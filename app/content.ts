@@ -30,6 +30,12 @@ export const BUSINESS_FACTS = {
   packaging: "Licht-, luft- und feuchtigkeitsdichte Verpackung",
 };
 
+export const B2B_PRICING = {
+  single: { price: 130, label: "Einzelbestellung", discount: 0 },
+  recurring: { price: 123.5, label: "Regelmäßige Belieferung", discount: 5 },
+  annual: { price: 117, label: "12-Monats-Partnerschaft", discount: 10 },
+};
+
 export const TODO_CONTENT = {
   productImages: "",
   b2cPrice: "",
@@ -50,6 +56,7 @@ export type LeadPayload = {
   city: string;
   business_type: string;
   locations: string;
+  pricing_interest?: string;
   estimated_monthly_demand?: string;
   current_supplier?: string;
   message?: string;
