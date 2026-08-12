@@ -8,12 +8,21 @@ export const BRAND = {
   address: null as string | null,
 };
 
+export const SHOP_STATUS = "prelaunch" as const; // "prelaunch" | "live"
+
+export const B2C_PRICING = {
+  oneTime: 29.99,
+  flexDiscount: 0.10,
+  annualDiscount: 0.15,
+};
+
 export const PRODUCT = {
   slug: "gloa-matcha",
   name: "GLOA Matcha",
   status: "coming_soon" as const,
   size: null as string | null,
-  price: null as number | null,
+  price: 29.99,
+  subscriptionEligible: true,
   origin: "Shizuoka, Japan",
   uses: ["Matcha Latte", "Pure Matcha"],
   storage: "Kühl und trocken lagern.",

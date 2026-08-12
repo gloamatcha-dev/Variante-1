@@ -71,3 +71,31 @@ export function BusinessCalculator(){
 // - Charge, MHD
 // - Bestellung ausgelöst → unterwegs → eingelagert
 // Langfristiges Ziel: Kunden-Belieferungen → Lagerprognose → Beschaffungsplanung
+
+// TODO: B2C SUBSCRIPTIONS
+// Subscription-Datenmodell:
+// - subscription_id, customer_id, plan (flex | annual), status (active | paused | canceled)
+// - billing_interval: monthly, next_billing_date, next_shipping_date
+// - price_per_delivery, discount_percent
+// - created_at, canceled_at, pause_start, pause_end
+
+// Flex-Abo:
+// - Monatlich kündbar, monatliche Lieferung + Abrechnung
+// - Pausieren möglich (1–3 Monate)
+// - Einzellieferung überspringen
+// - Kein Mindestlaufzeit
+
+// 12-Monats-Abo:
+// - 12 Monate Laufzeit, monatliche Lieferung + Abrechnung
+// - Kündigung zum Ende der Laufzeit
+// - Pausieren innerhalb der Laufzeit (max. 2 Monate kumuliert)
+// - Automatische Verlängerung um 1 Monat (Flex) nach Ablauf
+
+// Customer Account:
+// - Abo-Status einsehen
+// - Nächste Lieferung / nächste Abrechnung
+// - Abo pausieren / fortsetzen
+// - Abo kündigen (Flex: sofort, Annual: zum Laufzeitende)
+// - Lieferadresse ändern
+// - Zahlungsmethode ändern
+// Aktuell nur Pre-Launch Waitlist. Kein echtes Subscription Backend.
