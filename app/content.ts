@@ -26,7 +26,7 @@ export const PRODUCT = {
 export const BUSINESS_FACTS = {
   formats: ["500 g", "1 kg"],
   stock: "Bestand in Deutschland",
-  delivery: "Typische Lieferung in Deutschland: ca. 3–4 Werktage, abhängig von Verfügbarkeit und Bestellbedingungen.",
+  delivery: "Lieferzeit und Verfügbarkeit bestätigen wir bei Bestellung.",
   packaging: "Licht-, luft- und feuchtigkeitsdichte Verpackung",
 };
 
