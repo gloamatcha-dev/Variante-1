@@ -1,8 +1,8 @@
 export const BRAND = {
   name: "GLOA",
   origin: "Shizuoka, Japan",
-  contactEmail: null as string | null,
-  instagram: null as string | null,
+  contactEmail: "hello@gloa.de",
+  instagram: "gloa.matcha",
   tiktok: null as string | null,
   companyLegalName: null as string | null,
   address: null as string | null,
@@ -16,7 +16,7 @@ export const PRODUCT = {
   price: null as number | null,
   origin: "Shizuoka, Japan",
   uses: ["Matcha Latte", "Pure Matcha"],
-  storage: "Kühl, trocken und lichtgeschützt lagern.",
+  storage: "Kühl und trocken lagern.",
   tasteNotes: null as string | null,
   cultivar: null as string | null,
   producer: null as string | null,
@@ -31,15 +31,15 @@ export const BUSINESS_FACTS = {
 };
 
 export const TODO_CONTENT = {
-  productImages: "PRODUCT IMAGES REQUIRED",
-  b2cPrice: "B2C PRICE REQUIRED",
-  b2cSize: "B2C SIZE REQUIRED",
-  producer: "PRODUCER DATA REQUIRED",
-  cultivar: "CULTIVAR DATA REQUIRED",
-  tasteNotes: "TASTE NOTES REQUIRED",
-  certifications: "CERTIFICATION DATA REQUIRED",
-  socialLinks: "SOCIAL URLS REQUIRED",
-  legal: "LEGAL COMPANY DATA REQUIRED",
+  productImages: "",
+  b2cPrice: "",
+  b2cSize: "",
+  producer: "",
+  cultivar: "",
+  tasteNotes: "",
+  certifications: "",
+  socialLinks: "",
+  legal: "",
 };
 
 export type LeadPayload = {
