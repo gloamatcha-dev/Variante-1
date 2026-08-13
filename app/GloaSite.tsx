@@ -193,6 +193,68 @@ function RezeptDetail({slug}:{slug:string}){const r=recipes.find(x=>x.slug===slu
 function Contact(){return <main className="inner"><PageHero index="05" eyebrow="KONTAKT" title={<>Schreib<br/><i>uns.</i></>} text="Waehl den richtigen Weg und deine Nachricht landet da, wo sie hingehoert." tone="contact"/><section className="contact-choices"><a href="#customer"><span>KUNDE</span><h2>Fragen zu<br/>Produkt & Bestellung.</h2><b>Schreib uns</b></a><a href="/for-cafes"><span>BUSINESS</span><h2>Grosshandel,<br/>Samples & Cafés.</h2><b>Zum B2B-Bereich →</b></a></section><form id="customer" className="customer-form" onSubmit={e=>e.preventDefault()}><label>Name<input required/></label><label>E-Mail<input required type="email"/></label><label>Nachricht<textarea required/></label><button className="cta">Nachricht senden</button></form></main>}
 function Legal({route}:{route:string}){const title:Record<string,string>={impressum:"Impressum",datenschutz:"Datenschutz",agb:"Allgemeine Geschaeftsbedingungen",widerruf:"Widerruf",versand:"Versandinformationen"};return <main className="legal-page"><p className="eyebrow">LEGAL</p><h1>{title[route]||"Legal"}</h1><div className="legal-placeholder"><h2>Rechtlicher Inhalt ausstehend.</h2><p>Vor dem oeffentlichen Shop-Launch muss dieser Inhalt von GLOA beziehungsweise einer qualifizierten Rechtsberatung bereitgestellt und geprüft werden.</p></div></main>}
 
+function Account(){
+const [view,setView]=useState<"landing"|"login"|"choose"|"register">("landing");
+
+if(view==="login")return <main className="account-page"><section className="account-section">
+<button className="account-back" onClick={()=>setView("landing")}>← Zurueck</button>
+<p className="eyebrow">GLOA ACCOUNT</p>
+<h1>Anmelden.</h1>
+<form className="account-form" onSubmit={e=>e.preventDefault()}>
+<label>E-Mail<input required type="email" placeholder="deine@email.de" autoComplete="email"/></label>
+<label>Passwort<input required type="password" placeholder="Passwort" autoComplete="current-password"/></label>
+<button className="cta account-cta" type="submit">Anmelden</button>
+</form>
+<a className="account-forgot" href="/account">Passwort vergessen?</a>
+</section></main>;
+
+if(view==="choose")return <main className="account-page"><section className="account-section">
+<button className="account-back" onClick={()=>setView("landing")}>← Zurueck</button>
+<p className="eyebrow">KONTO ERSTELLEN</p>
+<h1>Welches Konto<br/><i>passt zu dir?</i></h1>
+<div className="account-type-grid">
+<div className="account-type-card account-type-private">
+<p className="eyebrow">PRIVATKUNDE</p>
+<h2>Matcha fuer<br/>deinen Alltag.</h2>
+<p>Bestellen, Abos verwalten und Rezepte speichern.</p>
+<button className="cta account-type-cta" onClick={()=>setView("register")}>Privatkonto erstellen</button>
+</div>
+<div className="account-type-card account-type-business">
+<p className="eyebrow">GESCHAEFTSKUNDE</p>
+<h2>Matcha fuer<br/>dein Business.</h2>
+<p>Grosshandel, Samples und individuelle Konditionen.</p>
+<a className="cta account-type-cta" href="/for-cafes#lead">B2B Zugang anfragen</a>
+</div>
+</div>
+</section></main>;
+
+if(view==="register")return <main className="account-page"><section className="account-section">
+<button className="account-back" onClick={()=>setView("choose")}>← Zurueck</button>
+<p className="eyebrow">PRIVATKONTO ERSTELLEN</p>
+<h1>Willkommen<br/><i>bei GLOA.</i></h1>
+<form className="account-form" onSubmit={e=>e.preventDefault()}>
+<div className="account-form-row">
+<label>Vorname<input required placeholder="Vorname" autoComplete="given-name"/></label>
+<label>Nachname<input required placeholder="Nachname" autoComplete="family-name"/></label>
+</div>
+<label>E-Mail<input required type="email" placeholder="deine@email.de" autoComplete="email"/></label>
+<label>Passwort<input required type="password" placeholder="Passwort" autoComplete="new-password"/></label>
+<button className="cta account-cta" type="submit">Konto erstellen</button>
+</form>
+<p className="account-login-hint">Schon ein Konto? <button className="account-link-btn" onClick={()=>setView("login")}>Anmelden</button></p>
+</section></main>;
+
+return <main className="account-page"><section className="account-section account-landing">
+<p className="eyebrow">GLOA ACCOUNT</p>
+<h1>Dein GLOA.<br/><i>An einem Ort.</i></h1>
+<p className="account-lead">Bestellungen, Abos und alles rund um deinen Matcha.</p>
+<div className="account-actions">
+<button className="cta" onClick={()=>setView("login")}>Anmelden</button>
+<button className="cta secondary" onClick={()=>setView("choose")}>Konto erstellen</button>
+</div>
+</section></main>;
+}
+
 function CartDrawer({open,onClose}:{open:boolean;onClose:()=>void}){
 const cart=useCart();
 const closeRef=useRef<HTMLButtonElement>(null);
@@ -246,6 +308,7 @@ else if(route==="for-cafes"||route==="wholesale")page=<ForCafes/>;
 else if(route==="rezepte"||route==="journal")page=<Rezepte/>;
 else if(route.startsWith("rezepte/"))page=<RezeptDetail slug={route.split("/")[1]}/>;
 else if(route.startsWith("journal/"))page=<RezeptDetail slug={route.split("/")[1]}/>;
+else if(route==="account")page=<Account/>;
 else if(route==="contact")page=<Contact/>;
 else if(["impressum","datenschutz","agb","widerruf","versand"].includes(route))page=<Legal route={route}/>;
 else page=<main className="not-found"><h1>404</h1><a href="/">Zurück zu GLOA →</a></main>;
