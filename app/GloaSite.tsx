@@ -4,8 +4,10 @@ import { Header, Footer, Newsletter } from "./Chrome";
 import { BRAND, BUSINESS_FACTS, PRODUCT, MATCHA_VARIANTS, FLEX_DISCOUNT, ANNUAL_DISCOUNT, SHOP_STATUS, flexPrice, annualPrice, pricePer100g, lowestPrice } from "./content";
 import { BusinessCalculator } from "./BusinessCalculator";
 import { track } from "./analytics";
+import { useCart } from "./cart";
 
 const fmt=(n:number)=>n.toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2});
+const purchaseLabel=(t:string)=>t==="flex"?"Flex-Abo":t==="annual"?"12-Monats-Abo":"Einmal";
 
 type Recipe={slug:string;title:string;category:string;time:string;tags:string[];image:string;alt:string;excerpt:string;description:string;ingredients:string[];steps:string[];featured:boolean};
 const recipes:Recipe[]=[
@@ -24,7 +26,10 @@ type CommunityItem={id:string;image:string;href?:string;alt:string}
 const communityItems:CommunityItem[]=[{id:"1",image:"/img/gloa-cafe.png",alt:"Matcha-Zubereitung im Café"},{id:"2",image:"/img/gloa-on-the-go.png",alt:"Iced Matcha unterwegs in Berlin"},{id:"3",image:"/img/gloa-iced.png",alt:"Iced Matcha"},{id:"4",image:"/img/gloa-social.png",alt:"Freunde mit Matcha"},{id:"5",image:"/img/gloa-morning.png",alt:"Matcha am Morgen"},{id:"6",image:"/img/gloa-work.png",alt:"Iced Matcha am Arbeitsplatz"}];
 function Placeholder({children=""}:{children?:string}){return <span className="placeholder-label">{children}</span>}
 function ProductVisual(){return <div className="product-visual lime"><img src="/img/gloa-hero-packaging.png" alt="GLOA Matcha Verpackung" loading="lazy"/></div>}
-function ProductCard({onAdd}:{onAdd:()=>void}){return <article className="product-card"><a href="/shop" onClick={()=>track("product_view")}><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>AB {fmt(lowestPrice())} €</strong></div></a><button className="add" onClick={onAdd}>Sag mir Bescheid <span>＋</span></button></article>}
+function ProductCard({onAdd}:{onAdd:()=>void}){
+const {addItem}=useCart();
+const handleAdd=()=>{const v=MATCHA_VARIANTS[2];addItem({productId:PRODUCT.slug,variantId:v.size,grams:v.grams,purchaseType:"once",unitPrice:v.price});track("add_to_cart");onAdd()};
+return <article className="product-card"><a href="/shop" onClick={()=>track("product_view")}><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>AB {fmt(lowestPrice())} €</strong></div></a><button className="add" onClick={handleAdd}>In den Warenkorb <span>+</span></button></article>}
 function HowTo(){return <section className="how-to"><div className="section-head"><div><p className="eyebrow">HOW TO GLOA</p><h2>Latte oder Pur.<br/>Mehr brauchst du nicht.</h2></div></div><div className="method-grid"><article><span>01</span><h3>Matcha Latte</h3><ol><li>Matcha dosieren</li><li>Mit Wasser aufschlagen</li><li>Milch oder Pflanzendrink dazu</li><li>Heiss oder iced geniessen</li></ol></article><article><span>02</span><h3>Pure Matcha</h3><ol><li>Matcha dosieren</li><li>Mit wenig Wasser glattrühren</li><li>Mit Wasser aufschlagen</li><li>Direkt geniessen</li></ol></article></div></section>}
 function CommunityFeed(){const [offset,setOffset]=useState(0);const [paused,setPaused]=useState(false);const [animate,setAnimate]=useState(true);const total=communityItems.length;useEffect(()=>{const mq=window.matchMedia("(prefers-reduced-motion: reduce)");if(mq.matches)return;let visible=true;const onVis=()=>{visible=document.visibilityState==="visible"};document.addEventListener("visibilitychange",onVis);const id=setInterval(()=>{if(!paused&&visible)setOffset(p=>p+1)},4500);return()=>{clearInterval(id);document.removeEventListener("visibilitychange",onVis)}},[paused]);useEffect(()=>{if(offset>=total){const t=setTimeout(()=>{setAnimate(false);setOffset(0);requestAnimationFrame(()=>requestAnimationFrame(()=>setAnimate(true)))},400);return()=>clearTimeout(t)}},[offset,total]);const track=[...communityItems,...communityItems.slice(0,4)];return <div className="community-feed" onMouseEnter={()=>setPaused(true)} onMouseLeave={()=>setPaused(false)}><div className="community-track" style={{transform:`translateX(-${offset*25}%)`,transition:animate?"transform 400ms ease":"none"}}>{track.map((item,i)=><div key={`cf-${i}`} className="community-card"><img src={item.image} alt={item.alt} loading="lazy"/></div>)}</div></div>}
 
@@ -68,6 +73,7 @@ return <section className="featured-recipes"><div className="featured-recipes-he
 function Home({onAdd}:{onAdd:()=>void}){return <main><div className="stack-pair"><section className="hero"><div className="hero-copy"><p className="eyebrow">MATCHA AUS SHIZUOKA.</p><h1>Matcha.<br/><i>Aber richtig.</i></h1><p className="lead">Aus Shizuoka, Japan. Für Latte, pur, iced oder wie du willst.</p><div className="hero-actions"><a className="cta" href="/shop" onClick={()=>track("shop_click")}>Zum Shop</a><a className="cta secondary" href="/about">GLOA entdecken →</a></div></div><div className="hero-art"><img src="/img/gloa-hero-packaging.png" alt="GLOA Matcha Verpackung" className="hero-img"/><span className="hero-micro">SHIZUOKA / JAPAN</span></div></section><section className="product-intro"><div><p className="eyebrow">MEET YOUR MATCHA.</p><h2>Ein Grün.<br/><i>Viele Momente.</i></h2><p>Aus Shizuoka, Japan. Für Matcha Latte und pur. Easy im Alltag, ehrlich im Produkt.</p><a className="cta" href="/shop">Shop GLOA</a></div><ProductCard onAdd={onAdd}/></section></div><div className="stack-pair"><section className="daily"><div className="daily-copy"><p className="eyebrow">MATCHA FÜR JEDEN TAG</p><h2>Morgens.<br/>Im Meeting.<br/><i>Nachmittags.</i></h2></div><div className="daily-grid">{dailyTiles.map(t=><div className="daily-tile" key={t.label}><img src={t.src} alt={t.alt} loading="lazy"/><span>{t.label}</span></div>)}</div></section><section className="origin"><div><p className="eyebrow">ORIGIN</p><h2>From Shizuoka,<br/><i>Japan.</i></h2></div><div><p>GLOA Matcha kommt aus Shizuoka, Japan. Mehr zum Produzenten, Cultivar und der Ernte teilen wir, sobald alles verifiziert ist.</p><dl><div><dt>ORIGIN</dt><dd>Shizuoka, Japan</dd></div><div><dt>MADE FOR</dt><dd>Latte + pure preparation</dd></div></dl></div></section></div><div className="stack-pair"><HowTo/><RecipeCarousel/></div><section className="community"><p className="eyebrow">#gloamatcha</p><h2>Zeig uns<br/><i>deinen Matcha.</i></h2><CommunityFeed/><a href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">@gloa.matcha folgen →</a></section><Newsletter/></main>}
 
 function Shop({onAdd}:{onAdd:()=>void}){
+const {addItem}=useCart();
 const [sizeIdx,setSizeIdx]=useState(2);
 const v=MATCHA_VARIANTS[sizeIdx];
 const [option,setOption]=useState<"once"|"flex"|"annual">("once");
@@ -77,6 +83,8 @@ const per100=pricePer100g(selectedPrice,v.grams);
 const lowest=lowestPrice();
 
 useEffect(()=>{if(!v.subscriptionEligible&&option!=="once")setOption("once")},[sizeIdx,v.subscriptionEligible,option]);
+
+const handleAdd=()=>{addItem({productId:PRODUCT.slug,variantId:v.size,grams:v.grams,purchaseType:option,unitPrice:selectedPrice});track("add_to_cart");onAdd()};
 
 const faqItems:[string,string][]=[
 ["Wie oft wird geliefert?","Alle Abos werden einmal im Monat geliefert. Du bekommst deinen Matcha regelmaessig, ohne selbst daran denken zu muessen."],
@@ -104,19 +112,20 @@ return <main className="shop-page">
 <label className={`purchase-option${option==="annual"?" active":""}`}><input type="radio" name="purchase-option" className="sr-only" value="annual" checked={option==="annual"} onChange={()=>setOption("annual")}/><span className="purchase-option-head"><strong>12 MONATE</strong><strong>{fmt(ap)} € <small>/ Lieferung</small></strong></span><span className="purchase-option-badge">15 % SPAREN</span><span className="purchase-option-desc">12 Monate Laufzeit · Monatl. Lieferung + Abrechnung</span></label>
 </div>:<p className="shop-only-once">Nur als Einzelkauf erhaeltlich.</p>}
 {option==="annual"&&<p className="shop-annual-note">12 Monate Laufzeit. Lieferung und Abrechnung erfolgen monatlich.</p>}
-<button className="cta shop-cta" onClick={onAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
+<button className="cta shop-cta" onClick={handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
 </div></section></div>
 
 <section className="shop-abo-explain"><div className="shop-abo-explain-inner"><p className="eyebrow">GLOA ON REPEAT</p><h2>Matcha.<br/><i>Jeden Monat.</i></h2><p className="shop-abo-lead">Du entscheidest, wie flexibel du bleiben moechtest. Wir liefern deinen Matcha einmal im Monat.</p><div className="shop-abo-grid"><article><span>01</span><div className="shop-abo-line"/><h3>EINMAL</h3><p>Einmalige Bestellung. Kein Abo, keine Bindung. Einfach Matcha bestellen.</p></article><article><span>02</span><div className="shop-abo-line"/><h3>FLEX</h3><p>Monatliche Lieferung. Jederzeit kuendbar oder pausierbar. 10 % guenstiger.</p></article><article><span>03</span><div className="shop-abo-line"/><h3>12 MONATE</h3><p>Der beste Preis. 12 Monate Laufzeit, monatliche Lieferung und Abrechnung. 15 % guenstiger.</p></article></div></div></section>
 
 <section className="shop-details"><div className="shop-details-inner"><p className="eyebrow">PRODUKTDETAILS</p><dl><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>VERWENDUNG</dt><dd>Latte · Iced · Pur</dd></div><div><dt>ERNTE</dt><dd>2. und 3. Pflueckung</dd></div><div><dt>MINDESTHALTBARKEIT</dt><dd>3 Jahre</dd></div><div><dt>LAGERUNG</dt><dd>Kuehl und trocken</dd></div><div><dt>GROESSEN</dt><dd>{MATCHA_VARIANTS.map(v=>v.size).join(" · ")}</dd></div></dl><a className="shop-details-link" href="/our-matcha" onClick={()=>track("shop_to_matcha")}>MEHR UEBER UNSEREN MATCHA →</a></div></section>
 
-<section className="shop-faq faq"><p className="eyebrow">ABO FAQ</p><h2>Fragen<br/>zum Abo?</h2>{faqItems.map(([q,a])=><details key={q}><summary>{q}<span>＋</span></summary><p>{a}</p></details>)}</section>
+<section className="shop-faq faq"><p className="eyebrow">ABO FAQ</p><h2>Fragen<br/>zum Abo?</h2>{faqItems.map(([q,a])=><details key={q}><summary>{q}<span>+</span></summary><p>{a}</p></details>)}</section>
 
 <Newsletter/>
 </main>}
 
 function ProductPage({onAdd}:{onAdd:()=>void}){
+const {addItem}=useCart();
 const [sizeIdx,setSizeIdx]=useState(2);
 const v=MATCHA_VARIANTS[sizeIdx];
 const [option,setOption]=useState<"once"|"flex"|"annual">("once");
@@ -125,6 +134,8 @@ const selectedPrice=option==="once"?v.price:option==="flex"?fp:ap;
 const per100=pricePer100g(selectedPrice,v.grams);
 
 useEffect(()=>{if(!v.subscriptionEligible&&option!=="once")setOption("once")},[sizeIdx,v.subscriptionEligible,option]);
+
+const handleAdd=()=>{addItem({productId:PRODUCT.slug,variantId:v.size,grams:v.grams,purchaseType:option,unitPrice:selectedPrice});track("add_to_cart");onAdd()};
 
 return <main className="pdp">
 <section className="pdp-hero"><div className="pdp-hero-image"><img src="/img/gloa-hero-packaging.png" alt="GLOA Matcha Verpackung"/></div><div className="pdp-hero-info"><p className="eyebrow">MATCHA · SHIZUOKA</p><h1>{PRODUCT.name}</h1><p>Fuer Latte, iced und pure Zubereitung.</p>
@@ -142,7 +153,7 @@ return <main className="pdp">
 <label className={`purchase-option${option==="annual"?" active":""}`}><input type="radio" name="pdp-purchase" className="sr-only" value="annual" checked={option==="annual"} onChange={()=>setOption("annual")}/><span className="purchase-option-head"><strong>12 MONATE</strong><strong>{fmt(ap)} € <small>/ Lieferung</small></strong></span><span className="purchase-option-badge">15 % SPAREN</span><span className="purchase-option-desc">12 Monate Laufzeit · Monatl. Lieferung + Abrechnung</span></label>
 </div>:<p className="shop-only-once">Nur als Einzelkauf erhaeltlich.</p>}
 
-<button className="cta shop-cta" onClick={onAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
+<button className="cta shop-cta" onClick={handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
 </div></section>
 
 <section className="pdp-facts"><div><p className="eyebrow">WHAT WE KNOW</p><h2>Clear facts.<br/>Nothing invented.</h2></div><dl><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>VERWENDUNG</dt><dd>Latte · Iced · Pur</dd></div><div><dt>LAGERUNG</dt><dd>{PRODUCT.storage}</dd></div><div><dt>GROESSEN</dt><dd>{MATCHA_VARIANTS.map(v=>v.size).join(" · ")}</dd></div></dl></section>
@@ -167,7 +178,7 @@ function About(){return <main className="about-page">
 <section className="about-final"><h2>Genug über uns.<br/><i>Zeit für Matcha.</i></h2><div className="about-final-actions"><a className="cta cream" href="/shop">Zum Shop</a><a className="cta about-cta-outline" href="/our-matcha">Unser Matcha →</a></div></section></div>
 </main>}
 function ForCafes(){useEffect(()=>track("b2b_page_view"),[]);return <main className="business"><div className="stack-pair"><section className="b2b-hero"><div><p className="eyebrow">GLOA FOR BUSINESS</p><h1>Matcha for<br/><i>your menu.</i></h1><p>Matcha aus Shizuoka für moderne Menüs.</p><div><a className="cta cream" href="?intent=sample#lead" onClick={()=>track("sample_request_start")}>Sample anfragen</a><a className="cta b2b-outline" href="#calculator">Umsatzpotenzial berechnen →</a></div></div><div className="b2b-visual"><div className="hero-tin"><span>GLOA</span><small>FOR BUSINESS</small></div><Placeholder/></div></section><section className="quick-facts">{["SHIZUOKA, JAPAN","LATTE · ICED · PUR","LAGER IN DEUTSCHLAND","SCHNELLE NACHBESTELLUNG","500 G · 1 KG GASTRO"].map(x=><strong key={x}>{x}</strong>)}</section></div><section className="behind-bar"><div><p className="eyebrow">FÜR DEINE BAR GEMACHT.</p><h2>Einfach zubereiten.<br/><i>Easy skalieren.</i></h2><p>Classic, iced, Strawberry oder pur. Ein Produkt, viele Drinks auf der Karte.</p></div><div className="servings"><span className="eyebrow servings-label">BEISPIELRECHNUNG</span><span><b>3 G</b>PRO DRINK</span><i>→</i><span><b>CA. 333</b>DRINKS / KG</span><small>Beispiel bei 3 g Matcha pro Drink.</small></div></section><BusinessCalculator/><BusinessFaq/></main>}
-function BusinessFaq(){const qs:[string,string][]=[["Wo kommt GLOA Matcha her?","Shizuoka, Japan."],["Ist GLOA fuer Matcha Latte geeignet?","Ja. Das Produkt ist fuer Latte, iced und pur geeignet."],["Welche Grosshandelsformate gibt es?","500 g und 1 kg Gastroformate."],["Habt ihr Lager in Deutschland?","Ja. Bestand in Deutschland."],["Wie schnell liefert ihr?","Lieferzeit und Verfuegbarkeit bestaetigen wir bei Bestellung."],["Wie viele Drinks bekomme ich aus 1 kg?","Abhaengig von der Dosierung: Bei 2 g pro Drink ca. 500 Drinks, bei 3 g ca. 333 Drinks, bei 4 g ca. 250 Drinks. Mengenbeispiele."],["Was kostet es im Grosshandel?","Unsere B2B-Konditionen werden individuell mit dir abgestimmt. Frag sie direkt ueber das B2B-Formular an."],["Was ist die regelmaessige Belieferung?","Ein flexibles Bezugsmodell mit monatlicher Lieferung und 5 % Preisvorteil. Mindestlaufzeit 3 Monate, danach monatlich kuendbar."],["Wie funktioniert die 12-Monats-Partnerschaft?","Du vereinbarst eine monatliche Mindestabnahme fuer 12 Monate und erhaeltst 10 % Preisvorteil. Lieferung und Abrechnung erfolgen monatlich."],["Muss ich beim Jahresmodell alles im Voraus bezahlen?","Nein. Die Abrechnung erfolgt monatlich. Du zahlst nur die jeweils gelieferte Menge."],["Kann ich mehr als die vereinbarte Menge bestellen?","Ja. Zusaetzliche Mengen koennen jederzeit angefragt werden, zum gleichen Kilopreis deines Modells."],["Was passiert, wenn ich noch nicht weiss, wie viel Matcha ich brauche?","Starte mit einer Einzelbestellung oder einem Sample. Sobald du deinen Bedarf besser einschaetzen kannst, kannst du jederzeit auf ein Bezugsmodell wechseln."]];return <section className="faq"><p className="eyebrow">B2B FAQ</p><h2>Fragen?<br/><i>Antworten.</i></h2>{qs.map(([q,a])=><details key={q}><summary>{q}<span>＋</span></summary><p>{a}</p></details>)}</section>}
+function BusinessFaq(){const qs:[string,string][]=[["Wo kommt GLOA Matcha her?","Shizuoka, Japan."],["Ist GLOA fuer Matcha Latte geeignet?","Ja. Das Produkt ist fuer Latte, iced und pur geeignet."],["Welche Grosshandelsformate gibt es?","500 g und 1 kg Gastroformate."],["Habt ihr Lager in Deutschland?","Ja. Bestand in Deutschland."],["Wie schnell liefert ihr?","Lieferzeit und Verfuegbarkeit bestaetigen wir bei Bestellung."],["Wie viele Drinks bekomme ich aus 1 kg?","Abhaengig von der Dosierung: Bei 2 g pro Drink ca. 500 Drinks, bei 3 g ca. 333 Drinks, bei 4 g ca. 250 Drinks. Mengenbeispiele."],["Was kostet es im Grosshandel?","Unsere B2B-Konditionen werden individuell mit dir abgestimmt. Frag sie direkt ueber das B2B-Formular an."],["Was ist die regelmaessige Belieferung?","Ein flexibles Bezugsmodell mit monatlicher Lieferung und 5 % Preisvorteil. Mindestlaufzeit 3 Monate, danach monatlich kuendbar."],["Wie funktioniert die 12-Monats-Partnerschaft?","Du vereinbarst eine monatliche Mindestabnahme fuer 12 Monate und erhaeltst 10 % Preisvorteil. Lieferung und Abrechnung erfolgen monatlich."],["Muss ich beim Jahresmodell alles im Voraus bezahlen?","Nein. Die Abrechnung erfolgt monatlich. Du zahlst nur die jeweils gelieferte Menge."],["Kann ich mehr als die vereinbarte Menge bestellen?","Ja. Zusaetzliche Mengen koennen jederzeit angefragt werden, zum gleichen Kilopreis deines Modells."],["Was passiert, wenn ich noch nicht weiss, wie viel Matcha ich brauche?","Starte mit einer Einzelbestellung oder einem Sample. Sobald du deinen Bedarf besser einschaetzen kannst, kannst du jederzeit auf ein Bezugsmodell wechseln."]];return <section className="faq"><p className="eyebrow">B2B FAQ</p><h2>Fragen?<br/><i>Antworten.</i></h2>{qs.map(([q,a])=><details key={q}><summary>{q}<span>+</span></summary><p>{a}</p></details>)}</section>}
 function Rezepte(){const [filter,setFilter]=useState("ALLE");const filtered=filter==="ALLE"?recipes:recipes.filter(r=>r.tags.includes(filter));return <main className="rezepte-page">
 <section className="rezepte-hero"><p className="eyebrow">GLOA · REZEPTE</p><h1>Matcha Rezepte.<br/><i>GLOA Edition.</i></h1><p className="lead">Signature Drinks. Einfach, visuell stark und passend zur GLOA-Welt.</p></section>
 <section className="rezepte-filters">{ALL_TAGS.map(t=><button key={t} className={filter===t?"active":""} onClick={()=>setFilter(t)}>{t}</button>)}</section>
@@ -179,6 +190,65 @@ function RezeptDetail({slug}:{slug:string}){const r=recipes.find(x=>x.slug===slu
 <section className="rezept-detail-content"><div className="rezept-detail-ingredients"><h2>Zutaten</h2><ul>{r.ingredients.map((ing,i)=><li key={i}>{ing}</li>)}</ul></div><div className="rezept-detail-steps"><h2>Zubereitung</h2><ol>{r.steps.map((step,i)=><li key={i}><span>{String(i+1).padStart(2,"0")}</span><p>{step}</p></li>)}</ol></div></section></div>
 <section className="rezept-detail-nav"><a href="/rezepte">← Alle Rezepte</a><a href="/shop" className="cta">Matcha kaufen</a></section>
 </main>}
-function Contact(){return <main className="inner"><PageHero index="05" eyebrow="KONTAKT" title={<>Schreib<br/><i>uns.</i></>} text="Waehl den richtigen Weg und deine Nachricht landet da, wo sie hingehoert." tone="contact"/><section className="contact-choices"><a href="#customer"><span>CUSTOMER</span><h2>Fragen zu<br/>Produkt & Bestellung.</h2><b>Schreib uns</b></a><a href="/for-cafes"><span>BUSINESS</span><h2>Grosshandel,<br/>Samples & Cafés.</h2><b>Zum B2B-Bereich →</b></a></section><form id="customer" className="customer-form" onSubmit={e=>e.preventDefault()}><label>Name<input required/></label><label>Email<input required type="email"/></label><label>Message<textarea required/></label><button className="cta">Nachricht senden</button></form></main>}
+function Contact(){return <main className="inner"><PageHero index="05" eyebrow="KONTAKT" title={<>Schreib<br/><i>uns.</i></>} text="Waehl den richtigen Weg und deine Nachricht landet da, wo sie hingehoert." tone="contact"/><section className="contact-choices"><a href="#customer"><span>KUNDE</span><h2>Fragen zu<br/>Produkt & Bestellung.</h2><b>Schreib uns</b></a><a href="/for-cafes"><span>BUSINESS</span><h2>Grosshandel,<br/>Samples & Cafés.</h2><b>Zum B2B-Bereich →</b></a></section><form id="customer" className="customer-form" onSubmit={e=>e.preventDefault()}><label>Name<input required/></label><label>E-Mail<input required type="email"/></label><label>Nachricht<textarea required/></label><button className="cta">Nachricht senden</button></form></main>}
 function Legal({route}:{route:string}){const title:Record<string,string>={impressum:"Impressum",datenschutz:"Datenschutz",agb:"Allgemeine Geschaeftsbedingungen",widerruf:"Widerruf",versand:"Versandinformationen"};return <main className="legal-page"><p className="eyebrow">LEGAL</p><h1>{title[route]||"Legal"}</h1><div className="legal-placeholder"><h2>Rechtlicher Inhalt ausstehend.</h2><p>Vor dem oeffentlichen Shop-Launch muss dieser Inhalt von GLOA beziehungsweise einer qualifizierten Rechtsberatung bereitgestellt und geprüft werden.</p></div></main>}
-export function GloaSite({route}:{route:string}){const [cart,setCart]=useState(false);const add=()=>{track("add_to_cart");setCart(true)};let page:React.ReactNode;if(route==="home")page=<Home onAdd={add}/>;else if(route==="shop")page=<Shop onAdd={add}/>;else if(route==="shop/gloa-matcha"||route==="shop/matcha")page=<ProductPage onAdd={add}/>;else if(route==="our-matcha")page=<MatchaPage/>;else if(route==="about")page=<About/>;else if(route==="for-cafes"||route==="wholesale")page=<ForCafes/>;else if(route==="rezepte"||route==="journal")page=<Rezepte/>;else if(route.startsWith("rezepte/"))page=<RezeptDetail slug={route.split("/")[1]}/>;else if(route.startsWith("journal/"))page=<RezeptDetail slug={route.split("/")[1]}/>;else if(route==="contact")page=<Contact/>;else if(["impressum","datenschutz","agb","widerruf","versand"].includes(route))page=<Legal route={route}/>;else page=<main className="not-found"><h1>404</h1><a href="/">Back to GLOA →</a></main>;return <><Header onCart={()=>setCart(true)}/>{page}<Footer/>{cart&&<div className="cart-backdrop" onClick={()=>setCart(false)}><aside className="cart" onClick={e=>e.stopPropagation()} aria-modal="true" role="dialog" aria-label="Warenkorb"><button onClick={()=>setCart(false)} aria-label="Schliessen">×</button><p className="eyebrow">WAITLIST</p><h2>Fast<br/>soweit.</h2><p>Lass uns deine Mail da und du erfaehrst es als Erstes.</p><a href="/contact" className="cta">Sag mir Bescheid</a></aside></div>}</>}
+
+function CartDrawer({open,onClose}:{open:boolean;onClose:()=>void}){
+const cart=useCart();
+const closeRef=useRef<HTMLButtonElement>(null);
+
+useEffect(()=>{
+if(!open)return;
+const prev=document.activeElement as HTMLElement|null;
+document.body.style.overflow="hidden";
+requestAnimationFrame(()=>closeRef.current?.focus());
+const onKey=(e:KeyboardEvent)=>{if(e.key==="Escape")onClose()};
+document.addEventListener("keydown",onKey);
+return()=>{document.removeEventListener("keydown",onKey);document.body.style.overflow="";prev?.focus?.()};
+},[open,onClose]);
+
+if(!open)return null;
+
+return <div className="cart-backdrop" onClick={onClose}><aside className="cart" onClick={e=>e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Warenkorb">
+<button ref={closeRef} className="cart-close" onClick={onClose} aria-label="Warenkorb schliessen">×</button>
+<p className="eyebrow">WARENKORB</p>
+{cart.items.length===0?<div className="cart-empty">
+<h2>Dein Warenkorb<br/>ist leer.</h2>
+<p>Zeit für Matcha?</p>
+<a href="/shop" className="cta" onClick={onClose}>Matcha →</a>
+</div>:<>
+<div className="cart-items">{cart.items.map(item=><div key={`${item.variantId}-${item.purchaseType}`} className="cart-item">
+<div className="cart-item-info"><strong>GLOA Matcha</strong><span>{item.grams} g · {purchaseLabel(item.purchaseType)}</span></div>
+<div className="cart-item-row">
+<div className="cart-qty"><button onClick={()=>cart.updateQuantity(item.productId,item.variantId,item.purchaseType,item.quantity-1)} aria-label="Menge reduzieren">-</button><span>{item.quantity}</span><button onClick={()=>cart.updateQuantity(item.productId,item.variantId,item.purchaseType,item.quantity+1)} aria-label="Menge erhoehen">+</button></div>
+<strong>{fmt(item.unitPrice*item.quantity)} €</strong>
+</div>
+<button className="cart-item-remove" onClick={()=>cart.removeItem(item.productId,item.variantId,item.purchaseType)} aria-label="Artikel entfernen">Entfernen</button>
+</div>)}</div>
+<div className="cart-footer"><div className="cart-total"><span>SUMME</span><strong>{fmt(cart.totalPrice)} €</strong></div></div>
+</>}
+</aside></div>
+}
+
+export function GloaSite({route}:{route:string}){
+const cart=useCart();
+const [cartOpen,setCartOpen]=useState(false);
+const openCart=useCallback(()=>setCartOpen(true),[]);
+const closeCart=useCallback(()=>setCartOpen(false),[]);
+
+let page:React.ReactNode;
+if(route==="home")page=<Home onAdd={openCart}/>;
+else if(route==="shop")page=<Shop onAdd={openCart}/>;
+else if(route==="shop/gloa-matcha"||route==="shop/matcha")page=<ProductPage onAdd={openCart}/>;
+else if(route==="our-matcha")page=<MatchaPage/>;
+else if(route==="about")page=<About/>;
+else if(route==="for-cafes"||route==="wholesale")page=<ForCafes/>;
+else if(route==="rezepte"||route==="journal")page=<Rezepte/>;
+else if(route.startsWith("rezepte/"))page=<RezeptDetail slug={route.split("/")[1]}/>;
+else if(route.startsWith("journal/"))page=<RezeptDetail slug={route.split("/")[1]}/>;
+else if(route==="contact")page=<Contact/>;
+else if(["impressum","datenschutz","agb","widerruf","versand"].includes(route))page=<Legal route={route}/>;
+else page=<main className="not-found"><h1>404</h1><a href="/">Zurück zu GLOA →</a></main>;
+
+return <><Header onCart={openCart} cartCount={cart.totalCount}/>{page}<Footer/><CartDrawer open={cartOpen} onClose={closeCart}/></>
+}
