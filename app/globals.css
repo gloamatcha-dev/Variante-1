@@ -211,6 +211,10 @@
 .account-type-business{background:var(--pink);color:var(--cream)}
 .account-type-business .eyebrow{color:var(--cream)}
 .account-type-cta{background:var(--cream)!important;color:var(--ink)!important;border:0;text-align:center;display:block;font:600 11px/1 var(--font-mono);letter-spacing:.12em;text-transform:uppercase;padding:16px 24px;cursor:pointer;transition:opacity .2s;margin-top:auto}.account-type-cta:hover{opacity:.85}
+.account-b2b{max-width:620px}
+.account-b2b-note{font-size:15px;line-height:1.5;opacity:.6;margin-bottom:28px}
+.account-form select{border:1px solid var(--line);background:transparent;padding:14px 16px;font-size:15px;font-family:var(--font-sans);border-radius:0;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23151515' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 16px center;cursor:pointer;transition:border-color .2s}.account-form select:focus{outline:none;border-color:var(--blue)}
+.account-form textarea{border:1px solid var(--line);background:transparent;padding:14px 16px;font-size:15px;font-family:var(--font-sans);border-radius:0;resize:vertical;min-height:100px;transition:border-color .2s}.account-form textarea:focus{outline:none;border-color:var(--blue)}
 
 /* ── Scroll-Stacking System ── */
 .stack-pair{position:relative}

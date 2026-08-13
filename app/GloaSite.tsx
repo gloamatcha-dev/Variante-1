@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Header, Footer, Newsletter } from "./Chrome";
-import { BRAND, BUSINESS_FACTS, PRODUCT, MATCHA_VARIANTS, FLEX_DISCOUNT, ANNUAL_DISCOUNT, SHOP_STATUS, flexPrice, annualPrice, pricePer100g, lowestPrice } from "./content";
+import { BRAND, BUSINESS_FACTS, PRODUCT, MATCHA_VARIANTS, FLEX_DISCOUNT, ANNUAL_DISCOUNT, SHOP_STATUS, flexPrice, annualPrice, pricePer100g, lowestPrice, B2B_BUSINESS_TYPES, B2B_DEMAND_OPTIONS } from "./content";
 import { BusinessCalculator } from "./BusinessCalculator";
 import { track } from "./analytics";
 import { useCart } from "./cart";
@@ -193,8 +193,21 @@ function RezeptDetail({slug}:{slug:string}){const r=recipes.find(x=>x.slug===slu
 function Contact(){return <main className="inner"><PageHero index="05" eyebrow="KONTAKT" title={<>Schreib<br/><i>uns.</i></>} text="Waehl den richtigen Weg und deine Nachricht landet da, wo sie hingehoert." tone="contact"/><section className="contact-choices"><a href="#customer"><span>KUNDE</span><h2>Fragen zu<br/>Produkt & Bestellung.</h2><b>Schreib uns</b></a><a href="/for-cafes"><span>BUSINESS</span><h2>Grosshandel,<br/>Samples & Cafés.</h2><b>Zum B2B-Bereich →</b></a></section><form id="customer" className="customer-form" onSubmit={e=>e.preventDefault()}><label>Name<input required/></label><label>E-Mail<input required type="email"/></label><label>Nachricht<textarea required/></label><button className="cta">Nachricht senden</button></form></main>}
 function Legal({route}:{route:string}){const title:Record<string,string>={impressum:"Impressum",datenschutz:"Datenschutz",agb:"Allgemeine Geschaeftsbedingungen",widerruf:"Widerruf",versand:"Versandinformationen"};return <main className="legal-page"><p className="eyebrow">LEGAL</p><h1>{title[route]||"Legal"}</h1><div className="legal-placeholder"><h2>Rechtlicher Inhalt ausstehend.</h2><p>Vor dem oeffentlichen Shop-Launch muss dieser Inhalt von GLOA beziehungsweise einer qualifizierten Rechtsberatung bereitgestellt und geprüft werden.</p></div></main>}
 
+// TODO: BUSINESS ACCOUNT DASHBOARD (nach Supabase + B2B-Freigabe)
+// Tabs / Sektionen fuer freigeschaltete B2B-Accounts:
+//   - ÜBERSICHT (Dashboard-Landing)
+//   - BESTELLUNGEN (B2B-Bestellhistorie)
+//   - REGELMÄSSIGE BELIEFERUNG (laufende Belieferungsvertraege)
+//   - RECHNUNGEN (B2B-Rechnungen)
+//   - UNTERNEHMEN (Firmenprofil bearbeiten)
+//   - LIEFERADRESSEN (Lieferadressen verwalten)
+//   - KONTO (Account-Einstellungen, Passwort, E-Mail)
+//
+// Freischaltung: Nur wenn b2b_status === "approved" (serverseitig gesetzt).
+// Kein Zugang zu B2B-Preisen oder Business-Dashboard ohne Freigabe.
+
 function Account(){
-const [view,setView]=useState<"landing"|"login"|"choose"|"register">("landing");
+const [view,setView]=useState<"landing"|"login"|"choose"|"register"|"b2b-apply">("landing");
 
 if(view==="login")return <main className="account-page"><section className="account-section">
 <button className="account-back" onClick={()=>setView("landing")}>← Zurueck</button>
@@ -223,7 +236,7 @@ if(view==="choose")return <main className="account-page"><section className="acc
 <p className="eyebrow">GESCHAEFTSKUNDE</p>
 <h2>Matcha fuer<br/>dein Business.</h2>
 <p>Grosshandel, Samples und individuelle Konditionen.</p>
-<a className="cta account-type-cta" href="/for-cafes#lead">B2B Zugang anfragen</a>
+<button className="cta account-type-cta" onClick={()=>setView("b2b-apply")}>B2B Zugang anfragen</button>
 </div>
 </div>
 </section></main>;
@@ -240,6 +253,25 @@ if(view==="register")return <main className="account-page"><section className="a
 <label>E-Mail<input required type="email" placeholder="deine@email.de" autoComplete="email"/></label>
 <label>Passwort<input required type="password" placeholder="Passwort" autoComplete="new-password"/></label>
 <button className="cta account-cta" type="submit">Konto erstellen</button>
+</form>
+<p className="account-login-hint">Schon ein Konto? <button className="account-link-btn" onClick={()=>setView("login")}>Anmelden</button></p>
+</section></main>;
+
+if(view==="b2b-apply")return <main className="account-page"><section className="account-section account-b2b">
+<button className="account-back" onClick={()=>setView("choose")}>← Zurueck</button>
+<p className="eyebrow">B2B ZUGANG ANFRAGEN</p>
+<h1>Matcha fuer<br/><i>dein Business.</i></h1>
+<p className="account-b2b-note">Nach Pruefung deiner Angaben melden wir uns mit den naechsten Schritten.</p>
+<form className="account-form" onSubmit={e=>e.preventDefault()}>
+<label>Ansprechperson*<input required name="contact_name" placeholder="Vor- und Nachname" autoComplete="name"/></label>
+<label>Unternehmen*<input required name="business_name" placeholder="Unternehmensname" autoComplete="organization"/></label>
+<label>E-Mail*<input required type="email" name="email" placeholder="business@email.de" autoComplete="email"/></label>
+<label>Stadt*<input required name="city" placeholder="Stadt" autoComplete="address-level2"/></label>
+<label>Unternehmenstyp*<select required name="business_type" defaultValue=""><option value="" disabled>Bitte auswaehlen</option>{B2B_BUSINESS_TYPES.map(t=><option key={t}>{t}</option>)}</select></label>
+<label>Anzahl Standorte<input type="number" min="1" name="locations" placeholder="1"/></label>
+<label>Geschaetzter Matcha-Bedarf<select name="estimated_demand"><option value="">Bitte auswaehlen</option>{B2B_DEMAND_OPTIONS.map(d=><option key={d}>{d}</option>)}</select></label>
+<label>Nachricht<textarea name="message" placeholder="Erzaehl uns von deinem Business und deinem Matcha-Bedarf." rows={4}/></label>
+<button className="cta account-cta" type="submit">B2B Zugang anfragen</button>
 </form>
 <p className="account-login-hint">Schon ein Konto? <button className="account-link-btn" onClick={()=>setView("login")}>Anmelden</button></p>
 </section></main>;

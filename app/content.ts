@@ -70,8 +70,26 @@ export const TODO_CONTENT = {
   legal: "",
 };
 
+export const B2B_BUSINESS_TYPES = [
+  "Café",
+  "Restaurant",
+  "Hotel",
+  "Office",
+  "Retail",
+  "Sonstiges",
+] as const;
+
+export const B2B_DEMAND_OPTIONS = [
+  "Noch nicht sicher",
+  "Unter 1 kg",
+  "1 - 2 kg",
+  "3 - 5 kg",
+  "6 - 10 kg",
+  "10+ kg",
+] as const;
+
 export type LeadPayload = {
-  lead_type: "wholesale" | "sample";
+  lead_type: "wholesale" | "sample" | "b2b-account";
   contact_name: string;
   business_name: string;
   email: string;
@@ -82,12 +100,43 @@ export type LeadPayload = {
   estimated_monthly_demand?: string;
   current_supplier?: string;
   message?: string;
-  calculator_selling_price: number;
-  calculator_drinks_per_day: number;
-  calculator_opening_days: number;
-  calculator_grams_per_drink: number;
-  calculator_monthly_drinks: number;
-  calculator_monthly_demand: number;
-  calculator_monthly_revenue: number;
+  calculator_selling_price?: number;
+  calculator_drinks_per_day?: number;
+  calculator_opening_days?: number;
+  calculator_grams_per_drink?: number;
+  calculator_monthly_drinks?: number;
+  calculator_monthly_demand?: number;
+  calculator_monthly_revenue?: number;
   created_at: string;
 };
+
+// TODO: SUPABASE SCHEMA – Account & B2B
+//
+// account_type: "private" | "business"
+//   → Wird bei Registrierung gesetzt. Private = B2C Shop. Business = B2B.
+//
+// b2b_status: "pending" | "approved" | "rejected" | "disabled"
+//   → Default: "pending" nach B2B-Antrag.
+//   → "approved" darf NUR serverseitig / administrativ gesetzt werden.
+//   → "approved" schaltet B2B-Preise und Business-Dashboard frei.
+//   → "rejected" / "disabled" blockiert B2B-Zugang.
+//
+// customer_profile (B2C):
+//   → user_id (FK auth.users), vorname, nachname, email
+//   → Lieferadressen, Bestellhistorie, Abo-Status
+//
+// business_profile (B2B):
+//   → user_id (FK auth.users), contact_name, business_name, email, city
+//   → business_type, locations, estimated_demand, message
+//   → b2b_status, approved_at, approved_by
+//   → B2B-Preise erst nach approved sichtbar
+//
+// Serverseitige Freigabe:
+//   → Admin-Dashboard oder internes Tool setzt b2b_status = "approved"
+//   → Kein automatischer Approval-Flow
+//   → Keine B2B-Preise im normalen /shop Warenkorb
+//
+// B2C und B2B NICHT mischen:
+//   → /shop Warenkorb = B2C (Endkundenpreise)
+//   → B2B-Accounts erhalten eigene Business-Bestelllogik
+//   → Keine B2C-Subscription-Pläne als B2B-Belieferung behandeln
