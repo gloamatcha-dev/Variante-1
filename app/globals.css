@@ -224,19 +224,6 @@
 .contact-sub{font-size:18px;line-height:1.5;max-width:520px;opacity:.7}
 .customer-form-row{display:grid;grid-template-columns:1fr 1fr;gap:20px}
 
-/* ── Scroll-Stacking System ── */
-.stack-pair{position:relative}
-.stack-pair>*:first-child{position:sticky;top:var(--stack-top,86px);z-index:1}
-.stack-pair>*:last-child{position:relative;z-index:2;box-shadow:0 -2px 16px rgba(0,0,0,.04)}
-
-/* Opaque backgrounds for stacking (prevent see-through) */
-.hero,.product-intro,.origin,.community,.featured-recipes,
-.shop-product,.matcha-hero,.matcha-facts,.about-beliefs,
-.rezept-detail-hero,.rezept-detail-content,
-.shop-details,.pdp-facts,.how-to,
-.about-why,.about-founders,.matcha-cta,
-.inner-hero,.contact-choices,
-.b2b-steps,.b2b-compare,.supply,.business-support{background:var(--cream)}
 .matcha-image{background:var(--ink)}
 
 /* ── Tablet Breakpoint ── */
@@ -246,9 +233,8 @@ header nav{gap:18px;font-size:10px}
 .account-link{display:none}
 }
 
-/* ── Mobile: disable stacking + cart fullscreen ── */
+/* ── Mobile: cart fullscreen + responsive ── */
 @media(max-width:800px){
-.stack-pair>*:first-child,.stack-pair>*:last-child{position:relative!important;z-index:auto!important;box-shadow:none!important}
 .cart{width:100%;padding:24px}
 .cart-empty h2{font-size:40px}
 .account-link{display:none}
@@ -261,13 +247,3 @@ header nav{gap:18px;font-size:10px}
 .contact-hero{padding:60px 5vw 40px}
 }
 
-/* ── Tablet: shorter sticky phase ── */
-@media(max-width:960px) and (min-width:801px){
-.stack-pair>*:last-child{box-shadow:0 -1px 10px rgba(0,0,0,.03)}
-}
-
-/* ── Reduced Motion: disable stacking ── */
-@media(prefers-reduced-motion:reduce){
-.stack-pair>*:first-child{position:relative;z-index:auto}
-.stack-pair>*:last-child{box-shadow:none}
-}
