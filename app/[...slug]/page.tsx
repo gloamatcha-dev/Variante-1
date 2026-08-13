@@ -8,7 +8,7 @@ const seo:Record<string,[string,string]>={
  "for-cafes":["GLOA for Cafés","Matcha aus Shizuoka für deine Karte. Potenzial berechnen oder Sample anfragen."],
  "rezepte":["Matcha Rezepte","GLOA Signature Drinks. Affogato, Strawberry, Tonic und mehr."],
  "journal":["Matcha Rezepte","GLOA Signature Drinks. Affogato, Strawberry, Tonic und mehr."],
- "contact":["Contact GLOA","Kontakt fuer Kund:innen, Cafes und Geschaeftskunden."],
+ "contact":["Contact GLOA","Kontakt für Kund:innen, Cafés und Geschäftskunden."],
  "account":["Dein Konto","GLOA Account. Bestellungen, Abos und alles rund um deinen Matcha."],
 };
 export async function generateMetadata({params}:{params:Promise<{slug:string[]}>}):Promise<Metadata>{const{slug}=await params;const path=slug.join("/");const base=path.startsWith("rezepte/")?seo.rezepte:path.startsWith("journal/")?seo.journal:seo[path]||["GLOA","Matcha aus Japan."];return{title:`${base[0]} — GLOA`,description:base[1],alternates:{canonical:`/${path}`},openGraph:{title:`${base[0]} — GLOA`,description:base[1],images:["/og.png"]}}}
