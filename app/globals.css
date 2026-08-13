@@ -180,3 +180,29 @@
 .rezept-detail-steps{padding:50px 5vw}
 .rezept-detail-nav{flex-direction:column;gap:20px;align-items:flex-start}
 }
+
+/* ── Scroll-Stacking System ── */
+.stack-pair{position:relative}
+.stack-pair>*:first-child{position:sticky;top:var(--stack-top,86px);z-index:1}
+.stack-pair>*:last-child{position:relative;z-index:2;box-shadow:0 -4px 20px rgba(0,0,0,.06)}
+
+/* Opaque backgrounds for stacking (prevent see-through) */
+.hero,.product-intro,.origin,.community,.featured-recipes,
+.shop-product,.matcha-hero,.matcha-facts,.about-beliefs,
+.rezept-detail-hero,.rezept-detail-content{background:var(--cream)}
+
+/* ── Tablet Breakpoint ── */
+@media(max-width:960px){
+header nav{gap:18px;font-size:10px}
+}
+
+/* ── Mobile: disable stacking ── */
+@media(max-width:800px){
+.stack-pair>*:first-child,.stack-pair>*:last-child{position:relative!important;z-index:auto!important;box-shadow:none!important}
+}
+
+/* ── Reduced Motion: disable stacking ── */
+@media(prefers-reduced-motion:reduce){
+.stack-pair>*:first-child{position:relative;z-index:auto}
+.stack-pair>*:last-child{box-shadow:none}
+}
