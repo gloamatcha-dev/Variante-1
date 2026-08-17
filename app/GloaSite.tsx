@@ -209,21 +209,12 @@ function Contact(){return <main className="contact-main">
 </main>}
 function Legal({route}:{route:string}){const title:Record<string,string>={impressum:"Impressum",datenschutz:"Datenschutz",agb:"Allgemeine Geschäftsbedingungen",widerruf:"Widerruf",versand:"Versandinformationen"};return <main className="legal-page"><p className="eyebrow">LEGAL</p><h1>{title[route]||"Legal"}</h1><div className="legal-placeholder"><h2>Rechtlicher Inhalt ausstehend.</h2><p>Vor dem öffentlichen Shop-Launch muss dieser Inhalt von GLOA beziehungsweise einer qualifizierten Rechtsberatung bereitgestellt und geprüft werden.</p></div></main>}
 
-// TODO: BUSINESS ACCOUNT DASHBOARD (nach Supabase + B2B-Freigabe)
-// Tabs / Sektionen für freigeschaltete B2B-Accounts:
-//   - ÜBERSICHT (Dashboard-Landing)
-//   - BESTELLUNGEN (B2B-Bestellhistorie)
-//   - REGELMÄSSIGE BELIEFERUNG (laufende Belieferungsvertraege)
-//   - RECHNUNGEN (B2B-Rechnungen)
-//   - UNTERNEHMEN (Firmenprofil bearbeiten)
-//   - LIEFERADRESSEN (Lieferadressen verwalten)
-//   - KONTO (Account-Einstellungen, Passwort, E-Mail)
-//
-// Freischaltung: Nur wenn b2b_status === "approved" (serverseitig gesetzt).
-// Kein Zugang zu B2B-Preisen oder Business-Dashboard ohne Freigabe.
+// B2B-Bereich: /account/business
+// Geschäftskunden (customerType === "business") sehen den B2B-Menüpunkt.
+// Privatkunden sehen keinen B2B-Menüpunkt.
 
 function Account(){
-const [view,setView]=useState<"landing"|"login"|"choose"|"register"|"b2b-apply">("landing");
+const [view,setView]=useState<"landing"|"login"|"choose"|"register"|"b2b-apply">(()=>{if(typeof window!=="undefined"){const p=new URLSearchParams(window.location.search);if(p.get("type")==="business")return "b2b-apply";if(p.get("action")==="register")return "choose"}return "landing"});
 const [pwError,setPwError]=useState("");
 
 const validatePw=(form:FormData)=>{
@@ -263,7 +254,7 @@ if(view==="choose")return <main className="account-page"><section className="acc
 <p className="eyebrow">GESCHÄFTSKUNDE</p>
 <h2>Matcha für<br/>dein Business.</h2>
 <p>Großhandel, Samples und individuelle Konditionen.</p>
-<button className="cta account-type-cta" onClick={()=>{setView("b2b-apply");setPwError("")}}>B2B Zugang anfragen</button>
+<button className="cta account-type-cta" onClick={()=>{setView("b2b-apply");setPwError("")}}>Geschäftskonto erstellen</button>
 </div>
 </div>
 </section></main>;
@@ -306,9 +297,9 @@ if(view==="register")return <main className="account-page"><section className="a
 
 if(view==="b2b-apply")return <main className="account-page"><section className="account-section account-b2b">
 <button className="account-back" onClick={()=>{setView("choose");setPwError("")}}>&#8592; Zurück</button>
-<p className="eyebrow">B2B ZUGANG ANFRAGEN</p>
+<p className="eyebrow">GESCHÄFTSKONTO ERSTELLEN</p>
 <h1>Matcha für<br/><i>dein Business.</i></h1>
-<p className="account-b2b-note">Geschäftskonten werden vor der Freischaltung geprüft. Preise und vollständige B2B-Konditionen sind nach Freigabe im Kundenbereich verfügbar.</p>
+<p className="account-b2b-note">Mit einem Geschäftskonto erhältst du Zugang zum B2B-Bereich mit Preisen, Konditionen und weiteren Business-Funktionen.</p>
 <form className="account-form" onSubmit={handleB2B}>
 <p className="account-form-section">UNTERNEHMEN</p>
 <label>Firmenname *<input required name="company_name" placeholder="Firmenname" autoComplete="organization"/></label>
@@ -346,7 +337,7 @@ if(view==="b2b-apply")return <main className="account-page"><section className="
 <label className="consent"><input required type="checkbox" name="confirm_company_auth"/> Ich bestätige, dass ich im Namen des angegebenen Unternehmens handle.</label>
 <label className="consent"><input required type="checkbox" name="accept_terms"/> Ich akzeptiere die <a href="/agb">AGB</a> und <a href="/datenschutz">Datenschutzerklärung</a>.</label>
 <label className="consent"><input type="checkbox" name="newsletter"/> Ich möchte B2B-Neuigkeiten von GLOA erhalten.</label>
-<button className="cta account-cta" type="submit">B2B Zugang anfragen</button>
+<button className="cta account-cta" type="submit">Geschäftskonto erstellen</button>
 </form>
 <p className="account-login-hint">Schon ein Konto? <button className="account-link-btn" onClick={()=>setView("login")}>Anmelden</button></p>
 </section></main>;
@@ -361,6 +352,30 @@ return <main className="account-page"><section className="account-section accoun
 </div>
 </section></main>;
 }
+
+function AccountBusiness(){
+const sections:[string,string,string[]][]=[
+["PREISE & KONDITIONEN","Einkaufspreise, Rabatte und Bezugsmodelle.",["Einkaufspreise","Rabattstaffelung","Bezugsmodelle","Vollständige Konditionen"]],
+["BELIEFERUNG","Liefermodelle und Belieferungsinformationen.",["Regelmäßige Belieferung","12-Monats-Partnerschaft","Lieferintervalle","Lieferstatus"]],
+["BESTELLUNGEN","B2B-Bestellungen und Bestellhistorie.",["Aktuelle Bestellungen","Bestellhistorie","Wiederkehrende Bestellungen","Rechnungen"]],
+["ROI & KALKULATION","Dein individueller Matcha-Business-Rechner.",["Einkaufspreis","Verkaufspreis pro Drink","Wareneinsatz","Umsatz & Deckungsbeitrag"]],
+["UNTERNEHMENSDATEN","Dein Firmenprofil und deine Kontodaten.",["Firmenname & Ansprechpartner","Rechnungsadresse","Lieferadresse","Steuernummer & USt-IdNr."]]
+];
+return <main className="account-page account-business-page"><section className="account-business-top">
+<a className="account-back" href="/account">&#8592; Mein Konto</a>
+<p className="eyebrow">B2B</p>
+<h1>B2B bei GLOA.</h1>
+<p className="account-lead">Alles für deine Zusammenarbeit mit GLOA an einem Ort.</p>
+</section>
+<section className="account-business-sections">
+{sections.map(([title,desc,items])=><div key={title} className="account-business-card">
+<p className="eyebrow">{title}</p>
+<p className="account-business-card-desc">{desc}</p>
+<ul>{items.map(item=><li key={item}>{item}</li>)}</ul>
+</div>)}
+</section>
+<p className="account-business-status">Verfügbar nach technischer Anbindung des Kundenkontos.</p>
+</main>}
 
 function CartDrawer({open,onClose}:{open:boolean;onClose:()=>void}){
 const cart=useCart();
@@ -415,6 +430,7 @@ else if(route==="for-cafes"||route==="wholesale")page=<ForCafes/>;
 else if(route==="rezepte"||route==="journal")page=<Rezepte/>;
 else if(route.startsWith("rezepte/"))page=<RezeptDetail slug={route.split("/")[1]}/>;
 else if(route.startsWith("journal/"))page=<RezeptDetail slug={route.split("/")[1]}/>;
+else if(route==="account/business")page=<AccountBusiness/>;
 else if(route==="account")page=<Account/>;
 else if(route==="contact")page=<Contact/>;
 else if(["impressum","datenschutz","agb","widerruf","versand"].includes(route))page=<Legal route={route}/>;

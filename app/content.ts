@@ -110,8 +110,7 @@ export type LeadPayload = {
   created_at: string;
 };
 
-export type AccountType = "private" | "business";
-export type B2bStatus = "pending" | "approved" | "rejected" | "disabled";
+export type CustomerType = "private" | "business";
 
 export type PrivateRegistration = {
   firstName: string;
@@ -165,31 +164,20 @@ export const COUNTRIES = [
 
 // TODO: SUPABASE SCHEMA – Account & B2B
 //
-// account_type: "private" | "business"
+// customer_type: "private" | "business"
 //   → Wird bei Registrierung gesetzt. Private = B2C Shop. Business = B2B.
-//
-// b2b_status: "pending" | "approved" | "rejected" | "disabled"
-//   → Default: "pending" nach B2B-Antrag.
-//   → "approved" darf NUR serverseitig / administrativ gesetzt werden.
-//   → "approved" schaltet B2B-Preise und Business-Dashboard frei.
-//   → "rejected" / "disabled" blockiert B2B-Zugang.
+//   → Business-Accounts haben direkt Zugang zum B2B-Bereich.
 //
 // customer_profile (B2C):
 //   → user_id (FK auth.users), vorname, nachname, email
 //   → Lieferadressen, Bestellhistorie, Abo-Status
 //
 // business_profile (B2B):
-//   → user_id (FK auth.users), contact_name, business_name, email, city
-//   → business_type, locations, estimated_demand, message
-//   → b2b_status, approved_at, approved_by
-//   → B2B-Preise erst nach approved sichtbar
-//
-// Serverseitige Freigabe:
-//   → Admin-Dashboard oder internes Tool setzt b2b_status = "approved"
-//   → Kein automatischer Approval-Flow
-//   → Keine B2B-Preise im normalen /shop Warenkorb
+//   → user_id (FK auth.users), contact_name, business_name, email
+//   → business_type, street, zip, city, country
+//   → tax_number, vat_id, website
 //
 // B2C und B2B NICHT mischen:
 //   → /shop Warenkorb = B2C (Endkundenpreise)
-//   → B2B-Accounts erhalten eigene Business-Bestelllogik
+//   → B2B-Accounts erhalten eigene Business-Bestelllogik unter /account/business
 //   → Keine B2C-Subscription-Pläne als B2B-Belieferung behandeln
