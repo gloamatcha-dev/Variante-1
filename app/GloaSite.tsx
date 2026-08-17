@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Header, Footer, Newsletter } from "./Chrome";
-import { BRAND, BUSINESS_FACTS, PRODUCT, MATCHA_VARIANTS, FLEX_DISCOUNT, ANNUAL_DISCOUNT, SHOP_STATUS, flexPrice, annualPrice, pricePer100g, lowestPrice, B2B_BUSINESS_TYPES, B2B_DEMAND_OPTIONS } from "./content";
+import { BRAND, BUSINESS_FACTS, PRODUCT, MATCHA_VARIANTS, FLEX_DISCOUNT, ANNUAL_DISCOUNT, SHOP_STATUS, flexPrice, annualPrice, pricePer100g, lowestPrice, B2B_BUSINESS_TYPES, B2B_DEMAND_OPTIONS, COUNTRIES } from "./content";
 import { BusinessCalculator } from "./BusinessCalculator";
 import { track } from "./analytics";
 import { useCart } from "./cart";
@@ -95,7 +95,7 @@ const faqItems:[string,string][]=[
 ["Gibt es Abos auch für Merch oder Zubehör?","Nein. Abo-Optionen gibt es nur für Matcha. Merch und Zubehör sind ausschließlich als Einzelkauf erhältlich."]
 ];
 return <main className="shop-page">
-<section className="shop-hero"><div className="shop-hero-inner"><p className="eyebrow">GLOA · MATCHA</p><h1>Dein Matcha.<br/><i>Deine Art.</i></h1><p className="lead">Matcha aus Shizuoka, Japan. Für Latte, iced, pur oder wie du ihn magst.</p><p className="shop-hero-price">AB {fmt(lowest)} €</p><p className="shop-hero-micro">Launch in Vorbereitung.</p><a className="cta secondary shop-hero-cta" href="#product" onClick={()=>track("shop_scroll_product")}>ZUM MATCHA →</a></div></section>
+<section className="shop-hero"><div className="shop-hero-inner"><p className="eyebrow">GLOA · MATCHA</p><h1>Dein Matcha.<br/><i>Deine Art.</i></h1><p className="lead">Matcha aus Shizuoka, Japan. Für Latte, iced, pur oder wie du ihn magst.</p><p className="shop-hero-price">AB {fmt(lowest)} €</p><p className="shop-hero-micro">Launch in Vorbereitung.</p><a className="cta shop-hero-cta" href="#product" onClick={()=>track("shop_scroll_product")}>ZUM MATCHA</a></div></section>
 
 <section id="product" className="shop-product"><div className="shop-product-image"><img src="/img/gloa-hero-packaging.png" alt="GLOA Matcha Verpackung" loading="lazy"/></div><div className="shop-product-info"><p className="eyebrow">MATCHA</p><h2>GLOA MATCHA</h2><p className="shop-product-sub">Shizuoka, Japan · Latte · Iced · Pur</p>
 
@@ -224,69 +224,128 @@ function Legal({route}:{route:string}){const title:Record<string,string>={impres
 
 function Account(){
 const [view,setView]=useState<"landing"|"login"|"choose"|"register"|"b2b-apply">("landing");
+const [pwError,setPwError]=useState("");
+
+const validatePw=(form:FormData)=>{
+const pw=String(form.get("password")||"");
+const pw2=String(form.get("password_confirm")||"");
+if(pw.length<8){setPwError("Passwort muss mindestens 8 Zeichen lang sein.");return false}
+if(pw!==pw2){setPwError("Passwörter stimmen nicht überein.");return false}
+setPwError("");return true};
+
+const handlePrivate=(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);if(!validatePw(f))return};
+const handleB2B=(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);if(!validatePw(f))return};
 
 if(view==="login")return <main className="account-page"><section className="account-section">
-<button className="account-back" onClick={()=>setView("landing")}>← Zurück</button>
+<button className="account-back" onClick={()=>{setView("landing");setPwError("")}}>&#8592; Zurück</button>
 <p className="eyebrow">GLOA ACCOUNT</p>
 <h1>Anmelden.</h1>
 <form className="account-form" onSubmit={e=>e.preventDefault()}>
-<label>E-Mail<input required type="email" placeholder="deine@email.de" autoComplete="email"/></label>
-<label>Passwort<input required type="password" placeholder="Passwort" autoComplete="current-password"/></label>
+<label>E-Mail-Adresse<input required type="email" placeholder="deine@email.de" autoComplete="email" name="email"/></label>
+<label>Passwort<input required type="password" placeholder="Passwort" autoComplete="current-password" name="password"/></label>
 <button className="cta account-cta" type="submit">Anmelden</button>
 </form>
-<a className="account-forgot" href="/account">Passwort vergessen?</a>
+<button className="account-forgot" onClick={()=>{}}>Passwort vergessen?</button>
 </section></main>;
 
 if(view==="choose")return <main className="account-page"><section className="account-section">
-<button className="account-back" onClick={()=>setView("landing")}>← Zurück</button>
+<button className="account-back" onClick={()=>setView("landing")}>&#8592; Zurück</button>
 <p className="eyebrow">KONTO ERSTELLEN</p>
-<h1>Welches Konto<br/><i>passt zu dir?</i></h1>
+<h1>Wie möchtest du<br/><i>GLOA nutzen?</i></h1>
 <div className="account-type-grid">
 <div className="account-type-card account-type-private">
 <p className="eyebrow">PRIVATKUNDE</p>
 <h2>Matcha für<br/>deinen Alltag.</h2>
 <p>Bestellen, Abos verwalten und Rezepte speichern.</p>
-<button className="cta account-type-cta" onClick={()=>setView("register")}>Privatkonto erstellen</button>
+<button className="cta account-type-cta" onClick={()=>{setView("register");setPwError("")}}>Privatkonto erstellen</button>
 </div>
 <div className="account-type-card account-type-business">
 <p className="eyebrow">GESCHÄFTSKUNDE</p>
 <h2>Matcha für<br/>dein Business.</h2>
 <p>Großhandel, Samples und individuelle Konditionen.</p>
-<button className="cta account-type-cta" onClick={()=>setView("b2b-apply")}>B2B Zugang anfragen</button>
+<button className="cta account-type-cta" onClick={()=>{setView("b2b-apply");setPwError("")}}>B2B Zugang anfragen</button>
 </div>
 </div>
 </section></main>;
 
-if(view==="register")return <main className="account-page"><section className="account-section">
-<button className="account-back" onClick={()=>setView("choose")}>← Zurück</button>
+if(view==="register")return <main className="account-page"><section className="account-section account-register">
+<button className="account-back" onClick={()=>{setView("choose");setPwError("")}}>&#8592; Zurück</button>
 <p className="eyebrow">PRIVATKONTO ERSTELLEN</p>
 <h1>Willkommen<br/><i>bei GLOA.</i></h1>
-<form className="account-form" onSubmit={e=>e.preventDefault()}>
+<form className="account-form" onSubmit={handlePrivate}>
+<p className="account-form-section">PERSÖNLICHE DATEN</p>
 <div className="account-form-row">
-<label>Vorname<input required placeholder="Vorname" autoComplete="given-name"/></label>
-<label>Nachname<input required placeholder="Nachname" autoComplete="family-name"/></label>
+<label>Vorname *<input required placeholder="Vorname" autoComplete="given-name" name="first_name"/></label>
+<label>Nachname *<input required placeholder="Nachname" autoComplete="family-name" name="last_name"/></label>
 </div>
-<label>E-Mail<input required type="email" placeholder="deine@email.de" autoComplete="email"/></label>
-<label>Passwort<input required type="password" placeholder="Passwort" autoComplete="new-password"/></label>
+<p className="account-form-section">KONTAKT</p>
+<label>E-Mail-Adresse *<input required type="email" placeholder="deine@email.de" autoComplete="email" name="email"/></label>
+<label>Telefonnummer<input type="tel" placeholder="Optional" autoComplete="tel" name="phone"/></label>
+<p className="account-form-section">PASSWORT</p>
+<div className="account-form-row">
+<label>Passwort *<input required type="password" placeholder="Min. 8 Zeichen" autoComplete="new-password" name="password" minLength={8}/></label>
+<label>Passwort wiederholen *<input required type="password" placeholder="Wiederholen" autoComplete="new-password" name="password_confirm" minLength={8}/></label>
+</div>
+<p className="account-form-section">ADRESSE</p>
+<div className="account-form-row">
+<label>Straße *<input required placeholder="Straße" autoComplete="address-line1" name="street"/></label>
+<label>Hausnummer *<input required placeholder="Nr." autoComplete="address-line2" name="house_number"/></label>
+</div>
+<div className="account-form-row">
+<label>PLZ *<input required placeholder="PLZ" autoComplete="postal-code" name="zip"/></label>
+<label>Ort *<input required placeholder="Ort" autoComplete="address-level2" name="city"/></label>
+</div>
+<label>Land *<select required name="country" defaultValue="Deutschland">{COUNTRIES.map(c=><option key={c}>{c}</option>)}</select></label>
+{pwError&&<p className="account-error">{pwError}</p>}
+<label className="consent"><input required type="checkbox" name="accept_terms"/> Ich akzeptiere die <a href="/agb">AGB</a> und <a href="/datenschutz">Datenschutzerklärung</a>.</label>
+<label className="consent"><input type="checkbox" name="newsletter"/> Ich möchte Neuigkeiten und Angebote von GLOA erhalten.</label>
 <button className="cta account-cta" type="submit">Konto erstellen</button>
 </form>
 <p className="account-login-hint">Schon ein Konto? <button className="account-link-btn" onClick={()=>setView("login")}>Anmelden</button></p>
 </section></main>;
 
 if(view==="b2b-apply")return <main className="account-page"><section className="account-section account-b2b">
-<button className="account-back" onClick={()=>setView("choose")}>← Zurück</button>
+<button className="account-back" onClick={()=>{setView("choose");setPwError("")}}>&#8592; Zurück</button>
 <p className="eyebrow">B2B ZUGANG ANFRAGEN</p>
 <h1>Matcha für<br/><i>dein Business.</i></h1>
-<p className="account-b2b-note">Nach Prüfung deiner Angaben melden wir uns mit den nächsten Schritten.</p>
-<form className="account-form" onSubmit={e=>e.preventDefault()}>
-<label>Ansprechperson*<input required name="contact_name" placeholder="Vor- und Nachname" autoComplete="name"/></label>
-<label>Unternehmen*<input required name="business_name" placeholder="Unternehmensname" autoComplete="organization"/></label>
-<label>E-Mail*<input required type="email" name="email" placeholder="business@email.de" autoComplete="email"/></label>
-<label>Stadt*<input required name="city" placeholder="Stadt" autoComplete="address-level2"/></label>
-<label>Unternehmenstyp*<select required name="business_type" defaultValue=""><option value="" disabled>Bitte auswählen</option>{B2B_BUSINESS_TYPES.map(t=><option key={t}>{t}</option>)}</select></label>
-<label>Anzahl Standorte<input type="number" min="1" name="locations" placeholder="1"/></label>
-<label>Geschätzter Matcha-Bedarf<select name="estimated_demand"><option value="">Bitte auswählen</option>{B2B_DEMAND_OPTIONS.map(d=><option key={d}>{d}</option>)}</select></label>
-<label>Nachricht<textarea name="message" placeholder="Erzähl uns von deinem Business und deinem Matcha-Bedarf." rows={4}/></label>
+<p className="account-b2b-note">Geschäftskonten werden vor der Freischaltung geprüft. Preise und vollständige B2B-Konditionen sind nach Freigabe im Kundenbereich verfügbar.</p>
+<form className="account-form" onSubmit={handleB2B}>
+<p className="account-form-section">UNTERNEHMEN</p>
+<label>Firmenname *<input required name="company_name" placeholder="Firmenname" autoComplete="organization"/></label>
+<label>Rechtsform<input name="legal_form" placeholder="z. B. GmbH, UG, Einzelunternehmen" /></label>
+<div className="account-form-row">
+<label>Ansprechpartner Vorname *<input required name="contact_first_name" placeholder="Vorname" autoComplete="given-name"/></label>
+<label>Ansprechpartner Nachname *<input required name="contact_last_name" placeholder="Nachname" autoComplete="family-name"/></label>
+</div>
+<p className="account-form-section">GESCHÄFTLICHER KONTAKT</p>
+<label>Geschäftliche E-Mail-Adresse *<input required type="email" name="email" placeholder="business@email.de" autoComplete="email"/></label>
+<label>Telefonnummer<input type="tel" name="phone" placeholder="Optional" autoComplete="tel"/></label>
+<p className="account-form-section">RECHNUNGS- / GESCHÄFTSADRESSE</p>
+<div className="account-form-row">
+<label>Straße *<input required name="street" placeholder="Straße" autoComplete="address-line1"/></label>
+<label>Hausnummer *<input required name="house_number" placeholder="Nr." autoComplete="address-line2"/></label>
+</div>
+<div className="account-form-row">
+<label>PLZ *<input required name="zip" placeholder="PLZ" autoComplete="postal-code"/></label>
+<label>Ort *<input required name="city" placeholder="Ort" autoComplete="address-level2"/></label>
+</div>
+<label>Land *<select required name="country" defaultValue="Deutschland">{COUNTRIES.map(c=><option key={c}>{c}</option>)}</select></label>
+<p className="account-form-section">UNTERNEHMENSDATEN</p>
+<div className="account-form-row">
+<label>Steuernummer *<input required name="tax_number" placeholder="Steuernummer"/></label>
+<label>USt-IdNr.<input name="vat_id" placeholder="Falls vorhanden"/></label>
+</div>
+<p className="account-form-hint">USt-IdNr. optional. Falls vorhanden.</p>
+<label>Website<input type="url" name="website" placeholder="https://"/></label>
+<p className="account-form-section">PASSWORT</p>
+<div className="account-form-row">
+<label>Passwort *<input required type="password" placeholder="Min. 8 Zeichen" autoComplete="new-password" name="password" minLength={8}/></label>
+<label>Passwort wiederholen *<input required type="password" placeholder="Wiederholen" autoComplete="new-password" name="password_confirm" minLength={8}/></label>
+</div>
+{pwError&&<p className="account-error">{pwError}</p>}
+<label className="consent"><input required type="checkbox" name="confirm_company_auth"/> Ich bestätige, dass ich im Namen des angegebenen Unternehmens handle.</label>
+<label className="consent"><input required type="checkbox" name="accept_terms"/> Ich akzeptiere die <a href="/agb">AGB</a> und <a href="/datenschutz">Datenschutzerklärung</a>.</label>
+<label className="consent"><input type="checkbox" name="newsletter"/> Ich möchte B2B-Neuigkeiten von GLOA erhalten.</label>
 <button className="cta account-cta" type="submit">B2B Zugang anfragen</button>
 </form>
 <p className="account-login-hint">Schon ein Konto? <button className="account-link-btn" onClick={()=>setView("login")}>Anmelden</button></p>

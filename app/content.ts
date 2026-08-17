@@ -110,6 +110,59 @@ export type LeadPayload = {
   created_at: string;
 };
 
+export type AccountType = "private" | "business";
+export type B2bStatus = "pending" | "approved" | "rejected" | "disabled";
+
+export type PrivateRegistration = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  password: string;
+  street: string;
+  houseNumber: string;
+  zip: string;
+  city: string;
+  country: string;
+  phone?: string;
+  acceptTerms: boolean;
+  newsletter: boolean;
+};
+
+export type BusinessRegistration = {
+  companyName: string;
+  legalForm?: string;
+  contactFirstName: string;
+  contactLastName: string;
+  email: string;
+  phone?: string;
+  street: string;
+  houseNumber: string;
+  zip: string;
+  city: string;
+  country: string;
+  taxNumber: string;
+  vatId?: string;
+  website?: string;
+  password: string;
+  confirmCompanyAuth: boolean;
+  acceptTerms: boolean;
+  newsletter: boolean;
+};
+
+export const COUNTRIES = [
+  "Deutschland",
+  "Österreich",
+  "Schweiz",
+  "Belgien",
+  "Dänemark",
+  "Frankreich",
+  "Italien",
+  "Luxemburg",
+  "Niederlande",
+  "Polen",
+  "Tschechien",
+] as const;
+
 // TODO: SUPABASE SCHEMA – Account & B2B
 //
 // account_type: "private" | "business"
