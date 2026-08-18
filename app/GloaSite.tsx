@@ -6,6 +6,8 @@ import { BusinessCalculator } from "./BusinessCalculator";
 import { AccountPortal } from "./AccountPortal";
 import { track } from "./analytics";
 import { useCart } from "./cart";
+import { AuthProvider, useAuth } from "../lib/auth";
+import { supabase } from "../lib/supabase";
 
 const fmt=(n:number)=>n.toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2});
 const purchaseLabel=(t:string)=>t==="flex"?"Flex-Abo":t==="annual"?"12-Monats-Abo":"Einmal";
@@ -215,8 +217,15 @@ function Legal({route}:{route:string}){const title:Record<string,string>={impres
 // Privatkunden sehen keinen B2B-Menüpunkt.
 
 function Account(){
-const [view,setView]=useState<"landing"|"login"|"choose"|"register"|"b2b-apply">(()=>{if(typeof window!=="undefined"){const p=new URLSearchParams(window.location.search);if(p.get("type")==="business")return "b2b-apply";if(p.get("action")==="register")return "choose"}return "landing"});
+const { user, loading: authLoading } = useAuth();
+const [view,setView]=useState<"landing"|"login"|"choose"|"register"|"b2b-apply"|"forgot">(()=>{if(typeof window!=="undefined"){const p=new URLSearchParams(window.location.search);if(p.get("type")==="business")return "b2b-apply";if(p.get("action")==="register")return "choose"}return "landing"});
 const [pwError,setPwError]=useState("");
+const [authError,setAuthError]=useState("");
+const [authBusy,setAuthBusy]=useState(false);
+const [forgotSent,setForgotSent]=useState(false);
+
+// Logged-in users → dashboard
+useEffect(()=>{if(!authLoading&&user)window.location.href="/account/dashboard"},[user,authLoading]);
 
 const validatePw=(form:FormData)=>{
 const pw=String(form.get("password")||"");
@@ -225,19 +234,36 @@ if(pw.length<8){setPwError("Passwort muss mindestens 8 Zeichen lang sein.");retu
 if(pw!==pw2){setPwError("Passwörter stimmen nicht überein.");return false}
 setPwError("");return true};
 
-const handlePrivate=(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);if(!validatePw(f))return};
-const handleB2B=(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);if(!validatePw(f))return};
+const handleLogin=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();if(!supabase)return;setAuthBusy(true);setAuthError("");const f=new FormData(e.currentTarget);const{error}=await supabase.auth.signInWithPassword({email:String(f.get("email")),password:String(f.get("password"))});setAuthBusy(false);if(error){setAuthError(error.message==="Invalid login credentials"?"E-Mail oder Passwort falsch.":error.message);return}window.location.href="/account/dashboard"};
+
+const handleForgot=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();if(!supabase)return;setAuthBusy(true);setAuthError("");const f=new FormData(e.currentTarget);const{error}=await supabase.auth.resetPasswordForEmail(String(f.get("email")));setAuthBusy(false);if(error){setAuthError("Fehler. Bitte versuche es erneut.");return}setForgotSent(true)};
+
+const handlePrivate=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);if(!validatePw(f))return;if(!supabase)return;setAuthBusy(true);setAuthError("");const{error}=await supabase.auth.signUp({email:String(f.get("email")),password:String(f.get("password")),options:{data:{customer_type:"private",first_name:String(f.get("first_name")),last_name:String(f.get("last_name")),phone:String(f.get("phone")||""),street:String(f.get("street")),house_number:String(f.get("house_number")),zip:String(f.get("zip")),city:String(f.get("city")),country:String(f.get("country")),accept_terms:true,newsletter:!!f.get("newsletter")}}});setAuthBusy(false);if(error){setAuthError(error.message.includes("already registered")?"Diese E-Mail ist bereits registriert.":error.message);return}window.location.href="/account/dashboard"};
+
+const handleB2B=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);if(!validatePw(f))return;if(!supabase)return;setAuthBusy(true);setAuthError("");const{error}=await supabase.auth.signUp({email:String(f.get("email")),password:String(f.get("password")),options:{data:{customer_type:"business",first_name:String(f.get("contact_first_name")),last_name:String(f.get("contact_last_name")),contact_first_name:String(f.get("contact_first_name")),contact_last_name:String(f.get("contact_last_name")),phone:String(f.get("phone")||""),company_name:String(f.get("company_name")),legal_form:String(f.get("legal_form")||""),tax_number:String(f.get("tax_number")),vat_id:String(f.get("vat_id")||""),website:String(f.get("website")||""),street:String(f.get("street")),house_number:String(f.get("house_number")),zip:String(f.get("zip")),city:String(f.get("city")),country:String(f.get("country")),confirm_company_auth:!!f.get("confirm_company_auth"),accept_terms:true,newsletter:!!f.get("newsletter")}}});setAuthBusy(false);if(error){setAuthError(error.message.includes("already registered")?"Diese E-Mail ist bereits registriert.":error.message);return}window.location.href="/account/dashboard"};
+
+if(view==="forgot")return <main className="account-page"><section className="account-section">
+<button className="account-back" onClick={()=>{setView("login");setAuthError("");setForgotSent(false)}}>&#8592; Zurück</button>
+<p className="eyebrow">PASSWORT ZURÜCKSETZEN</p>
+<h1>Passwort<br/><i>vergessen?</i></h1>
+{forgotSent?<p className="account-lead">Wir haben dir eine E-Mail gesendet. Prüfe dein Postfach.</p>:<form className="account-form" onSubmit={handleForgot}>
+<label>E-Mail-Adresse<input required type="email" placeholder="deine@email.de" autoComplete="email" name="email"/></label>
+{authError&&<p className="account-error">{authError}</p>}
+<button className="cta account-cta" type="submit" disabled={authBusy}>{authBusy?"SENDEN…":"LINK SENDEN"}</button>
+</form>}
+</section></main>;
 
 if(view==="login")return <main className="account-page"><section className="account-section">
-<button className="account-back" onClick={()=>{setView("landing");setPwError("")}}>&#8592; Zurück</button>
+<button className="account-back" onClick={()=>{setView("landing");setPwError("");setAuthError("")}}>&#8592; Zurück</button>
 <p className="eyebrow">GLOA ACCOUNT</p>
 <h1>Anmelden.</h1>
-<form className="account-form" onSubmit={e=>e.preventDefault()}>
+<form className="account-form" onSubmit={handleLogin}>
 <label>E-Mail-Adresse<input required type="email" placeholder="deine@email.de" autoComplete="email" name="email"/></label>
 <label>Passwort<input required type="password" placeholder="Passwort" autoComplete="current-password" name="password"/></label>
-<button className="cta account-cta" type="submit">Anmelden</button>
+{authError&&<p className="account-error">{authError}</p>}
+<button className="cta account-cta" type="submit" disabled={authBusy}>{authBusy?"ANMELDEN…":"Anmelden"}</button>
 </form>
-<button className="account-forgot" onClick={()=>{}}>Passwort vergessen?</button>
+<button className="account-forgot" onClick={()=>{setView("forgot");setAuthError("")}}>Passwort vergessen?</button>
 </section></main>;
 
 if(view==="choose")return <main className="account-page"><section className="account-section">
@@ -289,9 +315,10 @@ if(view==="register")return <main className="account-page"><section className="a
 </div>
 <label>Land *<select required name="country" defaultValue="Deutschland">{COUNTRIES.map(c=><option key={c}>{c}</option>)}</select></label>
 {pwError&&<p className="account-error">{pwError}</p>}
+{authError&&<p className="account-error">{authError}</p>}
 <label className="consent"><input required type="checkbox" name="accept_terms"/> Ich akzeptiere die <a href="/agb">AGB</a> und <a href="/datenschutz">Datenschutzerklärung</a>.</label>
 <label className="consent"><input type="checkbox" name="newsletter"/> Ich möchte Neuigkeiten und Angebote von GLOA erhalten.</label>
-<button className="cta account-cta" type="submit">Konto erstellen</button>
+<button className="cta account-cta" type="submit" disabled={authBusy}>{authBusy?"ERSTELLEN…":"Konto erstellen"}</button>
 </form>
 <p className="account-login-hint">Schon ein Konto? <button className="account-link-btn" onClick={()=>setView("login")}>Anmelden</button></p>
 </section></main>;
@@ -335,10 +362,11 @@ if(view==="b2b-apply")return <main className="account-page"><section className="
 <label>Passwort wiederholen *<input required type="password" placeholder="Wiederholen" autoComplete="new-password" name="password_confirm" minLength={8}/></label>
 </div>
 {pwError&&<p className="account-error">{pwError}</p>}
+{authError&&<p className="account-error">{authError}</p>}
 <label className="consent"><input required type="checkbox" name="confirm_company_auth"/> Ich bestätige, dass ich im Namen des angegebenen Unternehmens handle.</label>
 <label className="consent"><input required type="checkbox" name="accept_terms"/> Ich akzeptiere die <a href="/agb">AGB</a> und <a href="/datenschutz">Datenschutzerklärung</a>.</label>
 <label className="consent"><input type="checkbox" name="newsletter"/> Ich möchte B2B-Neuigkeiten von GLOA erhalten.</label>
-<button className="cta account-cta" type="submit">Geschäftskonto erstellen</button>
+<button className="cta account-cta" type="submit" disabled={authBusy}>{authBusy?"ERSTELLEN…":"Geschäftskonto erstellen"}</button>
 </form>
 <p className="account-login-hint">Schon ein Konto? <button className="account-link-btn" onClick={()=>setView("login")}>Anmelden</button></p>
 </section></main>;
@@ -393,7 +421,20 @@ return <div className="cart-backdrop" onClick={onClose}><aside className="cart" 
 </aside></div>
 }
 
-export function GloaSite({route}:{route:string}){
+function AuthConfirm(){
+useEffect(()=>{
+  if(!supabase)return;
+  const hash=window.location.hash;
+  if(hash){
+    supabase.auth.getSession().then(()=>{window.location.href="/account/dashboard"});
+  } else {
+    window.location.href="/account/dashboard";
+  }
+},[]);
+return <main className="account-page"><section className="account-section"><p>Verifizierung läuft…</p></section></main>;
+}
+
+function GloaSiteInner({route}:{route:string}){
 const cart=useCart();
 const [cartOpen,setCartOpen]=useState(false);
 const openCart=useCallback(()=>setCartOpen(true),[]);
@@ -409,6 +450,7 @@ else if(route==="for-cafes"||route==="wholesale")page=<ForCafes/>;
 else if(route==="rezepte"||route==="journal")page=<Rezepte/>;
 else if(route.startsWith("rezepte/"))page=<RezeptDetail slug={route.split("/")[1]}/>;
 else if(route.startsWith("journal/"))page=<RezeptDetail slug={route.split("/")[1]}/>;
+else if(route==="auth/confirm")page=<AuthConfirm/>;
 else if(route==="account/dashboard"||route==="account/orders"||route==="account/subscriptions"||route==="account/addresses"||route==="account/profile"||route==="account/business")page=<AccountPortal page={route.split("/")[1] as "dashboard"|"orders"|"subscriptions"|"addresses"|"profile"|"business"}/>;
 else if(route==="account")page=<Account/>;
 else if(route==="contact")page=<Contact/>;
@@ -416,4 +458,8 @@ else if(["impressum","datenschutz","agb","widerruf","versand"].includes(route))p
 else page=<main className="not-found"><h1>404</h1><a href="/">Zurück zu GLOA →</a></main>;
 
 return <><Header onCart={openCart} cartCount={cart.totalCount}/>{page}<Footer/><CartDrawer open={cartOpen} onClose={closeCart}/></>
+}
+
+export function GloaSite({route}:{route:string}){
+return <AuthProvider><GloaSiteInner route={route}/></AuthProvider>
 }

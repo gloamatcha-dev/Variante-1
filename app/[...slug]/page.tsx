@@ -9,6 +9,7 @@ const seo:Record<string,[string,string]>={
  "rezepte":["Matcha Rezepte","GLOA Signature Drinks. Affogato, Strawberry, Tonic und mehr."],
  "journal":["Matcha Rezepte","GLOA Signature Drinks. Affogato, Strawberry, Tonic und mehr."],
  "contact":["Contact GLOA","Kontakt für Kund:innen, Cafés und Geschäftskunden."],
+ "auth/confirm":["Verifizierung","Dein GLOA Konto wird verifiziert."],
  "account":["Dein Konto","GLOA Account. Bestellungen, Abos und alles rund um deinen Matcha."],
  "account/dashboard":["Dein GLOA","Dein GLOA Dashboard. Bestellungen, Abos und Lieferungen im Überblick."],
  "account/orders":["Bestellungen","Deine GLOA Bestellungen."],

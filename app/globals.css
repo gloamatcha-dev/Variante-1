@@ -274,6 +274,17 @@
 .portal-business-card ul{list-style:none;padding:0;margin:0}
 .portal-business-card li{padding:10px 0;border-top:1px solid var(--line);font:13px/1.4 var(--font-mono)}
 .portal-status-note{font:13px/1.5 var(--font-mono);opacity:.45;margin-top:40px}
+.portal-loading{font:14px/1.5 var(--font-mono);opacity:.45;padding:80px 0;text-align:center}
+.portal-edit-btn{margin-top:16px}
+.portal-inline-form{margin-top:16px}
+.portal-address-display p{margin:0;font:14px/1.6 var(--font-mono)}
+.portal-all-addresses{margin-top:40px;border-top:1px solid var(--line);padding-top:30px}
+.portal-all-addresses .eyebrow{margin-bottom:16px}
+.portal-address-item{border-top:1px solid rgba(0,0,0,.06);padding:20px 0;display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap}
+.portal-address-badges{display:flex;gap:6px;flex-wrap:wrap}
+.portal-badge{font:11px/1 var(--font-mono);text-transform:uppercase;letter-spacing:.06em;padding:4px 8px;border:1px solid var(--line);opacity:.6}
+.portal-address-delete{border:0;background:none;font:12px var(--font-mono);text-transform:uppercase;letter-spacing:.06em;cursor:pointer;opacity:.4;transition:opacity .2s;margin-left:auto}
+.portal-address-delete:hover{opacity:1;color:var(--berry)}
 
 /* ── Contact Page ── */
 .contact-main{background:var(--cream)}
