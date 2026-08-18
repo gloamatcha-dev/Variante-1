@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { CustomerType } from "./content";
 import { COUNTRIES } from "./content";
 import { useAuth } from "../lib/auth";
@@ -192,7 +192,13 @@ function PortalAddresses() {
 
   const handleDelete = async (id: string) => {
     if (!supabase) return;
+    const addr = addresses.find(a => a.id === id);
+    if (addr && (addr.is_default_shipping || addr.is_default_billing) && addresses.length <= 1) {
+      setError("Die letzte Standardadresse kann nicht entfernt werden.");
+      return;
+    }
     await supabase.from("addresses").delete().eq("id", id);
+    setError("");
     await refreshAddresses();
   };
 
@@ -377,34 +383,118 @@ function PortalProfile() {
 
 // ── B2B Bereich ────────────────────────────────────────────────────────
 
+type OfferModel = { id: number; slug: string; label: string; discount_pct: number; description: string | null; sort_order: number };
+type ProductSize = { id: number; grams: number; label: string; price_per_kg_net: number; sort_order: number };
+type GeneralTerm = { id: number; key: string; label: string; value: string; sort_order: number };
+
+const fmtEur = (n: number) => n.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const calcPrice = (pricePerKg: number, grams: number, discountPct: number) =>
+  Math.round(pricePerKg * grams / 1000 * (1 - discountPct / 100) * 100) / 100;
+
 function PortalBusiness() {
-  const sections: [string, string, string[]][] = [
-    ["PREISE & KONDITIONEN", "Deine B2B-Preise, Bezugsmodelle und Konditionen.", ["Einkaufspreise", "Rabattstaffelung", "Bezugsmodelle", "Vollständige Konditionen"]],
-    ["BELIEFERUNG", "Regelmäßige Belieferung und Partnerschaften verwalten.", ["Regelmäßige Belieferung", "12-Monats-Partnerschaft", "Lieferintervalle", "Lieferstatus"]],
-    ["BESTELLUNGEN", "Deine B2B-Bestellungen an einem Ort.", ["Aktuelle Bestellungen", "Bestellhistorie", "Wiederkehrende Bestellungen", "Rechnungen"]],
-    ["ROI & KALKULATION", "Kalkuliere später mit deinen tatsächlichen Einkaufs- und Verkaufspreisen.", ["Einkaufspreis", "Verkaufspreis pro Drink", "Wareneinsatz", "Umsatz & Deckungsbeitrag"]],
-    ["UNTERNEHMENSDATEN", "Firmendaten, Steuerdaten und Adressen verwalten.", ["Firmenname & Ansprechpartner", "Rechnungsadresse", "Lieferadresse", "Steuernummer & USt-IdNr."]],
-  ];
+  const { businessProfile } = useAuth();
+  const [models, setModels] = useState<OfferModel[]>([]);
+  const [sizes, setSizes] = useState<ProductSize[]>([]);
+  const [terms, setTerms] = useState<GeneralTerm[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!supabase) { setLoading(false); return; }
+    Promise.all([
+      supabase.from("b2b_offer_models").select("*").order("sort_order"),
+      supabase.from("b2b_product_sizes").select("*").order("sort_order"),
+      supabase.from("b2b_general_terms").select("*").order("sort_order"),
+    ]).then(([m, s, t]) => {
+      setModels(m.data ?? []);
+      setSizes(s.data ?? []);
+      setTerms(t.data ?? []);
+      setLoading(false);
+    });
+  }, []);
+
+  if (loading) return <p className="portal-loading">Laden…</p>;
 
   return (
     <>
       <section className="portal-page-head">
         <p className="eyebrow">B2B</p>
         <h1>B2B bei GLOA.</h1>
-        <p className="portal-page-lead">Alles für deine Zusammenarbeit mit GLOA an einem Ort.</p>
+        <p className="portal-page-lead">Preise, Bezugsmodelle und Konditionen für dein Unternehmen.</p>
       </section>
 
-      <div className="portal-business-grid">
-        {sections.map(([title, desc, items]) => (
-          <div key={title} className="portal-business-card">
-            <p className="eyebrow">{title}</p>
-            <p className="portal-business-card-desc">{desc}</p>
-            <ul>{items.map(item => <li key={item}>{item}</li>)}</ul>
+      {/* ── Pricing Table ── */}
+      <section className="b2b-section">
+        <p className="eyebrow">DEINE B2B-PREISE</p>
+        <p className="b2b-section-lead">Alle Preise netto zzgl. gesetzlicher MwSt.</p>
+        {sizes.length > 0 && models.length > 0 && (
+          <div className="b2b-pricing-table">
+            <div className="b2b-pricing-header">
+              <div className="b2b-pricing-cell b2b-pricing-label" />
+              {sizes.map(s => <div key={s.id} className="b2b-pricing-cell">{s.label}</div>)}
+            </div>
+            {models.map(m => (
+              <div key={m.id} className="b2b-pricing-row">
+                <div className="b2b-pricing-cell b2b-pricing-label">
+                  <strong>{m.label}</strong>
+                  {m.discount_pct > 0 && <span className="b2b-discount">{"\u2212"}{m.discount_pct} %</span>}
+                </div>
+                {sizes.map(s => (
+                  <div key={s.id} className="b2b-pricing-cell b2b-pricing-value">
+                    {fmtEur(calcPrice(s.price_per_kg_net, s.grams, m.discount_pct))} €
+                  </div>
+                ))}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        )}
+        {sizes.length > 0 && (
+          <p className="b2b-pricing-note">Basis: {fmtEur(sizes[0].price_per_kg_net)} € / kg netto</p>
+        )}
+      </section>
 
-      <p className="portal-status-note">Verfügbar nach technischer Anbindung des Kundenkontos.</p>
+      {/* ── Offer Models ── */}
+      <section className="b2b-section">
+        <p className="eyebrow">BEZUGSMODELLE</p>
+        <div className="b2b-models-grid">
+          {models.map(m => (
+            <div key={m.id} className="b2b-model-card">
+              <p className="b2b-model-label">{m.label}</p>
+              {m.discount_pct > 0 && <p className="b2b-model-discount">{"\u2212"}{m.discount_pct} % auf den Basispreis</p>}
+              {m.description && <p className="b2b-model-desc">{m.description}</p>}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── Terms ── */}
+      {terms.length > 0 && (
+        <section className="b2b-section">
+          <p className="eyebrow">KONDITIONEN</p>
+          <div className="b2b-terms-list">
+            {terms.map(t => (
+              <div key={t.id} className="b2b-term-row">
+                <span className="b2b-term-key">{t.label}</span>
+                <span>{t.value}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ── Company Data ── */}
+      {businessProfile && (
+        <section className="b2b-section">
+          <p className="eyebrow">UNTERNEHMENSDATEN</p>
+          <div className="b2b-company-data">
+            <div className="portal-profile-row"><span>Firma</span><strong>{businessProfile.company_name || "\u2014"}</strong></div>
+            {businessProfile.legal_form && <div className="portal-profile-row"><span>Rechtsform</span><strong>{businessProfile.legal_form}</strong></div>}
+            <div className="portal-profile-row"><span>Steuernummer</span><strong>{businessProfile.tax_number || "\u2014"}</strong></div>
+            {businessProfile.vat_id && <div className="portal-profile-row"><span>USt-IdNr.</span><strong>{businessProfile.vat_id}</strong></div>}
+            {businessProfile.website && <div className="portal-profile-row"><span>Website</span><strong>{businessProfile.website}</strong></div>}
+          </div>
+          <a href="/account/profile" className="b2b-edit-link">Kontodaten bearbeiten →</a>
+        </section>
+      )}
     </>
   );
 }

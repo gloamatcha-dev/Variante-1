@@ -39,7 +39,7 @@ export function BusinessCalculator(){
 // ARCHIVIERT: B2B Pricing Cards (class="b2b-pricing")
 // Enthielt: 3 Preiskarten mit €/kg (130€, 123,50€, 117€)
 // Vertragsbedingungen (Mindestlaufzeit, Kündigungsfristen)
-// → Preise bleiben in content.ts (B2B_PRICING) für späteres Portal
+// → B2B-Preise kommen aus Supabase (b2b_offer_models + b2b_product_sizes)
 
 // ARCHIVIERT: Beispielrechnung (class="b2b-example")
 // Enthielt: 3 kg/Monat Beispiel mit konkreten €/Monat-Beträgen

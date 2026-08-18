@@ -52,11 +52,7 @@ export const BUSINESS_FACTS = {
   packaging: "Licht-, luft- und feuchtigkeitsdichte Verpackung",
 };
 
-export const B2B_PRICING = {
-  single: { price: 130, label: "Einzelbestellung", discount: 0 },
-  recurring: { price: 123.5, label: "Regelmäßige Belieferung", discount: 5 },
-  annual: { price: 117, label: "12-Monats-Partnerschaft", discount: 10 },
-};
+// B2B pricing is sourced from Supabase (b2b_offer_models + b2b_product_sizes)
 
 export const TODO_CONTENT = {
   productImages: "",

@@ -268,13 +268,30 @@
 .portal-profile-note{font:14px/1.5 var(--font-mono);opacity:.4}
 .portal-newsletter-toggle{display:flex;align-items:flex-start;gap:10px;font:14px/1.5 var(--font-sans);cursor:pointer}
 .portal-newsletter-toggle input{width:18px;height:18px;margin-top:2px;accent-color:var(--blue);cursor:pointer}
-.portal-business-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
-.portal-business-card{border:1px solid var(--line);padding:30px 25px}
-.portal-business-card .eyebrow{margin-bottom:12px}
-.portal-business-card-desc{font-size:15px;line-height:1.5;margin:0 0 20px;opacity:.7}
-.portal-business-card ul{list-style:none;padding:0;margin:0}
-.portal-business-card li{padding:10px 0;border-top:1px solid var(--line);font:13px/1.4 var(--font-mono)}
-.portal-status-note{font:13px/1.5 var(--font-mono);opacity:.45;margin-top:40px}
+/* ── B2B Portal ── */
+.b2b-section{border-top:1px solid var(--line);padding:40px 0}
+.b2b-section .eyebrow{margin-bottom:16px}
+.b2b-section-lead{font:14px/1.5 var(--font-mono);opacity:.5;margin:0 0 28px}
+.b2b-pricing-table{max-width:620px}
+.b2b-pricing-header{display:grid;grid-template-columns:1.4fr 1fr 1fr;border-bottom:2px solid var(--ink);padding-bottom:12px}
+.b2b-pricing-row{display:grid;grid-template-columns:1.4fr 1fr 1fr;border-bottom:1px solid var(--line);padding:16px 0}
+.b2b-pricing-cell{font:14px/1.4 var(--font-mono)}
+.b2b-pricing-cell.b2b-pricing-label{display:flex;flex-direction:column;gap:4px}
+.b2b-pricing-cell.b2b-pricing-value{font-size:16px;font-weight:600}
+.b2b-pricing-header .b2b-pricing-cell{font:600 12px/1 var(--font-mono);letter-spacing:.1em;text-transform:uppercase}
+.b2b-discount{font:11px/1 var(--font-mono);opacity:.5}
+.b2b-pricing-note{font:13px/1.5 var(--font-mono);opacity:.4;margin-top:16px}
+.b2b-models-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.b2b-model-card{border:1px solid var(--line);padding:28px 24px}
+.b2b-model-label{font:600 14px/1.2 var(--font-mono);letter-spacing:.06em;margin:0 0 8px}
+.b2b-model-discount{font:13px/1.4 var(--font-mono);color:var(--blue);margin:0 0 12px}
+.b2b-model-desc{font:14px/1.5 var(--font-sans);opacity:.7;margin:0}
+.b2b-terms-list{max-width:620px}
+.b2b-term-row{display:flex;justify-content:space-between;padding:14px 0;border-top:1px solid rgba(0,0,0,.06);font:14px/1.4 var(--font-mono)}
+.b2b-term-key{opacity:.5}
+.b2b-company-data{max-width:620px}
+.b2b-edit-link{display:inline-block;margin-top:16px;font:13px/1 var(--font-mono);text-transform:uppercase;letter-spacing:.08em;transition:color .2s}
+.b2b-edit-link:hover{color:var(--berry)}
 .portal-loading{font:14px/1.5 var(--font-mono);opacity:.45;padding:80px 0;text-align:center}
 .portal-edit-btn{margin-top:16px}
 .portal-inline-form{margin-top:16px}
@@ -327,8 +344,10 @@ header nav{gap:18px;font-size:12px}
 .portal-quicklinks-grid a:last-child{border-bottom:0;padding-left:0}
 .portal-addresses-grid{grid-template-columns:1fr}
 .portal-form-actions{flex-direction:column}
-.portal-business-grid{grid-template-columns:1fr}
-.portal-business-card{padding:24px 20px}
+.b2b-models-grid{grid-template-columns:1fr}
+.b2b-model-card{padding:24px 20px}
+.b2b-pricing-header,.b2b-pricing-row{grid-template-columns:1.2fr 1fr 1fr}
+.b2b-term-row{flex-direction:column;gap:4px}
 .portal-profile-row{flex-direction:column;gap:4px}
 }
 
