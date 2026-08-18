@@ -9,10 +9,10 @@ create sequence public.order_number_seq start with 1 increment by 1;
 create or replace function public.generate_order_number()
 returns text
 language sql
-stable
+volatile
 security definer set search_path = ''
 as $$
-  select 'GLOA-' || extract(year from now())::text || '-' ||
+  select 'GLOA-' || to_char(current_timestamp, 'YYYY') || '-' ||
          lpad(nextval('public.order_number_seq')::text, 6, '0');
 $$;
 
