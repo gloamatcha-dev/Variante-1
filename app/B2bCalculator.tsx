@@ -6,14 +6,16 @@ type OfferModel = { id: number; slug: string; label: string; discount_pct: numbe
 type ProductSize = { id: number; grams: number; label: string; price_per_kg_net: number; sort_order: number };
 
 /* ── Helpers ──────────────────────────────────────────────────────── */
+/** Format number as EUR with 2 decimals — display only, no rounding of source values */
 const fmtEur = (n: number) =>
   n.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const fmtNum = (n: number, decimals = 1) =>
   n.toLocaleString("de-DE", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 
+/** Full-precision package price — NO internal rounding */
 const calcPrice = (pricePerKg: number, grams: number, discountPct: number) =>
-  Math.round(pricePerKg * grams / 1000 * (1 - discountPct / 100) * 100) / 100;
+  pricePerKg * grams / 1000 * (1 - discountPct / 100);
 
 /** Parse German-style decimal input (comma or dot). Returns null for empty, NaN, negative, Infinity. */
 function parseDecimal(raw: string): number | null {
@@ -27,6 +29,23 @@ function parseDecimal(raw: string): number | null {
 function parsePositiveInt(raw: string): number | null {
   const n = Number(raw.trim());
   return Number.isFinite(n) && n > 0 && Number.isInteger(n) ? n : null;
+}
+
+/** Semantic diff label: "Ersparnis" when positive, "Mehrkosten" when negative */
+function DiffValue({ val, pct }: { val: number; pct?: number }) {
+  if (val > 0) return (
+    <span className="calc-positive">
+      <span className="calc-diff-tag">Ersparnis</span> {fmtEur(val)} €
+      {pct !== undefined && <span className="calc-pct"> ({fmtNum(pct)} %)</span>}
+    </span>
+  );
+  if (val < 0) return (
+    <span className="calc-negative">
+      <span className="calc-diff-tag">Mehrkosten</span> {fmtEur(Math.abs(val))} €
+      {pct !== undefined && <span className="calc-pct"> ({fmtNum(Math.abs(pct))} %)</span>}
+    </span>
+  );
+  return <span>±0,00 €</span>;
 }
 
 /* ── Component ───────────────────────────────────────────────────── */
@@ -68,10 +87,10 @@ export function B2bCalculator({
     const hasSale = salePrice !== null && salePrice > 0;
     const hasVolume = drinksPerMonth !== null && hasDrink;
 
-    /* Model-independent drink metrics */
-    const drinksPerKg = hasDrink ? 1000 / gramsPerDrink : null;
-    const drinksPerPackage = hasDrink ? selectedSize.grams / gramsPerDrink : null;
-    const revenuePerKg = hasDrink && hasSale ? (1000 / gramsPerDrink) * salePrice : null;
+    /* Model-independent drink metrics — only FULL drinks count */
+    const fullDrinksPerKg = hasDrink ? Math.floor(1000 / gramsPerDrink) : null;
+    const fullDrinksPerPackage = hasDrink ? Math.floor(selectedSize.grams / gramsPerDrink) : null;
+    const revenuePerKg = fullDrinksPerKg !== null && hasSale ? fullDrinksPerKg * salePrice : null;
     const monthlyConsumptionKg = hasVolume ? (drinksPerMonth * gramsPerDrink) / 1000 : null;
 
     /* Per-model rows */
@@ -126,15 +145,11 @@ export function B2bCalculator({
     });
 
     return {
-      modelRows, drinksPerKg, drinksPerPackage,
+      modelRows, fullDrinksPerKg, fullDrinksPerPackage,
       revenuePerKg, monthlyConsumptionKg,
       hasDrink, hasSale, hasVolume,
     };
   }, [models, sizes, selectedSize, currentPrice, gramsPerDrink, salePrice, drinksPerMonth]);
-
-  /** Format a difference value with +/- prefix and optional label */
-  const fmtDiff = (val: number) => `${val > 0 ? "+" : ""}${fmtEur(val)} €`;
-  const diffClass = (val: number) => val > 0 ? "calc-positive" : val < 0 ? "calc-negative" : "";
 
   return (
     <div className="calc">
@@ -190,8 +205,8 @@ export function B2bCalculator({
                 <span><strong>{r.model.label}</strong>{r.model.discount_pct > 0 && <span className="calc-discount"> −{r.model.discount_pct} %</span>}</span>
                 <span>{fmtEur(r.gloaPricePerKg)} €</span>
                 <span>{fmtEur(r.packagePrice)} €</span>
-                <span className={diffClass(r.diffPerKg)}>{fmtDiff(r.diffPerKg)} <span className="calc-pct">({fmtNum(Math.abs(r.diffPercent))} %)</span></span>
-                <span className={diffClass(r.diffPerPackage)}>{fmtDiff(r.diffPerPackage)}</span>
+                <span><DiffValue val={r.diffPerKg} pct={r.diffPercent} /></span>
+                <span><DiffValue val={r.diffPerPackage} /></span>
               </div>
             ))}
           </div>
@@ -203,8 +218,8 @@ export function B2bCalculator({
                 <p className="calc-card-title">{r.model.label}{r.model.discount_pct > 0 && <span className="calc-discount"> −{r.model.discount_pct} %</span>}</p>
                 <div className="calc-card-row"><span>GLOA / kg</span><span>{fmtEur(r.gloaPricePerKg)} €</span></div>
                 <div className="calc-card-row"><span>Paketpreis ({selectedSize!.label})</span><span>{fmtEur(r.packagePrice)} €</span></div>
-                <div className="calc-card-row"><span>Differenz / kg</span><span className={diffClass(r.diffPerKg)}>{fmtDiff(r.diffPerKg)} ({fmtNum(Math.abs(r.diffPercent))} %)</span></div>
-                <div className="calc-card-row"><span>Differenz / Gebinde</span><span className={diffClass(r.diffPerPackage)}>{fmtDiff(r.diffPerPackage)}</span></div>
+                <div className="calc-card-row"><span>Differenz / kg</span><DiffValue val={r.diffPerKg} pct={r.diffPercent} /></div>
+                <div className="calc-card-row"><span>Differenz / Gebinde</span><DiffValue val={r.diffPerPackage} /></div>
               </div>
             ))}
           </div>
@@ -217,8 +232,8 @@ export function B2bCalculator({
               <p className="eyebrow calc-section-label">GETRÄNKE-KALKULATION</p>
 
               <div className="calc-metrics">
-                <div className="calc-metric"><span>Getränke pro kg</span><strong>{fmtNum(results.drinksPerKg!, 0)}</strong></div>
-                <div className="calc-metric"><span>Getränke pro {selectedSize!.label}</span><strong>{fmtNum(results.drinksPerPackage!, 0)}</strong></div>
+                <div className="calc-metric"><span>Getränke pro kg</span><strong>{results.fullDrinksPerKg}</strong></div>
+                <div className="calc-metric"><span>Getränke pro {selectedSize!.label}</span><strong>{results.fullDrinksPerPackage}</strong></div>
                 {results.revenuePerKg !== null && (
                   <div className="calc-metric"><span>Netto-Umsatz aus 1 kg</span><strong>{fmtEur(results.revenuePerKg)} €</strong></div>
                 )}
@@ -242,7 +257,7 @@ export function B2bCalculator({
                       <span><strong>{r.model.label}</strong></span>
                       <span>{fmtEur(r.costPerDrinkGloa)} €</span>
                       <span>{fmtEur(r.costPerDrinkCurrent!)} €</span>
-                      <span className={diffClass(r.diffPerDrink!)}>{fmtDiff(r.diffPerDrink!)}</span>
+                      <span><DiffValue val={r.diffPerDrink!} /></span>
                       {r.materialSharePct !== null && <span>{fmtNum(r.materialSharePct)} %</span>}
                     </div>
                   );
@@ -258,7 +273,7 @@ export function B2bCalculator({
                       <p className="calc-card-title">{r.model.label}</p>
                       <div className="calc-card-row"><span>GLOA / Getränk</span><span>{fmtEur(r.costPerDrinkGloa)} €</span></div>
                       <div className="calc-card-row"><span>Aktuell / Getränk</span><span>{fmtEur(r.costPerDrinkCurrent!)} €</span></div>
-                      <div className="calc-card-row"><span>Differenz</span><span className={diffClass(r.diffPerDrink!)}>{fmtDiff(r.diffPerDrink!)}</span></div>
+                      <div className="calc-card-row"><span>Differenz</span><DiffValue val={r.diffPerDrink!} /></div>
                       {r.materialSharePct !== null && <div className="calc-card-row"><span>Rohwarenanteil</span><span>{fmtNum(r.materialSharePct)} %</span></div>}
                     </div>
                   );
@@ -308,8 +323,8 @@ export function B2bCalculator({
                       <span><strong>{r.model.label}</strong></span>
                       <span>{fmtEur(r.monthlyGloa)} €</span>
                       <span>{fmtEur(r.monthlyCurrent!)} €</span>
-                      <span className={diffClass(r.monthlyDiff!)}>{fmtDiff(r.monthlyDiff!)}</span>
-                      <span className={diffClass(r.yearlyDiff!)}>{fmtDiff(r.yearlyDiff!)}</span>
+                      <span><DiffValue val={r.monthlyDiff!} /></span>
+                      <span><DiffValue val={r.yearlyDiff!} /></span>
                     </div>
                   );
                 })}
@@ -324,8 +339,8 @@ export function B2bCalculator({
                       <p className="calc-card-title">{r.model.label}</p>
                       <div className="calc-card-row"><span>GLOA / Monat</span><span>{fmtEur(r.monthlyGloa)} €</span></div>
                       <div className="calc-card-row"><span>Aktuell / Monat</span><span>{fmtEur(r.monthlyCurrent!)} €</span></div>
-                      <div className="calc-card-row"><span>Differenz / Monat</span><span className={diffClass(r.monthlyDiff!)}>{fmtDiff(r.monthlyDiff!)}</span></div>
-                      <div className="calc-card-row"><span>Differenz / Jahr</span><span className={diffClass(r.yearlyDiff!)}>{fmtDiff(r.yearlyDiff!)}</span></div>
+                      <div className="calc-card-row"><span>Differenz / Monat</span><DiffValue val={r.monthlyDiff!} /></div>
+                      <div className="calc-card-row"><span>Differenz / Jahr</span><DiffValue val={r.yearlyDiff!} /></div>
                     </div>
                   );
                 })}
