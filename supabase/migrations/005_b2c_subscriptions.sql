@@ -16,13 +16,17 @@ create table public.b2c_subscription_plans (
   commitment_months   integer not null default 0
                       check (commitment_months >= 0),
 
-  billing_interval    text not null default 'monthly'
-                      check (billing_interval in ('monthly', 'bimonthly', 'quarterly', 'semiannual', 'annual')),
+  billing_interval_unit   text not null default 'month'
+                          check (billing_interval_unit in ('day', 'week', 'month', 'year')),
+  billing_interval_count  integer not null default 1
+                          check (billing_interval_count > 0),
 
-  delivery_interval   text not null default 'monthly'
-                      check (delivery_interval in ('weekly', 'biweekly', 'monthly', 'bimonthly', 'quarterly')),
+  delivery_interval_unit  text not null default 'month'
+                          check (delivery_interval_unit in ('day', 'week', 'month', 'year')),
+  delivery_interval_count integer not null default 1
+                          check (delivery_interval_count > 0),
 
-  is_active           boolean not null default true,
+  is_active           boolean not null default false,
   sort_order          integer not null default 0,
 
   created_at          timestamptz not null default now(),
@@ -109,9 +113,12 @@ create trigger set_subscriptions_updated_at
 -- RLS: own-user SELECT only
 alter table public.subscriptions enable row level security;
 
-create policy "Users read own subscriptions"
+create policy "Private users read own subscriptions"
   on public.subscriptions for select
-  using (auth.uid() = user_id);
+  using (
+    auth.uid() = user_id
+    and not public.is_business_user()
+  );
 
 -- No INSERT/UPDATE/DELETE policies for authenticated clients
 -- Subscriptions will be created server-side

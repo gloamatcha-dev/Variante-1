@@ -166,21 +166,23 @@ type SubscriptionItemRow = {
 };
 
 const SUB_STATUS_DE: Record<string, string> = {
-  pending: "Ausstehend",
+  pending: "Wird eingerichtet",
   active: "Aktiv",
   paused: "Pausiert",
-  cancelled: "Gekündigt",
+  cancelled: "Beendet",
 };
 
-const INTERVAL_DE: Record<string, string> = {
-  weekly: "Wöchentlich",
-  biweekly: "Alle 2 Wochen",
-  monthly: "Monatlich",
-  bimonthly: "Alle 2 Monate",
-  quarterly: "Vierteljährlich",
-  semiannual: "Halbjährlich",
-  annual: "Jährlich",
-};
+const UNIT_DE_PLURAL: Record<string, string> = { day: "Tage", week: "Wochen", month: "Monate", year: "Jahre" };
+
+function fmtInterval(unit?: string, count?: number): string {
+  if (!unit || !count) return "";
+  if (count === 1) {
+    const map: Record<string, string> = { day: "Täglich", week: "Wöchentlich", month: "Monatlich", year: "Jährlich" };
+    return map[unit] || "";
+  }
+  const plural = UNIT_DE_PLURAL[unit];
+  return plural ? `Alle ${count} ${plural}` : "";
+}
 
 const fmtCents = (cents: number) => (cents / 100).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
@@ -191,20 +193,30 @@ function PortalDashboard({ firstName, customerType }: { firstName: string; custo
   const [lastOrder, setLastOrder] = useState<OrderRow | null>(null);
   const [orderLoading, setOrderLoading] = useState(true);
   const [activeSub, setActiveSub] = useState<SubscriptionRow | null>(null);
+  const [nextDeliverySub, setNextDeliverySub] = useState<SubscriptionRow | null>(null);
   const [subLoading, setSubLoading] = useState(customerType === "private");
+  const [deliveryLoading, setDeliveryLoading] = useState(customerType === "private");
 
   useEffect(() => {
-    if (!supabase) { setOrderLoading(false); setSubLoading(false); return; }
+    if (!supabase) { setOrderLoading(false); setSubLoading(false); setDeliveryLoading(false); return; }
     supabase.from("orders").select("*").order("created_at", { ascending: false }).limit(1)
       .then(({ data }) => { setLastOrder(data?.[0] ?? null); setOrderLoading(false); });
     if (customerType === "private") {
+      // "DEIN ABO" — letztes aktives Abo
       supabase.from("subscriptions").select("*").eq("status", "active").order("created_at", { ascending: false }).limit(1)
         .then(({ data }) => { setActiveSub(data?.[0] ?? null); setSubLoading(false); });
+      // "NÄCHSTE LIEFERUNG" — nächste zukünftige Lieferung
+      supabase.from("subscriptions").select("*").eq("status", "active").not("next_delivery_at", "is", null).gte("next_delivery_at", new Date().toISOString()).order("next_delivery_at", { ascending: true }).limit(1)
+        .then(({ data }) => { setNextDeliverySub(data?.[0] ?? null); setDeliveryLoading(false); });
     }
   }, [customerType]);
 
-  const planName = activeSub?.plan_snapshot ? (activeSub.plan_snapshot as Record<string, string>).name || "Abo" : "Abo";
-  const deliveryInterval = activeSub?.plan_snapshot ? INTERVAL_DE[(activeSub.plan_snapshot as Record<string, string>).delivery_interval] || "" : "";
+  const getPlanName = (sub: SubscriptionRow | null) => sub?.plan_snapshot ? (sub.plan_snapshot as Record<string, string>).name || "Abo" : "Abo";
+  const getDeliveryInterval = (sub: SubscriptionRow | null) => {
+    if (!sub?.plan_snapshot) return "";
+    const ps = sub.plan_snapshot as Record<string, string | number>;
+    return fmtInterval(ps.delivery_interval_unit as string, ps.delivery_interval_count as number);
+  };
 
   return (
     <>
@@ -217,13 +229,13 @@ function PortalDashboard({ firstName, customerType }: { firstName: string; custo
         {customerType === "private" && (
           <section className="portal-dash-block portal-dash-wide">
             <p className="eyebrow">NÄCHSTE LIEFERUNG</p>
-            {subLoading ? (
+            {deliveryLoading ? (
               <p className="portal-empty">Laden…</p>
-            ) : activeSub?.next_delivery_at ? (
+            ) : nextDeliverySub?.next_delivery_at ? (
               <div className="portal-dash-order">
-                <div className="portal-dash-order-row"><span>{planName}</span><span>{fmtDate(activeSub.next_delivery_at)}</span></div>
-                {deliveryInterval && <div className="portal-dash-order-row"><span>{deliveryInterval}</span><strong>{fmtCents(activeSub.total_gross_cents)} €</strong></div>}
-                <a href={`/account/subscriptions/${activeSub.id}`} className="portal-dash-order-link">ABO ANSEHEN</a>
+                <div className="portal-dash-order-row"><span>{getPlanName(nextDeliverySub)}</span><span>{fmtDate(nextDeliverySub.next_delivery_at)}</span></div>
+                {getDeliveryInterval(nextDeliverySub) && <div className="portal-dash-order-row"><span>{getDeliveryInterval(nextDeliverySub)}</span><strong>{fmtCents(nextDeliverySub.total_gross_cents)} €</strong></div>}
+                <a href={`/account/subscriptions/${nextDeliverySub.id}`} className="portal-dash-order-link">ABO ANSEHEN</a>
               </div>
             ) : (
               <p className="portal-empty">Keine geplante Lieferung.</p>
@@ -253,12 +265,12 @@ function PortalDashboard({ firstName, customerType }: { firstName: string; custo
               <p className="portal-empty">Laden…</p>
             ) : activeSub ? (
               <div className="portal-dash-order">
-                <div className="portal-dash-order-row"><span>{planName}</span><span>{SUB_STATUS_DE[activeSub.status] || activeSub.status}</span></div>
-                <div className="portal-dash-order-row"><span>{deliveryInterval}</span><strong>{fmtCents(activeSub.total_gross_cents)} €</strong></div>
+                <div className="portal-dash-order-row"><span>{getPlanName(activeSub)}</span><span>{SUB_STATUS_DE[activeSub.status] || activeSub.status}</span></div>
+                {getDeliveryInterval(activeSub) && <div className="portal-dash-order-row"><span>{getDeliveryInterval(activeSub)}</span><strong>{fmtCents(activeSub.total_gross_cents)} €</strong></div>}
                 <a href={`/account/subscriptions/${activeSub.id}`} className="portal-dash-order-link">ABO ANSEHEN</a>
               </div>
             ) : (
-              <p className="portal-empty">Du hast aktuell kein aktives Abo.</p>
+              <p className="portal-empty">Du hast aktuell kein Abonnement.</p>
             )}
           </section>
         )}
@@ -466,7 +478,16 @@ function PortalSubscriptions() {
     supabase.from("subscriptions").select("*").order("created_at", { ascending: false })
       .then(({ data, error: err }) => {
         if (err) { setError("Deine Abos konnten gerade nicht geladen werden."); }
-        else { setSubs(data ?? []); }
+        else {
+          // active zuerst, dann restliche Status, innerhalb neueste zuerst
+          const sorted = [...(data ?? [])].sort((a, b) => {
+            const aActive = a.status === "active" ? 0 : 1;
+            const bActive = b.status === "active" ? 0 : 1;
+            if (aActive !== bActive) return aActive - bActive;
+            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+          });
+          setSubs(sorted);
+        }
         setLoading(false);
       });
   }, []);
@@ -485,8 +506,8 @@ function PortalSubscriptions() {
         <section className="portal-empty-state"><p>{error}</p></section>
       ) : subs.length === 0 ? (
         <section className="portal-empty-state">
-          <p>Du hast aktuell kein aktives Abo.</p>
-          <a className="cta" href="/shop">MATCHA ENTDECKEN</a>
+          <p>Du hast aktuell kein Abonnement.</p>
+          <a className="cta" href="/shop">ZUM SHOP</a>
         </section>
       ) : (
         <div className="sub-list">
@@ -545,9 +566,10 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
     </>
   );
 
-  const plan = sub.plan_snapshot as Record<string, string>;
+  const plan = sub.plan_snapshot as Record<string, string | number>;
   const ship = sub.shipping_address_snapshot as Record<string, string>;
   const bill = sub.billing_address_snapshot as Record<string, string>;
+  const deliveryLabel = fmtInterval(plan.delivery_interval_unit as string, plan.delivery_interval_count as number);
 
   return (
     <>
@@ -555,12 +577,12 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
 
       <section className="portal-page-head">
         <p className="eyebrow">ABO</p>
-        <h1>{plan.name || "Dein Abo"}</h1>
+        <h1>{(plan.name as string) || "Dein Abo"}</h1>
       </section>
 
       <div className="order-detail-meta">
         <div className="portal-profile-row"><span>Status</span><strong>{SUB_STATUS_DE[sub.status] || sub.status}</strong></div>
-        {plan.delivery_interval && <div className="portal-profile-row"><span>Lieferintervall</span><strong>{INTERVAL_DE[plan.delivery_interval] || plan.delivery_interval}</strong></div>}
+        {deliveryLabel && <div className="portal-profile-row"><span>Lieferintervall</span><strong>{deliveryLabel}</strong></div>}
         {sub.next_delivery_at && <div className="portal-profile-row"><span>Nächste Lieferung</span><strong>{fmtDate(sub.next_delivery_at)}</strong></div>}
         {sub.started_at && <div className="portal-profile-row"><span>Laufzeit seit</span><strong>{fmtDate(sub.started_at)}</strong></div>}
         {sub.current_period_start && sub.current_period_end && (
@@ -568,7 +590,7 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
         )}
         {sub.cancel_at_period_end && <div className="portal-profile-row"><span>Hinweis</span><strong>Endet zum Periodenende</strong></div>}
         {sub.paused_at && <div className="portal-profile-row"><span>Pausiert seit</span><strong>{fmtDate(sub.paused_at)}</strong></div>}
-        {sub.cancelled_at && <div className="portal-profile-row"><span>Gekündigt am</span><strong>{fmtDate(sub.cancelled_at)}</strong></div>}
+        {sub.cancelled_at && <div className="portal-profile-row"><span>Beendet am</span><strong>{fmtDate(sub.cancelled_at)}</strong></div>}
       </div>
 
       {/* ── Items ── */}
