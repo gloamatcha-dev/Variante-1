@@ -7,7 +7,7 @@ export type CartItem = {
   label: string;
   grams: number;
   purchaseType: "once";
-  unitPriceCents: number;
+  unitPriceCents: number; // DISPLAY CACHE ONLY - NOT authoritative for checkout
   quantity: number;
 };
 

@@ -2,7 +2,7 @@ import { GloaSite } from "../GloaSite";
 import type { Metadata } from "next";
 
 const seo:Record<string,[string,string]>={
- "shop":["Shop Matcha","GLOA Matcha aus Shizuoka. 20 g, 50 g, 100 g, 150 g. Ab 19,99 Euro."],
+ "shop":["Shop Matcha","GLOA Matcha aus Shizuoka. 30 g, 50 g, 100 g. Ab 19,99 Euro."],
  "our-matcha":["Unser Matcha","GLOA Matcha aus Shizuoka, Japan. Herkunft, Fakten und Zubereitung."],
  "about":["Über GLOA","Wer hinter GLOA steht, warum wir Matcha machen und wie du den Aufbau begleiten kannst."],
  "for-cafes":["GLOA for Cafés","Matcha aus Shizuoka für deine Karte. Potenzial berechnen oder Sample anfragen."],

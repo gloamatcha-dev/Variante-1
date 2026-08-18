@@ -2,6 +2,17 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 
+// Raw database variant with nullable fields
+type DbCatalogVariant = {
+  id: string;
+  sku: string;
+  label: string;
+  size_grams: number | null;
+  price_gross_cents: number | null;
+  sort_order: number;
+};
+
+// Validated purchasable variant
 export type CatalogVariant = {
   id: string;
   sku: string;
@@ -62,8 +73,15 @@ export function useCatalog(slug: string): CatalogState {
         return;
       }
 
+      // Validate and filter to only purchasable variants
+      const purchasable: CatalogVariant[] = (variants || [])
+        .filter((v: DbCatalogVariant): v is CatalogVariant =>
+          typeof v.size_grams === "number" && v.size_grams > 0 &&
+          typeof v.price_gross_cents === "number" && v.price_gross_cents > 0
+        );
+
       setState({
-        product: { ...p, variants: variants || [] },
+        product: { ...p, variants: purchasable },
         loading: false,
         error: null,
       });

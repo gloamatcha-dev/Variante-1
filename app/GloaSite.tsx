@@ -29,9 +29,11 @@ const communityItems:CommunityItem[]=[{id:"1",image:"/img/gloa-cafe.png",alt:"Ma
 function Placeholder({children=""}:{children?:string}){return <span className="placeholder-label">{children}</span>}
 function ProductVisual(){return <div className="product-visual lime"><img src="/img/gloa-hero-packaging.png" alt="GLOA Matcha Verpackung" loading="lazy"/></div>}
 function ProductCard({onAdd}:{onAdd:()=>void}){
-const {product,loading}=useCatalog("matcha");
+const {product,loading,error}=useCatalog("matcha");
 const {addItem}=useCart();
-if(loading||!product||!product.variants.length)return <article className="product-card"><a href="/shop"><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>Laden…</strong></div></a></article>;
+if(loading)return <article className="product-card"><a href="/shop"><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>Laden…</strong></div></a></article>;
+if(error||!product)return <article className="product-card"><a href="/shop"><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>Nicht verfügbar</strong></div></a></article>;
+if(!product.variants.length)return <article className="product-card"><a href="/shop"><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>Demnächst</strong></div></a></article>;
 const dv=product.variants[0];const lowestCents=Math.min(...product.variants.map(v=>v.price_gross_cents));
 const handleAdd=()=>{addItem({productId:product.id,variantId:dv.id,label:dv.label,grams:dv.size_grams,purchaseType:"once",unitPriceCents:dv.price_gross_cents});track("add_to_cart");onAdd()};
 return <article className="product-card"><a href="/shop" onClick={()=>track("product_view")}><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>AB {fmtCents(lowestCents)} €</strong></div></a><button className="add" onClick={handleAdd}>In den Warenkorb <span>+</span></button></article>}
@@ -105,7 +107,7 @@ return <main className="shop-page">
 <p className="shop-product-price">{fmtCents(v.price_gross_cents)} €</p>
 <p className="shop-product-per100g">{fmtCents(per100)} € / 100 g</p>
 
-<button className="cta shop-cta" onClick={handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
+<button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="#newsletter":handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
 </div></section>
 
 <section className="shop-details"><div className="shop-details-inner"><p className="eyebrow">PRODUKTDETAILS</p><dl><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>VERWENDUNG</dt><dd>Latte · Iced · Pur</dd></div><div><dt>ERNTE</dt><dd>2. und 3. Pflückung</dd></div><div><dt>MINDESTHALTBARKEIT</dt><dd>3 Jahre</dd></div><div><dt>LAGERUNG</dt><dd>Kühl und trocken</dd></div><div><dt>GROESSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div></dl><a className="shop-details-link" href="/our-matcha" onClick={()=>track("shop_to_matcha")}>MEHR ÜBER UNSEREN MATCHA →</a></div></section>
@@ -137,7 +139,7 @@ return <main className="pdp">
 <p className="pdp-price">{fmtCents(v.price_gross_cents)} €</p>
 <p className="pdp-per100g">{fmtCents(per100)} € / 100 g</p>
 
-<button className="cta shop-cta" onClick={handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
+<button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="#newsletter":handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
 </div></section>
 
 <section className="pdp-facts"><div><p className="eyebrow">WHAT WE KNOW</p><h2>Clear facts.<br/>Nothing invented.</h2></div><dl><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>VERWENDUNG</dt><dd>Latte · Iced · Pur</dd></div><div><dt>LAGERUNG</dt><dd>{PRODUCT.storage}</dd></div><div><dt>GROESSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div></dl></section>
