@@ -303,6 +303,37 @@
 .portal-badge{font:11px/1 var(--font-mono);text-transform:uppercase;letter-spacing:.06em;padding:4px 8px;border:1px solid var(--line);opacity:.6}
 .portal-address-delete{border:0;background:none;font:12px var(--font-mono);text-transform:uppercase;letter-spacing:.06em;cursor:pointer;opacity:.4;transition:opacity .2s;margin-left:auto}
 .portal-address-delete:hover{opacity:1;color:var(--berry)}
+/* ── Order List ── */
+.order-list{border-top:2px solid var(--ink)}
+.order-list-header{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;padding:14px 0;border-bottom:1px solid var(--line);font:600 12px/1 var(--font-mono);letter-spacing:.1em;text-transform:uppercase}
+.order-list-row{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;padding:18px 0;border-bottom:1px solid var(--line);font:14px/1.4 var(--font-mono);text-decoration:none;transition:background .15s}
+.order-list-row:hover{background:rgba(23,70,209,.04)}
+.order-list-number{font-weight:600}
+.order-list-total{font-weight:600}
+/* ── Order Detail ── */
+.portal-back-link{display:inline-block;margin-bottom:20px;font:13px/1 var(--font-mono);text-transform:uppercase;letter-spacing:.08em;transition:color .2s}
+.portal-back-link:hover{color:var(--berry)}
+.order-detail-meta{max-width:620px;margin-bottom:40px}
+.order-detail-section{border-top:1px solid var(--line);padding:30px 0}
+.order-detail-section .eyebrow{margin-bottom:16px}
+.order-items-list{max-width:700px}
+.order-item-row{display:grid;grid-template-columns:1fr auto auto auto;gap:20px;padding:14px 0;border-bottom:1px solid rgba(0,0,0,.06);font:14px/1.4 var(--font-mono);align-items:baseline}
+.order-item-name{display:flex;flex-direction:column;gap:2px}
+.order-item-variant{font-size:12px;opacity:.5}
+.order-item-qty{opacity:.6}
+.order-item-unit{opacity:.6}
+.order-item-total{font-weight:600}
+.order-detail-addresses{display:grid;grid-template-columns:1fr 1fr;gap:0}
+.order-detail-addresses .order-detail-section{border-top:1px solid var(--line)}
+.order-totals{max-width:400px}
+.order-total-final{border-top:2px solid var(--ink);padding-top:14px;margin-top:4px}
+.order-total-final span,.order-total-final strong{font-size:16px}
+.portal-dash-order{display:flex;flex-direction:column;gap:8px}
+.portal-dash-order-row{display:flex;justify-content:space-between;font:14px/1.4 var(--font-mono)}
+.portal-dash-order-row span{opacity:.6}
+.portal-dash-order-row strong{opacity:1}
+.portal-dash-order-link{font:600 12px/1 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;margin-top:8px;transition:color .2s}
+.portal-dash-order-link:hover{color:var(--berry)}
 
 /* ── Contact Page ── */
 .contact-main{background:var(--cream)}
@@ -349,5 +380,10 @@ header nav{gap:18px;font-size:12px}
 .b2b-pricing-header,.b2b-pricing-row{grid-template-columns:1.2fr 1fr 1fr}
 .b2b-term-row{flex-direction:column;gap:4px}
 .portal-profile-row{flex-direction:column;gap:4px}
+.order-list-header{display:none}
+.order-list-row{grid-template-columns:1fr 1fr;gap:8px;padding:16px 0}
+.order-item-row{grid-template-columns:1fr auto;gap:8px}
+.order-item-qty,.order-item-unit{display:none}
+.order-detail-addresses{grid-template-columns:1fr}
 }
 

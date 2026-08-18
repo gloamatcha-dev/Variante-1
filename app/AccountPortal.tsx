@@ -6,7 +6,7 @@ import { useAuth } from "../lib/auth";
 import type { AddressRow } from "../lib/auth";
 import { supabase } from "../lib/supabase";
 
-type PortalPage = "dashboard" | "orders" | "subscriptions" | "addresses" | "profile" | "business";
+type PortalPage = "dashboard" | "orders" | "subscriptions" | "addresses" | "profile" | "business" | "order-detail";
 
 const NAV: { key: PortalPage; label: string; b2bOnly?: boolean }[] = [
   { key: "dashboard", label: "Übersicht" },
@@ -17,7 +17,7 @@ const NAV: { key: PortalPage; label: string; b2bOnly?: boolean }[] = [
   { key: "business", label: "B2B", b2bOnly: true },
 ];
 
-export function AccountPortal({ page }: { page: PortalPage }) {
+export function AccountPortal({ page, orderId }: { page: PortalPage; orderId?: string }) {
   const { user, profile, loading, signOut } = useAuth();
   const customerType: CustomerType = profile?.customer_type ?? "private";
 
@@ -49,7 +49,7 @@ export function AccountPortal({ page }: { page: PortalPage }) {
     <main className="portal">
       <nav className="portal-nav">
         {navItems.map(n => (
-          <a key={n.key} href={`/account/${n.key}`} className={page === n.key ? "active" : ""}>{n.label}</a>
+          <a key={n.key} href={`/account/${n.key}`} className={page === n.key || (n.key === "orders" && page === "order-detail") ? "active" : ""}>{n.label}</a>
         ))}
         <span className="portal-nav-spacer" />
         <button className="portal-logout" onClick={handleLogout}>Abmelden</button>
@@ -58,6 +58,7 @@ export function AccountPortal({ page }: { page: PortalPage }) {
       <div className="portal-content">
         {page === "dashboard" && <PortalDashboard firstName={firstName} customerType={customerType} />}
         {page === "orders" && <PortalOrders />}
+        {page === "order-detail" && <OrderDetail orderId={orderId!} />}
         {page === "subscriptions" && <PortalSubscriptions />}
         {page === "addresses" && <PortalAddresses />}
         {page === "profile" && <PortalProfile />}
@@ -67,9 +68,69 @@ export function AccountPortal({ page }: { page: PortalPage }) {
   );
 }
 
+// ── Order Types ───────────────────────────────────────────────────────
+
+type OrderRow = {
+  id: string;
+  order_number: string;
+  customer_type: string;
+  status: string;
+  payment_status: string;
+  fulfillment_status: string;
+  currency: string;
+  customer_snapshot: Record<string, unknown>;
+  shipping_address_snapshot: Record<string, unknown>;
+  billing_address_snapshot: Record<string, unknown>;
+  subtotal_net_cents: number;
+  subtotal_gross_cents: number;
+  discount_total_cents: number;
+  shipping_net_cents: number;
+  shipping_gross_cents: number;
+  tax_total_cents: number;
+  total_net_cents: number;
+  total_gross_cents: number;
+  placed_at: string | null;
+  created_at: string;
+};
+
+type OrderItemRow = {
+  id: string;
+  order_id: string;
+  product_name: string;
+  variant_name: string | null;
+  quantity: number;
+  unit_price_net_cents: number;
+  unit_price_gross_cents: number;
+  tax_rate_percent: number | null;
+  line_total_net_cents: number;
+  line_total_gross_cents: number;
+};
+
+const STATUS_DE: Record<string, string> = {
+  pending: "Eingegangen",
+  confirmed: "Bestätigt",
+  processing: "In Bearbeitung",
+  shipped: "Versendet",
+  delivered: "Zugestellt",
+  cancelled: "Storniert",
+  refunded: "Erstattet",
+};
+
+const fmtCents = (cents: number) => (cents / 100).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
+
 // ── Dashboard ──────────────────────────────────────────────────────────
 
 function PortalDashboard({ firstName, customerType }: { firstName: string; customerType: CustomerType }) {
+  const [lastOrder, setLastOrder] = useState<OrderRow | null>(null);
+  const [orderLoading, setOrderLoading] = useState(true);
+
+  useEffect(() => {
+    if (!supabase) { setOrderLoading(false); return; }
+    supabase.from("orders").select("*").order("created_at", { ascending: false }).limit(1)
+      .then(({ data }) => { setLastOrder(data?.[0] ?? null); setOrderLoading(false); });
+  }, []);
+
   return (
     <>
       <section className="portal-greeting">
@@ -85,7 +146,17 @@ function PortalDashboard({ firstName, customerType }: { firstName: string; custo
 
         <section className="portal-dash-block">
           <p className="eyebrow">LETZTE BESTELLUNG</p>
-          <p className="portal-empty">Du hast noch keine Bestellung.</p>
+          {orderLoading ? (
+            <p className="portal-empty">Laden…</p>
+          ) : lastOrder ? (
+            <div className="portal-dash-order">
+              <div className="portal-dash-order-row"><span>{lastOrder.order_number}</span><span>{fmtDate(lastOrder.placed_at || lastOrder.created_at)}</span></div>
+              <div className="portal-dash-order-row"><span>{STATUS_DE[lastOrder.status] || lastOrder.status}</span><strong>{fmtCents(lastOrder.customer_type === "business" ? lastOrder.total_net_cents : lastOrder.total_gross_cents)} €{lastOrder.customer_type === "business" ? " netto" : ""}</strong></div>
+              <a href={`/account/orders/${lastOrder.id}`} className="portal-dash-order-link">BESTELLUNG ANSEHEN</a>
+            </div>
+          ) : (
+            <p className="portal-empty">Du hast noch keine Bestellung.</p>
+          )}
         </section>
 
         <section className="portal-dash-block">
@@ -111,6 +182,22 @@ function PortalDashboard({ firstName, customerType }: { firstName: string; custo
 // ── Bestellungen ───────────────────────────────────────────────────────
 
 function PortalOrders() {
+  const { profile } = useAuth();
+  const isBusiness = profile?.customer_type === "business";
+  const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!supabase) { setLoading(false); return; }
+    supabase.from("orders").select("*").order("created_at", { ascending: false })
+      .then(({ data, error: err }) => {
+        if (err) { setError("Deine Bestellungen konnten gerade nicht geladen werden."); }
+        else { setOrders(data ?? []); }
+        setLoading(false);
+      });
+  }, []);
+
   return (
     <>
       <section className="portal-page-head">
@@ -118,9 +205,151 @@ function PortalOrders() {
         <h1>Bestellungen.</h1>
         <p className="portal-page-lead">Hier findest du deine bisherigen Bestellungen.</p>
       </section>
-      <section className="portal-empty-state">
-        <p>Du hast noch keine Bestellungen.</p>
-        <a className="cta" href="/shop">ZUM SHOP</a>
+
+      {loading ? (
+        <p className="portal-loading">Laden…</p>
+      ) : error ? (
+        <section className="portal-empty-state"><p>{error}</p></section>
+      ) : orders.length === 0 ? (
+        <section className="portal-empty-state">
+          <p>Du hast noch keine Bestellungen.</p>
+          <a className="cta" href="/shop">ZUM SHOP</a>
+        </section>
+      ) : (
+        <div className="order-list">
+          <div className="order-list-header">
+            <span>Bestellung</span>
+            <span>Datum</span>
+            <span>Status</span>
+            <span>Betrag</span>
+          </div>
+          {orders.map(o => (
+            <a key={o.id} href={`/account/orders/${o.id}`} className="order-list-row">
+              <span className="order-list-number">{o.order_number}</span>
+              <span>{fmtDate(o.placed_at || o.created_at)}</span>
+              <span>{STATUS_DE[o.status] || o.status}</span>
+              <span className="order-list-total">{fmtCents(isBusiness ? o.total_net_cents : o.total_gross_cents)} €{isBusiness ? " netto" : ""}</span>
+            </a>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+// ── Bestelldetail ─────────────────────────────────────────────────────
+
+function OrderDetail({ orderId }: { orderId: string }) {
+  const [order, setOrder] = useState<OrderRow | null>(null);
+  const [items, setItems] = useState<OrderItemRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+
+  useEffect(() => {
+    if (!supabase) { setLoading(false); setNotFound(true); return; }
+    Promise.all([
+      supabase.from("orders").select("*").eq("id", orderId).maybeSingle(),
+      supabase.from("order_items").select("*").eq("order_id", orderId).order("created_at"),
+    ]).then(([oRes, iRes]) => {
+      if (!oRes.data) { setNotFound(true); }
+      else { setOrder(oRes.data); setItems(iRes.data ?? []); }
+      setLoading(false);
+    });
+  }, [orderId]);
+
+  if (loading) return <p className="portal-loading">Laden…</p>;
+
+  if (notFound || !order) return (
+    <>
+      <section className="portal-page-head">
+        <p className="eyebrow">BESTELLUNG</p>
+        <h1>Bestellung nicht gefunden.</h1>
+      </section>
+      <a href="/account/orders" className="portal-back-link">&larr; Zurück zu Bestellungen</a>
+    </>
+  );
+
+  const isBusiness = order.customer_type === "business";
+  const ship = order.shipping_address_snapshot as Record<string, string>;
+  const bill = order.billing_address_snapshot as Record<string, string>;
+
+  return (
+    <>
+      <a href="/account/orders" className="portal-back-link">&larr; Bestellungen</a>
+
+      <section className="portal-page-head">
+        <p className="eyebrow">BESTELLUNG {order.order_number}</p>
+        <h1>{order.order_number}</h1>
+      </section>
+
+      <div className="order-detail-meta">
+        <div className="portal-profile-row"><span>Datum</span><strong>{fmtDate(order.placed_at || order.created_at)}</strong></div>
+        <div className="portal-profile-row"><span>Status</span><strong>{STATUS_DE[order.status] || order.status}</strong></div>
+      </div>
+
+      {/* ── Items ── */}
+      {items.length > 0 && (
+        <section className="order-detail-section">
+          <p className="eyebrow">ARTIKEL</p>
+          <div className="order-items-list">
+            {items.map(item => (
+              <div key={item.id} className="order-item-row">
+                <div className="order-item-name">
+                  <strong>{item.product_name}</strong>
+                  {item.variant_name && <span className="order-item-variant">{item.variant_name}</span>}
+                </div>
+                <span className="order-item-qty">{item.quantity}×</span>
+                <span className="order-item-unit">{fmtCents(isBusiness ? item.unit_price_net_cents : item.unit_price_gross_cents)} €</span>
+                <span className="order-item-total">{fmtCents(isBusiness ? item.line_total_net_cents : item.line_total_gross_cents)} €</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ── Addresses ── */}
+      <div className="order-detail-addresses">
+        <section className="order-detail-section">
+          <p className="eyebrow">LIEFERADRESSE</p>
+          <div className="portal-address-display">
+            <p>{ship.first_name} {ship.last_name}</p>
+            {ship.company && <p>{ship.company}</p>}
+            <p>{ship.street} {ship.house_number}</p>
+            <p>{ship.zip} {ship.city}</p>
+            <p>{ship.country}</p>
+          </div>
+        </section>
+        <section className="order-detail-section">
+          <p className="eyebrow">RECHNUNGSADRESSE</p>
+          <div className="portal-address-display">
+            <p>{bill.first_name} {bill.last_name}</p>
+            {bill.company && <p>{bill.company}</p>}
+            <p>{bill.street} {bill.house_number}</p>
+            <p>{bill.zip} {bill.city}</p>
+            <p>{bill.country}</p>
+          </div>
+        </section>
+      </div>
+
+      {/* ── Totals ── */}
+      <section className="order-detail-section">
+        <p className="eyebrow">SUMME</p>
+        <div className="order-totals">
+          <div className="portal-profile-row"><span>Zwischensumme</span><strong>{fmtCents(isBusiness ? order.subtotal_net_cents : order.subtotal_gross_cents)} €</strong></div>
+          {order.discount_total_cents > 0 && (
+            <div className="portal-profile-row"><span>Rabatt</span><strong>&minus;{fmtCents(order.discount_total_cents)} €</strong></div>
+          )}
+          {(order.shipping_net_cents > 0 || order.shipping_gross_cents > 0) && (
+            <div className="portal-profile-row"><span>Versand</span><strong>{fmtCents(isBusiness ? order.shipping_net_cents : order.shipping_gross_cents)} €</strong></div>
+          )}
+          {order.tax_total_cents > 0 && (
+            <div className="portal-profile-row"><span>MwSt.</span><strong>{fmtCents(order.tax_total_cents)} €</strong></div>
+          )}
+          <div className="portal-profile-row order-total-final">
+            <span>Gesamt{isBusiness ? " netto" : ""}</span>
+            <strong>{fmtCents(isBusiness ? order.total_net_cents : order.total_gross_cents)} €</strong>
+          </div>
+        </div>
       </section>
     </>
   );
