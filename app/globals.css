@@ -336,6 +336,14 @@
 .sub-list-row:hover{background:rgba(23,70,209,.04)}
 .sub-list-name{font-weight:600}
 .sub-list-total{font-weight:600}
+
+/* ── Supply List ── */
+.supply-list{border-top:2px solid var(--ink)}
+.supply-list-header{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;padding:14px 0;border-bottom:1px solid var(--line);font:600 12px/1 var(--font-mono);letter-spacing:.1em;text-transform:uppercase}
+.supply-list-row{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;padding:18px 0;border-bottom:1px solid var(--line);font:14px/1.4 var(--font-mono);text-decoration:none;transition:background .15s}
+.supply-list-row:hover{background:rgba(23,70,209,.04)}
+.supply-list-name{font-weight:600}
+.supply-list-total{font-weight:600}
 .portal-dash-order{display:flex;flex-direction:column;gap:8px}
 .portal-dash-order-row{display:flex;justify-content:space-between;font:14px/1.4 var(--font-mono)}
 .portal-dash-order-row span{opacity:.6}
@@ -395,5 +403,7 @@ header nav{gap:18px;font-size:12px}
 .order-detail-addresses{grid-template-columns:1fr}
 .sub-list-header{display:none}
 .sub-list-row{grid-template-columns:1fr 1fr;gap:8px;padding:16px 0}
+.supply-list-header{display:none}
+.supply-list-row{grid-template-columns:1fr 1fr;gap:8px;padding:16px 0}
 }
 

@@ -6,7 +6,7 @@ import { useAuth } from "../lib/auth";
 import type { AddressRow } from "../lib/auth";
 import { supabase } from "../lib/supabase";
 
-type PortalPage = "dashboard" | "orders" | "subscriptions" | "addresses" | "profile" | "business" | "order-detail" | "subscription-detail";
+type PortalPage = "dashboard" | "orders" | "subscriptions" | "addresses" | "profile" | "business" | "order-detail" | "subscription-detail" | "supply-detail";
 
 const NAV: { key: PortalPage; label: string; b2bOnly?: boolean; privateOnly?: boolean }[] = [
   { key: "dashboard", label: "Übersicht" },
@@ -17,7 +17,7 @@ const NAV: { key: PortalPage; label: string; b2bOnly?: boolean; privateOnly?: bo
   { key: "business", label: "B2B", b2bOnly: true },
 ];
 
-export function AccountPortal({ page, orderId, subscriptionId }: { page: PortalPage; orderId?: string; subscriptionId?: string }) {
+export function AccountPortal({ page, orderId, subscriptionId, supplyId }: { page: PortalPage; orderId?: string; subscriptionId?: string; supplyId?: string }) {
   const { user, profile, loading, signOut } = useAuth();
   const customerType: CustomerType = profile?.customer_type ?? "private";
 
@@ -28,7 +28,7 @@ export function AccountPortal({ page, orderId, subscriptionId }: { page: PortalP
   }
 
   // Business-only page guard
-  if (!loading && page === "business" && customerType !== "business") {
+  if (!loading && (page === "business" || page === "supply-detail") && customerType !== "business") {
     if (typeof window !== "undefined") window.location.href = "/account/dashboard";
     return null;
   }
@@ -55,7 +55,7 @@ export function AccountPortal({ page, orderId, subscriptionId }: { page: PortalP
     <main className="portal">
       <nav className="portal-nav">
         {navItems.map(n => (
-          <a key={n.key} href={`/account/${n.key}`} className={page === n.key || (n.key === "orders" && page === "order-detail") || (n.key === "subscriptions" && page === "subscription-detail") ? "active" : ""}>{n.label}</a>
+          <a key={n.key} href={`/account/${n.key}`} className={page === n.key || (n.key === "orders" && page === "order-detail") || (n.key === "subscriptions" && page === "subscription-detail") || (n.key === "business" && page === "supply-detail") ? "active" : ""}>{n.label}</a>
         ))}
         <span className="portal-nav-spacer" />
         <button className="portal-logout" onClick={handleLogout}>Abmelden</button>
@@ -70,6 +70,7 @@ export function AccountPortal({ page, orderId, subscriptionId }: { page: PortalP
         {page === "addresses" && <PortalAddresses />}
         {page === "profile" && <PortalProfile />}
         {page === "business" && <PortalBusiness />}
+        {page === "supply-detail" && <SupplyDetail supplyId={supplyId!} />}
       </div>
     </main>
   );
@@ -184,6 +185,63 @@ function fmtInterval(unit?: string, count?: number): string {
   return plural ? `Alle ${count} ${plural}` : "";
 }
 
+// ── B2B Supply Types ──────────────────────────────────────────────────
+
+type SupplyAgreementRow = {
+  id: string;
+  customer_type: string;
+  offer_model_id: number | null;
+  status: string;
+  currency: string;
+  offer_model_snapshot: Record<string, unknown>;
+  business_snapshot: Record<string, unknown>;
+  customer_snapshot: Record<string, unknown>;
+  shipping_address_snapshot: Record<string, unknown>;
+  billing_address_snapshot: Record<string, unknown>;
+  subtotal_net_cents: number;
+  subtotal_gross_cents: number;
+  discount_total_cents: number;
+  shipping_net_cents: number;
+  shipping_gross_cents: number;
+  tax_total_cents: number;
+  total_net_cents: number;
+  total_gross_cents: number;
+  billing_interval_unit: string | null;
+  billing_interval_count: number | null;
+  delivery_interval_unit: string | null;
+  delivery_interval_count: number | null;
+  commitment_months: number | null;
+  started_at: string | null;
+  commitment_end_at: string | null;
+  next_delivery_at: string | null;
+  ended_at: string | null;
+  created_at: string;
+};
+
+type SupplyItemRow = {
+  id: string;
+  supply_agreement_id: string;
+  product_name: string;
+  variant_name: string | null;
+  grams: number | null;
+  quantity: number;
+  base_unit_price_net_cents: number;
+  discount_percent: number | null;
+  unit_price_net_cents: number;
+  unit_price_gross_cents: number;
+  tax_rate_percent: number | null;
+  line_total_net_cents: number;
+  line_total_gross_cents: number;
+};
+
+const SUPPLY_STATUS_DE: Record<string, string> = {
+  pending: "Wird eingerichtet",
+  active: "Aktiv",
+  paused: "Pausiert",
+  cancelled: "Beendet",
+  completed: "Abgeschlossen",
+};
+
 const fmtCents = (cents: number) => (cents / 100).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
 
@@ -195,19 +253,23 @@ function PortalDashboard({ firstName, customerType }: { firstName: string; custo
   const [activeSub, setActiveSub] = useState<SubscriptionRow | null>(null);
   const [nextDeliverySub, setNextDeliverySub] = useState<SubscriptionRow | null>(null);
   const [subLoading, setSubLoading] = useState(customerType === "private");
-  const [deliveryLoading, setDeliveryLoading] = useState(customerType === "private");
+  const [deliveryLoading, setDeliveryLoading] = useState(true);
+  const [nextB2bSupply, setNextB2bSupply] = useState<SupplyAgreementRow | null>(null);
 
   useEffect(() => {
     if (!supabase) { setOrderLoading(false); setSubLoading(false); setDeliveryLoading(false); return; }
     supabase.from("orders").select("*").order("created_at", { ascending: false }).limit(1)
       .then(({ data }) => { setLastOrder(data?.[0] ?? null); setOrderLoading(false); });
     if (customerType === "private") {
-      // "DEIN ABO" — letztes aktives Abo
       supabase.from("subscriptions").select("*").eq("status", "active").order("created_at", { ascending: false }).limit(1)
         .then(({ data }) => { setActiveSub(data?.[0] ?? null); setSubLoading(false); });
-      // "NÄCHSTE LIEFERUNG" — nächste zukünftige Lieferung
       supabase.from("subscriptions").select("*").eq("status", "active").not("next_delivery_at", "is", null).gte("next_delivery_at", new Date().toISOString()).order("next_delivery_at", { ascending: true }).limit(1)
         .then(({ data }) => { setNextDeliverySub(data?.[0] ?? null); setDeliveryLoading(false); });
+    } else if (customerType === "business") {
+      supabase.from("b2b_supply_agreements").select("*").eq("status", "active").not("next_delivery_at", "is", null).gte("next_delivery_at", new Date().toISOString()).order("next_delivery_at", { ascending: true }).limit(1)
+        .then(({ data }) => { setNextB2bSupply(data?.[0] ?? null); setDeliveryLoading(false); });
+    } else {
+      setDeliveryLoading(false);
     }
   }, [customerType]);
 
@@ -236,6 +298,23 @@ function PortalDashboard({ firstName, customerType }: { firstName: string; custo
                 <div className="portal-dash-order-row"><span>{getPlanName(nextDeliverySub)}</span><span>{fmtDate(nextDeliverySub.next_delivery_at)}</span></div>
                 {getDeliveryInterval(nextDeliverySub) && <div className="portal-dash-order-row"><span>{getDeliveryInterval(nextDeliverySub)}</span><strong>{fmtCents(nextDeliverySub.total_gross_cents)} €</strong></div>}
                 <a href={`/account/subscriptions/${nextDeliverySub.id}`} className="portal-dash-order-link">ABO ANSEHEN</a>
+              </div>
+            ) : (
+              <p className="portal-empty">Keine geplante Lieferung.</p>
+            )}
+          </section>
+        )}
+
+        {customerType === "business" && (
+          <section className="portal-dash-block portal-dash-wide">
+            <p className="eyebrow">NÄCHSTE LIEFERUNG</p>
+            {deliveryLoading ? (
+              <p className="portal-empty">Laden…</p>
+            ) : nextB2bSupply?.next_delivery_at ? (
+              <div className="portal-dash-order">
+                <div className="portal-dash-order-row"><span>{(nextB2bSupply.offer_model_snapshot as Record<string, string>).label || "Belieferung"}</span><span>{fmtDate(nextB2bSupply.next_delivery_at)}</span></div>
+                {fmtInterval(nextB2bSupply.delivery_interval_unit ?? undefined, nextB2bSupply.delivery_interval_count ?? undefined) && <div className="portal-dash-order-row"><span>{fmtInterval(nextB2bSupply.delivery_interval_unit ?? undefined, nextB2bSupply.delivery_interval_count ?? undefined)}</span><strong>{fmtCents(nextB2bSupply.total_net_cents)} € netto</strong></div>}
+                <a href={`/account/business/supply/${nextB2bSupply.id}`} className="portal-dash-order-link">BELIEFERUNG ANSEHEN</a>
               </div>
             ) : (
               <p className="portal-empty">Keine geplante Lieferung.</p>
@@ -913,10 +992,13 @@ function PortalBusiness() {
   const [models, setModels] = useState<OfferModel[]>([]);
   const [sizes, setSizes] = useState<ProductSize[]>([]);
   const [terms, setTerms] = useState<GeneralTerm[]>([]);
+  const [agreements, setAgreements] = useState<SupplyAgreementRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [supplyLoading, setSupplyLoading] = useState(true);
+  const [supplyError, setSupplyError] = useState("");
 
   useEffect(() => {
-    if (!supabase) { setLoading(false); return; }
+    if (!supabase) { setLoading(false); setSupplyLoading(false); return; }
     Promise.all([
       supabase.from("b2b_offer_models").select("*").order("sort_order"),
       supabase.from("b2b_product_sizes").select("*").order("sort_order"),
@@ -927,6 +1009,20 @@ function PortalBusiness() {
       setTerms(t.data ?? []);
       setLoading(false);
     });
+    supabase.from("b2b_supply_agreements").select("*").order("created_at", { ascending: false })
+      .then(({ data, error: err }) => {
+        if (err) { setSupplyError("Deine Belieferung konnte gerade nicht geladen werden."); }
+        else {
+          const sorted = [...(data ?? [])].sort((a, b) => {
+            const aActive = a.status === "active" ? 0 : 1;
+            const bActive = b.status === "active" ? 0 : 1;
+            if (aActive !== bActive) return aActive - bActive;
+            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+          });
+          setAgreements(sorted);
+        }
+        setSupplyLoading(false);
+      });
   }, []);
 
   if (loading) return <p className="portal-loading">Laden…</p>;
@@ -937,6 +1033,38 @@ function PortalBusiness() {
         <p className="eyebrow">B2B</p>
         <h1>B2B bei GLOA.</h1>
         <p className="portal-page-lead">Preise, Bezugsmodelle und Konditionen für dein Unternehmen.</p>
+      </section>
+
+      {/* ── Supply Agreements ── */}
+      <section className="b2b-section">
+        <p className="eyebrow">BELIEFERUNG</p>
+        {supplyLoading ? (
+          <p className="portal-empty">Laden…</p>
+        ) : supplyError ? (
+          <p className="portal-empty">{supplyError}</p>
+        ) : agreements.length === 0 ? (
+          <p className="portal-empty">Noch keine regelmäßige Belieferung eingerichtet.</p>
+        ) : (
+          <div className="supply-list">
+            <div className="supply-list-header">
+              <span>Modell</span>
+              <span>Nächste Lieferung</span>
+              <span>Status</span>
+              <span>Betrag netto</span>
+            </div>
+            {agreements.map(a => {
+              const model = a.offer_model_snapshot as Record<string, string>;
+              return (
+                <a key={a.id} href={`/account/business/supply/${a.id}`} className="supply-list-row">
+                  <span className="supply-list-name">{model.label || "Belieferung"}</span>
+                  <span>{a.next_delivery_at ? fmtDate(a.next_delivery_at) : "Noch nicht terminiert"}</span>
+                  <span>{SUPPLY_STATUS_DE[a.status] || a.status}</span>
+                  <span className="supply-list-total">{fmtCents(a.total_net_cents)} €</span>
+                </a>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       {/* ── Pricing Table ── */}
@@ -1012,6 +1140,153 @@ function PortalBusiness() {
           <a href="/account/profile" className="b2b-edit-link">Kontodaten bearbeiten →</a>
         </section>
       )}
+    </>
+  );
+}
+
+// ── B2B Supply Detail ─────────────────────────────────────────────────
+
+function SupplyDetail({ supplyId }: { supplyId: string }) {
+  const [agreement, setAgreement] = useState<SupplyAgreementRow | null>(null);
+  const [items, setItems] = useState<SupplyItemRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+
+  useEffect(() => {
+    if (!supabase) { setLoading(false); setNotFound(true); return; }
+    Promise.all([
+      supabase.from("b2b_supply_agreements").select("*").eq("id", supplyId).maybeSingle(),
+      supabase.from("b2b_supply_items").select("*").eq("supply_agreement_id", supplyId).order("created_at"),
+    ]).then(([aRes, iRes]) => {
+      if (!aRes.data) { setNotFound(true); }
+      else { setAgreement(aRes.data); setItems(iRes.data ?? []); }
+      setLoading(false);
+    });
+  }, [supplyId]);
+
+  if (loading) return <p className="portal-loading">Laden…</p>;
+
+  if (notFound || !agreement) return (
+    <>
+      <section className="portal-page-head">
+        <p className="eyebrow">BELIEFERUNG</p>
+        <h1>Belieferung nicht gefunden.</h1>
+      </section>
+      <a href="/account/business" className="portal-back-link">&larr; Zurück zu B2B</a>
+    </>
+  );
+
+  const model = agreement.offer_model_snapshot as Record<string, string | number>;
+  const biz = agreement.business_snapshot as Record<string, string>;
+  const ship = agreement.shipping_address_snapshot as Record<string, string>;
+  const bill = agreement.billing_address_snapshot as Record<string, string>;
+  const deliveryLabel = fmtInterval(agreement.delivery_interval_unit ?? undefined, agreement.delivery_interval_count ?? undefined);
+
+  return (
+    <>
+      <a href="/account/business" className="portal-back-link">&larr; B2B</a>
+
+      <section className="portal-page-head">
+        <p className="eyebrow">BELIEFERUNG</p>
+        <h1>{(model.label as string) || "Belieferung"}</h1>
+      </section>
+
+      <div className="order-detail-meta">
+        <div className="portal-profile-row"><span>Status</span><strong>{SUPPLY_STATUS_DE[agreement.status] || agreement.status}</strong></div>
+        {agreement.started_at && <div className="portal-profile-row"><span>Beginn</span><strong>{fmtDate(agreement.started_at)}</strong></div>}
+        {agreement.commitment_end_at && <div className="portal-profile-row"><span>Partnerschaft bis</span><strong>{fmtDate(agreement.commitment_end_at)}</strong></div>}
+        {agreement.next_delivery_at && <div className="portal-profile-row"><span>Nächste Lieferung</span><strong>{fmtDate(agreement.next_delivery_at)}</strong></div>}
+        {deliveryLabel && <div className="portal-profile-row"><span>Lieferintervall</span><strong>{deliveryLabel}</strong></div>}
+        {typeof model.commitment_months === "number" && model.commitment_months > 0 && (
+          <div className="portal-profile-row"><span>Laufzeit</span><strong>{model.commitment_months} Monate</strong></div>
+        )}
+        {agreement.ended_at && <div className="portal-profile-row"><span>Beendet am</span><strong>{fmtDate(agreement.ended_at)}</strong></div>}
+      </div>
+
+      {/* ── Pricing Model ── */}
+      {typeof model.discount_pct === "number" && (model.discount_pct as number) > 0 && (
+        <section className="order-detail-section">
+          <p className="eyebrow">PREISMODELL</p>
+          <div className="portal-profile-row"><span>Rabatt</span><strong>{"\u2212"}{model.discount_pct} %</strong></div>
+        </section>
+      )}
+
+      {/* ── Items ── */}
+      {items.length > 0 && (
+        <section className="order-detail-section">
+          <p className="eyebrow">ARTIKEL</p>
+          <div className="order-items-list">
+            {items.map(item => (
+              <div key={item.id} className="order-item-row">
+                <div className="order-item-name">
+                  <strong>{item.product_name}</strong>
+                  {item.variant_name && <span className="order-item-variant">{item.variant_name}</span>}
+                  {item.grams && <span className="order-item-variant">{item.grams} g</span>}
+                </div>
+                <span className="order-item-qty">{item.quantity}×</span>
+                <span className="order-item-unit">{fmtCents(item.unit_price_net_cents)} €</span>
+                <span className="order-item-total">{fmtCents(item.line_total_net_cents)} €</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ── Addresses ── */}
+      <div className="order-detail-addresses">
+        <section className="order-detail-section">
+          <p className="eyebrow">LIEFERADRESSE</p>
+          <div className="portal-address-display">
+            <p>{ship.first_name} {ship.last_name}</p>
+            {ship.company && <p>{ship.company}</p>}
+            <p>{ship.street} {ship.house_number}</p>
+            <p>{ship.zip} {ship.city}</p>
+            <p>{ship.country}</p>
+          </div>
+        </section>
+        <section className="order-detail-section">
+          <p className="eyebrow">RECHNUNGSADRESSE</p>
+          <div className="portal-address-display">
+            <p>{bill.first_name} {bill.last_name}</p>
+            {bill.company && <p>{bill.company}</p>}
+            <p>{bill.street} {bill.house_number}</p>
+            <p>{bill.zip} {bill.city}</p>
+            <p>{bill.country}</p>
+          </div>
+        </section>
+      </div>
+
+      {/* ── Business Snapshot ── */}
+      {biz.company_name && (
+        <section className="order-detail-section">
+          <p className="eyebrow">UNTERNEHMEN</p>
+          <div className="portal-profile-row"><span>Firma</span><strong>{biz.company_name}</strong></div>
+          {biz.legal_form && <div className="portal-profile-row"><span>Rechtsform</span><strong>{biz.legal_form}</strong></div>}
+          {biz.tax_number && <div className="portal-profile-row"><span>Steuernummer</span><strong>{biz.tax_number}</strong></div>}
+          {biz.vat_id && <div className="portal-profile-row"><span>USt-IdNr.</span><strong>{biz.vat_id}</strong></div>}
+        </section>
+      )}
+
+      {/* ── Totals ── */}
+      <section className="order-detail-section">
+        <p className="eyebrow">SUMME PRO LIEFERUNG</p>
+        <div className="order-totals">
+          <div className="portal-profile-row"><span>Zwischensumme netto</span><strong>{fmtCents(agreement.subtotal_net_cents)} €</strong></div>
+          {agreement.discount_total_cents > 0 && (
+            <div className="portal-profile-row"><span>Rabatt</span><strong>&minus;{fmtCents(agreement.discount_total_cents)} €</strong></div>
+          )}
+          {agreement.shipping_net_cents > 0 && (
+            <div className="portal-profile-row"><span>Versand netto</span><strong>{fmtCents(agreement.shipping_net_cents)} €</strong></div>
+          )}
+          {agreement.tax_total_cents > 0 && (
+            <div className="portal-profile-row"><span>MwSt.</span><strong>{fmtCents(agreement.tax_total_cents)} €</strong></div>
+          )}
+          <div className="portal-profile-row order-total-final">
+            <span>Gesamt netto</span>
+            <strong>{fmtCents(agreement.total_net_cents)} €</strong>
+          </div>
+        </div>
+      </section>
     </>
   );
 }

@@ -534,6 +534,7 @@ else if(route==="auth/confirm")page=<AuthConfirm/>;
 else if(route==="account/reset-password")page=<ResetPassword/>;
 else if(route.startsWith("account/orders/")&&route.split("/").length===3)page=<AccountPortal page="order-detail" orderId={route.split("/")[2]}/>;
 else if(route.startsWith("account/subscriptions/")&&route.split("/").length===3)page=<AccountPortal page="subscription-detail" subscriptionId={route.split("/")[2]}/>;
+else if(route.startsWith("account/business/supply/")&&route.split("/").length===4)page=<AccountPortal page="supply-detail" supplyId={route.split("/")[3]}/>;
 else if(route==="account/dashboard"||route==="account/orders"||route==="account/subscriptions"||route==="account/addresses"||route==="account/profile"||route==="account/business")page=<AccountPortal page={route.split("/")[1] as "dashboard"|"orders"|"subscriptions"|"addresses"|"profile"|"business"}/>;
 else if(route==="account")page=<Account/>;
 else if(route==="contact")page=<Contact/>;
