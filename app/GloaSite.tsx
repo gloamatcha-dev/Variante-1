@@ -218,7 +218,7 @@ function Legal({route}:{route:string}){const title:Record<string,string>={impres
 
 function Account(){
 const { user, loading: authLoading } = useAuth();
-const [view,setView]=useState<"landing"|"login"|"choose"|"register"|"b2b-apply"|"forgot">(()=>{if(typeof window!=="undefined"){const p=new URLSearchParams(window.location.search);if(p.get("type")==="business")return "b2b-apply";if(p.get("action")==="register")return "choose"}return "landing"});
+const [view,setView]=useState<"landing"|"login"|"choose"|"register"|"b2b-apply"|"forgot"|"confirm-pending">(()=>{if(typeof window!=="undefined"){const p=new URLSearchParams(window.location.search);if(p.get("type")==="business")return "b2b-apply";if(p.get("action")==="register")return "choose"}return "landing"});
 const [pwError,setPwError]=useState("");
 const [authError,setAuthError]=useState("");
 const [authBusy,setAuthBusy]=useState(false);
@@ -234,13 +234,24 @@ if(pw.length<8){setPwError("Passwort muss mindestens 8 Zeichen lang sein.");retu
 if(pw!==pw2){setPwError("Passwörter stimmen nicht überein.");return false}
 setPwError("");return true};
 
+const confirmUrl=typeof window!=="undefined"?`${window.location.origin}/auth/confirm`:"";
+const resetUrl=typeof window!=="undefined"?`${window.location.origin}/account/reset-password`:"";
+
 const handleLogin=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();if(!supabase)return;setAuthBusy(true);setAuthError("");const f=new FormData(e.currentTarget);const{error}=await supabase.auth.signInWithPassword({email:String(f.get("email")),password:String(f.get("password"))});setAuthBusy(false);if(error){setAuthError(error.message==="Invalid login credentials"?"E-Mail oder Passwort falsch.":error.message);return}window.location.href="/account/dashboard"};
 
-const handleForgot=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();if(!supabase)return;setAuthBusy(true);setAuthError("");const f=new FormData(e.currentTarget);const{error}=await supabase.auth.resetPasswordForEmail(String(f.get("email")));setAuthBusy(false);if(error){setAuthError("Fehler. Bitte versuche es erneut.");return}setForgotSent(true)};
+const handleForgot=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();if(!supabase)return;setAuthBusy(true);setAuthError("");const f=new FormData(e.currentTarget);const{error}=await supabase.auth.resetPasswordForEmail(String(f.get("email")),{redirectTo:resetUrl});setAuthBusy(false);if(error){setAuthError("Fehler. Bitte versuche es erneut.");return}setForgotSent(true)};
 
-const handlePrivate=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);if(!validatePw(f))return;if(!supabase)return;setAuthBusy(true);setAuthError("");const{error}=await supabase.auth.signUp({email:String(f.get("email")),password:String(f.get("password")),options:{data:{customer_type:"private",first_name:String(f.get("first_name")),last_name:String(f.get("last_name")),phone:String(f.get("phone")||""),street:String(f.get("street")),house_number:String(f.get("house_number")),zip:String(f.get("zip")),city:String(f.get("city")),country:String(f.get("country")),accept_terms:true,newsletter:!!f.get("newsletter")}}});setAuthBusy(false);if(error){setAuthError(error.message.includes("already registered")?"Diese E-Mail ist bereits registriert.":error.message);return}window.location.href="/account/dashboard"};
+const handlePrivate=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);if(!validatePw(f))return;if(!supabase)return;setAuthBusy(true);setAuthError("");const{data,error}=await supabase.auth.signUp({email:String(f.get("email")),password:String(f.get("password")),options:{emailRedirectTo:confirmUrl,data:{customer_type:"private",first_name:String(f.get("first_name")),last_name:String(f.get("last_name")),phone:String(f.get("phone")||""),street:String(f.get("street")),house_number:String(f.get("house_number")),zip:String(f.get("zip")),city:String(f.get("city")),country:String(f.get("country")),accept_terms:true,newsletter:!!f.get("newsletter")}}});setAuthBusy(false);if(error){setAuthError(error.message.includes("already registered")?"Diese E-Mail ist bereits registriert.":error.message);return}if(data.session){window.location.href="/account/dashboard"}else{setView("confirm-pending")}};
 
-const handleB2B=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);if(!validatePw(f))return;if(!supabase)return;setAuthBusy(true);setAuthError("");const{error}=await supabase.auth.signUp({email:String(f.get("email")),password:String(f.get("password")),options:{data:{customer_type:"business",first_name:String(f.get("contact_first_name")),last_name:String(f.get("contact_last_name")),contact_first_name:String(f.get("contact_first_name")),contact_last_name:String(f.get("contact_last_name")),phone:String(f.get("phone")||""),company_name:String(f.get("company_name")),legal_form:String(f.get("legal_form")||""),tax_number:String(f.get("tax_number")),vat_id:String(f.get("vat_id")||""),website:String(f.get("website")||""),street:String(f.get("street")),house_number:String(f.get("house_number")),zip:String(f.get("zip")),city:String(f.get("city")),country:String(f.get("country")),confirm_company_auth:!!f.get("confirm_company_auth"),accept_terms:true,newsletter:!!f.get("newsletter")}}});setAuthBusy(false);if(error){setAuthError(error.message.includes("already registered")?"Diese E-Mail ist bereits registriert.":error.message);return}window.location.href="/account/dashboard"};
+const handleB2B=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);if(!validatePw(f))return;if(!supabase)return;setAuthBusy(true);setAuthError("");const{data,error}=await supabase.auth.signUp({email:String(f.get("email")),password:String(f.get("password")),options:{emailRedirectTo:confirmUrl,data:{customer_type:"business",first_name:String(f.get("contact_first_name")),last_name:String(f.get("contact_last_name")),contact_first_name:String(f.get("contact_first_name")),contact_last_name:String(f.get("contact_last_name")),phone:String(f.get("phone")||""),company_name:String(f.get("company_name")),legal_form:String(f.get("legal_form")||""),tax_number:String(f.get("tax_number")),vat_id:String(f.get("vat_id")||""),website:String(f.get("website")||""),street:String(f.get("street")),house_number:String(f.get("house_number")),zip:String(f.get("zip")),city:String(f.get("city")),country:String(f.get("country")),confirm_company_auth:!!f.get("confirm_company_auth"),accept_terms:true,newsletter:!!f.get("newsletter")}}});setAuthBusy(false);if(error){setAuthError(error.message.includes("already registered")?"Diese E-Mail ist bereits registriert.":error.message);return}if(data.session){window.location.href="/account/dashboard"}else{setView("confirm-pending")}};
+
+if(view==="confirm-pending")return <main className="account-page"><section className="account-section">
+<p className="eyebrow">GLOA ACCOUNT</p>
+<h1>Fast geschafft.</h1>
+<p className="account-lead">Wir haben dir eine E-Mail zur Bestätigung deiner Adresse geschickt.</p>
+<p className="account-confirm-hint">Prüfe dein Postfach und klicke auf den Bestätigungslink, um dein Konto zu aktivieren.</p>
+<button className="cta secondary" onClick={()=>setView("login")}>Zur Anmeldung</button>
+</section></main>;
 
 if(view==="forgot")return <main className="account-page"><section className="account-section">
 <button className="account-back" onClick={()=>{setView("login");setAuthError("");setForgotSent(false)}}>&#8592; Zurück</button>
@@ -422,16 +433,83 @@ return <div className="cart-backdrop" onClick={onClose}><aside className="cart" 
 }
 
 function AuthConfirm(){
+const [status,setStatus]=useState<"loading"|"success"|"error">("loading");
+useEffect(()=>{
+  if(!supabase){setStatus("error");return}
+  // Supabase sends tokens in URL hash (#access_token=...&refresh_token=...)
+  // or uses PKCE code in query params (?code=...)
+  // supabase-js automatically picks them up via onAuthStateChange
+  const params=new URLSearchParams(window.location.search);
+  const hashParams=new URLSearchParams(window.location.hash.replace("#",""));
+  const hasToken=hashParams.get("access_token")||params.get("code");
+  if(!hasToken){
+    // No token/code in URL — check if already logged in
+    supabase.auth.getSession().then(({data:{session}})=>{
+      if(session){window.location.href="/account/dashboard"}
+      else{setStatus("error")}
+    });
+    return;
+  }
+  // Wait for onAuthStateChange to pick up the token
+  const{data:{subscription}}=supabase.auth.onAuthStateChange((event,session)=>{
+    if(event==="SIGNED_IN"&&session){
+      setStatus("success");
+      setTimeout(()=>{window.location.href="/account/dashboard"},1500);
+    }
+  });
+  // Fallback: if tokens are in hash, getSession triggers exchange
+  supabase.auth.getSession().then(({data:{session}})=>{
+    if(session){setStatus("success");setTimeout(()=>{window.location.href="/account/dashboard"},1500)}
+  });
+  // Timeout after 10s
+  const t=setTimeout(()=>setStatus(s=>s==="loading"?"error":s),10000);
+  return()=>{subscription.unsubscribe();clearTimeout(t)};
+},[]);
+if(status==="success")return <main className="account-page"><section className="account-section"><p className="eyebrow">GLOA ACCOUNT</p><h1>E-Mail bestätigt.</h1><p className="account-lead">Dein Konto ist aktiv. Du wirst weitergeleitet…</p></section></main>;
+if(status==="error")return <main className="account-page"><section className="account-section"><p className="eyebrow">GLOA ACCOUNT</p><h1>Link ungültig.</h1><p className="account-lead">Der Bestätigungslink ist ungültig oder abgelaufen.</p><a className="cta" href="/account">Zur Anmeldung</a></section></main>;
+return <main className="account-page"><section className="account-section"><p className="eyebrow">GLOA ACCOUNT</p><h1>Verifizierung…</h1><p className="account-lead">Dein Konto wird aktiviert.</p></section></main>;
+}
+
+function ResetPassword(){
+const{user}=useAuth();
+const[pwError,setPwError]=useState("");
+const[saving,setSaving]=useState(false);
+const[done,setDone]=useState(false);
+
+// Supabase puts the user in session after clicking the reset link (PASSWORD_RECOVERY event)
+// If no user/session, the link was invalid
 useEffect(()=>{
   if(!supabase)return;
-  const hash=window.location.hash;
-  if(hash){
-    supabase.auth.getSession().then(()=>{window.location.href="/account/dashboard"});
-  } else {
-    window.location.href="/account/dashboard";
-  }
+  const{data:{subscription}}=supabase.auth.onAuthStateChange((event)=>{
+    if(event==="PASSWORD_RECOVERY"){/* user is now set via AuthProvider */}
+  });
+  return()=>subscription.unsubscribe();
 },[]);
-return <main className="account-page"><section className="account-section"><p>Verifizierung läuft…</p></section></main>;
+
+const handleSubmit=async(e:React.FormEvent<HTMLFormElement>)=>{
+  e.preventDefault();if(!supabase)return;
+  const f=new FormData(e.currentTarget);
+  const pw=String(f.get("password")||"");
+  const pw2=String(f.get("password_confirm")||"");
+  if(pw.length<8){setPwError("Passwort muss mindestens 8 Zeichen lang sein.");return}
+  if(pw!==pw2){setPwError("Passwörter stimmen nicht überein.");return}
+  setPwError("");setSaving(true);
+  const{error}=await supabase.auth.updateUser({password:pw});
+  setSaving(false);
+  if(error){setPwError(error.message);return}
+  setDone(true);
+  setTimeout(()=>{window.location.href="/account/dashboard"},2000);
+};
+
+if(done)return <main className="account-page"><section className="account-section"><p className="eyebrow">GLOA ACCOUNT</p><h1>Passwort geändert.</h1><p className="account-lead">Dein neues Passwort ist aktiv. Du wirst weitergeleitet…</p></section></main>;
+if(!user)return <main className="account-page"><section className="account-section"><p className="eyebrow">GLOA ACCOUNT</p><h1>Link ungültig.</h1><p className="account-lead">Der Reset-Link ist ungültig oder abgelaufen.</p><a className="cta" href="/account">Zur Anmeldung</a></section></main>;
+return <main className="account-page"><section className="account-section"><p className="eyebrow">NEUES PASSWORT</p><h1>Passwort<br/><i>zurücksetzen.</i></h1>
+<form className="account-form" onSubmit={handleSubmit}>
+<label>Neues Passwort<input required type="password" placeholder="Min. 8 Zeichen" name="password" minLength={8} autoComplete="new-password"/></label>
+<label>Passwort wiederholen<input required type="password" placeholder="Wiederholen" name="password_confirm" minLength={8} autoComplete="new-password"/></label>
+{pwError&&<p className="account-error">{pwError}</p>}
+<button className="cta account-cta" type="submit" disabled={saving}>{saving?"SPEICHERN…":"PASSWORT SPEICHERN"}</button>
+</form></section></main>;
 }
 
 function GloaSiteInner({route}:{route:string}){
@@ -451,6 +529,7 @@ else if(route==="rezepte"||route==="journal")page=<Rezepte/>;
 else if(route.startsWith("rezepte/"))page=<RezeptDetail slug={route.split("/")[1]}/>;
 else if(route.startsWith("journal/"))page=<RezeptDetail slug={route.split("/")[1]}/>;
 else if(route==="auth/confirm")page=<AuthConfirm/>;
+else if(route==="account/reset-password")page=<ResetPassword/>;
 else if(route==="account/dashboard"||route==="account/orders"||route==="account/subscriptions"||route==="account/addresses"||route==="account/profile"||route==="account/business")page=<AccountPortal page={route.split("/")[1] as "dashboard"|"orders"|"subscriptions"|"addresses"|"profile"|"business"}/>;
 else if(route==="account")page=<Account/>;
 else if(route==="contact")page=<Contact/>;

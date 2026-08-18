@@ -190,6 +190,7 @@
 .account-landing{text-align:center}
 .account-landing h1{font-size:clamp(36px,5vw,56px);line-height:1.08;margin:16px 0 20px}
 .account-lead{font-size:16px;line-height:1.5;opacity:.7;margin-bottom:32px}
+.account-confirm-hint{font:14px/1.5 var(--font-mono);opacity:.5;margin-bottom:32px}
 .account-actions{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
 .account-back{border:0;background:none;font:13px var(--font-mono);text-transform:uppercase;letter-spacing:.1em;margin-bottom:24px;padding:0;cursor:pointer;transition:color .2s}.account-back:hover{color:var(--berry)}
 .account-section h1{font-size:clamp(32px,4.5vw,48px);line-height:1.1;margin:12px 0 28px}
