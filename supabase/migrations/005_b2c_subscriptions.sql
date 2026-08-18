@@ -10,21 +10,25 @@ create table public.b2c_subscription_plans (
   name                text not null,
   description         text,
 
-  discount_percent    numeric(5,2) not null default 0
-                      check (discount_percent >= 0 and discount_percent <= 100),
+  discount_percent    numeric(5,2)
+                      check (discount_percent is null or (discount_percent >= 0 and discount_percent <= 100)),
 
-  commitment_months   integer not null default 0
-                      check (commitment_months >= 0),
+  commitment_months   integer
+                      check (commitment_months is null or commitment_months > 0),
 
-  billing_interval_unit   text not null default 'month'
-                          check (billing_interval_unit in ('day', 'week', 'month', 'year')),
-  billing_interval_count  integer not null default 1
-                          check (billing_interval_count > 0),
+  billing_interval_unit   text
+                          check (billing_interval_unit is null or billing_interval_unit in ('day', 'week', 'month', 'year')),
+  billing_interval_count  integer
+                          check (billing_interval_count is null or billing_interval_count > 0),
 
-  delivery_interval_unit  text not null default 'month'
-                          check (delivery_interval_unit in ('day', 'week', 'month', 'year')),
-  delivery_interval_count integer not null default 1
-                          check (delivery_interval_count > 0),
+  delivery_interval_unit  text
+                          check (delivery_interval_unit is null or delivery_interval_unit in ('day', 'week', 'month', 'year')),
+  delivery_interval_count integer
+                          check (delivery_interval_count is null or delivery_interval_count > 0),
+
+  -- Pairwise consistency: unit and count must both be NULL or both set
+  check ((billing_interval_unit is null) = (billing_interval_count is null)),
+  check ((delivery_interval_unit is null) = (delivery_interval_count is null)),
 
   is_active           boolean not null default false,
   sort_order          integer not null default 0,
