@@ -5,6 +5,7 @@ import { COUNTRIES } from "./content";
 import { useAuth } from "../lib/auth";
 import type { AddressRow } from "../lib/auth";
 import { supabase } from "../lib/supabase";
+import { B2bCalculator } from "./B2bCalculator";
 
 type PortalPage = "dashboard" | "orders" | "subscriptions" | "addresses" | "profile" | "business" | "order-detail" | "subscription-detail" | "supply-detail";
 
@@ -1110,6 +1111,15 @@ function PortalBusiness() {
           ))}
         </div>
       </section>
+
+      {/* ── Calculator ── */}
+      {sizes.length > 0 && models.length > 0 && (
+        <section className="b2b-section">
+          <p className="eyebrow">KALKULATION</p>
+          <h2 className="b2b-section-title">Matcha-Kalkulations&shy;rechner</h2>
+          <B2bCalculator models={models} sizes={sizes} />
+        </section>
+      )}
 
       {/* ── Terms ── */}
       {terms.length > 0 && (

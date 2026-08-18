@@ -351,6 +351,30 @@
 .portal-dash-order-link{font:600 12px/1 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;margin-top:8px;transition:color .2s}
 .portal-dash-order-link:hover{color:var(--berry)}
 
+/* ── B2B Calculator ── */
+.b2b-section-title{font-size:clamp(24px,3vw,36px);line-height:1.1;letter-spacing:-.04em;margin:8px 0 0;font-weight:800}
+.calc-intro{font:15px/1.6 var(--font-mono);opacity:.7;margin:16px 0 28px;max-width:600px}
+.calc-inputs{display:grid;grid-template-columns:1fr 1fr;gap:16px 24px;margin-bottom:32px}
+.calc-input-group{display:flex;flex-direction:column;gap:6px}
+.calc-label{font:600 11px/1 var(--font-mono);letter-spacing:.1em;text-transform:uppercase;opacity:.6}
+.calc-field{border:1px solid var(--line);background:transparent;padding:10px 12px;font:14px/1.4 var(--font-mono);border-radius:0;transition:border-color .15s}
+.calc-field:focus{outline:none;border-color:var(--ink)}
+select.calc-field{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23111' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:32px}
+.calc-results{margin-top:8px}
+.calc-table-wrap{overflow-x:auto;margin:0 0 8px}
+.calc-table{width:100%;border-collapse:collapse;font:13px/1.4 var(--font-mono);white-space:nowrap}
+.calc-table th{font:600 11px/1 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;text-align:left;padding:10px 14px 10px 0;border-bottom:2px solid var(--ink)}
+.calc-table td{padding:12px 14px 12px 0;border-bottom:1px solid var(--line);vertical-align:top}
+.calc-table tbody tr:last-child td{border-bottom:2px solid var(--ink)}
+.calc-positive{color:#1a7a3a}
+.calc-negative{color:var(--berry)}
+.calc-discount{font-weight:400;opacity:.6;margin-left:6px}
+.calc-pct{opacity:.6;font-size:12px}
+.calc-footnote{font:12px/1.5 var(--font-mono);opacity:.5;margin:4px 0 28px}
+.calc-section-label{margin:32px 0 12px}
+.calc-disclaimer{font:12px/1.6 var(--font-mono);opacity:.5;margin:28px 0 0;padding:16px 0;border-top:1px solid var(--line)}
+.calc-hint{font:14px/1.6 var(--font-mono);opacity:.5;padding:24px 0}
+
 /* ── Contact Page ── */
 .contact-main{background:var(--cream)}
 .contact-hero{padding:80px 5vw 50px}
@@ -405,5 +429,8 @@ header nav{gap:18px;font-size:12px}
 .sub-list-row{grid-template-columns:1fr 1fr;gap:8px;padding:16px 0}
 .supply-list-header{display:none}
 .supply-list-row{grid-template-columns:1fr 1fr;gap:8px;padding:16px 0}
+.calc-inputs{grid-template-columns:1fr}
+.calc-table{font-size:12px}
+.calc-table th,.calc-table td{padding:8px 8px 8px 0}
 }
 
