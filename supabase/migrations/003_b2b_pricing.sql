@@ -82,11 +82,4 @@ create policy "Business users can read general terms"
 
 grant select on public.b2b_general_terms to authenticated;
 
--- Seed
-insert into public.b2b_general_terms (key, label, value, sort_order) values
-  ('vat',        'MwSt.',              'zzgl. 19 % gesetzlicher MwSt.',       1),
-  ('payment',    'Zahlungsziel',       '14 Tage netto',                       2),
-  ('min_order',  'Mindestbestellwert', 'keiner',                              3),
-  ('delivery',   'Liefergebiet',       'Deutschland',                         4),
-  ('packaging',  'Verpackung',         'Licht-, luft- und feuchtigkeitsdicht', 5),
-  ('origin',     'Herkunft',           'Shizuoka, Japan',                     6);
+-- No seed data – terms will be added once confirmed
