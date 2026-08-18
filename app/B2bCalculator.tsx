@@ -9,10 +9,13 @@ type ProductSize = { id: number; grams: number; label: string; price_per_kg_net:
 const fmtEur = (n: number) =>
   n.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+const fmtNum = (n: number, decimals = 1) =>
+  n.toLocaleString("de-DE", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+
 const calcPrice = (pricePerKg: number, grams: number, discountPct: number) =>
   Math.round(pricePerKg * grams / 1000 * (1 - discountPct / 100) * 100) / 100;
 
-/** Parse German-style decimal input (comma or dot) */
+/** Parse German-style decimal input (comma or dot). Returns null for empty, NaN, negative, Infinity. */
 function parseDecimal(raw: string): number | null {
   const s = raw.trim().replace(",", ".");
   if (s === "") return null;
@@ -20,8 +23,8 @@ function parseDecimal(raw: string): number | null {
   return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
-/** Parse positive integer */
-function parseInt(raw: string): number | null {
+/** Parse positive integer. Returns null for empty, NaN, zero, negative, fractional, Infinity. */
+function parsePositiveInt(raw: string): number | null {
   const n = Number(raw.trim());
   return Number.isFinite(n) && n > 0 && Number.isInteger(n) ? n : null;
 }
@@ -35,80 +38,103 @@ export function B2bCalculator({
   sizes: ProductSize[];
 }) {
   /* inputs – all local state, no persistence */
-  const [currentPriceRaw, setCurrentPriceRaw] = useState("");       // current purchase price per kg (EUR netto)
-  const [gramsPerDrinkRaw, setGramsPerDrinkRaw] = useState("");     // grams matcha per drink
-  const [salePriceRaw, setSalePriceRaw] = useState("");             // net sale price per drink (EUR)
-  const [drinksPerMonthRaw, setDrinksPerMonthRaw] = useState("");   // drinks sold per month
+  const [currentPriceRaw, setCurrentPriceRaw] = useState("");
+  const [gramsPerDrinkRaw, setGramsPerDrinkRaw] = useState("");
+  const [salePriceRaw, setSalePriceRaw] = useState("");
+  const [drinksPerMonthRaw, setDrinksPerMonthRaw] = useState("");
   const [selectedSizeId, setSelectedSizeId] = useState<number | "">(sizes.length > 0 ? sizes[0].id : "");
 
   /* parsed values */
   const currentPrice = parseDecimal(currentPriceRaw);
   const gramsPerDrink = parseDecimal(gramsPerDrinkRaw);
   const salePrice = parseDecimal(salePriceRaw);
-  const drinksPerMonth = parseInt(drinksPerMonthRaw);
+  const drinksPerMonth = parsePositiveInt(drinksPerMonthRaw);
   const selectedSize = sizes.find(s => s.id === selectedSizeId) ?? null;
+
+  const handleReset = () => {
+    setCurrentPriceRaw("");
+    setGramsPerDrinkRaw("");
+    setSalePriceRaw("");
+    setDrinksPerMonthRaw("");
+    if (sizes.length > 0) setSelectedSizeId(sizes[0].id);
+  };
 
   /* derived calculations */
   const results = useMemo(() => {
-    if (!selectedSize || currentPrice === null) return null;
+    if (!selectedSize || currentPrice === null || currentPrice === 0) return null;
 
     const basePricePerKg = selectedSize.price_per_kg_net;
+    const hasDrink = gramsPerDrink !== null && gramsPerDrink > 0;
+    const hasSale = salePrice !== null && salePrice > 0;
+    const hasVolume = drinksPerMonth !== null && hasDrink;
 
-    /* Model comparison rows */
+    /* Model-independent drink metrics */
+    const drinksPerKg = hasDrink ? 1000 / gramsPerDrink : null;
+    const drinksPerPackage = hasDrink ? selectedSize.grams / gramsPerDrink : null;
+    const revenuePerKg = hasDrink && hasSale ? (1000 / gramsPerDrink) * salePrice : null;
+    const monthlyConsumptionKg = hasVolume ? (drinksPerMonth * gramsPerDrink) / 1000 : null;
+
+    /* Per-model rows */
     const modelRows = models.map(m => {
       const gloaPricePerKg = basePricePerKg * (1 - m.discount_pct / 100);
       const packagePrice = calcPrice(basePricePerKg, selectedSize.grams, m.discount_pct);
-      const savingsPerKg = currentPrice - gloaPricePerKg;
-      const savingsPercent = currentPrice > 0 ? (savingsPerKg / currentPrice) * 100 : 0;
+      const diffPerKg = currentPrice - gloaPricePerKg;
+      const diffPercent = (diffPerKg / currentPrice) * 100;
+      const currentPackagePrice = currentPrice * selectedSize.grams / 1000;
+      const diffPerPackage = currentPackagePrice - packagePrice;
 
-      /* per-drink metrics (only if grams/drink is set) */
+      /* per-drink */
       let costPerDrinkGloa: number | null = null;
       let costPerDrinkCurrent: number | null = null;
-      let drinksPerPackage: number | null = null;
-      let savingsPerDrink: number | null = null;
+      let diffPerDrink: number | null = null;
+      let materialSharePct: number | null = null;
+      let revenueMinusMatcha: number | null = null;
 
-      if (gramsPerDrink !== null && gramsPerDrink > 0) {
+      if (hasDrink) {
         costPerDrinkGloa = gloaPricePerKg * gramsPerDrink / 1000;
         costPerDrinkCurrent = currentPrice * gramsPerDrink / 1000;
-        drinksPerPackage = selectedSize.grams / gramsPerDrink;
-        savingsPerDrink = costPerDrinkCurrent - costPerDrinkGloa;
+        diffPerDrink = costPerDrinkCurrent - costPerDrinkGloa;
+        if (hasSale) {
+          materialSharePct = (costPerDrinkGloa / salePrice) * 100;
+        }
+        if (revenuePerKg !== null) {
+          revenueMinusMatcha = revenuePerKg - gloaPricePerKg;
+        }
       }
 
-      /* monthly / yearly projections (only if drinks/month is set) */
+      /* monthly / yearly */
       let monthlyGloa: number | null = null;
       let monthlyCurrent: number | null = null;
-      let monthlySavings: number | null = null;
-      let yearlySavings: number | null = null;
+      let monthlyDiff: number | null = null;
+      let yearlyDiff: number | null = null;
 
-      if (drinksPerMonth !== null && costPerDrinkGloa !== null && costPerDrinkCurrent !== null) {
+      if (hasVolume && costPerDrinkGloa !== null && costPerDrinkCurrent !== null) {
         monthlyGloa = costPerDrinkGloa * drinksPerMonth;
         monthlyCurrent = costPerDrinkCurrent * drinksPerMonth;
-        monthlySavings = monthlyCurrent - monthlyGloa;
-        yearlySavings = monthlySavings * 12;
+        monthlyDiff = monthlyCurrent - monthlyGloa;
+        yearlyDiff = monthlyDiff * 12;
       }
 
       return {
         model: m,
-        gloaPricePerKg,
-        packagePrice,
-        savingsPerKg,
-        savingsPercent,
-        costPerDrinkGloa,
-        costPerDrinkCurrent,
-        drinksPerPackage,
-        savingsPerDrink,
-        monthlyGloa,
-        monthlyCurrent,
-        monthlySavings,
-        yearlySavings,
+        gloaPricePerKg, packagePrice,
+        diffPerKg, diffPercent, diffPerPackage,
+        costPerDrinkGloa, costPerDrinkCurrent, diffPerDrink,
+        materialSharePct, revenueMinusMatcha,
+        monthlyGloa, monthlyCurrent, monthlyDiff, yearlyDiff,
       };
     });
 
-    return { modelRows };
-  }, [models, sizes, selectedSize, currentPrice, gramsPerDrink, drinksPerMonth]);
+    return {
+      modelRows, drinksPerKg, drinksPerPackage,
+      revenuePerKg, monthlyConsumptionKg,
+      hasDrink, hasSale, hasVolume,
+    };
+  }, [models, sizes, selectedSize, currentPrice, gramsPerDrink, salePrice, drinksPerMonth]);
 
-  const hasVolume = drinksPerMonth !== null;
-  const hasDrinkCalc = gramsPerDrink !== null && gramsPerDrink > 0;
+  /** Format a difference value with +/- prefix and optional label */
+  const fmtDiff = (val: number) => `${val > 0 ? "+" : ""}${fmtEur(val)} €`;
+  const diffClass = (val: number) => val > 0 ? "calc-positive" : val < 0 ? "calc-negative" : "";
 
   return (
     <div className="calc">
@@ -121,68 +147,25 @@ export function B2bCalculator({
       <div className="calc-inputs">
         <div className="calc-input-group">
           <label className="calc-label" htmlFor="calc-current-price">Aktueller Einkaufspreis / kg netto (EUR) *</label>
-          <input
-            id="calc-current-price"
-            type="text"
-            inputMode="decimal"
-            className="calc-field"
-            placeholder="z. B. 120,00"
-            value={currentPriceRaw}
-            onChange={e => setCurrentPriceRaw(e.target.value)}
-          />
+          <input id="calc-current-price" type="text" inputMode="decimal" className="calc-field" placeholder="z. B. 120,00" value={currentPriceRaw} onChange={e => setCurrentPriceRaw(e.target.value)} />
         </div>
-
         <div className="calc-input-group">
           <label className="calc-label" htmlFor="calc-size">Gebindegröße</label>
-          <select
-            id="calc-size"
-            className="calc-field"
-            value={selectedSizeId}
-            onChange={e => setSelectedSizeId(Number(e.target.value))}
-          >
-            {sizes.map(s => (
-              <option key={s.id} value={s.id}>{s.label} ({s.grams} g)</option>
-            ))}
+          <select id="calc-size" className="calc-field" value={selectedSizeId} onChange={e => setSelectedSizeId(Number(e.target.value))}>
+            {sizes.map(s => <option key={s.id} value={s.id}>{s.label} ({s.grams} g)</option>)}
           </select>
         </div>
-
         <div className="calc-input-group">
           <label className="calc-label" htmlFor="calc-grams">Gramm Matcha pro Getränk</label>
-          <input
-            id="calc-grams"
-            type="text"
-            inputMode="decimal"
-            className="calc-field"
-            placeholder="z. B. 2"
-            value={gramsPerDrinkRaw}
-            onChange={e => setGramsPerDrinkRaw(e.target.value)}
-          />
+          <input id="calc-grams" type="text" inputMode="decimal" className="calc-field" placeholder="z. B. 2" value={gramsPerDrinkRaw} onChange={e => setGramsPerDrinkRaw(e.target.value)} />
         </div>
-
         <div className="calc-input-group">
           <label className="calc-label" htmlFor="calc-sale-price">Netto-Verkaufspreis pro Getränk (EUR)</label>
-          <input
-            id="calc-sale-price"
-            type="text"
-            inputMode="decimal"
-            className="calc-field"
-            placeholder="z. B. 4,50"
-            value={salePriceRaw}
-            onChange={e => setSalePriceRaw(e.target.value)}
-          />
+          <input id="calc-sale-price" type="text" inputMode="decimal" className="calc-field" placeholder="z. B. 4,50" value={salePriceRaw} onChange={e => setSalePriceRaw(e.target.value)} />
         </div>
-
         <div className="calc-input-group">
           <label className="calc-label" htmlFor="calc-drinks">Getränke pro Monat</label>
-          <input
-            id="calc-drinks"
-            type="text"
-            inputMode="numeric"
-            className="calc-field"
-            placeholder="z. B. 600"
-            value={drinksPerMonthRaw}
-            onChange={e => setDrinksPerMonthRaw(e.target.value)}
-          />
+          <input id="calc-drinks" type="text" inputMode="numeric" className="calc-field" placeholder="z. B. 600" value={drinksPerMonthRaw} onChange={e => setDrinksPerMonthRaw(e.target.value)} />
         </div>
       </div>
 
@@ -190,128 +173,186 @@ export function B2bCalculator({
       {results && (
         <div className="calc-results">
 
-          {/* Model comparison */}
-          <div className="calc-table-wrap">
-            <table className="calc-table">
-              <thead>
-                <tr>
-                  <th>Bezugsmodell</th>
-                  <th>GLOA-Preis / kg</th>
-                  <th>Paketpreis ({selectedSize?.label})</th>
-                  <th>Ersparnis / kg</th>
-                </tr>
-              </thead>
-              <tbody>
-                {results.modelRows.map(r => (
-                  <tr key={r.model.id}>
-                    <td>
-                      <strong>{r.model.label}</strong>
-                      {r.model.discount_pct > 0 && <span className="calc-discount"> −{r.model.discount_pct} %</span>}
-                    </td>
-                    <td>{fmtEur(r.gloaPricePerKg)} €</td>
-                    <td>{fmtEur(r.packagePrice)} €</td>
-                    <td className={r.savingsPerKg > 0 ? "calc-positive" : r.savingsPerKg < 0 ? "calc-negative" : ""}>
-                      {r.savingsPerKg > 0 ? "+" : ""}{fmtEur(r.savingsPerKg)} €
-                      {r.savingsPercent !== 0 && <span className="calc-pct"> ({r.savingsPerKg > 0 ? "−" : "+"}{fmtEur(Math.abs(r.savingsPercent))} %)</span>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          {/* ── Section 1: Modellvergleich ── */}
+          <p className="eyebrow calc-section-label">MODELLVERGLEICH</p>
+
+          {/* Desktop grid */}
+          <div className="calc-grid calc-grid-5 calc-desktop">
+            <div className="calc-grid-head">
+              <span>Bezugsmodell</span>
+              <span>GLOA / kg</span>
+              <span>Paketpreis</span>
+              <span>Differenz / kg</span>
+              <span>Differenz / Gebinde</span>
+            </div>
+            {results.modelRows.map(r => (
+              <div key={r.model.id} className="calc-grid-row">
+                <span><strong>{r.model.label}</strong>{r.model.discount_pct > 0 && <span className="calc-discount"> −{r.model.discount_pct} %</span>}</span>
+                <span>{fmtEur(r.gloaPricePerKg)} €</span>
+                <span>{fmtEur(r.packagePrice)} €</span>
+                <span className={diffClass(r.diffPerKg)}>{fmtDiff(r.diffPerKg)} <span className="calc-pct">({fmtNum(Math.abs(r.diffPercent))} %)</span></span>
+                <span className={diffClass(r.diffPerPackage)}>{fmtDiff(r.diffPerPackage)}</span>
+              </div>
+            ))}
           </div>
+
+          {/* Mobile stacked */}
+          <div className="calc-mobile">
+            {results.modelRows.map(r => (
+              <div key={r.model.id} className="calc-card">
+                <p className="calc-card-title">{r.model.label}{r.model.discount_pct > 0 && <span className="calc-discount"> −{r.model.discount_pct} %</span>}</p>
+                <div className="calc-card-row"><span>GLOA / kg</span><span>{fmtEur(r.gloaPricePerKg)} €</span></div>
+                <div className="calc-card-row"><span>Paketpreis ({selectedSize!.label})</span><span>{fmtEur(r.packagePrice)} €</span></div>
+                <div className="calc-card-row"><span>Differenz / kg</span><span className={diffClass(r.diffPerKg)}>{fmtDiff(r.diffPerKg)} ({fmtNum(Math.abs(r.diffPercent))} %)</span></div>
+                <div className="calc-card-row"><span>Differenz / Gebinde</span><span className={diffClass(r.diffPerPackage)}>{fmtDiff(r.diffPerPackage)}</span></div>
+              </div>
+            ))}
+          </div>
+
           <p className="calc-footnote">Dein aktueller Preis: {fmtEur(currentPrice!)} € / kg netto — GLOA-Basis: {fmtEur(selectedSize!.price_per_kg_net)} € / kg netto</p>
 
-          {/* Per-drink breakdown */}
-          {hasDrinkCalc && (
+          {/* ── Section 2: Getränke-Kalkulation ── */}
+          {results.hasDrink && (
             <>
-              <p className="eyebrow calc-section-label">MATCHA-ROHWARENEINSATZ PRO GETRÄNK</p>
-              <div className="calc-table-wrap">
-                <table className="calc-table">
-                  <thead>
-                    <tr>
-                      <th>Bezugsmodell</th>
-                      <th>Einsatz / Getränk</th>
-                      <th>Aktuell / Getränk</th>
-                      <th>Differenz</th>
-                      {salePrice !== null && <th>Rohwareneinsatz-Anteil</th>}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {results.modelRows.map(r => {
-                      if (r.costPerDrinkGloa === null || r.costPerDrinkCurrent === null) return null;
-                      const marginPct = salePrice !== null && salePrice > 0 ? (r.costPerDrinkGloa / salePrice) * 100 : null;
-                      return (
-                        <tr key={r.model.id}>
-                          <td><strong>{r.model.label}</strong></td>
-                          <td>{fmtEur(r.costPerDrinkGloa)} €</td>
-                          <td>{fmtEur(r.costPerDrinkCurrent)} €</td>
-                          <td className={r.savingsPerDrink! > 0 ? "calc-positive" : r.savingsPerDrink! < 0 ? "calc-negative" : ""}>
-                            {r.savingsPerDrink! > 0 ? "+" : ""}{fmtEur(r.savingsPerDrink!)} €
-                          </td>
-                          {marginPct !== null && <td>{fmtEur(marginPct)} %</td>}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              <p className="eyebrow calc-section-label">GETRÄNKE-KALKULATION</p>
+
+              <div className="calc-metrics">
+                <div className="calc-metric"><span>Getränke pro kg</span><strong>{fmtNum(results.drinksPerKg!, 0)}</strong></div>
+                <div className="calc-metric"><span>Getränke pro {selectedSize!.label}</span><strong>{fmtNum(results.drinksPerPackage!, 0)}</strong></div>
+                {results.revenuePerKg !== null && (
+                  <div className="calc-metric"><span>Netto-Umsatz aus 1 kg</span><strong>{fmtEur(results.revenuePerKg)} €</strong></div>
+                )}
               </div>
+
+              <p className="eyebrow calc-section-label" style={{ marginTop: 20 }}>MATCHA-ROHWARENEINSATZ PRO GETRÄNK</p>
+
+              {/* Desktop grid */}
+              <div className={`calc-grid ${results.hasSale ? "calc-grid-5" : "calc-grid-4"} calc-desktop`}>
+                <div className="calc-grid-head">
+                  <span>Bezugsmodell</span>
+                  <span>GLOA / Getränk</span>
+                  <span>Aktuell / Getränk</span>
+                  <span>Differenz</span>
+                  {results.hasSale && <span>Rohwarenanteil</span>}
+                </div>
+                {results.modelRows.map(r => {
+                  if (r.costPerDrinkGloa === null) return null;
+                  return (
+                    <div key={r.model.id} className="calc-grid-row">
+                      <span><strong>{r.model.label}</strong></span>
+                      <span>{fmtEur(r.costPerDrinkGloa)} €</span>
+                      <span>{fmtEur(r.costPerDrinkCurrent!)} €</span>
+                      <span className={diffClass(r.diffPerDrink!)}>{fmtDiff(r.diffPerDrink!)}</span>
+                      {r.materialSharePct !== null && <span>{fmtNum(r.materialSharePct)} %</span>}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Mobile stacked */}
+              <div className="calc-mobile">
+                {results.modelRows.map(r => {
+                  if (r.costPerDrinkGloa === null) return null;
+                  return (
+                    <div key={r.model.id} className="calc-card">
+                      <p className="calc-card-title">{r.model.label}</p>
+                      <div className="calc-card-row"><span>GLOA / Getränk</span><span>{fmtEur(r.costPerDrinkGloa)} €</span></div>
+                      <div className="calc-card-row"><span>Aktuell / Getränk</span><span>{fmtEur(r.costPerDrinkCurrent!)} €</span></div>
+                      <div className="calc-card-row"><span>Differenz</span><span className={diffClass(r.diffPerDrink!)}>{fmtDiff(r.diffPerDrink!)}</span></div>
+                      {r.materialSharePct !== null && <div className="calc-card-row"><span>Rohwarenanteil</span><span>{fmtNum(r.materialSharePct)} %</span></div>}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Revenue minus matcha (per model) */}
+              {results.revenuePerKg !== null && (
+                <div className="calc-metrics" style={{ marginTop: 16 }}>
+                  {results.modelRows.map(r => r.revenueMinusMatcha !== null && (
+                    <div key={r.model.id} className="calc-metric">
+                      <span>Umsatz abzgl. Rohwareneinsatz ({r.model.label})</span>
+                      <strong>{fmtEur(r.revenueMinusMatcha)} € / kg</strong>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <p className="calc-footnote">
-                Berechnung: {gramsPerDrink} g Matcha pro Getränk — {selectedSize!.label} ergibt ca. {fmtEur(selectedSize!.grams / gramsPerDrink!)} Getränke pro Packung
+                Berechnung: {gramsPerDrink} g Matcha pro Getränk
               </p>
             </>
           )}
 
-          {/* Monthly / Yearly projections */}
-          {hasVolume && hasDrinkCalc && (
+          {/* ── Section 3: Monatliche & Jährliche Projektion ── */}
+          {results.hasVolume && (
             <>
               <p className="eyebrow calc-section-label">MONATLICHE & JÄHRLICHE PROJEKTION</p>
-              <div className="calc-table-wrap">
-                <table className="calc-table">
-                  <thead>
-                    <tr>
-                      <th>Bezugsmodell</th>
-                      <th>GLOA / Monat</th>
-                      <th>Aktuell / Monat</th>
-                      <th>Ersparnis / Monat</th>
-                      <th>Ersparnis / Jahr</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {results.modelRows.map(r => {
-                      if (r.monthlyGloa === null) return null;
-                      return (
-                        <tr key={r.model.id}>
-                          <td><strong>{r.model.label}</strong></td>
-                          <td>{fmtEur(r.monthlyGloa)} €</td>
-                          <td>{fmtEur(r.monthlyCurrent!)} €</td>
-                          <td className={r.monthlySavings! > 0 ? "calc-positive" : r.monthlySavings! < 0 ? "calc-negative" : ""}>
-                            {r.monthlySavings! > 0 ? "+" : ""}{fmtEur(r.monthlySavings!)} €
-                          </td>
-                          <td className={r.yearlySavings! > 0 ? "calc-positive" : r.yearlySavings! < 0 ? "calc-negative" : ""}>
-                            {r.yearlySavings! > 0 ? "+" : ""}{fmtEur(r.yearlySavings!)} €
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+
+              <div className="calc-metrics">
+                <div className="calc-metric"><span>Monatlicher Matcha-Verbrauch</span><strong>{fmtNum(results.monthlyConsumptionKg!, 2)} kg</strong></div>
               </div>
+
+              {/* Desktop grid */}
+              <div className="calc-grid calc-grid-5 calc-desktop">
+                <div className="calc-grid-head">
+                  <span>Bezugsmodell</span>
+                  <span>GLOA / Monat</span>
+                  <span>Aktuell / Monat</span>
+                  <span>Differenz / Monat</span>
+                  <span>Differenz / Jahr</span>
+                </div>
+                {results.modelRows.map(r => {
+                  if (r.monthlyGloa === null) return null;
+                  return (
+                    <div key={r.model.id} className="calc-grid-row">
+                      <span><strong>{r.model.label}</strong></span>
+                      <span>{fmtEur(r.monthlyGloa)} €</span>
+                      <span>{fmtEur(r.monthlyCurrent!)} €</span>
+                      <span className={diffClass(r.monthlyDiff!)}>{fmtDiff(r.monthlyDiff!)}</span>
+                      <span className={diffClass(r.yearlyDiff!)}>{fmtDiff(r.yearlyDiff!)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Mobile stacked */}
+              <div className="calc-mobile">
+                {results.modelRows.map(r => {
+                  if (r.monthlyGloa === null) return null;
+                  return (
+                    <div key={r.model.id} className="calc-card">
+                      <p className="calc-card-title">{r.model.label}</p>
+                      <div className="calc-card-row"><span>GLOA / Monat</span><span>{fmtEur(r.monthlyGloa)} €</span></div>
+                      <div className="calc-card-row"><span>Aktuell / Monat</span><span>{fmtEur(r.monthlyCurrent!)} €</span></div>
+                      <div className="calc-card-row"><span>Differenz / Monat</span><span className={diffClass(r.monthlyDiff!)}>{fmtDiff(r.monthlyDiff!)}</span></div>
+                      <div className="calc-card-row"><span>Differenz / Jahr</span><span className={diffClass(r.yearlyDiff!)}>{fmtDiff(r.yearlyDiff!)}</span></div>
+                    </div>
+                  );
+                })}
+              </div>
+
               <p className="calc-footnote">Projektion: {drinksPerMonth} Getränke / Monat × 12 = {drinksPerMonth! * 12} Getränke / Jahr</p>
             </>
           )}
 
-          {/* Disclaimer */}
+          {/* ── Disclaimer ── */}
           <p className="calc-disclaimer">
-            Die Berechnung bezieht sich ausschließlich auf den Matcha-Rohwareneinsatz (netto).
-            Weitere Kosten wie Personal, Milch, Energie, MwSt. und sonstige Betriebskosten
+            Die Berechnung basiert ausschließlich auf den eingegebenen Werten und berücksichtigt
+            den Matcha-Rohwareneinsatz (netto). Weitere Kosten wie Milch, weitere Zutaten,
+            Verpackung / Becher, Personal, Miete, Energie, Zahlungsgebühren, Versand und Steuern
             sind nicht berücksichtigt. Alle Angaben ohne Gewähr.
           </p>
         </div>
       )}
 
-      {/* Show hint when no result yet */}
+      {/* Hint when no result */}
       {!results && (
         <p className="calc-hint">Gib deinen aktuellen Einkaufspreis pro kg ein, um den Vergleich zu starten.</p>
+      )}
+
+      {/* Reset */}
+      {(currentPriceRaw || gramsPerDrinkRaw || salePriceRaw || drinksPerMonthRaw) && (
+        <button type="button" className="calc-reset" onClick={handleReset}>Werte zurücksetzen</button>
       )}
     </div>
   );
