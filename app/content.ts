@@ -10,22 +10,6 @@ export const BRAND = {
 
 export const SHOP_STATUS = "prelaunch" as const; // "prelaunch" | "live"
 
-export const FLEX_DISCOUNT = 0.10;
-export const ANNUAL_DISCOUNT = 0.15;
-
-export type MatchaVariant = {
-  size: string;
-  grams: number;
-  price: number;
-  subscriptionEligible: boolean;
-};
-
-export const MATCHA_VARIANTS: MatchaVariant[] = [
-  { size: "20 g", grams: 20, price: 19.99, subscriptionEligible: false },
-  { size: "50 g", grams: 50, price: 34.99, subscriptionEligible: true },
-  { size: "100 g", grams: 100, price: 49.99, subscriptionEligible: true },
-  { size: "150 g", grams: 150, price: 59.99, subscriptionEligible: true },
-];
 
 export const PRODUCT = {
   slug: "gloa-matcha",
@@ -40,10 +24,6 @@ export const PRODUCT = {
   certifications: null as string[] | null,
 };
 
-export function flexPrice(base: number) { return Math.floor(base * (1 - FLEX_DISCOUNT) * 100) / 100; }
-export function annualPrice(base: number) { return Math.floor(base * (1 - ANNUAL_DISCOUNT) * 100) / 100; }
-export function pricePer100g(price: number, grams: number) { return Math.round(price / grams * 100 * 100) / 100; }
-export function lowestPrice() { const v = MATCHA_VARIANTS.filter(v => v.subscriptionEligible); return v.length ? annualPrice(Math.min(...v.map(x => x.price))) : MATCHA_VARIANTS[0].price; }
 
 export const BUSINESS_FACTS = {
   formats: ["500 g", "1 kg"],

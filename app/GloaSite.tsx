@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Header, Footer, Newsletter } from "./Chrome";
-import { BRAND, BUSINESS_FACTS, PRODUCT, MATCHA_VARIANTS, FLEX_DISCOUNT, ANNUAL_DISCOUNT, SHOP_STATUS, flexPrice, annualPrice, pricePer100g, lowestPrice, B2B_BUSINESS_TYPES, B2B_DEMAND_OPTIONS, COUNTRIES } from "./content";
+import { BRAND, BUSINESS_FACTS, PRODUCT, SHOP_STATUS, B2B_BUSINESS_TYPES, B2B_DEMAND_OPTIONS, COUNTRIES } from "./content";
+import { useCatalog, fmtCents, per100gCents } from "./useCatalog";
 import { BusinessCalculator } from "./BusinessCalculator";
 import { AccountPortal } from "./AccountPortal";
 import { track } from "./analytics";
@@ -9,8 +10,6 @@ import { useCart } from "./cart";
 import { AuthProvider, useAuth } from "../lib/auth";
 import { supabase } from "../lib/supabase";
 
-const fmt=(n:number)=>n.toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2});
-const purchaseLabel=(t:string)=>t==="flex"?"Flex-Abo":t==="annual"?"12-Monats-Abo":"Einmal";
 
 type Recipe={slug:string;title:string;category:string;time:string;tags:string[];image:string;alt:string;excerpt:string;description:string;ingredients:string[];steps:string[];featured:boolean};
 const recipes:Recipe[]=[
@@ -30,9 +29,12 @@ const communityItems:CommunityItem[]=[{id:"1",image:"/img/gloa-cafe.png",alt:"Ma
 function Placeholder({children=""}:{children?:string}){return <span className="placeholder-label">{children}</span>}
 function ProductVisual(){return <div className="product-visual lime"><img src="/img/gloa-hero-packaging.png" alt="GLOA Matcha Verpackung" loading="lazy"/></div>}
 function ProductCard({onAdd}:{onAdd:()=>void}){
+const {product,loading}=useCatalog("matcha");
 const {addItem}=useCart();
-const handleAdd=()=>{const v=MATCHA_VARIANTS[2];addItem({productId:PRODUCT.slug,variantId:v.size,grams:v.grams,purchaseType:"once",unitPrice:v.price});track("add_to_cart");onAdd()};
-return <article className="product-card"><a href="/shop" onClick={()=>track("product_view")}><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>AB {fmt(lowestPrice())} €</strong></div></a><button className="add" onClick={handleAdd}>In den Warenkorb <span>+</span></button></article>}
+if(loading||!product||!product.variants.length)return <article className="product-card"><a href="/shop"><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>Laden…</strong></div></a></article>;
+const dv=product.variants[0];const lowestCents=Math.min(...product.variants.map(v=>v.price_gross_cents));
+const handleAdd=()=>{addItem({productId:product.id,variantId:dv.id,label:dv.label,grams:dv.size_grams,purchaseType:"once",unitPriceCents:dv.price_gross_cents});track("add_to_cart");onAdd()};
+return <article className="product-card"><a href="/shop" onClick={()=>track("product_view")}><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>AB {fmtCents(lowestCents)} €</strong></div></a><button className="add" onClick={handleAdd}>In den Warenkorb <span>+</span></button></article>}
 function HowTo(){return <section className="how-to"><div className="section-head"><div><p className="eyebrow">HOW TO GLOA</p><h2>Latte oder Pur.<br/>Mehr brauchst du nicht.</h2></div></div><div className="method-grid"><article><span>01</span><h3>Matcha Latte</h3><ol><li>Matcha dosieren</li><li>Mit Wasser aufschlagen</li><li>Milch oder Pflanzendrink dazu</li><li>Heiß oder iced genießen</li></ol></article><article><span>02</span><h3>Pure Matcha</h3><ol><li>Matcha dosieren</li><li>Mit wenig Wasser glattrühren</li><li>Mit Wasser aufschlagen</li><li>Direkt genießen</li></ol></article></div></section>}
 function CommunityFeed(){const [offset,setOffset]=useState(0);const [paused,setPaused]=useState(false);const [animate,setAnimate]=useState(true);const total=communityItems.length;useEffect(()=>{const mq=window.matchMedia("(prefers-reduced-motion: reduce)");if(mq.matches)return;let visible=true;const onVis=()=>{visible=document.visibilityState==="visible"};document.addEventListener("visibilitychange",onVis);const id=setInterval(()=>{if(!paused&&visible)setOffset(p=>p+1)},4500);return()=>{clearInterval(id);document.removeEventListener("visibilitychange",onVis)}},[paused]);useEffect(()=>{if(offset>=total){const t=setTimeout(()=>{setAnimate(false);setOffset(0);requestAnimationFrame(()=>requestAnimationFrame(()=>setAnimate(true)))},400);return()=>clearTimeout(t)}},[offset,total]);const track=[...communityItems,...communityItems.slice(0,4)];return <div className="community-feed" onMouseEnter={()=>setPaused(true)} onMouseLeave={()=>setPaused(false)}><div className="community-track" style={{transform:`translateX(-${offset*25}%)`,transition:animate?"transform 400ms ease":"none"}}>{track.map((item,i)=><div key={`cf-${i}`} className="community-card"><img src={item.image} alt={item.alt} loading="lazy"/></div>)}</div></div>}
 
@@ -76,95 +78,74 @@ return <section className="featured-recipes"><div className="featured-recipes-he
 function Home({onAdd}:{onAdd:()=>void}){return <main><section className="hero"><div className="hero-copy"><p className="eyebrow">MATCHA AUS SHIZUOKA.</p><h1>Matcha.<br/><i>Aber richtig.</i></h1><p className="lead">Aus Shizuoka, Japan. Für Latte, pur, iced oder wie du willst.</p><div className="hero-actions"><a className="cta" href="/shop" onClick={()=>track("shop_click")}>Zum Shop</a><a className="cta secondary" href="/about">GLOA entdecken →</a></div></div><div className="hero-art"><img src="/img/gloa-hero-packaging.png" alt="GLOA Matcha Verpackung" className="hero-img"/><span className="hero-micro">SHIZUOKA / JAPAN</span></div></section><section className="product-intro"><div><p className="eyebrow">MEET YOUR MATCHA.</p><h2>Ein Grün.<br/><i>Viele Momente.</i></h2><p>Aus Shizuoka, Japan. Für Matcha Latte und pur. Easy im Alltag, ehrlich im Produkt.</p><a className="cta" href="/shop">Shop GLOA</a></div><ProductCard onAdd={onAdd}/></section><section className="daily"><div className="daily-copy"><p className="eyebrow">MATCHA FÜR JEDEN TAG</p><h2>Morgens.<br/>Im Meeting.<br/><i>Nachmittags.</i></h2></div><div className="daily-grid">{dailyTiles.map(t=><div className="daily-tile" key={t.label}><img src={t.src} alt={t.alt} loading="lazy"/><span>{t.label}</span></div>)}</div></section><section className="origin"><div><p className="eyebrow">ORIGIN</p><h2>From Shizuoka,<br/><i>Japan.</i></h2></div><div><p>GLOA Matcha kommt aus Shizuoka, Japan. Mehr zum Produzenten, Cultivar und der Ernte teilen wir, sobald alles verifiziert ist.</p><dl><div><dt>ORIGIN</dt><dd>Shizuoka, Japan</dd></div><div><dt>MADE FOR</dt><dd>Latte + pure preparation</dd></div></dl></div></section><HowTo/><RecipeCarousel/><section className="community"><p className="eyebrow">#gloamatcha</p><h2>Zeig uns<br/><i>deinen Matcha.</i></h2><CommunityFeed/><a href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">@gloa.matcha folgen →</a></section><Newsletter/></main>}
 
 function Shop({onAdd}:{onAdd:()=>void}){
+const {product,loading,error}=useCatalog("matcha");
 const {addItem}=useCart();
-const [sizeIdx,setSizeIdx]=useState(2);
-const v=MATCHA_VARIANTS[sizeIdx];
-const [option,setOption]=useState<"once"|"flex"|"annual">("once");
-const fp=flexPrice(v.price);const ap=annualPrice(v.price);
-const selectedPrice=option==="once"?v.price:option==="flex"?fp:ap;
-const per100=pricePer100g(selectedPrice,v.grams);
-const lowest=lowestPrice();
+const [sizeIdx,setSizeIdx]=useState(0);
 
-useEffect(()=>{if(!v.subscriptionEligible&&option!=="once")setOption("once")},[sizeIdx,v.subscriptionEligible,option]);
+if(loading)return <main className="shop-page"><section className="shop-hero"><div className="shop-hero-inner"><p className="eyebrow">GLOA · MATCHA</p><h1>Dein Matcha.<br/><i>Deine Art.</i></h1><p className="lead">Matcha aus Shizuoka, Japan. Für Latte, iced, pur oder wie du ihn magst.</p><p className="shop-hero-price">Laden…</p></div></section></main>;
+if(error||!product)return <main className="shop-page"><section className="shop-hero"><div className="shop-hero-inner"><p className="eyebrow">GLOA · MATCHA</p><h1>Dein Matcha.<br/><i>Deine Art.</i></h1><p className="lead">Shop vorübergehend nicht verfügbar.</p></div></section></main>;
+if(!product.variants.length)return <main className="shop-page"><section className="shop-hero"><div className="shop-hero-inner"><p className="eyebrow">GLOA · MATCHA</p><h1>Dein Matcha.<br/><i>Deine Art.</i></h1><p className="lead">Aktuell keine Produkte verfügbar.</p></div></section></main>;
 
-const handleAdd=()=>{addItem({productId:PRODUCT.slug,variantId:v.size,grams:v.grams,purchaseType:option,unitPrice:selectedPrice});track("add_to_cart");onAdd()};
+const safe=Math.min(sizeIdx,product.variants.length-1);
+const v=product.variants[safe];
+const per100=per100gCents(v.price_gross_cents,v.size_grams);
+const lowestCents=Math.min(...product.variants.map(x=>x.price_gross_cents));
 
-const faqItems:[string,string][]=[
-["Wie oft wird geliefert?","Alle Abos werden einmal im Monat geliefert. Du bekommst deinen Matcha regelmäßig, ohne selbst daran denken zu müssen."],
-["Was ist das Flex-Abo?","Monatliche Lieferung, monatlich kündbar. Du kannst jederzeit pausieren oder kündigen, ohne Mindestlaufzeit."],
-["Was ist das 12-Monats-Abo?","12 Monate Laufzeit mit dem besten Preis. Lieferung und Abrechnung erfolgen monatlich. Nach Ablauf wechselst du automatisch ins Flex-Abo."],
-["Muss ich beim 12-Monats-Abo alles im Voraus bezahlen?","Nein. Die Abrechnung erfolgt monatlich. Du zahlst nur die jeweils gelieferte Menge."],
-["Kann ich mein Abo pausieren?","Ja. Beim Flex-Abo kannst du jederzeit pausieren. Beim 12-Monats-Abo sind bis zu 2 Monate Pause innerhalb der Laufzeit möglich."],
-["Gibt es Abos auch für Merch oder Zubehör?","Nein. Abo-Optionen gibt es nur für Matcha. Merch und Zubehör sind ausschließlich als Einzelkauf erhältlich."]
-];
+const handleAdd=()=>{addItem({productId:product.id,variantId:v.id,label:v.label,grams:v.size_grams,purchaseType:"once",unitPriceCents:v.price_gross_cents});track("add_to_cart");onAdd()};
+
 return <main className="shop-page">
-<section className="shop-hero"><div className="shop-hero-inner"><p className="eyebrow">GLOA · MATCHA</p><h1>Dein Matcha.<br/><i>Deine Art.</i></h1><p className="lead">Matcha aus Shizuoka, Japan. Für Latte, iced, pur oder wie du ihn magst.</p><p className="shop-hero-price">AB {fmt(lowest)} €</p><p className="shop-hero-micro">Launch in Vorbereitung.</p><a className="cta shop-hero-cta" href="#product" onClick={()=>track("shop_scroll_product")}>ZUM MATCHA</a></div></section>
+<section className="shop-hero"><div className="shop-hero-inner"><p className="eyebrow">GLOA · MATCHA</p><h1>Dein Matcha.<br/><i>Deine Art.</i></h1><p className="lead">Matcha aus Shizuoka, Japan. Für Latte, iced, pur oder wie du ihn magst.</p><p className="shop-hero-price">AB {fmtCents(lowestCents)} €</p><p className="shop-hero-micro">Launch in Vorbereitung.</p><a className="cta shop-hero-cta" href="#product" onClick={()=>track("shop_scroll_product")}>ZUM MATCHA</a></div></section>
 
 <section id="product" className="shop-product"><div className="shop-product-image"><img src="/img/gloa-hero-packaging.png" alt="GLOA Matcha Verpackung" loading="lazy"/></div><div className="shop-product-info"><p className="eyebrow">MATCHA</p><h2>GLOA MATCHA</h2><p className="shop-product-sub">Shizuoka, Japan · Latte · Iced · Pur</p>
 
 <div className="size-selector" role="radiogroup" aria-label="Größe wählen">
-{MATCHA_VARIANTS.map((mv,i)=><label key={mv.size} className={`size-option${i===sizeIdx?" active":""}`}><input type="radio" name="size" className="sr-only" value={mv.size} checked={i===sizeIdx} onChange={()=>setSizeIdx(i)}/><span className="size-option-size">{mv.size}</span><span className="size-option-price">{fmt(mv.price)} €</span></label>)}
+{product.variants.map((mv,i)=><label key={mv.id} className={`size-option${i===safe?" active":""}`}><input type="radio" name="size" className="sr-only" value={mv.id} checked={i===safe} onChange={()=>setSizeIdx(i)}/><span className="size-option-size">{mv.label}</span><span className="size-option-price">{fmtCents(mv.price_gross_cents)} €</span></label>)}
 </div>
 
-<p className="shop-product-price">{fmt(selectedPrice)} €{option!=="once"&&<span> / Lieferung</span>}</p>
-<p className="shop-product-per100g">{fmt(per100)} € / 100 g</p>
+<p className="shop-product-price">{fmtCents(v.price_gross_cents)} €</p>
+<p className="shop-product-per100g">{fmtCents(per100)} € / 100 g</p>
 
-{v.subscriptionEligible?<div className="purchase-options" role="radiogroup" aria-label="Kaufoption wählen">
-<label className={`purchase-option${option==="once"?" active":""}`}><input type="radio" name="purchase-option" className="sr-only" value="once" checked={option==="once"} onChange={()=>setOption("once")}/><span className="purchase-option-head"><strong>EINMAL KAUFEN</strong><strong>{fmt(v.price)} €</strong></span><span className="purchase-option-desc">Einmalige Lieferung · Keine Bindung</span></label>
-<label className={`purchase-option${option==="flex"?" active":""}`}><input type="radio" name="purchase-option" className="sr-only" value="flex" checked={option==="flex"} onChange={()=>setOption("flex")}/><span className="purchase-option-head"><strong>FLEX</strong><strong>{fmt(fp)} € <small>/ Lieferung</small></strong></span><span className="purchase-option-badge">10 % SPAREN</span><span className="purchase-option-desc">Monatlich · Kündbar · Pausierbar</span></label>
-<label className={`purchase-option${option==="annual"?" active":""}`}><input type="radio" name="purchase-option" className="sr-only" value="annual" checked={option==="annual"} onChange={()=>setOption("annual")}/><span className="purchase-option-head"><strong>12 MONATE</strong><strong>{fmt(ap)} € <small>/ Lieferung</small></strong></span><span className="purchase-option-badge">15 % SPAREN</span><span className="purchase-option-desc">12 Monate Laufzeit · Monatl. Lieferung + Abrechnung</span></label>
-</div>:<p className="shop-only-once">Nur als Einzelkauf erhältlich.</p>}
-{option==="annual"&&<p className="shop-annual-note">12 Monate Laufzeit. Lieferung und Abrechnung erfolgen monatlich.</p>}
 <button className="cta shop-cta" onClick={handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
 </div></section>
 
-<section className="shop-abo-explain"><div className="shop-abo-explain-inner"><p className="eyebrow">GLOA ON REPEAT</p><h2>Matcha.<br/><i>Jeden Monat.</i></h2><p className="shop-abo-lead">Du entscheidest, wie flexibel du bleiben möchtest. Wir liefern deinen Matcha einmal im Monat.</p><div className="shop-abo-grid"><article><span>01</span><div className="shop-abo-line"/><h3>EINMAL</h3><p>Einmalige Bestellung. Kein Abo, keine Bindung. Einfach Matcha bestellen.</p></article><article><span>02</span><div className="shop-abo-line"/><h3>FLEX</h3><p>Monatliche Lieferung. Jederzeit kündbar oder pausierbar. 10 % günstiger.</p></article><article><span>03</span><div className="shop-abo-line"/><h3>12 MONATE</h3><p>Der beste Preis. 12 Monate Laufzeit, monatliche Lieferung und Abrechnung. 15 % günstiger.</p></article></div></div></section>
-
-<section className="shop-details"><div className="shop-details-inner"><p className="eyebrow">PRODUKTDETAILS</p><dl><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>VERWENDUNG</dt><dd>Latte · Iced · Pur</dd></div><div><dt>ERNTE</dt><dd>2. und 3. Pflückung</dd></div><div><dt>MINDESTHALTBARKEIT</dt><dd>3 Jahre</dd></div><div><dt>LAGERUNG</dt><dd>Kühl und trocken</dd></div><div><dt>GROESSEN</dt><dd>{MATCHA_VARIANTS.map(v=>v.size).join(" · ")}</dd></div></dl><a className="shop-details-link" href="/our-matcha" onClick={()=>track("shop_to_matcha")}>MEHR ÜBER UNSEREN MATCHA →</a></div></section>
-
-<section className="shop-faq faq"><p className="eyebrow">ABO FAQ</p><h2>Fragen<br/>zum Abo?</h2>{faqItems.map(([q,a])=><details key={q}><summary>{q}<span>+</span></summary><p>{a}</p></details>)}</section>
+<section className="shop-details"><div className="shop-details-inner"><p className="eyebrow">PRODUKTDETAILS</p><dl><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>VERWENDUNG</dt><dd>Latte · Iced · Pur</dd></div><div><dt>ERNTE</dt><dd>2. und 3. Pflückung</dd></div><div><dt>MINDESTHALTBARKEIT</dt><dd>3 Jahre</dd></div><div><dt>LAGERUNG</dt><dd>Kühl und trocken</dd></div><div><dt>GROESSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div></dl><a className="shop-details-link" href="/our-matcha" onClick={()=>track("shop_to_matcha")}>MEHR ÜBER UNSEREN MATCHA →</a></div></section>
 
 <Newsletter/>
 </main>}
 
 function ProductPage({onAdd}:{onAdd:()=>void}){
+const {product,loading,error}=useCatalog("matcha");
 const {addItem}=useCart();
-const [sizeIdx,setSizeIdx]=useState(2);
-const v=MATCHA_VARIANTS[sizeIdx];
-const [option,setOption]=useState<"once"|"flex"|"annual">("once");
-const fp=flexPrice(v.price);const ap=annualPrice(v.price);
-const selectedPrice=option==="once"?v.price:option==="flex"?fp:ap;
-const per100=pricePer100g(selectedPrice,v.grams);
+const [sizeIdx,setSizeIdx]=useState(0);
 
-useEffect(()=>{if(!v.subscriptionEligible&&option!=="once")setOption("once")},[sizeIdx,v.subscriptionEligible,option]);
+if(loading)return <main className="pdp"><section className="pdp-hero"><div className="pdp-hero-info"><p className="eyebrow">MATCHA · SHIZUOKA</p><h1>{PRODUCT.name}</h1><p>Laden…</p></div></section></main>;
+if(error||!product||!product.variants.length)return <main className="pdp"><section className="pdp-hero"><div className="pdp-hero-info"><p className="eyebrow">MATCHA · SHIZUOKA</p><h1>{PRODUCT.name}</h1><p>Produkt vorübergehend nicht verfügbar.</p></div></section></main>;
 
-const handleAdd=()=>{addItem({productId:PRODUCT.slug,variantId:v.size,grams:v.grams,purchaseType:option,unitPrice:selectedPrice});track("add_to_cart");onAdd()};
+const safe=Math.min(sizeIdx,product.variants.length-1);
+const v=product.variants[safe];
+const per100=per100gCents(v.price_gross_cents,v.size_grams);
+
+const handleAdd=()=>{addItem({productId:product.id,variantId:v.id,label:v.label,grams:v.size_grams,purchaseType:"once",unitPriceCents:v.price_gross_cents});track("add_to_cart");onAdd()};
 
 return <main className="pdp">
 <section className="pdp-hero"><div className="pdp-hero-image"><img src="/img/gloa-hero-packaging.png" alt="GLOA Matcha Verpackung"/></div><div className="pdp-hero-info"><p className="eyebrow">MATCHA · SHIZUOKA</p><h1>{PRODUCT.name}</h1><p>Für Latte, iced und pure Zubereitung.</p>
 
 <div className="size-selector" role="radiogroup" aria-label="Größe wählen">
-{MATCHA_VARIANTS.map((mv,i)=><label key={mv.size} className={`size-option${i===sizeIdx?" active":""}`}><input type="radio" name="pdp-size" className="sr-only" value={mv.size} checked={i===sizeIdx} onChange={()=>setSizeIdx(i)}/><span className="size-option-size">{mv.size}</span><span className="size-option-price">{fmt(mv.price)} €</span></label>)}
+{product.variants.map((mv,i)=><label key={mv.id} className={`size-option${i===safe?" active":""}`}><input type="radio" name="pdp-size" className="sr-only" value={mv.id} checked={i===safe} onChange={()=>setSizeIdx(i)}/><span className="size-option-size">{mv.label}</span><span className="size-option-price">{fmtCents(mv.price_gross_cents)} €</span></label>)}
 </div>
 
-<p className="pdp-price">{fmt(selectedPrice)} €{option!=="once"&&<span> / Lieferung</span>}</p>
-<p className="pdp-per100g">{fmt(per100)} € / 100 g</p>
-
-{v.subscriptionEligible?<div className="purchase-options" role="radiogroup" aria-label="Kaufoption wählen">
-<label className={`purchase-option${option==="once"?" active":""}`}><input type="radio" name="pdp-purchase" className="sr-only" value="once" checked={option==="once"} onChange={()=>setOption("once")}/><span className="purchase-option-head"><strong>EINMAL KAUFEN</strong><strong>{fmt(v.price)} €</strong></span><span className="purchase-option-desc">Einmalige Lieferung · Keine Bindung</span></label>
-<label className={`purchase-option${option==="flex"?" active":""}`}><input type="radio" name="pdp-purchase" className="sr-only" value="flex" checked={option==="flex"} onChange={()=>setOption("flex")}/><span className="purchase-option-head"><strong>FLEX</strong><strong>{fmt(fp)} € <small>/ Lieferung</small></strong></span><span className="purchase-option-badge">10 % SPAREN</span><span className="purchase-option-desc">Monatlich · Kündbar · Pausierbar</span></label>
-<label className={`purchase-option${option==="annual"?" active":""}`}><input type="radio" name="pdp-purchase" className="sr-only" value="annual" checked={option==="annual"} onChange={()=>setOption("annual")}/><span className="purchase-option-head"><strong>12 MONATE</strong><strong>{fmt(ap)} € <small>/ Lieferung</small></strong></span><span className="purchase-option-badge">15 % SPAREN</span><span className="purchase-option-desc">12 Monate Laufzeit · Monatl. Lieferung + Abrechnung</span></label>
-</div>:<p className="shop-only-once">Nur als Einzelkauf erhältlich.</p>}
+<p className="pdp-price">{fmtCents(v.price_gross_cents)} €</p>
+<p className="pdp-per100g">{fmtCents(per100)} € / 100 g</p>
 
 <button className="cta shop-cta" onClick={handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
 </div></section>
 
-<section className="pdp-facts"><div><p className="eyebrow">WHAT WE KNOW</p><h2>Clear facts.<br/>Nothing invented.</h2></div><dl><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>VERWENDUNG</dt><dd>Latte · Iced · Pur</dd></div><div><dt>LAGERUNG</dt><dd>{PRODUCT.storage}</dd></div><div><dt>GROESSEN</dt><dd>{MATCHA_VARIANTS.map(v=>v.size).join(" · ")}</dd></div></dl></section>
+<section className="pdp-facts"><div><p className="eyebrow">WHAT WE KNOW</p><h2>Clear facts.<br/>Nothing invented.</h2></div><dl><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>VERWENDUNG</dt><dd>Latte · Iced · Pur</dd></div><div><dt>LAGERUNG</dt><dd>{PRODUCT.storage}</dd></div><div><dt>GROESSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div></dl></section>
 <HowTo/>
 </main>}
 
 function PageHero({index,eyebrow,title,text,tone}:{index:string;eyebrow:string;title:React.ReactNode;text:string;tone:string}){return <section className={`inner-hero ${tone}`}><span className="page-index">{index}</span><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="lead">{text}</p></div></section>}
-function MatchaPage(){return <main className="matcha-page">
+function MatchaPage(){const {product}=useCatalog("matcha");const lowestCents=product&&product.variants.length?Math.min(...product.variants.map(v=>v.price_gross_cents)):null;return <main className="matcha-page">
 <section className="matcha-hero"><div className="matcha-hero-copy"><p className="eyebrow">UNSER MATCHA</p><h1>Aus Shizuoka.<br/><i>Für deinen Alltag.</i></h1><p className="lead">Was wir über unser Produkt wissen. Was wir noch nicht sagen können. Keine erfundenen Claims. Kein Marketing-Bullshit.</p></div><div className="matcha-hero-visual"><img src="/img/gloa-hero-packaging.png" alt="GLOA Matcha Verpackung"/></div></section>
 
 <section className="matcha-facts"><p className="eyebrow">HERKUNFT</p><h2>Shizuoka,<br/><i>Japan.</i></h2><p className="matcha-section-text">GLOA Matcha kommt aus Shizuoka, einer der bekanntesten Teeanbauregionen Japans. Genauere Angaben zum Produzenten oder zur Farm können wir aktuell noch nicht machen.</p></section>
@@ -175,7 +156,7 @@ function MatchaPage(){return <main className="matcha-page">
 
 <section className="matcha-facts matcha-known"><p className="eyebrow">WAS WIR WISSEN</p><h2>Bestätigte<br/><i>Fakten.</i></h2><div className="matcha-facts-grid"><div><span>HERKUNFT</span><strong>Shizuoka, Japan</strong></div><div><span>ERNTE</span><strong>2. und 3. Pflückung</strong></div><div><span>VERWENDUNG</span><strong>Latte · Iced · Pur</strong></div><div><span>MINDESTHALTBARKEIT</span><strong>3 Jahre</strong></div><div><span>LAGERUNG</span><strong>Kühl und trocken</strong></div><div><span>LAGER</span><strong>Deutschland</strong></div></div></section>
 
-<section className="matcha-transparency"><div className="matcha-transparency-inner"><p className="eyebrow">TRANSPARENZ</p><h2>Was wir noch<br/><i>prüfen.</i></h2><p>Einige Details zum Produkt sind noch nicht vollständig verifiziert. Sobald sie bestätigt sind, ergänzen wir sie hier.</p><div className="matcha-pending-grid">{[["GESCHMACKSPROFIL","IN PRÜFUNG"],["CULTIVAR","IN PRÜFUNG"],["SINGLE CULTIVAR / BLEND","IN PRÜFUNG"],["PRODUZENT / FARM","IN PRÜFUNG"],["BIO-STATUS","IN PRÜFUNG"],["MAHLVERFAHREN – DETAILS","IN PRÜFUNG"]].map(([label,status])=><div key={label}><span>{label}</span><strong>○ {status}</strong></div>)}</div><p className="eyebrow matcha-pending-subhead">QUALITÄT & DOKUMENTATION</p><div className="matcha-pending-grid">{[["PRODUKTSPEZIFIKATION","IN PRÜFUNG"],["CHARGENANALYSE / COA","IN PRÜFUNG"],["PESTIZIDRÜCKSTÄNDE","UNTERLAGEN IN PRÜFUNG"],["MIKROBIOLOGISCHE ANALYSE","UNTERLAGEN IN PRÜFUNG"],["SCHWERMETALLANALYSE","UNTERLAGEN IN PRÜFUNG"],["ERNTE- / PRODUKTIONSDATEN","IN PRÜFUNG"]].map(([label,status])=><div key={label}><span>{label}</span><strong>○ {status}</strong></div>)}</div><div className="matcha-price-note"><span>ENDKUNDENPREIS</span><strong>AB {fmt(lowestPrice())} €</strong></div><p className="matcha-transparency-note">Wir erfinden nichts. Was hier steht, ist geprüft.</p></div></section>
+<section className="matcha-transparency"><div className="matcha-transparency-inner"><p className="eyebrow">TRANSPARENZ</p><h2>Was wir noch<br/><i>prüfen.</i></h2><p>Einige Details zum Produkt sind noch nicht vollständig verifiziert. Sobald sie bestätigt sind, ergänzen wir sie hier.</p><div className="matcha-pending-grid">{[["GESCHMACKSPROFIL","IN PRÜFUNG"],["CULTIVAR","IN PRÜFUNG"],["SINGLE CULTIVAR / BLEND","IN PRÜFUNG"],["PRODUZENT / FARM","IN PRÜFUNG"],["BIO-STATUS","IN PRÜFUNG"],["MAHLVERFAHREN – DETAILS","IN PRÜFUNG"]].map(([label,status])=><div key={label}><span>{label}</span><strong>○ {status}</strong></div>)}</div><p className="eyebrow matcha-pending-subhead">QUALITÄT & DOKUMENTATION</p><div className="matcha-pending-grid">{[["PRODUKTSPEZIFIKATION","IN PRÜFUNG"],["CHARGENANALYSE / COA","IN PRÜFUNG"],["PESTIZIDRÜCKSTÄNDE","UNTERLAGEN IN PRÜFUNG"],["MIKROBIOLOGISCHE ANALYSE","UNTERLAGEN IN PRÜFUNG"],["SCHWERMETALLANALYSE","UNTERLAGEN IN PRÜFUNG"],["ERNTE- / PRODUKTIONSDATEN","IN PRÜFUNG"]].map(([label,status])=><div key={label}><span>{label}</span><strong>○ {status}</strong></div>)}</div><div className="matcha-price-note"><span>ENDKUNDENPREIS</span><strong>{lowestCents!==null?<>AB {fmtCents(lowestCents)} €</>:"Laden…"}</strong></div><p className="matcha-transparency-note">Wir erfinden nichts. Was hier steht, ist geprüft.</p></div></section>
 
 <section className="matcha-shizuoka"><p className="eyebrow">SHIZUOKA</p><h2>Bald<br/><i>vor Ort.</i></h2><p>Wir planen einen Besuch vor Ort in Shizuoka. Sobald alles steht, nehmen wir euch mit und zeigen euch mehr über Herkunft, Verarbeitung und die Menschen hinter dem Produkt.</p><p className="matcha-build-note">Wir zeigen euch den Weg bis zum fertigen GLOA Produkt Schritt für Schritt.</p><a className="cta cream" href="https://www.tiktok.com/@gloa.matcha" target="_blank" rel="noopener noreferrer">AUF TIKTOK FOLGEN ↗</a></section>
 
@@ -421,15 +402,15 @@ return <div className="cart-backdrop" onClick={onClose}><aside className="cart" 
 <p>Zeit für Matcha?</p>
 <a href="/shop" className="cta" onClick={onClose}>Matcha →</a>
 </div>:<>
-<div className="cart-items">{cart.items.map(item=><div key={`${item.variantId}-${item.purchaseType}`} className="cart-item">
-<div className="cart-item-info"><strong>GLOA Matcha</strong><span>{item.grams} g · {purchaseLabel(item.purchaseType)}</span></div>
+<div className="cart-items">{cart.items.map(item=><div key={item.variantId} className="cart-item">
+<div className="cart-item-info"><strong>GLOA Matcha</strong><span>{item.label}</span></div>
 <div className="cart-item-row">
-<div className="cart-qty"><button onClick={()=>cart.updateQuantity(item.productId,item.variantId,item.purchaseType,item.quantity-1)} aria-label="Menge reduzieren">-</button><span>{item.quantity}</span><button onClick={()=>cart.updateQuantity(item.productId,item.variantId,item.purchaseType,item.quantity+1)} aria-label="Menge erhöhen">+</button></div>
-<strong>{fmt(item.unitPrice*item.quantity)} €</strong>
+<div className="cart-qty"><button onClick={()=>cart.updateQuantity(item.productId,item.variantId,item.quantity-1)} aria-label="Menge reduzieren">-</button><span>{item.quantity}</span><button onClick={()=>cart.updateQuantity(item.productId,item.variantId,item.quantity+1)} aria-label="Menge erhöhen">+</button></div>
+<strong>{fmtCents(item.unitPriceCents*item.quantity)} €</strong>
 </div>
-<button className="cart-item-remove" onClick={()=>cart.removeItem(item.productId,item.variantId,item.purchaseType)} aria-label="Artikel entfernen">Entfernen</button>
+<button className="cart-item-remove" onClick={()=>cart.removeItem(item.productId,item.variantId)} aria-label="Artikel entfernen">Entfernen</button>
 </div>)}</div>
-<div className="cart-footer"><div className="cart-total"><span>SUMME</span><strong>{fmt(cart.totalPrice)} €</strong></div></div>
+<div className="cart-footer"><div className="cart-total"><span>SUMME</span><strong>{fmtCents(cart.totalCents)} €</strong></div></div>
 </>}
 </aside></div>
 }

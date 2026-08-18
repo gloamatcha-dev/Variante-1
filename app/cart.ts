@@ -4,9 +4,10 @@ import { useSyncExternalStore, useCallback } from "react";
 export type CartItem = {
   productId: string;
   variantId: string;
+  label: string;
   grams: number;
-  purchaseType: "once" | "flex" | "annual";
-  unitPrice: number;
+  purchaseType: "once";
+  unitPriceCents: number;
   quantity: number;
 };
 
@@ -15,11 +16,22 @@ let listeners: (() => void)[] = [];
 let snapshot: CartItem[] = [];
 let initialized = false;
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function load(): CartItem[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const items: unknown[] = JSON.parse(raw);
+    return items.filter((item: any) =>
+      item &&
+      typeof item.variantId === "string" &&
+      UUID_RE.test(item.variantId) &&
+      typeof item.unitPriceCents === "number" &&
+      Number.isInteger(item.unitPriceCents) &&
+      item.purchaseType === "once"
+    ) as CartItem[];
   } catch { return []; }
 }
 
@@ -31,7 +43,17 @@ function persist(items: CartItem[]) {
 
 function init() {
   if (initialized || typeof window === "undefined") return;
-  snapshot = load();
+  const cleaned = load();
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (raw) {
+    try {
+      const original = JSON.parse(raw);
+      if (original.length !== cleaned.length) persist(cleaned);
+      else snapshot = cleaned;
+    } catch { snapshot = cleaned; }
+  } else {
+    snapshot = cleaned;
+  }
   initialized = true;
 }
 
@@ -51,8 +73,7 @@ export function useCart() {
     const cur = getSnapshot();
     const idx = cur.findIndex(c =>
       c.productId === item.productId &&
-      c.variantId === item.variantId &&
-      c.purchaseType === item.purchaseType
+      c.variantId === item.variantId
     );
     if (idx >= 0) {
       const next = [...cur];
@@ -63,21 +84,21 @@ export function useCart() {
     }
   }, []);
 
-  const removeItem = useCallback((productId: string, variantId: string, purchaseType: string) => {
+  const removeItem = useCallback((productId: string, variantId: string) => {
     persist(getSnapshot().filter(c =>
-      !(c.productId === productId && c.variantId === variantId && c.purchaseType === purchaseType)
+      !(c.productId === productId && c.variantId === variantId)
     ));
   }, []);
 
-  const updateQuantity = useCallback((productId: string, variantId: string, purchaseType: string, qty: number) => {
+  const updateQuantity = useCallback((productId: string, variantId: string, qty: number) => {
     if (qty <= 0) {
       persist(getSnapshot().filter(c =>
-        !(c.productId === productId && c.variantId === variantId && c.purchaseType === purchaseType)
+        !(c.productId === productId && c.variantId === variantId)
       ));
       return;
     }
     persist(getSnapshot().map(c =>
-      c.productId === productId && c.variantId === variantId && c.purchaseType === purchaseType
+      c.productId === productId && c.variantId === variantId
         ? { ...c, quantity: qty } : c
     ));
   }, []);
@@ -91,6 +112,6 @@ export function useCart() {
     updateQuantity,
     clearCart,
     totalCount: items.reduce((s, i) => s + i.quantity, 0),
-    totalPrice: items.reduce((s, i) => s + i.unitPrice * i.quantity, 0),
+    totalCents: items.reduce((s, i) => s + i.unitPriceCents * i.quantity, 0),
   };
 }
