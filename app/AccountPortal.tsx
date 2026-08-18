@@ -6,18 +6,18 @@ import { useAuth } from "../lib/auth";
 import type { AddressRow } from "../lib/auth";
 import { supabase } from "../lib/supabase";
 
-type PortalPage = "dashboard" | "orders" | "subscriptions" | "addresses" | "profile" | "business" | "order-detail";
+type PortalPage = "dashboard" | "orders" | "subscriptions" | "addresses" | "profile" | "business" | "order-detail" | "subscription-detail";
 
-const NAV: { key: PortalPage; label: string; b2bOnly?: boolean }[] = [
+const NAV: { key: PortalPage; label: string; b2bOnly?: boolean; privateOnly?: boolean }[] = [
   { key: "dashboard", label: "Übersicht" },
   { key: "orders", label: "Bestellungen" },
-  { key: "subscriptions", label: "Abos" },
+  { key: "subscriptions", label: "Abos", privateOnly: true },
   { key: "addresses", label: "Adressen" },
   { key: "profile", label: "Kontodaten" },
   { key: "business", label: "B2B", b2bOnly: true },
 ];
 
-export function AccountPortal({ page, orderId }: { page: PortalPage; orderId?: string }) {
+export function AccountPortal({ page, orderId, subscriptionId }: { page: PortalPage; orderId?: string; subscriptionId?: string }) {
   const { user, profile, loading, signOut } = useAuth();
   const customerType: CustomerType = profile?.customer_type ?? "private";
 
@@ -33,11 +33,17 @@ export function AccountPortal({ page, orderId }: { page: PortalPage; orderId?: s
     return null;
   }
 
+  // Private-only page guard (subscriptions are B2C only)
+  if (!loading && (page === "subscriptions" || page === "subscription-detail") && customerType === "business") {
+    if (typeof window !== "undefined") window.location.href = "/account/dashboard";
+    return null;
+  }
+
   if (loading) {
     return <main className="portal"><p className="portal-loading">Laden…</p></main>;
   }
 
-  const navItems = NAV.filter(n => !n.b2bOnly || customerType === "business");
+  const navItems = NAV.filter(n => (!n.b2bOnly || customerType === "business") && (!n.privateOnly || customerType === "private"));
   const firstName = profile?.first_name || "—";
 
   const handleLogout = async () => {
@@ -49,7 +55,7 @@ export function AccountPortal({ page, orderId }: { page: PortalPage; orderId?: s
     <main className="portal">
       <nav className="portal-nav">
         {navItems.map(n => (
-          <a key={n.key} href={`/account/${n.key}`} className={page === n.key || (n.key === "orders" && page === "order-detail") ? "active" : ""}>{n.label}</a>
+          <a key={n.key} href={`/account/${n.key}`} className={page === n.key || (n.key === "orders" && page === "order-detail") || (n.key === "subscriptions" && page === "subscription-detail") ? "active" : ""}>{n.label}</a>
         ))}
         <span className="portal-nav-spacer" />
         <button className="portal-logout" onClick={handleLogout}>Abmelden</button>
@@ -60,6 +66,7 @@ export function AccountPortal({ page, orderId }: { page: PortalPage; orderId?: s
         {page === "orders" && <PortalOrders />}
         {page === "order-detail" && <OrderDetail orderId={orderId!} />}
         {page === "subscriptions" && <PortalSubscriptions />}
+        {page === "subscription-detail" && <SubscriptionDetail subscriptionId={subscriptionId!} />}
         {page === "addresses" && <PortalAddresses />}
         {page === "profile" && <PortalProfile />}
         {page === "business" && <PortalBusiness />}
@@ -116,6 +123,65 @@ const STATUS_DE: Record<string, string> = {
   refunded: "Erstattet",
 };
 
+// ── Subscription Types ────────────────────────────────────────────────
+
+type SubscriptionRow = {
+  id: string;
+  customer_type: string;
+  status: string;
+  currency: string;
+  customer_snapshot: Record<string, unknown>;
+  shipping_address_snapshot: Record<string, unknown>;
+  billing_address_snapshot: Record<string, unknown>;
+  plan_snapshot: Record<string, unknown>;
+  subtotal_net_cents: number;
+  subtotal_gross_cents: number;
+  discount_total_cents: number;
+  shipping_net_cents: number;
+  shipping_gross_cents: number;
+  tax_total_cents: number;
+  total_net_cents: number;
+  total_gross_cents: number;
+  current_period_start: string | null;
+  current_period_end: string | null;
+  next_delivery_at: string | null;
+  started_at: string | null;
+  paused_at: string | null;
+  cancelled_at: string | null;
+  cancel_at_period_end: boolean;
+  created_at: string;
+};
+
+type SubscriptionItemRow = {
+  id: string;
+  subscription_id: string;
+  product_name: string;
+  variant_name: string | null;
+  quantity: number;
+  unit_price_net_cents: number;
+  unit_price_gross_cents: number;
+  tax_rate_percent: number | null;
+  line_total_net_cents: number;
+  line_total_gross_cents: number;
+};
+
+const SUB_STATUS_DE: Record<string, string> = {
+  pending: "Ausstehend",
+  active: "Aktiv",
+  paused: "Pausiert",
+  cancelled: "Gekündigt",
+};
+
+const INTERVAL_DE: Record<string, string> = {
+  weekly: "Wöchentlich",
+  biweekly: "Alle 2 Wochen",
+  monthly: "Monatlich",
+  bimonthly: "Alle 2 Monate",
+  quarterly: "Vierteljährlich",
+  semiannual: "Halbjährlich",
+  annual: "Jährlich",
+};
+
 const fmtCents = (cents: number) => (cents / 100).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
 
@@ -124,12 +190,21 @@ const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("de-DE", { day
 function PortalDashboard({ firstName, customerType }: { firstName: string; customerType: CustomerType }) {
   const [lastOrder, setLastOrder] = useState<OrderRow | null>(null);
   const [orderLoading, setOrderLoading] = useState(true);
+  const [activeSub, setActiveSub] = useState<SubscriptionRow | null>(null);
+  const [subLoading, setSubLoading] = useState(customerType === "private");
 
   useEffect(() => {
-    if (!supabase) { setOrderLoading(false); return; }
+    if (!supabase) { setOrderLoading(false); setSubLoading(false); return; }
     supabase.from("orders").select("*").order("created_at", { ascending: false }).limit(1)
       .then(({ data }) => { setLastOrder(data?.[0] ?? null); setOrderLoading(false); });
-  }, []);
+    if (customerType === "private") {
+      supabase.from("subscriptions").select("*").eq("status", "active").order("created_at", { ascending: false }).limit(1)
+        .then(({ data }) => { setActiveSub(data?.[0] ?? null); setSubLoading(false); });
+    }
+  }, [customerType]);
+
+  const planName = activeSub?.plan_snapshot ? (activeSub.plan_snapshot as Record<string, string>).name || "Abo" : "Abo";
+  const deliveryInterval = activeSub?.plan_snapshot ? INTERVAL_DE[(activeSub.plan_snapshot as Record<string, string>).delivery_interval] || "" : "";
 
   return (
     <>
@@ -139,10 +214,22 @@ function PortalDashboard({ firstName, customerType }: { firstName: string; custo
       </section>
 
       <div className="portal-dashboard-grid">
-        <section className="portal-dash-block portal-dash-wide">
-          <p className="eyebrow">NÄCHSTE LIEFERUNG</p>
-          <p className="portal-empty">Keine geplante Lieferung.</p>
-        </section>
+        {customerType === "private" && (
+          <section className="portal-dash-block portal-dash-wide">
+            <p className="eyebrow">NÄCHSTE LIEFERUNG</p>
+            {subLoading ? (
+              <p className="portal-empty">Laden…</p>
+            ) : activeSub?.next_delivery_at ? (
+              <div className="portal-dash-order">
+                <div className="portal-dash-order-row"><span>{planName}</span><span>{fmtDate(activeSub.next_delivery_at)}</span></div>
+                {deliveryInterval && <div className="portal-dash-order-row"><span>{deliveryInterval}</span><strong>{fmtCents(activeSub.total_gross_cents)} €</strong></div>}
+                <a href={`/account/subscriptions/${activeSub.id}`} className="portal-dash-order-link">ABO ANSEHEN</a>
+              </div>
+            ) : (
+              <p className="portal-empty">Keine geplante Lieferung.</p>
+            )}
+          </section>
+        )}
 
         <section className="portal-dash-block">
           <p className="eyebrow">LETZTE BESTELLUNG</p>
@@ -159,17 +246,29 @@ function PortalDashboard({ firstName, customerType }: { firstName: string; custo
           )}
         </section>
 
-        <section className="portal-dash-block">
-          <p className="eyebrow">DEIN ABO</p>
-          <p className="portal-empty">Du hast aktuell kein aktives Abo.</p>
-        </section>
+        {customerType === "private" && (
+          <section className="portal-dash-block">
+            <p className="eyebrow">DEIN ABO</p>
+            {subLoading ? (
+              <p className="portal-empty">Laden…</p>
+            ) : activeSub ? (
+              <div className="portal-dash-order">
+                <div className="portal-dash-order-row"><span>{planName}</span><span>{SUB_STATUS_DE[activeSub.status] || activeSub.status}</span></div>
+                <div className="portal-dash-order-row"><span>{deliveryInterval}</span><strong>{fmtCents(activeSub.total_gross_cents)} €</strong></div>
+                <a href={`/account/subscriptions/${activeSub.id}`} className="portal-dash-order-link">ABO ANSEHEN</a>
+              </div>
+            ) : (
+              <p className="portal-empty">Du hast aktuell kein aktives Abo.</p>
+            )}
+          </section>
+        )}
       </div>
 
       <section className="portal-quicklinks">
         <p className="eyebrow">SCHNELLZUGRIFFE</p>
         <div className="portal-quicklinks-grid">
           <a href="/account/orders">Bestellungen</a>
-          <a href="/account/subscriptions">Abos</a>
+          {customerType === "private" && <a href="/account/subscriptions">Abos</a>}
           <a href="/account/addresses">Adressen</a>
           <a href="/account/profile">Kontodaten</a>
           {customerType === "business" && <a href="/account/business">B2B</a>}
@@ -358,16 +457,183 @@ function OrderDetail({ orderId }: { orderId: string }) {
 // ── Abos ───────────────────────────────────────────────────────────────
 
 function PortalSubscriptions() {
+  const [subs, setSubs] = useState<SubscriptionRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!supabase) { setLoading(false); return; }
+    supabase.from("subscriptions").select("*").order("created_at", { ascending: false })
+      .then(({ data, error: err }) => {
+        if (err) { setError("Deine Abos konnten gerade nicht geladen werden."); }
+        else { setSubs(data ?? []); }
+        setLoading(false);
+      });
+  }, []);
+
   return (
     <>
       <section className="portal-page-head">
         <p className="eyebrow">ABOS</p>
         <h1>Deine Abos.</h1>
-        <p className="portal-page-lead">Verwalte hier deine regelmäßigen Lieferungen.</p>
+        <p className="portal-page-lead">Hier findest du deine regelmäßigen Lieferungen.</p>
       </section>
-      <section className="portal-empty-state">
-        <p>Du hast aktuell kein aktives Abo.</p>
-        <a className="cta" href="/shop">MATCHA ENTDECKEN</a>
+
+      {loading ? (
+        <p className="portal-loading">Laden…</p>
+      ) : error ? (
+        <section className="portal-empty-state"><p>{error}</p></section>
+      ) : subs.length === 0 ? (
+        <section className="portal-empty-state">
+          <p>Du hast aktuell kein aktives Abo.</p>
+          <a className="cta" href="/shop">MATCHA ENTDECKEN</a>
+        </section>
+      ) : (
+        <div className="sub-list">
+          <div className="sub-list-header">
+            <span>Abo</span>
+            <span>Lieferung</span>
+            <span>Status</span>
+            <span>Betrag</span>
+          </div>
+          {subs.map(s => {
+            const plan = s.plan_snapshot as Record<string, string>;
+            return (
+              <a key={s.id} href={`/account/subscriptions/${s.id}`} className="sub-list-row">
+                <span className="sub-list-name">{plan.name || "Abo"}</span>
+                <span>{s.next_delivery_at ? fmtDate(s.next_delivery_at) : "—"}</span>
+                <span>{SUB_STATUS_DE[s.status] || s.status}</span>
+                <span className="sub-list-total">{fmtCents(s.total_gross_cents)} €</span>
+              </a>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
+// ── Abo-Detail ──────────────────────────────────────────────────────
+
+function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
+  const [sub, setSub] = useState<SubscriptionRow | null>(null);
+  const [items, setItems] = useState<SubscriptionItemRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+
+  useEffect(() => {
+    if (!supabase) { setLoading(false); setNotFound(true); return; }
+    Promise.all([
+      supabase.from("subscriptions").select("*").eq("id", subscriptionId).maybeSingle(),
+      supabase.from("subscription_items").select("*").eq("subscription_id", subscriptionId).order("created_at"),
+    ]).then(([sRes, iRes]) => {
+      if (!sRes.data) { setNotFound(true); }
+      else { setSub(sRes.data); setItems(iRes.data ?? []); }
+      setLoading(false);
+    });
+  }, [subscriptionId]);
+
+  if (loading) return <p className="portal-loading">Laden…</p>;
+
+  if (notFound || !sub) return (
+    <>
+      <section className="portal-page-head">
+        <p className="eyebrow">ABO</p>
+        <h1>Abo nicht gefunden.</h1>
+      </section>
+      <a href="/account/subscriptions" className="portal-back-link">&larr; Zurück zu Abos</a>
+    </>
+  );
+
+  const plan = sub.plan_snapshot as Record<string, string>;
+  const ship = sub.shipping_address_snapshot as Record<string, string>;
+  const bill = sub.billing_address_snapshot as Record<string, string>;
+
+  return (
+    <>
+      <a href="/account/subscriptions" className="portal-back-link">&larr; Abos</a>
+
+      <section className="portal-page-head">
+        <p className="eyebrow">ABO</p>
+        <h1>{plan.name || "Dein Abo"}</h1>
+      </section>
+
+      <div className="order-detail-meta">
+        <div className="portal-profile-row"><span>Status</span><strong>{SUB_STATUS_DE[sub.status] || sub.status}</strong></div>
+        {plan.delivery_interval && <div className="portal-profile-row"><span>Lieferintervall</span><strong>{INTERVAL_DE[plan.delivery_interval] || plan.delivery_interval}</strong></div>}
+        {sub.next_delivery_at && <div className="portal-profile-row"><span>Nächste Lieferung</span><strong>{fmtDate(sub.next_delivery_at)}</strong></div>}
+        {sub.started_at && <div className="portal-profile-row"><span>Laufzeit seit</span><strong>{fmtDate(sub.started_at)}</strong></div>}
+        {sub.current_period_start && sub.current_period_end && (
+          <div className="portal-profile-row"><span>Aktueller Zeitraum</span><strong>{fmtDate(sub.current_period_start)} – {fmtDate(sub.current_period_end)}</strong></div>
+        )}
+        {sub.cancel_at_period_end && <div className="portal-profile-row"><span>Hinweis</span><strong>Endet zum Periodenende</strong></div>}
+        {sub.paused_at && <div className="portal-profile-row"><span>Pausiert seit</span><strong>{fmtDate(sub.paused_at)}</strong></div>}
+        {sub.cancelled_at && <div className="portal-profile-row"><span>Gekündigt am</span><strong>{fmtDate(sub.cancelled_at)}</strong></div>}
+      </div>
+
+      {/* ── Items ── */}
+      {items.length > 0 && (
+        <section className="order-detail-section">
+          <p className="eyebrow">ARTIKEL</p>
+          <div className="order-items-list">
+            {items.map(item => (
+              <div key={item.id} className="order-item-row">
+                <div className="order-item-name">
+                  <strong>{item.product_name}</strong>
+                  {item.variant_name && <span className="order-item-variant">{item.variant_name}</span>}
+                </div>
+                <span className="order-item-qty">{item.quantity}×</span>
+                <span className="order-item-unit">{fmtCents(item.unit_price_gross_cents)} €</span>
+                <span className="order-item-total">{fmtCents(item.line_total_gross_cents)} €</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ── Addresses ── */}
+      <div className="order-detail-addresses">
+        <section className="order-detail-section">
+          <p className="eyebrow">LIEFERADRESSE</p>
+          <div className="portal-address-display">
+            <p>{ship.first_name} {ship.last_name}</p>
+            {ship.company && <p>{ship.company}</p>}
+            <p>{ship.street} {ship.house_number}</p>
+            <p>{ship.zip} {ship.city}</p>
+            <p>{ship.country}</p>
+          </div>
+        </section>
+        <section className="order-detail-section">
+          <p className="eyebrow">RECHNUNGSADRESSE</p>
+          <div className="portal-address-display">
+            <p>{bill.first_name} {bill.last_name}</p>
+            {bill.company && <p>{bill.company}</p>}
+            <p>{bill.street} {bill.house_number}</p>
+            <p>{bill.zip} {bill.city}</p>
+            <p>{bill.country}</p>
+          </div>
+        </section>
+      </div>
+
+      {/* ── Totals ── */}
+      <section className="order-detail-section">
+        <p className="eyebrow">SUMME PRO LIEFERUNG</p>
+        <div className="order-totals">
+          <div className="portal-profile-row"><span>Zwischensumme</span><strong>{fmtCents(sub.subtotal_gross_cents)} €</strong></div>
+          {sub.discount_total_cents > 0 && (
+            <div className="portal-profile-row"><span>Rabatt</span><strong>&minus;{fmtCents(sub.discount_total_cents)} €</strong></div>
+          )}
+          {sub.shipping_gross_cents > 0 && (
+            <div className="portal-profile-row"><span>Versand</span><strong>{fmtCents(sub.shipping_gross_cents)} €</strong></div>
+          )}
+          {sub.tax_total_cents > 0 && (
+            <div className="portal-profile-row"><span>MwSt.</span><strong>{fmtCents(sub.tax_total_cents)} €</strong></div>
+          )}
+          <div className="portal-profile-row order-total-final">
+            <span>Gesamt</span>
+            <strong>{fmtCents(sub.total_gross_cents)} €</strong>
+          </div>
+        </div>
       </section>
     </>
   );
