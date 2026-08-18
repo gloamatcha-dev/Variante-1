@@ -112,6 +112,17 @@ export type LeadPayload = {
 
 export type CustomerType = "private" | "business";
 
+export type Address = {
+  firstName: string;
+  lastName: string;
+  company?: string;
+  street: string;
+  houseNumber: string;
+  zip: string;
+  city: string;
+  country: string;
+};
+
 export type PrivateRegistration = {
   firstName: string;
   lastName: string;

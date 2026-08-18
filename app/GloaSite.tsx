@@ -3,6 +3,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { Header, Footer, Newsletter } from "./Chrome";
 import { BRAND, BUSINESS_FACTS, PRODUCT, MATCHA_VARIANTS, FLEX_DISCOUNT, ANNUAL_DISCOUNT, SHOP_STATUS, flexPrice, annualPrice, pricePer100g, lowestPrice, B2B_BUSINESS_TYPES, B2B_DEMAND_OPTIONS, COUNTRIES } from "./content";
 import { BusinessCalculator } from "./BusinessCalculator";
+import { AccountPortal } from "./AccountPortal";
 import { track } from "./analytics";
 import { useCart } from "./cart";
 
@@ -353,29 +354,7 @@ return <main className="account-page"><section className="account-section accoun
 </section></main>;
 }
 
-function AccountBusiness(){
-const sections:[string,string,string[]][]=[
-["PREISE & KONDITIONEN","Einkaufspreise, Rabatte und Bezugsmodelle.",["Einkaufspreise","Rabattstaffelung","Bezugsmodelle","Vollständige Konditionen"]],
-["BELIEFERUNG","Liefermodelle und Belieferungsinformationen.",["Regelmäßige Belieferung","12-Monats-Partnerschaft","Lieferintervalle","Lieferstatus"]],
-["BESTELLUNGEN","B2B-Bestellungen und Bestellhistorie.",["Aktuelle Bestellungen","Bestellhistorie","Wiederkehrende Bestellungen","Rechnungen"]],
-["ROI & KALKULATION","Dein individueller Matcha-Business-Rechner.",["Einkaufspreis","Verkaufspreis pro Drink","Wareneinsatz","Umsatz & Deckungsbeitrag"]],
-["UNTERNEHMENSDATEN","Dein Firmenprofil und deine Kontodaten.",["Firmenname & Ansprechpartner","Rechnungsadresse","Lieferadresse","Steuernummer & USt-IdNr."]]
-];
-return <main className="account-page account-business-page"><section className="account-business-top">
-<a className="account-back" href="/account">&#8592; Mein Konto</a>
-<p className="eyebrow">B2B</p>
-<h1>B2B bei GLOA.</h1>
-<p className="account-lead">Alles für deine Zusammenarbeit mit GLOA an einem Ort.</p>
-</section>
-<section className="account-business-sections">
-{sections.map(([title,desc,items])=><div key={title} className="account-business-card">
-<p className="eyebrow">{title}</p>
-<p className="account-business-card-desc">{desc}</p>
-<ul>{items.map(item=><li key={item}>{item}</li>)}</ul>
-</div>)}
-</section>
-<p className="account-business-status">Verfügbar nach technischer Anbindung des Kundenkontos.</p>
-</main>}
+// AccountBusiness moved to AccountPortal.tsx
 
 function CartDrawer({open,onClose}:{open:boolean;onClose:()=>void}){
 const cart=useCart();
@@ -430,7 +409,7 @@ else if(route==="for-cafes"||route==="wholesale")page=<ForCafes/>;
 else if(route==="rezepte"||route==="journal")page=<Rezepte/>;
 else if(route.startsWith("rezepte/"))page=<RezeptDetail slug={route.split("/")[1]}/>;
 else if(route.startsWith("journal/"))page=<RezeptDetail slug={route.split("/")[1]}/>;
-else if(route==="account/business")page=<AccountBusiness/>;
+else if(route==="account/dashboard"||route==="account/orders"||route==="account/subscriptions"||route==="account/addresses"||route==="account/profile"||route==="account/business")page=<AccountPortal page={route.split("/")[1] as "dashboard"|"orders"|"subscriptions"|"addresses"|"profile"|"business"}/>;
 else if(route==="account")page=<Account/>;
 else if(route==="contact")page=<Contact/>;
 else if(["impressum","datenschutz","agb","widerruf","versand"].includes(route))page=<Legal route={route}/>;
