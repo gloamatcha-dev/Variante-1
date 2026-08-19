@@ -68,8 +68,16 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
+  const origin = getSiteOrigin();
+  if (!origin) {
+    console.error("Checkout session error: SITE_URL is not configured.");
+    return Response.json(
+      { error: "Zahlungsfunktion vorübergehend nicht verfügbar." } as ErrorResponse,
+      { status: 503 }
+    );
+  }
+
   const { quote } = quoteResult;
-  const origin = getSiteOrigin(request);
 
   const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = quote.items.map(item => ({
     quantity: item.quantity,
