@@ -79,7 +79,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [businessProfile, setBusinessProfile] = useState<BusinessProfile | null>(null);
   const [addresses, setAddresses] = useState<AddressRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !!supabase);
 
   const fetchProfile = useCallback(async (uid: string) => {
     if (!supabase) return;
@@ -121,10 +121,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user, fetchAddresses]);
 
   useEffect(() => {
-    if (!supabase) {
-      setLoading(false);
-      return;
-    }
+    if (!supabase) return;
 
     supabase.auth.getSession().then(({ data: { session: s } }) => {
       setSession(s);

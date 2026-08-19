@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState, useRef, useCallback } from "react";
+import Link from "next/link";
 import { Header, Footer, Newsletter } from "./Chrome";
-import { BRAND, BUSINESS_FACTS, PRODUCT, SHOP_STATUS, B2B_BUSINESS_TYPES, B2B_DEMAND_OPTIONS, COUNTRIES } from "./content";
+import { BRAND, PRODUCT, SHOP_STATUS, COUNTRIES } from "./content";
 import { useCatalog, fmtCents, per100gCents } from "./useCatalog";
 import { BusinessCalculator } from "./BusinessCalculator";
 import { AccountPortal } from "./AccountPortal";
@@ -31,13 +32,13 @@ function ProductVisual(){return <div className="product-visual lime"><img src="/
 function ProductCard({onAdd}:{onAdd:()=>void}){
 const {product,loading,error}=useCatalog("matcha");
 const {addItem}=useCart();
-if(loading)return <article className="product-card"><a href="/shop"><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>Laden…</strong></div></a></article>;
-if(error||!product)return <article className="product-card"><a href="/shop"><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>Nicht verfügbar</strong></div></a></article>;
-if(!product.variants.length)return <article className="product-card"><a href="/shop"><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>Demnächst</strong></div></a></article>;
+if(loading)return <article className="product-card"><Link href="/shop"><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>Laden…</strong></div></Link></article>;
+if(error||!product)return <article className="product-card"><Link href="/shop"><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>Nicht verfügbar</strong></div></Link></article>;
+if(!product.variants.length)return <article className="product-card"><Link href="/shop"><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>Demnächst</strong></div></Link></article>;
 const dv=product.variants[0];const lowestCents=Math.min(...product.variants.map(v=>v.price_gross_cents));
 const handleAdd=()=>{addItem({productId:product.id,variantId:dv.id,label:dv.label,grams:dv.size_grams,purchaseType:"once",unitPriceCents:dv.price_gross_cents});track("add_to_cart");onAdd()};
 const handlePrelaunch=()=>window.location.href="#newsletter";
-return <article className="product-card"><a href="/shop" onClick={()=>track("product_view")}><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>AB {fmtCents(lowestCents)} €</strong></div></a><button className="add" onClick={SHOP_STATUS==="prelaunch"?handlePrelaunch:handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"} <span>+</span></button></article>}
+return <article className="product-card"><Link href="/shop" onClick={()=>track("product_view")}><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>AB {fmtCents(lowestCents)} €</strong></div></Link><button className="add" onClick={SHOP_STATUS==="prelaunch"?handlePrelaunch:handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"} <span>+</span></button></article>}
 function HowTo(){return <section className="how-to"><div className="section-head"><div><p className="eyebrow">HOW TO GLOA</p><h2>Latte oder Pur.<br/>Mehr brauchst du nicht.</h2></div></div><div className="method-grid"><article><span>01</span><h3>Matcha Latte</h3><ol><li>Matcha dosieren</li><li>Mit Wasser aufschlagen</li><li>Milch oder Pflanzendrink dazu</li><li>Heiß oder iced genießen</li></ol></article><article><span>02</span><h3>Pure Matcha</h3><ol><li>Matcha dosieren</li><li>Mit wenig Wasser glattrühren</li><li>Mit Wasser aufschlagen</li><li>Direkt genießen</li></ol></article></div></section>}
 function CommunityFeed(){const [offset,setOffset]=useState(0);const [paused,setPaused]=useState(false);const [animate,setAnimate]=useState(true);const total=communityItems.length;useEffect(()=>{const mq=window.matchMedia("(prefers-reduced-motion: reduce)");if(mq.matches)return;let visible=true;const onVis=()=>{visible=document.visibilityState==="visible"};document.addEventListener("visibilitychange",onVis);const id=setInterval(()=>{if(!paused&&visible)setOffset(p=>p+1)},4500);return()=>{clearInterval(id);document.removeEventListener("visibilitychange",onVis)}},[paused]);useEffect(()=>{if(offset>=total){const t=setTimeout(()=>{setAnimate(false);setOffset(0);requestAnimationFrame(()=>requestAnimationFrame(()=>setAnimate(true)))},400);return()=>clearTimeout(t)}},[offset,total]);const track=[...communityItems,...communityItems.slice(0,4)];return <div className="community-feed" onMouseEnter={()=>setPaused(true)} onMouseLeave={()=>setPaused(false)}><div className="community-track" style={{transform:`translateX(-${offset*25}%)`,transition:animate?"transform 400ms ease":"none"}}>{track.map((item,i)=><div key={`cf-${i}`} className="community-card"><img src={item.image} alt={item.alt} loading="lazy"/></div>)}</div></div>}
 
@@ -68,17 +69,17 @@ const onPointerUp=useCallback(()=>{setDragging(false)},[]);
 return <section className="featured-recipes"><div className="featured-recipes-head"><div><p className="eyebrow">GLOA RECIPES</p><h2>Matcha.<br/><i>Mach was draus.</i></h2><p className="featured-recipes-sub">Unsere liebsten Matcha-Rezepte.</p></div></div>
 <div className="recipe-loop" onMouseEnter={()=>setPaused(true)} onMouseLeave={()=>setPaused(false)} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} style={{touchAction:"pan-y"}}>
 <div ref={trackRef} className="recipe-loop-track" style={{transform:`translateX(-${offset}px)`,transition:dragging?"none":"transform 0.5s linear",width:`${items.length*step}px`}}>
-{items.map((r,i)=><a key={`rl-${i}`} href={`/rezepte/${r.slug}`} className="recipe-loop-card" draggable={false} style={{width:cardW}}>
+{items.map((r,i)=><Link key={`rl-${i}`} href={`/rezepte/${r.slug}`} className="recipe-loop-card" draggable={false} style={{width:cardW}}>
 <div className="recipe-loop-img"><img src={r.image} alt={r.alt} loading="lazy" draggable={false}/></div>
 <p className="eyebrow">{r.time}</p>
 <h3>{r.title}</h3>
-</a>)}
+</Link>)}
 </div></div>
-<div className="featured-recipes-link"><a href="/rezepte">ALLE REZEPTE →</a></div>
+<div className="featured-recipes-link"><Link href="/rezepte">ALLE REZEPTE →</Link></div>
 </section>
 }
 
-function Home({onAdd}:{onAdd:()=>void}){return <main><section className="hero"><div className="hero-copy"><p className="eyebrow">MATCHA AUS SHIZUOKA.</p><h1>Matcha.<br/><i>Aber richtig.</i></h1><p className="lead">Aus Shizuoka, Japan. Für Latte, pur, iced oder wie du willst.</p><div className="hero-actions"><a className="cta" href="/shop" onClick={()=>track("shop_click")}>Zum Shop</a><a className="cta secondary" href="/about">GLOA entdecken →</a></div></div><div className="hero-art"><img src="/img/gloa-hero-packaging.png" alt="GLOA Matcha Verpackung" className="hero-img"/><span className="hero-micro">SHIZUOKA / JAPAN</span></div></section><section className="product-intro"><div><p className="eyebrow">MEET YOUR MATCHA.</p><h2>Ein Grün.<br/><i>Viele Momente.</i></h2><p>Aus Shizuoka, Japan. Für Matcha Latte und pur. Easy im Alltag, ehrlich im Produkt.</p><a className="cta" href="/shop">Shop GLOA</a></div><ProductCard onAdd={onAdd}/></section><section className="daily"><div className="daily-copy"><p className="eyebrow">MATCHA FÜR JEDEN TAG</p><h2>Morgens.<br/>Im Meeting.<br/><i>Nachmittags.</i></h2></div><div className="daily-grid">{dailyTiles.map(t=><div className="daily-tile" key={t.label}><img src={t.src} alt={t.alt} loading="lazy"/><span>{t.label}</span></div>)}</div></section><section className="origin"><div><p className="eyebrow">ORIGIN</p><h2>From Shizuoka,<br/><i>Japan.</i></h2></div><div><p>GLOA Matcha kommt aus Shizuoka, Japan. Mehr zum Produzenten, Cultivar und der Ernte teilen wir, sobald alles verifiziert ist.</p><dl><div><dt>ORIGIN</dt><dd>Shizuoka, Japan</dd></div><div><dt>MADE FOR</dt><dd>Latte + pure preparation</dd></div></dl></div></section><HowTo/><RecipeCarousel/><section className="community"><p className="eyebrow">#gloamatcha</p><h2>Zeig uns<br/><i>deinen Matcha.</i></h2><CommunityFeed/><a href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">@gloa.matcha folgen →</a></section><Newsletter/></main>}
+function Home({onAdd}:{onAdd:()=>void}){return <main><section className="hero"><div className="hero-copy"><p className="eyebrow">MATCHA AUS SHIZUOKA.</p><h1>Matcha.<br/><i>Aber richtig.</i></h1><p className="lead">Aus Shizuoka, Japan. Für Latte, pur, iced oder wie du willst.</p><div className="hero-actions"><Link className="cta" href="/shop" onClick={()=>track("shop_click")}>Zum Shop</Link><Link className="cta secondary" href="/about">GLOA entdecken →</Link></div></div><div className="hero-art"><img src="/img/gloa-hero-packaging.png" alt="GLOA Matcha Verpackung" className="hero-img"/><span className="hero-micro">SHIZUOKA / JAPAN</span></div></section><section className="product-intro"><div><p className="eyebrow">MEET YOUR MATCHA.</p><h2>Ein Grün.<br/><i>Viele Momente.</i></h2><p>Aus Shizuoka, Japan. Für Matcha Latte und pur. Easy im Alltag, ehrlich im Produkt.</p><Link className="cta" href="/shop">Shop GLOA</Link></div><ProductCard onAdd={onAdd}/></section><section className="daily"><div className="daily-copy"><p className="eyebrow">MATCHA FÜR JEDEN TAG</p><h2>Morgens.<br/>Im Meeting.<br/><i>Nachmittags.</i></h2></div><div className="daily-grid">{dailyTiles.map(t=><div className="daily-tile" key={t.label}><img src={t.src} alt={t.alt} loading="lazy"/><span>{t.label}</span></div>)}</div></section><section className="origin"><div><p className="eyebrow">ORIGIN</p><h2>From Shizuoka,<br/><i>Japan.</i></h2></div><div><p>GLOA Matcha kommt aus Shizuoka, Japan. Mehr zum Produzenten, Cultivar und der Ernte teilen wir, sobald alles verifiziert ist.</p><dl><div><dt>ORIGIN</dt><dd>Shizuoka, Japan</dd></div><div><dt>MADE FOR</dt><dd>Latte + pure preparation</dd></div></dl></div></section><HowTo/><RecipeCarousel/><section className="community"><p className="eyebrow">#gloamatcha</p><h2>Zeig uns<br/><i>deinen Matcha.</i></h2><CommunityFeed/><a href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">@gloa.matcha folgen →</a></section><Newsletter/></main>}
 
 function Shop({onAdd}:{onAdd:()=>void}){
 const {product,loading,error}=useCatalog("matcha");
@@ -97,7 +98,7 @@ const lowestCents=Math.min(...product.variants.map(x=>x.price_gross_cents));
 const handleAdd=()=>{addItem({productId:product.id,variantId:v.id,label:v.label,grams:v.size_grams,purchaseType:"once",unitPriceCents:v.price_gross_cents});track("add_to_cart");onAdd()};
 
 return <main className="shop-page">
-<section className="shop-hero"><div className="shop-hero-inner"><p className="eyebrow">GLOA · MATCHA</p><h1>Dein Matcha.<br/><i>Deine Art.</i></h1><p className="lead">Matcha aus Shizuoka, Japan. Für Latte, iced, pur oder wie du ihn magst.</p><p className="shop-hero-price">AB {fmtCents(lowestCents)} €</p><p className="shop-hero-micro">Launch in Vorbereitung.</p><a className="cta shop-hero-cta" href="#product" onClick={()=>track("shop_scroll_product")}>ZUM MATCHA</a></div></section>
+<section className="shop-hero"><div className="shop-hero-inner"><p className="eyebrow">GLOA · MATCHA</p><h1>Dein Matcha.<br/><i>Deine Art.</i></h1><p className="lead">Matcha aus Shizuoka, Japan. Für Latte, iced, pur oder wie du ihn magst.</p><p className="shop-hero-price">AB {fmtCents(lowestCents)} €</p><p className="shop-hero-micro">Launch in Vorbereitung.</p><Link className="cta shop-hero-cta" href="#product" onClick={()=>track("shop_scroll_product")}>ZUM MATCHA</Link></div></section>
 
 <section id="product" className="shop-product"><div className="shop-product-image"><img src="/img/gloa-hero-packaging.png" alt="GLOA Matcha Verpackung" loading="lazy"/></div><div className="shop-product-info"><p className="eyebrow">MATCHA</p><h2>GLOA MATCHA</h2><p className="shop-product-sub">Shizuoka, Japan · Latte · Iced · Pur</p>
 
@@ -111,7 +112,7 @@ return <main className="shop-page">
 <button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="#newsletter":handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
 </div></section>
 
-<section className="shop-details"><div className="shop-details-inner"><p className="eyebrow">PRODUKTDETAILS</p><dl><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>VERWENDUNG</dt><dd>Latte · Iced · Pur</dd></div><div><dt>ERNTE</dt><dd>2. und 3. Pflückung</dd></div><div><dt>MINDESTHALTBARKEIT</dt><dd>3 Jahre</dd></div><div><dt>LAGERUNG</dt><dd>Kühl und trocken</dd></div><div><dt>GROESSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div></dl><a className="shop-details-link" href="/our-matcha" onClick={()=>track("shop_to_matcha")}>MEHR ÜBER UNSEREN MATCHA →</a></div></section>
+<section className="shop-details"><div className="shop-details-inner"><p className="eyebrow">PRODUKTDETAILS</p><dl><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>VERWENDUNG</dt><dd>Latte · Iced · Pur</dd></div><div><dt>ERNTE</dt><dd>2. und 3. Pflückung</dd></div><div><dt>MINDESTHALTBARKEIT</dt><dd>3 Jahre</dd></div><div><dt>LAGERUNG</dt><dd>Kühl und trocken</dd></div><div><dt>GROESSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div></dl><Link className="shop-details-link" href="/our-matcha" onClick={()=>track("shop_to_matcha")}>MEHR ÜBER UNSEREN MATCHA →</Link></div></section>
 
 <Newsletter/>
 </main>}
@@ -147,7 +148,8 @@ return <main className="pdp">
 <HowTo/>
 </main>}
 
-function PageHero({index,eyebrow,title,text,tone}:{index:string;eyebrow:string;title:React.ReactNode;text:string;tone:string}){return <section className={`inner-hero ${tone}`}><span className="page-index">{index}</span><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="lead">{text}</p></div></section>}
+// Unused - kept for potential future use
+// function PageHero({index,eyebrow,title,text,tone}:{index:string;eyebrow:string;title:React.ReactNode;text:string;tone:string}){return <section className={`inner-hero ${tone}`}><span className="page-index">{index}</span><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="lead">{text}</p></div></section>}
 function MatchaPage(){const {product}=useCatalog("matcha");const lowestCents=product&&product.variants.length?Math.min(...product.variants.map(v=>v.price_gross_cents)):null;return <main className="matcha-page">
 <section className="matcha-hero"><div className="matcha-hero-copy"><p className="eyebrow">UNSER MATCHA</p><h1>Aus Shizuoka.<br/><i>Für deinen Alltag.</i></h1><p className="lead">Was wir über unser Produkt wissen. Was wir noch nicht sagen können. Keine erfundenen Claims. Kein Marketing-Bullshit.</p></div><div className="matcha-hero-visual"><img src="/img/gloa-hero-packaging.png" alt="GLOA Matcha Verpackung"/></div></section>
 
@@ -161,37 +163,37 @@ function MatchaPage(){const {product}=useCatalog("matcha");const lowestCents=pro
 
 <section className="matcha-transparency"><div className="matcha-transparency-inner"><p className="eyebrow">TRANSPARENZ</p><h2>Was wir noch<br/><i>prüfen.</i></h2><p>Einige Details zum Produkt sind noch nicht vollständig verifiziert. Sobald sie bestätigt sind, ergänzen wir sie hier.</p><div className="matcha-pending-grid">{[["GESCHMACKSPROFIL","IN PRÜFUNG"],["CULTIVAR","IN PRÜFUNG"],["SINGLE CULTIVAR / BLEND","IN PRÜFUNG"],["PRODUZENT / FARM","IN PRÜFUNG"],["BIO-STATUS","IN PRÜFUNG"],["MAHLVERFAHREN – DETAILS","IN PRÜFUNG"]].map(([label,status])=><div key={label}><span>{label}</span><strong>○ {status}</strong></div>)}</div><p className="eyebrow matcha-pending-subhead">QUALITÄT & DOKUMENTATION</p><div className="matcha-pending-grid">{[["PRODUKTSPEZIFIKATION","IN PRÜFUNG"],["CHARGENANALYSE / COA","IN PRÜFUNG"],["PESTIZIDRÜCKSTÄNDE","UNTERLAGEN IN PRÜFUNG"],["MIKROBIOLOGISCHE ANALYSE","UNTERLAGEN IN PRÜFUNG"],["SCHWERMETALLANALYSE","UNTERLAGEN IN PRÜFUNG"],["ERNTE- / PRODUKTIONSDATEN","IN PRÜFUNG"]].map(([label,status])=><div key={label}><span>{label}</span><strong>○ {status}</strong></div>)}</div><div className="matcha-price-note"><span>ENDKUNDENPREIS</span><strong>{lowestCents!==null?<>AB {fmtCents(lowestCents)} €</>:"Laden…"}</strong></div><p className="matcha-transparency-note">Wir erfinden nichts. Was hier steht, ist geprüft.</p></div></section>
 
-<section className="matcha-shizuoka"><p className="eyebrow">SHIZUOKA</p><h2>Bald<br/><i>vor Ort.</i></h2><p>Wir planen einen Besuch vor Ort in Shizuoka. Sobald alles steht, nehmen wir euch mit und zeigen euch mehr über Herkunft, Verarbeitung und die Menschen hinter dem Produkt.</p><p className="matcha-build-note">Wir zeigen euch den Weg bis zum fertigen GLOA Produkt Schritt für Schritt.</p><a className="cta cream" href="https://www.tiktok.com/@gloa.matcha" target="_blank" rel="noopener noreferrer">AUF TIKTOK FOLGEN ↗</a></section>
+<section className="matcha-shizuoka"><p className="eyebrow">SHIZUOKA</p><h2>Bald<br/><i>vor Ort.</i></h2><p>Wir planen einen Besuch vor Ort in Shizuoka. Sobald alles steht, nehmen wir euch mit und zeigen euch mehr über Herkunft, Verarbeitung und die Menschen hinter dem Produkt.</p><p className="matcha-build-note">Wir zeigen euch den Weg bis zum fertigen GLOA Produkt Schritt für Schritt.</p><Link className="cta cream" href="https://www.tiktok.com/@gloa.matcha" target="_blank" rel="noopener noreferrer">AUF TIKTOK FOLGEN ↗</Link></section>
 
 <section className="matcha-howto"><div className="section-head"><div><p className="eyebrow">ZUBEREITUNG</p><h2>Drei Wege.<br/><i>Alle easy.</i></h2></div></div><div className="matcha-method-grid"><article><span>01</span><h3>Matcha Latte</h3><ol><li>Matcha glatt rühren.</li><li>Milch oder Pflanzendrink dazu.</li><li>Heiß genießen.</li></ol></article><article><span>02</span><h3>Iced Matcha</h3><ol><li>Matcha glatt rühren.</li><li>Über Eis geben.</li><li>Milch oder Pflanzendrink dazu.</li></ol></article><article><span>03</span><h3>Pure Matcha</h3><ol><li>Matcha glatt rühren.</li><li>Mit Wasser auffüllen.</li><li>Direkt genießen.</li></ol></article></div></section>
 
 <section className="matcha-image"><img src="/img/gloa-iced.png" alt="Iced Matcha von GLOA"/></section>
-<section className="matcha-cta"><h2>Bereit?</h2><div className="matcha-cta-actions"><a className="cta" href="/shop">Zum Shop</a><a className="cta secondary" href="/for-cafes">B2B →</a></div></section>
+<section className="matcha-cta"><h2>Bereit?</h2><div className="matcha-cta-actions"><Link className="cta" href="/shop">Zum Shop</Link><Link className="cta secondary" href="/for-cafes">B2B →</Link></div></section>
 </main>}
 function About(){return <main className="about-page">
 <section className="about-hero"><span className="page-index">03</span><div><p className="eyebrow">ÜBER GLOA</p><h1>Good energy.<br/><i>No theatre.</i></h1><p className="lead">GLOA bringt Matcha aus Shizuoka in einen Alltag, der nicht nach Regeln fragt.</p><p className="about-sub-lead">Für Latte, iced, pur oder genau so, wie du ihn magst.</p></div><div className="about-hero-micro"><span>SHIZUOKA / JAPAN</span><span>BERLIN / GERMANY</span><span>EST. 2026</span></div></section>
 <section className="about-beliefs"><p className="eyebrow">WE BELIEVE IN</p><div className="about-beliefs-grid"><div className="about-belief"><span>01</span><h2>Gutes Produkt<br/>statt Hype.</h2></div><div className="about-belief"><span>02</span><h2>Echte Leute<br/>statt Bullshit.</h2></div><div className="about-belief accent"><span>03</span><h2>Matcha, der<br/><i>einfach Spaß macht.</i></h2></div></div></section>
 <section className="about-why"><div className="about-why-left"><p className="eyebrow">WHY GLOA EXISTS</p><h2>Matcha gehört<br/>nicht in eine<br/><i>Schublade.</i></h2></div><div className="about-why-right"><p>Wir mögen Matcha, aber nicht die Regeln, die manchmal darum gebaut werden.</p><p>GLOA soll unkompliziert funktionieren: im Café, im Büro, unterwegs oder zu Hause.</p><p>Kein Dresscode.<br/>Kein Ritual-Zwang.<br/>Ein gutes Produkt und du entscheidest, was du daraus machst.</p></div></section>
 <section className="about-founders"><p className="eyebrow">BEHIND GLOA</p><h2>Vali <span className="about-x">×</span> Poli.</h2><p className="about-founders-lead">Wir bauen GLOA gemeinsam auf.</p><div className="about-founders-text"><p>Von Produkt und Packaging über Brand, Website und Cafés bis zum Launch: GLOA entsteht gerade Schritt für Schritt.</p><p>Wir wollen dabei nicht so tun, als wäre schon alles fertig. Du kannst dabei sein, während es entsteht.</p></div></section>
-<section className="about-tiktok"><p className="eyebrow">BUILDING GLOA</p><h2>Begleite uns<br/><i>auf dem Weg.</i></h2><p>Wir bauen GLOA gerade auf.</p><p>Packaging, Produkt, Cafés, Launch und alles dazwischen. Auf TikTok zeigen wir, was hinter der Marke passiert.</p><a className="about-handle" href="https://www.tiktok.com/@gloa.matcha" target="_blank" rel="noopener noreferrer">@gloa.matcha</a><a className="cta cream" href="https://www.tiktok.com/@gloa.matcha" target="_blank" rel="noopener noreferrer">Auf TikTok folgen ↗</a><p className="about-micro">BUILDING IN PUBLIC · BERLIN · 2026</p></section>
-<section className="about-final"><h2>Genug über uns.<br/><i>Zeit für Matcha.</i></h2><div className="about-final-actions"><a className="cta cream" href="/shop">Zum Shop</a><a className="cta about-cta-outline" href="/our-matcha">Unser Matcha →</a></div></section>
+<section className="about-tiktok"><p className="eyebrow">BUILDING GLOA</p><h2>Begleite uns<br/><i>auf dem Weg.</i></h2><p>Wir bauen GLOA gerade auf.</p><p>Packaging, Produkt, Cafés, Launch und alles dazwischen. Auf TikTok zeigen wir, was hinter der Marke passiert.</p><Link className="about-handle" href="https://www.tiktok.com/@gloa.matcha" target="_blank" rel="noopener noreferrer">@gloa.matcha</Link><Link className="cta cream" href="https://www.tiktok.com/@gloa.matcha" target="_blank" rel="noopener noreferrer">Auf TikTok folgen ↗</Link><p className="about-micro">BUILDING IN PUBLIC · BERLIN · 2026</p></section>
+<section className="about-final"><h2>Genug über uns.<br/><i>Zeit für Matcha.</i></h2><div className="about-final-actions"><Link className="cta cream" href="/shop">Zum Shop</Link><Link className="cta about-cta-outline" href="/our-matcha">Unser Matcha →</Link></div></section>
 </main>}
-function ForCafes(){useEffect(()=>track("b2b_page_view"),[]);return <main className="business"><section className="b2b-hero"><div><p className="eyebrow">GLOA FOR BUSINESS</p><h1>Matcha for<br/><i>your menu.</i></h1><p>Matcha aus Shizuoka für moderne Menüs.</p><div><a className="cta cream" href="?intent=sample#lead" onClick={()=>track("sample_request_start")}>Sample anfragen</a><a className="cta b2b-outline" href="#calculator">Umsatzpotenzial berechnen →</a></div></div><div className="b2b-visual"><div className="hero-tin"><span>GLOA</span><small>FOR BUSINESS</small></div><Placeholder/></div></section><section className="quick-facts">{["SHIZUOKA, JAPAN","LATTE · ICED · PUR","LAGER IN DEUTSCHLAND","SCHNELLE NACHBESTELLUNG","500 G · 1 KG GASTRO"].map(x=><strong key={x}>{x}</strong>)}</section><section className="behind-bar"><div><p className="eyebrow">FÜR DEINE BAR GEMACHT.</p><h2>Einfach zubereiten.<br/><i>Easy skalieren.</i></h2><p>Classic, iced, Strawberry oder pur. Ein Produkt, viele Drinks auf der Karte.</p></div><div className="servings"><span className="eyebrow servings-label">BEISPIELRECHNUNG</span><span><b>3 G</b>PRO DRINK</span><i>→</i><span><b>CA. 333</b>DRINKS / KG</span><small>Beispiel bei 3 g Matcha pro Drink.</small></div></section><BusinessCalculator/><BusinessFaq/></main>}
+function ForCafes(){useEffect(()=>track("b2b_page_view"),[]);return <main className="business"><section className="b2b-hero"><div><p className="eyebrow">GLOA FOR BUSINESS</p><h1>Matcha for<br/><i>your menu.</i></h1><p>Matcha aus Shizuoka für moderne Menüs.</p><div><Link className="cta cream" href="?intent=sample#lead" onClick={()=>track("sample_request_start")}>Sample anfragen</Link><Link className="cta b2b-outline" href="#calculator">Umsatzpotenzial berechnen →</Link></div></div><div className="b2b-visual"><div className="hero-tin"><span>GLOA</span><small>FOR BUSINESS</small></div><Placeholder/></div></section><section className="quick-facts">{["SHIZUOKA, JAPAN","LATTE · ICED · PUR","LAGER IN DEUTSCHLAND","SCHNELLE NACHBESTELLUNG","500 G · 1 KG GASTRO"].map(x=><strong key={x}>{x}</strong>)}</section><section className="behind-bar"><div><p className="eyebrow">FÜR DEINE BAR GEMACHT.</p><h2>Einfach zubereiten.<br/><i>Easy skalieren.</i></h2><p>Classic, iced, Strawberry oder pur. Ein Produkt, viele Drinks auf der Karte.</p></div><div className="servings"><span className="eyebrow servings-label">BEISPIELRECHNUNG</span><span><b>3 G</b>PRO DRINK</span><i>→</i><span><b>CA. 333</b>DRINKS / KG</span><small>Beispiel bei 3 g Matcha pro Drink.</small></div></section><BusinessCalculator/><BusinessFaq/></main>}
 function BusinessFaq(){const qs:[string,string][]=[["Wo kommt GLOA Matcha her?","Shizuoka, Japan."],["Ist GLOA für Matcha Latte geeignet?","Ja. Das Produkt ist für Latte, iced und pur geeignet."],["Welche Großhandelsformate gibt es?","500 g und 1 kg Gastroformate."],["Habt ihr Lager in Deutschland?","Ja. Bestand in Deutschland."],["Wie schnell liefert ihr?","Lieferzeit und Verfügbarkeit bestätigen wir bei Bestellung."],["Wie viele Drinks bekomme ich aus 1 kg?","Abhängig von der Dosierung: Bei 2 g pro Drink ca. 500 Drinks, bei 3 g ca. 333 Drinks, bei 4 g ca. 250 Drinks. Mengenbeispiele."],["Was kostet es im Großhandel?","Unsere B2B-Konditionen werden individuell mit dir abgestimmt. Frag sie direkt über das B2B-Formular an."],["Was ist die regelmäßige Belieferung?","Ein flexibles Bezugsmodell mit monatlicher Lieferung und 5 % Preisvorteil. Mindestlaufzeit 3 Monate, danach monatlich kündbar."],["Wie funktioniert die 12-Monats-Partnerschaft?","Du vereinbarst eine monatliche Mindestabnahme für 12 Monate und erhältst 10 % Preisvorteil. Lieferung und Abrechnung erfolgen monatlich."],["Muss ich beim Jahresmodell alles im Voraus bezahlen?","Nein. Die Abrechnung erfolgt monatlich. Du zahlst nur die jeweils gelieferte Menge."],["Kann ich mehr als die vereinbarte Menge bestellen?","Ja. Zusätzliche Mengen können jederzeit angefragt werden, zum gleichen Kilopreis deines Modells."],["Was passiert, wenn ich noch nicht weiß, wie viel Matcha ich brauche?","Starte mit einer Einzelbestellung oder einem Sample. Sobald du deinen Bedarf besser einschätzen kannst, kannst du jederzeit auf ein Bezugsmodell wechseln."]];return <section className="faq"><p className="eyebrow">B2B FAQ</p><h2>Fragen?<br/><i>Antworten.</i></h2>{qs.map(([q,a])=><details key={q}><summary>{q}<span>+</span></summary><p>{a}</p></details>)}</section>}
 function Rezepte(){const [filter,setFilter]=useState("ALLE");const filtered=filter==="ALLE"?recipes:recipes.filter(r=>r.tags.includes(filter));return <main className="rezepte-page">
 <section className="rezepte-hero"><p className="eyebrow">GLOA · REZEPTE</p><h1>Matcha Rezepte.<br/><i>GLOA Edition.</i></h1><p className="lead">Signature Drinks. Einfach, visuell stark und passend zur GLOA-Welt.</p></section>
 <section className="rezepte-filters">{ALL_TAGS.map(t=><button key={t} className={filter===t?"active":""} onClick={()=>setFilter(t)}>{t}</button>)}</section>
-<section className="rezepte-grid">{filtered.map(r=><article key={r.slug} className="rezept-card"><a href={`/rezepte/${r.slug}`}><div className="rezept-card-img"><img src={r.image} alt={r.alt} loading="lazy"/></div><div className="rezept-card-body"><p className="eyebrow">{r.category} · {r.time}</p><h2>{r.title}</h2><p className="rezept-card-excerpt">{r.excerpt}</p><span className="rezept-card-cta">Rezept ansehen →</span></div></a></article>)}</section>
+<section className="rezepte-grid">{filtered.map(r=><article key={r.slug} className="rezept-card"><Link href={`/rezepte/${r.slug}`}><div className="rezept-card-img"><img src={r.image} alt={r.alt} loading="lazy"/></div><div className="rezept-card-body"><p className="eyebrow">{r.category} · {r.time}</p><h2>{r.title}</h2><p className="rezept-card-excerpt">{r.excerpt}</p><span className="rezept-card-cta">Rezept ansehen →</span></div></Link></article>)}</section>
 <Newsletter/>
 </main>}
-function RezeptDetail({slug}:{slug:string}){const r=recipes.find(x=>x.slug===slug);if(!r)return <main className="not-found"><h1>404</h1><p>Rezept nicht gefunden.</p><a href="/rezepte">← Alle Rezepte</a></main>;return <main className="rezept-detail">
+function RezeptDetail({slug}:{slug:string}){const r=recipes.find(x=>x.slug===slug);if(!r)return <main className="not-found"><h1>404</h1><p>Rezept nicht gefunden.</p><Link href="/rezepte">← Alle Rezepte</Link></main>;return <main className="rezept-detail">
 <section className="rezept-detail-hero"><div className="rezept-detail-image"><img src={r.image} alt={r.alt}/></div><div className="rezept-detail-intro"><p className="eyebrow">{r.category} · {r.time}</p><h1>{r.title}</h1><p className="rezept-detail-desc">{r.description}</p><div className="rezept-detail-tags">{r.tags.map(t=><span key={t}>{t}</span>)}</div></div></section>
 <section className="rezept-detail-content"><div className="rezept-detail-ingredients"><h2>Zutaten</h2><ul>{r.ingredients.map((ing,i)=><li key={i}>{ing}</li>)}</ul></div><div className="rezept-detail-steps"><h2>Zubereitung</h2><ol>{r.steps.map((step,i)=><li key={i}><span>{String(i+1).padStart(2,"0")}</span><p>{step}</p></li>)}</ol></div></section>
-<section className="rezept-detail-nav"><a href="/rezepte">← Alle Rezepte</a><a href="/shop" className="cta">Matcha kaufen</a></section>
+<section className="rezept-detail-nav"><Link href="/rezepte">← Alle Rezepte</Link><Link href="/shop" className="cta">Matcha kaufen</Link></section>
 </main>}
 function Contact(){return <main className="contact-main">
 <section className="contact-hero"><p className="eyebrow">KONTAKT</p><h1>Schreib<br/><i>uns.</i></h1><p className="contact-sub">Wähl den richtigen Weg und deine Nachricht landet da, wo sie hingehört.</p></section>
-<section className="contact-choices"><a href="#customer-form"><span>PRIVATKUNDE</span><h2>Fragen zu<br/>Produkt & Bestellung.</h2><b>Kontaktformular →</b></a><a href="/for-cafes"><span>BUSINESS</span><h2>Großhandel,<br/>Samples & Cafés.</h2><b>Zum B2B-Bereich →</b></a></section>
+<section className="contact-choices"><a href="#customer-form"><span>PRIVATKUNDE</span><h2>Fragen zu<br/>Produkt & Bestellung.</h2><b>Kontaktformular →</b></a><Link href="/for-cafes"><span>BUSINESS</span><h2>Großhandel,<br/>Samples & Cafés.</h2><b>Zum B2B-Bereich →</b></Link></section>
 <form id="customer-form" className="customer-form" onSubmit={e=>e.preventDefault()}><p className="eyebrow">NACHRICHT SENDEN</p><div className="customer-form-row"><label>Name*<input required placeholder="Vor- und Nachname"/></label><label>E-Mail*<input required type="email" placeholder="deine@email.de"/></label></div><div className="customer-form-row"><label>Anliegen*<select required defaultValue=""><option value="" disabled>Bitte auswählen</option><option>Bestellung</option><option>Produkt</option><option>Abo</option><option>Sonstiges</option></select></label><label>Bestellnummer<input placeholder="Optional"/></label></div><label>Nachricht*<textarea required placeholder="Wie können wir helfen?" rows={5}/></label><button className="cta" type="submit">Nachricht senden</button></form>
 </main>}
 function Legal({route}:{route:string}){const title:Record<string,string>={impressum:"Impressum",datenschutz:"Datenschutz",agb:"Allgemeine Geschäftsbedingungen",widerruf:"Widerruf",versand:"Versandinformationen"};return <main className="legal-page"><p className="eyebrow">LEGAL</p><h1>{title[route]||"Legal"}</h1><div className="legal-placeholder"><h2>Rechtlicher Inhalt ausstehend.</h2><p>Vor dem öffentlichen Shop-Launch muss dieser Inhalt von GLOA beziehungsweise einer qualifizierten Rechtsberatung bereitgestellt und geprüft werden.</p></div></main>}
@@ -313,7 +315,7 @@ if(view==="register")return <main className="account-page"><section className="a
 <label>Land *<select required name="country" defaultValue="Deutschland">{COUNTRIES.map(c=><option key={c}>{c}</option>)}</select></label>
 {pwError&&<p className="account-error">{pwError}</p>}
 {authError&&<p className="account-error">{authError}</p>}
-<label className="consent"><input required type="checkbox" name="accept_terms"/> Ich akzeptiere die <a href="/agb">AGB</a> und <a href="/datenschutz">Datenschutzerklärung</a>.</label>
+<label className="consent"><input required type="checkbox" name="accept_terms"/> Ich akzeptiere die <Link href="/agb">AGB</Link> und <Link href="/datenschutz">Datenschutzerklärung</Link>.</label>
 <label className="consent"><input type="checkbox" name="newsletter"/> Ich möchte Neuigkeiten und Angebote von GLOA erhalten.</label>
 <button className="cta account-cta" type="submit" disabled={authBusy}>{authBusy?"ERSTELLEN…":"Konto erstellen"}</button>
 </form>
@@ -361,7 +363,7 @@ if(view==="b2b-apply")return <main className="account-page"><section className="
 {pwError&&<p className="account-error">{pwError}</p>}
 {authError&&<p className="account-error">{authError}</p>}
 <label className="consent"><input required type="checkbox" name="confirm_company_auth"/> Ich bestätige, dass ich im Namen des angegebenen Unternehmens handle.</label>
-<label className="consent"><input required type="checkbox" name="accept_terms"/> Ich akzeptiere die <a href="/agb">AGB</a> und <a href="/datenschutz">Datenschutzerklärung</a>.</label>
+<label className="consent"><input required type="checkbox" name="accept_terms"/> Ich akzeptiere die <Link href="/agb">AGB</Link> und <Link href="/datenschutz">Datenschutzerklärung</Link>.</label>
 <label className="consent"><input type="checkbox" name="newsletter"/> Ich möchte B2B-Neuigkeiten von GLOA erhalten.</label>
 <button className="cta account-cta" type="submit" disabled={authBusy}>{authBusy?"ERSTELLEN…":"Geschäftskonto erstellen"}</button>
 </form>
@@ -397,13 +399,15 @@ return()=>{document.removeEventListener("keydown",onKey);document.body.style.ove
 
 if(!open)return null;
 
-return <div className="cart-backdrop" onClick={onClose}><aside className="cart" onClick={e=>e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Warenkorb">
+return <div className="cart-backdrop" onClick={onClose} onKeyDown={e=>e.key==="Escape"&&onClose()} role="button" tabIndex={0}>
+{/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
+<aside className="cart" onClick={e=>e.stopPropagation()} onKeyDown={e=>e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Warenkorb">
 <button ref={closeRef} className="cart-close" onClick={onClose} aria-label="Warenkorb schließen">×</button>
 <p className="eyebrow">WARENKORB</p>
 {cart.items.length===0?<div className="cart-empty">
 <h2>Dein Warenkorb<br/>ist leer.</h2>
 <p>Zeit für Matcha?</p>
-<a href="/shop" className="cta" onClick={onClose}>Matcha →</a>
+<Link href="/shop" className="cta" onClick={onClose}>Matcha →</Link>
 </div>:<>
 <div className="cart-items">{cart.items.map(item=><div key={item.variantId} className="cart-item">
 <div className="cart-item-info"><strong>GLOA Matcha</strong><span>{item.label}</span></div>
@@ -419,9 +423,9 @@ return <div className="cart-backdrop" onClick={onClose}><aside className="cart" 
 }
 
 function AuthConfirm(){
-const [status,setStatus]=useState<"loading"|"success"|"error">("loading");
+const [status,setStatus]=useState<"loading"|"success"|"error">(() => !supabase ? "error" : "loading");
 useEffect(()=>{
-  if(!supabase){setStatus("error");return}
+  if(!supabase) return;
   // Supabase sends tokens in URL hash (#access_token=...&refresh_token=...)
   // or uses PKCE code in query params (?code=...)
   // supabase-js automatically picks them up via onAuthStateChange
@@ -452,7 +456,7 @@ useEffect(()=>{
   return()=>{subscription.unsubscribe();clearTimeout(t)};
 },[]);
 if(status==="success")return <main className="account-page"><section className="account-section"><p className="eyebrow">GLOA ACCOUNT</p><h1>E-Mail bestätigt.</h1><p className="account-lead">Dein Konto ist aktiv. Du wirst weitergeleitet…</p></section></main>;
-if(status==="error")return <main className="account-page"><section className="account-section"><p className="eyebrow">GLOA ACCOUNT</p><h1>Link ungültig.</h1><p className="account-lead">Der Bestätigungslink ist ungültig oder abgelaufen.</p><a className="cta" href="/account">Zur Anmeldung</a></section></main>;
+if(status==="error")return <main className="account-page"><section className="account-section"><p className="eyebrow">GLOA ACCOUNT</p><h1>Link ungültig.</h1><p className="account-lead">Der Bestätigungslink ist ungültig oder abgelaufen.</p><Link className="cta" href="/account">Zur Anmeldung</Link></section></main>;
 return <main className="account-page"><section className="account-section"><p className="eyebrow">GLOA ACCOUNT</p><h1>Verifizierung…</h1><p className="account-lead">Dein Konto wird aktiviert.</p></section></main>;
 }
 
@@ -488,7 +492,7 @@ const handleSubmit=async(e:React.FormEvent<HTMLFormElement>)=>{
 };
 
 if(done)return <main className="account-page"><section className="account-section"><p className="eyebrow">GLOA ACCOUNT</p><h1>Passwort geändert.</h1><p className="account-lead">Dein neues Passwort ist aktiv. Du wirst weitergeleitet…</p></section></main>;
-if(!user)return <main className="account-page"><section className="account-section"><p className="eyebrow">GLOA ACCOUNT</p><h1>Link ungültig.</h1><p className="account-lead">Der Reset-Link ist ungültig oder abgelaufen.</p><a className="cta" href="/account">Zur Anmeldung</a></section></main>;
+if(!user)return <main className="account-page"><section className="account-section"><p className="eyebrow">GLOA ACCOUNT</p><h1>Link ungültig.</h1><p className="account-lead">Der Reset-Link ist ungültig oder abgelaufen.</p><Link className="cta" href="/account">Zur Anmeldung</Link></section></main>;
 return <main className="account-page"><section className="account-section"><p className="eyebrow">NEUES PASSWORT</p><h1>Passwort<br/><i>zurücksetzen.</i></h1>
 <form className="account-form" onSubmit={handleSubmit}>
 <label>Neues Passwort<input required type="password" placeholder="Min. 8 Zeichen" name="password" minLength={8} autoComplete="new-password"/></label>
@@ -523,7 +527,7 @@ else if(route==="account/dashboard"||route==="account/orders"||route==="account/
 else if(route==="account")page=<Account/>;
 else if(route==="contact")page=<Contact/>;
 else if(["impressum","datenschutz","agb","widerruf","versand"].includes(route))page=<Legal route={route}/>;
-else page=<main className="not-found"><h1>404</h1><a href="/">Zurück zu GLOA →</a></main>;
+else page=<main className="not-found"><h1>404</h1><Link href="/">Zurück zu GLOA →</Link></main>;
 
 return <><Header onCart={openCart} cartCount={cart.totalCount}/>{page}<Footer/><CartDrawer open={cartOpen} onClose={closeCart}/></>
 }

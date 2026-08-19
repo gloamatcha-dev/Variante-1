@@ -24,14 +24,18 @@ function load(): CartItem[] {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const items: unknown[] = JSON.parse(raw);
-    return items.filter((item: any) =>
-      item &&
+    return items.filter((item): item is CartItem =>
+      typeof item === "object" &&
+      item !== null &&
+      "variantId" in item &&
       typeof item.variantId === "string" &&
       UUID_RE.test(item.variantId) &&
+      "unitPriceCents" in item &&
       typeof item.unitPriceCents === "number" &&
       Number.isInteger(item.unitPriceCents) &&
+      "purchaseType" in item &&
       item.purchaseType === "once"
-    ) as CartItem[];
+    );
   } catch { return []; }
 }
 

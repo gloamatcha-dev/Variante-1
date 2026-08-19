@@ -36,13 +36,14 @@ type CatalogState = {
 };
 
 export function useCatalog(slug: string): CatalogState {
-  const [state, setState] = useState<CatalogState>({ product: null, loading: true, error: null });
+  const [state, setState] = useState<CatalogState>(() =>
+    !supabase
+      ? { product: null, loading: false, error: "Shop nicht verfügbar." }
+      : { product: null, loading: true, error: null }
+  );
 
   useEffect(() => {
-    if (!supabase) {
-      setState({ product: null, loading: false, error: "Shop nicht verfügbar." });
-      return;
-    }
+    if (!supabase) return;
 
     let cancelled = false;
 

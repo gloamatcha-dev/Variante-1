@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import type { CustomerType } from "./content";
 import { COUNTRIES } from "./content";
 import { useAuth } from "../lib/auth";
@@ -23,25 +24,32 @@ export function AccountPortal({ page, orderId, subscriptionId, supplyId }: { pag
   const customerType: CustomerType = profile?.customer_type ?? "private";
 
   // Not logged in → redirect
-  if (!loading && !user) {
-    if (typeof window !== "undefined") window.location.href = "/account";
-    return null;
-  }
+  useEffect(() => {
+    if (!loading && !user) {
+      window.location.href = "/account";
+    }
+  }, [loading, user]);
 
   // Business-only page guard
-  if (!loading && (page === "business" || page === "supply-detail") && customerType !== "business") {
-    if (typeof window !== "undefined") window.location.href = "/account/dashboard";
-    return null;
-  }
+  useEffect(() => {
+    if (!loading && (page === "business" || page === "supply-detail") && customerType !== "business") {
+      window.location.href = "/account/dashboard";
+    }
+  }, [loading, page, customerType]);
 
   // Private-only page guard (subscriptions are B2C only)
-  if (!loading && (page === "subscriptions" || page === "subscription-detail") && customerType === "business") {
-    if (typeof window !== "undefined") window.location.href = "/account/dashboard";
-    return null;
-  }
+  useEffect(() => {
+    if (!loading && (page === "subscriptions" || page === "subscription-detail") && customerType === "business") {
+      window.location.href = "/account/dashboard";
+    }
+  }, [loading, page, customerType]);
 
   if (loading) {
     return <main className="portal"><p className="portal-loading">Laden…</p></main>;
+  }
+
+  if (!user) {
+    return null;
   }
 
   const navItems = NAV.filter(n => (!n.b2bOnly || customerType === "business") && (!n.privateOnly || customerType === "private"));
@@ -56,7 +64,7 @@ export function AccountPortal({ page, orderId, subscriptionId, supplyId }: { pag
     <main className="portal">
       <nav className="portal-nav">
         {navItems.map(n => (
-          <a key={n.key} href={`/account/${n.key}`} className={page === n.key || (n.key === "orders" && page === "order-detail") || (n.key === "subscriptions" && page === "subscription-detail") || (n.key === "business" && page === "supply-detail") ? "active" : ""}>{n.label}</a>
+          <Link key={n.key} href={`/account/${n.key}`} className={page === n.key || (n.key === "orders" && page === "order-detail") || (n.key === "subscriptions" && page === "subscription-detail") || (n.key === "business" && page === "supply-detail") ? "active" : ""}>{n.label}</Link>
         ))}
         <span className="portal-nav-spacer" />
         <button className="portal-logout" onClick={handleLogout}>Abmelden</button>
@@ -250,15 +258,15 @@ const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("de-DE", { day
 
 function PortalDashboard({ firstName, customerType }: { firstName: string; customerType: CustomerType }) {
   const [lastOrder, setLastOrder] = useState<OrderRow | null>(null);
-  const [orderLoading, setOrderLoading] = useState(true);
+  const [orderLoading, setOrderLoading] = useState(() => !!supabase);
   const [activeSub, setActiveSub] = useState<SubscriptionRow | null>(null);
   const [nextDeliverySub, setNextDeliverySub] = useState<SubscriptionRow | null>(null);
-  const [subLoading, setSubLoading] = useState(customerType === "private");
-  const [deliveryLoading, setDeliveryLoading] = useState(true);
+  const [subLoading, setSubLoading] = useState(() => customerType === "private" && !!supabase);
+  const [deliveryLoading, setDeliveryLoading] = useState(() => !!supabase && (customerType === "private" || customerType === "business"));
   const [nextB2bSupply, setNextB2bSupply] = useState<SupplyAgreementRow | null>(null);
 
   useEffect(() => {
-    if (!supabase) { setOrderLoading(false); setSubLoading(false); setDeliveryLoading(false); return; }
+    if (!supabase) return;
     supabase.from("orders").select("*").order("created_at", { ascending: false }).limit(1)
       .then(({ data }) => { setLastOrder(data?.[0] ?? null); setOrderLoading(false); });
     if (customerType === "private") {
@@ -269,8 +277,6 @@ function PortalDashboard({ firstName, customerType }: { firstName: string; custo
     } else if (customerType === "business") {
       supabase.from("b2b_supply_agreements").select("*").eq("status", "active").not("next_delivery_at", "is", null).gte("next_delivery_at", new Date().toISOString()).order("next_delivery_at", { ascending: true }).limit(1)
         .then(({ data }) => { setNextB2bSupply(data?.[0] ?? null); setDeliveryLoading(false); });
-    } else {
-      setDeliveryLoading(false);
     }
   }, [customerType]);
 
@@ -359,11 +365,11 @@ function PortalDashboard({ firstName, customerType }: { firstName: string; custo
       <section className="portal-quicklinks">
         <p className="eyebrow">SCHNELLZUGRIFFE</p>
         <div className="portal-quicklinks-grid">
-          <a href="/account/orders">Bestellungen</a>
-          {customerType === "private" && <a href="/account/subscriptions">Abos</a>}
-          <a href="/account/addresses">Adressen</a>
-          <a href="/account/profile">Kontodaten</a>
-          {customerType === "business" && <a href="/account/business">B2B</a>}
+          <Link href="/account/orders">Bestellungen</Link>
+          {customerType === "private" && <Link href="/account/subscriptions">Abos</Link>}
+          <Link href="/account/addresses">Adressen</Link>
+          <Link href="/account/profile">Kontodaten</Link>
+          {customerType === "business" && <Link href="/account/business">B2B</Link>}
         </div>
       </section>
     </>
@@ -376,11 +382,11 @@ function PortalOrders() {
   const { profile } = useAuth();
   const isBusiness = profile?.customer_type === "business";
   const [orders, setOrders] = useState<OrderRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !!supabase);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!supabase) { setLoading(false); return; }
+    if (!supabase) return;
     supabase.from("orders").select("*").order("created_at", { ascending: false })
       .then(({ data, error: err }) => {
         if (err) { setError("Deine Bestellungen konnten gerade nicht geladen werden."); }
@@ -404,7 +410,7 @@ function PortalOrders() {
       ) : orders.length === 0 ? (
         <section className="portal-empty-state">
           <p>Du hast noch keine Bestellungen.</p>
-          <a className="cta" href="/shop">ZUM SHOP</a>
+          <Link className="cta" href="/shop">ZUM SHOP</Link>
         </section>
       ) : (
         <div className="order-list">
@@ -433,11 +439,11 @@ function PortalOrders() {
 function OrderDetail({ orderId }: { orderId: string }) {
   const [order, setOrder] = useState<OrderRow | null>(null);
   const [items, setItems] = useState<OrderItemRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
+  const [loading, setLoading] = useState(() => !!supabase);
+  const [notFound, setNotFound] = useState(!supabase);
 
   useEffect(() => {
-    if (!supabase) { setLoading(false); setNotFound(true); return; }
+    if (!supabase) return;
     Promise.all([
       supabase.from("orders").select("*").eq("id", orderId).maybeSingle(),
       supabase.from("order_items").select("*").eq("order_id", orderId).order("created_at"),
@@ -456,7 +462,7 @@ function OrderDetail({ orderId }: { orderId: string }) {
         <p className="eyebrow">BESTELLUNG</p>
         <h1>Bestellung nicht gefunden.</h1>
       </section>
-      <a href="/account/orders" className="portal-back-link">&larr; Zurück zu Bestellungen</a>
+      <Link href="/account/orders" className="portal-back-link">&larr; Zurück zu Bestellungen</Link>
     </>
   );
 
@@ -466,7 +472,7 @@ function OrderDetail({ orderId }: { orderId: string }) {
 
   return (
     <>
-      <a href="/account/orders" className="portal-back-link">&larr; Bestellungen</a>
+      <Link href="/account/orders" className="portal-back-link">&larr; Bestellungen</Link>
 
       <section className="portal-page-head">
         <p className="eyebrow">BESTELLUNG {order.order_number}</p>
@@ -550,11 +556,11 @@ function OrderDetail({ orderId }: { orderId: string }) {
 
 function PortalSubscriptions() {
   const [subs, setSubs] = useState<SubscriptionRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !!supabase);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!supabase) { setLoading(false); return; }
+    if (!supabase) return;
     supabase.from("subscriptions").select("*").order("created_at", { ascending: false })
       .then(({ data, error: err }) => {
         if (err) { setError("Deine Abos konnten gerade nicht geladen werden."); }
@@ -587,7 +593,7 @@ function PortalSubscriptions() {
       ) : subs.length === 0 ? (
         <section className="portal-empty-state">
           <p>Du hast aktuell kein Abonnement.</p>
-          <a className="cta" href="/shop">ZUM SHOP</a>
+          <Link className="cta" href="/shop">ZUM SHOP</Link>
         </section>
       ) : (
         <div className="sub-list">
@@ -619,11 +625,11 @@ function PortalSubscriptions() {
 function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
   const [sub, setSub] = useState<SubscriptionRow | null>(null);
   const [items, setItems] = useState<SubscriptionItemRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
+  const [loading, setLoading] = useState(() => !!supabase);
+  const [notFound, setNotFound] = useState(!supabase);
 
   useEffect(() => {
-    if (!supabase) { setLoading(false); setNotFound(true); return; }
+    if (!supabase) return;
     Promise.all([
       supabase.from("subscriptions").select("*").eq("id", subscriptionId).maybeSingle(),
       supabase.from("subscription_items").select("*").eq("subscription_id", subscriptionId).order("created_at"),
@@ -642,7 +648,7 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
         <p className="eyebrow">ABO</p>
         <h1>Abo nicht gefunden.</h1>
       </section>
-      <a href="/account/subscriptions" className="portal-back-link">&larr; Zurück zu Abos</a>
+      <Link href="/account/subscriptions" className="portal-back-link">&larr; Zurück zu Abos</Link>
     </>
   );
 
@@ -653,7 +659,7 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
 
   return (
     <>
-      <a href="/account/subscriptions" className="portal-back-link">&larr; Abos</a>
+      <Link href="/account/subscriptions" className="portal-back-link">&larr; Abos</Link>
 
       <section className="portal-page-head">
         <p className="eyebrow">ABO</p>
@@ -994,12 +1000,12 @@ function PortalBusiness() {
   const [sizes, setSizes] = useState<ProductSize[]>([]);
   const [terms, setTerms] = useState<GeneralTerm[]>([]);
   const [agreements, setAgreements] = useState<SupplyAgreementRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [supplyLoading, setSupplyLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !!supabase);
+  const [supplyLoading, setSupplyLoading] = useState(() => !!supabase);
   const [supplyError, setSupplyError] = useState("");
 
   useEffect(() => {
-    if (!supabase) { setLoading(false); setSupplyLoading(false); return; }
+    if (!supabase) return;
     Promise.all([
       supabase.from("b2b_offer_models").select("*").order("sort_order"),
       supabase.from("b2b_product_sizes").select("*").order("sort_order"),
@@ -1147,7 +1153,7 @@ function PortalBusiness() {
             {businessProfile.vat_id && <div className="portal-profile-row"><span>USt-IdNr.</span><strong>{businessProfile.vat_id}</strong></div>}
             {businessProfile.website && <div className="portal-profile-row"><span>Website</span><strong>{businessProfile.website}</strong></div>}
           </div>
-          <a href="/account/profile" className="b2b-edit-link">Kontodaten bearbeiten →</a>
+          <Link href="/account/profile" className="b2b-edit-link">Kontodaten bearbeiten →</Link>
         </section>
       )}
     </>
@@ -1159,11 +1165,11 @@ function PortalBusiness() {
 function SupplyDetail({ supplyId }: { supplyId: string }) {
   const [agreement, setAgreement] = useState<SupplyAgreementRow | null>(null);
   const [items, setItems] = useState<SupplyItemRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
+  const [loading, setLoading] = useState(() => !!supabase);
+  const [notFound, setNotFound] = useState(!supabase);
 
   useEffect(() => {
-    if (!supabase) { setLoading(false); setNotFound(true); return; }
+    if (!supabase) return;
     Promise.all([
       supabase.from("b2b_supply_agreements").select("*").eq("id", supplyId).maybeSingle(),
       supabase.from("b2b_supply_items").select("*").eq("supply_agreement_id", supplyId).order("created_at"),
@@ -1182,7 +1188,7 @@ function SupplyDetail({ supplyId }: { supplyId: string }) {
         <p className="eyebrow">BELIEFERUNG</p>
         <h1>Belieferung nicht gefunden.</h1>
       </section>
-      <a href="/account/business" className="portal-back-link">&larr; Zurück zu B2B</a>
+      <Link href="/account/business" className="portal-back-link">&larr; Zurück zu B2B</Link>
     </>
   );
 
@@ -1194,7 +1200,7 @@ function SupplyDetail({ supplyId }: { supplyId: string }) {
 
   return (
     <>
-      <a href="/account/business" className="portal-back-link">&larr; B2B</a>
+      <Link href="/account/business" className="portal-back-link">&larr; B2B</Link>
 
       <section className="portal-page-head">
         <p className="eyebrow">BELIEFERUNG</p>
