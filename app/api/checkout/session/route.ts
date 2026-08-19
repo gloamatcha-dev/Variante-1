@@ -2,7 +2,7 @@ import type Stripe from "stripe";
 import { getStripeClient } from "../../../../lib/stripe";
 import { validateQuoteItems, buildAuthoritativeQuote } from "../../../../lib/checkoutQuote";
 import { getSiteOrigin } from "../../../../lib/siteUrl";
-import { PRODUCT } from "../../../content";
+import { getOrCreateCheckoutAttempt, linkStripeSession } from "../../../../lib/checkoutAttempts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -79,14 +79,40 @@ export async function POST(request: Request): Promise<Response> {
 
   const { quote } = quoteResult;
 
-  const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = quote.items.map(item => ({
+  // Persists (or reuses, on retry) the authoritative server-side snapshot
+  // for this request_id BEFORE calling Stripe, so a retry after a failed
+  // Stripe call reuses the same locked-in prices instead of a possibly
+  // changed fresh quote.
+  const attemptResult = await getOrCreateCheckoutAttempt(requestId, quote);
+  if (!attemptResult.ok) {
+    return Response.json(
+      { error: attemptResult.error } as ErrorResponse,
+      { status: 503 }
+    );
+  }
+
+  const { attempt } = attemptResult;
+
+  if (attempt.status === "paid") {
+    return Response.json(
+      { error: "Diese Anfrage wurde bereits bezahlt." } as ErrorResponse,
+      { status: 409 }
+    );
+  }
+
+  const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = attempt.items_snapshot.map(item => ({
     quantity: item.quantity,
     price_data: {
-      currency: quote.currency.toLowerCase(),
+      currency: item.currency.toLowerCase(),
       unit_amount: item.unitGrossCents,
       product_data: {
-        name: `${PRODUCT.name} · ${item.label}`,
+        name: `${item.productName} · ${item.variantLabel}`,
       },
+    },
+    metadata: {
+      variant_id: item.variantId,
+      sku: item.sku,
+      size_grams: String(item.sizeGrams),
     },
   }));
 
@@ -100,6 +126,7 @@ export async function POST(request: Request): Promise<Response> {
         metadata: {
           checkout_version: "1",
           request_id: requestId,
+          checkout_attempt_id: attempt.id,
         },
       },
       { idempotencyKey: `gloa-checkout-${requestId}` }
@@ -112,6 +139,11 @@ export async function POST(request: Request): Promise<Response> {
         { status: 502 }
       );
     }
+
+    // Best-effort: the customer must still be able to pay even if this
+    // link fails. The webhook falls back to matching by
+    // metadata.request_id and self-heals this link when it runs.
+    await linkStripeSession(attempt.id, session.id);
 
     return Response.json(
       { sessionId: session.id, url: session.url } as SessionResponse,
