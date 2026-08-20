@@ -11,6 +11,7 @@ import { track } from "./analytics";
 import { useCart } from "./cart";
 import { AuthProvider, useAuth } from "../lib/auth";
 import { supabase } from "../lib/supabase";
+import { SHIPPING_ZONES, DELIVERY_TIME_NOTE, CUSTOMS_NOTE } from "../lib/shipping";
 
 
 type Recipe={slug:string;title:string;category:string;time:string;tags:string[];image:string;alt:string;excerpt:string;description:string;ingredients:string[];steps:string[];featured:boolean};
@@ -113,7 +114,7 @@ return <main className="shop-page">
 <button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="#newsletter":handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
 </div></section>
 
-<section className="shop-details"><div className="shop-details-inner"><p className="eyebrow">PRODUKTDETAILS</p><dl><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>VERWENDUNG</dt><dd>Latte · Iced · Pur</dd></div><div><dt>ERNTE</dt><dd>2. und 3. Pflückung</dd></div><div><dt>MINDESTHALTBARKEIT</dt><dd>3 Jahre</dd></div><div><dt>LAGERUNG</dt><dd>Kühl und trocken</dd></div><div><dt>GROESSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div></dl><Link className="shop-details-link" href="/our-matcha" onClick={()=>track("shop_to_matcha")}>MEHR ÜBER UNSEREN MATCHA →</Link></div></section>
+<section className="shop-details"><div className="shop-details-inner"><p className="eyebrow">PRODUKTDETAILS</p><dl><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>VERWENDUNG</dt><dd>Latte · Iced · Pur</dd></div><div><dt>ERNTE</dt><dd>2. und 3. Pflückung</dd></div><div><dt>MINDESTHALTBARKEIT</dt><dd>3 Jahre</dd></div><div><dt>LAGERUNG</dt><dd>Kühl und trocken</dd></div><div><dt>GROESSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div><div><dt>VERSAND</dt><dd>Versand aus Deutschland · Lieferzeit je nach Zielland: 2–10 Werktage</dd></div></dl><Link className="shop-details-link" href="/our-matcha" onClick={()=>track("shop_to_matcha")}>MEHR ÜBER UNSEREN MATCHA →</Link><Link className="shop-details-link" href="/versand">VERSAND & LIEFERZEITEN →</Link></div></section>
 
 <Newsletter/>
 </main>}
@@ -197,7 +198,21 @@ function Contact(){return <main className="contact-main">
 <section className="contact-choices"><a href="#customer-form"><span>PRIVATKUNDE</span><h2>Fragen zu<br/>Produkt & Bestellung.</h2><b>Kontaktformular →</b></a><Link href="/for-cafes"><span>BUSINESS</span><h2>Großhandel,<br/>Samples & Cafés.</h2><b>Zum B2B-Bereich →</b></Link></section>
 <form id="customer-form" className="customer-form" onSubmit={e=>e.preventDefault()}><p className="eyebrow">NACHRICHT SENDEN</p><div className="customer-form-row"><label>Name*<input required placeholder="Vor- und Nachname"/></label><label>E-Mail*<input required type="email" placeholder="deine@email.de"/></label></div><div className="customer-form-row"><label>Anliegen*<select required defaultValue=""><option value="" disabled>Bitte auswählen</option><option>Bestellung</option><option>Produkt</option><option>Abo</option><option>Sonstiges</option></select></label><label>Bestellnummer<input placeholder="Optional"/></label></div><label>Nachricht*<textarea required placeholder="Wie können wir helfen?" rows={5}/></label><button className="cta" type="submit">Nachricht senden</button></form>
 </main>}
-function Legal({route}:{route:string}){const title:Record<string,string>={impressum:"Impressum",datenschutz:"Datenschutz",agb:"Allgemeine Geschäftsbedingungen",widerruf:"Widerruf",versand:"Versandinformationen"};return <main className="legal-page"><p className="eyebrow">LEGAL</p><h1>{title[route]||"Legal"}</h1><div className="legal-placeholder"><h2>Rechtlicher Inhalt ausstehend.</h2><p>Vor dem öffentlichen Shop-Launch muss dieser Inhalt von GLOA beziehungsweise einer qualifizierten Rechtsberatung bereitgestellt und geprüft werden.</p></div></main>}
+function Legal({route}:{route:string}){
+const title:Record<string,string>={impressum:"Impressum",datenschutz:"Datenschutz",agb:"Allgemeine Geschäftsbedingungen",widerruf:"Widerruf",versand:"Versandinformationen"};
+if(route==="versand")return <main className="legal-page">
+<p className="eyebrow">LEGAL</p>
+<h1>{title.versand}</h1>
+<dl className="legal-shipping-table">
+<div><dt>DEUTSCHLAND</dt><dd>{SHIPPING_ZONES.germany.deliveryTimeLabel}</dd></div>
+<div><dt>EU</dt><dd>{SHIPPING_ZONES.eu.deliveryTimeLabel}</dd></div>
+<div><dt>SCHWEIZ / UK / NORWEGEN</dt><dd>{SHIPPING_ZONES.nonEuCore.deliveryTimeLabel}</dd></div>
+<div><dt>ÜBRIGES EUROPA</dt><dd>{SHIPPING_ZONES.restOfEurope.deliveryTimeLabel}</dd></div>
+</dl>
+<p className="legal-note">{DELIVERY_TIME_NOTE}</p>
+<p className="legal-note">{CUSTOMS_NOTE}</p>
+</main>;
+return <main className="legal-page"><p className="eyebrow">LEGAL</p><h1>{title[route]||"Legal"}</h1><div className="legal-placeholder"><h2>Rechtlicher Inhalt ausstehend.</h2><p>Vor dem öffentlichen Shop-Launch muss dieser Inhalt von GLOA beziehungsweise einer qualifizierten Rechtsberatung bereitgestellt und geprüft werden.</p></div></main>}
 
 // B2B-Bereich: /account/business
 // Geschäftskunden (customerType === "business") sehen den B2B-Menüpunkt.

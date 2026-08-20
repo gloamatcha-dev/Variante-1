@@ -5,6 +5,7 @@ import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth";
 import { useCart } from "./cart";
 import type { AddressSnapshot } from "../lib/orderAddressSnapshot";
+import { getCountryLabel } from "../lib/shipping";
 
 type OrderData = {
   id: string;
@@ -192,7 +193,7 @@ export function OrderSuccess() {
             {order.shippingAddress.line2 && <p>{order.shippingAddress.line2}</p>}
             <p>{order.shippingAddress.postalCode} {order.shippingAddress.city}</p>
             {order.shippingAddress.state && <p>{order.shippingAddress.state}</p>}
-            <p>{order.shippingAddress.country}</p>
+            <p>{getCountryLabel(order.shippingAddress.country)}</p>
           </div>
         </section>
       )}

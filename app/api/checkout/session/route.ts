@@ -4,6 +4,7 @@ import { validateQuoteItems, buildAuthoritativeQuote } from "../../../../lib/che
 import { getSiteOrigin } from "../../../../lib/siteUrl";
 import { getOrCreateCheckoutAttempt, linkStripeSession } from "../../../../lib/checkoutAttempts";
 import { verifyUserId } from "../../../../lib/verifyUser";
+import { ALLOWED_SHIPPING_COUNTRIES } from "../../../../lib/shipping";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -127,10 +128,10 @@ export async function POST(request: Request): Promise<Response> {
       {
         mode: "payment",
         line_items: lineItems,
-        // Launch ships to Germany only. Adding a country here is a
-        // business decision, not a technical one - see task notes before
-        // extending this list.
-        shipping_address_collection: { allowed_countries: ["DE"] },
+        // Which countries we ship to is a business decision, not a
+        // technical one - see lib/shipping.ts (SHIPPING_ZONES) rather
+        // than editing this list directly.
+        shipping_address_collection: { allowed_countries: ALLOWED_SHIPPING_COUNTRIES },
         success_url: `${origin}/order/success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${origin}/shop?checkout=cancelled`,
         metadata: {

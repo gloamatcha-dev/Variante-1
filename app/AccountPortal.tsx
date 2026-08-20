@@ -8,6 +8,7 @@ import type { AddressRow } from "../lib/auth";
 import { supabase } from "../lib/supabase";
 import { B2bCalculator } from "./B2bCalculator";
 import type { AddressSnapshot } from "../lib/orderAddressSnapshot";
+import { getCountryLabel } from "../lib/shipping";
 
 type PortalPage = "dashboard" | "orders" | "subscriptions" | "addresses" | "profile" | "business" | "order-detail" | "subscription-detail" | "supply-detail";
 
@@ -537,7 +538,7 @@ function OrderDetail({ orderId }: { orderId: string }) {
                 {ship.line2 && <p>{ship.line2}</p>}
                 <p>{ship.postalCode} {ship.city}</p>
                 {ship.state && <p>{ship.state}</p>}
-                <p>{ship.country}</p>
+                <p>{getCountryLabel(ship.country)}</p>
               </div>
             </section>
           )}
@@ -551,7 +552,7 @@ function OrderDetail({ orderId }: { orderId: string }) {
                 {bill.line2 && <p>{bill.line2}</p>}
                 <p>{bill.postalCode} {bill.city}</p>
                 {bill.state && <p>{bill.state}</p>}
-                <p>{bill.country}</p>
+                <p>{getCountryLabel(bill.country)}</p>
               </div>
             </section>
           )}
