@@ -96,15 +96,18 @@ type OrderRow = {
   fulfillment_status: string;
   currency: string;
   customer_snapshot: Record<string, unknown>;
-  shipping_address_snapshot: Record<string, unknown>;
-  billing_address_snapshot: Record<string, unknown>;
-  subtotal_net_cents: number;
+  // Address snapshots and the net/tax split are NULL until shipping/tax
+  // are finalized (a real order can legitimately have none of these yet -
+  // see migrations 011/012). Only *_gross_cents are guaranteed known.
+  shipping_address_snapshot: Record<string, unknown> | null;
+  billing_address_snapshot: Record<string, unknown> | null;
+  subtotal_net_cents: number | null;
   subtotal_gross_cents: number;
   discount_total_cents: number;
-  shipping_net_cents: number;
-  shipping_gross_cents: number;
-  tax_total_cents: number;
-  total_net_cents: number;
+  shipping_net_cents: number | null;
+  shipping_gross_cents: number | null;
+  tax_total_cents: number | null;
+  total_net_cents: number | null;
   total_gross_cents: number;
   placed_at: string | null;
   created_at: string;
@@ -340,7 +343,7 @@ function PortalDashboard({ firstName, customerType }: { firstName: string; custo
               {recentOrders.map(o => (
                 <div key={o.id} className="portal-dash-order">
                   <div className="portal-dash-order-row"><span>{o.order_number}</span><span>{fmtDate(o.placed_at || o.created_at)}</span></div>
-                  <div className="portal-dash-order-row"><span>{STATUS_DE[o.status] || o.status}</span><strong>{fmtCents(o.customer_type === "business" ? o.total_net_cents : o.total_gross_cents)} €{o.customer_type === "business" ? " netto" : ""}</strong></div>
+                  <div className="portal-dash-order-row"><span>{STATUS_DE[o.status] || o.status}</span><strong>{fmtCents(o.customer_type === "business" ? o.total_net_cents ?? o.total_gross_cents : o.total_gross_cents)} €{o.customer_type === "business" && o.total_net_cents !== null ? " netto" : ""}</strong></div>
                   <a href={`/account/orders/${o.id}`} className="portal-dash-order-link">BESTELLUNG ANSEHEN</a>
                 </div>
               ))}
@@ -432,7 +435,7 @@ function PortalOrders() {
               <span className="order-list-number">{o.order_number}</span>
               <span>{fmtDate(o.placed_at || o.created_at)}</span>
               <span>{STATUS_DE[o.status] || o.status}</span>
-              <span className="order-list-total">{fmtCents(isBusiness ? o.total_net_cents : o.total_gross_cents)} €{isBusiness ? " netto" : ""}</span>
+              <span className="order-list-total">{fmtCents(isBusiness ? o.total_net_cents ?? o.total_gross_cents : o.total_gross_cents)} €{isBusiness && o.total_net_cents !== null ? " netto" : ""}</span>
             </a>
           ))}
         </div>
@@ -474,8 +477,14 @@ function OrderDetail({ orderId }: { orderId: string }) {
   );
 
   const isBusiness = order.customer_type === "business";
-  const ship = order.shipping_address_snapshot as Record<string, string>;
-  const bill = order.billing_address_snapshot as Record<string, string>;
+  // Shipping/billing address snapshots, and the net/tax split, are
+  // genuinely unknown (NULL) until shipping/tax are finalized elsewhere -
+  // never assume they're present just because an order exists.
+  const ship = order.shipping_address_snapshot as Record<string, string> | null;
+  const bill = order.billing_address_snapshot as Record<string, string> | null;
+  const subtotalCents = isBusiness ? order.subtotal_net_cents : order.subtotal_gross_cents;
+  const shippingCents = isBusiness ? order.shipping_net_cents : order.shipping_gross_cents;
+  const totalCents = isBusiness ? order.total_net_cents : order.total_gross_cents;
 
   return (
     <>
@@ -489,6 +498,7 @@ function OrderDetail({ orderId }: { orderId: string }) {
       <div className="order-detail-meta">
         <div className="portal-profile-row"><span>Datum</span><strong>{fmtDate(order.placed_at || order.created_at)}</strong></div>
         <div className="portal-profile-row"><span>Status</span><strong>{STATUS_DE[order.status] || order.status}</strong></div>
+        <div className="portal-profile-row"><span>Zahlungsstatus</span><strong>{order.payment_status === "paid" ? "Bezahlt" : order.payment_status}</strong></div>
       </div>
 
       {/* ── Items ── */}
@@ -511,48 +521,58 @@ function OrderDetail({ orderId }: { orderId: string }) {
         </section>
       )}
 
-      {/* ── Addresses ── */}
-      <div className="order-detail-addresses">
-        <section className="order-detail-section">
-          <p className="eyebrow">LIEFERADRESSE</p>
-          <div className="portal-address-display">
-            <p>{ship.first_name} {ship.last_name}</p>
-            {ship.company && <p>{ship.company}</p>}
-            <p>{ship.street} {ship.house_number}</p>
-            <p>{ship.zip} {ship.city}</p>
-            <p>{ship.country}</p>
-          </div>
-        </section>
-        <section className="order-detail-section">
-          <p className="eyebrow">RECHNUNGSADRESSE</p>
-          <div className="portal-address-display">
-            <p>{bill.first_name} {bill.last_name}</p>
-            {bill.company && <p>{bill.company}</p>}
-            <p>{bill.street} {bill.house_number}</p>
-            <p>{bill.zip} {bill.city}</p>
-            <p>{bill.country}</p>
-          </div>
-        </section>
-      </div>
+      {/* ── Addresses (only when actually known) ── */}
+      {(ship || bill) && (
+        <div className="order-detail-addresses">
+          {ship && (
+            <section className="order-detail-section">
+              <p className="eyebrow">LIEFERADRESSE</p>
+              <div className="portal-address-display">
+                <p>{ship.first_name} {ship.last_name}</p>
+                {ship.company && <p>{ship.company}</p>}
+                <p>{ship.street} {ship.house_number}</p>
+                <p>{ship.zip} {ship.city}</p>
+                <p>{ship.country}</p>
+              </div>
+            </section>
+          )}
+          {bill && (
+            <section className="order-detail-section">
+              <p className="eyebrow">RECHNUNGSADRESSE</p>
+              <div className="portal-address-display">
+                <p>{bill.first_name} {bill.last_name}</p>
+                {bill.company && <p>{bill.company}</p>}
+                <p>{bill.street} {bill.house_number}</p>
+                <p>{bill.zip} {bill.city}</p>
+                <p>{bill.country}</p>
+              </div>
+            </section>
+          )}
+        </div>
+      )}
 
-      {/* ── Totals ── */}
+      {/* ── Totals (only fields that are actually known) ── */}
       <section className="order-detail-section">
         <p className="eyebrow">SUMME</p>
         <div className="order-totals">
-          <div className="portal-profile-row"><span>Zwischensumme</span><strong>{fmtCents(isBusiness ? order.subtotal_net_cents : order.subtotal_gross_cents)} €</strong></div>
+          {typeof subtotalCents === "number" && (
+            <div className="portal-profile-row"><span>Zwischensumme</span><strong>{fmtCents(subtotalCents)} €</strong></div>
+          )}
           {order.discount_total_cents > 0 && (
             <div className="portal-profile-row"><span>Rabatt</span><strong>&minus;{fmtCents(order.discount_total_cents)} €</strong></div>
           )}
-          {(order.shipping_net_cents > 0 || order.shipping_gross_cents > 0) && (
-            <div className="portal-profile-row"><span>Versand</span><strong>{fmtCents(isBusiness ? order.shipping_net_cents : order.shipping_gross_cents)} €</strong></div>
+          {typeof shippingCents === "number" && shippingCents > 0 && (
+            <div className="portal-profile-row"><span>Versand</span><strong>{fmtCents(shippingCents)} €</strong></div>
           )}
-          {order.tax_total_cents > 0 && (
+          {typeof order.tax_total_cents === "number" && order.tax_total_cents > 0 && (
             <div className="portal-profile-row"><span>MwSt.</span><strong>{fmtCents(order.tax_total_cents)} €</strong></div>
           )}
-          <div className="portal-profile-row order-total-final">
-            <span>Gesamt{isBusiness ? " netto" : ""}</span>
-            <strong>{fmtCents(isBusiness ? order.total_net_cents : order.total_gross_cents)} €</strong>
-          </div>
+          {typeof totalCents === "number" && (
+            <div className="portal-profile-row order-total-final">
+              <span>Gesamt{isBusiness ? " netto" : ""}</span>
+              <strong>{fmtCents(totalCents)} €</strong>
+            </div>
+          )}
         </div>
       </section>
     </>

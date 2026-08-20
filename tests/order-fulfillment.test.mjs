@@ -101,7 +101,11 @@ test("create_order_from_paid_checkout: a paid attempt produces exactly one order
   assert.equal(order.subtotal_gross_cents, expectedTotal);
   assert.equal(order.payment_status, "paid");
   assert.equal(order.checkout_attempt_id, attemptId);
-  // Net/tax/shipping are genuinely unknown at this stage - never fabricated as 0.
+  // Net/tax/shipping are genuinely unknown at this stage - never fabricated
+  // as 0. This exact null-heavy shape is real and reaches the account UI -
+  // app/AccountPortal.tsx's OrderDetail must render it without crashing
+  // (it once did: TypeError reading 'first_name' off a null address
+  // snapshot; see the "fix: load authenticated order details" commit).
   assert.equal(order.subtotal_net_cents, null);
   assert.equal(order.shipping_net_cents, null);
   assert.equal(order.shipping_gross_cents, null);
