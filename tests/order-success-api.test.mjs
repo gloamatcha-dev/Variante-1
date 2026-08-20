@@ -65,6 +65,19 @@ test("order success lookup: no order data is ever included on an invalid respons
   assert.equal(body.order, undefined);
 });
 
+test("order success lookup: extra query params (e.g. a spoofed shipping address) have no effect", async () => {
+  const spoofed = new URLSearchParams({
+    session_id: "not-a-real-session",
+    shippingAddress: JSON.stringify({ line1: "Fake Street 1", city: "Nowhere" }),
+    user_id: "11111111-1111-1111-1111-111111111111",
+  });
+  const plain = await fetch(`${BASE_URL}/api/orders/success?session_id=not-a-real-session`);
+  const withSpoofedParams = await fetch(`${BASE_URL}/api/orders/success?${spoofed.toString()}`);
+  // The route only ever reads session_id - any other query param is inert.
+  assert.equal(plain.status, withSpoofedParams.status);
+  assert.deepEqual(await plain.json(), await withSpoofedParams.json());
+});
+
 test("order success lookup: well-formed session_id fails gracefully without STRIPE_SECRET_KEY", async () => {
   const res = await fetch(`${BASE_URL}/api/orders/success?session_id=cs_test_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`);
   const body = await res.json();

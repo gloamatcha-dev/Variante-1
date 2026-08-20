@@ -4,6 +4,7 @@ import Link from "next/link";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth";
 import { useCart } from "./cart";
+import type { AddressSnapshot } from "../lib/orderAddressSnapshot";
 
 type OrderData = {
   id: string;
@@ -12,6 +13,7 @@ type OrderData = {
   currency: string;
   totalGrossCents: number;
   paymentStatus: string;
+  shippingAddress: AddressSnapshot | null;
   items: {
     productName: string;
     variantLabel: string | null;
@@ -180,6 +182,20 @@ export function OrderSuccess() {
           ))}
         </div>
       </section>
+
+      {order.shippingAddress && (
+        <section className="order-detail-section">
+          <p className="eyebrow">LIEFERADRESSE</p>
+          <div className="portal-address-display">
+            {order.shippingAddress.name && <p>{order.shippingAddress.name}</p>}
+            <p>{order.shippingAddress.line1}</p>
+            {order.shippingAddress.line2 && <p>{order.shippingAddress.line2}</p>}
+            <p>{order.shippingAddress.postalCode} {order.shippingAddress.city}</p>
+            {order.shippingAddress.state && <p>{order.shippingAddress.state}</p>}
+            <p>{order.shippingAddress.country}</p>
+          </div>
+        </section>
+      )}
 
       <section className="order-detail-section">
         <div className="order-totals">

@@ -1,6 +1,7 @@
 import { getStripeClient } from "../../../../lib/stripe";
 import { findAttemptByStripeSessionId, findAttemptByRequestId } from "../../../../lib/checkoutAttempts";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
+import type { AddressSnapshot } from "../../../../lib/orderAddressSnapshot";
 
 // Stripe Checkout Session ids, e.g. cs_test_a1b2c3... / cs_live_a1b2c3...
 const SESSION_ID_RE = /^cs_[a-zA-Z0-9_]{10,}$/;
@@ -18,6 +19,7 @@ type SuccessResponse =
         currency: string;
         totalGrossCents: number;
         paymentStatus: string;
+        shippingAddress: AddressSnapshot | null;
         items: {
           productName: string;
           variantLabel: string | null;
@@ -34,8 +36,10 @@ type SuccessResponse =
  * redirect/session_id itself as proof of payment - always re-verifies the
  * session server-side with Stripe, and only ever returns an order that
  * the verified, atomic order-creation flow (Stripe webhook) already
- * created. Deliberately returns no customer/address data - this endpoint
- * is reachable by anyone holding the session_id, including guests.
+ * created. Returns the shipping address (the success page needs to show
+ * it), but deliberately no billing address or customer email/name/phone -
+ * this endpoint is reachable by anyone holding the session_id, including
+ * guests, and those fields aren't needed to confirm "this is my order".
  */
 export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -81,7 +85,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const { data: order, error: orderError } = await admin
     .from("orders")
-    .select("id, order_number, currency, total_gross_cents, payment_status, placed_at, created_at")
+    .select("id, order_number, currency, total_gross_cents, payment_status, placed_at, created_at, shipping_address_snapshot")
     .eq("checkout_attempt_id", attempt.id)
     .maybeSingle();
 
@@ -117,6 +121,7 @@ export async function GET(request: Request): Promise<Response> {
         currency: order.currency,
         totalGrossCents: order.total_gross_cents,
         paymentStatus: order.payment_status,
+        shippingAddress: (order.shipping_address_snapshot as AddressSnapshot | null) ?? null,
         items: (items ?? []).map(item => ({
           productName: item.product_name,
           variantLabel: item.variant_name,

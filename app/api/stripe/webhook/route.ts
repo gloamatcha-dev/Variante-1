@@ -12,6 +12,7 @@ import {
 } from "../../../../lib/checkoutAttempts";
 import { evaluateStripeSessionPayment } from "../../../../lib/stripeFulfillment";
 import { createOrderFromPaidCheckoutAttempt } from "../../../../lib/orderFulfillment";
+import { buildShippingAddressSnapshot, buildBillingAddressSnapshot } from "../../../../lib/orderAddressSnapshot";
 
 type ErrorResponse = {
   error: string;
@@ -159,6 +160,8 @@ async function handleCheckoutSessionCompleted(stripe: Stripe, eventSession: Stri
       email: session.customer_details?.email ?? null,
       name: session.customer_details?.name ?? null,
     },
-    paymentIntentId
+    paymentIntentId,
+    buildShippingAddressSnapshot(session),
+    buildBillingAddressSnapshot(session)
   );
 }

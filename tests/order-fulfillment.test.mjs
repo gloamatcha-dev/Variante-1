@@ -3,13 +3,16 @@ import test from "node:test";
 import { getActiveVariantBySku, getReadOnlySupabaseClient } from "./helpers/catalog.mjs";
 import { getAdminSupabaseClient } from "./helpers/supabaseAdmin.mjs";
 
-// DB-level tests for create_order_from_paid_checkout (migration 011).
+// DB-level tests for create_order_from_paid_checkout (migrations
+// 011/012/013).
 //
-// Migration 011 is NOT auto-applied (see task 18 scope) - until a human
-// runs it in the Supabase SQL Editor, orders.checkout_attempt_id and the
-// RPC function do not exist yet. Every test below detects that up front
-// and skips with a clear message instead of failing, so `npm test` stays
-// green both before and after the migration is applied.
+// These migrations are NOT auto-applied (see task 18/19 scope) - until a
+// human runs them in the Supabase SQL Editor, the 5-arg RPC function
+// (checkout_attempt_id, customer_snapshot, payment_intent_id,
+// shipping_address_snapshot, billing_address_snapshot) does not exist
+// yet. Every test below detects that up front and skips with a clear
+// message instead of failing, so `npm test` stays green whether or not
+// the migrations have been applied yet.
 
 let admin;
 let variant;
@@ -17,6 +20,19 @@ let migrationApplied = true;
 let skipReason = "";
 
 const createdAttemptIds = [];
+const createdUserIds = [];
+
+// Synthetic test data only - never a real person's address.
+const SYNTHETIC_SHIPPING = {
+  name: "Max Mustermann",
+  company: null,
+  line1: "Musterstraße 1",
+  line2: null,
+  city: "Berlin",
+  postalCode: "10115",
+  state: null,
+  country: "DE",
+};
 
 function fakeItemsSnapshot(v, quantity = 1) {
   return [
@@ -34,7 +50,7 @@ function fakeItemsSnapshot(v, quantity = 1) {
   ];
 }
 
-async function seedPaidAttempt(v, { quantity = 1, status = "paid" } = {}) {
+async function seedPaidAttempt(v, { quantity = 1, status = "paid", userId = null } = {}) {
   const requestId = crypto.randomUUID();
   const itemsSnapshot = fakeItemsSnapshot(v, quantity);
   const expectedTotal = itemsSnapshot.reduce((sum, i) => sum + i.lineGrossCents, 0);
@@ -43,6 +59,7 @@ async function seedPaidAttempt(v, { quantity = 1, status = "paid" } = {}) {
     .from("checkout_attempts")
     .insert({
       request_id: requestId,
+      user_id: userId,
       status,
       currency: v.currency,
       expected_total_gross_cents: expectedTotal,
@@ -57,29 +74,46 @@ async function seedPaidAttempt(v, { quantity = 1, status = "paid" } = {}) {
   return { id: data.id, expectedTotal, itemsSnapshot };
 }
 
+function callRpc(attemptId, overrides = {}) {
+  return admin.rpc("create_order_from_paid_checkout", {
+    p_checkout_attempt_id: attemptId,
+    p_customer_snapshot: { email: null, name: null },
+    p_stripe_payment_intent_id: null,
+    p_shipping_address_snapshot: null,
+    p_billing_address_snapshot: null,
+    ...overrides,
+  });
+}
+
 test.before(async () => {
   admin = getAdminSupabaseClient();
   variant = await getActiveVariantBySku("GLOA-MATCHA-30G");
 
-  // Cheap existence probe for the migration-011 schema.
-  const probe = await admin.from("orders").select("checkout_attempt_id").limit(1);
-  if (probe.error) {
+  // Cheap existence probe for the migration-013 (5-arg) RPC signature.
+  // An unknown-attempt error means the function exists and ran; a
+  // "could not find function" / missing-overload error means it doesn't.
+  const probe = await callRpc("00000000-0000-0000-0000-000000000000");
+  if (probe.error && /could not find|does not exist|schema cache/i.test(probe.error.message)) {
     migrationApplied = false;
-    skipReason = `Migration 011 not applied yet (${probe.error.message}). Run supabase/migrations/011_orders_from_paid_checkout.sql, then re-run tests.`;
+    skipReason = `Migration 013 not applied yet (${probe.error.message}). Run supabase/migrations/011..013, then re-run tests.`;
   }
 });
 
 test.after(async () => {
-  if (!admin || createdAttemptIds.length === 0) return;
-  // Best-effort cleanup: delete any orders/order_items created from our
-  // seeded attempts, then the attempts themselves.
-  const { data: orders } = await admin.from("orders").select("id").in("checkout_attempt_id", createdAttemptIds);
-  const orderIds = (orders ?? []).map(o => o.id);
-  if (orderIds.length > 0) {
-    await admin.from("order_items").delete().in("order_id", orderIds);
-    await admin.from("orders").delete().in("id", orderIds);
+  if (admin && createdAttemptIds.length > 0) {
+    // Best-effort cleanup: delete any orders/order_items created from our
+    // seeded attempts, then the attempts themselves.
+    const { data: orders } = await admin.from("orders").select("id").in("checkout_attempt_id", createdAttemptIds);
+    const orderIds = (orders ?? []).map(o => o.id);
+    if (orderIds.length > 0) {
+      await admin.from("order_items").delete().in("order_id", orderIds);
+      await admin.from("orders").delete().in("id", orderIds);
+    }
+    await admin.from("checkout_attempts").delete().in("id", createdAttemptIds);
   }
-  await admin.from("checkout_attempts").delete().in("id", createdAttemptIds);
+  for (const id of createdUserIds) {
+    await admin.auth.admin.deleteUser(id).catch(() => {});
+  }
 });
 
 test("create_order_from_paid_checkout: a paid attempt produces exactly one order with matching items", async (t) => {
@@ -87,11 +121,7 @@ test("create_order_from_paid_checkout: a paid attempt produces exactly one order
 
   const { id: attemptId, expectedTotal, itemsSnapshot } = await seedPaidAttempt(variant, { quantity: 2 });
 
-  const { data, error } = await admin.rpc("create_order_from_paid_checkout", {
-    p_checkout_attempt_id: attemptId,
-    p_customer_snapshot: { email: "test@example.com", name: null },
-    p_stripe_payment_intent_id: null,
-  });
+  const { data, error } = await callRpc(attemptId, { p_customer_snapshot: { email: "test@example.com", name: null } });
 
   assert.equal(error, null, error?.message);
   const order = Array.isArray(data) ? data[0] : data;
@@ -111,6 +141,7 @@ test("create_order_from_paid_checkout: a paid attempt produces exactly one order
   assert.equal(order.shipping_gross_cents, null);
   assert.equal(order.tax_total_cents, null);
   assert.equal(order.total_net_cents, null);
+  // No shipping/billing snapshot was passed for this attempt either.
   assert.equal(order.shipping_address_snapshot, null);
   assert.equal(order.billing_address_snapshot, null);
 
@@ -129,21 +160,38 @@ test("create_order_from_paid_checkout: a paid attempt produces exactly one order
   assert.equal(items[0].line_total_net_cents, null);
 });
 
+test("create_order_from_paid_checkout: a real shipping address snapshot is stored as-is", async (t) => {
+  if (!migrationApplied) return t.skip(skipReason);
+
+  const { id: attemptId } = await seedPaidAttempt(variant, { quantity: 1 });
+
+  const { data, error } = await callRpc(attemptId, { p_shipping_address_snapshot: SYNTHETIC_SHIPPING });
+  assert.equal(error, null, error?.message);
+  const order = Array.isArray(data) ? data[0] : data;
+  assert.deepEqual(order.shipping_address_snapshot, SYNTHETIC_SHIPPING);
+  // Never split into street/house_number - Stripe's line1 stays whole.
+  assert.equal(order.shipping_address_snapshot.line1, "Musterstraße 1");
+});
+
+test("create_order_from_paid_checkout: guest order (user_id null) can still have a shipping snapshot", async (t) => {
+  if (!migrationApplied) return t.skip(skipReason);
+
+  const { id: attemptId } = await seedPaidAttempt(variant, { quantity: 1, userId: null });
+
+  const { data, error } = await callRpc(attemptId, { p_shipping_address_snapshot: SYNTHETIC_SHIPPING });
+  assert.equal(error, null, error?.message);
+  const order = Array.isArray(data) ? data[0] : data;
+  assert.equal(order.user_id, null);
+  assert.deepEqual(order.shipping_address_snapshot, SYNTHETIC_SHIPPING);
+});
+
 test("create_order_from_paid_checkout: called twice for the same attempt still yields exactly one order", async (t) => {
   if (!migrationApplied) return t.skip(skipReason);
 
   const { id: attemptId } = await seedPaidAttempt(variant, { quantity: 1 });
 
-  const first = await admin.rpc("create_order_from_paid_checkout", {
-    p_checkout_attempt_id: attemptId,
-    p_customer_snapshot: { email: null, name: null },
-    p_stripe_payment_intent_id: "pi_test_first",
-  });
-  const second = await admin.rpc("create_order_from_paid_checkout", {
-    p_checkout_attempt_id: attemptId,
-    p_customer_snapshot: { email: null, name: null },
-    p_stripe_payment_intent_id: "pi_test_second",
-  });
+  const first = await callRpc(attemptId, { p_stripe_payment_intent_id: "pi_test_first" });
+  const second = await callRpc(attemptId, { p_stripe_payment_intent_id: "pi_test_second" });
 
   assert.equal(first.error, null, first.error?.message);
   assert.equal(second.error, null, second.error?.message);
@@ -158,16 +206,40 @@ test("create_order_from_paid_checkout: called twice for the same attempt still y
   assert.equal(orders.length, 1);
 });
 
+test("create_order_from_paid_checkout: a retry with different snapshot data never overwrites the original snapshots", async (t) => {
+  if (!migrationApplied) return t.skip(skipReason);
+
+  const { id: attemptId } = await seedPaidAttempt(variant, { quantity: 1 });
+
+  const first = await callRpc(attemptId, {
+    p_customer_snapshot: { email: "first@example.invalid", name: "First Name" },
+    p_shipping_address_snapshot: SYNTHETIC_SHIPPING,
+  });
+  assert.equal(first.error, null, first.error?.message);
+
+  const differentShipping = { ...SYNTHETIC_SHIPPING, name: "Someone Else", city: "Hamburg" };
+  const second = await callRpc(attemptId, {
+    p_customer_snapshot: { email: "second@example.invalid", name: "Second Name" },
+    p_shipping_address_snapshot: differentShipping,
+  });
+  assert.equal(second.error, null, second.error?.message);
+
+  const { data: order, error } = await admin
+    .from("orders")
+    .select("customer_snapshot, shipping_address_snapshot")
+    .eq("checkout_attempt_id", attemptId)
+    .single();
+  assert.equal(error, null, error?.message);
+  assert.deepEqual(order.customer_snapshot, { email: "first@example.invalid", name: "First Name" });
+  assert.deepEqual(order.shipping_address_snapshot, SYNTHETIC_SHIPPING);
+});
+
 test("create_order_from_paid_checkout: an unpaid attempt is rejected and creates no order", async (t) => {
   if (!migrationApplied) return t.skip(skipReason);
 
   const { id: attemptId } = await seedPaidAttempt(variant, { quantity: 1, status: "created" });
 
-  const { error } = await admin.rpc("create_order_from_paid_checkout", {
-    p_checkout_attempt_id: attemptId,
-    p_customer_snapshot: { email: null, name: null },
-    p_stripe_payment_intent_id: null,
-  });
+  const { error } = await callRpc(attemptId);
 
   assert.ok(error, "expected an error for a non-paid checkout attempt");
 
@@ -178,11 +250,7 @@ test("create_order_from_paid_checkout: an unpaid attempt is rejected and creates
 test("create_order_from_paid_checkout: an unknown checkout attempt is rejected", async (t) => {
   if (!migrationApplied) return t.skip(skipReason);
 
-  const { error } = await admin.rpc("create_order_from_paid_checkout", {
-    p_checkout_attempt_id: "00000000-0000-0000-0000-000000000000",
-    p_customer_snapshot: { email: null, name: null },
-    p_stripe_payment_intent_id: null,
-  });
+  const { error } = await callRpc("00000000-0000-0000-0000-000000000000");
 
   assert.ok(error, "expected an error for an unknown checkout attempt id");
 });
@@ -191,11 +259,7 @@ test("orders/order_items: anonymous (unauthenticated) access is denied by grants
   if (!migrationApplied) return t.skip(skipReason);
 
   const { id: attemptId } = await seedPaidAttempt(variant, { quantity: 1 });
-  const { data } = await admin.rpc("create_order_from_paid_checkout", {
-    p_checkout_attempt_id: attemptId,
-    p_customer_snapshot: { email: null, name: null },
-    p_stripe_payment_intent_id: null,
-  });
+  const { data } = await callRpc(attemptId);
   const order = Array.isArray(data) ? data[0] : data;
 
   const anon = getReadOnlySupabaseClient();
@@ -203,4 +267,45 @@ test("orders/order_items: anonymous (unauthenticated) access is denied by grants
   // Either an explicit permission error, or RLS silently returning nothing -
   // either way, no order data must be visible to an unauthenticated client.
   assert.ok(error || !foreignRead, "an unauthenticated client must not be able to read another customer's order");
+});
+
+test("order shipping snapshot: independent of the account's current address book (no live FK)", async (t) => {
+  if (!migrationApplied) return t.skip(skipReason);
+
+  const email = `gloa-snapshot-test-${crypto.randomUUID()}@example.invalid`;
+  const password = `${crypto.randomUUID()}Aa1!`;
+  const { data: created, error: createErr } = await admin.auth.admin.createUser({ email, password, email_confirm: true });
+  assert.equal(createErr, null, createErr?.message);
+  createdUserIds.push(created.user.id);
+
+  const { id: attemptId } = await seedPaidAttempt(variant, { quantity: 1, userId: created.user.id });
+  const { data, error } = await callRpc(attemptId, { p_shipping_address_snapshot: SYNTHETIC_SHIPPING });
+  assert.equal(error, null, error?.message);
+  const order = Array.isArray(data) ? data[0] : data;
+
+  // Now change the account's address book after the order was created.
+  const { error: addrErr } = await admin.from("addresses").insert({
+    user_id: created.user.id,
+    first_name: "Changed",
+    last_name: "Later",
+    street: "Andere Straße",
+    house_number: "9",
+    zip: "20095",
+    city: "Hamburg",
+    country: "Deutschland",
+    is_default_shipping: true,
+    is_default_billing: true,
+  });
+  assert.equal(addrErr, null, addrErr?.message);
+
+  const { data: reread, error: rereadErr } = await admin
+    .from("orders")
+    .select("shipping_address_snapshot")
+    .eq("id", order.id)
+    .single();
+  assert.equal(rereadErr, null, rereadErr?.message);
+  // The historical order snapshot must be completely unaffected.
+  assert.deepEqual(reread.shipping_address_snapshot, SYNTHETIC_SHIPPING);
+
+  await admin.from("addresses").delete().eq("user_id", created.user.id);
 });

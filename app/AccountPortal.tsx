@@ -7,6 +7,7 @@ import { useAuth } from "../lib/auth";
 import type { AddressRow } from "../lib/auth";
 import { supabase } from "../lib/supabase";
 import { B2bCalculator } from "./B2bCalculator";
+import type { AddressSnapshot } from "../lib/orderAddressSnapshot";
 
 type PortalPage = "dashboard" | "orders" | "subscriptions" | "addresses" | "profile" | "business" | "order-detail" | "subscription-detail" | "supply-detail";
 
@@ -96,11 +97,14 @@ type OrderRow = {
   fulfillment_status: string;
   currency: string;
   customer_snapshot: Record<string, unknown>;
-  // Address snapshots and the net/tax split are NULL until shipping/tax
-  // are finalized (a real order can legitimately have none of these yet -
-  // see migrations 011/012). Only *_gross_cents are guaranteed known.
-  shipping_address_snapshot: Record<string, unknown> | null;
-  billing_address_snapshot: Record<string, unknown> | null;
+  // Address snapshots and the net/tax split are NULL until an order
+  // actually has them (shipping address collection may not be enabled;
+  // billing address is only ever stored when Stripe actually returned
+  // one - see migrations 011/012/013). Only *_gross_cents are guaranteed
+  // known. Snapshots hold Stripe's own address shape (line1/line2/...),
+  // never a guessed street/house-number split.
+  shipping_address_snapshot: AddressSnapshot | null;
+  billing_address_snapshot: AddressSnapshot | null;
   subtotal_net_cents: number | null;
   subtotal_gross_cents: number;
   discount_total_cents: number;
@@ -480,8 +484,8 @@ function OrderDetail({ orderId }: { orderId: string }) {
   // Shipping/billing address snapshots, and the net/tax split, are
   // genuinely unknown (NULL) until shipping/tax are finalized elsewhere -
   // never assume they're present just because an order exists.
-  const ship = order.shipping_address_snapshot as Record<string, string> | null;
-  const bill = order.billing_address_snapshot as Record<string, string> | null;
+  const ship = order.shipping_address_snapshot;
+  const bill = order.billing_address_snapshot;
   const subtotalCents = isBusiness ? order.subtotal_net_cents : order.subtotal_gross_cents;
   const shippingCents = isBusiness ? order.shipping_net_cents : order.shipping_gross_cents;
   const totalCents = isBusiness ? order.total_net_cents : order.total_gross_cents;
@@ -528,10 +532,11 @@ function OrderDetail({ orderId }: { orderId: string }) {
             <section className="order-detail-section">
               <p className="eyebrow">LIEFERADRESSE</p>
               <div className="portal-address-display">
-                <p>{ship.first_name} {ship.last_name}</p>
-                {ship.company && <p>{ship.company}</p>}
-                <p>{ship.street} {ship.house_number}</p>
-                <p>{ship.zip} {ship.city}</p>
+                {ship.name && <p>{ship.name}</p>}
+                <p>{ship.line1}</p>
+                {ship.line2 && <p>{ship.line2}</p>}
+                <p>{ship.postalCode} {ship.city}</p>
+                {ship.state && <p>{ship.state}</p>}
                 <p>{ship.country}</p>
               </div>
             </section>
@@ -540,10 +545,12 @@ function OrderDetail({ orderId }: { orderId: string }) {
             <section className="order-detail-section">
               <p className="eyebrow">RECHNUNGSADRESSE</p>
               <div className="portal-address-display">
-                <p>{bill.first_name} {bill.last_name}</p>
+                {bill.name && <p>{bill.name}</p>}
                 {bill.company && <p>{bill.company}</p>}
-                <p>{bill.street} {bill.house_number}</p>
-                <p>{bill.zip} {bill.city}</p>
+                <p>{bill.line1}</p>
+                {bill.line2 && <p>{bill.line2}</p>}
+                <p>{bill.postalCode} {bill.city}</p>
+                {bill.state && <p>{bill.state}</p>}
                 <p>{bill.country}</p>
               </div>
             </section>

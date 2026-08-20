@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from "./supabaseAdmin";
+import type { AddressSnapshot } from "./orderAddressSnapshot";
 
 export type OrderCustomerSnapshot = {
   email: string | null;
@@ -17,12 +18,16 @@ export type CreatedOrder = {
  * times for the same attempt (e.g. Stripe webhook retries) - returns the
  * existing order instead of creating a second one. All locking/atomicity
  * happens inside the create_order_from_paid_checkout Postgres function;
- * this is a thin, typed wrapper around that RPC call.
+ * this is a thin, typed wrapper around that RPC call. Shipping/billing
+ * snapshots are only ever written on the first successful creation - a
+ * later retry never overwrites them (see the RPC's idempotency check).
  */
 export async function createOrderFromPaidCheckoutAttempt(
   checkoutAttemptId: string,
   customerSnapshot: OrderCustomerSnapshot,
-  stripePaymentIntentId: string | null
+  stripePaymentIntentId: string | null,
+  shippingAddressSnapshot: AddressSnapshot | null,
+  billingAddressSnapshot: AddressSnapshot | null
 ): Promise<CreatedOrder> {
   const admin = getSupabaseAdmin();
   if (!admin) {
@@ -33,6 +38,8 @@ export async function createOrderFromPaidCheckoutAttempt(
     p_checkout_attempt_id: checkoutAttemptId,
     p_customer_snapshot: customerSnapshot,
     p_stripe_payment_intent_id: stripePaymentIntentId,
+    p_shipping_address_snapshot: shippingAddressSnapshot,
+    p_billing_address_snapshot: billingAddressSnapshot,
   });
 
   if (error || !data) {
