@@ -17,7 +17,7 @@ export const PRODUCT = {
   status: "coming_soon" as const,
   origin: "Shizuoka, Japan",
   uses: ["Matcha Latte", "Iced Matcha", "Pure Matcha"],
-  storage: "Kühl und trocken lagern.",
+  storage: "Kühl, trocken und lichtgeschützt lagern. Nach dem Öffnen gut verschlossen aufbewahren.",
   tasteNotes: null as string | null,
   cultivar: null as string | null,
   producer: null as string | null,
