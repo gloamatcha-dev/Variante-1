@@ -17,10 +17,16 @@ export type CheckoutSession = {
  * accessToken (if the customer is signed in) lets the server link the
  * checkout attempt to the authenticated account after re-verifying it -
  * this function never sends a user id directly.
+ *
+ * shippingCountry is the customer's chosen delivery country (ISO code,
+ * e.g. "DE"). The server independently validates it and computes the
+ * shipping zone/price/free-shipping eligibility itself - this function
+ * never sends a zone, price, or free-shipping flag.
  */
 export async function createCheckoutSession(
   cartItems: CartItem[],
   requestId: string,
+  shippingCountry: string,
   accessToken?: string | null
 ): Promise<CheckoutSession> {
   const payload = {
@@ -29,6 +35,7 @@ export async function createCheckoutSession(
       quantity: item.quantity,
     })),
     requestId,
+    shippingCountry,
   };
 
   const response = await fetch("/api/checkout/session", {

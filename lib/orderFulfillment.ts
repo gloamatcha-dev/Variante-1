@@ -27,7 +27,8 @@ export async function createOrderFromPaidCheckoutAttempt(
   customerSnapshot: OrderCustomerSnapshot,
   stripePaymentIntentId: string | null,
   shippingAddressSnapshot: AddressSnapshot | null,
-  billingAddressSnapshot: AddressSnapshot | null
+  billingAddressSnapshot: AddressSnapshot | null,
+  shippingGrossCents: number
 ): Promise<CreatedOrder> {
   const admin = getSupabaseAdmin();
   if (!admin) {
@@ -40,6 +41,7 @@ export async function createOrderFromPaidCheckoutAttempt(
     p_stripe_payment_intent_id: stripePaymentIntentId,
     p_shipping_address_snapshot: shippingAddressSnapshot,
     p_billing_address_snapshot: billingAddressSnapshot,
+    p_shipping_gross_cents: shippingGrossCents,
   });
 
   if (error || !data) {

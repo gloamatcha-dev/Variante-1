@@ -12,6 +12,8 @@ type OrderData = {
   orderNumber: string;
   placedAt: string;
   currency: string;
+  subtotalGrossCents: number;
+  shippingGrossCents: number | null;
   totalGrossCents: number;
   paymentStatus: string;
   shippingAddress: AddressSnapshot | null;
@@ -202,6 +204,10 @@ export function OrderSuccess() {
         <div className="order-totals">
           <div className="portal-profile-row"><span>Datum</span><strong>{fmtDate(order.placedAt)}</strong></div>
           <div className="portal-profile-row"><span>Zahlungsstatus</span><strong>Bezahlt</strong></div>
+          <div className="portal-profile-row"><span>Zwischensumme</span><strong>{fmtCents(order.subtotalGrossCents)} €</strong></div>
+          {typeof order.shippingGrossCents === "number" && (
+            <div className="portal-profile-row"><span>Versand</span><strong>{order.shippingGrossCents === 0 ? "Kostenlos" : `${fmtCents(order.shippingGrossCents)} €`}</strong></div>
+          )}
           <div className="portal-profile-row order-total-final"><span>Gesamt</span><strong>{fmtCents(order.totalGrossCents)} €</strong></div>
         </div>
       </section>

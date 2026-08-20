@@ -4,7 +4,7 @@ import { validateQuoteItems, buildAuthoritativeQuote } from "../../../../lib/che
 import { getSiteOrigin } from "../../../../lib/siteUrl";
 import { getOrCreateCheckoutAttempt, linkStripeSession } from "../../../../lib/checkoutAttempts";
 import { verifyUserId } from "../../../../lib/verifyUser";
-import { ALLOWED_SHIPPING_COUNTRIES } from "../../../../lib/shipping";
+import { ALLOWED_SHIPPING_COUNTRIES, getShippingZone, computeShippingGrossCents, SHIPPING_ZONES } from "../../../../lib/shipping";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -35,7 +35,7 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const { items, requestId } = body as { items?: unknown; requestId?: unknown };
+  const { items, requestId, shippingCountry } = body as { items?: unknown; requestId?: unknown; shippingCountry?: unknown };
 
   if (typeof requestId !== "string" || !UUID_RE.test(requestId)) {
     return Response.json(
@@ -48,6 +48,26 @@ export async function POST(request: Request): Promise<Response> {
   if (!validatedItems) {
     return Response.json(
       { error: "Ungültige Artikel oder Mengen." } as ErrorResponse,
+      { status: 400 }
+    );
+  }
+
+  // The client may only tell us WHICH country it wants to ship to - never
+  // the resulting zone, price, or free-shipping eligibility. Those are
+  // always recomputed server-side from this validated code.
+  if (typeof shippingCountry !== "string" || !ALLOWED_SHIPPING_COUNTRIES.includes(shippingCountry.toUpperCase())) {
+    return Response.json(
+      { error: "Ungültiges Lieferland." } as ErrorResponse,
+      { status: 400 }
+    );
+  }
+  const normalizedShippingCountry = shippingCountry.toUpperCase();
+  const shippingZone = getShippingZone(normalizedShippingCountry);
+  if (!shippingZone) {
+    // Unreachable given the ALLOWED_SHIPPING_COUNTRIES check above, but
+    // fail closed rather than assume.
+    return Response.json(
+      { error: "Ungültiges Lieferland." } as ErrorResponse,
       { status: 400 }
     );
   }
@@ -81,6 +101,11 @@ export async function POST(request: Request): Promise<Response> {
 
   const { quote } = quoteResult;
 
+  // Shipping price is computed server-side from the zone and the
+  // authoritative merchandise subtotal above - never a client-supplied
+  // amount, zone, or free-shipping flag.
+  const shippingGrossCents = computeShippingGrossCents(shippingZone, quote.subtotalGrossCents);
+
   // Never trust a client-supplied user id - re-verify the bearer token
   // (if any) against Supabase Auth. Guest checkout (no/invalid token)
   // simply links no user, it never fails the request.
@@ -89,8 +114,16 @@ export async function POST(request: Request): Promise<Response> {
   // Persists (or reuses, on retry) the authoritative server-side snapshot
   // for this request_id BEFORE calling Stripe, so a retry after a failed
   // Stripe call reuses the same locked-in prices instead of a possibly
-  // changed fresh quote.
-  const attemptResult = await getOrCreateCheckoutAttempt(requestId, quote, userId);
+  // changed fresh quote. This also freezes the shipping country/zone/
+  // price: a retry with a different shippingCountry can never change an
+  // already-created attempt's shipping identity (same guarantee as
+  // user_id - see getOrCreateCheckoutAttempt's ignoreDuplicates upsert).
+  const attemptResult = await getOrCreateCheckoutAttempt(
+    requestId,
+    quote,
+    { country: normalizedShippingCountry, zone: shippingZone, grossCents: shippingGrossCents },
+    userId
+  );
   if (!attemptResult.ok) {
     return Response.json(
       { error: attemptResult.error } as ErrorResponse,
@@ -106,6 +139,21 @@ export async function POST(request: Request): Promise<Response> {
       { status: 409 }
     );
   }
+
+  // Always build the Stripe session from the attempt's frozen shipping
+  // data, never from this request's freshly computed values - a retry
+  // with a different shippingCountry must not change an already-created
+  // attempt's priced shipping (see getOrCreateCheckoutAttempt above).
+  if (!attempt.shipping_country || !attempt.shipping_zone || attempt.shipping_gross_cents === null) {
+    console.error(`Checkout session error: attempt ${attempt.id} has no frozen shipping data.`);
+    return Response.json(
+      { error: "Zahlungsfunktion vorübergehend nicht verfügbar." } as ErrorResponse,
+      { status: 503 }
+    );
+  }
+  const frozenShippingCountry = attempt.shipping_country;
+  const frozenShippingZone = SHIPPING_ZONES[attempt.shipping_zone];
+  const frozenShippingGrossCents = attempt.shipping_gross_cents;
 
   const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = attempt.items_snapshot.map(item => ({
     quantity: item.quantity,
@@ -128,10 +176,25 @@ export async function POST(request: Request): Promise<Response> {
       {
         mode: "payment",
         line_items: lineItems,
-        // Which countries we ship to is a business decision, not a
-        // technical one - see lib/shipping.ts (SHIPPING_ZONES) rather
-        // than editing this list directly.
-        shipping_address_collection: { allowed_countries: ALLOWED_SHIPPING_COUNTRIES },
+        // Restricted to exactly the one country this attempt was priced
+        // for - Stripe shipping rates have no per-country filtering, so
+        // allowing every enabled country in one session would let a
+        // customer pick an address in a different (cheaper) zone than
+        // the shipping_options price below actually reflects.
+        shipping_address_collection: { allowed_countries: [frozenShippingCountry] },
+        shipping_options: [
+          {
+            shipping_rate_data: {
+              type: "fixed_amount",
+              display_name: frozenShippingGrossCents === 0 ? "Kostenloser Versand" : "Versand",
+              fixed_amount: { amount: frozenShippingGrossCents, currency: "eur" },
+              delivery_estimate: {
+                minimum: { unit: "business_day", value: frozenShippingZone.minBusinessDays },
+                maximum: { unit: "business_day", value: frozenShippingZone.maxBusinessDays },
+              },
+            },
+          },
+        ],
         success_url: `${origin}/order/success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${origin}/shop?checkout=cancelled`,
         metadata: {

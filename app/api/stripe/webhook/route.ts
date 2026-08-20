@@ -149,6 +149,23 @@ async function handleCheckoutSessionCompleted(stripe: Stripe, eventSession: Stri
     throw new Error(`failed to mark checkout attempt ${attempt.id} paid`);
   }
 
+  // Security check: the shipping country Stripe actually confirmed must
+  // match what this attempt was priced/frozen for (see
+  // getOrCreateCheckoutAttempt). shipping_address_collection.allowed_countries
+  // is restricted to exactly that one country, so this should be
+  // unreachable in normal use - but fail closed rather than assume, and
+  // never silently re-zone a paid attempt after the fact. Payment is
+  // still marked paid above (that's a true fact); only order creation is
+  // withheld.
+  const confirmedShippingCountry = session.collected_information?.shipping_details?.address?.country ?? null;
+  if (!attempt.shipping_country || attempt.shipping_gross_cents === null || confirmedShippingCountry !== attempt.shipping_country) {
+    console.error(
+      `Stripe webhook: attempt ${attempt.id} shipping country mismatch or missing shipping snapshot (frozen=${attempt.shipping_country ?? "none"}, confirmed=${confirmedShippingCountry ?? "none"}) - fulfillment withheld.`
+    );
+    return;
+  }
+  const frozenShippingGrossCents = attempt.shipping_gross_cents;
+
   // Order creation is idempotent (see create_order_from_paid_checkout) and
   // always attempted here, even if this attempt was already marked paid by
   // an earlier delivery - a prior delivery may have failed after marking
@@ -162,6 +179,7 @@ async function handleCheckoutSessionCompleted(stripe: Stripe, eventSession: Stri
     },
     paymentIntentId,
     buildShippingAddressSnapshot(session),
-    buildBillingAddressSnapshot(session)
+    buildBillingAddressSnapshot(session),
+    frozenShippingGrossCents
   );
 }

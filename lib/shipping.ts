@@ -3,31 +3,27 @@ export type ShippingZoneKey = "germany" | "eu" | "nonEuCore" | "restOfEurope";
 export type ShippingZone = {
   key: ShippingZoneKey;
   countryCodes: string[]; // ISO 3166-1 alpha-2, matching Stripe's shipping_address_collection.allowed_countries
-  deliveryTimeLabel: string;
+  minBusinessDays: number;
+  maxBusinessDays: number;
+  deliveryTimeLabel: string; // derived from min/max below - single source of truth for both the label and Stripe's delivery_estimate
 };
 
 /**
- * Per-zone shipping price shape (Task 20B). Deliberately not populated
- * yet - no shipping price or free-shipping threshold has been decided.
- * Once real values exist, add a `pricing: Record<ShippingZoneKey,
- * ShippingPricing>` map here (never invent placeholder numbers) and:
- * - have the checkout session route compute the customer's zone from
- *   their (server-validated) chosen shipping country, look up
- *   shippingGrossCents here, and pass it as a single Stripe
- *   shipping_options[0].shipping_rate_data.fixed_amount - never a
- *   client-supplied amount
- * - freeShippingThresholdGrossCents is compared against the
- *   server-computed merchandise subtotal (buildAuthoritativeQuote's
- *   result), never a client-reported cart total
- * - freeze the resolved zone/price into checkout_attempts
- *   (shipping_country/shipping_zone/shipping_gross_cents - see
- *   migration 015) at attempt-creation time, so a later change to this
- *   map never alters an already-priced attempt or a paid order
+ * Per-zone shipping price (confirmed, Task 20B). shippingGrossCents is
+ * the price charged when the free-shipping threshold (if any) isn't
+ * met. freeShippingThresholdGrossCents is compared against the
+ * server-computed merchandise subtotal only (never subtotal+shipping,
+ * never a client-reported cart total) - null means that zone never gets
+ * free shipping.
  */
 export type ShippingPricing = {
   shippingGrossCents: number;
   freeShippingThresholdGrossCents: number | null;
 };
+
+function deliveryLabel(min: number, max: number): string {
+  return `${min}–${max} Werktage`;
+}
 
 // All 27 current EU member states except Germany, which gets its own
 // zone/label below (still legally the EU, just a faster label).
@@ -50,11 +46,34 @@ const REST_OF_EUROPE = [
 ];
 
 export const SHIPPING_ZONES: Record<ShippingZoneKey, ShippingZone> = {
-  germany: { key: "germany", countryCodes: ["DE"], deliveryTimeLabel: "2–4 Werktage" },
-  eu: { key: "eu", countryCodes: EU_COUNTRIES_EXCLUDING_DE, deliveryTimeLabel: "3–8 Werktage" },
-  nonEuCore: { key: "nonEuCore", countryCodes: NON_EU_CORE, deliveryTimeLabel: "4–8 Werktage" },
-  restOfEurope: { key: "restOfEurope", countryCodes: REST_OF_EUROPE, deliveryTimeLabel: "5–10 Werktage" },
+  germany: { key: "germany", countryCodes: ["DE"], minBusinessDays: 2, maxBusinessDays: 4, deliveryTimeLabel: deliveryLabel(2, 4) },
+  eu: { key: "eu", countryCodes: EU_COUNTRIES_EXCLUDING_DE, minBusinessDays: 3, maxBusinessDays: 8, deliveryTimeLabel: deliveryLabel(3, 8) },
+  nonEuCore: { key: "nonEuCore", countryCodes: NON_EU_CORE, minBusinessDays: 4, maxBusinessDays: 8, deliveryTimeLabel: deliveryLabel(4, 8) },
+  restOfEurope: { key: "restOfEurope", countryCodes: REST_OF_EUROPE, minBusinessDays: 5, maxBusinessDays: 10, deliveryTimeLabel: deliveryLabel(5, 10) },
 };
+
+export const SHIPPING_PRICING: Record<ShippingZoneKey, ShippingPricing> = {
+  germany: { shippingGrossCents: 590, freeShippingThresholdGrossCents: 4900 },
+  eu: { shippingGrossCents: 1290, freeShippingThresholdGrossCents: 7900 },
+  nonEuCore: { shippingGrossCents: 1790, freeShippingThresholdGrossCents: null },
+  restOfEurope: { shippingGrossCents: 1990, freeShippingThresholdGrossCents: null },
+};
+
+/**
+ * Server-side shipping amount for a zone, given the authoritative
+ * merchandise subtotal (from buildAuthoritativeQuote - never a
+ * client-reported cart/subtotal value). Returns 0 (a real, known price -
+ * not "unknown") once the zone's free-shipping threshold is met; zones
+ * with no threshold (nonEuCore, restOfEurope) always charge the regular
+ * price.
+ */
+export function computeShippingGrossCents(zone: ShippingZoneKey, merchandiseSubtotalGrossCents: number): number {
+  const pricing = SHIPPING_PRICING[zone];
+  if (pricing.freeShippingThresholdGrossCents !== null && merchandiseSubtotalGrossCents >= pricing.freeShippingThresholdGrossCents) {
+    return 0;
+  }
+  return pricing.shippingGrossCents;
+}
 
 const COUNTRY_TO_ZONE: Record<string, ShippingZoneKey> = Object.fromEntries(
   Object.values(SHIPPING_ZONES).flatMap(zone => zone.countryCodes.map(code => [code, zone.key]))

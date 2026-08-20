@@ -97,6 +97,7 @@ function callRpc(attemptId, overrides = {}) {
     p_stripe_payment_intent_id: null,
     p_shipping_address_snapshot: null,
     p_billing_address_snapshot: null,
+    p_shipping_gross_cents: 0,
     ...overrides,
   });
 }
@@ -105,13 +106,13 @@ test.before(async () => {
   admin = getAdminSupabaseClient();
   variant = await getActiveVariantBySku("GLOA-MATCHA-30G");
 
-  // Cheap existence probe for the migration-013 (5-arg) RPC signature.
+  // Cheap existence probe for the migration-016 (6-arg) RPC signature.
   // An unknown-attempt error means the function exists and ran; a
   // "could not find function" / missing-overload error means it doesn't.
   const probe = await callRpc("00000000-0000-0000-0000-000000000000");
   if (probe.error && /could not find|does not exist|schema cache/i.test(probe.error.message)) {
     migrationApplied = false;
-    skipReason = `Migration 013 not applied yet (${probe.error.message}). Run supabase/migrations/011..013, then re-run tests.`;
+    skipReason = `Migration 016 not applied yet (${probe.error.message}). Run supabase/migrations/011..016, then re-run tests.`;
   }
 });
 
@@ -147,16 +148,18 @@ test("create_order_from_paid_checkout: a paid attempt produces exactly one order
   assert.equal(order.subtotal_gross_cents, expectedTotal);
   assert.equal(order.payment_status, "paid");
   assert.equal(order.checkout_attempt_id, attemptId);
-  // Net/tax/shipping are genuinely unknown at this stage - never fabricated
-  // as 0. This exact null-heavy shape is real and reaches the account UI -
+  // Net/tax are genuinely unknown at this stage - never fabricated as 0.
+  // This exact null-heavy shape is real and reaches the account UI -
   // app/AccountPortal.tsx's OrderDetail must render it without crashing
   // (it once did: TypeError reading 'first_name' off a null address
   // snapshot; see the "fix: load authenticated order details" commit).
   assert.equal(order.subtotal_net_cents, null);
   assert.equal(order.shipping_net_cents, null);
-  assert.equal(order.shipping_gross_cents, null);
   assert.equal(order.tax_total_cents, null);
   assert.equal(order.total_net_cents, null);
+  // shipping_gross_cents IS known now (Task 20B) - callRpc's default of 0
+  // must be stored as a real 0, not coerced to/confused with null.
+  assert.equal(order.shipping_gross_cents, 0);
   // No shipping/billing snapshot was passed for this attempt either.
   assert.equal(order.shipping_address_snapshot, null);
   assert.equal(order.billing_address_snapshot, null);
@@ -174,6 +177,36 @@ test("create_order_from_paid_checkout: a paid attempt produces exactly one order
   // Never fabricated - net price/tax split is not decided yet.
   assert.equal(items[0].unit_price_net_cents, null);
   assert.equal(items[0].line_total_net_cents, null);
+});
+
+test("create_order_from_paid_checkout: a real (non-zero) shipping price is stored on the order", async (t) => {
+  if (!migrationApplied) return t.skip(skipReason);
+
+  const { id: attemptId, expectedTotal } = await seedPaidAttempt(variant, { quantity: 1 });
+
+  const { data, error } = await callRpc(attemptId, { p_shipping_gross_cents: 590 });
+  assert.equal(error, null, error?.message);
+  const order = Array.isArray(data) ? data[0] : data;
+  assert.equal(order.shipping_gross_cents, 590);
+  // subtotal_gross_cents is merchandise-only; total_gross_cents comes from
+  // the attempt's already-frozen expected_total_gross_cents (merchandise +
+  // shipping, computed by getOrCreateCheckoutAttempt at attempt-creation
+  // time - this test's seeded attempt has no shipping folded into its
+  // expected total, so it stays equal to the merchandise total here).
+  assert.equal(order.subtotal_gross_cents, expectedTotal);
+  assert.equal(order.total_gross_cents, expectedTotal);
+});
+
+test("create_order_from_paid_checkout: free shipping stores a real shipping_gross_cents of 0, not null", async (t) => {
+  if (!migrationApplied) return t.skip(skipReason);
+
+  const { id: attemptId } = await seedPaidAttempt(variant, { quantity: 1 });
+
+  const { data, error } = await callRpc(attemptId, { p_shipping_gross_cents: 0 });
+  assert.equal(error, null, error?.message);
+  const order = Array.isArray(data) ? data[0] : data;
+  assert.strictEqual(order.shipping_gross_cents, 0);
+  assert.notStrictEqual(order.shipping_gross_cents, null);
 });
 
 test("create_order_from_paid_checkout: a real shipping address snapshot is stored as-is", async (t) => {

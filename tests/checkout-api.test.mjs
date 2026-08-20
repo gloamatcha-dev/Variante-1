@@ -141,6 +141,7 @@ test("session: ignores client-supplied price fields and fails gracefully without
       },
     ],
     requestId: REQUEST_ID,
+    shippingCountry: "DE",
   });
   // Reaching the "payment provider unavailable" response proves the
   // authoritative DB quote was built successfully first (manipulated price
@@ -154,6 +155,7 @@ test("session: ignores any client-supplied user id field in the request body", a
   const { status, body } = await post("/api/checkout/session", {
     items: [{ variantId: variant30g.id, quantity: 1 }],
     requestId: REQUEST_ID,
+    shippingCountry: "DE",
     userId: "11111111-1111-1111-1111-111111111111",
     user_id: "22222222-2222-2222-2222-222222222222",
   });
@@ -162,6 +164,45 @@ test("session: ignores any client-supplied user id field in the request body", a
   // (lib/verifyUser.ts). Reaching the same "payment provider unavailable"
   // response as an identical request without these fields proves they
   // have zero effect on request handling.
+  assert.equal(status, 503);
+  assert.equal(typeof body.error, "string");
+});
+
+test("session: rejects a missing shippingCountry", async () => {
+  const { status, body } = await post("/api/checkout/session", {
+    items: [{ variantId: variant30g.id, quantity: 1 }],
+    requestId: REQUEST_ID,
+  });
+  assert.equal(status, 400);
+  assert.equal(typeof body.error, "string");
+});
+
+test("session: rejects an unsupported/sanctioned shippingCountry", async () => {
+  for (const country of ["US", "RU", "BY", "UA", "ZZ", ""]) {
+    const { status } = await post("/api/checkout/session", {
+      items: [{ variantId: variant30g.id, quantity: 1 }],
+      requestId: REQUEST_ID,
+      shippingCountry: country,
+    });
+    assert.equal(status, 400, `expected ${JSON.stringify(country)} to be rejected`);
+  }
+});
+
+test("session: ignores any client-supplied shipping zone/price/free-shipping fields in the request body", async () => {
+  const { status, body } = await post("/api/checkout/session", {
+    items: [{ variantId: variant30g.id, quantity: 1 }],
+    requestId: REQUEST_ID,
+    shippingCountry: "DE",
+    shippingZone: "restOfEurope",
+    shippingPrice: 1,
+    shippingGrossCents: 1,
+    freeShipping: true,
+    orderTotal: 1,
+  });
+  // The route only ever reads shippingCountry from the body - zone, price,
+  // and free-shipping eligibility are always recomputed server-side
+  // (lib/shipping.ts). Reaching the same "payment provider unavailable"
+  // response as a request without these fields proves they're inert.
   assert.equal(status, 503);
   assert.equal(typeof body.error, "string");
 });

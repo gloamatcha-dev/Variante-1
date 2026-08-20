@@ -56,7 +56,7 @@ async function createThrowawayUser() {
   return { id: data.user.id, email, password };
 }
 
-async function upsertAttempt(requestId, userId, expectedTotalGrossCents, itemsSnapshot) {
+async function upsertAttempt(requestId, userId, expectedTotalGrossCents, itemsSnapshot, shipping = null) {
   // Mirrors getOrCreateCheckoutAttempt's exact upsert shape/options.
   return admin.from("checkout_attempts").upsert(
     {
@@ -65,10 +65,16 @@ async function upsertAttempt(requestId, userId, expectedTotalGrossCents, itemsSn
       currency: "EUR",
       expected_total_gross_cents: expectedTotalGrossCents,
       items_snapshot: itemsSnapshot,
+      shipping_country: shipping?.country ?? null,
+      shipping_zone: shipping?.zone ?? null,
+      shipping_gross_cents: shipping?.grossCents ?? null,
     },
     { onConflict: "request_id", ignoreDuplicates: true }
   );
 }
+
+let rpcApplied = true;
+let rpcSkipReason = "";
 
 test.before(async () => {
   admin = getAdminSupabaseClient();
@@ -77,6 +83,22 @@ test.before(async () => {
   anonKey = requireEnv("VITE_SUPABASE_PUBLISHABLE_KEY");
 
   [userA, userB] = await Promise.all([createThrowawayUser(), createThrowawayUser()]);
+
+  // Cheap existence probe for the current create_order_from_paid_checkout
+  // signature (migration 016) - only the "orders RLS" test below needs
+  // this. Skips gracefully instead of failing if not applied yet.
+  const probe = await admin.rpc("create_order_from_paid_checkout", {
+    p_checkout_attempt_id: "00000000-0000-0000-0000-000000000000",
+    p_customer_snapshot: { email: null, name: null },
+    p_stripe_payment_intent_id: null,
+    p_shipping_address_snapshot: null,
+    p_billing_address_snapshot: null,
+    p_shipping_gross_cents: 0,
+  });
+  if (probe.error && /could not find|does not exist|schema cache/i.test(probe.error.message)) {
+    rpcApplied = false;
+    rpcSkipReason = `Migration 016 not applied yet (${probe.error.message}). Run supabase/migrations/011..016, then re-run tests.`;
+  }
 });
 
 test.after(async () => {
@@ -146,6 +168,22 @@ test("checkout_attempts identity: a later retry can never reassign an already-au
   assert.equal(data.user_id, userA.id, "a later retry must not reassign an already-established authenticated identity");
 });
 
+test("checkout_attempts shipping: a later retry with a different country can never mutate the frozen shipping snapshot", async () => {
+  const requestId = randomUUID();
+  seededRequestIds.push(requestId);
+  const snapshot = [{ variantId: variant.id, sku: variant.sku, productName: "GLOA Matcha", variantLabel: variant.label, sizeGrams: variant.size_grams, quantity: 1, unitGrossCents: variant.price_gross_cents, lineGrossCents: variant.price_gross_cents, currency: variant.currency }];
+
+  await upsertAttempt(requestId, null, variant.price_gross_cents + 590, snapshot, { country: "DE", zone: "germany", grossCents: 590 });
+  // A retry claiming Switzerland/1790 must not overwrite the frozen DE/590.
+  await upsertAttempt(requestId, null, variant.price_gross_cents + 1790, snapshot, { country: "CH", zone: "nonEuCore", grossCents: 1790 });
+
+  const { data } = await admin.from("checkout_attempts").select("shipping_country, shipping_zone, shipping_gross_cents, expected_total_gross_cents").eq("request_id", requestId).single();
+  assert.equal(data.shipping_country, "DE", "a later retry must not overwrite the frozen shipping country");
+  assert.equal(data.shipping_zone, "germany", "a later retry must not overwrite the frozen shipping zone");
+  assert.equal(data.shipping_gross_cents, 590, "a later retry must not overwrite the frozen shipping price");
+  assert.equal(data.expected_total_gross_cents, variant.price_gross_cents + 590);
+});
+
 test("token verification: no Authorization header yields no trusted identity (guest)", async () => {
   const anon = createClient(anonUrl, anonKey);
   const { data, error } = await anon.auth.getUser();
@@ -159,7 +197,8 @@ test("token verification: a garbage bearer token is rejected, never trusted", as
   assert.ok(!data?.user);
 });
 
-test("orders RLS: the authenticated owner can read their own order via the real RPC + real session", async () => {
+test("orders RLS: the authenticated owner can read their own order via the real RPC + real session", async (t) => {
+  if (!rpcApplied) return t.skip(rpcSkipReason);
   const requestId = randomUUID();
   seededRequestIds.push(requestId);
   const snapshot = [{ variantId: variant.id, sku: variant.sku, productName: "GLOA Matcha", variantLabel: variant.label, sizeGrams: variant.size_grams, quantity: 1, unitGrossCents: variant.price_gross_cents, lineGrossCents: variant.price_gross_cents, currency: variant.currency }];
@@ -177,6 +216,7 @@ test("orders RLS: the authenticated owner can read their own order via the real 
     p_stripe_payment_intent_id: null,
     p_shipping_address_snapshot: null,
     p_billing_address_snapshot: null,
+    p_shipping_gross_cents: 0,
   });
   assert.equal(rpcErr, null, rpcErr?.message);
   const orderRow = Array.isArray(order) ? order[0] : order;

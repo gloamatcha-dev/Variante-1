@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ALLOWED_SHIPPING_COUNTRIES, getShippingZone, getDeliveryTimeLabel, getCountryLabel, SHIPPING_ZONES } from "../lib/shipping.ts";
+import { ALLOWED_SHIPPING_COUNTRIES, getShippingZone, getDeliveryTimeLabel, getCountryLabel, SHIPPING_ZONES, SHIPPING_PRICING, computeShippingGrossCents } from "../lib/shipping.ts";
 
 test("shipping: DE is an allowed shipping country", () => {
   assert.ok(ALLOWED_SHIPPING_COUNTRIES.includes("DE"));
@@ -99,4 +99,50 @@ test("country labels: every allowed shipping country resolves to a real (non-cod
 test("country labels: an unmapped code falls back to the raw code instead of crashing", () => {
   assert.equal(getCountryLabel("ZZ"), "ZZ");
   assert.equal(getCountryLabel(null), "");
+});
+
+// ── Confirmed shipping prices (Task 20B) ──────────────────────────────
+
+test("shipping pricing: confirmed per-zone prices and free-shipping thresholds", () => {
+  assert.deepEqual(SHIPPING_PRICING.germany, { shippingGrossCents: 590, freeShippingThresholdGrossCents: 4900 });
+  assert.deepEqual(SHIPPING_PRICING.eu, { shippingGrossCents: 1290, freeShippingThresholdGrossCents: 7900 });
+  assert.deepEqual(SHIPPING_PRICING.nonEuCore, { shippingGrossCents: 1790, freeShippingThresholdGrossCents: null });
+  assert.deepEqual(SHIPPING_PRICING.restOfEurope, { shippingGrossCents: 1990, freeShippingThresholdGrossCents: null });
+});
+
+test("computeShippingGrossCents: Germany below the free-shipping threshold charges 590", () => {
+  assert.equal(computeShippingGrossCents("germany", 1999), 590);
+  assert.equal(computeShippingGrossCents("germany", 4899), 590);
+});
+
+test("computeShippingGrossCents: Germany at or above the threshold is free (0, not null)", () => {
+  assert.strictEqual(computeShippingGrossCents("germany", 4900), 0);
+  assert.strictEqual(computeShippingGrossCents("germany", 9000), 0);
+});
+
+test("computeShippingGrossCents: EU below the free-shipping threshold charges 1290", () => {
+  assert.equal(computeShippingGrossCents("eu", 1999), 1290);
+  assert.equal(computeShippingGrossCents("eu", 7899), 1290);
+});
+
+test("computeShippingGrossCents: EU at or above the threshold is free", () => {
+  assert.strictEqual(computeShippingGrossCents("eu", 7900), 0);
+  assert.strictEqual(computeShippingGrossCents("eu", 20000), 0);
+});
+
+test("computeShippingGrossCents: CH/GB/NO (nonEuCore) always charge 1790 - no free shipping", () => {
+  assert.equal(computeShippingGrossCents("nonEuCore", 1999), 1790);
+  assert.equal(computeShippingGrossCents("nonEuCore", 1_000_000), 1790, "a huge order must still not be free - no threshold configured for this zone");
+});
+
+test("computeShippingGrossCents: restOfEurope always charges 1990 - no free shipping", () => {
+  assert.equal(computeShippingGrossCents("restOfEurope", 1999), 1990);
+  assert.equal(computeShippingGrossCents("restOfEurope", 1_000_000), 1990);
+});
+
+test("computeShippingGrossCents: free-shipping basis is the merchandise subtotal only, never subtotal+shipping (no circular threshold)", () => {
+  // A merchandise subtotal just under threshold must not become "free"
+  // by first adding the regular shipping price to it.
+  const subtotalJustUnderThreshold = 4900 - 590 + 1; // 4311
+  assert.equal(computeShippingGrossCents("germany", subtotalJustUnderThreshold), 590);
 });

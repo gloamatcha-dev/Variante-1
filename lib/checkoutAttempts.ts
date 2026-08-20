@@ -1,11 +1,18 @@
 import { getSupabaseAdmin } from "./supabaseAdmin";
 import type { CheckoutQuote } from "./checkoutQuote";
 import { buildItemsSnapshot, type CheckoutAttemptItemSnapshot } from "./checkoutAttemptSnapshot";
+import type { ShippingZoneKey } from "./shipping";
 
 export type { CheckoutAttemptItemSnapshot };
 export { buildItemsSnapshot };
 
 export type CheckoutAttemptStatus = "created" | "stripe_session_created" | "paid" | "failed" | "expired";
+
+export type CheckoutAttemptShipping = {
+  country: string;
+  zone: ShippingZoneKey;
+  grossCents: number;
+};
 
 export type CheckoutAttempt = {
   id: string;
@@ -14,12 +21,15 @@ export type CheckoutAttempt = {
   currency: string;
   expected_total_gross_cents: number;
   items_snapshot: CheckoutAttemptItemSnapshot[];
+  shipping_country: string | null;
+  shipping_zone: ShippingZoneKey | null;
+  shipping_gross_cents: number | null;
   stripe_checkout_session_id: string | null;
   stripe_payment_intent_id: string | null;
 };
 
 const ATTEMPT_COLUMNS =
-  "id, request_id, status, currency, expected_total_gross_cents, items_snapshot, stripe_checkout_session_id, stripe_payment_intent_id";
+  "id, request_id, status, currency, expected_total_gross_cents, items_snapshot, shipping_country, shipping_zone, shipping_gross_cents, stripe_checkout_session_id, stripe_payment_intent_id";
 
 export type GetOrCreateAttemptResult =
   | { ok: true; attempt: CheckoutAttempt }
@@ -36,6 +46,7 @@ export type GetOrCreateAttemptResult =
 export async function getOrCreateCheckoutAttempt(
   requestId: string,
   quote: CheckoutQuote,
+  shipping: CheckoutAttemptShipping,
   userId: string | null = null
 ): Promise<GetOrCreateAttemptResult> {
   const admin = getSupabaseAdmin();
@@ -50,8 +61,13 @@ export async function getOrCreateCheckoutAttempt(
         request_id: requestId,
         user_id: userId,
         currency: quote.currency,
-        expected_total_gross_cents: quote.subtotalGrossCents,
+        // The customer's total obligation is merchandise + shipping -
+        // Stripe's amount_total must match this exactly.
+        expected_total_gross_cents: quote.subtotalGrossCents + shipping.grossCents,
         items_snapshot: buildItemsSnapshot(quote),
+        shipping_country: shipping.country,
+        shipping_zone: shipping.zone,
+        shipping_gross_cents: shipping.grossCents,
       },
       { onConflict: "request_id", ignoreDuplicates: true }
     );

@@ -569,8 +569,8 @@ function OrderDetail({ orderId }: { orderId: string }) {
           {order.discount_total_cents > 0 && (
             <div className="portal-profile-row"><span>Rabatt</span><strong>&minus;{fmtCents(order.discount_total_cents)} €</strong></div>
           )}
-          {typeof shippingCents === "number" && shippingCents > 0 && (
-            <div className="portal-profile-row"><span>Versand</span><strong>{fmtCents(shippingCents)} €</strong></div>
+          {typeof shippingCents === "number" && (
+            <div className="portal-profile-row"><span>Versand</span><strong>{shippingCents === 0 ? "Kostenlos" : `${fmtCents(shippingCents)} €`}</strong></div>
           )}
           {typeof order.tax_total_cents === "number" && order.tax_total_cents > 0 && (
             <div className="portal-profile-row"><span>MwSt.</span><strong>{fmtCents(order.tax_total_cents)} €</strong></div>

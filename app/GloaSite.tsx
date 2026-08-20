@@ -11,7 +11,8 @@ import { track } from "./analytics";
 import { useCart } from "./cart";
 import { AuthProvider, useAuth } from "../lib/auth";
 import { supabase } from "../lib/supabase";
-import { SHIPPING_ZONES, DELIVERY_TIME_NOTE, CUSTOMS_NOTE } from "../lib/shipping";
+import { SHIPPING_ZONES, SHIPPING_PRICING, getShippingZone, getCountryLabel, computeShippingGrossCents, DELIVERY_TIME_NOTE, CUSTOMS_NOTE } from "../lib/shipping";
+import { createCheckoutSession } from "./createCheckoutSession";
 
 
 type Recipe={slug:string;title:string;category:string;time:string;tags:string[];image:string;alt:string;excerpt:string;description:string;ingredients:string[];steps:string[];featured:boolean};
@@ -200,18 +201,29 @@ function Contact(){return <main className="contact-main">
 </main>}
 function Legal({route}:{route:string}){
 const title:Record<string,string>={impressum:"Impressum",datenschutz:"Datenschutz",agb:"Allgemeine Geschäftsbedingungen",widerruf:"Widerruf",versand:"Versandinformationen"};
-if(route==="versand")return <main className="legal-page">
+if(route==="versand"){
+const zoneLabel:Record<string,string>={germany:"Deutschland",eu:"EU",nonEuCore:"Schweiz / UK / Norwegen",restOfEurope:"Übriges Europa"};
+return <main className="legal-page">
 <p className="eyebrow">LEGAL</p>
 <h1>{title.versand}</h1>
-<dl className="legal-shipping-table">
-<div><dt>DEUTSCHLAND</dt><dd>{SHIPPING_ZONES.germany.deliveryTimeLabel}</dd></div>
-<div><dt>EU</dt><dd>{SHIPPING_ZONES.eu.deliveryTimeLabel}</dd></div>
-<div><dt>SCHWEIZ / UK / NORWEGEN</dt><dd>{SHIPPING_ZONES.nonEuCore.deliveryTimeLabel}</dd></div>
-<div><dt>ÜBRIGES EUROPA</dt><dd>{SHIPPING_ZONES.restOfEurope.deliveryTimeLabel}</dd></div>
+<div className="legal-shipping-zones">
+{(Object.keys(SHIPPING_ZONES) as (keyof typeof SHIPPING_ZONES)[]).map(key=>{
+const zone=SHIPPING_ZONES[key];
+const pricing=SHIPPING_PRICING[key];
+return <div className="legal-shipping-zone" key={key}>
+<h3>{zoneLabel[key]}</h3>
+<dl>
+<div><dt>Lieferzeit</dt><dd>{zone.deliveryTimeLabel}</dd></div>
+<div><dt>Versand</dt><dd>{fmtCents(pricing.shippingGrossCents)} €</dd></div>
+{pricing.freeShippingThresholdGrossCents!==null&&<div><dt>Kostenlos ab</dt><dd>{fmtCents(pricing.freeShippingThresholdGrossCents)} €</dd></div>}
 </dl>
+</div>
+})}
+</div>
 <p className="legal-note">{DELIVERY_TIME_NOTE}</p>
 <p className="legal-note">{CUSTOMS_NOTE}</p>
 </main>;
+}
 return <main className="legal-page"><p className="eyebrow">LEGAL</p><h1>{title[route]||"Legal"}</h1><div className="legal-placeholder"><h2>Rechtlicher Inhalt ausstehend.</h2><p>Vor dem öffentlichen Shop-Launch muss dieser Inhalt von GLOA beziehungsweise einer qualifizierten Rechtsberatung bereitgestellt und geprüft werden.</p></div></main>}
 
 // B2B-Bereich: /account/business
@@ -399,9 +411,20 @@ return <main className="account-page"><section className="account-section accoun
 
 // AccountBusiness moved to AccountPortal.tsx
 
+const SHIPPING_COUNTRY_GROUPS:{label:string;codes:string[]}[]=[
+{label:"Deutschland",codes:SHIPPING_ZONES.germany.countryCodes},
+{label:"EU",codes:[...SHIPPING_ZONES.eu.countryCodes].sort((a,b)=>getCountryLabel(a).localeCompare(getCountryLabel(b),"de"))},
+{label:"Schweiz / UK / Norwegen",codes:SHIPPING_ZONES.nonEuCore.countryCodes},
+{label:"Übriges Europa",codes:[...SHIPPING_ZONES.restOfEurope.countryCodes].sort((a,b)=>getCountryLabel(a).localeCompare(getCountryLabel(b),"de"))},
+];
+
 function CartDrawer({open,onClose}:{open:boolean;onClose:()=>void}){
 const cart=useCart();
+const { session }=useAuth();
 const closeRef=useRef<HTMLButtonElement>(null);
+const [shippingCountry,setShippingCountry]=useState("DE");
+const [checkoutBusy,setCheckoutBusy]=useState(false);
+const [checkoutError,setCheckoutError]=useState("");
 
 useEffect(()=>{
 if(!open)return;
@@ -414,6 +437,27 @@ return()=>{document.removeEventListener("keydown",onKey);document.body.style.ove
 },[open,onClose]);
 
 if(!open)return null;
+
+// Display-only: helps the customer see what to expect before checkout.
+// Never trusted as-is - the server independently validates the country
+// and recomputes the zone/price/free-shipping eligibility itself.
+const zone=getShippingZone(shippingCountry);
+const shippingCents=zone?computeShippingGrossCents(zone,cart.totalCents):null;
+const threshold=zone?SHIPPING_PRICING[zone].freeShippingThresholdGrossCents:null;
+const remainingForFreeShipping=threshold!==null?Math.max(0,threshold-cart.totalCents):null;
+
+const handleCheckout=async()=>{
+if(SHOP_STATUS==="prelaunch"){onClose();window.location.href="/shop#newsletter";return}
+setCheckoutBusy(true);setCheckoutError("");
+try{
+const requestId=crypto.randomUUID();
+const{url}=await createCheckoutSession(cart.items,requestId,shippingCountry,session?.access_token);
+window.location.href=url;
+}catch(err){
+setCheckoutError(err instanceof Error?err.message:"Checkout konnte nicht gestartet werden.");
+setCheckoutBusy(false);
+}
+};
 
 return <div className="cart-backdrop" onClick={onClose} onKeyDown={e=>e.key==="Escape"&&onClose()} role="button" tabIndex={0}>
 {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
@@ -433,7 +477,25 @@ return <div className="cart-backdrop" onClick={onClose} onKeyDown={e=>e.key==="E
 </div>
 <button className="cart-item-remove" onClick={()=>cart.removeItem(item.productId,item.variantId)} aria-label="Artikel entfernen">Entfernen</button>
 </div>)}</div>
-<div className="cart-footer"><div className="cart-total"><span>SUMME</span><strong>{fmtCents(cart.totalCents)} €</strong></div></div>
+<div className="cart-shipping">
+<label className="cart-shipping-label" htmlFor="cart-shipping-country">LIEFERLAND</label>
+<select id="cart-shipping-country" value={shippingCountry} onChange={e=>setShippingCountry(e.target.value)}>
+{SHIPPING_COUNTRY_GROUPS.map(group=><optgroup label={group.label} key={group.label}>
+{group.codes.map(code=><option key={code} value={code}>{getCountryLabel(code)}</option>)}
+</optgroup>)}
+</select>
+{zone&&<div className="cart-shipping-info">
+<span>{SHIPPING_ZONES[zone].deliveryTimeLabel}</span>
+<span>{shippingCents===0?"Kostenloser Versand":`${fmtCents(shippingCents??0)} € Versand`}</span>
+</div>}
+{remainingForFreeShipping!==null&&remainingForFreeShipping>0&&<p className="cart-shipping-hint">Noch {fmtCents(remainingForFreeShipping)} € bis zum kostenlosen Versand</p>}
+{threshold!==null&&shippingCents===0&&<p className="cart-shipping-hint">Kostenloser Versand ab {fmtCents(threshold)} €</p>}
+</div>
+<div className="cart-footer">
+<div className="cart-total"><span>SUMME</span><strong>{fmtCents(cart.totalCents)} €</strong></div>
+{checkoutError&&<p className="cart-error">{checkoutError}</p>}
+<button className="cta cart-checkout-cta" onClick={handleCheckout} disabled={checkoutBusy}>{checkoutBusy?"WIRD GELADEN…":SHOP_STATUS==="prelaunch"?"ZUM LAUNCH INFORMIEREN":"ZUR KASSE"}</button>
+</div>
 </>}
 </aside></div>
 }
