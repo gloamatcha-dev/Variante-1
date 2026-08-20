@@ -743,7 +743,7 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
             {ship.company && <p>{ship.company}</p>}
             <p>{ship.street} {ship.house_number}</p>
             <p>{ship.zip} {ship.city}</p>
-            <p>{ship.country}</p>
+            <p>{getCountryLabel(ship.country)}</p>
           </div>
         </section>
         <section className="order-detail-section">
@@ -753,7 +753,7 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
             {bill.company && <p>{bill.company}</p>}
             <p>{bill.street} {bill.house_number}</p>
             <p>{bill.zip} {bill.city}</p>
-            <p>{bill.country}</p>
+            <p>{getCountryLabel(bill.country)}</p>
           </div>
         </section>
       </div>
@@ -1292,7 +1292,7 @@ function SupplyDetail({ supplyId }: { supplyId: string }) {
             {ship.company && <p>{ship.company}</p>}
             <p>{ship.street} {ship.house_number}</p>
             <p>{ship.zip} {ship.city}</p>
-            <p>{ship.country}</p>
+            <p>{getCountryLabel(ship.country)}</p>
           </div>
         </section>
         <section className="order-detail-section">
@@ -1302,7 +1302,7 @@ function SupplyDetail({ supplyId }: { supplyId: string }) {
             {bill.company && <p>{bill.company}</p>}
             <p>{bill.street} {bill.house_number}</p>
             <p>{bill.zip} {bill.city}</p>
-            <p>{bill.country}</p>
+            <p>{getCountryLabel(bill.country)}</p>
           </div>
         </section>
       </div>

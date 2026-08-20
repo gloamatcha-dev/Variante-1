@@ -61,7 +61,7 @@ test("delivery time labels match exactly the confirmed copy", () => {
 });
 
 test("shipping: an unsupported/non-configured country is never treated as an enabled destination", () => {
-  for (const code of ["US", "RU", "BY", "UA", "CN", "ZZ"]) {
+  for (const code of ["US", "RU", "BY", "UA", "CN", "ZZ", "MD"]) {
     assert.equal(getShippingZone(code), null, `${code} must not resolve to a shipping zone`);
     assert.equal(getDeliveryTimeLabel(code), null, `${code} must not get a delivery-time label`);
     assert.ok(!ALLOWED_SHIPPING_COUNTRIES.includes(code), `${code} must not be in the Stripe allowed_countries list`);
@@ -79,6 +79,13 @@ test("shipping: sanctioned/unconfirmed countries are explicitly excluded from th
   assert.ok(!allZoneCountries.includes("RU"));
   assert.ok(!allZoneCountries.includes("BY"));
   assert.ok(!allZoneCountries.includes("UA"));
+});
+
+test("shipping: Moldova (MD) is not offered at launch (business decision, Task 23A)", () => {
+  const allZoneCountries = Object.values(SHIPPING_ZONES).flatMap(z => z.countryCodes);
+  assert.ok(!allZoneCountries.includes("MD"), "MD must not resolve to a shipping zone");
+  assert.equal(getShippingZone("MD"), null);
+  assert.ok(!ALLOWED_SHIPPING_COUNTRIES.includes("MD"), "MD must not be in the Stripe allowed_countries list");
 });
 
 test("country labels: known European codes get a German display name, not the raw code", () => {

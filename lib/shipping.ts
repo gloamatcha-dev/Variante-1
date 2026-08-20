@@ -41,8 +41,9 @@ const NON_EU_CORE = ["GB", "CH", "NO"];
 // - Russia (RU) and Belarus (BY): sanctions
 // - Ukraine (UA): actual shipping feasibility not yet confirmed
 //   operationally - add only once that's verified, not assumed
+// - Moldova (MD): not offered at launch (business decision, Task 23A)
 const REST_OF_EUROPE = [
-  "IS", "LI", "AD", "MC", "SM", "AL", "BA", "ME", "MK", "RS", "MD",
+  "IS", "LI", "AD", "MC", "SM", "AL", "BA", "ME", "MK", "RS",
 ];
 
 export const SHIPPING_ZONES: Record<ShippingZoneKey, ShippingZone> = {
@@ -115,7 +116,7 @@ const COUNTRY_LABELS_DE: Record<string, string> = {
   GB: "Vereinigtes Königreich", CH: "Schweiz", NO: "Norwegen",
   IS: "Island", LI: "Liechtenstein", AD: "Andorra", MC: "Monaco",
   SM: "San Marino", AL: "Albanien", BA: "Bosnien und Herzegowina",
-  ME: "Montenegro", MK: "Nordmazedonien", RS: "Serbien", MD: "Moldau",
+  ME: "Montenegro", MK: "Nordmazedonien", RS: "Serbien",
 };
 
 /** Customer-facing country name; falls back to the raw code if unmapped. */

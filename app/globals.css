@@ -379,7 +379,7 @@ select.calc-field{appearance:none;background-image:url("data:image/svg+xml,%3Csv
 .calc-grid-head{font:600 11px/1 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;padding:10px 0;border-bottom:2px solid var(--ink)}
 .calc-grid-row{padding:12px 0;border-bottom:1px solid var(--line)}
 .calc-grid-row:last-child{border-bottom:2px solid var(--ink)}
-.calc-positive{color:#1a7a3a}
+.calc-positive{color:var(--blue)}
 .calc-negative{color:var(--berry)}
 .calc-discount{font-weight:400;opacity:.6;margin-left:6px}
 .calc-pct{opacity:.6;font-size:12px}
