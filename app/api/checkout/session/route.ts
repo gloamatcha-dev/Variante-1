@@ -127,6 +127,10 @@ export async function POST(request: Request): Promise<Response> {
       {
         mode: "payment",
         line_items: lineItems,
+        // Launch ships to Germany only. Adding a country here is a
+        // business decision, not a technical one - see task notes before
+        // extending this list.
+        shipping_address_collection: { allowed_countries: ["DE"] },
         success_url: `${origin}/order/success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${origin}/shop?checkout=cancelled`,
         metadata: {
