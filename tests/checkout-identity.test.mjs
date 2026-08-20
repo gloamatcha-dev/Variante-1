@@ -175,6 +175,8 @@ test("orders RLS: the authenticated owner can read their own order via the real 
     p_checkout_attempt_id: attempt.id,
     p_customer_snapshot: { email: null, name: null },
     p_stripe_payment_intent_id: null,
+    p_shipping_address_snapshot: null,
+    p_billing_address_snapshot: null,
   });
   assert.equal(rpcErr, null, rpcErr?.message);
   const orderRow = Array.isArray(order) ? order[0] : order;

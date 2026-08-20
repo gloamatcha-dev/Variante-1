@@ -1,7 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { parseEnv } from "node:util";
+import { existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+import { createClient } from "@supabase/supabase-js";
 import { getActiveVariantBySku, getReadOnlySupabaseClient } from "./helpers/catalog.mjs";
 import { getAdminSupabaseClient } from "./helpers/supabaseAdmin.mjs";
+
+const ROOT = path.resolve(fileURLToPath(import.meta.url), "../..");
+function loadLocalEnv() {
+  const envLocalPath = path.join(ROOT, ".env.local");
+  return existsSync(envLocalPath) ? parseEnv(readFileSync(envLocalPath, "utf-8")) : {};
+}
+function requireEnv(name) {
+  const value = process.env[name] || loadLocalEnv()[name];
+  if (!value) throw new Error(`Missing ${name}. Set it in the environment or .env.local to run order fulfillment tests.`);
+  return value;
+}
 
 // DB-level tests for create_order_from_paid_checkout (migrations
 // 011/012/013).
@@ -283,8 +299,15 @@ test("order shipping snapshot: independent of the account's current address book
   assert.equal(error, null, error?.message);
   const order = Array.isArray(data) ? data[0] : data;
 
-  // Now change the account's address book after the order was created.
-  const { error: addrErr } = await admin.from("addresses").insert({
+  // Now change the account's address book after the order was created -
+  // as the real account holder, via RLS (addresses is a user-owned table;
+  // service_role has no grant on it, and rightly so - matching how the
+  // real app writes addresses).
+  const asOwner = createClient(requireEnv("VITE_SUPABASE_URL"), requireEnv("VITE_SUPABASE_PUBLISHABLE_KEY"));
+  const { error: signInErr } = await asOwner.auth.signInWithPassword({ email, password });
+  assert.equal(signInErr, null, signInErr?.message);
+
+  const { error: addrErr } = await asOwner.from("addresses").insert({
     user_id: created.user.id,
     first_name: "Changed",
     last_name: "Later",
@@ -307,5 +330,7 @@ test("order shipping snapshot: independent of the account's current address book
   // The historical order snapshot must be completely unaffected.
   assert.deepEqual(reread.shipping_address_snapshot, SYNTHETIC_SHIPPING);
 
-  await admin.from("addresses").delete().eq("user_id", created.user.id);
+  // No explicit addresses cleanup needed: it cascade-deletes with the
+  // throwaway auth user in test.after() (addresses.user_id references
+  // auth.users(id) on delete cascade).
 });
