@@ -23,7 +23,7 @@ function requireEnv(name) {
 }
 
 let cachedClient;
-function getReadOnlySupabaseClient() {
+export function getReadOnlySupabaseClient() {
   if (cachedClient) return cachedClient;
   const url = requireEnv("VITE_SUPABASE_URL");
   const key = requireEnv("VITE_SUPABASE_PUBLISHABLE_KEY"); // publishable/anon key - not a secret

@@ -13,10 +13,15 @@ export type CheckoutSession = {
  * generated requestId (idempotency key, not a price source). The server
  * builds an authoritative quote from Supabase and rejects any client-
  * supplied price data.
+ *
+ * accessToken (if the customer is signed in) lets the server link the
+ * checkout attempt to the authenticated account after re-verifying it -
+ * this function never sends a user id directly.
  */
 export async function createCheckoutSession(
   cartItems: CartItem[],
-  requestId: string
+  requestId: string,
+  accessToken?: string | null
 ): Promise<CheckoutSession> {
   const payload = {
     items: cartItems.map(item => ({
@@ -28,7 +33,10 @@ export async function createCheckoutSession(
 
   const response = await fetch("/api/checkout/session", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
     body: JSON.stringify(payload),
   });
 

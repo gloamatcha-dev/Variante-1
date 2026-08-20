@@ -3,6 +3,7 @@ import { getStripeClient } from "../../../../lib/stripe";
 import { validateQuoteItems, buildAuthoritativeQuote } from "../../../../lib/checkoutQuote";
 import { getSiteOrigin } from "../../../../lib/siteUrl";
 import { getOrCreateCheckoutAttempt, linkStripeSession } from "../../../../lib/checkoutAttempts";
+import { verifyUserId } from "../../../../lib/verifyUser";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -79,11 +80,16 @@ export async function POST(request: Request): Promise<Response> {
 
   const { quote } = quoteResult;
 
+  // Never trust a client-supplied user id - re-verify the bearer token
+  // (if any) against Supabase Auth. Guest checkout (no/invalid token)
+  // simply links no user, it never fails the request.
+  const userId = await verifyUserId(request);
+
   // Persists (or reuses, on retry) the authoritative server-side snapshot
   // for this request_id BEFORE calling Stripe, so a retry after a failed
   // Stripe call reuses the same locked-in prices instead of a possibly
   // changed fresh quote.
-  const attemptResult = await getOrCreateCheckoutAttempt(requestId, quote);
+  const attemptResult = await getOrCreateCheckoutAttempt(requestId, quote, userId);
   if (!attemptResult.ok) {
     return Response.json(
       { error: attemptResult.error } as ErrorResponse,
@@ -121,7 +127,7 @@ export async function POST(request: Request): Promise<Response> {
       {
         mode: "payment",
         line_items: lineItems,
-        success_url: `${origin}/shop?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+        success_url: `${origin}/order/success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${origin}/shop?checkout=cancelled`,
         metadata: {
           checkout_version: "1",

@@ -256,8 +256,10 @@ const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("de-DE", { day
 
 // ── Dashboard ──────────────────────────────────────────────────────────
 
+const RECENT_ORDERS_LIMIT = 3;
+
 function PortalDashboard({ firstName, customerType }: { firstName: string; customerType: CustomerType }) {
-  const [lastOrder, setLastOrder] = useState<OrderRow | null>(null);
+  const [recentOrders, setRecentOrders] = useState<OrderRow[]>([]);
   const [orderLoading, setOrderLoading] = useState(() => !!supabase);
   const [activeSub, setActiveSub] = useState<SubscriptionRow | null>(null);
   const [nextDeliverySub, setNextDeliverySub] = useState<SubscriptionRow | null>(null);
@@ -267,8 +269,8 @@ function PortalDashboard({ firstName, customerType }: { firstName: string; custo
 
   useEffect(() => {
     if (!supabase) return;
-    supabase.from("orders").select("*").order("created_at", { ascending: false }).limit(1)
-      .then(({ data }) => { setLastOrder(data?.[0] ?? null); setOrderLoading(false); });
+    supabase.from("orders").select("*").order("created_at", { ascending: false }).limit(RECENT_ORDERS_LIMIT)
+      .then(({ data }) => { setRecentOrders(data ?? []); setOrderLoading(false); });
     if (customerType === "private") {
       supabase.from("subscriptions").select("*").eq("status", "active").order("created_at", { ascending: false }).limit(1)
         .then(({ data }) => { setActiveSub(data?.[0] ?? null); setSubLoading(false); });
@@ -329,15 +331,20 @@ function PortalDashboard({ firstName, customerType }: { firstName: string; custo
           </section>
         )}
 
-        <section className="portal-dash-block">
-          <p className="eyebrow">LETZTE BESTELLUNG</p>
+        <section className="portal-dash-block portal-dash-wide">
+          <p className="eyebrow">LETZTE BESTELLUNGEN</p>
           {orderLoading ? (
             <p className="portal-empty">Laden…</p>
-          ) : lastOrder ? (
-            <div className="portal-dash-order">
-              <div className="portal-dash-order-row"><span>{lastOrder.order_number}</span><span>{fmtDate(lastOrder.placed_at || lastOrder.created_at)}</span></div>
-              <div className="portal-dash-order-row"><span>{STATUS_DE[lastOrder.status] || lastOrder.status}</span><strong>{fmtCents(lastOrder.customer_type === "business" ? lastOrder.total_net_cents : lastOrder.total_gross_cents)} €{lastOrder.customer_type === "business" ? " netto" : ""}</strong></div>
-              <a href={`/account/orders/${lastOrder.id}`} className="portal-dash-order-link">BESTELLUNG ANSEHEN</a>
+          ) : recentOrders.length > 0 ? (
+            <div className="portal-dash-orders">
+              {recentOrders.map(o => (
+                <div key={o.id} className="portal-dash-order">
+                  <div className="portal-dash-order-row"><span>{o.order_number}</span><span>{fmtDate(o.placed_at || o.created_at)}</span></div>
+                  <div className="portal-dash-order-row"><span>{STATUS_DE[o.status] || o.status}</span><strong>{fmtCents(o.customer_type === "business" ? o.total_net_cents : o.total_gross_cents)} €{o.customer_type === "business" ? " netto" : ""}</strong></div>
+                  <a href={`/account/orders/${o.id}`} className="portal-dash-order-link">BESTELLUNG ANSEHEN</a>
+                </div>
+              ))}
+              <Link href="/account/orders" className="portal-dash-order-link">ALLE BESTELLUNGEN</Link>
             </div>
           ) : (
             <p className="portal-empty">Du hast noch keine Bestellung.</p>

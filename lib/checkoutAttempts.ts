@@ -35,7 +35,8 @@ export type GetOrCreateAttemptResult =
  */
 export async function getOrCreateCheckoutAttempt(
   requestId: string,
-  quote: CheckoutQuote
+  quote: CheckoutQuote,
+  userId: string | null = null
 ): Promise<GetOrCreateAttemptResult> {
   const admin = getSupabaseAdmin();
   if (!admin) {
@@ -47,6 +48,7 @@ export async function getOrCreateCheckoutAttempt(
     .upsert(
       {
         request_id: requestId,
+        user_id: userId,
         currency: quote.currency,
         expected_total_gross_cents: quote.subtotalGrossCents,
         items_snapshot: buildItemsSnapshot(quote),

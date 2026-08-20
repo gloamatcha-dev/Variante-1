@@ -11,6 +11,7 @@ import {
   markAttemptPaid,
 } from "../../../../lib/checkoutAttempts";
 import { evaluateStripeSessionPayment } from "../../../../lib/stripeFulfillment";
+import { createOrderFromPaidCheckoutAttempt } from "../../../../lib/orderFulfillment";
 
 type ErrorResponse = {
   error: string;
@@ -146,4 +147,18 @@ async function handleCheckoutSessionCompleted(stripe: Stripe, eventSession: Stri
   if (!marked) {
     throw new Error(`failed to mark checkout attempt ${attempt.id} paid`);
   }
+
+  // Order creation is idempotent (see create_order_from_paid_checkout) and
+  // always attempted here, even if this attempt was already marked paid by
+  // an earlier delivery - a prior delivery may have failed after marking
+  // paid but before the order existed, and a Stripe retry must still be
+  // able to complete fulfillment, not be blocked by "already paid".
+  await createOrderFromPaidCheckoutAttempt(
+    attempt.id,
+    {
+      email: session.customer_details?.email ?? null,
+      name: session.customer_details?.name ?? null,
+    },
+    paymentIntentId
+  );
 }
