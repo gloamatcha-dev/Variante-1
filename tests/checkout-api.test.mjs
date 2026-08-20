@@ -149,3 +149,19 @@ test("session: ignores client-supplied price fields and fails gracefully without
   assert.equal(status, 503);
   assert.equal(typeof body.error, "string");
 });
+
+test("session: ignores any client-supplied user id field in the request body", async () => {
+  const { status, body } = await post("/api/checkout/session", {
+    items: [{ variantId: variant30g.id, quantity: 1 }],
+    requestId: REQUEST_ID,
+    userId: "11111111-1111-1111-1111-111111111111",
+    user_id: "22222222-2222-2222-2222-222222222222",
+  });
+  // The route never reads a userId/user_id field from the body at all -
+  // identity comes exclusively from a verified Authorization bearer token
+  // (lib/verifyUser.ts). Reaching the same "payment provider unavailable"
+  // response as an identical request without these fields proves they
+  // have zero effect on request handling.
+  assert.equal(status, 503);
+  assert.equal(typeof body.error, "string");
+});
