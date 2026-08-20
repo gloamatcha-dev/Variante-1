@@ -6,6 +6,29 @@ export type ShippingZone = {
   deliveryTimeLabel: string;
 };
 
+/**
+ * Per-zone shipping price shape (Task 20B). Deliberately not populated
+ * yet - no shipping price or free-shipping threshold has been decided.
+ * Once real values exist, add a `pricing: Record<ShippingZoneKey,
+ * ShippingPricing>` map here (never invent placeholder numbers) and:
+ * - have the checkout session route compute the customer's zone from
+ *   their (server-validated) chosen shipping country, look up
+ *   shippingGrossCents here, and pass it as a single Stripe
+ *   shipping_options[0].shipping_rate_data.fixed_amount - never a
+ *   client-supplied amount
+ * - freeShippingThresholdGrossCents is compared against the
+ *   server-computed merchandise subtotal (buildAuthoritativeQuote's
+ *   result), never a client-reported cart total
+ * - freeze the resolved zone/price into checkout_attempts
+ *   (shipping_country/shipping_zone/shipping_gross_cents - see
+ *   migration 015) at attempt-creation time, so a later change to this
+ *   map never alters an already-priced attempt or a paid order
+ */
+export type ShippingPricing = {
+  shippingGrossCents: number;
+  freeShippingThresholdGrossCents: number | null;
+};
+
 // All 27 current EU member states except Germany, which gets its own
 // zone/label below (still legally the EU, just a faster label).
 const EU_COUNTRIES_EXCLUDING_DE = [
