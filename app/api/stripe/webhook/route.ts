@@ -13,6 +13,7 @@ import {
 import { evaluateStripeSessionPayment } from "../../../../lib/stripeFulfillment";
 import { createOrderFromPaidCheckoutAttempt } from "../../../../lib/orderFulfillment";
 import { buildShippingAddressSnapshot, buildBillingAddressSnapshot } from "../../../../lib/orderAddressSnapshot";
+import { sendOrderConfirmationEmailIfNeeded } from "../../../../lib/orderConfirmationEmail";
 
 type ErrorResponse = {
   error: string;
@@ -171,10 +172,11 @@ async function handleCheckoutSessionCompleted(stripe: Stripe, eventSession: Stri
   // an earlier delivery - a prior delivery may have failed after marking
   // paid but before the order existed, and a Stripe retry must still be
   // able to complete fulfillment, not be blocked by "already paid".
-  await createOrderFromPaidCheckoutAttempt(
+  const customerEmail = session.customer_details?.email ?? null;
+  const order = await createOrderFromPaidCheckoutAttempt(
     attempt.id,
     {
-      email: session.customer_details?.email ?? null,
+      email: customerEmail,
       name: session.customer_details?.name ?? null,
     },
     paymentIntentId,
@@ -182,4 +184,26 @@ async function handleCheckoutSessionCompleted(stripe: Stripe, eventSession: Stri
     buildBillingAddressSnapshot(session),
     frozenShippingGrossCents
   );
+
+  // Confirmation email is sent only now that a real, persisted, paid
+  // order genuinely exists. sendOrderConfirmationEmailIfNeeded() is its
+  // own idempotency boundary (see lib/orderConfirmationEmail.ts) - safe
+  // to call on every redelivery of this handler. It throws on a real
+  // send failure, which propagates to the outer handler's catch below
+  // and returns 500 - deliberately: that makes Stripe's own webhook
+  // retry schedule double as this feature's email retry mechanism,
+  // without needing a second, bespoke retry system. The order itself
+  // is already fully created and paid at this point regardless of
+  // whether the email ultimately succeeds.
+  await sendOrderConfirmationEmailIfNeeded({
+    order,
+    items: attempt.items_snapshot.map(item => ({
+      productName: item.productName,
+      variantLabel: item.variantLabel,
+      quantity: item.quantity,
+      unitGrossCents: item.unitGrossCents,
+      lineGrossCents: item.lineGrossCents,
+    })),
+    customerEmail,
+  });
 }

@@ -10,6 +10,12 @@ export type CreatedOrder = {
   id: string;
   order_number: string;
   checkout_attempt_id: string | null;
+  user_id: string | null;
+  currency: string;
+  subtotal_gross_cents: number;
+  shipping_gross_cents: number | null;
+  total_gross_cents: number;
+  shipping_address_snapshot: AddressSnapshot | null;
 };
 
 /**

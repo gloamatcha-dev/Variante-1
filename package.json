@@ -9,7 +9,7 @@
     "dev": "vinext dev",
     "build": "vite build",
     "start": "vinext start",
-    "test": "npm run build && node --test --experimental-test-module-mocks tests/rendered-html.test.mjs tests/checkout-api.test.mjs tests/stripe-fulfillment.test.mjs tests/stripe-webhook.test.mjs tests/order-fulfillment.test.mjs tests/order-success-api.test.mjs tests/checkout-identity.test.mjs tests/order-address-snapshot.test.mjs tests/shipping.test.mjs tests/checkout-attempt-shipping-columns.test.mjs tests/contact-api.test.mjs",
+    "test": "npm run build && node --test --experimental-test-module-mocks tests/rendered-html.test.mjs tests/checkout-api.test.mjs tests/stripe-fulfillment.test.mjs tests/stripe-webhook.test.mjs tests/order-fulfillment.test.mjs tests/order-success-api.test.mjs tests/checkout-identity.test.mjs tests/order-address-snapshot.test.mjs tests/shipping.test.mjs tests/checkout-attempt-shipping-columns.test.mjs tests/contact-api.test.mjs tests/order-confirmation-email-template.test.mjs tests/order-confirmation-email-state.test.mjs tests/order-confirmation-email-webhook.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },
