@@ -115,7 +115,7 @@ export async function POST(request: Request): Promise<Response> {
       from: fromAddress,
       to: CONTACT_RECIPIENT,
       replyTo: trimmedEmail,
-      subject: `GLOA Kontaktanfrage – ${anliegen}`,
+      subject: `GLOA Kontaktanfrage: ${anliegen}`,
       text: textBody,
     });
 

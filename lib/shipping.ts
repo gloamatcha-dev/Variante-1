@@ -22,7 +22,7 @@ export type ShippingPricing = {
 };
 
 function deliveryLabel(min: number, max: number): string {
-  return `${min}–${max} Werktage`;
+  return `${min}-${max} Werktage`;
 }
 
 // All 27 current EU member states except Germany, which gets its own

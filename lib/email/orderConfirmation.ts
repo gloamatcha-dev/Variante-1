@@ -101,7 +101,7 @@ export function buildOrderConfirmationEmail(params: {
   customerEmail: string;
 }): BuiltOrderConfirmationEmail {
   const { order, items } = params;
-  const subject = `Deine GLOA Bestellung ist bestätigt – ${order.order_number}`;
+  const subject = `Deine GLOA Bestellung ist bestätigt: ${order.order_number}`;
 
   const shippingLabel = order.shipping_gross_cents === null ? null : fmtShipping(order.shipping_gross_cents);
 
@@ -179,7 +179,7 @@ ${accountLinkHtml}
 
   // ---- Plain text ----
   const itemLinesText = items
-    .map(item => `${item.productName} (${item.variantLabel}) · ${item.quantity}× – ${fmtCents(item.lineGrossCents)} €`)
+    .map(item => `${item.productName} (${item.variantLabel}) · ${item.quantity}× · ${fmtCents(item.lineGrossCents)} €`)
     .join("\n");
 
   const totalsLinesText = [
@@ -195,7 +195,7 @@ ${accountLinkHtml}
   const accountLinkText = order.accountOrderUrl ? `\nBestellung in deinem Konto ansehen: ${order.accountOrderUrl}\n` : "";
 
   const text = [
-    "GLOA – Zahlung bestätigt",
+    "GLOA · Zahlung bestätigt",
     "",
     "Danke für deine Bestellung.",
     `Bestellnummer: ${order.order_number}`,

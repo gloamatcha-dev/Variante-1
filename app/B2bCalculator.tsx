@@ -224,7 +224,7 @@ export function B2bCalculator({
             ))}
           </div>
 
-          <p className="calc-footnote">Dein aktueller Preis: {fmtEur(currentPrice!)} € / kg netto — GLOA-Basis: {fmtEur(selectedSize!.price_per_kg_net)} € / kg netto</p>
+          <p className="calc-footnote">Dein aktueller Preis: {fmtEur(currentPrice!)} € / kg netto · GLOA-Basis: {fmtEur(selectedSize!.price_per_kg_net)} € / kg netto</p>
 
           {/* ── Section 2: Getränke-Kalkulation ── */}
           {results.hasDrink && (

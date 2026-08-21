@@ -55,7 +55,7 @@ export function AccountPortal({ page, orderId, subscriptionId, supplyId }: { pag
   }
 
   const navItems = NAV.filter(n => (!n.b2bOnly || customerType === "business") && (!n.privateOnly || customerType === "private"));
-  const firstName = profile?.first_name || "—";
+  const firstName = profile?.first_name || "-";
 
   const handleLogout = async () => {
     await signOut();
@@ -643,7 +643,7 @@ function PortalSubscriptions() {
             return (
               <a key={s.id} href={`/account/subscriptions/${s.id}`} className="sub-list-row">
                 <span className="sub-list-name">{plan.name || "Abo"}</span>
-                <span>{s.next_delivery_at ? fmtDate(s.next_delivery_at) : "—"}</span>
+                <span>{s.next_delivery_at ? fmtDate(s.next_delivery_at) : "-"}</span>
                 <span>{SUB_STATUS_DE[s.status] || s.status}</span>
                 <span className="sub-list-total">{fmtCents(s.total_gross_cents)} €</span>
               </a>
@@ -707,7 +707,7 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
         {sub.next_delivery_at && <div className="portal-profile-row"><span>Nächste Lieferung</span><strong>{fmtDate(sub.next_delivery_at)}</strong></div>}
         {sub.started_at && <div className="portal-profile-row"><span>Laufzeit seit</span><strong>{fmtDate(sub.started_at)}</strong></div>}
         {sub.current_period_start && sub.current_period_end && (
-          <div className="portal-profile-row"><span>Aktueller Zeitraum</span><strong>{fmtDate(sub.current_period_start)} – {fmtDate(sub.current_period_end)}</strong></div>
+          <div className="portal-profile-row"><span>Aktueller Zeitraum</span><strong>{fmtDate(sub.current_period_start)} - {fmtDate(sub.current_period_end)}</strong></div>
         )}
         {sub.cancel_at_period_end && <div className="portal-profile-row"><span>Hinweis</span><strong>Endet zum Periodenende</strong></div>}
         {sub.paused_at && <div className="portal-profile-row"><span>Pausiert seit</span><strong>{fmtDate(sub.paused_at)}</strong></div>}
@@ -959,10 +959,10 @@ function PortalProfile() {
           <p className="eyebrow">PERSÖNLICHE DATEN</p>
           {!editing ? (
             <>
-              <div className="portal-profile-row"><span>Vorname</span><strong>{profile?.first_name || "—"}</strong></div>
-              <div className="portal-profile-row"><span>Nachname</span><strong>{profile?.last_name || "—"}</strong></div>
-              <div className="portal-profile-row"><span>E-Mail</span><strong>{user?.email || "—"}</strong></div>
-              <div className="portal-profile-row"><span>Telefon</span><strong>{profile?.phone || "—"}</strong></div>
+              <div className="portal-profile-row"><span>Vorname</span><strong>{profile?.first_name || "-"}</strong></div>
+              <div className="portal-profile-row"><span>Nachname</span><strong>{profile?.last_name || "-"}</strong></div>
+              <div className="portal-profile-row"><span>E-Mail</span><strong>{user?.email || "-"}</strong></div>
+              <div className="portal-profile-row"><span>Telefon</span><strong>{profile?.phone || "-"}</strong></div>
               <button className="cta portal-edit-btn" onClick={() => setEditing(true)}>BEARBEITEN</button>
             </>
           ) : (
@@ -984,9 +984,9 @@ function PortalProfile() {
         {profile?.customer_type === "business" && businessProfile && (
           <section className="portal-profile-block">
             <p className="eyebrow">UNTERNEHMENSDATEN</p>
-            <div className="portal-profile-row"><span>Firma</span><strong>{businessProfile.company_name || "—"}</strong></div>
+            <div className="portal-profile-row"><span>Firma</span><strong>{businessProfile.company_name || "-"}</strong></div>
             {businessProfile.legal_form && <div className="portal-profile-row"><span>Rechtsform</span><strong>{businessProfile.legal_form}</strong></div>}
-            <div className="portal-profile-row"><span>Steuernummer</span><strong>{businessProfile.tax_number || "—"}</strong></div>
+            <div className="portal-profile-row"><span>Steuernummer</span><strong>{businessProfile.tax_number || "-"}</strong></div>
             {businessProfile.vat_id && <div className="portal-profile-row"><span>USt-IdNr.</span><strong>{businessProfile.vat_id}</strong></div>}
             {businessProfile.website && <div className="portal-profile-row"><span>Website</span><strong>{businessProfile.website}</strong></div>}
           </section>

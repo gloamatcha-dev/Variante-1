@@ -49,15 +49,15 @@ test("shipping zones: mapping is case-insensitive", () => {
 });
 
 test("delivery time labels match exactly the confirmed copy", () => {
-  assert.equal(SHIPPING_ZONES.germany.deliveryTimeLabel, "2–4 Werktage");
-  assert.equal(SHIPPING_ZONES.eu.deliveryTimeLabel, "3–8 Werktage");
-  assert.equal(SHIPPING_ZONES.nonEuCore.deliveryTimeLabel, "4–8 Werktage");
-  assert.equal(SHIPPING_ZONES.restOfEurope.deliveryTimeLabel, "5–10 Werktage");
+  assert.equal(SHIPPING_ZONES.germany.deliveryTimeLabel, "2-4 Werktage");
+  assert.equal(SHIPPING_ZONES.eu.deliveryTimeLabel, "3-8 Werktage");
+  assert.equal(SHIPPING_ZONES.nonEuCore.deliveryTimeLabel, "4-8 Werktage");
+  assert.equal(SHIPPING_ZONES.restOfEurope.deliveryTimeLabel, "5-10 Werktage");
 
-  assert.equal(getDeliveryTimeLabel("DE"), "2–4 Werktage");
-  assert.equal(getDeliveryTimeLabel("FR"), "3–8 Werktage");
-  assert.equal(getDeliveryTimeLabel("CH"), "4–8 Werktage");
-  assert.equal(getDeliveryTimeLabel("RS"), "5–10 Werktage");
+  assert.equal(getDeliveryTimeLabel("DE"), "2-4 Werktage");
+  assert.equal(getDeliveryTimeLabel("FR"), "3-8 Werktage");
+  assert.equal(getDeliveryTimeLabel("CH"), "4-8 Werktage");
+  assert.equal(getDeliveryTimeLabel("RS"), "5-10 Werktage");
 });
 
 test("shipping: an unsupported/non-configured country is never treated as an enabled destination", () => {

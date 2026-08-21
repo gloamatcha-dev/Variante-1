@@ -13,11 +13,11 @@ export async function generateMetadata(): Promise<Metadata> {
   const base = new URL(`${protocol}://${host}`);
   return {
     metadataBase: base,
-    title: "GLOA — Matcha aus Japan",
+    title: "GLOA · Matcha aus Japan",
     description: "Matcha aus Shizuoka, Japan. Für Latte, pur oder wie du willst.",
     icons: { icon: "/favicon.svg" },
-    openGraph: { title: "GLOA — Matcha aus Japan", description: "Matcha aus Japan. Bald in Berlin.", images: [{ url: "/og.png", width: 1732, height: 909 }] },
-    twitter: { card: "summary_large_image", title: "GLOA — Matcha aus Japan", description: "Matcha aus Japan. Bald in Berlin.", images: ["/og.png"] },
+    openGraph: { title: "GLOA · Matcha aus Japan", description: "Matcha aus Japan. Bald in Berlin.", images: [{ url: "/og.png", width: 1732, height: 909 }] },
+    twitter: { card: "summary_large_image", title: "GLOA · Matcha aus Japan", description: "Matcha aus Japan. Bald in Berlin.", images: ["/og.png"] },
   };
 }
 

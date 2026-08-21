@@ -82,7 +82,7 @@ return <section className="featured-recipes"><div className="featured-recipes-he
 </section>
 }
 
-function Home({onAdd}:{onAdd:()=>void}){return <main><section className="hero"><div className="hero-copy"><p className="eyebrow">MATCHA AUS SHIZUOKA.</p><h1>Matcha.<br/><i>Aber richtig.</i></h1><p className="lead">Aus Shizuoka, Japan. Für Latte, pur, iced oder wie du willst.</p><div className="hero-actions"><Link className="cta" href="/shop" onClick={()=>track("shop_click")}>Zum Shop</Link><Link className="cta secondary" href="/about">GLOA entdecken →</Link></div></div><div className="hero-art"><img src="/img/gloa-hero-packaging.jpg" alt="GLOA Matcha Verpackung" className="hero-img"/><span className="hero-micro">SHIZUOKA / JAPAN</span></div></section><section className="product-intro"><div><p className="eyebrow">MEET YOUR MATCHA.</p><h2>Ein Grün.<br/><i>Viele Momente.</i></h2><p>Aus Shizuoka, Japan. Für Matcha Latte und pur. Easy im Alltag, ehrlich im Produkt.</p><Link className="cta" href="/shop">Shop GLOA</Link></div><ProductCard onAdd={onAdd}/></section><section className="daily"><div className="daily-copy"><p className="eyebrow">MATCHA FÜR JEDEN TAG</p><h2>Morgens.<br/>Im Meeting.<br/><i>Nachmittags.</i></h2></div><div className="daily-grid">{dailyTiles.map(t=><div className="daily-tile" key={t.label}><img src={t.src} alt={t.alt} loading="lazy"/><span>{t.label}</span></div>)}</div></section><section className="origin"><div><p className="eyebrow">ORIGIN</p><h2>From Shizuoka,<br/><i>Japan.</i></h2></div><div><p>GLOA Matcha kommt aus Shizuoka, Japan – 100 % Bio-Matcha aus der zweiten und dritten Pflückung, fein vermahlen.</p><dl><div><dt>ORIGIN</dt><dd>Shizuoka, Japan</dd></div><div><dt>MADE FOR</dt><dd>Latte + pure preparation</dd></div></dl></div></section><HowTo/><RecipeCarousel/><section className="community"><p className="eyebrow">#gloamatcha</p><h2>Zeig uns<br/><i>deinen Matcha.</i></h2><CommunityFeed/><a href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">@gloa.matcha folgen →</a></section><Newsletter/></main>}
+function Home({onAdd}:{onAdd:()=>void}){return <main><section className="hero"><div className="hero-copy"><p className="eyebrow">MATCHA AUS SHIZUOKA.</p><h1>Matcha.<br/><i>Aber richtig.</i></h1><p className="lead">Aus Shizuoka, Japan. Für Latte, pur, iced oder wie du willst.</p><div className="hero-actions"><Link className="cta" href="/shop" onClick={()=>track("shop_click")}>Zum Shop</Link><Link className="cta secondary" href="/about">GLOA entdecken →</Link></div></div><div className="hero-art"><img src="/img/gloa-hero-packaging.jpg" alt="GLOA Matcha Verpackung" className="hero-img"/><span className="hero-micro">SHIZUOKA / JAPAN</span></div></section><section className="product-intro"><div><p className="eyebrow">MEET YOUR MATCHA.</p><h2>Ein Grün.<br/><i>Viele Momente.</i></h2><p>Aus Shizuoka, Japan. Für Matcha Latte und pur. Easy im Alltag, ehrlich im Produkt.</p><Link className="cta" href="/shop">Shop GLOA</Link></div><ProductCard onAdd={onAdd}/></section><section className="daily"><div className="daily-copy"><p className="eyebrow">MATCHA FÜR JEDEN TAG</p><h2>Morgens.<br/>Im Meeting.<br/><i>Nachmittags.</i></h2></div><div className="daily-grid">{dailyTiles.map(t=><div className="daily-tile" key={t.label}><img src={t.src} alt={t.alt} loading="lazy"/><span>{t.label}</span></div>)}</div></section><section className="origin"><div><p className="eyebrow">ORIGIN</p><h2>From Shizuoka,<br/><i>Japan.</i></h2></div><div><p>GLOA Matcha kommt aus Shizuoka, Japan: 100 % Bio-Matcha aus der zweiten und dritten Pflückung, fein vermahlen.</p><dl><div><dt>ORIGIN</dt><dd>Shizuoka, Japan</dd></div><div><dt>MADE FOR</dt><dd>Latte + pure preparation</dd></div></dl></div></section><HowTo/><RecipeCarousel/><section className="community"><p className="eyebrow">#gloamatcha</p><h2>Zeig uns<br/><i>deinen Matcha.</i></h2><CommunityFeed/><a href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">@gloa.matcha folgen →</a></section><Newsletter/></main>}
 
 function Shop({onAdd}:{onAdd:()=>void}){
 const {product,loading,error}=useCatalog("matcha");
@@ -115,7 +115,7 @@ return <main className="shop-page">
 <button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="#newsletter":handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
 </div></section>
 
-<section className="shop-details"><div className="shop-details-inner"><p className="eyebrow">PRODUKTDETAILS</p><dl><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>QUALITÄT</dt><dd>100 % Bio-Matcha</dd></div><div><dt>VERWENDUNG</dt><dd>Latte · Iced · Pur</dd></div><div><dt>ERNTE</dt><dd>2. und 3. Pflückung</dd></div><div><dt>LAGERUNG</dt><dd>Kühl, trocken und lichtgeschützt</dd></div><div><dt>GROESSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div><div><dt>VERSAND</dt><dd>Versand aus Deutschland · Lieferzeit je nach Zielland: 2–10 Werktage</dd></div></dl><Link className="shop-details-link" href="/our-matcha" onClick={()=>track("shop_to_matcha")}>MEHR ÜBER UNSEREN MATCHA →</Link><Link className="shop-details-link" href="/versand">VERSAND & LIEFERZEITEN →</Link></div></section>
+<section className="shop-details"><div className="shop-details-inner"><p className="eyebrow">PRODUKTDETAILS</p><dl><div><dt>LEBENSMITTELBEZEICHNUNG</dt><dd>Matcha (Grünteepulver)</dd></div><div><dt>ZUTAT</dt><dd>100 % Matcha-Grünteepulver, keine Zusätze</dd></div><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>QUALITÄT</dt><dd>100 % Bio-Matcha</dd></div><div><dt>ERNTE</dt><dd>2. und 3. Pflückung</dd></div><div><dt>ZUBEREITUNG</dt><dd>Ca. 2 g mit wenig heißem Wasser (ca. 80 °C) glattrühren, dann aufgießen. Latte, iced oder pur.</dd></div><div><dt>LAGERUNG</dt><dd>{PRODUCT.storage}</dd></div><div><dt>GROESSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div><div><dt>VERANTWORTLICHES LEBENSMITTELUNTERNEHMEN</dt><dd>Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin, Deutschland</dd></div><div><dt>VERSAND</dt><dd>Versand aus Deutschland · Lieferzeit je nach Zielland: 2-10 Werktage</dd></div></dl><Link className="shop-details-link" href="/our-matcha" onClick={()=>track("shop_to_matcha")}>MEHR ÜBER UNSEREN MATCHA →</Link><Link className="shop-details-link" href="/versand">VERSAND & LIEFERZEITEN →</Link></div></section>
 
 <Newsletter/>
 </main>}
@@ -147,38 +147,38 @@ return <main className="pdp">
 <button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="#newsletter":handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
 </div></section>
 
-<section className="pdp-facts"><div><p className="eyebrow">WHAT WE KNOW</p><h2>Clear facts.<br/>Nothing invented.</h2></div><dl><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>VERWENDUNG</dt><dd>Latte · Iced · Pur</dd></div><div><dt>LAGERUNG</dt><dd>{PRODUCT.storage}</dd></div><div><dt>GROESSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div></dl></section>
+<section className="pdp-facts"><div><p className="eyebrow">WHAT WE KNOW</p><h2>Clear facts.<br/>Nothing invented.</h2></div><dl><div><dt>LEBENSMITTELBEZEICHNUNG</dt><dd>Matcha (Grünteepulver)</dd></div><div><dt>ZUTAT</dt><dd>100 % Matcha-Grünteepulver, keine Zusätze</dd></div><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>VERWENDUNG</dt><dd>Latte · Iced · Pur</dd></div><div><dt>LAGERUNG</dt><dd>{PRODUCT.storage}</dd></div><div><dt>GROESSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div><div><dt>VERANTWORTLICHES LEBENSMITTELUNTERNEHMEN</dt><dd>Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin, Deutschland</dd></div></dl></section>
 <HowTo/>
 </main>}
 
 // Unused - kept for potential future use
 // function PageHero({index,eyebrow,title,text,tone}:{index:string;eyebrow:string;title:React.ReactNode;text:string;tone:string}){return <section className={`inner-hero ${tone}`}><span className="page-index">{index}</span><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="lead">{text}</p></div></section>}
 const matchaFaq:[string,string][]=[
-["Was ist Matcha?","Matcha ist gemahlener grüner Tee. Du trinkst dabei das fein vermahlene Blatt direkt mit – nicht nur einen Aufguss."],
+["Was ist Matcha?","Matcha ist gemahlener grüner Tee. Du trinkst dabei das fein vermahlene Blatt direkt mit, nicht nur einen Aufguss."],
 ["Woher kommt GLOA Matcha?","Aus Shizuoka, einer der bekanntesten Teeregionen Japans."],
-["Wie schmeckt er?","Ausgewogen und cremig, mit natürlicher Süße und angenehmem Umami – dazu eine dezente, frische Herbe."],
+["Wie schmeckt er?","Ausgewogen und cremig, mit natürlicher Süße und angenehmem Umami, dazu eine dezente, frische Herbe."],
 ["Kann ich ihn pur trinken?","Ja. Matcha mit wenig heißem Wasser glattrühren, aufgießen und direkt genießen."],
 ["Funktioniert er für Matcha Latte?","Ja. GLOA Matcha ist weich genug für den puren Genuss und gleichzeitig intensiv genug für Lattes."],
-["Wie bereite ich ihn zu?","Matcha mit wenig heißem Wasser (ca. 80 °C) glattrühren, dann mit Wasser, Milch oder Pflanzendrink auffüllen – heiß oder auf Eis."],
+["Wie bereite ich ihn zu?","Matcha mit wenig heißem Wasser (ca. 80 °C) glattrühren, dann mit Wasser, Milch oder Pflanzendrink auffüllen, heiß oder auf Eis."],
 ["Enthält Matcha Koffein?","Ja, Matcha enthält von Natur aus Koffein. Wie viel genau, hängt unter anderem von Zubereitung und Dosierung ab."],
 ["Wie lagere ich ihn?","Kühl, trocken und lichtgeschützt. Nach dem Öffnen gut verschlossen aufbewahren."],
 ["Ist GLOA Matcha Bio?","Ja, unser Matcha ist Bio-zertifiziert."],
 ];
 function MatchaPage(){return <main className="matcha-page">
 
-<section className="matcha-hero"><div className="matcha-hero-copy"><p className="eyebrow">UNSER MATCHA</p><h1>Matcha.<br/><i>Ohne Umwege.</i></h1><p className="lead">100 % Bio-Matcha aus Shizuoka, Japan. Für Latte, pur oder iced – klar beschrieben, nichts erfunden.</p></div><div className="matcha-hero-visual"><img src="/img/gloa-hero-packaging.jpg" alt="GLOA Matcha Verpackung"/></div></section>
+<section className="matcha-hero"><div className="matcha-hero-copy"><p className="eyebrow">UNSER MATCHA</p><h1>Matcha.<br/><i>Ohne Umwege.</i></h1><p className="lead">100 % Bio-Matcha aus Shizuoka, Japan. Für Latte, pur oder iced. Klar beschrieben, nichts erfunden.</p></div><div className="matcha-hero-visual"><img src="/img/gloa-hero-packaging.jpg" alt="GLOA Matcha Verpackung"/></div></section>
 
-<section className="matcha-facts"><p className="eyebrow">DAS PRODUKT</p><h2>Ein Grün.<br/><i>Klar erklärt.</i></h2><p className="matcha-section-text">GLOA Matcha ist 100 % Bio-Matcha aus Shizuoka, Japan – fein gemahlenes Grünteepulver, kein Zusatz, keine Mischung. Die Verpackung ist licht-, luft- und feuchtigkeitsdicht, damit Farbe und Geschmack erhalten bleiben.</p><div className="matcha-facts-grid"><div><span>HERKUNFT</span><strong>Shizuoka, Japan</strong></div><div><span>QUALITÄT</span><strong>100 % Bio-Matcha</strong></div><div><span>ERNTE</span><strong>2. und 3. Pflückung</strong></div><div><span>VERWENDUNG</span><strong>Latte · Iced · Pur</strong></div><div><span>GRÖSSEN</span><strong>30 g · 50 g · 100 g</strong></div><div><span>LAGER</span><strong>Deutschland</strong></div></div></section>
+<section className="matcha-facts"><p className="eyebrow">DAS PRODUKT</p><h2>Ein Grün.<br/><i>Klar erklärt.</i></h2><p className="matcha-section-text">GLOA Matcha ist 100 % Bio-Matcha aus Shizuoka, Japan: fein gemahlenes Grünteepulver, kein Zusatz, keine Mischung. Die Verpackung ist licht-, luft- und feuchtigkeitsdicht, damit Farbe und Geschmack erhalten bleiben.</p><div className="matcha-facts-grid"><div><span>HERKUNFT</span><strong>Shizuoka, Japan</strong></div><div><span>QUALITÄT</span><strong>100 % Bio-Matcha</strong></div><div><span>ERNTE</span><strong>2. und 3. Pflückung</strong></div><div><span>VERWENDUNG</span><strong>Latte · Iced · Pur</strong></div><div><span>GRÖSSEN</span><strong>30 g · 50 g · 100 g</strong></div><div><span>LAGER</span><strong>Deutschland</strong></div></div></section>
 
-<section className="matcha-taste"><p className="eyebrow">GESCHMACK</p><h2>Wie schmeckt<br/><i>GLOA?</i></h2><p className="matcha-section-text">Der Matcha zeichnet sich durch seine leuchtend grüne Farbe, feine Textur und seinen ausgewogenen Geschmack aus. Natürliche Süße und angenehmes Umami treffen auf eine dezente, frische Herbe – weich genug für den puren Genuss und gleichzeitig intensiv genug für Matcha Lattes.</p><div className="matcha-taste-grid"><div><span>GESCHMACK</span><strong>Ausgewogen, cremig, leicht süßlich & umami</strong></div><div><span>AROMA</span><strong>Frisch, vegetal & fein</strong></div></div></section>
+<section className="matcha-taste"><p className="eyebrow">GESCHMACK</p><h2>Wie schmeckt<br/><i>GLOA?</i></h2><p className="matcha-section-text">Der Matcha zeichnet sich durch seine leuchtend grüne Farbe, feine Textur und seinen ausgewogenen Geschmack aus. Natürliche Süße und angenehmes Umami treffen auf eine dezente, frische Herbe, weich genug für den puren Genuss und gleichzeitig intensiv genug für Matcha Lattes.</p><div className="matcha-taste-grid"><div><span>GESCHMACK</span><strong>Ausgewogen, cremig, leicht süßlich & umami</strong></div><div><span>AROMA</span><strong>Frisch, vegetal & fein</strong></div></div></section>
 
 <section className="matcha-shizuoka"><p className="eyebrow">HERKUNFT</p><h2>Aus Shizuoka,<br/><i>Japan.</i></h2><p>Unser Matcha kommt aus Shizuoka, einer der bekanntesten Teeregionen Japans. Geerntet wird die zweite und dritte Pflückung, danach wird das Blatt industriell zu feinem Pulver vermahlen.</p><p className="matcha-build-note">Wir planen, Shizuoka in Zukunft selbst zu besuchen und dir mehr von dort zu zeigen.</p><Link className="cta cream" href="https://www.tiktok.com/@gloa.matcha" target="_blank" rel="noopener noreferrer">AUF TIKTOK FOLGEN ↗</Link></section>
 
-<section className="matcha-what"><div><p className="eyebrow">WAS IST MATCHA</p><h2>Pulver statt<br/><i>Aufguss.</i></h2><p>Matcha ist gemahlener grüner Tee. Anders als bei klassisch aufgegossenem Tee trinkst du bei Matcha das fein vermahlene Blatt direkt mit – nicht nur den Sud. Deshalb enthält Matcha von Natur aus mehr Koffein, L-Theanin und Catechine wie EGCG als ein Aufguss aus derselben Teemenge. Wie viel genau, hängt unter anderem von Anbau, Ernte, Verarbeitung und Zubereitung ab.</p></div><div className="matcha-what-img"><img src="/img/gloa-work.jpg" alt="Iced Matcha am Arbeitsplatz"/></div></section>
+<section className="matcha-what"><div><p className="eyebrow">WAS IST MATCHA</p><h2>Pulver statt<br/><i>Aufguss.</i></h2><p>Matcha ist gemahlener grüner Tee. Anders als bei klassisch aufgegossenem Tee trinkst du bei Matcha das fein vermahlene Blatt direkt mit, nicht nur den Sud. Deshalb enthält Matcha von Natur aus mehr Koffein, L-Theanin und Catechine wie EGCG als ein Aufguss aus derselben Teemenge. Wie viel genau, hängt unter anderem von Anbau, Ernte, Verarbeitung und Zubereitung ab.</p></div><div className="matcha-what-img"><img src="/img/gloa-work.jpg" alt="Iced Matcha am Arbeitsplatz"/></div></section>
 
-<section className="matcha-transparency"><div className="matcha-transparency-inner"><p className="eyebrow">MATCHA & SCIENCE</p><h2>Forschung.<br/><i>Ehrlich eingeordnet.</i></h2><p>Wir wollen nichts versprechen, was sich nicht belegen lässt. Deshalb trennen wir hier klar, was Matcha enthält, was untersucht wurde – und was offen bleibt.</p><div className="matcha-science-grid"><div><h3>Was Matcha enthält</h3><p>Von Natur aus Koffein, L-Theanin und Pflanzenstoffe aus der Catechin-Gruppe wie EGCG. Weil beim Matcha das ganze Blatt getrunken wird, enthält er davon spürbar mehr als klassisch aufgegossener Grüntee.</p></div><div><h3>In Studien untersucht</h3><p>Die Kombination aus Koffein und L-Theanin wird häufig im Zusammenhang mit Aufmerksamkeit untersucht. Einzelne Übersichtsarbeiten deuten auf kurzfristige Effekte hin – die Ergebnisse sind uneinheitlich und lassen sich nicht pauschal auf ein bestimmtes Produkt übertragen.</p></div><div><h3>Was die Forschung noch nicht beantworten kann</h3><p>Für Grüntee-Catechine wurden bislang keine gesundheitsbezogenen Aussagen – etwa zu Stoffwechsel, Herz-Kreislauf oder Zellschutz – als ausreichend belegt eingestuft. Deshalb machen wir dazu keine Versprechen.</p></div></div><p className="matcha-transparency-note">Wir behaupten nichts, was wir nicht belegen können.</p></div></section>
+<section className="matcha-transparency"><div className="matcha-transparency-inner"><p className="eyebrow">MATCHA & SCIENCE</p><h2>Forschung.<br/><i>Ehrlich eingeordnet.</i></h2><p>Wir wollen nichts versprechen, was sich nicht belegen lässt. Deshalb trennen wir hier klar, was Matcha enthält, was untersucht wurde und was offen bleibt.</p><div className="matcha-science-grid"><div><h3>Was Matcha enthält</h3><p>Von Natur aus Koffein, L-Theanin und Pflanzenstoffe aus der Catechin-Gruppe wie EGCG. Weil beim Matcha das ganze Blatt getrunken wird, enthält er davon spürbar mehr als klassisch aufgegossener Grüntee.</p></div><div><h3>In Studien untersucht</h3><p>Die Kombination aus Koffein und L-Theanin wird häufig im Zusammenhang mit Aufmerksamkeit untersucht. Einzelne Übersichtsarbeiten deuten auf kurzfristige Effekte hin, die Ergebnisse sind uneinheitlich und lassen sich nicht pauschal auf ein bestimmtes Produkt übertragen.</p></div><div><h3>Was die Forschung noch nicht beantworten kann</h3><p>Für Grüntee-Catechine wurden bislang keine gesundheitsbezogenen Aussagen, etwa zu Stoffwechsel, Herz-Kreislauf oder Zellschutz, als ausreichend belegt eingestuft. Deshalb machen wir dazu keine Versprechen.</p></div></div><p className="matcha-transparency-note">Wir behaupten nichts, was wir nicht belegen können.</p></div></section>
 
-<section className="matcha-howto"><div className="section-head"><div><p className="eyebrow">ZUBEREITUNG</p><h2>Drei Wege.<br/><i>Alle einfach.</i></h2></div></div><div className="matcha-method-grid"><article><span>01</span><h3>Matcha Latte</h3><ol><li>Ca. 2 g Matcha mit wenig heißem Wasser (ca. 80 °C) glattrühren.</li><li>Milch oder Pflanzendrink erwärmen und dazugeben.</li><li>Heiß genießen.</li></ol></article><article><span>02</span><h3>Iced Matcha</h3><ol><li>Ca. 2 g Matcha mit wenig heißem Wasser (ca. 80 °C) glattrühren.</li><li>Über Eis geben.</li><li>Kalte Milch oder Pflanzendrink dazugeben.</li></ol></article><article><span>03</span><h3>Pure Matcha</h3><ol><li>Ca. 2 g Matcha mit wenig heißem Wasser (ca. 80 °C) glattrühren.</li><li>Mit ca. 60–70 ml Wasser aufgießen.</li><li>Direkt genießen.</li></ol></article></div><p className="matcha-section-text">Mengenangaben sind Zubereitungsempfehlungen – pass sie gern an deinen Geschmack an.</p></section>
+<section className="matcha-howto"><div className="section-head"><div><p className="eyebrow">ZUBEREITUNG</p><h2>Drei Wege.<br/><i>Alle einfach.</i></h2></div></div><div className="matcha-method-grid"><article><span>01</span><h3>Matcha Latte</h3><ol><li>Ca. 2 g Matcha mit wenig heißem Wasser (ca. 80 °C) glattrühren.</li><li>Milch oder Pflanzendrink erwärmen und dazugeben.</li><li>Heiß genießen.</li></ol></article><article><span>02</span><h3>Iced Matcha</h3><ol><li>Ca. 2 g Matcha mit wenig heißem Wasser (ca. 80 °C) glattrühren.</li><li>Über Eis geben.</li><li>Kalte Milch oder Pflanzendrink dazugeben.</li></ol></article><article><span>03</span><h3>Pure Matcha</h3><ol><li>Ca. 2 g Matcha mit wenig heißem Wasser (ca. 80 °C) glattrühren.</li><li>Mit ca. 60-70 ml Wasser aufgießen.</li><li>Direkt genießen.</li></ol></article></div><p className="matcha-section-text">Mengenangaben sind Zubereitungsempfehlungen, pass sie gern an deinen Geschmack an.</p></section>
 
 <section className="matcha-use"><p className="eyebrow">VERWENDUNG</p><h2>Latte. Iced. Pur.<br/><i>Deine Wahl.</i></h2><div className="matcha-use-grid"><div><strong>LATTE</strong><p>Mit Milch oder Pflanzendrink, warm oder kalt aufgeschäumt. Der einfachste Einstieg in den Alltag.</p></div><div><strong>ICED</strong><p>Über Eis gegossen, cremig und erfrischend. Für unterwegs oder heiße Tage.</p></div><div><strong>PUR</strong><p>Nur Matcha und Wasser. Direkt, klar, ohne Umwege.</p></div></div></section>
 
@@ -198,15 +198,15 @@ const aboutCares:[string,string][]=[
 function About(){return <main className="about-page">
 <section className="about-hero"><span className="page-index">03</span><div><p className="eyebrow">ÜBER GLOA</p><h1>Good energy.<br/><i>No theatre.</i></h1><p className="lead">GLOA bringt Matcha aus Shizuoka in einen Alltag, der nicht nach Regeln fragt.</p><p className="about-sub-lead">Für Latte, iced, pur oder genau so, wie du ihn magst.</p></div><div className="about-hero-micro"><span>SHIZUOKA / JAPAN</span><span>BERLIN / GERMANY</span><span>EST. 2026</span></div></section>
 
-<section className="about-why"><div className="about-why-left"><p className="eyebrow">WHY GLOA EXISTS</p><h2>Matcha gehört<br/>nicht in eine<br/><i>Schublade.</i></h2></div><div className="about-why-right"><p>Wir mögen Matcha, aber nicht die Regeln, die manchmal darum gebaut werden.</p><p>GLOA soll unkompliziert funktionieren: im Café, im Büro, unterwegs oder zu Hause.</p><p>Kein Dresscode.<br/>Kein Pflichtprogramm.<br/>Ein gutes Produkt – und du entscheidest, was du daraus machst.</p></div></section>
+<section className="about-why"><div className="about-why-left"><p className="eyebrow">WHY GLOA EXISTS</p><h2>Matcha gehört<br/>nicht in eine<br/><i>Schublade.</i></h2></div><div className="about-why-right"><p>Wir mögen Matcha, aber nicht die Regeln, die manchmal darum gebaut werden.</p><p>GLOA soll unkompliziert funktionieren: im Café, im Büro, unterwegs oder zu Hause.</p><p>Kein Dresscode.<br/>Kein Pflichtprogramm.<br/>Ein gutes Produkt. Und du entscheidest, was du daraus machst.</p></div></section>
 
-<section className="statement"><div><p className="eyebrow">MATCHA FOR REAL LIFE</p></div><h2>Nicht kompliziert.<br/><i>Einfach gut.</i></h2><p>Morgens, im Büro, im Café, unterwegs, iced oder als Latte – dein Tag entscheidet, nicht ein Regelwerk. GLOA funktioniert überall dort, wo du gerade bist.</p></section>
+<section className="statement"><div><p className="eyebrow">MATCHA FOR REAL LIFE</p></div><h2>Nicht kompliziert.<br/><i>Einfach gut.</i></h2><p>Morgens, im Büro, im Café, unterwegs, iced oder als Latte. Dein Tag entscheidet, nicht ein Regelwerk. GLOA funktioniert überall dort, wo du gerade bist.</p></section>
 
-<section className="about-origin"><div><p className="eyebrow">HERKUNFT</p><p>Unser Matcha kommt aus Shizuoka, Japan – 100 % Bio-Matcha, fein vermahlen.</p></div><Link className="text-link" href="/our-matcha">Unser Matcha →</Link></section>
+<section className="about-origin"><div><p className="eyebrow">HERKUNFT</p><p>Unser Matcha kommt aus Shizuoka, Japan: 100 % Bio-Matcha, fein vermahlen.</p></div><Link className="text-link" href="/our-matcha">Unser Matcha →</Link></section>
 
 <section className="about-cares"><p className="eyebrow">WAS UNS WICHTIG IST</p><h2>Worauf wir<br/><i>Wert legen.</i></h2><div className="about-cares-list">{aboutCares.map(([n,text])=><div key={n}><span>{n}</span><h3>{text}</h3></div>)}</div></section>
 
-<section className="about-tiktok"><p className="eyebrow">BUILDING GLOA</p><h2>Schau vorbei,<br/><i>während es entsteht.</i></h2><p>Wir bauen GLOA gerade auf – Produkt, Packaging, Cafés und alles dazwischen. Auf TikTok zeigen wir, was hinter der Marke passiert.</p><Link className="about-handle" href="https://www.tiktok.com/@gloa.matcha" target="_blank" rel="noopener noreferrer">@gloa.matcha</Link><Link className="cta cream" href="https://www.tiktok.com/@gloa.matcha" target="_blank" rel="noopener noreferrer">Auf TikTok folgen ↗</Link><p className="about-micro">BUILDING IN PUBLIC · BERLIN · 2026</p></section>
+<section className="about-tiktok"><p className="eyebrow">BUILDING GLOA</p><h2>Schau vorbei,<br/><i>während es entsteht.</i></h2><p>Wir bauen GLOA gerade auf: Produkt, Packaging, Cafés und alles dazwischen. Auf TikTok zeigen wir, was hinter der Marke passiert.</p><Link className="about-handle" href="https://www.tiktok.com/@gloa.matcha" target="_blank" rel="noopener noreferrer">@gloa.matcha</Link><Link className="cta cream" href="https://www.tiktok.com/@gloa.matcha" target="_blank" rel="noopener noreferrer">Auf TikTok folgen ↗</Link><p className="about-micro">BUILDING IN PUBLIC · BERLIN · 2026</p></section>
 
 <section className="about-final"><h2>Genug über uns.<br/><i>Zeit für Matcha.</i></h2><div className="about-final-actions"><Link className="cta cream" href="/shop">Zum Shop</Link><Link className="cta about-cta-outline" href="/our-matcha">Unser Matcha →</Link></div></section>
 </main>}
@@ -303,6 +303,43 @@ return <div className="legal-shipping-zone" key={key}>
 <p className="legal-note">{CUSTOMS_NOTE}</p>
 </main>;
 }
+if(route==="widerruf"){
+return <main className="legal-page">
+<p className="eyebrow">LEGAL</p>
+<h1>{title.widerruf}</h1>
+
+<h2>Widerrufsrecht</h2>
+<p>Verbraucherinnen und Verbrauchern steht ein gesetzliches Widerrufsrecht zu. Verbraucher ist jede natürliche Person, die ein Rechtsgeschäft zu Zwecken abschließt, die überwiegend weder ihrer gewerblichen noch ihrer selbständigen beruflichen Tätigkeit zugerechnet werden können.</p>
+<p>Du hast das Recht, binnen vierzehn Tagen ohne Angabe von Gründen diesen Vertrag zu widerrufen.</p>
+<p>Die Widerrufsfrist beträgt vierzehn Tage ab dem Tag, an dem du oder ein von dir benannter Dritter, der nicht der Beförderer ist, die Waren in Besitz genommen hat bzw. haben. Hast du in einer einheitlichen Bestellung mehrere Waren bestellt, die getrennt geliefert werden, beginnt die Frist mit dem Erhalt der letzten Ware.</p>
+<p>Um dein Widerrufsrecht auszuüben, musst du uns</p>
+<p>Cara 2 GmbH<br/>Hardenbergstr. 4<br/>10623 Berlin<br/>Deutschland<br/>E-Mail: <a href="mailto:info@gloamatcha.com">info@gloamatcha.com</a></p>
+<p>mittels einer eindeutigen Erklärung (z. B. ein mit der Post versandter Brief oder eine E-Mail) über deinen Entschluss, diesen Vertrag zu widerrufen, informieren. Du kannst dafür das Muster-Widerrufsformular weiter unten verwenden, das ist aber nicht vorgeschrieben.</p>
+<p>Zur Wahrung der Widerrufsfrist reicht es aus, dass du die Mitteilung über die Ausübung des Widerrufsrechts vor Ablauf der Widerrufsfrist absendest.</p>
+
+<h2>Elektronische Widerrufsfunktion</h2>
+<p>Für Verträge, die du über unsere Online-Benutzeroberfläche geschlossen hast, kannst du dein Widerrufsrecht zusätzlich über die elektronische Widerrufsfunktion weiter unten auf dieser Seite ausüben. Sie steht während der gesamten Widerrufsfrist zur Verfügung und ist ohne Anmeldung nutzbar, auch als Gast. Nach dem Absenden bestätigen wir dir unverzüglich auf einem dauerhaften Datenträger (in der Regel per E-Mail) den Eingang deiner Widerrufserklärung mit Inhalt, Datum und Uhrzeit.</p>
+
+<h2>Folgen des Widerrufs</h2>
+<p>Wenn du diesen Vertrag widerrufst, haben wir dir alle Zahlungen, die wir von dir erhalten haben, einschließlich der Lieferkosten (mit Ausnahme der zusätzlichen Kosten, die sich daraus ergeben, dass du eine andere Art der Lieferung als die von uns angebotene, günstigste Standardlieferung gewählt hast), unverzüglich und spätestens binnen vierzehn Tagen ab dem Tag zurückzuzahlen, an dem die Mitteilung über deinen Widerruf dieses Vertrags bei uns eingegangen ist. Für diese Rückzahlung verwenden wir dasselbe Zahlungsmittel, das du bei der ursprünglichen Transaktion eingesetzt hast, es sei denn, mit dir wurde ausdrücklich etwas anderes vereinbart; in keinem Fall werden dir wegen dieser Rückzahlung Entgelte berechnet.</p>
+<p>Wir können die Rückzahlung verweigern, bis wir die Waren wieder zurückerhalten haben oder bis du den Nachweis erbracht hast, dass du die Waren zurückgesandt hast, je nachdem, welches der frühere Zeitpunkt ist.</p>
+<p>Du hast die Waren unverzüglich und in jedem Fall spätestens binnen vierzehn Tagen ab dem Tag, an dem du uns über den Widerruf dieses Vertrags unterrichtest, an uns zurückzusenden oder zu übergeben. Die Frist ist gewahrt, wenn du die Waren vor Ablauf der Frist von vierzehn Tagen absendest. Du trägst die unmittelbaren Kosten der Rücksendung der Waren.</p>
+<p>Du musst für einen etwaigen Wertverlust der Waren nur aufkommen, wenn dieser Wertverlust auf einen zur Prüfung der Beschaffenheit, Eigenschaften und Funktionsweise der Waren nicht notwendigen Umgang mit ihnen zurückzuführen ist.</p>
+
+<h2>Muster-Widerrufsformular</h2>
+<p>(Wenn du den Vertrag widerrufen willst, fülle bitte dieses Formular aus und sende es zurück, oder nutze die elektronische Widerrufsfunktion unten.)</p>
+<p>An:<br/>Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin, Deutschland, E-Mail: info@gloamatcha.com</p>
+<p>Hiermit widerrufe(n) ich/wir den von mir/uns abgeschlossenen Vertrag über den Kauf der folgenden Waren:<br/>
+Bestellt am:<br/>
+Name des/der Verbraucher(s):<br/>
+Anschrift des/der Verbraucher(s):<br/>
+Datum:</p>
+
+<h2>Vertrag widerrufen</h2>
+<p>Alternativ kannst du dein Widerrufsrecht direkt hier elektronisch ausüben (§ 356a BGB). Ein Konto ist dafür nicht nötig.</p>
+<WithdrawalFunction/>
+</main>;
+}
 if(route==="impressum"){
 return <main className="legal-page">
 <p className="eyebrow">LEGAL</p>
@@ -313,10 +350,170 @@ return <main className="legal-page">
 <p>Vertreten durch: Serwan Amedi (Geschäftsführer)</p>
 <p>E-Mail: <a href="mailto:info@gloamatcha.com">info@gloamatcha.com</a></p>
 <p>Registergericht: Amtsgericht Charlottenburg<br/>Handelsregisternummer: HRB 278728 B</p>
+<p>Umsatzsteuer-Identifikationsnummer gemäß § 27a Umsatzsteuergesetz: DE457414734</p>
 </div>
 </main>;
 }
+if(route==="datenschutz"){
+return <main className="legal-page">
+<p className="eyebrow">LEGAL</p>
+<h1>{title.datenschutz}</h1>
+
+<h2>1. Verantwortlicher</h2>
+<p>Cara 2 GmbH<br/>Hardenbergstr. 4<br/>10623 Berlin<br/>Deutschland<br/>E-Mail: <a href="mailto:info@gloamatcha.com">info@gloamatcha.com</a></p>
+<p>Für alle Anliegen zum Datenschutz erreichst du uns unter der oben genannten E-Mail-Adresse.</p>
+
+<h2>2. Bereitstellung der Website (Hosting)</h2>
+<p>Beim Aufruf dieser Website verarbeitet die Hosting-Infrastruktur, über die sie technisch bereitgestellt wird, automatisch Verbindungsdaten (u. a. IP-Adresse, Datum und Uhrzeit des Zugriffs, aufgerufene Seite, verwendeter Browser), wie es für die technisch sichere Auslieferung jeder Website zwangsläufig erforderlich ist. Rechtsgrundlage ist Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse an einem funktionsfähigen, sicheren Betrieb der Website).</p>
+
+<h2>3. Kontoerstellung und Bestellung</h2>
+<p>Wenn du ein GLOA-Konto erstellst oder als Gast bestellst, verarbeiten wir die dafür notwendigen Angaben (z. B. Name, Kontaktdaten, Lieferadresse, Bestellinhalt) über unseren Datenbank- und Authentifizierungs-Dienstleister Supabase. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO (Vertragserfüllung bzw. vorvertragliche Maßnahmen). Bei der Kontoerstellung kannst du optional angeben, ob du Neuigkeiten von GLOA erhalten möchtest; diese Angabe wird bei deinem Konto gespeichert. Ein eigenständiger Newsletter-Versand ist aktuell nicht aktiv.</p>
+
+<h2>4. Zahlungsabwicklung</h2>
+<p>Die Zahlungsabwicklung erfolgt über unseren Zahlungsdienstleister Stripe. Dabei werden die für die Zahlung notwendigen Daten (u. a. Bestellbetrag, Zahlungsart, Rechnungs-/Lieferadresse) an Stripe übermittelt. Stripe verarbeitet Zahlungsdaten wie Kartendaten ausschließlich auf eigenen, gesicherten Systemen; wir selbst erhalten und speichern keine vollständigen Zahlungsdaten. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO.</p>
+
+<h2>5. Kontaktformular, B2B-Anfrage und Bestell-/Widerrufsbestätigungen</h2>
+<p>Nutzt du das Kontaktformular oder die B2B-Anfrage, verarbeiten wir deine Angaben (Name, E-Mail, Nachricht, ggf. Bestellnummer bzw. Unternehmensangaben), um deine Anfrage zu beantworten. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b bzw. lit. f DSGVO. Nach einer Bestellung bzw. einem Widerruf verwenden wir dieselbe technische Anbindung, um dir eine Bestell- oder Widerrufsbestätigung zuzusenden. Für den Versand dieser E-Mails setzen wir den E-Mail-Dienstleister Resend ein.</p>
+
+<h2>6. Cookies und lokale Speicherung</h2>
+<p>Diese Website verwendet ausschließlich technisch notwendige Speicherung: den Inhalt deines Warenkorbs (lokal in deinem Browser) und, falls du dich anmeldest, deine Anmeldesitzung. Ohne diese Speicherung stünden Warenkorb und Login-Funktion nicht zur Verfügung. Rechtsgrundlage ist § 25 Abs. 2 Nr. 2 TDDDG (vormals TTDSG) in Verbindung mit Art. 6 Abs. 1 lit. b DSGVO. Es werden keine Marketing-, Analyse- oder Tracking-Cookies gesetzt und keine entsprechenden Drittanbieter-Tools eingebunden.</p>
+
+<h2>7. Keine Analyse- oder Tracking-Tools</h2>
+<p>Wir setzen aktuell keine Web-Analyse-, Tracking- oder Werbetools ein.</p>
+
+<h2>8. Empfänger deiner Daten</h2>
+<p>Im Rahmen der oben beschriebenen Zwecke geben wir Daten an folgende Dienstleister weiter, die als Auftragsverarbeiter bzw. eigenständig Verantwortliche für uns tätig werden: Supabase (Datenbank/Authentifizierung), Stripe (Zahlungsabwicklung), Resend (E-Mail-Versand) sowie den Anbieter der technischen Hosting-Infrastruktur. Eine Weitergabe darüber hinaus findet nicht statt, außer wir sind gesetzlich dazu verpflichtet.</p>
+
+<h2>9. Speicherdauer</h2>
+<p>Wir speichern personenbezogene Daten nur so lange, wie es für die genannten Zwecke erforderlich ist oder wie es gesetzliche Aufbewahrungspflichten (z. B. handels- und steuerrechtliche Vorgaben) verlangen. Die konkrete Aufbewahrungsfrist hängt von der Datenkategorie ab und wird laufend anhand dieser Vorgaben bestimmt.</p>
+
+<h2>10. Deine Rechte</h2>
+<p>Du hast das Recht auf Auskunft (Art. 15 DSGVO), Berichtigung (Art. 16 DSGVO), Löschung (Art. 17 DSGVO), Einschränkung der Verarbeitung (Art. 18 DSGVO), Datenübertragbarkeit (Art. 20 DSGVO) sowie Widerspruch gegen die Verarbeitung (Art. 21 DSGVO). Wende dich dafür an <a href="mailto:info@gloamatcha.com">info@gloamatcha.com</a>.</p>
+<p>Außerdem hast du das Recht, dich bei einer Datenschutz-Aufsichtsbehörde zu beschweren, insbesondere in dem Mitgliedstaat deines Aufenthaltsorts, Arbeitsplatzes oder des Orts des mutmaßlichen Verstoßes. Für uns als Unternehmen mit Sitz in Berlin ist dies die Berliner Beauftragte für Datenschutz und Informationsfreiheit.</p>
+</main>;
+}
+if(route==="agb"){
+return <main className="legal-page">
+<p className="eyebrow">LEGAL</p>
+<h1>{title.agb}</h1>
+<p className="legal-note">Diese AGB gelten für Bestellungen von Privatkunden (B2C) im GLOA Online-Shop. Für Geschäftskunden (GLOA for Business) gelten individuell vereinbarte Konditionen, die gesondert und vertraulich zwischen GLOA und dem jeweiligen Geschäftskunden abgestimmt werden.</p>
+
+<h2>1. Geltungsbereich, Vertragspartner</h2>
+<p>Vertragspartner ist die Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin, Deutschland (im Folgenden &bdquo;GLOA&ldquo;). Diese AGB gelten für alle Bestellungen von Waren über den GLOA Online-Shop durch Verbraucher.</p>
+
+<h2>2. Vertragsschluss</h2>
+<p>Die Darstellung der Produkte im Shop stellt kein bindendes Angebot dar, sondern eine Aufforderung zur Bestellung. Mit dem Absenden der Bestellung über die Kasse (Stripe Checkout) gibst du ein verbindliches Angebot zum Kauf der ausgewählten Waren ab. Der Kaufvertrag kommt zustande, sobald wir deine Bestellung bestätigen bzw. die Ware versenden.</p>
+
+<h2>3. Preise und Zahlung</h2>
+<p>Alle angegebenen Preise sind Endpreise. Die Zahlung erfolgt über die im Bestellvorgang angebotenen, tatsächlich verfügbaren Zahlungsarten. Der Versandpreis wird dir vor Abschluss der Bestellung gesondert ausgewiesen, siehe <Link href="/versand">Versandinformationen</Link>.</p>
+
+<h2>4. Lieferung und Versand</h2>
+<p>Es gelten die auf <Link href="/versand">/versand</Link> ausgewiesenen Liefergebiete, Versandkosten und Lieferzeiten. Nicht alle Länder werden beliefert.</p>
+
+<h2>5. Eigentumsvorbehalt</h2>
+<p>Die gelieferte Ware bleibt bis zur vollständigen Bezahlung Eigentum von GLOA.</p>
+
+<h2>6. Gewährleistung</h2>
+<p>Es gelten die gesetzlichen Gewährleistungsrechte.</p>
+
+<h2>7. Widerrufsrecht</h2>
+<p>Als Verbraucher steht dir ein gesetzliches Widerrufsrecht zu. Einzelheiten findest du in unserer <Link href="/widerruf">Widerrufsbelehrung</Link>, einschließlich der elektronischen Widerrufsfunktion.</p>
+
+<h2>8. Haftung</h2>
+<p>GLOA haftet unbeschränkt für Vorsatz und grobe Fahrlässigkeit sowie nach den gesetzlichen Vorschriften für Schäden aus der Verletzung des Lebens, des Körpers oder der Gesundheit sowie nach dem Produkthaftungsgesetz. Im Übrigen haftet GLOA im Rahmen der gesetzlichen Vorschriften.</p>
+
+<h2>9. Vertragssprache</h2>
+<p>Der Vertrag wird in deutscher Sprache geschlossen.</p>
+
+<h2>10. Schlussbestimmungen</h2>
+<p>Es gilt das Recht der Bundesrepublik Deutschland unter Ausschluss des UN-Kaufrechts; zwingende verbraucherschützende Bestimmungen deines gewöhnlichen Aufenthaltsorts bleiben unberührt. Sollte eine Bestimmung dieser AGB unwirksam sein, bleibt die Wirksamkeit der übrigen Bestimmungen unberührt.</p>
+</main>;
+}
 return <main className="legal-page"><p className="eyebrow">LEGAL</p><h1>{title[route]||"Legal"}</h1><div className="legal-placeholder"><h2>Rechtlicher Inhalt ausstehend.</h2><p>Vor dem öffentlichen Shop-Launch muss dieser Inhalt von GLOA beziehungsweise einer qualifizierten Rechtsberatung bereitgestellt und geprüft werden.</p></div></main>}
+
+// Electronic withdrawal function (§ 356a BGB, in force since 19 June
+// 2026). Two explicit steps as required by the statute: an initial
+// "Vertrag widerrufen" action, then a separate "Widerruf bestätigen"
+// confirmation action. Guest-usable - no account/login/Stripe/Supabase
+// identifiers are ever requested, only what § 356a Abs. 2 actually
+// requires from the customer.
+type WithdrawalStep="form"|"review"|"success";
+function WithdrawalFunction(){
+const[step,setStep]=useState<WithdrawalStep>("form");
+const[name,setName]=useState("");
+const[email,setEmail]=useState("");
+const[orderReference,setOrderReference]=useState("");
+const[scope,setScope]=useState<"whole_order"|"partial">("whole_order");
+const[scopeNote,setScopeNote]=useState("");
+const[customerNote,setCustomerNote]=useState("");
+const[busy,setBusy]=useState(false);
+const[error,setError]=useState("");
+const[result,setResult]=useState<{submittedAt:string;confirmationEmailSent:boolean}|null>(null);
+
+const startReview=(e:React.FormEvent<HTMLFormElement>)=>{
+e.preventDefault();
+if(!name.trim()||!email.trim()||!orderReference.trim()){setError("Bitte fülle alle Pflichtfelder aus.");return}
+if(scope==="partial"&&!scopeNote.trim()){setError("Bitte gib an, welcher Teil der Bestellung widerrufen wird.");return}
+setError("");
+setStep("review");
+};
+
+const confirmWithdrawal=async()=>{
+setBusy(true);setError("");
+try{
+const res=await fetch("/api/withdrawal",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:name.trim(),email:email.trim(),orderReference:orderReference.trim(),scope,scopeNote:scope==="partial"?scopeNote.trim():null,customerNote:customerNote.trim()||null})});
+const body=await res.json().catch(()=>null);
+if(!res.ok){setError(body?.error||"Widerruf konnte nicht übermittelt werden.");setBusy(false);return}
+setResult({submittedAt:body.submittedAt,confirmationEmailSent:body.confirmationEmailSent});
+setStep("success");
+}catch{
+setError("Widerruf konnte nicht übermittelt werden. Bitte versuche es erneut oder schreib uns an info@gloamatcha.com.");
+}
+setBusy(false);
+};
+
+if(step==="success"&&result){
+const submitted=new Date(result.submittedAt);
+return <div className="legal-withdrawal">
+<h3>Dein Widerruf wurde aufgenommen.</h3>
+<p>Eingegangen am {submitted.toLocaleDateString("de-DE")} um {submitted.toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"})} Uhr.</p>
+{result.confirmationEmailSent
+?<p>Eine Eingangsbestätigung haben wir an {email.trim()} gesendet.</p>
+:<p>Wir konnten dir gerade keine automatische Bestätigung per E-Mail senden. Dein Widerruf ist trotzdem gespeichert - wir bestätigen dir den Eingang manuell.</p>}
+</div>;
+}
+
+if(step==="review")return <div className="legal-withdrawal">
+<h3>Angaben prüfen</h3>
+<p>Bitte prüfe deine Angaben. Mit Klick auf &bdquo;Widerruf bestätigen&ldquo; erklärst du verbindlich den Widerruf dieses Vertrags.</p>
+<dl>
+<div><dt>Name</dt><dd>{name}</dd></div>
+<div><dt>E-Mail für Bestätigung</dt><dd>{email}</dd></div>
+<div><dt>Bestellung/Vertrag</dt><dd>{orderReference}</dd></div>
+<div><dt>Umfang</dt><dd>{scope==="whole_order"?"Die gesamte Bestellung":`Nur ein Teil: ${scopeNote}`}</dd></div>
+{customerNote&&<div><dt>Anmerkung</dt><dd>{customerNote}</dd></div>}
+</dl>
+{error&&<p className="account-error">{error}</p>}
+<div className="portal-form-actions">
+<button type="button" className="portal-cancel-btn" onClick={()=>setStep("form")} disabled={busy}>Zurück</button>
+<button type="button" className="cta" onClick={confirmWithdrawal} disabled={busy}>{busy?"WIRD ÜBERMITTELT…":"Widerruf bestätigen"}</button>
+</div>
+</div>;
+
+return <form className="account-form legal-withdrawal" onSubmit={startReview}>
+<label>Name *<input required name="name" value={name} onChange={e=>setName(e.target.value)}/></label>
+<label>E-Mail für die Eingangsbestätigung *<input required type="email" name="email" value={email} onChange={e=>setEmail(e.target.value)}/></label>
+<label>Bestellnummer oder andere Vertragsreferenz *<input required name="orderReference" placeholder="z. B. GLOA-2026-000123" value={orderReference} onChange={e=>setOrderReference(e.target.value)}/></label>
+<label>Umfang des Widerrufs *<select name="scope" value={scope} onChange={e=>setScope(e.target.value as "whole_order"|"partial")}>
+<option value="whole_order">Die gesamte Bestellung</option>
+<option value="partial">Nur ein Teil der Bestellung</option>
+</select></label>
+{scope==="partial"&&<label>Welcher Teil? *<input required name="scopeNote" placeholder="z. B. 1x GLOA Matcha 50 g" value={scopeNote} onChange={e=>setScopeNote(e.target.value)}/></label>}
+<label>Anmerkung (optional)<textarea name="customerNote" value={customerNote} onChange={e=>setCustomerNote(e.target.value)}/></label>
+{error&&<p className="account-error">{error}</p>}
+<button className="cta account-cta" type="submit">Vertrag widerrufen</button>
+</form>;
+}
 
 // B2B-Bereich: /account/business
 // Geschäftskunden (customerType === "business") sehen den B2B-Menüpunkt.
@@ -587,6 +784,7 @@ return <div className="cart-backdrop" onClick={onClose} onKeyDown={e=>e.key==="E
 <div className="cart-total"><span>SUMME</span><strong>{fmtCents(cart.totalCents)} €</strong></div>
 {checkoutError&&<p className="cart-error">{checkoutError}</p>}
 <button className="cta cart-checkout-cta" onClick={handleCheckout} disabled={checkoutBusy}>{checkoutBusy?"WIRD GELADEN…":SHOP_STATUS==="prelaunch"?"ZUM LAUNCH INFORMIEREN":"ZUR KASSE"}</button>
+{SHOP_STATUS!=="prelaunch"&&<p className="cart-legal-note">Mit dem Bestellabschluss akzeptierst du unsere <Link href="/agb" onClick={onClose}>AGB</Link>. Es gilt unsere <Link href="/datenschutz" onClick={onClose}>Datenschutzerklärung</Link>. Informationen zu deinem <Link href="/widerruf" onClick={onClose}>Widerrufsrecht</Link>.</p>}
 </div>
 </>}
 </aside></div>
@@ -603,7 +801,7 @@ useEffect(()=>{
   const hashParams=new URLSearchParams(window.location.hash.replace("#",""));
   const hasToken=hashParams.get("access_token")||params.get("code");
   if(!hasToken){
-    // No token/code in URL — check if already logged in
+    // No token/code in URL, check if already logged in
     supabase.auth.getSession().then(({data:{session}})=>{
       if(session){window.location.href="/account/dashboard"}
       else{setStatus("error")}
