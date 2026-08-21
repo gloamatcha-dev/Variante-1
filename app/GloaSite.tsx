@@ -223,10 +223,60 @@ function RezeptDetail({slug}:{slug:string}){const r=recipes.find(x=>x.slug===slu
 <section className="rezept-detail-content"><div className="rezept-detail-ingredients"><h2>Zutaten</h2><ul>{r.ingredients.map((ing,i)=><li key={i}>{ing}</li>)}</ul></div><div className="rezept-detail-steps"><h2>Zubereitung</h2><ol>{r.steps.map((step,i)=><li key={i}><span>{String(i+1).padStart(2,"0")}</span><p>{step}</p></li>)}</ol></div></section>
 <section className="rezept-detail-nav"><Link href="/rezepte">← Alle Rezepte</Link><Link href="/shop" className="cta">Matcha kaufen</Link></section>
 </main>}
-function Contact(){return <main className="contact-main">
+function Contact(){
+const [status,setStatus]=useState<"idle"|"sending"|"success"|"error">("idle");
+const [errorMsg,setErrorMsg]=useState("");
+
+const handleSubmit=async(e:React.FormEvent<HTMLFormElement>)=>{
+e.preventDefault();
+if(status==="sending")return;
+const form=e.currentTarget;
+const f=new FormData(form);
+setStatus("sending");setErrorMsg("");
+try{
+const res=await fetch("/api/contact",{
+method:"POST",
+headers:{"Content-Type":"application/json"},
+body:JSON.stringify({
+name:String(f.get("name")||""),
+email:String(f.get("email")||""),
+anliegen:String(f.get("anliegen")||""),
+orderNumber:String(f.get("orderNumber")||""),
+message:String(f.get("message")||""),
+website:String(f.get("website")||""),
+}),
+});
+const body=await res.json().catch(()=>null);
+if(!res.ok){
+setStatus("error");
+setErrorMsg(body?.error||"Nachricht konnte nicht gesendet werden. Schreib uns direkt an info@gloamatcha.com.");
+return;
+}
+setStatus("success");
+form.reset();
+}catch{
+setStatus("error");
+setErrorMsg("Nachricht konnte nicht gesendet werden. Schreib uns direkt an info@gloamatcha.com.");
+}
+};
+
+return <main className="contact-main">
 <section className="contact-hero"><p className="eyebrow">KONTAKT</p><h1>Schreib<br/><i>uns.</i></h1><p className="contact-sub">Wähl den richtigen Weg und deine Nachricht landet da, wo sie hingehört.</p></section>
 <section className="contact-choices"><a href="#customer-form"><span>PRIVATKUNDE</span><h2>Fragen zu<br/>Produkt & Bestellung.</h2><b>Kontaktformular →</b></a><Link href="/for-cafes"><span>BUSINESS</span><h2>Großhandel,<br/>Samples & Cafés.</h2><b>Zum B2B-Bereich →</b></Link></section>
-<form id="customer-form" className="customer-form" onSubmit={e=>e.preventDefault()}><p className="eyebrow">NACHRICHT SENDEN</p><div className="customer-form-row"><label>Name*<input required placeholder="Vor- und Nachname"/></label><label>E-Mail*<input required type="email" placeholder="deine@email.de"/></label></div><div className="customer-form-row"><label>Anliegen*<select required defaultValue=""><option value="" disabled>Bitte auswählen</option><option>Bestellung</option><option>Produkt</option><option>Abo</option><option>Sonstiges</option></select></label><label>Bestellnummer<input placeholder="Optional"/></label></div><label>Nachricht*<textarea required placeholder="Wie können wir helfen?" rows={5}/></label><button className="cta" type="submit">Nachricht senden</button><p className="legal-note">Lieber direkt per E-Mail? Schreib uns an <a href="mailto:info@gloamatcha.com">info@gloamatcha.com</a>.</p></form>
+{status==="success"?
+<section id="customer-form" className="customer-form"><p className="eyebrow">NACHRICHT GESENDET</p><p className="success-line">Danke! Wir melden uns so schnell wie möglich bei dir.</p></section>
+:
+<form id="customer-form" className="customer-form" onSubmit={handleSubmit}>
+<p className="eyebrow">NACHRICHT SENDEN</p>
+<input type="text" name="website" tabIndex={-1} autoComplete="off" aria-hidden="true" style={{position:"absolute",left:"-9999px",width:1,height:1,opacity:0}}/>
+<div className="customer-form-row"><label>Name*<input required name="name" placeholder="Vor- und Nachname" maxLength={200} disabled={status==="sending"}/></label><label>E-Mail*<input required name="email" type="email" placeholder="deine@email.de" maxLength={254} disabled={status==="sending"}/></label></div>
+<div className="customer-form-row"><label>Anliegen*<select required name="anliegen" defaultValue="" disabled={status==="sending"}><option value="" disabled>Bitte auswählen</option><option>Bestellung</option><option>Produkt</option><option>Abo</option><option>Sonstiges</option></select></label><label>Bestellnummer<input name="orderNumber" placeholder="Optional" maxLength={100} disabled={status==="sending"}/></label></div>
+<label>Nachricht*<textarea required name="message" placeholder="Wie können wir helfen?" rows={5} minLength={10} maxLength={5000} disabled={status==="sending"}/></label>
+{status==="error"&&<p className="account-error">{errorMsg}</p>}
+<button className="cta" type="submit" disabled={status==="sending"}>{status==="sending"?"Wird gesendet …":"Nachricht senden"}</button>
+<p className="legal-note">Lieber direkt per E-Mail? Schreib uns an <a href="mailto:info@gloamatcha.com">info@gloamatcha.com</a>.</p>
+</form>
+}
 </main>}
 function Legal({route}:{route:string}){
 const title:Record<string,string>={impressum:"Impressum",datenschutz:"Datenschutz",agb:"Allgemeine Geschäftsbedingungen",widerruf:"Widerruf",versand:"Versandinformationen"};
@@ -258,7 +308,7 @@ return <main className="legal-page">
 <p className="eyebrow">LEGAL</p>
 <h1>{title.impressum}</h1>
 <div className="legal-placeholder">
-<h2>Angaben gemäß § 5 TMG</h2>
+<h2>Angaben gemäß § 5 DDG</h2>
 <p>Cara 2 GmbH<br/>Hardenbergstr. 4<br/>10623 Berlin<br/>Deutschland</p>
 <p>Vertreten durch: Serwan Amedi (Geschäftsführer)</p>
 <p>E-Mail: <a href="mailto:info@gloamatcha.com">info@gloamatcha.com</a></p>
