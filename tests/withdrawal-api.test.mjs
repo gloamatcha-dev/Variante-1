@@ -32,13 +32,22 @@ const BASE_URL = `http://127.0.0.1:${PORT}`;
 const MOCK_RESEND_PORT = 8932;
 const MOCK_FROM = "GLOA <kontakt@gloamatcha.invalid>";
 
+// Migration 018 deliberately grants service_role no DELETE on
+// withdrawal_requests: a § 356a declaration is a durable legal record, not
+// disposable test data. A run therefore cannot remove the rows it writes, so
+// any fixed order reference would gain one more row per run and break the
+// exact row-count assertions below from the second run onward. Giving each
+// run its own reference namespace keeps those counts meaningful without
+// needing a cleanup step that the grants would silently refuse anyway.
+const RUN = `R${Date.now().toString(36).toUpperCase()}`;
+const ref = name => `${name}-${RUN}`;
+
 let serverProcess;
 let mockResendServer;
 let receivedRequests = [];
 let admin;
 let migrationApplied = true;
 let skipReason = "";
-const createdRequestIds = [];
 
 test.before(async () => {
   admin = getAdminSupabaseClient();
@@ -95,9 +104,9 @@ test.before(async () => {
 test.after(async () => {
   serverProcess?.kill();
   mockResendServer?.close();
-  if (admin && createdRequestIds.length > 0) {
-    await admin.from("withdrawal_requests").delete().in("id", createdRequestIds);
-  }
+  // No row cleanup on purpose - see RUN above. service_role holds no DELETE
+  // grant on withdrawal_requests, so a delete here would fail silently and
+  // read as cleanup that never happened.
 });
 
 test.beforeEach(() => { receivedRequests = []; });
@@ -106,7 +115,7 @@ function validPayload(overrides = {}) {
   return {
     name: "Max Mustermann",
     email: "max@example.com",
-    orderReference: "GLOA-2026-000123",
+    orderReference: ref("GLOA-2026-000123"),
     scope: "whole_order",
     ...overrides,
   };
@@ -119,12 +128,6 @@ async function post(body, { rawBody, contentType = "application/json" } = {}) {
     body: rawBody !== undefined ? rawBody : JSON.stringify(body),
   });
   const parsed = await res.json().catch(() => null);
-  if (parsed?.ok && parsed?.submittedAt) {
-    // best-effort cleanup tracking - the id itself isn't returned by
-    // the endpoint (by design, see route.ts), so cleanup happens by
-    // submitted_at + contact_email match in test.after via a scoped
-    // query instead.
-  }
   return { status: res.status, body: parsed };
 }
 
@@ -139,39 +142,35 @@ test("withdrawal: a publicly reachable guest submission is accepted without any 
   const { data: rows, error } = await admin
     .from("withdrawal_requests")
     .select("id, customer_name, contact_email, order_reference, scope, confirmation_status")
-    .eq("order_reference", "GLOA-2026-000123")
+    .eq("order_reference", ref("GLOA-2026-000123"))
     .eq("contact_email", "max@example.com");
   assert.equal(error, null, error?.message);
   assert.equal(rows.length, 1);
-  createdRequestIds.push(rows[0].id);
   assert.equal(rows[0].customer_name, "Max Mustermann");
   assert.equal(rows[0].scope, "whole_order");
 });
 
 test("withdrawal: response never leaks internal ids, order data, or any field beyond ok/submittedAt/confirmationEmailSent", async (t) => {
   if (!migrationApplied) return t.skip(skipReason);
-  const { body } = await post(validPayload({ orderReference: "GLOA-2026-000124", email: "leak-check@example.com" }));
-  const { data: rows } = await admin.from("withdrawal_requests").select("id").eq("order_reference", "GLOA-2026-000124").eq("contact_email", "leak-check@example.com");
-  if (rows?.[0]?.id) createdRequestIds.push(rows[0].id);
+  const { body } = await post(validPayload({ orderReference: ref("GLOA-2026-000124"), email: "leak-check@example.com" }));
   assert.deepEqual(Object.keys(body).sort(), ["confirmationEmailSent", "ok", "submittedAt"]);
 });
 
 test("withdrawal: an unknown/made-up order reference is accepted identically - this is a declaration endpoint, not an order lookup API", async (t) => {
   if (!migrationApplied) return t.skip(skipReason);
-  const { status, body } = await post(validPayload({ orderReference: "DOES-NOT-EXIST-000000", email: "no-match@example.com" }));
+  const { status, body } = await post(validPayload({ orderReference: ref("DOES-NOT-EXIST-000000"), email: "no-match@example.com" }));
   assert.equal(status, 200);
   assert.equal(body.ok, true);
-  const { data: rows } = await admin.from("withdrawal_requests").select("id").eq("order_reference", "DOES-NOT-EXIST-000000").eq("contact_email", "no-match@example.com");
-  if (rows?.[0]?.id) createdRequestIds.push(rows[0].id);
+  const { data: rows } = await admin.from("withdrawal_requests").select("id").eq("order_reference", ref("DOES-NOT-EXIST-000000")).eq("contact_email", "no-match@example.com");
   assert.equal(rows.length, 1, "the declaration is still recorded even though no order was verified to exist");
 });
 
 test("withdrawal: sends a mocked confirmation email with declaration content, date and time - no marketing", async (t) => {
   if (!migrationApplied) return t.skip(skipReason);
-  const { body } = await post(validPayload({ orderReference: "GLOA-2026-000125", email: "confirm-check@example.com" }));
+  const { body } = await post(validPayload({ orderReference: ref("GLOA-2026-000125"), email: "confirm-check@example.com" }));
   assert.equal(body.confirmationEmailSent, true);
-  const { data: rows } = await admin.from("withdrawal_requests").select("id, confirmation_status").eq("order_reference", "GLOA-2026-000125").eq("contact_email", "confirm-check@example.com");
-  if (rows?.[0]?.id) createdRequestIds.push(rows[0].id);
+  const { data: rows } = await admin.from("withdrawal_requests").select("id, confirmation_status").eq("order_reference", ref("GLOA-2026-000125")).eq("contact_email", "confirm-check@example.com");
+  assert.equal(rows.length, 1);
   assert.equal(rows[0].confirmation_status, "sent");
 
   assert.equal(receivedRequests.length, 1);
@@ -186,10 +185,10 @@ test("withdrawal: sends a mocked confirmation email with declaration content, da
 
 test("withdrawal: partial-order withdrawal requires and records which part is affected", async (t) => {
   if (!migrationApplied) return t.skip(skipReason);
-  const { status, body } = await post(validPayload({ orderReference: "GLOA-2026-000126", email: "partial@example.com", scope: "partial", scopeNote: "1x GLOA Matcha 50 g" }));
+  const { status, body } = await post(validPayload({ orderReference: ref("GLOA-2026-000126"), email: "partial@example.com", scope: "partial", scopeNote: "1x GLOA Matcha 50 g" }));
   assert.equal(status, 200);
-  const { data: rows } = await admin.from("withdrawal_requests").select("id, scope, scope_note").eq("order_reference", "GLOA-2026-000126").eq("contact_email", "partial@example.com");
-  if (rows?.[0]?.id) createdRequestIds.push(rows[0].id);
+  const { data: rows } = await admin.from("withdrawal_requests").select("id, scope, scope_note").eq("order_reference", ref("GLOA-2026-000126")).eq("contact_email", "partial@example.com");
+  assert.equal(rows.length, 1);
   assert.equal(rows[0].scope, "partial");
   assert.equal(rows[0].scope_note, "1x GLOA Matcha 50 g");
   void body;
@@ -252,21 +251,20 @@ test("withdrawal: an oversized request body is rejected", async (t) => {
 
 test("withdrawal: honeypot field populated is silently discarded - success response, but nothing persisted and no email sent", async (t) => {
   if (!migrationApplied) return t.skip(skipReason);
-  const { status, body } = await post(validPayload({ orderReference: "GLOA-2026-HONEYPOT", email: "bot@example.invalid", website: "http://spam.example" }));
+  const { status, body } = await post(validPayload({ orderReference: ref("GLOA-2026-HONEYPOT"), email: "bot@example.invalid", website: "http://spam.example" }));
   assert.equal(status, 200);
   assert.equal(body.ok, true);
   assert.equal(receivedRequests.length, 0);
-  const { data: rows } = await admin.from("withdrawal_requests").select("id").eq("order_reference", "GLOA-2026-HONEYPOT");
+  const { data: rows } = await admin.from("withdrawal_requests").select("id").eq("order_reference", ref("GLOA-2026-HONEYPOT"));
   assert.equal(rows.length, 0, "a honeypot-triggered submission must never be persisted");
 });
 
 test("withdrawal: two independent submissions for the same order reference are both handled safely (no crash, no duplicate collision)", async (t) => {
   if (!migrationApplied) return t.skip(skipReason);
-  const first = await post(validPayload({ orderReference: "GLOA-2026-DUPLICATE", email: "dup@example.com" }));
-  const second = await post(validPayload({ orderReference: "GLOA-2026-DUPLICATE", email: "dup@example.com" }));
+  const first = await post(validPayload({ orderReference: ref("GLOA-2026-DUPLICATE"), email: "dup@example.com" }));
+  const second = await post(validPayload({ orderReference: ref("GLOA-2026-DUPLICATE"), email: "dup@example.com" }));
   assert.equal(first.status, 200);
   assert.equal(second.status, 200);
-  const { data: rows } = await admin.from("withdrawal_requests").select("id").eq("order_reference", "GLOA-2026-DUPLICATE").eq("contact_email", "dup@example.com");
-  rows?.forEach(r => createdRequestIds.push(r.id));
+  const { data: rows } = await admin.from("withdrawal_requests").select("id").eq("order_reference", ref("GLOA-2026-DUPLICATE")).eq("contact_email", "dup@example.com");
   assert.equal(rows.length, 2, "each independent declaration is recorded, not silently dropped");
 });
