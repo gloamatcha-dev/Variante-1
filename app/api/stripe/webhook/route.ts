@@ -11,6 +11,8 @@ import {
   markAttemptPaid,
 } from "../../../../lib/checkoutAttempts";
 import { evaluateStripeSessionPayment } from "../../../../lib/stripeFulfillment";
+import { isRefundEventType, paymentIntentIdFromRefundEvent } from "../../../../lib/stripeRefunds";
+import { syncOrderRefundStateFromStripe } from "../../../../lib/orderRefunds";
 import { createOrderFromPaidCheckoutAttempt } from "../../../../lib/orderFulfillment";
 import { buildShippingAddressSnapshot, buildBillingAddressSnapshot } from "../../../../lib/orderAddressSnapshot";
 import { sendOrderConfirmationEmailIfNeeded } from "../../../../lib/orderConfirmationEmail";
@@ -71,6 +73,8 @@ export async function POST(request: Request): Promise<Response> {
   try {
     if (event.type === "checkout.session.completed") {
       await handleCheckoutSessionCompleted(stripe, event.data.object);
+    } else if (isRefundEventType(event.type)) {
+      await handleRefundEvent(stripe, event);
     }
     // Other event types are acknowledged below with no action taken.
     // checkout.session.async_payment_succeeded / _failed can plug into
@@ -96,6 +100,36 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   return Response.json({ received: true }, { status: 200 });
+}
+
+/**
+ * Records refund state for a refund-related event (Task 26A).
+ *
+ * The only thing taken from the payload is which payment intent the
+ * event concerns; every amount and status is re-read from Stripe by
+ * syncOrderRefundStateFromStripe. Because that produces an absolute
+ * refunded total rather than an increment, a redelivered or out-of-order
+ * refund event converges on the same order row instead of double
+ * counting - which is what keeps partial refunds correct.
+ *
+ * This path never issues a refund and never touches fulfillment,
+ * shipping or any money column on the order. It also never touches the
+ * § 356a withdrawal declarations in public.withdrawal_requests: a
+ * withdrawal is a legal declaration by the customer, a Stripe refund is
+ * an operational payment fact, and the two stay deliberately uncoupled.
+ */
+async function handleRefundEvent(stripe: Stripe, event: Stripe.Event): Promise<void> {
+  const paymentIntentId = paymentIntentIdFromRefundEvent(event.data.object);
+
+  if (!paymentIntentId) {
+    // Refunds against a charge that has no payment intent (legacy
+    // charges) are acknowledged without action rather than guessed at.
+    console.error(`Stripe webhook: refund event ${event.id} (${event.type}) has no payment intent - ignored.`);
+    return;
+  }
+
+  const outcome = await syncOrderRefundStateFromStripe(stripe, paymentIntentId);
+  console.error(`Stripe webhook: refund event ${event.id} (${event.type}) -> ${outcome.result}`);
 }
 
 /**

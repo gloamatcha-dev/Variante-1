@@ -9,6 +9,15 @@ import { supabase } from "../lib/supabase";
 import { B2bCalculator } from "./B2bCalculator";
 import type { AddressSnapshot } from "../lib/orderAddressSnapshot";
 import { getCountryLabel } from "../lib/shipping";
+import {
+  getCancellationView,
+  getLifecycleSteps,
+  getPaymentStatusLabel,
+  getPrimaryStatusLabel,
+  getRefundView,
+  getStatusDetailText,
+  getTrackingView,
+} from "../lib/orderStatus";
 
 type PortalPage = "dashboard" | "orders" | "subscriptions" | "addresses" | "profile" | "business" | "order-detail" | "subscription-detail" | "supply-detail";
 
@@ -116,6 +125,15 @@ type OrderRow = {
   total_gross_cents: number;
   placed_at: string | null;
   created_at: string;
+  // Lifecycle fields (migration 019). All nullable and all genuinely
+  // unknown for orders placed before that migration - never defaulted to
+  // a value that would imply a state we never observed.
+  shipping_carrier: string | null;
+  tracking_number: string | null;
+  tracking_url: string | null;
+  shipped_at: string | null;
+  refunded_total_cents: number | null;
+  cancellation_requested_at: string | null;
 };
 
 type OrderItemRow = {
@@ -129,16 +147,6 @@ type OrderItemRow = {
   tax_rate_percent: number | null;
   line_total_net_cents: number;
   line_total_gross_cents: number;
-};
-
-const STATUS_DE: Record<string, string> = {
-  pending: "Eingegangen",
-  confirmed: "Bestätigt",
-  processing: "In Bearbeitung",
-  shipped: "Versendet",
-  delivered: "Zugestellt",
-  cancelled: "Storniert",
-  refunded: "Erstattet",
 };
 
 // ── Subscription Types ────────────────────────────────────────────────
@@ -348,7 +356,7 @@ function PortalDashboard({ firstName, customerType }: { firstName: string; custo
               {recentOrders.map(o => (
                 <div key={o.id} className="portal-dash-order">
                   <div className="portal-dash-order-row"><span>{o.order_number}</span><span>{fmtDate(o.placed_at || o.created_at)}</span></div>
-                  <div className="portal-dash-order-row"><span>{STATUS_DE[o.status] || o.status}</span><strong>{fmtCents(o.customer_type === "business" ? o.total_net_cents ?? o.total_gross_cents : o.total_gross_cents)} €{o.customer_type === "business" && o.total_net_cents !== null ? " netto" : ""}</strong></div>
+                  <div className="portal-dash-order-row"><span>{getPrimaryStatusLabel(o)}</span><strong>{fmtCents(o.customer_type === "business" ? o.total_net_cents ?? o.total_gross_cents : o.total_gross_cents)} €{o.customer_type === "business" && o.total_net_cents !== null ? " netto" : ""}</strong></div>
                   <a href={`/account/orders/${o.id}`} className="portal-dash-order-link">BESTELLUNG ANSEHEN</a>
                 </div>
               ))}
@@ -439,7 +447,13 @@ function PortalOrders() {
             <a key={o.id} href={`/account/orders/${o.id}`} className="order-list-row">
               <span className="order-list-number">{o.order_number}</span>
               <span>{fmtDate(o.placed_at || o.created_at)}</span>
-              <span>{STATUS_DE[o.status] || o.status}</span>
+              <span className="order-list-status">
+                {getPrimaryStatusLabel(o)}
+                {/* Quiet hint that a tracking link exists on the detail
+                    page - not a second status, and absent when there is
+                    no real tracking data. */}
+                {getTrackingView(o) && <span className="order-list-tracking">Sendung</span>}
+              </span>
               <span className="order-list-total">{fmtCents(isBusiness ? o.total_net_cents ?? o.total_gross_cents : o.total_gross_cents)} €{isBusiness && o.total_net_cents !== null ? " netto" : ""}</span>
             </a>
           ))}
@@ -452,10 +466,16 @@ function PortalOrders() {
 // ── Bestelldetail ─────────────────────────────────────────────────────
 
 function OrderDetail({ orderId }: { orderId: string }) {
+  const { session } = useAuth();
   const [order, setOrder] = useState<OrderRow | null>(null);
   const [items, setItems] = useState<OrderItemRow[]>([]);
   const [loading, setLoading] = useState(() => !!supabase);
   const [notFound, setNotFound] = useState(!supabase);
+  const [loadError, setLoadError] = useState(false);
+  const [cancelNote, setCancelNote] = useState("");
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [cancelError, setCancelError] = useState("");
+  const [cancelMessage, setCancelMessage] = useState("");
 
   useEffect(() => {
     if (!supabase) return;
@@ -463,13 +483,28 @@ function OrderDetail({ orderId }: { orderId: string }) {
       supabase.from("orders").select("*").eq("id", orderId).maybeSingle(),
       supabase.from("order_items").select("*").eq("order_id", orderId).order("created_at"),
     ]).then(([oRes, iRes]) => {
-      if (!oRes.data) { setNotFound(true); }
+      // A failed query and a genuinely missing order are different
+      // things for the customer: one is worth retrying, the other is
+      // not. Neither ever surfaces the underlying Supabase message.
+      if (oRes.error) { setLoadError(true); }
+      else if (!oRes.data) { setNotFound(true); }
       else { setOrder(oRes.data); setItems(iRes.data ?? []); }
       setLoading(false);
     });
   }, [orderId]);
 
   if (loading) return <p className="portal-loading">Laden…</p>;
+
+  if (loadError) return (
+    <>
+      <section className="portal-page-head">
+        <p className="eyebrow">BESTELLUNG</p>
+        <h1>Das hat gerade nicht geklappt.</h1>
+        <p className="portal-page-lead">Deine Bestellung konnte nicht geladen werden. Versuch es gleich noch einmal.</p>
+      </section>
+      <Link href="/account/orders" className="portal-back-link">&larr; Zurück zu Bestellungen</Link>
+    </>
+  );
 
   if (notFound || !order) return (
     <>
@@ -491,6 +526,41 @@ function OrderDetail({ orderId }: { orderId: string }) {
   const shippingCents = isBusiness ? order.shipping_net_cents : order.shipping_gross_cents;
   const totalCents = isBusiness ? order.total_net_cents : order.total_gross_cents;
 
+  // Everything the customer is told about progress, tracking, refunds
+  // and cancellation comes from lib/orderStatus.ts, so this page can
+  // never invent a state the data doesn't support.
+  const steps = getLifecycleSteps(order);
+  const statusDetail = getStatusDetailText(order);
+  const tracking = getTrackingView(order);
+  const refund = getRefundView(order);
+  const cancellation = getCancellationView(order);
+  const cancellationRequested = cancellation.state === "requested" || cancelMessage !== "";
+
+  const submitCancellationRequest = async () => {
+    if (!session?.access_token) { setCancelError("Bitte melde dich an."); return; }
+    setCancelBusy(true);
+    setCancelError("");
+    try {
+      const res = await fetch("/api/orders/cancellation-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ orderId: order.id, note: cancelNote.trim() || undefined }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        // Server copy is already customer-safe; the fallback never
+        // exposes a raw error.
+        setCancelError(typeof body?.error === "string" ? body.error : "Das hat gerade nicht geklappt.");
+        return;
+      }
+      setCancelMessage(typeof body?.message === "string" ? body.message : "Wir prüfen, ob die Bestellung noch gestoppt werden kann.");
+    } catch {
+      setCancelError("Das hat gerade nicht geklappt.");
+    } finally {
+      setCancelBusy(false);
+    }
+  };
+
   return (
     <>
       <Link href="/account/orders" className="portal-back-link">&larr; Bestellungen</Link>
@@ -500,11 +570,96 @@ function OrderDetail({ orderId }: { orderId: string }) {
         <h1>{order.order_number}</h1>
       </section>
 
+      {/* ── Status ── */}
+      <section className="order-status">
+        <p className="order-status-label">{getPrimaryStatusLabel(order)}</p>
+        {statusDetail && <p className="order-status-text">{statusDetail}</p>}
+        {steps.length > 0 && (
+          <ol className="order-steps">
+            {steps.map(step => (
+              <li key={step.key} className={`order-step is-${step.state}`}>
+                <span className="order-step-dot" aria-hidden="true" />
+                <span>{step.label}</span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
+
       <div className="order-detail-meta">
         <div className="portal-profile-row"><span>Datum</span><strong>{fmtDate(order.placed_at || order.created_at)}</strong></div>
-        <div className="portal-profile-row"><span>Status</span><strong>{STATUS_DE[order.status] || order.status}</strong></div>
-        <div className="portal-profile-row"><span>Zahlungsstatus</span><strong>{order.payment_status === "paid" ? "Bezahlt" : order.payment_status}</strong></div>
+        <div className="portal-profile-row"><span>Zahlung</span><strong>{getPaymentStatusLabel(order)}</strong></div>
+        {/* A refund amount is only ever shown when it was actually
+            recorded. An order flagged refunded without a stored amount
+            says so in words instead of printing an invented number. */}
+        {refund.kind === "full" && (
+          <div className="portal-profile-row"><span>Erstattet</span><strong>{fmtCents(refund.amountCents)} €</strong></div>
+        )}
+        {refund.kind === "partial" && (
+          <div className="portal-profile-row"><span>Teilweise erstattet</span><strong>{fmtCents(refund.amountCents)} €</strong></div>
+        )}
+        {refund.kind === "unknown_amount" && (
+          <div className="portal-profile-row"><span>{refund.partial ? "Teilweise erstattet" : "Erstattet"}</span><strong>Betrag folgt</strong></div>
+        )}
       </div>
+
+      {/* ── Sendung (only when tracking data actually exists) ── */}
+      {tracking && (
+        <section className="order-detail-section">
+          <p className="eyebrow">SENDUNG</p>
+          <div className="order-tracking">
+            {tracking.shippedAt && (
+              <div className="portal-profile-row"><span>Versendet am</span><strong>{fmtDate(tracking.shippedAt)}</strong></div>
+            )}
+            {tracking.carrier && (
+              <div className="portal-profile-row"><span>Versanddienst</span><strong>{tracking.carrier}</strong></div>
+            )}
+            {tracking.trackingNumber && (
+              <div className="portal-profile-row"><span>Sendungsnummer</span><strong className="order-tracking-number">{tracking.trackingNumber}</strong></div>
+            )}
+            {/* Rendered only for a validated absolute http(s) URL - see
+                sanitizeTrackingUrl. No URL is ever built from a carrier
+                name, so a missing link simply means no link. */}
+            {tracking.url && (
+              <a className="cta order-tracking-link" href={tracking.url} target="_blank" rel="noopener noreferrer">
+                Sendung verfolgen <span aria-hidden="true">↗</span>
+              </a>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* ── Stornierung anfragen ── */}
+      {(cancellation.state === "eligible" || cancellationRequested || cancellation.state === "too_late") && (
+        <section className="order-detail-section">
+          <p className="eyebrow">STORNIERUNG</p>
+          {cancellationRequested ? (
+            <p className="order-cancel-note">{cancelMessage || "Wir prüfen, ob die Bestellung noch gestoppt werden kann, und melden uns per E-Mail."}</p>
+          ) : cancellation.state === "too_late" ? (
+            <p className="order-cancel-note">
+              Diese Bestellung ist schon unterwegs und lässt sich nicht mehr stoppen. Nach Erhalt kannst du dein{" "}
+              <Link href="/widerruf" className="order-cancel-link">Widerrufsrecht</Link> nutzen.
+            </p>
+          ) : (
+            <div className="order-cancel">
+              <p className="order-cancel-note">Du möchtest die Bestellung doch nicht? Frag uns an, solange sie noch nicht unterwegs ist.</p>
+              <label className="order-cancel-label" htmlFor="cancel-note">Grund (optional)</label>
+              <textarea
+                id="cancel-note"
+                className="order-cancel-input"
+                value={cancelNote}
+                maxLength={2000}
+                rows={3}
+                onChange={e => setCancelNote(e.target.value)}
+              />
+              {cancelError && <p className="order-cancel-error">{cancelError}</p>}
+              <button className="cta order-cancel-cta" onClick={submitCancellationRequest} disabled={cancelBusy}>
+                {cancelBusy ? "Wird gesendet…" : "Stornierung anfragen"}
+              </button>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* ── Items ── */}
       {items.length > 0 && (
