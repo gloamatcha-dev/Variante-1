@@ -3,6 +3,11 @@ import test from "node:test";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import Stripe from "stripe";
+import { writeBlockedServerEnv } from "./helpers/testSupabase.mjs";
+
+// SAFE DEFAULT SUITE: the spawned server is started without a Supabase
+// service-role key, so every write path in the app degrades to its
+// "admin client not configured" branch and no row can be written.
 
 // Fake, local-only secret used exclusively to sign test payloads. Never a
 // real STRIPE_WEBHOOK_SECRET, and no network call is made with it - Stripe's
@@ -34,24 +39,22 @@ async function waitForReady(baseUrl) {
 test.before(async () => {
   serverWithSecret = spawn(process.execPath, [".output/server/index.mjs"], {
     cwd: new URL("..", import.meta.url),
-    env: {
-      ...process.env,
+    env: writeBlockedServerEnv({
       PORT: String(PORT_WITH_SECRET),
       STRIPE_WEBHOOK_SECRET: FAKE_WEBHOOK_SECRET,
       // Only needed so getStripeClient() is non-null and the route reaches
       // signature verification; webhooks.constructEvent is a pure local
       // HMAC check and never sends this key to Stripe's API.
       STRIPE_SECRET_KEY: "sk_test_not_a_real_key_used_only_so_the_client_constructs",
-    },
+    }),
     stdio: "ignore",
   });
-  const envWithoutSecret = {
-    ...process.env,
+  const envWithoutSecret = writeBlockedServerEnv({
     PORT: String(PORT_WITHOUT_SECRET),
     // Set so this test isolates "STRIPE_WEBHOOK_SECRET missing" specifically,
     // not "STRIPE_SECRET_KEY missing" too.
     STRIPE_SECRET_KEY: "sk_test_not_a_real_key_used_only_so_the_client_constructs",
-  };
+  });
   delete envWithoutSecret.STRIPE_WEBHOOK_SECRET;
   serverWithoutSecret = spawn(process.execPath, [".output/server/index.mjs"], {
     cwd: new URL("..", import.meta.url),

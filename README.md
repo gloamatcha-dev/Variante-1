@@ -91,7 +91,13 @@ actions tied to the current ChatGPT user. Leave public content anonymous.
 
 - `npm run dev`: start local development
 - `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
+- `npm test`: safe default suite (unit, rendering, and mocked/API tests). Never writes to any
+  database, so it is safe to run against a checkout configured for production.
+- `npm run test:integration`: real-database suite (orders, checkout attempts, withdrawal
+  declarations, auth users). Requires `TEST_SUPABASE_URL`, `TEST_SUPABASE_PUBLISHABLE_KEY`,
+  and `TEST_SUPABASE_SECRET_KEY` in `.env.test.local`, pointing at a dedicated
+  non-production Supabase project. The GLOA production project is hard-blocked; there is no
+  fallback to the application's own Supabase variables.
 - `npm run db:generate`: generate Drizzle migrations after schema changes
 
 ## Learn More

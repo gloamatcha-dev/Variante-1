@@ -3,6 +3,11 @@ import test from "node:test";
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
+import { writeBlockedServerEnv } from "./helpers/testSupabase.mjs";
+
+// SAFE DEFAULT SUITE: the spawned server is started without a Supabase
+// service-role key, so every write path in the app degrades to its
+// "admin client not configured" branch and no row can be written.
 
 // These tests exercise the real, built /api/contact route end to end
 // against a real HTTP server (matching the pattern used by
@@ -48,13 +53,12 @@ test.before(async () => {
 
   serverProcess = spawn(process.execPath, [".output/server/index.mjs"], {
     cwd: new URL("..", import.meta.url),
-    env: {
-      ...process.env,
+    env: writeBlockedServerEnv({
       PORT: String(PORT),
       RESEND_API_KEY: "test-mock-key-not-real",
       RESEND_CONTACT_FROM: MOCK_FROM,
       RESEND_BASE_URL: `http://127.0.0.1:${MOCK_RESEND_PORT}`,
-    },
+    }),
     stdio: "ignore",
   });
 

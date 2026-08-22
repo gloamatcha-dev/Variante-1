@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { getActiveVariantBySku } from "./helpers/catalog.mjs";
-import { getAdminSupabaseClient } from "./helpers/supabaseAdmin.mjs";
+import { getTestSupabaseAdmin, getTestSupabasePublishable } from "./helpers/testSupabase.mjs";
 
 const ROOT = path.resolve(fileURLToPath(import.meta.url), "../..");
 function loadLocalEnv() {
@@ -77,8 +77,8 @@ let rpcApplied = true;
 let rpcSkipReason = "";
 
 test.before(async () => {
-  admin = getAdminSupabaseClient();
-  variant = await getActiveVariantBySku("GLOA-MATCHA-30G");
+  admin = getTestSupabaseAdmin();
+  variant = await getActiveVariantBySku("GLOA-MATCHA-30G", getTestSupabasePublishable());
   anonUrl = requireEnv("VITE_SUPABASE_URL");
   anonKey = requireEnv("VITE_SUPABASE_PUBLISHABLE_KEY");
 

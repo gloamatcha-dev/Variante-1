@@ -5,8 +5,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
-import { getActiveVariantBySku, getReadOnlySupabaseClient } from "./helpers/catalog.mjs";
-import { getAdminSupabaseClient } from "./helpers/supabaseAdmin.mjs";
+import { getActiveVariantBySku } from "./helpers/catalog.mjs";
+import { getTestSupabaseAdmin, getTestSupabasePublishable } from "./helpers/testSupabase.mjs";
 
 const ROOT = path.resolve(fileURLToPath(import.meta.url), "../..");
 function loadLocalEnv() {
@@ -103,8 +103,8 @@ function callRpc(attemptId, overrides = {}) {
 }
 
 test.before(async () => {
-  admin = getAdminSupabaseClient();
-  variant = await getActiveVariantBySku("GLOA-MATCHA-30G");
+  admin = getTestSupabaseAdmin();
+  variant = await getActiveVariantBySku("GLOA-MATCHA-30G", getTestSupabasePublishable());
 
   // Cheap existence probe for the migration-016 (6-arg) RPC signature.
   // An unknown-attempt error means the function exists and ran; a
@@ -311,7 +311,7 @@ test("orders/order_items: anonymous (unauthenticated) access is denied by grants
   const { data } = await callRpc(attemptId);
   const order = Array.isArray(data) ? data[0] : data;
 
-  const anon = getReadOnlySupabaseClient();
+  const anon = getTestSupabasePublishable();
   const { data: foreignRead, error } = await anon.from("orders").select("id").eq("id", order.id).maybeSingle();
   // Either an explicit permission error, or RLS silently returning nothing -
   // either way, no order data must be visible to an unauthenticated client.

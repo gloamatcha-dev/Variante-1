@@ -3,6 +3,11 @@ import test from "node:test";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { getActiveVariantBySku } from "./helpers/catalog.mjs";
+import { writeBlockedServerEnv } from "./helpers/testSupabase.mjs";
+
+// SAFE DEFAULT SUITE: the spawned server is started without a Supabase
+// service-role key, so every write path in the app degrades to its
+// "admin client not configured" branch and no row can be written.
 
 // Resolved dynamically from the configured Supabase project by SKU in
 // test.before() - never hardcoded UUIDs or prices. Supabase stays the
@@ -31,7 +36,7 @@ test.before(async () => {
   // when Stripe is not configured.
   serverProcess = spawn(process.execPath, [".output/server/index.mjs"], {
     cwd: new URL("..", import.meta.url),
-    env: { ...process.env, PORT: String(PORT) },
+    env: writeBlockedServerEnv({ PORT: String(PORT) }),
     stdio: "ignore",
   });
 

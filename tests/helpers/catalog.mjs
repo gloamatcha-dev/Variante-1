@@ -32,11 +32,17 @@ export function getReadOnlySupabaseClient() {
 }
 
 /**
- * Reads an active variant by SKU from the configured Supabase project.
- * Read-only - never inserts, updates, or deletes catalog data.
+ * Reads an active variant by SKU. Read-only - never inserts, updates, or
+ * deletes catalog data.
+ *
+ * Pass an explicit client to read from a different project. Database
+ * integration tests must pass the TEST project's client
+ * (tests/helpers/testSupabase.mjs), so they seed from the same project they
+ * write to; the safe default suite reads the application's configured
+ * project, which is a read and never a write.
  */
-export async function getActiveVariantBySku(sku) {
-  const supabase = getReadOnlySupabaseClient();
+export async function getActiveVariantBySku(sku, client) {
+  const supabase = client ?? getReadOnlySupabaseClient();
   const { data, error } = await supabase
     .from("product_variants")
     .select("id, sku, label, size_grams, price_gross_cents, currency, is_active, products!inner(is_active)")

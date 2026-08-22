@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { getActiveVariantBySku } from "./helpers/catalog.mjs";
-import { getAdminSupabaseClient } from "./helpers/supabaseAdmin.mjs";
+import { getTestSupabaseAdmin, getTestSupabasePublishable } from "./helpers/testSupabase.mjs";
 
 // Real-database tests for the confirmation-email delivery state machine
 // added on public.orders by migration 017 (confirmation_email_status /
@@ -78,8 +78,8 @@ async function createPaidOrder({ userId = null } = {}) {
 }
 
 test.before(async () => {
-  admin = getAdminSupabaseClient();
-  variant = await getActiveVariantBySku("GLOA-MATCHA-30G");
+  admin = getTestSupabaseAdmin();
+  variant = await getActiveVariantBySku("GLOA-MATCHA-30G", getTestSupabasePublishable());
 
   const rpcProbe = await admin.rpc("create_order_from_paid_checkout", {
     p_checkout_attempt_id: "00000000-0000-0000-0000-000000000000",

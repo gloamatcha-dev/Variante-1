@@ -3,11 +3,7 @@ import test from "node:test";
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
-import { parseEnv } from "node:util";
-import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { getAdminSupabaseClient } from "./helpers/supabaseAdmin.mjs";
+import { getTestSupabaseAdmin, testServerEnv } from "./helpers/testSupabase.mjs";
 
 // Real end-to-end tests for the § 356a BGB electronic withdrawal
 // function (Task 25A): POST /api/withdrawal against the real built
@@ -15,17 +11,10 @@ import { getAdminSupabaseClient } from "./helpers/supabaseAdmin.mjs";
 // itself replaced by a local mock HTTP server (same RESEND_BASE_URL
 // override pattern as tests/contact-api.test.mjs / tests/order-
 // confirmation-email-webhook.test.mjs). No real email is ever sent.
-
-const ROOT = path.resolve(fileURLToPath(import.meta.url), "../..");
-function requireLocalEnv(name) {
-  const fromShell = process.env[name];
-  if (fromShell) return fromShell;
-  const envLocalPath = path.join(ROOT, ".env.local");
-  const local = existsSync(envLocalPath) ? parseEnv(readFileSync(envLocalPath, "utf-8")) : {};
-  const value = local[name];
-  if (!value) throw new Error(`Missing ${name}. Set it in the environment or .env.local to run these tests.`);
-  return value;
-}
+//
+// DATABASE INTEGRATION TEST: writes real rows, so it runs only through
+// `npm run test:integration` against a TEST_SUPABASE_* project. See
+// tests/helpers/testSupabase.mjs.
 
 const PORT = 8931;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
@@ -50,7 +39,7 @@ let migrationApplied = true;
 let skipReason = "";
 
 test.before(async () => {
-  admin = getAdminSupabaseClient();
+  admin = getTestSupabaseAdmin();
   const probe = await admin.from("withdrawal_requests").select("id").limit(1);
   if (probe.error && /column .* does not exist|relation .* does not exist|schema cache/i.test(probe.error.message)) {
     migrationApplied = false;
@@ -74,14 +63,14 @@ test.before(async () => {
 
   serverProcess = spawn(process.execPath, [".output/server/index.mjs"], {
     cwd: new URL("..", import.meta.url),
-    env: {
-      ...process.env,
+    // Test-project credentials for this child process only. Never mutates
+    // this process's env and never reads .env.local.
+    env: testServerEnv({
       PORT: String(PORT),
-      SUPABASE_SECRET_KEY: requireLocalEnv("SUPABASE_SECRET_KEY"),
       RESEND_API_KEY: "test-mock-key-not-real",
       RESEND_CONTACT_FROM: MOCK_FROM,
       RESEND_BASE_URL: `http://127.0.0.1:${MOCK_RESEND_PORT}`,
-    },
+    }),
     stdio: "ignore",
   });
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { getActiveVariantBySku } from "./helpers/catalog.mjs";
-import { getAdminSupabaseClient } from "./helpers/supabaseAdmin.mjs";
+import { getTestSupabaseAdmin, getTestSupabasePublishable } from "./helpers/testSupabase.mjs";
 
 // Schema-only checks for migration 015 (checkout_attempts.shipping_country /
 // shipping_zone / shipping_gross_cents). No pricing logic exists yet (Task
@@ -15,8 +15,8 @@ let skipReason = "";
 const createdAttemptIds = [];
 
 test.before(async () => {
-  admin = getAdminSupabaseClient();
-  variant = await getActiveVariantBySku("GLOA-MATCHA-30G");
+  admin = getTestSupabaseAdmin();
+  variant = await getActiveVariantBySku("GLOA-MATCHA-30G", getTestSupabasePublishable());
 
   const probe = await admin.from("checkout_attempts").select("shipping_country, shipping_zone, shipping_gross_cents").limit(1);
   if (probe.error) {

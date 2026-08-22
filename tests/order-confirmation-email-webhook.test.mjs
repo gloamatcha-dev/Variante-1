@@ -8,7 +8,12 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Stripe from "stripe";
+import { testServerEnv } from "./helpers/testSupabase.mjs";
 
+// DATABASE INTEGRATION TEST: the webhook records stripe_webhook_events, so
+// this file runs only through `npm run test:integration` against a
+// TEST_SUPABASE_* project. See tests/helpers/testSupabase.mjs.
+//
 // process.env.STRIPE_SECRET_KEY is never auto-populated for a spawned
 // server from .env.local (unlike import.meta.env.VITE_* values, which
 // Vite bakes in at build time) - it must be read and passed through
@@ -66,21 +71,19 @@ test.before(async () => {
   // behavior under test for the "invalid/unrecognized session" case.
   serverProcess = spawn(process.execPath, [".output/server/index.mjs"], {
     cwd: new URL("..", import.meta.url),
-    env: {
-      ...process.env,
+    // The webhook's event-dedup/recording (stripe_webhook_events) uses the
+    // Supabase admin client, so this child process gets the TEST project's
+    // credentials from testServerEnv - never the application's own. Unlike
+    // import.meta.env.VITE_* values, which Vite bakes in at build time,
+    // STRIPE_SECRET_KEY must still be passed through explicitly.
+    env: testServerEnv({
       PORT: String(PORT),
       STRIPE_WEBHOOK_SECRET: FAKE_WEBHOOK_SECRET,
       STRIPE_SECRET_KEY: requireLocalEnv("STRIPE_SECRET_KEY"),
-      // The webhook's event-dedup/recording (stripe_webhook_events) uses
-      // the Supabase admin client, which reads process.env.SUPABASE_SECRET_KEY
-      // at runtime - unlike VITE_SUPABASE_URL, this is never baked in at
-      // build time, so a spawned server needs it explicitly, exactly like
-      // STRIPE_SECRET_KEY above.
-      SUPABASE_SECRET_KEY: requireLocalEnv("SUPABASE_SECRET_KEY"),
       RESEND_API_KEY: "test-mock-key-not-real",
       RESEND_CONTACT_FROM: "GLOA <kontakt@gloamatcha.invalid>",
       RESEND_BASE_URL: `http://127.0.0.1:${MOCK_RESEND_PORT}`,
-    },
+    }),
     stdio: "ignore",
   });
 
