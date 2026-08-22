@@ -55,11 +55,21 @@ test("shop: an unknown product slug does not crash the page", async () => {
 
 /* ── Nothing unfinished is exposed ──────────────────────────── */
 
-test("shop: no Metal Case product is published anywhere in the shop", async () => {
-  for (const path of ["/shop", "/shop/matcha", "/"]) {
+test("shop: the standalone accessory route renders", async () => {
+  // Generic /shop/<slug> route. This proves the route and layout resolve,
+  // not that the catalog row exists - catalog data is fetched client-side,
+  // so server rendering returns the shell either way.
+  const { status, html } = await getHtml("/shop/metal-case");
+  assert.equal(status, 200);
+  assert.doesNotMatch(html, /Cannot read|undefined is not|TypeError/i);
+});
+
+test("shop: the accessory disclosure never appears on Matcha", async () => {
+  // The Metal Case reuses the Matcha packaging photo, so the disclosure
+  // has to be tied to the accessory and must never leak onto Matcha.
+  for (const path of ["/shop/matcha", "/shop/gloa-matcha", "/"]) {
     const { html } = await getHtml(path);
-    assert.doesNotMatch(html, /Metal Case/i, `Metal Case appeared on ${path}`);
-    assert.doesNotMatch(html, /Matcha nicht enthalten/i, `accessory disclosure appeared on ${path}`);
+    assert.doesNotMatch(html, /Matcha nicht enthalten/i, `disclosure leaked onto ${path}`);
   }
 });
 
