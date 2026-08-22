@@ -9,10 +9,23 @@ export type QuoteRequestItem = {
 
 export type QuoteResponseItem = {
   productId: string;
+  /**
+   * The product's own name, straight from the catalog. Carried here so
+   * downstream snapshots never have to assume which product this is -
+   * before Task 27A the snapshot hardcoded "GLOA Matcha" for every line,
+   * which would have mislabelled any second product.
+   */
+  productName: string;
+  productSlug: string;
   variantId: string;
   sku: string;
   label: string;
-  sizeGrams: number;
+  /**
+   * Net weight in grams, or null for something not sold by weight (the
+   * standalone Metal Case accessory). product_variants.size_grams has
+   * always been nullable; only this code required it.
+   */
+  sizeGrams: number | null;
   quantity: number;
   unitGrossCents: number;
   lineGrossCents: number;
@@ -83,7 +96,7 @@ export async function buildAuthoritativeQuote(items: QuoteRequestItem[]): Promis
   const variantIds = items.map(item => item.variantId);
   const { data: variants, error: dbError } = await supabase
     .from("product_variants")
-    .select("id, product_id, sku, label, size_grams, price_gross_cents, currency, is_active, products!inner(is_active)")
+    .select("id, product_id, sku, label, size_grams, price_gross_cents, currency, is_active, products!inner(is_active, name, slug)")
     .in("id", variantIds);
 
   if (dbError) {
@@ -122,10 +135,16 @@ export async function buildAuthoritativeQuote(items: QuoteRequestItem[]): Promis
       return fail(500, "Ungültiger Preis für ein Produkt.");
     }
 
+    // A net weight is optional: an accessory such as the standalone Metal
+    // Case is sold as a unit, not by weight. When a weight IS present it
+    // still has to be a sane positive integer - a corrupt value must not
+    // pass through just because the field became optional.
     if (
-      typeof variant.size_grams !== "number" ||
-      variant.size_grams <= 0 ||
-      !Number.isSafeInteger(variant.size_grams)
+      variant.size_grams !== null &&
+      variant.size_grams !== undefined &&
+      (typeof variant.size_grams !== "number" ||
+        variant.size_grams <= 0 ||
+        !Number.isSafeInteger(variant.size_grams))
     ) {
       return fail(500, "Ungültige Produktgröße.");
     }
@@ -145,12 +164,25 @@ export async function buildAuthoritativeQuote(items: QuoteRequestItem[]): Promis
       return fail(400, "Berechnung überschreitet zulässigen Bereich.");
     }
 
+    // @ts-expect-error - Supabase join structure
+    const productName: unknown = variant.products?.name;
+    // @ts-expect-error - Supabase join structure
+    const productSlug: unknown = variant.products?.slug;
+    if (typeof productName !== "string" || productName.trim() === "") {
+      return fail(500, "Ungültiger Produktname.");
+    }
+    if (typeof productSlug !== "string" || productSlug.trim() === "") {
+      return fail(500, "Ungültiges Produkt.");
+    }
+
     quoteItems.push({
       productId: variant.product_id,
+      productName,
+      productSlug,
       variantId: variant.id,
       sku: variant.sku,
       label: variant.label,
-      sizeGrams: variant.size_grams,
+      sizeGrams: typeof variant.size_grams === "number" ? variant.size_grams : null,
       quantity: item.quantity,
       unitGrossCents: variant.price_gross_cents,
       lineGrossCents,

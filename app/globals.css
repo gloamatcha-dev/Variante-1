@@ -310,6 +310,11 @@
 .order-list-row{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;padding:18px 0;border-bottom:1px solid var(--line);font:14px/1.4 var(--font-mono);text-decoration:none;transition:background .15s}
 .order-list-row:hover{background:rgba(23,70,209,.04)}
 .order-list-number{font-weight:600}
+/* ── Accessory disclosure (Task 27A) ── */
+/* Deliberately not fine print: berry on cream, bordered, at the price,
+   so "Matcha nicht enthalten" cannot be missed before adding to cart. */
+.product-not-included{display:block;margin:14px 0 0;padding:10px 12px;border:1px solid var(--berry);color:var(--berry);font:600 13px/1.4 var(--font-mono);letter-spacing:.02em;max-width:420px}
+.cart-item-note{display:block;margin-top:4px;color:var(--berry);font:600 11px/1.3 var(--font-mono);letter-spacing:.06em;text-transform:uppercase}
 .order-list-status{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 .order-list-tracking{font:11px/1 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--blue);border:1px solid var(--blue);padding:3px 6px;white-space:nowrap}
 /* ── Order Lifecycle (Task 26A) ── */
@@ -475,6 +480,7 @@ header nav{gap:18px;font-size:12px}
 .order-list-row{grid-template-columns:1fr 1fr;gap:8px;padding:16px 0}
 .order-item-row{grid-template-columns:1fr auto;gap:8px}
 .order-item-qty,.order-item-unit{display:none}
+.product-not-included{max-width:100%;font-size:12px}
 .order-status{padding:20px 0 24px}
 .order-steps{flex-direction:column;gap:10px}
 .order-tracking .portal-profile-row strong{text-align:left}

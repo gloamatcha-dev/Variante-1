@@ -3,10 +3,13 @@ import type { CartItem } from "./cart";
 
 export type CheckoutQuoteItem = {
   productId: string;
+  productName: string;
+  productSlug: string;
   variantId: string;
   sku: string;
   label: string;
-  sizeGrams: number;
+  /** Net weight in grams, or null for a product not sold by weight. */
+  sizeGrams: number | null;
   quantity: number;
   unitGrossCents: number; // AUTHORITATIVE price from server
   lineGrossCents: number;

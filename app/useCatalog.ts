@@ -12,12 +12,14 @@ type DbCatalogVariant = {
   sort_order: number;
 };
 
-// Validated purchasable variant
+// Validated purchasable variant. A price is what makes a variant
+// purchasable; a net weight is optional, because an accessory such as the
+// standalone Metal Case is sold as a unit rather than by weight.
 export type CatalogVariant = {
   id: string;
   sku: string;
   label: string;
-  size_grams: number;
+  size_grams: number | null;
   price_gross_cents: number;
   sort_order: number;
 };
@@ -26,6 +28,7 @@ export type CatalogProduct = {
   id: string;
   slug: string;
   name: string;
+  short_description: string | null;
   variants: CatalogVariant[];
 };
 
@@ -50,7 +53,7 @@ export function useCatalog(slug: string): CatalogState {
     (async () => {
       const { data: products, error: pErr } = await supabase
         .from("products")
-        .select("id, slug, name")
+        .select("id, slug, name, short_description")
         .eq("slug", slug)
         .limit(1);
 
@@ -74,11 +77,13 @@ export function useCatalog(slug: string): CatalogState {
         return;
       }
 
-      // Validate and filter to only purchasable variants
+      // Validate and filter to only purchasable variants. A weight, when
+      // present, must still be sane - but its absence no longer makes a
+      // variant unsellable.
       const purchasable: CatalogVariant[] = (variants || [])
         .filter((v: DbCatalogVariant): v is CatalogVariant =>
-          typeof v.size_grams === "number" && v.size_grams > 0 &&
-          typeof v.price_gross_cents === "number" && v.price_gross_cents > 0
+          typeof v.price_gross_cents === "number" && v.price_gross_cents > 0 &&
+          (v.size_grams === null || (typeof v.size_grams === "number" && v.size_grams > 0))
         );
 
       setState({

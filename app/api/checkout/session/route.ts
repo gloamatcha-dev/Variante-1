@@ -167,7 +167,9 @@ export async function POST(request: Request): Promise<Response> {
     metadata: {
       variant_id: item.variantId,
       sku: item.sku,
-      size_grams: String(item.sizeGrams),
+      // Only sent when the product actually has a net weight. An
+      // accessory sold as a unit would otherwise carry size_grams:"null".
+      ...(typeof item.sizeGrams === "number" ? { size_grams: String(item.sizeGrams) } : {}),
     },
   }));
 

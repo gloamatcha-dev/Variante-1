@@ -5,7 +5,20 @@ export type CartItem = {
   productId: string;
   variantId: string;
   label: string;
-  grams: number;
+  /**
+   * Net weight in grams, or null for a product not sold by weight.
+   * Optional in the type as well, because carts saved before Task 27A
+   * predate the field being nullable and must keep working.
+   */
+  grams?: number | null;
+  /**
+   * Product name for display. Optional for the same backwards
+   * compatibility reason - a cart saved before Task 27A has no product
+   * name, and every such item is Matcha, the only product that existed.
+   */
+  productName?: string;
+  /** Product slug, used to decide accessory-specific display. */
+  productSlug?: string;
   purchaseType: "once";
   unitPriceCents: number; // DISPLAY CACHE ONLY - NOT authoritative for checkout
   quantity: number;

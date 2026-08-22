@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Header, Footer, Newsletter } from "./Chrome";
 import { BRAND, PRODUCT, SHOP_STATUS, COUNTRIES } from "./content";
 import { useCatalog, fmtCents, per100gCents } from "./useCatalog";
+import { getProductPresentation, showsUnitPricePer100g, MATCHA_NOT_INCLUDED_SHORT } from "../lib/productPresentation";
 import { BusinessCalculator } from "./BusinessCalculator";
 import { AccountPortal } from "./AccountPortal";
 import { OrderSuccess } from "./OrderSuccess";
@@ -39,7 +40,7 @@ if(loading)return <article className="product-card"><Link href="/shop"><ProductV
 if(error||!product)return <article className="product-card"><Link href="/shop"><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>Nicht verfügbar</strong></div></Link></article>;
 if(!product.variants.length)return <article className="product-card"><Link href="/shop"><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>Demnächst</strong></div></Link></article>;
 const dv=product.variants[0];const lowestCents=Math.min(...product.variants.map(v=>v.price_gross_cents));
-const handleAdd=()=>{addItem({productId:product.id,variantId:dv.id,label:dv.label,grams:dv.size_grams,purchaseType:"once",unitPriceCents:dv.price_gross_cents});track("add_to_cart");onAdd()};
+const handleAdd=()=>{addItem({productId:product.id,productName:product.name,productSlug:product.slug,variantId:dv.id,label:dv.label,grams:dv.size_grams,purchaseType:"once",unitPriceCents:dv.price_gross_cents});track("add_to_cart");onAdd()};
 const handlePrelaunch=()=>window.location.href="#newsletter";
 return <article className="product-card"><Link href="/shop" onClick={()=>track("product_view")}><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>AB {fmtCents(lowestCents)} €</strong></div></Link><button className="add" onClick={SHOP_STATUS==="prelaunch"?handlePrelaunch:handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"} <span>+</span></button></article>}
 function HowTo(){return <section className="how-to"><div className="section-head"><div><p className="eyebrow">HOW TO GLOA</p><h2>Latte oder Pur.<br/>Mehr brauchst du nicht.</h2></div></div><div className="method-grid"><article><span>01</span><h3>Matcha Latte</h3><ol><li>Matcha dosieren</li><li>Mit Wasser aufschlagen</li><li>Milch oder Pflanzendrink dazu</li><li>Heiß oder iced genießen</li></ol></article><article><span>02</span><h3>Pure Matcha</h3><ol><li>Matcha dosieren</li><li>Mit wenig Wasser glattrühren</li><li>Mit Wasser aufschlagen</li><li>Direkt genießen</li></ol></article></div></section>}
@@ -95,10 +96,11 @@ if(!product.variants.length)return <main className="shop-page"><section classNam
 
 const safe=Math.min(sizeIdx,product.variants.length-1);
 const v=product.variants[safe];
-const per100=per100gCents(v.price_gross_cents,v.size_grams);
+const presentation=getProductPresentation(product.slug,v);
+const per100=showsUnitPricePer100g(v)?per100gCents(v.price_gross_cents,v.size_grams as number):null;
 const lowestCents=Math.min(...product.variants.map(x=>x.price_gross_cents));
 
-const handleAdd=()=>{addItem({productId:product.id,variantId:v.id,label:v.label,grams:v.size_grams,purchaseType:"once",unitPriceCents:v.price_gross_cents});track("add_to_cart");onAdd()};
+const handleAdd=()=>{addItem({productId:product.id,productName:product.name,productSlug:product.slug,variantId:v.id,label:v.label,grams:v.size_grams,purchaseType:"once",unitPriceCents:v.price_gross_cents});track("add_to_cart");onAdd()};
 
 return <main className="shop-page">
 <section className="shop-hero"><div className="shop-hero-inner"><p className="eyebrow">GLOA · MATCHA</p><h1>Dein Matcha.<br/><i>Deine Art.</i></h1><p className="lead">Matcha aus Shizuoka, Japan. Für Latte, iced, pur oder wie du ihn magst.</p><p className="shop-hero-price">AB {fmtCents(lowestCents)} €</p><p className="shop-hero-micro">Launch in Vorbereitung.</p><Link className="cta shop-hero-cta" href="#product" onClick={()=>track("shop_scroll_product")}>ZUM MATCHA</Link></div></section>
@@ -110,7 +112,8 @@ return <main className="shop-page">
 </div>
 
 <p className="shop-product-price">{fmtCents(v.price_gross_cents)} €</p>
-<p className="shop-product-per100g">{fmtCents(per100)} € / 100 g</p>
+{per100!==null&&<p className="shop-product-per100g">{fmtCents(per100)} € / 100 g</p>}
+{presentation.matchaNotIncludedNotice&&<p className="product-not-included">{presentation.matchaNotIncludedNotice}</p>}
 
 <button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="#newsletter":handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
 </div></section>
@@ -130,9 +133,10 @@ if(error||!product||!product.variants.length)return <main className="pdp"><secti
 
 const safe=Math.min(sizeIdx,product.variants.length-1);
 const v=product.variants[safe];
-const per100=per100gCents(v.price_gross_cents,v.size_grams);
+const presentation=getProductPresentation(product.slug,v);
+const per100=showsUnitPricePer100g(v)?per100gCents(v.price_gross_cents,v.size_grams as number):null;
 
-const handleAdd=()=>{addItem({productId:product.id,variantId:v.id,label:v.label,grams:v.size_grams,purchaseType:"once",unitPriceCents:v.price_gross_cents});track("add_to_cart");onAdd()};
+const handleAdd=()=>{addItem({productId:product.id,productName:product.name,productSlug:product.slug,variantId:v.id,label:v.label,grams:v.size_grams,purchaseType:"once",unitPriceCents:v.price_gross_cents});track("add_to_cart");onAdd()};
 
 return <main className="pdp">
 <section className="pdp-hero"><div className="pdp-hero-image"><img src="/img/gloa-hero-packaging.jpg" alt="GLOA Matcha Verpackung"/></div><div className="pdp-hero-info"><p className="eyebrow">MATCHA · SHIZUOKA</p><h1>{PRODUCT.name}</h1><p>Für Latte, iced und pure Zubereitung.</p>
@@ -142,7 +146,8 @@ return <main className="pdp">
 </div>
 
 <p className="pdp-price">{fmtCents(v.price_gross_cents)} €</p>
-<p className="pdp-per100g">{fmtCents(per100)} € / 100 g</p>
+{per100!==null&&<p className="pdp-per100g">{fmtCents(per100)} € / 100 g</p>}
+{presentation.matchaNotIncludedNotice&&<p className="product-not-included">{presentation.matchaNotIncludedNotice}</p>}
 
 <button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="#newsletter":handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
 </div></section>
@@ -759,7 +764,7 @@ return <div className="cart-backdrop" onClick={onClose} onKeyDown={e=>e.key==="E
 <Link href="/shop" className="cta" onClick={onClose}>Matcha</Link>
 </div>:<>
 <div className="cart-items">{cart.items.map(item=><div key={item.variantId} className="cart-item">
-<div className="cart-item-info"><strong>GLOA Matcha</strong><span>{item.label}</span></div>
+<div className="cart-item-info"><strong>{item.productName||PRODUCT.name}</strong><span>{item.label}</span>{item.productSlug&&getProductPresentation(item.productSlug,{size_grams:item.grams??null}).matchaNotIncluded&&<span className="cart-item-note">{MATCHA_NOT_INCLUDED_SHORT}</span>}</div>
 <div className="cart-item-row">
 <div className="cart-qty"><button onClick={()=>cart.updateQuantity(item.productId,item.variantId,item.quantity-1)} aria-label="Menge reduzieren">-</button><span>{item.quantity}</span><button onClick={()=>cart.updateQuantity(item.productId,item.variantId,item.quantity+1)} aria-label="Menge erhöhen">+</button></div>
 <strong>{fmtCents(item.unitPriceCents*item.quantity)} €</strong>
