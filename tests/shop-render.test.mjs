@@ -1,13 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { spawn } from "node:child_process";
-import { setTimeout as delay } from "node:timers/promises";
-import { writeBlockedServerEnv } from "./helpers/testSupabase.mjs";
+import { startRenderServer } from "./helpers/renderServer.mjs";
 
 // SAFE DEFAULT SUITE: the spawned server runs without a Supabase
 // service-role key, so no write path can reach a database. These tests
-// server-render the CURRENT build (.output/server), unlike
-// tests/rendered-html.test.mjs which renders the older dist/ artifact.
+// server-render the CURRENT build (.output/server) through the shared
+// harness in tests/helpers/renderServer.mjs.
 //
 // Catalog data is fetched client-side, so server rendering produces the
 // shop's loading shell. That is exactly what makes this a useful
@@ -15,40 +13,17 @@ import { writeBlockedServerEnv } from "./helpers/testSupabase.mjs";
 // shop and product routes render, respond 200, and expose no raw error.
 
 const PORT = 8926;
-const BASE = `http://127.0.0.1:${PORT}`;
-
-let serverProcess;
-
-async function waitForReady() {
-  for (let attempt = 0; attempt < 50; attempt++) {
-    try {
-      const res = await fetch(`${BASE}/`);
-      if (res.ok) return;
-    } catch {
-      // not up yet
-    }
-    await delay(200);
-  }
-  throw new Error("server did not become ready in time");
-}
+let server;
 
 test.before(async () => {
-  serverProcess = spawn(process.execPath, [".output/server/index.mjs"], {
-    cwd: new URL("..", import.meta.url),
-    env: writeBlockedServerEnv({ PORT: String(PORT) }),
-    stdio: "ignore",
-  });
-  await waitForReady();
+  server = await startRenderServer(PORT);
 });
 
 test.after(() => {
-  serverProcess?.kill();
+  server?.stop();
 });
 
-async function getHtml(path) {
-  const res = await fetch(`${BASE}${path}`, { headers: { accept: "text/html" } });
-  return { status: res.status, html: await res.text() };
-}
+const getHtml = path => server.getHtml(path);
 
 /* ── The shop still renders ─────────────────────────────────── */
 
