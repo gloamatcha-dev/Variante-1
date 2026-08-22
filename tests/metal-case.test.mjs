@@ -63,12 +63,20 @@ test("catalog: the variant carries no weight, real or fabricated", () => {
 });
 
 test("catalog: the seed writes no tax or net field", () => {
+  // Executable SQL only. The file's own comments explain that Task 21
+  // (VAT/OSS) stays paused, and that prose must not be mistaken for a
+  // field being written.
+  const sql = MIGRATION.split("\n").filter(line => !line.trim().startsWith("--")).join("\n");
+
   for (const field of ["tax_total_cents", "tax_rate_percent", "price_net_cents", "net_cents"]) {
-    assert.ok(!MIGRATION.toLowerCase().includes(field), `seed must not write ${field}`);
+    assert.ok(!sql.toLowerCase().includes(field), `seed must not write ${field}`);
   }
   // Whole words only: "ust" lives inside "must", "vat" inside "private".
+  // Built by concatenation on purpose - "\b" inside a template literal is
+  // a backspace escape, not a word boundary, which would make this pass
+  // against anything.
   for (const word of ["vat", "ust", "mwst", "steuer"]) {
-    assert.ok(!new RegExp(`\b${word}\b`, "i").test(MIGRATION), `seed must not write a tax field: ${word}`);
+    assert.ok(!new RegExp("\\b" + word + "\\b", "i").test(sql), `seed must not write a tax field: ${word}`);
   }
 });
 
@@ -170,8 +178,15 @@ test("disclosure: it renders next to the price in every accessory view", () => {
   // Matcha's own detail page must never render it.
   assert.ok(!body("MatchaProductPage").includes("matchaNotIncluded"), "Matcha PDP must not carry the disclosure");
 
+  // Visually prominent: a berry accent rule plus a tinted panel, in berry
+  // text. The exact border side is a design choice; carrying the brand
+  // alert colour is the part that must not quietly disappear.
   const css = readFileSync(path.join(ROOT, "app/globals.css"), "utf-8");
-  assert.match(css, /\.product-not-included\{[^}]*border:1px solid var\(--berry\)/, "disclosure must be visually prominent");
+  const rule = css.match(/\.product-not-included\{[^}]*\}/)?.[0] ?? "";
+  assert.ok(rule, ".product-not-included rule not found");
+  assert.match(rule, /border(-left)?:\d+px solid var\(--berry\)/, "disclosure needs a berry accent rule");
+  assert.match(rule, /color:var\(--berry\)/, "disclosure text must carry the brand alert colour");
+  assert.match(rule, /padding:/, "disclosure must not be cramped against its border");
 });
 
 /* ── Matcha stays exactly as it was ─────────────────────────── */

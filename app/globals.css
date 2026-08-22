@@ -32,19 +32,19 @@
 .shop-hero-cta{margin-top:30px;background:var(--cream);color:var(--plum);border-color:var(--cream)}
 .shop-hero-cta:hover{background:var(--blue);color:var(--cream);border-color:var(--blue)}
 
-.shop-product{display:grid;grid-template-columns:1fr 1fr;min-height:700px}
+.shop-product{display:grid;grid-template-columns:1.04fr .96fr;min-height:min(560px,80vh);scroll-margin-top:96px}
 .shop-product-image{background:var(--berry);position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center}
 .shop-product-image img{width:100%;height:100%;object-fit:cover;object-position:center;position:absolute;inset:0}
-.shop-product-info{padding:80px 5vw;display:flex;flex-direction:column;justify-content:center}
-.shop-product-info h2{font-size:clamp(36px,4vw,52px);letter-spacing:-.05em;margin:12px 0}
-.shop-product-sub{font:13px/1.4 var(--font-mono);letter-spacing:.08em;margin:0 0 20px}
+.shop-product-info{padding:72px 4.5vw;display:flex;flex-direction:column;justify-content:center;max-width:660px}
+.shop-product-info h2{font-size:clamp(34px,3.4vw,46px);line-height:1.02;letter-spacing:-.045em;margin:10px 0 14px}
+.shop-product-sub{font:13px/1.65 var(--font-mono);letter-spacing:.06em;margin:0 0 26px;max-width:46ch;opacity:.8}
 .shop-product-size{font:13px/1 var(--font-mono);letter-spacing:.1em;opacity:.55;margin:0 0 20px}
-.shop-product-price{font-size:32px;font-weight:800;letter-spacing:-.03em;margin:0 0 6px}
+.shop-product-price{font-size:30px;line-height:1.1;font-weight:800;letter-spacing:-.03em;margin:0 0 6px}
 .shop-product-price span{font-size:14px;font-weight:400;letter-spacing:0}
-.shop-product-per100g{font:13px/1 var(--font-mono);letter-spacing:.08em;opacity:.55;margin:0 0 25px}
+.shop-product-per100g{font:13px/1.4 var(--font-mono);letter-spacing:.08em;opacity:.55;margin:0 0 4px}
 .shop-only-once{font:13px/1.4 var(--font-mono);opacity:.55;margin:0 0 20px}
 
-.size-selector{display:flex;gap:8px;margin-bottom:22px;flex-wrap:wrap}
+.size-selector{display:flex;gap:8px;margin:0 0 26px;flex-wrap:wrap}
 .size-option{display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 18px;border:1px solid var(--line);cursor:pointer;transition:border-color .2s,background .2s;min-width:72px}
 .size-option:hover{border-color:var(--berry)}
 .size-option.active{border-color:var(--berry);background:rgba(166,30,89,.06)}
@@ -64,7 +64,7 @@
 .purchase-option-desc{display:block;font:13px/1.4 var(--font-mono);opacity:.6;margin-top:6px}
 .shop-annual-note{font:13px/1.5 var(--font-mono);opacity:.55;margin:-15px 0 20px}
 
-.shop-cta{width:100%;justify-content:center;margin-top:0}
+.shop-cta{width:100%;justify-content:center;margin-top:26px}
 
 .shop-abo-explain{padding:110px 5vw;background:var(--plum);color:var(--cream)}
 .shop-abo-explain-inner{max-width:1200px;margin:0 auto}
@@ -310,10 +310,40 @@
 .order-list-row{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;padding:18px 0;border-bottom:1px solid var(--line);font:14px/1.4 var(--font-mono);text-decoration:none;transition:background .15s}
 .order-list-row:hover{background:rgba(23,70,209,.04)}
 .order-list-number{font-weight:600}
+/* ── Product details accordion (shop UI refinement) ── */
+.shop-accordion{padding:0 4.5vw;border-bottom:1px solid var(--line)}
+.shop-accordion-inner{max-width:none}
+.product-accordion{border-top:0}
+.product-accordion-body{max-width:820px}
+.product-accordion summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:24px;padding:28px 0;font:600 13px/1 var(--font-mono);letter-spacing:.14em;text-transform:uppercase;transition:color .2s}
+.product-accordion summary::-webkit-details-marker{display:none}
+.product-accordion summary::marker{content:""}
+.product-accordion summary:hover{color:var(--berry)}
+.product-accordion summary:focus-visible{outline:3px solid var(--blue);outline-offset:4px}
+/* Plus that becomes a minus, drawn rather than an icon font. */
+.product-accordion-icon{position:relative;width:14px;height:14px;flex:0 0 14px}
+.product-accordion-icon::before,.product-accordion-icon::after{content:"";position:absolute;background:currentColor;transition:transform .25s ease,opacity .25s ease}
+.product-accordion-icon::before{top:6px;left:0;width:14px;height:2px}
+.product-accordion-icon::after{left:6px;top:0;width:2px;height:14px}
+.product-accordion[open] .product-accordion-icon::after{transform:scaleY(0);opacity:0}
+.product-accordion-body{padding:0 0 40px;max-width:820px}
+.product-accordion dl{margin:0}
+.product-accordion dl div{display:grid;grid-template-columns:minmax(200px,240px) 1fr;gap:28px;border-top:1px solid rgba(79,58,91,.16);padding:16px 0;align-items:baseline}
+.product-accordion dt{font:12px/1.6 var(--font-mono);letter-spacing:.1em;opacity:.6}
+.product-accordion dd{margin:0;font:15px/1.65 var(--font-sans)}
+.product-accordion-links{display:flex;gap:28px;flex-wrap:wrap;margin-top:28px}
+.product-accordion-links .shop-details-link{margin-top:0}
+/* ── Brand note, replacing the newsletter signup on /shop ── */
+.brand-note{padding:80px 4.5vw 90px;border-top:1px solid var(--line)}
+.brand-note-inner{max-width:640px}
+.brand-note-text{font-size:clamp(26px,2.8vw,38px);line-height:1.08;letter-spacing:-.035em;font-weight:800;margin:14px 0 0}
+.brand-note-sub{font:15px/1.7 var(--font-sans);margin:16px 0 0;max-width:44ch;opacity:.72}
+.brand-note-link{display:inline-block;margin-top:26px;font:13px/1 var(--font-mono);text-transform:uppercase;letter-spacing:.08em;text-decoration:underline;text-underline-offset:5px;transition:color .2s}
+.brand-note-link:hover{color:var(--berry)}
 /* ── Accessory disclosure (Task 27A) ── */
 /* Deliberately not fine print: berry on cream, bordered, at the price,
    so "Matcha nicht enthalten" cannot be missed before adding to cart. */
-.product-not-included{display:block;margin:14px 0 0;padding:10px 12px;border:1px solid var(--berry);color:var(--berry);font:600 13px/1.4 var(--font-mono);letter-spacing:.02em;max-width:420px}
+.product-not-included{display:block;margin:22px 0 0;padding:16px 18px;border-left:3px solid var(--berry);background:rgba(166,30,89,.05);color:var(--berry);font:600 13px/1.6 var(--font-mono);letter-spacing:.02em;max-width:44ch}
 .cart-item-note{display:block;margin-top:4px;color:var(--berry);font:600 11px/1.3 var(--font-mono);letter-spacing:.06em;text-transform:uppercase}
 .order-list-status{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 .order-list-tracking{font:11px/1 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--blue);border:1px solid var(--blue);padding:3px 6px;white-space:nowrap}
@@ -480,6 +510,13 @@ header nav{gap:18px;font-size:12px}
 .order-list-row{grid-template-columns:1fr 1fr;gap:8px;padding:16px 0}
 .order-item-row{grid-template-columns:1fr auto;gap:8px}
 .order-item-qty,.order-item-unit{display:none}
+.shop-product{min-height:0;scroll-margin-top:72px}
+.shop-product-info{padding:48px 6vw;max-width:100%}
+.shop-accordion{padding:0 6vw}
+.product-accordion summary{padding:24px 0}
+.product-accordion dl div{grid-template-columns:1fr;gap:6px;padding:14px 0}
+.product-accordion-links{gap:14px;flex-direction:column}
+.brand-note{padding:60px 6vw 70px}
 .product-not-included{max-width:100%;font-size:12px}
 .order-status{padding:20px 0 24px}
 .order-steps{flex-direction:column;gap:10px}

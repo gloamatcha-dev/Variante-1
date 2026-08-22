@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useRef, useCallback } from "react";
+import { Fragment, useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import { Header, Footer, Newsletter } from "./Chrome";
 import { BRAND, PRODUCT, SHOP_STATUS, COUNTRIES } from "./content";
@@ -133,7 +133,25 @@ return <section id={anchorId} className="shop-product">
 /** Confirmed GLOA Matcha food information. Rendered only for the Matcha
  *  product itself - an accessory must never inherit any of this. */
 function MatchaShopDetails({product}:{product:CatalogProduct}){
-return <section className="shop-details"><div className="shop-details-inner"><p className="eyebrow">PRODUKTDETAILS</p><dl><div><dt>LEBENSMITTELBEZEICHNUNG</dt><dd>Matcha (Grünteepulver)</dd></div><div><dt>ZUTAT</dt><dd>100 % Matcha-Grünteepulver, keine Zusätze</dd></div><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>QUALITÄT</dt><dd>100 % Bio-Matcha</dd></div><div><dt>ERNTE</dt><dd>2. und 3. Pflückung</dd></div><div><dt>ZUBEREITUNG</dt><dd>Ca. 2 g mit wenig heißem Wasser (ca. 80 °C) glattrühren, dann aufgießen. Latte, iced oder pur.</dd></div><div><dt>LAGERUNG</dt><dd>{PRODUCT.storage}</dd></div><div><dt>GROESSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div><div><dt>VERANTWORTLICHES LEBENSMITTELUNTERNEHMEN</dt><dd>Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin, Deutschland</dd></div><div><dt>VERSAND</dt><dd>Versand aus Deutschland · Lieferzeit je nach Zielland: 2-10 Werktage</dd></div></dl><Link className="shop-details-link" href="/our-matcha" onClick={()=>track("shop_to_matcha")}>MEHR ÜBER UNSEREN MATCHA →</Link><Link className="shop-details-link" href="/versand">VERSAND & LIEFERZEITEN →</Link></div></section>}
+return <section className="shop-accordion"><div className="shop-accordion-inner">
+<details className="product-accordion">
+<summary><span>Produktdetails</span><span className="product-accordion-icon" aria-hidden="true"/></summary>
+<div className="product-accordion-body">
+<dl><div><dt>LEBENSMITTELBEZEICHNUNG</dt><dd>Matcha (Grünteepulver)</dd></div><div><dt>ZUTAT</dt><dd>100 % Matcha-Grünteepulver, keine Zusätze</dd></div><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>QUALITÄT</dt><dd>100 % Bio-Matcha</dd></div><div><dt>ERNTE</dt><dd>2. und 3. Pflückung</dd></div><div><dt>ZUBEREITUNG</dt><dd>Ca. 2 g mit wenig heißem Wasser (ca. 80 °C) glattrühren, dann aufgießen. Latte, iced oder pur.</dd></div><div><dt>LAGERUNG</dt><dd>{PRODUCT.storage}</dd></div><div><dt>GROESSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div><div><dt>VERANTWORTLICHES LEBENSMITTELUNTERNEHMEN</dt><dd>Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin, Deutschland</dd></div><div><dt>VERSAND</dt><dd>Versand aus Deutschland · Lieferzeit je nach Zielland: 2-10 Werktage</dd></div></dl>
+<div className="product-accordion-links"><Link className="shop-details-link" href="/our-matcha" onClick={()=>track("shop_to_matcha")}>MEHR ÜBER UNSEREN MATCHA →</Link><Link className="shop-details-link" href="/versand">VERSAND & LIEFERZEITEN →</Link></div>
+</div>
+</details>
+</div></section>}
+
+/** Replaces the newsletter signup on /shop. A brand note, not a module:
+ *  no form, no consent checkbox, no marketing promise to keep. */
+function BrandNote(){
+return <section className="brand-note"><div className="brand-note-inner">
+<p className="eyebrow">KEIN NEWSLETTER-LÄRM</p>
+<p className="brand-note-text">Wir melden uns nur, wenn es sich lohnt.</p>
+<p className="brand-note-sub">Keine Rabattschreie, kein E-Mail-Dauerfeuer. Nur GLOA.</p>
+<Link className="brand-note-link" href="/contact">Fragen? Schreib uns →</Link>
+</div></section>}
 
 function Shop({onAdd}:{onAdd:()=>void}){
 const {products,loading,error}=useCatalogList();
@@ -156,11 +174,12 @@ const lowestCents=Math.min(...products.flatMap(p=>p.variants.map(x=>x.price_gros
 return <main className="shop-page">
 <section className="shop-hero"><div className="shop-hero-inner"><p className="eyebrow">{eyebrow}</p><h1>{heading}</h1><p className="lead">{lead}</p><p className="shop-hero-price">AB {fmtCents(lowestCents)} €</p><p className="shop-hero-micro">Launch in Vorbereitung.</p><Link className="cta shop-hero-cta" href="#product" onClick={()=>track("shop_scroll_product")}>{multi?"ZU DEN PRODUKTEN":"ZUM MATCHA"}</Link></div></section>
 
-{products.map((p,i)=><ShopProductBlock key={p.id} product={p} anchorId={i===0?"product":`product-${p.slug}`} onAdd={onAdd}/>)}
+{products.map((p,i)=><Fragment key={p.id}>
+<ShopProductBlock product={p} anchorId={i===0?"product":`product-${p.slug}`} onAdd={onAdd}/>
+{p.slug===MATCHA_SLUG&&<MatchaShopDetails product={p}/>}
+</Fragment>)}
 
-{products.filter(p=>p.slug===MATCHA_SLUG).map(p=><MatchaShopDetails key={p.id} product={p}/>)}
-
-<Newsletter/>
+<BrandNote/>
 </main>}
 
 // -- Product detail ---------------------------------------------------
