@@ -126,3 +126,55 @@ export function getProductPresentation(
     matchaNotIncludedNotice: matchaNotIncluded ? MATCHA_NOT_INCLUDED_NOTICE : null,
   };
 }
+
+/* -- Display fallbacks ------------------------------------------------ */
+
+/**
+ * The fields the shop needs to present a product, independent of where
+ * they came from.
+ */
+export type ProductDisplayFields = {
+  slug: string;
+  name: string;
+  primary_image_path?: string | null;
+  short_description?: string | null;
+};
+
+/**
+ * Confirmed presentation that predates the catalog carrying these
+ * columns, keyed by slug.
+ *
+ * Keyed rather than shared on purpose: no product can silently inherit
+ * another product's image or subtitle. A product not listed here shows
+ * only what its own catalog row provides, and nothing at all when that is
+ * empty - never a placeholder and never invented copy.
+ */
+export const PRODUCT_FALLBACK_IMAGE: Readonly<Record<string, string>> = Object.freeze({
+  matcha: "/img/gloa-hero-packaging.jpg",
+});
+
+export const PRODUCT_FALLBACK_SUBTITLE: Readonly<Record<string, string>> = Object.freeze({
+  matcha: "Shizuoka, Japan · Latte · Iced · Pur",
+});
+
+/** The product's image, or null when there genuinely is none. */
+export function getProductImage(product: ProductDisplayFields): string | null {
+  const own = typeof product?.primary_image_path === "string" ? product.primary_image_path.trim() : "";
+  if (own) return own;
+  return PRODUCT_FALLBACK_IMAGE[product?.slug] ?? null;
+}
+
+/** The product's one-line subtitle, or null when there genuinely is none. */
+export function getProductSubtitle(product: ProductDisplayFields): string | null {
+  const own = typeof product?.short_description === "string" ? product.short_description.trim() : "";
+  if (own) return own;
+  return PRODUCT_FALLBACK_SUBTITLE[product?.slug] ?? null;
+}
+
+/**
+ * Eyebrow label for a product block: "GLOA Matcha" becomes "MATCHA",
+ * because the brand already sits in the wordmark above it.
+ */
+export function getProductEyebrow(product: ProductDisplayFields): string {
+  return String(product?.name ?? "").replace(/^GLOA\s+/i, "").toUpperCase();
+}

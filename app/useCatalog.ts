@@ -29,6 +29,8 @@ export type CatalogProduct = {
   slug: string;
   name: string;
   short_description: string | null;
+  description: string | null;
+  primary_image_path: string | null;
   variants: CatalogVariant[];
 };
 
@@ -37,6 +39,18 @@ type CatalogState = {
   loading: boolean;
   error: string | null;
 };
+
+/**
+ * A variant is purchasable when it has a real price. A net weight is
+ * optional (accessories are sold as units), but a weight that IS present
+ * must be sane. Shared by both hooks so they cannot drift apart.
+ */
+function isPurchasable(v: DbCatalogVariant): v is CatalogVariant {
+  return (
+    typeof v.price_gross_cents === "number" && v.price_gross_cents > 0 &&
+    (v.size_grams === null || (typeof v.size_grams === "number" && v.size_grams > 0))
+  );
+}
 
 export function useCatalog(slug: string): CatalogState {
   const [state, setState] = useState<CatalogState>(() =>
@@ -53,7 +67,7 @@ export function useCatalog(slug: string): CatalogState {
     (async () => {
       const { data: products, error: pErr } = await supabase
         .from("products")
-        .select("id, slug, name, short_description")
+        .select("id, slug, name, short_description, description, primary_image_path")
         .eq("slug", slug)
         .limit(1);
 
@@ -77,14 +91,7 @@ export function useCatalog(slug: string): CatalogState {
         return;
       }
 
-      // Validate and filter to only purchasable variants. A weight, when
-      // present, must still be sane - but its absence no longer makes a
-      // variant unsellable.
-      const purchasable: CatalogVariant[] = (variants || [])
-        .filter((v: DbCatalogVariant): v is CatalogVariant =>
-          typeof v.price_gross_cents === "number" && v.price_gross_cents > 0 &&
-          (v.size_grams === null || (typeof v.size_grams === "number" && v.size_grams > 0))
-        );
+      const purchasable: CatalogVariant[] = (variants || []).filter(isPurchasable);
 
       setState({
         product: { ...p, variants: purchasable },
@@ -95,6 +102,94 @@ export function useCatalog(slug: string): CatalogState {
 
     return () => { cancelled = true; };
   }, [slug]);
+
+  return state;
+}
+
+// Shape of one row from the nested products+variants select. The
+// Supabase client is untyped in this project, so the embedded relation
+// needs an explicit shape rather than an inferred one.
+type DbCatalogProductRow = {
+  id: string;
+  slug: string;
+  name: string;
+  short_description: string | null;
+  description: string | null;
+  primary_image_path: string | null;
+  sort_order: number;
+  product_variants: DbCatalogVariant[] | null;
+};
+
+export type CatalogListState = {
+  products: CatalogProduct[];
+  loading: boolean;
+  error: string | null;
+};
+
+/**
+ * Loads every product the public catalog exposes, with its purchasable
+ * variants, in one request.
+ *
+ * Visibility is decided entirely by Postgres RLS (migration 007): the
+ * browser uses the publishable key, so it can only ever see active
+ * products and active priced variants of active products. A draft
+ * product therefore cannot reach the shop even by mistake - there is no
+ * is_active filter in this file to forget, because the database will not
+ * hand the rows over in the first place.
+ *
+ * Products with no purchasable variant are dropped rather than rendered
+ * as an empty or "coming soon" card.
+ */
+export function useCatalogList(): CatalogListState {
+  const [state, setState] = useState<CatalogListState>(() =>
+    !supabase
+      ? { products: [], loading: false, error: "Shop nicht verfügbar." }
+      : { products: [], loading: true, error: null }
+  );
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    let cancelled = false;
+
+    (async () => {
+      const { data, error } = await supabase
+        .from("products")
+        .select(
+          "id, slug, name, short_description, description, primary_image_path, sort_order, " +
+            "product_variants(id, sku, label, size_grams, price_gross_cents, sort_order)"
+        )
+        .order("sort_order", { ascending: true });
+
+      if (cancelled) return;
+
+      if (error) {
+        // Never surface a raw Supabase message to a customer.
+        console.error("Catalog load error:", error.message);
+        setState({ products: [], loading: false, error: "Shop vorübergehend nicht verfügbar." });
+        return;
+      }
+
+      const rows = (data ?? []) as unknown as DbCatalogProductRow[];
+      const products: CatalogProduct[] = rows
+        .map(row => ({
+          id: row.id,
+          slug: row.slug,
+          name: row.name,
+          short_description: row.short_description ?? null,
+          description: row.description ?? null,
+          primary_image_path: row.primary_image_path ?? null,
+          variants: (row.product_variants ?? [])
+            .filter(isPurchasable)
+            .sort((a, b) => a.sort_order - b.sort_order),
+        }))
+        .filter(p => p.variants.length > 0);
+
+      setState({ products, loading: false, error: null });
+    })();
+
+    return () => { cancelled = true; };
+  }, []);
 
   return state;
 }

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import {
   FOOD_PRODUCT_SLUGS,
   MATCHA_NOT_INCLUDED_NOTICE,
@@ -236,4 +237,83 @@ test("shipping: an accessory counts toward free shipping exactly like any mercha
     computeShippingGrossCents("eu", 5000),
   );
   assert.equal(computeShippingGrossCents("nonEuCore", 100000), 1790, "no free shipping outside the EU, unchanged");
+});
+
+/* ── Multi-product presentation (Task 27B) ──────────────────── */
+
+const MATCHA_PRODUCT = { slug: "matcha", name: "GLOA Matcha", primary_image_path: null, short_description: null };
+const CASE_PRODUCT = { slug: "metal-case", name: "GLOA Metal Case", primary_image_path: null, short_description: null };
+
+test("display: Matcha keeps its shipped image and subtitle", async () => {
+  const { getProductImage, getProductSubtitle } = await import("../lib/productPresentation.ts");
+  assert.equal(getProductImage(MATCHA_PRODUCT), "/img/gloa-hero-packaging.jpg");
+  assert.match(getProductSubtitle(MATCHA_PRODUCT), /Shizuoka/);
+});
+
+test("display: an accessory inherits nothing from Matcha", async () => {
+  const { getProductImage, getProductSubtitle } = await import("../lib/productPresentation.ts");
+  // No image and no subtitle until the catalog actually carries them.
+  assert.equal(getProductImage(CASE_PRODUCT), null, "must not borrow Matcha's photo");
+  assert.equal(getProductSubtitle(CASE_PRODUCT), null, "must not borrow Matcha's subtitle");
+});
+
+test("display: a product's own catalog data always wins over any fallback", async () => {
+  const { getProductImage, getProductSubtitle } = await import("../lib/productPresentation.ts");
+  assert.equal(
+    getProductImage({ ...MATCHA_PRODUCT, primary_image_path: "/img/own.jpg" }),
+    "/img/own.jpg"
+  );
+  assert.equal(
+    getProductSubtitle({ ...CASE_PRODUCT, short_description: "Die leere GLOA Dose." }),
+    "Die leere GLOA Dose."
+  );
+  // Blank strings count as absent, not as content.
+  assert.equal(getProductImage({ ...CASE_PRODUCT, primary_image_path: "   " }), null);
+  assert.equal(getProductSubtitle({ ...CASE_PRODUCT, short_description: "" }), null);
+});
+
+test("display: an unknown product renders no invented image or subtitle", async () => {
+  const { getProductImage, getProductSubtitle } = await import("../lib/productPresentation.ts");
+  const unknown = { slug: "some-future-thing", name: "GLOA Something", primary_image_path: null, short_description: null };
+  assert.equal(getProductImage(unknown), null);
+  assert.equal(getProductSubtitle(unknown), null);
+});
+
+test("display: the eyebrow drops the brand prefix already shown in the wordmark", async () => {
+  const { getProductEyebrow } = await import("../lib/productPresentation.ts");
+  assert.equal(getProductEyebrow(MATCHA_PRODUCT), "MATCHA");
+  assert.equal(getProductEyebrow(CASE_PRODUCT), "METAL CASE");
+  assert.equal(getProductEyebrow({ slug: "x", name: "Something Else" }), "SOMETHING ELSE");
+});
+
+test("multi-product: two products resolve independently, with no cross-contamination", async () => {
+  const { getProductPresentation, getProductImage } = await import("../lib/productPresentation.ts");
+
+  const matcha = getProductPresentation(MATCHA_PRODUCT.slug, { size_grams: 30 });
+  const accessory = getProductPresentation(CASE_PRODUCT.slug, { size_grams: null });
+
+  assert.equal(matcha.foodInformation, true);
+  assert.equal(matcha.weighed, true);
+  assert.equal(matcha.matchaNotIncluded, false);
+
+  assert.equal(accessory.foodInformation, false);
+  assert.equal(accessory.weighed, false);
+  assert.equal(accessory.matchaNotIncluded, true);
+
+  // Rendering one must not change the other.
+  assert.notEqual(getProductImage(MATCHA_PRODUCT), getProductImage(CASE_PRODUCT));
+});
+
+test("catalog: the browser catalog path never uses a service-role key", () => {
+  // Visibility of draft products is enforced by Postgres RLS, which only
+  // holds if the browser keeps using the publishable key.
+  const catalog = readFileSync(new URL("../app/useCatalog.ts", import.meta.url), "utf-8");
+  const client = readFileSync(new URL("../lib/supabase.ts", import.meta.url), "utf-8");
+  for (const source of [catalog, client]) {
+    assert.ok(!source.includes("SUPABASE_SECRET_KEY"), "browser catalog must never touch the secret key");
+    assert.ok(!source.includes("service_role"));
+  }
+  assert.ok(client.includes("VITE_SUPABASE_PUBLISHABLE_KEY"));
+  // No hand-rolled is_active filter to forget: RLS decides visibility.
+  assert.ok(catalog.includes("product_variants("), "list hook should embed variants in one RLS-filtered query");
 });

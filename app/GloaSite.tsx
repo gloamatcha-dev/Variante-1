@@ -3,8 +3,9 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import { Header, Footer, Newsletter } from "./Chrome";
 import { BRAND, PRODUCT, SHOP_STATUS, COUNTRIES } from "./content";
-import { useCatalog, fmtCents, per100gCents } from "./useCatalog";
-import { getProductPresentation, showsUnitPricePer100g, MATCHA_NOT_INCLUDED_SHORT } from "../lib/productPresentation";
+import { useCatalog, useCatalogList, fmtCents, per100gCents } from "./useCatalog";
+import type { CatalogProduct } from "./useCatalog";
+import { getProductPresentation, showsUnitPricePer100g, showsFoodInformation, isWeighedProduct, getProductImage, getProductSubtitle, getProductEyebrow, MATCHA_NOT_INCLUDED_SHORT } from "../lib/productPresentation";
 import { BusinessCalculator } from "./BusinessCalculator";
 import { AccountPortal } from "./AccountPortal";
 import { OrderSuccess } from "./OrderSuccess";
@@ -85,69 +86,101 @@ return <section className="featured-recipes"><div className="featured-recipes-he
 
 function Home({onAdd}:{onAdd:()=>void}){return <main><section className="hero"><div className="hero-copy"><p className="eyebrow">MATCHA AUS SHIZUOKA.</p><h1>Matcha.<br/><i>Aber richtig.</i></h1><p className="lead">Aus Shizuoka, Japan. Für Latte, pur, iced oder wie du willst.</p><div className="hero-actions"><Link className="cta" href="/shop" onClick={()=>track("shop_click")}>Zum Shop</Link><Link className="cta secondary" href="/about">GLOA entdecken →</Link></div></div><div className="hero-art"><img src="/img/gloa-hero-packaging.jpg" alt="GLOA Matcha Verpackung" className="hero-img"/><span className="hero-micro">SHIZUOKA / JAPAN</span></div></section><section className="product-intro"><div><p className="eyebrow">MEET YOUR MATCHA.</p><h2>Ein Grün.<br/><i>Viele Momente.</i></h2><p>Aus Shizuoka, Japan. Für Matcha Latte und pur. Easy im Alltag, ehrlich im Produkt.</p><Link className="cta" href="/shop">Shop GLOA</Link></div><ProductCard onAdd={onAdd}/></section><section className="daily"><div className="daily-copy"><p className="eyebrow">MATCHA FÜR JEDEN TAG</p><h2>Morgens.<br/>Im Meeting.<br/><i>Nachmittags.</i></h2></div><div className="daily-grid">{dailyTiles.map(t=><div className="daily-tile" key={t.label}><img src={t.src} alt={t.alt} loading="lazy"/><span>{t.label}</span></div>)}</div></section><section className="origin"><div><p className="eyebrow">ORIGIN</p><h2>From Shizuoka,<br/><i>Japan.</i></h2></div><div><p>GLOA Matcha kommt aus Shizuoka, Japan: 100 % Bio-Matcha aus der zweiten und dritten Pflückung, fein vermahlen.</p><dl><div><dt>ORIGIN</dt><dd>Shizuoka, Japan</dd></div><div><dt>MADE FOR</dt><dd>Latte + pure preparation</dd></div></dl></div></section><HowTo/><RecipeCarousel/><section className="community"><p className="eyebrow">#gloamatcha</p><h2>Zeig uns<br/><i>deinen Matcha.</i></h2><CommunityFeed/><a href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">@gloa.matcha folgen →</a></section><Newsletter/></main>}
 
-function Shop({onAdd}:{onAdd:()=>void}){
-const {product,loading,error}=useCatalog("matcha");
+// -- Catalog-driven shop --------------------------------------------
+//
+// The shop renders whatever the public catalog exposes. Visibility is
+// decided by RLS, so a draft product cannot appear here even by accident.
+//
+// Per-product presentation (image, subtitle, eyebrow, food vs accessory)
+// is resolved by lib/productPresentation.ts, so a card, a detail page and
+// a cart line cannot drift apart. Nothing is invented for a product that
+// has no data: a missing image or subtitle simply renders nothing.
+const MATCHA_SLUG="matcha";
+
+function VariantSelector({product,selected,onSelect,name}:{product:CatalogProduct;selected:number;onSelect:(i:number)=>void;name:string}){
+if(product.variants.length<2)return null;
+const weighed=isWeighedProduct(product.variants[selected]);
+return <div className="size-selector" role="radiogroup" aria-label={weighed?"Größe wählen":"Variante wählen"}>
+{product.variants.map((mv,i)=><label key={mv.id} className={`size-option${i===selected?" active":""}`}><input type="radio" name={name} className="sr-only" value={mv.id} checked={i===selected} onChange={()=>onSelect(i)}/><span className="size-option-size">{mv.label}</span><span className="size-option-price">{fmtCents(mv.price_gross_cents)} €</span></label>)}
+</div>}
+
+/** One product's purchase block on the shop page. Keeps its own variant
+ *  state, so several products on one page never share a selection. */
+function ShopProductBlock({product,anchorId,onAdd}:{product:CatalogProduct;anchorId:string;onAdd:()=>void}){
 const {addItem}=useCart();
-const [sizeIdx,setSizeIdx]=useState(0);
-
-if(loading)return <main className="shop-page"><section className="shop-hero"><div className="shop-hero-inner"><p className="eyebrow">GLOA · MATCHA</p><h1>Dein Matcha.<br/><i>Deine Art.</i></h1><p className="lead">Matcha aus Shizuoka, Japan. Für Latte, iced, pur oder wie du ihn magst.</p><p className="shop-hero-price">Laden…</p></div></section></main>;
-if(error||!product)return <main className="shop-page"><section className="shop-hero"><div className="shop-hero-inner"><p className="eyebrow">GLOA · MATCHA</p><h1>Dein Matcha.<br/><i>Deine Art.</i></h1><p className="lead">Shop vorübergehend nicht verfügbar.</p></div></section></main>;
-if(!product.variants.length)return <main className="shop-page"><section className="shop-hero"><div className="shop-hero-inner"><p className="eyebrow">GLOA · MATCHA</p><h1>Dein Matcha.<br/><i>Deine Art.</i></h1><p className="lead">Aktuell keine Produkte verfügbar.</p></div></section></main>;
-
-const safe=Math.min(sizeIdx,product.variants.length-1);
+const [idx,setIdx]=useState(0);
+const safe=Math.min(idx,product.variants.length-1);
 const v=product.variants[safe];
 const presentation=getProductPresentation(product.slug,v);
 const per100=showsUnitPricePer100g(v)?per100gCents(v.price_gross_cents,v.size_grams as number):null;
-const lowestCents=Math.min(...product.variants.map(x=>x.price_gross_cents));
-
+const img=getProductImage(product);
+const sub=getProductSubtitle(product);
 const handleAdd=()=>{addItem({productId:product.id,productName:product.name,productSlug:product.slug,variantId:v.id,label:v.label,grams:v.size_grams,purchaseType:"once",unitPriceCents:v.price_gross_cents});track("add_to_cart");onAdd()};
+return <section id={anchorId} className="shop-product">
+{img&&<div className="shop-product-image"><img src={img} alt={product.name}/></div>}
+<div className="shop-product-info"><p className="eyebrow">{getProductEyebrow(product)}</p><h2>{product.name.toUpperCase()}</h2>
+{sub&&<p className="shop-product-sub">{sub}</p>}
 
-return <main className="shop-page">
-<section className="shop-hero"><div className="shop-hero-inner"><p className="eyebrow">GLOA · MATCHA</p><h1>Dein Matcha.<br/><i>Deine Art.</i></h1><p className="lead">Matcha aus Shizuoka, Japan. Für Latte, iced, pur oder wie du ihn magst.</p><p className="shop-hero-price">AB {fmtCents(lowestCents)} €</p><p className="shop-hero-micro">Launch in Vorbereitung.</p><Link className="cta shop-hero-cta" href="#product" onClick={()=>track("shop_scroll_product")}>ZUM MATCHA</Link></div></section>
-
-<section id="product" className="shop-product"><div className="shop-product-image"><img src="/img/gloa-hero-packaging.jpg" alt="GLOA Matcha Verpackung"/></div><div className="shop-product-info"><p className="eyebrow">MATCHA</p><h2>GLOA MATCHA</h2><p className="shop-product-sub">Shizuoka, Japan · Latte · Iced · Pur</p>
-
-<div className="size-selector" role="radiogroup" aria-label="Größe wählen">
-{product.variants.map((mv,i)=><label key={mv.id} className={`size-option${i===safe?" active":""}`}><input type="radio" name="size" className="sr-only" value={mv.id} checked={i===safe} onChange={()=>setSizeIdx(i)}/><span className="size-option-size">{mv.label}</span><span className="size-option-price">{fmtCents(mv.price_gross_cents)} €</span></label>)}
-</div>
+<VariantSelector product={product} selected={safe} onSelect={setIdx} name={`variant-${product.slug}`}/>
 
 <p className="shop-product-price">{fmtCents(v.price_gross_cents)} €</p>
 {per100!==null&&<p className="shop-product-per100g">{fmtCents(per100)} € / 100 g</p>}
 {presentation.matchaNotIncludedNotice&&<p className="product-not-included">{presentation.matchaNotIncludedNotice}</p>}
 
 <button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="#newsletter":handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
-</div></section>
+</div></section>}
 
-<section className="shop-details"><div className="shop-details-inner"><p className="eyebrow">PRODUKTDETAILS</p><dl><div><dt>LEBENSMITTELBEZEICHNUNG</dt><dd>Matcha (Grünteepulver)</dd></div><div><dt>ZUTAT</dt><dd>100 % Matcha-Grünteepulver, keine Zusätze</dd></div><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>QUALITÄT</dt><dd>100 % Bio-Matcha</dd></div><div><dt>ERNTE</dt><dd>2. und 3. Pflückung</dd></div><div><dt>ZUBEREITUNG</dt><dd>Ca. 2 g mit wenig heißem Wasser (ca. 80 °C) glattrühren, dann aufgießen. Latte, iced oder pur.</dd></div><div><dt>LAGERUNG</dt><dd>{PRODUCT.storage}</dd></div><div><dt>GROESSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div><div><dt>VERANTWORTLICHES LEBENSMITTELUNTERNEHMEN</dt><dd>Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin, Deutschland</dd></div><div><dt>VERSAND</dt><dd>Versand aus Deutschland · Lieferzeit je nach Zielland: 2-10 Werktage</dd></div></dl><Link className="shop-details-link" href="/our-matcha" onClick={()=>track("shop_to_matcha")}>MEHR ÜBER UNSEREN MATCHA →</Link><Link className="shop-details-link" href="/versand">VERSAND & LIEFERZEITEN →</Link></div></section>
+/** Confirmed GLOA Matcha food information. Rendered only for the Matcha
+ *  product itself - an accessory must never inherit any of this. */
+function MatchaShopDetails({product}:{product:CatalogProduct}){
+return <section className="shop-details"><div className="shop-details-inner"><p className="eyebrow">PRODUKTDETAILS</p><dl><div><dt>LEBENSMITTELBEZEICHNUNG</dt><dd>Matcha (Grünteepulver)</dd></div><div><dt>ZUTAT</dt><dd>100 % Matcha-Grünteepulver, keine Zusätze</dd></div><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>QUALITÄT</dt><dd>100 % Bio-Matcha</dd></div><div><dt>ERNTE</dt><dd>2. und 3. Pflückung</dd></div><div><dt>ZUBEREITUNG</dt><dd>Ca. 2 g mit wenig heißem Wasser (ca. 80 °C) glattrühren, dann aufgießen. Latte, iced oder pur.</dd></div><div><dt>LAGERUNG</dt><dd>{PRODUCT.storage}</dd></div><div><dt>GROESSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div><div><dt>VERANTWORTLICHES LEBENSMITTELUNTERNEHMEN</dt><dd>Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin, Deutschland</dd></div><div><dt>VERSAND</dt><dd>Versand aus Deutschland · Lieferzeit je nach Zielland: 2-10 Werktage</dd></div></dl><Link className="shop-details-link" href="/our-matcha" onClick={()=>track("shop_to_matcha")}>MEHR ÜBER UNSEREN MATCHA →</Link><Link className="shop-details-link" href="/versand">VERSAND & LIEFERZEITEN →</Link></div></section>}
+
+function Shop({onAdd}:{onAdd:()=>void}){
+const {products,loading,error}=useCatalogList();
+const multi=products.length>1;
+// While Matcha is the only live product the hero is exactly the one
+// shipped today. A second active product switches it to a
+// product-neutral variant rather than continuing to announce the shop as
+// Matcha-only.
+const eyebrow=multi?"GLOA · SHOP":"GLOA · MATCHA";
+const heading=multi?<>Alles von GLOA.</>:<>Dein Matcha.<br/><i>Deine Art.</i></>;
+const lead=multi?"Matcha aus Shizuoka, Japan – und alles, was dazugehört.":"Matcha aus Shizuoka, Japan. Für Latte, iced, pur oder wie du ihn magst.";
+const shell=(leadText:string,extra?:React.ReactNode)=><main className="shop-page"><section className="shop-hero"><div className="shop-hero-inner"><p className="eyebrow">{eyebrow}</p><h1>{heading}</h1><p className="lead">{leadText}</p>{extra}</div></section></main>;
+
+if(loading)return shell(lead,<p className="shop-hero-price">Laden…</p>);
+if(error)return shell("Shop vorübergehend nicht verfügbar.");
+if(!products.length)return shell("Aktuell keine Produkte verfügbar.");
+
+const lowestCents=Math.min(...products.flatMap(p=>p.variants.map(x=>x.price_gross_cents)));
+
+return <main className="shop-page">
+<section className="shop-hero"><div className="shop-hero-inner"><p className="eyebrow">{eyebrow}</p><h1>{heading}</h1><p className="lead">{lead}</p><p className="shop-hero-price">AB {fmtCents(lowestCents)} €</p><p className="shop-hero-micro">Launch in Vorbereitung.</p><Link className="cta shop-hero-cta" href="#product" onClick={()=>track("shop_scroll_product")}>{multi?"ZU DEN PRODUKTEN":"ZUM MATCHA"}</Link></div></section>
+
+{products.map((p,i)=><ShopProductBlock key={p.id} product={p} anchorId={i===0?"product":`product-${p.slug}`} onAdd={onAdd}/>)}
+
+{products.filter(p=>p.slug===MATCHA_SLUG).map(p=><MatchaShopDetails key={p.id} product={p}/>)}
 
 <Newsletter/>
 </main>}
 
-function ProductPage({onAdd}:{onAdd:()=>void}){
-const {product,loading,error}=useCatalog("matcha");
+// -- Product detail ---------------------------------------------------
+
+/** GLOA Matcha's own detail page. Unchanged storytelling layout. */
+function MatchaProductPage({product,onAdd}:{product:CatalogProduct;onAdd:()=>void}){
 const {addItem}=useCart();
 const [sizeIdx,setSizeIdx]=useState(0);
-
-if(loading)return <main className="pdp"><section className="pdp-hero"><div className="pdp-hero-info"><p className="eyebrow">MATCHA · SHIZUOKA</p><h1>{PRODUCT.name}</h1><p>Laden…</p></div></section></main>;
-if(error||!product||!product.variants.length)return <main className="pdp"><section className="pdp-hero"><div className="pdp-hero-info"><p className="eyebrow">MATCHA · SHIZUOKA</p><h1>{PRODUCT.name}</h1><p>Produkt vorübergehend nicht verfügbar.</p></div></section></main>;
-
 const safe=Math.min(sizeIdx,product.variants.length-1);
 const v=product.variants[safe];
-const presentation=getProductPresentation(product.slug,v);
 const per100=showsUnitPricePer100g(v)?per100gCents(v.price_gross_cents,v.size_grams as number):null;
-
 const handleAdd=()=>{addItem({productId:product.id,productName:product.name,productSlug:product.slug,variantId:v.id,label:v.label,grams:v.size_grams,purchaseType:"once",unitPriceCents:v.price_gross_cents});track("add_to_cart");onAdd()};
 
 return <main className="pdp">
 <section className="pdp-hero"><div className="pdp-hero-image"><img src="/img/gloa-hero-packaging.jpg" alt="GLOA Matcha Verpackung"/></div><div className="pdp-hero-info"><p className="eyebrow">MATCHA · SHIZUOKA</p><h1>{PRODUCT.name}</h1><p>Für Latte, iced und pure Zubereitung.</p>
 
-<div className="size-selector" role="radiogroup" aria-label="Größe wählen">
-{product.variants.map((mv,i)=><label key={mv.id} className={`size-option${i===safe?" active":""}`}><input type="radio" name="pdp-size" className="sr-only" value={mv.id} checked={i===safe} onChange={()=>setSizeIdx(i)}/><span className="size-option-size">{mv.label}</span><span className="size-option-price">{fmtCents(mv.price_gross_cents)} €</span></label>)}
-</div>
+<VariantSelector product={product} selected={safe} onSelect={setSizeIdx} name="pdp-size"/>
 
 <p className="pdp-price">{fmtCents(v.price_gross_cents)} €</p>
 {per100!==null&&<p className="pdp-per100g">{fmtCents(per100)} € / 100 g</p>}
-{presentation.matchaNotIncludedNotice&&<p className="product-not-included">{presentation.matchaNotIncludedNotice}</p>}
 
 <button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="#newsletter":handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
 </div></section>
@@ -155,6 +188,51 @@ return <main className="pdp">
 <section className="pdp-facts"><div><p className="eyebrow">WHAT WE KNOW</p><h2>Clear facts.<br/>Nothing invented.</h2></div><dl><div><dt>LEBENSMITTELBEZEICHNUNG</dt><dd>Matcha (Grünteepulver)</dd></div><div><dt>ZUTAT</dt><dd>100 % Matcha-Grünteepulver, keine Zusätze</dd></div><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>VERWENDUNG</dt><dd>Latte · Iced · Pur</dd></div><div><dt>LAGERUNG</dt><dd>{PRODUCT.storage}</dd></div><div><dt>GROESSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div><div><dt>VERANTWORTLICHES LEBENSMITTELUNTERNEHMEN</dt><dd>Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin, Deutschland</dd></div></dl></section>
 <HowTo/>
 </main>}
+
+/** Detail page for a non-food product. Deliberately short: name, image,
+ *  description, price, variants, disclosure, buy. The long Matcha
+ *  storytelling layout is not forced onto an accessory, and no food field
+ *  appears anywhere. */
+function AccessoryProductPage({product,onAdd}:{product:CatalogProduct;onAdd:()=>void}){
+const {addItem}=useCart();
+const [idx,setIdx]=useState(0);
+const safe=Math.min(idx,product.variants.length-1);
+const v=product.variants[safe];
+const presentation=getProductPresentation(product.slug,v);
+const img=getProductImage(product);
+const handleAdd=()=>{addItem({productId:product.id,productName:product.name,productSlug:product.slug,variantId:v.id,label:v.label,grams:v.size_grams,purchaseType:"once",unitPriceCents:v.price_gross_cents});track("add_to_cart");onAdd()};
+
+return <main className="pdp">
+<section className="pdp-hero">
+{img&&<div className="pdp-hero-image"><img src={img} alt={product.name}/></div>}
+<div className="pdp-hero-info"><p className="eyebrow">{getProductEyebrow(product)}</p><h1>{product.name}</h1>
+{product.short_description&&<p>{product.short_description}</p>}
+
+<VariantSelector product={product} selected={safe} onSelect={setIdx} name={`pdp-variant-${product.slug}`}/>
+
+<p className="pdp-price">{fmtCents(v.price_gross_cents)} €</p>
+{presentation.matchaNotIncludedNotice&&<p className="product-not-included">{presentation.matchaNotIncludedNotice}</p>}
+
+<button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="#newsletter":handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
+</div></section>
+
+{product.description&&<section className="pdp-facts"><div><p className="eyebrow">PRODUKT</p><h2>{product.name}</h2></div><p className="pdp-description">{product.description}</p></section>}
+</main>}
+
+/** Route entry for /shop/<slug>. Picks the layout from the catalog rather
+ *  than from a hardcoded product. */
+function ProductPage({slug,onAdd}:{slug:string;onAdd:()=>void}){
+const {product,loading,error}=useCatalog(slug);
+
+const shell=(message:string)=><main className="pdp"><section className="pdp-hero"><div className="pdp-hero-info"><p className="eyebrow">GLOA</p><h1>{product?.name||"Produkt"}</h1><p>{message}</p></div></section></main>;
+
+if(loading)return shell("Laden…");
+if(error||!product)return shell("Produkt vorübergehend nicht verfügbar.");
+if(!product.variants.length)return shell("Aktuell nicht verfügbar.");
+
+return showsFoodInformation(product.slug)
+ ?<MatchaProductPage product={product} onAdd={onAdd}/>
+ :<AccessoryProductPage product={product} onAdd={onAdd}/>}
 
 // Unused - kept for potential future use
 // function PageHero({index,eyebrow,title,text,tone}:{index:string;eyebrow:string;title:React.ReactNode;text:string;tone:string}){return <section className={`inner-hero ${tone}`}><span className="page-index">{index}</span><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="lead">{text}</p></div></section>}
@@ -884,7 +962,7 @@ const closeCart=useCallback(()=>setCartOpen(false),[]);
 let page:React.ReactNode;
 if(route==="home")page=<Home onAdd={openCart}/>;
 else if(route==="shop")page=<Shop onAdd={openCart}/>;
-else if(route==="shop/gloa-matcha"||route==="shop/matcha")page=<ProductPage onAdd={openCart}/>;
+else if(route.startsWith("shop/"))page=<ProductPage slug={route.slice(5)==="gloa-matcha"?"matcha":route.slice(5)} onAdd={openCart}/>;
 else if(route==="our-matcha")page=<MatchaPage/>;
 else if(route==="about")page=<About/>;
 else if(route==="for-cafes"||route==="wholesale")page=<ForCafes/>;
