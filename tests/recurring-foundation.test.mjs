@@ -507,39 +507,60 @@ test("fix: the approved parts of migration 022 are untouched", () => {
   assert.ok(!/to authenticated/i.test(sql));
 });
 
-/* ── Task 29D-B.1: stripe_customers is genuinely server-only ── */
+/* ── Task 29D-B.1: the server-only tables are genuinely server-only ── */
 
 const hardening = read("supabase/migrations/023_harden_stripe_customers_grants.sql");
 const hardeningSql = withoutComments(hardening);
 
+const ALL_PRIVILEGES = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"];
+const SUPABASE_ROLES = ["anon", "authenticated", "service_role"];
+
+/**
+ * The three tables no browser role may reach, and the privileges the
+ * application genuinely uses on each - read out of the code, not assumed:
+ *
+ *   checkout_attempts      lib/checkoutAttempts.ts upserts, selects ×3
+ *                          and updates ×2
+ *   stripe_webhook_events  lib/stripeWebhookEvents.ts selects then inserts
+ *   stripe_customers       no reader yet; select + insert is the mapping
+ *                          lookup and first-subscription write
+ */
+const SERVER_ONLY_TABLES = {
+  stripe_customers: ["INSERT", "SELECT"],
+  checkout_attempts: ["INSERT", "SELECT", "UPDATE"],
+  stripe_webhook_events: ["INSERT", "SELECT"],
+};
+
 /**
  * Replays every GRANT and REVOKE that any migration issues against one
- * table, in file order, and returns the privileges each role is left
- * holding. Asserting the end state rather than the presence of a
- * statement is the whole point here: migration 022 "granted nothing" to
- * the browser roles and they still ended up with TRUNCATE, because
- * Supabase's default privileges had already given it to them.
+ * table, in file order, and returns what each Supabase role is left
+ * holding.
+ *
+ * Asserting the end state rather than the presence of a statement is the
+ * whole point. Migrations 009, 010 and 022 all "granted nothing" to the
+ * browser roles, and all three tables still ended up handing them
+ * TRUNCATE, because Supabase's default privileges got there first.
  */
 function effectiveGrants(table, { defaultPrivileges = [] } = {}) {
-  const ALL = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"];
-  const held = { anon: new Set(defaultPrivileges), authenticated: new Set(defaultPrivileges), service_role: new Set(defaultPrivileges) };
+  const held = Object.fromEntries(SUPABASE_ROLES.map(r => [r, new Set(defaultPrivileges)]));
 
-  const files = readdirSync(MIGRATIONS).filter(n => n.endsWith(".sql")).sort();
-  for (const file of files) {
+  for (const file of readdirSync(MIGRATIONS).filter(n => n.endsWith(".sql")).sort()) {
     const body = withoutComments(readFileSync(path.join(MIGRATIONS, file), "utf-8"));
     for (const statement of body.split(";")) {
       if (!new RegExp(`\\b${table}\\b`).test(statement)) continue;
       const isRevoke = /^\s*revoke\b/i.test(statement);
       const isGrant = /^\s*grant\b/i.test(statement);
       if (!isRevoke && !isGrant) continue;
+      // Function grants name the function, not the table; skip them.
+      if (/\bon\s+function\b/i.test(statement)) continue;
 
       const listed = statement.slice(0, statement.toLowerCase().indexOf(" on "));
-      const privileges = /all\s+privileges|^\s*(?:grant|revoke)\s+all\b/i.test(listed)
-        ? ALL
-        : ALL.filter(p => new RegExp(`\\b${p}\\b`, "i").test(listed));
+      const privileges = /\ball\b/i.test(listed)
+        ? ALL_PRIVILEGES
+        : ALL_PRIVILEGES.filter(p => new RegExp(`\\b${p}\\b`, "i").test(listed));
 
       const target = statement.slice(statement.toLowerCase().lastIndexOf(isRevoke ? " from " : " to "));
-      for (const role of Object.keys(held)) {
+      for (const role of SUPABASE_ROLES) {
         if (!new RegExp(`\\b${role}\\b`).test(target)) continue;
         for (const p of privileges) {
           if (isRevoke) held[role].delete(p);
@@ -551,97 +572,161 @@ function effectiveGrants(table, { defaultPrivileges = [] } = {}) {
   return Object.fromEntries(Object.entries(held).map(([role, set]) => [role, [...set].sort()]));
 }
 
-test("hardening: 023 is the next free number and 022 is not edited", () => {
+test("hardening: 023 owns its number and the live migrations are not edited", () => {
   const files = readdirSync(MIGRATIONS).filter(n => n.endsWith(".sql")).sort();
   assert.equal(files[files.length - 1], "023_harden_stripe_customers_grants.sql");
   assert.equal(files.filter(n => n.startsWith("023")).length, 1);
   assert.equal(files.filter(n => n.startsWith("024")).length, 0);
-  // 022 is live now, so it must keep the grants it was applied with.
+  // 022 is live, so it must keep the statements it was applied with.
   assert.match(sql, /grant select, insert on public\.stripe_customers to service_role;/);
+  assert.match(sql, /alter table public\.stripe_customers enable row level security;/);
 });
 
-test("hardening: everything is revoked from all three Supabase roles", () => {
+test("hardening: all three server-only tables are revoked from all three roles", () => {
   const revokes = hardeningSql.match(/revoke[^;]*;/gi) ?? [];
-  assert.equal(revokes.length, 1, "one revoke, aimed at one table");
-  const revoke = revokes[0].replace(/\s+/g, " ");
-  assert.match(revoke, /revoke all privileges on table public\.stripe_customers/i);
-  for (const role of ["anon", "authenticated", "service_role"]) {
-    assert.match(revoke, new RegExp(`\\b${role}\\b`), `${role} must be revoked from`);
+  assert.equal(revokes.length, 3, "one revoke per server-only table");
+  const covered = new Set();
+  for (const revoke of revokes.map(r => r.replace(/\s+/g, " "))) {
+    assert.match(revoke, /revoke all privileges on table public\.(\w+)/i);
+    covered.add(revoke.match(/public\.(\w+)/)[1]);
+    for (const role of SUPABASE_ROLES) {
+      assert.match(revoke, new RegExp(`\\b${role}\\b`), `${role} must be revoked in: ${revoke}`);
+    }
+    // The owner keeps its privileges; revoking them would lock the table.
+    assert.ok(!/\bpostgres\b/.test(revoke), "the table owner must not be revoked");
   }
-  // The owner keeps its privileges; revoking them would lock the table.
-  assert.ok(!/\bpostgres\b/.test(revoke), "the table owner must not be revoked");
+  assert.deepEqual([...covered].sort(), Object.keys(SERVER_ONLY_TABLES).sort());
 });
 
-test("hardening: only SELECT and INSERT come back, and only for service_role", () => {
-  const grants = hardeningSql.match(/grant[^;]*;/gi) ?? [];
-  assert.equal(grants.length, 1);
-  const grant = grants[0].replace(/\s+/g, " ");
-  assert.match(grant, /grant select, insert on table public\.stripe_customers to service_role;/i);
-  for (const role of ["anon", "authenticated", "public"]) {
-    assert.ok(!new RegExp(`to[^;]*\\b${role}\\b`, "i").test(grant), `nothing may be granted to ${role}`);
-  }
-});
-
-test("hardening: the browser roles end up holding nothing at all", () => {
-  // Replayed with Supabase's default privileges as the starting point,
-  // which is what actually happened on the live table.
-  const SUPABASE_DEFAULTS = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"];
-  const effective = effectiveGrants("stripe_customers", { defaultPrivileges: SUPABASE_DEFAULTS });
-
-  for (const role of ["anon", "authenticated"]) {
-    assert.deepEqual(effective[role], [], `${role} must hold no privilege on stripe_customers`);
-    // Named individually, because each of these was observed live.
-    for (const privilege of SUPABASE_DEFAULTS) {
-      assert.ok(!effective[role].includes(privilege), `${role} still holds ${privilege}`);
+test("hardening: only the privileges the code uses are granted back", () => {
+  const grants = (hardeningSql.match(/grant[^;]*;/gi) ?? []).map(g => g.replace(/\s+/g, " "));
+  assert.equal(grants.length, 3, "one grant per server-only table");
+  for (const grant of grants) {
+    assert.match(grant, /to service_role;$/i, `only the server may be granted: ${grant}`);
+    for (const role of ["anon", "authenticated", "public"]) {
+      assert.ok(!new RegExp(`\\bto\\b[^;]*\\b${role}\\b`, "i").test(grant), `nothing may be granted to ${role}`);
     }
   }
-  assert.deepEqual(effective.service_role, ["INSERT", "SELECT"], "the server keeps exactly what it uses");
+  assert.match(hardeningSql, /grant select, insert on table public\.stripe_customers to service_role;/i);
+  assert.match(hardeningSql, /grant select, insert, update on table public\.checkout_attempts to service_role;/i);
+  assert.match(hardeningSql, /grant select, insert on table public\.stripe_webhook_events to service_role;/i);
 });
 
-test("hardening: the end state holds even if the table started empty", () => {
-  // Same replay from a bare table, so the migration is correct whether or
-  // not a project has default privileges configured.
-  const effective = effectiveGrants("stripe_customers");
-  assert.deepEqual(effective.anon, []);
-  assert.deepEqual(effective.authenticated, []);
-  assert.deepEqual(effective.service_role, ["INSERT", "SELECT"]);
-});
-
-test("hardening: no write privilege beyond INSERT is ever granted", () => {
-  const effective = effectiveGrants("stripe_customers", {
-    defaultPrivileges: ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"],
-  });
-  for (const privilege of ["UPDATE", "DELETE", "TRUNCATE"]) {
-    assert.ok(!effective.service_role.includes(privilege), `service_role must not hold ${privilege}`);
+test("hardening: no browser role is left holding anything, on any of the three", () => {
+  // Replayed from Supabase's default privileges, which is the state the
+  // live query actually found.
+  for (const table of Object.keys(SERVER_ONLY_TABLES)) {
+    const effective = effectiveGrants(table, { defaultPrivileges: ALL_PRIVILEGES });
+    for (const role of ["anon", "authenticated"]) {
+      assert.deepEqual(effective[role], [], `${role} must hold nothing on ${table}`);
+      // Named individually. REFERENCES, TRIGGER and TRUNCATE were the
+      // three observed live, and SELECT would be the worst to regain.
+      for (const privilege of ALL_PRIVILEGES) {
+        assert.ok(!effective[role].includes(privilege), `${role} still holds ${privilege} on ${table}`);
+      }
+    }
   }
 });
 
-test("hardening: RLS and the empty policy set are left alone", () => {
-  // 022 turned RLS on; 023 must not touch it, and must not add a policy
-  // as a substitute for the grants it is fixing.
+test("hardening: service_role keeps exactly what it uses and nothing more", () => {
+  for (const [table, expected] of Object.entries(SERVER_ONLY_TABLES)) {
+    const effective = effectiveGrants(table, { defaultPrivileges: ALL_PRIVILEGES });
+    assert.deepEqual(effective.service_role, expected, `service_role privileges on ${table}`);
+    for (const privilege of ALL_PRIVILEGES.filter(p => !expected.includes(p))) {
+      assert.ok(!effective.service_role.includes(privilege), `service_role still holds ${privilege} on ${table}`);
+    }
+  }
+  // Spelled out, because these are the ones that must never come back.
+  assert.ok(!effectiveGrants("stripe_customers", { defaultPrivileges: ALL_PRIVILEGES }).service_role.includes("DELETE"));
+  assert.ok(!effectiveGrants("checkout_attempts", { defaultPrivileges: ALL_PRIVILEGES }).service_role.includes("DELETE"));
+  assert.ok(!effectiveGrants("stripe_webhook_events", { defaultPrivileges: ALL_PRIVILEGES }).service_role.includes("UPDATE"));
+});
+
+test("hardening: the end state holds even on a project with no default privileges", () => {
+  for (const [table, expected] of Object.entries(SERVER_ONLY_TABLES)) {
+    const effective = effectiveGrants(table);
+    assert.deepEqual(effective.anon, [], table);
+    assert.deepEqual(effective.authenticated, [], table);
+    assert.deepEqual(effective.service_role, expected, table);
+  }
+});
+
+test("hardening: the granted privileges match what the code actually does", () => {
+  // checkout_attempts: upsert + select + update, and nothing deletes.
+  const attempts = read("lib/checkoutAttempts.ts");
+  assert.match(attempts, /\.upsert\(/);
+  assert.match(attempts, /\.select\(ATTEMPT_COLUMNS\)/);
+  assert.match(attempts, /\.update\(\{/);
+  assert.ok(!/\.delete\(/.test(attempts), "a delete would need a privilege this migration withholds");
+
+  // stripe_webhook_events: select then insert, never rewritten.
+  const events = read("lib/stripeWebhookEvents.ts");
+  assert.match(events, /\.select\("stripe_event_id"\)/);
+  assert.match(events, /\.insert\(\{/);
+  assert.ok(!/\.update\(|\.delete\(/.test(events), "a processed marker must not be editable");
+
+  // stripe_customers has no reader yet; 29D-C adds the get-or-create.
+  const usesCustomers = ["lib", "app"].some(dir =>
+    readdirSync(path.join(ROOT, dir), { recursive: true })
+      .filter(f => typeof f === "string" && /\.tsx?$/.test(f))
+      .some(f => readFileSync(path.join(ROOT, dir, f), "utf-8").includes('from("stripe_customers")'))
+  );
+  assert.equal(usesCustomers, false, "if a reader appeared, re-check the privileges it needs");
+});
+
+test("hardening: RLS and the empty policy sets are left alone", () => {
   assert.ok(!/row level security/i.test(hardeningSql), "023 must not alter RLS");
-  assert.ok(!/create policy|drop policy/i.test(hardeningSql), "023 must not create or drop a policy");
-  assert.match(sql, /alter table public\.stripe_customers enable row level security;/);
+  assert.ok(!/create policy|drop policy|alter policy/i.test(hardeningSql), "023 must not touch policies");
+  // No migration ever adds a policy to any of the three.
   const policies = readdirSync(MIGRATIONS)
     .filter(n => n.endsWith(".sql"))
-    .flatMap(n => withoutComments(readFileSync(path.join(MIGRATIONS, n), "utf-8"))
-      .match(/create policy[^;]*stripe_customers[^;]*;/gi) ?? []);
-  assert.deepEqual(policies, [], "stripe_customers must have no policy in any migration");
+    .flatMap(n => withoutComments(readFileSync(path.join(MIGRATIONS, n), "utf-8")).match(/create policy[^;]*;/gi) ?? []);
+  for (const table of Object.keys(SERVER_ONLY_TABLES)) {
+    assert.ok(!policies.some(p => new RegExp(`\\b${table}\\b`).test(p)), `${table} gained a policy`);
+  }
+});
+
+test("hardening: function privileges are untouched", () => {
+  // Table privileges only. The RPCs keep the grants 021 and 022 gave them.
+  assert.ok(!/on function/i.test(hardeningSql), "023 must not alter any function privilege");
+  for (const fn of ["create_pending_subscription", "activate_subscription_from_invoice"]) {
+    assert.match(sql, new RegExp(`grant execute on function public\\.${fn}\\([^)]*\\) to service_role;`), fn);
+  }
 });
 
 test("hardening: schema-wide default privileges are not touched", () => {
-  // Changing them would silently alter every other table, present and
-  // future. This correction is one table wide.
   assert.ok(!/alter default privileges/i.test(hardeningSql), "default privileges must not be altered");
-  const tablesTouched = new Set(
-    (hardeningSql.match(/(?:on table |on )public\.(\w+)/gi) ?? []).map(m => m.split(".").pop())
-  );
-  assert.deepEqual([...tablesTouched], ["stripe_customers"], "023 must touch exactly one table");
   assert.ok(!/\bschema\b/i.test(hardeningSql), "no schema-level grant may appear");
+  const touched = new Set(
+    (hardeningSql.match(/on table public\.(\w+)/gi) ?? []).map(m => m.split(".").pop())
+  );
+  assert.deepEqual([...touched].sort(), Object.keys(SERVER_ONLY_TABLES).sort(), "023 must touch exactly these three tables");
 });
 
 test("hardening: no data is read, written or removed", () => {
-  for (const banned of ["insert into", "update ", "delete from", "truncate", "drop table", "alter column"]) {
-    assert.ok(!hardeningSql.toLowerCase().includes(banned), `023 performs a data operation: ${banned}`);
+  // Statement forms, not bare words: UPDATE is now a legitimately granted
+  // privilege on checkout_attempts, so the word appears in a GRANT.
+  for (const statement of hardeningSql.split(";")) {
+    const first = statement.trim().toLowerCase();
+    if (!first) continue;
+    assert.match(first, /^(revoke|grant)\b/, `023 issues something other than a grant or revoke: ${first.slice(0, 60)}`);
   }
+  for (const banned of [/\binsert\s+into\b/i, /\bupdate\s+public\./i, /\bdelete\s+from\b/i, /\btruncate\s+(table\s+)?public\./i, /\bdrop\s+table\b/i, /\balter\s+column\b/i]) {
+    assert.ok(!banned.test(hardeningSql), `023 performs a data operation matching ${banned}`);
+  }
+});
+
+test("hardening: the verify block asks for the full end state", () => {
+  // The query the owner runs after applying has to cover all three tables
+  // and all three roles, or it cannot prove the fix landed.
+  const verify = hardening.slice(hardening.indexOf("-- 4. VERIFY"));
+  assert.match(verify, /select table_name, grantee, privilege_type/);
+  for (const table of Object.keys(SERVER_ONLY_TABLES)) {
+    assert.ok(verify.includes(`'${table}'`), `the verify query omits ${table}`);
+  }
+  for (const role of SUPABASE_ROLES) {
+    assert.ok(verify.includes(`'${role}'`), `the verify query omits ${role}`);
+  }
+  assert.match(verify, /relrowsecurity/, "RLS must still be verified");
+  assert.match(verify, /pg_policies/, "the policy count must still be verified");
 });
