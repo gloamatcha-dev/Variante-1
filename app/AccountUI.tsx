@@ -69,9 +69,21 @@ export function AccountSectionHeader({ label, action }: { label: string; action?
 /**
  * Understated by design. An absent subscription or delivery is a normal
  * state of the account, not a problem to dramatise with a big empty card.
+ *
+ * `action` is what turns a dead end into a page: an empty state that has
+ * a real next step should offer it, on the same line, so the row spans
+ * the column instead of leaving a short sentence alone in white space.
+ * It is omitted when there genuinely is nothing to do yet.
  */
-export function AccountEmptyState({ children }: { children: ReactNode }) {
-  return <p className="portal-empty">{children}</p>;
+export function AccountEmptyState({ children, action }: { children: ReactNode; action?: ReactNode }) {
+  return action
+    ? <div className="portal-empty portal-empty-row"><span>{children}</span>{action}</div>
+    : <p className="portal-empty">{children}</p>;
+}
+
+/** The quiet uppercase link used for every account-level action. */
+export function AccountAction({ href, children }: { href: string; children: ReactNode }) {
+  return <Link href={href} className="portal-action">{children}</Link>;
 }
 
 /* ── Summary row ────────────────────────────────────────────── */
@@ -89,6 +101,7 @@ export function AccountSummaryRow({
   secondary,
   value,
   href,
+  action,
 }: {
   icon: AccountIconName;
   label: string;
@@ -96,6 +109,9 @@ export function AccountSummaryRow({
   secondary?: ReactNode;
   value?: ReactNode;
   href?: string;
+  /** Shown on the right when the row itself is not a link, so a row with
+   *  nothing to show still ends in something to do. */
+  action?: ReactNode;
 }) {
   const body = (
     <>
@@ -106,6 +122,7 @@ export function AccountSummaryRow({
         {secondary && <span className="portal-summary-secondary">{secondary}</span>}
       </span>
       {value && <span className="portal-summary-value">{value}</span>}
+      {!href && action}
       {href && <Chevron />}
     </>
   );

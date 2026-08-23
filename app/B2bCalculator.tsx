@@ -223,11 +223,13 @@ export function B2bCalculator({
               <thead>
                 <tr>
                   <th scope="col">Kennzahl</th>
-                  <th scope="col">Aktueller Einkauf</th>
+                  <th scope="col"><span className="calc-col-name">Aktuell</span><span className="calc-col-note">dein Einkauf</span></th>
                   {results.models.map(r => (
                     <th scope="col" key={r.model.id}>
-                      {r.model.label}
-                      {r.model.discount_pct > 0 && <span className="calc-discount">−{r.model.discount_pct} %</span>}
+                      <span className="calc-col-name">{r.model.label}</span>
+                      {r.model.discount_pct > 0 && (
+                        <span className="calc-col-note">{"−"}{r.model.discount_pct} % auf den Basispreis</span>
+                      )}
                     </th>
                   ))}
                 </tr>

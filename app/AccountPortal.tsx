@@ -7,11 +7,13 @@ import { useAuth } from "../lib/auth";
 import type { AddressRow } from "../lib/auth";
 import { supabase } from "../lib/supabase";
 import { B2bCalculator } from "./B2bCalculator";
+import { useCatalog } from "./useCatalog";
 import {
   AccountEmptyState,
   AccountIcon,
   AccountQuickLinks,
   AccountSectionHeader,
+  AccountAction,
   AccountSummaryRow,
   type AccountQuickLink,
 } from "./AccountUI";
@@ -89,7 +91,7 @@ export function AccountPortal({ page, orderId, subscriptionId, supplyId }: { pag
         <button className="portal-logout" onClick={handleLogout}>Abmelden</button>
       </nav>
 
-      <div className="portal-content">
+      <div className={`portal-content${customerType === "business" ? " portal-content-wide" : ""}`}>
         {page === "dashboard" && <PortalDashboard customerType={customerType} />}
         {page === "orders" && <PortalOrders />}
         {page === "order-detail" && <OrderDetail orderId={orderId!} />}
@@ -369,7 +371,9 @@ function PrivateDashboard() {
             <a href={`/account/subscriptions/${nextDeliverySub.id}`} className="portal-action">ABO ANSEHEN</a>
           </div>
         ) : (
-          <AccountEmptyState>Keine geplante Lieferung.</AccountEmptyState>
+          <AccountEmptyState action={<AccountAction href="/account/subscriptions">ABO EINRICHTEN</AccountAction>}>
+            Keine geplante Lieferung.
+          </AccountEmptyState>
         )}
       </section>
 
@@ -395,7 +399,9 @@ function PrivateDashboard() {
             </div>
           </>
         ) : (
-          <AccountEmptyState>Du hast noch keine Bestellung.</AccountEmptyState>
+          <AccountEmptyState action={<AccountAction href="/shop">ZUM SHOP</AccountAction>}>
+            Du hast noch keine Bestellung.
+          </AccountEmptyState>
         )}
       </section>
 
@@ -420,7 +426,9 @@ function PrivateDashboard() {
             </div>
           </>
         ) : (
-          <AccountEmptyState>Du hast aktuell kein Abonnement.</AccountEmptyState>
+          <AccountEmptyState action={<AccountAction href="/account/subscriptions">ABOS ANSEHEN</AccountAction>}>
+            Du hast aktuell kein Abonnement.
+          </AccountEmptyState>
         )}
       </section>
 
@@ -466,11 +474,13 @@ function BusinessDashboard() {
   // Only fields the account actually stores. No customer number, no
   // member-since, no price tier: the application has none of those, and a
   // summary panel is not a reason to invent them.
+  // Company identity first, contact last: the panel is about the
+  // business, and the account email is the least useful line on it.
   const companyFacts: [string, string][] = [];
   if (businessProfile?.legal_form) companyFacts.push(["Rechtsform", businessProfile.legal_form]);
-  if (user?.email) companyFacts.push(["E-Mail", user.email]);
   if (businessProfile?.vat_id) companyFacts.push(["USt-IdNr.", businessProfile.vat_id]);
   if (profile?.customer_type === "business") companyFacts.push(["Konto", "Geschäftskonto"]);
+  if (user?.email) companyFacts.push(["E-Mail", user.email]);
 
   const activeAgreements = agreements.filter(a => a.status === "active");
 
@@ -496,7 +506,7 @@ function BusinessDashboard() {
       </section>
 
       <section className="portal-section">
-        <AccountSectionHeader label="BELIEFERUNG" action={<Link href="/account/business" className="portal-action">B2B-BEREICH</Link>} />
+        <AccountSectionHeader label="REGELMÄSSIGE BELIEFERUNG" />
         {supplyLoading ? (
           <AccountEmptyState>Laden…</AccountEmptyState>
         ) : (
@@ -514,7 +524,13 @@ function BusinessDashboard() {
                 href={`/account/business/supply/${nextDelivery.id}`}
               />
             ) : (
-              <AccountSummaryRow icon="truck" label="Nächste Lieferung" primary="Keine geplante Lieferung." />
+              <AccountSummaryRow
+                icon="truck"
+                label="Nächste Lieferung"
+                primary="Keine geplante Lieferung."
+                secondary="Bezugsmodell, Lieferintervall und Konditionen richten wir gemeinsam ein."
+                action={<AccountAction href="/account/business">BELIEFERUNG EINRICHTEN</AccountAction>}
+              />
             )}
             {agreements.length > 0 && (
               <AccountSummaryRow
@@ -522,6 +538,7 @@ function BusinessDashboard() {
                 label="Vereinbarungen"
                 primary={`${activeAgreements.length} aktiv`}
                 secondary={agreements.length > activeAgreements.length ? `${agreements.length} insgesamt` : undefined}
+                value="B2B-Bereich"
                 href="/account/business"
               />
             )}
@@ -530,7 +547,7 @@ function BusinessDashboard() {
       </section>
 
       <section className="portal-section">
-        <AccountSectionHeader label="BESTELLUNGEN" action={<Link href="/account/orders" className="portal-action">ALLE BESTELLUNGEN</Link>} />
+        <AccountSectionHeader label="BESTELLUNGEN" />
         {orderLoading ? (
           <AccountEmptyState>Laden…</AccountEmptyState>
         ) : latestOrder ? (
@@ -543,9 +560,17 @@ function BusinessDashboard() {
               value={orderAmount(latestOrder)}
               href={`/account/orders/${latestOrder.id}`}
             />
+            <AccountSummaryRow
+              icon="bag"
+              label="Bestellhistorie"
+              primary="Alle Bestellungen"
+              action={<AccountAction href="/account/orders">ÖFFNEN</AccountAction>}
+            />
           </div>
         ) : (
-          <AccountEmptyState>Noch keine Bestellung.</AccountEmptyState>
+          <AccountEmptyState action={<AccountAction href="/account/business">B2B-PREISE ANSEHEN</AccountAction>}>
+            Noch keine Bestellung.
+          </AccountEmptyState>
         )}
       </section>
 
@@ -903,6 +928,10 @@ function PortalSubscriptions() {
   const [subs, setSubs] = useState<SubscriptionRow[]>([]);
   const [loading, setLoading] = useState(() => !!supabase);
   const [error, setError] = useState("");
+  // The real Matcha variants and their real catalog prices. Nothing about
+  // a subscription changes them: no subscription price exists in the
+  // database, so the prices shown here are the ordinary shop prices.
+  const { product, loading: catalogLoading } = useCatalog("matcha");
 
   useEffect(() => {
     if (!supabase) return;
@@ -923,24 +952,25 @@ function PortalSubscriptions() {
       });
   }, []);
 
+  const hasSubs = subs.length > 0;
+
   return (
     <>
       <section className="portal-page-head">
         <p className="eyebrow">ABOS</p>
-        <h1>Deine Abos.</h1>
-        <p className="portal-page-lead">Hier findest du deine regelmäßigen Lieferungen.</p>
+        <h1>{hasSubs ? "Deine Abos." : "Dein Matcha, regelmäßig."}</h1>
+        <p className="portal-page-lead">
+          {hasSubs
+            ? "Hier findest du deine regelmäßigen Lieferungen."
+            : "Regelmäßige Lieferungen für deinen GLOA Matcha, in Vorbereitung."}
+        </p>
       </section>
 
       {loading ? (
         <p className="portal-loading">Laden…</p>
       ) : error ? (
-        <section className="portal-empty-state"><p>{error}</p></section>
-      ) : subs.length === 0 ? (
-        <section className="portal-empty-state">
-          <p>Du hast aktuell kein Abonnement.</p>
-          <Link className="cta" href="/shop">ZUM SHOP</Link>
-        </section>
-      ) : (
+        <section className="portal-section"><AccountEmptyState>{error}</AccountEmptyState></section>
+      ) : hasSubs ? (
         <div className="sub-list">
           <div className="sub-list-header">
             <span>Abo</span>
@@ -960,6 +990,59 @@ function PortalSubscriptions() {
             );
           })}
         </div>
+      ) : (
+        <>
+          {/*
+            Deliberately NOT a booking form. The subscriptions table has no
+            INSERT path for a client, b2c_subscription_plans ships without
+            rows because intervals and conditions are not confirmed, and
+            Stripe runs in one-time payment mode only. A start button here
+            would be a button that cannot start anything, so the page shows
+            what is real - the sizes and their actual prices - and the one
+            action that genuinely works today.
+          */}
+          <section className="portal-section">
+            <AccountSectionHeader label="STATUS" />
+            <AccountEmptyState>Du hast aktuell kein Abonnement.</AccountEmptyState>
+            <p className="portal-note">
+              Abos sind noch nicht buchbar. Sobald Lieferintervalle und Konditionen feststehen,
+              kannst du dein Abo direkt hier starten. Bis dahin bestellst du deinen Matcha wie
+              gewohnt im Shop.
+            </p>
+          </section>
+
+          <section className="portal-section">
+            <AccountSectionHeader label="GRÖSSEN" />
+            {catalogLoading ? (
+              <AccountEmptyState>Laden…</AccountEmptyState>
+            ) : product && product.variants.length > 0 ? (
+              <>
+                <div className="portal-summary-rows">
+                  {product.variants.map(v => (
+                    <AccountSummaryRow
+                      key={v.id}
+                      icon="repeat"
+                      label={product.name}
+                      primary={v.label}
+                      secondary={v.size_grams !== null ? `${v.size_grams} g` : undefined}
+                      value={`${fmtCents(v.price_gross_cents)} €`}
+                    />
+                  ))}
+                </div>
+                <p className="portal-note">
+                  Preise wie im Shop. Für ein Abo ist kein gesonderter Preis und kein Rabatt hinterlegt.
+                </p>
+                <div className="portal-actions">
+                  <Link href="/shop" className="portal-action">MATCHA BESTELLEN</Link>
+                </div>
+              </>
+            ) : (
+              <AccountEmptyState action={<AccountAction href="/shop">ZUM SHOP</AccountAction>}>
+                Produkte konnten gerade nicht geladen werden.
+              </AccountEmptyState>
+            )}
+          </section>
+        </>
       )}
     </>
   );
@@ -1372,13 +1455,22 @@ function PortalBusiness() {
 
       {/* ── Supply Agreements ── */}
       <section className="b2b-section">
-        <p className="eyebrow">BELIEFERUNG</p>
+        <p className="eyebrow">REGELMÄSSIGE BELIEFERUNG</p>
         {supplyLoading ? (
           <p className="portal-empty">Laden…</p>
         ) : supplyError ? (
           <p className="portal-empty">{supplyError}</p>
         ) : agreements.length === 0 ? (
-          <p className="portal-empty">Noch keine regelmäßige Belieferung eingerichtet.</p>
+          <>
+            <p className="portal-empty">Noch keine regelmäßige Belieferung eingerichtet.</p>
+            <p className="portal-note">
+              Bezugsmodell, Gebindegröße und Lieferintervall stimmen wir individuell mit dir ab.
+              Deine Konditionen findest du unten auf dieser Seite.
+            </p>
+            <div className="portal-actions">
+              <Link href="/contact" className="portal-action">BELIEFERUNG ANFRAGEN</Link>
+            </div>
+          </>
         ) : (
           <div className="supply-list">
             <div className="supply-list-header">
@@ -1474,14 +1566,16 @@ function PortalBusiness() {
       {businessProfile && (
         <section className="b2b-section">
           <p className="eyebrow">UNTERNEHMENSDATEN</p>
-          <div className="b2b-company-data">
-            <div className="portal-profile-row"><span>Firma</span><strong>{businessProfile.company_name || "\u2014"}</strong></div>
-            {businessProfile.legal_form && <div className="portal-profile-row"><span>Rechtsform</span><strong>{businessProfile.legal_form}</strong></div>}
-            <div className="portal-profile-row"><span>Steuernummer</span><strong>{businessProfile.tax_number || "\u2014"}</strong></div>
-            {businessProfile.vat_id && <div className="portal-profile-row"><span>USt-IdNr.</span><strong>{businessProfile.vat_id}</strong></div>}
-            {businessProfile.website && <div className="portal-profile-row"><span>Website</span><strong>{businessProfile.website}</strong></div>}
+          <div className="portal-fact-grid">
+            <div className="portal-fact"><span>Firma</span><strong>{businessProfile.company_name || "\u2014"}</strong></div>
+            {businessProfile.legal_form && <div className="portal-fact"><span>Rechtsform</span><strong>{businessProfile.legal_form}</strong></div>}
+            <div className="portal-fact"><span>Steuernummer</span><strong>{businessProfile.tax_number || "\u2014"}</strong></div>
+            {businessProfile.vat_id && <div className="portal-fact"><span>USt-IdNr.</span><strong>{businessProfile.vat_id}</strong></div>}
+            {businessProfile.website && <div className="portal-fact"><span>Website</span><strong>{businessProfile.website}</strong></div>}
           </div>
-          <Link href="/account/profile" className="b2b-edit-link">Kontodaten bearbeiten →</Link>
+          <div className="portal-actions">
+            <Link href="/account/profile" className="portal-action">KONTODATEN BEARBEITEN</Link>
+          </div>
         </section>
       )}
     </>
