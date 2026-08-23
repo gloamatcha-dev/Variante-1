@@ -170,20 +170,6 @@ export type BusinessRegistration = {
   newsletter: boolean;
 };
 
-export const COUNTRIES = [
-  "Deutschland",
-  "Österreich",
-  "Schweiz",
-  "Belgien",
-  "Dänemark",
-  "Frankreich",
-  "Italien",
-  "Luxemburg",
-  "Niederlande",
-  "Polen",
-  "Tschechien",
-] as const;
-
 // TODO: SUPABASE SCHEMA – Account & B2B
 //
 // customer_type: "private" | "business"

@@ -125,6 +125,67 @@ export function getCountryLabel(countryCode: string | null | undefined): string 
   return COUNTRY_LABELS_DE[countryCode.toUpperCase()] ?? countryCode;
 }
 
+/**
+ * German label back to its ISO code, built by inverting the map above so
+ * there is exactly one place where a country's name and its code are
+ * associated. A second hand-written table would drift the first time a
+ * label is edited.
+ */
+const COUNTRY_CODES_BY_LABEL_DE: Record<string, string> = Object.fromEntries(
+  Object.entries(COUNTRY_LABELS_DE).map(([code, label]) => [label.toLowerCase(), code])
+);
+
+/**
+ * Normalises whatever a country field happens to hold into a supported
+ * ISO 3166-1 alpha-2 code, or null (Task 29D-B).
+ *
+ * This exists because the account address form wrote German country NAMES
+ * ("Deutschland") into addresses.country, while getShippingZone and
+ * resolveTaxJurisdiction both require codes ("DE"). Rows written before
+ * this task still hold names, and migration 001's signup trigger still
+ * defaults to 'Deutschland', so both forms have to keep working. Rather
+ * than rewrite live address rows, every reader normalises here.
+ *
+ * Null is the answer for anything unrecognised, and it is a real answer:
+ * an unsupported or unparseable country must stop a checkout, never
+ * silently become Germany and never become a different supported country
+ * that happens to look similar. Nothing here guesses.
+ */
+export function normalizeCountryCode(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const raw = value.trim();
+  if (!raw) return null;
+
+  // Already a code. Checked against the shipping zones, so an unsupported
+  // but syntactically valid code (e.g. "US") is rejected rather than
+  // passed through to fail somewhere less obvious.
+  const upper = raw.toUpperCase();
+  if (/^[A-Z]{2}$/.test(upper)) {
+    return COUNTRY_TO_ZONE[upper] ? upper : null;
+  }
+
+  // A German label from an address written before this task.
+  const byLabel = COUNTRY_CODES_BY_LABEL_DE[raw.toLowerCase()];
+  return byLabel ?? null;
+}
+
+/**
+ * The selectable countries for every GLOA address form: exactly the
+ * countries the shop ships to, labelled in German, sorted the way a
+ * German reader expects.
+ *
+ * Derived from the shipping zones rather than listed separately. Before
+ * this task the account form offered its own list of 11 German names
+ * while the shop shipped to 40 countries, so an address could name a
+ * destination checkout would refuse - and could not name most of the ones
+ * it accepts.
+ */
+export const SHIPPING_COUNTRY_OPTIONS: readonly { code: string; label: string }[] = Object.freeze(
+  ALLOWED_SHIPPING_COUNTRIES
+    .map(code => ({ code, label: getCountryLabel(code) }))
+    .sort((a, b) => a.label.localeCompare(b.label, "de"))
+);
+
 export const DELIVERY_TIME_NOTE =
   "Die angegebenen Lieferzeiten sind Richtwerte. Bei Lieferungen außerhalb der EU kann es durch die Zollabfertigung zu Verzögerungen kommen.";
 

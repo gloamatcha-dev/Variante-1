@@ -269,9 +269,19 @@ test("security: guards, RLS and the account separation are unchanged", () => {
   assert.match(portal, /page === "business" \|\| page === "supply-detail"\) && customerType !== "business"/);
   assert.match(portal, /page === "subscriptions" \|\| page === "subscription-detail"\) && customerType === "business"/);
   assert.match(subsSchema, /auth\.uid\(\) = user_id\s*\n\s*and not public\.is_business_user\(\)/);
-  // This task added no migration.
+  // Task 29C added no migration; Task 29D-B added 022, and it must not
+  // have loosened any of the ownership rules asserted above.
   const files = readdirSync(MIGRATIONS).filter(n => n.endsWith(".sql")).sort();
-  assert.equal(files[files.length - 1], "021_tax_snapshot.sql", "a migration was added");
+  for (const name of files.filter(n => n > "021_tax_snapshot.sql")) {
+    // Statements only: a comment explaining that nothing is granted to
+    // anon must not read as a grant to anon.
+    const later = withoutComments(readFileSync(path.join(MIGRATIONS, name), "utf-8"));
+    assert.ok(!/to anon/i.test(later), `${name} grants something to anon`);
+    assert.ok(!/grant[^;]*(insert|update|delete)[^;]*public\.subscriptions[^;]*to authenticated/i.test(later),
+      `${name} lets the browser write subscriptions`);
+    assert.ok(!/create policy[^;]*subscriptions for (insert|update|delete)/i.test(later),
+      `${name} adds a client write policy on subscriptions`);
+  }
 });
 
 test("security: the private dashboard still reads no business data", () => {

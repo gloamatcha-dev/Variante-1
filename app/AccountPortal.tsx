@@ -2,7 +2,6 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import type { CustomerType } from "./content";
-import { COUNTRIES } from "./content";
 import { useAuth } from "../lib/auth";
 import type { AddressRow } from "../lib/auth";
 import { supabase } from "../lib/supabase";
@@ -19,7 +18,7 @@ import {
 } from "./AccountUI";
 import { resolveGreetingName } from "../lib/accountGreeting";
 import type { AddressSnapshot } from "../lib/orderAddressSnapshot";
-import { getCountryLabel } from "../lib/shipping";
+import { getCountryLabel, normalizeCountryCode, SHIPPING_COUNTRY_OPTIONS } from "../lib/shipping";
 import {
   getCancellationView,
   getLifecycleSteps,
@@ -1192,7 +1191,7 @@ function PortalAddresses() {
       {a.company && <p>{a.company}</p>}
       <p>{a.street} {a.house_number}</p>
       <p>{a.zip} {a.city}</p>
-      <p>{a.country}</p>
+      <p>{getCountryLabel(normalizeCountryCode(a.country) ?? a.country)}</p>
     </div>
   );
 
@@ -1286,8 +1285,8 @@ function PortalAddresses() {
             <label>Ort*<input required name="city" /></label>
           </div>
           <label>Land*
-            <select required name="country" defaultValue="Deutschland">
-              {COUNTRIES.map(c => <option key={c}>{c}</option>)}
+            <select required name="country" defaultValue="DE">
+              {SHIPPING_COUNTRY_OPTIONS.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
             </select>
           </label>
           {error && <p className="account-error">{error}</p>}

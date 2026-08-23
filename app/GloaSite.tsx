@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import { Header, Footer } from "./Chrome";
-import { BRAND, PRODUCT, SHOP_STATUS, COUNTRIES } from "./content";
+import { BRAND, PRODUCT, SHOP_STATUS } from "./content";
 import { useCatalog, useCatalogList, fmtCents, per100gCents } from "./useCatalog";
 import type { CatalogProduct } from "./useCatalog";
 import { getProductPresentation, showsUnitPricePer100g, showsFoodInformation, isWeighedProduct, getProductImage, getProductSubtitle, getProductEyebrow, MATCHA_NOT_INCLUDED_SHORT } from "../lib/productPresentation";
@@ -13,7 +13,7 @@ import { track } from "./analytics";
 import { useCart } from "./cart";
 import { AuthProvider, useAuth } from "../lib/auth";
 import { supabase } from "../lib/supabase";
-import { SHIPPING_ZONES, SHIPPING_PRICING, getShippingZone, getCountryLabel, computeShippingGrossCents, DELIVERY_TIME_NOTE, CUSTOMS_NOTE } from "../lib/shipping";
+import { SHIPPING_ZONES, SHIPPING_PRICING, getShippingZone, getCountryLabel, computeShippingGrossCents, SHIPPING_COUNTRY_OPTIONS, DELIVERY_TIME_NOTE, CUSTOMS_NOTE } from "../lib/shipping";
 import { createCheckoutSession } from "./createCheckoutSession";
 
 
@@ -735,7 +735,7 @@ if(view==="register")return <main className="account-page"><section className="a
 <label>PLZ *<input required placeholder="PLZ" autoComplete="postal-code" name="zip"/></label>
 <label>Ort *<input required placeholder="Ort" autoComplete="address-level2" name="city"/></label>
 </div>
-<label>Land *<select required name="country" defaultValue="Deutschland">{COUNTRIES.map(c=><option key={c}>{c}</option>)}</select></label>
+<label>Land *<select required name="country" defaultValue="DE">{SHIPPING_COUNTRY_OPTIONS.map(c=><option key={c.code} value={c.code}>{c.label}</option>)}</select></label>
 {pwError&&<p className="account-error">{pwError}</p>}
 {authError&&<p className="account-error">{authError}</p>}
 <label className="consent"><input required type="checkbox" name="accept_terms"/> Ich akzeptiere die <Link href="/agb">AGB</Link> und <Link href="/datenschutz">Datenschutzerklärung</Link>.</label>
@@ -769,7 +769,7 @@ if(view==="b2b-apply")return <main className="account-page"><section className="
 <label>PLZ *<input required name="zip" placeholder="PLZ" autoComplete="postal-code"/></label>
 <label>Ort *<input required name="city" placeholder="Ort" autoComplete="address-level2"/></label>
 </div>
-<label>Land *<select required name="country" defaultValue="Deutschland">{COUNTRIES.map(c=><option key={c}>{c}</option>)}</select></label>
+<label>Land *<select required name="country" defaultValue="DE">{SHIPPING_COUNTRY_OPTIONS.map(c=><option key={c.code} value={c.code}>{c.label}</option>)}</select></label>
 <p className="account-form-section">UNTERNEHMENSDATEN</p>
 <div className="account-form-row">
 <label>Steuernummer *<input required name="tax_number" placeholder="Steuernummer"/></label>

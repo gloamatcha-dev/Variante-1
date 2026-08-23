@@ -164,13 +164,25 @@ test("boundary: the checkout attempt freezes a tax snapshot and nothing else abo
 
 /* ── Migration 021 contract ─────────────────────────────────── */
 
-test("migration: 021 is the next free number and nothing else claims it", () => {
+test("migration: 021 owns its number and no later migration undoes it", () => {
   const files = readdirSync(MIGRATIONS_DIR).filter(name => name.endsWith(".sql"));
-  const numbered = files.filter(name => name.startsWith("021"));
-  assert.deepEqual(numbered, ["021_tax_snapshot.sql"]);
-  // 021 has never been applied, so it is corrected in place rather than
-  // undone by a 022.
-  assert.equal(files.filter(name => name.startsWith("022")).length, 0, "021 must be the newest migration");
+  assert.deepEqual(files.filter(name => name.startsWith("021")), ["021_tax_snapshot.sql"]);
+  // 021 was corrected in place rather than undone. Later migrations are
+  // allowed to exist - Task 29D-B added 022 - but none of them may touch
+  // the tax objects 021 owns.
+  for (const name of files.filter(name => name > "021_tax_snapshot.sql")) {
+    const later = readFileSync(path.join(MIGRATIONS_DIR, name), "utf-8");
+    for (const owned of [
+      "create_order_from_paid_checkout",
+      "tax_treatment",
+      "tax_calculation_version",
+      "shipping_tax_allocation",
+      "order_items",
+    ]) {
+      assert.ok(!new RegExp(`(alter|drop|create or replace)[^;]*${owned}`, "i").test(later),
+        `${name} modifies the tax object ${owned}`);
+    }
+  }
 });
 
 test("migration: 021 contains no threshold reservation machinery at all", () => {
