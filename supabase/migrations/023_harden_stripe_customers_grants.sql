@@ -1,0 +1,113 @@
+-- ============================================================
+-- GLOA – Bugfix: make stripe_customers genuinely server-only (Task 29D-B.1)
+-- Run in Supabase SQL Editor AFTER 022
+--
+-- Migration 022 created public.stripe_customers, enabled RLS, added no
+-- policies, and granted select + insert to service_role. It then assumed
+-- that a table nobody was granted anything on is a table nobody can
+-- touch. On Supabase that assumption is wrong: the project ships
+-- ALTER DEFAULT PRIVILEGES for the public schema, so a newly created
+-- table arrives with privileges already handed to anon, authenticated and
+-- service_role. Post-apply verification found exactly that - anon and
+-- authenticated each holding REFERENCES, TRIGGER and TRUNCATE, and
+-- service_role holding more than the two privileges it was meant to have.
+--
+-- Why RLS did not cover this. Row-level security filters ROWS. TRUNCATE
+-- removes every row without producing any, REFERENCES lets another table
+-- point a foreign key at this one, and TRIGGER attaches code to it -
+-- none of those are row reads or row writes, so no policy, and no absence
+-- of policies, constrains them. Table privileges and RLS are two separate
+-- mechanisms; 010 already had to learn the other half of that lesson,
+-- when RLS-without-grants blocked service_role entirely.
+--
+-- The fix is deliberately narrow: revoke everything from the three
+-- Supabase roles on this one table, then grant back only what the server
+-- actually uses. It does not touch the table owner, does not create a
+-- policy, and does not alter default privileges for the schema - that
+-- would change behaviour for unrelated tables, existing and future, and
+-- is not this task's business.
+--
+-- Data is not touched. No row is read, written or deleted.
+-- ============================================================
+
+-- 1. TAKE EVERYTHING BACK ──────────────────────────────────────
+--
+-- Named roles only. postgres (the table owner) is deliberately absent:
+-- an owner's privileges are not what leaked, and revoking them would
+-- break the ability to administer the table at all.
+--
+-- PUBLIC is absent for a different reason: PostgreSQL grants no table
+-- privileges to PUBLIC by default, and 022 granted none, so there is
+-- nothing there to take back.
+
+revoke all privileges on table public.stripe_customers
+  from anon, authenticated, service_role;
+
+-- 2. GIVE BACK ONLY WHAT THE SERVER USES ───────────────────────
+--
+-- select  - read an existing GLOA user's Stripe Customer mapping.
+-- insert  - record one the first time a customer subscribes.
+--
+-- Deliberately NOT granted: update and delete. A mapping is written once
+-- and is never edited; a user id that needs a different Stripe Customer
+-- is a bug to investigate, not a row to overwrite. The mapping disappears
+-- with the user through the cascade from auth.users, which the owner
+-- performs, not service_role.
+
+grant select, insert on table public.stripe_customers to service_role;
+
+-- 3. VERIFY ────────────────────────────────────────────────────
+--
+-- Read-only. Run after applying.
+--
+-- (a) The intended end state, and the query that found the problem.
+--     Expected: exactly two rows, both service_role - SELECT and INSERT.
+--     anon and authenticated must not appear at all.
+--
+--   select grantee, privilege_type
+--   from information_schema.role_table_grants
+--   where table_schema = 'public' and table_name = 'stripe_customers'
+--     and grantee in ('anon', 'authenticated', 'service_role')
+--   order by grantee, privilege_type;
+--
+-- (b) The same question asked of the raw ACL, which also shows the owner.
+--     Expected: an entry for service_role with r and a only (read/append),
+--     and no entry for anon or authenticated.
+--
+--   select relname,
+--          coalesce(array_to_string(relacl, E'\n'), '(no explicit acl)') as acl
+--   from pg_class
+--   where oid = 'public.stripe_customers'::regclass;
+--
+-- (c) RLS is still on and there are still no policies. This migration
+--     changes neither, and both must remain true.
+--
+--   select relrowsecurity, relforcerowsecurity
+--   from pg_class where oid = 'public.stripe_customers'::regclass;
+--
+--   select count(*) as policy_count from pg_policies
+--   where schemaname = 'public' and tablename = 'stripe_customers';
+--
+-- (d) Nothing else moved. Expected: unchanged from before this migration -
+--     authenticated keeps SELECT on subscriptions and subscription_items,
+--     and anon appears nowhere.
+--
+--   select table_name, grantee, privilege_type
+--   from information_schema.role_table_grants
+--   where table_schema = 'public'
+--     and table_name in ('subscriptions', 'subscription_items',
+--                        'checkout_attempts', 'stripe_webhook_events')
+--     and grantee in ('anon', 'authenticated')
+--   order by table_name, grantee, privilege_type;
+--
+-- (e) Worth knowing, though out of scope here: the same default-privilege
+--     behaviour applies to every other server-only table in this project,
+--     because none of them revoke either. This lists what the browser
+--     roles actually hold on them today.
+--
+--   select table_name, grantee, privilege_type
+--   from information_schema.role_table_grants
+--   where table_schema = 'public'
+--     and table_name in ('checkout_attempts', 'stripe_webhook_events')
+--     and grantee in ('anon', 'authenticated')
+--   order by table_name, grantee, privilege_type;

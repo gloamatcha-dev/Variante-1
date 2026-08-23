@@ -13,7 +13,7 @@ import {
 import { resolveTaxJurisdiction } from "../lib/taxJurisdiction.ts";
 
 // SAFE DEFAULT SUITE: pure logic plus source-level contract checks on
-// migration 022. No DB connection, no Stripe, no writes of any kind.
+// migrations 022 and 023. No DB connection, no Stripe, no writes.
 //
 // Task 29D-B lays the database foundation for recurring subscriptions.
 // Two things must hold: an unrecognised country can never quietly become
@@ -143,11 +143,15 @@ test("forms: an address written before this task still renders", () => {
 
 /* ── Migration numbering and scope ──────────────────────────── */
 
-test("migration: 022 is the next free number and 021 is untouched", () => {
+test("migration: every number is claimed once and the sequence has no gaps", () => {
   const files = readdirSync(MIGRATIONS).filter(n => n.endsWith(".sql")).sort();
-  assert.equal(files[files.length - 1], "022_recurring_subscription_foundation.sql");
+  const numbers = files.map(n => Number(n.slice(0, 3)));
+  assert.deepEqual(numbers, [...new Set(numbers)], "a migration number is reused");
+  for (let i = 0; i < numbers.length; i++) {
+    assert.equal(numbers[i], i + 1, `gap or misorder at ${files[i]}`);
+  }
   assert.equal(files.filter(n => n.startsWith("022")).length, 1);
-  assert.equal(files.filter(n => n.startsWith("023")).length, 0);
+  assert.equal(files.filter(n => n.startsWith("023")).length, 1);
 });
 
 test("migration: no historical row is rewritten and no constraint is weakened", () => {
@@ -501,7 +505,143 @@ test("fix: the approved parts of migration 022 are untouched", () => {
   ]);
   assert.ok(!/to anon/i.test(sql));
   assert.ok(!/to authenticated/i.test(sql));
-  // And no 023 was created to do what 022 could do in place.
+});
+
+/* ── Task 29D-B.1: stripe_customers is genuinely server-only ── */
+
+const hardening = read("supabase/migrations/023_harden_stripe_customers_grants.sql");
+const hardeningSql = withoutComments(hardening);
+
+/**
+ * Replays every GRANT and REVOKE that any migration issues against one
+ * table, in file order, and returns the privileges each role is left
+ * holding. Asserting the end state rather than the presence of a
+ * statement is the whole point here: migration 022 "granted nothing" to
+ * the browser roles and they still ended up with TRUNCATE, because
+ * Supabase's default privileges had already given it to them.
+ */
+function effectiveGrants(table, { defaultPrivileges = [] } = {}) {
+  const ALL = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"];
+  const held = { anon: new Set(defaultPrivileges), authenticated: new Set(defaultPrivileges), service_role: new Set(defaultPrivileges) };
+
   const files = readdirSync(MIGRATIONS).filter(n => n.endsWith(".sql")).sort();
-  assert.equal(files[files.length - 1], "022_recurring_subscription_foundation.sql");
+  for (const file of files) {
+    const body = withoutComments(readFileSync(path.join(MIGRATIONS, file), "utf-8"));
+    for (const statement of body.split(";")) {
+      if (!new RegExp(`\\b${table}\\b`).test(statement)) continue;
+      const isRevoke = /^\s*revoke\b/i.test(statement);
+      const isGrant = /^\s*grant\b/i.test(statement);
+      if (!isRevoke && !isGrant) continue;
+
+      const listed = statement.slice(0, statement.toLowerCase().indexOf(" on "));
+      const privileges = /all\s+privileges|^\s*(?:grant|revoke)\s+all\b/i.test(listed)
+        ? ALL
+        : ALL.filter(p => new RegExp(`\\b${p}\\b`, "i").test(listed));
+
+      const target = statement.slice(statement.toLowerCase().lastIndexOf(isRevoke ? " from " : " to "));
+      for (const role of Object.keys(held)) {
+        if (!new RegExp(`\\b${role}\\b`).test(target)) continue;
+        for (const p of privileges) {
+          if (isRevoke) held[role].delete(p);
+          else held[role].add(p);
+        }
+      }
+    }
+  }
+  return Object.fromEntries(Object.entries(held).map(([role, set]) => [role, [...set].sort()]));
+}
+
+test("hardening: 023 is the next free number and 022 is not edited", () => {
+  const files = readdirSync(MIGRATIONS).filter(n => n.endsWith(".sql")).sort();
+  assert.equal(files[files.length - 1], "023_harden_stripe_customers_grants.sql");
+  assert.equal(files.filter(n => n.startsWith("023")).length, 1);
+  assert.equal(files.filter(n => n.startsWith("024")).length, 0);
+  // 022 is live now, so it must keep the grants it was applied with.
+  assert.match(sql, /grant select, insert on public\.stripe_customers to service_role;/);
+});
+
+test("hardening: everything is revoked from all three Supabase roles", () => {
+  const revokes = hardeningSql.match(/revoke[^;]*;/gi) ?? [];
+  assert.equal(revokes.length, 1, "one revoke, aimed at one table");
+  const revoke = revokes[0].replace(/\s+/g, " ");
+  assert.match(revoke, /revoke all privileges on table public\.stripe_customers/i);
+  for (const role of ["anon", "authenticated", "service_role"]) {
+    assert.match(revoke, new RegExp(`\\b${role}\\b`), `${role} must be revoked from`);
+  }
+  // The owner keeps its privileges; revoking them would lock the table.
+  assert.ok(!/\bpostgres\b/.test(revoke), "the table owner must not be revoked");
+});
+
+test("hardening: only SELECT and INSERT come back, and only for service_role", () => {
+  const grants = hardeningSql.match(/grant[^;]*;/gi) ?? [];
+  assert.equal(grants.length, 1);
+  const grant = grants[0].replace(/\s+/g, " ");
+  assert.match(grant, /grant select, insert on table public\.stripe_customers to service_role;/i);
+  for (const role of ["anon", "authenticated", "public"]) {
+    assert.ok(!new RegExp(`to[^;]*\\b${role}\\b`, "i").test(grant), `nothing may be granted to ${role}`);
+  }
+});
+
+test("hardening: the browser roles end up holding nothing at all", () => {
+  // Replayed with Supabase's default privileges as the starting point,
+  // which is what actually happened on the live table.
+  const SUPABASE_DEFAULTS = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"];
+  const effective = effectiveGrants("stripe_customers", { defaultPrivileges: SUPABASE_DEFAULTS });
+
+  for (const role of ["anon", "authenticated"]) {
+    assert.deepEqual(effective[role], [], `${role} must hold no privilege on stripe_customers`);
+    // Named individually, because each of these was observed live.
+    for (const privilege of SUPABASE_DEFAULTS) {
+      assert.ok(!effective[role].includes(privilege), `${role} still holds ${privilege}`);
+    }
+  }
+  assert.deepEqual(effective.service_role, ["INSERT", "SELECT"], "the server keeps exactly what it uses");
+});
+
+test("hardening: the end state holds even if the table started empty", () => {
+  // Same replay from a bare table, so the migration is correct whether or
+  // not a project has default privileges configured.
+  const effective = effectiveGrants("stripe_customers");
+  assert.deepEqual(effective.anon, []);
+  assert.deepEqual(effective.authenticated, []);
+  assert.deepEqual(effective.service_role, ["INSERT", "SELECT"]);
+});
+
+test("hardening: no write privilege beyond INSERT is ever granted", () => {
+  const effective = effectiveGrants("stripe_customers", {
+    defaultPrivileges: ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"],
+  });
+  for (const privilege of ["UPDATE", "DELETE", "TRUNCATE"]) {
+    assert.ok(!effective.service_role.includes(privilege), `service_role must not hold ${privilege}`);
+  }
+});
+
+test("hardening: RLS and the empty policy set are left alone", () => {
+  // 022 turned RLS on; 023 must not touch it, and must not add a policy
+  // as a substitute for the grants it is fixing.
+  assert.ok(!/row level security/i.test(hardeningSql), "023 must not alter RLS");
+  assert.ok(!/create policy|drop policy/i.test(hardeningSql), "023 must not create or drop a policy");
+  assert.match(sql, /alter table public\.stripe_customers enable row level security;/);
+  const policies = readdirSync(MIGRATIONS)
+    .filter(n => n.endsWith(".sql"))
+    .flatMap(n => withoutComments(readFileSync(path.join(MIGRATIONS, n), "utf-8"))
+      .match(/create policy[^;]*stripe_customers[^;]*;/gi) ?? []);
+  assert.deepEqual(policies, [], "stripe_customers must have no policy in any migration");
+});
+
+test("hardening: schema-wide default privileges are not touched", () => {
+  // Changing them would silently alter every other table, present and
+  // future. This correction is one table wide.
+  assert.ok(!/alter default privileges/i.test(hardeningSql), "default privileges must not be altered");
+  const tablesTouched = new Set(
+    (hardeningSql.match(/(?:on table |on )public\.(\w+)/gi) ?? []).map(m => m.split(".").pop())
+  );
+  assert.deepEqual([...tablesTouched], ["stripe_customers"], "023 must touch exactly one table");
+  assert.ok(!/\bschema\b/i.test(hardeningSql), "no schema-level grant may appear");
+});
+
+test("hardening: no data is read, written or removed", () => {
+  for (const banned of ["insert into", "update ", "delete from", "truncate", "drop table", "alter column"]) {
+    assert.ok(!hardeningSql.toLowerCase().includes(banned), `023 performs a data operation: ${banned}`);
+  }
 });
