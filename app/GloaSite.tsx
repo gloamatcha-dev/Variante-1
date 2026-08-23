@@ -43,7 +43,7 @@ if(!product.variants.length)return <article className="product-card"><Link href=
 const dv=product.variants[0];const lowestCents=Math.min(...product.variants.map(v=>v.price_gross_cents));
 const handleAdd=()=>{addItem({productId:product.id,productName:product.name,productSlug:product.slug,variantId:dv.id,label:dv.label,grams:dv.size_grams,purchaseType:"once",unitPriceCents:dv.price_gross_cents});track("add_to_cart");onAdd()};
 const handlePrelaunch=()=>window.location.href="/contact";
-return <article className="product-card"><Link href="/shop" onClick={()=>track("product_view")}><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>AB {fmtCents(lowestCents)} €</strong></div></Link><button className="add" onClick={SHOP_STATUS==="prelaunch"?handlePrelaunch:handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"} <span>+</span></button></article>}
+return <article className="product-card"><Link href="/shop" onClick={()=>track("product_view")}><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>AB {fmtCents(lowestCents)} €</strong></div></Link><button className="add" onClick={SHOP_STATUS==="prelaunch"?handlePrelaunch:handleAdd}>{SHOP_STATUS==="prelaunch"?"Fragen zum Launch":"In den Warenkorb"} <span>+</span></button></article>}
 function HowTo(){return <section className="how-to"><div className="section-head"><div><p className="eyebrow">HOW TO GLOA</p><h2>Latte oder Pur.<br/>Mehr brauchst du nicht.</h2></div></div><div className="method-grid"><article><span>01</span><h3>Matcha Latte</h3><ol><li>Matcha dosieren</li><li>Mit Wasser aufschlagen</li><li>Milch oder Pflanzendrink dazu</li><li>Heiß oder iced genießen</li></ol></article><article><span>02</span><h3>Pure Matcha</h3><ol><li>Matcha dosieren</li><li>Mit wenig Wasser glattrühren</li><li>Mit Wasser aufschlagen</li><li>Direkt genießen</li></ol></article></div></section>}
 function CommunityFeed(){const [offset,setOffset]=useState(0);const [paused,setPaused]=useState(false);const [animate,setAnimate]=useState(true);const total=communityItems.length;useEffect(()=>{const mq=window.matchMedia("(prefers-reduced-motion: reduce)");if(mq.matches)return;let visible=true;const onVis=()=>{visible=document.visibilityState==="visible"};document.addEventListener("visibilitychange",onVis);const id=setInterval(()=>{if(!paused&&visible)setOffset(p=>p+1)},4500);return()=>{clearInterval(id);document.removeEventListener("visibilitychange",onVis)}},[paused]);useEffect(()=>{if(offset>=total){const t=setTimeout(()=>{setAnimate(false);setOffset(0);requestAnimationFrame(()=>requestAnimationFrame(()=>setAnimate(true)))},400);return()=>clearTimeout(t)}},[offset,total]);const track=[...communityItems,...communityItems.slice(0,4)];return <div className="community-feed" onMouseEnter={()=>setPaused(true)} onMouseLeave={()=>setPaused(false)}><div className="community-track" style={{transform:`translateX(-${offset*25}%)`,transition:animate?"transform 400ms ease":"none"}}>{track.map((item,i)=><div key={`cf-${i}`} className="community-card"><img src={item.image} alt={item.alt} loading="lazy"/></div>)}</div></div>}
 
@@ -127,7 +127,7 @@ return <>
 {per100!==null&&<p className="shop-product-per100g">{fmtCents(per100)} € / 100 g</p>}
 {presentation.matchaNotIncludedNotice&&<p className="product-not-included">{presentation.matchaNotIncludedNotice}</p>}
 
-<button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
+<button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":handleAdd}>{SHOP_STATUS==="prelaunch"?"Fragen zum Launch":"In den Warenkorb"}</button>
 </div></>}
 
 /** Confirmed GLOA Matcha food information. Rendered only for the Matcha
@@ -135,7 +135,7 @@ return <>
 function MatchaShopDetails({product}:{product:CatalogProduct}){
 return <section className="shop-accordion"><div className="shop-accordion-inner">
 <details className="product-accordion">
-<summary><span>Produktdetails</span><span className="product-accordion-icon" aria-hidden="true"/></summary>
+<summary><span>Produktdetails &amp; Pflichtangaben</span><span className="product-accordion-icon" aria-hidden="true"/></summary>
 <div className="product-accordion-body">
 <dl><div><dt>LEBENSMITTELBEZEICHNUNG</dt><dd>Matcha (Grünteepulver)</dd></div><div><dt>ZUTAT</dt><dd>100 % Matcha-Grünteepulver, keine Zusätze</dd></div><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>QUALITÄT</dt><dd>100 % Bio-Matcha</dd></div><div><dt>ERNTE</dt><dd>2. und 3. Pflückung</dd></div><div><dt>ZUBEREITUNG</dt><dd>Ca. 2 g mit wenig heißem Wasser (ca. 80 °C) glattrühren, dann aufgießen. Latte, iced oder pur.</dd></div><div><dt>LAGERUNG</dt><dd>{PRODUCT.storage}</dd></div><div><dt>GROESSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div><div><dt>VERANTWORTLICHES LEBENSMITTELUNTERNEHMEN</dt><dd>Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin, Deutschland</dd></div><div><dt>VERSAND</dt><dd>Versand aus Deutschland · Lieferzeit je nach Zielland: 2-10 Werktage</dd></div></dl>
 <div className="product-accordion-links"><Link className="shop-details-link" href="/our-matcha" onClick={()=>track("shop_to_matcha")}>MEHR ÜBER UNSEREN MATCHA →</Link><Link className="shop-details-link" href="/versand">VERSAND & LIEFERZEITEN →</Link></div>
@@ -204,7 +204,7 @@ return <main className="pdp">
 <p className="pdp-price">{fmtCents(v.price_gross_cents)} €</p>
 {per100!==null&&<p className="pdp-per100g">{fmtCents(per100)} € / 100 g</p>}
 
-<button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
+<button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":handleAdd}>{SHOP_STATUS==="prelaunch"?"Fragen zum Launch":"In den Warenkorb"}</button>
 </div></section>
 
 <section className="pdp-facts"><div><p className="eyebrow">WHAT WE KNOW</p><h2>Clear facts.<br/>Nothing invented.</h2></div><dl><div><dt>LEBENSMITTELBEZEICHNUNG</dt><dd>Matcha (Grünteepulver)</dd></div><div><dt>ZUTAT</dt><dd>100 % Matcha-Grünteepulver, keine Zusätze</dd></div><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>VERWENDUNG</dt><dd>Latte · Iced · Pur</dd></div><div><dt>LAGERUNG</dt><dd>{PRODUCT.storage}</dd></div><div><dt>GROESSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div><div><dt>VERANTWORTLICHES LEBENSMITTELUNTERNEHMEN</dt><dd>Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin, Deutschland</dd></div></dl></section>
@@ -235,7 +235,7 @@ return <main className="pdp">
 <p className="pdp-price">{fmtCents(v.price_gross_cents)} €</p>
 {presentation.matchaNotIncludedNotice&&<p className="product-not-included">{presentation.matchaNotIncludedNotice}</p>}
 
-<button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
+<button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":handleAdd}>{SHOP_STATUS==="prelaunch"?"Fragen zum Launch":"In den Warenkorb"}</button>
 </div></section>
 
 {product.description&&<section className="pdp-facts"><div><p className="eyebrow">PRODUKT</p><h2>{product.name}</h2></div><p className="pdp-description">{product.description}</p></section>}
@@ -472,7 +472,7 @@ return <main className="legal-page">
 <p>Beim Aufruf dieser Website verarbeitet die Hosting-Infrastruktur, über die sie technisch bereitgestellt wird, automatisch Verbindungsdaten (u. a. IP-Adresse, Datum und Uhrzeit des Zugriffs, aufgerufene Seite, verwendeter Browser), wie es für die technisch sichere Auslieferung jeder Website zwangsläufig erforderlich ist. Rechtsgrundlage ist Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse an einem funktionsfähigen, sicheren Betrieb der Website).</p>
 
 <h2>3. Kontoerstellung und Bestellung</h2>
-<p>Wenn du ein GLOA-Konto erstellst oder als Gast bestellst, verarbeiten wir die dafür notwendigen Angaben (z. B. Name, Kontaktdaten, Lieferadresse, Bestellinhalt) über unseren Datenbank- und Authentifizierungs-Dienstleister Supabase. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO (Vertragserfüllung bzw. vorvertragliche Maßnahmen). Bei der Kontoerstellung kannst du optional angeben, ob du Neuigkeiten von GLOA erhalten möchtest; diese Angabe wird bei deinem Konto gespeichert. Ein eigenständiger Newsletter-Versand ist aktuell nicht aktiv.</p>
+<p>Wenn du ein GLOA-Konto erstellst oder als Gast bestellst, verarbeiten wir die dafür notwendigen Angaben (z. B. Name, Kontaktdaten, Lieferadresse, Bestellinhalt) über unseren Datenbank- und Authentifizierungs-Dienstleister Supabase. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO (Vertragserfüllung bzw. vorvertragliche Maßnahmen). Einen Newsletter bieten wir nicht an: Es gibt weder eine Newsletter-Anmeldung noch eine entsprechende Einwilligung oder einen Newsletter-Versand. Wir verarbeiten deine E-Mail-Adresse nur für die Abwicklung deines Kontos und deiner Bestellung sowie für Nachrichten, die du uns selbst schickst.</p>
 
 <h2>4. Zahlungsabwicklung</h2>
 <p>Die Zahlungsabwicklung erfolgt über unseren Zahlungsdienstleister Stripe. Dabei werden die für die Zahlung notwendigen Daten (u. a. Bestellbetrag, Zahlungsart, Rechnungs-/Lieferadresse) an Stripe übermittelt. Stripe verarbeitet Zahlungsdaten wie Kartendaten ausschließlich auf eigenen, gesicherten Systemen; wir selbst erhalten und speichern keine vollständigen Zahlungsdaten. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO.</p>
@@ -886,7 +886,7 @@ return <div className="cart-backdrop" onClick={onClose} onKeyDown={e=>e.key==="E
 <div className="cart-footer">
 <div className="cart-total"><span>SUMME</span><strong>{fmtCents(cart.totalCents)} €</strong></div>
 {checkoutError&&<p className="cart-error">{checkoutError}</p>}
-<button className="cta cart-checkout-cta" onClick={handleCheckout} disabled={checkoutBusy}>{checkoutBusy?"WIRD GELADEN…":SHOP_STATUS==="prelaunch"?"ZUM LAUNCH INFORMIEREN":"ZUR KASSE"}</button>
+<button className="cta cart-checkout-cta" onClick={handleCheckout} disabled={checkoutBusy}>{checkoutBusy?"WIRD GELADEN…":SHOP_STATUS==="prelaunch"?"FRAGEN ZUM LAUNCH":"ZUR KASSE"}</button>
 {SHOP_STATUS!=="prelaunch"&&<p className="cart-legal-note">Mit dem Bestellabschluss akzeptierst du unsere <Link href="/agb" onClick={onClose}>AGB</Link>. Es gilt unsere <Link href="/datenschutz" onClick={onClose}>Datenschutzerklärung</Link>. Informationen zu deinem <Link href="/widerruf" onClick={onClose}>Widerrufsrecht</Link>.</p>}
 </div>
 </>}

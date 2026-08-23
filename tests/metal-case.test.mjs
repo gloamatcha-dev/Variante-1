@@ -313,7 +313,9 @@ test("shop: the Matcha details accordion belongs to the Matcha column and starts
   // the DOM rather than being hidden behind JS.
   assert.match(site, /<details className="product-accordion">/);
   assert.ok(!/<details className="product-accordion" open/.test(site), "accordion must start collapsed");
-  assert.match(site, /<summary><span>Produktdetails<\/span>/);
+  // Task 28A renamed the summary so the LMIV mandatory particulars are
+  // "clearly identified" (Art. 14(1)(a)) rather than merely implied.
+  assert.match(site, /<summary><span>Produktdetails &amp; Pflichtangaben<\/span>/);
   // Rendered inside the product loop, next to its own product.
   assert.match(site, /p\.slug===MATCHA_SLUG&&<MatchaShopDetails product=\{p\}\/>/);
 });

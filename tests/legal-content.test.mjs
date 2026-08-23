@@ -190,3 +190,83 @@ test("Order confirmation email state machine (Task 24A) is untouched by this tas
   assert.match(orderConfirmationSource, /claimOrderConfirmationEmail/);
   assert.match(orderConfirmationSource, /"pending", "failed"/);
 });
+
+/* ── Task 28A: final customer-facing legal pass ─────────────── */
+
+test("Datenschutz: describes no newsletter processing, because none exists", async () => {
+  const { html: body } = await html("/datenschutz");
+  // The consent checkbox and the account newsletter setting were removed
+  // in Task 27E; the privacy notice must not keep describing them.
+  assert.doesNotMatch(body, /Neuigkeiten von GLOA erhalten/i);
+  assert.doesNotMatch(body, /Newsletter-Versand ist aktuell nicht aktiv/i);
+  assert.match(body, /Einen Newsletter bieten wir nicht an/i);
+});
+
+test("Datenschutz: claims no tracking, analytics or cookie consent that the site does not run", () => {
+  // Nothing may be described that is not actually implemented.
+  for (const invented of ["Google Analytics", "Matomo", "Facebook Pixel", "Cookie-Banner", "Einwilligungsbanner"]) {
+    assert.ok(!gloaSiteSource.includes(invented), `privacy notice must not claim ${invented}`);
+  }
+});
+
+test("Impressum: uses § 5 DDG and never the repealed § 5 TMG", () => {
+  assert.match(gloaSiteSource, /§ 5 DDG/);
+  assert.ok(!gloaSiteSource.includes("§ 5 TMG"), "TMG was replaced by the DDG in 2024");
+});
+
+test("Impressum: carries the company, register and VAT identifiers", () => {
+  for (const fact of ["Cara 2 GmbH", "Hardenbergstr. 4", "10623 Berlin", "Amtsgericht Charlottenburg", "HRB 278728 B", "DE457414734", "info@gloamatcha.com"]) {
+    assert.ok(gloaSiteSource.includes(fact), `Impressum is missing: ${fact}`);
+  }
+});
+
+test("Legal: the discontinued EU ODR/OS platform is not linked anywhere", () => {
+  // Regulation (EU) 524/2013 was repealed and the platform closed on
+  // 20 July 2025; keeping the link would itself mislead consumers.
+  for (const odr of ["ec.europa.eu/consumers/odr", "OS-Plattform", "Online-Streitbeilegung", "ODR-Plattform"]) {
+    assert.ok(!gloaSiteSource.includes(odr), `obsolete ODR reference: ${odr}`);
+  }
+});
+
+test("§ 356a: the electronic withdrawal function keeps its statutory labels", () => {
+  assert.match(gloaSiteSource, /Vertrag widerrufen/);
+  assert.match(gloaSiteSource, /Widerruf best\u00e4tigen/);
+});
+
+test("Food info: the mandatory particulars are identified as such before purchase", () => {
+  // Art. 14(1)(a) LMIV lets the particulars be provided through "other
+  // appropriate means clearly identified by the food business operator".
+  // The shop accordion names them explicitly.
+  assert.match(gloaSiteSource, /Produktdetails &amp; Pflichtangaben/);
+  assert.ok(!/<details className="product-accordion" open/.test(gloaSiteSource));
+});
+
+test("Food info: still no invented durability, allergen or nutrition data", () => {
+  for (const invented of ["Mindesthaltbar", "3 Jahre", "Kann Spuren von", "Brennwert", "N\u00e4hrwert"]) {
+    assert.ok(!gloaSiteSource.includes(invented), `invented food claim: ${invented}`);
+  }
+});
+
+test("Prelaunch CTA: promises no notification service, because none exists", () => {
+  // The newsletter is gone, so the button must not imply the customer
+  // will be told about the launch automatically.
+  assert.ok(!gloaSiteSource.includes("Zum Launch informieren"), "CTA still promises a notification");
+  assert.ok(!gloaSiteSource.includes("ZUM LAUNCH INFORMIEREN"), "CTA still promises a notification");
+  assert.match(gloaSiteSource, /Fragen zum Launch/i);
+  // And it points at a channel that actually exists.
+  assert.ok(!gloaSiteSource.includes("#newsletter"), "CTA still points at the removed newsletter anchor");
+});
+
+test("Prices: no VAT rate is asserted while the tax status is unresolved", () => {
+  // Task 21 is paused. A concrete VAT statement could be false, so the
+  // site states total prices only.
+  for (const claim of ["19 % MwSt", "7 % MwSt", "19% MwSt", "7% MwSt", "inkl. 19", "inkl. 7"]) {
+    assert.ok(!gloaSiteSource.includes(claim), `premature VAT claim: ${claim}`);
+  }
+});
+
+test("Bio: no organic control-body code is invented", () => {
+  // Using "Bio" online carries its own disclosure duties, but a code that
+  // has not been confirmed must never be fabricated.
+  assert.ok(!/DE-[\u00d6O]KO-\d/i.test(gloaSiteSource), "an organic control code was invented");
+});
