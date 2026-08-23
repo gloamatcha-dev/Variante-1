@@ -1,7 +1,7 @@
 "use client";
-import { Fragment, useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
-import { Header, Footer, Newsletter } from "./Chrome";
+import { Header, Footer } from "./Chrome";
 import { BRAND, PRODUCT, SHOP_STATUS, COUNTRIES } from "./content";
 import { useCatalog, useCatalogList, fmtCents, per100gCents } from "./useCatalog";
 import type { CatalogProduct } from "./useCatalog";
@@ -42,7 +42,7 @@ if(error||!product)return <article className="product-card"><Link href="/shop"><
 if(!product.variants.length)return <article className="product-card"><Link href="/shop"><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>Demnächst</strong></div></Link></article>;
 const dv=product.variants[0];const lowestCents=Math.min(...product.variants.map(v=>v.price_gross_cents));
 const handleAdd=()=>{addItem({productId:product.id,productName:product.name,productSlug:product.slug,variantId:dv.id,label:dv.label,grams:dv.size_grams,purchaseType:"once",unitPriceCents:dv.price_gross_cents});track("add_to_cart");onAdd()};
-const handlePrelaunch=()=>window.location.href="#newsletter";
+const handlePrelaunch=()=>window.location.href="/contact";
 return <article className="product-card"><Link href="/shop" onClick={()=>track("product_view")}><ProductVisual/><div className="product-info"><div><h3>{PRODUCT.name}</h3><p>{PRODUCT.origin} · LATTE + ICED + PUR</p></div><strong>AB {fmtCents(lowestCents)} €</strong></div></Link><button className="add" onClick={SHOP_STATUS==="prelaunch"?handlePrelaunch:handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"} <span>+</span></button></article>}
 function HowTo(){return <section className="how-to"><div className="section-head"><div><p className="eyebrow">HOW TO GLOA</p><h2>Latte oder Pur.<br/>Mehr brauchst du nicht.</h2></div></div><div className="method-grid"><article><span>01</span><h3>Matcha Latte</h3><ol><li>Matcha dosieren</li><li>Mit Wasser aufschlagen</li><li>Milch oder Pflanzendrink dazu</li><li>Heiß oder iced genießen</li></ol></article><article><span>02</span><h3>Pure Matcha</h3><ol><li>Matcha dosieren</li><li>Mit wenig Wasser glattrühren</li><li>Mit Wasser aufschlagen</li><li>Direkt genießen</li></ol></article></div></section>}
 function CommunityFeed(){const [offset,setOffset]=useState(0);const [paused,setPaused]=useState(false);const [animate,setAnimate]=useState(true);const total=communityItems.length;useEffect(()=>{const mq=window.matchMedia("(prefers-reduced-motion: reduce)");if(mq.matches)return;let visible=true;const onVis=()=>{visible=document.visibilityState==="visible"};document.addEventListener("visibilitychange",onVis);const id=setInterval(()=>{if(!paused&&visible)setOffset(p=>p+1)},4500);return()=>{clearInterval(id);document.removeEventListener("visibilitychange",onVis)}},[paused]);useEffect(()=>{if(offset>=total){const t=setTimeout(()=>{setAnimate(false);setOffset(0);requestAnimationFrame(()=>requestAnimationFrame(()=>setAnimate(true)))},400);return()=>clearTimeout(t)}},[offset,total]);const track=[...communityItems,...communityItems.slice(0,4)];return <div className="community-feed" onMouseEnter={()=>setPaused(true)} onMouseLeave={()=>setPaused(false)}><div className="community-track" style={{transform:`translateX(-${offset*25}%)`,transition:animate?"transform 400ms ease":"none"}}>{track.map((item,i)=><div key={`cf-${i}`} className="community-card"><img src={item.image} alt={item.alt} loading="lazy"/></div>)}</div></div>}
@@ -84,7 +84,7 @@ return <section className="featured-recipes"><div className="featured-recipes-he
 </section>
 }
 
-function Home({onAdd}:{onAdd:()=>void}){return <main><section className="hero"><div className="hero-copy"><p className="eyebrow">MATCHA AUS SHIZUOKA.</p><h1>Matcha.<br/><i>Aber richtig.</i></h1><p className="lead">Aus Shizuoka, Japan. Für Latte, pur, iced oder wie du willst.</p><div className="hero-actions"><Link className="cta" href="/shop" onClick={()=>track("shop_click")}>Zum Shop</Link><Link className="cta secondary" href="/about">GLOA entdecken →</Link></div></div><div className="hero-art"><img src="/img/gloa-hero-packaging.jpg" alt="GLOA Matcha Verpackung" className="hero-img"/><span className="hero-micro">SHIZUOKA / JAPAN</span></div></section><section className="product-intro"><div><p className="eyebrow">MEET YOUR MATCHA.</p><h2>Ein Grün.<br/><i>Viele Momente.</i></h2><p>Aus Shizuoka, Japan. Für Matcha Latte und pur. Easy im Alltag, ehrlich im Produkt.</p><Link className="cta" href="/shop">Shop GLOA</Link></div><ProductCard onAdd={onAdd}/></section><section className="daily"><div className="daily-copy"><p className="eyebrow">MATCHA FÜR JEDEN TAG</p><h2>Morgens.<br/>Im Meeting.<br/><i>Nachmittags.</i></h2></div><div className="daily-grid">{dailyTiles.map(t=><div className="daily-tile" key={t.label}><img src={t.src} alt={t.alt} loading="lazy"/><span>{t.label}</span></div>)}</div></section><section className="origin"><div><p className="eyebrow">ORIGIN</p><h2>From Shizuoka,<br/><i>Japan.</i></h2></div><div><p>GLOA Matcha kommt aus Shizuoka, Japan: 100 % Bio-Matcha aus der zweiten und dritten Pflückung, fein vermahlen.</p><dl><div><dt>ORIGIN</dt><dd>Shizuoka, Japan</dd></div><div><dt>MADE FOR</dt><dd>Latte + pure preparation</dd></div></dl></div></section><HowTo/><RecipeCarousel/><section className="community"><p className="eyebrow">#gloamatcha</p><h2>Zeig uns<br/><i>deinen Matcha.</i></h2><CommunityFeed/><a href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">@gloa.matcha folgen →</a></section><Newsletter/></main>}
+function Home({onAdd}:{onAdd:()=>void}){return <main><section className="hero"><div className="hero-copy"><p className="eyebrow">MATCHA AUS SHIZUOKA.</p><h1>Matcha.<br/><i>Aber richtig.</i></h1><p className="lead">Aus Shizuoka, Japan. Für Latte, pur, iced oder wie du willst.</p><div className="hero-actions"><Link className="cta" href="/shop" onClick={()=>track("shop_click")}>Zum Shop</Link><Link className="cta secondary" href="/about">GLOA entdecken →</Link></div></div><div className="hero-art"><img src="/img/gloa-hero-packaging.jpg" alt="GLOA Matcha Verpackung" className="hero-img"/><span className="hero-micro">SHIZUOKA / JAPAN</span></div></section><section className="product-intro"><div><p className="eyebrow">MEET YOUR MATCHA.</p><h2>Ein Grün.<br/><i>Viele Momente.</i></h2><p>Aus Shizuoka, Japan. Für Matcha Latte und pur. Easy im Alltag, ehrlich im Produkt.</p><Link className="cta" href="/shop">Shop GLOA</Link></div><ProductCard onAdd={onAdd}/></section><section className="daily"><div className="daily-copy"><p className="eyebrow">MATCHA FÜR JEDEN TAG</p><h2>Morgens.<br/>Im Meeting.<br/><i>Nachmittags.</i></h2></div><div className="daily-grid">{dailyTiles.map(t=><div className="daily-tile" key={t.label}><img src={t.src} alt={t.alt} loading="lazy"/><span>{t.label}</span></div>)}</div></section><section className="origin"><div><p className="eyebrow">ORIGIN</p><h2>From Shizuoka,<br/><i>Japan.</i></h2></div><div><p>GLOA Matcha kommt aus Shizuoka, Japan: 100 % Bio-Matcha aus der zweiten und dritten Pflückung, fein vermahlen.</p><dl><div><dt>ORIGIN</dt><dd>Shizuoka, Japan</dd></div><div><dt>MADE FOR</dt><dd>Latte + pure preparation</dd></div></dl></div></section><HowTo/><RecipeCarousel/><section className="community"><p className="eyebrow">#gloamatcha</p><h2>Zeig uns<br/><i>deinen Matcha.</i></h2><CommunityFeed/><a href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">@gloa.matcha folgen →</a></section><BrandNote/></main>}
 
 // -- Catalog-driven shop --------------------------------------------
 //
@@ -106,7 +106,7 @@ return <div className="size-selector" role="radiogroup" aria-label={weighed?"Gr�
 
 /** One product's purchase block on the shop page. Keeps its own variant
  *  state, so several products on one page never share a selection. */
-function ShopProductBlock({product,anchorId,onAdd}:{product:CatalogProduct;anchorId:string;onAdd:()=>void}){
+function ShopProductBlock({product,onAdd}:{product:CatalogProduct;onAdd:()=>void}){
 const {addItem}=useCart();
 const [idx,setIdx]=useState(0);
 const safe=Math.min(idx,product.variants.length-1);
@@ -116,7 +116,7 @@ const per100=showsUnitPricePer100g(v)?per100gCents(v.price_gross_cents,v.size_gr
 const img=getProductImage(product);
 const sub=getProductSubtitle(product);
 const handleAdd=()=>{addItem({productId:product.id,productName:product.name,productSlug:product.slug,variantId:v.id,label:v.label,grams:v.size_grams,purchaseType:"once",unitPriceCents:v.price_gross_cents});track("add_to_cart");onAdd()};
-return <section id={anchorId} className="shop-product">
+return <>
 {img&&<div className="shop-product-image"><img src={img} alt={product.name}/></div>}
 <div className="shop-product-info"><p className="eyebrow">{getProductEyebrow(product)}</p><h2>{product.name.toUpperCase()}</h2>
 {sub&&<p className="shop-product-sub">{sub}</p>}
@@ -127,8 +127,8 @@ return <section id={anchorId} className="shop-product">
 {per100!==null&&<p className="shop-product-per100g">{fmtCents(per100)} € / 100 g</p>}
 {presentation.matchaNotIncludedNotice&&<p className="product-not-included">{presentation.matchaNotIncludedNotice}</p>}
 
-<button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="#newsletter":handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
-</div></section>}
+<button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
+</div></>}
 
 /** Confirmed GLOA Matcha food information. Rendered only for the Matcha
  *  product itself - an accessory must never inherit any of this. */
@@ -148,8 +148,9 @@ return <section className="shop-accordion"><div className="shop-accordion-inner"
 function BrandNote(){
 return <section className="brand-note"><div className="brand-note-inner">
 <p className="eyebrow">KEIN NEWSLETTER-LÄRM</p>
-<p className="brand-note-text">Wir melden uns nur, wenn es sich lohnt.</p>
-<p className="brand-note-sub">Keine Rabattschreie, kein E-Mail-Dauerfeuer. Nur GLOA.</p>
+<p className="brand-note-text">Wir melden uns nicht.<br/><i>Und das ist Absicht.</i></p>
+<p className="brand-note-sub">Keine Rabattschreie. Kein E-Mail-Dauerfeuer.<br/>Wenn es etwas zu sagen gibt, findest du es hier.</p>
+<p className="brand-note-micro">Nur GLOA.</p>
 <Link className="brand-note-link" href="/contact">Fragen? Schreib uns →</Link>
 </div></section>}
 
@@ -174,10 +175,12 @@ const lowestCents=Math.min(...products.flatMap(p=>p.variants.map(x=>x.price_gros
 return <main className="shop-page">
 <section className="shop-hero"><div className="shop-hero-inner"><p className="eyebrow">{eyebrow}</p><h1>{heading}</h1><p className="lead">{lead}</p><p className="shop-hero-price">AB {fmtCents(lowestCents)} €</p><p className="shop-hero-micro">Launch in Vorbereitung.</p><Link className="cta shop-hero-cta" href="#product" onClick={()=>track("shop_scroll_product")}>{multi?"ZU DEN PRODUKTEN":"ZUM MATCHA"}</Link></div></section>
 
-{products.map((p,i)=><Fragment key={p.id}>
-<ShopProductBlock product={p} anchorId={i===0?"product":`product-${p.slug}`} onAdd={onAdd}/>
+<section id="product" className="shop-products">
+{products.map(p=><article key={p.id} id={`product-${p.slug}`} className="shop-column">
+<ShopProductBlock product={p} onAdd={onAdd}/>
 {p.slug===MATCHA_SLUG&&<MatchaShopDetails product={p}/>}
-</Fragment>)}
+</article>)}
+</section>
 
 <BrandNote/>
 </main>}
@@ -201,7 +204,7 @@ return <main className="pdp">
 <p className="pdp-price">{fmtCents(v.price_gross_cents)} €</p>
 {per100!==null&&<p className="pdp-per100g">{fmtCents(per100)} € / 100 g</p>}
 
-<button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="#newsletter":handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
+<button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
 </div></section>
 
 <section className="pdp-facts"><div><p className="eyebrow">WHAT WE KNOW</p><h2>Clear facts.<br/>Nothing invented.</h2></div><dl><div><dt>LEBENSMITTELBEZEICHNUNG</dt><dd>Matcha (Grünteepulver)</dd></div><div><dt>ZUTAT</dt><dd>100 % Matcha-Grünteepulver, keine Zusätze</dd></div><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>VERWENDUNG</dt><dd>Latte · Iced · Pur</dd></div><div><dt>LAGERUNG</dt><dd>{PRODUCT.storage}</dd></div><div><dt>GROESSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div><div><dt>VERANTWORTLICHES LEBENSMITTELUNTERNEHMEN</dt><dd>Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin, Deutschland</dd></div></dl></section>
@@ -232,7 +235,7 @@ return <main className="pdp">
 <p className="pdp-price">{fmtCents(v.price_gross_cents)} €</p>
 {presentation.matchaNotIncludedNotice&&<p className="product-not-included">{presentation.matchaNotIncludedNotice}</p>}
 
-<button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="#newsletter":handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
+<button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":handleAdd}>{SHOP_STATUS==="prelaunch"?"Zum Launch informieren":"In den Warenkorb"}</button>
 </div></section>
 
 {product.description&&<section className="pdp-facts"><div><p className="eyebrow">PRODUKT</p><h2>{product.name}</h2></div><p className="pdp-description">{product.description}</p></section>}
@@ -318,7 +321,7 @@ function Rezepte(){const [filter,setFilter]=useState("ALLE");const filtered=filt
 <section className="rezepte-hero"><p className="eyebrow">GLOA · REZEPTE</p><h1>Matcha Rezepte.<br/><i>GLOA Edition.</i></h1><p className="lead">Signature Drinks. Einfach, visuell stark und passend zur GLOA-Welt.</p></section>
 <section className="rezepte-filters">{ALL_TAGS.map(t=><button key={t} className={filter===t?"active":""} onClick={()=>setFilter(t)}>{t}</button>)}</section>
 <section className="rezepte-grid">{filtered.map(r=><article key={r.slug} className="rezept-card"><Link href={`/rezepte/${r.slug}`}><div className="rezept-card-img"><img src={r.image} alt={r.alt} loading="lazy"/></div><div className="rezept-card-body"><p className="eyebrow">{r.category} · {r.time}</p><h2>{r.title}</h2><p className="rezept-card-excerpt">{r.excerpt}</p><span className="rezept-card-cta">Rezept ansehen →</span></div></Link></article>)}</section>
-<Newsletter/>
+<BrandNote/>
 </main>}
 function RezeptDetail({slug}:{slug:string}){const r=recipes.find(x=>x.slug===slug);if(!r)return <main className="not-found"><h1>404</h1><p>Rezept nicht gefunden.</p><Link href="/rezepte">← Alle Rezepte</Link></main>;return <main className="rezept-detail">
 <section className="rezept-detail-hero"><div className="rezept-detail-image"><img src={r.image} alt={r.alt}/></div><div className="rezept-detail-intro"><p className="eyebrow">{r.category} · {r.time} · {r.servings}</p><h1>{r.title}</h1><p className="rezept-detail-desc">{r.description}</p><div className="rezept-detail-tags">{r.tags.map(t=><span key={t}>{t}</span>)}</div></div></section>
@@ -648,9 +651,9 @@ const handleLogin=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault()
 
 const handleForgot=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();if(!supabase)return;setAuthBusy(true);setAuthError("");const f=new FormData(e.currentTarget);const{error}=await supabase.auth.resetPasswordForEmail(String(f.get("email")),{redirectTo:resetUrl});setAuthBusy(false);if(error){setAuthError(translateAuthErr(error.message));return}setForgotSent(true)};
 
-const handlePrivate=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);if(!validatePw(f))return;if(!supabase)return;setAuthBusy(true);setAuthError("");const{data,error}=await supabase.auth.signUp({email:String(f.get("email")),password:String(f.get("password")),options:{emailRedirectTo:confirmUrl,data:{customer_type:"private",first_name:String(f.get("first_name")),last_name:String(f.get("last_name")),phone:String(f.get("phone")||""),street:String(f.get("street")),house_number:String(f.get("house_number")),zip:String(f.get("zip")),city:String(f.get("city")),country:String(f.get("country")),accept_terms:true,newsletter:!!f.get("newsletter")}}});setAuthBusy(false);if(error){setAuthError(translateAuthErr(error.message));return}if(data.session){window.location.href="/account/dashboard"}else{setView("confirm-pending")}};
+const handlePrivate=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);if(!validatePw(f))return;if(!supabase)return;setAuthBusy(true);setAuthError("");const{data,error}=await supabase.auth.signUp({email:String(f.get("email")),password:String(f.get("password")),options:{emailRedirectTo:confirmUrl,data:{customer_type:"private",first_name:String(f.get("first_name")),last_name:String(f.get("last_name")),phone:String(f.get("phone")||""),street:String(f.get("street")),house_number:String(f.get("house_number")),zip:String(f.get("zip")),city:String(f.get("city")),country:String(f.get("country")),accept_terms:true,newsletter:false}}});setAuthBusy(false);if(error){setAuthError(translateAuthErr(error.message));return}if(data.session){window.location.href="/account/dashboard"}else{setView("confirm-pending")}};
 
-const handleB2B=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);if(!validatePw(f))return;if(!supabase)return;setAuthBusy(true);setAuthError("");const{data,error}=await supabase.auth.signUp({email:String(f.get("email")),password:String(f.get("password")),options:{emailRedirectTo:confirmUrl,data:{customer_type:"business",first_name:String(f.get("contact_first_name")),last_name:String(f.get("contact_last_name")),contact_first_name:String(f.get("contact_first_name")),contact_last_name:String(f.get("contact_last_name")),phone:String(f.get("phone")||""),company_name:String(f.get("company_name")),legal_form:String(f.get("legal_form")||""),tax_number:String(f.get("tax_number")),vat_id:String(f.get("vat_id")||""),website:String(f.get("website")||""),street:String(f.get("street")),house_number:String(f.get("house_number")),zip:String(f.get("zip")),city:String(f.get("city")),country:String(f.get("country")),confirm_company_auth:!!f.get("confirm_company_auth"),accept_terms:true,newsletter:!!f.get("newsletter")}}});setAuthBusy(false);if(error){setAuthError(translateAuthErr(error.message));return}if(data.session){window.location.href="/account/dashboard"}else{setView("confirm-pending")}};
+const handleB2B=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);if(!validatePw(f))return;if(!supabase)return;setAuthBusy(true);setAuthError("");const{data,error}=await supabase.auth.signUp({email:String(f.get("email")),password:String(f.get("password")),options:{emailRedirectTo:confirmUrl,data:{customer_type:"business",first_name:String(f.get("contact_first_name")),last_name:String(f.get("contact_last_name")),contact_first_name:String(f.get("contact_first_name")),contact_last_name:String(f.get("contact_last_name")),phone:String(f.get("phone")||""),company_name:String(f.get("company_name")),legal_form:String(f.get("legal_form")||""),tax_number:String(f.get("tax_number")),vat_id:String(f.get("vat_id")||""),website:String(f.get("website")||""),street:String(f.get("street")),house_number:String(f.get("house_number")),zip:String(f.get("zip")),city:String(f.get("city")),country:String(f.get("country")),confirm_company_auth:!!f.get("confirm_company_auth"),accept_terms:true,newsletter:false}}});setAuthBusy(false);if(error){setAuthError(translateAuthErr(error.message));return}if(data.session){window.location.href="/account/dashboard"}else{setView("confirm-pending")}};
 
 if(view==="confirm-pending")return <main className="account-page"><section className="account-section">
 <p className="eyebrow">GLOA ACCOUNT</p>
@@ -735,7 +738,6 @@ if(view==="register")return <main className="account-page"><section className="a
 {pwError&&<p className="account-error">{pwError}</p>}
 {authError&&<p className="account-error">{authError}</p>}
 <label className="consent"><input required type="checkbox" name="accept_terms"/> Ich akzeptiere die <Link href="/agb">AGB</Link> und <Link href="/datenschutz">Datenschutzerklärung</Link>.</label>
-<label className="consent"><input type="checkbox" name="newsletter"/> Ich möchte Neuigkeiten und Angebote von GLOA erhalten.</label>
 <button className="cta account-cta" type="submit" disabled={authBusy}>{authBusy?"ERSTELLEN…":"Konto erstellen"}</button>
 </form>
 <p className="account-login-hint">Schon ein Konto? <button className="account-link-btn" onClick={()=>setView("login")}>Anmelden</button></p>
@@ -783,7 +785,6 @@ if(view==="b2b-apply")return <main className="account-page"><section className="
 {authError&&<p className="account-error">{authError}</p>}
 <label className="consent"><input required type="checkbox" name="confirm_company_auth"/> Ich bestätige, dass ich im Namen des angegebenen Unternehmens handle.</label>
 <label className="consent"><input required type="checkbox" name="accept_terms"/> Ich akzeptiere die <Link href="/agb">AGB</Link> und <Link href="/datenschutz">Datenschutzerklärung</Link>.</label>
-<label className="consent"><input type="checkbox" name="newsletter"/> Ich möchte B2B-Neuigkeiten von GLOA erhalten.</label>
 <button className="cta account-cta" type="submit" disabled={authBusy}>{authBusy?"ERSTELLEN…":"Geschäftskonto erstellen"}</button>
 </form>
 <p className="account-login-hint">Schon ein Konto? <button className="account-link-btn" onClick={()=>setView("login")}>Anmelden</button></p>
@@ -838,7 +839,7 @@ const threshold=zone?SHIPPING_PRICING[zone].freeShippingThresholdGrossCents:null
 const remainingForFreeShipping=threshold!==null?Math.max(0,threshold-cart.totalCents):null;
 
 const handleCheckout=async()=>{
-if(SHOP_STATUS==="prelaunch"){onClose();window.location.href="/shop#newsletter";return}
+if(SHOP_STATUS==="prelaunch"){onClose();window.location.href="/contact";return}
 setCheckoutBusy(true);setCheckoutError("");
 try{
 const requestId=crypto.randomUUID();

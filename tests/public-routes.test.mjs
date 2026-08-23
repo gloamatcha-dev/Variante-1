@@ -57,12 +57,72 @@ test("routes: /shop responds, with its content covered by shop-render", async ()
 /* ── Migrated from the retired stale test ───────────────────── */
 
 test("homepage: the consumer sections still render", async () => {
-  // These three assertions came from tests/rendered-html.test.mjs and
-  // still describe the live homepage, so they were kept as-is.
+  // Carried over from tests/rendered-html.test.mjs. "STAY IN THE GLOA"
+  // was the newsletter band's eyebrow and was dropped in Task 27E when
+  // the newsletter was removed site-wide.
   const { html } = await server.getHtml("/");
   assert.match(html, /From Shizuoka/);
   assert.match(html, /HOW TO GLOA/);
-  assert.match(html, /STAY IN THE GLOA/);
+});
+
+/* -- No newsletter anywhere (Task 27E) ----------------------- */
+
+const NEWSLETTER_ROUTES = ["/", "/shop", "/rezepte", "/our-matcha", "/about", "/contact", "/for-cafes"];
+
+test("newsletter: no signup form, input or consent box on any public route", async () => {
+  for (const route of NEWSLETTER_ROUTES) {
+    const { html } = await server.getHtml(route);
+    assert.doesNotMatch(html, /newsletter-band/i, `newsletter band on ${route}`);
+    assert.doesNotMatch(html, /id="newsletter"/i, `newsletter anchor on ${route}`);
+    assert.doesNotMatch(html, /name="newsletter"/i, `newsletter consent box on ${route}`);
+    assert.doesNotMatch(html, /newsletter-email/i, `newsletter email input on ${route}`);
+  }
+});
+
+test("newsletter: the obsolete signup copy is gone site-wide", async () => {
+  for (const route of NEWSLETTER_ROUTES) {
+    const { html } = await server.getHtml(route);
+    assert.doesNotMatch(html, /STAY IN THE GLOA/i, `newsletter eyebrow on ${route}`);
+    assert.doesNotMatch(html, /Wir sagen[\s\S]{0,20}dir Bescheid/i, `newsletter headline on ${route}`);
+    assert.doesNotMatch(html, /Rezepte, Drops, Caf/i, `newsletter promise on ${route}`);
+    assert.doesNotMatch(html, /Newsletter erhalten|Newsletter anmelden/i, `newsletter consent copy on ${route}`);
+  }
+});
+
+test("newsletter: the footer carries no email capture", async () => {
+  const { html } = await server.getHtml("/");
+  const footer = html.slice(html.lastIndexOf("<footer"));
+  assert.ok(footer.includes("Impressum"), "footer not found");
+  assert.doesNotMatch(footer, /<input/i, "the footer must contain no input at all");
+});
+
+test("brand note: replaces the newsletter with a statement, not a form", async () => {
+  // Server-rendered on / and /rezepte. On /shop it sits below the
+  // catalog-driven products and therefore renders client-side.
+  for (const route of ["/", "/rezepte"]) {
+    const { html } = await server.getHtml(route);
+    assert.match(html, /KEIN NEWSLETTER-L/i, `brand note missing on ${route}`);
+    assert.match(html, /Wir melden uns nicht/i, `brand note headline missing on ${route}`);
+    const note = html.slice(html.indexOf("brand-note"));
+    const noteEnd = note.slice(0, note.indexOf("</section>") + 10);
+    assert.doesNotMatch(noteEnd, /<input|<form/i, "the brand note must contain no form or input");
+  }
+});
+
+/* -- Legitimate email forms are preserved -------------------- */
+
+test("contact: the customer contact form still exists", async () => {
+  const { html } = await server.getHtml("/contact");
+  assert.match(html, /<form/i, "contact form missing");
+  assert.match(html, /type="email"|name="email"/i, "contact email field missing");
+});
+
+test("for-cafes: the B2B enquiry form still exists", async () => {
+  const { html } = await server.getHtml("/for-cafes");
+  assert.match(html, /<form/i, "B2B form missing");
+  assert.match(html, /type="email"|name="email"/i, "B2B email field missing");
+  // And still exposes no confidential commercial detail.
+  assert.doesNotMatch(html, /Einkaufspreis|Deckungsbeitrag/i);
 });
 
 test("for-cafes: the separate B2B journey still renders", async () => {

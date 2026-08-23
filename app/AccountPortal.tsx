@@ -1089,11 +1089,6 @@ function PortalProfile() {
     setEditing(false);
   };
 
-  const handleNewsletter = async (checked: boolean) => {
-    if (!supabase || !user) return;
-    await supabase.from("profiles").update({ newsletter_opt_in: checked }).eq("user_id", user.id);
-    await refreshProfile();
-  };
 
   const handlePasswordReset = async () => {
     if (!supabase || !user?.email) return;
@@ -1151,18 +1146,6 @@ function PortalProfile() {
           <p className="eyebrow">PASSWORT</p>
           <button className="cta" onClick={handlePasswordReset}>PASSWORT ÄNDERN</button>
           {pwMsg && <p className="portal-profile-note">{pwMsg}</p>}
-        </section>
-
-        <section className="portal-profile-block">
-          <p className="eyebrow">NEWSLETTER</p>
-          <label className="portal-newsletter-toggle">
-            <input
-              type="checkbox"
-              checked={profile?.newsletter_opt_in ?? false}
-              onChange={e => handleNewsletter(e.target.checked)}
-            />
-            Ich möchte Neuigkeiten und Angebote von GLOA erhalten.
-          </label>
         </section>
 
         <section className="portal-profile-block">

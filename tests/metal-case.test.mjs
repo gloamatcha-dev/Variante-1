@@ -293,3 +293,38 @@ test("checkout: no fabricated size_grams metadata reaches Stripe", () => {
   const session = readFileSync(path.join(ROOT, "app/api/checkout/session/route.ts"), "utf-8");
   assert.match(session, /typeof item\.sizeGrams === "number" \? \{ size_grams/);
 });
+
+/* -- Shop composition (Task 27E) ----------------------------- */
+
+test("shop: both products render as columns of one composition", () => {
+  const site = readFileSync(path.join(ROOT, "app/GloaSite.tsx"), "utf-8");
+  // One grid holding one column per catalog product, rather than a
+  // full-bleed row each.
+  assert.match(site, /className="shop-products"/);
+  assert.match(site, /className="shop-column"/);
+  const css = readFileSync(path.join(ROOT, "app/globals.css"), "utf-8");
+  assert.match(css, /\.shop-products\{[^}]*grid-template-columns:1fr 1fr/, "desktop must place the products side by side");
+  assert.match(css, /\.shop-products\{grid-template-columns:1fr;/, "mobile must stack them into one column");
+});
+
+test("shop: the Matcha details accordion belongs to the Matcha column and starts collapsed", () => {
+  const site = readFileSync(path.join(ROOT, "app/GloaSite.tsx"), "utf-8");
+  // Native details/summary: keyboard accessible, and the content stays in
+  // the DOM rather than being hidden behind JS.
+  assert.match(site, /<details className="product-accordion">/);
+  assert.ok(!/<details className="product-accordion" open/.test(site), "accordion must start collapsed");
+  assert.match(site, /<summary><span>Produktdetails<\/span>/);
+  // Rendered inside the product loop, next to its own product.
+  assert.match(site, /p\.slug===MATCHA_SLUG&&<MatchaShopDetails product=\{p\}\/>/);
+});
+
+test("shop: no newsletter component or anchor survives in the site source", () => {
+  const site = readFileSync(path.join(ROOT, "app/GloaSite.tsx"), "utf-8");
+  const chrome = readFileSync(path.join(ROOT, "app/Chrome.tsx"), "utf-8");
+  assert.ok(!site.includes("<Newsletter/>"), "newsletter component still used");
+  assert.ok(!site.includes("#newsletter"), "newsletter anchor still linked");
+  assert.ok(!chrome.includes("Newsletter"), "newsletter component still defined");
+  assert.ok(!site.includes('name="newsletter"'), "newsletter consent box still present");
+  // The account terms consent is a different thing and must stay.
+  assert.match(site, /name="accept_terms"/);
+});
