@@ -29,6 +29,7 @@ const migration = read("supabase/migrations/022_recurring_subscription_foundatio
 const portal = read("app/AccountPortal.tsx");
 const site = read("app/GloaSite.tsx");
 const shipping = read("lib/shipping.ts");
+const attemptsSchema = read("supabase/migrations/009_stripe_checkout_attempts.sql");
 
 const withoutComments = source => source
   .split(NEWLINE)
@@ -166,7 +167,7 @@ test("migration: no historical row is rewritten and no constraint is weakened", 
 /* ── Idempotency anchors ────────────────────────────────────── */
 
 test("schema: one Stripe invoice can back at most one checkout attempt", () => {
-  assert.match(sql, /alter table public\.checkout_attempts\s+add column stripe_invoice_id text;/);
+  assert.match(sql, /alter table public\.checkout_attempts\s+add column stripe_invoice_id text,/);
   assert.match(
     sql,
     /create unique index checkout_attempts_stripe_invoice_id_key\s+on public\.checkout_attempts \(stripe_invoice_id\)\s+where stripe_invoice_id is not null;/,
@@ -318,7 +319,8 @@ test("rpc: a redelivered invoice yields the same attempt, never a second", () =>
   );
   // Lookup first...
   assert.match(fn, /where stripe_invoice_id = p_stripe_invoice_id;/);
-  assert.match(fn, /if found then\s+return v_attempt\.id;/);
+  assert.match(fn, /if found then\s+if v_attempt\.subscription_id is distinct from p_subscription_id then/);
+  assert.match(fn, /return v_attempt\.id;/);
   // ...but the unique index is what actually decides a concurrent race.
   assert.match(fn, /when unique_violation then/);
   assert.match(fn, /insert into public\.checkout_attempts \(/);
@@ -353,4 +355,153 @@ test("scope: shipping prices and tax policy are unchanged", () => {
   assert.match(shipping, /nonEuCore: \{ shippingGrossCents: 1790, freeShippingThresholdGrossCents: null \}/);
   assert.match(shipping, /restOfEurope: \{ shippingGrossCents: 1990, freeShippingThresholdGrossCents: null \}/);
   assert.match(read("lib/tax.ts"), /export const EU_B2C_TAX_MODE: EuB2cTaxMode = "german_origin";/);
+});
+
+/* ── Task 29D-B FIX: the pre-apply defects, pinned ──────────── */
+
+/** The activation function body, comments stripped. */
+const activateFn = withoutComments(
+  migration.slice(
+    migration.indexOf("create or replace function public.activate_subscription_from_invoice("),
+    migration.indexOf("revoke all on function public.activate_subscription_from_invoice")
+  )
+);
+
+/** Character offset of a marker inside that body, asserted to exist. */
+const at = needle => {
+  const i = activateFn.indexOf(needle);
+  assert.notEqual(i, -1, `missing in activate function: ${needle}`);
+  return i;
+};
+
+test("fix: an attempt carries the exact subscription it bills", () => {
+  // TEST E - the insert stores p_subscription_id, not something derived.
+  assert.match(sql, /add column subscription_id uuid references public\.subscriptions\(id\)/);
+  const insert = activateFn.slice(at("insert into public.checkout_attempts ("), at("returning * into v_attempt;"));
+  assert.match(insert, /^\s*subscription_id,$/m, "the column must be in the insert list");
+  assert.match(insert, /^\s*p_subscription_id,$/m, "the value must be the parameter itself");
+});
+
+test("fix: subscription_id is nullable, unindexed and never unique", () => {
+  // TEST G - existing one-time attempts keep NULL and need no backfill.
+  const column = sql.slice(sql.indexOf("add column subscription_id"), sql.indexOf(";", sql.indexOf("add column subscription_id")));
+  assert.ok(!/not null/i.test(column), "the column must stay nullable");
+  assert.ok(!/default/i.test(column), "no default may fabricate a subscription");
+  // TEST H - many renewals share one subscription, so uniqueness would be
+  // an outright bug rather than a safeguard.
+  const indexes = sql.match(/create[^;]*index[^;]*;/gi) ?? [];
+  for (const index of indexes) {
+    assert.ok(!/\(\s*subscription_id\s*\)/.test(index), `an index keyed on subscription_id was added: ${index}`);
+  }
+  assert.ok(!/unique/i.test(column), "the column itself must not be declared unique");
+  // And no backfill of any kind.
+  assert.ok(!/update public\.checkout_attempts/i.test(sql), "existing attempts are rewritten");
+});
+
+test("fix: a known invoice must match the exact subscription, not just the owner", () => {
+  // TEST B and TEST C together. Comparing user_id would pass TEST B and
+  // fail TEST C, which is the case that matters: one customer holding two
+  // subscriptions must not have invoice A accepted as subscription B's.
+  const guards = [...activateFn.matchAll(/v_attempt\.subscription_id is distinct from p_subscription_id/g)];
+  assert.equal(guards.length, 2, "both the lookup and the recovery path must check it");
+  assert.ok(!/v_attempt\.user_id/.test(activateFn), "owner comparison is not a substitute for subscription identity");
+  // Fail closed, loudly, naming both subscriptions.
+  const raises = [...activateFn.matchAll(/raise exception 'stripe invoice % already belongs to subscription %, not %'/g)];
+  assert.equal(raises.length, 2);
+});
+
+test("fix: the same invoice on the same subscription is idempotent", () => {
+  // TEST A - found, matching, returned. No second attempt, no re-mutation.
+  const block = activateFn.slice(at("where stripe_invoice_id = p_stripe_invoice_id;"), at("update public.subscriptions"));
+  assert.match(block, /if found then/);
+  assert.match(block, /return v_attempt\.id;/);
+});
+
+test("fix: nothing is mutated before the invoice correlation is proven", () => {
+  // TEST D - the ordering IS the guarantee. A mismatched pair must reach
+  // the raise before any write, so it leaves no subscription mutation, no
+  // attempt and no order precursor behind.
+  const lock = at("for update;");
+  const statusGuard = at("cannot be activated from status");
+  const bindingGuard = at("is already bound to a different stripe subscription");
+  const lookup = at("where stripe_invoice_id = p_stripe_invoice_id;");
+  const correlationGuard = at("v_attempt.subscription_id is distinct from p_subscription_id");
+  const update = at("update public.subscriptions");
+  const insert = at("insert into public.checkout_attempts (");
+
+  assert.ok(lock < statusGuard, "the row must be locked first");
+  assert.ok(statusGuard < bindingGuard, "lifecycle before binding");
+  assert.ok(bindingGuard < lookup, "binding before the invoice lookup");
+  assert.ok(lookup < correlationGuard, "the lookup must be followed by its check");
+  assert.ok(correlationGuard < update, "the correlation check must precede every write");
+  assert.ok(update < insert, "activation precedes the attempt it justifies");
+});
+
+test("fix: the unique-violation recovery adopts a winner only after checking it", () => {
+  // TEST F - the index stays the authoritative concurrency guard, but its
+  // winner is not trusted blindly.
+  const recovery = activateFn.slice(at("when unique_violation then"));
+  assert.match(recovery, /where stripe_invoice_id = p_stripe_invoice_id;/);
+  assert.match(recovery, /if not found then\s+raise;/, "a violation from another constraint must re-raise");
+  assert.match(recovery, /v_attempt\.subscription_id is distinct from p_subscription_id/);
+  assert.ok(
+    recovery.indexOf("is distinct from p_subscription_id") < recovery.indexOf("return v_attempt.id;"),
+    "the winner must be validated before it is returned"
+  );
+  // The index itself is unchanged and still partial.
+  assert.match(sql, /create unique index checkout_attempts_stripe_invoice_id_key/);
+});
+
+test("fix: request_id is generated without depending on search_path resolution", () => {
+  // TEST I. checkout_attempts.request_id has no column default (migration
+  // 009 declares it `uuid not null unique`), so the value has to be
+  // produced here - and this body runs with search_path emptied.
+  assert.match(attemptsSchema, /request_id\s+uuid not null unique,/);
+  assert.ok(!/request_id[^,]*default/i.test(attemptsSchema), "if a default appears, prefer omitting the column instead");
+  assert.match(activateFn, /pg_catalog\.gen_random_uuid\(\)/);
+  assert.ok(!/[^.]\bgen_random_uuid\(\)/.test(activateFn), "an unqualified call would depend on the emptied search path");
+  // The function still declares the empty search path it is compensating for.
+  assert.match(activateFn, /security definer set search_path = ''/);
+});
+
+test("fix: the migration no longer claims no local row exists before payment", () => {
+  // TEST J. The architecture creates a pending row before Checkout; the
+  // comment justifying the omitted Stripe statuses used to deny that.
+  assert.ok(
+    !migration.includes("no row is written before a payment succeeds"),
+    "the false justification survives"
+  );
+  assert.match(migration, /Not because no local row exists yet - one does/);
+  assert.match(migration, /leaves it sitting in 'pending'/);
+  // The status model itself is unchanged.
+  const check = sql.match(/add constraint subscriptions_status_check\s+check \(status in \(([\s\S]*?)\)\)/)[1];
+  assert.deepEqual([...check.matchAll(/'([a-z_]+)'/g)].map(m => m[1]).sort(),
+    ["active", "cancelled", "past_due", "paused", "pending", "unpaid"]);
+});
+
+test("fix: the approved parts of migration 022 are untouched", () => {
+  for (const kept of [
+    "add column stripe_invoice_id text",
+    "create unique index checkout_attempts_stripe_invoice_id_key",
+    "add column stripe_subscription_id text",
+    "create unique index subscriptions_stripe_subscription_id_key",
+    "add column tax_snapshot jsonb",
+    "create table public.stripe_customers (",
+    "alter table public.stripe_customers enable row level security;",
+    "grant select, insert on public.stripe_customers to service_role;",
+  ]) {
+    assert.ok(sql.includes(kept), `a previously approved statement was lost: ${kept}`);
+  }
+  // Still exactly two functions, still service-role only, still no anon
+  // or authenticated grant anywhere in the file.
+  const created = sql.match(/create or replace function public\.\w+/g) ?? [];
+  assert.deepEqual(created.sort(), [
+    "create or replace function public.activate_subscription_from_invoice",
+    "create or replace function public.create_pending_subscription",
+  ]);
+  assert.ok(!/to anon/i.test(sql));
+  assert.ok(!/to authenticated/i.test(sql));
+  // And no 023 was created to do what 022 could do in place.
+  const files = readdirSync(MIGRATIONS).filter(n => n.endsWith(".sql")).sort();
+  assert.equal(files[files.length - 1], "022_recurring_subscription_foundation.sql");
 });

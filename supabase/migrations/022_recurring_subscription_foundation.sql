@@ -43,7 +43,22 @@
 -- NULLs do not collide, so no historical row is affected.
 
 alter table public.checkout_attempts
-  add column stripe_invoice_id text;
+  add column stripe_invoice_id text,
+  -- Which local subscription this attempt bills. NULL for every one-time
+  -- checkout, so no existing row needs a backfill and none is rewritten.
+  --
+  -- Deliberately NOT unique: each renewal invoice produces another attempt
+  -- for the same subscription, which is the normal case rather than a
+  -- conflict. Its job is correlation, and it is what lets the activation
+  -- function prove an invoice belongs to THIS subscription. Comparing
+  -- owners would not do: one customer may hold several subscriptions, and
+  -- subscription A's invoice must never be accepted as B's work merely
+  -- because both are theirs.
+  --
+  -- No index: nothing looks an attempt up by subscription today, and the
+  -- only reader is the row already located by stripe_invoice_id. One can
+  -- be added when a query actually needs it.
+  add column subscription_id uuid references public.subscriptions(id);
 
 create unique index checkout_attempts_stripe_invoice_id_key
   on public.checkout_attempts (stripe_invoice_id)
@@ -118,11 +133,14 @@ grant select, insert on public.stripe_customers to service_role;
 -- value 'canceled' is translated in application code, not by rewriting a
 -- constraint and every row behind it.
 --
--- Deliberately NOT added: trialing, incomplete, incomplete_expired. No
--- trial exists, and no row is written before a payment succeeds, so a
--- subscription can never be observed in an incomplete state. 'paused'
--- stays in the constraint from 005 but is not a launch feature and is
--- never written.
+-- Deliberately NOT added: trialing, incomplete, incomplete_expired.
+-- Not because no local row exists yet - one does: create_pending_subscription
+-- writes it before Stripe Checkout, and a failed or abandoned first
+-- payment simply leaves it sitting in 'pending' forever. The reason is
+-- that those Stripe states are not mapped into the GLOA lifecycle for the
+-- minimum launch: a subscription is either waiting for its first paid
+-- invoice ('pending') or it has had one ('active'). 'paused' stays in the
+-- constraint from 005 but is not a launch feature and is never written.
 
 alter table public.subscriptions
   drop constraint if exists subscriptions_status_check;
@@ -352,6 +370,26 @@ begin
     raise exception 'subscription % is already bound to a different stripe subscription', p_subscription_id;
   end if;
 
+  -- Has this invoice already been handled? Asked BEFORE anything is
+  -- written, so a redelivery cannot move lifecycle state a second time
+  -- and a mismatched pair cannot mutate a subscription at all.
+  select * into v_attempt
+  from public.checkout_attempts
+  where stripe_invoice_id = p_stripe_invoice_id;
+
+  if found then
+    -- The invoice must belong to THIS subscription. Comparing the owner
+    -- would not be enough: one customer may hold several subscriptions,
+    -- and invoice A must never be accepted as subscription B's work just
+    -- because both are theirs.
+    if v_attempt.subscription_id is distinct from p_subscription_id then
+      raise exception 'stripe invoice % already belongs to subscription %, not %',
+        p_stripe_invoice_id, v_attempt.subscription_id, p_subscription_id;
+    end if;
+    return v_attempt.id;
+  end if;
+
+  -- First time for this invoice: now the lifecycle may move.
   update public.subscriptions
      set stripe_subscription_id = coalesce(v_subscription.stripe_subscription_id, p_stripe_subscription_id),
          status                 = 'active',
@@ -361,16 +399,6 @@ begin
          next_delivery_at       = coalesce(p_next_delivery_at, v_subscription.next_delivery_at)
    where id = p_subscription_id
   returning * into v_subscription;
-
-  -- Already handled: a redelivered invoice returns the attempt it made
-  -- the first time, so no second order precursor can exist.
-  select * into v_attempt
-  from public.checkout_attempts
-  where stripe_invoice_id = p_stripe_invoice_id;
-
-  if found then
-    return v_attempt.id;
-  end if;
 
   -- Rebuilt from the frozen items rather than stored twice, so the
   -- subscription's own lines stay the single source of what is billed.
@@ -399,6 +427,7 @@ begin
   begin
     insert into public.checkout_attempts (
       request_id,
+      subscription_id,
       user_id,
       status,
       currency,
@@ -410,7 +439,15 @@ begin
       stripe_invoice_id,
       paid_at
     ) values (
-      gen_random_uuid(),
+      -- Schema-qualified deliberately. This body runs with search_path
+      -- emptied, and checkout_attempts.request_id has no column default
+      -- to fall back on, so an unqualified lookup would depend on a
+      -- resolution order this function has given up. pg_catalog is always
+      -- searched, and no migration in this project installs pgcrypto, so
+      -- the core function is the one every existing gen_random_uuid()
+      -- default already resolves to.
+      pg_catalog.gen_random_uuid(),
+      p_subscription_id,
       v_subscription.user_id,
       'paid',
       v_subscription.currency,
@@ -429,14 +466,19 @@ begin
   exception
     when unique_violation then
       -- A concurrent redelivery won the race between the lookup above and
-      -- this insert. The index is the real guard; this returns its winner.
+      -- this insert. The index is the real guard; this adopts its winner,
+      -- but only after proving the winner is this subscription's.
       select * into v_attempt
       from public.checkout_attempts
       where stripe_invoice_id = p_stripe_invoice_id;
-      if found then
-        return v_attempt.id;
+      if not found then
+        raise;
       end if;
-      raise;
+      if v_attempt.subscription_id is distinct from p_subscription_id then
+        raise exception 'stripe invoice % already belongs to subscription %, not %',
+          p_stripe_invoice_id, v_attempt.subscription_id, p_subscription_id;
+      end if;
+      return v_attempt.id;
   end;
 
   return v_attempt.id;
@@ -454,38 +496,105 @@ grant select on public.subscription_items to service_role;
 
 -- 8. VERIFY ────────────────────────────────────────────────────
 --
--- (a) The new columns and indexes exist. Expected: three rows.
+-- Read-only. Run after applying. Query (c) matters most: if the drop in
+-- section 5 did not match the constraint 005 actually created, the old
+-- four-value check survives alongside the new one and past_due would
+-- still be rejected - at runtime, not here.
 --
---   select indexname from pg_indexes
+-- (a) The new columns exist, all nullable, none with a default.
+--     Expected: four rows, is_nullable = YES, column_default NULL.
+--
+--   select table_name, column_name, data_type, is_nullable, column_default
+--   from information_schema.columns
+--   where table_schema = 'public'
+--     and ((table_name = 'checkout_attempts'
+--           and column_name in ('stripe_invoice_id', 'subscription_id'))
+--       or (table_name = 'subscriptions'
+--           and column_name in ('stripe_subscription_id', 'tax_snapshot')))
+--   order by table_name, column_name;
+--
+-- (b) Both unique indexes exist and are partial on non-null. Expected:
+--     two rows, each with a WHERE clause. subscription_id must NOT appear
+--     in any unique index - a subscription has many renewal attempts.
+--
+--   select indexname, indexdef
+--   from pg_indexes
 --   where schemaname = 'public'
---     and indexname in ('checkout_attempts_stripe_invoice_id_key',
---                       'subscriptions_stripe_subscription_id_key',
---                       'stripe_customers_stripe_customer_id_key')
+--     and tablename in ('checkout_attempts', 'subscriptions')
 --   order by indexname;
 --
--- (b) stripe_customers is server-only. Expected: rowsecurity true, zero
---     policies, and no grantee other than service_role (plus the owner).
+-- (c) EVERY check constraint on subscriptions. Expected: exactly one
+--     mentioning status, listing all six values.
 --
---   select relrowsecurity from pg_class
---   where oid = 'public.stripe_customers'::regclass;
+--   select conname, pg_get_constraintdef(oid) as definition
+--   from pg_constraint
+--   where conrelid = 'public.subscriptions'::regclass and contype = 'c'
+--   order by conname;
 --
---   select count(*) as policies from pg_policies
+-- (d) The correlation foreign key points where it should.
+--
+--   select conname, pg_get_constraintdef(oid) as definition
+--   from pg_constraint
+--   where conrelid = 'public.checkout_attempts'::regclass and contype = 'f'
+--   order by conname;
+--
+-- (e) Every existing subscription still satisfies the constraint.
+--
+--   select status, count(*) from public.subscriptions
+--   group by status order by status;
+--
+-- (f) Historical checkout attempts are untouched: both counts equal, and
+--     no existing row acquired an invoice or a subscription.
+--
+--   select count(*)                                          as attempts,
+--          count(*) filter (where stripe_invoice_id is null) as without_invoice,
+--          count(*) filter (where subscription_id is null)   as without_subscription
+--   from public.checkout_attempts;
+--
+-- (g) stripe_customers is server-only: RLS on, zero policies, and no
+--     grantee besides service_role and the owner.
+--
+--   select relrowsecurity, relforcerowsecurity
+--   from pg_class where oid = 'public.stripe_customers'::regclass;
+--
+--   select count(*) as policy_count from pg_policies
 --   where schemaname = 'public' and tablename = 'stripe_customers';
 --
---   select grantee, privilege_type from information_schema.role_table_grants
+--   select grantee, privilege_type
+--   from information_schema.role_table_grants
 --   where table_schema = 'public' and table_name = 'stripe_customers'
 --   order by grantee, privilege_type;
 --
--- (c) The status constraint accepts the two new values and still accepts
---     the old ones. Expected: the full six-value list.
+-- (h) Both functions are security definer with the search path pinned.
+--     Expected: prosecdef true, proconfig {search_path=""}.
 --
---   select pg_get_constraintdef(oid) from pg_constraint
---   where conrelid = 'public.subscriptions'::regclass
---     and conname = 'subscriptions_status_check';
+--   select p.proname, p.prosecdef as security_definer, p.proconfig
+--   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--   where n.nspname = 'public'
+--     and p.proname in ('create_pending_subscription',
+--                       'activate_subscription_from_invoice')
+--   order by p.proname;
 --
--- (d) Historical rows are untouched. Expected: every existing checkout
---     attempt still has a NULL invoice id.
+-- (i) Function ACLs: service_role only. A bare "=X/" entry would mean
+--     PUBLIC can still execute.
 --
---   select count(*) filter (where stripe_invoice_id is null) as untouched,
---          count(*)                                          as attempts
---   from public.checkout_attempts;
+--   select p.proname,
+--          coalesce(array_to_string(p.proacl, E'\n'),
+--                   '(default - PUBLIC can execute)') as acl
+--   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--   where n.nspname = 'public'
+--     and p.proname in ('create_pending_subscription',
+--                       'activate_subscription_from_invoice')
+--   order by p.proname;
+--
+-- (j) No browser role gained anything. Expected: authenticated keeps
+--     SELECT only on subscriptions and subscription_items, and nothing
+--     at all on checkout_attempts; anon appears nowhere.
+--
+--   select table_name, grantee, privilege_type
+--   from information_schema.role_table_grants
+--   where table_schema = 'public'
+--     and table_name in ('subscriptions', 'subscription_items',
+--                        'checkout_attempts', 'stripe_customers')
+--     and grantee in ('anon', 'authenticated')
+--   order by table_name, grantee, privilege_type;
