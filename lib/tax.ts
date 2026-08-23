@@ -1,29 +1,26 @@
 /**
- * German VAT calculation and EU origin-taxation policy (Task 21D).
+ * German VAT calculation for GLOA checkout (Task 21D, corrected by 21D.1).
  *
  * Scope, deliberately narrow:
  *   - Germany: domestic supply, German rates.
- *   - Other EU VAT territory: German rates too, but ONLY while the
- *     10 000 EUR allowance of § 3c Abs. 4 UStG keeps the place of supply
- *     in Germany. That is a dated fact, not a rule - see
- *     EU_ORIGIN_TAX_POLICY and resolveTaxTreatment below.
+ *   - Other EU VAT territory: taxed under the configured EU B2C tax mode
+ *     below, which currently means the same German rates.
  *   - Everything else (UK, CH, NO, independent third countries): NO tax
  *     treatment. Not "German VAT", not "0" - unknown. Fails closed.
  *
- * Confirmed facts this module encodes (owner, 2026):
- *   Cara 2 GmbH, Regelbesteuerung, no § 19 Kleinunternehmer,
- *   USt-IdNr. DE457414734, NOT registered for the Union OSS, and no
- *   § 3c Abs. 4 Satz 3 election for destination taxation.
+ * Tax mode is supplied by Cara 2 GmbH's tax/accounting responsibility.
+ * The application does not determine OSS or distance-sales threshold
+ * status. Change this configuration only after receiving an updated tax
+ * instruction.
  *
  * Money is integer cents throughout. No floating-point money arithmetic:
  * every division goes through divideRoundHalfUp, and tax is always the
  * remainder (gross - net), so gross = net + tax holds exactly by
  * construction rather than by luck.
  *
- * Pure and server-safe: no DB, no network, no import.meta.env, no clock
- * of its own (the calendar year is always passed in), and - like every
- * other directly unit-tested module here - no value imports. The
- * DB-backed half of the threshold guard lives in lib/euThreshold.ts.
+ * Pure and server-safe: no DB, no network, no import.meta.env, no clock,
+ * and - like every other directly unit-tested module here - no value
+ * imports.
  */
 
 import type { TaxJurisdiction, TaxJurisdictionResult } from "./taxJurisdiction";
@@ -148,72 +145,65 @@ export function extractTaxFromGross(grossCents: number, taxRatePercent: number):
   return { grossCents, netCents, taxCents: grossCents - netCents, taxRatePercent };
 }
 
-/* ── Tax policy: § 3c Abs. 4 UStG origin taxation ───────────── */
+/* ── Configured EU B2C tax mode ─────────────────────────────── */
+
+/**
+ * How a B2C supply into EU VAT territory other than Germany is taxed.
+ *
+ *   german_origin - German VAT, at the German rate of each product's tax
+ *                   category, exactly as for a domestic supply.
+ *
+ * A future destination/OSS mode becomes a second member of this union
+ * plus its own branch in resolveTaxTreatment. Nothing below assumes the
+ * union has only one member. Destination-country VAT, EU rate tables and
+ * OSS are deliberately NOT implemented here.
+ */
+export type EuB2cTaxMode = "german_origin";
+
+export type EuB2cTaxPolicy = {
+  mode: EuB2cTaxMode;
+};
+
+/**
+ * The current tax instruction: Cara 2 GmbH, Regelbesteuerung, not
+ * currently registered for the Union OSS, German origin VAT on B2C sales
+ * to Germany and to supported EU VAT territory.
+ *
+ * Tax mode is supplied by Cara 2 GmbH's tax/accounting responsibility.
+ * The application does not determine OSS or distance-sales threshold
+ * status. Change this configuration only after receiving an updated tax
+ * instruction.
+ *
+ * The tax/accounting team is responsible for telling the application team
+ * when the applicable EU VAT treatment changes. The application follows
+ * the configured treatment: it does not accumulate turnover, does not
+ * evaluate any distance-sales allowance, and makes no OSS determination
+ * of its own.
+ */
+export const EU_B2C_TAX_MODE: EuB2cTaxMode = "german_origin";
+
+export const EU_B2C_TAX_POLICY: Readonly<EuB2cTaxPolicy> = Object.freeze({
+  mode: EU_B2C_TAX_MODE,
+});
 
 /** Which body of rules an order is actually taxed under. */
 export type TaxTreatment =
-  /** Domestic German supply (§ 1 Abs. 1 Nr. 1 UStG). */
+  /** Domestic German supply. */
   | "de_domestic"
   /**
-   * Intra-EU B2C distance sale whose place of supply stays in Germany
-   * because the § 3c Abs. 4 UStG allowance is not exceeded.
+   * B2C supply into EU VAT territory other than Germany, taxed with
+   * German origin VAT because that is the configured mode. The value
+   * records what was charged; it is not a legal determination this
+   * application made.
    */
-  | "de_origin_intra_eu_3c4";
-
-/**
- * Dated tax-policy facts. This is NOT a timeless configuration: the two
- * turnover figures are statements the owner confirmed about ONE calendar
- * year. confirmedForYear is what stops them from silently becoming a
- * permanent "we have never sold anything into the EU" assumption - see
- * resolveTaxTreatment, which refuses EU origin taxation outright once the
- * calendar year has moved on and the facts have not been re-confirmed.
- *
- * Reviewing this for a new year means re-checking, at minimum:
- *   - the actual qualifying EU B2C turnover of the year just ended,
- *   - any qualifying turnover outside GLOA web sales,
- *   - whether an OSS registration or a § 3c Abs. 4 Satz 3 election exists.
- */
-export type EuOriginTaxPolicy = {
-  /** The calendar year the figures below were confirmed for. */
-  confirmedForYear: number;
-  /** Union OSS registration. While false, OSS destination VAT is not implemented. */
-  unionOssRegistered: boolean;
-  /** Voluntary election for destination taxation, § 3c Abs. 4 Satz 3 UStG. */
-  destinationTaxElection: boolean;
-  /** § 3c Abs. 4 Satz 1 UStG: 10 000 EUR, EU-wide, not per country. */
-  thresholdNetCents: number;
-  /**
-   * Refuse this far below the statutory allowance. Covers the two things
-   * the reservation in lib/euThreshold.ts cannot see: a checkout whose
-   * reservation window has lapsed but which still settles later (async
-   * payment methods), and the fact that the opening balance below is a
-   * dated statement rather than a live figure.
-   */
-  safetyBufferNetCents: number;
-  /** Qualifying turnover in confirmedForYear from outside GLOA web sales. */
-  externalRelevantNetCentsBeforeLaunch: number;
-  /** Qualifying turnover in the year BEFORE confirmedForYear (§ 3c Abs. 4 Satz 1). */
-  previousYearExternalRelevantNetCents: number;
-};
-
-export const EU_ORIGIN_TAX_POLICY: Readonly<EuOriginTaxPolicy> = Object.freeze({
-  confirmedForYear: 2026,
-  unionOssRegistered: false,
-  destinationTaxElection: false,
-  thresholdNetCents: 1_000_000,
-  safetyBufferNetCents: 50_000,
-  externalRelevantNetCentsBeforeLaunch: 0,
-  previousYearExternalRelevantNetCents: 0,
-});
+  | "de_origin_intra_eu";
 
 export type TaxTreatmentResult =
   | {
       applicable: true;
       treatment: TaxTreatment;
-      /** The country whose VAT is charged. Always DE in this task. */
+      /** The country whose VAT is charged. Always DE under the current mode. */
       taxCountry: "DE";
-      /** Whether this supply counts toward the § 3c Abs. 4 allowance. */
-      thresholdRelevant: boolean;
     }
   | {
       applicable: false;
@@ -221,28 +211,28 @@ export type TaxTreatmentResult =
        * not_implemented - this jurisdiction's VAT is genuinely not built
        *   yet (UK, CH, NO, third countries). Tax stays UNKNOWN and the
        *   order is not blocked by this module.
-       * policy_unavailable - the destination IS in scope, but the facts
-       *   needed to tax it correctly are stale or superseded. Blocking.
+       * policy_unavailable - the destination IS in scope, but the
+       *   configured tax mode is one this build cannot apply. Blocking.
        */
       kind: "not_implemented" | "policy_unavailable";
       reason: string;
     };
 
 /**
- * Decides which rules govern a destination in a given calendar year.
+ * Decides which rules govern a destination under the configured mode.
  *
- * Germany deliberately does not depend on the policy year: a domestic
- * supply is taxed at German rates regardless of the EU allowance, so a
- * stale policy must not take the German shop offline on 1 January.
+ * Germany is deliberately independent of that mode: a domestic supply is
+ * a domestic supply whatever instruction applies to EU distance sales, so
+ * a future mode change cannot take the German shop offline.
  */
 export function resolveTaxTreatment(
   jurisdiction: TaxJurisdiction,
-  options: { calendarYear: number; policy?: EuOriginTaxPolicy }
+  options: { policy?: EuB2cTaxPolicy } = {}
 ): TaxTreatmentResult {
-  const policy = options.policy ?? EU_ORIGIN_TAX_POLICY;
+  const policy = options.policy ?? EU_B2C_TAX_POLICY;
 
   if (jurisdiction.kind === "germany") {
-    return { applicable: true, treatment: "de_domestic", taxCountry: "DE", thresholdRelevant: false };
+    return { applicable: true, treatment: "de_domestic", taxCountry: "DE" };
   }
 
   if (jurisdiction.kind !== "eu") {
@@ -253,83 +243,20 @@ export function resolveTaxTreatment(
     };
   }
 
-  if (policy.unionOssRegistered) {
-    return {
-      applicable: false,
-      kind: "policy_unavailable",
-      reason: "the shop is registered for the Union OSS, so destination VAT applies and is not implemented",
-    };
+  switch (policy.mode) {
+    case "german_origin":
+      return { applicable: true, treatment: "de_origin_intra_eu", taxCountry: "DE" };
+    default:
+      // A configured mode this build does not implement. Fail closed
+      // rather than keep charging German VAT after the tax instruction
+      // has moved on.
+      return {
+        applicable: false,
+        kind: "policy_unavailable",
+        reason: `configured EU B2C tax mode "${String(policy.mode)}" is not implemented`,
+      };
   }
-
-  if (policy.destinationTaxElection) {
-    return {
-      applicable: false,
-      kind: "policy_unavailable",
-      reason: "a § 3c Abs. 4 Satz 3 election for destination taxation is in force, which is not implemented",
-    };
-  }
-
-  if (options.calendarYear !== policy.confirmedForYear) {
-    return {
-      applicable: false,
-      kind: "policy_unavailable",
-      reason: `EU tax policy was confirmed for ${policy.confirmedForYear} but the current calendar year is ${options.calendarYear}; it must be reviewed before intra-EU sales continue`,
-    };
-  }
-
-  if (policy.previousYearExternalRelevantNetCents > policy.thresholdNetCents) {
-    return {
-      applicable: false,
-      kind: "policy_unavailable",
-      reason: "the § 3c Abs. 4 allowance was already exceeded in the previous calendar year",
-    };
-  }
-
-  return { applicable: true, treatment: "de_origin_intra_eu_3c4", taxCountry: "DE", thresholdRelevant: true };
 }
-
-/* ── Threshold arithmetic ───────────────────────────────────── */
-
-export type ThresholdInput = {
-  thresholdNetCents: number;
-  safetyBufferNetCents: number;
-  /** Confirmed qualifying turnover from outside GLOA web sales. */
-  externalNetCents: number;
-  /** Qualifying turnover from paid GLOA orders in this calendar year. */
-  paidNetCents: number;
-  /** Qualifying value held by live, unpaid checkout reservations. */
-  pendingNetCents: number;
-  /** The relevant net value of the order being considered right now. */
-  proposedNetCents: number;
-};
-
-export type ThresholdEvaluation = {
-  withinAllowance: boolean;
-  totalNetCents: number;
-  allowanceNetCents: number;
-};
-
-/**
- * Pure § 3c Abs. 4 arithmetic.
- *
- * The allowance holds while the running total does not EXCEED 10 000 EUR
- * ("nicht überschreitet"), so landing exactly on the threshold is still
- * inside it. The safety buffer only ever narrows the allowance further -
- * it never widens it.
- */
-export function evaluateThreshold(input: ThresholdInput): ThresholdEvaluation {
-  const totalNetCents =
-    input.externalNetCents + input.paidNetCents + input.pendingNetCents + input.proposedNetCents;
-  const allowanceNetCents = input.thresholdNetCents - input.safetyBufferNetCents;
-  return { withinAllowance: totalNetCents <= allowanceNetCents, totalNetCents, allowanceNetCents };
-}
-
-/** The calendar year in Germany, which is the year § 3c Abs. 4 counts in. */
-export function berlinCalendarYear(now: Date = new Date()): number {
-  const year = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin", year: "numeric" }).format(now);
-  return Number.parseInt(year, 10);
-}
-
 /* ── Cart calculation ───────────────────────────────────────── */
 
 export type TaxableCartItem = {
@@ -406,8 +333,6 @@ export type CartTaxSnapshot = {
   };
   /** Per-rate summary, the shape an invoice or a VAT return needs. */
   rateBreakdown: TaxRateBreakdown[];
-  /** Net value counting toward § 3c Abs. 4; 0 for a domestic supply. */
-  thresholdRelevantNetCents: number;
 };
 
 export type CartTaxResult =
@@ -499,11 +424,10 @@ function allocateShipping(
 export function calculateCartTax(input: {
   jurisdiction: TaxJurisdiction;
   treatment: TaxTreatment;
-  thresholdRelevant: boolean;
   items: TaxableCartItem[];
   shippingGrossCents: number;
 }): CartTaxResult {
-  const { jurisdiction, treatment, thresholdRelevant, items, shippingGrossCents } = input;
+  const { jurisdiction, treatment, items, shippingGrossCents } = input;
 
   if (items.length === 0) return { ok: false, reason: "cannot tax an empty cart" };
   if (!Number.isSafeInteger(shippingGrossCents) || shippingGrossCents < 0) {
@@ -613,7 +537,6 @@ export function calculateCartTax(input: {
         taxTotalCents,
       },
       rateBreakdown,
-      thresholdRelevantNetCents: thresholdRelevant ? totalNetCents : 0,
     },
   };
 }
@@ -623,8 +546,8 @@ export function calculateCartTax(input: {
 /**
  * Shown to the customer when a destination cannot currently be taxed
  * correctly. Says only that the destination is unavailable and offers a
- * way to reach a human: no tax law, no OSS, no thresholds, no numbers,
- * nothing about the database.
+ * way to reach a human: no tax law, no internal tax administration, no
+ * numbers, nothing about the database.
  */
 export const TAX_DESTINATION_UNAVAILABLE_MESSAGE =
   "Bestellungen in dieses Lieferland sind momentan vorübergehend nicht verfügbar. Bitte kontaktiere uns.";
@@ -647,21 +570,19 @@ export function toTaxableCartItems(quote: CheckoutQuote): TaxableCartItem[] {
 
 export type CheckoutTaxOutcome =
   /** Tax is known and authoritative. */
-  | { kind: "calculated"; snapshot: CartTaxSnapshot; thresholdRelevantNetCents: number }
+  | { kind: "calculated"; snapshot: CartTaxSnapshot }
   /**
    * This destination's VAT is genuinely not built yet (UK, Switzerland,
    * Norway, third countries). Tax stays UNKNOWN - never a fabricated
    * German rate and never a fabricated zero - and checkout is not
-   * blocked on that account, exactly as it behaved before Task 21D. The
-   * supply is not an intra-EU distance sale, so its contribution to the
-   * § 3c Abs. 4 allowance is a real, known zero.
+   * blocked on that account, exactly as it behaved before Task 21D.
    */
   | { kind: "not_implemented"; reason: string }
   /**
    * The destination IS in scope but cannot be taxed correctly right now
-   * (stale policy year, an OSS registration or destination-tax election
-   * that is not implemented, an unrecognised country, or a product with
-   * no tax classification). Checkout must not proceed.
+   * (an unrecognised country, a configured tax mode this build does not
+   * implement, or a product with no tax classification). Checkout must
+   * not proceed.
    */
   | { kind: "blocked"; reason: string };
 
@@ -681,18 +602,14 @@ export function resolveCheckoutTax(input: {
   jurisdictionResult: TaxJurisdictionResult;
   items: TaxableCartItem[];
   shippingGrossCents: number;
-  calendarYear: number;
-  policy?: EuOriginTaxPolicy;
+  policy?: EuB2cTaxPolicy;
 }): CheckoutTaxOutcome {
   if (!input.jurisdictionResult.supported) {
     return { kind: "blocked", reason: input.jurisdictionResult.reason };
   }
   const jurisdiction = input.jurisdictionResult.jurisdiction;
 
-  const treatmentResult = resolveTaxTreatment(jurisdiction, {
-    calendarYear: input.calendarYear,
-    policy: input.policy,
-  });
+  const treatmentResult = resolveTaxTreatment(jurisdiction, { policy: input.policy });
 
   if (!treatmentResult.applicable) {
     return treatmentResult.kind === "not_implemented"
@@ -703,7 +620,6 @@ export function resolveCheckoutTax(input: {
   const taxResult = calculateCartTax({
     jurisdiction,
     treatment: treatmentResult.treatment,
-    thresholdRelevant: treatmentResult.thresholdRelevant,
     items: input.items,
     shippingGrossCents: input.shippingGrossCents,
   });
@@ -714,9 +630,5 @@ export function resolveCheckoutTax(input: {
     return { kind: "blocked", reason: taxResult.reason };
   }
 
-  return {
-    kind: "calculated",
-    snapshot: taxResult.snapshot,
-    thresholdRelevantNetCents: taxResult.snapshot.thresholdRelevantNetCents,
-  };
+  return { kind: "calculated", snapshot: taxResult.snapshot };
 }

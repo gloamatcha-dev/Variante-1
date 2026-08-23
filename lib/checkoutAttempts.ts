@@ -15,20 +15,6 @@ export type CheckoutAttemptShipping = {
   grossCents: number;
 };
 
-/**
- * The tax result frozen onto a checkout attempt (Task 21D).
- *
- * snapshot is null when this destination's VAT is genuinely not
- * implemented (UK, Switzerland, Norway, third countries) - unknown, not
- * zero. thresholdRelevantNetCents is known either way: an export is not
- * an intra-EU distance sale, so it contributes a real 0 to the
- * § 3c Abs. 4 allowance rather than an unknown.
- */
-export type CheckoutAttemptTax = {
-  snapshot: CartTaxSnapshot | null;
-  thresholdRelevantNetCents: number;
-};
-
 export type CheckoutAttempt = {
   id: string;
   request_id: string;
@@ -39,15 +25,18 @@ export type CheckoutAttempt = {
   shipping_country: string | null;
   shipping_zone: ShippingZoneKey | null;
   shipping_gross_cents: number | null;
+  /**
+   * The frozen tax result, or null when this destination's VAT is
+   * genuinely not implemented (UK, Switzerland, Norway, third
+   * countries) - unknown, never a fabricated zero.
+   */
   tax_snapshot: CartTaxSnapshot | null;
-  threshold_relevant_net_cents: number | null;
-  threshold_reserved_at: string | null;
   stripe_checkout_session_id: string | null;
   stripe_payment_intent_id: string | null;
 };
 
 const ATTEMPT_COLUMNS =
-  "id, request_id, status, currency, expected_total_gross_cents, items_snapshot, shipping_country, shipping_zone, shipping_gross_cents, tax_snapshot, threshold_relevant_net_cents, threshold_reserved_at, stripe_checkout_session_id, stripe_payment_intent_id";
+  "id, request_id, status, currency, expected_total_gross_cents, items_snapshot, shipping_country, shipping_zone, shipping_gross_cents, tax_snapshot, stripe_checkout_session_id, stripe_payment_intent_id";
 
 export type GetOrCreateAttemptResult =
   | { ok: true; attempt: CheckoutAttempt }
@@ -65,7 +54,7 @@ export async function getOrCreateCheckoutAttempt(
   requestId: string,
   quote: CheckoutQuote,
   shipping: CheckoutAttemptShipping,
-  tax: CheckoutAttemptTax,
+  taxSnapshot: CartTaxSnapshot | null,
   userId: string | null = null
 ): Promise<GetOrCreateAttemptResult> {
   const admin = getSupabaseAdmin();
@@ -91,8 +80,7 @@ export async function getOrCreateCheckoutAttempt(
         // settle the tax the customer was quoted, not whatever the tax
         // state happens to be when they come back. ignoreDuplicates
         // means an existing attempt keeps its original snapshot.
-        tax_snapshot: tax.snapshot,
-        threshold_relevant_net_cents: tax.thresholdRelevantNetCents,
+        tax_snapshot: taxSnapshot,
       },
       { onConflict: "request_id", ignoreDuplicates: true }
     );

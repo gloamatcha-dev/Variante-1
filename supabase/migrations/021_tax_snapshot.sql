@@ -1,8 +1,8 @@
 -- ============================================================
--- GLOA – Tax Snapshot + § 3c Abs. 4 UStG Threshold Guard (Task 21D)
+-- GLOA – Tax Snapshot (Task 21D, corrected by 21D.1)
 -- Run in Supabase SQL Editor AFTER 020
 --
--- Three things, in this order:
+-- Two things, in this order:
 --
 --   1. Removes the leftover `default 0` on the nullable net/tax columns
 --      of public.orders. Migration 011 dropped their NOT NULL so they
@@ -20,8 +20,12 @@
 --      line and per shipping share, tax cents are deliberately NOT stored
 --      separately - they are exactly gross - net.
 --
---   3. Adds the concurrency-safe reservation used to keep intra-EU B2C
---      distance sales inside the 10 000 EUR allowance of § 3c Abs. 4.
+-- What this migration deliberately does NOT contain: any accumulation of
+-- EU distance-sale turnover, any reservation, and any threshold or OSS
+-- decision. The applicable EU VAT treatment is a tax/accounting
+-- responsibility of Cara 2 GmbH, supplied to the application as the
+-- configured tax mode in lib/tax.ts. The database records what was
+-- charged; it does not decide what should be.
 --
 -- Historical data is not touched. No UPDATE runs against existing rows,
 -- no legacy 0 is converted to NULL, and no paid order is recalculated.
@@ -55,28 +59,11 @@ alter table public.orders
 -- (items, shipping apportionment, totals, per-rate breakdown, treatment,
 -- calculation version) - a working record, so one document is right here.
 --
--- threshold_relevant_net_cents is pulled out as its own column because
--- it is the one value SQL has to aggregate under a lock (section 3).
--- Its NULL contract matters:
---   NULL = this attempt predates Task 21D, relevance unknown
---   0    = known not to count (Germany, and every non-EU destination:
---          an export is not an intra-EU distance sale)
---   > 0  = counts toward the allowance
+-- NULL means the destination's VAT is genuinely not implemented (UK,
+-- Switzerland, Norway, third countries): unknown, never a fabricated 0.
 
 alter table public.checkout_attempts
-  add column tax_snapshot                 jsonb,
-  add column threshold_relevant_net_cents integer
-                                          check (threshold_relevant_net_cents is null
-                                                 or threshold_relevant_net_cents >= 0),
-  -- Set when the threshold guard admits this attempt. Acts as a soft,
-  -- self-expiring reservation: an abandoned checkout stops consuming the
-  -- allowance once the reservation window lapses, so merely quoting or
-  -- starting a checkout never permanently burns threshold headroom.
-  add column threshold_reserved_at        timestamptz;
-
-create index idx_checkout_attempts_threshold_reserved
-  on public.checkout_attempts (threshold_reserved_at)
-  where threshold_reserved_at is not null;
+  add column tax_snapshot jsonb;
 
 -- 3. TAX SNAPSHOT ON THE PAID ORDER ────────────────────────────
 --
@@ -88,27 +75,24 @@ create index idx_checkout_attempts_threshold_reserved
 --   what each line was       -> order_items
 --   what shipping was        -> shipping_gross_cents / shipping_net_cents
 --                               + shipping_tax_allocation
---   what it meant for § 3c   -> threshold_relevant_net_cents
 
 alter table public.orders
+  -- What was actually charged, not a legal determination made here.
+  -- de_origin_intra_eu records German VAT on a B2C supply into EU VAT
+  -- territory, which is the tax mode currently configured in lib/tax.ts.
   add column tax_treatment           text
                                      check (tax_treatment is null or tax_treatment in (
-                                       'de_domestic', 'de_origin_intra_eu_3c4'
+                                       'de_domestic', 'de_origin_intra_eu'
                                      )),
   add column tax_jurisdiction_kind   text,
   -- The country whose VAT was actually charged (DE here), which is not
-  -- the destination country for an intra-EU origin-taxed distance sale.
+  -- the destination country for an EU supply taxed at origin.
   add column tax_vat_country         text,
   add column tax_calculation_version text,
   -- How the shipping charge was apportioned across differently taxed
   -- supplies: [{taxCategory, taxRatePercent, grossCents, netCents,
   -- taxCents}]. NULL when tax was never calculated for this order.
-  add column shipping_tax_allocation jsonb,
-  add column threshold_relevant_net_cents integer
-                                     check (threshold_relevant_net_cents is null
-                                            or threshold_relevant_net_cents >= 0);
-
-create index idx_orders_placed_at on public.orders (placed_at);
+  add column shipping_tax_allocation jsonb;
 
 alter table public.order_items
   -- The tax category the line was classified under, kept alongside the
@@ -216,7 +200,6 @@ begin
       tax_vat_country,
       tax_calculation_version,
       shipping_tax_allocation,
-      threshold_relevant_net_cents,
       placed_at,
       checkout_attempt_id,
       stripe_checkout_session_id,
@@ -244,7 +227,6 @@ begin
       v_tax->>'taxCountry',
       v_tax->>'calculationVersion',
       v_tax->'shipping'->'allocations',
-      v_attempt.threshold_relevant_net_cents,
       now(),
       v_attempt.id,
       v_attempt.stripe_checkout_session_id,
@@ -311,175 +293,7 @@ begin
 end;
 $$;
 
--- 5. § 3c ABS. 4 THRESHOLD RESERVATION ─────────────────────────
---
--- The race this closes: two EU checkouts each read "there is room below
--- 10 000 EUR", each is allowed, and together they cross it. Reading the
--- running total from the application and then deciding cannot fix that,
--- however carefully it is written.
---
--- So the read and the reservation happen together, inside one
--- transaction, behind a transaction-scoped advisory lock. Every EU
--- checkout decision serializes on that lock, and the winner's
--- reservation is visible to the next caller before it evaluates.
---
--- What counts, and what deliberately does not:
---
---   counted   paid B2C orders of this calendar year whose recorded
---             relevant net value is > 0 (i.e. destinations the Task 21C
---             resolver placed in an EU VAT territory other than Germany)
---   counted   live reservations from other checkout attempts that have
---             not yet become an order
---   counted   the proposed order itself
---   NOT       Germany, UK, Switzerland, Norway, third countries - all
---             recorded as a known 0 by the application
---   NOT       B2B (customer_type <> 'private')
---   NOT       unpaid, failed or abandoned checkouts, and quotes, which
---             never reach this function at all
---   NOT       any other calendar year
---
--- Refunded orders are counted at their original value rather than
--- reduced. That overstates the running total slightly, which narrows the
--- allowance - the safe direction.
---
--- p_eu_country_codes comes from lib/taxJurisdiction.ts, the Task 21C
--- resolver. It is used only to detect paid EU orders from before this
--- migration, whose relevant turnover was never recorded: their value is
--- genuinely unknown, so the allowance cannot be computed and the function
--- refuses instead of assuming they were worth nothing.
---
--- A KNOWN GAP, stated rather than hidden. At the time this migration was
--- written the shop had 450 paid orders, all placed in 2026: 142 with a
--- German shipping address and 308 with no shipping address snapshot at
--- all, because address collection only arrived with migration 013. None
--- has an EU destination, so the qualifying turnover recognised here is
--- 0 EUR - which matches the owner's confirmed opening balance.
---
--- The 308 addressless orders cannot be attributed by destination, so
--- this function does not treat them as unclassified EU turnover; doing so
--- would refuse every intra-EU sale forever over rows that predate
--- international shipping entirely. What makes that safe is the owner's
--- dated confirmation in EU_ORIGIN_TAX_POLICY, not an assumption made
--- here. If those orders ever turn out to include EU B2C distance sales,
--- the correct fix is to raise externalRelevantNetCentsBeforeLaunch, not
--- to loosen anything below.
-
-create or replace function public.reserve_eu_distance_sale_threshold(
-  p_checkout_attempt_id uuid,
-  p_calendar_year integer,
-  p_eu_country_codes text[],
-  p_external_net_cents bigint,
-  p_threshold_net_cents bigint,
-  p_safety_buffer_net_cents bigint,
-  p_reservation_window_hours integer
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  v_attempt public.checkout_attempts;
-  v_paid_net_cents bigint := 0;
-  v_pending_net_cents bigint := 0;
-  v_unclassified_orders bigint := 0;
-  v_proposed_net_cents bigint;
-  v_total_net_cents bigint;
-  v_allowance_net_cents bigint;
-begin
-  -- Serializes every threshold decision for the whole shop. Held until
-  -- this transaction ends, so the reservation written below is committed
-  -- before the next caller can evaluate.
-  perform pg_advisory_xact_lock(hashtext('gloa:eu_distance_sale_threshold'));
-
-  select * into v_attempt
-  from public.checkout_attempts
-  where id = p_checkout_attempt_id
-  for update;
-
-  if not found then
-    return jsonb_build_object('allowed', false, 'reason', 'attempt_not_found');
-  end if;
-
-  if v_attempt.threshold_relevant_net_cents is null then
-    -- An attempt with no recorded relevant value cannot be evaluated.
-    return jsonb_build_object('allowed', false, 'reason', 'attempt_has_no_threshold_value');
-  end if;
-
-  v_proposed_net_cents := v_attempt.threshold_relevant_net_cents;
-
-  if v_proposed_net_cents = 0 then
-    -- Nothing to reserve; the caller should not have asked, but saying so
-    -- is better than writing a meaningless reservation.
-    return jsonb_build_object('allowed', true, 'reason', 'not_threshold_relevant');
-  end if;
-
-  select coalesce(sum(o.threshold_relevant_net_cents), 0)
-    into v_paid_net_cents
-  from public.orders o
-  where o.customer_type = 'private'
-    and o.payment_status in ('paid', 'partially_refunded', 'refunded')
-    and o.placed_at is not null
-    and extract(year from (o.placed_at at time zone 'Europe/Berlin')) = p_calendar_year
-    and o.threshold_relevant_net_cents is not null;
-
-  select count(*)
-    into v_unclassified_orders
-  from public.orders o
-  where o.customer_type = 'private'
-    and o.payment_status in ('paid', 'partially_refunded', 'refunded')
-    and o.placed_at is not null
-    and extract(year from (o.placed_at at time zone 'Europe/Berlin')) = p_calendar_year
-    and o.threshold_relevant_net_cents is null
-    and upper(coalesce(o.shipping_address_snapshot->>'country', '')) = any(p_eu_country_codes);
-
-  if v_unclassified_orders > 0 then
-    return jsonb_build_object(
-      'allowed', false,
-      'reason', 'unclassified_paid_eu_turnover',
-      'unclassifiedOrders', v_unclassified_orders
-    );
-  end if;
-
-  -- Live reservations from OTHER attempts. Excluding this attempt and
-  -- then adding its own value back makes re-running the guard for the
-  -- same attempt idempotent instead of double counting it.
-  --
-  -- An attempt drops out of this pool the moment its order exists, which
-  -- is when it starts being counted as paid turnover above - so the
-  -- handover happens with neither a gap nor an overlap.
-  select coalesce(sum(a.threshold_relevant_net_cents), 0)
-    into v_pending_net_cents
-  from public.checkout_attempts a
-  where a.id <> p_checkout_attempt_id
-    and a.threshold_reserved_at is not null
-    and a.threshold_reserved_at > now() - make_interval(hours => p_reservation_window_hours)
-    and coalesce(a.threshold_relevant_net_cents, 0) > 0
-    and not exists (
-      select 1 from public.orders o where o.checkout_attempt_id = a.id
-    );
-
-  v_allowance_net_cents := p_threshold_net_cents - p_safety_buffer_net_cents;
-  v_total_net_cents := p_external_net_cents + v_paid_net_cents + v_pending_net_cents + v_proposed_net_cents;
-
-  -- § 3c Abs. 4 Satz 1 holds while the total is not EXCEEDED, so landing
-  -- exactly on the allowance is still inside it.
-  if v_total_net_cents > v_allowance_net_cents then
-    return jsonb_build_object('allowed', false, 'reason', 'threshold_would_be_exceeded');
-  end if;
-
-  update public.checkout_attempts
-     set threshold_reserved_at = now()
-   where id = p_checkout_attempt_id;
-
-  return jsonb_build_object('allowed', true, 'reason', 'reserved');
-end;
-$$;
-
-revoke all on function public.reserve_eu_distance_sale_threshold(uuid, integer, text[], bigint, bigint, bigint, integer) from public;
-grant execute on function public.reserve_eu_distance_sale_threshold(uuid, integer, text[], bigint, bigint, bigint, integer) to service_role;
-
--- 6. VERIFY ────────────────────────────────────────────────────
+-- 5. VERIFY ────────────────────────────────────────────────────
 --
 -- (a) No nullable unknown column defaults to 0 any more. Expected: five
 --     rows, every column_default NULL.

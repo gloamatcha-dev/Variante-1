@@ -1,7 +1,7 @@
 import { validateQuoteItems, buildAuthoritativeQuote, type CheckoutQuote } from "../../../../lib/checkoutQuote";
 import { ALLOWED_SHIPPING_COUNTRIES, getShippingZone, computeShippingGrossCents } from "../../../../lib/shipping";
 import { resolveTaxJurisdiction } from "../../../../lib/taxJurisdiction";
-import { resolveCheckoutTax, toTaxableCartItems, berlinCalendarYear, type CartTaxSnapshot } from "../../../../lib/tax";
+import { resolveCheckoutTax, toTaxableCartItems, type CartTaxSnapshot } from "../../../../lib/tax";
 
 type ErrorResponse = {
   error: string;
@@ -86,7 +86,6 @@ function buildQuoteTax(quote: CheckoutQuote, shippingCountry: unknown): { tax?: 
     jurisdictionResult: resolveTaxJurisdiction(country),
     items: toTaxableCartItems(quote),
     shippingGrossCents,
-    calendarYear: berlinCalendarYear(),
   });
   if (outcome.kind !== "calculated") return {};
 

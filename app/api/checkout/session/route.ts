@@ -6,8 +6,7 @@ import { getOrCreateCheckoutAttempt, linkStripeSession } from "../../../../lib/c
 import { verifyUserId } from "../../../../lib/verifyUser";
 import { ALLOWED_SHIPPING_COUNTRIES, getShippingZone, computeShippingGrossCents, SHIPPING_ZONES } from "../../../../lib/shipping";
 import { resolveTaxJurisdiction } from "../../../../lib/taxJurisdiction";
-import { resolveCheckoutTax, toTaxableCartItems, berlinCalendarYear, TAX_DESTINATION_UNAVAILABLE_MESSAGE } from "../../../../lib/tax";
-import { reserveEuDistanceSaleThreshold } from "../../../../lib/euThreshold";
+import { resolveCheckoutTax, toTaxableCartItems, TAX_DESTINATION_UNAVAILABLE_MESSAGE } from "../../../../lib/tax";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -117,13 +116,12 @@ export async function POST(request: Request): Promise<Response> {
     jurisdictionResult: resolveTaxJurisdiction(normalizedShippingCountry),
     items: toTaxableCartItems(quote),
     shippingGrossCents,
-    calendarYear: berlinCalendarYear(),
   });
 
   if (taxOutcome.kind === "blocked") {
-    // In scope but not correctly taxable right now (a stale policy year,
-    // an unimplemented regime, or an unclassified product). Never create
-    // a paid order the shop cannot tax correctly.
+    // In scope but not correctly taxable right now (an unimplemented tax
+    // mode or an unclassified product). Never create a paid order the
+    // shop cannot tax correctly.
     console.error(`Checkout session: tax unavailable for ${normalizedShippingCountry} -`, taxOutcome.reason);
     return Response.json(
       { error: TAX_DESTINATION_UNAVAILABLE_MESSAGE } as ErrorResponse,
@@ -133,13 +131,8 @@ export async function POST(request: Request): Promise<Response> {
 
   // Non-EU destinations keep behaving exactly as before Task 21D: tax
   // stays genuinely unknown rather than being invented as German VAT,
-  // and the order is not blocked on that account. Their contribution to
-  // the § 3c Abs. 4 allowance is a real zero - an export is not an
-  // intra-EU distance sale.
-  const attemptTax =
-    taxOutcome.kind === "calculated"
-      ? { snapshot: taxOutcome.snapshot, thresholdRelevantNetCents: taxOutcome.thresholdRelevantNetCents }
-      : { snapshot: null, thresholdRelevantNetCents: 0 };
+  // and the order is not blocked on that account.
+  const attemptTaxSnapshot = taxOutcome.kind === "calculated" ? taxOutcome.snapshot : null;
 
   // Never trust a client-supplied user id - re-verify the bearer token
   // (if any) against Supabase Auth. Guest checkout (no/invalid token)
@@ -157,7 +150,7 @@ export async function POST(request: Request): Promise<Response> {
     requestId,
     quote,
     { country: normalizedShippingCountry, zone: shippingZone, grossCents: shippingGrossCents },
-    attemptTax,
+    attemptTaxSnapshot,
     userId
   );
   if (!attemptResult.ok) {
@@ -190,31 +183,6 @@ export async function POST(request: Request): Promise<Response> {
   const frozenShippingCountry = attempt.shipping_country;
   const frozenShippingZone = SHIPPING_ZONES[attempt.shipping_zone];
   const frozenShippingGrossCents = attempt.shipping_gross_cents;
-
-  // § 3c Abs. 4 UStG guard. Runs on the ATTEMPT, after it exists: the
-  // reservation reads the proposed value from the persisted row, so the
-  // decision is made against frozen data and is serialized against every
-  // other EU checkout by the RPC's advisory lock. A retry of the same
-  // request re-evaluates the same attempt instead of reserving twice.
-  //
-  // An attempt whose frozen tax predates this column has an unknown
-  // relevance, so it must be re-evaluated too rather than waved through.
-  const frozenThresholdRelevantNetCents = attempt.threshold_relevant_net_cents;
-  if (frozenThresholdRelevantNetCents === null || frozenThresholdRelevantNetCents > 0) {
-    const reservation = await reserveEuDistanceSaleThreshold(attempt.id);
-    if (!reservation.allowed) {
-      // The reason is for the logs only. The customer is told the
-      // destination is unavailable and nothing about why.
-      console.error(
-        `Checkout session: EU distance-sale threshold refused attempt ${attempt.id} (${frozenShippingCountry}) -`,
-        reservation.reason
-      );
-      return Response.json(
-        { error: TAX_DESTINATION_UNAVAILABLE_MESSAGE } as ErrorResponse,
-        { status: 409 }
-      );
-    }
-  }
 
   const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = attempt.items_snapshot.map(item => ({
     quantity: item.quantity,

@@ -15,7 +15,7 @@ import { computeShippingGrossCents } from "../lib/shipping.ts";
 
 // SAFE DEFAULT SUITE: pure logic. No DB, no network, no Stripe.
 //
-// Task 21D. The confirmed customer-facing gross prices are fixed points
+// Tasks 21D / 21D.1. The confirmed customer-facing gross prices are fixed points
 // throughout: 19,99 / 29,99 / 54,99 EUR for Matcha and 9,99 EUR for the
 // standalone Metal Case. Every assertion below that touches a price
 // checks the gross value is preserved, because tax is extracted FROM it
@@ -29,12 +29,11 @@ const METAL_CASE = { variantId: "44444444-4444-4444-8444-444444444444", sku: "GL
 const qty = (item, quantity) => ({ ...item, quantity, lineGrossCents: item.unitGrossCents * quantity });
 
 /** Calculates for a destination, asserting the destination is taxable. */
-function taxFor(country, items, shippingGrossCents, calendarYear = 2026) {
+function taxFor(country, items, shippingGrossCents) {
   const outcome = resolveCheckoutTax({
     jurisdictionResult: resolveTaxJurisdiction(country),
     items,
     shippingGrossCents,
-    calendarYear,
   });
   assert.equal(outcome.kind, "calculated", `${country} should be taxable: ${outcome.reason ?? ""}`);
   return outcome.snapshot;
@@ -95,7 +94,6 @@ test("tax: an unclassified product has no category and is never given a default 
     jurisdictionResult: resolveTaxJurisdiction("DE"),
     items: [{ variantId: "55555555-5555-4555-8555-555555555555", sku: "GLOA-WHISK-01", productSlug: "bamboo-whisk", quantity: 1, unitGrossCents: 2499, lineGrossCents: 2499 }],
     shippingGrossCents: 590,
-    calendarYear: 2026,
   });
   assert.equal(outcome.kind, "blocked");
   assert.match(outcome.reason, /no tax category/);
@@ -131,12 +129,10 @@ test("tax: Germany, standalone Metal Case at 19 %, gross price unchanged", () =>
   assert.equal(line.lineTaxCents, 160);
 });
 
-test("tax: Germany is a domestic supply and never counts toward the EU allowance", () => {
+test("tax: Germany is a domestic supply, taxed independently of the EU mode", () => {
   const snapshot = taxFor("DE", [MATCHA_30G, METAL_CASE], 590);
   assert.equal(snapshot.treatment, "de_domestic");
   assert.equal(snapshot.taxCountry, "DE");
-  // 0, not null: a domestic supply is KNOWN not to be a distance sale.
-  assert.equal(snapshot.thresholdRelevantNetCents, 0);
 });
 
 test("tax: line tax is taken from the line total, not from a multiplied-up unit price", () => {
@@ -152,12 +148,12 @@ test("tax: line tax is taken from the line total, not from a multiplied-up unit 
   assert.equal(line.lineNetCents + line.lineTaxCents, line.lineGrossCents);
 });
 
-/* ── EU under the threshold ─────────────────────────────────── */
+/* ── EU under the configured tax mode ───────────────────────── */
 
-test("tax: IT, FR and NL are taxed at German origin rates while § 3c Abs. 4 applies", () => {
+test("tax: IT, FR and NL are taxed at German rates under the configured mode", () => {
   for (const country of ["IT", "FR", "NL"]) {
     const snapshot = taxFor(country, [MATCHA_30G, METAL_CASE], 1290);
-    assert.equal(snapshot.treatment, "de_origin_intra_eu_3c4", country);
+    assert.equal(snapshot.treatment, "de_origin_intra_eu", country);
     assert.equal(snapshot.taxCountry, "DE", country);
     assert.equal(snapshot.destinationCountry, country);
     assert.equal(snapshot.items.find(i => i.sku === "GLOA-MATCHA-30G").taxRatePercent, 7, country);
@@ -172,8 +168,8 @@ test("tax: Monaco is taxed through the EU jurisdiction, not as a third country",
   assert.equal(snapshot.jurisdictionKind, "eu");
   assert.equal(snapshot.destinationCountry, "MC");
   assert.equal(snapshot.vatCountry, "FR", "Monaco is EU VAT territory governed by France");
-  assert.equal(snapshot.treatment, "de_origin_intra_eu_3c4");
-  assert.equal(snapshot.taxCountry, "DE", "origin taxation still charges German VAT");
+  assert.equal(snapshot.treatment, "de_origin_intra_eu");
+  assert.equal(snapshot.taxCountry, "DE", "the configured mode still charges German VAT");
 });
 
 test("tax: an EU destination's displayed gross prices are the German ones", () => {
@@ -186,12 +182,6 @@ test("tax: an EU destination's displayed gross prices are the German ones", () =
   assert.equal(it.totals.taxTotalCents, de.totals.taxTotalCents);
 });
 
-test("tax: an EU supply counts toward the allowance at its full net value", () => {
-  const snapshot = taxFor("IT", [MATCHA_30G], 1290);
-  assert.ok(snapshot.thresholdRelevantNetCents > 0);
-  assert.equal(snapshot.thresholdRelevantNetCents, snapshot.totals.totalNetCents);
-});
-
 /* ── Non-EU ─────────────────────────────────────────────────── */
 
 test("tax: UK, Switzerland, Norway and third countries stay UNKNOWN, never German", () => {
@@ -200,7 +190,6 @@ test("tax: UK, Switzerland, Norway and third countries stay UNKNOWN, never Germa
       jurisdictionResult: resolveTaxJurisdiction(country),
       items: [MATCHA_30G],
       shippingGrossCents: 1790,
-      calendarYear: 2026,
     });
     assert.equal(outcome.kind, "not_implemented", country);
     assert.equal(outcome.snapshot, undefined, `${country} must produce no tax snapshot at all`);
@@ -213,7 +202,6 @@ test("tax: an unknown country fails closed rather than becoming a taxable destin
       jurisdictionResult: resolveTaxJurisdiction(country),
       items: [MATCHA_30G],
       shippingGrossCents: 590,
-      calendarYear: 2026,
     });
     assert.equal(outcome.kind, "blocked", String(country));
   }
@@ -355,7 +343,7 @@ test("tax: the calculation reads only catalog identity, never a client-supplied 
     taxCategory: "matcha_reduced_de",
     netCents: 999,
     taxCents: 0,
-    thresholdRelevantNetCents: 0,
+    taxTotalCents: 0,
   };
   const snapshot = taxFor("DE", [hostile], 590);
   assert.equal(snapshot.items[0].taxRatePercent, 19, "a client-supplied rate must not be honoured");
@@ -395,8 +383,8 @@ test("tax: the quote mapping carries only catalog identity into the calculation"
 
 test("tax: an empty cart and a negative shipping charge are refused", () => {
   const jurisdictionResult = resolveTaxJurisdiction("DE");
-  assert.equal(calculateCartTax({ jurisdiction: jurisdictionResult.jurisdiction, treatment: "de_domestic", thresholdRelevant: false, items: [], shippingGrossCents: 0 }).ok, false);
-  assert.equal(calculateCartTax({ jurisdiction: jurisdictionResult.jurisdiction, treatment: "de_domestic", thresholdRelevant: false, items: [MATCHA_30G], shippingGrossCents: -1 }).ok, false);
+  assert.equal(calculateCartTax({ jurisdiction: jurisdictionResult.jurisdiction, treatment: "de_domestic", items: [], shippingGrossCents: 0 }).ok, false);
+  assert.equal(calculateCartTax({ jurisdiction: jurisdictionResult.jurisdiction, treatment: "de_domestic", items: [MATCHA_30G], shippingGrossCents: -1 }).ok, false);
 });
 
 test("tax: the calculation version is recorded on every snapshot", () => {
