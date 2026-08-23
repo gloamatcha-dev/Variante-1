@@ -110,6 +110,22 @@ export const TAX_SUPPORTED_COUNTRIES: readonly string[] = Object.freeze([
 ]);
 
 /**
+ * Every country above that sits in an EU VAT territory other than
+ * Germany, i.e. every destination an intra-EU distance sale can go to.
+ * Derived from the same tables the resolver uses rather than restated:
+ * a hand-written list would sooner or later forget Monaco.
+ *
+ * Task 21D passes this into SQL so the threshold guard can recognise
+ * paid EU orders whose relevant turnover was never recorded.
+ */
+export const EU_VAT_TERRITORY_COUNTRIES: readonly string[] = Object.freeze([
+  ...EU_MEMBER_STATES_EXCLUDING_DE,
+  ...Object.entries(SPECIAL_TERRITORIES)
+    .filter(([, jurisdiction]) => jurisdiction.kind === "eu")
+    .map(([code]) => code),
+]);
+
+/**
  * Normalises an ISO 3166-1 alpha-2 code, or null when the input is not
  * one. Lowercase is accepted and upper-cased, matching getShippingZone in
  * lib/shipping.ts, so the two never disagree about the same input.
