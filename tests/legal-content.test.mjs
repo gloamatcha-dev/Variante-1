@@ -147,8 +147,13 @@ test("Shipping page: current confirmed zones/prices, and Moldova stays excluded"
 const gloaSiteSource = readFileSync(new URL("../app/GloaSite.tsx", import.meta.url), "utf-8");
 
 test("Food info: responsible food business is shown in both purchase blocks (Art. 9(1)(h) Reg. 1169/2011)", () => {
-  const occurrences = gloaSiteSource.match(/VERANTWORTLICHES LEBENSMITTELUNTERNEHMEN<\/dt><dd>Cara 2 GmbH, Hardenbergstr\. 4, 10623 Berlin, Deutschland/g) || [];
-  assert.equal(occurrences.length, 2, "expected in both the /shop and PDP facts blocks");
+  // It moved out of the prominent detail table but must stay inside the
+  // same identified product-information block on both surfaces, so the
+  // mandatory particular is still available before purchase.
+  const occurrences = gloaSiteSource.match(/product-operator-note">Lebensmittelunternehmer: Cara 2 GmbH, Hardenbergstr\. 4, 10623 Berlin, Deutschland/g) || [];
+  assert.equal(occurrences.length, 2, "expected in both the /shop accordion and the PDP facts block");
+  // And it is no longer a row of the detail table.
+  assert.ok(!gloaSiteSource.includes("<dt>VERANTWORTLICHES LEBENSMITTELUNTERNEHMEN</dt>"), "operator must not be a table row any more");
 });
 
 test("Food info: factual food name accompanies the brand name (not GLOA alone)", () => {
@@ -320,4 +325,47 @@ test("VSBG: still no dispute-resolution declaration and no employee count publis
   for (const term of ["Verbraucherschlichtungsstelle", "Universalschlichtungsstelle", "VSBG", "Mitarbeiterzahl", "Besch\u00e4ftigte"]) {
     assert.ok(!gloaSiteSource.includes(term), `unexpected VSBG/employee statement: ${term}`);
   }
+});
+
+/* ── Product detail refinements ─────────────────────────────── */
+
+test("Matcha: no harvest claim anywhere on the customer-facing site", () => {
+  // Removed on request, and deliberately not swapped for another
+  // harvest or grade claim.
+  for (const claim of ["Pfl\u00fcckung", "ERNTE", "First Harvest", "First Picking", "Ceremonial", "Premium Grade"]) {
+    assert.ok(!gloaSiteSource.includes(claim), `harvest/grade claim still present: ${claim}`);
+  }
+});
+
+test("Matcha: preparation is 3 g everywhere, with no 2 g instruction left", () => {
+  assert.ok(!/Ca\. 2 ?g/i.test(gloaSiteSource), "a 2 g preparation instruction survived");
+  assert.ok(!/\b2 ?g Matcha/i.test(gloaSiteSource), "a 2 g Matcha instruction survived");
+  const threeGram = gloaSiteSource.match(/Ca\. 3 g Matcha/g) || [];
+  assert.equal(threeGram.length, 4, "expected the detail table, the PDP and the three method cards to agree");
+});
+
+test("Shipping copy: the product summary matches the authoritative zone data", async () => {
+  const { SHIPPING_ZONES } = await import("../lib/shipping.ts");
+  assert.match(gloaSiteSource, /Deutschland: 2\u20134 Werktage \u00b7 Andere L\u00e4nder: 3\u201310 Werktage/);
+  // Pinned against lib/shipping.ts so the summary cannot drift from the
+  // real delivery windows.
+  assert.equal(SHIPPING_ZONES.germany.minBusinessDays, 2);
+  assert.equal(SHIPPING_ZONES.germany.maxBusinessDays, 4);
+  const nonDe = ["eu", "nonEuCore", "restOfEurope"].map(k => SHIPPING_ZONES[k]);
+  assert.equal(Math.min(...nonDe.map(z => z.minBusinessDays)), 3);
+  assert.equal(Math.max(...nonDe.map(z => z.maxBusinessDays)), 10);
+  // The old catch-all wording is gone.
+  assert.ok(!gloaSiteSource.includes("Lieferzeit je nach Zielland: 2-10 Werktage"));
+});
+
+test("Shop layout: the two product columns keep independent heights", () => {
+  const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf-8");
+  const rule = css.match(/\.shop-products\{[^}]*grid-template-columns:1fr 1fr[^}]*\}/)?.[0] ?? "";
+  assert.ok(rule, "desktop product grid rule not found");
+  // Without this, the grid row stretches to the tallest column and
+  // opening the Matcha accordion drags the Metal Case column down.
+  assert.match(rule, /align-items:start/, "columns must not stretch to a shared height");
+  // The divider is drawn, not implied by a gap over a coloured
+  // background, which would show through under the shorter column.
+  assert.match(css, /\.shop-products::before\{[^}]*background:var\(--line\)/);
 });
