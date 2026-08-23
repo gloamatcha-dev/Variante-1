@@ -25,6 +25,43 @@ export const PRODUCT = {
 };
 
 
+/**
+ * INTERNAL ONLY - organic (Bio) certification data. Nothing here is
+ * rendered anywhere, and nothing here may be rendered until every field
+ * is filled from the real document.
+ *
+ * Replace only with verified data from the actual GLOA / Cara 2 GmbH
+ * organic certificate. Do not infer certification data from a supplier's
+ * certificate: the supplier being certified says nothing about whether
+ * this shop is.
+ *
+ * Status: PENDING OWNER DOCUMENT.
+ *
+ * Why it exists: the shop describes the Matcha as "100 % Bio-Matcha".
+ * Selling organic food at a distance carries its own online duties
+ * (control-body code available before purchase, and the shop itself
+ * being certified - the retailer exemption covers stationary retail
+ * only). Task 28A documented that; this is the slot the confirmed values
+ * go into, so nobody has to invent one under time pressure later.
+ *
+ * When the certificate arrives: fill these fields, then decide with the
+ * legal review where the code is surfaced (the Impressum is an accepted
+ * location) and whether the EU organic logo and the
+ * "Nicht-EU-Landwirtschaft" origin line belong on the product page.
+ */
+export const ORGANIC_CERTIFICATION = {
+  /** The control body's code number, exactly as printed. Never guess it. */
+  controlBodyCode: null as string | null,
+  /** Name of the control authority or body named on the certificate. */
+  controlBodyName: null as string | null,
+  /** Certificate number / reference as printed on the document. */
+  certificateReference: null as string | null,
+  /** Public URL of the certificate, if we publish one. */
+  certificateUrl: null as string | null,
+  /** Certificate validity, straight from the document. */
+  validUntil: null as string | null,
+};
+
 export const BUSINESS_FACTS = {
   formats: ["500 g", "1 kg"],
   stock: "Bestand in Deutschland",

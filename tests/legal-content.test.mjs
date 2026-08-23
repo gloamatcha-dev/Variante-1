@@ -270,3 +270,54 @@ test("Bio: no organic control-body code is invented", () => {
   // has not been confirmed must never be fabricated.
   assert.ok(!/DE-[\u00d6O]KO-\d/i.test(gloaSiteSource), "an organic control code was invented");
 });
+
+/* ── Task 28B: organic certification placeholder ────────────── */
+
+test("Bio: the certification placeholder exists and is entirely unfilled", async () => {
+  const { ORGANIC_CERTIFICATION } = await import("../app/content.ts");
+  // Every field null means nothing can be rendered by accident, and it
+  // records that the document is still outstanding.
+  assert.deepEqual(ORGANIC_CERTIFICATION, {
+    controlBodyCode: null,
+    controlBodyName: null,
+    certificateReference: null,
+    certificateUrl: null,
+    validUntil: null,
+  });
+});
+
+test("Bio: the placeholder is internal and reaches no customer-facing page", () => {
+  // Not imported by any component, so no null, "TBD" or "wird ergänzt"
+  // can leak into the UI.
+  assert.ok(!gloaSiteSource.includes("ORGANIC_CERTIFICATION"), "placeholder must stay out of the site components");
+  const chrome = readFileSync(new URL("../app/Chrome.tsx", import.meta.url), "utf-8");
+  assert.ok(!chrome.includes("ORGANIC_CERTIFICATION"));
+});
+
+test("Bio: no placeholder or fabricated certification wording is published", () => {
+  const content = readFileSync(new URL("../app/content.ts", import.meta.url), "utf-8");
+  // A fabricated code must never appear, in any spelling.
+  for (const source of [gloaSiteSource, content]) {
+    assert.ok(!/DE-[\u00d6O]KO-\s*(\d|X)/i.test(source), "an organic control code was fabricated");
+    assert.ok(!/[A-Z]{2}-BIO-\d/i.test(source), "a foreign organic code was fabricated");
+  }
+  // And no customer-visible "pending" wording around the Bio claim.
+  for (const filler of ["Zertifizierung folgt", "wird erg\u00e4nzt", "Bio-Zertifikat folgt", "coming soon", "TBD"]) {
+    assert.ok(!gloaSiteSource.includes(filler), `customer-visible placeholder: ${filler}`);
+  }
+});
+
+test("Impressum: the confirmed register data is untouched", () => {
+  // Pinned because the Bio work sits next to the company identifiers.
+  assert.match(gloaSiteSource, /HRB 278728 B/);
+  assert.match(gloaSiteSource, /Amtsgericht Charlottenburg/);
+  assert.match(gloaSiteSource, /Cara 2 GmbH/);
+});
+
+test("VSBG: still no dispute-resolution declaration and no employee count published", () => {
+  // Task 28B explicitly leaves this alone until the statutory position
+  // is established.
+  for (const term of ["Verbraucherschlichtungsstelle", "Universalschlichtungsstelle", "VSBG", "Mitarbeiterzahl", "Besch\u00e4ftigte"]) {
+    assert.ok(!gloaSiteSource.includes(term), `unexpected VSBG/employee statement: ${term}`);
+  }
+});
