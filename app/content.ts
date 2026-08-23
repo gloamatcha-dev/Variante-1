@@ -37,17 +37,15 @@ export const PRODUCT = {
  *
  * Status: PENDING OWNER DOCUMENT.
  *
- * Why it exists: the shop describes the Matcha as "100 % Bio-Matcha".
- * Selling organic food at a distance carries its own online duties
- * (control-body code available before purchase, and the shop itself
- * being certified - the retailer exemption covers stationary retail
- * only). Task 28A documented that; this is the slot the confirmed values
- * go into, so nobody has to invent one under time pressure later.
+ * Why it exists: the shop describes the Matcha as "100 % Bio-Matcha", so
+ * this is the slot the confirmed values go into, and nobody has to invent
+ * one under time pressure later.
  *
- * When the certificate arrives: fill these fields, then decide with the
- * legal review where the code is surfaced (the Impressum is an accepted
- * location) and whether the EU organic logo and the
- * "Nicht-EU-Landwirtschaft" origin line belong on the product page.
+ * Website disclosure requirements for organic certification data remain
+ * subject to final legal review. Do not render any control-body code,
+ * certificate data, organic logo or origin statement unless the
+ * requirement has been verified for the actual GLOA online sales
+ * presentation and the real certificate has been provided.
  */
 export const ORGANIC_CERTIFICATION = {
   /** The control body's code number, exactly as printed. Never guess it. */
