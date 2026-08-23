@@ -7,6 +7,15 @@ import { useAuth } from "../lib/auth";
 import type { AddressRow } from "../lib/auth";
 import { supabase } from "../lib/supabase";
 import { B2bCalculator } from "./B2bCalculator";
+import {
+  AccountEmptyState,
+  AccountIcon,
+  AccountQuickLinks,
+  AccountSectionHeader,
+  AccountSummaryRow,
+  type AccountQuickLink,
+} from "./AccountUI";
+import { resolveGreetingName } from "../lib/accountGreeting";
 import type { AddressSnapshot } from "../lib/orderAddressSnapshot";
 import { getCountryLabel } from "../lib/shipping";
 import {
@@ -64,7 +73,6 @@ export function AccountPortal({ page, orderId, subscriptionId, supplyId }: { pag
   }
 
   const navItems = NAV.filter(n => (!n.b2bOnly || customerType === "business") && (!n.privateOnly || customerType === "private"));
-  const firstName = profile?.first_name || "-";
 
   const handleLogout = async () => {
     await signOut();
@@ -82,7 +90,7 @@ export function AccountPortal({ page, orderId, subscriptionId, supplyId }: { pag
       </nav>
 
       <div className="portal-content">
-        {page === "dashboard" && <PortalDashboard firstName={firstName} customerType={customerType} />}
+        {page === "dashboard" && <PortalDashboard customerType={customerType} />}
         {page === "orders" && <PortalOrders />}
         {page === "order-detail" && <OrderDetail orderId={orderId!} />}
         {page === "subscriptions" && <PortalSubscriptions />}
@@ -270,131 +278,278 @@ const SUPPLY_STATUS_DE: Record<string, string> = {
 const fmtCents = (cents: number) => (cents / 100).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
 
+/** Plan name from the frozen plan snapshot, never a guessed one. */
+const subPlanName = (sub: SubscriptionRow | null) =>
+  (sub?.plan_snapshot as Record<string, string> | null)?.name || "Abo";
+
+/** Delivery interval from the frozen plan snapshot, or "" when it has none. */
+const subInterval = (sub: SubscriptionRow | null) => {
+  const ps = sub?.plan_snapshot as Record<string, string | number> | null;
+  return ps ? fmtInterval(ps.delivery_interval_unit as string, ps.delivery_interval_count as number) : "";
+};
+
 // ── Dashboard ──────────────────────────────────────────────────────────
 
-const RECENT_ORDERS_LIMIT = 3;
+/**
+ * The tiles that close the private dashboard. Every href is a real portal
+ * route (see NAV above and the router in GloaSite.tsx) - a tile that led
+ * nowhere would be worse than no tile at all.
+ */
+const PRIVATE_QUICK_LINKS: AccountQuickLink[] = [
+  { href: "/account/orders", label: "Bestellungen", icon: "bag" },
+  { href: "/account/subscriptions", label: "Abos", icon: "repeat" },
+  { href: "/account/addresses", label: "Adressen", icon: "pin" },
+  { href: "/account/profile", label: "Kontodaten", icon: "user" },
+];
 
-function PortalDashboard({ firstName, customerType }: { firstName: string; customerType: CustomerType }) {
-  const [recentOrders, setRecentOrders] = useState<OrderRow[]>([]);
+/**
+ * Same tiles, business destinations. /account/subscriptions is B2C only
+ * and is deliberately absent; /account/business is the B2B area a private
+ * account never sees.
+ */
+const BUSINESS_QUICK_LINKS: AccountQuickLink[] = [
+  { href: "/account/orders", label: "Bestellungen", icon: "bag" },
+  { href: "/account/business", label: "Belieferung", icon: "truck" },
+  { href: "/account/addresses", label: "Lieferadressen", icon: "pin" },
+  { href: "/account/profile", label: "Firmendaten", icon: "building" },
+];
+
+function PortalDashboard({ customerType }: { customerType: CustomerType }) {
+  return customerType === "business" ? <BusinessDashboard /> : <PrivateDashboard />;
+}
+
+/** The gross figure a customer sees, or the net one a business order records. */
+function orderAmount(order: OrderRow): string {
+  const business = order.customer_type === "business";
+  const cents = business ? order.total_net_cents ?? order.total_gross_cents : order.total_gross_cents;
+  return `${fmtCents(cents)} €${business && order.total_net_cents !== null ? " netto" : ""}`;
+}
+
+// ── Private dashboard ──────────────────────────────────────────────────
+
+function PrivateDashboard() {
+  const { profile } = useAuth();
+  const [latestOrder, setLatestOrder] = useState<OrderRow | null>(null);
   const [orderLoading, setOrderLoading] = useState(() => !!supabase);
   const [activeSub, setActiveSub] = useState<SubscriptionRow | null>(null);
+  const [subLoading, setSubLoading] = useState(() => !!supabase);
   const [nextDeliverySub, setNextDeliverySub] = useState<SubscriptionRow | null>(null);
-  const [subLoading, setSubLoading] = useState(() => customerType === "private" && !!supabase);
-  const [deliveryLoading, setDeliveryLoading] = useState(() => !!supabase && (customerType === "private" || customerType === "business"));
-  const [nextB2bSupply, setNextB2bSupply] = useState<SupplyAgreementRow | null>(null);
+  const [deliveryLoading, setDeliveryLoading] = useState(() => !!supabase);
 
   useEffect(() => {
     if (!supabase) return;
-    supabase.from("orders").select("*").order("created_at", { ascending: false }).limit(RECENT_ORDERS_LIMIT)
-      .then(({ data }) => { setRecentOrders(data ?? []); setOrderLoading(false); });
-    if (customerType === "private") {
-      supabase.from("subscriptions").select("*").eq("status", "active").order("created_at", { ascending: false }).limit(1)
-        .then(({ data }) => { setActiveSub(data?.[0] ?? null); setSubLoading(false); });
-      supabase.from("subscriptions").select("*").eq("status", "active").not("next_delivery_at", "is", null).gte("next_delivery_at", new Date().toISOString()).order("next_delivery_at", { ascending: true }).limit(1)
-        .then(({ data }) => { setNextDeliverySub(data?.[0] ?? null); setDeliveryLoading(false); });
-    } else if (customerType === "business") {
-      supabase.from("b2b_supply_agreements").select("*").eq("status", "active").not("next_delivery_at", "is", null).gte("next_delivery_at", new Date().toISOString()).order("next_delivery_at", { ascending: true }).limit(1)
-        .then(({ data }) => { setNextB2bSupply(data?.[0] ?? null); setDeliveryLoading(false); });
-    }
-  }, [customerType]);
+    supabase.from("orders").select("*").order("created_at", { ascending: false }).limit(1)
+      .then(({ data }) => { setLatestOrder(data?.[0] ?? null); setOrderLoading(false); });
+    supabase.from("subscriptions").select("*").eq("status", "active").order("created_at", { ascending: false }).limit(1)
+      .then(({ data }) => { setActiveSub(data?.[0] ?? null); setSubLoading(false); });
+    supabase.from("subscriptions").select("*").eq("status", "active").not("next_delivery_at", "is", null).gte("next_delivery_at", new Date().toISOString()).order("next_delivery_at", { ascending: true }).limit(1)
+      .then(({ data }) => { setNextDeliverySub(data?.[0] ?? null); setDeliveryLoading(false); });
+  }, []);
 
-  const getPlanName = (sub: SubscriptionRow | null) => sub?.plan_snapshot ? (sub.plan_snapshot as Record<string, string>).name || "Abo" : "Abo";
-  const getDeliveryInterval = (sub: SubscriptionRow | null) => {
-    if (!sub?.plan_snapshot) return "";
-    const ps = sub.plan_snapshot as Record<string, string | number>;
-    return fmtInterval(ps.delivery_interval_unit as string, ps.delivery_interval_count as number);
-  };
+  // Null rather than a placeholder: "Hallo, -." and "Hallo, GLOA." are
+  // both wrong, so an account with no stored first name gets a neutral
+  // greeting instead of an invented one.
+  const greetingName = resolveGreetingName(profile?.first_name);
 
   return (
     <>
       <section className="portal-greeting">
         <p className="eyebrow">DEIN GLOA</p>
-        <h1>Hallo, {firstName}.</h1>
+        <h1>{greetingName ? `Hallo, ${greetingName}.` : "Willkommen zurück."}</h1>
       </section>
 
-      <div className="portal-dashboard-grid">
-        {customerType === "private" && (
-          <section className="portal-dash-block portal-dash-wide">
-            <p className="eyebrow">NÄCHSTE LIEFERUNG</p>
-            {deliveryLoading ? (
-              <p className="portal-empty">Laden…</p>
-            ) : nextDeliverySub?.next_delivery_at ? (
-              <div className="portal-dash-order">
-                <div className="portal-dash-order-row"><span>{getPlanName(nextDeliverySub)}</span><span>{fmtDate(nextDeliverySub.next_delivery_at)}</span></div>
-                {getDeliveryInterval(nextDeliverySub) && <div className="portal-dash-order-row"><span>{getDeliveryInterval(nextDeliverySub)}</span><strong>{fmtCents(nextDeliverySub.total_gross_cents)} €</strong></div>}
-                <a href={`/account/subscriptions/${nextDeliverySub.id}`} className="portal-dash-order-link">ABO ANSEHEN</a>
-              </div>
-            ) : (
-              <p className="portal-empty">Keine geplante Lieferung.</p>
-            )}
-          </section>
+      <section className="portal-section">
+        <AccountSectionHeader label="NÄCHSTE LIEFERUNG" />
+        {deliveryLoading ? (
+          <AccountEmptyState>Laden…</AccountEmptyState>
+        ) : nextDeliverySub?.next_delivery_at ? (
+          <div className="portal-line">
+            <strong>{fmtDate(nextDeliverySub.next_delivery_at)}</strong>
+            <span>{subPlanName(nextDeliverySub)}{subInterval(nextDeliverySub) ? ` · ${subInterval(nextDeliverySub)}` : ""}</span>
+            <a href={`/account/subscriptions/${nextDeliverySub.id}`} className="portal-action">ABO ANSEHEN</a>
+          </div>
+        ) : (
+          <AccountEmptyState>Keine geplante Lieferung.</AccountEmptyState>
         )}
+      </section>
 
-        {customerType === "business" && (
-          <section className="portal-dash-block portal-dash-wide">
-            <p className="eyebrow">NÄCHSTE LIEFERUNG</p>
-            {deliveryLoading ? (
-              <p className="portal-empty">Laden…</p>
-            ) : nextB2bSupply?.next_delivery_at ? (
-              <div className="portal-dash-order">
-                <div className="portal-dash-order-row"><span>{(nextB2bSupply.offer_model_snapshot as Record<string, string>).label || "Belieferung"}</span><span>{fmtDate(nextB2bSupply.next_delivery_at)}</span></div>
-                {fmtInterval(nextB2bSupply.delivery_interval_unit ?? undefined, nextB2bSupply.delivery_interval_count ?? undefined) && <div className="portal-dash-order-row"><span>{fmtInterval(nextB2bSupply.delivery_interval_unit ?? undefined, nextB2bSupply.delivery_interval_count ?? undefined)}</span><strong>{fmtCents(nextB2bSupply.total_net_cents)} € netto</strong></div>}
-                <a href={`/account/business/supply/${nextB2bSupply.id}`} className="portal-dash-order-link">BELIEFERUNG ANSEHEN</a>
+      <section className="portal-section">
+        <AccountSectionHeader label="LETZTE BESTELLUNG" />
+        {orderLoading ? (
+          <AccountEmptyState>Laden…</AccountEmptyState>
+        ) : latestOrder ? (
+          <>
+            <div className="portal-order">
+              <div className="portal-order-id">
+                <strong>{latestOrder.order_number}</strong>
+                <span>{getPrimaryStatusLabel(latestOrder)}</span>
               </div>
-            ) : (
-              <p className="portal-empty">Keine geplante Lieferung.</p>
-            )}
-          </section>
-        )}
-
-        <section className="portal-dash-block portal-dash-wide">
-          <p className="eyebrow">LETZTE BESTELLUNGEN</p>
-          {orderLoading ? (
-            <p className="portal-empty">Laden…</p>
-          ) : recentOrders.length > 0 ? (
-            <div className="portal-dash-orders">
-              {recentOrders.map(o => (
-                <div key={o.id} className="portal-dash-order">
-                  <div className="portal-dash-order-row"><span>{o.order_number}</span><span>{fmtDate(o.placed_at || o.created_at)}</span></div>
-                  <div className="portal-dash-order-row"><span>{getPrimaryStatusLabel(o)}</span><strong>{fmtCents(o.customer_type === "business" ? o.total_net_cents ?? o.total_gross_cents : o.total_gross_cents)} €{o.customer_type === "business" && o.total_net_cents !== null ? " netto" : ""}</strong></div>
-                  <a href={`/account/orders/${o.id}`} className="portal-dash-order-link">BESTELLUNG ANSEHEN</a>
-                </div>
-              ))}
-              <Link href="/account/orders" className="portal-dash-order-link">ALLE BESTELLUNGEN</Link>
+              <div className="portal-order-meta">
+                <span>{fmtDate(latestOrder.placed_at || latestOrder.created_at)}</span>
+                <strong>{orderAmount(latestOrder)}</strong>
+              </div>
             </div>
-          ) : (
-            <p className="portal-empty">Du hast noch keine Bestellung.</p>
-          )}
-        </section>
-
-        {customerType === "private" && (
-          <section className="portal-dash-block">
-            <p className="eyebrow">DEIN ABO</p>
-            {subLoading ? (
-              <p className="portal-empty">Laden…</p>
-            ) : activeSub ? (
-              <div className="portal-dash-order">
-                <div className="portal-dash-order-row"><span>{getPlanName(activeSub)}</span><span>{SUB_STATUS_DE[activeSub.status] || activeSub.status}</span></div>
-                {getDeliveryInterval(activeSub) && <div className="portal-dash-order-row"><span>{getDeliveryInterval(activeSub)}</span><strong>{fmtCents(activeSub.total_gross_cents)} €</strong></div>}
-                <a href={`/account/subscriptions/${activeSub.id}`} className="portal-dash-order-link">ABO ANSEHEN</a>
-              </div>
-            ) : (
-              <p className="portal-empty">Du hast aktuell kein Abonnement.</p>
-            )}
-          </section>
+            <div className="portal-actions">
+              <a href={`/account/orders/${latestOrder.id}`} className="portal-action">BESTELLUNG ANSEHEN</a>
+              <Link href="/account/orders" className="portal-action">ALLE BESTELLUNGEN</Link>
+            </div>
+          </>
+        ) : (
+          <AccountEmptyState>Du hast noch keine Bestellung.</AccountEmptyState>
         )}
-      </div>
-
-      <section className="portal-quicklinks">
-        <p className="eyebrow">SCHNELLZUGRIFFE</p>
-        <div className="portal-quicklinks-grid">
-          <Link href="/account/orders">Bestellungen</Link>
-          {customerType === "private" && <Link href="/account/subscriptions">Abos</Link>}
-          <Link href="/account/addresses">Adressen</Link>
-          <Link href="/account/profile">Kontodaten</Link>
-          {customerType === "business" && <Link href="/account/business">B2B</Link>}
-        </div>
       </section>
+
+      <section className="portal-section">
+        <AccountSectionHeader label="DEIN ABO" />
+        {subLoading ? (
+          <AccountEmptyState>Laden…</AccountEmptyState>
+        ) : activeSub ? (
+          <>
+            <div className="portal-order">
+              <div className="portal-order-id">
+                <strong>{subPlanName(activeSub)}</strong>
+                <span>{SUB_STATUS_DE[activeSub.status] || activeSub.status}</span>
+              </div>
+              <div className="portal-order-meta">
+                {subInterval(activeSub) && <span>{subInterval(activeSub)}</span>}
+                <strong>{fmtCents(activeSub.total_gross_cents)} €</strong>
+              </div>
+            </div>
+            <div className="portal-actions">
+              <a href={`/account/subscriptions/${activeSub.id}`} className="portal-action">ABO ANSEHEN</a>
+            </div>
+          </>
+        ) : (
+          <AccountEmptyState>Du hast aktuell kein Abonnement.</AccountEmptyState>
+        )}
+      </section>
+
+      <AccountQuickLinks items={PRIVATE_QUICK_LINKS} />
+    </>
+  );
+}
+
+// ── Business dashboard ─────────────────────────────────────────────────
+
+function BusinessDashboard() {
+  const { user, profile, businessProfile } = useAuth();
+  const [latestOrder, setLatestOrder] = useState<OrderRow | null>(null);
+  const [orderLoading, setOrderLoading] = useState(() => !!supabase);
+  const [agreements, setAgreements] = useState<SupplyAgreementRow[]>([]);
+  const [nextDelivery, setNextDelivery] = useState<SupplyAgreementRow | null>(null);
+  const [supplyLoading, setSupplyLoading] = useState(() => !!supabase);
+
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.from("orders").select("*").order("created_at", { ascending: false }).limit(1)
+      .then(({ data }) => { setLatestOrder(data?.[0] ?? null); setOrderLoading(false); });
+    supabase.from("b2b_supply_agreements").select("*").order("created_at", { ascending: false })
+      .then(({ data }) => {
+        const rows = data ?? [];
+        setAgreements(rows);
+        // Which delivery is still upcoming depends on the clock, so it is
+        // resolved here rather than while rendering.
+        const now = Date.now();
+        setNextDelivery(
+          rows
+            .filter(a => a.status === "active" && a.next_delivery_at && new Date(a.next_delivery_at).getTime() >= now)
+            .sort((a, b) => new Date(a.next_delivery_at!).getTime() - new Date(b.next_delivery_at!).getTime())[0] ?? null
+        );
+        setSupplyLoading(false);
+      });
+  }, []);
+
+  const companyName = resolveGreetingName(businessProfile?.company_name);
+  const contactName = resolveGreetingName(profile?.first_name);
+  const greetingName = companyName ?? contactName;
+
+  // Only fields the account actually stores. No customer number, no
+  // member-since, no price tier: the application has none of those, and a
+  // summary panel is not a reason to invent them.
+  const companyFacts: [string, string][] = [];
+  if (businessProfile?.legal_form) companyFacts.push(["Rechtsform", businessProfile.legal_form]);
+  if (user?.email) companyFacts.push(["E-Mail", user.email]);
+  if (businessProfile?.vat_id) companyFacts.push(["USt-IdNr.", businessProfile.vat_id]);
+  if (profile?.customer_type === "business") companyFacts.push(["Konto", "Geschäftskonto"]);
+
+  const activeAgreements = agreements.filter(a => a.status === "active");
+
+  return (
+    <>
+      <section className="portal-b2b-head">
+        <div className="portal-b2b-intro">
+          <p className="eyebrow">DEIN GLOA B2B</p>
+          <h1>{greetingName ? `Hallo, ${greetingName}.` : "Willkommen zurück."}</h1>
+          <p className="portal-b2b-lead">Willkommen in deinem B2B-Kundenkonto.</p>
+        </div>
+        {(companyName || companyFacts.length > 0) && (
+          <aside className="portal-company-panel">
+            <div className="portal-company-head">
+              <AccountIcon name="building" />
+              <strong>{companyName ?? "Unternehmen"}</strong>
+            </div>
+            {companyFacts.map(([label, value]) => (
+              <div key={label} className="portal-company-fact"><span>{label}</span><strong>{value}</strong></div>
+            ))}
+          </aside>
+        )}
+      </section>
+
+      <section className="portal-section">
+        <AccountSectionHeader label="BELIEFERUNG" action={<Link href="/account/business" className="portal-action">B2B-BEREICH</Link>} />
+        {supplyLoading ? (
+          <AccountEmptyState>Laden…</AccountEmptyState>
+        ) : (
+          <div className="portal-summary-rows">
+            {nextDelivery ? (
+              <AccountSummaryRow
+                icon="truck"
+                label="Nächste Lieferung"
+                primary={fmtDate(nextDelivery.next_delivery_at!)}
+                secondary={[
+                  (nextDelivery.offer_model_snapshot as Record<string, string>).label || "Belieferung",
+                  fmtInterval(nextDelivery.delivery_interval_unit ?? undefined, nextDelivery.delivery_interval_count ?? undefined),
+                ].filter(Boolean).join(" · ")}
+                value={`${fmtCents(nextDelivery.total_net_cents)} € netto`}
+                href={`/account/business/supply/${nextDelivery.id}`}
+              />
+            ) : (
+              <AccountSummaryRow icon="truck" label="Nächste Lieferung" primary="Keine geplante Lieferung." />
+            )}
+            {agreements.length > 0 && (
+              <AccountSummaryRow
+                icon="repeat"
+                label="Vereinbarungen"
+                primary={`${activeAgreements.length} aktiv`}
+                secondary={agreements.length > activeAgreements.length ? `${agreements.length} insgesamt` : undefined}
+                href="/account/business"
+              />
+            )}
+          </div>
+        )}
+      </section>
+
+      <section className="portal-section">
+        <AccountSectionHeader label="BESTELLUNGEN" action={<Link href="/account/orders" className="portal-action">ALLE BESTELLUNGEN</Link>} />
+        {orderLoading ? (
+          <AccountEmptyState>Laden…</AccountEmptyState>
+        ) : latestOrder ? (
+          <div className="portal-summary-rows">
+            <AccountSummaryRow
+              icon="bag"
+              label="Letzte Bestellung"
+              primary={latestOrder.order_number}
+              secondary={`${fmtDate(latestOrder.placed_at || latestOrder.created_at)} · ${getPrimaryStatusLabel(latestOrder)}`}
+              value={orderAmount(latestOrder)}
+              href={`/account/orders/${latestOrder.id}`}
+            />
+          </div>
+        ) : (
+          <AccountEmptyState>Noch keine Bestellung.</AccountEmptyState>
+        )}
+      </section>
+
+      <AccountQuickLinks items={BUSINESS_QUICK_LINKS} />
     </>
   );
 }
