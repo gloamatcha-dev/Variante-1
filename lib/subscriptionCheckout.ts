@@ -4,12 +4,14 @@ import {
   LAUNCH_SUBSCRIPTION_SKUS,
   SUBSCRIPTION_FEATURE_FLAG,
   SUBSCRIPTION_QUANTITY,
-  attemptMatchesRequest,
+  attemptMatchesFingerprint,
   buildSubscriptionAddressSnapshot,
   buildSubscriptionLineItems,
   isSubscriptionCheckoutEnabled,
   parseSubscriptionCheckoutBody,
+  subscriptionAddressDigest,
   subscriptionCheckoutIdempotencyKey,
+  subscriptionRequestFingerprint,
   validateLaunchPlan,
   type PlanResolution,
   type SavedAddressRow,
@@ -62,17 +64,26 @@ import type { RecurringPriceResult } from "./stripeRecurringPrice";
  *   1. the feature gate, before anything at all
  *   2. request validation and authentication
  *   3. every server-side resolution, all of it read-only
- *   4. the checkout attempt, the idempotency anchor and the first write
- *   5. the local pending subscription, BEFORE Stripe
- *   6. Stripe Customer and recurring Prices
- *   7. the Checkout Session, carrying the local subscription id
+ *   4. the fingerprint of this exact intent
+ *   5. the checkout attempt, the idempotency anchor and the first write
+ *   6. the fingerprint comparison, which decides whether this really is
+ *      the same request or the same token pointed at another one
+ *   7. the local pending subscription, claimed atomically, BEFORE Stripe
+ *   8. Stripe Customer and recurring Prices
+ *   9. the Checkout Session, carrying the local subscription id
  *
- * Step 5 before step 7 is Model A from migration 022: the local row is
+ * Step 7 before step 9 is Model A from migration 022: the local row is
  * frozen before Stripe knows anything, so an invoice.paid delivered
  * BEFORE checkout.session.completed still has a subscription to resolve
  * against. Stripe promises no ordering between the two, and the newer
  * API's invoice carries no top-level subscription id to fall back on, so
  * the correlation goes into subscription_data.metadata instead.
+ *
+ * Step 7 is ONE database call, and that is the point of it. The obvious
+ * shape - read subscription_id, create, link - has a window in which two
+ * concurrent requests both read NULL and both create a subscription. That
+ * window cannot be closed from here at all, so it is closed in
+ * claim_pending_subscription_for_attempt under a row lock instead.
  */
 
 export {
@@ -82,7 +93,9 @@ export {
   SUBSCRIPTION_QUANTITY,
   isSubscriptionCheckoutEnabled,
   parseSubscriptionCheckoutBody,
+  subscriptionAddressDigest,
   subscriptionCheckoutIdempotencyKey,
+  subscriptionRequestFingerprint,
   validateLaunchPlan,
 };
 export type { SavedAddressRow };
@@ -109,8 +122,13 @@ export type SubscriptionCheckoutDeps = {
     input: { kind: "sku" | "shipping"; identifier: string; unitAmountCents: number; productName: string }
   ) => Promise<RecurringPriceResult>;
   ensureAttempt: (input: SubscriptionAttemptInput) => Promise<SubscriptionAttemptResult>;
-  createSubscription: (input: CreatePendingSubscriptionInput) => Promise<CreatePendingSubscriptionResult>;
-  attachSubscription: (attemptId: string, subscriptionId: string) => Promise<string | null>;
+  /**
+   * One atomic database operation: returns the attempt's existing
+   * subscription, or creates exactly one and links it, under a row lock.
+   * There is deliberately no separate "attach" step for a second caller
+   * to race against.
+   */
+  claimSubscription: (input: CreatePendingSubscriptionInput) => Promise<CreatePendingSubscriptionResult>;
   linkSession: (attemptId: string, sessionId: string) => Promise<boolean>;
 };
 
@@ -237,7 +255,32 @@ export async function handleSubscriptionCheckout(
   const taxSnapshot = taxOutcome.snapshot;
   const expectedTotalGrossCents = quote.subtotalGrossCents + shippingGrossCents;
 
-  // 8. THE ATTEMPT: the idempotency anchor, and the first write. It has
+  // 8. THE FINGERPRINT of this exact intent. A request_id is an
+  //    idempotency token, never commercial authority, so "the same
+  //    request" has to be a checkable claim: same customer, same plan,
+  //    same saved address AND the same address contents, same product,
+  //    same amounts. The address is reduced to a digest first, so nothing
+  //    readable about a delivery ever reaches the database column or a
+  //    log line.
+  const fingerprint = subscriptionRequestFingerprint({
+    userId: caller.userId,
+    planId: plan.id,
+    addressId,
+    addressDigest: subscriptionAddressDigest(addressSnapshot),
+    variantId: item.variantId,
+    quantity: SUBSCRIPTION_QUANTITY,
+    currency: quote.currency,
+    shippingCountry: destinationCountry,
+    shippingZone: shippingZone,
+    shippingGrossCents,
+    subtotalGrossCents: quote.subtotalGrossCents,
+    totalGrossCents: expectedTotalGrossCents,
+    taxCalculationVersion: taxSnapshot.calculationVersion,
+    taxTreatment: taxSnapshot.treatment,
+    taxTotalCents: taxSnapshot.totals.taxTotalCents,
+  });
+
+  // 9. THE ATTEMPT: the idempotency anchor, and the first write. It has
   //    to exist before the subscription so a retry finds the anchor
   //    rather than creating a second subscription.
   const items = buildItemsSnapshot(quote);
@@ -249,6 +292,7 @@ export async function handleSubscriptionCheckout(
     shipping: { country: destinationCountry, zone: shippingZone, grossCents: shippingGrossCents },
     taxSnapshot,
     expectedTotalGrossCents,
+    fingerprint,
   });
   if (!attemptResult.ok) {
     return fail(503, attemptResult.error);
@@ -259,53 +303,60 @@ export async function handleSubscriptionCheckout(
     return fail(409, "Diese Anfrage wurde bereits bezahlt.");
   }
 
-  // A request id reused with a different customer, product or total is
-  // not a retry. Refuse, rather than attach this request to the frozen
-  // snapshot somebody else's attempt already holds.
-  if (!attemptMatchesRequest(attempt, {
-    userId: caller.userId,
-    variantId: item.variantId,
-    totalGrossCents: expectedTotalGrossCents,
-    country: destinationCountry,
-  })) {
-    console.error(`Subscription checkout: request ${requestId} reused with a different commercial snapshot`);
+  // The stored fingerprint is what the FIRST request froze. If this
+  // request computes a different one, it is not a retry: it is the same
+  // token being used for another customer, another plan, another saved
+  // address, an edited address, another product or another price. A NULL
+  // is refused too, because that means the attempt came from the one-time
+  // payment flow and was never priced as a subscription.
+  if (!attemptMatchesFingerprint(attempt.subscription_request_fingerprint, fingerprint)) {
+    console.error(`Subscription checkout: request ${requestId} reused for a different checkout intent`);
     return fail(409, "Diese Anfrage-ID gehört zu einem anderen Vorgang.");
   }
 
-  // 9. THE LOCAL SUBSCRIPTION, before Stripe. Reused if this attempt
-  //    already has one, so a retry never creates a second.
-  let subscriptionId = attempt.subscription_id;
-  if (!subscriptionId) {
-    const created = await deps.createSubscription({
-      userId: caller.userId,
-      planId: plan.id,
-      planSnapshot: buildPlanSnapshot(plan, item.sku),
-      customerSnapshot: { email: caller.email, name: recipientName },
-      shippingAddressSnapshot: addressSnapshot,
-      // One saved address at launch: the customer selects a delivery
-      // address and it is also what is invoiced. A separate billing
-      // address is a later feature, not an invented second snapshot.
-      billingAddressSnapshot: addressSnapshot,
-      taxSnapshot,
-      items,
-    });
-    if (!created.ok) {
-      return fail(503, UNAVAILABLE);
-    }
+  // 10. THE FROZEN SNAPSHOT is authoritative from here on, exactly as it
+  //     is in the one-time flow. The fingerprint above already proves the
+  //     amounts agree; reading them off the attempt means a display-only
+  //     catalog edit between the first request and a retry cannot change
+  //     what gets frozen onto the subscription either.
+  const frozenItems = attempt.items_snapshot;
+  const frozenZone = attempt.shipping_zone;
+  const frozenShippingGrossCents = attempt.shipping_gross_cents;
+  const frozenTaxSnapshot = attempt.tax_snapshot;
 
-    // Adopt whatever is actually linked: a concurrent request may have
-    // won, in which case this request uses the winner's subscription and
-    // its own is left as an unreferenced pending row for reconciliation
-    // rather than deleted here.
-    const linked = await deps.attachSubscription(attempt.id, created.subscriptionId);
-    if (!linked) {
-      console.error(`Subscription checkout: attempt ${attempt.id} could not be linked to a subscription`);
-      return fail(503, UNAVAILABLE);
-    }
-    subscriptionId = linked;
+  if (!Array.isArray(frozenItems) || frozenItems.length !== 1
+    || frozenItems[0].quantity !== SUBSCRIPTION_QUANTITY
+    || !frozenZone || frozenShippingGrossCents === null || !frozenTaxSnapshot) {
+    console.error(`Subscription checkout error: attempt ${attempt.id} has no usable frozen subscription snapshot.`);
+    return fail(503, UNAVAILABLE);
   }
+  const frozenItem = frozenItems[0];
 
-  // 10. STRIPE. Nothing below can change what was frozen above.
+  // 11. THE LOCAL SUBSCRIPTION, before Stripe, claimed atomically. One
+  //     database call decides under a row lock whether this attempt
+  //     already owns a subscription and creates one only if it does not,
+  //     so two concurrent requests cannot produce two subscriptions and
+  //     there is no loser left unreferenced.
+  const claimed = await deps.claimSubscription({
+    checkoutAttemptId: attempt.id,
+    userId: caller.userId,
+    planId: plan.id,
+    planSnapshot: buildPlanSnapshot(plan, frozenItem.sku),
+    customerSnapshot: { email: caller.email, name: recipientName },
+    shippingAddressSnapshot: addressSnapshot,
+    // One saved address at launch: the customer selects a delivery
+    // address and it is also what is invoiced. A separate billing
+    // address is a later feature, not an invented second snapshot.
+    billingAddressSnapshot: addressSnapshot,
+    taxSnapshot: frozenTaxSnapshot,
+    items: frozenItems,
+  });
+  if (!claimed.ok) {
+    return fail(503, UNAVAILABLE);
+  }
+  const subscriptionId = claimed.subscriptionId;
+
+  // 12. STRIPE. Nothing below can change what was frozen above.
   const stripe = deps.getStripe();
   if (!stripe) {
     console.error("Subscription checkout error: STRIPE_SECRET_KEY is not configured.");
@@ -323,11 +374,12 @@ export async function handleSubscriptionCheckout(
     return fail(503, UNAVAILABLE);
   }
 
+  // From the FROZEN snapshot, not from this request's fresh quote.
   const productPrice = await deps.ensureRecurringPrice(stripe, {
     kind: "sku",
-    identifier: item.sku,
-    unitAmountCents: item.unitGrossCents,
-    productName: `${item.productName} · ${item.label}`,
+    identifier: frozenItem.sku,
+    unitAmountCents: frozenItem.unitGrossCents,
+    productName: `${frozenItem.productName} · ${frozenItem.variantLabel}`,
   });
   if (!productPrice.ok) {
     console.error("Subscription checkout: product price -", productPrice.reason);
@@ -335,16 +387,16 @@ export async function handleSubscriptionCheckout(
   }
 
   let shippingPriceId: string | null = null;
-  if (shippingGrossCents > 0) {
+  if (frozenShippingGrossCents > 0) {
     // The zone KEY, which is this repository's canonical shipping
     // identifier, never a label and never free text: a renamed
     // customer-facing label must not mint a second Stripe Price for the
     // same zone.
     const shippingPrice = await deps.ensureRecurringPrice(stripe, {
       kind: "shipping",
-      identifier: shippingZone,
-      unitAmountCents: shippingGrossCents,
-      productName: shippingProductName(shippingZone),
+      identifier: frozenZone,
+      unitAmountCents: frozenShippingGrossCents,
+      productName: shippingProductName(frozenZone),
     });
     if (!shippingPrice.ok) {
       console.error("Subscription checkout: shipping price -", shippingPrice.reason);

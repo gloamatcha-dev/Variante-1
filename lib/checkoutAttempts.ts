@@ -148,9 +148,17 @@ export async function linkStripeSession(attemptId: string, stripeCheckoutSession
 export type SubscriptionCheckoutAttempt = CheckoutAttempt & {
   user_id: string | null;
   subscription_id: string | null;
+  /**
+   * The digest of the exact checkout intent this attempt was created for
+   * (migration 025). NULL means the attempt came from the one-time
+   * payment flow and has no subscription intent, which the subscription
+   * flow refuses rather than adopts.
+   */
+  subscription_request_fingerprint: string | null;
 };
 
-const SUBSCRIPTION_ATTEMPT_COLUMNS = `${ATTEMPT_COLUMNS}, user_id, subscription_id`;
+const SUBSCRIPTION_ATTEMPT_COLUMNS =
+  `${ATTEMPT_COLUMNS}, user_id, subscription_id, subscription_request_fingerprint`;
 
 export type SubscriptionAttemptInput = {
   requestId: string;
@@ -161,6 +169,13 @@ export type SubscriptionAttemptInput = {
   taxSnapshot: CartTaxSnapshot;
   /** Merchandise + shipping, gross. What Stripe must charge per cycle. */
   expectedTotalGrossCents: number;
+  /**
+   * The digest of this exact intent, from
+   * subscriptionRequestFingerprint. Written once with the attempt and
+   * compared on every retry, so one request_id can only ever mean one
+   * customer, plan, saved address and priced snapshot.
+   */
+  fingerprint: string;
 };
 
 export type SubscriptionAttemptResult =
@@ -181,8 +196,13 @@ export type SubscriptionAttemptResult =
  * subscription_id is deliberately not written here. It cannot be: the
  * attempt is the idempotency anchor and therefore has to exist BEFORE the
  * subscription, so that a retry finds the anchor instead of creating a
- * second subscription. It is linked afterwards by
- * attachSubscriptionToAttempt.
+ * second subscription. Claiming it is a single database operation,
+ * claim_pending_subscription_for_attempt from migration 025, which locks
+ * this row and decides there. An earlier version read subscription_id
+ * here, created a subscription and then linked it; two concurrent
+ * requests could both read NULL, and the loser's subscription was left
+ * unreferenced. No application-level sequence can close that window, so
+ * none is attempted.
  */
 export async function getOrCreateSubscriptionCheckoutAttempt(
   input: SubscriptionAttemptInput
@@ -205,6 +225,7 @@ export async function getOrCreateSubscriptionCheckoutAttempt(
         shipping_zone: input.shipping.zone,
         shipping_gross_cents: input.shipping.grossCents,
         tax_snapshot: input.taxSnapshot,
+        subscription_request_fingerprint: input.fingerprint,
       },
       { onConflict: "request_id", ignoreDuplicates: true }
     );
@@ -226,55 +247,6 @@ export async function getOrCreateSubscriptionCheckoutAttempt(
   }
 
   return { ok: true, attempt: data as SubscriptionCheckoutAttempt };
-}
-
-/**
- * Links the local subscription to its checkout attempt, once.
- *
- * Conditional on subscription_id still being NULL, so two concurrent
- * requests that both got past the read converge on one winner rather than
- * the second overwriting the first. The loser re-reads and adopts the
- * winner's subscription; its own row is left pending and unreferenced,
- * which is inert (it was never sent to Stripe and has no invoice that
- * could activate it) and is reported as reconciliation work rather than
- * deleted here. Financial and correlation evidence is not something a
- * checkout route should be destroying.
- *
- * Returns the subscription id that is actually linked afterwards, which
- * is the winner's, not necessarily the one passed in.
- */
-export async function attachSubscriptionToAttempt(
-  attemptId: string,
-  subscriptionId: string
-): Promise<string | null> {
-  const admin = getSupabaseAdmin();
-  if (!admin) return null;
-
-  const { data, error } = await admin
-    .from("checkout_attempts")
-    .update({ subscription_id: subscriptionId })
-    .eq("id", attemptId)
-    .is("subscription_id", null)
-    .select("subscription_id")
-    .maybeSingle();
-
-  if (!error && data?.subscription_id) return data.subscription_id as string;
-  if (error) console.error("Subscription attempt link error:", error.message);
-
-  // Either a concurrent request won, or the update failed. Re-read and
-  // report whatever is actually linked, so the caller can adopt it rather
-  // than assume its own id is the one in the database.
-  const { data: current, error: readError } = await admin
-    .from("checkout_attempts")
-    .select("subscription_id")
-    .eq("id", attemptId)
-    .maybeSingle();
-
-  if (readError) {
-    console.error("Subscription attempt re-read error:", readError.message);
-    return null;
-  }
-  return (current?.subscription_id as string | undefined) ?? null;
 }
 
 /** Finds a checkout attempt by the Stripe Checkout Session that backs it. */

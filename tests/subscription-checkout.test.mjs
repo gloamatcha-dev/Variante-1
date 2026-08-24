@@ -5,17 +5,21 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ALLOWED_REQUEST_FIELDS,
+  FINGERPRINT_FIELDS,
+  FINGERPRINT_VERSION,
   LAUNCH_SUBSCRIPTION_SKUS,
   PLAN_BILLING_INTERVAL_COUNT,
   PLAN_BILLING_INTERVAL_UNIT,
   SUBSCRIPTION_FEATURE_FLAG,
   SUBSCRIPTION_QUANTITY,
-  attemptMatchesRequest,
+  attemptMatchesFingerprint,
   buildSubscriptionAddressSnapshot,
   buildSubscriptionLineItems,
   isSubscriptionCheckoutEnabled,
   parseSubscriptionCheckoutBody,
+  subscriptionAddressDigest,
   subscriptionCheckoutIdempotencyKey,
+  subscriptionRequestFingerprint,
   validateLaunchPlan,
 } from "../lib/subscriptionCheckoutRules.ts";
 import { computeShippingGrossCents, getShippingZone, normalizeCountryCode } from "../lib/shipping.ts";
@@ -41,6 +45,10 @@ const plansLib = read("lib/subscriptionPlans.ts");
 const subscriptionsLib = read("lib/subscriptions.ts");
 const attemptsLib = read("lib/checkoutAttempts.ts");
 const migration025 = read("supabase/migrations/025_grant_subscription_plans_service_role.sql");
+const migration025Sql = migration025
+  .split(NEWLINE)
+  .filter(line => !line.trim().startsWith("--"))
+  .join(NEWLINE);
 
 const withoutComments = source => source
   .split(NEWLINE)
@@ -90,6 +98,35 @@ const savedAddress = (overrides = {}) => ({
   ...overrides,
 });
 
+/** The delivery digest of the baseline address, and of a DIFFERENT Berlin one. */
+const digestOf = address => subscriptionAddressDigest(
+  buildSubscriptionAddressSnapshot(address, "DE").snapshot
+);
+const ADDRESS_DIGEST_A = digestOf(savedAddress());
+
+/**
+ * One exact checkout intent: 30 g at 19,99 to a Berlin address, German
+ * shipping at 5,90, German VAT. Every fingerprint test varies exactly one
+ * field of this.
+ */
+const baseIntent = () => ({
+  userId: USER_ID,
+  planId: PLAN_ID,
+  addressId: ADDRESS_ID,
+  addressDigest: ADDRESS_DIGEST_A,
+  variantId: VARIANT_ID,
+  quantity: 1,
+  currency: "EUR",
+  shippingCountry: "DE",
+  shippingZone: "germany",
+  shippingGrossCents: 590,
+  subtotalGrossCents: 1999,
+  totalGrossCents: 2589,
+  taxCalculationVersion: "de-2026.1",
+  taxTreatment: "de_domestic",
+  taxTotalCents: 169,
+});
+
 /* ── A. The feature gate ────────────────────────────────────── */
 
 test("gate: only the exact string \"true\" enables subscription checkout", () => {
@@ -118,7 +155,7 @@ test("gate: the flag is checked before any read, write or external call", () => 
     "deps.buildQuote(",
     "deps.loadAddress(",
     "deps.ensureAttempt(",
-    "deps.createSubscription(",
+    "deps.claimSubscription(",
     "deps.ensureStripeCustomer(",
     "deps.ensureRecurringPrice(",
     "stripe.checkout.sessions.create(",
@@ -279,12 +316,14 @@ test("quantity: fixed at 1 and never taken from the request", () => {
   assert.ok(!ALLOWED_REQUEST_FIELDS.includes("quantity"));
   const lines = buildSubscriptionLineItems({ productPriceId: "price_p", shippingPriceId: null });
   assert.equal(lines[0].quantity, 1);
-  // The frozen item snapshot carries the same 1, and the retry check
-  // refuses an attempt whose snapshot says anything else.
-  assert.equal(attemptMatchesRequest(
-    { user_id: USER_ID, expected_total_gross_cents: 2589, shipping_country: "DE", items_snapshot: [{ variantId: VARIANT_ID, quantity: 2 }] },
-    { userId: USER_ID, variantId: VARIANT_ID, totalGrossCents: 2589, country: "DE" }
-  ), false);
+  // Quantity is part of the request fingerprint, so a retry claiming a
+  // different one is a different intent rather than the same one.
+  assert.notEqual(
+    subscriptionRequestFingerprint(baseIntent()),
+    subscriptionRequestFingerprint({ ...baseIntent(), quantity: 2 })
+  );
+  // And the flow refuses a frozen snapshot that does not say 1.
+  assert.match(flowCode, /frozenItems\[0\]\.quantity !== SUBSCRIPTION_QUANTITY/);
 });
 
 /* ── M, N. The saved address ────────────────────────────────── */
@@ -384,12 +423,15 @@ test("shipping: a chargeable line is a RECURRING price on the same week/4 cadenc
   // Not a one-time charge and not a Stripe shipping_rate: a subscription
   // that collects shipping once would give the delivery away from the
   // second cycle onwards.
-  assert.match(flowCode, /if \(shippingGrossCents > 0\) \{/);
-  assert.match(flowCode, /kind: "shipping",\s*identifier: shippingZone,/);
+  assert.match(flowCode, /if \(frozenShippingGrossCents > 0\) \{/);
+  assert.match(flowCode, /kind: "shipping",\s*identifier: frozenZone,/);
   assert.ok(!/shipping_options|shipping_rate_data|shipping_rate:/.test(flowCode), "a one-time shipping rate was used");
   // The zone KEY is the identifier, so a renamed customer-facing label
   // cannot mint a second Stripe Price for the same zone.
   assert.ok(!/identifier: shippingProductName|identifier: getCountryLabel/.test(flowCode));
+  // The zone comes off the FROZEN attempt, so a retry cannot be shipped
+  // into a different zone than the one the request was priced for.
+  assert.match(flowCode, /const frozenZone = attempt\.shipping_zone;/);
   // Both lines go through the same helper, which is week/4 by construction.
   assert.match(deps, /ensureRecurringPrice: getOrCreateRecurringPrice/);
   const priceHelper = read("lib/stripeRecurringPrice.ts");
@@ -410,7 +452,7 @@ test("shipping: free shipping creates no line at all, not a zero-value charge", 
 /* ── S, T, U. Price and customer ────────────────────────────── */
 
 test("price: the amount is the catalog amount, passed straight through", () => {
-  assert.match(flowCode, /unitAmountCents: item\.unitGrossCents/);
+  assert.match(flowCode, /unitAmountCents: frozenItem\.unitGrossCents/);
   // Nothing multiplies, discounts or rounds it on the way to Stripe.
   assert.ok(!/unitGrossCents\s*[*+\-/]/.test(flowCode), "the catalog amount was modified");
   assert.ok(!/1999|2999|5499/.test(flowCode), "a catalog price was hardcoded");
@@ -428,7 +470,7 @@ test("customer: the Stripe Customer is resolved server-side from the user id", (
 /* ── V, W, X, Y. Local subscription and correlation ─────────── */
 
 test("subscription: the local row is created pending BEFORE the Stripe session", () => {
-  const created = flowCode.indexOf("deps.createSubscription(");
+  const created = flowCode.indexOf("deps.claimSubscription(");
   const session = flowCode.indexOf("stripe.checkout.sessions.create(");
   assert.ok(created > 0 && session > 0);
   assert.ok(created < session, "the local subscription must exist before Stripe is asked for a session");
@@ -467,10 +509,101 @@ test("attempt: the checkout attempt carries the exact subscription_id", () => {
   // Migration 022's column, and the exact correlation the previous task
   // hardened. Not a second idempotency table.
   assert.match(attemptsLib, /subscription_id: string \| null;/);
-  assert.match(attemptsLib, /\.update\(\{ subscription_id: subscriptionId \}\)/);
-  assert.match(attemptsLib, /\.is\("subscription_id", null\)/);
-  assert.match(flowCode, /deps\.attachSubscription\(attempt\.id, created\.subscriptionId\)/);
+  assert.match(flowCode, /checkoutAttemptId: attempt\.id,/);
   assert.ok(!/create table|insert into/i.test(withoutComments(attemptsLib)), "a second idempotency table appeared");
+  // The subscription_id link is written by the database function, so no
+  // application code updates that column any more.
+  assert.ok(!/subscription_id: subscriptionId/.test(withoutComments(attemptsLib)),
+    "an application-level link survived");
+  assert.match(migration025Sql, /set subscription_id = v_subscription_id/);
+});
+
+/* ── 17. The claim is atomic in PostgreSQL ──────────────────── */
+
+test("atomic claim: the race-prone application-level link is gone", () => {
+  // The previous shape was read subscription_id, create, then link, with
+  // a window in which two concurrent requests both read NULL. It is not
+  // narrowed here, it is removed.
+  for (const [name, source] of [["attempts", attemptsLib], ["deps", deps], ["flow", flow], ["subscriptions", subscriptionsLib]]) {
+    assert.ok(!/attachSubscriptionToAttempt/.test(source), `${name} still references the removed linker`);
+  }
+  assert.ok(!/createPendingSubscription/.test(withoutComments(deps)), "the deps still call the unguarded creator");
+  // And no JavaScript workaround took its place.
+  assert.ok(!/setTimeout|sleep|Mutex|mutex|retryLoop|while \(true\)/.test(flowCode + withoutComments(deps)),
+    "a process-local workaround appeared instead of a database guarantee");
+  // Exactly one call decides it.
+  assert.equal([...flowCode.matchAll(/deps\.claimSubscription\(/g)].length, 1);
+});
+
+test("atomic claim: the RPC locks the attempt row before it decides anything", () => {
+  const fn = migration025Sql.slice(
+    migration025Sql.indexOf("create or replace function public.claim_pending_subscription_for_attempt"),
+    migration025Sql.indexOf("revoke all on function")
+  );
+  assert.ok(fn.length > 0, "the claim function must exist in migration 025");
+
+  const lock = fn.indexOf("for update");
+  const earlyReturn = fn.indexOf("return v_attempt.subscription_id;");
+  const create = fn.indexOf("public.create_pending_subscription(");
+  const link = fn.indexOf("set subscription_id = v_subscription_id");
+
+  assert.ok(lock > 0, "the attempt row must be locked");
+  assert.match(fn, /where id = p_checkout_attempt_id\s*for update;/);
+  // The order IS the guarantee: lock, then look, then create only if the
+  // look found nothing, then link - all inside one function call and
+  // therefore one transaction.
+  assert.ok(lock < earlyReturn, "the lock must precede the already-claimed check");
+  assert.ok(earlyReturn < create, "an already-claimed attempt must return before anything is created");
+  assert.ok(create < link, "the link must follow the creation it links");
+  assert.match(fn, /if v_attempt\.subscription_id is not null then/);
+
+  // It calls the approved creator rather than copying subscription
+  // creation, so 022's atomicity and tax rules still apply unchanged.
+  assert.match(fn, /v_subscription_id := public\.create_pending_subscription\(/);
+  assert.ok(!/insert into public\.subscriptions|insert into public\.subscription_items/.test(fn),
+    "the claim must not reimplement subscription creation");
+});
+
+test("atomic claim: the RPC refuses another user's attempt and a one-time attempt", () => {
+  const fn = migration025Sql.slice(
+    migration025Sql.indexOf("create or replace function public.claim_pending_subscription_for_attempt"),
+    migration025Sql.indexOf("revoke all on function")
+  );
+  // A subscription created against somebody else's attempt would be
+  // billed to the wrong person.
+  assert.match(fn, /if v_attempt\.user_id is distinct from p_user_id then/);
+  assert.match(fn, /does not belong to this user/);
+  // A NULL fingerprint means the attempt came from the one-time payment
+  // flow, which was never priced as a subscription.
+  assert.match(fn, /if v_attempt\.subscription_request_fingerprint is null then/);
+  assert.match(fn, /is not a subscription checkout/);
+  assert.match(fn, /if v_attempt\.status = 'paid' then/);
+  assert.match(fn, /raise exception 'checkout attempt % not found'/);
+});
+
+test("atomic claim: the claim contract yields one subscription for two concurrent callers", () => {
+  // An executable model of the SQL above: a lock that serialises, a
+  // check, and a create only when the check found nothing. This proves
+  // the CONTRACT the function encodes; it does not execute PostgreSQL.
+  // See the honesty note in the final report - no database was available
+  // to run the real thing.
+  let row = { subscription_id: null };
+  let created = 0;
+  const claim = () => {
+    // select ... for update: callers are serialised on this row, and the
+    // second one reads the version the first one committed.
+    if (row.subscription_id !== null) return row.subscription_id;
+    created += 1;
+    row = { subscription_id: `sub_${created}` };
+    return row.subscription_id;
+  };
+
+  const first = claim();
+  const second = claim();
+
+  assert.equal(created, 1, "two concurrent callers created two subscriptions");
+  assert.equal(first, second, "the callers must receive the same subscription id");
+  assert.equal(row.subscription_id, first, "the attempt must own the one that was returned");
 });
 
 /* ── Z, AA. Idempotency ─────────────────────────────────────── */
@@ -479,8 +612,9 @@ test("idempotency: an identical retry converges instead of creating a second of 
   // The attempt is the anchor and is upserted with ignoreDuplicates, so a
   // retry gets the ORIGINAL frozen snapshot back rather than a repriced one.
   assert.match(attemptsLib, /onConflict: "request_id", ignoreDuplicates: true/);
-  // A subscription is only created when the attempt has none.
-  assert.match(flowCode, /let subscriptionId = attempt\.subscription_id;\s*if \(!subscriptionId\) \{/);
+  // The subscription decision is ONE database call, not a read followed
+  // by a write with a window between them.
+  assert.match(flowCode, /const claimed = await deps\.claimSubscription\(/);
   // And the Stripe session uses one deterministic key per attempt.
   assert.equal(subscriptionCheckoutIdempotencyKey("abc"), "gloa-sub-checkout-abc");
   assert.equal(
@@ -502,30 +636,154 @@ test("idempotency: the Checkout Session creation receives the deterministic key"
   assert.ok(!/idempotencyKey: `?\$\{?requestId/.test(flowCode));
 });
 
-test("idempotency: a request id reused with a different snapshot fails closed", () => {
-  const expected = { userId: USER_ID, variantId: VARIANT_ID, totalGrossCents: 2589, country: "DE" };
-  const matching = {
-    user_id: USER_ID,
-    expected_total_gross_cents: 2589,
-    shipping_country: "DE",
-    items_snapshot: [{ variantId: VARIANT_ID, quantity: 1 }],
-  };
-  assert.equal(attemptMatchesRequest(matching, expected), true);
+/* -- 18. Exact retry identity -------------------------------- */
 
-  // A token is an idempotency token, never commercial authority.
-  assert.equal(attemptMatchesRequest({ ...matching, user_id: UUID(9) }, expected), false, "another user's attempt was adopted");
-  assert.equal(attemptMatchesRequest({ ...matching, user_id: null }, expected), false);
-  assert.equal(attemptMatchesRequest({ ...matching, expected_total_gross_cents: 1999 }, expected), false, "a cheaper total was accepted");
-  assert.equal(attemptMatchesRequest({ ...matching, shipping_country: "AT" }, expected), false);
-  assert.equal(attemptMatchesRequest({ ...matching, items_snapshot: [{ variantId: UUID(8), quantity: 1 }] }, expected), false);
-  assert.equal(attemptMatchesRequest({ ...matching, items_snapshot: [] }, expected), false);
-  assert.equal(attemptMatchesRequest({
-    ...matching,
-    items_snapshot: [{ variantId: VARIANT_ID, quantity: 1 }, { variantId: UUID(8), quantity: 1 }],
-  }, expected), false);
-
-  assert.match(flowCode, /if \(!attemptMatchesRequest\(attempt, \{/);
+test("fingerprint: the same exact request produces the same digest", () => {
+  const a = subscriptionRequestFingerprint(baseIntent());
+  const b = subscriptionRequestFingerprint(baseIntent());
+  assert.equal(a, b);
+  assert.match(a, /^[0-9a-f]{64}$/, "a sha-256 hex digest");
+  assert.equal(attemptMatchesFingerprint(a, b), true);
+  assert.match(flowCode, /if \(!attemptMatchesFingerprint\(attempt\.subscription_request_fingerprint, fingerprint\)\)/);
   assert.match(flowCode, /return fail\(409, "Diese Anfrage-ID gehört zu einem anderen Vorgang\."\)/);
+});
+
+test("fingerprint: a NULL or empty stored fingerprint is refused, not waved through", () => {
+  const fp = subscriptionRequestFingerprint(baseIntent());
+  // A one-time payment attempt has no subscription intent, and reaching
+  // one is as easy as sending a request_id that already exists.
+  assert.equal(attemptMatchesFingerprint(null, fp), false);
+  assert.equal(attemptMatchesFingerprint(undefined, fp), false);
+  assert.equal(attemptMatchesFingerprint("", fp), false);
+  assert.equal(attemptMatchesFingerprint("something-else", fp), false);
+  // The database refuses it too, so the guarantee does not rest on the
+  // application remembering to check.
+  assert.match(migration025Sql, /if v_attempt\.subscription_request_fingerprint is null then/);
+});
+
+test("fingerprint: a different user, plan or address cannot share one request id", () => {
+  const base = subscriptionRequestFingerprint(baseIntent());
+  assert.notEqual(base, subscriptionRequestFingerprint({ ...baseIntent(), userId: UUID(9) }), "another user");
+  assert.notEqual(base, subscriptionRequestFingerprint({ ...baseIntent(), planId: UUID(9) }), "another plan");
+  assert.notEqual(base, subscriptionRequestFingerprint({ ...baseIntent(), addressId: UUID(9) }), "another address");
+});
+
+test("fingerprint: two different addresses in the SAME country are different intents", () => {
+  // The previous check compared only the destination country. Two Berlin
+  // addresses are both DE and are two different delivery intents.
+  const otherBerlin = savedAddress({ street: "Andere Strasse", house_number: "5", zip: "10999" });
+  const sameCountryOtherAddress = {
+    ...baseIntent(),
+    addressId: UUID(9),
+    addressDigest: digestOf(otherBerlin),
+  };
+  assert.equal(sameCountryOtherAddress.shippingCountry, baseIntent().shippingCountry, "both must be DE");
+  assert.notEqual(
+    subscriptionRequestFingerprint(baseIntent()),
+    subscriptionRequestFingerprint(sameCountryOtherAddress),
+    "two Berlin addresses shared one request id"
+  );
+});
+
+test("fingerprint: editing the CONTENTS of the same saved address is a different intent", () => {
+  // addressId is unchanged; the street is not. Binding only the id would
+  // let one request id cover two different streets, and the retry would
+  // create a subscription delivered somewhere the first request never
+  // described.
+  const edited = savedAddress({ street: "Umgezogen", house_number: "7", zip: "20095", city: "Hamburg" });
+  const afterEdit = { ...baseIntent(), addressDigest: digestOf(edited) };
+  assert.equal(afterEdit.addressId, baseIntent().addressId, "the address id is deliberately unchanged");
+  assert.notEqual(
+    subscriptionRequestFingerprint(baseIntent()),
+    subscriptionRequestFingerprint(afterEdit),
+    "an edited address was treated as the same delivery intent"
+  );
+  // A recipient rename counts too: the name is frozen onto the shipping
+  // snapshot, so changing it changes what would have been frozen.
+  assert.notEqual(ADDRESS_DIGEST_A, digestOf(savedAddress({ last_name: "Andere" })));
+  assert.notEqual(ADDRESS_DIGEST_A, digestOf(savedAddress({ company: "Firma" })));
+});
+
+test("fingerprint: a different product, amount or shipping is a different intent", () => {
+  const base = subscriptionRequestFingerprint(baseIntent());
+  const varied = [
+    ["another variant", { variantId: UUID(9) }],
+    ["another price", { subtotalGrossCents: 2199, totalGrossCents: 2789 }],
+    ["another shipping amount", { shippingGrossCents: 0, totalGrossCents: 1999 }],
+    ["another zone", { shippingZone: "eu" }],
+    ["another country", { shippingCountry: "AT" }],
+    ["another currency", { currency: "CHF" }],
+    ["another tax total", { taxTotalCents: 200 }],
+    ["another tax version", { taxCalculationVersion: "de-2027.1" }],
+    ["another treatment", { taxTreatment: "de_origin_intra_eu" }],
+  ];
+  for (const [label, overrides] of varied) {
+    assert.notEqual(base, subscriptionRequestFingerprint({ ...baseIntent(), ...overrides }), label);
+  }
+});
+
+test("fingerprint: EVERY declared field actually changes the digest", () => {
+  // Guards against a field being listed in the contract but silently
+  // dropped from the serialisation.
+  const base = subscriptionRequestFingerprint(baseIntent());
+  for (const field of FINGERPRINT_FIELDS) {
+    const mutated = { ...baseIntent() };
+    mutated[field] = typeof mutated[field] === "number" ? mutated[field] + 1 : `${mutated[field]}-changed`;
+    assert.notEqual(subscriptionRequestFingerprint(mutated), base, `${field} does not affect the fingerprint`);
+  }
+  assert.equal(FINGERPRINT_FIELDS.length, Object.keys(baseIntent()).length, "the contract and the intent disagree");
+});
+
+test("fingerprint: the canonical order is the declared array, not JS key order", () => {
+  const forward = baseIntent();
+  const reversed = {};
+  for (const key of Object.keys(forward).reverse()) reversed[key] = forward[key];
+  assert.notDeepEqual(Object.keys(forward), Object.keys(reversed), "the two objects must differ in key order");
+  assert.equal(
+    subscriptionRequestFingerprint(forward),
+    subscriptionRequestFingerprint(reversed),
+    "the digest depends on JavaScript property order"
+  );
+  assert.equal(FINGERPRINT_VERSION, "gloa-sub-fp-1");
+});
+
+test("fingerprint: nothing personal survives into the stored value", () => {
+  const fp = subscriptionRequestFingerprint(baseIntent());
+  for (const leak of ["Teststra", "Berlin", "10115", "Test", "Kundin", "@", "Deutschland"]) {
+    assert.ok(!fp.includes(leak), `the fingerprint leaks ${leak}`);
+  }
+  assert.match(ADDRESS_DIGEST_A, /^[0-9a-f]{64}$/);
+  // The flow hashes the address before building the fingerprint, so no
+  // raw address value is ever an input to the stored column.
+  assert.match(flowCode, /addressDigest: subscriptionAddressDigest\(addressSnapshot\)/);
+  assert.match(withoutComments(read("lib/subscriptionCheckoutRules.ts")), /createHash\("sha256"\)/);
+  // And the value itself is never logged.
+  assert.ok(!/console\.error\([^)]*\$\{fingerprint\}/.test(flowCode), "the fingerprint value reaches a log line");
+});
+
+/* -- 14. A retry never re-freezes an existing subscription ---- */
+
+test("retry: an existing subscription is reused untouched, not rebuilt from current data", () => {
+  // The RPC returns early on an already-claimed attempt, so nothing is
+  // recomputed into it: not the catalog price, not shipping, not tax and
+  // not the address.
+  const fn = migration025Sql.slice(
+    migration025Sql.indexOf("create or replace function public.claim_pending_subscription_for_attempt"),
+    migration025Sql.indexOf("revoke all on function")
+  );
+  assert.match(fn, /if v_attempt\.subscription_id is not null then\s*return v_attempt\.subscription_id;/);
+  assert.ok(!/update public\.subscriptions|update public\.subscription_items/.test(fn),
+    "the claim mutates an existing subscription");
+
+  // And once the attempt exists, the flow prices from the FROZEN
+  // snapshot rather than from this request's fresh quote, so a
+  // display-only catalog edit between a request and its retry cannot
+  // change what gets frozen either.
+  assert.match(flowCode, /identifier: frozenItem\.sku/);
+  assert.match(flowCode, /unitAmountCents: frozenItem\.unitGrossCents/);
+  assert.match(flowCode, /unitAmountCents: frozenShippingGrossCents/);
+  assert.match(flowCode, /taxSnapshot: frozenTaxSnapshot/);
+  assert.match(flowCode, /items: frozenItems/);
 });
 
 /* ── AB, AC, AD, AE, AG, AH. The Stripe session ─────────────── */
@@ -632,19 +890,84 @@ test("migrations: 025 is the only new one and 022-024 are untouched", () => {
   assert.match(read("supabase/migrations/022_recurring_subscription_foundation.sql"), /create table public\.stripe_customers \(/);
 });
 
-test("migrations: 025 adds only the audited minimum grant", () => {
-  const sql = withoutComments(migration025).split(NEWLINE).filter(l => l.trim()).join(NEWLINE);
-  assert.equal(sql.trim(), "grant select on table public.b2c_subscription_plans to service_role;");
+test("migrations: 025 grants exactly the audited minimum and widens nothing", () => {
+  const statements = migration025Sql.split(";").map(x => x.trim()).filter(Boolean);
+
+  // The plan grant migration 024 promised, unchanged.
+  assert.ok(
+    statements.some(x => x === "grant select on table public.b2c_subscription_plans to service_role"),
+    "the plan grant must survive the 29D-D.1 expansion"
+  );
 
   // Nothing widened, nothing else touched.
-  assert.ok(!/to anon/.test(sql), "anon was granted something");
-  assert.ok(!/alter default privileges/i.test(withoutComments(migration025)));
-  for (const forbidden of ["insert", "update", "delete", "truncate", "references", "trigger"]) {
-    assert.ok(!new RegExp(`grant[^;]*\\b${forbidden}\\b`, "i").test(sql), `025 grants ${forbidden}`);
-  }
-  assert.ok(!/create policy|drop policy|alter policy|row level security/i.test(sql), "025 changes the RLS model");
-  // And explicitly NOT a blanket read over personal data.
-  assert.ok(!/public\.addresses|public\.profiles/.test(sql), "025 grants access to personal data");
+  assert.ok(!/to anon/.test(migration025Sql), "anon was granted something");
+  assert.ok(!/alter default privileges/i.test(migration025Sql), "025 changes schema-wide default privileges");
+  assert.ok(!/create policy|drop policy|alter policy|row level security/i.test(migration025Sql),
+    "025 changes the RLS model");
+  assert.ok(!/owner to|to postgres/i.test(migration025Sql), "025 touches owner privileges");
+  // No table grant beyond the one plan SELECT, and in particular no
+  // blanket server read over personal data.
+  const tableGrants = [...migration025Sql.matchAll(/grant\s+([a-z, ]+?)\s+on table (\S+) to ([^;]+)/gi)];
+  assert.equal(tableGrants.length, 1, "025 must grant on exactly one table");
+  assert.equal(tableGrants[0][1].trim(), "select");
+  assert.equal(tableGrants[0][2], "public.b2c_subscription_plans");
+  assert.equal(tableGrants[0][3].trim(), "service_role");
+  assert.ok(!/public\.addresses|public\.profiles/.test(migration025Sql), "025 grants access to personal data");
+
+  // The only schema change is the fingerprint column: nullable, no
+  // default, so every historical one-time attempt stays valid.
+  const alters = [...migration025Sql.matchAll(/alter table (\S+)\s+add column (\S+) (\S+)/gi)];
+  assert.equal(alters.length, 1, "025 must add exactly one column");
+  assert.deepEqual(
+    [alters[0][1], alters[0][2], alters[0][3].replace(";", "")],
+    ["public.checkout_attempts", "subscription_request_fingerprint", "text"]
+  );
+  assert.ok(!/subscription_request_fingerprint text[^;]*(not null|default)/i.test(migration025Sql),
+    "the new column must be nullable with no default");
+  assert.ok(!/update public\.checkout_attempts\s+set subscription_request_fingerprint/i.test(migration025Sql),
+    "025 must not backfill historical attempts");
+});
+
+test("migrations: the new RPC is server-only, definer-scoped and search-path pinned", () => {
+  assert.match(migration025Sql, /create or replace function public\.claim_pending_subscription_for_attempt\(/);
+  assert.match(migration025Sql, /security definer set search_path = ''/);
+  assert.match(migration025Sql, /language plpgsql/);
+
+  // Revoked from PUBLIC first: a function is executable by PUBLIC by
+  // default, so granting service_role alone would leave the browser roles
+  // able to create subscriptions.
+  assert.match(migration025Sql, /revoke all on function public\.claim_pending_subscription_for_attempt\([\s\S]*?\) from public, anon, authenticated;/);
+  assert.match(migration025Sql, /grant execute on function public\.claim_pending_subscription_for_attempt\([\s\S]*?\) to service_role;/);
+  assert.ok(
+    migration025Sql.indexOf("revoke all on function") < migration025Sql.indexOf("grant execute on function"),
+    "the revoke must precede the grant"
+  );
+  // The same shape migration 022 uses for its two RPCs.
+  const m022 = read("supabase/migrations/022_recurring_subscription_foundation.sql");
+  assert.match(m022, /security definer set search_path = ''/);
+
+  // Only the service role is ever named as a grantee for it.
+  const executeGrants = [...migration025Sql.matchAll(/grant execute on function[\s\S]*?to (\w+);/g)].map(m => m[1]);
+  assert.deepEqual(executeGrants, ["service_role"]);
+});
+
+test("migrations: 026 was not created and 022-024 are untouched", () => {
+  const files = readdirSync(MIGRATIONS).filter(n => n.endsWith(".sql")).sort();
+  assert.equal(files.filter(n => n.startsWith("026")).length, 0, "migration 026 must not exist");
+  assert.deepEqual(files.filter(n => n.startsWith("025")), ["025_grant_subscription_plans_service_role.sql"]);
+
+  const m024 = read("supabase/migrations/024_seed_b2c_subscription_plans.sql");
+  assert.match(m024, /revoke all privileges on table public\.b2c_subscription_plans\s+from anon, authenticated, service_role;/);
+  assert.match(m024, /grant select on table public\.b2c_subscription_plans to authenticated;/);
+  assert.match(m024, /existing B2C subscription plan data requires manual review/);
+  const m022 = read("supabase/migrations/022_recurring_subscription_foundation.sql");
+  assert.match(m022, /create or replace function public\.create_pending_subscription\(/);
+  assert.match(m022, /create table public\.stripe_customers \(/);
+  const m023 = read("supabase/migrations/023_harden_stripe_customers_grants.sql");
+  assert.match(m023, /grant select, insert, update on table public\.checkout_attempts to service_role;/);
+  // 025 does not re-grant anything on checkout_attempts: 023 owns that.
+  assert.ok(!/grant[^;]*on table public\.checkout_attempts/i.test(migration025Sql),
+    "025 changes the checkout_attempts privilege model");
 });
 
 /* ── AP, AQ. The tests themselves ───────────────────────────── */

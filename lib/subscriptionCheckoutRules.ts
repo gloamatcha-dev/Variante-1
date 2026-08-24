@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type Stripe from "stripe";
 
 /**
@@ -310,38 +311,144 @@ export function buildSubscriptionLineItems(input: {
   return lineItems;
 }
 
-/* ── Retry safety ───────────────────────────────────────────── */
+/* ── Retry identity ─────────────────────────────────────────── */
 
-/** The minimum an existing attempt must expose for the check below. */
-export type AttemptFingerprintSource = {
-  user_id: string | null;
-  expected_total_gross_cents: number;
-  shipping_country: string | null;
-  items_snapshot: { variantId: string; quantity: number }[];
+/**
+ * Bumped whenever the field list or the serialisation below changes in a
+ * way that would produce a different digest for the same intent. An old
+ * attempt then simply stops matching, which fails closed and asks for a
+ * new checkout rather than silently comparing two different things.
+ */
+export const FINGERPRINT_VERSION = "gloa-sub-fp-1";
+
+/**
+ * The canonical field order, stated explicitly.
+ *
+ * The contract is this array, NOT the property order of whatever object
+ * a caller happens to build. JavaScript preserves insertion order for
+ * string keys, which makes it look safe to serialise an object directly
+ * and makes it silently wrong the day two call sites construct their
+ * fields in a different sequence.
+ */
+export const FINGERPRINT_FIELDS = Object.freeze([
+  "userId",
+  "planId",
+  "addressId",
+  "addressDigest",
+  "variantId",
+  "quantity",
+  "currency",
+  "shippingCountry",
+  "shippingZone",
+  "shippingGrossCents",
+  "subtotalGrossCents",
+  "totalGrossCents",
+  "taxCalculationVersion",
+  "taxTreatment",
+  "taxTotalCents",
+] as const);
+
+/**
+ * ASCII unit separator, written as an escape so no invisible control
+ * character sits in the source. None of the hashed values can contain
+ * one, so two different field lists cannot concatenate into the same
+ * string the way an empty or a common separator would allow.
+ */
+const FIELD_SEPARATOR = "\u001f";
+
+function digest(parts: string[]): string {
+  return createHash("sha256").update(parts.join(FIELD_SEPARATOR), "utf8").digest("hex");
+}
+
+/**
+ * A digest of WHERE this subscription is to be delivered.
+ *
+ * It exists because a saved address can be edited between a request and
+ * its retry. Binding only the addressId would let one request id cover
+ * two different streets: the retry would create a subscription delivered
+ * somewhere the original request never described. Binding the contents
+ * makes an edited address a different intent, which fails closed and asks
+ * for a new checkout.
+ *
+ * It is a digest rather than the values because comparison is the only
+ * thing anyone needs from it. The result goes into a database column and
+ * into no log line, and it cannot be read back into an address.
+ *
+ * The recipient name is included deliberately: it is part of the shipping
+ * snapshot that gets frozen onto the subscription, so a change to it is a
+ * change to what would have been frozen.
+ */
+export function subscriptionAddressDigest(snapshot: SubscriptionAddressSnapshot): string {
+  return digest([
+    FINGERPRINT_VERSION,
+    "addr",
+    snapshot.name ?? "",
+    snapshot.company ?? "",
+    snapshot.line1 ?? "",
+    snapshot.line2 ?? "",
+    snapshot.postalCode ?? "",
+    snapshot.city ?? "",
+    snapshot.state ?? "",
+    snapshot.country ?? "",
+  ]);
+}
+
+export type SubscriptionRequestIntent = {
+  userId: string;
+  planId: string;
+  addressId: string;
+  /** From subscriptionAddressDigest. Never the raw address. */
+  addressDigest: string;
+  variantId: string;
+  quantity: number;
+  currency: string;
+  shippingCountry: string;
+  shippingZone: string;
+  shippingGrossCents: number;
+  subtotalGrossCents: number;
+  totalGrossCents: number;
+  taxCalculationVersion: string;
+  taxTreatment: string;
+  taxTotalCents: number;
 };
 
 /**
- * Whether an existing attempt is really a retry of this request.
+ * The fingerprint of one exact subscription checkout intent.
  *
- * A request_id is an idempotency token, never commercial authority. If
- * the same token comes back with a different customer, a different
- * product or a different total, that is not a retry: it is either a bug
- * or an attempt to attach a cheaper snapshot to somebody else's
- * subscription. Either way it fails closed rather than being quietly
- * accepted, and rather than the attempt being quietly repriced.
+ * A request_id is an idempotency token, never commercial authority. This
+ * is what makes "the same request" a checkable claim rather than a
+ * convention: the same token arriving with a different customer, a
+ * different plan, a different saved address, a different address CONTENT,
+ * a different product or a different priced amount produces a different
+ * digest, and the flow refuses it.
+ *
+ * The destination country alone was the previous check and it was not
+ * enough. Two Berlin addresses are both DE and are two different delivery
+ * intents.
+ *
+ * Nothing personal survives into the stored value: the address is already
+ * reduced to a digest before it gets here, and no email, name or token is
+ * an input.
  */
-export function attemptMatchesRequest(
-  attempt: AttemptFingerprintSource,
-  expected: { userId: string; variantId: string; totalGrossCents: number; country: string }
+export function subscriptionRequestFingerprint(intent: SubscriptionRequestIntent): string {
+  // Ordered by the exported contract, not by the object's own key order.
+  const parts = FINGERPRINT_FIELDS.map(field => String(intent[field]));
+  return digest([FINGERPRINT_VERSION, "intent", ...parts]);
+}
+
+/**
+ * Whether an existing attempt is really a retry of THIS request.
+ *
+ * A NULL stored fingerprint is refused rather than treated as "no
+ * objection". It means the attempt was created by the one-time payment
+ * flow, and starting a subscription on one would attach a recurring
+ * charge to a snapshot that was never priced for it - which is reachable
+ * simply by sending a request_id that already exists.
+ */
+export function attemptMatchesFingerprint(
+  storedFingerprint: string | null | undefined,
+  computedFingerprint: string
 ): boolean {
-  if (attempt.user_id !== expected.userId) return false;
-  if (attempt.expected_total_gross_cents !== expected.totalGrossCents) return false;
-  if (attempt.shipping_country !== expected.country) return false;
-
-  const items = Array.isArray(attempt.items_snapshot) ? attempt.items_snapshot : [];
-  if (items.length !== 1) return false;
-  if (items[0].variantId !== expected.variantId) return false;
-  if (items[0].quantity !== SUBSCRIPTION_QUANTITY) return false;
-
-  return true;
+  if (typeof storedFingerprint !== "string" || storedFingerprint.length === 0) return false;
+  return storedFingerprint === computedFingerprint;
 }

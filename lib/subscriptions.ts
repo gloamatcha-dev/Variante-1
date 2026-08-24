@@ -72,6 +72,8 @@ export function buildPlanSnapshot(plan: SubscriptionPlanRow, sku: string): Subsc
 }
 
 export type CreatePendingSubscriptionInput = {
+  /** The attempt that owns this subscription. The claim serialises on it. */
+  checkoutAttemptId: string;
   userId: string;
   planId: string;
   planSnapshot: SubscriptionPlanSnapshot;
@@ -87,7 +89,18 @@ export type CreatePendingSubscriptionResult =
   | { ok: false; reason: string };
 
 /**
- * Calls the RPC and returns the new subscription's id.
+ * Atomically returns the ONE subscription belonging to a checkout
+ * attempt, creating it only if the attempt does not have one yet.
+ *
+ * One RPC, one transaction, and the decision is made under a row lock on
+ * the checkout attempt. That matters because the obvious application-side
+ * shape - read subscription_id, create, link - has a window between the
+ * read and the link in which a second concurrent request reads the same
+ * NULL and creates a second subscription. Only one could win the link and
+ * the loser's row was left unreferenced. A second SELECT, a retry loop or
+ * an in-process mutex would each narrow that window without closing it,
+ * and none of them work across server instances at all, so the claim is
+ * the database's job.
  *
  * The money columns are NOT passed: the function derives every total from
  * the tax snapshot, for the same reason the order RPC does. Two copies of
@@ -97,14 +110,20 @@ export type CreatePendingSubscriptionResult =
  * than a technicality. A destination whose VAT this build does not
  * implement cannot become a subscription at all, because the shop cannot
  * bill something every four weeks that it cannot tax.
+ *
+ * A retry whose attempt already owns a subscription gets that
+ * subscription back untouched. Nothing is re-frozen from current catalog,
+ * shipping, tax or address data: the existing row is what that request
+ * agreed to, and a genuinely new checkout needs a new request id.
  */
-export async function createPendingSubscription(
+export async function claimPendingSubscriptionForAttempt(
   input: CreatePendingSubscriptionInput
 ): Promise<CreatePendingSubscriptionResult> {
   const admin = getSupabaseAdmin();
   if (!admin) return { ok: false, reason: "supabase admin client is not configured" };
 
-  const { data, error } = await admin.rpc("create_pending_subscription", {
+  const { data, error } = await admin.rpc("claim_pending_subscription_for_attempt", {
+    p_checkout_attempt_id: input.checkoutAttemptId,
     p_user_id: input.userId,
     p_plan_id: input.planId,
     p_plan_snapshot: input.planSnapshot,
@@ -116,8 +135,8 @@ export async function createPendingSubscription(
   });
 
   if (error || !data) {
-    console.error("create_pending_subscription failed:", error?.message ?? "no id returned");
-    return { ok: false, reason: "pending subscription could not be created" };
+    console.error("claim_pending_subscription_for_attempt failed:", error?.message ?? "no id returned");
+    return { ok: false, reason: "pending subscription could not be claimed" };
   }
 
   const subscriptionId = typeof data === "string" ? data : String(data);

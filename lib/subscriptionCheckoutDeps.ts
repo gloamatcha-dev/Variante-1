@@ -3,12 +3,8 @@ import { getSiteOrigin } from "./siteUrl";
 import { verifyBearerUser } from "./verifyUser";
 import { getSupabaseAsUser, resolveLaunchPlanById } from "./subscriptionPlans";
 import { buildAuthoritativeQuote } from "./checkoutQuote";
-import {
-  attachSubscriptionToAttempt,
-  getOrCreateSubscriptionCheckoutAttempt,
-  linkStripeSession,
-} from "./checkoutAttempts";
-import { createPendingSubscription } from "./subscriptions";
+import { getOrCreateSubscriptionCheckoutAttempt, linkStripeSession } from "./checkoutAttempts";
+import { claimPendingSubscriptionForAttempt } from "./subscriptions";
 import { getOrCreateStripeCustomer } from "./stripeCustomers";
 import { getOrCreateRecurringPrice } from "./stripeRecurringPrice";
 import {
@@ -73,7 +69,6 @@ export const defaultSubscriptionCheckoutDeps: SubscriptionCheckoutDeps = {
   ensureStripeCustomer: getOrCreateStripeCustomer,
   ensureRecurringPrice: getOrCreateRecurringPrice,
   ensureAttempt: getOrCreateSubscriptionCheckoutAttempt,
-  createSubscription: createPendingSubscription,
-  attachSubscription: attachSubscriptionToAttempt,
+  claimSubscription: claimPendingSubscriptionForAttempt,
   linkSession: linkStripeSession,
 };
