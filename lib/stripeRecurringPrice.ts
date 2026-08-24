@@ -48,6 +48,27 @@ export function recurringPriceLookupKey(kind: "sku" | "shipping", identifier: st
   return `gloa-${kind}-${slug}-${unitAmountCents}-w${SUBSCRIPTION_INTERVAL_COUNT}`;
 }
 
+/**
+ * The Stripe idempotency key for creating one recurring Price.
+ *
+ * Derived from the lookup key and nothing else, so two requests that want
+ * the same Price send the same key. Without it, a lost race and a
+ * timed-out-but-successful request both reach `prices.create` a second
+ * time; the duplicate is rejected on the lookup key, but `product_data`
+ * means each attempt also asks Stripe to mint a Product, and whether a
+ * rejected create discards it is not something the API contract promises.
+ * With the key, the second request replays the first one's response
+ * instead of attempting anything, so there is no second Product to
+ * orphan.
+ *
+ * The lookup key holds a SKU or a shipping zone and an amount in cents.
+ * No user id, no email, no name, no address, no secret - an idempotency
+ * key is echoed in Stripe's logs and is not a place for personal data.
+ */
+export function recurringPriceIdempotencyKey(lookupKey: string): string {
+  return `gloa-price-${lookupKey}`;
+}
+
 export type RecurringPriceResult =
   | { ok: true; priceId: string; lookupKey: string; created: boolean }
   | { ok: false; reason: string };
@@ -71,7 +92,20 @@ type RecurringPriceInput = {
  * archived price is never resurrected. A create that loses a race against
  * a concurrent identical create fails on the unique lookup_key, and the
  * second lookup adopts the winner - the same shape as every other
- * get-or-create in this codebase.
+ * get-or-create in this codebase. The deterministic idempotency key makes
+ * that race rarer still: the second request replays the first one's
+ * response rather than attempting a create of its own.
+ *
+ * A found price is checked against everything that decides what the
+ * customer is charged: amount, cadence, usage type, billing scheme and
+ * currency. Any mismatch fails closed rather than billing something
+ * nobody asked for.
+ *
+ * What is deliberately NOT checked is which Product the price hangs off.
+ * The Product is created inline here and its id is not derivable from the
+ * lookup key, so there is no expected value to compare against; the
+ * product name is invoice display text, not a billing term. Everything
+ * that determines the amount is verified above.
  */
 export async function getOrCreateRecurringPrice(
   stripe: Stripe,
@@ -102,6 +136,21 @@ export async function getOrCreateRecurringPrice(
         || found.recurring?.interval_count !== SUBSCRIPTION_INTERVAL_COUNT) {
         return { ok: false, reason: `price ${found.id} is not billed every ${SUBSCRIPTION_INTERVAL_COUNT} ${SUBSCRIPTION_INTERVAL}s` };
       }
+      // Matching amount and cadence is not the same as matching billing
+      // SEMANTICS. A metered price can carry this exact amount and this
+      // exact cadence and still bill on reported usage rather than on the
+      // quantity in the subscription, which for a box of matcha would
+      // invoice nothing at all. "licensed" is Stripe's default and the
+      // only thing this flow means.
+      if (found.recurring?.usage_type !== "licensed") {
+        return { ok: false, reason: `price ${found.id} has usage type ${found.recurring?.usage_type ?? "none"}, expected licensed` };
+      }
+      // Same argument for tiering: a tiered price computes the amount
+      // from quantity bands, so unit_amount above stops being the thing
+      // the customer pays.
+      if (found.billing_scheme !== "per_unit") {
+        return { ok: false, reason: `price ${found.id} uses billing scheme ${found.billing_scheme}, expected per_unit` };
+      }
       if (found.currency !== "eur") {
         return { ok: false, reason: `price ${found.id} is not in EUR` };
       }
@@ -113,23 +162,48 @@ export async function getOrCreateRecurringPrice(
   }
 
   try {
-    const price = await stripe.prices.create({
-      currency: "eur",
-      unit_amount: unitAmountCents,
-      recurring: { interval: SUBSCRIPTION_INTERVAL, interval_count: SUBSCRIPTION_INTERVAL_COUNT },
-      // Created inline the first time this amount is needed, so no Stripe
-      // dashboard product has to be maintained by hand.
-      product_data: { name: productName },
-      lookup_key: lookupKey,
-      metadata: { gloa_kind: kind, gloa_identifier: identifier },
-    });
+    const price = await stripe.prices.create(
+      {
+        currency: "eur",
+        unit_amount: unitAmountCents,
+        recurring: { interval: SUBSCRIPTION_INTERVAL, interval_count: SUBSCRIPTION_INTERVAL_COUNT },
+        // Created inline the first time this amount is needed, so no Stripe
+        // dashboard product has to be maintained by hand.
+        product_data: { name: productName },
+        lookup_key: lookupKey,
+        metadata: { gloa_kind: kind, gloa_identifier: identifier },
+      },
+      { idempotencyKey: recurringPriceIdempotencyKey(lookupKey) }
+    );
     return { ok: true, priceId: price.id, lookupKey, created: true };
   } catch (err) {
-    // A concurrent identical create wins on the unique lookup_key.
+    // Two different things reach here, and they need different answers.
     try {
+      // One: a concurrent identical create won on the unique lookup_key.
+      // Adopt the winner, which is the same shape as every other
+      // get-or-create in this codebase.
       const winner = await stripe.prices.list({ lookup_keys: [lookupKey], active: true, limit: 1 });
       if (winner.data[0]) {
         return { ok: true, priceId: winner.data[0].id, lookupKey, created: false };
+      }
+
+      // Two: nothing ACTIVE holds the key, so no race was lost - and yet
+      // the create failed. An archived price still holding the key is the
+      // way that happens, and the lookup above cannot see it, because it
+      // filters on active. Look again without that filter.
+      //
+      // If one is there, this stops. Reactivating it would resurrect a
+      // price that was retired for a reason, transfer_lookup_key would
+      // move the key off a price that existing subscriptions may still be
+      // billed on, and inventing a different key would quietly create a
+      // second Price for one product. All three are decisions about live
+      // billing, so this returns the fact and lets an operator make them.
+      const archived = await stripe.prices.list({ lookup_keys: [lookupKey], active: false, limit: 1 });
+      if (archived.data[0]) {
+        return {
+          ok: false,
+          reason: `inactive stripe price ${archived.data[0].id} holds lookup key ${lookupKey}; an operator must review it before a new price can be created`,
+        };
       }
     } catch {
       // fall through to the original failure

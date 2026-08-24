@@ -582,7 +582,15 @@ test("hardening: 023 owns its number and the live migrations are not edited", ()
     for (const owned of ["stripe_customers", "stripe_webhook_events", "stripe_invoice_id", "stripe_subscription_id"]) {
       assert.ok(!new RegExp(owned).test(later), `${name} touches ${owned}`);
     }
-    assert.ok(!/^\s*(grant|revoke)\s/im.test(later), `${name} changes privileges`);
+    // A later migration MAY harden its own table - 024 does exactly that
+    // for b2c_subscription_plans, for the same reason 023 existed. What
+    // it may not do is reach into a table 023 already put live. The three
+    // stripe_* names are banned outright above; checkout_attempts is the
+    // fourth table 023 owns, and it is only banned inside a grant or a
+    // revoke, since an unrelated migration may still reference it.
+    for (const statement of later.match(/^\s*(?:grant|revoke)[^;]*;/gim) ?? []) {
+      assert.ok(!/checkout_attempts/i.test(statement), `${name} changes privileges on checkout_attempts`);
+    }
   }
   // 022 is live, so it must keep the statements it was applied with.
   assert.match(sql, /grant select, insert on public\.stripe_customers to service_role;/);
