@@ -90,15 +90,21 @@ test("audit: Stripe is still one-time payment only", () => {
   }
 });
 
-test("audit: the plan table is still unseeded, so no interval can be offered", () => {
-  assert.match(subsSchema, /NO seed data/);
+test("audit: the only cadence the app names is the confirmed one", () => {
+  assert.match(subsSchema, /NO seed data/, "005 itself still seeds nothing; 024 does the seeding");
   assert.match(subsSchema, /delivery_interval_unit\s+text/);
-  // The app must not carry its own hardcoded cadence list instead.
+  // Migration 024 confirmed the launch cadence, so "alle 4 Wochen" is now
+  // a real term rather than an invention. Every OTHER cadence still is
+  // one, and "monatlich" is wrong by definition: a month is 28 to 31 days
+  // and would drift against a four-weekly delivery.
   for (const source of [portal, accountUi]) {
-    for (const fake of ["2 Wochen", "4 Wochen", "6 Wochen", "8 Wochen", "alle 4", "monatlich liefern"]) {
+    for (const fake of ["2 Wochen", "6 Wochen", "8 Wochen", "monatlich liefern", "alle 2", "alle 6"]) {
       assert.ok(!source.includes(fake), `an invented cadence appeared: ${fake}`);
     }
   }
+  // And what it does name matches what migration 024 actually seeded.
+  const seed = read("supabase/migrations/024_seed_b2c_subscription_plans.sql");
+  assert.match(seed, /'week',\s*4,\s*'week',\s*4,\s*true,/);
 });
 
 /* ── B2C subscriptions page ─────────────────────────────────── */
@@ -123,9 +129,12 @@ test("subscriptions: sizes and prices come from the catalog, never from a litera
 test("subscriptions: no subscription discount is promised, because none exists", () => {
   // The page states the absence of a discount, so "Rabatt" is allowed
   // exactly once, inside that sentence, and nowhere else.
-  const DISCLAIMER = "Für ein Abo ist kein gesonderter Preis und kein Rabatt hinterlegt.";
-  assert.ok(subsMarkup.includes(DISCLAIMER), "the page must say no subscription price exists");
-  const rest = subsMarkup.replace(DISCLAIMER, "");
+  // Compared with whitespace collapsed, because the sentence is wrapped
+  // across source lines in the JSX.
+  const flat = subsMarkup.replace(/\s+/g, " ");
+  const DISCLAIMER = "Preise wie im Shop, geliefert alle 4 Wochen. Für ein Abo ist kein gesonderter Preis und kein Rabatt hinterlegt.";
+  assert.ok(flat.includes(DISCLAIMER), "the page must say no subscription price exists");
+  const rest = flat.replace(DISCLAIMER, "");
   for (const fake of ["Abo-Rabatt", "Rabatt", "gratis", "kostenlos", "spare", "Spare", "Vorteil"]) {
     assert.ok(!rest.includes(fake), `an invented benefit appeared: ${fake}`);
   }
@@ -133,7 +142,12 @@ test("subscriptions: no subscription discount is promised, because none exists",
 });
 
 test("subscriptions: the page never claims an Abo can be started right now", () => {
-  assert.match(subsMarkup, /Abos sind noch nicht buchbar/);
+  // The cadence and the price are confirmed now, but the server route is
+  // gated shut until Task 29D-E handles invoice.paid, so the page still
+  // offers no way to start one.
+  // Whitespace-collapsed: the sentence wraps across source lines.
+  assert.match(subsMarkup.replace(/\s+/g, " "), /Buchbar sind Abos noch nicht/);
+  assert.ok(!/api\/subscriptions\/checkout/.test(subsMarkup), "a CTA calls the gated route");
   // No CTA that would have to do something it cannot do.
   assert.ok(!/ABO STARTEN/.test(subsMarkup), "a start button appeared without a backend");
   assert.ok(!/<form/.test(subsMarkup), "a booking form appeared without a backend");

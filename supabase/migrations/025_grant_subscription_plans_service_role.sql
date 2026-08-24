@@ -1,0 +1,111 @@
+-- ============================================================
+-- GLOA – The server may read subscription plans (Task 29D-D)
+-- Run in Supabase SQL Editor AFTER 024
+--
+-- Migration 024 hardened public.b2c_subscription_plans down to exactly
+-- one grant, authenticated SELECT, and said why service_role got nothing:
+--
+--   "Searched for, and there is no caller ... When Task 29D-D adds the
+--    server route that resolves a cadence from an active plan, THAT
+--    migration grants select to service_role, next to the code that
+--    needs it."
+--
+-- That caller now exists. lib/subscriptionPlans.ts reads one plan row
+-- through the service-role client on behalf of
+-- app/api/subscriptions/checkout/session/route.ts, which must resolve the
+-- cadence, the linked variant and the absence of a discount itself before
+-- anything is charged. This migration is the promised grant and nothing
+-- else.
+--
+-- WHY service_role AND NOT THE CUSTOMER'S OWN SESSION. The route already
+-- holds the customer's token and could have read the plan with it: the
+-- policy from 005 allows any authenticated user to select active plans.
+-- It deliberately does not. The plan decides the cadence and the billing
+-- terms, so the server resolves it as its own authority rather than
+-- through a filtered view that a policy edit could later narrow without
+-- anyone noticing. The plan table holds no personal data, so reading it
+-- with the service role exposes nothing about anybody.
+--
+-- The opposite choice was made for the customer's address and identity,
+-- and for the same reason read the other way round: those ARE personal
+-- data, one person's at a time. The route reads them through the
+-- customer's own authenticated session, so RLS confines the read to that
+-- customer's own rows. This migration therefore does NOT grant the server
+-- blanket read access to public.addresses or public.profiles, and must
+-- not be extended to do so.
+--
+-- SELECT only. The route never inserts, updates or deletes a plan: plans
+-- are seeded by migration and changed by a person, never by a checkout.
+-- No TRUNCATE, REFERENCES or TRIGGER, which is what 024 spent a whole
+-- section taking away.
+--
+-- Not done here, deliberately: no policy is created or altered, RLS stays
+-- enabled, authenticated keeps exactly the SELECT it already had, anon
+-- keeps nothing, nothing is granted to PUBLIC, the table owner is
+-- untouched, and schema-wide ALTER DEFAULT PRIVILEGES are left alone.
+--
+-- No row is read, written or deleted by this migration.
+-- ============================================================
+
+grant select on table public.b2c_subscription_plans to service_role;
+
+-- VERIFY ───────────────────────────────────────────────────────
+--
+-- Read-only. Run after applying.
+--
+-- (a) The intended end state, and the only change from 024's verify (g).
+--     Expected EXACTLY two rows:
+--
+--       b2c_subscription_plans | authenticated | SELECT
+--       b2c_subscription_plans | service_role  | SELECT
+--
+--     No anon row. No INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES or
+--     TRIGGER for anyone.
+--
+--   select table_name, grantee, privilege_type
+--   from information_schema.role_table_grants
+--   where table_schema = 'public' and table_name = 'b2c_subscription_plans'
+--     and grantee in ('anon', 'authenticated', 'service_role')
+--   order by grantee, privilege_type;
+--
+-- (b) The same question asked of the raw ACL, which would also reveal a
+--     grant to PUBLIC as a leading "=" entry. Expected: authenticated and
+--     service_role each holding only r, and no anon or PUBLIC entry.
+--
+--   select relname,
+--          coalesce(array_to_string(relacl, E'\n'), '(no explicit acl)') as acl
+--   from pg_class
+--   where relnamespace = 'public'::regnamespace
+--     and relname = 'b2c_subscription_plans';
+--
+-- (c) RLS and the policy are untouched by this migration. Expected:
+--     relrowsecurity true, and exactly the one SELECT policy from 005.
+--
+--   select relrowsecurity, relforcerowsecurity
+--   from pg_class where oid = 'public.b2c_subscription_plans'::regclass;
+--
+--   select policyname, cmd, roles, qual, with_check
+--   from pg_policies
+--   where schemaname = 'public' and tablename = 'b2c_subscription_plans';
+--
+-- (d) The personal-data tables did NOT gain a server-side read. Expected:
+--     no service_role row for either table.
+--
+--   select table_name, grantee, privilege_type
+--   from information_schema.role_table_grants
+--   where table_schema = 'public'
+--     and table_name in ('addresses', 'profiles')
+--     and grantee in ('anon', 'authenticated', 'service_role')
+--   order by table_name, grantee, privilege_type;
+--
+-- (e) The three launch plans are still exactly what 024 seeded, and the
+--     catalog still holds the only price. Expected: three rows, week | 4.
+--
+--   select p.slug, v.sku, v.price_gross_cents,
+--          p.billing_interval_unit, p.billing_interval_count,
+--          p.delivery_interval_unit, p.delivery_interval_count,
+--          p.discount_percent, p.commitment_months, p.is_active
+--   from public.b2c_subscription_plans p
+--   join public.product_variants v on v.id = p.variant_id
+--   where p.is_active
+--   order by p.sort_order;

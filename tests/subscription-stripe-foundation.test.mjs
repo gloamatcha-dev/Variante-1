@@ -296,26 +296,36 @@ test("grants: authenticated ends with exactly SELECT", () => {
   assert.match(planSchema, /grant select on public\.b2c_subscription_plans to authenticated;/);
 });
 
-test("grants: service_role ends with nothing, because no caller needs it yet", () => {
-  assert.deepEqual(grantedPrivileges("service_role"), [], "a privilege was granted without a caller");
-  // Audited rather than assumed: no file in lib/ or app/ queries the
-  // table. The only mention anywhere is a comment in AccountPortal.tsx
-  // explaining why no booking form exists yet, which is not a caller.
+test("grants: 024 grants service_role nothing, and 025 grants it exactly where a caller appeared", () => {
+  // 024 itself still grants service_role nothing: at that point there was
+  // no caller, and a privilege without a caller is a privilege nobody
+  // asked for.
+  assert.deepEqual(grantedPrivileges("service_role"), [], "024 granted a privilege without a caller");
+
+  // The caller Task 29D-D added, found the same way 024's audit looked
+  // for one. A comment mentioning the table is not a caller; a query is.
   const callers = [];
   const walk = d => {
     for (const entry of readdirSync(path.join(ROOT, d), { withFileTypes: true })) {
       const rel = path.join(d, entry.name);
       if (entry.isDirectory()) { walk(rel); continue; }
       if (!/\.(ts|tsx)$/.test(entry.name)) continue;
-      if (/\.from\(\s*["'`]b2c_subscription_plans["'`]\s*\)/.test(read(rel))) callers.push(rel);
+      if (/\.from\(\s*["'`]b2c_subscription_plans["'`]\s*\)/.test(read(rel))) callers.push(rel.replace(/\\/g, "/"));
     }
   };
   walk("lib");
   walk("app");
-  assert.deepEqual(callers, [], `a caller exists and needs an audited grant: ${callers.join(", ")}`);
-  // create_pending_subscription takes a plan_id but is security definer,
-  // so it acts with its owner's privileges - the same point 023 records
-  // about the order and activation functions.
+  assert.deepEqual(callers, ["lib/subscriptionPlans.ts"], "the set of plan-table callers changed unexpectedly");
+
+  // 024 promised that the grant would arrive with that caller, and 025 is
+  // where it did - SELECT only, and only on this table.
+  assert.match(seed, /THAT migration grants\s*--\s*select to service_role/);
+  const m025 = read("supabase/migrations/025_grant_subscription_plans_service_role.sql");
+  assert.match(m025, /grant select on table public\.b2c_subscription_plans to service_role;/);
+
+  // create_pending_subscription still needs no grant of its own: it is
+  // security definer, so it acts with its owner's privileges - the same
+  // point 023 records about the order and activation functions.
   const m022 = read("supabase/migrations/022_recurring_subscription_foundation.sql");
   assert.match(m022, /create or replace function public\.create_pending_subscription\([\s\S]*?security definer/);
 });
@@ -724,8 +734,15 @@ test("boundary: the one-time checkout is untouched", () => {
 
 test("boundary: the account page still makes no subscription promise", () => {
   const portal = read("app/AccountPortal.tsx");
-  assert.match(portal, /Abos sind noch nicht buchbar/);
+  // Task 29D-D confirmed the cadence, so the page may now state it. What
+  // it must still not do is offer a booking action: the server route is
+  // gated shut until Task 29D-E handles invoice.paid.
+  // Whitespace-collapsed: the sentence wraps across source lines.
+  assert.match(portal.replace(/\s+/g, " "), /Buchbar sind Abos noch nicht/);
+  assert.match(portal, /alle 4 Wochen/);
+  assert.ok(!/monatlich/i.test(portal.replace(/Monatlich",/g, "")), "the cadence must never be called monthly");
   assert.ok(!/ABO STARTEN/.test(portal), "no start button until the flow can complete");
+  assert.ok(!/api\/subscriptions\/checkout/.test(portal), "no client CTA may call the gated route yet");
 });
 
 test("boundary: shipping and tax rules are unchanged", () => {
@@ -757,10 +774,13 @@ test("boundary: no cancellation, pause, resume or modification is implemented", 
   }
 });
 
-test("boundary: the live migrations are untouched and 024 is the only new one", () => {
+test("boundary: the live migrations are untouched and 024 owns its number", () => {
   const files = readdirSync(MIGRATIONS).filter(n => n.endsWith(".sql")).sort();
-  assert.equal(files[files.length - 1], "024_seed_b2c_subscription_plans.sql");
-  assert.equal(files.filter(n => n.startsWith("025")).length, 0);
+  // 024 owns exactly one file. Task 29D-D added 025, which is allowed to
+  // exist; what must not happen is 024 being split, renumbered or edited
+  // now that it is live.
+  assert.deepEqual(files.filter(n => n.startsWith("024")), ["024_seed_b2c_subscription_plans.sql"]);
+  assert.ok(files.length <= 25, "an unexpected extra migration appeared");
   // 022 and 023 are live; their statements must still be exactly as applied.
   const m022 = read("supabase/migrations/022_recurring_subscription_foundation.sql");
   assert.match(m022, /create table public\.stripe_customers \(/);

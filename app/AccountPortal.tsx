@@ -992,21 +992,21 @@ function PortalSubscriptions() {
       ) : (
         <>
           {/*
-            Deliberately NOT a booking form. The subscriptions table has no
-            INSERT path for a client, b2c_subscription_plans ships without
-            rows because intervals and conditions are not confirmed, and
-            Stripe runs in one-time payment mode only. A start button here
-            would be a button that cannot start anything, so the page shows
-            what is real - the sizes and their actual prices - and the one
-            action that genuinely works today.
+            Still deliberately NOT a booking form. The cadence IS confirmed
+            now - every 4 weeks, and the three launch plans exist - but the
+            server route behind it is gated by B2C_SUBSCRIPTIONS_ENABLED
+            and stays closed until Task 29D-E handles invoice.paid. A start
+            button today would be a button that can only return 503, and it
+            could take a payment nothing would activate. So the page states
+            the confirmed terms and offers the one action that genuinely
+            works, exactly as before.
           */}
           <section className="portal-section">
             <AccountSectionHeader label="STATUS" />
             <AccountEmptyState>Du hast aktuell kein Abonnement.</AccountEmptyState>
             <p className="portal-note">
-              Abos sind noch nicht buchbar. Sobald Lieferintervalle und Konditionen feststehen,
-              kannst du dein Abo direkt hier starten. Bis dahin bestellst du deinen Matcha wie
-              gewohnt im Shop.
+              Geplant ist eine Lieferung alle 4 Wochen, zum normalen Shop-Preis. Buchbar sind
+              Abos noch nicht. Bis dahin bestellst du deinen Matcha wie gewohnt im Shop.
             </p>
           </section>
 
@@ -1029,7 +1029,8 @@ function PortalSubscriptions() {
                   ))}
                 </div>
                 <p className="portal-note">
-                  Preise wie im Shop. Für ein Abo ist kein gesonderter Preis und kein Rabatt hinterlegt.
+                  Preise wie im Shop, geliefert alle 4 Wochen. Für ein Abo ist kein gesonderter
+                  Preis und kein Rabatt hinterlegt.
                 </p>
                 <div className="portal-actions">
                   <Link href="/shop" className="portal-action">MATCHA BESTELLEN</Link>

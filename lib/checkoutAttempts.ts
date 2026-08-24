@@ -131,6 +131,152 @@ export async function linkStripeSession(attemptId: string, stripeCheckoutSession
   return false;
 }
 
+/* ── Subscription checkout attempts (Task 29D-D) ─────────────── */
+
+/**
+ * A checkout attempt that bills a subscription rather than a cart.
+ *
+ * Same table, same request_id idempotency, two extra columns from
+ * migration 022: user_id, which a subscription always has because the
+ * flow is authenticated, and subscription_id, the exact correlation to
+ * the local subscription this attempt is starting.
+ *
+ * Deliberately NOT a second idempotency table. The attempt is already the
+ * thing that freezes a priced snapshot before Stripe is contacted, and a
+ * subscription needs exactly that.
+ */
+export type SubscriptionCheckoutAttempt = CheckoutAttempt & {
+  user_id: string | null;
+  subscription_id: string | null;
+};
+
+const SUBSCRIPTION_ATTEMPT_COLUMNS = `${ATTEMPT_COLUMNS}, user_id, subscription_id`;
+
+export type SubscriptionAttemptInput = {
+  requestId: string;
+  userId: string;
+  currency: string;
+  items: CheckoutAttemptItemSnapshot[];
+  shipping: CheckoutAttemptShipping;
+  taxSnapshot: CartTaxSnapshot;
+  /** Merchandise + shipping, gross. What Stripe must charge per cycle. */
+  expectedTotalGrossCents: number;
+};
+
+export type SubscriptionAttemptResult =
+  | { ok: true; attempt: SubscriptionCheckoutAttempt }
+  | { ok: false; error: string };
+
+/**
+ * Gets or creates the checkout attempt for one subscription checkout
+ * request.
+ *
+ * ignoreDuplicates, exactly as the one-time flow: a retry of the same
+ * request_id returns the ORIGINAL frozen snapshot rather than overwriting
+ * it with a freshly recomputed one. That is what makes a double click
+ * safe and what stops a second request from quietly repricing an attempt
+ * the customer is already paying against. The unique constraint on
+ * request_id is the real race guard, not the select-then-insert order.
+ *
+ * subscription_id is deliberately not written here. It cannot be: the
+ * attempt is the idempotency anchor and therefore has to exist BEFORE the
+ * subscription, so that a retry finds the anchor instead of creating a
+ * second subscription. It is linked afterwards by
+ * attachSubscriptionToAttempt.
+ */
+export async function getOrCreateSubscriptionCheckoutAttempt(
+  input: SubscriptionAttemptInput
+): Promise<SubscriptionAttemptResult> {
+  const admin = getSupabaseAdmin();
+  if (!admin) {
+    return { ok: false, error: "Checkout-Speicherung vorübergehend nicht verfügbar." };
+  }
+
+  const { error: upsertError } = await admin
+    .from("checkout_attempts")
+    .upsert(
+      {
+        request_id: input.requestId,
+        user_id: input.userId,
+        currency: input.currency,
+        expected_total_gross_cents: input.expectedTotalGrossCents,
+        items_snapshot: input.items,
+        shipping_country: input.shipping.country,
+        shipping_zone: input.shipping.zone,
+        shipping_gross_cents: input.shipping.grossCents,
+        tax_snapshot: input.taxSnapshot,
+      },
+      { onConflict: "request_id", ignoreDuplicates: true }
+    );
+
+  if (upsertError) {
+    console.error("Subscription checkout attempt upsert error:", upsertError.message);
+    return { ok: false, error: "Checkout-Speicherung vorübergehend nicht verfügbar." };
+  }
+
+  const { data, error: selectError } = await admin
+    .from("checkout_attempts")
+    .select(SUBSCRIPTION_ATTEMPT_COLUMNS)
+    .eq("request_id", input.requestId)
+    .single();
+
+  if (selectError || !data) {
+    console.error("Subscription checkout attempt lookup error:", selectError?.message);
+    return { ok: false, error: "Checkout-Speicherung vorübergehend nicht verfügbar." };
+  }
+
+  return { ok: true, attempt: data as SubscriptionCheckoutAttempt };
+}
+
+/**
+ * Links the local subscription to its checkout attempt, once.
+ *
+ * Conditional on subscription_id still being NULL, so two concurrent
+ * requests that both got past the read converge on one winner rather than
+ * the second overwriting the first. The loser re-reads and adopts the
+ * winner's subscription; its own row is left pending and unreferenced,
+ * which is inert (it was never sent to Stripe and has no invoice that
+ * could activate it) and is reported as reconciliation work rather than
+ * deleted here. Financial and correlation evidence is not something a
+ * checkout route should be destroying.
+ *
+ * Returns the subscription id that is actually linked afterwards, which
+ * is the winner's, not necessarily the one passed in.
+ */
+export async function attachSubscriptionToAttempt(
+  attemptId: string,
+  subscriptionId: string
+): Promise<string | null> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return null;
+
+  const { data, error } = await admin
+    .from("checkout_attempts")
+    .update({ subscription_id: subscriptionId })
+    .eq("id", attemptId)
+    .is("subscription_id", null)
+    .select("subscription_id")
+    .maybeSingle();
+
+  if (!error && data?.subscription_id) return data.subscription_id as string;
+  if (error) console.error("Subscription attempt link error:", error.message);
+
+  // Either a concurrent request won, or the update failed. Re-read and
+  // report whatever is actually linked, so the caller can adopt it rather
+  // than assume its own id is the one in the database.
+  const { data: current, error: readError } = await admin
+    .from("checkout_attempts")
+    .select("subscription_id")
+    .eq("id", attemptId)
+    .maybeSingle();
+
+  if (readError) {
+    console.error("Subscription attempt re-read error:", readError.message);
+    return null;
+  }
+  return (current?.subscription_id as string | undefined) ?? null;
+}
+
 /** Finds a checkout attempt by the Stripe Checkout Session that backs it. */
 export async function findAttemptByStripeSessionId(stripeCheckoutSessionId: string): Promise<CheckoutAttempt | null> {
   const admin = getSupabaseAdmin();
