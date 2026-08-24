@@ -574,9 +574,16 @@ function effectiveGrants(table, { defaultPrivileges = [] } = {}) {
 
 test("hardening: 023 owns its number and the live migrations are not edited", () => {
   const files = readdirSync(MIGRATIONS).filter(n => n.endsWith(".sql")).sort();
-  assert.equal(files[files.length - 1], "023_harden_stripe_customers_grants.sql");
   assert.equal(files.filter(n => n.startsWith("023")).length, 1);
-  assert.equal(files.filter(n => n.startsWith("024")).length, 0);
+  // Later migrations may exist - 024 seeds the launch plans - but none of
+  // them may touch what 022 and 023 already put live.
+  for (const name of files.filter(n => n > "023_harden_stripe_customers_grants.sql")) {
+    const later = withoutComments(readFileSync(path.join(MIGRATIONS, name), "utf-8"));
+    for (const owned of ["stripe_customers", "stripe_webhook_events", "stripe_invoice_id", "stripe_subscription_id"]) {
+      assert.ok(!new RegExp(owned).test(later), `${name} touches ${owned}`);
+    }
+    assert.ok(!/^\s*(grant|revoke)\s/im.test(later), `${name} changes privileges`);
+  }
   // 022 is live, so it must keep the statements it was applied with.
   assert.match(sql, /grant select, insert on public\.stripe_customers to service_role;/);
   assert.match(sql, /alter table public\.stripe_customers enable row level security;/);
@@ -665,13 +672,15 @@ test("hardening: the granted privileges match what the code actually does", () =
   assert.match(events, /\.insert\(\{/);
   assert.ok(!/\.update\(|\.delete\(/.test(events), "a processed marker must not be editable");
 
-  // stripe_customers has no reader yet; 29D-C adds the get-or-create.
-  const usesCustomers = ["lib", "app"].some(dir =>
-    readdirSync(path.join(ROOT, dir), { recursive: true })
-      .filter(f => typeof f === "string" && /\.tsx?$/.test(f))
-      .some(f => readFileSync(path.join(ROOT, dir, f), "utf-8").includes('from("stripe_customers")'))
-  );
-  assert.equal(usesCustomers, false, "if a reader appeared, re-check the privileges it needs");
+  // stripe_customers: the get-or-create added in 29D-C selects the
+  // mapping and inserts it once. Nothing updates or deletes it, which is
+  // why the grant withholds both.
+  const stripeCustomers = read("lib/stripeCustomers.ts");
+  const customerOps = stripeCustomers.replace(/\s+/g, " ");
+  assert.ok(customerOps.includes('.from("stripe_customers") .select('), "the mapping must be read");
+  assert.ok(customerOps.includes('.from("stripe_customers") .insert('), "the mapping must be written once");
+  assert.ok(!/\.update\(|\.delete\(|\.upsert\(/.test(stripeCustomers),
+    "a mapping is written once; an update path would need a privilege this migration withholds");
 });
 
 test("hardening: RLS and the empty policy sets are left alone", () => {
