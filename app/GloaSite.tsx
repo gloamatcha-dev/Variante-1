@@ -13,6 +13,7 @@ import { track } from "./analytics";
 import { useCart } from "./cart";
 import { AuthProvider, useAuth } from "../lib/auth";
 import { supabase } from "../lib/supabase";
+import { AUTH_CONFIRM_PATH, PASSWORD_RESET_PATH, browserAuthRedirectUrl } from "../lib/authRedirect";
 import { SHIPPING_ZONES, SHIPPING_PRICING, getShippingZone, getCountryLabel, computeShippingGrossCents, SHIPPING_COUNTRY_OPTIONS, DELIVERY_TIME_NOTE, CUSTOMS_NOTE } from "../lib/shipping";
 import { createCheckoutSession } from "./createCheckoutSession";
 
@@ -645,8 +646,11 @@ if(pw.length<8){setPwError("Passwort muss mindestens 8 Zeichen lang sein.");retu
 if(pw!==pw2){setPwError("Passwörter stimmen nicht überein.");return false}
 setPwError("");return true};
 
-const confirmUrl=typeof window!=="undefined"?`${window.location.origin}/auth/confirm`:"";
-const resetUrl=typeof window!=="undefined"?`${window.location.origin}/account/reset-password`:"";
+// Both go through the shared helper, so the two paths and the way the URL
+// is built exist in exactly one place. See lib/authRedirect.ts for why a
+// missing redirect is worth this much ceremony.
+const confirmUrl=browserAuthRedirectUrl(AUTH_CONFIRM_PATH);
+const resetUrl=browserAuthRedirectUrl(PASSWORD_RESET_PATH);
 
 const handleLogin=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();if(!supabase)return;setAuthBusy(true);setAuthError("");const f=new FormData(e.currentTarget);const{error}=await supabase.auth.signInWithPassword({email:String(f.get("email")),password:String(f.get("password"))});setAuthBusy(false);if(error){setAuthError(translateAuthErr(error.message));return}window.location.href="/account/dashboard"};
 
@@ -933,7 +937,7 @@ return <main className="account-page"><section className="account-section"><p cl
 }
 
 function ResetPassword(){
-const{user}=useAuth();
+const{user,loading:authLoading}=useAuth();
 const[pwError,setPwError]=useState("");
 const[saving,setSaving]=useState(false);
 const[done,setDone]=useState(false);
@@ -964,6 +968,12 @@ const handleSubmit=async(e:React.FormEvent<HTMLFormElement>)=>{
 };
 
 if(done)return <main className="account-page"><section className="account-section"><p className="eyebrow">GLOA ACCOUNT</p><h1>Passwort geändert.</h1><p className="account-lead">Dein neues Passwort ist aktiv. Du wirst weitergeleitet…</p></section></main>;
+// The recovery session arrives asynchronously: supabase-js reads the
+// token out of the URL and AuthProvider only then reports a user. Judging
+// the link before that has settled would show "Link ungültig" to somebody
+// holding a perfectly valid link, and a customer who reads that and
+// leaves never resets their password.
+if(authLoading)return <main className="account-page"><section className="account-section"><p className="eyebrow">GLOA ACCOUNT</p><h1>Einen Moment.</h1><p className="account-lead">Dein Reset-Link wird geprüft…</p></section></main>;
 if(!user)return <main className="account-page"><section className="account-section"><p className="eyebrow">GLOA ACCOUNT</p><h1>Link ungültig.</h1><p className="account-lead">Der Reset-Link ist ungültig oder abgelaufen.</p><Link className="cta" href="/account">Zur Anmeldung</Link></section></main>;
 return <main className="account-page"><section className="account-section"><p className="eyebrow">NEUES PASSWORT</p><h1>Passwort<br/><i>zurücksetzen.</i></h1>
 <form className="account-form" onSubmit={handleSubmit}>

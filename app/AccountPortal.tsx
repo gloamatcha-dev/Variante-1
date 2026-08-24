@@ -5,6 +5,7 @@ import type { CustomerType } from "./content";
 import { useAuth } from "../lib/auth";
 import type { AddressRow } from "../lib/auth";
 import { supabase } from "../lib/supabase";
+import { PASSWORD_RESET_PATH, browserAuthRedirectUrl } from "../lib/authRedirect";
 import { B2bCalculator } from "./B2bCalculator";
 import { useCatalog } from "./useCatalog";
 import {
@@ -1331,7 +1332,15 @@ function PortalProfile() {
   const handlePasswordReset = async () => {
     if (!supabase || !user?.email) return;
     setPwMsg("");
-    const { error: err } = await supabase.auth.resetPasswordForEmail(user.email);
+    // redirectTo is REQUIRED, and its absence here is what broke password
+    // recovery after the gloamatcha.com cutover. Without it Supabase does
+    // not complain - it silently falls back to the project's Site URL, so
+    // the customer landed on the homepage with a bare "#" instead of the
+    // reset form, and could never finish. Same helper the public forgot
+    // form uses; see lib/authRedirect.ts.
+    const { error: err } = await supabase.auth.resetPasswordForEmail(user.email, {
+      redirectTo: browserAuthRedirectUrl(PASSWORD_RESET_PATH),
+    });
     setPwMsg(err ? "Fehler. Bitte versuche es erneut." : "Wir haben dir eine E-Mail zum Zurücksetzen gesendet.");
   };
 
