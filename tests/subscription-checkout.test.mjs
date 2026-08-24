@@ -1013,10 +1013,13 @@ test("boundary: no order is created anywhere in this task", () => {
   }
 });
 
-test("boundary: no webhook handling and no fulfillment email is added", () => {
-  const webhook = read("app/api/stripe/webhook/route.ts");
-  for (const event of ["invoice.paid", "invoice.payment_failed", "customer.subscription.updated", "customer.subscription.deleted"]) {
-    assert.ok(!webhook.includes(event), `the webhook now handles ${event}`);
+test("boundary: the checkout flow itself adds no webhook handling and no email", () => {
+  // invoice.paid became the canonical fulfillment event in Task 29D-E, so
+  // the webhook handles it now. What the CHECKOUT flow must still not do
+  // is any of that work itself, and the lifecycle events remain unbuilt.
+  const webhook = withoutComments(read("app/api/stripe/webhook/route.ts"));
+  for (const event of ["invoice.payment_failed", "customer.subscription.updated", "customer.subscription.deleted"]) {
+    assert.ok(!webhook.includes(`"${event}"`), `the webhook now handles ${event}`);
   }
   // Comment-stripped for the same reason: naming the event that will
   // activate a subscription later is documentation, not a handler.

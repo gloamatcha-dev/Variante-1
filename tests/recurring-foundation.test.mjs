@@ -341,14 +341,24 @@ test("rpc: migration 021's order function is left completely alone", () => {
 
 /* ── Nothing else moved ─────────────────────────────────────── */
 
-test("scope: no Stripe checkout, webhook or plan seeding is implemented", () => {
+test("scope: migration 022 itself still seeds nothing and touches no B2B", () => {
+  // The ONE-TIME route is still payment mode. Subscription checkout got
+  // its own endpoint in Task 29D-D rather than overloading this one.
   const routes = read("app/api/checkout/session/route.ts");
   assert.match(routes, /mode: "payment"/);
-  assert.ok(!/mode: "subscription"/.test(routes), "subscription checkout belongs to a later phase");
-  const webhook = read("app/api/stripe/webhook/route.ts");
-  for (const later of ["invoice.paid", "customer.subscription", "invoice.payment_failed"]) {
-    assert.ok(!webhook.includes(later), `${later} handling belongs to a later phase`);
+  assert.ok(!/mode: "subscription"/.test(routes), "the one-time route must not change mode");
+
+  // invoice.paid IS handled now, by Task 29D-E, and that is the point of
+  // the foundation 022 laid. What must still not exist is a lifecycle
+  // this task never defined.
+  // Comment-stripped: the route is allowed to EXPLAIN why it does not
+  // handle a lifecycle event, just not to handle one.
+  const webhook = withoutComments(read("app/api/stripe/webhook/route.ts"));
+  assert.ok(webhook.includes('"invoice.paid"'), "the foundation is meant to be used");
+  for (const later of ["customer.subscription.updated", "customer.subscription.deleted", "invoice.payment_failed"]) {
+    assert.ok(!webhook.includes(`"${later}"`), `${later} handling belongs to the later lifecycle task`);
   }
+
   assert.ok(!/insert into public\.b2c_subscription_plans/i.test(sql), "no cadence may be seeded");
   assert.ok(!/b2b_/i.test(sql), "B2B is untouched by this task");
 });

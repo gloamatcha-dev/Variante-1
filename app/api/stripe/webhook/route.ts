@@ -16,6 +16,9 @@ import { syncOrderRefundStateFromStripe } from "../../../../lib/orderRefunds";
 import { createOrderFromPaidCheckoutAttempt } from "../../../../lib/orderFulfillment";
 import { buildShippingAddressSnapshot, buildBillingAddressSnapshot } from "../../../../lib/orderAddressSnapshot";
 import { sendOrderConfirmationEmailIfNeeded } from "../../../../lib/orderConfirmationEmail";
+import { fulfillPaidSubscriptionInvoice, subscriptionInvoiceDeps } from "../../../../lib/subscriptionInvoiceFulfillment";
+import { idOf, resolveGloaSubscriptionId, stripeSubscriptionIdMatches } from "../../../../lib/subscriptionInvoiceRules";
+import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 
 type ErrorResponse = {
   error: string;
@@ -72,11 +75,29 @@ export async function POST(request: Request): Promise<Response> {
 
   try {
     if (event.type === "checkout.session.completed") {
-      await handleCheckoutSessionCompleted(stripe, event.data.object);
+      const session = event.data.object as Stripe.Checkout.Session;
+      // The two flows are separated here, explicitly, and this branch is
+      // load-bearing. A subscription session is also payment_status
+      // "paid" with an amount_total that matches its checkout attempt, so
+      // without it the one-time handler below would mark that attempt
+      // paid and create an order - the first order, from the wrong event.
+      // invoice.paid is the canonical event and it must be the only one
+      // that ships anything.
+      if (session.mode === "subscription") {
+        await handleSubscriptionSessionCompleted(stripe, session);
+      } else {
+        await handleCheckoutSessionCompleted(stripe, session);
+      }
+    } else if (event.type === "invoice.paid") {
+      await handleInvoicePaid(stripe, event);
     } else if (isRefundEventType(event.type)) {
       await handleRefundEvent(stripe, event);
     }
     // Other event types are acknowledged below with no action taken.
+    // invoice.payment_failed in particular: a failed payment creates no
+    // order, no fulfillment and no paid state. The subscription lifecycle
+    // it implies (past_due, unpaid) belongs to the later cancellation and
+    // lifecycle task, not here, and is deliberately not invented.
     // checkout.session.async_payment_succeeded / _failed can plug into
     // this same handleCheckoutSessionCompleted-style flow later without
     // restructuring this route.
@@ -240,4 +261,109 @@ async function handleCheckoutSessionCompleted(stripe: Stripe, eventSession: Stri
     })),
     customerEmail,
   });
+}
+
+/**
+ * A paid subscription invoice becomes exactly one GLOA order
+ * (Task 29D-E).
+ *
+ * This is the canonical fulfillment event for a subscription, for the
+ * first cycle and for every four-weekly renewal alike. The browser
+ * success page, checkout.session.completed, customer.subscription.created
+ * and payment_intent.succeeded are all deliberately not it.
+ *
+ * A "failed" outcome THROWS rather than returning quietly. That is the
+ * whole point: the outer handler turns a throw into a 500 and skips
+ * recordStripeWebhookEvent, so the event never becomes terminally
+ * processed, Stripe keeps retrying, and a genuinely paid invoice cannot
+ * disappear because one delivery could not reconcile.
+ */
+async function handleInvoicePaid(stripe: Stripe, event: Stripe.Event): Promise<void> {
+  const eventInvoice = event.data.object as Stripe.Invoice;
+  if (!eventInvoice.id) {
+    console.error(`Stripe webhook: invoice.paid event ${event.id} has no invoice id - ignored.`);
+    return;
+  }
+
+  const result = await fulfillPaidSubscriptionInvoice(eventInvoice.id, subscriptionInvoiceDeps(stripe));
+
+  if (result.kind === "failed") {
+    // Sanitized: Stripe ids and GLOA uuids only. No address, name, email
+    // or customer amount reaches a log line.
+    throw new Error(`subscription invoice ${eventInvoice.id} could not be fulfilled: ${result.reason}`);
+  }
+
+  if (result.kind === "ignored") {
+    console.error(`Stripe webhook: invoice ${eventInvoice.id} ignored - ${result.reason}`);
+    return;
+  }
+
+  console.error(
+    `Stripe webhook: invoice ${eventInvoice.id} fulfilled as order ${result.orderNumber}`
+  );
+}
+
+/**
+ * checkout.session.completed for a SUBSCRIPTION session.
+ *
+ * It validates the correlation and does nothing else. In particular it
+ * must not activate the local subscription, must not create an order,
+ * must not mark a paid cycle and must not send anything: a completed
+ * Checkout Session means the customer finished the form, not that the
+ * first invoice was paid, and invoice.paid may well arrive before this
+ * event does.
+ *
+ * It also writes nothing. Synchronising subscriptions.stripe_subscription_id
+ * here was considered and rejected: service_role holds SELECT on
+ * public.subscriptions and no write grant, so it would have needed a new
+ * privilege or a new RPC for a value that activate_subscription_from_invoice
+ * binds authoritatively moments later anyway. A conflicting id still
+ * fails closed, which is the part that actually matters.
+ */
+async function handleSubscriptionSessionCompleted(stripe: Stripe, eventSession: Stripe.Checkout.Session): Promise<void> {
+  const session = await stripe.checkout.sessions.retrieve(eventSession.id);
+
+  const gloaSubscriptionId = resolveGloaSubscriptionId(session.metadata);
+  if (!gloaSubscriptionId) {
+    console.error(`Stripe webhook: subscription session ${session.id} carries no gloa_subscription_id - ignored.`);
+    return;
+  }
+
+  const stripeSubscriptionId = idOf(session.subscription as string | { id: string } | null);
+  if (!stripeSubscriptionId) {
+    console.error(`Stripe webhook: subscription session ${session.id} has no stripe subscription yet - ignored.`);
+    return;
+  }
+
+  const admin = getSupabaseAdmin();
+  if (!admin) {
+    throw new Error("supabase admin client is not configured");
+  }
+
+  const { data, error } = await admin
+    .from("subscriptions")
+    .select("id, stripe_subscription_id")
+    .eq("id", gloaSubscriptionId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`subscription lookup failed for session ${session.id}: ${error.message}`);
+  }
+  if (!data) {
+    console.error(`Stripe webhook: session ${session.id} references no local subscription - ignored.`);
+    return;
+  }
+
+  // Two Stripe subscriptions pointing at one local row is never quietly
+  // accepted. Throwing keeps the event retryable and visible rather than
+  // acknowledging a correlation nobody has reconciled.
+  if (!stripeSubscriptionIdMatches(data.stripe_subscription_id as string | null, stripeSubscriptionId)) {
+    throw new Error(
+      `subscription ${gloaSubscriptionId} is bound to a different stripe subscription than session ${session.id}`
+    );
+  }
+
+  console.error(
+    `Stripe webhook: subscription session ${session.id} verified for subscription ${gloaSubscriptionId} - no order created, invoice.paid remains canonical.`
+  );
 }

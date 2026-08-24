@@ -1,0 +1,326 @@
+import type Stripe from "stripe";
+import { getSupabaseAdmin } from "./supabaseAdmin";
+import { createOrderFromPaidCheckoutAttempt, type CreatedOrder } from "./orderFulfillment";
+import {
+  customerChainMatches,
+  evaluateSubscriptionInvoice,
+  idOf,
+  resolveGloaSubscriptionId,
+  resolveInvoiceSubscriptionId,
+  resolveSubscriptionPeriod,
+  stripeSubscriptionIdMatches,
+  validateLocalSubscription,
+  type LocalSubscriptionFacts,
+  type LocalSubscriptionItemFacts,
+} from "./subscriptionInvoiceRules";
+
+/**
+ * A paid subscription invoice becomes exactly one GLOA order
+ * (Task 29D-E).
+ *
+ * WHY THIS FILE CREATES NO NEW DATABASE OBJECTS. The one-invoice-one-order
+ * guarantee already exists, live, as two unique indexes that compose:
+ *
+ *   checkout_attempts_stripe_invoice_id_key   (migration 022)
+ *     unique (stripe_invoice_id) where stripe_invoice_id is not null
+ *
+ *   orders_checkout_attempt_id_key            (migration 011)
+ *     unique (checkout_attempt_id) where checkout_attempt_id is not null
+ *
+ * One Stripe invoice can therefore produce at most one checkout attempt,
+ * and one checkout attempt at most one order. The invariant is a
+ * database guarantee end to end, not a select-then-insert, and it was
+ * designed that way on purpose: migration 022 says a renewal "becomes an
+ * ordinary paid checkout attempt and then an ordinary order, so the tax
+ * snapshot, the shipping snapshot and the one-order-per-attempt
+ * guarantee are reused rather than reimplemented".
+ *
+ * Correlation is answerable the same way. "Which subscription generated
+ * this order" and "which Stripe invoice paid it" are both one join away
+ * through orders.checkout_attempt_id, because checkout_attempts already
+ * carries subscription_id and stripe_invoice_id. Copying either onto
+ * orders would be a second place to disagree.
+ *
+ * So the flow is two existing security-definer functions in sequence:
+ *
+ *   activate_subscription_from_invoice   (022)
+ *     locks the subscription, refuses a terminal status, refuses a
+ *     conflicting Stripe subscription id, activates, and creates exactly
+ *     one paid checkout attempt for this invoice - or returns the
+ *     existing one.
+ *
+ *   create_order_from_paid_checkout      (021)
+ *     locks that attempt and creates exactly one order and its items
+ *     from the frozen snapshot - or returns the existing one.
+ *
+ * Both are individually atomic and both are idempotent, so a redelivery
+ * converges instead of duplicating. They are two transactions rather
+ * than one; the consequence is analysed under PARTIAL FAILURE below and
+ * it is safe, because the second step is reachable again on every retry.
+ */
+
+/** What the caller needs to answer Stripe with. */
+export type InvoiceFulfillmentResult =
+  /** Not ours, or not a delivery cycle. Acknowledge, do nothing. */
+  | { kind: "ignored"; reason: string }
+  /** One order exists for this invoice, created now or already there. */
+  | { kind: "fulfilled"; orderId: string; orderNumber: string; created: boolean }
+  /**
+   * Ours, but it does not reconcile. The caller must NOT mark the event
+   * processed: an operator has to look, and Stripe's retry schedule is
+   * what keeps the work reachable meanwhile.
+   */
+  | { kind: "failed"; reason: string };
+
+export type SubscriptionInvoiceDeps = {
+  /** Re-read from Stripe, never the webhook payload's embedded copy. */
+  retrieveInvoice: (invoiceId: string) => Promise<Stripe.Invoice>;
+  retrieveSubscription: (subscriptionId: string) => Promise<Stripe.Subscription>;
+  loadLocalSubscription: (id: string) => Promise<LocalSubscriptionFacts | null>;
+  loadLocalItems: (subscriptionId: string) => Promise<LocalSubscriptionItemFacts[]>;
+  loadMappedStripeCustomerId: (userId: string) => Promise<string | null>;
+  activateFromInvoice: (input: {
+    subscriptionId: string;
+    stripeSubscriptionId: string;
+    stripeInvoiceId: string;
+    currentPeriodStart: string | null;
+    currentPeriodEnd: string | null;
+    nextDeliveryAt: string | null;
+  }) => Promise<string>;
+  createOrder: (input: {
+    checkoutAttemptId: string;
+    subscription: LocalSubscriptionFacts;
+  }) => Promise<CreatedOrder>;
+};
+
+const SUBSCRIPTION_COLUMNS =
+  "id, user_id, status, currency, stripe_subscription_id, total_gross_cents, shipping_gross_cents, customer_snapshot, shipping_address_snapshot, billing_address_snapshot, plan_snapshot, tax_snapshot";
+
+async function loadLocalSubscription(id: string): Promise<LocalSubscriptionFacts | null> {
+  const admin = getSupabaseAdmin();
+  if (!admin) throw new Error("supabase admin client is not configured");
+
+  const { data, error } = await admin
+    .from("subscriptions")
+    .select(SUBSCRIPTION_COLUMNS)
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) throw new Error(`subscription lookup failed: ${error.message}`);
+  return (data as LocalSubscriptionFacts | null) ?? null;
+}
+
+async function loadLocalItems(subscriptionId: string): Promise<LocalSubscriptionItemFacts[]> {
+  const admin = getSupabaseAdmin();
+  if (!admin) throw new Error("supabase admin client is not configured");
+
+  const { data, error } = await admin
+    .from("subscription_items")
+    .select("sku, quantity")
+    .eq("subscription_id", subscriptionId);
+
+  if (error) throw new Error(`subscription item lookup failed: ${error.message}`);
+  return (data as LocalSubscriptionItemFacts[] | null) ?? [];
+}
+
+async function loadMappedStripeCustomerId(userId: string): Promise<string | null> {
+  const admin = getSupabaseAdmin();
+  if (!admin) throw new Error("supabase admin client is not configured");
+
+  const { data, error } = await admin
+    .from("stripe_customers")
+    .select("stripe_customer_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) throw new Error(`stripe customer mapping lookup failed: ${error.message}`);
+  return (data?.stripe_customer_id as string | undefined) ?? null;
+}
+
+async function activateFromInvoice(input: {
+  subscriptionId: string;
+  stripeSubscriptionId: string;
+  stripeInvoiceId: string;
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+  nextDeliveryAt: string | null;
+}): Promise<string> {
+  const admin = getSupabaseAdmin();
+  if (!admin) throw new Error("supabase admin client is not configured");
+
+  const { data, error } = await admin.rpc("activate_subscription_from_invoice", {
+    p_subscription_id: input.subscriptionId,
+    p_stripe_subscription_id: input.stripeSubscriptionId,
+    p_stripe_invoice_id: input.stripeInvoiceId,
+    p_current_period_start: input.currentPeriodStart,
+    p_current_period_end: input.currentPeriodEnd,
+    p_next_delivery_at: input.nextDeliveryAt,
+  });
+
+  if (error || !data) {
+    throw new Error(`activate_subscription_from_invoice failed: ${error?.message ?? "no attempt id returned"}`);
+  }
+  return typeof data === "string" ? data : String(data);
+}
+
+/**
+ * The order is built from the subscription's FROZEN snapshots and from
+ * nothing else.
+ *
+ * Not the current catalog price, not the customer's current saved
+ * address, not today's shipping rules and not a freshly computed tax
+ * result. A customer who moves house or a shop that changes its prices
+ * must not silently redirect or reprice a subscription that was agreed
+ * months ago; changing an active subscription is a later, explicit
+ * feature. Stripe is the payment authority, the frozen subscription is
+ * the fulfillment authority.
+ *
+ * No payment intent is passed. This API version puts no payment intent
+ * on the invoice, and a subscription order's payment correlation is the
+ * invoice itself, reachable through the checkout attempt.
+ */
+async function createOrder(input: {
+  checkoutAttemptId: string;
+  subscription: LocalSubscriptionFacts;
+}): Promise<CreatedOrder> {
+  const { checkoutAttemptId, subscription } = input;
+  return createOrderFromPaidCheckoutAttempt(
+    checkoutAttemptId,
+    subscription.customer_snapshot as { email: string | null; name: string | null },
+    null,
+    subscription.shipping_address_snapshot as never,
+    subscription.billing_address_snapshot as never,
+    subscription.shipping_gross_cents
+  );
+}
+
+export const defaultSubscriptionInvoiceDeps: SubscriptionInvoiceDeps = {
+  retrieveInvoice: () => {
+    throw new Error("retrieveInvoice must be provided by the caller with a Stripe client");
+  },
+  retrieveSubscription: () => {
+    throw new Error("retrieveSubscription must be provided by the caller with a Stripe client");
+  },
+  loadLocalSubscription,
+  loadLocalItems,
+  loadMappedStripeCustomerId,
+  activateFromInvoice,
+  createOrder,
+};
+
+/** Binds the Stripe-client-dependent halves for a real request. */
+export function subscriptionInvoiceDeps(stripe: Stripe): SubscriptionInvoiceDeps {
+  return {
+    ...defaultSubscriptionInvoiceDeps,
+    retrieveInvoice: id => stripe.invoices.retrieve(id),
+    retrieveSubscription: id => stripe.subscriptions.retrieve(id),
+  };
+}
+
+/**
+ * Turns one paid Stripe invoice into one GLOA order.
+ *
+ * Every identifier that reaches a log line below is a Stripe id or a
+ * GLOA uuid. No address, no name, no email and no amount belonging to a
+ * customer is logged.
+ */
+export async function fulfillPaidSubscriptionInvoice(
+  eventInvoiceId: string,
+  deps: SubscriptionInvoiceDeps
+): Promise<InvoiceFulfillmentResult> {
+  // Re-read from Stripe rather than trusting the webhook payload's
+  // embedded object, exactly as the one-time session handler does.
+  const invoice = await deps.retrieveInvoice(eventInvoiceId);
+
+  const stripeSubscriptionId = resolveInvoiceSubscriptionId(invoice);
+  if (!stripeSubscriptionId) {
+    return { kind: "ignored", reason: "invoice is not attached to a stripe subscription" };
+  }
+
+  const stripeSubscription = await deps.retrieveSubscription(stripeSubscriptionId);
+
+  const gloaSubscriptionId = resolveGloaSubscriptionId(stripeSubscription.metadata);
+  if (!gloaSubscriptionId) {
+    // No fallback exists on purpose. Guessing from an email, a name, an
+    // amount or "the most recent pending subscription" would eventually
+    // attach one customer's payment to another customer's subscription.
+    return { kind: "failed", reason: `stripe subscription ${stripeSubscriptionId} carries no gloa_subscription_id` };
+  }
+
+  const subscription = await deps.loadLocalSubscription(gloaSubscriptionId);
+  if (!subscription) {
+    // Deliberately the same shape of answer as a corrupted one, so the
+    // response cannot be used to probe which uuids exist.
+    return { kind: "failed", reason: `no local subscription for ${gloaSubscriptionId}` };
+  }
+
+  const items = await deps.loadLocalItems(subscription.id);
+  const localCheck = validateLocalSubscription(subscription, items);
+  if (!localCheck.ok) {
+    return { kind: "failed", reason: `subscription ${subscription.id}: ${localCheck.reason}` };
+  }
+
+  // Two Stripe subscriptions pointing at one local row is never quietly
+  // accepted, and the existing id is never overwritten.
+  if (!stripeSubscriptionIdMatches(subscription.stripe_subscription_id, stripeSubscriptionId)) {
+    return {
+      kind: "failed",
+      reason: `subscription ${subscription.id} is bound to a different stripe subscription`,
+    };
+  }
+
+  // Metadata says which row to look at; it is not proof of whose money
+  // paid. The whole chain has to close.
+  const mappedCustomerId = await deps.loadMappedStripeCustomerId(subscription.user_id as string);
+  if (!customerChainMatches({
+    mappedStripeCustomerId: mappedCustomerId,
+    subscriptionCustomerId: idOf(stripeSubscription.customer),
+    invoiceCustomerId: idOf(invoice.customer as string | { id: string } | null),
+  })) {
+    return { kind: "failed", reason: `subscription ${subscription.id}: stripe customer does not match the local mapping` };
+  }
+
+  const decision = evaluateSubscriptionInvoice(
+    {
+      id: invoice.id ?? null,
+      currency: invoice.currency ?? null,
+      status: invoice.status ?? null,
+      billingReason: invoice.billing_reason ?? null,
+      total: typeof invoice.total === "number" ? invoice.total : null,
+      customerId: idOf(invoice.customer as string | { id: string } | null),
+      stripeSubscriptionId,
+    },
+    { totalGrossCents: subscription.total_gross_cents, currency: subscription.currency }
+  );
+
+  if (decision.kind === "ignore") return { kind: "ignored", reason: decision.reason };
+  if (decision.kind === "fail") {
+    return { kind: "failed", reason: `invoice ${invoice.id}: ${decision.reason}` };
+  }
+
+  // STEP 1. Activate and claim this invoice's checkout attempt. Migration
+  // 022 does both under a row lock on the subscription and is idempotent
+  // on stripe_invoice_id, so a redelivery returns the same attempt.
+  const period = resolveSubscriptionPeriod(stripeSubscription);
+  const checkoutAttemptId = await deps.activateFromInvoice({
+    subscriptionId: subscription.id,
+    stripeSubscriptionId,
+    stripeInvoiceId: invoice.id as string,
+    currentPeriodStart: period.currentPeriodStart,
+    currentPeriodEnd: period.currentPeriodEnd,
+    nextDeliveryAt: period.nextDeliveryAt,
+  });
+
+  // STEP 2. One order for that attempt. Migration 021 locks the attempt
+  // and returns the existing order if there is one, so this is safe to
+  // reach again on every retry - which is what makes the two-step shape
+  // safe despite being two transactions.
+  const order = await deps.createOrder({ checkoutAttemptId, subscription });
+
+  return {
+    kind: "fulfilled",
+    orderId: order.id,
+    orderNumber: order.order_number,
+    created: true,
+  };
+}

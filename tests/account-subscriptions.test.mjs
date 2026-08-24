@@ -75,8 +75,17 @@ test("audit: nothing in the app creates a subscription or a supply agreement", (
   for (const route of routes) {
     const src = read(route);
     for (const table of ["subscriptions", "b2b_supply_agreements", "subscription_items", "b2b_supply_items"]) {
-      assert.ok(!src.includes(`.from("${table}")`), `${route} touches ${table}`);
-      assert.ok(!src.includes(`"${table}"`) || !/insert|upsert/.test(src), `${route} may write ${table}`);
+      // Reading is allowed and expected since Task 29D-E: the Stripe
+      // webhook resolves a paid invoice against the local subscription.
+      // What no route may do is write one directly - every write goes
+      // through a security-definer RPC, and service_role holds no write
+      // grant on these tables at all.
+      const reads = src.includes(`.from("${table}")`);
+      if (!reads) continue;
+      assert.ok(
+        !new RegExp(`from\\("${table}"\\)[\\s\\S]{0,300}?\\.(insert|upsert|update|delete)\\(`).test(src),
+        `${route} writes ${table} directly`
+      );
     }
   }
 });
