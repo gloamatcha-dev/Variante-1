@@ -155,10 +155,17 @@ export type SubscriptionCheckoutAttempt = CheckoutAttempt & {
    * flow refuses rather than adopts.
    */
   subscription_request_fingerprint: string | null;
+  /**
+   * WHICH checkout this is: customer, plan and saved address, with no
+   * priced value in it. Compared on every retry, including one that finds
+   * an existing subscription - a different customer, plan or address is a
+   * different checkout whatever has already been created.
+   */
+  subscription_intent_fingerprint: string | null;
 };
 
 const SUBSCRIPTION_ATTEMPT_COLUMNS =
-  `${ATTEMPT_COLUMNS}, user_id, subscription_id, subscription_request_fingerprint`;
+  `${ATTEMPT_COLUMNS}, user_id, subscription_id, subscription_request_fingerprint, subscription_intent_fingerprint`;
 
 export type SubscriptionAttemptInput = {
   requestId: string;
@@ -176,6 +183,8 @@ export type SubscriptionAttemptInput = {
    * customer, plan, saved address and priced snapshot.
    */
   fingerprint: string;
+  /** The identity half, from subscriptionIntentFingerprint. */
+  intentFingerprint: string;
 };
 
 export type SubscriptionAttemptResult =
@@ -226,6 +235,7 @@ export async function getOrCreateSubscriptionCheckoutAttempt(
         shipping_gross_cents: input.shipping.grossCents,
         tax_snapshot: input.taxSnapshot,
         subscription_request_fingerprint: input.fingerprint,
+        subscription_intent_fingerprint: input.intentFingerprint,
       },
       { onConflict: "request_id", ignoreDuplicates: true }
     );

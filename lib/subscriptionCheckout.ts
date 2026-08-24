@@ -11,6 +11,7 @@ import {
   parseSubscriptionCheckoutBody,
   subscriptionAddressDigest,
   subscriptionCheckoutIdempotencyKey,
+  subscriptionIntentFingerprint,
   subscriptionRequestFingerprint,
   validateLaunchPlan,
   type PlanResolution,
@@ -95,6 +96,7 @@ export {
   parseSubscriptionCheckoutBody,
   subscriptionAddressDigest,
   subscriptionCheckoutIdempotencyKey,
+  subscriptionIntentFingerprint,
   subscriptionRequestFingerprint,
   validateLaunchPlan,
 };
@@ -262,7 +264,7 @@ export async function handleSubscriptionCheckout(
   //    same amounts. The address is reduced to a digest first, so nothing
   //    readable about a delivery ever reaches the database column or a
   //    log line.
-  const fingerprint = subscriptionRequestFingerprint({
+  const intent = {
     userId: caller.userId,
     planId: plan.id,
     addressId,
@@ -278,7 +280,9 @@ export async function handleSubscriptionCheckout(
     taxCalculationVersion: taxSnapshot.calculationVersion,
     taxTreatment: taxSnapshot.treatment,
     taxTotalCents: taxSnapshot.totals.taxTotalCents,
-  });
+  };
+  const fingerprint = subscriptionRequestFingerprint(intent);
+  const intentFingerprint = subscriptionIntentFingerprint(intent);
 
   // 9. THE ATTEMPT: the idempotency anchor, and the first write. It has
   //    to exist before the subscription so a retry finds the anchor
@@ -293,6 +297,7 @@ export async function handleSubscriptionCheckout(
     taxSnapshot,
     expectedTotalGrossCents,
     fingerprint,
+    intentFingerprint,
   });
   if (!attemptResult.ok) {
     return fail(503, attemptResult.error);
@@ -303,14 +308,31 @@ export async function handleSubscriptionCheckout(
     return fail(409, "Diese Anfrage wurde bereits bezahlt.");
   }
 
-  // The stored fingerprint is what the FIRST request froze. If this
-  // request computes a different one, it is not a retry: it is the same
-  // token being used for another customer, another plan, another saved
-  // address, an edited address, another product or another price. A NULL
-  // is refused too, because that means the attempt came from the one-time
-  // payment flow and was never priced as a subscription.
-  if (!attemptMatchesFingerprint(attempt.subscription_request_fingerprint, fingerprint)) {
-    console.error(`Subscription checkout: request ${requestId} reused for a different checkout intent`);
+  // WHICH checkout this is, checked on every path. A different customer,
+  // plan or saved address is a different checkout whatever already
+  // exists - two Berlin addresses are two delivery intents. A NULL is
+  // refused too: it means the attempt came from the one-time payment flow
+  // and was never priced as a subscription, which is reachable simply by
+  // sending a request_id that already exists.
+  if (!attemptMatchesFingerprint(attempt.subscription_intent_fingerprint, intentFingerprint)) {
+    console.error(`Subscription checkout: request ${requestId} reused for a different checkout`);
+    return fail(409, "Diese Anfrage-ID gehört zu einem anderen Vorgang.");
+  }
+
+  // The PRICED half, checked only while the intent is not yet frozen.
+  //
+  // Once this attempt owns a subscription, that subscription IS the
+  // answer to this request and nothing may rebuild it. Comparing the
+  // priced digest then would refuse the retry for something that is not
+  // the customer's doing - an edited saved address, a catalog price
+  // change, an adjusted shipping rate - and would leave them permanently
+  // unable to reach the Stripe session for a subscription they already
+  // have. While subscription_id is still NULL the opposite holds: the
+  // terms are about to be frozen, so they must be exactly the ones this
+  // request id was created with.
+  if (!attempt.subscription_id
+    && !attemptMatchesFingerprint(attempt.subscription_request_fingerprint, fingerprint)) {
+    console.error(`Subscription checkout: request ${requestId} reused with different priced terms`);
     return fail(409, "Diese Anfrage-ID gehört zu einem anderen Vorgang.");
   }
 
@@ -339,6 +361,11 @@ export async function handleSubscriptionCheckout(
   //     there is no loser left unreferenced.
   const claimed = await deps.claimSubscription({
     checkoutAttemptId: attempt.id,
+    // Re-checked by the database under its own row lock, so the
+    // transaction that claims the attempt proves it is claiming the
+    // intent that was verified above.
+    expectedIntentFingerprint: intentFingerprint,
+    expectedRequestFingerprint: fingerprint,
     userId: caller.userId,
     planId: plan.id,
     planSnapshot: buildPlanSnapshot(plan, frozenItem.sku),

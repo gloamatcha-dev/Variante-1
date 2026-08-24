@@ -1,6 +1,6 @@
 -- ============================================================
 -- GLOA – Subscription checkout: server plan read + atomic claim
--- (Task 29D-D, corrected by 29D-D.1)
+-- (Task 29D-D, corrected by 29D-D.1 and 29D-D.2)
 -- Run in Supabase SQL Editor AFTER 024
 --
 -- Three things, and they belong together because they are all what one
@@ -21,13 +21,27 @@
 --      function that serialises on the attempt row.
 --
 --   3. A request_id may mean exactly one checkout intent. It is an
---      idempotency token, so a retry has to be provably the SAME request:
---      same customer, same plan, same saved address and the same priced
---      snapshot. A fingerprint column records that, hashed.
+--      idempotency token, so a retry has to be provably the SAME request.
+--      That turns out to be two questions rather than one, recorded in
+--      two hashed columns:
 --
--- Migration 025 had not been applied when this correction was written, so
--- it is expanded in place rather than followed by a 026. Migrations 022,
--- 023 and 024 are live and are not touched.
+--        WHICH checkout is this - customer, plan, saved address. True
+--        always, or the request belongs to somebody else.
+--
+--        Are the priced terms still the frozen ones - address contents,
+--        variant, amounts, tax. Only meaningful while nothing has been
+--        frozen yet.
+--
+--      Collapsing them into one comparison was the 29D-D.1 shape and it
+--      was wrong in a way that only shows up after a subscription exists:
+--      a customer who edited their saved address, or whose catalog price
+--      moved, could no longer reach the Stripe session for the pending
+--      subscription they already had. Nothing was wrong with that
+--      subscription. The world had moved on around it.
+--
+-- Migration 025 had not been applied when these corrections were written,
+-- so it is expanded in place rather than followed by a 026. Migrations
+-- 022, 023 and 024 are live and are not touched.
 --
 -- RUN THIS FILE AS ONE EXECUTION: paste the whole file into the SQL
 -- Editor and run it once, or wrap it in an explicit begin; ... commit;.
@@ -67,11 +81,16 @@ grant select on table public.b2c_subscription_plans to service_role;
 
 -- 2. ONE REQUEST ID IS ONE CHECKOUT INTENT ─────────────────────
 --
--- A hash of everything that identifies WHICH subscription this request is
--- trying to start: the customer, the plan, the saved address and its
+-- Two hashes, written together when the attempt is created and computed
+-- in lib/subscriptionCheckoutRules.ts.
+--
+-- subscription_request_fingerprint covers everything that describes the
+-- priced intent: the customer, the plan, the saved address AND its
 -- contents, the variant, the quantity, the currency, the destination and
--- every priced amount. Computed in lib/subscriptionCheckoutRules.ts and
--- written when the attempt is created.
+-- every amount including the tax identity.
+--
+-- subscription_intent_fingerprint covers only what the caller named: the
+-- customer, the plan, the saved address and the quantity.
 --
 -- Why a hash and not the values. The point of comparison is only "is this
 -- the same intent", never "what was it", so nothing needs to be readable
@@ -101,7 +120,23 @@ grant select on table public.b2c_subscription_plans to service_role;
 -- the intent rather than an identifier of it.
 
 alter table public.checkout_attempts
-  add column subscription_request_fingerprint text;
+  add column subscription_request_fingerprint text,
+  -- The IDENTITY half, and the reason there are two columns rather than
+  -- one. It holds only what the caller named: the customer, the plan, the
+  -- saved address and the quantity. No price, no address content, nothing
+  -- that server state can change underneath a request.
+  --
+  -- A retry has to answer two different questions, and they stop having
+  -- the same answer the moment a subscription exists. "Is this the same
+  -- checkout" must always be true, or the request is somebody else's.
+  -- "Are the priced terms still the ones that were frozen" only matters
+  -- while nothing has been frozen yet: once a subscription exists it IS
+  -- the answer, and refusing the retry because the catalog price or the
+  -- saved address changed afterwards would lock the customer out of a
+  -- checkout they already started, for something that is not their doing.
+  --
+  -- Same shape as the column above: nullable, no default, no backfill.
+  add column subscription_intent_fingerprint text;
 
 -- 3. AT MOST ONE SUBSCRIPTION PER CHECKOUT ATTEMPT ─────────────
 --
@@ -136,6 +171,15 @@ create or replace function public.claim_pending_subscription_for_attempt(
   p_checkout_attempt_id uuid,
   p_user_id uuid,
   p_plan_id uuid,
+  -- The two digests the application verified for THIS request, re-checked
+  -- below under the row lock. Without them the function trusts that the
+  -- attempt id it was handed is the one the caller actually validated,
+  -- and nothing in the transaction proves it. With them the claim is
+  -- self-verifying: a caller that passes the wrong attempt, or an attempt
+  -- whose intent no longer matches, is refused by the database rather
+  -- than by the caller remembering to check.
+  p_expected_intent_fingerprint text,
+  p_expected_request_fingerprint text,
   p_plan_snapshot jsonb,
   p_customer_snapshot jsonb,
   p_shipping_address_snapshot jsonb,
@@ -178,7 +222,8 @@ begin
   -- Only a subscription checkout writes this. A NULL means the attempt is
   -- a one-time payment attempt, and starting a subscription on one would
   -- attach a recurring charge to a snapshot that was never priced for it.
-  if v_attempt.subscription_request_fingerprint is null then
+  if v_attempt.subscription_request_fingerprint is null
+     or v_attempt.subscription_intent_fingerprint is null then
     raise exception 'checkout attempt % is not a subscription checkout', p_checkout_attempt_id;
   end if;
 
@@ -186,10 +231,29 @@ begin
     raise exception 'checkout attempt % is already paid', p_checkout_attempt_id;
   end if;
 
+  -- WHICH checkout this is, checked on every path and under the lock. A
+  -- different customer, plan or saved address is a different checkout
+  -- whatever has already been created.
+  if p_expected_intent_fingerprint is null
+     or v_attempt.subscription_intent_fingerprint <> p_expected_intent_fingerprint then
+    raise exception 'checkout attempt % is a different checkout than the one claimed', p_checkout_attempt_id;
+  end if;
+
   -- Already claimed: return the winner and create NOTHING. This is the
-  -- branch a concurrent second caller and every ordinary retry take.
+  -- branch a concurrent second caller and every ordinary retry take, and
+  -- it is deliberately reached BEFORE the priced comparison below: the
+  -- existing subscription is the frozen answer, so a catalog, shipping or
+  -- address change afterwards must not be able to refuse the retry.
   if v_attempt.subscription_id is not null then
     return v_attempt.subscription_id;
+  end if;
+
+  -- The PRICED half, and only here, because this is the branch that is
+  -- about to freeze those terms. They must be exactly the ones this
+  -- attempt was created with.
+  if p_expected_request_fingerprint is null
+     or v_attempt.subscription_request_fingerprint <> p_expected_request_fingerprint then
+    raise exception 'checkout attempt % was priced for different terms', p_checkout_attempt_id;
   end if;
 
   -- Unclaimed, and nobody else can be here at the same time for this
@@ -225,11 +289,11 @@ $$;
 -- authenticated able to create subscriptions.
 
 revoke all on function public.claim_pending_subscription_for_attempt(
-  uuid, uuid, uuid, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb
+  uuid, uuid, uuid, text, text, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb
 ) from public, anon, authenticated;
 
 grant execute on function public.claim_pending_subscription_for_attempt(
-  uuid, uuid, uuid, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb
+  uuid, uuid, uuid, text, text, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb
 ) to service_role;
 
 -- 4. VERIFY ────────────────────────────────────────────────────
@@ -280,6 +344,24 @@ grant execute on function public.claim_pending_subscription_for_attempt(
 --   where n.nspname = 'public'
 --     and p.proname = 'claim_pending_subscription_for_attempt';
 --
+--     Expected arguments, in this order:
+--       p_checkout_attempt_id uuid, p_user_id uuid, p_plan_id uuid,
+--       p_expected_intent_fingerprint text,
+--       p_expected_request_fingerprint text,
+--       p_plan_snapshot jsonb, p_customer_snapshot jsonb,
+--       p_shipping_address_snapshot jsonb, p_billing_address_snapshot jsonb,
+--       p_tax_snapshot jsonb, p_items jsonb
+--
+--     Exactly ONE overload must exist. create or replace does not remove a
+--     function with a different signature, so if an earlier draft of this
+--     file was ever run, the older 9-argument version would still be
+--     there and would still be callable. Expected: one row.
+--
+--   select count(*) as overloads
+--   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--   where n.nspname = 'public'
+--     and p.proname = 'claim_pending_subscription_for_attempt';
+--
 -- (e) E, F, G. Who may execute it. Expected: service_role TRUE, anon and
 --     authenticated FALSE, PUBLIC FALSE.
 --
@@ -309,20 +391,24 @@ grant execute on function public.claim_pending_subscription_for_attempt(
 --                       'activate_subscription_from_invoice')
 --   order by p.proname;
 --
--- (f) H. The new column. Expected one row: text, is_nullable = YES,
---     column_default NULL.
+-- (f) H. The two new columns. Expected TWO rows, both text, both
+--     is_nullable = YES, both column_default NULL.
 --
 --   select column_name, data_type, is_nullable, column_default
 --   from information_schema.columns
 --   where table_schema = 'public'
 --     and table_name = 'checkout_attempts'
---     and column_name = 'subscription_request_fingerprint';
+--     and column_name in ('subscription_request_fingerprint',
+--                         'subscription_intent_fingerprint')
+--   order by column_name;
 --
---     And no existing attempt acquired one. Expected: with_fingerprint = 0
---     on a database where no subscription checkout has run yet.
+--     And no existing attempt acquired either. Expected: both counts 0 on
+--     a database where no subscription checkout has run yet, and attempts
+--     equal to whatever the one-time flow has already written.
 --
---   select count(*) as attempts,
---          count(subscription_request_fingerprint) as with_fingerprint
+--   select count(*)                                    as attempts,
+--          count(subscription_request_fingerprint)     as with_request_fingerprint,
+--          count(subscription_intent_fingerprint)      as with_intent_fingerprint
 --   from public.checkout_attempts;
 --
 -- (g) I. The checkout_attempts privilege model is unchanged from 023.

@@ -7,6 +7,7 @@ import {
   ALLOWED_REQUEST_FIELDS,
   FINGERPRINT_FIELDS,
   FINGERPRINT_VERSION,
+  INTENT_FINGERPRINT_FIELDS,
   LAUNCH_SUBSCRIPTION_SKUS,
   PLAN_BILLING_INTERVAL_COUNT,
   PLAN_BILLING_INTERVAL_UNIT,
@@ -19,6 +20,7 @@ import {
   parseSubscriptionCheckoutBody,
   subscriptionAddressDigest,
   subscriptionCheckoutIdempotencyKey,
+  subscriptionIntentFingerprint,
   subscriptionRequestFingerprint,
   validateLaunchPlan,
 } from "../lib/subscriptionCheckoutRules.ts";
@@ -575,7 +577,7 @@ test("atomic claim: the RPC refuses another user's attempt and a one-time attemp
   assert.match(fn, /does not belong to this user/);
   // A NULL fingerprint means the attempt came from the one-time payment
   // flow, which was never priced as a subscription.
-  assert.match(fn, /if v_attempt\.subscription_request_fingerprint is null then/);
+  assert.match(fn, /if v_attempt\.subscription_request_fingerprint is null\s*or v_attempt\.subscription_intent_fingerprint is null then/);
   assert.match(fn, /is not a subscription checkout/);
   assert.match(fn, /if v_attempt\.status = 'paid' then/);
   assert.match(fn, /raise exception 'checkout attempt % not found'/);
@@ -644,7 +646,8 @@ test("fingerprint: the same exact request produces the same digest", () => {
   assert.equal(a, b);
   assert.match(a, /^[0-9a-f]{64}$/, "a sha-256 hex digest");
   assert.equal(attemptMatchesFingerprint(a, b), true);
-  assert.match(flowCode, /if \(!attemptMatchesFingerprint\(attempt\.subscription_request_fingerprint, fingerprint\)\)/);
+  assert.equal(subscriptionIntentFingerprint(baseIntent()), subscriptionIntentFingerprint(baseIntent()));
+  assert.match(flowCode, /if \(!attemptMatchesFingerprint\(attempt\.subscription_intent_fingerprint, intentFingerprint\)\)/);
   assert.match(flowCode, /return fail\(409, "Diese Anfrage-ID gehört zu einem anderen Vorgang\."\)/);
 });
 
@@ -658,7 +661,7 @@ test("fingerprint: a NULL or empty stored fingerprint is refused, not waved thro
   assert.equal(attemptMatchesFingerprint("something-else", fp), false);
   // The database refuses it too, so the guarantee does not rest on the
   // application remembering to check.
-  assert.match(migration025Sql, /if v_attempt\.subscription_request_fingerprint is null then/);
+  assert.match(migration025Sql, /if v_attempt\.subscription_request_fingerprint is null\s*or v_attempt\.subscription_intent_fingerprint is null then/);
 });
 
 test("fingerprint: a different user, plan or address cannot share one request id", () => {
@@ -759,6 +762,179 @@ test("fingerprint: nothing personal survives into the stored value", () => {
   assert.match(withoutComments(read("lib/subscriptionCheckoutRules.ts")), /createHash\("sha256"\)/);
   // And the value itself is never logged.
   assert.ok(!/console\.error\([^)]*\$\{fingerprint\}/.test(flowCode), "the fingerprint value reaches a log line");
+});
+
+/* -- 29D-D.2 sections 3-7. The four retry cases ---------------- */
+
+/**
+ * The distinction the whole fix rests on. A retry asks two questions and
+ * they stop having the same answer once a subscription exists:
+ *
+ *   identity  - is this the same checkout at all
+ *   priced    - are the terms still the ones that were frozen
+ */
+const identityOf = overrides => subscriptionIntentFingerprint({ ...baseIntent(), ...overrides });
+const pricedOf = overrides => subscriptionRequestFingerprint({ ...baseIntent(), ...overrides });
+
+test("case A: an existing subscription survives a later saved-address edit", () => {
+  // The customer's pending subscription already exists. They then edit
+  // the saved address and come back to the same checkout. Nothing is
+  // wrong with the subscription - the world moved on around it - so the
+  // retry must reach it rather than be refused.
+  const edited = { addressDigest: digestOf(savedAddress({ street: "Umgezogen", house_number: "7" })) };
+
+  // Identity is unchanged, so the always-on check passes...
+  assert.equal(identityOf(edited), identityOf({}), "the identity must not depend on address CONTENT");
+  // ...and the priced digest differs, which is exactly what must NOT
+  // refuse the request once a subscription exists.
+  assert.notEqual(pricedOf(edited), pricedOf({}));
+
+  // The flow only compares the priced digest while subscription_id is null.
+  assert.match(flowCode, /if \(!attempt\.subscription_id\s*&&\s*!attemptMatchesFingerprint\(attempt\.subscription_request_fingerprint, fingerprint\)\)/);
+  // And the database reaches its early return BEFORE its priced check,
+  // so the guarantee does not rest on the application alone.
+  const fn = migration025Sql.slice(
+    migration025Sql.indexOf("create or replace function public.claim_pending_subscription_for_attempt"),
+    migration025Sql.indexOf("revoke all on function")
+  );
+  const earlyReturn = fn.indexOf("return v_attempt.subscription_id;");
+  const pricedCheck = fn.indexOf("was priced for different terms");
+  assert.ok(earlyReturn > 0 && pricedCheck > 0);
+  assert.ok(earlyReturn < pricedCheck, "the priced check must not run for an already-claimed attempt");
+});
+
+test("case A: the same holds for a catalog price or shipping change after creation", () => {
+  // The address is not a special case: any post-freeze change would have
+  // stranded the customer the same way.
+  for (const change of [
+    { subtotalGrossCents: 2199, totalGrossCents: 2789 },
+    { shippingGrossCents: 0, totalGrossCents: 1999 },
+    { taxTotalCents: 200 },
+    { taxCalculationVersion: "de-2027.1" },
+    { variantId: UUID(9) },
+  ]) {
+    assert.equal(identityOf(change), identityOf({}), `${Object.keys(change)[0]} must not change the identity`);
+    assert.notEqual(pricedOf(change), pricedOf({}), `${Object.keys(change)[0]} must change the priced digest`);
+  }
+});
+
+test("case B: an address edit BEFORE the subscription exists fails closed", () => {
+  // Nothing is frozen yet, so the terms about to be frozen must be the
+  // ones this request id was created with.
+  const edited = { addressDigest: digestOf(savedAddress({ city: "Hamburg", zip: "20095" })) };
+  assert.notEqual(pricedOf(edited), pricedOf({}));
+  assert.equal(
+    attemptMatchesFingerprint(pricedOf({}), pricedOf(edited)),
+    false,
+    "an edited address must not pass the priced comparison"
+  );
+  // The guard fires exactly when subscription_id is falsy.
+  assert.match(flowCode, /!attempt\.subscription_id/);
+  assert.match(flowCode, /request \$\{requestId\} reused with different priced terms/);
+  assert.match(migration025Sql, /was priced for different terms/);
+});
+
+test("case C: a different saved address in the same country fails closed on BOTH paths", () => {
+  // Two Berlin addresses are two delivery intents whether or not a
+  // subscription already exists, so this is the identity half.
+  const otherAddress = { addressId: UUID(9), addressDigest: digestOf(savedAddress({ street: "Andere Strasse" })) };
+  assert.equal(baseIntent().shippingCountry, "DE");
+  assert.notEqual(identityOf(otherAddress), identityOf({}), "a different address id shared one checkout identity");
+  assert.notEqual(pricedOf(otherAddress), pricedOf({}));
+  // Identity is compared before anything looks at subscription_id, in the
+  // flow and in the database.
+  const intentCheck = flowCode.indexOf("attempt.subscription_intent_fingerprint");
+  const pricedCheck = flowCode.indexOf("attempt.subscription_request_fingerprint");
+  assert.ok(intentCheck > 0 && pricedCheck > 0 && intentCheck < pricedCheck);
+  const fn = migration025Sql.slice(
+    migration025Sql.indexOf("create or replace function public.claim_pending_subscription_for_attempt"),
+    migration025Sql.indexOf("revoke all on function")
+  );
+  assert.ok(
+    fn.indexOf("is a different checkout than the one claimed") < fn.indexOf("return v_attempt.subscription_id;"),
+    "the identity check must precede the early return"
+  );
+});
+
+test("case C: a different user or plan fails closed on both paths too", () => {
+  assert.notEqual(identityOf({ userId: UUID(9) }), identityOf({}), "another user");
+  assert.notEqual(identityOf({ planId: UUID(9) }), identityOf({}), "another plan");
+  assert.notEqual(identityOf({ quantity: 2 }), identityOf({}), "another quantity");
+});
+
+test("case D: an unchanged retry matches on both halves", () => {
+  assert.equal(identityOf({}), identityOf({}));
+  assert.equal(pricedOf({}), pricedOf({}));
+  assert.equal(attemptMatchesFingerprint(identityOf({}), identityOf({})), true);
+  assert.equal(attemptMatchesFingerprint(pricedOf({}), pricedOf({})), true);
+  // And it converges on one Stripe session, because the key is the
+  // attempt's, not the request's.
+  assert.equal(subscriptionCheckoutIdempotencyKey("att_1"), subscriptionCheckoutIdempotencyKey("att_1"));
+});
+
+test("identity: the identity half carries NO priced or content value", () => {
+  assert.deepEqual([...INTENT_FINGERPRINT_FIELDS], ["userId", "planId", "addressId", "quantity"]);
+  // Everything volatile is in the priced half and only there.
+  for (const volatileField of [
+    "addressDigest", "variantId", "currency", "shippingCountry", "shippingZone",
+    "shippingGrossCents", "subtotalGrossCents", "totalGrossCents",
+    "taxCalculationVersion", "taxTreatment", "taxTotalCents",
+  ]) {
+    assert.ok(!INTENT_FINGERPRINT_FIELDS.includes(volatileField), `${volatileField} must not be an identity field`);
+    assert.ok(FINGERPRINT_FIELDS.includes(volatileField), `${volatileField} must be a priced field`);
+  }
+  // Every identity field genuinely changes the identity digest.
+  for (const field of INTENT_FINGERPRINT_FIELDS) {
+    const mutated = { ...baseIntent() };
+    mutated[field] = typeof mutated[field] === "number" ? mutated[field] + 1 : `${mutated[field]}-changed`;
+    assert.notEqual(subscriptionIntentFingerprint(mutated), identityOf({}), `${field} does not affect the identity`);
+  }
+  // The two digests are different values for the same intent, so one can
+  // never be mistaken for the other.
+  assert.notEqual(identityOf({}), pricedOf({}));
+  assert.match(identityOf({}), /^[0-9a-f]{64}$/);
+});
+
+/* -- 29D-D.2 sections 8-9. The claim verifies itself ----------- */
+
+test("rpc: both expected fingerprints are passed and compared under the lock", () => {
+  // Without them the function trusts that the attempt id it was handed is
+  // the one the caller validated, and nothing in the transaction proves
+  // it.
+  assert.match(subscriptionsLib, /p_expected_intent_fingerprint: input\.expectedIntentFingerprint/);
+  assert.match(subscriptionsLib, /p_expected_request_fingerprint: input\.expectedRequestFingerprint/);
+  assert.match(flowCode, /expectedIntentFingerprint: intentFingerprint/);
+  assert.match(flowCode, /expectedRequestFingerprint: fingerprint/);
+
+  const fn = migration025Sql.slice(
+    migration025Sql.indexOf("create or replace function public.claim_pending_subscription_for_attempt"),
+    migration025Sql.indexOf("revoke all on function")
+  );
+  assert.match(fn, /p_expected_intent_fingerprint text/);
+  assert.match(fn, /p_expected_request_fingerprint text/);
+  // Both comparisons happen after the row lock, so they are made against
+  // the committed row this transaction now holds.
+  const lock = fn.indexOf("for update");
+  assert.ok(lock > 0);
+  assert.ok(fn.indexOf("p_expected_intent_fingerprint is null") > lock, "the identity check must be under the lock");
+  assert.ok(fn.indexOf("p_expected_request_fingerprint is null") > lock, "the priced check must be under the lock");
+  // A NULL expectation is a refusal, not a skip.
+  assert.match(fn, /if p_expected_intent_fingerprint is null\s*or v_attempt\.subscription_intent_fingerprint <> p_expected_intent_fingerprint then/);
+  assert.match(fn, /if p_expected_request_fingerprint is null\s*or v_attempt\.subscription_request_fingerprint <> p_expected_request_fingerprint then/);
+});
+
+test("rpc: the revoke and grant name the NEW eleven-argument signature", () => {
+  // create or replace does not remove a function with a different
+  // signature, so a stale grant on the old argument list would leave an
+  // older overload callable.
+  const signature = "uuid, uuid, uuid, text, text, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb";
+  assert.ok(migration025Sql.includes(`revoke all on function public.claim_pending_subscription_for_attempt(\n  ${signature}\n) from public, anon, authenticated;`));
+  assert.ok(migration025Sql.includes(`grant execute on function public.claim_pending_subscription_for_attempt(\n  ${signature}\n) to service_role;`));
+  // The old nine-argument list must appear nowhere.
+  assert.ok(!/\(\s*uuid, uuid, uuid, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb\s*\)/.test(migration025Sql),
+    "a stale nine-argument signature survived");
+  // And the VERIFY block tells the owner to check for exactly one overload.
+  assert.match(migration025, /select count\(\*\) as overloads/);
 });
 
 /* -- 14. A retry never re-freezes an existing subscription ---- */
@@ -916,16 +1092,21 @@ test("migrations: 025 grants exactly the audited minimum and widens nothing", ()
 
   // The only schema change is the fingerprint column: nullable, no
   // default, so every historical one-time attempt stays valid.
-  const alters = [...migration025Sql.matchAll(/alter table (\S+)\s+add column (\S+) (\S+)/gi)];
-  assert.equal(alters.length, 1, "025 must add exactly one column");
-  assert.deepEqual(
-    [alters[0][1], alters[0][2], alters[0][3].replace(";", "")],
-    ["public.checkout_attempts", "subscription_request_fingerprint", "text"]
-  );
-  assert.ok(!/subscription_request_fingerprint text[^;]*(not null|default)/i.test(migration025Sql),
-    "the new column must be nullable with no default");
-  assert.ok(!/update public\.checkout_attempts\s+set subscription_request_fingerprint/i.test(migration025Sql),
-    "025 must not backfill historical attempts");
+  const alters = [...migration025Sql.matchAll(/alter table (\S+)/gi)];
+  assert.equal(alters.length, 1, "025 must alter exactly one table");
+  assert.equal(alters[0][1], "public.checkout_attempts");
+  const columns = [...migration025Sql.matchAll(/add column (\S+) (text|uuid|jsonb|integer|boolean)/gi)]
+    .map(m => [m[1], m[2]]);
+  assert.deepEqual(columns, [
+    ["subscription_request_fingerprint", "text"],
+    ["subscription_intent_fingerprint", "text"],
+  ], "025 must add exactly the two fingerprint columns");
+  for (const [name] of columns) {
+    assert.ok(!new RegExp(`${name} text[^,;]*(not null|default)`, "i").test(migration025Sql),
+      `${name} must be nullable with no default`);
+    assert.ok(!new RegExp(`update public\\\\.checkout_attempts\\\\s+set ${name}`, "i").test(migration025Sql),
+      `025 must not backfill ${name}`);
+  }
 });
 
 test("migrations: the new RPC is server-only, definer-scoped and search-path pinned", () => {

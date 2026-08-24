@@ -330,6 +330,27 @@ export const FINGERPRINT_VERSION = "gloa-sub-fp-1";
  * and makes it silently wrong the day two call sites construct their
  * fields in a different sequence.
  */
+/**
+ * The IDENTITY half: what the caller actually asked for, by name.
+ *
+ * Every one of these is either supplied by the browser (planId,
+ * addressId), taken from the verified token (userId), or a constant of
+ * the flow (quantity). None of them is server state that can change
+ * underneath a request.
+ *
+ * That distinction is the whole point. A retry has to answer two
+ * different questions - "is this the same checkout" and "are the priced
+ * terms still the ones that were frozen" - and they stop having the same
+ * answer the moment a subscription exists. See
+ * subscriptionIntentFingerprint below.
+ */
+export const INTENT_FINGERPRINT_FIELDS = Object.freeze([
+  "userId",
+  "planId",
+  "addressId",
+  "quantity",
+] as const);
+
 export const FINGERPRINT_FIELDS = Object.freeze([
   "userId",
   "planId",
@@ -434,6 +455,32 @@ export function subscriptionRequestFingerprint(intent: SubscriptionRequestIntent
   // Ordered by the exported contract, not by the object's own key order.
   const parts = FINGERPRINT_FIELDS.map(field => String(intent[field]));
   return digest([FINGERPRINT_VERSION, "intent", ...parts]);
+}
+
+/**
+ * WHICH checkout this is, independent of what anything currently costs.
+ *
+ * This exists because the full fingerprint above answers a question that
+ * stops being the right one once a subscription has been created.
+ *
+ * Consider a customer whose pending subscription already exists, who then
+ * edits their saved address - or whose catalog price changes, or whose
+ * shipping rate is adjusted - and who then returns to the same checkout.
+ * The full fingerprint would differ and the retry would be refused, so
+ * they could never reach the Stripe session for the subscription they
+ * already have. Nothing is wrong with that subscription: it was frozen,
+ * and it is authoritative. The request has not become a different
+ * request, the world has moved on around it.
+ *
+ * So the identity half is compared always, and the priced half only while
+ * the subscription does not exist yet. A different customer, plan or
+ * saved address is still a different checkout on both paths - two Berlin
+ * addresses are two delivery intents whether or not a subscription has
+ * been created.
+ */
+export function subscriptionIntentFingerprint(intent: SubscriptionRequestIntent): string {
+  const parts = INTENT_FINGERPRINT_FIELDS.map(field => String(intent[field]));
+  return digest([FINGERPRINT_VERSION, "identity", ...parts]);
 }
 
 /**

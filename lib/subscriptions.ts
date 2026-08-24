@@ -74,6 +74,15 @@ export function buildPlanSnapshot(plan: SubscriptionPlanRow, sku: string): Subsc
 export type CreatePendingSubscriptionInput = {
   /** The attempt that owns this subscription. The claim serialises on it. */
   checkoutAttemptId: string;
+  /**
+   * The two digests the application verified for THIS request. The
+   * database re-checks them under its own row lock, so the transaction
+   * that claims the attempt proves it is claiming the intent that was
+   * verified rather than trusting the caller to have handed it the right
+   * attempt id.
+   */
+  expectedIntentFingerprint: string;
+  expectedRequestFingerprint: string;
   userId: string;
   planId: string;
   planSnapshot: SubscriptionPlanSnapshot;
@@ -115,6 +124,14 @@ export type CreatePendingSubscriptionResult =
  * subscription back untouched. Nothing is re-frozen from current catalog,
  * shipping, tax or address data: the existing row is what that request
  * agreed to, and a genuinely new checkout needs a new request id.
+ *
+ * Which is also why the two expected digests are checked differently. The
+ * identity one is compared always: a different customer, plan or saved
+ * address is a different checkout no matter what already exists. The
+ * priced one is compared only while the attempt has no subscription yet,
+ * because once one exists it is the frozen answer and a later catalog,
+ * shipping or address change must not be able to lock the customer out of
+ * the checkout they already started.
  */
 export async function claimPendingSubscriptionForAttempt(
   input: CreatePendingSubscriptionInput
@@ -125,6 +142,8 @@ export async function claimPendingSubscriptionForAttempt(
   const { data, error } = await admin.rpc("claim_pending_subscription_for_attempt", {
     p_checkout_attempt_id: input.checkoutAttemptId,
     p_user_id: input.userId,
+    p_expected_intent_fingerprint: input.expectedIntentFingerprint,
+    p_expected_request_fingerprint: input.expectedRequestFingerprint,
     p_plan_id: input.planId,
     p_plan_snapshot: input.planSnapshot,
     p_customer_snapshot: input.customerSnapshot,
