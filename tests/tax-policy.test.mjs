@@ -171,7 +171,10 @@ test("migration: 021 owns its number and no later migration undoes it", () => {
   // allowed to exist - Task 29D-B added 022 - but none of them may touch
   // the tax objects 021 owns.
   for (const name of files.filter(name => name > "021_tax_snapshot.sql")) {
-    const later = readFileSync(path.join(MIGRATIONS_DIR, name), "utf-8");
+    // SQL only. A later migration may legitimately NAME a tax object in a
+    // comment while explaining what it deliberately does not touch, and a
+    // scan that read comments would call that a modification.
+    const later = withoutComments(readFileSync(path.join(MIGRATIONS_DIR, name), "utf-8"));
     for (const owned of [
       "create_order_from_paid_checkout",
       "tax_treatment",

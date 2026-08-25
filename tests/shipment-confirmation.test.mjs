@@ -534,10 +534,16 @@ test("it sends no subscription lifecycle email", () => {
 
 /* ── Unreachability: the CASE B guarantee ─────────────────────── */
 
-test("NOTHING in the application calls the shipment sender", () => {
-  // The whole point of this suite. If this fails, someone wired a
-  // shipment confirmation to something - and the audit that produced this
-  // module found no authorized shipment transition to wire it to.
+test("ONLY the authorized shipment route calls the shipment sender", () => {
+  // Phase 2A asserted this list was EMPTY, because there was no
+  // authorized shipment transition to wire the sender to. Phase 2B built
+  // that transition, so exactly one caller is now correct and expected.
+  //
+  // The rule this protects is unchanged, and if anything stricter: the
+  // sender is reachable from the authorized operator route and from
+  // nowhere else. A webhook, a cron, a customer route or a page appearing
+  // in this list would mean a customer could be told their parcel had
+  // shipped without an operator having shipped it.
   const callers = [];
   const walk = dir => {
     for (const entry of readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
@@ -555,7 +561,8 @@ test("NOTHING in the application calls the shipment sender", () => {
     }
   };
   for (const dir of ["app", "lib", "worker"]) walk(dir);
-  assert.deepEqual(callers, [], `the shipment sender is reachable from: ${callers.join(", ")}`);
+  assert.deepEqual(callers, ["app/api/internal/orders/ship/route.ts"],
+    `unexpected shipment sender callers: ${callers.join(", ")}`);
 });
 
 test("no route, webhook or cron can trigger a shipment confirmation", () => {
@@ -579,12 +586,26 @@ test("no route can mark an order shipped", () => {
   };
   walk("app/api");
   assert.ok(routes.length > 0, "no API routes were found to check");
+  // Phase 2B added exactly one route that may. It reaches those columns
+  // only through the SECURITY DEFINER RPC from migration 028 - it holds no
+  // grant to write them itself - and it is covered in depth by
+  // tests/shipment-transition-api.test.mjs.
+  const AUTHORIZED = "app/api/internal/orders/ship/route.ts";
+  assert.ok(routes.includes(AUTHORIZED), "the authorized shipment route is missing");
   for (const rel of routes) {
+    if (rel === AUTHORIZED) continue;
     const source = withoutComments(read(rel));
-    for (const write of ["fulfillment_status", "shipped_at", "tracking_number", "tracking_url", "shipping_carrier"]) {
+    for (const write of [
+      "fulfillment_status", "shipped_at", "tracking_number",
+      "tracking_url", "shipping_carrier", "mark_order_shipped",
+    ]) {
       assert.ok(!source.includes(write), `${rel} touches ${write}`);
     }
   }
+  // And the authorized one still cannot write them directly.
+  const authorized = withoutComments(read(AUTHORIZED));
+  assert.ok(!authorized.includes(".update("), "the authorized route writes a table directly");
+  assert.ok(!authorized.includes('.from("orders")'), "the authorized route reaches the orders table directly");
 });
 
 test("the customer UI can read shipment state but never write it", () => {
@@ -651,14 +672,21 @@ test("no new cron job was registered", () => {
 
 /* ── Migration 027 ────────────────────────────────────────────── */
 
-test("027 is the next free migration number and 022-026 are untouched", () => {
+test("027 owns its number and 022-026 are untouched", () => {
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
   const twentySevens = files.filter(f => f.startsWith("027"));
   assert.equal(twentySevens.length, 1, "027 is not exactly one file");
   assert.equal(twentySevens[0], "027_shipment_confirmation_email_state.sql");
-  assert.equal(numbers.filter(nr => nr > "027").length, 0, "a migration above 027 appeared");
+  // 027 was the next free number when it was written. 028 has since been
+  // taken by the authorized shipment transition (Phase 2B), which is a
+  // different migration and must not reach into 027's columns.
+  const sql028 = withoutComments(
+    readFileSync(path.join(MIGRATIONS, "028_authorized_shipment_transition.sql"), "utf-8")
+  );
+  assert.ok(!sql028.includes("shipment_email"), "028 writes 027's email state");
+  assert.ok(!sql028.includes("alter table"), "028 alters a table");
 });
 
 test("027 adds nullable columns with no default, so no historical row is queued", () => {

@@ -1,5 +1,5 @@
-import { createHash, timingSafeEqual } from "node:crypto";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
+import { isBearerSecretAuthorized } from "../../../../lib/serverSecretAuth";
 import { runInternalOrderNotificationCron } from "../../../../lib/internalOrderNotificationRetry";
 
 /**
@@ -54,22 +54,20 @@ import { runInternalOrderNotificationCron } from "../../../../lib/internalOrderN
  * and this is the net underneath it.
  */
 
-/**
- * Fixed-length digests so the comparison is timing safe for any input
- * length. timingSafeEqual throws on differing lengths, which would turn a
- * length mismatch into an observable difference all by itself; hashing
- * first removes that channel and the early return below is on presence,
- * never on content.
+/*
+ * The timing-safe comparison this endpoint used to carry privately now
+ * lives in lib/serverSecretAuth.ts, unchanged: sha256 both sides so
+ * length differences cannot leak, then timingSafeEqual. It moved there
+ * when the authorized shipment endpoint (Phase 2B) needed the same
+ * check - a second private copy of a comparison this security-sensitive
+ * is how two copies drift apart.
+ *
+ * The SECRET is emphatically not shared. This endpoint keeps CRON_SECRET
+ * and the shipment endpoint keeps FULFILLMENT_ADMIN_SECRET, because they
+ * have different blast radii: this one can only re-attempt work the shop
+ * already owed itself, while that one changes fulfillment state and mails
+ * a customer.
  */
-function digest(value: string): Buffer {
-  return createHash("sha256").update(value, "utf8").digest();
-}
-
-function isAuthorized(request: Request, secret: string): boolean {
-  const header = request.headers.get("authorization");
-  if (!header) return false;
-  return timingSafeEqual(digest(header), digest(`Bearer ${secret}`));
-}
 
 export async function GET(request: Request): Promise<Response> {
   // Fail closed. An unset CRON_SECRET must never mean "no authentication
@@ -82,7 +80,7 @@ export async function GET(request: Request): Promise<Response> {
     return Response.json({ error: "Nicht verfügbar." }, { status: 503 });
   }
 
-  if (!isAuthorized(request, secret)) {
+  if (!isBearerSecretAuthorized(request, secret)) {
     return Response.json({ error: "Nicht autorisiert." }, { status: 401 });
   }
 

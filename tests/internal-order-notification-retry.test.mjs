@@ -504,22 +504,29 @@ test("endpoint: it fails closed when CRON_SECRET is missing", () => {
   const handler = routeCode.slice(routeCode.indexOf("export async function GET"));
   const guard = handler.indexOf("if (!secret)");
   assert.ok(guard > 0, "a missing secret is not checked at all");
-  assert.ok(guard < handler.indexOf("isAuthorized("), "the secret is used before it is checked");
+  assert.ok(guard < handler.indexOf("isBearerSecretAuthorized("), "the secret is used before it is checked");
   assert.ok(guard < handler.indexOf("getSupabaseAdmin("), "the database is reached before the check");
   assert.ok(guard < handler.indexOf("runInternalOrderNotificationCron("), "work happens before the check");
   assert.match(handler, /return Response\.json\(\{ error: "[^"]+" \}, \{ status: 503 \}\);/);
 });
 
 test("endpoint: the comparison is timing safe and the secret never reaches a log", () => {
-  assert.match(routeCode, /timingSafeEqual/);
-  assert.match(routeCode, /createHash\("sha256"\)/);
+  // The comparison this endpoint used to carry privately now lives in
+  // lib/serverSecretAuth.ts, unchanged, because the authorized shipment
+  // endpoint (Phase 2B) needed the same check and two private copies of a
+  // security primitive are how the two drift apart. The property is
+  // asserted where the code now is, plus that this route uses it.
+  assert.match(routeCode, /isBearerSecretAuthorized\(request, secret\)/);
+  const helper = readFileSync(path.join(ROOT, "lib/serverSecretAuth.ts"), "utf-8");
+  assert.match(helper, /timingSafeEqual/);
+  assert.match(helper, /createHash\("sha256"\)/);
   // Equal-length digests, so timingSafeEqual cannot throw on a length
   // mismatch and a length difference is not observable by itself.
-  assert.match(routeCode, /timingSafeEqual\(digest\(header\), digest\(`Bearer \$\{secret\}`\)\)/);
-  assert.ok(!/===\s*secret|secret\s*===|!==\s*secret/.test(routeCode), "a plain string comparison survived");
+  assert.match(helper, /timingSafeEqual\(digest\(header\), digest\(`Bearer \$\{secret\}`\)\)/);
+  assert.ok(!/===\s*secret|secret\s*===|!==\s*secret/.test(helper), "a plain string comparison survived");
 
-  // The secret is interpolated in exactly one place - the digest it is
-  // compared through - and in no log line anywhere.
+  // The secret still reaches no log line here, and the route no longer
+  // interpolates it anywhere at all.
   const logs = [...routeCode.matchAll(/console\.error\(([\s\S]*?)\);/g)].map(m => m[1]);
   assert.ok(logs.length > 0);
   for (const line of logs) {
@@ -528,8 +535,9 @@ test("endpoint: the comparison is timing safe and the secret never reaches a log
       assert.ok(!line.includes(leak), `a log line carries ${leak}`);
     }
   }
-  const interpolations = [...routeCode.matchAll(/\$\{([^}]*)\}/g)].map(m => m[1]);
-  assert.deepEqual(interpolations, ["secret"], "the secret is used somewhere other than the comparison");
+  assert.deepEqual([...routeCode.matchAll(/\$\{([^}]*)\}/g)].map(m => m[1]), [], "the route interpolates a value");
+  // And the shipment endpoint's secret is a different one entirely.
+  assert.ok(!routeCode.includes("FULFILLMENT_ADMIN_SECRET"), "the cron reuses the fulfillment secret");
 });
 
 test("endpoint: it is server-only and takes no input from the caller", () => {
@@ -537,9 +545,12 @@ test("endpoint: it is server-only and takes no input from the caller", () => {
   for (const forbidden of ["searchParams", "new URL(", "request.json()", "request.text()", "orderId", "email"]) {
     assert.ok(!routeCode.includes(forbidden), `the endpoint reads ${forbidden} from the request`);
   }
-  // The only header it reads is the one it authenticates with.
-  const headerReads = [...routeCode.matchAll(/headers\.get\("([^"]+)"\)/g)].map(m => m[1]);
-  assert.deepEqual(headerReads, ["authorization"]);
+  // The only header read is the one it authenticates with. That read
+  // now happens inside lib/serverSecretAuth.ts, so the route itself reads
+  // no header at all and the helper reads exactly one.
+  assert.deepEqual([...routeCode.matchAll(/headers\.get\("([^"]+)"\)/g)].map(m => m[1]), []);
+  const helper = readFileSync(path.join(ROOT, "lib/serverSecretAuth.ts"), "utf-8");
+  assert.deepEqual([...helper.matchAll(/headers\.get\("([^"]+)"\)/g)].map(m => m[1]), ["authorization"]);
   // Service role stays on the server: the route is an API route, and the
   // key is only ever read through the server-only admin module.
   assert.match(routeCode, /getSupabaseAdmin/);
@@ -599,24 +610,32 @@ test("schedule: exactly one daily cron, as Vercel Hobby allows", () => {
 test("migrations: the retry still adds none, and 022-026 are untouched", () => {
   const files = readdirSync(MIGRATIONS).filter(n => n.endsWith(".sql")).sort();
   // The live, immutable ones are still exactly the files they were.
-  assert.deepEqual(files.slice(-6, -1), [
+  // Matched by name rather than by position, so a later migration for an
+  // unrelated feature cannot make this assertion fail for no reason.
+  for (const name of [
     "022_recurring_subscription_foundation.sql",
     "023_harden_stripe_customers_grants.sql",
     "024_seed_b2c_subscription_plans.sql",
     "025_grant_subscription_plans_service_role.sql",
     "026_internal_order_notification_state.sql",
-  ]);
-  // 027 exists now, and it belongs to the SHIPMENT confirmation, not to
-  // this retry. The rule this assertion protects is unchanged: the
-  // internal notification retry needs no migration of its own, and it
-  // must not acquire one by borrowing someone else's.
-  assert.equal(files[files.length - 1], "027_shipment_confirmation_email_state.sql");
-  assert.equal(files.filter(n => /^02[89]|^0[3-9]\d/.test(n)).length, 0, "the retry added a migration");
-  // Against 027's SQL only: its verification notes deliberately SELECT
+    "027_shipment_confirmation_email_state.sql",
+    "028_authorized_shipment_transition.sql",
+  ]) {
+    assert.ok(files.includes(name), `${name} is missing`);
+  }
+  // 027 and 028 both belong to the SHIPMENT work, not to this retry. The
+  // rule this assertion protects is unchanged: the internal notification
+  // retry needs no migration of its own, and it must not acquire one by
+  // borrowing someone else's.
+  assert.equal(files[files.length - 1], "028_authorized_shipment_transition.sql");
+  assert.equal(files.filter(n => /^029|^0[3-9]\d/.test(n)).length, 0, "the retry added a migration");
+  // Against their SQL only: 027's verification notes deliberately SELECT
   // 026's columns to prove they are unchanged, and reading them is the
   // opposite of reaching into them.
-  const shipment = withoutComments(read("supabase/migrations/027_shipment_confirmation_email_state.sql"));
-  assert.ok(!shipment.includes("internal_notification"), "027 writes the internal notification state");
+  for (const name of ["027_shipment_confirmation_email_state.sql", "028_authorized_shipment_transition.sql"]) {
+    const shipment = withoutComments(read(`supabase/migrations/${name}`));
+    assert.ok(!shipment.includes("internal_notification"), `${name} writes the internal notification state`);
+  }
   // The retry needs no column 026 did not already provide.
   const sql = read("supabase/migrations/026_internal_order_notification_state.sql");
   assert.match(sql, /check \(internal_notification_status in \('sending', 'sent', 'failed'\)\)/);
