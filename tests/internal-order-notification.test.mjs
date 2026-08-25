@@ -397,10 +397,14 @@ test("wiring: the source label is derived, never guessed", () => {
 
 /* ── Migration 026 ──────────────────────────────────────────── */
 
-test("migration: 026 is the next free number and adds only the two state columns", () => {
+test("migration: 026 owns its number and adds only the two state columns", () => {
   const files = readdirSync(MIGRATIONS).filter(n => n.endsWith(".sql")).sort();
-  assert.equal(files[files.length - 1], "026_internal_order_notification_state.sql");
-  assert.equal(files.filter(n => n.startsWith("027")).length, 0);
+  // 026 was the next free number when it was written. 027 has since been
+  // taken by the shipment confirmation email state, which is a different
+  // message on its own pair of columns - so what matters here is that
+  // exactly one file owns 026 and that it is still this one.
+  assert.deepEqual(files.filter(n => n.startsWith("026")), ["026_internal_order_notification_state.sql"]);
+  assert.equal(files.filter(n => n.startsWith("027")).length, 1);
 
   const sql = withoutComments(migration026);
   const columns = [...sql.matchAll(/add column (\S+) (text|timestamptz)/g)].map(m => [m[1], m[2]]);

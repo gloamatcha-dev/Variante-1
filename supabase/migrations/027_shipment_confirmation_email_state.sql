@@ -1,0 +1,217 @@
+-- ============================================================
+-- GLOA – Shipment confirmation email delivery state
+-- Run in Supabase SQL Editor AFTER 026
+--
+-- The third message about an order gets the third pair of columns, on
+-- the same table and in exactly the shape migration 026 established.
+--
+--   017  confirmation_email_*        the customer's "we got your order"
+--   026  internal_notification_*     fulfillment's "pack this"
+--   027  shipment_email_*            the customer's "it is on its way"
+--
+-- Three pairs rather than one shared status, because they are three
+-- different messages with three different fates. The first two are about
+-- a PAYMENT and both happen at checkout time; this one is about a PARCEL
+-- and happens whenever the parcel actually leaves, which may be days
+-- later or never. Any of them can succeed while another fails, and a
+-- retry must then send only the one still owed. One shared column could
+-- not express that without resending something the customer already has.
+--
+-- 027 IS THE NEXT FREE NUMBER. 022-026 are live and immutable and are not
+-- touched here: 022 recurring subscription foundation, 023 stripe
+-- customers grants, 024 subscription plan seed, 025 subscription plans
+-- service_role grant, 026 internal order notification state. Task 21
+-- (tax/VAT/OSS) still holds no migration file and remains free to take a
+-- later number - this migration writes no tax field and leaves every
+-- *_net_cents and tax_total_cents column exactly as it is.
+--
+-- NULL (no default): never attempted. Every order written before this
+--   migration is NULL, and so is every order that never enters the flow.
+--   It is the absence of a state, not a queued one.
+-- 'sending': a worker has claimed the right to send. The atomic guard
+--   against two concurrent workers both sending: the UPDATE matches only
+--   "never attempted or failed" AND "genuinely shipped", and row locking
+--   serialises concurrent updates to one order.
+-- 'sent': Resend accepted the message.
+-- 'failed': an attempt was made and it failed. THIS is the only value a
+--   future retry sweep may key on.
+--
+-- ── WHY NULLABLE WITH NO DEFAULT IS LOAD-BEARING HERE ─────────
+--
+-- It matters more on this migration than on 026, and it is worth being
+-- explicit about why.
+--
+-- A NOT NULL DEFAULT 'pending' column - the shape migration 017 uses -
+-- writes that default into every row that already exists. On 026 that
+-- would have meant the order history looking like queued work for the
+-- INTERNAL inbox: bad, but one mailbox, and the owner's own.
+--
+-- Here the recipient is the CUSTOMER, and the trap has already been
+-- sprung once in the data. Migration 019 gave the owner tracking columns
+-- to fill in by hand, and orders have been shipped that way ever since.
+-- Production therefore already holds orders that genuinely say
+-- fulfillment_status = 'shipped' with a real shipped_at. If this column
+-- arrived as 'pending', or if any future sweep keys on NULL, the first
+-- run would email every one of those customers "Deine Bestellung ist
+-- unterwegs" about a parcel that was delivered weeks ago.
+--
+-- Nullable with no default removes that at the source rather than
+-- relying on a future query being careful. A historical order is NULL,
+-- which is true and is not a work item. 'failed' can only ever be written
+-- by code that genuinely tried to send and genuinely failed, so a sweep
+-- keyed on 'failed' cannot reach an order that never entered this flow.
+-- No backfill is performed and none is wanted: see verification (c).
+--
+-- ── EMAIL STATE NEVER TOUCHES BUSINESS STATE ──────────────────
+--
+-- The grant below is column-scoped to exactly these two columns, as 017's
+-- and 026's are. That is what makes the following guarantee structural
+-- rather than a convention: a shipment confirmation that fails to send
+-- cannot un-ship the order. service_role has no write access to
+-- fulfillment_status, to shipped_at, or to any of the tracking columns -
+-- migration 019 withheld those deliberately, and this migration does not
+-- hand them over. An email failure can write 'failed' and nothing else.
+--
+-- Nothing here can change status, payment_status or any money column
+-- either, and nothing here may ever be a reason not to ship or not to
+-- keep an order: the order row is the source of truth for fulfillment,
+-- the email is a notification about it.
+--
+-- ── NOT A SHIPMENT TRIGGER ────────────────────────────────────
+--
+-- This migration adds delivery state and nothing else. It creates no
+-- function, no trigger and no policy, and it grants no one the ability
+-- to mark an order shipped. There is still no server-side shipping
+-- transition in the application - see lib/shipmentConfirmationEmail.ts,
+-- which is TECHNISCH VORBEREITET and is called from nowhere. Applying
+-- this migration therefore sends no email, changes no behaviour, and is
+-- safe to apply before that decision is made.
+--
+-- No row is read, written or deleted by this migration.
+-- ============================================================
+
+alter table public.orders
+  add column shipment_email_status text
+    check (shipment_email_status in ('sending', 'sent', 'failed')),
+  add column shipment_email_sent_at timestamptz;
+
+-- The smallest grant that lets the shipment email state machine work and
+-- nothing more. service_role holds SELECT on public.orders (migration
+-- 011) plus column-scoped UPDATE on 017's two columns and 026's two;
+-- this adds a third pair. Every other order mutation still goes through
+-- a SECURITY DEFINER function that runs as its owner.
+
+grant update (shipment_email_status, shipment_email_sent_at)
+  on public.orders to service_role;
+
+-- VERIFY ───────────────────────────────────────────────────────
+--
+-- Read-only. Run after applying. No statement below writes a row.
+--
+-- (a) The two new columns. Expected: two rows, text and timestamptz,
+--     BOTH is_nullable = YES and BOTH column_default NULL. A default of
+--     'pending' here would mean every historical order had just been
+--     marked as owing a customer a shipment confirmation.
+--
+--   select column_name, data_type, is_nullable, column_default
+--   from information_schema.columns
+--   where table_schema = 'public'
+--     and table_name = 'orders'
+--     and column_name in ('shipment_email_status',
+--                         'shipment_email_sent_at')
+--   order by column_name;
+--
+-- (b) The status check accepts exactly the three attempted states.
+--     Expected: sending, sent, failed. No 'pending'.
+--
+--   select conname, pg_get_constraintdef(oid) as definition
+--   from pg_constraint
+--   where conrelid = 'public.orders'::regclass
+--     and contype = 'c'
+--     and pg_get_constraintdef(oid) like '%shipment_email_status%';
+--
+-- (c) THE IMPORTANT ONE, and on this migration it is the whole point.
+--     Every order must be NULL, INCLUDING the ones that are already
+--     shipped. already_shipped may well be greater than zero - that is
+--     expected and correct, those are real past shipments. What must be
+--     zero is with_state and sweep_eligible: not one of them is visible
+--     to any future sweep.
+--
+--     Expected: with_state = 0, sweep_eligible = 0, sent_at = 0,
+--     whatever orders and already_shipped happen to be.
+--
+--   select count(*)                                   as orders,
+--          count(*) filter (where fulfillment_status in ('shipped','delivered'))
+--                                                     as already_shipped,
+--          count(shipment_email_status)               as with_state,
+--          count(*) filter (where shipment_email_status = 'failed')
+--                                                     as sweep_eligible,
+--          count(shipment_email_sent_at)              as sent_at
+--   from public.orders;
+--
+-- (d) THE PRIVILEGE CHECK. Expected: service_role holds SELECT on the
+--     table plus column-scoped UPDATE on exactly six columns - 017's
+--     two, 026's two and this migration's two - and nothing else.
+--     In particular fulfillment_status, shipped_at, shipping_carrier,
+--     tracking_number and tracking_url must NOT appear: an email state
+--     machine that could write those could un-ship an order. anon and
+--     authenticated must not appear as UPDATE grantees at all.
+--
+--   select grantee, privilege_type
+--   from information_schema.role_table_grants
+--   where table_schema = 'public' and table_name = 'orders'
+--     and grantee in ('anon', 'authenticated', 'service_role')
+--   order by grantee, privilege_type;
+--
+--   select grantee, column_name, privilege_type
+--   from information_schema.column_privileges
+--   where table_schema = 'public' and table_name = 'orders'
+--     and privilege_type = 'UPDATE'
+--     and grantee in ('anon', 'authenticated', 'service_role')
+--   order by grantee, column_name;
+--
+-- (e) Nothing else moved. RLS on orders is untouched and the customer
+--     read policy from 004 is still the only one. A customer can read
+--     their own order's new columns through it and can write nothing.
+--
+--   select relrowsecurity, relforcerowsecurity
+--   from pg_class where oid = 'public.orders'::regclass;
+--
+--   select policyname, cmd, roles, qual
+--   from pg_policies
+--   where schemaname = 'public' and tablename = 'orders'
+--   order by policyname;
+--
+-- (f) Migrations 017 and 026 are unchanged and still work the same way.
+--     Expected: four columns, 017's status NOT NULL default 'pending',
+--     026's status nullable with no default.
+--
+--   select column_name, data_type, is_nullable, column_default
+--   from information_schema.columns
+--   where table_schema = 'public'
+--     and table_name = 'orders'
+--     and column_name in ('confirmation_email_status',
+--                         'confirmation_email_sent_at',
+--                         'internal_notification_status',
+--                         'internal_notification_sent_at')
+--   order by column_name;
+--
+-- (g) Migration 019's shipment columns and their constraints are
+--     untouched. Expected: the four columns still present and nullable,
+--     and the three CHECK constraints still there.
+--
+--   select column_name, is_nullable
+--   from information_schema.columns
+--   where table_schema = 'public' and table_name = 'orders'
+--     and column_name in ('shipping_carrier', 'tracking_number',
+--                         'tracking_url', 'shipped_at')
+--   order by column_name;
+--
+--   select conname, pg_get_constraintdef(oid) as definition
+--   from pg_constraint
+--   where conrelid = 'public.orders'::regclass
+--     and contype = 'c'
+--     and conname in ('orders_tracking_url_scheme_check',
+--                     'orders_tracking_number_not_blank_check',
+--                     'orders_shipping_carrier_not_blank_check')
+--   order by conname;

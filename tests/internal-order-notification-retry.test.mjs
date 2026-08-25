@@ -596,18 +596,27 @@ test("schedule: exactly one daily cron, as Vercel Hobby allows", () => {
 
 /* ── No migration was needed ────────────────────────────────── */
 
-test("migrations: 026 is still the last one and 022-026 are untouched", () => {
+test("migrations: the retry still adds none, and 022-026 are untouched", () => {
   const files = readdirSync(MIGRATIONS).filter(n => n.endsWith(".sql")).sort();
-  assert.equal(files[files.length - 1], "026_internal_order_notification_state.sql");
-  assert.equal(files.filter(n => /^02[7-9]|^0[3-9]\d/.test(n)).length, 0, "the retry added a migration");
   // The live, immutable ones are still exactly the files they were.
-  assert.deepEqual(files.slice(-5), [
+  assert.deepEqual(files.slice(-6, -1), [
     "022_recurring_subscription_foundation.sql",
     "023_harden_stripe_customers_grants.sql",
     "024_seed_b2c_subscription_plans.sql",
     "025_grant_subscription_plans_service_role.sql",
     "026_internal_order_notification_state.sql",
   ]);
+  // 027 exists now, and it belongs to the SHIPMENT confirmation, not to
+  // this retry. The rule this assertion protects is unchanged: the
+  // internal notification retry needs no migration of its own, and it
+  // must not acquire one by borrowing someone else's.
+  assert.equal(files[files.length - 1], "027_shipment_confirmation_email_state.sql");
+  assert.equal(files.filter(n => /^02[89]|^0[3-9]\d/.test(n)).length, 0, "the retry added a migration");
+  // Against 027's SQL only: its verification notes deliberately SELECT
+  // 026's columns to prove they are unchanged, and reading them is the
+  // opposite of reaching into them.
+  const shipment = withoutComments(read("supabase/migrations/027_shipment_confirmation_email_state.sql"));
+  assert.ok(!shipment.includes("internal_notification"), "027 writes the internal notification state");
   // The retry needs no column 026 did not already provide.
   const sql = read("supabase/migrations/026_internal_order_notification_state.sql");
   assert.match(sql, /check \(internal_notification_status in \('sending', 'sent', 'failed'\)\)/);

@@ -198,3 +198,40 @@ ${accountLinkHtml}
 
   return { subject, html, text };
 }
+
+/**
+ * The Resend idempotency key for one order's shipment confirmation.
+ *
+ * The provider-side half of the duplicate guard, exactly as
+ * internalOrderNotificationIdempotencyKey is for the fulfillment inbox.
+ * The database claim stops two workers from both starting a send; this
+ * stops an attempt that reached Resend but lost its state write from
+ * becoming a second email in the customer's inbox.
+ *
+ * WHY AN ORDER ID IS A SUFFICIENT KEY HERE, which is a claim about the
+ * schema and not a convenience. public.orders carries exactly one set of
+ * shipment columns - shipping_carrier, tracking_number, tracking_url,
+ * shipped_at (migration 019) - there is no shipments table and no
+ * shipment foreign key anywhere in the schema, and fulfillment_status is
+ * a single scalar whose vocabulary (migration 004) has no
+ * 'partially_shipped' value. A second, partial shipment of one order is
+ * therefore not representable at all today. One order is one shipment,
+ * so one order is one confirmation, so the order id identifies the
+ * message completely.
+ *
+ * IF THAT EVER CHANGES, this key must change with it, and changing it is
+ * not optional: a per-shipment key is required the moment a second
+ * shipment for one order becomes representable, or the second parcel's
+ * confirmation would be silently swallowed by the first one's key.
+ *
+ * The prefix namespaces it against the other GLOA messages about the
+ * same order - the customer's order confirmation and the internal
+ * fulfillment notification are different notifications and must never
+ * collide with this one. It carries no customer email, no name, no
+ * address, no tracking number and no timestamp: none of those belong in
+ * a request header, and a value that changed per attempt would defeat
+ * the entire purpose of an idempotency key.
+ */
+export function shipmentConfirmationIdempotencyKey(orderId: string): string {
+  return `gloa/shipment/${orderId}`;
+}
