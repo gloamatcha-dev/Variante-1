@@ -84,7 +84,16 @@ async function markSent(orderId: string): Promise<void> {
   if (error) console.error(`Internal order notification: mark-sent failed for order ${orderId}:`, error.message);
 }
 
-async function markFailed(orderId: string): Promise<void> {
+/**
+ * Returns a notification to 'failed' - the one state a retry may key on.
+ *
+ * Exported for the retry sweep (lib/internalOrderNotificationRetry.ts).
+ * A claim that dies between winning 'sending' and reaching the send would
+ * otherwise leave the row in 'sending', which nothing is eligible to pick
+ * up again. It writes the same value this file's own failure path writes,
+ * so calling it twice for one attempt is a no-op, not a state change.
+ */
+export async function markInternalNotificationFailed(orderId: string): Promise<void> {
   const admin = getSupabaseAdmin();
   if (!admin) return;
   const { error } = await admin
@@ -141,7 +150,7 @@ export type SendInternalOrderNotificationParams = {
 export async function sendInternalOrderNotificationIfNeeded(
   params: SendInternalOrderNotificationParams
 ): Promise<void> {
-  const { order, items, customerEmail, customerName, source } = params;
+  const { order } = params;
 
   const claim = await claimInternalNotification(order.id);
   if (claim === "already-sent") return;
@@ -149,10 +158,37 @@ export async function sendInternalOrderNotificationIfNeeded(
     throw new Error(`could not claim internal notification state for order ${order.id}`);
   }
 
+  await deliverClaimedInternalOrderNotification(params);
+}
+
+/**
+ * Renders and sends a notification whose claim has ALREADY been won, and
+ * records the outcome on the order.
+ *
+ * Split out of the function above so the retry sweep can reuse the exact
+ * send and the exact state writes while bringing its own, stricter claim:
+ * the webhook may claim a row that was never attempted (NULL) or that
+ * failed, while the sweep may only ever claim 'failed'. One send path,
+ * two entry conditions - rather than a second copy of the send, which
+ * would be a second place for the recipient, the template and the state
+ * machine to drift.
+ *
+ * It must only ever be called by a caller holding a won claim. It does
+ * not check the state itself, because by this point the row says
+ * 'sending' and re-reading it would only re-derive what the caller
+ * already atomically established.
+ *
+ * Throws on a genuine send failure, after returning the row to 'failed'.
+ */
+export async function deliverClaimedInternalOrderNotification(
+  params: SendInternalOrderNotificationParams
+): Promise<void> {
+  const { order, items, customerEmail, customerName, source } = params;
+
   const resend = getResendClient();
   if (!resend) {
     console.error("Internal order notification: RESEND_API_KEY is not configured.");
-    await markFailed(order.id);
+    await markInternalNotificationFailed(order.id);
     throw new Error("email provider not configured");
   }
 
@@ -189,7 +225,7 @@ export async function sendInternalOrderNotificationIfNeeded(
     // The order id only. A failed notification is not a reason to put a
     // customer's address or email into a log line.
     console.error(`Internal order notification: send failed for order ${order.id}:`, sendErrorMessage);
-    await markFailed(order.id);
+    await markInternalNotificationFailed(order.id);
     throw new Error(`internal order notification send failed for order ${order.id}`);
   }
 
