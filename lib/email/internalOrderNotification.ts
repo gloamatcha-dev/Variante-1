@@ -78,6 +78,38 @@ export type BuiltInternalOrderNotification = {
   text: string;
 };
 
+/**
+ * The provider-side duplicate guard for this message.
+ *
+ * One logical notification is "the internal notification for order X",
+ * and every attempt at it - the first Stripe webhook delivery, a Stripe
+ * redelivery, the daily failed-retry sweep, and a retry that follows a
+ * stale-'sending' recovery - produces exactly this key. Resend refuses a
+ * second send for a key it has already accepted, so an attempt that
+ * genuinely succeeded but lost its database write cannot become a second
+ * email in the fulfillment inbox.
+ *
+ * The order id is the whole input, deliberately. It is a GLOA uuid: it
+ * identifies the durable order and nothing else, it is not a credential,
+ * and it is already the primary key of the row the state machine locks.
+ * A customer email, a name, an address, a Stripe secret or an amount
+ * would all be worse keys as well as being data that has no business in
+ * a request header. A timestamp, a retry counter or a random value would
+ * be worse still: each of them would make every attempt a different key,
+ * which is exactly the property an idempotency key must not have.
+ *
+ * The prefix namespaces it against every other GLOA message about the
+ * same order - the customer confirmation is a different notification and
+ * must never collide with this one.
+ *
+ * Deliberately NOT hashed. The key travels to Resend over TLS in an
+ * Idempotency-Key header, it carries no secret, and a readable key is
+ * worth more in a provider log than an opaque digest.
+ */
+export function internalOrderNotificationIdempotencyKey(orderId: string): string {
+  return `gloa/internal-order/${orderId}`;
+}
+
 const BRAND = {
   blue: "#1746D1",
   berry: "#A61E59",

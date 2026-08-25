@@ -5,13 +5,21 @@ import {
   markInternalNotificationFailed,
 } from "./internalOrderNotificationEmail";
 import {
+  IN_FLIGHT_STATUS,
   RETRY_BATCH_LIMIT,
   RETRY_ELIGIBLE_STATUS,
+  STALE_RECOVERY_BATCH_LIMIT,
   runInternalNotificationRetrySweep,
+  runStaleSendingRecovery,
+  staleSendingCutoff,
+  type CronSweepSummary,
   type InternalNotificationRetrySummary,
   type RetryAttemptRow,
   type RetryClaimOutcome,
   type RetryOrderRow,
+  type StaleRecoveryOutcome,
+  type StaleRecoverySummary,
+  type StaleSendingRow,
 } from "./internalOrderNotificationRetryRules";
 import type { AddressSnapshot } from "./orderAddressSnapshot";
 
@@ -145,4 +153,112 @@ export async function retryFailedInternalOrderNotifications(
     logFailure: (orderId, message) =>
       console.error(`Internal order notification retry: order ${orderId} still failing:`, message),
   });
+}
+
+/**
+ * The stale work list: rows still at 'sending' that nothing has touched
+ * since the cutoff.
+ *
+ * Two equality/inequality filters and a bound, so a NULL, 'failed' or
+ * 'sent' row cannot appear in it and neither can a recently claimed one.
+ * Oldest first, so the longest-abandoned rows are recovered first if
+ * there are ever more than one batch of them.
+ */
+async function loadStaleSending(
+  admin: SupabaseClient,
+  cutoffIso: string,
+  limit: number
+): Promise<StaleSendingRow[]> {
+  const { data, error } = await admin
+    .from("orders")
+    .select("id, internal_notification_status, updated_at")
+    .eq("internal_notification_status", IN_FLIGHT_STATUS)
+    .lte("updated_at", cutoffIso)
+    .order("updated_at", { ascending: true })
+    .limit(limit);
+
+  if (error) throw new Error(`stale notification lookup failed: ${error.message}`);
+  return (data as StaleSendingRow[] | null) ?? [];
+}
+
+/**
+ * Hands one genuinely stale row back to the retry sweep: 'sending' ->
+ * 'failed', in a single conditional UPDATE.
+ *
+ * Both halves of the stale rule are re-checked AT WRITE TIME, against the
+ * same cutoff the work list used. The read is therefore never trusted: if
+ * the original worker was alive after all and moved the row to 'sent', to
+ * 'failed', or merely touched it and refreshed updated_at, this matches
+ * zero rows and changes nothing. A delivered notification cannot be
+ * un-sent by this and an active claim cannot be stolen from its holder.
+ *
+ * Losing that race yields "skipped", which is a normal outcome, not an
+ * error.
+ */
+async function recoverStaleSending(
+  admin: SupabaseClient,
+  orderId: string,
+  cutoffIso: string
+): Promise<StaleRecoveryOutcome> {
+  const { data, error } = await admin
+    .from("orders")
+    .update({ internal_notification_status: RETRY_ELIGIBLE_STATUS })
+    .eq("id", orderId)
+    .eq("internal_notification_status", IN_FLIGHT_STATUS)
+    .lte("updated_at", cutoffIso)
+    .select("id");
+
+  if (error) throw new Error(`stale notification recovery failed: ${error.message}`);
+  return (data?.length ?? 0) > 0 ? "recovered" : "skipped";
+}
+
+/**
+ * One bounded stale-recovery pass.
+ *
+ * Throws only when the sweep cannot run at all - no admin client, or the
+ * work-list query itself failed. A single unrecoverable row is counted
+ * and logged inside the rules, never thrown, so one bad order cannot keep
+ * every other abandoned notification stuck at 'sending'.
+ */
+export async function recoverStaleInternalNotifications(
+  now: Date = new Date(),
+  limit: number = STALE_RECOVERY_BATCH_LIMIT
+): Promise<StaleRecoverySummary> {
+  const admin = getSupabaseAdmin();
+  if (!admin) throw new Error("supabase admin client is not configured");
+
+  const cutoffIso = staleSendingCutoff(now);
+
+  return runStaleSendingRecovery(
+    {
+      loadStaleSending: cutoff => loadStaleSending(admin, cutoff, limit),
+      recover: (orderId, cutoff) => recoverStaleSending(admin, orderId, cutoff),
+      // The order id only. An abandoned claim is not a reason to put a
+      // customer's name, address or email into a log line.
+      logFailure: (orderId, message) =>
+        console.error(`Internal order notification recovery: order ${orderId} could not be recovered:`, message),
+    },
+    cutoffIso
+  );
+}
+
+/**
+ * What one cron invocation does, in this order and for this reason:
+ *
+ *   A. return genuinely stale 'sending' rows to 'failed'
+ *   B. run the existing failed-only sweep
+ *
+ * A before B, so a notification recovered this morning is delivered on
+ * the same run rather than waiting another day. B is unchanged and
+ * remains the only path that sends anything; A never builds an email and
+ * never touches a provider. Both halves are separately bounded, so the
+ * total work per invocation stays bounded too.
+ *
+ * A failure in either half propagates: a cron that could not do its work
+ * must answer with an error rather than a clean-looking set of zeroes.
+ */
+export async function runInternalOrderNotificationCron(now: Date = new Date()): Promise<CronSweepSummary> {
+  const recovery = await recoverStaleInternalNotifications(now);
+  const sweep = await retryFailedInternalOrderNotifications();
+  return { ...recovery, ...sweep };
 }

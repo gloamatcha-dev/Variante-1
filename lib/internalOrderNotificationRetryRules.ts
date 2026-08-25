@@ -34,6 +34,9 @@
 /** The one status this sweep may ever act on. */
 export const RETRY_ELIGIBLE_STATUS = "failed";
 
+/** The in-flight status. Owned by whichever worker won the claim. */
+export const IN_FLIGHT_STATUS = "sending";
+
 /**
  * How many failed notifications one run may attempt.
  *
@@ -287,3 +290,173 @@ export async function runInternalNotificationRetrySweep<TAddress>(
 
   return summary;
 }
+
+/* ══════════════════════════════════════════════════════════════
+   STALE 'sending' RECOVERY
+   ══════════════════════════════════════════════════════════════
+
+   The one gap the failed-only sweep above cannot see.
+
+   A worker that wins the claim (NULL-or-failed -> 'sending', or
+   failed -> 'sending') and then dies before writing either 'sent' or
+   'failed' leaves the row at 'sending' forever. 'sending' is deliberately
+   not eligible for the retry sweep - it means "another worker holds
+   this" - so nothing in the system would ever look at that row again,
+   and fulfillment would silently never hear about a paid order.
+
+   The fix is deliberately NOT a second sending path. Recovery only moves
+   a genuinely stale row back to 'failed'; the existing sweep then picks
+   it up on the same run and does the actual delivery through the one
+   send path there has ever been. Nothing here builds an email, and
+   nothing here talks to a mail provider.
+
+   WHY updated_at IS THE RIGHT CLOCK, AND WHY IT IS SAFE. public.orders
+   has carried a BEFORE UPDATE trigger since migration 004 that sets
+   updated_at = now() on every row update, unconditionally and without the
+   writer being able to influence it. The claim is an update, so
+   updated_at is at least as recent as the moment the row was claimed -
+   any later write (a refund sync, a status change) only pushes it
+   further forward, never back. That direction is what makes it safe
+   here: "updated_at is older than the cutoff" therefore implies "this
+   row was claimed at least that long ago", so a freshly claimed row can
+   never look stale. The reverse - a stale row that looks fresh because
+   something else touched it - only delays a recovery, and delaying a
+   recovery is the harmless direction.
+
+   created_at is deliberately not used: it is the age of the ORDER, not of
+   the claim, and every failed notification on an old order would look
+   stale immediately. */
+
+/**
+ * How long a row may sit at 'sending' before it is presumed abandoned.
+ *
+ * Conservative by an order of magnitude. A legitimate in-flight
+ * notification lives inside one serverless invocation, and the platform
+ * kills that invocation long before this: the Vercel ceiling for a
+ * function is minutes, not tens of minutes, and the repository sets no
+ * maxDuration override, so no legitimate attempt can still be running
+ * after thirty. Stripe gives up on a webhook response after thirty
+ * seconds; the daily cron finishes its bounded batch in seconds.
+ *
+ * A server-side constant, never a request parameter and never a customer
+ * setting: a caller who could shorten this could turn the recovery into a
+ * duplicate-notification generator.
+ */
+export const STALE_SENDING_AFTER_MS = 30 * 60 * 1000;
+
+/** How many stale rows one run may recover. Bounded like the sweep. */
+export const STALE_RECOVERY_BATCH_LIMIT = 25;
+
+/**
+ * The cutoff a row's updated_at must not be newer than.
+ *
+ * Takes `now` rather than reading the clock, so this file stays pure and
+ * the boundary is testable to the millisecond.
+ */
+export function staleSendingCutoff(now: Date | number): string {
+  const millis = now instanceof Date ? now.getTime() : now;
+  return new Date(millis - STALE_SENDING_AFTER_MS).toISOString();
+}
+
+/**
+ * The stale predicate, applied in code as well as in SQL.
+ *
+ * Inclusive at the boundary: a row whose updated_at is exactly the cutoff
+ * has been in flight for exactly the threshold and counts as stale. The
+ * same comparison is used by the query and by the conditional write, so
+ * all three agree on the boundary rather than differing by a millisecond.
+ */
+export function isStaleSending(
+  status: string | null | undefined,
+  updatedAt: string | null | undefined,
+  cutoffIso: string
+): boolean {
+  if (status !== IN_FLIGHT_STATUS) return false;
+  if (!updatedAt) return false;
+  const at = Date.parse(updatedAt);
+  const cutoff = Date.parse(cutoffIso);
+  if (Number.isNaN(at) || Number.isNaN(cutoff)) return false;
+  return at <= cutoff;
+}
+
+/** A candidate row. Three columns, none of them a customer fact. */
+export type StaleSendingRow = {
+  id: string;
+  internal_notification_status: string | null;
+  updated_at: string | null;
+};
+
+/** What one conditional recovery write concluded. */
+export type StaleRecoveryOutcome = "recovered" | "skipped";
+
+/** Counts only. Recovered ids stay internal to the caller. */
+export type StaleRecoverySummary = {
+  /** Rows that looked stale when the work list was read. */
+  staleFound: number;
+  /** Rows this run actually moved from 'sending' back to 'failed'. */
+  staleRecovered: number;
+};
+
+export type StaleSendingRecoveryPort = {
+  /** Rows at 'sending' whose updated_at is at or before the cutoff. */
+  loadStaleSending: (cutoffIso: string) => Promise<StaleSendingRow[]>;
+  /**
+   * The conditional write. Must verify BOTH that the row still says
+   * 'sending' AND that its updated_at is still at or before the same
+   * cutoff, in one statement. "skipped" means it lost the race, which is
+   * a normal outcome and not an error.
+   */
+  recover: (orderId: string, cutoffIso: string) => Promise<StaleRecoveryOutcome>;
+  /** Order id only. Never a customer fact. */
+  logFailure: (orderId: string, message: string) => void;
+};
+
+/**
+ * Moves genuinely stale 'sending' rows back to 'failed'.
+ *
+ * RACE BEHAVIOUR. The work list is a read, and a read is never trusted:
+ * every recovery is a conditional UPDATE that re-checks the status and
+ * the cutoff at write time. So if the original worker was not dead after
+ * all and finished between the read and the write - by moving the row to
+ * 'sent', or to 'failed', or simply by touching it and refreshing
+ * updated_at - the write matches nothing and the row is left exactly as
+ * that worker left it. A 'sent' notification can therefore never be
+ * un-sent by this, and a genuinely active claim can never be stolen.
+ *
+ * It sends nothing. Recovery hands the row to the existing failed-only
+ * sweep, which is and remains the only path that delivers a retry.
+ *
+ * A single row that cannot be recovered is counted and logged, never
+ * thrown: one bad row must not keep the rest of the batch stuck at
+ * 'sending' forever. A failure of the work-list query itself is a
+ * different thing entirely and is left to propagate - see the caller.
+ */
+export async function runStaleSendingRecovery(
+  port: StaleSendingRecoveryPort,
+  cutoffIso: string
+): Promise<StaleRecoverySummary> {
+  const summary: StaleRecoverySummary = { staleFound: 0, staleRecovered: 0 };
+
+  const rows = await port.loadStaleSending(cutoffIso);
+
+  for (const row of rows) {
+    // The in-code half of the stale rule. The query already applies it;
+    // this refuses a row that reached the loop anyway - a NULL, 'failed'
+    // or 'sent' row, or one that is not old enough - before it can be
+    // written to at all.
+    if (!isStaleSending(row.internal_notification_status, row.updated_at, cutoffIso)) continue;
+
+    summary.staleFound += 1;
+
+    try {
+      if ((await port.recover(row.id, cutoffIso)) === "recovered") summary.staleRecovered += 1;
+    } catch (err) {
+      port.logFailure(row.id, err instanceof Error ? err.message : "unknown error");
+    }
+  }
+
+  return summary;
+}
+
+/** What one cron invocation reports: recovery first, then the sweep. */
+export type CronSweepSummary = StaleRecoverySummary & InternalNotificationRetrySummary;

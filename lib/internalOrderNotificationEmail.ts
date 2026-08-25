@@ -5,6 +5,7 @@ import { GLOA_FROM_HELLO, GLOA_INTERNAL_ORDERS } from "./emailSenders";
 import type { AddressSnapshot } from "./orderAddressSnapshot";
 import {
   buildInternalOrderNotificationEmail,
+  internalOrderNotificationIdempotencyKey,
   type InternalOrderAddress,
   type InternalOrderItem,
   type InternalOrderNotificationOrder,
@@ -90,8 +91,21 @@ async function markSent(orderId: string): Promise<void> {
  * Exported for the retry sweep (lib/internalOrderNotificationRetry.ts).
  * A claim that dies between winning 'sending' and reaching the send would
  * otherwise leave the row in 'sending', which nothing is eligible to pick
- * up again. It writes the same value this file's own failure path writes,
- * so calling it twice for one attempt is a no-op, not a state change.
+ * up again.
+ *
+ * CONDITIONAL ON STILL BEING 'sending', which is the state a caller
+ * holding a won claim put it in. Writing 'failed' over any other state is
+ * never correct, and one case is actively harmful: a worker that hung
+ * long enough for the stale recovery to take its row back could otherwise
+ * come round, write 'failed' over a notification a later worker had
+ * genuinely delivered, and cause a duplicate on the next sweep. The
+ * condition also makes the double call in the sweep's error path a true
+ * no-op - the first write already moved the row off 'sending'.
+ *
+ * The counterpart mark-sent is deliberately NOT conditional: 'sent'
+ * records that Resend accepted the message, which is true whatever the
+ * row says by then, and suppressing that write would invite a duplicate
+ * rather than prevent one.
  */
 export async function markInternalNotificationFailed(orderId: string): Promise<void> {
   const admin = getSupabaseAdmin();
@@ -99,7 +113,8 @@ export async function markInternalNotificationFailed(orderId: string): Promise<v
   const { error } = await admin
     .from("orders")
     .update({ internal_notification_status: "failed" })
-    .eq("id", orderId);
+    .eq("id", orderId)
+    .eq("internal_notification_status", "sending");
   if (error) console.error(`Internal order notification: mark-failed failed for order ${orderId}:`, error.message);
 }
 
@@ -207,15 +222,24 @@ export async function deliverClaimedInternalOrderNotification(
 
   const { subject, html, text } = buildInternalOrderNotificationEmail({ order: emailOrder, items });
 
+  // The provider-side half of the duplicate guard. The database claim
+  // stops two workers from both starting a send; this stops an attempt
+  // that reached Resend but lost its state write from becoming a second
+  // email. Same order, same key, on every attempt from every path.
+  const idempotencyKey = internalOrderNotificationIdempotencyKey(order.id);
+
   let sendErrorMessage: string | null = null;
   try {
-    const { error } = await resend.emails.send({
-      from: GLOA_FROM_HELLO,
-      to: GLOA_INTERNAL_ORDERS,
-      subject,
-      html,
-      text,
-    });
+    const { error } = await resend.emails.send(
+      {
+        from: GLOA_FROM_HELLO,
+        to: GLOA_INTERNAL_ORDERS,
+        subject,
+        html,
+        text,
+      },
+      { idempotencyKey }
+    );
     if (error) sendErrorMessage = error.message;
   } catch (err) {
     sendErrorMessage = err instanceof Error ? err.message : "unknown error";

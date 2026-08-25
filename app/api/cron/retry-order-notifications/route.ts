@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
-import { retryFailedInternalOrderNotifications } from "../../../../lib/internalOrderNotificationRetry";
+import { runInternalOrderNotificationCron } from "../../../../lib/internalOrderNotificationRetry";
 
 /**
  * Vercel Cron entry point for the internal order notification safety net.
@@ -18,6 +18,20 @@ import { retryFailedInternalOrderNotifications } from "../../../../lib/internalO
  * no email address, no name, no address and no amount: this is an
  * operational health signal, and a personal-data leak is not worth the
  * convenience of a detailed answer that only a cron ever reads.
+ *
+ * WHAT ONE INVOCATION DOES, in this order:
+ *
+ *   A. return genuinely stale 'sending' rows to 'failed'
+ *   B. run the failed-only retry sweep
+ *
+ * A exists because a worker that wins a claim and then dies leaves a row
+ * at 'sending', which the sweep deliberately cannot see - see
+ * lib/internalOrderNotificationRetryRules.ts. A sends nothing; it only
+ * makes an abandoned row visible to B, which remains the single delivery
+ * path. Both halves are separately bounded.
+ *
+ * Either half failing is a 500. A cron that could not do its work must
+ * not answer with a clean-looking set of zeroes.
  *
  * GET because that is what Vercel Cron issues.
  *
@@ -81,7 +95,7 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   try {
-    const summary = await retryFailedInternalOrderNotifications();
+    const summary = await runInternalOrderNotificationCron();
     return Response.json(summary, { status: 200 });
   } catch (err) {
     console.error(

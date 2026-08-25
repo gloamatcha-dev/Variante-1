@@ -7,12 +7,22 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeBlockedServerEnv } from "./helpers/testSupabase.mjs";
 import {
+  IN_FLIGHT_STATUS,
   RETRY_BATCH_LIMIT,
   RETRY_ELIGIBLE_STATUS,
+  STALE_RECOVERY_BATCH_LIMIT,
+  STALE_SENDING_AFTER_MS,
   buildRetryNotificationParams,
   isRetryEligibleStatus,
+  isStaleSending,
   runInternalNotificationRetrySweep,
+  runStaleSendingRecovery,
+  staleSendingCutoff,
 } from "../lib/internalOrderNotificationRetryRules.ts";
+import {
+  buildInternalOrderNotificationEmail,
+  internalOrderNotificationIdempotencyKey,
+} from "../lib/email/internalOrderNotification.ts";
 
 // SAFE DEFAULT SUITE: the pure sweep logic driven through an in-memory
 // port, source-level checks, and two spawned servers that are started
@@ -34,6 +44,7 @@ const rules = read("lib/internalOrderNotificationRetryRules.ts");
 const wiring = read("lib/internalOrderNotificationRetry.ts");
 const route = read("app/api/cron/retry-order-notifications/route.ts");
 const sender = read("lib/internalOrderNotificationEmail.ts");
+const template = read("lib/email/internalOrderNotification.ts");
 const vercelConfig = JSON.parse(read("vercel.json"));
 
 const withoutComments = source => source
@@ -448,8 +459,13 @@ test("sql: the claim is one conditional UPDATE that only 'failed' can win", () =
 });
 
 test("sql: the sweep writes notification state and nothing else", () => {
+  // Exactly two writes exist in this file: the claim (failed -> sending)
+  // and the stale recovery (sending -> failed). Neither sends anything
+  // and neither touches a column outside the notification state.
   const updates = [...wiringCode.matchAll(/\.update\(\{([^}]*)\}\)/g)].map(m => m[1]);
-  assert.equal(updates.length, 1, "the retry issues an update besides the claim");
+  assert.equal(updates.length, 2, "the retry issues a write it did not have");
+  assert.match(updates[0], /internal_notification_status: "sending"/);
+  assert.match(updates[1], /internal_notification_status: RETRY_ELIGIBLE_STATUS/);
   for (const payload of updates) {
     assert.match(payload, /internal_notification_status/);
     for (const forbidden of ["payment_status", "total_", "placed_at", "fulfillment_status", "confirmation_email"]) {
@@ -490,7 +506,7 @@ test("endpoint: it fails closed when CRON_SECRET is missing", () => {
   assert.ok(guard > 0, "a missing secret is not checked at all");
   assert.ok(guard < handler.indexOf("isAuthorized("), "the secret is used before it is checked");
   assert.ok(guard < handler.indexOf("getSupabaseAdmin("), "the database is reached before the check");
-  assert.ok(guard < handler.indexOf("retryFailedInternalOrderNotifications("), "work happens before the check");
+  assert.ok(guard < handler.indexOf("runInternalOrderNotificationCron("), "work happens before the check");
   assert.match(handler, /return Response\.json\(\{ error: "[^"]+" \}, \{ status: 503 \}\);/);
 });
 
@@ -546,6 +562,18 @@ test("endpoint: it answers with counts and no customer data", () => {
   for (const leak of ["orderNumber", "order_number", "email", "name", "address", "orderId", "ids"]) {
     assert.ok(!summaryBlock.includes(leak), `the response carries ${leak}`);
   }
+
+  // What the endpoint actually returns is the merged summary: the two
+  // recovery counts plus the four sweep counts, and nothing else.
+  assert.match(rules, /export type CronSweepSummary = StaleRecoverySummary & InternalNotificationRetrySummary;/);
+  const staleBlock = rules.slice(
+    rules.indexOf("export type StaleRecoverySummary = {"),
+    rules.indexOf("};", rules.indexOf("export type StaleRecoverySummary = {"))
+  );
+  assert.deepEqual([...staleBlock.matchAll(/^\s*(\w+): number;/gm)].map(m => m[1]), ["staleFound", "staleRecovered"]);
+  for (const leak of ["orderNumber", "order_number", "email", "name", "address", "orderId", "ids"]) {
+    assert.ok(!staleBlock.includes(leak), `the recovery response carries ${leak}`);
+  }
 });
 
 /* ── The schedule ───────────────────────────────────────────── */
@@ -584,6 +612,364 @@ test("migrations: 026 is still the last one and 022-026 are untouched", () => {
   const sql = read("supabase/migrations/026_internal_order_notification_state.sql");
   assert.match(sql, /check \(internal_notification_status in \('sending', 'sent', 'failed'\)\)/);
   assert.match(sql, /grant update \(internal_notification_status, internal_notification_sent_at\)/);
+});
+
+/* ── Stale 'sending' recovery ───────────────────────────────── */
+
+const NOW = Date.parse("2026-08-25T06:00:00.000Z");
+const CUTOFF = staleSendingCutoff(NOW);
+const minutesAgo = m => new Date(NOW - m * 60 * 1000).toISOString();
+
+const staleRow = (overrides = {}) => ({
+  id: "order-1",
+  internal_notification_status: IN_FLIGHT_STATUS,
+  updated_at: minutesAgo(90),
+  ...overrides,
+});
+
+/**
+ * A model of the live conditional recovery: the write re-checks BOTH the
+ * status and the cutoff, so anything another worker did between the read
+ * and the write makes it match nothing.
+ */
+function makeRecoveryPort(rows, options = {}) {
+  const { failOn = new Set(), beforeRecover = () => {} } = options;
+  const state = new Map(rows.map(row => [row.id, { ...row }]));
+  const calls = { recovered: [], attempted: [], logged: [] };
+
+  const port = {
+    loadStaleSending: async cutoff =>
+      rows
+        .map(row => ({ ...row }))
+        .filter(row => isStaleSending(row.internal_notification_status, row.updated_at, cutoff)),
+    recover: async (orderId, cutoff) => {
+      calls.attempted.push(orderId);
+      if (failOn.has(orderId)) throw new Error("recovery write failed");
+      beforeRecover(orderId, state);
+      const row = state.get(orderId);
+      if (!row || !isStaleSending(row.internal_notification_status, row.updated_at, cutoff)) return "skipped";
+      row.internal_notification_status = RETRY_ELIGIBLE_STATUS;
+      row.updated_at = new Date(NOW).toISOString();
+      calls.recovered.push(orderId);
+      return "recovered";
+    },
+    logFailure: (orderId, message) => calls.logged.push([orderId, message]),
+  };
+
+  return { port, state, calls };
+}
+
+test("stale: the threshold is a conservative server-side constant", () => {
+  assert.equal(STALE_SENDING_AFTER_MS, 30 * 60 * 1000);
+  // Comfortably beyond any legitimate in-flight attempt: one notification
+  // lives inside a single serverless invocation, and the platform kills
+  // that in minutes. No override exists in the repository.
+  assert.ok(STALE_SENDING_AFTER_MS >= 15 * 60 * 1000, "the threshold is not conservative");
+  assert.ok(!/maxDuration/.test(route), "a duration override appeared and the threshold was not revisited");
+  assert.equal(staleSendingCutoff(NOW), new Date(NOW - STALE_SENDING_AFTER_MS).toISOString());
+  // The cutoff is derived from a passed clock, never read inside the rules.
+  assert.ok(!/new Date\(\)|Date\.now\(\)/.test(withoutComments(rules)), "the rules read the clock themselves");
+});
+
+test("stale: a recent sending row is not stale", () => {
+  for (const minutes of [0, 1, 5, 29]) {
+    assert.equal(
+      isStaleSending(IN_FLIGHT_STATUS, minutesAgo(minutes), CUTOFF),
+      false,
+      `${minutes} minutes old was treated as abandoned`
+    );
+  }
+});
+
+test("stale: the boundary is deterministic and inclusive", () => {
+  const exactly = new Date(NOW - STALE_SENDING_AFTER_MS).toISOString();
+  assert.equal(isStaleSending(IN_FLIGHT_STATUS, exactly, CUTOFF), true, "exactly at the cutoff must be stale");
+  const oneMsNewer = new Date(NOW - STALE_SENDING_AFTER_MS + 1).toISOString();
+  assert.equal(isStaleSending(IN_FLIGHT_STATUS, oneMsNewer, CUTOFF), false, "one millisecond inside must not be stale");
+  const oneMsOlder = new Date(NOW - STALE_SENDING_AFTER_MS - 1).toISOString();
+  assert.equal(isStaleSending(IN_FLIGHT_STATUS, oneMsOlder, CUTOFF), true);
+});
+
+test("stale: an old sending row is stale", () => {
+  for (const minutes of [31, 90, 60 * 24 * 7]) {
+    assert.equal(isStaleSending(IN_FLIGHT_STATUS, minutesAgo(minutes), CUTOFF), true, `${minutes} minutes old`);
+  }
+});
+
+test("stale: only 'sending' can ever be stale", () => {
+  // A historical NULL row, a done row and an ordinary failed row are all
+  // outside this mechanism entirely, however old they are.
+  for (const status of [null, undefined, "sent", "failed", "pending", ""]) {
+    assert.equal(
+      isStaleSending(status, minutesAgo(60 * 24 * 365), CUTOFF),
+      false,
+      `${String(status)} was treated as an abandoned claim`
+    );
+  }
+  // A missing or unparseable timestamp is never stale either.
+  for (const updatedAt of [null, undefined, "", "not-a-date"]) {
+    assert.equal(isStaleSending(IN_FLIGHT_STATUS, updatedAt, CUTOFF), false);
+  }
+});
+
+test("stale: a stale row is atomically returned to 'failed'", async () => {
+  const { port, state, calls } = makeRecoveryPort([staleRow()]);
+  const summary = await runStaleSendingRecovery(port, CUTOFF);
+
+  assert.deepEqual(summary, { staleFound: 1, staleRecovered: 1 });
+  assert.deepEqual(calls.recovered, ["order-1"]);
+  assert.equal(state.get("order-1").internal_notification_status, RETRY_ELIGIBLE_STATUS);
+});
+
+test("stale: a recovered row is exactly what the failed sweep is looking for", async () => {
+  const { port, state } = makeRecoveryPort([staleRow()]);
+  await runStaleSendingRecovery(port, CUTOFF);
+
+  // The handover between the two halves of the cron, stated as one
+  // assertion: recovery writes the one status the sweep can see.
+  assert.equal(isRetryEligibleStatus(state.get("order-1").internal_notification_status), true);
+});
+
+test("stale: sent, failed and historical NULL rows are never recovered", async () => {
+  const { port, state, calls } = makeRecoveryPort([
+    staleRow({ id: "done", internal_notification_status: "sent" }),
+    staleRow({ id: "owed", internal_notification_status: "failed" }),
+    staleRow({ id: "historical", internal_notification_status: null }),
+  ]);
+  const summary = await runStaleSendingRecovery(port, CUTOFF);
+
+  assert.deepEqual(summary, { staleFound: 0, staleRecovered: 0 });
+  assert.deepEqual(calls.attempted, [], "a row outside the mechanism was written to");
+  assert.equal(state.get("done").internal_notification_status, "sent");
+  assert.equal(state.get("owed").internal_notification_status, "failed");
+  assert.equal(state.get("historical").internal_notification_status, null);
+});
+
+test("stale: a fresh sending row is never recovered", async () => {
+  const { port, state, calls } = makeRecoveryPort([staleRow({ updated_at: minutesAgo(2) })]);
+  const summary = await runStaleSendingRecovery(port, CUTOFF);
+
+  assert.deepEqual(summary, { staleFound: 0, staleRecovered: 0 });
+  assert.deepEqual(calls.attempted, []);
+  assert.equal(state.get("order-1").internal_notification_status, IN_FLIGHT_STATUS);
+});
+
+test("stale: recovery loses safely when the original worker finishes first", async () => {
+  // It was not dead after all: it delivered and wrote 'sent' between the
+  // read and the conditional write.
+  const { port, state, calls } = makeRecoveryPort([staleRow()], {
+    beforeRecover: (orderId, s) => {
+      s.get(orderId).internal_notification_status = "sent";
+    },
+  });
+  const summary = await runStaleSendingRecovery(port, CUTOFF);
+
+  assert.deepEqual(summary, { staleFound: 1, staleRecovered: 0 });
+  assert.deepEqual(calls.recovered, [], "a delivered notification was un-sent");
+  assert.equal(state.get("order-1").internal_notification_status, "sent");
+});
+
+test("stale: recovery never overwrites a claim that has just been refreshed", async () => {
+  // Another worker touched the row, so its updated_at is inside the
+  // window again. The conditional write re-checks the cutoff, not just
+  // the status, and therefore matches nothing.
+  const { port, state, calls } = makeRecoveryPort([staleRow()], {
+    beforeRecover: (orderId, s) => {
+      s.get(orderId).updated_at = minutesAgo(1);
+    },
+  });
+  const summary = await runStaleSendingRecovery(port, CUTOFF);
+
+  assert.deepEqual(summary, { staleFound: 1, staleRecovered: 0 });
+  assert.deepEqual(calls.recovered, []);
+  assert.equal(state.get("order-1").internal_notification_status, IN_FLIGHT_STATUS);
+});
+
+test("stale: two recoveries racing the same row recover it once", async () => {
+  const rows = [staleRow()];
+  const shared = makeRecoveryPort(rows);
+  const rival = { ...shared.port };
+
+  const [a, b] = await Promise.all([
+    runStaleSendingRecovery(shared.port, CUTOFF),
+    runStaleSendingRecovery(rival, CUTOFF),
+  ]);
+
+  assert.equal(a.staleRecovered + b.staleRecovered, 1, "the row was recovered twice");
+  assert.deepEqual(shared.calls.recovered, ["order-1"]);
+});
+
+test("stale: one unrecoverable row does not block the others", async () => {
+  const { port, state, calls } = makeRecoveryPort(
+    [staleRow({ id: "a" }), staleRow({ id: "poison" }), staleRow({ id: "b" })],
+    { failOn: new Set(["poison"]) }
+  );
+  const summary = await runStaleSendingRecovery(port, CUTOFF);
+
+  assert.deepEqual(summary, { staleFound: 3, staleRecovered: 2 });
+  assert.equal(state.get("a").internal_notification_status, RETRY_ELIGIBLE_STATUS);
+  assert.equal(state.get("b").internal_notification_status, RETRY_ELIGIBLE_STATUS);
+  assert.equal(state.get("poison").internal_notification_status, IN_FLIGHT_STATUS);
+  assert.equal(calls.logged.length, 1);
+  assert.equal(calls.logged[0][0], "poison");
+});
+
+test("stale: a work-list failure is infrastructure and is not swallowed", async () => {
+  const port = {
+    loadStaleSending: async () => {
+      throw new Error("stale notification lookup failed: connection reset");
+    },
+    recover: async () => assert.fail("nothing may be written when the work list could not be read"),
+    logFailure: () => assert.fail("a query failure is not a row failure"),
+  };
+  await assert.rejects(() => runStaleSendingRecovery(port, CUTOFF), /stale notification lookup failed/);
+});
+
+test("stale: recovery sends nothing and knows nothing about email", () => {
+  const recovery = rules.slice(rules.indexOf("export async function runStaleSendingRecovery"));
+  for (const forbidden of ["deliver", "resend", "Resend", "subject", "html", "@gloamatcha"]) {
+    assert.ok(!recovery.includes(forbidden), `the stale recovery reaches for ${forbidden}`);
+  }
+  // The port it is given has no delivery seam at all.
+  const portBlock = rules.slice(
+    rules.indexOf("export type StaleSendingRecoveryPort = {"),
+    rules.indexOf("};", rules.indexOf("export type StaleSendingRecoveryPort = {"))
+  );
+  assert.ok(!/deliver|markFailed|send\(/.test(portBlock), "the recovery port can send");
+});
+
+test("stale: the recovery run is bounded", () => {
+  assert.ok(STALE_RECOVERY_BATCH_LIMIT > 0 && STALE_RECOVERY_BATCH_LIMIT <= 50);
+  assert.match(wiringCode, /\.limit\(limit\)/);
+  assert.match(wiringCode, /limit: number = STALE_RECOVERY_BATCH_LIMIT/);
+});
+
+test("stale sql: the query and the write agree on both halves of the rule", () => {
+  const list = wiringCode.slice(wiringCode.indexOf("async function loadStaleSending"));
+  assert.match(list, /\.eq\("internal_notification_status", IN_FLIGHT_STATUS\)/);
+  assert.match(list, /\.lte\("updated_at", cutoffIso\)/);
+
+  const write = wiringCode.slice(wiringCode.indexOf("async function recoverStaleSending"));
+  assert.match(write, /\.update\(\{ internal_notification_status: RETRY_ELIGIBLE_STATUS \}\)/);
+  assert.match(write, /\.eq\("id", orderId\)/);
+  // BOTH conditions re-checked at write time. Without the second one a
+  // refreshed claim could be stolen from a worker that is still alive.
+  assert.match(write, /\.eq\("internal_notification_status", IN_FLIGHT_STATUS\)/);
+  assert.match(write, /\.lte\("updated_at", cutoffIso\)/);
+  assert.match(write, /\.select\("id"\)/);
+  assert.match(write, /\(data\?\.length \?\? 0\) > 0 \? "recovered" : "skipped"/);
+  // created_at is the age of the order, not of the claim, and is never used.
+  assert.ok(!/created_at/.test(wiringCode), "the recovery keys on the order's age");
+});
+
+test("cron: recovery runs first, then the unchanged failed sweep", () => {
+  const cron = wiringCode.slice(wiringCode.indexOf("export async function runInternalOrderNotificationCron"));
+  const recover = cron.indexOf("recoverStaleInternalNotifications(");
+  const sweep = cron.indexOf("retryFailedInternalOrderNotifications(");
+  assert.ok(recover > 0 && sweep > recover, "the sweep runs before the recovery it depends on");
+  // One cron, not two. vercel.json still registers a single daily job.
+  assert.equal(vercelConfig.crons.length, 1);
+});
+
+/* ── Provider-level duplicate suppression ───────────────────── */
+
+const ORDER_ID = "3f4a6b2c-0000-4d1e-9a77-1c2b3d4e5f60";
+
+test("idempotency: the key is deterministic for one order", () => {
+  const first = internalOrderNotificationIdempotencyKey(ORDER_ID);
+  assert.equal(first, `gloa/internal-order/${ORDER_ID}`);
+  // Every attempt from every path derives it the same way, so the first
+  // webhook delivery, a Stripe redelivery, the failed sweep and a retry
+  // after a stale recovery all present the same key.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    assert.equal(internalOrderNotificationIdempotencyKey(ORDER_ID), first);
+  }
+});
+
+test("idempotency: different orders never share a key", () => {
+  const other = "9c8b7a65-0000-4d1e-9a77-1c2b3d4e5f60";
+  assert.notEqual(internalOrderNotificationIdempotencyKey(ORDER_ID), internalOrderNotificationIdempotencyKey(other));
+  // And the internal notification is namespaced away from any other GLOA
+  // message about the same order.
+  assert.match(internalOrderNotificationIdempotencyKey(ORDER_ID), /^gloa\/internal-order\//);
+});
+
+test("idempotency: the key carries no customer data and no clock", () => {
+  const key = internalOrderNotificationIdempotencyKey(ORDER_ID);
+  for (const leak of ["@", "kundin", "Test Kundin", "Teststrasse", "Berlin", "GLOA-2026", "sk_", "re_", "whsec_", "pi_", "in_"]) {
+    assert.ok(!key.includes(leak), `the idempotency key carries ${leak}`);
+  }
+  // No timestamp, no counter, no randomness: a key that changed per
+  // attempt would suppress nothing at all.
+  assert.ok(!/\d{4}-\d{2}-\d{2}|\d{13}/.test(key), "the key contains a timestamp");
+  const templateCode = withoutComments(template);
+  const builder = templateCode
+    .slice(templateCode.indexOf("export function internalOrderNotificationIdempotencyKey"))
+    .slice(0, 200);
+  for (const forbidden of ["Date", "random", "attempt", "retry", "count"]) {
+    assert.ok(!builder.includes(forbidden), `the key builder uses ${forbidden}`);
+  }
+  // Resend rejects an over-long key; this one is a prefix plus a uuid.
+  assert.ok(key.length <= 256);
+});
+
+test("idempotency: the provider call actually receives the key", () => {
+  // The seam that matters is the real send, not a test double.
+  assert.match(senderCode, /const idempotencyKey = internalOrderNotificationIdempotencyKey\(order\.id\);/);
+  const send = senderCode.slice(senderCode.indexOf("resend.emails.send"));
+  assert.match(send, /to: GLOA_INTERNAL_ORDERS/);
+  assert.ok(send.indexOf("{ idempotencyKey }") > 0, "the send does not pass the option");
+  // It is derived from the durable order id and from nothing else.
+  assert.ok(!/idempotencyKey = .*(customerEmail|customerName|Date|random)/.test(senderCode));
+});
+
+test("idempotency: the installed SDK supports the option", () => {
+  const pkg = JSON.parse(read("package.json"));
+  assert.match(pkg.dependencies.resend, /6\./);
+  const types = read("node_modules/resend/dist/index.d.mts");
+  assert.match(types, /interface CreateEmailRequestOptions extends PostOptions, IdempotentRequest/);
+  assert.match(types, /idempotencyKey\?: string;/);
+  assert.match(types, /send\(payload: CreateEmailOptions, options\?: CreateEmailRequestOptions\)/);
+});
+
+test("idempotency: the payload for one order is stable across attempts", () => {
+  // Same frozen row, same frozen attempt, twice - as the webhook and a
+  // later retry both see it.
+  const first = buildRetryNotificationParams(orderRow(), attemptRow());
+  const second = buildRetryNotificationParams(orderRow(), attemptRow());
+  assert.deepEqual(first, second);
+
+  const render = params => buildInternalOrderNotificationEmail({
+    order: {
+      order_number: params.order.order_number,
+      currency: params.order.currency,
+      subtotal_gross_cents: params.order.subtotal_gross_cents,
+      shipping_gross_cents: params.order.shipping_gross_cents,
+      total_gross_cents: params.order.total_gross_cents,
+      shippingAddress: null,
+      customerEmail: params.customerEmail,
+      customerName: params.customerName,
+      source: params.source,
+      stripeInvoiceId: params.stripeInvoiceId,
+    },
+    items: params.items,
+  });
+  assert.deepEqual(render(first), render(second), "the same order renders differently on a second attempt");
+
+  // Nothing in the rendered message can vary between attempts.
+  const templateCode = withoutComments(template);
+  for (const forbidden of ["new Date(", "Date.now(", "Math.random(", "process.env"]) {
+    assert.ok(!templateCode.includes(forbidden), `the template injects ${forbidden}`);
+  }
+});
+
+test("idempotency: mark-failed can never resurrect a delivered notification", () => {
+  // A worker that hung long enough to be recovered must not come round
+  // and write 'failed' over a notification a later worker delivered.
+  const markFailed = senderCode.slice(senderCode.indexOf("export async function markInternalNotificationFailed"));
+  assert.match(markFailed, /\.update\(\{ internal_notification_status: "failed" \}\)/);
+  assert.match(markFailed, /\.eq\("id", orderId\)/);
+  assert.match(markFailed, /\.eq\("internal_notification_status", "sending"\)/);
 });
 
 /* ── The HTTP boundary, on real spawned servers ─────────────── */
