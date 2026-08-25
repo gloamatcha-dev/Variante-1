@@ -780,7 +780,9 @@ test("boundary: the live migrations are untouched and 024 owns its number", () =
   // exist; what must not happen is 024 being split, renumbered or edited
   // now that it is live.
   assert.deepEqual(files.filter(n => n.startsWith("024")), ["024_seed_b2c_subscription_plans.sql"]);
-  assert.ok(files.length <= 25, "an unexpected extra migration appeared");
+  // Later migrations are allowed to exist; what must not happen is 024
+  // being split, renumbered or edited now that it is live.
+  assert.ok(files.length >= 24, "a migration disappeared");
   // 022 and 023 are live; their statements must still be exactly as applied.
   const m022 = read("supabase/migrations/022_recurring_subscription_foundation.sql");
   assert.match(m022, /create table public\.stripe_customers \(/);

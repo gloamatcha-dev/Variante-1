@@ -16,6 +16,7 @@ import { syncOrderRefundStateFromStripe } from "../../../../lib/orderRefunds";
 import { createOrderFromPaidCheckoutAttempt } from "../../../../lib/orderFulfillment";
 import { buildShippingAddressSnapshot, buildBillingAddressSnapshot } from "../../../../lib/orderAddressSnapshot";
 import { sendOrderConfirmationEmailIfNeeded } from "../../../../lib/orderConfirmationEmail";
+import { sendInternalOrderNotificationIfNeeded } from "../../../../lib/internalOrderNotificationEmail";
 import { fulfillPaidSubscriptionInvoice, subscriptionInvoiceDeps } from "../../../../lib/subscriptionInvoiceFulfillment";
 import { idOf, resolveGloaSubscriptionId, stripeSubscriptionIdMatches } from "../../../../lib/subscriptionInvoiceRules";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
@@ -250,6 +251,27 @@ async function handleCheckoutSessionCompleted(stripe: Stripe, eventSession: Stri
   // without needing a second, bespoke retry system. The order itself
   // is already fully created and paid at this point regardless of
   // whether the email ultimately succeeds.
+  // Fulfillment first, and deliberately BEFORE the customer email. This
+  // one never throws: an internal notification is operationally useful
+  // but the order row is the record, and letting a flaky notification
+  // turn a settled payment into a repeatedly failing webhook would trade
+  // a small problem for a larger one. A failure is recorded as 'failed'
+  // on the order and stays sweepable.
+  await sendInternalOrderNotificationIfNeeded({
+    order,
+    items: attempt.items_snapshot.map(item => ({
+      productName: item.productName,
+      variantLabel: item.variantLabel,
+      quantity: item.quantity,
+      unitGrossCents: item.unitGrossCents,
+      lineGrossCents: item.lineGrossCents,
+      sku: item.sku ?? null,
+    })),
+    customerEmail,
+    customerName: session.customer_details?.name ?? null,
+    source: "one_time",
+  });
+
   await sendOrderConfirmationEmailIfNeeded({
     order,
     items: attempt.items_snapshot.map(item => ({
@@ -301,6 +323,43 @@ async function handleInvoicePaid(stripe: Stripe, event: Stripe.Event): Promise<v
   console.error(
     `Stripe webhook: invoice ${eventInvoice.id} fulfilled as order ${result.orderNumber}`
   );
+
+  // Both emails describe the order that now exists, built from the frozen
+  // subscription snapshot the order itself was built from. Neither can
+  // cause an order and neither runs before one exists.
+  //
+  // The internal notification is first and never throws, for the same
+  // reason as in the one-time flow. The customer confirmation may throw,
+  // which returns 500 and leaves the event unrecorded so Stripe's retry
+  // schedule becomes its retry schedule - and every step it would repeat
+  // is idempotent, including the order creation above.
+  await sendInternalOrderNotificationIfNeeded({
+    order: result.order,
+    items: result.items.map(item => ({
+      productName: item.productName,
+      variantLabel: item.variantLabel,
+      quantity: item.quantity,
+      unitGrossCents: item.unitGrossCents,
+      lineGrossCents: item.lineGrossCents,
+      sku: item.sku ?? null,
+    })),
+    customerEmail: result.customerEmail,
+    customerName: result.customerName,
+    source: "subscription",
+    stripeInvoiceId: result.stripeInvoiceId,
+  });
+
+  await sendOrderConfirmationEmailIfNeeded({
+    order: result.order,
+    items: result.items.map(item => ({
+      productName: item.productName,
+      variantLabel: item.variantLabel,
+      quantity: item.quantity,
+      unitGrossCents: item.unitGrossCents,
+      lineGrossCents: item.lineGrossCents,
+    })),
+    customerEmail: result.customerEmail,
+  });
 }
 
 /**

@@ -1,6 +1,7 @@
 import type Stripe from "stripe";
 import { getSupabaseAdmin } from "./supabaseAdmin";
 import { createOrderFromPaidCheckoutAttempt, type CreatedOrder } from "./orderFulfillment";
+import type { CheckoutAttemptItemSnapshot } from "./checkoutAttemptSnapshot";
 import {
   customerChainMatches,
   evaluateSubscriptionInvoice,
@@ -63,8 +64,25 @@ import {
 export type InvoiceFulfillmentResult =
   /** Not ours, or not a delivery cycle. Acknowledge, do nothing. */
   | { kind: "ignored"; reason: string }
-  /** One order exists for this invoice, created now or already there. */
-  | { kind: "fulfilled"; orderId: string; orderNumber: string; created: boolean }
+  /**
+   * One order exists for this invoice, created now or already there.
+   *
+   * The persisted order and the frozen lines come back with it so the
+   * caller can notify fulfillment and the customer WITHOUT re-reading
+   * anything: the email must describe the order that exists, and every
+   * value here came out of the frozen subscription snapshot.
+   */
+  | {
+      kind: "fulfilled";
+      orderId: string;
+      orderNumber: string;
+      created: boolean;
+      order: CreatedOrder;
+      items: CheckoutAttemptItemSnapshot[];
+      customerEmail: string | null;
+      customerName: string | null;
+      stripeInvoiceId: string;
+    }
   /**
    * Ours, but it does not reconcile. The caller must NOT mark the event
    * processed: an operator has to look, and Stripe's retry schedule is
@@ -91,6 +109,12 @@ export type SubscriptionInvoiceDeps = {
     checkoutAttemptId: string;
     subscription: LocalSubscriptionFacts;
   }) => Promise<CreatedOrder>;
+  /**
+   * The frozen lines the order was built from. Read back off the attempt
+   * rather than recomputed, so the notification describes the order that
+   * exists - the same source the one-time flow's emails use.
+   */
+  loadAttemptItems: (checkoutAttemptId: string) => Promise<CheckoutAttemptItemSnapshot[]>;
 };
 
 const SUBSCRIPTION_COLUMNS =
@@ -194,6 +218,21 @@ async function createOrder(input: {
   );
 }
 
+async function loadAttemptItems(checkoutAttemptId: string): Promise<CheckoutAttemptItemSnapshot[]> {
+  const admin = getSupabaseAdmin();
+  if (!admin) throw new Error("supabase admin client is not configured");
+
+  const { data, error } = await admin
+    .from("checkout_attempts")
+    .select("items_snapshot")
+    .eq("id", checkoutAttemptId)
+    .maybeSingle();
+
+  if (error) throw new Error(`checkout attempt item lookup failed: ${error.message}`);
+  const items = data?.items_snapshot;
+  return Array.isArray(items) ? (items as CheckoutAttemptItemSnapshot[]) : [];
+}
+
 export const defaultSubscriptionInvoiceDeps: SubscriptionInvoiceDeps = {
   retrieveInvoice: () => {
     throw new Error("retrieveInvoice must be provided by the caller with a Stripe client");
@@ -206,6 +245,7 @@ export const defaultSubscriptionInvoiceDeps: SubscriptionInvoiceDeps = {
   loadMappedStripeCustomerId,
   activateFromInvoice,
   createOrder,
+  loadAttemptItems,
 };
 
 /** Binds the Stripe-client-dependent halves for a real request. */
@@ -316,11 +356,23 @@ export async function fulfillPaidSubscriptionInvoice(
   // reach again on every retry - which is what makes the two-step shape
   // safe despite being two transactions.
   const order = await deps.createOrder({ checkoutAttemptId, subscription });
+  const frozenItems = await deps.loadAttemptItems(checkoutAttemptId);
+
+  // The frozen customer snapshot, not Stripe's billing details. Stripe is
+  // the payment authority; the subscription snapshot is the fulfillment
+  // authority, and that holds for who the confirmation is addressed to
+  // just as much as for what is in the box.
+  const customer = (subscription.customer_snapshot ?? {}) as { email?: unknown; name?: unknown };
 
   return {
     kind: "fulfilled",
     orderId: order.id,
     orderNumber: order.order_number,
     created: true,
+    order,
+    items: frozenItems,
+    customerEmail: typeof customer.email === "string" ? customer.email : null,
+    customerName: typeof customer.name === "string" ? customer.name : null,
+    stripeInvoiceId: invoice.id as string,
   };
 }

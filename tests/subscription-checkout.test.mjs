@@ -1054,8 +1054,10 @@ test("boundary: B2B is untouched and the one-time checkout still runs mode payme
 
 test("migrations: 025 is the only new one and 022-024 are untouched", () => {
   const files = readdirSync(MIGRATIONS).filter(n => n.endsWith(".sql")).sort();
-  assert.equal(files[files.length - 1], "025_grant_subscription_plans_service_role.sql");
-  assert.equal(files.filter(n => n.startsWith("026")).length, 0);
+  // Later migrations may exist - the transactional email phase added 026.
+  // What matters here is that 025 owns exactly one file and still holds
+  // what this task put in it.
+  assert.deepEqual(files.filter(n => n.startsWith("025")), ["025_grant_subscription_plans_service_role.sql"]);
 
   // 024 is live: its two privilege statements and its seed must be exactly
   // as applied.
@@ -1137,8 +1139,14 @@ test("migrations: the new RPC is server-only, definer-scoped and search-path pin
 
 test("migrations: 026 was not created and 022-024 are untouched", () => {
   const files = readdirSync(MIGRATIONS).filter(n => n.endsWith(".sql")).sort();
-  assert.equal(files.filter(n => n.startsWith("026")).length, 0, "migration 026 must not exist");
   assert.deepEqual(files.filter(n => n.startsWith("025")), ["025_grant_subscription_plans_service_role.sql"]);
+  // 026 exists now (the internal order notification's delivery state) and
+  // is deliberately unrelated to subscription checkout: it must not touch
+  // any table this task owns.
+  const later = files.filter(n => Number(n.slice(0, 3)) > 25).map(n => read(`supabase/migrations/${n}`)).join("");
+  for (const owned of ["b2c_subscription_plans", "checkout_attempts", "subscriptions"]) {
+    assert.ok(!new RegExp(`alter table public\\.${owned}`).test(later), `a later migration alters ${owned}`);
+  }
 
   const m024 = read("supabase/migrations/024_seed_b2c_subscription_plans.sql");
   assert.match(m024, /revoke all privileges on table public\.b2c_subscription_plans\s+from anon, authenticated, service_role;/);

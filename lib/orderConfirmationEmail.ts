@@ -2,6 +2,7 @@ import { getSupabaseAdmin } from "./supabaseAdmin";
 import { getResendClient } from "./resend";
 import { getCountryLabel } from "./shipping";
 import { getSiteOrigin } from "./siteUrl";
+import { GLOA_FROM_HELLO, GLOA_REPLY_TO_SUPPORT } from "./emailSenders";
 import type { AddressSnapshot } from "./orderAddressSnapshot";
 import {
   buildOrderConfirmationEmail,
@@ -129,9 +130,8 @@ export async function sendOrderConfirmationEmailIfNeeded(params: SendOrderConfir
   if (claim === "error") throw new Error(`could not claim confirmation email state for order ${order.id}`);
 
   const resend = getResendClient();
-  const fromAddress = process.env.RESEND_CONTACT_FROM;
-  if (!resend || !fromAddress) {
-    console.error("Order confirmation email error: RESEND_API_KEY or RESEND_CONTACT_FROM is not configured.");
+  if (!resend) {
+    console.error("Order confirmation email error: RESEND_API_KEY is not configured.");
     await markConfirmationEmailFailed(order.id);
     throw new Error("email provider not configured");
   }
@@ -149,9 +149,14 @@ export async function sendOrderConfirmationEmailIfNeeded(params: SendOrderConfir
   let sendErrorMessage: string | null = null;
   try {
     const { error } = await resend.emails.send({
-      from: fromAddress,
+      // Canonical sender, not RESEND_CONTACT_FROM. That variable gates the
+      // contact form, where an unset value fails one form; here an unset
+      // value threw and turned every paid-order webhook into a repeating
+      // 500. The footer still points customers at the published info@
+      // address from the Impressum; Reply-To is the order desk.
+      from: GLOA_FROM_HELLO,
       to: customerEmail,
-      replyTo: "info@gloamatcha.com",
+      replyTo: GLOA_REPLY_TO_SUPPORT,
       subject,
       html,
       text,

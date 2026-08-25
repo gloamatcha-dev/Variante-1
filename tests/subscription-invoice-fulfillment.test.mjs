@@ -571,16 +571,21 @@ test("frozen: no payment intent is invented for a subscription order", () => {
 
 /* ── AR-AT. Boundaries ──────────────────────────────────────── */
 
-test("boundary: no email, no label, no cancellation, no B2B", () => {
+test("boundary: no label, no cancellation, no B2B - and no email built here", () => {
   const newCode = fulfillmentCode + withoutComments(rules)
     + withoutComments(webhook.slice(webhook.indexOf("async function handleInvoicePaid")));
+  // The transactional email phase sends both order emails, but from the
+  // WEBHOOK after fulfillment returns - never from inside the fulfillment
+  // path itself, which must stay a pure order-creation concern.
   for (const forbidden of [
-    "sendOrderConfirmationEmail", "Resend", "resend", "dhl", "DHL", "label",
+    "sendOrderConfirmationEmail", "sendInternalOrderNotification", "Resend", "resend",
+    "dhl", "DHL", "label",
     "cancel_at_period_end", "subscriptions.cancel", "subscriptions.update",
     "pause", "resume", "b2b", "B2B", "b2b_supply",
   ]) {
-    assert.ok(!newCode.includes(forbidden), `the new code touches ${forbidden}`);
+    assert.ok(!fulfillmentCode.includes(forbidden), `the fulfillment path touches ${forbidden}`);
   }
+  assert.ok(!/shipped_at|tracking_number|fulfillment_status/.test(newCode));
   // And nothing marks an order shipped.
   assert.ok(!/shipped_at|tracking_number|fulfillment_status/.test(fulfillmentCode));
 });
@@ -599,8 +604,16 @@ test("boundary: the feature flag stays closed and is not read here", () => {
 
 test("migrations: 022 through 025 are unchanged and no new migration was needed", () => {
   const files = readdirSync(MIGRATIONS).filter(n => n.endsWith(".sql")).sort();
-  assert.equal(files[files.length - 1], "025_grant_subscription_plans_service_role.sql");
-  assert.equal(files.filter(n => n.startsWith("026")).length, 0, "no schema change was required");
+  // No schema change was required for invoice fulfillment itself. 026
+  // belongs to the transactional email phase and adds only email delivery
+  // state, so nothing it does may reach an order's money or status.
+  assert.deepEqual(files.filter(n => n.startsWith("025")), ["025_grant_subscription_plans_service_role.sql"]);
+  const m026 = files.find(n => n.startsWith("026"));
+  if (m026) {
+    const sql = read(`supabase/migrations/${m026}`);
+    assert.ok(!/create or replace function|insert into|update public\.orders\s+set/i.test(sql),
+      "026 does more than add email delivery state");
+  }
 
   const m022 = read("supabase/migrations/022_recurring_subscription_foundation.sql");
   assert.match(m022, /create or replace function public\.activate_subscription_from_invoice\(/);

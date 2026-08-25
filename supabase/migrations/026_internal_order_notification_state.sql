@@ -1,0 +1,129 @@
+-- ============================================================
+-- GLOA – Internal new-order notification delivery state
+-- Run in Supabase SQL Editor AFTER 025
+--
+-- The operational counterpart to migration 017. 017 gave the CUSTOMER
+-- confirmation email a durable delivery state so a redelivered Stripe
+-- webhook could never send a second copy; this gives the INTERNAL
+-- "new order, ship this" notification the same thing, on the same table
+-- and in exactly the same shape.
+--
+-- Two columns rather than reusing 017's, because they are two different
+-- messages with two different fates. The customer email can succeed while
+-- the internal one fails, and a retry must then send only the one that is
+-- still owed. One shared status could not express that without silently
+-- resending something a customer already received.
+--
+-- 'pending' (default): not yet attempted.
+-- 'sending': a delivery has claimed the right to send. The atomic guard
+--   against two concurrent webhook deliveries both sending, exactly as
+--   in 017: the UPDATE matches only 'pending'/'failed', and row locking
+--   serialises concurrent updates to one order.
+-- 'sent': Resend accepted the message.
+-- 'failed': the attempt failed and is eligible for a later retry. A
+--   provider outage must never permanently swallow a shipping
+--   instruction, and 'failed' is what makes that sweepable.
+--
+-- Email delivery state stays completely independent of payment and order
+-- state. Nothing here can change status, payment_status or any money
+-- column, and nothing here may ever be a reason not to create or keep an
+-- order: the order row is the source of truth for fulfillment, the email
+-- is a notification about it.
+--
+-- Historical orders get 'pending' by the default. That is honest - no
+-- internal notification was ever sent for them - and it is inert, because
+-- only the paid-order webhook path ever claims a row, and it only ever
+-- looks at the order it has just created.
+--
+-- Migrations 022, 023, 024 and 025 are live and are not touched.
+-- No row is read, written or deleted by this migration.
+-- ============================================================
+
+alter table public.orders
+  add column internal_notification_status text not null default 'pending'
+    check (internal_notification_status in ('pending', 'sending', 'sent', 'failed')),
+  add column internal_notification_sent_at timestamptz;
+
+-- Column-scoped, exactly as 017 scoped its own two.
+--
+-- service_role holds SELECT on public.orders (migration 011) and a
+-- column-scoped UPDATE on 017's two email columns. Every other order
+-- mutation goes through create_order_from_paid_checkout, which is
+-- SECURITY DEFINER and runs as its owner. This adds the smallest grant
+-- that lets the notification state machine work and nothing more, so a
+-- bug in that code path still cannot reach a money column.
+
+grant update (internal_notification_status, internal_notification_sent_at)
+  on public.orders to service_role;
+
+-- VERIFY ───────────────────────────────────────────────────────
+--
+-- Read-only. Run after applying. No statement below writes a row.
+--
+-- (a) The two new columns. Expected: two rows, text and timestamptz,
+--     internal_notification_status NOT NULL with default 'pending',
+--     internal_notification_sent_at nullable with no default.
+--
+--   select column_name, data_type, is_nullable, column_default
+--   from information_schema.columns
+--   where table_schema = 'public'
+--     and table_name = 'orders'
+--     and column_name in ('internal_notification_status',
+--                         'internal_notification_sent_at')
+--   order by column_name;
+--
+-- (b) The status check accepts exactly the four states.
+--
+--   select conname, pg_get_constraintdef(oid) as definition
+--   from pg_constraint
+--   where conrelid = 'public.orders'::regclass
+--     and contype = 'c'
+--     and pg_get_constraintdef(oid) like '%internal_notification_status%';
+--
+-- (c) Every historical order is 'pending' and none claims to have been
+--     notified. Expected: notified = 0, sent_at = 0.
+--
+--   select count(*)                                                    as orders,
+--          count(*) filter (where internal_notification_status <> 'pending') as notified,
+--          count(internal_notification_sent_at)                        as sent_at
+--   from public.orders;
+--
+-- (d) THE PRIVILEGE CHECK. Expected: service_role holds SELECT on the
+--     table plus column-scoped UPDATE on exactly four columns -
+--     017's two and this migration's two - and nothing else. anon and
+--     authenticated must not appear as UPDATE grantees at all.
+--
+--   select grantee, privilege_type
+--   from information_schema.role_table_grants
+--   where table_schema = 'public' and table_name = 'orders'
+--     and grantee in ('anon', 'authenticated', 'service_role')
+--   order by grantee, privilege_type;
+--
+--   select grantee, column_name, privilege_type
+--   from information_schema.column_privileges
+--   where table_schema = 'public' and table_name = 'orders'
+--     and privilege_type = 'UPDATE'
+--     and grantee in ('anon', 'authenticated', 'service_role')
+--   order by grantee, column_name;
+--
+-- (e) Nothing else moved. RLS on orders is untouched and the customer
+--     read policy from 004 is still the only one.
+--
+--   select relrowsecurity, relforcerowsecurity
+--   from pg_class where oid = 'public.orders'::regclass;
+--
+--   select policyname, cmd, roles, qual
+--   from pg_policies
+--   where schemaname = 'public' and tablename = 'orders'
+--   order by policyname;
+--
+-- (f) Migration 017's own columns are unchanged and still work the same
+--     way. Expected: both present, status NOT NULL default 'pending'.
+--
+--   select column_name, data_type, is_nullable, column_default
+--   from information_schema.columns
+--   where table_schema = 'public'
+--     and table_name = 'orders'
+--     and column_name in ('confirmation_email_status',
+--                         'confirmation_email_sent_at')
+--   order by column_name;
