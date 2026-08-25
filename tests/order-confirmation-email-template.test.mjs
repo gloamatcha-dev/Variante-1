@@ -139,7 +139,12 @@ test("order confirmation email: plain text version contains all essential order 
   assert.match(text, /Versand: 5,90 €/);
   assert.match(text, /Gesamt: 25,89 €/);
   assert.match(text, /Deutschland/);
-  assert.match(text, /info@gloamatcha\.com/);
+  // support@, matching the Reply-To the sender sets. Inside one
+  // transactional email, telling the customer to write to one mailbox
+  // while their reply goes to another contradicts itself. The site's
+  // published info@ address is a separate, later cleanup.
+  assert.match(text, /support@gloamatcha\.com/);
+  assert.ok(!/info@gloamatcha\.com/.test(text), "the footer disagrees with Reply-To");
 });
 
 test("order confirmation email: multiple items are all rendered", () => {

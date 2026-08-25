@@ -248,7 +248,10 @@ test("idempotency: the send is claimed atomically before Resend is called", () =
   // UPDATE matches only pending/failed, so a redelivered webhook or a
   // concurrent delivery finds the row already moved and sends nothing.
   assert.match(senderCode, /\.update\(\{ internal_notification_status: "sending" \}\)/);
-  assert.match(senderCode, /\.in\("internal_notification_status", \["pending", "failed"\]\)/);
+  // NULL-or-failed, deliberately. A 'pending' default would have made
+  // every historical order look claimable.
+  assert.match(senderCode, /\.or\("internal_notification_status\.is\.null,internal_notification_status\.eq\.failed"\)/);
+  assert.ok(!/"pending"/.test(senderCode), "a pending state survived");
   assert.match(senderCode, /if \(claim === "already-sent"\) return;/);
   // The claim happens BEFORE the provider is even constructed.
   assert.ok(
@@ -278,14 +281,40 @@ test("idempotency: a failure is recorded as retryable, and never touches the ord
   assert.ok(!/\.delete\(|\.insert\(/.test(senderCode), "the notification creates or removes rows");
 });
 
-test("idempotency: an internal-notification failure never fails the webhook", () => {
-  // The order is the record. A flaky notification must not turn a settled
-  // payment into a repeatedly failing webhook.
-  assert.ok(!/throw new Error/.test(senderCode), "the internal notification throws");
-  assert.match(sender, /Never throws/);
-  // The customer confirmation deliberately DOES throw, so Stripe's retry
-  // schedule doubles as its retry schedule. That difference is intended.
+test("retry: a failed internal notification is genuinely retried, not just marked", () => {
+  // The first version did not throw, so the handler reached
+  // recordStripeWebhookEvent, the event became terminally processed, and
+  // nothing ever looked at the row again. The column said "retryable";
+  // the system had no retry.
+  assert.match(senderCode, /throw new Error\(`internal order notification send failed for order/);
+  assert.match(senderCode, /throw new Error\("email provider not configured"\)/);
+  assert.match(senderCode, /throw new Error\(`could not claim internal notification state/);
+  // "Already sent" is success and must never throw.
+  assert.match(senderCode, /if \(claim === "already-sent"\) return;/);
+
+  // The throw only helps because the webhook turns it into a 500 BEFORE
+  // the event is recorded.
+  const catchAt = webhookCode.indexOf("} catch (err) {", webhookCode.indexOf("export async function POST"));
+  const recordAt = webhookCode.indexOf("const recorded = await recordStripeWebhookEvent");
+  assert.ok(catchAt > 0 && recordAt > catchAt, "a throw must return 500 before the event is recorded");
+
+  // And the customer email throws for the same reason, so both share one
+  // retry mechanism rather than inventing a second.
   assert.match(withoutComments(customerSender), /throw new Error\(`order confirmation email send failed/);
+});
+
+test("retry: every step a Stripe redelivery repeats is idempotent", () => {
+  // Throwing is only safe because a retry cannot duplicate a business
+  // effect. Each of these is the guard that makes that true.
+  const attempts = read("lib/checkoutAttempts.ts");
+  assert.match(attempts, /onConflict: "request_id", ignoreDuplicates: true/);
+  assert.match(read("supabase/migrations/011_orders_from_paid_checkout.sql"),
+    /create unique index orders_checkout_attempt_id_key/);
+  assert.match(read("supabase/migrations/022_recurring_subscription_foundation.sql"),
+    /create unique index checkout_attempts_stripe_invoice_id_key/);
+  // Both email claims skip an already-sent order rather than resending.
+  assert.match(senderCode, /if \(claim === "already-sent"\) return;/);
+  assert.match(withoutComments(customerSender), /if \(claim === "already-sent"\) return;/);
 });
 
 test("idempotency: no secret reaches a log line", () => {
@@ -325,21 +354,22 @@ test("wiring: both order flows notify only AFTER a durable order exists", () => 
     "an email module creates an order");
 });
 
-test("wiring: the internal notification precedes the customer confirmation", () => {
-  // The one that cannot throw runs first, so a customer-email failure
-  // cannot stop fulfillment from being told.
+test("wiring: the customer confirmation precedes the internal notification", () => {
+  // Both now throw, so whichever runs first gets the first attempt - and
+  // the customer's confirmation is the one they are owed.
   // Call sites only - the import block lists them in the other order.
   const body = webhookCode.slice(webhookCode.indexOf("export async function POST"));
-  const internal = body.indexOf("await sendInternalOrderNotificationIfNeeded");
   const customer = body.indexOf("await sendOrderConfirmationEmailIfNeeded");
-  assert.ok(internal > 0, "the internal notification is never called");
-  assert.ok(customer > internal, "the customer email must not precede the fulfillment notification");
-  // Both flows send both emails. Counted over the body, so the import
-  // block does not inflate the number.
+  const internal = body.indexOf("await sendInternalOrderNotificationIfNeeded");
+  assert.ok(customer > 0, "the customer confirmation is never called");
+  assert.ok(internal > customer, "the customer email must go first");
+
+  // Fulfillment is told about EVERY paid order, one-off and subscription
+  // cycle alike. The generic customer confirmation is one-time only.
   assert.equal([...body.matchAll(/await sendInternalOrderNotificationIfNeeded\(/g)].length, 2,
     "both order flows must notify fulfillment");
-  assert.equal([...body.matchAll(/await sendOrderConfirmationEmailIfNeeded\(/g)].length, 2,
-    "both order flows must confirm to the customer");
+  assert.equal([...body.matchAll(/await sendOrderConfirmationEmailIfNeeded\(/g)].length, 1,
+    "the generic confirmation belongs to the one-time flow only");
 });
 
 test("wiring: the subscription email uses the frozen snapshot, not current data", () => {
@@ -378,8 +408,15 @@ test("migration: 026 is the next free number and adds only the two state columns
     ["internal_notification_status", "text"],
     ["internal_notification_sent_at", "timestamptz"],
   ]);
-  assert.match(sql, /check \(internal_notification_status in \('pending', 'sending', 'sent', 'failed'\)\)/);
-  assert.match(sql, /default 'pending'/);
+  // THE HISTORICAL-ORDER GUARD. Nullable and with NO default, so applying
+  // 026 cannot write a state into every order that already exists. A NOT
+  // NULL DEFAULT 'pending' - the shape 017 uses - would have made the
+  // entire order history look like it was queued and owed a notification.
+  assert.ok(!/not null/i.test(sql), "the column is NOT NULL and would be written into every historical row");
+  assert.ok(!/default/i.test(sql), "a default would be written into every historical row");
+  assert.ok(!/'pending'/.test(sql), "'pending' is a state no historical order may silently acquire");
+  // Only states a real attempt can produce.
+  assert.match(sql, /check \(internal_notification_status in \('sending', 'sent', 'failed'\)\)/);
   // Historical orders are not rewritten.
   assert.ok(!/update public\.orders/i.test(sql), "026 backfills historical orders");
   assert.ok(!/delete from|drop column|drop index/i.test(sql));

@@ -251,37 +251,27 @@ async function handleCheckoutSessionCompleted(stripe: Stripe, eventSession: Stri
   // without needing a second, bespoke retry system. The order itself
   // is already fully created and paid at this point regardless of
   // whether the email ultimately succeeds.
-  // Fulfillment first, and deliberately BEFORE the customer email. This
-  // one never throws: an internal notification is operationally useful
-  // but the order row is the record, and letting a flaky notification
-  // turn a settled payment into a repeatedly failing webhook would trade
-  // a small problem for a larger one. A failure is recorded as 'failed'
-  // on the order and stays sweepable.
+  // Customer first, deliberately. Both emails now throw on failure, so
+  // whichever runs first gets the first attempt - and the customer's
+  // confirmation is the one they are owed. Its claim makes a later
+  // redelivery skip it, so the internal notification still gets its own
+  // retries without ever sending a second customer copy.
+  const emailItems = attempt.items_snapshot.map(item => ({
+    productName: item.productName,
+    variantLabel: item.variantLabel,
+    quantity: item.quantity,
+    unitGrossCents: item.unitGrossCents,
+    lineGrossCents: item.lineGrossCents,
+  }));
+
+  await sendOrderConfirmationEmailIfNeeded({ order, items: emailItems, customerEmail });
+
   await sendInternalOrderNotificationIfNeeded({
     order,
-    items: attempt.items_snapshot.map(item => ({
-      productName: item.productName,
-      variantLabel: item.variantLabel,
-      quantity: item.quantity,
-      unitGrossCents: item.unitGrossCents,
-      lineGrossCents: item.lineGrossCents,
-      sku: item.sku ?? null,
-    })),
+    items: attempt.items_snapshot.map(item => ({ ...item, sku: item.sku ?? null })),
     customerEmail,
     customerName: session.customer_details?.name ?? null,
     source: "one_time",
-  });
-
-  await sendOrderConfirmationEmailIfNeeded({
-    order,
-    items: attempt.items_snapshot.map(item => ({
-      productName: item.productName,
-      variantLabel: item.variantLabel,
-      quantity: item.quantity,
-      unitGrossCents: item.unitGrossCents,
-      lineGrossCents: item.lineGrossCents,
-    })),
-    customerEmail,
   });
 }
 
@@ -324,41 +314,21 @@ async function handleInvoicePaid(stripe: Stripe, event: Stripe.Event): Promise<v
     `Stripe webhook: invoice ${eventInvoice.id} fulfilled as order ${result.orderNumber}`
   );
 
-  // Both emails describe the order that now exists, built from the frozen
-  // subscription snapshot the order itself was built from. Neither can
-  // cause an order and neither runs before one exists.
-  //
-  // The internal notification is first and never throws, for the same
-  // reason as in the one-time flow. The customer confirmation may throw,
-  // which returns 500 and leaves the event unrecorded so Stripe's retry
-  // schedule becomes its retry schedule - and every step it would repeat
-  // is idempotent, including the order creation above.
+  // ONLY the internal notification. A subscription cycle gets no generic
+  // "Danke für deine Bestellung" - the dedicated customer lifecycle mails
+  // ("Abo gestartet" for the first invoice, a delivery confirmation for
+  // each later cycle) are their own later task, and sending the one-off
+  // confirmation here now would mean every subscriber received two
+  // different emails about the same delivery the day those arrive.
+  // Fulfillment still has to be told about every paid cycle, so this one
+  // runs for all of them.
   await sendInternalOrderNotificationIfNeeded({
     order: result.order,
-    items: result.items.map(item => ({
-      productName: item.productName,
-      variantLabel: item.variantLabel,
-      quantity: item.quantity,
-      unitGrossCents: item.unitGrossCents,
-      lineGrossCents: item.lineGrossCents,
-      sku: item.sku ?? null,
-    })),
+    items: result.items.map(item => ({ ...item, sku: item.sku ?? null })),
     customerEmail: result.customerEmail,
     customerName: result.customerName,
     source: "subscription",
     stripeInvoiceId: result.stripeInvoiceId,
-  });
-
-  await sendOrderConfirmationEmailIfNeeded({
-    order: result.order,
-    items: result.items.map(item => ({
-      productName: item.productName,
-      variantLabel: item.variantLabel,
-      quantity: item.quantity,
-      unitGrossCents: item.unitGrossCents,
-      lineGrossCents: item.lineGrossCents,
-    })),
-    customerEmail: result.customerEmail,
   });
 }
 

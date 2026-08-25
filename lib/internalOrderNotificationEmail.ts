@@ -19,25 +19,42 @@ import {
  * two different fates: the customer's copy can succeed while this one
  * fails, and a retry must then send only the one still owed.
  *
- * One difference, and it is the important one. The customer confirmation
- * throws on a send failure so the Stripe webhook returns 500 and Stripe's
- * own retry schedule becomes the email's retry schedule. This one does
- * NOT throw. An internal notification is operationally useful but it is
- * not the record: the order row is, and it already exists and is already
- * correct by the time this runs. Letting a flaky notification turn a
- * settled payment into a repeatedly failing webhook would trade a small
- * problem for a larger one. A failure is recorded as 'failed', which is
- * what makes it visible and sweepable later, and the caller carries on.
+ * THIS THROWS ON FAILURE, and that is a deliberate correction. The first
+ * version did not, on the reasoning that the order row is the record and
+ * a flaky notification should not fail a settled payment. The reasoning
+ * was fine and the consequence was not: not throwing let the handler
+ * reach recordStripeWebhookEvent, the event became terminally processed,
+ * Stripe never redelivered, and nothing else in the repository ever
+ * looked at the row again. "Retryable" was true of the database column
+ * and false of the system - a failed shipping instruction simply sat
+ * there.
+ *
+ * Throwing hands the problem to the mechanism that already solves it for
+ * the customer email: the webhook returns 500, the event is not recorded,
+ * and Stripe's retry schedule becomes this email's retry schedule. That
+ * is only safe because every step the retry repeats is idempotent -
+ * markAttemptPaid, create_order_from_paid_checkout,
+ * activate_subscription_from_invoice and both email claims - so a
+ * redelivery cannot produce a second order, a second attempt or a second
+ * copy of either message.
+ *
+ * It is bounded rather than infinite: Stripe eventually stops retrying.
+ * 'failed' is what remains afterwards, and it is the only value a future
+ * sweep may key on. That sweep does not exist yet.
  */
 
 type ClaimResult = "claimed" | "already-sent" | "error";
 
 /**
  * Atomically claims the right to send this order's internal
- * notification. Only one caller can win it: the UPDATE matches only
- * 'pending'/'failed', and Postgres row locking serialises concurrent
- * updates to one row, so a second concurrent or redelivered webhook sees
- * the row already moved and gets zero rows back.
+ * notification. Only one caller can win it: the UPDATE matches only a row
+ * that was never attempted (NULL) or that failed, and Postgres row
+ * locking serialises concurrent updates to one row, so a second
+ * concurrent or redelivered webhook sees the row already moved and gets
+ * zero rows back.
+ *
+ * NULL rather than a 'pending' default is what keeps every order written
+ * before migration 026 out of this flow entirely. See the migration.
  */
 async function claimInternalNotification(orderId: string): Promise<ClaimResult> {
   const admin = getSupabaseAdmin();
@@ -47,7 +64,7 @@ async function claimInternalNotification(orderId: string): Promise<ClaimResult> 
     .from("orders")
     .update({ internal_notification_status: "sending" })
     .eq("id", orderId)
-    .in("internal_notification_status", ["pending", "failed"])
+    .or("internal_notification_status.is.null,internal_notification_status.eq.failed")
     .select("id");
 
   if (error) {
@@ -116,9 +133,10 @@ export type SendInternalOrderNotificationParams = {
 /**
  * Sends the internal notification at most once per order.
  *
- * Never throws. Returns quietly on every failure path, having recorded
- * 'failed' where it could, so the caller's payment and order handling is
- * never affected by an email problem.
+ * Throws on a genuine send failure so the caller can propagate it into
+ * the Stripe webhook's existing error path, which returns 500 and leaves
+ * the event unrecorded - see the note at the top of this file. Never
+ * throws for "already sent": that is success, not failure.
  */
 export async function sendInternalOrderNotificationIfNeeded(
   params: SendInternalOrderNotificationParams
@@ -128,15 +146,14 @@ export async function sendInternalOrderNotificationIfNeeded(
   const claim = await claimInternalNotification(order.id);
   if (claim === "already-sent") return;
   if (claim === "error") {
-    console.error(`Internal order notification: could not claim state for order ${order.id}, skipping.`);
-    return;
+    throw new Error(`could not claim internal notification state for order ${order.id}`);
   }
 
   const resend = getResendClient();
   if (!resend) {
     console.error("Internal order notification: RESEND_API_KEY is not configured.");
     await markFailed(order.id);
-    return;
+    throw new Error("email provider not configured");
   }
 
   const emailOrder: InternalOrderNotificationOrder = {
@@ -173,7 +190,7 @@ export async function sendInternalOrderNotificationIfNeeded(
     // customer's address or email into a log line.
     console.error(`Internal order notification: send failed for order ${order.id}:`, sendErrorMessage);
     await markFailed(order.id);
-    return;
+    throw new Error(`internal order notification send failed for order ${order.id}`);
   }
 
   await markSent(order.id);

@@ -14,15 +14,42 @@
 -- still owed. One shared status could not express that without silently
 -- resending something a customer already received.
 --
--- 'pending' (default): not yet attempted.
+-- NULL (no default): never attempted. Every order written before this
+--   migration is NULL, and so is every new order until the webhook
+--   actually tries. It is the absence of a state, not a queued one.
 -- 'sending': a delivery has claimed the right to send. The atomic guard
 --   against two concurrent webhook deliveries both sending, exactly as
---   in 017: the UPDATE matches only 'pending'/'failed', and row locking
---   serialises concurrent updates to one order.
+--   in 017: the UPDATE matches only "never attempted or failed", and row
+--   locking serialises concurrent updates to one order.
 -- 'sent': Resend accepted the message.
--- 'failed': the attempt failed and is eligible for a later retry. A
---   provider outage must never permanently swallow a shipping
---   instruction, and 'failed' is what makes that sweepable.
+-- 'failed': an attempt was made and it failed. THIS is the only value a
+--   future retry sweep may key on.
+--
+-- WHY THERE IS NO 'pending' AND NO DEFAULT. This column was first written
+-- as NOT NULL DEFAULT 'pending', which is the shape migration 017 uses.
+-- On a table that already holds orders that is a trap: adding a NOT NULL
+-- column with a default writes that default into every existing row, so
+-- every historical order would have come out of this migration looking
+-- exactly like an order that is queued and owed a notification. The first
+-- retry worker anyone writes would then email orders@gloamatcha.com about
+-- the entire order history.
+--
+-- Nullable with no default removes the trap at the source rather than
+-- relying on a future query being careful. A historical order is NULL,
+-- which is true and is not a work item. 'failed' can only ever be written
+-- by code that genuinely tried and genuinely failed, so a sweep keyed on
+-- 'failed' cannot pick up an order that never entered this flow. No
+-- backfill is performed and none is needed.
+--
+-- The same shape migration 022 chose for
+-- checkout_attempts.subscription_request_fingerprint, and for the same
+-- reason: NULL means "this row was never part of that flow".
+--
+-- Note for a later cleanup task, deliberately NOT done here: migration
+-- 017's confirmation_email_status carries the same NOT NULL DEFAULT
+-- 'pending' shape and therefore the same latent trap. It is live and
+-- immutable, and no sweep exists today, so nothing is broken - but a
+-- customer-email retry worker must key on 'failed' too, never 'pending'.
 --
 -- Email delivery state stays completely independent of payment and order
 -- state. Nothing here can change status, payment_status or any money
@@ -30,18 +57,13 @@
 -- order: the order row is the source of truth for fulfillment, the email
 -- is a notification about it.
 --
--- Historical orders get 'pending' by the default. That is honest - no
--- internal notification was ever sent for them - and it is inert, because
--- only the paid-order webhook path ever claims a row, and it only ever
--- looks at the order it has just created.
---
 -- Migrations 022, 023, 024 and 025 are live and are not touched.
 -- No row is read, written or deleted by this migration.
 -- ============================================================
 
 alter table public.orders
-  add column internal_notification_status text not null default 'pending'
-    check (internal_notification_status in ('pending', 'sending', 'sent', 'failed')),
+  add column internal_notification_status text
+    check (internal_notification_status in ('sending', 'sent', 'failed')),
   add column internal_notification_sent_at timestamptz;
 
 -- Column-scoped, exactly as 017 scoped its own two.
@@ -61,8 +83,9 @@ grant update (internal_notification_status, internal_notification_sent_at)
 -- Read-only. Run after applying. No statement below writes a row.
 --
 -- (a) The two new columns. Expected: two rows, text and timestamptz,
---     internal_notification_status NOT NULL with default 'pending',
---     internal_notification_sent_at nullable with no default.
+--     BOTH is_nullable = YES and BOTH column_default NULL. A default of
+--     'pending' here would mean every historical order had just been
+--     marked as owing a notification.
 --
 --   select column_name, data_type, is_nullable, column_default
 --   from information_schema.columns
@@ -72,7 +95,9 @@ grant update (internal_notification_status, internal_notification_sent_at)
 --                         'internal_notification_sent_at')
 --   order by column_name;
 --
--- (b) The status check accepts exactly the four states.
+-- (b) The status check accepts exactly the three attempted states.
+--
+--     Expected: three values only - sending, sent, failed. No 'pending'.
 --
 --   select conname, pg_get_constraintdef(oid) as definition
 --   from pg_constraint
@@ -80,12 +105,15 @@ grant update (internal_notification_status, internal_notification_sent_at)
 --     and contype = 'c'
 --     and pg_get_constraintdef(oid) like '%internal_notification_status%';
 --
--- (c) Every historical order is 'pending' and none claims to have been
---     notified. Expected: notified = 0, sent_at = 0.
+-- (c) THE IMPORTANT ONE. Every historical order must be NULL, so none of
+--     them is visible to a future retry sweep. Expected: with_state = 0
+--     and sweep_eligible = 0, whatever the order count is.
 --
---   select count(*)                                                    as orders,
---          count(*) filter (where internal_notification_status <> 'pending') as notified,
---          count(internal_notification_sent_at)                        as sent_at
+--   select count(*)                                        as orders,
+--          count(internal_notification_status)             as with_state,
+--          count(*) filter (where internal_notification_status = 'failed')
+--                                                          as sweep_eligible,
+--          count(internal_notification_sent_at)            as sent_at
 --   from public.orders;
 --
 -- (d) THE PRIVILEGE CHECK. Expected: service_role holds SELECT on the

@@ -95,6 +95,14 @@ function formatAddressLines(address: OrderConfirmationAddress): string[] {
  * wasn't captured. Never includes any internal id - the input type
  * itself carries no order id, checkout attempt id, or Stripe id.
  */
+/*
+ * The footer address is support@gloamatcha.com, matching the Reply-To the
+ * sender sets. It deliberately differs from the info@ address the
+ * Impressum and app/content.ts publish: inside ONE transactional email,
+ * telling a customer to write to one mailbox while their reply goes to
+ * another is a message that contradicts itself. Reconciling the site's
+ * published contact address is a separate task and is not done here.
+ */
 export function buildOrderConfirmationEmail(params: {
   order: OrderConfirmationOrder;
   items: OrderConfirmationItem[];
@@ -169,7 +177,7 @@ export function buildOrderConfirmationEmail(params: {
 ${accountLinkHtml}
 </td></tr>
 <tr><td style="background-color:${BRAND.plum};padding:20px 32px;">
-<p style="font-size:12px;line-height:1.5;color:${BRAND.cream};margin:0;">GLOA · Fragen zu deiner Bestellung? <a href="mailto:info@gloamatcha.com" style="color:${BRAND.cream};">info@gloamatcha.com</a></p>
+<p style="font-size:12px;line-height:1.5;color:${BRAND.cream};margin:0;">GLOA · Fragen zu deiner Bestellung? <a href="mailto:support@gloamatcha.com" style="color:${BRAND.cream};">support@gloamatcha.com</a></p>
 </td></tr>
 </table>
 </td></tr>
@@ -206,7 +214,7 @@ ${accountLinkHtml}
     addressLinesText,
     accountLinkText,
     "",
-    "Fragen zu deiner Bestellung? info@gloamatcha.com",
+    "Fragen zu deiner Bestellung? support@gloamatcha.com",
   ]
     .filter(line => line !== "")
     .join("\n");
