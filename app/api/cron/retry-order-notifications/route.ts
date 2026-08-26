@@ -1,9 +1,48 @@
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { isBearerSecretAuthorized } from "../../../../lib/serverSecretAuth";
-import { runInternalOrderNotificationCron } from "../../../../lib/internalOrderNotificationRetry";
+import { runTransactionalEmailRetryCron } from "../../../../lib/transactionalEmailRetry";
 
 /**
- * Vercel Cron entry point for the internal order notification safety net.
+ * Vercel Cron entry point for the transactional email safety net.
+ *
+ * ── PHASE 2E-B WIDENED WHAT THIS DRAINS ───────────────────────
+ *
+ * It began as the retry for the internal new-order notification alone.
+ * There are now six transactional email families, and five of them could
+ * end at 'failed' with nothing in the system that would ever look at
+ * them again. This endpoint now drains all six.
+ *
+ * THE PATH IS DELIBERATELY UNCHANGED. "retry-order-notifications" stays
+ * truthful - every one of the six is a notification about an order - and
+ * renaming it would mean editing the path in vercel.json, which
+ * re-registers the deployed cron. That is a real deployment risk for a
+ * cosmetic gain, and the Vercel Hobby plan permits one invocation per
+ * day, so a second endpoint would have meant a second schedule this plan
+ * should not spend. One authenticated daily job, six families, separate
+ * counters.
+ *
+ * The families are independent: each has its own bounded batch, its own
+ * try/catch and its own counters, so one family's outage cannot stop the
+ * other five and one noisy family cannot starve them. See
+ * lib/transactionalEmailRetryRules.ts.
+ *
+ * ── FAILED ONLY. NEVER NULL. ──────────────────────────────────
+ *
+ * Selection is `<status column> = 'failed'` for every family, and that is
+ * absolute. The live database holds 451 orders whose email state columns
+ * are NULL because these features did not exist when those orders were
+ * placed - including one order with a genuinely settled refund. A sweep
+ * keyed on NULL, on a missing sent_at, or on a missing refund watermark
+ * would mail that history. 'failed' can only be written by code that
+ * genuinely tried and genuinely failed.
+ *
+ * ── IT RETRIES DELIVERY. IT CREATES NOTHING. ──────────────────
+ *
+ * No order is created, cancelled, resolved, shipped or refunded here, and
+ * no Stripe API is called. The only writes are one column moving from a
+ * stale 'sending' back to 'failed', and whatever the existing senders
+ * write - which the column-scoped grants in migrations 017, 026, 027,
+ * 030, 031 and 033 already confine to thirteen email-state columns.
  *
  * It takes no input at all. There is no order id, no recipient, no batch
  * size and no filter to pass: the eligibility rule lives in
@@ -19,7 +58,7 @@ import { runInternalOrderNotificationCron } from "../../../../lib/internalOrderN
  * operational health signal, and a personal-data leak is not worth the
  * convenience of a detailed answer that only a cron ever reads.
  *
- * WHAT ONE INVOCATION DOES, in this order:
+ * WHAT ONE INVOCATION DOES, per family, in this order:
  *
  *   A. return genuinely stale 'sending' rows to 'failed'
  *   B. run the failed-only retry sweep
@@ -30,8 +69,11 @@ import { runInternalOrderNotificationCron } from "../../../../lib/internalOrderN
  * makes an abandoned row visible to B, which remains the single delivery
  * path. Both halves are separately bounded.
  *
- * Either half failing is a 500. A cron that could not do its work must
- * not answer with a clean-looking set of zeroes.
+ * A family that cannot do its work reports errored: true in its own
+ * counters rather than failing the whole run - a cron that could not read
+ * one work list must still retry the other five, and must not answer with
+ * a clean-looking set of zeroes for the one it missed. Only a failure of
+ * the orchestration itself is a 500.
  *
  * GET because that is what Vercel Cron issues.
  *
@@ -76,7 +118,7 @@ export async function GET(request: Request): Promise<Response> {
   // The value itself is never logged, only its absence.
   const secret = process.env.CRON_SECRET;
   if (!secret) {
-    console.error("Order notification retry: CRON_SECRET is not configured - refusing to run.");
+    console.error("Transactional email retry: CRON_SECRET is not configured - refusing to run.");
     return Response.json({ error: "Nicht verfügbar." }, { status: 503 });
   }
 
@@ -88,16 +130,16 @@ export async function GET(request: Request): Promise<Response> {
   // clear 503 rather than a generic failure, and so the sweep is never
   // entered half-configured.
   if (!getSupabaseAdmin()) {
-    console.error("Order notification retry: SUPABASE_SECRET_KEY is not configured.");
+    console.error("Transactional email retry: SUPABASE_SECRET_KEY is not configured.");
     return Response.json({ error: "Vorübergehend nicht verfügbar." }, { status: 503 });
   }
 
   try {
-    const summary = await runInternalOrderNotificationCron();
+    const summary = await runTransactionalEmailRetryCron();
     return Response.json(summary, { status: 200 });
   } catch (err) {
     console.error(
-      "Order notification retry: sweep failed:",
+      "Transactional email retry: sweep failed:",
       err instanceof Error ? err.message : "unknown error"
     );
     return Response.json({ error: "Interner Fehler." }, { status: 500 });

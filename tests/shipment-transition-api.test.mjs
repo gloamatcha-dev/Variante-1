@@ -883,7 +883,19 @@ test("regression: only the one authorized route can reach the shipment sender", 
     }
   };
   for (const dir of ["app", "lib", "worker"]) walk(dir);
-  assert.deepEqual(callers, ["app/api/internal/orders/ship/route.ts"]);
+  assert.deepEqual(callers.sort(), [
+    "app/api/internal/orders/ship/route.ts",
+    "lib/transactionalEmailRetry.ts",
+  ]);
+  // Phase 2E-B added the transactional email retry cron as a second,
+  // intended caller: a shipment confirmation that FAILED to send is
+  // re-attempted from there. Note the test above is UNCHANGED - the retry
+  // may re-send a confirmation but may never reach mark_order_shipped, so
+  // a customer still cannot be told their parcel left without an operator
+  // having shipped it.
+  const retry = withoutComments(read("lib/transactionalEmailRetry.ts"));
+  assert.ok(!retry.includes("mark_order_shipped"), "the retry can ship an order");
+  assert.ok(!retry.includes(".rpc("), "the retry can create a business event");
 });
 
 test("regression: the customer account still cannot ship anything", () => {

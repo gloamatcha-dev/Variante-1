@@ -1287,7 +1287,16 @@ test("security: only the one route can reach the resolution RPC and the sender",
   assert.deepEqual(senderCallers.sort(), [
     "app/api/internal/orders/cancellation-request/resolve/route.ts",
     "lib/cancellationOutcomeEmail.ts",
+    "lib/transactionalEmailRetry.ts",
   ]);
+  // Phase 2E-B added the transactional email retry cron as a SECOND,
+  // intended caller of every sender. That is the whole point of a safety
+  // net: it re-attempts a delivery that already failed. What still must
+  // not exist is a third caller, or any caller that can create the
+  // business event - the retry only ever re-sends, and it holds no RPC.
+  const retry = withoutComments(read("lib/transactionalEmailRetry.ts"));
+  assert.ok(!retry.includes("resolve_order_cancellation_request"), "the retry can resolve a request");
+  assert.ok(!retry.includes(".rpc("), "the retry can create a business event");
 });
 
 test("security: no client file can see the endpoint, the RPC or the secret", () => {

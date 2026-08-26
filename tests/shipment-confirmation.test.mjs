@@ -534,7 +534,7 @@ test("it sends no subscription lifecycle email", () => {
 
 /* ── Unreachability: the CASE B guarantee ─────────────────────── */
 
-test("ONLY the authorized shipment route calls the shipment sender", () => {
+test("ONLY the authorized shipment route and the retry cron call the shipment sender", () => {
   // Phase 2A asserted this list was EMPTY, because there was no
   // authorized shipment transition to wire the sender to. Phase 2B built
   // that transition, so exactly one caller is now correct and expected.
@@ -561,8 +561,19 @@ test("ONLY the authorized shipment route calls the shipment sender", () => {
     }
   };
   for (const dir of ["app", "lib", "worker"]) walk(dir);
-  assert.deepEqual(callers, ["app/api/internal/orders/ship/route.ts"],
-    `unexpected shipment sender callers: ${callers.join(", ")}`);
+  assert.deepEqual(callers.sort(), [
+    "app/api/internal/orders/ship/route.ts",
+    "lib/transactionalEmailRetry.ts",
+  ], `unexpected shipment sender callers: ${callers.join(", ")}`);
+  // Phase 2E-B added the transactional email retry cron as a second,
+  // intended caller: a shipment confirmation that FAILED to send is
+  // re-attempted from there. The rule this protects is unchanged and is
+  // asserted below instead - the retry can re-send a confirmation, but it
+  // cannot ship anything, so a customer still cannot be told their parcel
+  // left without an operator having shipped it.
+  const retry = withoutComments(read("lib/transactionalEmailRetry.ts"));
+  assert.ok(!retry.includes("mark_order_shipped"), "the retry can ship an order");
+  assert.ok(!retry.includes(".rpc("), "the retry can create a business event");
 });
 
 test("no route, webhook or cron can trigger a shipment confirmation", () => {

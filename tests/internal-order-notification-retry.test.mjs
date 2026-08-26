@@ -506,7 +506,17 @@ test("endpoint: it fails closed when CRON_SECRET is missing", () => {
   assert.ok(guard > 0, "a missing secret is not checked at all");
   assert.ok(guard < handler.indexOf("isBearerSecretAuthorized("), "the secret is used before it is checked");
   assert.ok(guard < handler.indexOf("getSupabaseAdmin("), "the database is reached before the check");
-  assert.ok(guard < handler.indexOf("runInternalOrderNotificationCron("), "work happens before the check");
+  // Phase 2E-B widened this endpoint to drain all six email families, so
+  // the work it guards is now runTransactionalEmailRetryCron - which
+  // still delegates this family to runInternalOrderNotificationCron
+  // unchanged. The property asserted is the same: no work before the
+  // check.
+  assert.ok(guard < handler.indexOf("runTransactionalEmailRetryCron("), "work happens before the check");
+  assert.ok(
+    readFileSync(path.join(ROOT, "lib/transactionalEmailRetry.ts"), "utf-8")
+      .includes("runInternalOrderNotificationCron()"),
+    "the orchestrator no longer delegates to this family's proven sweep"
+  );
   assert.match(handler, /return Response\.json\(\{ error: "[^"]+" \}, \{ status: 503 \}\);/);
 });
 
@@ -542,8 +552,15 @@ test("endpoint: the comparison is timing safe and the secret never reaches a log
 
 test("endpoint: it is server-only and takes no input from the caller", () => {
   // No browser-supplied order id, no recipient, no batch size, no filter.
-  for (const forbidden of ["searchParams", "new URL(", "request.json()", "request.text()", "orderId", "email"]) {
+  for (const forbidden of ["searchParams", "new URL(", "request.json()", "request.text()", "orderId"]) {
     assert.ok(!routeCode.includes(forbidden), `the endpoint reads ${forbidden} from the request`);
+  }
+  // "email" is no longer a useful needle: Phase 2E-B renamed this
+  // endpoint's prose to "transactional email retry" because it now drains
+  // six families. What matters is that no recipient can be supplied, and
+  // the route reads nothing from the request at all - asserted below.
+  for (const forbidden of ["recipient", "customerEmail", "to:", "subject", "html"]) {
+    assert.ok(!routeCode.includes(forbidden), `the endpoint accepts ${forbidden}`);
   }
   // The only header read is the one it authenticates with. That read
   // now happens inside lib/serverSecretAuth.ts, so the route itself reads

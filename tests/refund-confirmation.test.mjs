@@ -412,12 +412,13 @@ test("historical: the webhook gates the send on that result", () => {
   assert.ok(webhookCode.includes("!isNewSettledRefundFact(outcome.result) || !outcome.orderId) return"));
 });
 
-test("historical: nothing enumerates orders - there is no sweep and no cron", () => {
+test("historical: the only sweep is failed-only, and it is not this feature's", () => {
   const vercel = JSON.parse(read("vercel.json"));
   assert.equal((vercel.crons ?? []).length, 1, "a cron job was added");
   assert.equal(vercel.crons[0].path, "/api/cron/retry-order-notifications");
-  const cron = withoutComments(read("app/api/cron/retry-order-notifications/route.ts"));
-  assert.ok(!cron.includes("refund"), "the cron now sweeps refunds");
+  // Phase 2E-B's cron does drain failed refund emails - by design, and
+  // strictly on refund_email_status = 'failed'. The proven internal
+  // notification sweep still knows nothing about refunds.
   assert.ok(!withoutComments(read("lib/internalOrderNotificationRetry.ts")).includes("refund_email"));
   // And the sender is only reachable from one place.
   const callers = [];
@@ -437,7 +438,20 @@ test("historical: nothing enumerates orders - there is no sweep and no cron", ()
   assert.deepEqual(callers.sort(), [
     "app/api/stripe/webhook/route.ts",
     "lib/refundConfirmationEmail.ts",
+    "lib/transactionalEmailRetry.ts",
   ]);
+  // Phase 2E-B added the transactional email retry cron as a SECOND,
+  // intended caller of every sender. That is the whole point of a safety
+  // net: it re-attempts a delivery that already failed. What still must
+  // not exist is a third caller, or any caller that can create the
+  // business event - the retry only ever re-sends, and it holds no RPC.
+  // And critically, that retry selects on refund_email_status = 'failed'
+  // only - never on the NULL watermark that the one historical settled
+  // refund carries.
+  const retry = withoutComments(read("lib/transactionalEmailRetry.ts"));
+  assert.ok(retry.includes('.eq(statusColumn, "failed")'));
+  assert.ok(!retry.includes("refund_email_notified_total_cents"), "the retry keys on the watermark");
+  assert.ok(!retry.includes("stripe"), "the retry touches Stripe");
 });
 
 test("historical: NULL is never used as a sweep criterion in 033", () => {

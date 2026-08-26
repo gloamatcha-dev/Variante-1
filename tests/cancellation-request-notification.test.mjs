@@ -859,10 +859,19 @@ test("security: only the one route can reach the sender", () => {
   };
   walk(path.join(ROOT, "app"));
   walk(path.join(ROOT, "lib"));
+  // Phase 2E-B added the transactional email retry cron as a SECOND,
+  // intended caller of every sender. That is the whole point of a safety
+  // net: it re-attempts a delivery that already failed. What still must
+  // not exist is a third caller, or any caller that can create the
+  // business event - the retry only ever re-sends, and it holds no RPC.
   assert.deepEqual(callers.sort(), [
     "app/api/orders/cancellation-request/route.ts",
     "lib/cancellationRequestNotificationEmail.ts",
+    "lib/transactionalEmailRetry.ts",
   ]);
+  const retry = withoutComments(read("lib/transactionalEmailRetry.ts"));
+  assert.ok(!retry.includes("request_order_cancellation"), "the retry can create a cancellation request");
+  assert.ok(!retry.includes(".rpc("), "the retry can create a business event");
 });
 
 test("security: no new public RPC and no new grant to a browser role", () => {
