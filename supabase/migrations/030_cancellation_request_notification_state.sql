@@ -1,0 +1,358 @@
+-- ============================================================
+-- GLOA – Internal cancellation request notification state (Phase 2D-A)
+-- Run in Supabase SQL Editor AFTER 029
+--
+-- The gap this closes is narrow and specific. A customer can already ask
+-- for a cancellation: POST /api/orders/cancellation-request verifies
+-- their Supabase Auth token and calls request_order_cancellation
+-- (migration 019), which durably writes cancellation_requested_at and an
+-- optional note. That has always worked. What has never worked is anyone
+-- at GLOA finding out: the request lands in a column, and the only way to
+-- see it is to query the database by hand. The customer is told "wir
+-- melden uns per E-Mail" by a system that cannot tell anyone.
+--
+-- This migration adds the durable state for ONE internal email that says
+-- a cancellation was REQUESTED. It is the fourth message in the same
+-- family and gets its own pair of columns for the same reason the third
+-- did.
+--
+-- 030 IS THE NEXT FREE NUMBER. 022-029 are live and immutable and are
+-- not touched: 022 recurring subscription foundation, 023 stripe
+-- customers grants, 024 subscription plan seed, 025 subscription plans
+-- service_role grant, 026 internal order notification state, 027
+-- shipment confirmation email state, 028 authorized shipment transition,
+-- 029 authorized order cancellation. Task 21 (tax/VAT/OSS) still holds no
+-- migration file and remains free to take a later number - this
+-- migration writes no tax field and leaves every *_net_cents and
+-- tax_total_cents column exactly as it is.
+--
+-- ── WHY A FOURTH PAIR OF COLUMNS ──────────────────────────────
+--
+-- 017 gave the customer order confirmation its own status columns, 026
+-- gave the internal fulfillment notification its own, and 027 gave the
+-- shipment confirmation its own. The reasoning each time was that the
+-- messages have DIFFERENT FATES: one can succeed while another fails,
+-- and a retry must then send only the one still owed.
+--
+-- This message has a fourth fate, and a different trigger from all three.
+-- The other three fire from a payment or a parcel. This one fires from a
+-- CUSTOMER ACTION that can happen days after the order, can happen to an
+-- order whose other three emails all went out cleanly, and can happen at
+-- a moment when nothing else about the order is changing. A shared status
+-- column could not express "the confirmation went out, the fulfillment
+-- notice went out, and the cancellation request notice failed".
+--
+-- ── WHY THERE IS NO 'pending' ─────────────────────────────────
+--
+-- Three allowed values only: 'sending', 'sent', 'failed'. NULL means
+-- "never part of this flow", and that is load-bearing rather than
+-- cosmetic.
+--
+-- THE TRAP THIS AVOIDS IS REAL AND IT IS ALREADY IN PRODUCTION.
+-- public.orders may already hold rows with a non-NULL
+-- cancellation_requested_at: the customer request endpoint has been live
+-- since Phase 2A, and every request it has ever recorded is sitting there
+-- with nobody notified. If this column had a 'pending' default, or if a
+-- future sweep were allowed to key on NULL, then the moment such a sweep
+-- first ran it would mail the fulfillment inbox about every historical
+-- cancellation request - requests that may be weeks old, that may already
+-- have been handled by hand, and that may belong to orders that have
+-- since shipped or been cancelled.
+--
+-- Nullable with no default means those rows read as "this feature did not
+-- exist when this happened", which is the truth. They are not queued
+-- work. The same trap migration 026 documents at length, and the same
+-- escape.
+--
+-- THERE IS NO HISTORICAL SWEEP IN THIS TASK, and any sweep ever added
+-- must key on 'failed' and nothing else. See the closing note.
+--
+-- ── WHAT THIS MIGRATION DOES NOT DO ───────────────────────────
+--
+-- It adds two nullable columns and one column-scoped grant. It creates no
+-- function, no trigger, no policy and no index; it writes no row, deletes
+-- no row, backfills nothing, drops nothing, and changes no existing
+-- constraint. It sends no email - a database trigger that mailed anyone
+-- would fire on every future backfill and correction run by hand, so the
+-- send stays firmly in the application, strictly after the request has
+-- committed.
+--
+-- It grants NOBODY the ability to cancel an order, to move any lifecycle
+-- column, to touch payment or refund state, or to read or write a
+-- customer snapshot. Applying it changes the behaviour and the content of
+-- exactly zero existing orders. See verification (H) and (I).
+-- ============================================================
+
+-- 1. NOTIFICATION STATE ────────────────────────────────────────
+--
+-- Nullable, no default, no backfill, exactly as 017, 026 and 027.
+--
+-- The CHECK deliberately omits 'pending'. A row is either outside this
+-- flow entirely (NULL), being sent right now ('sending'), delivered to
+-- the provider ('sent'), or owed a retry ('failed'). There is no fifth
+-- thing, and in particular there is no value that means "queued", because
+-- nothing in this repository queues.
+alter table public.orders
+  add column if not exists cancellation_request_notification_status text
+    check (cancellation_request_notification_status in ('sending', 'sent', 'failed')),
+  add column if not exists cancellation_request_notification_sent_at timestamptz;
+
+-- 2. THE SMALLEST GRANT THAT WORKS ─────────────────────────────
+--
+-- Column-scoped to exactly these two columns, as 017's, 026's and 027's
+-- grants are. service_role does NOT receive UPDATE on public.orders as a
+-- table, and after this migration it still holds column-scoped UPDATE on
+-- exactly eight columns - the six email-state columns from 017, 026 and
+-- 027, plus these two.
+--
+-- What it still cannot write directly, and must not:
+--
+--   status, fulfillment_status      only via cancel_order (029) and
+--                                   mark_order_shipped (028)
+--   cancelled_at                    only via cancel_order (029)
+--   cancellation_requested_at,
+--   cancellation_request_note       only via request_order_cancellation
+--                                   (019). THE NOTIFICATION CODE MUST
+--                                   NEVER WRITE THESE. An email that
+--                                   failed to send is a fact about an
+--                                   email; it is not a reason to erase,
+--                                   move or rewrite what the customer
+--                                   asked for or when they asked it.
+--   payment_status, refunded_total_cents, refund_updated_at
+--                                   only via apply_order_refund_state
+--                                   (019), from an absolute re-read of
+--                                   Stripe
+--   every *_cents column, every tax field, customer_snapshot,
+--   shipping_address_snapshot, billing_address_snapshot, the tracking
+--   columns, shipped_at
+--                                   never writable by service_role at all
+--
+-- The blast radius of a bug anywhere in the notification code is
+-- therefore these two columns, enforced by the database rather than by
+-- code review.
+grant update (cancellation_request_notification_status, cancellation_request_notification_sent_at)
+  on public.orders to service_role;
+
+-- 3. NO NEW CLIENT PRIVILEGES ──────────────────────────────────
+--
+-- No grant, policy or privilege is created for anon or authenticated by
+-- this migration. A customer keeps the SELECT-only access migration 004
+-- gave them under the "Users read own orders" RLS policy, which now also
+-- covers these two columns - a customer can read that a notification was
+-- sent about their own order and nothing else. anon still has no access
+-- to public.orders at all.
+--
+-- Nothing here is customer-facing. The account UI does not read these
+-- columns and must not start: whether GLOA's internal inbox received a
+-- message is an operational fact, not an order status, and showing it to
+-- a customer would invite reading "sent" as "handled".
+
+-- VERIFY ───────────────────────────────────────────────────────
+--
+-- Read-only. Run after applying. No statement below writes a row, sends
+-- an email, cancels an order or creates a refund.
+--
+-- (A)(B)(C) BOTH COLUMNS EXIST, ARE NULLABLE, AND HAVE NO DEFAULT.
+--     Expected: exactly two rows, both is_nullable = YES and both
+--     column_default = NULL.
+--
+--     A non-NULL default here is the failure mode this whole design
+--     exists to prevent: it would make every historical order look like
+--     queued work the first time anything swept the table.
+--
+--   select column_name, data_type, is_nullable, column_default
+--   from information_schema.columns
+--   where table_schema = 'public'
+--     and table_name   = 'orders'
+--     and column_name in ('cancellation_request_notification_status',
+--                         'cancellation_request_notification_sent_at')
+--   order by column_name;
+--
+--     Expected: ..._sent_at = timestamp with time zone, YES, NULL
+--               ..._status  = text,                     YES, NULL
+--
+-- (D) THE STATUS CONSTRAINT ALLOWS EXACTLY THREE VALUES.
+--     Expected: one row, and its definition names 'sending', 'sent' and
+--     'failed' and NOTHING ELSE. In particular it must not name
+--     'pending'.
+--
+--   select conname, pg_get_constraintdef(oid) as definition
+--   from pg_constraint
+--   where conrelid = 'public.orders'::regclass
+--     and contype = 'c'
+--     and pg_get_constraintdef(oid) like '%cancellation_request_notification_status%';
+--
+-- (E)(F)(G) WHO MAY UPDATE WHAT. The important block.
+--
+--     Expected: service_role holds column-scoped UPDATE on EXACTLY these
+--     eight columns and no others -
+--
+--       confirmation_email_status, confirmation_email_sent_at        (017)
+--       internal_notification_status, internal_notification_sent_at  (026)
+--       shipment_email_status, shipment_email_sent_at                (027)
+--       cancellation_request_notification_status,
+--       cancellation_request_notification_sent_at                    (030)
+--
+--     (E) 'status', 'fulfillment_status' and 'cancelled_at' MUST NOT
+--         appear in that list.
+--     (F) 'payment_status', 'refunded_total_cents' and
+--         'refund_updated_at' MUST NOT appear either - this migration
+--         changes no refund grant.
+--     (G) 'cancellation_requested_at' and 'cancellation_request_note'
+--         MUST NOT appear. The notification may never rewrite the
+--         request it is notifying about.
+--
+--     anon and authenticated must not appear as UPDATE grantees at all.
+--
+--   select grantee, column_name, privilege_type
+--   from information_schema.column_privileges
+--   where table_schema = 'public' and table_name = 'orders'
+--     and privilege_type = 'UPDATE'
+--     and grantee in ('anon', 'authenticated', 'service_role')
+--   order by grantee, column_name;
+--
+--     And no table-level write privilege appeared:
+--
+--   select grantee, privilege_type
+--   from information_schema.role_table_grants
+--   where table_schema = 'public' and table_name = 'orders'
+--     and grantee in ('anon', 'authenticated', 'service_role')
+--   order by grantee, privilege_type;
+--
+--     Expected: service_role SELECT only (the column-scoped UPDATE above
+--     does not appear here), authenticated SELECT only, anon absent.
+--
+-- (H) NO EXISTING ORDER WAS MODIFIED, AND NOTHING WAS BACKFILLED.
+--     THE IMPORTANT ONE. Applying this notifies nobody.
+--
+--     Expected: with_status = 0 and with_sent_at = 0 immediately after
+--     applying. Every pre-existing row reads NULL on both columns,
+--     INCLUDING any row that already carries a cancellation_requested_at
+--     from a request made before this feature existed.
+--
+--     open_requests is expected to be whatever it already was. Those are
+--     real customer requests that were recorded and never notified. They
+--     are deliberately NOT swept - see (K) and the closing note. If that
+--     number is non-zero, handle those orders by hand.
+--
+--   select count(*)                                        as orders,
+--          count(cancellation_requested_at)                 as open_requests,
+--          count(cancellation_request_notification_status)  as with_status,
+--          count(cancellation_request_notification_sent_at) as with_sent_at
+--   from public.orders;
+--
+-- (I) THE CUSTOMER REQUEST COLUMNS ARE UNTOUCHED. Migration 019's two
+--     columns still exist, still nullable, still with no default, and
+--     019's length constraint still stands. This migration neither reads
+--     nor writes them.
+--
+--   select column_name, data_type, is_nullable, column_default
+--   from information_schema.columns
+--   where table_schema = 'public' and table_name = 'orders'
+--     and column_name in ('cancellation_requested_at',
+--                         'cancellation_request_note',
+--                         'cancelled_at')
+--   order by column_name;
+--
+--   select conname, pg_get_constraintdef(oid) as definition
+--   from pg_constraint
+--   where conrelid = 'public.orders'::regclass
+--     and contype = 'c'
+--     and conname = 'orders_cancellation_request_note_length_check';
+--
+-- (J) NO TRIGGER ADDED. Nothing was attached to public.orders by this
+--     migration, and in particular nothing that could mail anyone.
+--     Expected: only the set_orders_updated_at trigger from migration 004.
+--
+--   select tgname, pg_get_triggerdef(oid) as definition
+--   from pg_trigger
+--   where tgrelid = 'public.orders'::regclass and not tgisinternal
+--   order by tgname;
+--
+-- (K) NO ORDER IS SWEEP ELIGIBLE. There is no sweep in this task, and
+--     if one is ever built it may key on 'failed' and nothing else.
+--     Expected: 0 immediately after applying, because nothing has
+--     attempted a send yet.
+--
+--   select count(*) as sweep_eligible
+--   from public.orders
+--   where cancellation_request_notification_status = 'failed';
+--
+-- (L) MIGRATIONS 022 THROUGH 029 ARE UNTOUCHED. Their objects still
+--     exist with their own privileges, unchanged by this migration.
+--     Expected: all four functions present, all SECURITY DEFINER, all
+--     executable by service_role and by nobody else.
+--
+--   select p.proname,
+--          p.prosecdef as security_definer,
+--          p.proconfig,
+--          has_function_privilege('anon',         p.oid, 'execute') as anon_can,
+--          has_function_privilege('service_role', p.oid, 'execute') as service_role_can
+--   from pg_proc p
+--   join pg_namespace n on n.oid = p.pronamespace
+--   where n.nspname = 'public'
+--     and p.proname in ('cancel_order',                 -- 029
+--                       'mark_order_shipped',           -- 028
+--                       'request_order_cancellation',   -- 019
+--                       'apply_order_refund_state')     -- 019
+--   order by p.proname;
+--
+--     Expected: security_definer true, proconfig {"search_path="},
+--     anon_can false, service_role_can true - for all four.
+--
+--     And 019's refund state model plus 026/027's email vocabularies are
+--     exactly as they were. Nothing in this migration touches any of them.
+--
+--   select conname, pg_get_constraintdef(oid) as definition
+--   from pg_constraint
+--   where conrelid = 'public.orders'::regclass
+--     and contype = 'c'
+--     and conname in ('orders_payment_status_check',
+--                     'orders_refunded_total_cents_range_check')
+--   order by conname;
+--
+--   select conname, pg_get_constraintdef(oid) as definition
+--   from pg_constraint
+--   where conrelid = 'public.orders'::regclass
+--     and contype = 'c'
+--     and (pg_get_constraintdef(oid) like '%internal_notification_status%'
+--       or pg_get_constraintdef(oid) like '%shipment_email_status%'
+--       or pg_get_constraintdef(oid) like '%confirmation_email_status%')
+--   order by conname;
+
+-- ══════════════════════════════════════════════════════════════
+-- WHY THERE IS NO RETRY SWEEP, AND WHAT ONE WOULD HAVE TO DO
+-- ══════════════════════════════════════════════════════════════
+--
+-- The internal fulfillment notification has a daily cron behind it
+-- (app/api/cron/retry-order-notifications) that drains rows stuck at
+-- 'failed' and recovers rows abandoned at 'sending'. Extending it to this
+-- message is the obvious next move and is deliberately NOT done here.
+--
+-- The reason is priority, not difficulty: the first thing that has to be
+-- true is that the NORMAL path is observable. A retry safety net for a
+-- path nobody has watched run yet is a second untested mechanism layered
+-- on a first untested mechanism.
+--
+-- There is a real interim retry, and it is the customer's own repeat
+-- request. Pressing "Stornierung anfragen" again returns
+-- 'already_requested' from request_order_cancellation - no second request
+-- is created and the original timestamp and note are preserved - and the
+-- route then re-enters the notification sender, whose claim picks the row
+-- up if and only if it is 'failed'. A 'sent' row loses the claim and
+-- mails nothing.
+--
+-- IF A SWEEP IS EVER BUILT, TWO RULES ARE NON-NEGOTIABLE:
+--
+--   1. IT MAY KEY ON 'failed' AND NOTHING ELSE. Never on NULL, and never
+--      on "cancellation_requested_at is not null and status is null".
+--      That tempting predicate would, on its very first run, mail the
+--      fulfillment inbox about every cancellation request ever recorded
+--      before this feature existed - see (H) above, where open_requests
+--      counts exactly those rows.
+--
+--   2. ITS COUNTS MUST STAY SEPARATE from the internal new-order
+--      notification's. They are two different messages about two
+--      different events, and one summary that conflated them would hide a
+--      failure behind an unrelated success.
+-- ══════════════════════════════════════════════════════════════

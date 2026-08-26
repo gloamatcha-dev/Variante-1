@@ -480,13 +480,20 @@ test("endpoint: a non-durable result is refused with a generic message", () => {
    MIGRATION 029: NUMBERING AND IMMUTABILITY
    ══════════════════════════════════════════════════════════════ */
 
-test("029: it is the next free number and 022-028 are untouched", () => {
+test("029: it owns its number and 022-028 are untouched", () => {
+  // 029 was the next free number when it was written. Phase 2D-A has
+  // since added 030 (internal cancellation request notification state),
+  // so this asserts ownership and immutability rather than "nothing later
+  // exists" - the same correction 028's suite already took when 029
+  // arrived. What must stay true is that 029 is the ONLY 029, that the
+  // seven migrations it was written on top of are still exactly those
+  // seven files, and that no later migration redefines cancel_order.
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
   assert.deepEqual(files.filter(f => f.startsWith("029")), ["029_authorized_order_cancellation.sql"]);
-  assert.equal(numbers.filter(nr => nr > "029").length, 0, "a migration above 029 appeared");
-  assert.deepEqual(files.slice(-8, -1), [
+  const upTo029 = files.filter(f => f < "030");
+  assert.deepEqual(upTo029.slice(-8), [
     "022_recurring_subscription_foundation.sql",
     "023_harden_stripe_customers_grants.sql",
     "024_seed_b2c_subscription_plans.sql",
@@ -494,7 +501,14 @@ test("029: it is the next free number and 022-028 are untouched", () => {
     "026_internal_order_notification_state.sql",
     "027_shipment_confirmation_email_state.sql",
     "028_authorized_shipment_transition.sql",
+    "029_authorized_order_cancellation.sql",
   ]);
+  // No later migration may redefine what 029 put live.
+  for (const name of files.filter(f => f > "029_authorized_order_cancellation.sql")) {
+    const later = withoutComments(readFileSync(path.join(MIGRATIONS, name), "utf-8"));
+    assert.ok(!later.includes("cancel_order"), `${name} redefines the cancellation transition`);
+    assert.ok(!later.includes("cancelled_at"), `${name} touches the cancellation timestamp`);
+  }
 });
 
 test("029: migration 028 is not edited and still says exactly what it said", () => {
@@ -1050,14 +1064,32 @@ test("regression: the DOCUMENTED GAP - a cancellation request does not block shi
   assert.ok(!sql029.includes("cancellation_declined_at"));
 });
 
-test("regression: no cancellation or refund customer email exists yet", () => {
+test("regression: no cancellation or refund CUSTOMER email exists yet", () => {
+  // Phase 2D-A added cancellationRequestNotification.ts, which is an
+  // INTERNAL message to orders@gloamatcha.com about a REQUEST. The
+  // customer's own cancellation-outcome mail and any refund mail still do
+  // not exist, which is what this assertion is really about.
   const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
   assert.deepEqual(templates, [
-    "internalOrderNotification.ts", "orderConfirmation.ts",
-    "shipmentConfirmation.ts", "withdrawalConfirmation.ts",
-  ], "an email template was added by this task");
-  // And nothing in this feature sends, claims or queues one.
-  for (const forbidden of ["cancellation_email", "cancellationEmail", "emailOutcome", "IdempotencyKey"]) {
+    "cancellationRequestNotification.ts", "internalOrderNotification.ts",
+    "orderConfirmation.ts", "shipmentConfirmation.ts", "withdrawalConfirmation.ts",
+  ], "an unexpected email template was added");
+  // Against stripped code: the template's header prose legitimately says
+  // where the message goes, and a scan that read comments would call that
+  // a hardcoded recipient.
+  const cancellationTemplate = withoutComments(
+    readFileSync(path.join(ROOT, "lib/email/cancellationRequestNotification.ts"), "utf-8")
+  );
+  assert.ok(!cancellationTemplate.includes("@gloamatcha.com"),
+    "the template hardcodes a recipient instead of leaving it to emailSenders");
+  assert.ok(withoutComments(readFileSync(path.join(ROOT, "lib/cancellationRequestNotificationEmail.ts"), "utf-8"))
+    .includes("to: GLOA_INTERNAL_ORDERS"), "the cancellation request mail is not internal-only");
+  // And the OPERATOR cancel route - this task's subject - still sends
+  // nothing at all.
+  for (const forbidden of [
+    "cancellation_email", "cancellationEmail", "emailOutcome", "IdempotencyKey",
+    "sendCancellationRequestNotificationIfNeeded",
+  ]) {
     assert.ok(!routeCode.includes(forbidden), `the route touches ${forbidden}`);
     assert.ok(!sql029.includes(forbidden), `029 touches ${forbidden}`);
   }
