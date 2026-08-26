@@ -7,15 +7,19 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeBlockedServerEnv } from "./helpers/testSupabase.mjs";
 import {
+  AUTO_RETRY_FAMILY_KEYS,
+  AUTO_RETRY_STATUS_COLUMNS,
   EMAIL_FAMILY_KEYS,
-  EMAIL_FAMILY_STATUS_COLUMNS,
   IN_FLIGHT_STATUS,
+  RETRY_DISABLED_FAMILIES,
   NEVER_ELIGIBLE_STATUSES,
   RETRY_BATCH_LIMIT,
   RETRY_ELIGIBLE_STATUS,
   STALE_RECOVERY_BATCH_LIMIT,
   STALE_SENDING_AFTER_MS,
+  disabledFamilySummary,
   emptyFamilySummary,
+  isAutoRetryFamily,
   isNeverEligibleStatus,
   isRetryEligibleStatus,
   isStaleSending,
@@ -57,7 +61,17 @@ const route = read("app/api/cron/retry-order-notifications/route.ts");
 const wiring = read("lib/transactionalEmailRetry.ts");
 const rules = read("lib/transactionalEmailRetryRules.ts");
 
+/**
+ * Code only.
+ *
+ * Block comments are removed FIRST. Both modules under test carry long
+ * prose blocks that deliberately NAME the things they exclude - the
+ * confirmation sender, its status column, the reason it is excluded - and
+ * a scan that read those would report the exclusion as a violation of
+ * itself.
+ */
 const withoutComments = source => source
+  .replace(/\/\*[\s\S]*?\*\//g, "")
   .split(NEWLINE)
   .filter(line => {
     const t = line.trim();
@@ -229,35 +243,144 @@ test("HISTORICAL: a NULL row in every family is never selected", async () => {
   }
 });
 
-test("HISTORICAL: order confirmation's 'pending' rows are never selected", async () => {
-  // Migration 017 is the one family with NOT NULL DEFAULT 'pending', so
-  // all 451 live orders sit there, as does every subscription-cycle order
-  // that deliberately never gets a customer confirmation.
+/* ══════════════════════════════════════════════════════════════
+   HOTFIX 2E-B.1: ORDER CONFIRMATION IS EXCLUDED ENTIRELY
+   ══════════════════════════════════════════════════════════════ */
+
+test("EXCLUDED: order confirmation is not an auto-retry family", () => {
+  // The root cause: it is the only one of the six senders that calls
+  // resend.emails.send WITHOUT a deterministic idempotency key, so a
+  // 'sending' or 'failed' row cannot be retried without risking a
+  // duplicate customer email.
+  assert.ok(!AUTO_RETRY_FAMILY_KEYS.includes("orderConfirmation"));
+  assert.equal(isAutoRetryFamily("orderConfirmation"), false);
+  assert.equal(AUTO_RETRY_FAMILY_KEYS.length, 5);
+  assert.deepEqual([...AUTO_RETRY_FAMILY_KEYS], [
+    "internalOrder", "shipment", "cancellationRequest", "cancellationOutcome", "refund",
+  ]);
+  assert.ok(RETRY_DISABLED_FAMILIES.orderConfirmation.includes("idempotency"));
+});
+
+test("EXCLUDED: the root cause is real - it is the one sender with no provider key", () => {
+  const confirmation = withoutComments(read("lib/orderConfirmationEmail.ts"));
+  assert.ok(confirmation.includes("resend.emails.send("), "the sender changed shape");
+  assert.ok(!confirmation.includes("idempotencyKey"), "the confirmation sender now HAS a key");
+  // Every auto-retryable family does have one.
+  for (const rel of [
+    "lib/internalOrderNotificationEmail.ts",
+    "lib/shipmentConfirmationEmail.ts",
+    "lib/cancellationRequestNotificationEmail.ts",
+    "lib/cancellationOutcomeEmail.ts",
+    "lib/refundConfirmationEmail.ts",
+  ]) {
+    assert.ok(withoutComments(read(rel)).includes("{ idempotencyKey }"), `${rel} lost its provider key`);
+  }
+});
+
+test("EXCLUDED: confirmation_email_status appears NOWHERE in the retry system", () => {
+  // Not "unused" - absent. No query, no work list and no conditional
+  // write can name it even by accident.
+  for (const [label, source] of [
+    ["wiring", wiringCode], ["rules", rulesCode], ["route", routeCode],
+  ]) {
+    assert.ok(!source.includes("confirmation_email_status"), `${label} names the confirmation status column`);
+    assert.ok(!source.includes("confirmation_email_sent_at"), `${label} names the confirmation sent_at column`);
+  }
+  assert.ok(!Object.values(AUTO_RETRY_STATUS_COLUMNS).includes("confirmation_email_status"));
+  assert.ok(!("orderConfirmation" in AUTO_RETRY_STATUS_COLUMNS));
+});
+
+test("EXCLUDED: the retry never imports or calls the confirmation sender", () => {
+  for (const [label, source] of [
+    ["wiring", wiringCode], ["rules", rulesCode], ["route", routeCode],
+  ]) {
+    assert.ok(!source.includes("sendOrderConfirmationEmailIfNeeded"), `${label} calls the confirmation sender`);
+    assert.ok(!source.includes("orderConfirmationEmail"), `${label} imports the confirmation sender`);
+  }
+  // And no reconstruction machinery survives either.
+  assert.ok(!wiringCode.includes("checkout_attempts"), "the retry still reads checkout attempts");
+  assert.ok(!wiringCode.includes("items_snapshot"), "the retry still rebuilds line items");
+  assert.ok(!wiringCode.includes("retryOrderConfirmation"), "the adapter survived");
+});
+
+test("EXCLUDED: every confirmation state is unreachable, not merely refused", () => {
+  // The 390 pending, 15 failed, 5 sending and 41 sent rows live in
+  // production are unreachable because the family is never run at all.
   const m017 = read("supabase/migrations/017_order_confirmation_email_state.sql");
   assert.ok(m017.includes("not null default 'pending'"), "017 no longer defaults to pending");
-  assert.equal(isRetryEligibleStatus("pending"), false);
+  assert.equal(isAutoRetryFamily("orderConfirmation"), false);
+  // Belt and braces: the generic predicates refuse most of them anyway.
+  for (const status of ["pending", "sending", "sent", null, undefined]) {
+    assert.equal(isRetryEligibleStatus(status), false, String(status));
+  }
+  // One runFamily call per auto-retry family, minus the internal
+  // notification which keeps its own sweep. Four.
+  assert.equal([...wiringCode.matchAll(/await runFamily\(/g)].length, 4,
+    "the orchestrator runs a family it should not");
+});
 
-  const { port, calls } = fakePort([
-    { id: ORDER_A, status: "pending" },
-    { id: ORDER_B, status: "pending" },
-  ]);
-  const summary = await runFamily(port, CUTOFF);
-  assert.deepEqual(calls, []);
-  assert.equal(summary.eligible, 0);
+test("EXCLUDED: repo-wide, only the paid-order webhook calls the confirmation sender", () => {
+  // The strongest form of the exclusion: a walk of the whole tree, with
+  // comments stripped, finds exactly one caller. The retry module NAMES
+  // the sender in its header prose to explain why it is excluded, which
+  // is documentation and not a call site - hence the stripping.
+  const callers = [];
+  const walk = dir => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { walk(full); continue; }
+      if (!/\.(ts|tsx)$/.test(entry.name)) continue;
+      const rel = path.relative(ROOT, full).split(path.sep).join("/");
+      if (rel === "lib/orderConfirmationEmail.ts") continue;
+      if (withoutComments(readFileSync(full, "utf-8")).includes("sendOrderConfirmationEmailIfNeeded")) {
+        callers.push(rel);
+      }
+    }
+  };
+  walk(path.join(ROOT, "app"));
+  walk(path.join(ROOT, "lib"));
+  assert.deepEqual(callers, ["app/api/stripe/webhook/route.ts"],
+    `the confirmation sender gained a caller: ${callers.join(", ")}`);
+});
+
+test("EXCLUDED: the response says disabled, and no query produced it", () => {
+  const summary = disabledFamilySummary("because");
+  assert.equal(summary.disabled, true);
+  assert.equal(summary.reason, "because");
+  for (const counter of ["staleFound", "staleRecovered", "eligible", "attempted", "sent", "failed", "skipped"]) {
+    assert.equal(summary[counter], 0, counter);
+  }
+  assert.equal(summary.errored, false, "disabled is not an error");
+  assert.ok(wiringCode.includes(
+    "orderConfirmation: disabledFamilySummary(RETRY_DISABLED_FAMILIES.orderConfirmation)"
+  ));
+});
+
+test("EXCLUDED: the production confirmation rows are not repaired by this change", () => {
+  // 390 pending, 15 failed, 5 sending, 41 sent are left exactly as they
+  // are. The hotfix stops the cron looking at them; it repairs nothing.
+  for (const forbidden of ["confirmation_email", "backfill", "markConfirmationEmail"]) {
+    assert.ok(!wiringCode.includes(forbidden), `the retry writes confirmation state: ${forbidden}`);
+  }
+  // The only UPDATE the retry performs is the one stale-recovery write,
+  // on an auto-retry family's column.
+  const updates = [...wiringCode.matchAll(/\.update\(\{([\s\S]*?)\}\)/g)].map(m => m[1]);
+  assert.equal(updates.length, 1);
+  assert.ok(updates[0].includes('[statusColumn]: "failed"'));
 });
 
 test("HISTORICAL: every family's status column is the one its migration created", () => {
   const expected = {
-    orderConfirmation: ["017_order_confirmation_email_state.sql", "confirmation_email_status"],
     internalOrder: ["026_internal_order_notification_state.sql", "internal_notification_status"],
     shipment: ["027_shipment_confirmation_email_state.sql", "shipment_email_status"],
     cancellationRequest: ["030_cancellation_request_notification_state.sql", "cancellation_request_notification_status"],
     cancellationOutcome: ["031_cancellation_request_resolution.sql", "cancellation_outcome_email_status"],
     refund: ["033_refund_confirmation_email_state.sql", "refund_email_status"],
   };
-  assert.deepEqual(Object.keys(EMAIL_FAMILY_STATUS_COLUMNS).sort(), [...EMAIL_FAMILY_KEYS].sort());
+  assert.deepEqual(Object.keys(AUTO_RETRY_STATUS_COLUMNS).sort(), [...AUTO_RETRY_FAMILY_KEYS].sort());
   for (const [key, [file, column]] of Object.entries(expected)) {
-    assert.equal(EMAIL_FAMILY_STATUS_COLUMNS[key], column, key);
+    assert.equal(AUTO_RETRY_STATUS_COLUMNS[key], column, key);
     const sql = read(`supabase/migrations/${file}`);
     assert.ok(sql.includes(column), `${file} does not create ${column}`);
     assert.ok(sql.includes(`'sending', 'sent', 'failed'`), `${file} vocabulary changed`);
@@ -489,7 +612,7 @@ test("refund: the sweep hands over an order id and lets the sender re-validate",
   // The sweep must not re-implement the watermark comparison - the sender
   // owns it, which is what keeps the multi-refund architecture in one
   // place.
-  assert.ok(wiringCode.includes("EMAIL_FAMILY_STATUS_COLUMNS.refund"));
+  assert.ok(wiringCode.includes("AUTO_RETRY_STATUS_COLUMNS.refund"));
   assert.ok(wiringCode.includes("sendRefundConfirmationIfNeeded"));
   for (const forbidden of [
     "refunded_total_cents >", "notified_total_cents >", "isRefundEmailOwed", "refundKind",
@@ -572,7 +695,10 @@ test("isolation: a stale-recovery failure does not stop that family's sweep", as
 
 test("isolation: every family runs inside its own guard in the orchestrator", () => {
   // Six families, each awaited separately, and the legacy one wrapped too.
-  assert.equal([...wiringCode.matchAll(/await runFamily\(/g)].length, 5);
+  // Four: five auto-retry families, minus the internal notification,
+  // which keeps its own proven sweep. Order confirmation is excluded
+  // entirely and is never run at all.
+  assert.equal([...wiringCode.matchAll(/await runFamily\(/g)].length, 4);
   assert.ok(wiringCode.includes("try {"), "the legacy sweep is not guarded");
   assert.ok(wiringCode.includes("internalOrder = erroredSummary();"));
   // The cutoff is computed once so all six judge staleness identically.
@@ -642,9 +768,10 @@ test("safety: the retry chooses no recipient and builds no message of its own", 
   }
   assert.ok(!wiringCode.includes("resend.emails.send"), "the wiring sends directly");
   assert.ok(!wiringCode.includes("GLOA_INTERNAL_ORDERS"));
-  // The one reconstruction it does perform takes its recipient from the
-  // order's own snapshot.
-  assert.ok(wiringCode.includes("order.customer_snapshot"));
+  // Since the 2E-B.1 hotfix the retry performs NO reconstruction at all:
+  // the one family that needed it is excluded, so every remaining sender
+  // takes an order id and reads every fact itself.
+  assert.ok(!wiringCode.includes("customer_snapshot"), "the retry reads a customer snapshot");
   assert.ok(!wiringCode.includes("customer_details"), "the retry reads a Stripe payload");
 });
 
@@ -742,11 +869,19 @@ test("cron: the response carries counts only, never a customer fact", () => {
   for (const value of Object.values(summary)) {
     assert.ok(typeof value === "number" || typeof value === "boolean");
   }
-  // The orchestrator returns exactly ok plus the six family keys.
+  // The orchestrator returns ok plus all six family keys - the five it
+  // runs, and order confirmation reported as disabled so the shape stays
+  // stable and the exclusion is visible rather than silent.
   const ret = wiringCode.slice(wiringCode.lastIndexOf("return {"));
-  const keys = [...ret.matchAll(/^\s+(\w+),?$/gm)].map(m => m[1]);
-  assert.deepEqual(keys.sort(), [...EMAIL_FAMILY_KEYS].sort());
   assert.ok(ret.includes("ok: true"));
+  for (const key of EMAIL_FAMILY_KEYS) {
+    assert.ok(ret.includes(key), `the response omits ${key}`);
+  }
+  assert.ok(ret.includes("orderConfirmation: disabledFamilySummary("));
+  // And a disabled family carries a reason, which is a string constant,
+  // never a customer fact.
+  assert.equal(typeof RETRY_DISABLED_FAMILIES.orderConfirmation, "string");
+  assert.ok(!RETRY_DISABLED_FAMILIES.orderConfirmation.includes("@"));
 });
 
 test("logging: no PII reaches a log line anywhere in this feature", () => {
@@ -761,45 +896,6 @@ test("logging: no PII reaches a log line anywhere in this feature", () => {
       }
     }
   }
-});
-
-/* ══════════════════════════════════════════════════════════════
-   ORDER CONFIRMATION RECONSTRUCTION
-   ══════════════════════════════════════════════════════════════ */
-
-test("confirmation: it is rebuilt from persisted rows and nothing else", () => {
-  const fn = wiringCode.slice(wiringCode.indexOf("async function retryOrderConfirmation"));
-  const body = fn.slice(0, fn.indexOf("export async function runTransactionalEmailRetryCron"));
-  // The frozen line items off the checkout attempt.
-  assert.ok(body.includes('.from("checkout_attempts")'));
-  assert.ok(body.includes('.select("items_snapshot")'));
-  // The recipient off the order's own snapshot.
-  assert.ok(body.includes("order.customer_snapshot"));
-  // Nothing is re-priced, re-quoted, or asked of Stripe.
-  for (const forbidden of ["resolveCheckoutTax", "computeShipping", "price_gross_cents", "stripe", "fetch("]) {
-    assert.ok(!body.includes(forbidden), `the reconstruction performs: ${forbidden}`);
-  }
-});
-
-test("confirmation: it never throws, so it satisfies the generic contract", () => {
-  const fn = wiringCode.slice(wiringCode.indexOf("async function retryOrderConfirmation"));
-  const body = fn.slice(0, fn.indexOf("export async function runTransactionalEmailRetryCron"));
-  assert.ok(body.includes("} catch {"), "the throwing sender is not caught");
-  assert.ok(!body.includes("throw"), "the adapter throws");
-  const returns = [...body.matchAll(/return "([a-z-]+)"/g)].map(m => m[1]);
-  for (const r of returns) {
-    assert.ok(["sent", "already-sent", "not-eligible", "failed"].includes(r), r);
-  }
-});
-
-test("confirmation: an unsendable order is not counted as a failure forever", () => {
-  const fn = wiringCode.slice(wiringCode.indexOf("async function retryOrderConfirmation"));
-  const body = fn.slice(0, fn.indexOf("export async function runTransactionalEmailRetryCron"));
-  // No attempt, no items and no recipient are all "not-eligible", not
-  // "failed" - there is nothing retryable about any of them.
-  assert.ok(body.includes("if (!order.checkout_attempt_id) return \"not-eligible\";"));
-  assert.ok(body.includes("if (raw.length === 0) return \"not-eligible\";"));
-  assert.ok(body.includes("if (!customerEmail) return \"not-eligible\";"));
 });
 
 /* ══════════════════════════════════════════════════════════════

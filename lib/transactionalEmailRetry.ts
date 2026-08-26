@@ -1,16 +1,15 @@
 import { getSupabaseAdmin } from "./supabaseAdmin";
 import { runInternalOrderNotificationCron } from "./internalOrderNotificationRetry";
-import { sendOrderConfirmationEmailIfNeeded } from "./orderConfirmationEmail";
 import { sendShipmentConfirmationIfNeeded } from "./shipmentConfirmationEmail";
 import { sendCancellationRequestNotificationIfNeeded } from "./cancellationRequestNotificationEmail";
 import { sendCancellationOutcomeEmailIfNeeded } from "./cancellationOutcomeEmail";
 import { sendRefundConfirmationIfNeeded } from "./refundConfirmationEmail";
-import type { AddressSnapshot } from "./orderAddressSnapshot";
-import type { OrderConfirmationItem } from "./email/orderConfirmation";
 import {
-  EMAIL_FAMILY_STATUS_COLUMNS,
+  AUTO_RETRY_STATUS_COLUMNS,
+  RETRY_DISABLED_FAMILIES,
   RETRY_BATCH_LIMIT,
   STALE_RECOVERY_BATCH_LIMIT,
+  disabledFamilySummary,
   emptyFamilySummary,
   runFamily,
   staleSendingCutoff,
@@ -24,8 +23,36 @@ import {
 } from "./transactionalEmailRetryRules";
 
 /**
- * Gives the transactional email retry rules a database and the six
- * existing senders, and nothing else (Phase 2E-B).
+ * Gives the transactional email retry rules a database and five of the
+ * six existing senders, and nothing else (Phase 2E-B, hotfixed in 2E-B.1).
+ *
+ * ══════════════════════════════════════════════════════════════
+ * FIVE FAMILIES, NOT SIX
+ * ══════════════════════════════════════════════════════════════
+ *
+ * The customer ORDER CONFIRMATION is excluded from automatic retry, and
+ * the exclusion is total: this module never queries
+ * confirmation_email_status, never recovers a stale confirmation
+ * 'sending', never selects a confirmation 'failed', and never imports
+ * sendOrderConfirmationEmailIfNeeded. The column name does not appear in
+ * this file at all.
+ *
+ * Phase 2E-B included it and that was wrong. It is the only one of the six
+ * senders that calls resend.emails.send WITHOUT a deterministic
+ * { idempotencyKey }, so its whole duplicate guard is the database claim.
+ * A 'sending' row therefore does not prove the message was never accepted
+ * - the process can die between Resend accepting it and the 'sent' write
+ * committing - and a 'failed' row carries the same ambiguity. Recovering
+ * either and re-sending can put a second order confirmation in a
+ * customer's inbox with nothing at the provider to stop it. Production
+ * showed exactly that on the first manual invocation.
+ *
+ * BOTH halves are disabled, not just recovery: leaving the failed-only
+ * sweep enabled would duplicate just as readily.
+ *
+ * See lib/transactionalEmailRetryRules.ts for what a future fix has to
+ * account for - chiefly that adding a key today does not make yesterday's
+ * keyless sends retryable.
  *
  * ══════════════════════════════════════════════════════════════
  * WHAT THIS IS AND IS NOT
@@ -71,21 +98,15 @@ import {
  * five new ones.
  *
  * ══════════════════════════════════════════════════════════════
- * WHY ORDER CONFIRMATION NEEDS AN ADAPTER
+ * THE PRODUCTION ROWS ARE LEFT EXACTLY AS THEY ARE
  * ══════════════════════════════════════════════════════════════
  *
- * sendOrderConfirmationEmailIfNeeded takes a built params object rather
- * than an order id, and it THROWS on failure, because it was written to
- * ride Stripe's webhook redelivery. Both are handled by the small adapter
- * below rather than by changing that sender: it is on the paid-order
- * path, it is the most load-bearing email in the system, and a retry
- * feature has no business editing it.
- *
- * The adapter rebuilds the message from persisted data and from nothing
- * else - the frozen items_snapshot on the checkout attempt, and the
- * order's own customer_snapshot for the recipient. Nothing is re-priced,
- * nothing is re-quoted, and Stripe is not consulted: a retry days later
- * must describe the order that exists, not what the shop sells today.
+ * At the time of the hotfix production held 390 confirmation rows at
+ * 'pending', 15 at 'failed', 5 at 'sending' and 41 at 'sent'. This
+ * change repairs none of them: no backfill, no reset, no re-send, no
+ * deletion. It only stops the cron from looking at them. Deciding what
+ * those 20 ambiguous rows deserve is an operator judgement about real
+ * customers' inboxes, not something a code change should make silently.
  */
 
 /** How the cron reports one family it could not even attempt. */
@@ -195,124 +216,6 @@ function buildPort(
 }
 
 /* ══════════════════════════════════════════════════════════════
-   ORDER CONFIRMATION: RECONSTRUCTION FROM DURABLE DATA
-   ══════════════════════════════════════════════════════════════ */
-
-const CONFIRMATION_ORDER_COLUMNS =
-  "id, order_number, user_id, subtotal_gross_cents, shipping_gross_cents, total_gross_cents, " +
-  "shipping_address_snapshot, customer_snapshot, checkout_attempt_id, confirmation_email_status";
-
-type ConfirmationOrderRow = {
-  id: string;
-  order_number: string;
-  user_id: string | null;
-  subtotal_gross_cents: number;
-  shipping_gross_cents: number | null;
-  total_gross_cents: number;
-  shipping_address_snapshot: AddressSnapshot | null;
-  customer_snapshot: unknown;
-  checkout_attempt_id: string | null;
-};
-
-type ConfirmationItemSnapshot = {
-  productName: string;
-  variantLabel: string;
-  quantity: number;
-  unitGrossCents: number;
-  lineGrossCents: number;
-};
-
-/**
- * Retries one order confirmation, rebuilt from persisted rows.
- *
- * Returns rather than throws, so it satisfies the generic loop's
- * contract even though the sender it wraps does throw.
- *
- * "not-eligible" is used for the two cases where a retry can never
- * succeed and must not be counted as a failure: an order with no frozen
- * line items to describe, and an order whose snapshot holds no recipient.
- * Both leave the row at 'failed', which means the sweep will look at them
- * again tomorrow and reach the same conclusion - noisy but harmless, and
- * strictly better than inventing a line item or an address. The sender
- * itself already refuses a missing recipient the same way.
- */
-async function retryOrderConfirmation(orderId: string): Promise<EmailSendResult> {
-  const admin = getSupabaseAdmin();
-  if (!admin) return "failed";
-
-  const { data, error } = await admin
-    .from("orders")
-    .select(CONFIRMATION_ORDER_COLUMNS)
-    .eq("id", orderId)
-    .maybeSingle();
-
-  if (error) {
-    console.error(`Transactional email retry (orderConfirmation): load failed for ${orderId}.`);
-    return "failed";
-  }
-  if (!data) return "not-eligible";
-
-  const order = data as unknown as ConfirmationOrderRow;
-
-  if (!order.checkout_attempt_id) return "not-eligible";
-
-  const { data: attempt, error: attemptError } = await admin
-    .from("checkout_attempts")
-    .select("items_snapshot")
-    .eq("id", order.checkout_attempt_id)
-    .maybeSingle();
-
-  if (attemptError) {
-    console.error(`Transactional email retry (orderConfirmation): attempt load failed for ${orderId}.`);
-    return "failed";
-  }
-  if (!attempt) return "not-eligible";
-
-  const snapshot = (attempt as { items_snapshot?: unknown }).items_snapshot;
-  const raw = (Array.isArray(snapshot) ? snapshot : []) as ConfirmationItemSnapshot[];
-  if (raw.length === 0) return "not-eligible";
-
-  // Exactly the five fields the customer template takes - the same
-  // mapping the webhook call site makes, from the same frozen snapshot.
-  const items: OrderConfirmationItem[] = raw.map(item => ({
-    productName: item.productName,
-    variantLabel: item.variantLabel,
-    quantity: item.quantity,
-    unitGrossCents: item.unitGrossCents,
-    lineGrossCents: item.lineGrossCents,
-  }));
-
-  // The order's own frozen snapshot, which is what
-  // create_order_from_paid_checkout persisted from the Checkout session.
-  // Never a Stripe payload and never a caller's value.
-  const customer = (order.customer_snapshot ?? {}) as { email?: unknown };
-  const customerEmail = typeof customer.email === "string" ? customer.email.trim() || null : null;
-  if (!customerEmail) return "not-eligible";
-
-  try {
-    await sendOrderConfirmationEmailIfNeeded({
-      order: {
-        id: order.id,
-        order_number: order.order_number,
-        user_id: order.user_id,
-        subtotal_gross_cents: order.subtotal_gross_cents,
-        shipping_gross_cents: order.shipping_gross_cents,
-        total_gross_cents: order.total_gross_cents,
-        shipping_address_snapshot: order.shipping_address_snapshot,
-      },
-      items,
-      customerEmail,
-    });
-    return "sent";
-  } catch {
-    // The sender has already written 'failed' before throwing, and it has
-    // already logged the provider's message without any customer fact.
-    // Nothing is added here beyond the count.
-    return "failed";
-  }
-}
-
-/* ══════════════════════════════════════════════════════════════
    THE CRON ORCHESTRATION
    ══════════════════════════════════════════════════════════════ */
 
@@ -356,19 +259,14 @@ export async function runTransactionalEmailRetryCron(): Promise<TransactionalEma
     internalOrder = erroredSummary();
   }
 
-  const orderConfirmation = await runFamily(
-    buildPort(EMAIL_FAMILY_STATUS_COLUMNS.orderConfirmation, "orderConfirmation", retryOrderConfirmation),
-    cutoffIso
-  );
-
   const shipment = await runFamily(
-    buildPort(EMAIL_FAMILY_STATUS_COLUMNS.shipment, "shipment", sendShipmentConfirmationIfNeeded),
+    buildPort(AUTO_RETRY_STATUS_COLUMNS.shipment, "shipment", sendShipmentConfirmationIfNeeded),
     cutoffIso
   );
 
   const cancellationRequest = await runFamily(
     buildPort(
-      EMAIL_FAMILY_STATUS_COLUMNS.cancellationRequest,
+      AUTO_RETRY_STATUS_COLUMNS.cancellationRequest,
       "cancellationRequest",
       sendCancellationRequestNotificationIfNeeded
     ),
@@ -377,7 +275,7 @@ export async function runTransactionalEmailRetryCron(): Promise<TransactionalEma
 
   const cancellationOutcome = await runFamily(
     buildPort(
-      EMAIL_FAMILY_STATUS_COLUMNS.cancellationOutcome,
+      AUTO_RETRY_STATUS_COLUMNS.cancellationOutcome,
       "cancellationOutcome",
       sendCancellationOutcomeEmailIfNeeded
     ),
@@ -393,13 +291,15 @@ export async function runTransactionalEmailRetryCron(): Promise<TransactionalEma
   // fail earlier, and a historical settled refund whose email state is
   // NULL is never selected here in the first place.
   const refund = await runFamily(
-    buildPort(EMAIL_FAMILY_STATUS_COLUMNS.refund, "refund", sendRefundConfirmationIfNeeded),
+    buildPort(AUTO_RETRY_STATUS_COLUMNS.refund, "refund", sendRefundConfirmationIfNeeded),
     cutoffIso
   );
 
   return {
     ok: true,
-    orderConfirmation,
+    // Never run, never queried. Zero counters plus an explicit flag, so
+    // the response says "switched off" rather than "nothing was owed".
+    orderConfirmation: disabledFamilySummary(RETRY_DISABLED_FAMILIES.orderConfirmation),
     internalOrder,
     shipment,
     cancellationRequest,

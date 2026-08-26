@@ -122,16 +122,97 @@ export const EMAIL_FAMILY_KEYS = [
 
 export type EmailFamilyKey = (typeof EMAIL_FAMILY_KEYS)[number];
 
+/* ══════════════════════════════════════════════════════════════
+   ORDER CONFIRMATION IS EXCLUDED FROM AUTOMATIC RETRY (2E-B.1)
+   ══════════════════════════════════════════════════════════════
+
+   THE HOTFIX, AND WHY IT WAS NEEDED.
+
+   Phase 2E-B included the customer order confirmation in the sweep. That
+   was wrong, and the first manual cron invocation in production made it
+   visible: 25 stale 'sending' rows were recovered to 'failed' and 25
+   confirmations were re-sent, against orders created on 2026-08-21.
+
+   THE DEFECT IS NOT THE SWEEP. It is that this one family has no
+   provider-side idempotency key. lib/orderConfirmationEmail.ts calls
+   resend.emails.send({...}) with no second { idempotencyKey } argument -
+   the only one of the six senders that does not - so its entire
+   duplicate guard is the database claim.
+
+   That is sufficient while the database is the only thing racing. It is
+   NOT sufficient across a crash, because a 'sending' row does not prove
+   the email was never accepted:
+
+     1. Resend accepts the message
+     2. the process dies before markConfirmationEmailSent commits
+     3. the row is left at 'sending'
+     4. stale recovery moves it to 'failed'
+     5. the sweep re-sends it - and nothing at the provider suppresses it
+     6. the customer receives a second order confirmation
+
+   The same ambiguity applies to a legacy 'failed' row: 'failed' is
+   written after a send attempt whose outcome at the provider is not
+   recorded anywhere. Neither state is safe to retry blind.
+
+   So BOTH HALVES are disabled for this family - stale recovery and the
+   failed-only sweep. Disabling only one would leave the other able to
+   duplicate.
+
+   THIS IS NOT A PERMANENT ANSWER. It is the safe state until a
+   provider-idempotent design exists, and that design has to cope with
+   rows that were sent WITHOUT a key, so adding a key today does not
+   retroactively make today's 20 ambiguous rows retryable. See the note
+   at the foot of this file.
+*/
+
 /**
- * Which durable column carries each family's delivery state.
+ * Families the cron may retry automatically.
  *
- * These are the exact column names migrations 017, 026, 027, 030, 031 and
- * 033 created. Nothing else on public.orders may ever appear here: the
- * sweep writes only through the senders, and the senders hold
- * column-scoped grants covering these thirteen columns and nothing more.
+ * Five, not six. Every one of them sends through a deterministic
+ * per-message Resend idempotency key, so a retry after an ambiguous crash
+ * is suppressed at the provider even when the database cannot tell
+ * whether the first attempt landed. That property is the entry
+ * requirement for this list, and order confirmation does not meet it.
  */
-export const EMAIL_FAMILY_STATUS_COLUMNS: Readonly<Record<EmailFamilyKey, string>> = Object.freeze({
-  orderConfirmation: "confirmation_email_status",
+export const AUTO_RETRY_FAMILY_KEYS = [
+  "internalOrder",
+  "shipment",
+  "cancellationRequest",
+  "cancellationOutcome",
+  "refund",
+] as const;
+
+export type AutoRetryFamilyKey = (typeof AUTO_RETRY_FAMILY_KEYS)[number];
+
+/**
+ * Families deliberately excluded from automatic retry, and why.
+ *
+ * Kept as data rather than as a comment so the exclusion is testable and
+ * so the reason travels with it.
+ */
+export const RETRY_DISABLED_FAMILIES: Readonly<Record<string, string>> = Object.freeze({
+  orderConfirmation:
+    "no deterministic provider idempotency key, so an ambiguous 'sending' or 'failed' row cannot be retried without risking a duplicate customer email",
+});
+
+export function isAutoRetryFamily(key: string): boolean {
+  return (AUTO_RETRY_FAMILY_KEYS as readonly string[]).includes(key);
+}
+
+/**
+ * Which durable column carries each AUTO-RETRYABLE family's state.
+ *
+ * confirmation_email_status is deliberately ABSENT. It is not merely
+ * unused here - the string does not appear anywhere in the retry system
+ * at all, so no query, no work list and no conditional write can name it
+ * even by accident.
+ *
+ * These are the exact column names migrations 026, 027, 030, 031 and 033
+ * created. Nothing else on public.orders may ever appear here: the sweep
+ * writes only through the senders, and the senders hold column-scoped
+ * grants covering the email-state columns and nothing more.
+ */
+export const AUTO_RETRY_STATUS_COLUMNS: Readonly<Record<AutoRetryFamilyKey, string>> = Object.freeze({
   internalOrder: "internal_notification_status",
   shipment: "shipment_email_status",
   cancellationRequest: "cancellation_request_notification_status",
@@ -140,19 +221,13 @@ export const EMAIL_FAMILY_STATUS_COLUMNS: Readonly<Record<EmailFamilyKey, string
 });
 
 /**
- * ORDER CONFIRMATION IS THE ODD ONE, AND IT IS STILL SAFE.
+ * Statuses that are never eligible under any circumstances.
  *
- * Migration 017 declared confirmation_email_status NOT NULL DEFAULT
- * 'pending', so unlike the other five it has no NULL rows at all - every
- * order ever created starts at 'pending'. That includes all 451 live
- * orders and every subscription-cycle order, which deliberately never
- * receives a customer confirmation and therefore sits at 'pending'
- * forever.
- *
- * The absolute rule covers this without a special case: a sweep keyed on
- * 'failed' cannot see 'pending'. What would have been catastrophic is a
- * sweep keyed on "not sent yet", which for this family would have meant
- * mailing the entire order history.
+ * 'pending' is on the list because migration 017 declared
+ * confirmation_email_status NOT NULL DEFAULT 'pending'. That family is
+ * now excluded outright, so the value should be unreachable here - it is
+ * kept anyway, because a rule that only holds while a separate exclusion
+ * holds is a rule with a single point of failure.
  */
 export const NEVER_ELIGIBLE_STATUSES = ["pending", "sending", "sent"] as const;
 
@@ -418,7 +493,55 @@ export async function runFamily(
   return summary;
 }
 
-/** What one cron invocation reports. Six families, counts only. */
+/**
+ * A family that was not run at all because automatic retry is disabled
+ * for it.
+ *
+ * Zero counters plus an explicit flag, rather than a missing key. The
+ * response is read by a human looking at a cron result, and "disabled"
+ * and "nothing was owed" are different facts that must not look the same.
+ *
+ * NO DATABASE QUERY PRODUCES THIS. The counters are zero because nothing
+ * ran, not because something counted zero rows - the whole point of the
+ * exclusion is that the confirmation columns are never queried.
+ */
+export type DisabledFamilySummary = EmailRetryFamilySummary & {
+  disabled: true;
+  /** Why, so an operator reading the response does not have to guess. */
+  reason: string;
+};
+
+export function disabledFamilySummary(reason: string): DisabledFamilySummary {
+  return { ...emptyFamilySummary(), disabled: true, reason };
+}
+
+/**
+ * What one cron invocation reports.
+ *
+ * All six families still appear, so the shape is stable and an operator
+ * can see at a glance that order confirmation exists and is switched off,
+ * rather than wondering whether it was forgotten.
+ */
 export type TransactionalEmailRetrySummary = {
   ok: true;
-} & Record<EmailFamilyKey, EmailRetryFamilySummary>;
+  orderConfirmation: DisabledFamilySummary;
+} & Record<AutoRetryFamilyKey, EmailRetryFamilySummary>;
+
+/* ══════════════════════════════════════════════════════════════
+   WHAT ORDER CONFIRMATION RELIABILITY WOULD TAKE
+   ══════════════════════════════════════════════════════════════
+
+   Deliberately NOT solved here. Recorded so the next attempt starts from
+   the constraint that actually matters rather than rediscovering it.
+
+   ADDING AN IDEMPOTENCY KEY TODAY DOES NOT FIX YESTERDAY. Every
+   confirmation sent so far went to Resend with no key, so the provider
+   holds no record that could suppress a second send of those messages.
+   A key makes FUTURE sends retryable; it leaves today's ambiguous rows
+   exactly as ambiguous as they are now.
+
+   Any future design therefore has to separate the two populations - rows
+   whose first attempt carried a key, and rows whose did not - and may
+   only ever auto-retry the first. The second is an operator decision, not
+   a sweep's.
+   ══════════════════════════════════════════════════════════════ */
