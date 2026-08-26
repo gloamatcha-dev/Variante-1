@@ -599,20 +599,33 @@ test("IDEMPOTENCY: the Resend key is per order and unchanged from Phase 2A", () 
    MIGRATION 028
    ══════════════════════════════════════════════════════════════ */
 
-test("028: it is the next free number and 022-027 are untouched", () => {
+test("028: it owns its number and 022-027 are untouched", () => {
+  // 028 was the next free number when it was written. Phase 2C has since
+  // added 029 (authorized order cancellation), so this asserts ownership
+  // and immutability rather than "nothing later exists" - the same
+  // correction 027's suite already took when 028 arrived. What must stay
+  // true is that 028 is the ONLY 028, that the six migrations it was
+  // written on top of are still exactly those six files, and that no
+  // later migration redefines the shipment transition.
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
   assert.deepEqual(files.filter(f => f.startsWith("028")), ["028_authorized_shipment_transition.sql"]);
-  assert.equal(numbers.filter(nr => nr > "028").length, 0, "a migration above 028 appeared");
-  assert.deepEqual(files.slice(-7, -1), [
+  const upTo028 = files.filter(f => f < "029");
+  assert.deepEqual(upTo028.slice(-7), [
     "022_recurring_subscription_foundation.sql",
     "023_harden_stripe_customers_grants.sql",
     "024_seed_b2c_subscription_plans.sql",
     "025_grant_subscription_plans_service_role.sql",
     "026_internal_order_notification_state.sql",
     "027_shipment_confirmation_email_state.sql",
+    "028_authorized_shipment_transition.sql",
   ]);
+  // No later migration may redefine what 028 put live.
+  for (const name of files.filter(f => f > "028_authorized_shipment_transition.sql")) {
+    const later = withoutComments(readFileSync(path.join(MIGRATIONS, name), "utf-8"));
+    assert.ok(!later.includes("mark_order_shipped"), `${name} redefines the shipment transition`);
+  }
 });
 
 test("028: 027 is not edited by it, and still says what it said", () => {

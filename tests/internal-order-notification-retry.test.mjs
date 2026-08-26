@@ -623,18 +623,20 @@ test("migrations: the retry still adds none, and 022-026 are untouched", () => {
   ]) {
     assert.ok(files.includes(name), `${name} is missing`);
   }
-  // 027 and 028 both belong to the SHIPMENT work, not to this retry. The
-  // rule this assertion protects is unchanged: the internal notification
-  // retry needs no migration of its own, and it must not acquire one by
-  // borrowing someone else's.
-  assert.equal(files[files.length - 1], "028_authorized_shipment_transition.sql");
-  assert.equal(files.filter(n => /^029|^0[3-9]\d/.test(n)).length, 0, "the retry added a migration");
+  // 027 and 028 belong to the SHIPMENT work and 029 belongs to the
+  // CANCELLATION work, not to this retry. The rule this assertion
+  // protects is unchanged: the internal notification retry needs no
+  // migration of its own, and it must not acquire one by borrowing
+  // someone else's. So this checks what every later migration DOES,
+  // rather than that none exists - later features are allowed to add
+  // migrations, they are just not allowed to touch this state.
+  //
   // Against their SQL only: 027's verification notes deliberately SELECT
   // 026's columns to prove they are unchanged, and reading them is the
   // opposite of reaching into them.
-  for (const name of ["027_shipment_confirmation_email_state.sql", "028_authorized_shipment_transition.sql"]) {
-    const shipment = withoutComments(read(`supabase/migrations/${name}`));
-    assert.ok(!shipment.includes("internal_notification"), `${name} writes the internal notification state`);
+  for (const name of files.filter(n => n > "026_internal_order_notification_state.sql")) {
+    const later = withoutComments(read(`supabase/migrations/${name}`));
+    assert.ok(!later.includes("internal_notification"), `${name} writes the internal notification state`);
   }
   // The retry needs no column 026 did not already provide.
   const sql = read("supabase/migrations/026_internal_order_notification_state.sql");
