@@ -1094,7 +1094,7 @@ test("regression: the DOCUMENTED GAP - a cancellation request does not block shi
   assert.ok(!sql029.includes("cancellation_declined_at"));
 });
 
-test("regression: no cancellation or refund CUSTOMER email exists yet", () => {
+test("regression: the OPERATOR cancel route still sends nothing at all", () => {
   // Phase 2D-A added cancellationRequestNotification.ts, which is an
   // INTERNAL message to orders@gloamatcha.com about a REQUEST. The
   // customer's own cancellation-outcome mail and any refund mail still do
@@ -1104,13 +1104,16 @@ test("regression: no cancellation or refund CUSTOMER email exists yet", () => {
   // by this one. What remains true, and is what this assertion is really
   // about, is that NO REFUND customer email exists and that the operator
   // cancel route below still sends nothing at all.
+  // Phase 2E-A added refundConfirmation.ts, the customer's refund mail.
+  // It is sent by the Stripe refund webhook, never by this endpoint - and
+  // that, not the absence of the template, is what this assertion is
+  // about. Migration 029 still creates no refund and mails nobody.
   const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
   assert.deepEqual(templates, [
     "cancellationOutcome.ts", "cancellationRequestNotification.ts",
     "internalOrderNotification.ts", "orderConfirmation.ts",
-    "shipmentConfirmation.ts", "withdrawalConfirmation.ts",
+    "refundConfirmation.ts", "shipmentConfirmation.ts", "withdrawalConfirmation.ts",
   ], "an unexpected email template was added");
-  assert.ok(!templates.some(name => /refund/i.test(name)), "a refund customer email appeared");
   // Against stripped code: the template's header prose legitimately says
   // where the message goes, and a scan that read comments would call that
   // a hardcoded recipient.
@@ -1126,7 +1129,7 @@ test("regression: no cancellation or refund CUSTOMER email exists yet", () => {
   for (const forbidden of [
     "cancellation_email", "cancellationEmail", "emailOutcome", "IdempotencyKey",
     "sendCancellationRequestNotificationIfNeeded", "sendCancellationOutcomeEmailIfNeeded",
-    "resolve_order_cancellation_request",
+    "sendRefundConfirmationIfNeeded", "resolve_order_cancellation_request",
   ]) {
     assert.ok(!routeCode.includes(forbidden), `the route touches ${forbidden}`);
     assert.ok(!sql029.includes(forbidden), `029 touches ${forbidden}`);

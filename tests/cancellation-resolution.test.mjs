@@ -953,7 +953,7 @@ test("email: it makes no health or product claim", () => {
   }
 });
 
-test("email: the template is a pure leaf, like the other five", () => {
+test("email: the template is a pure leaf, like its siblings", () => {
   assert.ok(!/from "\.\//.test(templateCode), "the template has a relative import");
   assert.ok(!templateCode.includes("supabase"), "the template touches the database");
   assert.ok(!templateCode.includes("fetch("), "the template makes a network call");
@@ -964,7 +964,7 @@ test("email: the template is a pure leaf, like the other five", () => {
   assert.deepEqual(templates, [
     "cancellationOutcome.ts", "cancellationRequestNotification.ts",
     "internalOrderNotification.ts", "orderConfirmation.ts",
-    "shipmentConfirmation.ts", "withdrawalConfirmation.ts",
+    "refundConfirmation.ts", "shipmentConfirmation.ts", "withdrawalConfirmation.ts",
   ]);
 });
 

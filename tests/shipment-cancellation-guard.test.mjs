@@ -74,8 +74,18 @@ test("032: it is the next free number and 022-031 are untouched", () => {
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
   assert.deepEqual(files.filter(f => f.startsWith("032")), ["032_open_cancellation_request_shipment_guard.sql"]);
-  assert.equal(numbers.filter(nr => nr > "032").length, 0, "a migration above 032 appeared");
-  assert.deepEqual(files.slice(-11, -1), [
+  // Phase 2E-A added 033, so this asserts ownership and immutability
+  // rather than "nothing later exists" - the same correction each earlier
+  // suite already took. No later migration may redefine the shipment
+  // transition or its guard.
+  for (const name of files.filter(f => f > "032_open_cancellation_request_shipment_guard.sql")) {
+    const later = withoutComments(readFileSync(path.join(MIGRATIONS, name), "utf-8"));
+    assert.ok(!later.includes("create or replace function public.mark_order_shipped"),
+      `${name} redefines the shipment transition`);
+    assert.ok(!later.includes(NEW_RESULT), `${name} touches the shipment guard result`);
+  }
+  const upTo032 = files.filter(f => f < "033");
+  assert.deepEqual(upTo032.slice(-11, -1), [
     "022_recurring_subscription_foundation.sql",
     "023_harden_stripe_customers_grants.sql",
     "024_seed_b2c_subscription_plans.sql",
@@ -514,19 +524,22 @@ test("route: a blocked shipment returns before the email is reached", () => {
    ══════════════════════════════════════════════════════════════ */
 
 test("email: no new template and no new Resend namespace", () => {
+  // Phase 2E-A added refundConfirmation.ts and the gloa/refund/
+  // namespace. Neither belongs to the shipment guard, and what this
+  // assertion protects is that THIS task added nothing of its own.
   const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
   assert.deepEqual(templates, [
     "cancellationOutcome.ts", "cancellationRequestNotification.ts",
     "internalOrderNotification.ts", "orderConfirmation.ts",
-    "shipmentConfirmation.ts", "withdrawalConfirmation.ts",
-  ], "an email template was added by this task");
+    "refundConfirmation.ts", "shipmentConfirmation.ts", "withdrawalConfirmation.ts",
+  ], "an unexpected email template was added");
   const namespaces = [];
   for (const name of templates) {
     const source = withoutComments(read(`lib/email/${name}`));
     for (const m of source.matchAll(/`gloa\/([a-z-]+)\//g)) namespaces.push(m[1]);
   }
   assert.deepEqual(namespaces.sort(), [
-    "cancellation-outcome", "cancellation-request", "internal-order", "shipment",
+    "cancellation-outcome", "cancellation-request", "internal-order", "refund", "shipment",
   ], "a Resend idempotency namespace was added or removed");
 });
 

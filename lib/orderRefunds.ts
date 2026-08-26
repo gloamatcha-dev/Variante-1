@@ -20,6 +20,21 @@ export type RefundSyncOutcome = {
   result: string;
   refundedTotalCents: number | null;
   hasPendingRefund: boolean | null;
+  /**
+   * The durable GLOA order id this payment intent belongs to, or null
+   * when no single order matched.
+   *
+   * Added in Phase 2E-A. apply_order_refund_state (migration 019) returns
+   * a bare status string and that migration is immutable, so the id is
+   * taken from the lookup this module already performs - the same query
+   * that reads the order's currency, which is how the id is known to
+   * belong to exactly one matching, already-paid order.
+   *
+   * It exists so the webhook can hand it to the refund confirmation
+   * sender. Nothing else is exported from here for that purpose: the
+   * sender re-reads every refund fact from the row itself.
+   */
+  orderId: string | null;
 };
 
 /**
@@ -41,14 +56,14 @@ export async function syncOrderRefundStateFromStripe(
 
   const trimmedId = paymentIntentId.trim();
   if (!trimmedId) {
-    return { result: "invalid_input", refundedTotalCents: null, hasPendingRefund: null };
+    return { result: "invalid_input", refundedTotalCents: null, hasPendingRefund: null, orderId: null };
   }
 
   // The order's own currency is the reference the refunds must match -
   // never a hardcoded 'eur'.
   const { data: order, error: orderError } = await admin
     .from("orders")
-    .select("currency")
+    .select("id, currency")
     .eq("stripe_payment_intent_id", trimmedId);
 
   if (orderError) {
@@ -58,14 +73,14 @@ export async function syncOrderRefundStateFromStripe(
   if (!order || order.length === 0) {
     // A payment intent we have no order for is not an error: it may
     // belong to something that was never fulfilled here.
-    return { result: "order_not_found", refundedTotalCents: null, hasPendingRefund: null };
+    return { result: "order_not_found", refundedTotalCents: null, hasPendingRefund: null, orderId: null };
   }
 
   if (order.length > 1) {
     // Never guess which order a refund belongs to. The database function
     // refuses this case too; refusing here as well avoids a pointless
     // Stripe call.
-    return { result: "ambiguous_payment_intent", refundedTotalCents: null, hasPendingRefund: null };
+    return { result: "ambiguous_payment_intent", refundedTotalCents: null, hasPendingRefund: null, orderId: null };
   }
 
   const refunds = await stripe.refunds.list({ payment_intent: trimmedId, limit: 100 });
@@ -89,6 +104,7 @@ export async function syncOrderRefundStateFromStripe(
 
   return {
     result: typeof data === "string" ? data : "unknown",
+    orderId: typeof order[0].id === "string" ? order[0].id : null,
     refundedTotalCents: summary.refundedTotalCents,
     hasPendingRefund: summary.hasPendingRefund,
   };

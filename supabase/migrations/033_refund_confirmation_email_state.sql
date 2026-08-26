@@ -1,0 +1,395 @@
+-- ============================================================
+-- GLOA – Customer refund confirmation email state (Phase 2E-A)
+-- Run in Supabase SQL Editor AFTER 032
+--
+-- Refunds have been fully reconciled since migration 019: an operator
+-- raises one by hand in the Stripe Dashboard, the webhook re-reads the
+-- payment intent's refunds ABSOLUTELY, and apply_order_refund_state
+-- writes payment_status and refunded_total_cents. All of that works and
+-- none of it is touched here.
+--
+-- What has never existed is telling the customer. Their money goes back
+-- and the only place that fact appears is the account page, if they
+-- happen to look. This migration adds the durable state for one
+-- transactional email per genuinely new settled refund.
+--
+-- 033 IS THE NEXT FREE NUMBER. 022-032 are live and immutable and are
+-- not touched. Task 21 (tax/VAT/OSS) still holds no migration file and
+-- remains free to take a later number - this migration writes no tax
+-- field.
+--
+-- ══════════════════════════════════════════════════════════════
+-- WHY THIS IS NOT ANOTHER status/sent_at PAIR
+-- ══════════════════════════════════════════════════════════════
+--
+-- The five email flows before this one (017, 026, 027, 030, 031) each
+-- got two columns: a status and a timestamp. Copying that shape here
+-- would be wrong, and the reason is a property of refunds specifically.
+--
+-- ONE ORDER CAN HAVE SEVERAL DISTINCT SETTLED REFUNDS. Stripe permits
+-- multiple partial refunds against one payment intent, and
+-- summarizeStripeRefunds (lib/stripeRefunds.ts) sums every settled one
+-- into a cumulative absolute total. A perfectly ordinary sequence is:
+--
+--   paid                                    refunded_total_cents NULL
+--   -> partially_refunded                   refunded_total_cents 1000
+--   -> partially_refunded (a second refund)  refunded_total_cents 2500
+--   -> refunded                              refunded_total_cents 4990
+--
+-- Each of those transitions is a different, customer-visible fact about
+-- their money, and each deserves its own email. A single 'sent' flag
+-- could express only the first: the customer would be told about the
+-- first 10,00 EUR and would never hear about the remaining 39,90.
+--
+-- So the durable identity of this message is not "the refund email for
+-- order X". It is "the refund email for order X at cumulative total N".
+--
+-- THE WATERMARK. refund_email_notified_total_cents records the
+-- cumulative total the customer has actually been told about. Eligibility
+-- is then a comparison rather than a flag:
+--
+--   send  <=>  refunded_total_cents > coalesce(refund_email_notified_total_cents, -1)
+--
+-- which gives all four required behaviours from one rule:
+--
+--   first refund (1000 vs NULL)       -> send
+--   duplicate of the same fact (1000 vs 1000) -> do not send
+--   a genuinely larger total (2500 vs 1000)   -> send
+--   full after partial (4990 vs 2500)         -> send
+--
+-- The watermark is written ONLY on a successful send, together with
+-- 'sent'. A failed send leaves it where it was, so the same total is
+-- still owed and a later attempt re-sends exactly that fact rather than
+-- skipping it.
+--
+-- The status column still exists alongside it, and still means what it
+-- means everywhere else in this schema: 'sending' is a claim held by one
+-- worker, 'failed' is the one state a future retry may key on. What it
+-- does NOT do any more is decide eligibility on its own - 'sent' is
+-- perfectly claimable again once the total has moved.
+--
+-- ══════════════════════════════════════════════════════════════
+-- HISTORICAL REFUNDS ARE NOT SWEPT, AND CANNOT BE
+-- ══════════════════════════════════════════════════════════════
+--
+-- Production may already hold orders that were genuinely refunded before
+-- this feature existed. Their watermark is NULL, so the comparison above
+-- would say "owed" if anything ever evaluated it for them. Two
+-- independent things stop that, and both matter:
+--
+--   1. NOTHING ENUMERATES ORDERS. There is no sweep and no cron in this
+--      migration or in this phase. The only code path that reaches this
+--      state machine is a live Stripe refund webhook for one specific
+--      payment intent.
+--
+--   2. THE APPLICATION SENDS ONLY WHEN THE STATE ACTUALLY MOVED.
+--      apply_order_refund_state already distinguishes 'applied' from
+--      'unchanged', and the webhook path treats 'unchanged' as "no new
+--      fact, no email". So a refund event that merely restates what the
+--      database already knew - which is what a historical row would
+--      produce - mails nobody.
+--
+-- NULL IS NEVER A SWEEP CRITERION HERE, and if a retry job is ever built
+-- it must key on refund_email_status = 'failed' and nothing else. The
+-- same rule migrations 026, 030 and 031 state, for the same reason.
+--
+-- ══════════════════════════════════════════════════════════════
+-- WHAT THIS MIGRATION DOES NOT DO
+-- ══════════════════════════════════════════════════════════════
+--
+-- It creates no refund and could not: no function here calls Stripe, and
+-- no Stripe write API exists anywhere in this repository. It does not
+-- touch payment_status, refunded_total_cents or refund_updated_at -
+-- those remain apply_order_refund_state's alone. It adds no function, no
+-- trigger, no policy and no index; it writes no row, backfills nothing,
+-- and sends nothing. Applying it changes the behaviour and the content
+-- of exactly zero existing orders. See verification (H).
+-- ============================================================
+
+-- 1. REFUND EMAIL STATE ────────────────────────────────────────
+--
+-- Three columns, all nullable, no defaults, no backfill.
+--
+-- refund_email_notified_total_cents is the load-bearing one and is
+-- deliberately an AMOUNT rather than a counter or a version number. It
+-- is derived entirely from persisted state, it is directly comparable to
+-- refunded_total_cents, and it is readable: an operator looking at a row
+-- can see at a glance what the customer was last told. A counter would
+-- have required a second source of truth about how many refunds there
+-- had been; a timestamp would have said when we mailed but not what we
+-- said.
+--
+-- The status vocabulary is the established one and deliberately has no
+-- 'pending': NULL means "never part of this flow", which is what keeps
+-- historical rows out of any future sweep.
+alter table public.orders
+  add column if not exists refund_email_status text
+    check (refund_email_status in ('sending', 'sent', 'failed')),
+  add column if not exists refund_email_sent_at timestamptz,
+  add column if not exists refund_email_notified_total_cents integer;
+
+-- The watermark can never exceed what the order was actually charged,
+-- mirroring migration 019's orders_refunded_total_cents_range_check on
+-- the column it shadows. Every pre-existing row is NULL and satisfies it.
+--
+-- Dropped defensively first so re-running this migration is safe.
+alter table public.orders
+  drop constraint if exists orders_refund_email_notified_total_range_check;
+
+alter table public.orders
+  add constraint orders_refund_email_notified_total_range_check
+    check (
+      refund_email_notified_total_cents is null
+      or (refund_email_notified_total_cents >= 0
+          and refund_email_notified_total_cents <= total_gross_cents)
+    );
+
+-- 2. THE SMALLEST GRANT THAT WORKS ─────────────────────────────
+--
+-- Column-scoped to exactly these three, as 017's, 026's, 027's, 030's
+-- and 031's grants are. After this migration service_role holds
+-- column-scoped UPDATE on exactly thirteen columns, and every one of them
+-- is email state:
+--
+--   confirmation_email_status, confirmation_email_sent_at            (017)
+--   internal_notification_status, internal_notification_sent_at      (026)
+--   shipment_email_status, shipment_email_sent_at                    (027)
+--   cancellation_request_notification_status, ..._sent_at            (030)
+--   cancellation_outcome_email_status, ..._email_sent_at             (031)
+--   refund_email_status, refund_email_sent_at,
+--   refund_email_notified_total_cents                                (033)
+--
+-- What service_role still cannot write directly, and must not:
+--
+--   payment_status, refunded_total_cents, refund_updated_at
+--                       only via apply_order_refund_state (019), from an
+--                       absolute re-read of Stripe. THE EMAIL CODE MUST
+--                       NEVER WRITE THESE. A message that failed to send
+--                       is a fact about a message; it is not a reason to
+--                       restate how much money went back.
+--   status, fulfillment_status, shipped_at, the tracking columns
+--                       only via mark_order_shipped (028/032) and
+--                       cancel_order (029)
+--   cancelled_at, cancellation_request_resolution, ..._resolved_at
+--                       only via cancel_order (029) and
+--                       resolve_order_cancellation_request (031)
+--   cancellation_requested_at, cancellation_request_note
+--                       only via request_order_cancellation (019)
+--   every *_cents money column, every tax field, every snapshot
+--                       never writable by service_role at all
+--
+-- The blast radius of a bug anywhere in the refund email code is
+-- therefore these three columns, enforced by the database rather than by
+-- code review.
+grant update (refund_email_status, refund_email_sent_at, refund_email_notified_total_cents)
+  on public.orders to service_role;
+
+-- 3. NO NEW CLIENT PRIVILEGES ──────────────────────────────────
+--
+-- No grant, policy or privilege is created for anon or authenticated. A
+-- customer keeps the SELECT-only access migration 004 gave them under the
+-- "Users read own orders" RLS policy, which now also covers these three
+-- columns. anon still has no access to public.orders at all.
+--
+-- The account UI deliberately does not read them and must not start.
+-- Whether a mail provider accepted a message is an operational fact, not
+-- a refund fact; the customer's refund state already has a truthful
+-- rendering through getRefundView (lib/orderStatus.ts), which reads
+-- payment_status and refunded_total_cents and nothing else.
+
+-- VERIFY ───────────────────────────────────────────────────────
+--
+-- Read-only. Run after applying. No statement below writes a row, sends
+-- an email, creates a refund or calls Stripe.
+--
+-- (A)(B)(C) ALL THREE COLUMNS EXIST, ARE NULLABLE, AND HAVE NO DEFAULT.
+--     Expected: exactly three rows, every is_nullable = YES and every
+--     column_default = NULL.
+--
+--     A non-NULL default on the watermark would be the worst possible
+--     failure: refund_email_notified_total_cents = 0 on every row would
+--     make every historical refunded order look like it was owed an
+--     email the moment anything evaluated the comparison.
+--
+--   select column_name, data_type, is_nullable, column_default
+--   from information_schema.columns
+--   where table_schema = 'public' and table_name = 'orders'
+--     and column_name in ('refund_email_status',
+--                         'refund_email_sent_at',
+--                         'refund_email_notified_total_cents')
+--   order by column_name;
+--
+--     Expected: ..._notified_total_cents = integer, YES, NULL
+--               ..._sent_at              = timestamp with time zone, YES, NULL
+--               ..._status               = text, YES, NULL
+--
+-- (D) THE STATUS CONSTRAINT ALLOWS EXACTLY THREE VALUES.
+--     Expected: one row naming 'sending', 'sent' and 'failed' and
+--     NOTHING else. In particular NOT 'pending'.
+--
+--   select conname, pg_get_constraintdef(oid) as definition
+--   from pg_constraint
+--   where conrelid = 'public.orders'::regclass and contype = 'c'
+--     and pg_get_constraintdef(oid) like '%refund_email_status%';
+--
+-- (E) THE WATERMARK RANGE CONSTRAINT EXISTS.
+--     Expected: one row, orders_refund_email_notified_total_range_check,
+--     bounding the value to [0, total_gross_cents] or NULL.
+--
+--   select conname, pg_get_constraintdef(oid) as definition
+--   from pg_constraint
+--   where conrelid = 'public.orders'::regclass and contype = 'c'
+--     and conname = 'orders_refund_email_notified_total_range_check';
+--
+-- (F) WHO MAY UPDATE WHAT. The important block.
+--
+--     Expected: service_role holds column-scoped UPDATE on EXACTLY the
+--     thirteen email-state columns listed in section 2 and no others.
+--
+--     THESE MUST NOT APPEAR, and the first three are the ones that
+--     matter most for this feature: 'payment_status',
+--     'refunded_total_cents', 'refund_updated_at'. Nor may 'status',
+--     'fulfillment_status', 'shipped_at', 'cancelled_at',
+--     'cancellation_requested_at', 'cancellation_request_note',
+--     'cancellation_request_resolution',
+--     'cancellation_request_resolved_at', any *_cents money column, any
+--     tax column, any snapshot or any tracking column.
+--
+--     anon and authenticated must not appear as UPDATE grantees at all.
+--
+--   select grantee, column_name, privilege_type
+--   from information_schema.column_privileges
+--   where table_schema = 'public' and table_name = 'orders'
+--     and privilege_type = 'UPDATE'
+--     and grantee in ('anon', 'authenticated', 'service_role')
+--   order by grantee, column_name;
+--
+--     And no table-level write privilege appeared:
+--
+--   select grantee, privilege_type
+--   from information_schema.role_table_grants
+--   where table_schema = 'public' and table_name = 'orders'
+--     and grantee in ('anon', 'authenticated', 'service_role')
+--   order by grantee, privilege_type;
+--
+--     Expected: service_role SELECT only, authenticated SELECT only,
+--     anon absent entirely.
+--
+-- (G) NO TRIGGER, NO NEW FUNCTION. Nothing was attached to public.orders
+--     by this migration, and in particular nothing that could mail a
+--     customer automatically. Expected: only set_orders_updated_at from
+--     migration 004, and exactly the five pre-existing functions.
+--
+--   select tgname, pg_get_triggerdef(oid) as definition
+--   from pg_trigger
+--   where tgrelid = 'public.orders'::regclass and not tgisinternal
+--   order by tgname;
+--
+--   select p.proname
+--   from pg_proc p
+--   join pg_namespace n on n.oid = p.pronamespace
+--   where n.nspname = 'public'
+--     and p.proname in ('mark_order_shipped', 'cancel_order',
+--                       'request_order_cancellation', 'apply_order_refund_state',
+--                       'resolve_order_cancellation_request')
+--   order by p.proname;
+--
+--     Expected: exactly those five, and no refund-email function.
+--
+-- (H) NOTHING WAS TOUCHED OR BACKFILLED. THE IMPORTANT ONE.
+--     Applying this mails nobody and queues nothing.
+--
+--     Expected: email_status = 0, email_dated = 0, notified = 0
+--     immediately after applying. Every pre-existing row reads NULL on
+--     all three columns, INCLUDING any order that is already genuinely
+--     refunded.
+--
+--     settled_refunds is expected to be whatever it already was. Those
+--     are real refunds that were never announced by email. They are
+--     deliberately NOT swept - see the header and (I). If that number is
+--     non-zero and those customers should be told, do it by hand.
+--
+--   select count(*)                                                    as orders,
+--          count(*) filter (where payment_status in ('partially_refunded', 'refunded'))
+--                                                                       as settled_refunds,
+--          count(*) filter (where payment_status = 'refund_pending')    as pending_refunds,
+--          count(refund_email_status)                                   as email_status,
+--          count(refund_email_sent_at)                                  as email_dated,
+--          count(refund_email_notified_total_cents)                     as notified
+--   from public.orders;
+--
+-- (I) NOTHING IS SWEEP ELIGIBLE. There is no retry cron in this phase,
+--     and if one is ever built it may key on 'failed' and nothing else.
+--     Expected: 0.
+--
+--   select count(*) as sweep_eligible
+--   from public.orders
+--   where refund_email_status = 'failed';
+--
+-- (J) THE WATERMARK INVARIANT HOLDS FOR EVERY EXISTING ROW.
+--     Expected: 0. A non-zero result would mean a customer was recorded
+--     as having been told about more money than the order was charged.
+--
+--   select count(*) as broken_watermarks
+--   from public.orders
+--   where refund_email_notified_total_cents is not null
+--     and (refund_email_notified_total_cents < 0
+--       or refund_email_notified_total_cents > total_gross_cents);
+--
+-- (K) MIGRATIONS 022 THROUGH 032 ARE UNTOUCHED. In particular migration
+--     019's refund model, which this feature reads and must never write.
+--     Expected: the payment vocabulary still carries all six values and
+--     the refund range check still stands.
+--
+--   select conname, pg_get_constraintdef(oid) as definition
+--   from pg_constraint
+--   where conrelid = 'public.orders'::regclass and contype = 'c'
+--     and conname in ('orders_payment_status_check',
+--                     'orders_refunded_total_cents_range_check',
+--                     'orders_cancellation_resolution_paired_check')
+--   order by conname;
+--
+--     Expected: orders_payment_status_check still allows
+--     'pending','paid','failed','refund_pending','partially_refunded',
+--     'refunded'.
+--
+--     And the five functions are still SECURITY DEFINER with an empty
+--     search_path, executable by service_role and by nobody else:
+--
+--   select p.proname,
+--          p.prosecdef as security_definer,
+--          p.proconfig,
+--          has_function_privilege('anon',         p.oid, 'execute') as anon_can,
+--          has_function_privilege('service_role', p.oid, 'execute') as service_role_can
+--   from pg_proc p
+--   join pg_namespace n on n.oid = p.pronamespace
+--   where n.nspname = 'public'
+--     and p.proname in ('mark_order_shipped', 'cancel_order',
+--                       'request_order_cancellation', 'apply_order_refund_state',
+--                       'resolve_order_cancellation_request')
+--   order by p.proname;
+--
+--     And 032's shipment guard is still in place:
+--
+--   select p.prosrc like '%cancellation_request_open%' as shipment_guard_present
+--   from pg_proc p
+--   join pg_namespace n on n.oid = p.pronamespace
+--   where n.nspname = 'public' and p.proname = 'mark_order_shipped';
+
+-- ══════════════════════════════════════════════════════════════
+-- WHAT IS STILL DEFERRED
+-- ══════════════════════════════════════════════════════════════
+--
+-- NO RETRY CRON. A send that fails leaves refund_email_status = 'failed'
+-- and the watermark unmoved, so the same cumulative total is still owed.
+-- The next genuine refund event for that order re-attempts it. There is
+-- deliberately no sweep yet, and if one is built it must key on 'failed'
+-- and nothing else - never on a NULL watermark, which would mail every
+-- historically refunded customer at once.
+--
+-- NO REFUND CREATION. Nothing in this repository calls Stripe's
+-- refund-creation API and this migration does not change that. Refunds
+-- are still raised by hand in the Stripe Dashboard and reconciled by
+-- apply_order_refund_state from an absolute re-read. This feature begins
+-- strictly after that reconciliation has committed.
+-- ══════════════════════════════════════════════════════════════

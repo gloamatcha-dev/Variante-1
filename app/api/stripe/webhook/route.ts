@@ -13,6 +13,8 @@ import {
 import { evaluateStripeSessionPayment } from "../../../../lib/stripeFulfillment";
 import { isRefundEventType, paymentIntentIdFromRefundEvent } from "../../../../lib/stripeRefunds";
 import { syncOrderRefundStateFromStripe } from "../../../../lib/orderRefunds";
+import { isNewSettledRefundFact } from "../../../../lib/refundConfirmationRules";
+import { sendRefundConfirmationIfNeeded } from "../../../../lib/refundConfirmationEmail";
 import { createOrderFromPaidCheckoutAttempt } from "../../../../lib/orderFulfillment";
 import { buildShippingAddressSnapshot, buildBillingAddressSnapshot } from "../../../../lib/orderAddressSnapshot";
 import { sendOrderConfirmationEmailIfNeeded } from "../../../../lib/orderConfirmationEmail";
@@ -139,6 +141,10 @@ export async function POST(request: Request): Promise<Response> {
  * § 356a withdrawal declarations in public.withdrawal_requests: a
  * withdrawal is a legal declaration by the customer, a Stripe refund is
  * an operational payment fact, and the two stay deliberately uncoupled.
+ *
+ * Phase 2E-A added one thing after the sync: when the state genuinely
+ * MOVED, the customer is told. See the guard below, which is what keeps
+ * historical refunds out of anyone's inbox.
  */
 async function handleRefundEvent(stripe: Stripe, event: Stripe.Event): Promise<void> {
   const paymentIntentId = paymentIntentIdFromRefundEvent(event.data.object);
@@ -152,6 +158,43 @@ async function handleRefundEvent(stripe: Stripe, event: Stripe.Event): Promise<v
 
   const outcome = await syncOrderRefundStateFromStripe(stripe, paymentIntentId);
   console.error(`Stripe webhook: refund event ${event.id} (${event.type}) -> ${outcome.result}`);
+
+  // ── CUSTOMER REFUND CONFIRMATION (Phase 2E-A) ───────────────
+  //
+  // Strictly after the refund state is durable, and only when it
+  // genuinely MOVED.
+  //
+  // isNewSettledRefundFact is the historical-refund guard and it is the
+  // load-bearing half of this branch. apply_order_refund_state already
+  // distinguishes 'applied' from 'unchanged'; only 'applied' means this
+  // delivery wrote something new. Without it, a refund event that merely
+  // restates an old refund - a charge.refund.updated for money returned
+  // months ago - would find a never-notified order and mail that customer
+  // about a refund they received long before this feature existed.
+  //
+  // The second half of the guard lives in the sender: it re-reads the row
+  // and announces a cumulative total only when it exceeds the watermark
+  // in refund_email_notified_total_cents. That is what lets one order
+  // legitimately receive several refund emails - one per genuinely larger
+  // settled total - without any of them repeating.
+  //
+  // NOTHING IS SENT for 'refund_pending', for a failed or cancelled
+  // refund (both of which self-heal the order back to 'paid' with a zero
+  // total), or for 'unchanged'.
+  if (!isNewSettledRefundFact(outcome.result) || !outcome.orderId) return;
+
+  // The sender never throws, deliberately, and the outcome is reported
+  // rather than acted on. A 500 here would be worse than useless: on
+  // Stripe's redelivery the sync would return 'unchanged', so this branch
+  // would not be reached again and the email could not be retried that
+  // way. Meanwhile the refund state is already durable and correct, and
+  // must stay that way. A failed send records 'failed' - the one state a
+  // future retry may key on - and touches nothing else.
+  const emailOutcome = await sendRefundConfirmationIfNeeded(outcome.orderId);
+  if (emailOutcome === "failed") {
+    // The order id only. Never the recipient, the customer, or the amount.
+    console.error(`Stripe webhook: refund confirmation failed for order ${outcome.orderId}.`);
+  }
 }
 
 /**
