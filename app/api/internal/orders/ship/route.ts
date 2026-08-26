@@ -52,6 +52,28 @@ import {
  * frozen customer_snapshot inside the confirmation sender. There is no
  * arbitrary-email surface here.
  *
+ * ── AN OPEN CANCELLATION REQUEST BLOCKS THIS (Phase 2D-C) ─────
+ *
+ * Migration 032 added one guard to mark_order_shipped: an order is not
+ * newly shipped while cancellation_requested_at IS NOT NULL AND
+ * cancellation_request_resolution IS NULL. The RPC returns
+ * 'cancellation_request_open' and this route answers 409.
+ *
+ * THE GUARD IS IN THE DATABASE, NOT HERE, and that is deliberate. A check
+ * in this file would read the order, decide, and then call the RPC -
+ * leaving a window in which a concurrent request_order_cancellation
+ * commits and the shipment proceeds on a stale read. Inside the function
+ * the check happens after `select ... for update`, and every other writer
+ * of those columns takes the same lock on the same row, so the two
+ * serialize. This route adds no pre-RPC check of its own and must not
+ * grow one: it would be redundant at best and misleading at worst.
+ *
+ * A blocked shipment writes nothing and therefore mails nothing - the
+ * result is not durable, so it never reaches sendShipmentConfirmationIfNeeded.
+ * A DECLINED request does not block; the operator resolves the request
+ * first (POST /api/internal/orders/cancellation-request/resolve) and then
+ * ships normally.
+ *
  * ── ORDERING, WHICH IS THE WHOLE POINT ────────────────────────
  *
  *   1. authorization
@@ -121,6 +143,16 @@ const REFUSAL_MESSAGES: Record<RefusedShipmentResult, string> = {
   not_shippable: "Diese Bestellung kann nicht als versendet markiert werden.",
   already_advanced: "Diese Bestellung ist bereits weiter fortgeschritten.",
   conflict: "Diese Bestellung ist bereits mit anderen Sendungsdaten versendet.",
+  // Migration 032. Operator-facing, so it says what to DO next.
+  //
+  // Deliberately worded to claim nothing that is not true. It does not
+  // say the order is cancelled, because it is not - the customer asked a
+  // question and nobody has answered it. It does not mention a refund,
+  // because no refund follows from an unanswered request. It names the
+  // one action that unblocks this: resolve the request. Declining it
+  // leaves the order shippable through the ordinary path.
+  cancellation_request_open:
+    "Zu dieser Bestellung liegt eine offene Stornierungsanfrage vor. Bitte zuerst entscheiden (annehmen oder ablehnen), dann erneut versenden.",
 };
 
 export async function POST(request: Request): Promise<Response> {

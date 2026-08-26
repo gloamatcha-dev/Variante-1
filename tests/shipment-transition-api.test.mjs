@@ -621,10 +621,35 @@ test("028: it owns its number and 022-027 are untouched", () => {
     "027_shipment_confirmation_email_state.sql",
     "028_authorized_shipment_transition.sql",
   ]);
-  // No later migration may redefine what 028 put live.
-  for (const name of files.filter(f => f > "028_authorized_shipment_transition.sql")) {
+  // Migration 032 (Phase 2D-C) is the ONE authorized replacement of this
+  // function: it adds the open-cancellation-request guard and changes
+  // nothing else. So the rule is no longer "nobody may touch it" - it is
+  // that any migration which does replace it must preserve every guard
+  // 028 established. tests/shipment-cancellation-guard.test.mjs proves
+  // 032's body is 028's line for line plus one contiguous guard; this
+  // asserts the load-bearing lines survive in whichever migration owns
+  // the live definition.
+  const replacements = files
+    .filter(f => f > "028_authorized_shipment_transition.sql")
+    .filter(f => withoutComments(readFileSync(path.join(MIGRATIONS, f), "utf-8"))
+      .includes("create or replace function public.mark_order_shipped"));
+  assert.deepEqual(replacements, ["032_open_cancellation_request_shipment_guard.sql"],
+    "an unexpected migration redefines the shipment transition");
+  for (const name of replacements) {
     const later = withoutComments(readFileSync(path.join(MIGRATIONS, name), "utf-8"));
-    assert.ok(!later.includes("mark_order_shipped"), `${name} redefines the shipment transition`);
+    for (const guard of [
+      "security definer set search_path = ''",
+      "for update",
+      "if v_order.fulfillment_status = 'delivered' or v_order.status = 'delivered' then",
+      "is not distinct from",
+      "or v_order.status in ('cancelled', 'refunded')",
+      "if v_order.payment_status not in ('paid', 'partially_refunded') then",
+      "if v_order.fulfillment_status not in ('unfulfilled', 'processing') then",
+      "shipped_at         = now(),",
+      "grant execute on function public.mark_order_shipped(text, text, text, text) to service_role;",
+    ]) {
+      assert.ok(later.includes(guard), `${name} dropped: ${guard}`);
+    }
   }
 });
 

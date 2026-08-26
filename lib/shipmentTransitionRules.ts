@@ -179,6 +179,22 @@ export function validateShipmentRequest(body: unknown): ShipmentRequestResult {
  *   already_advanced already 'delivered'. Never moved backwards
  *   not_shippable    cancelled, or not in a payment state that may ship
  *   not_found        no order with that number
+ *
+ *   cancellation_request_open
+ *                    ADDED BY MIGRATION 032. The customer has asked
+ *                    whether this order can still be stopped and nobody
+ *                    has answered yet:
+ *
+ *                      cancellation_requested_at       IS NOT NULL
+ *                      AND cancellation_request_resolution IS NULL
+ *
+ *                    THE ORDER IS NOT CANCELLED and no refund is
+ *                    implied - an unanswered question is not an outcome.
+ *                    Nothing about the order changed; the RPC performs
+ *                    zero writes on this path. The operator resolves the
+ *                    request first, and a DECLINED request then ships
+ *                    normally because the predicate tests the resolution
+ *                    for NULL rather than for a particular value.
  */
 export const SHIPMENT_RESULTS = [
   "shipped",
@@ -187,6 +203,7 @@ export const SHIPMENT_RESULTS = [
   "already_advanced",
   "not_shippable",
   "not_found",
+  "cancellation_request_open",
 ] as const;
 
 export type ShipmentResult = (typeof SHIPMENT_RESULTS)[number];
@@ -236,9 +253,18 @@ export function shipmentResultStatus(result: ShipmentResult): number {
       return 200;
     case "not_found":
       return 404;
+    // Four state conflicts, not malformed requests: the order exists and
+    // the request was well formed, but the world is not in a state where
+    // shipping it is the right next action.
+    //
+    // cancellation_request_open joins them rather than getting a status
+    // of its own, because it is the same KIND of answer - come back once
+    // the state is different. The operator learns what to do next from
+    // the message, not from the status code.
     case "conflict":
     case "already_advanced":
     case "not_shippable":
+    case "cancellation_request_open":
       return 409;
   }
 }

@@ -113,8 +113,22 @@ test("031: it is the next free number and 022-030 are untouched", () => {
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
   assert.deepEqual(files.filter(f => f.startsWith("031")), ["031_cancellation_request_resolution.sql"]);
-  assert.equal(numbers.filter(nr => nr > "031").length, 0, "a migration above 031 appeared");
-  assert.deepEqual(files.slice(-10, -1), [
+  // Phase 2D-C added 032, so this asserts ownership and immutability
+  // rather than "nothing later exists" - the same correction each earlier
+  // suite already took. No later migration may touch what 031 put live.
+  for (const name of files.filter(f => f > "031_cancellation_request_resolution.sql")) {
+    const later = withoutComments(readFileSync(path.join(MIGRATIONS, name), "utf-8"));
+    assert.ok(!later.includes("create or replace function public.resolve_order_cancellation_request"),
+      `${name} redefines the resolution RPC`);
+    const setClauses = [...later.matchAll(/update public\.orders([\s\S]*?)where /g)].map(m => m[1]);
+    for (const clause of setClauses) {
+      for (const owned of ["cancellation_request_resolution", "cancellation_request_resolved_at"]) {
+        assert.ok(!clause.includes(owned), `${name} writes ${owned}`);
+      }
+    }
+  }
+  const upTo031 = files.filter(f => f < "032");
+  assert.deepEqual(upTo031.slice(-10, -1), [
     "022_recurring_subscription_foundation.sql",
     "023_harden_stripe_customers_grants.sql",
     "024_seed_b2c_subscription_plans.sql",
@@ -1398,6 +1412,12 @@ test("regression: the shipment endpoint and mark_order_shipped are unchanged", (
   assert.ok(migration028.includes("create or replace function public.mark_order_shipped("));
   assert.ok(!withoutComments(migration028).includes("cancellation_request_resolution"));
   assert.ok(!sql031.includes("mark_order_shipped"), "031 redefines the shipment transition");
+  // Phase 2D-C's guard lives in migration 032 and in the RPC, never in
+  // the route: a route-level check would decide on a stale read. The
+  // route still reads no order of its own.
+  for (const forbidden of ['from("orders")', ".select(", "maybeSingle"]) {
+    assert.ok(!shipRoute.includes(forbidden), `the ship route reads an order itself: ${forbidden}`);
+  }
 });
 
 test("regression: THE DOCUMENTED GAP - the shipment guard is still deferred", () => {

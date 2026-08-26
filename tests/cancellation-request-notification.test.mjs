@@ -950,18 +950,35 @@ test("regression: the shipment endpoint and its RPC are unchanged", () => {
   const rpcs = [...shipRoute.matchAll(/\.rpc\("(\w+)"/g)].map(m => m[1]);
   assert.deepEqual(rpcs, ["mark_order_shipped"]);
   assert.ok(shipRoute.includes("sendShipmentConfirmationIfNeeded(orderId)"));
-  assert.ok(!shipRoute.includes("cancellation"), "the ship route learned about cancellation");
+  // Phase 2D-C gave the route ONE new thing: a refusal message for the
+  // 'cancellation_request_open' result that migration 032's guard can now
+  // return. It performs no check of its own, which is the property that
+  // actually matters - see the next test.
+  for (const forbidden of ['from("orders")', ".select(", "maybeSingle", "cancellation_requested_at"]) {
+    assert.ok(!shipRoute.includes(forbidden), `the ship route checks cancellation itself: ${forbidden}`);
+  }
 });
 
-test("regression: THE DOCUMENTED GAP - still no cancellation_requested_at shipment guard", () => {
-  // Deliberate. There is still no declined/resolved state for a request,
-  // so a request the owner decides not to grant would otherwise block
-  // that order's shipment forever.
+test("regression: THE GAP THIS PHASE LEFT OPEN IS NOW CLOSED, in the right place", () => {
+  // Phase 2D-A withheld the shipment guard because a request had no
+  // terminal state, so a DECLINED request would have blocked its order
+  // forever. Phase 2D-B added the resolution; Phase 2D-C added the guard.
+  // What this assertion protects now is WHERE it lives.
   const shipRoute = withoutComments(read("app/api/internal/orders/ship/route.ts"));
   const migration028 = withoutComments(read("supabase/migrations/028_authorized_shipment_transition.sql"));
+  const migration032 = withoutComments(read("supabase/migrations/032_open_cancellation_request_shipment_guard.sql"));
+
+  // Not in the route - a pre-RPC check would decide on a stale read.
   assert.ok(!shipRoute.includes("cancellation_requested_at"));
+  // Not in 028 either; that migration is immutable.
   assert.ok(!migration028.includes("cancellation_requested_at"));
-  // And no resolution column was added by this task either.
+  // In 032, inside the locked transaction, and keyed on the RESOLUTION
+  // being NULL rather than on any particular value - so a declined
+  // request does not block.
+  assert.ok(migration032.includes("cancellation_requested_at is not null"));
+  assert.ok(migration032.includes("cancellation_request_resolution is null"));
+  assert.ok(migration032.indexOf("for update") < migration032.indexOf("cancellation_request_open"));
+  // 030 still added no resolution column of its own.
   for (const column of ["cancellation_declined_at", "cancellation_resolved_at", "cancellation_request_state"]) {
     assert.ok(!sql030.includes(column), `030 added ${column}`);
   }

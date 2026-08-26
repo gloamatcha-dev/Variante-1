@@ -512,16 +512,25 @@ test("029: it owns its number and 022-028 are untouched", () => {
     assert.ok(!later.includes("create or replace function public.cancel_order"),
       `${name} redefines the cancellation transition`);
     assert.ok(!later.includes("drop function public.cancel_order"), `${name} drops cancel_order`);
-    // 029's three lifecycle columns stay 029's to WRITE. Scoped to the
-    // SET clause of an UPDATE, because a later migration may legitimately
-    // READ them - 031's decline path compares fulfillment_status against
-    // 'cancelled' to refuse a contradictory decline, which is a guard,
-    // not a write.
+    // 029's CANCELLATION write stays 029's. Scoped to UPDATE SET clauses,
+    // because a later migration may legitimately READ these columns -
+    // 031's decline path compares fulfillment_status against 'cancelled'
+    // to refuse a contradictory decline, and 032's guard reads them too.
+    //
+    // cancelled_at is 029's alone and may never be written elsewhere.
+    // status and fulfillment_status are shared with 028's SHIPMENT
+    // transition, so what is forbidden is writing 'cancelled' into them:
+    // 032 replaces mark_order_shipped and therefore legitimately writes
+    // status = 'shipped'.
     const setClauses = [...later.matchAll(/update public\.orders([\s\S]*?)where /g)].map(m => m[1]);
     for (const clause of setClauses) {
-      for (const owned of ["cancelled_at", "fulfillment_status", "status"]) {
-        const written = [...clause.matchAll(/^\s*(?:set\s+)?(\w+)\s*=/gm)].map(w => w[1]);
-        assert.ok(!written.includes(owned), `${name} writes ${owned}`);
+      const written = [...clause.matchAll(/^\s*(?:set\s+)?(\w+)\s*=\s*('?\w+'?)/gm)]
+        .map(w => [w[1], w[2]]);
+      for (const [column, value] of written) {
+        assert.ok(column !== "cancelled_at", `${name} writes cancelled_at`);
+        if (column === "status" || column === "fulfillment_status") {
+          assert.notEqual(value, "'cancelled'", `${name} performs a cancellation write`);
+        }
       }
     }
   }
