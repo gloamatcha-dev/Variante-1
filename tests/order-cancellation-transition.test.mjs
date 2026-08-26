@@ -503,11 +503,27 @@ test("029: it owns its number and 022-028 are untouched", () => {
     "028_authorized_shipment_transition.sql",
     "029_authorized_order_cancellation.sql",
   ]);
-  // No later migration may redefine what 029 put live.
+  // No later migration may REDEFINE what 029 put live, and none may write
+  // its columns. Calling cancel_order is explicitly allowed and is the
+  // point: 031's resolution RPC delegates approval to it precisely so the
+  // shipped/delivered guard is never restated anywhere else.
   for (const name of files.filter(f => f > "029_authorized_order_cancellation.sql")) {
     const later = withoutComments(readFileSync(path.join(MIGRATIONS, name), "utf-8"));
-    assert.ok(!later.includes("cancel_order"), `${name} redefines the cancellation transition`);
-    assert.ok(!later.includes("cancelled_at"), `${name} touches the cancellation timestamp`);
+    assert.ok(!later.includes("create or replace function public.cancel_order"),
+      `${name} redefines the cancellation transition`);
+    assert.ok(!later.includes("drop function public.cancel_order"), `${name} drops cancel_order`);
+    // 029's three lifecycle columns stay 029's to WRITE. Scoped to the
+    // SET clause of an UPDATE, because a later migration may legitimately
+    // READ them - 031's decline path compares fulfillment_status against
+    // 'cancelled' to refuse a contradictory decline, which is a guard,
+    // not a write.
+    const setClauses = [...later.matchAll(/update public\.orders([\s\S]*?)where /g)].map(m => m[1]);
+    for (const clause of setClauses) {
+      for (const owned of ["cancelled_at", "fulfillment_status", "status"]) {
+        const written = [...clause.matchAll(/^\s*(?:set\s+)?(\w+)\s*=/gm)].map(w => w[1]);
+        assert.ok(!written.includes(owned), `${name} writes ${owned}`);
+      }
+    }
   }
 });
 
@@ -907,10 +923,15 @@ test("account UI: no new customer button and no account file changed", () => {
   assert.ok(portal.includes("Stornierung anfragen"));
 });
 
-test("account UI: lib/orderStatus.ts is unchanged by this task", () => {
-  const status = read("lib/orderStatus.ts");
+test("account UI: lib/orderStatus.ts still learns nothing about the cancel RPC", () => {
+  // Against stripped code. Phase 2D-B added a comment to
+  // getCancellationView explaining that approving cancels via
+  // cancel_order, and prose naming a function is not the display layer
+  // depending on it.
+  const status = withoutComments(read("lib/orderStatus.ts"));
   assert.ok(!status.includes("cancelled_at"), "the display layer learned about cancelled_at");
-  assert.ok(!status.includes("cancel_order"));
+  assert.ok(!status.includes("cancel_order"), "the display layer calls the cancellation RPC");
+  assert.ok(!status.includes("supabase"), "the display layer reached for a database");
   // Its cancellation predicate still reads both columns.
   assert.ok(status.includes('const CANCELLED_VALUES = ["cancelled"];'));
 });
@@ -1069,11 +1090,18 @@ test("regression: no cancellation or refund CUSTOMER email exists yet", () => {
   // INTERNAL message to orders@gloamatcha.com about a REQUEST. The
   // customer's own cancellation-outcome mail and any refund mail still do
   // not exist, which is what this assertion is really about.
+  // Phase 2D-B added cancellationOutcome.ts, which IS the customer's
+  // cancellation-outcome mail and is sent by the resolution endpoint, not
+  // by this one. What remains true, and is what this assertion is really
+  // about, is that NO REFUND customer email exists and that the operator
+  // cancel route below still sends nothing at all.
   const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
   assert.deepEqual(templates, [
-    "cancellationRequestNotification.ts", "internalOrderNotification.ts",
-    "orderConfirmation.ts", "shipmentConfirmation.ts", "withdrawalConfirmation.ts",
+    "cancellationOutcome.ts", "cancellationRequestNotification.ts",
+    "internalOrderNotification.ts", "orderConfirmation.ts",
+    "shipmentConfirmation.ts", "withdrawalConfirmation.ts",
   ], "an unexpected email template was added");
+  assert.ok(!templates.some(name => /refund/i.test(name)), "a refund customer email appeared");
   // Against stripped code: the template's header prose legitimately says
   // where the message goes, and a scan that read comments would call that
   // a hardcoded recipient.
@@ -1088,7 +1116,8 @@ test("regression: no cancellation or refund CUSTOMER email exists yet", () => {
   // nothing at all.
   for (const forbidden of [
     "cancellation_email", "cancellationEmail", "emailOutcome", "IdempotencyKey",
-    "sendCancellationRequestNotificationIfNeeded",
+    "sendCancellationRequestNotificationIfNeeded", "sendCancellationOutcomeEmailIfNeeded",
+    "resolve_order_cancellation_request",
   ]) {
     assert.ok(!routeCode.includes(forbidden), `the route touches ${forbidden}`);
     assert.ok(!sql029.includes(forbidden), `029 touches ${forbidden}`);

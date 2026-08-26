@@ -144,6 +144,11 @@ type OrderRow = {
   shipped_at: string | null;
   refunded_total_cents: number | null;
   cancellation_requested_at: string | null;
+  // Migration 031. NULL while the request is still open; 'approved' or
+  // 'declined' once an operator has answered. Read-only here - the
+  // customer's SELECT grant covers it, and nothing in the browser can
+  // write it.
+  cancellation_request_resolution: string | null;
 };
 
 type OrderItemRow = {
@@ -810,10 +815,21 @@ function OrderDetail({ orderId }: { orderId: string }) {
       )}
 
       {/* ── Stornierung anfragen ── */}
-      {(cancellation.state === "eligible" || cancellationRequested || cancellation.state === "too_late") && (
+      {(cancellation.state === "eligible" || cancellationRequested || cancellation.state === "declined" || cancellation.state === "too_late") && (
         <section className="order-detail-section">
           <p className="eyebrow">STORNIERUNG</p>
-          {cancellationRequested ? (
+          {/* A declined request is terminal (migration 031) and is checked
+              FIRST, so it can never keep rendering "wir prüfen". Before
+              this existed there was no way to end that sentence, and a
+              refused request said "wir prüfen" forever. No reason is
+              shown, because none is collected. */}
+          {cancellation.state === "declined" ? (
+            <p className="order-cancel-note">
+              Deine Stornierungsanfrage konnten wir nicht mehr umsetzen. Die Bestellung bleibt bestehen und wird
+              normal bearbeitet. Nach Erhalt kannst du dein{" "}
+              <Link href="/widerruf" className="order-cancel-link">Widerrufsrecht</Link> nutzen.
+            </p>
+          ) : cancellationRequested ? (
             <p className="order-cancel-note">{cancelMessage || "Wir prüfen, ob die Bestellung noch gestoppt werden kann, und melden uns per E-Mail."}</p>
           ) : cancellation.state === "too_late" ? (
             <p className="order-cancel-note">

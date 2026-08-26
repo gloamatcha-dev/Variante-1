@@ -94,13 +94,23 @@ const built = (overrides = {}) =>
    MIGRATION 030: NUMBERING AND IMMUTABILITY
    ══════════════════════════════════════════════════════════════ */
 
-test("030: it is the next free number and 022-029 are untouched", () => {
+test("030: it owns its number and 022-029 are untouched", () => {
+  // 030 was the next free number when it was written. Phase 2D-B has
+  // since added 031 (cancellation request resolution), so this asserts
+  // ownership and immutability rather than "nothing later exists" - the
+  // same correction each earlier suite already took. No later migration
+  // may touch the notification state 030 put live.
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
   assert.deepEqual(files.filter(f => f.startsWith("030")), ["030_cancellation_request_notification_state.sql"]);
-  assert.equal(numbers.filter(nr => nr > "030").length, 0, "a migration above 030 appeared");
-  assert.deepEqual(files.slice(-9, -1), [
+  for (const name of files.filter(f => f > "030_cancellation_request_notification_state.sql")) {
+    const later = withoutComments(readFileSync(path.join(MIGRATIONS, name), "utf-8"));
+    assert.ok(!later.includes("cancellation_request_notification"),
+      `${name} touches the request notification state`);
+  }
+  const upTo030 = files.filter(f => f < "031");
+  assert.deepEqual(upTo030.slice(-9, -1), [
     "022_recurring_subscription_foundation.sql",
     "023_harden_stripe_customers_grants.sql",
     "024_seed_b2c_subscription_plans.sql",
@@ -668,14 +678,15 @@ test("email: it carries no address and no item list", () => {
   }
 });
 
-test("email: the template is a pure leaf, like the other four", () => {
+test("email: the template is a pure leaf, like its siblings", () => {
   assert.ok(!/from "\.\//.test(templateCode), "the template has a relative import");
   assert.ok(!templateCode.includes("supabase"), "the template touches the database");
   assert.ok(!templateCode.includes("fetch("), "the template makes a network call");
   const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
   assert.deepEqual(templates, [
-    "cancellationRequestNotification.ts", "internalOrderNotification.ts",
-    "orderConfirmation.ts", "shipmentConfirmation.ts", "withdrawalConfirmation.ts",
+    "cancellationOutcome.ts", "cancellationRequestNotification.ts",
+    "internalOrderNotification.ts", "orderConfirmation.ts",
+    "shipmentConfirmation.ts", "withdrawalConfirmation.ts",
   ]);
 });
 
@@ -1014,15 +1025,22 @@ test("regression: the other four emails and their state columns are untouched", 
   assert.ok(webhook.includes("sendInternalOrderNotificationIfNeeded("));
 });
 
-test("regression: no customer cancellation-outcome email was built", () => {
-  // Explicitly out of scope for Phase 2D-A. The only new template is the
-  // internal one, and it goes to the internal inbox.
+test("regression: THIS message stays internal-only, separate from the outcome email", () => {
+  // Phase 2D-B added cancellationOutcome.ts, the CUSTOMER's answer. It is
+  // a different message with a different recipient, a different template
+  // and a different idempotency namespace. This one must stay internal.
   const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
-  assert.equal(templates.length, 5, "an unexpected template was added");
+  assert.equal(templates.length, 6, "an unexpected template was added");
   assert.ok(templates.includes("cancellationRequestNotification.ts"));
-  // Nothing anywhere mails a customer about a cancellation.
+  assert.ok(templates.includes("cancellationOutcome.ts"));
+  // The REQUEST notification still goes to the internal inbox and carries
+  // no customer reply-to.
   assert.ok(!senderCode.includes("GLOA_REPLY_TO_SUPPORT"), "the internal mail carries a customer reply-to");
   assert.ok(senderCode.includes("to: GLOA_INTERNAL_ORDERS"));
+  // And it never learned to send the customer's outcome mail.
+  assert.ok(!senderCode.includes("sendCancellationOutcomeEmailIfNeeded"));
+  assert.ok(!routeCode.includes("sendCancellationOutcomeEmailIfNeeded"),
+    "the customer request route now mails an outcome");
 });
 
 test("regression: no new cron job was registered", () => {

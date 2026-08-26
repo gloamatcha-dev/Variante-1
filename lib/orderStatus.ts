@@ -36,6 +36,12 @@ export type OrderLifecycleFields = {
   tracking_url: string | null;
   shipped_at: string | null;
   cancellation_requested_at: string | null;
+  /**
+   * Migration 031. NULL means the request is still open and nobody has
+   * answered it yet; 'approved' and 'declined' are terminal. This is what
+   * finally lets a declined request stop reading as "wir prüfen" forever.
+   */
+  cancellation_request_resolution: string | null;
 };
 
 /* ── Tracking ─────────────────────────────────────────────────── */
@@ -249,6 +255,18 @@ export function getStatusDetailText(order: OrderLifecycleFields): string | null 
   if (isShipped(order)) return "Deine Bestellung ist unterwegs zu dir.";
 
   if (isPaid(order)) {
+    // A DECLINED request is terminal and must stop reading as "wir
+    // prüfen". Before migration 031 there was no way to say this, so a
+    // customer whose request was refused saw "wir prüfen" indefinitely on
+    // an order that was being packed normally. Checked before the
+    // requested branch, because the answer outranks the question.
+    //
+    // No reason is given, because none is collected. The wording is true
+    // whether the order was already packed, already gone, or simply too
+    // far along.
+    if (order.cancellation_request_resolution === "declined") {
+      return "Wir konnten die Stornierung nicht mehr umsetzen. Deine Bestellung bleibt bestehen.";
+    }
     if (order.cancellation_requested_at) return "Wir prüfen, ob die Bestellung noch gestoppt werden kann.";
     return "Wir bereiten deine Bestellung vor und melden uns, sobald sie unterwegs ist.";
   }
@@ -314,6 +332,11 @@ export type CancellationView =
   | { state: "eligible" }
   /** Already asked - we are checking, but nothing is cancelled yet. */
   | { state: "requested" }
+  /**
+   * Asked, and answered no (migration 031). Terminal. The order stands
+   * and is being processed normally.
+   */
+  | { state: "declined" }
   /** Too late to stop it; point at the statutory withdrawal route. */
   | { state: "too_late" }
   /** Already cancelled, or never in a state where this applies. */
@@ -341,6 +364,18 @@ export function getCancellationView(order: OrderLifecycleFields): CancellationVi
 
   if (!isPaid(order)) return { state: "unavailable" };
 
+  // A DECLINED request is terminal: it must never render as "wir prüfen"
+  // and must never offer the button again. Deliberately checked AFTER the
+  // shipped guard above, so a request that was declined and whose order
+  // then shipped still shows 'too_late' with the Widerruf pointer - that
+  // is the more useful answer at that point, and the customer already has
+  // the decline email.
+  if (order.cancellation_request_resolution === "declined") return { state: "declined" };
+
+  // An APPROVED request needs no branch here: approving cancels the
+  // order in the same transaction (migration 031 delegates to
+  // cancel_order), so isCancelled above has already returned
+  // 'unavailable' and the headline already reads "Storniert".
   if (order.cancellation_requested_at) return { state: "requested" };
 
   return { state: "eligible" };
