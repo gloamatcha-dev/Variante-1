@@ -951,9 +951,18 @@ test("regression: the Stripe webhook and every business flow are unchanged", () 
 
 test("regression: no migration was added and 022-033 are untouched", () => {
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files[files.length - 1], "033_refund_confirmation_email_state.sql",
-    "this task added a migration");
-  assert.equal(files.filter(f => f >= "034").length, 0);
+  // Phase 3C added 034 (subscription cancellation), which is not this
+  // task's. What this assertion protects is that the RETRY needed no
+  // migration of its own, so no later migration may touch the six
+  // email-state vocabularies it depends on.
+  for (const name of files.filter(f => f > "033_refund_confirmation_email_state.sql")) {
+    const later = readFileSync(path.join(MIGRATIONS, name), "utf-8");
+    for (const owned of ["confirmation_email_status", "internal_notification_status",
+                         "shipment_email_status", "cancellation_request_notification_status",
+                         "cancellation_outcome_email_status", "refund_email_status"]) {
+      assert.ok(!later.includes(owned), `${name} touches ${owned}`);
+    }
+  }
   // The six state vocabularies are all exactly as their migrations left
   // them, which is what makes a no-migration retry possible.
   for (const [file, column] of [

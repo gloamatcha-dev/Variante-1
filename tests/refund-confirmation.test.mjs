@@ -469,8 +469,18 @@ test("033: it is the next free number and 022-032 are untouched", () => {
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
   assert.deepEqual(files.filter(f => f.startsWith("033")), ["033_refund_confirmation_email_state.sql"]);
-  assert.equal(numbers.filter(nr => nr > "033").length, 0, "a migration above 033 appeared");
-  assert.deepEqual(files.slice(-12, -1), [
+  // Phase 3C added 034 (subscription cancellation). This asserts
+  // ownership and immutability rather than "nothing later exists" -
+  // the same correction each earlier suite already took. No later
+  // migration may touch the refund email state 033 put live.
+  for (const name of files.filter(f => f > "033_refund_confirmation_email_state.sql")) {
+    const later = withoutComments(readFileSync(path.join(MIGRATIONS, name), "utf-8"));
+    assert.ok(!later.includes("refund_email"), `${name} touches the refund email state`);
+  }
+  // Position-independent: a later migration must not make this fail for
+  // an unrelated reason.
+  const upTo033 = files.filter(f => f < "034");
+  assert.deepEqual(upTo033.slice(-12, -1), [
     "022_recurring_subscription_foundation.sql",
     "023_harden_stripe_customers_grants.sql",
     "024_seed_b2c_subscription_plans.sql",

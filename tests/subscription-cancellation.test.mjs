@@ -1,0 +1,992 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { spawn } from "node:child_process";
+import { readFileSync, readdirSync } from "node:fs";
+import { setTimeout as delay } from "node:timers/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { writeBlockedServerEnv } from "./helpers/testSupabase.mjs";
+import {
+  ALLOWED_BODY_KEYS,
+  CADENCE_DAYS,
+  CADENCE_MS,
+  CANCELLABLE_STATUSES,
+  CANCELLATION_CUTOFF_DAYS,
+  CANCEL_RESULTS,
+  CUTOFF_OFFSET_MS,
+  cancelResultIsDurable,
+  cancelResultStatus,
+  cancelWasNewlyScheduled,
+  isCancelResult,
+  isCancellableStatus,
+  resolveCancellationSchedule,
+  subscriptionCancelIdempotencyKey,
+  toStripeTimestamp,
+  validateCancelRequest,
+} from "../lib/subscriptionCancellationRules.ts";
+import {
+  PLAN_BILLING_INTERVAL_COUNT,
+  PLAN_BILLING_INTERVAL_UNIT,
+} from "../lib/subscriptionCheckoutRules.ts";
+
+// SAFE DEFAULT SUITE: pure cutoff arithmetic, source-level checks against
+// the migration and the service, and a real spawned server started
+// WITHOUT a Supabase service-role key and WITHOUT a Stripe key. No
+// database is reachable, no Stripe API is called, no subscription is
+// cancelled, no order is touched and no email is sent. Nothing here
+// executes SQL.
+//
+// The rules this suite protects: the 14-day boundary is exact and
+// UTC-safe, a late cancellation honours one further cycle, a customer can
+// only end their own subscription, scheduling is never the same thing as
+// cancelling, and nothing about the cadence is ever monthly.
+
+const ROOT = path.resolve(fileURLToPath(import.meta.url), "../..");
+const read = rel => readFileSync(path.join(ROOT, rel), "utf-8");
+const NEWLINE = String.fromCharCode(10);
+
+const MIGRATIONS = path.join(ROOT, "supabase/migrations");
+const route = read("app/api/subscriptions/cancel/route.ts");
+const service = read("lib/subscriptionCancellation.ts");
+const rules = read("lib/subscriptionCancellationRules.ts");
+const webhook = read("app/api/stripe/webhook/route.ts");
+const migration034 = read("supabase/migrations/034_subscription_cancellation.sql");
+
+/**
+ * Code only. Block comments are removed first: both modules carry long
+ * prose that deliberately NAMES the mechanisms they do not use
+ * (cancel_at_period_end, monthly, pause), and a scan that read those
+ * would report the avoidance as a violation of itself.
+ */
+const withoutComments = source => source
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .split(NEWLINE)
+  .filter(line => {
+    const t = line.trim();
+    return !t.startsWith("--") && !t.startsWith("//") && !t.startsWith("*") && !t.startsWith("/*");
+  })
+  .join(NEWLINE);
+
+const routeCode = withoutComments(route);
+const routeBody = routeCode.slice(routeCode.indexOf("export async function POST"));
+const serviceCode = withoutComments(service);
+const rulesCode = withoutComments(rules);
+const webhookCode = withoutComments(webhook);
+const sql034 = withoutComments(migration034);
+
+const SUB_ID = "11111111-2222-3333-4444-555555555555";
+const PERIOD_END = "2026-09-24T10:00:00.000Z";
+const CUTOFF = "2026-09-10T10:00:00.000Z"; // PERIOD_END - 14 days
+const LATE_END = "2026-10-22T10:00:00.000Z"; // PERIOD_END + 28 days
+
+const schedule = requestAt =>
+  resolveCancellationSchedule({ requestAt, currentPeriodEnd: PERIOD_END });
+
+/* ══════════════════════════════════════════════════════════════
+   THE CADENCE IS 28 DAYS, NEVER A MONTH
+   ══════════════════════════════════════════════════════════════ */
+
+test("cadence: 28 days and 14 days, agreeing with the checkout constants", () => {
+  assert.equal(CADENCE_DAYS, 28);
+  assert.equal(CANCELLATION_CUTOFF_DAYS, 14);
+  assert.equal(CADENCE_MS, 28 * 24 * 60 * 60 * 1000);
+  assert.equal(CUTOFF_OFFSET_MS, 14 * 24 * 60 * 60 * 1000);
+  // The same cadence the checkout module and migration 024 use.
+  assert.equal(PLAN_BILLING_INTERVAL_UNIT, "week");
+  assert.equal(PLAN_BILLING_INTERVAL_COUNT, 4);
+  assert.equal(PLAN_BILLING_INTERVAL_COUNT * 7, CADENCE_DAYS);
+});
+
+test("cadence: NO calendar arithmetic anywhere in the rules", () => {
+  // A month is not 28 days, and adding one to 31 January is ambiguous.
+  // Every computation is epoch milliseconds.
+  for (const forbidden of [
+    "setMonth", "getMonth", "setDate", "getDate", "setFullYear",
+    "addMonths", "monthly", "Monat",
+  ]) {
+    assert.ok(!rulesCode.includes(forbidden), `the rules use calendar arithmetic: ${forbidden}`);
+  }
+  for (const source of [routeCode, serviceCode]) {
+    for (const forbidden of ["setMonth", "getMonth", "monthly", "Monat"]) {
+      assert.ok(!source.includes(forbidden), `calendar arithmetic leaked: ${forbidden}`);
+    }
+  }
+  assert.ok(!sql034.toLowerCase().includes("month"), "034 mentions months");
+});
+
+/* ══════════════════════════════════════════════════════════════
+   THE BOUNDARY, TO THE MILLISECOND
+   ══════════════════════════════════════════════════════════════ */
+
+test("cutoff: it is exactly 14 days before the next billing", () => {
+  const result = schedule("2026-09-01T00:00:00.000Z");
+  assert.equal(result.ok, true);
+  assert.equal(result.schedule.cutoffAt, CUTOFF);
+  assert.equal(result.schedule.nextBillingAt, PERIOD_END);
+});
+
+test("BOUNDARY: exactly 14 days before is EARLY (inclusive)", () => {
+  const result = schedule(CUTOFF);
+  assert.equal(result.schedule.timing, "early");
+  assert.equal(result.schedule.effectiveCancelAt, PERIOD_END);
+});
+
+test("BOUNDARY: one millisecond before the cutoff is EARLY", () => {
+  const result = schedule(new Date(Date.parse(CUTOFF) - 1).toISOString());
+  assert.equal(result.schedule.timing, "early");
+  assert.equal(result.schedule.effectiveCancelAt, PERIOD_END);
+});
+
+test("BOUNDARY: one millisecond AFTER the cutoff is LATE", () => {
+  const result = schedule(new Date(Date.parse(CUTOFF) + 1).toISOString());
+  assert.equal(result.schedule.timing, "late");
+  assert.equal(result.schedule.effectiveCancelAt, LATE_END);
+});
+
+test("BOUNDARY: one second after the cutoff is LATE", () => {
+  const result = schedule(new Date(Date.parse(CUTOFF) + 1000).toISOString());
+  assert.equal(result.schedule.timing, "late");
+});
+
+test("BOUNDARY: 13 days 23:59:59 before next billing is LATE", () => {
+  const at = Date.parse(PERIOD_END) - (13 * 24 * 60 * 60 * 1000 + 23 * 3600 * 1000 + 59 * 60000 + 59000);
+  const result = schedule(new Date(at).toISOString());
+  assert.equal(result.schedule.timing, "late");
+  assert.equal(result.schedule.effectiveCancelAt, LATE_END);
+});
+
+test("BOUNDARY: 14 days and 1 second before next billing is EARLY", () => {
+  const at = Date.parse(PERIOD_END) - (CUTOFF_OFFSET_MS + 1000);
+  const result = schedule(new Date(at).toISOString());
+  assert.equal(result.schedule.timing, "early");
+  assert.equal(result.schedule.effectiveCancelAt, PERIOD_END);
+});
+
+test("EARLY: the upcoming cycle does not happen", () => {
+  const result = schedule("2026-08-27T09:00:00.000Z");
+  assert.equal(result.schedule.timing, "early");
+  assert.equal(result.schedule.effectiveCancelAt, PERIOD_END, "early ends at the next billing");
+});
+
+test("LATE: the upcoming cycle happens, then it ends 28 days later", () => {
+  const result = schedule("2026-09-20T09:00:00.000Z");
+  assert.equal(result.schedule.timing, "late");
+  assert.equal(result.schedule.effectiveCancelAt, LATE_END);
+  assert.equal(
+    Date.parse(LATE_END) - Date.parse(PERIOD_END),
+    CADENCE_MS,
+    "the extra cycle is not exactly 28 days"
+  );
+});
+
+test("UTC: the result is identical whatever the input timezone offset says", () => {
+  // Same instant, three notations.
+  const instants = [
+    "2026-09-20T09:00:00.000Z",
+    "2026-09-20T11:00:00.000+02:00",
+    "2026-09-20T04:00:00.000-05:00",
+  ];
+  const outputs = instants.map(at => schedule(at).schedule);
+  for (const out of outputs) {
+    assert.equal(out.timing, outputs[0].timing);
+    assert.equal(out.effectiveCancelAt, outputs[0].effectiveCancelAt);
+    assert.equal(out.cutoffAt, outputs[0].cutoffAt);
+  }
+  // And a Date object gives the same answer as its ISO string.
+  assert.deepEqual(
+    resolveCancellationSchedule({ requestAt: new Date(instants[0]), currentPeriodEnd: PERIOD_END }).schedule,
+    outputs[0]
+  );
+});
+
+test("UTC: a DST boundary does not change the 28-day distance", () => {
+  // European DST ends 25 October 2026. A period ending after it, measured
+  // from before it, must still be exactly 28 * 24 hours.
+  const end = "2026-11-05T02:30:00.000Z";
+  const result = resolveCancellationSchedule({ requestAt: "2026-11-01T00:00:00.000Z", currentPeriodEnd: end });
+  assert.equal(result.schedule.timing, "late");
+  assert.equal(Date.parse(result.schedule.effectiveCancelAt) - Date.parse(end), CADENCE_MS);
+  assert.equal(Date.parse(end) - Date.parse(result.schedule.cutoffAt), CUTOFF_OFFSET_MS);
+});
+
+test("cutoff: a missing or unparseable period end fails closed", () => {
+  for (const bad of [null, undefined, "", "not-a-date"]) {
+    const result = resolveCancellationSchedule({ requestAt: "2026-09-01T00:00:00.000Z", currentPeriodEnd: bad });
+    assert.equal(result.ok, false, String(bad));
+    assert.equal(result.reason, "invalid_period_end");
+  }
+  const badRequest = resolveCancellationSchedule({ requestAt: "nope", currentPeriodEnd: PERIOD_END });
+  assert.equal(badRequest.ok, false);
+  assert.equal(badRequest.reason, "invalid_request_time");
+});
+
+test("cutoff: Stripe gets whole seconds, never milliseconds", () => {
+  assert.equal(toStripeTimestamp(PERIOD_END), Math.floor(Date.parse(PERIOD_END) / 1000));
+  assert.ok(Number.isInteger(toStripeTimestamp(PERIOD_END)));
+});
+
+/* ══════════════════════════════════════════════════════════════
+   INPUT VALIDATION
+   ══════════════════════════════════════════════════════════════ */
+
+test("input: the allow-list is exactly one key", () => {
+  assert.deepEqual([...ALLOWED_BODY_KEYS], ["subscriptionId"]);
+});
+
+test("input: a valid body normalizes to one subscription id", () => {
+  const result = validateCancelRequest({ subscriptionId: SUB_ID });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.request, { subscriptionId: SUB_ID });
+});
+
+test("input: a non-object or malformed id is rejected", () => {
+  for (const bad of [null, undefined, "x", 42, true, []]) {
+    assert.equal(validateCancelRequest(bad).ok, false, JSON.stringify(bad));
+  }
+  for (const bad of ["", "   ", "not-a-uuid", "1234", 42, null, {}, "DROP TABLE subscriptions"]) {
+    const result = validateCancelRequest({ subscriptionId: bad });
+    assert.equal(result.ok, false, String(bad));
+    assert.equal(result.code, "invalid_subscription_id", String(bad));
+  }
+});
+
+test("input: THE BROWSER CANNOT SUPPLY ANY OF THE DECIDING FACTS", () => {
+  for (const key of [
+    "userId", "user_id", "email", "stripeCustomerId", "stripeSubscriptionId",
+    "nextBilling", "cutoff", "cutoffAt", "cancelAt", "cancel_at", "effectiveCancelAt",
+    "timing", "price", "plan", "planId", "status", "requestAt", "now", "quantity",
+  ]) {
+    const result = validateCancelRequest({ subscriptionId: SUB_ID, [key]: "x" });
+    assert.equal(result.ok, false, key);
+    assert.equal(result.code, "unknown_field", key);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   RESULT VOCABULARY
+   ══════════════════════════════════════════════════════════════ */
+
+test("results: the vocabulary matches what migration 034 returns", () => {
+  assert.deepEqual([...CANCEL_RESULTS].sort(), [
+    "already_scheduled", "conflict", "not_eligible", "not_found", "period_moved", "scheduled",
+  ]);
+  for (const result of CANCEL_RESULTS) {
+    assert.ok(sql034.includes(`'${result}'`), `034 never returns ${result}`);
+  }
+});
+
+test("results: only scheduled and already_scheduled confirm a cancellation", () => {
+  assert.equal(cancelResultIsDurable("scheduled"), true);
+  assert.equal(cancelResultIsDurable("already_scheduled"), true);
+  for (const refused of ["conflict", "not_found", "not_eligible", "period_moved"]) {
+    assert.equal(cancelResultIsDurable(refused), false, refused);
+  }
+  assert.equal(cancelWasNewlyScheduled("scheduled"), true);
+  assert.equal(cancelWasNewlyScheduled("already_scheduled"), false);
+});
+
+test("results: a CONFLICT never confirms a date nobody asked for", () => {
+  assert.equal(cancelResultIsDurable("conflict"), false);
+  assert.equal(cancelResultStatus("conflict"), 409);
+});
+
+test("results: each maps to a sensible HTTP status", () => {
+  assert.equal(cancelResultStatus("scheduled"), 200);
+  assert.equal(cancelResultStatus("already_scheduled"), 200);
+  assert.equal(cancelResultStatus("not_found"), 404);
+  assert.equal(cancelResultStatus("not_eligible"), 409);
+  assert.equal(cancelResultStatus("period_moved"), 409);
+  for (const bad of ["cancelled", "", null, 42, {}]) {
+    assert.equal(isCancelResult(bad), false, JSON.stringify(bad));
+  }
+});
+
+test("states: exactly active, past_due and unpaid may be cancelled", () => {
+  assert.deepEqual([...CANCELLABLE_STATUSES], ["active", "past_due", "unpaid"]);
+  for (const ok of CANCELLABLE_STATUSES) assert.equal(isCancellableStatus(ok), true, ok);
+  for (const no of ["pending", "paused", "cancelled", null, undefined, ""]) {
+    assert.equal(isCancellableStatus(no), false, String(no));
+  }
+  // Every value named exists in migration 022's vocabulary.
+  const m022 = read("supabase/migrations/022_recurring_subscription_foundation.sql");
+  for (const value of ["pending", "active", "paused", "cancelled", "past_due", "unpaid"]) {
+    assert.ok(m022.includes(`'${value}'`), `invented status: ${value}`);
+  }
+  // And the RPC agrees.
+  assert.ok(sql034.includes("if v_sub.status not in ('active', 'past_due', 'unpaid') then"));
+});
+
+/* ══════════════════════════════════════════════════════════════
+   STRIPE IDEMPOTENCY
+   ══════════════════════════════════════════════════════════════ */
+
+test("idempotency: the key carries the subscription AND the effective date", () => {
+  const key = subscriptionCancelIdempotencyKey(SUB_ID, PERIOD_END);
+  assert.equal(key, `gloa/subscription-cancel/${SUB_ID}/${toStripeTimestamp(PERIOD_END)}`);
+  // Same decision, same key - so a retry cannot schedule twice.
+  assert.equal(key, subscriptionCancelIdempotencyKey(SUB_ID, PERIOD_END));
+  // Different decision, different key - so Stripe cannot paper over a
+  // genuinely different end date.
+  assert.notEqual(key, subscriptionCancelIdempotencyKey(SUB_ID, LATE_END));
+  assert.notEqual(key, subscriptionCancelIdempotencyKey("99999999-8888-7777-6666-555555555555", PERIOD_END));
+});
+
+test("idempotency: no PII and no volatile input", () => {
+  const key = subscriptionCancelIdempotencyKey(SUB_ID, PERIOD_END);
+  for (const forbidden of ["@", "kundin", "example.com", "cus_", "sub_"]) {
+    assert.ok(!key.includes(forbidden), `the key contains ${forbidden}`);
+  }
+  const fn = rulesCode.slice(rulesCode.indexOf("export function subscriptionCancelIdempotencyKey"));
+  const body = fn.slice(0, fn.indexOf("\n}"));
+  for (const volatile of ["Date.now", "random", "Math."]) {
+    assert.ok(!body.includes(volatile), `the key uses ${volatile}`);
+  }
+});
+
+test("idempotency: it cannot collide with any other GLOA namespace", () => {
+  const key = subscriptionCancelIdempotencyKey(SUB_ID, PERIOD_END);
+  assert.match(key, /^gloa\/subscription-cancel\/[0-9a-f-]{36}\/\d+$/);
+  for (const other of ["gloa/refund/", "gloa/shipment/", "gloa/cancellation-outcome/", "gloa/internal-order/"]) {
+    assert.ok(!key.startsWith(other));
+  }
+});
+
+test("idempotency: the service uses it on its single Stripe write", () => {
+  assert.ok(serviceCode.includes("subscriptionCancelIdempotencyKey(\n            subscription.id,"));
+  assert.equal([...serviceCode.matchAll(/stripe\.subscriptions\.update\(/g)].length, 1);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   THE STRIPE WRITE
+   ══════════════════════════════════════════════════════════════ */
+
+test("stripe: cancel_at is genuinely supported by the installed SDK", () => {
+  // Verified against the real type declarations, not from memory.
+  const decl = readFileSync(
+    path.join(ROOT, "node_modules/stripe/cjs/resources/Subscriptions.d.ts"), "utf-8"
+  );
+  const updateParams = decl.slice(
+    decl.indexOf("interface SubscriptionUpdateParams {"),
+    decl.indexOf("namespace SubscriptionUpdateParams")
+  );
+  assert.ok(updateParams.includes("cancel_at?:"), "SDK has no cancel_at on update");
+  assert.ok(updateParams.includes("proration_behavior?:"), "SDK has no proration_behavior");
+  assert.ok(decl.includes("'always_invoice' | 'create_prorations' | 'none'"), "no ProrationBehavior union");
+  assert.ok(decl.includes("update(id: string, params?: SubscriptionUpdateParams, options?: RequestOptions)"));
+  const lib = readFileSync(path.join(ROOT, "node_modules/stripe/cjs/lib.d.ts"), "utf-8");
+  assert.ok(lib.includes("idempotencyKey?: string;"), "RequestOptions has no idempotencyKey");
+});
+
+test("stripe: it sets cancel_at and pins proration, and nothing else", () => {
+  const call = serviceCode.slice(serviceCode.indexOf("stripe.subscriptions.update("));
+  const params = call.slice(0, call.indexOf("idempotencyKey"));
+  assert.ok(params.includes("cancel_at: toStripeTimestamp(schedule.effectiveCancelAt)"));
+  assert.ok(params.includes('proration_behavior: "none"'));
+  // Nothing else may be touched.
+  for (const forbidden of [
+    "items", "price", "quantity", "metadata", "customer", "default_payment_method",
+    "billing_cycle_anchor", "trial", "cancel_at_period_end", "shipping",
+  ]) {
+    assert.ok(!params.includes(forbidden), `the Stripe update also sets ${forbidden}`);
+  }
+});
+
+test("stripe: it NEVER cancels or deletes immediately", () => {
+  for (const forbidden of [
+    "subscriptions.cancel(", "subscriptions.del(", "subscriptions.delete(",
+  ]) {
+    assert.ok(!serviceCode.includes(forbidden), `the service performs: ${forbidden}`);
+  }
+  // Only retrieve and update.
+  const calls = [...serviceCode.matchAll(/stripe\.subscriptions\.(\w+)\(/g)].map(m => m[1]);
+  assert.deepEqual([...new Set(calls)].sort(), ["retrieve", "update"]);
+});
+
+test("stripe: cancel_at_period_end is deliberately never used", () => {
+  // It cannot express the late case, and setting it would be misleading.
+  for (const source of [serviceCode, routeCode, rulesCode]) {
+    assert.ok(!source.includes("cancel_at_period_end"), "cancel_at_period_end is used");
+  }
+  const setClauses = [...sql034.matchAll(/update public\.subscriptions\s+set([\s\S]*?)where id = v_sub\.id/g)].map(m => m[1]).join(" ");
+  assert.ok(!setClauses.includes("cancel_at_period_end"), "034 writes cancel_at_period_end");
+});
+
+/* ══════════════════════════════════════════════════════════════
+   ORDERING AND THE TWO FAILURE WINDOWS
+   ══════════════════════════════════════════════════════════════ */
+
+test("ORDERING: Stripe is written BEFORE the database, never after", () => {
+  const stripeAt = serviceCode.indexOf("stripe.subscriptions.update(");
+  const rpcAt = serviceCode.indexOf('admin.rpc("schedule_subscription_cancellation"');
+  assert.ok(stripeAt > -1 && rpcAt > -1);
+  assert.ok(stripeAt < rpcAt, "the database is written before Stripe accepts");
+});
+
+test("STRIPE FAILS: nothing is persisted and no success is reported", () => {
+  const block = serviceCode.slice(serviceCode.indexOf("stripe.subscriptions.update("));
+  const catchBlock = block.slice(block.indexOf("} catch"), block.indexOf("admin.rpc("));
+  assert.ok(catchBlock.includes('return { ok: false, result: "error" }'));
+  // The failure returns before the RPC is reached.
+  assert.ok(block.indexOf('return { ok: false, result: "error" }') < block.indexOf("admin.rpc("));
+});
+
+test("STRIPE SUCCEEDS, DB FAILS: reconcile-before-write stops a second schedule", () => {
+  // The service retrieves Stripe first and adopts an existing future
+  // cancel_at verbatim rather than recomputing. Without this, a retry
+  // after a period roll would extend a LATE cancellation by another cycle
+  // every time.
+  const retrieveAt = serviceCode.indexOf("stripe.subscriptions.retrieve(");
+  const existingAt = serviceCode.indexOf("const existingCancelAt");
+  const updateAt = serviceCode.indexOf("stripe.subscriptions.update(");
+  assert.ok(retrieveAt < existingAt && existingAt < updateAt);
+  assert.ok(serviceCode.includes("if (!existingCancelAt) {"), "the update is not skipped when already scheduled");
+  assert.ok(serviceCode.includes("effectiveCancelAt: existingCancelAt"), "an existing schedule is not adopted");
+});
+
+test("STRIPE SUCCEEDS, DB FAILS: the webhook self-heals the local row", () => {
+  assert.ok(webhookCode.includes('event.type === "customer.subscription.updated"'));
+  assert.ok(webhookCode.includes("handleSubscriptionUpdated(event)"));
+  assert.ok(serviceCode.includes('admin.rpc("sync_subscription_from_stripe"'));
+  // The sync writes cancel_at, which is the fact that was lost.
+  assert.ok(sql034.includes("cancel_at                = p_cancel_at"));
+});
+
+/* ══════════════════════════════════════════════════════════════
+   OWNERSHIP AND AUTH
+   ══════════════════════════════════════════════════════════════ */
+
+test("auth: the route authenticates before touching any subscription", () => {
+  assert.ok(routeBody.includes("verifyBearerUser(request)"));
+  const authAt = routeBody.indexOf("verifyBearerUser");
+  assert.ok(authAt < routeBody.indexOf("cancelSubscriptionForUser"), "the service runs before auth");
+  assert.ok(routeBody.includes("status: 401"));
+});
+
+test("auth: the user id comes from the token and never from the body", () => {
+  assert.ok(routeCode.includes("caller.userId"));
+  const call = routeBody.slice(routeBody.indexOf("cancelSubscriptionForUser("));
+  const args = call.slice(0, call.indexOf(", {"));
+  assert.ok(args.includes("validated.request.subscriptionId"));
+  assert.ok(args.includes("caller.userId"));
+  assert.ok(!args.includes("body"), "the body reaches the service");
+});
+
+test("ownership: it is enforced twice, in code and in the locked RPC", () => {
+  // 1. the service SELECT matches id AND user_id
+  assert.ok(serviceCode.includes('.eq("id", subscriptionId)'));
+  assert.ok(serviceCode.includes('.eq("user_id", userId)'));
+  // 2. the RPC matches again, under FOR UPDATE
+  assert.ok(sql034.includes("where id = p_subscription_id"));
+  assert.ok(sql034.includes("and user_id = p_user_id"));
+  const select = sql034.slice(sql034.indexOf("select * into v_sub"));
+  assert.ok(select.slice(0, 300).includes("for update"));
+});
+
+test("ownership: a foreign subscription is indistinguishable from a missing one", () => {
+  assert.ok(serviceCode.includes('if (!data) return { ok: false, result: "not_found" }'));
+  // customer_type also answers not_found, not a distinct code.
+  assert.ok(serviceCode.includes('customer_type !== "private"'));
+  const b2c = serviceCode.slice(serviceCode.indexOf('customer_type !== "private"'));
+  assert.ok(b2c.slice(0, 120).includes('result: "not_found"'));
+  assert.ok(sql034.includes("if v_sub.customer_type is distinct from 'private' then"));
+});
+
+test("ownership: B2B supply agreements can never be ended through this route", () => {
+  for (const forbidden of ["b2b_supply_agreements", "business", "supply_agreement"]) {
+    assert.ok(!serviceCode.includes(forbidden), `the service touches ${forbidden}`);
+    assert.ok(!sql034.includes(forbidden), `034 touches ${forbidden}`);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   MIGRATION 034
+   ══════════════════════════════════════════════════════════════ */
+
+test("034: it is the next free number and 022-033 are untouched", () => {
+  const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
+  const numbers = files.map(f => f.slice(0, 3));
+  assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
+  assert.deepEqual(files.filter(f => f.startsWith("034")), ["034_subscription_cancellation.sql"]);
+  assert.equal(numbers.filter(nr => nr > "034").length, 0, "a migration above 034 appeared");
+  assert.equal(files[files.length - 2], "033_refund_confirmation_email_state.sql");
+  // It redefines nothing the subscription foundation owns.
+  for (const owned of [
+    "create_pending_subscription", "activate_subscription_from_invoice",
+    "claim_pending_subscription_for_attempt", "subscriptions_status_check",
+  ]) {
+    assert.ok(!sql034.includes(owned), `034 touches ${owned}`);
+  }
+});
+
+test("034: exactly two columns, nullable, no default, no backfill", () => {
+  const adds = [...sql034.matchAll(/add column(?: if not exists)? (\w+)/g)].map(m => m[1]);
+  assert.deepEqual(adds.sort(), ["cancel_at", "cancellation_requested_at"]);
+  const alter = sql034.slice(sql034.indexOf("alter table public.subscriptions"));
+  const statement = alter.slice(0, alter.indexOf(";") + 1);
+  assert.ok(!/default/i.test(statement), "a column has a default");
+  assert.ok(!/not null/i.test(statement), "a column is NOT NULL");
+  assert.ok(statement.includes("timestamptz"));
+  for (const forbidden of ["insert into", "delete from", "truncate", "create trigger", "create policy"]) {
+    assert.ok(!sql034.toLowerCase().includes(forbidden), `034 performs: ${forbidden}`);
+  }
+});
+
+test("034: both invariants exist, and the pairing is one-directional", () => {
+  assert.ok(sql034.includes("subscriptions_cancellation_request_scheduled_check"));
+  assert.ok(sql034.includes("check (cancellation_requested_at is null or cancel_at is not null)"));
+  assert.ok(sql034.includes("subscriptions_cancel_at_after_request_check"));
+  assert.ok(sql034.includes("or cancel_at > cancellation_requested_at"));
+  // NOT a symmetric pairing: a Stripe-originated cancel_at with no local
+  // request must remain representable, or the sync could not reconcile it.
+  assert.ok(!sql034.includes("(cancellation_requested_at is null) = (cancel_at is null)"),
+    "the pairing is symmetric and would block Stripe-originated cancellations");
+});
+
+test("034: SCHEDULING NEVER WRITES status - that is termination's job", () => {
+  const scheduleFn = sql034.slice(
+    sql034.indexOf("create or replace function public.schedule_subscription_cancellation"),
+    sql034.indexOf("create or replace function public.sync_subscription_from_stripe")
+  );
+  const setClause = scheduleFn.slice(scheduleFn.indexOf("update public.subscriptions"));
+  const written = [...setClause.matchAll(/^\s*(?:set\s+)?(\w+)\s*=/gm)].map(m => m[1]);
+  assert.deepEqual(written.sort(), ["cancel_at", "cancellation_requested_at"]);
+  for (const forbidden of [
+    "status", "cancelled_at", "cancel_at_period_end", "current_period", "_cents",
+    "snapshot", "stripe_subscription_id", "next_delivery_at", "plan_id",
+  ]) {
+    assert.ok(!setClause.slice(0, setClause.indexOf("where")).includes(forbidden),
+      `scheduling writes ${forbidden}`);
+  }
+});
+
+test("034: only mark_subscription_cancelled writes status = cancelled", () => {
+  // Count WRITES only. `if v_sub.status = 'cancelled'` is a read guard and
+  // appears in two functions; the SET clause appears in exactly one.
+  // Anchored on the UPDATE, not on the function's own `SET search_path`.
+  const setClauses = [...sql034.matchAll(/update public\.subscriptions\s+set([\s\S]*?)where id = v_sub\.id/g)].map(m => m[1]);
+  assert.equal(setClauses.length, 3, "unexpected number of UPDATE statements");
+  const writers = setClauses.filter(c => /status\s+=\s+'cancelled'/.test(c));
+  assert.equal(writers.length, 1, "more than one path writes the cancelled status");
+  const markFn = sql034.slice(sql034.indexOf("create or replace function public.mark_subscription_cancelled"));
+  assert.ok(markFn.includes("status       = 'cancelled'"));
+  assert.ok(markFn.includes("cancelled_at = coalesce(p_cancelled_at, now())"));
+});
+
+test("034: the sync refuses to write status, money or snapshots", () => {
+  const syncFn = sql034.slice(
+    sql034.indexOf("create or replace function public.sync_subscription_from_stripe"),
+    sql034.indexOf("create or replace function public.mark_subscription_cancelled")
+  );
+  const setClause = syncFn.slice(syncFn.indexOf("update public.subscriptions"), syncFn.indexOf("where id = v_sub.id"));
+  const written = [...setClause.matchAll(/^\s*(?:set\s+)?(\w+)\s*=/gm)].map(m => m[1]);
+  assert.deepEqual(written.sort(), [
+    "cancel_at", "cancellation_requested_at", "current_period_end", "current_period_start",
+  ]);
+  for (const forbidden of ["status", "_cents", "snapshot", "plan_id", "stripe_subscription_id", "cancelled_at"]) {
+    assert.ok(!setClause.includes(forbidden), `the sync writes ${forbidden}`);
+  }
+});
+
+test("034: all three functions are SECURITY DEFINER with an empty search_path", () => {
+  assert.equal([...sql034.matchAll(/security definer set search_path = ''/g)].length, 3);
+  for (const fn of [
+    "schedule_subscription_cancellation", "sync_subscription_from_stripe", "mark_subscription_cancelled",
+  ]) {
+    const at = sql034.indexOf(`create or replace function public.${fn}`);
+    assert.ok(at > -1, `${fn} missing`);
+    const body = sql034.slice(at, sql034.indexOf("$$;", at));
+    assert.ok(body.includes("language plpgsql"));
+    assert.ok(body.includes("returns jsonb"));
+    assert.ok(body.includes("for update"), `${fn} does not lock the row`);
+  }
+});
+
+test("034: execute revoked from public/anon/authenticated, granted to service_role only", () => {
+  const signatures = [
+    "public.schedule_subscription_cancellation(uuid, uuid, timestamptz, timestamptz)",
+    "public.sync_subscription_from_stripe(text, timestamptz, timestamptz, timestamptz)",
+    "public.mark_subscription_cancelled(text, timestamptz)",
+  ];
+  for (const sig of signatures) {
+    for (const role of ["public", "anon", "authenticated"]) {
+      assert.ok(sql034.includes(`revoke all on function ${sig} from ${role};`), `${sig} not revoked from ${role}`);
+    }
+    assert.ok(sql034.includes(`grant execute on function ${sig} to service_role;`));
+  }
+  const grants = sql034.split(NEWLINE).filter(l => l.trim().toLowerCase().startsWith("grant"));
+  assert.equal(grants.length, 3, "an unexpected grant was issued");
+  // NO table or column grant: service_role still cannot write subscriptions.
+  assert.ok(!/grant\s+update/i.test(sql034), "034 grants an UPDATE privilege");
+  assert.ok(!/grant[^;]*on\s+(table\s+)?public\.subscriptions/i.test(sql034), "034 grants a table privilege");
+  assert.ok(!/to (anon|authenticated|public)\b/i.test(sql034), "034 grants a browser role something");
+});
+
+test("034: the OWNER verification queries cover A through L", () => {
+  for (const marker of [
+    "-- (A)", "-- (C)", "-- (D)", "-- (E)", "-- (G)", "-- (H)", "-- (I)", "-- (J)", "-- (K)", "-- (L)",
+  ]) {
+    assert.ok(migration034.includes(marker), `verification ${marker} is missing`);
+  }
+  assert.ok(migration034.includes("prosecdef"));
+  assert.ok(migration034.includes("has_function_privilege"));
+  assert.ok(migration034.includes("column_privileges"));
+  assert.ok(migration034.includes("pg_trigger"));
+  assert.ok(migration034.includes("period_end_flagged"), "no cancel_at_period_end verification");
+  assert.ok(migration034.includes("rowsecurity"), "no RLS verification");
+});
+
+/* ══════════════════════════════════════════════════════════════
+   WEBHOOK
+   ══════════════════════════════════════════════════════════════ */
+
+test("webhook: deleted marks cancelled, updated only reconciles", () => {
+  assert.ok(webhookCode.includes('event.type === "customer.subscription.deleted"'));
+  assert.ok(webhookCode.includes("handleSubscriptionDeleted(event)"));
+  assert.ok(webhookCode.includes("markSubscriptionCancelledFromStripe(subscription)"));
+  assert.ok(webhookCode.includes("syncSubscriptionFromStripe(subscription)"));
+  // Neither handler writes anything itself.
+  const handlers = webhookCode.slice(webhookCode.indexOf("async function handleSubscriptionUpdated"));
+  const block = handlers.slice(0, handlers.indexOf("async function handleRefundEvent"));
+  for (const forbidden of [".update(", ".insert(", ".delete(", 'from("subscriptions")']) {
+    assert.ok(!block.includes(forbidden), `a handler writes directly: ${forbidden}`);
+  }
+});
+
+test("webhook: the deleted handler uses Stripe's own ended_at", () => {
+  assert.ok(serviceCode.includes("subscription.ended_at"));
+  assert.ok(sql034.includes("coalesce(p_cancelled_at, now())"));
+  // Idempotent: a redelivery does not move cancelled_at.
+  const markFn = sql034.slice(sql034.indexOf("create or replace function public.mark_subscription_cancelled"));
+  const guardAt = markFn.indexOf("if v_sub.status = 'cancelled' then");
+  const branch = markFn.slice(guardAt, markFn.indexOf("end if;", guardAt));
+  assert.ok(branch.includes("'already_cancelled'"));
+  assert.ok(!branch.includes("update"), "the idempotent branch writes");
+  assert.ok(!branch.includes("now()"), "the idempotent branch re-stamps cancelled_at");
+});
+
+test("webhook: prior orders and billing cycles are never touched", () => {
+  for (const forbidden of ["orders", "order_items", "checkout_attempts", "payment_status", "refund"]) {
+    assert.ok(!serviceCode.includes(forbidden), `the service touches ${forbidden}`);
+  }
+  assert.ok(!sql034.includes("public.orders"), "034 touches orders");
+  assert.ok(!sql034.includes("public.checkout_attempts"), "034 touches checkout attempts");
+});
+
+test("webhook: billing failure events remain unhandled - that is Phase 3E", () => {
+  for (const deferred of [
+    "invoice.payment_failed", "invoice.payment_action_required",
+    "customer.subscription.paused", "customer.subscription.resumed",
+  ]) {
+    assert.ok(!webhookCode.includes(deferred), `${deferred} was handled in this phase`);
+  }
+  // And nothing here writes past_due or unpaid, so 3E owns that decision.
+  const setClauses = [...sql034.matchAll(/update public\.subscriptions\s+set([\s\S]*?)where id = v_sub\.id/g)].map(m => m[1]).join(" ");
+  assert.ok(!setClauses.includes("'past_due'"));
+  assert.ok(!setClauses.includes("'unpaid'"));
+});
+
+/* ══════════════════════════════════════════════════════════════
+   FEATURE FLAG
+   ══════════════════════════════════════════════════════════════ */
+
+test("FLAG: cancellation is NOT gated by the purchase flag", () => {
+  // A customer whose bookings were switched off must still be able to end
+  // a contract they are paying for.
+  for (const source of [routeCode, serviceCode, rulesCode]) {
+    assert.ok(!source.includes("B2C_SUBSCRIPTIONS_ENABLED"), "cancellation reads the purchase flag");
+    assert.ok(!source.includes("isSubscriptionCheckoutEnabled"), "cancellation reads the purchase flag");
+  }
+});
+
+test("FLAG: purchase remains fail-closed and unchanged", () => {
+  const checkoutRules = withoutComments(read("lib/subscriptionCheckoutRules.ts"));
+  assert.ok(checkoutRules.includes('return env[SUBSCRIPTION_FEATURE_FLAG] === "true";'));
+  const checkout = withoutComments(read("lib/subscriptionCheckout.ts"));
+  assert.ok(checkout.includes("if (!deps.isEnabled()) {"));
+  // Against the CALL, not the deps type declaration, which necessarily
+  // names verifyCaller earlier in the file.
+  const handler = checkout.slice(checkout.indexOf("export async function handleSubscriptionCheckout"));
+  assert.ok(
+    handler.indexOf("if (!deps.isEnabled())") < handler.indexOf("deps.verifyCaller(request)"),
+    "the flag no longer runs first"
+  );
+  assert.match(read(".env.example"), /^B2C_SUBSCRIPTIONS_ENABLED=$/m);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   RESPONSE AND LOGGING
+   ══════════════════════════════════════════════════════════════ */
+
+test("response: only truthful, non-sensitive facts", () => {
+  // The payload object only. `{ status: 200 }` is the HTTP status option
+  // that follows it, not a field the customer receives.
+  const at = routeBody.lastIndexOf("Response.json(");
+  const payload = routeBody.slice(at, routeBody.indexOf("satisfies CancelResponse", at));
+  const fields = [...payload.matchAll(/^\s+(\w+)[:,]/gm)].map(m => m[1]);
+  assert.deepEqual(fields.sort(), [
+    "cutoffAt", "effectiveCancelAt", "newlyScheduled", "ok", "scheduled", "timing",
+  ]);
+  for (const forbidden of [
+    "stripe", "customer", "email", "userId", "user_id", "subscriptionId", "_cents", "plan", "status",
+  ]) {
+    assert.ok(!payload.includes(forbidden), `the response exposes ${forbidden}`);
+  }
+});
+
+test("response: a refusal never claims a cancellation", () => {
+  const messages = routeCode.slice(routeCode.indexOf("const REFUSAL_MESSAGES"));
+  const block = messages.slice(0, messages.indexOf("};"));
+  assert.equal([...block.matchAll(/^\s+\w+:/gm)].length, 4);
+  for (const forbidden of ["gekündigt.", "wurde beendet", "storniert"]) {
+    assert.ok(!block.includes(forbidden), `a refusal claims ${forbidden}`);
+  }
+});
+
+test("logging: no PII reaches a log line", () => {
+  for (const source of [routeCode, serviceCode]) {
+    const logs = [...source.matchAll(/console\.\w+\(([\s\S]*?)\);/g)].map(m => m[1]);
+    for (const line of logs) {
+      for (const forbidden of [
+        "caller.email", "customer_snapshot", "snapshot", "address", "userId",
+        "JSON.stringify", "rawBody", "parsed",
+      ]) {
+        assert.ok(!line.includes(forbidden), `a log line contains ${forbidden}: ${line}`);
+      }
+    }
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   REGRESSIONS
+   ══════════════════════════════════════════════════════════════ */
+
+test("regression: invoice.paid and checkout.session.completed are unchanged", () => {
+  assert.ok(webhookCode.includes('event.type === "invoice.paid"'));
+  assert.ok(webhookCode.includes("handleInvoicePaid(stripe, event)"));
+  assert.ok(webhookCode.includes('event.type === "checkout.session.completed"'));
+  assert.ok(webhookCode.includes("handleSubscriptionSessionCompleted(stripe, session)"));
+  const invoice = withoutComments(read("lib/subscriptionInvoiceFulfillment.ts"));
+  assert.ok(invoice.includes('admin.rpc("activate_subscription_from_invoice"'));
+  assert.ok(invoice.includes("createOrderFromPaidCheckoutAttempt("));
+  assert.ok(!invoice.includes("cancel"), "invoice fulfillment learned about cancellation");
+});
+
+test("regression: the order cancellation and refund systems are untouched", () => {
+  const orderCancel = withoutComments(read("app/api/internal/orders/cancel/route.ts"));
+  assert.deepEqual([...orderCancel.matchAll(/\.rpc\("(\w+)"/g)].map(m => m[1]), ["cancel_order"]);
+  const resolve = withoutComments(read("app/api/internal/orders/cancellation-request/resolve/route.ts"));
+  assert.deepEqual([...resolve.matchAll(/\.rpc\("(\w+)"/g)].map(m => m[1]),
+    ["resolve_order_cancellation_request"]);
+  assert.ok(webhookCode.includes("syncOrderRefundStateFromStripe(stripe, paymentIntentId)"));
+  assert.ok(webhookCode.includes("isNewSettledRefundFact(outcome.result)"));
+  // Subscription cancellation and ORDER cancellation are separate systems.
+  for (const forbidden of ["cancel_order", "request_order_cancellation", "resolve_order_cancellation"]) {
+    assert.ok(!serviceCode.includes(forbidden), `the subscription service touches ${forbidden}`);
+    assert.ok(!sql034.includes(forbidden), `034 touches ${forbidden}`);
+  }
+});
+
+test("regression: no Stripe write API for refunds appeared", () => {
+  const STRIPE_WRITES = [["refunds", ".create"], ["refunds", ".cancel"], ["paymentIntents", ".cancel"]]
+    .map(parts => parts.join(""));
+  const offenders = [];
+  const walk = dir => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { walk(full); continue; }
+      if (!/\.(ts|tsx)$/.test(entry.name)) continue;
+      const source = withoutComments(readFileSync(full, "utf-8"));
+      for (const forbidden of STRIPE_WRITES) {
+        if (source.includes(forbidden)) offenders.push(`${entry.name}: ${forbidden}`);
+      }
+    }
+  };
+  walk(path.join(ROOT, "app"));
+  walk(path.join(ROOT, "lib"));
+  assert.deepEqual(offenders, []);
+});
+
+test("regression: no account UI, no email and no legal copy changed", () => {
+  const portal = read("app/AccountPortal.tsx");
+  assert.ok(!portal.includes("/api/subscriptions/cancel"), "the account UI gained a cancel control");
+  // NOT a bare cancellation_requested_at check: the portal legitimately
+  // reads orders.cancellation_requested_at, which is the Phase 2A ORDER
+  // cancellation request and a different system entirely. What must be
+  // absent is any use of the new SUBSCRIPTION columns.
+  assert.ok(!portal.includes("sub.cancel_at\b"), "the account UI reads subscription cancel_at");
+  assert.ok(!portal.includes("subscriptionCancel"), "the account UI calls the cancellation service");
+  assert.ok(!portal.includes("schedule_subscription_cancellation"));
+  // No new email template.
+  const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
+  assert.equal(templates.length, 7, "an email template was added");
+  assert.ok(!templates.some(n => /subscription/i.test(n)));
+  for (const source of [routeCode, serviceCode, rulesCode]) {
+    for (const forbidden of ["resend", "Resend", "emails.send", "GLOA_FROM_HELLO"]) {
+      assert.ok(!source.includes(forbidden), `this phase sends email: ${forbidden}`);
+    }
+  }
+});
+
+test("regression: historical subscriptions are unaffected", () => {
+  // Nullable, no default, no backfill means every existing row reads NULL
+  // on both columns and nothing considers it cancelled.
+  assert.ok(sql034.includes("add column if not exists cancellation_requested_at timestamptz"));
+  assert.ok(sql034.includes("add column if not exists cancel_at                 timestamptz"));
+  // Every UPDATE is scoped to one row the function just locked, so
+  // applying 034 cannot touch a single existing subscription.
+  // mark_subscription_cancelled DOES write status - that is the
+  // termination path, and it runs only for one Stripe event.
+  const updates = [...sql034.matchAll(/update public\.subscriptions[\s\S]*?;/g)].map(m => m[0]);
+  assert.equal(updates.length, 3, "unexpected number of UPDATE statements");
+  for (const stmt of updates) {
+    assert.ok(stmt.includes("where id = v_sub.id"), "an unscoped UPDATE exists");
+  }
+  // And nothing enumerates subscriptions - the only entry points are one
+  // authenticated request and two Stripe events for one subscription id.
+  const vercel = JSON.parse(read("vercel.json"));
+  assert.equal((vercel.crons ?? []).length, 1);
+  assert.equal(vercel.crons[0].path, "/api/cron/retry-order-notifications");
+});
+
+test("regression: SHOP_STATUS and the subscription flag are unchanged", () => {
+  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "prelaunch" as const;'));
+  assert.match(read(".env.example"), /^B2C_SUBSCRIPTIONS_ENABLED=$/m);
+  const declared = [...read(".env.example").matchAll(/^([A-Z_0-9]+)=/gm)].map(m => m[1]);
+  assert.equal(new Set(declared).size, declared.length);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   THE HTTP BOUNDARY, ON A REAL SPAWNED SERVER
+   ══════════════════════════════════════════════════════════════ */
+
+const ENDPOINT_PATH = "/api/subscriptions/cancel";
+
+/**
+ * Started without SUPABASE_SECRET_KEY and without STRIPE_SECRET_KEY, so
+ * no database is reachable and no Stripe client can be constructed. No
+ * subscription can be cancelled by this suite.
+ */
+function serverEnv(extra) {
+  const env = writeBlockedServerEnv({ ...extra });
+  delete env.STRIPE_SECRET_KEY;
+  delete env.RESEND_API_KEY;
+  delete env.B2C_SUBSCRIPTIONS_ENABLED;
+  return env;
+}
+
+async function startServer(port, extraEnv) {
+  const child = spawn(process.execPath, [".output/server/index.mjs"], {
+    cwd: new URL("..", import.meta.url),
+    env: serverEnv({ PORT: String(port), ...extraEnv }),
+    stdio: "ignore",
+  });
+
+  await new Promise((resolveReady, rejectReady) => {
+    child.once("exit", code => rejectReady(new Error(`server exited early (code ${code})`)));
+    (async () => {
+      for (let attempt = 0; attempt < 50; attempt++) {
+        try {
+          const res = await fetch(`http://127.0.0.1:${port}/`);
+          if (res.ok) return resolveReady();
+        } catch {
+          // not up yet
+        }
+        await delay(200);
+      }
+      rejectReady(new Error("server did not become ready in time"));
+    })();
+  });
+
+  return child;
+}
+
+const post = (port, payload, headers = {}) =>
+  fetch(`http://127.0.0.1:${port}${ENDPOINT_PATH}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: typeof payload === "string" ? payload : JSON.stringify(payload),
+  });
+
+const PORT = 8956;
+let server;
+
+test.before(async () => {
+  server = await startServer(PORT, {});
+});
+
+test.after(() => {
+  server?.kill();
+});
+
+test("http: an unauthenticated caller cannot cancel", async () => {
+  const res = await post(PORT, { subscriptionId: SUB_ID });
+  assert.equal(res.status, 401);
+  const parsed = await res.json();
+  assert.equal(parsed.ok, undefined);
+  assert.equal(parsed.error, "Bitte melde dich an.");
+});
+
+test("http: a malformed or absent bearer token is not authentication", async () => {
+  for (const authorization of [
+    "Bearer", "Bearer ", "Bearer nonsense", "Basic abc",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyIn0.notarealsignature",
+  ]) {
+    const res = await post(PORT, { subscriptionId: SUB_ID }, { authorization });
+    assert.equal(res.status, 401, authorization);
+  }
+});
+
+test("http: authentication is checked before any subscription is looked at", async () => {
+  const valid = await post(PORT, { subscriptionId: SUB_ID });
+  const malformedId = await post(PORT, { subscriptionId: "nope" });
+  const unknownField = await post(PORT, { subscriptionId: SUB_ID, cancelAt: "2026-01-01" });
+  for (const res of [valid, malformedId, unknownField]) assert.equal(res.status, 401);
+});
+
+test("http: a non-JSON content type and an oversized body are refused", async () => {
+  const wrongType = await fetch(`http://127.0.0.1:${PORT}${ENDPOINT_PATH}`, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: "subscriptionId=x",
+  });
+  assert.equal(wrongType.status, 400);
+
+  const oversized = await post(PORT, JSON.stringify({ subscriptionId: SUB_ID, pad: "x".repeat(5_000) }));
+  assert.equal(oversized.status, 413);
+});
+
+test("http: GET, PUT, PATCH and DELETE are not surfaces", async () => {
+  for (const method of ["GET", "PUT", "PATCH", "DELETE"]) {
+    const res = await fetch(`http://127.0.0.1:${PORT}${ENDPOINT_PATH}`, { method });
+    assert.ok(res.status === 404 || res.status === 405, `${method} answered ${res.status}`);
+  }
+});
+
+test("http: no response ever confirms a cancellation or leaks a fact", async () => {
+  const responses = await Promise.all([
+    post(PORT, { subscriptionId: SUB_ID }),
+    post(PORT, { subscriptionId: "nope" }),
+    post(PORT, {}),
+  ]);
+  for (const res of responses) {
+    const text = await res.text();
+    for (const forbidden of ["scheduled", "cancelAt", "effectiveCancelAt", "@", "sub_", "cus_"]) {
+      assert.ok(!text.includes(forbidden), `a response contained ${forbidden}`);
+    }
+  }
+});
+
+test("no real Stripe request, no Resend request and no production Supabase in this suite", () => {
+  const suite = withoutComments(read("tests/subscription-cancellation.test.mjs"));
+  const forbidden = [
+    ["create", "Client("], ["new ", "Resend("], ["new ", "Stripe("],
+    ["supabase", ".co"], ["api.", "stripe.com"], ["api.", "resend.com"],
+  ].map(parts => parts.join(""));
+  for (const needle of forbidden) {
+    assert.ok(!suite.includes(needle), `the suite performs: ${needle}`);
+  }
+  const spawns = [...suite.matchAll(/spawn\(process\.execPath[\s\S]*?\}\)/g)];
+  assert.equal(spawns.length, 1, "a server is spawned outside the guarded helper");
+  assert.ok(spawns[0][0].includes("serverEnv("));
+});

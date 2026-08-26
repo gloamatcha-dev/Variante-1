@@ -355,7 +355,18 @@ test("scope: migration 022 itself still seeds nothing and touches no B2B", () =>
   // handle a lifecycle event, just not to handle one.
   const webhook = withoutComments(read("app/api/stripe/webhook/route.ts"));
   assert.ok(webhook.includes('"invoice.paid"'), "the foundation is meant to be used");
-  for (const later of ["customer.subscription.updated", "customer.subscription.deleted", "invoice.payment_failed"]) {
+  // Phase 3C added customer.subscription.updated and .deleted - the
+  // cancellation lifecycle this test was reserving them for. What each
+  // is now allowed to do is narrow, and that is asserted where it
+  // belongs, in tests/subscription-cancellation.test.mjs: updated may
+  // only reconcile period and cancel_at facts, deleted is the sole
+  // writer of status = cancelled. Neither creates an order.
+  for (const handled of ["customer.subscription.updated", "customer.subscription.deleted"]) {
+    assert.ok(webhook.includes(`"${handled}"`), `${handled} is no longer handled`);
+  }
+  // Billing failure is still Phase 3E and must NOT have appeared.
+  for (const later of ["invoice.payment_failed", "invoice.payment_action_required",
+                       "customer.subscription.paused", "customer.subscription.resumed"]) {
     assert.ok(!webhook.includes(`"${later}"`), `${later} handling belongs to the later lifecycle task`);
   }
 
@@ -589,9 +600,19 @@ test("hardening: 023 owns its number and the live migrations are not edited", ()
   // them may touch what 022 and 023 already put live.
   for (const name of files.filter(n => n > "023_harden_stripe_customers_grants.sql")) {
     const later = withoutComments(readFileSync(path.join(MIGRATIONS, name), "utf-8"));
-    for (const owned of ["stripe_customers", "stripe_webhook_events", "stripe_invoice_id", "stripe_subscription_id"]) {
+    for (const owned of ["stripe_customers", "stripe_webhook_events", "stripe_invoice_id"]) {
       assert.ok(!new RegExp(owned).test(later), `${name} touches ${owned}`);
     }
+    // stripe_subscription_id is READ by migration 034, which resolves a
+    // subscription by it in order to reconcile a cancellation. Reading
+    // the binding 022 established is the opposite of reaching into it;
+    // what is still forbidden is redefining it or writing it.
+    assert.ok(!/create unique index[^;]*stripe_subscription_id/i.test(later),
+      `${name} redefines the stripe subscription binding`);
+    const setClauses = [...later.matchAll(/update public\.subscriptions\s+set([\s\S]*?)where/g)]
+      .map(m => m[1]).join(" ");
+    assert.ok(!setClauses.includes("stripe_subscription_id"),
+      `${name} writes stripe_subscription_id`);
     // A later migration MAY harden its own table - 024 does exactly that
     // for b2c_subscription_plans, for the same reason 023 existed. What
     // it may not do is reach into a table 023 already put live. The three

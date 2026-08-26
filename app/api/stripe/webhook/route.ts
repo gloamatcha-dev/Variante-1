@@ -21,6 +21,10 @@ import { sendOrderConfirmationEmailIfNeeded } from "../../../../lib/orderConfirm
 import { sendInternalOrderNotificationIfNeeded } from "../../../../lib/internalOrderNotificationEmail";
 import { fulfillPaidSubscriptionInvoice, subscriptionInvoiceDeps } from "../../../../lib/subscriptionInvoiceFulfillment";
 import { idOf, resolveGloaSubscriptionId, stripeSubscriptionIdMatches } from "../../../../lib/subscriptionInvoiceRules";
+import {
+  markSubscriptionCancelledFromStripe,
+  syncSubscriptionFromStripe,
+} from "../../../../lib/subscriptionCancellation";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 
 type ErrorResponse = {
@@ -95,6 +99,15 @@ export async function POST(request: Request): Promise<Response> {
       await handleInvoicePaid(stripe, event);
     } else if (isRefundEventType(event.type)) {
       await handleRefundEvent(stripe, event);
+    } else if (event.type === "customer.subscription.updated") {
+      // Phase 3C. Reconciles scheduling facts only - the two period
+      // timestamps and cancel_at. It is what makes a cancellation that
+      // reached Stripe but failed to persist locally self-heal, because
+      // Stripe emits this event for that very change.
+      await handleSubscriptionUpdated(event);
+    } else if (event.type === "customer.subscription.deleted") {
+      // Phase 3C. The ONLY path that writes status = 'cancelled'.
+      await handleSubscriptionDeleted(event);
     }
     // Other event types are acknowledged below with no action taken.
     // invoice.payment_failed in particular: a failed payment creates no
@@ -124,6 +137,62 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   return Response.json({ received: true }, { status: 200 });
+}
+
+/**
+ * Reconciles scheduling facts from customer.subscription.updated
+ * (Phase 3C).
+ *
+ * DELIBERATELY NARROW. Four facts reach the database: current_period_start,
+ * current_period_end, cancel_at, and the clearing of a stale local
+ * cancellation request when Stripe reports no cancellation at all.
+ * migration 034's RPC refuses to write anything else - never status,
+ * never money, never a snapshot, never the plan - so an arbitrary Stripe
+ * update cannot rewrite GLOA business state.
+ *
+ * status in particular is NOT synchronised here. Stripe's status
+ * vocabulary and GLOA's are different concepts, and the billing-failure
+ * states ('past_due', 'unpaid') are Phase 3E's to design deliberately
+ * rather than something this handler should start writing as a side
+ * effect.
+ *
+ * A subscription this system did not create answers 'not_found' and is
+ * ignored, which is the normal case for any Stripe account holding other
+ * subscriptions.
+ */
+async function handleSubscriptionUpdated(event: Stripe.Event): Promise<void> {
+  const subscription = event.data.object as Stripe.Subscription;
+  if (!subscription?.id) {
+    console.error(`Stripe webhook: subscription updated event ${event.id} has no subscription id.`);
+    return;
+  }
+
+  const result = await syncSubscriptionFromStripe(subscription);
+  console.error(`Stripe webhook: subscription ${subscription.id} updated -> ${result}`);
+}
+
+/**
+ * Records an actual termination from customer.subscription.deleted
+ * (Phase 3C).
+ *
+ * THE ONLY PLACE status BECOMES 'cancelled'. Scheduling a cancellation
+ * never does it, and neither does the customer's request: until Stripe
+ * says the subscription has ended, the customer is still paying for and
+ * receiving a service and the record must say so.
+ *
+ * It destroys nothing. The local subscription row survives with its
+ * snapshots, and every durable order from every past cycle is untouched -
+ * those deliveries happened and were paid for.
+ */
+async function handleSubscriptionDeleted(event: Stripe.Event): Promise<void> {
+  const subscription = event.data.object as Stripe.Subscription;
+  if (!subscription?.id) {
+    console.error(`Stripe webhook: subscription deleted event ${event.id} has no subscription id.`);
+    return;
+  }
+
+  const result = await markSubscriptionCancelledFromStripe(subscription);
+  console.error(`Stripe webhook: subscription ${subscription.id} deleted -> ${result}`);
 }
 
 /**

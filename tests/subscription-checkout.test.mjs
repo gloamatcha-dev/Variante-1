@@ -1018,7 +1018,10 @@ test("boundary: the checkout flow itself adds no webhook handling and no email",
   // the webhook handles it now. What the CHECKOUT flow must still not do
   // is any of that work itself, and the lifecycle events remain unbuilt.
   const webhook = withoutComments(read("app/api/stripe/webhook/route.ts"));
-  for (const event of ["invoice.payment_failed", "customer.subscription.updated", "customer.subscription.deleted"]) {
+  // Phase 3C handles customer.subscription.updated and .deleted for the
+  // cancellation lifecycle. What this test protects is unchanged: the
+  // CHECKOUT flow itself adds no webhook handling and no email.
+  for (const event of ["invoice.payment_failed"]) {
     assert.ok(!webhook.includes(`"${event}"`), `the webhook now handles ${event}`);
   }
   // Comment-stripped for the same reason: naming the event that will
@@ -1143,9 +1146,44 @@ test("migrations: 026 was not created and 022-024 are untouched", () => {
   // 026 exists now (the internal order notification's delivery state) and
   // is deliberately unrelated to subscription checkout: it must not touch
   // any table this task owns.
-  const later = files.filter(n => Number(n.slice(0, 3)) > 25).map(n => read(`supabase/migrations/${n}`)).join("");
-  for (const owned of ["b2c_subscription_plans", "checkout_attempts", "subscriptions"]) {
+  // Comment-stripped: migration 034's OWNER verification block
+  // deliberately NAMES the objects it asserts are unchanged
+  // (subscriptions_status_check, create_pending_subscription, ...), and a
+  // scan that read those would report the verification as the violation.
+  const later = files
+    .filter(n => Number(n.slice(0, 3)) > 25)
+    .map(n => withoutComments(read(`supabase/migrations/${n}`)))
+    .join("");
+  for (const owned of ["b2c_subscription_plans", "checkout_attempts"]) {
     assert.ok(!new RegExp(`alter table public\\.${owned}`).test(later), `a later migration alters ${owned}`);
+  }
+  // public.subscriptions IS altered by migration 034 (Phase 3C), which
+  // adds the two cancellation columns. That is a different concern from
+  // checkout and is allowed. What must stay true is that no later
+  // migration touches what the CHECKOUT foundation owns - the money
+  // columns, the frozen snapshots, the plan binding, the status
+  // vocabulary or the pending-subscription RPC.
+  // Structural ownership only. The money COLUMN NAMES are deliberately
+  // not on this list: migration 033 legitimately references
+  // total_gross_cents in a CHECK on its own orders column, and a name
+  // appearing anywhere is not the same as the checkout foundation being
+  // touched.
+  for (const owned of [
+    "plan_snapshot", "tax_snapshot", "subscriptions_status_check",
+    "create_pending_subscription", "claim_pending_subscription_for_attempt",
+  ]) {
+    assert.ok(!later.includes(owned), `a later migration touches ${owned}`);
+  }
+  // And whatever a later migration adds to public.subscriptions, it may
+  // not write one of the frozen checkout facts.
+  const subscriptionWrites = [...later.matchAll(
+    /update public\.subscriptions\s+set([\s\S]*?)where/g
+  )].map(m => m[1]).join(" ");
+  for (const frozen of [
+    "subtotal_gross_cents", "total_gross_cents", "shipping_gross_cents", "tax_total_cents",
+    "plan_snapshot", "tax_snapshot", "customer_snapshot", "shipping_address_snapshot", "plan_id",
+  ]) {
+    assert.ok(!subscriptionWrites.includes(frozen), `a later migration writes ${frozen}`);
   }
 
   const m024 = read("supabase/migrations/024_seed_b2c_subscription_plans.sql");
