@@ -93,9 +93,25 @@ test("audit: nothing in the app creates a subscription or a supply agreement", (
 test("audit: Stripe is still one-time payment only", () => {
   assert.match(sessionRoute, /mode: "payment"/);
   assert.ok(!/mode: "subscription"/.test(sessionRoute), "a subscription mode appeared");
-  for (const rel of ["lib/stripe.ts", "lib/stripeFulfillment.ts", "app/api/stripe/webhook/route.ts"]) {
+  for (const rel of ["lib/stripe.ts", "lib/stripeFulfillment.ts"]) {
     const src = read(rel);
     assert.ok(!/\.subscriptions\.|\.prices\.create|recurring:/.test(src), `${rel} uses recurring Stripe`);
+  }
+  // The webhook was held to the same blanket rule until Phase 3C.1, when
+  // handleSubscriptionUpdated started re-reading the subscription from
+  // Stripe rather than trusting the event snapshot - a delayed event
+  // would otherwise regress the period timestamps and cancel_at.
+  //
+  // What this ever protected is that no recurring BILLING is set up here,
+  // and that is asserted directly now instead of by proxy: a read is
+  // allowed, every write and every price is not. That is the stricter
+  // check, because the old regex would have permitted .prices.create in
+  // any file it did not list.
+  const webhookSrc = read("app/api/stripe/webhook/route.ts");
+  const subscriptionCalls = [...webhookSrc.matchAll(/\.subscriptions\.(\w+)\(/g)].map(m => m[1]);
+  assert.deepEqual(subscriptionCalls, ["retrieve"], "the webhook calls a Stripe subscription write");
+  for (const forbidden of [".prices.", ".products.", ".plans.", "recurring:", "price_data"]) {
+    assert.ok(!webhookSrc.includes(forbidden), `the webhook uses ${forbidden}`);
   }
 });
 

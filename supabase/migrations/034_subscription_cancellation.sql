@@ -94,8 +94,13 @@
 -- asked to end this".
 --
 -- cancellation_requested_at is WHEN THE CUSTOMER ASKED. It is the input
--- to the cutoff comparison and it is a historical fact: once written it
+-- to the cutoff comparison and it is a historical fact: once NON NULL it
 -- is never moved, not by a repeat request and not by a reconciliation.
+-- It may be FILLED IN exactly once while still NULL, and only by an
+-- authenticated customer request matching a cancel_at already on the row
+-- - the reconciliation race described at CASE C below. NULL never means
+-- "queued"; it means no customer request was ever recorded, which is the
+-- permanent and correct answer for a Stripe Dashboard cancellation.
 --
 -- cancel_at is WHEN THE SUBSCRIPTION ACTUALLY ENDS, as scheduled at
 -- Stripe. It mirrors Stripe's own cancel_at so the two can be compared,
@@ -171,8 +176,16 @@ alter table public.subscriptions
 --
 -- RESULT VOCABULARY (the route maps these to HTTP codes):
 --   'scheduled'          recorded now, for the first time
---   'already_scheduled'  the same effective date already stands. A true
---                        no-op; cancellation_requested_at is NOT moved
+--   'already_scheduled'  the same effective date already stands. Two
+--                        sub-cases, both reported under this one result:
+--                        a genuine repeat is a true no-op and moves
+--                        NOTHING, while a request whose cancel_at was
+--                        already reconciled in from Stripe fills the
+--                        still-NULL cancellation_requested_at and nothing
+--                        else. The returned cancellation_requested_at is
+--                        always the one now durably stored, and the
+--                        second case additionally reports
+--                        'request_recorded' = true
 --   'conflict'           a DIFFERENT effective date already stands.
 --                        Never silently overwritten
 --   'not_found'          no such subscription, or not this user's
@@ -281,18 +294,46 @@ begin
     );
   end if;
 
-  -- ── ALREADY SCHEDULED ───────────────────────────────────────
-  -- A repeat of the same decision is a true no-op and performs ZERO
-  -- writes. cancellation_requested_at is deliberately NOT moved: the
-  -- customer asked when they asked, and that timestamp is the input to
-  -- the cutoff comparison. Moving it would rewrite the reason the
-  -- effective date is what it is.
+  -- ── A CANCELLATION ALREADY STANDS ─────────────────────────────
   --
-  -- A DIFFERENT date is refused outright rather than merged. Silently
-  -- moving a cancellation the customer has already been told about is
-  -- exactly the kind of change that must never happen quietly.
+  -- Three genuinely different situations hide behind "cancel_at is
+  -- already set", and collapsing them is how the customer's request gets
+  -- lost. They are separated here deliberately.
+  --
+  -- The one that forced this structure is the RECONCILIATION RACE.
+  -- POST /api/subscriptions/cancel writes to Stripe FIRST and only then
+  -- calls this function - a cancellation is not real until Stripe has
+  -- accepted it. But Stripe emits customer.subscription.updated for that
+  -- very change, and that webhook can reach this system BEFORE the HTTP
+  -- request gets here. sync_subscription_from_stripe then writes
+  -- cancel_at with cancellation_requested_at left NULL, because Stripe
+  -- has no idea when a customer asked. If this function then treated the
+  -- matching cancel_at as a finished repeat and wrote nothing, the fact
+  -- that an authenticated customer requested the cancellation would be
+  -- lost permanently - the row would be indistinguishable from a
+  -- cancellation the owner made in the Stripe Dashboard.
   if v_sub.cancel_at is not null then
-    if v_sub.cancel_at = p_cancel_at then
+
+    -- ── CASE D: a DIFFERENT date already stands ───────────────
+    -- Refused outright rather than merged. Silently moving a
+    -- cancellation the customer has already been told about is exactly
+    -- the kind of change that must never happen quietly. ZERO writes.
+    if v_sub.cancel_at <> p_cancel_at then
+      return jsonb_build_object(
+        'result', 'conflict',
+        'subscription_id', v_sub.id,
+        'cancellation_requested_at', v_sub.cancellation_requested_at,
+        'cancel_at', v_sub.cancel_at
+      );
+    end if;
+
+    -- ── CASE B: a genuine repeat ──────────────────────────────
+    -- The same date AND the request is already on record. A true no-op
+    -- performing ZERO writes. cancellation_requested_at is deliberately
+    -- NOT moved: the customer asked when they asked, and that timestamp
+    -- is the input to the cutoff comparison. Moving it would rewrite the
+    -- reason the effective date is what it is.
+    if v_sub.cancellation_requested_at is not null then
       return jsonb_build_object(
         'result', 'already_scheduled',
         'subscription_id', v_sub.id,
@@ -301,15 +342,61 @@ begin
       );
     end if;
 
+    -- ── CASE C: the reconciliation race ───────────────────────
+    -- The same effective date already stands, but the customer request
+    -- fact has never been recorded. This is the only place a NULL
+    -- cancellation_requested_at is ever filled in, it can only ever
+    -- happen ONCE per row (CASE B catches every later attempt), and it
+    -- writes exactly ONE column.
+    --
+    -- cancel_at is deliberately NOT rewritten even though the two values
+    -- are equal: the row already holds the correct schedule, and an
+    -- assignment that cannot change a value can only obscure which path
+    -- wrote it.
+    --
+    -- INVARIANT 2 (cancel_at > cancellation_requested_at) has to hold
+    -- for this write, and it cannot be assumed: the existing cancel_at
+    -- may have been scheduled from a period that has since elapsed. A
+    -- date that does not lie ahead of the request would raise a
+    -- constraint violation out of this function and turn a customer's
+    -- cancellation into a 500, so it is refused as 'period_moved' - the
+    -- accurate answer, and the one that tells the caller to recompute.
+    if p_cancel_at <= p_requested_at then
+      return jsonb_build_object(
+        'result', 'period_moved',
+        'subscription_id', v_sub.id,
+        'current_period_end', v_sub.current_period_end
+      );
+    end if;
+
+    update public.subscriptions
+       set cancellation_requested_at = p_requested_at
+     where id = v_sub.id;
+
     return jsonb_build_object(
-      'result', 'conflict',
+      'result', 'already_scheduled',
       'subscription_id', v_sub.id,
-      'cancellation_requested_at', v_sub.cancellation_requested_at,
-      'cancel_at', v_sub.cancel_at
+      'cancellation_requested_at', p_requested_at,
+      'cancel_at', v_sub.cancel_at,
+      'request_recorded', true
     );
   end if;
 
-  -- ── THE WRITE ───────────────────────────────────────────────
+  -- ── CASE A: THE WRITE ─────────────────────────────────────────
+  -- Nothing is scheduled yet, so both columns are written together.
+  --
+  -- The same INVARIANT 2 guard as CASE C, for the same reason: a
+  -- current_period_end that has already elapsed produces an effective
+  -- date behind the request, and writing it would raise a constraint
+  -- violation rather than record a cancellation.
+  if p_cancel_at <= p_requested_at then
+    return jsonb_build_object(
+      'result', 'period_moved',
+      'subscription_id', v_sub.id,
+      'current_period_end', v_sub.current_period_end
+    );
+  end if;
+
   -- TWO columns. Not status - a scheduled cancellation is still active.
   -- Not cancelled_at - that belongs to actual termination. Not
   -- cancel_at_period_end - we are not using that mechanism. Not the

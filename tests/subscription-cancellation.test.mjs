@@ -74,6 +74,37 @@ const rulesCode = withoutComments(rules);
 const webhookCode = withoutComments(webhook);
 const sql034 = withoutComments(migration034);
 
+/** Every `update public.subscriptions ... set <cols> where id = v_sub.id`. */
+const updateSetClauses = sql =>
+  [...sql.matchAll(/update public\.subscriptions\s+set([\s\S]*?)where id = v_sub\.id/g)].map(m => m[1]);
+
+/** The column names assigned in one such SET clause, sorted. */
+const columnsWritten = clause =>
+  [...clause.matchAll(/^\s*(?:set\s+)?(\w+)\s*=/gm)].map(m => m[1]).sort();
+
+const fnBody = (name, next) => sql034.slice(
+  sql034.indexOf(`create or replace function public.${name}`),
+  next ? sql034.indexOf(`create or replace function public.${next}`) : undefined
+);
+
+const scheduleFn = fnBody("schedule_subscription_cancellation", "sync_subscription_from_stripe");
+const syncFn = fnBody("sync_subscription_from_stripe", "mark_subscription_cancelled");
+const scheduleWrites = updateSetClauses(scheduleFn);
+
+/** One `if <head> ... end if;` branch, code only. */
+const branch = (src, head) => {
+  const at = src.indexOf(head);
+  assert.ok(at > -1, `branch not found: ${head}`);
+  const end = src.indexOf("end if;", at);
+  assert.ok(end > -1, `unterminated branch: ${head}`);
+  return src.slice(at, end);
+};
+
+const updatedHandler = (() => {
+  const at = webhookCode.indexOf("async function handleSubscriptionUpdated");
+  return webhookCode.slice(at, webhookCode.indexOf("async function handleSubscriptionDeleted", at));
+})();
+
 const SUB_ID = "11111111-2222-3333-4444-555555555555";
 const PERIOD_END = "2026-09-24T10:00:00.000Z";
 const CUTOFF = "2026-09-10T10:00:00.000Z"; // PERIOD_END - 14 days
@@ -445,10 +476,170 @@ test("STRIPE SUCCEEDS, DB FAILS: reconcile-before-write stops a second schedule"
 
 test("STRIPE SUCCEEDS, DB FAILS: the webhook self-heals the local row", () => {
   assert.ok(webhookCode.includes('event.type === "customer.subscription.updated"'));
-  assert.ok(webhookCode.includes("handleSubscriptionUpdated(event)"));
+  assert.ok(webhookCode.includes("handleSubscriptionUpdated(stripe, event)"));
   assert.ok(serviceCode.includes('admin.rpc("sync_subscription_from_stripe"'));
   // The sync writes cancel_at, which is the fact that was lost.
   assert.ok(sql034.includes("cancel_at                = p_cancel_at"));
+});
+
+/* ══════════════════════════════════════════════════════════════
+   PHASE 3C.1 - THE RECONCILIATION RACE
+
+   The ordering that forced this: the route writes to Stripe first,
+   Stripe emits customer.subscription.updated for that very change, and
+   that webhook can reach this system BEFORE the HTTP request persists
+   the customer's request. sync_subscription_from_stripe then writes
+   cancel_at while cancellation_requested_at stays NULL - Stripe has no
+   idea when a customer asked. Before the fix the route's RPC saw a
+   matching cancel_at, answered already_scheduled with zero writes, and
+   the fact that an authenticated customer requested the cancellation was
+   lost permanently.
+   ══════════════════════════════════════════════════════════════ */
+
+test("RACE 1 (CASE A): nothing scheduled yet writes BOTH columns", () => {
+  assert.deepEqual(columnsWritten(scheduleWrites[1]), ["cancel_at", "cancellation_requested_at"]);
+  // Reached only when no cancellation stands: the whole cancel_at branch
+  // returns before it.
+  const guardAt = scheduleFn.indexOf("if v_sub.cancel_at is not null then");
+  const writeAt = scheduleFn.indexOf("set cancellation_requested_at = p_requested_at,");
+  assert.ok(guardAt > -1 && guardAt < writeAt, "CASE A runs before the already-scheduled branch");
+});
+
+test("RACE 2 (CASE B): a genuine repeat writes NOTHING and moves nothing", () => {
+  const caseB = branch(scheduleFn, "if v_sub.cancellation_requested_at is not null then");
+  assert.ok(caseB.includes("'already_scheduled'"), "a repeat no longer answers already_scheduled");
+  assert.ok(!caseB.includes("update"), "the repeat branch writes");
+  // The ORIGINAL timestamp is returned, never the incoming one.
+  assert.ok(caseB.includes("'cancellation_requested_at', v_sub.cancellation_requested_at"));
+  assert.ok(!caseB.includes("p_requested_at"), "the repeat branch reports the new request time");
+});
+
+test("RACE 3 (CASE C): a reconciled cancel_at fills ONLY the request timestamp", () => {
+  assert.deepEqual(columnsWritten(scheduleWrites[0]), ["cancellation_requested_at"]);
+  const clause = scheduleWrites[0];
+  // Everything the fix must not touch.
+  for (const forbidden of [
+    "cancel_at ", "cancel_at=", "status", "cancelled_at", "cancel_at_period_end",
+    "current_period_start", "current_period_end", "_cents", "snapshot",
+    "stripe_subscription_id", "next_delivery_at", "plan_id",
+  ]) {
+    assert.ok(!clause.includes(forbidden), `CASE C writes ${forbidden}`);
+  }
+  // Reported honestly: the timestamp now stored, plus a marker so the
+  // race is legible in a log rather than silent.
+  const ret = scheduleFn.slice(scheduleFn.indexOf("'request_recorded', true") - 400);
+  assert.ok(ret.includes("'cancellation_requested_at', p_requested_at"));
+  assert.ok(ret.includes("'cancel_at', v_sub.cancel_at"), "CASE C reports a cancel_at it did not read");
+});
+
+test("RACE 4 (CASE D): a DIFFERENT cancel_at still conflicts with zero writes", () => {
+  const caseD = branch(scheduleFn, "if v_sub.cancel_at <> p_cancel_at then");
+  assert.ok(caseD.includes("'conflict'"));
+  assert.ok(!caseD.includes("update"), "the conflict branch writes");
+  // It is checked FIRST, so no later branch can reach a mismatched date.
+  const dAt = scheduleFn.indexOf("if v_sub.cancel_at <> p_cancel_at then");
+  assert.ok(dAt < scheduleFn.indexOf("if v_sub.cancellation_requested_at is not null then"));
+  assert.ok(dAt < scheduleFn.indexOf("set cancellation_requested_at = p_requested_at"));
+});
+
+test("RACE 5: a Stripe Dashboard cancellation keeps a NULL request forever", () => {
+  // The pairing stays ONE-DIRECTIONAL. A symmetric constraint would make
+  // an owner-initiated cancel_at unrepresentable, and the sync would have
+  // had to invent a request that never happened.
+  assert.ok(sql034.includes("check (cancellation_requested_at is null or cancel_at is not null)"));
+  assert.ok(!sql034.includes("(cancellation_requested_at is null) = (cancel_at is null)"));
+  assert.ok(!sql034.includes("cancel_at is null or cancellation_requested_at is not null"));
+  // Nothing fills the column outside an authenticated customer request:
+  // the sync only ever CLEARS it, and only when Stripe reports no
+  // cancellation at all.
+  assert.ok(!syncFn.includes("p_requested_at"), "the sync invents a request timestamp");
+  assert.ok(syncFn.includes("when p_cancel_at is null then null"));
+  assert.ok(syncFn.includes("else v_sub.cancellation_requested_at"), "the sync overwrites the request");
+});
+
+test("RACE 6: a request that lost the race is still recorded", () => {
+  // CASE C exists at all, and is reachable only after CASE D and CASE B
+  // have declined - so it fires exactly when the webhook won.
+  const caseCWriteAt = scheduleFn.indexOf("set cancellation_requested_at = p_requested_at\n");
+  assert.ok(caseCWriteAt > -1, "CASE C performs no write");
+  assert.ok(scheduleFn.indexOf("if v_sub.cancellation_requested_at is not null then") < caseCWriteAt);
+  assert.ok(scheduleFn.indexOf("if v_sub.cancel_at <> p_cancel_at then") < caseCWriteAt);
+  // Still inside the cancel_at branch, so it can never run on a row that
+  // has no schedule at all.
+  assert.ok(scheduleFn.indexOf("if v_sub.cancel_at is not null then") < caseCWriteAt);
+});
+
+test("RACE 7: once NON NULL the request timestamp is never moved again", () => {
+  // Exactly two assignments in the whole migration, and each is guarded
+  // by a condition that can only hold while the column is still NULL:
+  // CASE A (no cancel_at at all) and CASE C (requested_at IS NULL).
+  const assignments = [...sql034.matchAll(/cancellation_requested_at\s*=\s*p_requested_at/g)];
+  assert.equal(assignments.length, 2, "the request timestamp is assigned somewhere new");
+  assert.equal(scheduleWrites.filter(c => c.includes("p_requested_at")).length, 2);
+  // The sync never assigns it a value at all.
+  assert.ok(!/cancellation_requested_at\s*=\s*p_/.test(syncFn), "the sync writes a request timestamp");
+  // And termination leaves it alone entirely.
+  const markFn = fnBody("mark_subscription_cancelled", null);
+  assert.ok(!markFn.includes("cancellation_requested_at"), "termination rewrites the request");
+});
+
+test("RACE 8: customer.subscription.updated syncs from CURRENT Stripe state", () => {
+  assert.ok(updatedHandler.includes("stripe.subscriptions.retrieve(subscriptionId)"),
+    "the handler does not re-read the subscription");
+  const retrieveAt = updatedHandler.indexOf("stripe.subscriptions.retrieve(");
+  const syncAt = updatedHandler.indexOf("syncSubscriptionFromStripe(");
+  assert.ok(retrieveAt > -1 && retrieveAt < syncAt, "the database sync runs before the Stripe read");
+  // ONLY the id comes off the event payload.
+  assert.equal([...updatedHandler.matchAll(/event\.data\.object/g)].length, 1,
+    "the handler reads the event snapshot more than once");
+  assert.ok(updatedHandler.includes("(event.data.object as Stripe.Subscription)?.id"));
+  assert.ok(!updatedHandler.includes("syncSubscriptionFromStripe(event"),
+    "the event snapshot is synced directly");
+});
+
+test("RACE 9: a delayed webhook event cannot regress period or cancel_at", () => {
+  // The object handed to the sync is the RETRIEVED one, not the payload.
+  assert.ok(updatedHandler.includes("const subscription = await stripe.subscriptions.retrieve("));
+  assert.ok(updatedHandler.includes("syncSubscriptionFromStripe(subscription)"));
+  // No fallback to the snapshot when the retrieve fails: it throws, the
+  // route answers 500, and Stripe redelivers against fresh state.
+  assert.ok(!updatedHandler.includes("catch"), "the handler falls back to the stale payload");
+  assert.ok(!updatedHandler.includes("??"), "the handler falls back to the stale payload");
+  // No event-ordering column was invented to achieve this.
+  for (const invented of [
+    "stripe_event_created", "last_stripe_event", "event_sequence", "last_synced_at", "event_created_at",
+  ]) {
+    assert.ok(!sql034.includes(invented), `034 invented an ordering column: ${invented}`);
+  }
+  // Termination deliberately does NOT re-read: the deleted event's object
+  // is the final state and cannot go stale.
+  const deleted = webhookCode.slice(
+    webhookCode.indexOf("async function handleSubscriptionDeleted"),
+    webhookCode.indexOf("async function handleRefundEvent")
+  );
+  assert.ok(!deleted.includes("stripe.subscriptions.retrieve("), "the deleted handler re-reads");
+  assert.ok(deleted.includes("markSubscriptionCancelledFromStripe(subscription)"));
+});
+
+test("RACE 10: no product, quantity, price, address, tax, money or order write", () => {
+  const allowed = new Set([
+    "cancellation_requested_at", "cancel_at", "current_period_start", "current_period_end",
+    "status", "cancelled_at",
+  ]);
+  const clauses = updateSetClauses(sql034);
+  assert.equal(clauses.length, 4);
+  for (const clause of clauses) {
+    for (const column of columnsWritten(clause)) {
+      assert.ok(allowed.has(column), `034 writes ${column}`);
+    }
+  }
+  for (const forbidden of [
+    "quantity", "unit_amount", "price_id", "plan_id", "product", "shipping_address",
+    "billing_address", "tax_", "_cents", "snapshot", "public.orders", "public.order_items",
+    "public.checkout_attempts", "next_delivery_at", "cancel_at_period_end",
+  ]) {
+    assert.ok(!sql034.includes(forbidden), `034 touches ${forbidden}`);
+  }
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -543,19 +734,21 @@ test("034: both invariants exist, and the pairing is one-directional", () => {
 });
 
 test("034: SCHEDULING NEVER WRITES status - that is termination's job", () => {
-  const scheduleFn = sql034.slice(
-    sql034.indexOf("create or replace function public.schedule_subscription_cancellation"),
-    sql034.indexOf("create or replace function public.sync_subscription_from_stripe")
-  );
-  const setClause = scheduleFn.slice(scheduleFn.indexOf("update public.subscriptions"));
-  const written = [...setClause.matchAll(/^\s*(?:set\s+)?(\w+)\s*=/gm)].map(m => m[1]);
-  assert.deepEqual(written.sort(), ["cancel_at", "cancellation_requested_at"]);
-  for (const forbidden of [
-    "status", "cancelled_at", "cancel_at_period_end", "current_period", "_cents",
-    "snapshot", "stripe_subscription_id", "next_delivery_at", "plan_id",
-  ]) {
-    assert.ok(!setClause.slice(0, setClause.indexOf("where")).includes(forbidden),
-      `scheduling writes ${forbidden}`);
+  // TWO writes since Phase 3C.1: CASE A (nothing scheduled yet, both
+  // columns) and CASE C (the reconciliation race, one column). Both are
+  // checked; slicing only the first would have let the other write
+  // anything at all.
+  const written = scheduleWrites.map(columnsWritten);
+  assert.equal(written.length, 2, "unexpected number of scheduling writes");
+  assert.deepEqual(written[0], ["cancellation_requested_at"], "CASE C writes more than the request");
+  assert.deepEqual(written[1], ["cancel_at", "cancellation_requested_at"], "CASE A writes the wrong columns");
+  for (const clause of scheduleWrites) {
+    for (const forbidden of [
+      "status", "cancelled_at", "cancel_at_period_end", "current_period", "_cents",
+      "snapshot", "stripe_subscription_id", "next_delivery_at", "plan_id",
+    ]) {
+      assert.ok(!clause.includes(forbidden), `scheduling writes ${forbidden}`);
+    }
   }
 });
 
@@ -563,8 +756,8 @@ test("034: only mark_subscription_cancelled writes status = cancelled", () => {
   // Count WRITES only. `if v_sub.status = 'cancelled'` is a read guard and
   // appears in two functions; the SET clause appears in exactly one.
   // Anchored on the UPDATE, not on the function's own `SET search_path`.
-  const setClauses = [...sql034.matchAll(/update public\.subscriptions\s+set([\s\S]*?)where id = v_sub\.id/g)].map(m => m[1]);
-  assert.equal(setClauses.length, 3, "unexpected number of UPDATE statements");
+  const setClauses = updateSetClauses(sql034);
+  assert.equal(setClauses.length, 4, "unexpected number of UPDATE statements");
   const writers = setClauses.filter(c => /status\s+=\s+'cancelled'/.test(c));
   assert.equal(writers.length, 1, "more than one path writes the cancelled status");
   const markFn = sql034.slice(sql034.indexOf("create or replace function public.mark_subscription_cancelled"));
@@ -837,8 +1030,10 @@ test("regression: historical subscriptions are unaffected", () => {
   // applying 034 cannot touch a single existing subscription.
   // mark_subscription_cancelled DOES write status - that is the
   // termination path, and it runs only for one Stripe event.
+  // FOUR since Phase 3C.1: scheduling gained the CASE C single-column
+  // write that records a customer request the webhook raced past.
   const updates = [...sql034.matchAll(/update public\.subscriptions[\s\S]*?;/g)].map(m => m[0]);
-  assert.equal(updates.length, 3, "unexpected number of UPDATE statements");
+  assert.equal(updates.length, 4, "unexpected number of UPDATE statements");
   for (const stmt of updates) {
     assert.ok(stmt.includes("where id = v_sub.id"), "an unscoped UPDATE exists");
   }

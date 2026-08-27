@@ -104,7 +104,7 @@ export async function POST(request: Request): Promise<Response> {
       // timestamps and cancel_at. It is what makes a cancellation that
       // reached Stripe but failed to persist locally self-heal, because
       // Stripe emits this event for that very change.
-      await handleSubscriptionUpdated(event);
+      await handleSubscriptionUpdated(stripe, event);
     } else if (event.type === "customer.subscription.deleted") {
       // Phase 3C. The ONLY path that writes status = 'cancelled'.
       await handleSubscriptionDeleted(event);
@@ -159,16 +159,36 @@ export async function POST(request: Request): Promise<Response> {
  * A subscription this system did not create answers 'not_found' and is
  * ignored, which is the normal case for any Stripe account holding other
  * subscriptions.
+ *
+ * NEVER THE EVENT SNAPSHOT. Only the subscription id is taken from the
+ * payload; every fact is re-read from Stripe, exactly as the checkout and
+ * refund handlers already do.
+ *
+ * Webhook delivery is asynchronous and unordered. event.data.object is a
+ * picture of the subscription at the moment the event was GENERATED, and
+ * a delayed or redelivered event can therefore carry a state that is
+ * several changes old. Syncing from it would regress
+ * current_period_start, current_period_end and cancel_at - a renewal
+ * undone, or a cancellation the owner has since removed put back. Because
+ * every delivery re-reads instead, an old event and a new one write the
+ * same current values, so an out-of-order arrival is a no-op rather than
+ * a regression. No event-ordering column is needed to achieve that.
+ *
+ * A failed retrieve throws, which answers 500 and lets Stripe redeliver
+ * against fresh state. Falling back to the stale payload would defeat the
+ * entire purpose of the re-read.
  */
-async function handleSubscriptionUpdated(event: Stripe.Event): Promise<void> {
-  const subscription = event.data.object as Stripe.Subscription;
-  if (!subscription?.id) {
+async function handleSubscriptionUpdated(stripe: Stripe, event: Stripe.Event): Promise<void> {
+  const subscriptionId = (event.data.object as Stripe.Subscription)?.id;
+  if (!subscriptionId) {
     console.error(`Stripe webhook: subscription updated event ${event.id} has no subscription id.`);
     return;
   }
 
+  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+
   const result = await syncSubscriptionFromStripe(subscription);
-  console.error(`Stripe webhook: subscription ${subscription.id} updated -> ${result}`);
+  console.error(`Stripe webhook: subscription ${subscriptionId} updated -> ${result}`);
 }
 
 /**
@@ -183,6 +203,18 @@ async function handleSubscriptionUpdated(event: Stripe.Event): Promise<void> {
  * It destroys nothing. The local subscription row survives with its
  * snapshots, and every durable order from every past cycle is untouched -
  * those deliveries happened and were paid for.
+ *
+ * UNLIKE THE UPDATED HANDLER, this one deliberately does NOT re-read the
+ * subscription from Stripe, and the asymmetry is intentional. Termination
+ * is terminal: the deleted event's object IS the final state, there is no
+ * later state for a re-read to discover, and the two facts taken from it
+ * (the id and ended_at) cannot go stale. The RPC is idempotent and
+ * refuses to move an existing cancelled_at, so ordering does not matter
+ * either. A retrieve would only add a round trip and a failure mode.
+ *
+ * A delayed customer.subscription.updated arriving AFTER this cannot undo
+ * it: that handler now syncs from current Stripe state, and its RPC never
+ * writes status at all.
  */
 async function handleSubscriptionDeleted(event: Stripe.Event): Promise<void> {
   const subscription = event.data.object as Stripe.Subscription;

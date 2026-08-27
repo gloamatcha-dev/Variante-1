@@ -318,6 +318,13 @@ export function stripeSubscriptionFacts(subscription: Stripe.Subscription): {
  * Never throws. A subscription this system did not create answers
  * 'not_found' and is ignored, which is the normal case for any Stripe
  * account that also holds other subscriptions.
+ *
+ * THE CALLER MUST PASS A FRESHLY RETRIEVED SUBSCRIPTION, never the object
+ * embedded in a webhook event. That object is a snapshot from when the
+ * event was generated, and webhook delivery is asynchronous: syncing from
+ * a delayed one would regress the period timestamps and cancel_at to a
+ * state that is already several changes old. The webhook handler
+ * re-reads for exactly this reason.
  */
 export async function syncSubscriptionFromStripe(
   subscription: Stripe.Subscription
