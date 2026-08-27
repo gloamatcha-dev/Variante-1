@@ -1,7 +1,6 @@
 import type Stripe from "stripe";
 import { getSupabaseAdmin } from "./supabaseAdmin";
 import {
-  CANCELLABLE_STATUSES,
   DEFERRED_SWEEP_LIMIT,
   deferredCancelIdempotencyKey,
   deferredCancellationIsDue,
@@ -506,6 +505,32 @@ export type DeferredSweepSummary = {
  *      rather than inference.
  *   4. a live B2C subscription with a Stripe binding.
  *
+ * ══════════════════════════════════════════════════════════════
+ * THE BATCH IS BOUNDED, AND A DUE ROW CANNOT STARVE
+ * ══════════════════════════════════════════════════════════════
+ *
+ * The work list comes from due_deferred_subscription_cancellations, a
+ * read-only SECURITY DEFINER function in migration 034 that applies ALL
+ * of the conditions above - including the two-column comparison - BEFORE
+ * its own LIMIT.
+ *
+ * That ordering is the safety property. This sweep used to select rows
+ * with a PostgREST query and decide condition 3 in JavaScript afterwards,
+ * because PostgREST can only compare a column to a literal value and
+ * never to another column. The bound therefore landed on the wrong side
+ * of the decision: with more pending cancellations than the limit, a
+ * batch could consist entirely of rows that were not yet due while a
+ * genuinely due row was never even read.
+ *
+ * SORTING WOULD NOT HAVE FIXED IT, so it was not used as the fix. The two
+ * dates move independently - cancellation_effective_at is frozen when the
+ * customer asks, current_period_end advances only when a renewal is paid
+ * - so an earlier promise can still be pending while a later one is
+ * already due. Ordered either way, pending rows can crowd out a due one.
+ * Filtering server-side removes the possibility rather than reducing it:
+ * every row in the batch is due, so the only rows a full batch defers are
+ * other DUE rows, which the next run picks up in a deterministic order.
+ *
  * THIS IS NOT A NULL-KEYED SWEEP. The absolute rule that email retries
  * may select 'failed' and never NULL exists because a NULL email column
  * means "this feature did not exist when this happened". `cancel_at IS
@@ -535,16 +560,17 @@ export async function sweepDueDeferredCancellations(
     return summary;
   }
 
-  const { data, error } = await admin
-    .from("subscriptions")
-    .select("id, stripe_subscription_id, cancellation_effective_at, current_period_end")
-    .eq("customer_type", "private")
-    .in("status", [...CANCELLABLE_STATUSES])
-    .not("cancellation_requested_at", "is", null)
-    .not("cancellation_effective_at", "is", null)
-    .not("stripe_subscription_id", "is", null)
-    .is("cancel_at", null)
-    .limit(DEFERRED_SWEEP_LIMIT);
+  // THE WORK LIST IS SELECTED SERVER-SIDE, AND THAT IS THE WHOLE POINT.
+  // Due-ness compares two columns of the same row, which PostgREST cannot
+  // express - a filter there compares a column to a value, never to
+  // another column. Selecting rows and deciding due-ness here afterwards
+  // meant the bound was applied BEFORE the decision, so a batch could
+  // fill with rows that are not yet due while a genuinely due row sat
+  // outside it. The RPC applies the comparison before its LIMIT, so every
+  // row it returns is due and no pending row can crowd one out.
+  const { data, error } = await admin.rpc("due_deferred_subscription_cancellations", {
+    p_limit: DEFERRED_SWEEP_LIMIT,
+  });
 
   if (error) {
     // A work list this sweep cannot read is reported, never swallowed as
@@ -559,8 +585,10 @@ export async function sweepDueDeferredCancellations(
   >;
 
   for (const row of rows) {
-    // The paid-cycle proof. A late cancellation still inside its owed
-    // cycle is pending, not due, and must not be touched.
+    // The paid-cycle proof, re-checked. The RPC already guaranteed it for
+    // every row it returned, so this can no longer skip anything - it is
+    // kept because a due check that lives only in SQL is a due check this
+    // loop cannot be read to enforce, and the cost is one comparison.
     if (!deferredCancellationIsDue({
       periodEnd: row.current_period_end,
       promisedAt: row.cancellation_effective_at,

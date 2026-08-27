@@ -95,6 +95,15 @@ const fnBody = (name, next) => sql034.slice(
 const scheduleFn = fnBody("schedule_subscription_cancellation", "apply_deferred_subscription_cancellation");
 const applyFn = fnBody("apply_deferred_subscription_cancellation", "sync_subscription_from_stripe");
 const syncFn = fnBody("sync_subscription_from_stripe", "mark_subscription_cancelled");
+
+/**
+ * The read-only work list the safety sweep selects from, bounded at its
+ * own terminator so nothing after it (the grants) is read as its body.
+ */
+const dueListFn = (() => {
+  const at = sql034.indexOf("create or replace function public.due_deferred_subscription_cancellations");
+  return at === -1 ? "" : sql034.slice(at, sql034.indexOf("$$;", at) + 3);
+})();
 const scheduleWrites = updateSetClauses(scheduleFn);
 
 /** One `if <head> ... end if;` branch, code only. */
@@ -651,7 +660,7 @@ test("RACE 7: once NON NULL the request timestamp is never moved again", () => {
   // The sync never assigns it a value at all.
   assert.ok(!/cancellation_requested_at\s*=\s*p_/.test(syncFn), "the sync writes a request timestamp");
   // And termination leaves it alone entirely.
-  const markFn = fnBody("mark_subscription_cancelled", null);
+  const markFn = fnBody("mark_subscription_cancelled", "due_deferred_subscription_cancellations");
   assert.ok(!markFn.includes("cancellation_requested_at"), "termination rewrites the request");
 });
 
@@ -1100,18 +1109,25 @@ test("3C.3 (B/F): the sweep needs no invoice, no event and no second renewal", (
   for (const forbidden of ["invoice", "Invoice", "event", "Event", "subscriptions.list", "retrieve("]) {
     assert.ok(!sweep.includes(forbidden), `the sweep depends on ${forbidden}`);
   }
-  // Four durable conditions, all required.
-  assert.ok(sweep.includes('.not("cancellation_requested_at", "is", null)'));
-  assert.ok(sweep.includes('.not("cancellation_effective_at", "is", null)'));
-  assert.ok(sweep.includes('.not("stripe_subscription_id", "is", null)'));
-  assert.ok(sweep.includes('.is("cancel_at", null)'));
-  assert.ok(sweep.includes('.eq("customer_type", "private")'));
-  assert.ok(sweep.includes(".in(\"status\", [...CANCELLABLE_STATUSES])"));
-  // The paid-cycle proof, applied per row.
-  assert.ok(sweep.includes("deferredCancellationIsDue({"));
-  // Bounded.
-  assert.ok(sweep.includes(".limit(DEFERRED_SWEEP_LIMIT)"));
+  // The work list is the read-only RPC, and it is the ONLY selection.
+  assert.ok(sweep.includes('admin.rpc("due_deferred_subscription_cancellations"'),
+    "the sweep no longer selects its work list server-side");
+  assert.ok(!sweep.includes('.from("subscriptions")'),
+    "the sweep still builds a PostgREST query, which cannot compare two columns");
+  // Bounded, by the same constant as before.
+  assert.ok(sweep.includes("p_limit: DEFERRED_SWEEP_LIMIT"));
   assert.equal(DEFERRED_SWEEP_LIMIT, 50);
+  // The paid-cycle proof is still re-checked per row in JavaScript.
+  assert.ok(sweep.includes("deferredCancellationIsDue({"));
+  // Four durable conditions, all required, all now applied BEFORE the
+  // limit rather than after it.
+  assert.ok(dueListFn.includes("s.cancellation_requested_at is not null"));
+  assert.ok(dueListFn.includes("s.cancellation_effective_at is not null"));
+  assert.ok(dueListFn.includes("s.stripe_subscription_id is not null"));
+  assert.ok(dueListFn.includes("s.cancel_at is null"));
+  assert.ok(dueListFn.includes("s.customer_type = 'private'"));
+  assert.ok(dueListFn.includes("s.status in ('active', 'past_due', 'unpaid')"));
+  assert.deepEqual([...CANCELLABLE_STATUSES], ["active", "past_due", "unpaid"]);
 });
 
 test("3C.3: the sweep can never reach a historical or owner-made cancellation", () => {
@@ -1122,9 +1138,11 @@ test("3C.3: the sweep can never reach a historical or owner-made cancellation", 
     serviceCode.indexOf("export async function sweepDueDeferredCancellations"),
     serviceCode.indexOf("export function stripeSubscriptionFacts")
   );
-  const query = sweep.slice(sweep.indexOf('.from("subscriptions")'), sweep.indexOf(".limit("));
-  assert.ok(query.includes('.not("cancellation_requested_at", "is", null)'),
-    "the sweep can select a subscription nobody asked to cancel");
+  assert.ok(dueListFn.includes("s.cancellation_requested_at is not null"),
+    "the work list can select a subscription nobody asked to cancel");
+  // And it is a SELECT, so it cannot reach anything by writing either.
+  assert.ok(!/\b(update|insert|delete)\b/.test(dueListFn),
+    "the work list is not read-only");
   // It writes nothing itself - every write goes through the locking RPC.
   for (const forbidden of [".update(", ".insert(", ".delete(", ".upsert("]) {
     assert.ok(!sweep.includes(forbidden), `the sweep writes directly: ${forbidden}`);
@@ -1136,6 +1154,113 @@ test("3C.3: the sweep can never reach a historical or owner-made cancellation", 
   assert.ok(applyFn.includes("if v_sub.cancellation_requested_at is null"));
   assert.ok(applyFn.includes("if v_sub.cancel_at is not null then"));
   assert.ok(applyFn.includes("if p_cancel_at < v_sub.cancellation_effective_at then"));
+});
+
+test("3C.4: a due cancellation cannot starve behind rows that are not due", () => {
+  // THE DEFECT THIS PINS. The sweep applied .limit(DEFERRED_SWEEP_LIMIT)
+  // to a query that could not express due-ness, and decided due-ness in
+  // JavaScript afterwards. The bound was therefore on the wrong side of
+  // the decision: with more pending cancellations than the limit, an
+  // entire batch could be rows that are not yet due while a genuinely
+  // due row was never read - and a starved due row means a customer is
+  // billed for a cycle they cancelled.
+  assert.ok(dueListFn.length > 0, "the due work list is missing");
+
+  // The comparison is applied BEFORE the bound. Both live in one SQL
+  // statement, so their ORDER IN THE TEXT is the property. Anchored to
+  // the body so the `p_limit` PARAMETER is not read as the LIMIT clause.
+  const body = dueListFn.slice(dueListFn.indexOf("as $$"));
+  const compareAt = body.indexOf("s.current_period_end >= s.cancellation_effective_at");
+  const orderAt = body.indexOf("order by");
+  const limitAt = body.indexOf("limit ");
+  assert.ok(compareAt > -1, "the work list does not prove the owed cycle was paid");
+  assert.ok(orderAt > -1, "the work list has no ordering");
+  assert.ok(limitAt > -1, "the work list is unbounded");
+  assert.ok(compareAt < orderAt && orderAt < limitAt,
+    "the bound is applied before due-ness is decided");
+
+  // Deterministic and TOTAL, so the same state always yields the same
+  // batch and the longest-owed cancellation is attempted first.
+  assert.ok(dueListFn.includes("order by s.cancellation_effective_at asc, s.id asc"),
+    "the ordering is not total, so a full batch can repeat forever");
+
+  // Bounded, and the bound is clamped rather than trusted - no caller
+  // can ask this for the whole table.
+  assert.ok(/limit least\(greatest\(coalesce\(p_limit, 50\), 1\), 200\)/.test(dueListFn),
+    "the limit is taken from the caller unchecked");
+
+  // MINIMUM FIELDS. An id, the Stripe binding and the two dates the
+  // caller re-checks. Nothing that could turn a cron log into a leak.
+  const returns = dueListFn.slice(dueListFn.indexOf("returns table"), dueListFn.indexOf("language sql"));
+  for (const leak of ["email", "name", "address", "_cents", "snapshot", "user_id", "plan"]) {
+    assert.ok(!returns.includes(leak), `the work list returns ${leak}`);
+  }
+  assert.deepEqual(
+    [...returns.matchAll(/^ {2}(\w+) +\w/gm)].map(m => m[1]),
+    ["id", "stripe_subscription_id", "cancellation_effective_at", "current_period_end"]
+  );
+});
+
+test("3C.4: ordering alone could NOT have fixed it - the counterexample", () => {
+  // WHY THE COMPARISON HAD TO MOVE SERVER-SIDE. The two dates advance
+  // independently: cancellation_effective_at is frozen when the customer
+  // asks, and current_period_end moves only when a renewal is paid. So a
+  // row with the EARLIER promise can still be pending while a row with a
+  // LATER promise is already due. Sorted by the promise in either
+  // direction, the pending row still sorts ahead of the due one.
+  const early = {
+    // Asked while the period ended 2026-08-20, so promised 28 days later.
+    periodEnd: "2026-08-20T00:00:00.000Z",
+    promisedAt: "2026-09-17T00:00:00.000Z",
+  };
+  const late = {
+    // Asked later, and its renewal has since been paid.
+    periodEnd: "2026-10-23T00:00:00.000Z",
+    promisedAt: "2026-10-23T00:00:00.000Z",
+  };
+  assert.equal(deferredCancellationIsDue(early), false, "the pending row is due");
+  assert.equal(deferredCancellationIsDue(late), true, "the paid row is not due");
+  // The pending row carries the earlier promise, so ASCENDING order puts
+  // it first...
+  assert.ok(early.promisedAt < late.promisedAt);
+  // ...and the due row carries the later period end, so DESCENDING order
+  // by the promise would starve any due row with an early promise
+  // instead. Neither direction is a fix, which is why the filter moved
+  // into SQL rather than an .order() being added.
+  const batch = [early, late].sort((a, b) => a.promisedAt.localeCompare(b.promisedAt));
+  assert.deepEqual(batch.map(r => deferredCancellationIsDue(r)), [false, true],
+    "the not-due row no longer sorts ahead of the due row");
+});
+
+test("3C.4: the sweep still touches nothing it could not touch before", () => {
+  // The RPC is a NARROWING, not a widening. Every condition the old
+  // query applied is still applied, and one more is applied earlier.
+  assert.ok(dueListFn.includes("from public.subscriptions s"),
+    "the work list reads something other than subscriptions");
+  // Historical rows are unreachable: they carry NULL on the request.
+  assert.ok(dueListFn.includes("s.cancellation_requested_at is not null"));
+  // A Stripe Dashboard cancellation has no customer request either, so
+  // the same condition excludes it.
+  assert.ok(dueListFn.includes("s.cancel_at is null"));
+  // Not-yet-due rows are excluded, not merely deprioritised.
+  assert.ok(dueListFn.includes("s.current_period_end is not null"),
+    "a row with no period end could be compared against NULL");
+  // B2B is out of scope and stays out.
+  assert.ok(dueListFn.includes("s.customer_type = 'private'"));
+  // And the sweep still performs no local write of its own.
+  const sweep = serviceCode.slice(
+    serviceCode.indexOf("export async function sweepDueDeferredCancellations"),
+    serviceCode.indexOf("export function stripeSubscriptionFacts")
+  );
+  for (const forbidden of [".update(", ".insert(", ".delete(", ".upsert("]) {
+    assert.ok(!sweep.includes(forbidden), `the sweep writes directly: ${forbidden}`);
+  }
+  // Only the read RPC and the guarded apply. No second Stripe surface.
+  assert.deepEqual(
+    [...sweep.matchAll(/admin\.rpc\("([a-z_]+)"/g)].map(m => m[1]),
+    ["due_deferred_subscription_cancellations"]
+  );
+  assert.ok(sweep.includes("applyDeferredCancellationFromRenewal("));
 });
 
 test("3C.3: one failing row never stops the sweep, and nothing is hidden", () => {
@@ -1397,8 +1522,9 @@ test("034: the sync refuses to write status, money or snapshots", () => {
   }
 });
 
-test("034: all four functions are SECURITY DEFINER with an empty search_path", () => {
-  assert.equal([...sql034.matchAll(/security definer set search_path = ''/g)].length, 4);
+test("034: every function is SECURITY DEFINER with an empty search_path", () => {
+  assert.equal([...sql034.matchAll(/security definer set search_path = ''/g)].length, 5);
+  // The four WRITERS. Each locks the row it decides on.
   for (const fn of [
     "schedule_subscription_cancellation", "apply_deferred_subscription_cancellation",
     "sync_subscription_from_stripe", "mark_subscription_cancelled",
@@ -1410,6 +1536,14 @@ test("034: all four functions are SECURITY DEFINER with an empty search_path", (
     assert.ok(body.includes("returns jsonb"));
     assert.ok(body.includes("for update"), `${fn} does not lock the row`);
   }
+  // The one READER. It decides nothing, so it locks nothing and must not
+  // be able to write: a work list is a queue, never an authority.
+  assert.ok(dueListFn.length > 0, "the due work list is missing");
+  assert.ok(dueListFn.includes("language sql"));
+  assert.ok(dueListFn.includes("stable"), "the work list is not declared read-only");
+  assert.ok(dueListFn.includes("security definer set search_path = ''"));
+  assert.ok(!dueListFn.includes("for update"), "a read-only work list takes row locks");
+  assert.ok(!dueListFn.includes("volatile"));
 });
 
 test("034: execute revoked from public/anon/authenticated, granted to service_role only", () => {
@@ -1418,6 +1552,8 @@ test("034: execute revoked from public/anon/authenticated, granted to service_ro
     "public.apply_deferred_subscription_cancellation(text, timestamptz)",
     "public.sync_subscription_from_stripe(text, timestamptz, timestamptz, timestamptz)",
     "public.mark_subscription_cancelled(text, timestamptz)",
+    // Read-only, and still closed to every browser role.
+    "public.due_deferred_subscription_cancellations(integer)",
   ];
   for (const sig of signatures) {
     for (const role of ["public", "anon", "authenticated"]) {
@@ -1426,7 +1562,7 @@ test("034: execute revoked from public/anon/authenticated, granted to service_ro
     assert.ok(sql034.includes(`grant execute on function ${sig} to service_role;`));
   }
   const grants = sql034.split(NEWLINE).filter(l => l.trim().toLowerCase().startsWith("grant"));
-  assert.equal(grants.length, 4, "an unexpected grant was issued");
+  assert.equal(grants.length, 5, "an unexpected grant was issued");
   // NO table or column grant: service_role still cannot write subscriptions.
   assert.ok(!/grant\s+update/i.test(sql034), "034 grants an UPDATE privilege");
   assert.ok(!/grant[^;]*on\s+(table\s+)?public\.subscriptions/i.test(sql034), "034 grants a table privilege");
@@ -1445,6 +1581,44 @@ test("034: the OWNER verification queries cover A through L", () => {
   assert.ok(migration034.includes("pg_trigger"));
   assert.ok(migration034.includes("period_end_flagged"), "no cancel_at_period_end verification");
   assert.ok(migration034.includes("rowsecurity"), "no RLS verification");
+});
+
+test("034: the verification block checks the signature that actually exists", () => {
+  // THE DEFECT THIS PINS. (G) used to check a FOUR argument
+  // schedule_subscription_cancellation. The function has taken five
+  // arguments since the deferred late branch added p_cancel_at, so
+  // has_function_privilege would have raised "function does not exist"
+  // and the owner would have been unable to verify the one privilege
+  // check that matters most - on the only function a customer request
+  // can reach.
+  const FOUR = "public.schedule_subscription_cancellation(uuid,uuid,timestamptz,timestamptz)'";
+  assert.ok(!migration034.includes(FOUR),
+    "the verification block still names the old four argument signature");
+
+  // All four role checks name the real five argument function.
+  const FIVE = "public.schedule_subscription_cancellation(uuid,uuid,timestamptz,timestamptz,timestamptz)";
+  const escaped = FIVE.replace(/[()]/g, "\\$&");
+  for (const role of ["public", "anon", "authenticated", "service_role"]) {
+    assert.ok(new RegExp(`has_function_privilege\\('${role}',\\s*'${escaped}'`).test(migration034),
+      `(G) does not check ${role} against the real signature`);
+  }
+  assert.equal([...migration034.matchAll(new RegExp(escaped, "g"))].length, 4,
+    "(G) no longer checks exactly the four roles");
+
+  // AND THE VERIFICATION AGREES WITH THE EXECUTABLE GRANT. The grant is
+  // spaced, the has_function_privilege argument is not, so they are
+  // compared with whitespace removed rather than by eye.
+  const squash = s => s.replace(/\s+/g, "");
+  const granted = [...migration034.matchAll(/grant execute on function (public\.[^;]+?) to service_role;/g)]
+    .map(m => squash(m[1]));
+  const verified = [...migration034.matchAll(/has_function_privilege\('service_role',\s*'(public\.[^']+)'/g)]
+    .map(m => squash(m[1]));
+  for (const sig of verified) {
+    assert.ok(granted.includes(sig), `(G) verifies ${sig}, which nothing grants`);
+  }
+  for (const sig of granted) {
+    assert.ok(verified.includes(sig), `${sig} is granted but never verified`);
+  }
 });
 
 /* ══════════════════════════════════════════════════════════════

@@ -879,6 +879,100 @@ begin
 end;
 $$;
 
+-- 4B. THE DUE WORK LIST FOR THE SAFETY SWEEP ───────────────────
+--
+-- READ ONLY. It writes nothing, locks nothing, calls no Stripe API and
+-- returns no customer fact. It exists for exactly one reason: the daily
+-- sweep's bounded batch must actually CONTAIN the due rows, and due-ness
+-- is a comparison between two columns of the same row -
+--
+--   current_period_end >= cancellation_effective_at
+--
+-- - which PostgREST cannot express. A filter there compares a column to a
+-- literal value, never to another column, so the sweep could only read
+-- rows and decide due-ness in JavaScript afterwards. With LIMIT applied
+-- BEFORE that decision, a batch could fill up entirely with rows that are
+-- not yet due while a genuinely due row sat outside it, unattempted.
+--
+-- ORDERING ALONE CANNOT REPAIR THAT, so it was not used as the fix. The
+-- two dates move independently: cancellation_effective_at is frozen when
+-- the customer asks, and current_period_end advances only when a renewal
+-- is paid. A subscription that asked early therefore holds an EARLIER
+-- promise that is still pending, while one that asked later can hold a
+-- LATER promise its renewal has already reached. Sorted either way, the
+-- pending rows can crowd out the due one, and a starved due row means a
+-- customer is billed for a cycle they cancelled.
+--
+-- Doing the comparison HERE puts it before the LIMIT, which is the entire
+-- fix. Every row this returns is due by construction.
+--
+-- IT WEAKENS NO CONDITION AND INVENTS NONE. It restates exactly what the
+-- sweep already required:
+--
+--   customer_type = 'private'                  B2C only
+--   status in ('active','past_due','unpaid')   the 022 cancellable states
+--   cancellation_requested_at is not null      AN AUTHENTICATED CUSTOMER
+--                                              ASKED. This alone excludes
+--                                              every historical
+--                                              subscription and every
+--                                              Stripe Dashboard
+--                                              cancellation
+--   cancellation_effective_at is not null      an end date was promised
+--   stripe_subscription_id is not null         there is something to
+--                                              cancel at Stripe
+--   cancel_at is null                          Stripe does not hold it
+--   period_end >= effective                    THE OWED CYCLE IS PROVEN
+--                                              PAID. current_period_end
+--                                              only ever advances through
+--                                              activate_subscription_from_invoice,
+--                                              which runs only from an
+--                                              invoice Stripe reports
+--                                              paid, so this is proof and
+--                                              not inference
+--
+-- It remains a work QUEUE and never an authority: every row it hands back
+-- is re-read and re-checked under a row lock by
+-- apply_deferred_subscription_cancellation before anything reaches
+-- Stripe, so a row that stopped being due in between is refused there.
+--
+-- FOUR COLUMNS AND NO MORE. An id, the Stripe binding and the two dates
+-- the caller re-checks. No email, no name, no address, no amount, no
+-- snapshot - nothing that could turn a cron log into a data leak.
+--
+-- BOUNDED AND DETERMINISTIC. The limit is clamped rather than trusted, so
+-- no caller can ask this for the whole table, and the ordering is TOTAL -
+-- the promised date, then the id - so the same state always yields the
+-- same batch and the longest-owed cancellation is attempted first.
+create or replace function public.due_deferred_subscription_cancellations(
+  p_limit integer
+)
+returns table (
+  id                        uuid,
+  stripe_subscription_id    text,
+  cancellation_effective_at timestamptz,
+  current_period_end        timestamptz
+)
+language sql
+stable
+security definer set search_path = ''
+as $$
+  select s.id,
+         s.stripe_subscription_id,
+         s.cancellation_effective_at,
+         s.current_period_end
+  from public.subscriptions s
+  where s.customer_type = 'private'
+    and s.status in ('active', 'past_due', 'unpaid')
+    and s.cancellation_requested_at is not null
+    and s.cancellation_effective_at is not null
+    and s.stripe_subscription_id is not null
+    and s.cancel_at is null
+    and s.current_period_end is not null
+    and s.current_period_end >= s.cancellation_effective_at
+  order by s.cancellation_effective_at asc, s.id asc
+  limit least(greatest(coalesce(p_limit, 50), 1), 200);
+$$;
+
 -- 5. EXECUTE PRIVILEGES ────────────────────────────────────────
 --
 -- No browser role may call any of these. revoke from public FIRST,
@@ -911,12 +1005,20 @@ revoke all on function public.mark_subscription_cancelled(text, timestamptz) fro
 revoke all on function public.mark_subscription_cancelled(text, timestamptz) from authenticated;
 grant execute on function public.mark_subscription_cancelled(text, timestamptz) to service_role;
 
+-- The read-only work list. Same treatment, for the same reason: it reads
+-- across every customer's subscriptions, so no browser role may call it
+-- even though it writes nothing.
+revoke all on function public.due_deferred_subscription_cancellations(integer) from public;
+revoke all on function public.due_deferred_subscription_cancellations(integer) from anon;
+revoke all on function public.due_deferred_subscription_cancellations(integer) from authenticated;
+grant execute on function public.due_deferred_subscription_cancellations(integer) to service_role;
+
 -- 6. NO NEW CLIENT PRIVILEGES ──────────────────────────────────
 --
 -- No grant, policy or privilege is created for anon or authenticated. A
 -- customer keeps the SELECT-only access migration 005 gave them under the
 -- "Private users read own subscriptions" RLS policy, which now also
--- covers these two columns - so the account page can show a scheduled
+-- covers these three columns - so the account page can show a scheduled
 -- cancellation without any new privilege. anon still has no access at
 -- all, and no browser can write a cancellation.
 
@@ -960,9 +1062,10 @@ grant execute on function public.mark_subscription_cancelled(text, timestamptz) 
 --   where conrelid = 'public.subscriptions'::regclass and contype = 'c'
 --     and conname = 'subscriptions_status_check';
 --
--- (E)(F) ALL FOUR FUNCTIONS EXIST, SECURITY DEFINER, EMPTY search_path.
---     Expected: four rows, security_definer = true for all four, and
---     proconfig = {"search_path="} for all four.
+-- (E)(F) ALL FIVE FUNCTIONS EXIST, SECURITY DEFINER, EMPTY search_path.
+--     Expected: five rows, security_definer = true for all five, and
+--     proconfig = {"search_path="} for all five. The first four are the
+--     writers; due_deferred_subscription_cancellations is READ ONLY.
 --
 --   select p.proname,
 --          pg_get_function_identity_arguments(p.oid) as arguments,
@@ -975,24 +1078,28 @@ grant execute on function public.mark_subscription_cancelled(text, timestamptz) 
 --     and p.proname in ('schedule_subscription_cancellation',
 --                       'apply_deferred_subscription_cancellation',
 --                       'sync_subscription_from_stripe',
---                       'mark_subscription_cancelled')
+--                       'mark_subscription_cancelled',
+--                       'due_deferred_subscription_cancellations')
 --   order by p.proname;
 --
 --     Expected arguments:
 --       apply_deferred_subscription_cancellation  text, timestamp with time zone
+--       due_deferred_subscription_cancellations   integer
 --       mark_subscription_cancelled               text, timestamp with time zone
 --       schedule_subscription_cancellation        uuid, uuid, timestamp with time zone, timestamp with time zone, timestamp with time zone
 --       sync_subscription_from_stripe             text, timestamp with time zone, timestamp with time zone, timestamp with time zone
---     Expected returns: jsonb for all four.
+--     Expected returns: jsonb for the four writers, and SETOF record
+--     (id, stripe_subscription_id, cancellation_effective_at,
+--     current_period_end) for due_deferred_subscription_cancellations.
 --
 -- (G) WHO MAY EXECUTE THEM. The important block.
---     Expected: false, false, false, true - for each of the four.
+--     Expected: false, false, false, true - for each of the five.
 --
 --   select
---     has_function_privilege('public',        'public.schedule_subscription_cancellation(uuid,uuid,timestamptz,timestamptz)', 'execute') as public_can,
---     has_function_privilege('anon',          'public.schedule_subscription_cancellation(uuid,uuid,timestamptz,timestamptz)', 'execute') as anon_can,
---     has_function_privilege('authenticated', 'public.schedule_subscription_cancellation(uuid,uuid,timestamptz,timestamptz)', 'execute') as authenticated_can,
---     has_function_privilege('service_role',  'public.schedule_subscription_cancellation(uuid,uuid,timestamptz,timestamptz)', 'execute') as service_role_can;
+--     has_function_privilege('public',        'public.schedule_subscription_cancellation(uuid,uuid,timestamptz,timestamptz,timestamptz)', 'execute') as public_can,
+--     has_function_privilege('anon',          'public.schedule_subscription_cancellation(uuid,uuid,timestamptz,timestamptz,timestamptz)', 'execute') as anon_can,
+--     has_function_privilege('authenticated', 'public.schedule_subscription_cancellation(uuid,uuid,timestamptz,timestamptz,timestamptz)', 'execute') as authenticated_can,
+--     has_function_privilege('service_role',  'public.schedule_subscription_cancellation(uuid,uuid,timestamptz,timestamptz,timestamptz)', 'execute') as service_role_can;
 --
 --   select
 --     has_function_privilege('anon',          'public.sync_subscription_from_stripe(text,timestamptz,timestamptz,timestamptz)', 'execute') as anon_can,
@@ -1008,6 +1115,14 @@ grant execute on function public.mark_subscription_cancelled(text, timestamptz) 
 --     has_function_privilege('anon',          'public.mark_subscription_cancelled(text,timestamptz)', 'execute') as anon_can,
 --     has_function_privilege('authenticated', 'public.mark_subscription_cancelled(text,timestamptz)', 'execute') as authenticated_can,
 --     has_function_privilege('service_role',  'public.mark_subscription_cancelled(text,timestamptz)', 'execute') as service_role_can;
+--
+--     And the read-only work list, which no browser role may call either:
+--
+--   select
+--     has_function_privilege('public',        'public.due_deferred_subscription_cancellations(integer)', 'execute') as public_can,
+--     has_function_privilege('anon',          'public.due_deferred_subscription_cancellations(integer)', 'execute') as anon_can,
+--     has_function_privilege('authenticated', 'public.due_deferred_subscription_cancellations(integer)', 'execute') as authenticated_can,
+--     has_function_privilege('service_role',  'public.due_deferred_subscription_cancellations(integer)', 'execute') as service_role_can;
 --
 -- (H) THE BROWSER STILL CANNOT WRITE A SUBSCRIPTION. THE IMPORTANT ONE.
 --
