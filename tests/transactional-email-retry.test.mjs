@@ -725,7 +725,9 @@ test("safety: the retry writes exactly one column of its own", () => {
 });
 
 test("safety: the retry creates no business event and calls no RPC", () => {
-  for (const source of [wiringCode, rulesCode, routeCode]) {
+  // THE RETRY ITSELF - the six email families and their rules - still
+  // touches no business state and no Stripe API at all.
+  for (const source of [wiringCode, rulesCode]) {
     for (const forbidden of [
       ".rpc(", ".insert(", ".delete(", ".upsert(",
       "cancel_order", "mark_order_shipped", "resolve_order_cancellation_request",
@@ -735,6 +737,32 @@ test("safety: the retry creates no business event and calls no RPC", () => {
       assert.ok(!source.includes(forbidden), `the retry performs: ${forbidden}`);
     }
   }
+
+  // ── THE ROUTE IS NO LONGER EMAIL-ONLY (Phase 3C.3) ─────────
+  //
+  // It gained the deferred subscription cancellation sweep, because the
+  // Vercel Hobby plan permits one cron per day and that net needs a
+  // durable timer. So the route may name Stripe - but only for that one
+  // job, and only to set cancel_at on a subscription whose customer
+  // already asked to end it.
+  //
+  // Asserted by symbol, which is stricter than the old blanket ban: that
+  // would have permitted refunds.create in any file it did not list.
+  for (const forbidden of [
+    ".rpc(", ".insert(", ".delete(", ".upsert(",
+    "cancel_order", "mark_order_shipped", "resolve_order_cancellation_request",
+    "request_order_cancellation", "apply_order_refund_state",
+    "create_order_from_paid_checkout", "checkout.sessions",
+    "refunds.", "paymentIntents.", "prices.", "products.", "subscriptions.update",
+  ]) {
+    assert.ok(!routeCode.includes(forbidden), `the cron performs: ${forbidden}`);
+  }
+  // The ONLY Stripe surface the route names is the client factory, which
+  // it hands straight to the sweep.
+  const stripeUses = [...routeCode.matchAll(/\bstripe[A-Za-z.]*/g)].map(m => m[0]);
+  assert.deepEqual([...new Set(stripeUses)].sort(), ["stripe"]);
+  assert.ok(routeCode.includes("getStripeClient()"));
+  assert.ok(routeCode.includes("sweepDueDeferredCancellations(stripe)"));
 });
 
 test("safety: no Stripe write API anywhere in the repository", () => {
@@ -815,10 +843,25 @@ test("idempotency: the refund key still carries the durable cumulative total", (
    ══════════════════════════════════════════════════════════════ */
 
 test("cron: it reuses CRON_SECRET and creates no new secret", () => {
+  // Still exactly one env var read here. STRIPE_SECRET_KEY is read by
+  // lib/stripe.ts, which this route calls - it never touches the value,
+  // and no new secret was invented for the sweep.
   const names = [...routeCode.matchAll(/process\.env\.(\w+)/g)].map(m => m[1]);
   assert.deepEqual([...new Set(names)].sort(), ["CRON_SECRET"]);
-  for (const other of ["FULFILLMENT_ADMIN_SECRET", "CANCELLATION_ADMIN_SECRET", "RESEND_API_KEY", "STRIPE_"]) {
+  // No OTHER secret is read here. The deepEqual above is already
+  // exhaustive on process.env, so this checks the remaining ways a secret
+  // could arrive - and names may still appear inside a log MESSAGE, which
+  // is how every module in this repository reports an unset variable.
+  for (const other of ["FULFILLMENT_ADMIN_SECRET", "CANCELLATION_ADMIN_SECRET", "RESEND_API_KEY"]) {
     assert.ok(!routeCode.includes(other), `the cron names ${other}`);
+  }
+  for (const read of ["process.env.STRIPE", "process.env.SUPABASE", "process.env.RESEND"]) {
+    assert.ok(!routeCode.includes(read), `the cron reads ${read}`);
+  }
+  // And no secret VALUE is ever interpolated into a log line.
+  for (const line of routeCode.split(NEWLINE).filter(l => l.includes("console."))) {
+    assert.ok(!/\$\{\s*secret/i.test(line), "a log line interpolates the secret");
+    assert.ok(!line.includes("process.env"), "a log line reads an environment variable");
   }
   const example = read(".env.example");
   for (const name of ["CRON_SECRET", "FULFILLMENT_ADMIN_SECRET", "CANCELLATION_ADMIN_SECRET", "RESEND_API_KEY"]) {

@@ -1447,7 +1447,17 @@ test("regression: no retry cron was added", () => {
   assert.equal((vercel.crons ?? []).length, 1, "a cron job was added");
   assert.equal(vercel.crons[0].path, "/api/cron/retry-order-notifications");
   const cron = withoutComments(read("app/api/cron/retry-order-notifications/route.ts"));
-  assert.ok(!cron.includes("cancellation"), "the cron now sweeps cancellations");
+  // Phase 3C.3 gave the cron a SUBSCRIPTION cancellation sweep, so a bare
+  // "cancellation" match now catches an unrelated system. What this ever
+  // protected is that the ORDER cancellation request machinery of Phase
+  // 2D-B stays out of the cron - asserted by symbol now, which is also
+  // the stricter check.
+  for (const forbidden of [
+    "cancellation_request", "resolve_order_cancellation_request", "cancel_order",
+    "cancellation_outcome", "CANCELLATION_ADMIN_SECRET",
+  ]) {
+    assert.ok(!cron.includes(forbidden), `the cron resolves order cancellations: ${forbidden}`);
+  }
 });
 
 test("regression: the other five emails and their state columns are untouched", () => {

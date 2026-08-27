@@ -1,6 +1,8 @@
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { isBearerSecretAuthorized } from "../../../../lib/serverSecretAuth";
 import { runTransactionalEmailRetryCron } from "../../../../lib/transactionalEmailRetry";
+import { getStripeClient } from "../../../../lib/stripe";
+import { sweepDueDeferredCancellations } from "../../../../lib/subscriptionCancellation";
 
 /**
  * Vercel Cron entry point for the transactional email safety net.
@@ -36,13 +38,39 @@ import { runTransactionalEmailRetryCron } from "../../../../lib/transactionalEma
  * would mail that history. 'failed' can only be written by code that
  * genuinely tried and genuinely failed.
  *
+ * ── PHASE 3C.3 ADDED A SEVENTH JOB, AND IT IS NOT EMAIL ───────
+ *
+ * This endpoint now also drains DUE DEFERRED SUBSCRIPTION CANCELLATIONS,
+ * and that is a deliberate widening of its contract rather than an
+ * oversight. State it plainly: this is the one place in the cron that
+ * calls a Stripe write API.
+ *
+ * A late cancellation is applied at Stripe when its one owed cycle is
+ * paid, driven by invoice.paid. If that application fails, the webhook
+ * throws and Stripe redelivers - for about three days. Past that budget
+ * the cancellation would wait for the NEXT renewal, 28 days away, which
+ * charges the customer a second extra cycle. That is the concrete window
+ * this job closes, and closing it needs a durable timer.
+ *
+ * It lives here rather than in its own endpoint because the Vercel Hobby
+ * plan permits ONE cron invocation per day. A second endpoint would have
+ * needed a second schedule this plan does not have.
+ *
+ * It is bounded, it re-derives due-ness from durable local state, and it
+ * runs in its own guard: a Stripe outage cannot stop the six email
+ * families, and an email failure cannot stop it.
+ *
  * ── IT RETRIES DELIVERY. IT CREATES NOTHING. ──────────────────
  *
- * No order is created, cancelled, resolved, shipped or refunded here, and
- * no Stripe API is called. The only writes are one column moving from a
- * stale 'sending' back to 'failed', and whatever the existing senders
- * write - which the column-scoped grants in migrations 017, 026, 027,
- * 030, 031 and 033 already confine to thirteen email-state columns.
+ * No order is created, cancelled, resolved, shipped or refunded here.
+ * The only Stripe call is subscriptions.update setting cancel_at on a
+ * subscription whose customer already asked to end it - no refund, no
+ * charge, no price, no item, no quantity. The only local writes are one
+ * column moving from a stale 'sending' back to 'failed', whatever the
+ * existing senders write - which the column-scoped grants in migrations
+ * 017, 026, 027, 030, 031 and 033 already confine to thirteen
+ * email-state columns - and the two cancellation columns migration 034's
+ * security-definer function owns.
  *
  * It takes no input at all. There is no order id, no recipient, no batch
  * size and no filter to pass: the eligibility rule lives in
@@ -136,7 +164,37 @@ export async function GET(request: Request): Promise<Response> {
 
   try {
     const summary = await runTransactionalEmailRetryCron();
-    return Response.json(summary, { status: 200 });
+
+    // ── THE DEFERRED CANCELLATION NET (Phase 3C.3) ────────────
+    //
+    // Its own guard, deliberately. The six email families above have
+    // already done their work by this point and their counters must
+    // survive a Stripe outage; equally, an email family that errored
+    // must not stop a customer's cancellation from reaching Stripe.
+    //
+    // An unconfigured Stripe key is reported rather than thrown: the
+    // email half of this run genuinely succeeded and its summary is
+    // worth returning.
+    let deferredCancellations;
+    try {
+      const stripe = getStripeClient();
+      if (!stripe) {
+        console.error("Deferred cancellation sweep: STRIPE_SECRET_KEY is not configured.");
+        deferredCancellations = { due: 0, applied: 0, alreadyScheduled: 0, failed: 0, errored: true };
+      } else {
+        deferredCancellations = await sweepDueDeferredCancellations(stripe);
+      }
+    } catch (err) {
+      console.error(
+        "Deferred cancellation sweep: failed:",
+        err instanceof Error ? err.message : "unknown error"
+      );
+      deferredCancellations = { due: 0, applied: 0, alreadyScheduled: 0, failed: 0, errored: true };
+    }
+
+    // Counts only, exactly like the email families. No subscription id,
+    // no Stripe id, no customer fact.
+    return Response.json({ ...summary, deferredCancellations }, { status: 200 });
   } catch (err) {
     console.error(
       "Transactional email retry: sweep failed:",

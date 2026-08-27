@@ -13,6 +13,7 @@ import {
   CANCELLABLE_STATUSES,
   CANCELLATION_CUTOFF_DAYS,
   CANCEL_RESULTS,
+  DEFERRED_SWEEP_LIMIT,
   CUTOFF_OFFSET_MS,
   cancelResultIsDurable,
   cancellationDelivery,
@@ -973,6 +974,272 @@ test("DEFERRED APPLY: scheduled is still not cancelled", () => {
   // termination.
   const setClauses = updateSetClauses(sql034);
   assert.equal(setClauses.filter(c => /status\s+=\s+'cancelled'/.test(c)).length, 1);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   PHASE 3C.3 - DEFERRED CANCELLATION FAILURE RECOVERY
+
+   The defect: applyDeferredCancellationFromRenewal returned "error" and
+   handleInvoicePaid only LOGGED it. The webhook still answered 200, the
+   event was recorded as processed, and the cancellation waited for the
+   next renewal - 28 days later, and that renewal CHARGES THE CUSTOMER.
+   A transient Stripe or Supabase blip turned "exactly one further cycle"
+   into two at the customer's expense.
+
+   Two independent recovery paths now, neither of which needs another
+   paid invoice: the webhook throws so Stripe redelivers, and a daily
+   sweep re-derives due-ness from durable local state.
+   ══════════════════════════════════════════════════════════════ */
+
+test("3C.3: the event is recorded ONLY after every mandatory action succeeds", () => {
+  // This is what makes throwing a working retry rather than a lost event.
+  const events = read("lib/stripeWebhookEvents.ts");
+  assert.ok(events.includes("Records a verified, fully-processed Stripe event id"));
+  // No status column exists, so a row means "done" and nothing else. The
+  // table carries no UPDATE grant either, so a claim-then-mark design is
+  // not even reachable from application code.
+  const nine = read("supabase/migrations/009_stripe_checkout_attempts.sql");
+  const table = nine.slice(
+    nine.indexOf("create table public.stripe_webhook_events"),
+    nine.indexOf(");", nine.indexOf("create table public.stripe_webhook_events"))
+  );
+  for (const invented of ["status", "attempts", "failed_at", "processing"]) {
+    assert.ok(!table.includes(invented), `009 already had a ${invented} column`);
+  }
+  assert.ok(read("supabase/migrations/023_harden_stripe_customers_grants.sql")
+    .includes("grant select, insert on table public.stripe_webhook_events to service_role;"));
+  // Ordering in the route: record runs AFTER the handler block, so a
+  // throw skips it entirely.
+  const recordAt = webhookCode.indexOf("await recordStripeWebhookEvent(");
+  const handlerAt = webhookCode.indexOf("await handleInvoicePaid(");
+  // Anchored FORWARD from the handler: the route's first `} catch` belongs
+  // to signature verification, which runs long before any handler.
+  const catchAt = webhookCode.indexOf("} catch (err) {", handlerAt);
+  assert.ok(handlerAt > -1 && handlerAt < catchAt && catchAt < recordAt,
+    "the event is recorded before or inside the handler block");
+  // And that catch answers 500, which is what makes Stripe redeliver.
+  const failure = webhookCode.slice(catchAt, recordAt);
+  assert.ok(failure.includes("status: 500"), "a handler failure no longer answers 500");
+});
+
+test("3C.3 (A): a Stripe failure after the paid order still throws", () => {
+  const handler = webhookCode.slice(
+    webhookCode.indexOf("async function handleInvoicePaid"),
+    webhookCode.indexOf("async function handleSubscriptionSessionCompleted")
+  );
+  // The forbidden 3C.2 assumption is gone from every source.
+  for (const source of [handler, serviceCode]) {
+    assert.ok(!/pending for the next renewal/i.test(source),
+      "the next-renewal recovery assumption is still claimed");
+  }
+  // 'error' is fatal.
+  assert.ok(handler.includes('if (deferred === "error") {'));
+  const fatal = handler.slice(handler.indexOf('if (deferred === "error") {'));
+  assert.ok(fatal.includes("throw new Error("), "an error no longer throws");
+  // Stripe ids only in the message - no customer, no amount, no email.
+  const message = fatal.slice(fatal.indexOf("throw new Error("), fatal.indexOf(");", fatal.indexOf("throw new Error(")));
+  for (const leak of ["customerEmail", "customerName", "order.", "orderNumber", "amount", "total"]) {
+    assert.ok(!message.includes(leak), `the failure message leaks ${leak}`);
+  }
+  // A successful outcome does NOT throw.
+  for (const fine of ["applied", "already_scheduled", "nothing_pending", "too_early"]) {
+    assert.ok(!fatal.includes(`"${fine}"`), `${fine} is treated as fatal`);
+  }
+});
+
+test("3C.3 (A): the throw comes last, so the order and the email survive it", () => {
+  const handler = webhookCode.slice(
+    webhookCode.indexOf("async function handleInvoicePaid"),
+    webhookCode.indexOf("async function handleSubscriptionSessionCompleted")
+  );
+  const orderAt = handler.indexOf("fulfillPaidSubscriptionInvoice(");
+  const emailAt = handler.indexOf("sendInternalOrderNotificationIfNeeded(");
+  const applyAt = handler.indexOf("applyDeferredCancellationFromRenewal(");
+  const throwAt = handler.indexOf('if (deferred === "error") {');
+  assert.ok(orderAt < emailAt && emailAt < applyAt && applyAt < throwAt,
+    "the mandatory cancellation runs before the delivery it must not undo");
+});
+
+test("3C.3 (D): a redelivered invoice.paid reuses everything and retries only the cancellation", () => {
+  // The three things a redelivery re-runs are each idempotent AT THE
+  // DATABASE, not merely by convention.
+  const m022 = read("supabase/migrations/022_recurring_subscription_foundation.sql");
+  const activate = m022.slice(m022.indexOf("create or replace function public.activate_subscription_from_invoice"));
+  assert.ok(activate.includes("where stripe_invoice_id = p_stripe_invoice_id"));
+  assert.ok(activate.includes("return v_attempt.id;"), "a redelivery does not reuse the checkout attempt");
+  assert.ok(m022.includes("create unique index checkout_attempts_stripe_invoice_id_key"));
+
+  const m021 = readdirSync(MIGRATIONS).find(f => f.startsWith("021"));
+  const order = read(`supabase/migrations/${m021}`);
+  const createFn = order.slice(order.indexOf("create or replace function public.create_order_from_paid_checkout"));
+  assert.ok(createFn.includes("where checkout_attempt_id = p_checkout_attempt_id"));
+  assert.ok(createFn.includes("return v_order;"), "a redelivery creates a second order");
+
+  // The internal notification claims atomically and answers already-sent.
+  const notify = read("lib/internalOrderNotificationEmail.ts");
+  assert.ok(notify.includes('.or("internal_notification_status.is.null,internal_notification_status.eq.failed")'),
+    "the notification claim is no longer atomic");
+  assert.ok(notify.includes('if (claim === "already-sent") return;'));
+  assert.ok(notify.includes("internalOrderNotificationIdempotencyKey(order.id)"),
+    "the notification lost its provider idempotency key");
+
+  // And fulfillment answers 'fulfilled' the second time, NOT 'ignored',
+  // so the handler reaches the cancellation again.
+  const fulfil = read("lib/subscriptionInvoiceFulfillment.ts");
+  const tail = fulfil.slice(fulfil.indexOf("const order = await deps.createOrder("));
+  assert.ok(tail.includes('kind: "fulfilled"'), "a redelivery stops before the deferred cancellation");
+});
+
+test("3C.3 (B/F): the sweep needs no invoice, no event and no second renewal", () => {
+  const sweep = serviceCode.slice(
+    serviceCode.indexOf("export async function sweepDueDeferredCancellations"),
+    serviceCode.indexOf("export function stripeSubscriptionFacts")
+  );
+  assert.ok(sweep.length > 0, "the sweep is missing");
+  // It reads durable state only - no invoice, no event, no Stripe list.
+  for (const forbidden of ["invoice", "Invoice", "event", "Event", "subscriptions.list", "retrieve("]) {
+    assert.ok(!sweep.includes(forbidden), `the sweep depends on ${forbidden}`);
+  }
+  // Four durable conditions, all required.
+  assert.ok(sweep.includes('.not("cancellation_requested_at", "is", null)'));
+  assert.ok(sweep.includes('.not("cancellation_effective_at", "is", null)'));
+  assert.ok(sweep.includes('.not("stripe_subscription_id", "is", null)'));
+  assert.ok(sweep.includes('.is("cancel_at", null)'));
+  assert.ok(sweep.includes('.eq("customer_type", "private")'));
+  assert.ok(sweep.includes(".in(\"status\", [...CANCELLABLE_STATUSES])"));
+  // The paid-cycle proof, applied per row.
+  assert.ok(sweep.includes("deferredCancellationIsDue({"));
+  // Bounded.
+  assert.ok(sweep.includes(".limit(DEFERRED_SWEEP_LIMIT)"));
+  assert.equal(DEFERRED_SWEEP_LIMIT, 50);
+});
+
+test("3C.3: the sweep can never reach a historical or owner-made cancellation", () => {
+  // THE NULL RULE IS NOT VIOLATED. `cancel_at IS NULL` is selected, but
+  // only together with a NON-NULL customer request - which no historical
+  // subscription and no Stripe Dashboard cancellation has.
+  const sweep = serviceCode.slice(
+    serviceCode.indexOf("export async function sweepDueDeferredCancellations"),
+    serviceCode.indexOf("export function stripeSubscriptionFacts")
+  );
+  const query = sweep.slice(sweep.indexOf('.from("subscriptions")'), sweep.indexOf(".limit("));
+  assert.ok(query.includes('.not("cancellation_requested_at", "is", null)'),
+    "the sweep can select a subscription nobody asked to cancel");
+  // It writes nothing itself - every write goes through the locking RPC.
+  for (const forbidden of [".update(", ".insert(", ".delete(", ".upsert("]) {
+    assert.ok(!sweep.includes(forbidden), `the sweep writes directly: ${forbidden}`);
+  }
+  assert.ok(sweep.includes("applyDeferredCancellationFromRenewal("),
+    "the sweep does not reuse the guarded apply");
+  // Which re-checks all four conditions under a row lock.
+  assert.ok(applyFn.includes("for update"));
+  assert.ok(applyFn.includes("if v_sub.cancellation_requested_at is null"));
+  assert.ok(applyFn.includes("if v_sub.cancel_at is not null then"));
+  assert.ok(applyFn.includes("if p_cancel_at < v_sub.cancellation_effective_at then"));
+});
+
+test("3C.3: one failing row never stops the sweep, and nothing is hidden", () => {
+  const sweep = serviceCode.slice(
+    serviceCode.indexOf("export async function sweepDueDeferredCancellations"),
+    serviceCode.indexOf("export function stripeSubscriptionFacts")
+  );
+  assert.ok(sweep.includes("try {") && sweep.includes("} catch (err) {"), "a throwing row kills the batch");
+  assert.ok(sweep.includes("continue;"));
+  // An unreadable work list is reported, never a clean run of zeroes.
+  assert.ok(sweep.includes("summary.errored = true;"));
+  // too_early and nothing_pending cannot happen for a selected row, so
+  // they are counted as failures rather than silently swallowed.
+  assert.ok(sweep.includes("summary.failed += 1;"));
+  // Counts only. No id, no Stripe id, no customer fact in the summary.
+  const type = serviceCode.slice(
+    serviceCode.indexOf("export type DeferredSweepSummary = {"),
+    serviceCode.indexOf("};", serviceCode.indexOf("export type DeferredSweepSummary = {"))
+  );
+  for (const leak of ["subscriptionId", "stripe", "email", "name", "amount", "cancel_at"]) {
+    assert.ok(!type.includes(leak), `the summary carries ${leak}`);
+  }
+});
+
+test("3C.3: the sweep runs in the existing authenticated cron, in its own guard", () => {
+  const cron = withoutComments(read("app/api/cron/retry-order-notifications/route.ts"));
+  assert.ok(cron.includes("sweepDueDeferredCancellations(stripe)"));
+  // Behind the same CRON_SECRET, checked before anything runs.
+  const authAt = cron.indexOf("isBearerSecretAuthorized(request, secret)");
+  const sweepAt = cron.indexOf("sweepDueDeferredCancellations(");
+  assert.ok(authAt > -1 && authAt < sweepAt, "the sweep runs before authorization");
+  assert.ok(cron.includes("if (!secret)"), "the cron no longer fails closed");
+  // Its own try/catch, so a Stripe outage cannot lose the email counters
+  // and an email failure cannot stop a cancellation.
+  const block = cron.slice(cron.indexOf("runTransactionalEmailRetryCron()"));
+  assert.ok(block.includes("let deferredCancellations;"));
+  assert.ok(block.indexOf("try {") < block.indexOf("sweepDueDeferredCancellations("),
+    "the sweep is not guarded");
+  // Still exactly one schedule, at the unchanged path.
+  const vercel = JSON.parse(read("vercel.json"));
+  assert.equal((vercel.crons ?? []).length, 1, "a second cron was registered");
+  assert.equal(vercel.crons[0].path, "/api/cron/retry-order-notifications");
+  // GET only, and no new client-exposed surface.
+  assert.ok(cron.includes("export async function GET("));
+  for (const method of ["export async function POST(", "export async function PUT(", "export async function DELETE("]) {
+    assert.ok(!cron.includes(method), `the cron gained ${method}`);
+  }
+});
+
+test("3C.3 (C): Stripe succeeds and the local RPC fails - already closed, not re-solved", () => {
+  const fn = serviceCode.slice(
+    serviceCode.indexOf("export async function applyDeferredCancellationFromRenewal"),
+    serviceCode.indexOf("export type DeferredSweepSummary")
+  );
+  // Stripe first, then the RPC.
+  assert.ok(fn.indexOf("stripe.subscriptions.update(") < fn.indexOf("apply_deferred_subscription_cancellation"));
+  // An RPC failure is reported, and the comment names the mechanism that
+  // repairs it rather than inventing a second one.
+  // The reasoning lives in a comment, so this reads the RAW source -
+  // serviceCode has comments stripped for the code-only assertions.
+  const rawFn = service.slice(
+    service.indexOf("export async function applyDeferredCancellationFromRenewal"),
+    service.indexOf("export type DeferredSweepSummary")
+  );
+  assert.ok(rawFn.includes("customer.subscription.updated"), "the self-heal path is not documented");
+  // That mechanism still exists and still writes cancel_at.
+  assert.ok(webhookCode.includes('event.type === "customer.subscription.updated"'));
+  assert.ok(webhookCode.includes("handleSubscriptionUpdated(stripe, event)"));
+  assert.ok(syncFn.includes("cancel_at                = p_cancel_at"));
+  // And a retry after Stripe already holds it performs NO second Stripe
+  // mutation: the local row is repaired by the sync, and the apply then
+  // answers already_scheduled.
+  assert.ok(fn.includes('if (row.cancel_at) return "already_scheduled";'));
+  const guardAt = fn.indexOf('if (row.cancel_at) return "already_scheduled";');
+  assert.ok(guardAt < fn.indexOf("stripe.subscriptions.update("),
+    "a repaired row still issues a second Stripe write");
+});
+
+test("3C.3 (E): dedupe is unchanged for every other flow", () => {
+  const events = read("lib/stripeWebhookEvents.ts");
+  // Untouched by this phase.
+  assert.ok(events.includes("export async function hasStripeWebhookEventBeenProcessed"));
+  assert.ok(events.includes("export async function recordStripeWebhookEvent"));
+  assert.ok(!events.includes("status"), "the event table gained a status");
+  // A fully successful event is still recorded, so it is never replayed.
+  const route = webhookCode;
+  assert.ok(route.includes("if (alreadyProcessed) {"));
+  assert.ok(route.includes("return Response.json({ received: true }, { status: 200 });"));
+  // Only invoice.paid gained a mandatory action, and exactly one throw
+  // was added - inside that handler, not across the route.
+  const invoiceHandler = route.slice(
+    route.indexOf("async function handleInvoicePaid"),
+    route.indexOf("async function handleSubscriptionSessionCompleted")
+  );
+  assert.equal([...invoiceHandler.matchAll(/throw new Error\(/g)].length, 2,
+    "an unexpected number of fatal failures in the invoice handler");
+  assert.ok(invoiceHandler.includes("could not be fulfilled"), "the pre-existing fulfilment throw is gone");
+  assert.ok(invoiceHandler.includes("could not be applied"), "the deferred cancellation throw is missing");
+  // The refund, subscription-updated and subscription-deleted handlers
+  // gained none.
+  const others = route.slice(route.indexOf("async function handleSubscriptionUpdated"),
+    route.indexOf("async function handleCheckoutSessionCompleted"));
+  assert.equal([...others.matchAll(/throw new Error\(/g)].length, 0,
+    "another handler became fatal in this phase");
 });
 
 /* ══════════════════════════════════════════════════════════════

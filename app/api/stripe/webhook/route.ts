@@ -490,14 +490,44 @@ async function handleInvoicePaid(stripe: Stripe, event: Stripe.Event): Promise<v
   // date, which prorates nothing.
   //
   // It answers 'nothing_pending' for every ordinary renewal, which is the
-  // overwhelmingly common case, and it never throws: the delivery above
-  // is already durable and must not be undone by a failure here. A
-  // failure simply leaves the decision pending for the next renewal.
+  // overwhelmingly common case.
   const deferred = await applyDeferredCancellationFromRenewal(stripe, result.stripeSubscriptionId);
+
   if (deferred !== "nothing_pending") {
     // Stripe ids only. No customer, no amount, no email.
     console.error(
       `Stripe webhook: deferred cancellation for ${result.stripeSubscriptionId} -> ${deferred}`
+    );
+  }
+
+  // ── IT IS A MANDATORY POST-PAYMENT ACTION (Phase 3C.3) ──────
+  //
+  // A failure here THROWS, and that is the whole point.
+  //
+  // Phase 3C.2 swallowed it and let the event be recorded as processed,
+  // reasoning that the next renewal would apply the cancellation. That
+  // reasoning was wrong in the one way that matters: the next renewal is
+  // 28 days away and it CHARGES THE CUSTOMER AGAIN. A transient Stripe or
+  // Supabase failure would have turned "exactly one further cycle" into
+  // two, and the customer would have paid for the difference.
+  //
+  // Throwing hands the problem to the mechanism that already solves it.
+  // recordStripeWebhookEvent runs only after this function returns
+  // cleanly, so an unrecorded event is redelivered by Stripe - for up to
+  // three days, with backoff - and every action ahead of this one is
+  // idempotent on redelivery: activate_subscription_from_invoice returns
+  // the same checkout attempt, create_order_from_paid_checkout returns
+  // the same order, and the internal notification's claim answers
+  // 'already-sent'. No duplicate order, no duplicate email, no second
+  // charge. Only the cancellation is retried.
+  //
+  // Stripe eventually gives up. The daily sweep in
+  // sweepDueDeferredCancellations is the net underneath that, and it
+  // closes the remaining window long before another cycle can bill.
+  if (deferred === "error") {
+    // Stripe subscription id only, exactly as the failure above.
+    throw new Error(
+      `deferred cancellation for subscription ${result.stripeSubscriptionId} could not be applied`
     );
   }
 }

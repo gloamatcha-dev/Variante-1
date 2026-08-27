@@ -445,3 +445,16 @@ export type DeferredApplyResult = (typeof DEFERRED_APPLY_RESULTS)[number];
 export function isDeferredApplyResult(value: unknown): value is DeferredApplyResult {
   return typeof value === "string" && (DEFERRED_APPLY_RESULTS as readonly string[]).includes(value);
 }
+
+/**
+ * How many due cancellations one sweep of the safety net will attempt.
+ *
+ * Bounded like every other sweep in this repository. A number this small
+ * is not a throughput decision - it is a blast-radius decision, and the
+ * realistic due count on any given day is zero.
+ *
+ * It lives here rather than beside the sweep so the plain Node test
+ * runner can import it: this module is a pure leaf with no relative
+ * imports, no database and no clock.
+ */
+export const DEFERRED_SWEEP_LIMIT = 50;

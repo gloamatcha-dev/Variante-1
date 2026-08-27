@@ -1,6 +1,8 @@
 import type Stripe from "stripe";
 import { getSupabaseAdmin } from "./supabaseAdmin";
 import {
+  CANCELLABLE_STATUSES,
+  DEFERRED_SWEEP_LIMIT,
   deferredCancelIdempotencyKey,
   deferredCancellationIsDue,
   isCancelResult,
@@ -335,16 +337,29 @@ export async function cancelSubscriptionForUser(
  * checks here exist only to avoid a pointless Stripe call.
  *
  * ══════════════════════════════════════════════════════════════
- * IT NEVER THROWS, AND THAT IS DELIBERATE
+ * IT REPORTS FAILURE. IT NEVER SWALLOWS IT. (Phase 3C.3)
  * ══════════════════════════════════════════════════════════════
  *
- * The order for the paid cycle is already durable by the time this runs.
- * Throwing would answer 500, and on redelivery the fulfillment ahead of
- * it would answer 'ignored' or return the existing order - so failing
- * here must not undo a delivery that has already happened. A failure
- * leaves the decision PENDING, which is the safe state: the customer
- * keeps a subscription they asked to end rather than losing one they
- * paid for, and the very next renewal applies it.
+ * This function itself does not throw - every outcome is a returned
+ * value, so the caller decides. But "the next renewal will apply it" is
+ * NOT an acceptable recovery story and is no longer claimed anywhere:
+ * the next renewal is 28 days away and it charges the customer again, so
+ * a transient failure here would turn "exactly one further cycle" into
+ * two at the customer's expense.
+ *
+ * TWO INDEPENDENT RECOVERY PATHS, neither of which needs another paid
+ * invoice:
+ *
+ *   1. THE WEBHOOK RETRIES. handleInvoicePaid treats 'error' as fatal and
+ *      throws, so the event is never recorded as processed and Stripe
+ *      redelivers it - for up to three days, with backoff. Everything
+ *      ahead of this call is idempotent, so a redelivery re-attempts the
+ *      cancellation and nothing else: the same order, the same email
+ *      claim, no second charge.
+ *   2. THE DAILY SWEEP. sweepDueDeferredCancellations below finds every
+ *      cancellation whose owed cycle is already paid and which Stripe
+ *      still does not hold, and re-attempts it. That is the net for the
+ *      case where Stripe stops redelivering before the problem is fixed.
  *
  * ══════════════════════════════════════════════════════════════
  * A FAILED RENEWAL NEEDS NO POLICY OF ITS OWN
@@ -441,6 +456,145 @@ export async function applyDeferredCancellationFromRenewal(
 
   const payload = (rpcData ?? {}) as { result?: unknown };
   return isDeferredApplyResult(payload.result) ? payload.result : "error";
+}
+
+export type DeferredSweepSummary = {
+  /** Rows that are genuinely owed a Stripe cancellation right now. */
+  due: number;
+  applied: number;
+  /** Stripe already held it; the row was repaired or was already right. */
+  alreadyScheduled: number;
+  failed: number;
+  /** True when the work list itself could not be read. */
+  errored: boolean;
+};
+
+/**
+ * The safety net under the webhook retry (Phase 3C.3).
+ *
+ * ══════════════════════════════════════════════════════════════
+ * THE WINDOW IT CLOSES, CONCRETELY
+ * ══════════════════════════════════════════════════════════════
+ *
+ * handleInvoicePaid throws when the deferred cancellation cannot be
+ * applied, so Stripe redelivers the event. That is the fast path and it
+ * handles essentially every transient failure - but Stripe stops
+ * redelivering after about three days. If the problem outlives that
+ * budget, the cancellation would sit unapplied until the NEXT renewal,
+ * which is 28 days away and charges the customer a second extra cycle.
+ *
+ * This sweep is what makes that impossible. It needs no invoice, no
+ * event and no customer action: it re-derives due-ness from durable local
+ * state alone, so recovery is bounded by the cron schedule rather than by
+ * Stripe's retry budget or by the billing cadence.
+ *
+ * ══════════════════════════════════════════════════════════════
+ * WHAT "DUE" MEANS, AND WHY IT CANNOT TOUCH HISTORY
+ * ══════════════════════════════════════════════════════════════
+ *
+ * Four conditions, all durable, all required:
+ *
+ *   1. cancellation_requested_at IS NOT NULL - an authenticated customer
+ *      actually asked. This alone excludes every historical subscription
+ *      and every Stripe Dashboard cancellation.
+ *   2. cancel_at IS NULL - Stripe does not hold it yet.
+ *   3. current_period_end >= cancellation_effective_at - THE OWED CYCLE
+ *      IS PROVEN PAID. current_period_end only ever advances through
+ *      activate_subscription_from_invoice, which runs only from an
+ *      invoice Stripe reports as paid and whose total matches the frozen
+ *      subscription total. There is no other writer, so this is proof
+ *      rather than inference.
+ *   4. a live B2C subscription with a Stripe binding.
+ *
+ * THIS IS NOT A NULL-KEYED SWEEP. The absolute rule that email retries
+ * may select 'failed' and never NULL exists because a NULL email column
+ * means "this feature did not exist when this happened". `cancel_at IS
+ * NULL` means nothing of the sort: it is a state this code deliberately
+ * writes, it is only ever reached together with a non-NULL customer
+ * request, and condition 3 additionally requires a paid renewal that
+ * already happened. The 451 historical subscriptions carry NULL on
+ * cancellation_requested_at and can never be selected.
+ *
+ * It performs no local write of its own. Every row goes through
+ * applyDeferredCancellationFromRenewal, which re-reads under a row lock
+ * and re-checks all four conditions, so a row that stopped being due
+ * between the query and the attempt is refused there rather than here.
+ */
+export async function sweepDueDeferredCancellations(
+  stripe: Stripe,
+  deps?: { getAdmin?: typeof getSupabaseAdmin }
+): Promise<DeferredSweepSummary> {
+  const summary: DeferredSweepSummary = {
+    due: 0, applied: 0, alreadyScheduled: 0, failed: 0, errored: false,
+  };
+
+  const admin = (deps?.getAdmin ?? getSupabaseAdmin)();
+  if (!admin) {
+    console.error("Deferred cancellation sweep: SUPABASE_SECRET_KEY is not configured.");
+    summary.errored = true;
+    return summary;
+  }
+
+  const { data, error } = await admin
+    .from("subscriptions")
+    .select("id, stripe_subscription_id, cancellation_effective_at, current_period_end")
+    .eq("customer_type", "private")
+    .in("status", [...CANCELLABLE_STATUSES])
+    .not("cancellation_requested_at", "is", null)
+    .not("cancellation_effective_at", "is", null)
+    .not("stripe_subscription_id", "is", null)
+    .is("cancel_at", null)
+    .limit(DEFERRED_SWEEP_LIMIT);
+
+  if (error) {
+    // A work list this sweep cannot read is reported, never swallowed as
+    // a clean run of zero.
+    console.error("Deferred cancellation sweep: work list failed:", error.message);
+    summary.errored = true;
+    return summary;
+  }
+
+  const rows = (data ?? []) as unknown as Array<
+    Pick<SubscriptionRow, "id" | "stripe_subscription_id" | "cancellation_effective_at" | "current_period_end">
+  >;
+
+  for (const row of rows) {
+    // The paid-cycle proof. A late cancellation still inside its owed
+    // cycle is pending, not due, and must not be touched.
+    if (!deferredCancellationIsDue({
+      periodEnd: row.current_period_end,
+      promisedAt: row.cancellation_effective_at,
+    })) {
+      continue;
+    }
+
+    summary.due += 1;
+
+    // One failure never stops the rest of the batch.
+    let outcome: DeferredApplyResult | "error";
+    try {
+      outcome = await applyDeferredCancellationFromRenewal(stripe, row.stripe_subscription_id as string);
+    } catch (err) {
+      console.error(
+        `Deferred cancellation sweep: ${row.id} threw:`,
+        err instanceof Error ? err.message : "unknown error"
+      );
+      summary.failed += 1;
+      continue;
+    }
+
+    if (outcome === "applied") summary.applied += 1;
+    else if (outcome === "already_scheduled") summary.alreadyScheduled += 1;
+    else {
+      // 'too_early' and 'nothing_pending' cannot occur for a row this
+      // query selected and the due check passed, so either is as much a
+      // problem as 'error' and is counted with it rather than hidden.
+      summary.failed += 1;
+      console.error(`Deferred cancellation sweep: ${row.id} -> ${outcome}`);
+    }
+  }
+
+  return summary;
 }
 
 /* ══════════════════════════════════════════════════════════════

@@ -476,7 +476,12 @@ test("sql: the sweep writes notification state and nothing else", () => {
 });
 
 test("scope: the retry touches no other feature", () => {
-  const all = wiringCode + routeCode + withoutComments(rules);
+  // Phase 3C.3 gave the ROUTE a second job - the deferred subscription
+  // cancellation sweep - which legitimately needs the Stripe client. What
+  // this test protects is the RETRY itself, so the route is checked
+  // separately below against the symbols that would mean the retry had
+  // grown into another feature.
+  const all = wiringCode + withoutComments(rules);
   // Reading a subscription id or an invoice id off the frozen attempt is
   // how the source label is derived; these are the ACTIONS that must be
   // out of reach.
@@ -578,7 +583,25 @@ test("endpoint: it is server-only and takes no input from the caller", () => {
 });
 
 test("endpoint: it answers with counts and no customer data", () => {
-  assert.match(routeCode, /Response\.json\(summary, \{ status: 200 \}\)/);
+  // Phase 3C.3 merges one further counter block into the answer. Still
+  // counts only - asserted on the merged shape rather than on the bare
+  // summary, and the added block is checked field by field below.
+  assert.match(routeCode, /Response\.json\(\{ \.\.\.summary, deferredCancellations \}, \{ status: 200 \}\)/);
+  const deferredFields = ["due", "applied", "alreadyScheduled", "failed", "errored"];
+  const sweepType = read("lib/subscriptionCancellation.ts");
+  const block = sweepType.slice(
+    sweepType.indexOf("export type DeferredSweepSummary = {"),
+    sweepType.indexOf("};", sweepType.indexOf("export type DeferredSweepSummary = {"))
+  );
+  for (const field of deferredFields) {
+    assert.ok(block.includes(`${field}:`), `the sweep summary lost ${field}`);
+  }
+  for (const leak of [
+    "orderNumber", "order_number", "email", "name", "address", "subscriptionId",
+    "stripe_subscription_id", "cancel_at",
+  ]) {
+    assert.ok(!block.includes(leak), `the sweep summary carries ${leak}`);
+  }
   // The summary type is closed: four counts.
   assert.match(rules, /export type InternalNotificationRetrySummary = \{/);
   const summaryBlock = rules.slice(
