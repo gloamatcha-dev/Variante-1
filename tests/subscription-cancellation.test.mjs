@@ -1537,12 +1537,22 @@ test("3C.5 (6): customer.subscription.updated cannot advance the proof", () => {
 test("3C.5 (7): a successful subscription invoice.paid DOES advance it, from the validated period", () => {
   const fulfilment = read("lib/subscriptionInvoiceFulfillment.ts");
   const fulfilmentCode = withoutComments(fulfilment);
-  // The value is the period this flow already validated off the Stripe
-  // subscription it re-read - not a browser value, not the event payload
-  // and not a wall clock.
+  // The value is the service period of THE INVOICE ITSELF, off its own
+  // non-proration subscription lines - not a browser value, not the event
+  // payload, not a wall clock, and since Phase 3C.6 not the current
+  // Stripe subscription either. See tests/subscription-invoice-fulfillment
+  // for the resolver's own behaviour.
+  assert.ok(fulfilmentCode.includes(
+    "const paidPeriod = resolvePaidInvoiceSubscriptionPeriod(invoice, stripeSubscriptionId);"),
+    "the paid period is not resolved from the invoice");
+  assert.ok(fulfilmentCode.includes("paidPeriodEnd: paidPeriod.end,"),
+    "the paid period comes from somewhere other than the invoice's own lines");
+  assert.ok(!/paidPeriodEnd: period\./.test(fulfilmentCode),
+    "the paid period follows the current subscription period again");
+  // The current subscription period is still resolved and still goes to
+  // the activation, which is where a mirror of Stripe belongs.
   assert.ok(fulfilmentCode.includes("const period = resolveSubscriptionPeriod(stripeSubscription);"));
-  assert.ok(fulfilmentCode.includes("paidPeriodEnd: period.currentPeriodEnd,"),
-    "the paid period comes from somewhere other than the validated Stripe period");
+  assert.ok(fulfilmentCode.includes("currentPeriodEnd: period.currentPeriodEnd,"));
   assert.ok(fulfilmentCode.includes("stripeInvoiceId: invoice.id as string,"));
   assert.ok(fulfilmentCode.includes("subscriptionId: subscription.id,"));
   // The invoice it names is the one the fulfillment re-read from Stripe
@@ -1562,8 +1572,49 @@ test("3C.5 (7): a successful subscription invoice.paid DOES advance it, from the
     < invoiceHandler.indexOf("applyDeferredCancellationFromRenewal("),
     "the cancellation is attempted before the payment is proven");
 
-  // A missing period end records nothing rather than guessing one.
-  assert.ok(fulfilmentCode.includes("if (period.currentPeriodEnd) {"));
+  // A period that cannot be proven FAILS CLOSED: nothing is recorded and
+  // the deferred cancellation below is never reached, because the
+  // fulfillment returns 'failed' and the handler throws on it.
+  assert.ok(fulfilmentCode.includes("if (!paidPeriod.ok) {"));
+  assert.ok(fulfilmentCode.indexOf("if (!paidPeriod.ok) {") < recordAt,
+    "the recording is attempted before the period is proven");
+});
+
+test("3C.6: a delayed invoice paying only through P2 cannot unlock a cancellation owed P3", () => {
+  // THE CONSEQUENCE OF 3C.6 FOR THIS PHASE, end to end.
+  //
+  // Invoice A bought P1 -> P2 and is processed late, while Stripe already
+  // runs P2 -> P3. lib/subscriptionInvoiceRules.ts resolves A's period
+  // off A's own lines, so the most last_paid_period_end can become from
+  // A is P2 - never the P3 the subscription happens to be in.
+  const P1 = "2026-08-20T00:00:00.000Z";
+  const P2 = "2026-09-17T00:00:00.000Z";
+  const P3 = "2026-10-15T00:00:00.000Z";
+  assert.equal(Date.parse(P2) - Date.parse(P1), CADENCE_MS);
+  assert.equal(Date.parse(P3) - Date.parse(P2), CADENCE_MS);
+
+  // A late cancellation asked during P1 -> P2 is promised P3.
+  const decided = resolveCancellationSchedule({
+    requestAt: "2026-09-10T00:00:00.000Z", currentPeriodEnd: P2,
+  });
+  assert.equal(decided.schedule.timing, "late");
+  assert.equal(decided.schedule.effectiveCancelAt, P3);
+
+  // A's payment proves P2, and P2 does NOT reach the promise. The
+  // subscription keeps running, which is correct: the customer is owed
+  // the P2 -> P3 cycle and has not been billed for it yet.
+  assert.equal(deferredCancellationIsPaid({ paidPeriodEnd: P2, promisedAt: P3 }), false,
+    "an invoice that paid only through P2 unlocked a cancellation owed P3");
+  // Whereas reading the CURRENT subscription period would have handed
+  // over P3 and unlocked it - which is exactly the defect 3C.6 removed.
+  assert.equal(deferredCancellationIsPaid({ paidPeriodEnd: P3, promisedAt: P3 }), true);
+
+  // Only the invoice for P2 -> P3, once genuinely paid, advances it.
+  assert.ok(dueListFn.includes("s.last_paid_period_end >= s.cancellation_effective_at"));
+  assert.ok(applyFn.includes("v_sub.last_paid_period_end < v_sub.cancellation_effective_at"));
+  // And the period condition still has to hold too, so neither fact
+  // alone can end a subscription.
+  assert.ok(dueListFn.includes("s.current_period_end >= s.cancellation_effective_at"));
 });
 
 test("3C.5 (8): a dunning retry that finally pays advances it - with no second renewal", () => {

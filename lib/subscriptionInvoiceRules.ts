@@ -366,3 +366,185 @@ export function resolveSubscriptionPeriod(subscription: Stripe.Subscription): Su
 
   return { currentPeriodStart: start, currentPeriodEnd: end, nextDeliveryAt: end };
 }
+
+/* ── The period ONE PAID INVOICE actually paid for ───────────── */
+
+/**
+ * The service period of a specific paid invoice, or a refusal.
+ *
+ * Never a partial answer: an invoice whose period cannot be established
+ * beyond doubt produces `ok: false`, and the caller must not record a
+ * payment proof from it.
+ */
+export type PaidInvoicePeriodResult =
+  | { ok: true; start: string; end: string }
+  | { ok: false; reason: string };
+
+/**
+ * True when the line is a NON-PRORATION recurring line belonging to
+ * exactly this Stripe subscription.
+ *
+ * Every clause is a way a line could otherwise smuggle in the wrong
+ * period:
+ *
+ *   parent.type                 a one-time invoice item has
+ *                               'invoice_item_details' and describes no
+ *                               subscription period at all, even when it
+ *                               names a subscription.
+ *   proration === false         a proration line carries the stub period
+ *                               it was computed over, not the cycle that
+ *                               was billed. Compared to `false` rather
+ *                               than negated, so an absent or
+ *                               non-boolean flag is not read as "not a
+ *                               proration".
+ *   the subscription id         another subscription of the same
+ *                               customer must never establish this one's
+ *                               paid period. Both places Stripe reports
+ *                               it are checked, and if either is present
+ *                               and disagrees the line is refused rather
+ *                               than accepted on the strength of the
+ *                               other.
+ */
+function lineBelongsToSubscriptionCycle(
+  line: Stripe.InvoiceLineItem,
+  stripeSubscriptionId: string
+): boolean {
+  const parent = line.parent;
+  if (!parent || parent.type !== "subscription_item_details") return false;
+
+  const details = parent.subscription_item_details;
+  if (!details) return false;
+  if (details.proration !== false) return false;
+
+  // Stripe reports the owning subscription in two places. Neither is
+  // guaranteed present, so at least one must be, and any that IS present
+  // must name this subscription.
+  const fromDetails = typeof details.subscription === "string" ? details.subscription : null;
+  const fromLine = idOf(line.subscription as string | { id: string } | null | undefined);
+  if (!fromDetails && !fromLine) return false;
+  if (fromDetails && fromDetails !== stripeSubscriptionId) return false;
+  if (fromLine && fromLine !== stripeSubscriptionId) return false;
+
+  return true;
+}
+
+/** A Stripe period boundary: a finite, positive, whole-second epoch. */
+function periodSecondsAreUsable(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+/**
+ * WHICH PERIOD DID *THIS* INVOICE PAY FOR? (Phase 3C.6)
+ *
+ * ══════════════════════════════════════════════════════════════
+ * WHY THIS IS NOT resolveSubscriptionPeriod
+ * ══════════════════════════════════════════════════════════════
+ *
+ * resolveSubscriptionPeriod answers a different question: what period is
+ * the Stripe subscription in RIGHT NOW. That is the correct source for
+ * reconciling current_period_start/current_period_end, and it is wrong -
+ * dangerously wrong - as payment evidence.
+ *
+ * An invoice.paid event is not guaranteed to be processed inside the
+ * period it belongs to. Stripe redelivers for about three days, a failed
+ * handler leaves the event unrecorded, an operator can resend an event
+ * from the Dashboard at any later time, and delivery order is not
+ * guaranteed. So invoice A, whose service period was P1 to P2, can be
+ * processed when the subscription has already advanced to P2 to P3.
+ * Reading the subscription then would pair A's id with P3 and claim
+ * proof of a payment that has not happened.
+ *
+ * The service period therefore comes from the INVOICE, which is
+ * immutable once finalised, and specifically from its subscription line
+ * items - `Stripe.InvoiceLineItem.period`.
+ *
+ * NOT invoice.period_start / invoice.period_end. The installed SDK
+ * documents those two as "the earliest/latest timestamp at which invoice
+ * items can be associated with this invoice" and says in as many words:
+ * "Use the line item period to get the service period for each price."
+ * They are an envelope around the invoice, not the cycle that was
+ * bought.
+ *
+ * ══════════════════════════════════════════════════════════════
+ * A GLOA INVOICE HAS MORE THAN ONE RECURRING LINE
+ * ══════════════════════════════════════════════════════════════
+ *
+ * Every subscription bills merchandise AND recurring shipping, so
+ * lines.data[0] is not the answer - it is a coin toss between two prices
+ * whose order Stripe documents but does not owe us. Both are collected,
+ * and because both describe the same four-weekly cycle they must AGREE.
+ *
+ * If they disagree, this refuses. It does not take the earliest, the
+ * latest or the first: a disagreement means the invoice is not the shape
+ * this system was built for, and inventing an answer would put a
+ * cancellation date on a guess.
+ *
+ * ══════════════════════════════════════════════════════════════
+ * PAGINATION IS A REFUSAL, NOT AN ASSUMPTION
+ * ══════════════════════════════════════════════════════════════
+ *
+ * invoice.lines is an ApiList and carries has_more. The embedded first
+ * page is used - a GLOA invoice has two recurring lines and the page
+ * holds ten, so it is always complete in practice - but "in practice" is
+ * not a proof, so has_more true is refused outright rather than answered
+ * from a partial list. A hidden line that disagreed about the period
+ * would otherwise be invisible, and the disagreement check above is the
+ * whole safety property.
+ *
+ * FAILING CLOSED COSTS THE CUSTOMER NOTHING HERE. The order for the
+ * cycle is created before this is consulted, so the package still ships;
+ * what a refusal withholds is only the evidence that would let a
+ * deferred cancellation end the subscription, and withholding that means
+ * the customer keeps a cycle rather than losing one.
+ */
+export function resolvePaidInvoiceSubscriptionPeriod(
+  invoice: Stripe.Invoice,
+  stripeSubscriptionId: string
+): PaidInvoicePeriodResult {
+  if (!stripeSubscriptionId) {
+    return { ok: false, reason: "no stripe subscription to resolve a paid period for" };
+  }
+
+  const lines = invoice.lines;
+  if (!lines || !Array.isArray(lines.data)) {
+    return { ok: false, reason: "invoice carries no line items" };
+  }
+  if (lines.has_more === true) {
+    return { ok: false, reason: "invoice line items are paginated, so the period cannot be proven" };
+  }
+
+  const cycleLines = lines.data.filter(line => lineBelongsToSubscriptionCycle(line, stripeSubscriptionId));
+  if (cycleLines.length === 0) {
+    return {
+      ok: false,
+      reason: `invoice has no non-proration subscription line for ${stripeSubscriptionId}`,
+    };
+  }
+
+  // A qualifying line with an unusable period is a REFUSAL, never a
+  // line to skip: skipping it would let the remaining lines answer for
+  // a cycle one of them disagreed about.
+  for (const line of cycleLines) {
+    const period = line.period;
+    if (!period
+      || !periodSecondsAreUsable(period.start)
+      || !periodSecondsAreUsable(period.end)
+      || period.end <= period.start) {
+      return { ok: false, reason: "a subscription line has no usable service period" };
+    }
+  }
+
+  const start = cycleLines[0].period.start;
+  const end = cycleLines[0].period.end;
+  for (const line of cycleLines) {
+    if (line.period.start !== start || line.period.end !== end) {
+      return { ok: false, reason: "subscription lines disagree about the service period" };
+    }
+  }
+
+  return {
+    ok: true,
+    start: new Date(start * 1000).toISOString(),
+    end: new Date(end * 1000).toISOString(),
+  };
+}

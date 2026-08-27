@@ -15,6 +15,7 @@ import {
   idOf,
   resolveGloaSubscriptionId,
   resolveInvoiceSubscriptionId,
+  resolvePaidInvoiceSubscriptionPeriod,
   resolveSubscriptionPeriod,
   stripeSubscriptionIdMatches,
   validateLocalSubscription,
@@ -48,6 +49,7 @@ const withoutComments = source => source
 
 const webhookCode = withoutComments(webhook);
 const fulfillmentCode = withoutComments(fulfillment);
+const rulesCode = withoutComments(rules);
 
 const UUID = n => `${String(n).repeat(8)}-${String(n).repeat(4)}-${String(n).repeat(4)}-${String(n).repeat(4)}-${String(n).repeat(12)}`;
 const SUB_ID = UUID(1);
@@ -320,6 +322,349 @@ test("period: the cycle boundaries are Stripe's, taken from the subscription ITE
   });
   const code = withoutComments(rules);
   assert.ok(!/setMonth|addMonths|30 \* 24|31 \* 24/.test(code), "a period was computed locally");
+});
+
+/* ── Phase 3C.6. WHICH PERIOD DID *THIS* INVOICE PAY FOR? ───── */
+
+/**
+ * The three cycle boundaries every test below is built from. Exactly 28
+ * days apart, because the cadence is four weeks and never a month.
+ */
+const P1 = Date.parse("2026-08-20T00:00:00.000Z") / 1000;
+const P2 = P1 + 28 * 24 * 60 * 60;
+const P3 = P2 + 28 * 24 * 60 * 60;
+
+const SUB_STRIPE_ID = "sub_gloa_1";
+const OTHER_STRIPE_SUB = "sub_someone_else";
+
+/**
+ * "The test did not mention this field" and "the field is missing from
+ * the object" are different fixtures, and the fail-closed cases depend on
+ * the second. A plain `?? default` collapses them, so absence is spelled.
+ */
+const ABSENT = Symbol("absent");
+const given = (value, fallback) =>
+  value === undefined ? fallback : (value === ABSENT ? undefined : value);
+
+/** A recurring subscription line, in the installed SDK's actual shape. */
+const cycleLine = (overrides = {}) => ({
+  id: given(overrides.id, "il_1"),
+  object: "line_item",
+  period: given(overrides.period, { start: P1, end: P2 }),
+  subscription: given(overrides.subscription, SUB_STRIPE_ID),
+  parent: given(overrides.parent, {
+    type: "subscription_item_details",
+    invoice_item_details: null,
+    subscription_item_details: {
+      invoice_item: null,
+      proration: given(overrides.proration, false),
+      proration_details: null,
+      subscription: given(overrides.detailsSubscription, SUB_STRIPE_ID),
+      subscription_item: given(overrides.subscriptionItem, "si_1"),
+    },
+  }),
+});
+
+/** A one-time invoice item line, which describes no subscription cycle. */
+const invoiceItemLine = (overrides = {}) => ({
+  id: "il_item",
+  object: "line_item",
+  period: { start: P2, end: P3 },
+  subscription: null,
+  parent: {
+    type: "invoice_item_details",
+    subscription_item_details: null,
+    invoice_item_details: {
+      invoice_item: "ii_1",
+      proration: false,
+      proration_details: null,
+      subscription: overrides.subscription !== undefined ? overrides.subscription : null,
+    },
+  },
+});
+
+const invoiceWith = (lines, hasMore = false) => ({
+  id: "in_A",
+  lines: { object: "list", data: lines, has_more: hasMore, url: "/v1/invoices/in_A/lines" },
+});
+
+/** The two recurring lines a real GLOA invoice carries. */
+const matchaLine = () => cycleLine({ id: "il_matcha", subscriptionItem: "si_matcha" });
+const shippingLine = () => cycleLine({ id: "il_shipping", subscriptionItem: "si_shipping" });
+
+test("3C.6 (1): matcha AND recurring shipping both count, and they must agree", () => {
+  // A GLOA invoice has TWO recurring lines. lines.data[0] would be a coin
+  // toss between them, so both are collected and both are required to
+  // describe the same four-weekly cycle.
+  const resolved = resolvePaidInvoiceSubscriptionPeriod(
+    invoiceWith([matchaLine(), shippingLine()]), SUB_STRIPE_ID
+  );
+  assert.deepEqual(resolved, {
+    ok: true,
+    start: new Date(P1 * 1000).toISOString(),
+    end: new Date(P2 * 1000).toISOString(),
+  });
+  // Order must not matter.
+  const reversed = resolvePaidInvoiceSubscriptionPeriod(
+    invoiceWith([shippingLine(), matchaLine()]), SUB_STRIPE_ID
+  );
+  assert.deepEqual(reversed, resolved, "the answer depends on line order");
+  // And a single-line invoice still resolves.
+  assert.equal(
+    resolvePaidInvoiceSubscriptionPeriod(invoiceWith([matchaLine()]), SUB_STRIPE_ID).end,
+    new Date(P2 * 1000).toISOString()
+  );
+});
+
+test("3C.6 (2)(3)(12): THE DELAYED INVOICE. A pays through P2, the subscription is already at P3", () => {
+  // THE DEFECT THIS PINS, and the whole reason Phase 3C.6 exists.
+  //
+  // Invoice A bought P1 -> P2. Its invoice.paid was delayed: Stripe
+  // redelivers for about three days, a failed handler leaves the event
+  // unrecorded, an operator can resend one at any time, and delivery
+  // order is not guaranteed. By the time A is processed the subscription
+  // already runs P2 -> P3.
+  const invoiceA = invoiceWith([matchaLine(), shippingLine()]);           // P1 -> P2
+  const currentSubscription = {                                          // P2 -> P3
+    items: { data: [{ current_period_start: P2, current_period_end: P3 }] },
+  };
+
+  // FACT A. The reconciled CURRENT Stripe state, which STEP 1 passes to
+  // activate_subscription_from_invoice. It is P3, and that is correct:
+  // the column mirrors Stripe.
+  const factA = resolveSubscriptionPeriod(currentSubscription);
+  assert.equal(factA.currentPeriodEnd, new Date(P3 * 1000).toISOString(),
+    "the current period reconciliation regressed while fixing the payment proof");
+
+  // FACT B. The PAYMENT PROOF, which STEP 3 passes to
+  // record_paid_subscription_period. It is P2, because P2 is all invoice
+  // A actually bought.
+  const factB = resolvePaidInvoiceSubscriptionPeriod(invoiceA, SUB_STRIPE_ID);
+  assert.equal(factB.ok, true);
+  assert.equal(factB.end, new Date(P2 * 1000).toISOString(),
+    "the payment proof followed the current subscription instead of the invoice");
+
+  // THE TWO MUST DIFFER HERE. If they are ever equal in this scenario,
+  // the proof is being read off the subscription again.
+  assert.notEqual(factB.end, factA.currentPeriodEnd,
+    "the paid period tracked the current subscription period");
+  assert.ok(Date.parse(factB.end) < Date.parse(factA.currentPeriodEnd));
+
+  // AND THE WIRING SENDS EACH TO THE RIGHT PLACE. STEP 1 gets the
+  // subscription period; STEP 3 gets the invoice period. The old,
+  // defective wiring must be gone.
+  assert.match(fulfillmentCode, /const period = resolveSubscriptionPeriod\(stripeSubscription\);/);
+  assert.match(fulfillmentCode, /currentPeriodEnd: period\.currentPeriodEnd,/);
+  assert.match(fulfillmentCode,
+    /const paidPeriod = resolvePaidInvoiceSubscriptionPeriod\(invoice, stripeSubscriptionId\);/);
+  assert.match(fulfillmentCode, /paidPeriodEnd: paidPeriod\.end,/);
+  assert.ok(!/paidPeriodEnd: period\./.test(fulfillmentCode),
+    "the payment proof is taken from the current subscription period again");
+
+  // Nothing anywhere derives the proof from the invoice ENVELOPE either.
+  // The SDK documents invoice.period_start/period_end as the window in
+  // which items may be attached and says to use the line period instead.
+  assert.ok(!/invoice\.period_start|invoice\.period_end/.test(fulfillmentCode + rulesCode),
+    "the invoice envelope period is used as the service period");
+});
+
+test("3C.6 (4): a one-time invoice item never establishes the subscription period", () => {
+  // parent.type is 'invoice_item_details'. It carries a period, and it
+  // even names the subscription, but it describes no billed cycle.
+  assert.equal(
+    resolvePaidInvoiceSubscriptionPeriod(invoiceWith([invoiceItemLine()]), SUB_STRIPE_ID).ok,
+    false, "a one-time invoice item established the paid period"
+  );
+  assert.equal(
+    resolvePaidInvoiceSubscriptionPeriod(
+      invoiceWith([invoiceItemLine({ subscription: SUB_STRIPE_ID })]), SUB_STRIPE_ID
+    ).ok,
+    false, "an invoice item naming the subscription established the paid period"
+  );
+  // Mixed with real recurring lines it is IGNORED, not fatal - and it
+  // must not drag the answer to its own P2 -> P3 period.
+  const mixed = resolvePaidInvoiceSubscriptionPeriod(
+    invoiceWith([invoiceItemLine(), matchaLine(), shippingLine()]), SUB_STRIPE_ID
+  );
+  assert.equal(mixed.ok, true);
+  assert.equal(mixed.end, new Date(P2 * 1000).toISOString());
+});
+
+test("3C.6 (5): a proration line never establishes the paid period", () => {
+  // A proration carries the stub period it was computed over, not the
+  // cycle that was billed.
+  const proration = cycleLine({
+    id: "il_proration", proration: true, period: { start: P2, end: P3 },
+  });
+  assert.equal(
+    resolvePaidInvoiceSubscriptionPeriod(invoiceWith([proration]), SUB_STRIPE_ID).ok,
+    false, "a proration established the paid period"
+  );
+  // Ignored rather than fatal when real lines are present.
+  const mixed = resolvePaidInvoiceSubscriptionPeriod(
+    invoiceWith([proration, matchaLine(), shippingLine()]), SUB_STRIPE_ID
+  );
+  assert.equal(mixed.ok, true);
+  assert.equal(mixed.end, new Date(P2 * 1000).toISOString());
+  // The flag is compared to false, so a MISSING or non-boolean proration
+  // flag is NOT read as "not a proration". Fail closed, not fail open.
+  for (const flag of [ABSENT, null, "false", 0]) {
+    assert.equal(
+      resolvePaidInvoiceSubscriptionPeriod(
+        invoiceWith([cycleLine({ id: "il_unknown", proration: flag })]), SUB_STRIPE_ID
+      ).ok,
+      false, `a proration flag of ${String(flag)} was treated as not-a-proration`
+    );
+  }
+  // A line with no parent at all, or a parent Stripe describes with a
+  // type this build does not know, is refused too.
+  for (const parent of [ABSENT, null, { type: "something_new_details" }]) {
+    assert.equal(
+      resolvePaidInvoiceSubscriptionPeriod(
+        invoiceWith([cycleLine({ id: "il_parentless", parent })]), SUB_STRIPE_ID
+      ).ok,
+      false, `a parent of ${JSON.stringify(parent)} established the paid period`
+    );
+  }
+});
+
+test("3C.6 (6): another subscription's line never establishes this one's paid period", () => {
+  // One customer may hold several subscriptions. B's cycle must never
+  // answer for A's, on either of the two places Stripe reports the owner.
+  const otherViaDetails = cycleLine({
+    id: "il_other", detailsSubscription: OTHER_STRIPE_SUB, subscription: OTHER_STRIPE_SUB,
+    period: { start: P2, end: P3 },
+  });
+  assert.equal(
+    resolvePaidInvoiceSubscriptionPeriod(invoiceWith([otherViaDetails]), SUB_STRIPE_ID).ok,
+    false, "another subscription established the paid period"
+  );
+  // Disagreement between the two sources is refused rather than resolved
+  // in favour of whichever one happens to match.
+  const conflicted = cycleLine({
+    id: "il_conflict", detailsSubscription: SUB_STRIPE_ID, subscription: OTHER_STRIPE_SUB,
+  });
+  assert.equal(
+    resolvePaidInvoiceSubscriptionPeriod(invoiceWith([conflicted]), SUB_STRIPE_ID).ok,
+    false, "a line whose two owner fields disagree was accepted"
+  );
+  // A line with no resolvable owner at all is refused too.
+  const ownerless = cycleLine({
+    id: "il_ownerless", detailsSubscription: null, subscription: null,
+  });
+  assert.equal(
+    resolvePaidInvoiceSubscriptionPeriod(invoiceWith([ownerless]), SUB_STRIPE_ID).ok,
+    false, "a line with no subscription relationship was accepted"
+  );
+  // But EITHER source alone, agreeing, is enough.
+  for (const line of [
+    cycleLine({ id: "il_a", subscription: null }),
+    cycleLine({ id: "il_b", detailsSubscription: null }),
+  ]) {
+    assert.equal(resolvePaidInvoiceSubscriptionPeriod(invoiceWith([line]), SUB_STRIPE_ID).ok, true);
+  }
+});
+
+test("3C.6 (7): qualifying lines that disagree about the period FAIL CLOSED", () => {
+  // No earliest, no latest, no first. A disagreement means the invoice is
+  // not the shape this system was built for, and a cancellation date must
+  // never come out of a guess.
+  const disagreeing = cycleLine({ id: "il_shipping", period: { start: P2, end: P3 } });
+  const result = resolvePaidInvoiceSubscriptionPeriod(
+    invoiceWith([matchaLine(), disagreeing]), SUB_STRIPE_ID
+  );
+  assert.equal(result.ok, false, "disagreeing lines produced an answer");
+  assert.match(result.reason, /disagree/);
+  // Neither candidate leaked out.
+  assert.ok(!("end" in result), "a refusal still carried a period");
+  // Disagreement on the START alone is equally fatal.
+  const sameEnd = cycleLine({ id: "il_x", period: { start: P1 - 60, end: P2 } });
+  assert.equal(
+    resolvePaidInvoiceSubscriptionPeriod(invoiceWith([matchaLine(), sameEnd]), SUB_STRIPE_ID).ok,
+    false, "lines disagreeing only about the start were accepted"
+  );
+});
+
+test("3C.6 (8)(9): no qualifying line, or an unusable period, FAILS CLOSED", () => {
+  // Nothing to read.
+  assert.equal(resolvePaidInvoiceSubscriptionPeriod(invoiceWith([]), SUB_STRIPE_ID).ok, false);
+  assert.equal(resolvePaidInvoiceSubscriptionPeriod({ id: "in_A" }, SUB_STRIPE_ID).ok, false);
+  assert.equal(
+    resolvePaidInvoiceSubscriptionPeriod({ id: "in_A", lines: { data: null } }, SUB_STRIPE_ID).ok,
+    false
+  );
+  // No subscription to resolve against.
+  assert.equal(resolvePaidInvoiceSubscriptionPeriod(invoiceWith([matchaLine()]), "").ok, false);
+
+  // An unusable period on a QUALIFYING line is a refusal, never a line to
+  // skip: skipping it would let the other lines answer for a cycle one of
+  // them disagreed about.
+  for (const period of [
+    ABSENT, null, {}, { start: P1 }, { end: P2 },
+    { start: P1, end: null }, { start: "2026-09-17", end: "2026-10-15" },
+    { start: P1, end: Number.NaN }, { start: P1, end: Infinity },
+    { start: 0, end: P2 }, { start: -P1, end: P2 },
+    { start: P2, end: P1 },          // end before start
+    { start: P1, end: P1 },          // zero length
+  ]) {
+    const one = resolvePaidInvoiceSubscriptionPeriod(
+      invoiceWith([cycleLine({ period })]), SUB_STRIPE_ID
+    );
+    assert.equal(one.ok, false, `an unusable period was accepted: ${JSON.stringify(period)}`);
+    const withGoodSibling = resolvePaidInvoiceSubscriptionPeriod(
+      invoiceWith([matchaLine(), cycleLine({ id: "il_bad", period })]), SUB_STRIPE_ID
+    );
+    assert.equal(withGoodSibling.ok, false,
+      `an unusable period was skipped in favour of its sibling: ${JSON.stringify(period)}`);
+  }
+});
+
+test("3C.6 (10): a paginated line list can never silently produce a payment proof", () => {
+  // invoice.lines is an ApiList and carries has_more. The embedded page
+  // holds ten and a GLOA invoice has two recurring lines, so it is always
+  // complete in practice - but "in practice" is not a proof. A hidden
+  // line that disagreed about the period would be invisible, and the
+  // disagreement check is the whole safety property.
+  const paginated = invoiceWith([matchaLine(), shippingLine()], true);
+  const result = resolvePaidInvoiceSubscriptionPeriod(paginated, SUB_STRIPE_ID);
+  assert.equal(result.ok, false, "a partial line list produced a payment proof");
+  assert.match(result.reason, /paginated/);
+  // Refused BEFORE the lines are read, so a complete-looking first page
+  // cannot talk its way past the flag.
+  assert.equal(resolvePaidInvoiceSubscriptionPeriod(invoiceWith([matchaLine()], true), SUB_STRIPE_ID).ok, false);
+  // has_more false is the normal case and resolves.
+  assert.equal(resolvePaidInvoiceSubscriptionPeriod(invoiceWith([matchaLine()], false), SUB_STRIPE_ID).ok, true);
+  // The resolver never pages by itself, and structurally cannot: the
+  // rules module is a leaf with type-only imports and not one await in
+  // it, so it can neither call Stripe nor walk a list.
+  const valueImports = rules.split(NEWLINE)
+    .filter(l => /^import /.test(l) && !/^import type /.test(l));
+  assert.deepEqual(valueImports, [], "the rules leaf gained a value import");
+  assert.ok(!/\bawait\b|\basync\b/.test(rulesCode), "the rules leaf performs I/O");
+  assert.ok(!/autoPaging|listLineItems/.test(rulesCode),
+    "the resolver pages the line list itself");
+});
+
+test("3C.6 (11): the same invoice always yields the same period, so a redelivery is a no-op", () => {
+  // IDEMPOTENCE STARTS HERE. The RPC's monotonic guard answers
+  // 'unchanged' only when the redelivery presents the SAME value - which
+  // holds because the value comes from the invoice, which is immutable
+  // once finalised. Read off the subscription, a redelivery in a later
+  // cycle would arrive carrying a LARGER value and the guard would wave
+  // it through as a legitimate advance.
+  const invoiceA = invoiceWith([matchaLine(), shippingLine()]);
+  const first = resolvePaidInvoiceSubscriptionPeriod(invoiceA, SUB_STRIPE_ID);
+  const second = resolvePaidInvoiceSubscriptionPeriod(invoiceA, SUB_STRIPE_ID);
+  assert.deepEqual(first, second);
+  // The resolver is pure: same input, same answer, no clock and no state.
+  assert.ok(!/Date\.now|new Date\(\)/.test(rulesCode), "the resolver reads a clock");
+
+  // AND THE GUARD ONLY REFUSES VALUES THAT ARE TOO SMALL. Pinned here
+  // because it is the reason the invoice, not the subscription, has to be
+  // the source: nothing downstream can catch an overstatement.
+  const migration = read("supabase/migrations/034_subscription_cancellation.sql");
+  assert.ok(migration.includes("v_sub.last_paid_period_end >= p_paid_period_end"));
+  assert.ok(migration.includes("'result', 'unchanged'"));
 });
 
 /* ── AA. One invoice, one order: the live database guarantee ── */
@@ -603,11 +948,17 @@ test("paid period: the fulfillment records what was paid, after the order and ne
   assert.match(fulfillmentCode, /admin\.rpc\("record_paid_subscription_period"/);
   assert.match(fulfillmentCode, /p_paid_period_end: input\.paidPeriodEnd/);
 
-  // The value is the period this flow already resolved off the Stripe
-  // subscription it re-read - never the webhook payload, never a browser
-  // value and never a wall clock.
+  // The value is the service period of THIS INVOICE, off its own
+  // non-proration subscription lines. Never the webhook payload, never a
+  // browser value, never a wall clock - and, since Phase 3C.6, never the
+  // current Stripe subscription either.
+  assert.match(fulfillmentCode,
+    /const paidPeriod = resolvePaidInvoiceSubscriptionPeriod\(invoice, stripeSubscriptionId\);/);
+  assert.match(fulfillmentCode, /paidPeriodEnd: paidPeriod\.end,/);
+  // The current subscription period is still resolved, and still goes to
+  // STEP 1 where it belongs.
   assert.match(fulfillmentCode, /const period = resolveSubscriptionPeriod\(stripeSubscription\);/);
-  assert.match(fulfillmentCode, /paidPeriodEnd: period\.currentPeriodEnd,/);
+  assert.match(fulfillmentCode, /currentPeriodEnd: period\.currentPeriodEnd,/);
 
   // ORDER OF OPERATIONS: activate, order, THEN record. The proof exists
   // before anything can act on it, and after the cycle it describes has
@@ -618,10 +969,18 @@ test("paid period: the fulfillment records what was paid, after the order and ne
   assert.ok(activateAt > -1 && orderAt > activateAt && recordAt > orderAt,
     "the paid period is recorded out of order");
 
-  // A missing period end records NOTHING rather than guessing one. The
-  // same gap already stops the activation advancing current_period_end,
-  // so a deferred cancellation simply waits - the safe direction.
-  assert.match(fulfillmentCode, /if \(period\.currentPeriodEnd\) \{/);
+  // A period that cannot be proven FAILS CLOSED. It does not skip the
+  // recording and carry on, and it does not guess: it returns 'failed',
+  // which the webhook turns into a 500 so Stripe redelivers. The order
+  // already exists, so the customer still gets their package; what is
+  // withheld is only the evidence that would end their subscription.
+  assert.match(fulfillmentCode, /if \(!paidPeriod\.ok\) \{/);
+  assert.match(fulfillmentCode, /return \{ kind: "failed", reason: `invoice \$\{invoice\.id\}: \$\{paidPeriod\.reason\}` \};/);
+  // And the refusal is reached BEFORE the recording, so nothing can be
+  // written from an unproven period.
+  assert.ok(fulfillmentCode.indexOf("if (!paidPeriod.ok) {")
+    < fulfillmentCode.indexOf("deps.recordPaidPeriod("),
+    "the recording is attempted before the period is proven");
 });
 
 test("paid period: a refusal or an error is fatal, so the invoice stays retryable", () => {

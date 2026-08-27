@@ -246,10 +246,15 @@ alter table public.subscriptions
 -- role holds execute on the function or update on the table.
 --
 -- IT IS A PERIOD, NOT AN EVENT TIME, and that is the point. The sweep
--- compares it to cancellation_effective_at - two period boundaries
--- derived from the same Stripe subscription - so no comparison anywhere
--- in this feature depends on the Vercel clock agreeing with the Postgres
--- clock. The subscription's own first payment is excluded by arithmetic
+-- compares it to cancellation_effective_at - two period boundaries - so
+-- no comparison anywhere in this feature depends on the Vercel clock
+-- agreeing with the Postgres clock.
+--
+-- AND IT IS THE INVOICE'S PERIOD, NOT THE SUBSCRIPTION'S. The value comes
+-- from the paid invoice's own subscription lines, so an invoice.paid
+-- processed after its cycle has passed records the cycle it actually
+-- bought rather than whichever cycle Stripe happens to be in when the
+-- event is handled. See section 4B. The subscription's own first payment is excluded by arithmetic
 -- rather than by timing: a late cancellation promises
 -- cancellation_effective_at = current period end + one cadence, so the
 -- period the customer was already in cannot reach it and only the ONE
@@ -1030,16 +1035,52 @@ $$;
 -- shipped is not touched, no attempt changes status, and no order is
 -- created, altered or looked at.
 --
+-- ── WHAT THIS FUNCTION CANNOT CHECK, AND WHO DOES (3C.6) ──────
+--
+-- It proves the invoice was PAID. It cannot prove which PERIOD that
+-- invoice bought, because no Stripe invoice line period is stored in
+-- PostgreSQL and pretending otherwise would be a correlation that still
+-- ultimately trusts the same caller-supplied number.
+--
+-- That half is the application's, and it is discharged in
+-- lib/subscriptionInvoiceRules.ts by
+-- resolvePaidInvoiceSubscriptionPeriod, which reads the service period
+-- off the INVOICE'S OWN non-proration subscription lines
+-- (Stripe.InvoiceLineItem.period) rather than off the Stripe
+-- subscription's current state.
+--
+-- The distinction is not academic. An invoice.paid may be processed long
+-- after its own cycle: Stripe redelivers for about three days, a failed
+-- handler leaves the event unrecorded, an operator may resend one at any
+-- time, and delivery order is not guaranteed. An invoice for P1 to P2 can
+-- therefore arrive while the subscription already runs P2 to P3. Reading
+-- the subscription would pair that invoice's id with P3 and claim proof
+-- of a payment nobody made; reading the invoice yields P2.
+--
+-- No column is added for it. Storing the line period here would only
+-- duplicate the same unverified input in a second place, where it would
+-- look authoritative without having become any more so.
+--
 -- ── IT ONLY EVER MOVES FORWARD ────────────────────────────────
 --
 -- The row is locked and the new value must be strictly greater than what
 -- is already there. So:
 --
---   * a redelivery of the same invoice.paid is a no-op ('unchanged'),
---     because the same invoice carries the same period end;
+--   * a redelivery of the same invoice.paid is a no-op ('unchanged').
+--     That holds because the caller derives the period from the INVOICE:
+--     one invoice always carries one service period, however late it is
+--     processed. Were the period read off the subscription instead, a
+--     redelivery in a later cycle would arrive carrying a LARGER value
+--     and this guard would wave it through as a legitimate advance;
 --   * an out-of-order delivery of an OLDER invoice cannot pull the proof
 --     backwards and re-open a cancellation that already applied;
 --   * the column is monotonic by construction rather than by convention.
+--
+--     Note which direction the guard protects. It refuses a value that is
+--     too SMALL. It cannot refuse one that is too LARGE, so it is no
+--     defence at all against a period that overstates what was paid -
+--     which is precisely why the caller must take that number off the
+--     invoice and not off the subscription.
 --
 -- IT WRITES NOTHING ELSE. Not status, not cancelled_at, not cancel_at,
 -- not either cancellation timestamp, not the period columns, not the

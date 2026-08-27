@@ -8,6 +8,7 @@ import {
   idOf,
   resolveGloaSubscriptionId,
   resolveInvoiceSubscriptionId,
+  resolvePaidInvoiceSubscriptionPeriod,
   resolveSubscriptionPeriod,
   stripeSubscriptionIdMatches,
   validateLocalSubscription,
@@ -58,7 +59,10 @@ import {
  *   record_paid_subscription_period      (034)
  *     locks the subscription and advances last_paid_period_end, but only
  *     after re-proving that a PAID attempt for this invoice exists on
- *     this subscription. Monotonic, so a redelivery is a no-op.
+ *     this subscription. Monotonic, so a redelivery is a no-op - which
+ *     holds because the value it is given comes from the INVOICE and not
+ *     from the subscription's current state, so the same invoice always
+ *     carries the same period.
  *
  * All three are individually atomic and all three are idempotent, so a
  * redelivery converges instead of duplicating. They are three
@@ -130,10 +134,11 @@ export type SubscriptionInvoiceDeps = {
    *
    * Separate from activateFromInvoice because migration 022 is live and
    * immutable, and because the two facts are genuinely different:
-   * activation reconciles the period Stripe currently reports, this
-   * states that GLOA saw that period paid for. current_period_end cannot
-   * do both jobs - the customer.subscription.updated reconciliation
-   * writes it too, and that is not a payment event.
+   * activation reconciles the period Stripe CURRENTLY reports, this
+   * states which period one specific invoice bought. They are different
+   * values whenever an invoice is processed late, and `paidPeriodEnd`
+   * must always be the second one - taken off the invoice's own
+   * subscription lines, never off the subscription.
    */
   recordPaidPeriod: (input: {
     subscriptionId: string;
@@ -435,33 +440,51 @@ export async function fulfillPaidSubscriptionInvoice(
   const order = await deps.createOrder({ checkoutAttemptId, subscription });
   const frozenItems = await deps.loadAttemptItems(checkoutAttemptId);
 
-  // STEP 3. RECORD THAT THIS PERIOD WAS PAID (Phase 3C.5).
+  // STEP 3. RECORD THAT THIS PERIOD WAS PAID (Phase 3C.5, corrected in
+  // Phase 3C.6).
   //
   // Strictly after the order exists and strictly before the caller can
   // act on a deferred cancellation, because a cancellation that ends a
   // subscription must be able to point at durable proof that the cycle it
-  // is ending was paid for. current_period_end cannot be that proof: the
-  // customer.subscription.updated reconciliation writes the same column
-  // from an event that is not a payment, so a failed renewal whose period
-  // moved anyway would otherwise look exactly like a paid one - and the
-  // customer would lose a cycle they had paid for.
+  // is ending was paid for.
   //
-  // The value is the period this same flow just reconciled, off the
-  // Stripe subscription re-read above. Not a browser value, not an event
-  // payload, and not a wall clock: a period boundary, so everything
-  // downstream compares periods to periods.
+  // ── TWO PERIODS, AND THEY ARE ALLOWED TO DIFFER ─────────────
   //
-  // A missing period end records nothing rather than guessing. The same
-  // gap already stops the activation from advancing current_period_end,
-  // so the deferred cancellation waits either way - which is the safe
-  // direction: the customer keeps the cycle.
-  if (period.currentPeriodEnd) {
-    await deps.recordPaidPeriod({
-      subscriptionId: subscription.id,
-      stripeInvoiceId: invoice.id as string,
-      paidPeriodEnd: period.currentPeriodEnd,
-    });
+  //   current_period_end    what Stripe's subscription says NOW.
+  //                         `period` above, passed to STEP 1. It is a
+  //                         reconciled mirror, and the
+  //                         customer.subscription.updated handler writes
+  //                         the same column from an event that is not a
+  //                         payment - so it can never be the proof.
+  //   last_paid_period_end  the service period THIS INVOICE bought.
+  //                         `paidPeriod` below, off the invoice's own
+  //                         subscription lines.
+  //
+  // They diverge whenever an invoice.paid is processed late: Stripe
+  // redelivers for about three days, a failed handler leaves the event
+  // unrecorded, an operator can resend one from the Dashboard at any
+  // time, and delivery order is not guaranteed. Invoice A for P1 to P2
+  // can therefore land while the subscription already runs P2 to P3.
+  // Reading the subscription here would record P3 and claim proof of a
+  // payment that never happened; reading the invoice records P2, which is
+  // exactly what A paid for. STEP 1 still gets P3, because that field is
+  // supposed to mirror Stripe.
+  //
+  // A period that cannot be proven FAILS CLOSED. Nothing is recorded, the
+  // deferred cancellation below is never reached, and the caller throws
+  // so Stripe can redeliver. The order for this cycle already exists, so
+  // the customer still gets their package; what a refusal withholds is
+  // only the evidence that would end their subscription.
+  const paidPeriod = resolvePaidInvoiceSubscriptionPeriod(invoice, stripeSubscriptionId);
+  if (!paidPeriod.ok) {
+    return { kind: "failed", reason: `invoice ${invoice.id}: ${paidPeriod.reason}` };
   }
+
+  await deps.recordPaidPeriod({
+    subscriptionId: subscription.id,
+    stripeInvoiceId: invoice.id as string,
+    paidPeriodEnd: paidPeriod.end,
+  });
 
   // The frozen customer snapshot, not Stripe's billing details. Stripe is
   // the payment authority; the subscription snapshot is the fulfillment
