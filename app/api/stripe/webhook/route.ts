@@ -22,6 +22,7 @@ import { sendInternalOrderNotificationIfNeeded } from "../../../../lib/internalO
 import { fulfillPaidSubscriptionInvoice, subscriptionInvoiceDeps } from "../../../../lib/subscriptionInvoiceFulfillment";
 import { idOf, resolveGloaSubscriptionId, stripeSubscriptionIdMatches } from "../../../../lib/subscriptionInvoiceRules";
 import {
+  applyDeferredCancellationFromRenewal,
   markSubscriptionCancelledFromStripe,
   syncSubscriptionFromStripe,
 } from "../../../../lib/subscriptionCancellation";
@@ -474,6 +475,31 @@ async function handleInvoicePaid(stripe: Stripe, event: Stripe.Event): Promise<v
     source: "subscription",
     stripeInvoiceId: result.stripeInvoiceId,
   });
+
+  // ── A DEFERRED LATE CANCELLATION (Phase 3C.2) ───────────────
+  //
+  // STRICTLY LAST, and strictly after the order for this cycle exists.
+  //
+  // A late cancellation promises one further full-price cycle and
+  // deliberately puts NOTHING on Stripe at request time: a cancel_at in a
+  // future period always prorates, whatever proration_behavior says, and
+  // a prorated renewal would fail the total check above for a cycle the
+  // customer had already paid for. This is the event that proves the
+  // owed cycle was paid, so the cancellation can now be set at Stripe for
+  // the end of the period that just became current - a current-period
+  // date, which prorates nothing.
+  //
+  // It answers 'nothing_pending' for every ordinary renewal, which is the
+  // overwhelmingly common case, and it never throws: the delivery above
+  // is already durable and must not be undone by a failure here. A
+  // failure simply leaves the decision pending for the next renewal.
+  const deferred = await applyDeferredCancellationFromRenewal(stripe, result.stripeSubscriptionId);
+  if (deferred !== "nothing_pending") {
+    // Stripe ids only. No customer, no amount, no email.
+    console.error(
+      `Stripe webhook: deferred cancellation for ${result.stripeSubscriptionId} -> ${deferred}`
+    );
+  }
 }
 
 /**

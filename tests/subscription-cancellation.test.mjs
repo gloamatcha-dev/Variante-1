@@ -15,6 +15,10 @@ import {
   CANCEL_RESULTS,
   CUTOFF_OFFSET_MS,
   cancelResultIsDurable,
+  cancellationDelivery,
+  deferredCancelIdempotencyKey,
+  deferredCancellationIsDue,
+  schedulesAtStripeNow,
   cancelResultStatus,
   cancelWasNewlyScheduled,
   isCancelResult,
@@ -87,7 +91,8 @@ const fnBody = (name, next) => sql034.slice(
   next ? sql034.indexOf(`create or replace function public.${next}`) : undefined
 );
 
-const scheduleFn = fnBody("schedule_subscription_cancellation", "sync_subscription_from_stripe");
+const scheduleFn = fnBody("schedule_subscription_cancellation", "apply_deferred_subscription_cancellation");
+const applyFn = fnBody("apply_deferred_subscription_cancellation", "sync_subscription_from_stripe");
 const syncFn = fnBody("sync_subscription_from_stripe", "mark_subscription_cancelled");
 const scheduleWrites = updateSetClauses(scheduleFn);
 
@@ -382,9 +387,26 @@ test("idempotency: it cannot collide with any other GLOA namespace", () => {
   }
 });
 
-test("idempotency: the service uses it on its single Stripe write", () => {
+test("idempotency: every Stripe write carries a key, and the keys cannot collide", () => {
+  // TWO writes since Phase 3C.2: the request-time one (early only) and
+  // the renewal-time one that applies a deferred late cancellation.
+  const updates = [...serviceCode.matchAll(/stripe\.subscriptions\.update\(/g)];
+  assert.equal(updates.length, 2, "unexpected number of Stripe subscription writes");
   assert.ok(serviceCode.includes("subscriptionCancelIdempotencyKey(\n            subscription.id,"));
-  assert.equal([...serviceCode.matchAll(/stripe\.subscriptions\.update\(/g)].length, 1);
+  assert.ok(serviceCode.includes("deferredCancelIdempotencyKey(row.id, effectiveCancelAt)"));
+  // Neither call may reach Stripe without one.
+  for (const update of updates) {
+    const call = serviceCode.slice(update.index, serviceCode.indexOf("}\n    );", update.index));
+    assert.ok(call.includes("idempotencyKey"), "a Stripe write has no idempotency key");
+  }
+  // Distinct namespaces, so the two can never collide on one subscription.
+  assert.ok(rulesCode.includes("gloa/subscription-cancel/"));
+  assert.ok(rulesCode.includes("gloa/subscription-defer/"));
+  assert.equal(
+    subscriptionCancelIdempotencyKey(SUB_ID, LATE_END) === deferredCancelIdempotencyKey(SUB_ID, LATE_END),
+    false,
+    "the two idempotency keys collide"
+  );
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -470,7 +492,11 @@ test("STRIPE SUCCEEDS, DB FAILS: reconcile-before-write stops a second schedule"
   const existingAt = serviceCode.indexOf("const existingCancelAt");
   const updateAt = serviceCode.indexOf("stripe.subscriptions.update(");
   assert.ok(retrieveAt < existingAt && existingAt < updateAt);
-  assert.ok(serviceCode.includes("if (!existingCancelAt) {"), "the update is not skipped when already scheduled");
+  assert.ok(serviceCode.includes("if (deliverNow && !existingCancelAt) {"),
+    "the update is not skipped when already scheduled");
+  // An existing Stripe cancellation overrides the timing: Stripe holds it
+  // NOW, so there is nothing left to defer.
+  assert.ok(serviceCode.includes("Boolean(existingCancelAt) || schedulesAtStripeNow(schedule.timing)"));
   assert.ok(serviceCode.includes("effectiveCancelAt: existingCancelAt"), "an existing schedule is not adopted");
 });
 
@@ -496,13 +522,19 @@ test("STRIPE SUCCEEDS, DB FAILS: the webhook self-heals the local row", () => {
    lost permanently.
    ══════════════════════════════════════════════════════════════ */
 
-test("RACE 1 (CASE A): nothing scheduled yet writes BOTH columns", () => {
-  assert.deepEqual(columnsWritten(scheduleWrites[1]), ["cancel_at", "cancellation_requested_at"]);
-  // Reached only when no cancellation stands: the whole cancel_at branch
-  // returns before it.
-  const guardAt = scheduleFn.indexOf("if v_sub.cancel_at is not null then");
+test("RACE 1 (CASE A): nothing standing yet writes all three columns", () => {
+  assert.deepEqual(columnsWritten(scheduleWrites[1]),
+    ["cancel_at", "cancellation_effective_at", "cancellation_requested_at"]);
+  // Reached only when no cancellation stands: the whole effective-date
+  // branch returns before it.
+  const guardAt = scheduleFn.indexOf("if v_sub.cancellation_effective_at is not null then");
   const writeAt = scheduleFn.indexOf("set cancellation_requested_at = p_requested_at,");
   assert.ok(guardAt > -1 && guardAt < writeAt, "CASE A runs before the already-scheduled branch");
+  // cancel_at is the PARAMETER, never the promise: a deferred late
+  // cancellation passes NULL and the row must say so.
+  assert.ok(scheduleWrites[1].includes("cancel_at                 = p_cancel_at"));
+  assert.ok(!scheduleWrites[1].includes("cancel_at                 = p_effective_at"),
+    "CASE A claims Stripe holds the promised date");
 });
 
 test("RACE 2 (CASE B): a genuine repeat writes NOTHING and moves nothing", () => {
@@ -533,11 +565,11 @@ test("RACE 3 (CASE C): a reconciled cancel_at fills ONLY the request timestamp",
 });
 
 test("RACE 4 (CASE D): a DIFFERENT cancel_at still conflicts with zero writes", () => {
-  const caseD = branch(scheduleFn, "if v_sub.cancel_at <> p_cancel_at then");
+  const caseD = branch(scheduleFn, "if v_sub.cancellation_effective_at <> p_effective_at then");
   assert.ok(caseD.includes("'conflict'"));
   assert.ok(!caseD.includes("update"), "the conflict branch writes");
   // It is checked FIRST, so no later branch can reach a mismatched date.
-  const dAt = scheduleFn.indexOf("if v_sub.cancel_at <> p_cancel_at then");
+  const dAt = scheduleFn.indexOf("if v_sub.cancellation_effective_at <> p_effective_at then");
   assert.ok(dAt < scheduleFn.indexOf("if v_sub.cancellation_requested_at is not null then"));
   assert.ok(dAt < scheduleFn.indexOf("set cancellation_requested_at = p_requested_at"));
 });
@@ -546,15 +578,54 @@ test("RACE 5: a Stripe Dashboard cancellation keeps a NULL request forever", () 
   // The pairing stays ONE-DIRECTIONAL. A symmetric constraint would make
   // an owner-initiated cancel_at unrepresentable, and the sync would have
   // had to invent a request that never happened.
-  assert.ok(sql034.includes("check (cancellation_requested_at is null or cancel_at is not null)"));
+  assert.ok(sql034.includes(
+    "check (cancellation_requested_at is null or cancellation_effective_at is not null)"));
   assert.ok(!sql034.includes("(cancellation_requested_at is null) = (cancel_at is null)"));
   assert.ok(!sql034.includes("cancel_at is null or cancellation_requested_at is not null"));
-  // Nothing fills the column outside an authenticated customer request:
-  // the sync only ever CLEARS it, and only when Stripe reports no
-  // cancellation at all.
+  // And the request must NOT require a cancel_at, or the deferred late
+  // state could not exist without lying about Stripe.
+  assert.ok(!sql034.includes("check (cancellation_requested_at is null or cancel_at is not null)"),
+    "a request is forced to claim a Stripe schedule");
+  // Nothing fills the column outside an authenticated customer request.
   assert.ok(!syncFn.includes("p_requested_at"), "the sync invents a request timestamp");
-  assert.ok(syncFn.includes("when p_cancel_at is null then null"));
+  // ── CLEARING IS A TRANSITION, NOT A VALUE ──────────────────
+  // Phase 3C.2 made this load-bearing. A deferred LATE cancellation holds
+  // no cancel_at at Stripe for the whole cycle before its renewal, so
+  // "Stripe reports no cancellation" is its normal resting state. Keying
+  // the clear on that value would have deleted the customer's request on
+  // the next card update or renewal event that happened to arrive.
+  assert.ok(
+    syncFn.includes("v_unscheduled := v_sub.cancel_at is not null and p_cancel_at is null"),
+    "the sync clears on a value rather than on a transition"
+  );
+  assert.ok(syncFn.includes("when v_unscheduled then null"));
   assert.ok(syncFn.includes("else v_sub.cancellation_requested_at"), "the sync overwrites the request");
+  // The old, now-wrong form must not come back.
+  assert.ok(
+    !/cancellation_requested_at = case\s+when p_cancel_at is null then null/.test(syncFn),
+    "the sync clears a deferred request Stripe never held"
+  );
+});
+
+test("RACE 5B: a deferred late cancellation survives every unrelated sync", () => {
+  // The exact regression the transition guard prevents: while a late
+  // cancellation waits for its last paid cycle the row holds a request
+  // and NO cancel_at, and Stripe legitimately reports none either.
+  assert.ok(syncFn.includes("v_unscheduled"), "no transition guard exists");
+  const requestedAssignment = syncFn.slice(
+    syncFn.indexOf("v_new_requested := case"),
+    syncFn.indexOf("end;", syncFn.indexOf("v_new_requested := case"))
+  );
+  assert.ok(requestedAssignment.includes("when v_unscheduled then null"));
+  assert.ok(!requestedAssignment.includes("p_cancel_at"),
+    "the request is cleared from a Stripe value rather than a transition");
+  // And the promised date survives the same way.
+  const effectiveAssignment = syncFn.slice(
+    syncFn.indexOf("v_new_effective := case"),
+    syncFn.indexOf("end;", syncFn.indexOf("v_new_effective := case"))
+  );
+  assert.ok(effectiveAssignment.includes("else v_sub.cancellation_effective_at"),
+    "an unrelated sync erases the promised end date");
 });
 
 test("RACE 6: a request that lost the race is still recorded", () => {
@@ -563,10 +634,10 @@ test("RACE 6: a request that lost the race is still recorded", () => {
   const caseCWriteAt = scheduleFn.indexOf("set cancellation_requested_at = p_requested_at\n");
   assert.ok(caseCWriteAt > -1, "CASE C performs no write");
   assert.ok(scheduleFn.indexOf("if v_sub.cancellation_requested_at is not null then") < caseCWriteAt);
-  assert.ok(scheduleFn.indexOf("if v_sub.cancel_at <> p_cancel_at then") < caseCWriteAt);
-  // Still inside the cancel_at branch, so it can never run on a row that
-  // has no schedule at all.
-  assert.ok(scheduleFn.indexOf("if v_sub.cancel_at is not null then") < caseCWriteAt);
+  assert.ok(scheduleFn.indexOf("if v_sub.cancellation_effective_at <> p_effective_at then") < caseCWriteAt);
+  // Still inside the standing-cancellation branch, so it can never run on
+  // a row that has no end date at all.
+  assert.ok(scheduleFn.indexOf("if v_sub.cancellation_effective_at is not null then") < caseCWriteAt);
 });
 
 test("RACE 7: once NON NULL the request timestamp is never moved again", () => {
@@ -623,11 +694,11 @@ test("RACE 9: a delayed webhook event cannot regress period or cancel_at", () =>
 
 test("RACE 10: no product, quantity, price, address, tax, money or order write", () => {
   const allowed = new Set([
-    "cancellation_requested_at", "cancel_at", "current_period_start", "current_period_end",
-    "status", "cancelled_at",
+    "cancellation_requested_at", "cancellation_effective_at", "cancel_at",
+    "current_period_start", "current_period_end", "status", "cancelled_at",
   ]);
   const clauses = updateSetClauses(sql034);
-  assert.equal(clauses.length, 4);
+  assert.equal(clauses.length, 5, "unexpected number of UPDATE statements");
   for (const clause of clauses) {
     for (const column of columnsWritten(clause)) {
       assert.ok(allowed.has(column), `034 writes ${column}`);
@@ -640,6 +711,268 @@ test("RACE 10: no product, quantity, price, address, tax, money or order write",
   ]) {
     assert.ok(!sql034.includes(forbidden), `034 touches ${forbidden}`);
   }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   PHASE 3C.2 - PRORATION SAFETY ON THE LATE BRANCH
+
+   The finding, verified against the INSTALLED SDK rather than from
+   memory: SubscriptionUpdateParams.cancel_at documents that a date "set
+   during a future period ... will ALWAYS cause a proration for that
+   period" - unqualified by proration_behavior. A late cancellation is a
+   future-period date by definition.
+
+   In GLOA that is not a cosmetic credit line. Migration 022's
+   fulfillment refuses any invoice whose total does not equal the frozen
+   subscription total, so a prorated renewal would fail to fulfill
+   entirely: no order, no delivery, no confirmation, for a cycle the
+   customer had already been charged for.
+   ══════════════════════════════════════════════════════════════ */
+
+test("SDK: the future-period proration clause is really in the installed types", () => {
+  // Read from node_modules, not asserted from memory.
+  const decl = readFileSync(
+    path.join(ROOT, "node_modules/stripe/cjs/resources/Subscriptions.d.ts"), "utf-8"
+  );
+  // Anchored FORWARD from the update params: SubscriptionCreateParams
+  // appears earlier in the file and carries the same field names, so an
+  // unanchored search would slice the wrong interface (or nothing).
+  const updateAt = decl.indexOf("interface SubscriptionUpdateParams {");
+  assert.ok(updateAt > -1, "SubscriptionUpdateParams is gone");
+  const params = decl.slice(updateAt, decl.indexOf("cancel_at_period_end?: boolean;", updateAt));
+  assert.ok(params.includes("cancel_at?:"), "the slice missed cancel_at");
+  assert.ok(
+    params.includes("If set during a future period, this will always cause a proration for that period"),
+    "the SDK no longer documents the future-period proration - re-evaluate the late branch"
+  );
+});
+
+test("LATE: no future-period cancel_at is ever sent to Stripe", () => {
+  // The request-time Stripe write is gated on the delivery decision, and
+  // that decision is "immediate" for early only.
+  assert.ok(rulesCode.includes('return timing === "early" ? "immediate" : "deferred";'));
+  assert.equal(cancellationDelivery("early"), "immediate");
+  assert.equal(cancellationDelivery("late"), "deferred");
+  assert.equal(schedulesAtStripeNow("early"), true);
+  assert.equal(schedulesAtStripeNow("late"), false);
+  // And the service actually consults it before writing.
+  const updateAt = serviceCode.indexOf("stripe.subscriptions.update(");
+  const gateAt = serviceCode.indexOf("if (deliverNow && !existingCancelAt) {");
+  assert.ok(gateAt > -1 && gateAt < updateAt, "the Stripe write is not gated on the timing");
+});
+
+test("LATE: exactly one further cycle, enforced without a counter", () => {
+  // No cycle counter exists anywhere - a counter that can read 2 is a
+  // counter that can one day bill someone twice.
+  for (const invented of [
+    "cycles_remaining", "remaining_cycles", "cycle_count", "extra_cycles", "cancellation_cycles",
+  ]) {
+    assert.ok(!sql034.includes(invented), `034 stores a cycle counter: ${invented}`);
+    assert.ok(!serviceCode.includes(invented), `the service stores a cycle counter: ${invented}`);
+  }
+  // Instead: the decision is CONSUMED. It applies only while cancel_at is
+  // NULL, and applying it sets cancel_at.
+  assert.ok(applyFn.includes("if v_sub.cancel_at is not null then"));
+  const consumed = branch(applyFn, "if v_sub.cancel_at is not null then");
+  assert.ok(consumed.includes("'already_scheduled'"));
+  assert.ok(!consumed.includes("update"), "the consumed branch writes again");
+  // And it will not fire EARLY, so a redelivered invoice.paid for the
+  // cycle the customer was still in cannot rob them of the owed one.
+  assert.ok(applyFn.includes("if p_cancel_at < v_sub.cancellation_effective_at then"));
+  assert.ok(branch(applyFn, "if p_cancel_at < v_sub.cancellation_effective_at then").includes("'too_early'"));
+});
+
+test("LATE: the due check is inclusive and fails toward NOT cancelling early", () => {
+  const promised = LATE_END;
+  // The exact cycle: due.
+  assert.equal(deferredCancellationIsDue({ periodEnd: LATE_END, promisedAt: promised }), true);
+  // The cycle the customer was still in when they asked: NOT due, so a
+  // redelivery inside Stripe's retry window changes nothing.
+  assert.equal(deferredCancellationIsDue({ periodEnd: PERIOD_END, promisedAt: promised }), false);
+  // One millisecond short is still not due.
+  const oneMsShort = new Date(Date.parse(LATE_END) - 1).toISOString();
+  assert.equal(deferredCancellationIsDue({ periodEnd: oneMsShort, promisedAt: promised }), false);
+  // Beyond is due - a missed renewal does not strand the cancellation.
+  const later = new Date(Date.parse(LATE_END) + CADENCE_MS).toISOString();
+  assert.equal(deferredCancellationIsDue({ periodEnd: later, promisedAt: promised }), true);
+  // Unusable input never fires.
+  for (const bad of [null, undefined, "", "nope"]) {
+    assert.equal(deferredCancellationIsDue({ periodEnd: bad, promisedAt: promised }), false, String(bad));
+    assert.equal(deferredCancellationIsDue({ periodEnd: LATE_END, promisedAt: bad }), false, String(bad));
+  }
+});
+
+test("LATE: the applied date is a CURRENT-period date, which prorates nothing", () => {
+  // What reaches Stripe at renewal time is the period end the renewal
+  // just produced - never the promise, and never a computed future date.
+  assert.ok(serviceCode.includes("const effectiveCancelAt = row.current_period_end as string;"));
+  const call = serviceCode.slice(serviceCode.lastIndexOf("stripe.subscriptions.update("));
+  const params = call.slice(0, call.indexOf("idempotencyKey"));
+  assert.ok(params.includes("cancel_at: toStripeTimestamp(effectiveCancelAt)"));
+  assert.ok(params.includes('proration_behavior: "none"'));
+  // No cadence arithmetic at apply time: adding 28 days again would push
+  // the date back into a future period and reintroduce the proration.
+  assert.ok(!params.includes("CADENCE_MS"));
+  assert.ok(!params.includes("resolveCancellationSchedule"));
+});
+
+test("LATE: the commercial configuration is never touched", () => {
+  // Both Stripe writes carry cancel_at and proration_behavior and NOTHING
+  // else. This is what keeps the full normal merchandise amount, the
+  // normal recurring shipping line, quantity 1 and the week/4 cadence
+  // exactly as checkout froze them.
+  const updates = [...serviceCode.matchAll(/stripe\.subscriptions\.update\(/g)];
+  assert.equal(updates.length, 2);
+  for (const update of updates) {
+    const params = serviceCode.slice(update.index, serviceCode.indexOf("idempotencyKey", update.index));
+    for (const forbidden of [
+      "items", "price", "quantity", "metadata", "customer", "default_payment_method",
+      "billing_cycle_anchor", "trial", "cancel_at_period_end", "shipping", "discounts",
+      "coupon", "promotion_code", "tax", "currency", "collection_method",
+    ]) {
+      assert.ok(!params.includes(forbidden), `a Stripe write also sets ${forbidden}`);
+    }
+  }
+  // And the invariant that would have caught a proration anyway is still
+  // in place: a renewal whose total moved does not fulfill.
+  const invoiceRules = read("lib/subscriptionInvoiceRules.ts");
+  assert.ok(invoiceRules.includes("invoice.total !== frozen.totalGrossCents"),
+    "the frozen-total reconciliation was weakened");
+});
+
+test("LATE: no Subscription Schedule is created, and the SDK says why", () => {
+  // Option A was evaluated and rejected. from_subscription forbids every
+  // other parameter in the same call, and the follow-up update REQUIRES
+  // phases[].items - which would make the cancellation path responsible
+  // for re-declaring this subscription's prices and quantities.
+  const decl = readFileSync(
+    path.join(ROOT, "node_modules/stripe/cjs/resources/SubscriptionSchedules.d.ts"), "utf-8"
+  );
+  assert.ok(decl.includes("When using this parameter, other parameters (such as phase values) cannot be set"),
+    "from_subscription no longer forbids phases - re-evaluate Option A");
+  const updatePhase = decl.slice(
+    decl.indexOf("namespace SubscriptionScheduleUpdateParams"),
+    decl.indexOf("namespace SubscriptionScheduleUpdateParams") + 40000
+  );
+  assert.ok(/\n\s+items: Array<Phase\.Item>;/.test(updatePhase),
+    "phases[].items is no longer required - re-evaluate Option A");
+  // Nothing in GLOA touches schedules.
+  const offenders = [];
+  const walk = dir => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { walk(full); continue; }
+      if (!/\.(ts|tsx)$/.test(entry.name)) continue;
+      const source = withoutComments(readFileSync(full, "utf-8"));
+      for (const forbidden of ["subscriptionSchedules", "from_subscription", "end_behavior"]) {
+        if (source.includes(forbidden)) offenders.push(`${entry.name}: ${forbidden}`);
+      }
+    }
+  };
+  walk(path.join(ROOT, "app"));
+  walk(path.join(ROOT, "lib"));
+  assert.deepEqual(offenders, []);
+});
+
+test("EARLY: unchanged, and safe under the documented proration rule", () => {
+  // The early date is the CURRENT period end. The SDK's clause covers a
+  // date BEFORE the period ends and only "if prorations have been enabled
+  // using proration_behavior" - which is pinned to none - and the
+  // future-period clause does not apply at all.
+  const early = resolveCancellationSchedule({ requestAt: CUTOFF, currentPeriodEnd: PERIOD_END });
+  assert.equal(early.ok, true);
+  assert.equal(early.schedule.timing, "early");
+  assert.equal(early.schedule.effectiveCancelAt, PERIOD_END);
+  assert.equal(schedulesAtStripeNow(early.schedule.timing), true);
+  // One millisecond past the cutoff is late, and that one defers.
+  const late = resolveCancellationSchedule({
+    requestAt: new Date(Date.parse(CUTOFF) + 1).toISOString(),
+    currentPeriodEnd: PERIOD_END,
+  });
+  assert.equal(late.schedule.timing, "late");
+  assert.equal(late.schedule.effectiveCancelAt, LATE_END);
+  assert.equal(schedulesAtStripeNow(late.schedule.timing), false);
+});
+
+test("TRUTHFULNESS: cancel_at is written only when Stripe holds it", () => {
+  // The row must never claim a Stripe schedule that does not exist.
+  assert.ok(serviceCode.includes("p_cancel_at: deliverNow ? schedule.effectiveCancelAt : null"));
+  // The RPC refuses a cancel_at that disagrees with the promise, so the
+  // two can never drift apart through this entry point.
+  assert.ok(scheduleFn.includes("if p_cancel_at is not null and p_cancel_at <> p_effective_at then"));
+  // Only the deferred-apply path may turn a NULL cancel_at into a date,
+  // and only after its own Stripe write.
+  const stripeAt = serviceCode.lastIndexOf("stripe.subscriptions.update(");
+  const rpcAt = serviceCode.indexOf('admin.rpc(\n    "apply_deferred_subscription_cancellation"');
+  assert.ok(rpcAt > -1, "the deferred apply does not call its RPC");
+  assert.ok(stripeAt < rpcAt, "the database is written before Stripe accepts the deferred cancellation");
+});
+
+test("DEFERRED APPLY: idempotent, ordered, and never throws", () => {
+  const fn = serviceCode.slice(
+    serviceCode.indexOf("export async function applyDeferredCancellationFromRenewal"),
+    serviceCode.indexOf("export function stripeSubscriptionFacts")
+  );
+  assert.ok(fn.length > 0, "the deferred apply is missing");
+  // Never throws: every failure is a returned value.
+  assert.ok(!fn.includes("throw "), "the deferred apply throws");
+  for (const answer of ["nothing_pending", "already_scheduled", "too_early", "not_found", "error"]) {
+    assert.ok(fn.includes(`"${answer}"`), `the deferred apply cannot answer ${answer}`);
+  }
+  // It writes nothing directly - every write goes through the RPC.
+  for (const forbidden of [".insert(", ".update(", ".delete(", ".upsert("]) {
+    assert.ok(!fn.includes(`from("subscriptions")${forbidden}`), `it writes directly: ${forbidden}`);
+  }
+  assert.ok(fn.includes('.from("subscriptions")\n    .select('), "it does more than select");
+  // An owner-initiated Stripe Dashboard cancellation is never re-applied.
+  assert.ok(fn.includes("if (!row.cancellation_requested_at || !row.cancellation_effective_at) return \"nothing_pending\";"));
+});
+
+test("DEFERRED APPLY: it runs on invoice.paid, after the order exists", () => {
+  const handler = webhookCode.slice(
+    webhookCode.indexOf("async function handleInvoicePaid"),
+    webhookCode.indexOf("async function handleSubscriptionSessionCompleted")
+  );
+  const orderAt = handler.indexOf("sendInternalOrderNotificationIfNeeded(");
+  const applyAt = handler.indexOf("applyDeferredCancellationFromRenewal(");
+  assert.ok(orderAt > -1 && applyAt > -1);
+  assert.ok(orderAt < applyAt, "the cancellation is applied before the cycle is fulfilled");
+  // It is not a cron.
+  const vercel = JSON.parse(read("vercel.json"));
+  assert.equal((vercel.crons ?? []).length, 1);
+  assert.equal(vercel.crons[0].path, "/api/cron/retry-order-notifications");
+  // The subscription id comes from the fulfillment result, not re-derived.
+  assert.ok(handler.includes("result.stripeSubscriptionId"));
+  assert.ok(read("lib/subscriptionInvoiceFulfillment.ts").includes("stripeSubscriptionId,"));
+});
+
+test("DEFERRED APPLY: a failed renewal leaves the request pending, not lost", () => {
+  // No invoice.paid means no apply, so nothing is scheduled at Stripe and
+  // the row keeps saying so. There is no separate failure policy to get
+  // wrong, and none was invented.
+  assert.ok(!webhookCode.includes("invoice.payment_failed"), "billing failure was handled in this phase");
+  assert.ok(!serviceCode.includes("past_due ="), "the service writes a billing failure state");
+  // past_due and unpaid remain CANCELLABLE, so a customer whose card
+  // failed can still end the contract.
+  assert.deepEqual([...CANCELLABLE_STATUSES], ["active", "past_due", "unpaid"]);
+  assert.ok(sql034.includes("if v_sub.status not in ('active', 'past_due', 'unpaid') then"));
+  // And the apply never writes status, so it cannot mask a billing state.
+  assert.ok(!/update public\.subscriptions[\s\S]*?status/.test(applyFn), "the deferred apply writes status");
+});
+
+test("DEFERRED APPLY: scheduled is still not cancelled", () => {
+  // It writes exactly two columns, neither of them status or cancelled_at.
+  const writes = updateSetClauses(applyFn);
+  assert.equal(writes.length, 1, "the deferred apply writes more than once");
+  assert.deepEqual(columnsWritten(writes[0]), ["cancel_at", "cancellation_effective_at"]);
+  for (const forbidden of ["status", "cancelled_at", "current_period", "_cents", "snapshot", "plan_id"]) {
+    assert.ok(!writes[0].includes(forbidden), `the deferred apply writes ${forbidden}`);
+  }
+  // customer.subscription.deleted remains the only authority on
+  // termination.
+  const setClauses = updateSetClauses(sql034);
+  assert.equal(setClauses.filter(c => /status\s+=\s+'cancelled'/.test(c)).length, 1);
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -709,9 +1042,10 @@ test("034: it is the next free number and 022-033 are untouched", () => {
   }
 });
 
-test("034: exactly two columns, nullable, no default, no backfill", () => {
+test("034: exactly three columns, nullable, no default, no backfill", () => {
   const adds = [...sql034.matchAll(/add column(?: if not exists)? (\w+)/g)].map(m => m[1]);
-  assert.deepEqual(adds.sort(), ["cancel_at", "cancellation_requested_at"]);
+  assert.deepEqual(adds.sort(),
+    ["cancel_at", "cancellation_effective_at", "cancellation_requested_at"]);
   const alter = sql034.slice(sql034.indexOf("alter table public.subscriptions"));
   const statement = alter.slice(0, alter.indexOf(";") + 1);
   assert.ok(!/default/i.test(statement), "a column has a default");
@@ -722,10 +1056,23 @@ test("034: exactly two columns, nullable, no default, no backfill", () => {
   }
 });
 
-test("034: both invariants exist, and the pairing is one-directional", () => {
-  assert.ok(sql034.includes("subscriptions_cancellation_request_scheduled_check"));
-  assert.ok(sql034.includes("check (cancellation_requested_at is null or cancel_at is not null)"));
-  assert.ok(sql034.includes("subscriptions_cancel_at_after_request_check"));
+test("034: all four invariants exist, and the pairing is one-directional", () => {
+  for (const name of [
+    "subscriptions_cancellation_request_scheduled_check",
+    "subscriptions_cancel_at_promised_check",
+    "subscriptions_effective_after_request_check",
+    "subscriptions_cancel_at_after_request_check",
+  ]) {
+    assert.ok(sql034.includes(`add constraint ${name}`), `${name} is missing`);
+    assert.ok(sql034.includes(`drop constraint if exists ${name}`), `${name} is not re-runnable`);
+  }
+  // A request implies a PROMISE, and Stripe holding something implies one
+  // too - but neither implies the other, which is what lets a late
+  // cancellation exist before Stripe knows about it.
+  assert.ok(sql034.includes(
+    "check (cancellation_requested_at is null or cancellation_effective_at is not null)"));
+  assert.ok(sql034.includes("check (cancel_at is null or cancellation_effective_at is not null)"));
+  assert.ok(sql034.includes("or cancellation_effective_at > cancellation_requested_at"));
   assert.ok(sql034.includes("or cancel_at > cancellation_requested_at"));
   // NOT a symmetric pairing: a Stripe-originated cancel_at with no local
   // request must remain representable, or the sync could not reconcile it.
@@ -741,7 +1088,9 @@ test("034: SCHEDULING NEVER WRITES status - that is termination's job", () => {
   const written = scheduleWrites.map(columnsWritten);
   assert.equal(written.length, 2, "unexpected number of scheduling writes");
   assert.deepEqual(written[0], ["cancellation_requested_at"], "CASE C writes more than the request");
-  assert.deepEqual(written[1], ["cancel_at", "cancellation_requested_at"], "CASE A writes the wrong columns");
+  assert.deepEqual(written[1],
+    ["cancel_at", "cancellation_effective_at", "cancellation_requested_at"],
+    "CASE A writes the wrong columns");
   for (const clause of scheduleWrites) {
     for (const forbidden of [
       "status", "cancelled_at", "cancel_at_period_end", "current_period", "_cents",
@@ -757,7 +1106,7 @@ test("034: only mark_subscription_cancelled writes status = cancelled", () => {
   // appears in two functions; the SET clause appears in exactly one.
   // Anchored on the UPDATE, not on the function's own `SET search_path`.
   const setClauses = updateSetClauses(sql034);
-  assert.equal(setClauses.length, 4, "unexpected number of UPDATE statements");
+  assert.equal(setClauses.length, 5, "unexpected number of UPDATE statements");
   const writers = setClauses.filter(c => /status\s+=\s+'cancelled'/.test(c));
   assert.equal(writers.length, 1, "more than one path writes the cancelled status");
   const markFn = sql034.slice(sql034.indexOf("create or replace function public.mark_subscription_cancelled"));
@@ -773,17 +1122,19 @@ test("034: the sync refuses to write status, money or snapshots", () => {
   const setClause = syncFn.slice(syncFn.indexOf("update public.subscriptions"), syncFn.indexOf("where id = v_sub.id"));
   const written = [...setClause.matchAll(/^\s*(?:set\s+)?(\w+)\s*=/gm)].map(m => m[1]);
   assert.deepEqual(written.sort(), [
-    "cancel_at", "cancellation_requested_at", "current_period_end", "current_period_start",
+    "cancel_at", "cancellation_effective_at", "cancellation_requested_at",
+    "current_period_end", "current_period_start",
   ]);
   for (const forbidden of ["status", "_cents", "snapshot", "plan_id", "stripe_subscription_id", "cancelled_at"]) {
     assert.ok(!setClause.includes(forbidden), `the sync writes ${forbidden}`);
   }
 });
 
-test("034: all three functions are SECURITY DEFINER with an empty search_path", () => {
-  assert.equal([...sql034.matchAll(/security definer set search_path = ''/g)].length, 3);
+test("034: all four functions are SECURITY DEFINER with an empty search_path", () => {
+  assert.equal([...sql034.matchAll(/security definer set search_path = ''/g)].length, 4);
   for (const fn of [
-    "schedule_subscription_cancellation", "sync_subscription_from_stripe", "mark_subscription_cancelled",
+    "schedule_subscription_cancellation", "apply_deferred_subscription_cancellation",
+    "sync_subscription_from_stripe", "mark_subscription_cancelled",
   ]) {
     const at = sql034.indexOf(`create or replace function public.${fn}`);
     assert.ok(at > -1, `${fn} missing`);
@@ -796,7 +1147,8 @@ test("034: all three functions are SECURITY DEFINER with an empty search_path", 
 
 test("034: execute revoked from public/anon/authenticated, granted to service_role only", () => {
   const signatures = [
-    "public.schedule_subscription_cancellation(uuid, uuid, timestamptz, timestamptz)",
+    "public.schedule_subscription_cancellation(uuid, uuid, timestamptz, timestamptz, timestamptz)",
+    "public.apply_deferred_subscription_cancellation(text, timestamptz)",
     "public.sync_subscription_from_stripe(text, timestamptz, timestamptz, timestamptz)",
     "public.mark_subscription_cancelled(text, timestamptz)",
   ];
@@ -807,7 +1159,7 @@ test("034: execute revoked from public/anon/authenticated, granted to service_ro
     assert.ok(sql034.includes(`grant execute on function ${sig} to service_role;`));
   }
   const grants = sql034.split(NEWLINE).filter(l => l.trim().toLowerCase().startsWith("grant"));
-  assert.equal(grants.length, 3, "an unexpected grant was issued");
+  assert.equal(grants.length, 4, "an unexpected grant was issued");
   // NO table or column grant: service_role still cannot write subscriptions.
   assert.ok(!/grant\s+update/i.test(sql034), "034 grants an UPDATE privilege");
   assert.ok(!/grant[^;]*on\s+(table\s+)?public\.subscriptions/i.test(sql034), "034 grants a table privilege");
@@ -1026,14 +1378,16 @@ test("regression: historical subscriptions are unaffected", () => {
   // on both columns and nothing considers it cancelled.
   assert.ok(sql034.includes("add column if not exists cancellation_requested_at timestamptz"));
   assert.ok(sql034.includes("add column if not exists cancel_at                 timestamptz"));
+  assert.ok(sql034.includes("add column if not exists cancellation_effective_at timestamptz"));
   // Every UPDATE is scoped to one row the function just locked, so
   // applying 034 cannot touch a single existing subscription.
   // mark_subscription_cancelled DOES write status - that is the
   // termination path, and it runs only for one Stripe event.
   // FOUR since Phase 3C.1: scheduling gained the CASE C single-column
   // write that records a customer request the webhook raced past.
+  // FIVE since Phase 3C.2: applying a deferred late cancellation.
   const updates = [...sql034.matchAll(/update public\.subscriptions[\s\S]*?;/g)].map(m => m[0]);
-  assert.equal(updates.length, 4, "unexpected number of UPDATE statements");
+  assert.equal(updates.length, 5, "unexpected number of UPDATE statements");
   for (const stmt of updates) {
     assert.ok(stmt.includes("where id = v_sub.id"), "an unscoped UPDATE exists");
   }

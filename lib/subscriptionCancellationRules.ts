@@ -342,3 +342,106 @@ export const CANCELLABLE_STATUSES = ["active", "past_due", "unpaid"] as const;
 export function isCancellableStatus(status: string | null | undefined): boolean {
   return typeof status === "string" && (CANCELLABLE_STATUSES as readonly string[]).includes(status);
 }
+
+/* ══════════════════════════════════════════════════════════════
+   THE DEFERRED LATE BRANCH (Phase 3C.2)
+   ══════════════════════════════════════════════════════════════
+
+   A LATE cancellation is promised immediately and sent to Stripe later.
+
+   Not by preference. The installed SDK documents cancel_at as: "If set
+   during a future period, this will ALWAYS cause a proration for that
+   period" - unqualified by proration_behavior. A late cancellation lands
+   in a future period by definition, and in GLOA a prorated renewal would
+   not merely add a credit line: migration 022's fulfillment refuses any
+   invoice whose total does not equal the frozen subscription total, so
+   the cycle the customer is owed would fail to fulfill entirely.
+
+   So the late decision is stored, and applied when the one further cycle
+   is genuinely paid. At that moment the promised date IS the current
+   period end, which prorates nothing.
+
+   These helpers are the pure half of that: what reaches Stripe now, and
+   whether a paid renewal has reached the promised date. */
+
+/**
+ * What the cancellation endpoint may send to Stripe for this timing.
+ *
+ * "immediate" - the early branch. cancel_at goes to Stripe now, and the
+ *               local cancel_at records it.
+ * "deferred"  - the late branch. Nothing goes to Stripe, and the local
+ *               cancel_at stays NULL so the row never claims Stripe holds
+ *               something it does not.
+ */
+export type CancellationDelivery = "immediate" | "deferred";
+
+export function cancellationDelivery(timing: CancellationTiming): CancellationDelivery {
+  return timing === "early" ? "immediate" : "deferred";
+}
+
+/**
+ * True when a cancellation of this timing must reach Stripe at request
+ * time. Exactly the negation of "deferred", named positively because
+ * every call site reads better that way.
+ */
+export function schedulesAtStripeNow(timing: CancellationTiming): boolean {
+  return cancellationDelivery(timing) === "immediate";
+}
+
+/**
+ * Has a paid renewal reached the cycle a late cancellation was waiting
+ * for?
+ *
+ * `periodEnd` is the NOW-CURRENT period end, read back from Stripe after
+ * the renewal. `promisedAt` is cancellation_effective_at.
+ *
+ * Inclusive, and the direction of the inequality is the safety property:
+ * a redelivered invoice.paid for the cycle the customer was still in
+ * carries the earlier period end and answers false, so a redelivery
+ * inside Stripe's retry window cannot rob them of the cycle they are
+ * owed. If the two ever disagreed the customer would keep the
+ * subscription one cycle longer rather than lose one they paid for.
+ */
+export function deferredCancellationIsDue(input: {
+  periodEnd: string | Date | null | undefined;
+  promisedAt: string | Date | null | undefined;
+}): boolean {
+  const periodEndMs = epochMs(input.periodEnd);
+  const promisedMs = epochMs(input.promisedAt);
+  if (periodEndMs === null || promisedMs === null) return false;
+  return periodEndMs >= promisedMs;
+}
+
+/**
+ * The Stripe idempotency key for applying a deferred cancellation.
+ *
+ * Distinct from subscriptionCancelIdempotencyKey so the request-time call
+ * and the renewal-time call can never collide, and keyed on the effective
+ * date so every redelivery of the same renewal reuses one key.
+ */
+export function deferredCancelIdempotencyKey(
+  subscriptionId: string,
+  effectiveCancelAtIso: string
+): string {
+  return `gloa/subscription-defer/${subscriptionId}/${toStripeTimestamp(effectiveCancelAtIso)}`;
+}
+
+/**
+ * What apply_deferred_subscription_cancellation can answer.
+ *
+ * 'applied' and 'already_scheduled' both mean Stripe holds the
+ * cancellation; the rest mean it deliberately does not yet.
+ */
+export const DEFERRED_APPLY_RESULTS = [
+  "applied",
+  "already_scheduled",
+  "nothing_pending",
+  "too_early",
+  "not_found",
+] as const;
+
+export type DeferredApplyResult = (typeof DEFERRED_APPLY_RESULTS)[number];
+
+export function isDeferredApplyResult(value: unknown): value is DeferredApplyResult {
+  return typeof value === "string" && (DEFERRED_APPLY_RESULTS as readonly string[]).includes(value);
+}

@@ -997,7 +997,18 @@ test("regression: the refund webhook flow is untouched", () => {
   const webhook = withoutComments(read("app/api/stripe/webhook/route.ts"));
   assert.ok(webhook.includes("isRefundEventType(event.type)"));
   assert.ok(webhook.includes("syncOrderRefundStateFromStripe(stripe, paymentIntentId)"));
-  assert.ok(!webhook.includes("cancellation"), "the webhook learned about cancellation requests");
+  // Phase 3C.2 put SUBSCRIPTION cancellation orchestration in this route
+  // (a deferred late cancellation is applied when its owed cycle is
+  // paid), so a bare "cancellation" match now catches an unrelated
+  // system. What this ever protected is that the ORDER cancellation
+  // request machinery of Phase 2D stays out of the webhook, and that is
+  // asserted directly now - by symbol, which is also the stricter check.
+  for (const forbidden of [
+    "cancellation_request", "cancel_order", "resolve_order_cancellation_request",
+    "CANCELLATION_ADMIN_SECRET", "cancellation_outcome", "sendCancellationRequestNotification",
+  ]) {
+    assert.ok(!webhook.includes(forbidden), `the webhook learned about order cancellations: ${forbidden}`);
+  }
   const refunds = read("lib/stripeRefunds.ts");
   for (const event of [
     "charge.refunded", "charge.refund.updated", "refund.created", "refund.updated", "refund.failed",

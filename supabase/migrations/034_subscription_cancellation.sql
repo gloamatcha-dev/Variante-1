@@ -27,9 +27,13 @@
 --   request_at <= cutoff   EARLY. The upcoming cycle must not happen.
 --                          effective cancellation = nextBilling
 --
---   request_at >  cutoff   LATE. The upcoming cycle still happens and the
---                          subscription ends after it.
+--   request_at >  cutoff   LATE. The upcoming cycle still happens at the
+--                          full normal amount, and the subscription ends
+--                          after it.
 --                          effective cancellation = nextBilling + 28 days
+--
+-- The late date is PROMISED immediately and SENT TO STRIPE later. See the
+-- next block for why, and section 2B for how.
 --
 -- The arithmetic itself lives in lib/subscriptionCancellationRules.ts as
 -- a pure, unit-tested helper. This migration stores the RESULT and
@@ -37,25 +41,60 @@
 -- in SQL, because two implementations of one rule is one too many.
 --
 -- ══════════════════════════════════════════════════════════════
--- WHY cancel_at AND NOT cancel_at_period_end
+-- HOW EACH BRANCH REACHES STRIPE, AND WHY THEY DIFFER
 -- ══════════════════════════════════════════════════════════════
 --
--- cancel_at_period_end cannot express the LATE case. It always terminates
--- at the CURRENT period end, and a late cancellation requires one further
--- paid cycle. An absolute cancel_at timestamp expresses both branches
--- with one field, and Stripe enforces it - no cron, no scheduler, no
--- drift.
+-- EARLY: an absolute cancel_at, set at Stripe immediately.
 --
--- Verified against the installed SDK (stripe 22.5.0, OpenAPI v2349):
--- SubscriptionUpdateParams.cancel_at accepts a Unix timestamp, and
--- subscriptions.update takes RequestOptions with an idempotencyKey.
+--   cancel_at_period_end cannot express the late case, so it is not used
+--   for either. An absolute timestamp expresses the early case exactly
+--   and Stripe enforces it - no cron, no scheduler, no drift. The date is
+--   the CURRENT period end, and proration_behavior is pinned to "none".
+--
+-- LATE: nothing is sent to Stripe until the extra cycle has been paid.
+--
+--   The first draft of this migration sent cancel_at = current period end
+--   + one cadence, in the belief that proration_behavior "none" made that
+--   safe. IT DOES NOT. The installed SDK documents cancel_at as:
+--
+--     "If set to a date before the current period ends, this will cause a
+--      proration if prorations have been enabled using
+--      proration_behavior. If set during a future period, this will
+--      ALWAYS cause a proration for that period."
+--
+--   (stripe 22.5.0, OpenAPI v2349, API 2026-07-29.dahlia,
+--    SubscriptionUpdateParams.cancel_at.)
+--
+--   "Always" is not qualified by proration_behavior, and a late
+--   cancellation lands squarely in a future period. In GLOA that would
+--   not merely have produced an unexpected credit line: migration 022's
+--   fulfillment refuses any invoice whose total does not equal the frozen
+--   subscription total, so a prorated renewal would have FAILED to
+--   fulfill - no order, no delivery, no confirmation - for a cycle the
+--   customer had already been charged for and is owed.
+--
+--   So the late branch stores the decision and applies it later. When the
+--   one further cycle is genuinely paid, invoice.paid sets
+--   cancel_at = the NOW-CURRENT period end. That is a current-period date,
+--   which the clause above does not touch at all, and it is the same call
+--   shape the early branch already uses.
+--
+--   A Subscription Schedule with end_behavior = cancel was evaluated and
+--   rejected. from_subscription forbids every other parameter in the same
+--   call, so it needs two; the update call then REQUIRES phases[].items,
+--   which would make the cancellation path responsible for re-declaring
+--   this subscription's merchandise price, its recurring shipping price
+--   and their quantities. A cancellation that can mistype a price is a
+--   worse failure than the one being fixed. Its update also defaults to
+--   create_prorations, adding a second proration surface rather than
+--   removing one.
 --
 -- public.subscriptions.cancel_at_period_end IS DELIBERATELY LEFT ALONE at
 -- its default false. Setting it would be actively misleading: it is
 -- Stripe's name for a different mechanism, the one we are NOT using, and
 -- a reader who saw it true would reasonably conclude the subscription
 -- ends at the current period end - which is wrong for every late
--- cancellation. The scheduled termination is cancel_at and only cancel_at.
+-- cancellation.
 --
 -- ══════════════════════════════════════════════════════════════
 -- SCHEDULED IS NOT CANCELLED
@@ -79,8 +118,8 @@
 -- WHAT APPLYING THIS DOES
 -- ══════════════════════════════════════════════════════════════
 --
--- Two nullable columns with no default and no backfill, two CHECK
--- constraints, three SECURITY DEFINER functions, three function grants.
+-- Three nullable columns with no default and no backfill, four CHECK
+-- constraints, four SECURITY DEFINER functions, four function grants.
 -- It reads no row for a decision, writes no row, cancels nothing,
 -- schedules nothing, calls no Stripe API and sends no email. Applying it
 -- changes the behaviour and the content of exactly zero existing
@@ -89,57 +128,120 @@
 
 -- 1. CANCELLATION STATE ────────────────────────────────────────
 --
--- Two columns, both nullable, no default, no backfill. Every existing
--- subscription reads NULL on both, which honestly means "nobody has
+-- THREE columns, all nullable, no default, no backfill. Every existing
+-- subscription reads NULL on all three, which honestly means "nobody has
 -- asked to end this".
 --
--- cancellation_requested_at is WHEN THE CUSTOMER ASKED. It is the input
--- to the cutoff comparison and it is a historical fact: once NON NULL it
--- is never moved, not by a repeat request and not by a reconciliation.
--- It may be FILLED IN exactly once while still NULL, and only by an
--- authenticated customer request matching a cancel_at already on the row
--- - the reconciliation race described at CASE C below. NULL never means
--- "queued"; it means no customer request was ever recorded, which is the
--- permanent and correct answer for a Stripe Dashboard cancellation.
+-- They answer three DIFFERENT questions, and Phase 3C.2 exists because
+-- the first version collapsed two of them into one:
 --
--- cancel_at is WHEN THE SUBSCRIPTION ACTUALLY ENDS, as scheduled at
--- Stripe. It mirrors Stripe's own cancel_at so the two can be compared,
--- and it is what the account page will eventually show.
+--   cancellation_requested_at   WHEN THE CUSTOMER ASKED.
+--   cancellation_effective_at   WHEN THE SUBSCRIPTION IS PROMISED TO END.
+--   cancel_at                   WHAT STRIPE ACTUALLY HOLDS RIGHT NOW.
+--
+-- cancellation_requested_at is the input to the cutoff comparison and a
+-- historical fact: once NON NULL it is never moved, not by a repeat
+-- request and not by a reconciliation. It may be FILLED IN exactly once
+-- while still NULL, and only by an authenticated customer request
+-- matching a cancellation already on the row - the reconciliation race
+-- described at CASE C below. NULL never means "queued"; it means no
+-- customer request was ever recorded, which is the permanent and correct
+-- answer for a Stripe Dashboard cancellation.
+--
+-- cancellation_effective_at is what the customer is told and what the
+-- account page will show. For an EARLY cancellation it is the current
+-- period end and Stripe holds it immediately. For a LATE one it is one
+-- further cadence beyond that, and Stripe does NOT hold it yet - see the
+-- header. It is the identity of a standing cancellation: two requests
+-- naming the same effective date are the same decision, two naming
+-- different dates are a conflict.
+--
+-- cancel_at MIRRORS STRIPE AND NOTHING ELSE. It is non-NULL if and only
+-- if a cancellation genuinely exists at Stripe, so the two can be
+-- compared and so nothing here can ever claim Stripe has scheduled
+-- something it has not. That truthfulness is the whole point of keeping
+-- it separate:
+--
+--   requested + effective + NO cancel_at   a late cancellation is owed
+--                                          one further paid cycle and
+--                                          Stripe holds nothing yet
+--   requested + effective + cancel_at      Stripe holds the termination
+--   no request + effective + cancel_at     the owner cancelled it in the
+--                                          Stripe Dashboard
 --
 -- Deliberately NOT added: a cancellation reason, a customer note, a
--- pause/resume field, a product or quantity change field. None has a
--- reader, and a column nothing reads is a column that silently rots.
+-- pause/resume field, a product or quantity change field, a remaining
+-- cycle COUNTER. The count is not stored because it is not a variable:
+-- the rule is exactly one further cycle, the pending decision is consumed
+-- the moment it is applied, and a counter that could read 2 is a counter
+-- that could one day bill someone twice.
 alter table public.subscriptions
   add column if not exists cancellation_requested_at timestamptz,
+  add column if not exists cancellation_effective_at timestamptz,
   add column if not exists cancel_at                 timestamptz;
 
--- ── INVARIANT 1: a request always has an effective date ───────
+-- ── INVARIANT 1: a request always has a promised end date ─────
 --
 -- One-directional on purpose, and the direction matters.
 --
--- A customer REQUEST always produces a scheduled end, so
--- cancellation_requested_at NOT NULL implies cancel_at NOT NULL.
+-- A customer REQUEST always produces a promised end, so
+-- cancellation_requested_at NOT NULL implies cancellation_effective_at
+-- NOT NULL.
 --
--- The reverse is deliberately NOT required. cancel_at may legitimately
--- exist without a local request: the owner can schedule a cancellation
+-- The reverse is deliberately NOT required. A cancellation may
+-- legitimately exist without a local request: the owner can schedule one
 -- directly in the Stripe Dashboard, and sync_subscription_from_stripe
--- below will reconcile that into this column. Forcing a paired
--- constraint would have made that sync either impossible or a liar -
--- it would have had to invent a cancellation_requested_at for a request
--- that never happened.
+-- below will reconcile that into these columns. Forcing a paired
+-- constraint would have made that sync either impossible or a liar - it
+-- would have had to invent a cancellation_requested_at for a request that
+-- never happened.
+--
+-- NOTE THE CHANGE FROM THE FIRST DRAFT. This used to require a cancel_at,
+-- which was correct only while every cancellation reached Stripe
+-- immediately. A late cancellation deliberately does not, so requiring
+-- one would have forced the deferred state to lie about Stripe.
 alter table public.subscriptions
   drop constraint if exists subscriptions_cancellation_request_scheduled_check;
 
 alter table public.subscriptions
   add constraint subscriptions_cancellation_request_scheduled_check
-    check (cancellation_requested_at is null or cancel_at is not null);
+    check (cancellation_requested_at is null or cancellation_effective_at is not null);
 
--- ── INVARIANT 2: you cannot be cancelled before you asked ─────
+-- ── INVARIANT 2: Stripe cannot hold what nothing promised ─────
 --
--- Only checked when both exist, so a Stripe-originated cancel_at with no
--- local request is unaffected. Strictly greater: a cancellation that
--- takes effect at the very instant it was requested would mean an
--- immediate termination, which this feature never performs.
+-- cancel_at NOT NULL implies cancellation_effective_at NOT NULL. A
+-- termination scheduled at Stripe is by definition a promised end date,
+-- whoever made it, so the pair is written together in every path.
+alter table public.subscriptions
+  drop constraint if exists subscriptions_cancel_at_promised_check;
+
+alter table public.subscriptions
+  add constraint subscriptions_cancel_at_promised_check
+    check (cancel_at is null or cancellation_effective_at is not null);
+
+-- ── INVARIANT 3: you cannot end before you asked ──────────────
+--
+-- Only checked when both exist, so a Stripe-originated cancellation with
+-- no local request is unaffected. Strictly greater: an end that takes
+-- effect at the very instant it was requested would mean an immediate
+-- termination, which this feature never performs.
+alter table public.subscriptions
+  drop constraint if exists subscriptions_effective_after_request_check;
+
+alter table public.subscriptions
+  add constraint subscriptions_effective_after_request_check
+    check (
+      cancellation_requested_at is null
+      or cancellation_effective_at is null
+      or cancellation_effective_at > cancellation_requested_at
+    );
+
+-- ── INVARIANT 4: the same, for what Stripe holds ──────────────
+--
+-- cancel_at and cancellation_effective_at are equal in every path this
+-- migration writes, but a Stripe Dashboard cancellation can set one
+-- without the other having come from here, so it is checked in its own
+-- right rather than inferred.
 alter table public.subscriptions
   drop constraint if exists subscriptions_cancel_at_after_request_check;
 
@@ -151,11 +253,15 @@ alter table public.subscriptions
       or cancel_at > cancellation_requested_at
     );
 
--- 2. SCHEDULE A CUSTOMER CANCELLATION ──────────────────────────
+-- 2. RECORD A CUSTOMER CANCELLATION ────────────────────────────
 --
--- Called by POST /api/subscriptions/cancel, strictly AFTER Stripe has
--- accepted the schedule. The route never persists a cancellation Stripe
--- has not confirmed.
+-- Called by POST /api/subscriptions/cancel.
+--
+-- For an EARLY cancellation it is called strictly AFTER Stripe has
+-- accepted the schedule, and p_cancel_at carries what Stripe now holds.
+-- For a LATE one Stripe is deliberately not touched yet and p_cancel_at
+-- is NULL - see the header. Either way this function records only what is
+-- true at the moment it runs.
 --
 -- WHY A FUNCTION AND NOT A GRANT. service_role holds SELECT and nothing
 -- else on public.subscriptions (migration 022). Granting it UPDATE would
@@ -167,19 +273,25 @@ alter table public.subscriptions
 --
 -- WHAT THE CALLER MAY AND MAY NOT DECIDE
 --
--- May: which subscription, on whose behalf, when they asked, and when it
---      ends - the last two computed server-side from durable data.
+-- May: which subscription, on whose behalf, when they asked, when it is
+--      promised to end, and what Stripe holds - the last three computed
+--      server-side from durable data.
 -- May not: anything else. status, current_period_start/end,
 --      next_delivery_at, stripe_subscription_id, every money column,
 --      every snapshot, cancel_at_period_end and cancelled_at are never
 --      written here at all.
+--
+-- IDENTITY IS cancellation_effective_at, NOT cancel_at. Two requests
+-- naming the same end date are the same decision whether or not Stripe
+-- holds it yet; that is what keeps a late cancellation idempotent during
+-- the whole cycle before it reaches Stripe.
 --
 -- RESULT VOCABULARY (the route maps these to HTTP codes):
 --   'scheduled'          recorded now, for the first time
 --   'already_scheduled'  the same effective date already stands. Two
 --                        sub-cases, both reported under this one result:
 --                        a genuine repeat is a true no-op and moves
---                        NOTHING, while a request whose cancel_at was
+--                        NOTHING, while a request whose cancellation was
 --                        already reconciled in from Stripe fills the
 --                        still-NULL cancellation_requested_at and nothing
 --                        else. The returned cancellation_requested_at is
@@ -196,6 +308,7 @@ create or replace function public.schedule_subscription_cancellation(
   p_subscription_id uuid,
   p_user_id         uuid,
   p_requested_at    timestamptz,
+  p_effective_at    timestamptz,
   p_cancel_at       timestamptz
 )
 returns jsonb
@@ -207,7 +320,16 @@ declare
   v_sub public.subscriptions;
 begin
   if p_subscription_id is null or p_user_id is null
-     or p_requested_at is null or p_cancel_at is null then
+     or p_requested_at is null or p_effective_at is null then
+    return jsonb_build_object('result', 'not_found');
+  end if;
+
+  -- p_cancel_at is OPTIONAL - NULL is the deferred late case - but when
+  -- it is supplied it must be the same date Stripe was given. Anything
+  -- else would mean this row and Stripe disagree about when the
+  -- subscription ends, which is the one thing these columns exist to
+  -- prevent.
+  if p_cancel_at is not null and p_cancel_at <> p_effective_at then
     return jsonb_build_object('result', 'not_found');
   end if;
 
@@ -266,9 +388,9 @@ begin
     );
   end if;
 
-  -- A subscription with no Stripe binding cannot have been scheduled at
-  -- Stripe, so persisting a cancellation for it would record a fact that
-  -- exists nowhere else.
+  -- A subscription with no Stripe binding cannot be cancelled at Stripe
+  -- at all, now or one cycle from now, so persisting a cancellation for
+  -- it would record a fact that exists nowhere else.
   if v_sub.stripe_subscription_id is null then
     return jsonb_build_object(
       'result', 'not_eligible',
@@ -278,15 +400,15 @@ begin
   end if;
 
   -- ── THE PERIOD MUST NOT HAVE MOVED ──────────────────────────
-  -- The route computed p_cancel_at from current_period_end. If a renewal
-  -- committed in between, that computation is stale and applying it would
-  -- schedule the wrong date. Refusing lets the caller recompute against
-  -- the row it now sees, rather than writing a date derived from a period
-  -- that has already ended.
+  -- The route computed p_effective_at from current_period_end. If a
+  -- renewal committed in between, that computation is stale and applying
+  -- it would promise the wrong date. Refusing lets the caller recompute
+  -- against the row it now sees, rather than storing a date derived from
+  -- a period that has already ended.
   --
   -- The comparison is >= rather than = because the LATE branch
-  -- deliberately schedules a full cadence beyond the period end.
-  if v_sub.current_period_end is null or p_cancel_at < v_sub.current_period_end then
+  -- deliberately promises a full cadence beyond the period end.
+  if v_sub.current_period_end is null or p_effective_at < v_sub.current_period_end then
     return jsonb_build_object(
       'result', 'period_moved',
       'subscription_id', v_sub.id,
@@ -296,33 +418,36 @@ begin
 
   -- ── A CANCELLATION ALREADY STANDS ─────────────────────────────
   --
-  -- Three genuinely different situations hide behind "cancel_at is
-  -- already set", and collapsing them is how the customer's request gets
-  -- lost. They are separated here deliberately.
+  -- Three genuinely different situations hide behind "this subscription
+  -- already has an end date", and collapsing them is how the customer's
+  -- request gets lost. They are separated here deliberately.
   --
   -- The one that forced this structure is the RECONCILIATION RACE.
-  -- POST /api/subscriptions/cancel writes to Stripe FIRST and only then
-  -- calls this function - a cancellation is not real until Stripe has
-  -- accepted it. But Stripe emits customer.subscription.updated for that
-  -- very change, and that webhook can reach this system BEFORE the HTTP
-  -- request gets here. sync_subscription_from_stripe then writes
-  -- cancel_at with cancellation_requested_at left NULL, because Stripe
-  -- has no idea when a customer asked. If this function then treated the
-  -- matching cancel_at as a finished repeat and wrote nothing, the fact
-  -- that an authenticated customer requested the cancellation would be
-  -- lost permanently - the row would be indistinguishable from a
-  -- cancellation the owner made in the Stripe Dashboard.
-  if v_sub.cancel_at is not null then
+  -- POST /api/subscriptions/cancel writes an EARLY cancellation to Stripe
+  -- FIRST and only then calls this function - a cancellation is not real
+  -- until Stripe has accepted it. But Stripe emits
+  -- customer.subscription.updated for that very change, and that webhook
+  -- can reach this system BEFORE the HTTP request gets here.
+  -- sync_subscription_from_stripe then writes cancel_at and
+  -- cancellation_effective_at with cancellation_requested_at left NULL,
+  -- because Stripe has no idea when a customer asked. If this function
+  -- then treated the matching date as a finished repeat and wrote
+  -- nothing, the fact that an authenticated customer requested the
+  -- cancellation would be lost permanently - the row would be
+  -- indistinguishable from a cancellation the owner made in the Stripe
+  -- Dashboard.
+  if v_sub.cancellation_effective_at is not null then
 
     -- ── CASE D: a DIFFERENT date already stands ───────────────
     -- Refused outright rather than merged. Silently moving a
     -- cancellation the customer has already been told about is exactly
     -- the kind of change that must never happen quietly. ZERO writes.
-    if v_sub.cancel_at <> p_cancel_at then
+    if v_sub.cancellation_effective_at <> p_effective_at then
       return jsonb_build_object(
         'result', 'conflict',
         'subscription_id', v_sub.id,
         'cancellation_requested_at', v_sub.cancellation_requested_at,
+        'cancellation_effective_at', v_sub.cancellation_effective_at,
         'cancel_at', v_sub.cancel_at
       );
     end if;
@@ -333,11 +458,18 @@ begin
     -- NOT moved: the customer asked when they asked, and that timestamp
     -- is the input to the cutoff comparison. Moving it would rewrite the
     -- reason the effective date is what it is.
+    --
+    -- cancel_at is NOT written here either, and that matters for the
+    -- deferred late case: pressing cancel again during the cycle before
+    -- the renewal must not fabricate a Stripe schedule that does not
+    -- exist. Only apply_deferred_subscription_cancellation may set it,
+    -- and only after Stripe has accepted it.
     if v_sub.cancellation_requested_at is not null then
       return jsonb_build_object(
         'result', 'already_scheduled',
         'subscription_id', v_sub.id,
         'cancellation_requested_at', v_sub.cancellation_requested_at,
+        'cancellation_effective_at', v_sub.cancellation_effective_at,
         'cancel_at', v_sub.cancel_at
       );
     end if;
@@ -349,19 +481,18 @@ begin
     -- happen ONCE per row (CASE B catches every later attempt), and it
     -- writes exactly ONE column.
     --
-    -- cancel_at is deliberately NOT rewritten even though the two values
-    -- are equal: the row already holds the correct schedule, and an
-    -- assignment that cannot change a value can only obscure which path
-    -- wrote it.
+    -- Neither date is rewritten even though they match: the row already
+    -- holds the correct schedule, and an assignment that cannot change a
+    -- value can only obscure which path wrote it.
     --
-    -- INVARIANT 2 (cancel_at > cancellation_requested_at) has to hold
-    -- for this write, and it cannot be assumed: the existing cancel_at
-    -- may have been scheduled from a period that has since elapsed. A
-    -- date that does not lie ahead of the request would raise a
-    -- constraint violation out of this function and turn a customer's
-    -- cancellation into a 500, so it is refused as 'period_moved' - the
-    -- accurate answer, and the one that tells the caller to recompute.
-    if p_cancel_at <= p_requested_at then
+    -- INVARIANT 3 (cancellation_effective_at > cancellation_requested_at)
+    -- has to hold for this write, and it cannot be assumed: the standing
+    -- date may have been set from a period that has since elapsed. A date
+    -- that does not lie ahead of the request would raise a constraint
+    -- violation out of this function and turn a customer's cancellation
+    -- into a 500, so it is refused as 'period_moved' - the accurate
+    -- answer, and the one that tells the caller to recompute.
+    if p_effective_at <= p_requested_at then
       return jsonb_build_object(
         'result', 'period_moved',
         'subscription_id', v_sub.id,
@@ -377,19 +508,23 @@ begin
       'result', 'already_scheduled',
       'subscription_id', v_sub.id,
       'cancellation_requested_at', p_requested_at,
+      'cancellation_effective_at', v_sub.cancellation_effective_at,
       'cancel_at', v_sub.cancel_at,
       'request_recorded', true
     );
   end if;
 
   -- ── CASE A: THE WRITE ─────────────────────────────────────────
-  -- Nothing is scheduled yet, so both columns are written together.
+  -- Nothing stands yet, so the request and the promised end are written
+  -- together. cancel_at follows only what Stripe actually holds: the
+  -- early path passes the date it just accepted, the late path passes
+  -- NULL and the row honestly says Stripe has scheduled nothing.
   --
-  -- The same INVARIANT 2 guard as CASE C, for the same reason: a
+  -- The same INVARIANT 3 guard as CASE C, for the same reason: a
   -- current_period_end that has already elapsed produces an effective
   -- date behind the request, and writing it would raise a constraint
   -- violation rather than record a cancellation.
-  if p_cancel_at <= p_requested_at then
+  if p_effective_at <= p_requested_at then
     return jsonb_build_object(
       'result', 'period_moved',
       'subscription_id', v_sub.id,
@@ -397,13 +532,14 @@ begin
     );
   end if;
 
-  -- TWO columns. Not status - a scheduled cancellation is still active.
+  -- THREE columns. Not status - a scheduled cancellation is still active.
   -- Not cancelled_at - that belongs to actual termination. Not
   -- cancel_at_period_end - we are not using that mechanism. Not the
   -- period columns, not the Stripe binding, not one money column, not one
   -- snapshot.
   update public.subscriptions
      set cancellation_requested_at = p_requested_at,
+         cancellation_effective_at = p_effective_at,
          cancel_at                 = p_cancel_at
    where id = v_sub.id;
 
@@ -411,6 +547,128 @@ begin
     'result', 'scheduled',
     'subscription_id', v_sub.id,
     'cancellation_requested_at', p_requested_at,
+    'cancellation_effective_at', p_effective_at,
+    'cancel_at', p_cancel_at
+  );
+end;
+$$;
+
+-- 2B. APPLY A DEFERRED LATE CANCELLATION ───────────────────────
+--
+-- THE OTHER HALF OF THE LATE PATH, and the reason no future-period
+-- cancel_at is ever sent to Stripe.
+--
+-- Driven by invoice.paid, strictly after fulfillPaidSubscriptionInvoice
+-- has advanced current_period_end and created the order for the cycle
+-- that was just paid, and strictly after Stripe has accepted the
+-- cancel_at. By then the promised end date is the end of the CURRENT
+-- period, so setting it prorates nothing.
+--
+-- EXACTLY ONE FURTHER CYCLE is enforced by two conditions and no counter:
+--
+--   1. the pending decision is CONSUMED. It applies only while cancel_at
+--      is still NULL, and applying it sets cancel_at. Every later
+--      delivery of the same event, and every later renewal, finds a
+--      non-NULL cancel_at and answers 'already_scheduled' with zero
+--      writes and no Stripe call.
+--   2. it will not fire EARLY. p_cancel_at is the now-current period end;
+--      it must have reached the promised date. A redelivered invoice.paid
+--      for the cycle the customer was in when they asked carries the
+--      earlier period end and is refused as 'too_early', so a redelivery
+--      inside Stripe's retry window cannot rob the customer of the cycle
+--      they are owed.
+--
+-- The comparison fails toward NOT cancelling early: if the two dates ever
+-- disagreed, the customer would keep the subscription one more cycle
+-- rather than lose one they paid for. They do not disagree in practice -
+-- the cadence is exactly 28 days and both sides derive from the same
+-- Stripe timestamps - but the direction of the failure was chosen, not
+-- inherited.
+--
+-- IT NEVER WRITES status. A subscription with a scheduled cancellation is
+-- still active; termination has its own function below.
+--
+-- RESULT VOCABULARY:
+--   'not_found'          no local subscription for that stripe id
+--   'nothing_pending'    no customer request, or none awaiting Stripe
+--   'too_early'          the promised date has not been reached yet
+--   'already_scheduled'  Stripe already holds it. Idempotent, ZERO writes
+--   'applied'            cancel_at recorded now
+create or replace function public.apply_deferred_subscription_cancellation(
+  p_stripe_subscription_id text,
+  p_cancel_at              timestamptz
+)
+returns jsonb
+language plpgsql
+volatile
+security definer set search_path = ''
+as $$
+declare
+  v_sub public.subscriptions;
+begin
+  if p_stripe_subscription_id is null or btrim(p_stripe_subscription_id) = ''
+     or p_cancel_at is null then
+    return jsonb_build_object('result', 'not_found');
+  end if;
+
+  select * into v_sub
+  from public.subscriptions
+  where stripe_subscription_id = btrim(p_stripe_subscription_id)
+  for update;
+
+  if not found then
+    return jsonb_build_object('result', 'not_found');
+  end if;
+
+  -- No customer ever asked. An owner-initiated Stripe Dashboard
+  -- cancellation is NOT a deferred decision and must not be re-applied
+  -- from here.
+  if v_sub.cancellation_requested_at is null or v_sub.cancellation_effective_at is null then
+    return jsonb_build_object('result', 'nothing_pending', 'subscription_id', v_sub.id);
+  end if;
+
+  -- Already at Stripe. The decision was consumed - by an earlier delivery
+  -- of this event, by an earlier renewal, or because the cancellation was
+  -- early and never deferred at all.
+  if v_sub.cancel_at is not null then
+    return jsonb_build_object(
+      'result', 'already_scheduled',
+      'subscription_id', v_sub.id,
+      'cancel_at', v_sub.cancel_at
+    );
+  end if;
+
+  -- The cycle the customer was still owed has not been reached yet.
+  if p_cancel_at < v_sub.cancellation_effective_at then
+    return jsonb_build_object(
+      'result', 'too_early',
+      'subscription_id', v_sub.id,
+      'cancellation_effective_at', v_sub.cancellation_effective_at
+    );
+  end if;
+
+  -- INVARIANT 4 has to hold, and p_cancel_at comes from Stripe rather
+  -- than from the promise, so it is checked rather than assumed.
+  if p_cancel_at <= v_sub.cancellation_requested_at then
+    return jsonb_build_object('result', 'too_early', 'subscription_id', v_sub.id);
+  end if;
+
+  -- TWO columns. The promised date is corrected to what Stripe actually
+  -- accepted, because from this moment Stripe is the authority on when
+  -- this subscription ends and two fields quietly disagreeing is worse
+  -- than either one being slightly off.
+  --
+  -- Not status, not cancelled_at, not the period columns, not the Stripe
+  -- binding, not one money column, not one snapshot, and nothing at all
+  -- on public.orders - the cycle that was just paid for ships normally.
+  update public.subscriptions
+     set cancel_at                 = p_cancel_at,
+         cancellation_effective_at = p_cancel_at
+   where id = v_sub.id;
+
+  return jsonb_build_object(
+    'result', 'applied',
+    'subscription_id', v_sub.id,
     'cancel_at', p_cancel_at
   );
 end;
@@ -418,21 +676,21 @@ $$;
 
 -- 3. RECONCILE SCHEDULING FACTS FROM STRIPE ────────────────────
 --
--- Driven by customer.subscription.updated. Stripe is the source of truth
--- for these four facts and this is how they come home.
+-- Driven by customer.subscription.updated, from a subscription the
+-- handler re-read from Stripe rather than from the event payload. Stripe
+-- is the source of truth for these facts and this is how they come home.
 --
--- IT CLOSES THE STRIPE-SUCCEEDED-DATABASE-FAILED WINDOW. If the route
--- schedules at Stripe and then fails to persist locally, the
+-- IT CLOSES THE STRIPE-SUCCEEDED-DATABASE-FAILED WINDOW. If the early
+-- path schedules at Stripe and then fails to persist locally, the
 -- customer.subscription.updated event Stripe emits for that very change
--- arrives moments later and writes cancel_at anyway. The local record
--- self-heals without any retry, any cron or any customer action.
+-- arrives moments later and writes the cancellation anyway. The local
+-- record self-heals without any retry, any cron or any customer action.
 --
 -- KEYED ON stripe_subscription_id, which carries a partial unique index
 -- (migration 022), so there is exactly one local row behind one Stripe
 -- subscription and no ambiguity to resolve.
 --
--- DELIBERATELY NARROW. It writes four columns and refuses to be a general
--- Stripe mirror:
+-- DELIBERATELY NARROW. It refuses to be a general Stripe mirror:
 --
 --   * NEVER status. Stripe's status vocabulary and GLOA's are different
 --     concepts, and letting an arbitrary Stripe update rewrite the local
@@ -441,13 +699,26 @@ $$;
 --     failure states are Phase 3E's to design.
 --   * NEVER money, snapshots, plan, items, addresses or tax. Those are
 --     frozen at checkout by contract.
---   * NEVER cancellation_requested_at. Stripe does not know when a
---     customer asked, and inventing one would break the cutoff audit
---     trail.
+--   * NEVER invents a cancellation_requested_at. Stripe does not know
+--     when a customer asked, and inventing one would break the cutoff
+--     audit trail.
 --   * NEVER cancel_at_period_end.
 --
--- Nulls are accepted for cancel_at, which is how an UNSCHEDULING is
--- reconciled if the owner removes a cancellation in the Stripe Dashboard.
+-- ── WHY "NO CANCELLATION AT STRIPE" IS NOT ENOUGH TO CLEAR ────
+--
+-- The first draft cleared the local request whenever Stripe reported no
+-- cancel_at. That was safe only while every cancellation reached Stripe
+-- immediately. It is now actively wrong: a LATE cancellation deliberately
+-- holds no cancel_at at Stripe for the whole cycle before the renewal, so
+-- any customer.subscription.updated during that cycle - a card update, a
+-- renewal, anything at all - would have silently deleted the customer's
+-- cancellation.
+--
+-- Clearing is therefore keyed on a TRANSITION, not on a value: only a
+-- cancellation this row already recorded as living at Stripe, which
+-- Stripe now reports as gone, is an unscheduling. A deferred request that
+-- Stripe never held is left completely alone.
+--
 -- The period columns use coalesce so a partial event cannot erase a
 -- timestamp we already had.
 --
@@ -455,7 +726,7 @@ $$;
 --   'not_found'  no local subscription for that stripe id (normal for a
 --                subscription this system did not create)
 --   'unchanged'  nothing differed
---   'synced'     one or more of the four facts was updated
+--   'synced'     one or more of the reconciled facts was updated
 create or replace function public.sync_subscription_from_stripe(
   p_stripe_subscription_id text,
   p_current_period_start   timestamptz,
@@ -469,8 +740,11 @@ security definer set search_path = ''
 as $$
 declare
   v_sub public.subscriptions;
-  v_new_start timestamptz;
-  v_new_end   timestamptz;
+  v_new_start     timestamptz;
+  v_new_end       timestamptz;
+  v_new_effective timestamptz;
+  v_new_requested timestamptz;
+  v_unscheduled   boolean;
 begin
   if p_stripe_subscription_id is null or btrim(p_stripe_subscription_id) = '' then
     return jsonb_build_object('result', 'not_found');
@@ -488,25 +762,41 @@ begin
   v_new_start := coalesce(p_current_period_start, v_sub.current_period_start);
   v_new_end   := coalesce(p_current_period_end,   v_sub.current_period_end);
 
+  -- A cancellation this row knew Stripe was holding, which Stripe now
+  -- reports as gone. THAT is an unscheduling - not the mere absence of a
+  -- cancel_at, which is the normal resting state of a deferred late
+  -- cancellation.
+  v_unscheduled := v_sub.cancel_at is not null and p_cancel_at is null;
+
+  v_new_effective := case
+                       when p_cancel_at is not null then p_cancel_at
+                       when v_unscheduled then null
+                       else v_sub.cancellation_effective_at
+                     end;
+
+  -- The request is a customer's historical fact and survives everything
+  -- except a genuine unscheduling, which removes the cancellation it
+  -- belonged to.
+  v_new_requested := case
+                       when v_unscheduled then null
+                       else v_sub.cancellation_requested_at
+                     end;
+
   if v_sub.current_period_start is not distinct from v_new_start
      and v_sub.current_period_end is not distinct from v_new_end
      and v_sub.cancel_at is not distinct from p_cancel_at
+     and v_sub.cancellation_effective_at is not distinct from v_new_effective
+     and v_sub.cancellation_requested_at is not distinct from v_new_requested
   then
     return jsonb_build_object('result', 'unchanged', 'subscription_id', v_sub.id);
   end if;
 
-  -- The paired invariant is respected without inventing a request: if
-  -- Stripe reports no cancellation and we hold a local request, the
-  -- request row would violate the CHECK, so an unscheduling clears both.
-  -- That is the truthful outcome - the cancellation no longer exists.
   update public.subscriptions
      set current_period_start     = v_new_start,
          current_period_end       = v_new_end,
          cancel_at                = p_cancel_at,
-         cancellation_requested_at = case
-                                       when p_cancel_at is null then null
-                                       else v_sub.cancellation_requested_at
-                                     end
+         cancellation_effective_at = v_new_effective,
+         cancellation_requested_at = v_new_requested
    where id = v_sub.id;
 
   return jsonb_build_object(
@@ -601,10 +891,15 @@ $$;
 -- the server (lib/supabaseAdmin.ts), and it still holds NO direct write
 -- privilege on public.subscriptions - this migration adds no table grant
 -- and no column grant of any kind.
-revoke all on function public.schedule_subscription_cancellation(uuid, uuid, timestamptz, timestamptz) from public;
-revoke all on function public.schedule_subscription_cancellation(uuid, uuid, timestamptz, timestamptz) from anon;
-revoke all on function public.schedule_subscription_cancellation(uuid, uuid, timestamptz, timestamptz) from authenticated;
-grant execute on function public.schedule_subscription_cancellation(uuid, uuid, timestamptz, timestamptz) to service_role;
+revoke all on function public.schedule_subscription_cancellation(uuid, uuid, timestamptz, timestamptz, timestamptz) from public;
+revoke all on function public.schedule_subscription_cancellation(uuid, uuid, timestamptz, timestamptz, timestamptz) from anon;
+revoke all on function public.schedule_subscription_cancellation(uuid, uuid, timestamptz, timestamptz, timestamptz) from authenticated;
+grant execute on function public.schedule_subscription_cancellation(uuid, uuid, timestamptz, timestamptz, timestamptz) to service_role;
+
+revoke all on function public.apply_deferred_subscription_cancellation(text, timestamptz) from public;
+revoke all on function public.apply_deferred_subscription_cancellation(text, timestamptz) from anon;
+revoke all on function public.apply_deferred_subscription_cancellation(text, timestamptz) from authenticated;
+grant execute on function public.apply_deferred_subscription_cancellation(text, timestamptz) to service_role;
 
 revoke all on function public.sync_subscription_from_stripe(text, timestamptz, timestamptz, timestamptz) from public;
 revoke all on function public.sync_subscription_from_stripe(text, timestamptz, timestamptz, timestamptz) from anon;
@@ -631,9 +926,9 @@ grant execute on function public.mark_subscription_cancelled(text, timestamptz) 
 -- schedules a cancellation, cancels a subscription, calls Stripe or
 -- sends an email.
 --
--- (A)(B) BOTH COLUMNS EXIST, ARE NULLABLE, AND HAVE NO DEFAULT.
---     Expected: exactly two rows, both timestamp with time zone, both
---     is_nullable = YES, both column_default = NULL.
+-- (A)(B) ALL THREE COLUMNS EXIST, ARE NULLABLE, AND HAVE NO DEFAULT.
+--     Expected: exactly three rows, all timestamp with time zone, all
+--     is_nullable = YES, all column_default = NULL.
 --
 --     A non-NULL default here would mark every subscription in the shop
 --     as cancelled-pending, which is the worst possible failure.
@@ -641,15 +936,18 @@ grant execute on function public.mark_subscription_cancelled(text, timestamptz) 
 --   select column_name, data_type, is_nullable, column_default
 --   from information_schema.columns
 --   where table_schema = 'public' and table_name = 'subscriptions'
---     and column_name in ('cancellation_requested_at', 'cancel_at')
+--     and column_name in ('cancellation_requested_at',
+--                         'cancellation_effective_at', 'cancel_at')
 --   order by column_name;
 --
--- (C) BOTH INVARIANTS EXIST. Expected: exactly two rows.
+-- (C) ALL FOUR INVARIANTS EXIST. Expected: exactly four rows.
 --
 --   select conname, pg_get_constraintdef(oid) as definition
 --   from pg_constraint
 --   where conrelid = 'public.subscriptions'::regclass and contype = 'c'
 --     and conname in ('subscriptions_cancellation_request_scheduled_check',
+--                     'subscriptions_cancel_at_promised_check',
+--                     'subscriptions_effective_after_request_check',
 --                     'subscriptions_cancel_at_after_request_check')
 --   order by conname;
 --
@@ -662,9 +960,9 @@ grant execute on function public.mark_subscription_cancelled(text, timestamptz) 
 --   where conrelid = 'public.subscriptions'::regclass and contype = 'c'
 --     and conname = 'subscriptions_status_check';
 --
--- (E)(F) THE THREE FUNCTIONS EXIST, SECURITY DEFINER, EMPTY search_path.
---     Expected: three rows, security_definer = true for all three, and
---     proconfig = {"search_path="} for all three.
+-- (E)(F) ALL FOUR FUNCTIONS EXIST, SECURITY DEFINER, EMPTY search_path.
+--     Expected: four rows, security_definer = true for all four, and
+--     proconfig = {"search_path="} for all four.
 --
 --   select p.proname,
 --          pg_get_function_identity_arguments(p.oid) as arguments,
@@ -675,18 +973,20 @@ grant execute on function public.mark_subscription_cancelled(text, timestamptz) 
 --   join pg_namespace n on n.oid = p.pronamespace
 --   where n.nspname = 'public'
 --     and p.proname in ('schedule_subscription_cancellation',
+--                       'apply_deferred_subscription_cancellation',
 --                       'sync_subscription_from_stripe',
 --                       'mark_subscription_cancelled')
 --   order by p.proname;
 --
 --     Expected arguments:
---       mark_subscription_cancelled          text, timestamp with time zone
---       schedule_subscription_cancellation   uuid, uuid, timestamp with time zone, timestamp with time zone
---       sync_subscription_from_stripe        text, timestamp with time zone, timestamp with time zone, timestamp with time zone
---     Expected returns: jsonb for all three.
+--       apply_deferred_subscription_cancellation  text, timestamp with time zone
+--       mark_subscription_cancelled               text, timestamp with time zone
+--       schedule_subscription_cancellation        uuid, uuid, timestamp with time zone, timestamp with time zone, timestamp with time zone
+--       sync_subscription_from_stripe             text, timestamp with time zone, timestamp with time zone, timestamp with time zone
+--     Expected returns: jsonb for all four.
 --
 -- (G) WHO MAY EXECUTE THEM. The important block.
---     Expected: false, false, false, true - for each of the three.
+--     Expected: false, false, false, true - for each of the four.
 --
 --   select
 --     has_function_privilege('public',        'public.schedule_subscription_cancellation(uuid,uuid,timestamptz,timestamptz)', 'execute') as public_can,
@@ -698,6 +998,11 @@ grant execute on function public.mark_subscription_cancelled(text, timestamptz) 
 --     has_function_privilege('anon',          'public.sync_subscription_from_stripe(text,timestamptz,timestamptz,timestamptz)', 'execute') as anon_can,
 --     has_function_privilege('authenticated', 'public.sync_subscription_from_stripe(text,timestamptz,timestamptz,timestamptz)', 'execute') as authenticated_can,
 --     has_function_privilege('service_role',  'public.sync_subscription_from_stripe(text,timestamptz,timestamptz,timestamptz)', 'execute') as service_role_can;
+--
+--   select
+--     has_function_privilege('anon',          'public.apply_deferred_subscription_cancellation(text,timestamptz)', 'execute') as anon_can,
+--     has_function_privilege('authenticated', 'public.apply_deferred_subscription_cancellation(text,timestamptz)', 'execute') as authenticated_can,
+--     has_function_privilege('service_role',  'public.apply_deferred_subscription_cancellation(text,timestamptz)', 'execute') as service_role_can;
 --
 --   select
 --     has_function_privilege('anon',          'public.mark_subscription_cancelled(text,timestamptz)', 'execute') as anon_can,
@@ -744,6 +1049,7 @@ grant execute on function public.mark_subscription_cancelled(text, timestamptz) 
 --     already was.
 --
 --   select count(*)                                            as subscriptions,
+--          count(cancellation_effective_at)                     as promised,
 --          count(*) filter (where status = 'active')            as active,
 --          count(*) filter (where status = 'pending')           as pending,
 --          count(*) filter (where status = 'cancelled')         as cancelled,
@@ -753,8 +1059,28 @@ grant execute on function public.mark_subscription_cancelled(text, timestamptz) 
 --          count(*) filter (where cancel_at_period_end)         as period_end_flagged
 --   from public.subscriptions;
 --
+--     requested, promised and scheduled are all expected to be 0
+--     immediately after applying.
+--
 --     period_end_flagged is expected to be 0 and to STAY 0: this feature
 --     never sets cancel_at_period_end. See the header for why.
+--
+-- (M) NO ROW EVER CLAIMS STRIPE HOLDS SOMETHING IT DOES NOT.
+--     The deferred late state is legitimate and expected to appear once
+--     the feature is live; the reverse never is.
+--     Expected: zero rows, always.
+--
+--   select id, cancellation_requested_at, cancellation_effective_at, cancel_at
+--   from public.subscriptions
+--   where (cancel_at is not null and cancellation_effective_at is null)
+--      or (cancellation_requested_at is not null and cancellation_effective_at is null);
+--
+--     And the deferred state itself, which is what a late cancellation
+--     looks like while it waits for its last paid cycle:
+--
+--   select count(*) as awaiting_final_cycle
+--   from public.subscriptions
+--   where cancellation_requested_at is not null and cancel_at is null;
 --
 -- (K) NO TRIGGER ADDED. Expected: only set_subscriptions_updated_at from
 --     migration 005.

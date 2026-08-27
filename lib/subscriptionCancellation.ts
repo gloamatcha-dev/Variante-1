@@ -1,13 +1,18 @@
 import type Stripe from "stripe";
 import { getSupabaseAdmin } from "./supabaseAdmin";
 import {
+  deferredCancelIdempotencyKey,
+  deferredCancellationIsDue,
   isCancelResult,
   isCancellableStatus,
+  isDeferredApplyResult,
   resolveCancellationSchedule,
+  schedulesAtStripeNow,
   subscriptionCancelIdempotencyKey,
   toStripeTimestamp,
   type CancelResult,
   type CancellationSchedule,
+  type DeferredApplyResult,
 } from "./subscriptionCancellationRules";
 
 /**
@@ -89,7 +94,7 @@ import {
 /** The columns one cancellation decision is made from. */
 const SUBSCRIPTION_COLUMNS =
   "id, user_id, customer_type, status, stripe_subscription_id, current_period_end, " +
-  "cancellation_requested_at, cancel_at";
+  "cancellation_requested_at, cancellation_effective_at, cancel_at";
 
 type SubscriptionRow = {
   id: string;
@@ -99,6 +104,7 @@ type SubscriptionRow = {
   stripe_subscription_id: string | null;
   current_period_end: string | null;
   cancellation_requested_at: string | null;
+  cancellation_effective_at: string | null;
   cancel_at: string | null;
 };
 
@@ -209,10 +215,26 @@ export async function cancelSubscriptionForUser(
     ? { ...computed.schedule, effectiveCancelAt: existingCancelAt }
     : computed.schedule;
 
+  // ── WHAT REACHES STRIPE NOW ─────────────────────────────────
+  //
+  // EARLY: the cancellation goes to Stripe immediately. The date is the
+  // CURRENT period end, which prorates nothing.
+  //
+  // LATE: NOTHING goes to Stripe. See the module header - a cancel_at in
+  // a future period ALWAYS prorates, whatever proration_behavior says,
+  // and a prorated renewal would fail GLOA's own fulfillment check for a
+  // cycle the customer had already paid for. The decision is stored
+  // instead and applied by applyDeferredCancellationFromRenewal below
+  // when that cycle is genuinely paid.
+  //
+  // An existingCancelAt overrides the timing entirely: if Stripe already
+  // holds a cancellation, it holds it now, and there is nothing to defer.
+  const deliverNow = Boolean(existingCancelAt) || schedulesAtStripeNow(schedule.timing);
+
   // Only write to Stripe when the value would actually change. An
   // already-scheduled subscription needs no second write, and skipping it
   // means a retry produces no further Stripe events either.
-  if (!existingCancelAt) {
+  if (deliverNow && !existingCancelAt) {
     try {
       await stripe.subscriptions.update(
         subscription.stripe_subscription_id,
@@ -247,11 +269,16 @@ export async function cancelSubscriptionForUser(
   // inside the RPC, in one transaction. This module performs no table
   // write of its own and could not: service_role holds SELECT and nothing
   // else on public.subscriptions.
+  //
+  // p_cancel_at carries ONLY what Stripe actually holds. For a deferred
+  // late cancellation that is null, and the row honestly says so rather
+  // than claiming a Stripe schedule that does not exist.
   const { data: rpcData, error: rpcError } = await admin.rpc("schedule_subscription_cancellation", {
     p_subscription_id: subscription.id,
     p_user_id: userId,
     p_requested_at: requestAt.toISOString(),
-    p_cancel_at: schedule.effectiveCancelAt,
+    p_effective_at: schedule.effectiveCancelAt,
+    p_cancel_at: deliverNow ? schedule.effectiveCancelAt : null,
   });
 
   if (rpcError) {
@@ -275,6 +302,145 @@ export async function cancelSubscriptionForUser(
     return { ok: true, result, schedule };
   }
   return { ok: false, result };
+}
+
+/* ══════════════════════════════════════════════════════════════
+   THE DEFERRED LATE BRANCH (Phase 3C.2)
+   ══════════════════════════════════════════════════════════════ */
+
+/**
+ * Applies a late cancellation once its one further cycle has been paid.
+ *
+ * Driven by invoice.paid, strictly AFTER fulfillPaidSubscriptionInvoice
+ * has advanced current_period_end and created the order for the cycle
+ * that was just paid. By then the promised end date IS the end of the
+ * current period, so setting cancel_at prorates nothing - which is the
+ * entire reason the late branch defers.
+ *
+ * ══════════════════════════════════════════════════════════════
+ * EXACTLY ONE FURTHER CYCLE, WITHOUT A COUNTER
+ * ══════════════════════════════════════════════════════════════
+ *
+ *   1. THE DECISION IS CONSUMED. It applies only while the local
+ *      cancel_at is still NULL, and applying it sets cancel_at. Every
+ *      later delivery of the same event and every later renewal finds a
+ *      non-NULL cancel_at, answers 'already_scheduled', writes nothing
+ *      and calls no Stripe API.
+ *   2. IT WILL NOT FIRE EARLY. A redelivered invoice.paid for the cycle
+ *      the customer was still in carries an earlier period end than the
+ *      promise, and is refused - so a redelivery inside Stripe's retry
+ *      window cannot rob them of the cycle they are owed.
+ *
+ * Both guards are enforced again inside the RPC under a row lock; the
+ * checks here exist only to avoid a pointless Stripe call.
+ *
+ * ══════════════════════════════════════════════════════════════
+ * IT NEVER THROWS, AND THAT IS DELIBERATE
+ * ══════════════════════════════════════════════════════════════
+ *
+ * The order for the paid cycle is already durable by the time this runs.
+ * Throwing would answer 500, and on redelivery the fulfillment ahead of
+ * it would answer 'ignored' or return the existing order - so failing
+ * here must not undo a delivery that has already happened. A failure
+ * leaves the decision PENDING, which is the safe state: the customer
+ * keeps a subscription they asked to end rather than losing one they
+ * paid for, and the very next renewal applies it.
+ *
+ * ══════════════════════════════════════════════════════════════
+ * A FAILED RENEWAL NEEDS NO POLICY OF ITS OWN
+ * ══════════════════════════════════════════════════════════════
+ *
+ * If the one permitted invoice fails there is no invoice.paid, so nothing
+ * is applied and the request stays pending - truthfully, because Stripe
+ * holds nothing. Stripe's own dunning then decides: if a retry succeeds,
+ * that renewal applies the cancellation and the customer gets exactly the
+ * cycle they paid for; if dunning is exhausted and Stripe cancels the
+ * subscription, customer.subscription.deleted marks it cancelled and the
+ * customer never received a cycle they did not pay for. The cancellation
+ * cannot be lost either way, so no new business rule was invented here.
+ */
+export async function applyDeferredCancellationFromRenewal(
+  stripe: Stripe,
+  stripeSubscriptionId: string,
+  deps?: { getAdmin?: typeof getSupabaseAdmin }
+): Promise<DeferredApplyResult | "error"> {
+  const admin = (deps?.getAdmin ?? getSupabaseAdmin)();
+  if (!admin) {
+    console.error("Deferred cancellation: SUPABASE_SECRET_KEY is not configured.");
+    return "error";
+  }
+
+  const { data, error } = await admin
+    .from("subscriptions")
+    .select("id, cancellation_requested_at, cancellation_effective_at, cancel_at, current_period_end")
+    .eq("stripe_subscription_id", stripeSubscriptionId)
+    .maybeSingle();
+
+  if (error) {
+    console.error(`Deferred cancellation: load failed for ${stripeSubscriptionId}:`, error.message);
+    return "error";
+  }
+  if (!data) return "not_found";
+
+  const row = data as unknown as Pick<
+    SubscriptionRow,
+    "id" | "cancellation_requested_at" | "cancellation_effective_at" | "cancel_at" | "current_period_end"
+  >;
+
+  // Nothing is owed: no customer ever asked, or Stripe already holds it.
+  // An owner-initiated Stripe Dashboard cancellation has no request and
+  // must never be re-applied from here.
+  if (!row.cancellation_requested_at || !row.cancellation_effective_at) return "nothing_pending";
+  if (row.cancel_at) return "already_scheduled";
+
+  // current_period_end was just advanced by the fulfillment ahead of this
+  // call, from the subscription it re-read from Stripe.
+  if (!deferredCancellationIsDue({
+    periodEnd: row.current_period_end,
+    promisedAt: row.cancellation_effective_at,
+  })) {
+    return "too_early";
+  }
+
+  const effectiveCancelAt = row.current_period_end as string;
+
+  // ── STRIPE FIRST, THEN THE DATABASE ─────────────────────────
+  // The same discipline as the request path: the local row may only
+  // record a cancellation Stripe has actually accepted.
+  try {
+    await stripe.subscriptions.update(
+      stripeSubscriptionId,
+      {
+        cancel_at: toStripeTimestamp(effectiveCancelAt),
+        // A current-period date, so this is belt and braces rather than
+        // load-bearing - but a cancellation must never become a credit.
+        proration_behavior: "none",
+      },
+      { idempotencyKey: deferredCancelIdempotencyKey(row.id, effectiveCancelAt) }
+    );
+  } catch (err) {
+    console.error(
+      `Deferred cancellation: stripe update failed for ${row.id}:`,
+      err instanceof Error ? err.message : "unknown error"
+    );
+    return "error";
+  }
+
+  const { data: rpcData, error: rpcError } = await admin.rpc(
+    "apply_deferred_subscription_cancellation",
+    { p_stripe_subscription_id: stripeSubscriptionId, p_cancel_at: effectiveCancelAt }
+  );
+
+  if (rpcError) {
+    // Stripe holds the cancellation. customer.subscription.updated for
+    // that very change reconciles cancel_at into the row moments later,
+    // so this self-heals with no retry and no customer action.
+    console.error(`Deferred cancellation: RPC failed for ${row.id}:`, rpcError.message);
+    return "error";
+  }
+
+  const payload = (rpcData ?? {}) as { result?: unknown };
+  return isDeferredApplyResult(payload.result) ? payload.result : "error";
 }
 
 /* ══════════════════════════════════════════════════════════════

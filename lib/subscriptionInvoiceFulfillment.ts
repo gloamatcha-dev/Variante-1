@@ -82,6 +82,15 @@ export type InvoiceFulfillmentResult =
       customerEmail: string | null;
       customerName: string | null;
       stripeInvoiceId: string;
+      /**
+       * Which Stripe subscription this cycle belongs to.
+       *
+       * Reported so the caller never has to re-derive it from the
+       * invoice. Phase 3C.2 needs it: a late cancellation is applied at
+       * Stripe only once its one further cycle has genuinely been paid,
+       * and this is the event that proves it was.
+       */
+      stripeSubscriptionId: string;
     }
   /**
    * Ours, but it does not reconcile. The caller must NOT mark the event
@@ -374,5 +383,6 @@ export async function fulfillPaidSubscriptionInvoice(
     customerEmail: typeof customer.email === "string" ? customer.email : null,
     customerName: typeof customer.name === "string" ? customer.name : null,
     stripeInvoiceId: invoice.id as string,
+    stripeSubscriptionId,
   };
 }
