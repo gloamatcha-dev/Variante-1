@@ -42,7 +42,8 @@ import {
  * carries subscription_id and stripe_invoice_id. Copying either onto
  * orders would be a second place to disagree.
  *
- * So the flow is two existing security-definer functions in sequence:
+ * So the flow is two existing security-definer functions in sequence,
+ * followed by one narrow write that records what was paid:
  *
  *   activate_subscription_from_invoice   (022)
  *     locks the subscription, refuses a terminal status, refuses a
@@ -54,10 +55,16 @@ import {
  *     locks that attempt and creates exactly one order and its items
  *     from the frozen snapshot - or returns the existing one.
  *
- * Both are individually atomic and both are idempotent, so a redelivery
- * converges instead of duplicating. They are two transactions rather
- * than one; the consequence is analysed under PARTIAL FAILURE below and
- * it is safe, because the second step is reachable again on every retry.
+ *   record_paid_subscription_period      (034)
+ *     locks the subscription and advances last_paid_period_end, but only
+ *     after re-proving that a PAID attempt for this invoice exists on
+ *     this subscription. Monotonic, so a redelivery is a no-op.
+ *
+ * All three are individually atomic and all three are idempotent, so a
+ * redelivery converges instead of duplicating. They are three
+ * transactions rather than one; the consequence is analysed under
+ * PARTIAL FAILURE below and it is safe, because every later step is
+ * reachable again on every retry.
  */
 
 /** What the caller needs to answer Stripe with. */
@@ -118,6 +125,21 @@ export type SubscriptionInvoiceDeps = {
     checkoutAttemptId: string;
     subscription: LocalSubscriptionFacts;
   }) => Promise<CreatedOrder>;
+  /**
+   * Records that this subscription period was PAID (Phase 3C.5).
+   *
+   * Separate from activateFromInvoice because migration 022 is live and
+   * immutable, and because the two facts are genuinely different:
+   * activation reconciles the period Stripe currently reports, this
+   * states that GLOA saw that period paid for. current_period_end cannot
+   * do both jobs - the customer.subscription.updated reconciliation
+   * writes it too, and that is not a payment event.
+   */
+  recordPaidPeriod: (input: {
+    subscriptionId: string;
+    stripeInvoiceId: string;
+    paidPeriodEnd: string;
+  }) => Promise<void>;
   /**
    * The frozen lines the order was built from. Read back off the attempt
    * rather than recomputed, so the notification describes the order that
@@ -197,6 +219,51 @@ async function activateFromInvoice(input: {
 }
 
 /**
+ * The one call that can create payment evidence for a subscription.
+ *
+ * The RPC does not take this on trust: it refuses to write unless a PAID
+ * checkout attempt for this exact Stripe invoice already exists on this
+ * exact subscription, which only migration 022's activation - driven by
+ * invoice.paid - can have created. It advances last_paid_period_end and
+ * writes nothing else, and it only ever moves that value forward, so a
+ * redelivery of the same invoice is a no-op rather than a second write.
+ *
+ * A failure THROWS. The caller is the webhook, which turns a throw into a
+ * 500, skips recording the event and lets Stripe redeliver - and every
+ * step ahead of this one is idempotent, so the retry re-attempts exactly
+ * the missing evidence and creates no second order and no second email.
+ */
+async function recordPaidPeriod(input: {
+  subscriptionId: string;
+  stripeInvoiceId: string;
+  paidPeriodEnd: string;
+}): Promise<void> {
+  const admin = getSupabaseAdmin();
+  if (!admin) throw new Error("supabase admin client is not configured");
+
+  const { data, error } = await admin.rpc("record_paid_subscription_period", {
+    p_subscription_id: input.subscriptionId,
+    p_stripe_invoice_id: input.stripeInvoiceId,
+    p_paid_period_end: input.paidPeriodEnd,
+  });
+
+  if (error) {
+    throw new Error(`record_paid_subscription_period failed: ${error.message}`);
+  }
+
+  // 'recorded' and 'unchanged' are both success: the second is what a
+  // redelivered invoice produces. Anything else means the evidence was
+  // NOT written, and the caller must not go on to end a subscription on
+  // the strength of it.
+  const result = ((data ?? {}) as { result?: unknown }).result;
+  if (result !== "recorded" && result !== "unchanged") {
+    throw new Error(
+      `record_paid_subscription_period refused invoice ${input.stripeInvoiceId}: ${String(result)}`
+    );
+  }
+}
+
+/**
  * The order is built from the subscription's FROZEN snapshots and from
  * nothing else.
  *
@@ -254,6 +321,7 @@ export const defaultSubscriptionInvoiceDeps: SubscriptionInvoiceDeps = {
   loadMappedStripeCustomerId,
   activateFromInvoice,
   createOrder,
+  recordPaidPeriod,
   loadAttemptItems,
 };
 
@@ -366,6 +434,34 @@ export async function fulfillPaidSubscriptionInvoice(
   // safe despite being two transactions.
   const order = await deps.createOrder({ checkoutAttemptId, subscription });
   const frozenItems = await deps.loadAttemptItems(checkoutAttemptId);
+
+  // STEP 3. RECORD THAT THIS PERIOD WAS PAID (Phase 3C.5).
+  //
+  // Strictly after the order exists and strictly before the caller can
+  // act on a deferred cancellation, because a cancellation that ends a
+  // subscription must be able to point at durable proof that the cycle it
+  // is ending was paid for. current_period_end cannot be that proof: the
+  // customer.subscription.updated reconciliation writes the same column
+  // from an event that is not a payment, so a failed renewal whose period
+  // moved anyway would otherwise look exactly like a paid one - and the
+  // customer would lose a cycle they had paid for.
+  //
+  // The value is the period this same flow just reconciled, off the
+  // Stripe subscription re-read above. Not a browser value, not an event
+  // payload, and not a wall clock: a period boundary, so everything
+  // downstream compares periods to periods.
+  //
+  // A missing period end records nothing rather than guessing. The same
+  // gap already stops the activation from advancing current_period_end,
+  // so the deferred cancellation waits either way - which is the safe
+  // direction: the customer keeps the cycle.
+  if (period.currentPeriodEnd) {
+    await deps.recordPaidPeriod({
+      subscriptionId: subscription.id,
+      stripeInvoiceId: invoice.id as string,
+      paidPeriodEnd: period.currentPeriodEnd,
+    });
+  }
 
   // The frozen customer snapshot, not Stripe's billing details. Stripe is
   // the payment authority; the subscription snapshot is the fulfillment

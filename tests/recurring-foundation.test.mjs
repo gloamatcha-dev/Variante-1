@@ -600,15 +600,35 @@ test("hardening: 023 owns its number and the live migrations are not edited", ()
   // them may touch what 022 and 023 already put live.
   for (const name of files.filter(n => n > "023_harden_stripe_customers_grants.sql")) {
     const later = withoutComments(readFileSync(path.join(MIGRATIONS, name), "utf-8"));
-    for (const owned of ["stripe_customers", "stripe_webhook_events", "stripe_invoice_id"]) {
+    for (const owned of ["stripe_customers", "stripe_webhook_events"]) {
       assert.ok(!new RegExp(owned).test(later), `${name} touches ${owned}`);
     }
     // stripe_subscription_id is READ by migration 034, which resolves a
-    // subscription by it in order to reconcile a cancellation. Reading
-    // the binding 022 established is the opposite of reaching into it;
-    // what is still forbidden is redefining it or writing it.
+    // subscription by it in order to reconcile a cancellation.
+    // stripe_invoice_id is READ by the same migration, which will not
+    // record a paid subscription period unless the paid checkout attempt
+    // 022 wrote for THAT invoice is already there. Reading the bindings
+    // 022 established is the opposite of reaching into them; what is
+    // still forbidden is redefining them or writing them.
     assert.ok(!/create unique index[^;]*stripe_subscription_id/i.test(later),
       `${name} redefines the stripe subscription binding`);
+    assert.ok(!/create unique index[^;]*stripe_invoice_id/i.test(later),
+      `${name} redefines the stripe invoice binding`);
+    // A later migration may still write the attempts table - 025's
+    // claim_pending_subscription_for_attempt does, for its own column.
+    // What none of them may do is write the two facts that TOGETHER mean
+    // "this subscription invoice was paid", because that pair is the
+    // payment evidence 034's sweep rests on and 022 is its only author.
+    assert.ok(!/insert into public\.checkout_attempts/i.test(later),
+      `${name} creates a checkout attempt`);
+    assert.ok(!/delete from public\.checkout_attempts/i.test(later),
+      `${name} deletes a checkout attempt`);
+    const attemptWrites = [...later.matchAll(/update public\.checkout_attempts\s+set([\s\S]*?)where/g)]
+      .map(m => m[1]).join(" ");
+    assert.ok(!attemptWrites.includes("stripe_invoice_id"),
+      `${name} writes stripe_invoice_id`);
+    assert.ok(!/status\s*=\s*'paid'/.test(attemptWrites),
+      `${name} marks a checkout attempt paid`);
     const setClauses = [...later.matchAll(/update public\.subscriptions\s+set([\s\S]*?)where/g)]
       .map(m => m[1]).join(" ");
     assert.ok(!setClauses.includes("stripe_subscription_id"),

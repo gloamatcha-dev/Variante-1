@@ -4,6 +4,7 @@ import {
   DEFERRED_SWEEP_LIMIT,
   deferredCancelIdempotencyKey,
   deferredCancellationIsDue,
+  deferredCancellationIsPaid,
   isCancelResult,
   isCancellableStatus,
   isDeferredApplyResult,
@@ -107,6 +108,14 @@ type SubscriptionRow = {
   cancellation_requested_at: string | null;
   cancellation_effective_at: string | null;
   cancel_at: string | null;
+  /**
+   * The end of the latest subscription period GLOA has durable proof was
+   * PAID. Deliberately not part of SUBSCRIPTION_COLUMNS: a cancellation
+   * REQUEST is decided from the cutoff and never from a payment, so the
+   * request path must not read this. Only the deferred-apply path and
+   * the sweep do.
+   */
+  last_paid_period_end: string | null;
 };
 
 export type CancelSubscriptionOutcome =
@@ -313,10 +322,10 @@ export async function cancelSubscriptionForUser(
  * Applies a late cancellation once its one further cycle has been paid.
  *
  * Driven by invoice.paid, strictly AFTER fulfillPaidSubscriptionInvoice
- * has advanced current_period_end and created the order for the cycle
- * that was just paid. By then the promised end date IS the end of the
- * current period, so setting cancel_at prorates nothing - which is the
- * entire reason the late branch defers.
+ * has advanced current_period_end, created the order for the cycle that
+ * was just paid and RECORDED THE PAID PERIOD. By then the promised end
+ * date IS the end of the current period, so setting cancel_at prorates
+ * nothing - which is the entire reason the late branch defers.
  *
  * ══════════════════════════════════════════════════════════════
  * EXACTLY ONE FURTHER CYCLE, WITHOUT A COUNTER
@@ -331,9 +340,18 @@ export async function cancelSubscriptionForUser(
  *      the customer was still in carries an earlier period end than the
  *      promise, and is refused - so a redelivery inside Stripe's retry
  *      window cannot rob them of the cycle they are owed.
+ *   3. IT WILL NOT FIRE UNPAID. Reaching the promised date is a fact
+ *      about current_period_end, and customer.subscription.updated
+ *      writes that column too - a card update, a Dashboard edit, a move
+ *      into past_due. It is a mirror of Stripe, not a receipt. So the
+ *      payment is required separately, from last_paid_period_end, which
+ *      only a paid subscription invoice can advance. Without this, a
+ *      failed renewal whose period moved anyway would end the
+ *      subscription a cycle EARLY, taking a cycle the customer never
+ *      received.
  *
- * Both guards are enforced again inside the RPC under a row lock; the
- * checks here exist only to avoid a pointless Stripe call.
+ * All three guards are enforced again inside the RPC under a row lock;
+ * the checks here exist only to avoid a pointless Stripe call.
  *
  * ══════════════════════════════════════════════════════════════
  * IT REPORTS FAILURE. IT NEVER SWALLOWS IT. (Phase 3C.3)
@@ -364,9 +382,13 @@ export async function cancelSubscriptionForUser(
  * A FAILED RENEWAL NEEDS NO POLICY OF ITS OWN
  * ══════════════════════════════════════════════════════════════
  *
- * If the one permitted invoice fails there is no invoice.paid, so nothing
- * is applied and the request stays pending - truthfully, because Stripe
- * holds nothing. Stripe's own dunning then decides: if a retry succeeds,
+ * If the one permitted invoice fails there is no invoice.paid, so
+ * last_paid_period_end does not move, nothing is applied and the request
+ * stays pending - truthfully, because Stripe holds nothing. That holds
+ * WHATEVER Stripe did to the period in the meantime, which is the point
+ * of proving the payment separately rather than reading it off
+ * current_period_end. Stripe's own dunning then decides: if a retry
+ * succeeds,
  * that renewal applies the cancellation and the customer gets exactly the
  * cycle they paid for; if dunning is exhausted and Stripe cancels the
  * subscription, customer.subscription.deleted marks it cancelled and the
@@ -386,7 +408,10 @@ export async function applyDeferredCancellationFromRenewal(
 
   const { data, error } = await admin
     .from("subscriptions")
-    .select("id, cancellation_requested_at, cancellation_effective_at, cancel_at, current_period_end")
+    .select(
+      "id, cancellation_requested_at, cancellation_effective_at, cancel_at, " +
+      "current_period_end, last_paid_period_end"
+    )
     .eq("stripe_subscription_id", stripeSubscriptionId)
     .maybeSingle();
 
@@ -398,7 +423,8 @@ export async function applyDeferredCancellationFromRenewal(
 
   const row = data as unknown as Pick<
     SubscriptionRow,
-    "id" | "cancellation_requested_at" | "cancellation_effective_at" | "cancel_at" | "current_period_end"
+    "id" | "cancellation_requested_at" | "cancellation_effective_at" | "cancel_at"
+    | "current_period_end" | "last_paid_period_end"
   >;
 
   // Nothing is owed: no customer ever asked, or Stripe already holds it.
@@ -408,9 +434,28 @@ export async function applyDeferredCancellationFromRenewal(
   if (row.cancel_at) return "already_scheduled";
 
   // current_period_end was just advanced by the fulfillment ahead of this
-  // call, from the subscription it re-read from Stripe.
+  // call, from the subscription it re-read from Stripe. It says the
+  // period has REACHED the promised date, which is what makes the
+  // cancel_at below a current-period date that prorates nothing.
   if (!deferredCancellationIsDue({
     periodEnd: row.current_period_end,
+    promisedAt: row.cancellation_effective_at,
+  })) {
+    return "too_early";
+  }
+
+  // AND IT SAYS NOTHING ABOUT PAYMENT (Phase 3C.5). The same column is
+  // written by the customer.subscription.updated reconciliation, which is
+  // not a payment event, so the receipt is asked for separately: the
+  // fulfillment ahead of this call recorded last_paid_period_end from the
+  // invoice it had just seen Stripe report paid. A failed renewal cannot
+  // reach the promise here however Stripe moved the period.
+  //
+  // 'too_early' is the honest answer: the cycle the customer is owed has
+  // not been delivered yet, and the failure direction is the safe one -
+  // they keep the subscription rather than lose a cycle they paid for.
+  if (!deferredCancellationIsPaid({
+    paidPeriodEnd: row.last_paid_period_end,
     promisedAt: row.cancellation_effective_at,
   })) {
     return "too_early";
@@ -491,19 +536,62 @@ export type DeferredSweepSummary = {
  * WHAT "DUE" MEANS, AND WHY IT CANNOT TOUCH HISTORY
  * ══════════════════════════════════════════════════════════════
  *
- * Four conditions, all durable, all required:
+ * Five conditions, all durable, all required:
  *
  *   1. cancellation_requested_at IS NOT NULL - an authenticated customer
  *      actually asked. This alone excludes every historical subscription
  *      and every Stripe Dashboard cancellation.
  *   2. cancel_at IS NULL - Stripe does not hold it yet.
- *   3. current_period_end >= cancellation_effective_at - THE OWED CYCLE
- *      IS PROVEN PAID. current_period_end only ever advances through
- *      activate_subscription_from_invoice, which runs only from an
- *      invoice Stripe reports as paid and whose total matches the frozen
- *      subscription total. There is no other writer, so this is proof
- *      rather than inference.
- *   4. a live B2C subscription with a Stripe binding.
+ *   3. current_period_end >= cancellation_effective_at - Stripe's period
+ *      has REACHED the promised end date, which is what makes the
+ *      cancel_at this sweep goes on to send a CURRENT-period date and so
+ *      prorate nothing.
+ *   4. last_paid_period_end >= cancellation_effective_at - AND THAT
+ *      PERIOD WAS PAID FOR.
+ *   5. a live B2C subscription with a Stripe binding.
+ *
+ * ══════════════════════════════════════════════════════════════
+ * WHY 3 IS NOT 4, AND WHY BOTH ARE REQUIRED
+ * ══════════════════════════════════════════════════════════════
+ *
+ * Condition 3 used to be described here as the paid-cycle proof, on the
+ * grounds that only activate_subscription_from_invoice advances the
+ * period. THAT WAS WRONG. sync_subscription_from_stripe - in the same
+ * migration - writes current_period_end from
+ * customer.subscription.updated, which is not a payment event: it fires
+ * for a card update, a Dashboard edit, a move into past_due, anything.
+ * The column is a MIRROR OF STRIPE, and a mirror is not a receipt.
+ *
+ * The fix is not to assume Stripe leaves the period alone when a payment
+ * fails; that is Stripe's behaviour to change, not GLOA's invariant to
+ * lean on. If a renewal failed and the period moved anyway, condition 3
+ * alone would have ended the subscription a cycle EARLY - taking a cycle
+ * the customer had not received. So the sweep also requires payment
+ * evidence the database wrote itself, in its own column.
+ *
+ * last_paid_period_end has exactly ONE writer,
+ * record_paid_subscription_period, which refuses to write unless a PAID
+ * checkout attempt for that exact Stripe invoice already exists on that
+ * exact subscription - and that attempt in turn has one writer,
+ * activate_subscription_from_invoice (022), driven by invoice.paid after
+ * the invoice total matched the frozen subscription total. No browser
+ * role can execute either function or update either table.
+ *
+ * ══════════════════════════════════════════════════════════════
+ * TWO PERIOD BOUNDARIES, AND NOT ONE CLOCK COMPARISON
+ * ══════════════════════════════════════════════════════════════
+ *
+ * Conditions 3 and 4 both compare a period boundary to a period
+ * boundary, and every period boundary here comes from the same place -
+ * the Stripe subscription item. Nothing in this sweep compares the
+ * Vercel clock to the Postgres clock, and nothing infers a payment from
+ * when an event happened to arrive.
+ *
+ * The subscription's OWN first payment is excluded by arithmetic rather
+ * than by timing. A deferred row exists only for a LATE cancellation,
+ * whose promise is the current period end PLUS one whole cadence, so
+ * every period paid up to the request ends a full cadence short of it.
+ * Only the one further renewal the customer is owed can reach it.
  *
  * ══════════════════════════════════════════════════════════════
  * THE BATCH IS BOUNDED, AND A DUE ROW CANNOT STARVE
@@ -536,14 +624,17 @@ export type DeferredSweepSummary = {
  * means "this feature did not exist when this happened". `cancel_at IS
  * NULL` means nothing of the sort: it is a state this code deliberately
  * writes, it is only ever reached together with a non-NULL customer
- * request, and condition 3 additionally requires a paid renewal that
- * already happened. The 451 historical subscriptions carry NULL on
- * cancellation_requested_at and can never be selected.
+ * request, and conditions 3 and 4 additionally require a renewal that
+ * was durably paid. The 451 historical subscriptions carry NULL on
+ * cancellation_requested_at AND on last_paid_period_end, so each of
+ * those conditions alone already puts them out of reach.
  *
  * It performs no local write of its own. Every row goes through
- * applyDeferredCancellationFromRenewal, which re-reads under a row lock
- * and re-checks all four conditions, so a row that stopped being due
- * between the query and the attempt is refused there rather than here.
+ * applyDeferredCancellationFromRenewal, which re-reads the row and
+ * re-checks every condition - including the payment proof - before any
+ * Stripe call, and the RPC behind it re-checks them again under a row
+ * lock. A row that stopped being due between the query and the attempt
+ * is refused there rather than here.
  */
 export async function sweepDueDeferredCancellations(
   stripe: Stripe,
@@ -581,16 +672,33 @@ export async function sweepDueDeferredCancellations(
   }
 
   const rows = (data ?? []) as unknown as Array<
-    Pick<SubscriptionRow, "id" | "stripe_subscription_id" | "cancellation_effective_at" | "current_period_end">
+    Pick<
+      SubscriptionRow,
+      "id" | "stripe_subscription_id" | "cancellation_effective_at"
+      | "current_period_end" | "last_paid_period_end"
+    >
   >;
 
   for (const row of rows) {
-    // The paid-cycle proof, re-checked. The RPC already guaranteed it for
-    // every row it returned, so this can no longer skip anything - it is
-    // kept because a due check that lives only in SQL is a due check this
-    // loop cannot be read to enforce, and the cost is one comparison.
+    // BOTH conditions, re-checked. The RPC already guaranteed each of
+    // them for every row it returned, so neither can skip anything here -
+    // they are kept because a due check that lives only in SQL is a due
+    // check this loop cannot be read to enforce, and the cost is two
+    // comparisons.
+    //
+    // They are two different facts and they are asked separately on
+    // purpose: the first is Stripe's period reaching the promise, the
+    // second is proof that period was paid for. Reading only the first
+    // is exactly the mistake Phase 3C.5 removed.
     if (!deferredCancellationIsDue({
       periodEnd: row.current_period_end,
+      promisedAt: row.cancellation_effective_at,
+    })) {
+      continue;
+    }
+
+    if (!deferredCancellationIsPaid({
+      paidPeriodEnd: row.last_paid_period_end,
       promisedAt: row.cancellation_effective_at,
     })) {
       continue;

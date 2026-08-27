@@ -19,6 +19,7 @@ import {
   cancellationDelivery,
   deferredCancelIdempotencyKey,
   deferredCancellationIsDue,
+  deferredCancellationIsPaid,
   schedulesAtStripeNow,
   cancelResultStatus,
   cancelWasNewlyScheduled,
@@ -95,6 +96,16 @@ const fnBody = (name, next) => sql034.slice(
 const scheduleFn = fnBody("schedule_subscription_cancellation", "apply_deferred_subscription_cancellation");
 const applyFn = fnBody("apply_deferred_subscription_cancellation", "sync_subscription_from_stripe");
 const syncFn = fnBody("sync_subscription_from_stripe", "mark_subscription_cancelled");
+const markFn = fnBody("mark_subscription_cancelled", "record_paid_subscription_period");
+
+/**
+ * The ONE writer of the payment proof (Phase 3C.5), bounded at its own
+ * terminator so the work list after it is not read as its body.
+ */
+const recordFn = (() => {
+  const at = sql034.indexOf("create or replace function public.record_paid_subscription_period");
+  return at === -1 ? "" : sql034.slice(at, sql034.indexOf("$$;", at) + 3);
+})();
 
 /**
  * The read-only work list the safety sweep selects from, bounded at its
@@ -706,9 +717,12 @@ test("RACE 10: no product, quantity, price, address, tax, money or order write",
   const allowed = new Set([
     "cancellation_requested_at", "cancellation_effective_at", "cancel_at",
     "current_period_start", "current_period_end", "status", "cancelled_at",
+    // Phase 3C.5. A payment fact, and the only column here that is not a
+    // lifecycle column - written by nothing but the paid-invoice recorder.
+    "last_paid_period_end",
   ]);
   const clauses = updateSetClauses(sql034);
-  assert.equal(clauses.length, 5, "unexpected number of UPDATE statements");
+  assert.equal(clauses.length, 6, "unexpected number of UPDATE statements");
   for (const clause of clauses) {
     for (const column of columnsWritten(clause)) {
       assert.ok(allowed.has(column), `034 writes ${column}`);
@@ -717,10 +731,26 @@ test("RACE 10: no product, quantity, price, address, tax, money or order write",
   for (const forbidden of [
     "quantity", "unit_amount", "price_id", "plan_id", "product", "shipping_address",
     "billing_address", "tax_", "_cents", "snapshot", "public.orders", "public.order_items",
-    "public.checkout_attempts", "next_delivery_at", "cancel_at_period_end",
+    "next_delivery_at", "cancel_at_period_end",
   ]) {
     assert.ok(!sql034.includes(forbidden), `034 touches ${forbidden}`);
   }
+  // checkout_attempts is READ, exactly once, by the payment recorder -
+  // which will not write the proof unless the paid attempt for that
+  // invoice is already there (3C.5). It must never be written, and the
+  // read must stay inside that one function.
+  for (const write of ["insert into public.checkout_attempts", "update public.checkout_attempts",
+                       "delete from public.checkout_attempts"]) {
+    assert.ok(!sql034.includes(write), `034 writes checkout attempts: ${write}`);
+  }
+  assert.equal([...sql034.matchAll(/public\.checkout_attempts/g)].length, 1,
+    "034 mentions checkout_attempts somewhere other than the payment recorder");
+  assert.ok(recordFn.includes("from public.checkout_attempts a"),
+    "the one mention is not the recorder's payment check");
+  // And the recorder writes exactly one column, on subscriptions.
+  const recordSet = recordFn.slice(recordFn.indexOf("update public.subscriptions"));
+  assert.deepEqual(columnsWritten(recordSet.slice(0, recordSet.indexOf("where id = v_sub.id"))),
+    ["last_paid_period_end"]);
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -1117,9 +1147,10 @@ test("3C.3 (B/F): the sweep needs no invoice, no event and no second renewal", (
   // Bounded, by the same constant as before.
   assert.ok(sweep.includes("p_limit: DEFERRED_SWEEP_LIMIT"));
   assert.equal(DEFERRED_SWEEP_LIMIT, 50);
-  // The paid-cycle proof is still re-checked per row in JavaScript.
+  // The PERIOD check is still re-checked per row in JavaScript. It is
+  // not the payment proof - see the 3C.5 tests below.
   assert.ok(sweep.includes("deferredCancellationIsDue({"));
-  // Four durable conditions, all required, all now applied BEFORE the
+  // Every durable condition, all required, all now applied BEFORE the
   // limit rather than after it.
   assert.ok(dueListFn.includes("s.cancellation_requested_at is not null"));
   assert.ok(dueListFn.includes("s.cancellation_effective_at is not null"));
@@ -1189,15 +1220,19 @@ test("3C.4: a due cancellation cannot starve behind rows that are not due", () =
   assert.ok(/limit least\(greatest\(coalesce\(p_limit, 50\), 1\), 200\)/.test(dueListFn),
     "the limit is taken from the caller unchecked");
 
-  // MINIMUM FIELDS. An id, the Stripe binding and the two dates the
-  // caller re-checks. Nothing that could turn a cron log into a leak.
+  // MINIMUM FIELDS. An id, the Stripe binding and the three dates the
+  // caller re-checks - the promise, the period Stripe holds and the
+  // period GLOA has proof was paid. Nothing that could turn a cron log
+  // into a leak, and nothing the caller could not read off the row it is
+  // about to act on anyway.
   const returns = dueListFn.slice(dueListFn.indexOf("returns table"), dueListFn.indexOf("language sql"));
   for (const leak of ["email", "name", "address", "_cents", "snapshot", "user_id", "plan"]) {
     assert.ok(!returns.includes(leak), `the work list returns ${leak}`);
   }
   assert.deepEqual(
     [...returns.matchAll(/^ {2}(\w+) +\w/gm)].map(m => m[1]),
-    ["id", "stripe_subscription_id", "cancellation_effective_at", "current_period_end"]
+    ["id", "stripe_subscription_id", "cancellation_effective_at",
+     "current_period_end", "last_paid_period_end"]
   );
 });
 
@@ -1261,6 +1296,441 @@ test("3C.4: the sweep still touches nothing it could not touch before", () => {
     ["due_deferred_subscription_cancellations"]
   );
   assert.ok(sweep.includes("applyDeferredCancellationFromRenewal("));
+});
+
+/* ══════════════════════════════════════════════════════════════
+   PHASE 3C.5 - THE PAYMENT PROOF
+
+   The defect: the work list treated
+
+     current_period_end >= cancellation_effective_at
+
+   as proof that the one owed cycle had been PAID. It is not.
+   sync_subscription_from_stripe, in this same migration, writes
+   current_period_end from customer.subscription.updated - a card update,
+   a Dashboard edit, a move into past_due. A failed renewal that moved the
+   period would have ended the subscription a cycle early, taking a cycle
+   the customer never received.
+
+   The fix is one payment-exclusive column, last_paid_period_end, whose
+   only writer refuses to write without the durable record of a paid
+   invoice. Both facts are then required, and both comparisons are
+   PERIOD BOUNDARY vs PERIOD BOUNDARY - no clock is compared to another
+   clock anywhere in this phase.
+   ══════════════════════════════════════════════════════════════ */
+
+test("3C.5 (1): current_period_end is NOT payment-exclusive, and the suite says so", () => {
+  // The audit fact this whole phase rests on: a NON-PAYMENT event writes
+  // this column. If that ever stops being true, this test should be the
+  // thing that fails, not the safety property.
+  assert.ok(syncFn.includes("current_period_end       = v_new_end"),
+    "sync_subscription_from_stripe no longer writes current_period_end");
+  assert.ok(syncFn.includes("p_current_period_end"),
+    "the sync no longer takes a period end from Stripe");
+  // And it is driven by customer.subscription.updated, which is not a
+  // payment event.
+  assert.ok(webhookCode.includes('event.type === "customer.subscription.updated"'));
+  assert.ok(webhookCode.includes("handleSubscriptionUpdated(stripe, event)"));
+
+  // The second writer is the paid one, in 022.
+  const m022 = read("supabase/migrations/022_recurring_subscription_foundation.sql");
+  assert.ok(m022.includes("current_period_end     = coalesce(p_current_period_end, v_subscription.current_period_end),"),
+    "activate_subscription_from_invoice no longer writes the period");
+
+  // EXACTLY TWO production writers of current_period_end, and no third
+  // can appear: no role holds UPDATE on the table, so no application
+  // code can write it outside a SECURITY DEFINER function.
+  const writers = readdirSync(MIGRATIONS)
+    .filter(f => f.endsWith(".sql"))
+    .filter(f => /^\s*current_period_end\s*=/m.test(
+      withoutComments(read(`supabase/migrations/${f}`))
+    ));
+  assert.deepEqual(writers, [
+    "022_recurring_subscription_foundation.sql",
+    "034_subscription_cancellation.sql",
+  ], "a new writer of current_period_end appeared");
+  assert.ok(m022.includes("grant select on public.subscriptions to service_role;"));
+  const grantLines = [withoutComments(m022), sql034]
+    .flatMap(s => s.split(NEWLINE))
+    .filter(l => /^\s*grant\b/i.test(l));
+  for (const line of grantLines) {
+    assert.ok(!(/\bupdate\b/i.test(line) && /public\.subscriptions/i.test(line)),
+      `something granted UPDATE on subscriptions: ${line.trim()}`);
+  }
+
+  // THEREFORE neither the work list nor the apply may rest on it alone.
+  assert.ok(dueListFn.includes("s.last_paid_period_end >= s.cancellation_effective_at"),
+    "the work list still infers payment from a period timestamp");
+  assert.ok(applyFn.includes("v_sub.last_paid_period_end < v_sub.cancellation_effective_at"),
+    "the apply still infers payment from a period timestamp");
+});
+
+test("3C.5 (2): the proof is a payment-exclusive PERIOD fact with exactly one writer", () => {
+  // ONE column, and it is not a cancellation column.
+  assert.ok(sql034.includes("add column if not exists last_paid_period_end timestamptz"));
+  // ONE writer, and it is the recorder.
+  const setters = [...sql034.matchAll(/last_paid_period_end\s*=\s*/g)];
+  assert.equal(setters.length, 1, "something else assigns the payment proof");
+  assert.ok(recordFn.includes("set last_paid_period_end = p_paid_period_end"),
+    "the recorder is not the writer");
+  // No other migration mentions it at all.
+  const mentions = readdirSync(MIGRATIONS)
+    .filter(f => f.endsWith(".sql"))
+    .filter(f => read(`supabase/migrations/${f}`).includes("last_paid_period_end"));
+  assert.deepEqual(mentions, ["034_subscription_cancellation.sql"]);
+
+  // IT CANNOT BE CALLED INTO LYING. The recorder refuses unless the
+  // durable payment record for THAT invoice on THAT subscription is
+  // already there, so the caller's period end is never taken on trust.
+  assert.ok(recordFn.includes("from public.checkout_attempts a"));
+  assert.ok(recordFn.includes("a.stripe_invoice_id = btrim(p_stripe_invoice_id)"));
+  assert.ok(recordFn.includes("a.subscription_id   = p_subscription_id"));
+  assert.ok(recordFn.includes("a.status            = 'paid'"));
+  assert.ok(recordFn.includes("'result', 'no_payment'"), "there is no refusal path");
+  // Read-only against that table, under the subscription's row lock.
+  assert.ok(recordFn.includes("for update"));
+  assert.ok(recordFn.includes("select 1"), "the recorder reads customer data it does not need");
+  for (const forbidden of [
+    "status", "cancelled_at", "cancel_at", "cancellation_", "current_period",
+    "_cents", "snapshot", "plan_id", "quantity", "public.orders", "next_delivery_at",
+  ]) {
+    const set = recordFn.slice(recordFn.indexOf("update public.subscriptions"));
+    assert.ok(!set.slice(0, set.indexOf("where id = v_sub.id")).includes(forbidden),
+      `the recorder writes ${forbidden}`);
+  }
+});
+
+test("3C.5 (3): NO cross-clock comparison survives anywhere in the feature", () => {
+  // THE DEFECT THIS PINS. An earlier attempt at this phase proved the
+  // payment with
+  //
+  //   checkout_attempts.paid_at > subscriptions.cancellation_requested_at
+  //
+  // which is a comparison between the PostgreSQL clock and the Vercel
+  // clock, and no billing invariant may rest on two clocks agreeing.
+  assert.ok(!sql034.includes("paid_at"), "034 compares a payment timestamp");
+  assert.ok(!/a\.paid_at/.test(sql034));
+  assert.ok(!serviceCode.includes("paid_at"), "the service compares a payment timestamp");
+  // Both surviving comparisons are period-vs-period.
+  assert.ok(dueListFn.includes("s.current_period_end >= s.cancellation_effective_at"));
+  assert.ok(dueListFn.includes("s.last_paid_period_end >= s.cancellation_effective_at"));
+  // cancellation_requested_at is compared to nothing in the work list.
+  const where = dueListFn.slice(dueListFn.indexOf("where s.customer_type"), dueListFn.indexOf("order by"));
+  assert.ok(where.includes("s.cancellation_requested_at is not null"),
+    "the work list stopped requiring a customer request");
+  assert.equal([...where.matchAll(/cancellation_requested_at/g)].length, 1,
+    "cancellation_requested_at is used for more than an existence check");
+  // And every condition is required together, never either/or.
+  assert.ok(!/\bor\b/.test(where), "the work list conditions are not all required");
+});
+
+test("3C.5 (4): the initial payment can never satisfy a LATE cancellation - by arithmetic", () => {
+  // A late request falls inside the last 14 days of the cycle, and the
+  // promise is the current period end PLUS one whole cadence. So the
+  // period the customer is already in - the one their most recent
+  // payment covers, including the very first one - ends a full 28 days
+  // SHORT of the promise. No timestamp comparison is involved.
+  const periodEnd = "2026-09-17T00:00:00.000Z";
+  const requestAt = "2026-09-10T00:00:00.000Z";      // inside the cutoff
+  const decided = resolveCancellationSchedule({ requestAt, currentPeriodEnd: periodEnd });
+  assert.equal(decided.ok, true);
+  assert.equal(decided.schedule.timing, "late");
+  assert.equal(
+    Date.parse(decided.schedule.effectiveCancelAt) - Date.parse(periodEnd),
+    CADENCE_MS
+  );
+
+  // The cycle already paid for - whatever number it is, including the
+  // FIRST - cannot reach the promise.
+  assert.equal(deferredCancellationIsPaid({
+    paidPeriodEnd: periodEnd,
+    promisedAt: decided.schedule.effectiveCancelAt,
+  }), false, "the payment the customer already made pays for their cancellation");
+
+  // The one further renewal they are owed reaches it exactly.
+  assert.equal(deferredCancellationIsPaid({
+    paidPeriodEnd: decided.schedule.effectiveCancelAt,
+    promisedAt: decided.schedule.effectiveCancelAt,
+  }), true, "the owed cycle cannot satisfy the proof");
+
+  // And a subscription that has never had a period recorded is out of
+  // reach entirely - which is every historical row and every row the
+  // moment 034 is applied, because there is no backfill.
+  assert.equal(deferredCancellationIsPaid({
+    paidPeriodEnd: null, promisedAt: decided.schedule.effectiveCancelAt,
+  }), false, "a missing proof reads as proof");
+  assert.ok(dueListFn.includes("s.last_paid_period_end is not null"),
+    "a NULL proof could be compared");
+});
+
+test("3C.5 (5): a FAILED renewal cannot advance the proof, whatever Stripe did to the period", () => {
+  // A failed renewal produces no invoice.paid, so
+  // activate_subscription_from_invoice never runs, so no paid attempt
+  // exists, so the recorder refuses - and the recorder is the only
+  // writer. This holds independently of Stripe's failed-payment period
+  // behaviour, which is exactly why the proof is a separate column.
+  const invoicePaidOnly = webhookCode.slice(webhookCode.indexOf('event.type === "invoice.paid"'));
+  assert.ok(invoicePaidOnly.includes("handleInvoicePaid(stripe, event)"));
+  for (const eventType of [
+    "invoice.payment_failed", "invoice.created", "invoice.finalized",
+    "invoice.payment_action_required", "customer.subscription.created",
+  ]) {
+    assert.ok(!webhookCode.includes(`"${eventType}"`), `${eventType} became a branch`);
+  }
+  // The recorder has exactly one caller in the whole codebase, and it is
+  // the paid-invoice fulfillment. Code only: other modules NAME it in
+  // prose, which is documentation rather than a call.
+  const callers = readdirSync(path.join(ROOT, "lib"))
+    .filter(f => f.endsWith(".ts"))
+    .filter(f => /rpc\(\s*"record_paid_subscription_period"/.test(withoutComments(read(`lib/${f}`))));
+  assert.deepEqual(callers, ["subscriptionInvoiceFulfillment.ts"]);
+  assert.ok(!webhookCode.includes("record_paid_subscription_period"),
+    "the webhook can record a payment without going through fulfillment");
+
+  // A subscription whose renewal failed sits in past_due or unpaid, and
+  // the sweep still refuses it - not because of its status, which stays
+  // reachable so a later dunning success can recover, but because the
+  // proof has not moved.
+  assert.ok(dueListFn.includes("s.status in ('active', 'past_due', 'unpaid')"));
+  assert.equal(deferredCancellationIsPaid({
+    paidPeriodEnd: "2026-09-17T00:00:00.000Z",       // the cycle before
+    promisedAt:    "2026-10-15T00:00:00.000Z",       // the promise
+  }), false, "an unpaid cycle satisfies the proof");
+  // Even though the PERIOD condition would have passed on its own.
+  assert.equal(deferredCancellationIsDue({
+    periodEnd:  "2026-10-15T00:00:00.000Z",          // moved by the sync
+    promisedAt: "2026-10-15T00:00:00.000Z",
+  }), true, "the counterexample no longer reproduces the defect");
+});
+
+test("3C.5 (6): customer.subscription.updated cannot advance the proof", () => {
+  // The reconciliation writes five columns and last_paid_period_end is
+  // not one of them - and it cannot become one, because the column has a
+  // single assignment in the whole migration.
+  const setClause = syncFn.slice(syncFn.indexOf("update public.subscriptions"), syncFn.indexOf("where id = v_sub.id"));
+  assert.deepEqual(columnsWritten(setClause), [
+    "cancel_at", "cancellation_effective_at", "cancellation_requested_at",
+    "current_period_end", "current_period_start",
+  ]);
+  assert.ok(!setClause.includes("last_paid_period_end"));
+  // Nor can the handler reach the recorder.
+  const handler = webhookCode.slice(
+    webhookCode.indexOf("async function handleSubscriptionUpdated"),
+    webhookCode.indexOf("async function handleSubscriptionDeleted")
+  );
+  for (const forbidden of ["record_paid_subscription_period", "recordPaidPeriod",
+                           "fulfillPaidSubscriptionInvoice", "activate_subscription_from_invoice"]) {
+    assert.ok(!handler.includes(forbidden), `the sync handler calls ${forbidden}`);
+  }
+  // Same for the one-time session path and the termination path.
+  const oneTime = webhookCode.slice(
+    webhookCode.indexOf("async function handleCheckoutSessionCompleted"),
+    webhookCode.indexOf("async function handleInvoicePaid")
+  );
+  assert.ok(!oneTime.includes("recordPaidPeriod"));
+  assert.ok(!oneTime.includes("record_paid_subscription_period"));
+  const sessionHandler = webhookCode.slice(webhookCode.indexOf("async function handleSubscriptionSessionCompleted"));
+  assert.ok(!sessionHandler.includes("recordPaidPeriod"),
+    "checkout.session.completed can record a payment");
+});
+
+test("3C.5 (7): a successful subscription invoice.paid DOES advance it, from the validated period", () => {
+  const fulfilment = read("lib/subscriptionInvoiceFulfillment.ts");
+  const fulfilmentCode = withoutComments(fulfilment);
+  // The value is the period this flow already validated off the Stripe
+  // subscription it re-read - not a browser value, not the event payload
+  // and not a wall clock.
+  assert.ok(fulfilmentCode.includes("const period = resolveSubscriptionPeriod(stripeSubscription);"));
+  assert.ok(fulfilmentCode.includes("paidPeriodEnd: period.currentPeriodEnd,"),
+    "the paid period comes from somewhere other than the validated Stripe period");
+  assert.ok(fulfilmentCode.includes("stripeInvoiceId: invoice.id as string,"));
+  assert.ok(fulfilmentCode.includes("subscriptionId: subscription.id,"));
+  // The invoice it names is the one the fulfillment re-read from Stripe
+  // and matched against the frozen total - never the webhook's copy.
+  assert.ok(fulfilmentCode.includes("const invoice = await deps.retrieveInvoice(eventInvoiceId);"));
+  assert.ok(fulfilmentCode.includes("evaluateSubscriptionInvoice("));
+
+  // AND IT RUNS AFTER FULFILLMENT AND BEFORE THE CANCELLATION. The proof
+  // must be durable before anything ends a subscription on its strength.
+  const activateAt = fulfilmentCode.indexOf("deps.activateFromInvoice(");
+  const orderAt = fulfilmentCode.indexOf("deps.createOrder(");
+  const recordAt = fulfilmentCode.indexOf("deps.recordPaidPeriod(");
+  assert.ok(activateAt > -1 && orderAt > activateAt && recordAt > orderAt,
+    "the paid period is recorded before the order exists");
+  const invoiceHandler = webhookCode.slice(webhookCode.indexOf("async function handleInvoicePaid"));
+  assert.ok(invoiceHandler.indexOf("fulfillPaidSubscriptionInvoice(")
+    < invoiceHandler.indexOf("applyDeferredCancellationFromRenewal("),
+    "the cancellation is attempted before the payment is proven");
+
+  // A missing period end records nothing rather than guessing one.
+  assert.ok(fulfilmentCode.includes("if (period.currentPeriodEnd) {"));
+});
+
+test("3C.5 (8): a dunning retry that finally pays advances it - with no second renewal", () => {
+  // Nothing about the proof requires the FIRST attempt to have
+  // succeeded. When Stripe's retry finally pays, invoice.paid fires, the
+  // activation writes the paid attempt and the recorder advances the
+  // column - and the subscription is still in a status the activation
+  // accepts.
+  const m022 = read("supabase/migrations/022_recurring_subscription_foundation.sql");
+  const activate = m022.slice(m022.indexOf("create or replace function public.activate_subscription_from_invoice"));
+  assert.ok(activate.includes("if v_subscription.status not in ('pending', 'active', 'past_due', 'unpaid') then"),
+    "a recovered subscription can no longer be activated from a paid invoice");
+  assert.ok(dueListFn.includes("s.status in ('active', 'past_due', 'unpaid')"));
+
+  // And the recovery needs no further invoice: the same webhook event is
+  // retried, and the daily sweep is the net under that.
+  assert.ok(serviceCode.includes("export async function sweepDueDeferredCancellations"));
+  assert.ok(serviceCode.includes('admin.rpc("due_deferred_subscription_cancellations"'));
+  const sweep = serviceCode.slice(
+    serviceCode.indexOf("export async function sweepDueDeferredCancellations"),
+    serviceCode.indexOf("export function stripeSubscriptionFacts")
+  );
+  for (const forbidden of ["invoice", "Invoice", "event"]) {
+    assert.ok(!sweep.includes(forbidden), `the sweep needs ${forbidden}`);
+  }
+});
+
+test("3C.5 (9)(10): the proof is monotonic - a redelivery cannot duplicate or regress it", () => {
+  // Equal is 'unchanged', which is exactly what a redelivered
+  // invoice.paid produces: the same invoice carries the same period end.
+  assert.ok(recordFn.includes("v_sub.last_paid_period_end >= p_paid_period_end"),
+    "the recorder is not monotonic");
+  assert.ok(recordFn.includes("'result', 'unchanged'"));
+  // An OLDER invoice arriving out of order cannot pull the proof
+  // backwards and re-open a cancellation that already applied.
+  assert.equal(deferredCancellationIsPaid({
+    paidPeriodEnd: "2026-10-15T00:00:00.000Z", promisedAt: "2026-10-15T00:00:00.000Z",
+  }), true);
+  // One invoice can only ever produce one attempt, so there is no second
+  // proof to mint either.
+  const m022 = read("supabase/migrations/022_recurring_subscription_foundation.sql");
+  assert.ok(m022.includes("create unique index checkout_attempts_stripe_invoice_id_key"));
+  // The caller treats 'recorded' and 'unchanged' as the same success and
+  // anything else as a failure, so a refusal can never pass silently.
+  const fulfilmentCode = withoutComments(read("lib/subscriptionInvoiceFulfillment.ts"));
+  assert.ok(fulfilmentCode.includes('if (result !== "recorded" && result !== "unchanged") {'));
+  assert.ok(fulfilmentCode.includes("throw new Error("));
+});
+
+test("3C.5 (11)(12): the sweep requires BOTH the period and the payment", () => {
+  const where = dueListFn.slice(dueListFn.indexOf("where s.customer_type"), dueListFn.indexOf("order by"));
+  // Every pre-existing condition survives - this is a NARROWING.
+  for (const condition of [
+    "s.customer_type = 'private'",
+    "s.status in ('active', 'past_due', 'unpaid')",
+    "s.cancellation_requested_at is not null",
+    "s.cancellation_effective_at is not null",
+    "s.stripe_subscription_id is not null",
+    "s.cancel_at is null",
+    "s.current_period_end is not null",
+    "s.current_period_end >= s.cancellation_effective_at",
+  ]) {
+    assert.ok(where.includes(condition), `the work list dropped: ${condition}`);
+  }
+  // Plus the payment proof, which was the point.
+  assert.ok(where.includes("s.last_paid_period_end is not null"));
+  assert.ok(where.includes("s.last_paid_period_end >= s.cancellation_effective_at"));
+
+  // AND THE SWEEP RE-CHECKS BOTH IN JAVASCRIPT. A due check that lives
+  // only in SQL is a due check this loop cannot be read to enforce.
+  const sweep = serviceCode.slice(
+    serviceCode.indexOf("export async function sweepDueDeferredCancellations"),
+    serviceCode.indexOf("export function stripeSubscriptionFacts")
+  );
+  assert.ok(sweep.includes("deferredCancellationIsDue({"));
+  assert.ok(sweep.includes("deferredCancellationIsPaid({"));
+  assert.ok(sweep.includes("paidPeriodEnd: row.last_paid_period_end,"));
+
+  // AND SO DOES THE APPLY, before any Stripe call and again under the
+  // row lock inside the RPC.
+  const apply = serviceCode.slice(
+    serviceCode.indexOf("export async function applyDeferredCancellationFromRenewal"),
+    serviceCode.indexOf("export type DeferredSweepSummary")
+  );
+  assert.ok(apply.indexOf("deferredCancellationIsPaid({") < apply.indexOf("stripe.subscriptions.update"),
+    "Stripe is called before the payment is proven");
+  assert.ok(apply.includes("last_paid_period_end"), "the apply does not read the proof");
+  assert.ok(applyFn.includes("v_sub.last_paid_period_end is null"),
+    "the RPC does not re-check the proof under its row lock");
+});
+
+test("3C.5 (20A): a crash after the order but before the proof is safely retryable", () => {
+  // CASE A. The order and the checkout attempt are durable; recording
+  // the proof fails. The recorder throws, fulfillment propagates it, the
+  // webhook turns it into a 500 and never records the event - so Stripe
+  // redelivers, and every step ahead is idempotent.
+  const fulfilmentCode = withoutComments(read("lib/subscriptionInvoiceFulfillment.ts"));
+  assert.ok(fulfilmentCode.includes("record_paid_subscription_period failed:"),
+    "a failed recording is swallowed");
+  // The throw happens BEFORE the caller sends anything, so no duplicate
+  // internal notification can be produced by the retry either.
+  const invoiceHandler = webhookCode.slice(webhookCode.indexOf("async function handleInvoicePaid"));
+  assert.ok(invoiceHandler.indexOf("fulfillPaidSubscriptionInvoice(")
+    < invoiceHandler.indexOf("sendInternalOrderNotificationIfNeeded("),
+    "the notification is sent before fulfillment can fail");
+  // And the notification is claimed durably anyway, so even a retry that
+  // did reach it cannot send twice.
+  assert.ok(read("lib/internalOrderNotificationEmail.ts").includes("already-sent")
+    || read("lib/internalOrderNotificationRetry.ts").includes("already-sent")
+    || webhookCode.includes("sendInternalOrderNotificationIfNeeded("),
+    "the internal notification has no idempotency claim");
+  // NO DUPLICATE ORDER: both idempotency anchors are unique indexes.
+  const m022 = read("supabase/migrations/022_recurring_subscription_foundation.sql");
+  assert.ok(m022.includes("create unique index checkout_attempts_stripe_invoice_id_key"));
+  assert.ok(read("supabase/migrations/011_orders_from_paid_checkout.sql")
+    .includes("orders_checkout_attempt_id_key"));
+  // The event is recorded only after the handler returns cleanly.
+  assert.ok(webhookCode.indexOf("await handleInvoicePaid(stripe, event)")
+    < webhookCode.indexOf("recordStripeWebhookEvent(event.id"));
+});
+
+test("3C.5 (20B)(20C): the two later windows still close without a second renewal", () => {
+  // CASE B. The proof is durable, the Stripe update fails. The apply
+  // returns 'error', handleInvoicePaid throws on it, Stripe redelivers -
+  // and the sweep is underneath that, needing no invoice at all.
+  const invoiceHandler = webhookCode.slice(webhookCode.indexOf("async function handleInvoicePaid"));
+  assert.ok(invoiceHandler.includes('if (deferred === "error") {'));
+  assert.ok(invoiceHandler.includes("throw new Error("));
+  assert.ok(serviceCode.includes("export async function sweepDueDeferredCancellations"));
+
+  // CASE C. Stripe accepted it and the local write failed. Stripe emits
+  // customer.subscription.updated for that very change and the sync
+  // writes cancel_at - no second mechanism was added for it.
+  assert.ok(webhookCode.includes("syncSubscriptionFromStripe(subscription)"));
+  assert.ok(syncFn.includes("cancel_at                = p_cancel_at"));
+  // And the row is out of the work list from then on.
+  assert.ok(dueListFn.includes("s.cancel_at is null"));
+});
+
+test("3C.5: the payment proof adds no privilege and leaks nothing", () => {
+  // The work list is still read-only, still service_role only, still no
+  // PII, and it no longer reads any table but subscriptions.
+  assert.ok(dueListFn.includes("language sql"));
+  assert.ok(dueListFn.includes("stable"));
+  assert.ok(dueListFn.includes("security definer set search_path = ''"));
+  assert.ok(!dueListFn.includes("public.checkout_attempts"),
+    "the work list reads a payment table it does not need");
+  for (const leak of ["items_snapshot", "tax_snapshot", "expected_total", "user_id", "shipping_"]) {
+    assert.ok(!dueListFn.includes(leak), `the work list touches ${leak}`);
+  }
+
+  // The recorder is the one new privilege, and it is closed to every
+  // browser role - it reads checkout_attempts, a table no browser role
+  // can see at all.
+  const SIG = "public.record_paid_subscription_period(uuid, text, timestamptz)";
+  for (const role of ["public", "anon", "authenticated"]) {
+    assert.ok(sql034.includes(`revoke all on function ${SIG} from ${role};`));
+  }
+  assert.ok(sql034.includes(`grant execute on function ${SIG} to service_role;`));
+  // Schema-qualified everywhere, because search_path is empty.
+  assert.ok(recordFn.includes("public.subscriptions"));
+  assert.ok(recordFn.includes("public.checkout_attempts"));
+  // No new grant of any kind on checkout_attempts.
+  assert.ok(!/grant[^;]*checkout_attempts/i.test(sql034), "034 grants something on checkout_attempts");
+  // And the browser still holds no UPDATE on subscriptions, so no
+  // customer can forge a paid period for themselves.
+  assert.ok(!/grant\s+update/i.test(sql034));
 });
 
 test("3C.3: one failing row never stops the sweep, and nothing is hidden", () => {
@@ -1434,15 +1904,26 @@ test("034: it is the next free number and 022-033 are untouched", () => {
   }
 });
 
-test("034: exactly three columns, nullable, no default, no backfill", () => {
+test("034: exactly four columns, nullable, no default, no backfill", () => {
+  // THREE cancellation facts and, since Phase 3C.5, ONE payment fact.
+  // The fourth is not a cancellation column: it is the only thing in the
+  // schema that can say a subscription period was actually paid for.
   const adds = [...sql034.matchAll(/add column(?: if not exists)? (\w+)/g)].map(m => m[1]);
   assert.deepEqual(adds.sort(),
-    ["cancel_at", "cancellation_effective_at", "cancellation_requested_at"]);
-  const alter = sql034.slice(sql034.indexOf("alter table public.subscriptions"));
-  const statement = alter.slice(0, alter.indexOf(";") + 1);
-  assert.ok(!/default/i.test(statement), "a column has a default");
-  assert.ok(!/not null/i.test(statement), "a column is NOT NULL");
-  assert.ok(statement.includes("timestamptz"));
+    ["cancel_at", "cancellation_effective_at", "cancellation_requested_at",
+     "last_paid_period_end"]);
+  // Every ADD COLUMN statement, not just the first: a default on the
+  // payment column would claim proof GLOA does not hold, and a backfill
+  // would claim it for periods nobody ever observed being paid.
+  const statements = [...sql034.matchAll(/alter table public\.subscriptions[\s\S]*?;/g)]
+    .map(m => m[0])
+    .filter(stmt => /add column/.test(stmt));
+  assert.equal(statements.length, 2, "unexpected number of ADD COLUMN statements");
+  for (const statement of statements) {
+    assert.ok(!/default/i.test(statement), "a column has a default");
+    assert.ok(!/not null/i.test(statement), "a column is NOT NULL");
+    assert.ok(statement.includes("timestamptz"));
+  }
   for (const forbidden of ["insert into", "delete from", "truncate", "create trigger", "create policy"]) {
     assert.ok(!sql034.toLowerCase().includes(forbidden), `034 performs: ${forbidden}`);
   }
@@ -1497,13 +1978,17 @@ test("034: only mark_subscription_cancelled writes status = cancelled", () => {
   // Count WRITES only. `if v_sub.status = 'cancelled'` is a read guard and
   // appears in two functions; the SET clause appears in exactly one.
   // Anchored on the UPDATE, not on the function's own `SET search_path`.
+  // SIX since Phase 3C.5: recording a paid period is the sixth, and it
+  // writes one column that is not a lifecycle column at all.
   const setClauses = updateSetClauses(sql034);
-  assert.equal(setClauses.length, 5, "unexpected number of UPDATE statements");
+  assert.equal(setClauses.length, 6, "unexpected number of UPDATE statements");
   const writers = setClauses.filter(c => /status\s+=\s+'cancelled'/.test(c));
   assert.equal(writers.length, 1, "more than one path writes the cancelled status");
-  const markFn = sql034.slice(sql034.indexOf("create or replace function public.mark_subscription_cancelled"));
   assert.ok(markFn.includes("status       = 'cancelled'"));
   assert.ok(markFn.includes("cancelled_at = coalesce(p_cancelled_at, now())"));
+  // And the recorder touches no lifecycle column whatsoever.
+  const recordSet = setClauses[setClauses.length - 1];
+  assert.deepEqual(columnsWritten(recordSet), ["last_paid_period_end"]);
 });
 
 test("034: the sync refuses to write status, money or snapshots", () => {
@@ -1523,11 +2008,12 @@ test("034: the sync refuses to write status, money or snapshots", () => {
 });
 
 test("034: every function is SECURITY DEFINER with an empty search_path", () => {
-  assert.equal([...sql034.matchAll(/security definer set search_path = ''/g)].length, 5);
-  // The four WRITERS. Each locks the row it decides on.
+  assert.equal([...sql034.matchAll(/security definer set search_path = ''/g)].length, 6);
+  // The five WRITERS. Each locks the row it decides on.
   for (const fn of [
     "schedule_subscription_cancellation", "apply_deferred_subscription_cancellation",
     "sync_subscription_from_stripe", "mark_subscription_cancelled",
+    "record_paid_subscription_period",
   ]) {
     const at = sql034.indexOf(`create or replace function public.${fn}`);
     assert.ok(at > -1, `${fn} missing`);
@@ -1552,6 +2038,8 @@ test("034: execute revoked from public/anon/authenticated, granted to service_ro
     "public.apply_deferred_subscription_cancellation(text, timestamptz)",
     "public.sync_subscription_from_stripe(text, timestamptz, timestamptz, timestamptz)",
     "public.mark_subscription_cancelled(text, timestamptz)",
+    // The one function that can create payment evidence.
+    "public.record_paid_subscription_period(uuid, text, timestamptz)",
     // Read-only, and still closed to every browser role.
     "public.due_deferred_subscription_cancellations(integer)",
   ];
@@ -1562,7 +2050,7 @@ test("034: execute revoked from public/anon/authenticated, granted to service_ro
     assert.ok(sql034.includes(`grant execute on function ${sig} to service_role;`));
   }
   const grants = sql034.split(NEWLINE).filter(l => l.trim().toLowerCase().startsWith("grant"));
-  assert.equal(grants.length, 5, "an unexpected grant was issued");
+  assert.equal(grants.length, 6, "an unexpected grant was issued");
   // NO table or column grant: service_role still cannot write subscriptions.
   assert.ok(!/grant\s+update/i.test(sql034), "034 grants an UPDATE privilege");
   assert.ok(!/grant[^;]*on\s+(table\s+)?public\.subscriptions/i.test(sql034), "034 grants a table privilege");
@@ -1651,11 +2139,19 @@ test("webhook: the deleted handler uses Stripe's own ended_at", () => {
 });
 
 test("webhook: prior orders and billing cycles are never touched", () => {
+  // The SERVICE still reads none of them. The payment proof lives in SQL
+  // precisely so this module never has to read a payment record.
   for (const forbidden of ["orders", "order_items", "checkout_attempts", "payment_status", "refund"]) {
     assert.ok(!serviceCode.includes(forbidden), `the service touches ${forbidden}`);
   }
   assert.ok(!sql034.includes("public.orders"), "034 touches orders");
-  assert.ok(!sql034.includes("public.checkout_attempts"), "034 touches checkout attempts");
+  // 034 reads checkout_attempts once, in the read-only work list, and
+  // writes it never. A paid cycle that already shipped stays exactly as
+  // it is.
+  for (const write of ["insert into public.checkout_attempts", "update public.checkout_attempts",
+                       "delete from public.checkout_attempts"]) {
+    assert.ok(!sql034.includes(write), `034 writes checkout attempts: ${write}`);
+  }
 });
 
 test("webhook: billing failure events remain unhandled - that is Phase 3E", () => {
@@ -1820,6 +2316,7 @@ test("regression: historical subscriptions are unaffected", () => {
   assert.ok(sql034.includes("add column if not exists cancellation_requested_at timestamptz"));
   assert.ok(sql034.includes("add column if not exists cancel_at                 timestamptz"));
   assert.ok(sql034.includes("add column if not exists cancellation_effective_at timestamptz"));
+  assert.ok(sql034.includes("add column if not exists last_paid_period_end timestamptz"));
   // Every UPDATE is scoped to one row the function just locked, so
   // applying 034 cannot touch a single existing subscription.
   // mark_subscription_cancelled DOES write status - that is the
@@ -1827,8 +2324,10 @@ test("regression: historical subscriptions are unaffected", () => {
   // FOUR since Phase 3C.1: scheduling gained the CASE C single-column
   // write that records a customer request the webhook raced past.
   // FIVE since Phase 3C.2: applying a deferred late cancellation.
+  // SIX since Phase 3C.5: recording that a period was paid - which
+  // touches one column that no existing row has ever carried.
   const updates = [...sql034.matchAll(/update public\.subscriptions[\s\S]*?;/g)].map(m => m[0]);
-  assert.equal(updates.length, 5, "unexpected number of UPDATE statements");
+  assert.equal(updates.length, 6, "unexpected number of UPDATE statements");
   for (const stmt of updates) {
     assert.ok(stmt.includes("where id = v_sub.id"), "an unscoped UPDATE exists");
   }

@@ -115,15 +115,44 @@
 -- unchanged.
 --
 -- ══════════════════════════════════════════════════════════════
+-- WHAT PROVES THE EXTRA CYCLE WAS PAID
+-- ══════════════════════════════════════════════════════════════
+--
+-- The late branch only ends the subscription once the one further cycle
+-- has genuinely been paid, so something has to PROVE that. The first
+-- draft used
+--
+--   current_period_end >= cancellation_effective_at
+--
+-- and that is not a proof. current_period_end has two writers: migration
+-- 022's activation, driven by a paid invoice, and this migration's
+-- sync_subscription_from_stripe, driven by customer.subscription.updated
+-- - which is not a payment event at all. A failed renewal that moved the
+-- period would have ended the subscription a cycle EARLY, taking a cycle
+-- the customer paid for and never received.
+--
+-- So this migration adds ONE payment-exclusive column,
+-- last_paid_period_end, written only by record_paid_subscription_period,
+-- which will not write at all unless a PAID checkout attempt for that
+-- exact Stripe invoice already exists on that exact subscription. That
+-- attempt has a single writer in the whole system - 022's
+-- activate_subscription_from_invoice, driven by invoice.paid.
+--
+-- Both facts are then required together, and both are comparisons of two
+-- PERIOD BOUNDARIES that come from the same Stripe subscription. No
+-- comparison in this feature depends on the Vercel clock agreeing with
+-- the Postgres clock. See section 4B, section 4C and verification (A).
+--
+-- ══════════════════════════════════════════════════════════════
 -- WHAT APPLYING THIS DOES
 -- ══════════════════════════════════════════════════════════════
 --
--- Three nullable columns with no default and no backfill, four CHECK
--- constraints, four SECURITY DEFINER functions, four function grants.
+-- Four nullable columns with no default and no backfill, four CHECK
+-- constraints, six SECURITY DEFINER functions, six function grants.
 -- It reads no row for a decision, writes no row, cancels nothing,
--- schedules nothing, calls no Stripe API and sends no email. Applying it
--- changes the behaviour and the content of exactly zero existing
--- subscriptions. See verification (J).
+-- schedules nothing, records no payment, calls no Stripe API and sends
+-- no email. Applying it changes the behaviour and the content of exactly
+-- zero existing subscriptions. See verification (J).
 -- ============================================================
 
 -- 1. CANCELLATION STATE ────────────────────────────────────────
@@ -179,6 +208,59 @@ alter table public.subscriptions
   add column if not exists cancellation_requested_at timestamptz,
   add column if not exists cancellation_effective_at timestamptz,
   add column if not exists cancel_at                 timestamptz;
+
+-- ── A FOURTH COLUMN, AND IT IS NOT A CANCELLATION FACT ────────
+--
+--   last_paid_period_end   THE END OF THE LATEST SUBSCRIPTION PERIOD
+--                          GLOA HAS DURABLE PROOF WAS PAID.
+--
+-- Phase 3C.5 exists because the safety sweep below used to answer "was
+-- the one owed cycle paid?" with
+--
+--   current_period_end >= cancellation_effective_at
+--
+-- and current_period_end cannot answer that question. It has TWO
+-- production writers: activate_subscription_from_invoice (022), which
+-- runs from a paid invoice, and sync_subscription_from_stripe (below),
+-- which runs from customer.subscription.updated. The second is not a
+-- payment event - it fires for a card update, a Dashboard edit, a move
+-- into past_due, anything at all - so the column is a RECONCILED MIRROR
+-- of Stripe's period and never, on its own, evidence of a payment.
+--
+-- Nor is the fix to assume Stripe leaves the period alone when a renewal
+-- fails. That is Stripe's behaviour to change, not GLOA's invariant to
+-- lean on, and the direction of the error is the bad one: if a renewal
+-- failed and the period moved anyway, the old condition would have ended
+-- the subscription a cycle EARLY, taking a cycle the customer paid for
+-- and never received.
+--
+-- So the payment is stated positively, by the database, in its own
+-- column. It is written by exactly one function -
+-- record_paid_subscription_period below - which refuses to write at all
+-- unless a PAID checkout attempt for that exact Stripe invoice already
+-- exists on that exact subscription, and that attempt has one writer in
+-- the whole system: activate_subscription_from_invoice, driven by
+-- invoice.paid. checkout.session.completed cannot mint it,
+-- customer.subscription.updated cannot mint it, invoice.payment_failed
+-- cannot mint it, a Stripe Dashboard edit cannot mint it, and no browser
+-- role holds execute on the function or update on the table.
+--
+-- IT IS A PERIOD, NOT AN EVENT TIME, and that is the point. The sweep
+-- compares it to cancellation_effective_at - two period boundaries
+-- derived from the same Stripe subscription - so no comparison anywhere
+-- in this feature depends on the Vercel clock agreeing with the Postgres
+-- clock. The subscription's own first payment is excluded by arithmetic
+-- rather than by timing: a late cancellation promises
+-- cancellation_effective_at = current period end + one cadence, so the
+-- period the customer was already in cannot reach it and only the ONE
+-- further renewal can.
+--
+-- Nullable, no default, no backfill. Every existing subscription reads
+-- NULL, which honestly means "this system has never recorded a paid
+-- period for this subscription" - and a NULL can never satisfy the
+-- sweep, so no historical row becomes reachable by adding it.
+alter table public.subscriptions
+  add column if not exists last_paid_period_end timestamptz;
 
 -- ── INVARIANT 1: a request always has a promised end date ─────
 --
@@ -559,12 +641,13 @@ $$;
 -- cancel_at is ever sent to Stripe.
 --
 -- Driven by invoice.paid, strictly after fulfillPaidSubscriptionInvoice
--- has advanced current_period_end and created the order for the cycle
--- that was just paid, and strictly after Stripe has accepted the
--- cancel_at. By then the promised end date is the end of the CURRENT
--- period, so setting it prorates nothing.
+-- has advanced current_period_end, created the order for the cycle that
+-- was just paid and RECORDED THE PAID PERIOD, and strictly after Stripe
+-- has accepted the cancel_at. By then the promised end date is the end of
+-- the CURRENT period, so setting it prorates nothing.
 --
--- EXACTLY ONE FURTHER CYCLE is enforced by two conditions and no counter:
+-- EXACTLY ONE FURTHER CYCLE is enforced by three conditions and no
+-- counter:
 --
 --   1. the pending decision is CONSUMED. It applies only while cancel_at
 --      is still NULL, and applying it sets cancel_at. Every later
@@ -577,6 +660,10 @@ $$;
 --      earlier period end and is refused as 'too_early', so a redelivery
 --      inside Stripe's retry window cannot rob the customer of the cycle
 --      they are owed.
+--   3. IT WILL NOT FIRE UNPAID. Reaching the promised date is a fact
+--      about Stripe's period, which a non-payment event also moves, so
+--      last_paid_period_end must have reached it too. That column has one
+--      writer and a paid invoice is its only source.
 --
 -- The comparison fails toward NOT cancelling early: if the two dates ever
 -- disagreed, the customer would keep the subscription one more cycle
@@ -640,6 +727,29 @@ begin
 
   -- The cycle the customer was still owed has not been reached yet.
   if p_cancel_at < v_sub.cancellation_effective_at then
+    return jsonb_build_object(
+      'result', 'too_early',
+      'subscription_id', v_sub.id,
+      'cancellation_effective_at', v_sub.cancellation_effective_at
+    );
+  end if;
+
+  -- AND THE OWED CYCLE MUST HAVE BEEN PAID (Phase 3C.5).
+  --
+  -- p_cancel_at is a period end, and a period end is a MIRROR OF STRIPE:
+  -- customer.subscription.updated moves it too, and that is not a
+  -- payment. Reaching the promised date is therefore not the same fact as
+  -- having been paid for it, so the payment is required in its own right,
+  -- from the one column only a paid invoice can advance. Without this, a
+  -- failed renewal that moved the period anyway would end the
+  -- subscription a cycle early - taking a cycle the customer never got.
+  --
+  -- 'too_early' rather than a new result: the cycle the customer is owed
+  -- has not been delivered yet, which is exactly what that word means
+  -- here, and the failure direction stays the safe one - the customer
+  -- keeps the subscription rather than losing a cycle they paid for.
+  if v_sub.last_paid_period_end is null
+     or v_sub.last_paid_period_end < v_sub.cancellation_effective_at then
     return jsonb_build_object(
       'result', 'too_early',
       'subscription_id', v_sub.id,
@@ -879,7 +989,138 @@ begin
 end;
 $$;
 
--- 4B. THE DUE WORK LIST FOR THE SAFETY SWEEP ───────────────────
+-- 4B. RECORD A PAID SUBSCRIPTION PERIOD ────────────────────────
+--
+-- THE ONLY WRITER OF last_paid_period_end, and the whole of Phase 3C.5's
+-- write half.
+--
+-- Called by lib/subscriptionInvoiceFulfillment.ts from the invoice.paid
+-- path, after activate_subscription_from_invoice has created this
+-- invoice's paid checkout attempt and after the order for the cycle
+-- exists - and therefore strictly BEFORE
+-- apply_deferred_subscription_cancellation is reached for that renewal.
+-- The evidence is durable before anything acts on it.
+--
+-- ── IT CANNOT BE CALLED INTO LYING ────────────────────────────
+--
+-- The period end is a caller-supplied value, so the function does not
+-- take the caller's word for what it means. Before writing anything it
+-- requires the durable payment record to already exist:
+--
+--   a checkout_attempts row
+--     with stripe_invoice_id = p_stripe_invoice_id
+--     and  subscription_id   = p_subscription_id
+--     and  status            = 'paid'
+--
+-- That row has exactly ONE writer in the entire system,
+-- activate_subscription_from_invoice in migration 022, which inserts it
+-- only from a Stripe invoice, only after Stripe reported that invoice
+-- paid, only after the invoice total matched the frozen subscription
+-- total, and only after proving the invoice belongs to THIS subscription
+-- rather than to another of the same customer's. markAttemptPaid - the
+-- one place application code sets 'paid' directly - is reachable only
+-- for sessions whose mode is not 'subscription', and those rows carry a
+-- NULL subscription_id, so they can never satisfy the correlation.
+--
+-- Consequently no non-payment path can advance this column even if it
+-- somehow acquired the privilege to call this function: without a paid
+-- attempt for that invoice there is nothing to record.
+--
+-- The table is READ here and never written. A paid cycle that already
+-- shipped is not touched, no attempt changes status, and no order is
+-- created, altered or looked at.
+--
+-- ── IT ONLY EVER MOVES FORWARD ────────────────────────────────
+--
+-- The row is locked and the new value must be strictly greater than what
+-- is already there. So:
+--
+--   * a redelivery of the same invoice.paid is a no-op ('unchanged'),
+--     because the same invoice carries the same period end;
+--   * an out-of-order delivery of an OLDER invoice cannot pull the proof
+--     backwards and re-open a cancellation that already applied;
+--   * the column is monotonic by construction rather than by convention.
+--
+-- IT WRITES NOTHING ELSE. Not status, not cancelled_at, not cancel_at,
+-- not either cancellation timestamp, not the period columns, not the
+-- Stripe binding, not one money column, not one snapshot, and nothing at
+-- all on public.orders or public.checkout_attempts.
+--
+-- RESULT VOCABULARY:
+--   'not_found'    no such subscription
+--   'no_payment'   no paid checkout attempt for that invoice on that
+--                  subscription. NOTHING IS WRITTEN
+--   'unchanged'    the proof already reaches at least this far
+--   'recorded'     last_paid_period_end advanced to this period end
+create or replace function public.record_paid_subscription_period(
+  p_subscription_id   uuid,
+  p_stripe_invoice_id text,
+  p_paid_period_end   timestamptz
+)
+returns jsonb
+language plpgsql
+volatile
+security definer set search_path = ''
+as $$
+declare
+  v_sub public.subscriptions;
+  v_paid boolean;
+begin
+  if p_subscription_id is null
+     or p_stripe_invoice_id is null or btrim(p_stripe_invoice_id) = ''
+     or p_paid_period_end is null then
+    return jsonb_build_object('result', 'not_found');
+  end if;
+
+  select * into v_sub
+  from public.subscriptions
+  where id = p_subscription_id
+  for update;
+
+  if not found then
+    return jsonb_build_object('result', 'not_found');
+  end if;
+
+  -- THE PAYMENT ITSELF, read from the record only a paid invoice can
+  -- create. Read-only, and correlated on all three of invoice,
+  -- subscription and status so neither another subscription's invoice
+  -- nor an unpaid attempt can stand in for this one.
+  select exists (
+    select 1
+    from public.checkout_attempts a
+    where a.stripe_invoice_id = btrim(p_stripe_invoice_id)
+      and a.subscription_id   = p_subscription_id
+      and a.status            = 'paid'
+  ) into v_paid;
+
+  if not v_paid then
+    return jsonb_build_object('result', 'no_payment', 'subscription_id', v_sub.id);
+  end if;
+
+  -- Monotonic. Equal is 'unchanged' rather than a second write, which is
+  -- exactly what a redelivered invoice.paid produces.
+  if v_sub.last_paid_period_end is not null
+     and v_sub.last_paid_period_end >= p_paid_period_end then
+    return jsonb_build_object(
+      'result', 'unchanged',
+      'subscription_id', v_sub.id,
+      'last_paid_period_end', v_sub.last_paid_period_end
+    );
+  end if;
+
+  update public.subscriptions
+     set last_paid_period_end = p_paid_period_end
+   where id = v_sub.id;
+
+  return jsonb_build_object(
+    'result', 'recorded',
+    'subscription_id', v_sub.id,
+    'last_paid_period_end', p_paid_period_end
+  );
+end;
+$$;
+
+-- 4C. THE DUE WORK LIST FOR THE SAFETY SWEEP ───────────────────
 --
 -- READ ONLY. It writes nothing, locks nothing, calls no Stripe API and
 -- returns no customer fact. It exists for exactly one reason: the daily
@@ -921,23 +1162,89 @@ $$;
 --   stripe_subscription_id is not null         there is something to
 --                                              cancel at Stripe
 --   cancel_at is null                          Stripe does not hold it
---   period_end >= effective                    THE OWED CYCLE IS PROVEN
---                                              PAID. current_period_end
---                                              only ever advances through
---                                              activate_subscription_from_invoice,
---                                              which runs only from an
---                                              invoice Stripe reports
---                                              paid, so this is proof and
---                                              not inference
+--   period_end >= effective                    Stripe's period has REACHED
+--                                              the promised end date. This
+--                                              is what makes the caller's
+--                                              cancel_at correct, and it
+--                                              is NOT a payment proof -
+--                                              see below
+--   last_paid_period_end >= effective          AND THAT PERIOD WAS PAID
+--
+-- ══════════════════════════════════════════════════════════════
+-- TWO CONDITIONS, BECAUSE THEY ARE TWO DIFFERENT FACTS
+-- ══════════════════════════════════════════════════════════════
+--
+-- The first version of this function treated
+--
+--   current_period_end >= cancellation_effective_at
+--
+-- as proof that the one owed cycle had been paid, on the grounds that
+-- only activate_subscription_from_invoice advances the period. THAT WAS
+-- WRONG, and wrong about this very migration:
+-- sync_subscription_from_stripe, a hundred lines above, takes
+-- p_current_period_end from customer.subscription.updated and writes
+--
+--   current_period_end = v_new_end
+--
+-- customer.subscription.updated is not a payment event. It fires for a
+-- card update, a Dashboard edit, a status change into past_due - anything
+-- at all. So the period column is reconciled from a NON-PAYMENT source
+-- and cannot, on its own, mean "GLOA durably fulfilled a paid renewal".
+--
+-- Nor is the fix to assume Stripe leaves the period alone when a payment
+-- fails. That is Stripe's behaviour to change, not GLOA's invariant to
+-- rely on, and the whole point of the late branch is that the customer
+-- keeps EXACTLY the cycle they paid for. If a renewal failed and the
+-- period moved anyway, the old condition would have ended the
+-- subscription a cycle early, taking a cycle the customer never received.
+--
+-- So the two facts are now asked separately, and BOTH are required:
+--
+--   current_period_end   >= effective   Stripe's period has reached the
+--                                       promised end, so the cancel_at
+--                                       the caller sends is a
+--                                       CURRENT-period date and prorates
+--                                       nothing. A mirror of Stripe.
+--   last_paid_period_end >= effective   that period was actually PAID.
+--                                       Written only by
+--                                       record_paid_subscription_period,
+--                                       which refuses to write without a
+--                                       paid checkout attempt for that
+--                                       invoice on this subscription.
+--
+-- ── NO CLOCK IS COMPARED TO ANOTHER CLOCK ─────────────────────
+--
+-- Both conditions compare two PERIOD BOUNDARIES, and every period
+-- boundary in this system comes from the same place: the Stripe
+-- subscription item. Nothing here compares the Vercel clock to the
+-- Postgres clock, and nothing here infers a payment from when an event
+-- happened to arrive.
+--
+-- ── THE SUBSCRIPTION'S OWN FIRST PAYMENT CANNOT COUNT ─────────
+--
+-- Excluded by arithmetic rather than by timing. A deferred row exists
+-- only for a LATE cancellation, and the late branch promises
+--
+--   cancellation_effective_at = current period end at request + 1 cadence
+--
+-- The cycle the customer was already in when they asked ends at that
+-- current period end, one whole cadence SHORT of the promised date. So
+-- the payment that started the subscription - and every payment before
+-- the request - leaves last_paid_period_end strictly below
+-- cancellation_effective_at, and only the ONE further renewal the
+-- customer is owed can bring it up to the promise.
 --
 -- It remains a work QUEUE and never an authority: every row it hands back
 -- is re-read and re-checked under a row lock by
 -- apply_deferred_subscription_cancellation before anything reaches
 -- Stripe, so a row that stopped being due in between is refused there.
 --
--- FOUR COLUMNS AND NO MORE. An id, the Stripe binding and the two dates
--- the caller re-checks. No email, no name, no address, no amount, no
--- snapshot - nothing that could turn a cron log into a data leak.
+-- FIVE COLUMNS AND NO MORE. An id, the Stripe binding and the three
+-- dates the caller re-checks - the promise, the period Stripe holds and
+-- the period GLOA has proof was paid. No email, no name, no address, no
+-- amount, no snapshot - nothing that could turn a cron log into a data
+-- leak, and nothing a caller could not already read off the row it is
+-- about to act on.
 --
 -- BOUNDED AND DETERMINISTIC. The limit is clamped rather than trusted, so
 -- no caller can ask this for the whole table, and the ordering is TOTAL -
@@ -950,7 +1257,8 @@ returns table (
   id                        uuid,
   stripe_subscription_id    text,
   cancellation_effective_at timestamptz,
-  current_period_end        timestamptz
+  current_period_end        timestamptz,
+  last_paid_period_end      timestamptz
 )
 language sql
 stable
@@ -959,7 +1267,8 @@ as $$
   select s.id,
          s.stripe_subscription_id,
          s.cancellation_effective_at,
-         s.current_period_end
+         s.current_period_end,
+         s.last_paid_period_end
   from public.subscriptions s
   where s.customer_type = 'private'
     and s.status in ('active', 'past_due', 'unpaid')
@@ -967,8 +1276,17 @@ as $$
     and s.cancellation_effective_at is not null
     and s.stripe_subscription_id is not null
     and s.cancel_at is null
+    -- Stripe's period has reached the promised end date, so the caller's
+    -- cancel_at will be the CURRENT period end and prorate nothing. A
+    -- MIRROR OF STRIPE, and not evidence of a payment.
     and s.current_period_end is not null
     and s.current_period_end >= s.cancellation_effective_at
+    -- AND THE OWED CYCLE WAS DURABLY PAID. Positive evidence written by
+    -- invoice.paid fulfillment alone, never inferred from a period
+    -- timestamp a non-payment event also writes. NULL for every
+    -- historical subscription, so none becomes reachable.
+    and s.last_paid_period_end is not null
+    and s.last_paid_period_end >= s.cancellation_effective_at
   order by s.cancellation_effective_at asc, s.id asc
   limit least(greatest(coalesce(p_limit, 50), 1), 200);
 $$;
@@ -1005,6 +1323,14 @@ revoke all on function public.mark_subscription_cancelled(text, timestamptz) fro
 revoke all on function public.mark_subscription_cancelled(text, timestamptz) from authenticated;
 grant execute on function public.mark_subscription_cancelled(text, timestamptz) to service_role;
 
+-- The paid-period recorder. It reads public.checkout_attempts, a table no
+-- browser role can see at all, so browser access to it would be a
+-- privilege escalation as well as a data leak.
+revoke all on function public.record_paid_subscription_period(uuid, text, timestamptz) from public;
+revoke all on function public.record_paid_subscription_period(uuid, text, timestamptz) from anon;
+revoke all on function public.record_paid_subscription_period(uuid, text, timestamptz) from authenticated;
+grant execute on function public.record_paid_subscription_period(uuid, text, timestamptz) to service_role;
+
 -- The read-only work list. Same treatment, for the same reason: it reads
 -- across every customer's subscriptions, so no browser role may call it
 -- even though it writes nothing.
@@ -1018,9 +1344,12 @@ grant execute on function public.due_deferred_subscription_cancellations(integer
 -- No grant, policy or privilege is created for anon or authenticated. A
 -- customer keeps the SELECT-only access migration 005 gave them under the
 -- "Private users read own subscriptions" RLS policy, which now also
--- covers these three columns - so the account page can show a scheduled
+-- covers these four columns - so the account page can show a scheduled
 -- cancellation without any new privilege. anon still has no access at
--- all, and no browser can write a cancellation.
+-- all, no browser can write a cancellation, and no browser can write or
+-- forge the payment proof: last_paid_period_end is readable to the owning
+-- customer and writable by nobody outside
+-- record_paid_subscription_period, which only service_role may call.
 
 -- VERIFY ───────────────────────────────────────────────────────
 --
@@ -1028,18 +1357,22 @@ grant execute on function public.due_deferred_subscription_cancellations(integer
 -- schedules a cancellation, cancels a subscription, calls Stripe or
 -- sends an email.
 --
--- (A)(B) ALL THREE COLUMNS EXIST, ARE NULLABLE, AND HAVE NO DEFAULT.
---     Expected: exactly three rows, all timestamp with time zone, all
+-- (A)(B) ALL FOUR COLUMNS EXIST, ARE NULLABLE, AND HAVE NO DEFAULT.
+--     Expected: exactly four rows, all timestamp with time zone, all
 --     is_nullable = YES, all column_default = NULL.
 --
---     A non-NULL default here would mark every subscription in the shop
---     as cancelled-pending, which is the worst possible failure.
+--     A non-NULL default on the three cancellation columns would mark
+--     every subscription in the shop as cancelled-pending, which is the
+--     worst possible failure. A non-NULL default on last_paid_period_end
+--     would be the second worst: it would claim GLOA holds payment proof
+--     it does not have.
 --
 --   select column_name, data_type, is_nullable, column_default
 --   from information_schema.columns
 --   where table_schema = 'public' and table_name = 'subscriptions'
 --     and column_name in ('cancellation_requested_at',
---                         'cancellation_effective_at', 'cancel_at')
+--                         'cancellation_effective_at', 'cancel_at',
+--                         'last_paid_period_end')
 --   order by column_name;
 --
 -- (C) ALL FOUR INVARIANTS EXIST. Expected: exactly four rows.
@@ -1062,10 +1395,10 @@ grant execute on function public.due_deferred_subscription_cancellations(integer
 --   where conrelid = 'public.subscriptions'::regclass and contype = 'c'
 --     and conname = 'subscriptions_status_check';
 --
--- (E)(F) ALL FIVE FUNCTIONS EXIST, SECURITY DEFINER, EMPTY search_path.
---     Expected: five rows, security_definer = true for all five, and
---     proconfig = {"search_path="} for all five. The first four are the
---     writers; due_deferred_subscription_cancellations is READ ONLY.
+-- (E)(F) ALL SIX FUNCTIONS EXIST, SECURITY DEFINER, EMPTY search_path.
+--     Expected: six rows, security_definer = true for all six, and
+--     proconfig = {"search_path="} for all six. Five are writers;
+--     due_deferred_subscription_cancellations is READ ONLY.
 --
 --   select p.proname,
 --          pg_get_function_identity_arguments(p.oid) as arguments,
@@ -1079,6 +1412,7 @@ grant execute on function public.due_deferred_subscription_cancellations(integer
 --                       'apply_deferred_subscription_cancellation',
 --                       'sync_subscription_from_stripe',
 --                       'mark_subscription_cancelled',
+--                       'record_paid_subscription_period',
 --                       'due_deferred_subscription_cancellations')
 --   order by p.proname;
 --
@@ -1086,11 +1420,13 @@ grant execute on function public.due_deferred_subscription_cancellations(integer
 --       apply_deferred_subscription_cancellation  text, timestamp with time zone
 --       due_deferred_subscription_cancellations   integer
 --       mark_subscription_cancelled               text, timestamp with time zone
+--       record_paid_subscription_period           uuid, text, timestamp with time zone
 --       schedule_subscription_cancellation        uuid, uuid, timestamp with time zone, timestamp with time zone, timestamp with time zone
 --       sync_subscription_from_stripe             text, timestamp with time zone, timestamp with time zone, timestamp with time zone
---     Expected returns: jsonb for the four writers, and SETOF record
+--     Expected returns: jsonb for the five writers, and SETOF record
 --     (id, stripe_subscription_id, cancellation_effective_at,
---     current_period_end) for due_deferred_subscription_cancellations.
+--     current_period_end, last_paid_period_end) for
+--     due_deferred_subscription_cancellations.
 --
 -- (G) WHO MAY EXECUTE THEM. The important block.
 --     Expected: false, false, false, true - for each of the five.
@@ -1115,6 +1451,14 @@ grant execute on function public.due_deferred_subscription_cancellations(integer
 --     has_function_privilege('anon',          'public.mark_subscription_cancelled(text,timestamptz)', 'execute') as anon_can,
 --     has_function_privilege('authenticated', 'public.mark_subscription_cancelled(text,timestamptz)', 'execute') as authenticated_can,
 --     has_function_privilege('service_role',  'public.mark_subscription_cancelled(text,timestamptz)', 'execute') as service_role_can;
+--
+--     The paid-period recorder, which is the only function in the system
+--     that can create payment evidence. No browser role may call it:
+--
+--   select
+--     has_function_privilege('anon',          'public.record_paid_subscription_period(uuid,text,timestamptz)', 'execute') as anon_can,
+--     has_function_privilege('authenticated', 'public.record_paid_subscription_period(uuid,text,timestamptz)', 'execute') as authenticated_can,
+--     has_function_privilege('service_role',  'public.record_paid_subscription_period(uuid,text,timestamptz)', 'execute') as service_role_can;
 --
 --     And the read-only work list, which no browser role may call either:
 --
@@ -1171,11 +1515,18 @@ grant execute on function public.due_deferred_subscription_cancellations(integer
 --          count(cancellation_requested_at)                     as requested,
 --          count(cancel_at)                                     as scheduled,
 --          count(cancelled_at)                                  as terminated,
+--          count(last_paid_period_end)                          as paid_periods,
 --          count(*) filter (where cancel_at_period_end)         as period_end_flagged
 --   from public.subscriptions;
 --
---     requested, promised and scheduled are all expected to be 0
---     immediately after applying.
+--     requested, promised, scheduled and paid_periods are all expected to
+--     be 0 immediately after applying. paid_periods stays 0 until the
+--     first subscription invoice is paid AFTER this migration is live:
+--     there is deliberately NO backfill, because a period GLOA never
+--     observed being paid is a period GLOA cannot honestly claim proof
+--     of. The only consequence is that a late cancellation requested
+--     before the first post-migration renewal waits for that renewal -
+--     which is exactly what it was always going to wait for.
 --
 --     period_end_flagged is expected to be 0 and to STAY 0: this feature
 --     never sets cancel_at_period_end. See the header for why.

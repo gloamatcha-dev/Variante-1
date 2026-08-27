@@ -489,6 +489,12 @@ async function handleInvoicePaid(stripe: Stripe, event: Stripe.Event): Promise<v
   // the end of the period that just became current - a current-period
   // date, which prorates nothing.
   //
+  // The proof is DURABLE before this line runs. fulfillPaidSubscriptionInvoice
+  // recorded last_paid_period_end for this invoice, and both the call
+  // below and the daily sweep refuse to end a subscription without it -
+  // because current_period_end is also written by the
+  // customer.subscription.updated reconciliation, which is not a payment.
+  //
   // It answers 'nothing_pending' for every ordinary renewal, which is the
   // overwhelmingly common case.
   const deferred = await applyDeferredCancellationFromRenewal(stripe, result.stripeSubscriptionId);

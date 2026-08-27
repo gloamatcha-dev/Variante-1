@@ -413,6 +413,44 @@ export function deferredCancellationIsDue(input: {
 }
 
 /**
+ * Has GLOA durable PROOF that the cycle a late cancellation was waiting
+ * for was actually paid?
+ *
+ * The sibling of deferredCancellationIsDue, and deliberately a separate
+ * function rather than a second argument to it, because the two answer
+ * different questions about different columns:
+ *
+ *   deferredCancellationIsDue   has Stripe's period REACHED the promise?
+ *                               current_period_end, which
+ *                               customer.subscription.updated also
+ *                               writes, so it is a mirror of Stripe and
+ *                               never evidence of a payment.
+ *   deferredCancellationIsPaid  was that period PAID for?
+ *                               last_paid_period_end, which only
+ *                               record_paid_subscription_period writes
+ *                               and only from a paid invoice.
+ *
+ * Both are required before a deferred cancellation may reach Stripe.
+ * Collapsing them into one call would have hidden exactly the confusion
+ * Phase 3C.5 exists to undo.
+ *
+ * `paidPeriodEnd` is a PERIOD BOUNDARY, not the moment a payment
+ * happened, so this compares two dates that both originate from the same
+ * Stripe subscription. Nothing here compares a server clock to a database
+ * clock. A NULL is false: no proof is not proof, and it is the honest
+ * reading for every subscription that has never had a period recorded.
+ */
+export function deferredCancellationIsPaid(input: {
+  paidPeriodEnd: string | Date | null | undefined;
+  promisedAt: string | Date | null | undefined;
+}): boolean {
+  const paidMs = epochMs(input.paidPeriodEnd);
+  const promisedMs = epochMs(input.promisedAt);
+  if (paidMs === null || promisedMs === null) return false;
+  return paidMs >= promisedMs;
+}
+
+/**
  * The Stripe idempotency key for applying a deferred cancellation.
  *
  * Distinct from subscriptionCancelIdempotencyKey so the request-time call

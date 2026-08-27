@@ -590,6 +590,59 @@ test("boundary: no label, no cancellation, no B2B - and no email built here", ()
   assert.ok(!/shipped_at|tracking_number|fulfillment_status/.test(fulfillmentCode));
 });
 
+/* -- Phase 3C.5. One paid invoice is also one PROVEN PAID PERIOD -- */
+
+test("paid period: the fulfillment records what was paid, after the order and never before", () => {
+  // WHY THIS MODULE. Only the invoice.paid path has both halves at once:
+  // an invoice Stripe reported paid and matched against the frozen
+  // total, and the Stripe subscription period that invoice covers.
+  // Anything downstream that has to know "was this cycle paid for" would
+  // otherwise be reduced to reading current_period_end, which the
+  // customer.subscription.updated reconciliation also writes and which
+  // is therefore a mirror of Stripe rather than a receipt.
+  assert.match(fulfillmentCode, /admin\.rpc\("record_paid_subscription_period"/);
+  assert.match(fulfillmentCode, /p_paid_period_end: input\.paidPeriodEnd/);
+
+  // The value is the period this flow already resolved off the Stripe
+  // subscription it re-read - never the webhook payload, never a browser
+  // value and never a wall clock.
+  assert.match(fulfillmentCode, /const period = resolveSubscriptionPeriod\(stripeSubscription\);/);
+  assert.match(fulfillmentCode, /paidPeriodEnd: period\.currentPeriodEnd,/);
+
+  // ORDER OF OPERATIONS: activate, order, THEN record. The proof exists
+  // before anything can act on it, and after the cycle it describes has
+  // actually been turned into a package.
+  const activateAt = fulfillmentCode.indexOf("deps.activateFromInvoice(");
+  const orderAt = fulfillmentCode.indexOf("deps.createOrder(");
+  const recordAt = fulfillmentCode.indexOf("deps.recordPaidPeriod(");
+  assert.ok(activateAt > -1 && orderAt > activateAt && recordAt > orderAt,
+    "the paid period is recorded out of order");
+
+  // A missing period end records NOTHING rather than guessing one. The
+  // same gap already stops the activation advancing current_period_end,
+  // so a deferred cancellation simply waits - the safe direction.
+  assert.match(fulfillmentCode, /if \(period\.currentPeriodEnd\) \{/);
+});
+
+test("paid period: a refusal or an error is fatal, so the invoice stays retryable", () => {
+  // CASE A. The order is durable and the recording fails. It throws, the
+  // webhook turns that into a 500 and never records the event, and
+  // Stripe redelivers - at which point the activation returns the same
+  // attempt, the order RPC returns the same order and the recording is
+  // retried. No duplicate order, no duplicate attempt, no second charge.
+  assert.match(fulfillmentCode, /throw new Error\(`record_paid_subscription_period failed:/);
+  // 'unchanged' is success - that is what a redelivery of the same
+  // invoice produces. Anything else means no proof was written, and it
+  // must not pass silently.
+  assert.match(fulfillmentCode, /result !== "recorded" && result !== "unchanged"/);
+  assert.match(fulfillmentCode, /refused invoice/);
+  // And the throw happens before the caller sends anything, so no
+  // duplicate internal notification can come out of the retry either.
+  const handler = webhookCode.slice(webhookCode.indexOf("async function handleInvoicePaid"));
+  assert.ok(handler.indexOf("fulfillPaidSubscriptionInvoice(")
+    < handler.indexOf("sendInternalOrderNotificationIfNeeded("));
+});
+
 test("boundary: the feature flag stays closed and is not read here", () => {
   const example = read(".env.example");
   assert.match(example, /B2C_SUBSCRIPTIONS_ENABLED=\s*$/m);
