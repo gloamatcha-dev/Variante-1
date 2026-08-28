@@ -9,6 +9,7 @@ import {
   PAYMENT_PROBLEM_FAMILY,
   SUBSCRIPTION_EMAIL_RETRY_FAMILIES,
   SUBSCRIPTION_RETRY_BATCH_LIMIT,
+  classifyPaymentProblemInvoiceOwnership,
   classifyPaymentProblemInvoiceStatus,
   classifySubscriptionEmailProviderError,
   evaluatePaymentProblemPreflight,
@@ -333,8 +334,16 @@ test("29: the invoice is re-read live, immediately before Resend", () => {
   assert.ok(readAt !== -1, "the live invoice read is missing");
   assert.ok(resendAt !== -1);
   assert.ok(readAt < resendAt, "the invoice must be re-read before the provider");
-  // The sender imports no Stripe SDK: the read is injected.
-  assert.ok(!senderCode.includes('from "stripe"'));
+  // The sender pulls no Stripe CLIENT at runtime: the read is injected.
+  // Its only "stripe" import is type-only, which TypeScript erases, so
+  // no SDK reaches the bundle from here.
+  const stripeImports = senderCode
+    .split(NEWLINE)
+    .filter(l => l.includes('from "stripe"'));
+  assert.deepEqual(stripeImports, ['import type Stripe from "stripe";'],
+    "the sender gained a runtime Stripe import");
+  assert.ok(!senderCode.includes("getStripeClient"), "the sender constructs a Stripe client");
+  assert.ok(!senderCode.includes("stripe.invoices"), "the sender calls Stripe directly");
   assert.ok(senderCode.includes("retrieveInvoice: RetrieveInvoice"));
   // Both entry points require it - the canonical send and the retry.
   assert.ok(senderCode.includes("retrieveInvoice: RetrieveInvoice;"));
@@ -719,4 +728,187 @@ test("78b: it uses the established customer sender convention", () => {
   // And it never throws, so no lifecycle action can be failed by it.
   assert.ok(!/\bthrow\b/.test(senderCode), "the sender must never throw");
   assert.ok(!failedHandler().includes("throw"), "the handler must never throw");
+});
+
+/* ══════════════════════════════════════════════════════════════
+   OWNERSHIP: THE LIVE INVOICE MUST BE THIS SUBSCRIPTION'S
+   ══════════════════════════════════════════════════════════════
+
+   payment_problem is the only family whose delivery row pairs a local
+   subscription id with an identifier from ANOTHER system. Nothing in the
+   database forces those two to belong together, and a retry starts from
+   the stored pair rather than re-deriving it - so the relationship is
+   re-proven from the live invoice on every send.
+   ══════════════════════════════════════════════════════════════ */
+
+const SUB_A = "sub_AAAAAAAAAAAAAA";
+const SUB_B = "sub_BBBBBBBBBBBBBB";
+
+test("3: an invoice naming exactly this subscription is owned", () => {
+  assert.equal(classifyPaymentProblemInvoiceOwnership(SUB_A, SUB_A), "owned");
+  // Whitespace on either side does not change identity.
+  assert.equal(classifyPaymentProblemInvoiceOwnership(` ${SUB_A}`, `${SUB_A} `), "owned");
+});
+
+test("4: a DIFFERENT Stripe subscription is a mismatch", () => {
+  assert.equal(classifyPaymentProblemInvoiceOwnership(SUB_A, SUB_B), "mismatch");
+  assert.equal(classifyPaymentProblemInvoiceOwnership(SUB_B, SUB_A), "mismatch");
+  // Case is not identity either: Stripe ids are exact.
+  assert.equal(classifyPaymentProblemInvoiceOwnership(SUB_A, SUB_A.toUpperCase()), "mismatch");
+});
+
+test("5: an invoice with no subscription relationship is unrelated", () => {
+  for (const none of [null, undefined, "", "   "]) {
+    assert.equal(classifyPaymentProblemInvoiceOwnership(SUB_A, none), "unrelated", String(none));
+  }
+});
+
+test("5b: a local row with no Stripe id can own nothing", () => {
+  // Structurally unreachable - migration 022 binds the id in the same
+  // statement that sets started_at, which the preflight requires - but an
+  // unprovable claim must never become a send.
+  for (const none of [null, undefined, "", "  "]) {
+    assert.equal(classifyPaymentProblemInvoiceOwnership(none, SUB_A), "mismatch", String(none));
+  }
+  // And the sender reads the column, so it has a real value to compare.
+  assert.ok(senderCode.includes("stripe_subscription_id"),
+    "the sender must read the local Stripe subscription id");
+  assert.ok(rulesCode.includes("stripe_subscription_id: string | null;"),
+    "the facts type must carry it");
+});
+
+test("1, 2: BOTH paths prove ownership, from the live invoice", () => {
+  const deliver = senderCode.slice(senderCode.indexOf("export async function deliverClaimedPaymentProblem"));
+  // One shared path: the canonical send and the retry both end here, so
+  // the check cannot exist on one and be missing on the other.
+  assert.ok(senderCode.includes("return deliverClaimedPaymentProblem(subscriptionId, eventKey, claim.deliveryId, retrieveInvoice);"),
+    "the canonical send must funnel into the claimed path");
+  assert.ok(retryCode.includes("deliverClaimedPaymentProblem("),
+    "the retry must funnel into the same claimed path");
+
+  assert.ok(deliver.includes("classifyPaymentProblemInvoiceOwnership("));
+  // Both sides come from server state, not from a caller.
+  assert.ok(deliver.includes("subscriptionRow?.stripe_subscription_id ?? null"),
+    "the local side must come from the durable row");
+  assert.ok(deliver.includes("resolveInvoiceSubscriptionId(liveInvoice)"),
+    "the invoice side must come from the LIVE invoice");
+  // The proven resolver is reused rather than a second reading of
+  // Stripe's invoice parent shape.
+  assert.ok(senderCode.includes('import { resolveInvoiceSubscriptionId } from "./subscriptionInvoiceRules";'));
+});
+
+test("6, 7, 13, 14: a mismatch or missing relationship is TERMINAL", () => {
+  const deliver = senderCode.slice(senderCode.indexOf("export async function deliverClaimedPaymentProblem"));
+  const at = deliver.indexOf('if (ownership !== "owned")');
+  assert.notEqual(at, -1, "the ownership guard is missing");
+  const branch = deliver.slice(at, deliver.indexOf("const live = classifyPaymentProblemInvoiceStatus"));
+  assert.ok(branch.includes("await markSuperseded(deliveryId);"));
+  assert.ok(branch.includes('return "superseded";'));
+  // NOT failed: a failed row is automatically retried, and retrying an
+  // invalid pair would only re-approach the same wrong customer.
+  assert.ok(!branch.includes("markFailed"), "an ownership mismatch must not become retryable");
+  assert.ok(!branch.includes('return "failed";'));
+  // And superseded is never selected by the sweep.
+  assert.ok(retryCode.includes('.eq("status", "failed")'));
+});
+
+test("8: a sent delivery is never rewritten by the ownership guard", () => {
+  const supersede = senderCode.slice(senderCode.indexOf("async function markSuperseded"));
+  assert.ok(supersede.includes('.in("status", ["sending", "failed"])'),
+    "sent -> superseded must remain impossible");
+});
+
+test("9, 10: no recipient can come from the mismatching invoice", () => {
+  const deliver = senderCode.slice(senderCode.indexOf("export async function deliverClaimedPaymentProblem"));
+  // The guard runs strictly before the provider is even constructed.
+  const ownershipAt = deliver.indexOf("classifyPaymentProblemInvoiceOwnership(");
+  const resendAt = deliver.indexOf("getResendClient()");
+  const sendAt = deliver.indexOf("resend.emails.send(");
+  assert.ok(ownershipAt !== -1 && ownershipAt < resendAt && resendAt < sendAt,
+    "ownership must be proven before the provider is reached");
+  // The recipient still comes only from the LOCAL frozen snapshot, so
+  // even a mismatching invoice could not redirect a message.
+  assert.ok(senderCode.includes("to: preflight.recipient,"));
+  for (const forbidden of [
+    "liveInvoice.customer_email", "invoice.customer_email", "liveInvoice.customer",
+    "customer_email", "customer_details",
+  ]) {
+    assert.ok(!senderCode.includes(forbidden), `an address from the invoice: ${forbidden}`);
+  }
+  // The mismatch log names neither subscription and no customer fact.
+  const branch = deliver.slice(deliver.indexOf('if (ownership !== "owned")'),
+    deliver.indexOf("const live = classifyPaymentProblemInvoiceStatus"));
+  for (const forbidden of ["subscriptionId", "stripe_subscription_id", "recipient", "customer"]) {
+    assert.ok(!branch.includes(forbidden), `the mismatch log leaks ${forbidden}`);
+  }
+});
+
+test("11, 12: a Stripe READ failure is still failed, and still retryable", () => {
+  // Unchanged by this phase, and deliberately different from a mismatch:
+  // the read failing means Resend was never contacted, so nothing can
+  // have been accepted and a later attempt is safe.
+  const deliver = senderCode.slice(senderCode.indexOf("export async function deliverClaimedPaymentProblem"));
+  const catchAt = deliver.indexOf("} catch (err) {");
+  const ownershipAt = deliver.indexOf("classifyPaymentProblemInvoiceOwnership(");
+  assert.ok(catchAt !== -1 && catchAt < ownershipAt,
+    "the read's catch must precede the ownership check");
+  const readCatch = deliver.slice(catchAt, ownershipAt);
+  assert.ok(readCatch.includes("await markFailed(deliveryId);"));
+  assert.ok(readCatch.includes('return "failed";'));
+  assert.ok(!readCatch.includes("markSuperseded"),
+    "a read failure must not be confused with an invalid relationship");
+});
+
+test("15, 16, 17: the event key, provider key and copy are unchanged", () => {
+  assert.equal(paymentProblemEventKey(INVOICE_ID), INVOICE_ID);
+  assert.equal(
+    paymentProblemIdempotencyKey(SUBSCRIPTION_ID, INVOICE_ID),
+    `gloa/payment-problem/${SUBSCRIPTION_ID}/${INVOICE_ID}`
+  );
+  assert.equal(built().subject, "Deine Abo-Zahlung konnte nicht abgeschlossen werden");
+  // The template learned nothing about ownership.
+  for (const forbidden of ["ownership", "stripe_subscription_id", "mismatch"]) {
+    assert.ok(!templateCode.includes(forbidden), `the template changed: ${forbidden}`);
+  }
+});
+
+test("18, 19, 20: retry selection, family fairness and 3H families unchanged", () => {
+  const load = retryCode.slice(
+    retryCode.indexOf("loadFailed: async (family, limit) =>"),
+    retryCode.indexOf("claimFailed: async deliveryId =>")
+  );
+  assert.ok(load.includes('.eq("status", "failed")'));
+  for (const forbidden of ['"sending"', '.in("status"']) {
+    assert.ok(!load.includes(forbidden), `the work list was widened: ${forbidden}`);
+  }
+  assert.equal(SUBSCRIPTION_EMAIL_RETRY_FAMILIES.length, 4);
+  assert.equal(SUBSCRIPTION_RETRY_BATCH_LIMIT, 25);
+  // The three Phase 3H senders gained nothing from this phase.
+  for (const file of [
+    "lib/subscriptionStartedEmail.ts",
+    "lib/cancellationConfirmationEmail.ts",
+    "lib/subscriptionEndedEmail.ts",
+  ]) {
+    const source = withoutComments(read(file));
+    for (const forbidden of [
+      "classifyPaymentProblemInvoiceOwnership", "resolveInvoiceSubscriptionId", "retrieveInvoice",
+    ]) {
+      assert.ok(!source.includes(forbidden), `${file} changed: ${forbidden}`);
+    }
+  }
+});
+
+test("21, 22, 23: no migration was added, edited or required", () => {
+  const files = readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith(".sql")).sort();
+  assert.equal(files.length, 36);
+  assert.equal(files[files.length - 1], "036_subscription_payment_status.sql");
+  assert.ok(!files.some(f => f.startsWith("037")), "this phase must need no migration");
+  // The guard needs no schema: stripe_subscription_id is migration 022's
+  // column, and 022 is the single statement that binds it - which is why
+  // it is the authoritative side of the ownership comparison.
+  const sql022 = read("supabase/migrations/022_recurring_subscription_foundation.sql");
+  assert.ok(sql022.includes("stripe_subscription_id"),
+    "the column the guard reads must predate this phase");
+  assert.ok(sql022.includes("coalesce(v_subscription.stripe_subscription_id, p_stripe_subscription_id)"),
+    "022 must still bind the Stripe id exactly once");
 });

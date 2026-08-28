@@ -1188,6 +1188,15 @@ export type PaymentProblemFacts = {
   status: string;
   customer_snapshot: unknown;
   started_at: string | null;
+  /**
+   * Which Stripe subscription this local row IS.
+   *
+   * Read so the sender can re-prove, against the live invoice, that the
+   * delivery row's two ids genuinely belong together. Migration 022
+   * binds this exactly once, on activation, and never rebinds it, so it
+   * is the authoritative side of that comparison.
+   */
+  stripe_subscription_id: string | null;
 };
 
 export type PaymentProblemPreflight =
@@ -1295,4 +1304,56 @@ export const RECONCILABLE_STRIPE_STATUSES: readonly string[] = Object.freeze([
 
 export function isReconcilableStripeStatus(status: string | null | undefined): boolean {
   return typeof status === "string" && RECONCILABLE_STRIPE_STATUSES.includes(status);
+}
+
+/**
+ * Does this live Stripe invoice belong to THIS local subscription?
+ *
+ * ══════════════════════════════════════════════════════════════
+ * WHY A PAYMENT WARNING NEEDS ITS OWN OWNERSHIP PROOF.
+ * ══════════════════════════════════════════════════════════════
+ *
+ * The other three families key on the local subscription id, so the row
+ * and the fact cannot come apart. payment_problem keys on a STRIPE
+ * INVOICE ID, which is an identifier from another system, and the
+ * delivery row therefore pairs two ids that nothing in the database
+ * forces to belong together.
+ *
+ * The canonical webhook derives the local row FROM the invoice, so the
+ * pair it creates is sound. A retry does not: it starts from the stored
+ * pair, retrieves the invoice by the stored event_key, and would
+ * otherwise send to the recipient of whichever local subscription the row
+ * names. If those two ever disagreed, a customer could be told about an
+ * invoice that was never theirs.
+ *
+ * So the relationship is re-proven from the LIVE invoice on every send,
+ * canonical and retry alike, against the local row's own
+ * stripe_subscription_id. Neither side of the comparison comes from a
+ * caller, a browser, an event payload or an email address.
+ *
+ *   'owned'      the live invoice names exactly this subscription.
+ *   'unrelated'  the live invoice names no subscription at all. A
+ *                one-off invoice is not a subscription payment problem.
+ *   'mismatch'   it names a DIFFERENT subscription. The delivery row is
+ *                not valid for this local subscription and never will
+ *                be, so it is terminal rather than retryable.
+ */
+export type PaymentProblemOwnership = "owned" | "unrelated" | "mismatch";
+
+export function classifyPaymentProblemInvoiceOwnership(
+  localStripeSubscriptionId: string | null | undefined,
+  invoiceSubscriptionId: string | null | undefined
+): PaymentProblemOwnership {
+  const invoiceSubscription = (invoiceSubscriptionId ?? "").trim();
+  // No relationship on the invoice at all.
+  if (!invoiceSubscription) return "unrelated";
+
+  const local = (localStripeSubscriptionId ?? "").trim();
+  // A local row with no Stripe id cannot own any invoice. It should be
+  // unreachable - migration 022 binds the id in the same statement that
+  // sets started_at, which the preflight already requires - but an
+  // unprovable claim must never become a send.
+  if (!local) return "mismatch";
+
+  return local === invoiceSubscription ? "owned" : "mismatch";
 }

@@ -1,4 +1,10 @@
+// Type-only, so this module still pulls no Stripe client at runtime. The
+// invoice is retrieved by an injected function, exactly as before.
+import type Stripe from "stripe";
 import { getSupabaseAdmin } from "./supabaseAdmin";
+// The SAME resolver invoice.paid uses, rather than a second reading of
+// Stripe's modern invoice parent shape.
+import { resolveInvoiceSubscriptionId } from "./subscriptionInvoiceRules";
 import { getResendClient } from "./resend";
 import { getSiteOrigin } from "./siteUrl";
 import { GLOA_FROM_HELLO, GLOA_REPLY_TO_SUPPORT } from "./emailSenders";
@@ -7,6 +13,7 @@ import {
   paymentProblemIdempotencyKey,
 } from "./email/paymentProblem";
 import {
+  classifyPaymentProblemInvoiceOwnership,
   classifyPaymentProblemInvoiceStatus,
   classifySubscriptionEmailProviderError,
   evaluatePaymentProblemPreflight,
@@ -76,11 +83,19 @@ export type PaymentProblemEmailResult =
   /** Proven not accepted, or refused before the provider was contacted. */
   | "failed";
 
-/** Retrieves one invoice from Stripe. Injected, so this file imports no SDK. */
-export type RetrieveInvoice = (invoiceId: string) => Promise<{ status?: string | null } | null>;
+/**
+ * Retrieves one invoice from Stripe. Injected, so this file needs no
+ * runtime SDK import.
+ *
+ * It returns the WHOLE invoice rather than a narrowed shape, because the
+ * preflight needs two facts from it and not one: the live status, and
+ * which Stripe subscription the invoice belongs to.
+ */
+export type RetrieveInvoice = (invoiceId: string) => Promise<Stripe.Invoice | null>;
 
 /** The subscription columns one payment warning is rebuilt from. */
-const SUBSCRIPTION_COLUMNS = "id, customer_type, status, customer_snapshot, started_at";
+const SUBSCRIPTION_COLUMNS =
+  "id, customer_type, status, customer_snapshot, started_at, stripe_subscription_id";
 
 type ClaimOutcome =
   | { kind: "claimed"; deliveryId: string }
@@ -297,8 +312,9 @@ export async function deliverClaimedPaymentProblem(
     return "failed";
   }
 
+  const subscriptionRow = second.row;
   const preflight = evaluatePaymentProblemPreflight({
-    subscription: second.row,
+    subscription: subscriptionRow,
     claimed: true,
   });
 
@@ -320,6 +336,7 @@ export async function deliverClaimedPaymentProblem(
   // been contacted, so no message can exist, and the next sweep will
   // re-read and try again.
   let invoiceStatus: string | null | undefined;
+  let liveInvoice: Stripe.Invoice;
   try {
     const invoice = await retrieveInvoice(invoiceId);
     if (!invoice) {
@@ -327,6 +344,7 @@ export async function deliverClaimedPaymentProblem(
       await markFailed(deliveryId);
       return "failed";
     }
+    liveInvoice = invoice;
     invoiceStatus = invoice.status;
   } catch (err) {
     // A Stripe outage, a 5xx or a timeout. Provider acceptance is
@@ -337,6 +355,29 @@ export async function deliverClaimedPaymentProblem(
     );
     await markFailed(deliveryId);
     return "failed";
+  }
+
+  // ── OWNERSHIP, BEFORE ANYTHING ELSE THE INVOICE SAYS ───────
+  //
+  // Both sides come from durable server state: the live invoice's own
+  // parent relationship, and the local row's stripe_subscription_id. A
+  // caller cannot supply either, and neither is an email or a name.
+  //
+  // A mismatch is TERMINAL, not retryable. The stored pair is invalid
+  // for this local subscription and no later attempt can make it valid,
+  // so retrying would only re-approach the same wrong customer.
+  const ownership = classifyPaymentProblemInvoiceOwnership(
+    subscriptionRow?.stripe_subscription_id ?? null,
+    resolveInvoiceSubscriptionId(liveInvoice)
+  );
+  if (ownership !== "owned") {
+    // Delivery uuid and the verdict. NEITHER subscription id and no
+    // customer fact from either side.
+    console.error(
+      `Payment problem email: invoice ownership ${ownership} for delivery ${deliveryId} - not sent`
+    );
+    await markSuperseded(deliveryId);
+    return "superseded";
   }
 
   const live = classifyPaymentProblemInvoiceStatus(invoiceStatus);
