@@ -90,14 +90,74 @@ const providerError = (statusCode, message = "boom") => ({
    THE CLASSIFIER
    ══════════════════════════════════════════════════════════════ */
 
-test("2-6: every 4xx is a proven refusal", () => {
-  for (const code of [400, 401, 403, 404, 409, 422, 429, 451, 499]) {
+test("1-5, 11, 12: every 4xx EXCEPT 409 is a proven refusal", () => {
+  // Each of these means Resend looked at THIS request and declined it, so
+  // no message exists and none can appear later.
+  for (const code of [400, 401, 403, 404, 405, 408, 422, 429, 451, 499]) {
     assert.equal(
       classifySubscriptionEmailProviderError(providerError(code)),
       "definite_failure",
       `HTTP ${code} must be a proven refusal`
     );
   }
+  // 409 is deliberately absent from that list. See below.
+  assert.notEqual(
+    classifySubscriptionEmailProviderError(providerError(409)),
+    "definite_failure",
+    "409 must never be a proven refusal"
+  );
+});
+
+test("6-10: HTTP 409 is AMBIGUOUS, whatever name it carries", () => {
+  // 409 is the one 4xx that is about ANOTHER request rather than this
+  // one. resend@6.21.0's own error vocabulary carries two of them, and a
+  // same-event request may already have been accepted in both cases:
+  //
+  //   invalid_idempotent_request      the key was already used, with a
+  //                                   different payload
+  //   concurrent_idempotent_requests  another request with this key is in
+  //                                   flight right now
+  //
+  // Marking either as 'failed' would hand it to the retry sweep, and the
+  // sweep would send a message the customer may already have.
+  for (const name of [
+    "invalid_idempotent_request",
+    "concurrent_idempotent_requests",
+    // A name Resend has not shipped yet, and one with no name at all:
+    // both must classify identically, because the STATUS is the contract.
+    "some_future_idempotency_conflict",
+    undefined,
+  ]) {
+    const error = { statusCode: 409, message: "conflict" };
+    if (name !== undefined) error.name = name;
+    assert.equal(
+      classifySubscriptionEmailProviderError(error),
+      "ambiguous",
+      `409 must be ambiguous whatever its name (${String(name)})`
+    );
+  }
+  // And it must not depend on message text either.
+  for (const message of ["", "anything at all", "Idempotency key already used"]) {
+    assert.equal(
+      classifySubscriptionEmailProviderError({ statusCode: 409, message }),
+      "ambiguous"
+    );
+  }
+});
+
+test("6b: invalid_idempotency_key is NOT swept in with the 409s", () => {
+  // A malformed key we sent is an ordinary validation refusal: the
+  // request was rejected outright and nothing was accepted. It must stay
+  // retryable, or a fixable client bug would become a permanent
+  // owner-action row.
+  assert.equal(
+    classifySubscriptionEmailProviderError({
+      name: "invalid_idempotency_key",
+      statusCode: 422,
+      message: "idempotency key is too long",
+    }),
+    "definite_failure"
+  );
 });
 
 test("7: statusCode null is NEVER a proven refusal", () => {
@@ -128,6 +188,7 @@ test("12: it fails closed on every non-4xx and every unrecognised shape", () => 
     providerError("429"),
     providerError(Number.NaN),
     providerError(Number.POSITIVE_INFINITY),
+    providerError(409),
     providerError(399),
     providerError(300),
     providerError(200),
@@ -161,7 +222,7 @@ test("12b: the classifier is pure, deterministic and free of the SDK", () => {
   assert.ok(!rulesCode.includes("process.env"));
   // Exactly two outcomes.
   const outcomes = new Set(
-    [400, 499, 500, null, undefined, "x"].map(c => classifySubscriptionEmailProviderError(providerError(c)))
+    [400, 409, 499, 500, null, undefined, "x"].map(c => classifySubscriptionEmailProviderError(providerError(c)))
   );
   assert.deepEqual([...outcomes].sort(), ["ambiguous", "definite_failure"]);
 });
@@ -548,4 +609,74 @@ test("mutation: treating statusCode null as failed would break this suite", () =
   // The two only agree where agreement is correct: a real 4xx.
   assert.equal(classifySubscriptionEmailProviderError(providerError(422)), "definite_failure");
   assert.equal(mutated(providerError(422)), "definite_failure");
+});
+
+/* ══════════════════════════════════════════════════════════════
+   19-29. A 409 LEAVES THE ROW 'sending', EVERYWHERE
+   ══════════════════════════════════════════════════════════════ */
+
+for (const sender of SENDERS) {
+  test(`${sender.name}: 19-21, 25-27 - a 409 writes nothing at all`, () => {
+    // The senders route EVERY provider error through the one classifier,
+    // so 409 lands in the ambiguous branch by construction rather than by
+    // a second rule that could drift. This asserts the wiring that makes
+    // the classifier fix reach all three without touching them.
+    const tail = deliverTail(sender);
+    assert.ok(tail.includes("outcome = classifySubscriptionEmailProviderError(sendError);"),
+      "the sender must classify rather than judge the status itself");
+    // No sender inspects a status code on its own.
+    assert.ok(!sender.code.includes("statusCode"),
+      "a sender reads the status itself and could disagree with the classifier");
+    assert.ok(!sender.code.includes("409"), "a sender hardcodes a status");
+
+    // The ambiguous branch runs first and writes nothing.
+    const ambiguousAt = tail.indexOf('if (outcome === "ambiguous")');
+    const refusedAt = tail.indexOf('if (outcome === "definite_failure")');
+    assert.ok(ambiguousAt !== -1 && ambiguousAt < refusedAt);
+    const branch = tail.slice(ambiguousAt, refusedAt);
+    assert.ok(branch.includes('return "ambiguous";'));
+    for (const forbidden of ["markFailed", "markSent", "markSuperseded", ".update("]) {
+      assert.ok(!branch.includes(forbidden), `a 409 would write ${forbidden}`);
+    }
+  });
+}
+
+test("22-24, 28: a retried 409 stays sending and is never re-selected", () => {
+  const retryCode = withoutComments(read("lib/subscriptionEmailRetry.ts"));
+  // The retry reuses the same three deliverClaimed* paths, so a 409 there
+  // takes the same ambiguous branch proven above.
+  for (const fn of [
+    "deliverClaimedSubscriptionStarted",
+    "deliverClaimedCancellationConfirmation",
+    "deliverClaimedSubscriptionEnded",
+  ]) {
+    assert.ok(retryCode.includes(fn), `the retry does not reuse ${fn}`);
+  }
+  // The retry never classifies a provider error itself.
+  assert.ok(!retryCode.includes("statusCode"));
+  assert.ok(!retryCode.includes("classifySubscriptionEmailProviderError"));
+  // 'ambiguous' is the sweep's catch-all and writes no status.
+  assert.ok(retryCode.includes('if (result === "sent" || result === "failed" || result === "superseded") return result;')
+    || retryCode.includes('return "ambiguous";'));
+  // 29: candidate selection is still failed-only, so a row left at
+  // 'sending' by a 409 can never be picked up again automatically.
+  const load = retryCode.slice(
+    retryCode.indexOf("loadFailed: async (family, limit) =>"),
+    retryCode.indexOf("claimFailed: async deliveryId =>")
+  );
+  assert.ok(load.includes('.eq("status", "failed")'));
+  for (const forbidden of ['"sending"', '.in("status"', ".or("]) {
+    assert.ok(!load.includes(forbidden), `the work list was widened: ${forbidden}`);
+  }
+});
+
+test("30: stale sending is still diagnostic only after this hotfix", () => {
+  // A 409 row becomes a stale 'sending' row after 30 minutes. It must be
+  // REPORTED and never resent - otherwise the fix would just move the
+  // duplicate risk one step later.
+  const rules = withoutComments(read("lib/subscriptionEmailDeliveryRules.ts"));
+  const body = rules.slice(rules.indexOf("export async function inspectStaleSubscriptionEmailDeliveries"));
+  for (const forbidden of ["update", "upsert", "insert", "delete", "rpc", "claim"]) {
+    assert.ok(!body.includes(forbidden), `the stale inspection can write: ${forbidden}`);
+  }
 });

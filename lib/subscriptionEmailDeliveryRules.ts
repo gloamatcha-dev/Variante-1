@@ -744,14 +744,17 @@ export type ProviderErrorLike = {
  *
  * ── THE RULE, AND IT FAILS CLOSED ─────────────────────────────
  *
- * A numeric status in 400..499 means the provider answered and refused:
- * bad request, unauthorised, forbidden, conflict, rate limited. The
- * message was not accepted and cannot later appear. That is the ONLY case
- * this returns 'definite_failure' for, and it is not special-cased to one
- * code.
+ * A numeric status in 400..499 EXCEPT 409 means the provider answered and
+ * refused THIS request: bad request, unauthorised, forbidden, not found,
+ * unprocessable, rate limited. The message was not accepted and cannot
+ * later appear. That is the ONLY case this returns 'definite_failure'
+ * for, and within that range it is not special-cased to one code.
  *
  * EVERYTHING ELSE IS AMBIGUOUS, deliberately:
  *
+ *   409                  an idempotency conflict, and the one 4xx that is
+ *                        about ANOTHER request rather than this one. See
+ *                        the note in the body.
  *   statusCode null      no HTTP answer at all. See above.
  *   5xx                  the server answered with an error, but a 502 or
  *                        a 504 from a proxy says nothing about whether
@@ -775,6 +778,38 @@ export function classifySubscriptionEmailProviderError(
   if (!Number.isInteger(statusCode)) return "ambiguous";
 
   const code = statusCode as number;
+
+  // ══════════════════════════════════════════════════════════
+  // 409 IS THE ONE 4xx THAT PROVES NOTHING (Phase 3H.5B2.1).
+  // ══════════════════════════════════════════════════════════
+  //
+  // Every other 4xx means Resend looked at THIS request and declined it,
+  // so no message exists. A 409 means the opposite: it is Resend telling
+  // us something about ANOTHER request that used the same idempotency
+  // key. The SDK's own error vocabulary carries two of them:
+  //
+  //   invalid_idempotent_request      the key was already used, with a
+  //                                   different payload. The earlier
+  //                                   request may well have been accepted.
+  //   concurrent_idempotent_requests  another request with this key is in
+  //                                   flight right now. Its outcome is
+  //                                   not yet known to anyone.
+  //
+  // In both cases a same-event request may already have been accepted,
+  // which is exactly what 'failed' is required to rule out. Marking a 409
+  // as failed would hand it to the retry sweep, and the sweep would send
+  // a message the customer may already have.
+  //
+  // MATCHED ON THE STATUS, NOT ON THE NAME. Resend may add a third
+  // idempotency-related 409 at any time, and a name allowlist would
+  // silently misclassify it the day it appears. English message text is
+  // even less durable. The status is the contract.
+  //
+  // invalid_idempotency_key is deliberately NOT swept in here: it means
+  // the key we sent was malformed, so the request was rejected outright
+  // and nothing was accepted. It carries an ordinary 4xx, not a 409.
+  if (code === 409) return "ambiguous";
+
   return code >= 400 && code <= 499 ? "definite_failure" : "ambiguous";
 }
 
