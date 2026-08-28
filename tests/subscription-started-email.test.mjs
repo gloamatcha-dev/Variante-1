@@ -558,8 +558,13 @@ test("23: provider acceptance records sent AND sent_at, unconditionally", () => 
   // already a fact, and suppressing the write would invite a duplicate.
   assert.ok(!markSent.includes('.eq("status", "sending")'),
     "recording 'sent' must not be conditional after provider acceptance");
-  // And it happens only after the send genuinely succeeded.
-  assert.ok(senderCode.indexOf("if (sendErrorMessage)") < senderCode.indexOf("await markSent(deliveryId);"));
+  // And it happens only after the send genuinely succeeded: both the
+  // ambiguous and the proven-refused branches return before it (3H.5B1).
+  const ambiguousAt = senderCode.indexOf('if (outcome === "ambiguous")');
+  const refusedAt = senderCode.indexOf('if (outcome === "definite_failure")');
+  const sentAt = senderCode.indexOf("await markSent(deliveryId)");
+  assert.ok(ambiguousAt !== -1 && refusedAt !== -1 && sentAt !== -1);
+  assert.ok(ambiguousAt < sentAt && refusedAt < sentAt);
 });
 
 test("24: provider failure records failed only over sending", () => {

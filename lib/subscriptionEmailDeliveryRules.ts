@@ -687,3 +687,93 @@ export function evaluateSubscriptionEndedPreflight(input: {
     content: { endedAtIso: canonicalEventInstant(subscription.cancelled_at) },
   };
 }
+
+/* ══════════════════════════════════════════════════════════════
+   PROVIDER OUTCOME CLASSIFICATION (Phase 3H.5B1)
+   ══════════════════════════════════════════════════════════════ */
+
+/**
+ * What one provider error proves about whether Resend took the message.
+ *
+ *   'definite_failure'  the provider answered and REFUSED. No email exists
+ *                       and none ever will from that attempt, so the
+ *                       delivery may safely record 'failed'.
+ *   'ambiguous'         we do not know. The request may have reached
+ *                       Resend and been accepted with the response lost.
+ *                       The delivery must stay 'sending'.
+ */
+export type SubscriptionEmailProviderOutcome = "definite_failure" | "ambiguous";
+
+/**
+ * The shape resend@6.21.0 returns in the `error` slot of emails.send.
+ *
+ * Declared structurally rather than imported. This module is a LEAF - no
+ * relative import, no package import - so the focused suites can load the
+ * .ts source directly, and a rules module has no business pulling a
+ * network SDK into itself just to name a field.
+ */
+export type ProviderErrorLike = {
+  statusCode?: unknown;
+  message?: unknown;
+};
+
+/**
+ * Classifies one Resend error into "we can prove it was refused" or "we
+ * cannot".
+ *
+ * ══════════════════════════════════════════════════════════════
+ * WHY THIS EXISTS: THE SDK COLLAPSES TWO VERY DIFFERENT EVENTS.
+ * ══════════════════════════════════════════════════════════════
+ *
+ * resend@6.21.0 wraps its entire fetch in a try/catch and returns a
+ * structured error either way, so an explicit HTTP rejection and a lost
+ * connection arrive on the SAME code path:
+ *
+ *   an HTTP response was received   statusCode = response.status
+ *   fetch itself threw              statusCode = null, and the message is
+ *                                   the fixed string "Unable to fetch
+ *                                   data. The request could not be
+ *                                   resolved."
+ *
+ * The second case covers a network failure, a DNS failure, a connection
+ * reset and a timeout. In every one of those the request may already have
+ * reached Resend and been accepted, with only the answer lost. Treating it
+ * as a failure is how a retry becomes a second email in a customer's
+ * inbox - which is exactly what happened in this repository once already,
+ * on 2026-08-21, when stale recovery re-sent 25 order confirmations.
+ *
+ * ── THE RULE, AND IT FAILS CLOSED ─────────────────────────────
+ *
+ * A numeric status in 400..499 means the provider answered and refused:
+ * bad request, unauthorised, forbidden, conflict, rate limited. The
+ * message was not accepted and cannot later appear. That is the ONLY case
+ * this returns 'definite_failure' for, and it is not special-cased to one
+ * code.
+ *
+ * EVERYTHING ELSE IS AMBIGUOUS, deliberately:
+ *
+ *   statusCode null      no HTTP answer at all. See above.
+ *   5xx                  the server answered with an error, but a 502 or
+ *                        a 504 from a proxy says nothing about whether
+ *                        the message behind it was enqueued.
+ *   a non-numeric or
+ *   unrecognised shape   an SDK change or an error we did not anticipate.
+ *                        Guessing here would silently convert an unknown
+ *                        into a duplicate email, so it stays ambiguous.
+ *
+ * Success is NOT classified here. This function only ever sees an error;
+ * the caller checks for one first.
+ */
+export function classifySubscriptionEmailProviderError(
+  error: ProviderErrorLike | null | undefined
+): SubscriptionEmailProviderOutcome {
+  if (!error || typeof error !== "object") return "ambiguous";
+
+  const statusCode = error.statusCode;
+  // Number.isInteger rejects null, undefined, NaN, Infinity and the
+  // numeric strings a future SDK might return.
+  if (!Number.isInteger(statusCode)) return "ambiguous";
+
+  const code = statusCode as number;
+  return code >= 400 && code <= 499 ? "definite_failure" : "ambiguous";
+}

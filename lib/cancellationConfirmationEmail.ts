@@ -13,6 +13,8 @@ import {
   evaluateCancellationConfirmationPreflight,
   CANCELLATION_CONFIRMATION_FAMILY,
   type CancellationConfirmationFacts,
+  classifySubscriptionEmailProviderError,
+  type SubscriptionEmailProviderOutcome,
 } from "./subscriptionEmailDeliveryRules";
 
 /**
@@ -81,10 +83,16 @@ import {
  * a mail provider failure must not turn the customer's cancellation into a
  * failure - not in the HTTP response they are waiting on, and not in the
  * webhook that applies a deferred cancellation. So every outcome is
- * returned as data, the delivery row records 'failed', and the
- * cancellation state is untouched. 'failed' is the one status a future
- * sweep may act on, which is the durable retry state migration 035 exists
- * to hold.
+ * returned as data and the cancellation state is untouched.
+ *
+ * ── AND 'failed' MEANS SOMETHING EXACT (Phase 3H.5B1) ─────────
+ *
+ * The delivery records 'failed' ONLY when non-acceptance is proven: a
+ * refusal before the provider was contacted, or a numeric 4xx from Resend.
+ * A lost connection, a timeout, a 5xx or an unrecognised error shape leave
+ * the row at 'sending', because the message may already be in the
+ * customer's inbox. 'failed' is the one status a future sweep may act on,
+ * so it has to mean "safe to send again" and nothing looser.
  */
 
 /** What the caller learns. Never a customer fact, never a provider message. */
@@ -97,7 +105,19 @@ export type CancellationConfirmationEmailResult =
   | "already-claimed"
   /** The fact is gone or has moved. The row is terminal and Resend was not called. */
   | "superseded"
-  /** Attempted and failed. The row records 'failed' and the fact stays owed. */
+  /**
+   * The provider was contacted and we CANNOT PROVE what happened.
+   *
+   * A lost connection, a timeout, a 5xx, an unrecognised error shape, or
+   * acceptance whose state write did not land. The message may already be
+   * in the customer's inbox, so the delivery stays 'sending' and no
+   * automatic retry may resend it. See classifySubscriptionEmailProviderError.
+   */
+  | "ambiguous"
+  /**
+   * PROVEN not accepted by the provider, or refused before the provider
+   * was ever contacted. The row records 'failed' and the fact stays owed.
+   */
   | "failed";
 
 /** The subscription columns one cancellation confirmation is rebuilt from. */
@@ -197,16 +217,18 @@ async function claimCancellationConfirmation(
  * acceptance is already a fact, and suppressing the write would leave a row
  * a later sweep could pick up and send a second time.
  */
-async function markSent(deliveryId: string): Promise<void> {
+async function markSent(deliveryId: string): Promise<boolean> {
   const admin = getSupabaseAdmin();
-  if (!admin) return;
+  if (!admin) return false;
   const { error } = await admin
     .from("subscription_email_deliveries")
     .update({ status: "sent", sent_at: new Date().toISOString() })
     .eq("id", deliveryId);
   if (error) {
     console.error(`Cancellation confirmation: mark-sent failed for delivery ${deliveryId}:`, error.message);
+    return false;
   }
+  return true;
 }
 
 /**
@@ -389,6 +411,9 @@ async function deliverClaimedCancellationConfirmation(
   // cancellation this is.
   const idempotencyKey = cancellationConfirmationIdempotencyKey(subscriptionId, eventKey);
 
+  // 'accepted' until the provider says otherwise. The two failure values
+  // are the classifier's, and they are NOT interchangeable.
+  let outcome: SubscriptionEmailProviderOutcome | "accepted" = "accepted";
   let sendErrorMessage: string | null = null;
   try {
     const { error: sendError } = await resend.emails.send(
@@ -404,20 +429,64 @@ async function deliverClaimedCancellationConfirmation(
       },
       { idempotencyKey }
     );
-    if (sendError) sendErrorMessage = sendError.message;
+    if (sendError) {
+      // statusCode is the whole discriminator: a number means Resend
+      // answered, null means fetch itself threw and the request may still
+      // have landed.
+      outcome = classifySubscriptionEmailProviderError(sendError);
+      sendErrorMessage = sendError.message;
+    }
   } catch (err) {
+    // A throw around the call proves nothing about acceptance. The SDK
+    // catches its own transport failures, so reaching here at all means
+    // something unanticipated happened - which is the least safe moment
+    // to guess.
+    outcome = "ambiguous";
     sendErrorMessage = err instanceof Error ? err.message : "unknown error";
   }
 
-  if (sendErrorMessage) {
-    // The subscription uuid and the provider's message. Never the
-    // recipient, never a name, and never anything that reaches the
-    // customer's HTTP response.
-    console.error(`Cancellation confirmation: send failed for ${subscriptionId}:`, sendErrorMessage);
+  // ── AMBIGUOUS: THE ROW STAYS 'sending' ──────────────────────
+  //
+  // Nothing is written. 'failed' would be a lie we could not take back:
+  // it is the one status a retry sweep may act on, and re-sending a
+  // message the provider may already have delivered is precisely the
+  // duplicate this phase exists to prevent.
+  //
+  // The row is left for a human. A later phase reports stale 'sending'
+  // rows; it must never resend them.
+  if (outcome === "ambiguous") {
+    // Delivery uuid, family and the provider's short message. No
+    // recipient, no name, no customer data.
+    console.error(
+      `Cancellation confirmation: AMBIGUOUS provider outcome for delivery ${deliveryId} (${CANCELLATION_CONFIRMATION_FAMILY}) - left sending:`,
+      sendErrorMessage
+    );
+    return "ambiguous";
+  }
+
+  // ── PROVEN REFUSED: THE ROW MAY RECORD 'failed' ─────────────
+  //
+  // A 4xx means Resend answered and declined. No message exists, and none
+  // can appear later from this attempt, so a future retry cannot duplicate
+  // anything.
+  if (outcome === "definite_failure") {
+    console.error(
+      `Cancellation confirmation: send rejected for delivery ${deliveryId} (${CANCELLATION_CONFIRMATION_FAMILY}):`,
+      sendErrorMessage
+    );
     await markFailed(deliveryId);
     return "failed";
   }
 
-  await markSent(deliveryId);
+  // ── ACCEPTED ────────────────────────────────────────────────
+  //
+  // If the durable write does not land, the message is still out there.
+  // That is ambiguous, NOT failed, and the row stays 'sending'.
+  if (!(await markSent(deliveryId))) {
+    console.error(
+      `Cancellation confirmation: provider accepted but the sent state did not persist for delivery ${deliveryId} (${CANCELLATION_CONFIRMATION_FAMILY}) - left sending.`
+    );
+    return "ambiguous";
+  }
   return "sent";
 }

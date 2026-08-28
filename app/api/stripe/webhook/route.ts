@@ -519,7 +519,10 @@ async function handleInvoicePaid(stripe: Stripe, event: Stripe.Event): Promise<v
     billingReason: result.billingReason,
   });
 
-  if (started === "failed" || started === "superseded") {
+  // 'ambiguous' is reported too (Phase 3H.5B1): the provider may already
+  // have delivered it, the row stays 'sending', and no automatic retry
+  // will ever resend it - so this line is the only trace an operator gets.
+  if (started === "failed" || started === "superseded" || started === "ambiguous") {
     // GLOA uuid and an outcome word. No recipient, no name, no plan, no
     // amount - and never the provider's message, which is logged where it
     // happened.
