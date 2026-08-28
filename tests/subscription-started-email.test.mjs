@@ -676,7 +676,15 @@ test("29: the internal order notification is unchanged", () => {
   assert.ok(!internal.includes("subscriptionStarted"));
 });
 
-test("30: the deferred cancellation flow is unchanged", () => {
+test("30: the deferred cancellation flow never learned about THIS family", () => {
+  // PHASE 3H.3 NARROWED THIS GUARD, DELIBERATELY. It used to assert that
+  // lib/subscriptionCancellation.ts touched no email at all, which was
+  // the right boundary while subscription_started was the only family.
+  // 3H.3 has since wired the cancellation confirmation there, at the
+  // three functions that write the cancellation pair. What still holds,
+  // and is what this assertion is now about, is that the cancellation
+  // service knows nothing about the START message, calls no provider
+  // itself, and touches no delivery row directly.
   const cancellation = withoutComments(read("lib/subscriptionCancellation.ts"));
   for (const forbidden of [
     "subscription_email_deliveries", "subscriptionStarted", "subscription_started",
@@ -685,7 +693,11 @@ test("30: the deferred cancellation flow is unchanged", () => {
     assert.ok(!cancellation.includes(forbidden), `the cancellation service changed: ${forbidden}`);
   }
   const cancelRoute = withoutComments(read("app/api/subscriptions/cancel/route.ts"));
-  for (const forbidden of ["subscription_email_deliveries", "subscriptionStarted", "emails.send"]) {
+  for (const forbidden of [
+    "subscription_email_deliveries", "subscriptionStarted", "emails.send",
+    // 3H.3 wired the confirmation into the SERVICE, not into the route.
+    "cancellationConfirmationEmail",
+  ]) {
     assert.ok(!cancelRoute.includes(forbidden), `the cancel route changed: ${forbidden}`);
   }
 });

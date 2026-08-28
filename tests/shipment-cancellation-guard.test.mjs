@@ -529,7 +529,8 @@ test("email: no new template and no new Resend namespace", () => {
   // assertion protects is that THIS task added nothing of its own.
   const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
   assert.deepEqual(templates, [
-    "cancellationOutcome.ts", "cancellationRequestNotification.ts",
+    "cancellationConfirmation.ts", "cancellationOutcome.ts",
+    "cancellationRequestNotification.ts",
     "internalOrderNotification.ts", "orderConfirmation.ts",
     "refundConfirmation.ts", "shipmentConfirmation.ts", "subscriptionStarted.ts",
     "withdrawalConfirmation.ts",
@@ -543,8 +544,8 @@ test("email: no new template and no new Resend namespace", () => {
   // subscription lifecycle, not to the shipment guard, and what this
   // assertion protects is that THIS task still added nothing of its own.
   assert.deepEqual(namespaces.sort(), [
-    "cancellation-outcome", "cancellation-request", "internal-order", "refund", "shipment",
-    "subscription-started",
+    "cancellation-confirmation", "cancellation-outcome", "cancellation-request",
+    "internal-order", "refund", "shipment", "subscription-started",
   ], "a Resend idempotency namespace was added or removed");
 });
 

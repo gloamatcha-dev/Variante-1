@@ -2410,12 +2410,19 @@ test("regression: the account reaches this feature ONLY through the endpoint", (
   // is that the CANCELLATION route, service and rules send nothing at
   // all, which the Resend assertions below prove directly.
   const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
-  assert.equal(templates.length, 8, "an unreviewed email template was added");
+  assert.equal(templates.length, 9, "an unreviewed email template was added");
   assert.deepEqual(
     templates.filter(n => /subscription/i.test(n)),
     ["subscriptionStarted.ts"],
     "a subscription template beyond Phase 3H.2's start message appeared"
   );
+  // PHASE 3H.3 ADDED cancellationConfirmation.ts, and this route IS now
+  // one of its triggers - through cancelSubscriptionForUser, which sends
+  // it after the RPC has durably scheduled the cancellation. The boundary
+  // that still holds is the one below: the route, the service and the
+  // rules contain no Resend call of their own, and the browser still
+  // reaches the feature only through the authenticated endpoint.
+  assert.ok(templates.includes("cancellationConfirmation.ts"));
   for (const source of [routeCode, serviceCode, rulesCode]) {
     for (const forbidden of ["resend", "Resend", "emails.send", "GLOA_FROM_HELLO"]) {
       assert.ok(!source.includes(forbidden), `this phase sends email: ${forbidden}`);

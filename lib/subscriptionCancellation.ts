@@ -1,5 +1,10 @@
 import type Stripe from "stripe";
 import { getSupabaseAdmin } from "./supabaseAdmin";
+// Phase 3H.3. Every writer of the cancellation pair lives in this module,
+// so the confirmation is wired here once rather than at each of the four
+// call sites - the Stripe webhook route and the cron route both stay
+// unchanged and neither needs to know this email exists.
+import { sendCancellationConfirmationEmailIfNeeded } from "./cancellationConfirmationEmail";
 import {
   DEFERRED_SWEEP_LIMIT,
   deferredCancelIdempotencyKey,
@@ -309,6 +314,29 @@ export async function cancelSubscriptionForUser(
 
   const result = payload.result;
   if (result === "scheduled" || result === "already_scheduled") {
+    // ── CONFIRM IT TO THE CUSTOMER (Phase 3H.3) ───────────────
+    //
+    // BOTH results, deliberately. 'already_scheduled' is not only the
+    // idempotent repeat: migration 034's CASE C answers it after writing
+    // cancellation_requested_at onto an effective date Stripe already
+    // had, which is a genuinely NEW persisted pair and therefore a new
+    // customer-facing fact. Gating on 'scheduled' alone would silently
+    // drop that customer's confirmation.
+    //
+    // The repeat case costs nothing: an unchanged pair produces the same
+    // event key, the claim conflicts, and nothing is sent.
+    //
+    // IT IS PASSED THE SUBSCRIPTION ID AND NOTHING ELSE. `schedule` above
+    // is what THIS request calculated before the RPC ran, and the RPC has
+    // four outcomes that write different things - so the sender re-reads
+    // the row and derives its event key from what actually landed.
+    //
+    // AND IT CANNOT FAIL THIS CANCELLATION. The cancellation is already
+    // durable, locally and at Stripe. The sender never throws and its
+    // result is deliberately not consulted: a mail provider having a bad
+    // day must not turn the customer's successful cancellation into an
+    // error in the response they are waiting on.
+    await sendCancellationConfirmationEmailIfNeeded(subscription.id);
     return { ok: true, result, schedule };
   }
   return { ok: false, result };
@@ -499,7 +527,31 @@ export async function applyDeferredCancellationFromRenewal(
   }
 
   const payload = (rpcData ?? {}) as { result?: unknown };
-  return isDeferredApplyResult(payload.result) ? payload.result : "error";
+  const applied = isDeferredApplyResult(payload.result) ? payload.result : "error";
+
+  // ── THE END DATE MAY HAVE MOVED (Phase 3H.3) ────────────────
+  //
+  // apply_deferred_subscription_cancellation writes
+  // cancellation_effective_at = p_cancel_at. For a late cancellation that
+  // is the period end of the cycle that has just been paid, which can be
+  // LATER than the date the customer was told when they cancelled. That
+  // is a new persisted pair, a new event key and a genuinely new customer
+  // fact: they are entitled to the corrected date.
+  //
+  // BOTH CALLERS ARE COVERED BY THIS ONE LINE. The invoice.paid webhook
+  // and sweepDueDeferredCancellations below both reach the RPC through
+  // this function, so neither the Stripe webhook route nor the cron route
+  // needs to know this email exists.
+  //
+  // Only on 'applied'. Every other result wrote nothing, so there is no
+  // new fact - and the sender would refuse anyway, because an unchanged
+  // pair yields the same event key and loses the claim.
+  if (applied === "applied") {
+    // Never allowed to fail the cancellation that just succeeded.
+    await sendCancellationConfirmationEmailIfNeeded(row.id);
+  }
+
+  return applied;
 }
 
 export type DeferredSweepSummary = {
@@ -806,8 +858,38 @@ export async function syncSubscriptionFromStripe(
     return "error";
   }
 
-  const payload = (data ?? {}) as { result?: unknown };
-  return typeof payload.result === "string" ? payload.result : "unknown";
+  const payload = (data ?? {}) as { result?: unknown; subscription_id?: unknown };
+  const result = typeof payload.result === "string" ? payload.result : "unknown";
+
+  // ── STRIPE MOVED THE CANCELLATION (Phase 3H.3) ──────────────
+  //
+  // sync_subscription_from_stripe is the third writer of the cancellation
+  // pair and the only one that can CLEAR it: an unscheduling at Stripe
+  // nulls both columns. It can also move cancellation_effective_at to
+  // whatever Stripe now reports while cancellation_requested_at stays.
+  //
+  // Only on 'synced'. 'unchanged' wrote nothing, by the RPC's own
+  // column-by-column comparison, so there is no new fact to confirm.
+  //
+  // The sender decides what the change actually was from the ROW rather
+  // than from this result word, and all three cases come out right:
+  //
+  //   pair cleared    no event key at all -> nothing sent, nothing written
+  //   pair moved      a new event key -> a new claim and a new message
+  //   pair unmoved    the same event key -> the claim conflicts, silence
+  //
+  // Superseding a now-stale OLDER delivery row is the retry preflight's
+  // job and needs the sweep a later phase will build; this call reaches
+  // only the row for the current pair.
+  //
+  // It never throws, so a reconciliation is never failed by a mail
+  // provider - which matters here because this runs inside the Stripe
+  // webhook, where a throw becomes a 500 and a redelivery.
+  if (result === "synced" && typeof payload.subscription_id === "string") {
+    await sendCancellationConfirmationEmailIfNeeded(payload.subscription_id);
+  }
+
+  return result;
 }
 
 /**

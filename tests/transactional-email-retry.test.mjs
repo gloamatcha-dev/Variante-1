@@ -826,9 +826,12 @@ test("idempotency: all six deterministic namespaces still exist and are distinct
   // all five order namespaces, and distinct from the two STRIPE keys in
   // lib/subscriptionCancellationRules.ts - which are not Resend keys and
   // deliberately do not live in lib/email.
+  // Phase 3H.3 added gloa/cancellation-confirmation/, the second keyed on
+  // a subscription. It is a different message from gloa/cancellation-request/
+  // and gloa/cancellation-outcome/, which are the ORDER cancellation flow.
   assert.deepEqual(namespaces.sort(), [
-    "cancellation-outcome", "cancellation-request", "internal-order", "refund", "shipment",
-    "subscription-started",
+    "cancellation-confirmation", "cancellation-outcome", "cancellation-request",
+    "internal-order", "refund", "shipment", "subscription-started",
   ]);
   assert.equal(new Set(namespaces).size, namespaces.length, "two templates share a namespace");
   // The order confirmation is the sixth family and deliberately has no

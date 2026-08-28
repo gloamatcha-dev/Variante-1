@@ -1,5 +1,5 @@
 /**
- * The rules behind public.subscription_email_deliveries (Phase 3H.2).
+ * The rules behind public.subscription_email_deliveries (Phase 3H.2, 3H.3).
  *
  * Pure, and a LEAF: no database, no Stripe, no Resend, no environment
  * read, and no relative import. Every rules module in this repository is
@@ -20,10 +20,24 @@
  * future edit to one that is not made to the other fails a test instead of
  * failing an INSERT in production.
  *
- * ── WHAT THIS PHASE IMPLEMENTS ────────────────────────────────
+ * ── WHAT IS IMPLEMENTED HERE ──────────────────────────────────
  *
- * One family: 'subscription_started'. The other two vocabularies exist in
- * the database and are deliberately not implemented here.
+ * Two families: 'subscription_started' (3H.2) and
+ * 'cancellation_confirmation' (3H.3). Their event keys are deliberately
+ * different shapes, because the facts they identify are different:
+ *
+ *   subscription_started       the subscription id. A subscription starts
+ *                              exactly once, so the row itself is the
+ *                              event.
+ *   cancellation_confirmation  BOTH persisted cancellation timestamps. A
+ *                              subscription can legitimately carry more
+ *                              than one cancellation fact over its life,
+ *                              and the effective date can move, so the
+ *                              key has to name WHICH cancellation.
+ *
+ * 'subscription_ended' exists in the database vocabulary and is
+ * deliberately not implemented here. Neither is 'payment_problem', which
+ * migration 035 does not permit at all.
  */
 
 /** The launch products. Mirrored from lib/subscriptionInvoiceRules.ts. */
@@ -47,8 +61,11 @@ export const SUBSCRIPTION_EMAIL_FAMILIES: readonly string[] = Object.freeze([
   "subscription_ended",
 ]);
 
-/** The only family Phase 3H.2 sends. */
+/** The family Phase 3H.2 sends. */
 export const SUBSCRIPTION_STARTED_FAMILY = "subscription_started";
+
+/** The family Phase 3H.3 sends. */
+export const CANCELLATION_CONFIRMATION_FAMILY = "cancellation_confirmation";
 
 /** The four statuses migration 035's CHECK permits. There is no 'pending'. */
 export const SUBSCRIPTION_EMAIL_STATUSES: readonly string[] = Object.freeze([
@@ -279,5 +296,221 @@ export function evaluateSubscriptionStartPreflight(input: {
       quantity: item.quantity,
       cadenceWeeks: SUBSCRIPTION_INTERVAL_COUNT,
     },
+  };
+}
+
+/* ══════════════════════════════════════════════════════════════
+   CANCELLATION CONFIRMATION (Phase 3H.3)
+   ══════════════════════════════════════════════════════════════ */
+
+/**
+ * One timestamptz, as one deterministic machine-readable instant.
+ *
+ * ── WHY toISOString AND NOTHING ELSE ──────────────────────────
+ *
+ * The event key must produce the same string for the same PostgreSQL
+ * instant on every machine, in every process, forever. toISOString is
+ * always UTC, always the same shape, and reads no locale and no ambient
+ * timezone - so it cannot drift when a process moves host or when an ICU
+ * database updates underneath the application.
+ *
+ * It also ROUND-TRIPS what this system already writes.
+ * cancelSubscriptionForUser passes p_requested_at as requestAt.toISOString(),
+ * so the value PostgREST hands back is that same instant and normalising
+ * it again is a no-op rather than a re-interpretation.
+ *
+ * NEVER a German display string. "3. Oktober 2026" is a rendering, not an
+ * instant: it discards the time of day, so two genuinely different
+ * effective instants on one day would collide into one key, and it
+ * depends on a timezone and a locale database that can both change. A
+ * date the customer READS is decided in the template; it is never the
+ * idempotency key.
+ */
+export function canonicalEventInstant(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString();
+}
+
+/**
+ * The event key for one cancellation confirmation.
+ *
+ * BOTH PERSISTED TIMESTAMPS, joined. Neither alone is correct, and
+ * migration 035 documents the same contract:
+ *
+ *   requested_at alone  misses a legitimate change of the effective date.
+ *                       apply_deferred_subscription_cancellation writes
+ *                       cancellation_effective_at = p_cancel_at, and
+ *                       sync_subscription_from_stripe writes whatever
+ *                       Stripe now reports - so the customer could be
+ *                       left holding a date that has since moved, with no
+ *                       new key to tell them about it.
+ *   effective_at alone  misses a genuine second cancellation. A
+ *                       Stripe-side unscheduling nulls BOTH columns,
+ *                       after which the customer may cancel again; if the
+ *                       new request lands on the same date, a key made of
+ *                       the date alone would be already-claimed and the
+ *                       second confirmation silently suppressed.
+ *
+ * Returns null when either half is missing. That is not a failure: an
+ * incomplete pair means there is no cancellation fact to confirm - the
+ * customer never cancelled, or a Stripe unscheduling cleared both - and
+ * the caller must send nothing rather than invent half an event.
+ *
+ * MUST be built from values RE-READ from the row after the cancellation
+ * write committed. schedule_subscription_cancellation has four outcomes
+ * that write different things, so the argument a caller sent is not
+ * reliably the value that landed.
+ */
+export function cancellationConfirmationEventKey(input: {
+  cancellationRequestedAt: string | null | undefined;
+  cancellationEffectiveAt: string | null | undefined;
+}): string | null {
+  const requested = canonicalEventInstant(input.cancellationRequestedAt);
+  const effective = canonicalEventInstant(input.cancellationEffectiveAt);
+  if (!requested || !effective) return null;
+  return `${requested}|${effective}`;
+}
+
+/** The subscription columns one cancellation confirmation is rebuilt from. */
+export type CancellationConfirmationFacts = {
+  id: string;
+  customer_type: string | null;
+  status: string;
+  customer_snapshot: unknown;
+  cancellation_requested_at: string | null;
+  cancellation_effective_at: string | null;
+};
+
+/**
+ * The facts the message may state.
+ *
+ * Both are canonical instants taken from the row. The template turns them
+ * into German dates; it is never handed a pre-formatted string, and never
+ * a clock.
+ */
+export type CancellationConfirmationContent = {
+  requestedAtIso: string;
+  effectiveAtIso: string;
+};
+
+export type CancellationConfirmationPreflight =
+  | { kind: "send"; recipient: string; eventKey: string; content: CancellationConfirmationContent }
+  /** There is no cancellation fact here at all. Claim nothing, write nothing. */
+  | { kind: "not-eligible"; reason: string }
+  /** The fact this delivery describes is gone. Terminal. Never send. */
+  | { kind: "superseded"; reason: string }
+  /** Still owed, but not sendable now. The one status a later sweep may act on. */
+  | { kind: "failed"; reason: string };
+
+/**
+ * Proves, from the durable row alone, that this exact cancellation is
+ * still the customer's current one.
+ *
+ * Called TWICE per send, and the second call is the load-bearing one:
+ *
+ *   expectedEventKey === null   deciding whether anything is owed at all,
+ *                               before any claim exists. Nothing can be
+ *                               recorded yet, so an absent cancellation is
+ *                               'not-eligible' rather than 'superseded'.
+ *   expectedEventKey === "..."  proving a CLAIMED row is still current,
+ *                               immediately before the provider call. Here
+ *                               a vanished or changed pair IS supersession:
+ *                               there is a row to close, and the message it
+ *                               describes must never be sent.
+ *
+ * ── WHAT SUPERSEDES ──────────────────────────────────────────
+ *
+ *   the pair was cleared      a genuine Stripe unscheduling. The customer
+ *                             is not cancelling any more, so a
+ *                             confirmation would be actively false.
+ *   the pair changed          apply_deferred_subscription_cancellation or
+ *                             sync_subscription_from_stripe moved the
+ *                             effective date, or the customer cancelled
+ *                             again after an unscheduling. Either way this
+ *                             row's date is stale; the NEW pair gets its
+ *                             own key, its own row and its own message.
+ *   the subscription ended    status 'cancelled' is terminal. "Dein Abo
+ *                             endet am X, bis dahin läuft es weiter" is no
+ *                             longer a true thing to say once it has
+ *                             ended, and the ending gets its own family in
+ *                             a later phase.
+ *
+ * ── WHAT DOES NOT ────────────────────────────────────────────
+ *
+ * A missing recipient or a non-private subscription are 'failed' once a
+ * row exists: the cancellation still happened and the confirmation is
+ * still owed, so closing the row would silently drop a message the
+ * customer is entitled to.
+ */
+export function evaluateCancellationConfirmationPreflight(input: {
+  subscription: CancellationConfirmationFacts | null;
+  expectedEventKey: string | null;
+}): CancellationConfirmationPreflight {
+  const { subscription, expectedEventKey } = input;
+  const claimed = expectedEventKey !== null;
+
+  if (!subscription) {
+    // Migration 035 cascades the delivery row with the subscription, so a
+    // claimed row cannot outlive it - but a vanished row must still never
+    // be treated as delivered.
+    return claimed
+      ? { kind: "failed", reason: "subscription not found" }
+      : { kind: "not-eligible", reason: "subscription not found" };
+  }
+
+  const currentKey = cancellationConfirmationEventKey({
+    cancellationRequestedAt: subscription.cancellation_requested_at,
+    cancellationEffectiveAt: subscription.cancellation_effective_at,
+  });
+
+  // NO PAIR, NO MESSAGE. Both columns null is the ordinary state of a
+  // subscription nobody has cancelled, and it is also exactly what a
+  // Stripe unscheduling leaves behind.
+  if (!currentKey) {
+    return claimed
+      ? { kind: "superseded", reason: "the cancellation was unscheduled" }
+      : { kind: "not-eligible", reason: "no persisted cancellation pair" };
+  }
+
+  // THE FACT MOVED. A different pair is a different customer-facing fact
+  // and belongs to a different delivery row.
+  if (claimed && currentKey !== expectedEventKey) {
+    return { kind: "superseded", reason: "the cancellation changed after this delivery was claimed" };
+  }
+
+  // ALREADY OVER. Terminal, and the ending is its own later family.
+  if (subscription.status === "cancelled") {
+    return claimed
+      ? { kind: "superseded", reason: "the subscription has already ended" }
+      : { kind: "not-eligible", reason: "the subscription has already ended" };
+  }
+
+  // B2C only. Migration 022 CHECKs this column to 'private'; this is the
+  // lock that would still hold if that CHECK were ever widened.
+  if (subscription.customer_type !== "private") {
+    return claimed
+      ? { kind: "failed", reason: "subscription is not a private customer subscription" }
+      : { kind: "not-eligible", reason: "subscription is not a private customer subscription" };
+  }
+
+  const recipient = recipientFromCustomerSnapshot(subscription.customer_snapshot);
+  if (!recipient) {
+    return claimed
+      ? { kind: "failed", reason: "subscription snapshot carries no customer email" }
+      : { kind: "not-eligible", reason: "subscription snapshot carries no customer email" };
+  }
+
+  // Non-null by construction: currentKey exists, so both halves parsed.
+  const [requestedAtIso, effectiveAtIso] = currentKey.split("|");
+
+  return {
+    kind: "send",
+    recipient,
+    eventKey: currentKey,
+    content: { requestedAtIso, effectiveAtIso },
   };
 }

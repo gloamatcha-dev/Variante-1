@@ -567,16 +567,15 @@ test("the only DML-shaped verbs in 035 are DDL", () => {
    NOTHING ELSE MOVED
    ══════════════════════════════════════════════════════════════ */
 
-test("only Phase 3H.2's start template was added on top of this foundation", () => {
-  // PHASE 3H.2 CHANGED THIS GUARD, DELIBERATELY. It used to assert that
-  // lib/email held exactly the seven templates that existed when the
-  // migration landed, because 3H.1 was the database foundation alone.
-  // 3H.2 has since built the FIRST of the three families on it. The
-  // property still worth protecting is that it built exactly one: the
-  // cancellation confirmation and the subscription ended message are
-  // still later phases and must not appear without review.
+test("only the two reviewed lifecycle templates were added on this foundation", () => {
+  // PHASE 3H.3 CHANGED THIS GUARD AGAIN, DELIBERATELY. 3H.1 shipped the
+  // table alone; 3H.2 built subscription_started on it; 3H.3 has now
+  // built cancellation_confirmation. The property still worth protecting
+  // is that exactly those two exist: subscription_ended is a later phase
+  // and payment_problem is not even permitted by the migration.
   const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
   assert.deepEqual(templates, [
+    "cancellationConfirmation.ts",
     "cancellationOutcome.ts",
     "cancellationRequestNotification.ts",
     "internalOrderNotification.ts",
@@ -588,22 +587,25 @@ test("only Phase 3H.2's start template was added on top of this foundation", () 
   ], "an unreviewed email template was added");
 });
 
-test("only the subscription_started sender exists; the other two families do not", () => {
-  // PHASE 3H.2 CHANGED THIS GUARD, DELIBERATELY. 3H.1 shipped the table
-  // with no sender at all; 3H.2 shipped the first of the three. What
-  // still holds, and is what this assertion is now about, is that the
-  // cancellation confirmation, the subscription ended message and the
-  // deliberately deferred payment problem have no sender anywhere.
+test("two of the three families have a sender; subscription_ended does not", () => {
+  // PHASE 3H.3 CHANGED THIS GUARD AGAIN, DELIBERATELY. What still holds
+  // is that subscription_ended has no sender anywhere, and neither does
+  // the deliberately deferred payment problem - which migration 035 does
+  // not even permit as a family value.
   const libFiles = readdirSync(path.join(ROOT, "lib"));
   for (const f of libFiles) {
     assert.ok(
-      !/subscriptionEnded|cancellationConfirmation|paymentProblem/i.test(f),
+      !/subscriptionEnded|paymentProblem/i.test(f),
       `${f} implements a sender for a family this phase does not cover`
     );
   }
   assert.ok(
     libFiles.includes("subscriptionStartedEmail.ts"),
     "the Phase 3H.2 start sender is missing"
+  );
+  assert.ok(
+    libFiles.includes("cancellationConfirmationEmail.ts"),
+    "the Phase 3H.3 cancellation confirmation sender is missing"
   );
 });
 

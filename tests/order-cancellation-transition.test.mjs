@@ -1110,7 +1110,8 @@ test("regression: the OPERATOR cancel route still sends nothing at all", () => {
   // about. Migration 029 still creates no refund and mails nobody.
   const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
   assert.deepEqual(templates, [
-    "cancellationOutcome.ts", "cancellationRequestNotification.ts",
+    "cancellationConfirmation.ts", "cancellationOutcome.ts",
+    "cancellationRequestNotification.ts",
     "internalOrderNotification.ts", "orderConfirmation.ts",
     "refundConfirmation.ts", "shipmentConfirmation.ts", "subscriptionStarted.ts",
     "withdrawalConfirmation.ts",
