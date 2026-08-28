@@ -663,28 +663,32 @@ test("33: the recurring invoice path is unchanged", () => {
     "the webhook must reach this family only through the cancellation service");
 });
 
-test("34-35: no subscription_ended and no payment_problem sender appears", () => {
+test("34-35: no payment_problem sender appears, and the ending stays separate", () => {
+  // PHASE 3H.4 NARROWED THIS GUARD, DELIBERATELY. subscriptionEnded now
+  // exists as its own family, sent from customer.subscription.deleted.
+  // What still holds is that payment_problem has no implementation
+  // anywhere, and - the part this suite really owns - that the
+  // CANCELLATION CONFIRMATION never becomes an ending message.
   const libFiles = readdirSync(path.join(ROOT, "lib"));
   const emailFiles = readdirSync(path.join(ROOT, "lib/email"));
   for (const f of [...libFiles, ...emailFiles]) {
-    assert.ok(!/subscriptionEnded|paymentProblem/i.test(f), `${f} is a later phase`);
+    assert.ok(!/paymentProblem/i.test(f), `${f} is a deferred phase`);
   }
-  // Nothing anywhere may name payment_problem: migration 035's CHECK does
-  // not permit it as a family at all.
   for (const source of [senderCode, rulesCode, templateCode, serviceCode]) {
     assert.ok(!source.includes("payment_problem"), "payment_problem must stay absent");
   }
-  // subscription_ended appears ONCE, in the rules module's mirror of
-  // migration 035's family vocabulary. Nothing may act on it.
-  assert.equal((rulesCode.match(/subscription_ended/g) ?? []).length, 1,
-    "the rules module does more than name the third family");
-  for (const source of [senderCode, templateCode, serviceCode]) {
-    assert.ok(!source.includes("subscription_ended"), "subscription_ended must stay unimplemented");
+  // THIS family's sender and template know nothing about the ending.
+  for (const source of [senderCode, templateCode]) {
+    assert.ok(!source.includes("subscription_ended"), "the confirmation must not send the ending");
+    assert.ok(!source.includes("subscriptionEnded"), "the confirmation must not reach the ending");
   }
-  // And no "Abo beendet" message is sent from any cancellation path.
-  for (const source of [serviceCode, routeCode, webhookCode, cronCode]) {
-    assert.ok(!source.includes("Abo beendet"), "a termination email appeared");
+  // And the cancellation REQUEST paths still send no ending message: the
+  // route, the cron and the webhook route itself never name it.
+  for (const source of [routeCode, cronCode, webhookCode]) {
+    assert.ok(!source.includes("subscriptionEndedEmail"),
+      "an ending is sent from a non-terminal path");
   }
+  assert.ok(!templateCode.includes("Abo beendet"), "the confirmation claims the abo ended");
 });
 
 test("36: no automatic retry was wired", () => {

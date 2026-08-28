@@ -567,12 +567,12 @@ test("the only DML-shaped verbs in 035 are DDL", () => {
    NOTHING ELSE MOVED
    ══════════════════════════════════════════════════════════════ */
 
-test("only the two reviewed lifecycle templates were added on this foundation", () => {
-  // PHASE 3H.3 CHANGED THIS GUARD AGAIN, DELIBERATELY. 3H.1 shipped the
-  // table alone; 3H.2 built subscription_started on it; 3H.3 has now
-  // built cancellation_confirmation. The property still worth protecting
-  // is that exactly those two exist: subscription_ended is a later phase
-  // and payment_problem is not even permitted by the migration.
+test("exactly the three reviewed lifecycle templates were built on this foundation", () => {
+  // PHASE 3H.4 CHANGED THIS GUARD A THIRD AND FINAL TIME. 3H.1 shipped
+  // the table alone; 3H.2, 3H.3 and 3H.4 built the three families
+  // migration 035 permits. The family set is now CLOSED - the migration's
+  // CHECK admits no fourth value - so from here this list may only change
+  // for a message that is not a subscription lifecycle email at all.
   const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
   assert.deepEqual(templates, [
     "cancellationConfirmation.ts",
@@ -582,31 +582,31 @@ test("only the two reviewed lifecycle templates were added on this foundation", 
     "orderConfirmation.ts",
     "refundConfirmation.ts",
     "shipmentConfirmation.ts",
+    "subscriptionEnded.ts",
     "subscriptionStarted.ts",
     "withdrawalConfirmation.ts",
   ], "an unreviewed email template was added");
 });
 
-test("two of the three families have a sender; subscription_ended does not", () => {
-  // PHASE 3H.3 CHANGED THIS GUARD AGAIN, DELIBERATELY. What still holds
-  // is that subscription_ended has no sender anywhere, and neither does
-  // the deliberately deferred payment problem - which migration 035 does
-  // not even permit as a family value.
+test("all three permitted families now have a sender, and nothing else does", () => {
+  // PHASE 3H.4 CLOSED THIS GUARD OUT. The three families migration 035
+  // permits are now all implemented. What still holds - and is what this
+  // assertion is now for - is that no sender exists for the deliberately
+  // deferred payment problem, which the migration does not even admit as
+  // a family value.
   const libFiles = readdirSync(path.join(ROOT, "lib"));
   for (const f of libFiles) {
-    assert.ok(
-      !/subscriptionEnded|paymentProblem/i.test(f),
-      `${f} implements a sender for a family this phase does not cover`
-    );
+    assert.ok(!/paymentProblem/i.test(f), `${f} implements the deferred payment-problem sender`);
   }
-  assert.ok(
-    libFiles.includes("subscriptionStartedEmail.ts"),
-    "the Phase 3H.2 start sender is missing"
-  );
-  assert.ok(
-    libFiles.includes("cancellationConfirmationEmail.ts"),
-    "the Phase 3H.3 cancellation confirmation sender is missing"
-  );
+  for (const [family, senderFile] of [
+    ["subscription_started", "subscriptionStartedEmail.ts"],
+    ["cancellation_confirmation", "cancellationConfirmationEmail.ts"],
+    ["subscription_ended", "subscriptionEndedEmail.ts"],
+  ]) {
+    assert.ok(libFiles.includes(senderFile), `the ${family} sender is missing`);
+    assert.ok(flat.includes(`'${family}'`), `035 no longer permits ${family}`);
+  }
+  assert.ok(!flat.includes("payment_problem"), "035 must still not permit payment_problem");
 });
 
 test("the payment failure lifecycle remains untouched", () => {

@@ -845,7 +845,8 @@ test("email: the template is a pure leaf, like the other six", () => {
     "cancellationConfirmation.ts", "cancellationOutcome.ts",
     "cancellationRequestNotification.ts",
     "internalOrderNotification.ts", "orderConfirmation.ts",
-    "refundConfirmation.ts", "shipmentConfirmation.ts", "subscriptionStarted.ts",
+    "refundConfirmation.ts", "shipmentConfirmation.ts", "subscriptionEnded.ts",
+    "subscriptionStarted.ts",
     "withdrawalConfirmation.ts",
   ]);
 });

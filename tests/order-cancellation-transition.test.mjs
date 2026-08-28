@@ -1113,7 +1113,8 @@ test("regression: the OPERATOR cancel route still sends nothing at all", () => {
     "cancellationConfirmation.ts", "cancellationOutcome.ts",
     "cancellationRequestNotification.ts",
     "internalOrderNotification.ts", "orderConfirmation.ts",
-    "refundConfirmation.ts", "shipmentConfirmation.ts", "subscriptionStarted.ts",
+    "refundConfirmation.ts", "shipmentConfirmation.ts", "subscriptionEnded.ts",
+    "subscriptionStarted.ts",
     "withdrawalConfirmation.ts",
   ], "an unexpected email template was added");
   // Against stripped code: the template's header prose legitimately says

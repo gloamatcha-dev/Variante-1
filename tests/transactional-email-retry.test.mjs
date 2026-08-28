@@ -831,7 +831,7 @@ test("idempotency: all six deterministic namespaces still exist and are distinct
   // and gloa/cancellation-outcome/, which are the ORDER cancellation flow.
   assert.deepEqual(namespaces.sort(), [
     "cancellation-confirmation", "cancellation-outcome", "cancellation-request",
-    "internal-order", "refund", "shipment", "subscription-started",
+    "internal-order", "refund", "shipment", "subscription-ended", "subscription-started",
   ]);
   assert.equal(new Set(namespaces).size, namespaces.length, "two templates share a namespace");
   // The order confirmation is the sixth family and deliberately has no

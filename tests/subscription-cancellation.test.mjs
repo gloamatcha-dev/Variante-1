@@ -2410,11 +2410,11 @@ test("regression: the account reaches this feature ONLY through the endpoint", (
   // is that the CANCELLATION route, service and rules send nothing at
   // all, which the Resend assertions below prove directly.
   const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
-  assert.equal(templates.length, 9, "an unreviewed email template was added");
+  assert.equal(templates.length, 10, "an unreviewed email template was added");
   assert.deepEqual(
-    templates.filter(n => /subscription/i.test(n)),
-    ["subscriptionStarted.ts"],
-    "a subscription template beyond Phase 3H.2's start message appeared"
+    templates.filter(n => /subscription/i.test(n)).sort(),
+    ["subscriptionEnded.ts", "subscriptionStarted.ts"],
+    "a subscription template beyond the three reviewed families appeared"
   );
   // PHASE 3H.3 ADDED cancellationConfirmation.ts, and this route IS now
   // one of its triggers - through cancelSubscriptionForUser, which sends

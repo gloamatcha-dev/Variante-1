@@ -5,6 +5,10 @@ import { getSupabaseAdmin } from "./supabaseAdmin";
 // call sites - the Stripe webhook route and the cron route both stay
 // unchanged and neither needs to know this email exists.
 import { sendCancellationConfirmationEmailIfNeeded } from "./cancellationConfirmationEmail";
+// Phase 3H.4. The only writer of status = cancelled lives here too, so
+// the ending is wired at the same layer and the webhook route stays
+// unchanged.
+import { sendSubscriptionEndedEmailIfNeeded } from "./subscriptionEndedEmail";
 import {
   DEFERRED_SWEEP_LIMIT,
   deferredCancelIdempotencyKey,
@@ -927,6 +931,45 @@ export async function markSubscriptionCancelledFromStripe(
     return "error";
   }
 
-  const payload = (data ?? {}) as { result?: unknown };
-  return typeof payload.result === "string" ? payload.result : "unknown";
+  const payload = (data ?? {}) as { result?: unknown; subscription_id?: unknown };
+  const result = typeof payload.result === "string" ? payload.result : "unknown";
+
+  // ── "DEIN GLOA ABO IST BEENDET" (Phase 3H.4) ────────────────
+  //
+  // BOTH TERMINAL RESULTS, AND THE SECOND ONE IS THE POINT.
+  //
+  // 'cancelled' is the first transition. 'already_cancelled' is every
+  // later one, and it proves exactly the same durable fact: this row IS
+  // terminally cancelled. Gating on 'cancelled' alone would lose the
+  // customer's message in one specific window that Stripe makes likely
+  // rather than exotic:
+  //
+  //   1. customer.subscription.deleted arrives
+  //   2. mark_subscription_cancelled commits
+  //   3. the process dies before the email is claimed
+  //   4. Stripe redelivers - for up to three days - and the RPC now
+  //      answers 'already_cancelled'
+  //
+  // On step 4 there is no first transition left to observe, so a
+  // first-transition gate would mean the one delivery that could have
+  // told the customer was the one that crashed. Both results reach the
+  // sender and the DATABASE decides the duplicate: migration 035's unique
+  // (subscription_id, family, event_key) makes the second claim lose.
+  //
+  // 'not_found', 'error' and anything unrecognised prove nothing about a
+  // local row and must never reach it.
+  //
+  // The local id comes from the RPC payload, which 034 returns on both
+  // terminal results - never from the Stripe object, which names a
+  // subscription at Stripe rather than a row here.
+  //
+  // IT NEVER THROWS AND ITS RESULT IS NOT CONSULTED. The termination is
+  // already durable; a mail provider must not be able to make this
+  // webhook pretend the subscription is still running.
+  if ((result === "cancelled" || result === "already_cancelled")
+    && typeof payload.subscription_id === "string") {
+    await sendSubscriptionEndedEmailIfNeeded(payload.subscription_id);
+  }
+
+  return result;
 }

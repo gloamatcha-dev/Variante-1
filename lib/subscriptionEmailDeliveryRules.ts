@@ -1,5 +1,5 @@
 /**
- * The rules behind public.subscription_email_deliveries (Phase 3H.2, 3H.3).
+ * The rules behind public.subscription_email_deliveries (Phase 3H.2-3H.4).
  *
  * Pure, and a LEAF: no database, no Stripe, no Resend, no environment
  * read, and no relative import. Every rules module in this repository is
@@ -22,9 +22,9 @@
  *
  * ── WHAT IS IMPLEMENTED HERE ──────────────────────────────────
  *
- * Two families: 'subscription_started' (3H.2) and
- * 'cancellation_confirmation' (3H.3). Their event keys are deliberately
- * different shapes, because the facts they identify are different:
+ * All three families migration 035 permits. Their event keys are
+ * deliberately different shapes, because the facts they identify are
+ * different, and each shape was proven rather than assumed:
  *
  *   subscription_started       the subscription id. A subscription starts
  *                              exactly once, so the row itself is the
@@ -34,10 +34,14 @@
  *                              than one cancellation fact over its life,
  *                              and the effective date can move, so the
  *                              key has to name WHICH cancellation.
+ *   subscription_ended         the subscription id again, but for a
+ *                              different reason: 'cancelled' is terminal
+ *                              and the row can never be revived or
+ *                              re-attached, so it ends at most once. See
+ *                              subscriptionEndedEventKey for the proof.
  *
- * 'subscription_ended' exists in the database vocabulary and is
- * deliberately not implemented here. Neither is 'payment_problem', which
- * migration 035 does not permit at all.
+ * 'payment_problem' is absent, and migration 035 does not permit it as a
+ * family value at all. It is its own later phase.
  */
 
 /** The launch products. Mirrored from lib/subscriptionInvoiceRules.ts. */
@@ -66,6 +70,9 @@ export const SUBSCRIPTION_STARTED_FAMILY = "subscription_started";
 
 /** The family Phase 3H.3 sends. */
 export const CANCELLATION_CONFIRMATION_FAMILY = "cancellation_confirmation";
+
+/** The family Phase 3H.4 sends. */
+export const SUBSCRIPTION_ENDED_FAMILY = "subscription_ended";
 
 /** The four statuses migration 035's CHECK permits. There is no 'pending'. */
 export const SUBSCRIPTION_EMAIL_STATUSES: readonly string[] = Object.freeze([
@@ -512,5 +519,171 @@ export function evaluateCancellationConfirmationPreflight(input: {
     recipient,
     eventKey: currentKey,
     content: { requestedAtIso, effectiveAtIso },
+  };
+}
+
+/* ══════════════════════════════════════════════════════════════
+   SUBSCRIPTION ENDED (Phase 3H.4)
+   ══════════════════════════════════════════════════════════════ */
+
+/**
+ * The event key for one subscription's ending.
+ *
+ * IT IS THE LOCAL SUBSCRIPTION ID, and Phase 3H.4 proved that is
+ * sufficient rather than reusing 3H.2's reasoning by analogy. Three
+ * separate questions had to come out the right way, and all three did:
+ *
+ *   CAN ONE ROW END TWICE?  No. public.subscriptions.status has exactly
+ *     two writers in the whole schema: migration 022's
+ *     activate_subscription_from_invoice writes 'active', and migration
+ *     034's mark_subscription_cancelled writes 'cancelled'. The second is
+ *     idempotent - it returns 'already_cancelled' and deliberately does
+ *     NOT move cancelled_at - so a redelivered deletion changes nothing.
+ *
+ *   CAN A CANCELLED ROW BECOME ACTIVE AGAIN?  No.
+ *     activate_subscription_from_invoice refuses any status outside
+ *     pending/active/past_due/unpaid and RAISES rather than returning, so
+ *     'cancelled' is terminal for the row.
+ *
+ *   CAN A CANCELLED ROW BE ATTACHED TO A REPLACEMENT SUBSCRIPTION?  No.
+ *     stripe_subscription_id also has exactly one writer, the same
+ *     activation, which writes coalesce(existing, new) and raises on a
+ *     conflicting id - and it cannot run on a cancelled row anyway. A
+ *     customer who subscribes again gets a NEW subscriptions row from
+ *     create_pending_subscription, with a new id and correctly its own
+ *     ending message.
+ *
+ * So one local row ends at most once, permanently, and the row id is the
+ * event. NOT the Stripe event id: a redelivery carries a different one,
+ * which would defeat the guard entirely.
+ *
+ * Returned as null rather than blank when there is nothing to key on,
+ * because migration 035 CHECKs length(btrim(event_key)) > 0.
+ */
+export function subscriptionEndedEventKey(subscriptionId: string | null | undefined): string | null {
+  const trimmed = (subscriptionId ?? "").trim().toLowerCase();
+  return trimmed ? trimmed : null;
+}
+
+/** The subscription columns one ending message is rebuilt from. */
+export type SubscriptionEndedFacts = {
+  id: string;
+  customer_type: string | null;
+  status: string;
+  customer_snapshot: unknown;
+  /**
+   * Proof the subscription genuinely ran. Written once by migration 022's
+   * activation as coalesce(existing, now()) and never moved.
+   */
+  started_at: string | null;
+  /**
+   * When it actually ended. Written once by migration 034's
+   * mark_subscription_cancelled and deliberately never moved afterwards.
+   */
+  cancelled_at: string | null;
+};
+
+/**
+ * The facts the ending message may state.
+ *
+ * Deliberately thin. The ending does not restate the plan, the package,
+ * the cadence or the price: none of that is what the customer needs to
+ * know at this moment, and every extra fact is another thing that could
+ * be read from a moving column at retry time.
+ */
+export type SubscriptionEndedContent = {
+  /**
+   * The instant the subscription ended, or null when the row carries
+   * none. Nullable so a missing timestamp costs the date line rather than
+   * the whole message.
+   */
+  endedAtIso: string | null;
+};
+
+export type SubscriptionEndedPreflight =
+  | { kind: "send"; recipient: string; content: SubscriptionEndedContent }
+  /** Nothing to announce. Claim nothing, write nothing. */
+  | { kind: "not-eligible"; reason: string }
+  /** This message must never be sent. Terminal. */
+  | { kind: "superseded"; reason: string }
+  /** Still owed, but not sendable now. */
+  | { kind: "failed"; reason: string };
+
+/**
+ * Proves, from the durable row alone, that "Dein GLOA Abo ist beendet" is
+ * true.
+ *
+ * `claimed` says whether a delivery row already exists to record against.
+ * Before the claim there is nowhere to write an outcome, so a refusal is
+ * 'not-eligible'; after it, the same condition has to be recorded.
+ *
+ * ── WHY started_at IS CHECKED ─────────────────────────────────
+ *
+ * "Your subscription has ended" is false about a subscription that never
+ * began. In practice the check cannot fail: mark_subscription_cancelled
+ * finds its row BY stripe_subscription_id, and that column is written by
+ * exactly one statement - migration 022's activation - which sets
+ * status = 'active' and started_at in the same UPDATE. A row that was
+ * never activated therefore has no Stripe id, and the termination RPC
+ * answers 'not_found' instead of reaching this code at all.
+ *
+ * It is asserted anyway because the alternative is a truth claim that
+ * rests on a chain of reasoning across two migrations rather than on the
+ * row in front of us. One column read makes the copy provable.
+ *
+ * ── WHY A NON-CANCELLED STATUS SUPERSEDES ─────────────────────
+ *
+ * It is unreachable under the supported lifecycle: 'cancelled' is
+ * terminal, by the argument on subscriptionEndedEventKey above. The
+ * branch exists so that if a future phase ever did introduce a
+ * reactivation, a claimed-but-unsent ending would close itself rather
+ * than mail a customer that a running subscription had finished.
+ */
+export function evaluateSubscriptionEndedPreflight(input: {
+  subscription: SubscriptionEndedFacts | null;
+  claimed: boolean;
+}): SubscriptionEndedPreflight {
+  const { subscription, claimed } = input;
+
+  if (!subscription) {
+    return claimed
+      ? { kind: "failed", reason: "subscription not found" }
+      : { kind: "not-eligible", reason: "subscription not found" };
+  }
+
+  // THE AUTHORITATIVE FINAL STATE. Only mark_subscription_cancelled
+  // writes it, and only customer.subscription.deleted drives that.
+  if (subscription.status !== "cancelled") {
+    return claimed
+      ? { kind: "superseded", reason: "the subscription is no longer terminally cancelled" }
+      : { kind: "not-eligible", reason: `subscription status ${subscription.status} is not cancelled` };
+  }
+
+  // It must have genuinely run. Never sent, never retried.
+  if (!subscription.started_at) {
+    return claimed
+      ? { kind: "superseded", reason: "the subscription never started" }
+      : { kind: "not-eligible", reason: "the subscription never started" };
+  }
+
+  if (subscription.customer_type !== "private") {
+    return claimed
+      ? { kind: "failed", reason: "subscription is not a private customer subscription" }
+      : { kind: "not-eligible", reason: "subscription is not a private customer subscription" };
+  }
+
+  const recipient = recipientFromCustomerSnapshot(subscription.customer_snapshot);
+  if (!recipient) {
+    return claimed
+      ? { kind: "failed", reason: "subscription snapshot carries no customer email" }
+      : { kind: "not-eligible", reason: "subscription snapshot carries no customer email" };
+  }
+
+  return {
+    kind: "send",
+    recipient,
+    // Canonicalised so the template is handed an instant rather than
+    // whatever shape PostgREST happened to return.
+    content: { endedAtIso: canonicalEventInstant(subscription.cancelled_at) },
   };
 }
