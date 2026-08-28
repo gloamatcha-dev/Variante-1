@@ -457,23 +457,13 @@ test("57, 58: the launch gates are unchanged", () => {
   assert.ok(!sql036.includes("B2C_SUBSCRIPTIONS_ENABLED"));
 });
 
-test("59: no Phase 3H application code was touched by this phase", () => {
-  // This is a database-only phase. The senders, the retry sweep, the
-  // cron and the webhook must all be byte-identical to HEAD.
-  const changed = execFileSync("git", ["diff", "--name-only", "HEAD"], {
-    cwd: ROOT,
-    encoding: "utf-8",
-  }).trim();
-  const touched = changed ? changed.split(NEWLINE) : [];
-  for (const file of touched) {
-    assert.ok(
-      file.startsWith("supabase/migrations/036")
-        || file.startsWith("tests/")
-        || file === "package.json",
-      `this phase changed runtime code: ${file}`
-    );
-  }
-  // And 036 names none of the email machinery.
+test("59: the migration itself still reaches no email machinery", () => {
+  // PHASE 3I.B2 WIRED THE RUNTIME, so this guard no longer asserts that
+  // no application code exists. What still holds is the property that
+  // made 036 reviewable on its own: the MIGRATION touches nothing the
+  // email families own, and its function writes one column.
+  //
+  // 036 names none of the email machinery.
   for (const forbidden of [
     "subscription_started", "cancellation_confirmation", "subscription_ended",
     "sending", "sent_at", "superseded",
@@ -482,20 +472,26 @@ test("59: no Phase 3H application code was touched by this phase", () => {
   }
 });
 
-test("60: refund correlation and the payment problem sender remain absent", () => {
-  const libFiles = readdirSync(path.join(ROOT, "lib"));
-  for (const f of libFiles) {
-    assert.ok(!/paymentProblem/i.test(f), `${f} is Phase 3I.B2, not this one`);
+test("60: the RPC is reached only through its one wrapper, refunds untouched", () => {
+  // PHASE 3I.B2 WIRED IT. What still holds is that the RPC has exactly
+  // ONE caller in the whole codebase - lib/subscriptionPaymentStatus.ts -
+  // so the guards in 036 cannot be bypassed by a second call site with
+  // its own idea of which statuses are safe.
+  const callers = [];
+  for (const dir of ["lib", "app/api/stripe/webhook"]) {
+    const base = path.join(ROOT, dir);
+    for (const f of readdirSync(base)) {
+      if (!f.endsWith(".ts")) continue;
+      const source = withoutComments(readFileSync(path.join(base, f), "utf-8"));
+      if (source.includes('rpc("sync_subscription_payment_status"')) callers.push(f);
+    }
   }
-  // No handler for the event yet.
-  const webhook = withoutComments(read("app/api/stripe/webhook/route.ts"));
-  assert.ok(!webhook.includes("invoice.payment_failed"),
-    "this phase must not wire the event");
-  assert.ok(!webhook.includes("sync_subscription_payment_status"),
-    "this phase must not call the new RPC");
+  assert.deepEqual(callers, ["subscriptionPaymentStatus.ts"],
+    "the payment status RPC gained a second caller");
   // The refund correlation defect is untouched.
   const refunds = withoutComments(read("lib/orderRefunds.ts"));
   assert.ok(!refunds.includes("sync_subscription_payment_status"));
+  assert.ok(!refunds.includes("payment_problem"));
 });
 
 test("60b: stripe_backup_code.txt is not tracked and is referenced nowhere", () => {

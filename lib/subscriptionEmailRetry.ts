@@ -2,12 +2,18 @@ import { getSupabaseAdmin } from "./supabaseAdmin";
 import { deliverClaimedSubscriptionStarted } from "./subscriptionStartedEmail";
 import { deliverClaimedCancellationConfirmation } from "./cancellationConfirmationEmail";
 import { deliverClaimedSubscriptionEnded } from "./subscriptionEndedEmail";
+// Phase 3I.B2. The fourth family, and the only one whose preflight needs
+// a live Stripe read - so this module gains a Stripe client that the
+// other three never required.
+import { deliverClaimedPaymentProblem } from "./paymentProblemEmail";
+import { getStripeClient } from "./stripe";
 import {
   emptySubscriptionFamilySummary,
   inspectStaleSubscriptionEmailDeliveries,
   runSubscriptionFamilyRetry,
   staleSubscriptionSendingCutoff,
   CANCELLATION_CONFIRMATION_FAMILY,
+  PAYMENT_PROBLEM_FAMILY,
   STALE_SENDING_DIAGNOSTIC_LIMIT,
   SUBSCRIPTION_EMAIL_RETRY_FAMILIES,
   SUBSCRIPTION_ENDED_FAMILY,
@@ -107,6 +113,26 @@ async function retryClaimedDelivery(
       );
     case SUBSCRIPTION_ENDED_FAMILY:
       return normalize(await deliverClaimedSubscriptionEnded(row.subscription_id, row.id));
+    case PAYMENT_PROBLEM_FAMILY: {
+      // THE ONE FAMILY THAT NEEDS STRIPE. Its preflight re-reads the
+      // exact invoice, because a payment problem claimed yesterday may
+      // have been paid overnight and the warning would then be false.
+      //
+      // With no Stripe client the retry cannot prove the problem is
+      // still current, so it must not send. It reports an error and
+      // leaves the row 'failed' for the next run rather than guessing.
+      const stripe = getStripeClient();
+      if (!stripe) throw new Error("STRIPE_SECRET_KEY is not configured");
+      // The delivery row's event_key IS the Stripe invoice id.
+      return normalize(
+        await deliverClaimedPaymentProblem(
+          row.subscription_id,
+          row.event_key,
+          row.id,
+          id => stripe.invoices.retrieve(id)
+        )
+      );
+    }
     default:
       throw new Error(`unknown subscription email family: ${row.family}`);
   }

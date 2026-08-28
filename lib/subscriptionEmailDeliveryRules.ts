@@ -854,6 +854,7 @@ export const SUBSCRIPTION_EMAIL_RETRY_FAMILIES: readonly string[] = Object.freez
   "subscription_started",
   "cancellation_confirmation",
   "subscription_ended",
+  "payment_problem",
 ]);
 
 /** The one status a retry may select. */
@@ -1080,4 +1081,218 @@ export async function inspectStaleSubscriptionEmailDeliveries(
   const rows = await port.loadStaleSending(family, cutoffIso, STALE_SENDING_DIAGNOSTIC_LIMIT);
   summary.staleSendingCount = rows.length;
   summary.staleSendingIds = rows.map(row => row.id);
+}
+
+/**
+ * ══════════════════════════════════════════════════════════════
+ * PAYMENT PROBLEM (Phase 3I.B2)
+ * ══════════════════════════════════════════════════════════════
+ *
+ * The fourth family, permitted by migration 036. It differs from the
+ * other three in one structural way: its preflight depends on a LIVE
+ * Stripe invoice read rather than on local columns alone, because "is
+ * this payment still a problem" is a question only Stripe can answer.
+ */
+
+/** The family migration 036 added. */
+export const PAYMENT_PROBLEM_FAMILY = "payment_problem";
+
+/**
+ * The Stripe billing reason a payment problem may be reported for.
+ *
+ * ONLY a renewal. A first invoice that never succeeded never activated
+ * the local subscription: there is no running subscription to warn
+ * about, the customer is still in checkout where Stripe shows the
+ * failure inline, and migration 022 binds stripe_subscription_id only on
+ * activation - so the local row could not even be found by it.
+ */
+export const PAYMENT_PROBLEM_BILLING_REASON = "subscription_cycle";
+
+/** Is this failed invoice a renewal, and therefore reportable? */
+export function isPaymentProblemInvoice(billingReason: string | null | undefined): boolean {
+  return billingReason === PAYMENT_PROBLEM_BILLING_REASON;
+}
+
+/**
+ * The event key for one payment problem.
+ *
+ * IT IS THE STRIPE INVOICE ID, exactly. Stripe retries a failed invoice
+ * several times under Smart Retries and each attempt increments
+ * attempt_count, but the INVOICE is the same object with the same id -
+ * so every attempt on one cycle collapses to one delivery row and the
+ * customer is warned once, not once per attempt. A new billing cycle
+ * raises a new invoice and correctly earns a new warning.
+ *
+ * NOT the Stripe event id: invoice.payment_failed is redelivered and can
+ * be resent from the Dashboard, and each carries a different event id.
+ * NOT attempt_count, which is exactly the thing that must NOT create a
+ * second message. NOT the subscription id alone, which would collapse
+ * every cycle's failure into one row forever. NOT a timestamp.
+ */
+export function paymentProblemEventKey(invoiceId: string | null | undefined): string | null {
+  const trimmed = (invoiceId ?? "").trim();
+  return trimmed ? trimmed : null;
+}
+
+/**
+ * What one LIVE Stripe invoice status means for a payment warning.
+ *
+ * The vocabulary is Stripe's Invoice.Status union in the installed SDK:
+ * draft, open, paid, uncollectible, void.
+ *
+ *   open           money is still owed. The warning is true.
+ *   paid           the customer paid, possibly on a later Smart Retry.
+ *                  Warning them now would be false.
+ *   void           the invoice was cancelled at Stripe. Nothing is owed.
+ *   draft          not yet finalised, so not payable and not owed.
+ *   uncollectible  Stripe has given up collecting. This message asks the
+ *                  customer to resolve a live payment problem, and that
+ *                  is no longer the appropriate thing to say; the ending
+ *                  of the subscription is its own family.
+ *
+ * ANYTHING ELSE FAILS CLOSED. A status Stripe adds later must never be
+ * guessed into "still a problem" - the cost of a wrong guess is a
+ * customer told their payment failed when it did not.
+ */
+export type PaymentProblemInvoiceOutcome =
+  /** Still owed. The warning may be sent. */
+  | { kind: "current" }
+  /** Resolved or obsolete. Terminal: the warning must never be sent. */
+  | { kind: "superseded"; reason: string }
+  /** Not understood. Send nothing, and stay retryable. */
+  | { kind: "unknown"; reason: string };
+
+export function classifyPaymentProblemInvoiceStatus(
+  status: string | null | undefined
+): PaymentProblemInvoiceOutcome {
+  switch (status) {
+    case "open":
+      return { kind: "current" };
+    case "paid":
+      return { kind: "superseded", reason: "the invoice was paid" };
+    case "void":
+      return { kind: "superseded", reason: "the invoice was voided" };
+    case "draft":
+      return { kind: "superseded", reason: "the invoice is not finalised" };
+    case "uncollectible":
+      return { kind: "superseded", reason: "the invoice was marked uncollectible" };
+    default:
+      return { kind: "unknown", reason: `unrecognised invoice status ${status ?? "none"}` };
+  }
+}
+
+/** The subscription columns one payment warning is rebuilt from. */
+export type PaymentProblemFacts = {
+  id: string;
+  customer_type: string | null;
+  status: string;
+  customer_snapshot: unknown;
+  started_at: string | null;
+};
+
+export type PaymentProblemPreflight =
+  | { kind: "send"; recipient: string }
+  /** Nothing to warn about. Claim nothing, write nothing. */
+  | { kind: "not-eligible"; reason: string }
+  /** The problem is gone or the subscription ended. Terminal. */
+  | { kind: "superseded"; reason: string }
+  /** Still owed, but not sendable now. Retryable. */
+  | { kind: "failed"; reason: string };
+
+/**
+ * The LOCAL half of the preflight. The live invoice is checked
+ * separately by the caller, which owns the Stripe read.
+ *
+ * ── WHY past_due IS NOT REQUIRED ──────────────────────────────
+ *
+ * invoice.payment_failed and customer.subscription.updated are two
+ * independent webhooks with no ordering guarantee. Requiring the local
+ * row to already say 'past_due' would silently drop the warning whenever
+ * the failure event arrived first, which is common. The invoice being
+ * open is the authority on "money is owed"; the local status only has to
+ * not contradict it.
+ *
+ * ── WHY A SCHEDULED CANCELLATION DOES NOT SUPERSEDE ───────────
+ *
+ * A customer who has asked to cancel still owes the cycle they are in,
+ * and their subscription is still running until the effective date. An
+ * open failed invoice is therefore still a true problem. Only the
+ * TERMINAL 'cancelled' status blocks the warning, because at that point
+ * the subscription is over and collection is no longer the customer's
+ * live concern.
+ */
+export function evaluatePaymentProblemPreflight(input: {
+  subscription: PaymentProblemFacts | null;
+  claimed: boolean;
+}): PaymentProblemPreflight {
+  const { subscription, claimed } = input;
+
+  if (!subscription) {
+    return claimed
+      ? { kind: "failed", reason: "subscription not found" }
+      : { kind: "not-eligible", reason: "subscription not found" };
+  }
+
+  // TERMINAL. The subscription is over; a collection warning is not the
+  // message that belongs here.
+  if (subscription.status === "cancelled") {
+    return claimed
+      ? { kind: "superseded", reason: "the subscription has ended" }
+      : { kind: "not-eligible", reason: "the subscription has ended" };
+  }
+
+  // It must have genuinely run. A row that never activated has no
+  // renewal to fail, and this is the same proof subscription_ended uses.
+  if (!subscription.started_at) {
+    return claimed
+      ? { kind: "superseded", reason: "the subscription never started" }
+      : { kind: "not-eligible", reason: "the subscription never started" };
+  }
+
+  // Any live payment state is acceptable. See the note above on ordering.
+  if (!["active", "past_due", "unpaid"].includes(subscription.status)) {
+    return claimed
+      ? { kind: "failed", reason: `subscription status ${subscription.status} is not a live state` }
+      : { kind: "not-eligible", reason: `subscription status ${subscription.status} is not a live state` };
+  }
+
+  if (subscription.customer_type !== "private") {
+    return claimed
+      ? { kind: "failed", reason: "subscription is not a private customer subscription" }
+      : { kind: "not-eligible", reason: "subscription is not a private customer subscription" };
+  }
+
+  const recipient = recipientFromCustomerSnapshot(subscription.customer_snapshot);
+  if (!recipient) {
+    return claimed
+      ? { kind: "failed", reason: "subscription snapshot carries no customer email" }
+      : { kind: "not-eligible", reason: "subscription snapshot carries no customer email" };
+  }
+
+  return { kind: "send", recipient };
+}
+
+/**
+ * The only Stripe subscription statuses that describe a live payment
+ * state this system mirrors.
+ *
+ * Checked here as well as in the RPC. The database is the enforcement
+ * and this is the documentation: a reader of the webhook should be able
+ * to see which statuses reach the database without opening a migration.
+ *
+ * Everything else Stripe can report is deliberately absent. 'canceled'
+ * and 'incomplete_expired' are terminations that
+ * customer.subscription.deleted owns; 'incomplete' is a first invoice
+ * with no payment proof; 'trialing' and 'paused' are not offered by this
+ * product; and an unknown future status must never be guessed into a
+ * billing state.
+ */
+export const RECONCILABLE_STRIPE_STATUSES: readonly string[] = Object.freeze([
+  "active",
+  "past_due",
+  "unpaid",
+]);
+
+export function isReconcilableStripeStatus(status: string | null | undefined): boolean {
+  return typeof status === "string" && RECONCILABLE_STRIPE_STATUSES.includes(status);
 }

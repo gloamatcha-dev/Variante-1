@@ -531,7 +531,7 @@ test("email: no new template and no new Resend namespace", () => {
   assert.deepEqual(templates, [
     "cancellationConfirmation.ts", "cancellationOutcome.ts",
     "cancellationRequestNotification.ts",
-    "internalOrderNotification.ts", "orderConfirmation.ts",
+    "internalOrderNotification.ts", "orderConfirmation.ts", "paymentProblem.ts",
     "refundConfirmation.ts", "shipmentConfirmation.ts", "subscriptionEnded.ts",
     "subscriptionStarted.ts",
     "withdrawalConfirmation.ts",
@@ -546,7 +546,8 @@ test("email: no new template and no new Resend namespace", () => {
   // assertion protects is that THIS task still added nothing of its own.
   assert.deepEqual(namespaces.sort(), [
     "cancellation-confirmation", "cancellation-outcome", "cancellation-request",
-    "internal-order", "refund", "shipment", "subscription-ended", "subscription-started",
+    "internal-order", "payment-problem", "refund", "shipment",
+    "subscription-ended", "subscription-started",
   ], "a Resend idempotency namespace was added or removed");
 });
 

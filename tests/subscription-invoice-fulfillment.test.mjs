@@ -835,14 +835,31 @@ test("webhook: the one-time payment path is untouched", () => {
 });
 
 test("webhook: invoice.payment_failed and every non-paid invoice event create nothing", () => {
-  // Only invoice.paid is dispatched. No other invoice event type appears
-  // as a branch at all.
   assert.match(webhookCode, /else if \(event\.type === "invoice\.paid"\)/);
+  // Still the only invoice events dispatched at all.
   for (const eventType of [
-    "invoice.payment_failed", "invoice.created", "invoice.finalized",
+    "invoice.created", "invoice.finalized",
     "invoice.updated", "invoice.payment_action_required", "customer.subscription.created",
   ]) {
     assert.ok(!webhookCode.includes(`"${eventType}"`), `${eventType} became a branch`);
+  }
+  // PHASE 3I.B2 ADDED invoice.payment_failed, and the title of this test
+  // still holds: it CREATES NOTHING. Asserted on the handler body rather
+  // than on the event's absence.
+  assert.match(webhookCode, /else if \(event\.type === "invoice\.payment_failed"\)/);
+  const failedHandler = webhookCode.slice(
+    webhookCode.indexOf("async function handleInvoicePaymentFailed"),
+    webhookCode.indexOf("async function handleSubscriptionUpdated")
+  );
+  assert.ok(failedHandler.length > 0, "the payment failure handler disappeared");
+  for (const forbidden of [
+    "fulfillPaidSubscriptionInvoice", "createOrderFromPaidCheckoutAttempt", "createOrder",
+    "sendInternalOrderNotificationIfNeeded", "sendSubscriptionStartedEmailIfNeeded",
+    "markAttemptPaid", "activate_subscription_from_invoice", "recordPaidPeriod",
+    "shipment", "refund",
+  ]) {
+    assert.ok(!failedHandler.includes(forbidden),
+      `the payment failure handler creates business output: ${forbidden}`);
   }
 });
 

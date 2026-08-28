@@ -684,10 +684,15 @@ test("41: cancellation_confirmation is unchanged", () => {
   }
 });
 
-test("42-43: payment_problem and the refund correlation are untouched", () => {
-  for (const source of [senderCode, rulesCode, templateCode, serviceCode]) {
-    assert.ok(!source.includes("payment_problem"), "payment_problem must stay absent");
-    assert.ok(!source.includes("invoice.payment_failed"), "payment failure must stay deferred");
+test("42-43: the ending stays out of billing, and the refund correlation is untouched", () => {
+  // PHASE 3I.B2 BUILT payment_problem as its own family. What still
+  // holds here is that the ENDING sender and template know nothing about
+  // billing: a terminated subscription and an unpaid invoice are two
+  // different customer facts with two different messages.
+  for (const source of [senderCode, templateCode]) {
+    assert.ok(!source.includes("payment_problem"), "the ending sender learned about billing");
+    assert.ok(!source.includes("invoice.payment_failed"));
+    assert.ok(!source.includes("sync_subscription_payment_status"));
   }
   const refunds = withoutComments(read("lib/orderRefunds.ts"));
   for (const forbidden of ["subscription_email_deliveries", "subscriptionEnded", "subscription_ended"]) {

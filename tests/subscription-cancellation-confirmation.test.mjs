@@ -669,13 +669,15 @@ test("34-35: no payment_problem sender appears, and the ending stays separate", 
   // What still holds is that payment_problem has no implementation
   // anywhere, and - the part this suite really owns - that the
   // CANCELLATION CONFIRMATION never becomes an ending message.
+  // PHASE 3I.B2 BUILT payment_problem, so it is no longer absent. What
+  // still holds is that THIS family's sender and template know nothing
+  // about it.
   const libFiles = readdirSync(path.join(ROOT, "lib"));
   const emailFiles = readdirSync(path.join(ROOT, "lib/email"));
-  for (const f of [...libFiles, ...emailFiles]) {
-    assert.ok(!/paymentProblem/i.test(f), `${f} is a deferred phase`);
-  }
-  for (const source of [senderCode, rulesCode, templateCode, serviceCode]) {
-    assert.ok(!source.includes("payment_problem"), "payment_problem must stay absent");
+  assert.ok(libFiles.includes("paymentProblemEmail.ts"), "the 3I.B2 sender is missing");
+  assert.ok(emailFiles.includes("paymentProblem.ts"), "the 3I.B2 template is missing");
+  for (const source of [senderCode, templateCode]) {
+    assert.ok(!source.includes("payment_problem"), "the confirmation learned about billing");
   }
   // THIS family's sender and template know nothing about the ending.
   for (const source of [senderCode, templateCode]) {

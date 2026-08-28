@@ -533,12 +533,16 @@ test("37-39: no migration was added, edited or required", () => {
   }
 });
 
-test("40-41: payment_problem and the refund correlation are untouched", () => {
+test("40-41: the three hardened senders stay out of billing, refunds untouched", () => {
+  // PHASE 3I.B2 BUILT payment_problem, the fourth family. What still
+  // holds for THIS family's sender and template is that they know
+  // nothing about billing: they neither classify an invoice nor write a
+  // payment status.
   for (const sender of SENDERS) {
-    assert.ok(!sender.code.includes("payment_problem"));
+    assert.ok(!sender.code.includes("payment_problem"), "a 3H sender learned about billing");
     assert.ok(!sender.code.includes("invoice.payment_failed"));
+    assert.ok(!sender.code.includes("sync_subscription_payment_status"));
   }
-  assert.ok(!rulesCode.includes("payment_problem"));
   const refunds = withoutComments(read("lib/orderRefunds.ts"));
   assert.ok(!refunds.includes("subscription_email_deliveries"));
   assert.ok(!refunds.includes("classifySubscriptionEmailProviderError"));
@@ -680,7 +684,10 @@ test("30: stale sending is still diagnostic only after this hotfix", () => {
   // REPORTED and never resent - otherwise the fix would just move the
   // duplicate risk one step later.
   const rules = withoutComments(read("lib/subscriptionEmailDeliveryRules.ts"));
-  const body = rules.slice(rules.indexOf("export async function inspectStaleSubscriptionEmailDeliveries"));
+  const body = rules.slice(
+    rules.indexOf("export async function inspectStaleSubscriptionEmailDeliveries"),
+    rules.indexOf("export const PAYMENT_PROBLEM_FAMILY")
+  );
   for (const forbidden of ["update", "upsert", "insert", "delete", "rpc", "claim"]) {
     assert.ok(!body.includes(forbidden), `the stale inspection can write: ${forbidden}`);
   }

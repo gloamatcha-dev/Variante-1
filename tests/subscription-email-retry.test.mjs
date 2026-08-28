@@ -53,6 +53,7 @@ const retryWiringCode = withoutComments(read("lib/transactionalEmailRetry.ts"));
 const STARTED = "subscription_started";
 const CANCELLATION = "cancellation_confirmation";
 const ENDED = "subscription_ended";
+const PAYMENT = "payment_problem";
 
 const row = (id, family = STARTED, overrides = {}) => ({
   id,
@@ -178,27 +179,32 @@ test("2b: the REAL selection query filters on 'failed' and on nothing else", () 
   }
 });
 
-test("5: exactly the three families are handled", () => {
-  assert.deepEqual([...SUBSCRIPTION_EMAIL_RETRY_FAMILIES], [STARTED, CANCELLATION, ENDED]);
+test("5: exactly the four families are handled", () => {
+  // PHASE 3I.B2 ADDED payment_problem, the fourth and last family
+  // migration 036 permits.
+  assert.deepEqual([...SUBSCRIPTION_EMAIL_RETRY_FAMILIES], [STARTED, CANCELLATION, ENDED, PAYMENT]);
   for (const family of SUBSCRIPTION_EMAIL_RETRY_FAMILIES) {
     assert.equal(isSubscriptionEmailRetryFamily(family), true);
   }
   // And the retry module dispatches all three by name.
   for (const constant of [
-    "SUBSCRIPTION_STARTED_FAMILY", "CANCELLATION_CONFIRMATION_FAMILY", "SUBSCRIPTION_ENDED_FAMILY",
+    "SUBSCRIPTION_STARTED_FAMILY", "CANCELLATION_CONFIRMATION_FAMILY",
+    "SUBSCRIPTION_ENDED_FAMILY", "PAYMENT_PROBLEM_FAMILY",
   ]) {
     assert.ok(retryCode.includes(`case ${constant}:`), `the dispatch lost ${constant}`);
   }
 });
 
 test("6: an unknown family fails closed and sends nothing", async () => {
-  for (const unknown of ["payment_problem", "", null, undefined, "Subscription_Started"]) {
+  // payment_problem is a KNOWN family since Phase 3I.B2, so the unknown
+  // cases are now genuinely unknown ones.
+  for (const unknown of ["payment_failed", "", null, undefined, "Subscription_Started"]) {
     assert.equal(isSubscriptionEmailRetryFamily(unknown), false, String(unknown));
   }
-  const rows = [{ id: "a", family: "payment_problem", status: "failed", updated_at: "1" }];
+  const rows = [{ id: "a", family: "payment_failed", status: "failed", updated_at: "1" }];
   const { port, sends } = fakePort(rows);
   const summary = emptySubscriptionFamilySummary();
-  await runSubscriptionFamilyRetry(port, "payment_problem", summary);
+  await runSubscriptionFamilyRetry(port, "payment_failed", summary);
   assert.deepEqual(sends, []);
   assert.equal(summary.errors, 1);
   assert.equal(summary.selected, 0);
@@ -234,7 +240,7 @@ test("7: each family has its own independent limit of 25", async () => {
   for (const family of SUBSCRIPTION_EMAIL_RETRY_FAMILIES) {
     await runSubscriptionFamilyRetry(port, family, emptySubscriptionFamilySummary());
   }
-  assert.deepEqual(limits, [[STARTED, 25], [CANCELLATION, 25], [ENDED, 25]]);
+  assert.deepEqual(limits, [[STARTED, 25], [CANCELLATION, 25], [ENDED, 25], [PAYMENT, 25]]);
 });
 
 test("8, 54: a full family backlog cannot starve another family", async () => {
@@ -525,7 +531,10 @@ test("34, 35, 36: the stale path reads and never writes", async () => {
   assert.deepEqual(staleRows.map(r => r.status), ["sending", "sending", "sending"]);
 
   // And the function body contains no write of any kind.
-  const body = rulesCode.slice(rulesCode.indexOf("export async function inspectStaleSubscriptionEmailDeliveries"));
+  const body = rulesCode.slice(
+    rulesCode.indexOf("export async function inspectStaleSubscriptionEmailDeliveries"),
+    rulesCode.indexOf("export const PAYMENT_PROBLEM_FAMILY")
+  );
   for (const forbidden of ["update", "upsert", "insert", "delete", "rpc", "claim"]) {
     assert.ok(!body.includes(forbidden), `the stale inspection can write: ${forbidden}`);
   }
@@ -682,10 +691,15 @@ test("55-57: no migration was added, edited or required", () => {
   assert.ok(sql035.includes("where status = 'sending'"));
 });
 
-test("58, 59: payment_problem and the refund correlation are untouched", () => {
-  for (const source of [retryCode, rulesCode]) {
-    assert.ok(!source.includes("payment_problem"));
-    assert.ok(!source.includes("invoice.payment_failed"));
+test("58, 59: the retry stays out of billing, and refunds are untouched", () => {
+  // PHASE 3I.B2 ADDED payment_problem as the fourth family. What still
+  // holds is that the SWEEP does no billing work of its own: it never
+  // writes a subscription status and never reconciles Stripe.
+  for (const forbidden of [
+    "sync_subscription_payment_status", "reconcileSubscriptionPaymentStatus",
+    "invoice.payment_failed", "past_due", "unpaid",
+  ]) {
+    assert.ok(!retryCode.includes(forbidden), `the sweep does billing work: ${forbidden}`);
   }
   const refunds = withoutComments(read("lib/orderRefunds.ts"));
   assert.ok(!refunds.includes("subscription_email_deliveries"));

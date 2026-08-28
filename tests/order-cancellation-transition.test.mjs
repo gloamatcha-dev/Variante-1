@@ -1112,7 +1112,7 @@ test("regression: the OPERATOR cancel route still sends nothing at all", () => {
   assert.deepEqual(templates, [
     "cancellationConfirmation.ts", "cancellationOutcome.ts",
     "cancellationRequestNotification.ts",
-    "internalOrderNotification.ts", "orderConfirmation.ts",
+    "internalOrderNotification.ts", "orderConfirmation.ts", "paymentProblem.ts",
     "refundConfirmation.ts", "shipmentConfirmation.ts", "subscriptionEnded.ts",
     "subscriptionStarted.ts",
     "withdrawalConfirmation.ts",

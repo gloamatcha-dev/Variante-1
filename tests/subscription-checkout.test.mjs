@@ -1021,9 +1021,11 @@ test("boundary: the checkout flow itself adds no webhook handling and no email",
   // Phase 3C handles customer.subscription.updated and .deleted for the
   // cancellation lifecycle. What this test protects is unchanged: the
   // CHECKOUT flow itself adds no webhook handling and no email.
-  for (const event of ["invoice.payment_failed"]) {
-    assert.ok(!webhook.includes(`"${event}"`), `the webhook now handles ${event}`);
-  }
+  // PHASE 3I.B2 ADDED invoice.payment_failed to the webhook. What this
+  // boundary guard is really about is that the CHECKOUT flow added no
+  // webhook handling of its own, which the assertions below still prove.
+  assert.ok(webhook.includes('"invoice.payment_failed"'),
+    "the payment failure branch disappeared");
   // Comment-stripped for the same reason: naming the event that will
   // activate a subscription later is documentation, not a handler.
   const newCode = flowCode + withoutComments(deps) + withoutComments(route);

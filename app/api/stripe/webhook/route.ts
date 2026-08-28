@@ -21,7 +21,15 @@ import { sendOrderConfirmationEmailIfNeeded } from "../../../../lib/orderConfirm
 import { sendInternalOrderNotificationIfNeeded } from "../../../../lib/internalOrderNotificationEmail";
 import { fulfillPaidSubscriptionInvoice, subscriptionInvoiceDeps } from "../../../../lib/subscriptionInvoiceFulfillment";
 import { sendSubscriptionStartedEmailIfNeeded } from "../../../../lib/subscriptionStartedEmail";
-import { idOf, resolveGloaSubscriptionId, stripeSubscriptionIdMatches } from "../../../../lib/subscriptionInvoiceRules";
+// Phase 3I.B2. Payment status reconciliation and the payment problem email.
+import { reconcileSubscriptionPaymentStatus } from "../../../../lib/subscriptionPaymentStatus";
+import { sendPaymentProblemEmailIfNeeded } from "../../../../lib/paymentProblemEmail";
+import {
+  idOf,
+  resolveGloaSubscriptionId,
+  resolveInvoiceSubscriptionId,
+  stripeSubscriptionIdMatches,
+} from "../../../../lib/subscriptionInvoiceRules";
 import {
   applyDeferredCancellationFromRenewal,
   markSubscriptionCancelledFromStripe,
@@ -99,6 +107,11 @@ export async function POST(request: Request): Promise<Response> {
       }
     } else if (event.type === "invoice.paid") {
       await handleInvoicePaid(stripe, event);
+    } else if (event.type === "invoice.payment_failed") {
+      // Phase 3I.B2. It creates NOTHING: no order, no shipment, no
+      // fulfillment notice, no payment proof and no status write. Its
+      // entire job is the customer's payment-problem message.
+      await handleInvoicePaymentFailed(stripe, event);
     } else if (isRefundEventType(event.type)) {
       await handleRefundEvent(stripe, event);
     } else if (event.type === "customer.subscription.updated") {
@@ -112,10 +125,11 @@ export async function POST(request: Request): Promise<Response> {
       await handleSubscriptionDeleted(event);
     }
     // Other event types are acknowledged below with no action taken.
-    // invoice.payment_failed in particular: a failed payment creates no
-    // order, no fulfillment and no paid state. The subscription lifecycle
-    // it implies (past_due, unpaid) belongs to the later cancellation and
-    // lifecycle task, not here, and is deliberately not invented.
+    // invoice.payment_failed is now handled above, and its contract has
+    // not loosened: a failed payment still creates no order, no
+    // fulfillment and no paid state. What Phase 3I.B2 added is the
+    // customer's warning, and the past_due/unpaid reconciliation that
+    // customer.subscription.updated performs from a fresh Stripe read.
     // checkout.session.async_payment_succeeded / _failed can plug into
     // this same handleCheckoutSessionCompleted-style flow later without
     // restructuring this route.
@@ -152,11 +166,12 @@ export async function POST(request: Request): Promise<Response> {
  * never money, never a snapshot, never the plan - so an arbitrary Stripe
  * update cannot rewrite GLOA business state.
  *
- * status in particular is NOT synchronised here. Stripe's status
- * vocabulary and GLOA's are different concepts, and the billing-failure
- * states ('past_due', 'unpaid') are Phase 3E's to design deliberately
- * rather than something this handler should start writing as a side
- * effect.
+ * status is synchronised SEPARATELY, and by a different function.
+ * Migration 034's RPC still refuses to write it, exactly as before;
+ * Phase 3I.B2 added migration 036's sync_subscription_payment_status
+ * alongside it, which moves the local row only among 'active',
+ * 'past_due' and 'unpaid' and refuses a 'pending' or 'cancelled' row
+ * outright. Two RPCs, two disjoint column sets, one handler.
  *
  * A subscription this system did not create answers 'not_found' and is
  * ignored, which is the normal case for any Stripe account holding other
@@ -180,6 +195,115 @@ export async function POST(request: Request): Promise<Response> {
  * against fresh state. Falling back to the stale payload would defeat the
  * entire purpose of the re-read.
  */
+/**
+ * A subscription renewal that did not get paid (Phase 3I.B2).
+ *
+ * ══════════════════════════════════════════════════════════════
+ * IT CREATES NOTHING. IT ONLY TELLS THE CUSTOMER.
+ * ══════════════════════════════════════════════════════════════
+ *
+ * A failed invoice is not a sale. This handler creates no order, calls
+ * no fulfillment, sends no internal paid-order notification, ships
+ * nothing, refunds nothing, advances no payment proof, activates no
+ * subscription and touches no cancellation. Compare it with
+ * handleInvoicePaid above: everything that makes a paid cycle real is
+ * deliberately absent here, and none of it is reachable from this
+ * function.
+ *
+ * IT ALSO WRITES NO SUBSCRIPTION STATUS. past_due and unpaid are
+ * reconciled by customer.subscription.updated, which re-reads the
+ * subscription from Stripe. The two events arrive in either order and
+ * neither waits for the other: the customer's warning does not require
+ * the local row to already say past_due, and the status write does not
+ * require the warning to have been sent.
+ *
+ * ── ONLY A RENEWAL ────────────────────────────────────────────
+ *
+ * billing_reason must be 'subscription_cycle'. A first invoice that
+ * never succeeded never activated the local subscription - migration 022
+ * binds stripe_subscription_id only on activation, so the row could not
+ * even be found - and the customer is still in Checkout, where Stripe
+ * shows the failure to them directly. The sender enforces this itself,
+ * so a second caller could not bypass it.
+ *
+ * ── THE INVOICE IS RE-READ, TWICE ─────────────────────────────
+ *
+ * Once here, so the billing reason and the subscription link come from
+ * Stripe rather than from the event payload, exactly as invoice.paid
+ * does. And again inside the sender immediately before Resend, because
+ * Stripe retries a failed invoice for days and the customer may have
+ * paid in between.
+ *
+ * It never throws: the warning is not worth a 500 that would make Stripe
+ * redeliver a payment failure, and the delivery row is the durable retry
+ * state.
+ */
+async function handleInvoicePaymentFailed(stripe: Stripe, event: Stripe.Event): Promise<void> {
+  const eventInvoice = event.data.object as Stripe.Invoice;
+  if (!eventInvoice.id) {
+    console.error(`Stripe webhook: invoice.payment_failed event ${event.id} has no invoice id - ignored.`);
+    return;
+  }
+
+  // Re-read rather than trusting the payload, the same rule every other
+  // invoice fact in this route follows.
+  const invoice = await stripe.invoices.retrieve(eventInvoice.id);
+
+  const stripeSubscriptionId = resolveInvoiceSubscriptionId(invoice);
+  if (!stripeSubscriptionId) {
+    console.error(
+      `Stripe webhook: failed invoice ${eventInvoice.id} is not attached to a subscription - ignored.`
+    );
+    return;
+  }
+
+  // Resolved by the Stripe subscription id and by nothing else. Never by
+  // an email, a Stripe customer email or anything a caller could shape.
+  const admin = getSupabaseAdmin();
+  if (!admin) {
+    console.error("Stripe webhook: SUPABASE_SECRET_KEY is not configured for payment failure.");
+    return;
+  }
+
+  const { data, error } = await admin
+    .from("subscriptions")
+    .select("id")
+    .eq("stripe_subscription_id", stripeSubscriptionId)
+    .maybeSingle();
+
+  if (error) {
+    console.error(
+      `Stripe webhook: subscription lookup failed for ${stripeSubscriptionId}:`,
+      error.message
+    );
+    return;
+  }
+  if (!data) {
+    // A Stripe subscription this system does not know. Fail closed: no
+    // delivery row is created for a subscription that never activated.
+    console.error(
+      `Stripe webhook: failed invoice ${eventInvoice.id} has no local subscription - ignored.`
+    );
+    return;
+  }
+
+  const outcome = await sendPaymentProblemEmailIfNeeded({
+    subscriptionId: data.id as string,
+    invoiceId: invoice.id as string,
+    // From the RE-READ invoice, never the payload's copy.
+    billingReason: invoice.billing_reason ?? null,
+    retrieveInvoice: id => stripe.invoices.retrieve(id),
+  });
+
+  if (outcome !== "not-eligible" && outcome !== "sent") {
+    // Stripe invoice id and an outcome word. No recipient, no name, no
+    // amount, and never the provider's message.
+    console.error(
+      `Stripe webhook: payment problem email for invoice ${eventInvoice.id} -> ${outcome}`
+    );
+  }
+}
+
 async function handleSubscriptionUpdated(stripe: Stripe, event: Stripe.Event): Promise<void> {
   const subscriptionId = (event.data.object as Stripe.Subscription)?.id;
   if (!subscriptionId) {
@@ -191,6 +315,31 @@ async function handleSubscriptionUpdated(stripe: Stripe, event: Stripe.Event): P
 
   const result = await syncSubscriptionFromStripe(subscription);
   console.error(`Stripe webhook: subscription ${subscriptionId} updated -> ${result}`);
+
+  // ── LOCAL PAYMENT STATUS (Phase 3I.B2) ──────────────────────
+  //
+  // THE SINGLE STATUS AUTHORITY, and it lives here because this handler
+  // already RE-READ the subscription from Stripe above. That is the
+  // whole out-of-order defence: a late or duplicated past_due event
+  // reconciles to today's status rather than to the stale one it was
+  // carrying, so it cannot regress a subscription that has since
+  // recovered. Recovery needs no separate path either - Stripe moves a
+  // paid-up subscription back to active and emits this same event.
+  //
+  // invoice.paid keeps first-payment activation and invoice.payment_failed
+  // writes no status at all, so there is exactly one writer.
+  //
+  // Migration 036's RPC refuses a 'pending' or 'cancelled' local row, so
+  // this can neither fabricate first-payment proof nor undo a
+  // termination. 'pending_no_payment_proof' and 'terminal' are those
+  // guards working, not errors, and none of these results throws.
+  const paymentStatus = await reconcileSubscriptionPaymentStatus(subscription);
+  if (paymentStatus !== "unchanged" && paymentStatus !== "ignored_status") {
+    // Stripe subscription id and a result word. No customer fact.
+    console.error(
+      `Stripe webhook: subscription ${subscriptionId} payment status -> ${paymentStatus}`
+    );
+  }
 }
 
 /**

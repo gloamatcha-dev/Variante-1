@@ -991,7 +991,20 @@ test("DEFERRED APPLY: a failed renewal leaves the request pending, not lost", ()
   // No invoice.paid means no apply, so nothing is scheduled at Stripe and
   // the row keeps saying so. There is no separate failure policy to get
   // wrong, and none was invented.
-  assert.ok(!webhookCode.includes("invoice.payment_failed"), "billing failure was handled in this phase");
+  // PHASE 3I.B2 ADDED THE HANDLER. What still holds is that it cannot
+  // touch a deferred cancellation: no apply, no sweep, no cancellation
+  // column, so a failed renewal still leaves the request pending.
+  const failedHandler = webhookCode.slice(
+    webhookCode.indexOf("async function handleInvoicePaymentFailed"),
+    webhookCode.indexOf("async function handleSubscriptionUpdated")
+  );
+  for (const forbidden of [
+    "applyDeferredCancellationFromRenewal", "sweepDueDeferredCancellations",
+    "cancellation_requested_at", "cancellation_effective_at", "cancel_at",
+  ]) {
+    assert.ok(!failedHandler.includes(forbidden),
+      `the payment failure handler touches the deferred cancellation: ${forbidden}`);
+  }
   assert.ok(!serviceCode.includes("past_due ="), "the service writes a billing failure state");
   // past_due and unpaid remain CANCELLABLE, so a customer whose card
   // failed can still end the contract.
@@ -1472,10 +1485,28 @@ test("3C.5 (5): a FAILED renewal cannot advance the proof, whatever Stripe did t
   const invoicePaidOnly = webhookCode.slice(webhookCode.indexOf('event.type === "invoice.paid"'));
   assert.ok(invoicePaidOnly.includes("handleInvoicePaid(stripe, event)"));
   for (const eventType of [
-    "invoice.payment_failed", "invoice.created", "invoice.finalized",
+    "invoice.created", "invoice.finalized",
     "invoice.payment_action_required", "customer.subscription.created",
   ]) {
     assert.ok(!webhookCode.includes(`"${eventType}"`), `${eventType} became a branch`);
+  }
+  // PHASE 3I.B2 MADE invoice.payment_failed A BRANCH, DELIBERATELY. The
+  // property this guard protects is unchanged and is now asserted
+  // directly rather than through the event's absence: that handler
+  // cannot reach the payment proof, the recorder, the fulfillment or an
+  // order, so a failed renewal still advances nothing.
+  const failedHandler = webhookCode.slice(
+    webhookCode.indexOf("async function handleInvoicePaymentFailed"),
+    webhookCode.indexOf("async function handleSubscriptionUpdated")
+  );
+  assert.ok(failedHandler.length > 0, "the payment failure handler disappeared");
+  for (const forbidden of [
+    "record_paid_subscription_period", "recordPaidPeriod", "fulfillPaidSubscriptionInvoice",
+    "createOrder", "sendInternalOrderNotificationIfNeeded", "applyDeferredCancellationFromRenewal",
+    "sync_subscription_payment_status", "reconcileSubscriptionPaymentStatus",
+  ]) {
+    assert.ok(!failedHandler.includes(forbidden),
+      `the payment failure handler reaches ${forbidden}`);
   }
   // The recorder has exactly one caller in the whole codebase, and it is
   // the paid-invoice fulfillment. Code only: other modules NAME it in
@@ -2238,7 +2269,10 @@ test("webhook: prior orders and billing cycles are never touched", () => {
 
 test("webhook: billing failure events remain unhandled - that is Phase 3E", () => {
   for (const deferred of [
-    "invoice.payment_failed", "invoice.payment_action_required",
+    // PHASE 3I.B2 HANDLES invoice.payment_failed. It is asserted
+    // elsewhere in this file that the handler creates nothing and
+    // touches no cancellation column. These remain unhandled.
+    "invoice.payment_action_required",
     "customer.subscription.paused", "customer.subscription.resumed",
   ]) {
     assert.ok(!webhookCode.includes(deferred), `${deferred} was handled in this phase`);
@@ -2424,7 +2458,7 @@ test("regression: the account reaches this feature ONLY through the endpoint", (
   // is that the CANCELLATION route, service and rules send nothing at
   // all, which the Resend assertions below prove directly.
   const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
-  assert.equal(templates.length, 10, "an unreviewed email template was added");
+  assert.equal(templates.length, 11, "an unreviewed email template was added");
   assert.deepEqual(
     templates.filter(n => /subscription/i.test(n)).sort(),
     ["subscriptionEnded.ts", "subscriptionStarted.ts"],

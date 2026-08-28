@@ -593,6 +593,7 @@ test("exactly the three reviewed lifecycle templates were built on this foundati
     "cancellationRequestNotification.ts",
     "internalOrderNotification.ts",
     "orderConfirmation.ts",
+    "paymentProblem.ts",
     "refundConfirmation.ts",
     "shipmentConfirmation.ts",
     "subscriptionEnded.ts",
@@ -601,16 +602,14 @@ test("exactly the three reviewed lifecycle templates were built on this foundati
   ], "an unreviewed email template was added");
 });
 
-test("all three permitted families now have a sender, and nothing else does", () => {
-  // PHASE 3H.4 CLOSED THIS GUARD OUT. The three families migration 035
-  // permits are now all implemented. What still holds - and is what this
-  // assertion is now for - is that no sender exists for the deliberately
-  // deferred payment problem, which the migration does not even admit as
-  // a family value.
+test("every family 035 permits has a sender, and 036 added the fourth", () => {
+  // PHASE 3I.B2 CLOSED THIS GUARD OUT COMPLETELY. Migration 035's own
+  // three families were built in 3H.2-3H.4; migration 036 added
+  // payment_problem and 3I.B2 built it. All four now exist.
+  //
+  // 035's file text is unchanged and still names only three - the fourth
+  // lives in 036, which is where a reader should go looking for it.
   const libFiles = readdirSync(path.join(ROOT, "lib"));
-  for (const f of libFiles) {
-    assert.ok(!/paymentProblem/i.test(f), `${f} implements the deferred payment-problem sender`);
-  }
   for (const [family, senderFile] of [
     ["subscription_started", "subscriptionStartedEmail.ts"],
     ["cancellation_confirmation", "cancellationConfirmationEmail.ts"],
@@ -619,13 +618,28 @@ test("all three permitted families now have a sender, and nothing else does", ()
     assert.ok(libFiles.includes(senderFile), `the ${family} sender is missing`);
     assert.ok(flat.includes(`'${family}'`), `035 no longer permits ${family}`);
   }
-  assert.ok(!flat.includes("payment_problem"), "035 must still not permit payment_problem");
+  assert.ok(!flat.includes("payment_problem"),
+    "035's own text must still name only its three families");
+  // The fourth family and its sender.
+  assert.ok(libFiles.includes("paymentProblemEmail.ts"), "the payment_problem sender is missing");
+  const sql036 = withoutComments(
+    readFileSync(path.join(MIGRATIONS_DIR, "036_subscription_payment_status.sql"), "utf-8")
+  );
+  assert.ok(sql036.includes("'payment_problem'"), "036 no longer permits payment_problem");
 });
 
-test("the payment failure lifecycle remains untouched", () => {
+test("034's reconciliation still never writes subscriptions.status", () => {
+  // PHASE 3I.B2 BUILT THE PAYMENT FAILURE LIFECYCLE, so this guard no
+  // longer asserts that invoice.payment_failed is unhandled. What it
+  // still protects is the boundary that made 3I.B2 safe: migration 034's
+  // reconciliation writes period and cancellation facts only, and status
+  // reconciliation went to a SEPARATE function in 036 rather than being
+  // bolted onto this one.
   const webhook = withoutComments(read("app/api/stripe/webhook/route.ts"));
-  assert.ok(!webhook.includes("payment_failed"),
-    "invoice.payment_failed is still unhandled, deliberately");
+  assert.ok(webhook.includes('"invoice.payment_failed"'),
+    "the payment failure branch disappeared");
+  assert.ok(webhook.includes("reconcileSubscriptionPaymentStatus("),
+    "status reconciliation disappeared");
   // 034's reconciliation still never writes subscriptions.status.
   const sync = read("supabase/migrations/034_subscription_cancellation.sql");
   const syncFn = sync.slice(

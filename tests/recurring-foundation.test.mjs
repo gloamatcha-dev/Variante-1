@@ -365,7 +365,10 @@ test("scope: migration 022 itself still seeds nothing and touches no B2B", () =>
     assert.ok(webhook.includes(`"${handled}"`), `${handled} is no longer handled`);
   }
   // Billing failure is still Phase 3E and must NOT have appeared.
-  for (const later of ["invoice.payment_failed", "invoice.payment_action_required",
+  // invoice.payment_failed moved out of this list in Phase 3I.B2, which
+  // built the payment failure lifecycle deliberately. The rest are still
+  // unclaimed.
+  for (const later of ["invoice.payment_action_required",
                        "customer.subscription.paused", "customer.subscription.resumed"]) {
     assert.ok(!webhook.includes(`"${later}"`), `${later} handling belongs to the later lifecycle task`);
   }
