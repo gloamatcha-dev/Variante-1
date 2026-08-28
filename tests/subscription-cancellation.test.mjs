@@ -1944,8 +1944,25 @@ test("034: it is the next free number and 022-033 are untouched", () => {
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
   assert.deepEqual(files.filter(f => f.startsWith("034")), ["034_subscription_cancellation.sql"]);
-  assert.equal(numbers.filter(nr => nr > "034").length, 0, "a migration above 034 appeared");
-  assert.equal(files[files.length - 2], "033_refund_confirmation_email_state.sql");
+  // 034 was the next free number when this phase ran, and 033 still
+  // precedes it. Phase 3H.1 later took 035 for a server-only email
+  // delivery table; it is the ONLY migration permitted above 034 until a
+  // later one is reviewed against this suite.
+  assert.deepEqual(
+    files.filter(f => f.slice(0, 3) > "034").sort(),
+    ["035_subscription_email_deliveries.sql"],
+    "an unreviewed migration above 034 appeared"
+  );
+  assert.equal(
+    files[files.indexOf("034_subscription_cancellation.sql") - 1],
+    "033_refund_confirmation_email_state.sql"
+  );
+  // And 035 redefines nothing 034 owns: no function, and no write to
+  // public.subscriptions.
+  const sql035 = read("supabase/migrations/035_subscription_email_deliveries.sql");
+  assert.ok(!/create (or replace )?function/i.test(sql035), "035 defines a function");
+  assert.ok(!/alter table public\.subscriptions/i.test(sql035),
+    "035 alters public.subscriptions");
   // It redefines nothing the subscription foundation owns.
   for (const owned of [
     "create_pending_subscription", "activate_subscription_from_invoice",

@@ -442,10 +442,22 @@ test("3F: only the owner's own private subscriptions are readable", () => {
   assert.match(m005, /create policy "Private users read own subscriptions"/);
   assert.match(m005, /auth\.uid\(\) = user_id/);
   assert.match(m005, /and not public\.is_business_user\(\)/);
-  // No policy or grant was added anywhere for this phase.
+  // No policy or grant was added anywhere for THIS phase. 035 arrived
+  // later, from Phase 3H.1, and is a server-only email delivery table -
+  // it adds no policy and grants nothing to authenticated, so the
+  // property this assertion protects (an account UI change must not
+  // widen what a customer can read) still holds.
   const migrations = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql"));
-  assert.equal(migrations.length, 34, "a migration was added for an account UI change");
-  assert.ok(!migrations.some(f => f.startsWith("035")), "migration 035 was created");
+  assert.equal(migrations.length, 35, "an unreviewed migration was added");
+  assert.deepEqual(
+    migrations.filter(f => f > "034_subscription_cancellation.sql").sort(),
+    ["035_subscription_email_deliveries.sql"],
+    "a migration above 034 appeared that this suite has not been reviewed against"
+  );
+  const m035 = read("supabase/migrations/035_subscription_email_deliveries.sql");
+  assert.ok(!m035.includes("create policy"), "035 must create no policy");
+  assert.ok(!/grant[^;]*to authenticated/.test(m035),
+    "035 must grant nothing to the browser role");
 
   // The browser never carries a service-role key, and the portal holds
   // no admin client.
@@ -677,10 +689,14 @@ test("3F: the controls are real buttons, focusable, and status is not colour-onl
    REGRESSION
    ══════════════════════════════════════════════════════════════ */
 
-test("3F: migrations 022 through 034 are untouched and no 035 exists", () => {
+test("3F: migrations 022 through 034 are untouched and 035 is the only later one", () => {
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.length, 34);
-  assert.equal(files[files.length - 1], "034_subscription_cancellation.sql");
+  assert.equal(files.length, 35);
+  // 034 remains the last of the cancellation work; 035 is Phase 3H.1's
+  // delivery table and is the ONLY migration allowed above it until a
+  // later phase is reviewed here.
+  assert.equal(files[files.length - 2], "034_subscription_cancellation.sql");
+  assert.equal(files[files.length - 1], "035_subscription_email_deliveries.sql");
   // This phase writes no SQL at all: nothing in it references a
   // migration, a policy or a grant.
   for (const source of [viewCode, portalCode]) {
