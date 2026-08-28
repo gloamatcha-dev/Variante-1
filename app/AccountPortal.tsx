@@ -29,6 +29,20 @@ import {
   getStatusDetailText,
   getTrackingView,
 } from "../lib/orderStatus";
+import {
+  SUBSCRIPTION_CADENCE_LABEL,
+  SUBSCRIPTION_QUANTITY_LABEL,
+  canRequestSubscriptionCancellation,
+  getCancellationCutoffAt,
+  getCancellationPreview,
+  getEffectiveEndAt,
+  getNextBillingAt,
+  getNextDeliveryAt,
+  getSubscriptionStatusLabel,
+  getSubscriptionStatusNote,
+  hasEnded,
+  isCancellationScheduled,
+} from "../lib/subscriptionCancellationRules";
 
 type PortalPage = "dashboard" | "orders" | "subscriptions" | "addresses" | "profile" | "business" | "order-detail" | "subscription-detail" | "supply-detail";
 
@@ -191,7 +205,35 @@ type SubscriptionRow = {
   cancelled_at: string | null;
   cancel_at_period_end: boolean;
   created_at: string;
+  /**
+   * Migration 034, and only the two the customer is entitled to.
+   *
+   * cancel_at and last_paid_period_end are deliberately ABSENT. They are
+   * what Stripe currently holds and the payment proof the safety sweep
+   * needs - internal machinery of Phase 3C, not a customer fact - and the
+   * SELECT below does not ask for them either, so they never reach the
+   * browser at all. The customer-facing promise is
+   * cancellation_effective_at.
+   */
+  cancellation_requested_at: string | null;
+  cancellation_effective_at: string | null;
 };
+
+/**
+ * Every subscription column the account is allowed to read.
+ *
+ * Named explicitly rather than `*`. A star select would hand the browser
+ * cancel_at and last_paid_period_end the moment migration 034 went live,
+ * and "we simply never render it" is not the same guarantee as never
+ * having sent it.
+ */
+const SUBSCRIPTION_SELECT =
+  "id, customer_type, status, currency, customer_snapshot, shipping_address_snapshot, " +
+  "billing_address_snapshot, plan_snapshot, subtotal_net_cents, subtotal_gross_cents, " +
+  "discount_total_cents, shipping_net_cents, shipping_gross_cents, tax_total_cents, " +
+  "total_net_cents, total_gross_cents, current_period_start, current_period_end, " +
+  "next_delivery_at, started_at, paused_at, cancelled_at, cancel_at_period_end, created_at, " +
+  "cancellation_requested_at, cancellation_effective_at";
 
 type SubscriptionItemRow = {
   id: string;
@@ -204,13 +246,6 @@ type SubscriptionItemRow = {
   tax_rate_percent: number | null;
   line_total_net_cents: number;
   line_total_gross_cents: number;
-};
-
-const SUB_STATUS_DE: Record<string, string> = {
-  pending: "Wird eingerichtet",
-  active: "Aktiv",
-  paused: "Pausiert",
-  cancelled: "Beendet",
 };
 
 const UNIT_DE_PLURAL: Record<string, string> = { day: "Tage", week: "Wochen", month: "Monate", year: "Jahre" };
@@ -289,12 +324,6 @@ const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("de-DE", { day
 const subPlanName = (sub: SubscriptionRow | null) =>
   (sub?.plan_snapshot as Record<string, string> | null)?.name || "Abo";
 
-/** Delivery interval from the frozen plan snapshot, or "" when it has none. */
-const subInterval = (sub: SubscriptionRow | null) => {
-  const ps = sub?.plan_snapshot as Record<string, string | number> | null;
-  return ps ? fmtInterval(ps.delivery_interval_unit as string, ps.delivery_interval_count as number) : "";
-};
-
 // ── Dashboard ──────────────────────────────────────────────────────────
 
 /**
@@ -347,10 +376,10 @@ function PrivateDashboard() {
     if (!supabase) return;
     supabase.from("orders").select("*").order("created_at", { ascending: false }).limit(1)
       .then(({ data }) => { setLatestOrder(data?.[0] ?? null); setOrderLoading(false); });
-    supabase.from("subscriptions").select("*").eq("status", "active").order("created_at", { ascending: false }).limit(1)
-      .then(({ data }) => { setActiveSub(data?.[0] ?? null); setSubLoading(false); });
-    supabase.from("subscriptions").select("*").eq("status", "active").not("next_delivery_at", "is", null).gte("next_delivery_at", new Date().toISOString()).order("next_delivery_at", { ascending: true }).limit(1)
-      .then(({ data }) => { setNextDeliverySub(data?.[0] ?? null); setDeliveryLoading(false); });
+    supabase.from("subscriptions").select(SUBSCRIPTION_SELECT).eq("status", "active").order("created_at", { ascending: false }).limit(1)
+      .then(({ data }) => { setActiveSub((data?.[0] as unknown as SubscriptionRow) ?? null); setSubLoading(false); });
+    supabase.from("subscriptions").select(SUBSCRIPTION_SELECT).eq("status", "active").not("next_delivery_at", "is", null).gte("next_delivery_at", new Date().toISOString()).order("next_delivery_at", { ascending: true }).limit(1)
+      .then(({ data }) => { setNextDeliverySub((data?.[0] as unknown as SubscriptionRow) ?? null); setDeliveryLoading(false); });
   }, []);
 
   // Null rather than a placeholder: "Hallo, -." and "Hallo, GLOA." are
@@ -369,10 +398,10 @@ function PrivateDashboard() {
         <AccountSectionHeader label="NÄCHSTE LIEFERUNG" />
         {deliveryLoading ? (
           <AccountEmptyState>Laden…</AccountEmptyState>
-        ) : nextDeliverySub?.next_delivery_at ? (
+        ) : nextDeliverySub && getNextDeliveryAt(nextDeliverySub) ? (
           <div className="portal-line">
-            <strong>{fmtDate(nextDeliverySub.next_delivery_at)}</strong>
-            <span>{subPlanName(nextDeliverySub)}{subInterval(nextDeliverySub) ? ` · ${subInterval(nextDeliverySub)}` : ""}</span>
+            <strong>{fmtDate(getNextDeliveryAt(nextDeliverySub) as string)}</strong>
+            <span>{subPlanName(nextDeliverySub)} · {SUBSCRIPTION_CADENCE_LABEL}</span>
             <a href={`/account/subscriptions/${nextDeliverySub.id}`} className="portal-action">ABO ANSEHEN</a>
           </div>
         ) : (
@@ -419,10 +448,10 @@ function PrivateDashboard() {
             <div className="portal-order">
               <div className="portal-order-id">
                 <strong>{subPlanName(activeSub)}</strong>
-                <span>{SUB_STATUS_DE[activeSub.status] || activeSub.status}</span>
+                <span>{getSubscriptionStatusLabel(activeSub)}</span>
               </div>
               <div className="portal-order-meta">
-                {subInterval(activeSub) && <span>{subInterval(activeSub)}</span>}
+                <span>{SUBSCRIPTION_CADENCE_LABEL}</span>
                 <strong>{fmtCents(activeSub.total_gross_cents)} €</strong>
               </div>
             </div>
@@ -951,12 +980,17 @@ function PortalSubscriptions() {
 
   useEffect(() => {
     if (!supabase) return;
-    supabase.from("subscriptions").select("*").order("created_at", { ascending: false })
+    supabase.from("subscriptions").select(SUBSCRIPTION_SELECT).order("created_at", { ascending: false })
       .then(({ data, error: err }) => {
         if (err) { setError("Deine Abos konnten gerade nicht geladen werden."); }
         else {
+          // The explicit column list above is a runtime string, so the
+          // typed client cannot infer the row shape from it the way it
+          // does for a literal. The shape is SubscriptionRow by
+          // construction - SUBSCRIPTION_SELECT names exactly its columns.
+          const rows = (data ?? []) as unknown as SubscriptionRow[];
           // active zuerst, dann restliche Status, innerhalb neueste zuerst
-          const sorted = [...(data ?? [])].sort((a, b) => {
+          const sorted = [...rows].sort((a, b) => {
             const aActive = a.status === "active" ? 0 : 1;
             const bActive = b.status === "active" ? 0 : 1;
             if (aActive !== bActive) return aActive - bActive;
@@ -987,21 +1021,34 @@ function PortalSubscriptions() {
       ) : error ? (
         <section className="portal-section"><AccountEmptyState>{error}</AccountEmptyState></section>
       ) : hasSubs ? (
+        /*
+          A LIST OF CARDS, NOT A TABLE. The previous four-column grid hid
+          its header on mobile, which left four unlabelled cells and no
+          way to tell a delivery date from a billing date. Every value
+          here carries its own label at every width, so nothing has to be
+          squeezed and nothing loses its meaning below 430px.
+        */
         <div className="sub-list">
-          <div className="sub-list-header">
-            <span>Abo</span>
-            <span>Lieferung</span>
-            <span>Status</span>
-            <span>Betrag</span>
-          </div>
           {subs.map(s => {
             const plan = s.plan_snapshot as Record<string, string>;
+            const nextDelivery = getNextDeliveryAt(s);
+            const endsAt = getEffectiveEndAt(s);
             return (
-              <a key={s.id} href={`/account/subscriptions/${s.id}`} className="sub-list-row">
-                <span className="sub-list-name">{plan.name || "Abo"}</span>
-                <span>{s.next_delivery_at ? fmtDate(s.next_delivery_at) : "-"}</span>
-                <span>{SUB_STATUS_DE[s.status] || s.status}</span>
-                <span className="sub-list-total">{fmtCents(s.total_gross_cents)} €</span>
+              <a key={s.id} href={`/account/subscriptions/${s.id}`} className="sub-card">
+                <div className="sub-card-head">
+                  <span className="sub-card-name">{plan.name || "Abo"}</span>
+                  <span className="sub-card-status">{getSubscriptionStatusLabel(s)}</span>
+                </div>
+                <dl className="sub-card-facts">
+                  <div><dt>Rhythmus</dt><dd>{SUBSCRIPTION_CADENCE_LABEL}</dd></div>
+                  {nextDelivery && (
+                    <div><dt>Nächste Lieferung</dt><dd>{fmtDate(nextDelivery)}</dd></div>
+                  )}
+                  {endsAt && (
+                    <div><dt>{hasEnded(s) ? "Beendet am" : "Endet am"}</dt><dd>{fmtDate(endsAt)}</dd></div>
+                  )}
+                  <div><dt>Pro Lieferung</dt><dd>{fmtCents(s.total_gross_cents)} €</dd></div>
+                </dl>
               </a>
             );
           })}
@@ -1068,22 +1115,88 @@ function PortalSubscriptions() {
 // ── Abo-Detail ──────────────────────────────────────────────────────
 
 function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
+  const { session } = useAuth();
   const [sub, setSub] = useState<SubscriptionRow | null>(null);
   const [items, setItems] = useState<SubscriptionItemRow[]>([]);
   const [loading, setLoading] = useState(() => !!supabase);
   const [notFound, setNotFound] = useState(!supabase);
 
+  // ── Kündigung ──
+  const [confirming, setConfirming] = useState(false);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [cancelError, setCancelError] = useState("");
+
+  /*
+    AUTHORIZATION IS THE SERVER'S, NOT THIS QUERY'S. The id in the URL is
+    a browser-supplied value and is treated as one: this SELECT runs under
+    the customer's own session, so migration 005's RLS policy
+    ("auth.uid() = user_id and not is_business_user()") is what decides
+    whether a row comes back. A foreign id returns nothing, exactly like a
+    non-existent one, and the cancel endpoint re-proves ownership twice
+    more before it writes anything.
+  */
+  const fetchSubscription = async (): Promise<{
+    sub: SubscriptionRow | null;
+    items: SubscriptionItemRow[];
+  } | null> => {
+    if (!supabase) return null;
+    const [sRes, iRes] = await Promise.all([
+      supabase.from("subscriptions").select(SUBSCRIPTION_SELECT).eq("id", subscriptionId).maybeSingle(),
+      supabase.from("subscription_items").select("*").eq("subscription_id", subscriptionId).order("created_at"),
+    ]);
+    return {
+      sub: (sRes.data as unknown as SubscriptionRow) ?? null,
+      items: (iRes.data ?? []) as SubscriptionItemRow[],
+    };
+  };
+
   useEffect(() => {
     if (!supabase) return;
-    Promise.all([
-      supabase.from("subscriptions").select("*").eq("id", subscriptionId).maybeSingle(),
-      supabase.from("subscription_items").select("*").eq("subscription_id", subscriptionId).order("created_at"),
-    ]).then(([sRes, iRes]) => {
-      if (!sRes.data) { setNotFound(true); }
-      else { setSub(sRes.data); setItems(iRes.data ?? []); }
+    let stale = false;
+    fetchSubscription().then(result => {
+      if (stale) return;
+      if (!result?.sub) { setNotFound(true); }
+      else { setSub(result.sub); setItems(result.items); }
       setLoading(false);
     });
+    return () => { stale = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subscriptionId]);
+
+  /*
+    THE PAGE NEVER INVENTS THE RESULT. On success it re-reads the row and
+    renders whatever the server actually persisted, so "Kündigung
+    vorgemerkt" and its date can only appear once they are true in the
+    database. An optimistic local state would have been able to show a
+    cancellation that never reached Stripe.
+  */
+  const submitCancellation = async () => {
+    if (!session?.access_token) { setCancelError("Bitte melde dich an."); return; }
+    setCancelBusy(true);
+    setCancelError("");
+    try {
+      const res = await fetch("/api/subscriptions/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ subscriptionId }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        // Every refusal the route can produce already carries customer-safe
+        // German copy. The fallback is generic on purpose: a raw server
+        // string must never reach the page.
+        setCancelError(typeof body?.error === "string" ? body.error : "Das hat gerade nicht geklappt.");
+        return;
+      }
+      setConfirming(false);
+      const refreshed = await fetchSubscription();
+      if (refreshed?.sub) { setSub(refreshed.sub); setItems(refreshed.items); }
+    } catch {
+      setCancelError("Das hat gerade nicht geklappt.");
+    } finally {
+      setCancelBusy(false);
+    }
+  };
 
   if (loading) return <p className="portal-loading">Laden…</p>;
 
@@ -1100,7 +1213,25 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
   const plan = sub.plan_snapshot as Record<string, string | number>;
   const ship = sub.shipping_address_snapshot as Record<string, string>;
   const bill = sub.billing_address_snapshot as Record<string, string>;
-  const deliveryLabel = fmtInterval(plan.delivery_interval_unit as string, plan.delivery_interval_count as number);
+
+  /*
+    EVERY SENTENCE BELOW COMES FROM lib/subscriptionAccountView.ts, which
+    reads six columns and cannot see cancel_at, last_paid_period_end or
+    any Stripe identifier. The rhythm is the contract constant, never
+    fmtInterval: that helper is shared with B2B supply agreements and can
+    say "Monatlich", which for this contract is always wrong.
+  */
+  const statusLabel = getSubscriptionStatusLabel(sub);
+  const statusNote = getSubscriptionStatusNote(sub);
+  const nextBilling = getNextBillingAt(sub);
+  const nextDelivery = getNextDeliveryAt(sub);
+  const endsAt = getEffectiveEndAt(sub);
+  const scheduled = isCancellationScheduled(sub);
+  const ended = hasEnded(sub);
+  const canCancel = canRequestSubscriptionCancellation(sub);
+  const now = new Date();
+  const cutoffAt = getCancellationCutoffAt(sub, now);
+  const preview = getCancellationPreview(sub, now);
 
   return (
     <>
@@ -1112,17 +1243,104 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
       </section>
 
       <div className="order-detail-meta">
-        <div className="portal-profile-row"><span>Status</span><strong>{SUB_STATUS_DE[sub.status] || sub.status}</strong></div>
-        {deliveryLabel && <div className="portal-profile-row"><span>Lieferintervall</span><strong>{deliveryLabel}</strong></div>}
-        {sub.next_delivery_at && <div className="portal-profile-row"><span>Nächste Lieferung</span><strong>{fmtDate(sub.next_delivery_at)}</strong></div>}
-        {sub.started_at && <div className="portal-profile-row"><span>Laufzeit seit</span><strong>{fmtDate(sub.started_at)}</strong></div>}
-        {sub.current_period_start && sub.current_period_end && (
-          <div className="portal-profile-row"><span>Aktueller Zeitraum</span><strong>{fmtDate(sub.current_period_start)} - {fmtDate(sub.current_period_end)}</strong></div>
+        <div className="portal-profile-row"><span>Status</span><strong>{statusLabel}</strong></div>
+        <div className="portal-profile-row"><span>Rhythmus</span><strong>{SUBSCRIPTION_CADENCE_LABEL}</strong></div>
+        <div className="portal-profile-row"><span>Menge</span><strong>{SUBSCRIPTION_QUANTITY_LABEL}</strong></div>
+        {nextBilling && <div className="portal-profile-row"><span>Nächste Abrechnung</span><strong>{fmtDate(nextBilling)}</strong></div>}
+        {nextDelivery && <div className="portal-profile-row"><span>Nächste Lieferung</span><strong>{fmtDate(nextDelivery)}</strong></div>}
+        {endsAt && (
+          <div className="portal-profile-row">
+            <span>{ended ? "Beendet am" : "Endet am"}</span><strong>{fmtDate(endsAt)}</strong>
+          </div>
         )}
-        {sub.cancel_at_period_end && <div className="portal-profile-row"><span>Hinweis</span><strong>Endet zum Periodenende</strong></div>}
-        {sub.paused_at && <div className="portal-profile-row"><span>Pausiert seit</span><strong>{fmtDate(sub.paused_at)}</strong></div>}
-        {sub.cancelled_at && <div className="portal-profile-row"><span>Beendet am</span><strong>{fmtDate(sub.cancelled_at)}</strong></div>}
+        {sub.started_at && <div className="portal-profile-row"><span>Laufzeit seit</span><strong>{fmtDate(sub.started_at)}</strong></div>}
       </div>
+
+      {statusNote && <p className="portal-note">{statusNote}</p>}
+
+      {/* ── Kündigung ── */}
+      <section className="order-detail-section">
+        <p className="eyebrow">KÜNDIGUNG</p>
+        {scheduled && endsAt ? (
+          /*
+            A STANDING CANCELLATION, AND NO SECOND CTA. The customer has
+            already asked and GLOA has already promised a date, so the only
+            honest thing left to show is the promise. Nothing here mentions
+            what Stripe currently holds, how the last cycle is proven paid,
+            or that a sweep exists.
+          */
+          <div className="sub-cancel">
+            <p className="sub-cancel-lead">Kündigung vorgemerkt.</p>
+            <p className="order-cancel-note">
+              Dein Abo endet am {fmtDate(endsAt)}.
+              {nextDelivery ? " Die letzte Lieferung erhältst du noch wie gewohnt." : ""}
+            </p>
+          </div>
+        ) : ended ? (
+          <p className="order-cancel-note">
+            Dieses Abo ist beendet{endsAt ? ` (${fmtDate(endsAt)})` : ""}. Neue Lieferungen gibt es nicht mehr.
+          </p>
+        ) : canCancel && preview ? (
+          <div className="sub-cancel">
+            {cutoffAt && (
+              <p className="order-cancel-note">
+                Kündbar für den nächsten Zyklus bis {fmtDate(cutoffAt)}.
+              </p>
+            )}
+            {!confirming ? (
+              <button
+                type="button"
+                className="cta order-cancel-cta"
+                onClick={() => { setCancelError(""); setConfirming(true); }}
+              >
+                Abo kündigen
+              </button>
+            ) : (
+              /*
+                A DELIBERATE SECOND STEP. One stray click must not end a
+                paid contract, and the consequence is stated with the SAME
+                helper the server decides with - so the sentence the
+                customer agrees to is the rule the backend will apply.
+              */
+              <div
+                className="sub-cancel-confirm"
+                role="group"
+                aria-labelledby="sub-cancel-confirm-title"
+              >
+                <p id="sub-cancel-confirm-title" className="sub-cancel-lead">Abo wirklich kündigen?</p>
+                <p className="order-cancel-note">{preview.consequence}</p>
+                <p className="order-cancel-note">
+                  <strong>Ende: {fmtDate(preview.schedule.effectiveCancelAt)}</strong>
+                </p>
+                {cancelError && <p className="order-cancel-error" role="alert">{cancelError}</p>}
+                <div className="sub-cancel-actions">
+                  <button
+                    type="button"
+                    className="cta order-cancel-cta"
+                    onClick={submitCancellation}
+                    disabled={cancelBusy}
+                  >
+                    {cancelBusy ? "Wird gesendet…" : "Jetzt kündigen"}
+                  </button>
+                  <button
+                    type="button"
+                    className="sub-cancel-back"
+                    onClick={() => setConfirming(false)}
+                    disabled={cancelBusy}
+                  >
+                    Doch nicht
+                  </button>
+                </div>
+              </div>
+            )}
+            {!confirming && cancelError && <p className="order-cancel-error" role="alert">{cancelError}</p>}
+          </div>
+        ) : (
+          <p className="order-cancel-note">
+            Dieses Abo lässt sich gerade nicht über das Konto kündigen. Melde dich bei uns, dann klären wir das gemeinsam.
+          </p>
+        )}
+      </section>
 
       {/* ── Items ── */}
       {items.length > 0 && (

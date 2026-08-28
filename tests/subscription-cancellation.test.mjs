@@ -2340,16 +2340,51 @@ test("regression: no Stripe write API for refunds appeared", () => {
   assert.deepEqual(offenders, []);
 });
 
-test("regression: no account UI, no email and no legal copy changed", () => {
+test("regression: the account reaches this feature ONLY through the endpoint", () => {
+  // PHASE 3F CHANGED THIS GUARD, DELIBERATELY. It used to assert that the
+  // account UI did not reference the cancel endpoint at all, which was
+  // the correct boundary while Phase 3C had no customer-facing half. The
+  // account now has one, so the guard states the boundary that still
+  // holds: the browser goes through the authenticated HTTP route and
+  // through nothing else.
   const portal = read("app/AccountPortal.tsx");
-  assert.ok(!portal.includes("/api/subscriptions/cancel"), "the account UI gained a cancel control");
-  // NOT a bare cancellation_requested_at check: the portal legitimately
-  // reads orders.cancellation_requested_at, which is the Phase 2A ORDER
-  // cancellation request and a different system entirely. What must be
-  // absent is any use of the new SUBSCRIPTION columns.
-  assert.ok(!portal.includes("sub.cancel_at\b"), "the account UI reads subscription cancel_at");
-  assert.ok(!portal.includes("subscriptionCancel"), "the account UI calls the cancellation service");
-  assert.ok(!portal.includes("schedule_subscription_cancellation"));
+  assert.ok(portal.includes('fetch("/api/subscriptions/cancel"'),
+    "the account no longer reaches the cancellation endpoint");
+  assert.ok(portal.includes("Authorization: `Bearer ${session.access_token}`"),
+    "the account calls the endpoint without a bearer token");
+
+  // NEVER the service, never the RPC, never a direct write. Those run
+  // server-side under the service-role key, and a browser that could
+  // reach them would bypass every ownership check.
+  // The account imports the pure RULES module - that is the point, it is
+  // how the cutoff cannot drift - but never the SERVICE, which holds the
+  // service-role client and every Stripe call.
+  // Matched on the module SPECIFIER, not per line: these are multi-line
+  // named imports, so the path sits on the closing line.
+  assert.match(portal, /from "\.\.\/lib\/subscriptionCancellationRules"/,
+    "the account stopped sharing the cancellation rules");
+  assert.ok(!/from "\.\.\/lib\/subscriptionCancellation"/.test(portal),
+    "the account imports the cancellation service");
+  const portalCode = withoutComments(portal);
+  for (const serverOnly of [
+    "cancelSubscriptionForUser", "sweepDueDeferredCancellations",
+    "applyDeferredCancellationFromRenewal", "schedule_subscription_cancellation",
+    "apply_deferred_subscription_cancellation", "record_paid_subscription_period",
+    "due_deferred_subscription_cancellations",
+  ]) {
+    assert.ok(!portalCode.includes(serverOnly), `the account UI reaches ${serverOnly}`);
+  }
+  assert.ok(!/from\("subscriptions"\)[\s\S]{0,200}\.update\(/.test(portalCode),
+    "the account writes a subscription directly");
+
+  // And NEVER the two internal columns. The account may show the promise
+  // (cancellation_effective_at); what Stripe currently holds and the
+  // payment proof the sweep needs are not customer facts. Checked on code
+  // only, because the prose deliberately names what it refuses to read.
+  assert.ok(!portalCode.includes("last_paid_period_end"), "the account UI reads the payment proof");
+  assert.ok(!/\bcancel_at\b/.test(portalCode), "the account UI reads subscription cancel_at");
+  // cancel_at_period_end is a different, pre-existing column and may stay.
+  assert.ok(portalCode.includes("cancel_at_period_end"));
   // No new email template.
   const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
   assert.equal(templates.length, 7, "an email template was added");

@@ -182,11 +182,18 @@ test("subscriptions: the page never claims an Abo can be started right now", () 
 });
 
 test("subscriptions: a real subscription is still rendered from real columns", () => {
+  // PHASE 3F RESHAPED THE LIST from a four-column table into labelled
+  // cards, so the markup this used to pin is gone. The property it was
+  // protecting is not: every value on the card still comes from a real
+  // column or from a helper that reads one, and none is invented.
   assert.match(subsMarkup, /supabase\.from\("subscriptions"\)/);
-  assert.match(subsMarkup, /s\.next_delivery_at \? fmtDate\(s\.next_delivery_at\)/);
-  assert.match(subsMarkup, /SUB_STATUS_DE\[s\.status\]/);
+  assert.match(subsMarkup, /getNextDeliveryAt\(s\)/);
+  assert.match(subsMarkup, /fmtDate\(nextDelivery\)/);
+  assert.match(subsMarkup, /getSubscriptionStatusLabel\(s\)/);
   assert.match(subsMarkup, /fmtCents\(s\.total_gross_cents\)/);
   assert.match(subsMarkup, /href=\{`\/account\/subscriptions\/\$\{s\.id\}`\}/);
+  // The plan name is still the frozen snapshot's, never a guessed one.
+  assert.match(subsMarkup, /plan\.name \|\| "Abo"/);
 });
 
 /* ── Empty states now offer a real next step ────────────────── */

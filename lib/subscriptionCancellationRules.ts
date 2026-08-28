@@ -496,3 +496,263 @@ export function isDeferredApplyResult(value: unknown): value is DeferredApplyRes
  * imports, no database and no clock.
  */
 export const DEFERRED_SWEEP_LIMIT = 50;
+
+/* ══════════════════════════════════════════════════════════════
+   WHAT THE CUSTOMER IS TOLD ABOUT THEIR OWN ABO (Phase 3F)
+   ══════════════════════════════════════════════════════════════
+
+   The account list, the subscription detail page and the cancellation
+   confirmation all derive their sentences from here, so they cannot
+   drift apart - and neither can they drift from the cutoff rule above,
+   because it is the same file.
+
+   THAT PROXIMITY IS THE POINT. The account must never recalculate a
+   business-critical cancellation decision differently from the backend,
+   and the strongest available form of that guarantee is for the copy and
+   the arithmetic to be one module. getCancellationPreview below calls
+   resolveCancellationSchedule - the very function the cancel route runs -
+   rather than reimplementing 14 days anywhere.
+
+   It also keeps this file a PURE LEAF with no relative imports, which is
+   what lets the plain Node test runner import it, exactly as the note on
+   DEFERRED_SWEEP_LIMIT above describes.
+
+   ══════════════════════════════════════════════════════════════
+   WHAT IT DELIBERATELY CANNOT SEE
+   ══════════════════════════════════════════════════════════════
+
+   SubscriptionAccountFields carries six columns and no more. No id, no
+   user_id, no stripe_subscription_id, no cancel_at, no
+   last_paid_period_end, no snapshot, no tax field. That is not a
+   convention: a value these functions cannot receive is a value they
+   cannot leak into the account page, however the UI later changes.
+
+   cancel_at and last_paid_period_end are the two that matter. They are
+   Phase 3C's internal machinery - what Stripe holds right now, and the
+   payment proof the safety sweep needs - and a customer has no business
+   seeing either. The customer-facing promise is
+   cancellation_effective_at, the date GLOA actually committed to.
+   ══════════════════════════════════════════════════════════════ */
+
+/** The persisted subscription fields the customer-facing view depends on. */
+export type SubscriptionAccountFields = {
+  status: string;
+  current_period_end: string | null;
+  next_delivery_at: string | null;
+  cancellation_requested_at: string | null;
+  cancellation_effective_at: string | null;
+  cancelled_at: string | null;
+};
+
+/**
+ * Every 4 weeks.
+ *
+ * Derived from CADENCE_DAYS rather than written out, so the copy cannot
+ * drift from the constant the cutoff arithmetic uses. The account
+ * portal's generic fmtInterval helper is deliberately NOT used for B2C
+ * subscriptions: it can say "Monatlich", and for this contract that word
+ * is always wrong. It stays in the portal for B2B supply agreements,
+ * which genuinely can be billed monthly.
+ */
+export const SUBSCRIPTION_CADENCE_LABEL = `Alle ${CADENCE_DAYS / 7} Wochen`;
+
+/** Exactly one package per cycle. The contract permits no other value. */
+export const SUBSCRIPTION_QUANTITY_LABEL = "1 Packung";
+
+/**
+ * Has the customer asked to end this, and has GLOA promised a date?
+ *
+ * Both columns, never one. Migration 034's first invariant guarantees a
+ * request always carries a promised end, and reading both means a
+ * half-written row can never render as "vorgemerkt" with no date.
+ */
+export function isCancellationScheduled(sub: SubscriptionAccountFields): boolean {
+  return !!sub.cancellation_requested_at && !!sub.cancellation_effective_at;
+}
+
+/**
+ * True once the subscription has genuinely ended.
+ *
+ * cancelled_at alone is enough. status is Stripe's to move through
+ * customer.subscription.deleted, and the page must not keep talking about
+ * future billing while the local row catches up.
+ */
+export function hasEnded(sub: SubscriptionAccountFields): boolean {
+  return sub.status === "cancelled" || !!sub.cancelled_at;
+}
+
+/**
+ * The one line at the top of the card.
+ *
+ * A scheduled cancellation OUTRANKS the lifecycle status: "Aktiv" is
+ * technically true for a subscription that is ending, and it is not what
+ * the customer needs to read first. It is still active - it still bills
+ * in the late case and it still ships - and the dates below say so.
+ *
+ * An unrecognised status reads "Unbekannt" rather than printing the raw
+ * database value at a customer.
+ */
+export function getSubscriptionStatusLabel(sub: SubscriptionAccountFields): string {
+  if (hasEnded(sub)) return "Beendet";
+  if (isCancellationScheduled(sub)) return "Kündigung vorgemerkt";
+
+  switch (sub.status) {
+    case "active": return "Aktiv";
+    case "pending": return "Wird eingerichtet";
+    case "past_due": return "Zahlung ausstehend";
+    case "unpaid": return "Zahlung offen";
+    case "paused": return "Pausiert";
+    default: return "Unbekannt";
+  }
+}
+
+/**
+ * A short explanation, or null when the label speaks for itself.
+ *
+ * The two payment states describe what is happening, not what the
+ * customer did wrong, and neither offers to update a payment method:
+ * this build has no such screen, and offering one that does not exist
+ * would be worse than saying nothing.
+ */
+export function getSubscriptionStatusNote(sub: SubscriptionAccountFields): string | null {
+  if (hasEnded(sub)) return null;
+  if (isCancellationScheduled(sub)) return null;
+
+  switch (sub.status) {
+    case "pending":
+      return "Dein Abo wird gerade eingerichtet.";
+    case "past_due":
+      return "Die letzte Abbuchung hat noch nicht geklappt. Sie wird automatisch erneut versucht.";
+    case "unpaid":
+      return "Die Abbuchung war bisher nicht erfolgreich. Melde dich bei uns, dann klären wir das gemeinsam.";
+    default:
+      return null;
+  }
+}
+
+/**
+ * Does the cycle beginning at `boundary` still happen?
+ *
+ * The one predicate behind both the next billing and the next delivery,
+ * and the reason neither of them lies about an early cancellation.
+ *
+ * An EARLY cancellation ends the subscription AT the current period end,
+ * so the cycle that would begin there never happens: its charge is never
+ * made and its box is never sent - even though next_delivery_at still
+ * holds that date, because migration 022 set it from the period end when
+ * the last invoice was paid. A LATE cancellation ends one full cadence
+ * later, so that same boundary is a real charge and a real delivery.
+ *
+ * Both fall out of one comparison of two authoritative dates, with no
+ * arithmetic and no cadence assumption.
+ */
+function boundaryStillHappens(
+  sub: SubscriptionAccountFields,
+  boundary: string | null
+): boolean {
+  if (hasEnded(sub)) return false;
+  const boundaryMs = epochMs(boundary);
+  if (boundaryMs === null) return false;
+
+  const effectiveMs = epochMs(sub.cancellation_effective_at);
+  if (effectiveMs === null) return true;
+  return boundaryMs < effectiveMs;
+}
+
+/**
+ * When the customer is next charged, or null when they are not.
+ *
+ * current_period_end straight from the row. Nothing here adds 28 days:
+ * the database already carries the boundary Stripe actually bills on, and
+ * a locally computed one would drift away from it.
+ */
+export function getNextBillingAt(sub: SubscriptionAccountFields): string | null {
+  return boundaryStillHappens(sub, sub.current_period_end) ? sub.current_period_end : null;
+}
+
+/**
+ * When the next box is due, or null when none is.
+ *
+ * This is the next subscription DELIVERY CYCLE, not a carrier promise.
+ * Nothing here knows when a parcel lands, and the label the account uses
+ * says "Nächste Lieferung" rather than anything about arrival.
+ */
+export function getNextDeliveryAt(sub: SubscriptionAccountFields): string | null {
+  return boundaryStillHappens(sub, sub.next_delivery_at) ? sub.next_delivery_at : null;
+}
+
+/** The promised end date once a cancellation is standing, or the real one. */
+export function getEffectiveEndAt(sub: SubscriptionAccountFields): string | null {
+  if (hasEnded(sub)) return sub.cancelled_at ?? sub.cancellation_effective_at;
+  return isCancellationScheduled(sub) ? sub.cancellation_effective_at : null;
+}
+
+/**
+ * May this subscription be cancelled from the account right now?
+ *
+ * Mirrors the server's own preconditions rather than inventing softer
+ * ones: a cancellable status, a period end to measure from, and no
+ * standing request. The server decides for real - this only decides
+ * whether to render the control, and a control that would always be
+ * refused is worse than no control at all.
+ */
+export function canRequestSubscriptionCancellation(sub: SubscriptionAccountFields): boolean {
+  if (hasEnded(sub)) return false;
+  if (isCancellationScheduled(sub)) return false;
+  if (!isCancellableStatus(sub.status)) return false;
+  return epochMs(sub.current_period_end) !== null;
+}
+
+export type CancellationPreview = {
+  schedule: CancellationSchedule;
+  /** What the customer is agreeing to, in one sentence. */
+  consequence: string;
+};
+
+/**
+ * What cancelling right now would mean, computed with THE SERVER'S OWN
+ * RULE.
+ *
+ * resolveCancellationSchedule is the same function the cancel route runs,
+ * so a confirmation cannot promise a date the backend would not honour.
+ * It is still a preview and not an authority: the request is decided
+ * server-side against the server's clock, and the row the page re-reads
+ * afterwards is what it actually shows.
+ *
+ * `now` is a parameter. Nothing in this module reads a clock, because a
+ * rendering function that reads one cannot be tested and a cutoff that
+ * moves between two renders is a bug waiting to happen.
+ */
+export function getCancellationPreview(
+  sub: SubscriptionAccountFields,
+  now: Date | string
+): CancellationPreview | null {
+  if (!canRequestSubscriptionCancellation(sub)) return null;
+
+  const decided = resolveCancellationSchedule({
+    requestAt: now,
+    currentPeriodEnd: sub.current_period_end,
+  });
+  if (!decided.ok) return null;
+
+  return {
+    schedule: decided.schedule,
+    consequence: decided.schedule.timing === "early"
+      ? "Die nächste Lieferung entfällt und dein Abo endet zum Ende des laufenden Zeitraums."
+      : "Die nächste Lieferung wird noch ganz normal geliefert und berechnet. Danach endet dein Abo.",
+  };
+}
+
+/**
+ * The cutoff date, shown only while it still means something.
+ *
+ * Taken from the shared schedule rather than recomputed here, and hidden
+ * once a cancellation is standing: a deadline for a decision that has
+ * already been made only confuses.
+ */
+export function getCancellationCutoffAt(
+  sub: SubscriptionAccountFields,
+  now: Date | string
+): string | null {
+  return getCancellationPreview(sub, now)?.schedule.cutoffAt ?? null;
+}
