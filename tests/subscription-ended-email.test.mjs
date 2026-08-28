@@ -290,9 +290,16 @@ test("12: the event key is the subscription id, and terminality proves it safe",
   assert.ok(sql034.includes("if v_sub.status = 'cancelled' then"));
 });
 
-test("12b: exactly two statements in the whole schema write subscriptions.status", () => {
+test("12b: exactly three statements in the whole schema write subscriptions.status", () => {
   // The claim the event key rests on. Counted across every migration so a
-  // third writer added later fails here rather than in production.
+  // FOURTH writer added later fails here rather than in production.
+  //
+  // PHASE 3I.B1 ADDED THE THIRD, DELIBERATELY, and it cannot weaken this
+  // family: sync_subscription_payment_status moves only among 'active',
+  // 'past_due' and 'unpaid', and refuses outright when the local row is
+  // 'pending' or 'cancelled'. So 'cancelled' remains terminal and the
+  // subscription_ended event key remains sound. The guards are asserted
+  // in tests/subscription-payment-status-migration.test.mjs.
   const writers = [];
   for (const name of readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith(".sql")).sort()) {
     const sql = withoutComments(readFileSync(path.join(MIGRATIONS_DIR, name), "utf-8"));
@@ -304,7 +311,23 @@ test("12b: exactly two statements in the whole schema write subscriptions.status
   assert.deepEqual([...new Set(writers)].sort(), [
     "022_recurring_subscription_foundation.sql",
     "034_subscription_cancellation.sql",
-  ], "a third writer of subscriptions.status appeared");
+    "036_subscription_payment_status.sql",
+  ], "a fourth writer of subscriptions.status appeared");
+
+  // AND THE THIRD ONE CANNOT REACH 'cancelled'. This is what keeps the
+  // ending's event key safe now that a second reconciliation path exists.
+  const sql036 = withoutComments(
+    readFileSync(path.join(MIGRATIONS_DIR, "036_subscription_payment_status.sql"), "utf-8")
+  );
+  assert.ok(sql036.includes("if v_sub.status = 'cancelled' then"),
+    "036 lost its terminal guard");
+  assert.ok(sql036.includes("if v_target not in ('active', 'past_due', 'unpaid') then"),
+    "036 lost its target allowlist");
+  assert.ok(sql036.includes("set status = v_target"));
+  // It can never write 'cancelled', 'pending' or 'paused' as a literal.
+  for (const forbidden of ["set status = 'cancelled'", "set status = 'pending'", "set status = 'paused'"]) {
+    assert.ok(!sql036.includes(forbidden), `036 writes ${forbidden}`);
+  }
 });
 
 test("13: the same subscription cannot create a duplicate ended delivery", () => {
@@ -712,9 +735,15 @@ test("45: migration 035 still declares exactly the contract this phase uses", ()
 
 test("46-47: 022 through 035 are all present and there is no 036", () => {
   const files = readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.length, 35, "a migration was added or removed");
-  assert.equal(files[files.length - 1], MIGRATION_035, "035 must remain the highest");
-  assert.ok(!files.some(f => f.startsWith("036")), "this phase must need no migration");
+    // PHASE 3I.B1 ADDED MIGRATION 036 (payment_problem family plus the
+  // payment-status RPC). It is reviewed in
+  // tests/subscription-payment-status-migration.test.mjs. What this
+  // guard still protects is that no UNREVIEWED migration appeared.
+  assert.equal(files.length, 36, "a migration was added or removed");
+  assert.equal(files[files.length - 1], "036_subscription_payment_status.sql",
+    "036 must be the highest, and 035 the one before it");
+  assert.equal(files[files.length - 2], MIGRATION_035);
+  assert.ok(!files.some(f => f.startsWith("037")), "an unreviewed migration appeared");
   for (let n = 22; n <= 35; n += 1) {
     const prefix = String(n).padStart(3, "0");
     assert.ok(files.some(f => f.startsWith(prefix)), `migration ${prefix} is missing`);

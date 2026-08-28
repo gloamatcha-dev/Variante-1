@@ -762,9 +762,15 @@ test("32b: the code's vocabularies match the live migration exactly", () => {
 
 test("33-34: 022 through 035 are all present and there is no 036", () => {
   const files = readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.length, 35, "a migration was added or removed");
-  assert.equal(files[files.length - 1], MIGRATION_035, "035 must remain the highest");
-  assert.ok(!files.some(f => f.startsWith("036")), "this phase must need no migration");
+    // PHASE 3I.B1 ADDED MIGRATION 036 (payment_problem family plus the
+  // payment-status RPC). It is reviewed in
+  // tests/subscription-payment-status-migration.test.mjs. What this
+  // guard still protects is that no UNREVIEWED migration appeared.
+  assert.equal(files.length, 36, "a migration was added or removed");
+  assert.equal(files[files.length - 1], "036_subscription_payment_status.sql",
+    "036 must be the highest, and 035 the one before it");
+  assert.equal(files[files.length - 2], MIGRATION_035);
+  assert.ok(!files.some(f => f.startsWith("037")), "an unreviewed migration appeared");
   for (let n = 22; n <= 34; n += 1) {
     const prefix = String(n).padStart(3, "0");
     assert.ok(files.some(f => f.startsWith(prefix)), `migration ${prefix} is missing`);

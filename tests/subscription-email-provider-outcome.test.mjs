@@ -507,9 +507,14 @@ test("35-36: the cron route and vercel.json are untouched", () => {
 
 test("37-39: no migration was added, edited or required", () => {
   const files = readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.length, 35);
-  assert.equal(files[files.length - 1], "035_subscription_email_deliveries.sql");
-  assert.ok(!files.some(f => f.startsWith("036")), "this phase must need no migration");
+    // PHASE 3I.B1 ADDED MIGRATION 036 (payment_problem family plus the
+  // payment-status RPC). It is reviewed in
+  // tests/subscription-payment-status-migration.test.mjs. What this
+  // guard still protects is that no UNREVIEWED migration appeared.
+  assert.equal(files.length, 36);
+  assert.equal(files[files.length - 1], "036_subscription_payment_status.sql");
+  assert.equal(files[files.length - 2], "035_subscription_email_deliveries.sql");
+  assert.ok(!files.some(f => f.startsWith("037")), "an unreviewed migration appeared");
   const sql035 = withoutComments(read("supabase/migrations/035_subscription_email_deliveries.sql"));
   // The four statuses are unchanged: 'ambiguous' is an APPLICATION result,
   // never a database status.

@@ -1946,13 +1946,27 @@ test("034: it is the next free number and 022-033 are untouched", () => {
   assert.deepEqual(files.filter(f => f.startsWith("034")), ["034_subscription_cancellation.sql"]);
   // 034 was the next free number when this phase ran, and 033 still
   // precedes it. Phase 3H.1 later took 035 for a server-only email
-  // delivery table; it is the ONLY migration permitted above 034 until a
-  // later one is reviewed against this suite.
+  // delivery table, and Phase 3I.B1 took 036 for the payment foundation;
+  // those two are the ONLY migrations permitted above 034 until a later
+  // one is reviewed against this suite.
   assert.deepEqual(
     files.filter(f => f.slice(0, 3) > "034").sort(),
-    ["035_subscription_email_deliveries.sql"],
+    ["035_subscription_email_deliveries.sql", "036_subscription_payment_status.sql"],
     "an unreviewed migration above 034 appeared"
   );
+  // AND 036 REDEFINES NOTHING 034 OWNS. It adds one function of its own
+  // and must not touch the cancellation machinery this suite protects.
+  const sql036 = read("supabase/migrations/036_subscription_payment_status.sql");
+  for (const owned of [
+    "schedule_subscription_cancellation", "apply_deferred_subscription_cancellation",
+    "sync_subscription_from_stripe", "mark_subscription_cancelled",
+    "record_paid_subscription_period", "due_deferred_subscription_cancellations",
+  ]) {
+    assert.ok(!sql036.includes(`function public.${owned}`), `036 redefines ${owned}`);
+  }
+  // Its only function is its own, and it writes status alone.
+  assert.equal((sql036.match(/create or replace function/g) ?? []).length, 1);
+  assert.ok(sql036.includes("function public.sync_subscription_payment_status"));
   assert.equal(
     files[files.indexOf("034_subscription_cancellation.sql") - 1],
     "033_refund_confirmation_email_state.sql"

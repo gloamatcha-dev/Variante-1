@@ -81,7 +81,7 @@ const IMMUTABLE_MIGRATIONS = [
    EXISTENCE AND NUMBERING
    ══════════════════════════════════════════════════════════════ */
 
-test("035 exists, is the only 035, and is the highest migration number", () => {
+test("035 exists, is the only 035, and 036 is the only migration after it", () => {
   const files = readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith(".sql"));
   assert.ok(files.includes(MIGRATION_035), "migration 035 is missing");
 
@@ -94,11 +94,24 @@ test("035 exists, is the only 035, and is the highest migration number", () => {
     [MIGRATION_035],
     "there must be exactly one migration numbered 035"
   );
-  assert.equal(
-    Math.max(...numbered.map(x => x.n)),
-    35,
-    "035 must be the highest number - a later migration would need its own review"
+  // PHASE 3I.B1 TOOK 036 for the payment_problem family and the payment
+  // status RPC, reviewed in its own suite. It is the ONLY migration
+  // permitted above 035 until a later one is reviewed against this file.
+  assert.deepEqual(
+    numbered.filter(x => x.n > 35).map(x => x.file).sort(),
+    ["036_subscription_payment_status.sql"],
+    "an unreviewed migration above 035 appeared"
   );
+  // And 036 does not disturb what 035 owns beyond the family CHECK it
+  // deliberately replaces: no column, no index, no grant, no policy.
+  const sql036 = withoutComments(
+    readFileSync(path.join(MIGRATIONS_DIR, "036_subscription_payment_status.sql"), "utf-8")
+  ).toLowerCase();
+  for (const forbidden of ["add column", "create index", "create policy", "create table"]) {
+    assert.ok(!sql036.includes(forbidden), `036 changes the delivery table: ${forbidden}`);
+  }
+  assert.ok(!/grant[^;]*on public\.subscription_email_deliveries/.test(sql036),
+    "036 changes a delivery table grant");
 });
 
 test("022 through 034 are all still present, none renamed or deleted", () => {
