@@ -2402,10 +2402,20 @@ test("regression: the account reaches this feature ONLY through the endpoint", (
   assert.ok(!/\bcancel_at\b/.test(portalCode), "the account UI reads subscription cancel_at");
   // cancel_at_period_end is a different, pre-existing column and may stay.
   assert.ok(portalCode.includes("cancel_at_period_end"));
-  // No new email template.
+  // PHASE 3H.2 CHANGED THIS GUARD, DELIBERATELY. It used to assert that
+  // no subscription email template existed anywhere, which was the
+  // correct boundary while Phase 3C/3F had no customer-facing message.
+  // subscriptionStarted.ts now exists, sent by the invoice.paid handler.
+  // The boundary that still holds - and that this test is really about -
+  // is that the CANCELLATION route, service and rules send nothing at
+  // all, which the Resend assertions below prove directly.
   const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
-  assert.equal(templates.length, 7, "an email template was added");
-  assert.ok(!templates.some(n => /subscription/i.test(n)));
+  assert.equal(templates.length, 8, "an unreviewed email template was added");
+  assert.deepEqual(
+    templates.filter(n => /subscription/i.test(n)),
+    ["subscriptionStarted.ts"],
+    "a subscription template beyond Phase 3H.2's start message appeared"
+  );
   for (const source of [routeCode, serviceCode, rulesCode]) {
     for (const forbidden of ["resend", "Resend", "emails.send", "GLOA_FROM_HELLO"]) {
       assert.ok(!source.includes(forbidden), `this phase sends email: ${forbidden}`);

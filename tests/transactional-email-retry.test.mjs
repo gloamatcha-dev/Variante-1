@@ -821,9 +821,16 @@ test("idempotency: all six deterministic namespaces still exist and are distinct
     const source = withoutComments(read(`lib/email/${name}`));
     for (const m of source.matchAll(/`gloa\/([a-z-]+)\//g)) namespaces.push(m[1]);
   }
+  // Phase 3H.2 added gloa/subscription-started/, the first namespace that
+  // is keyed on a subscription rather than an order. It is distinct from
+  // all five order namespaces, and distinct from the two STRIPE keys in
+  // lib/subscriptionCancellationRules.ts - which are not Resend keys and
+  // deliberately do not live in lib/email.
   assert.deepEqual(namespaces.sort(), [
     "cancellation-outcome", "cancellation-request", "internal-order", "refund", "shipment",
+    "subscription-started",
   ]);
+  assert.equal(new Set(namespaces).size, namespaces.length, "two templates share a namespace");
   // The order confirmation is the sixth family and deliberately has no
   // provider-side key: its duplicate guard is the database claim alone,
   // which predates this task and is not changed by it.

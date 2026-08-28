@@ -20,6 +20,7 @@ import { buildShippingAddressSnapshot, buildBillingAddressSnapshot } from "../..
 import { sendOrderConfirmationEmailIfNeeded } from "../../../../lib/orderConfirmationEmail";
 import { sendInternalOrderNotificationIfNeeded } from "../../../../lib/internalOrderNotificationEmail";
 import { fulfillPaidSubscriptionInvoice, subscriptionInvoiceDeps } from "../../../../lib/subscriptionInvoiceFulfillment";
+import { sendSubscriptionStartedEmailIfNeeded } from "../../../../lib/subscriptionStartedEmail";
 import { idOf, resolveGloaSubscriptionId, stripeSubscriptionIdMatches } from "../../../../lib/subscriptionInvoiceRules";
 import {
   applyDeferredCancellationFromRenewal,
@@ -475,6 +476,57 @@ async function handleInvoicePaid(stripe: Stripe, event: Stripe.Event): Promise<v
     source: "subscription",
     stripeInvoiceId: result.stripeInvoiceId,
   });
+
+  // ── "DEIN GLOA ABO IST AKTIV" (Phase 3H.2) ──────────────────
+  //
+  // The first customer-facing message a subscription has ever produced,
+  // and it fires for the FIRST paid invoice only. The gate is
+  // billing_reason === 'subscription_create', taken from the invoice
+  // fulfillPaidSubscriptionInvoice re-read from Stripe rather than from
+  // this event's embedded copy. Every renewal is 'subscription_cycle' and
+  // deliberately produces no customer email: there is no recurring
+  // "Zahlung erfolgreich" in this system, and the sender itself refuses a
+  // cycle invoice, so this ordering cannot be bypassed by a later caller.
+  //
+  // ── WHY HERE, AND NOWHERE ELSE ──────────────────────────────
+  //
+  // AFTER the durable order exists, because a customer told their
+  // subscription started must have a first delivery genuinely on the way.
+  // AFTER the internal notification, because fulfillment learning about a
+  // paid cycle must never queue behind a customer mail provider.
+  // BEFORE the deferred cancellation below, because that block may throw
+  // by design and a throw must not be able to skip the customer's message
+  // on a delivery that got this far.
+  //
+  // ── AND IT CANNOT BREAK ANY OF THEM ─────────────────────────
+  //
+  // It never throws. A provider failure records 'failed' on its own
+  // delivery row in public.subscription_email_deliveries and returns, so
+  // the order, the payment evidence and the mandatory cancellation work
+  // below all still happen on this same delivery. Throwing would buy
+  // nothing: the failed row is already claimed, the redelivery's claim
+  // would return zero rows, and re-attempting a 'failed' row needs the
+  // status-guarded claim that a later phase will build. See the long note
+  // in lib/subscriptionStartedEmail.ts.
+  //
+  // Redelivery-safe by the database, not by this call site. The claim is
+  // keyed on (subscription id, family, event key) and NOT on the webhook
+  // event id, so a redelivery of this invoice - and any other Stripe
+  // event that ever represents the same first paid fact - finds the key
+  // already claimed and sends nothing.
+  const started = await sendSubscriptionStartedEmailIfNeeded({
+    subscriptionId: result.subscriptionId,
+    billingReason: result.billingReason,
+  });
+
+  if (started === "failed" || started === "superseded") {
+    // GLOA uuid and an outcome word. No recipient, no name, no plan, no
+    // amount - and never the provider's message, which is logged where it
+    // happened.
+    console.error(
+      `Stripe webhook: subscription start email for ${result.subscriptionId} -> ${started}`
+    );
+  }
 
   // ── A DEFERRED LATE CANCELLATION (Phase 3C.2) ───────────────
   //

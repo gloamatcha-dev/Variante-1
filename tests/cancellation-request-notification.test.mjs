@@ -686,7 +686,8 @@ test("email: the template is a pure leaf, like its siblings", () => {
   assert.deepEqual(templates, [
     "cancellationOutcome.ts", "cancellationRequestNotification.ts",
     "internalOrderNotification.ts", "orderConfirmation.ts",
-    "refundConfirmation.ts", "shipmentConfirmation.ts", "withdrawalConfirmation.ts",
+    "refundConfirmation.ts", "shipmentConfirmation.ts", "subscriptionStarted.ts",
+    "withdrawalConfirmation.ts",
   ]);
 });
 
@@ -1068,8 +1069,11 @@ test("regression: THIS message stays internal-only, separate from the outcome em
   // and a different idempotency namespace. This one must stay internal.
   // Phase 2E-A added refundConfirmation.ts, a seventh and again distinct
   // customer message. This one must still stay internal.
+  // Phase 3H.2 added subscriptionStarted.ts, an eighth - and the first
+  // that is not about an order at all. It is sent by the invoice.paid
+  // handler to the customer, and this one must STILL stay internal.
   const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
-  assert.equal(templates.length, 7, "an unexpected template was added");
+  assert.equal(templates.length, 8, "an unexpected template was added");
   assert.ok(templates.includes("cancellationRequestNotification.ts"));
   assert.ok(templates.includes("cancellationOutcome.ts"));
   // The REQUEST notification still goes to the internal inbox and carries

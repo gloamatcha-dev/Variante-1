@@ -844,7 +844,8 @@ test("email: the template is a pure leaf, like the other six", () => {
   assert.deepEqual(templates, [
     "cancellationOutcome.ts", "cancellationRequestNotification.ts",
     "internalOrderNotification.ts", "orderConfirmation.ts",
-    "refundConfirmation.ts", "shipmentConfirmation.ts", "withdrawalConfirmation.ts",
+    "refundConfirmation.ts", "shipmentConfirmation.ts", "subscriptionStarted.ts",
+    "withdrawalConfirmation.ts",
   ]);
 });
 

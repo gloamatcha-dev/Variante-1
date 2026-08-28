@@ -1112,7 +1112,8 @@ test("regression: the OPERATOR cancel route still sends nothing at all", () => {
   assert.deepEqual(templates, [
     "cancellationOutcome.ts", "cancellationRequestNotification.ts",
     "internalOrderNotification.ts", "orderConfirmation.ts",
-    "refundConfirmation.ts", "shipmentConfirmation.ts", "withdrawalConfirmation.ts",
+    "refundConfirmation.ts", "shipmentConfirmation.ts", "subscriptionStarted.ts",
+    "withdrawalConfirmation.ts",
   ], "an unexpected email template was added");
   // Against stripped code: the template's header prose legitimately says
   // where the message goes, and a scan that read comments would call that

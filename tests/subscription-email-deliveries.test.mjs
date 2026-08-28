@@ -567,7 +567,14 @@ test("the only DML-shaped verbs in 035 are DDL", () => {
    NOTHING ELSE MOVED
    ══════════════════════════════════════════════════════════════ */
 
-test("no email template was added", () => {
+test("only Phase 3H.2's start template was added on top of this foundation", () => {
+  // PHASE 3H.2 CHANGED THIS GUARD, DELIBERATELY. It used to assert that
+  // lib/email held exactly the seven templates that existed when the
+  // migration landed, because 3H.1 was the database foundation alone.
+  // 3H.2 has since built the FIRST of the three families on it. The
+  // property still worth protecting is that it built exactly one: the
+  // cancellation confirmation and the subscription ended message are
+  // still later phases and must not appear without review.
   const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
   assert.deepEqual(templates, [
     "cancellationOutcome.ts",
@@ -576,18 +583,28 @@ test("no email template was added", () => {
     "orderConfirmation.ts",
     "refundConfirmation.ts",
     "shipmentConfirmation.ts",
+    "subscriptionStarted.ts",
     "withdrawalConfirmation.ts",
-  ], "Phase 3H.1 is the database foundation only - no template belongs in it");
+  ], "an unreviewed email template was added");
 });
 
-test("no sender for the three new families exists yet", () => {
+test("only the subscription_started sender exists; the other two families do not", () => {
+  // PHASE 3H.2 CHANGED THIS GUARD, DELIBERATELY. 3H.1 shipped the table
+  // with no sender at all; 3H.2 shipped the first of the three. What
+  // still holds, and is what this assertion is now about, is that the
+  // cancellation confirmation, the subscription ended message and the
+  // deliberately deferred payment problem have no sender anywhere.
   const libFiles = readdirSync(path.join(ROOT, "lib"));
   for (const f of libFiles) {
     assert.ok(
-      !/subscriptionStarted|subscriptionEnded|cancellationConfirmation|paymentProblem/i.test(f),
-      `${f} implements a sender, which this phase does not`
+      !/subscriptionEnded|cancellationConfirmation|paymentProblem/i.test(f),
+      `${f} implements a sender for a family this phase does not cover`
     );
   }
+  assert.ok(
+    libFiles.includes("subscriptionStartedEmail.ts"),
+    "the Phase 3H.2 start sender is missing"
+  );
 });
 
 test("the payment failure lifecycle remains untouched", () => {

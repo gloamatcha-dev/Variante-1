@@ -531,15 +531,20 @@ test("email: no new template and no new Resend namespace", () => {
   assert.deepEqual(templates, [
     "cancellationOutcome.ts", "cancellationRequestNotification.ts",
     "internalOrderNotification.ts", "orderConfirmation.ts",
-    "refundConfirmation.ts", "shipmentConfirmation.ts", "withdrawalConfirmation.ts",
+    "refundConfirmation.ts", "shipmentConfirmation.ts", "subscriptionStarted.ts",
+    "withdrawalConfirmation.ts",
   ], "an unexpected email template was added");
   const namespaces = [];
   for (const name of templates) {
     const source = withoutComments(read(`lib/email/${name}`));
     for (const m of source.matchAll(/`gloa\/([a-z-]+)\//g)) namespaces.push(m[1]);
   }
+  // Phase 3H.2 added gloa/subscription-started/. It belongs to the
+  // subscription lifecycle, not to the shipment guard, and what this
+  // assertion protects is that THIS task still added nothing of its own.
   assert.deepEqual(namespaces.sort(), [
     "cancellation-outcome", "cancellation-request", "internal-order", "refund", "shipment",
+    "subscription-started",
   ], "a Resend idempotency namespace was added or removed");
 });
 

@@ -102,6 +102,32 @@ export type InvoiceFulfillmentResult =
        * and this is the event that proves it was.
        */
       stripeSubscriptionId: string;
+      /**
+       * WHICH LOCAL SUBSCRIPTION this cycle belongs to (Phase 3H.2).
+       *
+       * Reported for the same reason stripeSubscriptionId is: so the
+       * caller never re-derives it. It is the value this function already
+       * proved - metadata named the row, the Stripe customer chain closed
+       * on it, and the frozen snapshots validated - and it is the
+       * subscription_id and event_key of the start message's delivery row
+       * in public.subscription_email_deliveries.
+       */
+      subscriptionId: string;
+      /**
+       * Why Stripe raised this invoice, from the RE-READ invoice (Phase
+       * 3H.2).
+       *
+       * 'subscription_create' is the first invoice and the only one that
+       * may produce the customer's "Abo ist aktiv" message.
+       * 'subscription_cycle' is every renewal and deliberately produces no
+       * customer email at all.
+       *
+       * Taken from the invoice this function retrieved from Stripe, never
+       * from the webhook payload's embedded copy - the same rule every
+       * other invoice fact here follows, and the reason the caller is
+       * given the value rather than reading one for itself.
+       */
+      billingReason: string | null;
     }
   /**
    * Ours, but it does not reconcile. The caller must NOT mark the event
@@ -503,5 +529,8 @@ export async function fulfillPaidSubscriptionInvoice(
     customerName: typeof customer.name === "string" ? customer.name : null,
     stripeInvoiceId: invoice.id as string,
     stripeSubscriptionId,
+    subscriptionId: subscription.id,
+    // The re-read invoice's own reason, not the webhook payload's.
+    billingReason: invoice.billing_reason ?? null,
   };
 }
