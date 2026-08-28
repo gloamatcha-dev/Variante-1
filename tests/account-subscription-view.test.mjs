@@ -308,6 +308,56 @@ test("3F: a standing cancellation hides the cancel control and shows the promise
   assert.match(subscriptionsSection, /Kündigung vorgemerkt/);
   assert.match(subscriptionsSection, /Dein Abo endet am/);
   assert.match(subscriptionsSection, /scheduled && endsAt \?/);
+
+  // ORDER IS THE WHOLE POINT. A completed cancellation still carries both
+  // columns - that is what a finished cancellation looks like - so the
+  // cancellation section must ask "has it ended?" BEFORE "is one
+  // standing?", exactly as getSubscriptionStatusLabel does. Testing them
+  // the other way round told a customer whose abo ended in July that a
+  // cancellation was vorgemerkt and that it "endet am" a past date,
+  // directly under a status line reading Beendet.
+  //
+  // Scoped to the cancellation section, because `ended` also appears in
+  // the meta rows above it: matching THAT occurrence would make this
+  // guard pass no matter which branch actually comes first.
+  const cancelSection = subscriptionsSection.slice(
+    subscriptionsSection.indexOf("KÜNDIGUNG</p>")
+  );
+  assert.ok(cancelSection.length > 0, "the cancellation section was not found");
+  const endedBranch = cancelSection.indexOf("{ended ?");
+  const scheduledBranch = cancelSection.indexOf("scheduled && endsAt ?");
+  assert.ok(endedBranch > -1, "the cancellation section no longer tests ended first");
+  assert.ok(scheduledBranch > -1, "the standing-cancellation branch is gone");
+  assert.ok(
+    endedBranch < scheduledBranch,
+    "a standing cancellation is tested before the abo has ended, so an ended abo reads as vorgemerkt"
+  );
+});
+
+test("3F: an abo that COMPLETED its cancellation reads as ended, never as vorgemerkt", () => {
+  /*
+    The end state of every cancellation this feature makes: requested,
+    promised, and now actually over. All three columns are set, which is
+    precisely why the two branches could be confused.
+  */
+  const finished = activeSub({
+    status: "cancelled",
+    cancelled_at: P_END,
+    cancellation_requested_at: "2026-08-25T00:00:00.000Z",
+    cancellation_effective_at: P_END,
+  });
+
+  // Both predicates are true at once. The UI must resolve that with
+  // hasEnded, and the status label already does.
+  assert.equal(hasEnded(finished), true);
+  assert.equal(isCancellationScheduled(finished), true);
+  assert.equal(getSubscriptionStatusLabel(finished), "Beendet");
+
+  // Nothing about this abo is in the future.
+  assert.equal(getNextBillingAt(finished), null);
+  assert.equal(getNextDeliveryAt(finished), null);
+  assert.equal(canRequestSubscriptionCancellation(finished), false);
+  assert.equal(getSubscriptionStatusNote(finished), null);
 });
 
 test("3F: cancellation is only offered where the server would accept it", () => {

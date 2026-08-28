@@ -1215,11 +1215,12 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
   const bill = sub.billing_address_snapshot as Record<string, string>;
 
   /*
-    EVERY SENTENCE BELOW COMES FROM lib/subscriptionAccountView.ts, which
-    reads six columns and cannot see cancel_at, last_paid_period_end or
-    any Stripe identifier. The rhythm is the contract constant, never
-    fmtInterval: that helper is shared with B2B supply agreements and can
-    say "Monatlich", which for this contract is always wrong.
+    EVERY SENTENCE BELOW COMES FROM the view helpers in
+    lib/subscriptionCancellationRules.ts, which read six columns and
+    cannot see cancel_at, last_paid_period_end or any Stripe identifier.
+    The rhythm is the contract constant, never fmtInterval: that helper is
+    shared with B2B supply agreements and can say "Monatlich", which for
+    this contract is always wrong.
   */
   const statusLabel = getSubscriptionStatusLabel(sub);
   const statusNote = getSubscriptionStatusNote(sub);
@@ -1261,7 +1262,21 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
       {/* ── Kündigung ── */}
       <section className="order-detail-section">
         <p className="eyebrow">KÜNDIGUNG</p>
-        {scheduled && endsAt ? (
+        {/*
+          ENDED IS TESTED FIRST, exactly as getSubscriptionStatusLabel
+          tests it first. A subscription that completed a cancellation
+          still carries cancellation_requested_at and
+          cancellation_effective_at - that is what a finished cancellation
+          LOOKS like - so asking "is one standing?" before "has it
+          ended?" would tell a customer whose abo ended in July that a
+          cancellation is vorgemerkt and that it "endet am" a past date,
+          while the status line directly above it says Beendet.
+        */}
+        {ended ? (
+          <p className="order-cancel-note">
+            Dieses Abo ist beendet{endsAt ? ` (${fmtDate(endsAt)})` : ""}. Neue Lieferungen gibt es nicht mehr.
+          </p>
+        ) : scheduled && endsAt ? (
           /*
             A STANDING CANCELLATION, AND NO SECOND CTA. The customer has
             already asked and GLOA has already promised a date, so the only
@@ -1276,10 +1291,6 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
               {nextDelivery ? " Die letzte Lieferung erhältst du noch wie gewohnt." : ""}
             </p>
           </div>
-        ) : ended ? (
-          <p className="order-cancel-note">
-            Dieses Abo ist beendet{endsAt ? ` (${fmtDate(endsAt)})` : ""}. Neue Lieferungen gibt es nicht mehr.
-          </p>
         ) : canCancel && preview ? (
           <div className="sub-cancel">
             {cutoffAt && (
