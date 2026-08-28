@@ -339,49 +339,199 @@ test("PUBLIC, anon and authenticated are explicitly revoked", () => {
   }
 });
 
-test("service_role is revoked BEFORE it is granted, so DELETE cannot survive a default", () => {
-  // Granting three privileges does not remove a fourth. If ALTER DEFAULT
-  // PRIVILEGES hands service_role ALL on new tables, DELETE would already
-  // be present and the grant would simply not mention it. Migration 023
-  // exists because that assumption failed once already.
+/**
+ * Every grant statement in 035, parsed.
+ *
+ *   `grant insert (a, b) on public.t to service_role`
+ *     -> { privilege: "insert", columns: ["a", "b"], grantee: "service_role" }
+ *   `grant select on public.t to service_role`
+ *     -> { privilege: "select", columns: null,       grantee: "service_role" }
+ *
+ * columns === null means TABLE-WIDE, which is a materially different
+ * thing from a column list and is asserted as such below. The comma
+ * split ignores commas inside a parenthesised column list.
+ */
+const GRANTED = statements
+  .filter(s => s.startsWith("grant "))
+  .flatMap(stmt => {
+    const m = /^grant (.+?) on (\S+) to (\S+)$/.exec(stmt);
+    assert.ok(m, `unparsable grant statement: ${stmt}`);
+    const [, privileges, table, grantee] = m;
+    assert.equal(table, TABLE, `a grant names another table: ${stmt}`);
+    return privileges.split(/,(?![^(]*\))/).map(part => {
+      const scoped = /^(\w+) \((.+)\)$/.exec(part.trim());
+      return scoped
+        ? {
+            privilege: scoped[1],
+            columns: scoped[2].split(",").map(c => c.trim()).sort(),
+            grantee,
+          }
+        : { privilege: part.trim(), columns: null, grantee };
+    });
+  });
+
+const granted = privilege => GRANTED.filter(g => g.privilege === privilege);
+
+/** Every column the table declares, so "not granted" can be proven per column. */
+const ALL_COLUMNS = [
+  "id", "subscription_id", "family", "event_key",
+  "status", "sent_at", "created_at", "updated_at",
+];
+
+/** The three values the unique constraint guards. */
+const IDENTITY_COLUMNS = ["subscription_id", "family", "event_key"];
+
+/** Database-generated, and never the application's to write. */
+const GENERATED_COLUMNS = ["id", "created_at", "updated_at"];
+
+/** Everything a sender legitimately writes, across both DML privileges. */
+const WRITABLE_COLUMNS = ["subscription_id", "family", "event_key", "status", "sent_at"];
+
+test("service_role is revoked BEFORE every grant, so nothing survives a default", () => {
+  // Granting a privilege does not remove another. If ALTER DEFAULT
+  // PRIVILEGES hands service_role ALL on new tables, DELETE - and
+  // table-wide UPDATE - would already be present and the grants below
+  // would simply not mention them. Migration 023 exists because that
+  // assumption failed once already.
   const revokeAt = flat.indexOf(`revoke all on ${TABLE} from service_role`);
   assert.notEqual(revokeAt, -1, "service_role must be revoked before being granted");
-  const grantAt = flat.indexOf(`grant select, insert, update on ${TABLE} to service_role`);
-  assert.notEqual(grantAt, -1, "the service_role grant is missing");
-  assert.ok(revokeAt < grantAt, "the revoke must come before the grant, or it undoes it");
+
+  const grants = statements.filter(s => s.startsWith("grant "));
+  assert.ok(grants.length > 0, "the service_role grants are missing");
+  for (const stmt of grants) {
+    assert.ok(
+      revokeAt < flat.indexOf(stmt),
+      `the revoke must precede every grant, or it undoes one: ${stmt.slice(0, 60)}`
+    );
+  }
 });
 
 test("no browser role receives any grant", () => {
-  const grants = statements.filter(s => s.startsWith("grant "));
-  for (const stmt of grants) {
-    assert.ok(!stmt.includes(" to anon"), `anon must receive nothing: ${stmt}`);
-    assert.ok(!stmt.includes(" to authenticated"), `authenticated must receive nothing: ${stmt}`);
-    assert.ok(!stmt.includes(" to public"), `PUBLIC must receive nothing: ${stmt}`);
+  for (const g of GRANTED) {
+    assert.equal(g.grantee, "service_role",
+      `only the server role may be granted anything: ${g.privilege} to ${g.grantee}`);
   }
 });
 
-test("service_role receives SELECT, INSERT and UPDATE, and nothing else", () => {
-  const grants = statements.filter(s => s.startsWith("grant "));
-  assert.equal(grants.length, 1, "there should be exactly one grant statement");
+test("the old table-wide SELECT, INSERT, UPDATE grant is gone", () => {
+  // The shape this migration was hardened away from. Named literally so
+  // a revert cannot pass by quietly re-adding it.
+  assert.ok(
+    !flat.includes(`grant select, insert, update on ${TABLE}`),
+    "the table-wide grant let service_role rewrite the delivery identity"
+  );
+  for (const g of GRANTED) {
+    if (g.privilege === "insert" || g.privilege === "update") {
+      assert.notEqual(g.columns, null,
+        `${g.privilege} must be column-scoped, never table-wide`);
+    }
+  }
+});
 
-  const grant = grants[0];
-  assert.ok(grant.includes("select"), "service_role needs SELECT");
-  assert.ok(grant.includes("insert"), "service_role needs INSERT for the first claim");
-  assert.ok(grant.includes("update"), "service_role needs UPDATE for sent/failed/superseded");
-  assert.ok(grant.endsWith(`on ${TABLE} to service_role`));
+test("service_role has SELECT on the table", () => {
+  const selects = granted("select");
+  assert.equal(selects.length, 1, "exactly one SELECT grant");
+  assert.equal(selects[0].columns, null,
+    "SELECT is deliberately table-wide: the sweep filters and re-reads freely");
+});
+
+test("INSERT is column-scoped to exactly the four columns a claim supplies", () => {
+  const inserts = granted("insert");
+  assert.equal(inserts.length, 1, "exactly one INSERT grant");
+  assert.deepEqual(inserts[0].columns,
+    ["event_key", "family", "status", "subscription_id"],
+    "the claim writes these four and nothing else");
+});
+
+test("INSERT does not name id, sent_at, created_at or updated_at", () => {
+  // The first, third and fourth carry database defaults, and a
+  // column-scoped INSERT still applies the default of every column it
+  // does not name. sent_at must be NULL at 'sending' by the section 4
+  // CHECK, so an INSERT that named it could only ever be rejected.
+  const [insert] = granted("insert");
+  for (const column of ["id", "sent_at", "created_at", "updated_at"]) {
+    assert.ok(!insert.columns.includes(column),
+      `${column} must not be application-suppliable at claim time`);
+  }
+});
+
+test("UPDATE is column-scoped to exactly status and sent_at", () => {
+  const updates = granted("update");
+  assert.equal(updates.length, 1, "exactly one UPDATE grant");
+  assert.deepEqual(updates[0].columns, ["sent_at", "status"],
+    "sent, failed, superseded and stale recovery touch these two columns only");
+});
+
+test("the delivery identity is not writable after the claim", () => {
+  // subscription_id, family and event_key are insert-only. The unique
+  // constraint guards exactly these three, so if they were updatable the
+  // guard would be only as strong as the code that avoids touching them:
+  // a claimed key could be edited aside and the same message sent twice.
+  const [update] = granted("update");
+  for (const column of IDENTITY_COLUMNS) {
+    assert.ok(!update.columns.includes(column),
+      `${column} is delivery identity and must never be updatable`);
+  }
+  // And the guard those three values feed is still the same guard.
+  assert.ok(
+    flat.includes(`unique (${IDENTITY_COLUMNS.join(", ")})`),
+    "the unique claim guard must remain (subscription_id, family, event_key)"
+  );
+});
+
+test("id, created_at and updated_at are never application-writable", () => {
+  const [insert] = granted("insert");
+  const [update] = granted("update");
+  for (const column of GENERATED_COLUMNS) {
+    assert.ok(!insert.columns.includes(column), `${column} must not be insertable`);
+    assert.ok(!update.columns.includes(column), `${column} must not be updatable`);
+  }
+});
+
+test("updated_at is unwritable AND still trigger-maintained", () => {
+  // PostgreSQL checks UPDATE privilege against the columns the statement
+  // assigns - its SET list - before row processing begins. A BEFORE
+  // trigger's assignment to NEW is not a privilege-checked assignment,
+  // so withholding UPDATE on updated_at does not disable the trigger. It
+  // does stop a sender keeping a stuck row looking fresh forever, which
+  // is what section 6's stale-recovery argument depends on.
+  const [update] = granted("update");
+  assert.ok(!update.columns.includes("updated_at"));
+  assert.ok(
+    flat.includes(
+      `create trigger set_subscription_email_deliveries_updated_at before update on ${TABLE} for each row execute function public.set_updated_at()`
+    ),
+    "the updated_at trigger must survive the privilege hardening intact"
+  );
+});
+
+test("every column is on a deliberate side of the write boundary", () => {
+  // A column added later must be classified here rather than inheriting
+  // a privilege by accident.
+  const [insert] = granted("insert");
+  const [update] = granted("update");
+  const writable = new Set([...insert.columns, ...update.columns]);
+  for (const column of ALL_COLUMNS) {
+    assert.ok(createTableBody.includes(column), `a designed column disappeared: ${column}`);
+    assert.equal(writable.has(column), WRITABLE_COLUMNS.includes(column),
+      `${column} is on the wrong side of the write boundary`);
+  }
 });
 
 test("DELETE is granted to nobody", () => {
-  // Checked against the grant statements only: `on delete cascade` in the
+  // Checked against the parsed grants only: `on delete cascade` in the
   // table definition legitimately contains the word.
-  const grants = statements.filter(s => s.startsWith("grant "));
-  for (const stmt of grants) {
-    const privileges = stmt.slice("grant ".length, stmt.indexOf(" on "));
-    assert.ok(!privileges.includes("delete"),
+  for (const g of GRANTED) {
+    assert.notEqual(g.privilege, "delete",
       "delivery history is append-and-amend; a superseded fact is closed, never erased");
-    assert.ok(!privileges.includes("all"),
+    assert.notEqual(g.privilege, "all",
       "the privileges must be enumerated, never granted wholesale");
   }
+  assert.deepEqual(
+    GRANTED.map(g => g.privilege).sort(),
+    ["insert", "select", "update"],
+    "exactly three privileges, and DELETE is not one of them"
+  );
 });
 
 /* ══════════════════════════════════════════════════════════════

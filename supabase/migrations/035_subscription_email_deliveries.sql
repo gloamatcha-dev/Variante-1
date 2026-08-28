@@ -545,17 +545,120 @@ revoke all on public.subscription_email_deliveries from authenticated;
 -- instead of as a later repair.
 revoke all on public.subscription_email_deliveries from service_role;
 
--- SELECT to read a work list and to re-read a claimed row.
--- INSERT to make the first claim.
--- UPDATE to record 'sent', 'failed' or 'superseded', and to recover a
--- stale claim.
+-- THREE GRANTS, NOT ONE, AND TWO OF THEM ARE COLUMN-SCOPED.
+--
+-- A table-wide `grant insert, update` would let service_role rewrite the
+-- delivery identity itself. That is wider than any sender needs, and the
+-- columns it would expose are the ones this whole design rests on.
+--
+-- ── SELECT: the whole table ───────────────────────────────────
+--
+-- Reading is not the risk here, and the sweep needs it in full: it
+-- filters on family, status and updated_at, re-reads a claimed row
+-- before calling the provider, and every claim ends in `returning id`.
+-- Column-scoping it would buy nothing - by the design in section 1 this
+-- table holds no recipient, no customer text and no error message - and
+-- would break an operator's `select *` for no gain.
+grant select on public.subscription_email_deliveries to service_role;
+
+-- ── INSERT: exactly the four columns a claim supplies ─────────
+--
+-- The first claim writes these four and nothing else:
+--
+--   insert into public.subscription_email_deliveries
+--     (subscription_id, family, event_key, status)
+--   values ($1, $2, $3, 'sending')
+--   on conflict (subscription_id, family, event_key) do nothing
+--   returning id
+--
+-- id, created_at and updated_at are omitted deliberately. All three have
+-- database defaults, and a column-scoped INSERT still applies the
+-- default of every column it does not name. A sender that cannot name
+-- them cannot supply a colliding id, cannot backdate a claim, and cannot
+-- open a row that already looks stale to the recovery sweep.
+--
+-- sent_at is omitted too. A row is born 'sending', and the biconditional
+-- CHECK in section 4 requires sent_at to be NULL there, so the only
+-- INSERT that could name it is one the constraint would reject anyway.
+-- Withholding the privilege refuses it one layer earlier.
+--
+-- ON CONFLICT DO NOTHING needs no privilege beyond INSERT. DO UPDATE
+-- would additionally need UPDATE on the columns it assigns, which is a
+-- second reason the claim in section 5 is DO NOTHING.
+grant insert (subscription_id, family, event_key, status)
+  on public.subscription_email_deliveries to service_role;
+
+-- ── UPDATE: exactly the two columns a result writes ───────────
+--
+-- Every write after the claim is one of four, and between them they
+-- touch two columns:
+--
+--   sent         status = 'sent',       sent_at = now()
+--   failed       status = 'failed',     sent_at = null
+--   superseded   status = 'superseded', sent_at = null
+--   recovery     status = 'sending'     (a stale claim, retaken)
+--
+-- ══════════════════════════════════════════════════════════════
+-- THE DELIVERY IDENTITY IS NOT WRITABLE AFTER THE CLAIM.
+-- ══════════════════════════════════════════════════════════════
+--
+-- subscription_id, family and event_key are INSERT-ONLY. Once a row
+-- exists, no application statement can move it to another subscription,
+-- relabel which message it is, or re-point it at a different occurrence.
+-- That is not tidiness. Four properties argued elsewhere in this file
+-- depend on it, and each one silently weakens if the identity is
+-- writable:
+--
+--   idempotency   the unique constraint in section 5 guards
+--                 (subscription_id, family, event_key). If those three
+--                 can be updated, the guard is only as strong as the
+--                 code that happens not to touch them: a claimed key
+--                 could be edited aside and the same message claimed,
+--                 and sent, a second time.
+--   watermark     section 1 argues the key pins the exact date a
+--                 cancellation confirmation must carry, so a retry
+--                 cannot render a different one. That holds only while
+--                 the key cannot be rewritten between the failure and
+--                 the retry.
+--   preflight     the preflight compares the two live cancellation
+--                 timestamps against the key. A mutable key could be
+--                 made to match, instead of being correctly found not
+--                 to and superseded.
+--   history       a 'superseded' row records that a message was owed and
+--                 deliberately never sent. Editable identity makes that
+--                 record unusable as an audit trail.
+--
+-- created_at is likewise not writable: when a claim happened is a fact
+-- about the past. id is not writable because a primary key that can move
+-- is not an identity.
+--
+-- updated_at IS DELIBERATELY ABSENT FROM THIS GRANT, AND THE TRIGGER
+-- STILL WORKS. PostgreSQL checks UPDATE privilege against the columns
+-- the STATEMENT assigns - its SET list - and it checks them once, before
+-- row processing begins. The BEFORE UPDATE trigger from section 6
+-- assigns new.updated_at later, inside the row, and a trigger's
+-- assignment to NEW is not a privilege-checked assignment. So
+-- `update ... set status = 'sent', sent_at = now()` is authorised by
+-- (status, sent_at) alone and updated_at is still stamped.
+--
+-- The column is therefore maintained by the database and unwritable by
+-- the application at the same time, which is what section 6's
+-- stale-recovery argument actually needs: if a sender could set
+-- updated_at itself, a stuck row could be kept looking fresh forever and
+-- recovery would never reach it.
+--
+-- The WHERE clauses these updates carry - `where id = $1 and status =
+-- 'sending'`, `where family = $1 and status = 'failed'` - read columns
+-- rather than assign them, and reading is covered by the table SELECT
+-- above.
 --
 -- NO DELETE, and that is a decision rather than an omission. Delivery
 -- history is append-and-amend: what GLOA sent a customer, and when, is
 -- exactly the kind of record that must survive an operator's bad day.
 -- Nothing in the designed lifecycle needs to remove a row - a fact that
 -- stops being current is superseded, not erased.
-grant select, insert, update on public.subscription_email_deliveries to service_role;
+grant update (status, sent_at)
+  on public.subscription_email_deliveries to service_role;
 
 -- Nothing else is touched. In particular the grants on
 -- public.subscriptions (service_role SELECT only, authenticated SELECT
@@ -598,14 +701,46 @@ grant select, insert, update on public.subscription_email_deliveries to service_
 --     and tablename = 'subscription_email_deliveries';
 --   -- expect 0
 --
---   -- Only service_role. anon and authenticated must not appear at all,
---   -- and DELETE must appear for nobody.
+--   -- TABLE-LEVEL grants. Only service_role, and only SELECT: the
+--   -- INSERT and UPDATE privileges are column-scoped and deliberately
+--   -- do NOT appear in this view. anon and authenticated must not
+--   -- appear at all, and DELETE must appear for nobody.
 --   select grantee, privilege_type
 --   from information_schema.role_table_grants
 --   where table_schema = 'public'
 --     and table_name = 'subscription_email_deliveries'
 --   order by grantee, privilege_type;
---   -- expect service_role: INSERT, SELECT, UPDATE
+--   -- expect exactly one row: service_role, SELECT
+--
+--   -- COLUMN-LEVEL grants, which is where INSERT and UPDATE now live.
+--   -- A column-scoped privilege is stored on the column, not the table,
+--   -- so the query above cannot see it and this one must be run too.
+--   select grantee, column_name, privilege_type
+--   from information_schema.column_privileges
+--   where table_schema = 'public'
+--     and table_name = 'subscription_email_deliveries'
+--     and privilege_type in ('INSERT', 'UPDATE')
+--   order by privilege_type, column_name;
+--   -- expect INSERT: event_key, family, status, subscription_id
+--   --        UPDATE: sent_at, status
+--   -- and NOTHING for id, created_at or updated_at in either.
+--
+--   -- The same thing asked as the question that actually matters.
+--   select
+--     has_table_privilege('service_role',
+--       'public.subscription_email_deliveries', 'SELECT')        as sel,
+--     has_table_privilege('service_role',
+--       'public.subscription_email_deliveries', 'DELETE')        as del,
+--     has_column_privilege('service_role',
+--       'public.subscription_email_deliveries', 'status',
+--       'UPDATE')                                                as upd_status,
+--     has_column_privilege('service_role',
+--       'public.subscription_email_deliveries', 'event_key',
+--       'UPDATE')                                                as upd_event_key,
+--     has_column_privilege('service_role',
+--       'public.subscription_email_deliveries', 'updated_at',
+--       'UPDATE')                                                as upd_updated_at;
+--   -- expect t, f, t, f, f
 --
 --   -- The four constraints and the two partial indexes.
 --   select conname, pg_get_constraintdef(oid)
