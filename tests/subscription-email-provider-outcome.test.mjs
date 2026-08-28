@@ -389,25 +389,36 @@ test("32-33: event keys and provider idempotency keys are unchanged", () => {
    34-44. NOTHING ELSE MOVED
    ══════════════════════════════════════════════════════════════ */
 
-test("34: no automatic retry code was added", () => {
-  const libFiles = readdirSync(path.join(ROOT, "lib"));
-  for (const f of libFiles) {
-    assert.ok(!/subscriptionEmailRetry/i.test(f), `${f} is the retry phase, not this one`);
-  }
+test("34: the ORDER retry engine still knows nothing about these families", () => {
+  // PHASE 3H.5B2 NARROWED THIS GUARD, DELIBERATELY. It used to assert
+  // that no subscription retry existed anywhere, which was the correct
+  // boundary while 'failed' could still mean an ambiguous outcome. The
+  // sweep now exists, in its own module, and the property still worth
+  // protecting is that it did NOT get there by generalising the proven
+  // order retry engine or by joining AUTO_RETRY_FAMILY_KEYS.
   for (const [name, source] of [
     ["retry rules", retryRulesCode],
     ["retry wiring", retryWiringCode],
-    ["cron route", cronCode],
   ]) {
     for (const forbidden of [
       "subscription_email_deliveries", "subscription_started", "subscription_ended",
       "cancellation_confirmation", "subscriptionStartedEmail", "subscriptionEndedEmail",
-      "cancellationConfirmationEmail",
+      "cancellationConfirmationEmail", "subscriptionEmailRetry",
     ]) {
       assert.ok(!source.includes(forbidden), `the ${name} learned about this phase: ${forbidden}`);
     }
   }
-  // No sender grew a sweep or a stale recovery.
+  // The cron route reaches the sweep through ONE import and nothing else:
+  // it never touches the delivery table or a sender itself.
+  assert.ok(cronCode.includes("runSubscriptionEmailRetrySweep()"));
+  for (const forbidden of [
+    "subscription_email_deliveries", "subscriptionStartedEmail", "subscriptionEndedEmail",
+    "cancellationConfirmationEmail", "AUTO_RETRY_FAMILY_KEYS",
+  ]) {
+    assert.ok(!cronCode.includes(forbidden), `the cron route reaches too far: ${forbidden}`);
+  }
+  // And no SENDER grew a sweep of its own: the retry lives beside them,
+  // reusing their claimed-delivery path rather than duplicating it.
   for (const sender of SENDERS) {
     for (const forbidden of ["sweep", "Sweep", "stale", "Stale", "cutoff", "limit(25)"]) {
       assert.ok(!sender.code.includes(forbidden), `${sender.name} grew retry logic: ${forbidden}`);

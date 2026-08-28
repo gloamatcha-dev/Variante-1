@@ -777,3 +777,272 @@ export function classifySubscriptionEmailProviderError(
   const code = statusCode as number;
   return code >= 400 && code <= 499 ? "definite_failure" : "ambiguous";
 }
+
+/**
+ * AUTOMATIC RETRY (Phase 3H.5B2)
+ * ══════════════════════════════════════════════════════════════
+ *
+ * Pure orchestration over an injected port, the same shape
+ * lib/transactionalEmailRetryRules.ts uses for the six order families.
+ * The port is the only thing that touches a database or a provider, so
+ * every rule below is unit-testable with in-memory fakes.
+ *
+ * ══════════════════════════════════════════════════════════════
+ * THE ONE RULE: ONLY 'failed' IS EVER RETRIED.
+ * ══════════════════════════════════════════════════════════════
+ *
+ * Phase 3H.5B1 made that safe by making 'failed' mean something exact:
+ * the application PROVED the provider did not accept the message, either
+ * because it refused before the provider was contacted or because Resend
+ * answered with a numeric 4xx. Nothing ambiguous can reach 'failed' any
+ * more.
+ *
+ * 'sending' is never retried, and that is the whole reason this sweep can
+ * exist at all. A 'sending' row may mean the process died before the
+ * provider was contacted, OR that Resend accepted the message and the
+ * process died before the state landed, OR that the state write itself
+ * failed after acceptance, OR that the provider outcome was ambiguous.
+ * The database deliberately does not distinguish them, so resending would
+ * be a coin flip on a customer's inbox.
+ *
+ * AND THE PROVIDER CANNOT SAVE US THERE. Resend retains an idempotency
+ * key for 24 hours. The cron runs once a day at 05:20 UTC and the stale
+ * threshold is 30 minutes, so an attempt at 05:19 is not stale at 05:20
+ * and waits until 05:20 the NEXT day - 24h01m later, with the key already
+ * expired. This repository has already sent 25 duplicate order
+ * confirmations, on 2026-08-21, by treating an ambiguous state as
+ * retryable. It does not do so twice.
+ */
+
+/** The three families this sweep may touch. Nothing else, ever. */
+export const SUBSCRIPTION_EMAIL_RETRY_FAMILIES: readonly string[] = Object.freeze([
+  "subscription_started",
+  "cancellation_confirmation",
+  "subscription_ended",
+]);
+
+/** The one status a retry may select. */
+export const SUBSCRIPTION_RETRY_ELIGIBLE_STATUS = "failed";
+
+/**
+ * The three statuses a retry must NEVER select.
+ *
+ *   'sending'     ambiguous. See the header.
+ *   'sent'        delivered. Terminal email history.
+ *   'superseded'  the fact is gone and the message must never be sent.
+ */
+export const SUBSCRIPTION_RETRY_NEVER_ELIGIBLE_STATUSES: readonly string[] = Object.freeze([
+  "sending",
+  "sent",
+  "superseded",
+]);
+
+/**
+ * How many failed rows one run may attempt PER FAMILY.
+ *
+ * Per family rather than globally, and for the reason
+ * lib/transactionalEmailRetryRules.ts already records for the order
+ * families: a shared cap lets one noisy family consume the entire budget
+ * and starve the others. A hundred failed start messages after a provider
+ * outage must not delay a single customer's cancellation confirmation.
+ */
+export const SUBSCRIPTION_RETRY_BATCH_LIMIT = 25;
+
+/** How many stale rows one run may REPORT, per family. Diagnostics only. */
+export const STALE_SENDING_DIAGNOSTIC_LIMIT = 25;
+
+/**
+ * How long a row may sit at 'sending' before it is worth a human's
+ * attention.
+ *
+ * ══════════════════════════════════════════════════════════════
+ * THIS IS A DIAGNOSTIC THRESHOLD. IT IS NOT A RETRY THRESHOLD.
+ * ══════════════════════════════════════════════════════════════
+ *
+ * Crossing it does NOT mean the row is safe to retry, does NOT mean the
+ * provider rejected anything, and does NOT make the row 'failed'. It
+ * means only that this delivery has been unresolved long enough that
+ * somebody should look at it. Nothing in this module mutates such a row.
+ */
+export const STALE_SENDING_DIAGNOSTIC_AFTER_MS = 30 * 60 * 1000;
+
+/** Is this status the one and only retry-eligible one? */
+export function isSubscriptionRetryEligibleStatus(status: string | null | undefined): boolean {
+  return status === SUBSCRIPTION_RETRY_ELIGIBLE_STATUS;
+}
+
+/** Is this a family this sweep is allowed to dispatch? Fails closed. */
+export function isSubscriptionEmailRetryFamily(family: string | null | undefined): boolean {
+  return typeof family === "string" && SUBSCRIPTION_EMAIL_RETRY_FAMILIES.includes(family);
+}
+
+/** The instant before which a 'sending' row is worth reporting. */
+export function staleSubscriptionSendingCutoff(nowMs: number): string {
+  return new Date(nowMs - STALE_SENDING_DIAGNOSTIC_AFTER_MS).toISOString();
+}
+
+/** One failed delivery, as the sweep needs it. No customer data. */
+export type SubscriptionEmailDeliveryRow = {
+  id: string;
+  subscription_id: string;
+  family: string;
+  event_key: string;
+};
+
+/** What one family-specific retry attempt reports back. */
+export type SubscriptionEmailRetryOutcome =
+  | "sent"
+  | "failed"
+  | "superseded"
+  | "ambiguous";
+
+/**
+ * Everything that touches a database or a provider, injected.
+ *
+ * Note what is ABSENT: there is no insert, no upsert and no delete. The
+ * sweep can only ever read existing rows, win a compare-and-swap on one,
+ * and let the family sender record the result. It cannot manufacture a
+ * delivery row for a subscription that never had one, which is what makes
+ * historical replay structurally impossible rather than merely forbidden.
+ */
+export type SubscriptionEmailRetryPort = {
+  /** Failed rows for one family, oldest first, bounded by the caller. */
+  loadFailed: (family: string, limit: number) => Promise<SubscriptionEmailDeliveryRow[]>;
+  /**
+   * Compare-and-swap 'failed' -> 'sending' on one row.
+   *
+   * MUST match on the id AND on status = 'failed'. True only when this
+   * worker won it; false means another worker did, and this one must not
+   * contact the provider.
+   */
+  claimFailed: (deliveryId: string) => Promise<boolean>;
+  /**
+   * The family-specific send, AFTER the claim was won. Runs the
+   * authoritative preflight, the existing template and the existing
+   * provider key, and records the result.
+   */
+  retryClaimed: (row: SubscriptionEmailDeliveryRow) => Promise<SubscriptionEmailRetryOutcome>;
+  /** Stale 'sending' rows for one family. READ ONLY. Ids only. */
+  loadStaleSending: (family: string, cutoffIso: string, limit: number) => Promise<{ id: string }[]>;
+  /** Safe internal logging. Delivery uuid and a message, never a customer fact. */
+  logFailure: (deliveryId: string, message: string) => void;
+};
+
+/** One family's counters. Counts and delivery uuids only. */
+export type SubscriptionEmailFamilySummary = {
+  selected: number;
+  claimed: number;
+  sent: number;
+  failed: number;
+  superseded: number;
+  ambiguous: number;
+  errors: number;
+  staleSendingCount: number;
+  staleSendingIds: string[];
+};
+
+export function emptySubscriptionFamilySummary(): SubscriptionEmailFamilySummary {
+  return {
+    selected: 0,
+    claimed: 0,
+    sent: 0,
+    failed: 0,
+    superseded: 0,
+    ambiguous: 0,
+    errors: 0,
+    staleSendingCount: 0,
+    staleSendingIds: [],
+  };
+}
+
+/**
+ * Retries one family's failed deliveries.
+ *
+ * ── BOUNDED, AND DELIBERATELY NOT A LOOP ──────────────────────
+ *
+ * The candidate list is read ONCE and iterated once. A row that this run
+ * returns to 'failed' - because the provider answered 4xx again - is not
+ * re-selected in the same invocation, so a permanently rejected address
+ * costs one provider attempt per day rather than twenty-five in a row.
+ * One provider attempt per delivery row per cron run is the hard ceiling.
+ *
+ * ── PER ROW ISOLATION ─────────────────────────────────────────
+ *
+ * One bad delivery increments `errors` and the loop continues. A single
+ * malformed row must never stop the rest of its family, nor the two
+ * families after it.
+ */
+export async function runSubscriptionFamilyRetry(
+  port: SubscriptionEmailRetryPort,
+  family: string,
+  summary: SubscriptionEmailFamilySummary
+): Promise<void> {
+  // FAIL CLOSED. Migration 035's CHECK already refuses an unknown family
+  // at the database, and this refuses to dispatch one in the application
+  // rather than guessing which sender it resembles.
+  if (!isSubscriptionEmailRetryFamily(family)) {
+    summary.errors += 1;
+    return;
+  }
+
+  const rows = await port.loadFailed(family, SUBSCRIPTION_RETRY_BATCH_LIMIT);
+
+  for (const row of rows) {
+    // Belt to the query's braces: the port filters on 'failed', and a row
+    // of another family must never be dispatched by this one.
+    if (row.family !== family) {
+      summary.errors += 1;
+      continue;
+    }
+    summary.selected += 1;
+
+    try {
+      // THE RACE IS DECIDED HERE, by the database. Zero rows back means
+      // another worker took it, and this one sends nothing.
+      if (!(await port.claimFailed(row.id))) continue;
+      summary.claimed += 1;
+
+      const outcome = await port.retryClaimed(row);
+      if (outcome === "sent") summary.sent += 1;
+      else if (outcome === "failed") summary.failed += 1;
+      else if (outcome === "superseded") summary.superseded += 1;
+      else summary.ambiguous += 1;
+    } catch (err) {
+      summary.errors += 1;
+      port.logFailure(row.id, err instanceof Error ? err.message : "unknown error");
+    }
+  }
+}
+
+/**
+ * REPORTS stale 'sending' deliveries. It never touches them.
+ *
+ * Named "inspect" rather than "recover" on purpose. The order families
+ * have a runFamilyStaleRecovery that moves stale rows to 'failed' and
+ * re-sends them; that function is why 25 duplicate order confirmations
+ * reached customers on 2026-08-21, and this family set does not have one.
+ *
+ * The port method it calls is a SELECT. There is no write anywhere in
+ * this function and none may ever be added: a stale row is ambiguous, and
+ * age is not evidence about what a provider did.
+ *
+ * Only delivery uuids leave here. Not the subscription id, not the
+ * recipient, not the event key - which for cancellation_confirmation is
+ * built from two cancellation timestamps and is therefore a customer
+ * fact.
+ */
+export async function inspectStaleSubscriptionEmailDeliveries(
+  port: SubscriptionEmailRetryPort,
+  family: string,
+  cutoffIso: string,
+  summary: SubscriptionEmailFamilySummary
+): Promise<void> {
+  if (!isSubscriptionEmailRetryFamily(family)) {
+    summary.errors += 1;
+    return;
+  }
+
+  const rows = await port.loadStaleSending(family, cutoffIso, STALE_SENDING_DIAGNOSTIC_LIMIT);
+  summary.staleSendingCount = rows.length;
+  summary.staleSendingIds = rows.map(row => row.id);
+}

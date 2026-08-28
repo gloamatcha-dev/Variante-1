@@ -338,7 +338,19 @@ export async function sendSubscriptionEndedEmailIfNeeded(
  * apart in. Such a sweep must bring its own, stricter claim - 'failed'
  * only, never 'sending', 'sent' or 'superseded'.
  */
-async function deliverClaimedSubscriptionEnded(
+/**
+ * EXPORTED FOR THE RETRY SWEEP ONLY (Phase 3H.5B2).
+ *
+ * The caller MUST already have won this delivery - either the initial
+ * INSERT claim above, or the sweep's compare-and-swap from 'failed' to
+ * 'sending'. Calling it without holding the claim would contact the
+ * provider for a delivery somebody else owns.
+ *
+ * It performs no INSERT, which is exactly why the sweep uses it: the
+ * public entry point starts with ON CONFLICT DO NOTHING against a row
+ * that already exists, so it could never retry anything.
+ */
+export async function deliverClaimedSubscriptionEnded(
   subscriptionId: string,
   deliveryId: string
 ): Promise<SubscriptionEndedEmailResult> {

@@ -3,6 +3,11 @@ import { isBearerSecretAuthorized } from "../../../../lib/serverSecretAuth";
 import { runTransactionalEmailRetryCron } from "../../../../lib/transactionalEmailRetry";
 import { getStripeClient } from "../../../../lib/stripe";
 import { sweepDueDeferredCancellations } from "../../../../lib/subscriptionCancellation";
+// Phase 3H.5B2. Same cron, third job, its own error boundary.
+import {
+  emptySubscriptionEmailRetrySummary,
+  runSubscriptionEmailRetrySweep,
+} from "../../../../lib/subscriptionEmailRetry";
 
 /**
  * Vercel Cron entry point for the transactional email safety net.
@@ -192,9 +197,38 @@ export async function GET(request: Request): Promise<Response> {
       deferredCancellations = { due: 0, applied: 0, alreadyScheduled: 0, failed: 0, errored: true };
     }
 
+    // ── THE SUBSCRIPTION LIFECYCLE EMAIL SWEEP (Phase 3H.5B2) ──
+    //
+    // THIRD, AND LAST, deliberately. The two jobs above have already
+    // finished by this point, so an unexpected failure here cannot cost
+    // an order email its retry or a customer's cancellation its trip to
+    // Stripe. Its own guard, for the same reason the deferred sweep has
+    // one.
+    //
+    // It selects status = 'failed' and nothing else. 'sending' is
+    // reported and never touched: it is ambiguous about whether Resend
+    // already accepted the message, and Phase 3H.5A proved this daily
+    // cron cannot guarantee landing inside the provider's 24-hour
+    // idempotency window. Nothing here converts an age into a failure.
+    let subscriptionEmails;
+    try {
+      subscriptionEmails = await runSubscriptionEmailRetrySweep();
+    } catch (err) {
+      console.error(
+        "Subscription email retry: sweep failed:",
+        err instanceof Error ? err.message : "unknown error"
+      );
+      subscriptionEmails = emptySubscriptionEmailRetrySummary(true);
+    }
+
     // Counts only, exactly like the email families. No subscription id,
-    // no Stripe id, no customer fact.
-    return Response.json({ ...summary, deferredCancellations }, { status: 200 });
+    // no Stripe id, no customer fact. The subscription block adds
+    // delivery uuids for stale 'sending' rows, which are the one thing an
+    // operator needs to find them - and are not customer data.
+    return Response.json(
+      { ...summary, deferredCancellations, subscriptionEmails },
+      { status: 200 }
+    );
   } catch (err) {
     console.error(
       "Transactional email retry: sweep failed:",

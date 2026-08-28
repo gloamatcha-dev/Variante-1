@@ -583,10 +583,29 @@ test("endpoint: it is server-only and takes no input from the caller", () => {
 });
 
 test("endpoint: it answers with counts and no customer data", () => {
-  // Phase 3C.3 merges one further counter block into the answer. Still
-  // counts only - asserted on the merged shape rather than on the bare
-  // summary, and the added block is checked field by field below.
-  assert.match(routeCode, /Response\.json\(\{ \.\.\.summary, deferredCancellations \}, \{ status: 200 \}\)/);
+  // Phase 3C.3 merged one further counter block into the answer, and
+  // Phase 3H.5B2 merged a second. Still counts only - asserted on the
+  // merged shape, with each added block checked field by field below.
+  assert.match(routeCode, /Response\.json\(\s*\{ \.\.\.summary, deferredCancellations, subscriptionEmails \},/);
+  // The subscription block carries counters plus stale DELIVERY uuids,
+  // and no customer fact at all.
+  const subscriptionSummary = read("lib/subscriptionEmailDeliveryRules.ts");
+  const familyBlock = subscriptionSummary.slice(
+    subscriptionSummary.indexOf("export type SubscriptionEmailFamilySummary = {"),
+    subscriptionSummary.indexOf("};", subscriptionSummary.indexOf("export type SubscriptionEmailFamilySummary = {"))
+  );
+  for (const field of [
+    "selected", "claimed", "sent", "failed", "superseded", "ambiguous",
+    "errors", "staleSendingCount", "staleSendingIds",
+  ]) {
+    assert.ok(familyBlock.includes(`${field}:`), `the subscription summary lost ${field}`);
+  }
+  for (const leak of [
+    "subscription_id", "subscriptionId", "email", "recipient", "name",
+    "event_key", "eventKey", "customer",
+  ]) {
+    assert.ok(!familyBlock.includes(leak), `the subscription summary carries ${leak}`);
+  }
   const deferredFields = ["due", "applied", "alreadyScheduled", "failed", "errored"];
   const sweepType = read("lib/subscriptionCancellation.ts");
   const block = sweepType.slice(
