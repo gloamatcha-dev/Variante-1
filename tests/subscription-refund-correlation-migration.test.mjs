@@ -121,9 +121,11 @@ test("1, 2: 037 exists, owns its number, and is the highest migration", () => {
   const files = readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith(".sql")).sort();
   assert.ok(files.includes(MIGRATION_037), "migration 037 is missing");
   assert.deepEqual(files.filter(f => f.startsWith("037")), [MIGRATION_037]);
-  assert.equal(files[files.length - 1], MIGRATION_037, "037 must be the highest");
-  assert.ok(!files.some(f => f.startsWith("038")), "a 038 appeared");
-  assert.equal(files.length, 37);
+  assert.equal(files[files.length - 1], "038_one_time_refund_writer_concurrency.sql",
+    "038 is the one-time writer concurrency fix and must be the highest");
+  assert.equal(files[files.length - 2], MIGRATION_037, "037 must still be the one before it");
+  assert.ok(!files.some(f => f.startsWith("039")), "a 039 appeared");
+  assert.equal(files.length, 38);
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length);

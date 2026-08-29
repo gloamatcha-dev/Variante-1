@@ -448,12 +448,20 @@ test("3F: only the owner's own private subscriptions are readable", () => {
   // property this assertion protects (an account UI change must not
   // widen what a customer can read) still holds.
   const migrations = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql"));
-  assert.equal(migrations.length, 37, "an unreviewed migration was added");
+  assert.equal(migrations.length, 38, "an unreviewed migration was added");
   assert.deepEqual(
     migrations.filter(f => f > "034_subscription_cancellation.sql").sort(),
-    ["035_subscription_email_deliveries.sql", "036_subscription_payment_status.sql", "037_subscription_refund_correlation.sql"],
+    ["035_subscription_email_deliveries.sql", "036_subscription_payment_status.sql",
+     "037_subscription_refund_correlation.sql", "038_one_time_refund_writer_concurrency.sql"],
     "a migration above 034 appeared that this suite has not been reviewed against"
   );
+  // 038 is Phase 3K.B's one-time refund writer concurrency fix. Like 035
+  // it adds no policy and grants nothing to a browser role, so the
+  // property this assertion protects still holds.
+  const m038 = read("supabase/migrations/038_one_time_refund_writer_concurrency.sql");
+  assert.ok(!m038.includes("create policy"), "038 must create no policy");
+  assert.ok(!/grant[^;]*to authenticated/.test(m038),
+    "038 must grant nothing to the browser role");
   const m035 = read("supabase/migrations/035_subscription_email_deliveries.sql");
   assert.ok(!m035.includes("create policy"), "035 must create no policy");
   assert.ok(!/grant[^;]*to authenticated/.test(m035),
@@ -691,16 +699,18 @@ test("3F: the controls are real buttons, focusable, and status is not colour-onl
 
 test("3F: migrations 022 through 034 are untouched and only 035, 036 and 037 follow", () => {
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.length, 37);
+  assert.equal(files.length, 38);
   // 034 remains the last of the cancellation work. 035 is Phase 3H.1's
-  // delivery table, 036 is Phase 3I.B1's payment foundation and 037 is
-  // Phase 3J.B1's invoice-keyed refund-state writer; those three are the
+  // delivery table, 036 is Phase 3I.B1's payment foundation, 037 is
+  // Phase 3J.B1's invoice-keyed refund-state writer and 038 is Phase
+  // 3K.B's one-time refund writer concurrency fix; those four are the
   // ONLY migrations allowed above it until a later phase is reviewed
   // here.
-  assert.equal(files[files.length - 4], "034_subscription_cancellation.sql");
-  assert.equal(files[files.length - 3], "035_subscription_email_deliveries.sql");
-  assert.equal(files[files.length - 2], "036_subscription_payment_status.sql");
-  assert.equal(files[files.length - 1], "037_subscription_refund_correlation.sql");
+  assert.equal(files[files.length - 5], "034_subscription_cancellation.sql");
+  assert.equal(files[files.length - 4], "035_subscription_email_deliveries.sql");
+  assert.equal(files[files.length - 3], "036_subscription_payment_status.sql");
+  assert.equal(files[files.length - 2], "037_subscription_refund_correlation.sql");
+  assert.equal(files[files.length - 1], "038_one_time_refund_writer_concurrency.sql");
   // This phase writes no SQL at all: nothing in it references a
   // migration, a policy or a grant.
   for (const source of [viewCode, portalCode]) {

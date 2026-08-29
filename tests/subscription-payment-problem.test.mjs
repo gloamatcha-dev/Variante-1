@@ -659,10 +659,11 @@ test("72-74: no migration was added, edited or required", () => {
   // writer), reviewed in
   // tests/subscription-refund-correlation-migration.test.mjs. THIS phase
   // still needed no migration, which is what the guard protects.
-  assert.equal(files.length, 37);
-  assert.equal(files[files.length - 1], "037_subscription_refund_correlation.sql");
-  assert.equal(files[files.length - 2], "036_subscription_payment_status.sql");
-  assert.ok(!files.some(f => f.startsWith("038")), "an unreviewed migration appeared");
+  assert.equal(files.length, 38);
+  assert.equal(files[files.length - 1], "038_one_time_refund_writer_concurrency.sql");
+  assert.equal(files[files.length - 2], "037_subscription_refund_correlation.sql");
+  assert.equal(files[files.length - 3], "036_subscription_payment_status.sql");
+  assert.ok(!files.some(f => f.startsWith("039")), "an unreviewed migration appeared");
   // Everything this phase needed, 036 already grants.
   assert.ok(sql036.includes("'payment_problem'"));
   assert.ok(sql036.includes("grant execute on function public.sync_subscription_payment_status(text, text) to service_role;"));
@@ -909,10 +910,11 @@ test("21, 22, 23: no migration was added, edited or required", () => {
   // writer), reviewed in
   // tests/subscription-refund-correlation-migration.test.mjs. THIS phase
   // still needed no migration, which is what the guard protects.
-  assert.equal(files.length, 37);
-  assert.equal(files[files.length - 1], "037_subscription_refund_correlation.sql");
-  assert.equal(files[files.length - 2], "036_subscription_payment_status.sql");
-  assert.ok(!files.some(f => f.startsWith("038")), "an unreviewed migration appeared");
+  assert.equal(files.length, 38);
+  assert.equal(files[files.length - 1], "038_one_time_refund_writer_concurrency.sql");
+  assert.equal(files[files.length - 2], "037_subscription_refund_correlation.sql");
+  assert.equal(files[files.length - 3], "036_subscription_payment_status.sql");
+  assert.ok(!files.some(f => f.startsWith("039")), "an unreviewed migration appeared");
   // The guard needs no schema: stripe_subscription_id is migration 022's
   // column, and 022 is the single statement that binds it - which is why
   // it is the authoritative side of the ownership comparison.

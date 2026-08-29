@@ -86,11 +86,12 @@ test("1, 2: 036 exists, owns its number, and 037 is the only thing above it", ()
   // writer), reviewed in
   // tests/subscription-refund-correlation-migration.test.mjs. 036 still
   // owns its number and is unedited; it is simply no longer the last.
-  assert.equal(files[files.length - 1], "037_subscription_refund_correlation.sql");
-  assert.equal(files[files.length - 2], MIGRATION_036, "036 must be the one before 037");
+  assert.equal(files[files.length - 1], "038_one_time_refund_writer_concurrency.sql");
+  assert.equal(files[files.length - 2], "037_subscription_refund_correlation.sql");
+  assert.equal(files[files.length - 3], MIGRATION_036, "036 must still be the one before 037");
   assert.deepEqual(files.filter(f => f.startsWith("037")), ["037_subscription_refund_correlation.sql"]);
-  assert.ok(!files.some(f => f.startsWith("038")), "a 038 appeared");
-  assert.equal(files.length, 37);
+  assert.ok(!files.some(f => f.startsWith("039")), "a 039 appeared");
+  assert.equal(files.length, 38);
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length);

@@ -652,10 +652,19 @@ test("54: migrations 019 and 022-037 are unmodified", () => {
     .includes("security definer set search_path = ''"));
 });
 
-test("55: no migration 038 was created", () => {
-  const files = readdirSync(MIGRATIONS).filter(name => /^0*3[89]|^0*[4-9]\d/.test(name));
-  assert.deepEqual(files, [], "this phase required no schema change");
+test("55: this phase added no migration, and the only one after it is 038", () => {
+  // Written when 037 was the highest, as "no 038 was created": THIS phase
+  // is runtime only and still adds nothing. Phase 3K.B then added 038 on
+  // purpose, for the ONE-TIME writer's concurrency. So the guard is kept
+  // and re-pinned rather than deleted, and it now also proves 038 stayed
+  // out of the subscription writer this phase depends on.
+  const beyond = readdirSync(MIGRATIONS).filter(name => Number(name.slice(0, 3)) > 37).sort();
+  assert.deepEqual(beyond, ["038_one_time_refund_writer_concurrency.sql"],
+    "an unreviewed migration appeared after 037");
   assert.ok(existsSync(path.join(MIGRATIONS, "037_subscription_refund_correlation.sql")));
+  const sql038 = withoutComments(read("supabase/migrations/038_one_time_refund_writer_concurrency.sql"));
+  assert.ok(!sql038.includes("apply_order_refund_state_by_invoice"),
+    "038 reached into the subscription refund writer");
 });
 
 test("56: the webhook route was not modified", () => {
