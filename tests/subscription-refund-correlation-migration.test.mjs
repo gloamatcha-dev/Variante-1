@@ -358,6 +358,130 @@ test("19: every refund decision is made AFTER the lock, from the locked row", ()
   }
 });
 
+/* ══════════════════════════════════════════════════════════════
+   19a-19k. THE LOCK INVARIANT (Phase 3J.B1.1)
+   ══════════════════════════════════════════════════════════════
+
+   A count and the select that follows it are SEPARATE STATEMENTS, and
+   under READ COMMITTED the row can vanish between them. SELECT INTO
+   without STRICT does not raise on zero rows: FOUND goes false and the
+   target is left NULL.
+
+   For the ORDER LOCK that is not a no-op, it is a false success. Every
+   comparison below would run against NULL: the eligibility test answers
+   NULL and falls through, the cap answers NULL and falls through, the
+   ladder picks an arm from the caller's amount alone, the unchanged
+   check answers NULL and falls through, and the UPDATE runs with
+   `where id = NULL`, matches nothing, and the function returns
+   'applied'. A payment fact reported durable that was never written.
+
+   So the invariant these tests hold is: the transition can only run
+   against a row that was selected AND locked. ══════════════════════ */
+
+/** Everything the function does with refund state, in source order. */
+const REFUND_DECISIONS = [
+  "v_order.payment_status not in ('paid'",
+  "p_refunded_total_cents > v_order.total_gross_cents",
+  "p_refunded_total_cents >= v_order.total_gross_cents",
+  "elsif coalesce(p_has_pending_refund, false) then",
+  "v_order.refunded_total_cents is not distinct from",
+  "update public.orders",
+  "return 'applied';",
+];
+
+/** The guard block that must sit between the lock and all of them. */
+const LOCK_GUARD = `  for update;`;
+const POST_LOCK_GUARD = `  if not found then
+    return 'order_missing_for_attempt';
+  end if;`;
+
+test("19a: the attempt select is followed IMMEDIATELY by a NOT FOUND guard", () => {
+  const at = newFunction.indexOf(`  select id into v_attempt_id
+  from public.checkout_attempts
+  where stripe_invoice_id = v_invoice_id;`);
+  assert.notEqual(at, -1, "the attempt select changed shape");
+  const after = newFunction.slice(at);
+  const guardAt = after.indexOf(`  if not found then
+    return 'order_not_found';
+  end if;`);
+  assert.notEqual(guardAt, -1, "the attempt select has no NOT FOUND guard");
+  // Nothing executable may run between the select and its guard.
+  const between = withoutComments(after.slice(after.indexOf(";") + 1, guardAt)).trim();
+  assert.equal(between, "", `something runs before the attempt guard: ${between}`);
+});
+
+test("19b: a vanished attempt cannot reach the order lookup", () => {
+  const guardAt = newFunction.indexOf(`  if not found then
+    return 'order_not_found';
+  end if;`);
+  const orderCountAt = newFunction.indexOf(`  select count(*) into v_match_count
+  from public.orders`);
+  assert.ok(guardAt !== -1 && orderCountAt !== -1);
+  assert.ok(guardAt < orderCountAt, "the order lookup runs before the attempt is proven");
+});
+
+test("19c: the FOR UPDATE is followed IMMEDIATELY by a NOT FOUND guard", () => {
+  const lockAt = newFunction.indexOf(LOCK_GUARD);
+  assert.notEqual(lockAt, -1, "the lock changed shape");
+  const after = newFunction.slice(lockAt + LOCK_GUARD.length);
+  const guardAt = after.indexOf(POST_LOCK_GUARD);
+  assert.notEqual(guardAt, -1, "THE LOCK HAS NO NOT FOUND GUARD");
+  // Nothing executable may run between the lock and its guard.
+  const between = withoutComments(after.slice(0, guardAt)).trim();
+  assert.equal(between, "", `something runs before the lock guard: ${between}`);
+});
+
+test("19d-19j: NO refund decision exists before the post-lock guard", () => {
+  const lockAt = newFunction.indexOf(LOCK_GUARD);
+  const guardEnd = lockAt + LOCK_GUARD.length
+    + newFunction.slice(lockAt + LOCK_GUARD.length).indexOf(POST_LOCK_GUARD)
+    + POST_LOCK_GUARD.length;
+  for (const decision of REFUND_DECISIONS) {
+    const at = newFunction.indexOf(decision);
+    assert.notEqual(at, -1, `missing: ${decision}`);
+    assert.ok(at > guardEnd,
+      `a refund decision can run against an unlocked NULL row: ${decision}`);
+  }
+  // And the decisions are still in their reviewed order.
+  const positions = REFUND_DECISIONS.map(d => newFunction.indexOf(d));
+  assert.deepEqual(positions, [...positions].sort((a, b) => a - b),
+    "the transition was reordered");
+});
+
+test("19k: 'applied' is unreachable through the zero-row lock path", () => {
+  // The guard returns before it, and it is the only 'applied' there is.
+  const guardReturnAt = newFunction.indexOf(POST_LOCK_GUARD);
+  const appliedAt = newFunction.indexOf("return 'applied';");
+  assert.ok(guardReturnAt !== -1 && appliedAt > guardReturnAt);
+  assert.equal([...newFunction.matchAll(/return 'applied';/g)].length, 1,
+    "there is more than one way to report a durable write");
+  // Every statement that could report success reads v_order, which the
+  // guard has just proven exists.
+  const tail = newFunction.slice(guardReturnAt + POST_LOCK_GUARD.length);
+  assert.ok(tail.includes("where id = v_order.id;"),
+    "the write no longer targets the locked row");
+});
+
+test("19l: both row-selecting statements are guarded, and the counts are not", () => {
+  // A count always returns exactly one row, so FOUND after it proves
+  // nothing. The guards belong to the two selects that can return none.
+  const guards = [...newFunction.matchAll(/if not found then/g)];
+  assert.equal(guards.length, 2, "the FOUND guard count changed");
+  const rowSelects = [
+    "select id into v_attempt_id",
+    "select * into v_order",
+  ];
+  for (const stmt of rowSelects) {
+    const at = newFunction.indexOf(stmt);
+    assert.notEqual(at, -1, `missing: ${stmt}`);
+    const next = newFunction.slice(at).indexOf("if not found then");
+    assert.notEqual(next, -1, `${stmt} is unguarded`);
+  }
+  // SELECT INTO STRICT is deliberately NOT used: it raises, and every
+  // expected refusal here must be a returned word the webhook can log.
+  assert.ok(!/into strict/i.test(newFunction), "the function raises instead of returning");
+});
+
 test("20: the locked row is the one that gets written", () => {
   const update = newFunction.slice(newFunction.indexOf("update public.orders"));
   assert.ok(update.includes("where id = v_order.id;"),

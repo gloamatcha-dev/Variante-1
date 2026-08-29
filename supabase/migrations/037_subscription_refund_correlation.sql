@@ -107,6 +107,10 @@
 --   * 'ambiguous_payment_intent' becomes 'ambiguous_invoice_correlation'
 --   * 'order_missing_for_attempt', which 019 has no analogue for because
 --     it does not traverse a second table
+--   * two explicit FOUND guards after the row-selecting statements, so
+--     the transition below can only ever run against a row that was
+--     actually selected and actually locked. See the guard comments in
+--     3a and 3c: both sit BEFORE the transition and neither changes it.
 --
 -- NO CURRENCY ARGUMENT, and this is deliberate. Migration 019 is
 -- currency-independent and deals only in integer cents; the currency
@@ -175,6 +179,16 @@ begin
   from public.checkout_attempts
   where stripe_invoice_id = v_invoice_id;
 
+  -- The count above and this select are separate statements, and under
+  -- READ COMMITTED the row can disappear between them. SELECT INTO
+  -- without STRICT does not raise on zero rows: it sets FOUND false and
+  -- leaves the target NULL. An unguarded NULL here would make the next
+  -- lookup compare checkout_attempt_id = NULL, which matches nothing and
+  -- would report the wrong reason for the refusal.
+  if not found then
+    return 'order_not_found';
+  end if;
+
   -- 3b. CHECKOUT ATTEMPT -> ORDER
   --
   -- Same reasoning against orders_checkout_attempt_id_key (011).
@@ -204,6 +218,22 @@ begin
   from public.orders
   where checkout_attempt_id = v_attempt_id
   for update;
+
+  -- THE GUARD THAT MAKES THE LOCK MEAN SOMETHING.
+  --
+  -- Without it a zero-row lock is not an error and not a refusal: it is
+  -- a silent NULL v_order, and every test below then evaluates against
+  -- NULL. The eligibility check answers NULL and falls through, the cap
+  -- comparison answers NULL and falls through, the ladder picks an arm
+  -- from p_refunded_total_cents alone, the unchanged check answers NULL
+  -- and falls through, and the UPDATE runs with `where id = NULL`. It
+  -- matches no row, writes nothing, and the function still returns
+  -- 'applied' - a payment fact reported as durable that was never
+  -- written. That is the one outcome a refund-state writer must never
+  -- produce, so no refund decision may run before this returns.
+  if not found then
+    return 'order_missing_for_attempt';
+  end if;
 
   -- 3d. MIGRATION 019'S TRANSITION, UNCHANGED ──────────────────
 
