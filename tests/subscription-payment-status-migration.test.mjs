@@ -110,8 +110,11 @@ test("3: migrations 022 through 035 are all still present, none renamed", () => 
   const touched = changed ? changed.split(NEWLINE) : [];
   for (const file of touched) {
     // 037 is a NEW file, not an edit, so it may legitimately appear here
-    // once it is staged. Nothing older may.
-    assert.ok(file.endsWith(MIGRATION_036) || file.endsWith("037_subscription_refund_correlation.sql"),
+    // once it is staged, and 038 is still UNAPPLIED so it may genuinely be
+    // edited in place. Nothing older may.
+    assert.ok(file.endsWith(MIGRATION_036)
+      || file.endsWith("037_subscription_refund_correlation.sql")
+      || file.endsWith("038_one_time_refund_writer_concurrency.sql"),
       `an immutable migration was modified: ${file}`);
   }
 });

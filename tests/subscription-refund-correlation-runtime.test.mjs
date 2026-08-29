@@ -642,7 +642,11 @@ test("54: migrations 019 and 022-037 are unmodified", () => {
   const changed = execFileSync("git", ["diff", "--name-only", "HEAD"], { cwd: ROOT, encoding: "utf-8" })
     .trim();
   const touched = changed ? changed.split(NEWLINE) : [];
-  const migrations = touched.filter(rel => rel.startsWith("supabase/migrations/"));
+  // 038 is still UNAPPLIED, so it may be edited in place until the owner
+  // applies it. Every migration below it is live and may not.
+  const migrations = touched
+    .filter(rel => rel.startsWith("supabase/migrations/"))
+    .filter(rel => !rel.endsWith("038_one_time_refund_writer_concurrency.sql"));
   assert.deepEqual(migrations, [], "a live, immutable migration was edited");
   // And the two functions this phase depends on still read the way they
   // were applied to production.

@@ -61,7 +61,7 @@ const outsideTheFunction = (() => {
   return sql038.slice(0, from) + sql038.slice(to + "$$;".length);
 })();
 
-const LOCK = "lock table public.orders in share row exclusive mode;";
+const LOCK = "lock table public.orders in exclusive mode;";
 const at = needle => {
   const i = fn038.indexOf(needle);
   assert.notEqual(i, -1, `missing from the function: ${needle}`);
@@ -109,7 +109,11 @@ test("3, 4, 5: migrations 019 and 022 through 037 are unmodified", () => {
   const changed = execFileSync("git", ["diff", "--name-only", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
-  assert.deepEqual(touched, [], "a live, immutable migration was edited");
+  // 038 itself may be edited while it is still unapplied - that is the
+  // whole reason it is not a 039. Everything BELOW it is live and
+  // immutable, and that is what this guard is for.
+  const immutable = touched.filter(rel => !rel.endsWith(MIGRATION_038));
+  assert.deepEqual(immutable, [], "a live, immutable migration was edited");
   // And the two this phase reasons about still read the way they were applied.
   assert.ok(read(`supabase/migrations/${MIGRATION_019}`)
     .includes("create or replace function public.apply_order_refund_state("));
@@ -175,23 +179,83 @@ test("12b: the comparison is still the RAW parameter, not a normalised one", () 
    13-16. THE TABLE LOCK
    ══════════════════════════════════════════════════════════════ */
 
-test("13: the table lock exists, and it is SHARE ROW EXCLUSIVE", () => {
-  assert.ok(fn038.includes(LOCK), "the table lock is missing");
+test("13: the table lock exists, and it is EXCLUSIVE", () => {
+  assert.ok(fn038.includes(LOCK), "the table lock is missing or is not EXCLUSIVE");
   assert.equal((fn038.match(/lock table/g) ?? []).length, 1, "more than one table lock");
 });
 
-test("13b: plain SHARE MODE is deliberately NOT used", () => {
-  // SHARE is self-compatible, so two invocations can hold it at once and
-  // then deadlock upgrading to the ROW EXCLUSIVE their UPDATE needs.
-  // SHARE ROW EXCLUSIVE blocks the same DML and conflicts with itself, so
-  // a second invocation waits at the LOCK instead of deadlocking later.
+test("13b: neither SHARE nor SHARE ROW EXCLUSIVE is used", () => {
+  // SHARE is self-compatible, so two invocations hold it at once and then
+  // deadlock upgrading to the ROW EXCLUSIVE their own UPDATE needs.
+  //
+  // SHARE ROW EXCLUSIVE fixes that but still ALLOWS ROW SHARE, which is
+  // what SELECT ... FOR UPDATE takes - so one of the five live
+  // row-locking order workflows can hold a row this function is about to
+  // select, wait for ROW EXCLUSIVE behind this function's table lock, and
+  // close a cross-RPC cycle. EXCLUSIVE blocks ROW SHARE, so that
+  // transaction waits before it holds anything.
   assert.ok(!/in share mode/i.test(fn038), "the lock was weakened to SHARE, which self-deadlocks");
-  assert.ok(!/in exclusive mode/i.test(fn038), "the lock is broader than it needs to be");
+  assert.ok(!/in share row exclusive mode/i.test(fn038),
+    "the lock was weakened to SHARE ROW EXCLUSIVE, which allows ROW SHARE and deadlocks cross-RPC");
+  assert.ok(!/in share update exclusive mode/i.test(fn038),
+    "the lock does not block DML at all");
   assert.ok(!/in access exclusive mode/i.test(fn038), "the lock blocks plain readers");
   assert.ok(!/nowait/i.test(fn038), "the lock refuses to wait, turning contention into an error");
   // The reasoning is written down where the next reader will find it.
   assert.ok(sql038Source.includes("SHARE MODE WAS EVALUATED FIRST AND IS REJECTED"),
-    "the lock-mode decision is not explained in the migration");
+    "the SHARE decision is not explained in the migration");
+  assert.ok(sql038Source.includes("SHARE ROW EXCLUSIVE WAS EVALUATED SECOND AND IS ALSO REJECTED"),
+    "the SHARE ROW EXCLUSIVE decision is not explained in the migration");
+  assert.ok(sql038Source.includes("EXCLUSIVE IS THE NARROWEST MODE THAT IS CORRECT"),
+    "the chosen mode is not justified in the migration");
+});
+
+test("13c: the chosen mode blocks every lock that can start a cycle here", () => {
+  // The conflict facts this design rests on, written down as a table so a
+  // future reader does not have to rederive them. A held EXCLUSIVE blocks
+  // ROW SHARE, ROW EXCLUSIVE and EXCLUSIVE, and allows ACCESS SHARE.
+  const rationale = sql038Source;
+  for (const fact of [
+    "INSERT / UPDATE / DELETE   ROW EXCLUSIVE   BLOCKED",
+    "SELECT ... FOR UPDATE      ROW SHARE       BLOCKED",
+    "another call to this fn    EXCLUSIVE       BLOCKED",
+    "plain SELECT               ACCESS SHARE    allowed",
+  ]) {
+    assert.ok(rationale.includes(fact), `the conflict table lost a row: ${fact}`);
+  }
+  // And the five live row-locking order workflows this protects against
+  // are named, so the next person to add a sixth sees the constraint.
+  for (const fn of [
+    "request_order_cancellation", "cancel_order", "resolve_order_cancellation_request",
+    "mark_order_shipped", "apply_order_refund_state_by_invoice",
+  ]) {
+    assert.ok(rationale.includes(fn), `the cross-RPC inventory lost: ${fn}`);
+  }
+});
+
+test("13d: every named cross-RPC workflow really is a row-locking orders writer", () => {
+  // The migration's argument is only as good as its inventory, so the
+  // inventory is checked against the migrations rather than trusted.
+  const live = {
+    request_order_cancellation: "019_order_lifecycle_tracking.sql",
+    cancel_order: "029_authorized_order_cancellation.sql",
+    resolve_order_cancellation_request: "031_cancellation_request_resolution.sql",
+    mark_order_shipped: "032_open_cancellation_request_shipment_guard.sql",
+    apply_order_refund_state_by_invoice: "037_subscription_refund_correlation.sql",
+  };
+  for (const [name, file] of Object.entries(live)) {
+    const source = withoutComments(read(`supabase/migrations/${file}`));
+    const from = source.indexOf(`create or replace function public.${name}(`);
+    assert.notEqual(from, -1, `${name} is not defined in ${file}`);
+    const fn = source.slice(from, source.indexOf("$$;", from));
+    const lockAt = fn.indexOf("for update;");
+    const updateAt = fn.indexOf("update public.orders");
+    assert.ok(lockAt > 0, `${name} takes no row lock`);
+    assert.ok(updateAt > lockAt,
+      `${name} no longer locks an orders row before updating orders`);
+    assert.ok(fn.slice(0, lockAt).includes("from public.orders"),
+      `${name} locks a row in a different table`);
+  }
 });
 
 test("14: the table lock happens AFTER input validation", () => {

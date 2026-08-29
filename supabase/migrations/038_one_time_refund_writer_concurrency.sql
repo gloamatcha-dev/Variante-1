@@ -133,33 +133,101 @@
 -- No data would be corrupted, but shipping a known deadlock inside a
 -- concurrency fix is not a fix.
 --
--- SHARE ROW EXCLUSIVE IS THE NARROWEST MODE THAT IS CORRECT. From
--- PostgreSQL's lock conflict table, a held SHARE ROW EXCLUSIVE blocks
--- requests for ROW EXCLUSIVE, SHARE UPDATE EXCLUSIVE, SHARE, SHARE ROW
--- EXCLUSIVE, EXCLUSIVE and ACCESS EXCLUSIVE, and allows ACCESS SHARE
--- and ROW SHARE. Therefore:
+-- SHARE ROW EXCLUSIVE WAS EVALUATED SECOND AND IS ALSO REJECTED. It
+-- fixes the deadlock above - it conflicts with itself, so two refund
+-- calls serialise at the LOCK instead of upgrading into each other - but
+-- it still ALLOWS ROW SHARE, and that is the hole. ROW SHARE is what
+-- SELECT ... FOR UPDATE takes, and this database has five other live
+-- functions that lock an orders row and then update it:
 --
---   INSERT / UPDATE / DELETE   ROW EXCLUSIVE    BLOCKED  <- the property
---   plain SELECT               ACCESS SHARE     allowed
---   SELECT ... FOR UPDATE      ROW SHARE        allowed  <- our own
---   another call to this fn    SHARE ROW EXCL   BLOCKED  <- serialised
+--   request_order_cancellation          019
+--   cancel_order                        029
+--   resolve_order_cancellation_request  031
+--   mark_order_shipped                  032
+--   apply_order_refund_state_by_invoice 037
 --
--- The last line is what SHARE could not give. Because the mode conflicts
--- WITH ITSELF, a second invocation waits at the LOCK statement, before it
--- has read anything and before it holds anything, and then runs cleanly
--- once the first commits. There is no lock upgrade, so there is nothing
--- to deadlock. EXCLUSIVE and ACCESS EXCLUSIVE would also work and are
--- deliberately not used: they would additionally block SELECT ... FOR
--- UPDATE and plain reads respectively, which this function has no need
--- to exclude.
+-- Every one of them is the shape ROW SHARE + row lock, then ROW
+-- EXCLUSIVE. Against a refund holding SHARE ROW EXCLUSIVE that produces a
+-- genuine cross-RPC cycle, and the window is not theoretical - it is the
+-- cardinality count below, which is a SEQUENTIAL SCAN because this column
+-- carries no index:
+--
+--   T2  lock table orders in share row exclusive   -> granted
+--   T1  select ... orders where order_number = X
+--         for update                               -> ROW SHARE is
+--                                                     COMPATIBLE with
+--                                                     T2's mode, so T1
+--                                                     is granted, and it
+--                                                     now holds row X
+--   T2  (finishes its seq scan, counts 1)
+--   T2  select ... orders where stripe_payment_intent_id = ...
+--         for update                               -> the same row X,
+--                                                     held by T1, so T2
+--                                                     waits on T1
+--   T1  update public.orders ...                   -> needs ROW
+--                                                     EXCLUSIVE, which
+--                                                     conflicts with
+--                                                     T2's SHARE ROW
+--                                                     EXCLUSIVE, so T1
+--                                                     waits on T2
+--                                                  -> DEADLOCK
+--
+-- Refunding an order while its cancellation is being resolved, or while
+-- it is being cancelled, is not an exotic interleaving. It is the normal
+-- pairing: resolving a cancellation is exactly when a refund is issued.
+--
+-- EXCLUSIVE IS THE NARROWEST MODE THAT IS CORRECT. From PostgreSQL's
+-- lock conflict table, a held EXCLUSIVE blocks requests for ROW SHARE,
+-- ROW EXCLUSIVE, SHARE UPDATE EXCLUSIVE, SHARE, SHARE ROW EXCLUSIVE,
+-- EXCLUSIVE and ACCESS EXCLUSIVE, and allows ACCESS SHARE alone.
+-- Therefore:
+--
+--   INSERT / UPDATE / DELETE   ROW EXCLUSIVE   BLOCKED  <- the property
+--   SELECT ... FOR UPDATE      ROW SHARE       BLOCKED  <- closes the
+--                                                          cycle above
+--   another call to this fn    EXCLUSIVE       BLOCKED  <- serialised
+--   plain SELECT               ACCESS SHARE    allowed  <- readers keep
+--                                                          working
+--
+-- WHY THAT IS DEADLOCK-FREE, AND NOT JUST DEADLOCK-UNLIKELY. This
+-- transaction requests exactly one table lock, on one table, as its first
+-- act against that table, and it never requests a lock on anything else.
+--
+--   BEFORE the lock is granted it holds nothing, so no other transaction
+--   can be waiting on it. A wait-for edge points away from it only.
+--
+--   AFTER the lock is granted, no other transaction holds ROW SHARE or
+--   ROW EXCLUSIVE on public.orders - EXCLUSIVE waited them out, and a row
+--   lock cannot outlive the table lock its holder needed to take it. So
+--   nothing else holds a row lock here, and this function's own
+--   SELECT ... FOR UPDATE and UPDATE wait for no one. A transaction never
+--   conflicts with itself.
+--
+-- No outgoing wait-for edge in either half means this transaction cannot
+-- be a member of a cycle. That is a structural argument, not a
+-- probability one.
+--
+-- ACCESS EXCLUSIVE would also work and is deliberately not used: it would
+-- additionally block plain SELECT, so the account page could not read an
+-- order while any refund was being recorded. EXCLUSIVE is one step
+-- narrower and gives up nothing this function needs.
 --
 -- THE COST, STATED PLAINLY. While this transaction holds the lock, every
--- write to public.orders waits - including order creation from a paid
--- checkout and the email-state updates. The lock is taken AFTER input
--- validation, so a malformed call blocks nothing, and it is released
--- when the transaction ends, which for this function is a few statements
--- later. That is the accepted price of correctness on a column that
--- carries no unique index and provably carries duplicates.
+-- write to public.orders waits - order creation from a paid checkout, the
+-- email-state updates, and, under EXCLUSIVE, the five row-locking order
+-- workflows named above as well. They WAIT; none of them fails, and none
+-- of them deadlocks, which is the whole point of choosing this mode. Only
+-- plain SELECT is unaffected, so nothing a customer or the account page
+-- reads is blocked.
+--
+-- The lock is taken AFTER input validation, so a malformed call blocks
+-- nothing, and it is released when the transaction ends, which for this
+-- function is a few statements later. The one thing that makes that
+-- window longer than it should be is the unindexed cardinality scan; an
+-- ordinary index on stripe_payment_intent_id would shorten it and is
+-- deliberately left to its own phase. That is the accepted price of
+-- correctness on a column that carries no unique index and provably
+-- carries duplicates.
 --
 -- PRIVILEGE NOTE. LOCK TABLE in any mode above ROW EXCLUSIVE requires
 -- table-level UPDATE, DELETE or TRUNCATE privilege. This function is
@@ -228,8 +296,10 @@ begin
   -- decide a refund is allowed to run before this line - not the count,
   -- not the select, not a status test - because a decision taken before
   -- the writers are excluded is a decision taken from a snapshot that is
-  -- still moving. See section 3 for why this mode and not SHARE.
-  lock table public.orders in share row exclusive mode;
+  -- still moving. See section 3 for why EXCLUSIVE and not SHARE or SHARE
+  -- ROW EXCLUSIVE: both of those let another order workflow hold a row
+  -- lock here and deadlock against this one.
+  lock table public.orders in exclusive mode;
 
   -- CARDINALITY, PROVEN UNDER THE LOCK.
   --
