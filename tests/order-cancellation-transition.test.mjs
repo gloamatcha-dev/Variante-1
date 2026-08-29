@@ -1061,7 +1061,14 @@ test("regression: the refund webhook flow is untouched", () => {
   ]) {
     assert.ok(refunds.includes(`"${event}"`), `the refund event set lost ${event}`);
   }
-  assert.ok(refunds.includes("apply_order_refund_state") === false);
+  // The pure module still reaches no database. Phase 3J.B2 gave it the
+  // invoice writer's RESULT VOCABULARY to interpret - a string union and
+  // a name inside a comment, never a call - so a bare substring ban no
+  // longer states this invariant. What it always meant is asserted
+  // instead: no import, no client, no rpc.
+  assert.ok(!refunds.includes(".rpc("), "the pure refund module learned to call the database");
+  assert.ok(!refunds.includes("import "), "the pure refund module took a dependency");
+  assert.ok(!refunds.includes("supabase"), "the pure refund module learned about Supabase");
   assert.ok(read("lib/orderRefunds.ts").includes('admin.rpc("apply_order_refund_state"'));
 });
 

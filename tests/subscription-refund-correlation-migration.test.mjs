@@ -28,6 +28,9 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(fileURLToPath(import.meta.url), "../..");
 const NEWLINE = String.fromCharCode(10);
+
+/** Every Postgres function lib/orderRefunds.ts writes through, in source order. */
+const RPC_CALL = /admin\.rpc\("(\w+)"/g;
 const CARRIAGE_RETURN = String.fromCharCode(13);
 
 /**
@@ -798,7 +801,13 @@ test("50: orders.stripe_payment_intent_id still has no unique index anywhere", (
 });
 
 /* ══════════════════════════════════════════════════════════════
-   51-55. NOTHING IS WIRED UP YET
+   51-55. WHAT THE RUNTIME MAY AND MAY NOT DO WITH 037
+
+   Written in the migration-only phase as "nothing is wired up yet",
+   which Phase 3J.B2 then deliberately wired up. These guards are kept
+   rather than deleted: what they were really protecting is that the new
+   writer has exactly ONE caller, that the one-time path still runs
+   first, and that the refund EMAIL layer never learned about any of it.
    ══════════════════════════════════════════════════════════════ */
 
 /** Every source file under lib/ and app/. */
@@ -816,29 +825,53 @@ const sourceFiles = (() => {
   return out;
 })();
 
-test("51: no application code calls the new function", () => {
-  const callers = sourceFiles.filter(rel => read(rel).includes("apply_order_refund_state_by_invoice"));
-  assert.deepEqual(callers, [], "the runtime fallback belongs to Phase 3J.B2, not this migration phase");
+test("51: exactly one file calls the new function, and it is the refund sync", () => {
+  const callers = sourceFiles.filter(rel => read(rel).includes('rpc("apply_order_refund_state_by_invoice"'));
+  assert.equal(callers.length, 1, "the invoice writer gained a second caller");
+  assert.ok(callers[0].split(path.sep).join("/") === "lib/orderRefunds.ts", callers[0]);
+  // And it is reached only from the subscription fallback, never from
+  // the one-time path that runs before it.
+  const sync = read("lib/orderRefunds.ts");
+  const fallbackAt = sync.indexOf("async function syncSubscriptionOrderRefundState");
+  assert.ok(fallbackAt > 0);
+  // The CALL, not the name: the fallback's own doc comment names 037
+  // and sits above it, so a bare mention would fail here for no reason.
+  assert.ok(!sync.slice(0, fallbackAt).includes('rpc("apply_order_refund_state_by_invoice"'),
+    "the one-time path can reach the invoice writer");
 });
 
-test("52: the refund runtime is byte-identical to HEAD", () => {
-  const changed = execFileSync("git", ["diff", "--name-only", "HEAD"], { cwd: ROOT, encoding: "utf-8" })
-    .trim();
-  const touched = changed ? changed.split(NEWLINE) : [];
+test("52: the refund EMAIL layer and the webhook route never learned about invoices", () => {
+  // The correlation phase changed WHICH ORDER a refund reaches. Who is
+  // told, with which key, and at which address are decided by these
+  // files, and none of them may acquire a second notion of correctness.
   for (const rel of [
-    "lib/orderRefunds.ts", "lib/stripeRefunds.ts", "lib/refundConfirmationEmail.ts",
-    "lib/refundConfirmationRules.ts", "lib/email/refundConfirmation.ts",
-    "app/api/stripe/webhook/route.ts",
+    "lib/refundConfirmationEmail.ts", "lib/refundConfirmationRules.ts",
+    "lib/email/refundConfirmation.ts", "app/api/stripe/webhook/route.ts",
   ]) {
-    assert.ok(!touched.includes(rel), `${rel} was modified by a migration-only phase`);
+    const source = read(rel);
+    for (const forbidden of [
+      "apply_order_refund_state_by_invoice", "invoicePayments", "stripe_invoice_id",
+      "checkout_attempt_id",
+    ]) {
+      assert.ok(!source.includes(forbidden), rel + " learned about the invoice correlation: " + forbidden);
+    }
   }
+  // The route still consumes the one unchanged contract, and still gates
+  // on the same two facts.
+  const route = read("app/api/stripe/webhook/route.ts");
+  assert.ok(route.includes("syncOrderRefundStateFromStripe(stripe, paymentIntentId)"));
+  assert.ok(route.includes("isNewSettledRefundFact(outcome.result) || !outcome.orderId"));
 });
 
 test("53: the existing refund path still correlates the way it always did", () => {
   const orderRefunds = read("lib/orderRefunds.ts");
   assert.ok(orderRefunds.includes('.eq("stripe_payment_intent_id", trimmedId)'));
-  assert.deepEqual([...orderRefunds.matchAll(/admin\.rpc\("(\w+)"/g)].map(m => m[1]),
-    ["apply_order_refund_state"], "the refund writer changed in a migration-only phase");
+  // Exactly two writers, in this order: the one-time path still reaches
+  // 019 first, and 037 exists only after it, as the fallback. A reversal
+  // here would mean subscriptions had become the primary correlation.
+  assert.deepEqual([...orderRefunds.matchAll(RPC_CALL)].map(m => m[1]),
+    ["apply_order_refund_state", "apply_order_refund_state_by_invoice"],
+    "the refund writers changed or were reordered");
 });
 
 test("54: the payment failure lifecycle and the Phase 3H emails are untouched", () => {
