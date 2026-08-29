@@ -448,10 +448,10 @@ test("3F: only the owner's own private subscriptions are readable", () => {
   // property this assertion protects (an account UI change must not
   // widen what a customer can read) still holds.
   const migrations = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql"));
-  assert.equal(migrations.length, 36, "an unreviewed migration was added");
+  assert.equal(migrations.length, 37, "an unreviewed migration was added");
   assert.deepEqual(
     migrations.filter(f => f > "034_subscription_cancellation.sql").sort(),
-    ["035_subscription_email_deliveries.sql", "036_subscription_payment_status.sql"],
+    ["035_subscription_email_deliveries.sql", "036_subscription_payment_status.sql", "037_subscription_refund_correlation.sql"],
     "a migration above 034 appeared that this suite has not been reviewed against"
   );
   const m035 = read("supabase/migrations/035_subscription_email_deliveries.sql");
@@ -689,16 +689,18 @@ test("3F: the controls are real buttons, focusable, and status is not colour-onl
    REGRESSION
    ══════════════════════════════════════════════════════════════ */
 
-test("3F: migrations 022 through 034 are untouched and only 035 and 036 follow", () => {
+test("3F: migrations 022 through 034 are untouched and only 035, 036 and 037 follow", () => {
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.length, 36);
+  assert.equal(files.length, 37);
   // 034 remains the last of the cancellation work. 035 is Phase 3H.1's
-  // delivery table and 036 is Phase 3I.B1's payment foundation; those two
-  // are the ONLY migrations allowed above it until a later phase is
-  // reviewed here.
-  assert.equal(files[files.length - 3], "034_subscription_cancellation.sql");
-  assert.equal(files[files.length - 2], "035_subscription_email_deliveries.sql");
-  assert.equal(files[files.length - 1], "036_subscription_payment_status.sql");
+  // delivery table, 036 is Phase 3I.B1's payment foundation and 037 is
+  // Phase 3J.B1's invoice-keyed refund-state writer; those three are the
+  // ONLY migrations allowed above it until a later phase is reviewed
+  // here.
+  assert.equal(files[files.length - 4], "034_subscription_cancellation.sql");
+  assert.equal(files[files.length - 3], "035_subscription_email_deliveries.sql");
+  assert.equal(files[files.length - 2], "036_subscription_payment_status.sql");
+  assert.equal(files[files.length - 1], "037_subscription_refund_correlation.sql");
   // This phase writes no SQL at all: nothing in it references a
   // migration, a policy or a grant.
   for (const source of [viewCode, portalCode]) {

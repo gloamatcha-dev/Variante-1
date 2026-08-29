@@ -511,10 +511,14 @@ test("37-39: no migration was added, edited or required", () => {
   // payment-status RPC). It is reviewed in
   // tests/subscription-payment-status-migration.test.mjs. What this
   // guard still protects is that no UNREVIEWED migration appeared.
-  assert.equal(files.length, 36);
-  assert.equal(files[files.length - 1], "036_subscription_payment_status.sql");
-  assert.equal(files[files.length - 2], "035_subscription_email_deliveries.sql");
-  assert.ok(!files.some(f => f.startsWith("037")), "an unreviewed migration appeared");
+  // PHASE 3J.B1 THEN ADDED 037 (the invoice-keyed refund-state writer),
+  // reviewed in tests/subscription-refund-correlation-migration.test.mjs.
+  assert.equal(files.length, 37);
+  assert.equal(files[files.length - 1], "037_subscription_refund_correlation.sql");
+  assert.equal(files[files.length - 2], "036_subscription_payment_status.sql");
+  assert.equal(files[files.length - 3], "035_subscription_email_deliveries.sql");
+  assert.deepEqual(files.filter(f => f.startsWith("037")), ["037_subscription_refund_correlation.sql"]);
+  assert.ok(!files.some(f => f.startsWith("038")), "an unreviewed migration appeared");
   const sql035 = withoutComments(read("supabase/migrations/035_subscription_email_deliveries.sql"));
   // The four statuses are unchanged: 'ambiguous' is an APPLICATION result,
   // never a database status.

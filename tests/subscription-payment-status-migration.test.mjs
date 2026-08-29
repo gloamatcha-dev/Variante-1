@@ -78,13 +78,19 @@ const IMMUTABLE_MIGRATIONS = [
    1-4. NUMBERING AND IMMUTABILITY
    ══════════════════════════════════════════════════════════════ */
 
-test("1, 2: 036 exists, is the only 036, and is the highest migration", () => {
+test("1, 2: 036 exists, owns its number, and 037 is the only thing above it", () => {
   const files = readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith(".sql")).sort();
   assert.ok(files.includes(MIGRATION_036), "migration 036 is missing");
   assert.deepEqual(files.filter(f => f.startsWith("036")), [MIGRATION_036]);
-  assert.equal(files[files.length - 1], MIGRATION_036, "036 must be the highest");
-  assert.ok(!files.some(f => f.startsWith("037")), "a 037 appeared");
-  assert.equal(files.length, 36);
+  // PHASE 3J.B1 ADDED MIGRATION 037 (the invoice-keyed refund-state
+  // writer), reviewed in
+  // tests/subscription-refund-correlation-migration.test.mjs. 036 still
+  // owns its number and is unedited; it is simply no longer the last.
+  assert.equal(files[files.length - 1], "037_subscription_refund_correlation.sql");
+  assert.equal(files[files.length - 2], MIGRATION_036, "036 must be the one before 037");
+  assert.deepEqual(files.filter(f => f.startsWith("037")), ["037_subscription_refund_correlation.sql"]);
+  assert.ok(!files.some(f => f.startsWith("038")), "a 038 appeared");
+  assert.equal(files.length, 37);
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length);
@@ -102,7 +108,10 @@ test("3: migrations 022 through 035 are all still present, none renamed", () => 
   }).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
   for (const file of touched) {
-    assert.ok(file.endsWith(MIGRATION_036), `an immutable migration was modified: ${file}`);
+    // 037 is a NEW file, not an edit, so it may legitimately appear here
+    // once it is staged. Nothing older may.
+    assert.ok(file.endsWith(MIGRATION_036) || file.endsWith("037_subscription_refund_correlation.sql"),
+      `an immutable migration was modified: ${file}`);
   }
 });
 

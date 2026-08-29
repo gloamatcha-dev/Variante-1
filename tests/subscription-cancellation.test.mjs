@@ -1978,11 +1978,14 @@ test("034: it is the next free number and 022-033 are untouched", () => {
   // 034 was the next free number when this phase ran, and 033 still
   // precedes it. Phase 3H.1 later took 035 for a server-only email
   // delivery table, and Phase 3I.B1 took 036 for the payment foundation;
-  // those two are the ONLY migrations permitted above 034 until a later
+  // and Phase 3J.B1 took 037 for the invoice-keyed refund-state writer,
+  // reviewed in tests/subscription-refund-correlation-migration.test.mjs;
+  // those three are the ONLY migrations permitted above 034 until a later
   // one is reviewed against this suite.
   assert.deepEqual(
     files.filter(f => f.slice(0, 3) > "034").sort(),
-    ["035_subscription_email_deliveries.sql", "036_subscription_payment_status.sql"],
+    ["035_subscription_email_deliveries.sql", "036_subscription_payment_status.sql",
+     "037_subscription_refund_correlation.sql"],
     "an unreviewed migration above 034 appeared"
   );
   // AND 036 REDEFINES NOTHING 034 OWNS. It adds one function of its own

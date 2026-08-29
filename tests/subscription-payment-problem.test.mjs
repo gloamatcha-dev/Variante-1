@@ -655,9 +655,14 @@ test("71: the three existing lifecycle emails are unchanged", () => {
 
 test("72-74: no migration was added, edited or required", () => {
   const files = readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.length, 36);
-  assert.equal(files[files.length - 1], "036_subscription_payment_status.sql");
-  assert.ok(!files.some(f => f.startsWith("037")), "this phase must need no migration");
+  // PHASE 3J.B1 ADDED MIGRATION 037 (the invoice-keyed refund-state
+  // writer), reviewed in
+  // tests/subscription-refund-correlation-migration.test.mjs. THIS phase
+  // still needed no migration, which is what the guard protects.
+  assert.equal(files.length, 37);
+  assert.equal(files[files.length - 1], "037_subscription_refund_correlation.sql");
+  assert.equal(files[files.length - 2], "036_subscription_payment_status.sql");
+  assert.ok(!files.some(f => f.startsWith("038")), "an unreviewed migration appeared");
   // Everything this phase needed, 036 already grants.
   assert.ok(sql036.includes("'payment_problem'"));
   assert.ok(sql036.includes("grant execute on function public.sync_subscription_payment_status(text, text) to service_role;"));
@@ -900,9 +905,14 @@ test("18, 19, 20: retry selection, family fairness and 3H families unchanged", (
 
 test("21, 22, 23: no migration was added, edited or required", () => {
   const files = readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.length, 36);
-  assert.equal(files[files.length - 1], "036_subscription_payment_status.sql");
-  assert.ok(!files.some(f => f.startsWith("037")), "this phase must need no migration");
+  // PHASE 3J.B1 ADDED MIGRATION 037 (the invoice-keyed refund-state
+  // writer), reviewed in
+  // tests/subscription-refund-correlation-migration.test.mjs. THIS phase
+  // still needed no migration, which is what the guard protects.
+  assert.equal(files.length, 37);
+  assert.equal(files[files.length - 1], "037_subscription_refund_correlation.sql");
+  assert.equal(files[files.length - 2], "036_subscription_payment_status.sql");
+  assert.ok(!files.some(f => f.startsWith("038")), "an unreviewed migration appeared");
   // The guard needs no schema: stripe_subscription_id is migration 022's
   // column, and 022 is the single statement that binds it - which is why
   // it is the authoritative side of the ownership comparison.

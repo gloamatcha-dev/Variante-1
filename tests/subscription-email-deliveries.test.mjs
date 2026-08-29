@@ -81,7 +81,7 @@ const IMMUTABLE_MIGRATIONS = [
    EXISTENCE AND NUMBERING
    ══════════════════════════════════════════════════════════════ */
 
-test("035 exists, is the only 035, and 036 is the only migration after it", () => {
+test("035 exists, is the only 035, and only 036 and 037 follow it", () => {
   const files = readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith(".sql"));
   assert.ok(files.includes(MIGRATION_035), "migration 035 is missing");
 
@@ -95,11 +95,13 @@ test("035 exists, is the only 035, and 036 is the only migration after it", () =
     "there must be exactly one migration numbered 035"
   );
   // PHASE 3I.B1 TOOK 036 for the payment_problem family and the payment
-  // status RPC, reviewed in its own suite. It is the ONLY migration
-  // permitted above 035 until a later one is reviewed against this file.
+  // status RPC, and PHASE 3J.B1 TOOK 037 for the invoice-keyed
+  // refund-state writer. Both are reviewed in their own suites, and they
+  // are the ONLY migrations permitted above 035 until a later one is
+  // reviewed against this file.
   assert.deepEqual(
     numbered.filter(x => x.n > 35).map(x => x.file).sort(),
-    ["036_subscription_payment_status.sql"],
+    ["036_subscription_payment_status.sql", "037_subscription_refund_correlation.sql"],
     "an unreviewed migration above 035 appeared"
   );
   // And 036 does not disturb what 035 owns beyond the family CHECK it
