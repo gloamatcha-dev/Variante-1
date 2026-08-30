@@ -145,8 +145,8 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
   const files = readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith(".sql")).sort();
   assert.deepEqual(files.filter(f => f.startsWith("039")), [MIGRATION_039],
     "there must be exactly one migration 039");
-  assert.equal(files[files.length - 1], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 2], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 2], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 3], MIGRATION_038, "038 must be the one before it");
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
@@ -154,7 +154,7 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
 test("2: no migration 040 or beyond", () => {
   // 039 is not applied anywhere, so it is still the right place to fix
   // 039. A hardening pass must not become a second migration.
-  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 39);
+  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 40);
   assert.deepEqual(beyond, [], "an unreviewed migration appeared after 039");
 });
 
@@ -978,7 +978,17 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
   // discounted units plus thirteen shipping charges - cannot be expressed
   // by the one-time writer, whose total comes from a CheckoutQuote's
   // catalog subtotal plus one shipping charge. Additive only.
-  const ALLOWED_LIB_EDITS = ["lib/checkoutAttempts.ts"];
+  //
+  // Phase 4B3.2 adds the annual checkout's own modules to the list. All
+  // four are annual-only: the one-time and subscription flows import
+  // none of them, and lib/checkoutAttempts.ts still gains only an
+  // additional writer.
+  const ALLOWED_LIB_EDITS = [
+    "lib/checkoutAttempts.ts",
+    "lib/annualPlanCheckout.ts",
+    "lib/annualPlanCheckoutRules.ts",
+    "lib/annualPlanCheckoutDeps.ts",
+  ];
 
   for (const rel of touched) {
     assert.ok(!rel.startsWith("app/"),

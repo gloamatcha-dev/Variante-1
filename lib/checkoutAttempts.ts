@@ -336,7 +336,7 @@ export async function markAttemptPaid(attemptId: string, stripePaymentIntentId: 
  * attempt already belongs to something else.
  */
 const ANNUAL_ATTEMPT_COLUMNS =
-  `${ATTEMPT_COLUMNS}, user_id, subscription_id, annual_plan_id, annual_delivery_number`;
+  `${ATTEMPT_COLUMNS}, user_id, subscription_id, annual_plan_id, annual_delivery_number, annual_intent_fingerprint, annual_request_fingerprint`;
 
 export type AnnualCheckoutAttempt = CheckoutAttempt & {
   user_id: string | null;
@@ -348,6 +348,22 @@ export type AnnualCheckoutAttempt = CheckoutAttempt & {
    */
   annual_plan_id: string | null;
   annual_delivery_number: number | null;
+  /**
+   * WHICH checkout this is (migration 040): customer, product and
+   * selected address, with no priced value in it. Compared on every
+   * retry, including one that finds an annual plan already created.
+   *
+   * NULL means the attempt has no annual payment intent - a one-time
+   * cart, a subscription cycle, an annual delivery, or a row written
+   * before 040 - and the hardened RPC refuses it rather than adopting it.
+   */
+  annual_intent_fingerprint: string | null;
+  /**
+   * The TERMS: the identity above plus the address CONTENTS and every
+   * frozen commercial fact. Compared only while no annual plan exists;
+   * once one does, its frozen snapshots are authoritative.
+   */
+  annual_request_fingerprint: string | null;
 };
 
 export type AnnualAttemptInput = {
@@ -359,6 +375,18 @@ export type AnnualAttemptInput = {
   taxSnapshot: CartTaxSnapshot;
   /** The WHOLE prepayment: thirteen units plus thirteen shipping charges. */
   expectedTotalGrossCents: number;
+  /**
+   * The digest of WHICH checkout this is, from annualIntentFingerprint.
+   * Written once with the attempt and compared on every retry, so one
+   * request_id can only ever mean one customer, product and address.
+   */
+  intentFingerprint: string;
+  /**
+   * The digest of the frozen TERMS, from annualRequestFingerprint.
+   * Written once with the attempt; migration 040 compares it under the
+   * row lock while no annual plan exists yet.
+   */
+  requestFingerprint: string;
 };
 
 export type AnnualAttemptResult =
@@ -393,9 +421,17 @@ export type AnnualAttemptResult =
  * annual_plans.payment_checkout_attempt_id.
  *
  * The subscription fingerprint columns are not written either. They
- * belong to migration 025's claim function, which compares them against
- * the subscription flow's own values; an annual attempt leaves them NULL,
- * which that function already refuses outright.
+ * belong to migration 025's claim function, which reads their
+ * non-NULL-ness as the DEFINITION of "this attempt is a subscription
+ * checkout"; an annual attempt leaves them NULL, which that function
+ * already refuses outright. Migration 040 gave the annual flow its own
+ * two columns rather than borrowing those, so after it the four attempt
+ * populations are structurally distinguishable:
+ *
+ *   one-time          both fingerprint families NULL
+ *   subscription      subscription_* set, annual_* NULL
+ *   annual payment    annual_* set, subscription_* NULL
+ *   annual delivery   both NULL, annual_plan_id set
  */
 export async function getOrCreateAnnualCheckoutAttempt(
   input: AnnualAttemptInput
@@ -418,6 +454,12 @@ export async function getOrCreateAnnualCheckoutAttempt(
         shipping_zone: input.shipping.zone,
         shipping_gross_cents: input.shipping.grossCents,
         tax_snapshot: input.taxSnapshot,
+        // THE FIRST DURABLE INTENT WINS. ignoreDuplicates below means a
+        // retry of the same request_id never overwrites these two, so the
+        // digests compared by migration 040 are always the ones the
+        // original request froze - which is the entire point of them.
+        annual_intent_fingerprint: input.intentFingerprint,
+        annual_request_fingerprint: input.requestFingerprint,
       },
       { onConflict: "request_id", ignoreDuplicates: true }
     );

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type Stripe from "stripe";
 import type { AnnualPricing } from "./annualPlanRules";
 import type { AnnualLaunchPlan } from "./annualPlans";
@@ -311,6 +312,8 @@ export type FrozenAnnualAttempt = {
   annual_plan_id: string | null;
   annual_delivery_number: number | null;
   subscription_id: string | null;
+  annual_intent_fingerprint: string | null;
+  annual_request_fingerprint: string | null;
 };
 
 export type FrozenAttemptCheck =
@@ -356,6 +359,8 @@ export function verifyFrozenAnnualAttempt(input: {
   userId: string;
   plan: AnnualLaunchPlan;
   pricing: AnnualPricing;
+  /** From annualIntentFingerprint. The identity half, checked early. */
+  intentFingerprint: string;
 }): FrozenAttemptCheck {
   const { attempt, pricing } = input;
 
@@ -376,6 +381,24 @@ export function verifyFrozenAnnualAttempt(input: {
 
   if (attempt.currency !== "EUR") {
     return { ok: false, reason: "attempt is not priced in EUR" };
+  }
+
+  // THE IDENTITY GATE, as early defence (Phase 4B3.2).
+  //
+  // Migration 040 checks this again under the attempt's row lock and IS
+  // the authority; this copy only refuses an obviously foreign request
+  // before any snapshot is built or any RPC is issued. A NULL stored
+  // digest fails: it means the attempt has no annual payment intent at
+  // all - a one-time cart, a subscription cycle, or a row written before
+  // 040 - and none of those may be adopted into one.
+  //
+  // The TERMS digest is deliberately NOT checked here. Whether it still
+  // has to match depends on something only the database knows under that
+  // lock: whether an annual plan already exists. Checking it in the
+  // application would refuse a legitimate retry for a contract the
+  // customer already holds.
+  if (!attemptMatchesAnnualFingerprint(attempt.annual_intent_fingerprint, input.intentFingerprint)) {
+    return { ok: false, reason: "attempt belongs to a different annual checkout" };
   }
 
   const frozenItems = attempt.items_snapshot;
@@ -571,4 +594,207 @@ export function buildAnnualSessionMetadata(input: {
     checkout_attempt_id: input.checkoutAttemptId,
     gloa_annual_plan_id: input.annualPlanId,
   };
+}
+
+/* ── Retry identity (Phase 4B3.2) ───────────────────────────── */
+
+/**
+ * Bumped whenever the field lists or the serialisation below change in a
+ * way that would produce a different digest for the same intent. An old
+ * attempt then simply stops matching, which fails closed and asks for a
+ * new checkout rather than silently comparing two different things.
+ *
+ * Its OWN version, deliberately distinct from the subscription flow's
+ * "gloa-sub-fp-1". The two are different products with different frozen
+ * contracts, they live in different columns, and a digest from one must
+ * never be able to equal a digest from the other even by accident.
+ */
+export const ANNUAL_FINGERPRINT_VERSION = "gloa-annual-fp-1";
+
+/**
+ * A control character, so no field value can contain the separator and
+ * two different field lists cannot collide by concatenation - "ab" plus
+ * "c" and "a" plus "bc" are different strings here, which they would not
+ * be with an empty or a printable separator.
+ */
+const FIELD_SEPARATOR = "\u001f";
+
+function digest(parts: string[]): string {
+  return createHash("sha256").update(parts.join(FIELD_SEPARATOR), "utf8").digest("hex");
+}
+
+/**
+ * WHICH checkout this is, independent of what anything currently costs.
+ *
+ * The contract is this ARRAY, not the property order of whatever object a
+ * caller happens to build. JavaScript preserves insertion order for
+ * string keys, which makes it look safe to serialise an object directly
+ * and makes it silently wrong the day two call sites construct their
+ * fields in different orders.
+ *
+ * deliveryCount is included as an explicit domain marker. It is a server
+ * constant that never comes from the browser, and it means an annual
+ * digest cannot be confused with a digest of a single purchase of the
+ * same product to the same address.
+ *
+ * NO PRICED VALUE belongs here. This half is compared even after a plan
+ * exists, and the plan's price is frozen by then; including money would
+ * refuse a legitimate retry the moment the catalog moved.
+ */
+export const ANNUAL_INTENT_FINGERPRINT_FIELDS = Object.freeze([
+  "userId",
+  "variantId",
+  "addressId",
+  "deliveryCount",
+] as const);
+
+/**
+ * The TERMS: the identity above plus every mutable fact that gets frozen
+ * onto public.annual_plans.
+ *
+ * catalogUnitGrossCents and discountPercentApplied are in here even
+ * though the annual unit price is derived from them, because both are
+ * PERSISTED CONTRACTUAL FACTS on the plan row - the savings line is
+ * computed from the catalog price later, and the discount is what the
+ * customer was told they got. Neither may drift across one request id
+ * just because the derived unit price happened to round to the same
+ * cents.
+ */
+export const ANNUAL_REQUEST_FINGERPRINT_FIELDS = Object.freeze([
+  "userId",
+  "variantId",
+  "addressId",
+  "deliveryCount",
+  "addressDigest",
+  "sku",
+  "currency",
+  "shippingCountry",
+  "catalogUnitGrossCents",
+  "discountPercentApplied",
+  "annualUnitGrossCents",
+  "shippingPerDeliveryGrossCents",
+  "shippingTotalGrossCents",
+  "totalGrossCents",
+  "taxCalculationVersion",
+  "taxTreatment",
+  "taxTotalCents",
+] as const);
+
+/**
+ * A digest of WHERE this annual plan is to be delivered, thirteen times.
+ *
+ * It exists because a saved address can be edited between a request and
+ * its retry. Binding only the addressId would let one request id cover
+ * two different streets - Phase 4B3.1 reproduced exactly that - and
+ * binding the contents catches it whether the customer edited the row or
+ * selected a different one.
+ *
+ * A DIGEST rather than the values, because comparison is the only thing
+ * anyone needs and a database column is not a place to keep somebody's
+ * street. Built from the NORMALISED snapshot, so it describes what will
+ * actually be frozen rather than however the row happened to be typed.
+ */
+export function annualAddressDigest(snapshot: AddressSnapshot): string {
+  return digest([
+    ANNUAL_FINGERPRINT_VERSION,
+    "addr",
+    snapshot.name ?? "",
+    snapshot.company ?? "",
+    snapshot.line1 ?? "",
+    snapshot.line2 ?? "",
+    snapshot.postalCode ?? "",
+    snapshot.city ?? "",
+    snapshot.state ?? "",
+    snapshot.country ?? "",
+  ]);
+}
+
+/** Everything both fingerprints are built from. No token, no key, no email. */
+export type AnnualRequestIntent = {
+  userId: string;
+  variantId: string;
+  addressId: string;
+  deliveryCount: number;
+  /** From annualAddressDigest. Never the raw address. */
+  addressDigest: string;
+  sku: string;
+  currency: string;
+  shippingCountry: string;
+  catalogUnitGrossCents: number;
+  discountPercentApplied: number;
+  annualUnitGrossCents: number;
+  shippingPerDeliveryGrossCents: number;
+  shippingTotalGrossCents: number;
+  totalGrossCents: number;
+  taxCalculationVersion: string;
+  taxTreatment: string;
+  taxTotalCents: number;
+};
+
+/**
+ * The identity half. Compared on EVERY retry, including one that finds an
+ * annual plan already in existence.
+ */
+export function annualIntentFingerprint(intent: AnnualRequestIntent): string {
+  const parts = ANNUAL_INTENT_FINGERPRINT_FIELDS.map(field => String(intent[field]));
+  return digest([ANNUAL_FINGERPRINT_VERSION, "identity", ...parts]);
+}
+
+/**
+ * The priced-and-frozen half. Compared only while no annual plan exists.
+ *
+ * Once one does, it IS the answer: refusing the retry because the
+ * customer has since edited their saved address, or because the catalog
+ * moved, would leave them unable to reach the Stripe session for a
+ * contract they already hold, for something that is not their doing.
+ * Migration 040 enforces that ordering under the row lock; this function
+ * only produces the value it compares.
+ */
+export function annualRequestFingerprint(intent: AnnualRequestIntent): string {
+  const parts = ANNUAL_REQUEST_FINGERPRINT_FIELDS.map(field => String(intent[field]));
+  return digest([ANNUAL_FINGERPRINT_VERSION, "terms", ...parts]);
+}
+
+/**
+ * Compares a STORED fingerprint with a freshly computed one.
+ *
+ * A NULL stored value is a refusal, never a pass. It means the attempt
+ * came from the one-time or subscription flow, or predates migration
+ * 040, and neither may be retroactively adopted as an annual checkout.
+ */
+export function attemptMatchesAnnualFingerprint(
+  stored: string | null | undefined,
+  expected: string
+): boolean {
+  return typeof stored === "string" && stored.length > 0 && stored === expected;
+}
+
+/**
+ * Which HTTP status a refused pending-plan result deserves.
+ *
+ * A CONFLICT (409) means "this request id is not this checkout" and no
+ * amount of retrying will change it: the customer needs a fresh checkout.
+ * That covers the two fingerprint gates migration 040 added, plus 039's
+ * own ownership, state and total refusals - every one of them a statement
+ * about the request rather than about the server.
+ *
+ * Everything else, including a result word this code has never seen, is a
+ * 503: the attempt survives, and a retry may well succeed.
+ *
+ * NOTHING IS ECHOED. The caller learns a status and a generic message.
+ * Neither the stored digest nor the expected one leaves the server, and
+ * the reason word is logged rather than returned - a caller that guessed
+ * a request id must not be able to learn anything it could use to
+ * construct one that matches.
+ */
+export const ANNUAL_PENDING_PLAN_CONFLICT_RESULTS: readonly string[] = Object.freeze([
+  "attempt_intent_mismatch",
+  "attempt_request_mismatch",
+  "attempt_not_owned",
+  "attempt_not_pre_stripe",
+  "total_mismatch",
+]);
+
+export function annualPendingPlanFailureStatus(reason: string): 409 | 503 {
+  return ANNUAL_PENDING_PLAN_CONFLICT_RESULTS.includes(reason) ? 409 : 503;
 }

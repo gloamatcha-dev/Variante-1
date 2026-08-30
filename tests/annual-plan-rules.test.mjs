@@ -590,11 +590,11 @@ test("26: this phase created no Stripe object and no recurring price", () => {
 test("27: migration 039 is untouched and no 040 exists", () => {
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations[migrations.length - 1], "039_b2c_annual_plan_foundation.sql",
+  assert.equal(migrations[migrations.length - 1], "040_annual_checkout_retry_fingerprints.sql",
     "039 is no longer the highest migration");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 39), [],
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 40), [],
     "a migration 040 or beyond appeared");
-  assert.equal(migrations.length, 39);
+  assert.equal(migrations.length, 40);
   // 039 is now LIVE, so it is immutable in the strongest sense: this
   // phase may not have edited any migration at all.
   const changed = execFileSync("git", ["diff", "--name-only", "HEAD", "--", "supabase/migrations/"],

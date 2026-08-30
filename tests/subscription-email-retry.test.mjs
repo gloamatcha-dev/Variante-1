@@ -678,18 +678,19 @@ test("55-57: no migration was added, edited or required", () => {
   // guard still protects is that no UNREVIEWED migration appeared.
   // PHASE 3J.B1 THEN ADDED 037 (the invoice-keyed refund-state writer),
   // reviewed in tests/subscription-refund-correlation-migration.test.mjs.
-  assert.equal(files.length, 39);
+  assert.equal(files.length, 40);
   // Phase 4B1 added 039, the B2C prepaid annual plan foundation,
   // reviewed in tests/annual-plan-foundation-migration.test.mjs. The
   // guard is re-pinned, not deleted: it protects "no UNREVIEWED
   // migration appeared", never "the stack stopped growing".
-  assert.equal(files[files.length - 1], "039_b2c_annual_plan_foundation.sql");
-  assert.equal(files[files.length - 2], "038_one_time_refund_writer_concurrency.sql");
-  assert.equal(files[files.length - 3], "037_subscription_refund_correlation.sql");
-  assert.equal(files[files.length - 4], "036_subscription_payment_status.sql");
-  assert.equal(files[files.length - 5], "035_subscription_email_deliveries.sql");
+  assert.equal(files[files.length - 1], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 2], "039_b2c_annual_plan_foundation.sql");
+  assert.equal(files[files.length - 3], "038_one_time_refund_writer_concurrency.sql");
+  assert.equal(files[files.length - 4], "037_subscription_refund_correlation.sql");
+  assert.equal(files[files.length - 5], "036_subscription_payment_status.sql");
+  assert.equal(files[files.length - 6], "035_subscription_email_deliveries.sql");
   assert.deepEqual(files.filter(f => f.startsWith("037")), ["037_subscription_refund_correlation.sql"]);
-  assert.ok(!files.some(f => f.startsWith("040")));
+  assert.ok(!files.some(f => f.startsWith("041")));
   const sql035 = withoutComments(read("supabase/migrations/035_subscription_email_deliveries.sql"));
   // The sweep needs exactly what 035 already grants: SELECT, and UPDATE
   // on status and sent_at.

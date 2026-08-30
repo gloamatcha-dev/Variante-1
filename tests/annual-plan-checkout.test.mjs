@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,9 +8,18 @@ import {
   ALLOWED_ANNUAL_REQUEST_FIELDS,
   ANNUAL_ALLOWED_COUNTRY,
   ANNUAL_CHECKOUT_VERSION,
+  ANNUAL_FINGERPRINT_VERSION,
+  ANNUAL_INTENT_FINGERPRINT_FIELDS,
+  ANNUAL_PENDING_PLAN_CONFLICT_RESULTS,
+  ANNUAL_REQUEST_FINGERPRINT_FIELDS,
   ANNUAL_SHIPPING_ZONE,
   PENDING_ANNUAL_PLAN_SUCCESS_RESULTS,
+  annualAddressDigest,
   annualCheckoutIdempotencyKey,
+  annualIntentFingerprint,
+  annualPendingPlanFailureStatus,
+  annualRequestFingerprint,
+  attemptMatchesAnnualFingerprint,
   buildAnnualCheckoutLineItems,
   buildAnnualCustomerSnapshot,
   buildAnnualDeliveryItemsSnapshot,
@@ -84,8 +94,14 @@ const SKU = { "30g": "GLOA-MATCHA-30G", "50g": "GLOA-MATCHA-50G", "100g": "GLOA-
 const GRAMS = { "30g": 30, "50g": 50, "100g": 100 };
 
 /** A canonical quote line, in buildAuthoritativeQuote's own field names. */
+const VARIANT_ID = {
+  "30g": "11111111-2222-3333-4444-555555555530",
+  "50g": UUID,
+  "100g": "11111111-2222-3333-4444-555555555100",
+};
+
 const variantFor = (size, over = {}) => ({
-  variantId: UUID,
+  variantId: VARIANT_ID[size],
   sku: SKU[size],
   sizeGrams: GRAMS[size],
   unitGrossCents: CATALOG[size],
@@ -129,6 +145,32 @@ const snapshotFor = row => {
 };
 
 /** A frozen payment attempt, as the annual writer stores one. */
+/** The canonical intent, exactly as the flow composes it. */
+const intentFor = (size, over = {}) => {
+  const plan = planFor(size);
+  const pricing = pricingFor(size);
+  return {
+    userId: UUID,
+    variantId: plan.variantId,
+    addressId: ADDRESS_ID,
+    deliveryCount: pricing.deliveryCount,
+    addressDigest: annualAddressDigest(snapshotFor(addressRow()).snapshot),
+    sku: plan.sku,
+    currency: "EUR",
+    shippingCountry: "DE",
+    catalogUnitGrossCents: pricing.catalogUnitGrossCents,
+    discountPercentApplied: pricing.discountPercentApplied,
+    annualUnitGrossCents: pricing.annualUnitGrossCents,
+    shippingPerDeliveryGrossCents: pricing.shippingPerDeliveryGrossCents,
+    shippingTotalGrossCents: pricing.shippingTotalGrossCents,
+    totalGrossCents: pricing.totalGrossCents,
+    taxCalculationVersion: "de-2026.1",
+    taxTreatment: "de_domestic",
+    taxTotalCents: 1234,
+    ...over,
+  };
+};
+
 const frozenAttempt = (size, over = {}) => {
   const pricing = pricingFor(size);
   const plan = planFor(size);
@@ -146,9 +188,20 @@ const frozenAttempt = (size, over = {}) => {
     annual_plan_id: null,
     annual_delivery_number: null,
     subscription_id: null,
+    annual_intent_fingerprint: annualIntentFingerprint(intentFor(size)),
+    annual_request_fingerprint: annualRequestFingerprint(intentFor(size)),
     ...over,
   };
 };
+
+/** verifyFrozenAnnualAttempt with the matching intent supplied. */
+const verifyRetry = (size, over = {}, intentOver = {}) => verifyFrozenAnnualAttempt({
+  attempt: frozenAttempt(size, over),
+  userId: UUID,
+  plan: planFor(size),
+  pricing: pricingFor(size),
+  intentFingerprint: annualIntentFingerprint(intentFor(size, intentOver)),
+});
 
 /* ══════════════════════════════════════════════════════════════
    1-3. THE GATE, AND WHERE IT SITS
@@ -471,18 +524,24 @@ test("17: the payment attempt freezes the annual total and the annual shipping T
     "the attempt freezes the per-delivery tax instead of the annual one");
   assert.ok(call.includes("items: buildAnnualPaymentItemsSnapshot("));
   assert.ok(call.includes("userId: caller.userId"));
+  // Phase 4B3.2: both digests are written with the attempt, once.
+  assert.ok(call.includes("intentFingerprint,"));
+  assert.ok(call.includes("requestFingerprint,"));
 });
 
 test("18: the payment attempt carries no annual binding and no Stripe identity", () => {
   const writer = attemptsCode.slice(attemptsCode.indexOf("export async function getOrCreateAnnualCheckoutAttempt"));
   const upsert = writer.slice(writer.indexOf(".upsert("), writer.indexOf("ignoreDuplicates"));
   for (const forbidden of [
-    "annual_plan_id", "annual_delivery_number", "subscription_id", "stripe_invoice_id",
+    "annual_plan_id:", "annual_delivery_number", "subscription_id", "stripe_invoice_id",
     "stripe_checkout_session_id", "stripe_payment_intent_id", "paid_at", "status:",
     "subscription_request_fingerprint", "subscription_intent_fingerprint",
   ]) {
     assert.ok(!upsert.includes(forbidden), `the annual payment attempt writes ${forbidden}`);
   }
+  // It DOES write its own two, and only on the first insert.
+  assert.ok(upsert.includes("annual_intent_fingerprint: input.intentFingerprint"));
+  assert.ok(upsert.includes("annual_request_fingerprint: input.requestFingerprint"));
   // ignoreDuplicates: a retry returns the ORIGINAL frozen snapshot.
   assert.ok(writer.includes("ignoreDuplicates: true"));
   assert.ok(writer.includes('onConflict: "request_id"'));
@@ -494,7 +553,7 @@ test("18: the payment attempt carries no annual binding and no Stripe identity",
 test("19: a retry is verified against the attempt's own frozen columns", () => {
   const plan = planFor("50g");
   const pricing = pricingFor("50g");
-  const ok = verifyFrozenAnnualAttempt({ attempt: frozenAttempt("50g"), userId: UUID, plan, pricing });
+  const ok = verifyRetry("50g");
   assert.equal(ok.ok, true);
 
   const refusals = [
@@ -511,7 +570,7 @@ test("19: a retry is verified against the attempt's own frozen columns", () => {
     [{ tax_snapshot: null }, /no frozen tax snapshot/],
   ];
   for (const [over, reason] of refusals) {
-    const r = verifyFrozenAnnualAttempt({ attempt: frozenAttempt("50g", over), userId: UUID, plan, pricing });
+    const r = verifyRetry("50g", over);
     assert.equal(r.ok, false, JSON.stringify(over));
     assert.match(r.reason, reason);
   }
@@ -519,6 +578,7 @@ test("19: a retry is verified against the attempt's own frozen columns", () => {
   // 50 g purchase.
   const crossed = verifyFrozenAnnualAttempt({
     attempt: frozenAttempt("30g"), userId: UUID, plan, pricing,
+    intentFingerprint: annualIntentFingerprint(intentFor("50g")),
   });
   assert.equal(crossed.ok, false);
 
@@ -559,18 +619,27 @@ test("21: the RPC gets the thirteen reviewed arguments and no totals", () => {
     "p_discount_percent_applied", "p_customer_snapshot", "p_shipping_address_snapshot",
     "p_billing_address_snapshot", "p_tax_snapshot", "p_delivery_items_snapshot",
     "p_delivery_tax_snapshot",
+    "p_expected_annual_intent_fingerprint", "p_expected_annual_request_fingerprint",
   ];
   for (const arg of expected) assert.ok(call.includes(`${arg}:`), `missing RPC argument ${arg}`);
-  assert.equal((call.match(/p_[a-z_]+:/g) || []).length, 13, "the RPC call does not pass exactly 13 arguments");
+  assert.equal((call.match(/p_[a-z_]+:/g) || []).length, 15, "the RPC call does not pass exactly 15 arguments");
   // 039 computes the totals itself; passing them would be a second place
   // for the money to be wrong.
   for (const forbidden of ["p_total", "p_merchandise", "p_shipping_total", "p_delivery_count"]) {
     assert.ok(!call.includes(forbidden), `the RPC call passes ${forbidden}`);
   }
   // The signature the migration actually installed.
-  const migration = read("supabase/migrations/039_b2c_annual_plan_foundation.sql");
+  const m039 = read("supabase/migrations/039_b2c_annual_plan_foundation.sql");
+  const m040 = read("supabase/migrations/040_annual_checkout_retry_fingerprints.sql");
   for (const arg of expected) {
-    assert.ok(migration.includes(arg), `039 has no argument ${arg}`);
+    assert.ok(m040.includes(arg), `040's hardened signature has no argument ${arg}`);
+  }
+  // The first thirteen are 039's, unchanged; the last two are 040's.
+  for (const arg of expected.slice(0, 13)) {
+    assert.ok(m039.includes(arg), `039 has no argument ${arg}`);
+  }
+  for (const arg of expected.slice(13)) {
+    assert.ok(!m039.includes(arg), `039 already had ${arg}, so 040 changed nothing`);
   }
   // Billing reuses the one saved address, exactly as the subscription
   // checkout does. No new request field, no second address UI.
@@ -720,9 +789,11 @@ test("28: nothing durable is deleted on a partial failure", () => {
   const linkBlock = flow.slice(at("const linked = await deps.linkSession("), at("return Response.json({ sessionId"));
   assert.match(linkBlock, /if \(!linked\)/);
   assert.match(linkBlock, /return fail\(503, UNAVAILABLE\);/);
-  // A refused RPC leaves the attempt for the retry.
+  // A refused RPC leaves the attempt for the retry, whichever status it
+  // answers with.
   const rpcBlock = flow.slice(at("if (!pending.ok)"), at("const annualPlanId"));
-  assert.match(rpcBlock, /return fail\(503, UNAVAILABLE\);/);
+  assert.match(rpcBlock, /return status === 409/);
+  assert.match(rpcBlock, /fail\(503, UNAVAILABLE\)/);
   assert.ok(!rpcBlock.includes("delete"));
 });
 
@@ -753,7 +824,13 @@ test("30: the rules module is a leaf and the flow is the only place with side ef
   const ruleImports = read("lib/annualPlanCheckoutRules.ts")
     .split(NEWLINE).filter(l => /^import /.test(l));
   for (const line of ruleImports) {
-    assert.match(line, /^import type /, `a value import reached the rules leaf: ${line}`);
+    // Type-only relative imports are erased; a BARE specifier such as
+    // node:crypto resolves fine. What must never appear is a value
+    // import of an extension-less relative path, which is what stops the
+    // test runner loading the module. lib/subscriptionCheckoutRules.ts
+    // has exactly this shape and for exactly this reason.
+    const ok = /^import type /.test(line) || /from "node:[a-z]+";$/.test(line);
+    assert.ok(ok, `a relative value import reached the rules leaf: ${line}`);
   }
   for (const banned of ["supabase", "Supabase", "getStripeClient", "process.env", "fetch("]) {
     assert.ok(!rulesCode.includes(banned), `the rules leaf reaches for ${banned}`);
@@ -781,10 +858,489 @@ test("31: the live checkout flows and the webhook are untouched", () => {
   assert.ok(!read("app/api/cron/retry-order-notifications/route.ts").includes("annual"));
 });
 
-test("32: migrations 001-039 are untouched and no 040 exists", () => {
+test("32: 040 is the only new migration, and 001-039 are untouched", () => {
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 39);
-  assert.equal(migrations[migrations.length - 1], "039_b2c_annual_plan_foundation.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 39), []);
+  assert.equal(migrations.length, 40);
+  assert.equal(migrations[migrations.length - 1], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(migrations[migrations.length - 2], "039_b2c_annual_plan_foundation.sql");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 40), [],
+    "a migration 041 or beyond appeared");
+  // 039 is live and immutable: this phase may not have edited any
+  // migration below 040 at all.
+  const changed = execFileSync("git", ["diff", "--name-only", "HEAD", "--", "supabase/migrations/"],
+    { cwd: ROOT, encoding: "utf-8" }).trim();
+  const touched = changed ? changed.split(NEWLINE) : [];
+  assert.deepEqual(touched, [], "a live, immutable migration was edited");
+});
+
+/* ══════════════════════════════════════════════════════════════
+   33-38. MIGRATION 040 AND THE TWO FINGERPRINTS
+
+   Phase 4B3.1 reproduced the gap these close: an annual checkout could
+   be retried with the same request_id after the customer edited their
+   saved address, and nothing noticed - because annual shipping is
+   decided by product SIZE, so a street, postcode, city, recipient or
+   company edit leaves the money, the country and the tax identical.
+   ══════════════════════════════════════════════════════════════ */
+
+/**
+ * SQL code only. withoutComments above strips // and block comments,
+ * which is right for TypeScript and wrong here: a migration's prose uses
+ * -- and deliberately NAMES what it refuses to do ("no default", "no
+ * index", "no backfill"), so a scan that read it would report every
+ * deliberate avoidance as a violation of itself.
+ */
+const withoutSqlComments = source => source
+  .split(NEWLINE)
+  .filter(line => !line.trim().startsWith("--"))
+  .join(NEWLINE);
+
+const m040 = read("supabase/migrations/040_annual_checkout_retry_fingerprints.sql");
+const m040Code = withoutSqlComments(m040);
+const OLD_RPC_ARGS = "uuid, uuid, uuid, integer, integer, integer, numeric, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb";
+const NEW_RPC_ARGS = `${OLD_RPC_ARGS}, text, text`;
+
+test("33: 040 adds exactly two nullable annual columns, and nothing else", () => {
+  assert.ok(m040Code.includes("add column annual_intent_fingerprint  text,"));
+  assert.ok(m040Code.includes("add column annual_request_fingerprint text;"));
+  // Exactly one ALTER TABLE, and it is on checkout_attempts.
+  const altered = [...m040Code.matchAll(/alter table public\.(\w+)/g)].map(m => m[1]);
+  assert.deepEqual(altered, ["checkout_attempts"]);
+  assert.equal((m040Code.match(/add column/g) || []).length, 2);
+  // The ALTER itself carries no default, no NOT NULL and no constraint.
+  const alter = m040Code.slice(m040Code.indexOf("alter table public.checkout_attempts"),
+    m040Code.indexOf(";", m040Code.indexOf("alter table public.checkout_attempts")));
+  for (const forbidden of ["default", "not null", "constraint", "references", "check ("]) {
+    assert.ok(!alter.toLowerCase().includes(forbidden),
+      `the annual columns are not plain nullable text: ${forbidden}`);
+  }
+  // And the migration as a whole creates no index, no policy, no
+  // constraint, changes no table privilege and writes no row.
+  for (const forbidden of [
+    "create index", "create unique index", "create policy", "row level security",
+    "grant select", "grant insert", "grant update on", "grant delete",
+    "add constraint", "update public.checkout_attempts", "insert into public.checkout_attempts",
+    "delete from", "truncate", "alter default privileges",
+  ]) {
+    assert.ok(!m040Code.toLowerCase().includes(forbidden),
+      `040 does something it must not: ${forbidden}`);
+  }
+});
+
+test("34: 040 drops the old 13-argument signature and leaves exactly one", () => {
+  // An overload would leave the unsafe version callable by anything that
+  // simply omitted the two new arguments.
+  assert.ok(m040Code.includes("drop function public.create_pending_annual_plan_for_attempt("),
+    "040 does not drop the old signature");
+  const drop = m040Code.slice(m040Code.indexOf("drop function"), m040Code.indexOf(");", m040Code.indexOf("drop function")));
+  assert.ok(!drop.includes("if exists"), "the drop is conditional and would hide schema drift");
+  assert.ok(!drop.includes("cascade"), "the drop cascades");
+  assert.ok(drop.includes("text") === false, "the drop names the NEW signature, not the old one");
+
+  // Exactly one create, and it carries both new parameters.
+  assert.equal((m040Code.match(/create or replace function public\.create_pending_annual_plan_for_attempt\(/g) || []).length, 1);
+  assert.ok(m040Code.includes("p_expected_annual_intent_fingerprint  text,"));
+  assert.ok(m040Code.includes("p_expected_annual_request_fingerprint text"));
+
+  // And the grants name the fifteen-argument signature only.
+  for (const role of ["public", "anon", "authenticated"]) {
+    assert.ok(m040Code.includes(`revoke all on function public.create_pending_annual_plan_for_attempt(${NEW_RPC_ARGS}) from ${role};`),
+      `040 does not revoke the new signature from ${role}`);
+  }
+  assert.ok(m040Code.includes(`grant execute on function public.create_pending_annual_plan_for_attempt(${NEW_RPC_ARGS}) to service_role;`));
+  assert.ok(!m040Code.includes(`grant execute on function public.create_pending_annual_plan_for_attempt(${OLD_RPC_ARGS}) to`),
+    "040 grants the old signature");
+});
+
+test("35: the hardened RPC is still SECURITY DEFINER with an empty search_path", () => {
+  const fn = m040Code.slice(
+    m040Code.indexOf("create or replace function public.create_pending_annual_plan_for_attempt("),
+    m040Code.indexOf("$$;"));
+  assert.ok(fn.includes("security definer set search_path = ''"));
+  assert.ok(!/execute\s+format\s*\(/i.test(fn), "the hardened RPC uses dynamic SQL");
+  // Fully qualified relations throughout.
+  assert.ok(fn.includes("from public.checkout_attempts"));
+  assert.ok(fn.includes("from public.annual_plans"));
+  assert.ok(fn.includes("insert into public.annual_plans"));
+  assert.ok(!fn.includes(" from checkout_attempts"), "an unqualified relation appears");
+});
+
+test("36: the gate ORDER inside the RPC is the whole point", () => {
+  const fn = m040Code.slice(
+    m040Code.indexOf("create or replace function public.create_pending_annual_plan_for_attempt("),
+    m040Code.indexOf("$$;"));
+  const lock = fn.indexOf("where id = p_checkout_attempt_id\n  for update;");
+  const owner = fn.indexOf("if v_attempt.user_id is distinct from p_user_id then");
+  const intentGate = fn.indexOf("v_attempt.annual_intent_fingerprint is null");
+  const existing = fn.indexOf("where payment_checkout_attempt_id = p_checkout_attempt_id;");
+  const termsGate = fn.indexOf("v_attempt.annual_request_fingerprint is null");
+  const preStripe = fn.indexOf("if v_attempt.status <> 'created'");
+  const insert = fn.indexOf("insert into public.annual_plans");
+
+  for (const [name, i] of Object.entries({ lock, owner, intentGate, existing, termsGate, preStripe, insert })) {
+    assert.ok(i > 0, `missing from the hardened RPC: ${name}`);
+  }
+  // Everything happens under the lock.
+  assert.ok(lock < owner, "ownership is decided before the row is locked");
+  assert.ok(owner < intentGate, "the intent gate runs before ownership");
+  // THE IDENTITY GATE RUNS BEFORE THE EXISTING-PLAN LOOKUP, so it is
+  // checked even when a plan already exists.
+  assert.ok(intentGate < existing, "the intent gate can be skipped by an existing plan");
+  // AND THE TERMS GATE RUNS AFTER IT, so an address edited after the
+  // contract was frozen cannot lock the customer out of it.
+  assert.ok(existing < termsGate, "the terms gate would refuse a retry for an existing plan");
+  assert.ok(termsGate < preStripe, "the terms gate runs after the pre-Stripe test");
+  assert.ok(preStripe < insert, "a plan is created before the pre-Stripe test");
+
+  // Both gates compare the STORED column against the expected argument,
+  // and both fail closed on NULL.
+  assert.ok(fn.includes("v_attempt.annual_intent_fingerprint is distinct from p_expected_annual_intent_fingerprint"));
+  assert.ok(fn.includes("v_attempt.annual_request_fingerprint is distinct from p_expected_annual_request_fingerprint"));
+  assert.ok(fn.includes("v_attempt.annual_intent_fingerprint is null"));
+  assert.ok(fn.includes("v_attempt.annual_request_fingerprint is null"));
+  assert.ok(fn.includes("'attempt_intent_mismatch'"));
+  assert.ok(fn.includes("'attempt_request_mismatch'"));
+  // Nothing is echoed: no digest leaves the function.
+  assert.ok(!fn.includes("'stored'"));
+  assert.ok(!fn.includes("p_expected_annual_intent_fingerprint,\n"));
+});
+
+test("37: every 039 invariant survives in the hardened RPC, verbatim", () => {
+  const m039 = read("supabase/migrations/039_b2c_annual_plan_foundation.sql");
+  const body039 = withoutComments(m039).slice(
+    withoutComments(m039).indexOf("create or replace function public.create_pending_annual_plan_for_attempt("),
+    withoutComments(m039).indexOf("$$;"));
+  const fn = m040Code.slice(
+    m040Code.indexOf("create or replace function public.create_pending_annual_plan_for_attempt("),
+    m040Code.indexOf("$$;"));
+  for (const invariant of [
+    "return pg_catalog.jsonb_build_object('result', 'attempt_not_found');",
+    "return pg_catalog.jsonb_build_object('result', 'attempt_not_owned');",
+    "'result', 'attempt_not_pre_stripe',",
+    "'result', 'total_mismatch',",
+    "v_merch := p_annual_unit_gross_cents * v_count;",
+    "v_ship  := p_shipping_per_delivery_gross_cents * v_count;",
+    "v_total := v_merch + v_ship;",
+    "if v_attempt.expected_total_gross_cents is distinct from v_total then",
+    "when unique_violation then",
+    "'result', 'created',",
+    "'result', 'existing',",
+  ]) {
+    assert.ok(body039.includes(invariant), `039 no longer has: ${invariant}`);
+    assert.ok(fn.includes(invariant), `040 dropped a 039 invariant: ${invariant}`);
+  }
+  // The totals are still computed, never accepted.
+  assert.ok(!fn.includes("p_total_gross_cents"));
+  assert.ok(!fn.includes("p_merchandise_total"));
+});
+
+test("38: 039's file is byte-identical and the other seven functions are untouched", () => {
+  const m039 = read("supabase/migrations/039_b2c_annual_plan_foundation.sql");
+  // 040 redefines exactly one function, and it is the pending-plan one.
+  const redefined = [...m040Code.matchAll(/create or replace function public\.(\w+)\(/g)].map(m => m[1]);
+  assert.deepEqual(redefined, ["create_pending_annual_plan_for_attempt"]);
+  for (const untouched of [
+    "activate_annual_plan_from_payment", "claim_due_annual_plan_deliveries",
+    "fulfill_annual_plan_delivery", "apply_annual_plan_refund_state",
+    "claim_annual_plan_purchase_email", "record_annual_plan_purchase_email_result",
+    "complete_due_annual_plans", "create_order_from_paid_checkout",
+    "apply_order_refund_state", "claim_pending_subscription_for_attempt",
+  ]) {
+    assert.ok(!m040Code.includes(`function public.${untouched}(`), `040 touches ${untouched}`);
+  }
+  // 039 still defines its own seven, which 040 leaves alone.
+  for (const own of [
+    "activate_annual_plan_from_payment", "claim_due_annual_plan_deliveries",
+    "fulfill_annual_plan_delivery", "apply_annual_plan_refund_state",
+    "claim_annual_plan_purchase_email", "record_annual_plan_purchase_email_result",
+    "complete_due_annual_plans",
+  ]) {
+    assert.ok(m039.includes(`create or replace function public.${own}(`), `039 lost ${own}`);
+  }
+  // And 040 does not write into the subscription fingerprint columns.
+  assert.ok(!m040Code.includes("subscription_request_fingerprint"));
+  assert.ok(!m040Code.includes("subscription_intent_fingerprint"));
+});
+
+/* ══════════════════════════════════════════════════════════════
+   39-42. THE FINGERPRINTS THEMSELVES
+   ══════════════════════════════════════════════════════════════ */
+
+test("39: the annual fingerprint domain is its own, and separated from the subscription one", () => {
+  assert.equal(ANNUAL_FINGERPRINT_VERSION, "gloa-annual-fp-1");
+  const subs = read("lib/subscriptionCheckoutRules.ts");
+  assert.ok(subs.includes('export const FINGERPRINT_VERSION = "gloa-sub-fp-1";'),
+    "the subscription fingerprint version changed");
+  assert.notEqual(ANNUAL_FINGERPRINT_VERSION, "gloa-sub-fp-1");
+  // The annual rules do not import the subscription constants and pretend
+  // the domains are the same.
+  assert.ok(!rulesCode.includes("gloa-sub-fp"));
+  assert.ok(!rulesCode.includes("subscriptionRequestFingerprint"));
+  // Every digest is 64 hex characters of SHA-256.
+  const d = annualIntentFingerprint(intentFor("50g"));
+  assert.match(d, /^[0-9a-f]{64}$/);
+  assert.match(annualRequestFingerprint(intentFor("50g")), /^[0-9a-f]{64}$/);
+  assert.match(annualAddressDigest(snapshotFor(addressRow()).snapshot), /^[0-9a-f]{64}$/);
+  // The two halves of one intent are never equal.
+  assert.notEqual(annualIntentFingerprint(intentFor("50g")), annualRequestFingerprint(intentFor("50g")));
+});
+
+test("40: the field lists are the contract, and they bind what they must", () => {
+  assert.deepEqual([...ANNUAL_INTENT_FINGERPRINT_FIELDS],
+    ["userId", "variantId", "addressId", "deliveryCount"]);
+  assert.deepEqual([...ANNUAL_REQUEST_FINGERPRINT_FIELDS], [
+    "userId", "variantId", "addressId", "deliveryCount", "addressDigest", "sku",
+    "currency", "shippingCountry", "catalogUnitGrossCents", "discountPercentApplied",
+    "annualUnitGrossCents", "shippingPerDeliveryGrossCents", "shippingTotalGrossCents",
+    "totalGrossCents", "taxCalculationVersion", "taxTreatment", "taxTotalCents",
+  ]);
+  // The identity half carries NO priced value: it is compared even after
+  // a plan exists, when the price is already frozen.
+  for (const priced of ["Cents", "discount", "tax", "addressDigest"]) {
+    assert.ok(!ANNUAL_INTENT_FINGERPRINT_FIELDS.some(f => f.includes(priced)),
+      `the identity half carries a priced field: ${priced}`);
+  }
+  // Every terms field genuinely moves the digest.
+  const base = annualRequestFingerprint(intentFor("50g"));
+  for (const [field, value] of [
+    ["userId", "99999999-8888-7777-6666-555555555555"],
+    ["variantId", "88888888-7777-6666-5555-444444444444"],
+    ["addressId", "77777777-6666-5555-4444-333333333333"],
+    ["deliveryCount", 12],
+    ["addressDigest", "deadbeef"],
+    ["sku", "GLOA-MATCHA-30G"],
+    ["currency", "CHF"],
+    ["shippingCountry", "AT"],
+    ["catalogUnitGrossCents", 3099],
+    ["discountPercentApplied", 15],
+    ["annualUnitGrossCents", 2700],
+    ["shippingPerDeliveryGrossCents", 590],
+    ["shippingTotalGrossCents", 7670],
+    ["totalGrossCents", 35088],
+    ["taxCalculationVersion", "de-2027.1"],
+    ["taxTreatment", "de_origin_intra_eu"],
+    ["taxTotalCents", 4321],
+  ]) {
+    assert.notEqual(annualRequestFingerprint(intentFor("50g", { [field]: value })), base,
+      `changing ${field} did not change the terms digest`);
+  }
+});
+
+test("41: the address digest binds every canonical field and stores no PII", () => {
+  const base = annualAddressDigest(snapshotFor(addressRow()).snapshot);
+  // The six edits Phase 4B3.1 proved were invisible.
+  for (const [label, edit] of [
+    ["street", { street: "Torstrasse" }],
+    ["house number", { house_number: "99" }],
+    ["postcode", { zip: "10115" }],
+    ["city", { city: "Potsdam" }],
+    ["recipient", { first_name: "Jonas", last_name: "Weber" }],
+    ["company", { company: "GLOA GmbH" }],
+  ]) {
+    const edited = annualAddressDigest(snapshotFor(addressRow(edit)).snapshot);
+    assert.notEqual(edited, base, `an edited ${label} produced the same digest`);
+  }
+  // Identical contents produce an identical digest, so an unchanged
+  // retry converges.
+  assert.equal(annualAddressDigest(snapshotFor(addressRow()).snapshot), base);
+  // It is a digest, not the address: no readable field survives in it.
+  for (const value of ["Kastanienallee", "Berlin", "10435", "Mira", "Sato", "GLOA"]) {
+    assert.ok(!base.includes(value), `the address digest leaks ${value}`);
+  }
+  // And no address text is written into either fingerprint column.
+  const writer = attemptsCode.slice(attemptsCode.indexOf("export async function getOrCreateAnnualCheckoutAttempt"));
+  for (const banned of ["street", "house_number", "zip", "city", "first_name", "company"]) {
+    assert.ok(!writer.includes(banned), `the annual writer stores ${banned}`);
+  }
+});
+
+test("42: a stored NULL fingerprint fails closed and is never adopted", () => {
+  assert.equal(attemptMatchesAnnualFingerprint(null, "x"), false);
+  assert.equal(attemptMatchesAnnualFingerprint(undefined, "x"), false);
+  assert.equal(attemptMatchesAnnualFingerprint("", "x"), false);
+  assert.equal(attemptMatchesAnnualFingerprint("x", "x"), true);
+  assert.equal(attemptMatchesAnnualFingerprint("x", "y"), false);
+  // An attempt from the one-time or subscription flow, or one written
+  // before 040, has NULL here and is refused rather than adopted.
+  const r = verifyRetry("50g", { annual_intent_fingerprint: null });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /different annual checkout/);
+  // The database says so too.
+  assert.ok(m040Code.includes("v_attempt.annual_intent_fingerprint is null"));
+});
+
+/* ══════════════════════════════════════════════════════════════
+   43-48. THE FIVE CASES
+   ══════════════════════════════════════════════════════════════ */
+
+test("43: CASE A - plan already exists, address edited afterwards, plan reused", () => {
+  // The identity is unchanged by an address CONTENT edit: same customer,
+  // same product, same selected address id.
+  const editedAddressIntent = intentFor("50g", {
+    addressDigest: annualAddressDigest(snapshotFor(addressRow({ street: "Torstrasse" })).snapshot),
+  });
+  assert.equal(
+    annualIntentFingerprint(editedAddressIntent),
+    annualIntentFingerprint(intentFor("50g")),
+    "an address content edit changed the IDENTITY digest, which would break CASE A");
+  // ...while the terms digest differs, which is what CASE B relies on.
+  assert.notEqual(
+    annualRequestFingerprint(editedAddressIntent),
+    annualRequestFingerprint(intentFor("50g")));
+
+  // So the RPC returns 'existing' before ever reaching the terms gate.
+  const fn = m040Code.slice(
+    m040Code.indexOf("create or replace function public.create_pending_annual_plan_for_attempt("),
+    m040Code.indexOf("$$;"));
+  assert.ok(fn.indexOf("'result', 'existing',") < fn.indexOf("v_attempt.annual_request_fingerprint is null"),
+    "the existing-plan answer comes after the terms gate");
+  // And the application adopts it without rebuilding anything.
+  assert.deepEqual([...PENDING_ANNUAL_PLAN_SUCCESS_RESULTS], ["created", "existing"]);
+  assert.equal(interpretPendingAnnualPlanResult({ result: "existing", annual_plan_id: PLAN_ID }).ok, true);
+  for (const banned of ["update public.annual_plans", "annual_plans"]) {
+    assert.ok(!flow.includes(banned), `the flow writes the plan: ${banned}`);
+  }
+
+  // A CATALOG CHANGE after the plan exists is equally harmless: Stripe is
+  // built from the FROZEN attempt, not from a fresh price.
+  assert.ok(flow.includes("annualUnitGrossCents: frozenItem.unitGrossCents"));
+  assert.ok(flow.includes("shippingTotalGrossCents: frozenShippingTotal"));
+});
+
+test("44: CASE B - no plan yet, same addressId, contents changed, refused", () => {
+  const base = annualRequestFingerprint(intentFor("50g"));
+  for (const [label, edit] of [
+    ["street", { street: "Torstrasse" }],
+    ["house number", { house_number: "99" }],
+    ["postcode", { zip: "10115" }],
+    ["city", { city: "Potsdam" }],
+    ["recipient name", { first_name: "Jonas", last_name: "Weber" }],
+    ["company", { company: "GLOA GmbH" }],
+  ]) {
+    const digest = annualAddressDigest(snapshotFor(addressRow(edit)).snapshot);
+    assert.notEqual(annualRequestFingerprint(intentFor("50g", { addressDigest: digest })), base,
+      `an edited ${label} did not change the terms digest`);
+  }
+  // The database refuses it, under the lock, with its own word.
+  assert.ok(m040Code.includes("'result', 'attempt_request_mismatch',"));
+  // And the route answers 409, not 503: retrying will never fix it. The
+  // conflict family is the set of refusals that are statements about the
+  // REQUEST rather than about the server.
+  assert.deepEqual([...ANNUAL_PENDING_PLAN_CONFLICT_RESULTS], [
+    "attempt_intent_mismatch", "attempt_request_mismatch", "attempt_not_owned",
+    "attempt_not_pre_stripe", "total_mismatch",
+  ]);
+  for (const conflict of ANNUAL_PENDING_PLAN_CONFLICT_RESULTS) {
+    assert.equal(annualPendingPlanFailureStatus(conflict), 409, conflict);
+  }
+  // Anything else, including a word nobody has seen, stays retryable.
+  for (const retryable of ["attempt_not_found", "invalid_input", "unknown", ""]) {
+    assert.equal(annualPendingPlanFailureStatus(retryable), 503, retryable);
+  }
+  assert.equal(annualPendingPlanFailureStatus("attempt_request_mismatch"), 409);
+  assert.ok(flow.includes('fail(409, "Diese Anfrage-ID gehört zu einem anderen Vorgang.")'));
+  // No digest reaches the customer.
+  const block = flow.slice(at("const status = annualPendingPlanFailureStatus("), at("const annualPlanId"));
+  assert.ok(!block.includes("pending.reason)") || block.includes("console.error"),
+    "the refusal reason is returned rather than logged");
+  assert.ok(!block.includes("fingerprint"), "a fingerprint value reaches the response");
+});
+
+test("45: CASE C - no plan yet, a different addressId, refused", () => {
+  const other = "66666666-5555-4444-3333-222222222222";
+  // Identical contents and identical pricing, different selected address.
+  const changed = intentFor("50g", { addressId: other });
+  assert.notEqual(annualIntentFingerprint(changed), annualIntentFingerprint(intentFor("50g")),
+    "a different addressId did not change the IDENTITY digest");
+  assert.notEqual(annualRequestFingerprint(changed), annualRequestFingerprint(intentFor("50g")));
+  // The identity gate catches it, so it is refused even if a plan exists.
+  const r = verifyRetry("50g", {}, { addressId: other });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /different annual checkout/);
+  assert.equal(annualPendingPlanFailureStatus("attempt_intent_mismatch"), 409);
+});
+
+test("46: CASE D - no plan yet, identical request, accepted", () => {
+  const r = verifyRetry("50g");
+  assert.equal(r.ok, true);
+  // Both digests are stable across repeated computation, so a retry
+  // converges rather than drifting.
+  assert.equal(annualIntentFingerprint(intentFor("50g")), annualIntentFingerprint(intentFor("50g")));
+  assert.equal(annualRequestFingerprint(intentFor("50g")), annualRequestFingerprint(intentFor("50g")));
+  // And the RPC's success words are the only ones accepted.
+  assert.equal(interpretPendingAnnualPlanResult({ result: "created", annual_plan_id: PLAN_ID }).ok, true);
+});
+
+test("47: CASE E - a different user or a different variant is refused", () => {
+  const otherUser = "99999999-8888-7777-6666-555555555555";
+  assert.notEqual(annualIntentFingerprint(intentFor("50g", { userId: otherUser })),
+    annualIntentFingerprint(intentFor("50g")));
+  // Two independent refusals: the stored user_id and the identity digest.
+  const byUser = verifyRetry("50g", { user_id: otherUser });
+  assert.equal(byUser.ok, false);
+  assert.match(byUser.reason, /another customer/);
+  const byIntent = verifyRetry("50g", {}, { userId: otherUser });
+  assert.equal(byIntent.ok, false);
+  // A third, in the database, under the lock.
+  assert.ok(m040Code.includes("if v_attempt.user_id is distinct from p_user_id then"));
+
+  // A different variant changes both digests and the frozen item.
+  assert.notEqual(annualIntentFingerprint(intentFor("30g")), annualIntentFingerprint(intentFor("50g")));
+  const byVariant = verifyFrozenAnnualAttempt({
+    attempt: frozenAttempt("50g"), userId: UUID, plan: planFor("30g"), pricing: pricingFor("30g"),
+    intentFingerprint: annualIntentFingerprint(intentFor("30g")),
+  });
+  assert.equal(byVariant.ok, false);
+});
+
+test("48: the four attempt populations stay structurally distinguishable", () => {
+  // Migration 025 reads the non-NULL-ness of its two columns as the
+  // DEFINITION of "this attempt is a subscription checkout". The annual
+  // flow therefore got its own two rather than borrowing those.
+  const m025 = read("supabase/migrations/025_grant_subscription_plans_service_role.sql");
+  assert.ok(m025.includes("is not a subscription checkout"),
+    "migration 025's definition changed, so this reasoning is stale");
+
+  const annualWriter = attemptsCode.slice(attemptsCode.indexOf("export async function getOrCreateAnnualCheckoutAttempt"));
+  const subWriter = attemptsCode.slice(
+    attemptsCode.indexOf("export async function getOrCreateSubscriptionCheckoutAttempt"),
+    attemptsCode.indexOf("export async function findAttemptByStripeSessionId"));
+  const oneTimeWriter = attemptsCode.slice(
+    attemptsCode.indexOf("export async function getOrCreateCheckoutAttempt"),
+    attemptsCode.indexOf("export async function linkStripeSession"));
+
+  // annual writes annual only
+  assert.ok(annualWriter.includes("annual_intent_fingerprint:"));
+  assert.ok(!annualWriter.includes("subscription_request_fingerprint"));
+  // subscription writes subscription only
+  assert.ok(subWriter.includes("subscription_request_fingerprint: input.fingerprint"));
+  assert.ok(!subWriter.includes("annual_intent_fingerprint"));
+  // one-time writes neither
+  assert.ok(!oneTimeWriter.includes("fingerprint"));
+  // and the synthetic delivery attempt, which 039 mints in SQL, writes
+  // neither family either.
+  const m039 = read("supabase/migrations/039_b2c_annual_plan_foundation.sql");
+  const prepare = m039.slice(m039.indexOf("insert into public.checkout_attempts"));
+  const insertCols = prepare.slice(0, prepare.indexOf(") values"));
+  for (const banned of ["fingerprint"]) {
+    assert.ok(!insertCols.includes(banned), `039's delivery attempt writes ${banned}`);
+  }
+});
+
+test("49: this phase still activates nothing and touches no other runtime", () => {
+  for (const banned of [
+    "activate_annual_plan_from_payment", "fulfill_annual_plan_delivery",
+    "create_order_from_paid_checkout", "markAttemptPaid", "Resend",
+  ]) {
+    assert.ok(!flow.includes(banned), `the checkout flow calls ${banned}`);
+    assert.ok(!depsCode.includes(banned), `the wiring reaches for ${banned}`);
+  }
+  // The webhook still has no annual branch.
+  assert.ok(!withoutComments(read("app/api/stripe/webhook/route.ts")).includes("annual"));
+  // The cron is untouched.
+  assert.ok(!read("app/api/cron/retry-order-notifications/route.ts").includes("annual"));
+  // The flag is still closed by default.
+  assert.match(read(".env.example"), /^B2C_ANNUAL_PLAN_ENABLED=$/m);
+  assert.ok(read("lib/annualPlans.ts").includes('return env[ANNUAL_PLAN_FEATURE_FLAG] === "true";'));
 });

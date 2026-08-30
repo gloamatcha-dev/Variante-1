@@ -104,7 +104,8 @@ test("035 exists, is the only 035, and only 036 and 037 follow it", () => {
   assert.deepEqual(
     numbered.filter(x => x.n > 35).map(x => x.file).sort(),
     ["036_subscription_payment_status.sql", "037_subscription_refund_correlation.sql",
-     "038_one_time_refund_writer_concurrency.sql", "039_b2c_annual_plan_foundation.sql"],
+     "038_one_time_refund_writer_concurrency.sql", "039_b2c_annual_plan_foundation.sql",
+     "040_annual_checkout_retry_fingerprints.sql"],
     "an unreviewed migration above 035 appeared"
   );
   // And 039 leaves this table entirely alone. An annual plan's one

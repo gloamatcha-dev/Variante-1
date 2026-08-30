@@ -8,7 +8,10 @@ import { resolveAnnualLaunchPlan, type AnnualLaunchPlan } from "./annualPlans";
 import {
   ANNUAL_ALLOWED_COUNTRY,
   ANNUAL_SHIPPING_ZONE,
+  annualAddressDigest,
   annualCheckoutIdempotencyKey,
+  annualIntentFingerprint,
+  annualRequestFingerprint,
   buildAnnualCheckoutLineItems,
   buildAnnualCustomerSnapshot,
   buildAnnualDeliveryItemsSnapshot,
@@ -17,6 +20,7 @@ import {
   buildAnnualShippingOptions,
   buildAnnualTaxableItems,
   buildDeliveryTaxableItems,
+  annualPendingPlanFailureStatus,
   interpretPendingAnnualPlanResult,
   parseAnnualCheckoutBody,
   requireAnnualDestination,
@@ -102,7 +106,7 @@ export type AnnualCheckoutDeps = {
   linkSession: (attemptId: string, sessionId: string) => Promise<boolean>;
 };
 
-/** The thirteen arguments migration 039's RPC takes, and no more. */
+/** The fifteen arguments migration 040's hardened RPC takes, and no more. */
 export type CreatePendingAnnualPlanInput = {
   checkoutAttemptId: string;
   userId: string;
@@ -117,6 +121,8 @@ export type CreatePendingAnnualPlanInput = {
   taxSnapshot: CartTaxSnapshot;
   deliveryItemsSnapshot: unknown;
   deliveryTaxSnapshot: CartTaxSnapshot;
+  expectedIntentFingerprint: string;
+  expectedRequestFingerprint: string;
 };
 
 type ErrorResponse = { error: string };
@@ -268,6 +274,43 @@ export async function handleAnnualPlanCheckout(
     currency: quote.currency,
   };
 
+  // 8b. THE FINGERPRINT OF THIS EXACT INTENT (Phase 4B3.2).
+  //
+  // A request_id is an idempotency token, never commercial authority, so
+  // "the same request" has to be a checkable claim. Two digests, because
+  // the question changes the moment a contract exists:
+  //
+  //   identity  customer, product, selected address. Compared on EVERY
+  //             retry, including one that finds an existing plan.
+  //   terms     the identity plus the address CONTENTS and every frozen
+  //             commercial fact. Compared only while no plan exists.
+  //
+  // The address is reduced to a digest first, so nothing readable about
+  // a delivery ever reaches a database column or a log line. Phase 4B3.1
+  // reproduced the gap this closes: six different address edits all left
+  // the money, the country and the tax identical, so nothing noticed.
+  const intent = {
+    userId: caller.userId,
+    variantId: plan.variantId,
+    addressId,
+    deliveryCount: pricing.deliveryCount,
+    addressDigest: annualAddressDigest(addressSnapshot),
+    sku: plan.sku,
+    currency: quote.currency,
+    shippingCountry: destination.country,
+    catalogUnitGrossCents: pricing.catalogUnitGrossCents,
+    discountPercentApplied: pricing.discountPercentApplied,
+    annualUnitGrossCents: pricing.annualUnitGrossCents,
+    shippingPerDeliveryGrossCents: pricing.shippingPerDeliveryGrossCents,
+    shippingTotalGrossCents: pricing.shippingTotalGrossCents,
+    totalGrossCents: pricing.totalGrossCents,
+    taxCalculationVersion: annualTax.snapshot.calculationVersion,
+    taxTreatment: annualTax.snapshot.treatment,
+    taxTotalCents: annualTax.snapshot.totals.taxTotalCents,
+  };
+  const intentFingerprint = annualIntentFingerprint(intent);
+  const requestFingerprint = annualRequestFingerprint(intent);
+
   // 9. THE PAYMENT ATTEMPT: the idempotency anchor, and the FIRST WRITE.
   //    It has to exist before the plan so a retry finds the anchor rather
   //    than creating a second plan. annual_plan_id and
@@ -288,6 +331,11 @@ export async function handleAnnualPlanCheckout(
     },
     taxSnapshot: annualTax.snapshot,
     expectedTotalGrossCents: pricing.totalGrossCents,
+    // Written once, with the attempt. ignoreDuplicates means a retry
+    // never overwrites them: the FIRST durable intent wins, and it is
+    // what migration 040 compares under the row lock.
+    intentFingerprint,
+    requestFingerprint,
   });
   if (!attemptResult.ok) {
     return fail(503, attemptResult.error);
@@ -302,7 +350,9 @@ export async function handleAnnualPlanCheckout(
   // columns rather than against a digest. A different customer, a
   // different product or a different total is a different purchase, and
   // the frozen one wins.
-  const frozen = verifyFrozenAnnualAttempt({ attempt, userId: caller.userId, plan, pricing });
+  const frozen = verifyFrozenAnnualAttempt({
+    attempt, userId: caller.userId, plan, pricing, intentFingerprint,
+  });
   if (!frozen.ok) {
     console.error(`Annual checkout: request ${requestId} reused for a different checkout -`, frozen.reason);
     return fail(409, "Diese Anfrage-ID gehört zu einem anderen Vorgang.");
@@ -339,6 +389,13 @@ export async function handleAnnualPlanCheckout(
     taxSnapshot: annualTax.snapshot,
     deliveryItemsSnapshot: buildAnnualDeliveryItemsSnapshot({ plan, pricing, catalog }),
     deliveryTaxSnapshot: deliveryTax.snapshot,
+    // BOTH EXPECTED DIGESTS, compared against the STORED ones under the
+    // attempt's row lock. The database decides which of the two still
+    // has to match: the identity always, the terms only while no annual
+    // plan exists. Doing that comparison here instead would either miss
+    // the race or lock a customer out of a contract they already hold.
+    expectedIntentFingerprint: intentFingerprint,
+    expectedRequestFingerprint: requestFingerprint,
   });
 
   const pending = interpretPendingAnnualPlanResult(rpcResult);
@@ -346,8 +403,16 @@ export async function handleAnnualPlanCheckout(
     // FAIL CLOSED on every word that is not 'created' or 'existing',
     // including one this code has never seen. The attempt survives, so a
     // retry can reuse it.
+    //
+    // A fingerprint mismatch is a 409 rather than a 503: this request id
+    // is not this checkout, and retrying will never change that - the
+    // customer needs a fresh one. The reason is LOGGED, never returned;
+    // no digest and no stored value reaches the response.
+    const status = annualPendingPlanFailureStatus(pending.reason);
     console.error(`Annual checkout: pending plan refused for attempt ${attempt.id} -`, pending.reason);
-    return fail(503, UNAVAILABLE);
+    return status === 409
+      ? fail(409, "Diese Anfrage-ID gehört zu einem anderen Vorgang.")
+      : fail(503, UNAVAILABLE);
   }
   const annualPlanId = pending.annualPlanId;
 

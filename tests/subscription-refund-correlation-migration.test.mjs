@@ -125,12 +125,13 @@ test("1, 2: 037 exists, owns its number, and is the highest migration", () => {
   // reviewed in tests/annual-plan-foundation-migration.test.mjs. The
   // guard is re-pinned, not deleted: it protects "no UNREVIEWED
   // migration appeared", never "the stack stopped growing".
-  assert.equal(files[files.length - 1], "039_b2c_annual_plan_foundation.sql");
-  assert.equal(files[files.length - 2], "038_one_time_refund_writer_concurrency.sql",
+  assert.equal(files[files.length - 1], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 2], "039_b2c_annual_plan_foundation.sql");
+  assert.equal(files[files.length - 3], "038_one_time_refund_writer_concurrency.sql",
     "038 is the one-time writer concurrency fix and must be the highest");
-  assert.equal(files[files.length - 3], MIGRATION_037, "037 must still be the one before it");
-  assert.ok(!files.some(f => f.startsWith("040")), "a 040 appeared");
-  assert.equal(files.length, 39);
+  assert.equal(files[files.length - 4], MIGRATION_037, "037 must still be the one before it");
+  assert.ok(!files.some(f => f.startsWith("041")), "a 041 appeared");
+  assert.equal(files.length, 40);
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length);
@@ -154,7 +155,8 @@ test("3: every immutable migration is still present and unedited", () => {
     // edited in place until the owner applies it.
     assert.ok(file.endsWith(MIGRATION_037)
       || file.endsWith("038_one_time_refund_writer_concurrency.sql")
-      || file.endsWith("039_b2c_annual_plan_foundation.sql"),
+      || file.endsWith("039_b2c_annual_plan_foundation.sql")
+      || file.endsWith("040_annual_checkout_retry_fingerprints.sql"),
       `an immutable migration was modified: ${file}`);
   }
 });

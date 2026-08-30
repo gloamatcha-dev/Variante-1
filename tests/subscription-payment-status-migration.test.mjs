@@ -90,13 +90,14 @@ test("1, 2: 036 exists, owns its number, and 037 is the only thing above it", ()
   // reviewed in tests/annual-plan-foundation-migration.test.mjs. The
   // guard is re-pinned, not deleted: it protects "no UNREVIEWED
   // migration appeared", never "the stack stopped growing".
-  assert.equal(files[files.length - 1], "039_b2c_annual_plan_foundation.sql");
-  assert.equal(files[files.length - 2], "038_one_time_refund_writer_concurrency.sql");
-  assert.equal(files[files.length - 3], "037_subscription_refund_correlation.sql");
-  assert.equal(files[files.length - 4], MIGRATION_036, "036 must still be the one before 037");
+  assert.equal(files[files.length - 1], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 2], "039_b2c_annual_plan_foundation.sql");
+  assert.equal(files[files.length - 3], "038_one_time_refund_writer_concurrency.sql");
+  assert.equal(files[files.length - 4], "037_subscription_refund_correlation.sql");
+  assert.equal(files[files.length - 5], MIGRATION_036, "036 must still be the one before 037");
   assert.deepEqual(files.filter(f => f.startsWith("037")), ["037_subscription_refund_correlation.sql"]);
-  assert.ok(!files.some(f => f.startsWith("040")), "a 040 appeared");
-  assert.equal(files.length, 39);
+  assert.ok(!files.some(f => f.startsWith("041")), "a 041 appeared");
+  assert.equal(files.length, 40);
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length);
@@ -122,7 +123,8 @@ test("3: migrations 022 through 035 are all still present, none renamed", () => 
     assert.ok(file.endsWith(MIGRATION_036)
       || file.endsWith("037_subscription_refund_correlation.sql")
       || file.endsWith("038_one_time_refund_writer_concurrency.sql")
-      || file.endsWith("039_b2c_annual_plan_foundation.sql"),
+      || file.endsWith("039_b2c_annual_plan_foundation.sql")
+      || file.endsWith("040_annual_checkout_retry_fingerprints.sql"),
       `an immutable migration was modified: ${file}`);
   }
 });

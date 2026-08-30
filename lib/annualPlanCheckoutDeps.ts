@@ -58,10 +58,18 @@ async function loadOwnAddress(token: string, userId: string, addressId: string):
 }
 
 /**
- * Calls migration 039's immutable pending-plan function.
+ * Calls the hardened pending-plan function - 039's, as migration 040
+ * replaced it.
  *
- * A thin wrapper and nothing more: it passes the thirteen arguments and
+ * A thin wrapper and nothing more: it passes the fifteen arguments and
  * returns whatever jsonb the function answered with, unexamined.
+ *
+ * The last two are the expected fingerprints. They are compared against
+ * the STORED ones inside the function, under the same row lock that
+ * decides whether to create the plan - which is the point of migration
+ * 040. Comparing them out here would be two transactions with a window
+ * between them.
+ *
  * Interpreting that answer is a pure decision and lives in
  * lib/annualPlanCheckoutRules.ts, where it can be tested - including the
  * rule that anything other than 'created' or 'existing' fails closed.
@@ -93,6 +101,8 @@ async function createPendingAnnualPlan(input: CreatePendingAnnualPlanInput): Pro
     p_tax_snapshot: input.taxSnapshot,
     p_delivery_items_snapshot: input.deliveryItemsSnapshot,
     p_delivery_tax_snapshot: input.deliveryTaxSnapshot,
+    p_expected_annual_intent_fingerprint: input.expectedIntentFingerprint,
+    p_expected_annual_request_fingerprint: input.expectedRequestFingerprint,
   });
 
   if (error) {
