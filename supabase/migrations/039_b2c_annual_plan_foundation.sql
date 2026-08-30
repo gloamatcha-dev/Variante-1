@@ -54,12 +54,21 @@
 --      exactly 13 annual_plan_deliveries in one transaction.
 --
 --   3. The daily Vercel cron claims due deliveries, and each claimed
---      delivery is prepared into its OWN synthetic paid checkout attempt
---      by prepare_annual_plan_delivery_attempt. The existing
---      create_order_from_paid_checkout (migration 021) then mints the
---      order, unchanged, so the tax snapshot, the shipping snapshot, the
---      order number, the order items, the shipment flow and the four
---      email state machines are all reused rather than reimplemented.
+--      delivery is fulfilled by ONE call to fulfill_annual_plan_delivery.
+--      That single transaction locks the parent, re-proves it is still
+--      deliverable, creates the delivery's OWN synthetic paid checkout
+--      attempt, calls the existing create_order_from_paid_checkout
+--      (migration 021) unchanged, and records the resulting order on the
+--      delivery row. The tax snapshot, the shipping snapshot, the order
+--      number, the order items, the shipment flow and the four email
+--      state machines are all reused rather than reimplemented.
+--
+--      IT IS ONE TRANSACTION ON PURPOSE. Phase 4B1.1 replaced a
+--      three-call composition - prepare, then create the order, then
+--      mark fulfilled - because the parent lock was released between the
+--      guard and the order. A full refund committing in that window
+--      would have produced a physical order for a plan that was no
+--      longer deliverable. See section 9.
 --
 -- ── THE PAYMENT AND THE DELIVERIES ARE DIFFERENT THINGS ───────
 --
@@ -325,10 +334,16 @@ create table public.annual_plans (
             and plan_end_at is not null
             and payment_status <> 'pending'
             and stripe_payment_intent_id is not null)),
+  -- BICONDITIONAL, not one-way. A terminal status and its timestamp are
+  -- the same fact recorded twice, so neither may exist without the
+  -- other: a 'completed' row with no completed_at would have no answer
+  -- to "when", and a completed_at on an active row would claim an event
+  -- that has not happened. status is NOT NULL, so neither side of these
+  -- can be NULL and the equality is always a real decision.
   constraint annual_plans_completed_at_check
-    check ((completed_at is null) or status = 'completed'),
+    check ((completed_at is not null) = (status = 'completed')),
   constraint annual_plans_cancelled_at_check
-    check ((cancelled_at is null) or status = 'cancelled'),
+    check ((cancelled_at is not null) = (status = 'cancelled')),
 
   -- ── THE FROZEN PER-DELIVERY DOCUMENTS MUST AGREE ──────────
   --
@@ -613,7 +628,7 @@ create policy "Users read own annual plan deliveries"
 --                  above. This is what the account area will read.
 --   service_role   SELECT on both tables. NO INSERT, NO UPDATE, NO
 --                  DELETE - deliberately, and this is the point of
---                  section 16's rule. The six functions below are the
+--                  section 16's rule. The five functions below are the
 --                  entire write surface, they are SECURITY DEFINER, and
 --                  they therefore act with their owner's privileges
 --                  rather than with service_role's. Granting a direct
@@ -717,9 +732,26 @@ begin
     return pg_catalog.jsonb_build_object('result', 'attempt_not_found');
   end if;
 
+  -- ── OWNERSHIP FIRST, BEFORE ANY PLAN IS RESOLVED OR REPORTED ──
+  --
+  -- Order matters here and it is a security property, not tidiness.
+  -- Answering the existing-plan branch before proving ownership would
+  -- turn a guessed request id into an oracle: a caller holding somebody
+  -- else's attempt id would learn that an annual plan exists for it, and
+  -- learn its uuid and its lifecycle status. Proving ownership first
+  -- means an attempt that is not this caller's produces exactly one
+  -- answer, carrying no plan id and no status, whether or not a plan
+  -- exists behind it.
+  if v_attempt.user_id is distinct from p_user_id then
+    return pg_catalog.jsonb_build_object('result', 'attempt_not_owned');
+  end if;
+
   -- Already claimed. Idempotent, and the ONLY safe answer to a retry:
   -- the plan that exists IS the answer to this request and nothing may
-  -- rebuild it from a freshly computed price.
+  -- rebuild it from a freshly computed price. Reached only by the
+  -- attempt's own owner, and reached BEFORE the pre-Stripe test below,
+  -- because a legitimate retry after the Stripe session was created has
+  -- an attempt that is no longer pre-Stripe and must still be answered.
   select * into v_plan
   from public.annual_plans
   where payment_checkout_attempt_id = p_checkout_attempt_id;
@@ -732,26 +764,45 @@ begin
     );
   end if;
 
-  -- THE ATTEMPT MUST BE THIS CUSTOMER'S, AND MUST BE A PAYMENT ATTEMPT.
-  -- A request id that already belongs to a one-time cart, a subscription
-  -- cycle or another annual delivery is somebody else's work.
-  if v_attempt.user_id is distinct from p_user_id then
-    return pg_catalog.jsonb_build_object('result', 'attempt_not_owned');
-  end if;
-  if v_attempt.subscription_id is not null
+  -- ── NO PLAN YET, SO THE ATTEMPT MUST STILL BE PRE-STRIPE ──────
+  --
+  -- From here on a NEW parent would be created, and the contract is
+  -- strictly ordered:
+  --
+  --     payment attempt  ->  pending annual parent  ->  Stripe session
+  --
+  -- The parent has to exist before the session so its id can go into
+  -- subscription-free Stripe metadata as gloa_annual_plan_id, which is
+  -- what lets the payment webhook resolve the plan against trusted local
+  -- data instead of against anything the payload says.
+  --
+  -- 'created' is the EXACT pre-Stripe state in this architecture, not an
+  -- assumption: migration 009 defaults checkout_attempts.status to
+  -- 'created', lib/checkoutAttempts.ts inserts without a status, and
+  -- linkStripeSession is the thing that moves it to
+  -- 'stripe_session_created' at the moment a Stripe session first
+  -- exists. 'failed' and 'expired' are past states and 'paid' is a
+  -- settled payment; none of them may mint a parent.
+  --
+  -- The four Stripe identity columns are checked as well as the status,
+  -- because the status is a workflow marker while those are evidence
+  -- that an external object already exists. An attempt that carries a
+  -- session, a payment intent, an invoice, a subscription binding or an
+  -- annual delivery binding belongs to something else, and minting a
+  -- fresh parent for it would be minting a contract against a payment
+  -- nobody priced as an annual plan.
+  if v_attempt.status <> 'created'
+     or v_attempt.stripe_checkout_session_id is not null
+     or v_attempt.stripe_payment_intent_id is not null
      or v_attempt.stripe_invoice_id is not null
+     or v_attempt.subscription_id is not null
      or v_attempt.annual_plan_id is not null
      or v_attempt.annual_delivery_number is not null
   then
-    return pg_catalog.jsonb_build_object('result', 'attempt_not_a_payment_attempt');
-  end if;
-
-  -- A paid attempt with no plan cannot be resolved here. The plan is
-  -- always created BEFORE the Stripe session exists, so this state means
-  -- something is genuinely wrong and a person should look at it - not
-  -- that a plan should be minted against a payment nobody priced.
-  if v_attempt.status = 'paid' then
-    return pg_catalog.jsonb_build_object('result', 'attempt_already_paid');
+    return pg_catalog.jsonb_build_object(
+      'result', 'attempt_not_pre_stripe',
+      'attempt_status', v_attempt.status
+    );
   end if;
 
   v_merch := p_annual_unit_gross_cents * v_count;
@@ -859,12 +910,53 @@ $$;
 -- the caller cannot activate a plan by asserting that it was paid; it
 -- can only activate one whose own frozen anchor already says so.
 --
+-- ── AND THE STRIPE IDENTITY MUST MATCH, EXACTLY ───────────────
+--
+-- Phase 4B1.1 tightened this. markAttemptPaid persists BOTH facts on the
+-- attempt - stripe_payment_intent_id and paid_at - and linkStripeSession
+-- persists stripe_checkout_session_id before the customer is ever handed
+-- the session URL, with the webhook re-linking it if that first write
+-- failed. So the attempt is the authority on which Stripe objects settled
+-- it, and both arguments are CROSS-CHECKED against it rather than
+-- believed:
+--
+--     supplied session id  =  attempt.stripe_checkout_session_id
+--     supplied intent id   =  attempt.stripe_payment_intent_id
+--
+-- Both must be present and non-blank on the attempt, and both must match
+-- after trimming, or the function returns a conflict and MUTATES
+-- NOTHING. What is then written onto the plan is the ATTEMPT's value, not
+-- the caller's, so the PaymentIntent that section 11's refund writer
+-- resolves by provably came from the one paid attempt that belongs to
+-- this plan.
+--
+-- A missing session id on a paid attempt is refused rather than waived.
+-- It is an internal inconsistency for a thirteen-delivery prepaid
+-- contract, and it self-heals: the webhook re-links the session on every
+-- redelivery, so a refusal here becomes an activation on the next one,
+-- whereas activating without it would permanently record a plan whose
+-- Stripe identity could not be fully proved.
+--
+-- Nothing is correlated by customer, email, amount alone, SKU or
+-- timestamp. An annual plan bills one customer one amount once, so every
+-- one of those would eventually match the wrong plan.
+--
+-- ── THE PURCHASE DATE IS NOT THE CALLER'S TO CHOOSE ───────────
+--
+-- purchased_at is read from the attempt's paid_at and from nowhere else.
+-- Phase 4B1.1 removed the p_purchased_at argument entirely rather than
+-- defaulting it, because this one timestamp positions thirteen future
+-- shipments and the plan's end date: a caller that could pass it could
+-- move every delivery. paid_at is written by markAttemptPaid at the
+-- moment payment was verified, so it is evidence rather than input, and
+-- it is REQUIRED - a 'paid' attempt without one is refused.
+--
 -- ── THE SCHEDULE, AND WHY IT IS HOURS AND NOT DAYS ────────────
 --
---   delivery 1   purchased_at
---   delivery n   purchased_at + 672 hours * (n - 1)
---   delivery 13  purchased_at + 8064 hours   = +336 days
---   plan_end_at  purchased_at + 8736 hours   = +364 days
+--   delivery 1   paid_at
+--   delivery n   paid_at + 672 hours * (n - 1)
+--   delivery 13  paid_at + 8064 hours   = +336 days
+--   plan_end_at  paid_at + 8736 hours   = +364 days
 --
 -- 672 hours is 28 days and 8736 is 364 days, expressed as an absolute
 -- duration. timestamptz + interval '28 days' is CALENDAR arithmetic: it
@@ -891,16 +983,15 @@ $$;
 -- on conflict (annual_plan_id, delivery_number) do nothing - so the
 -- database, not the code, is what makes fourteen rows impossible.
 --
--- IT CREATES NO ORDER. Delivery 1 is scheduled at purchased_at and is
+-- IT CREATES NO ORDER. Delivery 1 is scheduled at paid_at and is
 -- therefore immediately due, but it is fulfilled through the same claim
--- and prepare path as the other twelve. "The first one is special" is
+-- and fulfill path as the other twelve. "The first one is special" is
 -- exactly how the annual PaymentIntent would leak onto a delivery order.
 
 create or replace function public.activate_annual_plan_from_payment(
-  p_annual_plan_id            uuid,
+  p_annual_plan_id             uuid,
   p_stripe_checkout_session_id text,
-  p_stripe_payment_intent_id  text,
-  p_purchased_at              timestamptz
+  p_stripe_payment_intent_id   text
 )
 returns jsonb
 language plpgsql
@@ -915,15 +1006,20 @@ declare
   v_session   text;
   v_created   integer;
 begin
+  -- BOTH identities are required input. Neither has a default and
+  -- neither may be blank: they exist to be cross-checked against the
+  -- attempt, and an absent one would check nothing.
   if p_annual_plan_id is null
      or p_stripe_payment_intent_id is null
      or pg_catalog.btrim(p_stripe_payment_intent_id) = ''
+     or p_stripe_checkout_session_id is null
+     or pg_catalog.btrim(p_stripe_checkout_session_id) = ''
   then
     return pg_catalog.jsonb_build_object('result', 'invalid_input');
   end if;
 
   v_intent  := pg_catalog.btrim(p_stripe_payment_intent_id);
-  v_session := nullif(pg_catalog.btrim(coalesce(p_stripe_checkout_session_id, '')), '');
+  v_session := pg_catalog.btrim(p_stripe_checkout_session_id);
 
   select * into v_plan
   from public.annual_plans
@@ -944,13 +1040,18 @@ begin
   end if;
 
   -- ALREADY ACTIVE. Idempotent, but only for the SAME payment: a second
-  -- PaymentIntent claiming an active plan is a correlation error, and
-  -- adopting it would overwrite the identity section 11's refund writer
-  -- resolves by.
+  -- PaymentIntent or a second Checkout Session claiming an active plan is
+  -- a correlation error, and adopting either would overwrite the identity
+  -- section 11's refund writer resolves by.
   if v_plan.status = 'active' then
     if v_plan.stripe_payment_intent_id is distinct from v_intent then
       return pg_catalog.jsonb_build_object(
         'result', 'payment_intent_conflict', 'annual_plan_id', v_plan.id
+      );
+    end if;
+    if v_plan.stripe_checkout_session_id is distinct from v_session then
+      return pg_catalog.jsonb_build_object(
+        'result', 'checkout_session_conflict', 'annual_plan_id', v_plan.id
       );
     end if;
     select pg_catalog.count(*) into v_created
@@ -981,15 +1082,58 @@ begin
     return pg_catalog.jsonb_build_object('result', 'total_mismatch');
   end if;
 
-  v_purchased := coalesce(p_purchased_at, v_attempt.paid_at, pg_catalog.now());
+  -- THE ATTEMPT AND THE PLAN MUST BELONG TO THE SAME PERSON. The plan
+  -- names the attempt and the attempt names a user; a disagreement means
+  -- one of the two was written against the wrong customer, and neither is
+  -- then trustworthy. Checked even though the creation function proved it
+  -- once: this is the transaction that turns money into a contract.
+  if v_attempt.user_id is distinct from v_plan.user_id then
+    return pg_catalog.jsonb_build_object('result', 'attempt_owner_mismatch');
+  end if;
+
+  -- ── THE EXACT STRIPE IDENTITIES, FROM THE ATTEMPT ─────────
+  --
+  -- Present, non-blank, and equal to what the caller re-read from
+  -- Stripe. Any failure returns before the UPDATE below, so a
+  -- correlation error mutates nothing at all.
+  if v_attempt.stripe_payment_intent_id is null
+     or pg_catalog.btrim(v_attempt.stripe_payment_intent_id) = ''
+  then
+    return pg_catalog.jsonb_build_object('result', 'attempt_payment_intent_missing');
+  end if;
+  if v_attempt.stripe_checkout_session_id is null
+     or pg_catalog.btrim(v_attempt.stripe_checkout_session_id) = ''
+  then
+    return pg_catalog.jsonb_build_object('result', 'attempt_checkout_session_missing');
+  end if;
+  if pg_catalog.btrim(v_attempt.stripe_payment_intent_id) is distinct from v_intent then
+    return pg_catalog.jsonb_build_object('result', 'payment_intent_conflict');
+  end if;
+  if pg_catalog.btrim(v_attempt.stripe_checkout_session_id) is distinct from v_session then
+    return pg_catalog.jsonb_build_object('result', 'checkout_session_conflict');
+  end if;
+
+  -- ── THE PURCHASE DATE, FROM THE ATTEMPT ───────────────────
+  --
+  -- Required, never defaulted to now(). A 'paid' attempt with no paid_at
+  -- cannot say when the thirteen deliveries start, and inventing that
+  -- answer would silently move every one of them.
+  if v_attempt.paid_at is null then
+    return pg_catalog.jsonb_build_object('result', 'attempt_paid_at_missing');
+  end if;
+  v_purchased := v_attempt.paid_at;
 
   update public.annual_plans
      set status                     = 'active',
          payment_status             = 'paid',
          purchased_at               = v_purchased,
          plan_end_at                = v_purchased + pg_catalog.make_interval(hours => 8736),
-         stripe_payment_intent_id   = v_intent,
-         stripe_checkout_session_id = coalesce(v_session, stripe_checkout_session_id)
+         -- THE ATTEMPT'S VALUES, not the caller's. They were proved
+         -- identical above, and taking them from the evidence rather
+         -- than from the argument is what makes the provenance
+         -- unambiguous when this row is read back by the refund writer.
+         stripe_payment_intent_id   = pg_catalog.btrim(v_attempt.stripe_payment_intent_id),
+         stripe_checkout_session_id = pg_catalog.btrim(v_attempt.stripe_checkout_session_id)
    where id = v_plan.id
   returning * into v_plan;
 
@@ -1122,7 +1266,9 @@ as $$
     limit least(greatest(coalesce(p_limit, 25), 1), 100)
     -- OF d, so only the delivery rows are locked. Locking the parent
     -- too would let this function and section 9 acquire the same two
-    -- rows in opposite orders and deadlock.
+    -- rows in opposite orders and deadlock. Section 9 always takes the
+    -- parent first and the delivery second; this one takes the delivery
+    -- only, so no cycle exists.
     for update of d skip locked
   )
   update public.annual_plan_deliveries t
@@ -1134,23 +1280,53 @@ as $$
 $$;
 
 
--- 9. PREPARING ONE DELIVERY FOR THE EXISTING ORDER PIPELINE ────
+-- 9. FULFILLING ONE DELIVERY, IN ONE TRANSACTION ───────────────
 --
--- Creates or resolves exactly one SYNTHETIC PAID checkout attempt for a
--- claimed delivery, and stops there. It creates no order.
+-- The whole of a delivery's fulfillment, from the parent guard to the
+-- persisted order, inside a single database transaction that never lets
+-- go of the annual plan's row lock.
 --
--- ── WHY IT STOPS THERE ────────────────────────────────────────
+-- ── WHY IT IS ONE FUNCTION AND NOT THREE ──────────────────────
 --
--- public.create_order_from_paid_checkout (migration 021) is live and
--- immutable and it already does this job correctly: it locks the
+-- The first draft of this migration exposed three service-role calls -
+-- prepare the attempt, then let application code call
+-- create_order_from_paid_checkout, then mark the delivery fulfilled.
+-- Each was individually atomic, and the composition was not. Between the
+-- first call committing and the second one running, the parent row lock
+-- was released, and in that window this could happen:
+--
+--     t0  prepare: parent is 'active', payment_status 'paid'  -> ok
+--     t1  prepare commits, parent lock released
+--     t2  apply_annual_plan_refund_state: full refund commits
+--     t3  application calls create_order_from_paid_checkout
+--     t4  a physical order now exists for a fully refunded plan
+--
+-- The guard at t0 was true and irrelevant by t3. No amount of re-reading
+-- inside the application closes that: any check it performs is also
+-- outside the transaction that creates the order.
+--
+-- So the guard and the order creation are now the same transaction. The
+-- parent is locked FOR UPDATE at the start and the lock is held until
+-- the order exists and the delivery row records it. See section 10 for
+-- the proof that this makes the sequence above impossible.
+--
+-- ── IT DOES NOT REDEFINE THE ORDER CREATOR ────────────────────
+--
+-- public.create_order_from_paid_checkout (migrations 011 through 021) is
+-- live and immutable and it already does its job correctly: it locks the
 -- attempt, refuses one that is not paid, validates the tax snapshot
 -- against the shipping and the expected total, mints the order and its
--- items from the frozen snapshot, and returns the existing order on a
--- retry. Redefining it in 039 to teach it about annual plans would put a
--- live one-time and subscription code path at risk for a case it does
--- not need to know about. So this function prepares an attempt that is
--- ALREADY VALID INPUT for it, and application code calls the existing
--- creator afterwards, unchanged.
+-- items from the frozen snapshot, and returns the EXISTING order on a
+-- retry rather than creating a second one. Teaching it about annual
+-- plans would put a live one-time and subscription path at risk for a
+-- case it does not need to know about.
+--
+-- It is therefore CALLED, not replaced, and called from inside this
+-- transaction so its work commits or rolls back with the guard above it.
+-- Both functions are SECURITY DEFINER owned by the same role, so the
+-- inner call runs with its owner's privileges exactly as it does today;
+-- migration 016's grant to service_role is untouched and unnecessary
+-- here, because the owner's own EXECUTE is what this uses.
 --
 -- The compatibility was checked field by field and there is no
 -- incompatibility to report:
@@ -1182,8 +1358,30 @@ $$;
 -- Not the catalog, not lib/shipping.ts's threshold, not a current tax
 -- rate. Every value comes from the plan's frozen columns, which is what
 -- makes a price change in month three unable to touch delivery nine.
+--
+-- ── IDEMPOTENT, AND THE DATABASE IS THE BACKSTOP ──────────────
+--
+-- A retry after a successful fulfillment returns the SAME attempt and
+-- the SAME order and creates neither again. That is not a code
+-- convention; three constraints hold it jointly:
+--
+--   checkout_attempts_annual_delivery_key      one attempt per delivery
+--   orders_checkout_attempt_id_key   (011)     one order per attempt
+--   annual_plan_deliveries_order_id_key        one delivery per order
+--
+-- A retry after a PARTIAL failure converges too, because every step
+-- resolves an existing row rather than assuming it must create one.
+--
+-- ── AND IT STILL CREATES NO PAYMENT IDENTITY ──────────────────
+--
+-- The synthetic attempt names no PaymentIntent, no invoice, no session
+-- and no subscription, and section 3's CHECK refuses the row if it ever
+-- did. p_stripe_payment_intent_id is passed to the order creator as
+-- NULL for the same reason: an annual delivery order that carried the
+-- annual intent would make migration 038 answer
+-- 'ambiguous_payment_intent' for every refund of that payment.
 
-create or replace function public.prepare_annual_plan_delivery_attempt(
+create or replace function public.fulfill_annual_plan_delivery(
   p_delivery_id uuid
 )
 returns jsonb
@@ -1195,13 +1393,15 @@ declare
   v_delivery public.annual_plan_deliveries;
   v_plan     public.annual_plans;
   v_attempt  public.checkout_attempts;
+  v_order    public.orders;
   v_expected integer;
 begin
   if p_delivery_id is null then
     return pg_catalog.jsonb_build_object('result', 'invalid_input');
   end if;
 
-  -- Unlocked read, only to learn which plan to lock.
+  -- Unlocked read, only to learn which parent to lock. Nothing is
+  -- decided from it; the row is read again under the lock below.
   select * into v_delivery
   from public.annual_plan_deliveries
   where id = p_delivery_id;
@@ -1210,9 +1410,13 @@ begin
     return pg_catalog.jsonb_build_object('result', 'not_found');
   end if;
 
-  -- PARENT FIRST, THEN CHILD. One consistent lock order across every
-  -- function in this file, which is what makes a deadlock between this
-  -- and section 10 impossible.
+  -- ── THE PARENT LOCK. EVERYTHING BELOW HAPPENS UNDER IT. ───
+  --
+  -- Taken FIRST, and held for the rest of this transaction - through the
+  -- guards, through the attempt insert, through the order creation and
+  -- through the delivery update. apply_annual_plan_refund_state locks
+  -- the same row the same way, so the two serialise on it and there is
+  -- no window between the guard and the order.
   select * into v_plan
   from public.annual_plans
   where id = v_delivery.annual_plan_id
@@ -1222,13 +1426,42 @@ begin
     return pg_catalog.jsonb_build_object('result', 'plan_not_found');
   end if;
 
+  -- ── THE CHILD LOCK, ALWAYS SECOND ─────────────────────────
+  --
+  -- One consistent order across every function in this file. The claim
+  -- function deliberately locks only delivery rows (for update of d), so
+  -- no pair of these can acquire the same two rows in opposite orders.
   select * into v_delivery
   from public.annual_plan_deliveries
   where id = p_delivery_id
   for update;
 
-  -- THE AUTHORITATIVE GATE. Section 8 read these two facts without a
-  -- lock; here they are true or nothing is created.
+  -- ── ALREADY FULFILLED: RETURN THE SAME ORDER ──────────────
+  --
+  -- Checked before the parent guards, deliberately. A delivery that
+  -- already shipped is a historical fact, and a later refund or
+  -- termination does not un-ship it - so a retry must be able to report
+  -- what happened even when the plan is no longer deliverable.
+  if v_delivery.state = 'fulfilled' then
+    return pg_catalog.jsonb_build_object(
+      'result', 'already_fulfilled',
+      'delivery_id', v_delivery.id,
+      'delivery_number', v_delivery.delivery_number,
+      'checkout_attempt_id', v_delivery.checkout_attempt_id,
+      'order_id', v_delivery.order_id
+    );
+  end if;
+
+  -- ── THE AUTHORITATIVE PARENT GUARD ────────────────────────
+  --
+  -- The claim function read these two facts without a lock, which made
+  -- them advisory. Here they are true under the lock or NOTHING is
+  -- created: no attempt, no order, no state change.
+  --
+  -- status covers future administrative termination as well as the
+  -- states 039 writes: whatever moves a plan out of 'active', this stops
+  -- generating orders for it without that phase having to find this
+  -- function.
   if v_plan.status <> 'active' then
     return pg_catalog.jsonb_build_object(
       'result', 'plan_not_active', 'status', v_plan.status
@@ -1238,25 +1471,9 @@ begin
     return pg_catalog.jsonb_build_object('result', 'plan_refunded');
   end if;
 
-  -- ALREADY PREPARED. Idempotent: the attempt that exists is the answer,
-  -- and it is returned rather than rebuilt.
-  if v_delivery.checkout_attempt_id is not null then
-    return pg_catalog.jsonb_build_object(
-      'result', 'already_prepared',
-      'delivery_id', v_delivery.id,
-      'delivery_number', v_delivery.delivery_number,
-      'checkout_attempt_id', v_delivery.checkout_attempt_id,
-      'shipping_gross_cents', v_plan.shipping_per_delivery_gross_cents,
-      'customer_snapshot', v_plan.customer_snapshot,
-      'shipping_address_snapshot', v_plan.shipping_address_snapshot,
-      'billing_address_snapshot', v_plan.billing_address_snapshot
-    );
-  end if;
-
-  -- FAIL CLOSED ON ANYTHING THAT IS NOT A LIVE CLAIM. A 'fulfilled' row
-  -- with no attempt is an internal inconsistency and is not repaired by
-  -- guessing; a 'scheduled' row was never claimed and must go through
-  -- section 8 first; a 'cancelled' one is owed nothing.
+  -- FAIL CLOSED ON ANYTHING THAT IS NOT A LIVE CLAIM. A 'scheduled' row
+  -- was never claimed and must go through section 8 first; a 'cancelled'
+  -- one is owed nothing.
   if v_delivery.state <> 'claimed' then
     return pg_catalog.jsonb_build_object(
       'result', 'delivery_not_claimed', 'state', v_delivery.state
@@ -1265,167 +1482,100 @@ begin
 
   v_expected := v_plan.annual_unit_gross_cents + v_plan.shipping_per_delivery_gross_cents;
 
-  begin
-    insert into public.checkout_attempts (
-      request_id,
-      user_id,
-      status,
-      currency,
-      expected_total_gross_cents,
-      items_snapshot,
-      shipping_country,
-      shipping_gross_cents,
-      tax_snapshot,
-      annual_plan_id,
-      annual_delivery_number,
-      paid_at
-    ) values (
-      -- Schema-qualified for migration 022's reason: this body runs with
-      -- search_path emptied and request_id has no column default to fall
-      -- back on, so an unqualified name would depend on a resolution
-      -- order this function has given up.
-      pg_catalog.gen_random_uuid(),
-      v_plan.user_id,
-      'paid',
-      v_plan.currency,
-      v_expected,
-      v_plan.delivery_items_snapshot,
-      v_plan.shipping_address_snapshot->>'country',
-      v_plan.shipping_per_delivery_gross_cents,
-      v_plan.delivery_tax_snapshot,
-      v_plan.id,
-      v_delivery.delivery_number,
-      pg_catalog.now()
-      -- stripe_payment_intent_id, stripe_invoice_id,
-      -- stripe_checkout_session_id and subscription_id are all left
-      -- unset. Section 3's CHECK would refuse the row otherwise, which
-      -- is the point: the annual PaymentIntent belongs to the plan.
-    )
-    returning * into v_attempt;
-  exception
-    when unique_violation then
-      -- checkout_attempts_annual_delivery_key won the race. Adopt its
-      -- winner, but only after proving the winner is THIS delivery's.
-      select * into v_attempt
-      from public.checkout_attempts
-      where annual_plan_id = v_plan.id
-        and annual_delivery_number = v_delivery.delivery_number;
-      if not found then
-        raise;
-      end if;
-  end;
-
-  update public.annual_plan_deliveries
-     set checkout_attempt_id = v_attempt.id
-   where id = v_delivery.id;
-
-  return pg_catalog.jsonb_build_object(
-    'result', 'prepared',
-    'delivery_id', v_delivery.id,
-    'delivery_number', v_delivery.delivery_number,
-    'checkout_attempt_id', v_attempt.id,
-    'shipping_gross_cents', v_plan.shipping_per_delivery_gross_cents,
-    'customer_snapshot', v_plan.customer_snapshot,
-    'shipping_address_snapshot', v_plan.shipping_address_snapshot,
-    'billing_address_snapshot', v_plan.billing_address_snapshot
-  );
-end;
-$$;
-
-
--- 10. RECORDING THE ORDER AGAINST ITS DELIVERY ─────────────────
---
--- The other half of section 9, and the reason section 8's lease has
--- anything to test: without this a claimed delivery could never reach
--- 'fulfilled' and every row would look abandoned forever.
---
--- THE ORDER ID IS NOT TAKEN ON TRUST. A caller passing a uuid is not
--- evidence, so this proves the link structurally: the order must carry
--- the very checkout_attempt_id this delivery was prepared into. A wrong
--- uuid in application code therefore cannot attach a stranger's order to
--- an annual delivery, for the same reason migration 037 resolves by the
--- Stripe invoice identity rather than by a uuid the caller supplies.
-
-create or replace function public.mark_annual_plan_delivery_fulfilled(
-  p_delivery_id uuid,
-  p_order_id    uuid
-)
-returns jsonb
-language plpgsql
-volatile
-security definer set search_path = ''
-as $$
-declare
-  v_delivery public.annual_plan_deliveries;
-  v_plan     public.annual_plans;
-  v_order    public.orders;
-begin
-  if p_delivery_id is null or p_order_id is null then
-    return pg_catalog.jsonb_build_object('result', 'invalid_input');
-  end if;
-
-  select * into v_delivery
-  from public.annual_plan_deliveries
-  where id = p_delivery_id;
-
-  if not found then
-    return pg_catalog.jsonb_build_object('result', 'not_found');
-  end if;
-
-  -- Same parent-then-child lock order as section 9.
-  select * into v_plan
-  from public.annual_plans
-  where id = v_delivery.annual_plan_id
-  for update;
-
-  if not found then
-    return pg_catalog.jsonb_build_object('result', 'plan_not_found');
-  end if;
-
-  select * into v_delivery
-  from public.annual_plan_deliveries
-  where id = p_delivery_id
-  for update;
-
-  if v_delivery.checkout_attempt_id is null then
-    return pg_catalog.jsonb_build_object('result', 'delivery_not_prepared');
-  end if;
-
-  select * into v_order
-  from public.orders
-  where id = p_order_id;
-
-  if not found then
-    return pg_catalog.jsonb_build_object('result', 'order_not_found');
-  end if;
-
-  -- THE STRUCTURAL PROOF.
-  if v_order.checkout_attempt_id is distinct from v_delivery.checkout_attempt_id then
-    return pg_catalog.jsonb_build_object('result', 'order_not_this_delivery');
-  end if;
-
-  if v_delivery.state = 'fulfilled' then
-    -- Idempotent for the same order, and a refusal for any other. The
-    -- unique index on order_id would refuse the second one anyway; this
-    -- answers in words instead of raising.
-    if v_delivery.order_id is not distinct from p_order_id then
-      return pg_catalog.jsonb_build_object(
-        'result', 'unchanged', 'delivery_id', v_delivery.id, 'order_id', v_delivery.order_id
-      );
+  -- ── STEP 1: THE SYNTHETIC PAID ATTEMPT, CREATED OR RESOLVED ──
+  if v_delivery.checkout_attempt_id is not null then
+    select * into v_attempt
+    from public.checkout_attempts
+    where id = v_delivery.checkout_attempt_id;
+    if not found then
+      return pg_catalog.jsonb_build_object('result', 'attempt_missing');
     end if;
-    return pg_catalog.jsonb_build_object('result', 'order_conflict');
+  else
+    begin
+      insert into public.checkout_attempts (
+        request_id,
+        user_id,
+        status,
+        currency,
+        expected_total_gross_cents,
+        items_snapshot,
+        shipping_country,
+        shipping_gross_cents,
+        tax_snapshot,
+        annual_plan_id,
+        annual_delivery_number,
+        paid_at
+      ) values (
+        -- Schema-qualified for migration 022's reason: this body runs
+        -- with search_path emptied and request_id has no column default
+        -- to fall back on, so an unqualified name would depend on a
+        -- resolution order this function has given up.
+        pg_catalog.gen_random_uuid(),
+        v_plan.user_id,
+        'paid',
+        v_plan.currency,
+        v_expected,
+        v_plan.delivery_items_snapshot,
+        v_plan.shipping_address_snapshot->>'country',
+        v_plan.shipping_per_delivery_gross_cents,
+        v_plan.delivery_tax_snapshot,
+        v_plan.id,
+        v_delivery.delivery_number,
+        pg_catalog.now()
+        -- stripe_payment_intent_id, stripe_invoice_id,
+        -- stripe_checkout_session_id and subscription_id are all left
+        -- unset. Section 3's CHECK would refuse the row otherwise, which
+        -- is the point: the annual PaymentIntent belongs to the plan.
+      )
+      returning * into v_attempt;
+    exception
+      when unique_violation then
+        -- checkout_attempts_annual_delivery_key won the race. Adopt its
+        -- winner, but only after proving the winner is THIS delivery's.
+        select * into v_attempt
+        from public.checkout_attempts
+        where annual_plan_id = v_plan.id
+          and annual_delivery_number = v_delivery.delivery_number;
+        if not found then
+          raise;
+        end if;
+    end;
   end if;
 
-  if v_delivery.state <> 'claimed' then
-    return pg_catalog.jsonb_build_object(
-      'result', 'delivery_not_claimed', 'state', v_delivery.state
-    );
+  -- ── STEP 2: THE ORDER, FROM THE LIVE CREATOR, SAME TRANSACTION ──
+  --
+  -- Positional arguments against the signature migrations 016 and 021
+  -- established: (attempt, customer snapshot, payment intent, shipping
+  -- address, billing address, shipping cents). NULL::text for the
+  -- payment intent, explicitly typed so the call cannot resolve
+  -- anywhere unintended.
+  --
+  -- It is idempotent in its own right: given an attempt that already has
+  -- an order, it returns that order untouched. So a retry that got this
+  -- far before dying resolves the same row rather than creating another.
+  v_order := public.create_order_from_paid_checkout(
+    v_attempt.id,
+    v_plan.customer_snapshot,
+    null::text,
+    v_plan.shipping_address_snapshot,
+    v_plan.billing_address_snapshot,
+    v_plan.shipping_per_delivery_gross_cents
+  );
+
+  if v_order.id is null then
+    -- Unreachable: the creator raises rather than returning nothing.
+    -- Refusing anyway means a future change there cannot silently mark a
+    -- delivery fulfilled against no order.
+    raise exception 'create_order_from_paid_checkout returned no order for annual delivery %',
+      v_delivery.id;
   end if;
 
+  -- ── STEP 3: THE DELIVERY RECORDS WHAT HAPPENED ────────────
   update public.annual_plan_deliveries
-     set state        = 'fulfilled',
-         order_id     = p_order_id,
-         fulfilled_at = pg_catalog.now()
+     set state               = 'fulfilled',
+         checkout_attempt_id = v_attempt.id,
+         order_id            = v_order.id,
+         fulfilled_at        = pg_catalog.now()
    where id = v_delivery.id;
 
   -- NOTHING HERE COMPLETES THE PLAN. See section 13.
@@ -1433,10 +1583,57 @@ begin
     'result', 'fulfilled',
     'delivery_id', v_delivery.id,
     'delivery_number', v_delivery.delivery_number,
-    'order_id', p_order_id
+    'checkout_attempt_id', v_attempt.id,
+    'order_id', v_order.id,
+    'order_number', v_order.order_number
   );
 end;
 $$;
+
+
+-- 10. WHY THE FULL-REFUND RACE IS IMPOSSIBLE ───────────────────
+--
+-- Two functions may act on a live annual plan, and both take the SAME
+-- row lock on public.annual_plans FOR UPDATE before deciding anything:
+--
+--   fulfill_annual_plan_delivery        section 9
+--   apply_annual_plan_refund_state      section 11
+--
+-- Each runs as one transaction, so exactly one of them holds that lock
+-- at a time and the other waits. There are only two orders:
+--
+--   FULFILLMENT FIRST
+--     It holds the parent lock, reads status 'active' and payment_status
+--     not 'refunded', creates the attempt, creates the order and records
+--     it on the delivery - all before releasing. The refund cannot
+--     commit in the middle because it cannot acquire the lock at all. It
+--     applies afterwards, against a plan whose delivery is genuinely
+--     fulfilled, and every LATER delivery then sees 'refunded' and
+--     creates nothing.
+--
+--   REFUND FIRST
+--     It holds the parent lock and sets payment_status = 'refunded'.
+--     Fulfillment waits, then reads the COMMITTED row - FOR UPDATE
+--     re-reads the latest version rather than the snapshot it started
+--     with - sees 'refunded', and returns 'plan_refunded' having created
+--     no attempt and no order.
+--
+-- The window the first draft had - guard commits, refund commits, order
+-- is created - required the guard and the order to be in different
+-- transactions. They no longer are.
+--
+-- THE SAME ARGUMENT COVERS FUTURE ADMINISTRATIVE TERMINATION. Whatever
+-- later phase moves a plan out of 'active' will take the same parent
+-- lock to write it, and the status guard in section 9 is evaluated under
+-- that lock, so a terminated plan cannot produce another order either.
+-- That is why the guard tests status generally rather than naming the
+-- states 039 happens to write.
+--
+-- THE CLAIM FUNCTION IS DELIBERATELY OUTSIDE THIS. It reads the parent
+-- without a lock, which is safe precisely because it creates nothing: a
+-- stale 'active' read there produces at worst a claimed delivery that
+-- section 9 then refuses, and a refused delivery returns to being
+-- reclaimable once its lease expires.
 
 
 -- 11. THE ANNUAL REFUND WRITER ─────────────────────────────────
@@ -1583,10 +1780,13 @@ $$;
 -- is used:
 --
 --   CHOSEN   claim_due_annual_plan_deliveries and
---            prepare_annual_plan_delivery_attempt both refuse a plan
---            whose payment_status is 'refunded'. One predicate, in the
---            two functions that could create work, evaluated fresh every
---            time.
+--            fulfill_annual_plan_delivery both refuse a plan whose
+--            payment_status is 'refunded'. One predicate, in the two
+--            functions that could create work, evaluated fresh every
+--            time - and in the one that actually creates the order, it
+--            is evaluated under the parent row lock it holds until the
+--            order exists. Section 10 proves why that closes the race
+--            the first draft of this file had.
 --
 --   REJECTED forcing status = 'cancelled' inside the refund writer.
 --            Section 5's rule is that refund state is not lifecycle
@@ -1649,33 +1849,35 @@ $$;
 -- nothing but an anon key.
 --
 -- service_role is the only grantee, and it still holds no INSERT, UPDATE
--- or DELETE on either annual table. These six functions are the entire
--- write surface for the annual plan.
+-- or DELETE on either annual table. These FIVE functions are the entire
+-- write surface for the annual plan, and there is deliberately no sixth:
+-- Phase 4B1.1 removed prepare_annual_plan_delivery_attempt and
+-- mark_annual_plan_delivery_fulfilled rather than keeping them alongside
+-- fulfill_annual_plan_delivery. Leaving them callable would have left a
+-- second, non-atomic way to reach the same rows - the exact composition
+-- whose transaction gap section 9 exists to close - and a guard that can
+-- be bypassed by calling a different function is not a guard. 039 is not
+-- live, so nothing depended on them.
 
 revoke all on function public.create_pending_annual_plan_for_attempt(uuid, uuid, uuid, integer, integer, integer, numeric, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb) from public;
 revoke all on function public.create_pending_annual_plan_for_attempt(uuid, uuid, uuid, integer, integer, integer, numeric, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb) from anon;
 revoke all on function public.create_pending_annual_plan_for_attempt(uuid, uuid, uuid, integer, integer, integer, numeric, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb) from authenticated;
 grant execute on function public.create_pending_annual_plan_for_attempt(uuid, uuid, uuid, integer, integer, integer, numeric, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb) to service_role;
 
-revoke all on function public.activate_annual_plan_from_payment(uuid, text, text, timestamptz) from public;
-revoke all on function public.activate_annual_plan_from_payment(uuid, text, text, timestamptz) from anon;
-revoke all on function public.activate_annual_plan_from_payment(uuid, text, text, timestamptz) from authenticated;
-grant execute on function public.activate_annual_plan_from_payment(uuid, text, text, timestamptz) to service_role;
+revoke all on function public.activate_annual_plan_from_payment(uuid, text, text) from public;
+revoke all on function public.activate_annual_plan_from_payment(uuid, text, text) from anon;
+revoke all on function public.activate_annual_plan_from_payment(uuid, text, text) from authenticated;
+grant execute on function public.activate_annual_plan_from_payment(uuid, text, text) to service_role;
 
 revoke all on function public.claim_due_annual_plan_deliveries(integer) from public;
 revoke all on function public.claim_due_annual_plan_deliveries(integer) from anon;
 revoke all on function public.claim_due_annual_plan_deliveries(integer) from authenticated;
 grant execute on function public.claim_due_annual_plan_deliveries(integer) to service_role;
 
-revoke all on function public.prepare_annual_plan_delivery_attempt(uuid) from public;
-revoke all on function public.prepare_annual_plan_delivery_attempt(uuid) from anon;
-revoke all on function public.prepare_annual_plan_delivery_attempt(uuid) from authenticated;
-grant execute on function public.prepare_annual_plan_delivery_attempt(uuid) to service_role;
-
-revoke all on function public.mark_annual_plan_delivery_fulfilled(uuid, uuid) from public;
-revoke all on function public.mark_annual_plan_delivery_fulfilled(uuid, uuid) from anon;
-revoke all on function public.mark_annual_plan_delivery_fulfilled(uuid, uuid) from authenticated;
-grant execute on function public.mark_annual_plan_delivery_fulfilled(uuid, uuid) to service_role;
+revoke all on function public.fulfill_annual_plan_delivery(uuid) from public;
+revoke all on function public.fulfill_annual_plan_delivery(uuid) from anon;
+revoke all on function public.fulfill_annual_plan_delivery(uuid) from authenticated;
+grant execute on function public.fulfill_annual_plan_delivery(uuid) to service_role;
 
 revoke all on function public.apply_annual_plan_refund_state(text, integer) from public;
 revoke all on function public.apply_annual_plan_refund_state(text, integer) from anon;
@@ -1688,7 +1890,7 @@ grant execute on function public.apply_annual_plan_refund_state(text, integer) t
 -- Applying this migration inserts no row, updates no row and deletes no
 -- row. It creates two empty tables, adds two nullable columns to
 -- public.checkout_attempts with no default and no backfill, and defines
--- six functions that it calls zero times.
+-- five functions that it calls zero times.
 --
 -- No existing order, subscription, checkout attempt, plan, product,
 -- address, email state or refund state changes as a result. Nothing in
@@ -1806,10 +2008,19 @@ grant execute on function public.apply_annual_plan_refund_state(text, integer) t
 --       'create_pending_annual_plan_for_attempt',
 --       'activate_annual_plan_from_payment',
 --       'claim_due_annual_plan_deliveries',
---       'prepare_annual_plan_delivery_attempt',
---       'mark_annual_plan_delivery_fulfilled',
+--       'fulfill_annual_plan_delivery',
 --       'apply_annual_plan_refund_state')
 --   order by p.proname;
+--   -- expect FIVE rows. prepare_annual_plan_delivery_attempt and
+--   -- mark_annual_plan_delivery_fulfilled must NOT exist: Phase 4B1.1
+--   -- replaced them with the atomic function above.
+--
+--   select count(*) as removed_composition_functions
+--   from pg_proc
+--   where pronamespace = 'public'::regnamespace
+--     and proname in ('prepare_annual_plan_delivery_attempt',
+--                     'mark_annual_plan_delivery_fulfilled');
+--   -- expect 0
 --
 -- (j) Nothing was applied to data. Expect zero and zero.
 --

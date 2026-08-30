@@ -150,8 +150,11 @@ test("3: every immutable migration is still present and unedited", () => {
     // 038 is still UNAPPLIED, which is exactly why it is not a 039: it may
     // be edited in place until the owner applies it. 037 and everything
     // older may not.
+    // 039, the annual plan foundation, is UNAPPLIED and may likewise be
+    // edited in place until the owner applies it.
     assert.ok(file.endsWith(MIGRATION_037)
-      || file.endsWith("038_one_time_refund_writer_concurrency.sql"),
+      || file.endsWith("038_one_time_refund_writer_concurrency.sql")
+      || file.endsWith("039_b2c_annual_plan_foundation.sql"),
       `an immutable migration was modified: ${file}`);
   }
 });

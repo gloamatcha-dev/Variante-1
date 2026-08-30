@@ -644,9 +644,12 @@ test("54: migrations 019 and 022-037 are unmodified", () => {
   const touched = changed ? changed.split(NEWLINE) : [];
   // 038 is still UNAPPLIED, so it may be edited in place until the owner
   // applies it. Every migration below it is live and may not.
+  // 039, the annual plan foundation, is UNAPPLIED and may likewise be
+  // edited in place until the owner applies it.
   const migrations = touched
     .filter(rel => rel.startsWith("supabase/migrations/"))
-    .filter(rel => !rel.endsWith("038_one_time_refund_writer_concurrency.sql"));
+    .filter(rel => !rel.endsWith("038_one_time_refund_writer_concurrency.sql"))
+    .filter(rel => !rel.endsWith("039_b2c_annual_plan_foundation.sql"));
   assert.deepEqual(migrations, [], "a live, immutable migration was edited");
   // And the two functions this phase depends on still read the way they
   // were applied to production.

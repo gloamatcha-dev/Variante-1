@@ -12,20 +12,21 @@ import { fileURLToPath } from "node:url";
 //
 // What it protects. Phase 4B1 is the DATABASE FOUNDATION of the B2C
 // prepaid annual plan and nothing else: two tables, two nullable columns
-// on public.checkout_attempts, and six server-only functions. The
-// invariants worth guarding are the ones that would be expensive or
-// impossible to fix once a customer has paid for thirteen deliveries:
+// on public.checkout_attempts, and five server-only functions.
 //
-//   * the annual Stripe PaymentIntent belongs to the PARENT and can
-//     never reach a delivery order, because migration 038 answers
-//     'ambiguous_payment_intent' the moment two orders share one and the
-//     refund then lands nowhere at all
-//   * exactly thirteen deliveries, at exactly 28 days, frozen once
-//   * refund state and lifecycle state stay separate vocabularies
-//   * a claimed delivery that a dead worker abandoned can be recovered,
-//     and one that already produced an order cannot
-//   * no browser role can write, and no browser role can read another
-//     customer's plan
+// PHASE 4B1.1 HARDENED FOUR THINGS, and they are the reason several
+// assertions below are about ORDER rather than presence:
+//
+//   * ownership of the payment attempt is proved BEFORE any annual plan
+//     is resolved or reported, so a guessed attempt id is not an oracle
+//   * a NEW parent can only be minted from a genuinely pre-Stripe
+//     attempt ('created', no session, no intent, no invoice, no binding)
+//   * activation correlates the EXACT Stripe Checkout Session and the
+//     EXACT PaymentIntent against the paid attempt, and takes
+//     purchased_at from that attempt's paid_at rather than from a caller
+//   * the parent guard and the physical order creation are ONE
+//     transaction under ONE parent row lock, so a full refund can no
+//     longer commit between them
 
 const ROOT = path.resolve(fileURLToPath(import.meta.url), "../..");
 const read = rel => readFileSync(path.join(ROOT, rel), "utf-8");
@@ -39,8 +40,9 @@ const MIGRATION_039 = "039_b2c_annual_plan_foundation.sql";
 /**
  * Code only. The migration's prose deliberately NAMES what it refuses to
  * do - a table lock, a lifecycle write on refund, a completion cron, an
- * annual column on public.orders - so a scan that read the comments
- * would report every deliberate avoidance as a violation of itself.
+ * annual column on public.orders, the two composition functions Phase
+ * 4B1.1 removed - so a scan that read the comments would report every
+ * deliberate avoidance as a violation of itself.
  */
 const withoutComments = source => source
   .split(NEWLINE)
@@ -56,15 +58,25 @@ const sql = withoutComments(migration039);
 /** Lowercased and whitespace-collapsed, so formatting cannot hide a statement. */
 const flat = sql.toLowerCase().replace(/\s+/g, " ");
 
-/** Every function this migration is allowed to define, with its identity arguments. */
+/**
+ * Every function this migration is allowed to define, with its identity
+ * arguments. FIVE, not six: Phase 4B1.1 replaced
+ * prepare_annual_plan_delivery_attempt and
+ * mark_annual_plan_delivery_fulfilled with one atomic function.
+ */
 const FUNCTIONS = [
   ["create_pending_annual_plan_for_attempt",
    "uuid, uuid, uuid, integer, integer, integer, numeric, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb"],
-  ["activate_annual_plan_from_payment", "uuid, text, text, timestamptz"],
+  ["activate_annual_plan_from_payment", "uuid, text, text"],
   ["claim_due_annual_plan_deliveries", "integer"],
-  ["prepare_annual_plan_delivery_attempt", "uuid"],
-  ["mark_annual_plan_delivery_fulfilled", "uuid, uuid"],
+  ["fulfill_annual_plan_delivery", "uuid"],
   ["apply_annual_plan_refund_state", "text, integer"],
+];
+
+/** Functions that must NOT exist after the 4B1.1 hardening. */
+const REMOVED_FUNCTIONS = [
+  "prepare_annual_plan_delivery_attempt",
+  "mark_annual_plan_delivery_fulfilled",
 ];
 
 /** The body of one function, from its CREATE to the terminating $$;. */
@@ -87,15 +99,23 @@ const tableOf = name => {
 
 const PLANS = tableOf("annual_plans");
 const DELIVERIES = tableOf("annual_plan_deliveries");
-const CLAIM = bodyOf("claim_due_annual_plan_deliveries");
-const ACTIVATE = bodyOf("activate_annual_plan_from_payment");
-const PREPARE = bodyOf("prepare_annual_plan_delivery_attempt");
-const REFUND = bodyOf("apply_annual_plan_refund_state");
-const FULFILLED = bodyOf("mark_annual_plan_delivery_fulfilled");
 const PENDING = bodyOf("create_pending_annual_plan_for_attempt");
+const ACTIVATE = bodyOf("activate_annual_plan_from_payment");
+const CLAIM = bodyOf("claim_due_annual_plan_deliveries");
+const FULFILL = bodyOf("fulfill_annual_plan_delivery");
+const REFUND = bodyOf("apply_annual_plan_refund_state");
 
 /** Whitespace-collapsed helper for reading one block. */
 const oneLine = block => block.toLowerCase().replace(/\s+/g, " ");
+
+/** Asserts `first` appears before `second` inside one block. */
+const before = (block, first, second, message) => {
+  const a = block.indexOf(first);
+  const b = block.indexOf(second);
+  assert.ok(a !== -1, `missing: ${first}`);
+  assert.ok(b !== -1, `missing: ${second}`);
+  assert.ok(a < b, message);
+};
 
 /* ══════════════════════════════════════════════════════════════
    1-5. THE MIGRATION SET
@@ -112,6 +132,8 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
 });
 
 test("2: no migration 040 or beyond", () => {
+  // 039 is not applied anywhere, so it is still the right place to fix
+  // 039. A hardening pass must not become a second migration.
   const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 39);
   assert.deepEqual(beyond, [], "an unreviewed migration appeared after 039");
 });
@@ -131,29 +153,33 @@ test("4: migrations 037 and 038 still hold their refund writers, untouched", () 
   assert.ok(read(`supabase/migrations/${MIGRATION_038}`)
     .includes("create or replace function public.apply_order_refund_state("),
     "038's one-time refund writer changed");
-  // And 039 does not redefine either of them, nor any unrelated function.
-  assert.ok(!flat.includes("function public.apply_order_refund_state("),
-    "039 redefines the one-time refund writer");
-  assert.ok(!flat.includes("function public.apply_order_refund_state_by_invoice("),
-    "039 redefines the invoice refund writer");
-  assert.ok(!flat.includes("function public.create_order_from_paid_checkout("),
-    "039 redefines the live order creator");
+  // 039 does not redefine either of them, nor any unrelated function.
   for (const forbidden of [
+    "function public.apply_order_refund_state(",
+    "function public.apply_order_refund_state_by_invoice(",
     "function public.activate_subscription_from_invoice(",
     "function public.schedule_subscription_cancellation(",
     "function public.mark_subscription_cancelled(",
     "function public.sync_subscription_payment_status(",
-    "function public.apply_order_refund_state_by_invoice(",
     "function public.authorize_order_shipment(",
   ]) {
     assert.ok(!flat.includes(forbidden), `039 redefines ${forbidden}`);
   }
+  // And create_order_from_paid_checkout is CALLED, never redefined.
+  assert.ok(!flat.includes("create or replace function public.create_order_from_paid_checkout"),
+    "039 redefines the live order creator");
+  assert.ok(flat.includes("v_order := public.create_order_from_paid_checkout("),
+    "039 does not call the live order creator");
 });
 
-test("5: 039 defines exactly the six reviewed functions and no others", () => {
+test("5: 039 defines exactly the five reviewed functions and no others", () => {
   const defined = [...sql.matchAll(/create or replace function public\.(\w+)\(/g)].map(m => m[1]);
   assert.deepEqual(defined.slice().sort(), FUNCTIONS.map(f => f[0]).slice().sort());
   assert.equal(defined.length, FUNCTIONS.length, "a function is defined twice");
+  // The removed composition path is gone entirely, not merely ungranted.
+  for (const gone of REMOVED_FUNCTIONS) {
+    assert.ok(!sql.includes(gone), `${gone} still exists in executable SQL`);
+  }
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -163,7 +189,6 @@ test("5: 039 defines exactly the six reviewed functions and no others", () => {
 test("6: annual_plans exists with its identity and ownership columns", () => {
   assert.ok(PLANS.includes("id                          uuid primary key"));
   assert.match(PLANS, /user_id\s+uuid not null references auth\.users\(id\)/);
-  // NOT "on delete set null": a paid annual contract must not lose its owner.
   assert.ok(!/user_id[\s\S]{0,120}on delete set null/.test(PLANS),
     "the owner of a paid annual plan must not be nullable on delete");
   assert.match(PLANS, /payment_checkout_attempt_id uuid not null unique\s+references public\.checkout_attempts\(id\)/);
@@ -175,7 +200,6 @@ test("7: annual_plan_deliveries exists, keyed by plan and delivery number", () =
   assert.match(DELIVERIES, /delivery_number\s+integer not null/);
   assert.match(DELIVERIES, /check \(delivery_number between 1 and 13\)/);
   assert.match(DELIVERIES, /scheduled_for\s+timestamptz not null/);
-  // No cascade: a delivery is evidence and must not vanish with a delete.
   assert.ok(!/annual_plan_id[\s\S]{0,120}on delete cascade/.test(DELIVERIES));
 });
 
@@ -185,9 +209,6 @@ test("8: lifecycle and payment vocabularies are separate, and neither borrows th
   assert.match(PLANS, lifecycle, "the lifecycle vocabulary is not exactly the four reviewed values");
   assert.match(PLANS, payment, "the payment vocabulary is not exactly the four reviewed values");
 
-  // The lifecycle CHECK must not contain a refund word, and the payment
-  // CHECK must not contain a lifecycle word. Extracted separately so one
-  // cannot satisfy the other.
   const lifecycleList = PLANS.match(lifecycle)[0];
   const paymentList = PLANS.match(payment)[0];
   for (const refundWord of ["refunded", "partially_refunded", "refund_pending"]) {
@@ -203,8 +224,6 @@ test("8: lifecycle and payment vocabularies are separate, and neither borrows th
 test("9: delivery_count is pinned to exactly 13, in the parent and in the child", () => {
   assert.match(PLANS, /delivery_count\s+integer not null default 13\s+check \(delivery_count = 13\)/);
   assert.match(DELIVERIES, /check \(delivery_number between 1 and 13\)/);
-  // The same 13 in the attempt link, so a fourteenth delivery attempt is
-  // refused by the column CHECK before any index is consulted.
   assert.ok(flat.includes("annual_delivery_number between 1 and 13"));
 });
 
@@ -221,7 +240,6 @@ test("10: every money field is integer cents and no floating point type appears"
   for (const column of CENTS) {
     assert.match(PLANS, new RegExp(`${column}\\s+integer not null`), `${column} is not integer not null`);
   }
-  // numeric is exact and is used for the recorded percentage only.
   assert.match(PLANS, /discount_percent_applied\s+numeric\(5,2\) not null/);
   for (const forbidden of ["float", "double precision", "real ", "money"]) {
     assert.ok(!flat.includes(forbidden), `a non-exact numeric type appears: ${forbidden}`);
@@ -235,7 +253,6 @@ test("11: the money identities make a total impossible to supply independently",
     "check (shipping_total_gross_cents = shipping_per_delivery_gross_cents * delivery_count)"));
   assert.ok(flat.includes(
     "check (total_gross_cents = merchandise_total_gross_cents + shipping_total_gross_cents)"));
-  // And the totals are DERIVED in the creation function, never accepted.
   assert.ok(oneLine(PENDING).includes("v_merch := p_annual_unit_gross_cents * v_count"));
   assert.ok(oneLine(PENDING).includes("v_total := v_merch + v_ship"));
   assert.ok(!/p_total_gross_cents/.test(PENDING), "a caller-supplied total was accepted");
@@ -259,42 +276,58 @@ test("13: the annual Stripe PaymentIntent is unique on the parent", () => {
     "create unique index annual_plans_stripe_checkout_session_id_key on public.annual_plans (stripe_checkout_session_id) where stripe_checkout_session_id is not null"));
 });
 
+test("14: the terminal timestamps are biconditional with their status", () => {
+  // Phase 4B1.1. A terminal status and its timestamp are the same fact
+  // recorded twice, so neither may exist without the other.
+  assert.ok(flat.includes(
+    "check ((completed_at is not null) = (status = 'completed'))"),
+    "completed_at is not biconditional with status");
+  assert.ok(flat.includes(
+    "check ((cancelled_at is not null) = (status = 'cancelled'))"),
+    "cancelled_at is not biconditional with status");
+  // The one-way forms this replaced must be gone, or a completed row
+  // could still exist with no completed_at.
+  assert.ok(!flat.includes("check ((completed_at is null) or status = 'completed')"));
+  assert.ok(!flat.includes("check ((cancelled_at is null) or status = 'cancelled')"));
+  // An abandoned pending plan may still become cancelled later: the
+  // purchase-date guard exempts 'pending' and 'cancelled'.
+  assert.ok(flat.includes("check (status not in ('active', 'completed')"),
+    "the purchase-date guard no longer exempts a never-purchased plan");
+});
+
 /* ══════════════════════════════════════════════════════════════
-   14-18. ONE PAYMENT, THIRTEEN DELIVERIES, NEVER SHARED
+   15-19. ONE PAYMENT, THIRTEEN DELIVERIES, NEVER SHARED
    ══════════════════════════════════════════════════════════════ */
 
-test("14: one delivery row per (plan, delivery number), enforced by a unique constraint", () => {
+test("15: one delivery row per (plan, delivery number), enforced by a unique constraint", () => {
   assert.ok(oneLine(DELIVERIES).includes(
     "constraint annual_plan_deliveries_plan_number_key unique (annual_plan_id, delivery_number)"));
-  // And a delivery holds at most one attempt and at most one order.
   assert.ok(flat.includes(
     "create unique index annual_plan_deliveries_checkout_attempt_id_key on public.annual_plan_deliveries (checkout_attempt_id) where checkout_attempt_id is not null"));
   assert.ok(flat.includes(
     "create unique index annual_plan_deliveries_order_id_key on public.annual_plan_deliveries (order_id) where order_id is not null"));
 });
 
-test("15: one synthetic fulfillment attempt per (plan, delivery number)", () => {
+test("16: one synthetic fulfillment attempt per (plan, delivery number)", () => {
   assert.ok(flat.includes(
     "create unique index checkout_attempts_annual_delivery_key on public.checkout_attempts (annual_plan_id, annual_delivery_number) where annual_plan_id is not null and annual_delivery_number is not null"));
   assert.ok(flat.includes(
     "add column annual_plan_id uuid references public.annual_plans(id), add column annual_delivery_number integer"));
 });
 
-test("16: a synthetic delivery attempt can never carry the annual Stripe payment identity", () => {
-  // The CHECK is the guarantee; the function merely respects it.
+test("17: a synthetic delivery attempt can never carry the annual Stripe payment identity", () => {
   const guard = flat.slice(flat.indexOf("checkout_attempts_annual_delivery_no_stripe_payment_check"));
   assert.ok(guard.startsWith("checkout_attempts_annual_delivery_no_stripe_payment_check check ( annual_plan_id is null or (stripe_payment_intent_id is null and stripe_invoice_id is null and stripe_checkout_session_id is null and subscription_id is null) )"),
     "the no-shared-payment CHECK is not the reviewed one");
 
-  // The two populations are disjoint: an attempt has both annual columns
-  // or neither, so the payment attempt cannot acquire a back-reference.
   assert.ok(flat.includes(
     "checkout_attempts_annual_delivery_paired_check check ( (annual_plan_id is null and annual_delivery_number is null) or (annual_plan_id is not null and annual_delivery_number between 1 and 13) )"));
 
-  // And the insert in prepare_... sets none of the four.
-  const insert = oneLine(PREPARE).slice(
-    oneLine(PREPARE).indexOf("insert into public.checkout_attempts"),
-    oneLine(PREPARE).indexOf("returning * into v_attempt"));
+  // The insert inside the atomic fulfillment sets none of the four.
+  const f = oneLine(FULFILL);
+  const insert = f.slice(
+    f.indexOf("insert into public.checkout_attempts"),
+    f.indexOf("returning * into v_attempt"));
   for (const forbidden of [
     "stripe_payment_intent_id", "stripe_invoice_id", "stripe_checkout_session_id", "subscription_id",
   ]) {
@@ -306,105 +339,203 @@ test("16: a synthetic delivery attempt can never carry the annual Stripe payment
   assert.ok(insert.includes("v_plan.delivery_tax_snapshot"), "the frozen per-delivery tax is not used");
   assert.ok(insert.includes("v_plan.shipping_per_delivery_gross_cents"),
     "the frozen per-delivery shipping is not used");
+  // And the order creator is handed a NULL payment intent, explicitly typed.
+  assert.ok(f.includes("null::text"), "the order creator is not given a null payment intent");
 });
 
-test("17: no annual column is added to public.orders", () => {
-  assert.ok(!/alter\s+table\s+public\.orders/i.test(sql),
-    "039 alters public.orders");
+test("18: no annual column is added to public.orders", () => {
+  assert.ok(!/alter\s+table\s+public\.orders/i.test(sql), "039 alters public.orders");
   assert.ok(!/alter\s+table\s+public\.order_items/i.test(sql));
-  // The only table 039 extends is checkout_attempts.
   const altered = [...sql.matchAll(/alter table public\.(\w+)/g)].map(m => m[1]);
   assert.deepEqual([...new Set(altered)].sort(),
     ["annual_plan_deliveries", "annual_plans", "checkout_attempts"]);
 });
 
-test("18: nothing fresh is read for a purchased plan", () => {
-  // The fulfillment path must never touch the catalog or recompute a price.
-  for (const block of [PREPARE, ACTIVATE, FULFILLED]) {
+test("19: nothing fresh is read for a purchased plan", () => {
+  for (const block of [FULFILL, ACTIVATE]) {
     assert.ok(!block.includes("product_variants"), "a purchased plan re-read the catalog");
     assert.ok(!block.includes("price_gross_cents"), "a purchased plan re-read a catalog price");
   }
 });
 
 /* ══════════════════════════════════════════════════════════════
-   19-22. THE FROZEN SCHEDULE
+   20-23. THE PENDING PARENT, BEFORE STRIPE
    ══════════════════════════════════════════════════════════════ */
 
-test("19: the cadence is exactly 28 days, expressed as an absolute duration", () => {
-  // 672 hours is 28 days. Hours, not calendar days, so the sequence does
-  // not depend on a session time zone or on a DST boundary.
-  assert.equal(672, 28 * 24);
-  assert.ok(oneLine(ACTIVATE).includes("pg_catalog.make_interval(hours => 672 * (n - 1))"),
-    "the delivery cadence is not 672 hours per step");
-  // Never calendar arithmetic.
-  for (const forbidden of ["interval '1 month'", "interval '28 days'", "interval '4 weeks'", "'1 mon'"]) {
-    assert.ok(!flat.includes(forbidden), `calendar arithmetic appears: ${forbidden}`);
+test("20: ownership is proved before any annual plan is resolved or reported", () => {
+  // Phase 4B1.1. Answering the existing-plan branch first would let a
+  // guessed attempt id reveal that a plan exists, plus its uuid and its
+  // status.
+  const p = oneLine(PENDING);
+  before(p,
+    "if v_attempt.user_id is distinct from p_user_id then",
+    "from public.annual_plans where payment_checkout_attempt_id = p_checkout_attempt_id",
+    "the existing plan is resolved before ownership is proved");
+  before(p,
+    "'attempt_not_owned'",
+    "'annual_plan_id', v_plan.id",
+    "a plan id can be reported before ownership is proved");
+  // The refusal carries no plan id and no status.
+  const refusal = p.slice(p.indexOf("if v_attempt.user_id is distinct from p_user_id then"));
+  const refusalReturn = refusal.slice(0, refusal.indexOf("end if;"));
+  assert.ok(refusalReturn.includes("'result', 'attempt_not_owned'"));
+  assert.ok(!refusalReturn.includes("annual_plan_id"), "the ownership refusal leaks a plan id");
+  assert.ok(!refusalReturn.includes("status"), "the ownership refusal leaks a status");
+});
+
+test("21: a NEW parent can only be minted from a genuinely pre-Stripe attempt", () => {
+  const p = oneLine(PENDING);
+  // 'created' is the exact pre-Stripe state name in this architecture.
+  assert.ok(p.includes("if v_attempt.status <> 'created'"),
+    "the pre-Stripe state is not pinned to 'created'");
+  // Audited against the live source rather than assumed.
+  const attempts = read("lib/checkoutAttempts.ts");
+  assert.ok(attempts.includes(
+    'export type CheckoutAttemptStatus = "created" | "stripe_session_created" | "paid" | "failed" | "expired";'),
+    "the checkout attempt status vocabulary changed");
+  assert.ok(attempts.includes('status: "stripe_session_created",'),
+    "linkStripeSession no longer marks the post-Stripe state");
+  assert.ok(read("supabase/migrations/009_stripe_checkout_attempts.sql")
+    .includes("status                      text not null default 'created'"),
+    "'created' is no longer the default pre-Stripe state");
+  // Every external-object marker is refused too, not just the status.
+  for (const evidence of [
+    "v_attempt.stripe_checkout_session_id is not null",
+    "v_attempt.stripe_payment_intent_id is not null",
+    "v_attempt.stripe_invoice_id is not null",
+    "v_attempt.subscription_id is not null",
+    "v_attempt.annual_plan_id is not null",
+    "v_attempt.annual_delivery_number is not null",
+  ]) {
+    assert.ok(p.includes(evidence), `a new parent can be minted despite ${evidence}`);
   }
+  assert.ok(p.includes("'attempt_not_pre_stripe'"));
 });
 
-test("20: delivery 1 is the purchase date and delivery 13 is exactly +336 days", () => {
-  // n = 1 gives + 0 hours, so delivery 1 is purchased_at itself.
-  assert.equal(672 * (1 - 1), 0);
-  // n = 13 gives 8064 hours, which is 336 days.
-  assert.equal(672 * (13 - 1), 8064);
-  assert.equal(8064, 336 * 24);
-  assert.ok(oneLine(ACTIVATE).includes("v_purchased + pg_catalog.make_interval(hours => 672 * (n - 1))"));
-  assert.ok(oneLine(ACTIVATE).includes(
-    "from pg_catalog.generate_series(1, v_plan.delivery_count) as n"),
-    "the thirteen rows are not generated from delivery_count");
+test("22: the pre-Stripe test does not break a legitimate retry", () => {
+  // A retry after the Stripe session was created has an attempt that is
+  // no longer pre-Stripe, and must still get its existing parent back.
+  // So the existing-plan return has to come FIRST.
+  const p = oneLine(PENDING);
+  before(p,
+    "'result', 'existing'",
+    "if v_attempt.status <> 'created'",
+    "the pre-Stripe test runs before the existing-plan return and would break retries");
 });
 
-test("21: plan_end_at is exactly purchase + 364 days", () => {
-  assert.equal(8736, 364 * 24);
-  // And 364 days is 13 whole 28-day periods, so the plan ends when the
-  // final delivery's own period does.
-  assert.equal(8736, 672 * 13);
-  assert.ok(oneLine(ACTIVATE).includes(
-    "plan_end_at = v_purchased + pg_catalog.make_interval(hours => 8736)"),
-    "plan_end_at is not purchase + 8736 hours");
-});
-
-test("22: the thirteen rows are created in the activation transaction, with the constraint as backstop", () => {
-  const a = oneLine(ACTIVATE);
-  assert.ok(a.includes("insert into public.annual_plan_deliveries"));
-  assert.ok(a.includes("on conflict on constraint annual_plan_deliveries_plan_number_key do nothing"),
-    "the duplicate backstop is not the unique constraint");
-  assert.ok(a.includes("if v_created <> v_plan.delivery_count then"),
-    "a partial schedule is not refused");
-  assert.ok(a.includes("raise exception"), "a partial schedule does not roll the activation back");
-  // Activation creates no order, ever.
-  assert.ok(!a.includes("insert into public.orders"), "activation creates an order");
-  assert.ok(!a.includes("create_order_from_paid_checkout"), "activation mints an order");
+test("23: the pending parent is claimed under the attempt's row lock", () => {
+  const p = oneLine(PENDING);
+  before(p,
+    "from public.checkout_attempts where id = p_checkout_attempt_id for update",
+    "insert into public.annual_plans",
+    "the parent is created without holding the attempt lock");
+  assert.ok(p.includes("when unique_violation then"), "the concurrent-race winner is not adopted");
+  assert.ok(p.includes(
+    "if v_attempt.expected_total_gross_cents is distinct from v_total then"),
+    "the plan total is not checked against the amount the customer will be asked for");
 });
 
 /* ══════════════════════════════════════════════════════════════
-   23-25. ACTIVATION IS IDEMPOTENT AND FAILS CLOSED
+   24-29. ACTIVATION
    ══════════════════════════════════════════════════════════════ */
 
-test("23: activation is idempotent and refuses a second, different payment", () => {
+test("24: the activation signature takes no caller timestamp", () => {
+  // Phase 4B1.1 removed p_purchased_at rather than defaulting it: one
+  // timestamp positions thirteen future shipments and the end date.
+  const header = ACTIVATE.slice(0, ACTIVATE.indexOf("as $$"));
+  assert.ok(!header.includes("p_purchased_at"), "activation still accepts a caller timestamp");
+  assert.ok(!header.includes("timestamptz"), "activation still accepts a timestamp argument");
+  assert.match(header, /p_annual_plan_id\s+uuid,\s*[\s\S]*p_stripe_checkout_session_id text,\s*[\s\S]*p_stripe_payment_intent_id\s+text/);
+  // And the grants name the new three-argument signature.
+  assert.ok(flat.includes(
+    "grant execute on function public.activate_annual_plan_from_payment(uuid, text, text) to service_role;"));
+  assert.ok(!flat.includes("activate_annual_plan_from_payment(uuid, text, text, timestamptz)"),
+    "a stale four-argument grant survived");
+});
+
+test("25: purchased_at is the attempt's verified paid_at and nothing else", () => {
+  const a = oneLine(ACTIVATE);
+  assert.ok(a.includes("if v_attempt.paid_at is null then"), "a paid attempt with no paid_at can activate");
+  assert.ok(a.includes("'attempt_paid_at_missing'"));
+  assert.ok(a.includes("v_purchased := v_attempt.paid_at;"),
+    "purchased_at is not taken from the attempt");
+  // Never invented.
+  assert.ok(!a.includes("v_purchased := pg_catalog.now()"), "purchased_at falls back to a clock");
+  assert.ok(!a.includes("coalesce(p_purchased_at"), "a caller timestamp is still consulted");
+  // paid_at is written by markAttemptPaid at the verified moment.
+  assert.ok(read("lib/checkoutAttempts.ts").includes("paid_at: new Date().toISOString(),"),
+    "markAttemptPaid no longer stamps paid_at");
+});
+
+test("26: activation correlates the exact Checkout Session and the exact PaymentIntent", () => {
+  const a = oneLine(ACTIVATE);
+  // Both must be present on the attempt.
+  assert.ok(a.includes("if v_attempt.stripe_payment_intent_id is null"));
+  assert.ok(a.includes("'attempt_payment_intent_missing'"));
+  assert.ok(a.includes("if v_attempt.stripe_checkout_session_id is null"));
+  assert.ok(a.includes("'attempt_checkout_session_missing'"));
+  // And both must match, after trimming.
+  assert.ok(a.includes(
+    "if pg_catalog.btrim(v_attempt.stripe_payment_intent_id) is distinct from v_intent then"),
+    "the PaymentIntent is not correlated to the paid attempt");
+  assert.ok(a.includes("'payment_intent_conflict'"));
+  assert.ok(a.includes(
+    "if pg_catalog.btrim(v_attempt.stripe_checkout_session_id) is distinct from v_session then"),
+    "the Checkout Session is not correlated to the paid attempt");
+  assert.ok(a.includes("'checkout_session_conflict'"));
+  // Blank input is refused before anything is read.
+  assert.ok(a.includes("or pg_catalog.btrim(p_stripe_payment_intent_id) = ''"));
+  assert.ok(a.includes("or pg_catalog.btrim(p_stripe_checkout_session_id) = ''"));
+  // The plan stores the ATTEMPT's values, not the caller's arguments.
+  const set = a.slice(a.indexOf("update public.annual_plans set"), a.indexOf("returning * into v_plan"));
+  assert.ok(set.includes("stripe_payment_intent_id = pg_catalog.btrim(v_attempt.stripe_payment_intent_id)"));
+  assert.ok(set.includes("stripe_checkout_session_id = pg_catalog.btrim(v_attempt.stripe_checkout_session_id)"));
+  assert.ok(!set.includes("= v_intent"), "the caller's argument is written instead of the evidence");
+  assert.ok(!set.includes("= v_session"), "the caller's argument is written instead of the evidence");
+});
+
+test("27: a correlation mismatch mutates nothing", () => {
+  const a = oneLine(ACTIVATE);
+  const write = a.indexOf("update public.annual_plans set");
+  assert.ok(write > 0, "the activation write was not found");
+  for (const guard of [
+    "if v_attempt.status <> 'paid' then",
+    "if v_attempt.expected_total_gross_cents is distinct from v_plan.total_gross_cents then",
+    "if v_attempt.user_id is distinct from v_plan.user_id then",
+    "if v_attempt.stripe_payment_intent_id is null",
+    "if v_attempt.stripe_checkout_session_id is null",
+    "if pg_catalog.btrim(v_attempt.stripe_payment_intent_id) is distinct from v_intent then",
+    "if pg_catalog.btrim(v_attempt.stripe_checkout_session_id) is distinct from v_session then",
+    "if v_attempt.paid_at is null then",
+  ]) {
+    const at = a.indexOf(guard);
+    assert.ok(at !== -1, `missing guard: ${guard}`);
+    assert.ok(at < write, `a guard runs after the write: ${guard}`);
+  }
+  // No mutation of any kind happens before the guards either.
+  const head = a.slice(0, write);
+  assert.ok(!head.includes("insert into"), "activation inserts before its guards");
+  assert.ok(!/update public\./.test(head), "activation updates before its guards");
+});
+
+test("28: nothing is correlated by customer, email, amount alone, SKU or timestamp", () => {
+  const a = oneLine(ACTIVATE);
+  for (const forbidden of ["customer_snapshot", "email", "sku", "variant_id", "created_at"]) {
+    assert.ok(!a.includes(forbidden), `activation correlates by ${forbidden}`);
+  }
+  // The attempt and the plan must also agree on who they belong to.
+  assert.ok(a.includes("if v_attempt.user_id is distinct from v_plan.user_id then"));
+  assert.ok(a.includes("'attempt_owner_mismatch'"));
+});
+
+test("29: activation is idempotent and refuses a second, different payment", () => {
   const a = oneLine(ACTIVATE);
   assert.ok(a.includes("if v_plan.status = 'active' then"), "a replay is not detected");
-  assert.ok(a.includes("if v_plan.stripe_payment_intent_id is distinct from v_intent then"),
-    "a replay does not prove it is the same payment");
-  assert.ok(a.includes("'payment_intent_conflict'"), "a conflicting payment intent is adopted");
+  assert.ok(a.includes("if v_plan.stripe_payment_intent_id is distinct from v_intent then"));
+  assert.ok(a.includes("if v_plan.stripe_checkout_session_id is distinct from v_session then"));
   assert.ok(a.includes("'already_active'"), "an idempotent replay has no distinct answer");
-  // Terminal states stay terminal.
   assert.ok(a.includes("if v_plan.status in ('completed', 'cancelled') then"));
   assert.ok(a.includes("'terminal'"));
-});
-
-test("24: activation requires real payment proof from the frozen anchor", () => {
-  const a = oneLine(ACTIVATE);
-  assert.ok(a.includes("from public.checkout_attempts where id = v_plan.payment_checkout_attempt_id for update"),
-    "the payment attempt is not read under a lock");
-  assert.ok(a.includes("if v_attempt.status <> 'paid' then"), "an unpaid attempt can activate a plan");
-  assert.ok(a.includes(
-    "if v_attempt.expected_total_gross_cents is distinct from v_plan.total_gross_cents then"),
-    "the paid amount is not re-proved against the plan total");
-});
-
-test("25: the plan row is locked before any activation decision", () => {
-  const a = oneLine(ACTIVATE);
   const lock = a.indexOf("from public.annual_plans where id = p_annual_plan_id for update");
   assert.ok(lock > 0, "the plan is not locked");
   for (const decision of [
@@ -418,58 +549,89 @@ test("25: the plan row is locked before any activation decision", () => {
 });
 
 /* ══════════════════════════════════════════════════════════════
-   26-29. CLAIMING, AND THE SIX HOUR LEASE
+   30-33. THE FROZEN SCHEDULE
    ══════════════════════════════════════════════════════════════ */
 
-test("26: the claim locks its rows and skips ones another worker holds", () => {
+test("30: the cadence is exactly 28 days, expressed as an absolute duration", () => {
+  assert.equal(672, 28 * 24);
+  assert.ok(oneLine(ACTIVATE).includes("pg_catalog.make_interval(hours => 672 * (n - 1))"),
+    "the delivery cadence is not 672 hours per step");
+  for (const forbidden of ["interval '1 month'", "interval '28 days'", "interval '4 weeks'", "'1 mon'"]) {
+    assert.ok(!flat.includes(forbidden), `calendar arithmetic appears: ${forbidden}`);
+  }
+});
+
+test("31: delivery 1 is the paid date and delivery 13 is exactly +336 days", () => {
+  assert.equal(672 * (1 - 1), 0);
+  assert.equal(672 * (13 - 1), 8064);
+  assert.equal(8064, 336 * 24);
+  assert.ok(oneLine(ACTIVATE).includes("v_purchased + pg_catalog.make_interval(hours => 672 * (n - 1))"));
+  assert.ok(oneLine(ACTIVATE).includes(
+    "from pg_catalog.generate_series(1, v_plan.delivery_count) as n"),
+    "the thirteen rows are not generated from delivery_count");
+});
+
+test("32: plan_end_at is exactly paid_at + 364 days", () => {
+  assert.equal(8736, 364 * 24);
+  assert.equal(8736, 672 * 13);
+  assert.ok(oneLine(ACTIVATE).includes(
+    "plan_end_at = v_purchased + pg_catalog.make_interval(hours => 8736)"),
+    "plan_end_at is not purchase + 8736 hours");
+});
+
+test("33: the thirteen rows are created in the activation transaction, with the constraint as backstop", () => {
+  const a = oneLine(ACTIVATE);
+  assert.ok(a.includes("insert into public.annual_plan_deliveries"));
+  assert.ok(a.includes("on conflict on constraint annual_plan_deliveries_plan_number_key do nothing"),
+    "the duplicate backstop is not the unique constraint");
+  assert.ok(a.includes("if v_created <> v_plan.delivery_count then"),
+    "a partial schedule is not refused");
+  assert.ok(a.includes("raise exception"), "a partial schedule does not roll the activation back");
+  assert.ok(!a.includes("insert into public.orders"), "activation creates an order");
+  assert.ok(!a.includes("create_order_from_paid_checkout"), "activation mints an order");
+});
+
+/* ══════════════════════════════════════════════════════════════
+   34-37. CLAIMING, AND THE SIX HOUR LEASE
+   ══════════════════════════════════════════════════════════════ */
+
+test("34: the claim locks its rows and skips ones another worker holds", () => {
   const c = oneLine(CLAIM);
   assert.ok(c.includes("for update of d skip locked"),
     "the claim does not lock with SKIP LOCKED");
-  // OF d: only the delivery rows, so this and prepare_... cannot acquire
-  // the same two rows in opposite orders.
   assert.ok(!c.includes("for update of p"), "the claim locks the parent too and can deadlock");
   assert.ok(!c.includes("lock table"), "the claim takes a table lock");
-  // Select and update are one statement, so two runs cannot both read a
-  // row as due.
   assert.ok(c.includes("with due as ("));
   assert.ok(c.includes("update public.annual_plan_deliveries t set state = 'claimed', claimed_at = pg_catalog.now()"));
-  // Bounded batch.
   assert.ok(c.includes("limit least(greatest(coalesce(p_limit, 25), 1), 100)"),
     "the batch is not bounded");
 });
 
-test("27: the stale-claim lease is exactly six hours and is the only reclaim path", () => {
+test("35: the stale-claim lease is exactly six hours and is the only reclaim path", () => {
   const c = oneLine(CLAIM);
   assert.ok(c.includes("d.claimed_at < pg_catalog.now() - interval '6 hours'"),
     "the lease threshold is not the pinned six hours");
-  // Six hours sits far above any request and far below the daily cron.
   const LEASE_HOURS = 6;
   assert.ok(LEASE_HOURS * 60 * 60 > 300, "the lease is not above the maximum function duration");
   assert.ok(LEASE_HOURS < 24, "the lease is not below the daily cron interval");
   assert.match(read("vercel.json"), /"schedule":\s*"20 5 \* \* \*"/,
     "the cron is no longer daily, so the lease reasoning has to be revisited");
-  // Exactly one reclaim branch, and it requires a real stale claim.
   assert.ok(c.includes("(d.state = 'claimed' and d.claimed_at is not null and d.claimed_at < pg_catalog.now() - interval '6 hours')"));
   assert.equal((c.match(/interval '6 hours'/g) || []).length, 1);
 });
 
-test("28: a delivery that already produced an order can never be reclaimed", () => {
+test("36: a delivery that already produced an order can never be reclaimed", () => {
   const c = oneLine(CLAIM);
-  // Both guards sit in the shared WHERE, before the OR that offers the
-  // reclaim branch, so they apply to the reclaim path too.
   const orBranch = c.indexOf("and ( (d.state = 'scheduled'");
   assert.ok(orBranch > 0, "the due/reclaim disjunction was not found");
   const shared = c.slice(0, orBranch);
-  assert.ok(shared.includes("d.order_id is null"),
-    "a delivery with an order can be reclaimed");
-  assert.ok(shared.includes("d.fulfilled_at is null"),
-    "a fulfilled delivery can be reclaimed");
-  // The state CHECK keeps the two facts from disagreeing.
+  assert.ok(shared.includes("d.order_id is null"), "a delivery with an order can be reclaimed");
+  assert.ok(shared.includes("d.fulfilled_at is null"), "a fulfilled delivery can be reclaimed");
   assert.ok(oneLine(DELIVERIES).includes(
     "check ((state = 'fulfilled') = (order_id is not null and fulfilled_at is not null))"));
 });
 
-test("29: the claim creates nothing at all", () => {
+test("37: the claim creates nothing at all", () => {
   const c = oneLine(CLAIM);
   for (const forbidden of [
     "insert into public.orders",
@@ -483,58 +645,119 @@ test("29: the claim creates nothing at all", () => {
 });
 
 /* ══════════════════════════════════════════════════════════════
-   30-32. PREPARING A DELIVERY, AND THE ORDER LINK
+   38-43. ATOMIC FULFILLMENT, AND THE RACE THAT IS NOW CLOSED
    ══════════════════════════════════════════════════════════════ */
 
-test("30: prepare locks parent then child, and fails closed on anything but a live claim", () => {
-  const p = oneLine(PREPARE);
-  const planLock = p.indexOf("from public.annual_plans where id = v_delivery.annual_plan_id for update");
-  const rowLock = p.indexOf("from public.annual_plan_deliveries where id = p_delivery_id for update");
-  assert.ok(planLock > 0 && rowLock > planLock, "the lock order is not parent then child");
-  assert.ok(p.indexOf("insert into public.checkout_attempts") > rowLock,
-    "an attempt is created before the row is locked");
-  assert.ok(p.includes("if v_plan.status <> 'active' then"));
-  assert.ok(p.includes("if v_delivery.state <> 'claimed' then"));
-  assert.ok(p.includes("if v_delivery.checkout_attempt_id is not null then"),
-    "an already-prepared delivery is not idempotent");
-  assert.ok(p.includes("'already_prepared'"));
-  // The unique index is the real guard, and its winner is adopted.
-  assert.ok(p.includes("when unique_violation then"));
-  assert.ok(p.includes("where annual_plan_id = v_plan.id and annual_delivery_number = v_delivery.delivery_number"));
-  // It creates no order; the live creator is left to application code.
-  assert.ok(!p.includes("insert into public.orders"));
-  assert.ok(!p.includes("create_order_from_paid_checkout"));
-});
-
-test("31: an order is bound to a delivery only by the attempt they share", () => {
-  const f = oneLine(FULFILLED);
-  assert.ok(f.includes(
-    "if v_order.checkout_attempt_id is distinct from v_delivery.checkout_attempt_id then"),
-    "a caller-supplied order id is taken on trust");
-  assert.ok(f.includes("'order_not_this_delivery'"));
-  assert.ok(f.includes("if v_delivery.state = 'fulfilled' then"), "re-marking is not idempotent");
-  assert.ok(f.includes("'unchanged'"));
-  assert.ok(f.includes("'order_conflict'"));
-});
-
-test("32: nothing in 039 writes 'completed' or 'cancelled'", () => {
-  for (const [name] of FUNCTIONS) {
-    const body = oneLine(bodyOf(name));
-    assert.ok(!body.includes("status = 'completed'"), `${name} completes a plan`);
-    assert.ok(!body.includes("status = 'cancelled'"), `${name} cancels a plan`);
-    assert.ok(!body.includes("completed_at ="), `${name} stamps completed_at`);
-    assert.ok(!body.includes("cancelled_at ="), `${name} stamps cancelled_at`);
+test("38: fulfillment is ONE function, and the unsafe composition is gone", () => {
+  // Phase 4B1.1. Two exposed halves meant the parent lock was released
+  // between the guard and the order; a second supported write path that
+  // recreates the race is not an acceptable leftover.
+  assert.ok(sql.includes("create or replace function public.fulfill_annual_plan_delivery("),
+    "the atomic fulfillment function does not exist");
+  for (const gone of REMOVED_FUNCTIONS) {
+    assert.ok(!sql.includes(gone), `${gone} is still defined or granted`);
+    assert.ok(!flat.includes(`grant execute on function public.${gone}`),
+      `${gone} is still granted to a role`);
   }
-  // The vocabulary still declares both, so a later phase does not have
-  // to widen a CHECK to reach them.
-  assert.ok(PLANS.includes("'pending', 'active', 'completed', 'cancelled'"));
+  // No caller-supplied order id exists anywhere any more: the function
+  // derives the order from the attempt it created in the same
+  // transaction, so there is nothing to take on trust.
+  assert.ok(!sql.includes("p_order_id"), "a caller-supplied order id survives");
+});
+
+test("39: the parent is locked first, the delivery second, and the lock is held through the order", () => {
+  const f = oneLine(FULFILL);
+  const planLock = f.indexOf("from public.annual_plans where id = v_delivery.annual_plan_id for update");
+  const rowLock = f.indexOf("from public.annual_plan_deliveries where id = p_delivery_id for update");
+  const guardStatus = f.indexOf("if v_plan.status <> 'active' then");
+  const guardRefund = f.indexOf("if v_plan.payment_status = 'refunded' then");
+  const insert = f.indexOf("insert into public.checkout_attempts");
+  const order = f.indexOf("v_order := public.create_order_from_paid_checkout(");
+  const record = f.indexOf("update public.annual_plan_deliveries");
+
+  assert.ok(planLock > 0, "the parent is not locked");
+  assert.ok(rowLock > planLock, "the lock order is not parent then child");
+  assert.ok(guardStatus > rowLock, "the status guard runs before the row is locked");
+  assert.ok(guardRefund > rowLock, "the refund guard runs before the row is locked");
+  assert.ok(insert > guardRefund, "an attempt is created before the parent guards");
+  assert.ok(order > insert, "the order is created before its attempt exists");
+  assert.ok(record > order, "the delivery is recorded before the order exists");
+
+  // THE WHOLE POINT: the guard and the order are in the same function
+  // body, so they are in the same transaction and the same lock.
+  assert.ok(guardRefund < order,
+    "the refund guard does not precede order creation inside one transaction");
+  assert.ok(!f.includes("commit"), "the fulfillment splits itself into several transactions");
+});
+
+test("40: the refund writer serialises on the SAME parent row lock", () => {
+  // This is the proof that "guard passes, refund commits, order is
+  // created" cannot happen: both functions take FOR UPDATE on the same
+  // public.annual_plans row before deciding anything.
+  assert.ok(oneLine(FULFILL).includes(
+    "from public.annual_plans where id = v_delivery.annual_plan_id for update"));
+  assert.ok(oneLine(REFUND).includes(
+    "from public.annual_plans where stripe_payment_intent_id = v_intent for update"));
+  // And the refund's write happens after that lock, so it cannot
+  // interleave with a fulfillment that already holds it.
+  const r = oneLine(REFUND);
+  assert.ok(r.indexOf("update public.annual_plans") >
+    r.indexOf("from public.annual_plans where stripe_payment_intent_id = v_intent for update"),
+    "the refund writes before it locks");
+});
+
+test("41: fulfillment is idempotent and returns the same one order", () => {
+  const f = oneLine(FULFILL);
+  // Already fulfilled: return what happened, create nothing.
+  assert.ok(f.includes("if v_delivery.state = 'fulfilled' then"));
+  assert.ok(f.includes("'already_fulfilled'"));
+  const already = f.indexOf("if v_delivery.state = 'fulfilled' then");
+  assert.ok(already < f.indexOf("insert into public.checkout_attempts"),
+    "a fulfilled delivery can still reach the attempt insert");
+  // An existing attempt is resolved, never rebuilt.
+  assert.ok(f.includes("if v_delivery.checkout_attempt_id is not null then"),
+    "an existing synthetic attempt is not reused");
+  assert.ok(f.includes("when unique_violation then"), "the race winner is not adopted");
+  assert.ok(f.includes("where annual_plan_id = v_plan.id and annual_delivery_number = v_delivery.delivery_number"),
+    "the adopted attempt is not proved to be this delivery's");
+  // Only a live claim may be fulfilled.
+  assert.ok(f.includes("if v_delivery.state <> 'claimed' then"));
+  assert.ok(f.includes("'delivery_not_claimed'"));
+  // And a missing order is refused rather than recorded.
+  assert.ok(f.includes("if v_order.id is null then"));
+  assert.ok(f.includes("raise exception"));
+});
+
+test("42: a full refund prevents fulfillment; a partial refund does not", () => {
+  assert.ok(oneLine(CLAIM).includes("p.payment_status <> 'refunded'"),
+    "the claim does not refuse a fully refunded plan");
+  assert.ok(oneLine(FULFILL).includes("if v_plan.payment_status = 'refunded' then"),
+    "fulfillment does not refuse a fully refunded plan");
+  assert.ok(oneLine(FULFILL).includes("'plan_refunded'"));
+  // A partial refund is a real recorded state that stops nothing.
+  assert.ok(PLANS.includes("'partially_refunded'"));
+  assert.ok(oneLine(REFUND).includes("v_new_status := 'partially_refunded'"));
+  assert.ok(!oneLine(CLAIM).includes("partially_refunded"),
+    "a partial refund stops future deliveries");
+  assert.ok(!oneLine(FULFILL).includes("partially_refunded"),
+    "a partial refund stops future deliveries");
+});
+
+test("43: a plan that leaves 'active' stops producing orders, whatever moved it", () => {
+  // Future administrative termination needs no change here: the guard
+  // tests status generally rather than naming the states 039 writes, and
+  // it is evaluated under the same parent lock the terminator would take.
+  const f = oneLine(FULFILL);
+  assert.ok(f.includes("if v_plan.status <> 'active' then"),
+    "the status guard names specific states instead of requiring 'active'");
+  assert.ok(f.includes("'plan_not_active'"));
 });
 
 /* ══════════════════════════════════════════════════════════════
-   33-36. THE ANNUAL REFUND WRITER
+   44-47. THE ANNUAL REFUND WRITER
    ══════════════════════════════════════════════════════════════ */
 
-test("33: the refund writer resolves by the unique annual PaymentIntent and nothing else", () => {
+test("44: the refund writer resolves by the unique annual PaymentIntent and nothing else", () => {
   const r = oneLine(REFUND);
   assert.ok(r.includes("from public.annual_plans where stripe_payment_intent_id = v_intent for update"),
     "the plan is not resolved by payment intent under a lock");
@@ -544,14 +767,12 @@ test("33: the refund writer resolves by the unique annual PaymentIntent and noth
   ]) {
     assert.ok(!r.includes(forbidden), `the refund writer correlates by ${forbidden}`);
   }
-  // A unique index makes ambiguity impossible, so no table lock is taken
-  // and no arbitrary row is picked.
   assert.ok(!r.includes("lock table"), "the annual writer takes a table lock it does not need");
   assert.ok(!r.includes("limit 1"), "an answer is manufactured where a refusal is honest");
   assert.ok(!r.includes("order by"), "an answer is manufactured where a refusal is honest");
 });
 
-test("34: the three financial transitions are exactly the reviewed ones", () => {
+test("45: the three financial transitions are exactly the reviewed ones", () => {
   const r = oneLine(REFUND);
   assert.ok(r.includes("if p_refunded_total_cents = 0 then v_new_status := 'paid';"));
   assert.ok(r.includes("elsif p_refunded_total_cents >= v_plan.total_gross_cents then v_new_status := 'refunded';"));
@@ -561,28 +782,10 @@ test("34: the three financial transitions are exactly the reviewed ones", () => 
   assert.ok(r.includes("if v_plan.payment_status = 'pending' then"), "an unpaid plan can be refunded");
   assert.ok(r.includes("'not_applicable'"));
   assert.ok(r.includes("'unchanged'"), "a no-op still writes");
-  // Absolute totals: nothing accumulates.
   assert.ok(!r.includes("refunded_total_cents +"), "the refund total is accumulated, not absolute");
 });
 
-test("35: a full refund blocks future delivery generation", () => {
-  assert.ok(oneLine(CLAIM).includes("p.payment_status <> 'refunded'"),
-    "the claim does not refuse a fully refunded plan");
-  assert.ok(oneLine(PREPARE).includes("if v_plan.payment_status = 'refunded' then"),
-    "prepare does not refuse a fully refunded plan");
-  assert.ok(oneLine(PREPARE).includes("'plan_refunded'"));
-});
-
-test("36: a partial refund is recorded but by itself stops nothing", () => {
-  // It is a real state on the parent...
-  assert.ok(PLANS.includes("'partially_refunded'"));
-  assert.ok(oneLine(REFUND).includes("v_new_status := 'partially_refunded'"));
-  // ...and neither gate mentions it, so twelve owed deliveries stay owed.
-  assert.ok(!oneLine(CLAIM).includes("partially_refunded"),
-    "a partial refund stops future deliveries");
-  assert.ok(!oneLine(PREPARE).includes("partially_refunded"),
-    "a partial refund stops future deliveries");
-  // And the refund writer never touches lifecycle or a delivery row.
+test("46: the refund writer never touches lifecycle or a delivery row", () => {
   const r = oneLine(REFUND);
   assert.ok(!r.includes("annual_plan_deliveries"), "the refund writer touches a delivery row");
   assert.ok(!r.includes("set status"), "the refund writer writes lifecycle status");
@@ -590,40 +793,47 @@ test("36: a partial refund is recorded but by itself stops nothing", () => {
   assert.ok(setClause.includes("payment_status ="));
   assert.ok(setClause.includes("refunded_total_cents ="));
   assert.ok(setClause.includes("refund_updated_at ="));
-  assert.ok(!setClause.includes("status =") || setClause.includes("payment_status ="),
-    "the refund writer writes something other than money state");
+  assert.ok(!setClause.includes("completed_at"), "the refund writer completes a plan");
+  assert.ok(!setClause.includes("cancelled_at"), "the refund writer cancels a plan");
+});
+
+test("47: nothing in 039 writes 'completed' or 'cancelled'", () => {
+  for (const [name] of FUNCTIONS) {
+    const body = oneLine(bodyOf(name));
+    assert.ok(!body.includes("status = 'completed'"), `${name} completes a plan`);
+    assert.ok(!body.includes("status = 'cancelled'"), `${name} cancels a plan`);
+    assert.ok(!body.includes("completed_at ="), `${name} stamps completed_at`);
+    assert.ok(!body.includes("cancelled_at ="), `${name} stamps cancelled_at`);
+  }
+  assert.ok(PLANS.includes("'pending', 'active', 'completed', 'cancelled'"));
 });
 
 /* ══════════════════════════════════════════════════════════════
-   37-41. RLS, PRIVILEGES AND FUNCTION HARDENING
+   48-52. RLS, PRIVILEGES AND FUNCTION HARDENING
    ══════════════════════════════════════════════════════════════ */
 
-test("37: RLS is enabled on both annual tables", () => {
+test("48: RLS is enabled on both annual tables", () => {
   assert.ok(flat.includes("alter table public.annual_plans enable row level security"));
   assert.ok(flat.includes("alter table public.annual_plan_deliveries enable row level security"));
 });
 
-test("38: authenticated may only SELECT, and only its own rows", () => {
+test("49: authenticated may only SELECT, and only its own rows", () => {
   const policies = [...sql.matchAll(/create policy "([^"]+)"\s+on public\.(\w+) for (\w+)/g)];
   assert.equal(policies.length, 2, "there must be exactly two policies");
-  for (const [, , , cmd] of policies) {
+  const declaredCommands = policies.map(([, , , cmd]) => cmd);
+  for (const cmd of declaredCommands) {
     assert.equal(cmd, "select", "a policy permits something other than SELECT");
   }
-  assert.ok(flat.includes('create policy "users read own annual plans" on public.annual_plans for select using (auth.uid() = user_id)'));
-  // Ownership is inherited by the child, never duplicated onto it.
-  assert.ok(oneLine(sql).includes(
-    "where p.id = annual_plan_deliveries.annual_plan_id and p.user_id = auth.uid()"));
-  assert.ok(!DELIVERIES.includes("user_id"), "the delivery row duplicates the owner");
-  // No write policy of any kind. Read off the policy declarations
-  // themselves, never off the whole file - "for update" also appears in
-  // every row lock in every function body.
-  const declaredCommands = policies.map(([, , , cmd]) => cmd);
   for (const cmd of ["insert", "update", "delete", "all"]) {
     assert.ok(!declaredCommands.includes(cmd), `a write policy exists: for ${cmd}`);
   }
+  assert.ok(flat.includes('create policy "users read own annual plans" on public.annual_plans for select using (auth.uid() = user_id)'));
+  assert.ok(oneLine(sql).includes(
+    "where p.id = annual_plan_deliveries.annual_plan_id and p.user_id = auth.uid()"));
+  assert.ok(!DELIVERIES.includes("user_id"), "the delivery row duplicates the owner");
 });
 
-test("39: anon gets nothing, and no role gets a direct write on either table", () => {
+test("50: anon gets nothing, and no role gets a direct write on either table", () => {
   assert.ok(flat.includes("revoke all privileges on table public.annual_plans from anon, authenticated, service_role"));
   assert.ok(flat.includes("revoke all privileges on table public.annual_plan_deliveries from anon, authenticated, service_role"));
   const grants = [...sql.matchAll(/grant ([\w, ()]+?) on table public\.(\w+)\s+to (\w+);/g)]
@@ -638,33 +848,31 @@ test("39: anon gets nothing, and no role gets a direct write on either table", (
     assert.equal(priv, "select");
     assert.notEqual(grantee, "anon");
   }
-  // checkout_attempts and orders keep the privileges 011 and 023 gave them.
   assert.ok(!/grant[^;]*on table public\.checkout_attempts/i.test(sql),
     "039 changes checkout_attempts privileges");
   assert.ok(!/grant[^;]*on (table )?public\.orders/i.test(sql),
     "039 changes orders privileges");
 });
 
-test("40: every function is SECURITY DEFINER with an empty search_path and no dynamic SQL", () => {
+test("51: every function is SECURITY DEFINER with an empty search_path and no dynamic SQL", () => {
   for (const [name] of FUNCTIONS) {
     const body = bodyOf(name);
     assert.ok(body.includes("security definer set search_path = ''"),
       `${name} is not hardened`);
     assert.ok(!/execute\s+format\s*\(/i.test(body), `${name} uses dynamic SQL`);
     assert.ok(!/\bexecute\s+'/i.test(body), `${name} uses dynamic SQL`);
-    // Every relation is schema-qualified, so an emptied search_path
-    // cannot resolve one somewhere else.
     for (const bare of [
       " from annual_plans", " from annual_plan_deliveries", " from checkout_attempts",
       " from orders", " into annual_plans", "insert into annual_plan",
       "insert into checkout_attempts", "update annual_plan",
+      ":= create_order_from_paid_checkout(",
     ]) {
       assert.ok(!oneLine(body).includes(bare), `${name} references an unqualified relation: ${bare}`);
     }
   }
 });
 
-test("41: only service_role may execute, and PUBLIC is revoked first", () => {
+test("52: only service_role may execute, and PUBLIC is revoked first", () => {
   for (const [name, args] of FUNCTIONS) {
     const sig = `function public.${name}(${args})`;
     for (const role of ["public", "anon", "authenticated"]) {
@@ -675,20 +883,20 @@ test("41: only service_role may execute, and PUBLIC is revoked first", () => {
       `${name} is not granted to service_role`);
     assert.ok(!flat.includes(`grant execute on ${sig} to authenticated`));
     assert.ok(!flat.includes(`grant execute on ${sig} to anon`));
-    // PUBLIC comes first, because anon and authenticated inherit it.
     assert.ok(flat.indexOf(`revoke all on ${sig} from public;`)
       < flat.indexOf(`grant execute on ${sig} to service_role;`),
       `${name} grants before it revokes`);
   }
+  // Exactly five functions are granted, no more.
+  const granted = [...sql.matchAll(/grant execute on function public\.(\w+)\(/g)].map(m => m[1]);
+  assert.deepEqual([...new Set(granted)].sort(), FUNCTIONS.map(f => f[0]).slice().sort());
 });
 
 /* ══════════════════════════════════════════════════════════════
-   42-45. THE COMMERCIAL CONTRACT, AND WHAT WAS NOT TOUCHED
+   53-56. THE COMMERCIAL CONTRACT, AND WHAT WAS NOT TOUCHED
    ══════════════════════════════════════════════════════════════ */
 
-test("42: the three Germany annual totals are exact in integer cents", () => {
-  // The schema stores these; the arithmetic is asserted here so the
-  // contract the migration was built for is pinned next to it.
+test("53: the three Germany annual totals are exact in integer cents", () => {
   const N = 13;
   const rows = [
     { size: "30g", catalog: 1999, unit: 1799, ship: 590, total: 31057 },
@@ -701,15 +909,12 @@ test("42: the three Germany annual totals are exact in integer cents", () => {
     assert.ok(r.unit <= r.catalog);
     assert.ok(Number.isInteger(r.unit) && Number.isInteger(r.ship) && Number.isInteger(r.total));
   }
-  // 50 g free shipping is a real annual benefit; the normal German rule
-  // would charge it, which is why the amount is a frozen per-plan column
-  // and not derived from lib/shipping.ts.
   assert.ok(read("lib/shipping.ts").includes("germany: { shippingGrossCents: 590, freeShippingThresholdGrossCents: 4900 }"));
   assert.ok(2699 < 4900, "the 50 g annual unit is above the normal free-shipping threshold");
   assert.ok(!flat.includes("4900"), "the migration derives annual shipping from the shop threshold");
 });
 
-test("43: no application code was changed by this phase", () => {
+test("54: no application code was changed by this phase", () => {
   const changed = execFileSync("git", ["diff", "--name-only", "HEAD"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
@@ -719,23 +924,20 @@ test("43: no application code was changed by this phase", () => {
   }
 });
 
-test("44: the feature flag and the shop status are unchanged and still closed", () => {
+test("55: the feature flag and the shop status are unchanged and still closed", () => {
   assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "prelaunch" as const;'));
   assert.ok(read("lib/subscriptionCheckoutRules.ts")
     .includes('export const SUBSCRIPTION_FEATURE_FLAG = "B2C_SUBSCRIPTIONS_ENABLED";'));
-  // B2C_ANNUAL_PLAN_ENABLED is application configuration for a later
-  // phase. 039 must not invent it, read it, or default it to anything.
   assert.ok(!flat.includes("b2c_annual_plan_enabled"),
     "the migration references a feature flag it does not own");
 });
 
-test("45: the migration changes no data and creates no order", () => {
-  // Every INSERT in the file is inside a function body, so applying it
-  // writes nothing.
+test("56: the migration changes no data and creates no order of its own", () => {
   const inserts = [...sql.matchAll(/insert into public\.(\w+)/g)].map(m => m[1]);
   assert.deepEqual([...new Set(inserts)].sort(),
     ["annual_plan_deliveries", "annual_plans", "checkout_attempts"]);
-  assert.ok(!flat.includes("insert into public.orders"), "039 creates an order");
+  assert.ok(!flat.includes("insert into public.orders"),
+    "039 inserts into orders instead of calling the live creator");
   assert.ok(!flat.includes("delete from"), "039 deletes rows");
   assert.ok(!flat.includes("truncate"), "039 truncates");
   assert.ok(!flat.includes("drop table"), "039 drops a table");
