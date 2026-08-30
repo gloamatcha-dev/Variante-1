@@ -324,3 +324,119 @@ export async function markAttemptPaid(attemptId: string, stripePaymentIntentId: 
   }
   return true;
 }
+
+/* ── Annual plan payment attempts (Phase 4B3) ────────────────── */
+
+/**
+ * The columns the annual checkout verifies a retry against.
+ *
+ * Wider than the one-time list because the annual flow proves ownership
+ * and non-adoption from the row itself rather than from a digest: it
+ * needs user_id, and it needs the three link columns that would mean this
+ * attempt already belongs to something else.
+ */
+const ANNUAL_ATTEMPT_COLUMNS =
+  `${ATTEMPT_COLUMNS}, user_id, subscription_id, annual_plan_id, annual_delivery_number`;
+
+export type AnnualCheckoutAttempt = CheckoutAttempt & {
+  user_id: string | null;
+  subscription_id: string | null;
+  /**
+   * NULL on a payment attempt, always. Migration 039's paired CHECK keeps
+   * the payment population and the thirteen delivery attempts disjoint,
+   * and the annual PaymentIntent belongs to public.annual_plans alone.
+   */
+  annual_plan_id: string | null;
+  annual_delivery_number: number | null;
+};
+
+export type AnnualAttemptInput = {
+  requestId: string;
+  userId: string;
+  currency: string;
+  items: CheckoutAttemptItemSnapshot[];
+  shipping: CheckoutAttemptShipping;
+  taxSnapshot: CartTaxSnapshot;
+  /** The WHOLE prepayment: thirteen units plus thirteen shipping charges. */
+  expectedTotalGrossCents: number;
+};
+
+export type AnnualAttemptResult =
+  | { ok: true; attempt: AnnualCheckoutAttempt }
+  | { ok: false; error: string };
+
+/**
+ * Gets or creates the PAYMENT checkout attempt for one annual checkout
+ * request (Phase 4B3).
+ *
+ * ignoreDuplicates, exactly as the one-time and subscription flows: a
+ * retry of the same request_id returns the ORIGINAL frozen snapshot
+ * rather than overwriting it with a freshly recomputed one. That is what
+ * makes a double click safe and what stops a second request from quietly
+ * repricing a thirteen-delivery contract the customer is already looking
+ * at. The unique constraint on request_id is the real race guard, not the
+ * select-then-insert order.
+ *
+ * A SEPARATE FUNCTION rather than a reuse of the one-time writer, because
+ * the two freeze different things. getOrCreateCheckoutAttempt derives its
+ * expected total from a CheckoutQuote's catalog subtotal plus one
+ * shipping charge; an annual purchase is thirteen discounted units plus
+ * thirteen shipping charges, which that quote cannot express. Teaching it
+ * to would have changed a live guest-checkout path for a case it does not
+ * need to know about. Nothing above this line is modified.
+ *
+ * annual_plan_id and annual_delivery_number are deliberately NOT written.
+ * They cannot be: migration 039 only mints a parent from an attempt that
+ * is still in the exact pre-Stripe state, with no annual binding at all,
+ * and the parent must exist before Stripe so its id can travel as
+ * metadata. The link runs the other way, through
+ * annual_plans.payment_checkout_attempt_id.
+ *
+ * The subscription fingerprint columns are not written either. They
+ * belong to migration 025's claim function, which compares them against
+ * the subscription flow's own values; an annual attempt leaves them NULL,
+ * which that function already refuses outright.
+ */
+export async function getOrCreateAnnualCheckoutAttempt(
+  input: AnnualAttemptInput
+): Promise<AnnualAttemptResult> {
+  const admin = getSupabaseAdmin();
+  if (!admin) {
+    return { ok: false, error: "Checkout-Speicherung vorübergehend nicht verfügbar." };
+  }
+
+  const { error: upsertError } = await admin
+    .from("checkout_attempts")
+    .upsert(
+      {
+        request_id: input.requestId,
+        user_id: input.userId,
+        currency: input.currency,
+        expected_total_gross_cents: input.expectedTotalGrossCents,
+        items_snapshot: input.items,
+        shipping_country: input.shipping.country,
+        shipping_zone: input.shipping.zone,
+        shipping_gross_cents: input.shipping.grossCents,
+        tax_snapshot: input.taxSnapshot,
+      },
+      { onConflict: "request_id", ignoreDuplicates: true }
+    );
+
+  if (upsertError) {
+    console.error("Annual checkout attempt upsert error:", upsertError.message);
+    return { ok: false, error: "Checkout-Speicherung vorübergehend nicht verfügbar." };
+  }
+
+  const { data, error: selectError } = await admin
+    .from("checkout_attempts")
+    .select(ANNUAL_ATTEMPT_COLUMNS)
+    .eq("request_id", input.requestId)
+    .single();
+
+  if (selectError || !data) {
+    console.error("Annual checkout attempt lookup error:", selectError?.message);
+    return { ok: false, error: "Checkout-Speicherung vorübergehend nicht verfügbar." };
+  }
+
+  return { ok: true, attempt: data as AnnualCheckoutAttempt };
+}
