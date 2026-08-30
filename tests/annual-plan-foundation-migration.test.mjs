@@ -941,15 +941,34 @@ test("53: the three Germany annual totals are exact in integer cents", () => {
   assert.ok(!flat.includes("4900"), "the migration derives annual shipping from the shop threshold");
 });
 
-test("54: the live runtime is not rewritten to accommodate the annual plan", () => {
-  // Written when 039 was a database-only phase, as "no application module
-  // changed at all". Phase 4B3 adds the annual checkout, so that question
-  // stopped being the right one; the guard is re-pinned rather than
-  // deleted, because what it actually protects still holds.
+test("54: no UNCOMMITTED edit to a live application module is in the working tree", () => {
+  // ── WHAT THIS ACTUALLY CHECKS, AND WHAT IT DOES NOT ─────────
   //
-  // The property now: annual work is ADDITIVE. New files are free, but a
-  // live module the one-time or subscription flow depends on may not be
-  // edited to make the annual case fit - with one reviewed exception.
+  // It reads `git diff --name-only HEAD`, so its subject is exactly one
+  // thing: TRACKED FILES MODIFIED IN THE WORKING TREE. Three consequences
+  // follow, and the test name and the assertions below are narrowed to
+  // them rather than claiming more:
+  //
+  //   * A NEW file is invisible here. Untracked files never appear in
+  //     that diff, so this cannot and does not prove that no new route,
+  //     no new lib module and no new annual code was added. Phase 4B3
+  //     added four such files and this test stayed green throughout.
+  //     Whether a new file is acceptable is a review question, not
+  //     something this assertion answers.
+  //   * After a commit the diff is empty, so this passes trivially. It
+  //     is a working-tree guard, not a history guard. Every guard of this
+  //     shape in the repository has the same property.
+  //   * It says nothing about WHAT changed inside a file. The annual
+  //     checkout suite asserts that the two pre-existing attempt writers
+  //     survived intact; that is where the real protection lives.
+  //
+  // What is left is still worth having: an in-progress edit to a live
+  // application module, made to bend an existing flow around the annual
+  // plan, shows up here before it is committed.
+  //
+  // Written when 039 was a database-only phase, as "no application module
+  // changed at all". Phase 4B3 legitimately edits one, so the guard is
+  // re-pinned rather than deleted.
   const changed = execFileSync("git", ["diff", "--name-only", "HEAD"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
@@ -958,16 +977,39 @@ test("54: the live runtime is not rewritten to accommodate the annual plan", () 
   // file owns every attempt writer, and an annual prepayment - thirteen
   // discounted units plus thirteen shipping charges - cannot be expressed
   // by the one-time writer, whose total comes from a CheckoutQuote's
-  // catalog subtotal plus one shipping charge. Additive only: the annual
-  // checkout suite asserts both existing writers are still present and
-  // that the new one writes no Stripe id and no annual binding.
+  // catalog subtotal plus one shipping charge. Additive only.
   const ALLOWED_LIB_EDITS = ["lib/checkoutAttempts.ts"];
 
   for (const rel of touched) {
-    assert.ok(!rel.startsWith("app/"), `a live application module changed: ${rel}`);
+    assert.ok(!rel.startsWith("app/"),
+      `a live application module has an uncommitted edit: ${rel}`);
     if (rel.startsWith("lib/")) {
-      assert.ok(ALLOWED_LIB_EDITS.includes(rel), `an unreviewed application module changed: ${rel}`);
+      assert.ok(ALLOWED_LIB_EDITS.includes(rel),
+        `an unreviewed application module has an uncommitted edit: ${rel}`);
     }
+  }
+});
+
+test("54b: the annual checkout did not disturb the two live attempt writers", () => {
+  // The invariant test 54 cannot reach, asserted directly against the
+  // source rather than against a diff - so it holds after the commit too,
+  // and it does not depend on which files happen to be dirty.
+  const attempts = read("lib/checkoutAttempts.ts");
+  for (const writer of [
+    "export async function getOrCreateCheckoutAttempt(",
+    "export async function getOrCreateSubscriptionCheckoutAttempt(",
+    "export async function markAttemptPaid(",
+    "export async function linkStripeSession(",
+  ]) {
+    assert.ok(attempts.includes(writer), `a live attempt writer disappeared: ${writer}`);
+  }
+  // The subscription writer still owns the fingerprint columns, and the
+  // annual writer still does not touch them: migration 025 reads their
+  // non-NULL-ness as "this attempt IS a subscription checkout".
+  const annualWriter = attempts.slice(attempts.indexOf("export async function getOrCreateAnnualCheckoutAttempt("));
+  for (const column of ["subscription_request_fingerprint", "subscription_intent_fingerprint"]) {
+    assert.ok(attempts.includes(`${column}: input.`), `the subscription writer stopped writing ${column}`);
+    assert.ok(!annualWriter.includes(column), `the annual writer writes ${column}`);
   }
 });
 
