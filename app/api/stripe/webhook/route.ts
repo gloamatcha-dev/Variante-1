@@ -36,6 +36,11 @@ import {
   syncSubscriptionFromStripe,
 } from "../../../../lib/subscriptionCancellation";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
+// Phase 4B4. The annual branch of this same endpoint - one canonical
+// Stripe webhook, a third payment model on it.
+import { routeAnnualSession } from "../../../../lib/annualPlanWebhookRules";
+import { settleAnnualCheckoutSession } from "../../../../lib/annualPlanWebhook";
+import { annualWebhookDeps } from "../../../../lib/annualPlanWebhookDeps";
 
 type ErrorResponse = {
   error: string;
@@ -93,14 +98,36 @@ export async function POST(request: Request): Promise<Response> {
   try {
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
-      // The two flows are separated here, explicitly, and this branch is
+      // THREE FLOWS ARE SEPARATED HERE, EXPLICITLY, and this branch is
       // load-bearing. A subscription session is also payment_status
       // "paid" with an amount_total that matches its checkout attempt, so
       // without it the one-time handler below would mark that attempt
       // paid and create an order - the first order, from the wrong event.
       // invoice.paid is the canonical event and it must be the only one
       // that ships anything.
-      if (session.mode === "subscription") {
+      //
+      // AN ANNUAL SESSION RUNS mode "payment" TOO, so it would otherwise
+      // land in the one-time handler and be settled by it: that would
+      // mark the annual PAYMENT attempt paid and immediately mint ONE
+      // order for thirteen boxes carrying the annual PaymentIntent -
+      // exactly what migration 039's architecture forbids, because the
+      // intent belongs to public.annual_plans alone and thirteen separate
+      // deliveries are owed. The annual branch is therefore checked
+      // first, and it routes on metadata rather than on anything about
+      // the amount, the SKU, the quantity or the customer.
+      const annual = routeAnnualSession(session.metadata);
+      if (annual.kind === "malformed") {
+        // A session carrying an annual plan id IS annual. Falling through
+        // would hand a paid annual purchase to a handler written for a
+        // different product, so this stops instead - loudly, because
+        // somebody has already been charged.
+        throw new Error(
+          `annual checkout session ${session.id} has unusable metadata: ${annual.reason}`
+        );
+      }
+      if (annual.kind === "annual") {
+        await settleAnnualCheckoutSession(session.id, annual.metadata, annualWebhookDeps(stripe));
+      } else if (session.mode === "subscription") {
         await handleSubscriptionSessionCompleted(stripe, session);
       } else {
         await handleCheckoutSessionCompleted(stripe, session);

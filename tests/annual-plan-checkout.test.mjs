@@ -851,9 +851,17 @@ test("31: the live checkout flows and the webhook are untouched", () => {
   // One-time and subscription routes still say what they said.
   assert.ok(read("app/api/checkout/session/route.ts").includes('mode: "payment"'));
   assert.ok(withoutComments(read("lib/subscriptionCheckout.ts")).includes('mode: "subscription"'));
-  // The webhook has no annual branch yet: that is the next phase.
+  // Phase 4B4 added the webhook's annual branch, reviewed in
+  // tests/annual-plan-webhook.test.mjs. What this guard protects is not
+  // that the branch is absent - it is that adding it left the other two
+  // alone, so a CHECKOUT change can never be what broke settlement.
   const webhook = withoutComments(read("app/api/stripe/webhook/route.ts"));
-  assert.ok(!webhook.includes("annual"), "the webhook already handles annual plans");
+  assert.ok(webhook.includes("await handleCheckoutSessionCompleted(stripe, session);"),
+    "the one-time settlement branch disappeared");
+  assert.ok(webhook.includes("await handleSubscriptionSessionCompleted(stripe, session);"),
+    "the subscription settlement branch disappeared");
+  assert.ok(webhook.includes('} else if (session.mode === "subscription") {'),
+    "the subscription discriminator changed");
   // And nothing in this phase touched the cron, emails or the portal.
   assert.ok(!read("app/api/cron/retry-order-notifications/route.ts").includes("annual"));
 });
@@ -1365,7 +1373,13 @@ test("48: the four attempt populations stay structurally distinguishable", () =>
   assert.ok(m025.includes("is not a subscription checkout"),
     "migration 025's definition changed, so this reasoning is stale");
 
-  const annualWriter = attemptsCode.slice(attemptsCode.indexOf("export async function getOrCreateAnnualCheckoutAttempt"));
+  // Bounded at the next export, so lib/checkoutAttempts.ts's annual
+  // payment READER - whose column list necessarily NAMES the
+  // subscription fingerprints in order to prove they are null - is not
+  // read as part of the writer.
+  const annualWriter = attemptsCode.slice(
+    attemptsCode.indexOf("export async function getOrCreateAnnualCheckoutAttempt"),
+    attemptsCode.indexOf("const ANNUAL_PAYMENT_ATTEMPT_COLUMNS"));
   const subWriter = attemptsCode.slice(
     attemptsCode.indexOf("export async function getOrCreateSubscriptionCheckoutAttempt"),
     attemptsCode.indexOf("export async function findAttemptByStripeSessionId"));
@@ -1399,8 +1413,10 @@ test("49: this phase still activates nothing and touches no other runtime", () =
     assert.ok(!flow.includes(banned), `the checkout flow calls ${banned}`);
     assert.ok(!depsCode.includes(banned), `the wiring reaches for ${banned}`);
   }
-  // The webhook still has no annual branch.
-  assert.ok(!withoutComments(read("app/api/stripe/webhook/route.ts")).includes("annual"));
+  // The CHECKOUT flow still calls none of the settlement machinery -
+  // Phase 4B4 put that in its own modules, reviewed separately.
+  assert.ok(!flow.includes("settleAnnualCheckoutSession"));
+  assert.ok(!flow.includes("runAnnualDeliveryWorker"));
   // The cron is untouched.
   assert.ok(!read("app/api/cron/retry-order-notifications/route.ts").includes("annual"));
   // The flag is still closed by default.

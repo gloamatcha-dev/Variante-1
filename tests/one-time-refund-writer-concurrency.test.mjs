@@ -582,13 +582,20 @@ const changedFiles = () => {
 
 test("43: the refund runtime is untouched - this is a migration-only phase", () => {
   const touched = changedFiles();
+  // app/api/stripe/webhook/route.ts left this list in Phase 4B4, which
+  // added an annual settlement branch to the one canonical webhook. The
+  // subject of this guard is the REFUND RUNTIME, and the route's refund
+  // wiring is asserted directly against the source below - which is the
+  // stronger check anyway, since it also holds after a commit.
   for (const rel of [
     "lib/orderRefunds.ts", "lib/stripeRefunds.ts", "lib/refundConfirmationEmail.ts",
     "lib/refundConfirmationRules.ts", "lib/email/refundConfirmation.ts",
-    "app/api/stripe/webhook/route.ts",
   ]) {
     assert.ok(!touched.includes(rel), `${rel} was modified by a migration-only phase`);
   }
+  const webhook = read("app/api/stripe/webhook/route.ts");
+  assert.ok(webhook.includes("isRefundEventType(event.type)"), "the refund discriminator left the webhook");
+  assert.ok(webhook.includes("await handleRefundEvent(stripe, event);"), "the refund branch left the webhook");
   // And the runtime still calls the same name and signature, so 038 is
   // transparent to it.
   assert.ok(read("lib/orderRefunds.ts").includes('admin.rpc("apply_order_refund_state"'));

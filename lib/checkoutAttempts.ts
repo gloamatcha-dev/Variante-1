@@ -482,3 +482,60 @@ export async function getOrCreateAnnualCheckoutAttempt(
 
   return { ok: true, attempt: data as AnnualCheckoutAttempt };
 }
+
+/**
+ * Every column the annual webhook needs to prove an attempt is THE annual
+ * payment attempt (Phase 4B4).
+ *
+ * Wider than the checkout writer's list because the webhook has to refuse
+ * three impostors, not just find a row: a subscription attempt, a
+ * synthetic annual DELIVERY attempt, and an attempt from before migration
+ * 040. Each is excluded by a column that is only meaningful when read.
+ */
+const ANNUAL_PAYMENT_ATTEMPT_COLUMNS =
+  `${ATTEMPT_COLUMNS}, user_id, paid_at, subscription_id, stripe_invoice_id, annual_plan_id, annual_delivery_number, annual_intent_fingerprint, annual_request_fingerprint, subscription_request_fingerprint, subscription_intent_fingerprint`;
+
+export type AnnualPaymentAttempt = CheckoutAttempt & {
+  user_id: string | null;
+  paid_at: string | null;
+  subscription_id: string | null;
+  stripe_invoice_id: string | null;
+  annual_plan_id: string | null;
+  annual_delivery_number: number | null;
+  annual_intent_fingerprint: string | null;
+  annual_request_fingerprint: string | null;
+  subscription_request_fingerprint: string | null;
+  subscription_intent_fingerprint: string | null;
+};
+
+/**
+ * Reads one checkout attempt BY ID, for the annual payment webhook.
+ *
+ * By id rather than by request_id or by Stripe session, because the
+ * webhook is handed an id in Stripe metadata and must then re-read the
+ * local row: metadata may say WHICH row to look at, and the row itself
+ * says what it is. The caller cross-checks request_id, the annual
+ * fingerprints and the absence of every other binding before trusting it.
+ *
+ * Returns null for "no such row" and for a failed query alike - the
+ * caller fails closed on both, and a lookup error is not a reason to put
+ * an id in a log line twice.
+ */
+export async function findAnnualPaymentAttemptById(
+  checkoutAttemptId: string
+): Promise<AnnualPaymentAttempt | null> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return null;
+
+  const { data, error } = await admin
+    .from("checkout_attempts")
+    .select(ANNUAL_PAYMENT_ATTEMPT_COLUMNS)
+    .eq("id", checkoutAttemptId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Annual payment attempt lookup error:", error.message);
+    return null;
+  }
+  return (data as AnnualPaymentAttempt | null) ?? null;
+}

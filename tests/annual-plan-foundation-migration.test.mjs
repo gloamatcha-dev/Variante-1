@@ -993,9 +993,19 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     "lib/annualPlanCheckoutDeps.ts",
   ];
 
+  // Phase 4B4 edits ONE application module: the single canonical Stripe
+  // webhook, which is where a paid annual session has to be settled -
+  // creating a second endpoint would mean a second signature check and a
+  // second definition of what "paid" means. The edit is additive, and
+  // that it is additive is asserted directly against the source in
+  // tests/annual-plan-webhook.test.mjs rather than assumed here.
+  const ALLOWED_APP_EDITS = ["app/api/stripe/webhook/route.ts"];
+
   for (const rel of touched) {
-    assert.ok(!rel.startsWith("app/"),
-      `a live application module has an uncommitted edit: ${rel}`);
+    if (rel.startsWith("app/")) {
+      assert.ok(ALLOWED_APP_EDITS.includes(rel),
+        `an unreviewed application module has an uncommitted edit: ${rel}`);
+    }
     if (rel.startsWith("lib/")) {
       assert.ok(ALLOWED_LIB_EDITS.includes(rel),
         `an unreviewed application module has an uncommitted edit: ${rel}`);
@@ -1019,7 +1029,13 @@ test("54b: the annual checkout did not disturb the two live attempt writers", ()
   // The subscription writer still owns the fingerprint columns, and the
   // annual writer still does not touch them: migration 025 reads their
   // non-NULL-ness as "this attempt IS a subscription checkout".
-  const annualWriter = attempts.slice(attempts.indexOf("export async function getOrCreateAnnualCheckoutAttempt("));
+  // Bounded at the annual payment READER that Phase 4B4 appended. That
+  // reader's column list necessarily NAMES both subscription
+  // fingerprints - it selects them in order to PROVE they are null - and
+  // a read is not a write.
+  const annualWriter = attempts.slice(
+    attempts.indexOf("export async function getOrCreateAnnualCheckoutAttempt("),
+    attempts.indexOf("const ANNUAL_PAYMENT_ATTEMPT_COLUMNS"));
   for (const column of ["subscription_request_fingerprint", "subscription_intent_fingerprint"]) {
     assert.ok(attempts.includes(`${column}: input.`), `the subscription writer stopped writing ${column}`);
     assert.ok(!annualWriter.includes(column), `the annual writer writes ${column}`);

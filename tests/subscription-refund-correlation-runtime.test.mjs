@@ -683,12 +683,18 @@ test("55: this phase added no migration, and the only ones after it are 038 and 
     "038 reached into the subscription refund writer");
 });
 
-test("56: the webhook route was not modified", () => {
-  const changed = execFileSync("git", ["diff", "--name-only", "HEAD"], { cwd: ROOT, encoding: "utf-8" })
-    .trim();
-  const touched = changed ? changed.split(NEWLINE) : [];
-  assert.ok(!touched.includes("app/api/stripe/webhook/route.ts"),
-    "the route changed without a stated reason");
+test("56: the webhook's refund wiring is unchanged", () => {
+  // Written as "the route was not modified", which was the whole point
+  // while THIS phase's extended refund outcome had to fit the contract
+  // the route already consumed. Phase 4B4 then added an annual
+  // settlement branch to the same file - a different concern in the same
+  // module - so the question is narrowed to the part this suite owns and
+  // asked of the source instead of a diff, which also makes it survive
+  // the commit.
+  assert.ok(webhookCode.includes("isRefundEventType(event.type)"),
+    "the refund event discriminator changed");
+  assert.ok(webhookCode.includes("await handleRefundEvent(stripe, event);"),
+    "the refund branch left the webhook");
   // Because the extended outcome fits the contract it already consumed.
   assert.ok(webhookCode.includes("syncOrderRefundStateFromStripe(stripe, paymentIntentId)"));
   assert.ok(!webhookCode.includes("invoicePayments"));
