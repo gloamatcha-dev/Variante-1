@@ -475,17 +475,20 @@ test("3F: only the owner's own private subscriptions are readable", () => {
   // and no grant on any table this suite is about, so what a customer
   // can read of a subscription or an order is unchanged.
   const m039 = read("supabase/migrations/039_b2c_annual_plan_foundation.sql");
+  // STATEMENTS ONLY, throughout. 039's prose explains what it does NOT
+  // do by naming it - the column-scoped UPDATE grant migrations 017, 027
+  // and 033 make on public.orders, the anon rows its verify queries look
+  // for - so a scan that read the comments would report every deliberate
+  // avoidance as the violation it exists to detect.
+  const m039Statements = m039.split(NEWLINE).filter(l => !l.trim().startsWith("--"));
+  const m039Sql = m039Statements.join(NEWLINE);
   for (const existing of ["subscriptions", "subscription_items", "orders", "order_items",
                           "addresses", "profiles", "b2c_subscription_plans"]) {
-    assert.ok(!new RegExp("create policy[^;]*on public[.]" + existing + "(?![a-z_])").test(m039),
+    assert.ok(!new RegExp("create policy[^;]*on public[.]" + existing + "(?![a-z_])").test(m039Sql),
       `039 added a policy on public.${existing}`);
-    assert.ok(!new RegExp("grant[^;]*on (table )?public[.]" + existing + "(?![a-z_])").test(m039),
+    assert.ok(!new RegExp("grant[^;]*on (table )?public[.]" + existing + "(?![a-z_])").test(m039Sql),
       `039 granted something on public.${existing}`);
   }
-  // Statements only. 039's verify block quotes information_schema
-  // queries that mention anon, and a scan that read those would report
-  // the audit query as the violation it exists to detect.
-  const m039Statements = m039.split(NEWLINE).filter(l => !l.trim().startsWith("--"));
   assert.ok(!m039Statements.some(l => /^\s*grant\b/i.test(l) && /\banon\b/.test(l)),
     "039 must grant nothing to anon");
 

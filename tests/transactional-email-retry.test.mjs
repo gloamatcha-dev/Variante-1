@@ -1010,7 +1010,14 @@ test("regression: no migration was added and 022-033 are untouched", () => {
   // migration of its own, so no later migration may touch the six
   // email-state vocabularies it depends on.
   for (const name of files.filter(f => f > "033_refund_confirmation_email_state.sql")) {
-    const later = readFileSync(path.join(MIGRATIONS, name), "utf-8");
+    // STATEMENTS ONLY. Migration 039's prose explains which house
+    // pattern its own annual purchase confirmation follows, and doing so
+    // quotes migration 017's grant verbatim. Citing a live column is not
+    // touching it; what this guard is about is DDL.
+    const later = readFileSync(path.join(MIGRATIONS, name), "utf-8")
+      .split(NEWLINE)
+      .filter(line => !line.trim().startsWith("--"))
+      .join(NEWLINE);
     for (const owned of ["confirmation_email_status", "internal_notification_status",
                          "shipment_email_status", "cancellation_request_notification_status",
                          "cancellation_outcome_email_status", "refund_email_status"]) {

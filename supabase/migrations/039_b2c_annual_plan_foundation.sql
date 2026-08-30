@@ -176,7 +176,12 @@ create table public.annual_plans (
   -- plan. One payment attempt, at most one annual plan. This is the
   -- PAYMENT attempt; it is never one of the thirteen delivery attempts,
   -- and section 3's paired CHECK makes that structural.
-  payment_checkout_attempt_id uuid not null unique
+  --
+  -- The UNIQUE half is declared as a NAMED table-level constraint below
+  -- rather than inline, so the guarantee has a name this file chose
+  -- instead of one Postgres derived. The verify block and the exception
+  -- handler in section 6 both refer to it by that name.
+  payment_checkout_attempt_id uuid not null
                               references public.checkout_attempts(id),
 
   stripe_checkout_session_id  text,
@@ -278,6 +283,13 @@ create table public.annual_plans (
   -- value. NULL means the row never entered the email flow, which is
   -- what every plan created before the sender exists will read as - and
   -- it is why the retry sweep selects 'failed' and never NULL.
+  --
+  -- Three values, matching migration 017's vocabulary exactly, and
+  -- 'pending' is deliberately not among them: on public.orders the
+  -- column is NOT NULL DEFAULT 'pending' because every order genuinely
+  -- owes a confirmation, whereas an annual plan owes one only once it
+  -- has been paid for. Absence is the pending state here, the same
+  -- choice migration 035 made and for the same reason.
   purchase_confirmation_email_status   text
                                        check (purchase_confirmation_email_status is null
                                           or purchase_confirmation_email_status in (
@@ -285,11 +297,33 @@ create table public.annual_plans (
                                           )),
   purchase_confirmation_email_sent_at  timestamptz,
 
+  -- WHEN THE SEND WAS LAST CLAIMED, and the only clock the stale-'sending'
+  -- rule reads.
+  --
+  -- public.orders does this differently, and the difference is deliberate.
+  -- lib/transactionalEmailRetryRules.ts reads orders.updated_at, because
+  -- migration 017 was adding columns to a live table and the row already
+  -- carried an unconditional updated_at trigger; it documents the
+  -- consequence honestly - an unrelated write pushes updated_at forward,
+  -- so a genuinely stale row can look fresh and merely have its recovery
+  -- delayed.
+  --
+  -- public.annual_plans has the same trigger and would inherit the same
+  -- imprecision, and here there is no reason to accept it: this table has
+  -- no history, so one nullable timestamptz added now costs nothing and
+  -- makes the clock mean exactly what the rule needs it to mean. A refund
+  -- landing on the parent must not be able to make an abandoned send look
+  -- alive.
+  purchase_confirmation_email_claimed_at timestamptz,
+
   -- ── THE MONEY IDENTITIES ──────────────────────────────────
   --
   -- Every total is the product of a per-delivery integer and the
   -- delivery count, so no total can drift from the unit price it was
   -- built from and no total can be supplied independently.
+  constraint annual_plans_payment_checkout_attempt_id_key
+    unique (payment_checkout_attempt_id),
+
   constraint annual_plans_merchandise_total_check
     check (merchandise_total_gross_cents = annual_unit_gross_cents * delivery_count),
   constraint annual_plans_shipping_total_check
@@ -380,7 +414,16 @@ create table public.annual_plans (
   -- entered the flow" and must not carry a timestamp.
   constraint annual_plans_purchase_email_sent_at_check
     check ((purchase_confirmation_email_sent_at is not null)
-             = (purchase_confirmation_email_status is not distinct from 'sent'))
+             = (purchase_confirmation_email_status is not distinct from 'sent')),
+
+  -- A row that has a status was claimed at some point, and a row that has
+  -- none never entered the flow. The claim writes both together and
+  -- nothing else writes either, so the two can never disagree - which is
+  -- what lets the stale rule trust claimed_at instead of re-deriving
+  -- "was this ever claimed" from the status.
+  constraint annual_plans_purchase_email_claimed_at_check
+    check ((purchase_confirmation_email_claimed_at is not null)
+             = (purchase_confirmation_email_status is not null))
 );
 
 -- The two Stripe identities are unique where present. Partial, because
@@ -627,8 +670,8 @@ create policy "Users read own annual plan deliveries"
 --   authenticated  SELECT on both tables, under the own-row policies
 --                  above. This is what the account area will read.
 --   service_role   SELECT on both tables. NO INSERT, NO UPDATE, NO
---                  DELETE - deliberately, and this is the point of
---                  section 16's rule. The five functions below are the
+--                  DELETE - deliberately, and no column-scoped UPDATE
+--                  either. The eight functions below are the
 --                  entire write surface, they are SECURITY DEFINER, and
 --                  they therefore act with their owner's privileges
 --                  rather than with service_role's. Granting a direct
@@ -1247,7 +1290,7 @@ as $$
     from public.annual_plan_deliveries d
     join public.annual_plans p on p.id = d.annual_plan_id
     where p.status = 'active'
-      -- A FULLY REFUNDED PLAN GENERATES NOTHING FURTHER. See section 12
+      -- A FULLY REFUNDED PLAN GENERATES NOTHING FURTHER. See section 14
       -- for why this predicate, and not a lifecycle change, is the
       -- chosen contract.
       and p.payment_status <> 'refunded'
@@ -1578,7 +1621,8 @@ begin
          fulfilled_at        = pg_catalog.now()
    where id = v_delivery.id;
 
-  -- NOTHING HERE COMPLETES THE PLAN. See section 13.
+  -- NOTHING HERE COMPLETES THE PLAN. That is section 13's job, and
+  -- it needs the whole term and all thirteen boxes, not this one.
   return pg_catalog.jsonb_build_object(
     'result', 'fulfilled',
     'delivery_id', v_delivery.id,
@@ -1692,7 +1736,7 @@ $$;
 -- RECORDED TRUTHFULLY and stops nothing: a customer who was refunded one
 -- delivery is still owed the other twelve, and cancelling them would be
 -- inventing a commercial rule. Only a FULL refund stops future
--- generation, and section 12 records why that is one predicate in the
+-- generation, and section 14 records why that is one predicate in the
 -- claim function rather than a forced lifecycle transition.
 
 create or replace function public.apply_annual_plan_refund_state(
@@ -1774,7 +1818,424 @@ end;
 $$;
 
 
--- 12. THE FULL-REFUND CONTRACT, STATED ONCE ────────────────────
+-- 12. THE ANNUAL PURCHASE CONFIRMATION'S WRITE SURFACE ─────────
+--
+-- Two functions, and they are the whole of it. The columns for this
+-- message already exist in section 1; what was missing was any way for
+-- the server to write them, because service_role holds SELECT on
+-- public.annual_plans and nothing else. Applying 039 without this would
+-- have meant a table that records an email state nobody can set.
+--
+-- ── WHICH EXISTING GLOA PATTERN THIS IS ───────────────────────
+--
+-- The repository already solves this exact state-machine problem twice,
+-- and this is the smaller of the two:
+--
+--   PER-RECORD COLUMNS   migrations 017, 026, 027, 030, 031, 033. Two
+--                        columns on the subject row, claimed by moving
+--                        the status to 'sending' and refusing the move
+--                        if it is not claimable. One message per record.
+--
+--   A DELIVERIES TABLE   migration 035. A row per (subscription, family,
+--                        occurrence), for a subject that owes SEVERAL
+--                        different messages, some of them repeatedly.
+--
+-- An annual plan owes exactly ONE purchase confirmation, ever. A
+-- deliveries table would carry a family column with one value and an
+-- event key with one value, which is a table pretending to be a column.
+-- So this follows the per-record pattern, and it follows it exactly:
+-- same three statuses, same claim-by-status-transition, same 'failed' is
+-- retryable, same 'sent' is terminal, same NULL means never entered.
+--
+-- ── WHERE IT DEPARTS, AND WHY ─────────────────────────────────
+--
+-- On public.orders the claim is an ordinary UPDATE issued by the
+-- application, made safe by a column-scoped
+-- "grant update (confirmation_email_status, ...) to service_role".
+-- That grant is not extended to public.annual_plans, deliberately: this
+-- table carries the money and the lifecycle of a prepaid contract, every
+-- other write to it goes through a SECURITY DEFINER function that proves
+-- something first, and a column-scoped UPDATE would be the one place
+-- where "the server may write annual_plans directly" became true. Once
+-- that is true for two columns it is an argument for the next two.
+--
+-- So the claim is a function instead. The guarantee is identical -
+-- Postgres serialises concurrent writers on the row, and the loser sees
+-- a status it may not claim - and the blast radius is smaller.
+--
+-- ── THE STATE MACHINE, IN FULL ────────────────────────────────
+--
+--   NULL       never entered the flow. Claimable ONLY by the sender that
+--              runs after activation, because nothing else knows a plan
+--              just became payable-for. A generic retry sweep must
+--              select 'failed' (and stale 'sending'), never NULL, or it
+--              would mail every plan that predates the sender. That rule
+--              lives in the sweep's own query, exactly as
+--              lib/internalOrderNotificationRetryRules.ts documents it
+--              for orders, and service_role's SELECT on this table is
+--              what lets the sweep apply it.
+--   'sending'  owned by whoever won the claim. Not claimable by anyone
+--              else until it goes stale.
+--   'sent'     terminal. Never claimable again, and the claim mutates
+--              nothing when it sees this.
+--   'failed'   a genuine attempt that genuinely failed. Claimable.
+--
+-- ── STALE 'sending', AND THE THIRTY MINUTES ───────────────────
+--
+-- A worker that wins the claim and then dies leaves a row at 'sending'
+-- that nothing would ever look at again. Recovery is folded into the
+-- claim rather than split into a separate recover-then-retry pass,
+-- because that is what section 8 of this migration already does for a
+-- due delivery and one migration should not carry two shapes of the same
+-- idea.
+--
+-- THIRTY MINUTES, and it is not a new number: it is
+-- STALE_SENDING_AFTER_MS in lib/transactionalEmailRetryRules.ts, which
+-- is what every other GLOA email family already recovers on. Choosing a
+-- different threshold here would mean two answers to "how long may a
+-- send be in flight".
+--
+-- The clock is purchase_confirmation_email_claimed_at, written by this
+-- function and by nothing else, so an unrelated write to the parent - a
+-- refund, a completion - cannot make an abandoned send look alive.
+--
+-- ── IT SENDS NOTHING ──────────────────────────────────────────
+--
+-- No mail is sent from PostgreSQL and no provider is contacted. This
+-- function hands out permission and records outcomes; the message itself
+-- belongs to a later phase, and no reminder email is invented here.
+
+create or replace function public.claim_annual_plan_purchase_email(
+  p_annual_plan_id uuid
+)
+returns jsonb
+language plpgsql
+volatile
+security definer set search_path = ''
+as $$
+declare
+  v_plan public.annual_plans;
+  -- THIRTY MINUTES. lib/transactionalEmailRetryRules.ts's
+  -- STALE_SENDING_AFTER_MS, restated; the focused suite pins both.
+  v_stale constant interval := interval '30 minutes';
+begin
+  if p_annual_plan_id is null then
+    return pg_catalog.jsonb_build_object('result', 'invalid_input');
+  end if;
+
+  -- THE LOCK, BEFORE ANY DECISION. Two workers racing for the same
+  -- confirmation serialise here, and the loser reads the winner's
+  -- committed 'sending' rather than the state it started from.
+  select * into v_plan
+  from public.annual_plans
+  where id = p_annual_plan_id
+  for update;
+
+  if not found then
+    return pg_catalog.jsonb_build_object('result', 'not_found');
+  end if;
+
+  -- THERE IS NOTHING TO CONFIRM UNTIL THERE IS A PURCHASE. A 'pending'
+  -- plan was never paid for, and a 'cancelled' one is over; neither owes
+  -- this message. 'completed' is allowed because a confirmation that
+  -- failed at purchase is still owed a year later.
+  if v_plan.status not in ('active', 'completed') or v_plan.purchased_at is null then
+    return pg_catalog.jsonb_build_object(
+      'result', 'not_purchased', 'status', v_plan.status
+    );
+  end if;
+
+  -- TERMINAL. No mutation at all, so the updated_at trigger does not
+  -- fire and a redelivered webhook does not look like activity.
+  if v_plan.purchase_confirmation_email_status = 'sent' then
+    return pg_catalog.jsonb_build_object(
+      'result', 'already_sent',
+      'annual_plan_id', v_plan.id,
+      'sent_at', v_plan.purchase_confirmation_email_sent_at
+    );
+  end if;
+
+  -- SOMEBODY ELSE OWNS IT, and their lease has not run out.
+  if v_plan.purchase_confirmation_email_status = 'sending'
+     and v_plan.purchase_confirmation_email_claimed_at is not null
+     and v_plan.purchase_confirmation_email_claimed_at > pg_catalog.now() - v_stale
+  then
+    return pg_catalog.jsonb_build_object(
+      'result', 'in_flight',
+      'annual_plan_id', v_plan.id,
+      'claimed_at', v_plan.purchase_confirmation_email_claimed_at
+    );
+  end if;
+
+  -- CLAIMABLE: never entered the flow, a previous genuine failure, or a
+  -- lease that expired. All three become 'sending' owned by this caller.
+  update public.annual_plans
+     set purchase_confirmation_email_status     = 'sending',
+         purchase_confirmation_email_claimed_at = pg_catalog.now()
+   where id = v_plan.id;
+
+  return pg_catalog.jsonb_build_object(
+    'result', 'claimed',
+    'annual_plan_id', v_plan.id,
+    -- Which of the three it was, so the caller can log a recovery
+    -- distinctly from a first attempt without re-reading the row.
+    'previous_status', v_plan.purchase_confirmation_email_status
+  );
+end;
+$$;
+
+
+-- ONE WRITER FOR THE OUTCOME, NOT TWO ─────────────────────────
+--
+-- 'sent' and 'failed' are the two ends of the same attempt, so they are
+-- one function taking which one happened rather than two functions that
+-- would have to repeat the same ownership proof.
+--
+-- THE CALLER MUST OWN THE CLAIM. The row has to be at 'sending' or the
+-- outcome is refused: a caller that never claimed cannot declare a
+-- message sent, and a worker whose lease expired and was taken over by
+-- somebody else cannot overwrite the new owner's state. This is the
+-- ownership half the orders pattern gets from its WHERE clause.
+--
+-- 'sent' also writes sent_at, together, because
+-- annual_plans_purchase_email_sent_at_check makes them one fact: the
+-- timestamp exists if and only if the status is 'sent'.
+
+create or replace function public.record_annual_plan_purchase_email_result(
+  p_annual_plan_id uuid,
+  p_outcome        text
+)
+returns jsonb
+language plpgsql
+volatile
+security definer set search_path = ''
+as $$
+declare
+  v_plan    public.annual_plans;
+  v_outcome text;
+begin
+  if p_annual_plan_id is null or p_outcome is null then
+    return pg_catalog.jsonb_build_object('result', 'invalid_input');
+  end if;
+
+  -- A CLOSED VOCABULARY, checked before the row is read so an
+  -- unsupported word costs no lock. 'sending' is deliberately not
+  -- accepted: claiming is the other function's job, and accepting it
+  -- here would be a second way to take ownership.
+  v_outcome := pg_catalog.btrim(p_outcome);
+  if v_outcome not in ('sent', 'failed') then
+    return pg_catalog.jsonb_build_object('result', 'invalid_outcome');
+  end if;
+
+  select * into v_plan
+  from public.annual_plans
+  where id = p_annual_plan_id
+  for update;
+
+  if not found then
+    return pg_catalog.jsonb_build_object('result', 'not_found');
+  end if;
+
+  -- ALREADY DONE. Idempotent for the same answer, and a refusal for the
+  -- opposite one: a 'sent' message cannot be un-sent by a late failure
+  -- report from a worker whose send actually succeeded.
+  if v_plan.purchase_confirmation_email_status = 'sent' then
+    if v_outcome = 'sent' then
+      return pg_catalog.jsonb_build_object(
+        'result', 'unchanged', 'annual_plan_id', v_plan.id, 'status', 'sent'
+      );
+    end if;
+    return pg_catalog.jsonb_build_object('result', 'already_sent');
+  end if;
+
+  -- THE OWNERSHIP PROOF.
+  if v_plan.purchase_confirmation_email_status is distinct from 'sending' then
+    return pg_catalog.jsonb_build_object(
+      'result', 'not_claimed',
+      'status', v_plan.purchase_confirmation_email_status
+    );
+  end if;
+
+  if v_outcome = 'sent' then
+    update public.annual_plans
+       set purchase_confirmation_email_status  = 'sent',
+           purchase_confirmation_email_sent_at = pg_catalog.now()
+     where id = v_plan.id;
+  else
+    -- claimed_at is deliberately LEFT ALONE. It records when the send
+    -- that failed was claimed, and a 'failed' row is eligible for retry
+    -- on its status alone, so nothing reads it until the next claim
+    -- overwrites it.
+    update public.annual_plans
+       set purchase_confirmation_email_status = 'failed'
+     where id = v_plan.id;
+  end if;
+
+  return pg_catalog.jsonb_build_object(
+    'result', 'recorded',
+    'annual_plan_id', v_plan.id,
+    'status', v_outcome
+  );
+end;
+$$;
+
+
+-- 13. COMPLETION ───────────────────────────────────────────────
+--
+-- The rule this migration documented from the start, now executable.
+--
+-- ── THE RULE, AND ALL FOUR PARTS OF IT ────────────────────────
+--
+-- A plan becomes 'completed' only when EVERY one of these is true:
+--
+--   1. status = 'active'          it is running, and not already
+--                                 completed or terminated
+--   2. now() >= plan_end_at       the term is genuinely over
+--   3. exactly delivery_count     thirteen schedule rows exist
+--      delivery rows exist
+--   4. every one of them is       nothing is still scheduled, still
+--      'fulfilled' AND carries    claimed, or cancelled, and every
+--      a durable order_id         fulfilment produced a real order
+--
+-- Both halves of the date-and-delivery pair matter and neither is
+-- sufficient. Completing on the thirteenth fulfilment alone would end
+-- the contract 28 days early and contradict plan_end_at, which is
+-- purchase + 364 days; completing on the date alone would call a plan
+-- complete while a box was still owed. So the census below counts rows
+-- rather than looking at delivery 13.
+--
+-- ── WHAT IT REFUSES TO TOUCH ──────────────────────────────────
+--
+-- payment_status, refunded_total_cents, refund_updated_at, every money
+-- column, every snapshot, and every delivery row. Completion writes
+-- exactly two columns - status and completed_at - and
+-- annual_plans_completed_at_check makes them one fact.
+--
+-- It deletes nothing. A fulfilled delivery, its synthetic attempt and
+-- its order are the record of what was shipped, and a plan reaching its
+-- end does not revise history.
+--
+-- ── COMPLETION AND REFUNDS ARE SEPARATE, AND STAY SEPARATE ────
+--
+-- payment_status is NOT part of the eligibility rule, and that is a
+-- decision rather than an omission. Completion is a lifecycle fact -
+-- "the term ran out and all thirteen boxes were shipped" - and a refund
+-- is a money fact about the same contract. Two cases follow, and both
+-- are honest:
+--
+--   REFUNDED AFTER ALL THIRTEEN SHIPPED. The plan really did deliver
+--   everything, so it completes. The refund stays recorded on
+--   payment_status where it belongs, and 'completed' does not claim the
+--   money was kept.
+--
+--   REFUNDED PART WAY THROUGH. Section 8 and section 9 both refuse a
+--   refunded plan, so no further delivery is ever generated, so the
+--   census can never reach thirteen, so the plan NEVER completes and
+--   remains 'active' with payment_status 'refunded'.
+--
+-- The second case leaves a real gap, and it is named rather than
+-- papered over: there is no lifecycle transition for "fully refunded and
+-- abandoned part way". Inventing one here would be inventing the
+-- commercial and legal decision behind administrative termination, which
+-- this phase is explicitly not making. No invariant is violated in the
+-- meantime - the row says exactly what is true, that the plan is running
+-- and the money was returned - and nothing generates work for it.
+--
+-- NOCH NICHT ENTSCHIEDEN: which lifecycle state a fully refunded,
+-- partly delivered plan should end in, and who may put it there. That
+-- belongs with administrative termination and reuses the established
+-- cancellation-admin boundary rather than a new secret.
+--
+-- ── BOUNDED, LOCKED, AND SAFE TO RUN TWICE ────────────────────
+--
+-- Shaped for the existing daily cron, which vercel.json schedules once
+-- per day: a bounded batch, FOR UPDATE SKIP LOCKED so two invocations
+-- cannot fight over the same plan, and idempotent by construction
+-- because a completed plan no longer matches status = 'active'.
+--
+-- The batch limit counts plans EXAMINED, not plans completed. A plan
+-- whose term is over but whose deliveries are incomplete consumes a slot
+-- and is left alone, which is deliberate: the census is a per-plan
+-- question, and keeping it out of the locking query is what makes that
+-- query a plain row lock with no aggregate in it.
+
+create or replace function public.complete_due_annual_plans(
+  p_limit integer
+)
+returns table (
+  annual_plan_id uuid,
+  completed_at   timestamptz,
+  deliveries     integer
+)
+language plpgsql
+volatile
+security definer set search_path = ''
+as $$
+#variable_conflict use_column
+-- The directive above is on the first line of the body deliberately.
+--
+-- TWO OF THIS FUNCTION'S OUTPUT COLUMNS SHARE A NAME WITH A REAL COLUMN:
+-- annual_plan_id exists on public.annual_plan_deliveries and
+-- completed_at on public.annual_plans, and in PL/pgSQL an output name is
+-- also a variable. Every reference below is table-qualified, so none is
+-- ambiguous today; this is what keeps that true if a later edit adds an
+-- unqualified one, by resolving it to the column rather than silently
+-- reading the output variable. Assignment targets are unaffected, so the
+-- three RETURN NEXT assignments still write the outputs.
+declare
+  v_plan  public.annual_plans;
+  v_total integer;
+  v_done  integer;
+  v_now   timestamptz;
+begin
+  for v_plan in
+    select *
+    from public.annual_plans p
+    where p.status = 'active'
+      and p.plan_end_at is not null
+      and p.plan_end_at <= pg_catalog.now()
+    order by p.plan_end_at asc, p.id asc
+    limit least(greatest(coalesce(p_limit, 25), 1), 100)
+    for update skip locked
+  loop
+    -- THE CENSUS. Two integers answer parts 3 and 4 of the rule
+    -- together: how many delivery rows exist at all, and how many of
+    -- them are fulfilled WITH a durable order. A row that is still
+    -- scheduled, still claimed, cancelled, or fulfilled without an order
+    -- is counted by the first and not by the second, so any of them
+    -- fails the comparison below.
+    select pg_catalog.count(*),
+           pg_catalog.count(*) filter (
+             where d.state = 'fulfilled' and d.order_id is not null
+           )
+      into v_total, v_done
+    from public.annual_plan_deliveries d
+    where d.annual_plan_id = v_plan.id;
+
+    if v_total <> v_plan.delivery_count or v_done <> v_plan.delivery_count then
+      continue;
+    end if;
+
+    v_now := pg_catalog.now();
+
+    -- TWO COLUMNS. Nothing else is written, and nothing else may be:
+    -- payment_status, the refund columns, the money, the snapshots and
+    -- every delivery row are untouched.
+    update public.annual_plans
+       set status       = 'completed',
+           completed_at = v_now
+     where id = v_plan.id;
+
+    annual_plan_id := v_plan.id;
+    completed_at   := v_now;
+    deliveries     := v_done;
+    return next;
+  end loop;
+end;
+$$;
+
+
+-- 14. THE FULL-REFUND CONTRACT, STATED ONCE ────────────────────
 --
 -- Two designs could stop deliveries after a full refund. The smaller one
 -- is used:
@@ -1808,39 +2269,7 @@ $$;
 -- historical fact and a refund does not un-ship it.
 
 
--- 13. COMPLETION IS NOT WRITTEN HERE ───────────────────────────
---
--- delivery 13 lands at purchased_at + 336 days and plan_end_at is
--- purchased_at + 364 days. The plan is therefore still running for 28
--- days after the last box, which is the final delivery's own period and
--- is why the two dates differ.
---
--- THE INTENDED LATER RULE, recorded so the next phase implements the one
--- that was reviewed rather than one it invents:
---
---   a plan becomes status 'completed', with completed_at set, once ALL
---   of its delivery rows are 'fulfilled' AND now() >= plan_end_at.
---
--- Both halves matter. Completing on the thirteenth fulfilment alone
--- would end the contract 28 days early and contradict plan_end_at;
--- completing on the date alone would call a plan complete while a
--- delivery was still owed.
---
--- NO FUNCTION IN 039 WRITES 'completed', and no completion cron is
--- created. The value exists in the CHECK so the vocabulary is fixed and
--- reviewed in one place, and annual_plans_completed_at_check already
--- makes completed_at impossible without it. Leaving a finished plan at
--- 'active' until that phase exists is not a contradictory state: it is
--- an unfinished feature, and the claim function simply finds no
--- scheduled rows for it.
---
--- Administrative termination is likewise absent. Section 15 of the phase
--- brief is explicit: no endpoint, no new secret, and the future path
--- reuses the established cancellation-admin boundary. 039 writes no
--- 'cancelled' either.
-
-
--- 14. EXECUTE PRIVILEGES ───────────────────────────────────────
+-- 15. EXECUTE PRIVILEGES ───────────────────────────────────────
 --
 -- REVOKE FROM public FIRST. A freshly created function is executable by
 -- PUBLIC by default and anon and authenticated inherit that, so revoking
@@ -1849,15 +2278,24 @@ $$;
 -- nothing but an anon key.
 --
 -- service_role is the only grantee, and it still holds no INSERT, UPDATE
--- or DELETE on either annual table. These FIVE functions are the entire
--- write surface for the annual plan, and there is deliberately no sixth:
+-- or DELETE on either annual table - not even the column-scoped UPDATE
+-- migrations 017, 027 and 033 grant on public.orders for their email
+-- state. These EIGHT functions are the entire write surface for the
+-- annual plan.
+--
 -- Phase 4B1.1 removed prepare_annual_plan_delivery_attempt and
 -- mark_annual_plan_delivery_fulfilled rather than keeping them alongside
 -- fulfill_annual_plan_delivery. Leaving them callable would have left a
 -- second, non-atomic way to reach the same rows - the exact composition
 -- whose transaction gap section 9 exists to close - and a guard that can
--- be bypassed by calling a different function is not a guard. 039 is not
--- live, so nothing depended on them.
+-- be bypassed by calling a different function is not a guard.
+--
+-- Phase 4B1.2 added the three the runtime already known to be coming
+-- needs: two for the purchase confirmation's state machine (section 12)
+-- and one for completion (section 13). They are here rather than in a
+-- later migration for one reason: applying a table that records an email
+-- state nobody can write, and a completion rule nobody can execute, is
+-- knowingly applying an incomplete write surface.
 
 revoke all on function public.create_pending_annual_plan_for_attempt(uuid, uuid, uuid, integer, integer, integer, numeric, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb) from public;
 revoke all on function public.create_pending_annual_plan_for_attempt(uuid, uuid, uuid, integer, integer, integer, numeric, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb) from anon;
@@ -1884,13 +2322,28 @@ revoke all on function public.apply_annual_plan_refund_state(text, integer) from
 revoke all on function public.apply_annual_plan_refund_state(text, integer) from authenticated;
 grant execute on function public.apply_annual_plan_refund_state(text, integer) to service_role;
 
+revoke all on function public.claim_annual_plan_purchase_email(uuid) from public;
+revoke all on function public.claim_annual_plan_purchase_email(uuid) from anon;
+revoke all on function public.claim_annual_plan_purchase_email(uuid) from authenticated;
+grant execute on function public.claim_annual_plan_purchase_email(uuid) to service_role;
 
--- 15. NO DATA CHANGE ───────────────────────────────────────────
+revoke all on function public.record_annual_plan_purchase_email_result(uuid, text) from public;
+revoke all on function public.record_annual_plan_purchase_email_result(uuid, text) from anon;
+revoke all on function public.record_annual_plan_purchase_email_result(uuid, text) from authenticated;
+grant execute on function public.record_annual_plan_purchase_email_result(uuid, text) to service_role;
+
+revoke all on function public.complete_due_annual_plans(integer) from public;
+revoke all on function public.complete_due_annual_plans(integer) from anon;
+revoke all on function public.complete_due_annual_plans(integer) from authenticated;
+grant execute on function public.complete_due_annual_plans(integer) to service_role;
+
+
+-- 16. NO DATA CHANGE ───────────────────────────────────────────
 --
 -- Applying this migration inserts no row, updates no row and deletes no
 -- row. It creates two empty tables, adds two nullable columns to
 -- public.checkout_attempts with no default and no backfill, and defines
--- five functions that it calls zero times.
+-- eight functions that it calls zero times.
 --
 -- No existing order, subscription, checkout attempt, plan, product,
 -- address, email state or refund state changes as a result. Nothing in
@@ -1962,21 +2415,61 @@ grant execute on function public.apply_annual_plan_refund_state(text, integer) t
 --   where table_schema = 'public' and table_name = 'orders'
 --     and column_name like '%annual%';
 --
--- (f) The uniqueness guarantees are in place. Expect four index rows.
+-- (f) EVERY load-bearing idempotency guarantee, in one query.
+--     Expect SEVEN rows, all of them unique. A UNIQUE constraint carries
+--     a backing index of the same name, so the delivery-number
+--     constraint appears here too and is additionally proved to be a
+--     real constraint below.
+--
+--       annual_plans_payment_checkout_attempt_id_key
+--           one payment attempt -> at most one annual plan. What makes
+--           create_pending_annual_plan_for_attempt idempotent.
+--       annual_plans_stripe_payment_intent_id_key
+--           one PaymentIntent -> at most one plan. What lets
+--           apply_annual_plan_refund_state resolve without a table lock
+--           and without an ambiguity branch.
+--       annual_plans_stripe_checkout_session_id_key
+--           one Checkout Session -> at most one plan.
+--       annual_plan_deliveries_plan_number_key
+--           thirteen deliveries, never fourteen.
+--       annual_plan_deliveries_checkout_attempt_id_key
+--           one delivery -> at most one synthetic attempt.
+--       annual_plan_deliveries_order_id_key
+--           one delivery -> at most one order, and one order cannot be
+--           claimed by two deliveries.
+--       checkout_attempts_annual_delivery_key
+--           one (plan, delivery number) -> at most one attempt. With
+--           orders_checkout_attempt_id_key (011) this is what makes a
+--           second order for one delivery impossible.
 --
 --   select indexname, indexdef
 --   from pg_indexes
 --   where schemaname = 'public'
---     and indexname in ('annual_plans_stripe_payment_intent_id_key',
+--     and indexname in ('annual_plans_payment_checkout_attempt_id_key',
+--                       'annual_plans_stripe_payment_intent_id_key',
 --                       'annual_plans_stripe_checkout_session_id_key',
---                       'checkout_attempts_annual_delivery_key',
---                       'annual_plan_deliveries_checkout_attempt_id_key')
+--                       'annual_plan_deliveries_plan_number_key',
+--                       'annual_plan_deliveries_checkout_attempt_id_key',
+--                       'annual_plan_deliveries_order_id_key',
+--                       'checkout_attempts_annual_delivery_key')
 --   order by indexname;
+--   -- expect 7 rows, every indexdef containing "CREATE UNIQUE INDEX"
 --
---   select conname, pg_get_constraintdef(oid)
+--     The two that are constraints rather than bare indexes. Expect two.
+--
+--   select conrelid::regclass as tbl, conname, pg_get_constraintdef(oid)
 --   from pg_constraint
---   where conrelid = 'public.annual_plan_deliveries'::regclass
---     and conname = 'annual_plan_deliveries_plan_number_key';
+--   where conname in ('annual_plan_deliveries_plan_number_key',
+--                     'annual_plans_payment_checkout_attempt_id_key')
+--   order by conname;
+--
+--     And migration 011's index, which composes with the last one above
+--     and must still be exactly what 011 created. Expect one row.
+--
+--   select indexname, indexdef
+--   from pg_indexes
+--   where schemaname = 'public'
+--     and indexname = 'orders_checkout_attempt_id_key';
 --
 -- (g) The two CHECKs that keep the annual PaymentIntent off a delivery.
 --
@@ -1996,7 +2489,7 @@ grant execute on function public.apply_annual_plan_refund_state(text, integer) t
 --   order by conname;
 --
 -- (i) Every new function is SECURITY DEFINER with an empty search_path,
---     and executable by service_role alone. Expect six rows, each with
+--     and executable by service_role alone. Expect EIGHT rows, each with
 --     prosecdef = true and proconfig = {search_path=}.
 --
 --   select p.proname, p.prosecdef, p.proconfig,
@@ -2009,11 +2502,18 @@ grant execute on function public.apply_annual_plan_refund_state(text, integer) t
 --       'activate_annual_plan_from_payment',
 --       'claim_due_annual_plan_deliveries',
 --       'fulfill_annual_plan_delivery',
---       'apply_annual_plan_refund_state')
+--       'apply_annual_plan_refund_state',
+--       'claim_annual_plan_purchase_email',
+--       'record_annual_plan_purchase_email_result',
+--       'complete_due_annual_plans')
 --   order by p.proname;
---   -- expect FIVE rows. prepare_annual_plan_delivery_attempt and
+--   -- expect EIGHT rows, and every acl must show service_role=X with no
+--   -- anon entry, no authenticated entry, and no leading "=" entry for
+--   -- PUBLIC.
+--   --
+--   -- prepare_annual_plan_delivery_attempt and
 --   -- mark_annual_plan_delivery_fulfilled must NOT exist: Phase 4B1.1
---   -- replaced them with the atomic function above.
+--   -- replaced them with the atomic function in section 9.
 --
 --   select count(*) as removed_composition_functions
 --   from pg_proc
@@ -2026,6 +2526,39 @@ grant execute on function public.apply_annual_plan_refund_state(text, integer) t
 --
 --   select count(*) from public.annual_plans;
 --   select count(*) from public.annual_plan_deliveries;
+--
+-- (j2) The purchase confirmation's state machine. Expect the two pairing
+--      constraints, and no plan in any email state - applying this
+--      migration enters nothing into the flow.
+--
+--   select conname, pg_get_constraintdef(oid)
+--   from pg_constraint
+--   where conrelid = 'public.annual_plans'::regclass
+--     and conname in ('annual_plans_purchase_email_sent_at_check',
+--                     'annual_plans_purchase_email_claimed_at_check')
+--   order by conname;
+--
+--   select purchase_confirmation_email_status, count(*)
+--   from public.annual_plans group by 1 order by 1;
+--   -- expect no rows at all
+--
+--      And service_role still holds NO column-scoped write on this
+--      table, unlike public.orders where migrations 017, 027 and 033
+--      grant one for their email state. Expect zero rows.
+--
+--   select grantee, privilege_type, column_name
+--   from information_schema.column_privileges
+--   where table_schema = 'public' and table_name = 'annual_plans'
+--     and privilege_type in ('INSERT', 'UPDATE', 'DELETE')
+--     and grantee in ('anon', 'authenticated', 'service_role');
+--
+-- (j3) Nothing is completed yet, and nothing could be: completion only
+--      moves a plan whose term is over and whose thirteen deliveries are
+--      all fulfilled, and there are no plans. Expect zero rows.
+--
+--   select id, status, completed_at, plan_end_at
+--   from public.annual_plans
+--   where status = 'completed' or completed_at is not null;
 --
 -- (k) The live refund writers are untouched and still exist exactly as
 --     037 and 038 defined them. Expect two rows.

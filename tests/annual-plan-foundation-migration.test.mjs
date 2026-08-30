@@ -12,7 +12,12 @@ import { fileURLToPath } from "node:url";
 //
 // What it protects. Phase 4B1 is the DATABASE FOUNDATION of the B2C
 // prepaid annual plan and nothing else: two tables, two nullable columns
-// on public.checkout_attempts, and five server-only functions.
+// on public.checkout_attempts, and eight server-only functions.
+//
+// PHASE 4B1.2 completed the write surface rather than shipping a table
+// whose email state nobody can set and whose completion rule nobody can
+// execute: two functions for the purchase confirmation's state machine
+// and one bounded completion sweep.
 //
 // PHASE 4B1.1 HARDENED FOUR THINGS, and they are the reason several
 // assertions below are about ORDER rather than presence:
@@ -60,9 +65,10 @@ const flat = sql.toLowerCase().replace(/\s+/g, " ");
 
 /**
  * Every function this migration is allowed to define, with its identity
- * arguments. FIVE, not six: Phase 4B1.1 replaced
+ * arguments. EIGHT. Phase 4B1.1 replaced
  * prepare_annual_plan_delivery_attempt and
- * mark_annual_plan_delivery_fulfilled with one atomic function.
+ * mark_annual_plan_delivery_fulfilled with one atomic function; Phase
+ * 4B1.2 added the three the already-known runtime needs.
  */
 const FUNCTIONS = [
   ["create_pending_annual_plan_for_attempt",
@@ -71,6 +77,10 @@ const FUNCTIONS = [
   ["claim_due_annual_plan_deliveries", "integer"],
   ["fulfill_annual_plan_delivery", "uuid"],
   ["apply_annual_plan_refund_state", "text, integer"],
+  // Phase 4B1.2: the runtime write surface 039 was missing.
+  ["claim_annual_plan_purchase_email", "uuid"],
+  ["record_annual_plan_purchase_email_result", "uuid, text"],
+  ["complete_due_annual_plans", "integer"],
 ];
 
 /** Functions that must NOT exist after the 4B1.1 hardening. */
@@ -104,6 +114,9 @@ const ACTIVATE = bodyOf("activate_annual_plan_from_payment");
 const CLAIM = bodyOf("claim_due_annual_plan_deliveries");
 const FULFILL = bodyOf("fulfill_annual_plan_delivery");
 const REFUND = bodyOf("apply_annual_plan_refund_state");
+const EMAIL_CLAIM = bodyOf("claim_annual_plan_purchase_email");
+const EMAIL_RESULT = bodyOf("record_annual_plan_purchase_email_result");
+const COMPLETE = bodyOf("complete_due_annual_plans");
 
 /** Whitespace-collapsed helper for reading one block. */
 const oneLine = block => block.toLowerCase().replace(/\s+/g, " ");
@@ -172,7 +185,7 @@ test("4: migrations 037 and 038 still hold their refund writers, untouched", () 
     "039 does not call the live order creator");
 });
 
-test("5: 039 defines exactly the five reviewed functions and no others", () => {
+test("5: 039 defines exactly the eight reviewed functions and no others", () => {
   const defined = [...sql.matchAll(/create or replace function public\.(\w+)\(/g)].map(m => m[1]);
   assert.deepEqual(defined.slice().sort(), FUNCTIONS.map(f => f[0]).slice().sort());
   assert.equal(defined.length, FUNCTIONS.length, "a function is defined twice");
@@ -191,7 +204,11 @@ test("6: annual_plans exists with its identity and ownership columns", () => {
   assert.match(PLANS, /user_id\s+uuid not null references auth\.users\(id\)/);
   assert.ok(!/user_id[\s\S]{0,120}on delete set null/.test(PLANS),
     "the owner of a paid annual plan must not be nullable on delete");
-  assert.match(PLANS, /payment_checkout_attempt_id uuid not null unique\s+references public\.checkout_attempts\(id\)/);
+  assert.match(PLANS, /payment_checkout_attempt_id uuid not null\s+references public\.checkout_attempts\(id\)/);
+  // Named, not derived: one payment attempt, at most one annual plan.
+  assert.ok(oneLine(PLANS).includes(
+    "constraint annual_plans_payment_checkout_attempt_id_key unique (payment_checkout_attempt_id)"),
+    "the one-plan-per-payment-attempt guarantee is not a named constraint");
   assert.match(PLANS, /variant_id\s+uuid not null references public\.product_variants\(id\)/);
 });
 
@@ -797,13 +814,16 @@ test("46: the refund writer never touches lifecycle or a delivery row", () => {
   assert.ok(!setClause.includes("cancelled_at"), "the refund writer cancels a plan");
 });
 
-test("47: nothing in 039 writes 'completed' or 'cancelled'", () => {
+test("47: exactly one function writes 'completed', and none writes 'cancelled'", () => {
   for (const [name] of FUNCTIONS) {
     const body = oneLine(bodyOf(name));
-    assert.ok(!body.includes("status = 'completed'"), `${name} completes a plan`);
+    // 'cancelled' belongs to administrative termination, which is still
+    // a later phase. Nothing in 039 may reach it.
     assert.ok(!body.includes("status = 'cancelled'"), `${name} cancels a plan`);
-    assert.ok(!body.includes("completed_at ="), `${name} stamps completed_at`);
     assert.ok(!body.includes("cancelled_at ="), `${name} stamps cancelled_at`);
+    if (name === "complete_due_annual_plans") continue;
+    assert.ok(!body.includes("status = 'completed'"), `${name} completes a plan`);
+    assert.ok(!body.includes("completed_at ="), `${name} stamps completed_at`);
   }
   assert.ok(PLANS.includes("'pending', 'active', 'completed', 'cancelled'"));
 });
@@ -944,4 +964,270 @@ test("56: the migration changes no data and creates no order of its own", () => 
   assert.ok(!flat.includes("drop constraint"), "039 drops a constraint");
   assert.ok(!flat.includes("drop function"), "039 drops a function");
   assert.ok(!flat.includes("drop index"), "039 drops an index");
+});
+
+/* ══════════════════════════════════════════════════════════════
+   57-63. THE PURCHASE CONFIRMATION'S STATE MACHINE
+   ══════════════════════════════════════════════════════════════ */
+
+test("57: the state machine is migration 017's vocabulary, and NULL still means never entered", () => {
+  assert.match(PLANS, /purchase_confirmation_email_status\s+text\s+check \(purchase_confirmation_email_status is null\s+or purchase_confirmation_email_status in \(\s*'sending', 'sent', 'failed'\s*\)\)/);
+  // Nullable, no default: absence is the pending state, so a plan that
+  // predates the sender is not queued work. Read off the DECLARATION
+  // alone - the pairing constraints further down legitimately say
+  // "is not null" about the very same column.
+  const declaration = PLANS.slice(
+    PLANS.indexOf("purchase_confirmation_email_status   text"),
+    PLANS.indexOf("purchase_confirmation_email_sent_at"));
+  assert.ok(declaration.length > 0, "the email status declaration was not found");
+  assert.ok(!/not null/.test(declaration),
+    "the email status became NOT NULL and NULL stopped meaning 'never entered'");
+  assert.ok(!/default/.test(declaration),
+    "the email status gained a default and every plan now looks queued");
+  assert.ok(!PLANS.includes("'pending', 'sending'"), "'pending' entered the email vocabulary");
+  // The same three words the live order families use.
+  assert.ok(read("supabase/migrations/017_order_confirmation_email_state.sql")
+    .includes("check (confirmation_email_status in ('pending', 'sending', 'sent', 'failed'))"),
+    "migration 017's vocabulary changed, so the comparison this file makes is stale");
+});
+
+test("58: both email timestamps are paired with the status by CHECK", () => {
+  assert.ok(flat.includes(
+    "check ((purchase_confirmation_email_sent_at is not null) = (purchase_confirmation_email_status is not distinct from 'sent'))"),
+    "sent_at is not biconditional with 'sent'");
+  // Phase 4B1.2's new column. claimed_at exists exactly when the row has
+  // entered the flow at all, which is what lets the stale rule trust it.
+  assert.match(PLANS, /purchase_confirmation_email_claimed_at timestamptz/);
+  assert.ok(flat.includes(
+    "check ((purchase_confirmation_email_claimed_at is not null) = (purchase_confirmation_email_status is not null))"),
+    "claimed_at is not paired with the status");
+});
+
+test("59: the claim locks the row before it decides anything", () => {
+  const c = oneLine(EMAIL_CLAIM);
+  const lock = c.indexOf("from public.annual_plans where id = p_annual_plan_id for update");
+  assert.ok(lock > 0, "the claim does not lock the row");
+  for (const decision of [
+    "if v_plan.purchase_confirmation_email_status = 'sent' then",
+    "if v_plan.purchase_confirmation_email_status = 'sending'",
+    "update public.annual_plans",
+  ]) {
+    assert.ok(c.indexOf(decision) > lock, `a decision is taken before the lock: ${decision}`);
+  }
+  // Two workers therefore serialise: the loser reads the winner's
+  // committed 'sending' rather than the state it started from.
+  assert.ok(c.includes("'in_flight'"), "a second concurrent claimer is not refused");
+  assert.ok(c.includes("'claimed'"));
+});
+
+test("60: 'sent' is terminal and mutates nothing; 'failed' is retryable", () => {
+  const c = oneLine(EMAIL_CLAIM);
+  const sent = c.indexOf("if v_plan.purchase_confirmation_email_status = 'sent' then");
+  const write = c.indexOf("update public.annual_plans");
+  assert.ok(sent > 0 && sent < write, "a sent confirmation can be re-claimed");
+  assert.ok(c.includes("'already_sent'"));
+  // 'failed' is never named as a refusal, so it falls through to the claim.
+  assert.ok(!c.includes("= 'failed' then"), "a failed send is refused instead of retried");
+
+  // And the outcome writer is idempotent for 'sent' and refuses a
+  // contradicting late report.
+  const r = oneLine(EMAIL_RESULT);
+  assert.ok(r.includes("if v_plan.purchase_confirmation_email_status = 'sent' then"));
+  assert.ok(r.includes("'unchanged'"), "recording 'sent' twice is not idempotent");
+  assert.ok(r.includes("'already_sent'"), "a late failure can un-send a sent message");
+});
+
+test("61: only the claim owner may record an outcome, and only 'sent' or 'failed'", () => {
+  const r = oneLine(EMAIL_RESULT);
+  assert.ok(r.includes("if v_outcome not in ('sent', 'failed') then"),
+    "the outcome vocabulary is not closed");
+  assert.ok(r.includes("'invalid_outcome'"));
+  // 'sending' is not an accepted outcome: claiming belongs to the other
+  // function, and accepting it here would be a second way to take
+  // ownership.
+  const vocab = r.slice(r.indexOf("if v_outcome not in"), r.indexOf("'invalid_outcome'"));
+  assert.ok(!vocab.includes("'sending'"), "the outcome writer can also claim");
+  assert.ok(r.includes("if v_plan.purchase_confirmation_email_status is distinct from 'sending' then"),
+    "an unclaimed row can be marked sent");
+  assert.ok(r.includes("'not_claimed'"));
+  // sent_at is written with 'sent', never alone.
+  assert.ok(r.includes("purchase_confirmation_email_status = 'sent', purchase_confirmation_email_sent_at = pg_catalog.now()"));
+});
+
+test("62: the stale-sending lease is the house threshold, thirty minutes", () => {
+  const c = oneLine(EMAIL_CLAIM);
+  assert.ok(c.includes("interval '30 minutes'"), "the email lease is not thirty minutes");
+  assert.equal((c.match(/interval '30 minutes'/g) || []).length, 1);
+  // A row is only stolen once the lease has genuinely run out.
+  assert.ok(c.includes("v_plan.purchase_confirmation_email_claimed_at > pg_catalog.now() - v_stale"),
+    "the in-flight test does not use the claim timestamp");
+  // Not a new number: it is what every other GLOA email family recovers on.
+  const rules = read("lib/transactionalEmailRetryRules.ts");
+  assert.ok(rules.includes("export const STALE_SENDING_AFTER_MS = 30 * 60 * 1000;"),
+    "the house stale threshold changed, so 039's thirty minutes is now a second answer");
+  assert.equal(30 * 60 * 1000, 30 * 60 * 1000);
+  // The clock is the dedicated column, never the row's generic updated_at.
+  assert.ok(!c.includes("updated_at"), "the email lease reads the row's generic updated_at");
+});
+
+test("63: no email is sent from PostgreSQL, and no reminder family is invented", () => {
+  for (const forbidden of ["resend", "http", "pg_net", "smtp", "reminder", "net.http"]) {
+    assert.ok(!flat.includes(forbidden), `039 reaches outside the database: ${forbidden}`);
+  }
+  // One message per plan. No family column, no event key, no second table.
+  assert.ok(!flat.includes("annual_plan_email_deliveries"),
+    "a deliveries table was invented for a single message");
+  assert.ok(!flat.includes("subscription_email_deliveries"),
+    "039 reaches into the subscription email delivery table");
+  const statuses = [...PLANS.matchAll(/purchase_confirmation_email_status/g)];
+  assert.ok(statuses.length >= 1);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   64-69. COMPLETION
+   ══════════════════════════════════════════════════════════════ */
+
+test("64: completion requires an active plan whose term is genuinely over", () => {
+  const c = oneLine(COMPLETE);
+  assert.ok(c.includes("where p.status = 'active'"), "completion does not require 'active'");
+  assert.ok(c.includes("and p.plan_end_at is not null"), "a plan with no end date can complete");
+  assert.ok(c.includes("and p.plan_end_at <= pg_catalog.now()"),
+    "completion does not require the term to be over");
+  // Never delivery 13 alone: the census counts rows, it does not look at
+  // a delivery number.
+  assert.ok(!c.includes("delivery_number = 13"), "completion keys on delivery 13");
+  assert.ok(!c.includes("delivery_number"), "completion looks at a delivery number");
+});
+
+test("65: completion requires all thirteen deliveries, fulfilled, each with an order", () => {
+  const c = oneLine(COMPLETE);
+  // Two integers answer all four parts of the rule.
+  assert.ok(c.includes("select pg_catalog.count(*), pg_catalog.count(*) filter ( where d.state = 'fulfilled' and d.order_id is not null ) into v_total, v_done"),
+    "the delivery census is not the reviewed one");
+  assert.ok(c.includes("from public.annual_plan_deliveries d where d.annual_plan_id = v_plan.id"));
+  // Both counts must equal the plan's own delivery_count, which is
+  // pinned to 13 by CHECK - so a missing row, a scheduled row, a claimed
+  // row, a cancelled row or a fulfilled row with no order all fail.
+  assert.ok(c.includes("if v_total <> v_plan.delivery_count or v_done <> v_plan.delivery_count then continue;"),
+    "a partially delivered plan can complete");
+  assert.match(PLANS, /delivery_count\s+integer not null default 13\s+check \(delivery_count = 13\)/);
+});
+
+test("66: completion writes exactly two columns and touches nothing else", () => {
+  const c = oneLine(COMPLETE);
+  const set = c.slice(c.indexOf("update public.annual_plans set"), c.indexOf("where id = v_plan.id"));
+  assert.ok(set.includes("status = 'completed'"));
+  assert.ok(set.includes("completed_at = v_now"));
+  for (const forbidden of [
+    "payment_status", "refunded_total_cents", "refund_updated_at", "cancelled_at",
+    "purchased_at", "plan_end_at", "total_gross_cents", "snapshot",
+    "stripe_payment_intent_id", "purchase_confirmation_email",
+  ]) {
+    assert.ok(!set.includes(forbidden), `completion writes ${forbidden}`);
+  }
+  // Delivery history is read and never altered.
+  assert.ok(!c.includes("update public.annual_plan_deliveries"), "completion rewrites a delivery");
+  assert.ok(!c.includes("delete"), "completion deletes delivery history");
+  assert.ok(!c.includes("insert into"), "completion inserts");
+});
+
+test("67: completion is idempotent, bounded, and locks with SKIP LOCKED", () => {
+  const c = oneLine(COMPLETE);
+  // A completed plan no longer matches status = 'active', so a second
+  // run is a no-op by construction rather than by a guard.
+  assert.ok(c.includes("where p.status = 'active'"));
+  assert.ok(c.includes("for update skip locked"), "two runs can fight over the same plan");
+  assert.ok(c.includes("limit least(greatest(coalesce(p_limit, 25), 1), 100)"),
+    "the completion batch is not bounded");
+  assert.ok(c.includes("order by p.plan_end_at asc, p.id asc"), "the batch order is not deterministic");
+});
+
+test("68: completion and refund state stay separate", () => {
+  // payment_status is not part of the eligibility rule at all.
+  const c = oneLine(COMPLETE);
+  assert.ok(!c.includes("payment_status"), "completion consults refund state");
+  // And the refund writer still never writes lifecycle status.
+  const r = oneLine(REFUND);
+  assert.ok(!r.includes("set status"), "the refund writer writes lifecycle status");
+  assert.ok(!r.includes("'completed'"), "the refund writer completes a plan");
+  // The unresolved case is NAMED in the migration rather than guessed at.
+  assert.ok(migration039.includes("NOCH NICHT ENTSCHIEDEN"),
+    "the fully-refunded, partly-delivered case is not flagged as undecided");
+});
+
+test("69: the completion rule the prose promises is the rule the function implements", () => {
+  // The migration documented this rule before it was executable. Both
+  // halves must still be there, and the function must implement both.
+  assert.ok(migration039.includes("now() >= plan_end_at"),
+    "the documented completion rule lost its date half");
+  const c = oneLine(COMPLETE);
+  assert.ok(c.includes("p.plan_end_at <= pg_catalog.now()"));
+  assert.ok(c.includes("v_done <> v_plan.delivery_count"));
+});
+
+/* ══════════════════════════════════════════════════════════════
+   70-72. THE WRITE SURFACE STAYS NARROW
+   ══════════════════════════════════════════════════════════════ */
+
+test("70: no direct INSERT, UPDATE or DELETE grant is introduced on either annual table", () => {
+  // public.orders carries column-scoped UPDATE grants for its email
+  // state (017, 027, 033). That pattern is deliberately NOT extended
+  // here: every write goes through a SECURITY DEFINER function.
+  const statements = migration039.split(NEWLINE).filter(l => !l.trim().startsWith("--"));
+  for (const line of statements) {
+    if (!/^\s*grant\b/i.test(line)) continue;
+    if (/on function/i.test(line)) continue;
+    assert.match(line, /grant select on table public\.(annual_plans|annual_plan_deliveries)\s+to (authenticated|service_role);/,
+      `a non-SELECT table grant was introduced: ${line.trim()}`);
+  }
+  // Belt and braces: no column-scoped grant of any kind.
+  assert.ok(!/grant (update|insert|delete)\s*\(/i.test(withoutComments(migration039)),
+    "a column-scoped write grant was introduced");
+});
+
+test("71: customer roles can execute none of the eight functions", () => {
+  for (const [name, args] of FUNCTIONS) {
+    const sig = `function public.${name}(${args})`;
+    for (const role of ["public", "anon", "authenticated"]) {
+      assert.ok(flat.includes(`revoke all on ${sig} from ${role};`), `${name} is not revoked from ${role}`);
+    }
+    assert.ok(!flat.includes(`grant execute on ${sig} to anon`));
+    assert.ok(!flat.includes(`grant execute on ${sig} to authenticated`));
+  }
+  // Exactly eight grants, all to service_role, and no other grantee.
+  const grants = [...sql.matchAll(/grant execute on function public\.(\w+)\([^)]*\) to (\w+);/g)];
+  assert.equal(grants.length, FUNCTIONS.length, "the number of execute grants changed");
+  for (const [, , grantee] of grants) assert.equal(grantee, "service_role");
+});
+
+test("72: the verification block contains no stale expected count", () => {
+  // The prose and the schema have to agree, or the owner's dry run is
+  // checked against a number nobody updated.
+  const verify = migration039.slice(migration039.indexOf("VERIFY AFTER APPLYING"));
+  assert.ok(verify.length > 0, "the verify block was removed");
+  for (const stale of [
+    "Expect six rows", "expect six rows", "expect FIVE rows", "Expect five rows",
+    "Expect four index rows", "expect four index",
+  ]) {
+    assert.ok(!verify.includes(stale), `the verify block still promises "${stale}"`);
+  }
+  assert.ok(verify.includes("Expect EIGHT rows"), "the function count is not restated");
+  // And the count it promises is the count the file defines.
+  const named = [...verify.matchAll(/--\s+'(\w+)'[,)]?$/gm)].map(m => m[1]);
+  for (const [name] of FUNCTIONS) {
+    assert.ok(named.includes(name), `the verify block does not list ${name}`);
+  }
+  // Every load-bearing uniqueness guarantee is verified by name.
+  for (const index of [
+    "annual_plans_payment_checkout_attempt_id_key",
+    "annual_plans_stripe_payment_intent_id_key",
+    "annual_plans_stripe_checkout_session_id_key",
+    "annual_plan_deliveries_plan_number_key",
+    "annual_plan_deliveries_checkout_attempt_id_key",
+    "annual_plan_deliveries_order_id_key",
+    "checkout_attempts_annual_delivery_key",
+  ]) {
+    assert.ok(verify.includes(index), `the verify block does not check ${index}`);
+    assert.ok(sql.includes(index), `${index} is not actually created`);
+  }
 });
