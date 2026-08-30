@@ -368,3 +368,119 @@ test("routes: every account route still server-renders", async () => {
     assert.ok(!/Application error|Internal Server Error/i.test(html), `${route} rendered an error`);
   }
 });
+
+/* ══════════════════════════════════════════════════════════════
+   SAVED ADDRESSES BELONG TO THE AUTHENTICATED USER
+
+   public.addresses.user_id is NOT NULL with no default, and migration
+   001's policy is `for insert with check (auth.uid() = user_id)`. An
+   INSERT that omits the column compares auth.uid() to NULL - not true
+   rather than false - so the database refuses it and PostgREST answers
+   403, which the page can only surface as "Fehler beim Speichern."
+
+   These tests hold the two halves of the fix: the owner is written, and
+   it comes from the session rather than from the form.
+   ══════════════════════════════════════════════════════════════ */
+
+/** The PortalAddresses insert payload, comment-stripped. */
+const addressInsert = (() => {
+  const body = withoutComments(fnBody(portal, "function PortalAddresses()"));
+  const at = body.indexOf('supabase.from("addresses").insert({');
+  assert.notEqual(at, -1, "the address insert was moved or removed");
+  return body.slice(at, body.indexOf("});", at));
+})();
+
+test("addresses: the insert carries the authenticated user id", () => {
+  assert.ok(addressInsert.includes("user_id: user.id"),
+    "the address insert omits its owner, which RLS answers with 403");
+  // And the owner is destructured from the auth context, not invented.
+  const body = fnBody(portal, "function PortalAddresses()");
+  assert.match(body, /const \{ user, addresses, refreshAddresses \} = useAuth\(\);/,
+    "PortalAddresses no longer reads the session user");
+});
+
+test("addresses: the owner is never taken from anything the browser controls", () => {
+  // FormData is whatever the browser sends. Reading the owner from it -
+  // or from a query string, or from storage - would be an owner field a
+  // caller can choose.
+  assert.ok(!/user_id:\s*String\(f\.get/.test(addressInsert), "the owner comes from the form");
+  assert.ok(!/user_id:\s*f\.get/.test(addressInsert), "the owner comes from the form");
+  for (const source of ["localStorage", "sessionStorage", "searchParams", "location.", "props."]) {
+    assert.ok(!addressInsert.includes(source), `the owner could come from ${source}`);
+  }
+  // The form itself must not carry an owner field for anyone to fill in.
+  const body = withoutComments(fnBody(portal, "function PortalAddresses()"));
+  assert.ok(!/name="user_?[iI]d"/.test(body), "the address form exposes an owner field");
+});
+
+test("addresses: no write is attempted without an authenticated user", () => {
+  const body = withoutComments(fnBody(portal, "function PortalAddresses()"));
+  const guardAt = body.indexOf("if (!user)");
+  const insertAt = body.indexOf('supabase.from("addresses").insert({');
+  assert.notEqual(guardAt, -1, "the unauthenticated guard is missing");
+  assert.ok(guardAt < insertAt, "the insert can run before the user is checked");
+  // It returns rather than falling through.
+  assert.match(body.slice(guardAt, insertAt), /return;/, "the guard does not stop the handler");
+});
+
+test("addresses: the first saved address is still both defaults", () => {
+  const body = fnBody(portal, "function PortalAddresses()");
+  assert.match(body, /const isFirst = addresses\.length === 0;/);
+  assert.ok(addressInsert.includes("is_default_shipping: isFirst"));
+  assert.ok(addressInsert.includes("is_default_billing: isFirst"));
+});
+
+test("addresses: the stored country is the code the checkout normalises", () => {
+  const body = fnBody(portal, "function PortalAddresses()");
+  // The select posts SHIPPING_COUNTRY_OPTIONS codes, defaulting to DE,
+  // and the subscription checkout reads them back through
+  // normalizeCountryCode. This phase changes neither.
+  assert.match(body, /value=\{c\.code\}/);
+  assert.ok(addressInsert.includes('country: String(f.get("country"))'));
+  assert.ok(read("lib/subscriptionCheckout.ts").includes("normalizeCountryCode(addressRow?.country)"),
+    "the checkout stopped normalising the stored country");
+});
+
+test("addresses: display and delete are unchanged, and delete stays owner-scoped", () => {
+  const body = fnBody(portal, "function PortalAddresses()");
+  // Display still reads the same row fields.
+  assert.ok(body.includes("a.first_name") && body.includes("a.house_number") && body.includes("a.zip"));
+  assert.ok(body.includes("getCountryLabel(normalizeCountryCode(a.country) ?? a.country)"));
+  // Delete is still by id only, which is safe BECAUSE the delete policy
+  // is `using (auth.uid() = user_id)` - the row filter is the database's,
+  // not the client's. Adding a client-side owner filter here would not
+  // add security, and removing RLS's would remove all of it.
+  assert.ok(body.includes('supabase.from("addresses").delete().eq("id", id)'));
+  assert.ok(body.includes("Die letzte Standardadresse kann nicht entfernt werden."));
+});
+
+test("addresses: RLS is unchanged and the browser holds no service role", () => {
+  const m001 = read("supabase/migrations/001_customer_accounts.sql");
+  for (const policy of [
+    'create policy "Users read own addresses"',
+    'create policy "Users insert own addresses"',
+    'create policy "Users update own addresses"',
+    'create policy "Users delete own addresses"',
+  ]) {
+    assert.ok(m001.includes(policy), `an addresses policy was removed: ${policy}`);
+  }
+  assert.ok(m001.includes("with check (auth.uid() = user_id)"), "the insert check was weakened");
+  assert.ok(m001.includes("alter table public.addresses enable row level security;"));
+  // No grant on addresses was added anywhere.
+  assert.ok(!/grant[^;]*on\s+(table\s+)?public\.addresses/i.test(m001), "a grant on addresses appeared");
+  // And the page reaches Supabase only through the publishable client.
+  assert.ok(portal.includes('from "../lib/supabase"') || portal.includes('from "../lib/auth"'));
+  for (const forbidden of ["supabaseAdmin", "SUPABASE" + "_SECRET_KEY", "service_role"]) {
+    assert.ok(!portal.includes(forbidden), `the browser portal reaches ${forbidden}`);
+  }
+});
+
+test("addresses: nothing about subscriptions or checkout changed here", () => {
+  const body = fnBody(portal, "function PortalAddresses()");
+  for (const forbidden of [
+    "subscriptions/checkout/session", "b2c_subscription_plans", "apply_order_refund_state",
+    "stripe", "B2C_SUBSCRIPTIONS_ENABLED",
+  ]) {
+    assert.ok(!body.includes(forbidden), `the address form reaches into ${forbidden}`);
+  }
+});

@@ -1424,7 +1424,7 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
 // ── Adressen ───────────────────────────────────────────────────────────
 
 function PortalAddresses() {
-  const { addresses, refreshAddresses } = useAuth();
+  const { user, addresses, refreshAddresses } = useAuth();
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -1442,14 +1442,36 @@ function PortalAddresses() {
     </div>
   );
 
+  /*
+    THE ROW NEEDS AN OWNER, AND IT COMES FROM THE SESSION.
+
+    public.addresses.user_id is NOT NULL and has no default, and migration
+    001's policy is `for insert with check (auth.uid() = user_id)`. An
+    INSERT that omits the column compares auth.uid() to NULL, which is
+    not true rather than false, so the policy refuses and PostgREST
+    answers 403 - which the page could only report as "Fehler beim
+    Speichern."
+
+    The owner is read from useAuth(), which holds the user supabase-js
+    resolved from the verified session. It is deliberately NOT taken from
+    the form: FormData is whatever the browser sends, and an owner field
+    a caller can choose is an owner field a caller can forge. RLS would
+    still refuse a forged one - the policy is the enforcement, this is
+    only the honest value to hand it.
+  */
   const handleAdd = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!supabase) return;
+    // Refused here as well as by the database. Without a session there is
+    // no owner to write, and sending the insert anyway would turn a known
+    // state into a 403 the customer sees as a save failure.
+    if (!user) { setError("Bitte melde dich an."); return; }
     setSaving(true);
     setError("");
     const f = new FormData(e.currentTarget);
     const isFirst = addresses.length === 0;
     const { error: err } = await supabase.from("addresses").insert({
+      user_id: user.id,
       first_name: String(f.get("firstName")),
       last_name: String(f.get("lastName")),
       company: String(f.get("company") || "") || null,
