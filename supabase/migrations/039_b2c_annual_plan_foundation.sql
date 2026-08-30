@@ -98,13 +98,23 @@
 --
 -- ── WHAT THIS MIGRATION DELIBERATELY DOES NOT DO ──────────────
 --
--- It applies no data change. It creates no order. It writes no status
--- 'completed' and no status 'cancelled': those transitions belong to the
--- completion rule and the administrative termination boundary, both of
--- which are later phases, and inventing them here would mean inventing
--- the commercial decisions behind them. It defines no endpoint, no
--- secret and no feature flag - B2C_ANNUAL_PLAN_ENABLED is application
--- configuration and stays OFF until the phase that reads it exists.
+-- It applies no data change and it creates no order. Applying this file
+-- writes no row at all: it creates two empty tables, adds three nullable
+-- columns to public.checkout_attempts and public.annual_plans, and
+-- defines eight functions it calls zero times. In particular no plan is
+-- completed by the apply, because there is no plan to complete and
+-- complete_due_annual_plans is never invoked here.
+--
+-- It writes no status 'cancelled'. That transition belongs to
+-- administrative termination, which is a later phase and an undecided
+-- commercial and legal question; inventing it here would mean inventing
+-- the decision behind it. 'completed' is different: section 13's
+-- complete_due_annual_plans DOES write it, together with completed_at,
+-- once a plan's term is over and all thirteen deliveries are fulfilled.
+--
+-- It defines no endpoint, no secret and no feature flag -
+-- B2C_ANNUAL_PLAN_ENABLED is application configuration and stays OFF
+-- until the phase that reads it exists.
 --
 -- It does not touch lib/shipping.ts's 4900-cent German free-shipping
 -- threshold, and it does not derive annual free shipping from it. The
@@ -204,10 +214,16 @@ create table public.annual_plans (
   -- partially refunded plan had to stop being 'active', which is false -
   -- it is still running and still owes deliveries.
   --
-  -- 039 writes 'pending' and 'active' and nothing else. 'completed' and
-  -- 'cancelled' are declared here so the vocabulary is fixed and
-  -- reviewed, and are written by later phases that own the completion
-  -- rule and the administrative termination boundary.
+  -- WHICH OF THE FOUR 039 ACTUALLY WRITES:
+  --
+  --   'pending'    create_pending_annual_plan_for_attempt  (section 6)
+  --   'active'     activate_annual_plan_from_payment       (section 7)
+  --   'completed'  complete_due_annual_plans               (section 13)
+  --   'cancelled'  NOBODY. Reserved for administrative termination,
+  --                which is a later phase and an undecided commercial
+  --                and legal question. It is declared here so the
+  --                vocabulary is fixed and reviewed in one place, and so
+  --                that phase widens no CHECK to reach it.
   status                      text not null default 'pending'
                               check (status in (
                                 'pending', 'active', 'completed', 'cancelled'
@@ -316,6 +332,30 @@ create table public.annual_plans (
   -- alive.
   purchase_confirmation_email_claimed_at timestamptz,
 
+  -- WHICH CLAIM IS CURRENTLY IN FLIGHT. A claim VERSION, not a secret.
+  --
+  -- claimed_at answers "when was the last claim taken" and survives into
+  -- 'sent' and 'failed' as a record of it. That is not enough to prove
+  -- OWNERSHIP, and the difference is a real race:
+  --
+  --   worker A claims          status 'sending', claimed_at = A
+  --   worker A stalls past the thirty-minute lease
+  --   worker B reclaims        status 'sending', claimed_at = B
+  --   worker A wakes up and reports its outcome
+  --
+  -- A check of "is the status still 'sending'" is true for worker A at
+  -- that point, so A would overwrite the state of a claim it no longer
+  -- holds - marking B's in-flight send 'sent' when nothing was sent, or
+  -- 'failed' when B is about to succeed. Comparing timestamps would not
+  -- fix it either: A knows only its own clock reading, and two claims can
+  -- share a millisecond.
+  --
+  -- So each successful claim mints a fresh uuid and the outcome writer
+  -- must present it. It identifies the ACTIVE claim and nothing else:
+  -- it is NULL whenever the row is not 'sending', it is never reused,
+  -- and it is never handed to a caller that did not win the claim.
+  purchase_confirmation_email_claim_token uuid,
+
   -- ── THE MONEY IDENTITIES ──────────────────────────────────
   --
   -- Every total is the product of a per-delivery integer and the
@@ -423,7 +463,22 @@ create table public.annual_plans (
   -- "was this ever claimed" from the status.
   constraint annual_plans_purchase_email_claimed_at_check
     check ((purchase_confirmation_email_claimed_at is not null)
-             = (purchase_confirmation_email_status is not null))
+             = (purchase_confirmation_email_status is not null)),
+
+  -- THE TOKEN EXISTS EXACTLY WHILE A CLAIM DOES.
+  --
+  -- Biconditional against 'sending' alone, so the three non-'sending'
+  -- states - NULL, 'sent', 'failed' - are all provably tokenless. That
+  -- is what makes "present the current token" a real proof rather than a
+  -- convention: a stale token cannot match a row that holds none, and a
+  -- row that holds one is by definition mid-claim.
+  --
+  -- Deliberately NOT paired with claimed_at, which keeps documenting the
+  -- last claim's time through 'sent' and 'failed'. The two columns
+  -- answer different questions and only one of them is an identity.
+  constraint annual_plans_purchase_email_claim_token_check
+    check ((purchase_confirmation_email_claim_token is not null)
+             = (purchase_confirmation_email_status is not distinct from 'sending'))
 );
 
 -- The two Stripe identities are unique where present. Partial, because
@@ -1918,6 +1973,10 @@ declare
   -- THIRTY MINUTES. lib/transactionalEmailRetryRules.ts's
   -- STALE_SENDING_AFTER_MS, restated; the focused suite pins both.
   v_stale constant interval := interval '30 minutes';
+  -- THE NEW CLAIM'S IDENTITY. Minted once per successful claim - a first
+  -- send, a retry after 'failed', or a stale reclaim alike - so the
+  -- previous owner's token can never match again.
+  v_token uuid;
 begin
   if p_annual_plan_id is null then
     return pg_catalog.jsonb_build_object('result', 'invalid_input');
@@ -1956,6 +2015,12 @@ begin
   end if;
 
   -- SOMEBODY ELSE OWNS IT, and their lease has not run out.
+  --
+  -- THE ANSWER CARRIES NO TOKEN. A caller that did not win the claim
+  -- must not learn the winner's identity: handing it over would let the
+  -- loser write the winner's outcome, which is the whole thing the token
+  -- exists to prevent. claimed_at is reported instead, which says how
+  -- long the lease still has to run and proves nothing about ownership.
   if v_plan.purchase_confirmation_email_status = 'sending'
      and v_plan.purchase_confirmation_email_claimed_at is not null
      and v_plan.purchase_confirmation_email_claimed_at > pg_catalog.now() - v_stale
@@ -1968,15 +2033,31 @@ begin
   end if;
 
   -- CLAIMABLE: never entered the flow, a previous genuine failure, or a
-  -- lease that expired. All three become 'sending' owned by this caller.
+  -- lease that expired. All three become 'sending' owned by this caller,
+  -- under a FRESH token.
+  --
+  -- Schema-qualified for migration 022's reason: this body runs with
+  -- search_path emptied, so an unqualified name would depend on a
+  -- resolution order this function has given up. pg_catalog's
+  -- gen_random_uuid is the same one every gen_random_uuid() column
+  -- default in this project already resolves to - no migration here
+  -- installs pgcrypto - and section 9 mints its synthetic attempt's
+  -- request_id exactly this way.
+  v_token := pg_catalog.gen_random_uuid();
+
   update public.annual_plans
-     set purchase_confirmation_email_status     = 'sending',
-         purchase_confirmation_email_claimed_at = pg_catalog.now()
+     set purchase_confirmation_email_status      = 'sending',
+         purchase_confirmation_email_claimed_at  = pg_catalog.now(),
+         purchase_confirmation_email_claim_token = v_token
    where id = v_plan.id;
 
   return pg_catalog.jsonb_build_object(
     'result', 'claimed',
     'annual_plan_id', v_plan.id,
+    -- THE ONLY PLACE A TOKEN LEAVES THE DATABASE, and only to the caller
+    -- that just won it. It must be handed straight back to
+    -- record_annual_plan_purchase_email_result and stored nowhere.
+    'claim_token', v_token,
     -- Which of the three it was, so the caller can log a recovery
     -- distinctly from a first attempt without re-reading the row.
     'previous_status', v_plan.purchase_confirmation_email_status
@@ -1991,18 +2072,32 @@ $$;
 -- one function taking which one happened rather than two functions that
 -- would have to repeat the same ownership proof.
 --
--- THE CALLER MUST OWN THE CLAIM. The row has to be at 'sending' or the
--- outcome is refused: a caller that never claimed cannot declare a
--- message sent, and a worker whose lease expired and was taken over by
--- somebody else cannot overwrite the new owner's state. This is the
--- ownership half the orders pattern gets from its WHERE clause.
+-- THE CALLER MUST OWN THE CURRENT CLAIM, and that is TWO conditions,
+-- not one:
+--
+--   1. the row is at 'sending'          somebody holds a claim
+--   2. its token equals p_claim_token   and it is this caller's
+--
+-- Condition 1 alone is what the orders pattern gets from its WHERE
+-- clause, and for public.orders it is enough: nothing there ever takes a
+-- claim away from a live worker. Here the thirty-minute lease does
+-- exactly that, so condition 1 is true for a worker whose work was
+-- reclaimed half an hour ago. Without condition 2 that worker could
+-- report 'sent' for a message nobody sent, or 'failed' over a send the
+-- new owner is about to complete. Condition 2 is why the token exists.
+--
+-- A refused caller mutates NOTHING and is told 'claim_not_owned'.
 --
 -- 'sent' also writes sent_at, together, because
 -- annual_plans_purchase_email_sent_at_check makes them one fact: the
--- timestamp exists if and only if the status is 'sent'.
+-- timestamp exists if and only if the status is 'sent'. Both outcomes
+-- clear the token in the same statement, because
+-- annual_plans_purchase_email_claim_token_check makes THAT one fact too:
+-- a token exists if and only if the status is 'sending'.
 
 create or replace function public.record_annual_plan_purchase_email_result(
   p_annual_plan_id uuid,
+  p_claim_token    uuid,
   p_outcome        text
 )
 returns jsonb
@@ -2014,7 +2109,11 @@ declare
   v_plan    public.annual_plans;
   v_outcome text;
 begin
-  if p_annual_plan_id is null or p_outcome is null then
+  -- THE TOKEN IS REQUIRED INPUT. No default and no NULL: it exists to be
+  -- compared, and a NULL would compare against nothing. A caller that
+  -- lost its token has to let the lease expire and let somebody reclaim,
+  -- which is exactly the outcome the stale rule is for.
+  if p_annual_plan_id is null or p_claim_token is null or p_outcome is null then
     return pg_catalog.jsonb_build_object('result', 'invalid_input');
   end if;
 
@@ -2048,7 +2147,7 @@ begin
     return pg_catalog.jsonb_build_object('result', 'already_sent');
   end if;
 
-  -- THE OWNERSHIP PROOF.
+  -- THERE IS A CLAIM AT ALL.
   if v_plan.purchase_confirmation_email_status is distinct from 'sending' then
     return pg_catalog.jsonb_build_object(
       'result', 'not_claimed',
@@ -2056,18 +2155,50 @@ begin
     );
   end if;
 
+  -- AND IT IS THIS CALLER'S CLAIM.
+  --
+  -- This is the guard the first draft was missing. "The row is still
+  -- 'sending'" is true for a worker whose lease expired thirty minutes
+  -- ago and whose work was reclaimed by somebody else, so on its own it
+  -- would let that worker overwrite the new owner's state - reporting
+  -- 'sent' for a message nobody sent, or 'failed' over a send that is
+  -- about to succeed.
+  --
+  -- is distinct from, not <>, so a NULL on either side is a refusal
+  -- rather than an unknown that falls through. The token cannot be NULL
+  -- here in practice - annual_plans_purchase_email_claim_token_check
+  -- makes it NOT NULL for every 'sending' row - but the comparison does
+  -- not rely on that constraint holding.
+  --
+  -- NOTHING IS MUTATED on this path. The refusal is returned before
+  -- either UPDATE below, so a late worker changes no column, fires no
+  -- trigger and leaves the current owner's claim exactly as it found it.
+  if v_plan.purchase_confirmation_email_claim_token is distinct from p_claim_token then
+    return pg_catalog.jsonb_build_object(
+      'result', 'claim_not_owned',
+      'annual_plan_id', v_plan.id,
+      'status', v_plan.purchase_confirmation_email_status
+    );
+  end if;
+
   if v_outcome = 'sent' then
+    -- The token is cleared in the same statement that ends the claim, so
+    -- annual_plans_purchase_email_claim_token_check holds at every
+    -- commit: no token without 'sending', no 'sending' without a token.
     update public.annual_plans
-       set purchase_confirmation_email_status  = 'sent',
-           purchase_confirmation_email_sent_at = pg_catalog.now()
+       set purchase_confirmation_email_status      = 'sent',
+           purchase_confirmation_email_sent_at     = pg_catalog.now(),
+           purchase_confirmation_email_claim_token = null
      where id = v_plan.id;
   else
     -- claimed_at is deliberately LEFT ALONE. It records when the send
     -- that failed was claimed, and a 'failed' row is eligible for retry
     -- on its status alone, so nothing reads it until the next claim
-    -- overwrites it.
+    -- overwrites it. The TOKEN is cleared, because the claim it
+    -- identified is over - and the next retry mints a new one.
     update public.annual_plans
-       set purchase_confirmation_email_status = 'failed'
+       set purchase_confirmation_email_status      = 'failed',
+           purchase_confirmation_email_claim_token = null
      where id = v_plan.id;
   end if;
 
@@ -2250,8 +2381,9 @@ $$;
 --            the first draft of this file had.
 --
 --   REJECTED forcing status = 'cancelled' inside the refund writer.
---            Section 5's rule is that refund state is not lifecycle
---            state, and this would break it in the most damaging
+--            Section 1 separates the two vocabularies on purpose -
+--            lifecycle in status, money in payment_status - and this
+--            would break that in the most damaging
 --            direction: 'cancelled' is terminal, so a refund that Stripe
 --            later reverses could not be walked back and the plan would
 --            be permanently dead for a payment that is once again
@@ -2327,10 +2459,10 @@ revoke all on function public.claim_annual_plan_purchase_email(uuid) from anon;
 revoke all on function public.claim_annual_plan_purchase_email(uuid) from authenticated;
 grant execute on function public.claim_annual_plan_purchase_email(uuid) to service_role;
 
-revoke all on function public.record_annual_plan_purchase_email_result(uuid, text) from public;
-revoke all on function public.record_annual_plan_purchase_email_result(uuid, text) from anon;
-revoke all on function public.record_annual_plan_purchase_email_result(uuid, text) from authenticated;
-grant execute on function public.record_annual_plan_purchase_email_result(uuid, text) to service_role;
+revoke all on function public.record_annual_plan_purchase_email_result(uuid, uuid, text) from public;
+revoke all on function public.record_annual_plan_purchase_email_result(uuid, uuid, text) from anon;
+revoke all on function public.record_annual_plan_purchase_email_result(uuid, uuid, text) from authenticated;
+grant execute on function public.record_annual_plan_purchase_email_result(uuid, uuid, text) to service_role;
 
 revoke all on function public.complete_due_annual_plans(integer) from public;
 revoke all on function public.complete_due_annual_plans(integer) from anon;
@@ -2511,6 +2643,32 @@ grant execute on function public.complete_due_annual_plans(integer) to service_r
 --   -- anon entry, no authenticated entry, and no leading "=" entry for
 --   -- PUBLIC.
 --   --
+--   -- CHECK THE ARGUMENT LISTS, not just the names. The identity
+--   -- arguments must read exactly:
+--   --
+--   --   activate_annual_plan_from_payment          uuid, text, text
+--   --   apply_annual_plan_refund_state             text, integer
+--   --   claim_annual_plan_purchase_email           uuid
+--   --   claim_due_annual_plan_deliveries           integer
+--   --   complete_due_annual_plans                  integer
+--   --   create_pending_annual_plan_for_attempt     uuid, uuid, uuid,
+--   --       integer, integer, integer, numeric, jsonb, jsonb, jsonb,
+--   --       jsonb, jsonb, jsonb
+--   --   fulfill_annual_plan_delivery               uuid
+--   --   record_annual_plan_purchase_email_result   uuid, uuid, text
+--   --
+--   -- The last one takes THREE arguments: the plan, the claim token and
+--   -- the outcome. A two-argument (uuid, text) version must NOT exist -
+--   -- it would be an overload that skips the ownership proof, and 039
+--   -- was corrected in place rather than adding one.
+--
+--   select count(*) as unowned_outcome_writers
+--   from pg_proc
+--   where pronamespace = 'public'::regnamespace
+--     and proname = 'record_annual_plan_purchase_email_result'
+--     and pg_get_function_identity_arguments(oid) <> 'uuid, uuid, text';
+--   -- expect 0
+--   --
 --   -- prepare_annual_plan_delivery_attempt and
 --   -- mark_annual_plan_delivery_fulfilled must NOT exist: Phase 4B1.1
 --   -- replaced them with the atomic function in section 9.
@@ -2527,20 +2685,55 @@ grant execute on function public.complete_due_annual_plans(integer) to service_r
 --   select count(*) from public.annual_plans;
 --   select count(*) from public.annual_plan_deliveries;
 --
--- (j2) The purchase confirmation's state machine. Expect the two pairing
---      constraints, and no plan in any email state - applying this
---      migration enters nothing into the flow.
+-- (j2) The purchase confirmation's state machine. FOUR columns and
+--      THREE pairing constraints, and no plan in any email state -
+--      applying this migration enters nothing into the flow.
+--
+--      The four columns, and which question each answers:
+--
+--        _status      which state the message is in, or NULL for never
+--                     entered the flow
+--        _sent_at     when it was sent. Exists iff status = 'sent'.
+--        _claimed_at  when the LAST claim was taken. Exists iff the row
+--                     entered the flow at all, and deliberately survives
+--                     into 'sent' and 'failed'. This is the clock the
+--                     thirty-minute stale rule reads.
+--        _claim_token WHICH claim is in flight. Exists iff status =
+--                     'sending'. This is the identity the outcome writer
+--                     compares, and it is what stops a worker whose
+--                     lease expired from overwriting the state of the
+--                     claim that replaced it.
+--
+--   select column_name, data_type, is_nullable, column_default
+--   from information_schema.columns
+--   where table_schema = 'public' and table_name = 'annual_plans'
+--     and column_name like 'purchase_confirmation_email%'
+--   order by column_name;
+--   -- expect 4 rows, all is_nullable = YES and all column_default NULL
 --
 --   select conname, pg_get_constraintdef(oid)
 --   from pg_constraint
 --   where conrelid = 'public.annual_plans'::regclass
 --     and conname in ('annual_plans_purchase_email_sent_at_check',
---                     'annual_plans_purchase_email_claimed_at_check')
+--                     'annual_plans_purchase_email_claimed_at_check',
+--                     'annual_plans_purchase_email_claim_token_check')
 --   order by conname;
+--   -- expect 3 rows. The token check must read
+--   --   ((purchase_confirmation_email_claim_token IS NOT NULL)
+--   --      = (purchase_confirmation_email_status IS NOT DISTINCT FROM
+--   --         'sending'::text))
 --
 --   select purchase_confirmation_email_status, count(*)
 --   from public.annual_plans group by 1 order by 1;
 --   -- expect no rows at all
+--
+--      And the token invariant holds for every row that exists, which is
+--      none today and must stay true afterwards. Expect zero rows.
+--
+--   select id, purchase_confirmation_email_status
+--   from public.annual_plans
+--   where (purchase_confirmation_email_claim_token is not null)
+--      <> (purchase_confirmation_email_status is not distinct from 'sending');
 --
 --      And service_role still holds NO column-scoped write on this
 --      table, unlike public.orders where migrations 017, 027 and 033

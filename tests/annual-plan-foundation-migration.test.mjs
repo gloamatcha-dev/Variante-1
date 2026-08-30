@@ -19,6 +19,13 @@ import { fileURLToPath } from "node:url";
 // execute: two functions for the purchase confirmation's state machine
 // and one bounded completion sweep.
 //
+// PHASE 4B1.3 closed the last known hole in that state machine. Proving
+// "the row is still 'sending'" does not prove the caller still OWNS the
+// claim, because the thirty-minute lease can hand it to somebody else in
+// between. Each claim now mints a uuid, the outcome writer must present
+// it, and tests 73-79 walk the exact worker-A-against-worker-B sequence
+// step by step.
+//
 // PHASE 4B1.1 HARDENED FOUR THINGS, and they are the reason several
 // assertions below are about ORDER rather than presence:
 //
@@ -79,7 +86,7 @@ const FUNCTIONS = [
   ["apply_annual_plan_refund_state", "text, integer"],
   // Phase 4B1.2: the runtime write surface 039 was missing.
   ["claim_annual_plan_purchase_email", "uuid"],
-  ["record_annual_plan_purchase_email_result", "uuid, text"],
+  ["record_annual_plan_purchase_email_result", "uuid, uuid, text"],
   ["complete_due_annual_plans", "integer"],
 ];
 
@@ -991,7 +998,7 @@ test("57: the state machine is migration 017's vocabulary, and NULL still means 
     "migration 017's vocabulary changed, so the comparison this file makes is stale");
 });
 
-test("58: both email timestamps are paired with the status by CHECK", () => {
+test("58: all three email state columns are paired with the status by CHECK", () => {
   assert.ok(flat.includes(
     "check ((purchase_confirmation_email_sent_at is not null) = (purchase_confirmation_email_status is not distinct from 'sent'))"),
     "sent_at is not biconditional with 'sent'");
@@ -1001,6 +1008,21 @@ test("58: both email timestamps are paired with the status by CHECK", () => {
   assert.ok(flat.includes(
     "check ((purchase_confirmation_email_claimed_at is not null) = (purchase_confirmation_email_status is not null))"),
     "claimed_at is not paired with the status");
+  // Phase 4B1.3's claim token. Biconditional against 'sending' ALONE, so
+  // NULL, 'sent' and 'failed' are all provably tokenless - which is what
+  // makes "present the current token" a real proof rather than a
+  // convention.
+  assert.match(PLANS, /purchase_confirmation_email_claim_token uuid/);
+  assert.ok(flat.includes(
+    "constraint annual_plans_purchase_email_claim_token_check check ((purchase_confirmation_email_claim_token is not null) = (purchase_confirmation_email_status is not distinct from 'sending'))"),
+    "the claim token is not paired with the 'sending' state");
+  // Nullable, no default: a token is minted by a claim, never by a row
+  // coming into existence.
+  const token = PLANS.slice(
+    PLANS.indexOf("purchase_confirmation_email_claim_token uuid"),
+    PLANS.indexOf("purchase_confirmation_email_claim_token uuid") + 60);
+  assert.ok(!/not null/.test(token) && !/default/.test(token),
+    "the claim token is NOT NULL or has a default");
 });
 
 test("59: the claim locks the row before it decides anything", () => {
@@ -1230,4 +1252,199 @@ test("72: the verification block contains no stale expected count", () => {
     assert.ok(verify.includes(index), `the verify block does not check ${index}`);
     assert.ok(sql.includes(index), `${index} is not actually created`);
   }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   73-79. THE STALE-RECLAIM RACE: WORKER A AGAINST WORKER B
+
+   The exact sequence these seven tests pin, step by step:
+
+     A. worker A claims                -> token_A, status 'sending'
+     B. A's claim ages past 30 minutes
+     C. worker B reclaims              -> token_B, token_B != token_A
+     D. A reports 'sent'  with token_A -> REFUSED, nothing mutated
+     E. A reports 'failed' with token_A -> REFUSED, nothing mutated
+     F. B reports with token_B          -> accepted, token cleared
+
+   This is a static suite, so each step is pinned by the SQL structure
+   that makes it true rather than by executing it. The structure is the
+   guarantee: no execution can produce a different outcome from these
+   statements, and a future edit that broke any step would have to
+   change a line one of these tests names.
+   ══════════════════════════════════════════════════════════════ */
+
+test("73: (A) a successful claim mints a FRESH token and returns it to the winner", () => {
+  const c = oneLine(EMAIL_CLAIM);
+  // Minted per claim, never derived from the row and never reused.
+  assert.ok(c.includes("v_token := pg_catalog.gen_random_uuid();"),
+    "the claim does not mint a fresh token");
+  assert.ok(!c.includes("v_token := v_plan."), "the token is reused from the row");
+  // Written atomically with the status and the clock, in ONE update.
+  const set = c.slice(c.indexOf("update public.annual_plans set"), c.indexOf("where id = v_plan.id"));
+  assert.ok(set.includes("purchase_confirmation_email_status = 'sending'"));
+  assert.ok(set.includes("purchase_confirmation_email_claimed_at = pg_catalog.now()"));
+  assert.ok(set.includes("purchase_confirmation_email_claim_token = v_token"));
+  // And handed back only on the winning path.
+  const claimed = c.slice(c.indexOf("'result', 'claimed'"));
+  assert.ok(claimed.includes("'claim_token', v_token"),
+    "the winner is not told its own claim token");
+  // Same pg_catalog-qualified generator the rest of the migration uses.
+  assert.ok(flat.includes("pg_catalog.gen_random_uuid()"));
+});
+
+test("74: (B, C) every claimable state mints a NEW token, so a reclaim cannot collide", () => {
+  const c = oneLine(EMAIL_CLAIM);
+  // There is exactly ONE update in the claim, and exactly one mint, so
+  // all three claimable entries - never entered, 'failed', and a stale
+  // 'sending' - pass through the same fresh-token statement. A reclaim
+  // therefore cannot reuse the previous owner's identity.
+  assert.equal((c.match(/update public\.annual_plans/g) || []).length, 1,
+    "the claim has more than one write path");
+  assert.equal((c.match(/pg_catalog\.gen_random_uuid\(\)/g) || []).length, 1,
+    "the claim mints a token on some paths and not others");
+  // The stale branch is the only way a 'sending' row becomes claimable,
+  // and it is a refusal ABOVE the write, so a fresh claim is never stolen.
+  assert.ok(c.includes("v_plan.purchase_confirmation_email_claimed_at > pg_catalog.now() - v_stale"));
+  const inFlight = c.indexOf("'result', 'in_flight'");
+  const write = c.indexOf("update public.annual_plans");
+  assert.ok(inFlight > 0 && inFlight < write, "a live claim can be taken over");
+  // Thirty minutes, unchanged by this phase.
+  assert.ok(c.includes("interval '30 minutes'"));
+});
+
+test("75: (C) a losing caller is never told the winner's token", () => {
+  const c = oneLine(EMAIL_CLAIM);
+  // Every non-'claimed' answer, and none of them may carry the identity
+  // that authorises a write.
+  for (const result of ["'not_found'", "'not_purchased'", "'already_sent'", "'in_flight'", "'invalid_input'"]) {
+    const at = c.indexOf(result);
+    assert.ok(at > 0, `missing claim result: ${result}`);
+    // The payload of that answer ends at its closing ");".
+    const payload = c.slice(at, c.indexOf(");", at));
+    assert.ok(!payload.includes("claim_token"),
+      `the ${result} answer leaks a claim token`);
+  }
+  // claim_token appears in exactly one returned payload: the winner's.
+  assert.equal((c.match(/'claim_token'/g) || []).length, 1);
+});
+
+test("76: (D, E) a stale worker cannot write ANY outcome over a newer claim", () => {
+  const r = oneLine(EMAIL_RESULT);
+  // The guard, and it is a comparison against the row's CURRENT token.
+  assert.ok(r.includes(
+    "if v_plan.purchase_confirmation_email_claim_token is distinct from p_claim_token then"),
+    "the outcome writer does not prove the caller owns the current claim");
+  assert.ok(r.includes("'claim_not_owned'"), "a stale worker has no distinct refusal");
+  // NULL-safe: `is distinct from`, never `<>`, so a NULL on either side
+  // refuses instead of falling through as unknown.
+  assert.ok(!/claim_token <> p_claim_token/.test(r), "the token comparison is not NULL-safe");
+
+  // IT APPLIES TO BOTH OUTCOMES, because the refusal sits above the
+  // branch that chooses between them - one guard, not one per outcome.
+  const guard = r.indexOf("if v_plan.purchase_confirmation_email_claim_token is distinct from p_claim_token then");
+  const branch = r.indexOf("if v_outcome = 'sent' then update public.annual_plans");
+  assert.ok(guard > 0 && branch > guard,
+    "the ownership guard does not cover both 'sent' and 'failed'");
+
+  // AND NOTHING IS MUTATED. No write of any kind precedes the guard.
+  const head = r.slice(0, guard);
+  assert.ok(!/update public\./.test(head), "the outcome writer updates before proving ownership");
+  assert.ok(!head.includes("insert into"), "the outcome writer inserts before proving ownership");
+});
+
+test("77: (D, E) the token is required input and cannot be omitted", () => {
+  const header = EMAIL_RESULT.slice(0, EMAIL_RESULT.indexOf("as $$"));
+  assert.match(header, /p_annual_plan_id uuid,\s*p_claim_token\s+uuid,\s*p_outcome\s+text/,
+    "the outcome writer's signature is not (uuid, uuid, text)");
+  const r = oneLine(EMAIL_RESULT);
+  assert.ok(r.includes("if p_annual_plan_id is null or p_claim_token is null or p_outcome is null then"),
+    "a NULL claim token is accepted");
+  // There is no two-argument version anywhere: 039 was corrected in
+  // place, so an overload that skips the ownership proof cannot exist.
+  assert.ok(!flat.includes("record_annual_plan_purchase_email_result(uuid, text)"),
+    "a two-argument overload survives and would skip the ownership proof");
+  assert.equal(
+    (sql.match(/create or replace function public\.record_annual_plan_purchase_email_result\(/g) || []).length,
+    1, "the outcome writer is defined more than once");
+  // And the grants name the new signature only.
+  for (const role of ["public", "anon", "authenticated"]) {
+    assert.ok(flat.includes(
+      `revoke all on function public.record_annual_plan_purchase_email_result(uuid, uuid, text) from ${role};`));
+  }
+  assert.ok(flat.includes(
+    "grant execute on function public.record_annual_plan_purchase_email_result(uuid, uuid, text) to service_role;"));
+});
+
+test("78: (F) the current owner's outcome is accepted and clears the token", () => {
+  const r = oneLine(EMAIL_RESULT);
+  // Both outcomes end the claim, and both clear the token in the SAME
+  // statement that moves the status - so the token CHECK holds at every
+  // commit rather than between two of them.
+  const sentSet = r.slice(r.indexOf("set purchase_confirmation_email_status = 'sent'"),
+    r.indexOf("else"));
+  assert.ok(sentSet.includes("purchase_confirmation_email_sent_at = pg_catalog.now()"));
+  assert.ok(sentSet.includes("purchase_confirmation_email_claim_token = null"),
+    "'sent' does not clear the claim token");
+  const failedSet = r.slice(r.indexOf("set purchase_confirmation_email_status = 'failed'"));
+  assert.ok(failedSet.includes("purchase_confirmation_email_claim_token = null"),
+    "'failed' does not clear the claim token");
+  // claimed_at is deliberately NOT cleared: it keeps documenting when
+  // the last claim was taken.
+  assert.ok(!sentSet.includes("purchase_confirmation_email_claimed_at"),
+    "'sent' erases the claim timestamp");
+  assert.ok(!failedSet.includes("purchase_confirmation_email_claimed_at"),
+    "'failed' erases the claim timestamp");
+  assert.ok(r.includes("'recorded'"));
+});
+
+test("79: 'sent' stays terminal and 'failed' stays retryable under the token rule", () => {
+  const r = oneLine(EMAIL_RESULT);
+  // Terminal is checked BEFORE the token, so a duplicate success report
+  // from any worker is idempotent rather than a token error - the
+  // message really was sent, and the row already says so.
+  const terminal = r.indexOf("if v_plan.purchase_confirmation_email_status = 'sent' then");
+  const tokenGuard = r.indexOf("if v_plan.purchase_confirmation_email_claim_token is distinct from p_claim_token then");
+  assert.ok(terminal > 0 && terminal < tokenGuard,
+    "a duplicate success report is answered as a token error rather than as idempotent");
+  assert.ok(r.includes("'unchanged'"));
+  assert.ok(r.includes("'already_sent'"), "a late failure can un-send a sent message");
+
+  // 'failed' is claimable again, and the next claim mints a NEW token -
+  // there is one mint on the one write path (test 74).
+  const c = oneLine(EMAIL_CLAIM);
+  assert.ok(!c.includes("= 'failed' then"), "a failed send is refused instead of retried");
+  // A 'failed' row holds no token, so nothing from the failed attempt
+  // could authorise a write against the retry.
+  assert.ok(flat.includes(
+    "check ((purchase_confirmation_email_claim_token is not null) = (purchase_confirmation_email_status is not distinct from 'sending'))"));
+});
+
+/* ══════════════════════════════════════════════════════════════
+   80. THE PROSE MATCHES THE FUNCTIONALITY
+   ══════════════════════════════════════════════════════════════ */
+
+test("80: no comment still claims 039 never writes 'completed'", () => {
+  // 039 becomes immutable when it is applied, so a comment that is wrong
+  // now is wrong forever. complete_due_annual_plans DOES write
+  // 'completed'; only 'cancelled' is still unreachable.
+  for (const stale of [
+    "It writes no status 'completed' and no status 'cancelled'",
+    "039 writes 'pending' and 'active' and nothing else",
+    "NO FUNCTION IN 039 WRITES 'completed'",
+    "no completion cron is created",
+    "COMPLETION IS NOT WRITTEN HERE",
+  ]) {
+    assert.ok(!migration039.includes(stale), `a stale comment survives: "${stale}"`);
+  }
+  // And the corrected statements are actually there.
+  assert.ok(migration039.includes("It writes no status 'cancelled'"),
+    "the migration no longer states that 'cancelled' is unreachable");
+  assert.ok(migration039.includes("'completed'  complete_due_annual_plans"),
+    "the lifecycle comment does not name which function writes 'completed'");
+  // The one function that writes it is the one that may.
+  assert.ok(oneLine(COMPLETE).includes("set status = 'completed', completed_at = v_now"));
+
+  // Section 14's cross-reference used to point at TABLE PRIVILEGES.
+  assert.ok(!migration039.includes("Section 5's rule is that refund state is not lifecycle"),
+    "the refund contract still cites the wrong section");
 });
