@@ -1981,15 +1981,31 @@ test("034: it is the next free number and 022-033 are untouched", () => {
   // Phase 3J.B1 took 037 for the invoice-keyed refund-state writer,
   // reviewed in tests/subscription-refund-correlation-migration.test.mjs;
   // and Phase 3K.B took 038 for the one-time refund writer's concurrency,
-  // reviewed in tests/one-time-refund-writer-concurrency.test.mjs. Those
-  // four are the ONLY migrations permitted above 034 until a later one is
+  // reviewed in tests/one-time-refund-writer-concurrency.test.mjs; and
+  // Phase 4B1 took 039 for the B2C prepaid annual plan foundation,
+  // reviewed in tests/annual-plan-foundation-migration.test.mjs. Those
+  // five are the ONLY migrations permitted above 034 until a later one is
   // reviewed against this suite.
   assert.deepEqual(
     files.filter(f => f.slice(0, 3) > "034").sort(),
     ["035_subscription_email_deliveries.sql", "036_subscription_payment_status.sql",
-     "037_subscription_refund_correlation.sql", "038_one_time_refund_writer_concurrency.sql"],
+     "037_subscription_refund_correlation.sql", "038_one_time_refund_writer_concurrency.sql",
+     "039_b2c_annual_plan_foundation.sql"],
     "an unreviewed migration above 034 appeared"
   );
+  // AND 039 REDEFINES NOTHING 034 OWNS. It is a prepaid plan with no
+  // Stripe subscription at all, so it has no business anywhere near the
+  // cancellation machinery, the subscriptions table or its status.
+  const sql039 = read("supabase/migrations/039_b2c_annual_plan_foundation.sql");
+  for (const owned of ["schedule_subscription_cancellation",
+                       "apply_deferred_subscription_cancellation",
+                       "mark_subscription_cancelled",
+                       "sync_subscription_from_stripe",
+                       "record_paid_subscription_period",
+                       "due_deferred_subscription_cancellations",
+                       "alter table public.subscriptions"]) {
+    assert.ok(!sql039.includes(owned), `039 touches ${owned}`);
+  }
   // AND 038 REDEFINES NOTHING 034 OWNS EITHER.
   const sql038 = read("supabase/migrations/038_one_time_refund_writer_concurrency.sql");
   assert.ok(!sql038.includes("schedule_subscription_cancellation"), "038 touches the cancellation machinery");

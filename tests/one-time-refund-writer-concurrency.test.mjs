@@ -21,6 +21,7 @@ const NEWLINE = String.fromCharCode(10);
 const MIGRATIONS_DIR = path.join(ROOT, "supabase/migrations");
 
 const MIGRATION_038 = "038_one_time_refund_writer_concurrency.sql";
+const MIGRATION_039 = "039_b2c_annual_plan_foundation.sql";
 const MIGRATION_037 = "037_subscription_refund_correlation.sql";
 const MIGRATION_019 = "019_order_lifecycle_tracking.sql";
 
@@ -89,20 +90,31 @@ const REFUND_DECISIONS = [
    1-5. THE MIGRATION SET
    ══════════════════════════════════════════════════════════════ */
 
-test("1: 038 exists, owns its number, and is the highest migration", () => {
+test("1: 038 exists, owns its number, and 039 is the only one above it", () => {
   const files = readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith(".sql")).sort();
   assert.ok(files.includes(MIGRATION_038), "migration 038 is missing");
   assert.deepEqual(files.filter(f => f.startsWith("038")), [MIGRATION_038]);
-  assert.equal(files[files.length - 1], MIGRATION_038, "038 must be the highest");
-  assert.equal(files[files.length - 2], MIGRATION_037, "037 must be the one before it");
+  // Phase 4B1 added 039, the B2C prepaid annual plan foundation, reviewed
+  // in tests/annual-plan-foundation-migration.test.mjs. 038 is therefore
+  // no longer the highest, and this is re-pinned rather than deleted:
+  // what it protects is that no UNREVIEWED migration appeared.
+  assert.equal(files[files.length - 1], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 2], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 3], MIGRATION_037, "037 must be the one before that");
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
 
-test("2: no migration 039 or beyond", () => {
-  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 38);
-  assert.deepEqual(beyond, [], "an unreviewed migration appeared after 038");
+test("2: no migration 040 or beyond", () => {
+  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 38).sort();
+  assert.deepEqual(beyond, [MIGRATION_039], "an unreviewed migration appeared after 039");
+  // And 039 kept its hands off this phase's writer entirely.
+  const sql039 = read(`supabase/migrations/${MIGRATION_039}`);
+  assert.ok(!sql039.includes("function public.apply_order_refund_state("),
+    "039 redefined the one-time refund writer");
+  assert.ok(!/alter\s+table\s+public\.orders/i.test(sql039),
+    "039 altered public.orders");
 });
 
 test("3, 4, 5: migrations 019 and 022 through 037 are unmodified", () => {

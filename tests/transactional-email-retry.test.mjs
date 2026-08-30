@@ -1014,8 +1014,18 @@ test("regression: no migration was added and 022-033 are untouched", () => {
     for (const owned of ["confirmation_email_status", "internal_notification_status",
                          "shipment_email_status", "cancellation_request_notification_status",
                          "cancellation_outcome_email_status", "refund_email_status"]) {
-      assert.ok(!later.includes(owned), `${name} touches ${owned}`);
+      // Anchored on the left, because these are COLUMN NAMES on
+      // public.orders and a different table's column may legitimately end
+      // with the same words. Phase 4B1's 039 owns
+      // annual_plans.purchase_confirmation_email_status, which is its own
+      // column on its own new table and is not one of the six this sweep
+      // drains. A bare substring test would have read that as a
+      // regression it is not.
+      assert.ok(!new RegExp(`(?<![a-z_])${owned}`).test(later), `${name} touches ${owned}`);
     }
+    // And what the six actually live on is untouched by anything later.
+    assert.ok(!/alter table public\.orders/i.test(later),
+      `${name} alters public.orders, where the six email states live`);
   }
   // The six state vocabularies are all exactly as their migrations left
   // them, which is what makes a no-migration retry possible.

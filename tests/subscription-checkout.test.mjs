@@ -1156,8 +1156,26 @@ test("migrations: 026 was not created and 022-024 are untouched", () => {
     .filter(n => Number(n.slice(0, 3)) > 25)
     .map(n => withoutComments(read(`supabase/migrations/${n}`)))
     .join("");
-  for (const owned of ["b2c_subscription_plans", "checkout_attempts"]) {
-    assert.ok(!new RegExp(`alter table public\\.${owned}`).test(later), `a later migration alters ${owned}`);
+  assert.ok(!/alter table public\.b2c_subscription_plans/.test(later),
+    "a later migration alters b2c_subscription_plans");
+  // Phase 4B1's 039 DOES alter public.checkout_attempts: it adds two
+  // nullable annual-plan columns with no default and no backfill. That is
+  // permitted, and the guard is narrowed to what it actually protects
+  // rather than waived. What no later migration may do is CHANGE what
+  // this foundation put there - so an ADD is allowed and an alter, drop
+  // or rename of an existing column or constraint is not.
+  for (const statement of later.split(";")) {
+    if (!/alter table public\.checkout_attempts/.test(statement)) continue;
+    for (const forbidden of [/alter column/i, /drop column/i, /drop constraint/i, /rename/i]) {
+      assert.ok(!forbidden.test(statement),
+        "a later migration changes an existing checkout_attempts column or constraint");
+    }
+    for (const owned of ["request_id", "expected_total_gross_cents", "items_snapshot",
+                         "tax_snapshot", "status", "subscription_id", "stripe_invoice_id",
+                         "subscription_request_fingerprint", "subscription_intent_fingerprint"]) {
+      assert.ok(!new RegExp(`add column\\s+${owned}\\b`).test(statement),
+        `a later migration redefines checkout_attempts.${owned}`);
+    }
   }
   // public.subscriptions IS altered by migration 034 (Phase 3C), which
   // adds the two cancellation columns. That is a different concern from
@@ -1171,10 +1189,22 @@ test("migrations: 026 was not created and 022-024 are untouched", () => {
   // appearing anywhere is not the same as the checkout foundation being
   // touched.
   for (const owned of [
-    "plan_snapshot", "tax_snapshot", "subscriptions_status_check",
+    "subscriptions_status_check",
     "create_pending_subscription", "claim_pending_subscription_for_attempt",
   ]) {
     assert.ok(!later.includes(owned), `a later migration touches ${owned}`);
+  }
+  // The two frozen snapshot COLUMNS, by structure rather than by name.
+  // Phase 4B1's 039 reads checkout_attempts.tax_snapshot and writes one
+  // into the synthetic paid attempt it mints for an annual delivery -
+  // which is exactly what migration 022's activation already does for a
+  // renewal, and is the opposite of redefining the column. What no later
+  // migration may do is CHANGE either column's definition.
+  for (const owned of ["plan_snapshot", "tax_snapshot"]) {
+    for (const ddl of ["add column", "alter column", "drop column"]) {
+      assert.ok(!new RegExp(`${ddl}\\s+${owned}\\b`).test(later),
+        `a later migration redefines ${owned}`);
+    }
   }
   // And whatever a later migration adds to public.subscriptions, it may
   // not write one of the frozen checkout facts.

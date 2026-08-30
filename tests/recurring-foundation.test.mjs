@@ -622,8 +622,19 @@ test("hardening: 023 owns its number and the live migrations are not edited", ()
     // What none of them may do is write the two facts that TOGETHER mean
     // "this subscription invoice was paid", because that pair is the
     // payment evidence 034's sweep rests on and 022 is its only author.
-    assert.ok(!/insert into public\.checkout_attempts/i.test(later),
-      `${name} creates a checkout attempt`);
+    // Phase 4B1's 039 DOES insert a checkout attempt: one synthetic paid
+    // attempt per annual-plan delivery. It is permitted here, and the
+    // guard is narrowed to the fact it actually protects rather than
+    // waived - the insert must carry NEITHER of the two facts that
+    // together mean "this subscription invoice was paid". 039 cannot: a
+    // CHECK constraint refuses an annual attempt that names a
+    // stripe_invoice_id or a subscription_id at all.
+    for (const insert of later.match(/insert into public\.checkout_attempts[\s\S]*?\)\s*values/gi) ?? []) {
+      assert.ok(!/\bstripe_invoice_id\b/i.test(insert),
+        `${name} writes a subscription invoice binding onto a checkout attempt`);
+      assert.ok(!/\bsubscription_id\b/i.test(insert),
+        `${name} writes a subscription binding onto a checkout attempt`);
+    }
     assert.ok(!/delete from public\.checkout_attempts/i.test(later),
       `${name} deletes a checkout attempt`);
     const attemptWrites = [...later.matchAll(/update public\.checkout_attempts\s+set([\s\S]*?)where/g)]

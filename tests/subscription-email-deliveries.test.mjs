@@ -97,15 +97,23 @@ test("035 exists, is the only 035, and only 036 and 037 follow it", () => {
   // PHASE 3I.B1 TOOK 036 for the payment_problem family and the payment
   // status RPC, PHASE 3J.B1 TOOK 037 for the invoice-keyed refund-state
   // writer, and PHASE 3K.B TOOK 038 for the one-time refund writer's
-  // concurrency. All three are reviewed in their own suites, and they
+  // concurrency, and PHASE 4B1 TOOK 039 for the B2C prepaid annual plan
+  // foundation. All four are reviewed in their own suites, and they
   // are the ONLY migrations permitted above 035 until a later one is
   // reviewed against this file.
   assert.deepEqual(
     numbered.filter(x => x.n > 35).map(x => x.file).sort(),
     ["036_subscription_payment_status.sql", "037_subscription_refund_correlation.sql",
-     "038_one_time_refund_writer_concurrency.sql"],
+     "038_one_time_refund_writer_concurrency.sql", "039_b2c_annual_plan_foundation.sql"],
     "an unreviewed migration above 035 appeared"
   );
+  // And 039 leaves this table entirely alone. An annual plan's one
+  // purchase confirmation lives in two columns on its own parent row,
+  // deliberately NOT as a fourth family here: this table's family CHECK,
+  // its event keys and its grants are unchanged.
+  const sql039 = readFileSync(path.join(MIGRATIONS_DIR, "039_b2c_annual_plan_foundation.sql"), "utf-8");
+  assert.ok(!sql039.includes("subscription_email_deliveries"),
+    "039 reaches into the subscription email delivery table");
   // And 036 does not disturb what 035 owns beyond the family CHECK it
   // deliberately replaces: no column, no index, no grant, no policy.
   const sql036 = withoutComments(
