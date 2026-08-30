@@ -866,12 +866,16 @@ test("32: 040 is the only new migration, and 001-039 are untouched", () => {
   assert.equal(migrations[migrations.length - 2], "039_b2c_annual_plan_foundation.sql");
   assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 40), [],
     "a migration 041 or beyond appeared");
-  // 039 is live and immutable: this phase may not have edited any
-  // migration below 040 at all.
+  // 040 is NOT APPLIED yet, so it may still be edited in place - that is
+  // the whole reason it is a file under review rather than a 041. Every
+  // migration below it is live and may not be touched, which is what
+  // this guard is for. (The diff sees modified TRACKED files only; a
+  // brand-new migration is caught by the count and the ordering above.)
   const changed = execFileSync("git", ["diff", "--name-only", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
-  assert.deepEqual(touched, [], "a live, immutable migration was edited");
+  const live = touched.filter(rel => !rel.endsWith("040_annual_checkout_retry_fingerprints.sql"));
+  assert.deepEqual(live, [], "a live, immutable migration was edited");
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -928,6 +932,56 @@ test("33: 040 adds exactly two nullable annual columns, and nothing else", () =>
   }
 });
 
+test("33b: 040 is explicitly transactional, and the whole migration is inside it", () => {
+  // Section 3 DROPS the pending-plan function and then creates its
+  // replacement. Between those two statements the annual checkout has no
+  // pending-plan function at all, so a failure in between would leave
+  // the schema in exactly that state. The file wraps itself rather than
+  // relying on whichever client happens to run it.
+  const lines = m040.split(NEWLINE);
+  const lineOf = predicate => {
+    const i = lines.findIndex(predicate);
+    assert.ok(i > -1, "statement not found");
+    return i;
+  };
+
+  // Anchored at the start of a line, so the PL/pgSQL block's own
+  // `begin` / `end;` inside the function body cannot be mistaken for the
+  // transaction's.
+  const begins = lines.filter(l => l.trimEnd() === "begin;");
+  const commits = lines.filter(l => l.trimEnd() === "commit;");
+  assert.equal(begins.length, 1, "there must be exactly one begin;");
+  assert.equal(commits.length, 1, "there must be exactly one commit;");
+  assert.ok(!m040.includes("rollback"), "the migration rolls itself back");
+
+  const begin = lineOf(l => l.trimEnd() === "begin;");
+  const alter = lineOf(l => l.startsWith("alter table public.checkout_attempts"));
+  const drop = lineOf(l => l.startsWith("drop function public.create_pending_annual_plan_for_attempt("));
+  const create = lineOf(l => l.startsWith("create or replace function public.create_pending_annual_plan_for_attempt("));
+  const grant = lineOf(l => l.startsWith("grant execute on function public.create_pending_annual_plan_for_attempt("));
+  const commit = lineOf(l => l.trimEnd() === "commit;");
+  const verify = lineOf(l => l.includes("VERIFY AFTER APPLYING"));
+
+  // BEGIN comes first, COMMIT last, and every executable statement is
+  // between them - including the drop and the create that must not be
+  // separable.
+  assert.ok(begin < alter, "the ALTER runs before BEGIN");
+  assert.ok(alter < drop, "the DROP runs before the ALTER");
+  assert.ok(drop < create, "the CREATE runs before the DROP");
+  assert.ok(create < grant, "the GRANT runs before the CREATE");
+  assert.ok(grant < commit, "COMMIT comes before the GRANT");
+  assert.ok(commit < verify, "the VERIFY block is inside the transaction");
+
+  // Nothing executable survives after the commit: the verify block is
+  // read-only and stays commented out.
+  const afterCommit = lines.slice(commit + 1);
+  for (const line of afterCommit) {
+    const t = line.trim();
+    assert.ok(t === "" || t.startsWith("--"),
+      `an executable statement follows the commit: ${t}`);
+  }
+});
+
 test("34: 040 drops the old 13-argument signature and leaves exactly one", () => {
   // An overload would leave the unsafe version callable by anything that
   // simply omitted the two new arguments.
@@ -949,6 +1003,15 @@ test("34: 040 drops the old 13-argument signature and leaves exactly one", () =>
       `040 does not revoke the new signature from ${role}`);
   }
   assert.ok(m040Code.includes(`grant execute on function public.create_pending_annual_plan_for_attempt(${NEW_RPC_ARGS}) to service_role;`));
+  // The verify block checks the resulting privileges two independent
+  // ways: the raw ACL, and the effective answer has_function_privilege
+  // gives - which resolves inheritance and is what actually decides a
+  // call.
+  assert.ok(m040.includes("has_function_privilege("));
+  for (const role of ["public", "anon", "authenticated", "service_role"]) {
+    assert.ok(m040.includes(`('${role}')`), `the privilege verify omits ${role}`);
+  }
+  assert.ok(m040.includes("coalesce(array_to_string(proacl"), "the raw ACL check was removed");
   assert.ok(!m040Code.includes(`grant execute on function public.create_pending_annual_plan_for_attempt(${OLD_RPC_ARGS}) to`),
     "040 grants the old signature");
 });

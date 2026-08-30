@@ -78,11 +78,24 @@
 -- 039 IS NOT EDITED. It is live and immutable, and this file is the only
 -- thing that changes. 040 IS THE NEXT FREE NUMBER.
 --
--- RUN THIS FILE AS ONE EXECUTION. Section 3 drops a function and creates
--- its replacement; running the sections separately would leave the
--- annual checkout with no pending-plan function at all. Paste the whole
--- file into the SQL Editor and run it once, or wrap it in an explicit
--- begin; ... commit;.
+-- THIS FILE IS EXPLICITLY TRANSACTIONAL. Every executable statement sits
+-- between the begin; below and the commit; at the end of section 4, so
+-- the whole migration applies or none of it does.
+--
+-- That is not a convenience. Section 3 DROPS the pending-plan function
+-- and then creates its replacement: between those two statements the
+-- annual checkout has no pending-plan function at all, and a failure in
+-- between would leave the schema in exactly that state. Relying on a
+-- client to wrap the file would make the guarantee a property of
+-- whatever tool happened to run it - the Supabase SQL Editor, psql, a CI
+-- step - rather than of the migration itself.
+--
+-- RUN THE WHOLE FILE AS ONE EXECUTION. Do not run sections separately
+-- and do not use "run selection": a partial run would send a BEGIN with
+-- no COMMIT, or a COMMIT with no BEGIN. Do not add a second wrapping
+-- transaction around it either; Postgres does not nest them.
+--
+-- The VERIFY section after the commit is read-only and commented out.
 -- ============================================================
 
 
@@ -137,6 +150,15 @@
 -- name, company, postcode or city is ever stored here, and nothing
 -- readable about a delivery can reach a log line through them. No token
 -- and no key goes in either.
+
+-- ── THE TRANSACTION OPENS HERE ────────────────────────────────
+--
+-- Everything from this line to the commit; at the end of section 4 is
+-- one unit. DDL is transactional in PostgreSQL, so the two columns, the
+-- dropped function, its hardened replacement and the four privilege
+-- statements all land together or not at all.
+
+begin;
 
 alter table public.checkout_attempts
   add column annual_intent_fingerprint  text,
@@ -485,6 +507,14 @@ revoke all on function public.create_pending_annual_plan_for_attempt(uuid, uuid,
 revoke all on function public.create_pending_annual_plan_for_attempt(uuid, uuid, uuid, integer, integer, integer, numeric, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb, text, text) from authenticated;
 grant execute on function public.create_pending_annual_plan_for_attempt(uuid, uuid, uuid, integer, integer, integer, numeric, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb, text, text) to service_role;
 
+-- ── AND CLOSES HERE ───────────────────────────────────────────
+--
+-- The last executable statement of the migration. Everything after this
+-- line is a comment: section 5 records what the file does NOT do, and
+-- the VERIFY block is read-only and stays commented out.
+
+commit;
+
 
 -- 5. NO DATA CHANGE ────────────────────────────────────────────
 --
@@ -595,6 +625,28 @@ grant execute on function public.create_pending_annual_plan_for_attempt(uuid, uu
 --   from pg_proc
 --   where pronamespace = 'public'::regnamespace
 --     and proname = 'create_pending_annual_plan_for_attempt';
+--
+--     And the same question asked EFFECTIVELY rather than by reading the
+--     ACL, which is what actually decides a call. has_function_privilege
+--     resolves inheritance, so a privilege reaching a role through a
+--     grant this file never made would still show up here.
+--
+--     Expect exactly:
+--       public         false
+--       anon           false
+--       authenticated  false
+--       service_role   true
+--
+--   select role_name,
+--          has_function_privilege(
+--            role_name,
+--            'public.create_pending_annual_plan_for_attempt(uuid, uuid, '
+--            || 'uuid, integer, integer, integer, numeric, jsonb, jsonb, '
+--            || 'jsonb, jsonb, jsonb, jsonb, text, text)',
+--            'EXECUTE') as can_execute
+--   from (values ('public'), ('anon'), ('authenticated'), ('service_role'))
+--        as r(role_name)
+--   order by role_name;
 --
 -- (j) The other seven annual functions from 039 are untouched. Expect
 --     SEVEN rows, every one prosecdef = true.

@@ -133,8 +133,11 @@ test("3, 4, 5: migrations 019 and 022 through 037 are unmodified", () => {
   // Phase 4B1.1 note: 039 is the annual plan foundation and it has NOT
   // been applied anywhere, so it is still the right place to fix 039 and
   // it may be edited in place. Everything below it is live.
+  // 040 is NOT APPLIED yet, so it may still be edited in place; every
+  // migration below it is live and may not be.
   const immutable = touched.filter(rel =>
-    !rel.endsWith(MIGRATION_038) && !rel.endsWith(MIGRATION_039));
+    !rel.endsWith(MIGRATION_038) && !rel.endsWith(MIGRATION_039)
+    && !rel.endsWith(MIGRATION_040));
   assert.deepEqual(immutable, [], "a live, immutable migration was edited");
   // And the two this phase reasons about still read the way they were applied.
   assert.ok(read(`supabase/migrations/${MIGRATION_019}`)

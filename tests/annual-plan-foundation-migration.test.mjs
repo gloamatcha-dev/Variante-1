@@ -162,7 +162,10 @@ test("3: migrations 001 through 038 are unmodified", () => {
   const changed = execFileSync("git", ["diff", "--name-only", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
-  const immutable = touched.filter(rel => !rel.endsWith(MIGRATION_039));
+  // 040 is NOT APPLIED yet, so it may still be edited in place; every
+  // migration below it is live and may not be.
+  const immutable = touched.filter(rel =>
+    !rel.endsWith(MIGRATION_039) && !rel.endsWith("040_annual_checkout_retry_fingerprints.sql"));
   assert.deepEqual(immutable, [], "a live, immutable migration was edited");
 });
 
