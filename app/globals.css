@@ -842,3 +842,151 @@ header nav{gap:18px;font-size:12px}
   .hero .hero-copy h1 .hero-line-2,
   .hero .hero-copy .lead{transform:none}
 }
+
+/* ══════════════════════════════════════════════════════════════
+   HOMEPAGE PRELAUNCH SECTION
+
+   Replaces the old product intro. The page stops merchandising a product
+   that is not on sale yet and asks for one thing instead.
+
+   ── WHY IT IS NARROW ─────────────────────────────────────────
+   The section it replaced was a full-width two-column feature. This one
+   is a centred column with four hairlines around it - deliberately the
+   quietest block on the page, and the raspberry counterpoint to the blue
+   countdown directly above it.
+
+   ── THE HAIRLINES ARE NOT A BOX ──────────────────────────────
+   Four separate 1px rules, insetting the verticals and stopping them
+   short of full height, so the composition is framed rather than boxed.
+   No border-radius, no shadow, no fill.
+   ══════════════════════════════════════════════════════════════ */
+
+.prelaunch{background:var(--cream);padding:clamp(64px,6vw,88px) clamp(20px,4vw,48px)}
+.prelaunch-inner{
+  position:relative;
+  max-width:720px;
+  margin:0 auto;
+  padding:clamp(30px,3.4vw,46px) clamp(18px,3vw,44px);
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  text-align:center;
+  /* top + bottom hairline. They stop at the composition, not at the
+     viewport, which is what keeps this editorial rather than sectioned. */
+  border-top:1px solid var(--berry);
+  border-bottom:1px solid var(--berry);
+}
+/* the two SHORT vertical hairlines, inset and centred on the block */
+.prelaunch-inner::before,
+.prelaunch-inner::after{
+  content:"";
+  position:absolute;
+  top:14%;
+  height:72%;
+  width:1px;
+  background:var(--berry);
+}
+.prelaunch-inner::before{left:0}
+.prelaunch-inner::after{right:0}
+
+.prelaunch-eyebrow{
+  margin:0;
+  color:var(--berry);
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:11px;
+  line-height:1.2;
+  letter-spacing:.2em;
+  text-transform:uppercase;
+}
+
+/* ONE typographic block: three lines, tight, sharing a centre axis. */
+.prelaunch-headline{
+  margin:clamp(18px,1.8vw,26px) 0 0;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:2px;
+  color:var(--ink);
+  letter-spacing:-.03em;
+}
+.prelaunch-line-1{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:clamp(38px,4.5vw,64px);
+  line-height:1;
+}
+/* THE ONE PLACE OUTSIDE THE EDITORIAL ITALICS WHERE THE DISPLAY FACE IS
+   INVITED BACK. It carries the emotional word, in raspberry. */
+.prelaunch-line-2{
+  font-family:var(--font-display),Georgia,serif;
+  font-style:italic;
+  font-weight:400;
+  font-size:clamp(46px,5.5vw,76px);
+  line-height:.98;
+  letter-spacing:-.015em;
+  color:var(--berry);
+}
+.prelaunch-line-3{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:700;
+  font-style:normal;
+  font-size:clamp(36px,4vw,58px);
+  line-height:1;
+}
+
+.prelaunch-body{
+  margin:clamp(20px,2.2vw,30px) 0 0;
+  max-width:560px;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-size:clamp(15px,1.05vw,16px);
+  line-height:1.6;
+  color:var(--ink);
+  opacity:.82;
+}
+
+.prelaunch .prelaunch-cta{
+  margin-top:clamp(24px,2.4vw,32px);
+  min-height:48px;
+  padding:15px 34px;
+  background:var(--berry);
+  color:var(--cream);
+  border-color:var(--berry);
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:11px;
+  line-height:1;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+}
+.prelaunch .prelaunch-cta:hover{background:#8d1a4b;border-color:#8d1a4b}
+
+.prelaunch-social{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  margin-top:clamp(20px,2.2vw,28px);
+  color:var(--berry);
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:500;
+  font-size:15px;
+  line-height:1.4;
+  transition:opacity .2s ease;
+}
+.prelaunch-social:hover{opacity:.72}
+.prelaunch-social-icon{flex-shrink:0}
+
+@media (max-width:640px){
+  .prelaunch{padding:clamp(48px,11vw,64px) 22px}
+  .prelaunch-inner{padding:clamp(26px,7vw,34px) 0;max-width:none}
+  /* the verticals would pinch the copy on a phone, so they go */
+  .prelaunch-inner::before,.prelaunch-inner::after{display:none}
+  .prelaunch-body{max-width:none}
+  .prelaunch .prelaunch-cta{width:100%;justify-content:center;padding:15px 20px}
+  .prelaunch-social{flex-wrap:wrap;text-align:center}
+}

@@ -30,11 +30,14 @@ const ROOT = path.resolve(fileURLToPath(import.meta.url), "../..");
 const read = rel => readFileSync(path.join(ROOT, rel), "utf-8");
 
 const site = read("app/GloaSite.tsx");
+/** CSS with comments stripped: the prose legitimately names the very
+ *  properties the rules are asserted not to contain. */
+const cssRules = read("app/globals.css").replace(/\/\*[\s\S]*?\*\//g, "");
 const css = read("app/globals.css");
 const layout = read("app/layout.tsx");
 
 /** The homepage component only - every other route lives in the same file. */
-const homeStart = site.indexOf("function Home({onAdd}");
+const homeStart = site.indexOf("function Home()");
 const homepage = site.slice(homeStart, site.indexOf("\nfunction ", homeStart + 10));
 
 const SECOND = 1000;
@@ -126,28 +129,30 @@ test("6: the hero and the product feature use the new images", () => {
   assert.match(homepage, /<img src="\/img\/Header\.png" alt="[^"]+" className="hero-img"/);
   assert.ok(!homepage.includes("gloa-hero-packaging"), "the old hero packaging image is still in the hero");
 
-  // The product feature carries the pouch, contained rather than cropped.
-  const productVisual = site.slice(site.indexOf("function ProductVisual()"), site.indexOf("function ProductCard("));
-  assert.match(productVisual, /<img src="\/img\/Produkt BILD\.png" alt="[^"]+"/);
-  assert.ok(!productVisual.includes("gloa-hero-packaging"));
-  assert.match(css, /\.product-visual img\{[^}]*object-fit:contain/);
+  // THE PRODUCT IMAGE LEFT THE HOMEPAGE with the prelaunch redesign: the
+  // page no longer merchandises a product that is not on sale. The asset
+  // itself stays in the repository for the shop and the product pages.
+  assert.ok(!/src="\/img\/Produkt BILD\.png"/.test(site), "the homepage still renders the pouch");
+  assert.ok(!homepage.includes("Produkt BILD"), "the homepage still references the pouch");
+  assert.ok(!homepage.includes("ProductCard"), "the homepage still renders the product card");
 
-  // Neither image is duplicated into a second DOM layer.
+  // The hero image is not duplicated into a second DOM layer.
   assert.equal([...homepage.matchAll(/\/img\/Header\.png/g)].length, 1);
-  assert.equal([...site.matchAll(/Produkt BILD\.png/g)].length, 1);
 });
 
 test("7: the countdown appears exactly once, in blue, between hero and product", () => {
   const hero = homepage.indexOf('<section className="hero">');
   const countdown = homepage.indexOf("<LaunchCountdown/>");
-  const product = homepage.indexOf('<section className="product-intro">');
+  const product = homepage.indexOf('<section className="prelaunch">');
   assert.ok(hero > -1 && countdown > hero, "the countdown is not after the hero");
-  assert.ok(countdown < product, "the countdown is not before the product section");
+  assert.ok(countdown < product, "the countdown is not before the prelaunch section");
   assert.equal([...site.matchAll(/<LaunchCountdown\/>/g)].length, 1, "a second countdown appeared");
 
   // GLOA Blue, no cards, no pills, no glass.
   assert.match(css, /\.countdown\{background:var\(--blue\)/);
   const countdownCss = css.slice(css.indexOf(".countdown{"), css.indexOf("*{box-sizing:border-box}"));
+  // The countdown itself was not touched by the prelaunch redesign.
+  assert.match(css, /\.countdown\{background:var\(--blue\);color:var\(--cream\)/);
   for (const banned of ["border-radius", "box-shadow", "backdrop-filter", "linear-gradient", "radial-gradient"]) {
     assert.ok(!countdownCss.includes(banned), `the countdown band uses ${banned}`);
   }
@@ -166,7 +171,7 @@ test("7: the countdown appears exactly once, in blue, between hero and product",
 });
 
 test("8: the hero effect is scroll-linked, and reduced motion turns it off", () => {
-  const hook = site.slice(site.indexOf("function useHeroScrollProgress"), site.indexOf("function Home({onAdd}"));
+  const hook = site.slice(site.indexOf("function useHeroScrollProgress"), site.indexOf("function Home()"));
   // Scroll position drives one CSS variable through rAF - no loop, no
   // interval, no animation library.
   assert.match(hook, /requestAnimationFrame/);
@@ -211,6 +216,7 @@ test("9: the hero no longer reserves an empty viewport before the product", () =
   assert.ok(!css.includes(".hero{min-height:720px"), "the hero still reserves 720px");
   assert.ok(!css.includes(".hero-copy{padding:110px 4vw 70px}"), "the hero copy still pads 110px");
   assert.ok(!css.includes(".product-intro{padding:110px 5vw"), "the product section still pads 110px");
+  // The section that follows the hero is the prelaunch block now.
   assert.match(css, /\.hero-art\{[^}]*min-height:clamp\(/);
   assert.match(css, /\.hero-copy\{padding:clamp\(/);
   assert.match(css, /\.product-intro\{padding:clamp\(/);
@@ -301,7 +307,7 @@ test("12: exactly two font families, and the italic is a real one", () => {
   // The display face still exists and is still the editorial voice of the
   // page - it simply no longer appears inside the hero.
   assert.match(css, /h1 i,h2 i,h3 i,\.display-italic\{font-family:var\(--font-display\)/);
-  assert.ok(site.includes("<i>Viele Momente.</i>"), "the product italic left the page");
+  assert.ok(site.includes("<i>Nachmittags.</i>"), "the lifestyle italic left the page");
   assert.ok(site.includes("<i>Und das ist Absicht.</i>"), "the brand statement italic left the page");
   assert.ok(!/\.hero h1\{[^}]*font-family/.test(css), "the hero headline overrides the sans family");
 });
@@ -311,11 +317,7 @@ test("13: the homepage copy, prices and claims were not rewritten", () => {
     "MATCHA AUS SHIZUOKA.",
     // The hero's own supporting line, shortened in the typography pass.
     "Für Latte, pur, iced oder wie du willst.",
-    // The full sentence still opens the product section, untouched.
-    "Aus Shizuoka, Japan. Für Matcha Latte und pur.",
-    "MEET YOUR MATCHA.",
-    "Ein Grün.",
-    "Viele Momente.",
+
     "MATCHA FÜR JEDEN TAG",
     "GLOA RECIPES",
   ]) {
@@ -534,7 +536,8 @@ test("21: the hero image is contained, capped, and the only one in the hero", ()
   assert.match(heroCss, /max-width:min\(100%,720px\)/);
   assert.match(heroCss, /max-height:clamp\(340px,36vw,520px\)/);
   // No card chrome around it.
-  const art = heroCss.slice(heroCss.indexOf(".hero .hero-art{"), heroCss.indexOf(".hero .hero-micro{"));
+  const artStart = heroCss.indexOf(".hero .hero-art{");
+  const art = heroCss.slice(artStart, heroCss.indexOf("}", artStart));
   for (const banned of ["border-radius", "box-shadow", "backdrop-filter", "gradient"]) {
     assert.ok(!art.includes(banned), `the hero image frame uses ${banned}`);
   }
@@ -649,4 +652,92 @@ test("24: the motion moves three lines, in two directions, and clips nothing", (
   // The section cannot clip the moving type; only the art column crops.
   assert.match(css, /\.hero\{[^}]*overflow:visible/);
   assert.match(css, /\.hero-art\{[^}]*overflow:hidden/);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   25-28. THE PRELAUNCH SECTION
+   ══════════════════════════════════════════════════════════════ */
+
+const prelaunch = homepage.slice(
+  homepage.indexOf('<section className="prelaunch">'),
+  homepage.indexOf('<section className="daily">')
+);
+const prelaunchCss = css.slice(css.indexOf("HOMEPAGE PRELAUNCH SECTION"));
+const prelaunchRules = cssRules.slice(cssRules.indexOf(".prelaunch{"));
+
+test("25: the product intro is gone, and nothing of it survived on the homepage", () => {
+  assert.ok(prelaunch.length > 0, "the prelaunch section is missing");
+  for (const gone of [
+    "MEET YOUR MATCHA.", "Ein Grün.", "Viele Momente.", "Shop GLOA",
+    "product-intro", "ProductCard", "ProductVisual", "Produkt BILD",
+    "AB 19,99", "FRAGEN ZUM LAUNCH", "product-visual",
+  ]) {
+    assert.ok(!homepage.includes(gone), `the homepage still carries: ${gone}`);
+  }
+  // No price, no product meta and no image anywhere in the new section.
+  assert.ok(!/<img|€|LATTE|ICED|PUR/.test(prelaunch), "the prelaunch section merchandises a product");
+  // The shop still sells it: the catalog, the routes and the asset are
+  // untouched by this pass.
+  assert.ok(site.includes('href="/shop"'), "the shop route left the site");
+  assert.ok(existsSync(path.join(ROOT, "public/img/Produkt BILD.png")), "the asset was deleted");
+});
+
+test("26: the prelaunch copy is exactly the approved lines", () => {
+  assert.ok(prelaunch.includes('<p className="eyebrow prelaunch-eyebrow">PRELAUNCH</p>'));
+  // Three lines, one headline block.
+  assert.ok(prelaunch.includes('<span className="prelaunch-line-1">Zum Launch</span>'));
+  assert.ok(prelaunch.includes('<i className="prelaunch-line-2">benachrichtigt</i>'));
+  assert.ok(prelaunch.includes('<span className="prelaunch-line-3">werden.</span>'));
+  assert.ok(prelaunch.includes("Trag dich ein und wir schicken dir eine Nachricht,"));
+  assert.ok(prelaunch.includes("wenn GLOA online geht. Nur ein kurzes Update zum Launch."));
+  assert.ok(prelaunch.includes("Zum Launch benachrichtigen"));
+  assert.ok(prelaunch.includes("Oder folge uns einfach auf Instagram →"));
+  // And nothing extra was invented alongside it.
+  for (const invented of ["Kein Newsletter", "Versprochen", "Rabatt", "%", "gratis"]) {
+    assert.ok(!prelaunch.includes(invented), `the section invents: ${invented}`);
+  }
+});
+
+test("27: the CTA links to a real route and fakes no signup", () => {
+  // NO NOTIFICATION BACKEND EXISTS in this repository - no list, no
+  // capture endpoint, no consent flow - so the button is a LINK to the
+  // existing contact route rather than a form that pretends to subscribe.
+  assert.match(prelaunch, /<Link className="cta prelaunch-cta" href="\/contact"/);
+  for (const banned of ["<input", "<form", 'type="email"', "checkbox", "subscribe", "mailchimp", "klaviyo"]) {
+    assert.ok(!prelaunch.includes(banned), `the prelaunch section collects data: ${banned}`);
+  }
+  // The Instagram link reuses the brand handle the footer already uses.
+  assert.match(prelaunch, /href=\{`https:\/\/instagram\.com\/\$\{BRAND\.instagram\}`\}/);
+  assert.match(prelaunch, /target="_blank" rel="noopener noreferrer"/);
+  assert.match(read("app/content.ts"), /instagram: "gloa\.matcha"/);
+  assert.ok(read("app/Chrome.tsx").includes("https://instagram.com/${BRAND.instagram}"),
+    "the footer no longer uses the same handle");
+});
+
+test("28: the section is narrow, hairlined in raspberry, and typed correctly", () => {
+  // Cream ground, raspberry rules, no card of any kind.
+  assert.match(prelaunchCss, /\.prelaunch\{background:var\(--cream\)/);
+  assert.match(prelaunchCss, /border-top:1px solid var\(--berry\)/);
+  assert.match(prelaunchCss, /border-bottom:1px solid var\(--berry\)/);
+  assert.match(prelaunchCss, /\.prelaunch-inner::before,\s*\.prelaunch-inner::after\{[\s\S]*?background:var\(--berry\)/);
+  for (const banned of ["border-radius", "box-shadow", "backdrop-filter", "gradient", "var(--blue)"]) {
+    assert.ok(!prelaunchRules.includes(banned), `the prelaunch section uses ${banned}`);
+  }
+  // Deliberately narrow, and not a viewport-height block.
+  assert.match(prelaunchCss, /\.prelaunch-inner\{[\s\S]*?max-width:720px/);
+  assert.ok(!prelaunchCss.includes("100vh"), "the section reserves a viewport");
+
+  // Type: sans everywhere, display face on the one editorial word.
+  const line2 = prelaunchCss.slice(prelaunchCss.indexOf(".prelaunch-line-2{"), prelaunchCss.indexOf("}", prelaunchCss.indexOf(".prelaunch-line-2{")));
+  assert.match(line2, /font-family:var\(--font-display\)/);
+  assert.match(line2, /font-style:italic/);
+  assert.match(line2, /color:var\(--berry\)/);
+  for (const name of [".prelaunch-eyebrow{", ".prelaunch-line-1{", ".prelaunch-line-3{", ".prelaunch-body{"]) {
+    const rule = prelaunchCss.slice(prelaunchCss.indexOf(name), prelaunchCss.indexOf("}", prelaunchCss.indexOf(name)));
+    assert.match(rule, /font-family:var\(--font-sans\)/, `${name} is not on the sans`);
+    assert.ok(!rule.includes("--font-display"), `${name} uses the display face`);
+  }
+  // The raspberry CTA, and the mobile rules that keep it usable.
+  assert.match(prelaunchCss, /\.prelaunch \.prelaunch-cta\{[\s\S]*?background:var\(--berry\)/);
+  assert.match(prelaunchCss, /@media \(max-width:640px\)\{[\s\S]*?\.prelaunch-inner::before,\.prelaunch-inner::after\{display:none\}/);
 });
