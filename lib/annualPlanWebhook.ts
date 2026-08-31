@@ -378,7 +378,10 @@ export async function settleAnnualCheckoutSession(
         annualPlanId: plan.id,
         activation: "terminal",
         deliveries: 0,
-        worker: { claimed: 0, fulfilled: 0, guarded: 0, failed: 0, outcomes: [], errors: [] },
+        worker: {
+          claimed: 0, fulfilled: 0, guarded: 0, failed: 0,
+          notified: 0, notifyFailed: 0, outcomes: [], errors: [],
+        },
         // NO EMAIL ON THIS PATH. A historical replay against a plan that
         // is already completed or cancelled is not a purchase completing
         // now, and migration 039's claim would refuse a cancelled one

@@ -11,14 +11,15 @@
  *
  * The annual payment webhook runs it immediately after activating a plan,
  * because migration 039 schedules delivery 1 at paid_at and it is
- * therefore due the moment the plan exists. A later phase will run the
- * same function from the daily cron for deliveries 2 to 13.
+ * therefore due the moment the plan exists. Phase 4B6 runs the SAME
+ * function from the daily maintenance job for deliveries 2 to 13.
  *
  * That is the point of it being shared: DELIVERY 1 IS NOT SPECIAL. It is
- * claimed from the same global queue and fulfilled by the same RPC as
- * every other delivery, so there is no second code path that could
- * disagree with the first - and in particular no path that could mint an
- * order without going through migration 039's atomic fulfillment.
+ * claimed from the same global queue, fulfilled by the same RPC and given
+ * the same post-order processing as every other delivery, so there is no
+ * second code path that could disagree with the first - and in particular
+ * no path that could mint an order without going through migration 039's
+ * atomic fulfillment, and none that could mint one nobody is told about.
  *
  * ── WHAT IT DOES NOT DO ───────────────────────────────────────
  *
@@ -73,6 +74,20 @@ export const ANNUAL_FULFILL_SUCCESS_RESULTS: readonly string[] =
 export const ANNUAL_FULFILL_GUARDED_RESULTS: readonly string[] =
   Object.freeze(["plan_not_active", "plan_refunded", "delivery_not_claimed"]);
 
+/**
+ * The facts one fulfilled delivery hands to post-order processing.
+ *
+ * The order id is the whole point of it: an annual delivery becomes an
+ * ORDINARY order, and everything an ordinary order is owed is owed to
+ * this one too.
+ */
+export type FulfilledAnnualDeliveryOrder = {
+  deliveryId: string;
+  deliveryNumber: number;
+  annualPlanId: string;
+  orderId: string;
+};
+
 /** What one delivery's fulfillment attempt produced. */
 export type AnnualDeliveryOutcome = {
   deliveryId: string;
@@ -90,6 +105,20 @@ export type AnnualDeliveryWorkerSummary = {
   guarded: number;
   /** A result nobody recognises, or a database error. Genuinely wrong. */
   failed: number;
+  /** Orders whose post-order processing this pass completed or found done. */
+  notified: number;
+  /**
+   * Orders whose post-order processing could not be completed here.
+   *
+   * DELIBERATELY NOT PART OF `failed`. The order exists and is durable;
+   * only the message about it did not go out, and the order's OWN email
+   * state machine already owns recovering that - so escalating it would
+   * ask the caller to redo work that is already finished, and in the
+   * webhook's case would hold a settled customer's purchase confirmation
+   * hostage to the fulfilment inbox's mail provider. It is counted,
+   * reported and never hidden.
+   */
+  notifyFailed: number;
   outcomes: AnnualDeliveryOutcome[];
   /** Sanitised failure reasons. Never an id, an amount or an address. */
   errors: string[];
@@ -100,6 +129,33 @@ export type AnnualDeliveryWorkerDeps = {
   claimDue: (limit: number) => Promise<ClaimedAnnualDelivery[]>;
   /** public.fulfill_annual_plan_delivery(p_delivery_id). Returns its jsonb answer. */
   fulfillDelivery: (deliveryId: string) => Promise<unknown>;
+  /**
+   * THE POST-ORDER PROCESSING AN ORDINARY ORDER RECEIVES (Phase 4B6).
+   *
+   * An annual delivery is a normal physical order once migration 039 has
+   * minted it, and a normal paid order tells the fulfilment inbox it
+   * needs packing. Nothing in the database does that - the RPC creates
+   * rows, it sends no mail - so without this port a delivery order would
+   * sit unpacked and nobody would know.
+   *
+   * IT LIVES ON THE SHARED WORKER, NOT IN THE CRON, and that is the
+   * whole reason it is here: Delivery 1 goes through this worker from
+   * the payment webhook and Deliveries 2 to 13 go through it from the
+   * daily maintenance job. A notification wired into the cron route
+   * would cover twelve of the thirteen.
+   *
+   * OPTIONAL, so that a caller which genuinely has no post-order
+   * processing to do - a test port driving the queue alone - stays
+   * valid. Both real call sites supply it, and the focused suite asserts
+   * that at the source.
+   *
+   * It is called for 'already_fulfilled' as well as for 'fulfilled',
+   * deliberately. A pass that minted the order and died before the
+   * message went out leaves work owed, and a later reclaim answers
+   * 'already_fulfilled' with the SAME order id; the notification's own
+   * claim then decides whether anything is actually sent.
+   */
+  notifyOrder?: (order: FulfilledAnnualDeliveryOrder) => Promise<void>;
 };
 
 /**
@@ -143,6 +199,8 @@ export async function runAnnualDeliveryWorker(
     fulfilled: 0,
     guarded: 0,
     failed: 0,
+    notified: 0,
+    notifyFailed: 0,
     outcomes: [],
     errors: [],
   };
@@ -168,6 +226,7 @@ export async function runAnnualDeliveryWorker(
 
       if (ANNUAL_FULFILL_SUCCESS_RESULTS.includes(outcome.result)) {
         summary.fulfilled += 1;
+        await runPostOrderProcessing(deps, summary, outcome);
       } else if (ANNUAL_FULFILL_GUARDED_RESULTS.includes(outcome.result)) {
         summary.guarded += 1;
       } else {
@@ -190,6 +249,48 @@ export async function runAnnualDeliveryWorker(
   }
 
   return summary;
+}
+
+/**
+ * Hands one fulfilled delivery's ORDER to the post-order processing an
+ * ordinary order receives, and never lets that stop the batch.
+ *
+ * Its own try/catch, one order at a time: the twenty-four other rows
+ * this pass has already taken responsibility for must still be
+ * fulfilled, and a mail provider having a bad minute is not a reason to
+ * leave a queue half-drained.
+ *
+ * A success answer with no order id is impossible - migration 039
+ * returns one for both 'fulfilled' and 'already_fulfilled' - so it is
+ * treated as a genuine failure rather than quietly skipped.
+ */
+async function runPostOrderProcessing(
+  deps: AnnualDeliveryWorkerDeps,
+  summary: AnnualDeliveryWorkerSummary,
+  outcome: AnnualDeliveryOutcome
+): Promise<void> {
+  if (!deps.notifyOrder) return;
+
+  if (!outcome.orderId) {
+    summary.notifyFailed += 1;
+    summary.errors.push(`post-order processing skipped: ${outcome.result} carried no order id`);
+    return;
+  }
+
+  try {
+    await deps.notifyOrder({
+      deliveryId: outcome.deliveryId,
+      deliveryNumber: outcome.deliveryNumber,
+      annualPlanId: outcome.annualPlanId,
+      orderId: outcome.orderId,
+    });
+    summary.notified += 1;
+  } catch (err) {
+    summary.notifyFailed += 1;
+    summary.errors.push(
+      `post-order processing failed: ${err instanceof Error ? err.message : "unknown error"}`
+    );
+  }
 }
 
 /** Reads migration 039's fulfillment answer without trusting its shape. */

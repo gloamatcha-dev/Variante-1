@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -58,6 +58,19 @@ const senderSource = read("lib/annualPurchaseConfirmationEmail.ts");
 const sender = withoutComments(senderSource);
 const template = withoutComments(read("lib/email/annualPurchaseConfirmation.ts"));
 const emailDeps = withoutComments(read("lib/annualPurchaseConfirmationEmailDeps.ts"));
+// Phase 4B6. The daily sweep's wiring: the one module in the repository
+// that queries annual plans by their purchase-email state.
+const maintenanceDeps = withoutComments(read("lib/annualPlanMaintenanceDeps.ts"));
+
+/**
+ * How many lib modules filter public.annual_plans on the purchase-email
+ * state column. Exactly one may, and the test above says which.
+ */
+const modulesNamingPurchaseEmailStatusColumn = () => readdirSync(path.join(ROOT, "lib"))
+  .filter(f => f.endsWith(".ts"))
+  .filter(f => /purchase_confirmation_email_status\.eq\./
+    .test(withoutComments(read(path.join("lib", f)))))
+  .length;
 const flow = withoutComments(read("lib/annualPlanWebhook.ts"));
 const webhookDeps = withoutComments(read("lib/annualPlanWebhookDeps.ts"));
 const route = withoutComments(read("app/api/stripe/webhook/route.ts"));
@@ -980,22 +993,52 @@ test("the sweep predicate admits 'failed' and stale 'sending', and nothing else"
   assert.equal(isAnnualPurchaseEmailRetryCandidate({ status: "sent", claimedAt: stale, now }), false);
 });
 
-test("no module queries annual plans by purchase-email state", () => {
-  // The immediate sender NAMES one plan. A query on the state column -
-  // and above all one that could match NULL - is what would mail the
-  // entire back catalogue on its first run.
+test("exactly one query selects annual plans by purchase-email state, and it cannot match NULL", () => {
+  // PHASE 4B6 REWROTE THIS GUARD. Phase 4B5 asserted that NO module
+  // queried the state column, because the sweep did not exist yet. It
+  // exists now, so the invariant it was really protecting is asserted
+  // instead: there is exactly ONE such query, it lives in the maintenance
+  // wiring, and NOTHING - here or there - can match a NULL row. A query
+  // on NULL is what would mail the entire back catalogue on its first run.
+  //
+  // The IMMEDIATE sender still names one plan and queries nothing.
   for (const [name, source] of [["sender", sender], ["deps", emailDeps]]) {
-    assert.doesNotMatch(source, /purchase_confirmation_email_status/,
-      `${name} must not select on the email state column`);
+    assert.doesNotMatch(source, /from\("annual_plans"\)\s*[\s\S]{0,400}purchase_confirmation_email_status\./,
+      `${name} filters annual plans by the email state column`);
     assert.doesNotMatch(source, /\.is\(/, `${name} must not filter on NULL`);
   }
   assert.match(sender, /annualPlanId: string/, "the sender takes a plan id as an argument");
+
+  // The one work-list query, in the maintenance wiring.
+  assert.doesNotMatch(maintenanceDeps, /\.is\(/, "the sweep query filters on NULL");
+  const workList = maintenanceDeps.slice(
+    maintenanceDeps.indexOf("async function loadAnnualPurchaseEmailCandidates"),
+    maintenanceDeps.indexOf("async function completeDueAnnualPlans")
+  );
+  assert.ok(workList.length > 0, "the work list query moved");
+  // Two equality tests and a staleness bound. No equality test in SQL can
+  // match NULL, which is what makes the refusal structural.
+  assert.match(workList, /purchase_confirmation_email_status\.eq\.failed/);
+  assert.match(workList, /purchase_confirmation_email_status\.eq\.sending/);
+  assert.match(workList, /purchase_confirmation_email_claimed_at\.lte\./);
+  assert.ok(!workList.includes("is.null"), "the work list can match a NULL row");
+  // And the whole repository still has exactly this one query on it.
+  assert.equal(modulesNamingPurchaseEmailStatusColumn(), 1);
 });
 
-test("this phase wires no cron and no sweep", () => {
-  for (const [name, source] of [["sender", sender], ["deps", emailDeps]]) {
-    assert.doesNotMatch(source, /cron|sweep|setInterval/i, `${name} must not schedule anything`);
+test("the sweep schedules nothing of its own", () => {
+  // PHASE 4B6 REWROTE THIS GUARD. Phase 4B5 asserted the words "cron" and
+  // "sweep" appeared nowhere; the sweep exists now, so what is protected
+  // is that it remains a bounded FUNCTION rather than a timer, and that
+  // the schedule stays where the repository keeps it: one daily Vercel
+  // cron, unchanged.
+  for (const [name, source] of [["sender", sender], ["deps", emailDeps], ["maintenance", maintenanceDeps]]) {
+    assert.doesNotMatch(source, /setInterval|setTimeout/, `${name} schedules something itself`);
   }
+  const vercel = JSON.parse(read("vercel.json"));
+  assert.equal(vercel.crons.length, 1, "a second cron schedule appeared");
+  assert.equal(vercel.crons[0].path, "/api/cron/retry-order-notifications");
+  assert.equal(vercel.crons[0].schedule, "20 5 * * *");
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -1135,7 +1178,11 @@ test("the decision module and the template are both leaves", () => {
 
 test("migration 039 is the only email state machine, and it is not restated", () => {
   // No application-side status table, column write or lease arithmetic.
-  assert.doesNotMatch(sender, /purchase_confirmation_email/);
+  // PHASE 4B6: the sweep's work-list ROW TYPE names the two state columns
+  // it reads, so the assertion is now about WRITES, which is what it was
+  // always protecting. Every write to a paid contract still goes through
+  // a security-definer function that proves something first.
+  assert.doesNotMatch(sender, /\.update\(|\.insert\(|\.upsert\(|\.delete\(/);
   assert.doesNotMatch(sender, /insert into|update /i);
   // The lease threshold is restated as one constant and nothing derives
   // a second one.

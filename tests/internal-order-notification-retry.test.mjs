@@ -583,10 +583,20 @@ test("endpoint: it is server-only and takes no input from the caller", () => {
 });
 
 test("endpoint: it answers with counts and no customer data", () => {
-  // Phase 3C.3 merged one further counter block into the answer, and
-  // Phase 3H.5B2 merged a second. Still counts only - asserted on the
-  // merged shape, with each added block checked field by field below.
-  assert.match(routeCode, /Response\.json\(\s*\{ \.\.\.summary, deferredCancellations, subscriptionEmails \},/);
+  // Phase 3C.3 merged one further counter block into the answer, Phase
+  // 3H.5B2 merged a second and Phase 4B6 merged a third (the annual
+  // plan's daily maintenance). Still counts only - asserted on the merged
+  // shape, with each added block checked field by field below.
+  assert.match(routeCode, /Response\.json\(\s*\{ \.\.\.summary, deferredCancellations, subscriptionEmails, annual \},/);
+  // The annual block is counters, an errored flag per step and sanitised
+  // reason strings. No plan id, order id, recipient, address or amount.
+  const annualSummary = withoutComments(readFileSync(path.join(ROOT, "lib/annualPlanMaintenance.ts"), "utf-8"));
+  for (const leak of [
+    "customerEmail", "recipient", "order_number", "customer_snapshot",
+    "shipping_address", "total_gross_cents", "@",
+  ]) {
+    assert.ok(!annualSummary.includes(leak), `the annual maintenance summary carries ${leak}`);
+  }
   // The subscription block carries counters plus stale DELIVERY uuids,
   // and no customer fact at all.
   const subscriptionSummary = read("lib/subscriptionEmailDeliveryRules.ts");

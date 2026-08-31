@@ -47,11 +47,18 @@ export type InternalOrderAddress = {
 };
 
 /**
- * Where this order came from. Both values are derived from data that is
+ * Where this order came from. Every value is derived from data that is
  * actually persisted - a subscription order is one whose checkout attempt
- * carries a subscription_id - so neither is a guess.
+ * carries a subscription_id, an annual one is a delivery whose attempt
+ * carries an annual_plan_id - so none of them is a guess.
+ *
+ * 'annual' arrived with Phase 4B6, and it is a LABEL rather than a second
+ * notification: same columns, same claim, same idempotency key, same
+ * fulfilment inbox. It exists because "Einzelbestellung" would be untrue
+ * of a prepaid annual delivery, and an internal instruction to pack a box
+ * must not misdescribe why the box is owed.
  */
-export type InternalOrderSource = "one_time" | "subscription";
+export type InternalOrderSource = "one_time" | "subscription" | "annual";
 
 export type InternalOrderNotificationOrder = {
   order_number: string;
@@ -121,6 +128,10 @@ const BRAND = {
 const SOURCE_LABEL: Readonly<Record<InternalOrderSource, string>> = Object.freeze({
   one_time: "Einzelbestellung",
   subscription: "Abo-Lieferung (alle 4 Wochen)",
+  // Says the two things fulfillment needs and nothing else: the cadence,
+  // and that there is no payment outstanding for this box - the customer
+  // paid for all thirteen once, a year ago.
+  annual: "Jahresplan-Lieferung (alle 4 Wochen, vorausbezahlt)",
 });
 
 function fmtCents(cents: number): string {

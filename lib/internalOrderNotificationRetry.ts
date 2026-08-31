@@ -49,7 +49,15 @@ import type { AddressSnapshot } from "./orderAddressSnapshot";
  * attempts counter would be a live migration bought for nothing.
  */
 
-const ORDER_COLUMNS =
+/**
+ * The order columns a notification is rebuilt from.
+ *
+ * EXPORTED for lib/annualOrderNotification.ts (Phase 4B6), which rebuilds
+ * the same message for an annual delivery order from the same columns.
+ * Sharing the list rather than copying it means the two cannot end up
+ * reading different facts about one order.
+ */
+export const ORDER_COLUMNS =
   "id, order_number, currency, subtotal_gross_cents, shipping_gross_cents, total_gross_cents, shipping_address_snapshot, customer_snapshot, checkout_attempt_id, internal_notification_status";
 
 /**
@@ -114,11 +122,23 @@ async function claimFailedNotification(admin: SupabaseClient, orderId: string): 
   return (data?.length ?? 0) > 0 ? "claimed" : "taken";
 }
 
-/** The frozen lines the order was built from, read back rather than recomputed. */
-async function loadAttempt(admin: SupabaseClient, checkoutAttemptId: string): Promise<RetryAttemptRow | null> {
+/**
+ * The frozen lines the order was built from, read back rather than
+ * recomputed.
+ *
+ * EXPORTED for the same reason ORDER_COLUMNS is. annual_plan_id joined
+ * the selection with Phase 4B6: it is what makes the source label of an
+ * annual delivery order truthful on a retry, so a message retried a week
+ * later still says "Jahresplan-Lieferung" rather than
+ * "Einzelbestellung".
+ */
+export async function loadAttempt(
+  admin: SupabaseClient,
+  checkoutAttemptId: string
+): Promise<RetryAttemptRow | null> {
   const { data, error } = await admin
     .from("checkout_attempts")
-    .select("items_snapshot, subscription_id, stripe_invoice_id")
+    .select("items_snapshot, subscription_id, stripe_invoice_id, annual_plan_id")
     .eq("id", checkoutAttemptId)
     .maybeSingle();
 

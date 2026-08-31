@@ -641,15 +641,18 @@ test("52: the sweep has its own error boundary and reports errored", () => {
   assert.notEqual(blockStart, -1, "the sweep block disappeared");
   const block = cronCode.slice(
     blockStart,
-    cronCode.indexOf("{ ...summary, deferredCancellations, subscriptionEmails }", blockStart)
+    // Phase 4B6 appended a fourth job block; the sweep's boundary now
+    // ends where that one begins rather than at the response.
+    cronCode.indexOf("let annual;", blockStart)
   );
   assert.ok(block.length > 0, "the sweep block could not be isolated");
   assert.ok(block.includes("try {"), "the sweep needs its own try");
   assert.ok(block.includes("} catch (err) {"));
   assert.ok(block.includes("emptySubscriptionEmailRetrySummary(true)"),
     "a thrown sweep must report errored: true");
-  // The earlier results still reach the response.
-  assert.ok(cronCode.includes("{ ...summary, deferredCancellations, subscriptionEmails },"));
+  // The earlier results still reach the response, alongside the annual
+  // block Phase 4B6 merged into it.
+  assert.ok(cronCode.includes("{ ...summary, deferredCancellations, subscriptionEmails, annual },"));
   // Per family isolation inside the sweep too.
   assert.equal((retryCode.match(/} catch \(err\) \{/g) ?? []).length, 2,
     "each family's retry and stale inspection need their own guard");

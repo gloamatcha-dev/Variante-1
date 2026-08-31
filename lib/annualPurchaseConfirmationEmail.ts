@@ -918,13 +918,13 @@ async function finishFailed(
  * the threshold old has been in flight for precisely the threshold and
  * counts as stale.
  *
- * ── THIS PHASE DOES NOT WIRE A SWEEP ──────────────────────────
+ * ── THE SWEEP THAT USES IT (Phase 4B6) ────────────────────────
  *
- * Nothing calls this yet, deliberately. The daily job belongs to the
- * Annual Delivery phase, and pulling it in here would drag the delivery
- * cron along with it. What this phase owes is that when that sweep is
- * written, the predicate it must use already exists, already refuses NULL,
- * and already has a test proving it.
+ * runAnnualPurchaseEmailRetrySweep at the bottom of this file, from the
+ * daily maintenance job. It applies this predicate to every row its query
+ * returned before anything is sent, which is the second of the two
+ * refusals of NULL - the first being the query itself, which can only
+ * match 'failed' or a stale 'sending'.
  */
 export function isAnnualPurchaseEmailRetryCandidate(input: {
   status: string | null | undefined;
@@ -950,4 +950,168 @@ export function isAnnualPurchaseEmailRetryCandidate(input: {
 
   const millis = input.now instanceof Date ? input.now.getTime() : input.now;
   return claimed <= millis - ANNUAL_PURCHASE_EMAIL_STALE_AFTER_MS;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   THE DAILY RETRY SWEEP (Phase 4B6)
+   ══════════════════════════════════════════════════════════════
+
+   The safety net under the ONE purchase confirmation.
+
+   The immediate sender runs inside the payment webhook, and Stripe's
+   redelivery schedule is its first retry. That schedule is bounded -
+   Stripe eventually stops - and what can remain afterwards is a paid
+   annual plan whose customer was never told, sitting at 'failed' or at a
+   'sending' whose worker died. This is what looks at those two rows, and
+   at nothing else.
+
+   ── IT ADDS NO SENDER, NO CLAIM AND NO VOCABULARY ─────────────
+
+   It calls sendAnnualPurchaseConfirmationEmail, the same function the
+   webhook calls, with the same ports. There is deliberately no
+   "retryAnnualPurchaseEmailDirectly": a second sender would be a second
+   place for the claim, the template, the recipient and the outcome
+   writer to be wrong. The sender re-enters migration 039's claim RPC, so
+   the sweep does not decide whether anything is sent - it only decides
+   which plan ids are worth asking about:
+
+     'failed'        the claim grants a FRESH token and the send is
+                     retried under the same provider idempotency key.
+     stale 'sending' the claim's own thirty-minute test agrees, grants a
+                     fresh token, and the send is retried.
+     live 'sending'  the claim answers 'in_flight'. Nothing is sent.
+     'sent'          the claim answers 'already_sent'. Nothing is sent.
+
+   The last two cannot normally reach the sender at all, because the
+   query and then isAnnualPurchaseEmailRetryCandidate both refuse them;
+   they are listed because the claim refusing them again is what makes a
+   race between this sweep and a Stripe redelivery safe.
+
+   ── NULL IS REFUSED THREE TIMES ───────────────────────────────
+
+   By the query, which matches only 'failed' or 'sending'; by the
+   predicate below, whose first line is the NULL refusal; and by
+   migration 039's claim, which treats a NULL row as a first attempt that
+   only a caller naming one activated plan id may make. A sweep that
+   claimed NULL would mail every annual plan that never entered the flow,
+   which is the exact mistake the 451 historical orders taught this
+   repository not to make. */
+
+/**
+ * How many purchase confirmations one run may attempt.
+ *
+ * Twenty-five, the same ceiling every other family in this repository
+ * uses. On a healthy day the list is empty. A backlog is drained over
+ * several days rather than in one serverless invocation, and correctness
+ * never depends on clearing it in one pass.
+ */
+export const ANNUAL_PURCHASE_EMAIL_RETRY_LIMIT = 25;
+
+/** One candidate row, in the three columns the rule needs. */
+export type AnnualPurchaseEmailRetryRow = {
+  id: string;
+  purchase_confirmation_email_status: string | null;
+  purchase_confirmation_email_claimed_at: string | null;
+};
+
+/** The outcome of one run. Counts and plan ids only - never a customer fact. */
+export type AnnualPurchaseEmailRetrySummary = {
+  /** Rows the work list returned. */
+  found: number;
+  /** Rows the predicate accepted and the sender was asked about. */
+  attempted: number;
+  /** Rows refused HERE, after the query. A NULL among them is a bug elsewhere. */
+  skipped: number;
+  sent: number;
+  alreadySent: number;
+  inFlight: number;
+  notEligible: number;
+  ambiguous: number;
+  failed: number;
+  /** Sanitised reasons. Never a recipient, a token or a provider message. */
+  errors: string[];
+};
+
+export type AnnualPurchaseEmailRetryPort = {
+  /**
+   * The bounded work list. Its query may match 'failed' and 'sending'
+   * and NOTHING ELSE - see the note above.
+   */
+  loadCandidates: () => Promise<AnnualPurchaseEmailRetryRow[]>;
+  /** The SAME ports the webhook's immediate send uses. */
+  emailDeps: AnnualPurchaseEmailDeps;
+  /** Passed in, never read here: this file has no clock. */
+  now: Date;
+};
+
+/**
+ * One bounded pass over the annual purchase confirmations still owed.
+ *
+ * Sequential and per-row guarded. One plan whose send throws must not
+ * strand the others, and every row it did not reach is exactly as owed
+ * tomorrow as it was today.
+ *
+ * Throws only when the work list itself cannot be read - an
+ * infrastructure failure the caller must report rather than answer for
+ * with a clean-looking zero.
+ */
+export async function runAnnualPurchaseEmailRetrySweep(
+  port: AnnualPurchaseEmailRetryPort
+): Promise<AnnualPurchaseEmailRetrySummary> {
+  const summary: AnnualPurchaseEmailRetrySummary = {
+    found: 0,
+    attempted: 0,
+    skipped: 0,
+    sent: 0,
+    alreadySent: 0,
+    inFlight: 0,
+    notEligible: 0,
+    ambiguous: 0,
+    failed: 0,
+    errors: [],
+  };
+
+  const rows = await port.loadCandidates();
+  summary.found = rows.length;
+
+  for (const row of rows) {
+    // THE SECOND REFUSAL OF NULL, and of a row that stopped being a
+    // candidate between the query and here - a worker claiming it in that
+    // window turns a stale 'sending' into a live one, and this sees the
+    // row it read rather than the row as it is, so the claim remains the
+    // authority either way.
+    if (
+      !isAnnualPurchaseEmailRetryCandidate({
+        status: row.purchase_confirmation_email_status,
+        claimedAt: row.purchase_confirmation_email_claimed_at,
+        now: port.now,
+      })
+    ) {
+      summary.skipped += 1;
+      continue;
+    }
+
+    summary.attempted += 1;
+
+    let result: AnnualPurchaseEmailResult;
+    try {
+      // THE SAME SENDER. One argument, and the ports the webhook uses.
+      result = await sendAnnualPurchaseConfirmationEmail(row.id, port.emailDeps);
+    } catch (err) {
+      summary.failed += 1;
+      summary.errors.push(
+        `annual purchase email retry failed: ${err instanceof Error ? err.message : "unknown error"}`
+      );
+      continue;
+    }
+
+    if (result === "sent") summary.sent += 1;
+    else if (result === "already-sent") summary.alreadySent += 1;
+    else if (result === "in-flight") summary.inFlight += 1;
+    else if (result === "not-eligible") summary.notEligible += 1;
+    else if (result === "ambiguous") summary.ambiguous += 1;
+    else summary.failed += 1;
+  }
+
+  return summary;
 }

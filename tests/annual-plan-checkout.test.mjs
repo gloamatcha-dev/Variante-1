@@ -862,8 +862,19 @@ test("31: the live checkout flows and the webhook are untouched", () => {
     "the subscription settlement branch disappeared");
   assert.ok(webhook.includes('} else if (session.mode === "subscription") {'),
     "the subscription discriminator changed");
-  // And nothing in this phase touched the cron, emails or the portal.
-  assert.ok(!read("app/api/cron/retry-order-notifications/route.ts").includes("annual"));
+  // PHASE 4B6 REWROTE THIS LINE. The cron now runs the annual plan's
+  // daily maintenance, so "the word annual does not appear" stopped being
+  // the invariant. What is protected is what it always was: no CHECKOUT
+  // machinery reached the cron. It runs one maintenance function and
+  // creates no session, no attempt and no plan.
+  const cron = withoutComments(read("app/api/cron/retry-order-notifications/route.ts"));
+  assert.match(cron, /runAnnualPlanMaintenanceJob\(\)/);
+  for (const banned of [
+    "annual-plan/checkout", "getOrCreateAnnualCheckoutAttempt", "createAnnualCheckoutSession",
+    "create_pending_annual_plan_for_attempt", "annualPlanCheckout", "checkout.sessions",
+  ]) {
+    assert.ok(!cron.includes(banned), `the cron reaches into the checkout flow: ${banned}`);
+  }
 });
 
 test("32: 040 is the only new migration, and 001-039 are untouched", () => {
@@ -1417,8 +1428,11 @@ test("49: this phase still activates nothing and touches no other runtime", () =
   // Phase 4B4 put that in its own modules, reviewed separately.
   assert.ok(!flow.includes("settleAnnualCheckoutSession"));
   assert.ok(!flow.includes("runAnnualDeliveryWorker"));
-  // The cron is untouched.
-  assert.ok(!read("app/api/cron/retry-order-notifications/route.ts").includes("annual"));
+  // PHASE 4B6 REWROTE THIS LINE, for the reason test 31 gives. The
+  // CHECKOUT flow is still not reachable from the cron.
+  const cron = withoutComments(read("app/api/cron/retry-order-notifications/route.ts"));
+  assert.ok(!cron.includes("annualPlanCheckout"), "the checkout flow reached the cron");
+  assert.ok(!cron.includes("annual-plan/checkout"), "the checkout route reached the cron");
   // The flag is still closed by default.
   assert.match(read(".env.example"), /^B2C_ANNUAL_PLAN_ENABLED=$/m);
   assert.ok(read("lib/annualPlans.ts").includes('return env[ANNUAL_PLAN_FEATURE_FLAG] === "true";'));

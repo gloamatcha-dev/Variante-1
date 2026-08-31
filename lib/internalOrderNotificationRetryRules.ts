@@ -62,7 +62,7 @@ export function isRetryEligibleStatus(status: string | null | undefined): boolea
 }
 
 /** Where this order came from. Derived from persisted data, never guessed. */
-export type RetryNotificationSource = "one_time" | "subscription";
+export type RetryNotificationSource = "one_time" | "subscription" | "annual";
 
 /** A frozen checkout line, as persisted on the checkout attempt. */
 export type RetryItemSnapshot = {
@@ -100,6 +100,14 @@ export type RetryAttemptRow = {
   items_snapshot: unknown;
   subscription_id: string | null;
   stripe_invoice_id: string | null;
+  /**
+   * Set only on the SYNTHETIC attempt migration 039 mints for one annual
+   * delivery (Phase 4B6). Migration 039's paired CHECK keeps it present
+   * exactly when annual_delivery_number is, and a payment attempt can
+   * never acquire one, so the two populations are disjoint by
+   * construction and this is a safe thing to derive a label from.
+   */
+  annual_plan_id?: string | null;
 };
 
 /**
@@ -164,7 +172,15 @@ export function buildRetryNotificationParams<TAddress>(
     throw new Error(`order ${row.id} has no frozen line items`);
   }
 
-  const source: RetryNotificationSource = attempt.subscription_id ? "subscription" : "one_time";
+  // ANNUAL FIRST, and the three are mutually exclusive in the database:
+  // migration 039's CHECK refuses an attempt that carries both a
+  // subscription and an annual plan, so the order below decides nothing
+  // and is only here to be read as a total function.
+  const source: RetryNotificationSource = attempt.annual_plan_id
+    ? "annual"
+    : attempt.subscription_id
+      ? "subscription"
+      : "one_time";
   const customer = (row.customer_snapshot ?? {}) as { email?: unknown; name?: unknown };
 
   return {
@@ -189,7 +205,9 @@ export function buildRetryNotificationParams<TAddress>(
     customerName: typeof customer.name === "string" ? customer.name : null,
     source,
     // A one-off order has no invoice to give, exactly as at the webhook
-    // call site.
+    // call site - and neither has an annual delivery: a prepaid contract
+    // raises no Stripe invoice per box, and its PaymentIntent belongs to
+    // the plan rather than to any order.
     stripeInvoiceId: source === "subscription" ? attempt.stripe_invoice_id : null,
   };
 }

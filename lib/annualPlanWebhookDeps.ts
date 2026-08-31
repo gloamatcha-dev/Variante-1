@@ -20,6 +20,12 @@ import type { ClaimedAnnualDelivery } from "./annualDeliveryWorker";
 // one argument and cannot reach Supabase or Resend itself.
 import { sendAnnualPurchaseConfirmationEmail } from "./annualPurchaseConfirmationEmail";
 import { annualPurchaseEmailDeps } from "./annualPurchaseConfirmationEmailDeps";
+// Phase 4B6. The post-order processing an ordinary order receives, bound
+// to the SHARED worker below rather than to a caller - which is what
+// makes Delivery 1 and Deliveries 2 to 13 one mechanism. Its own module
+// for the same reason every port here is thin: this file resolves rows
+// and calls functions, it does not know what an email is.
+import { notifyAnnualDeliveryOrder } from "./annualOrderNotification";
 
 /**
  * The real wiring behind the annual payment webhook (Phase 4B4).
@@ -109,7 +115,8 @@ async function activateAnnualPlan(input: {
 }
 
 /**
- * The shared worker's two database calls.
+ * The shared worker's two database calls, and the post-order processing
+ * that follows them.
  *
  * claim_due_annual_plan_deliveries IS the queue: it selects due and
  * stale-claimed rows under FOR UPDATE SKIP LOCKED and moves them to
@@ -142,6 +149,15 @@ export const annualDeliveryWorkerDeps = {
     if (error) throw new Error(`fulfill_annual_plan_delivery failed: ${error.message}`);
     return data;
   },
+
+  // ONE ARGUMENT: the order id migration 039 just answered with. The
+  // recipient, the lines, the address and the label are read from the
+  // durable order and its frozen attempt by the notification itself, so
+  // nothing about the annual plan can reach that message from here - and
+  // the duplicate guard is the order's own claim, not anything decided in
+  // this file.
+  notifyOrder: (order: { orderId: string }): Promise<void> =>
+    notifyAnnualDeliveryOrder(order.orderId),
 };
 
 /**

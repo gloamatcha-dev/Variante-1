@@ -8,6 +8,9 @@ import {
   emptySubscriptionEmailRetrySummary,
   runSubscriptionEmailRetrySweep,
 } from "../../../../lib/subscriptionEmailRetry";
+// Phase 4B6. Same cron, fourth job, its own error boundary.
+import { emptyAnnualMaintenanceSummary } from "../../../../lib/annualPlanMaintenance";
+import { runAnnualPlanMaintenanceJob } from "../../../../lib/annualPlanMaintenanceDeps";
 
 /**
  * Vercel Cron entry point for the transactional email safety net.
@@ -64,6 +67,30 @@ import {
  * It is bounded, it re-derives due-ness from durable local state, and it
  * runs in its own guard: a Stripe outage cannot stop the six email
  * families, and an email failure cannot stop it.
+ *
+ * ── PHASE 4B6 ADDED A FOURTH JOB, AND IT DOES CREATE ORDERS ───
+ *
+ * This endpoint now also runs the ANNUAL PLAN'S DAILY MAINTENANCE, and
+ * that is the largest widening of its contract so far: deliveries 2 to 13
+ * of a prepaid annual plan become real orders here.
+ *
+ * It is here rather than in its own endpoint for the reason the deferred
+ * cancellation sweep is: the Vercel Hobby plan permits ONE cron
+ * invocation per day, and a second endpoint would have needed a second
+ * schedule this plan does not have. vercel.json is unchanged, the path is
+ * unchanged, and the authentication is the same CRON_SECRET.
+ *
+ * NO ORDER IS CREATED BY THIS FILE. The maintenance job asks migration
+ * 039's claim and fulfillment functions, each of which decides under its
+ * own row lock whether a delivery is due and whether its plan may still
+ * be fulfilled, and creates the order inside one transaction. This
+ * endpoint passes no id, no date, no amount and no limit into any of it:
+ * its entire request surface is still one Authorization header.
+ *
+ * It runs in its own guard, like the two jobs above it. An annual
+ * database outage cannot stop the six email families, a mail provider
+ * cannot stop a plan being completed, and none of them can stop the
+ * others.
  *
  * ── IT RETRIES DELIVERY. IT CREATES NOTHING. ──────────────────
  *
@@ -221,12 +248,43 @@ export async function GET(request: Request): Promise<Response> {
       subscriptionEmails = emptySubscriptionEmailRetrySummary(true);
     }
 
+    // ── THE ANNUAL PLAN'S DAILY MAINTENANCE (Phase 4B6) ───────
+    //
+    // FOURTH, AND LAST. The three jobs above have finished by this point,
+    // so a failure here cannot cost an order email its retry, a
+    // cancellation its trip to Stripe or a subscription email its sweep.
+    // Its own guard, for the same reason they have one.
+    //
+    // Inside it, four bounded steps run in a fixed order with their own
+    // boundaries: due deliveries through the shared worker, the recovery
+    // for an annual order whose notification was never attempted, the
+    // purchase-confirmation retry - which selects 'failed' and stale
+    // 'sending' and NEVER a NULL - and finally completion, last so a plan
+    // whose thirteenth delivery was fulfilled a moment ago can complete
+    // on this same run. See lib/annualPlanMaintenance.ts.
+    //
+    // B2C_ANNUAL_PLAN_ENABLED is deliberately not consulted: that flag
+    // stops new sales, and a contract somebody already paid for in full
+    // is still owed its deliveries.
+    let annual;
+    try {
+      annual = await runAnnualPlanMaintenanceJob();
+    } catch (err) {
+      console.error(
+        "Annual plan maintenance: run failed:",
+        err instanceof Error ? err.message : "unknown error"
+      );
+      annual = emptyAnnualMaintenanceSummary(true);
+    }
+
     // Counts only, exactly like the email families. No subscription id,
     // no Stripe id, no customer fact. The subscription block adds
     // delivery uuids for stale 'sending' rows, which are the one thing an
-    // operator needs to find them - and are not customer data.
+    // operator needs to find them - and are not customer data. The annual
+    // block adds counts and sanitised failure reasons, and no plan id,
+    // order id, recipient or amount at all.
     return Response.json(
-      { ...summary, deferredCancellations, subscriptionEmails },
+      { ...summary, deferredCancellations, subscriptionEmails, annual },
       { status: 200 }
     );
   } catch (err) {

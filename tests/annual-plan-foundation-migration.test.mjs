@@ -992,6 +992,16 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
   // concurrency edit to them shows up and is expected. All four are
   // annual-only and the one-time and subscription flows import none of
   // them, which tests/annual-plan-webhook.test.mjs asserts directly.
+  //
+  // Phase 4B6 adds five. Three are annual-only (the worker gains its
+  // post-order port, the sender gains the daily sweep, the webhook deps
+  // bind that port). The other two are the SHARED order-notification
+  // machinery, edited additively so an annual delivery order is described
+  // truthfully rather than as "Einzelbestellung": one new value in a
+  // source union, one column added to a SELECT, and two symbols exported
+  // so the annual path reuses them instead of copying them. The one-time
+  // and subscription paths keep their existing labels, which
+  // tests/annual-plan-maintenance.test.mjs asserts directly.
   const ALLOWED_LIB_EDITS = [
     "lib/checkoutAttempts.ts",
     "lib/annualPlanCheckout.ts",
@@ -1001,6 +1011,10 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     "lib/annualPlanWebhookRules.ts",
     "lib/annualPlanWebhookDeps.ts",
     "lib/annualDeliveryWorker.ts",
+    "lib/annualPurchaseConfirmationEmail.ts",
+    "lib/internalOrderNotificationRetry.ts",
+    "lib/internalOrderNotificationRetryRules.ts",
+    "lib/email/internalOrderNotification.ts",
   ];
 
   // Phase 4B4 edits ONE application module: the single canonical Stripe
@@ -1009,7 +1023,15 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
   // second definition of what "paid" means. The edit is additive, and
   // that it is additive is asserted directly against the source in
   // tests/annual-plan-webhook.test.mjs rather than assumed here.
-  const ALLOWED_APP_EDITS = ["app/api/stripe/webhook/route.ts"];
+  //
+  // Phase 4B6 edits the second and last one: the single daily cron route,
+  // which gains a fourth job in its own error boundary. A second endpoint
+  // would have meant a second Vercel schedule, which the Hobby plan does
+  // not have - see the route's own header.
+  const ALLOWED_APP_EDITS = [
+    "app/api/stripe/webhook/route.ts",
+    "app/api/cron/retry-order-notifications/route.ts",
+  ];
 
   for (const rel of touched) {
     if (rel.startsWith("app/")) {
