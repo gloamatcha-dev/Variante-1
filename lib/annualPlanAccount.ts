@@ -91,13 +91,23 @@
  * delivery_items_snapshot IS selected, because it is the only truthful
  * source of what was bought - see buildAnnualPlanProduct, which reduces
  * it to a name, a label and a size rather than passing it through.
+ *
+ * ── AND SINCE 4B8.1 THE DATABASE AGREES ───────────────────────
+ *
+ * This list is no longer the only thing standing between a browser and
+ * those columns. Migration 041 replaces the table-level SELECT grant
+ * `authenticated` held with COLUMN-LEVEL grants naming exactly the
+ * columns below, so a caller that ignores this constant and asks for
+ * `*`, or for the claim token by name, is refused by PostgreSQL rather
+ * than by a convention. The two must therefore stay identical, and the
+ * focused suite asserts this list against the migration's grant.
  */
 export const ANNUAL_PLAN_ACCOUNT_SELECT =
   "id, status, payment_status, currency, delivery_count, " +
   "catalog_unit_gross_cents, annual_unit_gross_cents, shipping_per_delivery_gross_cents, " +
   "merchandise_total_gross_cents, shipping_total_gross_cents, total_gross_cents, " +
   "refunded_total_cents, discount_percent_applied, delivery_items_snapshot, " +
-  "purchased_at, plan_end_at, completed_at, cancelled_at, created_at";
+  "purchased_at, plan_end_at, completed_at, cancelled_at";
 
 /**
  * Every delivery column the account is allowed to read.
@@ -112,9 +122,16 @@ export const ANNUAL_PLAN_ACCOUNT_SELECT =
  * the account already renders those. Linking to the order the customer
  * can already open is the whole point of not inventing a second,
  * annual-specific representation of a physical delivery.
+ *
+ * annual_plan_id is selected although nothing renders it: the account
+ * reads a plan's deliveries with a filter on it, and PostgreSQL requires
+ * SELECT on a column used in a WHERE clause exactly as it does on one
+ * that is returned. The delivery's own id is NOT selected - nothing looks
+ * a delivery up by uuid - and migration 041 grants neither it nor
+ * checkout_attempt_id nor claimed_at.
  */
 export const ANNUAL_PLAN_DELIVERY_ACCOUNT_SELECT =
-  "id, annual_plan_id, delivery_number, scheduled_for, state, fulfilled_at, order_id";
+  "annual_plan_id, delivery_number, scheduled_for, state, fulfilled_at, order_id";
 
 /**
  * Which plans belong in "meine Jahrespläne".
@@ -161,11 +178,9 @@ export type AnnualPlanAccountRow = {
   plan_end_at: string | null;
   completed_at: string | null;
   cancelled_at: string | null;
-  created_at?: string | null;
 };
 
 export type AnnualPlanDeliveryAccountRow = {
-  id: string;
   delivery_number: number;
   scheduled_for: string;
   state: string;
@@ -472,56 +487,114 @@ export function buildAnnualPlanAccountView(
    ══════════════════════════════════════════════════════════════ */
 
 /**
- * What the account page may conclude after a return from Stripe.
+ * The query parameter the annual checkout's return URLs carry.
  *
- *   'active'      a purchased plan exists. The customer holds a contract.
- *   'processing'  a plan exists but has not been activated yet - the money
- *                 is settling, or the webhook has not arrived. Delayed
- *                 notification methods make this an ordinary outcome
- *                 rather than an error (Phase 4B4.2).
- *   'none'        this account has no annual plan at all.
+ * It holds the LOCAL annual plan uuid - the row this repository created
+ * before Stripe was ever contacted - and it is CORRELATION ONLY. See
+ * resolveAnnualCheckoutReturnState for what it is not.
  */
-export type AnnualCheckoutReturnState = "active" | "processing" | "none";
+export const ANNUAL_CHECKOUT_RETURN_PARAM = "annualPlanId";
 
 /**
- * Resolves the post-checkout state from DURABLE ROWS ALONE.
+ * What the account page may conclude about the plan a customer just
+ * returned from Stripe with.
  *
- * ── THE QUERY STRING IS AN INTENT, NEVER A PROOF ──────────────
- *
- * lib/annualPlanCheckout.ts sends the customer to `/account?annual=processing`
- * on success and `/account?annual=cancelled` on cancel. Both are UI
- * intent: a browser can type either one. Neither is an argument to this
- * function, and nothing here accepts a session id, a PaymentIntent, an
- * amount or a plan id from the caller - the plans passed in are the ones
- * RLS already proved belong to the signed-in user.
- *
- * That is also why no id needs to travel in the URL, and why this phase
- * adds no new public identifier: the account page asks "does the logged-in
- * customer hold an annual plan", which the user's own rows answer.
- *
- * ── AND IT NEVER POLLS STRIPE ─────────────────────────────────
- *
- * Payment truth arrives through the webhook, which is the only path that
- * activates a plan. A browser that could ask Stripe would be a second
- * source of truth about money, answering before the durable one.
- *
- * Ordering: a purchased plan wins over a pending one, so a customer who
- * abandoned a checkout last month and completed one today is told what
- * they now hold rather than what they left behind.
+ *   'processing'  the plan exists and is not a purchase yet - the money is
+ *                 settling, or the webhook has not landed. Delayed
+ *                 notification methods make this an ordinary outcome
+ *                 rather than an error (Phase 4B4.2).
+ *   'active'      purchased and live. The customer holds this contract.
+ *   'completed'   purchased, and its year is over. Only reachable on an
+ *                 extraordinarily delayed return; reported truthfully
+ *                 rather than squeezed into 'active'.
+ *   'refunded'    purchased and fully refunded. NEVER reported as a
+ *                 successful new purchase.
+ *   'ended'       the plan was cancelled. Nothing is owed.
+ *   'none'        no plan answers to this id for this customer - a missing
+ *                 parameter, a stranger's id, a guess, or a row that no
+ *                 longer exists. All four are one answer, deliberately.
  */
-export function resolveAnnualCheckoutReturnState(
-  plans: Array<{ status?: unknown; purchased_at?: unknown }> | null | undefined
-): AnnualCheckoutReturnState {
-  const rows = Array.isArray(plans) ? plans : [];
-  if (rows.length === 0) return "none";
+export type AnnualCheckoutReturnState =
+  | "processing"
+  | "active"
+  | "completed"
+  | "refunded"
+  | "ended"
+  | "none";
 
-  const purchased = rows.some(
-    plan => isPurchasedAnnualPlanRow(plan) && (plan.status === "active" || plan.status === "completed")
-  );
-  if (purchased) return "active";
+/** The columns the return resolver reads. All of them are 041-granted. */
+export type AnnualCheckoutReturnRow = {
+  id: string;
+  status: string;
+  payment_status: string;
+  purchased_at: string | null;
+};
 
-  // A row exists but is not a contract yet. 'cancelled' is deliberately
-  // not "processing": nothing is settling for it.
-  const settling = rows.some(plan => plan.status === "pending");
-  return settling ? "processing" : "none";
+/**
+ * Resolves the post-checkout state of ONE NAMED PLAN, from durable rows.
+ *
+ * ── WHY THE TARGET ID IS REQUIRED (Phase 4B8.1) ───────────────
+ *
+ * The first version of this function asked "does this customer hold any
+ * annual plan", and that is the wrong question. A customer may hold
+ * several: one bought last year and still running, one created by the
+ * checkout they are returning from right now. Answering from the set
+ * would let LAST YEAR'S plan report today's payment as successful, which
+ * is exactly the mistake a post-checkout screen must not make.
+ *
+ * So the caller must name the plan. lib/annualPlanCheckout.ts puts that
+ * id - the local row it created before contacting Stripe - into both
+ * return URLs, and nothing else in the set may influence the answer. Two
+ * checkouts open at once therefore resolve independently, and no
+ * heuristic is used to guess which one is meant: not the newest row, not
+ * purchased_at ordering, not the amount, not the SKU.
+ *
+ * ── THE ID PROVES NOTHING, AND IS NOT MEANT TO ────────────────
+ *
+ * It is an identifier a browser can edit, and it is treated as one. It is
+ * not payment proof: only the webhook activates a plan, and this function
+ * reads what the database says rather than what the URL hopes. It is not
+ * ownership either: the rows passed in are the ones RLS already proved
+ * belong to the signed-in user, so a stranger's id - or a guessed uuid -
+ * simply matches nothing and answers 'none', the same answer an id that
+ * never existed gets. Nothing here can promote a pending plan.
+ *
+ * ── AND NOTHING ASKS STRIPE ───────────────────────────────────
+ *
+ * No Session is retrieved and no PaymentIntent is inspected, here or in
+ * the browser. A page that could ask Stripe would be a second source of
+ * truth about money, answering before the durable one.
+ */
+export function resolveAnnualCheckoutReturnState(input: {
+  /** The plan id the return URL carried. Untrusted, and only a selector. */
+  targetAnnualPlanId: string | null | undefined;
+  /** The signed-in customer's own plans, as RLS returned them. */
+  plans: AnnualCheckoutReturnRow[] | null | undefined;
+}): AnnualCheckoutReturnState {
+  const target = typeof input?.targetAnnualPlanId === "string" ? input.targetAnnualPlanId.trim() : "";
+  if (!target) return "none";
+
+  const rows = Array.isArray(input?.plans) ? input.plans : [];
+  const plan = rows.find(row => typeof row?.id === "string" && row.id === target);
+  if (!plan) return "none";
+
+  // NOT A PURCHASE YET. A status word alone never promotes a row: a plan
+  // claiming to be active with no purchased_at is a shape migration 039's
+  // annual_plans_running_requires_purchase_check forbids, and the honest
+  // reading of it is "not settled", never "paid".
+  if (!isPurchasedAnnualPlanRow(plan)) return "processing";
+
+  if (plan.status === "cancelled") return "ended";
+
+  // FULLY REFUNDED IS NEVER A SUCCESSFUL PURCHASE, whatever the lifecycle
+  // says. The money went back, and a screen congratulating somebody on a
+  // plan they have been refunded for would be untrue.
+  if (plan.payment_status === "refunded") return "refunded";
+
+  if (plan.status === "completed") return "completed";
+  if (plan.status === "active") return "active";
+
+  // 'pending' with a purchase date, or a word this file has never seen.
+  // Fail closed: it is not a contract this page may celebrate.
+  return "processing";
 }

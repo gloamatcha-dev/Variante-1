@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ANNUAL_ACCOUNT_CADENCE,
+  ANNUAL_CHECKOUT_RETURN_PARAM,
   ANNUAL_ACCOUNT_PAYMENT_STATUSES,
   ANNUAL_ACCOUNT_STATUSES,
   ANNUAL_PLAN_ACCOUNT_SELECT,
@@ -578,73 +579,192 @@ test("22: only purchased plans belong in the account list", () => {
    23-25. THE POST-CHECKOUT RETURN
    ══════════════════════════════════════════════════════════════ */
 
-test("23: the return state is resolved from durable rows only", () => {
-  assert.equal(resolveAnnualCheckoutReturnState([planRow()]), "active");
+const PLAN_B = "dddddddd-4444-4444-8444-dddddddddddd";
+
+const returnRow = (over = {}) => ({
+  id: PLAN_ID,
+  status: "active",
+  payment_status: "paid",
+  purchased_at: PURCHASED_AT,
+  ...over,
+});
+
+test("23: the return state describes THE NAMED PLAN, and only it", () => {
+  const target = { targetAnnualPlanId: PLAN_ID };
+
+  // A plan created but not yet activated: the money is settling.
   assert.equal(
-    resolveAnnualCheckoutReturnState([planRow({ status: "completed", completed_at: "2027-01-04T11:00:00.000Z" })]),
-    "active"
-  );
-  // Written before Stripe was contacted, not activated yet: the money is
-  // still settling, or the webhook has not landed.
-  assert.equal(
-    resolveAnnualCheckoutReturnState([{ status: "pending", purchased_at: null }]),
+    resolveAnnualCheckoutReturnState({
+      ...target,
+      plans: [returnRow({ status: "pending", payment_status: "pending", purchased_at: null })],
+    }),
     "processing"
   );
-  assert.equal(resolveAnnualCheckoutReturnState([]), "none");
-  assert.equal(resolveAnnualCheckoutReturnState(null), "none");
-  assert.equal(resolveAnnualCheckoutReturnState(undefined), "none");
-  // A purchased plan wins over an abandoned one.
+  // Purchased and live.
+  assert.equal(resolveAnnualCheckoutReturnState({ ...target, plans: [returnRow()] }), "active");
+  // An extraordinary delayed return onto a finished plan: truthful,
+  // rather than squeezed into "active".
   assert.equal(
-    resolveAnnualCheckoutReturnState([{ status: "pending", purchased_at: null }, planRow()]),
+    resolveAnnualCheckoutReturnState({ ...target, plans: [returnRow({ status: "completed" })] }),
+    "completed"
+  );
+  // Fully refunded is NEVER reported as a successful purchase.
+  assert.equal(
+    resolveAnnualCheckoutReturnState({ ...target, plans: [returnRow({ payment_status: "refunded" })] }),
+    "refunded"
+  );
+  // A partial refund is still a live contract.
+  assert.equal(
+    resolveAnnualCheckoutReturnState({ ...target, plans: [returnRow({ payment_status: "partially_refunded" })] }),
     "active"
   );
-  // A cancelled row is not "settling".
   assert.equal(
-    resolveAnnualCheckoutReturnState([{ status: "cancelled", purchased_at: null }]),
-    "none"
+    resolveAnnualCheckoutReturnState({ ...target, plans: [returnRow({ status: "cancelled" })] }),
+    "ended"
   );
 });
 
-test("24: a status word cannot be promoted without purchased_at", () => {
-  // The one dangerous shape: a row claiming to be active that was never
-  // paid for. It is not reported as a held contract.
+test("24: a missing, malformed or unknown target answers the same neutral 'none'", () => {
+  for (const targetAnnualPlanId of [null, undefined, "", "   ", "not-a-uuid", PLAN_B]) {
+    assert.equal(
+      resolveAnnualCheckoutReturnState({ targetAnnualPlanId, plans: [returnRow()] }),
+      "none",
+      `target ${String(targetAnnualPlanId)} was resolved`
+    );
+  }
+  // No rows at all is the same answer as a stranger's id: the account
+  // cannot tell a customer whether somebody else's plan exists, because
+  // RLS returned nothing in either case.
+  assert.equal(resolveAnnualCheckoutReturnState({ targetAnnualPlanId: PLAN_ID, plans: [] }), "none");
+  assert.equal(resolveAnnualCheckoutReturnState({ targetAnnualPlanId: PLAN_ID, plans: null }), "none");
+  assert.equal(resolveAnnualCheckoutReturnState({ targetAnnualPlanId: PLAN_ID, plans: undefined }), "none");
+  assert.equal(resolveAnnualCheckoutReturnState({}), "none");
+});
+
+test("25: an OLD active plan can never make a NEW pending plan look paid", () => {
+  // The regression this phase exists for. Plan A was bought months ago
+  // and is running; plan B was created by the checkout the customer is
+  // returning from right now.
+  const planA = returnRow({ id: PLAN_ID, status: "active", purchased_at: "2025-03-01T10:00:00.000Z" });
+  const planB = returnRow({ id: PLAN_B, status: "pending", payment_status: "pending", purchased_at: null });
+
   assert.equal(
-    resolveAnnualCheckoutReturnState([{ status: "active", purchased_at: null }]),
-    "none"
+    resolveAnnualCheckoutReturnState({ targetAnnualPlanId: PLAN_B, plans: [planA, planB] }),
+    "processing",
+    "an older plan answered for a brand-new checkout"
+  );
+  // Row order must not matter either.
+  assert.equal(
+    resolveAnnualCheckoutReturnState({ targetAnnualPlanId: PLAN_B, plans: [planB, planA] }),
+    "processing"
+  );
+  // Once B genuinely activates, B says so - and A still has no say.
+  assert.equal(
+    resolveAnnualCheckoutReturnState({
+      targetAnnualPlanId: PLAN_B,
+      plans: [planA, { ...planB, status: "active", payment_status: "paid", purchased_at: "2026-09-01T08:00:00.000Z" }],
+    }),
+    "active"
+  );
+  // And asking about A still answers for A.
+  assert.equal(
+    resolveAnnualCheckoutReturnState({ targetAnnualPlanId: PLAN_ID, plans: [planA, planB] }),
+    "active"
+  );
+});
+
+test("26: two checkouts open at once resolve independently, with no heuristic", () => {
+  const first = returnRow({ id: PLAN_ID, status: "pending", payment_status: "pending", purchased_at: null });
+  const second = returnRow({ id: PLAN_B, status: "pending", payment_status: "pending", purchased_at: null });
+
+  assert.equal(
+    resolveAnnualCheckoutReturnState({ targetAnnualPlanId: PLAN_B, plans: [first, second] }),
+    "processing"
+  );
+  // Now the SECOND one settles. Returning from the first must still say
+  // processing: it is a different contract.
+  const settled = { ...second, status: "active", payment_status: "paid", purchased_at: "2026-09-01T08:00:00.000Z" };
+  assert.equal(
+    resolveAnnualCheckoutReturnState({ targetAnnualPlanId: PLAN_ID, plans: [first, settled] }),
+    "processing"
   );
   assert.equal(
-    resolveAnnualCheckoutReturnState([{ status: "active", purchased_at: "" }]),
-    "none"
+    resolveAnnualCheckoutReturnState({ targetAnnualPlanId: PLAN_B, plans: [first, settled] }),
+    "active"
   );
-  // And migration 039 refuses that row anyway.
+
+  // No "latest row", no purchased_at ordering, no amount or SKU matching.
+  const resolver = accountCode.slice(accountCode.indexOf("export function resolveAnnualCheckoutReturnState"));
+  for (const banned of [
+    "sort", "reduce", "slice", "purchased_at >", "Math.max", "total_gross_cents",
+    "sku", "amount", "[0]", "at(-1)", "pop()",
+  ]) {
+    assert.ok(!resolver.includes(banned), `the resolver guesses with ${banned}`);
+  }
+  assert.ok(resolver.includes("rows.find(row => typeof row?.id === \"string\" && row.id === target)"));
+});
+
+test("27: a status word alone cannot promote a plan, and neither can the URL", () => {
+  // The dangerous shape: a row claiming to be active that was never paid
+  // for. It is reported as still settling, never as a held contract.
+  assert.equal(
+    resolveAnnualCheckoutReturnState({
+      targetAnnualPlanId: PLAN_ID,
+      plans: [returnRow({ status: "active", purchased_at: null })],
+    }),
+    "processing"
+  );
+  assert.equal(
+    resolveAnnualCheckoutReturnState({
+      targetAnnualPlanId: PLAN_ID,
+      plans: [returnRow({ status: "completed", purchased_at: "" })],
+    }),
+    "processing"
+  );
+  // Migration 039 refuses that row anyway.
   assert.match(m039, /annual_plans_running_requires_purchase_check/);
-});
 
-test("25: the query string is UI intent, and no payment proof may come from the browser", () => {
-  // The resolver takes ROWS. There is no session id, no PaymentIntent, no
-  // amount and no plan id it could be handed instead.
+  // The resolver takes an id and rows. There is nothing else it could be
+  // handed - no session, no PaymentIntent, no amount, no query string.
   const resolver = accountCode.slice(accountCode.indexOf("export function resolveAnnualCheckoutReturnState"));
   for (const banned of [
     "annual=processing", "annual=cancelled", "searchParams", "URLSearchParams", "location",
-    "window", "sessionId", "session_id", "paymentIntent", "payment_intent", "stripe",
+    "window", "sessionId", "session_id", "paymentIntent", "payment_intent", "stripe", "fetch(",
   ]) {
     assert.ok(!resolver.includes(banned), `the resolver accepts ${banned} from the browser`);
   }
-  // The redirect itself still carries no identifier, so nothing in a URL
-  // could be mistaken for evidence.
+});
+
+test("28: the return URLs carry the LOCAL plan id and nothing else", () => {
   const checkout = read("lib/annualPlanCheckout.ts");
-  assert.match(checkout, /success_url: `\$\{origin\}\/account\?annual=processing`/);
-  assert.match(checkout, /cancel_url: `\$\{origin\}\/account\?annual=cancelled`/);
-  for (const leak of ["annual=processing&", "plan_id=", "session_id={CHECKOUT_SESSION_ID}", "payment_intent="]) {
-    assert.ok(!checkout.includes(leak), `the redirect leaks ${leak}`);
+  assert.ok(checkout.includes(
+    "success_url: `${origin}/account?annual=processing&annualPlanId=${encodeURIComponent(annualPlanId)}`"
+  ));
+  assert.ok(checkout.includes(
+    "cancel_url: `${origin}/account?annual=cancelled&annualPlanId=${encodeURIComponent(annualPlanId)}`"
+  ));
+  assert.equal(ANNUAL_CHECKOUT_RETURN_PARAM, "annualPlanId");
+  // The value is the LOCAL row created before Stripe was contacted - the
+  // same id the session metadata already carries.
+  assert.ok(checkout.includes("annualPlanId,"));
+  // Nothing that could be mistaken for payment proof travels in a URL.
+  const urls = [...checkout.matchAll(/(?:success|cancel)_url: `[^`]*`/g)].map(m => m[0]);
+  assert.equal(urls.length, 2);
+  for (const url of urls) {
+    for (const leak of [
+      "payment_intent", "paymentIntent", "session.id", "CHECKOUT_SESSION_ID",
+      "email", "requestId", "fingerprint", "token", "amount", "total",
+    ]) {
+      assert.ok(!url.includes(leak), `a return URL carries ${leak}`);
+    }
   }
 });
 
 /* ══════════════════════════════════════════════════════════════
-   26-28. OWNERSHIP, AND THE BOUNDARY
+   29-31. OWNERSHIP, AND THE BOUNDARY
    ══════════════════════════════════════════════════════════════ */
 
-test("26: ownership is enforced by RLS in Postgres, not by this module", () => {
+test("29: ownership is enforced by RLS in Postgres, not by this module", () => {
   // The account reads its own rows with the USER'S client, exactly as the
   // portal already reads orders and subscriptions. Both policies scope to
   // the signed-in user, and a wrong id therefore returns ZERO ROWS - the
@@ -667,11 +787,14 @@ test("26: ownership is enforced by RLS in Postgres, not by this module", () => {
   assert.ok(!accountCode.includes("getSupabaseAdmin"));
 });
 
-test("27: this phase adds no endpoint, no migration and no frontend change", () => {
+test("30: the account architecture stays as it is: no endpoint, no portal redesign", () => {
+  // PHASE 4B8.1 added exactly one migration, and it grants privileges
+  // only - no table, no column, no function, no policy, no row.
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 40);
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 40), [], "a 041 appeared");
+  assert.equal(migrations.length, 41);
+  assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 41), [], "a 042 appeared");
 
   // The API surface is unchanged: no account endpoint exists, because the
   // portal reads its own rows under RLS.
@@ -701,7 +824,7 @@ test("27: this phase adds no endpoint, no migration and no frontend change", () 
   ], "the API surface changed in a read-model phase");
 });
 
-test("28: the account portal was not redesigned by this phase", () => {
+test("31: the account portal was not redesigned by this phase", () => {
   // The read model exists to be wired up by the UI phase that follows.
   // Nothing in this one renders it, and the portal's existing reads are
   // untouched.

@@ -810,9 +810,27 @@ test("29: a successful response activates nothing and creates nothing", () => {
   }
   // The response says a session exists, and nothing more.
   assert.ok(flow.includes("return Response.json({ sessionId: session.id, url: session.url }, { status: 200 });"));
-  // The success URL grants nothing and assumes no order.
-  assert.ok(flow.includes("success_url: `${origin}/account?annual=processing`"));
-  assert.ok(flow.includes("cancel_url: `${origin}/account?annual=cancelled`"));
+  // The success URL grants nothing and assumes no order. PHASE 4B8.1
+  // added the LOCAL annual plan id to both URLs so the account page can
+  // ask about the plan THIS checkout created; it is correlation, not
+  // evidence, and it is read back under RLS.
+  assert.ok(flow.includes(
+    "success_url: `${origin}/account?annual=processing&annualPlanId=${encodeURIComponent(annualPlanId)}`"
+  ));
+  assert.ok(flow.includes(
+    "cancel_url: `${origin}/account?annual=cancelled&annualPlanId=${encodeURIComponent(annualPlanId)}`"
+  ));
+  // And nothing else rides along in a URL the customer can edit.
+  const urls = [...flow.matchAll(/(?:success|cancel)_url: `[^`]*`/g)].map(m => m[0]);
+  assert.equal(urls.length, 2);
+  for (const url of urls) {
+    for (const leak of [
+      "payment_intent", "session.id", "CHECKOUT_SESSION_ID", "customerEmail", "email",
+      "requestId", "fingerprint", "attempt.id", "totalGrossCents", "amount",
+    ]) {
+      assert.ok(!url.includes(leak), `a return URL carries ${leak}`);
+    }
+  }
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -877,24 +895,39 @@ test("31: the live checkout flows and the webhook are untouched", () => {
   }
 });
 
-test("32: 040 is the only new migration, and 001-039 are untouched", () => {
+test("32: the checkout phase's own migrations are untouched, and 041 is not its work", () => {
+  // PHASE 4B8.1 RE-PINNED THIS GUARD. It was written when 040 was the
+  // newest file and 041 did not exist; 041 now does, and it is a
+  // PRIVILEGE migration belonging to the account read surface rather than
+  // to checkout. What this guard protects is unchanged: the checkout
+  // phase's own migrations are live and immutable.
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 40);
-  assert.equal(migrations[migrations.length - 1], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(migrations[migrations.length - 2], "039_b2c_annual_plan_foundation.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 40), [],
-    "a migration 041 or beyond appeared");
-  // 040 is NOT APPLIED yet, so it may still be edited in place - that is
-  // the whole reason it is a file under review rather than a 041. Every
-  // migration below it is live and may not be touched, which is what
-  // this guard is for. (The diff sees modified TRACKED files only; a
-  // brand-new migration is caught by the count and the ordering above.)
+  assert.equal(migrations.length, 41);
+  assert.equal(migrations[38], "039_b2c_annual_plan_foundation.sql");
+  assert.equal(migrations[39], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 41), [],
+    "a migration 042 or beyond appeared");
+  // 041 touches privileges only: it creates no table, no column and no
+  // function, so it cannot have changed anything this suite proves.
+  const m041 = read("supabase/migrations/041_annual_account_column_privileges.sql");
+  // The EXECUTABLE region only: its prose legitimately discusses the
+  // statements it refuses to contain.
+  const executable = m041
+    .slice(m041.indexOf("begin;"), m041.indexOf("commit;") + "commit;".length)
+    .split(NEWLINE)
+    .filter(line => !line.trim().startsWith("--"))
+    .join(NEWLINE)
+    .toLowerCase();
+  for (const banned of ["create table", "alter table", "create function", "insert into", "update ", "delete"]) {
+    assert.ok(!executable.includes(banned), `041 contains ${banned}`);
+  }
+  assert.ok(executable.includes("revoke select on table public.annual_plans"));
   const changed = execFileSync("git", ["diff", "--name-only", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
-  const live = touched.filter(rel => !rel.endsWith("040_annual_checkout_retry_fingerprints.sql"));
-  assert.deepEqual(live, [], "a live, immutable migration was edited");
+  assert.deepEqual(touched, [], "a live, immutable migration was edited");
 });
 
 /* ══════════════════════════════════════════════════════════════

@@ -1991,7 +1991,8 @@ test("034: it is the next free number and 022-033 are untouched", () => {
     ["035_subscription_email_deliveries.sql", "036_subscription_payment_status.sql",
      "037_subscription_refund_correlation.sql", "038_one_time_refund_writer_concurrency.sql",
      "039_b2c_annual_plan_foundation.sql",
-     "040_annual_checkout_retry_fingerprints.sql"],
+     "040_annual_checkout_retry_fingerprints.sql",
+     "041_annual_account_column_privileges.sql"],
     "an unreviewed migration above 034 appeared"
   );
   // AND 039 REDEFINES NOTHING 034 OWNS. It is a prepaid plan with no

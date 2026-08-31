@@ -475,8 +475,24 @@ export async function handleAnnualPlanCheckout(
         // delivery is scheduled and no order exists until the webhook
         // phase says so. Deliberately a minimal existing route - the
         // annual success experience is a later phase.
-        success_url: `${origin}/account?annual=processing`,
-        cancel_url: `${origin}/account?annual=cancelled`,
+        //
+        // ── THE PLAN ID IS CORRELATION, NOT EVIDENCE (4B8.1) ──
+        //
+        // The LOCAL annual plan uuid, which exists before Stripe is
+        // contacted and is already in this session's metadata. It is
+        // carried back so the account page can ask about THE PLAN THIS
+        // CHECKOUT CREATED rather than about "any annual plan this
+        // customer holds" - a customer may hold several, and an older
+        // active one must never make a brand-new pending one look paid.
+        //
+        // It is an identifier, not a secret and not a capability: reading
+        // it back is an RLS-scoped query, so a stranger's id or a guessed
+        // uuid matches nothing and is indistinguishable from an id that
+        // never existed. No PaymentIntent, no Session id, no email, no
+        // amount and no fingerprint goes into either URL - a return URL is
+        // the one place in this flow a customer can freely edit.
+        success_url: `${origin}/account?annual=processing&annualPlanId=${encodeURIComponent(annualPlanId)}`,
+        cancel_url: `${origin}/account?annual=cancelled&annualPlanId=${encodeURIComponent(annualPlanId)}`,
         metadata: buildAnnualSessionMetadata({
           requestId,
           checkoutAttemptId: attempt.id,

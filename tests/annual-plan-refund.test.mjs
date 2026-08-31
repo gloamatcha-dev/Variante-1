@@ -848,9 +848,10 @@ test("28: the rules module is a leaf, and the wiring is where the effects are", 
 test("29: this phase adds no migration, no route and no customer action", () => {
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 40);
-  assert.equal(migrations[migrations.length - 1], "040_annual_checkout_retry_fingerprints.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 40), [], "a 041 appeared");
+  assert.equal(migrations.length, 41);
+  assert.equal(migrations[migrations.length - 1], "041_annual_account_column_privileges.sql");
+  assert.equal(migrations[migrations.length - 2], "040_annual_checkout_retry_fingerprints.sql");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 41), [], "a 042 appeared");
 
   // No annual refund endpoint, and no browser-triggered refund anywhere.
   const annualRoutes = readdirSync(path.join(ROOT, "app/api/annual-plan"), { withFileTypes: true })

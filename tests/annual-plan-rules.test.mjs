@@ -587,14 +587,15 @@ test("26: this phase created no Stripe object and no recurring price", () => {
   }
 });
 
-test("27: 039 is untouched, 040 is the highest, and there is no 041", () => {
+test("27: 039 and 040 are untouched, 041 is the highest, and there is no 042", () => {
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations[migrations.length - 1], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(migrations[migrations.length - 2], "039_b2c_annual_plan_foundation.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 40), [],
-    "a migration 041 or beyond appeared");
-  assert.equal(migrations.length, 40);
+  assert.equal(migrations[migrations.length - 1], "041_annual_account_column_privileges.sql");
+  assert.equal(migrations[migrations.length - 2], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(migrations[migrations.length - 3], "039_b2c_annual_plan_foundation.sql");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 41), [],
+    "a migration 042 or beyond appeared");
+  assert.equal(migrations.length, 41);
   // 039 is LIVE and therefore immutable. 040 is NOT APPLIED yet, so it
   // may still be edited in place - that is the whole reason it is a file
   // under review rather than a 041 - and it is the only one that may.

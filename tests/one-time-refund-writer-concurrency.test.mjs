@@ -23,6 +23,7 @@ const MIGRATIONS_DIR = path.join(ROOT, "supabase/migrations");
 const MIGRATION_038 = "038_one_time_refund_writer_concurrency.sql";
 const MIGRATION_039 = "039_b2c_annual_plan_foundation.sql";
 const MIGRATION_040 = "040_annual_checkout_retry_fingerprints.sql";
+const MIGRATION_041 = "041_annual_account_column_privileges.sql";
 const MIGRATION_037 = "037_subscription_refund_correlation.sql";
 const MIGRATION_019 = "019_order_lifecycle_tracking.sql";
 
@@ -99,22 +100,24 @@ test("1: 038 exists, owns its number, and 039 is the only one above it", () => {
   // in tests/annual-plan-foundation-migration.test.mjs. 038 is therefore
   // no longer the highest, and this is re-pinned rather than deleted:
   // what it protects is that no UNREVIEWED migration appeared.
-  assert.equal(files[files.length - 2], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 3], MIGRATION_038, "038 must be the one before it");
-  assert.equal(files[files.length - 4], MIGRATION_037, "037 must be the one before that");
+  assert.equal(files[files.length - 3], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 4], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 5], MIGRATION_037, "037 must be the one before that");
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
 
-test("2: no migration 041 or beyond", () => {
+test("2: no migration 042 or beyond", () => {
   // Phase 4B3.2 added 040, the annual checkout retry fingerprints,
   // reviewed in tests/annual-plan-checkout.test.mjs.
   const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 38).sort();
-  assert.deepEqual(beyond, [MIGRATION_039, MIGRATION_040],
-    "an unreviewed migration appeared after 040");
+  // Phase 4B8.1 added 041, column-level privileges on the two annual
+  // tables, reviewed in tests/annual-account-privileges-migration.test.mjs.
+  assert.deepEqual(beyond, [MIGRATION_039, MIGRATION_040, MIGRATION_041],
+    "an unreviewed migration appeared after 041");
   // And 039 kept its hands off this phase's writer entirely.
-  for (const name of [MIGRATION_039, MIGRATION_040]) {
+  for (const name of [MIGRATION_039, MIGRATION_040, MIGRATION_041]) {
     const sql = read(`supabase/migrations/${name}`);
     assert.ok(!sql.includes("function public.apply_order_refund_state("),
       `${name} redefined the one-time refund writer`);

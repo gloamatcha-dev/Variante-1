@@ -90,14 +90,20 @@ test("1, 2: 036 exists, owns its number, and 037 is the only thing above it", ()
   // reviewed in tests/annual-plan-foundation-migration.test.mjs. The
   // guard is re-pinned, not deleted: it protects "no UNREVIEWED
   // migration appeared", never "the stack stopped growing".
-  assert.equal(files[files.length - 1], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(files[files.length - 2], "039_b2c_annual_plan_foundation.sql");
-  assert.equal(files[files.length - 3], "038_one_time_refund_writer_concurrency.sql");
-  assert.equal(files[files.length - 4], "037_subscription_refund_correlation.sql");
-  assert.equal(files[files.length - 5], MIGRATION_036, "036 must still be the one before 037");
+  // PHASE 4B8.1 ADDED MIGRATION 041 (column-level privileges that
+  // narrow the annual account read surface), reviewed in
+  // tests/annual-account-privileges-migration.test.mjs. Re-pinned
+  // rather than deleted: this guard protects "no UNREVIEWED migration
+  // appeared", never "the stack stopped growing".
+  assert.equal(files[files.length - 1], "041_annual_account_column_privileges.sql");
+  assert.equal(files[files.length - 2], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 3], "039_b2c_annual_plan_foundation.sql");
+  assert.equal(files[files.length - 4], "038_one_time_refund_writer_concurrency.sql");
+  assert.equal(files[files.length - 5], "037_subscription_refund_correlation.sql");
+  assert.equal(files[files.length - 6], MIGRATION_036, "036 must still be the one before 037");
   assert.deepEqual(files.filter(f => f.startsWith("037")), ["037_subscription_refund_correlation.sql"]);
-  assert.ok(!files.some(f => f.startsWith("041")), "a 041 appeared");
-  assert.equal(files.length, 40);
+  assert.ok(!files.some(f => f.startsWith("042")), "a 042 appeared");
+  assert.equal(files.length, 41);
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length);

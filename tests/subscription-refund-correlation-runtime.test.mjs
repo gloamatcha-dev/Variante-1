@@ -672,7 +672,8 @@ test("55: this phase added no migration, and the only ones after it are 038 and 
   const beyond = readdirSync(MIGRATIONS).filter(name => Number(name.slice(0, 3)) > 37).sort();
   assert.deepEqual(beyond, ["038_one_time_refund_writer_concurrency.sql",
                             "039_b2c_annual_plan_foundation.sql",
-     "040_annual_checkout_retry_fingerprints.sql"],
+     "040_annual_checkout_retry_fingerprints.sql",
+                            "041_annual_account_column_privileges.sql"],
     "an unreviewed migration appeared after 037");
   const sql039 = withoutComments(read("supabase/migrations/039_b2c_annual_plan_foundation.sql"));
   assert.ok(!sql039.includes("apply_order_refund_state_by_invoice"),
