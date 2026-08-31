@@ -162,13 +162,46 @@ export async function POST(request: Request): Promise<Response> {
         await settleAnnualCheckoutSession(
           session.id, annual.metadata, annualWebhookDeps(stripe), "async_payment_succeeded"
         );
+      } else if (session.mode === "subscription") {
+        // UNCHANGED, and deliberately. invoice.paid is the canonical
+        // fulfillment event for a subscription and the only one that
+        // creates an order; a delayed first payment produces that invoice
+        // when the money settles, so there is nothing for this event to
+        // do that would not be a second path to the same order.
+        console.error(
+          `Stripe webhook: subscription session ${session.id} paid asynchronously - awaiting invoice.paid.`
+        );
+      } else {
+        // ── THE ONE-TIME DELAYED PAYMENT (Pre-go-live audit) ──
+        //
+        // THE GAP THIS CLOSES. SEPA Direct Debit and the bank-transfer
+        // family complete a Checkout Session immediately and confirm the
+        // money days later. The session therefore arrives at
+        // checkout.session.completed with payment_status "unpaid", where
+        // evaluateStripeSessionPayment correctly refuses it and no order
+        // is created - and until now nothing ever looked at that session
+        // again. THIS event is what says the money actually arrived, and
+        // ignoring it meant a customer could pay in full and never
+        // receive an order.
+        //
+        // Which payment methods are offered is Stripe Dashboard
+        // configuration, and no flow in this repository restricts them,
+        // so the one-time flow is made safe for delayed methods rather
+        // than made to depend on them being switched off - the same
+        // choice Phase 4B4.2 made for the annual plan.
+        //
+        // IT IS THE SAME SETTLEMENT, NOT A SECOND ONE. This calls the
+        // ordinary handler, which re-retrieves the Session from Stripe,
+        // resolves the same durable checkout attempt, applies the same
+        // frozen-total evaluation, marks the same attempt paid and mints
+        // the order through create_order_from_paid_checkout - which locks
+        // the attempt row, returns the existing order if there is one,
+        // and is backed by migration 011's unique index over the paid
+        // attempt. So completed-then-async, async-then-completed and any
+        // number of redeliveries of either converge on exactly one order,
+        // and both order emails keep their own claims.
+        await handleCheckoutSessionCompleted(stripe, session);
       }
-      // A NON-ANNUAL async payment keeps today's semantics exactly: it is
-      // acknowledged and nothing happens. Solving delayed payments for
-      // one-time orders is a separate decision and is not made here - and
-      // in particular this must never fall through to the one-time
-      // handler, which would create an order from an event the rest of
-      // that flow has never been designed around.
     } else if (event.type === "checkout.session.async_payment_failed") {
       // Phase 4B4.2. The money did not arrive. This creates NOTHING: it
       // calls a pure function that has no writer to call, so it cannot

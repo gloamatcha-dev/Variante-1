@@ -1318,14 +1318,30 @@ test("47: delayed payment methods are handled without restricting them", () => {
   // The route now handles both async events, for ANNUAL sessions only.
   assert.ok(routeCode.includes('event.type === "checkout.session.async_payment_succeeded"'));
   assert.ok(routeCode.includes('event.type === "checkout.session.async_payment_failed"'));
-  // Delayed payments for ONE-TIME orders remain the open decision, and
-  // the two async arms must never reach that handler.
-  const asyncArms = routeCode.slice(
-    routeCode.indexOf('event.type === "checkout.session.async_payment_succeeded"'),
-    routeCode.indexOf('event.type === "invoice.paid"'));
-  assert.ok(!asyncArms.includes("handleCheckoutSessionCompleted"),
-    "a delayed one-time payment now creates an order");
-  assert.ok(!asyncArms.includes("handleSubscriptionSessionCompleted"));
+  // THE PRE-GO-LIVE AUDIT CLOSED THE ONE-TIME HALF. When 4B4.2 ran, a
+  // delayed one-time payment was an open decision and this guard said the
+  // async arms must not reach that handler. They now do - deliberately,
+  // because ignoring the event meant a customer could pay by SEPA and
+  // never receive an order. What this guard protects is unchanged: the
+  // annual session is routed FIRST, and the one-time settlement is the
+  // SAME function the ordinary paid event calls, never a second path.
+  const asyncSuccess = sliceBetween(routeCode,
+    'event.type === "checkout.session.async_payment_succeeded"',
+    'event.type === "checkout.session.async_payment_failed"');
+  const annualAt = asyncSuccess.indexOf('if (annual.kind === "annual") {');
+  const oneTimeAt = asyncSuccess.indexOf("await handleCheckoutSessionCompleted(stripe, session);");
+  assert.ok(annualAt > 0 && oneTimeAt > annualAt,
+    "an annual session can reach the one-time handler on the async event");
+  assert.equal([...asyncSuccess.matchAll(/handleCheckoutSessionCompleted\(/g)].length, 1);
+  // A subscription session is still settled by invoice.paid alone.
+  assert.ok(!asyncSuccess.includes("handleSubscriptionSessionCompleted"));
+  // And the FAILURE arm still creates nothing at all.
+  const asyncFailed = sliceBetween(routeCode,
+    'event.type === "checkout.session.async_payment_failed"',
+    'event.type === "invoice.paid"');
+  for (const banned of ["handleCheckoutSessionCompleted", "handleSubscriptionSessionCompleted", "await "]) {
+    assert.ok(!asyncFailed.includes(banned), `the async failure arm calls ${banned}`);
+  }
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -1563,17 +1579,33 @@ test("57: a NON-annual async event never enters annual settlement", () => {
     assert.ok(guard > 0, from);
     assert.ok(guard < arm.indexOf(call), `${call} runs outside the annual guard`);
   }
-  // ...and in particular does not reach the one-time order path, which
-  // remains driven by checkout.session.completed alone.
+  // ...and in particular a not_annual session never reaches ANNUAL
+  // settlement. The pre-go-live audit gave the one-time handler a second
+  // call site on purpose - the async event is how a SEPA payment is
+  // eventually settled - so what is pinned now is that both call sites
+  // are the SAME function, outside the annual guard, and that the
+  // subscription handler still has exactly one.
   const completed = sliceBetween(routeCode,
     'if (event.type === "checkout.session.completed")',
     'event.type === "checkout.session.async_payment_succeeded"');
   assert.ok(completed.includes("await handleCheckoutSessionCompleted(stripe, session);"));
   assert.ok(completed.includes("await handleSubscriptionSessionCompleted(stripe, session);"));
-  assert.equal((routeCode.match(/handleCheckoutSessionCompleted\(stripe, session\)/g) ?? []).length, 1,
-    "the one-time handler gained a second call site");
+  assert.equal((routeCode.match(/handleCheckoutSessionCompleted\(stripe, session\)/g) ?? []).length, 2,
+    "the one-time settlement is no longer reached from exactly the two paid triggers");
+  assert.equal((routeCode.match(/async function handleCheckoutSessionCompleted\(/g) ?? []).length, 1,
+    "a second one-time settlement function appeared");
   assert.equal((routeCode.match(/handleSubscriptionSessionCompleted\(stripe, session\)/g) ?? []).length, 1,
     "the subscription handler gained a second call site");
+  // Both one-time call sites sit OUTSIDE the annual guard.
+  for (const [from, to] of [
+    ['if (event.type === "checkout.session.completed")', 'event.type === "checkout.session.async_payment_succeeded"'],
+    ['event.type === "checkout.session.async_payment_succeeded"', 'event.type === "checkout.session.async_payment_failed"'],
+  ]) {
+    const armCode = sliceBetween(routeCode, from, to);
+    assert.ok(armCode.indexOf('if (annual.kind === "annual") {')
+      < armCode.indexOf("await handleCheckoutSessionCompleted(stripe, session);"),
+      `an annual session could reach the one-time handler in ${from}`);
+  }
 });
 
 test("58: the flag still does not gate any of the three annual arms", () => {
