@@ -601,6 +601,10 @@ test("exactly the three reviewed lifecycle templates were built on this foundati
   // for a message that is not a subscription lifecycle email at all.
   const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
   assert.deepEqual(templates, [
+    // Phase 4B5. NOT a subscription lifecycle email and not a family of
+    // migration 035: an annual plan's purchase confirmation lives on
+    // public.annual_plans, claimed through migration 039's own functions.
+    "annualPurchaseConfirmation.ts",
     "cancellationConfirmation.ts",
     "cancellationOutcome.ts",
     "cancellationRequestNotification.ts",

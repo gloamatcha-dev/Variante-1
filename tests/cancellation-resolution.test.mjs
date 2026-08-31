@@ -962,6 +962,9 @@ test("email: the template is a pure leaf, like its siblings", () => {
   }
   const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
   assert.deepEqual(templates, [
+    // Phase 4B5 added the annual purchase confirmation, reviewed in
+    // tests/annual-purchase-confirmation-email.test.mjs.
+    "annualPurchaseConfirmation.ts",
     "cancellationConfirmation.ts", "cancellationOutcome.ts",
     "cancellationRequestNotification.ts",
     "internalOrderNotification.ts", "orderConfirmation.ts", "paymentProblem.ts",

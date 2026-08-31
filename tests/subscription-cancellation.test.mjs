@@ -2484,7 +2484,7 @@ test("regression: the account reaches this feature ONLY through the endpoint", (
   // is that the CANCELLATION route, service and rules send nothing at
   // all, which the Resend assertions below prove directly.
   const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
-  assert.equal(templates.length, 11, "an unreviewed email template was added");
+  assert.equal(templates.length, 12, "an unreviewed email template was added");
   assert.deepEqual(
     templates.filter(n => /subscription/i.test(n)).sort(),
     ["subscriptionEnded.ts", "subscriptionStarted.ts"],

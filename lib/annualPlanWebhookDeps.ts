@@ -14,6 +14,12 @@ import {
 import type { AnnualWebhookDeps } from "./annualPlanWebhook";
 import type { AnnualWebhookAttempt, AnnualWebhookPlan } from "./annualPlanWebhookRules";
 import type { ClaimedAnnualDelivery } from "./annualDeliveryWorker";
+// Phase 4B5. The purchase confirmation's own ports live in their own deps
+// module for the same reason this file exists at all; here they are only
+// bound to the sender, so the settlement flow receives one function of
+// one argument and cannot reach Supabase or Resend itself.
+import { sendAnnualPurchaseConfirmationEmail } from "./annualPurchaseConfirmationEmail";
+import { annualPurchaseEmailDeps } from "./annualPurchaseConfirmationEmailDeps";
 
 /**
  * The real wiring behind the annual payment webhook (Phase 4B4).
@@ -155,5 +161,10 @@ export function annualWebhookDeps(stripe: Stripe): AnnualWebhookDeps {
     settlePaidAtomically: settleAnnualAttemptPaidAtomically,
     activatePlan: activateAnnualPlan,
     worker: annualDeliveryWorkerDeps,
+    // ONE ARGUMENT: the plan id. The recipient, the money, the pack size
+    // and every date are read from the frozen row by the sender itself,
+    // so nothing the webhook learned from Stripe can reach the message.
+    sendPurchaseEmail: (annualPlanId: string) =>
+      sendAnnualPurchaseConfirmationEmail(annualPlanId, annualPurchaseEmailDeps),
   };
 }

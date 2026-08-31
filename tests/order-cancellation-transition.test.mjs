@@ -1117,6 +1117,9 @@ test("regression: the OPERATOR cancel route still sends nothing at all", () => {
   // about. Migration 029 still creates no refund and mails nobody.
   const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
   assert.deepEqual(templates, [
+    // Phase 4B5 added the annual purchase confirmation, reviewed in
+    // tests/annual-purchase-confirmation-email.test.mjs.
+    "annualPurchaseConfirmation.ts",
     "cancellationConfirmation.ts", "cancellationOutcome.ts",
     "cancellationRequestNotification.ts",
     "internalOrderNotification.ts", "orderConfirmation.ts", "paymentProblem.ts",

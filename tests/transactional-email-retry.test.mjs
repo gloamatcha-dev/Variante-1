@@ -821,6 +821,14 @@ test("idempotency: all six deterministic namespaces still exist and are distinct
     const source = withoutComments(read(`lib/email/${name}`));
     for (const m of source.matchAll(/`gloa\/([a-z-]+)\//g)) namespaces.push(m[1]);
   }
+  // Phase 4B5's key does NOT live in lib/email. It is keyed on an annual
+  // plan rather than on anything an order template knows about, and it
+  // sits beside the decisions that say when a send may happen - see the
+  // note above annualPurchaseConfirmationIdempotencyKey. Scanning that
+  // module too is what keeps this the complete registry rather than a
+  // registry of one directory.
+  for (const m of withoutComments(read("lib/annualPurchaseConfirmationEmail.ts"))
+    .matchAll(/`gloa\/([a-z-]+)\//g)) namespaces.push(m[1]);
   // Phase 3H.2 added gloa/subscription-started/, the first namespace that
   // is keyed on a subscription rather than an order. It is distinct from
   // all five order namespaces, and distinct from the two STRIPE keys in
@@ -830,6 +838,7 @@ test("idempotency: all six deterministic namespaces still exist and are distinct
   // a subscription. It is a different message from gloa/cancellation-request/
   // and gloa/cancellation-outcome/, which are the ORDER cancellation flow.
   assert.deepEqual(namespaces.sort(), [
+    "annual-purchase-confirmation",
     "cancellation-confirmation", "cancellation-outcome", "cancellation-request",
     "internal-order", "payment-problem", "refund", "shipment",
     "subscription-ended", "subscription-started",

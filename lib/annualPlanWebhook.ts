@@ -13,6 +13,7 @@ import {
   type AnnualWebhookPlan,
 } from "./annualPlanWebhookRules";
 import { runAnnualDeliveryWorker, type AnnualDeliveryWorkerSummary } from "./annualDeliveryWorker";
+import type { AnnualPurchaseEmailResult } from "./annualPurchaseConfirmationEmail";
 import type {
   AnnualPaidSettlementOutcome,
   AnnualSessionLinkOutcome,
@@ -50,6 +51,21 @@ import type { AnnualDeliveryWorkerDeps } from "./annualDeliveryWorker";
  *    7. settle the attempt paid ATOMICALLY, write-once
  *    8. activate through migration 039's RPC
  *    9. one bounded pass of the shared delivery worker
+ *   10. the ONE purchase confirmation email, claimed durably (4B5)
+ *
+ * ── STEP 10 IS LAST, AND THAT IS THE POINT ────────────────────
+ *
+ * The customer is told "your purchase is complete" only after this
+ * invocation has proved the payment, settled it, activated the plan and
+ * put Delivery 1 through the shared worker WITHOUT an infrastructure
+ * failure. Sending it earlier would mean congratulating somebody in the
+ * same breath as discovering their first delivery could not be queued.
+ *
+ * A GUARDED refusal is different and does not block the message: a
+ * refunded or non-active plan refusing fulfillment is Phase 4B4.1's guard
+ * working correctly, not a failure, and the email says nothing about
+ * fulfilment it cannot prove - see the note on firstDeliveryStarted in
+ * lib/annualPurchaseConfirmationEmail.ts.
  *
  * ── THE FEATURE FLAG IS NOT CHECKED HERE ──────────────────────
  *
@@ -112,6 +128,16 @@ export type AnnualWebhookDeps = {
     stripePaymentIntentId: string;
   }) => Promise<unknown>;
   worker: AnnualDeliveryWorkerDeps;
+  /**
+   * The ONE purchase confirmation (Phase 4B5).
+   *
+   * Takes a plan id and nothing else - no recipient, no amount, no
+   * content - so this file cannot influence what the customer is told.
+   * Every fact in that message is read from the frozen plan by the sender
+   * itself, and the duplicate guard is migration 039's claim rather than
+   * anything decided here.
+   */
+  sendPurchaseEmail: (annualPlanId: string) => Promise<AnnualPurchaseEmailResult>;
 };
 
 export type AnnualWebhookResult =
@@ -122,6 +148,12 @@ export type AnnualWebhookResult =
       activation: string;
       deliveries: number;
       worker: AnnualDeliveryWorkerSummary;
+      /**
+       * What the purchase confirmation did, or "not_attempted" on the
+       * terminal replay path - which never reaches the sender, because a
+       * plan somebody already ended is not a purchase completing now.
+       */
+      purchaseEmail: AnnualPurchaseEmailResult | "not_attempted";
     }
   | {
       /**
@@ -347,6 +379,12 @@ export async function settleAnnualCheckoutSession(
         activation: "terminal",
         deliveries: 0,
         worker: { claimed: 0, fulfilled: 0, guarded: 0, failed: 0, outcomes: [], errors: [] },
+        // NO EMAIL ON THIS PATH. A historical replay against a plan that
+        // is already completed or cancelled is not a purchase completing
+        // now, and migration 039's claim would refuse a cancelled one
+        // anyway. A confirmation that genuinely failed at purchase time
+        // stays owed and belongs to the retry sweep, not to a replay.
+        purchaseEmail: "not_attempted",
       };
     }
     // Everything else - a conflicting PaymentIntent or session, an
@@ -377,11 +415,72 @@ export async function settleAnnualCheckoutSession(
     );
   }
 
+  // 10. THE ONE PURCHASE CONFIRMATION (Phase 4B5).
+  //
+  //     LAST, and only now. Everything above has proved the payment,
+  //     settled it write-once, activated the plan and put Delivery 1
+  //     through the shared queue without an infrastructure failure. A
+  //     message that says the purchase went through is only honest after
+  //     all of that.
+  //
+  //     THE DUPLICATE GUARD IS NOT HERE. It is migration 039's claim, on
+  //     the plan row, and it is the reason this call is unconditional: a
+  //     redelivery re-runs an activation that answers 'already_active'
+  //     and then reaches this line again, where the claim answers
+  //     'already_sent' and no provider is contacted. Webhook event-id
+  //     suppression is a different mechanism for a different problem and
+  //     is deliberately not the correctness argument for this email.
+  //
+  //     NO FEATURE FLAG. B2C_ANNUAL_PLAN_ENABLED gates new sales, and a
+  //     purchase that settled after an operator turned it off still
+  //     deserves its confirmation - the same reasoning that keeps the
+  //     flag out of the settlement path above.
+  const purchaseEmail = await deps.sendPurchaseEmail(plan.id);
+
+  // ── WHICH OUTCOMES MAKE THE WEBHOOK RETRY ───────────────────
+  //
+  // 'failed' and 'ambiguous' only, and both for the same reason: they are
+  // the two that leave a customer who paid without the message they are
+  // owed, and every operation above them is idempotent, so a redelivery
+  // converges rather than duplicating.
+  //
+  // A retry does NOT re-send blindly. It re-enters the claim:
+  //
+  //   after 'failed'      the row is 'failed', the claim is granted with
+  //                       a FRESH token, and the send is retried under
+  //                       the same provider idempotency key.
+  //   after 'ambiguous'   the row is still 'sending' under a live lease,
+  //                       so the claim answers 'in_flight' and NOTHING is
+  //                       sent. One redelivery acknowledges, and the
+  //                       thirty-minute lease owns recovery from there.
+  //
+  // 'in-flight' is acknowledged rather than retried, deliberately.
+  // Another invocation holds the live claim and is sending right now;
+  // returning retryably would ask Stripe to redeliver against a state
+  // that cannot progress for up to thirty minutes, which is a hot retry
+  // loop that sends no email and fixes nothing. If that worker dies, its
+  // claim goes stale and the retry sweep the next phase wires - selecting
+  // 'failed' and stale 'sending', NEVER NULL - is what recovers it.
+  //
+  // 'already-sent' and 'not-eligible' are acknowledged: the first means
+  // the customer has it, the second means nothing is owed, and no number
+  // of redeliveries changes either.
+  if (purchaseEmail === "failed" || purchaseEmail === "ambiguous") {
+    // The plan IS activated and durable at this point, and Delivery 1 has
+    // been through the queue. Only the confirmation had trouble. The
+    // reason is not repeated here - the sender has already logged a
+    // sanitised one - and no recipient, amount or token reaches this line.
+    throw new Error(
+      `annual plan ${plan.id} settled, purchase confirmation email reported ${purchaseEmail}`
+    );
+  }
+
   return {
     outcome: "settled",
     annualPlanId: plan.id,
     activation: activation.result,
     deliveries: activation.deliveries,
     worker,
+    purchaseEmail,
   };
 }
