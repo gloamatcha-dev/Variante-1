@@ -308,3 +308,104 @@ test("13: the homepage copy, prices and claims were not rewritten", () => {
     assert.ok(!homepage.includes(banned), `the homepage carries ${banned}`);
   }
 });
+
+/* ══════════════════════════════════════════════════════════════
+   14-16. THE BUTTON SYSTEM AND THE NOTIFY CTA
+   ══════════════════════════════════════════════════════════════ */
+
+test("14: three button styles, one set of measurements", () => {
+  // The tokens exist, and the primary reads them rather than restating
+  // its own height, padding, type or tracking.
+  assert.match(css, /--cta-pad:[^;]+;--cta-h:[^;]+;--cta-type:[^;]+;--cta-track:[^}]+\}/);
+  assert.match(css, /\.cta\{[^}]*padding:var\(--cta-pad\)[^}]*min-height:var\(--cta-h\)[^}]*font:var\(--cta-type\)/);
+  assert.match(css, /\.cta\{[^}]*border-radius:0/);
+
+  // Secondary is ONE style now - the berry-filled variant that used to
+  // compete with the primary is gone.
+  assert.ok(!css.includes(".cta.secondary{background:var(--berry)"), "a second secondary style survived");
+  assert.match(css, /\.cta\.secondary\{background:transparent;color:var\(--ink\);border-color:var\(--ink\)\}/);
+
+  // The tertiary is a text link, not a third box.
+  assert.match(css, /\.link-cta\{[^}]*text-decoration:underline/);
+  assert.ok(!/\.link-cta\{[^}]*background:/.test(css), "the text link grew a background");
+
+  // No pills, no shadows anywhere in the button system.
+  const buttons = css.slice(css.indexOf(":root{--cta-pad"), css.indexOf(".link-cta:hover"));
+  for (const banned of ["border-radius:9", "border-radius:5", "box-shadow", "linear-gradient"]) {
+    assert.ok(!buttons.includes(banned), `the button system uses ${banned}`);
+  }
+});
+
+test("15: the hero has one primary, one secondary and one text link", () => {
+  const actions = homepage.slice(
+    homepage.indexOf('<div className="hero-actions">'),
+    homepage.indexOf('</div><div className="hero-art">')
+  );
+  assert.ok(actions.length > 0, "the hero actions moved");
+
+  // Exactly one of each, in priority order.
+  assert.equal([...actions.matchAll(/className="cta"/g)].length, 1, "more than one primary button");
+  assert.equal([...actions.matchAll(/className="cta secondary"/g)].length, 1, "more than one secondary button");
+  assert.equal([...actions.matchAll(/className="link-cta"/g)].length, 1, "more than one tertiary link");
+  assert.ok(actions.indexOf('className="cta"') < actions.indexOf('className="cta secondary"'));
+  assert.ok(actions.indexOf('className="cta secondary"') < actions.indexOf('className="link-cta"'));
+
+  // The whole homepage stays inside the three styles: no fourth class.
+  const classes = [...homepage.matchAll(/className="(cta[^"]*|link-cta)"/g)].map(m => m[1]);
+  for (const name of classes) {
+    assert.ok(["cta", "cta secondary", "link-cta"].includes(name), `an unknown button style: ${name}`);
+  }
+});
+
+test("16: the notify CTA is a link to /contact, and still not a signup", () => {
+  const actions = homepage.slice(
+    homepage.indexOf('<div className="hero-actions">'),
+    homepage.indexOf('</div><div className="hero-art">')
+  );
+  // The arrow function in onClick contains ">", so the match is anchored
+  // on the two things that matter: the style and the destination.
+  const notify = actions.slice(actions.indexOf('className="cta secondary"'), actions.indexOf("</Link>", actions.indexOf('className="cta secondary"')));
+  assert.match(notify, /href="\/contact"/);
+  assert.ok(notify.includes("Benachrichtige mich"), "the notify CTA lost its label");
+
+  // IT COLLECTS NOTHING. No input, no form, no consent box, no provider -
+  // which is what keeps it compatible with the promise the same page
+  // makes further down ("Wir melden uns nicht.").
+  for (const banned of ["<input", "<form", 'type="email"', "checkbox", "subscribe", "mailchimp", "klaviyo"]) {
+    assert.ok(!homepage.includes(banned), `the homepage grew a signup: ${banned}`);
+  }
+  // And the brand statement still says exactly that.
+  assert.ok(site.includes("Wir melden uns nicht."));
+  assert.ok(site.includes("KEIN NEWSLETTER-LÄRM"));
+});
+
+/* ══════════════════════════════════════════════════════════════
+   17-18. THE RECIPE SECTION'S ACCENT AND FILL
+   ══════════════════════════════════════════════════════════════ */
+
+test("17: raspberry is an accent in the recipes, never a fill", () => {
+  // Small things only: the eyebrows, the card rule on hover, the link.
+  assert.match(css, /\.featured-recipes-head \.eyebrow\{color:var\(--berry\)\}/);
+  assert.match(css, /\.recipe-loop-card:hover\{border-top-color:var\(--berry\)\}/);
+  assert.match(css, /\.recipe-loop-card \.eyebrow\{color:var\(--berry\)/);
+  assert.match(css, /\.link-cta:hover\{color:var\(--berry\)/);
+
+  // No berry BACKGROUND anywhere in the recipe section.
+  const recipesCss = css.slice(css.indexOf(".featured-recipes{"), css.indexOf(".daily{"));
+  assert.ok(!/background:var\(--berry\)/.test(recipesCss), "the recipe section is filled with berry");
+});
+
+test("18: the recipe head fills its width and the tiles are taller", () => {
+  // The head is two columns now, so the right half is no longer empty.
+  assert.match(css, /\.featured-recipes-head\{[^}]*display:grid;grid-template-columns:1\.1fr \.9fr/);
+  const rail = site.slice(site.indexOf("function RecipeCarousel()"), site.indexOf("let clockTick"));
+  assert.match(rail, /<div className="featured-recipes-aside">/);
+  assert.match(rail, /<Link className="link-cta" href="\/rezepte">Alle Rezepte →<\/Link>/);
+
+  // Taller tiles, and a cover image inside each one, so a wide desktop
+  // row reads as full rather than as four thin strips.
+  assert.match(css, /\.recipe-loop-img\{width:100%;height:clamp\(240px,22vw,330px\)/);
+  assert.match(css, /\.recipe-loop-img img\{width:100%;height:100%;object-fit:cover/);
+  // The duplicate bottom link is hidden on desktop, shown on mobile.
+  assert.match(css, /@media \(max-width:900px\)\{\.featured-recipes-link\{display:block\}\}/);
+});

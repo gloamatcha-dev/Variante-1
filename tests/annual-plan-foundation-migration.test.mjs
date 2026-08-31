@@ -1048,6 +1048,10 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     "app/GloaSite.tsx",
     "app/layout.tsx",
     "app/globals.css",
+    // One event name, so the notify CTA can be measured like the other
+    // homepage actions. app/analytics.ts dispatches a browser CustomEvent
+    // and nothing else - no network, no storage, no personal data.
+    "app/analytics.ts",
   ];
 
   for (const rel of touched) {
