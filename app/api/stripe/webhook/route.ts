@@ -13,6 +13,9 @@ import {
 import { evaluateStripeSessionPayment } from "../../../../lib/stripeFulfillment";
 import { isRefundEventType, paymentIntentIdFromRefundEvent } from "../../../../lib/stripeRefunds";
 import { syncOrderRefundStateFromStripe } from "../../../../lib/orderRefunds";
+// Phase 4B7. The annual parent's own refund correlation, tried before the
+// ordinary order flow and resolving by the plan's PaymentIntent alone.
+import { syncAnnualPlanRefundStateFromStripe } from "../../../../lib/annualPlanRefunds";
 import { isNewSettledRefundFact } from "../../../../lib/refundConfirmationRules";
 import { sendRefundConfirmationIfNeeded } from "../../../../lib/refundConfirmationEmail";
 import { createOrderFromPaidCheckoutAttempt } from "../../../../lib/orderFulfillment";
@@ -478,6 +481,28 @@ async function handleSubscriptionDeleted(event: Stripe.Event): Promise<void> {
  * Phase 2E-A added one thing after the sync: when the state genuinely
  * MOVED, the customer is told. See the guard below, which is what keeps
  * historical refunds out of anyone's inbox.
+ *
+ * ── PHASE 4B7 ADDED ONE BRANCH IN FRONT OF ALL OF IT ──────────
+ *
+ * A prepaid annual plan is refunded against ITS OWN PaymentIntent, which
+ * lives on the annual parent and on no order at all - migration 039
+ * refuses a synthetic delivery attempt that carries a Stripe payment, so
+ * the thirteen delivery orders are invisible to the lookup below and an
+ * annual refund would otherwise correlate to nothing and be silently
+ * dropped.
+ *
+ * The annual resolver therefore runs FIRST, and it decides only one
+ * thing: does an annual plan carry this intent. If one does, the annual
+ * writer records the money and this handler is finished - the ordinary
+ * order flow must never see an annual intent. If none does, NOTHING was
+ * read from Stripe and nothing was written, and the ordinary flow runs
+ * exactly as it did before this phase: same lookup, same absolute
+ * re-read, same writer, same words, same email.
+ *
+ * NO ANNUAL EMAIL IS SENT. A prepaid contract is not one delivery order,
+ * and the ordinary refund confirmation describes a single order's total.
+ * What a customer is owed after a partial refund of a thirteen-box plan
+ * is a commercial decision this phase does not make.
  */
 async function handleRefundEvent(stripe: Stripe, event: Stripe.Event): Promise<void> {
   const paymentIntentId = paymentIntentIdFromRefundEvent(event.data.object);
@@ -486,6 +511,21 @@ async function handleRefundEvent(stripe: Stripe, event: Stripe.Event): Promise<v
     // Refunds against a charge that has no payment intent (legacy
     // charges) are acknowledged without action rather than guessed at.
     console.error(`Stripe webhook: refund event ${event.id} (${event.type}) has no payment intent - ignored.`);
+    return;
+  }
+
+  // ── THE ANNUAL PARENT, FIRST (Phase 4B7) ────────────────────
+  //
+  // Resolves by annual_plans.stripe_payment_intent_id and by nothing
+  // else. A non-annual intent answers "not_annual" after one indexed
+  // lookup, having issued no Stripe request, and falls through.
+  const annual = await syncAnnualPlanRefundStateFromStripe(stripe, paymentIntentId);
+  if (annual.kind === "annual") {
+    // Counts and words only: the plan id and the writer's answer. No
+    // amount, no customer, no address and no Stripe secret.
+    console.error(
+      `Stripe webhook: annual refund event ${event.id} (${event.type}) for plan ${annual.annualPlanId} -> ${annual.result}`
+    );
     return;
   }
 
