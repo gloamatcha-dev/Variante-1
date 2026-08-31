@@ -38,7 +38,7 @@ import {
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 // Phase 4B4. The annual branch of this same endpoint - one canonical
 // Stripe webhook, a third payment model on it.
-import { routeAnnualSession } from "../../../../lib/annualPlanWebhookRules";
+import { acknowledgeAnnualPaymentFailure, routeAnnualSession } from "../../../../lib/annualPlanWebhookRules";
 import { settleAnnualCheckoutSession } from "../../../../lib/annualPlanWebhook";
 import { annualWebhookDeps } from "../../../../lib/annualPlanWebhookDeps";
 
@@ -132,6 +132,59 @@ export async function POST(request: Request): Promise<Response> {
       } else {
         await handleCheckoutSessionCompleted(stripe, session);
       }
+    } else if (event.type === "checkout.session.async_payment_succeeded") {
+      // Phase 4B4.2. DELAYED PAYMENT METHODS. SEPA Direct Debit and the
+      // bank-transfer family complete a Checkout Session immediately and
+      // confirm the money days later, so the session above arrives with
+      // payment_status "unpaid" and this is the event that says it was
+      // actually paid. Without it a customer could pay in full and never
+      // receive the annual plan they paid for.
+      //
+      // Which payment methods are offered is Stripe Dashboard
+      // configuration - no flow in this repository restricts them - so
+      // annual settlement is made safe for delayed methods rather than
+      // made to depend on them being switched off.
+      const session = event.data.object as Stripe.Checkout.Session;
+      const annual = routeAnnualSession(session.metadata);
+      if (annual.kind === "malformed") {
+        throw new Error(
+          `annual async payment for session ${session.id} has unusable metadata: ${annual.reason}`
+        );
+      }
+      if (annual.kind === "annual") {
+        // THE SAME settlement path, not a second one. It re-retrieves the
+        // Session, re-proves the correlation, checks the frozen total and
+        // settles through the same compare-and-set writers, so a replay
+        // of either event converges on one plan.
+        await settleAnnualCheckoutSession(
+          session.id, annual.metadata, annualWebhookDeps(stripe), "async_payment_succeeded"
+        );
+      }
+      // A NON-ANNUAL async payment keeps today's semantics exactly: it is
+      // acknowledged and nothing happens. Solving delayed payments for
+      // one-time orders is a separate decision and is not made here - and
+      // in particular this must never fall through to the one-time
+      // handler, which would create an order from an event the rest of
+      // that flow has never been designed around.
+    } else if (event.type === "checkout.session.async_payment_failed") {
+      // Phase 4B4.2. The money did not arrive. This creates NOTHING: it
+      // calls a pure function that has no writer to call, so it cannot
+      // mark an attempt paid, activate a plan, claim a delivery or mint
+      // an order even by mistake.
+      //
+      // The pending annual plan and the checkout attempt both survive as
+      // evidence. Cancelling or expiring them would be inventing contract
+      // semantics this event does not carry.
+      const session = event.data.object as Stripe.Checkout.Session;
+      const annual = routeAnnualSession(session.metadata);
+      if (annual.kind === "malformed") {
+        throw new Error(
+          `annual async failure for session ${session.id} has unusable metadata: ${annual.reason}`
+        );
+      }
+      if (annual.kind === "annual") {
+        console.error(acknowledgeAnnualPaymentFailure(annual.metadata, session.id).message);
+      }
     } else if (event.type === "invoice.paid") {
       await handleInvoicePaid(stripe, event);
     } else if (event.type === "invoice.payment_failed") {
@@ -157,9 +210,10 @@ export async function POST(request: Request): Promise<Response> {
     // fulfillment and no paid state. What Phase 3I.B2 added is the
     // customer's warning, and the past_due/unpaid reconciliation that
     // customer.subscription.updated performs from a fresh Stripe read.
-    // checkout.session.async_payment_succeeded / _failed can plug into
-    // this same handleCheckoutSessionCompleted-style flow later without
-    // restructuring this route.
+    // checkout.session.async_payment_succeeded / _failed ARE handled
+    // above, for annual sessions only. Delayed payments for one-time
+    // orders remain an open product decision: those events are
+    // acknowledged with no action, exactly as they were before.
   } catch (err) {
     console.error(
       `Stripe webhook processing failed for event ${event.id} (${event.type}):`,

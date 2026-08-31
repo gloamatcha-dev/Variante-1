@@ -1,12 +1,14 @@
 import type Stripe from "stripe";
 import {
   annualPaymentIntentId,
+  decideAnnualPaymentReadiness,
   decidePaidState,
   decideSessionLink,
   interpretAnnualActivationResult,
   verifyAnnualPaymentAttempt,
   verifyAnnualPlanCorrelation,
   type AnnualSessionMetadata,
+  type AnnualSettlementTrigger,
   type AnnualWebhookAttempt,
   type AnnualWebhookPlan,
 } from "./annualPlanWebhookRules";
@@ -22,10 +24,16 @@ import type { AnnualDeliveryWorkerDeps } from "./annualDeliveryWorker";
  * A paid annual Checkout Session becomes an active annual plan
  * (Phase 4B4).
  *
- * This is the canonical settlement event for a prepaid annual plan, and
+ * This is the canonical settlement path for a prepaid annual plan, and
  * the only one. The browser's return from Stripe is not payment, the
  * success URL grants nothing, and nothing else in the system activates a
  * plan.
+ *
+ * TWO Stripe events reach it (Phase 4B4.2): checkout.session.completed,
+ * and checkout.session.async_payment_succeeded for the delayed
+ * notification methods whose money arrives days after the session does.
+ * They run the SAME verification, not a second architecture - see the
+ * trigger parameter, which changes exactly one decision.
  *
  * ── WHAT IT DOES, IN ORDER ────────────────────────────────────
  *
@@ -37,7 +45,8 @@ import type { AnnualDeliveryWorkerDeps } from "./annualDeliveryWorker";
  *       and cross-check the id metadata named
  *    5. self-heal the Stripe session link ATOMICALLY, or refuse a
  *       different one
- *    6. verify the payment against the FROZEN expected total
+ *    6. verify the payment against the FROZEN expected total, or stop
+ *       here if Stripe has not confirmed it yet
  *    7. settle the attempt paid ATOMICALLY, write-once
  *    8. activate through migration 039's RPC
  *    9. one bounded pass of the shared delivery worker
@@ -105,12 +114,29 @@ export type AnnualWebhookDeps = {
   worker: AnnualDeliveryWorkerDeps;
 };
 
-export type AnnualWebhookResult = {
-  annualPlanId: string;
-  activation: string;
-  deliveries: number;
-  worker: AnnualDeliveryWorkerSummary;
-};
+export type AnnualWebhookResult =
+  | {
+      /** The plan is active and its first delivery has been through the queue. */
+      outcome: "settled" | "terminal";
+      annualPlanId: string;
+      activation: string;
+      deliveries: number;
+      worker: AnnualDeliveryWorkerSummary;
+    }
+  | {
+      /**
+       * A real annual purchase, correlated and proved, whose payment
+       * Stripe has not confirmed yet (Phase 4B4.2).
+       *
+       * It carries NO activation, NO delivery count and NO worker
+       * summary, and that is deliberate rather than tidy: there is no
+       * shape in which this variant can report an entitlement, because it
+       * has no field to report one in.
+       */
+      outcome: "payment_pending";
+      annualPlanId: string;
+      reason: string;
+    };
 
 /**
  * A refusal that is NOT retryable: the correlation is wrong and no number
@@ -133,7 +159,14 @@ export class AnnualWebhookConflict extends Error {}
 export async function settleAnnualCheckoutSession(
   eventSessionId: string,
   metadata: AnnualSessionMetadata,
-  deps: AnnualWebhookDeps
+  deps: AnnualWebhookDeps,
+  /**
+   * Which Stripe event asked. It changes ONE decision - whether a
+   * not-yet-paid Session is expected or contradictory - and nothing else
+   * about the path below. Defaulting to the ordinary trigger keeps the
+   * common call site unchanged.
+   */
+  trigger: AnnualSettlementTrigger = "checkout_completed"
 ): Promise<AnnualWebhookResult> {
   // 1. THE SESSION, RE-READ FROM STRIPE. The event proves Stripe sent
   //    something; it is not a reason to trust every nested field of a
@@ -217,10 +250,32 @@ export async function settleAnnualCheckoutSession(
       expected_total_gross_cents: attempt.expected_total_gross_cents,
     }
   );
-  if (!evaluation.shouldMarkPaid) {
+  //    A NOT-YET-PAID SESSION IS NOT AUTOMATICALLY AN ERROR. Delayed
+  //    notification methods complete a Checkout Session immediately and
+  //    confirm the money days later, so checkout.session.completed with
+  //    payment_status "unpaid" is the normal FIRST event for them rather
+  //    than a fault. It is acknowledged and nothing is written; Stripe's
+  //    later async event runs this same function again and settles it.
+  const readiness = decideAnnualPaymentReadiness({
+    paymentStatus: session.payment_status ?? "",
+    evaluation,
+    trigger,
+  });
+  if (readiness.kind === "refused") {
     throw new AnnualWebhookConflict(
-      `annual attempt ${attempt.id} not settleable - ${evaluation.reason}`
+      `annual attempt ${attempt.id} not settleable - ${readiness.reason}`
     );
+  }
+  if (readiness.kind === "pending") {
+    // RETURNS BEFORE EVERY WRITE THAT GRANTS ANYTHING. No PaymentIntent
+    // is read, the attempt is not marked paid, no plan is activated and
+    // the delivery worker never runs. The only thing that happened above
+    // is the session link, which is correlation rather than entitlement
+    // and is what the checkout route already attempts.
+    console.error(
+      `Annual webhook: session ${session.id} is not paid yet (plan ${plan.id}) - awaiting Stripe.`
+    );
+    return { outcome: "payment_pending", annualPlanId: plan.id, reason: readiness.reason };
   }
 
   // A PaymentIntent is REQUIRED. It is what migration 039 stores on the
@@ -287,6 +342,7 @@ export async function settleAnnualCheckoutSession(
       // metadata pointing at a terminal plan never reaches this line.
       console.error(`Annual webhook: plan ${plan.id} is terminal - acknowledged historical replay.`);
       return {
+        outcome: "terminal",
         annualPlanId: plan.id,
         activation: "terminal",
         deliveries: 0,
@@ -322,6 +378,7 @@ export async function settleAnnualCheckoutSession(
   }
 
   return {
+    outcome: "settled",
     annualPlanId: plan.id,
     activation: activation.result,
     deliveries: activation.deliveries,

@@ -554,3 +554,130 @@ export function classifyAnnualPaidReread(input: {
   }
   return { kind: "already_settled" };
 }
+
+/* ── Delayed payment methods (Phase 4B4.2) ──────────────────── */
+
+/**
+ * WHICH Stripe event asked for settlement.
+ *
+ * It changes exactly one thing: whether a Session that is not yet paid is
+ * an expected intermediate state or a contradiction. Nothing else about
+ * the settlement path varies by trigger - the same re-retrieval, the same
+ * correlation, the same frozen-total check, the same compare-and-set
+ * writers and the same activation RPC run either way. There is one
+ * payment-verification architecture, not two.
+ */
+export type AnnualSettlementTrigger = "checkout_completed" | "async_payment_succeeded";
+
+/**
+ * The one Stripe payment_status that means "the money is still moving".
+ *
+ * Delayed-notification methods - SEPA Direct Debit and the bank-transfer
+ * family among them - complete a Checkout Session immediately and confirm
+ * the payment days later. Stripe emits checkout.session.completed at once
+ * with payment_status "unpaid", then checkout.session.async_payment_succeeded
+ * or _failed when it knows.
+ *
+ * 'no_payment_required' is deliberately NOT here. It is a zero-amount
+ * session, an annual plan is never zero, and treating it as pending would
+ * mean waiting forever for a confirmation that is never coming.
+ */
+export const ANNUAL_PAYMENT_PENDING_STATUS = "unpaid";
+
+export type AnnualPaymentReadiness =
+  /** Verified against the frozen attempt. Settle it. */
+  | { kind: "paid" }
+  /**
+   * A real annual purchase whose payment Stripe has not confirmed yet.
+   * NOT an error and NOT an entitlement: acknowledged so the event is not
+   * redelivered forever, and nothing is written.
+   */
+  | { kind: "pending"; reason: string }
+  /** Wrong money, or a state that contradicts the event. Fail closed. */
+  | { kind: "refused"; reason: string };
+
+/**
+ * Decides whether a re-retrieved Session may settle an annual plan.
+ *
+ * ── WHY "NOT PAID" IS NOT ONE ANSWER ──────────────────────────
+ *
+ * Before this phase every unpaid Session threw, which the route turns
+ * into a 500 and Stripe retries. For a card that is correct: an unpaid
+ * completed Session should not exist and something is wrong. For a
+ * delayed-notification method it is the NORMAL first event, and 500ing it
+ * would mean days of pointless redelivery, an event Stripe eventually
+ * gives up on, and an alarm that means nothing.
+ *
+ * So the answer depends on which event is asking:
+ *
+ *   * checkout.session.completed with "unpaid" is expected. PENDING.
+ *     The customer owes nothing further; Stripe will send an async event.
+ *   * checkout.session.async_payment_succeeded with anything other than
+ *     paid CONTRADICTS the event that triggered it. That is far more
+ *     likely to be a stale read than a genuinely unpaid session, so it is
+ *     REFUSED and therefore retried - a redelivery re-reads the Session
+ *     and converges. Acknowledging it would discard a payment that has
+ *     already been taken.
+ *
+ * ── AND A WRONG AMOUNT IS NEVER PENDING ───────────────────────
+ *
+ * A Session that says paid but disagrees with the frozen attempt on
+ * currency or on a single cent is refused whatever the trigger. The
+ * frozen attempt is the money authority and no amount of waiting makes a
+ * mismatched total correct.
+ */
+export function decideAnnualPaymentReadiness(input: {
+  paymentStatus: string;
+  /** From the SAME evaluator the one-time flow uses. Never recomputed. */
+  evaluation: { shouldMarkPaid: boolean; reason?: string };
+  trigger: AnnualSettlementTrigger;
+}): AnnualPaymentReadiness {
+  if (input.evaluation.shouldMarkPaid) return { kind: "paid" };
+
+  const reason = input.evaluation.reason ?? "payment could not be verified";
+
+  if (
+    input.paymentStatus === ANNUAL_PAYMENT_PENDING_STATUS
+    && input.trigger === "checkout_completed"
+  ) {
+    return { kind: "pending", reason: "Stripe has not confirmed this payment yet" };
+  }
+  return { kind: "refused", reason };
+}
+
+/**
+ * checkout.session.async_payment_failed, for an annual session.
+ *
+ * ── IT IS PURE, AND THAT IS THE POINT ─────────────────────────
+ *
+ * A failed delayed payment must create no entitlement, and the cheapest
+ * way to guarantee that is a function which CANNOT create one: no deps,
+ * no database client, no Stripe client, no writer. It cannot mark an
+ * attempt paid, cannot activate a plan, cannot claim a delivery and
+ * cannot mint an order, because it has nothing to call.
+ *
+ * ── AND IT INVENTS NO CONTRACT SEMANTICS ──────────────────────
+ *
+ * It does not cancel the pending annual plan, does not expire the
+ * checkout attempt and does not refund anything - there is nothing to
+ * refund, since the payment never completed. Both rows stay exactly as
+ * they are, as durable evidence that this customer tried. If the same
+ * customer retries, migration 040's fingerprint gates decide whether the
+ * existing attempt may be reused, which is a question this event has no
+ * business answering.
+ *
+ * Returns the log line only. The caller writes nothing either.
+ */
+export function acknowledgeAnnualPaymentFailure(
+  metadata: AnnualSessionMetadata,
+  sessionId: string
+): { annualPlanId: string; checkoutAttemptId: string; message: string } {
+  return {
+    annualPlanId: metadata.annualPlanId,
+    checkoutAttemptId: metadata.checkoutAttemptId,
+    message:
+      `Annual webhook: Stripe reported a failed delayed payment for session ${sessionId} `
+      + `(plan ${metadata.annualPlanId}, attempt ${metadata.checkoutAttemptId}). `
+      + "Nothing was settled, activated or shipped.",
+  };
+}

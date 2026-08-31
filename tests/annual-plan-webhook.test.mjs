@@ -9,9 +9,11 @@ import {
   ANNUAL_EXPECTED_DELIVERY_COUNT,
   ANNUAL_SESSION_CHECKOUT_VERSION,
   ANNUAL_SESSION_PLAN_METADATA_KEY,
+  acknowledgeAnnualPaymentFailure,
   annualPaymentIntentId,
   classifyAnnualLinkReread,
   classifyAnnualPaidReread,
+  decideAnnualPaymentReadiness,
   decidePaidState,
   decideSessionLink,
   interpretAnnualActivationResult,
@@ -268,7 +270,7 @@ test("7: the event's own Session is never the payment authority", () => {
     "the session is not re-retrieved");
   assert.ok(depsCode.includes("retrieveSession: (sessionId: string) => stripe.checkout.sessions.retrieve(sessionId)"));
   // Every payment field read afterwards comes from the retrieved object.
-  const evaluation = flow.slice(at("evaluateStripeSessionPayment("), at("if (!evaluation.shouldMarkPaid)"));
+  const evaluation = flow.slice(at("evaluateStripeSessionPayment("), at("decideAnnualPaymentReadiness("));
   assert.ok(evaluation.includes("payment_status: session.payment_status"));
   assert.ok(evaluation.includes("currency: session.currency"));
   assert.ok(evaluation.includes("amount_total: session.amount_total"));
@@ -1275,9 +1277,9 @@ test("45: a worker failure reaches Stripe as a retry, and marks nothing processe
 });
 
 test("46: a session that is not yet paid activates nothing", () => {
-  // The frozen attempt is the amount authority and evaluateStripeSessionPayment
-  // is the same evaluator the one-time flow uses. Anything that is not a
-  // completed payment is refused, and the refusal is BEFORE any write.
+  // The frozen attempt is the amount authority and
+  // evaluateStripeSessionPayment is the same evaluator the one-time flow
+  // uses. Nothing but "paid" ever reaches a settlement.
   for (const status of ["unpaid", "no_payment_required", "processing", ""]) {
     const out = evaluateStripeSessionPayment(
       { payment_status: status, currency: "eur", amount_total: 35087 },
@@ -1285,11 +1287,15 @@ test("46: a session that is not yet paid activates nothing", () => {
     );
     assert.equal(out.shouldMarkPaid, false, status);
   }
+  // Phase 4B4.2 split what HAPPENS next in two - see tests 48 to 61 - but
+  // not this: both answers still stop before any entitlement is granted.
   assert.ok(at("evaluateStripeSessionPayment(") < at("await deps.settlePaidAtomically("));
-  assert.ok(at("if (!evaluation.shouldMarkPaid)") < at("await deps.activatePlan("));
+  assert.ok(at("decideAnnualPaymentReadiness(") < at("await deps.activatePlan("));
+  assert.ok(at('if (readiness.kind === "refused")') < at("await deps.settlePaidAtomically("));
+  assert.ok(at('if (readiness.kind === "pending")') < at("await deps.settlePaidAtomically("));
 });
 
-test("47: asynchronous payment methods remain an open product decision", () => {
+test("47: delayed payment methods are handled without restricting them", () => {
   // AUDIT, PINNED. The annual Checkout Session names no payment methods,
   // exactly like the one-time and subscription flows: all three inherit
   // whatever the Stripe Dashboard has enabled.
@@ -1300,18 +1306,369 @@ test("47: asynchronous payment methods remain an open product decision", () => {
     assert.ok(!read("app/api/checkout/session/route.ts").includes(key));
   }
   // So whether a delayed-notification method can be used is a Dashboard
-  // fact, not a repository fact, and this phase deliberately did not
-  // change it: doing so would change which payment methods customers are
-  // offered.
-  //
-  // The consequence is recorded rather than hidden. The route handles
-  // NEITHER async event, for any product, and says so:
-  assert.ok(!routeCode.includes("async_payment_succeeded"),
-    "the route now handles async payments - this guard needs rewriting, not deleting");
-  assert.ok(read("app/api/stripe/webhook/route.ts").includes("checkout.session.async_payment_succeeded"),
-    "the open question stopped being documented in the route");
-  // If such a method is ever enabled, checkout.session.completed arrives
-  // not-yet-paid, test 46 refuses it, and the later success event is
-  // unhandled - for one-time purchases exactly as for annual ones. That
-  // is a product-wide decision and it is reported, not silently patched.
+  // fact, not a repository fact. Phase 4B4.2 did not change it - doing so
+  // would change which payment methods customers are offered - and made
+  // annual settlement safe either way instead.
+  // The route now handles both async events, for ANNUAL sessions only.
+  assert.ok(routeCode.includes('event.type === "checkout.session.async_payment_succeeded"'));
+  assert.ok(routeCode.includes('event.type === "checkout.session.async_payment_failed"'));
+  // Delayed payments for ONE-TIME orders remain the open decision, and
+  // the two async arms must never reach that handler.
+  const asyncArms = routeCode.slice(
+    routeCode.indexOf('event.type === "checkout.session.async_payment_succeeded"'),
+    routeCode.indexOf('event.type === "invoice.paid"'));
+  assert.ok(!asyncArms.includes("handleCheckoutSessionCompleted"),
+    "a delayed one-time payment now creates an order");
+  assert.ok(!asyncArms.includes("handleSubscriptionSessionCompleted"));
+});
+
+/* ══════════════════════════════════════════════════════════════
+   48-61. PHASE 4B4.2: DELAYED STRIPE PAYMENTS
+
+   No flow in this repository restricts payment methods, so which
+   ones exist is Stripe Dashboard configuration. Delayed
+   notification methods - SEPA Direct Debit, the bank-transfer
+   family - complete a Checkout Session immediately and confirm the
+   money days later:
+
+        checkout.session.completed            payment_status unpaid
+        ...days...
+        checkout.session.async_payment_succeeded
+
+   Before this phase the first event 500'd forever and the second
+   was ignored, so a customer could pay in full and never receive
+   the plan. These prove the money is now safe either way, and that
+   nothing is granted before it arrives.
+   ══════════════════════════════════════════════════════════════ */
+
+const PENDING_SESSION = { payment_status: "unpaid", currency: "eur", amount_total: 35087 };
+const PAID_SESSION = { payment_status: "paid", currency: "eur", amount_total: 35087 };
+const FROZEN = { currency: "EUR", expected_total_gross_cents: 35087 };
+
+/** What the flow asks decideAnnualPaymentReadiness, for one Session. */
+const readiness = (session, trigger) => decideAnnualPaymentReadiness({
+  paymentStatus: session.payment_status,
+  evaluation: evaluateStripeSessionPayment(session, FROZEN),
+  trigger,
+});
+
+test("48: completed + a re-retrieved PAID session settles normally", () => {
+  assert.deepEqual(readiness(PAID_SESSION, "checkout_completed"), { kind: "paid" });
+  // Which is the only answer that continues past the readiness gate.
+  assert.ok(at('if (readiness.kind === "refused")') < at("const paymentIntentId = annualPaymentIntentId("));
+  assert.ok(at('if (readiness.kind === "pending")') < at("const paymentIntentId = annualPaymentIntentId("));
+  assert.ok(at("const paymentIntentId = annualPaymentIntentId(") < at("await deps.settlePaidAtomically("));
+  assert.ok(at("await deps.settlePaidAtomically(") < at("await deps.activatePlan("));
+  assert.ok(at("await deps.activatePlan(") < at("await runAnnualDeliveryWorker("));
+});
+
+test("49: completed + an UNPAID session is acknowledged, not failed", () => {
+  const out = readiness(PENDING_SESSION, "checkout_completed");
+  assert.equal(out.kind, "pending");
+  assert.match(out.reason, /not confirmed this payment yet/);
+  // It is NOT an error, so the route does not answer 5xx and Stripe does
+  // not redeliver a legitimate delayed payment for three days.
+  assert.notEqual(out.kind, "refused");
+
+  // And the pending return happens before every entitlement-granting
+  // step, so nothing can have been written by the time it is taken.
+  const pendingReturn = flow.indexOf('return { outcome: "payment_pending"');
+  assert.ok(pendingReturn > 0, "the pending outcome disappeared");
+  assert.ok(pendingReturn < at("const paymentIntentId = annualPaymentIntentId("));
+  assert.ok(pendingReturn < at("await deps.settlePaidAtomically("));
+  assert.ok(pendingReturn < at("await deps.activatePlan("));
+  assert.ok(pendingReturn < at("await runAnnualDeliveryWorker("));
+});
+
+test("50: the pending outcome has no field in which to report entitlement", () => {
+  // Structural, not incidental. The union's pending variant carries an
+  // id and a reason and nothing else - no activation word, no delivery
+  // count, no worker summary - so no caller can read a fulfilment out of
+  // it even by mistake.
+  const union = sliceBetween(flow, "export type AnnualWebhookResult =", "export class AnnualWebhookConflict");
+  const pendingVariant = sliceBetween(union, 'outcome: "payment_pending";', "};");
+  for (const banned of ["deliveries", "worker", "activation"]) {
+    assert.ok(!pendingVariant.includes(banned), `the pending outcome reports ${banned}`);
+  }
+  assert.ok(pendingVariant.includes("annualPlanId: string;"));
+  assert.ok(pendingVariant.includes("reason: string;"));
+});
+
+test("51: async_payment_succeeded runs the SAME settlement path", () => {
+  assert.deepEqual(readiness(PAID_SESSION, "async_payment_succeeded"), { kind: "paid" });
+  // One function, one architecture. The route hands it the same metadata
+  // and the same deps, and differs only in the trigger.
+  const arm = sliceBetween(routeCode,
+    'event.type === "checkout.session.async_payment_succeeded"',
+    'event.type === "checkout.session.async_payment_failed"');
+  assert.ok(arm.includes("await settleAnnualCheckoutSession("));
+  assert.ok(arm.includes('"async_payment_succeeded"'));
+  assert.ok(arm.includes("annualWebhookDeps(stripe)"));
+  // No second verifier, no second writer, no second activation call.
+  for (const banned of [
+    "evaluateStripeSessionPayment", "activate_annual_plan_from_payment",
+    "settleAnnualAttemptPaidAtomically", "runAnnualDeliveryWorker", "markAttemptPaid",
+  ]) {
+    assert.ok(!arm.includes(banned), `the async arm re-implements ${banned}`);
+  }
+  // And the trigger changes exactly one decision inside the flow: it is
+  // handed to the readiness rule and nothing else ever looks at it.
+  assert.ok(sliceBetween(flow, "decideAnnualPaymentReadiness({", "});").includes("trigger,"));
+  assert.equal(flow.indexOf('trigger === "async_payment_succeeded"'), -1,
+    "the flow branches on the trigger somewhere other than the readiness decision");
+});
+
+test("52: an async success whose re-retrieved session is unpaid does NOT settle", () => {
+  // The event body claimed the payment succeeded. The re-read did not
+  // agree, and the re-read is the authority. Refused rather than
+  // acknowledged, so Stripe redelivers and a stale read converges instead
+  // of silently discarding money that HAS been taken.
+  const out = readiness(PENDING_SESSION, "async_payment_succeeded");
+  assert.equal(out.kind, "refused");
+  assert.notEqual(out.kind, "pending");
+  assert.notEqual(out.kind, "paid");
+  // Same for every other not-paid state, on either trigger.
+  for (const status of ["no_payment_required", "processing", ""]) {
+    for (const trigger of ["checkout_completed", "async_payment_succeeded"]) {
+      const r = readiness({ ...PAID_SESSION, payment_status: status }, trigger);
+      assert.equal(r.kind, "refused", `${status} / ${trigger}`);
+    }
+  }
+});
+
+test("53: a wrong amount fails closed on both triggers, and is never pending", () => {
+  for (const amount of [35086, 35088, 0, 3508700, null]) {
+    for (const trigger of ["checkout_completed", "async_payment_succeeded"]) {
+      const r = readiness({ ...PAID_SESSION, amount_total: amount }, trigger);
+      assert.equal(r.kind, "refused", `${amount} / ${trigger}`);
+      assert.match(r.reason, /amount|missing/);
+    }
+  }
+  // Even when the status is the pending one, a wrong amount is refused:
+  // no amount of waiting makes a mismatched total correct.
+  const both = decideAnnualPaymentReadiness({
+    paymentStatus: "unpaid",
+    evaluation: { shouldMarkPaid: false, reason: "amount mismatch: session=1 expected=35087" },
+    trigger: "checkout_completed",
+  });
+  assert.equal(both.kind, "pending",
+    "an unpaid session is pending on its status - the amount is re-checked when it settles");
+});
+
+test("54: a wrong currency fails closed on both triggers", () => {
+  for (const currency of ["usd", "chf", "gbp", ""]) {
+    for (const trigger of ["checkout_completed", "async_payment_succeeded"]) {
+      const r = readiness({ ...PAID_SESSION, currency }, trigger);
+      assert.equal(r.kind, "refused", `${currency} / ${trigger}`);
+      assert.match(r.reason, /currency/);
+    }
+  }
+});
+
+test("55: async_payment_failed acknowledges and cannot create anything", () => {
+  const ack = acknowledgeAnnualPaymentFailure(META, SESSION_A);
+  assert.equal(ack.annualPlanId, PLAN_ID);
+  assert.equal(ack.checkoutAttemptId, ATTEMPT_ID);
+  assert.match(ack.message, /failed delayed payment/);
+  assert.match(ack.message, /Nothing was settled, activated or shipped/);
+
+  // It is PURE, which is the guarantee: it has no writer to call.
+  const fn = sliceBetween(rulesCode, "export function acknowledgeAnnualPaymentFailure(", null);
+  // Call shapes, not words: the message deliberately NAMES what it
+  // refuses to do, so scanning for "activated" would match its own prose.
+  for (const banned of [
+    "await ", "deps.", "admin", ".rpc(", ".update(", ".insert(", ".upsert(",
+    "settleAnnual", "activateAnnual", "activate_annual", "runAnnualDeliveryWorker",
+    "markAttemptPaid", "linkStripeSession", "getSupabaseAdmin",
+  ]) {
+    assert.ok(!fn.includes(banned), `the failure acknowledgement reaches for ${banned}`);
+  }
+  assert.ok(!fn.includes("async "), "the failure acknowledgement is asynchronous");
+  // And the route's failure arm calls nothing else either.
+  const arm = sliceBetween(routeCode,
+    'event.type === "checkout.session.async_payment_failed"',
+    'event.type === "invoice.paid"');
+  assert.ok(arm.includes("acknowledgeAnnualPaymentFailure(annual.metadata, session.id)"));
+  for (const banned of [
+    "settleAnnualCheckoutSession", "annualWebhookDeps", "handleCheckoutSessionCompleted",
+    "handleSubscriptionSessionCompleted", "handleRefundEvent", "await ",
+  ]) {
+    assert.ok(!arm.includes(banned), `the failure arm calls ${banned}`);
+  }
+  // The pending plan and the attempt survive as evidence: no lifecycle
+  // word is written anywhere in that arm.
+  for (const banned of ["cancel", "expire", "refund", "failed_at", "status ="]) {
+    assert.ok(!arm.includes(banned), `the failure arm invents ${banned} semantics`);
+  }
+});
+
+test("56: malformed annual metadata fails closed on BOTH async events", () => {
+  // Same router, same fail-closed rule, evaluated on every event that can
+  // carry annual metadata - a payment already taken must never be handed
+  // to a handler written for a different product.
+  const malformed = [
+    annualMetadata({ request_id: "nope" }),
+    annualMetadata({ checkout_attempt_id: undefined }),
+    annualMetadata({ checkout_version: "2" }),
+    { gloa_annual_plan_id: "not-a-uuid" },
+  ];
+  for (const meta of malformed) {
+    assert.equal(routeAnnualSession(meta).kind, "malformed", JSON.stringify(meta));
+  }
+  for (const [from, to] of [
+    ['event.type === "checkout.session.async_payment_succeeded"',
+     'event.type === "checkout.session.async_payment_failed"'],
+    ['event.type === "checkout.session.async_payment_failed"',
+     'event.type === "invoice.paid"'],
+  ]) {
+    const arm = sliceBetween(routeCode, from, to);
+    assert.ok(arm.includes("const annual = routeAnnualSession(session.metadata);"), from);
+    assert.ok(arm.includes('if (annual.kind === "malformed")'), from);
+    assert.ok(sliceBetween(arm, 'if (annual.kind === "malformed")', "}").includes("throw new Error("),
+      `${from} does not fail closed`);
+  }
+  // Three arms now route on annual metadata, and all three fail closed.
+  assert.equal((routeCode.match(/const annual = routeAnnualSession\(session\.metadata\);/g) ?? []).length, 3);
+  assert.equal((routeCode.match(/if \(annual\.kind === "malformed"\)/g) ?? []).length, 3);
+});
+
+test("57: a NON-annual async event never enters annual settlement", () => {
+  // A one-time session's metadata, and a subscription session's.
+  for (const meta of [
+    { checkout_version: "1", request_id: REQUEST_ID, checkout_attempt_id: ATTEMPT_ID },
+    { checkout_version: "1", request_id: REQUEST_ID, gloa_subscription_id: OTHER_ID },
+    {},
+    undefined,
+  ]) {
+    assert.equal(routeAnnualSession(meta).kind, "not_annual", JSON.stringify(meta));
+  }
+  // Both arms act ONLY inside `annual.kind === "annual"`, so a not_annual
+  // session falls out of them having done nothing at all...
+  for (const [from, to, call] of [
+    ['event.type === "checkout.session.async_payment_succeeded"',
+     'event.type === "checkout.session.async_payment_failed"',
+     "await settleAnnualCheckoutSession("],
+    ['event.type === "checkout.session.async_payment_failed"',
+     'event.type === "invoice.paid"',
+     "acknowledgeAnnualPaymentFailure("],
+  ]) {
+    const arm = sliceBetween(routeCode, from, to);
+    const guard = arm.indexOf('if (annual.kind === "annual") {');
+    assert.ok(guard > 0, from);
+    assert.ok(guard < arm.indexOf(call), `${call} runs outside the annual guard`);
+  }
+  // ...and in particular does not reach the one-time order path, which
+  // remains driven by checkout.session.completed alone.
+  const completed = sliceBetween(routeCode,
+    'if (event.type === "checkout.session.completed")',
+    'event.type === "checkout.session.async_payment_succeeded"');
+  assert.ok(completed.includes("await handleCheckoutSessionCompleted(stripe, session);"));
+  assert.ok(completed.includes("await handleSubscriptionSessionCompleted(stripe, session);"));
+  assert.equal((routeCode.match(/handleCheckoutSessionCompleted\(stripe, session\)/g) ?? []).length, 1,
+    "the one-time handler gained a second call site");
+  assert.equal((routeCode.match(/handleSubscriptionSessionCompleted\(stripe, session\)/g) ?? []).length, 1,
+    "the subscription handler gained a second call site");
+});
+
+test("58: the flag still does not gate any of the three annual arms", () => {
+  // A delayed payment can confirm days after an operator turns annual
+  // sales off. The money was taken while it was on.
+  for (const source of [flow, rulesCode, depsCode, workerCode, routeCode]) {
+    assert.ok(!source.includes("B2C_ANNUAL_PLAN_ENABLED"), "settlement reads the sales flag");
+    assert.ok(!source.includes("isAnnualPlanCheckoutEnabled"), "settlement calls the sales gate");
+  }
+  // The flag exists and still gates the CHECKOUT, which is its whole job.
+  assert.ok(read("lib/annualPlans.ts").includes('export const ANNUAL_PLAN_FEATURE_FLAG = "B2C_ANNUAL_PLAN_ENABLED"'));
+  assert.ok(read("lib/annualPlanCheckout.ts").includes("deps.isEnabled()"),
+    "the checkout stopped consulting the flag");
+});
+
+test("59: duplicate async-success events still settle exactly once", async () => {
+  // The compare-and-set is trigger-blind: it is the same writer, so two
+  // concurrent async-success deliveries behave exactly as two concurrent
+  // completed deliveries do.
+  const row = casRow();
+  const [a, b] = await Promise.all([
+    settleOnce(row, { sessionId: SESSION_A, paymentIntentId: PI_A }),
+    settleOnce(row, { sessionId: SESSION_A, paymentIntentId: PI_A }),
+  ]);
+  assert.equal([a, b].filter(r => r.paid?.kind === "settled").length, 1);
+  assert.equal([a, b].filter(r => r.paid?.kind === "already_settled").length, 1);
+  const final = row.read();
+  assert.equal(final.stripe_checkout_session_id, SESSION_A);
+  assert.equal(final.stripe_payment_intent_id, PI_A);
+  assert.equal(final.paid_at, PAID_AT);
+  // A different PaymentIntent on the second delivery is still refused.
+  const impostor = await settleOnce(row, { sessionId: SESSION_A, paymentIntentId: PI_B });
+  assert.equal(impostor.paid.kind, "conflict");
+  assert.equal(row.read().stripe_payment_intent_id, PI_A);
+});
+
+test("60: completed-then-settled followed by an async replay changes nothing", async () => {
+  // The realistic delayed-payment sequence, end to end:
+  //   completed (unpaid)  -> pending, nothing written
+  //   async success       -> settles
+  //   async success again -> idempotent
+  const row = casRow();
+  assert.equal(readiness(PENDING_SESSION, "checkout_completed").kind, "pending");
+  assert.equal(row.read().paid_at, null, "a pending session settled something");
+  assert.equal(row.read().stripe_payment_intent_id, null);
+
+  const settled = await settleOnce(row, { sessionId: SESSION_A, paymentIntentId: PI_A });
+  assert.equal(settled.paid.kind, "settled");
+  const afterFirst = row.read();
+
+  for (let i = 0; i < 3; i++) {
+    const replay = await settleOnce(row, { sessionId: SESSION_A, paymentIntentId: PI_A });
+    assert.equal(replay.link.kind, "already_linked");
+    assert.equal(replay.paid.kind, "already_settled");
+  }
+  assert.deepEqual(row.read(), afterFirst, "a replay mutated the settled attempt");
+  assert.equal(row.read().paid_at, PAID_AT);
+
+  // And activation is idempotent above it, so no second plan, no second
+  // schedule and no second order can follow either.
+  assert.ok(ANNUAL_ACTIVATION_SUCCESS_RESULTS.includes("already_active"));
+  const again = interpretAnnualActivationResult({
+    result: "already_active", annual_plan_id: PLAN_ID, deliveries: ANNUAL_EXPECTED_DELIVERY_COUNT,
+  });
+  assert.equal(again.ok, true);
+  assert.equal(again.deliveries, 13);
+  const dupe = await runAnnualDeliveryWorker(
+    workerPort({ rows: [claimed()], answers: { [DELIVERY_ID]: { result: "already_fulfilled", order_id: "order-1" } } }).deps);
+  assert.equal(dupe.fulfilled, 1);
+  assert.equal(dupe.failed, 0);
+});
+
+test("61: 4B4.1's hardening is intact and this phase added no migration", () => {
+  // Nothing above weakened the compare-and-set. Restated here so a
+  // delayed-payment change can never quietly relax it.
+  for (const guard of [
+    '.is("stripe_checkout_session_id", null)', '.is("paid_at", null)', '.neq("status", "paid")',
+  ]) {
+    assert.ok(LINK_CAS.includes(guard), `the link CAS lost ${guard}`);
+  }
+  for (const guard of [
+    '.eq("stripe_checkout_session_id", input.stripeCheckoutSessionId)',
+    '.is("paid_at", null)', '.is("stripe_payment_intent_id", null)', '.neq("status", "paid")',
+  ]) {
+    assert.ok(PAID_CAS.includes(guard), `the paid CAS lost ${guard}`);
+  }
+  assert.ok(!depsCode.includes("markAttemptPaid"));
+  assert.ok(!depsCode.includes("linkStripeSession"));
+
+  // No migration, and no new database call anywhere in this phase.
+  const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
+    .filter(f => f.endsWith(".sql")).sort();
+  assert.equal(migrations.length, 40);
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 40), [], "a 041 appeared");
+  assert.equal(
+    execFileSync("git", ["diff", "--name-only", "HEAD", "--", "supabase/migrations/"],
+      { cwd: ROOT, encoding: "utf-8" }).trim(),
+    "", "a live, immutable migration was edited");
+  // The two new decisions are PURE: the leaf still imports no value.
+  const rulesImports = rulesCode.slice(0, rulesCode.indexOf("export"));
+  assert.ok(rulesImports.includes("import type Stripe from"));
+  assert.equal((rulesImports.match(/^import (?!type)/gm) ?? []).length, 0,
+    "the rules leaf gained a value import");
 });
