@@ -409,3 +409,40 @@ test("18: the recipe head fills its width and the tiles are taller", () => {
   // The duplicate bottom link is hidden on desktop, shown on mobile.
   assert.match(css, /@media \(max-width:900px\)\{\.featured-recipes-link\{display:block\}\}/);
 });
+
+test("19: no rule anywhere sets a display face OTHER than Cormorant", () => {
+  // THE BUG THIS GUARDS. The generic `h1 i,h2 i` rule was added at the top
+  // of the stylesheet, but fifteen older, MORE SPECIFIC rules
+  // (`.hero h1 i`, `.featured-recipes-head h2 i`, `.brand-note-text i`, ...)
+  // still said `font-family:Georgia,serif` further down and therefore won
+  // the cascade. The homepage was rendering "Aber richtig.",
+  // "Mach was draus." and "Und das ist Absicht." in Georgia while the
+  // product, daily, origin and community italics used Cormorant - three
+  // families on one page, which is exactly what the type consolidation was
+  // supposed to remove.
+  //
+  // Every one of those rules now names the display token first and keeps
+  // Georgia only as the fallback.
+  const families = [...css.matchAll(/font-family:([^;}]+)/g)].map(m => m[1].trim());
+  for (const family of families) {
+    assert.ok(
+      family.startsWith("var(--font-sans)") || family.startsWith("var(--font-display)") || family === "var(--font-mono)",
+      `a rule sets an unmanaged font-family: ${family}`
+    );
+  }
+  // Georgia survives only as a fallback behind the real face.
+  assert.ok(!/font-family:Georgia/.test(css), "a rule still leads with Georgia");
+  assert.equal([...css.matchAll(/Georgia,serif/g)].length,
+    [...css.matchAll(/var\(--font-display\),Georgia,serif/g)].length,
+    "a Georgia fallback exists without the display face in front of it");
+
+  // And the shorthand `font:` declarations only ever use the two tokens.
+  const shorthand = [...css.matchAll(/font:[^;}]*?(var\(--font-[a-z]+\))/g)].map(m => m[1]);
+  for (const token of new Set(shorthand)) {
+    assert.ok(["var(--font-sans)", "var(--font-mono)", "var(--font-display)"].includes(token),
+      `an unmanaged font token: ${token}`);
+  }
+  // Two families are loaded, and only two.
+  assert.equal([...layout.matchAll(/from "next\/font\/google"/g)].length, 1);
+  assert.match(layout, /import \{ Inter, Cormorant_Garamond \}/);
+});
