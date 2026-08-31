@@ -987,15 +987,55 @@ export function isAnnualPurchaseEmailRetryCandidate(input: {
    they are listed because the claim refusing them again is what makes a
    race between this sweep and a Stripe redelivery safe.
 
-   ── NULL IS REFUSED THREE TIMES ───────────────────────────────
+   ── NULL IS REFUSED TWICE, AND THE CLAIM IS NOT ONE OF THEM ───
 
-   By the query, which matches only 'failed' or 'sending'; by the
-   predicate below, whose first line is the NULL refusal; and by
-   migration 039's claim, which treats a NULL row as a first attempt that
-   only a caller naming one activated plan id may make. A sweep that
-   claimed NULL would mail every annual plan that never entered the flow,
-   which is the exact mistake the 451 historical orders taught this
-   repository not to make. */
+   THE CLAIM RPC DOES NOT REFUSE NULL, and it must not. NULL is one of
+   the three states migration 039 lists as CLAIMABLE - never entered the
+   flow, a previous genuine failure, an expired lease - because that is
+   how the very first purchase confirmation enters the state machine at
+   all: the immediate post-purchase sender names one freshly activated
+   plan id, the claim moves NULL to 'sending' under a fresh token, and
+   the customer is told. A claim that refused NULL would mean no annual
+   plan ever received its confirmation.
+
+   So exactly TWO things stand between this sweep and the back catalogue,
+   and both of them live here:
+
+     1. THE QUERY, in lib/annualPlanMaintenanceDeps.ts, whose every
+        branch is an equality test on the status column - and no equality
+        test in SQL matches NULL.
+     2. isAnnualPurchaseEmailRetryCandidate, whose first line is the NULL
+        refusal, applied to every row the query returned before the
+        sender is called at all.
+
+   Neither may be relaxed on the assumption that the database would catch
+   it, because the database deliberately would not. A sweep that
+   enumerated NULL would hand real plan ids to a sender that is entitled
+   to send for them, and would mail every annual plan that never entered
+   the flow - the exact accident the 451 historical orders taught this
+   repository not to have.
+
+   ── NOT THE SAME RULE AS THE ANNUAL ORDER RECOVERY ────────────
+
+   lib/annualOrderNotificationRules.ts deliberately DOES select
+   orders.internal_notification_status IS NULL, and that is not a
+   contradiction. Two different columns, two different work lists:
+
+     annual_plans.purchase_confirmation_email_status IS NULL
+        means "this plan was never told to send anything". The population
+        is every annual plan that exists, including every one that
+        predates the feature, so there is no scoping that could make a
+        generic sweep of it safe. It is FORBIDDEN.
+
+     orders.internal_notification_status IS NULL, joined through
+     annual_plan_deliveries!inner
+        means "this ANNUAL DELIVERY ORDER, which this system minted and
+        owes a box for, was never told about". The join is the scope: a
+        historical order has no delivery row and cannot appear, so the
+        population is only orders whose fulfillment is genuinely owed.
+        It is REQUIRED - it is the only thing that closes the crash
+        window between the order committing and its notification being
+        claimed. */
 
 /**
  * How many purchase confirmations one run may attempt.

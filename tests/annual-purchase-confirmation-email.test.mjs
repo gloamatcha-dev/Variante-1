@@ -383,6 +383,69 @@ test("a fresh purchased plan with no email state sends exactly once", async () =
   assert.equal(db.state.token, null);
 });
 
+test("NULL IS CLAIMABLE by the immediate sender, and that is the contract", async () => {
+  // PHASE 4B6.1. The test above already depended on this, silently: its
+  // store starts at NULL. Stated explicitly here, because the opposite
+  // belief - "039 refuses NULL, so a sweep is safe by construction" - is
+  // both wrong and dangerous, and it appeared once in a phase report.
+  const db = store();
+  assert.equal(db.state.status, null, "the fixture no longer starts at NULL");
+
+  // The claim moves NULL to 'sending' under a fresh token and says which
+  // state it came from. This is how the FIRST confirmation ever enters.
+  const answer = await db.claim(PLAN_ID);
+  assert.equal(answer.result, "claimed");
+  assert.equal(answer.previous_status, null);
+  assert.match(answer.claim_token, /^[0-9a-f-]{36}$/i);
+  assert.equal(db.state.status, "sending");
+
+  // And migration 039 itself says so: NULL is listed among the three
+  // CLAIMABLE states, and the only two early returns are 'sent' and a
+  // LIVE 'sending'. There is no NULL guard, and there must not be.
+  const claimFn = read(MIGRATION_039).slice(
+    read(MIGRATION_039).indexOf("create or replace function public.claim_annual_plan_purchase_email"),
+    read(MIGRATION_039).indexOf("-- ONE WRITER FOR THE OUTCOME, NOT TWO")
+  );
+  assert.ok(claimFn.length > 0, "the claim function moved");
+  assert.match(claimFn, /CLAIMABLE: never entered the flow/);
+  assert.ok(!/purchase_confirmation_email_status is null/i.test(claimFn),
+    "039 gained a NULL guard, which would stop every first confirmation");
+  assert.match(claimFn, /purchase_confirmation_email_status = 'sent'/);
+  assert.match(claimFn, /purchase_confirmation_email_status = 'sending'/);
+});
+
+test("a freshly purchased plan at NULL is sent exactly one confirmation", async () => {
+  const db = store();
+  const mail = provider();
+  const result = await sendAnnualPurchaseConfirmationEmail(PLAN_ID, deps(db, mail));
+
+  assert.equal(result, "sent");
+  assert.equal(mail.sends.length, 1);
+  assert.equal(db.state.status, "sent");
+  // The sender NAMES one plan id. It never queries for candidates, which
+  // is why it may safely be the one caller that starts from NULL.
+  assert.equal(db.calls.claim, 1);
+  assert.ok(!sender.includes('.from("annual_plans")'), "the sender queries plans");
+});
+
+test("no module claims that the database refuses a NULL email state", () => {
+  // The guard rails against a NULL sweep are the QUERY and the PURE
+  // PREDICATE. Writing down that 039 is a third one would invite a future
+  // phase to relax one of the two that actually exist.
+  for (const [name, source] of [
+    ["sender", senderSource],
+    ["deps", read("lib/annualPurchaseConfirmationEmailDeps.ts")],
+    ["maintenance", read("lib/annualPlanMaintenance.ts")],
+    ["maintenance deps", read("lib/annualPlanMaintenanceDeps.ts")],
+  ]) {
+    assert.ok(!/REFUSED THREE TIMES|refuses NULL|rejects NULL|NULL cannot be claimed/i.test(source),
+      `${name} states that the claim RPC refuses NULL`);
+  }
+  // And the two refusals that DO exist are named where they live.
+  assert.match(senderSource, /NULL IS REFUSED TWICE, AND THE CLAIM IS NOT ONE OF THEM/);
+  assert.match(senderSource, /NULL is claimable exactly once, by the immediate post-purchase sender/);
+});
+
 test("a plan whose confirmation is already sent sends nothing", async () => {
   const db = store({ email: { status: "sent", sentAt: PURCHASED_AT, claimedAt: NOW } });
   const mail = provider();

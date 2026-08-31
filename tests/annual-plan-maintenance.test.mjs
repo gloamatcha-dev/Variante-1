@@ -1258,6 +1258,48 @@ test("34: this phase adds no migration and edits none", () => {
   }
 });
 
+test("36: the TWO null rules are different rules, and neither may be read as the other", () => {
+  // PHASE 4B6.1. One phase report described migration 039's claim as a
+  // third refusal of NULL. It is not: NULL is one of the three states
+  // that function lists as CLAIMABLE, which is how the FIRST purchase
+  // confirmation ever enters the state machine. What keeps a generic
+  // sweep away from NULL is the query plus the pure predicate, and
+  // nothing else - so both are asserted here as load-bearing.
+
+  // FORBIDDEN: a generic sweep of annual_plans by a NULL email state.
+  const workList = maintenanceDeps.slice(
+    maintenanceDeps.indexOf("async function loadAnnualPurchaseEmailCandidates"),
+    maintenanceDeps.indexOf("async function completeDueAnnualPlans")
+  );
+  assert.ok(workList.length > 0, "the purchase-email work list moved");
+  // Every branch is an equality test, and no equality test matches NULL.
+  assert.match(workList, /purchase_confirmation_email_status\.eq\.failed/);
+  assert.match(workList, /purchase_confirmation_email_status\.eq\.sending/);
+  for (const branch of ["is.null", "not.is.null", ".is(", "isNull"]) {
+    assert.ok(!workList.includes(branch), `the purchase-email query can match NULL: ${branch}`);
+  }
+  // The refusal is NOT delegated to a JavaScript post-filter alone: the
+  // predicate is a second refusal, applied to rows the query already
+  // narrowed.
+  assert.equal(isAnnualPurchaseEmailRetryCandidate({ status: null, claimedAt: null, now: NOW }), false);
+  assert.match(senderCode, /isAnnualPurchaseEmailRetryCandidate\(\{/);
+
+  // REQUIRED: the annual ORDER recovery, which is a different column, a
+  // different table and a scoped population - annual delivery orders
+  // this system minted and owes a box for. Its NULL scan is the only
+  // thing that closes the crash window, and it stays.
+  const recovery = orderNotificationCode.slice(
+    orderNotificationCode.indexOf("async function loadAnnualOrdersMissingNotification")
+  );
+  assert.match(recovery, /annual_plan_deliveries!inner/);
+  assert.match(recovery, /\.is\("internal_notification_status", null\)/);
+  assert.equal(isAnnualOrderNotificationRecoveryCandidate(null), true);
+
+  // The two never touch the same column.
+  assert.ok(!workList.includes("internal_notification_status"));
+  assert.ok(!recovery.includes("purchase_confirmation_email"));
+});
+
 test("35: the leaves stay leaves, so this suite can execute them at all", () => {
   for (const rel of [
     "lib/annualDeliveryWorker.ts",
