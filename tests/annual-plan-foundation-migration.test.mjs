@@ -1035,9 +1035,19 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
   // which gains a fourth job in its own error boundary. A second endpoint
   // would have meant a second Vercel schedule, which the Hobby plan does
   // not have - see the route's own header.
+  //
+  // FRONTEND PHASE 1 edits three PRESENTATION files: the site component,
+  // the root layout's font loading and the stylesheet. None of them is a
+  // payment, fulfillment or account-security module - which is what this
+  // guard is actually about - and the annual runtime they render is
+  // unchanged. They are listed so an edit to them is reviewed rather than
+  // silent, exactly like the two API routes above.
   const ALLOWED_APP_EDITS = [
     "app/api/stripe/webhook/route.ts",
     "app/api/cron/retry-order-notifications/route.ts",
+    "app/GloaSite.tsx",
+    "app/layout.tsx",
+    "app/globals.css",
   ];
 
   for (const rel of touched) {

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { Header, Footer } from "./Chrome";
 import { BRAND, PRODUCT, SHOP_STATUS } from "./content";
@@ -10,6 +10,10 @@ import { BusinessCalculator } from "./BusinessCalculator";
 import { AccountPortal } from "./AccountPortal";
 import { OrderSuccess } from "./OrderSuccess";
 import { track } from "./analytics";
+// The launch countdown's arithmetic lives in a pure leaf: it takes `now`
+// as an argument, clamps at zero and owns the one new fact this page
+// introduces - the launch instant.
+import { GLOA_LAUNCH_LABEL, launchCountdown, padCountdownUnit } from "../lib/launchCountdown";
 import { useCart } from "./cart";
 import { AuthProvider, useAuth } from "../lib/auth";
 import { supabase } from "../lib/supabase";
@@ -28,13 +32,17 @@ const recipes:Recipe[]=[
 {slug:"affogato-matcha-cloud",title:"Affogato & Matcha Cloud",category:"REZEPT",time:"5 MIN",servings:"1 Glas",tags:["ICED","COFFEE"],image:"/img/gloa-recipe-affogato-cloud.jpg",alt:"Affogato mit Matcha Cloud",excerpt:"Espresso, Eis und cremiger Matcha-Finish.",description:"Kräftiger Espresso trifft auf eine cremige Matcha-Cloud. Intensiv, kühl und für alle, die Kaffee und Matcha nicht trennen wollen.",ingredients:["2 Shots Espresso","Eiswürfel","1 Kugel Vanille-Gelato oder 1\u20132 TL Vanilleeis","1 TL Matcha (ca. 4\u20135 g)","2 TL Sahne oder Whipping Cream","1 TL Milch","Optional: etwas Süße"],steps:["Espresso zubereiten und leicht abkühlen lassen.","Ein Glas mit Eis füllen und den Espresso eingießen.","Für die Matcha-Cloud Matcha mit wenig Wasser glatt rühren.","Sahne und Milch leicht aufschäumen oder cremig verrühren.","Matcha-Cloud unterheben und als obere Schicht auf den Espresso geben.","Optional mit Vanille-Gelato servieren."],featured:false}
 ];
 const ALL_TAGS=["ALLE","LATTE","ICED","FRUITY"];
-const featuredRecipes=recipes.filter(r=>r.featured);
+// The rail shows all four recipes rather than the two flagged `featured`.
+// That flag stays on the data for the recipes page; deriving a two-item
+// list here is what left a wide desktop rail half empty.
 const dailyTiles=[{label:"MORNING",src:"/img/gloa-morning.jpg",alt:"Matcha am Morgen"},{label:"WORK",src:"/img/gloa-work.jpg",alt:"Iced Matcha am Arbeitsplatz"},{label:"CAFÉ",src:"/img/gloa-cafe.jpg",alt:"Matcha-Zubereitung im Café"},{label:"ON THE GO",src:"/img/gloa-on-the-go.jpg",alt:"Iced Matcha unterwegs in Berlin"},{label:"ICED",src:"/img/gloa-iced.jpg",alt:"Iced Matcha"},{label:"SOCIAL",src:"/img/gloa-social.jpg",alt:"Freunde mit Matcha"}];
 // TODO: Replace local community items with Instagram Graph API data after account/API credentials are configured.
 type CommunityItem={id:string;image:string;href?:string;alt:string}
 const communityItems:CommunityItem[]=[{id:"1",image:"/img/gloa-cafe.jpg",alt:"Matcha-Zubereitung im Café"},{id:"2",image:"/img/gloa-on-the-go.jpg",alt:"Iced Matcha unterwegs in Berlin"},{id:"3",image:"/img/gloa-iced.jpg",alt:"Iced Matcha"},{id:"4",image:"/img/gloa-social.jpg",alt:"Freunde mit Matcha"},{id:"5",image:"/img/gloa-morning.jpg",alt:"Matcha am Morgen"},{id:"6",image:"/img/gloa-work.jpg",alt:"Iced Matcha am Arbeitsplatz"}];
 function Placeholder({children=""}:{children?:string}){return <span className="placeholder-label">{children}</span>}
-function ProductVisual(){return <div className="product-visual lime"><img src="/img/gloa-hero-packaging.jpg" alt="GLOA Matcha Verpackung" loading="lazy"/></div>}
+/** The product feature's visual. `contain`, because the pouch and its
+ *  COMING SOON stamp are the subject and a crop would cut one of them. */
+function ProductVisual(){return <div className="product-visual"><img src="/img/Produkt BILD.png" alt="GLOA Matcha Beutel mit COMING SOON Stempel" loading="lazy"/></div>}
 function ProductCard({onAdd}:{onAdd:()=>void}){
 const {product,loading,error}=useCatalog("matcha");
 const {addItem}=useCart();
@@ -48,35 +56,32 @@ return <article className="product-card"><Link href="/shop" onClick={()=>track("
 function HowTo(){return <section className="how-to"><div className="section-head"><div><p className="eyebrow">HOW TO GLOA</p><h2>Latte oder Pur.<br/>Mehr brauchst du nicht.</h2></div></div><div className="method-grid"><article><span>01</span><h3>Matcha Latte</h3><ol><li>Matcha dosieren</li><li>Mit Wasser aufschlagen</li><li>Milch oder Pflanzendrink dazu</li><li>Heiß oder iced genießen</li></ol></article><article><span>02</span><h3>Pure Matcha</h3><ol><li>Matcha dosieren</li><li>Mit wenig Wasser glattrühren</li><li>Mit Wasser aufschlagen</li><li>Direkt genießen</li></ol></article></div></section>}
 function CommunityFeed(){const [offset,setOffset]=useState(0);const [paused,setPaused]=useState(false);const [animate,setAnimate]=useState(true);const total=communityItems.length;useEffect(()=>{const mq=window.matchMedia("(prefers-reduced-motion: reduce)");if(mq.matches)return;let visible=true;const onVis=()=>{visible=document.visibilityState==="visible"};document.addEventListener("visibilitychange",onVis);const id=setInterval(()=>{if(!paused&&visible)setOffset(p=>p+1)},4500);return()=>{clearInterval(id);document.removeEventListener("visibilitychange",onVis)}},[paused]);useEffect(()=>{if(offset>=total){const t=setTimeout(()=>{setAnimate(false);setOffset(0);requestAnimationFrame(()=>requestAnimationFrame(()=>setAnimate(true)))},400);return()=>clearTimeout(t)}},[offset,total]);const track=[...communityItems,...communityItems.slice(0,4)];return <div className="community-feed" onMouseEnter={()=>setPaused(true)} onMouseLeave={()=>setPaused(false)}><div className="community-track" style={{transform:`translateX(-${offset*25}%)`,transition:animate?"transform 400ms ease":"none"}}>{track.map((item,i)=><div key={`cf-${i}`} className="community-card"><img src={item.image} alt={item.alt} loading="lazy"/></div>)}</div></div>}
 
+/**
+ * The recipe rail.
+ *
+ * ── WHY THIS IS NO LONGER A MOVING TRACK ──────────────────────
+ *
+ * It used to translate a flex track built from featuredRecipes DUPLICATED
+ * once - two recipes, so four cards, about 1200px of content. On a 1440px
+ * desktop that track is narrower than the rail it sits in, and as the
+ * offset advanced the cards ran off to the left with nothing behind them:
+ * the blank centre that made the drinks look like they had disappeared.
+ *
+ * A wider viewport made it worse, which is exactly backwards. So the
+ * track is gone. Four recipes, one grid, no transform and no interval -
+ * there is nothing left that can run out of cards, and the page keeps a
+ * single deliberate motion moment (the hero) instead of two.
+ *
+ * Mobile keeps a real horizontal rail: the grid becomes max-content and
+ * the container scrolls, with snap points, rather than shrinking four
+ * tiles onto a 390px screen.
+ */
 function RecipeCarousel(){
-const trackRef=useRef<HTMLDivElement>(null);
-const [offset,setOffset]=useState(0);
-const [paused,setPaused]=useState(false);
-const [dragging,setDragging]=useState(false);
-const startX=useRef(0);const startOffset=useRef(0);
-const items=[...featuredRecipes,...featuredRecipes];
-const cardW=280;const gap=20;const step=cardW+gap;
-const totalW=featuredRecipes.length*step;
-
-useEffect(()=>{
-const mq=window.matchMedia("(prefers-reduced-motion: reduce)");
-if(mq.matches)return;
-let visible=true;
-const onVis=()=>{visible=document.visibilityState==="visible"};
-document.addEventListener("visibilitychange",onVis);
-const id=setInterval(()=>{if(!paused&&!dragging&&visible)setOffset(p=>{const next=p+1;return next>=totalW?0:next})},30);
-return()=>{clearInterval(id);document.removeEventListener("visibilitychange",onVis)}
-},[paused,dragging,totalW]);
-
-const onPointerDown=useCallback((e:React.PointerEvent)=>{setDragging(true);startX.current=e.clientX;startOffset.current=offset;(e.target as HTMLElement).setPointerCapture(e.pointerId)},[offset]);
-const onPointerMove=useCallback((e:React.PointerEvent)=>{if(!dragging)return;const dx=startX.current-e.clientX;let next=startOffset.current+dx;if(next<0)next=totalW+next;if(next>=totalW)next=next-totalW;setOffset(next)},[dragging,totalW]);
-const onPointerUp=useCallback(()=>{setDragging(false)},[]);
-
 return <section className="featured-recipes"><div className="featured-recipes-head"><div><p className="eyebrow">GLOA RECIPES</p><h2>Matcha.<br/><i>Mach was draus.</i></h2><p className="featured-recipes-sub">Unsere liebsten Matcha-Rezepte.</p></div></div>
-<div className="recipe-loop" onMouseEnter={()=>setPaused(true)} onMouseLeave={()=>setPaused(false)} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} style={{touchAction:"pan-y"}}>
-<div ref={trackRef} className="recipe-loop-track" style={{transform:`translateX(-${offset}px)`,transition:dragging?"none":"transform 0.5s linear",width:`${items.length*step}px`}}>
-{items.map((r,i)=><Link key={`rl-${i}`} href={`/rezepte/${r.slug}`} className="recipe-loop-card" draggable={false} style={{width:cardW}}>
-<div className="recipe-loop-img"><img src={r.image} alt={r.alt} loading="lazy" draggable={false}/></div>
+<div className="recipe-loop">
+<div className="recipe-loop-track">
+{recipes.map(r=><Link key={`rl-${r.slug}`} href={`/rezepte/${r.slug}`} className="recipe-loop-card">
+<div className="recipe-loop-img"><img src={r.image} alt={r.alt} loading="lazy"/></div>
 <p className="eyebrow">{r.time}</p>
 <h3>{r.title}</h3>
 </Link>)}
@@ -85,7 +90,114 @@ return <section className="featured-recipes"><div className="featured-recipes-he
 </section>
 }
 
-function Home({onAdd}:{onAdd:()=>void}){return <main><section className="hero"><div className="hero-copy"><p className="eyebrow">MATCHA AUS SHIZUOKA.</p><h1>Matcha.<br/><i>Aber richtig.</i></h1><p className="lead">Aus Shizuoka, Japan. Für Latte, pur, iced oder wie du willst.</p><div className="hero-actions"><Link className="cta" href="/shop" onClick={()=>track("shop_click")}>Zum Shop</Link><Link className="cta secondary" href="/about">GLOA entdecken →</Link></div></div><div className="hero-art"><img src="/img/gloa-hero-packaging.jpg" alt="GLOA Matcha Verpackung" className="hero-img"/><span className="hero-micro">SHIZUOKA / JAPAN</span></div></section><section className="product-intro"><div><p className="eyebrow">MEET YOUR MATCHA.</p><h2>Ein Grün.<br/><i>Viele Momente.</i></h2><p>Aus Shizuoka, Japan. Für Matcha Latte und pur. Easy im Alltag, ehrlich im Produkt.</p><Link className="cta" href="/shop">Shop GLOA</Link></div><ProductCard onAdd={onAdd}/></section><section className="daily"><div className="daily-copy"><p className="eyebrow">MATCHA FÜR JEDEN TAG</p><h2>Morgens.<br/>Im Meeting.<br/><i>Nachmittags.</i></h2></div><div className="daily-grid">{dailyTiles.map(t=><div className="daily-tile" key={t.label}><img src={t.src} alt={t.alt} loading="lazy"/><span>{t.label}</span></div>)}</div></section><section className="origin"><div><p className="eyebrow">ORIGIN</p><h2>From Shizuoka,<br/><i>Japan.</i></h2></div><div><p>GLOA Matcha kommt aus Shizuoka, Japan: 100 % Bio-Matcha, fein vermahlen.</p><dl><div><dt>ORIGIN</dt><dd>Shizuoka, Japan</dd></div><div><dt>MADE FOR</dt><dd>Latte + pure preparation</dd></div></dl></div></section><HowTo/><RecipeCarousel/><section className="community"><p className="eyebrow">#gloamatcha</p><h2>Zeig uns<br/><i>deinen Matcha.</i></h2><CommunityFeed/><a href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">@gloa.matcha folgen →</a></section><BrandNote/></main>}
+/**
+ * The launch countdown.
+ *
+ * ── ONE TIMER, ONE SECOND, AND IT STOPS ───────────────────────
+ *
+ * Every value comes from launchCountdown() in lib/launchCountdown.ts,
+ * which is pure and clamps at zero, so this component owns no arithmetic
+ * and cannot render a negative day. The interval is cleared on unmount
+ * and again the moment the launch instant passes: a page left open past
+ * midnight settles into the launched state instead of ticking forever.
+ *
+ * ── AND IT DOES NOT TALK TO SCREEN READERS EVERY SECOND ───────
+ *
+ * The ticking block is aria-hidden and there is no aria-live anywhere
+ * near it. A countdown that announced itself once a second would make
+ * the page unusable with a screen reader. The heading and the date carry
+ * the meaning instead, and both are real text.
+ */
+let clockTick=0;
+/**
+ * ONE clock for the whole page, read through useSyncExternalStore.
+ *
+ * The snapshot is a cached number that only changes when the interval
+ * fires, so React is never handed a new value on every render, the
+ * subscription is torn down with the component, and the SERVER snapshot
+ * is null - the band renders without numbers on the server and hydrates
+ * without a mismatch, because a server clock and a browser clock are
+ * never the same instant.
+ */
+const clockStore={
+subscribe(onChange:()=>void){
+clockTick=Date.now();
+const id=setInterval(()=>{clockTick=Date.now();onChange()},1000);
+return()=>clearInterval(id);
+},
+getSnapshot(){return clockTick||Date.now()},
+getServerSnapshot(){return null as number|null},
+};
+
+function LaunchCountdown(){
+const now=useSyncExternalStore(clockStore.subscribe,clockStore.getSnapshot,clockStore.getServerSnapshot);
+const state=now===null?null:launchCountdown(now);
+return <section className="countdown" aria-labelledby="countdown-title">
+<div className="countdown-inner">
+<div className="countdown-head">
+<h2 className="countdown-title" id="countdown-title">{state?.launched?"GLOA is here":"GLOA is coming"}</h2>
+<p className="countdown-date">{GLOA_LAUNCH_LABEL}</p>
+</div>
+{state?.launched
+?<p className="countdown-live">Der Shop ist offen.</p>
+:<div className="countdown-units" aria-hidden="true">
+{([["Days",state?.days],["Hours",state?.hours],["Min",state?.minutes],["Sec",state?.seconds]] as const).map(([label,value])=>
+<div className="countdown-unit" key={label}>
+<span className="countdown-value">{value===undefined?"--":padCountdownUnit(value)}</span>
+<span className="countdown-label">{label}</span>
+</div>)}
+</div>}
+</div>
+</section>
+}
+
+/**
+ * The hero's scroll-linked typography.
+ *
+ * ── SCROLL-LINKED, NOT A MARQUEE ──────────────────────────────
+ *
+ * One requestAnimationFrame reader writes ONE CSS variable,
+ * --hero-scroll, as a 0..1 progress value across the first viewport of
+ * scrolling. The two headline lines and the lead each translate by a
+ * different multiple of it in globals.css, so the movement is tied to
+ * the reader's own scrolling and stops when they stop. Nothing loops,
+ * nothing animates on its own, and the copy is fully legible at every
+ * point - the largest displacement is a few dozen pixels.
+ *
+ * prefers-reduced-motion: reduce turns it off in CSS AND skips the
+ * listener entirely here, so a reduced-motion visitor pays for no
+ * scroll work at all. Mobile keeps a much smaller displacement (see the
+ * 900px media query) so a narrow line never drifts toward an edge.
+ */
+function useHeroScrollProgress(){
+const ref=useRef<HTMLElement|null>(null);
+useEffect(()=>{
+const node=ref.current;
+if(!node)return;
+if(window.matchMedia("(prefers-reduced-motion: reduce)").matches)return;
+let frame=0;
+const read=()=>{
+frame=0;
+const height=window.innerHeight||1;
+const progress=Math.min(1,Math.max(0,window.scrollY/height));
+node.style.setProperty("--hero-scroll",progress.toFixed(4));
+};
+const onScroll=()=>{if(!frame)frame=window.requestAnimationFrame(read)};
+read();
+window.addEventListener("scroll",onScroll,{passive:true});
+window.addEventListener("resize",onScroll,{passive:true});
+return()=>{
+if(frame)window.cancelAnimationFrame(frame);
+window.removeEventListener("scroll",onScroll);
+window.removeEventListener("resize",onScroll);
+};
+},[]);
+return ref;
+}
+
+function Home({onAdd}:{onAdd:()=>void}){
+const heroRef=useHeroScrollProgress();
+return <main><section className="hero"><div className="hero-copy" ref={heroRef as React.RefObject<HTMLDivElement>}><p className="eyebrow">MATCHA AUS SHIZUOKA.</p><h1>Matcha.<br/><i>Aber richtig.</i></h1><p className="lead">Aus Shizuoka, Japan. Für Latte, pur, iced oder wie du willst.</p><div className="hero-actions"><Link className="cta" href="/shop" onClick={()=>track("shop_click")}>Zum Shop</Link><Link className="cta secondary" href="/about">GLOA entdecken →</Link></div></div><div className="hero-art"><img src="/img/Header.png" alt="GLOA Matcha in Bewegung" className="hero-img" fetchPriority="high"/><span className="hero-micro">SHIZUOKA / JAPAN</span></div></section><LaunchCountdown/><section className="product-intro"><div><p className="eyebrow">MEET YOUR MATCHA.</p><h2>Ein Grün.<br/><i>Viele Momente.</i></h2><p>Aus Shizuoka, Japan. Für Matcha Latte und pur. Easy im Alltag, ehrlich im Produkt.</p><Link className="cta" href="/shop">Shop GLOA</Link></div><ProductCard onAdd={onAdd}/></section><section className="daily"><div className="daily-copy"><p className="eyebrow">MATCHA FÜR JEDEN TAG</p><h2>Morgens.<br/>Im Meeting.<br/><i>Nachmittags.</i></h2></div><div className="daily-grid">{dailyTiles.map(t=><div className="daily-tile" key={t.label}><img src={t.src} alt={t.alt} loading="lazy"/><span>{t.label}</span></div>)}</div></section><section className="origin"><div><p className="eyebrow">ORIGIN</p><h2>From Shizuoka,<br/><i>Japan.</i></h2></div><div><p>GLOA Matcha kommt aus Shizuoka, Japan: 100 % Bio-Matcha, fein vermahlen.</p><dl><div><dt>ORIGIN</dt><dd>Shizuoka, Japan</dd></div><div><dt>MADE FOR</dt><dd>Latte + pure preparation</dd></div></dl></div></section><HowTo/><RecipeCarousel/><section className="community"><p className="eyebrow">#gloamatcha</p><h2>Zeig uns<br/><i>deinen Matcha.</i></h2><CommunityFeed/><a href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">@gloa.matcha folgen →</a></section><BrandNote/></main>}
 
 // -- Catalog-driven shop --------------------------------------------
 //
@@ -149,11 +261,15 @@ return <section className="shop-accordion"><div className="shop-accordion-inner"
  *  no form, no consent checkbox, no marketing promise to keep. */
 function BrandNote(){
 return <section className="brand-note"><div className="brand-note-inner">
+<div className="brand-note-left">
 <p className="eyebrow">KEIN NEWSLETTER-LÄRM</p>
 <p className="brand-note-text">Wir melden uns nicht.<br/><i>Und das ist Absicht.</i></p>
+</div>
+<div className="brand-note-right">
 <p className="brand-note-sub">Keine Rabattschreie. Kein E-Mail-Dauerfeuer.<br/>Wenn es etwas zu sagen gibt, findest du es hier.</p>
 <p className="brand-note-micro">Nur GLOA.</p>
 <Link className="brand-note-link" href="/contact">Fragen? Schreib uns →</Link>
+</div>
 </div></section>}
 
 function Shop({onAdd}:{onAdd:()=>void}){
