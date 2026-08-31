@@ -714,7 +714,10 @@ header nav{gap:18px;font-size:12px}
   display:inline-block;
   font-family:var(--font-sans),Arial,sans-serif;
   font-style:italic;
-  font-weight:800;
+  /* NOT BOLD. The heavy weight put this line in competition with
+     "Matcha." above it; at regular weight the two read as one headline
+     with a clear hierarchy - mass first, then the quiet italic line. */
+  font-weight:400;
   font-synthesis:none;
   font-size:clamp(48px,5vw,86px);
   line-height:.98;

@@ -602,12 +602,13 @@ test("23: every hero text is Inter, and only weight/size/case separates them", (
   assert.match(headline, /font-style:normal/);
   assert.match(headline, /letter-spacing:-\.055em/);
   assert.match(headline, /font-size:clamp\(54px,5\.9vw,100px\)/);
-  // Is for everyone. - 800 ITALIC, and no synthetic fallback allowed.
+  // Is for everyone. - ITALIC and DELIBERATELY NOT BOLD: the heavy weight
+  // competed with "Matcha." above it. No synthetic slant allowed either.
   assert.match(line2, /font-style:italic/);
-  assert.match(line2, /font-weight:800/);
+  assert.match(line2, /font-weight:400/);
   assert.match(line2, /font-synthesis:none/);
   assert.match(line2, /font-size:clamp\(48px,5vw,86px\)/);
-  assert.ok(!line2.includes("font-weight:500"), "the second line is still the old weight");
+  assert.ok(!/font-weight:[5-9]00/.test(line2), "the second line is bold again");
   // GLOA ENTDECKEN
   assert.match(cta, /font-weight:600/);
   assert.match(cta, /font-size:11px/);
