@@ -810,10 +810,15 @@ test("32: a redelivered event converges instead of duplicating", () => {
 test("33: this phase stays inside its boundaries", () => {
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 41);
-  assert.equal(migrations[migrations.length - 1], "041_annual_account_column_privileges.sql");
-  assert.equal(migrations[migrations.length - 2], "040_annual_checkout_retry_fingerprints.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 41), [], "a 042 appeared");
+  assert.equal(migrations.length, 42);
+  // PHASE 4B8.2 ADDED MIGRATION 042: the ONE column privilege 041
+  // was short of, so migration 039's delivery policy can still read
+  // the parent's user_id while resolving ownership. Reviewed in
+  // tests/annual-account-privileges-migration.test.mjs.
+  assert.equal(migrations[migrations.length - 1], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(migrations[migrations.length - 2], "041_annual_account_column_privileges.sql");
+  assert.equal(migrations[migrations.length - 3], "040_annual_checkout_retry_fingerprints.sql");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 42), [], "a 043 appeared");
   // 039 and 040 are both live now: no migration may be edited at all.
   const changed = execFileSync("git", ["diff", "--name-only", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
@@ -1661,8 +1666,8 @@ test("61: 4B4.1's hardening is intact and this phase added no migration", () => 
   // No migration, and no new database call anywhere in this phase.
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 41);
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 41), [], "a 042 appeared");
+  assert.equal(migrations.length, 42);
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 42), [], "a 043 appeared");
   assert.equal(
     execFileSync("git", ["diff", "--name-only", "HEAD", "--", "supabase/migrations/"],
       { cwd: ROOT, encoding: "utf-8" }).trim(),

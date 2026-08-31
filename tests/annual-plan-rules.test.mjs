@@ -590,12 +590,17 @@ test("26: this phase created no Stripe object and no recurring price", () => {
 test("27: 039 and 040 are untouched, 041 is the highest, and there is no 042", () => {
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations[migrations.length - 1], "041_annual_account_column_privileges.sql");
-  assert.equal(migrations[migrations.length - 2], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(migrations[migrations.length - 3], "039_b2c_annual_plan_foundation.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 41), [],
-    "a migration 042 or beyond appeared");
-  assert.equal(migrations.length, 41);
+  // PHASE 4B8.2 ADDED MIGRATION 042: the ONE column privilege 041
+  // was short of, so migration 039's delivery policy can still read
+  // the parent's user_id while resolving ownership. Reviewed in
+  // tests/annual-account-privileges-migration.test.mjs.
+  assert.equal(migrations[migrations.length - 1], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(migrations[migrations.length - 2], "041_annual_account_column_privileges.sql");
+  assert.equal(migrations[migrations.length - 3], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(migrations[migrations.length - 4], "039_b2c_annual_plan_foundation.sql");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 42), [],
+    "a migration 043 or beyond appeared");
+  assert.equal(migrations.length, 42);
   // 039 is LIVE and therefore immutable. 040 is NOT APPLIED yet, so it
   // may still be edited in place - that is the whole reason it is a file
   // under review rather than a 041 - and it is the only one that may.

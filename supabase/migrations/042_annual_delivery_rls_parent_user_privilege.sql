@@ -1,0 +1,257 @@
+-- ============================================================
+-- GLOA - The one column migration 041 was one short of (Phase 4B8.2)
+-- Run in Supabase SQL Editor AFTER 041
+--
+-- Migrations 001-041 are LIVE, VERIFIED and IMMUTABLE. This file edits
+-- none of them. It creates no table, no column, no index, no function,
+-- no policy and no row. It is ONE GRANT.
+--
+-- ── WHAT 041 GOT WRONG, STATED PLAINLY ────────────────────────
+--
+-- 041 narrowed public.annual_plans and public.annual_plan_deliveries
+-- from a table-level SELECT for `authenticated` to column-level grants.
+-- Its header predicted one risk and named the exact fix:
+--
+--     "PostgreSQL evaluates a policy expression's own table references
+--      with the policy table's owner rights rather than the caller's,
+--      which is why this file does not grant authenticated any privilege
+--      on annual_plans.user_id"
+--
+-- THAT IS WRONG, and the verify probe it shipped for exactly this
+-- question found it. On the live database, section E2 - an
+-- authenticated-role SELECT on public.annual_plan_deliveries - failed:
+--
+--     ERROR 42501: permission denied for table annual_plans
+--
+-- A policy expression that reads ANOTHER table is checked against the
+-- CALLING role's privileges, not the policy owner's. Migration 039's
+-- delivery policy is exactly such an expression:
+--
+--     exists (
+--       select 1
+--       from public.annual_plans p
+--       where p.id = annual_plan_deliveries.annual_plan_id
+--         and p.user_id = auth.uid()
+--     )
+--
+-- so evaluating it requires the caller to hold SELECT on the two parent
+-- columns it reads. 041 already grants annual_plans.id. user_id is the
+-- one it withheld, and without it EVERY delivery read from the account
+-- area fails - not with an empty result, but with a hard permission
+-- error.
+--
+-- ── WHY GRANTING IT LEAKS NOTHING ─────────────────────────────
+--
+-- annual_plans keeps migration 039's RLS policy, untouched:
+--
+--     using (auth.uid() = user_id)
+--
+-- So the only rows `authenticated` can read at all are rows whose
+-- user_id ALREADY EQUALS the caller's own uid. The single value this
+-- grant can ever return to a customer is their own user id - which their
+-- JWT carries, which the client library already holds in memory, and
+-- which identifies nobody else. There is no row in which this column
+-- could disclose another customer's identity, because there is no such
+-- readable row.
+--
+-- It also grants no new ROWS: a column privilege widens which columns a
+-- permitted row may expose, never which rows are permitted. RLS decides
+-- that, and RLS is not touched here.
+--
+-- ── WHY NOT SIMPLY RESTORE THE TABLE GRANT ────────────────────
+--
+-- Because the table grant is the whole problem 041 fixed. It would hand
+-- the browser back stripe_payment_intent_id, the four raw snapshots and
+-- purchase_confirmation_email_claim_token - which is authority to record
+-- an email outcome, not a fact. One column is the smallest change that
+-- makes the ownership check evaluable, and it is the only change here.
+--
+-- ── WHY NOT REWRITE THE POLICY INSTEAD ────────────────────────
+--
+-- A SECURITY DEFINER helper would also work, and would be a bigger
+-- change to a LIVE policy on a table holding paid contracts: a new
+-- function, a new grant, a dropped and recreated policy, and a window in
+-- which deliveries are readable by nobody or by the wrong rule. 039's
+-- policy is correct and stays exactly as written. The privilege model is
+-- what was one column short, so the privilege model is what changes.
+-- ============================================================
+
+
+begin;
+
+
+-- THE ONE GRANT ────────────────────────────────────────────────
+--
+-- COLUMN-LEVEL, on public.annual_plans, for `authenticated`, and only
+-- for user_id. It exists so migration 039's delivery policy can evaluate
+-- its ownership check; nothing in the application selects this column,
+-- and lib/annualPlanAccount.ts's ANNUAL_PLAN_ACCOUNT_SELECT deliberately
+-- does not name it.
+
+grant select (user_id) on table public.annual_plans to authenticated;
+
+
+commit;
+
+
+-- ============================================================
+-- VERIFY - READ ONLY, AFTER APPLYING. NOTHING BELOW RUNS.
+-- ============================================================
+--
+--   A. THE TABLE-LEVEL READ IS STILL GONE. This file must not have
+--      restored what 041 removed.
+--
+--   select has_table_privilege('authenticated', 'public.annual_plans', 'select')           as plans_auth,
+--          has_table_privilege('authenticated', 'public.annual_plan_deliveries', 'select') as deliveries_auth,
+--          has_table_privilege('service_role',  'public.annual_plans', 'select')           as plans_service,
+--          has_table_privilege('anon',          'public.annual_plans', 'select')           as plans_anon;
+--
+--     EXPECT false, false, true, false.
+--
+--     has_table_privilege is true only when the privilege covers the
+--     WHOLE table, so a column grant must not turn it back on.
+--
+--   select table_name, grantee, privilege_type
+--   from information_schema.role_table_grants
+--   where table_schema = 'public'
+--     and table_name in ('annual_plans', 'annual_plan_deliveries')
+--     and grantee in ('anon', 'authenticated', 'service_role')
+--   order by table_name, grantee, privilege_type;
+--
+--     EXPECT exactly two rows, both service_role SELECT.
+--
+--
+--   B. user_id IS NOW READABLE, AS A COLUMN.
+--
+--   select has_column_privilege('authenticated', 'public.annual_plans', 'user_id', 'select') as user_id_readable;
+--
+--     EXPECT true.
+--
+--
+--   C. NOTHING ELSE BECAME READABLE.
+--
+--   select column_name,
+--          has_column_privilege('authenticated', 'public.annual_plans', column_name, 'select') as readable
+--   from (values
+--     ('stripe_payment_intent_id'), ('stripe_checkout_session_id'),
+--     ('payment_checkout_attempt_id'), ('purchase_confirmation_email_claim_token'),
+--     ('purchase_confirmation_email_status'), ('purchase_confirmation_email_sent_at'),
+--     ('purchase_confirmation_email_claimed_at'),
+--     ('customer_snapshot'), ('shipping_address_snapshot'), ('billing_address_snapshot'),
+--     ('tax_snapshot'), ('delivery_tax_snapshot'),
+--     ('variant_id'), ('refund_updated_at'), ('created_at'), ('updated_at')
+--   ) as forbidden(column_name)
+--   order by column_name;
+--
+--     EXPECT readable = false for every row.
+--
+--   select column_name,
+--          has_column_privilege('authenticated', 'public.annual_plan_deliveries', column_name, 'select') as readable
+--   from (values ('id'), ('checkout_attempt_id'), ('claimed_at'), ('created_at')) as forbidden(column_name)
+--   order by column_name;
+--
+--     EXPECT readable = false for all four. This file grants nothing on
+--     the delivery table at all.
+--
+--   select table_name, column_name
+--   from information_schema.column_privileges
+--   where table_schema = 'public'
+--     and table_name = 'annual_plans'
+--     and grantee = 'authenticated'
+--     and privilege_type = 'SELECT'
+--   order by column_name;
+--
+--     EXPECT 041's eighteen columns plus user_id - nineteen rows:
+--       annual_unit_gross_cents, cancelled_at, catalog_unit_gross_cents,
+--       completed_at, currency, delivery_count, delivery_items_snapshot,
+--       discount_percent_applied, id, merchandise_total_gross_cents,
+--       payment_status, plan_end_at, purchased_at, refunded_total_cents,
+--       shipping_per_delivery_gross_cents, shipping_total_gross_cents,
+--       status, total_gross_cents, user_id
+--
+--
+--   D. RLS IS UNCHANGED. This file creates, drops and alters no policy.
+--
+--   select relname, relrowsecurity
+--   from pg_class
+--   where relnamespace = 'public'::regnamespace
+--     and relname in ('annual_plans', 'annual_plan_deliveries');
+--
+--     EXPECT relrowsecurity = true for both.
+--
+--   select tablename, policyname, cmd, qual
+--   from pg_policies
+--   where schemaname = 'public'
+--     and tablename in ('annual_plans', 'annual_plan_deliveries')
+--   order by tablename, policyname;
+--
+--     EXPECT the same two SELECT policies migration 039 installed:
+--       "Users read own annual plan deliveries"  and
+--       "Users read own annual plans"
+--     with auth.uid() = user_id, and the EXISTS through the parent.
+--
+--
+--   E. THE PROBE THAT FAILED NOW PASSES - AND THE REST STILL REFUSES.
+--
+--      Run inside an explicit transaction and ROLL BACK. Substitute a
+--      real user's uuid.
+--
+--   begin;
+--   set local role authenticated;
+--   set local request.jwt.claims = '{"sub":"<a real auth user uuid>","role":"authenticated"}';
+--
+--   -- E1. The parent read still works and returns only own rows.
+--   select id, status, payment_status, total_gross_cents, purchased_at
+--   from public.annual_plans
+--   order by purchased_at desc nulls last;
+--
+--   -- E2. THE ONE THAT FAILED WITH 42501. It must now return this
+--   --     customer's delivery rows, or zero rows, and NOT
+--   --     "permission denied for table annual_plans".
+--   select annual_plan_id, delivery_number, scheduled_for, state, order_id
+--   from public.annual_plan_deliveries
+--   order by annual_plan_id, delivery_number;
+--
+--   rollback;
+--
+--   -- E3. The star select is still refused. Own transaction: a refused
+--   --     statement aborts the one it is in.
+--   begin;
+--   set local role authenticated;
+--   set local request.jwt.claims = '{"sub":"<a real auth user uuid>","role":"authenticated"}';
+--   select * from public.annual_plans;
+--   rollback;
+--
+--     EXPECT: ERROR permission denied for table annual_plans
+--
+--   -- E4. And each capability column is still refused by name. One
+--   --     transaction each, for the same reason.
+--   begin;
+--   set local role authenticated;
+--   set local request.jwt.claims = '{"sub":"<a real auth user uuid>","role":"authenticated"}';
+--   select purchase_confirmation_email_claim_token from public.annual_plans;
+--   rollback;
+--
+--     EXPECT: ERROR permission denied for table annual_plans
+--
+--     Repeat for stripe_payment_intent_id, customer_snapshot, and
+--     annual_plan_deliveries.claimed_at.
+--
+--   -- E5. user_id reads back the caller's OWN id and nothing else.
+--   begin;
+--   set local role authenticated;
+--   set local request.jwt.claims = '{"sub":"<a real auth user uuid>","role":"authenticated"}';
+--   select distinct user_id from public.annual_plans;
+--   rollback;
+--
+--     EXPECT at most one row, equal to the uuid in the claim above -
+--     which is what RLS guarantees and what makes this grant a non-event.
+--
+--
+--   F. NOTHING ELSE MOVED. This file wrote no row.
+--
+--   select count(*) as plans from public.annual_plans;
+--   select count(*) as deliveries from public.annual_plan_deliveries;
+--
+--     EXPECT both to match what they were before applying.
+-- ============================================================

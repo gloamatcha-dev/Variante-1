@@ -145,16 +145,16 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
   const files = readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith(".sql")).sort();
   assert.deepEqual(files.filter(f => f.startsWith("039")), [MIGRATION_039],
     "there must be exactly one migration 039");
-  assert.equal(files[files.length - 3], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 4], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 4], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 5], MIGRATION_038, "038 must be the one before it");
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
 
-test("2: no migration 042 or beyond", () => {
+test("2: no migration 043 or beyond", () => {
   // 039 is not applied anywhere, so it is still the right place to fix
   // 039. A hardening pass must not become a second migration.
-  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 41);
+  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 42);
   assert.deepEqual(beyond, [], "an unreviewed migration appeared after 039");
 });
 

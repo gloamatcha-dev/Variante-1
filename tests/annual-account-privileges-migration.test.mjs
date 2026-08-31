@@ -31,6 +31,27 @@ const NEWLINE = String.fromCharCode(10);
 const MIGRATION = "supabase/migrations/041_annual_account_column_privileges.sql";
 const sql = read(MIGRATION);
 
+/**
+ * PHASE 4B8.2. 041's E2 probe failed on the live database with
+ *
+ *     ERROR 42501: permission denied for table annual_plans
+ *
+ * on an authenticated SELECT of public.annual_plan_deliveries, which is
+ * the contingency 041's own header named: a policy expression that reads
+ * ANOTHER table is checked against the CALLING role's privileges, not the
+ * policy owner's, so migration 039's delivery policy needs SELECT on the
+ * parent's user_id. 042 grants exactly that one column and nothing else.
+ */
+const MIGRATION_042 = "supabase/migrations/042_annual_delivery_rls_parent_user_privilege.sql";
+const sql042 = read(MIGRATION_042);
+
+const executableOf = source => source
+  .split(NEWLINE)
+  .filter(line => !line.trim().startsWith("--"))
+  .join(NEWLINE);
+
+const executable042 = executableOf(sql042);
+
 /** The statements PostgreSQL would actually run: no comment lines. */
 const executable = sql
   .split(NEWLINE)
@@ -61,14 +82,15 @@ const selectColumns = select => select.split(",").map(c => c.trim()).filter(Bool
    1-4. THE FILE ITSELF
    ══════════════════════════════════════════════════════════════ */
 
-test("1: 041 is the newest migration, and 001-040 are untouched", () => {
+test("1: 042 is the newest migration, and 001-041 are untouched", () => {
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 41);
+  assert.equal(migrations.length, 42);
   assert.equal(migrations[38], "039_b2c_annual_plan_foundation.sql");
   assert.equal(migrations[39], "040_annual_checkout_retry_fingerprints.sql");
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 41), [], "a 042 appeared");
+  assert.equal(migrations[41], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 42), [], "a 043 appeared");
 
   // No live migration was edited to make room for this one.
   const changed = execFileSync("git", ["diff", "--name-only", "HEAD", "--", "supabase/migrations/"],
@@ -148,7 +170,7 @@ test("5: the broad table-level read is removed from authenticated, on both table
   assert.match(m039, /grant select on table public\.annual_plans\s+to authenticated;/);
 });
 
-test("6: the parent allowlist is exactly the reviewed set", () => {
+test("6: 041's parent allowlist is exactly the reviewed set", () => {
   assert.deepEqual([...PLAN_GRANTS].sort(), [
     "annual_unit_gross_cents",
     "cancelled_at",
@@ -371,4 +393,147 @@ test("16: after 041 a star select cannot succeed for authenticated", () => {
     assert.ok(ungranted.includes(column), `${column} is not in the ungranted set`);
   }
   assert.match(sql, /`select \*` fails for authenticated/);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   17-22. MIGRATION 042 - THE ONE COLUMN 041 WAS SHORT
+   ══════════════════════════════════════════════════════════════ */
+
+test("17: 042 is ONE grant, inside one transaction, and nothing else", () => {
+  const begin = executable042.indexOf("begin;");
+  const commit = executable042.indexOf("commit;");
+  assert.ok(begin > -1 && commit > begin, "042 is not one transaction");
+  assert.equal(executable042.indexOf("begin;", begin + 1), -1, "a second transaction was opened");
+  assert.equal(executable042.indexOf("commit;", commit + 1), -1, "a second commit exists");
+  assert.equal(executable042.slice(commit + "commit;".length).trim(), "",
+    "an executable statement follows the commit");
+
+  // Exactly one statement, and it is the grant.
+  const statements = executable042
+    .slice(begin + "begin;".length, commit)
+    .split(";")
+    .map(v => v.trim())
+    .filter(Boolean);
+  assert.deepEqual(statements, [
+    "grant select (user_id) on table public.annual_plans to authenticated",
+  ]);
+  assert.equal((executable042.match(/^grant /gm) ?? []).length, 1);
+  assert.equal((executable042.match(/^revoke /gm) ?? []).length, 0);
+});
+
+test("18: 042 grants ONE column, on ONE table, to ONE role", () => {
+  assert.match(executable042, /grant select \(user_id\) on table public\.annual_plans to authenticated;/);
+  // Not the table.
+  assert.ok(!/grant select on table/.test(executable042), "042 restores a table-level SELECT");
+  // Not the delivery table, and not another role.
+  assert.ok(!executable042.includes("annual_plan_deliveries"), "042 grants on the delivery table");
+  assert.ok(!executable042.includes("service_role"), "042 changes service_role");
+  assert.ok(!executable042.includes("anon"), "042 mentions anon");
+  assert.ok(!/to public/i.test(executable042), "042 grants to PUBLIC");
+  // No forbidden column rides along in the grant.
+  for (const column of [
+    "stripe_payment_intent_id", "stripe_checkout_session_id", "payment_checkout_attempt_id",
+    "purchase_confirmation_email_claim_token", "purchase_confirmation_email_status",
+    "customer_snapshot", "shipping_address_snapshot", "billing_address_snapshot",
+    "tax_snapshot", "delivery_tax_snapshot", "variant_id", "created_at", "updated_at",
+  ]) {
+    assert.ok(!executable042.includes(column), `042 grants ${column}`);
+  }
+});
+
+test("19: 042 changes no schema, no policy, no RLS and no data", () => {
+  const lower042 = executable042.toLowerCase();
+  for (const banned of [
+    "create table", "alter table", "drop table", "create index", "drop index",
+    "create function", "create or replace function", "drop function",
+    "create policy", "drop policy", "alter policy",
+    "enable row level security", "disable row level security",
+    "insert into", "update ", "delete from", "truncate", "alter column",
+    "create trigger", "create type", "comment on",
+  ]) {
+    assert.ok(!lower042.includes(banned), `042 contains ${banned}`);
+  }
+  for (const write of ["insert", "update", "delete", "truncate", "references", "trigger", "all privileges"]) {
+    assert.ok(!lower042.includes(`grant ${write}`), `042 grants ${write}`);
+  }
+});
+
+test("20: 041 itself is untouched, and so is every migration below it", () => {
+  // 041 is LIVE now. The fix is a new file, never an edit to it.
+  const changed = execFileSync("git", ["diff", "--name-only", "HEAD", "--", "supabase/migrations/"],
+    { cwd: ROOT, encoding: "utf-8" }).trim();
+  assert.equal(changed, "", "a live, immutable migration was edited");
+  // 041 still says what it said: the same revokes and the same grants.
+  assert.match(executable, /revoke select on table public\.annual_plans\s+from authenticated;/);
+  assert.equal(PLAN_GRANTS.length, 18);
+  assert.ok(!PLAN_GRANTS.includes("user_id"), "041 was edited to add user_id");
+});
+
+test("21: user_id is granted for the POLICY, and no application code selects it", () => {
+  // The reason it is needed: 039's delivery policy reads the parent's
+  // user_id while resolving ownership, and a policy that reads another
+  // table is checked against the CALLING role's privileges.
+  const m039 = read("supabase/migrations/039_b2c_annual_plan_foundation.sql");
+  assert.match(m039, /create policy "Users read own annual plan deliveries"[\s\S]{0,400}p\.user_id = auth\.uid\(\)/);
+  assert.match(sql042, /permission denied for table annual_plans/);
+  assert.match(sql042, /CALLING role's privileges/);
+
+  // And nothing in the account read model asks for it: the column exists
+  // in the ACL so the database can evaluate ownership, not so a browser
+  // can render an id it already has in its own JWT.
+  assert.ok(!selectColumns(ANNUAL_PLAN_ACCOUNT_SELECT).includes("user_id"),
+    "the account select now asks for user_id");
+  assert.ok(!selectColumns(ANNUAL_PLAN_DELIVERY_ACCOUNT_SELECT).includes("user_id"));
+  const account = read("lib/annualPlanAccount.ts");
+  assert.ok(!account.includes('"user_id"'), "the read model names user_id");
+
+  // RLS is what makes the grant a non-event: the only row a customer can
+  // read is one whose user_id is already their own.
+  assert.match(m039, /create policy "Users read own annual plans"[\s\S]{0,200}using \(auth\.uid\(\) = user_id\)/);
+});
+
+test("22: 042's verify section is commented, read-only, and re-runs the failing probe", () => {
+  const verify042 = sql042.slice(sql042.lastIndexOf(NEWLINE, sql042.indexOf("VERIFY - READ ONLY")) + 1);
+  for (const line of verify042.split(NEWLINE)) {
+    if (line.trim() === "") continue;
+    assert.ok(line.trim().startsWith("--"), `an executable line is in the verify section: ${line}`);
+  }
+  const verifySql042 = verify042
+    .split(NEWLINE)
+    .map(line => line.replace(/^\s*--\s?/, ""))
+    .join(NEWLINE);
+
+  // A: the table grant is still gone. B: user_id is readable.
+  assert.match(verifySql042, /has_table_privilege\('authenticated', 'public\.annual_plans', 'select'\)/);
+  assert.match(verifySql042, /has_column_privilege\('authenticated', 'public\.annual_plans', 'user_id', 'select'\)/);
+  // C: the capability columns stay refused.
+  for (const column of [
+    "stripe_payment_intent_id", "stripe_checkout_session_id", "payment_checkout_attempt_id",
+    "purchase_confirmation_email_claim_token", "customer_snapshot", "shipping_address_snapshot",
+    "billing_address_snapshot", "tax_snapshot", "delivery_tax_snapshot",
+  ]) {
+    assert.ok(verifySql042.includes(`('${column}')`), `the verify section does not re-check ${column}`);
+  }
+  // D: the policies are re-read rather than assumed.
+  assert.match(verifySql042, /pg_policies/);
+  assert.match(verifySql042, /relrowsecurity/);
+  // E: the exact probe that failed, run again as the browser role.
+  assert.match(verifySql042, /set local role authenticated;/);
+  assert.match(verifySql042, /from public\.annual_plan_deliveries/);
+  assert.match(verifySql042, /rollback;/);
+  assert.match(verifySql042, /select \* from public\.annual_plans;/);
+
+  // Read-only: it starts no statement that could change anything.
+  for (const [label, pattern] of [
+    ["insert", /^\s*insert\s+into\b/im],
+    ["update", /^\s*update\s+\w/im],
+    ["delete", /^\s*delete\s+from\b/im],
+    ["drop", /^\s*drop\s+\w/im],
+    ["alter", /^\s*alter\s+\w/im],
+    ["grant", /^\s*grant\s+[\w(), ]+\s+on\b/im],
+    ["revoke", /^\s*revoke\s+\w/im],
+    ["commit", /^\s*commit\s*;/im],
+  ]) {
+    assert.ok(!pattern.test(verifySql042), `the verify section starts a ${label} statement`);
+  }
 });

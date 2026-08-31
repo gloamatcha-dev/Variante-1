@@ -448,7 +448,7 @@ test("3F: only the owner's own private subscriptions are readable", () => {
   // property this assertion protects (an account UI change must not
   // widen what a customer can read) still holds.
   const migrations = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql"));
-  assert.equal(migrations.length, 41, "an unreviewed migration was added");
+  assert.equal(migrations.length, 42, "an unreviewed migration was added");
   assert.deepEqual(
     migrations.filter(f => f > "034_subscription_cancellation.sql").sort(),
     ["035_subscription_email_deliveries.sql", "036_subscription_payment_status.sql",
@@ -458,7 +458,8 @@ test("3F: only the owner's own private subscriptions are readable", () => {
      // Phase 4B8.1. Column-level privileges on the two ANNUAL tables. It
      // narrows what authenticated may read and widens nothing, and it
      // touches no subscription table, policy or grant.
-     "041_annual_account_column_privileges.sql"],
+     "041_annual_account_column_privileges.sql",
+     "042_annual_delivery_rls_parent_user_privilege.sql"],
     "a migration above 034 appeared that this suite has not been reviewed against"
   );
   // 038 is Phase 3K.B's one-time refund writer concurrency fix. Like 035
@@ -729,27 +730,32 @@ test("3F: the controls are real buttons, focusable, and status is not colour-onl
 
 test("3F: migrations 022 through 034 are untouched and only 035, 036 and 037 follow", () => {
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.length, 41);
+  assert.equal(files.length, 42);
   // 034 remains the last of the cancellation work. 035 is Phase 3H.1's
   // delivery table, 036 is Phase 3I.B1's payment foundation, 037 is
   // Phase 3J.B1's invoice-keyed refund-state writer and 038 is Phase
   // 3K.B's one-time refund writer concurrency fix; those four are the
   // ONLY migrations allowed above it until a later phase is reviewed
   // here.
-  assert.equal(files[files.length - 8], "034_subscription_cancellation.sql");
-  assert.equal(files[files.length - 7], "035_subscription_email_deliveries.sql");
-  assert.equal(files[files.length - 6], "036_subscription_payment_status.sql");
-  assert.equal(files[files.length - 5], "037_subscription_refund_correlation.sql");
-  assert.equal(files[files.length - 4], "038_one_time_refund_writer_concurrency.sql");
+  assert.equal(files[files.length - 9], "034_subscription_cancellation.sql");
+  assert.equal(files[files.length - 8], "035_subscription_email_deliveries.sql");
+  assert.equal(files[files.length - 7], "036_subscription_payment_status.sql");
+  assert.equal(files[files.length - 6], "037_subscription_refund_correlation.sql");
+  assert.equal(files[files.length - 5], "038_one_time_refund_writer_concurrency.sql");
   // 039 is Phase 4B1's annual plan foundation, reviewed in its own suite.
   // PHASE 4B8.1 ADDED MIGRATION 041 (column-level privileges that
   // narrow the annual account read surface), reviewed in
   // tests/annual-account-privileges-migration.test.mjs. Re-pinned
   // rather than deleted: this guard protects "no UNREVIEWED migration
   // appeared", never "the stack stopped growing".
-  assert.equal(files[files.length - 1], "041_annual_account_column_privileges.sql");
-  assert.equal(files[files.length - 2], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(files[files.length - 3], "039_b2c_annual_plan_foundation.sql");
+  // PHASE 4B8.2 ADDED MIGRATION 042: the ONE column privilege 041
+  // was short of, so migration 039's delivery policy can still read
+  // the parent's user_id while resolving ownership. Reviewed in
+  // tests/annual-account-privileges-migration.test.mjs.
+  assert.equal(files[files.length - 1], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(files[files.length - 2], "041_annual_account_column_privileges.sql");
+  assert.equal(files[files.length - 3], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 4], "039_b2c_annual_plan_foundation.sql");
   // This phase writes no SQL at all: nothing in it references a
   // migration, a policy or a grant.
   for (const source of [viewCode, portalCode]) {

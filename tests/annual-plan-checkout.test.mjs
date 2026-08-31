@@ -903,12 +903,12 @@ test("32: the checkout phase's own migrations are untouched, and 041 is not its 
   // phase's own migrations are live and immutable.
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 41);
+  assert.equal(migrations.length, 42);
   assert.equal(migrations[38], "039_b2c_annual_plan_foundation.sql");
   assert.equal(migrations[39], "040_annual_checkout_retry_fingerprints.sql");
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 41), [],
-    "a migration 042 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 42), [],
+    "a migration 043 or beyond appeared");
   // 041 touches privileges only: it creates no table, no column and no
   // function, so it cannot have changed anything this suite proves.
   const m041 = read("supabase/migrations/041_annual_account_column_privileges.sql");

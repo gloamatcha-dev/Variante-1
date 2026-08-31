@@ -108,7 +108,8 @@ test("035 exists, is the only 035, and only 036 and 037 follow it", () => {
      "040_annual_checkout_retry_fingerprints.sql",
      // Phase 4B8.1: annual account column privileges. It grants and
      // revokes on the two annual tables and nowhere else.
-     "041_annual_account_column_privileges.sql"],
+     "041_annual_account_column_privileges.sql",
+     "042_annual_delivery_rls_parent_user_privilege.sql"],
     "an unreviewed migration above 035 appeared"
   );
   // And 039 leaves this table entirely alone. An annual plan's one
