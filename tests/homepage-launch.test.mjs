@@ -720,6 +720,20 @@ test("28: the section is narrow, hairlined in raspberry, and typed correctly", (
   assert.match(prelaunchCss, /border-top:1px solid var\(--berry\)/);
   assert.match(prelaunchCss, /border-bottom:1px solid var\(--berry\)/);
   assert.match(prelaunchCss, /\.prelaunch-inner::before,\s*\.prelaunch-inner::after\{[\s\S]*?background:var\(--berry\)/);
+  // The verticals are SHORT and centred: long ones read as an open box.
+  const vertical = prelaunchRules.slice(prelaunchRules.indexOf(".prelaunch-inner::before,"));
+  const top = Number(/top:(\d+)%/.exec(vertical)?.[1]);
+  const height = Number(/height:(\d+)%/.exec(vertical)?.[1]);
+  assert.ok(Number.isFinite(top) && Number.isFinite(height), "the vertical hairlines moved");
+  assert.ok(height <= 62, "the vertical hairlines are box-length again");
+  assert.equal(top * 2 + height, 100, "the vertical hairlines are not centred");
+  // The horizontal rules are untouched: still the block's own borders.
+  assert.match(prelaunchRules, /border-top:1px solid var\(--berry\)/);
+  assert.match(prelaunchRules, /border-bottom:1px solid var\(--berry\)/);
+  // "werden." must not out-weigh "benachrichtigt".
+  const line3 = prelaunchRules.slice(prelaunchRules.indexOf(".prelaunch-line-3{"), prelaunchRules.indexOf("}", prelaunchRules.indexOf(".prelaunch-line-3{")));
+  assert.match(line3, /font-weight:600/);
+  assert.ok(!/font-weight:[78]00/.test(line3), "the closing line is heavy again");
   for (const banned of ["border-radius", "box-shadow", "backdrop-filter", "gradient", "var(--blue)"]) {
     assert.ok(!prelaunchRules.includes(banned), `the prelaunch section uses ${banned}`);
   }

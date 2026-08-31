@@ -881,8 +881,11 @@ header nav{gap:18px;font-size:12px}
 .prelaunch-inner::after{
   content:"";
   position:absolute;
-  top:14%;
-  height:72%;
+  /* 72% -> 60%: about a sixth shorter, and re-centred (top = (100-60)/2)
+     so both rules stay identical and symmetric. Shorter verticals read as
+     an editorial frame; longer ones start to read as an open box. */
+  top:20%;
+  height:60%;
   width:1px;
   background:var(--berry);
 }
@@ -907,7 +910,10 @@ header nav{gap:18px;font-size:12px}
   display:flex;
   flex-direction:column;
   align-items:center;
-  gap:2px;
+  /* The three lines are ONE headline: the gap goes and each line-height
+     tightens a touch, which takes roughly 8px out of the block without
+     changing a single size. */
+  gap:0;
   color:var(--ink);
   letter-spacing:-.03em;
 }
@@ -916,7 +922,7 @@ header nav{gap:18px;font-size:12px}
   font-weight:400;
   font-style:normal;
   font-size:clamp(38px,4.5vw,64px);
-  line-height:1;
+  line-height:.96;
 }
 /* THE ONE PLACE OUTSIDE THE EDITORIAL ITALICS WHERE THE DISPLAY FACE IS
    INVITED BACK. It carries the emotional word, in raspberry. */
@@ -925,20 +931,22 @@ header nav{gap:18px;font-size:12px}
   font-style:italic;
   font-weight:400;
   font-size:clamp(46px,5.5vw,76px);
-  line-height:.98;
+  line-height:.94;
   letter-spacing:-.015em;
   color:var(--berry);
 }
 .prelaunch-line-3{
   font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:700;
+  /* 700 -> 600. At the heavier weight this line was competing with
+     "benachrichtigt" above it, which is meant to be the accent. */
+  font-weight:600;
   font-style:normal;
   font-size:clamp(36px,4vw,58px);
-  line-height:1;
+  line-height:.96;
 }
 
 .prelaunch-body{
-  margin:clamp(20px,2.2vw,30px) 0 0;
+  margin:clamp(14px,1.6vw,23px) 0 0;
   max-width:560px;
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:400;
@@ -949,7 +957,7 @@ header nav{gap:18px;font-size:12px}
 }
 
 .prelaunch .prelaunch-cta{
-  margin-top:clamp(24px,2.4vw,32px);
+  margin-top:clamp(20px,1.9vw,26px);
   min-height:48px;
   padding:15px 34px;
   background:var(--berry);
@@ -970,7 +978,7 @@ header nav{gap:18px;font-size:12px}
   align-items:center;
   justify-content:center;
   gap:10px;
-  margin-top:clamp(20px,2.2vw,28px);
+  margin-top:clamp(18px,1.6vw,22px);
   color:var(--berry);
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:500;
