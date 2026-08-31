@@ -178,7 +178,15 @@ test("8: the hero effect is scroll-linked, and reduced motion turns it off", () 
   }
   // CSS honours reduced motion too, and mobile moves far less.
   assert.match(css, /@media \(prefers-reduced-motion:reduce\)\{[^}]*\.hero-copy h1[^}]*transform:none!important/);
-  assert.match(css, /@media \(max-width:900px\)\{\.hero-copy h1\{transform:translate3d\(calc\(var\(--hero-scroll\)\*-8px\)/);
+  // Mobile keeps a much smaller displacement than desktop, whatever the
+  // two amplitudes are tuned to.
+  const desktopShift = Number(/\.hero-copy h1\{--hero-scroll:0;transform:translate3d\(calc\(var\(--hero-scroll\)\*-(\d+)px\)/.exec(css)?.[1]);
+  const mobileShift = Number(/@media \(max-width:900px\)\{\.hero-copy h1\{transform:translate3d\(calc\(var\(--hero-scroll\)\*-(\d+)px\)/.exec(css)?.[1]);
+  assert.ok(Number.isFinite(desktopShift) && Number.isFinite(mobileShift), "the hero shift amplitudes moved");
+  assert.ok(mobileShift < desktopShift, "mobile moves as far as desktop");
+  assert.ok(desktopShift <= 30, "the hero displacement stopped being restrained");
+  // The progress value is eased, so the movement starts and ends softly.
+  assert.match(site, /const progress=raw\*raw\*\(3-2\*raw\);/);
   // At rest the variable is 0, so the type sits where the static layout
   // puts it even before the first frame.
   assert.match(css, /\.hero-copy h1\{--hero-scroll:0/);
@@ -282,7 +290,11 @@ test("12: exactly two font families, and the italic is a real one", () => {
 
   // The display face is used for the editorial italics only.
   assert.match(css, /h1 i,h2 i,h3 i,\.display-italic\{font-family:var\(--font-display\),Georgia,serif;font-style:italic/);
-  assert.match(homepage, /<h1>Matcha\.<br\/><i>Aber richtig\.<\/i><\/h1>/);
+  assert.match(homepage, /<h1>Matcha\.<br\/><i>Is for everyone\.<\/i><\/h1>/);
+  // "Matcha." is Inter (the h1's own family), the italic line is the
+  // display face, and the lead is Inter.
+  assert.match(css, /h1 i,h2 i,h3 i,\.display-italic\{font-family:var\(--font-display\)/);
+  assert.ok(!/\.hero h1\{[^}]*font-family/.test(css), "the hero headline overrides the sans family");
 });
 
 test("13: the homepage copy, prices and claims were not rewritten", () => {

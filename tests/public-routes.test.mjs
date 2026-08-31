@@ -32,7 +32,7 @@ test.after(() => {
 // the current build rather than guessed. A heading is what actually
 // identifies a page to a customer, so it is a fair thing to pin.
 const ROUTES = [
-  { path: "/", title: "GLOA · Matcha aus Japan", heading: "<h1>Matcha.<br/><i>Aber richtig.</i></h1>" },
+  { path: "/", title: "GLOA · Matcha aus Japan", heading: "<h1>Matcha.<br/><i>Is for everyone.</i></h1>" },
   { path: "/our-matcha", title: "Unser Matcha · GLOA", heading: "<h1>Matcha.<br/><i>Ohne Umwege.</i></h1>" },
   { path: "/about", title: "Über GLOA · GLOA", heading: "<h1>Good energy.<br/><i>No theatre.</i></h1>" },
   { path: "/for-cafes", title: "GLOA for Cafés · GLOA", heading: "<h1>Matcha for<br/><i>your menu.</i></h1>" },
