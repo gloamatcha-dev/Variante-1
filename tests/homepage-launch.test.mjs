@@ -183,6 +183,7 @@ test("8: the hero effect is scroll-linked, and reduced motion turns it off", () 
   // Measured on the FINAL hero block, which is appended last and is what
   // actually renders - not on the earlier rules it supersedes.
   const heroBlock = css.slice(css.indexOf("HOMEPAGE HERO - FINAL PASS"));
+  const heroBlockForEffect = heroBlock;
   assert.ok(heroBlock.length > 0, "the final hero block moved");
   const desktopShift = Number(/\.hero \.hero-copy h1\{transform:translate3d\(calc\(var\(--hero-scroll\)\*-(\d+)px\)/.exec(heroBlock)?.[1]);
   const mobileShift = Number(/@media \(max-width:900px\)\{[\s\S]*?\.hero \.hero-copy h1\{transform:translate3d\(calc\(var\(--hero-scroll\)\*-(\d+)px\)/.exec(heroBlock)?.[1]);
@@ -194,6 +195,8 @@ test("8: the hero effect is scroll-linked, and reduced motion turns it off", () 
   // At rest the variable is 0, so the type sits where the static layout
   // puts it even before the first frame.
   assert.match(css, /\.hero-copy h1\{--hero-scroll:0/);
+  // The second headline line is a span now, and the effect follows it.
+  assert.match(heroBlockForEffect, /\.hero \.hero-copy h1 \.hero-line-2\{transform:translate3d/);
 
   // No new marquee was added: the one that exists is the pre-existing
   // brand ticker, and the recipe rail no longer moves at all.
@@ -294,10 +297,12 @@ test("12: exactly two font families, and the italic is a real one", () => {
 
   // The display face is used for the editorial italics only.
   assert.match(css, /h1 i,h2 i,h3 i,\.display-italic\{font-family:var\(--font-display\),Georgia,serif;font-style:italic/);
-  assert.match(homepage, /<h1>Matcha\.<br\/><i>Is for everyone\.<\/i><\/h1>/);
-  // "Matcha." is Inter (the h1's own family), the italic line is the
-  // display face, and the lead is Inter.
+  assert.match(homepage, /<h1>Matcha\.<br\/><span className="hero-line-2">Is for everyone\.<\/span><\/h1>/);
+  // The display face still exists and is still the editorial voice of the
+  // page - it simply no longer appears inside the hero.
   assert.match(css, /h1 i,h2 i,h3 i,\.display-italic\{font-family:var\(--font-display\)/);
+  assert.ok(site.includes("<i>Viele Momente.</i>"), "the product italic left the page");
+  assert.ok(site.includes("<i>Und das ist Absicht.</i>"), "the brand statement italic left the page");
   assert.ok(!/\.hero h1\{[^}]*font-family/.test(css), "the hero headline overrides the sans family");
 });
 
@@ -352,47 +357,50 @@ test("14: three button styles, one set of measurements", () => {
   }
 });
 
-test("15: the hero has one primary, one secondary and one text link", () => {
+test("15: the hero has exactly ONE action, and it is a real button", () => {
   const actions = homepage.slice(
     homepage.indexOf('<div className="hero-actions">'),
     homepage.indexOf('</div><div className="hero-art">')
   );
   assert.ok(actions.length > 0, "the hero actions moved");
 
-  // Exactly one of each, in priority order.
-  assert.equal([...actions.matchAll(/className="cta"/g)].length, 1, "more than one primary button");
-  assert.equal([...actions.matchAll(/className="cta secondary"/g)].length, 1, "more than one secondary button");
-  assert.equal([...actions.matchAll(/className="link-cta"/g)].length, 1, "more than one tertiary link");
-  assert.ok(actions.indexOf('className="cta"') < actions.indexOf('className="cta secondary"'));
-  assert.ok(actions.indexOf('className="cta secondary"') < actions.indexOf('className="link-cta"'));
-
-  // The whole homepage stays inside the three styles: no fourth class.
-  const classes = [...homepage.matchAll(/className="(cta[^"]*|link-cta)"/g)].map(m => m[1]);
-  for (const name of classes) {
-    assert.ok(["cta", "cta secondary", "link-cta"].includes(name), `an unknown button style: ${name}`);
+  // One link, one button class, nothing else.
+  assert.equal([...actions.matchAll(/<Link /g)].length, 1, "the hero has more than one action");
+  assert.match(actions, /<Link className="cta berry" href="\/about">GLOA entdecken<\/Link>/);
+  // The two retired calls to action are gone from the hero.
+  for (const gone of ["Zum Shop", "Benachrichtige mich", "link-cta", "cta secondary"]) {
+    assert.ok(!actions.includes(gone), `the hero still carries: ${gone}`);
   }
+
+  // It is a FILLED button in the brand raspberry, using the existing
+  // token - not a new colour.
+  assert.match(css, /\.cta\.berry\{background:var\(--berry\);color:var\(--cream\)/);
+  assert.match(css, /--berry:#A61E59/);
+  const berry = css.slice(css.indexOf(".cta.berry{"), css.indexOf(".cta.berry:hover"));
+  for (const banned of ["border-radius:9", "box-shadow", "gradient"]) {
+    assert.ok(!berry.includes(banned), `the hero CTA uses ${banned}`);
+  }
+  // It keeps the site's button measurements, at the hero's own height.
+  assert.match(css, /\.hero \.hero-actions \.cta\{min-height:46px/);
 });
 
-test("16: the notify CTA is a link to /contact, and still not a signup", () => {
-  const actions = homepage.slice(
-    homepage.indexOf('<div className="hero-actions">'),
-    homepage.indexOf('</div><div className="hero-art">')
-  );
-  // The arrow function in onClick contains ">", so the match is anchored
-  // on the two things that matter: the style and the destination.
-  const notify = actions.slice(actions.indexOf('className="cta secondary"'), actions.indexOf("</Link>", actions.indexOf('className="cta secondary"')));
-  assert.match(notify, /href="\/contact"/);
-  assert.ok(notify.includes("Benachrichtige mich"), "the notify CTA lost its label");
+test("16: nothing sits over the hero image, and there is still no signup", () => {
+  const hero = homepage.slice(homepage.indexOf('<section className="hero">'), homepage.indexOf('<LaunchCountdown/>'));
+  // The location label that overlapped the artwork is gone - markup and
+  // styling both.
+  assert.ok(!hero.includes("hero-micro"), "the image still carries a meta label");
+  assert.ok(!hero.includes("SHIZUOKA / JAPAN"), "the image still carries a location caption");
+  assert.ok(!/\.hero \.hero-micro\{/.test(css), "the removed label still has styling");
+  // The art column holds the image and nothing else.
+  const art = hero.slice(hero.indexOf('<div className="hero-art">'));
+  assert.equal([...art.matchAll(/<span|<p |<h[1-6]/g)].length, 0, "text was added back over the image");
 
-  // IT COLLECTS NOTHING. No input, no form, no consent box, no provider -
-  // which is what keeps it compatible with the promise the same page
-  // makes further down ("Wir melden uns nicht.").
+  // AND THE PAGE STILL COLLECTS NOTHING. The notify button is gone, so
+  // the only thing that could have implied a list is gone with it.
   for (const banned of ["<input", "<form", 'type="email"', "checkbox", "subscribe", "mailchimp", "klaviyo"]) {
     assert.ok(!homepage.includes(banned), `the homepage grew a signup: ${banned}`);
   }
-  // And the brand statement still says exactly that.
   assert.ok(site.includes("Wir melden uns nicht."));
-  assert.ok(site.includes("KEIN NEWSLETTER-LÄRM"));
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -472,7 +480,7 @@ const heroCss = css.slice(css.indexOf("HOMEPAGE HERO - FINAL PASS"));
 test("20: the hero copy is exactly the four approved lines", () => {
   const hero = homepage.slice(homepage.indexOf('<section className="hero">'), homepage.indexOf('<LaunchCountdown/>'));
   assert.ok(hero.includes('<p className="eyebrow">MATCHA AUS SHIZUOKA.</p>'));
-  assert.ok(hero.includes("<h1>Matcha.<br/><i>Is for everyone.</i></h1>"));
+  assert.ok(hero.includes('<h1>Matcha.<br/><span className="hero-line-2">Is for everyone.</span></h1>'));
   assert.ok(hero.includes('<p className="lead">Aus Shizuoka, Japan. Für Latte, pur, iced oder wie du willst.</p>'));
   // The retired phrases are gone from the hero.
   for (const gone of ["Aber richtig.", "Ein Grün.", "Viele Momente."]) {
@@ -480,12 +488,20 @@ test("20: the hero copy is exactly the four approved lines", () => {
   }
   // "Is for everyone." is ONE phrase: no <br> inside the italic, and it
   // is held on one line wherever the column can carry it.
-  assert.ok(!/<i>Is for<br\/>everyone\.<\/i>/.test(hero), "the phrase is split by a break");
+  assert.ok(!/Is for<br\/>everyone\./.test(hero), "the phrase is split by a break");
   assert.match(heroCss, /@media \(min-width:1100px\)\{[\s\S]*?white-space:nowrap/);
 
-  // Three actions, unchanged, in order.
-  assert.ok(hero.indexOf("Zum Shop") < hero.indexOf("Benachrichtige mich"));
-  assert.ok(hero.indexOf("Benachrichtige mich") < hero.indexOf("GLOA entdecken →"));
+  // ONE TYPOGRAPHIC VOICE. The eyebrow, the second headline line and the
+  // paragraph all resolve to the sans; only "Matcha." is the display
+  // weight above them.
+  assert.match(heroCss, /\.hero \.hero-copy h1 \.hero-line-2\{[\s\S]*?font-family:var\(--font-sans\)/);
+  assert.match(heroCss, /\.hero \.hero-copy h1 \.hero-line-2\{[\s\S]*?font-style:normal/);
+  assert.ok(!/\.hero[^{]*\{[^}]*font-family:var\(--font-display\)/.test(heroCss),
+    "the hero still uses the display face");
+
+  // One action, below the copy.
+  assert.ok(hero.indexOf("GLOA entdecken") > hero.indexOf("Aus Shizuoka, Japan."));
+  assert.equal([...hero.matchAll(/GLOA entdecken/g)].length, 1);
 });
 
 test("21: the hero image is contained, capped, and the only one in the hero", () => {
