@@ -309,7 +309,10 @@ test("12: exactly two font families, and the italic is a real one", () => {
 test("13: the homepage copy, prices and claims were not rewritten", () => {
   for (const line of [
     "MATCHA AUS SHIZUOKA.",
-    "Aus Shizuoka, Japan. Für Latte, pur, iced oder wie du willst.",
+    // The hero's own supporting line, shortened in the typography pass.
+    "Für Latte, pur, iced oder wie du willst.",
+    // The full sentence still opens the product section, untouched.
+    "Aus Shizuoka, Japan. Für Matcha Latte und pur.",
     "MEET YOUR MATCHA.",
     "Ein Grün.",
     "Viele Momente.",
@@ -374,6 +377,7 @@ test("15: the hero has exactly ONE action, and it is a real button", () => {
 
   // It is a FILLED button in the brand raspberry, using the existing
   // token - not a new colour.
+  const heroCssForCta = css.slice(css.indexOf("HOMEPAGE HERO - FINAL PASS"));
   assert.match(css, /\.cta\.berry\{background:var\(--berry\);color:var\(--cream\)/);
   assert.match(css, /--berry:#A61E59/);
   const berry = css.slice(css.indexOf(".cta.berry{"), css.indexOf(".cta.berry:hover"));
@@ -381,7 +385,12 @@ test("15: the hero has exactly ONE action, and it is a real button", () => {
     assert.ok(!berry.includes(banned), `the hero CTA uses ${banned}`);
   }
   // It keeps the site's button measurements, at the hero's own height.
-  assert.match(css, /\.hero \.hero-actions \.cta\{min-height:46px/);
+  assert.match(heroCssForCta, /\.hero \.hero-actions \.cta\{[\s\S]*?min-height:46px/);
+  // The button speaks the same metadata voice as the two small lines.
+  assert.match(heroCssForCta, /\.hero \.hero-actions \.cta\{[\s\S]*?font-weight:600/);
+  assert.match(heroCssForCta, /\.hero \.hero-actions \.cta\{[\s\S]*?font-size:11px/);
+  assert.match(heroCssForCta, /\.hero \.hero-actions \.cta\{[\s\S]*?letter-spacing:\.2em/);
+  assert.match(heroCssForCta, /\.hero \.hero-actions \.cta\{[\s\S]*?text-transform:uppercase/);
 });
 
 test("16: nothing sits over the hero image, and there is still no signup", () => {
@@ -481,7 +490,10 @@ test("20: the hero copy is exactly the four approved lines", () => {
   const hero = homepage.slice(homepage.indexOf('<section className="hero">'), homepage.indexOf('<LaunchCountdown/>'));
   assert.ok(hero.includes('<p className="eyebrow">MATCHA AUS SHIZUOKA.</p>'));
   assert.ok(hero.includes('<h1>Matcha.<br/><span className="hero-line-2">Is for everyone.</span></h1>'));
-  assert.ok(hero.includes('<p className="lead">Aus Shizuoka, Japan. Für Latte, pur, iced oder wie du willst.</p>'));
+  assert.ok(hero.includes('<p className="lead">Für Latte, pur, iced oder wie du willst.</p>'));
+  // "Aus Shizuoka, Japan." is gone from the hero - it lives in the
+  // eyebrow's meaning and in the product section, not twice.
+  assert.ok(!hero.includes("Aus Shizuoka, Japan."), "the hero repeats the origin sentence");
   // The retired phrases are gone from the hero.
   for (const gone of ["Aber richtig.", "Ein Grün.", "Viele Momente."]) {
     assert.ok(!hero.includes(gone), `the hero still says: ${gone}`);
@@ -500,7 +512,7 @@ test("20: the hero copy is exactly the four approved lines", () => {
     "the hero still uses the display face");
 
   // One action, below the copy.
-  assert.ok(hero.indexOf("GLOA entdecken") > hero.indexOf("Aus Shizuoka, Japan."));
+  assert.ok(hero.indexOf("GLOA entdecken") > hero.indexOf("Für Latte, pur, iced"));
   assert.equal([...hero.matchAll(/GLOA entdecken/g)].length, 1);
 });
 
@@ -536,8 +548,99 @@ test("22: the hero is compact, measured and centred", () => {
   assert.match(heroCss, /\.hero \.hero-art\{[\s\S]*?min-height:0/);
   // Buttons keep one height, scoped to the hero so the rest of the page
   // keeps the height it was approved with.
-  assert.match(heroCss, /\.hero \.hero-actions \.cta\{min-height:46px/);
+  assert.match(heroCss, /\.hero \.hero-actions \.cta\{[\s\S]*?min-height:46px/);
   assert.match(css, /--cta-h:52px/);
   // Below 640px the effect is off entirely.
   assert.match(heroCss, /@media \(max-width:640px\)\{[\s\S]*?transform:none/);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   23-24. THE LOCKED HERO TYPE MATRIX
+   ══════════════════════════════════════════════════════════════ */
+
+const heroRule = name => {
+  const block = css.slice(css.indexOf("HOMEPAGE HERO - FINAL PASS"));
+  const at = block.indexOf(name + "{");
+  assert.notEqual(at, -1, `missing hero rule: ${name}`);
+  return block.slice(at, block.indexOf("}", at));
+};
+
+test("23: every hero text is Inter, and only weight/size/case separates them", () => {
+  // Inter now ships its REAL italic faces - without them the 800 italic
+  // line below could only ever have been a browser-faked slant.
+  assert.match(layout, /const sans = Inter\(\{[\s\S]*?style: \["normal", "italic"\][\s\S]*?\}\);/);
+  assert.match(layout, /weight: \["400", "500", "600", "700", "800", "900"\]/);
+
+  const eyebrow = heroRule(".hero .hero-copy .eyebrow");
+  const headline = heroRule(".hero .hero-copy h1");
+  const line2 = heroRule(".hero .hero-copy h1 .hero-line-2");
+  const lead = heroRule(".hero .hero-copy .lead");
+  const cta = heroRule(".hero .hero-actions .cta");
+
+  // Every one of the five resolves to the sans, explicitly.
+  for (const [name, rule] of [
+    ["eyebrow", eyebrow], ["headline", headline], ["second line", line2],
+    ["supporting line", lead], ["cta", cta],
+  ]) {
+    assert.match(rule, /font-family:var\(--font-sans\)/, `${name} is not on the sans`);
+    assert.ok(!rule.includes("--font-display"), `${name} uses the display face`);
+    // "sans-serif" is the fallback of the sans stack, not a serif.
+    assert.ok(!/Georgia|Cormorant|[^-]serif/.test(rule), `${name} reaches for a serif`);
+  }
+
+  // MATCHA AUS SHIZUOKA. and the supporting line are typographically
+  // identical - that is the point of them.
+  for (const rule of [eyebrow, lead]) {
+    assert.match(rule, /font-weight:600/);
+    assert.match(rule, /font-style:normal/);
+    assert.match(rule, /font-size:11px/);
+    assert.match(rule, /letter-spacing:\.2em/);
+    assert.match(rule, /text-transform:uppercase/);
+  }
+  // Matcha.
+  assert.match(headline, /font-weight:800/);
+  assert.match(headline, /font-style:normal/);
+  assert.match(headline, /letter-spacing:-\.055em/);
+  assert.match(headline, /font-size:clamp\(54px,5\.9vw,100px\)/);
+  // Is for everyone. - 800 ITALIC, and no synthetic fallback allowed.
+  assert.match(line2, /font-style:italic/);
+  assert.match(line2, /font-weight:800/);
+  assert.match(line2, /font-synthesis:none/);
+  assert.match(line2, /font-size:clamp\(48px,5vw,86px\)/);
+  assert.ok(!line2.includes("font-weight:500"), "the second line is still the old weight");
+  // GLOA ENTDECKEN
+  assert.match(cta, /font-weight:600/);
+  assert.match(cta, /font-size:11px/);
+  assert.match(cta, /letter-spacing:\.2em/);
+  assert.match(cta, /text-transform:uppercase/);
+});
+
+test("24: the motion moves three lines, in two directions, and clips nothing", () => {
+  const block = css.slice(css.indexOf("HOMEPAGE HERO - FINAL PASS"));
+
+  // Matcha. left, the italic line right, the metadata line right but far
+  // less - and nothing else in the hero moves at all.
+  const headlineShift = Number(/\.hero \.hero-copy h1\{transform:translate3d\(calc\(var\(--hero-scroll\)\*(-?\d+)px\)/.exec(block)?.[1]);
+  const line2Shift = Number(/\.hero \.hero-copy h1 \.hero-line-2\{transform:translate3d\(calc\(var\(--hero-scroll\)\*(-?\d+)px\)/.exec(block)?.[1]);
+  const leadShift = Number(/\.hero \.hero-copy \.lead\{transform:translate3d\(calc\(var\(--hero-scroll\)\*(-?\d+)px\)/.exec(block)?.[1]);
+  assert.ok(headlineShift < 0, "the headline does not drift left");
+  assert.ok(line2Shift > 0, "the second line does not drift right");
+  assert.ok(leadShift > 0 && leadShift < line2Shift, "the metadata line is not the calmest of the three");
+  assert.ok(Math.abs(headlineShift) <= 30 && line2Shift <= 42, "the displacement is no longer restrained");
+
+  // The eyebrow and the button are never transformed.
+  for (const untouched of [".hero .hero-copy .eyebrow{", ".hero .hero-actions .cta{"]) {
+    const rule = block.slice(block.indexOf(untouched), block.indexOf("}", block.indexOf(untouched)));
+    // text-transform is not a transform: only translate3d moves anything.
+    assert.ok(!rule.includes("transform:translate3d"), `${untouched} is animated`);
+  }
+
+  // Transform only - no layout property is animated, and there is no
+  // timed animation of any kind in the hero.
+  for (const banned of ["animation:", "@keyframes", "transition:transform", "left:calc(var(--hero-scroll)", "margin-left:calc"]) {
+    assert.ok(!block.includes(banned), `the hero animates with ${banned}`);
+  }
+  // The section cannot clip the moving type; only the art column crops.
+  assert.match(css, /\.hero\{[^}]*overflow:visible/);
+  assert.match(css, /\.hero-art\{[^}]*overflow:hidden/);
 });

@@ -19,6 +19,11 @@ const sans = Inter({
   variable: "--font-sans",
   subsets: ["latin"],
   weight: ["400", "500", "600", "700", "800", "900"],
+  // REAL ITALIC FACES, added deliberately. The typography audit found
+  // Inter was loaded without them, so any italic in a sans context could
+  // only ever have been a browser-synthesised slant. The hero's second
+  // headline line is Inter 800 ITALIC, which needs the actual face.
+  style: ["normal", "italic"],
   display: "swap",
 });
 const display = Cormorant_Garamond({
