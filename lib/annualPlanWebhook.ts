@@ -11,6 +11,10 @@ import {
   type AnnualWebhookPlan,
 } from "./annualPlanWebhookRules";
 import { runAnnualDeliveryWorker, type AnnualDeliveryWorkerSummary } from "./annualDeliveryWorker";
+import type {
+  AnnualPaidSettlementOutcome,
+  AnnualSessionLinkOutcome,
+} from "./checkoutAttempts";
 import { evaluateStripeSessionPayment } from "./stripeFulfillment";
 import type { AnnualDeliveryWorkerDeps } from "./annualDeliveryWorker";
 
@@ -31,9 +35,10 @@ import type { AnnualDeliveryWorkerDeps } from "./annualDeliveryWorker";
  *       impostors
  *    4. resolve the plan through annual_plans.payment_checkout_attempt_id
  *       and cross-check the id metadata named
- *    5. self-heal the Stripe session link, or refuse a different one
+ *    5. self-heal the Stripe session link ATOMICALLY, or refuse a
+ *       different one
  *    6. verify the payment against the FROZEN expected total
- *    7. mark the attempt paid through the existing writer
+ *    7. settle the attempt paid ATOMICALLY, write-once
  *    8. activate through migration 039's RPC
  *    9. one bounded pass of the shared delivery worker
  *
@@ -46,6 +51,15 @@ import type { AnnualDeliveryWorkerDeps } from "./annualDeliveryWorker";
  * and no plan activated, which is far worse than a sale the operator no
  * longer wanted. The flag stops checkouts being created; it does not
  * abandon ones that already were.
+ *
+ * ── AND THE DATABASE, NOT THIS FILE, DECIDES WHO WON ──────────
+ *
+ * Stripe delivers concurrently and retries hard, so two invocations
+ * settling one annual payment at the same moment is ordinary. Both of the
+ * durable writes here are therefore compare-and-set: they restate the
+ * state they expect inside the UPDATE, Postgres serialises them on the
+ * row, and the loser re-reads instead of overwriting. The pure decisions
+ * above them stay as early diagnostics and are never the guarantee.
  *
  * ── METADATA NAMES ROWS. THE DATABASE PROVES THEM. ────────────
  *
@@ -67,8 +81,21 @@ export type AnnualWebhookDeps = {
   findAttempt: (checkoutAttemptId: string) => Promise<AnnualWebhookAttempt | null>;
   /** Resolves the plan BY payment_checkout_attempt_id, never by the metadata id. */
   findPlanByAttempt: (checkoutAttemptId: string) => Promise<AnnualWebhookPlan | null>;
-  linkSession: (attemptId: string, sessionId: string) => Promise<boolean>;
-  markPaid: (attemptId: string, paymentIntentId: string) => Promise<boolean>;
+  /**
+   * COMPARE-AND-SET, not a plain write. It carries the state it expects
+   * into the UPDATE's own WHERE clause and reports whether it won, lost
+   * to an identical link, or hit a genuine conflict.
+   */
+  linkSessionAtomically: (
+    attemptId: string,
+    sessionId: string
+  ) => Promise<AnnualSessionLinkOutcome>;
+  /** Compare-and-set as well. paid_at is written at most once, ever. */
+  settlePaidAtomically: (input: {
+    attemptId: string;
+    stripeCheckoutSessionId: string;
+    stripePaymentIntentId: string;
+  }) => Promise<AnnualPaidSettlementOutcome>;
   /** public.activate_annual_plan_from_payment(uuid, text, text). */
   activatePlan: (input: {
     annualPlanId: string;
@@ -145,21 +172,35 @@ export async function settleAnnualCheckoutSession(
   //    checkout route links best-effort, so a request that died after
   //    Stripe created the session leaves an attempt with none. A
   //    DIFFERENT session is never overwritten.
-  const link = decideSessionLink({
+  //    THE PRE-READ IS A DIAGNOSTIC, NOT THE GUARANTEE. It refuses an
+  //    obviously wrong session before any write is attempted, which keeps
+  //    the common failure cheap and legible. But the row it looked at can
+  //    change before the write lands, so the write itself is the
+  //    authority: the compare-and-set below runs UNCONDITIONALLY, carries
+  //    every expectation in its own WHERE clause, and a lost race is
+  //    resolved from a fresh read rather than from this decision.
+  const linkPrecheck = decideSessionLink({
     storedSessionId: attempt.stripe_checkout_session_id,
     retrievedSessionId: session.id,
   });
+  if (linkPrecheck.kind === "conflict") {
+    throw new AnnualWebhookConflict(`annual attempt ${attempt.id}: ${linkPrecheck.reason}`);
+  }
+
+  const link = await deps.linkSessionAtomically(attempt.id, session.id);
   if (link.kind === "conflict") {
+    // A different session won the row, or this row is not a settleable
+    // annual payment. Never retryable, and nothing was overwritten.
     throw new AnnualWebhookConflict(`annual attempt ${attempt.id}: ${link.reason}`);
   }
-  if (link.kind === "link") {
-    const linked = await deps.linkSession(attempt.id, session.id);
-    if (!linked) {
-      // Retryable: nothing is wrong, the write did not land. Activation
-      // requires the session id, so stopping here is honest.
-      throw new Error(`annual attempt ${attempt.id}: failed to link the Stripe session`);
-    }
+  if (link.kind === "error") {
+    // Retryable: nothing is wrong, the write did not land. Activation
+    // requires the session id, so stopping here is honest.
+    throw new Error(`annual attempt ${attempt.id}: ${link.reason}`);
   }
+  // 'linked' and 'already_linked' are both success. The second means
+  // another invocation linked this same session, which is exactly what a
+  // concurrent redelivery looks like and is not an error.
 
   // 6. THE PAYMENT, against the FROZEN expected total. The same pure
   //    evaluator the one-time flow uses: paid state, currency and amount,
@@ -190,23 +231,39 @@ export async function settleAnnualCheckoutSession(
     throw new AnnualWebhookConflict(`annual session ${session.id} has no payment intent`);
   }
 
-  // 7. MARK IT PAID, through the existing writer and only now.
-  //    The already-settled guard lives in the rules module in front of
-  //    this call rather than inside markAttemptPaid, which is an
-  //    unconditional write the one-time and subscription flows depend on.
-  const paid = decidePaidState({
+  // 7. SETTLE IT PAID, write-once, and only now.
+  //    NOT through markAttemptPaid. That writer's predicate is `id = $1`
+  //    alone, which is the settled behaviour the one-time and
+  //    subscription flows depend on and which this phase does not get to
+  //    change - but which would also let a redelivery restamp paid_at and
+  //    a second PaymentIntent overwrite the first. The annual flow uses
+  //    its own compare-and-set writer instead, and does not import that
+  //    one at all.
+  const paidPrecheck = decidePaidState({
     attemptStatus: attempt.status,
     storedPaymentIntentId: attempt.stripe_payment_intent_id,
     verifiedPaymentIntentId: paymentIntentId,
   });
+  if (paidPrecheck.kind === "conflict") {
+    throw new AnnualWebhookConflict(`annual attempt ${attempt.id}: ${paidPrecheck.reason}`);
+  }
+
+  //    AND AGAIN, THE WRITE DECIDES. The compare-and-set requires the
+  //    verified session, an unset paid_at and an unset PaymentIntent, so
+  //    two invocations carrying different PaymentIntents cannot both
+  //    succeed and a replay cannot restamp paid_at - which is migration
+  //    039's purchased_at and therefore the origin of all thirteen
+  //    delivery dates.
+  const paid = await deps.settlePaidAtomically({
+    attemptId: attempt.id,
+    stripeCheckoutSessionId: session.id,
+    stripePaymentIntentId: paymentIntentId,
+  });
   if (paid.kind === "conflict") {
     throw new AnnualWebhookConflict(`annual attempt ${attempt.id}: ${paid.reason}`);
   }
-  if (paid.kind === "settle") {
-    const marked = await deps.markPaid(attempt.id, paymentIntentId);
-    if (!marked) {
-      throw new Error(`annual attempt ${attempt.id}: failed to mark paid`);
-    }
+  if (paid.kind === "error") {
+    throw new Error(`annual attempt ${attempt.id}: ${paid.reason}`);
   }
 
   // 8. ACTIVATION. Migration 039 re-proves every one of the facts above

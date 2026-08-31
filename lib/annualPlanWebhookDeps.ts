@@ -1,6 +1,16 @@
 import type Stripe from "stripe";
 import { getSupabaseAdmin } from "./supabaseAdmin";
-import { findAnnualPaymentAttemptById, linkStripeSession, markAttemptPaid } from "./checkoutAttempts";
+// Phase 4B4.1. The two ATOMIC annual settlement writers, not
+// linkStripeSession and not markAttemptPaid. Those two write with the
+// predicate `id = $1` alone, which is right for the one-time and
+// subscription flows and unsafe for a contract whose paid_at is a year of
+// delivery dates. They are deliberately not imported here, so no annual
+// settlement path can reach an unconditional write by accident.
+import {
+  findAnnualPaymentAttemptById,
+  linkAnnualStripeSessionAtomically,
+  settleAnnualAttemptPaidAtomically,
+} from "./checkoutAttempts";
 import type { AnnualWebhookDeps } from "./annualPlanWebhook";
 import type { AnnualWebhookAttempt, AnnualWebhookPlan } from "./annualPlanWebhookRules";
 import type { ClaimedAnnualDelivery } from "./annualDeliveryWorker";
@@ -141,11 +151,8 @@ export function annualWebhookDeps(stripe: Stripe): AnnualWebhookDeps {
     findAttempt: (checkoutAttemptId: string) =>
       findAnnualPaymentAttemptById(checkoutAttemptId) as Promise<AnnualWebhookAttempt | null>,
     findPlanByAttempt: findAnnualPlanByPaymentAttempt,
-    linkSession: linkStripeSession,
-    // The EXISTING writer, unchanged. Its unconditional-write behaviour is
-    // what the one-time and subscription flows depend on; the annual
-    // already-settled guard sits in front of the call, not inside it.
-    markPaid: markAttemptPaid,
+    linkSessionAtomically: linkAnnualStripeSessionAtomically,
+    settlePaidAtomically: settleAnnualAttemptPaidAtomically,
     activatePlan: activateAnnualPlan,
     worker: annualDeliveryWorkerDeps,
   };

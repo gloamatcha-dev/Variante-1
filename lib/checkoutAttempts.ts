@@ -3,6 +3,13 @@ import type { CheckoutQuote } from "./checkoutQuote";
 import { buildItemsSnapshot, type CheckoutAttemptItemSnapshot } from "./checkoutAttemptSnapshot";
 import type { ShippingZoneKey } from "./shipping";
 import type { CartTaxSnapshot } from "./tax";
+// Phase 4B4.1. The annual settlement writers below are compare-and-set,
+// and how to read a LOST race is a decision, not a statement - so it
+// lives in the leaf the test runner can load and execute.
+import {
+  classifyAnnualLinkReread,
+  classifyAnnualPaidReread,
+} from "./annualPlanWebhookRules";
 
 export type { CheckoutAttemptItemSnapshot };
 export { buildItemsSnapshot };
@@ -538,4 +545,207 @@ export async function findAnnualPaymentAttemptById(
     return null;
   }
   return (data as AnnualPaymentAttempt | null) ?? null;
+}
+
+/* ── Annual settlement, write-once (Phase 4B4.1) ─────────────── */
+
+/**
+ * ── WHY THE ANNUAL FLOW HAS ITS OWN TWO WRITERS ───────────────
+ *
+ * linkStripeSession and markAttemptPaid above both write with the
+ * predicate `id = $1` and nothing else. That is correct for what they
+ * were built for and it is NOT changed here: the one-time and
+ * subscription flows depend on their unconditional behaviour, and
+ * rewriting them to suit a third product would put every existing
+ * settlement path at risk in order to fix a problem only this one has.
+ *
+ * The problem this one has is that an annual payment is the only place in
+ * the system where a checkout attempt's Stripe identity is also the
+ * durable identity of a year-long contract. paid_at becomes migration
+ * 039's purchased_at, which is the origin of all thirteen delivery dates,
+ * and stripe_payment_intent_id is what the annual refund writer resolves
+ * by. Neither may ever be rewritten by a redelivered or concurrent
+ * webhook.
+ *
+ * An application-level read, decide, unconditional write cannot promise
+ * that. Two Stripe deliveries of the same event can both read the
+ * unsettled row before either one writes. So both writers below are
+ * COMPARE-AND-SET: every fact the caller believed is restated in the
+ * UPDATE's own WHERE clause, Postgres serialises the concurrent updates
+ * on the row, and the loser matches zero rows and re-reads instead of
+ * overwriting the winner.
+ *
+ * This is the claim pattern lib/internalOrderNotificationEmail.ts and
+ * lib/transactionalEmailRetry.ts already use, and it needs no migration:
+ * service_role's UPDATE grant on public.checkout_attempts is the one the
+ * two existing writers use, and a narrower WHERE clause needs no wider
+ * permission.
+ *
+ * ── THE ANNUAL PAYMENT SHAPE IS PART OF THE PREDICATE ─────────
+ *
+ * Each UPDATE also restates what an annual PAYMENT attempt is: both
+ * annual fingerprints present, no subscription binding, and
+ * annual_plan_id and annual_delivery_number both NULL. That is not
+ * belt-and-braces. It means neither writer can touch a one-time attempt,
+ * a subscription attempt or one of migration 039's synthetic delivery
+ * attempts even when handed its id.
+ *
+ * annual_plan_id is NULL on a payment attempt because the annual PLAN
+ * points at the payment attempt, through
+ * annual_plans.payment_checkout_attempt_id, and never the other way
+ * round. A non-NULL value there is the synthetic DELIVERY attempt, which
+ * carries no Stripe payment identity at all.
+ */
+
+export type AnnualSessionLinkOutcome =
+  /** This invocation won the link. */
+  | { kind: "linked" }
+  /** Someone else linked the SAME session. Nothing was written. */
+  | { kind: "already_linked" }
+  /** A different session, or a row this webhook may not settle. */
+  | { kind: "conflict"; reason: string }
+  /** Infrastructure. Retryable, and never confused with either of those. */
+  | { kind: "error"; reason: string };
+
+/**
+ * Links a Stripe Checkout Session to an annual payment attempt, once.
+ *
+ * The predicate permits the write only from a genuinely unlinked,
+ * unsettled annual payment attempt:
+ *
+ *      id = $1
+ *      and stripe_checkout_session_id is null
+ *      and paid_at is null
+ *      and status <> 'paid'
+ *      and <the annual payment shape>
+ *
+ * Requiring `is null` rather than "null or already this session" is
+ * deliberate. It means the UPDATE does not run at all when a session is
+ * already linked, so the status write it carries can never regress an
+ * attempt another invocation has already marked paid. The already-linked
+ * case is answered by the re-read instead, which writes nothing.
+ *
+ * `paid_at is null and status <> 'paid'` is redundant with that in
+ * practice, since a paid annual attempt always has a session. It is
+ * stated anyway, so that this write is impossible to turn into a
+ * regression by any future path that settles an attempt without one.
+ */
+export async function linkAnnualStripeSessionAtomically(
+  attemptId: string,
+  stripeCheckoutSessionId: string
+): Promise<AnnualSessionLinkOutcome> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return { kind: "error", reason: "supabase admin client is not configured" };
+
+  const { data, error } = await admin
+    .from("checkout_attempts")
+    .update({
+      stripe_checkout_session_id: stripeCheckoutSessionId,
+      status: "stripe_session_created",
+    })
+    .eq("id", attemptId)
+    .is("stripe_checkout_session_id", null)
+    .is("paid_at", null)
+    .neq("status", "paid")
+    .not("annual_intent_fingerprint", "is", null)
+    .not("annual_request_fingerprint", "is", null)
+    .is("annual_plan_id", null)
+    .is("annual_delivery_number", null)
+    .is("subscription_id", null)
+    .is("subscription_request_fingerprint", null)
+    .is("subscription_intent_fingerprint", null)
+    .select("id");
+
+  if (error) {
+    console.error(`Annual session link failed for attempt ${attemptId}:`, error.message);
+    return { kind: "error", reason: "the annual session link could not be written" };
+  }
+  if ((data?.length ?? 0) > 0) return { kind: "linked" };
+
+  // ZERO ROWS, which is a question rather than an error: either somebody
+  // else got there first, or this is not a row the annual webhook may
+  // settle. The durable row decides which, not this process.
+  const current = await findAnnualPaymentAttemptById(attemptId);
+  return classifyAnnualLinkReread({ attempt: current, expectedSessionId: stripeCheckoutSessionId });
+}
+
+export type AnnualPaidSettlementOutcome =
+  /** This invocation settled it, and paid_at was written exactly once. */
+  | { kind: "settled" }
+  /** Someone else settled it, with the same session and PaymentIntent. */
+  | { kind: "already_settled" }
+  | { kind: "conflict"; reason: string }
+  | { kind: "error"; reason: string };
+
+/**
+ * Marks an annual payment attempt paid, once, and never again.
+ *
+ * The predicate:
+ *
+ *      id = $1
+ *      and stripe_checkout_session_id = $2   -- the verified session
+ *      and paid_at is null
+ *      and stripe_payment_intent_id is null
+ *      and status <> 'paid'
+ *      and <the annual payment shape>
+ *
+ * Every one of those is load-bearing:
+ *
+ *   * the session equality means a payment can only settle the attempt it
+ *     was actually verified against, so an invocation carrying a
+ *     different session settles nothing;
+ *   * `paid_at is null` IS the write-once guarantee. paid_at becomes
+ *     migration 039's purchased_at and therefore the origin of all
+ *     thirteen delivery dates, so a replay that rewrote it would move a
+ *     year of shipments;
+ *   * `stripe_payment_intent_id is null` makes the first verified
+ *     PaymentIntent the authoritative one. There is no path by which a
+ *     second one wins.
+ *
+ * On zero rows the row is re-read and accepted as idempotent only when it
+ * is already settled with this same session and this same PaymentIntent.
+ * Nothing is written in that case: not the status, not the PaymentIntent,
+ * and above all not paid_at.
+ */
+export async function settleAnnualAttemptPaidAtomically(input: {
+  attemptId: string;
+  stripeCheckoutSessionId: string;
+  stripePaymentIntentId: string;
+}): Promise<AnnualPaidSettlementOutcome> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return { kind: "error", reason: "supabase admin client is not configured" };
+
+  const { data, error } = await admin
+    .from("checkout_attempts")
+    .update({
+      status: "paid",
+      paid_at: new Date().toISOString(),
+      stripe_payment_intent_id: input.stripePaymentIntentId,
+    })
+    .eq("id", input.attemptId)
+    .eq("stripe_checkout_session_id", input.stripeCheckoutSessionId)
+    .is("paid_at", null)
+    .is("stripe_payment_intent_id", null)
+    .neq("status", "paid")
+    .not("annual_intent_fingerprint", "is", null)
+    .not("annual_request_fingerprint", "is", null)
+    .is("annual_plan_id", null)
+    .is("annual_delivery_number", null)
+    .is("subscription_id", null)
+    .is("subscription_request_fingerprint", null)
+    .is("subscription_intent_fingerprint", null)
+    .select("id");
+
+  if (error) {
+    console.error(`Annual paid settlement failed for attempt ${input.attemptId}:`, error.message);
+    return { kind: "error", reason: "the annual settlement could not be written" };
+  }
+  if ((data?.length ?? 0) > 0) return { kind: "settled" };
+
+  const current = await findAnnualPaymentAttemptById(input.attemptId);
+  return classifyAnnualPaidReread({
+    attempt: current,
+    expectedSessionId: input.stripeCheckoutSessionId,
+    expectedPaymentIntentId: input.stripePaymentIntentId,
+  });
 }

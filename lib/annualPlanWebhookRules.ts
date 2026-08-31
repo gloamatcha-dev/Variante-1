@@ -328,19 +328,21 @@ export type PaidStateDecision =
 /**
  * Decides whether the attempt still needs marking paid.
  *
- * ── WHY THIS IS DECIDED HERE AND NOT IN markAttemptPaid ───────
+ * ── AN EARLY DIAGNOSTIC, NOT THE GUARANTEE ────────────────────
  *
- * lib/checkoutAttempts.ts's markAttemptPaid is an unconditional write,
- * and it has to stay that way: it is the one-time and subscription flows'
- * settled behaviour and this phase does not get to change what those
- * mean. But an unconditional write would let a second PaymentIntent
- * overwrite the first on an already-paid annual attempt, and the annual
- * plan's whole refund correlation hangs off that one id.
+ * This reads the row the caller already has and refuses an obviously
+ * wrong PaymentIntent before any write is attempted, which keeps the
+ * common failure cheap and its reason legible.
  *
- * So the guard lives here, in front of the call, and the existing writer
- * is used unchanged. Migration 039's activation re-proves the same
- * equality under its own row lock, so this is the earlier of two
- * independent refusals rather than the only one.
+ * It is NOT what makes settlement safe. Between this read and the write
+ * another webhook invocation can settle the same payment, so the durable
+ * guarantee is lib/checkoutAttempts.ts's compare-and-set writer, whose
+ * UPDATE requires paid_at and stripe_payment_intent_id to still be null,
+ * and classifyAnnualPaidReread below, which resolves a lost race from a
+ * fresh read. Migration 039's activation then re-proves the same equality
+ * a third time under its own row lock.
+ *
+ * Three independent refusals, and this is only the first of them.
  */
 export function decidePaidState(input: {
   attemptStatus: string;
@@ -428,4 +430,127 @@ export function interpretAnnualActivationResult(data: unknown): AnnualActivation
   }
 
   return { ok: true, result, annualPlanId, deliveries };
+}
+
+/* ── Atomic settlement: reading a lost race (Phase 4B4.1) ───── */
+
+/**
+ * ── WHY THESE EXIST ───────────────────────────────────────────
+ *
+ * decideSessionLink and decidePaidState above are PRE-READS. They look at
+ * a row, decide, and hand the decision to a writer, and between those two
+ * moments another webhook invocation can settle the same payment. Stripe
+ * delivers concurrently and retries aggressively, so that interleaving is
+ * ordinary rather than exotic:
+ *
+ *      A reads session NULL, status not paid
+ *      B reads session NULL, status not paid      <- same stale state
+ *      A links session_A, marks paid pi_A at t1
+ *      B still holds its stale decision
+ *
+ * If B's write were unconditional it would relink, reset the status to
+ * 'stripe_session_created' and stamp a second paid_at over the first.
+ *
+ * So the durable writes are compare-and-set: the UPDATE carries the state
+ * it expects in its own WHERE clause, and Postgres serialises the two
+ * concurrent updates on the row. The loser matches ZERO rows, which is
+ * not an error and not a success - it is a question. These two functions
+ * answer it from a fresh read of the row that won.
+ *
+ * ── AND WHY THEY ARE HERE ─────────────────────────────────────
+ *
+ * Because the answer is a DECISION, and every decision in this flow lives
+ * in a module the test runner can load. lib/checkoutAttempts.ts owns the
+ * statements; the interpretation is executable.
+ */
+
+/** What a lost link race turned out to mean. */
+export type AnnualLinkReread =
+  /** The winner linked the SAME session. Idempotent success, no write. */
+  | { kind: "already_linked" }
+  /** The winner linked a different session, or the row is not settleable. */
+  | { kind: "conflict"; reason: string };
+
+/**
+ * Classifies a zero-row session link.
+ *
+ * The row is re-read AFTER the failed UPDATE, so it reflects whatever the
+ * winner committed. Only one outcome is a success: the durable row names
+ * the very session this invocation is holding.
+ *
+ * Note what is deliberately NOT consulted - the status. An attempt that
+ * is already 'paid' against this same session is a perfectly good link
+ * result: the session is there, it is ours, and there is nothing to
+ * write. Treating paid as a failure here would turn the normal replay
+ * into an error, and re-linking it would regress a settled attempt.
+ */
+export function classifyAnnualLinkReread(input: {
+  attempt: { stripe_checkout_session_id: string | null } | null;
+  expectedSessionId: string;
+}): AnnualLinkReread {
+  const { attempt } = input;
+  if (!attempt) {
+    return { kind: "conflict", reason: "the annual payment attempt disappeared" };
+  }
+  if (attempt.stripe_checkout_session_id === input.expectedSessionId) {
+    return { kind: "already_linked" };
+  }
+  if (attempt.stripe_checkout_session_id) {
+    return { kind: "conflict", reason: "attempt is linked to a different Stripe session" };
+  }
+  // Still unlinked, yet the guarded UPDATE refused it. Something in the
+  // annual payment shape the predicate requires is not true of this row,
+  // so it is not a row this webhook may settle.
+  return { kind: "conflict", reason: "attempt is not a settleable annual payment" };
+}
+
+/** What a lost paid race turned out to mean. */
+export type AnnualPaidReread =
+  /** The winner settled it with the SAME session and PaymentIntent. */
+  | { kind: "already_settled" }
+  | { kind: "conflict"; reason: string };
+
+/**
+ * Classifies a zero-row paid settlement.
+ *
+ * ── THIS IS WHERE LAST-WRITE-WINS IS REFUSED ──────────────────
+ *
+ * Two invocations carrying DIFFERENT PaymentIntents for one frozen annual
+ * contract cannot both be right. Exactly one becomes authoritative, and
+ * it is whichever one's UPDATE matched: the annual plan's entire refund
+ * correlation hangs off that single id, so the loser must fail closed
+ * rather than overwrite it.
+ *
+ * Success requires all four facts to agree with what this invocation
+ * verified - the same session, the same PaymentIntent, a paid status and
+ * a paid_at that is already set. paid_at is never rewritten; it is
+ * migration 039's purchased_at and therefore the origin of all thirteen
+ * delivery dates, and moving it would move a year of shipments.
+ */
+export function classifyAnnualPaidReread(input: {
+  attempt: {
+    status: string;
+    paid_at: string | null;
+    stripe_checkout_session_id: string | null;
+    stripe_payment_intent_id: string | null;
+  } | null;
+  expectedSessionId: string;
+  expectedPaymentIntentId: string;
+}): AnnualPaidReread {
+  const { attempt } = input;
+  if (!attempt) {
+    return { kind: "conflict", reason: "the annual payment attempt disappeared" };
+  }
+  if (attempt.stripe_checkout_session_id !== input.expectedSessionId) {
+    return { kind: "conflict", reason: "attempt is linked to a different Stripe session" };
+  }
+  if (attempt.stripe_payment_intent_id !== input.expectedPaymentIntentId) {
+    return { kind: "conflict", reason: "attempt is already settled against a different payment" };
+  }
+  if (attempt.status !== "paid" || !attempt.paid_at) {
+    // The PaymentIntent matches but the row is not settled, so the
+    // guarded UPDATE was refused by something else. Never assume paid.
+    return { kind: "conflict", reason: "attempt did not reach a settled state" };
+  }
+  return { kind: "already_settled" };
 }

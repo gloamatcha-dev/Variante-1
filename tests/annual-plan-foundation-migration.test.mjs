@@ -986,11 +986,21 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
   // four are annual-only: the one-time and subscription flows import
   // none of them, and lib/checkoutAttempts.ts still gains only an
   // additional writer.
+  //
+  // Phase 4B4.1 adds the annual webhook's own four. They were new files
+  // in 4B4 and therefore invisible here; now that they are tracked, a
+  // concurrency edit to them shows up and is expected. All four are
+  // annual-only and the one-time and subscription flows import none of
+  // them, which tests/annual-plan-webhook.test.mjs asserts directly.
   const ALLOWED_LIB_EDITS = [
     "lib/checkoutAttempts.ts",
     "lib/annualPlanCheckout.ts",
     "lib/annualPlanCheckoutRules.ts",
     "lib/annualPlanCheckoutDeps.ts",
+    "lib/annualPlanWebhook.ts",
+    "lib/annualPlanWebhookRules.ts",
+    "lib/annualPlanWebhookDeps.ts",
+    "lib/annualDeliveryWorker.ts",
   ];
 
   // Phase 4B4 edits ONE application module: the single canonical Stripe

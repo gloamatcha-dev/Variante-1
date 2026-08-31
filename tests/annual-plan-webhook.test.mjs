@@ -10,6 +10,8 @@ import {
   ANNUAL_SESSION_CHECKOUT_VERSION,
   ANNUAL_SESSION_PLAN_METADATA_KEY,
   annualPaymentIntentId,
+  classifyAnnualLinkReread,
+  classifyAnnualPaidReread,
   decidePaidState,
   decideSessionLink,
   interpretAnnualActivationResult,
@@ -371,9 +373,9 @@ test("12: nothing is correlated by email, amount, SKU or customer", () => {
   }
   assert.ok(!depsCode.includes("email"));
   // Correlation happens before any write.
-  assert.ok(at("verifyAnnualPaymentAttempt(") < at("await deps.linkSession("));
-  assert.ok(at("verifyAnnualPlanCorrelation(") < at("await deps.linkSession("));
-  assert.ok(at("verifyAnnualPlanCorrelation(") < at("await deps.markPaid("));
+  assert.ok(at("verifyAnnualPaymentAttempt(") < at("await deps.linkSessionAtomically("));
+  assert.ok(at("verifyAnnualPlanCorrelation(") < at("await deps.linkSessionAtomically("));
+  assert.ok(at("verifyAnnualPlanCorrelation(") < at("await deps.settlePaidAtomically("));
   assert.ok(at("verifyAnnualPlanCorrelation(") < at("await deps.activatePlan("));
 });
 
@@ -392,12 +394,16 @@ test("13: the session link self-heals, is idempotent, and never overwrites", () 
   const conflict = decideSessionLink({ storedSessionId: SESSION_A, retrievedSessionId: SESSION_B });
   assert.equal(conflict.kind, "conflict");
   assert.match(conflict.reason, /different Stripe session/);
-  // The flow refuses a conflict before marking paid or activating.
-  assert.ok(at('if (link.kind === "conflict")') < at("await deps.markPaid("));
+  // The flow refuses a conflict before settling paid or activating.
+  assert.ok(at('if (link.kind === "conflict")') < at("await deps.settlePaidAtomically("));
   assert.ok(flow.includes("throw new AnnualWebhookConflict(`annual attempt ${attempt.id}: ${link.reason}`)"));
-  // And it uses the existing helper rather than writing the column.
-  assert.ok(flow.includes("await deps.linkSession(attempt.id, session.id)"));
-  assert.ok(depsCode.includes("linkSession: linkStripeSession"));
+  // Phase 4B4.1: through the ATOMIC writer, and never the unconditional
+  // one. decideSessionLink above is a pre-read and is no longer what
+  // makes this safe, so the compare-and-set runs unconditionally.
+  assert.ok(flow.includes("await deps.linkSessionAtomically(attempt.id, session.id)"));
+  assert.ok(!flow.includes("deps.linkSession("), "the flow still calls the unconditional link writer");
+  assert.ok(depsCode.includes("linkSessionAtomically: linkAnnualStripeSessionAtomically"));
+  assert.ok(!depsCode.includes("linkStripeSession"), "the wiring can still reach the unconditional writer");
   assert.ok(!flow.includes("stripe_checkout_session_id:"), "the flow writes the column directly");
 });
 
@@ -430,9 +436,16 @@ test("15: an attempt already settled against a different PaymentIntent is refuse
   assert.equal(conflict.kind, "conflict");
   assert.match(conflict.reason, /different payment/);
 
-  // The guard sits IN FRONT of the existing writer, which stays an
-  // unconditional write for the one-time and subscription flows.
-  assert.ok(at("decidePaidState(") < at("await deps.markPaid("));
+  // This pre-read runs first, but it is NOT what makes settlement safe -
+  // see tests 34 to 44. The durable write is the compare-and-set, and the
+  // annual flow no longer reaches markAttemptPaid at all.
+  assert.ok(at("decidePaidState(") < at("await deps.settlePaidAtomically("));
+  assert.ok(!flow.includes("deps.markPaid("), "the flow still calls the unconditional paid writer");
+  assert.ok(!depsCode.includes("markAttemptPaid"), "the wiring can still reach the unconditional writer");
+
+  // And markAttemptPaid itself is UNCHANGED. It is the one-time and
+  // subscription flows' settled behaviour, and the annual concurrency
+  // problem was fixed beside it rather than inside it.
   const marker = read("lib/checkoutAttempts.ts");
   assert.ok(marker.includes("export async function markAttemptPaid(attemptId: string, stripePaymentIntentId: string | null)"),
     "markAttemptPaid's signature changed");
@@ -819,4 +832,486 @@ test("33: this phase stays inside its boundaries", () => {
   // The existing refund handling is untouched.
   assert.ok(routeCode.includes("await handleRefundEvent(stripe, event);"));
   assert.ok(routeCode.includes("async function handleRefundEvent("));
+});
+
+/* ══════════════════════════════════════════════════════════════
+   34-47. PHASE 4B4.1: ATOMIC SETTLEMENT UNDER CONCURRENCY
+
+   Phase 4B4 proved every REFUSAL. These prove the refusals still
+   hold when two webhook invocations overlap.
+
+   Stripe delivers concurrently and retries hard, so:
+
+        A reads   session NULL, status not paid
+        B reads   session NULL, status not paid   <- same stale row
+        A links session_A, settles pi_A at t1
+        B is still holding its stale decision
+
+   is ordinary rather than exotic. A read, a JavaScript decision and
+   an unconditional write cannot survive it. The two annual writers
+   are therefore compare-and-set, and what follows drives them.
+   ══════════════════════════════════════════════════════════════ */
+
+const attemptsSource = read("lib/checkoutAttempts.ts");
+const sliceBetween = (source, from, to) => {
+  const a = source.indexOf(from);
+  assert.notEqual(a, -1, `missing: ${from}`);
+  const b = to ? source.indexOf(to, a) : source.length;
+  assert.notEqual(b, -1, `missing: ${to}`);
+  return source.slice(a, b);
+};
+
+const LINK_CAS = sliceBetween(
+  attemptsSource,
+  "export async function linkAnnualStripeSessionAtomically(",
+  "export type AnnualPaidSettlementOutcome"
+);
+const PAID_CAS = sliceBetween(
+  attemptsSource,
+  "export async function settleAnnualAttemptPaidAtomically(",
+  null
+);
+
+/**
+ * The annual PAYMENT shape, restated as the seven predicates BOTH
+ * compare-and-set writers carry. Pinned against the source below, so the
+ * in-memory model underneath cannot drift away from the real statements.
+ */
+const ANNUAL_SHAPE_GUARDS = [
+  '.not("annual_intent_fingerprint", "is", null)',
+  '.not("annual_request_fingerprint", "is", null)',
+  '.is("annual_plan_id", null)',
+  '.is("annual_delivery_number", null)',
+  '.is("subscription_id", null)',
+  '.is("subscription_request_fingerprint", null)',
+  '.is("subscription_intent_fingerprint", null)',
+];
+
+const isAnnualPaymentShape = r =>
+  r.annual_intent_fingerprint !== null && r.annual_request_fingerprint !== null
+  && r.annual_plan_id === null && r.annual_delivery_number === null
+  && r.subscription_id === null
+  && r.subscription_request_fingerprint === null
+  && r.subscription_intent_fingerprint === null;
+
+/** A fixed stamp. Nothing in this suite reads a clock. */
+const PAID_AT = "2026-09-01T09:30:00.000Z";
+const PAID_AT_LATER = "2026-09-01T09:31:00.000Z";
+
+/**
+ * ONE checkout_attempts row plus the two compare-and-set writers applied
+ * to it exactly as lib/checkoutAttempts.ts applies them, and resolving a
+ * lost race through the REAL classifiers imported above.
+ *
+ * Postgres serialises two concurrent UPDATEs of one row, so at most one
+ * of them can find the row in the state its WHERE clause requires. A
+ * single-threaded model reproduces that faithfully: both callers decide
+ * from the same stale snapshot, then write in some order, and the second
+ * one finds the row already moved.
+ */
+const casRow = (over = {}) => {
+  const state = attempt({ stripe_checkout_session_id: null, ...over });
+  // Any SECOND stamp would land a different value, so an assertion on
+  // PAID_AT is a real write-once assertion rather than a tautology.
+  let stamps = 0;
+  return {
+    read: () => ({ ...state }),
+    linkSessionAtomically: async (attemptId, sessionId) => {
+      const matched = state.id === attemptId
+        && state.stripe_checkout_session_id === null
+        && state.paid_at === null
+        && state.status !== "paid"
+        && isAnnualPaymentShape(state);
+      if (matched) {
+        state.stripe_checkout_session_id = sessionId;
+        state.status = "stripe_session_created";
+        return { kind: "linked" };
+      }
+      return classifyAnnualLinkReread({ attempt: { ...state }, expectedSessionId: sessionId });
+    },
+    settlePaidAtomically: async ({ attemptId, stripeCheckoutSessionId, stripePaymentIntentId }) => {
+      const matched = state.id === attemptId
+        && state.stripe_checkout_session_id === stripeCheckoutSessionId
+        && state.paid_at === null
+        && state.stripe_payment_intent_id === null
+        && state.status !== "paid"
+        && isAnnualPaymentShape(state);
+      if (matched) {
+        state.status = "paid";
+        state.paid_at = stamps++ === 0 ? PAID_AT : PAID_AT_LATER;
+        state.stripe_payment_intent_id = stripePaymentIntentId;
+        return { kind: "settled" };
+      }
+      return classifyAnnualPaidReread({
+        attempt: { ...state },
+        expectedSessionId: stripeCheckoutSessionId,
+        expectedPaymentIntentId: stripePaymentIntentId,
+      });
+    },
+  };
+};
+
+/** One invocation's whole durable interaction, from a stale pre-read. */
+const settleOnce = async (row, { sessionId, paymentIntentId }) => {
+  const link = await row.linkSessionAtomically(ATTEMPT_ID, sessionId);
+  if (link.kind === "conflict" || link.kind === "error") return { stopped: "link", link };
+  const paid = await row.settlePaidAtomically({
+    attemptId: ATTEMPT_ID,
+    stripeCheckoutSessionId: sessionId,
+    stripePaymentIntentId: paymentIntentId,
+  });
+  return { link, paid };
+};
+
+test("34: the annual settlement writers are compare-and-set, not blind writes", () => {
+  // The predicate is the guarantee, so the predicate is what is pinned.
+  for (const guard of [
+    '.eq("id", attemptId)',
+    '.is("stripe_checkout_session_id", null)',
+    '.is("paid_at", null)',
+    '.neq("status", "paid")',
+    ...ANNUAL_SHAPE_GUARDS,
+    '.select("id")',
+  ]) {
+    assert.ok(LINK_CAS.includes(guard), `the link CAS lost its guard: ${guard}`);
+  }
+  for (const guard of [
+    '.eq("id", input.attemptId)',
+    '.eq("stripe_checkout_session_id", input.stripeCheckoutSessionId)',
+    '.is("paid_at", null)',
+    '.is("stripe_payment_intent_id", null)',
+    '.neq("status", "paid")',
+    ...ANNUAL_SHAPE_GUARDS,
+    '.select("id")',
+  ]) {
+    assert.ok(PAID_CAS.includes(guard), `the paid CAS lost its guard: ${guard}`);
+  }
+  // Zero rows is a QUESTION, answered from a fresh read of the row that
+  // won - never assumed to be either success or failure.
+  for (const cas of [LINK_CAS, PAID_CAS]) {
+    assert.ok(cas.includes("await findAnnualPaymentAttemptById("), "a lost race is not re-read");
+    assert.ok(cas.includes('(data?.length ?? 0) > 0'), "the affected-row count is not consulted");
+  }
+  assert.ok(LINK_CAS.includes("classifyAnnualLinkReread("));
+  assert.ok(PAID_CAS.includes("classifyAnnualPaidReread("));
+  // No migration was needed: these are UPDATEs on a table the existing
+  // writers already update, with a narrower WHERE clause.
+  for (const cas of [LINK_CAS, PAID_CAS]) {
+    assert.ok(!cas.includes(".rpc("), "the settlement writer calls an RPC");
+    assert.ok(cas.includes('from("checkout_attempts")'));
+  }
+});
+
+test("35: same Session and same PaymentIntent, two concurrent invocations", async () => {
+  const row = casRow();
+  // Both start from the same stale unlinked, unsettled read.
+  const [a, b] = await Promise.all([
+    settleOnce(row, { sessionId: SESSION_A, paymentIntentId: PI_A }),
+    settleOnce(row, { sessionId: SESSION_A, paymentIntentId: PI_A }),
+  ]);
+
+  // Exactly one of each write lands.
+  const linked = [a, b].filter(r => r.link.kind === "linked");
+  const settled = [a, b].filter(r => r.paid?.kind === "settled");
+  assert.equal(linked.length, 1, "both invocations linked");
+  assert.equal(settled.length, 1, "both invocations settled");
+  // And the loser is a clean idempotent success, not an error.
+  assert.equal([a, b].filter(r => r.link.kind === "already_linked").length, 1);
+  assert.equal([a, b].filter(r => r.paid?.kind === "already_settled").length, 1);
+
+  const final = row.read();
+  assert.equal(final.stripe_checkout_session_id, SESSION_A);
+  assert.equal(final.stripe_payment_intent_id, PI_A);
+  assert.equal(final.status, "paid");
+  assert.equal(final.paid_at, PAID_AT, "paid_at was stamped more than once");
+});
+
+test("36: a replay after settlement changes nothing at all", async () => {
+  const row = casRow();
+  await settleOnce(row, { sessionId: SESSION_A, paymentIntentId: PI_A });
+  const afterFirst = row.read();
+
+  // Stripe redelivers the same event. Twice.
+  for (let i = 0; i < 2; i++) {
+    const replay = await settleOnce(row, { sessionId: SESSION_A, paymentIntentId: PI_A });
+    assert.equal(replay.link.kind, "already_linked");
+    assert.equal(replay.paid.kind, "already_settled");
+  }
+  assert.deepEqual(row.read(), afterFirst, "a replay mutated the settled attempt");
+  assert.equal(row.read().paid_at, PAID_AT);
+});
+
+test("37: session_A against session_B from one unlinked row - exactly one wins", async () => {
+  for (const [first, second] of [[SESSION_A, SESSION_B], [SESSION_B, SESSION_A]]) {
+    const row = casRow();
+    const winner = await settleOnce(row, { sessionId: first, paymentIntentId: PI_A });
+    const loser = await settleOnce(row, { sessionId: second, paymentIntentId: PI_B });
+
+    assert.equal(winner.link.kind, "linked");
+    assert.equal(winner.paid.kind, "settled");
+    // The loser NEVER overwrites, and never reaches the paid write.
+    assert.equal(loser.stopped, "link");
+    assert.equal(loser.link.kind, "conflict");
+    assert.match(loser.link.reason, /different Stripe session/);
+
+    const final = row.read();
+    assert.equal(final.stripe_checkout_session_id, first, "last write won");
+    assert.equal(final.stripe_payment_intent_id, PI_A);
+    assert.equal(final.paid_at, PAID_AT);
+  }
+});
+
+test("38: pi_A against pi_B on one linked row - exactly one becomes authoritative", async () => {
+  for (const [first, second] of [[PI_A, PI_B], [PI_B, PI_A]]) {
+    // Both invocations carry the SAME session, so both pass the link, and
+    // only the paid compare-and-set can separate them.
+    const row = casRow({ stripe_checkout_session_id: SESSION_A });
+    const winner = await settleOnce(row, { sessionId: SESSION_A, paymentIntentId: first });
+    const loser = await settleOnce(row, { sessionId: SESSION_A, paymentIntentId: second });
+
+    assert.equal(winner.link.kind, "already_linked");
+    assert.equal(winner.paid.kind, "settled");
+    assert.equal(loser.paid.kind, "conflict");
+    assert.match(loser.paid.reason, /different payment/);
+
+    const final = row.read();
+    assert.equal(final.stripe_payment_intent_id, first, "the second PaymentIntent overwrote the first");
+    assert.equal(final.paid_at, PAID_AT);
+  }
+});
+
+test("39: a link retry after another invocation settled cannot regress paid", async () => {
+  const row = casRow();
+  await settleOnce(row, { sessionId: SESSION_A, paymentIntentId: PI_A });
+  assert.equal(row.read().status, "paid");
+
+  // A stale invocation now resumes and tries the link it decided on
+  // before any of that happened. The UPDATE carries status <> 'paid' and
+  // stripe_checkout_session_id IS NULL, so it does not run.
+  const stale = await row.linkSessionAtomically(ATTEMPT_ID, SESSION_A);
+  assert.equal(stale.kind, "already_linked");
+  assert.equal(row.read().status, "paid", "the link write regressed a settled attempt");
+  assert.equal(row.read().paid_at, PAID_AT);
+
+  // Even the pure pre-read agrees, but it is not what stopped it: the
+  // link writer would refuse a paid row on its own predicate.
+  assert.ok(LINK_CAS.includes('.neq("status", "paid")'));
+  assert.ok(LINK_CAS.includes('.is("paid_at", null)'));
+});
+
+test("40: after activation, a stale writer cannot drift the plan's identity", async () => {
+  // Activation has happened. The plan's purchased_at IS this paid_at, and
+  // its refund correlation IS this PaymentIntent, so neither may move.
+  const row = casRow();
+  await settleOnce(row, { sessionId: SESSION_A, paymentIntentId: PI_A });
+  const activated = row.read();
+
+  // Two stale writers resume: one with the same facts, one with different
+  // ones. Neither may touch the row.
+  const replay = await settleOnce(row, { sessionId: SESSION_A, paymentIntentId: PI_A });
+  assert.equal(replay.paid.kind, "already_settled");
+  const impostor = await settleOnce(row, { sessionId: SESSION_B, paymentIntentId: PI_B });
+  assert.equal(impostor.link.kind, "conflict");
+
+  assert.deepEqual(row.read(), activated, "the settled attempt drifted after activation");
+
+  // And the activation RPC re-proves the same equalities under its own
+  // row lock, so this is the earlier of two independent refusals.
+  const m039 = read("supabase/migrations/039_b2c_annual_plan_foundation.sql");
+  assert.ok(m039.includes("payment_intent_conflict"));
+  assert.ok(m039.includes("checkout_session_conflict"));
+  assert.ok(m039.includes("v_purchased := v_attempt.paid_at;"),
+    "039 stopped freezing purchased_at from the attempt");
+});
+
+test("41: a lost race is only a success when the durable row agrees exactly", () => {
+  // The link re-read.
+  assert.deepEqual(
+    classifyAnnualLinkReread({ attempt: { stripe_checkout_session_id: SESSION_A }, expectedSessionId: SESSION_A }),
+    { kind: "already_linked" });
+  for (const [row, pattern] of [
+    [{ stripe_checkout_session_id: SESSION_B }, /different Stripe session/],
+    [{ stripe_checkout_session_id: null }, /not a settleable annual payment/],
+    [null, /disappeared/],
+  ]) {
+    const out = classifyAnnualLinkReread({ attempt: row, expectedSessionId: SESSION_A });
+    assert.equal(out.kind, "conflict");
+    assert.match(out.reason, pattern);
+  }
+
+  // The paid re-read. All four facts must agree.
+  const settledRow = {
+    status: "paid", paid_at: PAID_AT,
+    stripe_checkout_session_id: SESSION_A, stripe_payment_intent_id: PI_A,
+  };
+  const ask = over => classifyAnnualPaidReread({
+    attempt: over === null ? null : { ...settledRow, ...over },
+    expectedSessionId: SESSION_A,
+    expectedPaymentIntentId: PI_A,
+  });
+  assert.deepEqual(ask({}), { kind: "already_settled" });
+  for (const [over, pattern] of [
+    [{ stripe_checkout_session_id: SESSION_B }, /different Stripe session/],
+    [{ stripe_payment_intent_id: PI_B }, /different payment/],
+    [{ stripe_payment_intent_id: null }, /different payment/],
+    [{ status: "stripe_session_created" }, /did not reach a settled state/],
+    [{ paid_at: null }, /did not reach a settled state/],
+    [null, /disappeared/],
+  ]) {
+    const out = ask(over);
+    assert.equal(out.kind, "conflict", JSON.stringify(over));
+    assert.match(out.reason, pattern);
+  }
+});
+
+test("42: neither settlement writer can reach another attempt population", async () => {
+  // A one-time attempt, a subscription attempt and migration 039's
+  // synthetic DELIVERY attempt all fail the shape predicate, so the
+  // UPDATE does not run and the re-read refuses.
+  const populations = {
+    "one-time": { annual_intent_fingerprint: null, annual_request_fingerprint: null },
+    subscription: { subscription_request_fingerprint: "c".repeat(64), subscription_id: "sub_1" },
+    delivery: { annual_plan_id: PLAN_ID, annual_delivery_number: 1 },
+  };
+  for (const [name, over] of Object.entries(populations)) {
+    const row = casRow(over);
+    const out = await settleOnce(row, { sessionId: SESSION_A, paymentIntentId: PI_A });
+    assert.equal(out.link.kind, "conflict", name);
+    assert.equal(row.read().stripe_checkout_session_id, null, `${name} was linked`);
+    assert.equal(row.read().paid_at, null, `${name} was settled`);
+  }
+});
+
+test("43: the VALID annual payment shape has no plan id and no delivery number", () => {
+  // The annual PLAN points at the payment attempt through
+  // annual_plans.payment_checkout_attempt_id. The payment attempt does
+  // NOT point back, so both annual link columns are null on it.
+  const valid = attempt();
+  assert.equal(valid.annual_plan_id, null);
+  assert.equal(valid.annual_delivery_number, null);
+  assert.notEqual(valid.annual_intent_fingerprint, null);
+  assert.notEqual(valid.annual_request_fingerprint, null);
+  assert.equal(valid.subscription_request_fingerprint, null);
+  assert.equal(valid.subscription_intent_fingerprint, null);
+  assert.equal(valid.subscription_id, null);
+  assert.notEqual(valid.user_id, null);
+  assert.deepEqual(verifyAnnualPaymentAttempt({ attempt: valid, metadata: META }), { ok: true });
+
+  // The relationship direction is 039's, not this suite's invention.
+  const m039 = read("supabase/migrations/039_b2c_annual_plan_foundation.sql");
+  assert.ok(m039.includes("payment_checkout_attempt_id"));
+
+  // A synthetic DELIVERY attempt is the mirror image, and the PAYMENT
+  // webhook rejects it - it has no Stripe payment identity to settle.
+  const delivery = attempt({
+    annual_plan_id: PLAN_ID, annual_delivery_number: 1,
+    annual_intent_fingerprint: null, annual_request_fingerprint: null,
+    stripe_checkout_session_id: null,
+  });
+  const refused = verifyAnnualPaymentAttempt({ attempt: delivery, metadata: META });
+  assert.equal(refused.ok, false);
+  // Refused for being unsettleable, whichever check catches it first.
+  assert.match(refused.reason, /annual delivery|no annual payment intent/);
+});
+
+test("44: an infrastructure failure is retryable, a business guard is not", async () => {
+  // INFRASTRUCTURE: the queue is unreachable, one fulfillment throws, or
+  // the RPC answers a word nobody recognises. All three are failures.
+  const unreachable = await runAnnualDeliveryWorker(workerPort({ claimThrows: true }).deps);
+  assert.ok(unreachable.failed > 0);
+  const threw = await runAnnualDeliveryWorker(
+    workerPort({ rows: [claimed()], fulfillThrows: DELIVERY_ID }).deps);
+  assert.ok(threw.failed > 0);
+  const unknown = await runAnnualDeliveryWorker(
+    workerPort({ rows: [claimed()], answers: { [DELIVERY_ID]: { result: "who_knows" } } }).deps);
+  assert.ok(unknown.failed > 0);
+
+  // BUSINESS GUARD: the parent said no after the claim. Nothing was
+  // created, retrying would not change the answer, and manufacturing an
+  // order would defeat the guard. Counted, reported, never escalated.
+  for (const word of ANNUAL_FULFILL_GUARDED_RESULTS) {
+    const guarded = await runAnnualDeliveryWorker(
+      workerPort({ rows: [claimed()], answers: { [DELIVERY_ID]: { result: word } } }).deps);
+    assert.equal(guarded.guarded, 1, word);
+    assert.equal(guarded.failed, 0, `${word} was escalated to a failure`);
+    assert.equal(guarded.fulfilled, 0, `${word} was counted as a fulfillment`);
+    assert.ok(guarded.outcomes.every(o => o.orderId === null), `${word} produced an order id`);
+  }
+
+  // And the flow escalates on `failed` ALONE. A guarded refusal must
+  // never become an endless Stripe retry.
+  const escalation = sliceBetween(flow, "if (worker.failed > 0) {", "return {");
+  assert.ok(escalation.includes("throw new Error("), "a worker failure is swallowed");
+  assert.ok(!escalation.includes("worker.guarded"), "a business guard triggers a Stripe retry");
+  assert.ok(!flow.includes("if (worker.guarded"), "a business guard is escalated");
+});
+
+test("45: a worker failure reaches Stripe as a retry, and marks nothing processed", () => {
+  // The chain, asserted where each link actually lives.
+  //
+  // 1. the flow throws rather than returning a summary
+  assert.ok(at("const worker = await runAnnualDeliveryWorker(") < at("if (worker.failed > 0) {"));
+  assert.ok(sliceBetween(flow, "if (worker.failed > 0) {", "return {").includes("throw new Error("),
+    "the worker failure does not stop the handler");
+  // 2. the route calls it INSIDE the try whose catch answers 500
+  const guarded = sliceBetween(routeCode,
+    'if (event.type === "checkout.session.completed") {',
+    "const recorded = await recordStripeWebhookEvent(");
+  assert.ok(guarded.includes("await settleAnnualCheckoutSession("),
+    "the annual settlement moved out of the guarded block");
+  assert.ok(guarded.includes("} catch (err) {"));
+  assert.ok(guarded.includes("{ status: 500 }"), "a handler failure no longer answers 5xx");
+  // 3. and the processed-event marker is written only AFTER that block,
+  //    so a throw skips it and Stripe redelivers against fresh state.
+  assert.ok(routeCode.indexOf("} catch (err) {")
+    < routeCode.indexOf("const recorded = await recordStripeWebhookEvent("),
+    "the event is marked processed before the handler can fail");
+  // lastIndexOf, because the same 200 also short-circuits an event that
+  // was ALREADY recorded. The one that matters here is the final one.
+  assert.ok(routeCode.lastIndexOf("return Response.json({ received: true }, { status: 200 });")
+    > routeCode.indexOf("const recorded = await recordStripeWebhookEvent("),
+    "the route acknowledges before recording");
+  // 4. which is safe only because every step is idempotent - tests 35-40.
+});
+
+test("46: a session that is not yet paid activates nothing", () => {
+  // The frozen attempt is the amount authority and evaluateStripeSessionPayment
+  // is the same evaluator the one-time flow uses. Anything that is not a
+  // completed payment is refused, and the refusal is BEFORE any write.
+  for (const status of ["unpaid", "no_payment_required", "processing", ""]) {
+    const out = evaluateStripeSessionPayment(
+      { payment_status: status, currency: "eur", amount_total: 35087 },
+      { currency: "EUR", expected_total_gross_cents: 35087 }
+    );
+    assert.equal(out.shouldMarkPaid, false, status);
+  }
+  assert.ok(at("evaluateStripeSessionPayment(") < at("await deps.settlePaidAtomically("));
+  assert.ok(at("if (!evaluation.shouldMarkPaid)") < at("await deps.activatePlan("));
+});
+
+test("47: asynchronous payment methods remain an open product decision", () => {
+  // AUDIT, PINNED. The annual Checkout Session names no payment methods,
+  // exactly like the one-time and subscription flows: all three inherit
+  // whatever the Stripe Dashboard has enabled.
+  const annualCheckout = read("lib/annualPlanCheckout.ts");
+  assert.ok(annualCheckout.includes('mode: "payment",'));
+  for (const key of ["payment_method_types", "payment_method_options", "payment_method_configuration"]) {
+    assert.ok(!annualCheckout.includes(key), `the annual checkout now constrains ${key}`);
+    assert.ok(!read("app/api/checkout/session/route.ts").includes(key));
+  }
+  // So whether a delayed-notification method can be used is a Dashboard
+  // fact, not a repository fact, and this phase deliberately did not
+  // change it: doing so would change which payment methods customers are
+  // offered.
+  //
+  // The consequence is recorded rather than hidden. The route handles
+  // NEITHER async event, for any product, and says so:
+  assert.ok(!routeCode.includes("async_payment_succeeded"),
+    "the route now handles async payments - this guard needs rewriting, not deleting");
+  assert.ok(read("app/api/stripe/webhook/route.ts").includes("checkout.session.async_payment_succeeded"),
+    "the open question stopped being documented in the route");
+  // If such a method is ever enabled, checkout.session.completed arrives
+  // not-yet-paid, test 46 refuses it, and the later success event is
+  // unhandled - for one-time purchases exactly as for annual ones. That
+  // is a product-wide decision and it is reported, not silently patched.
 });
