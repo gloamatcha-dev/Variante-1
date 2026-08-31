@@ -502,6 +502,11 @@ test("20: the hero copy is exactly the four approved lines", () => {
   // is held on one line wherever the column can carry it.
   assert.ok(!/Is for<br\/>everyone\./.test(hero), "the phrase is split by a break");
   assert.match(heroCss, /@media \(min-width:1100px\)\{[\s\S]*?white-space:nowrap/);
+  // The supporting line is held on one line too - a `ch` cap used to
+  // break "WILLST." onto its own row, because ch ignores letter-spacing.
+  assert.match(heroCss, /@media \(min-width:1100px\)\{[\s\S]*?\.hero \.hero-copy \.lead\{white-space:nowrap\}/);
+  assert.ok(!/\.hero \.hero-copy \.lead\{[\s\S]*?max-width:\d+ch/.test(heroCss),
+    "the supporting line is capped in ch again");
 
   // ONE TYPOGRAPHIC VOICE. The eyebrow, the second headline line and the
   // paragraph all resolve to the sans; only "Matcha." is the display

@@ -735,7 +735,11 @@ header nav{gap:18px;font-size:12px}
   line-height:1.45;
   letter-spacing:.2em;
   text-transform:uppercase;
-  max-width:44ch;
+  /* NO ch CAP. The `ch` unit measures the "0" glyph and ignores
+     letter-spacing, so 44ch was materially narrower than these 40
+     characters at .2em tracking - which is what pushed "WILLST." onto a
+     second line. The column already limits the width. */
+  max-width:none;
   margin:0;
   opacity:1;
 }
@@ -801,8 +805,9 @@ header nav{gap:18px;font-size:12px}
 .hero .hero-copy .lead{transform:translate3d(calc(var(--hero-scroll)*11px),0,0)}
 
 @media (min-width:1100px){
-  /* Wide enough to hold the phrase, so it is never split. */
+  /* Wide enough to hold both phrases, so neither is split. */
   .hero .hero-copy h1 .hero-line-2{white-space:nowrap}
+  .hero .hero-copy .lead{white-space:nowrap}
 }
 
 @media (max-width:900px){
