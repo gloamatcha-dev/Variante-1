@@ -180,8 +180,12 @@ test("8: the hero effect is scroll-linked, and reduced motion turns it off", () 
   assert.match(css, /@media \(prefers-reduced-motion:reduce\)\{[^}]*\.hero-copy h1[^}]*transform:none!important/);
   // Mobile keeps a much smaller displacement than desktop, whatever the
   // two amplitudes are tuned to.
-  const desktopShift = Number(/\.hero-copy h1\{--hero-scroll:0;transform:translate3d\(calc\(var\(--hero-scroll\)\*-(\d+)px\)/.exec(css)?.[1]);
-  const mobileShift = Number(/@media \(max-width:900px\)\{\.hero-copy h1\{transform:translate3d\(calc\(var\(--hero-scroll\)\*-(\d+)px\)/.exec(css)?.[1]);
+  // Measured on the FINAL hero block, which is appended last and is what
+  // actually renders - not on the earlier rules it supersedes.
+  const heroBlock = css.slice(css.indexOf("HOMEPAGE HERO - FINAL PASS"));
+  assert.ok(heroBlock.length > 0, "the final hero block moved");
+  const desktopShift = Number(/\.hero \.hero-copy h1\{transform:translate3d\(calc\(var\(--hero-scroll\)\*-(\d+)px\)/.exec(heroBlock)?.[1]);
+  const mobileShift = Number(/@media \(max-width:900px\)\{[\s\S]*?\.hero \.hero-copy h1\{transform:translate3d\(calc\(var\(--hero-scroll\)\*-(\d+)px\)/.exec(heroBlock)?.[1]);
   assert.ok(Number.isFinite(desktopShift) && Number.isFinite(mobileShift), "the hero shift amplitudes moved");
   assert.ok(mobileShift < desktopShift, "mobile moves as far as desktop");
   assert.ok(desktopShift <= 30, "the hero displacement stopped being restrained");
@@ -457,4 +461,67 @@ test("19: no rule anywhere sets a display face OTHER than Cormorant", () => {
   // Two families are loaded, and only two.
   assert.equal([...layout.matchAll(/from "next\/font\/google"/g)].length, 1);
   assert.match(layout, /import \{ Inter, Cormorant_Garamond \}/);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   20-22. THE FINAL HERO PASS
+   ══════════════════════════════════════════════════════════════ */
+
+const heroCss = css.slice(css.indexOf("HOMEPAGE HERO - FINAL PASS"));
+
+test("20: the hero copy is exactly the four approved lines", () => {
+  const hero = homepage.slice(homepage.indexOf('<section className="hero">'), homepage.indexOf('<LaunchCountdown/>'));
+  assert.ok(hero.includes('<p className="eyebrow">MATCHA AUS SHIZUOKA.</p>'));
+  assert.ok(hero.includes("<h1>Matcha.<br/><i>Is for everyone.</i></h1>"));
+  assert.ok(hero.includes('<p className="lead">Aus Shizuoka, Japan. Für Latte, pur, iced oder wie du willst.</p>'));
+  // The retired phrases are gone from the hero.
+  for (const gone of ["Aber richtig.", "Ein Grün.", "Viele Momente."]) {
+    assert.ok(!hero.includes(gone), `the hero still says: ${gone}`);
+  }
+  // "Is for everyone." is ONE phrase: no <br> inside the italic, and it
+  // is held on one line wherever the column can carry it.
+  assert.ok(!/<i>Is for<br\/>everyone\.<\/i>/.test(hero), "the phrase is split by a break");
+  assert.match(heroCss, /@media \(min-width:1100px\)\{[\s\S]*?white-space:nowrap/);
+
+  // Three actions, unchanged, in order.
+  assert.ok(hero.indexOf("Zum Shop") < hero.indexOf("Benachrichtige mich"));
+  assert.ok(hero.indexOf("Benachrichtige mich") < hero.indexOf("GLOA entdecken →"));
+});
+
+test("21: the hero image is contained, capped, and the only one in the hero", () => {
+  const hero = homepage.slice(homepage.indexOf('<section className="hero">'), homepage.indexOf('<LaunchCountdown/>'));
+  assert.equal([...hero.matchAll(/<img /g)].length, 1, "the hero carries more than one image");
+  assert.match(hero, /src="\/img\/Header\.png"/);
+  for (const old of ["gloa-hero-packaging", "Produkt BILD", "gloa-matcha-in-the-city"]) {
+    assert.ok(!hero.includes(old), `the hero uses ${old}`);
+  }
+  // CONTAIN, because the asset is near-square artwork: a cover fit in a
+  // wide box would cut the powder movement off.
+  assert.match(heroCss, /\.hero \.hero-img\{[\s\S]*?object-fit:contain/);
+  assert.match(heroCss, /max-width:min\(100%,720px\)/);
+  assert.match(heroCss, /max-height:clamp\(340px,36vw,520px\)/);
+  // No card chrome around it.
+  const art = heroCss.slice(heroCss.indexOf(".hero .hero-art{"), heroCss.indexOf(".hero .hero-micro{"));
+  for (const banned of ["border-radius", "box-shadow", "backdrop-filter", "gradient"]) {
+    assert.ok(!art.includes(banned), `the hero image frame uses ${banned}`);
+  }
+});
+
+test("22: the hero is compact, measured and centred", () => {
+  // A measured column rather than two halves pushed to opposite edges.
+  assert.match(heroCss, /padding-inline:max\(clamp\(32px,3vw,56px\),calc\(\(100% - 1560px\) \/ 2\)\)/);
+  assert.match(heroCss, /grid-template-columns:minmax\(0,\.95fr\) minmax\(0,1\.05fr\)/);
+  assert.match(heroCss, /gap:clamp\(28px,3vw,52px\)/);
+  assert.match(heroCss, /padding-block:clamp\(54px,6vw,82px\) clamp\(48px,5vw,72px\)/);
+  // The divider that separated the two columns is gone.
+  assert.match(heroCss, /\.hero \.hero-art\{[\s\S]*?border-left:0/);
+  // No reserved viewport anywhere in the hero.
+  assert.ok(!/\.hero[^{]*\{[^}]*min-height:100vh/.test(css), "the hero reserves a viewport");
+  assert.match(heroCss, /\.hero \.hero-art\{[\s\S]*?min-height:0/);
+  // Buttons keep one height, scoped to the hero so the rest of the page
+  // keeps the height it was approved with.
+  assert.match(heroCss, /\.hero \.hero-actions \.cta\{min-height:46px/);
+  assert.match(css, /--cta-h:52px/);
+  // Below 640px the effect is off entirely.
+  assert.match(heroCss, /@media \(max-width:640px\)\{[\s\S]*?transform:none/);
 });

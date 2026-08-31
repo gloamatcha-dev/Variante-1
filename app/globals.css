@@ -635,3 +635,147 @@ header nav{gap:18px;font-size:12px}
 .calc-roi-table th,.calc-roi-table td{padding:10px}
 }
 
+/* ══════════════════════════════════════════════════════════════
+   HOMEPAGE HERO - FINAL PASS
+
+   ── HOMEPAGE HERO, FINAL PASS. WHY THIS BLOCK IS AT THE END ───
+
+   Everything here is scoped to .hero and appended AFTER the older rules
+   it corrects. `.hero h1` and `.hero-copy h1` have identical specificity,
+   so source order is what decides between them - the same mechanism that
+   left the display italics rendering in Georgia for a whole phase. The
+   base rules below are safe at every width; the desktop-only and
+   mobile-only refinements are inside explicit media queries so neither
+   can silently swallow the other.
+
+   Nothing outside .hero is touched.
+   ══════════════════════════════════════════════════════════════ */
+
+/* THE SHELL. Full-bleed section, content held to a measured column, so
+   the hairline under the hero still spans the page while the type and
+   the image stay near each other instead of being pushed to opposite
+   edges. padding-inline does the centring - no wrapper element, no
+   change to the markup. */
+.hero{
+  grid-template-columns:minmax(0,.95fr) minmax(0,1.05fr);
+  gap:clamp(28px,3vw,52px);
+  align-items:center;
+  padding-block:clamp(54px,6vw,82px) clamp(48px,5vw,72px);
+  padding-inline:max(clamp(32px,3vw,56px),calc((100% - 1560px) / 2));
+}
+
+/* THE COPY COLUMN. Explicit rhythm rather than one flex gap: the two
+   headline lines belong together, the paragraph sits closer than it did,
+   and the actions are the only thing with real air above them. */
+.hero .hero-copy{padding:0;max-width:none;gap:0;display:block}
+.hero .hero-copy .eyebrow{margin:0 0 24px;font-size:11px;letter-spacing:.2em;color:var(--berry)}
+.hero .hero-copy h1{
+  font-size:clamp(54px,5.9vw,100px);
+  line-height:.92;
+  letter-spacing:-.055em;
+  font-weight:800;
+  margin:0 0 38px;
+}
+/* ONE PHRASE. "Is for everyone." is a sentence, not two stacked
+   fragments, so it is kept on a single line wherever the column can hold
+   it and allowed to wrap only when it genuinely cannot. */
+.hero .hero-copy h1 i{
+  display:inline-block;
+  font-size:.92em;
+  line-height:1;
+  letter-spacing:-.02em;
+}
+.hero .hero-copy .lead{
+  font-size:clamp(16px,1.1vw,18px);
+  line-height:1.6;
+  max-width:38ch;
+  margin:0;
+  opacity:.8;
+}
+.hero .hero-actions{
+  margin-top:34px;
+  padding-top:26px;
+  gap:14px;
+  border-top:1px solid var(--line);
+}
+/* Hero-scoped button height. The site-wide --cta-h stays where the rest
+   of the page approved it; only this row is a little tighter. */
+.hero .hero-actions .cta{min-height:46px;padding:13px 24px}
+
+/* THE IMAGE. Header.png is a near-square 891x941 artwork, so it is
+   CONTAINED rather than cropped - a cover fit in a wide box would cut the
+   powder movement straight off. Height is what limits it: capped so the
+   image reads as a placed object and not as a billboard filling the
+   right half of the screen. */
+.hero .hero-art{
+  min-height:0;
+  padding:0;
+  border-left:0;
+  background:transparent;
+  align-items:center;
+  justify-content:center;
+}
+.hero .hero-img{
+  position:relative;
+  width:auto;
+  height:auto;
+  max-width:min(100%,720px);
+  max-height:clamp(340px,36vw,520px);
+  object-fit:contain;
+  object-position:center;
+}
+.hero .hero-micro{
+  left:auto;
+  right:clamp(12px,1.4vw,22px);
+  bottom:clamp(10px,1.2vw,18px);
+  background:transparent;
+  color:var(--plum);
+  opacity:.65;
+  padding:0;
+}
+
+/* THE EFFECT. The same three lines, one shared gesture: the two headline
+   lines part slightly, the paragraph drifts a little the other way. All
+   transform, no layout, nothing that can collide or clip. */
+.hero .hero-copy h1{transform:translate3d(calc(var(--hero-scroll)*-20px),0,0)}
+.hero .hero-copy h1 i{transform:translate3d(calc(var(--hero-scroll)*30px),0,0)}
+.hero .hero-copy .lead{transform:translate3d(calc(var(--hero-scroll)*9px),0,0);opacity:.8}
+
+@media (min-width:1100px){
+  /* Wide enough to hold the phrase, so it is never split. */
+  .hero .hero-copy h1 i{white-space:nowrap}
+}
+
+@media (max-width:900px){
+  .hero{
+    display:block;
+    padding-block:clamp(40px,9vw,58px) clamp(32px,7vw,48px);
+    padding-inline:6vw;
+  }
+  .hero .hero-copy{padding:0}
+  .hero .hero-copy .eyebrow{margin-bottom:18px}
+  .hero .hero-copy h1{font-size:clamp(44px,12vw,64px);margin-bottom:26px}
+  .hero .hero-copy .lead{max-width:none}
+  .hero .hero-actions{margin-top:26px;padding-top:22px}
+  .hero .hero-art{margin-top:clamp(28px,7vw,40px);padding:0;min-height:0}
+  .hero .hero-img{max-height:clamp(260px,64vw,380px);max-width:100%}
+  .hero .hero-micro{position:static;display:block;margin-top:12px;text-align:right}
+  .hero .hero-copy h1{transform:translate3d(calc(var(--hero-scroll)*-6px),0,0)}
+  .hero .hero-copy h1 i{transform:translate3d(calc(var(--hero-scroll)*8px),0,0)}
+  .hero .hero-copy .lead{transform:none}
+}
+
+@media (max-width:640px){
+  /* READABILITY WINS. Below this width the lines are short enough that
+     any horizontal drift reads as a wobble, so the effect is off. */
+  .hero .hero-copy h1,
+  .hero .hero-copy h1 i,
+  .hero .hero-copy .lead{transform:none}
+}
+
+@media (prefers-reduced-motion:reduce){
+  .hero .hero-copy h1,
+  .hero .hero-copy h1 i,
+  .hero .hero-copy .lead{transform:none;opacity:1}
+  .hero .hero-copy .lead{opacity:.8}
+}
