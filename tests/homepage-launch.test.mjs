@@ -448,7 +448,8 @@ test("17: raspberry is an accent in the recipes, never a fill", () => {
   assert.match(css, /\.link-cta:hover\{color:var\(--berry\)/);
 
   // No berry BACKGROUND anywhere in the recipe section.
-  const recipesCss = css.slice(css.indexOf(".featured-recipes{"), css.indexOf(".daily{"));
+  const recipesCss = css.slice(css.indexOf(".featured-recipes{"), css.indexOf(".rezepte-page h1{"));
+  assert.ok(recipesCss.includes(".recipe-loop-card{"), "the recipe slice lost its own rules");
   assert.ok(!/background:var\(--berry\)/.test(recipesCss), "the recipe section is filled with berry");
 });
 
@@ -799,10 +800,11 @@ test("29: the copy and the six tiles are one horizontal composition", () => {
   // The copy is centred against the wall, not pinned above it - the old
   // 70px margin between headline and tiles is gone.
   assert.match(dailyCss, /\.daily-copy\{[\s\S]*?justify-content:center/);
-  // The old 70px gap rule still exists earlier in the file; what matters
-  // is that the appended block, which wins on source order, resets it.
+  // The old 70px gap rule USED to sit earlier in the file and was merely
+  // outranked by source order. It is now deleted outright, along with the
+  // rest of the retired strip layout - see test 35.
   assert.match(dailyCss, /\.daily-grid\{[\s\S]*?margin:0/);
-  assert.ok(!/margin-top:70px/.test(dailyCss), "the appended block reintroduced the gap");
+  assert.ok(!/\.daily-grid\{[^}]*margin-top:70px/.test(css), "the retired 70px gap is back");
   // Still GLOA Blue, and no new colour was introduced.
   assert.match(dailyCss, /\.daily\{background:var\(--blue\)/);
   for (const banned of ["gradient", "backdrop-filter", "#0", "#2", "#3"]) {
@@ -832,7 +834,13 @@ test("30: the six existing tiles keep their order, labels and files", () => {
   // 3 x 2, hairline gutters, no card chrome.
   assert.match(dailyCss, /\.daily-grid\{[\s\S]*?grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
   assert.match(dailyCss, /\.daily-grid\{[\s\S]*?grid-template-rows:repeat\(2,minmax\(0,1fr\)\)/);
-  assert.match(dailyCss, /\.daily-grid\{[\s\S]*?gap:2px/);
+  // A 1px gutter over a SOLID cream wrapper. Both halves matter: a
+  // translucent wrapper would tint to a lighter blue, and a tile that does
+  // not fill its row would let that wrapper show through as a band.
+  const gap = /\.daily-grid\{[\s\S]*?[^-]gap:(\d+)px/.exec(dailyCss);
+  assert.ok(gap && Number(gap[1]) <= 2, "the gutter is wider than a hairline");
+  assert.match(dailyCss, /\.daily-grid\{[\s\S]*?background:var\(--cream\)/);
+  assert.match(dailyCss, /\.daily-tile\{[\s\S]*?height:100%/);
   assert.match(dailyCss, /\.daily-tile\{[\s\S]*?border-radius:0/);
   assert.match(dailyCss, /\.daily-tile\{[\s\S]*?box-shadow:none/);
   // One label style for all six: a single base rule plus its mobile
@@ -865,8 +873,8 @@ test("31: the section's type stays inside the two families", () => {
     assert.match(rule, /font-family:var\(--font-sans\)/, `${name} is not on the sans`);
     assert.ok(!rule.includes("--font-display"), `${name} uses the display face`);
   }
-  // The link is editorial: a raspberry rule, never a filled button.
-  assert.match(dailyCss, /\.daily-link\{[\s\S]*?border-bottom:1px solid var\(--berry\)/);
+  // The link is editorial: a cream rule, never a filled button.
+  assert.match(dailyCss, /\.daily-link\{[\s\S]*?border-bottom:1px solid var\(--cream\)/);
   assert.ok(!/\.daily-link\{[^}]*background:/.test(dailyCss), "the link became a button");
   // Tablet and mobile fall back to two columns rather than crushing three.
   assert.match(dailyCss, /@media \(max-width:1024px\)\{[\s\S]*?grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
@@ -965,4 +973,76 @@ test("34: the origin type stays inside the two families", () => {
   const line = originCss.slice(originCss.indexOf(".origin-line{"), originCss.indexOf("}", originCss.indexOf(".origin-line{")));
   assert.match(line, /font-weight:500/);
   assert.ok(!/font-weight:[89]00/.test(line), "the origin headline is hero-weight");
+});
+
+/* ══════════════════════════════════════════════════════════════
+   35. THE LIFESTYLE SECTION'S TWO-COLOUR CONTRACT
+   ══════════════════════════════════════════════════════════════ */
+
+test("35: the section paints one blue, one cream, and nothing else", () => {
+  // ── THE SECOND BLUE, AND WHY IT EXISTED ──────────────────────
+  // Two retired declarations survived the redesign in the base sheet:
+  //   .daily-grid{background:rgba(255,255,255,.4)} - translucent white
+  //     over #1746D1, which IS a second, lighter blue.
+  //   .daily-tile{height:280px} - a fixed height inside a 1fr row, so the
+  //     wrapper showed as a ~35px band between and below the two rows.
+  // Both are deleted. This test refuses their return anywhere in the file.
+  for (const gone of [
+    "background:rgba(255,255,255,.4)",
+    ".daily-tile{height:280px",
+    ".daily-grid{display:flex",
+    ".daily-tile{min-width:78vw}",
+    "rgba(245,235,226,.34)",
+  ]) {
+    assert.ok(!css.includes(gone), `the retired declaration is back: ${gone}`);
+  }
+
+  // EVERY .daily rule now lives in the appended block. Nothing paints this
+  // section from the base sheet any more, so source-order surprises of the
+  // kind that caused the bands cannot recur.
+  const beforeBlock = css.slice(0, css.indexOf(DAILY_BLOCK));
+  for (const m of beforeBlock.matchAll(/([^{}]+)\{/g)) {
+    assert.ok(!/(^|[\s,])\.daily/.test(m[1]) || m[1].includes(" h2"),
+      `a .daily rule still sits before the block: ${m[1].trim().slice(0, 60)}`);
+  }
+  assert.ok(!css.includes(".d1,.d4{"), "the dead per-tile modifiers are back");
+
+  // ── THE ALLOWED PALETTE ──────────────────────────────────────
+  assert.match(read("app/globals.css"), /--blue:#1746D1;/);
+  assert.match(read("app/globals.css"), /--cream:#F5EBE2;/);
+  // The blue ground, and blue behind every tile so a gutter is all that
+  // can ever show between them.
+  assert.match(dailyCss, /\.daily\{background:var\(--blue\)/);
+  assert.match(dailyCss, /\.daily-tile\{[\s\S]*?background:var\(--blue\)/);
+  // No raspberry anywhere in the section: unreadable on this ground.
+  assert.ok(!dailyCss.includes("--berry"), "raspberry is back on the blue");
+  // No translucent surface of any kind, which is the only way a second
+  // blue can appear without a second token being written down.
+  const surfaces = [...dailyCss.matchAll(/background:([^;}]+)/g)].map(m => m[1].trim());
+  for (const surface of surfaces) {
+    assert.ok(/^var\(--(blue|cream)\)$|^rgba\(17,17,17/.test(surface),
+      `the section paints an unapproved surface: ${surface}`);
+  }
+  // Cream text on all four of the left column's elements.
+  for (const name of [".daily-eyebrow{", ".daily-headline{", ".daily-note{", ".daily-link{"]) {
+    const rule = dailyCss.slice(dailyCss.indexOf(name), dailyCss.indexOf("}", dailyCss.indexOf(name)));
+    assert.match(rule, /color:var\(--cream\)/, `${name} is not cream`);
+    assert.ok(!/opacity:[\d.]/.test(rule), `${name} fades its cream`);
+  }
+  // The hairline under the headline, and the link's rule and arrow.
+  assert.match(dailyCss, /\.daily-rule\{[\s\S]*?background:var\(--cream\)/);
+  assert.match(dailyCss, /\.daily-link span\{color:var\(--cream\)/);
+  // Labels: near-black scrim, cream text, one rule for all six.
+  const caption = dailyCss.slice(dailyCss.indexOf(".daily-tile figcaption{"), dailyCss.indexOf("}", dailyCss.indexOf(".daily-tile figcaption{")));
+  assert.match(caption, /background:rgba\(17,17,17,\.6[5-9]|\.7[0-5]\)/);
+  assert.match(caption, /color:var\(--cream\)/);
+
+  // ── THE FROZEN SECTIONS ──────────────────────────────────────
+  // This pass touched no rule any other section reads. The shared h2 rule
+  // that .daily co-owns with five other sections is intact, and the hero,
+  // prelaunch and origin blocks still carry their own raspberry.
+  assert.match(css, /\.product-intro h2,\.daily h2,\.origin h2,[^{]*\{font-size:clamp\(48px,7vw,98px\)/);
+  assert.match(cssBlockRules(HERO_BLOCK, PRELAUNCH_BLOCK), /var\(--berry\)/);
+  assert.match(cssBlockRules(PRELAUNCH_BLOCK, DAILY_BLOCK), /var\(--berry\)/);
+  assert.match(cssBlockRules(ORIGIN_BLOCK), /var\(--berry\)/);
 });
