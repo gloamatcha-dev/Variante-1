@@ -20,7 +20,7 @@ const css = read("app/globals.css");
 
 const page = site.slice(site.indexOf("function MatchaPage()"), site.indexOf("\nfunction ", site.indexOf("function MatchaPage()") + 5));
 const hero = page.slice(page.indexOf('<section className="matcha-hero">'), page.indexOf("</section>") + 10);
-const rules = css.slice(css.indexOf("/our-matcha PAGE HERO"));
+const rules = css.slice(css.indexOf("/our-matcha PAGE HERO"), css.indexOf("/our-matcha PRODUCT + TASTE, MERGED"));
 const rule = name => {
   const at = rules.indexOf(name);
   assert.notEqual(at, -1, `missing rule: ${name}`);
@@ -125,7 +125,7 @@ test("3: two families, unchanged copy, canonical rail", () => {
 
   // ── THE RAIL, AND A CONTENT-DRIVEN HEIGHT ────────────────────
   assert.match(hero, /<div className="matcha-hero-inner home-rail">/);
-  assert.match(css, /\.shop-accordion,\s*\.matcha-hero\{padding-inline:var\(--rail-gutter\)\}/);
+  assert.match(css, /\.shop-accordion,\s*\.matcha-hero,\s*\.matcha-product\{padding-inline:var\(--rail-gutter\)\}/);
   assert.match(rules, /\.matcha-hero-inner\{[\s\S]*?grid-template-columns:minmax\(0,1\.05fr\) minmax\(0,\.95fr\)/);
   assert.match(rules, /\.matcha-hero\{[\s\S]*?padding-block:clamp\(72px,7vw,110px\)/);
   assert.ok(!rules.includes("100vh"), "the hero reserves a viewport");

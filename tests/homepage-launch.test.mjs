@@ -1305,7 +1305,7 @@ test("39: every homepage section starts on one rail, and it is the lifestyle one
   // 4.5vw / 5vw / 6vw and 22px.
   // The shop hero and its launch band read the same gutter - section 20
   // of the brief: the shop is on the canonical rail too.
-  assert.match(railCss, /\.countdown,\s*\.prelaunch,\s*\.daily,\s*\.origin,\s*\.how-to,\s*\.community,\s*\.brand-note,\s*\.shop-hero,\s*\.shop-strip,\s*\.shop-column,\s*\.shop-accordion,\s*\.matcha-hero\{padding-inline:var\(--rail-gutter\)\}/);
+  assert.match(railCss, /\.countdown,\s*\.prelaunch,\s*\.daily,\s*\.origin,\s*\.how-to,\s*\.community,\s*\.brand-note,\s*\.shop-hero,\s*\.shop-strip,\s*\.shop-column,\s*\.shop-accordion,\s*\.matcha-hero,\s*\.matcha-product\{padding-inline:var\(--rail-gutter\)\}/);
   // The hero has no wrapper - its own padding IS the rail, in the same
   // shape, at desktop and on mobile.
   assert.match(css, /\.hero\{[\s\S]*?padding-inline:max\(var\(--rail-gutter\),calc\(\(100% - var\(--rail-max\)\) \/ 2\)\)/);

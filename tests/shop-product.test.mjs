@@ -186,7 +186,7 @@ test("5: a product title, not a hero one, on the canonical rail", () => {
   assert.match(rules, /\.shop-product-row \.shop-cta\{[\s\S]*?color:var\(--cream\)/);
   // The rail: the section takes the shared gutter, the row is a
   // narrower INNER block that starts on the same left edge.
-  assert.match(css, /\.shop-column,\s*\.shop-accordion,\s*\.matcha-hero\{padding-inline:var\(--rail-gutter\)\}/);
+  assert.match(css, /\.shop-column,\s*\.shop-accordion,\s*\.matcha-hero,\s*\.matcha-product\{padding-inline:var\(--rail-gutter\)\}/);
   assert.match(block, /<div className="shop-product-row home-rail">/);
   assert.match(details, /<div className="shop-accordion-inner home-rail">/);
   assert.match(rule(".shop-product-row{"), /max-width:min\(1240px,var\(--rail-max\)\)/);
