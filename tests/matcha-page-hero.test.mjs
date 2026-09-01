@@ -32,9 +32,12 @@ const rule = name => {
    ══════════════════════════════════════════════════════════════ */
 
 test("1: the hero renders the map, and the packaging photo only left THIS hero", () => {
-  assert.match(hero, /<img src="\/img\/Landkarte Japan\.png" alt="Karte von Japan mit Shizuoka markiert"/);
-  assert.ok(existsSync(path.join(ROOT, "public/img/Landkarte Japan.png")), "the map asset is missing");
-  assert.ok(statSync(path.join(ROOT, "public/img/Landkarte Japan.png")).size > 0);
+  assert.match(hero, /<img src="\/img\/Japan_Karte\.png" alt="Karte von Japan mit Shizuoka markiert"/);
+  assert.ok(existsSync(path.join(ROOT, "public/img/Japan_Karte.png")), "the map asset is missing");
+  assert.ok(statSync(path.join(ROOT, "public/img/Japan_Karte.png")).size > 0);
+  // The retired map is not rendered here - and not deleted either.
+  assert.ok(!hero.includes("Landkarte Japan.png"), "the hero still renders the old map");
+  assert.ok(existsSync(path.join(ROOT, "public/img/Landkarte Japan.png")), "the old map asset was deleted");
 
   // ── THE PACKAGING PHOTO IS NOT DELETED ───────────────────────
   assert.ok(!hero.includes("gloa-hero-packaging"), "the hero still renders the packaging photo");
@@ -42,7 +45,7 @@ test("1: the hero renders the map, and the packaging photo only left THIS hero",
   assert.ok(site.includes("gloa-hero-packaging"), "the packaging photo left the site entirely");
   // And no other image was smuggled into this hero.
   assert.equal([...hero.matchAll(/<img /g)].length, 1);
-  for (const banned of ["Header.png", "Produkt Bild (2).png", "Produkt BILD.png"]) {
+  for (const banned of ["Header.png", "Produkt Bild (2).png", "Produkt BILD.png", "Landkarte Japan.png"]) {
     assert.ok(!hero.includes(banned), `the hero renders ${banned}`);
   }
 
@@ -52,7 +55,7 @@ test("1: the hero renders the map, and the packaging photo only left THIS hero",
   assert.match(map, /border:0/);
   assert.match(map, /border-radius:0/);
   assert.match(map, /box-shadow:none/);
-  assert.match(map, /width:min\(100%,clamp\(420px,42vw,600px\)\)/);
+  assert.match(map, /width:min\(100%,clamp\(500px,43vw,650px\)\)/);
   assert.match(map, /align-self:center/);
   // Contained, so no coastline and no label is cropped away.
   assert.match(rules, /\.matcha-hero-map img\{[\s\S]*?object-fit:contain/);
@@ -73,8 +76,13 @@ test("1: the hero renders the map, and the packaging photo only left THIS hero",
 test("2: a page hero - under the homepage hero, over a section title", () => {
   const clamp = (lo, mid, hi) => Math.max(lo, Math.min(mid, hi));
   const parse = t => /clamp\(([\d.]+)px,([\d.]+)vw,([\d.]+)px\)/.exec(t).slice(1).map(Number);
-  const [tLo, tVw, tHi] = parse(/\.matcha-hero-line\{[\s\S]*?font-size:(clamp\([^)]*\))/.exec(rules)[1]);
-  const [aLo, aVw, aHi] = parse(/\.matcha-hero-line-accent\{[\s\S]*?font-size:(clamp\([^)]*\))/.exec(rules)[1]);
+  // BOTH page heroes read one token now, so the curve is parsed from the
+  // token itself rather than from either hero's own rule.
+  assert.match(rules, /\.matcha-hero-line\{[\s\S]*?font-size:var\(--type-page-hero\)/);
+  assert.match(rules, /\.matcha-hero-line-accent\{[\s\S]*?font-size:var\(--type-page-hero-accent\)/);
+  const token = n => new RegExp("--type-" + n + ":([^;]+);").exec(css)[1];
+  const [tLo, tVw, tHi] = parse(token("page-hero"));
+  const [aLo, aVw, aHi] = parse(token("page-hero-accent"));
   // The homepage hero's own curve, including the floor it DIPS to just
   // above its 900px breakpoint - which is what a 6.5vw page hero would
   // have overtaken.
@@ -88,9 +96,16 @@ test("2: a page hero - under the homepage hero, over a section title", () => {
     // And it is a HERO: at desktop widths it outranks a section title.
     if (w >= 1024) assert.ok(title > sectionTitle(w), `the page hero shrank to a section title at ${w}px`);
   }
-  // The same curves the shop hero uses: one scale for the role.
-  assert.match(css, /\.shop-hero-line\{[\s\S]*?font-size:clamp\(40px,5\.2vw,84px\)/);
-  assert.match(rules, /\.matcha-hero-line\{[\s\S]*?font-size:clamp\(40px,5\.2vw,84px\)/);
+  // ── ONE PAGE-HERO ROLE, TWO PAGES ────────────────────────────
+  // /shop and /our-matcha read the SAME two tokens. Their colours and
+  // their copy differ on purpose; their type scale cannot.
+  assert.match(css, /\.shop-hero-line\{[\s\S]*?font-size:var\(--type-page-hero\)/);
+  assert.match(css, /\.shop-hero-line-accent\{[\s\S]*?font-size:var\(--type-page-hero-accent\)/);
+  assert.equal(tHi, 84);
+  assert.equal(aHi, 78);
+  // And a page hero outranks a section title at desktop widths.
+  const titleCap = Number(/--type-title:clamp\([^,]+,[^,]+,(\d+)px\)/.exec(css)[1]);
+  assert.ok(tHi > titleCap, "the page hero is no larger than a section title");
   // The 122px headline that beat the homepage hero is gone.
   assert.ok(!css.includes(".matcha-page h1{font-size:clamp(64px,8vw,122px)"), "the 122px headline survived");
 });
@@ -126,7 +141,7 @@ test("3: two families, unchanged copy, canonical rail", () => {
   // ── THE RAIL, AND A CONTENT-DRIVEN HEIGHT ────────────────────
   assert.match(hero, /<div className="matcha-hero-inner home-rail">/);
   assert.match(css, /\.shop-accordion,\s*\.matcha-hero,\s*\.matcha-product\{padding-inline:var\(--rail-gutter\)\}/);
-  assert.match(rules, /\.matcha-hero-inner\{[\s\S]*?grid-template-columns:minmax\(0,1\.05fr\) minmax\(0,\.95fr\)/);
+  assert.match(rules, /\.matcha-hero-inner\{[\s\S]*?grid-template-columns:minmax\(0,\.95fr\) minmax\(0,1\.05fr\)/);
   assert.match(rules, /\.matcha-hero\{[\s\S]*?padding-block:clamp\(72px,7vw,110px\)/);
   assert.ok(!rules.includes("100vh"), "the hero reserves a viewport");
   assert.ok(!/\.matcha-hero\{[^}]*min-height/.test(rules), "the hero has a fixed height");
@@ -136,5 +151,5 @@ test("3: two families, unchanged copy, canonical rail", () => {
   // Stacks text-then-map before the columns can crush each other.
   assert.match(rules, /@media \(max-width:1024px\)\{[\s\S]*?\.matcha-hero-inner\{grid-template-columns:1fr/);
   assert.ok(hero.indexOf("matcha-hero-copy") < hero.indexOf("matcha-hero-map"), "the map stacks above the text");
-  assert.match(rules, /@media \(max-width:640px\)\{[\s\S]*?\.matcha-hero-map\{justify-self:center;width:min\(100%,420px\)/);
+  assert.match(rules, /@media \(max-width:640px\)\{[\s\S]*?\.matcha-hero-map\{justify-self:center;width:min\(100%,460px\)/);
 });

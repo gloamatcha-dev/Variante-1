@@ -146,8 +146,12 @@ test("5: two families, cream on raspberry, and smaller than the homepage hero", 
   // hero's own curve; clamp() is monotonic, so this covers the range.
   const clamp = (lo, mid, hi) => Math.max(lo, Math.min(mid, hi));
   const parse = t => /clamp\(([\d.]+)px,([\d.]+)vw,([\d.]+)px\)/.exec(t).slice(1).map(Number);
-  const [sLo, sVw, sHi] = parse(/\.shop-hero-line\{[\s\S]*?font-size:(clamp\([^)]*\))/.exec(rules)[1]);
-  const [aLo, aVw, aHi] = parse(/\.shop-hero-line-accent\{[\s\S]*?font-size:(clamp\([^)]*\))/.exec(rules)[1]);
+  // The two page heroes share one role, so the curve lives in a token.
+  assert.match(rules, /\.shop-hero-line\{[\s\S]*?font-size:var\(--type-page-hero\)/);
+  assert.match(rules, /\.shop-hero-line-accent\{[\s\S]*?font-size:var\(--type-page-hero-accent\)/);
+  const token = n => new RegExp("--type-" + n + ":([^;]+);").exec(css)[1];
+  const [sLo, sVw, sHi] = parse(token("page-hero"));
+  const [aLo, aVw, aHi] = parse(token("page-hero-accent"));
   const homeTitle = w => (w <= 900 ? clamp(44, 0.12 * w, 64) : clamp(54, 0.059 * w, 100));
   for (const w of [320, 390, 430, 640, 900, 901, 1024, 1085, 1280, 1440, 1536, 1680, 1920, 2560]) {
     const shopTitle = clamp(sLo, (sVw / 100) * w, sHi);

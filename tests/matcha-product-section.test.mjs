@@ -112,7 +112,11 @@ test("3: a section under the page hero, and a sub-heading under that", () => {
   assert.equal(parse(token("title"))[2], 64);
   assert.equal(parse(token("editorial"))[2], 68);
 
-  const pageHero = /\.matcha-hero-line\{[\s\S]*?font-size:(clamp\([^)]*\))/.exec(css)[1];
+  // The page hero reads the shared page-hero token now, so the curve is
+  // taken from the token - a lazy match on the rule would run past the
+  // var() and pick up whatever clamp appears next in the file.
+  assert.match(css, /\.matcha-hero-line\{[\s\S]*?font-size:var\(--type-page-hero\)/);
+  const pageHero = token("page-hero");
   const tasteSans = /\.matcha-taste-line\{[\s\S]*?font-size:(clamp\([^)]*\))/.exec(rules)[1];
   const tasteAccent = /\.matcha-taste-line-accent\{[\s\S]*?font-size:(clamp\([^)]*\))/.exec(rules)[1];
   for (const w of [320, 390, 430, 640, 900, 1024, 1200, 1440, 1536, 1920]) {
