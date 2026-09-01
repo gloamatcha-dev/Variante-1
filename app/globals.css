@@ -124,22 +124,8 @@ h1 i,h2 i,h3 i,.display-italic{font-family:var(--font-display),Georgia,serif;fon
 }
 
 /* FEATURED RECIPES (Homepage) — Infinite Loop Carousel */
-.featured-recipes{padding:0 0 0}
-/* The head was one left column with an empty right half - part of what made the section read as hollow. It is now a two-column editorial head: statement left, the sub line and the all-recipes link right. */.featured-recipes-head{padding:clamp(56px,6.5vw,92px) 4vw clamp(28px,3.4vw,46px);display:grid;grid-template-columns:1.1fr .9fr;gap:clamp(20px,4vw,64px);align-items:end;border-top:1px solid var(--line)}.featured-recipes-head .eyebrow{color:var(--berry)}.featured-recipes-head h2{margin:0}.featured-recipes-aside{display:flex;flex-direction:column;align-items:flex-start;gap:14px}@media (max-width:900px){.featured-recipes-head{grid-template-columns:1fr;align-items:start}}
-.featured-recipes-head h2{font-size:clamp(48px,7vw,98px);line-height:.9;letter-spacing:-.065em;margin:24px 0 0}
-.featured-recipes-head h2 i{font-family:var(--font-display),Georgia,serif;font-weight:400}
-.featured-recipes-sub{font-size:clamp(15px,1.15vw,17px);line-height:1.6;margin:0;opacity:.75;max-width:32ch}
-/* A STATIC RAIL. The old implementation translated a track built from TWO featured recipes, so on a wide desktop the track ran out of cards and left a blank centre - the reported 'drinks disappear from the middle'. Four tiles, one grid, no transform, nothing to run out of. */.recipe-loop{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;padding:0 4vw 6px}
-.recipe-loop:active{cursor:grabbing}
-.recipe-loop-track{display:grid;grid-template-columns:repeat(4,1fr);gap:clamp(14px,1.6vw,24px);width:100%;min-width:0}
-.recipe-loop-card{display:flex;flex-direction:column;gap:10px;text-decoration:none;color:inherit;min-width:0;scroll-snap-align:start;padding-top:14px;border-top:1px solid var(--line);transition:border-color .2s ease}.recipe-loop-card:hover{border-top-color:var(--berry)}.recipe-loop-card .eyebrow{color:var(--berry);order:-1}.recipe-loop-card h3{margin:0;font-size:clamp(16px,1.3vw,19px);line-height:1.25;letter-spacing:-.02em}.recipe-loop-card:hover h3{text-decoration:underline;text-underline-offset:5px;text-decoration-color:var(--berry);text-decoration-thickness:1.5px}
-/* Taller tiles: at four across, a short crop is what left the middle of the rail looking empty even when every card was present. */.recipe-loop-img{width:100%;height:clamp(240px,22vw,330px);overflow:hidden;background:var(--cream)}.recipe-loop-img img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .5s ease}.recipe-loop-card:hover .recipe-loop-img img{transform:scale(1.03)}@media (max-width:900px){.recipe-loop-track{grid-template-columns:repeat(4,minmax(230px,1fr));width:max-content}.recipe-loop-img{height:210px}}
-.recipe-loop-img img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
-.recipe-loop-card .eyebrow{margin:12px 0 4px}
-.recipe-loop-card h3{font-size:18px;font-weight:700;letter-spacing:-.02em;margin:0;line-height:1.2}
-.featured-recipes-link{padding:clamp(22px,2.6vw,34px) 4vw clamp(56px,6.5vw,92px);display:none}@media (max-width:900px){.featured-recipes-link{display:block}}
-.featured-recipes-link a{font:13px var(--font-mono);text-transform:uppercase;text-decoration:underline;text-underline-offset:4px;text-decoration-thickness:1.5px}
-@media(max-width:800px){.featured-recipes-head{padding:70px 4vw 30px}.featured-recipes-link{padding:20px 4vw 70px}}
+/* The homepage recipe carousel lives in its own block at the end of
+   this file. */
 
 /* REZEPTE PAGE */
 .rezepte-page h1{font-size:clamp(64px,8vw,122px);line-height:.79;letter-spacing:-.075em;margin:24px 0 38px;font-weight:800}
@@ -1576,3 +1562,235 @@ header nav{gap:18px;font-size:12px}
 .origin,
 .how-to,
 .brand-note{padding-inline:var(--rail-gutter)}
+
+/* ══════════════════════════════════════════════════════════════
+   HOMEPAGE RECIPES CAROUSEL
+
+   Was: a four-column grid holding six recipes, so two of them wrapped
+   onto a second row, and a right-hand aside that put the sub line and
+   the all-recipes link beside the headline.
+
+   Now: ONE horizontal row that never stops moving, with the sub line and
+   the link below it. The head and the foot sit on the canonical rail;
+   the carousel itself deliberately runs the full width and crops a card
+   at each viewport edge, which is what makes the row read as continuous.
+
+   THE SEAM, THE GUTTER AND THE NO-BLANK GUARANTEE are explained on the
+   RecipeCarousel component in GloaSite.tsx - the short version is that
+   the gutter is a margin on the card rather than a flex gap, so a third
+   of a three-pass track is exactly one pass, trailing gutter included.
+
+   Scoped to .featured-recipes / .recipe-*, appended last, so the frozen
+   hero, countdown, prelaunch, lifestyle, origin and how-to blocks and
+   the shared rail utilities are untouched.
+   ══════════════════════════════════════════════════════════════ */
+
+.featured-recipes{background:var(--cream)}
+
+/* ── THE HEAD, ON THE RAIL ─────────────────────────────────── */
+.featured-recipes-head{
+  display:block;
+  padding-block:clamp(56px,6.5vw,92px) 0;
+  border-top:1px solid var(--line);
+}
+.featured-recipes-eyebrow{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:11px;
+  line-height:1.2;
+  letter-spacing:.2em;
+  text-transform:uppercase;
+  color:var(--berry);
+}
+/* The whole headline is near black - only the eyebrow above it and the
+   minute labels in the cards carry raspberry. */
+.featured-recipes-head .featured-recipes-headline{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  margin:clamp(18px,1.8vw,26px) 0 0;
+  color:var(--ink);
+  letter-spacing:normal;
+  line-height:1;
+}
+.featured-recipes-line{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:800;
+  font-style:normal;
+  font-size:clamp(58px,6vw,84px);
+  line-height:.94;
+  letter-spacing:-.055em;
+  color:var(--ink);
+}
+.featured-recipes-line-accent{
+  font-family:var(--font-display),Georgia,serif;
+  font-style:italic;
+  font-weight:400;
+  font-size:clamp(62px,6.4vw,90px);
+  line-height:.96;
+  letter-spacing:-.015em;
+  color:var(--ink);
+  margin-top:2px;
+}
+
+/* ── THE ROW ───────────────────────────────────────────────── */
+/* Full width on purpose, and overflow:hidden, so the cropped cards at
+   the two edges never become a page-level horizontal scrollbar. */
+.recipe-marquee{
+  position:relative;
+  width:100%;
+  overflow:hidden;
+  margin-top:clamp(48px,4.4vw,64px);
+}
+.recipe-marquee-track{
+  display:flex;
+  flex-wrap:nowrap;
+  width:max-content;
+  /* One pass per cycle, at a constant speed, forever, starting now. */
+  animation:recipe-marquee 36s linear 0s infinite;
+}
+@keyframes recipe-marquee{
+  from{transform:translate3d(0,0,0)}
+  to{transform:translate3d(calc(-100% / 3),0,0)}
+}
+/* Hovering or tabbing into the row holds it still so a card can be
+   clicked; leaving resumes from where it stopped, never from card one. */
+.recipe-marquee:hover .recipe-marquee-track,
+.recipe-marquee:focus-within .recipe-marquee-track{animation-play-state:paused}
+
+.recipe-card{
+  flex:0 0 auto;
+  width:clamp(280px,22vw,330px);
+  /* THE GUTTER IS A MARGIN, NOT A GAP. See the component comment: a flex
+     gap would make a third of the track a third of a gutter short of one
+     pass. */
+  margin-right:24px;
+  display:flex;
+  flex-direction:column;
+  color:var(--ink);
+  border-radius:0;
+  box-shadow:none;
+}
+.recipe-card-time{
+  margin:0 0 12px;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:11px;
+  line-height:1;
+  letter-spacing:.18em;
+  text-transform:uppercase;
+  color:var(--berry);
+}
+.recipe-card-img{
+  width:100%;
+  height:clamp(300px,24vw,360px);
+  overflow:hidden;
+  background:var(--cream);
+}
+.recipe-card-img img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:block;
+  transition:transform .6s ease;
+}
+.recipe-card:hover .recipe-card-img img{transform:scale(1.03)}
+.recipe-card-title{
+  margin:14px 0 0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:clamp(16px,1.25vw,18px);
+  line-height:1.25;
+  letter-spacing:-.015em;
+  color:var(--ink);
+}
+.recipe-card:hover .recipe-card-title{
+  text-decoration:underline;
+  text-underline-offset:5px;
+  text-decoration-thickness:1.5px;
+  text-decoration-color:var(--berry);
+}
+
+/* ── THE FOOT, ON THE RAIL ─────────────────────────────────── */
+.featured-recipes-foot{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:16px;
+  padding-block:clamp(40px,3.6vw,56px) clamp(56px,6.5vw,92px);
+}
+.featured-recipes-sub{
+  margin:0;
+  max-width:520px;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:clamp(16px,1.2vw,18px);
+  line-height:1.5;
+  color:var(--ink);
+  opacity:1;
+}
+/* Black type, raspberry rule - not a raspberry link. */
+.featured-recipes-cta{
+  display:inline-flex;
+  align-items:center;
+  gap:9px;
+  padding-bottom:6px;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:11px;
+  line-height:1;
+  letter-spacing:.18em;
+  text-transform:uppercase;
+  color:var(--ink);
+  border-bottom:1px solid var(--berry);
+  transition:opacity .2s ease;
+}
+.featured-recipes-cta:hover{opacity:.7}
+.featured-recipes-cta span{transition:transform .2s ease}
+.featured-recipes-cta:hover span{transform:translateX(3px)}
+
+@media (max-width:1024px){
+  /* TOUCH GETS A REAL SCROLLER. An animated transform inside a scroll
+     container fights the finger, so below the desktop breakpoint the row
+     becomes a native snap track: same single row, same six cards, swiped
+     rather than played. The clones would only be duplicates here. */
+  .recipe-marquee{
+    overflow-x:auto;
+    overflow-y:hidden;
+    scroll-snap-type:x proximity;
+    -webkit-overflow-scrolling:touch;
+    padding-inline:var(--rail-gutter);
+  }
+  .recipe-marquee-track{animation:none;transform:none}
+  .recipe-card{width:clamp(240px,34vw,300px);scroll-snap-align:start}
+  .recipe-card[aria-hidden="true"]{display:none}
+}
+
+@media (max-width:640px){
+  .featured-recipes-line{font-size:clamp(44px,12vw,58px)}
+  .featured-recipes-line-accent{font-size:clamp(46px,13vw,62px)}
+  .recipe-card{width:80vw;margin-right:16px}
+  .recipe-card-img{height:clamp(260px,72vw,320px)}
+}
+
+@media (prefers-reduced-motion:reduce){
+  /* No automatic movement at any width; the row stays fully reachable
+     as a scroller. */
+  .recipe-marquee{
+    overflow-x:auto;
+    overflow-y:hidden;
+    scroll-snap-type:x proximity;
+    -webkit-overflow-scrolling:touch;
+    padding-inline:var(--rail-gutter);
+  }
+  .recipe-marquee-track{animation:none;transform:none}
+  .recipe-card{scroll-snap-align:start}
+  .recipe-card[aria-hidden="true"]{display:none}
+  .recipe-card-img img{transition:none}
+}

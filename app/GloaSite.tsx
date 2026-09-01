@@ -87,17 +87,74 @@ function CommunityFeed(){const [offset,setOffset]=useState(0);const [paused,setP
  * the container scrolls, with snap points, rather than shrinking four
  * tiles onto a 390px screen.
  */
+/**
+ * The homepage recipe carousel.
+ *
+ * ── WHY THE TRACK IS RENDERED TWICE ───────────────────────────
+ *
+ * The track holds THREE identical passes of the same six recipes and the
+ * animation translates it by exactly one pass - calc(-100% / 3). At that
+ * point the seventh card sits precisely where the first one started, so
+ * the loop restarts on a frame that is pixel-identical to the one before
+ * it. Nothing jumps because nothing visibly moved.
+ *
+ * ── WHY A THIRD IS EXACTLY ONE PASS ───────────────────────────
+ *
+ * The gutter between cards is a margin-right ON EVERY CARD, never a flex
+ * `gap`. With a gap, an 18-card track measures 18w + 17g and a third of
+ * that is 6w + 5.67g - a third of a gutter short of one pass, which is
+ * the drift that opens a seam. With the margin on the card the track is
+ * 18(w + g) and a third of it is 6(w + g): one pass, trailing gutter
+ * included. calc(-100% / 3) keeps that exact rather than rounding it.
+ *
+ * ── WHY THE VIEWPORT CAN NEVER RUN EMPTY ──────────────────────
+ *
+ * THIS IS THE BUG THAT WAS REPORTED BEFORE. The old rail translated a
+ * track built from only the two `featured` recipes, so on a wide desktop
+ * it ran out of cards and left a hole in the middle.
+ *
+ * The guarantee here is structural, not a lucky duration: at any offset
+ * t within a pass, the content still to the right of the left edge is
+ * (3 passes - t), which is never less than TWO passes. So the viewport
+ * is covered at every instant as long as two passes are wider than the
+ * widest viewport it plays on:
+ *
+ *     one pass    6 x (280..330px + 24px) = 1824..2124px
+ *     two passes  3648..4248px            - clears 4K (3840)
+ *     below 1025px the marquee is replaced by a native scroller
+ *
+ * Two passes would have covered only 2124px, which is a real blank tail
+ * on an ultrawide display. Three is what makes the width irrelevant.
+ *
+ * ── THE CLONES ARE INVISIBLE TO ASSISTIVE TECH ────────────────
+ *
+ * The second pass exists for motion only, so it is aria-hidden, out of
+ * the tab order, and its images carry no alt text. The original six stay
+ * fully reachable, and under prefers-reduced-motion the clones are
+ * display:none - a static scroller has no reason to repeat itself.
+ */
 function RecipeCarousel(){
-return <section className="featured-recipes"><div className="featured-recipes-head home-rail-pad"><div><p className="eyebrow">GLOA RECIPES</p><h2>Matcha.<br/><i>Mach was draus.</i></h2></div><div className="featured-recipes-aside"><p className="featured-recipes-sub">Unsere liebsten Matcha-Rezepte.</p><Link className="link-cta" href="/rezepte">Alle Rezepte →</Link></div></div>
-<div className="recipe-loop home-rail-pad">
-<div className="recipe-loop-track">
-{recipes.map(r=><Link key={`rl-${r.slug}`} href={`/rezepte/${r.slug}`} className="recipe-loop-card">
-<div className="recipe-loop-img"><img src={r.image} alt={r.alt} loading="lazy"/></div>
-<p className="eyebrow">{r.time}</p>
-<h3>{r.title}</h3>
-</Link>)}
+const track=[...recipes,...recipes,...recipes];
+return <section className="featured-recipes">
+<div className="featured-recipes-head home-rail-pad">
+<p className="eyebrow featured-recipes-eyebrow">GLOA RECIPES</p>
+<h2 className="featured-recipes-headline">
+<span className="featured-recipes-line">Matcha.</span>
+<i className="featured-recipes-line featured-recipes-line-accent">Mach was draus.</i>
+</h2>
+</div>
+<div className="recipe-marquee">
+<div className="recipe-marquee-track">
+{track.map((r,i)=>{const clone=i>=recipes.length;return <Link key={`rm-${i}`} href={`/rezepte/${r.slug}`} className="recipe-card" aria-hidden={clone||undefined} tabIndex={clone?-1:undefined}>
+<p className="recipe-card-time">{r.time}</p>
+<div className="recipe-card-img"><img src={r.image} alt={clone?"":r.alt} loading="lazy"/></div>
+<h3 className="recipe-card-title">{r.title}</h3>
+</Link>})}
 </div></div>
-<div className="featured-recipes-link home-rail-pad"><Link href="/rezepte">ALLE REZEPTE →</Link></div>
+<div className="featured-recipes-foot home-rail-pad">
+<p className="featured-recipes-sub">Unsere liebsten Matcha-Rezepte.</p>
+<Link className="featured-recipes-cta" href="/rezepte">ALLE REZEPTE <span aria-hidden="true">→</span></Link>
+</div>
 </section>
 }
 

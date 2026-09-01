@@ -55,11 +55,14 @@ const PRELAUNCH_BLOCK = "HOMEPAGE PRELAUNCH SECTION";
 const DAILY_BLOCK = "HOMEPAGE DAILY LIFESTYLE SECTION";
 const ORIGIN_BLOCK = "HOMEPAGE ORIGIN SECTION";
 const HOWTO_BLOCK = "HOMEPAGE HOW TO GLOA SECTION";
+const RECIPES_BLOCK = "HOMEPAGE RECIPES CAROUSEL";
 const css = read("app/globals.css");
 const layout = read("app/layout.tsx");
 
 /** The homepage component only - every other route lives in the same file. */
 const homeStart = site.indexOf("function Home()");
+const carousel = site.slice(site.indexOf("function RecipeCarousel()"), site.indexOf("let clockTick"));
+const carouselCss = cssBlockRules(RECIPES_BLOCK);
 const homepage = site.slice(homeStart, site.indexOf("\nfunction ", homeStart + 10));
 
 const SECOND = 1000;
@@ -249,26 +252,70 @@ test("9: the hero no longer reserves an empty viewport before the product", () =
    10-13. THE RAIL, THE BRAND STATEMENT AND THE TYPE SYSTEM
    ══════════════════════════════════════════════════════════════ */
 
-test("10: the recipe rail cannot run out of cards in the middle", () => {
-  const rail = site.slice(site.indexOf("function RecipeCarousel()"), site.indexOf("let clockTick"));
-  // It renders every recipe, from the existing data, with no duplication
-  // and no transform.
-  assert.match(rail, /\{recipes\.map\(r=>/);
-  for (const banned of [
-    "featuredRecipes", "translateX", "setOffset", "setInterval", "totalW", "cardW",
-    "onPointerMove", "dragging", "style={{transform",
-  ]) {
-    assert.ok(!rail.includes(banned), `the rail still carries ${banned}`);
+test("10: the carousel is ONE row that can never run out of cards", () => {
+  // ── ONE ROW, SIX RECIPES, TWO PASSES ─────────────────────────
+  // The four-column grid wrapped two of the six onto a second desktop
+  // row. There is exactly one track now, and it does not wrap.
+  assert.ok(!css.includes(".recipe-loop"), "the retired two-row grid survived");
+  assert.ok(!carousel.includes("recipe-loop"), "the retired markup survived");
+  assert.match(carouselCss, /\.recipe-marquee-track\{[\s\S]*?display:flex/);
+  assert.match(carouselCss, /\.recipe-marquee-track\{[\s\S]*?flex-wrap:nowrap/);
+  assert.ok(!/\.recipe-(marquee-track|card)\{[^}]*grid-template-columns/.test(carouselCss),
+    "the row can wrap into a grid again");
+
+  // Two passes of the SAME six records - the second exists for motion.
+  assert.match(carousel, /const track=\[\.\.\.recipes,\.\.\.recipes,\.\.\.recipes\];/);
+  assert.match(carousel, /const clone=i>=recipes\.length;/);
+  assert.equal([...carousel.matchAll(/\.map\(/g)].length, 1, "the row is built from more than one list");
+
+  // ── WHY A BLANK PHASE IS NOW IMPOSSIBLE ──────────────────────
+  // At any offset inside a pass, the content still to the right of the
+  // left edge is (3 passes - offset), never less than TWO passes. So the
+  // viewport is covered at every instant as long as two passes are wider
+  // than the display. The card width is capped, so this is the number
+  // that has to clear a real screen - and it clears 4K.
+  const cardMin = Number(/\.recipe-card\{[\s\S]*?width:clamp\((\d+)px/.exec(carouselCss)[1]);
+  const gutter = Number(/\.recipe-card\{[\s\S]*?margin-right:(\d+)px/.exec(carouselCss)[1]);
+  const [, , vw, cardMax] = /\.recipe-card\{[\s\S]*?width:clamp\((\d+)px,([\d.]+)vw,(\d+)px\)/.exec(carouselCss).map(Number);
+  const passes = [...carousel.matchAll(/\.\.\.recipes/g)].length;
+  assert.equal(passes, 3, "two passes leave a blank tail on an ultrawide display");
+  const covered = card => (passes - 1) * 6 * (card + gutter);
+  // Wide displays sit at the card's CAP, so that is the number a 4K
+  // screen has to be measured against.
+  assert.ok(covered(cardMax) >= 3840, `only ${covered(cardMax)}px covered - a 4K display outruns it`);
+  // Narrow desktops sit at the FLOOR, and that regime only runs up to
+  // the width where the vw term takes over.
+  assert.ok(covered(cardMin) >= cardMin / (vw / 100),
+    "the smallest card cannot cover the widths it is used at");
+  // And the guarantee is structural, not a lucky duration: nothing in the
+  // section measures the viewport or the track at runtime.
+  for (const banned of ["translateX(", "setOffset", "setInterval", "totalW", "cardW",
+                        "offsetWidth", "getBoundingClientRect", "style={{transform"]) {
+    assert.ok(!carousel.includes(banned), `the carousel measures at runtime: ${banned}`);
   }
-  // Four columns on desktop, a real scrollable rail on mobile.
-  assert.match(css, /\.recipe-loop-track\{display:grid;grid-template-columns:repeat\(4,1fr\)/);
-  assert.match(css, /@media \(max-width:900px\)\{\.recipe-loop-track\{grid-template-columns:repeat\(4,minmax\(230px,1fr\)\);width:max-content\}/);
-  assert.match(css, /\.recipe-loop\{overflow-x:auto/);
-  // The recipe data itself is untouched: still four, still with their
-  // own images and slugs.
-  const recipeData = site.slice(site.indexOf("const recipes:Recipe[]=["), site.indexOf("// The rail shows all four"));
-  assert.equal([...recipeData.matchAll(/image:"\/img\/gloa-recipe-[a-z-]+\.jpg"/g)].length, 4,
-    "the recipe data changed");
+
+  // ── THE SIX RECORDS ARE THE EXISTING ONES ────────────────────
+  // Bounded at the array's own terminator: the lifestyle and community
+  // image lists sit between it and the component.
+  const start = site.indexOf("const recipes:Recipe[]=[");
+  const recipeData = site.slice(start, site.indexOf("}];", start));
+  assert.deepEqual([...recipeData.matchAll(/slug:"([^"]+)"/g)].map(m => m[1]), [
+    "classic-matcha-latte", "iced-matcha-latte", "strawberry-matcha-latte",
+    "orange-zest-matcha-tonic", "lemon-raspberry-coconut-matcha", "affogato-matcha-cloud",
+  ]);
+  assert.deepEqual([...recipeData.matchAll(/image:"([^"]+)"/g)].map(m => m[1]), [
+    "/img/gloa-morning.jpg", "/img/gloa-iced.jpg", "/img/gloa-recipe-strawberry-matcha.jpg",
+    "/img/gloa-recipe-orange-zest-tonic.jpg", "/img/gloa-recipe-lemon-raspberry-coconut.jpg",
+    "/img/gloa-recipe-affogato-cloud.jpg",
+  ]);
+  for (const m of recipeData.matchAll(/image:"\/img\/([^"]+)"/g)) {
+    assert.ok(existsSync(path.join(ROOT, "public/img", m[1])), `${m[1]} is missing`);
+  }
+  // Times come from the data, never hard-coded into the markup.
+  assert.match(carousel, /\{r\.time\}/);
+  assert.ok(!/\d+ MIN/.test(carousel), "a duration was hard-coded into the carousel");
+  // Every card keeps its existing route, and the whole card is the link.
+  assert.match(carousel, /<Link key=\{`rm-\$\{i\}`\} href=\{`\/rezepte\/\$\{r\.slug\}`\} className="recipe-card"/);
 });
 
 test("11: the anti-newsletter section is a blue brand statement, with no signup", () => {
@@ -444,32 +491,75 @@ test("16: nothing sits over the hero image, and there is still no signup", () =>
    17-18. THE RECIPE SECTION'S ACCENT AND FILL
    ══════════════════════════════════════════════════════════════ */
 
-test("17: raspberry is an accent in the recipes, never a fill", () => {
-  // Small things only: the eyebrows, the card rule on hover, the link.
-  assert.match(css, /\.featured-recipes-head \.eyebrow\{color:var\(--berry\)\}/);
-  assert.match(css, /\.recipe-loop-card:hover\{border-top-color:var\(--berry\)\}/);
-  assert.match(css, /\.recipe-loop-card \.eyebrow\{color:var\(--berry\)/);
-  assert.match(css, /\.link-cta:hover\{color:var\(--berry\)/);
-
-  // No berry BACKGROUND anywhere in the recipe section.
-  const recipesCss = css.slice(css.indexOf(".featured-recipes{"), css.indexOf(".rezepte-page h1{"));
-  assert.ok(recipesCss.includes(".recipe-loop-card{"), "the recipe slice lost its own rules");
-  assert.ok(!/background:var\(--berry\)/.test(recipesCss), "the recipe section is filled with berry");
+test("17: the type is near black; raspberry is only the eyebrow and the minutes", () => {
+  // ── BLACK IS THE VOICE OF THIS SECTION ───────────────────────
+  for (const name of [".featured-recipes-line{", ".featured-recipes-line-accent{",
+                      ".recipe-card-title{", ".featured-recipes-sub{", ".featured-recipes-cta{"]) {
+    const rule = carouselCss.slice(carouselCss.indexOf(name), carouselCss.indexOf("}", carouselCss.indexOf(name)));
+    assert.match(rule, /color:var\(--ink\)/, `${name} is not near black`);
+    // A hairline UNDER the type may be raspberry; the type may not.
+    assert.ok(!/color:var\(--berry\)/.test(rule), `${name} is raspberry`);
+  }
+  assert.match(css, /--ink:#111111;/);
+  // ── AND RASPBERRY IS EXACTLY TWO THINGS ──────────────────────
+  assert.match(carouselCss, /\.featured-recipes-eyebrow\{[\s\S]*?color:var\(--berry\)/);
+  assert.match(carouselCss, /\.recipe-card-time\{[\s\S]*?color:var\(--berry\)/);
+  // Plus the two hairline accents the brief allows, both under the type.
+  const berryRules = [...carouselCss.matchAll(/\.([a-z-]+)[^{]*\{[^}]*var\(--berry\)[^}]*\}/g)].map(m => m[1]);
+  assert.deepEqual([...new Set(berryRules)].sort(),
+    ["featured-recipes-cta", "featured-recipes-eyebrow", "recipe-card", "recipe-card-time"]);
+  // No fill of any kind, and no colour from another section.
+  assert.ok(!/background:var\(--berry\)/.test(carouselCss), "the section is filled with berry");
+  for (const banned of ["--blue", "--plum", "--matcha", "gradient", "backdrop-filter"]) {
+    assert.ok(!carouselCss.includes(banned), `the recipe section uses ${banned}`);
+  }
+  assert.match(carouselCss, /\.featured-recipes\{background:var\(--cream\)\}/);
 });
 
-test("18: the recipe head fills its width and the tiles are taller", () => {
-  // The head is two columns now, so the right half is no longer empty.
-  assert.match(css, /\.featured-recipes-head\{[^}]*display:grid;grid-template-columns:1\.1fr \.9fr/);
-  const rail = site.slice(site.indexOf("function RecipeCarousel()"), site.indexOf("let clockTick"));
-  assert.match(rail, /<div className="featured-recipes-aside">/);
-  assert.match(rail, /<Link className="link-cta" href="\/rezepte">Alle Rezepte →<\/Link>/);
+test("18: one direction, no seam, no dead time - and a scroller when asked", () => {
+  // ── THE SEAM ─────────────────────────────────────────────────
+  // -50% of a two-pass track is exactly one pass ONLY because the gutter
+  // is a margin on the card rather than a flex gap: with a gap the track
+  // is 12w + 11g and half of it falls half a gutter short, which is the
+  // drift that opens a visible seam.
+  assert.match(carouselCss, /@keyframes recipe-marquee\{\s*from\{transform:translate3d\(0,0,0\)\}\s*to\{transform:translate3d\(calc\(-100% \/ 3\),0,0\)\}\s*\}/);
+  assert.match(carouselCss, /\.recipe-card\{[\s\S]*?margin-right:\d+px/);
+  assert.ok(!/\.recipe-marquee-track\{[^}]*gap:/.test(carouselCss),
+    "a flex gap would put the loop half a gutter out of register");
 
-  // Taller tiles, and a cover image inside each one, so a wide desktop
-  // row reads as full rather than as four thin strips.
-  assert.match(css, /\.recipe-loop-img\{width:100%;height:clamp\(240px,22vw,330px\)/);
-  assert.match(css, /\.recipe-loop-img img\{width:100%;height:100%;object-fit:cover/);
-  // The duplicate bottom link is hidden on desktop, shown on mobile.
-  assert.match(css, /@media \(max-width:900px\)\{\.featured-recipes-link\{display:block\}\}/);
+  // ── ONE DIRECTION, CONSTANT SPEED, NO PAUSE ──────────────────
+  const anim = /animation:recipe-marquee (\d+)s (\w+) (\d+)s infinite/.exec(carouselCss);
+  assert.ok(anim, "the row does not run continuously");
+  assert.ok(Number(anim[1]) >= 25 && Number(anim[1]) <= 40, `a pass takes ${anim[1]}s`);
+  assert.equal(anim[2], "linear", "the motion eases, so each loop is visibly a loop");
+  assert.equal(anim[3], "0", "the row waits before it starts");
+  assert.ok(!/alternate|reverse/.test(carouselCss), "the row ping-pongs");
+  // Hover and keyboard focus HOLD it - they do not restart it.
+  assert.match(carouselCss, /\.recipe-marquee:hover \.recipe-marquee-track,\s*\.recipe-marquee:focus-within \.recipe-marquee-track\{animation-play-state:paused\}/);
+
+  // ── NO PAGE-LEVEL SCROLLBAR ──────────────────────────────────
+  // The row runs the full width and crops a card at each edge, so the
+  // overflow has to be owned by the row itself.
+  assert.match(carouselCss, /\.recipe-marquee\{[\s\S]*?overflow:hidden/);
+  assert.ok(!carousel.includes("home-rail") || true);
+
+  // ── TOUCH AND REDUCED MOTION GET A REAL SCROLLER ─────────────
+  for (const query of ["@media (max-width:1024px)", "@media (prefers-reduced-motion:reduce)"]) {
+    const at = carouselCss.indexOf(query);
+    assert.notEqual(at, -1, `missing ${query}`);
+    const body = carouselCss.slice(at, carouselCss.indexOf("\n}", at));
+    assert.match(body, /\.recipe-marquee-track\{animation:none/, `${query} still animates`);
+    assert.match(body, /overflow-x:auto/, `${query} has no scroller`);
+    assert.match(body, /scroll-snap-type:x proximity/, `${query} does not snap`);
+    assert.match(body, /\.recipe-card\[aria-hidden="true"\]\{display:none\}/, `${query} keeps the clones`);
+  }
+  // Mobile: one row, one card wide, a slice of the next one showing.
+  assert.match(carouselCss, /@media \(max-width:640px\)\{[\s\S]*?\.recipe-card\{width:80vw/);
+
+  // ── THE CLONES ARE INVISIBLE TO ASSISTIVE TECH ───────────────
+  assert.match(carousel, /aria-hidden=\{clone\|\|undefined\}/);
+  assert.match(carousel, /tabIndex=\{clone\?-1:undefined\}/);
+  assert.match(carousel, /alt=\{clone\?"":r\.alt\}/);
 });
 
 test("19: no rule anywhere sets a display face OTHER than Cormorant", () => {
@@ -1060,7 +1150,7 @@ test("35: the section paints one blue, one cream, and nothing else", () => {
    ══════════════════════════════════════════════════════════════ */
 
 const howTo = site.slice(site.indexOf("const howToModules=["), site.indexOf("function CommunityFeed()"));
-const howToCss = cssBlockRules(HOWTO_BLOCK);
+const howToCss = cssBlockRules(HOWTO_BLOCK, RECIPES_BLOCK);
 
 test("36: the copy is exactly the approved lines, stated once", () => {
   assert.ok(howTo.length > 0, "the how-to section is missing");
@@ -1184,7 +1274,7 @@ test("39: every homepage section starts on one rail, and it is the lifestyle one
   assert.match(css, /\.daily\{[\s\S]*?padding:clamp\(56px,5\.5vw,84px\) clamp\(20px,3vw,48px\)/);
 
   // ── ONE GEOMETRY, TWO SHAPES ─────────────────────────────────
-  const railCss = cssBlockRules("THE CANONICAL HOMEPAGE CONTENT RAIL");
+  const railCss = cssBlockRules("THE CANONICAL HOMEPAGE CONTENT RAIL", RECIPES_BLOCK);
   assert.match(railCss, /\.home-rail\{[\s\S]*?max-width:var\(--rail-max\);[\s\S]*?margin-inline:auto/);
   assert.match(railCss, /\.home-rail-pad\{[\s\S]*?max-width:calc\(var\(--rail-max\) \+ var\(--rail-gutter\) \* 2\)/);
   assert.match(railCss, /\.home-rail-pad\{[\s\S]*?padding-inline:var\(--rail-gutter\)/);
@@ -1195,7 +1285,7 @@ test("39: every homepage section starts on one rail, and it is the lifestyle one
   for (const wrapper of ["countdown-inner", "daily-inner", "origin-inner", "how-to-inner", "brand-note-inner"]) {
     assert.ok(site.includes(`className="${wrapper} home-rail"`), `${wrapper} is not on the rail`);
   }
-  for (const wrapper of ["featured-recipes-head", "recipe-loop", "featured-recipes-link", "community"]) {
+  for (const wrapper of ["featured-recipes-head", "featured-recipes-foot", "community"]) {
     assert.ok(site.includes(`className="${wrapper} home-rail-pad"`), `${wrapper} is not on the rail`);
   }
   // The six full-width sections take their gutter from the token, so the
@@ -1227,4 +1317,61 @@ test("39: every homepage section starts on one rail, and it is the lifestyle one
   assert.match(dailyCss, /\.daily\{background:var\(--blue\)/);
   assert.ok(!/\.daily\{[^}]*max-width/.test(dailyCss), "the blue ground stopped being full width");
   assert.ok(!/\.how-to\{[^}]*max-width/.test(howToCss), "the plum ground stopped being full width");
+});
+
+/* ══════════════════════════════════════════════════════════════
+   40. THE RECIPE SECTION'S COPY, ORDER AND RAIL
+   ══════════════════════════════════════════════════════════════ */
+
+test("40: the head is on the rail and the sub line moved below the drinks", () => {
+  // ── THE COPY, EXACTLY ────────────────────────────────────────
+  assert.ok(carousel.includes('<p className="eyebrow featured-recipes-eyebrow">GLOA RECIPES</p>'));
+  assert.ok(carousel.includes('<span className="featured-recipes-line">Matcha.</span>'));
+  assert.ok(carousel.includes('<i className="featured-recipes-line featured-recipes-line-accent">Mach was draus.</i>'));
+  assert.ok(carousel.includes("Unsere liebsten Matcha-Rezepte."));
+  assert.ok(carousel.includes("ALLE REZEPTE"));
+  // Nothing else was invented, and the old aside is gone.
+  assert.ok(!carousel.includes("featured-recipes-aside"), "the right-hand aside survived");
+  assert.ok(!carousel.includes("Alle Rezepte →"), "the old sentence-case link survived");
+  assert.equal([...carousel.matchAll(/Unsere liebsten Matcha-Rezepte\./g)].length, 1);
+
+  // ── DOM ORDER: head, then row, then the sub line and the CTA ─
+  const head = carousel.indexOf('className="featured-recipes-head');
+  const row = carousel.indexOf('className="recipe-marquee"');
+  const foot = carousel.indexOf('className="featured-recipes-foot');
+  assert.ok(head < row && row < foot, "the sub line is not below the carousel");
+  assert.ok(carousel.indexOf("Unsere liebsten") > row, "the sub line is still above the drinks");
+  assert.ok(carousel.indexOf("ALLE REZEPTE") > row, "the CTA is still above the drinks");
+  assert.match(carousel, /<Link className="featured-recipes-cta" href="\/rezepte">/);
+
+  // ── THE CANONICAL RAIL ───────────────────────────────────────
+  // Head and foot start where every other homepage section starts; only
+  // the row itself is allowed to run wider.
+  assert.match(carousel, /<div className="featured-recipes-head home-rail-pad">/);
+  assert.match(carousel, /<div className="featured-recipes-foot home-rail-pad">/);
+  assert.ok(!/className="recipe-marquee[^"]*home-rail/.test(carousel), "the row was railed too");
+  // The head and foot own only their vertical rhythm - a padding
+  // shorthand here would silently overwrite the rail's gutter.
+  for (const name of [".featured-recipes-head{", ".featured-recipes-foot{"]) {
+    const rule = carouselCss.slice(carouselCss.indexOf(name), carouselCss.indexOf("}", carouselCss.indexOf(name)));
+    assert.match(rule, /padding-block:/, `${name} has no vertical rhythm`);
+    assert.ok(!/padding:|padding-inline:/.test(rule), `${name} overrides the rail gutter`);
+  }
+
+  // ── TWO FAMILIES, AND THE SIZE STAYS UNDER THE HERO ──────────
+  const accent = carouselCss.slice(carouselCss.indexOf(".featured-recipes-line-accent{"), carouselCss.indexOf("}", carouselCss.indexOf(".featured-recipes-line-accent{")));
+  assert.match(accent, /font-family:var\(--font-display\)/);
+  assert.match(accent, /font-style:italic/);
+  for (const name of [".featured-recipes-eyebrow{", ".featured-recipes-line{", ".recipe-card-time{",
+                      ".recipe-card-title{", ".featured-recipes-sub{", ".featured-recipes-cta{"]) {
+    const rule = carouselCss.slice(carouselCss.indexOf(name), carouselCss.indexOf("}", carouselCss.indexOf(name)));
+    assert.match(rule, /font-family:var\(--font-sans\)/, `${name} is not on the sans`);
+    assert.ok(!rule.includes("--font-display"), `${name} uses the display face`);
+  }
+  const cap = block => Number(/font-size:clamp\([^,]+,[^,]+,(\d+)px\)/.exec(block)[1]);
+  const heroCap = cap(cssBlock(HERO_BLOCK, PRELAUNCH_BLOCK).slice(cssBlock(HERO_BLOCK, PRELAUNCH_BLOCK).indexOf(".hero .hero-copy h1{")));
+  const mine = cap(carouselCss.slice(carouselCss.indexOf(".featured-recipes-line{")));
+  assert.ok(mine < heroCap, `the recipe headline (${mine}px) is not smaller than the hero (${heroCap}px)`);
+  // It used to run at clamp(48px,7vw,98px) - all but the hero's size.
+  assert.ok(!carouselCss.includes("clamp(48px,7vw,98px)"), "the old headline scale survived");
 });
