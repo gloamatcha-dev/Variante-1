@@ -54,6 +54,7 @@ const HERO_BLOCK = "HOMEPAGE HERO - FINAL PASS";
 const PRELAUNCH_BLOCK = "HOMEPAGE PRELAUNCH SECTION";
 const DAILY_BLOCK = "HOMEPAGE DAILY LIFESTYLE SECTION";
 const ORIGIN_BLOCK = "HOMEPAGE ORIGIN SECTION";
+const HOWTO_BLOCK = "HOMEPAGE HOW TO GLOA SECTION";
 const css = read("app/globals.css");
 const layout = read("app/layout.tsx");
 
@@ -888,7 +889,7 @@ const origin = homepage.slice(
   homepage.indexOf('<section className="origin">'),
   homepage.indexOf("<HowTo/>")
 );
-const originCss = cssBlockRules(ORIGIN_BLOCK);
+const originCss = cssBlockRules(ORIGIN_BLOCK, HOWTO_BLOCK);
 
 test("32: the origin copy is exactly the approved lines, with no repetition", () => {
   assert.ok(origin.length > 0, "the origin section is missing");
@@ -1045,4 +1046,128 @@ test("35: the section paints one blue, one cream, and nothing else", () => {
   assert.match(cssBlockRules(HERO_BLOCK, PRELAUNCH_BLOCK), /var\(--berry\)/);
   assert.match(cssBlockRules(PRELAUNCH_BLOCK, DAILY_BLOCK), /var\(--berry\)/);
   assert.match(cssBlockRules(ORIGIN_BLOCK), /var\(--berry\)/);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   36-38. THE HOW TO GLOA SECTION
+   ══════════════════════════════════════════════════════════════ */
+
+const howTo = site.slice(site.indexOf("const howToModules=["), site.indexOf("function CommunityFeed()"));
+const howToCss = cssBlockRules(HOWTO_BLOCK);
+
+test("36: the copy is exactly the approved lines, stated once", () => {
+  assert.ok(howTo.length > 0, "the how-to section is missing");
+  assert.ok(howTo.includes('<p className="eyebrow how-to-eyebrow">HOW TO GLOA</p>'));
+  assert.ok(howTo.includes('<span className="how-to-line">Latte oder pur.</span>'));
+  assert.ok(howTo.includes('<i className="how-to-line how-to-line-accent">Mehr brauchst du nicht.</i>'));
+  // The old headline capitalised "Pur."; the approved line does not.
+  assert.ok(!howTo.includes("Latte oder Pur."), "the retired capitalisation survived");
+
+  // Two modules, each stated once, with the dose on its own small line.
+  const modules = [...howTo.matchAll(/number:"(\d\d)",title:"([^"]+)",dose:"([^"]+)"/g)].map(m => m.slice(1));
+  assert.deepEqual(modules, [["01", "MATCHA LATTE", "3 g Matcha"], ["02", "PURE MATCHA", "3 g Matcha"]]);
+  // Four steps each, in the approved wording and order.
+  const steps = [...howTo.matchAll(/steps:\[([^\]]+)\]/g)].map(m => m[1].split('","').map(x => x.replace(/"/g, "")));
+  assert.deepEqual(steps, [
+    ["Matcha dosieren", "mit Wasser aufschlagen", "Milch oder Pflanzendrink dazu", "heiß oder iced genießen"],
+    ["Matcha dosieren", "mit wenig Wasser glattrühren", "mit Wasser aufschlagen", "direkt genießen"],
+  ]);
+  // NOTHING was invented alongside it: no explanatory prose, no CTA, no
+  // repeated brewing advice, and no second copy of the section.
+  assert.ok(!/<p className="how-to-(?!module-dose)/.test(howTo.replace('<p className="eyebrow how-to-eyebrow">', "")),
+    "the section grew an extra paragraph");
+  for (const invented of ["Sekunden", "Temperatur", "80 °C", "Tipp", "cta", "Link "]) {
+    assert.ok(!howTo.includes(invented), `the section invents: ${invented}`);
+  }
+  // The retired table is gone from the markup AND the stylesheet.
+  assert.ok(!site.includes('className="method-grid"'), "the table markup survived");
+  assert.ok(!css.includes(".method-grid{"), "the table stylesheet survived");
+  // .section-head still serves the matcha page, so its rules stay.
+  assert.match(css, /\.section-head\{display:flex/);
+  assert.match(css, /\.matcha-method-grid\{display:grid/);
+});
+
+test("37: the section sits on the canonical content rail and is compact", () => {
+  // ── THE GLOBAL RAIL RULE ─────────────────────────────────────
+  // Every homepage section shares one desktop left/right rail, with the
+  // lifestyle section as the reference. A section may paint edge to edge;
+  // its CONTENT may not start at its own X.
+  const rail = (block, section, inner) => {
+    const pad = new RegExp("\\." + section + "\\{[\\s\\S]*?padding:[^;]*? (clamp\\([^)]*\\))").exec(block);
+    const width = new RegExp("\\." + inner + "\\{[\\s\\S]*?max-width:(\\d+px)").exec(block);
+    assert.ok(pad && width, `${section} has no measurable rail`);
+    return { pad: pad[1], width: width[1] };
+  };
+  const reference = rail(dailyCss, "daily", "daily-inner");
+  const mine = rail(howToCss, "how-to", "how-to-inner");
+  assert.equal(mine.pad, reference.pad, "the how-to gutter differs from the lifestyle gutter");
+  assert.equal(mine.width, reference.width, "the how-to rail is narrower than the lifestyle rail");
+  assert.equal(mine.width, "1520px");
+  assert.match(howToCss, /\.how-to-inner\{[\s\S]*?margin-inline:auto/);
+  // Same split as the lifestyle wall, so the two sections break on one axis.
+  assert.match(howToCss, /\.how-to-body\{[\s\S]*?grid-template-columns:minmax\(300px,\.85fr\) minmax\(0,1\.7fr\)/);
+
+  // ── COMPACT, AND BELOW THE OTHER SECTIONS IN SCALE ───────────
+  // The retired layout was a flat 110px of padding; this one is capped
+  // well under it and is the smallest headline on the page.
+  assert.ok(!howToCss.includes("110px"), "the retired padding is back");
+  const cap = name => Number(/clamp\([^,]+,[^,]+,(\d+)px\)/.exec(name)[1]);
+  const heroCap = cap(/\.hero \.hero-copy h1\{[\s\S]*?(font-size:clamp\([^)]*\))/.exec(cssBlock(HERO_BLOCK, PRELAUNCH_BLOCK))[1]);
+  const originCap = cap(/\.origin-line-accent\{[\s\S]*?(font-size:clamp\([^)]*\))/.exec(originCss)[1]);
+  const mineCap = cap(/\.how-to-line-accent\{[\s\S]*?(font-size:clamp\([^)]*\))/.exec(howToCss)[1]);
+  assert.ok(mineCap < originCap, "the how-to headline is not smaller than the origin headline");
+  assert.ok(mineCap < heroCap / 1.5, "the how-to headline reads as a second hero");
+
+  // One hairline across the top of the block, and no table borders.
+  assert.match(howToCss, /\.how-to-inner\{[\s\S]*?border-top:1px solid rgba\(245,235,226,\.28\)/);
+  assert.ok(!/\.how-to[^{]*\{[^}]*border-radius|box-shadow/.test(howToCss), "the modules became cards");
+  // A seam between the modules, hairlines inside each list.
+  assert.match(howToCss, /\.how-to-module\+\.how-to-module\{[\s\S]*?border-left:1px solid/);
+  assert.match(howToCss, /\.how-to-steps li\{[\s\S]*?border-top:1px solid/);
+  // Mobile: stacked, the seam turns horizontal, nothing is squeezed.
+  assert.match(howToCss, /@media \(max-width:760px\)\{[\s\S]*?\.how-to-modules\{grid-template-columns:1fr/);
+  assert.match(howToCss, /@media \(max-width:760px\)\{[\s\S]*?border-left:0/);
+});
+
+test("38: plum, cream and one matcha green - on the existing two families", () => {
+  // The plum ground is kept deliberately.
+  assert.match(howToCss, /\.how-to\{[\s\S]*?background:var\(--plum\)/);
+  assert.match(css, /--plum:#4F3A5B;/);
+  // ONE new token, and it is the icon colour.
+  assert.match(css, /--matcha:#9DBF7F;/);
+  assert.match(howToCss, /\.how-to-icon\{[\s\S]*?color:var\(--matcha\)/);
+  // No raspberry, no blue: this section is plum + cream + green.
+  for (const banned of ["--berry", "--blue", "gradient", "backdrop-filter"]) {
+    assert.ok(!howToCss.includes(banned), `the how-to section uses ${banned}`);
+  }
+  // Every surface and every line is cream, the lines at reduced opacity.
+  for (const m of howToCss.matchAll(/(?:border-top|border-left):1px solid ([^;}]+)/g)) {
+    assert.match(m[1], /^rgba\(245,235,226,\.\d+\)$/, `an unapproved divider colour: ${m[1]}`);
+  }
+
+  // ── THE ICONS ARE DRAWN HERE, NOT INSTALLED ──────────────────
+  // Two inline SVGs, on currentColor, no dependency and no asset.
+  assert.equal([...howTo.matchAll(/<svg className="how-to-icon"/g)].length, 2);
+  assert.equal([...howTo.matchAll(/stroke="currentColor"/g)].length, 7);
+  assert.ok(!/fill="#|stroke="#/.test(howTo), "an icon hard-codes a colour");
+  assert.equal([...howTo.matchAll(/aria-hidden="true" focusable="false"/g)].length, 2);
+  const pkg = JSON.parse(read("package.json"));
+  for (const dep of Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })) {
+    assert.ok(!/icon|lucide|feather|heroicon/i.test(dep), `an icon package was added: ${dep}`);
+  }
+
+  // ── TWO FAMILIES, DISPLAY FACE ON ONE LINE ONLY ──────────────
+  const accent = howToCss.slice(howToCss.indexOf(".how-to-line-accent{"), howToCss.indexOf("}", howToCss.indexOf(".how-to-line-accent{")));
+  assert.match(accent, /font-family:var\(--font-display\)/);
+  assert.match(accent, /font-style:italic/);
+  for (const name of [".how-to-eyebrow{", ".how-to-line{", ".how-to-module-number{", ".how-to-module-title{",
+                      ".how-to-module-dose{", ".how-to-step-number{", ".how-to-step-text{"]) {
+    const rule = howToCss.slice(howToCss.indexOf(name), howToCss.indexOf("}", howToCss.indexOf(name)));
+    assert.match(rule, /font-family:var\(--font-sans\)/, `${name} is not on the sans`);
+    assert.ok(!rule.includes("--font-display"), `${name} uses the display face`);
+  }
+  // The weights the brief names: 600 eyebrow, 700 module title, 500 steps.
+  assert.match(howToCss, /\.how-to-eyebrow\{[\s\S]*?font-weight:600/);
+  assert.match(howToCss, /\.how-to-module-title\{[\s\S]*?font-weight:700/);
+  assert.match(howToCss, /\.how-to-step-text\{[\s\S]*?font-weight:500/);
 });
