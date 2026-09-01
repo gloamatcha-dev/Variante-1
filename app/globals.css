@@ -22,15 +22,15 @@ h1 i,h2 i,h3 i,.display-italic{font-family:var(--font-display),Georgia,serif;fon
 @media(max-width:800px){.cta{padding:14px 24px;min-height:50px}.search-bar{top:100%;grid-template-columns:1fr auto}.search-bar label{display:none}.hero-actions{align-items:flex-start;flex-direction:column}.product-intro,.origin,.pdp-facts,.behind-bar{grid-template-columns:1fr}.product-intro{padding:75px 5vw}.origin{padding:80px 5vw}.newsletter-band{grid-template-columns:1fr}.newsletter-img{height:300px}.pdp-hero{grid-template-columns:1fr}.pdp-hero-image{height:450px;position:relative}.pdp-hero-info{padding:50px 5vw}.pdp-hero h1{font-size:42px}.facts-table>div{grid-template-columns:.7fr 1.3fr}.contact-choices{grid-template-columns:1fr}.contact-choices a{min-height:330px}.b2b-hero{grid-template-columns:1fr}.b2b-hero>div:first-child{padding:70px 5vw}.b2b-hero>div:first-child>div{align-items:flex-start;flex-direction:column}.b2b-visual{min-height:520px}.quick-facts{display:flex;overflow-x:auto}.quick-facts strong{min-width:190px}.servings{padding:30px 16px}.servings b{font-size:38px}.calc-intro h2{margin:25px 0}.calc-panel{grid-template-columns:1fr}.ranges,.results{padding:28px 20px}.results>div{display:block}.results strong{display:block;margin-top:7px}.sample-callout{grid-template-columns:1fr;gap:0}.sample-callout h2{font-size:55px}.lead-form{grid-template-columns:1fr}.lead-form>*{grid-column:1!important}.lead-form h2{font-size:58px}.business-support>div{display:flex;overflow-x:auto}.business-support article{min-width:75vw}.supply-path{grid-template-columns:1fr;gap:20px}.supply-path i{transform:rotate(90deg);text-align:center}.supply-path strong{font-size:32px}.calc-method>div>div{flex-direction:column;gap:4px}.calc-roi-placeholder div{flex-direction:column;align-items:flex-start;gap:8px}.b2b-pricing{padding:75px 5vw}.b2b-pricing-grid{grid-template-columns:1fr}.b2b-pricing-card{padding:30px 20px}.b2b-pricing-price b{font-size:34px}.b2b-example{padding:60px 5vw}.b2b-example-grid{grid-template-columns:1fr}.b2b-steps{padding:75px 5vw}.b2b-steps-grid{grid-template-columns:1fr 1fr}.b2b-steps-grid article{border-right:0;border-bottom:1px solid var(--line)}.b2b-compare{padding:70px 5vw}.b2b-compare-grid{grid-template-columns:1fr}.b2b-portal-hint{padding:70px 5vw}footer{grid-template-columns:1fr 1fr}.article-image{height:55vh;min-height:400px}.matcha-hero{display:block}.matcha-hero-copy{padding:65px 5vw}.matcha-page h1{font-size:58px;margin-bottom:28px}.matcha-hero-visual{height:520px}.matcha-facts{padding:75px 5vw}.matcha-facts-grid{grid-template-columns:1fr}.matcha-taste{padding:75px 5vw}.matcha-use{padding:75px 5vw}.matcha-use-grid{grid-template-columns:1fr}.matcha-shizuoka{padding:75px 5vw}.matcha-transparency{padding:75px 5vw}.matcha-howto{padding:75px 5vw}.matcha-science-grid{grid-template-columns:1fr}.matcha-science-grid>div{border-right:0;border-bottom:1px solid rgba(245,235,226,.3);padding:22px 0}.matcha-science-grid>div:last-child{border-bottom:0}.matcha-what{grid-template-columns:1fr;padding:75px 5vw}.matcha-what-img{height:340px;order:-1}.matcha-taste-grid{grid-template-columns:1fr}.matcha-storage{padding:35px 5vw;flex-direction:column;align-items:flex-start;gap:14px}.matcha-method-grid{grid-template-columns:1fr}.matcha-method-grid article{border-right:0;border-bottom:1px solid rgba(245,235,226,.4)}.matcha-image{height:55vh;min-height:400px}.matcha-cta{padding:75px 5vw}.matcha-cta-actions{flex-direction:column;align-items:center}.about-hero{display:block;padding-top:65px;min-height:590px}.about-hero .lead,.about-sub-lead{margin-left:0;margin-top:20px}.about-hero .page-index{display:block;margin-bottom:50px}.about-hero-micro{position:static;flex-direction:row;gap:20px;margin-top:40px;text-align:left}.about-cares{padding:80px 5vw}.about-cares-list>div{grid-template-columns:50px 1fr;gap:18px;padding:26px 0}.about-why{grid-template-columns:1fr}.about-why-left,.about-why-right{padding:65px 5vw}.about-origin{padding:45px 5vw;flex-direction:column;align-items:flex-start;gap:16px}.about-founders-credit>span{font-size:clamp(36px,12vw,80px)}.about-x-large{font-size:clamp(28px,8vw,60px);padding:0 15px}.about-tiktok{padding:75px 5vw}.about-final{padding:75px 5vw}.about-final-actions{flex-direction:column;align-items:center}}
 
 /* SHOP PAGE */
-.shop-hero{background:var(--berry);color:var(--cream);padding:120px 5vw 100px;border-bottom:1px solid var(--line)}
-.shop-hero-inner{max-width:800px}
-.shop-hero h1{font-size:clamp(64px,8vw,122px);line-height:.79;letter-spacing:-.075em;margin:24px 0 38px;font-weight:800}
-.shop-hero h1 i{font-family:var(--font-display),Georgia,serif;font-weight:400}
-.shop-hero .lead{font-size:17px;line-height:1.5;max-width:520px}
-.shop-hero-price{font:600 28px/1 var(--font-mono);letter-spacing:-.02em;margin:30px 0 8px}
-.shop-hero-micro{font:12px/1 var(--font-mono);letter-spacing:.14em;text-transform:uppercase;opacity:.7}
-.shop-hero-cta{margin-top:30px;background:var(--cream);color:var(--plum);border-color:var(--cream)}
-.shop-hero-cta:hover{background:var(--blue);color:var(--cream);border-color:var(--blue)}
+
+
+
+
+
+
+
+
+
 
 /* Two products as one editorial composition: a pair of panels split
    by a single hairline, not a card grid. */
@@ -109,8 +109,8 @@ h1 i,h2 i,h3 i,.display-italic{font-family:var(--font-display),Georgia,serif;fon
 .shop-faq h2 i{font-family:var(--font-display),Georgia,serif;font-weight:400}
 
 @media(max-width:800px){
-.shop-hero{padding:65px 5vw 60px}
-.shop-hero h1{font-size:58px;margin-bottom:28px}
+
+
 .shop-product{grid-template-columns:1fr}
 .shop-product-image{height:520px}
 .shop-product-info{padding:50px 5vw}
@@ -1556,7 +1556,9 @@ header nav{gap:18px;font-size:12px}
 .origin,
 .how-to,
 .community,
-.brand-note{padding-inline:var(--rail-gutter)}
+.brand-note,
+.shop-hero,
+.shop-strip{padding-inline:var(--rail-gutter)}
 
 /* ══════════════════════════════════════════════════════════════
    HOMEPAGE RECIPES CAROUSEL
@@ -2013,3 +2015,224 @@ header nav{gap:18px;font-size:12px}
 .origin .origin-headline,
 .how-to .how-to-headline,
 .community .community-headline{font-size:var(--type-title)}
+
+/* ══════════════════════════════════════════════════════════════
+   SHOP LAUNCH HERO
+
+   Was: a 122px headline - LARGER than the homepage hero's 100px - over a
+   dash in the supporting line and a "Launch in Vorbereitung." micro line,
+   with the copy switching between a matcha-only and a shop-wide variant.
+
+   Now: type only, on the canonical rail, with a thin blue launch band
+   underneath. The headline is capped so the HOMEPAGE hero stays the
+   largest typographic moment on the site:
+
+       homepage hero   clamp(54px,5.9vw,100px)   / mobile clamp(44px,12vw,64px)
+       shop hero       clamp(40px,5.2vw,84px)
+
+   5.2vw is below 5.9vw at every width, the 84px cap is below the 100px
+   one, and the 40px floor is below both the 44px mobile floor and the
+   54px desktop floor the homepage hero dips to just above 900px. The
+   brief suggested 6.5vw/92px, which would have outgrown the homepage
+   hero at every width above 900px.
+
+   No packaging, no pouch, no powder: the hero is text. The product
+   photography is untouched and still renders in the cards below.
+   ══════════════════════════════════════════════════════════════ */
+
+.shop-hero{
+  background:var(--berry);
+  color:var(--cream);
+  padding-block:clamp(72px,7vw,112px) clamp(60px,5.6vw,88px);
+  border-bottom:0;
+}
+.shop-hero-inner{display:flex;flex-direction:column;align-items:flex-start}
+
+.shop-hero-eyebrow{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:var(--type-meta);
+  line-height:1.2;
+  letter-spacing:.2em;
+  text-transform:uppercase;
+  color:var(--cream);
+}
+.shop-hero-rule{
+  display:block;
+  width:56px;
+  height:1px;
+  margin:clamp(18px,1.8vw,26px) 0 0;
+  background:var(--cream);
+  opacity:.6;
+}
+
+/* Three lines, one headline block: two sans rows and the editorial row
+   directly under them, with no gap worth the name between them. */
+.shop-hero-headline{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  max-width:1050px;
+  margin:clamp(22px,2.2vw,32px) 0 0;
+  color:var(--cream);
+  letter-spacing:normal;
+  line-height:1;
+}
+.shop-hero-line{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:800;
+  font-style:normal;
+  font-size:clamp(40px,5.2vw,84px);
+  line-height:.9;
+  letter-spacing:-.05em;
+}
+/* THE EDITORIAL ROW. Cormorant italic, exactly as the homepage sets its
+   accent lines - the two families are not interchangeable here. */
+.shop-hero-line-accent{
+  font-family:var(--font-display),Georgia,serif;
+  font-weight:400;
+  font-style:italic;
+  font-size:clamp(37px,4.8vw,78px);
+  line-height:.94;
+  letter-spacing:-.02em;
+  margin-top:4px;
+}
+
+.shop-hero-lead{
+  margin:clamp(24px,2.4vw,34px) 0 0;
+  max-width:520px;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:var(--type-body);
+  line-height:1.5;
+  color:var(--cream);
+}
+.shop-hero-price{
+  margin:clamp(26px,2.6vw,34px) 0 0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:700;
+  font-style:normal;
+  font-size:clamp(24px,2vw,30px);
+  line-height:1.1;
+  letter-spacing:-.02em;
+  color:var(--cream);
+}
+.shop-hero-meta{
+  margin:12px 0 0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:var(--type-meta);
+  line-height:1.2;
+  letter-spacing:.18em;
+  text-transform:uppercase;
+  color:var(--cream);
+}
+.shop-hero .shop-hero-cta{
+  display:inline-flex;
+  align-items:center;
+  gap:9px;
+  margin-top:clamp(28px,2.8vw,38px);
+  min-height:48px;
+  padding:15px 28px;
+  background:var(--cream);
+  color:var(--berry);
+  border:1px solid var(--cream);
+  border-radius:0;
+  box-shadow:none;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:var(--type-meta);
+  line-height:1;
+  letter-spacing:.18em;
+  text-transform:uppercase;
+  transition:opacity .2s ease;
+}
+.shop-hero .shop-hero-cta:hover{background:var(--cream);color:var(--berry);border-color:var(--cream);opacity:.86}
+.shop-hero .shop-hero-cta span{transition:transform .2s ease}
+.shop-hero .shop-hero-cta:hover span{transform:translateX(3px)}
+
+/* ── THE LAUNCH BAND ───────────────────────────────────────── */
+/* A ticker, not a section: one row, one hairline scale, ~84px tall. */
+.shop-strip{
+  background:var(--blue);
+  color:var(--cream);
+  padding-block:clamp(20px,2vw,26px);
+}
+.shop-strip-inner{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:clamp(18px,2.4vw,40px);
+  flex-wrap:wrap;
+}
+.shop-strip-title,
+.shop-strip-date,
+.shop-strip-live{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  line-height:1.2;
+  text-transform:uppercase;
+  color:var(--cream);
+}
+.shop-strip-title{font-size:clamp(11px,.95vw,13px);letter-spacing:.18em}
+.shop-strip-date{font-size:clamp(11px,.9vw,13px);letter-spacing:.14em}
+.shop-strip-live{font-size:clamp(13px,1.2vw,16px);letter-spacing:.14em}
+
+.shop-strip-units{
+  display:flex;
+  align-items:baseline;
+  gap:clamp(16px,2vw,34px);
+  min-width:0;
+}
+.shop-strip-unit{
+  display:inline-flex;
+  align-items:baseline;
+  gap:8px;
+  white-space:nowrap;
+}
+/* A hairline between the units rather than a box around each. */
+.shop-strip-unit+.shop-strip-unit{
+  padding-left:clamp(16px,2vw,34px);
+  border-left:1px solid rgba(245,235,226,.3);
+}
+.shop-strip-unit b{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:700;
+  font-size:clamp(24px,2.3vw,32px);
+  line-height:1;
+  letter-spacing:-.03em;
+  font-variant-numeric:tabular-nums;
+  font-feature-settings:'tnum' 1;
+}
+.shop-strip-unit span{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-size:clamp(10px,.85vw,12px);
+  line-height:1;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+}
+
+@media (max-width:900px){
+  /* The band wraps into two compact rows rather than scrolling the page
+     sideways; the units keep their own row. */
+  .shop-strip-inner{gap:clamp(14px,3vw,20px)}
+  .shop-strip-units{order:3;width:100%;justify-content:flex-start}
+  .shop-strip-date{margin-left:auto}
+}
+
+@media (max-width:640px){
+  .shop-hero{padding-block:clamp(56px,12vw,72px) clamp(48px,10vw,60px)}
+  .shop-hero-lead{max-width:none}
+  .shop-hero .shop-hero-cta{width:100%;justify-content:center;padding:15px 20px}
+  .shop-strip-units{gap:14px;flex-wrap:wrap;row-gap:12px}
+  .shop-strip-unit+.shop-strip-unit{padding-left:14px}
+  .shop-strip-unit b{font-size:clamp(22px,7vw,28px)}
+}

@@ -306,26 +306,80 @@ return <section className="brand-note"><div className="brand-note-inner home-rai
 </div>
 </div></section>}
 
+/**
+ * The shop's launch band.
+ *
+ * ── ONE COUNTDOWN, ONE CLOCK, ONE LAUNCH INSTANT ──────────────
+ *
+ * This is a second PRESENTATION of the countdown, never a second
+ * implementation: the instant comes from GLOA_LAUNCH_ISO, the
+ * arithmetic from launchCountdown() and the tick from the same
+ * clockStore the homepage band subscribes to, so the two can never
+ * disagree and a page showing both pays for one interval.
+ *
+ * Everything the homepage band does about correctness holds here for the
+ * same reason: the server snapshot is null so the numbers hydrate
+ * instead of mismatching, the ticking row is aria-hidden rather than
+ * announced once a second, and launchCountdown() clamps at zero so
+ * there is no negative countdown - the launched state takes over.
+ */
+function ShopLaunchStrip(){
+const now=useSyncExternalStore(clockStore.subscribe,clockStore.getSnapshot,clockStore.getServerSnapshot);
+const state=now===null?null:launchCountdown(now);
+return <section className="shop-strip" aria-label="GLOA Launch">
+<div className="shop-strip-inner home-rail">
+<p className="shop-strip-title">{state?.launched?"GLOA is here":"GLOA is coming"}</p>
+{state?.launched
+?<p className="shop-strip-live">Der Shop ist offen.</p>
+:<div className="shop-strip-units" aria-hidden="true">
+{([["Tage",state?.days],["Stunden",state?.hours],["Minuten",state?.minutes],["Sekunden",state?.seconds]] as const).map(([label,value])=>
+<span className="shop-strip-unit" key={label}>
+<b>{value===undefined?"--":padCountdownUnit(value)}</b>
+<span>{label}</span>
+</span>)}
+</div>}
+<p className="shop-strip-date">{GLOA_LAUNCH_LABEL}</p>
+</div>
+</section>
+}
+
+/** The supporting line, as one sentence over two rows. No dash. */
+const SHOP_HERO_LEAD=<>Premium Matcha aus Shizuoka, Japan<br/>und alles, was dazugehört.</>;
+
+/**
+ * The shop hero. TYPE ONLY - no pouch, no packaging mockup, no powder.
+ * The product's own photography lives in the cards below and on the
+ * product page; nothing was deleted, this hero simply does not render it.
+ */
+function ShopHero({lead,price}:{lead:React.ReactNode;price:React.ReactNode}){
+return <section className="shop-hero"><div className="shop-hero-inner home-rail">
+<p className="eyebrow shop-hero-eyebrow">GLOA · SHOP</p>
+<span className="shop-hero-rule" aria-hidden="true"/>
+<h1 className="shop-hero-headline">
+<span className="shop-hero-line">Alles von</span>
+<span className="shop-hero-line">GLOA.</span>
+<i className="shop-hero-line shop-hero-line-accent">alles was du brauchst.</i>
+</h1>
+<p className="shop-hero-lead">{lead}</p>
+{price}
+<p className="shop-hero-meta">LAUNCH AM {GLOA_LAUNCH_LABEL}</p>
+<Link className="cta shop-hero-cta" href="#product" onClick={()=>track("shop_scroll_product")}>PRODUKTE ENTDECKEN <span aria-hidden="true">→</span></Link>
+</div></section>
+}
+
 function Shop({onAdd}:{onAdd:()=>void}){
 const {products,loading,error}=useCatalogList();
-const multi=products.length>1;
-// While Matcha is the only live product the hero is exactly the one
-// shipped today. A second active product switches it to a
-// product-neutral variant rather than continuing to announce the shop as
-// Matcha-only.
-const eyebrow=multi?"GLOA · SHOP":"GLOA · MATCHA";
-const heading=multi?<>Alles von GLOA.</>:<>Dein Matcha.<br/><i>Deine Art.</i></>;
-const lead=multi?"Matcha aus Shizuoka, Japan – und alles, was dazugehört.":"Matcha aus Shizuoka, Japan. Für Latte, iced, pur oder wie du ihn magst.";
-const shell=(leadText:string,extra?:React.ReactNode)=><main className="shop-page"><section className="shop-hero"><div className="shop-hero-inner"><p className="eyebrow">{eyebrow}</p><h1>{heading}</h1><p className="lead">{leadText}</p>{extra}</div></section></main>;
+const shell=(lead:React.ReactNode,price:React.ReactNode)=><main className="shop-page"><ShopHero lead={lead} price={price}/><ShopLaunchStrip/></main>;
 
-if(loading)return shell(lead,<p className="shop-hero-price">Laden…</p>);
-if(error)return shell("Shop vorübergehend nicht verfügbar.");
-if(!products.length)return shell("Aktuell keine Produkte verfügbar.");
+if(loading)return shell(SHOP_HERO_LEAD,<p className="shop-hero-price">Laden…</p>);
+if(error)return shell("Shop vorübergehend nicht verfügbar.",null);
+if(!products.length)return shell("Aktuell keine Produkte verfügbar.",null);
 
 const lowestCents=Math.min(...products.flatMap(p=>p.variants.map(x=>x.price_gross_cents)));
 
 return <main className="shop-page">
-<section className="shop-hero"><div className="shop-hero-inner"><p className="eyebrow">{eyebrow}</p><h1>{heading}</h1><p className="lead">{lead}</p><p className="shop-hero-price">AB {fmtCents(lowestCents)} €</p><p className="shop-hero-micro">Launch in Vorbereitung.</p><Link className="cta shop-hero-cta" href="#product" onClick={()=>track("shop_scroll_product")}>{multi?"ZU DEN PRODUKTEN":"ZUM MATCHA"}</Link></div></section>
+<ShopHero lead={SHOP_HERO_LEAD} price={<p className="shop-hero-price">AB {fmtCents(lowestCents)} €</p>}/>
+<ShopLaunchStrip/>
 
 <section id="product" className="shop-products">
 {products.map(p=><article key={p.id} id={`product-${p.slug}`} className="shop-column">

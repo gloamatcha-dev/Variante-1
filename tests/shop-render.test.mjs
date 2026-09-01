@@ -31,9 +31,23 @@ test("shop: the catalog-driven shop page renders", async () => {
   const { status, html } = await getHtml("/shop");
   assert.equal(status, 200);
   assert.match(html, /GLOA/);
-  // The Matcha hero shipped today is preserved while Matcha is the only
-  // live product.
-  assert.match(html, /Dein Matcha\./);
+  // THE HERO IS SERVER-RENDERED TEXT. It no longer branches on how many
+  // products the catalog returns, so this holds in the loading shell too.
+  assert.match(html, /GLOA · SHOP/);
+  assert.match(html, /Alles von/);
+  assert.match(html, /alles was du brauchst\./);
+  assert.match(html, /Premium Matcha aus Shizuoka, Japan/);
+  // React splits adjacent text and expression children with a comment
+  // marker in the SSR stream, so the two halves are matched separately.
+  assert.match(html, /LAUNCH AM/);
+  assert.match(html, /01\.10\.2026/);
+  assert.match(html, /PRODUKTE ENTDECKEN/);
+  // The retired copy is gone from the page.
+  for (const retired of ["Dein Matcha.", "Deine Art.", "Launch in Vorbereitung", "ZUM MATCHA", "ZU DEN PRODUKTEN"]) {
+    assert.ok(!html.includes(retired), `the retired shop hero copy survived: ${retired}`);
+  }
+  // NO DASH in the supporting line, in either form.
+  assert.ok(!/Shizuoka, Japan\s*[\u2013\u2014]/.test(html), "the supporting copy still carries a dash");
 });
 
 test("shop: the Matcha product page renders", async () => {

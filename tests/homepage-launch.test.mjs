@@ -57,6 +57,7 @@ const ORIGIN_BLOCK = "HOMEPAGE ORIGIN SECTION";
 const HOWTO_BLOCK = "HOMEPAGE HOW TO GLOA SECTION";
 const RECIPES_BLOCK = "HOMEPAGE RECIPES CAROUSEL";
 const COMMUNITY_BLOCK = "HOMEPAGE COMMUNITY SECTION";
+const SHOP_BLOCK = "SHOP LAUNCH HERO";
 const css = read("app/globals.css");
 const layout = read("app/layout.tsx");
 
@@ -64,7 +65,7 @@ const layout = read("app/layout.tsx");
 const homeStart = site.indexOf("function Home()");
 const carousel = site.slice(site.indexOf("function RecipeCarousel()"), site.indexOf("let clockTick"));
 const carouselCss = cssBlockRules(RECIPES_BLOCK, COMMUNITY_BLOCK);
-const communityCss = cssBlockRules(COMMUNITY_BLOCK);
+const communityCss = cssBlockRules(COMMUNITY_BLOCK, SHOP_BLOCK);
 const homepage = site.slice(homeStart, site.indexOf("\nfunction ", homeStart + 10));
 // The community component AND its section markup - bounded so the
 // countdown, which sits between them in the file, cannot leak its
@@ -327,7 +328,13 @@ test("10: the carousel is ONE row that can never run out of cards", () => {
 });
 
 test("11: the anti-newsletter section is a blue brand statement, with no signup", () => {
-  const note = site.slice(site.indexOf("function BrandNote()"), site.indexOf("function BrandNote()") + 1400);
+  // Bounded at the doc comment that follows it, not at the next
+  // `function`: the comment in between belongs to another component and
+  // its prose would answer for this section's banned-word list.
+  const noteStart = site.indexOf("function BrandNote()");
+  const noteEnd = Math.min(...["\n/**", "\nfunction "]
+    .map(m => site.indexOf(m, noteStart + 5)).filter(i => i > 0));
+  const note = site.slice(noteStart, noteEnd);
 
   // THE TEXT IS UNCHANGED, word for word.
   for (const line of [
@@ -1296,7 +1303,9 @@ test("39: every homepage section starts on one rail, and it is the lifestyle one
   // The six full-width sections take their gutter from the token, so the
   // desktop, tablet and mobile edge is one value instead of 3vw / 4vw /
   // 4.5vw / 5vw / 6vw and 22px.
-  assert.match(railCss, /\.countdown,\s*\.prelaunch,\s*\.daily,\s*\.origin,\s*\.how-to,\s*\.community,\s*\.brand-note\{padding-inline:var\(--rail-gutter\)\}/);
+  // The shop hero and its launch band read the same gutter - section 20
+  // of the brief: the shop is on the canonical rail too.
+  assert.match(railCss, /\.countdown,\s*\.prelaunch,\s*\.daily,\s*\.origin,\s*\.how-to,\s*\.community,\s*\.brand-note,\s*\.shop-hero,\s*\.shop-strip\{padding-inline:var\(--rail-gutter\)\}/);
   // The hero has no wrapper - its own padding IS the rail, in the same
   // shape, at desktop and on mobile.
   assert.match(css, /\.hero\{[\s\S]*?padding-inline:max\(var\(--rail-gutter\),calc\(\(100% - var\(--rail-max\)\) \/ 2\)\)/);
