@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -296,15 +296,29 @@ test("checkout: no fabricated size_grams metadata reaches Stripe", () => {
 
 /* -- Shop composition (Task 27E) ----------------------------- */
 
-test("shop: both products render as columns of one composition", () => {
+test("shop: the section lists one product per row, and the case is only hidden", () => {
   const site = readFileSync(path.join(ROOT, "app/GloaSite.tsx"), "utf-8");
-  // One grid holding one column per catalog product, rather than a
-  // full-bleed row each.
+  const css = readFileSync(path.join(ROOT, "app/globals.css"), "utf-8");
+  // WAS: a 1fr 1fr grid putting the two products side by side. With the
+  // case withheld one half was simply empty, so the section is block
+  // flow now - one <article> per listed product, each its own row.
   assert.match(site, /className="shop-products"/);
   assert.match(site, /className="shop-column"/);
-  const css = readFileSync(path.join(ROOT, "app/globals.css"), "utf-8");
-  assert.match(css, /\.shop-products\{[^}]*grid-template-columns:1fr 1fr/, "desktop must place the products side by side");
-  assert.match(css, /\.shop-products\{grid-template-columns:1fr;/, "mobile must stack them into one column");
+  assert.match(css, /\.shop-products\{[\s\S]*?display:block/);
+  assert.ok(!/\.shop-products\{[^}]*grid-template-columns/.test(css), "the split panel came back");
+  assert.ok(!css.includes(".shop-products::before"), "the centre divider came back");
+  // Inside a row: a contained image beside the purchase column.
+  assert.match(css, /\.shop-product-row\{[\s\S]*?grid-template-columns:minmax\(280px,\.85fr\) minmax\(0,1\.15fr\)/);
+
+  // ── THE CASE IS HIDDEN, NOT DELETED ──────────────────────────
+  assert.match(site, /const SHOP_HIDDEN_SLUGS=Object\.freeze\(\["metal-case"\]\);/);
+  assert.match(site, /\{shown\.map\(p=>/, "the shop still renders every catalog product");
+  // Everything the case needs to come back is still here.
+  assert.match(readFileSync(path.join(ROOT, "lib/productPresentation.ts"), "utf-8"), /"metal-case"/);
+  assert.match(readFileSync(path.join(ROOT, "lib/tax.ts"), "utf-8"), /"metal-case"/);
+  assert.ok(existsSync(path.join(ROOT, "supabase/migrations/020_standalone_metal_case.sql")),
+    "the case's catalog migration was removed");
+  assert.match(css, /\.shop-column\[id\$="metal-case"\]/, "the case's own presentation rule was removed");
 });
 
 test("shop: the Matcha details accordion belongs to the Matcha column and starts collapsed", () => {

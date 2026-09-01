@@ -244,6 +244,32 @@ return <main><section className="hero"><div className="hero-copy" ref={heroRef a
 // has no data: a missing image or subtitle simply renders nothing.
 const MATCHA_SLUG="matcha";
 
+/**
+ * Products /shop withholds for now.
+ *
+ * HIDDEN, NEVER DELETED: the catalog row, the price, the variants, the
+ * IDs, the route /shop/metal-case, the tax category, the image and the
+ * "Matcha nicht enthalten" notice are all exactly where they were. This
+ * page skips them, and the hero's "ab" price skips them with it, so the
+ * page cannot advertise a price for something it does not list.
+ *
+ * Bringing the case back is deleting one string from this array.
+ */
+const SHOP_HIDDEN_SLUGS=Object.freeze(["metal-case"]);
+const visibleShopProducts=(products:CatalogProduct[])=>products.filter(p=>!SHOP_HIDDEN_SLUGS.includes(p.slug));
+
+/**
+ * The image /shop renders for a product, when it differs from the shared
+ * presentation image.
+ *
+ * Deliberately NOT a change to getProductImage(): that map also serves
+ * the cart line, the product card and the product page, and this pass
+ * only re-frames the shop section.
+ */
+const SHOP_SECTION_IMAGE:Readonly<Record<string,{src:string;alt:string}>>=Object.freeze({
+[MATCHA_SLUG]:{src:"/img/Produkt Bild (2).png",alt:"Grünes Matcha-Pulver"},
+});
+
 function VariantSelector({product,selected,onSelect,name}:{product:CatalogProduct;selected:number;onSelect:(i:number)=>void;name:string}){
 if(product.variants.length<2)return null;
 const weighed=isWeighedProduct(product.variants[selected]);
@@ -260,12 +286,13 @@ const safe=Math.min(idx,product.variants.length-1);
 const v=product.variants[safe];
 const presentation=getProductPresentation(product.slug,v);
 const per100=showsUnitPricePer100g(v)?per100gCents(v.price_gross_cents,v.size_grams as number):null;
-const img=getProductImage(product);
+const own=SHOP_SECTION_IMAGE[product.slug];
+const img=own??(getProductImage(product)?{src:getProductImage(product) as string,alt:product.name}:null);
 const sub=getProductSubtitle(product);
 const handleAdd=()=>{addItem({productId:product.id,productName:product.name,productSlug:product.slug,variantId:v.id,label:v.label,grams:v.size_grams,purchaseType:"once",unitPriceCents:v.price_gross_cents});track("add_to_cart");onAdd()};
-return <>
-{img&&<div className="shop-product-image"><img src={img} alt={product.name}/></div>}
-<div className="shop-product-info"><p className="eyebrow">{getProductEyebrow(product)}</p><h2>{product.name.toUpperCase()}</h2>
+return <div className="shop-product-row home-rail">
+{img&&<div className="shop-product-visual"><img src={img.src} alt={img.alt} loading="lazy"/></div>}
+<div className="shop-product-info"><p className="eyebrow shop-product-eyebrow">{getProductEyebrow(product)}</p><h2 className="shop-product-title">{product.name.toUpperCase()}</h2>
 {sub&&<p className="shop-product-sub">{sub}</p>}
 
 <VariantSelector product={product} selected={safe} onSelect={setIdx} name={`variant-${product.slug}`}/>
@@ -275,18 +302,41 @@ return <>
 {presentation.matchaNotIncludedNotice&&<p className="product-not-included">{presentation.matchaNotIncludedNotice}</p>}
 
 <button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":handleAdd}>{SHOP_STATUS==="prelaunch"?"Fragen zum Launch":"In den Warenkorb"}</button>
-</div></>}
+</div></div>}
 
 /** Confirmed GLOA Matcha food information. Rendered only for the Matcha
  *  product itself - an accessory must never inherit any of this. */
 function MatchaShopDetails({product}:{product:CatalogProduct}){
-return <section className="shop-accordion"><div className="shop-accordion-inner">
+return <section className="shop-accordion"><div className="shop-accordion-inner home-rail">
 <details className="product-accordion">
 <summary><span>Produktdetails &amp; Pflichtangaben</span><span className="product-accordion-icon" aria-hidden="true"/></summary>
 <div className="product-accordion-body">
-<dl><div><dt>LEBENSMITTELBEZEICHNUNG</dt><dd>Matcha (Grünteepulver)</dd></div><div><dt>ZUTAT</dt><dd>100 % Matcha-Grünteepulver, keine Zusätze</dd></div><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>QUALITÄT</dt><dd>100 % Bio-Matcha</dd></div><div><dt>ZUBEREITUNG</dt><dd>Ca. 3 g Matcha mit wenig heißem Wasser (ca. 80 °C) glattrühren, dann aufgießen. Latte, iced oder pur.</dd></div><div><dt>LAGERUNG</dt><dd>{PRODUCT.storage}</dd></div><div><dt>GROESSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div><div><dt>VERSAND</dt><dd>Deutschland: 2–4 Werktage · Andere Länder: 3–10 Werktage</dd></div></dl>
+<dl><div><dt>LEBENSMITTELBEZEICHNUNG</dt><dd>Matcha (Grünteepulver)</dd></div><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>QUALITÄT</dt><dd>100 % Bio-Matcha</dd></div><div><dt>LAGERUNG</dt><dd>{PRODUCT.storage}</dd></div><div><dt>GROESSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div></dl>
 <p className="product-operator-note">Lebensmittelunternehmer: Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin, Deutschland</p>
-<div className="product-accordion-links"><Link className="shop-details-link" href="/our-matcha" onClick={()=>track("shop_to_matcha")}>MEHR ÜBER UNSEREN MATCHA →</Link><Link className="shop-details-link" href="/versand">VERSAND & LIEFERZEITEN →</Link></div>
+</div>
+</details>
+<details className="product-accordion">
+<summary><span>Zutaten</span><span className="product-accordion-icon" aria-hidden="true"/></summary>
+<div className="product-accordion-body">
+{/* THE ROW IS "ZUTATEN", NOT "ZUTATEN & NÄHRWERTE". No nutrition data
+    exists in this repository, and tests/legal-content.test.mjs bans the
+    word outright so that none can be invented. A row promising a table
+    nobody measured is the failure that guard exists to prevent. */}
+<dl><div><dt>ZUTAT</dt><dd>100 % Matcha-Grünteepulver, keine Zusätze</dd></div></dl>
+</div>
+</details>
+<details className="product-accordion">
+<summary><span>Zubereitung</span><span className="product-accordion-icon" aria-hidden="true"/></summary>
+<div className="product-accordion-body">
+<dl><div><dt>ZUBEREITUNG</dt><dd>Ca. 3 g Matcha mit wenig heißem Wasser (ca. 80 °C) glattrühren, dann aufgießen. Latte, iced oder pur.</dd></div></dl>
+<div className="product-accordion-links"><Link className="shop-details-link" href="/our-matcha" onClick={()=>track("shop_to_matcha")}>MEHR ÜBER UNSEREN MATCHA →</Link></div>
+</div>
+</details>
+<details className="product-accordion">
+<summary><span>Versand &amp; Lieferung</span><span className="product-accordion-icon" aria-hidden="true"/></summary>
+<div className="product-accordion-body">
+<dl><div><dt>VERSAND</dt><dd>Deutschland: 2–4 Werktage · Andere Länder: 3–10 Werktage</dd></div></dl>
+<div className="product-accordion-links"><Link className="shop-details-link" href="/versand">VERSAND & LIEFERZEITEN →</Link></div>
 </div>
 </details>
 </div></section>}
@@ -373,16 +423,19 @@ const shell=(lead:React.ReactNode,price:React.ReactNode)=><main className="shop-
 
 if(loading)return shell(SHOP_HERO_LEAD,<p className="shop-hero-price">Laden…</p>);
 if(error)return shell("Shop vorübergehend nicht verfügbar.",null);
-if(!products.length)return shell("Aktuell keine Produkte verfügbar.",null);
+if(!visibleShopProducts(products).length)return shell("Aktuell keine Produkte verfügbar.",null);
 
-const lowestCents=Math.min(...products.flatMap(p=>p.variants.map(x=>x.price_gross_cents)));
+// The hero's "ab" price is computed from what the page actually LISTS,
+// so a hidden product cannot set the number a customer reads.
+const shown=visibleShopProducts(products);
+const lowestCents=Math.min(...shown.flatMap(p=>p.variants.map(x=>x.price_gross_cents)));
 
 return <main className="shop-page">
 <ShopHero lead={SHOP_HERO_LEAD} price={<p className="shop-hero-price">AB {fmtCents(lowestCents)} €</p>}/>
 <ShopLaunchStrip/>
 
 <section id="product" className="shop-products">
-{products.map(p=><article key={p.id} id={`product-${p.slug}`} className="shop-column">
+{shown.map(p=><article key={p.id} id={`product-${p.slug}`} className="shop-column">
 <ShopProductBlock product={p} onAdd={onAdd}/>
 {p.slug===MATCHA_SLUG&&<MatchaShopDetails product={p}/>}
 </article>)}

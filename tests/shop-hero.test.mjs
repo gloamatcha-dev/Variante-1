@@ -59,7 +59,10 @@ test("1: the hero says exactly the approved lines, and no dash", () => {
 
 test("2: the price comes from the catalog, and the CTA still scrolls to the products", () => {
   // No invented commerce: the lowest gross price of the live variants.
-  assert.match(shop, /const lowestCents=Math\.min\(\.\.\.products\.flatMap\(p=>p\.variants\.map\(x=>x\.price_gross_cents\)\)\);/);
+  // Computed from what the page actually LISTS, not from the whole
+  // catalog: a product withheld from /shop must not set the "ab" price.
+  assert.match(shop, /const shown=visibleShopProducts\(products\);/);
+  assert.match(shop, /const lowestCents=Math\.min\(\.\.\.shown\.flatMap\(p=>p\.variants\.map\(x=>x\.price_gross_cents\)\)\);/);
   assert.match(shop, /AB \{fmtCents\(lowestCents\)\} €/);
   assert.ok(!/AB 9,99|9\.99|999/.test(hero + shop), "a price was hard-coded");
   // The existing anchor and the existing analytics event, unchanged.

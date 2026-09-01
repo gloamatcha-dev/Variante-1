@@ -358,14 +358,17 @@ test("Shipping copy: the product summary matches the authoritative zone data", a
   assert.ok(!gloaSiteSource.includes("Lieferzeit je nach Zielland: 2-10 Werktage"));
 });
 
-test("Shop layout: the two product columns keep independent heights", () => {
+test("Shop layout: one product per row, so an accordion moves nothing else", () => {
   const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf-8");
-  const rule = css.match(/\.shop-products\{[^}]*grid-template-columns:1fr 1fr[^}]*\}/)?.[0] ?? "";
-  assert.ok(rule, "desktop product grid rule not found");
-  // Without this, the grid row stretches to the tallest column and
-  // opening the Matcha accordion drags the Metal Case column down.
-  assert.match(rule, /align-items:start/, "columns must not stretch to a shared height");
-  // The divider is drawn, not implied by a gap over a coloured
-  // background, which would show through under the shorter column.
-  assert.match(css, /\.shop-products::before\{[^}]*background:var\(--line\)/);
+  // THE OLD SHAPE was a 1fr 1fr grid, which needed align-items:start so
+  // that opening the Matcha accordion could not drag the neighbouring
+  // column down, and a drawn divider so the gap did not show through.
+  // Neither exists any more: the section is block flow, each product is
+  // its own article, and a row's height is nobody else's business.
+  assert.match(css, /\.shop-products\{[\s\S]*?display:block/);
+  assert.ok(!/\.shop-products\{[^}]*grid-template-columns:1fr 1fr/.test(css),
+    "the shared-height grid came back without its guard");
+  assert.ok(!css.includes(".shop-products::before"), "the centre divider came back");
+  // The accordions sit under the row, full width, on the same rail.
+  assert.match(css, /\.shop-accordion\{[\s\S]*?background:var\(--cream\)/);
 });

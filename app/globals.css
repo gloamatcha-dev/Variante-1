@@ -41,24 +41,24 @@ h1 i,h2 i,h3 i,.display-italic{font-family:var(--font-display),Georgia,serif;fon
    height. The divider is a pseudo-element rather than a gap over a
    coloured background, because that background would otherwise show
    through wherever the shorter column ends. */
-.shop-products{position:relative;display:grid;grid-template-columns:1fr 1fr;gap:0;align-items:start;border-top:1px solid var(--line);border-bottom:1px solid var(--line);scroll-margin-top:96px}
-.shop-products::before{content:"";position:absolute;top:0;bottom:0;left:50%;width:1px;background:var(--line)}
-.shop-column{background:var(--cream);display:flex;flex-direction:column;min-width:0}
+
+
+
 /* The accessory reuses the Matcha packaging photo because no separate
    Metal Case shot exists yet. Side by side, an identical crop reads as a
    duplicated image, so this panel gets its own framing of the same asset.
    The factual distinction is carried by the 'Matcha nicht enthalten'
    notice, not by the photography. */
 .shop-column[id$="metal-case"] .shop-product-image img{object-position:72% 42%;transform:scale(1.22)}
-.shop-product-image{background:var(--berry);position:relative;overflow:hidden;aspect-ratio:5/4}
-.shop-product-image img{width:100%;height:100%;object-fit:cover;object-position:center;position:absolute;inset:0}
-.shop-product-info{padding:40px 2.8vw 44px;display:flex;flex-direction:column;flex:1;min-width:0}
-.shop-product-info h2{font-size:clamp(30px,2.5vw,40px);line-height:1.02;letter-spacing:-.045em;margin:10px 0 14px}
-.shop-product-sub{font:13px/1.65 var(--font-mono);letter-spacing:.06em;margin:0 0 26px;max-width:46ch;opacity:.8}
+
+
+
+
+
 .shop-product-size{font:13px/1 var(--font-mono);letter-spacing:.1em;opacity:.55;margin:0 0 20px}
-.shop-product-price{font-size:30px;line-height:1.1;font-weight:800;letter-spacing:-.03em;margin:0 0 6px}
+
 .shop-product-price span{font-size:14px;font-weight:400;letter-spacing:0}
-.shop-product-per100g{font:13px/1.4 var(--font-mono);letter-spacing:.08em;opacity:.55;margin:0 0 26px}
+
 .shop-only-once{font:13px/1.4 var(--font-mono);opacity:.55;margin:0 0 20px}
 
 .size-selector{display:flex;gap:8px;margin:0 0 26px;flex-wrap:wrap}
@@ -112,8 +112,8 @@ h1 i,h2 i,h3 i,.display-italic{font-family:var(--font-display),Georgia,serif;fon
 
 
 .shop-product{grid-template-columns:1fr}
-.shop-product-image{height:520px}
-.shop-product-info{padding:50px 5vw}
+
+
 .shop-abo-explain{padding:75px 5vw}
 .shop-abo-grid{grid-template-columns:1fr}
 .shop-abo-grid article{border-right:0!important}
@@ -355,8 +355,8 @@ a.portal-summary-row:hover{color:var(--blue)}
 .order-list-row:hover{background:rgba(23,70,209,.04)}
 .order-list-number{font-weight:600}
 /* ── Product details accordion (shop UI refinement) ── */
-.shop-accordion{padding:0 2.8vw;border-top:1px solid var(--line)}
-.shop-accordion-inner{max-width:none}
+
+
 .product-accordion{border-top:0}
 .product-accordion-body{max-width:820px}
 .product-accordion summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:24px;padding:28px 0;font:600 13px/1 var(--font-mono);letter-spacing:.14em;text-transform:uppercase;transition:color .2s}
@@ -588,12 +588,12 @@ header nav{gap:18px;font-size:12px}
 .order-list-row{grid-template-columns:1fr 1fr;gap:8px;padding:16px 0}
 .order-item-row{grid-template-columns:1fr auto;gap:8px}
 .order-item-qty,.order-item-unit{display:none}
-.shop-products{grid-template-columns:1fr;gap:0;scroll-margin-top:72px}
-.shop-products::before{display:none}
+
+
 .shop-column+.shop-column{border-top:1px solid var(--line)}
-.shop-product-image{aspect-ratio:4/3}
-.shop-product-info{padding:40px 6vw 46px}
-.shop-accordion{padding:0 6vw}
+
+
+
 .product-accordion summary{padding:24px 0}
 .product-accordion dl div{grid-template-columns:1fr;gap:6px;padding:14px 0}
 .product-accordion-links{gap:14px;flex-direction:column}
@@ -1558,7 +1558,9 @@ header nav{gap:18px;font-size:12px}
 .community,
 .brand-note,
 .shop-hero,
-.shop-strip{padding-inline:var(--rail-gutter)}
+.shop-strip,
+.shop-column,
+.shop-accordion{padding-inline:var(--rail-gutter)}
 
 /* ══════════════════════════════════════════════════════════════
    HOMEPAGE RECIPES CAROUSEL
@@ -2235,4 +2237,205 @@ header nav{gap:18px;font-size:12px}
   .shop-strip-units{gap:14px;flex-wrap:wrap;row-gap:12px}
   .shop-strip-unit+.shop-strip-unit{padding-left:14px}
   .shop-strip-unit b{font-size:clamp(22px,7vw,28px)}
+}
+
+/* ══════════════════════════════════════════════════════════════
+   SHOP MATCHA PRODUCT SECTION
+
+   Was: two full-height 50/50 panels with a hairline down the middle,
+   each opening on a berry-backed 5:4 image that filled its whole column.
+   With the metal case withheld, one of those halves was simply empty.
+
+   Now: ONE product, one row - a small contained image on the left, the
+   purchase information on the right, and the accordions underneath on
+   the same rail. The image is ~320px rather than half the viewport;
+   everything around it is the section's own cream.
+
+   ── WHAT IS NOT HERE ─────────────────────────────────────────
+   .shop-cta, .size-selector, .size-option, .product-accordion* and
+   .shop-details-link are SHARED with the two product pages, so they are
+   restyled under .shop-product-row / .shop-accordion rather than edited
+   where the product pages also read them.
+
+   The metal case's own crop rule further up the file is intentionally
+   left in place: it belongs to the case, and this pass hides the case
+   rather than removing anything of it. It will want a look when the
+   case comes back into a contained frame.
+   ══════════════════════════════════════════════════════════════ */
+
+.shop-products{
+  display:block;
+  background:var(--cream);
+  border-top:1px solid var(--line);
+  scroll-margin-top:96px;
+}
+.shop-column{
+  display:block;
+  background:var(--cream);
+  padding-block:clamp(72px,6.5vw,100px) 0;
+}
+/* A narrower INNER block on the shared rail: same left edge as every
+   other section, simply ending sooner on the right. */
+.shop-product-row{
+  display:grid;
+  grid-template-columns:minmax(280px,.85fr) minmax(0,1.15fr);
+  gap:clamp(32px,4vw,72px);
+  align-items:center;
+  max-width:min(1240px,var(--rail-max));
+  margin-inline:0;
+  padding-bottom:clamp(56px,5.4vw,80px);
+}
+
+/* ── THE IMAGE: CONTAINED, AND SMALL ───────────────────────── */
+.shop-product-visual{
+  width:min(100%,320px);
+  background:transparent;
+  border:0;
+  border-radius:0;
+  box-shadow:none;
+  overflow:visible;
+}
+.shop-product-visual img{
+  display:block;
+  width:100%;
+  height:auto;
+  object-fit:contain;
+}
+
+/* ── THE PURCHASE COLUMN ───────────────────────────────────── */
+.shop-product-info{display:flex;flex-direction:column;align-items:flex-start;min-width:0}
+.shop-product-eyebrow{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:var(--type-meta);
+  line-height:1.2;
+  letter-spacing:.2em;
+  text-transform:uppercase;
+  color:var(--berry);
+}
+/* A PRODUCT title, not a hero one: capped at 46px, which sits below the
+   shop hero's 84px and the homepage hero's 100px. */
+.shop-product-title{
+  margin:clamp(12px,1.2vw,16px) 0 0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:clamp(32px,3vw,46px);
+  line-height:1.04;
+  letter-spacing:-.025em;
+  color:var(--ink);
+}
+.shop-product-sub{
+  margin:10px 0 0;
+  max-width:46ch;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:15px;
+  line-height:1.4;
+  letter-spacing:0;
+  color:var(--ink);
+  opacity:.72;
+}
+
+/* The shared selector, sized for this section only. */
+.shop-product-row .size-selector{margin:clamp(26px,2.6vw,34px) 0 0;gap:10px}
+.shop-product-row .size-option{
+  min-width:92px;
+  min-height:72px;
+  justify-content:center;
+  gap:6px;
+  padding:12px 14px;
+  border-radius:0;
+  box-shadow:none;
+}
+.shop-product-row .size-option-size{
+  font:600 15px/1 var(--font-sans),Arial,sans-serif;
+  letter-spacing:0;
+  color:var(--ink);
+}
+.shop-product-row .size-option-price{
+  font:400 13px/1 var(--font-sans),Arial,sans-serif;
+  color:var(--ink);
+  opacity:.7;
+}
+
+.shop-product-price{
+  margin:clamp(24px,2.4vw,32px) 0 0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:700;
+  font-style:normal;
+  font-size:clamp(28px,2.2vw,32px);
+  line-height:1.1;
+  letter-spacing:-.025em;
+  color:var(--ink);
+}
+.shop-product-per100g{
+  margin:6px 0 0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:13px;
+  line-height:1.4;
+  letter-spacing:0;
+  color:var(--ink);
+  opacity:.62;
+}
+.shop-product-row .shop-cta{
+  width:100%;
+  max-width:500px;
+  justify-content:center;
+  margin:clamp(26px,2.6vw,34px) 0 0;
+  min-height:56px;
+  padding:18px 26px;
+  background:var(--blue);
+  color:var(--cream);
+  border:1px solid var(--blue);
+  border-radius:0;
+  box-shadow:none;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:var(--type-meta);
+  line-height:1;
+  letter-spacing:.18em;
+  text-transform:uppercase;
+}
+.shop-product-row .shop-cta:hover{background:#123bb0;border-color:#123bb0;color:var(--cream)}
+
+/* ── THE ACCORDIONS, ON THE SAME RAIL ──────────────────────── */
+.shop-accordion{
+  background:var(--cream);
+  border-top:0;
+  padding-bottom:clamp(56px,6vw,88px);
+}
+.shop-accordion .product-accordion{border-top:1px solid var(--line)}
+.shop-accordion .product-accordion:last-of-type{border-bottom:1px solid var(--line)}
+.shop-accordion .product-accordion summary{
+  padding:clamp(20px,2vw,26px) 0;
+  font:600 var(--type-meta)/1 var(--font-sans),Arial,sans-serif;
+  letter-spacing:.18em;
+  text-transform:uppercase;
+  color:var(--ink);
+}
+.shop-accordion .product-accordion-body{padding:0 0 clamp(24px,2.4vw,34px);max-width:820px}
+.shop-accordion .product-accordion dd{font:400 15px/1.6 var(--font-sans),Arial,sans-serif;color:var(--ink)}
+.shop-accordion .product-accordion dt{font:600 11px/1.6 var(--font-sans),Arial,sans-serif;letter-spacing:.14em;opacity:.6}
+
+@media (max-width:900px){
+  /* Two columns would squeeze both halves, so the row stacks and the
+     image centres itself above the purchase column. */
+  .shop-product-row{grid-template-columns:1fr;gap:clamp(28px,5vw,40px);max-width:none}
+  .shop-product-visual{width:min(100%,300px);margin-inline:auto}
+}
+
+@media (max-width:640px){
+  .shop-column{padding-block:clamp(52px,11vw,68px) 0}
+  .shop-product-visual{width:min(100%,280px)}
+  /* Three sizes stay in one row at 390px by sharing the width evenly. */
+  .shop-product-row .size-selector{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  .shop-product-row .size-option{min-width:0;padding:12px 6px}
+  .shop-product-row .shop-cta{max-width:none}
 }
