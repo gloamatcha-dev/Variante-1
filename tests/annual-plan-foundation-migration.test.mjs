@@ -1052,6 +1052,15 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // homepage actions. app/analytics.ts dispatches a browser CustomEvent
     // and nothing else - no network, no storage, no personal data.
     "app/analytics.ts",
+    // B2B ORDERING MODELS: presentation only. The file also owns the B2B
+    // lead form, so it is listed here rather than waved through - which is
+    // exactly what this guard is for. The edit replaces the markup of ONE
+    // section (.b2b-compare) and adds a data const beside it; the intent
+    // state, the choose() handler, submit(), the LeadPayload it builds and
+    // the gloa:b2b-lead event are all untouched, and
+    // tests/b2b-ordering-models.test.mjs asserts that directly against the
+    // source rather than leaving it to this diff.
+    "app/BusinessCalculator.tsx",
   ];
 
   for (const rel of touched) {

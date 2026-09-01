@@ -32,7 +32,9 @@ const menu = block.slice(block.indexOf('<section className="b2b-menu">'));
 
 const blockAt = css.indexOf("INFO STRIP + MENU SECTION");
 assert.notEqual(blockAt, -1, "the CSS block was not found");
-const rules = css.slice(css.lastIndexOf("/*", blockAt));
+// Bounded at the NEXT page block. Without an end this slice runs to the
+// end of the file and silently absorbs whatever is appended after it.
+const rules = css.slice(css.lastIndexOf("/*", blockAt), css.lastIndexOf("/*", css.indexOf("THE TWO ORDERING MODELS")));
 /* Comment-free, so the prose describing what this USED to be can never
    satisfy - or trip - an assertion about the rules. */
 const code = rules.replace(/\/\*[\s\S]*?\*\//g, "");

@@ -4,6 +4,18 @@ import Link from "next/link";
 import type { LeadPayload } from "./content";
 import { track } from "./analytics";
 
+/* THE TWO ORDERING MODELS. One shape, two accents - the discount, the
+   wording and the request handler are the ones that were already here.
+   `mark` and `check` are single-path line drawings on a 24 grid; both
+   are decorative, the labels beside them carry the meaning. */
+const b2bModels=[
+ {key:"flex",eyebrow:"FLEXIBEL",title:"Regelmäßige Belieferung",cta:"Konditionen anfragen",
+  mark:"M3.6 7.4 12 3l8.4 4.4v9.2L12 21l-8.4-4.4V7.4ZM3.6 7.4 12 11.9l8.4-4.5M12 11.9V21M7.8 5.2l8.4 4.5",
+  benefits:["5 % Preisvorteil gegenüber Einzelbestellung","Flexible monatliche Lieferung"]},
+ {key:"plan",eyebrow:"PLANBAR",title:"12-Monats-Partnerschaft",cta:"Partnerschaft anfragen",
+  mark:"M4 6.5h16v14H4zM4 11h16M8.5 3.5v4M15.5 3.5v4M8 15h2M14 15h2",
+  benefits:["10 % Preisvorteil gegenüber Einzelbestellung","Planbare monatliche Belieferung"]},
+];
 export function BusinessCalculator(){
  const [intent,setIntent]=useState<"wholesale"|"sample">(() => {
    if (typeof window === 'undefined') return "wholesale";
@@ -11,7 +23,7 @@ export function BusinessCalculator(){
  }),[success,setSuccess]=useState(false);
  const choose=(i:"wholesale"|"sample")=>{setIntent(i);track(i==="sample"?"sample_request_start":"wholesale_request_start");document.getElementById("lead")?.scrollIntoView({behavior:"smooth"})};
  const submit=(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);const payload:LeadPayload={lead_type:intent,contact_name:String(f.get("contact_name")),business_name:String(f.get("business_name")),email:String(f.get("email")),city:String(f.get("city")),business_type:String(f.get("business_type")),locations:String(f.get("locations")),pricing_interest:String(f.get("pricing_interest")||""),estimated_monthly_demand:String(f.get("demand")||""),current_supplier:String(f.get("supplier")||""),message:String(f.get("message")||""),created_at:new Date().toISOString()};window.dispatchEvent(new CustomEvent("gloa:b2b-lead",{detail:payload}));track(intent==="sample"?"sample_request_submit":"wholesale_request_submit");setSuccess(true)};
- return <><section className="b2b-compare"><p className="eyebrow">BEZUGSMODELLE</p><h2>Flexibel bestellen<br/><i>oder langfristig profitieren.</i></h2><div className="b2b-compare-grid"><div className="b2b-compare-card"><p className="eyebrow">FLEXIBEL</p><h3>Regelmäßige Belieferung</h3><ul><li>5 % Preisvorteil gegenüber Einzelbestellung</li><li>Flexible monatliche Lieferung</li></ul><button className="cta" onClick={()=>choose("wholesale")}>Konditionen anfragen</button></div><div className="b2b-compare-card"><p className="eyebrow">PLANBAR</p><h3>12-Monats-Partnerschaft</h3><ul><li>10 % Preisvorteil gegenüber Einzelbestellung</li><li>Planbare monatliche Belieferung</li></ul><button className="cta dark" onClick={()=>choose("wholesale")}>Partnerschaft anfragen</button></div></div><p className="b2b-compare-note">Je länger wir deinen Bedarf planen können, desto größer ist dein Preisvorteil. Preise und Konditionen erhältst du auf Anfrage.</p></section>
+ return <><section className="b2b-compare"><div className="b2b-compare-inner home-rail"><div className="b2b-compare-intro"><p className="eyebrow b2b-compare-eyebrow">FLEXIBEL &amp; PLANBAR</p><h2 className="b2b-compare-headline"><span className="b2b-compare-line">Flexibel bestellen</span><i className="b2b-compare-line b2b-compare-line-accent">oder langfristig profitieren.</i></h2><p className="b2b-compare-note">Je länger wir deinen Bedarf planen können, desto größer ist dein Preisvorteil. Preise und Konditionen erhältst du auf Anfrage.</p></div>{b2bModels.map(m=><div className={`b2b-model b2b-model-${m.key}`} key={m.key}><span className="b2b-model-mark"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d={m.mark}/></svg></span><p className="eyebrow b2b-model-eyebrow">{m.eyebrow}</p><h3 className="b2b-model-title">{m.title}</h3><span className="b2b-model-rule" aria-hidden="true"/><ul className="b2b-model-benefits">{m.benefits.map(b=><li key={b}><svg className="b2b-model-check" viewBox="0 0 20 20" width="19" height="19" fill="none" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="9.25" stroke="currentColor" strokeOpacity=".55" strokeWidth="1"/><path d="m6 10.3 2.7 2.7 5.4-5.6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg><span>{b}</span></li>)}</ul><button className="cta b2b-model-cta" onClick={()=>choose("wholesale")}>{m.cta} <span aria-hidden="true">→</span></button></div>)}</div></section>
 
 <section className="b2b-portal-hint"><div><p className="eyebrow">B2B KUNDENPORTAL</p><h2>Preise, Konditionen<br/><i>und dein Dashboard.</i></h2><p>Detaillierte Preise, individuelle Konditionen und ein eigenes B2B-Dashboard, alles in deinem GLOA Geschäftskonto.</p><div className="b2b-portal-hint-actions"><Link className="cta cream" href="/account?type=business">Geschäftskonto erstellen</Link><button className="cta dark" onClick={()=>choose("wholesale")}>B2B-Anfrage starten</button></div></div></section>
 
