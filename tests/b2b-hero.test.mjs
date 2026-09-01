@@ -24,12 +24,14 @@ const site = read("app/GloaSite.tsx");
 const css = read("app/globals.css");
 
 const hero = site.slice(site.indexOf('<section className="b2b-hero"'),
-                        site.indexOf('<section className="quick-facts">'));
+                        site.indexOf('<section className="b2b-facts">'));
 assert.ok(hero.length > 400, "the B2B hero markup was not found");
 
 const blockAt = css.indexOf("/for-cafes PAGE HERO");
 assert.notEqual(blockAt, -1, "the B2B hero CSS block was not found");
-const rules = css.slice(css.lastIndexOf("/*", blockAt));
+// Bounded at the NEXT page block. Without an end this slice runs to the
+// end of the file and silently absorbs whatever is appended after it.
+const rules = css.slice(css.lastIndexOf("/*", blockAt), css.lastIndexOf("/*", css.indexOf("INFO STRIP + MENU SECTION")));
 /* The block opens with a long comment describing what the hero USED to
    be; every structural check reads the comment-free view so that prose
    can never satisfy an assertion. */
@@ -109,11 +111,16 @@ test("2b: the calculator code was not touched", () => {
 
 test("2c: the sections below the hero are untouched", () => {
   const page = site.slice(site.indexOf("function ForCafes()"), site.indexOf("\nfunction BusinessFaq()"));
-  for (const marker of ['<section className="quick-facts">', '<section className="behind-bar">',
-                        "<BusinessCalculator/>", "<BusinessFaq/>", "SHIZUOKA, JAPAN",
-                        "Einfach zubereiten.", "BEISPIELRECHNUNG"]) {
+  // The strip and the menu section below the hero were redesigned in
+  // their own pass - see tests/b2b-menu-section.test.mjs. What this test
+  // guards is that the HERO pass did not reach past them.
+  for (const marker of ['<section className="b2b-facts">', '<section className="b2b-menu">',
+                        "<BusinessCalculator/>", "<BusinessFaq/>",
+                        "Einfach zubereitet.", "BEISPIELRECHNUNG"]) {
     assert.ok(page.includes(marker), `a section below the hero changed: ${marker}`);
   }
+  // The strip facts live in their own const above ForCafes.
+  assert.match(site, /const b2bFacts=\["SHIZUOKA, JAPAN"/);
 });
 
 /* ══════════════════════════════════════════════════════════════
