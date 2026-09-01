@@ -339,7 +339,9 @@ test("5b: every selector is scoped, and nothing else on the page moved", () => {
   assert.match(site, /Einfach zubereitet\./);
   assert.match(site, /Leicht skalierbar\./);
   // And the sections below it.
-  for (const marker of ['className="b2b-steps"', 'className="supply"', 'className="business-support"',
+  // b2b-steps + supply were merged into one .b2b-flow section in a later
+  // pass - see tests/b2b-flow-section.test.mjs.
+  for (const marker of ['className="b2b-flow"', 'className="business-support"',
                         'className="sample-callout"', 'id="lead"']) {
     assert.ok(src.includes(marker), `a section below changed: ${marker}`);
   }

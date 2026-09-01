@@ -22,14 +22,14 @@ const src = read("app/BusinessCalculator.tsx");
 const css = read("app/globals.css");
 
 const section = src.slice(src.indexOf('<section className="b2b-portal-hint">'),
-                          src.indexOf('<section className="b2b-steps">'));
+                          src.indexOf('<section className="b2b-flow">'));
 assert.ok(section.length > 300, "the section markup was not found");
 
 const blockAt = css.indexOf("B2B CUSTOMER PORTAL SECTION");
 assert.notEqual(blockAt, -1, "the CSS block was not found");
 /* Bounded the way the sibling blocks are, so a block appended after this
    one cannot answer for - or trip - an assertion about this section. */
-const rules = css.slice(css.lastIndexOf("/*", blockAt));
+const rules = css.slice(css.lastIndexOf("/*", blockAt), css.lastIndexOf("/*", css.indexOf("PROCESS + ROUTE, MERGED")));
 const code = rules.replace(/\/\*[\s\S]*?\*\//g, "");
 const desktop = code.slice(0, code.indexOf("@media"));
 const mobile = code.slice(code.indexOf("@media (max-width:760px)"));
@@ -275,7 +275,9 @@ test("4c: every selector is scoped, and nothing else on the page moved", () => {
   assert.match(site, /const b2bFacts=\["SHIZUOKA, JAPAN"/);
   assert.match(site, /Einfach zubereitet\./);
   // And everything after it.
-  for (const marker of ['className="b2b-steps"', 'className="supply"', 'className="business-support"',
+  // b2b-steps + supply were merged into one .b2b-flow section in a later
+  // pass - see tests/b2b-flow-section.test.mjs.
+  for (const marker of ['className="b2b-flow"', 'className="business-support"',
                         'className="sample-callout"', 'id="lead"']) {
     assert.ok(src.includes(marker), `a section below changed: ${marker}`);
   }

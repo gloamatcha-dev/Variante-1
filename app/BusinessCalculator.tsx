@@ -16,6 +16,22 @@ const b2bModels=[
   mark:"M4 6.5h16v14H4zM4 11h16M8.5 3.5v4M15.5 3.5v4M8 15h2M14 15h2",
   benefits:["10 % Preisvorteil gegenüber Einzelbestellung","Planbare monatliche Belieferung"]},
 ];
+/* THE B2B FLOW: four process steps and the route they end in, in ONE
+   section. Every icon is a single path on a 24 grid, decorative, with
+   the number and the title beside it carrying the meaning. */
+const b2bFlowSteps:{n:string;title:string;body:[string,string];icon:string}[]=[
+{n:"01",title:"Anfrage stellen",body:["Sag uns, was du brauchst.","Wir melden uns mit einem persönlichen Angebot."],
+ icon:"M4 5.5h16v10h-8.4L7 19.5V15.5H4Z"},
+{n:"02",title:"Modell wählen",body:["Einzelbestellung,","regelmäßige Belieferung oder 12-Monats-Partnerschaft."],
+ icon:"M9 4.5H6.5a1 1 0 0 0-1 1V20a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V5.5a1 1 0 0 0-1-1H15M9 3h6v3H9zM8.5 11.5h7M8.5 15.5h7"},
+{n:"03",title:"Lieferung erhalten",body:["Deine vereinbarte Menge wird","zuverlässig geliefert."],
+ icon:"M3.6 7.4 12 3l8.4 4.4v9.2L12 21l-8.4-4.4V7.4ZM3.6 7.4 12 11.9l8.4-4.5M12 11.9V21"},
+{n:"04",title:"Bedarf anpassen",body:["Zusätzliche Mengen können","bei Bedarf angefragt werden."],
+ icon:"M4 8h9M17 8h3M4 16h3M11 16h9M15 5.5v5M7 13.5v5"},
+];
+/* SHIZUOKA -> GLOA -> DEIN CAFÉ. The middle node names the party that
+   handles the order, not a warehouse location. */
+const b2bFlowRoute:[string,string][]=[["SHIZUOKA","Herkunft"],["GLOA","Abwicklung"],["DEIN CAFÉ","Schnelle Nachbestellung"]];
 export function BusinessCalculator(){
  const [intent,setIntent]=useState<"wholesale"|"sample">(() => {
    if (typeof window === 'undefined') return "wholesale";
@@ -27,9 +43,7 @@ export function BusinessCalculator(){
 
 <section className="b2b-portal-hint"><div className="b2b-portal-inner home-rail"><div className="b2b-portal-copy"><span className="b2b-portal-rule" aria-hidden="true"/><p className="eyebrow b2b-portal-eyebrow">B2B KUNDENPORTAL</p><h2 className="b2b-portal-headline"><span className="b2b-portal-line">Preise, Konditionen</span><i className="b2b-portal-line b2b-portal-line-accent">und dein Dashboard.</i></h2><p className="b2b-portal-lead">Preise, individuelle Konditionen und dein B2B-Dashboard.</p><p className="b2b-portal-sub">Alles gebündelt in deinem GLOA Geschäftskonto.</p><div className="b2b-portal-hint-actions"><Link className="cta b2b-portal-cta" href="/account?type=business">Geschäftskonto erstellen</Link><button className="cta b2b-portal-cta b2b-portal-cta-secondary" onClick={()=>choose("wholesale")}>B2B-Anfrage starten</button></div></div></div></section>
 
-<section className="b2b-steps"><p className="eyebrow">HOW IT WORKS</p><h2>Matcha, bevor<br/><i>er ausgeht.</i></h2><div className="b2b-steps-grid"><article><span>01</span><h3>Anfrage stellen</h3><p>Sag uns, was du brauchst. Wir melden uns mit einem persönlichen Angebot.</p></article><article><span>02</span><h3>Modell wählen</h3><p>Einzelbestellung, regelmäßige Belieferung oder 12-Monats-Partnerschaft.</p></article><article><span>03</span><h3>Monatlich geliefert</h3><p>Deine vereinbarte Menge wird regelmäßig geliefert.</p></article><article><span>04</span><h3>Bedarf anpassen</h3><p>Zusätzliche Mengen können bei Bedarf angefragt werden.</p></article></div></section>
-
-<section className="supply"><p className="eyebrow">AUS JAPAN. LAGER IN DEUTSCHLAND.</p><div className="supply-path"><strong>SHIZUOKA<small>Origin</small></strong><i>&rarr;</i><strong>DEUTSCHLAND<small>Lokaler Bestand</small></strong><i>&rarr;</i><strong>DEIN CAF&Eacute;<small>Schnelle Nachbestellung</small></strong></div><p>Lieferzeit und Verfügbarkeit werden bei Bestellung bestätigt.</p></section>
+<section className="b2b-flow"><div className="b2b-flow-inner home-rail"><div className="b2b-flow-top"><div className="b2b-flow-intro"><p className="eyebrow b2b-flow-eyebrow">SO FUNKTIONIERT&apos;S</p><h2 className="b2b-flow-headline"><span className="b2b-flow-line">Matcha, bevor</span><i className="b2b-flow-line b2b-flow-line-accent">er ausgeht.</i></h2><p className="b2b-flow-support">In vier einfachen Schritten zu deinem Matcha,<br/>passend zu deinem Bedarf.</p></div><ol className="b2b-flow-steps">{b2bFlowSteps.map((s,i)=><li className="b2b-flow-step" key={s.n}>{i>0&&<span className="b2b-flow-step-arrow" aria-hidden="true">→</span>}<span className="b2b-flow-step-mark"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d={s.icon}/></svg></span><span className="b2b-flow-step-number">{s.n}</span><h3 className="b2b-flow-step-title">{s.title}</h3><p className="b2b-flow-step-body">{s.body[0]}<br/>{s.body[1]}</p></li>)}</ol></div><span className="b2b-flow-divider" aria-hidden="true"/><div className="b2b-flow-route"><p className="eyebrow b2b-flow-route-eyebrow">AUS SHIZUOKA.<br/>FÜR DEINE KARTE.</p><div className="b2b-flow-path">{b2bFlowRoute.map(([main,sub],i)=><div className="b2b-flow-node" key={main}>{i>0&&<span className="b2b-flow-node-arrow" aria-hidden="true">→</span>}<span className="b2b-flow-node-main">{main}</span><span className="b2b-flow-node-sub">{sub}</span></div>)}</div><span className="b2b-flow-note-rule" aria-hidden="true"/><p className="b2b-flow-note">Lieferzeit und Verfügbarkeit werden bei Bestellung bestätigt.</p></div></div></section>
 
 <section className="business-support"><p className="eyebrow">MEHR ALS MATCHA</p><h2>Wir helfen dir,<br/><i>Matcha auf die Karte zu bringen.</i></h2><div>{[["REZEPT-GUIDES","Standardisierte Rezepte für gleichbleibende Drinks."],["BAR-SOPs","Klare Abläufe für dein Team."],["TEAM-TRAINING","Kompakte Schulungsmaterialien."],["MENÜ-SUPPORT","Hilfe bei der Integration in deine Karte."],["SOCIAL TOOLKIT","Fertiger Content für deinen Launch."]].map(([a,b])=><article key={a}><h3>{a}</h3><p>{b}</p><small>Verfügbar ab Launch</small></article>)}</div></section>
 

@@ -324,7 +324,7 @@ test("5b: every selector is scoped, and nothing else on the page moved", () => {
   assert.match(after, /<BusinessCalculator\/>/);
   assert.match(after, /<BusinessFaq\/>/);
   assert.match(read("app/BusinessCalculator.tsx"), /className="b2b-compare"/);
-  assert.match(read("app/BusinessCalculator.tsx"), /className="supply"/);
+  assert.match(read("app/BusinessCalculator.tsx"), /className="b2b-flow"/);
   assert.match(read("app/B2bCalculator.tsx"), /export function B2bCalculator\(/);
   // And the other finished pages still have their own blocks.
   for (const marker of ["/about — ONE EDITORIAL SYSTEM", "/our-matcha PAGE HERO", ".home-rail{"]) {
