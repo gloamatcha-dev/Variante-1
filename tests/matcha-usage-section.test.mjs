@@ -22,7 +22,7 @@ const css = read("app/globals.css");
 const data = site.slice(site.indexOf("const usageModes=["), site.indexOf("// The three research blocks."));
 const page = site.slice(site.indexOf("function MatchaPage()"), site.indexOf("\nfunction ", site.indexOf("function MatchaPage()") + 5));
 const section = page.slice(page.indexOf('<section className="matcha-use">'));
-const rules = css.slice(css.indexOf("/our-matcha USAGE SECTION"));
+const rules = css.slice(css.indexOf("/our-matcha USAGE SECTION"), css.indexOf("/our-matcha PRODUCT STORY - THE MOVED AREAS"));
 const rule = name => {
   const at = rules.indexOf(name);
   assert.notEqual(at, -1, `missing rule: ${name}`);

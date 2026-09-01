@@ -21,7 +21,11 @@ const css = read("app/globals.css");
 const page = site.slice(site.indexOf("function MatchaPage()"), site.indexOf("\nfunction ", site.indexOf("function MatchaPage()") + 5));
 const section = page.slice(page.indexOf('<section className="matcha-product">'),
                            page.indexOf('<section className="matcha-shizuoka">'));
-const rules = css.slice(css.indexOf("/our-matcha PRODUCT + TASTE, MERGED"), css.indexOf("/our-matcha RESEARCH SECTION"));
+// The section's styles live in two appended blocks: the original
+// merged one, and the moved areas that came in later. Both belong to
+// the same section, so both are read here.
+const rules = css.slice(css.indexOf("/our-matcha PRODUCT + TASTE, MERGED"), css.indexOf("/our-matcha RESEARCH SECTION"))
+  + css.slice(css.indexOf("/our-matcha PRODUCT STORY - THE MOVED AREAS"));
 const rule = name => {
   const at = rules.indexOf(name);
   assert.notEqual(at, -1, `missing rule: ${name}`);
@@ -54,9 +58,10 @@ test("1: product and taste share one wrapper, and the old pair is gone", () => {
   // ONE SURFACE. The only other background in the block is the 1px
   // divider's own fade, which paints a line rather than an area.
   const surfaces = [...rules.matchAll(/background:([^;}]+)/g)].map(m => m[1].trim());
-  const areas = surfaces.filter(v => !v.startsWith("linear-gradient"));
+  const areas = surfaces.filter(v => !v.startsWith("linear-gradient") && v !== "transparent");
   assert.deepEqual([...new Set(areas)], ["var(--blue)"]);
-  assert.equal(surfaces.length - areas.length, 1, "more than one gradient appeared");
+  assert.equal(surfaces.filter(v => v.startsWith("linear-gradient")).length, 1,
+    "more than one gradient appeared");
   assert.match(css, /--blue:#1746D1;/);
 });
 
@@ -83,23 +88,30 @@ test("2: the copy moved without being rewritten", () => {
   // Five facts, then the taste pair - and no invented sixth cell.
   const facts = section.slice(section.indexOf('className="matcha-fact-grid"'), section.indexOf('className="matcha-taste-block"'));
   assert.deepEqual([...facts.matchAll(/<dt>([^<]+)<\/dt>/g)].map(m => m[1]),
-    ["HERKUNFT", "QUALITÄT", "VERWENDUNG", "GRÖSSEN", "LAGER"]);
+    ["HERKUNFT", "QUALITÄT", "VERWENDUNG", "GRÖSSEN", "BESTAND"]);
   assert.match(rules, /\.matcha-fact-grid\{[\s\S]*?grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
   const pair = section.slice(section.indexOf('className="matcha-taste-pair"'));
   assert.deepEqual([...pair.matchAll(/<dt>([^<]+)<\/dt>/g)].map(m => m[1]), ["GESCHMACK", "AROMA"]);
 
   // ── NO ICONS, NO CARDS ───────────────────────────────────────
-  assert.ok(!/<svg|<img/.test(section), "an icon or image was added");
-  for (const banned of ["border-radius", "box-shadow", "backdrop-filter"]) {
-    assert.ok(!rules.includes(banned), `the section grew a card: ${banned}`);
-  }
+  // No ICONS - the section is typography-led. The one image is the
+  // editorial insert that moved in with "was ist Matcha" (test 7).
+  assert.ok(!/<svg/.test(section), "an icon was added");
+  assert.equal([...section.matchAll(/<img /g)].length, 1, "a second image appeared");
+  // border-radius:0 / box-shadow:none are the photo REFUSING a card, so
+  // the ban is on non-zero values.
+  for (const m of rules.matchAll(/border-radius:([^;}]+)/g)) assert.equal(m[1].trim(), "0");
+  for (const m of rules.matchAll(/box-shadow:([^;}]+)/g)) assert.equal(m[1].trim(), "none");
+  assert.ok(!rules.includes("backdrop-filter"), "the section grew a card");
   // The one gradient in the block belongs to the divider and softens its
   // two ends - it is not an area fill.
   assert.equal([...rules.matchAll(/linear-gradient/g)].length, 1);
   assert.match(rule(".matcha-product-divider{"), /background:linear-gradient\(/);
   // Only the two hairline colours the brief allows.
+  // .3 separates rows INSIDE a block; .24 separates the story's areas.
   for (const m of rules.matchAll(/border-top:1px solid ([^;}]+)/g)) {
-    assert.equal(m[1].trim(), "rgba(245,235,226,.3)");
+    assert.ok(["rgba(245,235,226,.3)", "rgba(245,235,226,.24)"].includes(m[1].trim()),
+      `an unapproved hairline: ${m[1]}`);
   }
 });
 
@@ -223,15 +235,16 @@ test("5: the plum origin block is hidden, and every line of it survives", () => 
   assert.match(read("app/Chrome.tsx"), /tiktok\.com\/@gloa\.matcha/);
 
   // ── NOTHING REPLACED IT, AND NO GAP WAS LEFT ─────────────────
-  // The section carried its own 110px padding, so the blue section and
-  // the berry one below it now meet on their own paddings.
-  assert.match(css, /\.matcha-what\{padding:110px 5vw;background:var\(--berry\)/);
+  // The berry "was ist Matcha" section that used to follow it has since
+  // been absorbed INTO the blue story, so the research section is what
+  // comes next now - and it brings its own padding.
+  assert.match(css, /\.matcha-research\{[\s\S]*?padding-block:clamp\(84px,7vw,110px\)/);
   assert.ok(!page.includes("matcha-origin-spacer") && !page.includes('className="spacer"'),
     "a spacer was left behind");
   // The next section after the hidden block is the one that always
   // followed it - nothing was slotted into the space.
   const after = page.slice(page.indexOf('<section className="matcha-shizuoka">'));
-  assert.match(after.slice(after.indexOf("</section>")), /^<\/section>\}\s*<section className="matcha-what">/,
+  assert.match(after.slice(after.indexOf("</section>")), /^<\/section>\}\s*<section className="matcha-research">/,
     "something was inserted where the section used to be");
 });
 
@@ -270,4 +283,68 @@ test("6: a partial, decorative seam between the two main columns", () => {
   assert.match(rules, /\.matcha-fact-grid>div\{[\s\S]*?border-top:1px solid rgba\(245,235,226,\.3\)/);
   assert.match(rules, /\.matcha-taste-pair>div\{[\s\S]*?border-top:1px solid rgba\(245,235,226,\.3\)/);
   assert.match(rules, /\.matcha-taste-block\{[\s\S]*?border-top:1px solid rgba\(245,235,226,\.3\)/);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   7. THE TWO AREAS THAT MOVED IN
+   ══════════════════════════════════════════════════════════════ */
+
+test("7: what-is-matcha and storage are areas of this section now", () => {
+  // ── ONE SECTION, NOT THREE STACKED ───────────────────────────
+  // Both blocks are children of the SAME rail wrapper as the product
+  // and taste content - not sections of their own that were recoloured.
+  assert.ok(!page.includes('<section className="matcha-what">'), "the berry section still renders");
+  assert.ok(!page.includes('<section className="matcha-storage">'), "the cream storage strip still renders");
+  const inner = section.slice(section.indexOf('className="matcha-product-inner home-rail"'));
+  assert.ok(inner.includes('className="matcha-what-block"'), "what-is-matcha is outside the rail wrapper");
+  assert.ok(inner.includes('className="matcha-storage-row"'), "storage is outside the rail wrapper");
+  assert.match(rules, /\.matcha-what-block,\s*\.matcha-storage-row\{[\s\S]*?grid-column:1\/-1/);
+  // Order: product, taste, what-is-matcha, storage.
+  const order = ["matcha-product-detail", "matcha-taste-block", "matcha-what-block", "matcha-storage-row"];
+  const at = order.map(c => section.indexOf(c));
+  assert.deepEqual(at, [...at].sort((x, y) => x - y), "the four areas are out of order");
+  // Their own full-width backgrounds are gone from the stylesheet.
+  assert.ok(!css.includes(".matcha-what{"), "the berry background survived");
+  assert.ok(!css.includes(".matcha-storage{"), "the cream storage background survived");
+
+  // ── EVERY LINE MOVED UNCHANGED, AND EXACTLY ONCE ─────────────
+  for (const line of [
+    "WAS IST MATCHA", "Pulver statt", "Aufguss.",
+    "Matcha ist gemahlener grüner Tee. Anders als bei klassisch aufgegossenem Tee trinkst du bei Matcha das fein vermahlene Blatt direkt mit, nicht nur den Sud. Deshalb enthält Matcha von Natur aus mehr Koffein, L-Theanin und Catechine wie EGCG als ein Aufguss aus derselben Teemenge. Wie viel genau, hängt unter anderem von Anbau, Ernte, Verarbeitung und Zubereitung ab.",
+    "LAGERUNG",
+    "Kühl, trocken und lichtgeschützt lagern. Nach dem Öffnen gut verschlossen aufbewahren.",
+    "/img/gloa-work.jpg",
+  ]) {
+    assert.ok(section.includes(line), `the move lost: ${line}`);
+    // Counted by splitting rather than by a built regex - these lines
+    // contain brackets and dots that would need escaping twice over.
+    assert.equal(page.split(line).length - 1, 1, `duplicated on the page: ${line}`);
+  }
+
+  // ── THE PHOTO IS AN INSERT, NOT A HERO ───────────────────────
+  const photo = rule(".matcha-what-photo{");
+  assert.match(photo, /width:clamp\(300px,26vw,420px\)/);
+  assert.match(photo, /max-width:420px/);
+  assert.match(photo, /background:transparent/);
+  assert.match(photo, /border:0/);
+  assert.match(photo, /border-radius:0/);
+  assert.match(photo, /box-shadow:none/);
+  assert.match(rules, /\.matcha-what-photo img\{display:block;width:100%;height:auto\}/);
+  assert.ok(!rules.includes("object-fit:cover"), "the photo is cropped again");
+  assert.ok(!css.includes(".matcha-what-img{overflow:hidden;height:480px}"), "the 480px crop survived");
+  assert.match(rules, /@media \(max-width:640px\)\{[\s\S]*?\.matcha-what-photo\{width:100%;max-width:360px/);
+
+  // ── THE STORAGE ROW STAYS A ROW ──────────────────────────────
+  // Two rules carry .matcha-storage-row: the shared one it opens with,
+  // then its own - so the grid is read from the block, not the first hit.
+  assert.match(rules, /\.matcha-storage-row\{[\s\S]*?grid-template-columns:minmax\(0,\.33fr\) minmax\(0,\.67fr\)/);
+  assert.match(rule(".matcha-storage-eyebrow{"), /font-size:var\(--type-meta\)/);
+  assert.match(rule(".matcha-storage-body{"), /font-size:clamp\(15px,1\.1vw,16px\)/);
+  assert.ok(!/matcha-storage-row[^{]*\{[^}]*min-height/.test(rules), "the storage row grew a height");
+
+  // ── THE DIVIDER STILL BELONGS TO THE TOP ROW ONLY ────────────
+  // The moved areas span all three tracks, so they open new grid rows;
+  // the divider stays in the first one.
+  assert.match(rules, /\.matcha-what-block,\s*\.matcha-storage-row\{[\s\S]*?border-top:1px solid rgba\(245,235,226,\.24\)/);
+  assert.ok(section.indexOf("matcha-product-divider") < section.indexOf("matcha-what-block"));
 });
