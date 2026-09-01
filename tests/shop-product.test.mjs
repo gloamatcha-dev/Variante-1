@@ -22,7 +22,7 @@ const css = read("app/globals.css");
 const block = site.slice(site.indexOf("function ShopProductBlock("), site.indexOf("function MatchaShopDetails("));
 const details = site.slice(site.indexOf("function MatchaShopDetails("), site.indexOf("/** Replaces the newsletter signup"));
 const shop = site.slice(site.indexOf("function Shop({onAdd}"), site.indexOf("// -- Product detail ---"));
-const rules = css.slice(css.indexOf("SHOP MATCHA PRODUCT SECTION"));
+const rules = css.slice(css.indexOf("SHOP MATCHA PRODUCT SECTION"), css.indexOf("/our-matcha PAGE HERO"));
 const rule = name => {
   const at = rules.indexOf(name);
   assert.notEqual(at, -1, `missing rule: ${name}`);
@@ -186,7 +186,7 @@ test("5: a product title, not a hero one, on the canonical rail", () => {
   assert.match(rules, /\.shop-product-row \.shop-cta\{[\s\S]*?color:var\(--cream\)/);
   // The rail: the section takes the shared gutter, the row is a
   // narrower INNER block that starts on the same left edge.
-  assert.match(css, /\.shop-column,\s*\.shop-accordion\{padding-inline:var\(--rail-gutter\)\}/);
+  assert.match(css, /\.shop-column,\s*\.shop-accordion,\s*\.matcha-hero\{padding-inline:var\(--rail-gutter\)\}/);
   assert.match(block, /<div className="shop-product-row home-rail">/);
   assert.match(details, /<div className="shop-accordion-inner home-rail">/);
   assert.match(rule(".shop-product-row{"), /max-width:min\(1240px,var\(--rail-max\)\)/);

@@ -33,7 +33,9 @@ test.after(() => {
 // identifies a page to a customer, so it is a fair thing to pin.
 const ROUTES = [
   { path: "/", title: "GLOA · Matcha aus Japan", heading: "<h1>Matcha.<br/><span class=\"hero-line-2\">Is for everyone.</span></h1>" },
-  { path: "/our-matcha", title: "Unser Matcha · GLOA", heading: "<h1>Matcha.<br/><i>Ohne Umwege.</i></h1>" },
+  // Same two lines, now as explicit spans so the sans and the editorial
+  // italic can carry their own scale - see tests/matcha-page-hero.test.mjs.
+  { path: "/our-matcha", title: "Unser Matcha · GLOA", heading: '<h1 class="matcha-hero-headline"><span class="matcha-hero-line">Matcha.</span><i class="matcha-hero-line matcha-hero-line-accent">Ohne Umwege.</i></h1>' },
   { path: "/about", title: "Über GLOA · GLOA", heading: "<h1>Good energy.<br/><i>No theatre.</i></h1>" },
   { path: "/for-cafes", title: "GLOA for Cafés · GLOA", heading: "<h1>Matcha for<br/><i>your menu.</i></h1>" },
   { path: "/rezepte", title: "Matcha Rezepte · GLOA", heading: "<h1>Matcha Rezepte.<br/><i>GLOA Edition.</i></h1>" },
