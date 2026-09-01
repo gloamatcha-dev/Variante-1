@@ -3660,51 +3660,79 @@ header nav{gap:18px;font-size:12px}
   color:rgba(245,235,226,.62);
 }
 
-/* ── 02. WHY GLOA EXISTS - THE SPLIT ───────────────────────── */
-/* Both grounds run edge to edge; only the CONTENT is railed. The left
-   column is exactly half the section, so 100% of the column is half the
-   section width and (100% * 2 - --rail-max) / 2 is the canonical rail
-   inset - the same left edge every other section on the page uses. The
-   right column mirrors it on its own outer edge. */
+/* ── 02. WHY GLOA EXISTS ───────────────────────────────────── */
+/* Was a 50/50 split - a raspberry headline half butted against a cream
+   copy half, with the seam running down the middle of the page and
+   near-black type on the cream side. It was the one section on /about
+   with a shape of its own, and it needed a bespoke rail calculation to
+   sit on the page's left edge at all.
+
+   Now ONE raspberry ground, edge to edge, with both columns on the
+   canonical .home-rail - the same shape MATCHA FOR REAL LIFE and
+   BUILDING GLOA use. The section is a module in a sequence rather than
+   a device, and the rail arithmetic goes with the split.
+
+   THE TYPE IS THE PAGE'S, UNCHANGED. The shared section headline pair
+   (60px sans / 64px italic caps), the 11px/.2em eyebrow every GLOA
+   eyebrow on every finished page uses, and a right column that steps
+   500/18px -> 400/17px -> 500/17px without ever leaving the body role,
+   whose ceiling site-wide is --type-body's 18px. Nothing here is sized
+   for this section alone. */
 .about-why{
-  display:grid;
-  grid-template-columns:repeat(2,minmax(0,1fr));
-  align-items:stretch;
-}
-.about-why-left,
-.about-why-right{
-  display:flex;
-  align-items:center;
-  padding-block:clamp(88px,7.4vw,118px);
-}
-.about-why-left{
   background:var(--berry);
   color:var(--cream);
-  justify-content:flex-end;
-  padding-left:max(var(--rail-gutter),calc((100% * 2 - var(--rail-max)) / 2));
-  padding-right:clamp(28px,3vw,56px);
+  padding-block:clamp(92px,7.8vw,124px);
+  padding-inline:var(--rail-gutter);
 }
-.about-why-right{
-  background:var(--cream);
-  color:var(--ink);
-  padding-left:clamp(28px,3vw,56px);
-  padding-right:max(var(--rail-gutter),calc((100% * 2 - var(--rail-max)) / 2));
+.about-why-inner{
+  display:grid;
+  grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);
+  gap:clamp(40px,4.8vw,88px);
+  align-items:center;
 }
-.about-why-left-inner{display:flex;flex-direction:column;align-items:flex-start;width:100%;min-width:0}
-.about-why-right-inner{width:100%;min-width:0;max-width:520px}
-.about-why-eyebrow{color:var(--cream)}
+.about-why-copy{display:flex;flex-direction:column;align-items:flex-start;min-width:0}
+.about-why-eyebrow{color:rgba(245,235,226,.72)}
 .about-why-headline{color:var(--cream)}
-.about-why-right-inner p{
-  margin:0 0 clamp(18px,1.6vw,22px);
+
+/* ── THE RIGHT COLUMN: THREE BLOCKS, ONE ROLE ──────────────── */
+.about-why-detail{min-width:0;max-width:560px}
+/* The opening claim carries the section, so it is the heaviest and the
+   largest the body role goes - not a fourth type size. */
+.about-why-lead{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:500;
+  font-style:normal;
+  font-size:clamp(17px,1.45vw,18px);
+  line-height:1.5;
+  letter-spacing:0;
+  color:var(--cream);
+}
+.about-why-body{
+  margin:clamp(24px,2.4vw,32px) 0 0;
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:400;
   font-style:normal;
   font-size:clamp(16px,1.3vw,17px);
-  line-height:1.62;
+  line-height:1.6;
   letter-spacing:0;
-  color:var(--ink);
+  color:var(--cream);
 }
-.about-why-right-inner p:last-child{margin-bottom:0}
+/* THE ONE HAIRLINE IN THIS SECTION. The four closing lines are its
+   cadence, so they get a rule and their own leading - not a card, not a
+   box, not a second background. */
+.about-why-close{
+  margin:clamp(28px,2.8vw,40px) 0 0;
+  padding-top:clamp(26px,2.6vw,34px);
+  border-top:1px solid rgba(245,235,226,.22);
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:500;
+  font-style:normal;
+  font-size:clamp(16px,1.3vw,17px);
+  line-height:1.85;
+  letter-spacing:0;
+  color:var(--cream);
+}
 
 /* ── 03. MATCHA FOR REAL LIFE ──────────────────────────────── */
 .about-real{
@@ -3974,16 +4002,14 @@ header nav{gap:18px;font-size:12px}
   .about-hero-lead,.about-hero-sub{max-width:none;font-size:16px}
   .about-hero-meta{flex-direction:row;flex-wrap:wrap;gap:6px 18px;font-size:10px;letter-spacing:.12em}
 
-  /* The split stacks; both halves take the canonical mobile gutter. */
-  .about-why{grid-template-columns:1fr}
-  .about-why-left,
-  .about-why-right{
-    padding-block:clamp(56px,10vw,72px);
-    padding-left:var(--rail-gutter);
-    padding-right:var(--rail-gutter);
-  }
-  .about-why-right-inner{max-width:none}
-  .about-why-right-inner p{font-size:16px}
+  /* Eyebrow, headline, then the copy - one column, with air between
+     the two blocks rather than a squeezed 50/50. */
+  .about-why{padding-block:clamp(64px,11vw,86px)}
+  .about-why-inner{grid-template-columns:1fr;gap:clamp(30px,4.5vw,44px);align-items:start}
+  .about-why-detail{max-width:none}
+  .about-why-lead{font-size:17px}
+  .about-why-body,
+  .about-why-close{font-size:16px}
 
   .about-real{padding-block:clamp(60px,11vw,80px)}
   .about-real-body{max-width:none;font-size:16px}

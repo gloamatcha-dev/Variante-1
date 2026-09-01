@@ -39,15 +39,6 @@ const rule = name => {
   assert.notEqual(at, -1, `missing rule: ${name}`);
   return code.slice(at, code.indexOf("}", at));
 };
-/* The standalone rule for a selector that also appears in a grouped one
-   - .about-why-right is in both. */
-const ruleAfter = (anchor, name) => {
-  const from = code.indexOf(anchor);
-  assert.notEqual(from, -1, `missing anchor: ${anchor}`);
-  const at = code.indexOf(name, from + anchor.length);
-  assert.notEqual(at, -1, `missing rule: ${name}`);
-  return code.slice(at, code.indexOf("}", at));
-};
 /* Desktop rules only - everything before the first @media. */
 const desktop = code.slice(0, code.indexOf("@media"));
 const mobile = code.slice(code.indexOf("@media (max-width:900px)"));
@@ -56,7 +47,7 @@ const mobile = code.slice(code.indexOf("@media (max-width:900px)"));
    1. THE SECTION SEQUENCE AND ITS GROUNDS
    ══════════════════════════════════════════════════════════════ */
 
-test("1: seven sections, in the intended blue/split/cream/plum rhythm", () => {
+test("1: seven sections, in the intended blue/raspberry/cream/plum rhythm", () => {
   const order = [...about.matchAll(/<section className="(about-[a-z]+)"/g)].map(m => m[1]);
   assert.deepEqual(order, [
     "about-hero", "about-why", "about-real",
@@ -66,10 +57,7 @@ test("1: seven sections, in the intended blue/split/cream/plum rhythm", () => {
   const ground = (sel, token) =>
     assert.match(rule(sel), new RegExp(`background:var\\(--${token}\\)`), `${sel} is not ${token}`);
   ground(".about-hero{", "blue");
-  // Both halves of the split share a grouped rule first, so these two
-  // are looked up after it.
-  assert.match(ruleAfter(".about-why-left,", ".about-why-left{"), /background:var\(--berry\)/);
-  assert.match(ruleAfter(".about-why-left{", ".about-why-right{"), /background:var\(--cream\)/);
+  ground(".about-why{", "berry");
   ground(".about-real{", "cream");
   ground(".about-origin{", "plum");
   ground(".about-cares{", "cream");
@@ -113,7 +101,7 @@ test("1b: no gradient, no card, no pill, no shadow, no glass", () => {
    ══════════════════════════════════════════════════════════════ */
 
 test("2: every height is content-driven - no min-height, no vh", () => {
-  // The 630px hero and the 600px split were what produced the empty
+  // The 630px hero and the 600px split half were what produced the empty
   // blue and raspberry stripes between sections. What is left is the
   // shared button box (52/54px, a tap target), and ONE deliberate
   // content floor on the hero grid - the height the brief specifies for
@@ -243,7 +231,7 @@ test("3d: one eyebrow rule for all six eyebrows, at 11px / .2em", () => {
 });
 
 test("3e: body copy is 16-17px everywhere, and 16px on mobile", () => {
-  for (const sel of [".about-hero-lead,", ".about-why-right-inner p{", ".about-real-body{",
+  for (const sel of [".about-hero-lead,", ".about-why-body{", ".about-real-body{",
                      ".about-origin-body{", ".about-tiktok-body{"]) {
     assert.match(rule(sel), /font-size:clamp\(16px,1\.3vw,17px\)/, `${sel} is off the body role`);
     assert.match(rule(sel), /line-height:1\.5[5-9]|line-height:1\.6[0-9]?/, `${sel} is off the body leading`);
@@ -279,8 +267,8 @@ test("3f: two families, and only two", () => {
    ══════════════════════════════════════════════════════════════ */
 
 test("4: every section content block sits on the canonical rail", () => {
-  // Five sections use the shared utility inside a full-width ground.
-  for (const inner of ["about-hero-inner", "about-real-inner", "about-origin-inner",
+  // All seven sections use the shared utility inside a full-width ground.
+  for (const inner of ["about-hero-inner", "about-why-inner", "about-real-inner", "about-origin-inner",
                        "about-cares-inner", "about-tiktok-inner", "about-final-inner"]) {
     assert.ok(about.includes(`className="${inner} home-rail"`), `${inner} is off the rail`);
   }
@@ -294,31 +282,81 @@ test("4: every section content block sits on the canonical rail", () => {
   assert.ok(!/padding[^;}]*\dvw/.test(desktop.replace(/clamp\([^)]*\)/g, "")),
     "a section-specific vw gutter survived");
 
-  // The split is the one shape .home-rail cannot express, so it derives
-  // the SAME inset from its own half-width column.
-  const inset = "max(var(--rail-gutter),calc((100% * 2 - var(--rail-max)) / 2))";
-  assert.ok(ruleAfter(".about-why-left,", ".about-why-left{").includes(`padding-left:${inset}`));
-  assert.ok(ruleAfter(".about-why-left{", ".about-why-right{").includes(`padding-right:${inset}`));
-  // And on mobile both halves fall back to the plain token.
-  assert.match(mobile, /padding-left:var\(--rail-gutter\);\s*padding-right:var\(--rail-gutter\);/);
+  // ALL SEVEN sections are now the same shape - a full-width ground
+  // handing its gutter to the token, with .home-rail inside. The
+  // half-column rail arithmetic the old 50/50 split needed is gone,
+  // and with it the last bespoke geometry on the page.
+  assert.ok(!code.includes("100% * 2"), "the split's bespoke rail maths survived");
+  assert.equal([...about.matchAll(/ home-rail"/g)].length, 7,
+    "a section content block is off the shared rail utility");
+  assert.equal([...code.matchAll(/padding-inline:var\(--rail-gutter\)/g)].length, 7,
+    "a section ground is not on the shared gutter");
 });
 
 /* ══════════════════════════════════════════════════════════════
    5. LAYOUT SHAPES
    ══════════════════════════════════════════════════════════════ */
 
-test("5: the split is 50/50 with no gap and no radius", () => {
-  const split = rule(".about-why{");
-  assert.match(split, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
-  assert.ok(!/\bgap:/.test(split), "the split halves were given a gap");
-  assert.ok(!/border-radius/.test(split));
-  // Both columns are centred on the same vertical zone.
-  for (const sel of [".about-why-left,"]) assert.match(rule(sel), /align-items:center/);
-  // It stacks - headline block first, copy block second - on mobile.
-  assert.match(mobile, /\.about-why\{grid-template-columns:1fr\}/);
-  const left = about.indexOf("about-why-left");
-  const right = about.indexOf("about-why-right");
-  assert.ok(left > 0 && left < right, "the raspberry headline block is not first in source order");
+test("5: WHY GLOA EXISTS is ONE raspberry ground, not a split", () => {
+  // The cream half, the seam and the near-black copy are gone, and so
+  // is the bespoke half-column rail arithmetic the split needed.
+  assert.ok(!about.includes("about-why-left") && !about.includes("about-why-right"),
+    "a half of the old split survived in the markup");
+  assert.ok(!code.includes("about-why-left") && !code.includes("about-why-right"),
+    "a half of the old split survived in the CSS");
+  const why = rule(".about-why{");
+  assert.match(why, /background:var\(--berry\)/);
+  assert.match(why, /color:var\(--cream\)/);
+  assert.ok(!/var\(--ink\)/.test(rules.slice(rules.indexOf(".about-why{"), rules.indexOf("/* ── 03"))),
+    "near-black type survived in the raspberry section");
+  // It is a normal railed section now, exactly like the other five.
+  assert.match(why, /padding-inline:var\(--rail-gutter\)/);
+  assert.ok(about.includes('className="about-why-inner home-rail"'));
+
+  // Two columns, headline-dominant, with a real column gap.
+  const inner = rule(".about-why-inner{");
+  assert.match(inner, /grid-template-columns:minmax\(0,1\.05fr\) minmax\(0,\.95fr\)/);
+  assert.match(inner, /gap:clamp\(40px,4\.8vw,88px\)/);
+  assert.match(inner, /align-items:center/);
+  assert.ok(!/border-radius|box-shadow|background/.test(inner), "the columns grew a container");
+
+  // Eyebrow, headline, then copy - the order the stacked view needs.
+  assert.ok(about.indexOf("about-why-eyebrow") < about.indexOf("about-why-headline"));
+  assert.ok(about.indexOf("about-why-headline") < about.indexOf("about-why-detail"));
+  assert.match(mobile, /\.about-why-inner\{grid-template-columns:1fr/);
+});
+
+test("5a: the right column is three blocks that never leave the body role", () => {
+  for (const cls of ["about-why-lead", "about-why-body", "about-why-close"]) {
+    assert.ok(about.includes(`className="${cls}"`), `${cls} is not rendered`);
+  }
+  // 500/18 -> 400/17 -> 500/17. A step in weight and one in size, and
+  // the top of it is --type-body's own 18px ceiling.
+  const lead = rule(".about-why-lead{");
+  assert.match(lead, /font-weight:500/);
+  assert.match(lead, /font-size:clamp\(17px,1\.45vw,18px\)/);
+  assert.match(rule(".about-why-body{"), /font-weight:400/);
+  assert.match(rule(".about-why-body{"), /font-size:clamp\(16px,1\.3vw,17px\)/);
+  assert.match(rule(".about-why-close{"), /font-weight:500/);
+  const bodyCap = Number(/clamp\([\d.]+px,[\d.]+vw,([\d.]+)px\)/.exec(/--type-body:([^;]+);/.exec(css)[1])[1]);
+  for (const sel of [".about-why-lead{", ".about-why-body{", ".about-why-close{"]) {
+    const px = Number(/font-size:clamp\([\d.]+px,[\d.]+vw,([\d.]+)px\)/.exec(rule(sel))[1]);
+    assert.ok(px <= bodyCap, `${sel} (${px}px) is above the site body ceiling (${bodyCap}px)`);
+  }
+  // All three are cream, and the blocks are separated by space.
+  for (const sel of [".about-why-lead{", ".about-why-body{", ".about-why-close{"]) {
+    assert.match(rule(sel), /color:var\(--cream\)/, `${sel} is not cream`);
+  }
+  assert.match(rule(".about-why-body{"), /margin:clamp\(24px,2\.4vw,32px\) 0 0/);
+  assert.match(rule(".about-why-close{"), /margin:clamp\(28px,2\.8vw,40px\) 0 0/);
+  // One subtle hairline, inside the dark-ground band the rest of the
+  // site uses (.20-.28), and no box around anything.
+  const close = rule(".about-why-close{");
+  assert.match(close, /border-top:1px solid rgba\(245,235,226,\.22\)/);
+  // Exactly one such rule - the section grew no second divider.
+  assert.equal([...code.matchAll(/rgba\(245,235,226,\.22\)/g)].length, 1);
+  assert.match(close, /line-height:1\.85/);
+  assert.match(rule(".about-why-detail{"), /max-width:560px/);
 });
 
 test("5b: Herkunft is a compact band, with a decorative line mark", () => {
