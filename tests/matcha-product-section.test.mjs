@@ -179,7 +179,7 @@ test("4: two families, cream on blue, canonical rail", () => {
   assert.match(rule(".matcha-product-intro{"), /font-size:var\(--type-body\)/);
 
   // ── RAIL, RATIO, HEIGHT ──────────────────────────────────────
-  assert.match(css, /\.matcha-hero,\s*\.matcha-product,\s*\.matcha-research\{padding-inline:var\(--rail-gutter\)\}/);
+  assert.match(css, /\.matcha-hero,\s*\.matcha-product,\s*\.matcha-research,\s*\.matcha-use\{padding-inline:var\(--rail-gutter\)\}/);
   assert.match(rules, /\.matcha-product-inner\{[\s\S]*?grid-template-columns:minmax\(0,\.45fr\) 1px minmax\(0,\.55fr\)/);
   assert.match(rules, /\.matcha-product-inner\{[\s\S]*?align-items:start/);
   assert.match(rules, /\.matcha-product\{[\s\S]*?padding-block:clamp\(90px,8vw,110px\)/);
@@ -228,7 +228,10 @@ test("5: the plum origin block is hidden, and every line of it survives", () => 
   assert.match(css, /\.matcha-what\{padding:110px 5vw;background:var\(--berry\)/);
   assert.ok(!page.includes("matcha-origin-spacer") && !page.includes('className="spacer"'),
     "a spacer was left behind");
-  assert.ok(!/\{SHOW_LEGACY_ORIGIN_SECTION&&<section className="matcha-shizuoka">[\s\S]*?\}\s*<section className="matcha-(?!what)/.test(page),
+  // The next section after the hidden block is the one that always
+  // followed it - nothing was slotted into the space.
+  const after = page.slice(page.indexOf('<section className="matcha-shizuoka">'));
+  assert.match(after.slice(after.indexOf("</section>")), /^<\/section>\}\s*<section className="matcha-what">/,
     "something was inserted where the section used to be");
 });
 

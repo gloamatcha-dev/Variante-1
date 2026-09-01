@@ -545,6 +545,38 @@ const matchaFaq:[string,string][]=[
  */
 const SHOW_LEGACY_ORIGIN_SECTION:boolean=false;
 
+/**
+ * The legacy step-by-step preparation section on /our-matcha.
+ *
+ * HIDDEN, NOT DELETED. "Drei Wege. Alle einfach.", all three
+ * articles, every step, the closing note and the .matcha-howto /
+ * .matcha-method-grid styles are exactly where they were.
+ *
+ * The two pages have different jobs: the homepage HOW TO GLOA
+ * section explains how to MAKE it, and this page now explains how
+ * you can DRINK it. A second set of instructions here was the same
+ * answer to a question the page was not asking.
+ */
+const SHOW_LEGACY_PREPARATION_SECTION:boolean=false;
+
+// The three ways to drink GLOA. Deliberately NOT preparation steps:
+// no dose, no temperature, no numbered instructions. Icons are inline
+// SVG on currentColor, in the same 22px / 1.6 stroke language as the
+// homepage how-to marks, and decorative - the label carries the meaning.
+const usageModes=[{
+  number:"01",label:"LATTE",
+  body:<>Cremig, warm oder kalt.<br/>Mit Milch oder Pflanzendrink.</>,
+  icon:<svg className="matcha-use-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M5.2 5.4h10.3v9.4a4.6 4.6 0 0 1-4.6 4.6h-1.1a4.6 4.6 0 0 1-4.6-4.6z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/><path d="M15.5 8.1h1.8a2.5 2.5 0 0 1 0 5h-1.8" fill="none" stroke="currentColor" strokeWidth="1.6"/></svg>,
+},{
+  number:"02",label:"ICED",
+  body:<>Erfrischend, klar und leicht.<br/>Auf Eis, für unterwegs oder heiße Tage.</>,
+  icon:<svg className="matcha-use-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M7.1 7.2h9.1l-1 12a1.6 1.6 0 0 1-1.6 1.5h-3.9a1.6 1.6 0 0 1-1.6-1.5z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/><path d="M13.6 7.2 16.9 3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/><path d="M7.6 11.6h8.1" fill="none" stroke="currentColor" strokeWidth="1.6"/></svg>,
+},{
+  number:"03",label:"PUR",
+  body:<>Nur Matcha und Wasser.<br/>Direkt, klar, ohne Umwege.</>,
+  icon:<svg className="matcha-use-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M3.6 10.8h16.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/><path d="M5.1 10.8a6.9 6.9 0 0 0 13.8 0" fill="none" stroke="currentColor" strokeWidth="1.6"/><path d="M9.8 7.6c0-1.2 1.3-1.6 1.3-2.8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/><path d="M13.6 7.6c0-1.2 1.3-1.6 1.3-2.8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>,
+}];
+
 // The three research blocks. Inline SVG rather than an icon package:
 // three 22px line marks are not worth a dependency, and drawing them
 // here keeps them on currentColor, which is what makes them raspberry.
@@ -575,9 +607,9 @@ function MatchaPage(){return <main className="matcha-page">
 
 <section className="matcha-research"><div className="matcha-research-inner home-rail"><div className="matcha-research-copy"><p className="eyebrow matcha-research-eyebrow">MATCHA & SCIENCE</p><h2 className="matcha-research-headline"><span className="matcha-research-line">Forschung.</span><i className="matcha-research-line matcha-research-line-accent">Ehrlich eingeordnet.</i></h2><p className="matcha-research-intro">Wir wollen nichts versprechen, was sich nicht belegen lässt. Deshalb trennen wir hier klar, was Matcha enthält, was untersucht wurde und was offen bleibt.</p><p className="matcha-research-note">Wir behaupten nichts, was wir nicht belegen können.</p></div><div className="matcha-research-grid">{researchBlocks.map(b=><article className="matcha-research-block" key={b.label}><div className="matcha-research-head">{b.icon}<h3 className="matcha-research-label">{b.label}</h3></div><p className="matcha-research-body">{b.body}</p></article>)}</div></div></section>
 
-<section className="matcha-howto"><div className="section-head"><div><p className="eyebrow">ZUBEREITUNG</p><h2>Drei Wege.<br/><i>Alle einfach.</i></h2></div></div><div className="matcha-method-grid"><article><span>01</span><h3>Matcha Latte</h3><ol><li>Ca. 3 g Matcha mit wenig heißem Wasser (ca. 80 °C) glattrühren.</li><li>Milch oder Pflanzendrink erwärmen und dazugeben.</li><li>Heiß genießen.</li></ol></article><article><span>02</span><h3>Iced Matcha</h3><ol><li>Ca. 3 g Matcha mit wenig heißem Wasser (ca. 80 °C) glattrühren.</li><li>Über Eis geben.</li><li>Kalte Milch oder Pflanzendrink dazugeben.</li></ol></article><article><span>03</span><h3>Pure Matcha</h3><ol><li>Ca. 3 g Matcha mit wenig heißem Wasser (ca. 80 °C) glattrühren.</li><li>Mit ca. 60-70 ml Wasser aufgießen.</li><li>Direkt genießen.</li></ol></article></div><p className="matcha-section-text">Mengenangaben sind Zubereitungsempfehlungen, pass sie gern an deinen Geschmack an.</p></section>
+{SHOW_LEGACY_PREPARATION_SECTION&&<section className="matcha-howto"><div className="section-head"><div><p className="eyebrow">ZUBEREITUNG</p><h2>Drei Wege.<br/><i>Alle einfach.</i></h2></div></div><div className="matcha-method-grid"><article><span>01</span><h3>Matcha Latte</h3><ol><li>Ca. 3 g Matcha mit wenig heißem Wasser (ca. 80 °C) glattrühren.</li><li>Milch oder Pflanzendrink erwärmen und dazugeben.</li><li>Heiß genießen.</li></ol></article><article><span>02</span><h3>Iced Matcha</h3><ol><li>Ca. 3 g Matcha mit wenig heißem Wasser (ca. 80 °C) glattrühren.</li><li>Über Eis geben.</li><li>Kalte Milch oder Pflanzendrink dazugeben.</li></ol></article><article><span>03</span><h3>Pure Matcha</h3><ol><li>Ca. 3 g Matcha mit wenig heißem Wasser (ca. 80 °C) glattrühren.</li><li>Mit ca. 60-70 ml Wasser aufgießen.</li><li>Direkt genießen.</li></ol></article></div><p className="matcha-section-text">Mengenangaben sind Zubereitungsempfehlungen, pass sie gern an deinen Geschmack an.</p></section>}
 
-<section className="matcha-use"><p className="eyebrow">VERWENDUNG</p><h2>Latte. Iced. Pur.<br/><i>Deine Wahl.</i></h2><div className="matcha-use-grid"><div><strong>LATTE</strong><p>Mit Milch oder Pflanzendrink, warm oder kalt aufgeschäumt. Der einfachste Einstieg in den Alltag.</p></div><div><strong>ICED</strong><p>Über Eis gegossen, cremig und erfrischend. Für unterwegs oder heiße Tage.</p></div><div><strong>PUR</strong><p>Nur Matcha und Wasser. Direkt, klar, ohne Umwege.</p></div></div></section>
+<section className="matcha-use"><div className="matcha-use-inner home-rail"><div className="matcha-use-head"><p className="eyebrow matcha-use-eyebrow">VERWENDUNG</p><h2 className="matcha-use-headline"><span className="matcha-use-line">Latte. Iced. Pur.</span><i className="matcha-use-line matcha-use-line-accent">Deine Wahl.</i></h2></div><div className="matcha-use-grid">{usageModes.map(m=><article className="matcha-use-item" key={m.label}><div className="matcha-use-meta">{m.icon}<span className="matcha-use-number">{m.number}</span></div><h3 className="matcha-use-label">{m.label}</h3><span className="matcha-use-rule" aria-hidden="true"/><p className="matcha-use-body">{m.body}</p></article>)}</div></div></section>
 
 <section className="matcha-image"><img src="/img/gloa-iced.jpg" alt="Iced Matcha von GLOA"/></section>
 

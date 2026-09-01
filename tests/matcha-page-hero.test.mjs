@@ -140,7 +140,7 @@ test("3: two families, unchanged copy, canonical rail", () => {
 
   // ── THE RAIL, AND A CONTENT-DRIVEN HEIGHT ────────────────────
   assert.match(hero, /<div className="matcha-hero-inner home-rail">/);
-  assert.match(css, /\.shop-accordion,\s*\.matcha-hero,\s*\.matcha-product,\s*\.matcha-research\{padding-inline:var\(--rail-gutter\)\}/);
+  assert.match(css, /\.shop-accordion,\s*\.matcha-hero,\s*\.matcha-product,\s*\.matcha-research,\s*\.matcha-use\{padding-inline:var\(--rail-gutter\)\}/);
   assert.match(rules, /\.matcha-hero-inner\{[\s\S]*?grid-template-columns:minmax\(0,\.95fr\) minmax\(0,1\.05fr\)/);
   assert.match(rules, /\.matcha-hero\{[\s\S]*?padding-block:clamp\(72px,7vw,110px\)/);
   assert.ok(!rules.includes("100vh"), "the hero reserves a viewport");

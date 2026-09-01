@@ -22,7 +22,7 @@ const data = site.slice(site.indexOf("const researchBlocks=["), site.indexOf("fu
 const page = site.slice(site.indexOf("function MatchaPage()"), site.indexOf("\nfunction ", site.indexOf("function MatchaPage()") + 5));
 const section = page.slice(page.indexOf('<section className="matcha-research">'),
                            page.indexOf('<section className="matcha-howto">'));
-const rules = css.slice(css.indexOf("/our-matcha RESEARCH SECTION"));
+const rules = css.slice(css.indexOf("/our-matcha RESEARCH SECTION"), css.indexOf("/our-matcha USAGE SECTION"));
 const rule = name => {
   const at = rules.indexOf(name);
   assert.notEqual(at, -1, `missing rule: ${name}`);
@@ -185,7 +185,7 @@ test("4: a section, not a hero - and it stacks cleanly", () => {
 
   // ── RAIL AND RESPONSIVE ──────────────────────────────────────
   assert.match(section, /<div className="matcha-research-inner home-rail">/);
-  assert.match(css, /\.matcha-product,\s*\.matcha-research\{padding-inline:var\(--rail-gutter\)\}/);
+  assert.match(css, /\.matcha-research,\s*\.matcha-use\{padding-inline:var\(--rail-gutter\)\}/);
   assert.match(rules, /\.matcha-research-inner\{[\s\S]*?grid-template-columns:minmax\(0,\.33fr\) minmax\(0,\.67fr\)/);
   assert.match(rules, /\.matcha-research\{[\s\S]*?padding-block:clamp\(84px,7vw,110px\)/);
   assert.ok(!rules.includes("100vh"), "the section reserves a viewport");
