@@ -30,7 +30,9 @@ const data = src.slice(dataFrom, src.indexOf("];", src.indexOf("=[", dataFrom)))
 
 const blockAt = css.indexOf("MEHR ALS MATCHA, THE SUPPORT SECTION");
 assert.notEqual(blockAt, -1, "the CSS block was not found");
-const rules = css.slice(css.lastIndexOf("/*", blockAt));
+// Bounded at the NEXT page block, so a block appended after this one
+// cannot answer for - or trip - an assertion about this section.
+const rules = css.slice(css.lastIndexOf("/*", blockAt), css.lastIndexOf("/*", css.indexOf("THE SAMPLE CALLOUT AND THE B2B FORM")));
 const code = rules.replace(/\/\*[\s\S]*?\*\//g, "");
 const desktop = code.slice(0, code.indexOf("@media"));
 const mobile = code.slice(code.indexOf("@media (max-width:760px)"));
