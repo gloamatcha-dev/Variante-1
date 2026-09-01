@@ -36,7 +36,9 @@ const ROUTES = [
   // Same two lines, now as explicit spans so the sans and the editorial
   // italic can carry their own scale - see tests/matcha-page-hero.test.mjs.
   { path: "/our-matcha", title: "Unser Matcha · GLOA", heading: '<h1 class="matcha-hero-headline"><span class="matcha-hero-line">Matcha.</span><i class="matcha-hero-line matcha-hero-line-accent">Ohne Umwege.</i></h1>' },
-  { path: "/about", title: "Über GLOA · GLOA", heading: "<h1>Good energy.<br/><i>No theatre.</i></h1>" },
+  // Same two lines, now as explicit spans so the sans and the editorial
+  // italic can carry their own scale - see tests/about-page-system.test.mjs.
+  { path: "/about", title: "Über GLOA · GLOA", heading: '<h1 class="about-hero-headline"><span class="about-hero-line">Good energy.</span><i class="about-hero-line about-hero-line-accent">No theatre.</i></h1>' },
   { path: "/for-cafes", title: "GLOA for Cafés · GLOA", heading: "<h1>Matcha for<br/><i>your menu.</i></h1>" },
   { path: "/rezepte", title: "Matcha Rezepte · GLOA", heading: "<h1>Matcha Rezepte.<br/><i>GLOA Edition.</i></h1>" },
   { path: "/contact", title: "Contact GLOA · GLOA", heading: "<h1>Schreib<br/><i>uns.</i></h1>" },
