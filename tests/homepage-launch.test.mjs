@@ -1029,18 +1029,13 @@ test("33: the section is compact, railed and deliberately smaller than the hero"
     assert.ok(!originCss.includes(banned), `the origin section uses ${banned}`);
   }
 
-  // THE HIERARCHY. Origin caps at 64/68px; the hero runs to 100px and the
-  // lifestyle statement to 74px, so the page keeps hero > lifestyle >
-  // origin rather than two competing headlines.
-  const cap = re => Number(re.exec(originCss)?.[1]);
-  const shizuoka = cap(/\.origin-line\{[\s\S]*?font-size:clamp\([^,]+,[^,]+,(\d+)px\)/);
-  const japan = cap(/\.origin-line-accent\{[\s\S]*?font-size:clamp\([^,]+,[^,]+,(\d+)px\)/);
-  assert.equal(shizuoka, 64);
-  assert.equal(japan, 68);
-  const heroCap = Number(/\.hero \.hero-copy h1\{[\s\S]*?font-size:clamp\([^,]+,[^,]+,(\d+)px\)/.exec(heroCss)?.[1]);
-  const lifestyleCap = Number(/\.daily-line\{[\s\S]*?font-size:clamp\([^,]+,[^,]+,(\d+)px\)/.exec(dailyCss)?.[1]);
-  assert.ok(japan < lifestyleCap, "origin is not smaller than the lifestyle statement");
-  assert.ok(lifestyleCap < heroCap, "the lifestyle statement is not smaller than the hero");
+  // THE HIERARCHY IS A SHARED SCALE NOW, not a per-section number: the
+  // whole page below the hero reads from the same two tokens. Test 43
+  // proves the tokens themselves stay under the hero at every width.
+  assert.match(originCss, /\.origin-line\{[\s\S]*?font-size:var\(--type-title\)/);
+  assert.match(originCss, /\.origin-line-accent\{[\s\S]*?font-size:var\(--type-editorial\)/);
+  assert.ok(!/\.origin-line(-accent)?\{[^}]*font-size:clamp/.test(originCss),
+    "the origin section went back to a scale of its own");
 
   // Two columns with a short, centred raspberry seam between them.
   // The facts take a fixed compact column that ends ON the right rail;
@@ -1071,7 +1066,7 @@ test("34: the origin type stays inside the two families", () => {
   // The eyebrow matches the site's meta voice exactly.
   const eyebrow = originCss.slice(originCss.indexOf(".origin-eyebrow{"), originCss.indexOf("}", originCss.indexOf(".origin-eyebrow{")));
   assert.match(eyebrow, /font-weight:600/);
-  assert.match(eyebrow, /font-size:11px/);
+  assert.match(eyebrow, /font-size:var\(--type-meta\)/);
   assert.match(eyebrow, /letter-spacing:\.2em/);
   assert.match(eyebrow, /text-transform:uppercase/);
   assert.match(eyebrow, /color:var\(--berry\)/);
@@ -1208,12 +1203,13 @@ test("37: the section sits on the canonical content rail and is compact", () => 
   // The retired layout was a flat 110px of padding; this one is capped
   // well under it and is the smallest headline on the page.
   assert.ok(!howToCss.includes("110px"), "the retired padding is back");
-  const cap = name => Number(/clamp\([^,]+,[^,]+,(\d+)px\)/.exec(name)[1]);
-  const heroCap = cap(/\.hero \.hero-copy h1\{[\s\S]*?(font-size:clamp\([^)]*\))/.exec(cssBlock(HERO_BLOCK, PRELAUNCH_BLOCK))[1]);
-  const originCap = cap(/\.origin-line-accent\{[\s\S]*?(font-size:clamp\([^)]*\))/.exec(originCss)[1]);
-  const mineCap = cap(/\.how-to-line-accent\{[\s\S]*?(font-size:clamp\([^)]*\))/.exec(howToCss)[1]);
-  assert.ok(mineCap < originCap, "the how-to headline is not smaller than the origin headline");
-  assert.ok(mineCap < heroCap / 1.5, "the how-to headline reads as a second hero");
+  // This section used to run at 46/50px - the smallest headline on the
+  // page - which was its own scale rather than the shared one. It is a
+  // SECTION TITLE like the others now; test 43 owns the hierarchy.
+  assert.match(howToCss, /\.how-to-line\{[\s\S]*?font-size:var\(--type-title\)/);
+  assert.match(howToCss, /\.how-to-line-accent\{[\s\S]*?font-size:var\(--type-editorial\)/);
+  assert.ok(!/\.how-to-line(-accent)?\{[^}]*font-size:clamp/.test(howToCss),
+    "the how-to section went back to a scale of its own");
 
   // One hairline across the top of the block, and no table borders.
   assert.match(howToCss, /\.how-to-inner\{[\s\S]*?border-top:1px solid rgba\(245,235,226,\.28\)/);
@@ -1377,11 +1373,13 @@ test("40: the head is on the rail and the sub line moved below the drinks", () =
     assert.match(rule, /font-family:var\(--font-sans\)/, `${name} is not on the sans`);
     assert.ok(!rule.includes("--font-display"), `${name} uses the display face`);
   }
-  const cap = block => Number(/font-size:clamp\([^,]+,[^,]+,(\d+)px\)/.exec(block)[1]);
-  const heroCap = cap(cssBlock(HERO_BLOCK, PRELAUNCH_BLOCK).slice(cssBlock(HERO_BLOCK, PRELAUNCH_BLOCK).indexOf(".hero .hero-copy h1{")));
-  const mine = cap(carouselCss.slice(carouselCss.indexOf(".featured-recipes-line{")));
-  assert.ok(mine < heroCap, `the recipe headline (${mine}px) is not smaller than the hero (${heroCap}px)`);
-  // It used to run at clamp(48px,7vw,98px) - all but the hero's size.
+  // "Matcha." here was Inter 800 at 84px - within a pixel of the hero's
+  // own "Matcha." on a 1440 screen. It is a SECTION title, at the shared
+  // scale and the shared weight.
+  assert.match(carouselCss, /\.featured-recipes-line\{[\s\S]*?font-weight:500/);
+  assert.match(carouselCss, /\.featured-recipes-line\{[\s\S]*?font-size:var\(--type-title\)/);
+  assert.match(carouselCss, /\.featured-recipes-line-accent\{[\s\S]*?font-size:var\(--type-editorial\)/);
+  assert.ok(!/font-size:clamp\(58px|font-weight:800/.test(carouselCss), "the hero-sized recipe headline survived");
   assert.ok(!carouselCss.includes("clamp(48px,7vw,98px)"), "the old headline scale survived");
 });
 
@@ -1486,9 +1484,125 @@ test("42: raspberry ground, cream type, cream button, seamless strip", () => {
 
   // ── SCALE AND RAIL ───────────────────────────────────────────
   assert.match(homepage, /<div className="community-inner home-rail">/);
-  const cap = block => Number(/font-size:clamp\([^,]+,[^,]+,(\d+)px\)/.exec(block)[1]);
-  const heroCap = cap(cssBlock(HERO_BLOCK, PRELAUNCH_BLOCK).slice(cssBlock(HERO_BLOCK, PRELAUNCH_BLOCK).indexOf(".hero .hero-copy h1{")));
-  const mine = cap(communityCss.slice(communityCss.indexOf(".community-line-accent{")));
-  assert.ok(mine < heroCap, `the community headline (${mine}px) is not smaller than the hero (${heroCap}px)`);
-  assert.ok(mine <= 68, "the community headline outgrew its place in the hierarchy");
+  assert.match(communityCss, /\.community-line\{[\s\S]*?font-size:var\(--type-title\)/);
+  assert.match(communityCss, /\.community-line-accent\{[\s\S]*?font-size:var\(--type-editorial\)/);
+  assert.ok(!/\.community-line(-accent)?\{[^}]*font-size:clamp/.test(communityCss),
+    "the community section went back to a scale of its own");
+});
+
+/* ══════════════════════════════════════════════════════════════
+   43. THE SHARED HOMEPAGE TYPE SCALE
+   ══════════════════════════════════════════════════════════════ */
+
+test("43: one scale below the hero, and the hero stays above it at every width", () => {
+  // ── THE FIVE TOKENS ──────────────────────────────────────────
+  const token = name => {
+    const m = new RegExp("--type-" + name + ":([^;]+);").exec(css);
+    assert.ok(m, `missing --type-${name}`);
+    return m[1];
+  };
+  assert.equal(token("title"), "clamp(34px,4.4vw,64px)");
+  assert.equal(token("editorial"), "clamp(37px,4.7vw,68px)");
+  assert.equal(token("body"), "clamp(15px,2vw,18px)");
+  assert.equal(token("meta"), "11px");
+  assert.equal(token("card"), "clamp(16px,1.25vw,18px)");
+
+  // ── THE HERO IS THE ONE EXCEPTION, AND IT IS UNTOUCHED ───────
+  assert.match(heroCss, /\.hero \.hero-copy h1\{[\s\S]*?font-size:clamp\(54px,5\.9vw,100px\)/);
+  assert.match(heroCss, /\.hero \.hero-copy h1 \.hero-line-2\{[\s\S]*?font-size:clamp\(48px,5vw,86px\)/);
+  assert.ok(!/\.hero[^{]*\{[^}]*var\(--type-/.test(heroCss), "the hero was pulled onto the section scale");
+
+  // THE HIERARCHY, EVALUATED. clamp() is monotonic in the viewport, so
+  // sampling the breakpoints and the two places where the hero's own
+  // curve bends is enough to prove the ordering holds everywhere.
+  const clamp = (lo, mid, hi) => Math.max(lo, Math.min(mid, hi));
+  const evalToken = (t, w) => {
+    const m = /clamp\(([\d.]+)px,([\d.]+)vw,([\d.]+)px\)/.exec(t);
+    return m ? clamp(+m[1], (+m[2] / 100) * w, +m[3]) : Number(/([\d.]+)px/.exec(t)[1]);
+  };
+  const heroTitle = w => (w <= 900 ? clamp(44, 0.12 * w, 64) : clamp(54, 0.059 * w, 100));
+  const heroLine2 = w => (w <= 900 ? clamp(38, 0.105 * w, 56) : clamp(48, 0.05 * w, 86));
+  for (const w of [320, 360, 390, 430, 640, 768, 834, 900, 901, 1024, 1085, 1200, 1280, 1440, 1536, 1680, 1920]) {
+    const title = evalToken(token("title"), w);
+    const editorial = evalToken(token("editorial"), w);
+    const body = evalToken(token("body"), w);
+    // LEVEL 1 is the hero, and both of its lines outrank both of ours.
+    assert.ok(heroTitle(w) > title && heroTitle(w) > editorial, `hero title loses at ${w}px`);
+    assert.ok(heroLine2(w) > title && heroLine2(w) > editorial, `hero second line loses at ${w}px`);
+    // LEVEL 2 / 2B: the editorial line is slightly larger, never wildly.
+    assert.ok(editorial > title && editorial / title < 1.15, `the two section roles drifted apart at ${w}px`);
+    // LEVEL 3: a sentence is never a headline.
+    assert.ok(body < title * 0.62, `body copy is headline-sized at ${w}px`);
+    assert.ok(body >= 15 && body <= 18);
+  }
+
+  // ── SAME ROLE = SAME SCALE ───────────────────────────────────
+  const rule = name => {
+    const at = css.indexOf(name);
+    assert.notEqual(at, -1, `missing rule: ${name}`);
+    return css.slice(at, css.indexOf("}", at));
+  };
+  // Every section title below the hero, including the two that are not in
+  // an appended block.
+  for (const name of [".daily-line{", ".origin-line{", ".how-to-line{", ".featured-recipes-line{",
+                      ".community-line{", ".prelaunch-line-1{", ".prelaunch-line-3{", ".brand-note-text{"]) {
+    const r = rule(name);
+    assert.match(r, /font-size:var\(--type-title\)/, `${name} is not on the section scale`);
+    assert.match(r, /font-family:var\(--font-sans\)/, `${name} is not on the sans`);
+  }
+  // Every editorial accent.
+  for (const name of [".daily-line-accent{", ".origin-line-accent{", ".how-to-line-accent{",
+                      ".featured-recipes-line-accent{", ".community-line-accent{",
+                      ".prelaunch-line-2{", ".brand-note-text i{"]) {
+    const r = rule(name);
+    assert.match(r, /font-size:var\(--type-editorial\)/, `${name} is not on the editorial scale`);
+    assert.match(r, /font-family:var\(--font-display\)/, `${name} is not on the display face`);
+    assert.match(r, /font-style:italic/, `${name} is not italic`);
+    assert.match(r, /font-weight:400/, `${name} is not the display weight`);
+  }
+  // Every eyebrow, including the anti-newsletter one that was still on
+  // the generic 12px/.14em rule.
+  for (const name of [".daily-eyebrow{", ".origin-eyebrow{", ".how-to-eyebrow{",
+                      ".featured-recipes-eyebrow{", ".community-eyebrow{",
+                      ".prelaunch-eyebrow{", ".brand-note .eyebrow{"]) {
+    const r = rule(name);
+    assert.match(r, /font-size:var\(--type-meta\)/, `${name} is not on the meta scale`);
+    assert.match(r, /font-weight:600/, `${name} is not 600`);
+    assert.match(r, /letter-spacing:\.2em/, `${name} does not carry the eyebrow tracking`);
+    assert.match(r, /text-transform:uppercase/, `${name} is not uppercase`);
+  }
+  // Every body sentence.
+  for (const name of [".daily-note{", ".origin-intro{", ".featured-recipes-sub{",
+                      ".prelaunch-body{", ".brand-note-sub{"]) {
+    assert.match(rule(name), /font-size:var\(--type-body\)/, `${name} is not on the body scale`);
+  }
+  // Every CTA and meta line.
+  for (const name of [".daily-link{", ".featured-recipes-cta{", ".community-cta{",
+                      ".prelaunch .prelaunch-cta{", ".recipe-card-time{", ".origin-list dt{",
+                      ".how-to-step-number{", ".how-to-module-number{"]) {
+    assert.match(rule(name), /font-size:var\(--type-meta\)/, `${name} is not on the meta scale`);
+  }
+  assert.match(rule(".recipe-card-title{"), /font-size:var\(--type-card\)/);
+
+  // ── NO SECTION KEPT A SCALE OF ITS OWN ───────────────────────
+  // The per-section mobile font sizes are gone: one clamp per role now
+  // covers every width, which is what makes the roles comparable.
+  for (const gone of ["clamp(46px,4.2vw,74px)", "clamp(52px,4.8vw,82px)", "clamp(58px,6vw,84px)",
+                      "clamp(62px,6.4vw,90px)", "clamp(32px,2.9vw,46px)", "clamp(38px,4.4vw,62px)",
+                      "clamp(42px,12vw,58px)", "clamp(34px,10vw,46px)", "clamp(28px,8vw,38px)"]) {
+    assert.ok(!css.includes(gone), `a section-specific headline scale survived: ${gone}`);
+  }
+
+  // ── STILL EXACTLY TWO FAMILIES ───────────────────────────────
+  // Inter is structural, Cormorant is the editorial accent; consistency
+  // was NOT bought by collapsing everything into one of them.
+  assert.match(layout, /const sans = Inter\(/);
+  assert.match(layout, /Cormorant_Garamond\(/);
+  for (const m of css.matchAll(/font-family:([^;}]+)/g)) {
+    assert.match(m[1], /^var\(--font-(sans|display|mono)\)/, `a third family: ${m[1]}`);
+  }
+  // Georgia and Arial only ever appear AFTER a var(), as fallbacks.
+  for (const m of css.matchAll(/font-family:[^;}]*\b(Georgia|Arial|Helvetica|Times)\b/g)) {
+    assert.match(m[0], /var\(--font-(sans|display)\)[^;}]*\b(Georgia|Arial)\b/, `an active fallback face: ${m[0]}`);
+  }
 });
