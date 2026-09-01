@@ -440,9 +440,12 @@ return <main className="shop-page">
 {p.slug===MATCHA_SLUG&&<MatchaShopDetails product={p}/>}
 </article>)}
 </section>
-
-<BrandNote/>
 </main>}
+
+// The anti-newsletter band is NOT rendered here. It is a homepage
+// statement, and /shop ends on the product it sells: hero, launch
+// band, product, details, footer. The component itself is untouched
+// and still runs on / and /rezepte.
 
 // -- Product detail ---------------------------------------------------
 

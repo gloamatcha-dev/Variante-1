@@ -88,7 +88,10 @@ test("3: the hero is type only, and nothing was deleted to make it so", () => {
   }
   assert.match(shop, /<ShopProductBlock product=\{p\} onAdd=\{onAdd\}\/>/);
   assert.match(shop, /\{p\.slug===MATCHA_SLUG&&<MatchaShopDetails product=\{p\}\/>\}/);
-  assert.match(shop, /<BrandNote\/>/);
+  // The anti-newsletter band is deliberately NOT part of the shop
+  // composition any more - tests/shop-render.test.mjs owns that contract
+  // and proves the component and its other two pages are untouched.
+  assert.ok(!shop.includes("<BrandNote/>"), "the band came back to /shop");
 });
 
 /* ══════════════════════════════════════════════════════════════

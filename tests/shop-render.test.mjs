@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { startRenderServer } from "./helpers/renderServer.mjs";
 
 // SAFE DEFAULT SUITE: the spawned server runs without a Supabase
@@ -48,6 +49,38 @@ test("shop: the catalog-driven shop page renders", async () => {
   }
   // NO DASH in the supporting line, in either form.
   assert.ok(!/Shizuoka, Japan\s*[\u2013\u2014]/.test(html), "the supporting copy still carries a dash");
+});
+
+test("shop: the anti-newsletter band is a homepage statement, not a shop one", async () => {
+  // IT IS NOT DELETED - it is simply not part of the shop composition.
+  const shop = (await getHtml("/shop")).html;
+  for (const line of ["KEIN NEWSLETTER-L", "Wir melden uns nicht.", "Und das ist Absicht.",
+                      "Keine Rabattschreie", "Nur GLOA.", "brand-note"]) {
+    assert.ok(!shop.includes(line), `the shop still renders the band: ${line}`);
+  }
+  // The homepage still does, word for word.
+  const home = (await getHtml("/")).html;
+  for (const line of ["KEIN NEWSLETTER-L", "Wir melden uns nicht.", "Und das ist Absicht."]) {
+    assert.ok(home.includes(line), `the homepage lost the band: ${line}`);
+  }
+  // Both pages still end on the footer.
+  for (const html of [shop, home]) assert.match(html, /<footer/);
+  // ── AND THE SOURCE SAYS SO ───────────────────────────────────
+  // The rendered check above is necessary but not sufficient: /shop is
+  // catalog-driven, so its SERVER render is the loading shell either
+  // way. The composition itself is what this pass changed.
+  const site = readFileSync(new URL("../app/GloaSite.tsx", import.meta.url), "utf-8");
+  const fn = name => site.slice(site.indexOf(`function ${name}(`), site.indexOf("\nfunction ", site.indexOf(`function ${name}(`) + 5));
+  assert.ok(!fn("Shop").includes("<BrandNote/>"), "the shop composition still includes the band");
+  assert.ok(fn("Home").includes("<BrandNote/>"), "the homepage lost the band");
+  assert.ok(fn("Rezepte").includes("<BrandNote/>"), "the recipes page lost the band");
+  // The component, its styles and its copy are all still here.
+  assert.match(site, /function BrandNote\(\)/);
+  assert.equal([...site.matchAll(/<BrandNote\/>/g)].length, 2, "the band left another page too");
+  assert.match(readFileSync(new URL("../app/globals.css", import.meta.url), "utf-8"), /\.brand-note\{/);
+  // NOTHING replaced it and no spacer was left behind: the shop's last
+  // element is the product section, and </main> follows it directly.
+  assert.match(fn("Shop"), /<\/article>\)\}\n<\/section>\n<\/main>\}/);
 });
 
 test("shop: the Matcha product page renders", async () => {
