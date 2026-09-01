@@ -303,7 +303,10 @@ test("11: the anti-newsletter section is a blue brand statement, with no signup"
     assert.ok(!noteCss.includes(banned), `the brand statement uses ${banned}`);
   }
   // Two editorial columns on desktop, stacked on mobile.
-  assert.match(css, /\.brand-note-inner\{max-width:1140px;margin:0 auto;display:grid;grid-template-columns:1\.05fr \.95fr/);
+  // The 1140px container is gone: this wrapper is on the shared rail now
+  // (test 39). Its internal two-column split is unchanged.
+  assert.match(css, /\.brand-note-inner\{display:grid;grid-template-columns:1\.05fr \.95fr/);
+  assert.ok(!css.includes("max-width:1140px"), "the anti-newsletter kept its own container");
   assert.match(css, /@media \(max-width:900px\)\{\.brand-note-inner\{grid-template-columns:1fr/);
 });
 
@@ -569,7 +572,8 @@ test("21: the hero image is contained, capped, and the only one in the hero", ()
 
 test("22: the hero is compact, measured and centred", () => {
   // A measured column rather than two halves pushed to opposite edges.
-  assert.match(heroCss, /padding-inline:max\(clamp\(32px,3vw,56px\),calc\(\(100% - 1560px\) \/ 2\)\)/);
+  // Same shape, page tokens instead of its own two numbers - see test 39.
+  assert.match(heroCss, /padding-inline:max\(var\(--rail-gutter\),calc\(\(100% - var\(--rail-max\)\) \/ 2\)\)/);
   assert.match(heroCss, /grid-template-columns:minmax\(0,\.95fr\) minmax\(0,1\.05fr\)/);
   assert.match(heroCss, /gap:clamp\(28px,3vw,52px\)/);
   assert.match(heroCss, /padding-block:clamp\(54px,6vw,82px\) clamp\(48px,5vw,72px\)/);
@@ -793,11 +797,9 @@ const dailyCss = cssBlockRules(DAILY_BLOCK, ORIGIN_BLOCK);
 test("29: the copy and the six tiles are one horizontal composition", () => {
   assert.ok(daily.length > 0, "the daily section is missing");
   // Copy left, wall right, inside one centred container.
-  assert.match(daily, /<div className="daily-inner">/);
+  assert.match(daily, /<div className="daily-inner home-rail">/);
   assert.ok(daily.indexOf('className="daily-copy"') < daily.indexOf('className="daily-grid"'));
   assert.match(dailyCss, /\.daily-inner\{[\s\S]*?grid-template-columns:minmax\(300px,\.85fr\) minmax\(0,1\.7fr\)/);
-  assert.match(dailyCss, /\.daily-inner\{[\s\S]*?max-width:1520px/);
-  assert.match(dailyCss, /\.daily-inner\{[\s\S]*?margin-inline:auto/);
   // The copy is centred against the wall, not pinned above it - the old
   // 70px margin between headline and tiles is gone.
   assert.match(dailyCss, /\.daily-copy\{[\s\S]*?justify-content:center/);
@@ -916,9 +918,11 @@ test("32: the origin copy is exactly the approved lines, with no repetition", ()
 });
 
 test("33: the section is compact, railed and deliberately smaller than the hero", () => {
-  // A 1240px rail, centred, on the existing cream - not a floating card.
-  assert.match(originCss, /\.origin-inner\{[\s\S]*?max-width:1240px/);
-  assert.match(originCss, /\.origin-inner\{[\s\S]*?margin-inline:auto/);
+  // WAS a 1240px container of its own, which started this section 57px
+  // right of the lifestyle section. It is on the shared rail now (test 39)
+  // and stays compact through its columns instead of its container.
+  assert.match(homepage, /<div className="origin-inner home-rail">/);
+  assert.ok(!css.includes("max-width:1240px"), "the origin kept its own container");
   assert.match(originCss, /\.origin\{[\s\S]*?background:var\(--cream\)/);
   assert.match(originCss, /\.origin\{[\s\S]*?padding:clamp\(68px,6vw,92px\)/);
   assert.ok(!originCss.includes("100vh"), "the section reserves a viewport");
@@ -941,7 +945,10 @@ test("33: the section is compact, railed and deliberately smaller than the hero"
   assert.ok(lifestyleCap < heroCap, "the lifestyle statement is not smaller than the hero");
 
   // Two columns with a short, centred raspberry seam between them.
-  assert.match(originCss, /grid-template-columns:minmax\(0,\.85fr\) 1px minmax\(0,1\.15fr\)/);
+  // The facts take a fixed compact column that ends ON the right rail;
+  // the headline absorbs the rest. A proportional split would have
+  // stretched the two fact rows to ~830px at 1520.
+  assert.match(originCss, /grid-template-columns:minmax\(0,1fr\) 1px minmax\(320px,560px\)/);
   assert.match(originCss, /\.origin-divider\{[\s\S]*?width:1px[\s\S]*?background:var\(--berry\)/);
   assert.match(originCss, /\.origin-divider\{[\s\S]*?height:76%/);
   // Tablet turns the seam horizontal; mobile stacks the rows.
@@ -1092,18 +1099,10 @@ test("37: the section sits on the canonical content rail and is compact", () => 
   // Every homepage section shares one desktop left/right rail, with the
   // lifestyle section as the reference. A section may paint edge to edge;
   // its CONTENT may not start at its own X.
-  const rail = (block, section, inner) => {
-    const pad = new RegExp("\\." + section + "\\{[\\s\\S]*?padding:[^;]*? (clamp\\([^)]*\\))").exec(block);
-    const width = new RegExp("\\." + inner + "\\{[\\s\\S]*?max-width:(\\d+px)").exec(block);
-    assert.ok(pad && width, `${section} has no measurable rail`);
-    return { pad: pad[1], width: width[1] };
-  };
-  const reference = rail(dailyCss, "daily", "daily-inner");
-  const mine = rail(howToCss, "how-to", "how-to-inner");
-  assert.equal(mine.pad, reference.pad, "the how-to gutter differs from the lifestyle gutter");
-  assert.equal(mine.width, reference.width, "the how-to rail is narrower than the lifestyle rail");
-  assert.equal(mine.width, "1520px");
-  assert.match(howToCss, /\.how-to-inner\{[\s\S]*?margin-inline:auto/);
+  // Both wrappers carry the same utility, so they cannot drift apart.
+  assert.match(site, /<div className="how-to-inner home-rail">/);
+  assert.match(site, /<div className="daily-inner home-rail">/);
+  assert.ok(!/\.how-to-inner\{[^}]*max-width/.test(howToCss), "the how-to declared its own container");
   // Same split as the lifestyle wall, so the two sections break on one axis.
   assert.match(howToCss, /\.how-to-body\{[\s\S]*?grid-template-columns:minmax\(300px,\.85fr\) minmax\(0,1\.7fr\)/);
 
@@ -1170,4 +1169,62 @@ test("38: plum, cream and one matcha green - on the existing two families", () =
   assert.match(howToCss, /\.how-to-eyebrow\{[\s\S]*?font-weight:600/);
   assert.match(howToCss, /\.how-to-module-title\{[\s\S]*?font-weight:700/);
   assert.match(howToCss, /\.how-to-step-text\{[\s\S]*?font-weight:500/);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   39. THE CANONICAL HOMEPAGE CONTENT RAIL
+   ══════════════════════════════════════════════════════════════ */
+
+test("39: every homepage section starts on one rail, and it is the lifestyle one", () => {
+  // ── THE TOKENS ARE THE LIFESTYLE SECTION'S OWN NUMBERS ───────
+  // The lifestyle section is the alignment authority, so its gutter and
+  // its rail became the page's two tokens rather than the other way round.
+  assert.match(css, /--rail-gutter:clamp\(20px,3vw,48px\);/);
+  assert.match(css, /--rail-max:1520px;/);
+  assert.match(css, /\.daily\{[\s\S]*?padding:clamp\(56px,5\.5vw,84px\) clamp\(20px,3vw,48px\)/);
+
+  // ── ONE GEOMETRY, TWO SHAPES ─────────────────────────────────
+  const railCss = cssBlockRules("THE CANONICAL HOMEPAGE CONTENT RAIL");
+  assert.match(railCss, /\.home-rail\{[\s\S]*?max-width:var\(--rail-max\);[\s\S]*?margin-inline:auto/);
+  assert.match(railCss, /\.home-rail-pad\{[\s\S]*?max-width:calc\(var\(--rail-max\) \+ var\(--rail-gutter\) \* 2\)/);
+  assert.match(railCss, /\.home-rail-pad\{[\s\S]*?padding-inline:var\(--rail-gutter\)/);
+
+  // ── EVERY HOMEPAGE WRAPPER IS ON IT ──────────────────────────
+  // .home-rail sits inside a section whose full-width background carries
+  // the gutter; .home-rail-pad IS the rail where there is no wrapper.
+  for (const wrapper of ["countdown-inner", "daily-inner", "origin-inner", "how-to-inner", "brand-note-inner"]) {
+    assert.ok(site.includes(`className="${wrapper} home-rail"`), `${wrapper} is not on the rail`);
+  }
+  for (const wrapper of ["featured-recipes-head", "recipe-loop", "featured-recipes-link", "community"]) {
+    assert.ok(site.includes(`className="${wrapper} home-rail-pad"`), `${wrapper} is not on the rail`);
+  }
+  // The six full-width sections take their gutter from the token, so the
+  // desktop, tablet and mobile edge is one value instead of 3vw / 4vw /
+  // 4.5vw / 5vw / 6vw and 22px.
+  assert.match(railCss, /\.countdown,\s*\.prelaunch,\s*\.daily,\s*\.origin,\s*\.how-to,\s*\.brand-note\{padding-inline:var\(--rail-gutter\)\}/);
+  // The hero has no wrapper - its own padding IS the rail, in the same
+  // shape, at desktop and on mobile.
+  assert.match(css, /\.hero\{[\s\S]*?padding-inline:max\(var\(--rail-gutter\),calc\(\(100% - var\(--rail-max\)\) \/ 2\)\)/);
+  assert.match(css, /@media \(max-width:900px\)\{[\s\S]*?\.hero\{[\s\S]*?padding-inline:var\(--rail-gutter\)/);
+
+  // ── NO SECTION KEEPS A CONTAINER OF ITS OWN ──────────────────
+  // These four numbers were the four different starting X positions.
+  for (const gone of ["max-width:1240px", "max-width:1140px", "1560px",
+                      ".countdown-inner{max-width"]) {
+    assert.ok(!css.includes(gone), `a section still declares its own container: ${gone}`);
+  }
+  // The one deliberate exception, and it is an INNER block: prelaunch
+  // keeps its 720px centred composition inside the shared outer gutter,
+  // which section 14 of the brief explicitly allows.
+  assert.match(prelaunchCss, /\.prelaunch-inner\{[\s\S]*?max-width:720px/);
+
+  // ── NO POSITION HACKS ────────────────────────────────────────
+  // The alignment is container structure, not nudging.
+  for (const hack of ["margin-left:", "translateX", "position:absolute"]) {
+    assert.ok(!railCss.includes(hack), `the rail is faked with ${hack}`);
+  }
+  // Backgrounds still run edge to edge: the rail is on content only.
+  assert.match(dailyCss, /\.daily\{background:var\(--blue\)/);
+  assert.ok(!/\.daily\{[^}]*max-width/.test(dailyCss), "the blue ground stopped being full width");
+  assert.ok(!/\.how-to\{[^}]*max-width/.test(howToCss), "the plum ground stopped being full width");
 });
