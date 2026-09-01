@@ -29,9 +29,9 @@ const data = src.slice(src.indexOf("const b2bModels"), src.indexOf("];", src.ind
 
 const blockAt = css.indexOf("THE TWO ORDERING MODELS");
 assert.notEqual(blockAt, -1, "the CSS block was not found");
-/* This block is currently last in the file; the bound keeps it honest
-   when the next pass appends after it. */
-const rules = css.slice(css.lastIndexOf("/*", blockAt));
+/* Bounded at the NEXT page block, so a block appended after this one
+   cannot answer for - or trip - an assertion about this section. */
+const rules = css.slice(css.lastIndexOf("/*", blockAt), css.lastIndexOf("/*", css.indexOf("B2B CUSTOMER PORTAL SECTION")));
 const code = rules.replace(/\/\*[\s\S]*?\*\//g, "");
 const desktop = code.slice(0, code.indexOf("@media"));
 const mobile = code.slice(code.indexOf("@media (max-width:760px)"));
@@ -321,10 +321,13 @@ test("5b: every selector is scoped, and nothing else on the page moved", () => {
   }
   assert.ok(n > 20, `only ${n} selectors were scanned`);
 
-  // .cta.dark is shared with the frozen portal-hint section below.
+  // .cta.dark is a SHARED token and this pass left its definition alone.
+  // (The portal-hint section below stopped rendering it in a later pass -
+  // see tests/b2b-portal-section.test.mjs - so the class is no longer
+  // asserted in the markup, only its untouched definition.)
   assert.match(css, /\.cta\.dark\{background:var\(--plum\);color:var\(--cream\)\}/);
+  assert.match(css, /\.cta\.cream\{background:var\(--cream\)/);
   assert.match(src, /<section className="b2b-portal-hint">/);
-  assert.match(src, /className="cta dark"/);
 
   // The three B2B blocks above this one are untouched.
   const site = read("app/GloaSite.tsx");
