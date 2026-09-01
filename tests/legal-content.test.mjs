@@ -54,6 +54,26 @@ async function html(path) {
   return { status: res.status, html: await res.text() };
 }
 
+/**
+ * THE RENDERED COPY, WITHOUT THE DOCUMENT'S PLUMBING.
+ *
+ * The placeholder check below looks for "TODO", "TBD" and "Lorem"
+ * case-insensitively. Run against the whole document it also reads
+ * ASSET URLS, and a content hash is eight random letters: one build of
+ * this repository emitted `GloaSite-DTTBDeRv.js`, whose hash contains
+ * "TBD", and both legal pages failed for a reason that had nothing to
+ * do with their text. The next build rerolled the hash and the failure
+ * vanished, which is worse than a hard break - so the check now reads
+ * the body with <head>, <script> and <link> removed.
+ *
+ * It still catches a real placeholder in the copy; it just cannot be
+ * tripped by a filename any more.
+ */
+const copyOf = body => body
+  .replace(/<head[\s\S]*?<\/head>/i, "")
+  .replace(/<script[\s\S]*?<\/script>/gi, "")
+  .replace(/<link[^>]*>/gi, "");
+
 test("Impressum: shows the correct company/operator, uses § 5 DDG (not TMG), and includes the USt-IdNr.", async () => {
   const { status, html: body } = await html("/impressum");
   assert.equal(status, 200);
@@ -79,7 +99,7 @@ test("Legal pages: no obsolete EU ODR/OS platform link anywhere on the site", as
 test("Datenschutz: no longer a placeholder, and only documents actually-implemented data flows", async () => {
   const { status, html: body } = await html("/datenschutz");
   assert.equal(status, 200);
-  assert.doesNotMatch(body, /Rechtlicher Inhalt ausstehend|TODO|TBD|Lorem/i);
+  assert.doesNotMatch(copyOf(body), /Rechtlicher Inhalt ausstehend|TODO|TBD|Lorem/i);
   assert.match(body, /Supabase/);
   assert.match(body, /Stripe/);
   assert.match(body, /Resend/);
@@ -92,7 +112,7 @@ test("Datenschutz: no longer a placeholder, and only documents actually-implemen
 test("AGB: no longer a placeholder, and does not invent unsupported terms", async () => {
   const { status, html: body } = await html("/agb");
   assert.equal(status, 200);
-  assert.doesNotMatch(body, /Rechtlicher Inhalt ausstehend|TODO|TBD|Lorem/i);
+  assert.doesNotMatch(copyOf(body), /Rechtlicher Inhalt ausstehend|TODO|TBD|Lorem/i);
   assert.match(body, /Cara 2 GmbH/);
   // No fake tax rate and no invented subscription pricing terms - only
   // what's actually purchasable today (one-time purchase) is described.

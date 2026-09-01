@@ -29,7 +29,9 @@ const form = both.slice(both.indexOf('<section id="lead"'));
 
 const blockAt = css.indexOf("THE SAMPLE CALLOUT AND THE B2B FORM");
 assert.notEqual(blockAt, -1, "the CSS block was not found");
-const rules = css.slice(css.lastIndexOf("/*", blockAt));
+// Bounded at the NEXT page block, so a block appended after this one
+// cannot answer for - or trip - an assertion about these two sections.
+const rules = css.slice(css.lastIndexOf("/*", blockAt), css.lastIndexOf("/*", css.indexOf("/for-cafes — THE B2B FAQ")));
 const code = rules.replace(/\/\*[\s\S]*?\*\//g, "");
 const desktop = code.slice(0, code.indexOf("@media"));
 const mobile = code.slice(code.indexOf("@media (max-width:760px)"));

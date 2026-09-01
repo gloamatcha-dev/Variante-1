@@ -5977,3 +5977,145 @@ header nav{gap:18px;font-size:12px}
   .lead-form .intent-tabs{flex-direction:column}
   .lead-form .intent-tabs button{flex:0 0 auto;width:100%}
 }
+
+/* ══════════════════════════════════════════════════════════════
+   /for-cafes — THE B2B FAQ
+
+   /for-cafes and /our-matcha render the SAME component: one
+   <section className="faq"> with native <details> rows. /our-matcha
+   restyled it in its own pass by scoping every rule to
+   `.matcha-page .faq`, deliberately leaving the base `.faq` rules in
+   place for this page - its test asserts exactly that.
+
+   This block does the same thing from the other side. Every selector
+   here starts with `.business .faq`, so /our-matcha cannot be reached,
+   the shared base rules are not edited, and the two FAQs finally read
+   as one design.
+
+   ── WHAT CHANGES ─────────────────────────────────────────────
+   The base rules gave this page a 98px h2 (the shared
+   .product-intro/.daily/.faq list), 110px/10vw padding on a rail of its
+   own, a solid plum row line and an 18px question. It now takes the
+   /our-matcha FAQ's shape on the canonical rail, with the brief's own
+   58/62 caps and a hairline at rgba(17,17,17,.30) rather than solid
+   plum - /our-matcha keeps the plum line it already had, because that
+   file is frozen.
+
+   ── THE SCALE ────────────────────────────────────────────────
+       B2B hero   clamp(52px,5.4vw,76px) / clamp(50px,5vw,72px)
+       THIS       clamp(42px,4.2vw,58px) / clamp(44px,4.5vw,62px)
+
+   Caps are the brief's. The floors are the ones every other B2B
+   section uses: at 901px a 50px serif floor would sit level with the
+   hero italic, and on mobile the brief's 48/52 would pass it outright.
+
+   ── NO PURE WHITE ────────────────────────────────────────────
+   Near black on cream throughout. Nothing in this block declares
+   white in any form.
+   ══════════════════════════════════════════════════════════════ */
+
+.business .faq{
+  background:var(--cream);
+  color:var(--ink);
+  padding-block:clamp(76px,6.5vw,96px) clamp(80px,6.5vw,104px);
+  padding-inline:var(--rail-gutter);
+  /* The canonical rail, the way /our-matcha's FAQ takes it. */
+  max-width:calc(var(--rail-max) + var(--rail-gutter) * 2);
+  margin-inline:auto;
+}
+.business .faq .eyebrow{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:var(--type-meta);
+  line-height:1.2;
+  letter-spacing:.2em;
+  text-transform:uppercase;
+  color:var(--ink);
+}
+/* (0,2,1) - the shared `.faq h2` list is (0,1,1) and would otherwise
+   hold this at clamp(48px,7vw,98px). */
+.business .faq h2{
+  margin:clamp(18px,1.8vw,26px) 0 clamp(48px,4.6vw,58px);
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:500;
+  font-style:normal;
+  font-size:clamp(42px,4.2vw,58px);
+  line-height:.98;
+  letter-spacing:-.04em;
+  color:var(--ink);
+}
+/* (0,2,2) - beats the shared `.faq h2 i` list. */
+.business .faq h2 i{
+  font-family:var(--font-display),Georgia,serif;
+  font-weight:400;
+  font-style:italic;
+  font-size:clamp(44px,4.5vw,62px);
+  line-height:.93;
+  letter-spacing:-.01em;
+  color:var(--ink);
+}
+
+/* ── THE ROWS ──────────────────────────────────────────────── */
+/* Open and editorial: one hairline per row, nothing else. The base
+   rule paints a solid plum line; this is the subtle near black the
+   rest of the page uses. */
+.business .faq details{border-top:1px solid rgba(17,17,17,.30)}
+.business .faq details:last-of-type{border-bottom:1px solid rgba(17,17,17,.30)}
+.business .faq summary{
+  display:flex;
+  justify-content:space-between;
+  align-items:baseline;
+  gap:24px;
+  padding:clamp(22px,2.2vw,26px) 0;
+  cursor:pointer;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:500;
+  font-style:normal;
+  font-size:clamp(16px,1.2vw,17px);
+  line-height:1.4;
+  letter-spacing:0;
+  color:var(--ink);
+  transition:opacity .2s ease;
+}
+.business .faq summary:hover{opacity:.68}
+/* The same "+" /our-matcha uses - sized, and deliberately not bolder.
+   No circle, no icon, no colour of its own. */
+.business .faq summary span{
+  flex:0 0 auto;
+  font-weight:400;
+  font-size:18px;
+  line-height:1;
+  color:var(--ink);
+}
+.business .faq details p{
+  margin:0;
+  max-width:800px;
+  padding-top:6px;
+  padding-bottom:clamp(24px,2.4vw,30px);
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:clamp(15px,1.1vw,16px);
+  line-height:1.65;
+  letter-spacing:0;
+  color:rgba(17,17,17,.82);
+}
+
+/* ── MOBILE ────────────────────────────────────────────────── */
+@media (max-width:760px){
+  .business .faq{padding-block:clamp(60px,10vw,78px) clamp(64px,10vw,82px)}
+  .business .faq h2{
+    margin-bottom:clamp(34px,5vw,44px);
+    font-size:clamp(34px,8.8vw,44px);
+  }
+  .business .faq h2 i{font-size:clamp(36px,9.4vw,46px)}
+  .business .faq summary{
+    gap:18px;
+    padding:clamp(20px,3.6vw,22px) 0;
+    font-size:16px;
+  }
+  .business .faq summary span{font-size:16px}
+  .business .faq details p{max-width:none;font-size:15px;line-height:1.6}
+}
