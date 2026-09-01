@@ -56,14 +56,22 @@ const DAILY_BLOCK = "HOMEPAGE DAILY LIFESTYLE SECTION";
 const ORIGIN_BLOCK = "HOMEPAGE ORIGIN SECTION";
 const HOWTO_BLOCK = "HOMEPAGE HOW TO GLOA SECTION";
 const RECIPES_BLOCK = "HOMEPAGE RECIPES CAROUSEL";
+const COMMUNITY_BLOCK = "HOMEPAGE COMMUNITY SECTION";
 const css = read("app/globals.css");
 const layout = read("app/layout.tsx");
 
 /** The homepage component only - every other route lives in the same file. */
 const homeStart = site.indexOf("function Home()");
 const carousel = site.slice(site.indexOf("function RecipeCarousel()"), site.indexOf("let clockTick"));
-const carouselCss = cssBlockRules(RECIPES_BLOCK);
+const carouselCss = cssBlockRules(RECIPES_BLOCK, COMMUNITY_BLOCK);
+const communityCss = cssBlockRules(COMMUNITY_BLOCK);
 const homepage = site.slice(homeStart, site.indexOf("\nfunction ", homeStart + 10));
+// The community component AND its section markup - bounded so the
+// countdown, which sits between them in the file, cannot leak its
+// setInterval into the strip's assertions.
+const feedStart = site.indexOf("function CommunityFeed()");
+const community = site.slice(feedStart, site.indexOf("\nfunction ", feedStart + 5))
+  + homepage.slice(homepage.indexOf('<section className="community">'), homepage.indexOf("<BrandNote/>"));
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
@@ -1282,16 +1290,17 @@ test("39: every homepage section starts on one rail, and it is the lifestyle one
   // ── EVERY HOMEPAGE WRAPPER IS ON IT ──────────────────────────
   // .home-rail sits inside a section whose full-width background carries
   // the gutter; .home-rail-pad IS the rail where there is no wrapper.
-  for (const wrapper of ["countdown-inner", "daily-inner", "origin-inner", "how-to-inner", "brand-note-inner"]) {
+  for (const wrapper of ["countdown-inner", "daily-inner", "origin-inner", "how-to-inner",
+                         "community-inner", "brand-note-inner"]) {
     assert.ok(site.includes(`className="${wrapper} home-rail"`), `${wrapper} is not on the rail`);
   }
-  for (const wrapper of ["featured-recipes-head", "featured-recipes-foot", "community"]) {
+  for (const wrapper of ["featured-recipes-head", "featured-recipes-foot"]) {
     assert.ok(site.includes(`className="${wrapper} home-rail-pad"`), `${wrapper} is not on the rail`);
   }
   // The six full-width sections take their gutter from the token, so the
   // desktop, tablet and mobile edge is one value instead of 3vw / 4vw /
   // 4.5vw / 5vw / 6vw and 22px.
-  assert.match(railCss, /\.countdown,\s*\.prelaunch,\s*\.daily,\s*\.origin,\s*\.how-to,\s*\.brand-note\{padding-inline:var\(--rail-gutter\)\}/);
+  assert.match(railCss, /\.countdown,\s*\.prelaunch,\s*\.daily,\s*\.origin,\s*\.how-to,\s*\.community,\s*\.brand-note\{padding-inline:var\(--rail-gutter\)\}/);
   // The hero has no wrapper - its own padding IS the rail, in the same
   // shape, at desktop and on mobile.
   assert.match(css, /\.hero\{[\s\S]*?padding-inline:max\(var\(--rail-gutter\),calc\(\(100% - var\(--rail-max\)\) \/ 2\)\)/);
@@ -1374,4 +1383,112 @@ test("40: the head is on the rail and the sub line moved below the drinks", () =
   assert.ok(mine < heroCap, `the recipe headline (${mine}px) is not smaller than the hero (${heroCap}px)`);
   // It used to run at clamp(48px,7vw,98px) - all but the hero's size.
   assert.ok(!carouselCss.includes("clamp(48px,7vw,98px)"), "the old headline scale survived");
+});
+
+/* ══════════════════════════════════════════════════════════════
+   41-42. THE COMMUNITY SECTION
+   ══════════════════════════════════════════════════════════════ */
+
+test("41: every photo survived, and the burned-in watermark is framed out", () => {
+  // ── NOTHING WAS REMOVED ──────────────────────────────────────
+  // Same six records, same ids, same paths, same alt text - each one
+  // only gained a visible label.
+  const data = site.slice(site.indexOf("const communityItems:CommunityItem[]=["),
+                          site.indexOf("}];", site.indexOf("const communityItems:CommunityItem[]=[")));
+  assert.deepEqual([...data.matchAll(/image:"([^"]+)"/g)].map(m => m[1]), [
+    "/img/gloa-cafe.jpg", "/img/gloa-on-the-go.jpg", "/img/gloa-iced.jpg",
+    "/img/gloa-social.jpg", "/img/gloa-morning.jpg", "/img/gloa-work.jpg",
+  ]);
+  assert.deepEqual([...data.matchAll(/id:"(\d)"/g)].map(m => m[1]), ["1", "2", "3", "4", "5", "6"]);
+  assert.equal([...data.matchAll(/alt:"[^"]+"/g)].length, 6, "a photo lost its alt text");
+  assert.equal(new Set([...data.matchAll(/image:"([^"]+)"/g)].map(m => m[1])).size, 6, "a photo was duplicated away");
+  for (const m of data.matchAll(/image:"\/img\/([^"]+)"/g)) {
+    assert.ok(existsSync(path.join(ROOT, "public/img", m[1])), `${m[1]} was deleted`);
+  }
+  // The strip still renders an <img> per record, from the data.
+  assert.match(community, /<img src=\{item\.image\} alt=\{clone\?"":item\.alt\} loading="lazy"\/>/);
+
+  // ── THE LABELS ───────────────────────────────────────────────
+  assert.deepEqual([...data.matchAll(/label:"([^"]+)"/g)].map(m => m[1]),
+    ["CAFÉ", "ON THE GO", "ICED", "SOCIAL", "MORNING", "WORK"]);
+  assert.match(community, /<figcaption>\{item\.label\}<\/figcaption>/);
+  // No visible PLACEHOLDER string anywhere on the homepage.
+  assert.ok(!site.includes("PLACEHOLDER"), "a PLACEHOLDER string is rendered");
+
+  // ── THE WATERMARK IS IN THE PIXELS, SO THE FRAME REMOVES IT ──
+  // All six sources are 1254x1254 squares carrying a burned-in
+  // "PLACEHOLDER - <NAME>" mark inside the outer 6.4% at the top (four of
+  // them) or at the bottom (gloa-cafe, gloa-on-the-go). A 4:3 frame with
+  // object-fit:cover crops a square by 12.5% at each end, which clears
+  // every one of them by about 78px - and touches no file.
+  assert.match(communityCss, /\.community-tile img\{[\s\S]*?aspect-ratio:4 \/ 3/);
+  assert.match(communityCss, /\.community-tile img\{[\s\S]*?object-fit:cover/);
+  assert.match(communityCss, /\.community-tile img\{[\s\S]*?object-position:center center/);
+});
+
+test("42: raspberry ground, cream type, cream button, seamless strip", () => {
+  // ── THE COLOUR CONTRACT ──────────────────────────────────────
+  assert.match(communityCss, /\.community\{[\s\S]*?background:var\(--berry\)/);
+  assert.match(css, /--berry:#A61E59;/);
+  for (const name of [".community-eyebrow{", ".community-line{", ".community-line-accent{"]) {
+    const rule = communityCss.slice(communityCss.indexOf(name), communityCss.indexOf("}", communityCss.indexOf(name)));
+    assert.match(rule, /color:var\(--cream\)/, `${name} is not cream`);
+  }
+  // Cream button, raspberry text, square, no shadow.
+  const cta = communityCss.slice(communityCss.indexOf(".community-cta{"), communityCss.indexOf("}", communityCss.indexOf(".community-cta{")));
+  assert.match(cta, /background:var\(--cream\)/);
+  assert.match(cta, /color:var\(--berry\)/);
+  assert.match(cta, /border-radius:0/);
+  assert.match(cta, /box-shadow:none/);
+  assert.match(cta, /text-transform:uppercase/);
+  // Labels: near-black scrim, cream text. No other colour in the section.
+  assert.match(communityCss, /\.community-tile figcaption\{[\s\S]*?background:rgba\(17,17,17,\.7\)/);
+  assert.match(communityCss, /\.community-tile figcaption\{[\s\S]*?color:var\(--cream\)/);
+  for (const banned of ["--blue", "--plum", "--matcha", "--ink)", "gradient", "backdrop-filter"]) {
+    assert.ok(!communityCss.includes(banned), `the community section uses ${banned}`);
+  }
+
+  // ── THE INSTAGRAM LINK IS THE EXISTING ONE ───────────────────
+  assert.match(community, /href=\{`https:\/\/instagram\.com\/\$\{BRAND\.instagram\}`\}/);
+  assert.match(community, /\{`@\$\{BRAND\.instagram\} folgen`\}/);
+  assert.match(community, /target="_blank" rel="noopener noreferrer"/);
+  assert.match(read("app/content.ts"), /instagram: "gloa\.matcha"/);
+
+  // ── THE STRIP STILL MOVES, AND NOW WITHOUT A RESET ───────────
+  // The old feed stepped 25% on a setInterval and snapped back to zero.
+  for (const banned of ["setInterval", "setOffset", "useState", "useEffect", "translateX", "style={{transform"]) {
+    assert.ok(!community.includes(banned), `the strip still carries ${banned}`);
+  }
+  assert.match(community, /const track=\[\.\.\.communityItems,\.\.\.communityItems,\.\.\.communityItems\];/);
+  const anim = /animation:community-strip (\d+)s (\w+) (\d+)s infinite/.exec(communityCss);
+  assert.ok(anim, "the strip does not run continuously");
+  assert.ok(Number(anim[1]) >= 24 && Number(anim[1]) <= 36, `a pass takes ${anim[1]}s`);
+  assert.equal(anim[2], "linear");
+  assert.equal(anim[3], "0", "the strip waits before it starts");
+  assert.match(communityCss, /@keyframes community-strip\{\s*from\{transform:translate3d\(0,0,0\)\}\s*to\{transform:translate3d\(calc\(-100% \/ 3\),0,0\)\}\s*\}/);
+  assert.match(communityCss, /\.community-tile\{[\s\S]*?margin-right:\d+px/);
+  assert.ok(!/\.community-strip-track\{[^}]*gap:/.test(communityCss),
+    "a flex gap would put the loop a third of a gutter out of register");
+  assert.match(communityCss, /\.community-strip:hover \.community-strip-track,\s*\.community-strip:focus-within \.community-strip-track\{animation-play-state:paused\}/);
+  // One row, clipped by the strip itself - never a page scrollbar.
+  assert.match(communityCss, /\.community-strip-track\{[\s\S]*?flex-wrap:nowrap/);
+  assert.match(communityCss, /\.community-strip\{[\s\S]*?overflow:hidden/);
+  // Touch and reduced motion get a real scroller, without the clones.
+  for (const query of ["@media (max-width:1024px)", "@media (prefers-reduced-motion:reduce)"]) {
+    const at = communityCss.indexOf(query);
+    assert.notEqual(at, -1, `missing ${query}`);
+    const body = communityCss.slice(at, communityCss.indexOf("\n}", at));
+    assert.match(body, /\.community-strip-track\{animation:none/, `${query} still animates`);
+    assert.match(body, /overflow-x:auto/, `${query} has no scroller`);
+    assert.match(body, /\.community-tile\[aria-hidden="true"\]\{display:none\}/, `${query} keeps the clones`);
+  }
+  assert.match(community, /aria-hidden=\{clone\|\|undefined\}/);
+
+  // ── SCALE AND RAIL ───────────────────────────────────────────
+  assert.match(homepage, /<div className="community-inner home-rail">/);
+  const cap = block => Number(/font-size:clamp\([^,]+,[^,]+,(\d+)px\)/.exec(block)[1]);
+  const heroCap = cap(cssBlock(HERO_BLOCK, PRELAUNCH_BLOCK).slice(cssBlock(HERO_BLOCK, PRELAUNCH_BLOCK).indexOf(".hero .hero-copy h1{")));
+  const mine = cap(communityCss.slice(communityCss.indexOf(".community-line-accent{")));
+  assert.ok(mine < heroCap, `the community headline (${mine}px) is not smaller than the hero (${heroCap}px)`);
+  assert.ok(mine <= 68, "the community headline outgrew its place in the hierarchy");
 });

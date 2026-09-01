@@ -43,8 +43,8 @@ const ALL_TAGS=["ALLE","LATTE","ICED","FRUITY"];
 // cup out of two of them. The image FILES are untouched.
 const dailyTiles=[{label:"MORNING",src:"/img/gloa-morning.jpg",alt:"Matcha am Morgen",focus:"center 38%"},{label:"WORK",src:"/img/gloa-work.jpg",alt:"Iced Matcha am Arbeitsplatz",focus:"center 45%"},{label:"CAFÉ",src:"/img/gloa-cafe.jpg",alt:"Matcha-Zubereitung im Café",focus:"center 42%"},{label:"ON THE GO",src:"/img/gloa-on-the-go.jpg",alt:"Iced Matcha unterwegs in Berlin",focus:"center 35%"},{label:"ICED",src:"/img/gloa-iced.jpg",alt:"Iced Matcha",focus:"center center"},{label:"SOCIAL",src:"/img/gloa-social.jpg",alt:"Freunde mit Matcha",focus:"center 32%"}];
 // TODO: Replace local community items with Instagram Graph API data after account/API credentials are configured.
-type CommunityItem={id:string;image:string;href?:string;alt:string}
-const communityItems:CommunityItem[]=[{id:"1",image:"/img/gloa-cafe.jpg",alt:"Matcha-Zubereitung im Café"},{id:"2",image:"/img/gloa-on-the-go.jpg",alt:"Iced Matcha unterwegs in Berlin"},{id:"3",image:"/img/gloa-iced.jpg",alt:"Iced Matcha"},{id:"4",image:"/img/gloa-social.jpg",alt:"Freunde mit Matcha"},{id:"5",image:"/img/gloa-morning.jpg",alt:"Matcha am Morgen"},{id:"6",image:"/img/gloa-work.jpg",alt:"Iced Matcha am Arbeitsplatz"}];
+type CommunityItem={id:string;image:string;href?:string;alt:string;label:string}
+const communityItems:CommunityItem[]=[{id:"1",image:"/img/gloa-cafe.jpg",alt:"Matcha-Zubereitung im Café",label:"CAFÉ"},{id:"2",image:"/img/gloa-on-the-go.jpg",alt:"Iced Matcha unterwegs in Berlin",label:"ON THE GO"},{id:"3",image:"/img/gloa-iced.jpg",alt:"Iced Matcha",label:"ICED"},{id:"4",image:"/img/gloa-social.jpg",alt:"Freunde mit Matcha",label:"SOCIAL"},{id:"5",image:"/img/gloa-morning.jpg",alt:"Matcha am Morgen",label:"MORNING"},{id:"6",image:"/img/gloa-work.jpg",alt:"Iced Matcha am Arbeitsplatz",label:"WORK"}];
 function Placeholder({children=""}:{children?:string}){return <span className="placeholder-label">{children}</span>}
 /** The product feature's visual. `contain`, because the pouch and its
  *  COMING SOON stamp are the subject and a crop would cut one of them. */
@@ -65,74 +65,35 @@ const howToModules=[{
   icon:<svg className="how-to-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M3.4 10.6h17.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><path d="M4.9 10.6a7.1 7.1 0 0 0 14.2 0" fill="none" stroke="currentColor" strokeWidth="1.4"/><path d="M9.6 7.4c0-1.3 1.3-1.6 1.3-2.9" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><path d="M13.6 7.4c0-1.3 1.3-1.6 1.3-2.9" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>,
 }];
 function HowTo(){return <section className="how-to"><div className="how-to-inner home-rail"><div className="how-to-body"><div className="how-to-copy"><p className="eyebrow how-to-eyebrow">HOW TO GLOA</p><h2 className="how-to-headline"><span className="how-to-line">Latte oder pur.</span><i className="how-to-line how-to-line-accent">Mehr brauchst du nicht.</i></h2></div><div className="how-to-modules">{howToModules.map(m=><article className="how-to-module" key={m.number}><div className="how-to-module-head">{m.icon}<span className="how-to-module-number">{m.number}</span></div><h3 className="how-to-module-title">{m.title}</h3><p className="how-to-module-dose">{m.dose}</p><ol className="how-to-steps">{m.steps.map((step,i)=><li key={step}><span className="how-to-step-number">{String(i+1).padStart(2,"0")}</span><span className="how-to-step-text">{step}</span></li>)}</ol></article>)}</div></div></div></section>}
-function CommunityFeed(){const [offset,setOffset]=useState(0);const [paused,setPaused]=useState(false);const [animate,setAnimate]=useState(true);const total=communityItems.length;useEffect(()=>{const mq=window.matchMedia("(prefers-reduced-motion: reduce)");if(mq.matches)return;let visible=true;const onVis=()=>{visible=document.visibilityState==="visible"};document.addEventListener("visibilitychange",onVis);const id=setInterval(()=>{if(!paused&&visible)setOffset(p=>p+1)},4500);return()=>{clearInterval(id);document.removeEventListener("visibilitychange",onVis)}},[paused]);useEffect(()=>{if(offset>=total){const t=setTimeout(()=>{setAnimate(false);setOffset(0);requestAnimationFrame(()=>requestAnimationFrame(()=>setAnimate(true)))},400);return()=>clearTimeout(t)}},[offset,total]);const track=[...communityItems,...communityItems.slice(0,4)];return <div className="community-feed" onMouseEnter={()=>setPaused(true)} onMouseLeave={()=>setPaused(false)}><div className="community-track" style={{transform:`translateX(-${offset*25}%)`,transition:animate?"transform 400ms ease":"none"}}>{track.map((item,i)=><div key={`cf-${i}`} className="community-card"><img src={item.image} alt={item.alt} loading="lazy"/></div>)}</div></div>}
-
 /**
- * The recipe rail.
+ * The community photo strip.
  *
- * ── WHY THIS IS NO LONGER A MOVING TRACK ──────────────────────
+ * ── SAME SEAMLESS ARCHITECTURE AS THE RECIPE CAROUSEL ─────────
  *
- * It used to translate a flex track built from featuredRecipes DUPLICATED
- * once - two recipes, so four cards, about 1200px of content. On a 1440px
- * desktop that track is narrower than the rail it sits in, and as the
- * offset advanced the cards ran off to the left with nothing behind them:
- * the blank centre that made the drinks look like they had disappeared.
+ * Three identical passes of the same six photos, translated by exactly
+ * calc(-100% / 3), so the loop restarts on a frame identical to the one
+ * before it. The gutter is a margin-right on the tile rather than a flex
+ * gap: a third of an 18-tile track is then exactly one pass, trailing
+ * gutter included, instead of a third of a gutter short.
  *
- * A wider viewport made it worse, which is exactly backwards. So the
- * track is gone. Four recipes, one grid, no transform and no interval -
- * there is nothing left that can run out of cards, and the page keeps a
- * single deliberate motion moment (the hero) instead of two.
+ * At any offset the content still to the right of the left edge is never
+ * less than TWO passes - 6 x (230..280 + 18) = 1488..1788px each - and
+ * the strip occupies at most the right column of the rail, so it cannot
+ * run dry. This replaces a setInterval that stepped 25% at a time and
+ * snapped back to zero, which is what made the reset visible.
  *
- * Mobile keeps a real horizontal rail: the grid becomes max-content and
- * the container scrolls, with snap points, rather than shrinking four
- * tiles onto a 390px screen.
+ * The second and third passes are aria-hidden with no alt text. Under
+ * reduced motion, and on touch, they are display:none and the strip is a
+ * native snap scroller instead.
  */
-/**
- * The homepage recipe carousel.
- *
- * ── WHY THE TRACK IS RENDERED TWICE ───────────────────────────
- *
- * The track holds THREE identical passes of the same six recipes and the
- * animation translates it by exactly one pass - calc(-100% / 3). At that
- * point the seventh card sits precisely where the first one started, so
- * the loop restarts on a frame that is pixel-identical to the one before
- * it. Nothing jumps because nothing visibly moved.
- *
- * ── WHY A THIRD IS EXACTLY ONE PASS ───────────────────────────
- *
- * The gutter between cards is a margin-right ON EVERY CARD, never a flex
- * `gap`. With a gap, an 18-card track measures 18w + 17g and a third of
- * that is 6w + 5.67g - a third of a gutter short of one pass, which is
- * the drift that opens a seam. With the margin on the card the track is
- * 18(w + g) and a third of it is 6(w + g): one pass, trailing gutter
- * included. calc(-100% / 3) keeps that exact rather than rounding it.
- *
- * ── WHY THE VIEWPORT CAN NEVER RUN EMPTY ──────────────────────
- *
- * THIS IS THE BUG THAT WAS REPORTED BEFORE. The old rail translated a
- * track built from only the two `featured` recipes, so on a wide desktop
- * it ran out of cards and left a hole in the middle.
- *
- * The guarantee here is structural, not a lucky duration: at any offset
- * t within a pass, the content still to the right of the left edge is
- * (3 passes - t), which is never less than TWO passes. So the viewport
- * is covered at every instant as long as two passes are wider than the
- * widest viewport it plays on:
- *
- *     one pass    6 x (280..330px + 24px) = 1824..2124px
- *     two passes  3648..4248px            - clears 4K (3840)
- *     below 1025px the marquee is replaced by a native scroller
- *
- * Two passes would have covered only 2124px, which is a real blank tail
- * on an ultrawide display. Three is what makes the width irrelevant.
- *
- * ── THE CLONES ARE INVISIBLE TO ASSISTIVE TECH ────────────────
- *
- * The second pass exists for motion only, so it is aria-hidden, out of
- * the tab order, and its images carry no alt text. The original six stay
- * fully reachable, and under prefers-reduced-motion the clones are
- * display:none - a static scroller has no reason to repeat itself.
- */
+function CommunityFeed(){
+const track=[...communityItems,...communityItems,...communityItems];
+return <div className="community-strip"><div className="community-strip-track">
+{track.map((item,i)=>{const clone=i>=communityItems.length;return <figure className="community-tile" key={`cf-${i}`} aria-hidden={clone||undefined}>
+<img src={item.image} alt={clone?"":item.alt} loading="lazy"/>
+<figcaption>{item.label}</figcaption>
+</figure>})}
+</div></div>}
 function RecipeCarousel(){
 const track=[...recipes,...recipes,...recipes];
 return <section className="featured-recipes">
@@ -270,7 +231,7 @@ return ref;
 
 function Home(){
 const heroRef=useHeroScrollProgress();
-return <main><section className="hero"><div className="hero-copy" ref={heroRef as React.RefObject<HTMLDivElement>}><p className="eyebrow">MATCHA AUS SHIZUOKA.</p><h1>Matcha.<br/><span className="hero-line-2">Is for everyone.</span></h1><p className="lead">Für Latte, pur, iced oder wie du willst.</p><div className="hero-actions"><Link className="cta berry" href="/about">GLOA entdecken</Link></div></div><div className="hero-art"><img src="/img/Header.png" alt="GLOA Matcha in Bewegung" className="hero-img" fetchPriority="high"/></div></section><LaunchCountdown/><section className="prelaunch"><div className="prelaunch-inner"><p className="eyebrow prelaunch-eyebrow">PRELAUNCH</p><h2 className="prelaunch-headline"><span className="prelaunch-line-1">Zum Launch</span><i className="prelaunch-line-2">benachrichtigt</i><span className="prelaunch-line-3">werden.</span></h2><p className="prelaunch-body">Trag dich ein und wir schicken dir eine Nachricht,<br/>wenn GLOA online geht. Nur ein kurzes Update zum Launch.</p><Link className="cta prelaunch-cta" href="/contact" onClick={()=>track("notify_click")}>Zum Launch benachrichtigen</Link><a className="prelaunch-social" href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer"><svg className="prelaunch-social-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="currentColor" strokeWidth="1.6"/><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.6"/><circle cx="17.2" cy="6.8" r="1.1" fill="currentColor"/></svg><span>Oder folge uns einfach auf Instagram →</span></a></div></section><section className="daily"><div className="daily-inner home-rail"><div className="daily-copy"><p className="eyebrow daily-eyebrow">MATCHA FÜR JEDEN TAG</p><h2 className="daily-headline"><span className="daily-line">Morgens.</span><span className="daily-line">Im Meeting.</span><i className="daily-line daily-line-accent">Nachmittags.</i></h2><span className="daily-rule" aria-hidden="true"/><p className="daily-note">Reiner Genuss. Klare Energie.<br/>Für jeden Moment deines Tages.</p><Link className="daily-link" href="/our-matcha">Matcha entdecken <span aria-hidden="true">→</span></Link></div><div className="daily-grid">{dailyTiles.map(t=><figure className="daily-tile" key={t.label}><img src={t.src} alt={t.alt} loading="lazy" style={{objectPosition:t.focus}}/><figcaption>{t.label}</figcaption></figure>)}</div></div></section><section className="origin"><div className="origin-inner home-rail"><div className="origin-copy"><p className="eyebrow origin-eyebrow">ORIGIN</p><h2 className="origin-headline"><span className="origin-line">From Shizuoka,</span><i className="origin-line origin-line-accent">Japan.</i></h2></div><span className="origin-divider" aria-hidden="true"/><div className="origin-facts"><p className="origin-intro">100 % Bio-Matcha aus Shizuoka, fein vermahlen.</p><dl className="origin-list"><div><dt>MATCHA</dt><dd>100 % Bio</dd></div><div><dt>MADE FOR</dt><dd>Latte + pur</dd></div></dl></div></div></section><HowTo/><RecipeCarousel/><section className="community home-rail-pad"><p className="eyebrow">#gloamatcha</p><h2>Zeig uns<br/><i>deinen Matcha.</i></h2><CommunityFeed/><a href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">@gloa.matcha folgen →</a></section><BrandNote/></main>}
+return <main><section className="hero"><div className="hero-copy" ref={heroRef as React.RefObject<HTMLDivElement>}><p className="eyebrow">MATCHA AUS SHIZUOKA.</p><h1>Matcha.<br/><span className="hero-line-2">Is for everyone.</span></h1><p className="lead">Für Latte, pur, iced oder wie du willst.</p><div className="hero-actions"><Link className="cta berry" href="/about">GLOA entdecken</Link></div></div><div className="hero-art"><img src="/img/Header.png" alt="GLOA Matcha in Bewegung" className="hero-img" fetchPriority="high"/></div></section><LaunchCountdown/><section className="prelaunch"><div className="prelaunch-inner"><p className="eyebrow prelaunch-eyebrow">PRELAUNCH</p><h2 className="prelaunch-headline"><span className="prelaunch-line-1">Zum Launch</span><i className="prelaunch-line-2">benachrichtigt</i><span className="prelaunch-line-3">werden.</span></h2><p className="prelaunch-body">Trag dich ein und wir schicken dir eine Nachricht,<br/>wenn GLOA online geht. Nur ein kurzes Update zum Launch.</p><Link className="cta prelaunch-cta" href="/contact" onClick={()=>track("notify_click")}>Zum Launch benachrichtigen</Link><a className="prelaunch-social" href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer"><svg className="prelaunch-social-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="currentColor" strokeWidth="1.6"/><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.6"/><circle cx="17.2" cy="6.8" r="1.1" fill="currentColor"/></svg><span>Oder folge uns einfach auf Instagram →</span></a></div></section><section className="daily"><div className="daily-inner home-rail"><div className="daily-copy"><p className="eyebrow daily-eyebrow">MATCHA FÜR JEDEN TAG</p><h2 className="daily-headline"><span className="daily-line">Morgens.</span><span className="daily-line">Im Meeting.</span><i className="daily-line daily-line-accent">Nachmittags.</i></h2><span className="daily-rule" aria-hidden="true"/><p className="daily-note">Reiner Genuss. Klare Energie.<br/>Für jeden Moment deines Tages.</p><Link className="daily-link" href="/our-matcha">Matcha entdecken <span aria-hidden="true">→</span></Link></div><div className="daily-grid">{dailyTiles.map(t=><figure className="daily-tile" key={t.label}><img src={t.src} alt={t.alt} loading="lazy" style={{objectPosition:t.focus}}/><figcaption>{t.label}</figcaption></figure>)}</div></div></section><section className="origin"><div className="origin-inner home-rail"><div className="origin-copy"><p className="eyebrow origin-eyebrow">ORIGIN</p><h2 className="origin-headline"><span className="origin-line">From Shizuoka,</span><i className="origin-line origin-line-accent">Japan.</i></h2></div><span className="origin-divider" aria-hidden="true"/><div className="origin-facts"><p className="origin-intro">100 % Bio-Matcha aus Shizuoka, fein vermahlen.</p><dl className="origin-list"><div><dt>MATCHA</dt><dd>100 % Bio</dd></div><div><dt>MADE FOR</dt><dd>Latte + pur</dd></div></dl></div></div></section><HowTo/><RecipeCarousel/><section className="community"><div className="community-inner home-rail"><div className="community-copy"><p className="eyebrow community-eyebrow">#GLOAMATCHA</p><h2 className="community-headline"><span className="community-line">Zeig uns</span><i className="community-line community-line-accent">deinen Matcha.</i></h2><a className="community-cta" href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">{`@${BRAND.instagram} folgen`}</a></div><CommunityFeed/></div></section><BrandNote/></main>}
 
 // -- Catalog-driven shop --------------------------------------------
 //
