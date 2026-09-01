@@ -531,13 +531,27 @@ const matchaFaq:[string,string][]=[
 ["Wie lagere ich ihn?","Kühl, trocken und lichtgeschützt. Nach dem Öffnen gut verschlossen aufbewahren."],
 ["Ist GLOA Matcha Bio?","Ja, unser Matcha ist Bio-zertifiziert."],
 ];
+/**
+ * The legacy plum origin section on /our-matcha.
+ *
+ * HIDDEN, NOT DELETED. Its eyebrow, both headline lines, both
+ * paragraphs, the TikTok link and its .matcha-shizuoka styles are all
+ * still here - the page just does not render it while this is false.
+ * The Shizuoka story is carried by the hero map and the blue product
+ * section now, so the plum block was saying it a third time.
+ *
+ * Typed as boolean rather than left to infer `false`, so the JSX below
+ * stays type-checked instead of being narrowed away.
+ */
+const SHOW_LEGACY_ORIGIN_SECTION:boolean=false;
+
 function MatchaPage(){return <main className="matcha-page">
 
 <section className="matcha-hero"><div className="matcha-hero-inner home-rail"><div className="matcha-hero-copy"><p className="eyebrow matcha-hero-eyebrow">UNSER MATCHA</p><h1 className="matcha-hero-headline"><span className="matcha-hero-line">Matcha.</span><i className="matcha-hero-line matcha-hero-line-accent">Ohne Umwege.</i></h1><p className="matcha-hero-lead">100 % Bio-Matcha aus Shizuoka, Japan.<br/>Für Latte, pur oder iced.<br/>Klar beschrieben, nichts erfunden.</p></div><div className="matcha-hero-map"><img src="/img/Japan_Karte.png" alt="Karte von Japan mit Shizuoka markiert" fetchPriority="high"/></div></div></section>
 
 <section className="matcha-product"><div className="matcha-product-inner home-rail"><div className="matcha-product-copy"><p className="eyebrow matcha-product-eyebrow">DAS PRODUKT</p><h2 className="matcha-product-headline"><span className="matcha-product-line">Ein Grün.</span><i className="matcha-product-line matcha-product-line-accent">Klar erklärt.</i></h2></div><div className="matcha-product-detail"><p className="matcha-product-intro">GLOA Matcha ist 100 % Bio-Matcha aus Shizuoka, Japan: fein gemahlenes Grünteepulver, kein Zusatz, keine Mischung. Die Verpackung ist licht-, luft- und feuchtigkeitsdicht, damit Farbe und Geschmack erhalten bleiben.</p><dl className="matcha-fact-grid"><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>QUALITÄT</dt><dd>100 % Bio-Matcha</dd></div><div><dt>VERWENDUNG</dt><dd>Latte · Iced · Pur</dd></div><div><dt>GRÖSSEN</dt><dd>30 g · 50 g · 100 g</dd></div><div><dt>LAGER</dt><dd>Deutschland</dd></div></dl><div className="matcha-taste-block"><p className="eyebrow matcha-taste-eyebrow">GESCHMACK</p><h3 className="matcha-taste-headline"><span className="matcha-taste-line">Wie schmeckt</span><i className="matcha-taste-line matcha-taste-line-accent">GLOA?</i></h3><p className="matcha-taste-body">Der Matcha zeichnet sich durch seine leuchtend grüne Farbe, feine Textur und seinen ausgewogenen Geschmack aus. Natürliche Süße und angenehmes Umami treffen auf eine dezente, frische Herbe, weich genug für den puren Genuss und gleichzeitig intensiv genug für Matcha Lattes.</p><dl className="matcha-taste-pair"><div><dt>GESCHMACK</dt><dd>Ausgewogen, cremig, leicht süßlich & umami</dd></div><div><dt>AROMA</dt><dd>Frisch, vegetal & fein</dd></div></dl></div></div></div></section>
 
-<section className="matcha-shizuoka"><p className="eyebrow">HERKUNFT</p><h2>Aus Shizuoka,<br/><i>Japan.</i></h2><p>Unser Matcha kommt aus Shizuoka, einer der bekanntesten Teeregionen Japans. Das Blatt wird industriell zu feinem Pulver vermahlen.</p><p className="matcha-build-note">Wir planen, Shizuoka in Zukunft selbst zu besuchen und dir mehr von dort zu zeigen.</p><Link className="cta cream" href="https://www.tiktok.com/@gloa.matcha" target="_blank" rel="noopener noreferrer">AUF TIKTOK FOLGEN ↗</Link></section>
+{SHOW_LEGACY_ORIGIN_SECTION&&<section className="matcha-shizuoka"><p className="eyebrow">HERKUNFT</p><h2>Aus Shizuoka,<br/><i>Japan.</i></h2><p>Unser Matcha kommt aus Shizuoka, einer der bekanntesten Teeregionen Japans. Das Blatt wird industriell zu feinem Pulver vermahlen.</p><p className="matcha-build-note">Wir planen, Shizuoka in Zukunft selbst zu besuchen und dir mehr von dort zu zeigen.</p><Link className="cta cream" href="https://www.tiktok.com/@gloa.matcha" target="_blank" rel="noopener noreferrer">AUF TIKTOK FOLGEN ↗</Link></section>}
 
 <section className="matcha-what"><div><p className="eyebrow">WAS IST MATCHA</p><h2>Pulver statt<br/><i>Aufguss.</i></h2><p>Matcha ist gemahlener grüner Tee. Anders als bei klassisch aufgegossenem Tee trinkst du bei Matcha das fein vermahlene Blatt direkt mit, nicht nur den Sud. Deshalb enthält Matcha von Natur aus mehr Koffein, L-Theanin und Catechine wie EGCG als ein Aufguss aus derselben Teemenge. Wie viel genau, hängt unter anderem von Anbau, Ernte, Verarbeitung und Zubereitung ab.</p></div><div className="matcha-what-img"><img src="/img/gloa-work.jpg" alt="Iced Matcha am Arbeitsplatz"/></div></section>
 

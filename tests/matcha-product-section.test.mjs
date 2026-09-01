@@ -183,3 +183,44 @@ test("4: two families, cream on blue, canonical rail", () => {
   assert.match(rules, /@media \(max-width:1024px\)\{[\s\S]*?\.matcha-product-inner\{grid-template-columns:1fr/);
   assert.match(rules, /@media \(max-width:640px\)\{[\s\S]*?grid-template-columns:1fr;gap:0\}/);
 });
+
+/* ══════════════════════════════════════════════════════════════
+   5. THE LEGACY PLUM ORIGIN SECTION
+   ══════════════════════════════════════════════════════════════ */
+
+test("5: the plum origin block is hidden, and every line of it survives", () => {
+  // ── NOT RENDERED ─────────────────────────────────────────────
+  // One named flag decides, in the same shape SHOP_STATUS and
+  // SHOP_HIDDEN_SLUGS already use elsewhere in this file.
+  assert.match(site, /const SHOW_LEGACY_ORIGIN_SECTION:boolean=false;/);
+  assert.match(page, /\{SHOW_LEGACY_ORIGIN_SECTION&&<section className="matcha-shizuoka">/);
+  // The blue product section is followed by the berry one directly - the
+  // plum block is not between them any more.
+  const flow = [...page.matchAll(/<section className="(matcha-[a-z-]+)"/g)].map(m => m[1]);
+  assert.ok(flow.indexOf("matcha-product") + 1 === flow.indexOf("matcha-shizuoka"),
+    "the flag no longer sits where the section used to render");
+
+  // ── NOT DELETED ──────────────────────────────────────────────
+  for (const line of [
+    "HERKUNFT", "Aus Shizuoka,", "Japan.",
+    "Unser Matcha kommt aus Shizuoka, einer der bekanntesten Teeregionen Japans. Das Blatt wird industriell zu feinem Pulver vermahlen.",
+    "Wir planen, Shizuoka in Zukunft selbst zu besuchen und dir mehr von dort zu zeigen.",
+    "AUF TIKTOK FOLGEN", "https://www.tiktok.com/@gloa.matcha",
+  ]) {
+    assert.ok(page.includes(line), `hiding the section deleted: ${line}`);
+  }
+  assert.match(css, /\.matcha-shizuoka\{padding:110px 5vw;background:var\(--plum\)/);
+  assert.match(css, /\.matcha-build-note\{/);
+  // The TikTok address is still configured where the rest of the site
+  // reads it, so nothing else lost its link.
+  assert.match(read("app/Chrome.tsx"), /tiktok\.com\/@gloa\.matcha/);
+
+  // ── NOTHING REPLACED IT, AND NO GAP WAS LEFT ─────────────────
+  // The section carried its own 110px padding, so the blue section and
+  // the berry one below it now meet on their own paddings.
+  assert.match(css, /\.matcha-what\{padding:110px 5vw;background:var\(--berry\)/);
+  assert.ok(!page.includes("matcha-origin-spacer") && !page.includes('className="spacer"'),
+    "a spacer was left behind");
+  assert.ok(!/\{SHOW_LEGACY_ORIGIN_SECTION&&<section className="matcha-shizuoka">[\s\S]*?\}\s*<section className="matcha-(?!what)/.test(page),
+    "something was inserted where the section used to be");
+});
