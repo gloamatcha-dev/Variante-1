@@ -32,6 +32,22 @@ const b2bFlowSteps:{n:string;title:string;body:[string,string];icon:string}[]=[
 /* SHIZUOKA -> GLOA -> DEIN CAFÉ. The middle node names the party that
    handles the order, not a warehouse location. */
 const b2bFlowRoute:[string,string][]=[["SHIZUOKA","Herkunft"],["GLOA","Abwicklung"],["DEIN CAFÉ","Schnelle Nachbestellung"]];
+/* THE FIVE SUPPORT MATERIALS. One row each: a line icon, its number, a
+   title and a sentence. The "available at launch" note used to repeat
+   under every one of them; it is one line at the foot of the section
+   now. Icons are single paths on a 24 grid, decorative. */
+const b2bSupport:{n:string;title:string;body:string;icon:string}[]=[
+{n:"01",title:"REZEPT-GUIDES",body:"Standardisierte Rezepte für gleichbleibende Drinks.",
+ icon:"M12 6.5S9.5 4.5 4 4.5v13c5.5 0 8 2 8 2s2.5-2 8-2v-13c-5.5 0-8 2-8 2ZM12 6.5v13"},
+{n:"02",title:"BAR-SOPS",body:"Klare Abläufe für dein Team.",
+ icon:"M9 4.5H6.5a1 1 0 0 0-1 1V20a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V5.5a1 1 0 0 0-1-1H15M9 3h6v3H9zM8.5 12.5l1.4 1.4 2.6-2.6M8.5 17l1.4 1.4 2.6-2.6"},
+{n:"03",title:"TEAM-TRAINING",body:"Kompakte Schulungsmaterialien.",
+ icon:"M2.5 9 12 4.5 21.5 9 12 13.5 2.5 9ZM6.5 11v5c0 1.4 2.5 2.5 5.5 2.5s5.5-1.1 5.5-2.5v-5"},
+{n:"04",title:"MENÜ-SUPPORT",body:"Hilfe bei der Integration in deine Karte.",
+ icon:"M6 3.5h12a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1ZM8.5 8h7M8.5 12h7M8.5 16h4"},
+{n:"05",title:"SOCIAL TOOLKIT",body:"Content für deinen GLOA Launch.",
+ icon:"M8 2.5h8a1 1 0 0 1 1 1v17a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1v-17a1 1 0 0 1 1-1ZM10.5 5h3M11 18.5h2"},
+];
 export function BusinessCalculator(){
  const [intent,setIntent]=useState<"wholesale"|"sample">(() => {
    if (typeof window === 'undefined') return "wholesale";
@@ -45,7 +61,7 @@ export function BusinessCalculator(){
 
 <section className="b2b-flow"><div className="b2b-flow-inner home-rail"><div className="b2b-flow-top"><div className="b2b-flow-intro"><p className="eyebrow b2b-flow-eyebrow">SO FUNKTIONIERT&apos;S</p><h2 className="b2b-flow-headline"><span className="b2b-flow-line">Matcha, bevor</span><i className="b2b-flow-line b2b-flow-line-accent">er ausgeht.</i></h2><p className="b2b-flow-support">In vier einfachen Schritten zu deinem Matcha,<br/>passend zu deinem Bedarf.</p></div><ol className="b2b-flow-steps">{b2bFlowSteps.map((s,i)=><li className="b2b-flow-step" key={s.n}>{i>0&&<span className="b2b-flow-step-arrow" aria-hidden="true">→</span>}<span className="b2b-flow-step-mark"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d={s.icon}/></svg></span><span className="b2b-flow-step-number">{s.n}</span><h3 className="b2b-flow-step-title">{s.title}</h3><p className="b2b-flow-step-body">{s.body[0]}<br/>{s.body[1]}</p></li>)}</ol></div><span className="b2b-flow-divider" aria-hidden="true"/><div className="b2b-flow-route"><p className="eyebrow b2b-flow-route-eyebrow">AUS SHIZUOKA.<br/>FÜR DEINE KARTE.</p><div className="b2b-flow-path">{b2bFlowRoute.map(([main,sub],i)=><div className="b2b-flow-node" key={main}>{i>0&&<span className="b2b-flow-node-arrow" aria-hidden="true">→</span>}<span className="b2b-flow-node-main">{main}</span><span className="b2b-flow-node-sub">{sub}</span></div>)}</div><span className="b2b-flow-note-rule" aria-hidden="true"/><p className="b2b-flow-note">Lieferzeit und Verfügbarkeit werden bei Bestellung bestätigt.</p></div></div></section>
 
-<section className="business-support"><p className="eyebrow">MEHR ALS MATCHA</p><h2>Wir helfen dir,<br/><i>Matcha auf die Karte zu bringen.</i></h2><div>{[["REZEPT-GUIDES","Standardisierte Rezepte für gleichbleibende Drinks."],["BAR-SOPs","Klare Abläufe für dein Team."],["TEAM-TRAINING","Kompakte Schulungsmaterialien."],["MENÜ-SUPPORT","Hilfe bei der Integration in deine Karte."],["SOCIAL TOOLKIT","Fertiger Content für deinen Launch."]].map(([a,b])=><article key={a}><h3>{a}</h3><p>{b}</p><small>Verfügbar ab Launch</small></article>)}</div></section>
+<section className="b2b-support"><div className="b2b-support-rail home-rail"><div className="b2b-support-grid"><div className="b2b-support-intro"><p className="eyebrow b2b-support-eyebrow">MEHR ALS MATCHA</p><h2 className="b2b-support-headline"><span className="b2b-support-line">Mehr als Matcha.</span><i className="b2b-support-line b2b-support-line-accent">Alles für deine Karte.</i></h2><p className="b2b-support-body">Von Rezepten bis Team-Training: Wir helfen dir dabei, GLOA sauber in deinen Alltag und deine Karte zu integrieren.</p></div><span className="b2b-support-seam" aria-hidden="true"/>{b2bSupport.map(s=><article className="b2b-support-item" key={s.n}><span className="b2b-support-mark"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d={s.icon}/></svg></span><span className="b2b-support-number">{s.n}</span><h3 className="b2b-support-title">{s.title}</h3><p className="b2b-support-text">{s.body}</p></article>)}</div><span className="b2b-support-rule" aria-hidden="true"/><p className="b2b-support-note">ALLE SUPPORT-MATERIALIEN AB LAUNCH VERFÜGBAR.</p></div></section>
 
 <section className="sample-callout"><div><p className="eyebrow">PROBIER&apos;S ERSTMAL.</p><h2>Test it with<br/>your team.</h2></div><div><p>Bestell ein Sample, bevor du deine erste größere Bestellung aufgibst. Konditionen klären wir individuell.</p><button className="cta" onClick={()=>choose("sample")}>Sample anfragen</button></div></section>
 

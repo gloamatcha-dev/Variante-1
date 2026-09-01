@@ -25,7 +25,7 @@ const src = read("app/BusinessCalculator.tsx");
 const css = read("app/globals.css");
 
 const section = src.slice(src.indexOf('<section className="b2b-flow">'),
-                          src.indexOf('<section className="business-support">'));
+                          src.indexOf('<section className="b2b-support">'));
 assert.ok(section.length > 400, "the section markup was not found");
 /* Anchored past the "=[" - the type annotation on this const contains
    a "];" of its own, which would truncate the slice to nothing. */
@@ -35,7 +35,7 @@ const route = src.slice(src.indexOf("const b2bFlowRoute"), src.indexOf("];", src
 
 const blockAt = css.indexOf("PROCESS + ROUTE, MERGED");
 assert.notEqual(blockAt, -1, "the CSS block was not found");
-const rules = css.slice(css.lastIndexOf("/*", blockAt));
+const rules = css.slice(css.lastIndexOf("/*", blockAt), css.lastIndexOf("/*", css.indexOf("MEHR ALS MATCHA, THE SUPPORT SECTION")));
 const code = rules.replace(/\/\*[\s\S]*?\*\//g, "");
 const desktop = code.slice(0, code.indexOf("@media"));
 const mobile = code.slice(code.indexOf("@media (max-width:760px)"));
@@ -297,7 +297,7 @@ test("5c: nothing else on the page moved", () => {
   // The section directly before, and the one directly after.
   assert.match(src, /<section className="b2b-portal-hint">/);
   assert.match(src, /B2B KUNDENPORTAL/);
-  assert.match(src, /<section className="business-support">/);
+  assert.match(src, /<section className="b2b-support">/);
   assert.match(src, /MEHR ALS MATCHA/);
   // The rest of the B2B page.
   assert.match(src, /FLEXIBEL &amp; PLANBAR/);

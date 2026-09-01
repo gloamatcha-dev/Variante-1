@@ -16,13 +16,13 @@ h1 i,h2 i,h3 i,.display-italic{font-family:var(--font-display),Georgia,serif;fon
 .pdp-price{font-size:32px;font-weight:800;letter-spacing:-.03em;margin:0 0 6px}
 .pdp-price span{font-size:14px;font-weight:400;letter-spacing:0}
 .pdp-per100g{font:13px/1 var(--font-mono);letter-spacing:.08em;opacity:.55;margin:0 0 25px}.pdp-facts{padding:110px 5vw;display:grid;grid-template-columns:1fr 1fr;gap:8vw}.facts-table{padding:80px 5vw}.facts-table>div{display:grid;grid-template-columns:1fr 2fr;border-top:1px solid var(--line);padding:23px 0}.facts-table span{font:13px var(--font-mono)}.article{padding:100px 5vw}.article>h1{font-size:clamp(60px,10vw,150px);line-height:.85;letter-spacing:-.07em;max-width:1100px}.article-image{height:70vh;min-height:500px;position:relative;background:var(--cream)}.article-image.j1{background:var(--blue)}.article-image.j3{background:var(--berry)}.article article{max-width:700px;margin:80px auto;font-size:19px;line-height:1.6}.article article h2{font-size:40px;line-height:1.1}.filters{padding:40px 4vw 0}.contact-choices{display:grid;grid-template-columns:1fr 1fr}.contact-choices a{min-height:420px;padding:50px 5vw;background:var(--blue);color:white;display:flex;flex-direction:column;justify-content:space-between}.contact-choices a:last-child{background:var(--berry);color:var(--cream)}.contact-choices span{font:14px var(--font-mono);letter-spacing:.12em;text-transform:uppercase}.contact-choices h2{font-size:48px}.customer-form{padding:80px 5vw;max-width:1200px;display:grid;gap:28px;margin:0 auto}.customer-form label{display:grid;gap:8px;font:600 14px/1.2 var(--font-mono);letter-spacing:.1em;text-transform:uppercase}.customer-form input,.customer-form textarea,.customer-form select{border:1px solid var(--line);background:transparent;padding:16px;font-size:16px;font-family:var(--font-sans);border-radius:0;transition:border-color .2s}.customer-form select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23111111' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 16px center;cursor:pointer}.customer-form input:focus,.customer-form textarea:focus,.customer-form select:focus{outline:none;border-color:var(--blue)}.customer-form textarea{min-height:120px}.legal-page{padding:120px 8vw;min-height:70vh}.legal-page h1{font-size:clamp(55px,9vw,120px);letter-spacing:-.07em}.legal-placeholder{max-width:700px;padding:40px;background:var(--cream);border:1px solid var(--line)}.legal-shipping-zones{display:grid;grid-template-columns:repeat(2,1fr);gap:0;max-width:900px;margin-top:40px;border-top:1px solid var(--line);border-left:1px solid var(--line)}.legal-shipping-zone{padding:30px;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}.legal-shipping-zone h3{font-size:20px;letter-spacing:-.02em;margin:0 0 18px}.legal-shipping-zone dl{margin:0}.legal-shipping-zone dl div{display:flex;justify-content:space-between;border-top:1px solid var(--line);padding:12px 0}.legal-shipping-zone dl div:first-child{border-top:0}.legal-shipping-zone dt{font:13px var(--font-mono);letter-spacing:.06em;text-transform:uppercase;opacity:.6}.legal-shipping-zone dd{margin:0;font:15px var(--font-mono)}.legal-note{max-width:700px;font:14px/1.6 var(--font-mono);opacity:.65;margin-top:24px}
-@media(max-width:800px){.legal-shipping-zones{grid-template-columns:1fr}}.not-found{min-height:70vh;padding:100px 5vw}.not-found h1{font-size:25vw;margin:0}.b2b-hero h1 i,.behind-bar h2 i,.business-support h2 i,.faq h2 i{font-family:var(--font-display),Georgia,serif;font-weight:400}.calculator{padding:110px 5vw;background:var(--blue);color:white}.calc-intro h2{font-size:clamp(50px,6vw,90px);line-height:.9;letter-spacing:-.06em;margin:0}.calc-panel{display:grid;grid-template-columns:1fr 1fr;margin-top:70px;border:1px solid rgba(255,255,255,.55)}.ranges{padding:45px}.range{display:block;margin-bottom:42px}.range>span{display:flex;justify-content:space-between;font:13px var(--font-mono)}.range b{font-size:16px}.range input{width:100%;accent-color:var(--cream);height:35px}.range small{display:flex;justify-content:space-between;font:13px var(--font-mono)}.range small i{font-style:normal}.results{background:var(--cream);color:var(--plum);padding:45px;display:flex;flex-direction:column}.results>div{display:flex;justify-content:space-between;padding:18px 0;border-top:1px solid var(--line)}.results span{font:13px var(--font-mono)}.results strong{font-size:20px}.results .scenario{margin-top:auto;background:rgba(166,30,89,.1);padding:20px;display:block}.results .scenario strong{display:block;margin-top:10px}.results small{font:13px/1.5 var(--font-mono);margin-top:12px}.sample-callout{padding:100px 5vw;background:var(--cream);display:grid;grid-template-columns:1.4fr .6fr;gap:70px}.sample-callout h2{font-size:75px;line-height:.9;letter-spacing:-.06em}.sample-callout>div:last-child{padding-top:40px}.lead-section{padding:110px 5vw;background:var(--berry);color:white}.lead-form{display:grid;grid-template-columns:1fr 1fr;gap:25px;max-width:1100px;margin:auto}.lead-form h2,.form-success h2{grid-column:1/-1;font-size:75px;line-height:.9;letter-spacing:-.06em}.lead-form h2 i{font-family:var(--font-display),Georgia,serif;font-weight:400}.lead-form label{display:grid;gap:8px;font:600 14px/1.2 var(--font-mono);letter-spacing:.1em;text-transform:uppercase}.lead-form input,.lead-form select,.lead-form textarea{background:transparent;color:white;border:0;border-bottom:1px solid white;padding:13px 0}.lead-form option{color:var(--ink)}.lead-form textarea{min-height:100px}.wide{grid-column:1/-1}.intent-tabs{grid-column:1/-1;display:flex}.intent-tabs button{border:1px solid white;background:none;color:white;padding:12px 25px}.intent-tabs .active{background:white;color:var(--berry)}.calc-summary{background:rgba(0,0,0,.14);padding:18px;font:13px var(--font-mono)}.calc-method{border-top:1px solid rgba(255,255,255,.3);padding:50px 0 0;margin-top:50px}.calc-method>div{margin-top:25px}.calc-method>div>div{padding:16px 0;border-top:1px solid rgba(255,255,255,.3);display:flex;justify-content:space-between;align-items:baseline}.calc-method span{font:13px var(--font-mono);display:block;margin-bottom:8px}.calc-method strong{font-size:14px}.calc-method>small{font:13px/1.5 var(--font-mono);opacity:.6;display:block;margin-top:20px}.calc-transparency-note{margin-top:30px}.calc-transparency-note p{font:13px/1.6 var(--font-mono);opacity:.7;margin:0}.calc-roi-placeholder{border-top:1px solid rgba(255,255,255,.3);padding-top:25px;margin-top:30px}.calc-roi-placeholder div{display:flex;justify-content:space-between;align-items:center}.calc-roi-placeholder span{font:13px var(--font-mono)}.calc-roi-placeholder strong{font:13px var(--font-mono);opacity:.6}.calc-roi-placeholder p{font:13px/1.6 var(--font-mono);opacity:.7;margin:12px 0 0}.b2b-outline{background:transparent;color:var(--cream);border-color:var(--cream)}.b2b-outline:hover{background:var(--cream);color:var(--blue)}.model-tabs{margin-top:10px}.model-tabs .eyebrow{margin-bottom:14px}.model-tabs button{display:block;width:100%;text-align:left;background:none;border:1px solid rgba(255,255,255,.3);color:white;padding:14px 18px;margin-bottom:8px;font:13px var(--font-mono);letter-spacing:.04em;transition:background .2s,border-color .2s}.model-tabs button span{float:right;font-weight:700}.model-tabs button.active{background:rgba(255,255,255,.15);border-color:white}.b2b-pricing{padding:110px 5vw}.b2b-pricing h2{font-size:clamp(48px,7vw,98px);line-height:.9;letter-spacing:-.065em;margin:24px 0}.b2b-pricing h2 i{font-family:var(--font-display),Georgia,serif;font-weight:400}.b2b-pricing-lead{font-size:18px;line-height:1.55;max-width:620px;margin-bottom:60px}.b2b-pricing-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}.b2b-pricing-card{border:1px solid var(--line);padding:40px 30px;display:flex;flex-direction:column}.b2b-pricing-card.highlight{border:2px solid var(--blue);background:rgba(23,70,209,.04)}.b2b-pricing-price{margin:20px 0}.b2b-pricing-price b{font-size:42px;letter-spacing:-.04em}.b2b-pricing-price span{font:13px var(--font-mono);margin-left:6px}.b2b-pricing-discount{display:inline-block;background:var(--blue);color:white;padding:5px 10px;font:600 12px var(--font-mono);letter-spacing:.08em}.b2b-pricing-desc{font-size:16px;line-height:1.5;margin:10px 0 25px}.b2b-pricing-details{list-style:none;padding:0;margin:0 0 30px;flex:1}.b2b-pricing-details li{padding:10px 0;border-top:1px solid var(--line);font:13px/1.4 var(--font-mono)}.b2b-pricing-card .cta{margin-top:auto;width:100%;justify-content:center}.b2b-example{padding:80px 5vw;background:var(--blue);color:white}.b2b-example .eyebrow{margin-bottom:30px}.b2b-example-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}.b2b-example-card{padding:30px;border:1px solid rgba(255,255,255,.3)}.b2b-example-card span{font:13px var(--font-mono);display:block;margin-bottom:12px}.b2b-example-card strong{font-size:24px;display:block}.b2b-example-card small{display:block;font:13px/1.6 var(--font-mono);margin-top:14px;opacity:.7}.form-success{min-height:400px;display:flex;flex-direction:column;justify-content:center;max-width:1100px;margin-left:auto;margin-right:auto}.business-support{padding:110px 5vw}.business-support>div{display:grid;grid-template-columns:repeat(5,1fr);margin-top:70px}.business-support article{padding:25px;border-top:1px solid var(--plum);border-right:1px solid var(--line)}.business-support article h3{font-size:20px}.business-support article small{font:13px/1.5 var(--font-mono)}.faq{padding:110px 10vw}.faq details{border-top:1px solid var(--plum)}.faq summary{padding:25px 0;display:flex;justify-content:space-between;cursor:pointer;font-size:18px}.faq details p{max-width:700px;line-height:1.55;padding-bottom:25px}footer{grid-template-columns:1.2fr repeat(5,.65fr)}.social-note small{font:12px var(--font-mono)}
+@media(max-width:800px){.legal-shipping-zones{grid-template-columns:1fr}}.not-found{min-height:70vh;padding:100px 5vw}.not-found h1{font-size:25vw;margin:0}.b2b-hero h1 i,.behind-bar h2 i,.business-support h2 i,.faq h2 i{font-family:var(--font-display),Georgia,serif;font-weight:400}.calculator{padding:110px 5vw;background:var(--blue);color:white}.calc-intro h2{font-size:clamp(50px,6vw,90px);line-height:.9;letter-spacing:-.06em;margin:0}.calc-panel{display:grid;grid-template-columns:1fr 1fr;margin-top:70px;border:1px solid rgba(255,255,255,.55)}.ranges{padding:45px}.range{display:block;margin-bottom:42px}.range>span{display:flex;justify-content:space-between;font:13px var(--font-mono)}.range b{font-size:16px}.range input{width:100%;accent-color:var(--cream);height:35px}.range small{display:flex;justify-content:space-between;font:13px var(--font-mono)}.range small i{font-style:normal}.results{background:var(--cream);color:var(--plum);padding:45px;display:flex;flex-direction:column}.results>div{display:flex;justify-content:space-between;padding:18px 0;border-top:1px solid var(--line)}.results span{font:13px var(--font-mono)}.results strong{font-size:20px}.results .scenario{margin-top:auto;background:rgba(166,30,89,.1);padding:20px;display:block}.results .scenario strong{display:block;margin-top:10px}.results small{font:13px/1.5 var(--font-mono);margin-top:12px}.sample-callout{padding:100px 5vw;background:var(--cream);display:grid;grid-template-columns:1.4fr .6fr;gap:70px}.sample-callout h2{font-size:75px;line-height:.9;letter-spacing:-.06em}.sample-callout>div:last-child{padding-top:40px}.lead-section{padding:110px 5vw;background:var(--berry);color:white}.lead-form{display:grid;grid-template-columns:1fr 1fr;gap:25px;max-width:1100px;margin:auto}.lead-form h2,.form-success h2{grid-column:1/-1;font-size:75px;line-height:.9;letter-spacing:-.06em}.lead-form h2 i{font-family:var(--font-display),Georgia,serif;font-weight:400}.lead-form label{display:grid;gap:8px;font:600 14px/1.2 var(--font-mono);letter-spacing:.1em;text-transform:uppercase}.lead-form input,.lead-form select,.lead-form textarea{background:transparent;color:white;border:0;border-bottom:1px solid white;padding:13px 0}.lead-form option{color:var(--ink)}.lead-form textarea{min-height:100px}.wide{grid-column:1/-1}.intent-tabs{grid-column:1/-1;display:flex}.intent-tabs button{border:1px solid white;background:none;color:white;padding:12px 25px}.intent-tabs .active{background:white;color:var(--berry)}.calc-summary{background:rgba(0,0,0,.14);padding:18px;font:13px var(--font-mono)}.calc-method{border-top:1px solid rgba(255,255,255,.3);padding:50px 0 0;margin-top:50px}.calc-method>div{margin-top:25px}.calc-method>div>div{padding:16px 0;border-top:1px solid rgba(255,255,255,.3);display:flex;justify-content:space-between;align-items:baseline}.calc-method span{font:13px var(--font-mono);display:block;margin-bottom:8px}.calc-method strong{font-size:14px}.calc-method>small{font:13px/1.5 var(--font-mono);opacity:.6;display:block;margin-top:20px}.calc-transparency-note{margin-top:30px}.calc-transparency-note p{font:13px/1.6 var(--font-mono);opacity:.7;margin:0}.calc-roi-placeholder{border-top:1px solid rgba(255,255,255,.3);padding-top:25px;margin-top:30px}.calc-roi-placeholder div{display:flex;justify-content:space-between;align-items:center}.calc-roi-placeholder span{font:13px var(--font-mono)}.calc-roi-placeholder strong{font:13px var(--font-mono);opacity:.6}.calc-roi-placeholder p{font:13px/1.6 var(--font-mono);opacity:.7;margin:12px 0 0}.b2b-outline{background:transparent;color:var(--cream);border-color:var(--cream)}.b2b-outline:hover{background:var(--cream);color:var(--blue)}.model-tabs{margin-top:10px}.model-tabs .eyebrow{margin-bottom:14px}.model-tabs button{display:block;width:100%;text-align:left;background:none;border:1px solid rgba(255,255,255,.3);color:white;padding:14px 18px;margin-bottom:8px;font:13px var(--font-mono);letter-spacing:.04em;transition:background .2s,border-color .2s}.model-tabs button span{float:right;font-weight:700}.model-tabs button.active{background:rgba(255,255,255,.15);border-color:white}.b2b-pricing{padding:110px 5vw}.b2b-pricing h2{font-size:clamp(48px,7vw,98px);line-height:.9;letter-spacing:-.065em;margin:24px 0}.b2b-pricing h2 i{font-family:var(--font-display),Georgia,serif;font-weight:400}.b2b-pricing-lead{font-size:18px;line-height:1.55;max-width:620px;margin-bottom:60px}.b2b-pricing-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}.b2b-pricing-card{border:1px solid var(--line);padding:40px 30px;display:flex;flex-direction:column}.b2b-pricing-card.highlight{border:2px solid var(--blue);background:rgba(23,70,209,.04)}.b2b-pricing-price{margin:20px 0}.b2b-pricing-price b{font-size:42px;letter-spacing:-.04em}.b2b-pricing-price span{font:13px var(--font-mono);margin-left:6px}.b2b-pricing-discount{display:inline-block;background:var(--blue);color:white;padding:5px 10px;font:600 12px var(--font-mono);letter-spacing:.08em}.b2b-pricing-desc{font-size:16px;line-height:1.5;margin:10px 0 25px}.b2b-pricing-details{list-style:none;padding:0;margin:0 0 30px;flex:1}.b2b-pricing-details li{padding:10px 0;border-top:1px solid var(--line);font:13px/1.4 var(--font-mono)}.b2b-pricing-card .cta{margin-top:auto;width:100%;justify-content:center}.b2b-example{padding:80px 5vw;background:var(--blue);color:white}.b2b-example .eyebrow{margin-bottom:30px}.b2b-example-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}.b2b-example-card{padding:30px;border:1px solid rgba(255,255,255,.3)}.b2b-example-card span{font:13px var(--font-mono);display:block;margin-bottom:12px}.b2b-example-card strong{font-size:24px;display:block}.b2b-example-card small{display:block;font:13px/1.6 var(--font-mono);margin-top:14px;opacity:.7}.form-success{min-height:400px;display:flex;flex-direction:column;justify-content:center;max-width:1100px;margin-left:auto;margin-right:auto}.faq{padding:110px 10vw}.faq details{border-top:1px solid var(--plum)}.faq summary{padding:25px 0;display:flex;justify-content:space-between;cursor:pointer;font-size:18px}.faq details p{max-width:700px;line-height:1.55;padding-bottom:25px}footer{grid-template-columns:1.2fr repeat(5,.65fr)}.social-note small{font:12px var(--font-mono)}
 .matcha-page h1 i,.matcha-facts h2 i,.matcha-transparency h2 i,.matcha-howto h2 i,.matcha-cta h2 i,.matcha-taste h2 i,.matcha-use h2 i,.matcha-shizuoka h2 i,.matcha-what h2 i{font-family:var(--font-display),Georgia,serif;font-weight:400}.matcha-facts h2,.matcha-transparency h2,.matcha-howto h2,.matcha-cta h2,.matcha-taste h2,.matcha-use h2,.matcha-shizuoka h2,.matcha-what h2{font-size:clamp(48px,7vw,98px);line-height:.9;letter-spacing:-.065em;margin:24px 0}.matcha-facts-secondary{margin-top:45px;border-top:1px solid var(--line);padding-top:20px}.matcha-facts-secondary p{font:13px var(--font-mono);letter-spacing:.1em;opacity:.55;margin:0 0 8px}.matcha-howto{padding:110px 5vw;background:var(--plum);color:var(--cream)}.matcha-method-grid{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid rgba(245,235,226,.4);border-bottom:1px solid rgba(245,235,226,.4)}.matcha-method-grid article{padding:35px 4vw;border-right:1px solid rgba(245,235,226,.4)}.matcha-method-grid article:last-child{border-right:0}.matcha-method-grid span{font:13px var(--font-mono)}.matcha-method-grid h3{font-size:38px}.matcha-method-grid li{padding:12px 0;border-top:1px solid rgba(245,235,226,.25)}.matcha-section-text{font-size:18px;line-height:1.6;max-width:620px;margin:30px 0 0}.matcha-known{border-top:1px solid var(--line)}.matcha-shizuoka{padding:110px 5vw;background:var(--plum);color:var(--cream)}.matcha-shizuoka>p:not(.eyebrow):not(.matcha-build-note){font-size:18px;line-height:1.6;max-width:620px;margin:30px 0 0}.matcha-build-note{font:600 14px/1.5 var(--font-mono);letter-spacing:.06em;margin:35px 0 30px;opacity:.7}.matcha-image{height:70vh;min-height:500px;position:relative;overflow:hidden}.matcha-image img{width:100%;height:100%;object-fit:cover;object-position:center}.matcha-cta{padding:110px 5vw;text-align:center}.matcha-cta h2{margin-bottom:45px}.matcha-cta-actions{display:flex;gap:16px;justify-content:center}
 /* The legacy /about block that stood here - one 122px page h1 above a 12%
    index gutter, 630px and 600px min-heights, a 98px h2 shared by four
    sections and a 64px TikTok handle - was replaced wholesale by the ABOUT
    PAGE block at the end of this file. Nothing else read those selectors. */
-@media(max-width:800px){.cta{padding:14px 24px;min-height:50px}.search-bar{top:100%;grid-template-columns:1fr auto}.search-bar label{display:none}.hero-actions{align-items:flex-start;flex-direction:column}.product-intro,.origin,.pdp-facts,.behind-bar{grid-template-columns:1fr}.product-intro{padding:75px 5vw}.origin{padding:80px 5vw}.newsletter-band{grid-template-columns:1fr}.newsletter-img{height:300px}.pdp-hero{grid-template-columns:1fr}.pdp-hero-image{height:450px;position:relative}.pdp-hero-info{padding:50px 5vw}.pdp-hero h1{font-size:42px}.facts-table>div{grid-template-columns:.7fr 1.3fr}.contact-choices{grid-template-columns:1fr}.contact-choices a{min-height:330px}.calc-intro h2{margin:25px 0}.calc-panel{grid-template-columns:1fr}.ranges,.results{padding:28px 20px}.results>div{display:block}.results strong{display:block;margin-top:7px}.sample-callout{grid-template-columns:1fr;gap:0}.sample-callout h2{font-size:55px}.lead-form{grid-template-columns:1fr}.lead-form>*{grid-column:1!important}.lead-form h2{font-size:58px}.business-support>div{display:flex;overflow-x:auto}.business-support article{min-width:75vw}.calc-method>div>div{flex-direction:column;gap:4px}.calc-roi-placeholder div{flex-direction:column;align-items:flex-start;gap:8px}.b2b-pricing{padding:75px 5vw}.b2b-pricing-grid{grid-template-columns:1fr}.b2b-pricing-card{padding:30px 20px}.b2b-pricing-price b{font-size:34px}.b2b-example{padding:60px 5vw}.b2b-example-grid{grid-template-columns:1fr}footer{grid-template-columns:1fr 1fr}.article-image{height:55vh;min-height:400px}.matcha-shizuoka{padding:75px 5vw}.matcha-howto{padding:75px 5vw}.matcha-method-grid{grid-template-columns:1fr}.matcha-method-grid article{border-right:0;border-bottom:1px solid rgba(245,235,226,.4)}.matcha-image{height:55vh;min-height:400px}.matcha-cta{padding:75px 5vw}.matcha-cta-actions{flex-direction:column;align-items:center}}
+@media(max-width:800px){.cta{padding:14px 24px;min-height:50px}.search-bar{top:100%;grid-template-columns:1fr auto}.search-bar label{display:none}.hero-actions{align-items:flex-start;flex-direction:column}.product-intro,.origin,.pdp-facts,.behind-bar{grid-template-columns:1fr}.product-intro{padding:75px 5vw}.origin{padding:80px 5vw}.newsletter-band{grid-template-columns:1fr}.newsletter-img{height:300px}.pdp-hero{grid-template-columns:1fr}.pdp-hero-image{height:450px;position:relative}.pdp-hero-info{padding:50px 5vw}.pdp-hero h1{font-size:42px}.facts-table>div{grid-template-columns:.7fr 1.3fr}.contact-choices{grid-template-columns:1fr}.contact-choices a{min-height:330px}.calc-intro h2{margin:25px 0}.calc-panel{grid-template-columns:1fr}.ranges,.results{padding:28px 20px}.results>div{display:block}.results strong{display:block;margin-top:7px}.sample-callout{grid-template-columns:1fr;gap:0}.sample-callout h2{font-size:55px}.lead-form{grid-template-columns:1fr}.lead-form>*{grid-column:1!important}.lead-form h2{font-size:58px}.calc-method>div>div{flex-direction:column;gap:4px}.calc-roi-placeholder div{flex-direction:column;align-items:flex-start;gap:8px}.b2b-pricing{padding:75px 5vw}.b2b-pricing-grid{grid-template-columns:1fr}.b2b-pricing-card{padding:30px 20px}.b2b-pricing-price b{font-size:34px}.b2b-example{padding:60px 5vw}.b2b-example-grid{grid-template-columns:1fr}footer{grid-template-columns:1fr 1fr}.article-image{height:55vh;min-height:400px}.matcha-shizuoka{padding:75px 5vw}.matcha-howto{padding:75px 5vw}.matcha-method-grid{grid-template-columns:1fr}.matcha-method-grid article{border-right:0;border-bottom:1px solid rgba(245,235,226,.4)}.matcha-image{height:55vh;min-height:400px}.matcha-cta{padding:75px 5vw}.matcha-cta-actions{flex-direction:column;align-items:center}}
 
 /* SHOP PAGE */
 
@@ -5345,4 +5345,239 @@ header nav{gap:18px;font-size:12px}
     width:1em;
   }
   .b2b-flow .b2b-flow-note{max-width:none}
+}
+
+/* ══════════════════════════════════════════════════════════════
+   /for-cafes — MEHR ALS MATCHA, THE SUPPORT SECTION
+
+   Was: no ground of its own, a headline on the shared
+   clamp(48px,7vw,98px) h2 rule - larger than the page hero - and five
+   bordered cells, each repeating "Verfügbar ab Launch" underneath it.
+   Five copies of one sentence.
+
+   Now GLOA blue, edge to edge: a wider intro column, a seam, five open
+   service columns, and the launch note ONCE at the foot behind a
+   hairline. Nothing in the section has a background, a border box, a
+   radius or a shadow - the only shapes are the five icon rings and the
+   hairlines.
+
+   ── THE SCALE ────────────────────────────────────────────────
+       B2B hero   clamp(52px,5.4vw,76px) / clamp(50px,5vw,72px)
+       THIS       clamp(42px,3.8vw,54px) / clamp(46px,4.1vw,58px)
+
+   The 54/58 caps are the brief's, and they sit one step under the
+   58/62 the ordering and flow sections carry - this section leads with
+   its columns, not its headline. On MOBILE the brief's 46/50 would
+   pass the hero, which drops to clamp(40px,11.4vw,54px) /
+   clamp(38px,10.6vw,50px) there, so this takes the curve the other B2B
+   sections already use.
+
+   ── THE OLD NAME ─────────────────────────────────────────────
+   .business-support is still named in TWO shared selector lists, one
+   with .faq / .behind-bar / .daily / .origin and one with .b2b-hero h1
+   i. Renaming to .b2b-support leaves both lists untouched rather than
+   editing CSS that other pages read.
+   ══════════════════════════════════════════════════════════════ */
+
+.b2b-support{
+  --col-gap:clamp(20px,2.2vw,34px);
+  background:var(--blue);
+  color:var(--cream);
+  padding-block:clamp(88px,7vw,108px) clamp(72px,6vw,94px);
+  padding-inline:var(--rail-gutter);
+}
+/* Intro, seam, then the five. The intro track is visibly wider than any
+   single service column. */
+.b2b-support-grid{
+  display:grid;
+  grid-template-columns:minmax(300px,1.45fr) 1px repeat(5,minmax(125px,.78fr));
+  gap:var(--col-gap);
+  align-items:start;
+}
+
+/* ── THE INTRO ─────────────────────────────────────────────── */
+.b2b-support-intro{display:flex;flex-direction:column;align-items:flex-start;min-width:0}
+.b2b-support .b2b-support-eyebrow{
+  margin:0 0 clamp(22px,2.2vw,26px);
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:var(--type-meta);
+  line-height:1.2;
+  letter-spacing:.2em;
+  text-transform:uppercase;
+  color:var(--cream);
+}
+.b2b-support .b2b-support-headline{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  margin:0;
+  color:var(--cream);
+  letter-spacing:normal;
+  line-height:1;
+}
+.b2b-support .b2b-support-line{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:500;
+  font-style:normal;
+  font-size:clamp(42px,3.8vw,54px);
+  line-height:.98;
+  letter-spacing:-.04em;
+  color:var(--cream);
+}
+.b2b-support .b2b-support-line-accent{
+  font-family:var(--font-display),Georgia,serif;
+  font-weight:400;
+  font-style:italic;
+  font-size:clamp(46px,4.1vw,58px);
+  line-height:.93;
+  letter-spacing:-.01em;
+  margin-top:4px;
+  color:var(--cream);
+}
+.b2b-support .b2b-support-body{
+  margin:clamp(28px,2.8vw,36px) 0 0;
+  max-width:360px;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:clamp(15px,1.2vw,16px);
+  line-height:1.6;
+  letter-spacing:0;
+  color:var(--cream);
+}
+
+/* ── THE SEAM, AND THE FIVE COLUMNS ────────────────────────── */
+/* A grid track of its own, so it cannot drift from the columns. */
+.b2b-support-seam{
+  align-self:center;
+  display:block;
+  width:1px;
+  height:clamp(150px,16vw,220px);
+  background:rgba(245,235,226,.30);
+}
+/* Open columns: no background, no border box, no padding shell. */
+.b2b-support-item{position:relative;display:flex;flex-direction:column;align-items:flex-start;min-width:0}
+/* The divider between two service columns, in the gap - never an edge
+   on the column itself. */
+.b2b-support-item + .b2b-support-item::before{
+  content:"";
+  position:absolute;
+  left:calc(var(--col-gap) / -2);
+  top:7.5%;
+  width:1px;
+  height:85%;
+  background:rgba(245,235,226,.28);
+}
+/* A thin ring, never a filled bubble. */
+.b2b-support-mark{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  width:50px;
+  height:50px;
+  border:1px solid rgba(245,235,226,.72);
+  border-radius:50%;
+  background:transparent;
+  color:var(--cream);
+}
+.b2b-support-mark svg{display:block}
+.b2b-support-number{
+  margin-top:clamp(20px,2vw,24px);
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:11px;
+  line-height:1;
+  letter-spacing:.08em;
+  color:var(--cream);
+}
+.b2b-support-title{
+  margin:9px 0 0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:clamp(14px,1.15vw,15px);
+  line-height:1.25;
+  letter-spacing:.01em;
+  color:var(--cream);
+}
+.b2b-support-text{
+  margin:11px 0 0;
+  max-width:165px;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:clamp(13px,1.05vw,14px);
+  line-height:1.55;
+  letter-spacing:0;
+  color:rgba(245,235,226,.88);
+}
+
+/* ── THE FOOT ──────────────────────────────────────────────── */
+/* One hairline, one note - the sentence that used to sit under all
+   five services. */
+.b2b-support-rule{
+  display:block;
+  width:100%;
+  height:1px;
+  margin-top:clamp(42px,4.2vw,52px);
+  background:rgba(245,235,226,.32);
+}
+.b2b-support .b2b-support-note{
+  margin:clamp(18px,1.8vw,22px) 0 0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:11px;
+  line-height:1.3;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--cream);
+}
+
+/* ── TABLET ────────────────────────────────────────────────── */
+/* Intro across the top, then three and two - five narrow columns would
+   squeeze every description. */
+@media (max-width:1200px){
+  .b2b-support-grid{grid-template-columns:repeat(3,minmax(0,1fr));row-gap:clamp(34px,4vw,48px)}
+  .b2b-support-intro{grid-column:1 / -1}
+  /* display:none takes it out of the grid, so the five columns fill the
+     three tracks cleanly. */
+  .b2b-support-seam{display:none}
+  .b2b-support .b2b-support-body{max-width:520px}
+  .b2b-support-text{max-width:none}
+  /* The fourth item starts the second row and has no gap to its left. */
+  .b2b-support-item:nth-of-type(4)::before{content:none}
+}
+
+/* ── MOBILE ────────────────────────────────────────────────── */
+@media (max-width:760px){
+  .b2b-support{padding-block:clamp(64px,11vw,84px) clamp(56px,9vw,72px)}
+  .b2b-support .b2b-support-line{font-size:clamp(34px,8.8vw,44px)}
+  .b2b-support .b2b-support-line-accent{font-size:clamp(36px,9.4vw,46px)}
+  .b2b-support .b2b-support-body{max-width:none;font-size:15px}
+
+  /* One service per row: icon and number left, title and text right. */
+  .b2b-support-grid{grid-template-columns:1fr;gap:0}
+  .b2b-support-intro{grid-column:auto;margin-bottom:clamp(30px,5vw,40px)}
+  .b2b-support-item{
+    display:grid;
+    grid-template-columns:46px minmax(0,1fr);
+    column-gap:18px;
+    align-items:start;
+    padding-top:clamp(20px,4vw,26px);
+    margin-top:clamp(20px,4vw,26px);
+    border-top:1px solid rgba(245,235,226,.25);
+  }
+  /* Vertical dividers out, horizontal ones in. */
+  .b2b-support-item + .b2b-support-item::before{content:none}
+  .b2b-support-mark{width:46px;height:46px;grid-row:1 / span 3}
+  .b2b-support-mark svg{width:25px;height:25px}
+  .b2b-support-number{grid-column:2;margin-top:2px}
+  .b2b-support-title{grid-column:2}
+  .b2b-support-text{grid-column:2;max-width:none}
+  .b2b-support-rule{margin-top:clamp(30px,5vw,40px)}
+  .b2b-support .b2b-support-note{font-size:10px;letter-spacing:.13em}
 }

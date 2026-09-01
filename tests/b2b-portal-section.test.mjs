@@ -277,7 +277,7 @@ test("4c: every selector is scoped, and nothing else on the page moved", () => {
   // And everything after it.
   // b2b-steps + supply were merged into one .b2b-flow section in a later
   // pass - see tests/b2b-flow-section.test.mjs.
-  for (const marker of ['className="b2b-flow"', 'className="business-support"',
+  for (const marker of ['className="b2b-flow"', 'className="b2b-support"',
                         'className="sample-callout"', 'id="lead"']) {
     assert.ok(src.includes(marker), `a section below changed: ${marker}`);
   }
