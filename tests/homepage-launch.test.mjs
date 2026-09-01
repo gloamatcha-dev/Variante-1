@@ -53,6 +53,7 @@ const cssBlockRules = (from, to) => {
 const HERO_BLOCK = "HOMEPAGE HERO - FINAL PASS";
 const PRELAUNCH_BLOCK = "HOMEPAGE PRELAUNCH SECTION";
 const DAILY_BLOCK = "HOMEPAGE DAILY LIFESTYLE SECTION";
+const ORIGIN_BLOCK = "HOMEPAGE ORIGIN SECTION";
 const css = read("app/globals.css");
 const layout = read("app/layout.tsx");
 
@@ -785,7 +786,7 @@ const daily = homepage.slice(
   homepage.indexOf('<section className="daily">'),
   homepage.indexOf('<section className="origin">')
 );
-const dailyCss = cssBlockRules(DAILY_BLOCK);
+const dailyCss = cssBlockRules(DAILY_BLOCK, ORIGIN_BLOCK);
 
 test("29: the copy and the six tiles are one horizontal composition", () => {
   assert.ok(daily.length > 0, "the daily section is missing");
@@ -869,4 +870,99 @@ test("31: the section's type stays inside the two families", () => {
   assert.ok(!/\.daily-link\{[^}]*background:/.test(dailyCss), "the link became a button");
   // Tablet and mobile fall back to two columns rather than crushing three.
   assert.match(dailyCss, /@media \(max-width:1024px\)\{[\s\S]*?grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   32-34. THE ORIGIN SECTION
+   ══════════════════════════════════════════════════════════════ */
+
+const origin = homepage.slice(
+  homepage.indexOf('<section className="origin">'),
+  homepage.indexOf("<HowTo/>")
+);
+const originCss = cssBlockRules(ORIGIN_BLOCK);
+
+test("32: the origin copy is exactly the approved lines, with no repetition", () => {
+  assert.ok(origin.length > 0, "the origin section is missing");
+  for (const line of [
+    "ORIGIN", "From Shizuoka,", "Japan.",
+    "100 % Bio-Matcha aus Shizuoka, fein vermahlen.",
+    "MATCHA", "100 % Bio", "MADE FOR", "Latte + pur",
+  ]) {
+    assert.ok(origin.includes(line), `the origin section lost: ${line}`);
+  }
+  // The three repetitions are gone: the duplicate ORIGIN row, the longer
+  // sentence that restated the headline, and the English value.
+  for (const gone of [
+    "<dd>Shizuoka, Japan</dd>",
+    "GLOA Matcha kommt aus Shizuoka, Japan",
+    "Latte + pure preparation",
+  ]) {
+    assert.ok(!origin.includes(gone), `the origin section still carries: ${gone}`);
+  }
+  // Exactly two rows now.
+  assert.equal([...origin.matchAll(/<dt>/g)].length, 2, "the fact list is not two rows");
+  assert.match(origin, /<dt>MATCHA<\/dt><dd>100 % Bio<\/dd>/);
+  assert.match(origin, /<dt>MADE FOR<\/dt><dd>Latte \+ pur<\/dd>/);
+});
+
+test("33: the section is compact, railed and deliberately smaller than the hero", () => {
+  // A 1240px rail, centred, on the existing cream - not a floating card.
+  assert.match(originCss, /\.origin-inner\{[\s\S]*?max-width:1240px/);
+  assert.match(originCss, /\.origin-inner\{[\s\S]*?margin-inline:auto/);
+  assert.match(originCss, /\.origin\{[\s\S]*?background:var\(--cream\)/);
+  assert.match(originCss, /\.origin\{[\s\S]*?padding:clamp\(68px,6vw,92px\)/);
+  assert.ok(!originCss.includes("100vh"), "the section reserves a viewport");
+  assert.ok(!/text-align:center/.test(originCss), "the content was centred like a card");
+  for (const banned of ["border-radius", "box-shadow", "gradient", "backdrop-filter"]) {
+    assert.ok(!originCss.includes(banned), `the origin section uses ${banned}`);
+  }
+
+  // THE HIERARCHY. Origin caps at 64/68px; the hero runs to 100px and the
+  // lifestyle statement to 74px, so the page keeps hero > lifestyle >
+  // origin rather than two competing headlines.
+  const cap = re => Number(re.exec(originCss)?.[1]);
+  const shizuoka = cap(/\.origin-line\{[\s\S]*?font-size:clamp\([^,]+,[^,]+,(\d+)px\)/);
+  const japan = cap(/\.origin-line-accent\{[\s\S]*?font-size:clamp\([^,]+,[^,]+,(\d+)px\)/);
+  assert.equal(shizuoka, 64);
+  assert.equal(japan, 68);
+  const heroCap = Number(/\.hero \.hero-copy h1\{[\s\S]*?font-size:clamp\([^,]+,[^,]+,(\d+)px\)/.exec(heroCss)?.[1]);
+  const lifestyleCap = Number(/\.daily-line\{[\s\S]*?font-size:clamp\([^,]+,[^,]+,(\d+)px\)/.exec(dailyCss)?.[1]);
+  assert.ok(japan < lifestyleCap, "origin is not smaller than the lifestyle statement");
+  assert.ok(lifestyleCap < heroCap, "the lifestyle statement is not smaller than the hero");
+
+  // Two columns with a short, centred raspberry seam between them.
+  assert.match(originCss, /grid-template-columns:minmax\(0,\.85fr\) 1px minmax\(0,1\.15fr\)/);
+  assert.match(originCss, /\.origin-divider\{[\s\S]*?width:1px[\s\S]*?background:var\(--berry\)/);
+  assert.match(originCss, /\.origin-divider\{[\s\S]*?height:76%/);
+  // Tablet turns the seam horizontal; mobile stacks the rows.
+  assert.match(originCss, /@media \(max-width:1024px\)\{[\s\S]*?\.origin-divider\{width:72px;height:1px/);
+  assert.match(originCss, /@media \(max-width:640px\)\{[\s\S]*?\.origin-list div\{flex-direction:column/);
+});
+
+test("34: the origin type stays inside the two families", () => {
+  // Only "Japan." uses the display face; everything else is the sans.
+  const accent = originCss.slice(originCss.indexOf(".origin-line-accent{"), originCss.indexOf("}", originCss.indexOf(".origin-line-accent{")));
+  assert.match(accent, /font-family:var\(--font-display\)/);
+  assert.match(accent, /font-style:italic/);
+  assert.match(accent, /color:var\(--berry\)/);
+  assert.match(origin, /<i className="origin-line origin-line-accent">Japan\.<\/i>/);
+
+  for (const name of [".origin-eyebrow{", ".origin-line{", ".origin-intro{", ".origin-list dt{", ".origin-list dd{"]) {
+    const rule = originCss.slice(originCss.indexOf(name), originCss.indexOf("}", originCss.indexOf(name)));
+    assert.match(rule, /font-family:var\(--font-sans\)/, `${name} is not on the sans`);
+    assert.ok(!rule.includes("--font-display"), `${name} uses the display face`);
+    assert.ok(!/Georgia|Cormorant|[^-]serif/.test(rule), `${name} reaches for a serif`);
+  }
+  // The eyebrow matches the site's meta voice exactly.
+  const eyebrow = originCss.slice(originCss.indexOf(".origin-eyebrow{"), originCss.indexOf("}", originCss.indexOf(".origin-eyebrow{")));
+  assert.match(eyebrow, /font-weight:600/);
+  assert.match(eyebrow, /font-size:11px/);
+  assert.match(eyebrow, /letter-spacing:\.2em/);
+  assert.match(eyebrow, /text-transform:uppercase/);
+  assert.match(eyebrow, /color:var\(--berry\)/);
+  // "From Shizuoka," is lighter than the hero anchor, on purpose.
+  const line = originCss.slice(originCss.indexOf(".origin-line{"), originCss.indexOf("}", originCss.indexOf(".origin-line{")));
+  assert.match(line, /font-weight:500/);
+  assert.ok(!/font-weight:[89]00/.test(line), "the origin headline is hero-weight");
 });

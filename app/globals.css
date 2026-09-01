@@ -1166,3 +1166,139 @@ header nav{gap:18px;font-size:12px}
   .daily-grid{min-height:0;grid-template-rows:repeat(3,minmax(180px,1fr))}
   .daily-tile figcaption{top:12px;left:12px;padding:5px 8px}
 }
+
+/* ══════════════════════════════════════════════════════════════
+   HOMEPAGE ORIGIN SECTION
+
+   A QUIET INFORMATION MOMENT, and sized like one. It used to run at the
+   shared h2 scale - clamp(48px,7vw,98px) - which put it in the same
+   weight class as the hero, so the page had two headlines competing for
+   the same job. It is now capped at 64/68px and sits on a 1240px rail
+   rather than the full 1520px the lifestyle wall uses.
+
+   THE PAGE'S INTENDED ORDER:
+     hero  >  lifestyle / prelaunch  >  origin
+
+   Every selector is scoped to .origin and appended last, so the frozen
+   hero, countdown, prelaunch and lifestyle rules are untouched - including
+   the shared `.origin h2` rule, which is overridden here rather than
+   edited where it also serves four other sections.
+   ══════════════════════════════════════════════════════════════ */
+
+.origin{
+  background:var(--cream);
+  display:block;
+  padding:clamp(68px,6vw,92px) clamp(20px,4vw,48px);
+}
+.origin-inner{
+  max-width:1240px;
+  margin-inline:auto;
+  display:grid;
+  grid-template-columns:minmax(0,.85fr) 1px minmax(0,1.15fr);
+  gap:clamp(28px,4vw,64px);
+  align-items:center;
+}
+
+.origin-copy{min-width:0}
+.origin-eyebrow{
+  margin:0 0 clamp(20px,2vw,28px);
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:11px;
+  line-height:1.2;
+  letter-spacing:.2em;
+  text-transform:uppercase;
+  color:var(--berry);
+}
+/* Two explicit lines, tight, so they read as one address. */
+.origin-headline{display:flex;flex-direction:column;align-items:flex-start;margin:0}
+.origin-line{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:500;
+  font-style:normal;
+  font-size:clamp(46px,4.2vw,64px);
+  line-height:.98;
+  letter-spacing:-.045em;
+  color:var(--ink);
+}
+.origin-line-accent{
+  font-family:var(--font-display),Georgia,serif;
+  font-style:italic;
+  font-weight:400;
+  font-size:clamp(50px,4.6vw,68px);
+  line-height:.94;
+  letter-spacing:-.01em;
+  color:var(--berry);
+  margin-top:3px;
+}
+
+/* The seam between the two columns: short, centred, and softened - a
+   rule, not a table edge. */
+.origin-divider{
+  display:block;
+  width:1px;
+  height:76%;
+  align-self:center;
+  background:var(--berry);
+  opacity:.7;
+}
+
+.origin-facts{min-width:0}
+.origin-intro{
+  margin:0 0 clamp(28px,2.6vw,34px);
+  max-width:520px;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:18px;
+  line-height:1.5;
+  color:var(--ink);
+}
+.origin-list{margin:0}
+.origin-list div{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:24px;
+  min-height:56px;
+  padding:16px 0;
+  border-top:1px solid var(--line);
+}
+.origin-list div:last-child{border-bottom:1px solid var(--line)}
+.origin-list dt{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:11px;
+  line-height:1.2;
+  letter-spacing:.18em;
+  text-transform:uppercase;
+  color:var(--ink);
+}
+.origin-list dd{
+  margin:0;
+  text-align:right;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:17px;
+  line-height:1.3;
+  color:var(--ink);
+}
+
+@media (max-width:1024px){
+  /* Two columns would squeeze the facts, so the composition stacks and
+     the seam turns horizontal. */
+  .origin-inner{grid-template-columns:1fr;gap:clamp(26px,4vw,36px)}
+  .origin-divider{width:72px;height:1px;align-self:start}
+}
+
+@media (max-width:640px){
+  .origin{padding:clamp(52px,11vw,68px) 22px}
+  .origin-line{font-size:clamp(38px,11vw,48px)}
+  .origin-line-accent{font-size:clamp(42px,13vw,54px)}
+  .origin-intro{font-size:16px;max-width:none}
+  .origin-list div{flex-direction:column;align-items:flex-start;gap:6px;min-height:0;padding:14px 0}
+  .origin-list dd{text-align:left}
+}
