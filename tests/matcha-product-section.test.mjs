@@ -25,7 +25,7 @@ const section = page.slice(page.indexOf('<section className="matcha-product">'),
 // merged one, and the moved areas that came in later. Both belong to
 // the same section, so both are read here.
 const rules = css.slice(css.indexOf("/our-matcha PRODUCT + TASTE, MERGED"), css.indexOf("/our-matcha RESEARCH SECTION"))
-  + css.slice(css.indexOf("/our-matcha PRODUCT STORY - THE MOVED AREAS"));
+  + css.slice(css.indexOf("/our-matcha PRODUCT STORY - THE MOVED AREAS"), css.indexOf("/our-matcha FAQ + FINAL CTA"));
 const rule = name => {
   const at = rules.indexOf(name);
   assert.notEqual(at, -1, `missing rule: ${name}`);
@@ -191,7 +191,7 @@ test("4: two families, cream on blue, canonical rail", () => {
   assert.match(rule(".matcha-product-intro{"), /font-size:var\(--type-body\)/);
 
   // ── RAIL, RATIO, HEIGHT ──────────────────────────────────────
-  assert.match(css, /\.matcha-hero,\s*\.matcha-product,\s*\.matcha-research,\s*\.matcha-use\{padding-inline:var\(--rail-gutter\)\}/);
+  assert.match(css, /\.matcha-hero,\s*\.matcha-product,\s*\.matcha-research,\s*\.matcha-use,\s*\.matcha-page \.faq,\s*\.matcha-cta\{padding-inline:var\(--rail-gutter\)\}/);
   assert.match(rules, /\.matcha-product-inner\{[\s\S]*?grid-template-columns:minmax\(0,\.45fr\) 1px minmax\(0,\.55fr\)/);
   assert.match(rules, /\.matcha-product-inner\{[\s\S]*?align-items:start/);
   assert.match(rules, /\.matcha-product\{[\s\S]*?padding-block:clamp\(90px,8vw,110px\)/);

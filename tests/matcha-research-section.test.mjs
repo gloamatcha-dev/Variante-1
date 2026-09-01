@@ -185,7 +185,7 @@ test("4: a section, not a hero - and it stacks cleanly", () => {
 
   // ── RAIL AND RESPONSIVE ──────────────────────────────────────
   assert.match(section, /<div className="matcha-research-inner home-rail">/);
-  assert.match(css, /\.matcha-research,\s*\.matcha-use\{padding-inline:var\(--rail-gutter\)\}/);
+  assert.match(css, /\.matcha-research,\s*\.matcha-use,\s*\.matcha-page \.faq,\s*\.matcha-cta\{padding-inline:var\(--rail-gutter\)\}/);
   assert.match(rules, /\.matcha-research-inner\{[\s\S]*?grid-template-columns:minmax\(0,\.33fr\) minmax\(0,\.67fr\)/);
   assert.match(rules, /\.matcha-research\{[\s\S]*?padding-block:clamp\(84px,7vw,110px\)/);
   assert.ok(!rules.includes("100vh"), "the section reserves a viewport");

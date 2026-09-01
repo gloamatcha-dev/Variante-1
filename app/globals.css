@@ -1564,7 +1564,9 @@ header nav{gap:18px;font-size:12px}
 .matcha-hero,
 .matcha-product,
 .matcha-research,
-.matcha-use{padding-inline:var(--rail-gutter)}
+.matcha-use,
+.matcha-page .faq,
+.matcha-cta{padding-inline:var(--rail-gutter)}
 
 /* ══════════════════════════════════════════════════════════════
    HOMEPAGE RECIPES CAROUSEL
@@ -3298,4 +3300,177 @@ header nav{gap:18px;font-size:12px}
   .matcha-what-body{max-width:none}
   .matcha-what-photo{width:100%;max-width:360px;margin-top:clamp(24px,6vw,32px)}
   .matcha-storage-body{max-width:none}
+}
+
+/* ══════════════════════════════════════════════════════════════
+   /our-matcha FAQ + FINAL CTA
+
+   ── WHY EVERY SELECTOR STARTS WITH .matcha-page ──────────────
+   .faq is rendered TWICE in this repository: here and by BusinessFaq
+   on /for-cafes. Styling the bare class would have quietly restyled a
+   page nobody asked about, so the FAQ rules are scoped to this page and
+   /for-cafes keeps exactly what it had.
+
+   ── AND WHY THERE IS NO MARKUP DIFF ──────────────────────────
+   Both sections already own the elements they need: an <h2> holding the
+   sans line with an <i> for the editorial one, an eyebrow, a <details>
+   per question. So this is typography and rhythm only - the accordion,
+   its keyboard behaviour, both CTA routes and every string are the ones
+   that were already there.
+
+   The FAQ headline was reading the page's shared 98px h2 rule, nearly
+   the /our-matcha hero's own size. Both headlines are section-scale now
+   and both stay under the page hero at every width.
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── FAQ ───────────────────────────────────────────────────── */
+.matcha-page .faq{
+  background:var(--cream);
+  padding-block:clamp(84px,7vw,110px);
+  max-width:calc(var(--rail-max) + var(--rail-gutter) * 2);
+  margin-inline:auto;
+}
+.matcha-page .faq .eyebrow{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:var(--type-meta);
+  line-height:1.2;
+  letter-spacing:.2em;
+  text-transform:uppercase;
+  color:var(--ink);
+}
+/* (0,2,1) - the shared `.faq h2` list is (0,1,1) and would otherwise
+   hold this at clamp(48px,7vw,98px). */
+.matcha-page .faq h2{
+  margin:clamp(18px,1.8vw,26px) 0 clamp(40px,4vw,56px);
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:500;
+  font-style:normal;
+  font-size:clamp(48px,4.3vw,60px);
+  line-height:.98;
+  letter-spacing:-.04em;
+  color:var(--ink);
+}
+.matcha-page .faq h2 i{
+  font-family:var(--font-display),Georgia,serif;
+  font-weight:400;
+  font-style:italic;
+  font-size:clamp(50px,4.6vw,64px);
+  line-height:.93;
+  letter-spacing:-.01em;
+  color:var(--ink);
+}
+.matcha-page .faq summary{
+  padding:clamp(22px,2.2vw,26px) 0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:500;
+  font-style:normal;
+  font-size:clamp(16px,1.2vw,17px);
+  line-height:1.35;
+  color:var(--ink);
+}
+/* The existing "+" - sized, and deliberately not bolder. */
+.matcha-page .faq summary span{font-weight:400;font-size:19px;line-height:1}
+.matcha-page .faq details p{
+  max-width:760px;
+  padding-bottom:clamp(22px,2.2vw,28px);
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:clamp(15px,1.1vw,16px);
+  line-height:1.6;
+  color:var(--ink);
+}
+
+/* ── FINAL CTA ─────────────────────────────────────────────── */
+.matcha-cta{
+  background:var(--berry);
+  color:var(--cream);
+  padding-block:clamp(90px,8vw,130px);
+  max-width:none;
+  text-align:center;
+}
+.matcha-cta .eyebrow{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:var(--type-meta);
+  line-height:1.2;
+  letter-spacing:.2em;
+  text-transform:uppercase;
+  color:var(--cream);
+}
+.matcha-page .matcha-cta h2{
+  margin:clamp(18px,1.8vw,26px) 0 clamp(34px,3.4vw,46px);
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:500;
+  font-style:normal;
+  font-size:clamp(48px,4.4vw,60px);
+  line-height:.98;
+  letter-spacing:-.04em;
+  color:var(--cream);
+}
+.matcha-page .matcha-cta h2 i{
+  font-family:var(--font-display),Georgia,serif;
+  font-weight:400;
+  font-style:italic;
+  font-size:clamp(52px,4.8vw,66px);
+  line-height:.93;
+  letter-spacing:-.01em;
+  color:var(--cream);
+}
+.matcha-cta-actions{gap:14px}
+
+/* Cream on raspberry, and its inverse - both square, both the same box.
+   (0,3,0) so the global .cta.secondary cannot win. */
+.matcha-cta .matcha-cta-actions .cta{
+  min-height:54px;
+  padding:17px 30px;
+  border-radius:0;
+  box-shadow:none;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:12px;
+  line-height:1;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  transition:background .2s ease,color .2s ease,border-color .2s ease;
+}
+.matcha-cta .matcha-cta-actions .cta{
+  background:var(--cream);
+  color:var(--berry);
+  border:1px solid var(--cream);
+}
+.matcha-cta .matcha-cta-actions .cta:hover{
+  background:transparent;
+  color:var(--cream);
+  border-color:var(--cream);
+}
+.matcha-cta .matcha-cta-actions .cta.secondary{
+  background:transparent;
+  color:var(--cream);
+  border:1px solid rgba(245,235,226,.65);
+}
+.matcha-cta .matcha-cta-actions .cta.secondary:hover{
+  background:var(--cream);
+  color:var(--berry);
+  border-color:var(--cream);
+}
+
+@media (max-width:640px){
+  .matcha-page .faq{padding-block:clamp(64px,13vw,84px)}
+  .matcha-page .faq h2{font-size:clamp(40px,10.5vw,50px)}
+  .matcha-page .faq h2 i{font-size:clamp(42px,11.2vw,54px)}
+  .matcha-page .faq summary{font-size:16px}
+  .matcha-page .faq details p{font-size:15px;max-width:none}
+  .matcha-cta{padding-block:clamp(72px,14vw,96px)}
+  .matcha-page .matcha-cta h2{font-size:clamp(40px,10.5vw,50px)}
+  .matcha-page .matcha-cta h2 i{font-size:clamp(42px,11.2vw,54px)}
+  /* The two buttons keep their row while they fit; the existing
+     stacking rule below 800px still applies underneath. */
+  .matcha-cta .matcha-cta-actions .cta{width:100%;justify-content:center}
 }

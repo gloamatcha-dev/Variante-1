@@ -190,7 +190,7 @@ test("5: a content section, under both heroes, stacking cleanly", () => {
 
   // ── RAIL AND RESPONSIVE ──────────────────────────────────────
   assert.match(section, /<div className="matcha-use-inner home-rail">/);
-  assert.match(css, /\.matcha-research,\s*\.matcha-use\{padding-inline:var\(--rail-gutter\)\}/);
+  assert.match(css, /\.matcha-research,\s*\.matcha-use,\s*\.matcha-page \.faq,\s*\.matcha-cta\{padding-inline:var\(--rail-gutter\)\}/);
   assert.match(rule(".matcha-use-grid{"), /grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
   assert.ok(!rules.includes("100vh"), "the section reserves a viewport");
   // Stacked below 900px, with a hairline between items instead of seams.
