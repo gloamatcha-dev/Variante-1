@@ -39,7 +39,9 @@ const ROUTES = [
   // Same two lines, now as explicit spans so the sans and the editorial
   // italic can carry their own scale - see tests/about-page-system.test.mjs.
   { path: "/about", title: "Über GLOA · GLOA", heading: '<h1 class="about-hero-headline"><span class="about-hero-line">Good energy.</span><i class="about-hero-line about-hero-line-accent">No theatre.</i></h1>' },
-  { path: "/for-cafes", title: "GLOA for Cafés · GLOA", heading: "<h1>Matcha for<br/><i>your menu.</i></h1>" },
+  // Variant 2: two explicit spans so the sans and the editorial italic
+  // carry their own scale - see tests/b2b-hero.test.mjs.
+  { path: "/for-cafes", title: "GLOA for Cafés · GLOA", heading: '<h1 class="b2b-hero-headline"><span class="b2b-hero-line">Dein Matcha.</span><i class="b2b-hero-line b2b-hero-line-accent">Dein Signature-Drink.</i></h1>' },
   { path: "/rezepte", title: "Matcha Rezepte · GLOA", heading: "<h1>Matcha Rezepte.<br/><i>GLOA Edition.</i></h1>" },
   { path: "/contact", title: "Contact GLOA · GLOA", heading: "<h1>Schreib<br/><i>uns.</i></h1>" },
 ];

@@ -26,7 +26,9 @@ const css = read("app/globals.css");
 const about = site.slice(site.indexOf("function About(){return <main"), site.indexOf("\nfunction ForCafes()"));
 const blockAt = css.indexOf("/about — ONE EDITORIAL SYSTEM");
 assert.notEqual(blockAt, -1, "the About CSS block was not found");
-const rules = css.slice(css.lastIndexOf("/*", blockAt));
+// Bounded at the NEXT page block, so a block appended after this one
+// cannot answer for - or trip - an assertion about /about.
+const rules = css.slice(css.lastIndexOf("/*", blockAt), css.lastIndexOf("/*", css.indexOf("/for-cafes PAGE HERO")));
 assert.ok(rules.length > 4000, "the About CSS block was not found");
 
 /* The block opens with a long explanatory comment. Every structural

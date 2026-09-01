@@ -47,10 +47,14 @@ test("1: the hero says exactly the approved lines, and no dash", () => {
   for (const dash of ["–", "—", " - "]) {
     assert.ok(!lead.includes(dash), `the supporting copy carries a dash: ${dash}`);
   }
-  // And the retired copy is gone from the whole file.
+  // And the retired copy is gone from the SHOP. Scoped to the shop
+  // surfaces rather than the whole file: "Dein Matcha." was retired as a
+  // /shop hero line, and /for-cafes now opens with it as its own
+  // approved headline - a different page, a different role.
+  const shopSurfaces = hero + strip + shop;
   for (const retired of ["Matcha aus Shizuoka, Japan –", "Launch in Vorbereitung.",
                          "Dein Matcha.", "Deine Art.", "shop-hero-micro"]) {
-    assert.ok(!site.includes(retired), `retired shop copy survived: ${retired}`);
+    assert.ok(!shopSurfaces.includes(retired), `retired shop copy survived: ${retired}`);
   }
   // The date is the launch utility's, never a second literal.
   assert.ok(!hero.includes("01.10.2026"), "the launch date is hard-coded in the hero");
