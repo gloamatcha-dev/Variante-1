@@ -21,7 +21,7 @@ const css = read("app/globals.css");
 const hero = site.slice(site.indexOf("function ShopHero("), site.indexOf("function Shop({onAdd}"));
 const strip = site.slice(site.indexOf("function ShopLaunchStrip()"), site.indexOf("const SHOP_HERO_LEAD"));
 const shop = site.slice(site.indexOf("function Shop({onAdd}"), site.indexOf("// -- Product detail ---"));
-const block = css.slice(css.indexOf("SHOP LAUNCH HERO"));
+const block = css.slice(css.indexOf("SHOP LAUNCH HERO"), css.indexOf("SHOP MATCHA PRODUCT SECTION"));
 const rules = block.slice(block.indexOf("*/") + 2);
 const rule = name => {
   const at = rules.indexOf(name);

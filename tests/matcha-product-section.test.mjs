@@ -51,9 +51,12 @@ test("1: product and taste share one wrapper, and the old pair is gone", () => {
                       ".matcha-facts-grid{", ".matcha-taste-grid{"]) {
     assert.ok(!css.includes(gone), `the retired rule survived: ${gone}`);
   }
-  // No cream sub-area, and no second background inside the section.
+  // ONE SURFACE. The only other background in the block is the 1px
+  // divider's own fade, which paints a line rather than an area.
   const surfaces = [...rules.matchAll(/background:([^;}]+)/g)].map(m => m[1].trim());
-  assert.deepEqual([...new Set(surfaces)], ["var(--blue)"]);
+  const areas = surfaces.filter(v => !v.startsWith("linear-gradient"));
+  assert.deepEqual([...new Set(areas)], ["var(--blue)"]);
+  assert.equal(surfaces.length - areas.length, 1, "more than one gradient appeared");
   assert.match(css, /--blue:#1746D1;/);
 });
 
@@ -87,9 +90,13 @@ test("2: the copy moved without being rewritten", () => {
 
   // ── NO ICONS, NO CARDS ───────────────────────────────────────
   assert.ok(!/<svg|<img/.test(section), "an icon or image was added");
-  for (const banned of ["border-radius", "box-shadow", "backdrop-filter", "gradient"]) {
+  for (const banned of ["border-radius", "box-shadow", "backdrop-filter"]) {
     assert.ok(!rules.includes(banned), `the section grew a card: ${banned}`);
   }
+  // The one gradient in the block belongs to the divider and softens its
+  // two ends - it is not an area fill.
+  assert.equal([...rules.matchAll(/linear-gradient/g)].length, 1);
+  assert.match(rule(".matcha-product-divider{"), /background:linear-gradient\(/);
   // Only the two hairline colours the brief allows.
   for (const m of rules.matchAll(/border-top:1px solid ([^;}]+)/g)) {
     assert.equal(m[1].trim(), "rgba(245,235,226,.3)");
@@ -173,7 +180,7 @@ test("4: two families, cream on blue, canonical rail", () => {
 
   // ── RAIL, RATIO, HEIGHT ──────────────────────────────────────
   assert.match(css, /\.matcha-hero,\s*\.matcha-product\{padding-inline:var\(--rail-gutter\)\}/);
-  assert.match(rules, /\.matcha-product-inner\{[\s\S]*?grid-template-columns:minmax\(0,\.45fr\) minmax\(0,\.55fr\)/);
+  assert.match(rules, /\.matcha-product-inner\{[\s\S]*?grid-template-columns:minmax\(0,\.45fr\) 1px minmax\(0,\.55fr\)/);
   assert.match(rules, /\.matcha-product-inner\{[\s\S]*?align-items:start/);
   assert.match(rules, /\.matcha-product\{[\s\S]*?padding-block:clamp\(90px,8vw,110px\)/);
   assert.ok(!rules.includes("100vh"), "the section reserves a viewport");
@@ -223,4 +230,41 @@ test("5: the plum origin block is hidden, and every line of it survives", () => 
     "a spacer was left behind");
   assert.ok(!/\{SHOW_LEGACY_ORIGIN_SECTION&&<section className="matcha-shizuoka">[\s\S]*?\}\s*<section className="matcha-(?!what)/.test(page),
     "something was inserted where the section used to be");
+});
+
+/* ══════════════════════════════════════════════════════════════
+   6. THE CENTRE DIVIDER
+   ══════════════════════════════════════════════════════════════ */
+
+test("6: a partial, decorative seam between the two main columns", () => {
+  // ── ITS OWN GRID TRACK, NOT A GUESSED OFFSET ─────────────────
+  // The split is .45/.55, so anything anchored at 50% would miss the
+  // seam. A 1px track puts it exactly on the column boundary and gives
+  // it the section's gap on BOTH sides.
+  assert.match(rules, /\.matcha-product-inner\{[\s\S]*?grid-template-columns:minmax\(0,\.45fr\) 1px minmax\(0,\.55fr\)/);
+  assert.match(section, /<\/div><span className="matcha-product-divider" aria-hidden="true"\/><div className="matcha-product-detail">/);
+  assert.ok(section.indexOf("matcha-product-copy") < section.indexOf("matcha-product-divider"));
+  assert.ok(section.indexOf("matcha-product-divider") < section.indexOf("matcha-product-detail"));
+
+  // ── 1PX, CREAM AT .28, PARTIAL HEIGHT, CENTRED ───────────────
+  const divider = rule(".matcha-product-divider{");
+  assert.match(divider, /width:1px/);
+  assert.match(divider, /height:clamp\(260px,38vw,440px\)/);
+  assert.match(divider, /align-self:center/);
+  assert.match(divider, /rgba\(245,235,226,\.28\)/);
+  // NOT full height, and nothing else paints it.
+  assert.ok(!/\.matcha-product-divider\{[^}]*height:100%/.test(rules), "the seam runs the full height");
+  assert.ok(!/\.matcha-product-divider\{[^}]*(border|box-shadow|border-radius)/.test(rules));
+  // The gap is the spacing on each side - 57.6px at 1440, 72px at cap.
+  assert.match(rules, /\.matcha-product-inner\{[\s\S]*?gap:clamp\(32px,4vw,72px\)/);
+
+  // ── DECORATIVE, AND GONE WHEN THE SECTION STACKS ─────────────
+  assert.match(section, /aria-hidden="true"/);
+  assert.ok(!/matcha-product-divider[^>]*>[^<]/.test(section), "the seam carries text");
+  assert.match(rules, /@media \(max-width:1024px\)\{[\s\S]*?\.matcha-product-divider\{display:none\}/);
+
+  // ── THE INTERNAL HAIRLINES ARE A DIFFERENT THING, AND STAY ───
+  assert.match(rules, /\.matcha-fact-grid>div\{[\s\S]*?border-top:1px solid rgba\(245,235,226,\.3\)/);
+  assert.match(rules, /\.matcha-taste-pair>div\{[\s\S]*?border-top:1px solid rgba\(245,235,226,\.3\)/);
+  assert.match(rules, /\.matcha-taste-block\{[\s\S]*?border-top:1px solid rgba\(245,235,226,\.3\)/);
 });

@@ -2601,7 +2601,7 @@ header nav{gap:18px;font-size:12px}
 }
 .matcha-product-inner{
   display:grid;
-  grid-template-columns:minmax(0,.45fr) minmax(0,.55fr);
+  grid-template-columns:minmax(0,.45fr) 1px minmax(0,.55fr);
   gap:clamp(32px,4vw,72px);
   /* Top-aligned: centring would push "DAS PRODUKT" far down the page,
      because the right column is much taller than the left. */
@@ -2648,6 +2648,25 @@ header nav{gap:18px;font-size:12px}
   letter-spacing:-.015em;
   margin-top:3px;
   color:var(--cream);
+}
+
+/* THE SEAM BETWEEN THE TWO MAIN COLUMNS. Partial height and vertically
+   centred, so it structures the two halves without drawing a table edge
+   down the section. The gradient only softens the two ends - at .28
+   alpha over blue there is nothing else to see. Purely decorative, so
+   the element is aria-hidden and carries no text. */
+.matcha-product-divider{
+  display:block;
+  width:1px;
+  height:clamp(260px,38vw,440px);
+  align-self:center;
+  background:linear-gradient(
+    to bottom,
+    transparent,
+    rgba(245,235,226,.28) 12%,
+    rgba(245,235,226,.28) 88%,
+    transparent
+  );
 }
 
 /* ── THE RIGHT COLUMN ──────────────────────────────────────── */
@@ -2794,6 +2813,7 @@ header nav{gap:18px;font-size:12px}
   /* One column, in the reading order the brief sets out - and still one
      blue section. */
   .matcha-product-inner{grid-template-columns:1fr;gap:clamp(28px,4vw,40px)}
+  .matcha-product-divider{display:none}
 }
 
 @media (max-width:640px){
