@@ -30,9 +30,29 @@ const ROOT = path.resolve(fileURLToPath(import.meta.url), "../..");
 const read = rel => readFileSync(path.join(ROOT, rel), "utf-8");
 
 const site = read("app/GloaSite.tsx");
-/** CSS with comments stripped: the prose legitimately names the very
- *  properties the rules are asserted not to contain. */
-const cssRules = read("app/globals.css").replace(/\/\*[\s\S]*?\*\//g, "");
+
+/**
+ * One appended block, bounded at the next one. Without the bound each
+ * slice ran to the end of the file and picked up declarations from every
+ * later section - which is how a hero assertion started failing on a
+ * transition that belongs to the lifestyle tiles.
+ */
+const cssBlock = (from, to) => {
+  const start = css.indexOf(from);
+  assert.notEqual(start, -1, `missing css block: ${from}`);
+  const end = to ? css.indexOf(to, start) : -1;
+  return css.slice(start, end === -1 ? undefined : end);
+};
+/** The same block with comments removed. The marker sits INSIDE the
+ *  block's own header comment, so the slice starts mid-comment: drop
+ *  everything up to its close before stripping the rest. */
+const cssBlockRules = (from, to) => {
+  const block = cssBlock(from, to);
+  return block.slice(block.indexOf("*/") + 2).replace(/\/\*[\s\S]*?\*\//g, "");
+};
+const HERO_BLOCK = "HOMEPAGE HERO - FINAL PASS";
+const PRELAUNCH_BLOCK = "HOMEPAGE PRELAUNCH SECTION";
+const DAILY_BLOCK = "HOMEPAGE DAILY LIFESTYLE SECTION";
 const css = read("app/globals.css");
 const layout = read("app/layout.tsx");
 
@@ -187,7 +207,7 @@ test("8: the hero effect is scroll-linked, and reduced motion turns it off", () 
   // two amplitudes are tuned to.
   // Measured on the FINAL hero block, which is appended last and is what
   // actually renders - not on the earlier rules it supersedes.
-  const heroBlock = css.slice(css.indexOf("HOMEPAGE HERO - FINAL PASS"));
+  const heroBlock = cssBlock(HERO_BLOCK, PRELAUNCH_BLOCK);
   const heroBlockForEffect = heroBlock;
   assert.ok(heroBlock.length > 0, "the final hero block moved");
   const desktopShift = Number(/\.hero \.hero-copy h1\{transform:translate3d\(calc\(var\(--hero-scroll\)\*-(\d+)px\)/.exec(heroBlock)?.[1]);
@@ -307,7 +327,8 @@ test("12: exactly two font families, and the italic is a real one", () => {
   // The display face still exists and is still the editorial voice of the
   // page - it simply no longer appears inside the hero.
   assert.match(css, /h1 i,h2 i,h3 i,\.display-italic\{font-family:var\(--font-display\)/);
-  assert.ok(site.includes("<i>Nachmittags.</i>"), "the lifestyle italic left the page");
+  assert.ok(site.includes('<i className="daily-line daily-line-accent">Nachmittags.</i>'),
+    "the lifestyle italic left the page");
   assert.ok(site.includes("<i>Und das ist Absicht.</i>"), "the brand statement italic left the page");
   assert.ok(!/\.hero h1\{[^}]*font-family/.test(css), "the hero headline overrides the sans family");
 });
@@ -379,7 +400,7 @@ test("15: the hero has exactly ONE action, and it is a real button", () => {
 
   // It is a FILLED button in the brand raspberry, using the existing
   // token - not a new colour.
-  const heroCssForCta = css.slice(css.indexOf("HOMEPAGE HERO - FINAL PASS"));
+  const heroCssForCta = cssBlock(HERO_BLOCK, PRELAUNCH_BLOCK);
   assert.match(css, /\.cta\.berry\{background:var\(--berry\);color:var\(--cream\)/);
   assert.match(css, /--berry:#A61E59/);
   const berry = css.slice(css.indexOf(".cta.berry{"), css.indexOf(".cta.berry:hover"));
@@ -486,7 +507,7 @@ test("19: no rule anywhere sets a display face OTHER than Cormorant", () => {
    20-22. THE FINAL HERO PASS
    ══════════════════════════════════════════════════════════════ */
 
-const heroCss = css.slice(css.indexOf("HOMEPAGE HERO - FINAL PASS"));
+const heroCss = cssBlock(HERO_BLOCK, PRELAUNCH_BLOCK);
 
 test("20: the hero copy is exactly the four approved lines", () => {
   const hero = homepage.slice(homepage.indexOf('<section className="hero">'), homepage.indexOf('<LaunchCountdown/>'));
@@ -567,7 +588,7 @@ test("22: the hero is compact, measured and centred", () => {
    ══════════════════════════════════════════════════════════════ */
 
 const heroRule = name => {
-  const block = css.slice(css.indexOf("HOMEPAGE HERO - FINAL PASS"));
+  const block = cssBlock(HERO_BLOCK, PRELAUNCH_BLOCK);
   const at = block.indexOf(name + "{");
   assert.notEqual(at, -1, `missing hero rule: ${name}`);
   return block.slice(at, block.indexOf("}", at));
@@ -625,7 +646,7 @@ test("23: every hero text is Inter, and only weight/size/case separates them", (
 });
 
 test("24: the motion moves three lines, in two directions, and clips nothing", () => {
-  const block = css.slice(css.indexOf("HOMEPAGE HERO - FINAL PASS"));
+  const block = cssBlock(HERO_BLOCK, PRELAUNCH_BLOCK);
 
   // Matcha. left, the italic line right, the metadata line right but far
   // less - and nothing else in the hero moves at all.
@@ -662,8 +683,8 @@ const prelaunch = homepage.slice(
   homepage.indexOf('<section className="prelaunch">'),
   homepage.indexOf('<section className="daily">')
 );
-const prelaunchCss = css.slice(css.indexOf("HOMEPAGE PRELAUNCH SECTION"));
-const prelaunchRules = cssRules.slice(cssRules.indexOf(".prelaunch{"));
+const prelaunchCss = cssBlock(PRELAUNCH_BLOCK, DAILY_BLOCK);
+const prelaunchRules = cssBlockRules(PRELAUNCH_BLOCK, DAILY_BLOCK);
 
 test("25: the product intro is gone, and nothing of it survived on the homepage", () => {
   assert.ok(prelaunch.length > 0, "the prelaunch section is missing");
@@ -754,4 +775,98 @@ test("28: the section is narrow, hairlined in raspberry, and typed correctly", (
   // The raspberry CTA, and the mobile rules that keep it usable.
   assert.match(prelaunchCss, /\.prelaunch \.prelaunch-cta\{[\s\S]*?background:var\(--berry\)/);
   assert.match(prelaunchCss, /@media \(max-width:640px\)\{[\s\S]*?\.prelaunch-inner::before,\.prelaunch-inner::after\{display:none\}/);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   29-31. THE DAILY LIFESTYLE SECTION
+   ══════════════════════════════════════════════════════════════ */
+
+const daily = homepage.slice(
+  homepage.indexOf('<section className="daily">'),
+  homepage.indexOf('<section className="origin">')
+);
+const dailyCss = cssBlockRules(DAILY_BLOCK);
+
+test("29: the copy and the six tiles are one horizontal composition", () => {
+  assert.ok(daily.length > 0, "the daily section is missing");
+  // Copy left, wall right, inside one centred container.
+  assert.match(daily, /<div className="daily-inner">/);
+  assert.ok(daily.indexOf('className="daily-copy"') < daily.indexOf('className="daily-grid"'));
+  assert.match(dailyCss, /\.daily-inner\{[\s\S]*?grid-template-columns:minmax\(300px,\.85fr\) minmax\(0,1\.7fr\)/);
+  assert.match(dailyCss, /\.daily-inner\{[\s\S]*?max-width:1520px/);
+  assert.match(dailyCss, /\.daily-inner\{[\s\S]*?margin-inline:auto/);
+  // The copy is centred against the wall, not pinned above it - the old
+  // 70px margin between headline and tiles is gone.
+  assert.match(dailyCss, /\.daily-copy\{[\s\S]*?justify-content:center/);
+  // The old 70px gap rule still exists earlier in the file; what matters
+  // is that the appended block, which wins on source order, resets it.
+  assert.match(dailyCss, /\.daily-grid\{[\s\S]*?margin:0/);
+  assert.ok(!/margin-top:70px/.test(dailyCss), "the appended block reintroduced the gap");
+  // Still GLOA Blue, and no new colour was introduced.
+  assert.match(dailyCss, /\.daily\{background:var\(--blue\)/);
+  for (const banned of ["gradient", "backdrop-filter", "#0", "#2", "#3"]) {
+    assert.ok(!dailyCss.includes(banned), `the daily section uses ${banned}`);
+  }
+});
+
+test("30: the six existing tiles keep their order, labels and files", () => {
+  const tiles = site.slice(site.indexOf("const dailyTiles=["), site.indexOf("];", site.indexOf("const dailyTiles=[")));
+  // Exactly the six originals, in the approved reading order.
+  assert.deepEqual([...tiles.matchAll(/label:"([^"]+)"/g)].map(m => m[1]),
+    ["MORNING", "WORK", "CAFÉ", "ON THE GO", "ICED", "SOCIAL"]);
+  assert.deepEqual([...tiles.matchAll(/src:"([^"]+)"/g)].map(m => m[1]), [
+    "/img/gloa-morning.jpg", "/img/gloa-work.jpg", "/img/gloa-cafe.jpg",
+    "/img/gloa-on-the-go.jpg", "/img/gloa-iced.jpg", "/img/gloa-social.jpg",
+  ]);
+  // Every file still on disk, and every tile still described.
+  for (const m of tiles.matchAll(/src:"\/img\/([^"]+)"/g)) {
+    assert.ok(existsSync(path.join(ROOT, "public/img", m[1])), `${m[1]} is missing`);
+  }
+  assert.equal([...tiles.matchAll(/alt:"[^"]+"/g)].length, 6, "a tile lost its alt text");
+  // A per-tile focal point, because a 3x2 crop is far tighter than the
+  // old strip - the files themselves are untouched.
+  assert.equal([...tiles.matchAll(/focus:"[^"]+"/g)].length, 6);
+  assert.match(daily, /style=\{\{objectPosition:t\.focus\}\}/);
+
+  // 3 x 2, hairline gutters, no card chrome.
+  assert.match(dailyCss, /\.daily-grid\{[\s\S]*?grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+  assert.match(dailyCss, /\.daily-grid\{[\s\S]*?grid-template-rows:repeat\(2,minmax\(0,1fr\)\)/);
+  assert.match(dailyCss, /\.daily-grid\{[\s\S]*?gap:2px/);
+  assert.match(dailyCss, /\.daily-tile\{[\s\S]*?border-radius:0/);
+  assert.match(dailyCss, /\.daily-tile\{[\s\S]*?box-shadow:none/);
+  // One label style for all six: a single base rule plus its mobile
+  // refinement, and no per-tile variant anywhere.
+  assert.match(dailyCss, /\.daily-tile figcaption\{[\s\S]*?letter-spacing:\.16em/);
+  assert.ok(!/\.daily-tile:nth-child|\.daily-tile\.[a-z]/.test(dailyCss), "a per-tile label style exists");
+  assert.equal([...daily.matchAll(/<figcaption>/g)].length, 1, "the labels are not rendered from one template");
+  assert.match(dailyCss, /\.daily-tile figcaption\{[\s\S]*?background:rgba\(17,17,17,\.66\)/);
+});
+
+test("31: the section's type stays inside the two families", () => {
+  // Headline lines, explicitly, so they can never reflow into one line.
+  for (const line of ["Morgens.", "Im Meeting.", "Nachmittags."]) {
+    assert.ok(daily.includes(line), `the headline lost: ${line}`);
+  }
+  assert.match(daily, /<i className="daily-line daily-line-accent">Nachmittags\.<\/i>/);
+  assert.ok(daily.includes("MATCHA FÜR JEDEN TAG"));
+  // The micro-copy and the editorial link.
+  assert.ok(daily.includes("Reiner Genuss. Klare Energie."));
+  assert.ok(daily.includes("Für jeden Moment deines Tages."));
+  assert.match(daily, /<Link className="daily-link" href="\/our-matcha">Matcha entdecken/);
+  assert.ok(read("app/Chrome.tsx").includes('href="/our-matcha"'), "the route left the navigation");
+
+  // ONLY "Nachmittags." uses the display face; everything else is sans.
+  const accent = dailyCss.slice(dailyCss.indexOf(".daily-line-accent{"), dailyCss.indexOf("}", dailyCss.indexOf(".daily-line-accent{")));
+  assert.match(accent, /font-family:var\(--font-display\)/);
+  assert.match(accent, /font-style:italic/);
+  for (const name of [".daily-eyebrow{", ".daily-line{", ".daily-note{", ".daily-link{", ".daily-tile figcaption{"]) {
+    const rule = dailyCss.slice(dailyCss.indexOf(name), dailyCss.indexOf("}", dailyCss.indexOf(name)));
+    assert.match(rule, /font-family:var\(--font-sans\)/, `${name} is not on the sans`);
+    assert.ok(!rule.includes("--font-display"), `${name} uses the display face`);
+  }
+  // The link is editorial: a raspberry rule, never a filled button.
+  assert.match(dailyCss, /\.daily-link\{[\s\S]*?border-bottom:1px solid var\(--berry\)/);
+  assert.ok(!/\.daily-link\{[^}]*background:/.test(dailyCss), "the link became a button");
+  // Tablet and mobile fall back to two columns rather than crushing three.
+  assert.match(dailyCss, /@media \(max-width:1024px\)\{[\s\S]*?grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
 });
