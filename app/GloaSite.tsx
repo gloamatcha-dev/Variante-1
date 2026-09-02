@@ -659,12 +659,37 @@ function ForCafes(){useEffect(()=>track("b2b_page_view"),[]);return <main classN
 <section className="b2b-menu"><div className="b2b-menu-inner home-rail"><div className="b2b-menu-copy"><p className="eyebrow b2b-menu-eyebrow">FÜR DEINE KARTE GEMACHT.</p><h2 className="b2b-menu-headline"><span className="b2b-menu-line">Einfach zubereitet.</span><i className="b2b-menu-line b2b-menu-line-accent">Leicht skalierbar.</i></h2><p className="b2b-menu-body">Latte, iced, Strawberry oder pur.<br/>Ein Matcha, viele Drinks auf deiner Karte.</p></div><span className="b2b-menu-divider" aria-hidden="true"/><div className="b2b-menu-example"><p className="eyebrow b2b-menu-example-eyebrow">BEISPIELRECHNUNG</p><div className="b2b-menu-figures"><div className="b2b-menu-figure"><span className="b2b-menu-number">3 G</span><span className="b2b-menu-meta">PRO DRINK</span></div><span className="b2b-menu-arrow" aria-hidden="true">→</span><div className="b2b-menu-figure"><span className="b2b-menu-number">CA. 333</span><span className="b2b-menu-meta">DRINKS / KG</span></div></div><p className="b2b-menu-note">Beispiel bei 3 g Matcha pro Drink.</p></div></div></section>
 <BusinessCalculator/><BusinessFaq/></main>}
 function BusinessFaq(){const qs:[string,string][]=[["Wo kommt GLOA Matcha her?","Shizuoka, Japan."],["Ist GLOA für Matcha Latte geeignet?","Ja. Das Produkt ist für Latte, iced und pur geeignet."],["Welche Großhandelsformate gibt es?","500 g und 1 kg Gastroformate."],["Wie schnell liefert ihr?","Lieferzeit und Verfügbarkeit bestätigen wir bei Bestellung."],["Wie viele Drinks bekomme ich aus 1 kg?","Abhängig von der Dosierung: Bei 2 g pro Drink ca. 500 Drinks, bei 3 g ca. 333 Drinks, bei 4 g ca. 250 Drinks. Mengenbeispiele."],["Was kostet es im Großhandel?","Unsere B2B-Konditionen werden individuell mit dir abgestimmt. Frag sie direkt über das B2B-Formular an."],["Was ist die regelmäßige Belieferung?","Ein flexibles Bezugsmodell mit monatlicher Lieferung und 5 % Preisvorteil. Mindestlaufzeit 3 Monate, danach monatlich kündbar."],["Wie funktioniert die 12-Monats-Partnerschaft?","Du vereinbarst eine monatliche Mindestabnahme für 12 Monate und erhältst 10 % Preisvorteil. Lieferung und Abrechnung erfolgen monatlich."],["Muss ich beim Jahresmodell alles im Voraus bezahlen?","Nein. Die Abrechnung erfolgt monatlich. Du zahlst nur die jeweils gelieferte Menge."],["Kann ich mehr als die vereinbarte Menge bestellen?","Ja. Zusätzliche Mengen können jederzeit angefragt werden, zum gleichen Kilopreis deines Modells."],["Was passiert, wenn ich noch nicht weiß, wie viel Matcha ich brauche?","Starte mit einer Einzelbestellung oder einem Sample. Sobald du deinen Bedarf besser einschätzen kannst, kannst du jederzeit auf ein Bezugsmodell wechseln."]];return <section className="faq"><p className="eyebrow">B2B FAQ</p><h2>Fragen?<br/><i>Antworten.</i></h2>{qs.map(([q,a])=><details key={q}><summary>{q}<span>+</span></summary><p>{a}</p></details>)}</section>}
+/* /rezepte, THE LISTING PAGE.
+   The hero is the shared page hero scale on raspberry; the filters and
+   the grid sit on the canonical rail; the page closes on a blue
+   community band rather than the shared BrandNote, which stays exactly
+   where it is on the homepage. See the CSS block of the same name. */
 function Rezepte(){const [filter,setFilter]=useState("ALLE");const filtered=filter==="ALLE"?recipes:recipes.filter(r=>r.tags.includes(filter));return <main className="rezepte-page">
-<section className="rezepte-hero"><p className="eyebrow gloa-hero-eyebrow">GLOA · REZEPTE</p><h1 className="gloa-hero-primary">Matcha Rezepte.<br/><i className="gloa-hero-secondary">GLOA Edition.</i></h1><p className="lead">Signature Drinks. Einfach, visuell stark und passend zur GLOA-Welt.</p></section>
-<section className="rezepte-filters">{ALL_TAGS.map(t=><button key={t} className={filter===t?"active":""} onClick={()=>setFilter(t)}>{t}</button>)}</section>
-<section className="rezepte-grid">{filtered.map(r=><article key={r.slug} className="rezept-card"><Link href={`/rezepte/${r.slug}`}><div className="rezept-card-img"><img src={r.image} alt={r.alt} loading="lazy"/></div><div className="rezept-card-body"><p className="eyebrow">{r.category} · {r.time}</p><h2>{r.title}</h2><p className="rezept-card-excerpt">{r.excerpt}</p><span className="rezept-card-cta">Rezept ansehen →</span></div></Link></article>)}</section>
-<BrandNote/>
+<section className="rezepte-hero"><div className="rezepte-hero-inner home-rail"><p className="eyebrow rezepte-hero-eyebrow gloa-hero-eyebrow">GLOA · REZEPTE</p><h1 className="rezepte-hero-headline"><span className="rezepte-hero-line gloa-hero-primary">Matcha Rezepte.</span><i className="rezepte-hero-line rezepte-hero-line-accent gloa-hero-secondary">GLOA Edition.</i></h1><p className="rezepte-hero-lead">Signature Drinks. Einfach, visuell stark und passend zur GLOA-Welt.</p></div></section>
+<section className="rezepte-filters" aria-label="Rezepte filtern"><div className="rezepte-filters-inner home-rail">{ALL_TAGS.map(t=><button key={t} type="button" className={filter===t?"active":""} aria-pressed={filter===t} onClick={()=>setFilter(t)}>{t}</button>)}</div></section>
+<section className="rezepte-grid"><div className="rezepte-grid-inner home-rail">{filtered.map(r=><article key={r.slug} className="rezept-card"><Link href={`/rezepte/${r.slug}`}><div className="rezept-card-img"><img src={r.image} alt={r.alt} loading="lazy"/></div><div className="rezept-card-body"><p className="rezept-card-meta">{r.category} · {r.time}</p><h2>{r.title}</h2><p className="rezept-card-excerpt">{r.excerpt}</p><span className="rezept-card-cta">Rezept ansehen <span aria-hidden="true">→</span></span></div></Link></article>)}</div></section>
+<RezepteCommunity/>
 </main>}
+
+/* The blue band that closes /rezepte.
+   It replaces the shared <BrandNote/> ON THIS PAGE ONLY - the homepage
+   still renders BrandNote, unchanged, and this component does not touch
+   it. Where BrandNote says "we will not email you", this asks for
+   something instead: send us what you made. */
+function RezepteCommunity(){
+return <section className="rz-community"><div className="rz-community-inner home-rail">
+<div className="rz-community-copy">
+<p className="eyebrow rz-community-eyebrow">YOUR TURN</p>
+<h2 className="rz-community-headline"><span className="rz-community-line">Jetzt bist du dran.</span><i className="rz-community-line rz-community-line-accent">Mix something good.</i></h2>
+</div>
+<div className="rz-community-side">
+<p className="rz-community-body">Strawberry, Coconut, Espresso oder etwas, auf das wir noch nicht gekommen sind.<br/>Mix deinen GLOA Drink, teile ihn mit uns und markiere @gloa.matcha.</p>
+<div className="rz-community-actions">
+<Link className="cta rz-community-cta" href="/contact">Dein Rezept teilen <span aria-hidden="true">→</span></Link>
+<a className="rz-community-social" href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">{`@${BRAND.instagram}`}<span aria-hidden="true"> ↗</span></a>
+</div>
+</div>
+</div></section>}
 function RezeptDetail({slug}:{slug:string}){const r=recipes.find(x=>x.slug===slug);if(!r)return <main className="not-found"><h1>404</h1><p>Rezept nicht gefunden.</p><Link href="/rezepte">← Alle Rezepte</Link></main>;return <main className="rezept-detail">
 <section className="rezept-detail-hero"><div className="rezept-detail-image"><img src={r.image} alt={r.alt}/></div><div className="rezept-detail-intro"><p className="eyebrow">{r.category} · {r.time} · {r.servings}</p><h1>{r.title}</h1><p className="rezept-detail-desc">{r.description}</p><div className="rezept-detail-tags">{r.tags.map(t=><span key={t}>{t}</span>)}</div></div></section>
 <section className="rezept-detail-content"><div className="rezept-detail-ingredients"><h2>Zutaten</h2><ul>{r.ingredients.map((ing,i)=><li key={i}>{ing}</li>)}</ul></div><div className="rezept-detail-steps"><h2>Zubereitung</h2><ol>{r.steps.map((step,i)=><li key={i}><span>{String(i+1).padStart(2,"0")}</span><p>{step}</p></li>)}</ol></div></section>

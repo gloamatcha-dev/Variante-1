@@ -39,9 +39,10 @@ const ROUTES = [
   { path: "/our-matcha", title: "Unser Matcha · GLOA", heading: '<h1 class="matcha-hero-headline"><span class="matcha-hero-line gloa-hero-primary">Matcha.</span><i class="matcha-hero-line matcha-hero-line-accent gloa-hero-secondary">Ohne Umwege.</i></h1>' },
   { path: "/about", title: "Über GLOA · GLOA", heading: '<h1 class="about-hero-headline"><span class="about-hero-line gloa-hero-primary">Good energy.</span><i class="about-hero-line about-hero-line-accent gloa-hero-secondary">No theatre.</i></h1>' },
   { path: "/for-cafes", title: "GLOA for Cafés · GLOA", heading: '<h1 class="b2b-hero-headline"><span class="b2b-hero-line gloa-hero-primary">Dein Matcha.</span><i class="b2b-hero-line b2b-hero-line-accent gloa-hero-secondary">Dein Signature-Drink.</i></h1>' },
-  // These two had no headline class of their own, so the shared pair is
-  // all they carry.
-  { path: "/rezepte", title: "Matcha Rezepte · GLOA", heading: '<h1 class="gloa-hero-primary">Matcha Rezepte.<br/><i class="gloa-hero-secondary">GLOA Edition.</i></h1>' },
+  // /rezepte gained a route class of its own when the page moved onto the
+  // system: the shared pair still carries the type, the route pair the
+  // colour. Same two lines, same words.
+  { path: "/rezepte", title: "Matcha Rezepte · GLOA", heading: '<h1 class="rezepte-hero-headline"><span class="rezepte-hero-line gloa-hero-primary">Matcha Rezepte.</span><i class="rezepte-hero-line rezepte-hero-line-accent gloa-hero-secondary">GLOA Edition.</i></h1>' },
   { path: "/contact", title: "Contact GLOA · GLOA", heading: '<h1 class="gloa-hero-primary">Schreib<br/><i class="gloa-hero-secondary">uns.</i></h1>' },
 ];
 
@@ -102,9 +103,14 @@ test("newsletter: the footer carries no email capture", async () => {
 });
 
 test("brand note: replaces the newsletter with a statement, not a form", async () => {
-  // Server-rendered on / and /rezepte. On /shop it sits below the
+  // Server-rendered on the homepage. On /shop it sits below the
   // catalog-driven products and therefore renders client-side.
-  for (const route of ["/", "/rezepte"]) {
+  //
+  // /rezepte USED to render it too and no longer does: that page now
+  // closes on its own community band, which asks for a recipe back
+  // instead of promising no email. BrandNote itself is unchanged - see
+  // tests/rezepte-page.test.mjs, which pins both halves of that.
+  for (const route of ["/"]) {
     const { html } = await server.getHtml(route);
     assert.match(html, /KEIN NEWSLETTER-L/i, `brand note missing on ${route}`);
     assert.match(html, /Wir melden uns nicht/i, `brand note headline missing on ${route}`);

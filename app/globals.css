@@ -133,24 +133,24 @@ h1 i,h2 i,h3 i,.display-italic{font-family:var(--font-display),Georgia,serif;fon
    this file. */
 
 /* REZEPTE PAGE */
-.rezepte-page h1{margin:24px 0 38px}
 
-.rezepte-hero{padding:120px 5vw 80px;border-bottom:1px solid var(--line)}
-.rezepte-hero .lead{font-size:17px;line-height:1.5;max-width:520px;margin-top:0}
-.rezepte-filters{display:flex;gap:8px;padding:30px 5vw 0;flex-wrap:wrap}
-.rezepte-filters button{padding:10px 16px;border:1px solid var(--plum);background:transparent;font:13px var(--font-mono);letter-spacing:.08em;text-transform:uppercase;cursor:pointer;transition:background .2s,color .2s}
-.rezepte-filters button:hover{border-color:var(--berry);color:var(--berry)}
-.rezepte-filters button.active{background:var(--plum);color:white;border-color:var(--plum)}
 
-.rezepte-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:35px 24px;padding:50px 5vw 100px}
-.rezept-card a{display:block;text-decoration:none;color:inherit}
-.rezept-card-img{position:relative;height:300px;overflow:hidden;background:var(--cream)}
-.rezept-card-img img{width:100%;height:100%;object-fit:cover;object-position:center;transition:transform .4s ease}
-.rezept-card a:hover .rezept-card-img img{transform:scale(1.03)}
-.rezept-card-body{padding:16px 0}
-.rezept-card-body h2{font-size:22px;line-height:1.1;letter-spacing:-.03em;margin:8px 0 6px}
-.rezept-card-excerpt{font-size:15px;line-height:1.5;opacity:.7;margin:0 0 12px}
-.rezept-card-cta{font:13px var(--font-mono);text-transform:uppercase;text-decoration:underline;text-underline-offset:4px;text-decoration-thickness:1.5px}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 /* REZEPT DETAIL */
 .rezept-detail-hero{display:grid;grid-template-columns:1.1fr .9fr;min-height:650px}
@@ -177,10 +177,10 @@ h1 i,h2 i,h3 i,.display-italic{font-family:var(--font-display),Georgia,serif;fon
 .rezept-detail-nav a:first-child{font:13px var(--font-mono);text-transform:uppercase;text-decoration:underline;text-underline-offset:4px}
 
 @media(max-width:800px){
-.rezepte-hero{padding:65px 5vw 50px}
-.rezepte-page h1{margin-bottom:28px}
-.rezepte-grid{grid-template-columns:1fr;gap:30px;padding:40px 5vw 70px}
-.rezept-card-img{height:280px}
+
+
+
+
 .rezept-detail-hero{grid-template-columns:1fr}
 .rezept-detail-image{height:450px;position:relative}
 .rezept-detail-intro{padding:50px 5vw}
@@ -6766,4 +6766,389 @@ header nav{gap:18px;font-size:12px}
   .pt-checks-radio{grid-template-columns:minmax(0,1fr);max-width:none}
   .pt-checks-radio+.pt-fields{max-width:none}
   .pt-check{min-height:46px}
+}
+
+/* ══════════════════════════════════════════════════════════════
+   /rezepte — THE LISTING PAGE
+
+   Everything here is scoped to the listing page. THE RECIPE DETAIL
+   PAGE IS NOT TOUCHED: it renders `.rezept-detail`, every one of its
+   rules is left exactly where it was, and no selector below reaches it.
+
+   ── WHAT THIS REPLACES ───────────────────────────────────────
+   The page was the last one still built out of the pre-system rules:
+   a plain cream header at `padding:120px 5vw`, filters bordered in
+   plum whose active state was set in LITERAL WHITE, a grid on its own
+   5vw gutter rather than the canonical rail, and the shared
+   <BrandNote/> as its ending.
+
+   ── THE COLOUR RHYTHM ────────────────────────────────────────
+       1  .rezepte-hero     RASPBERRY  #A61E59  cream on raspberry
+       2  .rezepte-filters  CREAM      #F5EBE2  near black on cream
+       3  .rezepte-grid     CREAM      #F5EBE2  near black on cream
+       4  .rz-community     BLUE       #1746D1  cream on blue
+
+   Then the existing near black footer. Blue into ink is the same
+   closing edge the homepage already makes under <BrandNote/>, so the
+   transition into the footer is the site's own and needs no divider.
+
+   Plum appears nowhere: this page is raspberry and blue, and the one
+   place plum used to sit - the active filter - is now raspberry.
+
+   NO PURE WHITE. Every light value here is var(--cream) or an rgba
+   derived from it; rgba(245,235,226,a) IS #F5EBE2.
+
+   ── THE TYPE ─────────────────────────────────────────────────
+   The hero reads the canonical page hero classes (gloa-hero-*), so it
+   is the same scale as the homepage and sets no size of its own. The
+   community headline reads the established GLOA SECTION scale that
+   /about and /partnerships use,
+
+       sans    clamp(42px,4.2vw,60px)  500  .98  -.04em
+       italic  clamp(44px,4.6vw,64px)  400  .93  -.01em   Cormorant
+
+   so a section heading is never mistaken for a page hero.
+
+   The cards are the homepage's finished recipe card, given room: the
+   same raspberry meta line at var(--type-meta)/.18em, the same title
+   at var(--type-card), the same .6s image ease and the same raspberry
+   underline on hover. Nothing about the card was invented here.
+   ══════════════════════════════════════════════════════════════ */
+
+/* ══ 1 — THE HERO, ON RASPBERRY ════════════════════════════ */
+.rezepte-hero{
+  background:var(--berry);
+  color:var(--cream);
+  padding-block:clamp(78px,7vw,124px) clamp(66px,6vw,96px);
+  padding-inline:var(--rail-gutter);
+}
+.rezepte-hero .rezepte-hero-eyebrow{margin:0;color:rgba(245,235,226,.72)}
+/* The two lines stack, the way every other GLOA hero sets its headline. */
+.rezepte-hero-headline{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  max-width:1080px;
+  margin:clamp(18px,1.8vw,26px) 0 0;
+  letter-spacing:normal;
+  line-height:1;
+}
+.rezepte-hero-line{color:var(--cream)}
+.rezepte-hero-line-accent{margin-top:4px}
+.rezepte-hero-lead{
+  margin:clamp(26px,2.6vw,36px) 0 0;
+  max-width:520px;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:var(--type-body);
+  line-height:1.55;
+  color:var(--cream);
+}
+
+/* ══ 2 — THE FILTERS, ON CREAM ═════════════════════════════ */
+.rezepte-filters{
+  background:var(--cream);
+  color:var(--ink);
+  padding-block:clamp(40px,3.6vw,56px) 0;
+  padding-inline:var(--rail-gutter);
+}
+.rezepte-filters-inner{display:flex;flex-wrap:wrap;gap:10px}
+/* Square, flat, and sized for a thumb. */
+.rezepte-filters button{
+  min-height:44px;
+  padding:13px 20px;
+  border:1px solid rgba(17,17,17,.28);
+  border-radius:0;
+  box-shadow:none;
+  background:var(--cream);
+  color:var(--ink);
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:12px;
+  line-height:1;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  cursor:pointer;
+  transition:background .2s ease,color .2s ease,border-color .2s ease;
+}
+.rezepte-filters button:hover{border-color:var(--berry);color:var(--berry)}
+/* THE ACTIVE FILTER IS RASPBERRY, and its label is cream - the old
+   rule painted it plum on literal white. */
+.rezepte-filters button.active{
+  background:var(--berry);
+  color:var(--cream);
+  border-color:var(--berry);
+}
+.rezepte-filters button.active:hover{
+  background:var(--berry);
+  color:var(--cream);
+  border-color:var(--berry);
+}
+
+/* ══ 3 — THE GRID, ON CREAM ════════════════════════════════ */
+.rezepte-grid{
+  background:var(--cream);
+  color:var(--ink);
+  padding-block:clamp(44px,4vw,64px) clamp(84px,7vw,124px);
+  padding-inline:var(--rail-gutter);
+}
+.rezepte-grid-inner{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  column-gap:clamp(24px,2.4vw,40px);
+  row-gap:clamp(48px,4.4vw,72px);
+}
+.rezept-card a{
+  display:flex;
+  flex-direction:column;
+  text-decoration:none;
+  color:var(--ink);
+}
+/* A ratio rather than a pixel height, so the crop is the same shape at
+   every width instead of getting squatter as the column grows. */
+.rezept-card-img{
+  position:relative;
+  width:100%;
+  aspect-ratio:4 / 5;
+  overflow:hidden;
+  background:rgba(17,17,17,.06);
+}
+.rezept-card-img img{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  display:block;
+  object-fit:cover;
+  object-position:center;
+  transition:transform .6s ease;
+}
+/* THE TWO SQUARE SOURCES CARRY A BURNED-IN WATERMARK.
+
+   Four of the six photos are natively 1122x1402, exactly the 4:5 of the
+   frame, so they are shown whole. The other two are the 1254x1254
+   squares the homepage also uses, and both have a "PLACEHOLDER - NAME"
+   mark burned into the top 6.4% of the pixels.
+
+   object-position cannot help: cover fits a square into a PORTRAIT frame
+   by matching the height, so it crops horizontally and the full height
+   is always shown. These two are therefore pinned to the bottom of the
+   frame and over-scaled by 18%, which pushes the top 15.3% of the source
+   above the frame and out - clearing the mark by roughly nine percent of
+   the image. Nothing is written to the files; this is framing only. */
+.rezept-card-img img[src$="gloa-morning.jpg"],
+.rezept-card-img img[src$="gloa-iced.jpg"]{
+  top:auto;
+  bottom:0;
+  height:118%;
+}
+.rezept-card a:hover .rezept-card-img img{transform:scale(1.03)}
+.rezept-card-body{padding:clamp(16px,1.6vw,22px) 0 0}
+/* The raspberry meta line, exactly as the homepage card sets it. */
+.rezept-card-meta{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:var(--type-meta);
+  line-height:1;
+  letter-spacing:.18em;
+  text-transform:uppercase;
+  color:var(--berry);
+}
+.rezept-card-body h2{
+  margin:clamp(12px,1.2vw,16px) 0 0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:var(--type-card);
+  line-height:1.25;
+  letter-spacing:-.015em;
+  color:var(--ink);
+}
+.rezept-card-excerpt{
+  margin:clamp(8px,.9vw,12px) 0 0;
+  max-width:38ch;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:clamp(15px,1.1vw,16px);
+  line-height:1.6;
+  letter-spacing:0;
+  color:rgba(17,17,17,.72);
+}
+.rezept-card-cta{
+  display:inline-block;
+  margin-top:clamp(14px,1.4vw,20px);
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:var(--type-meta);
+  line-height:1;
+  letter-spacing:.18em;
+  text-transform:uppercase;
+  color:var(--ink);
+  text-decoration:underline;
+  text-decoration-color:var(--berry);
+  text-underline-offset:7px;
+  text-decoration-thickness:1.5px;
+  transition:color .2s ease;
+}
+.rezept-card a:hover .rezept-card-cta{color:var(--berry)}
+
+/* ══ 4 — THE COMMUNITY BAND, ON BLUE ═══════════════════════ */
+/* This is where <BrandNote/> used to be. BrandNote itself is unchanged
+   and still closes the homepage; it is simply no longer this page's
+   ending, because a recipe page should ask for a recipe back. */
+.rz-community{
+  background:var(--blue);
+  color:var(--cream);
+  padding-block:clamp(80px,6.6vw,116px);
+  padding-inline:var(--rail-gutter);
+}
+/* Headline left, the ask and the two actions right, both finishing on
+   the same baseline. */
+.rz-community-inner{
+  display:grid;
+  grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);
+  gap:clamp(36px,4.4vw,88px);
+  align-items:end;
+}
+.rz-community .rz-community-eyebrow{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:var(--type-meta);
+  line-height:1.2;
+  letter-spacing:.2em;
+  text-transform:uppercase;
+  color:rgba(245,235,226,.72);
+}
+.rz-community-headline{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  margin:clamp(18px,1.8vw,26px) 0 0;
+  letter-spacing:normal;
+  line-height:1;
+}
+.rz-community-line{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:500;
+  font-style:normal;
+  font-size:clamp(42px,4.2vw,60px);
+  line-height:.98;
+  letter-spacing:-.04em;
+  color:var(--cream);
+}
+.rz-community-line-accent{
+  font-family:var(--font-display),Georgia,serif;
+  font-weight:400;
+  font-style:italic;
+  font-size:clamp(44px,4.6vw,64px);
+  line-height:.93;
+  letter-spacing:-.01em;
+  margin-top:3px;
+  color:var(--cream);
+}
+.rz-community-side{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:clamp(24px,2.4vw,34px);
+}
+.rz-community-body{
+  margin:0;
+  max-width:46ch;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:var(--type-body);
+  line-height:1.55;
+  color:rgba(245,235,226,.88);
+}
+.rz-community-actions{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:clamp(18px,2vw,30px);
+}
+/* Cream on blue, square, no shadow - the canonical coloured-section CTA. */
+.rz-community .rz-community-cta{
+  width:max-content;
+  min-height:54px;
+  padding:18px 31px;
+  border-radius:0;
+  box-shadow:none;
+  background:var(--cream);
+  color:var(--blue);
+  border:1px solid var(--cream);
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:12px;
+  line-height:1;
+  letter-spacing:.15em;
+  text-transform:uppercase;
+  transition:background .2s ease,color .2s ease,border-color .2s ease;
+}
+.rz-community .rz-community-cta:hover{
+  background:transparent;
+  color:var(--cream);
+  border-color:var(--cream);
+}
+/* The secondary action is a link, not a second button. */
+.rz-community-social{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:var(--type-meta);
+  line-height:1;
+  letter-spacing:.18em;
+  text-transform:uppercase;
+  color:var(--cream);
+  text-decoration:underline;
+  text-underline-offset:7px;
+  text-decoration-thickness:1.5px;
+  transition:opacity .2s ease;
+}
+.rz-community-social:hover{opacity:.72}
+/* Keyboard users get the ring in the colour of the band they are on. */
+.rezepte-hero :focus-visible,
+.rz-community :focus-visible{outline-color:var(--cream)}
+
+/* ══ RESPONSIVE ════════════════════════════════════════════ */
+@media (max-width:1100px){
+  .rezepte-grid-inner{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .rz-community-inner{grid-template-columns:minmax(0,1fr);align-items:start}
+}
+
+@media (max-width:900px){
+  .rezepte-hero{padding-block:clamp(58px,10vw,78px) clamp(46px,8vw,62px)}
+  .rezepte-filters{padding-block:clamp(32px,5vw,42px) 0}
+  .rezepte-grid{padding-block:clamp(34px,5vw,46px) clamp(66px,10vw,88px)}
+  .rz-community{padding-block:clamp(64px,10vw,86px)}
+  /* One section scale down, at the same 900px the page hero uses. */
+  .rz-community-line{font-size:clamp(36px,9.2vw,44px)}
+  .rz-community-line-accent{font-size:clamp(38px,10vw,46px)}
+}
+
+@media (max-width:760px){
+  .rezepte-grid-inner{grid-template-columns:minmax(0,1fr);row-gap:clamp(38px,6vw,50px)}
+  .rezept-card-excerpt{max-width:none}
+  .rezepte-hero-lead{max-width:none}
+  .rz-community-body{max-width:none}
+  /* Full-width primary action, and the two never crowd each other. */
+  .rz-community-actions{gap:20px}
+  .rz-community .rz-community-cta{width:100%;justify-content:center;padding:18px 20px}
+}
+
+@media (max-width:520px){
+  /* Four filters on a narrow screen: two rows of two, each still a
+     comfortable target rather than a shrunken chip. */
+  .rezepte-filters-inner{gap:8px}
+  .rezepte-filters button{padding:13px 16px;letter-spacing:.12em}
 }

@@ -149,9 +149,9 @@ const HEROES = [
   ["/for-cafes", '<p className="eyebrow b2b-hero-eyebrow gloa-hero-eyebrow">',
     ['<span className="b2b-hero-line gloa-hero-primary">Dein Matcha.</span>'],
     '<i className="b2b-hero-line b2b-hero-line-accent gloa-hero-secondary">'],
-  ["/rezepte", '<p className="eyebrow gloa-hero-eyebrow">GLOA · REZEPTE</p>',
-    ['<h1 className="gloa-hero-primary">Matcha Rezepte.'],
-    '<i className="gloa-hero-secondary">GLOA Edition.</i>'],
+  ["/rezepte", '<p className="eyebrow rezepte-hero-eyebrow gloa-hero-eyebrow">GLOA · REZEPTE</p>',
+    ['<span className="rezepte-hero-line gloa-hero-primary">Matcha Rezepte.</span>'],
+    '<i className="rezepte-hero-line rezepte-hero-line-accent gloa-hero-secondary">GLOA Edition.</i>'],
   ["/contact", '<p className="eyebrow gloa-hero-eyebrow">KONTAKT</p>',
     ['<h1 className="gloa-hero-primary">Schreib'],
     '<i className="gloa-hero-secondary">uns.</i>'],
@@ -176,7 +176,7 @@ test("6b: no route-specific hero size, weight or family survives", () => {
   // Every route hero rule may still hold colour and margin - and nothing
   // typographic, or it would outrank the shared class.
   const TYPO = /(font-family|font-style|font-weight|font-size|line-height|letter-spacing)\s*:/;
-  const ROUTE_HERO = /^\.(shop-hero-line|shop-hero-line-accent|matcha-hero-line|matcha-hero-line-accent|about-hero-line|about-hero-line-accent|pt-hero-line|pt-hero-line-accent|rezepte-page h1|contact-hero h1)( i)?$|^\.b2b-hero \.b2b-hero-line(-accent)?$/;
+  const ROUTE_HERO = /^\.(shop-hero-line|shop-hero-line-accent|matcha-hero-line|matcha-hero-line-accent|about-hero-line|about-hero-line-accent|pt-hero-line|pt-hero-line-accent|rezepte-hero-line|rezepte-hero-line-accent|contact-hero h1)( i)?$|^\.b2b-hero \.b2b-hero-line(-accent)?$/;
   const bare = css.replace(/\/\*[\s\S]*?\*\//g, "");
   let checked = 0;
   for (const m of bare.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
@@ -185,7 +185,7 @@ test("6b: no route-specific hero size, weight or family survives", () => {
     checked++;
     assert.ok(!TYPO.test(m[2]), `${sel} still sets hero typography: ${m[2].slice(0, 70)}`);
   }
-  assert.ok(checked >= 8, `only ${checked} route hero rules were scanned`);
+  assert.ok(checked >= 10, `only ${checked} route hero rules were scanned`);
 
   // The two shared italic lists no longer reach a hero, and still serve
   // their h2 consumers.
@@ -232,6 +232,7 @@ test("7: typography only - no colour, layout or copy in the hero system", () => 
   assert.match(css, /\.b2b-hero \.b2b-hero-line-accent\{margin-top:6px;color:var\(--cream\)\}/);
   assert.match(css, /\.about-hero-eyebrow\{color:rgba\(245,235,226,\.72\)\}/);
   assert.match(css, /\.pt-hero-line\{color:var\(--cream\)\}/);
+  assert.match(css, /\.rezepte-hero-line\{color:var\(--cream\)\}/);
 
   // And every hero's copy, word for word.
   for (const copy of ["Matcha.<br/><span className=\"hero-line-2\">Is for everyone.",
@@ -271,12 +272,13 @@ test("7c: no non-hero heading was pulled into the hero scale", () => {
   // The canonical classes appear on hero elements only.
   const uses = [...site.matchAll(/gloa-hero-(eyebrow|primary|secondary)/g)];
   // 7 eyebrows + 8 primary lines (/shop has two) + 7 second lines.
+  // /rezepte's three now sit on route-classed elements like the rest.
   assert.equal(uses.length, 22, `unexpected number of hero-class uses: ${uses.length}`);
   // Every use sits on an element whose own class names it a hero, or on
   // the /rezepte and /contact hero h1/i that have no other class.
   for (const m of site.matchAll(/className="([^"]*gloa-hero-[^"]*)"/g)) {
     const cls = m[1];
-    assert.ok(/(shop-hero|matcha-hero|about-hero|b2b-hero|pt-hero)-/.test(cls)
+    assert.ok(/(shop-hero|matcha-hero|about-hero|b2b-hero|pt-hero|rezepte-hero)-/.test(cls)
       || cls === "eyebrow gloa-hero-eyebrow"
       || cls === "gloa-hero-primary" || cls === "gloa-hero-secondary",
       `a hero class landed somewhere unexpected: ${cls}`);
