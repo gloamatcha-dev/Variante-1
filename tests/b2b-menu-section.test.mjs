@@ -248,15 +248,21 @@ test("4: two families, and the caps the contract names", () => {
 
 test("4b: the section stays under the B2B hero, and the numbers under the title", () => {
   // The hero's own curves, from the block above this one.
-  const heroBlock = css.slice(css.indexOf("/for-cafes PAGE HERO"), blockAt);
-  const heroCode = heroBlock.replace(/\/\*[\s\S]*?\*\//g, "");
-  const heroDesktop = heroCode.slice(0, heroCode.indexOf("@media"));
-  const heroMobile = heroCode.slice(heroCode.indexOf("@media (max-width:900px)"));
+  // The B2B hero no longer carries a size of its own. Every true page
+  // hero reads the shared homepage scale, so the two tokens ARE the
+  // hero - see tests/page-hero-typography.test.mjs. They are declared
+  // once in :root and redefined once at 900px, in that order.
+  const heroTok = (name, w) => {
+    const bare = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    const all = bare.split(name + ":").slice(1).map((t) => t.slice(0, t.indexOf(")") + 1));
+    assert.equal(all.length, 2, `${name} is not declared exactly twice`);
+    return w <= 900 ? all[1] : all[0];
+  };
 
   const pick = (scopeD, scopeM, sel, w) => clampAt(sizeOf(w <= 900 ? scopeM : scopeD, sel), w);
   for (const w of [320, 360, 390, 430, 480, 640, 768, 900, 901, 1024, 1200, 1280, 1440, 1536, 1680, 1920]) {
-    const heroSans = pick(heroDesktop, heroMobile, ".b2b-hero .b2b-hero-line{", w);
-    const heroItal = pick(heroDesktop, heroMobile, ".b2b-hero .b2b-hero-line-accent{", w);
+    const heroSans = clampAt(heroTok("--type-hero-primary", w), w);
+    const heroItal = clampAt(heroTok("--type-hero-secondary", w), w);
     const sans = pick(desktop, mobile, ".b2b-menu .b2b-menu-line{", w);
     const ital = pick(desktop, mobile, ".b2b-menu .b2b-menu-line-accent{", w);
     const num = pick(desktop, mobile, ".b2b-menu-number{", w);
@@ -270,7 +276,10 @@ test("4b: the section stays under the B2B hero, and the numbers under the title"
   // rather than editing a list that .faq and .business-support share.
   assert.ok(!menu.includes("behind-bar"), "the old class survived in the markup");
   assert.match(css, /\.behind-bar h2,|,\.behind-bar h2[,{]/);
-  assert.match(css, /\.b2b-hero h1 i,\.behind-bar h2 i,\.business-support h2 i,\.faq h2 i\{/);
+  // The hero italic left this list when every page hero moved to the
+  // shared homepage scale (Inter italic, not Cormorant). The list is
+  // otherwise untouched and still serves its three h2 consumers.
+  assert.match(css, /\.behind-bar h2 i,\.business-support h2 i,\.faq h2 i\{/);
 });
 
 /* ══════════════════════════════════════════════════════════════

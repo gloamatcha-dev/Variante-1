@@ -29,7 +29,11 @@ assert.ok(faq.length > 600, "the B2B FAQ was not found");
 
 const blockAt = css.indexOf("/for-cafes — THE B2B FAQ");
 assert.notEqual(blockAt, -1, "the CSS block was not found");
-const rules = css.slice(css.lastIndexOf("/*", blockAt));
+// Bounded at the top of the next block, so anything appended after
+// this one (the shared page hero type system) is not read as ours.
+const endAt = css.indexOf("THE PAGE HERO TYPE SYSTEM", blockAt);
+assert.notEqual(endAt, -1, "the following block was not found");
+const rules = css.slice(css.lastIndexOf("/*", blockAt), css.lastIndexOf("/*", endAt));
 const code = rules.replace(/\/\*[\s\S]*?\*\//g, "");
 const desktop = code.slice(0, code.indexOf("@media"));
 const mobile = code.slice(code.indexOf("@media (max-width:760px)"));
@@ -224,14 +228,20 @@ test("4: two families, and the caps the contract names", () => {
 });
 
 test("4b: the FAQ stays under the B2B hero at every width", () => {
-  const heroBlock = css.slice(css.indexOf("/for-cafes PAGE HERO"), css.indexOf("INFO STRIP + MENU SECTION"));
-  const heroCode = heroBlock.replace(/\/\*[\s\S]*?\*\//g, "");
-  const heroD = heroCode.slice(0, heroCode.indexOf("@media"));
-  const heroM = heroCode.slice(heroCode.indexOf("@media (max-width:900px)"));
+  // The B2B hero no longer carries a size of its own. Every true page
+  // hero reads the shared homepage scale, so the two tokens ARE the
+  // hero - see tests/page-hero-typography.test.mjs. They are declared
+  // once in :root and redefined once at 900px, in that order.
+  const heroTok = (name, w) => {
+    const bare = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    const all = bare.split(name + ":").slice(1).map((t) => t.slice(0, t.indexOf(")") + 1));
+    assert.equal(all.length, 2, `${name} is not declared exactly twice`);
+    return w <= 900 ? all[1] : all[0];
+  };
 
   for (const w of [320, 360, 390, 430, 480, 640, 760, 761, 900, 1024, 1200, 1280, 1440, 1536, 1680, 1920]) {
-    const heroSans = clampAt(sizeOf(w <= 900 ? heroM : heroD, ".b2b-hero .b2b-hero-line{"), w);
-    const heroItal = clampAt(sizeOf(w <= 900 ? heroM : heroD, ".b2b-hero .b2b-hero-line-accent{"), w);
+    const heroSans = clampAt(heroTok("--type-hero-primary", w), w);
+    const heroItal = clampAt(heroTok("--type-hero-secondary", w), w);
     const scope = w <= 760 ? mobile : desktop;
     const sans = clampAt(sizeOf(scope, ".business .faq h2{"), w);
     const ital = clampAt(sizeOf(scope, ".business .faq h2 i{"), w);

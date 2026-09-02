@@ -161,8 +161,13 @@ test("5: a product title, not a hero one, on the canonical rail", () => {
   const title = rule(".shop-product-title{");
   assert.match(title, /font-size:clamp\(32px,3vw,46px\)/);
   assert.ok(cap(title) <= 46, "the product title left its band");
-  // Below the shop hero (84px) and far below the homepage hero (100px).
-  assert.ok(cap(title) < cap(/\.shop-hero-line\{[\s\S]*?(font-size:clamp\([^)]*\))/.exec(css)[1]));
+  // Far below the page hero. The shop hero no longer sets a size of its
+  // own - every true page hero reads --type-hero-primary, which IS the
+  // homepage hero's curve - so the ceiling is read from the token.
+  const tail = css.split("--type-hero-primary:")[1];
+  const heroCap = cap(tail.slice(0, tail.indexOf(")") + 1));
+  assert.equal(heroCap, 100, "the page hero token moved");
+  assert.ok(cap(title) < heroCap, "the product title reaches the page hero");
   assert.ok(cap(title) < cap(/\.hero \.hero-copy h1\{[\s\S]*?(font-size:clamp\(54px[^)]*\))/.exec(css)[1]));
 
   // The small roles read the page's shared tokens.

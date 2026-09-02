@@ -36,7 +36,6 @@ const rules = css.slice(css.lastIndexOf("/*", blockAt), css.lastIndexOf("/*", cs
    be; every structural check reads the comment-free view so that prose
    can never satisfy an assertion. */
 const code = rules.replace(/\/\*[\s\S]*?\*\//g, "");
-const desktop = code.slice(0, code.indexOf("@media"));
 
 const rule = name => {
   const at = code.indexOf(name);
@@ -219,11 +218,6 @@ const clampAt = (t, w) => {
   const [lo, vw, hi] = /clamp\(([\d.]+)px,([\d.]+)vw,([\d.]+)px\)/.exec(t).slice(1).map(Number);
   return Math.max(lo, Math.min((vw / 100) * w, hi));
 };
-const sizeOf = (scope, sel) => {
-  const at = scope.indexOf(sel);
-  assert.notEqual(at, -1, `missing rule: ${sel}`);
-  return /font-size:(clamp\([^)]*\)|\d+px)/.exec(scope.slice(at))[1];
-};
 const homepageHero = w => (w <= 900 ? Math.max(44, Math.min(0.12 * w, 64)) : Math.max(54, Math.min(0.059 * w, 100)));
 
 test("5: two families only, at the sizes the contract names", () => {
@@ -238,26 +232,46 @@ test("5: two families only, at the sizes the contract names", () => {
   assert.match(rule(".b2b-hero .b2b-hero-eyebrow{"), /font-size:var\(--type-meta\)/);
   assert.match(css, /--type-meta:11px/);
   assert.match(rule(".b2b-hero .b2b-hero-eyebrow{"), /letter-spacing:\.2em/);
-  assert.match(rule(".b2b-hero .b2b-hero-line{"), /font-family:var\(--font-sans\)/);
-  assert.match(rule(".b2b-hero .b2b-hero-line-accent{"), /font-family:var\(--font-display\)/);
-  assert.match(rule(".b2b-hero .b2b-hero-line-accent{"), /font-style:italic/);
   assert.match(rule(".b2b-hero .b2b-hero-lead{"), /font-size:clamp\(16px,1\.3vw,17px\)/);
   assert.match(rule(".b2b-hero-audience span{"), /font-size:11px/);
 
-  // The caps the brief names, exactly.
-  const cap = t => /clamp\([\d.]+px,[\d.]+vw,([\d.]+)px\)/.exec(t)[1];
-  assert.equal(cap(sizeOf(desktop, ".b2b-hero .b2b-hero-line{")), "76");
-  assert.equal(cap(sizeOf(desktop, ".b2b-hero .b2b-hero-line-accent{")), "72");
+  // THE TWO HEADLINE LINES ARE NO LONGER SET HERE. The homepage is the
+  // typography master for every true page hero, so both lines read the
+  // shared classes and this block keeps only their colour and spacing.
+  // The contract itself lives in tests/page-hero-typography.test.mjs.
+  //
+  // That also retires this hero's Cormorant second line: the homepage
+  // sets "Is for everyone." in Inter italic, and so does this one now.
+  assert.ok(hero.includes('className="b2b-hero-line gloa-hero-primary"'),
+    "the hero sans line does not read the shared scale");
+  assert.ok(hero.includes('className="b2b-hero-line b2b-hero-line-accent gloa-hero-secondary"'),
+    "the hero italic line does not read the shared scale");
+  for (const sel of [".b2b-hero .b2b-hero-line{", ".b2b-hero .b2b-hero-line-accent{"]) {
+    const at = code.indexOf(sel);
+    if (at === -1) continue;
+    const body = code.slice(at + sel.length, code.indexOf("}", at));
+    for (const prop of ["font-size", "font-family", "font-weight", "font-style", "letter-spacing", "line-height"]) {
+      assert.ok(!body.includes(prop), `the hero still sets ${prop} of its own: ${sel}`);
+    }
+  }
 });
 
-test("5b: this hero never outgrows the homepage hero, at any width", () => {
-  const mobile = code.slice(code.indexOf("@media (max-width:900px)"));
-  const pick = (sel, w) => clampAt(sizeOf(w <= 900 ? mobile : desktop, sel), w);
+test("5b: this hero IS the homepage hero, at any width", () => {
+  // It no longer sits under the homepage hero - it reads the same two
+  // tokens, so the curves are identical by construction. What is worth
+  // checking is that the shared scale still behaves like a page hero
+  // here: the italic under the sans, and never down at section scale.
+  const bare = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const tok = (name, w) => {
+    const all = bare.split(name + ":").slice(1).map((t) => t.slice(0, t.indexOf(")") + 1));
+    assert.equal(all.length, 2, `${name} is not declared exactly twice`);
+    return all[w <= 900 ? 1 : 0];
+  };
   for (const w of [320, 360, 390, 430, 480, 640, 768, 900, 901, 1024, 1200, 1280, 1440, 1536, 1680, 1920]) {
-    const sans = pick(".b2b-hero .b2b-hero-line{", w);
-    const ital = pick(".b2b-hero .b2b-hero-line-accent{", w);
-    assert.ok(sans < homepageHero(w),
-      `the B2B hero (${sans}) reaches the homepage hero (${homepageHero(w)}) at ${w}px`);
+    const sans = clampAt(tok("--type-hero-primary", w), w);
+    const ital = clampAt(tok("--type-hero-secondary", w), w);
+    assert.ok(Math.abs(sans - homepageHero(w)) < 1e-6,
+      `the B2B hero (${sans}) is not the homepage hero (${homepageHero(w)}) at ${w}px`);
     assert.ok(ital < sans, `the italic outgrew the sans at ${w}px`);
     // And it stays a page hero, never a section headline: comfortably
     // above the 60px section cap the finished pages use.
@@ -361,7 +375,10 @@ test("7b: every selector is hero-scoped, and no other page moved", () => {
   }
   assert.ok(n > 15, `only ${n} selectors were scanned`);
   // The italic rule the sections BELOW the hero share is still intact.
-  assert.match(css, /\.b2b-hero h1 i,\.behind-bar h2 i,\.business-support h2 i,\.faq h2 i\{/);
+  // The hero italic left this list when every page hero moved to the
+  // shared homepage scale (Inter italic, not Cormorant). The list is
+  // otherwise untouched and still serves its three h2 consumers.
+  assert.match(css, /\.behind-bar h2 i,\.business-support h2 i,\.faq h2 i\{/);
   // The other finished pages still have their own blocks.
   for (const marker of ["/about — ONE EDITORIAL SYSTEM", "/our-matcha PAGE HERO",
                         "/our-matcha FAQ + FINAL CTA", ".home-rail{"]) {

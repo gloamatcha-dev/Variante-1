@@ -131,11 +131,12 @@ test("3: a section under the page hero, and a sub-heading under that", () => {
   assert.equal(parse(token("title"))[2], 64);
   assert.equal(parse(token("editorial"))[2], 68);
 
-  // The page hero reads the shared page-hero token now, so the curve is
-  // taken from the token - a lazy match on the rule would run past the
-  // var() and pick up whatever clamp appears next in the file.
-  assert.match(css, /\.matcha-hero-line\{[\s\S]*?font-size:var\(--type-page-hero\)/);
-  const pageHero = token("page-hero");
+  // The page hero reads the SHARED HOMEPAGE SCALE now - every true page
+  // hero does - so the curve is taken from that token rather than from
+  // this page's own rule, which no longer carries a size at all.
+  const heroTail = css.split("--type-hero-primary:")[1];
+  const pageHero = heroTail.slice(0, heroTail.indexOf(")") + 1);
+  assert.equal(pageHero, "clamp(54px,5.9vw,100px)", "the page hero token moved");
   const tasteSans = /\.matcha-taste-line\{[\s\S]*?font-size:(clamp\([^)]*\))/.exec(rules)[1];
   const tasteAccent = /\.matcha-taste-line-accent\{[\s\S]*?font-size:(clamp\([^)]*\))/.exec(rules)[1];
   for (const w of [320, 390, 430, 640, 900, 1024, 1200, 1440, 1536, 1920]) {

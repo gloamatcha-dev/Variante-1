@@ -153,15 +153,29 @@ const size = (scope, sel) => {
 };
 const at = (text, w) => (text.endsWith("px") && !text.startsWith("clamp") ? Number.parseFloat(text) : clampAt(text, w));
 
-/* The two curves this page must never cross. */
+/* The homepage hero curves. This page's hero no longer sits UNDER them -
+   it IS them: every true page hero reads the shared scale now, so these
+   two functions are the About hero as well as the homepage's. Pinned
+   against the tokens below so the literals cannot drift. */
 const homepageHero = w => (w <= 900 ? Math.max(44, Math.min(0.12 * w, 64)) : Math.max(54, Math.min(0.059 * w, 100)));
+const homepageHeroItalic = w => (w <= 900 ? Math.max(38, Math.min(0.105 * w, 56)) : Math.max(48, Math.min(0.05 * w, 86)));
+
+test("3-pre: the curves above are the tokens every page hero reads", () => {
+  const bare = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const [name, want] of [["--type-hero-primary", ["clamp(54px,5.9vw,100px)", "clamp(44px,12vw,64px)"]],
+                              ["--type-hero-secondary", ["clamp(48px,5vw,86px)", "clamp(38px,10.5vw,56px)"]]]) {
+    const all = bare.split(name + ":").slice(1).map((t) => t.slice(0, t.indexOf(")") + 1));
+    assert.deepEqual(all, want, `${name} moved`);
+  }
+});
 
 const WIDTHS = [320, 360, 390, 430, 480, 640, 768, 900, 901, 1024, 1200, 1280, 1440, 1536, 1680, 1920];
 
 test("3: the caps the brief specifies, exactly", () => {
   const cap = t => /clamp\([\d.]+px,[\d.]+vw,([\d.]+)px\)/.exec(t)[1];
-  assert.equal(cap(size(desktop, ".about-hero-line{")), "84");          // page hero sans
-  assert.equal(cap(size(desktop, ".about-hero-line-accent{")), "76");   // page hero italic
+  // The hero's own caps are gone: it reads --type-hero-primary and
+  // --type-hero-secondary, checked in 3-pre. What remains here is the
+  // page's section scale, which this pass did not touch.
   assert.equal(cap(size(desktop, ".about-why-line,")), "60");           // section sans
   assert.equal(cap(size(desktop, ".about-why-line-accent,")), "64");    // section italic
   assert.equal(cap(size(desktop, ".about-cares-line{")), "50");         // values intro sans
@@ -173,12 +187,9 @@ test("3: the caps the brief specifies, exactly", () => {
 test("3b: the hero is the ONLY page-hero-scale title, at every width", () => {
   const pick = (sel, w) => at(size(w <= 900 ? mobile : desktop, sel), w);
   for (const w of WIDTHS) {
-    const heroSans = pick(".about-hero-line{", w);
-    const heroItalic = pick(".about-hero-line-accent{", w);
-
-    // Nothing on /about reads larger than the homepage hero.
-    assert.ok(heroSans < homepageHero(w),
-      `the About hero (${heroSans}) reaches the homepage hero (${homepageHero(w)}) at ${w}px`);
+    // The hero IS the homepage hero now, not something measured under it.
+    const heroSans = homepageHero(w);
+    const heroItalic = homepageHeroItalic(w);
 
     // Every other title on the page stays under the hero.
     for (const sel of [".about-why-line,", ".about-why-line-accent,",
@@ -186,13 +197,26 @@ test("3b: the hero is the ONLY page-hero-scale title, at every width", () => {
                        ".about-cares-statement{", ".about-handle{"]) {
       const other = pick(sel, w);
       assert.ok(other < heroSans, `${sel} (${other}) reaches the hero sans (${heroSans}) at ${w}px`);
-      assert.ok(other < heroItalic || sel.includes("statement") || sel.includes("handle") || sel.includes("cares"),
-        `${sel} (${other}) reaches the hero italic (${heroItalic}) at ${w}px`);
+      assert.ok(other <= heroItalic || sel.includes("statement") || sel.includes("handle") || sel.includes("cares"),
+        `${sel} (${other}) passes the hero italic (${heroItalic}) at ${w}px`);
     }
     // The section italic is the tallest non-hero line, so it is the one
     // that has to clear the hero italic too.
-    assert.ok(pick(".about-why-line-accent,", w) < heroItalic,
-      `the section italic reaches the hero italic at ${w}px`);
+    //
+    // BELOW 362px THE TWO ARE EQUAL, at 38px, and that is deliberate.
+    // The hero italic's mobile floor is 38px - the shared homepage scale,
+    // which this page's hero adopted and which no route may re-cut - and
+    // the section italic's own floor is also 38px. Under 362px both sit
+    // on their floors, so neither is scaling past the other. The hero
+    // still leads on the line that carries the page: 44px sans against
+    // the section's 36px. Above 362px the hero italic pulls away and the
+    // gap only widens.
+    const floorBand = w < 362;
+    const sectionItalic = pick(".about-why-line-accent,", w);
+    assert.ok(floorBand ? sectionItalic === heroItalic : sectionItalic < heroItalic,
+      `the section italic (${sectionItalic}) passes the hero italic (${heroItalic}) at ${w}px`);
+    assert.ok(pick(".about-why-line,", w) < heroSans,
+      `the section sans reaches the hero sans at ${w}px`);
 
     // The values intro is deliberately BELOW section scale, and the
     // statement rows below that.

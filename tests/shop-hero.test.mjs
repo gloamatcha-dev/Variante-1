@@ -34,10 +34,12 @@ const rule = name => {
    ══════════════════════════════════════════════════════════════ */
 
 test("1: the hero says exactly the approved lines, and no dash", () => {
-  assert.ok(hero.includes('<p className="eyebrow shop-hero-eyebrow">GLOA · SHOP</p>'));
-  assert.ok(hero.includes('<span className="shop-hero-line">Alles von</span>'));
-  assert.ok(hero.includes('<span className="shop-hero-line">GLOA.</span>'));
-  assert.ok(hero.includes('<i className="shop-hero-line shop-hero-line-accent">alles was du brauchst.</i>'));
+  // Same words. The gloa-hero-* classes are the shared homepage scale,
+  // added in the global page hero pass; nothing here was reworded.
+  assert.ok(hero.includes('<p className="eyebrow shop-hero-eyebrow gloa-hero-eyebrow">GLOA · SHOP</p>'));
+  assert.ok(hero.includes('<span className="shop-hero-line gloa-hero-primary">Alles von</span>'));
+  assert.ok(hero.includes('<span className="shop-hero-line gloa-hero-primary">GLOA.</span>'));
+  assert.ok(hero.includes('<i className="shop-hero-line shop-hero-line-accent gloa-hero-secondary">alles was du brauchst.</i>'));
   assert.match(site, /const SHOP_HERO_LEAD=<>Premium Matcha aus Shizuoka, Japan<br\/>und alles, was dazugehört\.<\/>;/);
   assert.ok(hero.includes("LAUNCH AM {GLOA_LAUNCH_LABEL}"));
   assert.ok(hero.includes("PRODUKTE ENTDECKEN"));
@@ -144,34 +146,44 @@ test("4: the launch band reuses the existing countdown and sits under the hero",
    5. TYPE, COLOUR AND THE RAIL
    ══════════════════════════════════════════════════════════════ */
 
-test("5: two families, cream on raspberry, and smaller than the homepage hero", () => {
-  // ── THE HOMEPAGE HERO STAYS THE CEILING ──────────────────────
-  // Sampled across the breakpoints and the two bends in the homepage
-  // hero's own curve; clamp() is monotonic, so this covers the range.
+test("5: two families, cream on raspberry, and the homepage hero's own scale", () => {
+  // ── THE HOMEPAGE HERO IS NO LONGER A CEILING - IT IS THE SCALE ──
+  // This hero used to be pitched deliberately under the homepage's own
+  // curve through a pair of page-hero tokens. The homepage is the
+  // typography master now: both lines read the shared classes, and the
+  // tokens they used to read have no consumer left anywhere.
   const clamp = (lo, mid, hi) => Math.max(lo, Math.min(mid, hi));
   const parse = t => /clamp\(([\d.]+)px,([\d.]+)vw,([\d.]+)px\)/.exec(t).slice(1).map(Number);
-  // The two page heroes share one role, so the curve lives in a token.
-  assert.match(rules, /\.shop-hero-line\{[\s\S]*?font-size:var\(--type-page-hero\)/);
-  assert.match(rules, /\.shop-hero-line-accent\{[\s\S]*?font-size:var\(--type-page-hero-accent\)/);
-  const token = n => new RegExp("--type-" + n + ":([^;]+);").exec(css)[1];
-  const [sLo, sVw, sHi] = parse(token("page-hero"));
-  const [aLo, aVw, aHi] = parse(token("page-hero-accent"));
+  const bare = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.ok(!bare.includes("var(--type-page-hero)"), "the superseded token found a consumer");
+  assert.ok(!bare.includes("var(--type-page-hero-accent)"), "the superseded accent token found a consumer");
+  const tok = (name) => {
+    const all = bare.split(name + ":").slice(1).map((t) => t.slice(0, t.indexOf(")") + 1));
+    assert.equal(all.length, 2, `${name} is not declared exactly twice`);
+    return all;
+  };
+  const [sDesk, sMob] = tok("--type-hero-primary");
+  const [aDesk, aMob] = tok("--type-hero-secondary");
+  // Read from the homepage's own rule, so master and page cannot drift.
+  assert.match(bare, /\.hero \.hero-copy h1\{[^}]*font-size:clamp\(54px,5\.9vw,100px\)/);
   const homeTitle = w => (w <= 900 ? clamp(44, 0.12 * w, 64) : clamp(54, 0.059 * w, 100));
   for (const w of [320, 390, 430, 640, 900, 901, 1024, 1085, 1280, 1440, 1536, 1680, 1920, 2560]) {
+    const [sLo, sVw, sHi] = parse(w <= 900 ? sMob : sDesk);
+    const [aLo, aVw, aHi] = parse(w <= 900 ? aMob : aDesk);
     const shopTitle = clamp(sLo, (sVw / 100) * w, sHi);
     const shopAccent = clamp(aLo, (aVw / 100) * w, aHi);
-    assert.ok(homeTitle(w) > shopTitle, `the shop hero outgrows the homepage hero at ${w}px`);
-    assert.ok(homeTitle(w) > shopAccent, `the shop accent outgrows the homepage hero at ${w}px`);
+    assert.ok(Math.abs(homeTitle(w) - shopTitle) < 1e-6,
+      `the shop hero (${shopTitle}) is not the homepage hero (${homeTitle(w)}) at ${w}px`);
+    assert.ok(shopAccent < shopTitle, `the accent outgrew the hero at ${w}px`);
   }
-  assert.ok(sHi <= 100 && sHi >= 62, "the shop headline left its intended band");
 
-  // ── TWO FAMILIES, AND THE ITALIC IS THE DISPLAY ONE ──────────
-  assert.match(rule(".shop-hero-line{"), /font-family:var\(--font-sans\)/);
-  assert.match(rule(".shop-hero-line{"), /font-weight:800/);
-  const accent = rule(".shop-hero-line-accent{");
-  assert.match(accent, /font-family:var\(--font-display\)/);
-  assert.match(accent, /font-style:italic/);
-  assert.match(accent, /font-weight:400/);
+  // ── THE HEADLINE LINES ARE THE SHARED SCALE ─────────────
+  // Inter 800 over Inter ITALIC 400 - the homepage's pairing. This
+  // hero's Cormorant second line is retired here and nowhere else.
+  assert.ok(hero.includes('className="shop-hero-line gloa-hero-primary"'), "/shop left the shared scale");
+  assert.match(css, /\.gloa-hero-primary\{[\s\S]*?font-weight:800/);
+  assert.match(css, /\.gloa-hero-secondary\{[\s\S]*?font-style:italic/);
+  assert.match(css, /\.gloa-hero-secondary\{[\s\S]*?font-weight:400/);
   for (const m of rules.matchAll(/font-family:([^;}]+)/g)) {
     assert.match(m[1], /^var\(--font-(sans|display)\)/, `a third family: ${m[1]}`);
   }

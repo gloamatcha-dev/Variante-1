@@ -256,15 +256,21 @@ test("4: two families, and the caps the contract names", () => {
 });
 
 test("4b: the section stays under the B2B hero at every width", () => {
-  const heroBlock = css.slice(css.indexOf("/for-cafes PAGE HERO"), css.indexOf("INFO STRIP + MENU SECTION"));
-  const heroCode = heroBlock.replace(/\/\*[\s\S]*?\*\//g, "");
-  const heroD = heroCode.slice(0, heroCode.indexOf("@media"));
-  const heroM = heroCode.slice(heroCode.indexOf("@media (max-width:900px)"));
+  // The B2B hero no longer carries a size of its own. Every true page
+  // hero reads the shared homepage scale, so the two tokens ARE the
+  // hero - see tests/page-hero-typography.test.mjs. They are declared
+  // once in :root and redefined once at 900px, in that order.
+  const heroTok = (name, w) => {
+    const bare = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    const all = bare.split(name + ":").slice(1).map((t) => t.slice(0, t.indexOf(")") + 1));
+    assert.equal(all.length, 2, `${name} is not declared exactly twice`);
+    return w <= 900 ? all[1] : all[0];
+  };
   const pick = (d, m, sel, w) => clampAt(sizeOf(w <= 760 ? m : d, sel), w);
 
   for (const w of [320, 360, 390, 430, 480, 640, 760, 761, 900, 1024, 1200, 1280, 1440, 1536, 1680, 1920]) {
-    const heroSans = clampAt(sizeOf(w <= 900 ? heroM : heroD, ".b2b-hero .b2b-hero-line{"), w);
-    const heroItal = clampAt(sizeOf(w <= 900 ? heroM : heroD, ".b2b-hero .b2b-hero-line-accent{"), w);
+    const heroSans = clampAt(heroTok("--type-hero-primary", w), w);
+    const heroItal = clampAt(heroTok("--type-hero-secondary", w), w);
     const sans = pick(desktop, mobile, ".b2b-compare .b2b-compare-line{", w);
     const ital = pick(desktop, mobile, ".b2b-compare .b2b-compare-line-accent{", w);
     const offer = pick(desktop, mobile, ".b2b-model-title{", w);
