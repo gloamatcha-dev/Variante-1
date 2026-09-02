@@ -7614,3 +7614,146 @@ header nav{gap:18px;font-size:12px}
   .portal-profile-row>strong,
   .portal-fact>strong{text-align:left}
 }
+
+/* ══════════════════════════════════════════════════════════════
+   /account — THE ACCOUNT TYPE SELECTION
+
+   A TYPOGRAPHY PASS ONLY. Nothing here paints, sizes or moves
+   anything: the cream page, the blue Private panel, the raspberry
+   Business panel, the 1fr 1fr grid, the 560px rail, the card padding
+   and both button boxes are exactly what they were. Every declaration
+   below is a font-family, style, weight, size, leading or tracking.
+
+   SCOPED ON PURPOSE. `.account-page`, `.account-section h1` and
+   `.eyebrow` are shared by NINE views plus most of the site, so every
+   rule is keyed on `.account-choose`, which only the `view==="choose"`
+   branch carries. The `<main>` stays a plain `.account-page`, so the
+   landing band, the form views and the signed-in portal cannot be
+   reached from here.
+
+   WHAT WAS WRONG. Tailwind's preflight resets headings to
+   `font-weight:inherit`, so `.account-section h1` and
+   `.account-type-card h2` were rendering at Inter 400 - the body
+   weight - which is why this screen read light next to every page
+   that had already been rebuilt. And the second headline line fell
+   through to the global `h1 i` rule, which is Cormorant Garamond.
+
+   THE TYPE. Same DNA as the account landing and the signed-in
+   portal - Inter 800 over Inter ITALIC 400, never Cormorant - but a
+   step below it again: this is an onboarding CHOICE, so it is capped
+   at 64/58 rather than the landing's 84/72 or a hero's 100/86. The
+   panels must stay the loudest thing on the screen.
+
+   ONE TYPE SYSTEM ACROSS BOTH PANELS. Blue and raspberry share every
+   label, title, body and button rule; only the copy and the existing
+   colours differ.
+   ══════════════════════════════════════════════════════════════ */
+
+/* ══ THE PAGE HEAD ═════════════════════════════════════════ */
+/* (0,2,0) - the shared `.account-back` is (0,1,0) and sets a `font`
+   shorthand, which resets weight to 400. */
+.account-choose .account-back{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-style:normal;
+  font-weight:600;
+  font-size:11px;
+  line-height:1.2;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+}
+/* The direct child, so the two panel labels below are not touched by
+   this rule - they carry `.eyebrow` too. */
+.account-choose>.eyebrow{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-style:normal;
+  font-weight:600;
+  font-size:11px;
+  line-height:1.2;
+  letter-spacing:.2em;
+  text-transform:uppercase;
+}
+
+/* ══ THE HEADLINE ══════════════════════════════════════════ */
+/* (0,2,1), so it beats the shared `.account-section h1` (0,1,1). The
+   margins are deliberately NOT redeclared: the shared rule keeps them,
+   so the block sits exactly where it sat. */
+.account-choose.account-section h1{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-style:normal;
+  font-weight:800;
+  font-size:clamp(42px,4.2vw,64px);
+  line-height:.94;
+  letter-spacing:-.045em;
+}
+/* (0,2,2), so it beats BOTH global italic rules - the family/weight one
+   and the `h1 i,h2 i{font-size:1.06em}` one. Real Inter Italic, which
+   layout.tsx loads as an actual face; `font-synthesis:none` makes a
+   missing face fail visibly rather than slant Inter Regular. */
+.account-choose.account-section h1 i{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-style:italic;
+  font-weight:400;
+  font-size:clamp(38px,3.9vw,58px);
+  line-height:.98;
+  letter-spacing:-.04em;
+  font-synthesis:none;
+}
+
+/* ══ THE TWO PANELS — ONE TYPE SYSTEM ══════════════════════ */
+/* (0,3,0). Both labels, one rule, so PRIVATKUNDE and GESCHÄFTSKUNDE
+   cannot drift apart. Colour and opacity stay with the existing
+   `.account-type-private/.account-type-business .eyebrow` rules. */
+.account-choose .account-type-card .eyebrow{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-style:normal;
+  font-weight:600;
+  font-size:11px;
+  line-height:1.2;
+  letter-spacing:.18em;
+  text-transform:uppercase;
+}
+/* Subordinate to the page headline on purpose - a panel title, not a
+   hero, and never Cormorant. */
+.account-choose .account-type-card h2{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-style:normal;
+  font-weight:600;
+  font-size:clamp(26px,2vw,32px);
+  line-height:1.08;
+  letter-spacing:-.025em;
+}
+/* `:not(.eyebrow)` because the label is a `<p>` in this panel too, and
+   the shared `.account-type-card p` reaches it. `flex:1` is left where
+   it is - it is layout, and layout is frozen here. */
+.account-choose .account-type-card p:not(.eyebrow){
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-style:normal;
+  font-weight:400;
+  font-size:16px;
+  line-height:1.5;
+  letter-spacing:0;
+}
+/* (0,2,0). The longer German label does NOT get a smaller size: both
+   buttons keep the same padding box and wrap to two lines exactly as
+   they did before. */
+.account-choose .account-type-cta{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-style:normal;
+  font-weight:600;
+  font-size:11px;
+  line-height:1.2;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+}
+
+/* ══ RESPONSIVE — SIZE ONLY ════════════════════════════════ */
+/* Weight, family, style and leading do not change on a phone. */
+@media (max-width:900px){
+  .account-choose.account-section h1{font-size:clamp(38px,10vw,52px)}
+  .account-choose.account-section h1 i{font-size:clamp(34px,9vw,46px)}
+}
+/* 800px is where the existing grid drops to one column, so this is the
+   width at which a panel title stops competing for half the rail. */
+@media (max-width:800px){
+  .account-choose .account-type-card h2{font-size:clamp(24px,7vw,28px)}
+}

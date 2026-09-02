@@ -1234,7 +1234,7 @@ if(view==="login")return <main className="account-page"><section className="acco
 <button className="account-forgot" onClick={()=>{setView("forgot");setAuthError("")}}>Passwort vergessen?</button>
 </section></main>;
 
-if(view==="choose")return <main className="account-page"><section className="account-section">
+if(view==="choose")return <main className="account-page"><section className="account-section account-choose">
 <button className="account-back" onClick={()=>setView("landing")}>&#8592; Zurück</button>
 <p className="eyebrow">KONTO ERSTELLEN</p>
 <h1>Wie möchtest du<br/><i>GLOA nutzen?</i></h1>
