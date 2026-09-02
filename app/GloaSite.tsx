@@ -1337,9 +1337,9 @@ if(view==="b2b-apply")return <main className="account-page"><section className="
 <p className="account-login-hint">Schon ein Konto? <button className="account-link-btn" onClick={()=>setView("login")}>Anmelden</button></p>
 </section></main>;
 
-return <main className="account-page"><section className="account-section account-landing">
-<p className="eyebrow">GLOA ACCOUNT</p>
-<h1>Dein GLOA.<br/><i>An einem Ort.</i></h1>
+return <main className="account-page account-landing-page"><section className="account-section account-landing">
+<p className="eyebrow account-landing-eyebrow">GLOA ACCOUNT</p>
+<h1 className="account-landing-headline"><span className="account-landing-line">Dein GLOA.</span><i className="account-landing-line account-landing-line-accent">An einem Ort.</i></h1>
 <p className="account-lead">Bestellungen, Abos und alles rund um deinen Matcha.</p>
 <div className="account-actions">
 <button className="cta" onClick={()=>setView("login")}>Anmelden</button>

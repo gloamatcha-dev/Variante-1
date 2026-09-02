@@ -197,7 +197,7 @@ h1 i,h2 i,h3 i,.display-italic{font-family:var(--font-display),Georgia,serif;fon
 .account-page{min-height:70vh;display:flex;align-items:center;justify-content:center;padding:80px 5vw}
 .account-section{max-width:560px;width:100%}
 .account-landing{text-align:center}
-.account-landing h1{font-size:clamp(36px,5vw,56px);line-height:1.08;margin:16px 0 20px}
+
 .account-lead{font-size:16px;line-height:1.5;opacity:.7;margin-bottom:32px}
 .account-confirm-hint{font:14px/1.5 var(--font-mono);opacity:.5;margin-bottom:32px}
 .account-actions{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
@@ -7178,4 +7178,168 @@ header nav{gap:18px;font-size:12px}
      comfortable target rather than a shrunken chip. */
   .rezepte-filters-inner{gap:8px}
   .rezepte-filters button{padding:13px 16px;letter-spacing:.13em}
+}
+
+/* ══════════════════════════════════════════════════════════════
+   /account — THE UNAUTHENTICATED LANDING
+
+   SCOPED ON PURPOSE. `.account-page` and `.account-section` are shared
+   by NINE views - login, register, b2b-apply, forgot, confirm-pending,
+   the two AuthConfirm states and the two ResetPassword states - and
+   `.account-lead` renders in all of them. Every rule below is therefore
+   keyed on `.account-landing-page` or `.account-landing`, which only the
+   signed-out entry view carries. Nothing here can reach a form view, and
+   nothing here can reach the signed-in dashboard, which is a different
+   component using `account-form-*` and `portal-*` selectors entirely.
+
+   NO AUTH LOGIC IS INVOLVED. The two buttons keep their handlers
+   (setView("login") and setView("choose")), their copy and their
+   semantics; only their paint changed.
+
+   ── THE BAND ─────────────────────────────────────────────────
+   Blue #1746D1 edge to edge, from under the existing header down to the
+   existing black footer. Solid into solid - no gradient, no divider.
+
+   NO PURE WHITE. Every light value here is var(--cream) or an rgba
+   derived from it; rgba(245,235,226,a) IS #F5EBE2.
+
+   ── THE TYPE ─────────────────────────────────────────────────
+   Same DNA as the page heroes - Inter 800 over Inter ITALIC 400, never
+   Cormorant - but deliberately NOT the shared gloa-hero-* system: this
+   is a functional entry page, so it is capped at 84/72 instead of the
+   100/86 a campaign hero gets. It is not one of the seven routes the
+   page hero contract governs.
+   ══════════════════════════════════════════════════════════════ */
+
+/* (0,2,0), so it beats the shared `.account-page` regardless of order. */
+.account-page.account-landing-page{
+  background:var(--blue);
+  color:var(--cream);
+  min-height:clamp(520px,64vh,780px);
+  padding-block:clamp(84px,9vh,140px);
+  padding-inline:var(--rail-gutter);
+}
+/* The centred block, a little wider than the form views' 560px. */
+.account-landing{
+  max-width:760px;
+  text-align:center;
+}
+.account-landing .account-landing-eyebrow{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:11px;
+  line-height:1.2;
+  letter-spacing:.2em;
+  text-transform:uppercase;
+  color:var(--cream);
+}
+/* (0,2,0) - the shared `.account-section h1` is (0,1,1) and would
+   otherwise hold the margin and the 48px cap. */
+.account-landing .account-landing-headline{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  margin:clamp(18px,1.8vw,26px) 0 0;
+  letter-spacing:normal;
+  line-height:1;
+}
+.account-landing-line{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-style:normal;
+  font-weight:800;
+  font-size:clamp(48px,5.2vw,84px);
+  line-height:.92;
+  letter-spacing:-.055em;
+  color:var(--cream);
+}
+/* A REAL Inter italic, not Cormorant and not a synthesised slant. The
+   global `h1 i` rule sets the display face at (0,0,2); this is (0,1,0)
+   and wins, and font-synthesis:none guarantees the real face. */
+.account-landing-line-accent{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-style:italic;
+  font-weight:400;
+  font-size:clamp(42px,4.6vw,72px);
+  line-height:.98;
+  letter-spacing:-.045em;
+  font-synthesis:none;
+  margin-top:4px;
+  color:var(--cream);
+}
+/* The shared `.account-lead` carries opacity:.7, which would fade the
+   whole line; it is answered with a cream-derived colour instead. */
+.account-landing .account-lead{
+  margin:clamp(24px,2.4vw,32px) auto 0;
+  max-width:520px;
+  opacity:1;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:clamp(16px,1.2vw,18px);
+  line-height:1.55;
+  letter-spacing:0;
+  color:rgba(245,235,226,.84);
+}
+.account-landing .account-actions{
+  display:flex;
+  gap:14px;
+  justify-content:center;
+  flex-wrap:wrap;
+  margin-top:clamp(34px,3.4vw,46px);
+}
+/* Square, flat, equal height - the canonical coloured-section CTA. */
+.account-landing .cta{
+  min-height:54px;
+  padding:18px 31px;
+  border-radius:0;
+  box-shadow:none;
+  background:var(--cream);
+  color:var(--blue);
+  border:1px solid var(--cream);
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:12px;
+  line-height:1;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  transition:background .2s ease,color .2s ease,border-color .2s ease;
+}
+.account-landing .cta:hover{
+  background:transparent;
+  color:var(--cream);
+  border-color:var(--cream);
+}
+/* (0,3,0) - the shared `.cta.secondary` paints near black on near black
+   here, which on blue would be unreadable. */
+.account-landing .cta.secondary{
+  background:transparent;
+  color:var(--cream);
+  border-color:var(--cream);
+}
+.account-landing .cta.secondary:hover{
+  background:var(--cream);
+  color:var(--blue);
+  border-color:var(--cream);
+}
+/* The global focus ring is blue, which is invisible on this band. */
+.account-landing-page :focus-visible{outline-color:var(--cream)}
+
+@media (max-width:900px){
+  .account-page.account-landing-page{
+    min-height:auto;
+    padding-block:clamp(64px,11vw,96px);
+  }
+  .account-landing-line{font-size:clamp(42px,11.5vw,58px)}
+  .account-landing-line-accent{font-size:clamp(38px,10vw,52px)}
+}
+
+@media (max-width:520px){
+  /* Full width rather than two cramped halves, and the primary stays
+     first in the reading order. */
+  .account-landing .account-actions{flex-direction:column;align-items:stretch;gap:12px}
+  .account-landing .cta{width:100%;padding:18px 20px}
+  .account-landing .account-lead{max-width:none}
 }
