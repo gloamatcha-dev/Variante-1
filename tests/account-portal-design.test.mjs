@@ -215,12 +215,16 @@ test("4: eyebrows, section labels, body, labels and values each have one rule", 
   assert.match(eyebrow, /font-weight:600/);
   assert.match(eyebrow, /font-size:11px/);
   assert.match(eyebrow, /line-height:1\.2/);
-  assert.match(eyebrow, /letter-spacing:\.16em/);
+  // A SECTION label. It sits one notch below a page eyebrow.
+  assert.match(eyebrow, /letter-spacing:\.18em/);
   assert.match(eyebrow, /text-transform:uppercase/);
   assert.match(eyebrow, /color:var\(--ink\)/);
   assert.match(css, /\.eyebrow\{font:600 12px\/1\.2 var\(--font-mono\)/, "the global eyebrow changed");
-  // A page eyebrow sits one notch wider than a section label.
-  assert.match(rule(".portal .portal-page-head .eyebrow,"), /letter-spacing:\.2em/);
+  // A page eyebrow sits one notch wider than a section label, and all
+  // three page heads - including the B2B dashboard's - read it.
+  const pageEyebrow = rule(".portal .portal-page-head .eyebrow,");
+  assert.match(pageEyebrow, /letter-spacing:\.2em/);
+  assert.match(pageEyebrow, /portal-b2b-intro \.eyebrow/);
 
   const lead = rule(".portal-page-lead,");
   assert.match(lead, /font-size:16px/);
@@ -274,7 +278,8 @@ test("4c: actions keep their hierarchy", () => {
   // Secondary actions stay text, not a second filled button.
   const secondary = rule(".portal-action,");
   assert.match(secondary, /font-size:11px/);
-  assert.match(secondary, /letter-spacing:\.16em/);
+  // One notch below the nav and the button, which both run .16em.
+  assert.match(secondary, /letter-spacing:\.15em/);
   assert.match(secondary, /color:rgba\(17,17,17,\.6\)/);
   assert.ok(!/\.portal-action[^{]*\{[^}]*background:var\(--blue\)/.test(code),
     "a secondary action became a primary button");

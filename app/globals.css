@@ -7457,14 +7457,17 @@ header nav{gap:18px;font-size:12px}
   font-style:normal;
   font-size:11px;
   line-height:1.2;
-  letter-spacing:.16em;
+  letter-spacing:.18em;
   text-transform:uppercase;
   color:var(--ink);
 }
 /* A page eyebrow is the widest-tracked thing on the page; a section
-   label sits one notch tighter so the two read as different ranks. */
+   label sits one notch tighter so the two read as different ranks.
+   The B2B dashboard head is a page head too - it just has its own
+   class because it also carries the company panel. */
 .portal .portal-page-head .eyebrow,
-.portal .portal-greeting .eyebrow{letter-spacing:.2em}
+.portal .portal-greeting .eyebrow,
+.portal .portal-b2b-intro .eyebrow{letter-spacing:.2em}
 
 /* ══ BODY ══════════════════════════════════════════════════ */
 .portal-page-lead,
@@ -7546,9 +7549,11 @@ header nav{gap:18px;font-size:12px}
 .portal-order-meta span,
 .portal-line span{opacity:1;color:rgba(17,17,17,.6)}
 .portal-summary-label{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
   font-size:11px;
-  line-height:1.2;
-  letter-spacing:.16em;
+  line-height:1.3;
+  letter-spacing:.12em;
 }
 
 /* ══ ACTIONS ═══════════════════════════════════════════════ */
@@ -7576,7 +7581,7 @@ header nav{gap:18px;font-size:12px}
   font-style:normal;
   font-size:11px;
   line-height:1.2;
-  letter-spacing:.16em;
+  letter-spacing:.15em;
   text-transform:uppercase;
   opacity:1;
   color:rgba(17,17,17,.6);
@@ -7602,8 +7607,10 @@ header nav{gap:18px;font-size:12px}
   /* The strip keeps its scroll and its height; only the rhythm tightens. */
   .portal-nav a{padding:18px 16px}
   .portal-logout{padding:18px 0 18px 16px}
+  /* Tracking does NOT drop here: the strip scrolls, so the tabs do
+     not have to be squeezed to fit. One nav style at every width. */
   .portal-nav a,
-  .portal-logout{font-size:11px;letter-spacing:.14em}
+  .portal-logout{font-size:11px}
   /* One scale, so one step down. */
   .portal-greeting h1,
   .portal-page-head h1,
@@ -7756,4 +7763,207 @@ header nav{gap:18px;font-size:12px}
    width at which a panel title stops competing for half the rail. */
 @media (max-width:800px){
   .account-choose .account-type-card h2{font-size:clamp(24px,7vw,28px)}
+}
+
+/* ══════════════════════════════════════════════════════════════
+   THE B2B ACCOUNT — THE REST OF THE TYPE
+
+   The block above put the signed-in account on one navigation, one
+   title, one eyebrow, one body and one action. It did not reach the
+   rows, tables, panels and B2B blocks the business account is mostly
+   MADE of, and those were still carrying their original ad-hoc values:
+   13.5px secondaries, 12px/1 table heads, 14px/1.4 rows, .06em and
+   .1em trackings, four different muted opacities. This finishes the
+   job for /account/dashboard, /orders, /addresses, /profile and
+   /business.
+
+   ── WHY EVERY RULE RESTATES font-family ───────────────────────
+   NOT decoration. `--font-mono` is declared on `:root` as
+   `var(--font-sans)`, but next/font puts Inter's `--font-sans` on
+   `<body>`. A custom property is substituted where it is DECLARED, so
+   `--font-mono` captures the value `--font-sans` has at `:root` -
+   Tailwind's system stack - and inherits that everywhere. Every
+   `var(--font-mono)` call site therefore renders the OS UI font, not
+   Inter. The block above was immune only because it names
+   `var(--font-sans)` explicitly; every rule here does the same, which
+   is what actually puts the authenticated account on Inter. The
+   root-level alias is site-wide and is NOT touched here.
+
+   ── THE LADDER ────────────────────────────────────────────────
+   page eyebrow    600 11/1.2  .2em   uppercase  ink
+   section label   600 11/1.2  .18em  uppercase  ink
+   meta label      600 11/1.3  .12em  uppercase  muted
+   page title      800 clamp(42,4.4vw,64)/.96    -.045em
+   block heading   700 18/1.2                    -.015em
+   lead value      600 18/1.3                    -.01em
+   value           400-600 15/1.45
+   body            400 15/1.55                   muted
+   action          600 11/1.2  .15em  uppercase
+   button          600 12/1    .16em  uppercase
+   nav             600 11/1.2  .16em  uppercase
+
+   ── SCOPE ─────────────────────────────────────────────────────
+   Every selector is keyed on `.portal`, which only the signed-in
+   shell renders. The public /b2b page uses `.b2b-pricing-card`,
+   `.b2b-pricing-grid` and friends and is deliberately out of reach,
+   even though it shares the `b2b-` prefix.
+
+   SHARED WITH THE PRIVATE ACCOUNT ON PURPOSE. Both account types run
+   through this one shell, and one type system for both is the point.
+   Nothing here reads customer_type: the private account keeps ABOS,
+   the business account keeps B2B, and that stays a data decision in
+   AccountPortal's NAV filter.
+
+   NO PURE WHITE, no shadow, no radius, no card. Every light value is
+   var(--cream); every hairline is rgba(17,17,17,.12).
+   ══════════════════════════════════════════════════════════════ */
+
+/* ══ META LABELS — the uppercase field names ═══════════════ */
+/* Table heads are meta labels that happen to sit in a row. Same rank,
+   so the same rule rather than three more. */
+.portal .portal-company-fact>span,
+.portal .order-list-header,
+.portal .order-list-header span,
+.portal .supply-list-header,
+.portal .supply-list-header span,
+.portal .b2b-pricing-header .b2b-pricing-cell{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-style:normal;
+  font-weight:600;
+  font-size:11px;
+  line-height:1.3;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  opacity:1;
+  color:rgba(17,17,17,.6);
+}
+
+/* ══ BLOCK HEADINGS ════════════════════════════════════════ */
+/* The company panel title and the offer-model titles are the same
+   rank: the name of a block, never a page title. */
+.portal .portal-company-head strong,
+.portal .b2b-model-label{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-style:normal;
+  font-weight:700;
+  font-size:18px;
+  line-height:1.2;
+  letter-spacing:-.015em;
+  color:var(--ink);
+  margin:0 0 8px;
+}
+.portal .portal-company-head strong{margin:0}
+
+/* ══ THE LEAD VALUE ════════════════════════════════════════ */
+/* The one line a summary row exists to say - a date, an order number,
+   or the fact that there is no delivery yet. Stated at weight, not at
+   size: an absent delivery is a normal state, not a headline. */
+.portal .portal-summary-primary{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-style:normal;
+  font-weight:600;
+  font-size:18px;
+  line-height:1.3;
+  letter-spacing:-.01em;
+  color:var(--ink);
+}
+
+/* ══ VALUES ════════════════════════════════════════════════ */
+/* One line height for every data row on every account route. */
+.portal .portal-summary-value,
+.portal .order-list-row,
+.portal .supply-list-row,
+.portal .b2b-pricing-cell,
+.portal .b2b-term-row,
+.portal .portal-address-display p{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-style:normal;
+  font-weight:400;
+  font-size:15px;
+  line-height:1.45;
+  letter-spacing:0;
+  color:var(--ink);
+}
+/* The figures and identifiers carry the weight; the fields around
+   them stay quiet. Same 15/1.45, one notch heavier. */
+.portal .portal-summary-value,
+.portal .order-list-number,
+.portal .order-list-total,
+.portal .b2b-pricing-value,
+.portal .b2b-pricing-label strong,
+.portal .b2b-term-row>span+span,
+.portal .portal-address-display p:first-child{font-weight:600}
+/* The left half of a term row is the field, not the answer. */
+.portal .b2b-term-key{
+  font-weight:400;
+  opacity:1;
+  color:rgba(17,17,17,.6);
+}
+
+/* ══ BODY ══════════════════════════════════════════════════ */
+/* Everything explanatory on a B2B page reads at one size. */
+.portal .portal-summary-secondary,
+.portal .b2b-section-lead,
+.portal .b2b-pricing-note,
+.portal .b2b-model-desc,
+.portal .b2b-model-discount,
+.portal .b2b-discount{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-style:normal;
+  font-weight:400;
+  font-size:15px;
+  line-height:1.55;
+  letter-spacing:0;
+  opacity:1;
+  color:rgba(17,17,17,.6);
+}
+/* The discount is the one line on the page that earns the blue. */
+.portal .b2b-model-discount{color:var(--blue)}
+
+/* ══ BUTTON-LIKE LABELS ════════════════════════════════════ */
+/* A quick-link tile is a button with a hairline instead of a fill, so
+   it reads the button's type, not a size of its own. */
+.portal .portal-quicklink-label{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-style:normal;
+  font-weight:600;
+  font-size:12px;
+  line-height:1.2;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+}
+/* The tracking hint next to an order status is a badge, so it reads
+   the badge type rather than a fourth uppercase size. */
+.portal .order-list-tracking{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-style:normal;
+  font-weight:600;
+  font-size:11px;
+  line-height:1.2;
+  letter-spacing:.14em;
+}
+.portal .portal-badge{letter-spacing:.14em}
+
+/* ══ HAIRLINES ═════════════════════════════════════════════ */
+/* Three rows were still drawing rgba(0,0,0,.06) - a grey on cream -
+   while the block above had already moved the account to a near-black
+   hairline. One line value now. */
+.portal .portal-summary-row,
+.portal .portal-address-item,
+.portal .b2b-term-row{border-top-color:rgba(17,17,17,.12)}
+
+/* ══ RESPONSIVE ════════════════════════════════════════════ */
+@media (max-width:800px){
+  /* A summary row already wraps here, and its VALUE already drops to
+     a full-width line under the text. Its ACTION never did, so on a
+     375px phone the delivery action held roughly 190px of a 317px
+     row and squeezed the delivery copy into a 68px column. Same
+     treatment as the value, same 58px indent, so it lines up under
+     the copy rather than beside the icon. */
+  .portal .portal-summary-row>.portal-action{flex:1 0 100%;padding-left:58px}
+  /* A stacked row puts the field above the answer, so the lead value
+     steps down rather than fighting the page title for attention. */
+  .portal .portal-summary-primary{font-size:17px}
+  .portal .portal-company-head strong,
+  .portal .b2b-model-label{font-size:17px}
 }
