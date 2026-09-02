@@ -8289,3 +8289,27 @@ header nav{gap:18px;font-size:12px}
   .annual-panel{max-width:none}
   .annual-panel-lines>div{gap:12px}
 }
+
+/* ══════════════════════════════════════════════════════════════
+   THE MAIN NAVIGATION AT SEVEN ITEMS
+
+   Partnerschaften made the row seven links long, and seven at
+   gap:32px/13px/.1em stopped fitting between the logo and the head
+   actions: measured overflow was 5px at 1060, 39px at 1024, 82px at 980
+   and 19px at 820. Six links fit at every width, so this is the
+   seventh's cost and nothing else. The values below were measured down
+   to 801px, the last width the desktop row is used at.
+
+   TIGHTENED, NOT HIDDEN. The alternative was moving the mobile menu
+   breakpoint up from 800px, which would have buried the whole
+   navigation behind a hamburger on ordinary laptops to make room for
+   one entry. Below 800px the existing rule still swaps in the mobile
+   menu and this block stops mattering.
+   ══════════════════════════════════════════════════════════════ */
+@media (max-width:1100px){
+  header nav{
+    gap:clamp(9px,1.5vw,24px);
+    font-size:12px;
+    letter-spacing:.04em;
+  }
+}

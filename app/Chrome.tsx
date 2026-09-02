@@ -4,7 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BRAND } from "./content";
 
-const links:[ string, string ][] = [["/","Startseite"],["/shop","Kaufen"],["/our-matcha","Unser Matcha"],["/about","Über GLOA"],["/for-cafes","B2B"],["/rezepte","Rezepte"]];
+// ONE array, read by BOTH the desktop nav and the mobile menu below, so
+// the two can never list different pages. Partnerschaften sits between
+// B2B and Rezepte: the two business-facing routes stay adjacent and the
+// editorial one keeps the end of the row.
+const links:[ string, string ][] = [["/","Startseite"],["/shop","Kaufen"],["/our-matcha","Unser Matcha"],["/about","Über GLOA"],["/for-cafes","B2B"],["/partnerships","Partnerschaften"],["/rezepte","Rezepte"]];
 export function Mark(){return <Link className="wordmark" href="/" aria-label="GLOA Startseite">GLOA<span>®</span></Link>}
 export function Header({onCart,cartCount}:{onCart:()=>void;cartCount:number}){
  const [open,setOpen]=useState(false);const [search,setSearch]=useState(false);const [scrolled,setScrolled]=useState(false);const path=usePathname();

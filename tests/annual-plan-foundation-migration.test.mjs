@@ -1077,6 +1077,14 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // tests/account-portal-design.test.mjs asserts that directly against
     // the source rather than leaving it to this diff.
     "app/AccountPortal.tsx",
+    // SITE CHROME: one entry added to the `links` array, so /partnerships
+    // is reachable from the main navigation between B2B and Rezepte
+    // instead of by direct URL only. Presentation and routing only - no
+    // payment, fulfillment, account or annual module is involved, and the
+    // array is read by the desktop nav and the mobile menu alike so the
+    // two cannot diverge. tests/partnerships-page.test.mjs asserts the
+    // position and the single occurrence directly against the source.
+    "app/Chrome.tsx",
   ];
 
   for (const rel of touched) {

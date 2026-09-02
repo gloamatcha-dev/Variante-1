@@ -67,12 +67,19 @@ test("1: /partnerships resolves through the public site architecture", async () 
   assert.match(slugPage, /"partnerships":\["Partnerships",/);
   assert.ok(html.includes("<title>Partnerships · GLOA</title>"), "the page title is missing");
 
-  // The shared header and footer are reused untouched - this page adds
-  // neither a nav item nor a footer link in this phase.
+  // The shared header and footer are reused. The page IS in the main
+  // navigation now, between B2B and Rezepte, and in exactly one place:
+  // `links` is read by the desktop nav and the mobile menu alike, so the
+  // two cannot list different pages.
   const chrome = read("app/Chrome.tsx");
-  assert.ok(!chrome.includes("partnerships"), "the navigation or footer was changed");
+  assert.ok(chrome.includes('["/for-cafes","B2B"],["/partnerships","Partnerschaften"],["/rezepte","Rezepte"]'),
+    "the partnerships entry is not between B2B and Rezepte");
+  assert.equal([...chrome.matchAll(/\/partnerships/g)].length, 1,
+    "the partnerships route is listed more than once in the chrome");
   assert.ok(html.includes("<header"), "the shared header is missing");
   assert.ok(html.includes("<footer"), "the shared footer is missing");
+  // Both navigations render it, from that one array.
+  assert.ok(html.includes('href="/partnerships"'), "the header does not link the page");
 });
 
 /* ══════════════════════════════════════════════════════════════
