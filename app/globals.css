@@ -6894,15 +6894,22 @@ header nav{gap:18px;font-size:12px}
   padding-block:clamp(44px,4vw,64px) clamp(84px,7vw,124px);
   padding-inline:var(--rail-gutter);
 }
-/* TWO strong columns. Three made the drinks small on a page whose whole
-   job is to show them; two on the full rail is the image-led composition
-   the brief asks for, and the images stay aligned row by row. */
+/* FOUR columns. Two put a single 4:5 image at 655px wide and 819px tall
+   on a 1440 screen - one and a half drinks per screenful on a page that
+   exists to give an overview of six. Four on the same rail is 319px wide
+   and 399px tall: half the height, a quarter of the area, and a whole
+   row visible at once. The ratio itself does NOT change, because four of
+   the six photos are natively 4:5 and are shown whole; a squarer frame
+   would start cropping them to make the grid denser.
+
+   Row gap stays clearly larger than the column gap, so the rows read as
+   rows rather than as a mesh. */
 .rezepte-grid-inner{
   display:grid;
-  grid-template-columns:repeat(2,minmax(0,1fr));
-  column-gap:clamp(28px,3vw,56px);
-  row-gap:clamp(56px,5vw,88px);
-  align-items:start;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  column-gap:clamp(20px,1.8vw,32px);
+  row-gap:clamp(44px,3.6vw,64px);
+  align-items:stretch;
 }
 /* THE EMPTY FILTER STATE. Unreachable with the current six recipes -
    ALLE 6, LATTE 3, ICED 5, FRUITY 2 - so it invents no content; it
@@ -6918,9 +6925,14 @@ header nav{gap:18px;font-size:12px}
   letter-spacing:0;
   color:rgba(17,17,17,.72);
 }
+/* The card fills its grid row, so a short excerpt does not raise its
+   card's link while the neighbour's sits lower: every "REZEPT ANSEHEN"
+   in a row lands on one line. That is what the stretched grid above is
+   for, and it is the only thing keeping four columns visually calm. */
 .rezept-card a{
   display:flex;
   flex-direction:column;
+  height:100%;
   text-decoration:none;
   color:var(--ink);
 }
@@ -6963,7 +6975,12 @@ header nav{gap:18px;font-size:12px}
   height:118%;
 }
 .rezept-card a:hover .rezept-card-img img{transform:scale(1.03)}
-.rezept-card-body{padding:clamp(16px,1.6vw,22px) 0 0}
+.rezept-card-body{
+  display:flex;
+  flex-direction:column;
+  flex:1;
+  padding:clamp(14px,1.1vw,18px) 0 0;
+}
 /* The raspberry meta line, exactly as the homepage card sets it. */
 .rezept-card-meta{
   margin:0;
@@ -6976,30 +6993,37 @@ header nav{gap:18px;font-size:12px}
   text-transform:uppercase;
   color:var(--ink);
 }
+/* One step down from the two-column scale: a 319px column does not carry
+   a 26px title without the card reading as a poster. Weight, leading and
+   tracking are unchanged, so it is the same voice at a smaller size. */
 .rezept-card-body h2{
-  margin:clamp(10px,1vw,14px) 0 0;
+  margin:clamp(8px,.8vw,12px) 0 0;
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:600;
   font-style:normal;
-  font-size:clamp(22px,1.8vw,28px);
+  font-size:clamp(18px,1.3vw,21px);
   line-height:1.12;
   letter-spacing:-.025em;
   color:var(--ink);
 }
 .rezept-card-excerpt{
-  margin:clamp(10px,1vw,14px) 0 0;
-  max-width:44ch;
+  margin:clamp(8px,.8vw,12px) 0 0;
+  max-width:36ch;
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:400;
   font-style:normal;
-  font-size:clamp(15px,1.1vw,16px);
+  font-size:clamp(14px,.95vw,15px);
   line-height:1.5;
   letter-spacing:0;
   color:rgba(17,17,17,.72);
 }
+/* `margin-top:auto` is what pushes it to the foot of the stretched card;
+   the padding keeps a floor under that so it never sits on the excerpt
+   in the one card that happens to be tallest. */
 .rezept-card-cta{
   display:inline-block;
-  margin-top:clamp(16px,1.6vw,22px);
+  margin-top:auto;
+  padding-top:clamp(14px,1.2vw,20px);
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:600;
   font-style:normal;
@@ -7146,6 +7170,10 @@ header nav{gap:18px;font-size:12px}
 
 /* ══ RESPONSIVE ════════════════════════════════════════════ */
 @media (max-width:1100px){
+  /* TABLET: two columns. Below 1100 a fourth column would put the drinks
+     under 244px and the grid would read as thumbnails rather than as a
+     listing, so it halves in one step instead of degrading gradually. */
+  .rezepte-grid-inner{grid-template-columns:repeat(2,minmax(0,1fr))}
   .rz-community-inner{grid-template-columns:minmax(0,1fr);align-items:start}
 }
 
@@ -7160,10 +7188,10 @@ header nav{gap:18px;font-size:12px}
 }
 
 @media (max-width:760px){
-  /* TWO COLUMNS HOLD THROUGH TABLET. At 900 they are 409px wide and at
-     768 they are 349px - both still read as drinks. One column only
-     below that, because a full-rail 4:5 image at tablet width would be
-     over 1000px tall and taller than the screen it is on. */
+  /* MOBILE: one column. Two hold from 1100 down to here - 409px wide at
+     900 and 349px at 768, both still reading as drinks - but below 760 a
+     half-rail image gets too small to be worth the row, and a full-rail
+     4:5 image is the only honest alternative. */
   .rezepte-grid-inner{grid-template-columns:minmax(0,1fr);row-gap:clamp(44px,6vw,60px)}
   .rezept-card-excerpt{max-width:none}
   .rezepte-hero-lead{max-width:none}

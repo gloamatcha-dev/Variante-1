@@ -177,14 +177,16 @@ test("4: the cards are the homepage's recipe card, given room", () => {
   // TITLE: real weight on an image-led listing, and one exact rule.
   const title = rule(".rezept-card-body h2{");
   assert.match(title, /font-weight:600/);
-  assert.match(title, /font-size:clamp\(22px,1\.8vw,28px\)/);
+  // One step down for the four-column grid: same weight, leading and
+  // tracking, smaller size. A 319px column cannot carry 26px.
+  assert.match(title, /font-size:clamp\(18px,1\.3vw,21px\)/);
   assert.match(title, /line-height:1\.12/);
   assert.match(title, /letter-spacing:-\.025em/);
   assert.match(title, /color:var\(--ink\)/);
   // DESCRIPTION and CTA, also one rule each.
   const excerpt = rule(".rezept-card-excerpt{");
   assert.match(excerpt, /font-weight:400/);
-  assert.match(excerpt, /font-size:clamp\(15px,1\.1vw,16px\)/);
+  assert.match(excerpt, /font-size:clamp\(14px,\.95vw,15px\)/);
   assert.match(excerpt, /line-height:1\.5/);
   const cta = rule(".rezept-card-cta{");
   assert.match(cta, /font-weight:600/);
@@ -343,24 +345,46 @@ test("6: the grid and the band reflow, and nothing reorders", () => {
   const at900 = code.slice(code.indexOf("@media (max-width:900px)"), code.indexOf("@media (max-width:760px)"));
   const at760 = code.slice(code.indexOf("@media (max-width:760px)"), code.indexOf("@media (max-width:520px)"));
 
-  // TWO strong columns, held through tablet, one column below 760.
-  assert.match(rule(".rezepte-grid-inner{"), /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
-  assert.ok(!at1100.includes(".rezepte-grid-inner"), "the grid still reflows at 1100");
-  assert.ok(!at900.includes(".rezepte-grid-inner"), "the grid still reflows at 900");
+  // FOUR columns on desktop, two on tablet, one below 760. The whole
+  // page is an overview of six drinks, so a screenful shows a row.
+  assert.match(rule(".rezepte-grid-inner{"), /grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
+  assert.match(at1100, /\.rezepte-grid-inner\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)\}/);
+  assert.ok(!at900.includes(".rezepte-grid-inner"), "the grid reflows again at 900");
   assert.match(at760, /\.rezepte-grid-inner\{grid-template-columns:minmax\(0,1fr\)/);
-  assert.match(rule(".rezepte-grid-inner{"), /align-items:start/);
+  // STRETCHED, not top-aligned: the card fills its row and the link is
+  // pushed to the foot, so every CTA in a row lands on one line whatever
+  // the excerpt length. Verified in a browser at 1920 down to 320.
+  assert.match(rule(".rezepte-grid-inner{"), /align-items:stretch/);
+  assert.match(rule(".rezept-card a{"), /height:100%/);
+  assert.match(rule(".rezept-card-body{"), /flex:1/);
+  assert.match(rule(".rezept-card-cta{"), /margin-top:auto/);
+  // The row gap stays clearly larger than the column gap, so four
+  // columns read as rows rather than as a mesh.
+  const grid = rule(".rezepte-grid-inner{");
+  assert.match(grid, /column-gap:clamp\(20px,1\.8vw,32px\)/);
+  assert.match(grid, /row-gap:clamp\(44px,3\.6vw,64px\)/);
 
   // A full-rail 4:5 image must never be taller than the screen it is on.
   // Evaluated from the real rail, gutter and gap tokens.
   const cl = (t, w) => at(t, w);
-  for (const w of [1680, 1536, 1440, 1280, 1024, 900, 768, 760, 430, 390, 375, 320]) {
+  for (const w of [1920, 1680, 1536, 1440, 1280, 1101, 1100, 1024, 900, 768, 760, 430, 390, 375, 320]) {
     const gutter = cl("clamp(20px,3vw,48px)", w);
     const rail = Math.min(1520, w - 2 * gutter);
-    const cols = w <= 760 ? 1 : 2;
-    const colW = cols === 1 ? rail : (rail - cl("clamp(28px,3vw,56px)", w)) / 2;
-    assert.ok(colW > 250, `a recipe image is only ${Math.round(colW)}px wide at ${w}px`);
+    const cols = w <= 760 ? 1 : w <= 1100 ? 2 : 4;
+    const gap = cols === 4 ? cl("clamp(20px,1.8vw,32px)", w) : cl("clamp(28px,3vw,56px)", w);
+    const colW = cols === 1 ? rail : (rail - gap * (cols - 1)) / cols;
+    // A drink must stay a drink and never become a thumbnail, which is
+    // why the fourth column is dropped at 1100 rather than squeezed.
+    assert.ok(colW > 235, `a recipe image is only ${Math.round(colW)}px wide at ${w}px`);
     assert.ok(colW * 1.25 < 1000, `a recipe image is ${Math.round(colW * 1.25)}px tall at ${w}px`);
   }
+  // And the four-column image really is far smaller than the two-column
+  // one it replaced: same rail, same ratio, a quarter of the area.
+  const railAt1440 = Math.min(1520, 1440 - 2 * cl("clamp(20px,3vw,48px)", 1440));
+  const four = (railAt1440 - cl("clamp(20px,1.8vw,32px)", 1440) * 3) / 4;
+  const two = (railAt1440 - cl("clamp(28px,3vw,56px)", 1440)) / 2;
+  assert.ok(four * 1.25 < two * 1.25 * 0.55,
+    `the four-column image is not materially smaller: ${Math.round(four * 1.25)} vs ${Math.round(two * 1.25)}`);
   assert.match(rule(".rz-community-inner{"), /grid-template-columns:minmax\(0,1\.15fr\) minmax\(0,\.85fr\)/);
   assert.match(at1100, /\.rz-community-inner\{grid-template-columns:minmax\(0,1fr\)/);
   assert.match(at760, /\.rz-community \.rz-community-cta\{width:100%/);
