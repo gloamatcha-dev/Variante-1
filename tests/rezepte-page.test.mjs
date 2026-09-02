@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startRenderServer } from "./helpers/renderServer.mjs";
@@ -143,6 +143,15 @@ test("3: the active filter is raspberry with a cream label", () => {
   assert.match(idle, /box-shadow:none/);
   assert.match(idle, /min-height:44px/);
   assert.match(idle, /text-transform:uppercase/);
+  // One exact rule across all four, at the contract's figures.
+  assert.match(idle, /font-family:var\(--font-sans\),Arial,sans-serif/);
+  assert.match(idle, /font-weight:600/);
+  assert.match(idle, /font-size:12px/);
+  assert.match(idle, /line-height:1\.2/);
+  assert.match(idle, /letter-spacing:\.15em/);
+  // The four share one selector, so none of them can drift alone.
+  assert.equal((code.match(/\.rezepte-filters button\{/g) || []).length, 2,
+    "the filters are styled by more than a base rule and one override");
   // Hover moves to raspberry rather than to a fill.
   assert.match(rule(".rezepte-filters button:hover{"), /border-color:var\(--berry\);color:var\(--berry\)/);
   // The four categories still render, and the state is announced.
@@ -156,16 +165,34 @@ test("3: the active filter is raspberry with a cream label", () => {
    ══════════════════════════════════════════════════════════════ */
 
 test("4: the cards are the homepage's recipe card, given room", () => {
-  // The raspberry meta line, at the same scale the homepage card sets.
+  // META: near black, 11px, 1.2, .16em, uppercase. Raspberry stays the
+  // accent where selection happens - the active filter and the CTA hover.
   const meta = rule(".rezept-card-meta{");
+  assert.match(meta, /font-weight:600/);
   assert.match(meta, /font-size:var\(--type-meta\)/);
-  assert.match(meta, /letter-spacing:\.18em/);
+  assert.match(meta, /line-height:1\.2/);
+  assert.match(meta, /letter-spacing:\.16em/);
   assert.match(meta, /text-transform:uppercase/);
-  assert.match(meta, /color:var\(--berry\)/);
-  assert.match(css, /\.recipe-card-time\{[\s\S]*?letter-spacing:\.18em[\s\S]*?color:var\(--berry\)/,
-    "the homepage card this one follows changed");
-  // The title reads the shared card token, not a number of its own.
-  assert.match(rule(".rezept-card-body h2{"), /font-size:var\(--type-card\)/);
+  assert.match(meta, /color:var\(--ink\)/);
+  // TITLE: real weight on an image-led listing, and one exact rule.
+  const title = rule(".rezept-card-body h2{");
+  assert.match(title, /font-weight:600/);
+  assert.match(title, /font-size:clamp\(22px,1\.8vw,28px\)/);
+  assert.match(title, /line-height:1\.12/);
+  assert.match(title, /letter-spacing:-\.025em/);
+  assert.match(title, /color:var\(--ink\)/);
+  // DESCRIPTION and CTA, also one rule each.
+  const excerpt = rule(".rezept-card-excerpt{");
+  assert.match(excerpt, /font-weight:400/);
+  assert.match(excerpt, /font-size:clamp\(15px,1\.1vw,16px\)/);
+  assert.match(excerpt, /line-height:1\.5/);
+  const cta = rule(".rezept-card-cta{");
+  assert.match(cta, /font-weight:600/);
+  assert.match(cta, /font-size:var\(--type-meta\)/);
+  assert.match(cta, /line-height:1\.2/);
+  assert.match(cta, /letter-spacing:\.12em/);
+  assert.match(cta, /text-transform:uppercase/);
+  assert.match(cta, /color:var\(--ink\)/);
   // Meta, title, excerpt, CTA - in that order, from the recipe data.
   assert.match(page, /<p className="rezept-card-meta">\{r\.category\} · \{r\.time\}<\/p><h2>\{r\.title\}<\/h2>/);
   assert.ok(page.includes('<p className="rezept-card-excerpt">{r.excerpt}</p>'));
@@ -178,6 +205,14 @@ test("4: the cards are the homepage's recipe card, given room", () => {
   // The CTA underline is raspberry, and the whole card is one link.
   assert.match(rule(".rezept-card-cta{"), /text-decoration-color:var\(--berry\)/);
   assert.match(rule(".rezept-card a{"), /text-decoration:none/);
+  // A RECIPE TITLE IS NEVER A SECTION HEADLINE. It has to stay well
+  // under the page hero at every width - the contract bans 36-48px.
+  for (const w of [320, 375, 390, 430, 768, 900, 901, 1280, 1440, 1680, 1920]) {
+    const t = at("clamp(22px,1.8vw,28px)", w);
+    const hero = w <= 900 ? at("clamp(44px,12vw,64px)", w) : at("clamp(54px,5.9vw,100px)", w);
+    assert.ok(t <= 28, `the recipe title reached ${t}px at ${w}px`);
+    assert.ok(t < hero * 0.7, `the recipe title (${t}) is not subordinate to the hero (${hero}) at ${w}px`);
+  }
   // No card is a panel: no fill, no radius, no shadow anywhere here.
   assert.ok(!/box-shadow:(?!none)/.test(code), "a shadow was introduced");
   assert.ok(!/border-radius:(?!0)/.test(code), "a rounded container was introduced");
@@ -216,7 +251,7 @@ test("5: the page closes on a community ask, not a newsletter", () => {
   for (const copy of ["YOUR TURN", "Jetzt bist du dran.", "Mix something good.",
                       "Strawberry, Coconut, Espresso oder etwas, auf das wir noch nicht gekommen sind.",
                       "Mix deinen GLOA Drink, teile ihn mit uns und markiere @gloa.matcha.",
-                      "Dein Rezept teilen", "@gloa.matcha"]) {
+                      "DEIN REZEPT TEILEN", "@GLOA.MATCHA", "@gloa.matcha"]) {
     assert.ok(html.includes(copy), `missing community copy: ${copy}`);
   }
   // The retired newsletter framing is not on this page any more.
@@ -224,11 +259,23 @@ test("5: the page closes on a community ask, not a newsletter", () => {
     assert.ok(!html.includes(gone), `the newsletter band is still on /rezepte: ${gone}`);
   }
   assert.ok(!/newsletter/i.test(html.replace(/<script[\s\S]*?<\/script>/g, "")), "a newsletter string survived");
-  // Two actions: one internal, one external with the outward arrow.
-  assert.ok(community.includes('href="/contact"'), "the primary action goes nowhere");
-  assert.match(community, /href=\{`https:\/\/instagram\.com\/\$\{BRAND\.instagram\}`\}/);
-  assert.match(community, /target="_blank" rel="noopener noreferrer"/);
-  assert.ok(community.includes("↗"), "the external link has no outward arrow");
+  // THE CONTRACTED STRINGS, EXACTLY, INCLUDING THEIR ARROWS.
+  assert.ok(html.includes("DEIN REZEPT TEILEN "), "the primary CTA label is not the contracted string");
+  assert.ok(html.includes("↗"), "the external link has no outward arrow");
+
+  // THERE IS NO RECIPE-SUBMISSION CHANNEL IN THIS REPOSITORY, so the
+  // primary CTA cannot promise one. Both actions go to the one real
+  // destination the copy already names, read from BRAND rather than
+  // typed out, so they can never drift from the rest of the site.
+  assert.equal((community.match(/https:\/\/instagram\.com\/\$\{BRAND\.instagram\}/g) || []).length, 2,
+    "an action points somewhere other than the repository's Instagram");
+  assert.match(read("app/content.ts"), /instagram: "gloa\.matcha"/);
+  // The same destination the footer and the homepage already use.
+  assert.match(read("app/Chrome.tsx"), /https:\/\/instagram\.com\/\$\{BRAND\.instagram\}/);
+  assert.equal((community.match(/target="_blank" rel="noopener noreferrer"/g) || []).length, 2,
+    "an external action is missing the safe-window attributes");
+  // The label is derived, not hardcoded, so it cannot drift from the URL.
+  assert.match(community, /\{`@\$\{BRAND\.instagram\}`\.toUpperCase\(\)\}/);
 });
 
 test("5b: BrandNote is untouched, and still closes the homepage", () => {
@@ -253,14 +300,25 @@ test("5b: BrandNote is untouched, and still closes the homepage", () => {
 test("5c: the community headline is SECTION scale, never hero scale", () => {
   const sans = rule(".rz-community-line{");
   const ital = rule(".rz-community-line-accent{");
-  assert.match(sans, /font-size:clamp\(42px,4\.2vw,60px\)/);
-  assert.match(sans, /font-weight:500/);
-  assert.match(ital, /font-size:clamp\(44px,4\.6vw,64px\)/);
+  // Inter 700 capped at 56, and the Cormorant editorial line at 60.
+  assert.match(sans, /font-weight:700/);
+  assert.match(sans, /font-size:clamp\(40px,4vw,56px\)/);
+  assert.match(sans, /line-height:\.95/);
+  assert.match(ital, /font-size:clamp\(42px,4\.3vw,60px\)/);
+  assert.match(ital, /line-height:\.94/);
+  assert.match(ital, /font-weight:400/);
   assert.match(ital, /font-family:var\(--font-display\),Georgia,serif/);
   assert.match(ital, /font-style:italic/);
-  // Exactly what /about and /partnerships already set - one section scale.
-  assert.match(css, /\.about-why-line,[^{]*\{[^}]*font-size:clamp\(42px,4\.2vw,60px\)/);
-  assert.match(css, /\.partnerships-page \.pt-line\{[\s\S]*?font-size:clamp\(42px,4\.2vw,60px\)/);
+  // IT IS AN INTERNAL SECTION, NOT A PAGE HERO: it must not read the
+  // shared hero system, and the hero system must not read Cormorant.
+  assert.ok(!community.includes("gloa-hero-"), "the community band took the page hero classes");
+  assert.ok(!code.includes("--type-hero-primary") && !code.includes("--type-hero-secondary"),
+    "this page redefines or reads the hero tokens outside the hero");
+  // The body, at the contract's figures.
+  const body = rule(".rz-community-body{");
+  assert.match(body, /font-size:clamp\(16px,1\.2vw,17px\)/);
+  assert.match(body, /line-height:1\.6/);
+  assert.match(body, /max-width:460px/);
   // It never reaches the page hero, at any width.
   const heroSans = w => (w <= 900 ? at("clamp(44px,12vw,64px)", w) : at("clamp(54px,5.9vw,100px)", w));
   const secSans = w => (w <= 900 ? at("clamp(36px,9.2vw,44px)", w) : at("clamp(42px,4.2vw,60px)", w));
@@ -285,18 +343,39 @@ test("6: the grid and the band reflow, and nothing reorders", () => {
   const at900 = code.slice(code.indexOf("@media (max-width:900px)"), code.indexOf("@media (max-width:760px)"));
   const at760 = code.slice(code.indexOf("@media (max-width:760px)"), code.indexOf("@media (max-width:520px)"));
 
-  assert.match(rule(".rezepte-grid-inner{"), /grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
-  assert.match(at1100, /\.rezepte-grid-inner\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)\}/);
+  // TWO strong columns, held through tablet, one column below 760.
+  assert.match(rule(".rezepte-grid-inner{"), /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+  assert.ok(!at1100.includes(".rezepte-grid-inner"), "the grid still reflows at 1100");
+  assert.ok(!at900.includes(".rezepte-grid-inner"), "the grid still reflows at 900");
   assert.match(at760, /\.rezepte-grid-inner\{grid-template-columns:minmax\(0,1fr\)/);
+  assert.match(rule(".rezepte-grid-inner{"), /align-items:start/);
+
+  // A full-rail 4:5 image must never be taller than the screen it is on.
+  // Evaluated from the real rail, gutter and gap tokens.
+  const cl = (t, w) => at(t, w);
+  for (const w of [1680, 1536, 1440, 1280, 1024, 900, 768, 760, 430, 390, 375, 320]) {
+    const gutter = cl("clamp(20px,3vw,48px)", w);
+    const rail = Math.min(1520, w - 2 * gutter);
+    const cols = w <= 760 ? 1 : 2;
+    const colW = cols === 1 ? rail : (rail - cl("clamp(28px,3vw,56px)", w)) / 2;
+    assert.ok(colW > 250, `a recipe image is only ${Math.round(colW)}px wide at ${w}px`);
+    assert.ok(colW * 1.25 < 1000, `a recipe image is ${Math.round(colW * 1.25)}px tall at ${w}px`);
+  }
   assert.match(rule(".rz-community-inner{"), /grid-template-columns:minmax\(0,1\.15fr\) minmax\(0,\.85fr\)/);
   assert.match(at1100, /\.rz-community-inner\{grid-template-columns:minmax\(0,1fr\)/);
   assert.match(at760, /\.rz-community \.rz-community-cta\{width:100%/);
   // The section scale steps down once, at the same 900px the hero uses.
-  assert.match(at900, /\.rz-community-line\{font-size:clamp\(36px,9\.2vw,44px\)\}/);
-  assert.match(at900, /\.rz-community-line-accent\{font-size:clamp\(38px,10vw,46px\)\}/);
+  assert.match(at900, /\.rz-community-line\{font-size:clamp\(34px,8\.8vw,42px\)\}/);
+  assert.match(at900, /\.rz-community-line-accent\{font-size:clamp\(36px,9\.4vw,44px\)\}/);
   // Nothing is reordered, so the reading order is the DOM order.
   assert.ok(!/\border:\s*-?\d|grid-auto-flow:\s*dense|flex-direction:\s*(column|row)-reverse/.test(code),
     "a reflow changed the reading order");
+  // THE EMPTY FILTER STATE exists but is unreachable with the current
+  // data - every filter matches at least two recipes - so it adds no
+  // content, only a graceful floor if the data later changes.
+  assert.match(page, /\{filtered\.length===0&&<p className="rezepte-empty home-rail">/);
+  assert.match(rule(".rezepte-empty{"), /font-family:var\(--font-sans\)/);
+  assert.ok(!html.includes("rezepte-empty"), "the empty state rendered with a full catalogue");
   // Filters stay a comfortable target at the narrowest width.
   assert.match(code.slice(code.indexOf("@media (max-width:520px)")), /\.rezepte-filters button\{padding:13px 16px/);
 });
@@ -338,4 +417,70 @@ test("6c: no other page moved", () => {
   assert.equal([...data.matchAll(/image:"\/img\/[^"]+"/g)].length, 6, "a recipe photo changed");
   assert.deepEqual([...site.matchAll(/const ALL_TAGS=\[([^\]]+)\]/g)].map(m => m[1]),
     ['"ALLE","LATTE","ICED","FRUITY"'], "the filter categories changed");
+});
+
+/* ══════════════════════════════════════════════════════════════
+   7. THE THINGS THAT MUST STILL WORK
+   ══════════════════════════════════════════════════════════════ */
+
+test("7: every filter still selects from the real data", () => {
+  // The matcher is unchanged, so the counts are DERIVED here rather than
+  // written down: ALLE is everything, any other tag is a tags.includes.
+  const data = site.slice(site.indexOf("const recipes:Recipe[]=["),
+                          site.indexOf("];", site.indexOf("const recipes:Recipe[]=[")));
+  const recipes = [...data.matchAll(/slug:"([^"]+)"[\s\S]*?tags:\[([^\]]*)\]/g)]
+    .map(m => ({ slug: m[1], tags: m[2].replace(/"/g, "").split(",") }));
+  assert.equal(recipes.length, 6, "the recipe set changed size");
+
+  const tags = /const ALL_TAGS=\[([^\]]+)\]/.exec(site)[1].replace(/"/g, "").split(",");
+  assert.deepEqual(tags, ["ALLE", "LATTE", "ICED", "FRUITY"]);
+  for (const t of tags) {
+    const hits = t === "ALLE" ? recipes : recipes.filter(r => r.tags.includes(t));
+    assert.ok(hits.length > 0, `the ${t} filter would render an empty grid`);
+  }
+  // The logic itself is untouched: one state, one predicate, one source.
+  assert.match(page, /const \[filter,setFilter\]=useState\("ALLE"\)/);
+  assert.match(page, /filter==="ALLE"\?recipes:recipes\.filter\(r=>r\.tags\.includes\(filter\)\)/);
+  // No query param, no route change - selection stays local state.
+  assert.ok(!page.includes("useSearchParams") && !page.includes("router.push"),
+    "the filter started touching the route");
+});
+
+test("7b: every listing link still resolves to its own detail route", async () => {
+  const hrefs = [...html.matchAll(/href="(\/rezepte\/[^"]+)"/g)].map(m => m[1]);
+  assert.equal(hrefs.length, 6, `the listing rendered ${hrefs.length} recipe links`);
+  assert.equal(new Set(hrefs).size, 6, "two cards point at the same recipe");
+  for (const href of hrefs) {
+    const { status } = await server.getHtml(href);
+    assert.equal(status, 200, `${href} does not resolve`);
+  }
+  // One link per card, wrapping the whole item - no nested anchors.
+  assert.equal((html.match(/<article class="rezept-card">/g) || []).length, 6);
+  // Exactly one anchor per card, so the whole item is clickable without
+  // a second link nested inside it.
+  for (const m of html.matchAll(/<article class="rezept-card">([\s\S]*?)<\/article>/g)) {
+    assert.equal(m[1].split("<a ").length - 1, 1, "a recipe card has more than one link");
+    assert.ok(!/<button/.test(m[1]), "a recipe card nests a control inside its link");
+  }
+  // Alt text survived on every photo.
+  const alts = [...html.matchAll(/<img src="\/img\/[^"]+" alt="([^"]*)"/g)].map(m => m[1]);
+  assert.equal(alts.length, 6, "a recipe photo lost its img tag");
+  for (const a of alts) {
+    assert.ok(a.length > 3 && !/^(image|bild|recipe image|rezept)$/i.test(a), `a placeholder alt: "${a}"`);
+  }
+});
+
+test("7c: this pass added no backend of any kind", () => {
+  // The recipe-sharing CTA is a link to Instagram, not a submission.
+  assert.deepEqual(readdirSync(path.join(ROOT, "app/api")).sort(),
+    ["annual-plan", "checkout", "contact", "cron", "internal", "orders",
+     "stripe", "subscriptions", "withdrawal"],
+    "an API route was added or removed");
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("043")),
+    "migration 043 exists");
+  for (const banned of ['"use server"', "fetch(", "supabase", "resend",
+                        "localStorage", "sessionStorage", "<form", "onSubmit"]) {
+    assert.ok(!page.toLowerCase().includes(banned.toLowerCase()),
+      `the recipes page reaches for ${banned}`);
+  }
 });

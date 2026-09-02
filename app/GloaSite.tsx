@@ -667,7 +667,7 @@ function BusinessFaq(){const qs:[string,string][]=[["Wo kommt GLOA Matcha her?",
 function Rezepte(){const [filter,setFilter]=useState("ALLE");const filtered=filter==="ALLE"?recipes:recipes.filter(r=>r.tags.includes(filter));return <main className="rezepte-page">
 <section className="rezepte-hero"><div className="rezepte-hero-inner home-rail"><p className="eyebrow rezepte-hero-eyebrow gloa-hero-eyebrow">GLOA · REZEPTE</p><h1 className="rezepte-hero-headline"><span className="rezepte-hero-line gloa-hero-primary">Matcha Rezepte.</span><i className="rezepte-hero-line rezepte-hero-line-accent gloa-hero-secondary">GLOA Edition.</i></h1><p className="rezepte-hero-lead">Signature Drinks. Einfach, visuell stark und passend zur GLOA-Welt.</p></div></section>
 <section className="rezepte-filters" aria-label="Rezepte filtern"><div className="rezepte-filters-inner home-rail">{ALL_TAGS.map(t=><button key={t} type="button" className={filter===t?"active":""} aria-pressed={filter===t} onClick={()=>setFilter(t)}>{t}</button>)}</div></section>
-<section className="rezepte-grid"><div className="rezepte-grid-inner home-rail">{filtered.map(r=><article key={r.slug} className="rezept-card"><Link href={`/rezepte/${r.slug}`}><div className="rezept-card-img"><img src={r.image} alt={r.alt} loading="lazy"/></div><div className="rezept-card-body"><p className="rezept-card-meta">{r.category} · {r.time}</p><h2>{r.title}</h2><p className="rezept-card-excerpt">{r.excerpt}</p><span className="rezept-card-cta">Rezept ansehen <span aria-hidden="true">→</span></span></div></Link></article>)}</div></section>
+<section className="rezepte-grid">{filtered.length===0&&<p className="rezepte-empty home-rail">Für diesen Filter haben wir gerade kein Rezept. Schau dir alle an.</p>}<div className="rezepte-grid-inner home-rail">{filtered.map(r=><article key={r.slug} className="rezept-card"><Link href={`/rezepte/${r.slug}`}><div className="rezept-card-img"><img src={r.image} alt={r.alt} loading="lazy"/></div><div className="rezept-card-body"><p className="rezept-card-meta">{r.category} · {r.time}</p><h2>{r.title}</h2><p className="rezept-card-excerpt">{r.excerpt}</p><span className="rezept-card-cta">Rezept ansehen <span aria-hidden="true">→</span></span></div></Link></article>)}</div></section>
 <RezepteCommunity/>
 </main>}
 
@@ -685,8 +685,8 @@ return <section className="rz-community"><div className="rz-community-inner home
 <div className="rz-community-side">
 <p className="rz-community-body">Strawberry, Coconut, Espresso oder etwas, auf das wir noch nicht gekommen sind.<br/>Mix deinen GLOA Drink, teile ihn mit uns und markiere @gloa.matcha.</p>
 <div className="rz-community-actions">
-<Link className="cta rz-community-cta" href="/contact">Dein Rezept teilen <span aria-hidden="true">→</span></Link>
-<a className="rz-community-social" href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">{`@${BRAND.instagram}`}<span aria-hidden="true"> ↗</span></a>
+<a className="cta rz-community-cta" href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">DEIN REZEPT TEILEN <span aria-hidden="true">→</span></a>
+<a className="rz-community-social" href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">{`@${BRAND.instagram}`.toUpperCase()}<span aria-hidden="true"> ↗</span></a>
 </div>
 </div>
 </div></section>}

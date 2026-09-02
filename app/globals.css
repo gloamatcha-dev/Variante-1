@@ -6867,8 +6867,8 @@ header nav{gap:18px;font-size:12px}
   font-weight:600;
   font-style:normal;
   font-size:12px;
-  line-height:1;
-  letter-spacing:.14em;
+  line-height:1.2;
+  letter-spacing:.15em;
   text-transform:uppercase;
   cursor:pointer;
   transition:background .2s ease,color .2s ease,border-color .2s ease;
@@ -6894,11 +6894,29 @@ header nav{gap:18px;font-size:12px}
   padding-block:clamp(44px,4vw,64px) clamp(84px,7vw,124px);
   padding-inline:var(--rail-gutter);
 }
+/* TWO strong columns. Three made the drinks small on a page whose whole
+   job is to show them; two on the full rail is the image-led composition
+   the brief asks for, and the images stay aligned row by row. */
 .rezepte-grid-inner{
   display:grid;
-  grid-template-columns:repeat(3,minmax(0,1fr));
-  column-gap:clamp(24px,2.4vw,40px);
-  row-gap:clamp(48px,4.4vw,72px);
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  column-gap:clamp(28px,3vw,56px);
+  row-gap:clamp(56px,5vw,88px);
+  align-items:start;
+}
+/* THE EMPTY FILTER STATE. Unreachable with the current six recipes -
+   ALLE 6, LATTE 3, ICED 5, FRUITY 2 - so it invents no content; it
+   exists so that a later data edit degrades into the page's own type
+   instead of a blank cream band. */
+.rezepte-empty{
+  margin:0 0 clamp(40px,4vw,60px);
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:clamp(16px,1.2vw,17px);
+  line-height:1.6;
+  letter-spacing:0;
+  color:rgba(17,17,17,.72);
 }
 .rezept-card a{
   display:flex;
@@ -6953,41 +6971,41 @@ header nav{gap:18px;font-size:12px}
   font-weight:600;
   font-style:normal;
   font-size:var(--type-meta);
-  line-height:1;
-  letter-spacing:.18em;
+  line-height:1.2;
+  letter-spacing:.16em;
   text-transform:uppercase;
-  color:var(--berry);
+  color:var(--ink);
 }
 .rezept-card-body h2{
-  margin:clamp(12px,1.2vw,16px) 0 0;
+  margin:clamp(10px,1vw,14px) 0 0;
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:600;
   font-style:normal;
-  font-size:var(--type-card);
-  line-height:1.25;
-  letter-spacing:-.015em;
+  font-size:clamp(22px,1.8vw,28px);
+  line-height:1.12;
+  letter-spacing:-.025em;
   color:var(--ink);
 }
 .rezept-card-excerpt{
-  margin:clamp(8px,.9vw,12px) 0 0;
-  max-width:38ch;
+  margin:clamp(10px,1vw,14px) 0 0;
+  max-width:44ch;
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:400;
   font-style:normal;
   font-size:clamp(15px,1.1vw,16px);
-  line-height:1.6;
+  line-height:1.5;
   letter-spacing:0;
   color:rgba(17,17,17,.72);
 }
 .rezept-card-cta{
   display:inline-block;
-  margin-top:clamp(14px,1.4vw,20px);
+  margin-top:clamp(16px,1.6vw,22px);
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:600;
   font-style:normal;
   font-size:var(--type-meta);
-  line-height:1;
-  letter-spacing:.18em;
+  line-height:1.2;
+  letter-spacing:.12em;
   text-transform:uppercase;
   color:var(--ink);
   text-decoration:underline;
@@ -7035,23 +7053,29 @@ header nav{gap:18px;font-size:12px}
   letter-spacing:normal;
   line-height:1;
 }
+/* THE INTERNAL SECTION SCALE, AT THE WEIGHT THIS BRIEF NAMES.
+   /about and /partnerships set their section headline in Inter 500 at
+   clamp(42px,4.2vw,60px). This one is 700 capped at 56px because the
+   brief asks for that directly. The Cormorant line below stays the
+   canonical editorial face: this is an INTERNAL SECTION, not a page
+   hero, so it deliberately does not read the gloa-hero-* system. */
 .rz-community-line{
   font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:500;
+  font-weight:700;
   font-style:normal;
-  font-size:clamp(42px,4.2vw,60px);
-  line-height:.98;
-  letter-spacing:-.04em;
+  font-size:clamp(40px,4vw,56px);
+  line-height:.95;
+  letter-spacing:-.035em;
   color:var(--cream);
 }
 .rz-community-line-accent{
   font-family:var(--font-display),Georgia,serif;
   font-weight:400;
   font-style:italic;
-  font-size:clamp(44px,4.6vw,64px);
-  line-height:.93;
+  font-size:clamp(42px,4.3vw,60px);
+  line-height:.94;
   letter-spacing:-.01em;
-  margin-top:3px;
+  margin-top:4px;
   color:var(--cream);
 }
 .rz-community-side{
@@ -7062,12 +7086,12 @@ header nav{gap:18px;font-size:12px}
 }
 .rz-community-body{
   margin:0;
-  max-width:46ch;
+  max-width:460px;
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:400;
   font-style:normal;
-  font-size:var(--type-body);
-  line-height:1.55;
+  font-size:clamp(16px,1.2vw,17px);
+  line-height:1.6;
   color:rgba(245,235,226,.88);
 }
 .rz-community-actions{
@@ -7122,7 +7146,6 @@ header nav{gap:18px;font-size:12px}
 
 /* ══ RESPONSIVE ════════════════════════════════════════════ */
 @media (max-width:1100px){
-  .rezepte-grid-inner{grid-template-columns:repeat(2,minmax(0,1fr))}
   .rz-community-inner{grid-template-columns:minmax(0,1fr);align-items:start}
 }
 
@@ -7132,12 +7155,16 @@ header nav{gap:18px;font-size:12px}
   .rezepte-grid{padding-block:clamp(34px,5vw,46px) clamp(66px,10vw,88px)}
   .rz-community{padding-block:clamp(64px,10vw,86px)}
   /* One section scale down, at the same 900px the page hero uses. */
-  .rz-community-line{font-size:clamp(36px,9.2vw,44px)}
-  .rz-community-line-accent{font-size:clamp(38px,10vw,46px)}
+  .rz-community-line{font-size:clamp(34px,8.8vw,42px)}
+  .rz-community-line-accent{font-size:clamp(36px,9.4vw,44px)}
 }
 
 @media (max-width:760px){
-  .rezepte-grid-inner{grid-template-columns:minmax(0,1fr);row-gap:clamp(38px,6vw,50px)}
+  /* TWO COLUMNS HOLD THROUGH TABLET. At 900 they are 409px wide and at
+     768 they are 349px - both still read as drinks. One column only
+     below that, because a full-rail 4:5 image at tablet width would be
+     over 1000px tall and taller than the screen it is on. */
+  .rezepte-grid-inner{grid-template-columns:minmax(0,1fr);row-gap:clamp(44px,6vw,60px)}
   .rezept-card-excerpt{max-width:none}
   .rezepte-hero-lead{max-width:none}
   .rz-community-body{max-width:none}
@@ -7150,5 +7177,5 @@ header nav{gap:18px;font-size:12px}
   /* Four filters on a narrow screen: two rows of two, each still a
      comfortable target rather than a shrunken chip. */
   .rezepte-filters-inner{gap:8px}
-  .rezepte-filters button{padding:13px 16px;letter-spacing:.12em}
+  .rezepte-filters button{padding:13px 16px;letter-spacing:.13em}
 }
