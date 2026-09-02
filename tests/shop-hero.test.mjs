@@ -92,7 +92,9 @@ test("3: the hero is type only, and nothing was deleted to make it so", () => {
   for (const asset of ["public/img/Produkt BILD.png", "public/img/gloa-morning.jpg"]) {
     assert.ok(existsSync(path.join(ROOT, asset)), `${asset} was deleted`);
   }
-  assert.match(shop, /<ShopProductBlock product=\{p\} onAdd=\{onAdd\}\/>/);
+  // The block still receives the product and the cart callback; the third
+  // prop is the annual-plan selection request from the band below it.
+  assert.match(shop, /<ShopProductBlock product=\{p\} onAdd=\{onAdd\} annualRequest=\{annualRequest\}\/>/);
   assert.match(shop, /\{p\.slug===MATCHA_SLUG&&<MatchaShopDetails product=\{p\}\/>\}/);
   // The anti-newsletter band is deliberately NOT part of the shop
   // composition any more - tests/shop-render.test.mjs owns that contract

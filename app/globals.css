@@ -7967,3 +7967,325 @@ header nav{gap:18px;font-size:12px}
   .portal .portal-company-head strong,
   .portal .b2b-model-label{font-size:17px}
 }
+
+/* ══════════════════════════════════════════════════════════════
+   /shop — THE ANNUAL PLAN
+
+   The prepaid annual plan existed end to end on the server and nowhere
+   on the page. This is the shop side of it: a purchase-mode choice next
+   to the size selector, the plan's full commercial truth, and one blue
+   band explaining the idea.
+
+   ── IT IS NOT A SUBSCRIPTION, AND IT MUST NOT LOOK LIKE ONE ───
+   No rounded plan card, no shadow, no gradient, no green savings badge,
+   no pricing-table column. The same hairline boxes and the same
+   raspberry active state `.size-option` already uses, because the shop
+   had a selection language before this feature arrived and a second one
+   would read as a different product.
+
+   ── THE LOUD NUMBER IS THE ONE BEING CHARGED ──────────────────
+   `.annual-panel-total` is the largest thing in the panel and the
+   per-delivery figure is a data row above it, because the customer pays
+   the year total today. Shouting the per-delivery price over a plan
+   that charges the whole year at once is the one thing this panel must
+   never do.
+
+   NO PURE WHITE. Every light value on the blue band is var(--cream) or
+   an rgba derived from it; rgba(245,235,226,a) IS #F5EBE2.
+   ══════════════════════════════════════════════════════════════ */
+
+/* ══ THE PURCHASE MODE ═════════════════════════════════════ */
+/* Two equal columns, not a pill toggle. Same geometry as the size
+   selector above it, so the two read as one control stack. */
+.purchase-mode{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  margin:clamp(20px,2vw,26px) 0 0;
+  width:100%;
+}
+.purchase-mode-option{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  padding:14px 16px;
+  border:1px solid var(--line);
+  cursor:pointer;
+  transition:border-color .2s ease,background .2s ease;
+  min-width:0;
+}
+/* The same active treatment `.size-option.active` uses. Stated by the
+   border AND the ground, and the native radio underneath states it a
+   third time, so it never rests on colour alone. */
+.purchase-mode-option.active{
+  border-color:var(--berry);
+  background:rgba(166,30,89,.06);
+}
+.purchase-mode-option:hover{border-color:var(--berry)}
+.purchase-mode-option:focus-within{outline:3px solid var(--blue);outline-offset:2px}
+.purchase-mode-label{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-size:13px;
+  line-height:1.2;
+  letter-spacing:.1em;
+  text-transform:uppercase;
+  color:var(--ink);
+}
+.purchase-mode-meta{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-size:13px;
+  line-height:1.35;
+  letter-spacing:0;
+  color:rgba(17,17,17,.62);
+}
+
+/* ══ THE PLAN'S OWN PANEL ══════════════════════════════════ */
+/* Hairline-bounded, not a card: one rule above and one below, the
+   page's own cream showing through, no radius and no shadow. */
+.annual-panel{
+  margin:clamp(20px,2vw,26px) 0 clamp(24px,2.4vw,30px);
+  padding:clamp(20px,2vw,26px) 0;
+  border-top:1px solid var(--line);
+  border-bottom:1px solid var(--line);
+  width:100%;
+  max-width:44ch;
+}
+.annual-panel-eyebrow{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-size:11px;
+  line-height:1.2;
+  letter-spacing:.2em;
+  text-transform:uppercase;
+  color:var(--berry);
+}
+.annual-panel-title{
+  margin:10px 0 0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:700;
+  font-size:clamp(20px,1.8vw,24px);
+  line-height:1.15;
+  letter-spacing:-.02em;
+  color:var(--ink);
+}
+.annual-panel-sub{
+  margin:8px 0 0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-size:14px;
+  line-height:1.5;
+  letter-spacing:0;
+  color:rgba(17,17,17,.62);
+}
+/* Label left, figure right, hairline between. The shop's own data-row
+   language, not a table. */
+.annual-panel-lines{margin:clamp(16px,1.6vw,20px) 0 0}
+.annual-panel-lines>div{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:16px;
+  padding:10px 0;
+  border-top:1px solid rgba(17,17,17,.12);
+}
+.annual-panel-lines dt{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-size:14px;
+  line-height:1.45;
+  color:rgba(17,17,17,.62);
+}
+.annual-panel-lines dd{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-size:15px;
+  line-height:1.45;
+  color:var(--ink);
+  white-space:nowrap;
+}
+/* The amount actually charged. The largest thing in the panel, on
+   purpose, and it keeps that weight on a phone. */
+.annual-panel-total{
+  display:flex;
+  align-items:baseline;
+  flex-wrap:wrap;
+  gap:0 10px;
+  margin:clamp(16px,1.6vw,20px) 0 0;
+  padding-top:clamp(14px,1.4vw,18px);
+  border-top:2px solid var(--ink);
+}
+.annual-panel-total-label{
+  flex:1 0 100%;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-size:11px;
+  line-height:1.2;
+  letter-spacing:.18em;
+  text-transform:uppercase;
+  color:rgba(17,17,17,.62);
+}
+.annual-panel-total b{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:800;
+  font-size:clamp(30px,3vw,40px);
+  line-height:1.05;
+  letter-spacing:-.04em;
+  color:var(--ink);
+  margin-top:6px;
+}
+.annual-panel-total-note{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-size:13px;
+  line-height:1.2;
+  letter-spacing:.04em;
+  color:rgba(17,17,17,.62);
+}
+/* The contract, as ordinary prose. Never a tooltip. */
+.annual-panel-terms{
+  margin:clamp(14px,1.4vw,18px) 0 0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-size:14px;
+  line-height:1.55;
+  letter-spacing:0;
+  color:rgba(17,17,17,.72);
+}
+.annual-panel-note{
+  margin:10px 0 0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-size:13px;
+  line-height:1.5;
+  color:rgba(17,17,17,.55);
+}
+
+/* ══ THE BLUE BAND ═════════════════════════════════════════ */
+.shop-annual{
+  background:var(--blue);
+  color:var(--cream);
+  padding-block:clamp(64px,7vw,104px);
+  /* The FULL-WIDTH section carries the gutter and `.home-rail` inside
+     it carries the max-width. That is the contract the rail block
+     above states: background edge to edge, content on the rail. */
+  padding-inline:var(--rail-gutter);
+  border-top:1px solid var(--line);
+}
+.shop-annual-inner{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(0,.85fr);
+  gap:clamp(36px,5vw,72px);
+  align-items:start;
+}
+.shop-annual-eyebrow{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-size:11px;
+  line-height:1.2;
+  letter-spacing:.2em;
+  text-transform:uppercase;
+  color:var(--cream);
+}
+/* AN INTERNAL SECTION, NOT A SECOND PAGE HERO. Capped at 56px, well
+   below the shop hero's own scale, and it does not read the shared
+   --type-hero-* tokens. */
+.shop-annual-headline{
+  display:flex;
+  flex-direction:column;
+  margin:clamp(16px,1.6vw,22px) 0 0;
+  letter-spacing:normal;
+}
+.shop-annual-line{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-style:normal;
+  font-weight:800;
+  font-size:clamp(34px,3.6vw,56px);
+  line-height:.98;
+  letter-spacing:-.045em;
+  color:var(--cream);
+}
+/* Real Inter Italic, the shop's established accent line. */
+.shop-annual-line-accent{
+  font-style:italic;
+  font-weight:400;
+  font-size:clamp(30px,3.2vw,48px);
+  line-height:1.02;
+  letter-spacing:-.04em;
+  font-synthesis:none;
+  margin-top:4px;
+}
+.shop-annual-body{
+  margin:clamp(18px,1.8vw,24px) 0 0;
+  max-width:46ch;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-size:clamp(15px,1.1vw,17px);
+  line-height:1.6;
+  letter-spacing:0;
+  color:rgba(245,235,226,.84);
+}
+.shop-annual-cta{
+  margin:clamp(24px,2.4vw,32px) 0 0;
+  background:var(--cream);
+  color:var(--blue);
+  border:1px solid var(--cream);
+  border-radius:0;
+  box-shadow:none;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-size:12px;
+  line-height:1;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+}
+.shop-annual-cta:hover{background:transparent;color:var(--cream)}
+/* Four open rows on cream hairlines. No cards, no icons. */
+.shop-annual-facts{
+  list-style:none;
+  margin:0;
+  padding:0;
+}
+.shop-annual-fact{
+  display:flex;
+  align-items:baseline;
+  gap:clamp(14px,1.4vw,20px);
+  padding:clamp(14px,1.4vw,18px) 0;
+  border-top:1px solid rgba(245,235,226,.28);
+}
+.shop-annual-fact:last-child{border-bottom:1px solid rgba(245,235,226,.28)}
+.shop-annual-fact-num{
+  flex:0 0 auto;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-size:11px;
+  line-height:1.2;
+  letter-spacing:.16em;
+  color:rgba(245,235,226,.6);
+}
+.shop-annual-fact-label{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-size:clamp(13px,1vw,15px);
+  line-height:1.3;
+  letter-spacing:.1em;
+  text-transform:uppercase;
+  color:var(--cream);
+}
+.shop-annual :focus-visible{outline-color:var(--cream)}
+
+/* ══ RESPONSIVE ════════════════════════════════════════════ */
+@media (max-width:900px){
+  .shop-annual-inner{grid-template-columns:1fr;gap:clamp(28px,5vw,40px)}
+}
+@media (max-width:560px){
+  /* Two cramped halves become two full rows; the annual total keeps its
+     size, because it is the number the customer is deciding on. */
+  .purchase-mode{grid-template-columns:1fr}
+  .annual-panel{max-width:none}
+  .annual-panel-lines>div{gap:12px}
+}

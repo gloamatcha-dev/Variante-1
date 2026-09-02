@@ -78,9 +78,13 @@ test("shop: the anti-newsletter band is a homepage statement, not a shop one", a
   assert.match(site, /function BrandNote\(\)/);
   assert.equal([...site.matchAll(/<BrandNote\/>/g)].length, 2, "the band left another page too");
   assert.match(readFileSync(new URL("../app/globals.css", import.meta.url), "utf-8"), /\.brand-note\{/);
-  // NOTHING replaced it and no spacer was left behind: the shop's last
-  // element is the product section, and </main> follows it directly.
-  assert.match(fn("Shop"), /<\/article>\)\}\n<\/section>\n<\/main>\}/);
+  // NOTHING replaced it and no spacer was left behind. The shop's last
+  // element is now the annual-plan band - a purchase section rather than
+  // a marketing sign-up, see tests/shop-annual-plan.test.mjs - and
+  // </main> follows it directly.
+  assert.match(fn("Shop"), /<\/article>\)\}\n<\/section>\n\n\{hasAnnual&&<ShopAnnualPlan[\s\S]*?\/>\}\n<\/main>\}/);
+  assert.equal([...fn("Shop").matchAll(/<section/g)].length, 1,
+    "the shop composition grew another inline section");
 });
 
 test("shop: the Matcha product page renders", async () => {

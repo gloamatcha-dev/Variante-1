@@ -4,7 +4,15 @@ import Link from "next/link";
 import { Header, Footer } from "./Chrome";
 import { BRAND, PRODUCT, SHOP_STATUS } from "./content";
 import { useCatalog, useCatalogList, fmtCents, per100gCents } from "./useCatalog";
-import type { CatalogProduct } from "./useCatalog";
+import type { CatalogProduct, CatalogVariant } from "./useCatalog";
+// THE SAME ARITHMETIC THE SERVER USES, NOT A COPY OF ITS ANSWERS.
+// lib/annualPlanRules.ts is a zero-import leaf, so the browser can run
+// the identical function the checkout route runs; every euro the shop
+// prints is derived here from the catalog price the catalog already
+// sent, and no annual total is written down anywhere in this file. The
+// server still resolves the money independently - see AnnualPlanPanel.
+import { ANNUAL_DELIVERY_COUNT, ANNUAL_DELIVERY_INTERVAL_DAYS, buildAnnualPricing, type AnnualPricing } from "../lib/annualPlanRules";
+import { ANNUAL_LAUNCH_SIZE_BY_SKU } from "../lib/annualPlans";
 import { getProductPresentation, showsUnitPricePer100g, showsFoodInformation, isWeighedProduct, getProductImage, getProductSubtitle, getProductEyebrow, MATCHA_NOT_INCLUDED_SHORT } from "../lib/productPresentation";
 import { BusinessCalculator } from "./BusinessCalculator";
 import { AccountPortal } from "./AccountPortal";
@@ -276,9 +284,111 @@ return <div className="size-selector" role="radiogroup" aria-label={weighed?"Gr�
 {product.variants.map((mv,i)=><label key={mv.id} className={`size-option${i===selected?" active":""}`}><input type="radio" name={name} className="sr-only" value={mv.id} checked={i===selected} onChange={()=>onSelect(i)}/><span className="size-option-size">{mv.label}</span><span className="size-option-price">{fmtCents(mv.price_gross_cents)} €</span></label>)}
 </div>}
 
+/* ══ THE ANNUAL PLAN, IN THE SHOP ══════════════════════════════
+ *
+ * The B2C prepaid annual plan already exists end to end on the server -
+ * checkout route, webhook branch, delivery maintenance job, refund
+ * correlation, confirmation mail. What it never had was a way for a
+ * customer to SEE it. That is all this adds.
+ *
+ * ── WHAT AN ANNUAL PLAN IS ────────────────────────────────────
+ * One payment. Thirteen deliveries, 28 days apart. No renewal, no second
+ * charge, no Stripe Subscription. Never "monatlich": thirteen 28-day
+ * steps are 364 days, and a calendar month is 28 to 31.
+ *
+ * ── ELIGIBILITY IS THE SERVER'S ALLOWLIST, NOT A LOCAL GUESS ──
+ * ANNUAL_LAUNCH_SIZE_BY_SKU is the same frozen SKU allowlist
+ * resolveAnnualLaunchPlan validates against. A fourth SKU appearing in
+ * the catalog therefore shows no annual option here for exactly the same
+ * reason the server would refuse it - by omission, failing closed - and
+ * accessories, the Metal Case and gift items never acquire one.
+ */
+
+/**
+ * The annual money for one catalog variant, or null if it is not an
+ * annual launch product.
+ *
+ * DERIVED, NEVER STORED. Not one of 17,99 / 26,99 / 49,49 / 310,57 /
+ * 350,87 / 643,37 appears in this file: each falls out of
+ * buildAnnualPricing() from the catalog price the catalog itself
+ * delivered, so a price change in product_variants moves the shop and
+ * the checkout together and cannot move only one of them.
+ */
+function annualPricingFor(variant: CatalogVariant): AnnualPricing | null {
+  const size = ANNUAL_LAUNCH_SIZE_BY_SKU[variant.sku];
+  if (!size) return null;
+  const result = buildAnnualPricing({ size, catalogUnitGrossCents: variant.price_gross_cents });
+  return result.ok ? result.pricing : null;
+}
+
+type PurchaseMode = "one_time" | "annual";
+
+/**
+ * One-time or annual, as a real radio group.
+ *
+ * The SAME control the size selector is: a role="radiogroup" of labels
+ * wrapping visually-hidden native radios. Native inputs mean arrow keys,
+ * focus and announcement come from the browser rather than from
+ * hand-rolled key handlers, and the selected state is carried by the
+ * radio itself - so it never rests on colour alone.
+ *
+ * Deliberately not a pill toggle and not a card: the same hairline box
+ * and the same raspberry active state the size selector already uses,
+ * because the shop had a selection language before this feature arrived.
+ */
+function PurchaseModeSelector({mode,onSelect,name,oncePriceCents}:{mode:PurchaseMode;onSelect:(m:PurchaseMode)=>void;name:string;oncePriceCents:number}){
+return <div className="purchase-mode" role="radiogroup" aria-label="Kaufoption wählen">
+<label className={`purchase-mode-option${mode==="one_time"?" active":""}`}>
+<input type="radio" name={name} className="sr-only" value="one_time" checked={mode==="one_time"} onChange={()=>onSelect("one_time")}/>
+<span className="purchase-mode-label">Einmalig kaufen</span>
+<span className="purchase-mode-meta">{fmtCents(oncePriceCents)} € einmalig</span>
+</label>
+<label className={`purchase-mode-option${mode==="annual"?" active":""}`}>
+<input type="radio" name={name} className="sr-only" value="annual" checked={mode==="annual"} onChange={()=>onSelect("annual")}/>
+<span className="purchase-mode-label">Jahresplan</span>
+<span className="purchase-mode-meta">{ANNUAL_DELIVERY_COUNT} Lieferungen · alle {ANNUAL_DELIVERY_INTERVAL_DAYS} Tage</span>
+</label>
+</div>}
+
+/**
+ * The whole commercial truth of the plan, as ordinary readable text.
+ *
+ * ── THE NUMBER THAT MATTERS IS THE ONE BEING CHARGED ──────────
+ * The per-delivery figure is the small line and the year total is the
+ * loud one, because the customer pays the year total today. A layout
+ * that shouted "17,99 €" over a plan that charges 310,57 € at once
+ * would be the single most misleading thing this panel could do.
+ *
+ * ── AND THE TERMS ARE TEXT, NOT A TOOLTIP ─────────────────────
+ * Thirteen deliveries, the 28-day rhythm, one payment and no automatic
+ * renewal are four sentences in the flow of the page. None of them is a
+ * title attribute, a hover card or pseudo-content.
+ */
+function AnnualPlanPanel({variant,annual}:{variant:CatalogVariant;annual:AnnualPricing}){
+const shipsFree = annual.shippingPerDeliveryGrossCents === 0;
+return <div className="annual-panel">
+<p className="eyebrow annual-panel-eyebrow">JAHRESPLAN</p>
+<p className="annual-panel-title">Alle {ANNUAL_DELIVERY_INTERVAL_DAYS} Tage Matcha.</p>
+<p className="annual-panel-sub">{variant.label} · {ANNUAL_DELIVERY_COUNT} Lieferungen · einmal bezahlen · keine automatische Verlängerung</p>
+<dl className="annual-panel-lines">
+<div><dt>Matcha je Lieferung</dt><dd>{fmtCents(annual.annualUnitGrossCents)} €</dd></div>
+<div><dt>Versand je Lieferung</dt><dd>{shipsFree?"inklusive":`${fmtCents(annual.shippingPerDeliveryGrossCents)} €`}</dd></div>
+<div><dt>Lieferungen</dt><dd>{annual.deliveryCount}</dd></div>
+</dl>
+<p className="annual-panel-total"><span className="annual-panel-total-label">Jahresgesamtbetrag</span><b>{fmtCents(annual.totalGrossCents)} €</b><span className="annual-panel-total-note">einmalig</span></p>
+<p className="annual-panel-terms">
+{annual.deliveryCount} Lieferungen im {ANNUAL_DELIVERY_INTERVAL_DAYS}-Tage-Rhythmus.
+{" "}{shipsFree
+?"Versand ist im Jahresgesamtbetrag enthalten."
+:`Der Versand von ${fmtCents(annual.shippingPerDeliveryGrossCents)} € je Lieferung ist im Jahresgesamtbetrag bereits enthalten.`}
+{" "}Du zahlst den Jahresgesamtbetrag einmalig. Keine automatische Verlängerung, keine weitere Abbuchung.
+</p>
+<p className="annual-panel-note">Jahresplan-Lieferungen gehen aktuell nur innerhalb Deutschlands.</p>
+</div>}
+
 /** One product's purchase block on the shop page. Keeps its own variant
  *  state, so several products on one page never share a selection. */
-function ShopProductBlock({product,onAdd}:{product:CatalogProduct;onAdd:()=>void}){
+function ShopProductBlock({product,onAdd,annualRequest=0}:{product:CatalogProduct;onAdd:()=>void;annualRequest?:number}){
 const {addItem}=useCart();
 const [idx,setIdx]=useState(0);
 const safe=Math.min(idx,product.variants.length-1);
@@ -289,6 +399,27 @@ const own=SHOP_SECTION_IMAGE[product.slug];
 const img=own??(getProductImage(product)?{src:getProductImage(product) as string,alt:product.name}:null);
 const sub=getProductSubtitle(product);
 const handleAdd=()=>{addItem({productId:product.id,productName:product.name,productSlug:product.slug,variantId:v.id,label:v.label,grams:v.size_grams,purchaseType:"once",unitPriceCents:v.price_gross_cents});track("add_to_cart");onAdd()};
+
+// ONE-TIME IS THE DEFAULT, ALWAYS. A twelve-month prepaid commitment is
+// never something a customer arrives already opted into.
+const [mode,setMode]=useState<PurchaseMode>("one_time");
+const annual=annualPricingFor(v);
+// NOTHING ABOUT THE PLAN IS HELD IN STATE. The selected size drives the
+// annual figures every render, so 30 g -> 100 g re-derives price,
+// shipping and total together and none of them can go stale. And a size
+// with no annual plan cannot show an annual panel, because this is an
+// AND: the mode alone is never enough.
+const annualActive=mode==="annual"&&annual!==null;
+// The blue band's CTA asks for annual mode from outside this block by
+// incrementing a counter. Adjusted during render rather than in an
+// effect - React's own "derive state from props" pattern - so there is
+// no second render pass and no cascading update.
+const [seenRequest,setSeenRequest]=useState(annualRequest);
+if(annualRequest!==seenRequest){
+  setSeenRequest(annualRequest);
+  if(annual)setMode("annual");
+}
+
 return <div className="shop-product-row home-rail">
 {img&&<div className="shop-product-visual"><img src={img.src} alt={img.alt} loading="lazy"/></div>}
 <div className="shop-product-info"><p className="eyebrow shop-product-eyebrow">{getProductEyebrow(product)}</p><h2 className="shop-product-title">{product.name.toUpperCase()}</h2>
@@ -296,11 +427,21 @@ return <div className="shop-product-row home-rail">
 
 <VariantSelector product={product} selected={safe} onSelect={setIdx} name={`variant-${product.slug}`}/>
 
+{annual&&<PurchaseModeSelector mode={mode} onSelect={setMode} name={`mode-${product.slug}`} oncePriceCents={v.price_gross_cents}/>}
+
+{annualActive&&annual
+?<AnnualPlanPanel variant={v} annual={annual}/>
+:<>
 <p className="shop-product-price">{fmtCents(v.price_gross_cents)} €</p>
 {per100!==null&&<p className="shop-product-per100g">{fmtCents(per100)} € / 100 g</p>}
 {presentation.matchaNotIncludedNotice&&<p className="product-not-included">{presentation.matchaNotIncludedNotice}</p>}
+</>}
 
-<button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":handleAdd}>{SHOP_STATUS==="prelaunch"?"Fragen zum Launch":"In den Warenkorb"}</button>
+{/* THE ANNUAL CTA NEVER TOUCHES THE CART. An annual plan is a
+    dedicated account-bound checkout, not a cart line, so the one-time
+    handler is not reachable from annual mode at all. In prelaunch both
+    modes route where every other shop CTA routes. */}
+<button className="cta shop-cta" onClick={annualActive?()=>{track("shop_annual_interest");window.location.href="/contact"}:SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":handleAdd}>{SHOP_STATUS==="prelaunch"?"Fragen zum Launch":annualActive?"Jahresplan anfragen":"In den Warenkorb"}</button>
 </div></div>}
 
 /** Confirmed GLOA Matcha food information. Rendered only for the Matcha
@@ -392,6 +533,43 @@ return <section className="shop-strip" aria-label="GLOA Launch">
 </section>
 }
 
+/**
+ * The one explanatory band for the annual plan. ONE, on purpose: the
+ * purchase panel above states the money, this states the idea, and a
+ * third repetition would be clutter rather than clarity.
+ *
+ * Blue edge to edge, cream on it - the same band language /account and
+ * the signed-in portal use - so the shop breaks once, here, between the
+ * product and whatever follows it.
+ *
+ * Its CTA is NAVIGATION, never a purchase: it selects annual mode on the
+ * product above and scrolls there. Nothing is bought, no checkout is
+ * created, and the button says so.
+ */
+function ShopAnnualPlan({onChoose}:{onChoose:()=>void}){
+const facts:[string,string][]=[
+["01",`${ANNUAL_DELIVERY_COUNT} LIEFERUNGEN`],
+["02",`ALLE ${ANNUAL_DELIVERY_INTERVAL_DAYS} TAGE`],
+["03","EINMAL ZAHLEN"],
+["04","KEINE AUTOMATISCHE VERLÄNGERUNG"],
+];
+return <section className="shop-annual" aria-labelledby="shop-annual-title">
+<div className="shop-annual-inner home-rail">
+<div className="shop-annual-intro">
+<p className="eyebrow shop-annual-eyebrow">GLOA JAHRESPLAN</p>
+<h2 className="shop-annual-headline" id="shop-annual-title">
+<span className="shop-annual-line">Matcha da.</span>
+<i className="shop-annual-line shop-annual-line-accent">Bevor er ausgeht.</i>
+</h2>
+<p className="shop-annual-body">{ANNUAL_DELIVERY_COUNT} Lieferungen im {ANNUAL_DELIVERY_INTERVAL_DAYS}-Tage-Rhythmus.<br/>Einmal bezahlen und ein Jahr lang planbar versorgt.<br/>Keine automatische Verlängerung.</p>
+<button type="button" className="cta shop-annual-cta" onClick={onChoose}>JAHRESPLAN AUSWÄHLEN</button>
+</div>
+<ol className="shop-annual-facts">
+{facts.map(([n,label])=><li key={n} className="shop-annual-fact"><span className="shop-annual-fact-num">{n}</span><span className="shop-annual-fact-label">{label}</span></li>)}
+</ol>
+</div>
+</section>}
+
 /** The supporting line, as one sentence over two rows. No dash. */
 const SHOP_HERO_LEAD=<>Premium Matcha aus Shizuoka, Japan<br/>und alles, was dazugehört.</>;
 
@@ -418,6 +596,10 @@ return <section className="shop-hero"><div className="shop-hero-inner home-rail"
 
 function Shop({onAdd}:{onAdd:()=>void}){
 const {products,loading,error}=useCatalogList();
+// A COUNTER, not a boolean: the blue band's CTA must still work the
+// second time it is pressed, after the customer has switched back to
+// one-time in between.
+const [annualRequest,setAnnualRequest]=useState(0);
 const shell=(lead:React.ReactNode,price:React.ReactNode)=><main className="shop-page"><ShopHero lead={lead} price={price}/><ShopLaunchStrip/></main>;
 
 if(loading)return shell(SHOP_HERO_LEAD,<p className="shop-hero-price">Laden…</p>);
@@ -428,6 +610,10 @@ if(!visibleShopProducts(products).length)return shell("Aktuell keine Produkte ve
 // so a hidden product cannot set the number a customer reads.
 const shown=visibleShopProducts(products);
 const lowestCents=Math.min(...shown.flatMap(p=>p.variants.map(x=>x.price_gross_cents)));
+// The annual band is rendered only when the page actually lists a
+// product that HAS an annual plan, so a catalog without the launch SKUs
+// cannot advertise one.
+const hasAnnual=shown.some(p=>p.variants.some(v=>annualPricingFor(v)!==null));
 
 return <main className="shop-page">
 <ShopHero lead={SHOP_HERO_LEAD} price={<p className="shop-hero-price">AB {fmtCents(lowestCents)} €</p>}/>
@@ -435,10 +621,12 @@ return <main className="shop-page">
 
 <section id="product" className="shop-products">
 {shown.map(p=><article key={p.id} id={`product-${p.slug}`} className="shop-column">
-<ShopProductBlock product={p} onAdd={onAdd}/>
+<ShopProductBlock product={p} onAdd={onAdd} annualRequest={annualRequest}/>
 {p.slug===MATCHA_SLUG&&<MatchaShopDetails product={p}/>}
 </article>)}
 </section>
+
+{hasAnnual&&<ShopAnnualPlan onChoose={()=>{setAnnualRequest(n=>n+1);document.getElementById("product")?.scrollIntoView({behavior:"smooth",block:"start"});track("shop_annual_select")}}/>}
 </main>}
 
 // The anti-newsletter band is NOT rendered here. It is a homepage

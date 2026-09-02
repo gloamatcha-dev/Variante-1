@@ -104,9 +104,16 @@ test("3: variants, price and base price still come from the catalog", () => {
   for (const literal of ["19,99", "29,99", "54,99", "66,63", "30 g\"", "50 g\"", "100 g\""]) {
     assert.ok(!block.includes(literal), `a commerce value was hard-coded: ${literal}`);
   }
-  // The launch CTA's behaviour is untouched.
-  assert.match(block, /onClick=\{SHOP_STATUS==="prelaunch"\?\(\)=>window\.location\.href="\/contact":handleAdd\}/);
-  assert.match(block, /SHOP_STATUS==="prelaunch"\?"Fragen zum Launch":"In den Warenkorb"/);
+  // The launch CTA's ONE-TIME behaviour is untouched: prelaunch still
+  // goes to /contact and the live path still adds to the cart.
+  assert.match(block, /SHOP_STATUS==="prelaunch"\?\(\)=>window\.location\.href="\/contact":handleAdd\}/);
+  // The annual branch sits in front of it and never reaches handleAdd -
+  // an annual plan is a dedicated account-bound checkout, not a cart
+  // line. See tests/shop-annual-plan.test.mjs.
+  assert.match(block, /onClick=\{annualActive\?\(\)=>\{track\("shop_annual_interest"\);window\.location\.href="\/contact"\}:/);
+  // Prelaunch says the same thing in BOTH purchase modes, because in
+  // prelaunch neither of them sells anything.
+  assert.match(block, /SHOP_STATUS==="prelaunch"\?"Fragen zum Launch":annualActive\?"Jahresplan anfragen":"In den Warenkorb"/);
   assert.match(read("app/content.ts"), /export const SHOP_STATUS = "prelaunch"/);
   // The hero's anchor still lands on the section.
   assert.match(shop, /<section id="product" className="shop-products">/);
