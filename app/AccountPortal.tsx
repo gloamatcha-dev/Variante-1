@@ -98,9 +98,10 @@ export function AccountPortal({ page, orderId, subscriptionId, supplyId }: { pag
   return (
     <main className="portal">
       <nav className="portal-nav">
-        {navItems.map(n => (
-          <Link key={n.key} href={`/account/${n.key}`} className={page === n.key || (n.key === "orders" && page === "order-detail") || (n.key === "subscriptions" && page === "subscription-detail") || (n.key === "business" && page === "supply-detail") ? "active" : ""}>{n.label}</Link>
-        ))}
+        {navItems.map(n => {
+          const active = page === n.key || (n.key === "orders" && page === "order-detail") || (n.key === "subscriptions" && page === "subscription-detail") || (n.key === "business" && page === "supply-detail");
+          return <Link key={n.key} href={`/account/${n.key}`} className={active ? "active" : ""} aria-current={active ? "page" : undefined}>{n.label}</Link>;
+        })}
         <span className="portal-nav-spacer" />
         <button className="portal-logout" onClick={handleLogout}>Abmelden</button>
       </nav>

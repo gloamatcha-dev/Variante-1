@@ -1068,6 +1068,15 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // a single added line in a string map. Listed so it is reviewed
     // rather than silent, like everything above it.
     "app/[...slug]/page.tsx",
+    // ACCOUNT PORTAL: presentation only. The file owns the signed-in
+    // account, so it is listed here rather than waved through - which is
+    // exactly what this guard is for. The edit names the EXISTING active
+    // -tab predicate in a const and adds aria-current from it; the
+    // predicate itself, the auth hooks, the three route guards, the
+    // navItems filter and handleLogout are byte-identical, and
+    // tests/account-portal-design.test.mjs asserts that directly against
+    // the source rather than leaving it to this diff.
+    "app/AccountPortal.tsx",
   ];
 
   for (const rel of touched) {

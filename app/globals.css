@@ -246,7 +246,7 @@ h1 i,h2 i,h3 i,.display-italic{font-family:var(--font-display),Georgia,serif;fon
    get the wider end of the account column: ~1166px of content at 1536,
    ~1176px at 1440. B2C stays at ~1026-1036px. */
 .portal-content-wide{max-width:1320px}
-.portal-greeting h1{font-size:clamp(36px,5vw,64px);line-height:1;letter-spacing:-.05em;margin:16px 0 0}
+
 .portal-greeting{margin-bottom:48px}
 .portal-empty{font:15px/1.5 var(--font-mono);opacity:.45}
 .portal-empty-row{display:flex;align-items:baseline;justify-content:space-between;gap:24px;flex-wrap:wrap}
@@ -257,7 +257,7 @@ h1 i,h2 i,h3 i,.display-italic{font-family:var(--font-display),Georgia,serif;fon
 .portal-fact span{opacity:.5;white-space:nowrap}
 .portal-fact strong{font-weight:600;text-align:right;overflow-wrap:anywhere}
 .portal-page-head{margin-bottom:50px}
-.portal-page-head h1{font-size:clamp(32px,4.5vw,56px);line-height:1.08;letter-spacing:-.04em;margin:16px 0 16px}
+
 .portal-page-lead{font-size:16px;line-height:1.5;opacity:.6;max-width:520px}
 .portal-empty-state{border-top:1px solid var(--line);padding:50px 0}
 .portal-empty-state p{font:16px/1.5 var(--font-mono);opacity:.45;margin:0 0 30px}
@@ -306,7 +306,7 @@ a.portal-summary-row:hover{color:var(--blue)}
 .portal-summary-value{font:16px/1.2 var(--font-mono);white-space:nowrap}
 .portal-chevron{flex:0 0 auto;opacity:.35}
 .portal-b2b-head{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:56px;align-items:start;margin-bottom:48px}
-.portal-b2b-intro h1{font-size:clamp(34px,4.6vw,58px);line-height:1.02;letter-spacing:-.05em;margin:16px 0 0}
+
 .portal-b2b-lead{font:15px/1.5 var(--font-mono);opacity:.55;margin:16px 0 0}
 .portal-company-panel{border:1px solid var(--line);padding:22px 22px 10px}
 .portal-company-head{display:flex;align-items:center;gap:10px;padding-bottom:16px}
@@ -569,13 +569,13 @@ header nav{gap:18px;font-size:12px}
 .portal-nav a{padding:14px 16px;font-size:11px}
 .portal-logout{padding:14px 0 14px 16px;font-size:11px}
 .portal-content{padding:40px 5vw 70px}
-.portal-greeting h1{font-size:36px}
+
 .portal-quicklinks-grid,.portal-quicklinks-grid[data-count="5"]{grid-template-columns:1fr}
 .portal-quicklink{min-height:64px;padding:0 16px}
 .portal-quicklinks{margin-top:40px}
 .portal-section{padding:28px 0}
 .portal-b2b-head{grid-template-columns:1fr;gap:26px;margin-bottom:36px}
-.portal-b2b-intro h1{font-size:34px}
+
 .portal-order{flex-direction:column;gap:14px}
 .portal-order-meta{align-items:flex-start;text-align:left}
 .portal-summary-row{flex-wrap:wrap;gap:14px}
@@ -7342,4 +7342,275 @@ header nav{gap:18px;font-size:12px}
   .account-landing .account-actions{flex-direction:column;align-items:stretch;gap:12px}
   .account-landing .cta{width:100%;padding:18px 20px}
   .account-landing .account-lead{max-width:none}
+}
+
+/* ══════════════════════════════════════════════════════════════
+   THE AUTHENTICATED ACCOUNT — ONE NAVIGATION, ONE TYPE SYSTEM
+
+   All five signed-in sections plus the three detail views and the B2B
+   section render through ONE shell: `<main class="portal">` holding
+   `.portal-nav` and `.portal-content`. So this is written once, here,
+   rather than five times.
+
+   ── WHAT WAS FRAGMENTED ──────────────────────────────────────
+   Three different page-title scales were in use -
+
+       .portal-greeting h1    clamp(36px,5vw,64px)   1     -.05em
+       .portal-page-head h1   clamp(32px,4.5vw,56px) 1.08  -.04em
+       .portal-b2b-intro h1   clamp(34px,4.6vw,58px) 1.02  -.05em
+
+   none of which set a weight, so all three inherited the browser's
+   bold rather than GLOA's 800. They are one rule now.
+
+   Muted labels were set six different ways (opacity .4 / .45 / .5 /
+   .55 / .6 and two tracking values). They read one muted colour now,
+   rgba(17,17,17,.6), because opacity fades a whole element while a
+   colour states an intent.
+
+   ── THE BANDS ────────────────────────────────────────────────
+   Cream site header (untouched)
+        v
+   BLUE .portal-nav          #1746D1, cream on it
+        v
+   CREAM .portal-content     from body, deliberately not repainted
+
+   NO PURE WHITE. Every light value is var(--cream) or an rgba derived
+   from it; rgba(245,235,226,a) IS #F5EBE2.
+
+   ── NOT A HERO ───────────────────────────────────────────────
+   These are functional pages, so the title is Inter 800 at a capped
+   internal scale and there is no Cormorant anywhere in the signed-in
+   account. The identity comes from weight, spacing, blue, cream and
+   hairlines - not from an editorial serif.
+   ══════════════════════════════════════════════════════════════ */
+
+/* ══ THE ACCOUNT NAVIGATION ════════════════════════════════ */
+/* Already horizontally scrollable, which is what keeps all five
+   sections reachable on a phone; only the paint changed. */
+.portal-nav{
+  background:var(--blue);
+  border-bottom:0;
+  padding-inline:var(--rail-gutter);
+}
+.portal-nav a,
+.portal-logout{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:11px;
+  line-height:1.2;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  white-space:nowrap;
+  color:rgba(245,235,226,.72);
+  border-bottom:2px solid transparent;
+  transition:color .2s ease,border-color .2s ease;
+}
+/* 20 + 13.2 + 20 + 2 = 55.2px: a rail, not a second header. */
+.portal-nav a{padding:20px 22px}
+.portal-logout{
+  padding:20px 0 20px 22px;
+  border-top:0;
+  border-left:0;
+  border-right:0;
+  background:none;
+  opacity:1;
+  cursor:pointer;
+}
+.portal-nav a:hover,
+.portal-logout:hover{color:var(--cream);opacity:1}
+/* Active is stated twice - cream AND an underline - so it never rests
+   on colour alone. aria-current says it a third time. */
+.portal-nav a.active{
+  color:var(--cream);
+  border-bottom-color:var(--cream);
+}
+/* The global focus ring is blue, which is invisible on this strip. */
+.portal-nav :focus-visible{outline-color:var(--cream)}
+
+/* ══ THE CONTENT RAIL ══════════════════════════════════════ */
+/* The same gutter as the nav above it and as the rest of the site, so
+   the tabs, the title and the data rows all start on one line. The
+   1180px cap stays: these are documents, not full-bleed pages. */
+.portal-content{padding-inline:var(--rail-gutter)}
+
+/* ══ ONE PAGE TITLE ════════════════════════════════════════ */
+.portal-greeting h1,
+.portal-page-head h1,
+.portal-b2b-intro h1{
+  margin:clamp(14px,1.4vw,18px) 0 0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:800;
+  font-style:normal;
+  font-size:clamp(42px,4.4vw,64px);
+  line-height:.96;
+  letter-spacing:-.045em;
+  color:var(--ink);
+}
+
+/* ══ EYEBROWS AND SECTION LABELS ═══════════════════════════ */
+/* (0,2,0), so it outranks the global .eyebrow at 12px/.14em. */
+.portal .eyebrow{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:11px;
+  line-height:1.2;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  color:var(--ink);
+}
+/* A page eyebrow is the widest-tracked thing on the page; a section
+   label sits one notch tighter so the two read as different ranks. */
+.portal .portal-page-head .eyebrow,
+.portal .portal-greeting .eyebrow{letter-spacing:.2em}
+
+/* ══ BODY ══════════════════════════════════════════════════ */
+.portal-page-lead,
+.portal-b2b-lead{
+  margin:clamp(16px,1.6vw,20px) 0 0;
+  max-width:560px;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:16px;
+  line-height:1.55;
+  letter-spacing:0;
+  opacity:1;
+  color:rgba(17,17,17,.72);
+}
+.portal-note,
+.portal-profile-note,
+.portal-empty,
+.portal-loading{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-size:15px;
+  line-height:1.55;
+  letter-spacing:0;
+  opacity:1;
+  color:rgba(17,17,17,.6);
+}
+.portal-empty-state p{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-size:16px;
+  line-height:1.55;
+  opacity:1;
+  color:rgba(17,17,17,.6);
+}
+
+/* ══ DATA ROWS ═════════════════════════════════════════════ */
+/* Line based, hairline separated, never a card. The label states the
+   field and the value answers it, so the value carries the weight. */
+.portal-profile-row,
+.portal-fact{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-size:15px;
+  line-height:1.45;
+  letter-spacing:0;
+  padding:14px 0;
+  border-top:1px solid rgba(17,17,17,.12);
+}
+.portal-profile-row>span,
+.portal-fact>span,
+.portal-company-fact>span{
+  font-weight:400;
+  opacity:1;
+  color:rgba(17,17,17,.6);
+}
+.portal-profile-row>strong,
+.portal-fact>strong,
+.portal-company-fact>strong{
+  font-weight:600;
+  color:var(--ink);
+}
+.portal-company-fact{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-size:15px;
+  line-height:1.45;
+  border-top:1px solid rgba(17,17,17,.12);
+}
+.portal-company-fact>span{
+  font-size:11px;
+  line-height:1.2;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+}
+.portal-company-fact>strong{font-size:15px}
+/* Every other muted label in the portal reads the same value. */
+.portal-summary-label,
+.portal-summary-secondary,
+.portal-order-id span,
+.portal-order-meta span,
+.portal-line span{opacity:1;color:rgba(17,17,17,.6)}
+.portal-summary-label{
+  font-size:11px;
+  line-height:1.2;
+  letter-spacing:.16em;
+}
+
+/* ══ ACTIONS ═══════════════════════════════════════════════ */
+/* Primary stays the canonical GLOA button - blue ground, cream label,
+   square - at the account's own tighter meta size. */
+.portal .cta{
+  border-radius:0;
+  box-shadow:none;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:12px;
+  line-height:1;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+}
+/* Secondary actions stay text, not a second filled button, so the
+   hierarchy survives. One type for all of them. */
+.portal-action,
+.portal-back-link,
+.portal-cancel-btn,
+.portal-address-delete{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:11px;
+  line-height:1.2;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  opacity:1;
+  color:rgba(17,17,17,.6);
+  transition:color .2s ease;
+}
+.portal-action:hover,
+.portal-back-link:hover,
+.portal-cancel-btn:hover,
+.portal-address-delete:hover{opacity:1;color:var(--blue)}
+.portal-badge{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-size:11px;
+  line-height:1.2;
+  letter-spacing:.14em;
+  opacity:1;
+  color:rgba(17,17,17,.6);
+  border-color:rgba(17,17,17,.22);
+}
+
+/* ══ RESPONSIVE ════════════════════════════════════════════ */
+@media (max-width:800px){
+  /* The strip keeps its scroll and its height; only the rhythm tightens. */
+  .portal-nav a{padding:18px 16px}
+  .portal-logout{padding:18px 0 18px 16px}
+  .portal-nav a,
+  .portal-logout{font-size:11px;letter-spacing:.14em}
+  /* One scale, so one step down. */
+  .portal-greeting h1,
+  .portal-page-head h1,
+  .portal-b2b-intro h1{font-size:clamp(34px,8.6vw,44px)}
+  .portal-page-lead,
+  .portal-b2b-lead{max-width:none}
+  /* A stacked row still needs its label above its value, not beside. */
+  .portal-profile-row>strong,
+  .portal-fact>strong{text-align:left}
 }
