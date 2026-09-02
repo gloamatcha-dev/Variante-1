@@ -1100,10 +1100,16 @@ test("35: the section paints one blue, one cream, and nothing else", () => {
     ".daily-tile{height:280px",
     ".daily-grid{display:flex",
     ".daily-tile{min-width:78vw}",
-    "rgba(245,235,226,.34)",
   ]) {
     assert.ok(!css.includes(gone), `the retired declaration is back: ${gone}`);
   }
+  // The retired cream hairline is banned in THIS SECTION, not file-wide:
+  // rgba(245,235,226,.34) is simply cream at 34%, and other pages use it
+  // legitimately for their own hairlines. What must not come back is this
+  // section painting with it. (/partnerships was the first page to need
+  // the value after the guard was written.)
+  assert.ok(!dailyCss.includes("rgba(245,235,226,.34)"),
+    "the retired cream hairline is back on the lifestyle section");
 
   // EVERY .daily rule now lives in the appended block. Nothing paints this
   // section from the base sheet any more, so source-order surprises of the

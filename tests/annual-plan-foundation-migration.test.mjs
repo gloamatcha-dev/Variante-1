@@ -1061,6 +1061,13 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // tests/b2b-ordering-models.test.mjs asserts that directly against the
     // source rather than leaving it to this diff.
     "app/BusinessCalculator.tsx",
+    // PARTNERSHIPS PAGE: the public catch-all route's SEO map gains ONE
+    // entry, so /partnerships gets a title and a description like every
+    // other public page. It is metadata for a marketing route - no
+    // payment, fulfillment or account module is involved, and the edit is
+    // a single added line in a string map. Listed so it is reviewed
+    // rather than silent, like everything above it.
+    "app/[...slug]/page.tsx",
   ];
 
   for (const rel of touched) {

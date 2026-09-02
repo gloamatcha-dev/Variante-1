@@ -670,6 +670,183 @@ function RezeptDetail({slug}:{slug:string}){const r=recipes.find(x=>x.slug===slu
 <section className="rezept-detail-content"><div className="rezept-detail-ingredients"><h2>Zutaten</h2><ul>{r.ingredients.map((ing,i)=><li key={i}>{ing}</li>)}</ul></div><div className="rezept-detail-steps"><h2>Zubereitung</h2><ol>{r.steps.map((step,i)=><li key={i}><span>{String(i+1).padStart(2,"0")}</span><p>{step}</p></li>)}</ol></div></section>
 <section className="rezept-detail-nav"><Link href="/rezepte">← Alle Rezepte</Link><Link href="/shop" className="cta">Matcha kaufen</Link></section>
 </main>}
+/* /partnerships — EVENTS, BRANDS, CREATORS, GIFTING, EXPERIENCES.
+   Design phase only: the request form below is real markup with real
+   labels and real fieldsets, and it has no submission path of any kind.
+   No action, no method, no fetch, no state, no storage. See the CSS
+   block and tests/partnerships-page.test.mjs. */
+const ptIndex:[string,string][]=[["01","EVENTS"],["02","BRANDS"],["03","CREATORS"],["04","GIFTING"],["05","EXPERIENCES"]];
+const ptTypes:[string,string,string][]=[
+["01","EVENTS & POP-UPS","Openings, Community Events, Sport, Fashion, Beauty oder Culture."],
+["02","BRAND COLLABORATIONS","Gemeinsame Kampagnen, Produkte, Drops oder besondere Projekte."],
+["03","SPONSORING & SEEDING","Produkt, Sampling oder Support für ausgewählte Events und Projekte."],
+["04","CREATORS & CONTENT","Content, Community und kreative Formate mit passenden Creators."],
+["05","CORPORATE GIFTING","Gifting für Teams, Kunden, Events, PR oder besondere Anlässe."],
+["06","HOSPITALITY & EXPERIENCES","Hotels, Studios, Wellness, Restaurants und besondere Experiences."],
+];
+const ptPrinciples:[string,string,string][]=[
+["01","DIE IDEE","Eine Zusammenarbeit sollte einen Grund haben, nicht nur ein Logo."],
+["02","DER FIT","Marke, Community und Moment müssen zusammenpassen."],
+["03","DER MEHRWERT","Die besten Partnerschaften funktionieren für beide Seiten."],
+];
+const ptProcess:[string,string,string][]=[
+["01","ANFRAGE SENDEN","Erzähl uns, was du planst und was du dir von GLOA wünschst."],
+["02","WIR PRÜFEN","Wir schauen uns Projekt, Timing, Zielgruppe und Rahmenbedingungen an."],
+["03","GEMEINSAM ABSTIMMEN","Wenn es passt, klären wir Idee, Umfang und die nächsten Schritte."],
+["04","LET'S MAKE IT HAPPEN","Dann machen wir aus der Idee eine Zusammenarbeit."],
+];
+const ptTypeOptions=["EVENT / POP-UP","BRAND COLLABORATION","SPONSORING","PRODUCT SEEDING","CREATOR / CONTENT","CORPORATE GIFTING","HOSPITALITY / EXPERIENCE","ANDERE"];
+const ptNeedOptions=["MATCHA / PRODUKT","MATCHA BAR / POP-UP","GOODIE BAGS / GIFTING","SPONSORING","GEMEINSAMER CONTENT","CO-BRANDING","GIVEAWAYS","LANGFRISTIGE PARTNERSCHAFT","ANDERES"];
+const ptOfferOptions=["SOCIAL CONTENT","REELS / POSTS","LOGO-PLATZIERUNG","EVENT-PRÄSENZ","STANDFLÄCHE","SAMPLING","NEWSLETTER / WEBSITE","PRESSE","CREATOR-REICHWEITE","CONTENT / NUTZUNGSRECHTE","EXKLUSIVITÄT","ANDERES"];
+const ptBudgetOptions=["JA","NEIN","NOCH OFFEN"];
+
+function PartnershipChecks({name,options}:{name:string;options:string[]}){
+return <div className="pt-checks">{options.map(o=><label key={o} className="pt-check"><input type="checkbox" name={name} value={o}/><span className="pt-check-box" aria-hidden="true"/><span className="pt-check-label">{o}</span></label>)}</div>;
+}
+
+function Partnerships(){
+/* DESIGN PHASE. There is no partnership submission infrastructure yet, so
+   nothing here may send, store or pretend to send anything. The button is
+   type="button" so it can never submit, and the guard below stops an
+   implicit submission from putting personal data into the URL. */
+const blockSubmit=useCallback((e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault()},[]);
+
+return <main className="partnerships-page">
+
+<section className="pt-hero">
+<div className="pt-hero-inner home-rail">
+<div className="pt-hero-copy">
+<p className="eyebrow pt-eyebrow pt-hero-eyebrow gloa-hero-eyebrow">LET&apos;S WORK TOGETHER</p>
+<h1 className="pt-hero-headline"><span className="pt-hero-line gloa-hero-primary">Your idea.</span><i className="pt-hero-line pt-hero-line-accent gloa-hero-secondary">Our Matcha.</i></h1>
+<p className="pt-hero-lead">Events, Brand Collaborations, Gifting oder etwas, das wir noch nicht auf dem Schirm haben. Wenn GLOA zu deinem Projekt passt, erzähl uns davon.</p>
+<a className="cta pt-cta" href="#partnership-request">PARTNERSCHAFT ANFRAGEN</a>
+</div>
+<ol className="pt-hero-index">{ptIndex.map(([n,label])=><li key={n}><span className="pt-hero-index-num">{n}</span><span className="pt-hero-index-label">{label}</span></li>)}</ol>
+</div>
+</section>
+
+<section className="pt-types">
+<div className="pt-types-inner home-rail">
+<div className="pt-types-head">
+<p className="eyebrow pt-eyebrow">PARTNERSCHAFTEN</p>
+<h2 className="pt-headline"><span className="pt-line">Good things.</span><i className="pt-line pt-line-accent">Made together.</i></h2>
+<p className="pt-intro">Von Events bis Brand Collaboration: Wir suchen Partnerschaften, die zu GLOA, zur Community und zum Moment passen.</p>
+</div>
+<div className="pt-types-grid">{ptTypes.map(([n,title,copy])=><article key={n} className="pt-type"><span className="pt-num">{n}</span><h3 className="pt-type-title">{title}</h3><p className="pt-type-copy">{copy}</p></article>)}</div>
+</div>
+</section>
+
+<section className="pt-fit">
+<div className="pt-fit-inner home-rail">
+<div className="pt-fit-copy">
+<p className="eyebrow pt-eyebrow">GOOD FIT</p>
+<h2 className="pt-headline"><span className="pt-line">Good fit.</span><i className="pt-line pt-line-accent">Not just good reach.</i></h2>
+<p className="pt-intro">Für uns zählt nicht nur, wie viele Menschen du erreichst. Eine gute Partnerschaft braucht eine klare Idee, einen passenden Kontext und echten Mehrwert auf beiden Seiten.</p>
+</div>
+<div className="pt-fit-list">{ptPrinciples.map(([n,title,copy])=><div key={n} className="pt-principle"><span className="pt-num">{n}</span><h3 className="pt-principle-title">{title}</h3><p className="pt-principle-copy">{copy}</p></div>)}</div>
+</div>
+</section>
+
+<section className="pt-process">
+<div className="pt-process-inner home-rail">
+<div className="pt-process-head">
+<p className="eyebrow pt-eyebrow">SO FUNKTIONIERT&apos;S</p>
+<h2 className="pt-headline"><span className="pt-line">Von der Idee.</span><i className="pt-line pt-line-accent">Zur Zusammenarbeit.</i></h2>
+<p className="pt-intro">Je konkreter deine Anfrage, desto schneller können wir einschätzen, ob und wie GLOA dazu passt.</p>
+</div>
+<ol className="pt-process-steps">{ptProcess.map(([n,title,copy])=><li key={n} className="pt-step"><span className="pt-num">{n}</span><h3 className="pt-step-title">{title}</h3><p className="pt-step-copy">{copy}</p></li>)}</ol>
+</div>
+</section>
+
+<section className="pt-request" id="partnership-request">
+<div className="pt-request-inner home-rail">
+<div className="pt-request-head">
+<p className="eyebrow pt-eyebrow">PARTNERSHIP REQUEST</p>
+<h2 className="pt-headline"><span className="pt-line">Tell us.</span><i className="pt-line pt-line-accent">What you have in mind.</i></h2>
+<p className="pt-intro">Je mehr wir über dein Projekt wissen, desto besser können wir einschätzen, ob und wie eine Zusammenarbeit mit GLOA funktionieren kann.</p>
+</div>
+
+<form className="pt-form" onSubmit={blockSubmit}>
+
+<fieldset className="pt-group"><legend className="pt-legend">ÜBER DICH</legend>
+<div className="pt-fields">
+<label>Ansprechpartner/in*<input name="pt-contact" type="text" autoComplete="name" maxLength={200}/></label>
+<label>Unternehmen / Brand / Organisation*<input name="pt-company" type="text" autoComplete="organization" maxLength={200}/></label>
+<label>E-Mail*<input name="pt-email" type="email" autoComplete="email" maxLength={254}/></label>
+<label>Telefon<input name="pt-phone" type="tel" autoComplete="tel" maxLength={60}/></label>
+<label>Website<input name="pt-website" type="url" placeholder="https://" maxLength={300}/></label>
+<label>Instagram / TikTok / Social Link<input name="pt-social" type="text" maxLength={300}/></label>
+<label>Stadt / Land*<input name="pt-location" type="text" maxLength={200}/></label>
+</div>
+</fieldset>
+
+<fieldset className="pt-group"><legend className="pt-legend">ART DER PARTNERSCHAFT*</legend>
+<PartnershipChecks name="pt-type" options={ptTypeOptions}/>
+</fieldset>
+
+<fieldset className="pt-group"><legend className="pt-legend">DEIN PROJEKT</legend>
+<div className="pt-fields">
+<label>Name des Projekts / Events*<input name="pt-project" type="text" maxLength={200}/></label>
+<label>Datum / Zeitraum*<input name="pt-when" type="text" placeholder="TT.MM.JJJJ oder Zeitraum" maxLength={120}/></label>
+<label className="pt-wide">Worum geht&apos;s?*<textarea name="pt-about" rows={5} maxLength={5000}/></label>
+<label>Ort*<input name="pt-place" type="text" maxLength={200}/></label>
+<label>Projekt- / Event-Link<input name="pt-project-link" type="url" placeholder="https://" maxLength={300}/></label>
+<label>Media Kit / Deck Link<input name="pt-deck" type="url" placeholder="https://" maxLength={300}/></label>
+</div>
+</fieldset>
+
+<fieldset className="pt-group"><legend className="pt-legend">WAS WÜNSCHT IHR EUCH VON GLOA?</legend>
+<PartnershipChecks name="pt-need" options={ptNeedOptions}/>
+</fieldset>
+
+<fieldset className="pt-group"><legend className="pt-legend">WAS BRINGT IHR IN DIE PARTNERSCHAFT EIN?</legend>
+<PartnershipChecks name="pt-offer" options={ptOfferOptions}/>
+</fieldset>
+
+<fieldset className="pt-group"><legend className="pt-legend">REICHWEITE &amp; SICHTBARKEIT</legend>
+<div className="pt-fields">
+<label>Erwartete Gäste / Teilnehmer<input name="pt-guests" type="text" maxLength={120}/></label>
+<label>Social Reach<input name="pt-reach" type="text" maxLength={200}/></label>
+<label className="pt-wide">Relevante Creator / Partner / Accounts<textarea name="pt-accounts" rows={3} maxLength={2000}/></label>
+</div>
+</fieldset>
+
+<fieldset className="pt-group"><legend className="pt-legend">BUDGET</legend>
+<p className="pt-question">GIBT ES FÜR DIE ZUSAMMENARBEIT EIN VORGESEHENES BUDGET?</p>
+<div className="pt-checks pt-checks-radio">{ptBudgetOptions.map(o=><label key={o} className="pt-check"><input type="radio" name="pt-budget" value={o}/><span className="pt-check-box" aria-hidden="true"/><span className="pt-check-label">{o}</span></label>)}</div>
+<div className="pt-fields">
+<label>Budget / Range<input name="pt-budget-range" type="text" maxLength={120}/></label>
+</div>
+</fieldset>
+
+<fieldset className="pt-group"><legend className="pt-legend">ZUM SCHLUSS</legend>
+<div className="pt-fields">
+<label className="pt-wide">Was würde eine erfolgreiche Partnerschaft für euch ausmachen?<textarea name="pt-success" rows={4} maxLength={3000}/></label>
+<label className="pt-wide">Sonst noch was?<textarea name="pt-anything" rows={3} maxLength={3000}/></label>
+</div>
+</fieldset>
+
+<p className="pt-form-note">Wir prüfen jede Anfrage individuell. Je konkreter dein Projekt, desto besser können wir einschätzen, ob und wie GLOA dazu passt.</p>
+<button className="cta pt-cta pt-submit" type="button">PARTNERSCHAFT ANFRAGEN</button>
+</form>
+</div>
+</section>
+
+<section className="pt-final">
+<div className="pt-final-inner home-rail">
+<div className="pt-final-copy">
+<p className="eyebrow pt-eyebrow">GOT SOMETHING IN MIND?</p>
+<h2 className="pt-headline"><span className="pt-line">Let&apos;s make.</span><i className="pt-line pt-line-accent">Something good.</i></h2>
+</div>
+<div className="pt-final-side">
+<p className="pt-final-lead">Eine gute Idee beginnt meistens mit einer Nachricht.</p>
+<a className="cta pt-cta" href="#partnership-request">PARTNERSCHAFT ANFRAGEN</a>
+</div>
+</div>
+</section>
+
+</main>;
+}
 function Contact(){
 const [status,setStatus]=useState<"idle"|"sending"|"success"|"error">("idle");
 const [errorMsg,setErrorMsg]=useState("");
@@ -1349,6 +1526,7 @@ else if(route.startsWith("account/business/supply/")&&route.split("/").length===
 else if(route==="account/dashboard"||route==="account/orders"||route==="account/subscriptions"||route==="account/addresses"||route==="account/profile"||route==="account/business")page=<AccountPortal page={route.split("/")[1] as "dashboard"|"orders"|"subscriptions"|"addresses"|"profile"|"business"}/>;
 else if(route==="account")page=<Account/>;
 else if(route==="contact")page=<Contact/>;
+else if(route==="partnerships")page=<Partnerships/>;
 else if(["impressum","datenschutz","agb","widerruf","versand"].includes(route))page=<Legal route={route}/>;
 else page=<main className="not-found"><h1>404</h1><Link href="/">Zurück zu GLOA →</Link></main>;
 

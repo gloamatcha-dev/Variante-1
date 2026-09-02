@@ -6141,3 +6141,629 @@ header nav{gap:18px;font-size:12px}
     --type-hero-secondary:clamp(38px,10.5vw,56px);
   }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   /partnerships — EVENTS, BRANDS, CREATORS, GIFTING, EXPERIENCES
+
+   A new public page, and every rule here is scoped to
+   `.partnerships-page` or to a `.pt-` class of its own. Nothing
+   shared is edited, so no finished page can move because of this
+   block. The header, the footer and the canonical rail are used
+   exactly as they are.
+
+   ── THE COLOUR RHYTHM ────────────────────────────────────────
+   Six full-width bands, in this order and no other:
+
+       1  .pt-hero      BLUE       #1746D1   cream on blue
+       2  .pt-types     CREAM      #F5EBE2   near black on cream
+       3  .pt-fit       RASPBERRY  #A61E59   cream on raspberry
+       4  .pt-process   CREAM      #F5EBE2   near black on cream
+       5  .pt-request   PLUM       #4F3A5B   cream on plum
+       6  .pt-final     BLUE       #1746D1   cream on blue
+
+   Then the existing black footer. The colour changes ARE the
+   transitions - there is no decorative divider anywhere.
+
+   NO PURE WHITE. Every light value in this block is var(--cream)
+   or an rgba derived from it: rgba(245,235,226,a) IS #F5EBE2.
+
+   ── THE TYPE ─────────────────────────────────────────────────
+   The hero reads the canonical page hero classes (gloa-hero-*),
+   so /partnerships is the seventh route on the homepage's scale
+   and sets no size of its own. Section headings deliberately do
+   NOT: they read the established GLOA section scale that /about,
+   /our-matcha and /for-cafes already use,
+
+       sans    clamp(42px,4.2vw,60px)  500  .98  -.04em
+       italic  clamp(44px,4.6vw,64px)  400  .93  -.01em   Cormorant
+
+   weight 500 rather than a heavier cut, because that is what
+   every finished section on the site is set in and a new page
+   may not quietly introduce a second section scale.
+
+   ── NO CARDS ─────────────────────────────────────────────────
+   Nothing here has a filled panel, a rounded container, a shadow,
+   a gradient or a blur. Structure comes from hairlines, numbers
+   and the rail. Fields are bottom-border only, the way the B2B
+   lead form already does it.
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── SHARED PAGE VOCABULARY ────────────────────────────────── */
+/* (0,2,0) so it outranks the global .eyebrow, which is 12px/.14em. */
+.partnerships-page .pt-eyebrow{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:var(--type-meta);
+  line-height:1.2;
+  letter-spacing:.2em;
+  text-transform:uppercase;
+}
+.partnerships-page .pt-headline{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  margin:clamp(18px,1.8vw,26px) 0 0;
+  letter-spacing:normal;
+  line-height:1;
+}
+.partnerships-page .pt-line{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:500;
+  font-style:normal;
+  font-size:clamp(42px,4.2vw,60px);
+  line-height:.98;
+  letter-spacing:-.04em;
+}
+.partnerships-page .pt-line-accent{
+  font-family:var(--font-display),Georgia,serif;
+  font-weight:400;
+  font-style:italic;
+  font-size:clamp(44px,4.6vw,64px);
+  line-height:.93;
+  letter-spacing:-.01em;
+  margin-top:3px;
+}
+.partnerships-page .pt-intro{
+  margin:clamp(22px,2.2vw,30px) 0 0;
+  max-width:640px;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:var(--type-body);
+  line-height:1.55;
+}
+/* The number is a marker, never a headline. */
+.partnerships-page .pt-num{
+  display:block;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:12px;
+  line-height:1.2;
+  letter-spacing:.08em;
+}
+
+/* Square, flat, uppercase - the canonical GLOA button, in cream on
+   every coloured band. Text takes the band's own colour, which is
+   what /shop and /for-cafes already do. */
+.partnerships-page .pt-cta{
+  width:max-content;
+  min-height:54px;
+  padding:18px 31px;
+  border-radius:0;
+  box-shadow:none;
+  background:var(--cream);
+  border:1px solid var(--cream);
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:12px;
+  line-height:1;
+  letter-spacing:.15em;
+  text-transform:uppercase;
+  transition:background .2s ease,color .2s ease,border-color .2s ease;
+}
+.partnerships-page .pt-cta:hover{
+  background:transparent;
+  color:var(--cream);
+  border-color:var(--cream);
+}
+/* Keyboard users get the ring in the colour of the band they are on. */
+.pt-hero :focus-visible,
+.pt-fit :focus-visible,
+.pt-request :focus-visible,
+.pt-final :focus-visible{outline-color:var(--cream)}
+
+/* ══ 1 — THE HERO, ON BLUE ═════════════════════════════════ */
+.pt-hero{
+  background:var(--blue);
+  color:var(--cream);
+  padding-block:clamp(78px,7vw,124px) clamp(66px,6vw,96px);
+  padding-inline:var(--rail-gutter);
+}
+/* Copy leads; the index is a narrow companion column, not a panel. It
+   bottom-aligns with the CTA, so the two columns finish together and the
+   headline is left alone at the top - the asymmetry is the point, and it
+   is what stops the band opening a dead corner under the list. */
+.pt-hero-inner{
+  display:grid;
+  grid-template-columns:minmax(0,1.55fr) minmax(0,.85fr);
+  gap:clamp(40px,5vw,96px);
+  align-items:end;
+}
+.pt-hero .pt-hero-eyebrow{color:rgba(245,235,226,.72)}
+/* The two lines stack, the way every other GLOA hero sets its headline. */
+.pt-hero-headline{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  max-width:1080px;
+  margin:clamp(18px,1.8vw,26px) 0 0;
+  letter-spacing:normal;
+  line-height:1;
+}
+.pt-hero-line{color:var(--cream)}
+.pt-hero-line-accent{margin-top:4px}
+.pt-hero-lead{
+  margin:clamp(26px,2.6vw,36px) 0 0;
+  max-width:560px;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:var(--type-body);
+  line-height:1.55;
+  color:var(--cream);
+}
+.pt-hero .pt-cta{margin-top:clamp(30px,3vw,40px);color:var(--blue)}
+
+/* The right column is a list, not an illustration: five words, five
+   numbers and a hairline under each. */
+.pt-hero-index{
+  list-style:none;
+  margin:clamp(8px,1vw,16px) 0 0;
+  padding:0;
+  border-top:1px solid rgba(245,235,226,.34);
+}
+.pt-hero-index li{
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr);
+  gap:clamp(14px,1.6vw,22px);
+  align-items:baseline;
+  padding:clamp(14px,1.5vw,19px) 0;
+  border-bottom:1px solid rgba(245,235,226,.34);
+}
+.pt-hero-index-num{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-size:11px;
+  line-height:1.2;
+  letter-spacing:.08em;
+  color:rgba(245,235,226,.72);
+}
+.pt-hero-index-label{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-size:clamp(13px,1.05vw,15px);
+  line-height:1.2;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--cream);
+}
+
+/* ══ 2 — PARTNERSHIP TYPES, ON CREAM ═══════════════════════ */
+.pt-types{
+  background:var(--cream);
+  color:var(--ink);
+  padding-block:clamp(80px,6.6vw,116px);
+  padding-inline:var(--rail-gutter);
+}
+.pt-types .pt-eyebrow,
+.pt-types .pt-line,
+.pt-types .pt-line-accent,
+.pt-types .pt-num{color:var(--ink)}
+.pt-types-head{max-width:940px}
+.pt-types .pt-intro{color:rgba(17,17,17,.82)}
+/* Three across, two rows. Open: one raspberry hairline per item and
+   nothing else - no panel, no border box, no shadow. */
+.pt-types-grid{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  column-gap:clamp(28px,3vw,56px);
+  row-gap:clamp(38px,3.6vw,54px);
+  margin-top:clamp(48px,4.6vw,72px);
+}
+.pt-type{
+  display:grid;
+  gap:clamp(10px,1vw,14px);
+  align-content:start;
+  padding-top:clamp(18px,1.8vw,24px);
+  border-top:1px solid var(--berry);
+}
+.pt-types .pt-num{color:var(--berry)}
+.pt-type-title{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:clamp(17px,1.35vw,20px);
+  line-height:1.25;
+  letter-spacing:.02em;
+  text-transform:uppercase;
+  color:var(--ink);
+}
+.pt-type-copy{
+  margin:0;
+  max-width:420px;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:clamp(15px,1.1vw,16px);
+  line-height:1.6;
+  color:rgba(17,17,17,.82);
+}
+
+/* ══ 3 — GOOD FIT, ON RASPBERRY ════════════════════════════ */
+.pt-fit{
+  background:var(--berry);
+  color:var(--cream);
+  padding-block:clamp(80px,6.6vw,116px);
+  padding-inline:var(--rail-gutter);
+}
+/* Copy left, the three principles stacked right. */
+.pt-fit-inner{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  gap:clamp(40px,5vw,96px);
+  align-items:start;
+}
+.pt-fit .pt-eyebrow,
+.pt-fit .pt-line,
+.pt-fit .pt-line-accent{color:var(--cream)}
+.pt-fit .pt-intro{color:rgba(245,235,226,.88)}
+.pt-fit-list{
+  margin-top:clamp(6px,.8vw,14px);
+  border-top:1px solid rgba(245,235,226,.34);
+}
+.pt-principle{
+  display:grid;
+  grid-template-columns:clamp(46px,4vw,72px) minmax(0,1fr);
+  gap:clamp(8px,1vw,14px) clamp(16px,2vw,30px);
+  padding:clamp(24px,2.4vw,32px) 0;
+  border-bottom:1px solid rgba(245,235,226,.34);
+}
+.pt-fit .pt-num{color:rgba(245,235,226,.72);grid-row:1 / span 2}
+.pt-principle-title{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:clamp(17px,1.35vw,20px);
+  line-height:1.25;
+  letter-spacing:.02em;
+  text-transform:uppercase;
+  color:var(--cream);
+}
+.pt-principle-copy{
+  margin:0;
+  max-width:460px;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:clamp(15px,1.1vw,16px);
+  line-height:1.6;
+  color:rgba(245,235,226,.88);
+}
+
+/* ══ 4 — HOW WE WORK, ON CREAM ═════════════════════════════ */
+.pt-process{
+  background:var(--cream);
+  color:var(--ink);
+  padding-block:clamp(80px,6.6vw,116px);
+  padding-inline:var(--rail-gutter);
+}
+.pt-process .pt-eyebrow,
+.pt-process .pt-line,
+.pt-process .pt-line-accent{color:var(--ink)}
+.pt-process-head{max-width:940px}
+.pt-process .pt-intro{color:rgba(17,17,17,.82)}
+/* Four columns, and the four top borders meet to read as ONE hairline
+   running the width of the rail. That is the process line - there is
+   no drawn connector and no card. */
+.pt-process-steps{
+  list-style:none;
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:0;
+  margin:clamp(48px,4.6vw,72px) 0 0;
+  padding:0;
+}
+.pt-step{
+  display:grid;
+  gap:clamp(10px,1vw,14px);
+  align-content:start;
+  padding:clamp(18px,1.8vw,24px) clamp(20px,2vw,34px) 0 0;
+  border-top:1px solid var(--berry);
+}
+.pt-process .pt-num{color:var(--berry)}
+.pt-step-title{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:clamp(17px,1.35vw,20px);
+  line-height:1.25;
+  letter-spacing:.02em;
+  text-transform:uppercase;
+  color:var(--ink);
+}
+.pt-step-copy{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:clamp(15px,1.1vw,16px);
+  line-height:1.6;
+  color:rgba(17,17,17,.82);
+}
+
+/* ══ 5 — THE REQUEST FORM, ON PLUM ═════════════════════════ */
+/* DESIGN PHASE. This is form UI: real labels, real fieldsets, real
+   legends, and no submission path of any kind. */
+.pt-request{
+  background:var(--plum);
+  color:var(--cream);
+  padding-block:clamp(86px,7vw,124px);
+  padding-inline:var(--rail-gutter);
+  scroll-margin-top:clamp(70px,8vw,110px);
+}
+.pt-request .pt-eyebrow,
+.pt-request .pt-line,
+.pt-request .pt-line-accent{color:var(--cream)}
+.pt-request-head{max-width:940px}
+.pt-request .pt-intro{color:rgba(245,235,226,.88)}
+.pt-form{
+  display:grid;
+  gap:clamp(42px,4vw,60px);
+  margin-top:clamp(52px,5vw,76px);
+}
+/* A fieldset is a semantic group, not a box: the browser's own border
+   and padding are removed and a hairline carries the division. */
+.pt-group{
+  min-width:0;
+  margin:0;
+  padding:clamp(22px,2.2vw,30px) 0 0;
+  border:0;
+  border-top:1px solid rgba(245,235,226,.34);
+}
+.pt-legend{
+  padding:0;
+  margin:0 0 clamp(22px,2.2vw,30px);
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:var(--type-meta);
+  line-height:1.2;
+  letter-spacing:.2em;
+  text-transform:uppercase;
+  color:rgba(245,235,226,.72);
+}
+.pt-fields{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  column-gap:clamp(28px,2.8vw,44px);
+  row-gap:clamp(26px,2.6vw,34px);
+}
+.pt-wide{grid-column:1 / -1}
+.pt-form label{
+  display:grid;
+  gap:9px;
+  min-width:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:11px;
+  line-height:1.25;
+  letter-spacing:.1em;
+  text-transform:uppercase;
+  color:var(--cream);
+}
+/* Bottom-border fields, never boxes. Cream, never white. */
+.pt-form input[type="text"],
+.pt-form input[type="email"],
+.pt-form input[type="tel"],
+.pt-form input[type="url"],
+.pt-form textarea{
+  width:100%;
+  min-width:0;
+  background:transparent;
+  color:var(--cream);
+  border:0;
+  border-bottom:1px solid rgba(245,235,226,.62);
+  border-radius:0;
+  padding:13px 0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:16px;
+  line-height:1.4;
+  letter-spacing:0;
+  transition:border-color .2s ease;
+}
+.pt-form input::placeholder,
+.pt-form textarea::placeholder{color:rgba(245,235,226,.60)}
+.pt-form input:focus,
+.pt-form textarea:focus{border-bottom-color:var(--cream)}
+.pt-form textarea{resize:vertical}
+
+/* ── THE MULTI-SELECTS ─────────────────────────────────────── */
+/* Square boxes, cream hairline, cream fill when chosen. The tick is
+   drawn from the box's own borders so no image is needed. */
+.pt-checks{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  column-gap:clamp(20px,2vw,32px);
+  row-gap:clamp(14px,1.4vw,18px);
+}
+.pt-checks-radio{grid-template-columns:repeat(3,minmax(0,1fr));max-width:600px}
+.pt-check{
+  display:flex;
+  flex-direction:row;
+  align-items:center;
+  gap:12px;
+  min-height:44px;
+  cursor:pointer;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:12px;
+  line-height:1.3;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:var(--cream);
+}
+/* The native control stays in the accessibility tree and keeps the
+   keyboard behaviour; only its paint is replaced. */
+.pt-check input{
+  position:absolute;
+  width:1px;
+  height:1px;
+  opacity:0;
+  margin:0;
+  pointer-events:none;
+}
+.pt-check-box{
+  position:relative;
+  flex:0 0 auto;
+  width:18px;
+  height:18px;
+  border:1px solid rgba(245,235,226,.62);
+  background:transparent;
+  transition:background .15s ease,border-color .15s ease;
+}
+.pt-check:hover .pt-check-box{border-color:var(--cream)}
+.pt-check input:checked+.pt-check-box{
+  background:var(--cream);
+  border-color:var(--cream);
+}
+.pt-check input:checked+.pt-check-box::after{
+  content:"";
+  position:absolute;
+  left:5px;
+  top:1px;
+  width:5px;
+  height:10px;
+  border-right:2px solid var(--plum);
+  border-bottom:2px solid var(--plum);
+  transform:rotate(43deg);
+}
+.pt-check input:focus-visible+.pt-check-box{
+  outline:3px solid var(--cream);
+  outline-offset:3px;
+}
+
+.pt-question{
+  margin:0 0 clamp(16px,1.6vw,22px);
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:12px;
+  line-height:1.4;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:var(--cream);
+}
+.pt-checks-radio+.pt-fields{margin-top:clamp(26px,2.6vw,34px);max-width:600px}
+.pt-form-note{
+  margin:0;
+  max-width:620px;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:clamp(14px,1.05vw,15px);
+  line-height:1.6;
+  color:rgba(245,235,226,.78);
+}
+.pt-request .pt-submit{margin-top:0;color:var(--plum)}
+
+/* ══ 6 — THE FINAL CTA, ON BLUE ════════════════════════════ */
+/* Compact on purpose: an ending, not a second hero. */
+.pt-final{
+  background:var(--blue);
+  color:var(--cream);
+  padding-block:clamp(72px,5.6vw,96px);
+  padding-inline:var(--rail-gutter);
+}
+.pt-final-inner{
+  display:grid;
+  grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr);
+  gap:clamp(34px,4vw,80px);
+  align-items:end;
+}
+.pt-final .pt-eyebrow{color:rgba(245,235,226,.72)}
+.pt-final .pt-line,
+.pt-final .pt-line-accent{color:var(--cream)}
+.pt-final-side{display:flex;flex-direction:column;align-items:flex-start;gap:clamp(22px,2.2vw,30px)}
+.pt-final-lead{
+  margin:0;
+  max-width:420px;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:var(--type-body);
+  line-height:1.55;
+  color:var(--cream);
+}
+.pt-final .pt-cta{color:var(--blue)}
+
+/* ══ RESPONSIVE ════════════════════════════════════════════ */
+@media (max-width:1100px){
+  /* The hero index drops under the copy rather than squeezing it. */
+  .pt-hero-inner{grid-template-columns:minmax(0,1fr)}
+  .pt-hero-index{margin-top:clamp(34px,4vw,48px);max-width:520px}
+  .pt-fit-inner{grid-template-columns:minmax(0,1fr)}
+  .pt-types-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  /* Two by two, and the reading order stays 01 02 / 03 04. */
+  .pt-process-steps{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:clamp(30px,3.4vw,42px)}
+  .pt-checks{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .pt-final-inner{grid-template-columns:minmax(0,1fr);align-items:start}
+}
+
+@media (max-width:900px){
+  .pt-hero{padding-block:clamp(58px,10vw,78px) clamp(52px,9vw,68px)}
+  .pt-types,
+  .pt-fit,
+  .pt-process{padding-block:clamp(62px,10vw,84px)}
+  .pt-request{padding-block:clamp(66px,10vw,90px)}
+  .pt-final{padding-block:clamp(56px,9vw,74px)}
+  /* One section scale down, in one place, exactly as /about does it. */
+  .partnerships-page .pt-line{font-size:clamp(36px,9.2vw,44px)}
+  .partnerships-page .pt-line-accent{font-size:clamp(38px,10vw,46px)}
+  .pt-fields{grid-template-columns:minmax(0,1fr)}
+  .pt-checks{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .pt-checks-radio{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+
+@media (max-width:760px){
+  .pt-types-grid{grid-template-columns:minmax(0,1fr);row-gap:clamp(30px,5vw,40px)}
+  .pt-type-copy,
+  .pt-principle-copy{max-width:none}
+  /* Vertical sequence, 01 through 04, each keeping its hairline. */
+  .pt-process-steps{grid-template-columns:minmax(0,1fr);row-gap:clamp(26px,4.4vw,34px)}
+  .pt-step{padding-right:0}
+  .pt-principle{grid-template-columns:minmax(0,1fr);gap:clamp(8px,2vw,12px)}
+  .partnerships-page .pt-fit .pt-num{grid-row:auto}
+  .pt-hero-lead,
+  .pt-hero-index{max-width:none}
+  .pt-form-note{max-width:none}
+  /* Full-width controls, and a target that stays comfortable. */
+  .partnerships-page .pt-cta{width:100%;justify-content:center;padding:18px 20px}
+}
+
+@media (max-width:520px){
+  .pt-checks{grid-template-columns:minmax(0,1fr)}
+  .pt-checks-radio{grid-template-columns:minmax(0,1fr);max-width:none}
+  .pt-checks-radio+.pt-fields{max-width:none}
+  .pt-check{min-height:46px}
+}

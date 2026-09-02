@@ -25,7 +25,11 @@ const css = read("app/globals.css");
 
 const blockAt = css.indexOf("THE PAGE HERO TYPE SYSTEM");
 assert.notEqual(blockAt, -1, "the canonical hero block was not found");
-const rules = css.slice(css.lastIndexOf("/*", blockAt));
+// Bounded at the next banner, so blocks appended after this one - the
+// /partnerships page, and whatever follows it - are not read as ours.
+const heroStart = css.lastIndexOf("/*", blockAt);
+const heroEnd = css.indexOf("/* ══════", blockAt);
+const rules = css.slice(heroStart, heroEnd === -1 ? css.length : heroEnd);
 const code = rules.replace(/\/\*[\s\S]*?\*\//g, "");
 
 const rule = name => {
@@ -151,9 +155,14 @@ const HEROES = [
   ["/contact", '<p className="eyebrow gloa-hero-eyebrow">KONTAKT</p>',
     ['<h1 className="gloa-hero-primary">Schreib'],
     '<i className="gloa-hero-secondary">uns.</i>'],
+  // Added with the page itself rather than converted: /partnerships was
+  // built on this scale from the start and never had one of its own.
+  ["/partnerships", '<p className="eyebrow pt-eyebrow pt-hero-eyebrow gloa-hero-eyebrow">',
+    ['<span className="pt-hero-line gloa-hero-primary">Your idea.</span>'],
+    '<i className="pt-hero-line pt-hero-line-accent gloa-hero-secondary">Our Matcha.</i>'],
 ];
 
-test("6: all six non-homepage heroes carry the canonical classes", () => {
+test("6: all seven non-homepage heroes carry the canonical classes", () => {
   for (const [route, eyebrow, primaries, secondary] of HEROES) {
     assert.ok(site.includes(eyebrow), `${route}: eyebrow is off the system`);
     for (const p of primaries) assert.ok(site.includes(p), `${route}: primary is off the system`);
@@ -167,7 +176,7 @@ test("6b: no route-specific hero size, weight or family survives", () => {
   // Every route hero rule may still hold colour and margin - and nothing
   // typographic, or it would outrank the shared class.
   const TYPO = /(font-family|font-style|font-weight|font-size|line-height|letter-spacing)\s*:/;
-  const ROUTE_HERO = /^\.(shop-hero-line|shop-hero-line-accent|matcha-hero-line|matcha-hero-line-accent|about-hero-line|about-hero-line-accent|rezepte-page h1|contact-hero h1)( i)?$|^\.b2b-hero \.b2b-hero-line(-accent)?$/;
+  const ROUTE_HERO = /^\.(shop-hero-line|shop-hero-line-accent|matcha-hero-line|matcha-hero-line-accent|about-hero-line|about-hero-line-accent|pt-hero-line|pt-hero-line-accent|rezepte-page h1|contact-hero h1)( i)?$|^\.b2b-hero \.b2b-hero-line(-accent)?$/;
   const bare = css.replace(/\/\*[\s\S]*?\*\//g, "");
   let checked = 0;
   for (const m of bare.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
@@ -176,7 +185,7 @@ test("6b: no route-specific hero size, weight or family survives", () => {
     checked++;
     assert.ok(!TYPO.test(m[2]), `${sel} still sets hero typography: ${m[2].slice(0, 70)}`);
   }
-  assert.ok(checked >= 6, `only ${checked} route hero rules were scanned`);
+  assert.ok(checked >= 8, `only ${checked} route hero rules were scanned`);
 
   // The two shared italic lists no longer reach a hero, and still serve
   // their h2 consumers.
@@ -222,13 +231,15 @@ test("7: typography only - no colour, layout or copy in the hero system", () => 
   assert.match(css, /\.b2b-hero \.b2b-hero-line\{color:var\(--cream\)\}/);
   assert.match(css, /\.b2b-hero \.b2b-hero-line-accent\{margin-top:6px;color:var\(--cream\)\}/);
   assert.match(css, /\.about-hero-eyebrow\{color:rgba\(245,235,226,\.72\)\}/);
+  assert.match(css, /\.pt-hero-line\{color:var\(--cream\)\}/);
 
   // And every hero's copy, word for word.
   for (const copy of ["Matcha.<br/><span className=\"hero-line-2\">Is for everyone.",
                       "Alles von", "GLOA.", "alles was du brauchst.",
                       "Ohne Umwege.", "Good energy.", "No theatre.",
                       "Dein Matcha.", "Dein Signature-Drink.",
-                      "Matcha Rezepte.", "GLOA Edition.", "Schreib", "uns."]) {
+                      "Matcha Rezepte.", "GLOA Edition.", "Schreib", "uns.",
+                      "Your idea.", "Our Matcha."]) {
     assert.ok(site.includes(copy), `hero copy changed: ${copy}`);
   }
 });
@@ -259,13 +270,13 @@ test("7b: Cormorant is untouched everywhere it is not a page hero", () => {
 test("7c: no non-hero heading was pulled into the hero scale", () => {
   // The canonical classes appear on hero elements only.
   const uses = [...site.matchAll(/gloa-hero-(eyebrow|primary|secondary)/g)];
-  // 6 eyebrows + 7 primary lines (/shop has two) + 6 second lines.
-  assert.equal(uses.length, 19, `unexpected number of hero-class uses: ${uses.length}`);
+  // 7 eyebrows + 8 primary lines (/shop has two) + 7 second lines.
+  assert.equal(uses.length, 22, `unexpected number of hero-class uses: ${uses.length}`);
   // Every use sits on an element whose own class names it a hero, or on
   // the /rezepte and /contact hero h1/i that have no other class.
   for (const m of site.matchAll(/className="([^"]*gloa-hero-[^"]*)"/g)) {
     const cls = m[1];
-    assert.ok(/(shop-hero|matcha-hero|about-hero|b2b-hero)-/.test(cls)
+    assert.ok(/(shop-hero|matcha-hero|about-hero|b2b-hero|pt-hero)-/.test(cls)
       || cls === "eyebrow gloa-hero-eyebrow"
       || cls === "gloa-hero-primary" || cls === "gloa-hero-secondary",
       `a hero class landed somewhere unexpected: ${cls}`);
