@@ -44,12 +44,12 @@ export async function generateMetadata(): Promise<Metadata> {
     title: "GLOA · Matcha aus Japan",
     description: "Matcha aus Shizuoka, Japan. Für Latte, pur oder wie du willst.",
     icons: { icon: "/favicon.svg" },
-    openGraph: { title: "GLOA · Matcha aus Japan", description: "Matcha aus Japan. Bald in Berlin.", images: [{ url: "/og.png", width: 1732, height: 909 }] },
-    twitter: { card: "summary_large_image", title: "GLOA · Matcha aus Japan", description: "Matcha aus Japan. Bald in Berlin.", images: ["/og.png"] },
+    openGraph: { title: "GLOA · Matcha aus Japan", description: "Matcha aus Japan. Bald in Berlin.", images: [{ url: "/gloa-logo-slogan-link.png", width: 1731, height: 909 }] },
+    twitter: { card: "summary_large_image", title: "GLOA · Matcha aus Japan", description: "Matcha aus Japan. Bald in Berlin.", images: ["/gloa-logo-slogan-link.png"] },
   };
 }
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const organization = { "@context": "https://schema.org", "@type": "Organization", name: "GLOA", url: "/" };
+  const organization = { "@context": "https://schema.org", "@type": "Organization", name: "GLOA", url: "/", logo: "/gloa-logo-slogan-link.png" };
   return <html lang="de"><body className={`${sans.variable} ${display.variable}`}><script type="application/ld+json" dangerouslySetInnerHTML={{__html:JSON.stringify(organization)}} />{children}</body></html>;
 }
