@@ -9,7 +9,7 @@ import { BRAND } from "./content";
 // B2B and Rezepte: the two business-facing routes stay adjacent and the
 // editorial one keeps the end of the row.
 const links:[ string, string ][] = [["/","Startseite"],["/shop","Kaufen"],["/our-matcha","Unser Matcha"],["/about","Über GLOA"],["/for-cafes","B2B"],["/partnerships","Partnerschaften"],["/rezepte","Rezepte"]];
-export function Mark(){return <Link className="wordmark" href="/" aria-label="GLOA Startseite"><span className="wordmark-glyph" aria-hidden="true"/><span className="wordmark-tm">®</span></Link>}
+export function Mark(){return <Link className="wordmark" href="/" aria-label="GLOA Startseite"><span className="wordmark-glyph" aria-hidden="true"/></Link>}
 export function Header({onCart,cartCount}:{onCart:()=>void;cartCount:number}){
  const [open,setOpen]=useState(false);const [search,setSearch]=useState(false);const [scrolled,setScrolled]=useState(false);const path=usePathname();
  useEffect(()=>{const s=()=>{setScrolled(window.scrollY>10)};window.addEventListener("scroll",s,{passive:true});s();return()=>window.removeEventListener("scroll",s)},[]);
