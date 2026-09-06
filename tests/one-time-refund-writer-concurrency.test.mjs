@@ -101,22 +101,26 @@ test("1: 038 exists, owns its number, and 039 is the only one above it", () => {
   // in tests/annual-plan-foundation-migration.test.mjs. 038 is therefore
   // no longer the highest, and this is re-pinned rather than deleted:
   // what it protects is that no UNREVIEWED migration appeared.
-  assert.equal(files[files.length - 4], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 5], MIGRATION_038, "038 must be the one before it");
-  assert.equal(files[files.length - 6], MIGRATION_037, "037 must be the one before that");
+  assert.equal(files[files.length - 5], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 6], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 7], MIGRATION_037, "037 must be the one before that");
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
 
-test("2: no migration 043 or beyond", () => {
+test("2: no migration 044 or beyond", () => {
   // Phase 4B3.2 added 040, the annual checkout retry fingerprints,
   // reviewed in tests/annual-plan-checkout.test.mjs.
   const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 38).sort();
   // Phase 4B8.1 added 041, column-level privileges on the two annual
   // tables, reviewed in tests/annual-account-privileges-migration.test.mjs.
-  assert.deepEqual(beyond, [MIGRATION_039, MIGRATION_040, MIGRATION_041, MIGRATION_042],
-    "an unreviewed migration appeared after 041");
+  // Phase 5 added 043, public.launch_waitlist - one new table, RLS on,
+  // no anon or authenticated grant, and no existing object touched.
+  // Reviewed in tests/launch-waitlist.test.mjs.
+  assert.deepEqual(beyond, [MIGRATION_039, MIGRATION_040, MIGRATION_041, MIGRATION_042,
+    "043_launch_waitlist.sql"],
+    "an unreviewed migration appeared after 043");
   // And 039 kept its hands off this phase's writer entirely.
   for (const name of [MIGRATION_039, MIGRATION_040, MIGRATION_041, MIGRATION_042]) {
     const sql = read(`supabase/migrations/${name}`);

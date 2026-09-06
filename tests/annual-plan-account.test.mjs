@@ -792,9 +792,9 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
   // only - no table, no column, no function, no policy, no row.
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 42);
+  assert.equal(migrations.length, 43);
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 42), [], "a 043 appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 43), [], "a 045 appeared");
 
   // The API surface is unchanged: no account endpoint exists, because the
   // portal reads its own rows under RLS.
@@ -815,6 +815,14 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
     "/internal/orders/cancel",
     "/internal/orders/cancellation-request/resolve",
     "/internal/orders/ship",
+    // PHASE 5. The launch waitlist: one public POST that records the
+    // entry and mails the double opt-in, plus the two token links that
+    // confirm and withdraw it. No account endpoint - these are reachable
+    // without an account and read no account row. Reviewed in
+    // tests/launch-waitlist.test.mjs.
+    "/launch",
+    "/launch/confirm",
+    "/launch/withdraw",
     "/orders/cancellation-request",
     "/orders/success",
     "/stripe/webhook",

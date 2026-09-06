@@ -109,7 +109,11 @@ test("035 exists, is the only 035, and only 036 and 037 follow it", () => {
      // Phase 4B8.1: annual account column privileges. It grants and
      // revokes on the two annual tables and nowhere else.
      "041_annual_account_column_privileges.sql",
-     "042_annual_delivery_rls_parent_user_privilege.sql"],
+     "042_annual_delivery_rls_parent_user_privilege.sql",
+     // Phase 5. public.launch_waitlist: one new table for the one-time
+     // launch notification, RLS on, no anon/authenticated grant, and no
+     // existing object touched. Reviewed in tests/launch-waitlist.test.mjs.
+     "043_launch_waitlist.sql"],
     "an unreviewed migration above 035 appeared"
   );
   // And 039 leaves this table entirely alone. An annual plan's one
@@ -613,6 +617,12 @@ test("exactly the three reviewed lifecycle templates were built on this foundati
     "cancellationOutcome.ts",
     "cancellationRequestNotification.ts",
     "internalOrderNotification.ts",
+    // Phase 5 added launchConfirmation.ts, the double opt-in mail for
+    // the one-time launch notification list. It is a customer message
+    // with its own purpose and carries no marketing at all; it does not
+    // touch any order, subscription or cancellation flow. Reviewed in
+    // tests/launch-waitlist.test.mjs.
+    "launchConfirmation.ts",
     "orderConfirmation.ts",
     "paymentProblem.ts",
     "refundConfirmation.ts",

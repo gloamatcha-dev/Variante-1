@@ -534,7 +534,14 @@ test("email: no new template and no new Resend namespace", () => {
     "annualPurchaseConfirmation.ts",
     "cancellationConfirmation.ts", "cancellationOutcome.ts",
     "cancellationRequestNotification.ts",
-    "internalOrderNotification.ts", "orderConfirmation.ts", "paymentProblem.ts",
+    "internalOrderNotification.ts",
+    // Phase 5 added launchConfirmation.ts, the double opt-in mail for
+    // the one-time launch notification list. It is a customer message
+    // with its own purpose and carries no marketing at all; it does not
+    // touch any order, subscription or cancellation flow. Reviewed in
+    // tests/launch-waitlist.test.mjs.
+    "launchConfirmation.ts",
+    "orderConfirmation.ts", "paymentProblem.ts",
     "refundConfirmation.ts", "shipmentConfirmation.ts", "subscriptionEnded.ts",
     "subscriptionStarted.ts",
     "withdrawalConfirmation.ts",

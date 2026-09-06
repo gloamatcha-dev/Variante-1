@@ -1,0 +1,746 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import {
+  CONFIRMATION_TOKEN_TTL_DAYS,
+  LAUNCH_AUDIENCE_TYPES,
+  LAUNCH_CONSENT_TEXT,
+  LAUNCH_CONSENT_VERSION,
+  LAUNCH_PURPOSE,
+  LAUNCH_SOURCES,
+  PENDING_RETENTION_DAYS,
+  createToken,
+  hashToken,
+  isConfirmationExpired,
+  isValidEmail,
+  isWellFormedToken,
+  mayReceiveLaunchNotification,
+  normalizeEmail,
+  normalizeFirstName,
+  resolveAudienceType,
+  resolveSource,
+  tokenMatchesHash,
+} from "../lib/launchWaitlist.ts";
+
+import {
+  LAUNCH_RATE_LIMIT_MAX,
+  LAUNCH_RATE_LIMIT_WINDOW_MS,
+  consumeRateLimit,
+  rateLimitKeyFromRequest,
+} from "../lib/launchRateLimit.ts";
+
+import { buildLaunchConfirmationEmail } from "../lib/email/launchConfirmation.ts";
+
+/* ══════════════════════════════════════════════════════════════
+   THE LAUNCH WAITLIST
+
+   SAFE DEFAULT SUITE: pure functions driven with explicit inputs, plus
+   source-level checks on the page, the routes, the migration and the
+   privacy notice.
+
+   Nothing here reads a wall clock - every expiry assertion passes its
+   own `now` - and nothing renders a page, opens a socket, constructs a
+   Supabase or Resend client, or touches a database.
+
+   WHAT THIS SUITE IS ACTUALLY PROTECTING is one promise: that an email
+   address given for a launch notification is used for the launch
+   notification and for nothing else. Most of the assertions below exist
+   to make that promise expensive to break by accident - which is the
+   only way it would ever be broken.
+   ══════════════════════════════════════════════════════════════ */
+
+const ROOT = path.resolve(fileURLToPath(import.meta.url), "../..");
+const read = (rel) => readFileSync(path.join(ROOT, rel), "utf-8");
+
+/**
+ * COMMENTS ARE NOT CODE, AND THIS SUITE MUST NOT CONFUSE THE TWO.
+ *
+ * Several assertions below ban a word - "defaultChecked", "YOU'RE ON
+ * THE LIST", "delete from public." - and the source files discuss those
+ * exact words in comments precisely in order to forbid them. Matching
+ * there is the opposite of a bug: it would mean a file is penalised for
+ * explaining itself, and the honest fix would be to delete the
+ * explanation. So the banned-word checks run against code with the
+ * prose removed.
+ *
+ * Line comments are only stripped when the line STARTS with `//`, so a
+ * `https://` inside a string is never mistaken for one.
+ */
+const stripJs = (src) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+const stripSql = (src) => src.replace(/^\s*--.*$/gm, "");
+
+const launchPage = read("app/LaunchPage.tsx");
+const signupRoute = read("app/api/launch/route.ts");
+const confirmRoute = read("app/api/launch/confirm/route.ts");
+const withdrawRoute = read("app/api/launch/withdraw/route.ts");
+const migration = read("supabase/migrations/043_launch_waitlist.sql");
+const gloaSite = read("app/GloaSite.tsx");
+const emailTemplate = read("lib/email/launchConfirmation.ts");
+
+/* ── 1. Email normalisation ─────────────────────────────────── */
+
+test("1: the email is trimmed and lowercased, so one person cannot become two rows", () => {
+  assert.equal(normalizeEmail("  Anna@Example.COM  "), "anna@example.com");
+  assert.equal(normalizeEmail("anna@example.com"), "anna@example.com");
+  assert.equal(normalizeEmail("\tANNA@EXAMPLE.COM\n"), "anna@example.com");
+  // The three spellings above collapse to one value, which is what the
+  // unique constraint in the migration is placed on.
+  const spellings = ["Anna@Example.COM", " anna@example.com ", "ANNA@EXAMPLE.com"];
+  assert.equal(new Set(spellings.map(normalizeEmail)).size, 1);
+});
+
+test("2: an invalid or oversized email is rejected", () => {
+  for (const bad of ["", "   ", "anna", "anna@", "@example.com", "anna example.com", "anna@example"]) {
+    assert.equal(isValidEmail(normalizeEmail(bad)), false, `accepted: ${JSON.stringify(bad)}`);
+  }
+  assert.equal(isValidEmail(normalizeEmail(`${"a".repeat(250)}@example.com`)), false, "accepted an over-long address");
+  assert.equal(isValidEmail("anna@example.com"), true);
+});
+
+/* ── 2. Data minimisation ───────────────────────────────────── */
+
+test("3: the first name is optional and never a reason to fail", () => {
+  assert.equal(normalizeFirstName(undefined), null);
+  assert.equal(normalizeFirstName(null), null);
+  assert.equal(normalizeFirstName(""), null);
+  assert.equal(normalizeFirstName("   "), null);
+  assert.equal(normalizeFirstName(42), null);
+  assert.equal(normalizeFirstName("  Anna  "), "Anna");
+  assert.equal(normalizeFirstName("x".repeat(400)).length, 100, "an over-long name must be cut, not rejected");
+});
+
+test("4: the form asks for an email, a first name and an optional bracket - nothing else", () => {
+  // The fields the page actually renders.
+  assert.match(launchPage, /name="email"/);
+  assert.match(launchPage, /name="firstName"/);
+  assert.match(launchPage, /name="audienceType"/);
+  assert.match(launchPage, /name="consent"/);
+  assert.match(launchPage, /name="website"/); // honeypot
+
+  // And the ones it must never grow.
+  for (const forbidden of [
+    'name="lastName"', 'name="surname"', 'name="phone"', 'name="tel"',
+    'name="street"', 'name="address"', 'name="zip"', 'name="city"',
+    'name="birthday"', 'name="dateOfBirth"', 'name="company"', 'name="gender"',
+  ]) {
+    assert.ok(!launchPage.includes(forbidden), `the launch form collects: ${forbidden}`);
+  }
+
+  // Only the email carries `required`. A required attribute on the name
+  // or the bracket would quietly make an optional field mandatory.
+  const emailField = launchPage.slice(launchPage.indexOf('id="launch-email"'));
+  assert.match(emailField.slice(0, 400), /required/);
+  const nameField = launchPage.slice(launchPage.indexOf('id="launch-first-name"'), launchPage.indexOf('id="launch-email"'));
+  assert.ok(!nameField.includes("required"), "the first name must stay optional");
+});
+
+test("5: the audience bracket is optional, coarse, and not a sales pipeline", () => {
+  assert.deepEqual([...LAUNCH_AUDIENCE_TYPES], ["private", "cafe", "studio", "business", "other"]);
+  assert.equal(resolveAudienceType(undefined), null);
+  assert.equal(resolveAudienceType(""), null);
+  assert.equal(resolveAudienceType("vip"), null, "an unknown bracket must not be stored");
+  assert.equal(resolveAudienceType("cafe"), "cafe");
+  // The page offers a genuine "no answer" option, so somebody can leave
+  // it blank without hunting for a way to.
+  assert.match(launchPage, /<option value="">Keine Angabe<\/option>/);
+});
+
+/* ── 3. Consent ─────────────────────────────────────────────── */
+
+test("6: the consent box is not pre-ticked, anywhere", () => {
+  const code = stripJs(launchPage);
+  const consentBlock = code.slice(code.indexOf('id="launch-consent"'));
+  const input = consentBlock.slice(0, consentBlock.indexOf("/>") + 2);
+  assert.match(input, /type="checkbox"/);
+  assert.ok(!input.includes("defaultChecked"), "the consent box ships pre-ticked");
+  assert.ok(!/\bchecked\b/.test(input), "the consent box ships pre-ticked");
+  // And nothing else on the page is pre-ticked either.
+  assert.ok(!code.includes("defaultChecked"), "something on this page is pre-ticked");
+  assert.ok(!/\bchecked=/.test(code), "something on this page is pre-ticked");
+});
+
+test("7: the server refuses a submission that does not carry an explicit consent === true", () => {
+  // Client validation is not consent. The route makes the decision.
+  assert.match(signupRoute, /if \(consent !== true\)/);
+  const guard = signupRoute.indexOf("consent !== true");
+  const insert = signupRoute.indexOf(".upsert(");
+  assert.ok(guard !== -1 && insert !== -1 && guard < insert, "the consent gate must precede the write");
+});
+
+test("8: the consent wording is stored with the row, and comes from the server", () => {
+  // What has to be provable later is what THIS person agreed to.
+  assert.match(signupRoute, /consent_version: LAUNCH_CONSENT_VERSION/);
+  assert.match(signupRoute, /consent_text: LAUNCH_CONSENT_TEXT/);
+  assert.match(signupRoute, /consent_given_at: nowIso/);
+  // And it is not taken from the request body, where a caller could
+  // have written any wording it liked.
+  const destructured = signupRoute.slice(signupRoute.indexOf("const {"), signupRoute.indexOf("} = body"));
+  for (const smuggled of ["consentText", "consent_text", "consentVersion", "purpose"]) {
+    assert.ok(!destructured.includes(smuggled), `the route reads ${smuggled} from the request body`);
+  }
+});
+
+test("9: the wording rendered to the person is the wording that gets stored", () => {
+  // The page and the constant must not drift apart, or the stored
+  // consent text stops describing what was actually on screen.
+  assert.match(LAUNCH_CONSENT_TEXT, /ausschließlich für diese Launch-Benachrichtigung verwendet/);
+  const collapse = (s) => s.replace(/\s+/g, " ").trim();
+  assert.ok(
+    collapse(launchPage).includes(collapse(LAUNCH_CONSENT_TEXT)),
+    "the consent checkbox no longer renders LAUNCH_CONSENT_TEXT"
+  );
+  assert.match(LAUNCH_CONSENT_VERSION, /^\d{4}-\d{2}-\d{2}\./, "the consent version must be datable");
+});
+
+test("10: the privacy link is present and points at the real privacy page", () => {
+  assert.match(launchPage, /<Link href="\/datenschutz">Datenschutzerklärung<\/Link>/);
+  assert.match(launchPage, /jederzeit widerrufen/);
+  // /datenschutz is a route this site actually serves.
+  assert.match(gloaSite, /if\(route==="datenschutz"\)/);
+});
+
+/* ── 4. Purpose limitation - the whole point ────────────────── */
+
+test("11: every row carries the launch purpose, and the database refuses any other", () => {
+  assert.equal(LAUNCH_PURPOSE, "launch_notification");
+  assert.match(signupRoute, /purpose: LAUNCH_PURPOSE/);
+  // Not merely a default: a CHECK constraint, so a row with another
+  // purpose cannot physically exist in this table.
+  assert.match(migration, /check \(purpose = 'launch_notification'\)/);
+});
+
+test("12: this list is not a newsletter, and nothing in it says otherwise", () => {
+  const surfaces = { launchPage, signupRoute, emailTemplate };
+  // Wording that would signal a different, broader consent than the one
+  // actually obtained.
+  const forbidden = [
+    "Newsletter abonnieren", "Newsletter anmelden", "Newsletter erhalten",
+    "Marketing Updates", "Marketing-Updates", "Angebote erhalten",
+    "Promotions", "Produktneuheiten", "Rabatt", "Gutschein",
+  ];
+  for (const [name, source] of Object.entries(surfaces)) {
+    const copy = stripJs(source);
+    for (const term of forbidden) {
+      assert.ok(!copy.includes(term), `${name} uses newsletter/marketing wording: ${term}`);
+    }
+    // A discount figure, specifically. A bare "%" would false-positive
+    // on the email's width="100%" table layout, which is not an offer.
+    assert.ok(!/\d+\s*%/.test(copy.replace(/width="100%"/g, "")), `${name} advertises a percentage`);
+  }
+});
+
+test("13: no row can be sent anything unless it is confirmed, unnotified and launch-purposed", () => {
+  const base = { status: "confirmed", purpose: LAUNCH_PURPOSE, launch_notification_sent_at: null };
+  assert.equal(mayReceiveLaunchNotification(base), true);
+
+  assert.equal(mayReceiveLaunchNotification({ ...base, status: "pending" }), false, "pending is not consent");
+  assert.equal(mayReceiveLaunchNotification({ ...base, status: "withdrawn" }), false, "withdrawn must never be mailed");
+  assert.equal(mayReceiveLaunchNotification({ ...base, status: "notified" }), false, "the consent is used up");
+  assert.equal(
+    mayReceiveLaunchNotification({ ...base, launch_notification_sent_at: "2026-10-01T09:00:00.000Z" }),
+    false,
+    "a row that already got the launch mail must not get a second one"
+  );
+  assert.equal(
+    mayReceiveLaunchNotification({ ...base, purpose: "newsletter" }),
+    false,
+    "a row repurposed as a newsletter entry must not be sendable"
+  );
+});
+
+test("14: the launch send is not wired up yet - only the waitlist and the confirmation are", () => {
+  // The task was to build the list, not to fire the launch announcement.
+  // A send job existing here would mean the real launch mail could go
+  // out by accident, to a list that is still filling.
+  assert.ok(!signupRoute.includes("launch_notification_sent_at"),
+    "the signup route writes the launch-sent marker");
+  assert.ok(!confirmRoute.includes("launch_notification_sent_at"),
+    "the confirm route writes the launch-sent marker");
+  // The column and the gate exist, ready for it.
+  assert.match(migration, /launch_notification_sent_at timestamptz/);
+});
+
+/* ── 5. Source whitelisting ─────────────────────────────────── */
+
+test("15: only whitelisted sources are stored, so ?source= is not a free-text column", () => {
+  assert.deepEqual([...LAUNCH_SOURCES], ["launch_page", "homepage", "qr_flyer", "event"]);
+  assert.equal(resolveSource("qr_flyer"), "qr_flyer");
+  assert.equal(resolveSource("event"), "event");
+  assert.equal(resolveSource("utm_campaign_spring_sale"), "launch_page");
+  assert.equal(resolveSource("<script>alert(1)</script>"), "launch_page");
+  assert.equal(resolveSource(undefined), "launch_page");
+  assert.equal(resolveSource(null), "launch_page");
+  assert.equal(resolveSource(123), "launch_page");
+  // And the database refuses anything else even if the route were bypassed.
+  assert.match(migration, /check \(source in \('launch_page', 'homepage', 'qr_flyer', 'event'\)\)/);
+});
+
+/* ── 6. Tokens ──────────────────────────────────────────────── */
+
+test("16: tokens are opaque, random and never stored in the clear", () => {
+  const a = createToken();
+  const b = createToken();
+  assert.match(a, /^[0-9a-f]{64}$/);
+  assert.notEqual(a, b, "two tokens must not collide");
+
+  // Only the hash is written.
+  assert.match(signupRoute, /confirmation_token_hash: hashToken\(confirmationToken\)/);
+  assert.match(signupRoute, /withdrawal_token_hash: hashToken\(withdrawalToken\)/);
+  for (const source of [signupRoute, confirmRoute, withdrawRoute]) {
+    assert.ok(!/token_hash:\s*token\b/.test(source), "a raw token is being written to the database");
+  }
+  // The migration pins the shape too, so a plaintext token cannot be
+  // slipped into the hash column.
+  assert.match(migration, /confirmation_token_hash is null or confirmation_token_hash ~ '\^\[0-9a-f\]\{64\}\$'/);
+});
+
+test("17: a token matches only its own hash, and the comparison is constant-time", () => {
+  const token = createToken();
+  const other = createToken();
+  assert.equal(tokenMatchesHash(token, hashToken(token)), true);
+  assert.equal(tokenMatchesHash(other, hashToken(token)), false);
+  assert.equal(tokenMatchesHash(token, "not-a-hash"), false, "a malformed hash must not throw");
+  assert.match(read("lib/launchWaitlist.ts"), /timingSafeEqual/);
+});
+
+test("18: a malformed token is rejected before any database round-trip", () => {
+  for (const bad of ["", "abc", "ZZZ", "../../etc/passwd", "a".repeat(63), "a".repeat(65), null, undefined, 42]) {
+    assert.equal(isWellFormedToken(bad), false, `accepted: ${JSON.stringify(bad)}`);
+  }
+  assert.equal(isWellFormedToken(createToken()), true);
+  // Both routes check the shape first.
+  for (const [name, source] of Object.entries({ confirmRoute, withdrawRoute })) {
+    const check = source.indexOf("isWellFormedToken");
+    const query = source.indexOf(".from(\"launch_waitlist\")");
+    assert.ok(check !== -1 && query !== -1 && check < query, `${name} queries before validating the token`);
+  }
+});
+
+test("19: no email address ever travels in a link", () => {
+  // URLs end up in proxy logs, browser history and Referer headers.
+  for (const [name, source] of Object.entries({ signupRoute, confirmRoute, withdrawRoute, emailTemplate })) {
+    assert.ok(!/[?&]email=/.test(source), `${name} puts an address in a URL`);
+    assert.ok(!/[?&]e=\$\{/.test(source), `${name} puts an address in a URL`);
+  }
+  assert.match(signupRoute, /confirmUrl: `\$\{origin\}\/api\/launch\/confirm\?token=\$\{confirmationToken\}`/);
+  assert.match(signupRoute, /withdrawUrl: `\$\{origin\}\/api\/launch\/withdraw\?token=\$\{withdrawalToken\}`/);
+});
+
+/* ── 7. Confirmation expiry ─────────────────────────────────── */
+
+test("20: a confirmation link expires, on an explicit clock", () => {
+  const sent = "2026-09-06T12:00:00.000Z";
+  const sentMs = Date.parse(sent);
+  const day = 24 * 60 * 60 * 1000;
+
+  assert.equal(isConfirmationExpired(sent, sentMs), false, "fresh");
+  assert.equal(isConfirmationExpired(sent, sentMs + 13 * day), false, "day 13 is still valid");
+  assert.equal(isConfirmationExpired(sent, sentMs + CONFIRMATION_TOKEN_TTL_DAYS * day + 1), true, "past the TTL");
+
+  // Missing or unparseable timestamps expire closed, not open.
+  assert.equal(isConfirmationExpired(null, sentMs), true);
+  assert.equal(isConfirmationExpired("not-a-date", sentMs), true);
+});
+
+test("21: the confirmation TTL and the pending retention window are the same number", () => {
+  // A link that no longer works must not leave a row behind that still
+  // holds an address nobody can confirm.
+  assert.equal(CONFIRMATION_TOKEN_TTL_DAYS, PENDING_RETENTION_DAYS);
+  assert.equal(PENDING_RETENTION_DAYS, 14);
+  // And the privacy notice tells people that number.
+  assert.match(gloaSite, /löschen wir die Eintragung nach 14 Tagen/);
+});
+
+/* ── 8. Withdrawal ──────────────────────────────────────────── */
+
+test("22: withdrawing takes one click, needs no login, and is final for this list", () => {
+  assert.match(withdrawRoute, /status: "withdrawn"/);
+  assert.match(withdrawRoute, /withdrawn_at: new Date\(\)\.toISOString\(\)/);
+  // The confirmation link dies with the consent it belonged to.
+  assert.match(withdrawRoute, /confirmation_token_hash: null/);
+  // No auth, no session, no user lookup anywhere in the route.
+  for (const gate of ["getUser", "requireAuth", "session", "Authorization"]) {
+    assert.ok(!withdrawRoute.includes(gate), `withdrawal is gated behind ${gate}`);
+  }
+});
+
+test("23: re-submitting a withdrawn address does not revive it or send mail", () => {
+  // The upsert would otherwise reset a withdrawn row to pending.
+  assert.match(signupRoute, /if \(upserted && upserted\.withdrawn_at\)/);
+  const revive = signupRoute.indexOf("upserted.withdrawn_at");
+  const send = signupRoute.indexOf("resend.emails.send");
+  assert.ok(revive !== -1 && send !== -1 && revive < send, "the withdrawn check must precede the send");
+  assert.match(signupRoute, /status: "withdrawn", confirmation_token_hash: null/);
+});
+
+test("24: clicking a withdrawal link twice is a no-op, not an error", () => {
+  assert.match(withdrawRoute, /if \(row\.status === "withdrawn"\) return redirect\("withdrawn"\)/);
+});
+
+/* ── 9. Duplicates and enumeration ──────────────────────────── */
+
+test("25: duplicates are prevented by the database, not by a racy read-then-write", () => {
+  assert.match(migration, /email\s+text not null unique/);
+  assert.match(signupRoute, /onConflict: "email"/);
+  // A "select then insert" would let two concurrent submissions both
+  // pass. There must be no such lookup before the write.
+  const beforeWrite = signupRoute.slice(0, signupRoute.indexOf(".upsert("));
+  assert.ok(!beforeWrite.includes('.select("id, status'), "the route reads the row before writing it");
+});
+
+test("26: the response never reveals whether an address is already on the list", () => {
+  // Otherwise a public form becomes an oracle answering "does GLOA have
+  // this address?" for any address anybody types.
+  assert.match(signupRoute, /function neutralSuccess\(\)/);
+  const code = stripJs(signupRoute);
+  for (const leak of ["Du bist bereits auf der Liste", "bereits eingetragen", "already on the list", "already subscribed"]) {
+    assert.ok(!code.includes(leak), `the route leaks list membership: ${leak}`);
+  }
+  // The page says the neutral thing too.
+  assert.match(launchPage, /Wenn diese Adresse eingetragen werden kann/);
+});
+
+/* ── 10. Server-side validation and secrets ─────────────────── */
+
+test("27: the route validates on the server and rejects a non-JSON or oversized body", () => {
+  assert.match(signupRoute, /application\/json/);
+  assert.match(signupRoute, /MAX_BODY_BYTES/);
+  assert.match(signupRoute, /status: 413/);
+  assert.match(signupRoute, /isValidEmail\(normalizedEmail\)/);
+});
+
+test("28: no secret and no admin client reaches the browser", () => {
+  // LaunchPage.tsx is a "use client" component. It must talk to the API
+  // and nothing else.
+  assert.match(launchPage, /^"use client";/);
+  for (const forbidden of [
+    "SUPABASE_SECRET_KEY", "supabaseAdmin", "getSupabaseAdmin", "RESEND_API_KEY",
+    "getResendClient", "service_role", "process.env",
+  ]) {
+    assert.ok(!launchPage.includes(forbidden), `the client bundle would carry: ${forbidden}`);
+  }
+  assert.match(launchPage, /fetch\("\/api\/launch"/);
+});
+
+test("29: the table is server-only - RLS on, no anon or authenticated grant", () => {
+  assert.match(migration, /alter table public\.launch_waitlist enable row level security/);
+  assert.match(migration, /grant select, insert, update, delete on public\.launch_waitlist to service_role/);
+  // No policy and no grant for a browser-side role. An anonymous client
+  // that could insert here could write a consent_text nobody was shown.
+  assert.ok(!/create policy/i.test(migration), "the launch table must have no RLS policy");
+  assert.ok(!/to anon\b/.test(migration), "the launch table must not be granted to anon");
+  assert.ok(!/to authenticated\b/.test(migration), "the launch table must not be granted to authenticated");
+});
+
+/* ── 11. Logging ────────────────────────────────────────────── */
+
+test("30: no address, token or secret is written to the logs", () => {
+  for (const [name, source] of Object.entries({ signupRoute, confirmRoute, withdrawRoute })) {
+    for (const line of source.split("\n").filter((l) => l.includes("console."))) {
+      for (const leak of ["normalizedEmail", "rawEmail", "confirmationToken", "withdrawalToken", "token", "consent_text"]) {
+        assert.ok(!line.includes(leak), `${name} logs ${leak}: ${line.trim()}`);
+      }
+    }
+  }
+});
+
+/* ── 12. Rate limiting and the honeypot ─────────────────────── */
+
+test("31: the signup is rate limited, and a refused attempt still counts", () => {
+  const state = new Map();
+  const t0 = 1_000_000;
+  for (let i = 0; i < LAUNCH_RATE_LIMIT_MAX; i++) {
+    assert.equal(consumeRateLimit(state, "1.2.3.4", t0 + i).allowed, true, `attempt ${i + 1} should pass`);
+  }
+  const refused = consumeRateLimit(state, "1.2.3.4", t0 + 10);
+  assert.equal(refused.allowed, false, "the limit did not engage");
+  assert.ok(refused.retryAfterSeconds > 0, "a refusal must say when to come back");
+
+  // Being refused must not reset the caller's own window.
+  assert.equal(consumeRateLimit(state, "1.2.3.4", t0 + 11).allowed, false);
+
+  // A different bucket is unaffected.
+  assert.equal(consumeRateLimit(state, "5.6.7.8", t0 + 12).allowed, true);
+
+  // And the window really does reopen.
+  assert.equal(consumeRateLimit(state, "1.2.3.4", t0 + LAUNCH_RATE_LIMIT_WINDOW_MS + 1).allowed, true);
+});
+
+test("32: a request with no forwarding header still lands in a bucket", () => {
+  const headers = (map) => ({ headers: { get: (n) => map[n.toLowerCase()] ?? null } });
+  assert.equal(rateLimitKeyFromRequest(headers({ "x-forwarded-for": "9.9.9.9, 10.0.0.1" })), "9.9.9.9");
+  assert.equal(rateLimitKeyFromRequest(headers({ "x-real-ip": " 8.8.8.8 " })), "8.8.8.8");
+  // Not "unlimited" - one shared bucket, which is the hole this closes.
+  assert.equal(rateLimitKeyFromRequest(headers({})), "unknown");
+});
+
+test("33: the route rate limits before it parses the body, and returns Retry-After", () => {
+  const limit = signupRoute.indexOf("consumeRateLimit");
+  const parse = signupRoute.indexOf("await request.json()");
+  assert.ok(limit !== -1 && parse !== -1 && limit < parse, "the body is parsed before the limit is checked");
+  assert.match(signupRoute, /status: 429, headers: \{ "Retry-After"/);
+});
+
+test("34: the honeypot discards silently, with the same shape as a real success", () => {
+  assert.match(signupRoute, /if \(typeof website === "string" && website\.trim\(\) !== ""\)/);
+  const hp = signupRoute.indexOf('website.trim() !== ""');
+  const send = signupRoute.indexOf("resend.emails.send");
+  assert.ok(hp < send, "the honeypot must short-circuit before any mail is sent");
+  // Hidden from people, not from bots.
+  assert.match(launchPage, /tabIndex=\{-1\}/);
+  assert.match(launchPage, /aria-hidden="true"/);
+});
+
+/* ── 13. The confirmation email ─────────────────────────────── */
+
+test("35: the double opt-in mail asks one question and advertises nothing", () => {
+  const mail = buildLaunchConfirmationEmail({
+    firstName: "Anna",
+    confirmUrl: "https://gloamatcha.com/api/launch/confirm?token=" + "a".repeat(64),
+    withdrawUrl: "https://gloamatcha.com/api/launch/withdraw?token=" + "b".repeat(64),
+  });
+
+  assert.equal(mail.subject, "GLOA Launch List bestätigen");
+  for (const part of [mail.html, mail.text]) {
+    assert.match(part, /Fast geschafft/);
+    assert.match(part, /Bestätige kurz, dass wir dir Bescheid geben dürfen/);
+    assert.match(part, /keine regelmäßigen Newsletter/);
+    assert.match(part, /ausschließlich für die Launch-Benachrichtigung verwendet/);
+    assert.match(part, /Cara 2 GmbH/);
+    // No marketing of any kind.
+    for (const term of ["Shop", "kaufen", "Rabatt", "Angebot", "Produkt", "€", "Preis", "Event"]) {
+      assert.ok(!part.includes(term), `the confirmation mail advertises: ${term}`);
+    }
+  }
+  assert.match(mail.text, /EINTRAGUNG BESTÄTIGEN/);
+  assert.match(mail.html, /Eintragung bestätigen<\/a>/);
+});
+
+test("36: the mail greets without a name when none was given, and escapes what it is given", () => {
+  const anon = buildLaunchConfirmationEmail({ firstName: null, confirmUrl: "https://x/c", withdrawUrl: "https://x/w" });
+  assert.match(anon.text, /^Hi,/);
+  assert.ok(!anon.text.includes("Hi null"), "a missing name leaked into the greeting");
+
+  const hostile = buildLaunchConfirmationEmail({
+    firstName: '<script>alert("x")</script>',
+    confirmUrl: "https://x/c",
+    withdrawUrl: "https://x/w",
+  });
+  assert.ok(!hostile.html.includes("<script>"), "the name is not escaped in the HTML body");
+  assert.match(hostile.html, /&lt;script&gt;/);
+});
+
+test("37: the mail carries a one-click way out", () => {
+  const mail = buildLaunchConfirmationEmail({
+    firstName: null,
+    confirmUrl: "https://gloamatcha.com/api/launch/confirm?token=x",
+    withdrawUrl: "https://gloamatcha.com/api/launch/withdraw?token=y",
+  });
+  assert.ok(mail.html.includes("https://gloamatcha.com/api/launch/withdraw?token=y"));
+  assert.ok(mail.text.includes("https://gloamatcha.com/api/launch/withdraw?token=y"));
+});
+
+test("38: the mail is sent from the existing GLOA sender, not a new or invented one", () => {
+  assert.match(signupRoute, /from: GLOA_FROM_HELLO/);
+  assert.match(read("lib/emailSenders.ts"), /GLOA_FROM_HELLO = "GLOA <hello@gloamatcha\.com>"/);
+  // No second mail provider was introduced for this feature.
+  assert.match(signupRoute, /getResendClient/);
+  for (const other of ["mailchimp", "klaviyo", "sendgrid", "brevo", "postmark", "nodemailer"]) {
+    assert.ok(!signupRoute.toLowerCase().includes(other), `a second mail provider appeared: ${other}`);
+  }
+});
+
+/* ── 14. Wiring ─────────────────────────────────────────────── */
+
+test("39: the homepage teaser links to /launch and still captures nothing", () => {
+  const prelaunch = gloaSite.slice(
+    gloaSite.indexOf('<section className="prelaunch">'),
+    gloaSite.indexOf('<section className="daily">')
+  );
+  assert.ok(prelaunch.length > 0, "the prelaunch section is missing");
+  assert.match(prelaunch, /href="\/launch"/);
+  for (const term of ["<input", "<form", 'type="email"', "checkbox"]) {
+    assert.ok(!prelaunch.includes(term), `the homepage teaser collects data: ${term}`);
+  }
+});
+
+test("40: /launch is a real route with its own metadata", () => {
+  assert.match(gloaSite, /else if\(route==="launch"\)page=<LaunchPage\/>;/);
+  const seo = read("app/[...slug]/page.tsx");
+  assert.match(seo, /"launch":\["GLOA Launch List"/);
+  assert.match(seo, /Trag dich ein und wir sagen dir Bescheid, sobald GLOA offiziell startet\./);
+  // The shared canonical/openGraph builder covers it, so nothing extra
+  // had to be invented for this page.
+  assert.match(seo, /alternates:\{canonical:`\/\$\{path\}`\}/);
+});
+
+test("41: the hero uses the shared page-hero scale rather than inventing one", () => {
+  assert.match(launchPage, /className="gloa-hero-primary"/);
+  assert.match(launchPage, /className="gloa-hero-secondary"/);
+  assert.match(launchPage, /gloa-hero-eyebrow/);
+  assert.match(launchPage, /BE AMONG/);
+  assert.match(launchPage, /THE FIRST\./);
+
+  const css = read("app/globals.css");
+  const block = css.slice(css.indexOf("/launch — THE LAUNCH LIST"));
+  assert.ok(block.length > 0, "the launch css block is missing");
+  assert.match(block, /\.launch-hero\{[\s\S]*?background:var\(--blue\)/);
+  assert.match(block, /\.launch-form-band\{[\s\S]*?background:var\(--cream\)/);
+  // No hero font-size is redeclared here - that is the shared block's job.
+  const hero = block.slice(block.indexOf(".launch-hero-headline{"), block.indexOf(".launch-hero-lead{"));
+  assert.ok(!hero.includes("font-size"), "the launch hero redeclares a font size");
+  // AND NONE OF THE BANNED DECORATION. No glassmorphism, no glow, no
+  // SaaS card, no pill, and no pure white - GLOA has none of those
+  // anywhere in its visible styling and this page does not introduce
+  // them.
+  for (const term of ["backdrop-filter", "box-shadow", "filter:blur", "border-radius:999", "#fff", "#FFF", "#ffffff", ":white"]) {
+    assert.ok(!block.includes(term), `the launch page uses ${term}`);
+  }
+
+  // Both bands are FLAT colour. The one `linear-gradient` in this block
+  // is the two-triangle caret on the <select>, a decades-old way of
+  // drawing an arrow without shipping an image - not a decorative
+  // background. So the ban is on gradients where a band's colour is
+  // set, which is what "no gradients" actually meant, rather than on
+  // the string anywhere in the file.
+  for (const band of [".launch-hero{", ".launch-form-band{", ".launch-page{"]) {
+    const rule = block.slice(block.indexOf(band), block.indexOf("}", block.indexOf(band)));
+    assert.ok(rule.length > 0, `missing rule: ${band}`);
+    assert.ok(!rule.includes("gradient"), `${band} paints a gradient`);
+  }
+  const gradientLines = block.split(String.fromCharCode(10)).filter((l) => l.includes("gradient"));
+  assert.equal(gradientLines.length, 1, `gradients outside the select caret: ${gradientLines.join(" | ")}`);
+  assert.match(gradientLines[0].trim(), /^background-image:linear-gradient\(45deg/, "that is not the select caret");
+});
+
+test("42: the outcome states are rendered on /launch, not in the API route", () => {
+  // Redirecting also drops the token out of the address bar.
+  for (const [name, source] of Object.entries({ confirmRoute, withdrawRoute })) {
+    assert.match(source, /status: 303/, `${name} does not redirect`);
+    assert.match(source, /\/launch\?state=/, `${name} does not hand off to /launch`);
+    assert.match(source, /"Cache-Control": "no-store"/, `${name} allows a per-person outcome to be cached`);
+    assert.match(source, /"Referrer-Policy": "no-referrer"/, `${name} may leak the token in a Referer header`);
+  }
+  assert.match(launchPage, /YOU'RE ON/);
+  assert.match(launchPage, /THE LIST\./);
+});
+
+test("43: the success state does not claim confirmation before it happened", () => {
+  // Right after submitting, the entry is PENDING. Saying "you're on the
+  // list" there would promise a message that will not be sent unless the
+  // link in the mail is clicked.
+  const code = stripJs(launchPage);
+  const submitted = code.slice(code.indexOf('status === "submitted"'), code.indexOf("Keine Mail bekommen"));
+  assert.ok(submitted.length > 0, "the pending state is missing");
+  assert.ok(!submitted.includes("YOU'RE ON"), "the pending state claims the entry is confirmed");
+  assert.match(submitted, /Check deine/);
+  assert.match(submitted, /Bestätige darin/);
+});
+
+test("44: the instagram handle is the one the site already uses, not an invented URL", () => {
+  assert.match(launchPage, /https:\/\/instagram\.com\/\$\{BRAND\.instagram\}/);
+  assert.match(read("app/content.ts"), /instagram: "gloa\.matcha"/);
+  assert.match(launchPage, /target="_blank" rel="noopener noreferrer"/);
+});
+
+/* ── 15. Accessibility ──────────────────────────────────────── */
+
+test("45: every field has a real label bound by id, and none relies on a placeholder", () => {
+  for (const id of ["launch-first-name", "launch-email", "launch-audience", "launch-consent"]) {
+    assert.ok(launchPage.includes(`htmlFor="${id}"`), `no label bound to ${id}`);
+    assert.ok(launchPage.includes(`id="${id}"`), `no field with id ${id}`);
+  }
+  // No placeholder is doing a label's job: a placeholder disappears the
+  // moment somebody types, which is when they need it most.
+  const form = launchPage.slice(launchPage.indexOf("<form className=\"launch-form\""));
+  assert.ok(!form.includes("placeholder="), "a field uses a placeholder instead of a visible label");
+});
+
+test("46: submit, error and success states are announced, and the error is bound to the field", () => {
+  assert.match(launchPage, /aria-live="polite"/);
+  assert.match(launchPage, /role="status"/);
+  assert.match(launchPage, /id="launch-error"/);
+  assert.match(launchPage, /aria-describedby=\{status === "error" \? "launch-error" : undefined\}/);
+});
+
+test("47: focus is visible, and no state is communicated by colour alone", () => {
+  const css = read("app/globals.css");
+  const block = css.slice(css.indexOf("/launch — THE LAUNCH LIST"));
+  assert.match(block, /:focus-visible\{[\s\S]*?outline:2px solid var\(--berry\)/);
+  // The error is a bordered block with text, not a red field outline.
+  assert.match(block, /\.launch-error\{[\s\S]*?border-left:2px solid var\(--berry\)/);
+  // 16px on inputs stops iOS zooming the page on focus.
+  assert.match(block, /\.launch-field input,[\s\S]*?font-size:16px/);
+});
+
+/* ── 16. Migrations ─────────────────────────────────────────── */
+
+test("48: 043 is additive and touches nothing that already exists", () => {
+  assert.match(migration, /create table public\.launch_waitlist/);
+  // No edit to any existing object.
+  for (const destructive of [
+    "drop table", "drop column", "drop policy", "alter table public.orders",
+    "alter table public.customer", "alter table public.checkout_attempts",
+    "revoke", "truncate", "delete from public.",
+  ]) {
+    assert.ok(!stripSql(migration).toLowerCase().includes(destructive), `043 performs: ${destructive}`);
+  }
+  // The only table it names is its own.
+  const tables = [...stripSql(migration).matchAll(/public\.(\w+)/g)].map((m) => m[1]);
+  for (const t of tables) {
+    assert.ok(["launch_waitlist", "set_updated_at"].includes(t), `043 touches another object: ${t}`);
+  }
+});
+
+test("49: the retention rule is written down and indexed for, but not silently automated", () => {
+  assert.match(migration, /idx_launch_waitlist_pending_created/);
+  assert.match(migration, /RETENTION/);
+  assert.match(migration, /14 days/);
+  // Nothing may start deleting rows on a schedule nobody reviewed
+  // against the real launch date.
+  assert.ok(!/create .*trigger.*delete/i.test(migration), "043 automates deletion");
+  assert.ok(!/pg_cron|cron\.schedule/i.test(migration), "043 schedules a job");
+});
+
+/* ── 17. The privacy notice ─────────────────────────────────── */
+
+test("50: the privacy notice describes this list, accurately and without overclaiming", () => {
+  const privacy = gloaSite.slice(
+    gloaSite.indexOf('if(route==="datenschutz")'),
+    gloaSite.indexOf('if(route==="agb")')
+  );
+  assert.ok(privacy.length > 0, "the privacy page is missing");
+
+  assert.match(privacy, /Launch-Benachrichtigung/);
+  assert.match(privacy, /Art\. 6 Abs\. 1 lit\. a DSGVO/, "the legal basis must be consent");
+  assert.match(privacy, /Double-Opt-In/);
+  assert.match(privacy, /jederzeit mit Wirkung für die Zukunft widerrufen/);
+  assert.match(privacy, /Pflichtangabe ist ausschließlich die E-Mail-Adresse/);
+  assert.match(privacy, /Ein Newsletter ist damit nicht verbunden/);
+  assert.match(privacy, /gesonderte Einwilligung/);
+  // Only providers actually used.
+  assert.match(privacy, /Resend/);
+  assert.match(privacy, /Supabase/);
+  // The existing statement that GLOA runs no newsletter must survive.
+  assert.match(privacy, /Einen Newsletter bieten wir nicht an/);
+  // And no legal claim nobody verified.
+  for (const term of ["100 % DSGVO-konform", "vollständig rechtskonform", "rechtssicher", "zertifiziert"]) {
+    assert.ok(!privacy.includes(term), `the privacy notice overclaims: ${term}`);
+  }
+  // The responsible party is the one already named on the page - not a
+  // second, invented one.
+  assert.match(privacy, /Cara 2 GmbH/);
+  assert.equal((privacy.match(/Cara 2 GmbH/g) || []).length >= 1, true);
+});
+
+test("51: the section numbering stayed sequential after the insert", () => {
+  const privacy = gloaSite.slice(
+    gloaSite.indexOf('if(route==="datenschutz")'),
+    gloaSite.indexOf('if(route==="agb")')
+  );
+  const numbers = [...privacy.matchAll(/<h2>(\d+)\./g)].map((m) => Number(m[1]));
+  assert.deepEqual(numbers, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], `privacy headings out of order: ${numbers}`);
+});

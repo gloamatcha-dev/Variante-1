@@ -832,10 +832,18 @@ test("26: the prelaunch copy is exactly the approved lines", () => {
 });
 
 test("27: the CTA links to a real route and fakes no signup", () => {
-  // NO NOTIFICATION BACKEND EXISTS in this repository - no list, no
-  // capture endpoint, no consent flow - so the button is a LINK to the
-  // existing contact route rather than a form that pretends to subscribe.
-  assert.match(prelaunch, /<Link className="cta prelaunch-cta" href="\/contact"/);
+  // THE NOTIFICATION BACKEND NOW EXISTS - public.launch_waitlist, POST
+  // /api/launch, and a double opt-in - so the button points at /launch,
+  // the page that owns the form, the consent text and the privacy link.
+  //
+  // What did NOT change is the rule this test was written for: the
+  // homepage is still a TEASER and still captures nothing. No inline
+  // form, no modal, no email field here. Somebody who scrolls past this
+  // section has handed over nothing, and the section itself carries no
+  // consent decision - that is made once, on /launch, in front of the
+  // wording and the privacy link.
+  assert.match(prelaunch, /<Link className="cta prelaunch-cta" href="\/launch"/);
+  assert.ok(!prelaunch.includes('href="/contact"'), "the CTA still points at the old contact route");
   for (const banned of ["<input", "<form", 'type="email"', "checkbox", "subscribe", "mailchimp", "klaviyo"]) {
     assert.ok(!prelaunch.includes(banned), `the prelaunch section collects data: ${banned}`);
   }

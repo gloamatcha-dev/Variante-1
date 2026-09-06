@@ -312,11 +312,16 @@ test("5c: the server keeps every commercial decision", () => {
 
 test("5d: no backend, migration or commercial logic changed", () => {
   assert.deepEqual(readdirSync(path.join(ROOT, "app/api")).sort(),
-    ["annual-plan", "checkout", "contact", "cron", "internal", "orders",
-     "stripe", "subscriptions", "withdrawal"], "an API route changed");
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("043")),
-    "migration 043 exists");
-  assert.equal(readdirSync(path.join(ROOT, "supabase/migrations")).filter(f => f.endsWith(".sql")).length, 42,
+    // PHASE 5 ADDED "launch": the one-time launch notification list
+    // (POST /api/launch plus its confirm/withdraw links). It is its own
+    // namespace, touches no route listed here, and is reviewed in
+    // tests/launch-waitlist.test.mjs. This guard protects "no
+    // UNREVIEWED route appeared", never "the surface stopped growing".
+    ["annual-plan", "checkout", "contact", "cron", "internal", "launch",
+     "orders", "stripe", "subscriptions", "withdrawal"], "an API route changed");
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("044")),
+    "migration 044 exists");
+  assert.equal(readdirSync(path.join(ROOT, "supabase/migrations")).filter(f => f.endsWith(".sql")).length, 43,
     "the migration count changed");
   // The one-time path is untouched.
   assert.ok(site.includes('purchaseType:"once",unitPriceCents:v.price_gross_cents'),

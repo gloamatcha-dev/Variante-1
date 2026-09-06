@@ -8341,3 +8341,223 @@ header nav{gap:18px;font-size:12px}
     letter-spacing:.04em;
   }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   /launch — THE LAUNCH LIST
+
+   A new public page, and every rule here is scoped to `.launch-page`
+   or to a `.launch-` class of its own. Nothing shared is edited, so no
+   finished page can move because of this block. The header, the footer,
+   the canonical rail and the page-hero type system are used exactly as
+   they are.
+
+   ── THE TWO BANDS ────────────────────────────────────────────
+       1  .launch-hero        BLUE   #1746D1   cream on blue
+       2  .launch-form-band   CREAM  #F5EBE2   near black on cream
+
+   Two, and no more. The page has one job, so it gets one statement and
+   one form. No third band was added to "balance" it.
+
+   ── THE HERO READS THE SHARED SCALE ──────────────────────────
+   .gloa-hero-eyebrow / -primary / -secondary carry every hero on this
+   site and carry this one too. Nothing here redeclares a font-size, a
+   line-height or a letter-spacing for the headline, which is the whole
+   point of that block existing - and why this page needs no hero media
+   query of its own.
+
+   ── NO PILL, NO CARD, NO GRADIENT ────────────────────────────
+   The submit button is the site's own `.cta` - rectangular, cream on
+   raspberry - not a rounded newsletter button. The form sits directly
+   on the cream band rather than in a floating white card: there is no
+   pure white anywhere in GLOA's visible styling, and a card would make
+   this read like the SaaS signup it deliberately is not.
+   ══════════════════════════════════════════════════════════════ */
+
+.launch-page{background:var(--cream)}
+
+.launch-hero{
+  background:var(--blue);
+  color:var(--cream);
+  padding:clamp(88px,10vw,150px) var(--rail-gutter) clamp(72px,8vw,120px);
+}
+.launch-hero-inner{max-width:860px;margin:0 auto}
+.launch-hero-eyebrow{color:var(--cream);opacity:.75;margin:0 0 clamp(20px,2.4vw,30px)}
+.launch-hero-headline{margin:0;color:var(--cream)}
+.launch-hero-headline span,
+.launch-hero-headline i{display:block}
+.launch-hero-lead{
+  margin:clamp(26px,3vw,38px) 0 0;
+  max-width:34ch;
+  font-size:var(--type-body);
+  line-height:1.55;
+  color:var(--cream);
+  opacity:.86;
+}
+/* The trust line. Metadata voice, not body copy: it is a promise about
+   what will NOT arrive, and it should read as a stamp. */
+.launch-hero-trust{
+  margin:clamp(22px,2.6vw,30px) 0 0;
+  font-size:var(--type-meta);
+  font-weight:600;
+  letter-spacing:.2em;
+  text-transform:uppercase;
+  color:var(--cream);
+  opacity:.62;
+}
+.launch-hero-social{
+  margin:clamp(24px,2.8vw,34px) 0 0;
+  font-size:var(--type-body);
+  line-height:1.55;
+  color:var(--cream);
+  opacity:.86;
+}
+.launch-hero-social a{
+  color:var(--cream);
+  text-decoration:none;
+  border-bottom:1px solid rgba(245,235,226,.45);
+  font-weight:600;
+  letter-spacing:.06em;
+}
+.launch-hero-social a:hover{border-bottom-color:var(--cream)}
+
+/* ── THE FORM BAND ───────────────────────────────────────────── */
+
+.launch-form-band{
+  background:var(--cream);
+  color:var(--ink);
+  padding:clamp(64px,7vw,104px) var(--rail-gutter) clamp(80px,9vw,128px);
+}
+.launch-form-inner{max-width:620px;margin:0 auto}
+.launch-form-eyebrow{margin:0 0 clamp(16px,2vw,22px);color:var(--berry)}
+.launch-form-headline{
+  margin:0;
+  font-size:var(--type-title);
+  line-height:1.02;
+  letter-spacing:-.04em;
+}
+.launch-form-line{display:block;font-weight:800;font-style:normal}
+.launch-form-line-accent{
+  display:block;
+  font-style:italic;
+  font-weight:400;
+  font-synthesis:none;
+  color:var(--berry);
+}
+.launch-form-body{
+  margin:clamp(20px,2.4vw,28px) 0 0;
+  max-width:44ch;
+  font-size:var(--type-body);
+  line-height:1.6;
+  color:var(--plum);
+}
+
+.launch-form{margin:clamp(32px,3.6vw,44px) 0 0;display:flex;flex-direction:column;gap:clamp(20px,2.4vw,26px)}
+.launch-field{display:flex;flex-direction:column;gap:9px}
+/* REAL LABELS, ALWAYS VISIBLE. No placeholder is doing a label's job on
+   this form: a placeholder disappears the moment someone types, which
+   is exactly when a person checking their own answer needs it. */
+.launch-field label{
+  font-size:var(--type-meta);
+  font-weight:600;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  color:var(--plum);
+}
+.launch-optional{
+  font-weight:400;
+  letter-spacing:.08em;
+  text-transform:none;
+  opacity:.72;
+}
+.launch-field input,
+.launch-field select{
+  width:100%;
+  font:inherit;
+  font-size:16px; /* 16px stops iOS Safari zooming the page on focus. */
+  color:var(--ink);
+  background:transparent;
+  border:1px solid var(--line);
+  border-radius:0; /* Editorial, not pill. */
+  padding:14px 14px;
+  appearance:none;
+}
+.launch-field select{
+  background-image:linear-gradient(45deg,transparent 50%,var(--plum) 50%),linear-gradient(135deg,var(--plum) 50%,transparent 50%);
+  background-position:calc(100% - 20px) calc(50% + 2px),calc(100% - 14px) calc(50% + 2px);
+  background-size:6px 6px,6px 6px;
+  background-repeat:no-repeat;
+  padding-right:44px;
+}
+.launch-field input:hover,
+.launch-field select:hover{border-color:rgba(79,58,91,.42)}
+/* A VISIBLE focus ring, on its own and not only a colour change. */
+.launch-field input:focus-visible,
+.launch-field select:focus-visible,
+.launch-consent input:focus-visible,
+.launch-cta:focus-visible,
+.launch-restart:focus-visible{
+  outline:2px solid var(--berry);
+  outline-offset:2px;
+}
+.launch-field input:disabled,
+.launch-field select:disabled{opacity:.55}
+
+.launch-consent{display:flex;align-items:flex-start;gap:12px}
+.launch-consent input{
+  flex:0 0 auto;
+  width:20px;
+  height:20px;
+  margin:2px 0 0;
+  accent-color:var(--berry);
+}
+.launch-consent label{
+  font-size:14px;
+  line-height:1.55;
+  color:var(--ink);
+  cursor:pointer;
+}
+.launch-privacy{
+  margin:0;
+  font-size:13px; /* Small, but never so small it stops being readable. */
+  line-height:1.6;
+  color:var(--plum);
+}
+.launch-privacy a{color:var(--berry);text-decoration:underline;text-underline-offset:2px}
+
+/* The live region keeps its box whether or not it holds a message, so
+   an error appearing does not shove the button down the page. */
+.launch-status{min-height:0}
+.launch-error{
+  margin:0;
+  padding:12px 14px;
+  border-left:2px solid var(--berry);
+  background:rgba(166,30,89,.07);
+  font-size:14px;
+  line-height:1.5;
+  color:var(--berry);
+}
+
+.launch-cta{align-self:flex-start}
+
+.launch-submitted{max-width:44ch}
+.launch-form-note{margin:clamp(18px,2vw,24px) 0 0;font-size:14px;line-height:1.6;color:var(--plum)}
+/* A button, because it performs an action - styled as the link it reads
+   as, rather than an anchor that goes nowhere. */
+.launch-restart{
+  font:inherit;
+  color:var(--berry);
+  background:none;
+  border:0;
+  padding:0;
+  text-decoration:underline;
+  text-underline-offset:2px;
+  cursor:pointer;
+}
+
+@media (max-width:640px){
+  .launch-hero{padding:clamp(64px,16vw,96px) var(--rail-gutter) clamp(52px,12vw,76px)}
+  .launch-hero-lead,.launch-form-body,.launch-submitted{max-width:none}
+  /* Full usable width on a phone, and never a button that spans the
+     screen edge to edge for the sake of it. */
+  .launch-cta{align-self:stretch;text-align:center}
+}

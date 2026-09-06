@@ -768,7 +768,7 @@ test("33-34: 022 through 035 are all present and there is no 036", () => {
   // guard still protects is that no UNREVIEWED migration appeared.
   // PHASE 3J.B1 THEN ADDED 037 (the invoice-keyed refund-state writer),
   // reviewed in tests/subscription-refund-correlation-migration.test.mjs.
-  assert.equal(files.length, 42, "a migration was added or removed");
+  assert.equal(files.length, 43, "a migration was added or removed");
   // Phase 4B1 added 039, the B2C prepaid annual plan foundation,
   // reviewed in tests/annual-plan-foundation-migration.test.mjs. The
   // guard is re-pinned, not deleted: it protects "no UNREVIEWED
@@ -782,17 +782,22 @@ test("33-34: 022 through 035 are all present and there is no 036", () => {
   // was short of, so migration 039's delivery policy can still read
   // the parent's user_id while resolving ownership. Reviewed in
   // tests/annual-account-privileges-migration.test.mjs.
-  assert.equal(files[files.length - 1], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.equal(files[files.length - 2], "041_annual_account_column_privileges.sql");
-  assert.equal(files[files.length - 3], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(files[files.length - 4], "039_b2c_annual_plan_foundation.sql");
-  assert.equal(files[files.length - 5], "038_one_time_refund_writer_concurrency.sql",
+  // PHASE 5 ADDED MIGRATION 043: public.launch_waitlist, the one-time
+  // launch notification list. It creates one new table with RLS on and
+  // no anon/authenticated grant, and touches no existing object.
+  // Reviewed in tests/launch-waitlist.test.mjs.
+  assert.equal(files[files.length - 1], "043_launch_waitlist.sql");
+  assert.equal(files[files.length - 2], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(files[files.length - 3], "041_annual_account_column_privileges.sql");
+  assert.equal(files[files.length - 4], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 5], "039_b2c_annual_plan_foundation.sql");
+  assert.equal(files[files.length - 6], "038_one_time_refund_writer_concurrency.sql",
     "038 must be the highest, and 037 the one before it");
-  assert.equal(files[files.length - 6], "037_subscription_refund_correlation.sql");
-  assert.equal(files[files.length - 7], "036_subscription_payment_status.sql");
-  assert.equal(files[files.length - 8], MIGRATION_035);
+  assert.equal(files[files.length - 7], "037_subscription_refund_correlation.sql");
+  assert.equal(files[files.length - 8], "036_subscription_payment_status.sql");
+  assert.equal(files[files.length - 9], MIGRATION_035);
   assert.deepEqual(files.filter(f => f.startsWith("037")), ["037_subscription_refund_correlation.sql"]);
-  assert.ok(!files.some(f => f.startsWith("043")), "an unreviewed migration appeared");
+  assert.ok(!files.some(f => f.startsWith("044")), "an unreviewed migration appeared");
   for (let n = 22; n <= 34; n += 1) {
     const prefix = String(n).padStart(3, "0");
     assert.ok(files.some(f => f.startsWith(prefix)), `migration ${prefix} is missing`);

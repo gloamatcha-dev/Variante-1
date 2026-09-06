@@ -1233,15 +1233,20 @@ test("33: B2C_ANNUAL_PLAN_ENABLED cannot stop an existing contract", () => {
 test("34: this phase adds no migration and edits none", () => {
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 42);
+  assert.equal(migrations.length, 43);
   // PHASE 4B8.2 ADDED MIGRATION 042: the ONE column privilege 041
   // was short of, so migration 039's delivery policy can still read
   // the parent's user_id while resolving ownership. Reviewed in
   // tests/annual-account-privileges-migration.test.mjs.
-  assert.equal(migrations[migrations.length - 1], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.equal(migrations[migrations.length - 2], "041_annual_account_column_privileges.sql");
-  assert.equal(migrations[migrations.length - 3], "040_annual_checkout_retry_fingerprints.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 42), [], "a 043 appeared");
+  // PHASE 5 ADDED MIGRATION 043: public.launch_waitlist, the one-time
+  // launch notification list. It creates one new table with RLS on and
+  // no anon/authenticated grant, and touches no existing object.
+  // Reviewed in tests/launch-waitlist.test.mjs.
+  assert.equal(migrations[migrations.length - 1], "043_launch_waitlist.sql");
+  assert.equal(migrations[migrations.length - 2], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(migrations[migrations.length - 3], "041_annual_account_column_privileges.sql");
+  assert.equal(migrations[migrations.length - 4], "040_annual_checkout_retry_fingerprints.sql");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 43), [], "a 045 appeared");
   const changed = execFileSync("git", ["diff", "--name-only", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   assert.equal(changed, "", "a live, immutable migration was edited");

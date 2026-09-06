@@ -98,10 +98,15 @@ test("1e: no auth, guard, data or backend logic changed", () => {
     assert.ok(portal.includes(kept), `portal logic changed: ${kept}`);
   }
   assert.deepEqual(readdirSync(path.join(ROOT, "app/api")).sort(),
-    ["annual-plan", "checkout", "contact", "cron", "internal", "orders",
-     "stripe", "subscriptions", "withdrawal"], "an API route changed");
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("043")),
-    "migration 043 exists");
+    // PHASE 5 ADDED "launch": the one-time launch notification list
+    // (POST /api/launch plus its confirm/withdraw links). It is its own
+    // namespace, touches no route listed here, and is reviewed in
+    // tests/launch-waitlist.test.mjs. This guard protects "no
+    // UNREVIEWED route appeared", never "the surface stopped growing".
+    ["annual-plan", "checkout", "contact", "cron", "internal", "launch",
+     "orders", "stripe", "subscriptions", "withdrawal"], "an API route changed");
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("044")),
+    "migration 044 exists");
 });
 
 /* ══════════════════════════════════════════════════════════════

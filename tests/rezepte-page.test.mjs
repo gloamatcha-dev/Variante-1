@@ -497,11 +497,16 @@ test("7b: every listing link still resolves to its own detail route", async () =
 test("7c: this pass added no backend of any kind", () => {
   // The recipe-sharing CTA is a link to Instagram, not a submission.
   assert.deepEqual(readdirSync(path.join(ROOT, "app/api")).sort(),
-    ["annual-plan", "checkout", "contact", "cron", "internal", "orders",
-     "stripe", "subscriptions", "withdrawal"],
+    // PHASE 5 ADDED "launch": the one-time launch notification list
+    // (POST /api/launch plus its confirm/withdraw links). It is its own
+    // namespace, touches no route listed here, and is reviewed in
+    // tests/launch-waitlist.test.mjs. This guard protects "no
+    // UNREVIEWED route appeared", never "the surface stopped growing".
+    ["annual-plan", "checkout", "contact", "cron", "internal", "launch",
+     "orders", "stripe", "subscriptions", "withdrawal"],
     "an API route was added or removed");
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("043")),
-    "migration 043 exists");
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("044")),
+    "migration 044 exists");
   for (const banned of ['"use server"', "fetch(", "supabase", "resend",
                         "localStorage", "sessionStorage", "<form", "onSubmit"]) {
     assert.ok(!page.toLowerCase().includes(banned.toLowerCase()),

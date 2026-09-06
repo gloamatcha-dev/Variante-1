@@ -1993,7 +1993,11 @@ test("034: it is the next free number and 022-033 are untouched", () => {
      "039_b2c_annual_plan_foundation.sql",
      "040_annual_checkout_retry_fingerprints.sql",
      "041_annual_account_column_privileges.sql",
-     "042_annual_delivery_rls_parent_user_privilege.sql"],
+     "042_annual_delivery_rls_parent_user_privilege.sql",
+     // Phase 5. public.launch_waitlist: one new table for the one-time
+     // launch notification, RLS on, no anon/authenticated grant, and no
+     // existing object touched. Reviewed in tests/launch-waitlist.test.mjs.
+     "043_launch_waitlist.sql"],
     "an unreviewed migration above 034 appeared"
   );
   // AND 039 REDEFINES NOTHING 034 OWNS. It is a prepaid plan with no
@@ -2486,7 +2490,7 @@ test("regression: the account reaches this feature ONLY through the endpoint", (
   // is that the CANCELLATION route, service and rules send nothing at
   // all, which the Resend assertions below prove directly.
   const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
-  assert.equal(templates.length, 12, "an unreviewed email template was added");
+  assert.equal(templates.length, 13, "an unreviewed email template was added");
   assert.deepEqual(
     templates.filter(n => /subscription/i.test(n)).sort(),
     ["subscriptionEnded.ts", "subscriptionStarted.ts"],

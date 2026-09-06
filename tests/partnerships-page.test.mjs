@@ -251,13 +251,18 @@ test("4b: NO SUBMISSION PATH OF ANY KIND", () => {
 test("4c: no API, no server action, no migration was added for this page", () => {
   // The API surface is exactly what it was before this page existed.
   assert.deepEqual(readdirSync(path.join(ROOT, "app/api")).sort(),
-    ["annual-plan", "checkout", "contact", "cron", "internal", "orders",
-     "stripe", "subscriptions", "withdrawal"],
+    // PHASE 5 ADDED "launch": the one-time launch notification list
+    // (POST /api/launch plus its confirm/withdraw links). It is its own
+    // namespace, touches no route listed here, and is reviewed in
+    // tests/launch-waitlist.test.mjs. This guard protects "no
+    // UNREVIEWED route appeared", never "the surface stopped growing".
+    ["annual-plan", "checkout", "contact", "cron", "internal", "launch",
+     "orders", "stripe", "subscriptions", "withdrawal"],
     "an API route was added or removed");
   assert.ok(!page.includes('"use server"'), "a server action was added");
   // No migration 043, and the live set is unchanged.
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"));
-  assert.ok(!migrations.some(f => f.startsWith("043")), "migration 043 exists");
+  assert.ok(!migrations.some(f => f.startsWith("044")), "migration 044 exists");
 });
 
 /* ══════════════════════════════════════════════════════════════

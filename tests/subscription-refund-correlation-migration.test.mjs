@@ -134,15 +134,20 @@ test("1, 2: 037 exists, owns its number, and is the highest migration", () => {
   // was short of, so migration 039's delivery policy can still read
   // the parent's user_id while resolving ownership. Reviewed in
   // tests/annual-account-privileges-migration.test.mjs.
-  assert.equal(files[files.length - 1], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.equal(files[files.length - 2], "041_annual_account_column_privileges.sql");
-  assert.equal(files[files.length - 3], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(files[files.length - 4], "039_b2c_annual_plan_foundation.sql");
-  assert.equal(files[files.length - 5], "038_one_time_refund_writer_concurrency.sql",
+  // PHASE 5 ADDED MIGRATION 043: public.launch_waitlist, the one-time
+  // launch notification list. It creates one new table with RLS on and
+  // no anon/authenticated grant, and touches no existing object.
+  // Reviewed in tests/launch-waitlist.test.mjs.
+  assert.equal(files[files.length - 1], "043_launch_waitlist.sql");
+  assert.equal(files[files.length - 2], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(files[files.length - 3], "041_annual_account_column_privileges.sql");
+  assert.equal(files[files.length - 4], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 5], "039_b2c_annual_plan_foundation.sql");
+  assert.equal(files[files.length - 6], "038_one_time_refund_writer_concurrency.sql",
     "038 is the one-time writer concurrency fix and must be the highest");
-  assert.equal(files[files.length - 6], MIGRATION_037, "037 must still be the one before it");
-  assert.ok(!files.some(f => f.startsWith("043")), "a 043 appeared");
-  assert.equal(files.length, 42);
+  assert.equal(files[files.length - 7], MIGRATION_037, "037 must still be the one before it");
+  assert.ok(!files.some(f => f.startsWith("044")), "a 045 appeared");
+  assert.equal(files.length, 43);
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length);
