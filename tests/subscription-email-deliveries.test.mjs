@@ -613,6 +613,13 @@ test("exactly the three reviewed lifecycle templates were built on this foundati
     // migration 035: an annual plan's purchase confirmation lives on
     // public.annual_plans, claimed through migration 039's own functions.
     "annualPurchaseConfirmation.ts",
+    // NOT A TEMPLATE. brand.ts is the shared branding foundation the
+    // launch mails compose from - the master colours, the approved
+    // wordmark as an absolute-URL <img>, the table shell and the shared
+    // escapeHtml. It sends nothing and renders no message of its own, so
+    // it adds no recipient, no purpose and no consent surface. Reviewed
+    // in tests/launch-waitlist.test.mjs.
+    "brand.ts",
     "cancellationConfirmation.ts",
     "cancellationOutcome.ts",
     "cancellationRequestNotification.ts",

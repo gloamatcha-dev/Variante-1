@@ -5,7 +5,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   GLOA_LAUNCH_ISO,
+  GLOA_LAUNCH_FULL_LABEL,
   GLOA_LAUNCH_LABEL,
+  GLOA_LAUNCH_TIME_LABEL,
   GLOA_LAUNCH_MS,
   launchCountdown,
   padCountdownUnit,
@@ -83,13 +85,23 @@ const DAY = 24 * HOUR;
    1-5. THE COUNTDOWN, AS ARITHMETIC
    ══════════════════════════════════════════════════════════════ */
 
-test("1: the launch instant is Berlin midnight on 01.10.2026", () => {
-  assert.equal(GLOA_LAUNCH_ISO, "2026-10-01T00:00:00+02:00");
+test("1: the launch instant is 12:00 noon Berlin on 01.10.2026", () => {
+  // MOVED FROM MIDNIGHT TO NOON. The shop opens at 12:00 Europe/Berlin,
+  // and a countdown that ran out twelve hours early would have had the
+  // site saying "GLOA is here" through a night when nothing could be
+  // bought. One instant, written once, and every surface derives from
+  // it: the homepage countdown, the strip above the shop, the date on
+  // /launch and the guard on the launch send.
+  assert.equal(GLOA_LAUNCH_ISO, "2026-10-01T12:00:00+02:00");
   assert.equal(GLOA_LAUNCH_LABEL, "01.10.2026");
+  assert.equal(GLOA_LAUNCH_TIME_LABEL, "12:00 UHR");
+  assert.equal(GLOA_LAUNCH_FULL_LABEL, "01.10.2026 — 12:00 UHR");
+
   // The offset is explicit, so the countdown ends at the same instant for
-  // a customer in Berlin and one in New York.
-  assert.equal(GLOA_LAUNCH_MS, Date.parse("2026-09-30T22:00:00.000Z"));
-  assert.equal(new Date(GLOA_LAUNCH_MS).toISOString(), "2026-09-30T22:00:00.000Z");
+  // a customer in Berlin and one in New York. Berlin is on CEST (+02:00)
+  // at the start of October, so noon local is 10:00 UTC.
+  assert.equal(GLOA_LAUNCH_MS, Date.parse("2026-10-01T10:00:00.000Z"));
+  assert.equal(new Date(GLOA_LAUNCH_MS).toISOString(), "2026-10-01T10:00:00.000Z");
 });
 
 test("2: days, hours, minutes and seconds are split correctly", () => {

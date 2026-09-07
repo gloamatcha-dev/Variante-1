@@ -936,6 +936,22 @@ header nav{gap:18px;font-size:12px}
   line-height:.96;
 }
 
+/* The launch moment on the homepage. Deliberately a stamp and not a
+   sentence: this section already has a headline, a body line and a
+   button, so the date earns its place by being the one piece of hard
+   information among them - not by taking more room. Same string, same
+   source constant, as the countdown above it and /launch. */
+.prelaunch-date{
+  margin:clamp(14px,1.6vw,23px) 0 0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-size:var(--type-meta);
+  font-weight:600;
+  letter-spacing:.2em;
+  text-transform:uppercase;
+  color:var(--ink);
+  opacity:.72;
+}
+
 .prelaunch-body{
   margin:clamp(14px,1.6vw,23px) 0 0;
   max-width:560px;
@@ -8392,6 +8408,19 @@ header nav{gap:18px;font-size:12px}
   line-height:1.55;
   color:var(--cream);
   opacity:.86;
+}
+/* THE LAUNCH MOMENT.
+   Tracked uppercase at full opacity: it is the one hard fact on this
+   page, so it reads as a stamp rather than as another line of copy, and
+   it is the only element here allowed to be brighter than the lead. The
+   string comes from GLOA_LAUNCH_FULL_LABEL, never from this file. */
+.launch-hero-date{
+  margin:clamp(22px,2.6vw,30px) 0 0;
+  font-size:var(--type-meta);
+  font-weight:600;
+  letter-spacing:.2em;
+  text-transform:uppercase;
+  color:var(--cream);
 }
 /* The trust line. Metadata voice, not body copy: it is a promise about
    what will NOT arrive, and it should read as a stamp. */

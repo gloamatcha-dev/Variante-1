@@ -2,6 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { BRAND } from "./content";
+import { GLOA_LAUNCH_FULL_LABEL } from "../lib/launchCountdown";
 
 /**
  * /launch - THE LAUNCH LIST.
@@ -167,12 +168,27 @@ export function LaunchPage() {
                 <span className="gloa-hero-primary">BE AMONG</span>
                 <i className="gloa-hero-secondary">THE FIRST.</i>
               </h1>
+              {/*
+                THE DATE, FROM THE ONE CONSTANT THAT HOLDS IT.
+                GLOA_LAUNCH_FULL_LABEL is derived from GLOA_LAUNCH_ISO in
+                lib/launchCountdown.ts, which is also what the homepage
+                countdown and the shop strip read. Typing "01.10.2026"
+                here would be a fourth place for the date to be wrong in.
+              */}
+              <p className="launch-hero-date">{GLOA_LAUNCH_FULL_LABEL}</p>
               <p className="launch-hero-lead">
-                Trag dich ein und erfahre als eine der Ersten,
+                Unser Shop öffnet am 1. Oktober um 12:00 Uhr.
                 <br />
-                wenn GLOA live geht.
+                Trag dich ein und wir sagen dir Bescheid, sobald GLOA live geht.
               </p>
-              <p className="launch-hero-trust">NO SPAM. JUST THE LAUNCH.</p>
+              {/*
+                The trust line says what the list is and what it is not.
+                It is not decoration: the promise it makes - one mail, no
+                newsletter - is the same one the consent text, the privacy
+                notice and the purpose column in migration 043 make, and
+                all four have to keep saying it.
+              */}
+              <p className="launch-hero-trust">NUR FÜR DEN LAUNCH. KEIN NEWSLETTER.</p>
             </>
           )}
         </div>

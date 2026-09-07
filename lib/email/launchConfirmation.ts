@@ -1,3 +1,18 @@
+import {
+  GLOA_BERRY,
+  GLOA_BLUE,
+  GLOA_PLUM,
+  GLOA_POSTAL_ADDRESS,
+  emailButton,
+  emailEyebrow,
+  emailFooter,
+  emailHeader,
+  emailHeadline,
+  emailPreheader,
+  emailShell,
+  escapeHtml,
+} from "./brand.ts";
+
 export type LaunchConfirmationInput = {
   /** Optional. Absent means the mail simply does not greet by name. */
   firstName: string | null;
@@ -5,6 +20,15 @@ export type LaunchConfirmationInput = {
   confirmUrl: string;
   /** Absolute URL that withdraws the entry in one click. */
   withdrawUrl: string;
+  /**
+   * The site origin, for the absolute image URL the logo needs.
+   *
+   * Optional, and the mail is built without a logo when it is absent
+   * rather than with a broken image: a missing origin must not put a
+   * grey placeholder box at the top of a consent mail. The caller passes
+   * getSiteOrigin(), which it has already checked before sending.
+   */
+  origin?: string | null;
 };
 
 export type BuiltLaunchConfirmationEmail = {
@@ -12,15 +36,6 @@ export type BuiltLaunchConfirmationEmail = {
   html: string;
   text: string;
 };
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
 
 /**
  * THE DOUBLE OPT-IN MAIL, AND NOTHING ELSE.
@@ -44,7 +59,7 @@ function escapeHtml(value: string): string {
  * hold the "no marketing" promise to actual bytes.
  */
 export function buildLaunchConfirmationEmail(input: LaunchConfirmationInput): BuiltLaunchConfirmationEmail {
-  const { firstName, confirmUrl, withdrawUrl } = input;
+  const { firstName, confirmUrl, withdrawUrl, origin } = input;
 
   const greeting = firstName ? `Hi ${firstName},` : "Hi,";
 
@@ -72,32 +87,27 @@ export function buildLaunchConfirmationEmail(input: LaunchConfirmationInput): Bu
     "Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin",
   ].join("\n");
 
-  const html = `<!doctype html>
-<html lang="de">
-<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>${escapeHtml(subject)}</title></head>
-<body style="margin:0;padding:0;background:#F5EBE2;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F5EBE2;">
-<tr><td align="center" style="padding:40px 20px;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;background:#F5EBE2;font-family:Inter,Helvetica,Arial,sans-serif;color:#111111;">
-<tr><td style="padding:0 0 28px 0;font-size:11px;letter-spacing:.2em;text-transform:uppercase;font-weight:600;color:#A61E59;">GLOA Launch List</td></tr>
-<tr><td style="padding:0 0 8px 0;font-size:34px;line-height:1.05;letter-spacing:-.03em;font-weight:800;">Fast geschafft.</td></tr>
-<tr><td style="padding:0 0 28px 0;font-size:16px;line-height:1.55;color:#4F3A5B;">${escapeHtml(greeting)}<br/>Bestätige kurz, dass wir dir Bescheid geben dürfen, wenn GLOA offiziell startet.</td></tr>
+  // The mark, when an origin was supplied. A mail with no absolute
+  // origin is built without it rather than with a broken image.
+  const header = origin ? emailHeader(origin) : "";
+
+  const html = emailShell(
+    escapeHtml(subject),
+    `${emailPreheader("Ein Klick, dann sagen wir dir zum Launch Bescheid.")}
+${header}
+${emailEyebrow("GLOA Launch List")}
+${emailHeadline("Fast geschafft.")}
+<tr><td style="padding:0 0 28px 0;font-size:16px;line-height:1.55;color:${GLOA_PLUM};">${escapeHtml(greeting)}<br/>Bestätige kurz, dass wir dir Bescheid geben dürfen, wenn GLOA offiziell startet.</td></tr>
 <tr><td style="padding:0 0 28px 0;">
-<a href="${escapeHtml(confirmUrl)}" style="display:inline-block;background:#1746D1;color:#F5EBE2;text-decoration:none;padding:16px 28px;font-size:12px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;">Eintragung bestätigen</a>
+${emailButton(escapeHtml(confirmUrl), "Eintragung bestätigen")}
 </td></tr>
-<tr><td style="padding:0 0 24px 0;font-size:13px;line-height:1.6;color:#4F3A5B;">Falls der Button nicht funktioniert, öffne diesen Link:<br/><a href="${escapeHtml(confirmUrl)}" style="color:#1746D1;word-break:break-all;">${escapeHtml(confirmUrl)}</a></td></tr>
-<tr><td style="padding:24px 0 0 0;border-top:1px solid rgba(79,58,91,.22);font-size:12px;line-height:1.7;color:#4F3A5B;">
-Du erhältst über diese Eintragung keine regelmäßigen Newsletter. Deine E-Mail-Adresse wird ausschließlich für die Launch-Benachrichtigung verwendet.
+<tr><td style="padding:0 0 24px 0;font-size:13px;line-height:1.6;color:${GLOA_PLUM};">Falls der Button nicht funktioniert, öffne diesen Link:<br/><a href="${escapeHtml(confirmUrl)}" style="color:${GLOA_BLUE};word-break:break-all;">${escapeHtml(confirmUrl)}</a></td></tr>
+${emailFooter(`Du erhältst über diese Eintragung keine regelmäßigen Newsletter. Deine E-Mail-Adresse wird ausschließlich für die Launch-Benachrichtigung verwendet.
 <br/><br/>
-Du warst das nicht oder hast es dir anders überlegt? Dann ignoriere diese E-Mail einfach, oder <a href="${escapeHtml(withdrawUrl)}" style="color:#A61E59;">trag dich hier direkt wieder aus</a>.
+Du warst das nicht oder hast es dir anders überlegt? Dann ignoriere diese E-Mail einfach, oder <a href="${escapeHtml(withdrawUrl)}" style="color:${GLOA_BERRY};">trag dich hier direkt wieder aus</a>.
 <br/><br/>
-GLOA &middot; Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin
-</td></tr>
-</table>
-</td></tr>
-</table>
-</body>
-</html>`;
+${GLOA_POSTAL_ADDRESS}`)}`
+  );
 
   return { subject, html, text };
 }

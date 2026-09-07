@@ -50,6 +50,26 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const organization = { "@context": "https://schema.org", "@type": "Organization", name: "GLOA", url: "/", logo: "/gloa-logo-slogan-link.png" };
+  // THE LOGO HERE IS THE LOGO, NOT THE SOCIAL PREVIEW.
+  //
+  // This used to point at /gloa-logo-slogan-link.png, which is the Open
+  // Graph card: the wordmark plus the slogan, baked onto a Warm Cream
+  // rectangle at 1731x909. As a link preview that is exactly right. As
+  // schema.org/logo it is wrong twice over - a consumer of this markup
+  // (a search result, a knowledge panel, a merchant listing) crops it to
+  // a square or a small box, which cuts the slogan off and shrinks the
+  // wordmark inside its own margins, and it hands over an image with a
+  // background where a logo is expected to have none.
+  //
+  // /gloa-logo-blue-600.png is the approved wordmark itself: GLOA Blue,
+  // transparent, no slogan, no padding. The Open Graph and Twitter cards
+  // above keep the lockup, because that is what they are for.
+  const organization = {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    name: "GLOA",
+    url: "/",
+    logo: "/gloa-logo-blue-600.png",
+  };
   return <html lang="de"><body className={`${sans.variable} ${display.variable}`}><script type="application/ld+json" dangerouslySetInnerHTML={{__html:JSON.stringify(organization)}} />{children}</body></html>;
 }

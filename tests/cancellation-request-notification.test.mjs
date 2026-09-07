@@ -687,6 +687,13 @@ test("email: the template is a pure leaf, like its siblings", () => {
     // Phase 4B5 added the annual purchase confirmation, reviewed in
     // tests/annual-purchase-confirmation-email.test.mjs.
     "annualPurchaseConfirmation.ts",
+    // NOT A TEMPLATE. brand.ts is the shared branding foundation the
+    // launch mails compose from - the master colours, the approved
+    // wordmark as an absolute-URL <img>, the table shell and the shared
+    // escapeHtml. It sends nothing and renders no message of its own, so
+    // it adds no recipient, no purpose and no consent surface. Reviewed
+    // in tests/launch-waitlist.test.mjs.
+    "brand.ts",
     "cancellationConfirmation.ts", "cancellationOutcome.ts",
     "cancellationRequestNotification.ts",
     "internalOrderNotification.ts",
@@ -1085,7 +1092,16 @@ test("regression: THIS message stays internal-only, separate from the outcome em
   // that is not about an order at all. It is sent by the invoice.paid
   // handler to the customer, and this one must STILL stay internal.
   const templates = readdirSync(path.join(ROOT, "lib/email")).sort();
-  assert.equal(templates.length, 13, "an unexpected template was added");
+  // 13 templates + brand.ts, the shared branding foundation. It renders
+  // no message, names no recipient and sends nothing, so it cannot be
+  // the "second customer mail" this guard exists to catch - and the
+  // count below still trips on a real fourteenth template.
+  assert.equal(templates.length, 14, "an unexpected template was added");
+  assert.equal(
+    templates.filter(n => n !== "brand.ts").length,
+    13,
+    "an unexpected template was added"
+  );
   assert.ok(templates.includes("cancellationRequestNotification.ts"));
   assert.ok(templates.includes("cancellationOutcome.ts"));
   // The REQUEST notification still goes to the internal inbox and carries

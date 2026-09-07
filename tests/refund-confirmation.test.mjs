@@ -845,6 +845,13 @@ test("email: the template is a pure leaf, like the other six", () => {
     // Phase 4B5 added the annual purchase confirmation - a prepaid
     // contract's ONE message, reviewed in tests/annual-purchase-confirmation-email.test.mjs.
     "annualPurchaseConfirmation.ts",
+    // NOT A TEMPLATE. brand.ts is the shared branding foundation the
+    // launch mails compose from - the master colours, the approved
+    // wordmark as an absolute-URL <img>, the table shell and the shared
+    // escapeHtml. It sends nothing and renders no message of its own, so
+    // it adds no recipient, no purpose and no consent surface. Reviewed
+    // in tests/launch-waitlist.test.mjs.
+    "brand.ts",
     "cancellationConfirmation.ts", "cancellationOutcome.ts",
     "cancellationRequestNotification.ts",
     "internalOrderNotification.ts",

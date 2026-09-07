@@ -41,7 +41,7 @@ test("1: the hero says exactly the approved lines, and no dash", () => {
   assert.ok(hero.includes('<span className="shop-hero-line gloa-hero-primary">GLOA.</span>'));
   assert.ok(hero.includes('<i className="shop-hero-line shop-hero-line-accent gloa-hero-secondary">alles was du brauchst.</i>'));
   assert.match(site, /const SHOP_HERO_LEAD=<>Premium Matcha aus Shizuoka, Japan<br\/>und alles, was dazugehört\.<\/>;/);
-  assert.ok(hero.includes("LAUNCH AM {GLOA_LAUNCH_LABEL}"));
+  assert.ok(hero.includes("LAUNCH AM {GLOA_LAUNCH_FULL_LABEL}"));
   assert.ok(hero.includes("PRODUKTE ENTDECKEN"));
 
   // ── NO DASH, IN EITHER FORM ──────────────────────────────────
@@ -61,6 +61,8 @@ test("1: the hero says exactly the approved lines, and no dash", () => {
   // The date is the launch utility's, never a second literal.
   assert.ok(!hero.includes("01.10.2026"), "the launch date is hard-coded in the hero");
   assert.match(read("lib/launchCountdown.ts"), /GLOA_LAUNCH_LABEL = "01\.10\.2026"/);
+  // The shop surfaces print date AND time, both from the one constant.
+  assert.match(read("lib/launchCountdown.ts"), /GLOA_LAUNCH_TIME_LABEL = "12:00 UHR"/);
 });
 
 test("2: the price comes from the catalog, and the CTA still scrolls to the products", () => {
@@ -111,7 +113,7 @@ test("4: the launch band reuses the existing countdown and sits under the hero",
   assert.match(strip, /useSyncExternalStore\(clockStore\.subscribe,clockStore\.getSnapshot,clockStore\.getServerSnapshot\)/);
   assert.match(strip, /launchCountdown\(now\)/);
   assert.match(strip, /padCountdownUnit\(value\)/);
-  assert.match(strip, /\{GLOA_LAUNCH_LABEL\}/);
+  assert.match(strip, /\{GLOA_LAUNCH_FULL_LABEL\}/);
   assert.ok(!/new Date\(|Date\.now\(\)|setInterval|setTimeout/.test(strip),
     "the strip started a clock of its own");
   assert.equal([...site.matchAll(/const clockStore=/g)].length, 1, "a second clock appeared");

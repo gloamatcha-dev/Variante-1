@@ -14,22 +14,56 @@
  */
 
 /**
- * 1 October 2026, midnight in Berlin.
+ * 1 October 2026, 12:00 noon in Berlin.
  *
  * Written with the explicit +02:00 offset rather than as a local-time
  * string: Berlin is on CEST at the start of October, and a bare
- * "2026-10-01T00:00:00" would mean midnight in whatever timezone the
- * VIEWER happens to be in - so a customer in New York would see the
- * countdown end six hours late. The offset makes it one instant in time
- * for everybody.
+ * "2026-10-01T12:00:00" would mean noon in whatever timezone the VIEWER
+ * happens to be in - so a customer in New York would see the countdown
+ * end six hours late. The offset makes it one instant in time for
+ * everybody. The same instant in UTC is 2026-10-01T10:00:00Z.
+ *
+ * THIS CONSTANT IS THE ONLY PLACE THE LAUNCH INSTANT IS WRITTEN. The
+ * countdown on the homepage, the strip above the shop, the date on the
+ * launch page and the guard on the launch send all derive from it, so
+ * two components cannot disagree about when GLOA opens.
+ *
+ * ── WHAT THIS INSTANT DOES *NOT* DO ───────────────────────────
+ *
+ * Three different things are deliberately kept apart, and this is only
+ * the first of them:
+ *
+ *   1. THE PLANNED LAUNCH INSTANT - this constant. It drives what the
+ *      site SAYS. Nothing more.
+ *
+ *   2. THE ACTUAL SHOP RELEASE - SHOP_STATUS in app/content.ts, a
+ *      constant a person edits and deploys. Reaching this instant does
+ *      NOT flip it. A countdown that hit zero while the shop was not
+ *      ready would otherwise have the site claiming products are buyable
+ *      when the cart still routes to /contact.
+ *
+ *   3. THE ACTUAL LAUNCH ANNOUNCEMENT - the one-time mail to the
+ *      waitlist, which is released by an explicit human confirmation and
+ *      may not be sent by a timer at all.
+ *
+ * A client clock is not evidence about any of the three. `launched`
+ * below says only "the announced moment has passed on the viewer's
+ * device", and no purchase, price or availability decision may be taken
+ * from it.
  */
-export const GLOA_LAUNCH_ISO = "2026-10-01T00:00:00+02:00";
+export const GLOA_LAUNCH_ISO = "2026-10-01T12:00:00+02:00";
 
 /** The same instant in epoch milliseconds. Parsed once, never re-derived. */
 export const GLOA_LAUNCH_MS = Date.parse(GLOA_LAUNCH_ISO);
 
 /** The date as the page prints it. Display only. */
 export const GLOA_LAUNCH_LABEL = "01.10.2026";
+
+/** The time as the page prints it. Display only, Berlin local. */
+export const GLOA_LAUNCH_TIME_LABEL = "12:00 UHR";
+
+/** Date and time together, for the places that print the full moment. */
+export const GLOA_LAUNCH_FULL_LABEL = `${GLOA_LAUNCH_LABEL} — ${GLOA_LAUNCH_TIME_LABEL}`;
 
 export type LaunchCountdown = {
   /** True once the launch instant has been reached or passed. */

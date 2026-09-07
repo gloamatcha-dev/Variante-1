@@ -349,6 +349,9 @@ export async function POST(request: Request): Promise<Response> {
     firstName: resolvedFirstName,
     confirmUrl: `${origin}/api/launch/confirm?token=${confirmationToken}`,
     withdrawUrl: `${origin}/api/launch/withdraw?token=${withdrawalToken}`,
+    // The same checked origin the links are built from, so the logo can
+    // be an absolute HTTPS URL - the only kind an inbox can load.
+    origin,
   });
 
   try {

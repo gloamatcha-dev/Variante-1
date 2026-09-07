@@ -49,6 +49,16 @@ import {
 
 import { buildLaunchConfirmationEmail } from "../lib/email/launchConfirmation.ts";
 
+import {
+  GLOA_BERRY,
+  GLOA_BLUE,
+  GLOA_CREAM,
+  GLOA_NEAR_BLACK,
+  GLOA_PLUM,
+  LOGO_DISPLAY_HEIGHT,
+  LOGO_DISPLAY_WIDTH,
+} from "../lib/email/brand.ts";
+
 /* ══════════════════════════════════════════════════════════════
    THE LAUNCH WAITLIST
 
@@ -1384,4 +1394,209 @@ test("70: the sweep actually runs - it is wired into the daily cron, last and gu
   // matters more than it did.
   assert.match(cronRoute, /const secret = process\.env\.CRON_SECRET/);
   assert.match(cronRoute, /if \(!secret\)[\s\S]{0,300}?status: 503/);
+});
+
+/* ── 13. The mark, the mail branding and the launch moment ────
+ *
+ * The wordmark is a piece of approved artwork, not a font and not
+ * something a build step may regenerate. These tests hold that: they
+ * check the actual bytes of the SVG the site and the mails are drawn
+ * from, and they check that every colour variant is the SAME geometry
+ * with a different fill.
+ * ────────────────────────────────────────────────────────────── */
+
+const logoSvg = read("public/gloa-logo-schwarz.svg");
+const logoBlueSvg = read("public/gloa-logo-blue.svg");
+const logoCreamSvg = read("public/gloa-logo-cream.svg");
+const brandModule = read("lib/email/brand.ts");
+const layout = read("app/layout.tsx");
+
+/** The `d` attribute of every path, in order. This IS the geometry. */
+function pathData(svg) {
+  return [...svg.matchAll(/d="([^"]+)"/g)].map((m) => m[1]);
+}
+
+test("71: the wordmark is drawn artwork, never a font and never regenerated", () => {
+  // Four closed paths - G, L, O and A - and not one glyph reference.
+  // A <text> element or a font-family here would mean the mark is being
+  // set in a typeface rather than drawn, which is the one thing the
+  // brand rules forbid outright: the O is a bespoke organic form that no
+  // font contains.
+  assert.equal(pathData(logoSvg).length, 4, "the wordmark is not four drawn paths");
+  for (const forbidden of ["<text", "font-family", "font-weight", "@font-face", "textPath"]) {
+    assert.ok(!logoSvg.includes(forbidden), `the wordmark is set in type: ${forbidden}`);
+  }
+
+  // The approved artboard. A changed viewBox would mean the geometry was
+  // re-cropped or re-scaled rather than reused.
+  assert.match(logoSvg, /viewBox="54 52\.7785 825\.444 248\.443"/);
+  assert.match(logoSvg, /<title>GLOA Schwarz ohne_Slogan #000000<\/title>/);
+
+  // No slogan is baked into the wordmark itself. The slogan lockup is a
+  // separate asset with a separate job.
+  assert.ok(!/MATCHA IS FOR/i.test(logoSvg), "the wordmark has the slogan baked in");
+});
+
+test("72: every colour variant is the same geometry with a different fill", () => {
+  // THIS IS THE WHOLE POINT OF THE VARIANTS. They were derived by
+  // replacing the fill and nothing else, so a variant cannot quietly
+  // become a redrawn, re-traced or AI-regenerated mark. Byte-identical
+  // path data is the proof, and it is checked rather than trusted.
+  const source = pathData(logoSvg);
+  assert.deepEqual(pathData(logoBlueSvg), source, "the blue variant has different geometry");
+  assert.deepEqual(pathData(logoCreamSvg), source, "the cream variant has different geometry");
+
+  // The approved palette, and only it.
+  assert.match(logoBlueSvg, /fill="#1746D1"/);
+  assert.match(logoCreamSvg, /fill="#F5EBE2"/);
+  assert.ok(!logoBlueSvg.includes("#000000"), "the blue variant still carries black");
+
+  // Same artboard, so the three are interchangeable at any size.
+  for (const svg of [logoBlueSvg, logoCreamSvg]) {
+    assert.match(svg, /viewBox="54 52\.7785 825\.444 248\.443"/);
+  }
+});
+
+test("73: the mail branding uses the approved palette and no other colour", () => {
+  assert.equal(GLOA_BLUE, "#1746D1");
+  assert.equal(GLOA_BERRY, "#A61E59");
+  assert.equal(GLOA_CREAM, "#F5EBE2");
+  assert.equal(GLOA_PLUM, "#4F3A5B");
+  assert.equal(GLOA_NEAR_BLACK, "#111111");
+
+  // Every hex literal in the module is one of the five. A lavender
+  // button, a grey border or a stray white would show up here.
+  const master = new Set([GLOA_BLUE, GLOA_BERRY, GLOA_CREAM, GLOA_PLUM, GLOA_NEAR_BLACK]);
+  for (const hex of brandModule.match(/#[0-9a-fA-F]{6}/g) ?? []) {
+    assert.ok(master.has(hex.toUpperCase()), `the mail branding uses an off-palette colour: ${hex}`);
+  }
+
+  // And none of the decoration GLOA does not use anywhere.
+  for (const banned of ["linear-gradient", "border-radius", "box-shadow", "backdrop-filter"]) {
+    assert.ok(!brandModule.includes(banned), `the mail branding uses ${banned}`);
+  }
+});
+
+test("74: the mail logo is an absolute HTTPS PNG, sized and never stretched", () => {
+  const html = buildLaunchConfirmationEmail({
+    firstName: "Valmira",
+    confirmUrl: "https://gloamatcha.com/api/launch/confirm?token=" + "a".repeat(64),
+    withdrawUrl: "https://gloamatcha.com/api/launch/withdraw?token=" + "b".repeat(64),
+    origin: "https://gloamatcha.com",
+  }).html;
+
+  // ABSOLUTE, AND HTTPS. A relative src has nothing to resolve against
+  // in an inbox, and http:// is blocked or downgraded by most clients.
+  assert.match(html, /<img src="https:\/\/gloamatcha\.com\/gloa-logo-blue-600\.png"/);
+  assert.ok(!/src="\//.test(html), "the mail carries a relative image path");
+  assert.ok(!/src="http:\/\//.test(html), "the mail loads an image over http");
+
+  // A PNG, not the SVG: Outlook's renderer does not draw SVG at all.
+  assert.ok(!/\.svg/.test(html), "the mail references an SVG");
+
+  // Width and height as ATTRIBUTES as well as CSS - Outlook ignores the
+  // CSS and would otherwise draw the file at its intrinsic 600px.
+  assert.match(html, /width="132" height="40"/);
+  // And the pair matches the artwork's real aspect ratio, so the mark
+  // cannot arrive squashed or stretched.
+  assert.equal(LOGO_DISPLAY_HEIGHT, Math.round((LOGO_DISPLAY_WIDTH * 248.443) / 825.444));
+
+  // Alt text is the brand name. The mark IS the word, so "GLOA logo"
+  // would have a screen reader announce the word twice.
+  assert.match(html, /alt="GLOA"/);
+
+  // THE SOCIAL PREVIEW IS NOT A LOGO and must never be used as one: it
+  // has its own baked-in cream background and its own lockup, so in a
+  // cream mail it would draw a second rectangle around a shrunken mark.
+  assert.ok(!html.includes("gloa-logo-slogan-link"), "the mail uses the social preview as its logo");
+});
+
+test("75: a mail built without an origin has no logo rather than a broken image", () => {
+  const html = buildLaunchConfirmationEmail({
+    firstName: null,
+    confirmUrl: "https://gloamatcha.com/api/launch/confirm?token=" + "a".repeat(64),
+    withdrawUrl: "https://gloamatcha.com/api/launch/withdraw?token=" + "b".repeat(64),
+  }).html;
+  assert.ok(!html.includes("<img"), "a mail with no origin still carries an image tag");
+  // The message itself is unaffected - it is still a complete, sendable
+  // consent mail, because a missing logo may not cost somebody their
+  // confirmation link.
+  assert.ok(html.includes("Eintragung bestätigen"));
+  assert.ok(html.includes("Fast geschafft."));
+});
+
+test("76: the confirmation mail's wording and purpose are untouched by the rebrand", () => {
+  const { subject, html, text } = buildLaunchConfirmationEmail({
+    firstName: "Valmira",
+    confirmUrl: "https://gloamatcha.com/api/launch/confirm?token=" + "a".repeat(64),
+    withdrawUrl: "https://gloamatcha.com/api/launch/withdraw?token=" + "b".repeat(64),
+    origin: "https://gloamatcha.com",
+  });
+
+  // A visual pass may not change what a consent mail says.
+  assert.equal(subject, "GLOA Launch List bestätigen");
+  assert.ok(html.includes("Du erhältst über diese Eintragung keine regelmäßigen Newsletter."));
+  assert.ok(html.includes("ausschließlich für die Launch-Benachrichtigung verwendet"));
+  assert.ok(html.includes("Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin"));
+  assert.ok(text.includes("Du erhältst über diese Eintragung keine regelmäßigen Newsletter."));
+
+  // Still exactly one action, and still no marketing of any kind.
+  for (const banned of ["/shop", "Rabatt", "Gutschein", "% ", "Angebot", "jetzt kaufen", "Produkte"]) {
+    assert.ok(!html.includes(banned), `the consent mail advertises: ${banned}`);
+  }
+});
+
+test("77: the structured-data logo is the wordmark, not the social preview", () => {
+  // schema.org/logo is cropped to a square or a small box by whatever
+  // consumes it, which cuts the slogan off the lockup and shrinks the
+  // mark inside its own baked-in margins.
+  assert.match(layout, /"@type": "Organization"[\s\S]*?logo: "\/gloa-logo-blue-600\.png"/);
+  // The Open Graph and Twitter cards keep the lockup - that IS what it
+  // is for.
+  assert.match(layout, /openGraph:[\s\S]*?gloa-logo-slogan-link\.png/);
+});
+
+test("78: the launch moment is one constant, and every surface derives from it", () => {
+  // The date is printed on four surfaces. None of them types it.
+  //
+  // Comments are not code - the note at the top of this file. A file
+  // that explains WHY it must not hard-code the date would otherwise be
+  // failed for explaining itself, and the honest fix would be to delete
+  // the explanation.
+  const site = stripJs(read("app/GloaSite.tsx"));
+  const page = stripJs(launchPage);
+  assert.ok(!/01\.10\.2026/.test(site), "GloaSite hard-codes the launch date");
+  assert.ok(!/01\.10\.2026/.test(page), "the launch page hard-codes the launch date");
+  assert.ok(!/12:00 UHR/.test(site), "GloaSite hard-codes the launch time");
+
+  // The homepage countdown, the shop strip, the shop hero and /launch
+  // all read the same derived label.
+  assert.equal((site.match(/GLOA_LAUNCH_FULL_LABEL/g) ?? []).length, 5,
+    "a launch-date surface stopped using the shared constant");
+  assert.match(launchPage, /\{GLOA_LAUNCH_FULL_LABEL\}/);
+});
+
+test("79: reaching the launch instant does not open the shop", () => {
+  // THE THREE THINGS THAT MUST STAY APART. A client clock is not
+  // evidence that anything is buyable, and this is the assertion that
+  // keeps the countdown from becoming a release switch.
+  const countdown = stripJs(read("lib/launchCountdown.ts"));
+  const content = stripJs(read("app/content.ts"));
+
+  // The shop release is its own constant, edited and deployed by a
+  // person - not derived from a date.
+  assert.match(read("app/content.ts"), /export const SHOP_STATUS = "prelaunch"/);
+  assert.ok(!countdown.includes("SHOP_STATUS"), "the countdown knows about the shop release");
+  assert.ok(!content.includes("GLOA_LAUNCH"), "the shop release is derived from the launch date");
+
+  // And `launched` is never used to gate a purchase. The site may say
+  // "GLOA is here"; it may not put anything in a cart because of it.
+  const site = stripJs(read("app/GloaSite.tsx"));
+  for (const gate of [
+    /launched\s*[?&|]{1,2}[^;]{0,80}handleAdd/,
+    /launched\s*[?&|]{1,2}[^;]{0,80}checkout/i,
+    /SHOP_STATUS\s*=\s*[^;]{0,40}launched/,
+  ]) {
+    assert.ok(!gate.test(site), `the countdown gates a purchase: ${gate}`);
+  }
 });
