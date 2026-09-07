@@ -103,17 +103,17 @@ test("1, 2: 036 exists, owns its number, and 037 is the only thing above it", ()
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(files[files.length - 1], "043_launch_waitlist.sql");
-  assert.equal(files[files.length - 2], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.equal(files[files.length - 3], "041_annual_account_column_privileges.sql");
-  assert.equal(files[files.length - 4], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(files[files.length - 5], "039_b2c_annual_plan_foundation.sql");
-  assert.equal(files[files.length - 6], "038_one_time_refund_writer_concurrency.sql");
-  assert.equal(files[files.length - 7], "037_subscription_refund_correlation.sql");
-  assert.equal(files[files.length - 8], MIGRATION_036, "036 must still be the one before 037");
+  assert.equal(files[files.length - 1], "044_launch_send.sql");
+  assert.equal(files[files.length - 2], "043_launch_waitlist.sql");
+  assert.equal(files[files.length - 3], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(files[files.length - 4], "041_annual_account_column_privileges.sql");
+  assert.equal(files[files.length - 5], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 6], "039_b2c_annual_plan_foundation.sql");
+  assert.equal(files[files.length - 7], "038_one_time_refund_writer_concurrency.sql");
+  assert.equal(files[files.length - 9], MIGRATION_036, "036 must still be the one before 037");
   assert.deepEqual(files.filter(f => f.startsWith("037")), ["037_subscription_refund_correlation.sql"]);
-  assert.ok(!files.some(f => f.startsWith("044")), "a 045 appeared");
-  assert.equal(files.length, 43);
+  assert.ok(!files.some(f => f.startsWith("045")), "a 045 appeared");
+  assert.equal(files.length, 44);
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length);

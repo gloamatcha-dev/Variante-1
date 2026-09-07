@@ -113,7 +113,7 @@ test("035 exists, is the only 035, and only 036 and 037 follow it", () => {
      // Phase 5. public.launch_waitlist: one new table for the one-time
      // launch notification, RLS on, no anon/authenticated grant, and no
      // existing object touched. Reviewed in tests/launch-waitlist.test.mjs.
-     "043_launch_waitlist.sql"],
+     "043_launch_waitlist.sql", "044_launch_send.sql"],
     "an unreviewed migration above 035 appeared"
   );
   // And 039 leaves this table entirely alone. An annual plan's one
@@ -630,6 +630,13 @@ test("exactly the three reviewed lifecycle templates were built on this foundati
     // touch any order, subscription or cancellation flow. Reviewed in
     // tests/launch-waitlist.test.mjs.
     "launchConfirmation.ts",
+    // The one-time launch announcement. It is the message the launch
+    // list consented to receive and the only one that consent covers;
+    // mayReceiveLaunchNotification() in lib/launchWaitlist.ts is the gate,
+    // and migration 044 makes the send single-shot. It touches no order,
+    // subscription or cancellation flow. Reviewed in tests/launch-send.test.mjs.
+    "launchDay.ts",
+
     "orderConfirmation.ts",
     "paymentProblem.ts",
     "refundConfirmation.ts",

@@ -111,7 +111,7 @@ test("1c: no backend, auth or database was touched", () => {
     // UNREVIEWED route appeared", never "the surface stopped growing".
     ["annual-plan", "checkout", "contact", "cron", "internal", "launch",
      "orders", "stripe", "subscriptions", "withdrawal"], "an API route changed");
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("044")),
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("045")),
     "migration 044 exists");
 });
 

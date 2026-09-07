@@ -101,9 +101,9 @@ test("1: 038 exists, owns its number, and 039 is the only one above it", () => {
   // in tests/annual-plan-foundation-migration.test.mjs. 038 is therefore
   // no longer the highest, and this is re-pinned rather than deleted:
   // what it protects is that no UNREVIEWED migration appeared.
-  assert.equal(files[files.length - 5], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 6], MIGRATION_038, "038 must be the one before it");
-  assert.equal(files[files.length - 7], MIGRATION_037, "037 must be the one before that");
+  assert.equal(files[files.length - 6], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 7], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 8], MIGRATION_037, "037 must be the one before that");
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
@@ -119,7 +119,7 @@ test("2: no migration 044 or beyond", () => {
   // no anon or authenticated grant, and no existing object touched.
   // Reviewed in tests/launch-waitlist.test.mjs.
   assert.deepEqual(beyond, [MIGRATION_039, MIGRATION_040, MIGRATION_041, MIGRATION_042,
-    "043_launch_waitlist.sql"],
+    "043_launch_waitlist.sql", "044_launch_send.sql"],
     "an unreviewed migration appeared after 043");
   // And 039 kept its hands off this phase's writer entirely.
   for (const name of [MIGRATION_039, MIGRATION_040, MIGRATION_041, MIGRATION_042]) {

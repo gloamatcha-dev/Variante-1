@@ -136,7 +136,7 @@ test("1e: no backend, auth, data or commercial logic changed", () => {
     // UNREVIEWED route appeared", never "the surface stopped growing".
     ["annual-plan", "checkout", "contact", "cron", "internal", "launch",
      "orders", "stripe", "subscriptions", "withdrawal"], "an API route changed");
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("044")),
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("045")),
     "migration 044 exists");
   // The presentation primitives stayed presentation.
   assert.ok(!/supabase|useAuth|customer_type/.test(ui), "AccountUI grew a data dependency");

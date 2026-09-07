@@ -548,6 +548,13 @@ test("email: no new template and no new Resend namespace", () => {
     // touch any order, subscription or cancellation flow. Reviewed in
     // tests/launch-waitlist.test.mjs.
     "launchConfirmation.ts",
+    // The one-time launch announcement. It is the message the launch
+    // list consented to receive and the only one that consent covers;
+    // mayReceiveLaunchNotification() in lib/launchWaitlist.ts is the gate,
+    // and migration 044 makes the send single-shot. It touches no order,
+    // subscription or cancellation flow. Reviewed in tests/launch-send.test.mjs.
+    "launchDay.ts",
+
     "orderConfirmation.ts", "paymentProblem.ts",
     "refundConfirmation.ts", "shipmentConfirmation.ts", "subscriptionEnded.ts",
     "subscriptionStarted.ts",

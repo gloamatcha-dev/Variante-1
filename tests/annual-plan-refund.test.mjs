@@ -848,7 +848,7 @@ test("28: the rules module is a leaf, and the wiring is where the effects are", 
 test("29: this phase adds no migration, no route and no customer action", () => {
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 43);
+  assert.equal(migrations.length, 44);
   // PHASE 4B8.2 ADDED MIGRATION 042: the ONE column privilege 041
   // was short of, so migration 039's delivery policy can still read
   // the parent's user_id while resolving ownership. Reviewed in
@@ -857,11 +857,11 @@ test("29: this phase adds no migration, no route and no customer action", () => 
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(migrations[migrations.length - 1], "043_launch_waitlist.sql");
-  assert.equal(migrations[migrations.length - 2], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.equal(migrations[migrations.length - 3], "041_annual_account_column_privileges.sql");
-  assert.equal(migrations[migrations.length - 4], "040_annual_checkout_retry_fingerprints.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 43), [], "a 045 appeared");
+  assert.equal(migrations[migrations.length - 1], "044_launch_send.sql");
+  assert.equal(migrations[migrations.length - 2], "043_launch_waitlist.sql");
+  assert.equal(migrations[migrations.length - 3], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(migrations[migrations.length - 4], "041_annual_account_column_privileges.sql");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 44), [], "a 045 appeared");
 
   // No annual refund endpoint, and no browser-triggered refund anywhere.
   const annualRoutes = readdirSync(path.join(ROOT, "app/api/annual-plan"), { withFileTypes: true })

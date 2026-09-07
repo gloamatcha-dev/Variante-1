@@ -1086,15 +1086,35 @@ test("60: the counter is locked to service_role, exactly as the list is", () => 
 });
 
 test("61: the rate limit went into 043 rather than into a 044, and 043 is still additive", () => {
-  // 043 has not been applied anywhere, and this repository's rule for
-  // that case is written into
-  // tests/one-time-refund-writer-concurrency.test.mjs: an unapplied
-  // migration is still the right place to fix itself, and "a hardening
-  // pass must not become a second migration". That test is also what
-  // would fail if a 044 appeared, so this one only has to hold the
-  // other half of the bargain: 043 stayed additive while it grew.
+  // WHAT THIS TEST ORIGINALLY HELD, AND WHY IT CHANGED.
+  //
+  // The rule from tests/one-time-refund-writer-concurrency.test.mjs is
+  // that "a hardening pass must not become a second migration": while
+  // 043 was unapplied, fixing 043 belonged in 043. This test enforced
+  // that by asserting no 044 existed at all.
+  //
+  // 043 IS NOW APPLIED IN PRODUCTION, so that clause has done its job
+  // and the opposite rule takes over: an applied migration may never be
+  // edited again, and anything further has to be its own file. 044 is
+  // that file, and it is a NEW FEATURE - the one-time launch send - not
+  // a hardening pass on 043.
+  //
+  // So the assertion narrows rather than disappears. What still has to
+  // be true is that the RATE LIMIT lives in 043 and that no later
+  // migration reaches into it - which is the thing the original rule
+  // was protecting.
   const files = readdirSync(path.join(ROOT, "supabase/migrations")).filter((f) => f.endsWith(".sql"));
-  assert.deepEqual(files.filter((f) => Number(f.slice(0, 3)) > 43), [], "a 044 appeared after all");
+  const later = files.filter((f) => Number(f.slice(0, 3)) > 43);
+  assert.deepEqual(later, ["044_launch_send.sql"], "an unreviewed migration appeared after 043");
+
+  // The rate limit objects are in 043 and nowhere else. A later
+  // migration that recreated, altered or dropped them would mean the
+  // limiter's definition had two homes.
+  for (const f of later) {
+    const sql = stripSql(read(`supabase/migrations/${f}`));
+    assert.ok(!sql.includes("launch_rate_limit"), `${f} touches the rate limit table`);
+    assert.ok(!sql.includes("consume_launch_rate_limit"), `${f} touches the rate limit function`);
+  }
 
   const sql = stripSql(migration);
   for (const destructive of [

@@ -703,6 +703,13 @@ test("email: the template is a pure leaf, like its siblings", () => {
     // touch any order, subscription or cancellation flow. Reviewed in
     // tests/launch-waitlist.test.mjs.
     "launchConfirmation.ts",
+    // The one-time launch announcement. It is the message the launch
+    // list consented to receive and the only one that consent covers;
+    // mayReceiveLaunchNotification() in lib/launchWaitlist.ts is the gate,
+    // and migration 044 makes the send single-shot. It touches no order,
+    // subscription or cancellation flow. Reviewed in tests/launch-send.test.mjs.
+    "launchDay.ts",
+
     "orderConfirmation.ts", "paymentProblem.ts",
     "refundConfirmation.ts", "shipmentConfirmation.ts", "subscriptionEnded.ts",
     "subscriptionStarted.ts",
@@ -1096,10 +1103,10 @@ test("regression: THIS message stays internal-only, separate from the outcome em
   // no message, names no recipient and sends nothing, so it cannot be
   // the "second customer mail" this guard exists to catch - and the
   // count below still trips on a real fourteenth template.
-  assert.equal(templates.length, 14, "an unexpected template was added");
+  assert.equal(templates.length, 15, "an unexpected template was added");
   assert.equal(
     templates.filter(n => n !== "brand.ts").length,
-    13,
+    14,
     "an unexpected template was added"
   );
   assert.ok(templates.includes("cancellationRequestNotification.ts"));
