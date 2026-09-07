@@ -3,6 +3,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { BRAND } from "./content";
 import { GLOA_LAUNCH_FULL_LABEL } from "../lib/launchCountdown";
+import { LAUNCH_DISCOUNT_LABEL } from "../lib/launchDiscount";
 
 /**
  * /launch - THE LAUNCH LIST.
@@ -176,6 +177,14 @@ export function LaunchPage() {
                 here would be a fourth place for the date to be wrong in.
               */}
               <p className="launch-hero-date">{GLOA_LAUNCH_FULL_LABEL}</p>
+              {/*
+                THE BENEFIT, NAMED ONCE.
+                Between the date and the lead because that is the order
+                somebody reads in: when, what they get, what to do. The
+                string comes from lib/launchDiscount.ts, so this page
+                cannot promise a percentage the checkout does not grant.
+              */}
+              <p className="launch-hero-offer">{LAUNCH_DISCOUNT_LABEL}</p>
               <p className="launch-hero-lead">
                 Unser Shop öffnet am 1. Oktober um 12:00 Uhr.
                 <br />
@@ -290,9 +299,18 @@ export function LaunchPage() {
                       it. The server refuses the request without it. */}
                   <div className="launch-consent">
                     <input id="launch-consent" name="consent" type="checkbox" required disabled={status === "sending"} />
+                    {/*
+                      WORD FOR WORD LAUNCH_CONSENT_TEXT from
+                      lib/launchWaitlist.ts. The server stores that
+                      constant on the row as evidence of what this person
+                      was shown, so if the two ever drift the stored
+                      evidence becomes a record of a sentence nobody read.
+                      tests/launch-waitlist.test.mjs compares them.
+                    */}
                     <label htmlFor="launch-consent">
-                      Ich möchte per E-Mail benachrichtigt werden, sobald GLOA startet. Meine E-Mail-Adresse wird
-                      ausschließlich für diese Launch-Benachrichtigung verwendet.
+                      Ich möchte per E-Mail benachrichtigt werden, sobald GLOA startet, und dafür einmalig
+                      meinen Launch-Rabattcode erhalten. Meine E-Mail-Adresse wird ausschließlich für diese
+                      beiden E-Mails verwendet.
                     </label>
                   </div>
 

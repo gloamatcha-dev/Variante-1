@@ -598,14 +598,14 @@ test("27: 039 and 040 are untouched, 041 is the highest, and there is no 042", (
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(migrations[migrations.length - 1], "044_launch_send.sql");
-  assert.equal(migrations[migrations.length - 2], "043_launch_waitlist.sql");
-  assert.equal(migrations[migrations.length - 3], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.equal(migrations[migrations.length - 4], "041_annual_account_column_privileges.sql");
-  assert.equal(migrations[migrations.length - 5], "040_annual_checkout_retry_fingerprints.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 44), [],
+  assert.equal(migrations[migrations.length - 1], "045_launch_welcome_email.sql");
+  assert.equal(migrations[migrations.length - 2], "044_launch_send.sql");
+  assert.equal(migrations[migrations.length - 3], "043_launch_waitlist.sql");
+  assert.equal(migrations[migrations.length - 4], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(migrations[migrations.length - 5], "041_annual_account_column_privileges.sql");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 45), [],
     "a migration 044 or beyond appeared");
-  assert.equal(migrations.length, 44);
+  assert.equal(migrations.length, 45);
   // 039 is LIVE and therefore immutable. 040 is NOT APPLIED yet, so it
   // may still be edited in place - that is the whole reason it is a file
   // under review rather than a 041 - and it is the only one that may.

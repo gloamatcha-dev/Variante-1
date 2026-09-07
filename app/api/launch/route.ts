@@ -323,7 +323,7 @@ export async function POST(request: Request): Promise<Response> {
       },
       { onConflict: "email", ignoreDuplicates: false }
     )
-    .select("id, status, withdrawn_at")
+    .select("id, status, withdrawn_at, confirmed_at")
     .maybeSingle();
 
   if (upsertError) {
@@ -341,6 +341,34 @@ export async function POST(request: Request): Promise<Response> {
     await supabase
       .from("launch_waitlist")
       .update({ status: "withdrawn", confirmation_token_hash: null, confirmation_sent_at: null })
+      .eq("id", upserted.id);
+    return neutralSuccess();
+  }
+
+  // AN ALREADY CONFIRMED ROW IS PUT BACK TOO.
+  //
+  // The upsert cannot express "only if it is still pending", so it
+  // overwrites `status` with 'pending' whatever the row said before -
+  // and it does NOT clear `confirmed_at`, because that column is not in
+  // the payload. The result was a row reading status='pending' with a
+  // confirmed_at from days earlier: a person who HAD confirmed, silently
+  // demoted to unconfirmed by typing their address in again.
+  //
+  // That is wrong twice over. They would have been excluded from the
+  // launch send they had already opted in to, and the retention sweep
+  // would have deleted them fourteen days later as "never confirmed",
+  // with a confirmed_at sitting right there saying otherwise.
+  //
+  // `confirmed_at` is the evidence and it survives the upsert, so it is
+  // exactly what tells us the row was confirmed BEFORE this request.
+  // The row is restored and no mail goes out: somebody who is already on
+  // the list does not need to confirm a second time, and re-sending a
+  // confirmation link to a confirmed address is how a person ends up
+  // clicking a link that demotes them.
+  if (upserted && upserted.confirmed_at) {
+    await supabase
+      .from("launch_waitlist")
+      .update({ status: "confirmed", confirmation_token_hash: null, confirmation_sent_at: null })
       .eq("id", upserted.id);
     return neutralSuccess();
   }

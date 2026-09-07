@@ -8409,6 +8409,18 @@ header nav{gap:18px;font-size:12px}
   color:var(--cream);
   opacity:.86;
 }
+/* THE BENEFIT LINE. Cream at full strength like the date above it,
+   but set in the body face rather than tracked caps: the date is a
+   stamp, this is a sentence somebody reads. It never states a
+   percentage of its own - the string comes from lib/launchDiscount.ts. */
+.launch-hero-offer{
+  margin:clamp(10px,1.2vw,14px) 0 0;
+  font-size:var(--type-body);
+  line-height:1.4;
+  font-weight:600;
+  color:var(--cream);
+}
+
 /* THE LAUNCH MOMENT.
    Tracked uppercase at full opacity: it is the one hard fact on this
    page, so it reads as a stamp rather than as another line of copy, and

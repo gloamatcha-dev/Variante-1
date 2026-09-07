@@ -1142,6 +1142,12 @@ test("regression: the OPERATOR cancel route still sends nothing at all", () => {
     // and migration 044 makes the send single-shot. It touches no order,
     // subscription or cancellation flow. Reviewed in tests/launch-send.test.mjs.
     "launchDay.ts",
+    // The welcome mail carrying the launch discount code. Sent once,
+    // right after a confirmation, and ONLY to rows whose stored consent
+    // version names it - rows signed under version 1 never receive it.
+    // It touches no order, subscription or cancellation flow. Reviewed
+    // in tests/launch-waitlist.test.mjs (84-87).
+    "launchWelcome.ts",
 
     "orderConfirmation.ts", "paymentProblem.ts",
     "refundConfirmation.ts", "shipmentConfirmation.ts", "subscriptionEnded.ts",

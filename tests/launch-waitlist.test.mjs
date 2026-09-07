@@ -8,7 +8,10 @@ import {
   CONFIRMATION_TOKEN_TTL_DAYS,
   LAUNCH_AUDIENCE_TYPES,
   LAUNCH_CONSENT_TEXT,
+  LAUNCH_CONSENT_TEXT_V1,
   LAUNCH_CONSENT_VERSION,
+  LAUNCH_CONSENT_VERSIONS,
+  LAUNCH_CONSENT_VERSION_V1,
   LAUNCH_PURPOSE,
   LAUNCH_SOURCES,
   PENDING_RETENTION_DAYS,
@@ -18,6 +21,7 @@ import {
   isValidEmail,
   isWellFormedToken,
   mayReceiveLaunchNotification,
+  mayReceiveWelcomeEmail,
   normalizeEmail,
   normalizeFirstName,
   resolveAudienceType,
@@ -48,6 +52,7 @@ import {
 } from "../lib/launchWaitlistRetention.ts";
 
 import { buildLaunchConfirmationEmail } from "../lib/email/launchConfirmation.ts";
+import { buildLaunchWelcomeEmail } from "../lib/email/launchWelcome.ts";
 
 import {
   GLOA_BERRY,
@@ -213,7 +218,11 @@ test("8: the consent wording is stored with the row, and comes from the server",
 test("9: the wording rendered to the person is the wording that gets stored", () => {
   // The page and the constant must not drift apart, or the stored
   // consent text stops describing what was actually on screen.
-  assert.match(LAUNCH_CONSENT_TEXT, /ausschließlich für diese Launch-Benachrichtigung verwendet/);
+  // The CURRENT wording is version 2: it names both mails, because the
+  // list now also sends the welcome mail with the discount code. The
+  // version 1 sentence is asserted separately in test 80, where it
+  // belongs - as history, not as the live text.
+  assert.match(LAUNCH_CONSENT_TEXT, /ausschließlich für diese beiden E-Mails verwendet/);
   const collapse = (s) => s.replace(/\s+/g, " ").trim();
   assert.ok(
     collapse(launchPage).includes(collapse(LAUNCH_CONSENT_TEXT)),
@@ -243,10 +252,16 @@ test("12: this list is not a newsletter, and nothing in it says otherwise", () =
   const surfaces = { launchPage, signupRoute, emailTemplate };
   // Wording that would signal a different, broader consent than the one
   // actually obtained.
+  // WHAT THIS GUARD IS FOR: wording that would signal a BROADER consent
+  // than the one actually obtained. It is not a ban on the word
+  // "Rabatt" - the launch discount is named in the consent text itself,
+  // so the page and the mail may say it. What they may not do is imply
+  // recurring marketing.
   const forbidden = [
     "Newsletter abonnieren", "Newsletter anmelden", "Newsletter erhalten",
     "Marketing Updates", "Marketing-Updates", "Angebote erhalten",
-    "Promotions", "Produktneuheiten", "Rabatt", "Gutschein",
+    "Promotions", "Produktneuheiten", "Gutschein", "exklusive Angebote",
+    "Vorteile sichern",
   ];
   for (const [name, source] of Object.entries(surfaces)) {
     const copy = stripJs(source);
@@ -1105,7 +1120,14 @@ test("61: the rate limit went into 043 rather than into a 044, and 043 is still 
   // was protecting.
   const files = readdirSync(path.join(ROOT, "supabase/migrations")).filter((f) => f.endsWith(".sql"));
   const later = files.filter((f) => Number(f.slice(0, 3)) > 43);
-  assert.deepEqual(later, ["044_launch_send.sql"], "an unreviewed migration appeared after 043");
+  assert.deepEqual(
+    later,
+    // 044: the one-time launch send, reviewed in tests/launch-send.test.mjs.
+    // 045: the welcome mail with the discount code, reviewed in tests 84-87
+    //      of this file. Both are additive and neither touches 043.
+    ["044_launch_send.sql", "045_launch_welcome_email.sql"],
+    "an unreviewed migration appeared after 043"
+  );
 
   // The rate limit objects are in 043 and nowhere else. A later
   // migration that recreated, altered or dropped them would mean the
@@ -1619,4 +1641,249 @@ test("79: reaching the launch instant does not open the shop", () => {
   ]) {
     assert.ok(!gate.test(site), `the countdown gates a purchase: ${gate}`);
   }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   14. THE SECOND CONSENT, AND THE WELCOME MAIL IT PERMITS
+
+   The list now sends a welcome mail carrying the launch discount code.
+   That is a second message AND it carries an offer, so version 1 of the
+   consent does not cover it - that wording said "ausschließlich für
+   diese Launch-Benachrichtigung", and the privacy notice said the list
+   sends no offers.
+
+   These tests hold the one rule that follows: a row is judged by the
+   wording ITS OWNER was shown, never by the wording the current build
+   renders.
+   ══════════════════════════════════════════════════════════════ */
+
+const welcomeTemplate = read("lib/email/launchWelcome.ts");
+const welcomeMigration = read("supabase/migrations/045_launch_welcome_email.sql");
+
+test("80: version 1 is preserved verbatim and is no longer the current wording", () => {
+  // The people who signed it still exist. Deleting the constant would
+  // not delete the promise, only make it unreadable from the code that
+  // has to keep it.
+  assert.equal(LAUNCH_CONSENT_VERSION_V1, "2026-09-06.launch-notification.v1");
+  assert.match(LAUNCH_CONSENT_TEXT_V1, /ausschließlich für diese Launch-Benachrichtigung verwendet/);
+  assert.ok(!LAUNCH_CONSENT_TEXT_V1.includes("Rabatt"), "v1 was rewritten to mention the discount");
+
+  // The current wording is a different one.
+  assert.notEqual(LAUNCH_CONSENT_VERSION, LAUNCH_CONSENT_VERSION_V1);
+  assert.equal(LAUNCH_CONSENT_VERSION, "2026-09-07.launch-notification-with-code.v2");
+  assert.deepEqual([...LAUNCH_CONSENT_VERSIONS], [LAUNCH_CONSENT_VERSION, LAUNCH_CONSENT_VERSION_V1]);
+});
+
+test("81: the current wording names both mails and promises nothing else", () => {
+  // It has to name the discount, because that is what changed, and it
+  // has to bound the count, because "two" is the whole promise.
+  assert.match(LAUNCH_CONSENT_TEXT, /Launch-Rabattcode/);
+  assert.match(LAUNCH_CONSENT_TEXT, /beiden E-Mails/);
+  assert.match(LAUNCH_CONSENT_TEXT, /ausschließlich/);
+
+  // And it must not have become a newsletter opt-in on the way.
+  for (const banned of ["Newsletter", "regelmäßig", "Angebote", "Partner", "Werbung"]) {
+    assert.ok(!LAUNCH_CONSENT_TEXT.includes(banned), `the consent text now permits: ${banned}`);
+  }
+
+  // THE PAGE SHOWS EXACTLY WHAT THE SERVER STORES. If these drift, the
+  // stored evidence is a record of a sentence nobody read.
+  const collapse = (s) => s.replace(/\s+/g, " ").trim();
+  assert.ok(
+    collapse(launchPage).includes(collapse(LAUNCH_CONSENT_TEXT)),
+    "the launch page no longer renders the stored consent text verbatim"
+  );
+});
+
+test("82: only version 2 may receive the welcome mail - v1 never can", () => {
+  const base = {
+    status: "confirmed",
+    purpose: LAUNCH_PURPOSE,
+    consent_version: LAUNCH_CONSENT_VERSION,
+    welcome_email_sent_at: null,
+  };
+  assert.equal(mayReceiveWelcomeEmail(base), true);
+
+  // THE ASSERTION THIS WHOLE FEATURE TURNS ON. The two people already on
+  // the list signed v1 and are promised one mail and no offers.
+  assert.equal(
+    mayReceiveWelcomeEmail({ ...base, consent_version: LAUNCH_CONSENT_VERSION_V1 }),
+    false,
+    "a version 1 row would receive the discount mail"
+  );
+
+  // An unknown version is not evidence of anything either.
+  for (const version of ["", "v2", "2027-01-01.something.v3", "unknown"]) {
+    assert.equal(mayReceiveWelcomeEmail({ ...base, consent_version: version }), false,
+      `an unknown consent version was accepted: ${version}`);
+  }
+
+  // The other three gates mirror mayReceiveLaunchNotification.
+  for (const status of ["pending", "withdrawn", "notified"]) {
+    assert.equal(mayReceiveWelcomeEmail({ ...base, status }), false, `a ${status} row was accepted`);
+  }
+  assert.equal(mayReceiveWelcomeEmail({ ...base, purpose: "marketing" }), false);
+  assert.equal(mayReceiveWelcomeEmail({ ...base, welcome_email_sent_at: "2026-10-01T00:00:00Z" }), false,
+    "the welcome mail would be sent twice");
+});
+
+test("83: the launch notification gate is unchanged by any of this", () => {
+  // The second consent must not have widened the first. A v1 row still
+  // receives the launch notification exactly as promised.
+  for (const version of [LAUNCH_CONSENT_VERSION, LAUNCH_CONSENT_VERSION_V1]) {
+    assert.equal(
+      mayReceiveLaunchNotification({
+        status: "confirmed", purpose: LAUNCH_PURPOSE,
+        launch_notification_sent_at: null, consent_version: version,
+      }),
+      true,
+      `a ${version} row lost its launch notification`
+    );
+  }
+  // And it still refuses everything it refused before.
+  assert.equal(mayReceiveLaunchNotification({
+    status: "pending", purpose: LAUNCH_PURPOSE, launch_notification_sent_at: null,
+  }), false);
+});
+
+test("84: 045 checks the consent version in SQL, not only in the application", () => {
+  const sql = stripSql(welcomeMigration);
+  // A caller that forgot the check cannot get a v1 row out of the claim.
+  assert.match(sql, /and consent_version = p_consent_version/);
+  assert.match(sql, /and status = 'confirmed'/);
+  assert.match(sql, /and withdrawn_at is null/);
+  assert.match(sql, /and welcome_email_sent_at is null/);
+
+  // Additive only, and it does not reach into 043's or 044's objects.
+  for (const destructive of ["drop table", "drop column", "delete from", "truncate", "alter column"]) {
+    assert.ok(!sql.toLowerCase().includes(destructive), `045 performs: ${destructive}`);
+  }
+  assert.ok(!sql.includes("launch_rate_limit"), "045 touches the rate limiter");
+  assert.ok(!sql.includes("launch_release"), "045 touches the launch release");
+  assert.ok(!/update .*consent_version|set consent_version/i.test(sql),
+    "045 rewrites a stored consent version");
+
+  // Server-only, same posture as 043 and 044.
+  assert.ok(!/to anon|to authenticated/.test(sql), "045 grants something to a browser role");
+  for (const fn of ["claim_welcome_email", "mark_welcome_email_sent", "release_welcome_email_claim"]) {
+    assert.match(sql, new RegExp(`grant execute on function public\\.${fn}[^;]*to service_role`));
+  }
+});
+
+test("85: a double-clicked confirmation link cannot send two welcome mails", () => {
+  // The mail is sent from the confirm route, so the concurrency here is
+  // not two workers but one link opened twice - by the person and by a
+  // mail client's link scanner.
+  const sql = stripSql(welcomeMigration);
+  const claim = sql.slice(sql.indexOf("function public.claim_welcome_email"),
+                          sql.indexOf("function public.mark_welcome_email_sent"));
+  // One conditional UPDATE: exactly one caller can move the row from
+  // unclaimed to claimed.
+  assert.match(claim, /update public\.launch_waitlist/);
+  assert.match(claim, /welcome_email_claim_id is null/);
+  assert.match(claim, /get diagnostics v_updated = row_count/);
+  assert.match(claim, /return v_updated = 1/);
+  // And an expired claim can be taken again, so a crash does not strand
+  // somebody without their code.
+  assert.match(claim, /welcome_email_claimed_at < now\(\) - make_interval/);
+});
+
+test("86: the welcome mail hands over the code and links to no shop", () => {
+  const { subject, html, text } = buildLaunchWelcomeEmail({
+    firstName: "Anna",
+    origin: "https://gloamatcha.com",
+    code: "GLOALAUNCH10",
+    percentLabel: "10 %",
+    validFromLabel: "01.10.2026, 12:00 Uhr",
+    validUntilLabel: "31.10.2026, 23:59 Uhr",
+  });
+
+  assert.equal(subject, "Willkommen bei GLOA. Hier ist dein Launch-Code.");
+  assert.ok(html.includes("GLOALAUNCH10"));
+  assert.ok(html.includes("10 %"));
+  assert.ok(html.includes("01.10.2026, 12:00 Uhr"));
+  assert.ok(html.includes("31.10.2026, 23:59 Uhr"));
+  assert.ok(text.includes("DEIN CODE: GLOALAUNCH10"));
+
+  // NO SHOP LINK. The shop is in prelaunch and the cart routes to
+  // /contact; a "shop now" button three weeks early is a shut door.
+  assert.ok(!html.includes("/shop"), "the welcome mail links to the shop before it opens");
+  assert.ok(!/GLOA ist live|THE WAIT/.test(html), "the welcome mail claims the launch happened");
+
+  // It carries the mark and the brand palette, and nothing else.
+  assert.ok(html.includes('<img src="https://gloamatcha.com/gloa-logo-blue-600.png"'));
+  assert.ok(html.includes("keine regelmäßigen Newsletter"));
+  assert.ok(html.includes("Cara 2 GmbH"));
+  for (const banned of ["Newsletter anmelden", "weiterempfehlen", "Event", "B2B", "width=\"1\""]) {
+    assert.ok(!html.includes(banned), `the welcome mail carries: ${banned}`);
+  }
+});
+
+test("87: the welcome mail states no percentage or date of its own", () => {
+  // Every number is passed in, so the mail cannot promise something
+  // lib/launchDiscount.ts does not grant.
+  const code = stripJs(welcomeTemplate);
+  assert.ok(!/10\s*%/.test(code), "the template hard-codes a percentage");
+  assert.ok(!/GLOALAUNCH/.test(code), "the template hard-codes the code");
+  assert.ok(!/01\.10\.2026|31\.10\.2026/.test(code), "the template hard-codes a date");
+  assert.ok(!/Date\.now|new Date/.test(code), "the template reads a clock");
+});
+
+test("88: re-submitting a CONFIRMED address does not demote it or re-send mail", () => {
+  // THE BUG THIS FIXES. The upsert cannot say "only if still pending",
+  // so it overwrote status with 'pending' - while leaving confirmed_at
+  // untouched, because that column is not in the payload. The result was
+  // a row reading pending with a confirmed_at from days earlier: someone
+  // who HAD confirmed, silently demoted by typing their address again,
+  // excluded from the send they had opted into, and due for deletion by
+  // the retention sweep as "never confirmed".
+  const code = stripJs(signupRoute);
+
+  // confirmed_at is read back from the upsert - it is the evidence that
+  // survives, and therefore what identifies a previously confirmed row.
+  assert.match(code, /\.select\("id, status, withdrawn_at, confirmed_at"\)/);
+  assert.match(code, /if \(upserted && upserted\.confirmed_at\)/);
+  // The row is restored to confirmed, and the confirmation token it just
+  // got is discarded so nobody can click a link that demotes them.
+  assert.match(code, /status: "confirmed", confirmation_token_hash: null, confirmation_sent_at: null/);
+
+  // And no mail goes out on that path: the restore returns before the
+  // send, exactly as the withdrawn branch does.
+  const confirmedBranch = code.slice(code.indexOf("if (upserted && upserted.confirmed_at)"));
+  const returnAt = confirmedBranch.indexOf("return neutralSuccess()");
+  const sendAt = confirmedBranch.indexOf("emails.send");
+  assert.ok(returnAt > 0 && (sendAt === -1 || returnAt < sendAt),
+    "a confirmed re-submission still sends a confirmation mail");
+
+  // The withdrawn branch is still there and still first.
+  assert.ok(code.indexOf("upserted.withdrawn_at") < code.indexOf("upserted.confirmed_at"),
+    "the withdrawn check must stay ahead of the confirmed check");
+});
+
+test("89: the privacy notice matches what is actually sent", () => {
+  // It may no longer say "keine Angebote" - a discount code is an offer.
+  assert.ok(!gloaSite.includes("keine Angebote und keine Event-Einladungen"),
+    "the privacy notice still promises no offers");
+
+  // It names the welcome mail, bounds the count, and protects the people
+  // who signed the earlier wording.
+  assert.match(gloaSite, /Willkommens-E-Mail mit deinem Launch-Rabattcode/);
+  assert.match(gloaSite, /genau zwei E-Mails/);
+  assert.match(gloaSite, /deuten bestehende Einwilligungen nicht nachträglich um/);
+
+  // Still no newsletter, and still no transfer into other lists.
+  assert.match(gloaSite, /keine regelmäßigen Marketing-E-Mails/);
+  assert.match(gloaSite, /nicht in andere Marketing- oder Verteilerlisten/);
+
+  // The retention promise is unchanged.
+  assert.match(gloaSite, /löschen wir die Eintragung nach 14 Tagen/);
+});
+
+test("90: the discount is visible on the landing page, from the shared constant", () => {
+  assert.match(launchPage, /\{LAUNCH_DISCOUNT_LABEL\}/);
+  assert.match(launchPage, /from "\.\.\/lib\/launchDiscount"/);
+  // The page never types a percentage of its own.
+  assert.ok(!/10\s*%/.test(stripJs(launchPage)), "the launch page hard-codes a percentage");
+  // And it is still not a newsletter signup.
+  assert.match(launchPage, /NUR FÜR DEN LAUNCH\. KEIN NEWSLETTER\./);
 });

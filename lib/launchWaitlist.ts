@@ -38,10 +38,82 @@ export type LaunchPurpose = typeof LAUNCH_PURPOSE;
  * current build happens to render. Change the wording, bump the version;
  * older rows keep the text they were actually given.
  */
-export const LAUNCH_CONSENT_VERSION = "2026-09-06.launch-notification.v1";
-export const LAUNCH_CONSENT_TEXT =
+/**
+ * VERSION 1 - THE ORIGINAL WORDING. HISTORICAL, NEVER SENT AGAIN.
+ *
+ * Kept because rows signed under it still exist and this is the text
+ * those people were actually shown. It permits ONE launch notification
+ * and says the address is used for nothing else - so a row carrying this
+ * version may NOT receive the welcome mail with the discount code, which
+ * did not exist when its owner agreed to anything.
+ *
+ * Deleting this constant would not delete the promise; it would only
+ * make the promise unreadable from the code that has to keep it.
+ */
+export const LAUNCH_CONSENT_VERSION_V1 = "2026-09-06.launch-notification.v1";
+export const LAUNCH_CONSENT_TEXT_V1 =
   "Ich möchte per E-Mail benachrichtigt werden, sobald GLOA startet. " +
   "Meine E-Mail-Adresse wird ausschließlich für diese Launch-Benachrichtigung verwendet.";
+
+/**
+ * VERSION 2 - THE CURRENT WORDING, AND WHAT CHANGED.
+ *
+ * The launch list now also sends a welcome mail carrying the shared
+ * launch discount code, once, right after the address is confirmed. That
+ * is a SECOND message and it carries an offer, so version 1 does not
+ * cover it: that text says "ausschließlich für diese
+ * Launch-Benachrichtigung", and the privacy notice said in as many words
+ * that the list sends no offers.
+ *
+ * So the wording is replaced rather than reinterpreted, and the version
+ * is bumped. Both messages are named, the count is stated, and the
+ * absence of anything else is stated too. Nobody signing this is
+ * agreeing to a newsletter, and nobody who signed version 1 is
+ * retroactively agreeing to this.
+ *
+ * THE BUMP IS THE WHOLE MECHANISM. consent_version is stored on every
+ * row, so "may this person receive the welcome mail?" is answered by
+ * what they were shown, not by what the current build renders -
+ * mayReceiveWelcomeEmail() below is that answer, and it is the only
+ * place it is decided.
+ */
+export const LAUNCH_CONSENT_VERSION = "2026-09-07.launch-notification-with-code.v2";
+export const LAUNCH_CONSENT_TEXT =
+  "Ich möchte per E-Mail benachrichtigt werden, sobald GLOA startet, und dafür einmalig " +
+  "meinen Launch-Rabattcode erhalten. Meine E-Mail-Adresse wird ausschließlich für diese " +
+  "beiden E-Mails verwendet.";
+
+/** Every wording that has ever been shown, newest first. */
+export const LAUNCH_CONSENT_VERSIONS = [LAUNCH_CONSENT_VERSION, LAUNCH_CONSENT_VERSION_V1] as const;
+
+/**
+ * MAY THIS PERSON RECEIVE THE WELCOME MAIL WITH THE DISCOUNT CODE?
+ *
+ * Only if they were shown a wording that mentions it. That is version 2
+ * and nothing else - not "version 2 or later", because a later version
+ * might narrow the consent again, and not "anything that is not version
+ * 1", because an unknown version is not evidence of anything.
+ *
+ * The other three conditions mirror mayReceiveLaunchNotification: the
+ * purpose must be the launch purpose, the address must be confirmed, and
+ * the mail must not already have gone out.
+ *
+ *   consent_version v1  no - they were promised one mail and no offers
+ *   pending             no - the address was never confirmed
+ *   withdrawn           no - consent was taken back
+ *   already sent        no - this mail is sent once
+ */
+export function mayReceiveWelcomeEmail(row: {
+  status: LaunchStatus;
+  purpose: string;
+  consent_version: string;
+  welcome_email_sent_at: string | null;
+}): boolean {
+  if (row.purpose !== LAUNCH_PURPOSE) return false;
+  if (row.consent_version !== LAUNCH_CONSENT_VERSION) return false;
+  if (row.status !== "confirmed") return false;
+  return row.welcome_email_sent_at === null;
+}
 
 /** Lifecycle of one entry. `notified` is terminal for this flow. */
 export const LAUNCH_STATUSES = ["pending", "confirmed", "withdrawn", "notified"] as const;

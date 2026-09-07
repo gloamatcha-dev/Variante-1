@@ -267,7 +267,7 @@ test("4c: no API, no server action, no migration was added for this page", () =>
   assert.ok(!page.includes('"use server"'), "a server action was added");
   // No migration 043, and the live set is unchanged.
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"));
-  assert.ok(!migrations.some(f => f.startsWith("045")), "migration 044 exists");
+  assert.ok(!migrations.some(f => f.startsWith("046")), "migration 044 exists");
 });
 
 /* ══════════════════════════════════════════════════════════════

@@ -1997,7 +1997,7 @@ test("034: it is the next free number and 022-033 are untouched", () => {
      // Phase 5. public.launch_waitlist: one new table for the one-time
      // launch notification, RLS on, no anon/authenticated grant, and no
      // existing object touched. Reviewed in tests/launch-waitlist.test.mjs.
-     "043_launch_waitlist.sql", "044_launch_send.sql"],
+     "043_launch_waitlist.sql", "044_launch_send.sql", "045_launch_welcome_email.sql"],
     "an unreviewed migration above 034 appeared"
   );
   // AND 039 REDEFINES NOTHING 034 OWNS. It is a prepaid plan with no
@@ -2494,11 +2494,11 @@ test("regression: the account reaches this feature ONLY through the endpoint", (
   // not a message: it renders no mail, names no recipient and sends
   // nothing. Counted here so a real fourteenth TEMPLATE still trips this
   // guard rather than hiding behind the new file.
-  assert.equal(templates.length, 15, "an unreviewed email template was added");
+  assert.equal(templates.length, 16, "an unreviewed email template was added");
   assert.ok(templates.includes("brand.ts"));
   assert.equal(
     templates.filter(n => n !== "brand.ts").length,
-    14,
+    15,
     "an unreviewed email template was added"
   );
   assert.deepEqual(
