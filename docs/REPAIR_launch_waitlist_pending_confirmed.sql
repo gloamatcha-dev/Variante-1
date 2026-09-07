@@ -1,6 +1,11 @@
 -- ============================================================
 -- ONE-OFF REPAIR, NOT A MIGRATION
 --
+-- STATE AS VERIFIED ON 8 SEPTEMBER 2026, AFTER 045 AND 046 WERE
+-- APPLIED. Migration 046 stops this defect happening again; it does
+-- not repair the row that already carries it, which is what this file
+-- is for. 044 is still unapplied and is irrelevant here.
+--
 -- DO NOT RUN THIS WITHOUT AN EXPLICIT DECISION. It is not part of the
 -- migration sequence, it is not idempotent by number, and it changes a
 -- live row. It lives in docs/ rather than supabase/migrations/ for
@@ -111,7 +116,12 @@ update public.launch_waitlist
    and launch_notification_sent_at is null
    -- Pinned: this repair is only valid for the version that was in force
    -- when the confirmation happened.
-   and consent_version = '2026-09-06.launch-notification.v1';
+   and consent_version = '2026-09-06.launch-notification.v1'
+   -- Added after 046: there must be no unconfirmed newer wording
+   -- waiting on this row. If there were, promoting the row to
+   -- 'confirmed' would leave a proposed consent stranded beside a
+   -- confirmation that did not cover it. Verified as null on 8 September.
+   and pending_consent_version is null;
 
 -- Expect exactly one row. If it is zero, the row changed after the audit
 -- and this transaction should be rolled back and the state re-checked.
@@ -137,7 +147,17 @@ commit;
 --   select consent_version from public.launch_waitlist
 --    where id = 'a103c9d8-3d7a-45b1-9e5d-ca05a2f7af85';       -- v1
 --
--- IF MIGRATION 046 HAS ALREADY BEEN APPLIED, its backfill will have
--- written a launch_consent_history row for this contact from the same
--- evidence. This repair does not add a second one: it records no new
--- confirmation, because none happened.
+-- THE CONSENT HISTORY IS NOT TOUCHED, and must not be. 046's backfill
+-- already wrote one row for this contact from the same evidence -
+-- version 1, confirmed 18:23:30 - and that row remains the proof.
+--
+-- This repair records NO new confirmation, because none happened: it
+-- corrects a status that was overwritten, it does not assert that
+-- somebody clicked something. Writing a history row here would be
+-- inventing an event, which is the one thing a consent log must never
+-- contain.
+--
+--   select consent_version, confirmed_at, recorded_at
+--     from public.launch_consent_history
+--    where waitlist_id = 'a103c9d8-3d7a-45b1-9e5d-ca05a2f7af85';
+--   -- Expect exactly one row, unchanged, before and after.
