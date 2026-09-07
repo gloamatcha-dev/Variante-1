@@ -4,6 +4,12 @@ import { randomUUID } from "node:crypto";
 import { CONFIRMATION_TOKEN_TTL_DAYS, LAUNCH_CONSENT_VERSION, hashToken, isWellFormedToken } from "../../../../lib/launchWaitlist";
 import { buildWelcomeWiring } from "../../../../lib/launchWelcomeDeps.ts";
 import { sendWelcomeEmail } from "../../../../lib/launchWelcomeSend.ts";
+import {
+  compatConfirmDb,
+  isMissingFunctionError,
+  legacyConfirm,
+  type CompatClient,
+} from "../../../../lib/launchSignupCompat.ts";
 
 /**
  * DOUBLE OPT-IN, SECOND HALF.
@@ -76,9 +82,33 @@ export async function GET(request: Request): Promise<Response> {
     p_ttl_days: CONFIRMATION_TOKEN_TTL_DAYS,
   });
 
+  // Until migration 046 is applied the function does not exist. That one
+  // case - and no other database failure - takes the legacy path, so
+  // confirmation links already sitting in inboxes keep working across the
+  // deployment gap.
   if (confirmError) {
-    console.error("Launch waitlist confirm: rpc failed:", confirmError.message);
-    return redirect("error");
+    if (!isMissingFunctionError(confirmError)) {
+      console.error("Launch waitlist confirm: rpc failed:", confirmError.message);
+      return redirect("error");
+    }
+    console.error("Launch waitlist confirm: migration 046 is not applied - using the legacy path.");
+    try {
+      const legacy = await legacyConfirm(
+        compatConfirmDb(supabase as unknown as CompatClient),
+        hashToken(token),
+        Date.now(),
+        CONFIRMATION_TOKEN_TTL_DAYS
+      );
+      // The welcome mail needs 045 as well, so it is not attempted on
+      // this path: sendWelcomeEmail would only report unavailable.
+      return redirect(legacy);
+    } catch (err) {
+      console.error(
+        "Launch waitlist confirm: legacy path failed:",
+        err instanceof Error ? err.message : "unknown error"
+      );
+      return redirect("error");
+    }
   }
 
   // `returns table (...)` arrives as an array of rows through PostgREST.

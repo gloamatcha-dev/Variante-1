@@ -69,6 +69,12 @@ import {
 import { idempotencyKey as idempotencyKeyForLaunch } from "../lib/launchSend.ts";
 
 import {
+  isMissingFunctionError,
+  legacyConfirm,
+  legacySignup,
+} from "../lib/launchSignupCompat.ts";
+
+import {
   GLOA_BERRY,
   GLOA_BLUE,
   GLOA_CREAM,
@@ -358,8 +364,12 @@ test("16: tokens are opaque, random and never stored in the clear", () => {
   assert.notEqual(a, b, "two tokens must not collide");
 
   // Only the hash is written.
-  assert.match(signupRoute, /confirmation_token_hash: hashToken\(confirmationToken\)/);
-  assert.match(signupRoute, /withdrawal_token_hash: hashToken\(withdrawalToken\)/);
+  // Hashed once into a local and handed to whichever path writes it, so
+  // the clear token still never reaches the database.
+  assert.ok(signupRoute.includes("const confirmationTokenHash = hashToken(confirmationToken)"));
+  assert.ok(signupRoute.includes("const withdrawalTokenHash = hashToken(withdrawalToken)"));
+  assert.ok(signupRoute.includes("p_confirmation_token_hash: confirmationTokenHash"));
+  assert.ok(signupRoute.includes("p_withdrawal_token_hash: withdrawalTokenHash"));
   for (const source of [signupRoute, confirmRoute, withdrawRoute]) {
     assert.ok(!/token_hash:\s*token\b/.test(source), "a raw token is being written to the database");
   }
@@ -2651,4 +2661,165 @@ test("120: a withdrawal outranks a pending confirmation in both directions", () 
 
   // And the welcome claim excludes withdrawn rows outright.
   assert.match(stripSql(welcomeMigration), /and withdrawn_at is null/);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   18. THE DEPLOYMENT GAP
+
+   The routes call RPCs that migration 046 creates. The code shipped
+   before the migration was applied and the public list answered 503 to
+   everybody for about an hour. These tests hold the bridge that keeps it
+   working until the migration lands - and, just as importantly, hold
+   that only a MISSING FUNCTION takes that path.
+   ══════════════════════════════════════════════════════════════ */
+
+const compatLib = read("lib/launchSignupCompat.ts");
+
+test("121: only a missing function falls back - every other failure refuses", () => {
+  // A timeout, a permission error or a dead connection must NOT be
+  // treated as "the migration is pending". Getting this wrong would turn
+  // a database outage into silent writes down a narrower path.
+  assert.equal(isMissingFunctionError({ code: "PGRST202" }), true);
+  assert.equal(isMissingFunctionError({ message: "Could not find the function public.submit_launch_signup" }), true);
+
+  for (const other of [
+    null, undefined, {}, "PGRST202",
+    { code: "PGRST301" },
+    { code: "42501", message: "permission denied for function submit_launch_signup" },
+    { code: "57014", message: "canceling statement due to statement timeout" },
+    { message: "fetch failed" },
+    { message: "Could not find the table public.launch_waitlist" },
+  ]) {
+    assert.equal(isMissingFunctionError(other), false, `treated as missing: ${JSON.stringify(other)}`);
+  }
+
+  // The route branches on exactly that, and refuses otherwise.
+  const code = stripJs(signupRoute);
+  assert.match(code, /if \(!signupError\)/);
+  assert.match(code, /} else if \(isMissingFunctionError\(signupError\)\) \{/);
+  assert.match(code, /} else \{[\s\S]{0,300}?return temporarilyUnavailable\(\);/);
+});
+
+test("122: the legacy signup never demotes, revives or overwrites a consent", async () => {
+  const calls = [];
+  const db = (row) => ({
+    async findByEmail() { return row; },
+    async insertPending(i) { calls.push(["insert", i.email]); },
+    async refreshPending(id) { calls.push(["refresh", id]); },
+  });
+  const input = {
+    email: "a@example.com", firstName: null, audienceType: null, source: "launch_page",
+    consentVersion: LAUNCH_CONSENT_VERSION, consentText: LAUNCH_CONSENT_TEXT,
+    confirmationTokenHash: "a".repeat(64), withdrawalTokenHash: "b".repeat(64),
+  };
+
+  // New address: inserted.
+  calls.length = 0;
+  assert.equal(await legacySignup(db(null), input), "created");
+  assert.deepEqual(calls, [["insert", "a@example.com"]]);
+
+  // Pending: tokens refreshed, which is what makes "I never got the
+  // mail" work.
+  calls.length = 0;
+  assert.equal(await legacySignup(db({
+    id: "r1", status: "pending", confirmed_at: null, withdrawn_at: null,
+    consent_version: LAUNCH_CONSENT_VERSION,
+  }), input), "refreshed");
+  assert.deepEqual(calls, [["refresh", "r1"]]);
+
+  // Confirmed, notified, withdrawn: NOTHING IS WRITTEN in any of them.
+  for (const [status, extra, expected] of [
+    ["confirmed", { confirmed_at: "x" }, "already_current"],
+    ["notified", { confirmed_at: "x" }, "already_current"],
+    ["withdrawn", { withdrawn_at: "y" }, "withdrawn"],
+  ]) {
+    calls.length = 0;
+    const outcome = await legacySignup(db({
+      id: "r2", status, confirmed_at: null, withdrawn_at: null,
+      consent_version: LAUNCH_CONSENT_VERSION, ...extra,
+    }), input);
+    assert.equal(outcome, expected, `${status} gave ${outcome}`);
+    assert.deepEqual(calls, [], `${status} wrote to the database`);
+  }
+
+  // Explicitly: an older wording writes nothing.
+  calls.length = 0;
+  assert.equal(await legacySignup(db({
+    id: "r3", status: "confirmed", confirmed_at: "x", withdrawn_at: null,
+    consent_version: LAUNCH_CONSENT_VERSION_V1,
+  }), input), "already_current");
+  assert.deepEqual(calls, [], "the legacy path overwrote an older consent");
+});
+
+test("123: a legacy refresh clears confirmed_at, so the old inconsistency cannot recur", () => {
+  // The live list holds one row reading pending with a confirmed_at.
+  // Whatever path writes a pending row must clear it.
+  assert.match(compatLib, /confirmed_at: null,/);
+  const refresh = compatLib.slice(compatLib.indexOf("async refreshPending"));
+  assert.match(refresh, /status: "pending"/);
+  assert.match(refresh, /confirmed_at: null/);
+});
+
+test("124: the legacy confirmation honours withdrawal, expiry and a spent token", async () => {
+  const row = (over = {}) => ({
+    id: "r1", status: "pending",
+    confirmation_sent_at: "2026-09-07T19:32:40.000Z",
+    withdrawn_at: null, ...over,
+  });
+  const NOW = Date.parse("2026-09-10T00:00:00Z");
+  const db = (r, won = true) => ({
+    async findByToken() { return r; },
+    async confirm() { return won; },
+  });
+
+  assert.equal(await legacyConfirm(db(row()), "a".repeat(64), NOW, 14), "confirmed");
+  assert.equal(await legacyConfirm(db(null), "a".repeat(64), NOW, 14), "invalid");
+  assert.equal(await legacyConfirm(db(row({ status: "withdrawn" })), "a".repeat(64), NOW, 14), "withdrawn");
+  assert.equal(await legacyConfirm(db(row({ withdrawn_at: "z" })), "a".repeat(64), NOW, 14), "withdrawn");
+
+  // Expiry, to the day.
+  const late = Date.parse("2026-09-07T19:32:40.000Z") + 15 * 24 * 60 * 60 * 1000;
+  assert.equal(await legacyConfirm(db(row()), "a".repeat(64), late, 14), "expired");
+  assert.equal(await legacyConfirm(db(row({ confirmation_sent_at: null })), "a".repeat(64), NOW, 14), "expired");
+
+  // A second click loses the compare-and-swap and is not reported as a
+  // fresh confirmation.
+  assert.equal(await legacyConfirm(db(row(), false), "a".repeat(64), NOW, 14), "invalid");
+});
+
+test("125: the bridge is temporary, self-contained and says so", () => {
+  // One file, so it can be deleted in one move once 046 is applied.
+  assert.match(compatLib, /IT IS TEMPORARY, AND IT SAYS SO/);
+  assert.match(compatLib, /Delete it then/);
+
+  // It writes only 043's columns - nothing from 044, 045 or 046.
+  const code = stripJs(compatLib);
+  for (const later of ["pending_consent", "welcome_email", "launch_send", "launch_release",
+                       "launch_consent_history"]) {
+    assert.ok(!code.includes(later), `the bridge touches a later migration's column: ${later}`);
+  }
+  // And it never sends anything itself.
+  assert.ok(!/resend|emails\.send|fetch\(/i.test(code), "the bridge sends mail");
+});
+
+test("126: both routes prefer the RPC and only fall back on its absence", () => {
+  for (const [name, source, rpc] of [
+    ["signup", signupRoute, "submit_launch_signup"],
+    ["confirm", confirmRouteSrc, "confirm_launch_signup"],
+  ]) {
+    const code = stripJs(source);
+    // Measured on the CALL, not the import at the top of the file.
+    const rpcAt = code.indexOf(rpc);
+    const fallbackAt = code.indexOf("isMissingFunctionError(");
+    assert.ok(rpcAt > 0, `${name} no longer calls the RPC`);
+    assert.ok(fallbackAt > rpcAt, `${name} checks for the fallback before trying the RPC`);
+  }
+
+  // The confirm route does not attempt the welcome mail on the legacy
+  // path - it needs 045, which is equally absent.
+  const legacyBlock = stripJs(confirmRouteSrc);
+  const legacyAt = legacyBlock.indexOf("legacyConfirm(");
+  const welcomeAt = legacyBlock.indexOf("sendWelcomeEmail(");
+  assert.ok(legacyAt > 0 && welcomeAt > legacyAt,
+    "the legacy confirmation path tries to send the welcome mail");
 });

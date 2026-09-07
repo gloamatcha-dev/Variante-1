@@ -24,6 +24,13 @@ import {
   type RateLimitState,
 } from "../../../lib/launchRateLimit";
 import { consumePersistentRateLimit } from "../../../lib/launchRateLimitStore";
+import {
+  compatDb,
+  isMissingFunctionError,
+  type CompatClient,
+  legacySignup,
+  type SignupOutcome,
+} from "../../../lib/launchSignupCompat.ts";
 
 /**
  * JOIN THE LAUNCH LIST.
@@ -291,41 +298,71 @@ export async function POST(request: Request): Promise<Response> {
   const confirmationToken = createToken();
   const withdrawalToken = createToken();
 
-  // ONE STATEMENT DECIDES AND WRITES.
+  // ONE STATEMENT DECIDES AND WRITES - once migration 046 is applied.
   //
-  // submit_launch_signup (migration 046) takes a row lock, decides and
-  // writes inside a single transaction, and returns what it did. That
-  // replaces a read in this file followed by an upsert, which had two
-  // defects:
+  // submit_launch_signup takes a row lock, decides and writes inside a
+  // single transaction, and returns what it did. That replaces a read in
+  // this file followed by an upsert, which had two defects: a
+  // confirmation click landing between them could be overwritten, and
+  // the write destroyed the record of what a person had actually agreed
+  // to.
   //
-  //   - A confirmation click landing between the read and the write
-  //     could be overwritten, undoing a confirmation somebody had just
-  //     made.
-  //   - The upsert overwrote consent_version, consent_text and
-  //     consent_given_at with the CURRENT wording, destroying the record
-  //     of what a person had actually agreed to.
-  //
-  // The function keeps the in-force consent untouched and parks a newer
-  // wording in the pending_consent_* columns until it is confirmed, so a
-  // contact who agreed to version 1 stays entitled to version 1 and
-  // gains nothing until they click a new link.
-  //
-  // The four outcomes are the four things that can be true of an address;
-  // only two of them mean a mail goes out.
-  const { data: outcome, error: signupError } = await supabase.rpc("submit_launch_signup", {
+  // UNTIL THE MIGRATION IS APPLIED, the function does not exist and
+  // PostgREST says so with PGRST202. That single case - and no other
+  // database failure - falls through to the legacy path in
+  // lib/launchSignupCompat.ts, so the public list keeps working across
+  // the deployment gap instead of answering 503 to everybody.
+  const confirmationTokenHash = hashToken(confirmationToken);
+  const withdrawalTokenHash = hashToken(withdrawalToken);
+
+  const signupInput = {
+    email: normalizedEmail,
+    firstName: resolvedFirstName,
+    audienceType: resolvedAudienceType,
+    source: resolvedSource,
+    consentVersion: LAUNCH_CONSENT_VERSION,
+    consentText: LAUNCH_CONSENT_TEXT,
+    confirmationTokenHash,
+    withdrawalTokenHash,
+  };
+
+  let outcome: SignupOutcome;
+
+  const { data: rpcOutcome, error: signupError } = await supabase.rpc("submit_launch_signup", {
     p_email: normalizedEmail,
     p_first_name: resolvedFirstName,
     p_audience_type: resolvedAudienceType,
     p_source: resolvedSource,
     p_consent_version: LAUNCH_CONSENT_VERSION,
     p_consent_text: LAUNCH_CONSENT_TEXT,
-    p_confirmation_token_hash: hashToken(confirmationToken),
-    p_withdrawal_token_hash: hashToken(withdrawalToken),
+    p_confirmation_token_hash: confirmationTokenHash,
+    p_withdrawal_token_hash: withdrawalTokenHash,
   });
 
-  if (signupError) {
-    // Never log the address, never log a token, never return the driver
-    // message to the caller.
+  if (!signupError) {
+    outcome = rpcOutcome as SignupOutcome;
+  } else if (isMissingFunctionError(signupError)) {
+    // Migration 046 is not applied yet. Said out loud once per request
+    // rather than passed over: an operator has to be able to see that
+    // the list is running on the narrower path.
+    console.error("Launch waitlist: migration 046 is not applied - using the legacy signup path.");
+    try {
+      // Supabase's query-builder types are generic enough that checking
+      // the real client against the narrow surface above exceeds the
+      // compiler's instantiation depth, so the assertion is made here
+      // rather than widening the contract to `any`.
+      outcome = await legacySignup(compatDb(supabase as unknown as CompatClient), signupInput);
+    } catch (err) {
+      console.error(
+        "Launch waitlist: legacy signup failed:",
+        err instanceof Error ? err.message : "unknown error"
+      );
+      return temporarilyUnavailable();
+    }
+  } else {
+    // A real failure - a timeout, a permission problem, a broken
+    // connection. Never log the address, never log a token, never return
+    // the driver message to the caller.
     console.error("Launch waitlist: could not record the entry:", signupError.message);
     return temporarilyUnavailable();
   }
