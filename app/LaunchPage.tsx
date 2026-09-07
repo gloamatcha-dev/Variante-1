@@ -3,7 +3,11 @@ import { useState } from "react";
 import Link from "next/link";
 import { BRAND } from "./content";
 import { GLOA_LAUNCH_FULL_LABEL } from "../lib/launchCountdown";
-import { LAUNCH_DISCOUNT_LABEL } from "../lib/launchDiscount";
+import {
+  LAUNCH_DISCOUNT_LABEL,
+  LAUNCH_DISCOUNT_PERCENT,
+  LAUNCH_DISCOUNT_UNTIL_LABEL,
+} from "../lib/launchDiscount";
 
 /**
  * /launch - THE LAUNCH LIST.
@@ -178,17 +182,38 @@ export function LaunchPage() {
               */}
               <p className="launch-hero-date">{GLOA_LAUNCH_FULL_LABEL}</p>
               {/*
-                THE BENEFIT, NAMED ONCE.
-                Between the date and the lead because that is the order
-                somebody reads in: when, what they get, what to do. The
-                string comes from lib/launchDiscount.ts, so this page
-                cannot promise a percentage the checkout does not grant.
+                THE BENEFIT, AS THE SECOND THING ON THE PAGE.
+
+                It used to be one small line under the date and it
+                disappeared into the blue. It is now a Cream block that
+                interrupts the field - the only light surface above the
+                fold - with the number set at display size beside the
+                line that qualifies it.
+
+                The number and the percent sign are separate elements so
+                the sign can sit at cap height instead of being scaled
+                with the digits, and so 320px can shrink the digits
+                without breaking the pairing.
+
+                Every string still comes from lib/launchDiscount.ts. The
+                page cannot promise a percentage or a deadline the
+                checkout does not honour.
               */}
-              <p className="launch-hero-offer">{LAUNCH_DISCOUNT_LABEL}</p>
+              <div className="launch-offer" role="group" aria-label={LAUNCH_DISCOUNT_LABEL}>
+                <p className="launch-offer-figure" aria-hidden="true">
+                  <span className="launch-offer-number">{LAUNCH_DISCOUNT_PERCENT}</span>
+                  <span className="launch-offer-percent">%</span>
+                </p>
+                <div className="launch-offer-copy">
+                  <p className="launch-offer-line">AUF DEINE ERSTE BESTELLUNG</p>
+                  <p className="launch-offer-valid">
+                    Einlösbar bis {LAUNCH_DISCOUNT_UNTIL_LABEL}
+                  </p>
+                </div>
+              </div>
               <p className="launch-hero-lead">
-                Unser Shop öffnet am 1. Oktober um 12:00 Uhr.
-                <br />
-                Trag dich ein und wir sagen dir Bescheid, sobald GLOA live geht.
+                Trag dich ein und sichere dir {LAUNCH_DISCOUNT_PERCENT} % auf deine erste
+                Bestellung. Deinen Code erhältst du nach der Bestätigung deiner E-Mail-Adresse.
               </p>
               {/*
                 The trust line says what the list is and what it is not.

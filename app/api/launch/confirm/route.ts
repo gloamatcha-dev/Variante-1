@@ -1,6 +1,9 @@
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { getSiteOrigin } from "../../../../lib/siteUrl";
-import { CONFIRMATION_TOKEN_TTL_DAYS, hashToken, isWellFormedToken } from "../../../../lib/launchWaitlist";
+import { randomUUID } from "node:crypto";
+import { CONFIRMATION_TOKEN_TTL_DAYS, LAUNCH_CONSENT_VERSION, hashToken, isWellFormedToken } from "../../../../lib/launchWaitlist";
+import { buildWelcomeWiring } from "../../../../lib/launchWelcomeDeps.ts";
+import { sendWelcomeEmail } from "../../../../lib/launchWelcomeSend.ts";
 
 /**
  * DOUBLE OPT-IN, SECOND HALF.
@@ -85,6 +88,44 @@ export async function GET(request: Request): Promise<Response> {
   if (outcome === "withdrawn") return redirect("withdrawn");
   if (outcome === "expired") return redirect("expired");
   if (outcome !== "confirmed") return redirect("invalid");
+
+  // ── THE WELCOME MAIL ────────────────────────────────────────
+  //
+  // Sent here, on the request that confirmed the address, and only to
+  // somebody whose consent IN FORCE names it. The RPC above returned
+  // which wording that is, and claim_welcome_email checks it again in
+  // SQL - so a version 1 contact cannot reach this mail even if this
+  // code forgot to look.
+  //
+  // NOTHING HERE MAY FAIL THE CONFIRMATION. Confirming is what the
+  // person actually asked for; a second mail that could not be sent,
+  // claimed or marked - including because migration 045 is not applied
+  // yet - is an operational fact for the log, not a reason to tell them
+  // their confirmation did not work.
+  const effectiveVersion =
+    row && typeof row === "object"
+      ? (row as { effective_consent_version?: unknown }).effective_consent_version
+      : null;
+  const rowId = row && typeof row === "object" ? (row as { row_id?: unknown }).row_id : null;
+
+  if (typeof rowId === "string" && effectiveVersion === LAUNCH_CONSENT_VERSION) {
+    const wiring = buildWelcomeWiring();
+    if (!wiring.ok) {
+      console.error("Launch welcome mail: not configured -", wiring.reason);
+    } else {
+      const sent = await sendWelcomeEmail(
+        wiring.db,
+        wiring.mailer,
+        rowId,
+        LAUNCH_CONSENT_VERSION,
+        () => randomUUID()
+      );
+      // Counts and reasons only - never the address, never the row id.
+      if (sent.kind === "needs_review" || sent.kind === "failed" || sent.kind === "unavailable") {
+        console.error("Launch welcome mail:", sent.kind, "-", sent.reason);
+      }
+    }
+  }
 
   return redirect("confirmed");
 }

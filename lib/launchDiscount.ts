@@ -249,3 +249,15 @@ export function applyDiscountToLines(
  * want to change it.
  */
 export const FREE_SHIPPING_MEASURED_BEFORE_DISCOUNT = true;
+
+/**
+ * The window as a person reads it. Display only.
+ *
+ * Written out rather than formatted from the ISO strings, because a
+ * runtime formatter would need a locale and a timezone at exactly the
+ * moment this file refuses to have either. The suite asserts these
+ * against the instants above, so they cannot drift from the window the
+ * checkout actually enforces.
+ */
+export const LAUNCH_DISCOUNT_FROM_LABEL = "01.10.2026, 12:00 Uhr";
+export const LAUNCH_DISCOUNT_UNTIL_LABEL = "31.10.2026, 23:59 Uhr";

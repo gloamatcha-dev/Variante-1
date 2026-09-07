@@ -55,6 +55,20 @@ import { buildLaunchConfirmationEmail } from "../lib/email/launchConfirmation.ts
 import { buildLaunchWelcomeEmail } from "../lib/email/launchWelcome.ts";
 
 import {
+  sendWelcomeEmail,
+  welcomeIdempotencyKey,
+} from "../lib/launchWelcomeSend.ts";
+
+import {
+  LAUNCH_DISCOUNT_FROM_LABEL,
+  LAUNCH_DISCOUNT_UNTIL_LABEL,
+} from "../lib/launchDiscount.ts";
+
+// The launch announcement key, imported under a distinct name so test
+// 109 can prove the two mails use different idempotency namespaces.
+import { idempotencyKey as idempotencyKeyForLaunch } from "../lib/launchSend.ts";
+
+import {
   GLOA_BERRY,
   GLOA_BLUE,
   GLOA_CREAM,
@@ -1831,7 +1845,11 @@ test("85: a double-clicked confirmation link cannot send two welcome mails", () 
   assert.match(claim, /update public\.launch_waitlist/);
   assert.match(claim, /welcome_email_claim_id is null/);
   assert.match(claim, /get diagnostics v_updated = row_count/);
-  assert.match(claim, /return v_updated = 1/);
+  // The claim returns the recipient WITH the verdict, so winning it and
+  // knowing who to write to is one round trip - and a caller that lost
+  // gets no address at all.
+  assert.match(claim, /if v_updated = 1 then\s*return query select true, v_email, v_first_name;/);
+  assert.match(claim, /return query select false, null::text, null::text;/);
   // And an expired claim can be taken again, so a crash does not strand
   // somebody without their code.
   assert.match(claim, /welcome_email_claimed_at < now\(\) - make_interval/);
@@ -2148,10 +2166,279 @@ test("100: the confirm route decides nothing itself any more", () => {
   // No status write, no expiry arithmetic, no consent handling in the route.
   assert.ok(!code.includes(".update("), "the confirm route writes directly");
   assert.ok(!code.includes("isConfirmationExpired"), "the confirm route re-implements the expiry");
-  assert.ok(!code.includes("consent"), "the confirm route touches consent columns");
+  // It may READ which wording is now in force - that is how it knows
+  // whether the welcome mail is owed. What it may not do is write a
+  // consent column: promoting a pending wording is the RPC's job, and
+  // only because somebody clicked a link.
+  assert.ok(!/consent_versions*=|consent_texts*=|consent_given_ats*=/.test(code),
+    "the confirm route writes a consent column");
+  assert.ok(!code.includes("pending_consent"), "the confirm route touches the proposed consent");
   // The TTL still comes from the one shared constant.
   assert.match(code, /p_ttl_days: CONFIRMATION_TOKEN_TTL_DAYS/);
   // Every outcome maps to an existing page state, and an unknown one is
   // treated as invalid rather than as success.
   assert.match(code, /outcome !== "confirmed"\) return redirect\("invalid"\)/);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   16. SENDING THE WELCOME MAIL, ONCE
+
+   The mail goes out from the confirm route, on the same request that
+   spends the token. The concurrency here is not two workers but one
+   link opened twice - by the person, by a mail client's link scanner,
+   by a restored tab. These tests drive the whole flow, including that
+   double click, with no socket and no key.
+   ══════════════════════════════════════════════════════════════ */
+
+const welcomeSendLib = read("lib/launchWelcomeSend.ts");
+
+function fakeWelcomeDb(opts = {}) {
+  const state = {
+    sent: false,
+    claim: null,
+    needsReview: false,
+    reason: null,
+    consentVersion: opts.consentVersion ?? LAUNCH_CONSENT_VERSION,
+  };
+  const calls = { claims: 0, marks: 0, releases: 0 };
+  return {
+    state,
+    calls,
+    async claim(rowId, claimId, consentVersion) {
+      calls.claims += 1;
+      if (opts.claimThrows) throw new Error("relation does not exist");
+      // The SQL checks the consent version, the watermark, the review
+      // flag and the existing claim. The fake enforces the same rules.
+      if (consentVersion !== state.consentVersion) return { claimed: false };
+      if (state.sent || state.needsReview || state.claim !== null) return { claimed: false };
+      state.claim = claimId;
+      return { claimed: true, email: "person@example.com", firstName: "Anna" };
+    },
+    async markSent(rowId, claimId) {
+      calls.marks += 1;
+      if (opts.markThrows) throw new Error("mark exploded");
+      if (state.claim !== claimId || state.sent) return false;
+      state.sent = true;
+      state.claim = null;
+      return true;
+    },
+    async release(rowId, claimId, reason, needsReview) {
+      calls.releases += 1;
+      if (state.claim !== claimId) return false;
+      state.claim = null;
+      state.reason = reason;
+      state.needsReview = needsReview;
+      return true;
+    },
+  };
+}
+
+let claimCounter = 0;
+const nextClaimId = () => `claim-${++claimCounter}`;
+
+const okMailer = (behaviour = () => ({ ok: true })) => {
+  const seen = [];
+  return { seen, async send(recipient, key) { seen.push({ ...recipient, key }); return behaviour(); } };
+};
+
+test("101: a confirmed v2 contact receives the welcome mail exactly once", async () => {
+  const db = fakeWelcomeDb();
+  const mailer = okMailer();
+
+  const first = await sendWelcomeEmail(db, mailer, "row-1", LAUNCH_CONSENT_VERSION, nextClaimId);
+  assert.deepEqual(first, { kind: "sent" });
+  assert.equal(mailer.seen.length, 1);
+  assert.equal(mailer.seen[0].email, "person@example.com");
+  assert.equal(mailer.seen[0].firstName, "Anna");
+  assert.equal(db.state.sent, true);
+
+  // A SECOND CLICK SENDS NOTHING. The watermark is set, so the claim
+  // refuses - which is the whole reason it exists.
+  const second = await sendWelcomeEmail(db, mailer, "row-1", LAUNCH_CONSENT_VERSION, nextClaimId);
+  assert.deepEqual(second, { kind: "not_claimed" });
+  assert.equal(mailer.seen.length, 1, "the welcome mail was sent twice");
+});
+
+test("102: two simultaneous clicks produce exactly one mail", async () => {
+  const db = fakeWelcomeDb();
+  const mailer = okMailer();
+
+  const [a, b] = await Promise.all([
+    sendWelcomeEmail(db, mailer, "row-1", LAUNCH_CONSENT_VERSION, nextClaimId),
+    sendWelcomeEmail(db, mailer, "row-1", LAUNCH_CONSENT_VERSION, nextClaimId),
+  ]);
+
+  const kinds = [a.kind, b.kind].sort();
+  assert.deepEqual(kinds, ["not_claimed", "sent"], `got ${kinds}`);
+  assert.equal(mailer.seen.length, 1, "a double click sent two welcome mails");
+});
+
+test("103: a version 1 contact can never be claimed for it", async () => {
+  // The gate is in SQL, so the fake models it there: the claim compares
+  // the consent version and refuses. This is what protects the two
+  // contacts already on the live list.
+  const db = fakeWelcomeDb({ consentVersion: LAUNCH_CONSENT_VERSION_V1 });
+  const mailer = okMailer();
+
+  const outcome = await sendWelcomeEmail(db, mailer, "row-1", LAUNCH_CONSENT_VERSION, nextClaimId);
+  assert.deepEqual(outcome, { kind: "not_claimed" });
+  assert.equal(mailer.seen.length, 0, "a version 1 contact was sent the discount mail");
+});
+
+test("104: an unknown provider outcome parks the row and is never retried", async () => {
+  const db = fakeWelcomeDb();
+  const mailer = okMailer(() => ({ ok: false, unclear: true, reason: "key already in flight" }));
+
+  const outcome = await sendWelcomeEmail(db, mailer, "row-1", LAUNCH_CONSENT_VERSION, nextClaimId);
+  assert.equal(outcome.kind, "needs_review");
+  assert.equal(db.state.needsReview, true);
+
+  // Parked rows are invisible to the claim, so nothing retries them.
+  const again = await sendWelcomeEmail(db, mailer, "row-1", LAUNCH_CONSENT_VERSION, nextClaimId);
+  assert.deepEqual(again, { kind: "not_claimed" });
+
+  // A thrown request is treated the same way: a dead socket says nothing
+  // about whether the provider took the message.
+  const db2 = fakeWelcomeDb();
+  const throwing = { seen: [], async send() { throw new Error("socket hang up"); } };
+  const thrown = await sendWelcomeEmail(db2, throwing, "row-2", LAUNCH_CONSENT_VERSION, nextClaimId);
+  assert.equal(thrown.kind, "needs_review");
+  assert.equal(db2.state.needsReview, true);
+});
+
+test("105: a plain refusal gives the claim back so it can be retried", async () => {
+  const db = fakeWelcomeDb();
+  let attempt = 0;
+  const mailer = okMailer(() => (++attempt === 1 ? { ok: false, reason: "mailbox full" } : { ok: true }));
+
+  const first = await sendWelcomeEmail(db, mailer, "row-1", LAUNCH_CONSENT_VERSION, nextClaimId);
+  assert.equal(first.kind, "failed");
+  assert.equal(db.state.needsReview, false, "a plain refusal parked the row");
+  assert.equal(db.state.claim, null, "the claim was not given back");
+
+  const second = await sendWelcomeEmail(db, mailer, "row-1", LAUNCH_CONSENT_VERSION, nextClaimId);
+  assert.deepEqual(second, { kind: "sent" });
+});
+
+test("106: a mark that fails after the provider accepted parks the row", async () => {
+  // The provider has the message and the database will not record it -
+  // the one path on which a duplicate can exist.
+  const db = fakeWelcomeDb({ markThrows: true });
+  const outcome = await sendWelcomeEmail(db, okMailer(), "row-1", LAUNCH_CONSENT_VERSION, nextClaimId);
+  assert.equal(outcome.kind, "needs_review");
+  assert.match(outcome.reason, /mark failed after send/);
+  assert.equal(db.state.needsReview, true);
+});
+
+test("107: a missing migration 045 reports unavailable and sends nothing", async () => {
+  // 045 is not applied yet. Confirming must still work.
+  const db = fakeWelcomeDb({ claimThrows: true });
+  const mailer = okMailer();
+  const outcome = await sendWelcomeEmail(db, mailer, "row-1", LAUNCH_CONSENT_VERSION, nextClaimId);
+  assert.equal(outcome.kind, "unavailable");
+  assert.equal(mailer.seen.length, 0);
+});
+
+test("108: the welcome mail never fails a confirmation", () => {
+  // The confirm route redirects to the confirmed page regardless of what
+  // the welcome mail did. Losing your place on the list because a second
+  // mail failed would be the worse bug by far.
+  const code = stripJs(confirmRouteSrc);
+  const sendAt = code.indexOf("sendWelcomeEmail");
+  const redirectAt = code.lastIndexOf('redirect("confirmed")');
+  assert.ok(sendAt > 0, "the confirm route does not send the welcome mail");
+  assert.ok(redirectAt > sendAt, "the confirmation is not returned after the welcome attempt");
+  // Its failures are logged, not thrown, and never reach the visitor.
+  assert.ok(!/throw/.test(code.slice(sendAt)), "a welcome failure can throw out of the confirm route");
+});
+
+test("109: the welcome key is its own namespace, so the two mails never dedupe together", () => {
+  // Same person, two different messages. If they shared a namespace the
+  // provider could treat the launch announcement as a repeat of the
+  // welcome mail and silently drop it.
+  const w = welcomeIdempotencyKey("row-1");
+  const l = idempotencyKeyForLaunch("row-1");
+  assert.notEqual(w, l);
+  assert.ok(w.startsWith("gloa-launch-welcome:"));
+  assert.ok(!w.includes("@"), "the key carries an address");
+  assert.equal(welcomeIdempotencyKey("abc"), welcomeIdempotencyKey("abc"));
+  assert.ok(w.length <= 256, "the key exceeds the provider's limit");
+});
+
+test("110: the send module is a leaf that logs nothing and reaches nothing", () => {
+  const code = stripJs(welcomeSendLib);
+  assert.ok(!/console\./.test(code), "the welcome send logs");
+  assert.ok(!/fetch\(/.test(code), "the welcome send makes its own network call");
+  assert.ok(!/supabase/i.test(code), "the welcome send builds its own client");
+  assert.ok(!/process\.env/.test(code), "the welcome send reads the environment");
+  assert.ok(!/from "\.\//.test(code), "the welcome send is not a leaf");
+});
+
+test("111: the mail states no number of its own - every value is passed in", () => {
+  const template = stripJs(read("lib/email/launchWelcome.ts"));
+  assert.ok(!/GLOALAUNCH/.test(template), "the template hard-codes the code");
+  assert.ok(!/10\s*%/.test(template), "the template hard-codes a percentage");
+  assert.ok(!/01\.10\.2026|31\.10\.2026/.test(template), "the template hard-codes a date");
+
+  // And the wiring takes them from the one module that owns them.
+  const deps = read("lib/launchWelcomeDeps.ts");
+  assert.match(deps, /code: LAUNCH_DISCOUNT_CODE/);
+  assert.match(deps, /percentLabel: `\$\{LAUNCH_DISCOUNT_PERCENT\} %`/);
+  assert.match(deps, /validFromLabel: LAUNCH_DISCOUNT_FROM_LABEL/);
+  assert.match(deps, /validUntilLabel: LAUNCH_DISCOUNT_UNTIL_LABEL/);
+
+  // The printed labels agree with the instants the checkout enforces.
+  assert.equal(LAUNCH_DISCOUNT_FROM_LABEL, "01.10.2026, 12:00 Uhr");
+  assert.equal(LAUNCH_DISCOUNT_UNTIL_LABEL, "31.10.2026, 23:59 Uhr");
+});
+
+/* ── The launch page's offer block ───────────────────────────── */
+
+test("112: the discount is a block on the page, not a line lost in the blue", () => {
+  // It was one small paragraph under the date and it disappeared. It is
+  // now the only Cream surface above the fold.
+  assert.match(launchPage, /className="launch-offer"/);
+  assert.match(launchPage, /\{LAUNCH_DISCOUNT_PERCENT\}<\/span>/);
+  assert.match(launchPage, /AUF DEINE ERSTE BESTELLUNG/);
+  assert.match(launchPage, /Einlösbar bis \{LAUNCH_DISCOUNT_UNTIL_LABEL\}/);
+
+  // The requested copy, and it says where the code comes from - the page
+  // deliberately does not print the code itself.
+  assert.match(launchPage, /sichere dir \{LAUNCH_DISCOUNT_PERCENT\} % auf deine erste/);
+  assert.match(launchPage, /Deinen Code erhältst du nach der Bestätigung deiner E-Mail-Adresse/);
+  assert.ok(!launchPage.includes("GLOALAUNCH10"), "the launch page prints the shared code");
+
+  // The figure is decorative markup; the group carries the readable name.
+  assert.match(launchPage, /role="group" aria-label=\{LAUNCH_DISCOUNT_LABEL\}/);
+  assert.match(launchPage, /className="launch-offer-figure" aria-hidden="true"/);
+
+  // The launch date is stated once, not repeated beside the offer.
+  // Rendered once. The other two mentions are the import and the
+  // comment explaining why the date is not typed anywhere.
+  assert.equal((launchPage.match(/{GLOA_LAUNCH_FULL_LABEL}/g) ?? []).length, 1,
+    "the launch date is printed more than once");
+});
+
+test("113: the offer block uses only the approved palette and no sale decoration", () => {
+  const css = read("app/globals.css");
+  const block = css.slice(css.indexOf("/* THE OFFER BLOCK."), css.indexOf("/* THE LAUNCH MOMENT."));
+  assert.ok(block.length > 0, "the offer block css is missing");
+
+  // Brand tokens only - no raw hex, no colour from outside the palette.
+  assert.ok(!/#[0-9a-fA-F]{3,8}/.test(block), "the offer block hard-codes a colour");
+  assert.match(block, /background:var\(--cream\)/);
+  assert.match(block, /color:var\(--blue\)/);
+
+  // None of the decoration GLOA does not use.
+  for (const banned of ["border-radius", "box-shadow", "linear-gradient", "backdrop-filter",
+                        "text-shadow", "rotate(", "animation"]) {
+    assert.ok(!block.includes(banned), `the offer block uses ${banned}`);
+  }
+
+  // It stacks on narrow screens rather than shrinking the number into
+  // illegibility or letting the row overflow.
+  assert.match(block, /@media \(max-width:430px\)/);
+  assert.match(block, /flex-direction:column/);
+  // And the figure is fluid, so 320px never clips it.
+  assert.match(block, /font-size:clamp\(56px,11vw,104px\)/);
 });

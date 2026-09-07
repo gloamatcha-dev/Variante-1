@@ -8409,16 +8409,85 @@ header nav{gap:18px;font-size:12px}
   color:var(--cream);
   opacity:.86;
 }
-/* THE BENEFIT LINE. Cream at full strength like the date above it,
-   but set in the body face rather than tracked caps: the date is a
-   stamp, this is a sentence somebody reads. It never states a
-   percentage of its own - the string comes from lib/launchDiscount.ts. */
-.launch-hero-offer{
-  margin:clamp(10px,1.2vw,14px) 0 0;
-  font-size:var(--type-body);
+
+/* THE OFFER BLOCK.
+
+   The one Cream surface above the fold, so it interrupts the blue
+   field instead of sitting in it. Flat colour, a hairline rule, no
+   radius, no shadow, nothing faded: the contrast IS the emphasis, and
+   a sticker would be a different brand.
+
+   Laid out as figure + copy rather than one centred lockup, so the
+   number reads first and the qualifying line reads second - which is
+   the order the sentence is spoken in. */
+.launch-offer{
+  display:flex;
+  align-items:center;
+  gap:clamp(16px,2.4vw,28px);
+  margin:clamp(24px,3vw,34px) 0 0;
+  padding:clamp(18px,2.4vw,26px) clamp(20px,2.8vw,32px);
+  background:var(--cream);
+  color:var(--ink);
+  width:max-content;
+  max-width:100%;
+}
+
+/* The number. Set on the display scale and optically aligned: the
+   digits carry the weight, the percent sign is a companion rather than
+   a third digit, so it is smaller and lifted to cap height. */
+.launch-offer-figure{
+  display:flex;
+  align-items:flex-start;
+  gap:.06em;
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:800;
+  letter-spacing:-.055em;
+  line-height:.82;
+  color:var(--blue);
+}
+.launch-offer-number{ font-size:clamp(56px,11vw,104px); }
+.launch-offer-percent{
+  font-size:clamp(24px,4.4vw,42px);
+  line-height:1;
+  padding-top:.12em;
+}
+
+.launch-offer-copy{ min-width:0; }
+
+/* The qualifying line. Tracked caps, tight to the number, and never
+   larger than it - it explains the figure rather than competing. */
+.launch-offer-line{
+  margin:0;
+  font-size:clamp(12px,1.5vw,15px);
+  font-weight:700;
+  letter-spacing:.14em;
+  line-height:1.25;
+  text-transform:uppercase;
+  color:var(--ink);
+}
+
+/* The deadline. The one place it is stated, in the quiet voice. */
+.launch-offer-valid{
+  margin:.55em 0 0;
+  font-size:clamp(11px,1.3vw,13px);
   line-height:1.4;
-  font-weight:600;
-  color:var(--cream);
+  color:var(--plum);
+}
+
+/* NARROW SCREENS. At 320-430px the row would either wrap badly or
+   force the digits down to an unreadable size, so the block stacks and
+   the number keeps its presence. width:auto stops the max-content box
+   from staying narrower than the stacked copy. */
+@media (max-width:430px){
+  .launch-offer{
+    flex-direction:column;
+    align-items:flex-start;
+    gap:10px;
+    width:auto;
+  }
+  .launch-offer-number{ font-size:clamp(52px,16vw,72px); }
+  .launch-offer-percent{ font-size:clamp(22px,6vw,30px); }
 }
 
 /* THE LAUNCH MOMENT.

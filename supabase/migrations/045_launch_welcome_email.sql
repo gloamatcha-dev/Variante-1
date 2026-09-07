@@ -82,12 +82,18 @@ create or replace function public.claim_welcome_email(
   p_consent_version text,
   p_stale_seconds integer default 900
 )
-returns boolean
+-- Returns the recipient WITH the claim, so a successful claim and the
+-- data needed to send are one round trip rather than two. A caller that
+-- did not win the claim gets claimed=false and no address at all - it
+-- has no business knowing who it lost to.
+returns table (claimed boolean, email text, first_name text)
 language plpgsql
 security definer set search_path = ''
 as $$
 declare
   v_updated integer;
+  v_email text;
+  v_first_name text;
 begin
   if p_claim_id is null or p_consent_version is null then
     raise exception 'welcome mail: a claim id and a consent version are required';
@@ -107,10 +113,16 @@ begin
      and (
        welcome_email_claim_id is null
        or welcome_email_claimed_at < now() - make_interval(secs => p_stale_seconds)
-     );
+     )
+   returning launch_waitlist.email, launch_waitlist.first_name
+        into v_email, v_first_name;
 
   get diagnostics v_updated = row_count;
-  return v_updated = 1;
+  if v_updated = 1 then
+    return query select true, v_email, v_first_name;
+  else
+    return query select false, null::text, null::text;
+  end if;
 end;
 $$;
 
