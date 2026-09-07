@@ -16,7 +16,6 @@ import {
   LAUNCH_SOURCES,
   PENDING_RETENTION_DAYS,
   createToken,
-  decideResubmission,
   hashToken,
   isConfirmationExpired,
   isValidEmail,
@@ -102,6 +101,16 @@ const read = (rel) => readFileSync(path.join(ROOT, rel), "utf-8");
  */
 const stripJs = (src) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 const stripSql = (src) => src.replace(/^\s*--.*$/gm, "");
+
+/**
+ * WHERE THE SIGNUP ACTUALLY WRITES.
+ *
+ * It used to be an upsert in this route. Migration 046 moved the whole
+ * decision into one locked statement, so the write is now a single RPC
+ * call - and every ordering assertion below asks about THAT rather than
+ * naming a Supabase method that no longer appears in the file.
+ */
+const SIGNUP_WRITE = 'supabase.rpc("submit_launch_signup"';
 
 const launchPage = read("app/LaunchPage.tsx");
 const signupRoute = read("app/api/launch/route.ts");
@@ -199,15 +208,17 @@ test("7: the server refuses a submission that does not carry an explicit consent
   // Client validation is not consent. The route makes the decision.
   assert.match(signupRoute, /if \(consent !== true\)/);
   const guard = signupRoute.indexOf("consent !== true");
-  const insert = signupRoute.indexOf(".upsert(");
+  const insert = signupRoute.indexOf(SIGNUP_WRITE);
   assert.ok(guard !== -1 && insert !== -1 && guard < insert, "the consent gate must precede the write");
 });
 
 test("8: the consent wording is stored with the row, and comes from the server", () => {
   // What has to be provable later is what THIS person agreed to.
-  assert.match(signupRoute, /consent_version: LAUNCH_CONSENT_VERSION/);
-  assert.match(signupRoute, /consent_text: LAUNCH_CONSENT_TEXT/);
-  assert.match(signupRoute, /consent_given_at: nowIso/);
+  // The route hands the server's own constants to the RPC; the
+  // timestamp is set by the database, not by the caller.
+  assert.match(signupRoute, /p_consent_version: LAUNCH_CONSENT_VERSION/);
+  assert.match(signupRoute, /p_consent_text: LAUNCH_CONSENT_TEXT/);
+  assert.match(read("supabase/migrations/046_launch_signup_atomic.sql"), /consent_given_at\s*=\s*v_now/);
   // And it is not taken from the request body, where a caller could
   // have written any wording it liked.
   const destructured = signupRoute.slice(signupRoute.indexOf("const {"), signupRoute.indexOf("} = body"));
@@ -243,7 +254,10 @@ test("10: the privacy link is present and points at the real privacy page", () =
 
 test("11: every row carries the launch purpose, and the database refuses any other", () => {
   assert.equal(LAUNCH_PURPOSE, "launch_notification");
-  assert.match(signupRoute, /purpose: LAUNCH_PURPOSE/);
+  // The purpose is written by the RPC, from a literal, and pinned a
+  // second time by 043's CHECK constraint.
+  assert.match(read("supabase/migrations/046_launch_signup_atomic.sql"), /'launch_notification'/);
+  assert.equal(LAUNCH_PURPOSE, "launch_notification");
   // Not merely a default: a CHECK constraint, so a row with another
   // purpose cannot physically exist in this table.
   assert.match(migration, /check \(purpose = 'launch_notification'\)/);
@@ -354,10 +368,16 @@ test("18: a malformed token is rejected before any database round-trip", () => {
     assert.equal(isWellFormedToken(bad), false, `accepted: ${JSON.stringify(bad)}`);
   }
   assert.equal(isWellFormedToken(createToken()), true);
-  // Both routes check the shape first.
-  for (const [name, source] of Object.entries({ confirmRoute, withdrawRoute })) {
+  // Both routes check the shape first. The confirm route now reaches the
+  // database through an RPC and the withdraw route still queries the
+  // table directly, so each is matched on how it actually talks to it -
+  // what matters is that the check comes first in both.
+  for (const [name, source, reach] of [
+    ["confirmRoute", confirmRoute, '.rpc("confirm_launch_signup"'],
+    ["withdrawRoute", withdrawRoute, '.from("launch_waitlist")'],
+  ]) {
     const check = source.indexOf("isWellFormedToken");
-    const query = source.indexOf(".from(\"launch_waitlist\")");
+    const query = source.indexOf(reach);
     assert.ok(check !== -1 && query !== -1 && check < query, `${name} queries before validating the token`);
   }
 });
@@ -412,31 +432,29 @@ test("22: withdrawing takes one click, needs no login, and is final for this lis
 
 test("23: re-submitting a withdrawn address does not revive it or send mail", () => {
   // A withdrawal is not undone by somebody typing the address into a
-  // form. It is now decided BEFORE anything is written, rather than by
-  // putting the row back after an upsert had already reset it.
-  assert.equal(
-    decideResubmission({ status: "withdrawn", confirmed_at: null, withdrawn_at: "2026-09-01T00:00:00Z", consent_version: LAUNCH_CONSENT_VERSION }),
-    "leave_withdrawn"
-  );
-  // Either mark alone is enough - a row carrying one but not the other
-  // is still a withdrawal.
-  assert.equal(
-    decideResubmission({ status: "withdrawn", confirmed_at: null, withdrawn_at: null, consent_version: LAUNCH_CONSENT_VERSION }),
-    "leave_withdrawn"
-  );
-  assert.equal(
-    decideResubmission({ status: "confirmed", confirmed_at: "x", withdrawn_at: "y", consent_version: LAUNCH_CONSENT_VERSION }),
-    "leave_withdrawn"
-  );
+  // form. The rule lives in submit_launch_signup (migration 046), where
+  // it is decided under a row lock before anything is written - so it
+  // is asserted against the SQL rather than against branching in the
+  // route, which no longer has any.
+  const sql = stripSql(read("supabase/migrations/046_launch_signup_atomic.sql"));
 
-  // The route acts on it before it writes or sends anything.
+  // Either mark alone is enough: a row carrying one but not the other is
+  // still a withdrawal.
+  assert.match(sql, /if v_row\.status = 'withdrawn' or v_row\.withdrawn_at is not null then\s*return 'withdrawn';/);
+
+  // And it is checked BEFORE the branch that would otherwise refresh the
+  // row - so a withdrawn contact never gets new tokens.
+  const fn = sql.slice(sql.indexOf("function public.submit_launch_signup"),
+                       sql.indexOf("function public.confirm_launch_signup"));
+  assert.ok(fn.indexOf("return 'withdrawn';") < fn.indexOf("return 'refreshed';"),
+    "the withdrawn check does not precede the refresh");
+
+  // The route sends nothing for that outcome.
   const code = stripJs(signupRoute);
-  assert.match(code, /action === "leave_confirmed" || action === "leave_withdrawn"/);
-  const decide = code.indexOf("decideResubmission");
-  const write = code.indexOf(".upsert(");
+  assert.match(code, /outcome !== "created" && outcome !== "refreshed"/);
+  const decide = code.indexOf(SIGNUP_WRITE);
   const send = code.indexOf("resend.emails.send");
-  assert.ok(decide > 0 && decide < write, "the route writes before it decides");
-  assert.ok(decide < send, "the route sends before it decides");
+  assert.ok(decide > 0 && decide < send, "the route sends before it decides");
 });
 
 test("24: clicking a withdrawal link twice is a no-op, not an error", () => {
@@ -446,36 +464,20 @@ test("24: clicking a withdrawal link twice is a no-op, not an error", () => {
 /* ── 9. Duplicates and enumeration ──────────────────────────── */
 
 test("25: duplicates are prevented by the database, not by application code", () => {
-  // WHAT CHANGED, AND WHY THE GUARD NARROWED.
-  //
-  // This used to forbid ANY select before the write, because a
-  // "select then insert" would let two concurrent submissions both
-  // pass and create two rows. That reasoning is still right about
-  // DUPLICATES - and duplicates are still prevented the same way: the
-  // unique constraint on the normalised email, plus an upsert that
-  // merges on conflict. Neither has changed, and both are asserted
-  // here.
-  //
-  // What the route now reads the row for is a different question: not
-  // "does this address exist" but "has this person already confirmed,
-  // and under which consent wording". That cannot be answered after
-  // the write, because the write destroys both answers - which is
-  // exactly how a confirmed contact ended up demoted to pending with a
-  // confirmed_at from an hour earlier, and how a version 1 consent
-  // could have been silently upgraded to version 2 without anybody
-  // confirming the new wording.
-  //
-  // The read decides WHETHER to write. It does not prevent duplicates
-  // and is not relied on to.
+  // The unique constraint is still the guard, and the RPC still merges
+  // on conflict rather than failing - so two concurrent submissions of
+  // one address cannot produce two rows.
   assert.match(migration, /email\s+text not null unique/);
-  assert.match(signupRoute, /onConflict: "email"/);
+  const sql = stripSql(read("supabase/migrations/046_launch_signup_atomic.sql"));
+  assert.match(sql, /on conflict \(email\) do nothing/);
 
-  // The decision is a pure function, not ad-hoc branching in the route.
-  assert.ok(signupRoute.includes("const action = decideResubmission(existing, LAUNCH_CONSENT_VERSION)"));
-
-  // And the read selects only what the decision needs - no address, no
-  // token, no consent text.
-  assert.ok(signupRoute.includes(String.raw`.select("id, status, confirmed_at, withdrawn_at, consent_version")`));
+  // The route no longer decides anything itself: one RPC call replaces
+  // the read-then-upsert entirely.
+  const code = stripJs(signupRoute);
+  assert.ok(code.includes(SIGNUP_WRITE), "the route no longer writes through the RPC");
+  assert.ok(!code.includes(".upsert("), "the route still upserts directly");
+  assert.ok(!code.includes('.select("id, status'), "the route still reads the row first");
+  assert.ok(!code.includes("decideResubmission"), "the decision is duplicated in the route");
 });
 
 test("26: the response never reveals whether an address is already on the list", () => {
@@ -983,7 +985,7 @@ test("55: the limit is 5 attempts per 10 minutes, in one place, in both units", 
 
 test("56: the shared limit is applied before a row is written and before mail is sent", () => {
   const shared = signupRoute.indexOf("consumePersistentRateLimit");
-  const upsert = signupRoute.indexOf(".upsert(");
+  const upsert = signupRoute.indexOf(SIGNUP_WRITE);
   const send = signupRoute.indexOf("resend.emails.send");
   assert.ok(shared !== -1, "the route does not consult the shared limit");
   assert.ok(shared < upsert, "a refused caller can still write a row");
@@ -1072,7 +1074,7 @@ test("58: a database that cannot answer refuses the signup rather than waving it
   // The refusal happens BEFORE anything is written or sent. If the
   // upsert or the mail moved above the limit check this would catch it.
   const limitAt = code.indexOf("consumePersistentRateLimit");
-  const upsertAt = code.indexOf(".upsert(");
+  const upsertAt = code.indexOf(SIGNUP_WRITE);
   const sendAt = code.indexOf("emails.send");
   assert.ok(limitAt > 0 && upsertAt > limitAt, "the row is written before the shared limit is spent");
   assert.ok(sendAt > limitAt, "the mail is sent before the shared limit is spent");
@@ -1170,7 +1172,9 @@ test("61: the rate limit went into 043 rather than into a 044, and 043 is still 
     // 044: the one-time launch send, reviewed in tests/launch-send.test.mjs.
     // 045: the welcome mail with the discount code, reviewed in tests 84-87
     //      of this file. Both are additive and neither touches 043.
-    ["044_launch_send.sql", "045_launch_welcome_email.sql"],
+    // 046: atomic signup and the consent-history split, reviewed in
+    // tests 91-100 of this file.
+    ["044_launch_send.sql", "045_launch_welcome_email.sql", "046_launch_signup_atomic.sql"],
     "an unreviewed migration appeared after 043"
   );
 
@@ -1875,71 +1879,43 @@ test("87: the welcome mail states no percentage or date of its own", () => {
 });
 
 test("88: a re-submission never demotes a confirmed contact, and never upgrades a consent", () => {
-  // THE TWO BUGS THIS CLOSES, both of which reached live data.
+  // THE TWO DEFECTS THIS CLOSES, both seen in live data.
   //
-  // 1. DEMOTION. The upsert cannot say "only if this row is still
-  //    pending", so it wrote status='pending' over a confirmed row while
-  //    leaving confirmed_at set - because that column is not in its
-  //    payload. The live list held exactly that: a contact who confirmed
-  //    at 18:23 and was demoted at 19:32 by a second form submission,
-  //    with consent_given_at LATER than confirmed_at as the fingerprint.
-  //    They would have been excluded from the send they had opted into,
-  //    and deleted by the retention sweep as "never confirmed".
+  // 1. DEMOTION. The old upsert wrote status='pending' over a confirmed
+  //    row while leaving confirmed_at set. The live list held exactly
+  //    that: confirmed at 18:23, demoted at 19:32 by a second form
+  //    submission, with consent_given_at LATER than confirmed_at as the
+  //    fingerprint. That contact would have been skipped by the send and
+  //    deleted by the retention sweep as "never confirmed".
   //
-  // 2. SILENT CONSENT UPGRADE. The upsert also overwrites
-  //    consent_version. A person who agreed to version 1 and later
-  //    re-submitted would have version 2 stored against them - and if
-  //    the row were simply restored to 'confirmed', they would count as
-  //    having consented to the welcome mail and its discount code
-  //    without ever confirming that wording. A double opt-in that can be
-  //    skipped by re-submitting a form is not a double opt-in.
-  const V2 = LAUNCH_CONSENT_VERSION;
-  const V1 = LAUNCH_CONSENT_VERSION_V1;
+  // 2. SILENT CONSENT UPGRADE. The same upsert overwrote
+  //    consent_version, so a person who agreed to version 1 and
+  //    re-submitted would have version 2 stored against them without
+  //    ever confirming that wording.
+  //
+  // Both are now decided inside submit_launch_signup under a row lock.
+  // The detail is asserted in tests 92, 93 and 96; this test holds the
+  // two headline properties and the route's part of the bargain.
+  const sql = stripSql(read("supabase/migrations/046_launch_signup_atomic.sql"));
+  const fn = sql.slice(sql.indexOf("function public.submit_launch_signup"),
+                       sql.indexOf("function public.confirm_launch_signup"));
 
-  // Confirmed under the CURRENT wording: nothing happens at all.
-  assert.equal(
-    decideResubmission({ status: "confirmed", confirmed_at: "2026-09-07T18:23:30Z", withdrawn_at: null, consent_version: V2 }),
-    "leave_confirmed"
-  );
-  // Already notified: the launch mail has gone out. Re-submitting must
-  // not reopen the row.
-  assert.equal(
-    decideResubmission({ status: "notified", confirmed_at: "x", withdrawn_at: null, consent_version: V2 }),
-    "leave_confirmed"
-  );
+  // Confirmed or notified under this exact wording: nothing is written.
+  assert.match(fn, /v_row\.status in \('confirmed', 'notified'\)\s*and v_row\.consent_version = p_consent_version then\s*return 'already_current';/);
 
-  // CONFIRMED UNDER THE OLD WORDING: the new wording has not been
-  // confirmed, so it must be. This is the case that keeps a consent
-  // change honest, and it is why the version is part of the decision.
-  assert.equal(
-    decideResubmission({ status: "confirmed", confirmed_at: "x", withdrawn_at: null, consent_version: V1 }),
-    "refresh"
-  );
-  assert.equal(
-    decideResubmission({ status: "notified", confirmed_at: "x", withdrawn_at: null, consent_version: V1 }),
-    "refresh"
-  );
+  // The branch that refreshes a CONFIRMED row touches neither the status
+  // nor the consent in force.
+  const confirmedBranch = fn.slice(fn.indexOf("if v_row.status in ('confirmed', 'notified') then"),
+                                   fn.indexOf("else"));
+  assert.ok(!/\bstatus\s*=/.test(confirmedBranch), "a re-submission demotes a confirmed contact");
+  assert.ok(!/(^|[^_])consent_version\s*=/m.test(confirmedBranch), "a re-submission upgrades the consent");
 
-  // Unconfirmed rows are refreshed, which is what makes "I never got the
-  // mail, let me try again" work.
-  assert.equal(
-    decideResubmission({ status: "pending", confirmed_at: null, withdrawn_at: null, consent_version: V2 }),
-    "refresh"
-  );
-  // And a brand new address is created.
-  assert.equal(decideResubmission(null), "create");
+  // And a row written back to pending carries no confirmed_at.
+  const pendingBranch = fn.slice(fn.indexOf("else"), fn.indexOf("return 'refreshed';"));
+  assert.match(pendingBranch, /confirmed_at\s*=\s*null/);
 
-  // THE ROUTE CLEARS confirmed_at WHEN IT WRITES A PENDING ROW. That
-  // inconsistency - pending with a confirmed_at - is the bug itself, and
-  // it must not survive the fix.
-  assert.match(signupRoute, /confirmed_at: null,/);
-  const code = stripJs(signupRoute);
-  // The settled cases return before any write and before any send.
-  const decide = code.indexOf("decideResubmission");
-  const write = code.indexOf(".upsert(");
-  assert.ok(decide > 0 && decide < write, "the route writes before it decides");
-  assert.ok(!code.includes("upserted.confirmed_at"),
-    "the route still patches the row up after writing it");
+  // The route sends a mail only for the two outcomes that need one.
+  assert.match(stripJs(signupRoute), /outcome !== "created" && outcome !== "refreshed"/);
 });
 
 test("89: the privacy notice matches what is actually sent", () => {
@@ -1968,4 +1944,214 @@ test("90: the discount is visible on the landing page, from the shared constant"
   assert.ok(!/10\s*%/.test(stripJs(launchPage)), "the launch page hard-codes a percentage");
   // And it is still not a newsletter signup.
   assert.match(launchPage, /NUR FÜR DEN LAUNCH\. KEIN NEWSLETTER\./);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   15. ATOMIC SIGNUP AND CONSENT THAT SURVIVES A RE-SUBMISSION
+
+   Migration 046 moved the whole decision into one locked statement and
+   split the consent into two: the one IN FORCE and a newer one merely
+   PROPOSED. These tests hold both properties against the SQL itself,
+   because that is now where the rule lives.
+   ══════════════════════════════════════════════════════════════ */
+
+const atomicMigration = read("supabase/migrations/046_launch_signup_atomic.sql");
+const confirmRouteSrc = read("app/api/launch/confirm/route.ts");
+
+const signupFn = () => {
+  const sql = stripSql(atomicMigration);
+  return sql.slice(sql.indexOf("function public.submit_launch_signup"),
+                   sql.indexOf("function public.confirm_launch_signup"));
+};
+const confirmFn = () => {
+  const sql = stripSql(atomicMigration);
+  return sql.slice(sql.indexOf("function public.confirm_launch_signup"),
+                   sql.indexOf("revoke all on function public.submit_launch_signup"));
+};
+
+test("91: the decision is taken under a row lock, not read-then-write", () => {
+  // A confirmation click landing between a read and a write could
+  // previously overwrite a confirmation somebody had just made.
+  const fn = signupFn();
+  assert.match(fn, /select \* into v_row[\s\S]*?where email = p_email[\s\S]*?for update/);
+  assert.match(confirmFn(), /where confirmation_token_hash = p_token_hash[\s\S]*?for update/);
+
+  // And the route no longer reads the row itself before writing.
+  const code = stripJs(signupRoute);
+  assert.match(code, /supabase\.rpc\("submit_launch_signup"/);
+  assert.ok(!code.includes('.select("id, status, confirmed_at'),
+    "the route still reads the row before writing");
+  assert.ok(!code.includes(".upsert("), "the route still upserts directly");
+});
+
+test("92: a confirmed contact is never demoted, reopened or revived", () => {
+  const fn = signupFn();
+
+  // Withdrawn wins outright, on either mark.
+  assert.match(fn, /if v_row\.status = 'withdrawn' or v_row\.withdrawn_at is not null then\s*return 'withdrawn';/);
+
+  // Confirmed or notified under this exact wording: nothing is written.
+  assert.match(fn, /if v_row\.status in \('confirmed', 'notified'\)\s*and v_row\.consent_version = p_consent_version then\s*return 'already_current';/);
+
+  // And when a confirmed row DOES need to re-confirm a new wording, the
+  // update for that branch must not touch `status` at all - that is what
+  // stops the demotion.
+  const confirmedBranch = fn.slice(
+    fn.indexOf("if v_row.status in ('confirmed', 'notified') then"),
+    fn.indexOf("else")
+  );
+  assert.ok(confirmedBranch.length > 0, "the confirmed branch could not be isolated");
+  assert.ok(!/\bstatus\s*=/.test(confirmedBranch), "the confirmed branch rewrites status");
+  assert.ok(!/confirmed_at\s*=/.test(confirmedBranch), "the confirmed branch clears confirmed_at");
+});
+
+test("93: a re-submission never destroys the consent that is in force", () => {
+  // THE DEFECT THIS CLOSES. consent_version, consent_text and
+  // consent_given_at are the record Article 7(1) requires. The upsert
+  // used to overwrite all three with the current wording, so a contact
+  // who confirmed version 1 and re-submitted lost the evidence that they
+  // had confirmed anything - and would then have been skipped by the
+  // send and deleted by the retention sweep as "never confirmed".
+  const fn = signupFn();
+  const confirmedBranch = fn.slice(
+    fn.indexOf("if v_row.status in ('confirmed', 'notified') then"),
+    fn.indexOf("else")
+  );
+
+  // The in-force columns are not assigned in that branch.
+  for (const col of ["consent_version", "consent_text", "consent_given_at"]) {
+    assert.ok(
+      !new RegExp(`(^|[^_])${col}\\s*=`, "m").test(confirmedBranch),
+      `a re-submission overwrites the in-force ${col}`
+    );
+  }
+  // The proposed wording goes somewhere else entirely.
+  assert.match(confirmedBranch, /pending_consent_version\s*=\s*p_consent_version/);
+  assert.match(confirmedBranch, /pending_consent_text\s*=\s*p_consent_text/);
+  assert.match(confirmedBranch, /pending_consent_given_at\s*=\s*v_now/);
+});
+
+test("94: a proposed consent carries no permission until it is confirmed", () => {
+  // The pending columns are a proposal. Only confirm_launch_signup
+  // promotes them, and only because somebody clicked a link sent to that
+  // address.
+  const fn = confirmFn();
+  assert.match(fn, /consent_version = coalesce\(v_row\.pending_consent_version, v_row\.consent_version\)/);
+  assert.match(fn, /consent_text = coalesce\(v_row\.pending_consent_text, v_row\.consent_text\)/);
+  assert.match(fn, /pending_consent_version = null/);
+  // The token is spent in the same statement, so the link works once.
+  assert.match(fn, /confirmation_token_hash = null/);
+
+  // NOTHING ELSE promotes a pending consent. Not the signup, not an
+  // admin route, not a sweep.
+  const sql = stripSql(atomicMigration);
+  const promotions = [...sql.matchAll(/consent_version = coalesce\(/g)];
+  assert.equal(promotions.length, 1, "a second place promotes a pending consent");
+  for (const rel of ["app/api/launch/route.ts", "lib/launchSend.ts", "lib/launchWaitlist.ts"]) {
+    assert.ok(!/pending_consent/.test(stripJs(read(rel))),
+      `${rel} touches the proposed consent`);
+  }
+});
+
+test("95: the welcome mail still turns on the consent IN FORCE, so v1 cannot reach it", () => {
+  // mayReceiveWelcomeEmail reads consent_version - the in-force column -
+  // which the signup can no longer write. So the only route to the
+  // discount mail is confirming version 2.
+  assert.equal(
+    mayReceiveWelcomeEmail({
+      status: "confirmed", purpose: LAUNCH_PURPOSE,
+      consent_version: LAUNCH_CONSENT_VERSION_V1, welcome_email_sent_at: null,
+    }),
+    false
+  );
+  assert.equal(
+    mayReceiveWelcomeEmail({
+      status: "confirmed", purpose: LAUNCH_PURPOSE,
+      consent_version: LAUNCH_CONSENT_VERSION, welcome_email_sent_at: null,
+    }),
+    true
+  );
+
+  // A v1 contact who re-submits but never confirms keeps status
+  // 'confirmed' and version 1 in force - entitled to the launch mail,
+  // not to the discount mail. That is the whole design, expressed as the
+  // two assertions above plus the SQL in test 93.
+});
+
+test("96: pending and confirmed_at can no longer coexist", () => {
+  // The inconsistency that started all of this: a row reading pending
+  // with a confirmed_at from an hour earlier.
+  const fn = signupFn();
+  const pendingBranch = fn.slice(fn.indexOf("else"), fn.indexOf("return 'refreshed';"));
+  assert.match(pendingBranch, /confirmed_at\s*=\s*null/);
+  assert.match(pendingBranch, /status\s*=\s*'pending'/);
+  // And the migration ships the query that proves it stays true.
+  assert.match(atomicMigration, /where status = 'pending' and confirmed_at is not null/);
+});
+
+test("97: there is exactly one valid confirmation link, decided by lock order", () => {
+  // Two parallel submissions used to leave two links of which only the
+  // later worked, by chance. The lock serialises them, so the surviving
+  // token is the one written last - deterministically - and every
+  // earlier link is dead the moment it is replaced.
+  const fn = signupFn();
+  assert.match(fn, /for update/);
+  const writes = [...fn.matchAll(/confirmation_token_hash\s*=\s*p_confirmation_token_hash/g)];
+  assert.equal(writes.length, 2, "the token is written somewhere other than the two update branches");
+  // A concurrent insert that beat the lock is absorbed rather than
+  // duplicated, and reported honestly.
+  assert.match(fn, /on conflict \(email\) do nothing/);
+  assert.match(fn, /return 'already_current';/);
+});
+
+test("98: the public response cannot be used to test whether an address exists", () => {
+  // Four different database outcomes, two response shapes, and the two
+  // that mean "already known" are indistinguishable from a fresh signup.
+  const code = stripJs(signupRoute);
+  assert.match(code, /if \(outcome !== "created" && outcome !== "refreshed"\) \{\s*return neutralSuccess\(\);/);
+  // Nothing about the outcome reaches the caller.
+  assert.ok(!/Response\.json\([^)]*outcome/.test(code), "the route returns the outcome");
+  assert.ok(!/console\.\w+\([^)]*outcome/.test(code), "the route logs the outcome");
+});
+
+test("99: 046 is additive, depends only on 043, and is server-only", () => {
+  const sql = stripSql(atomicMigration);
+
+  for (const destructive of ["drop table", "drop column", "drop policy", "truncate",
+                             "delete from", "alter column", "drop constraint"]) {
+    assert.ok(!sql.toLowerCase().includes(destructive), `046 performs: ${destructive}`);
+  }
+  // Every added column is nullable, so every existing row stays valid.
+  assert.match(sql, /add column if not exists pending_consent_version text/);
+  assert.ok(!/pending_consent\w* [a-z]+ not null/.test(sql), "046 adds a NOT NULL column");
+
+  // It does not depend on 044 or 045, so it can be applied on its own.
+  for (const later of ["launch_release", "launch_send_claim_id", "welcome_email_sent_at",
+                       "claim_launch_notifications", "claim_welcome_email"]) {
+    assert.ok(!sql.includes(later), `046 depends on a later migration: ${later}`);
+  }
+  // And it does not touch 043's rate limiter.
+  assert.ok(!sql.includes("launch_rate_limit"), "046 touches the rate limiter");
+
+  // Server-only, same posture as 043.
+  assert.ok(!/to anon|to authenticated/.test(sql), "046 grants something to a browser role");
+  for (const fn of ["submit_launch_signup", "confirm_launch_signup"]) {
+    assert.match(sql, new RegExp(`revoke all on function public\\.${fn}[^;]*from anon`));
+    assert.match(sql, new RegExp(`grant execute on function public\\.${fn}[^;]*to service_role`));
+    assert.match(sql, new RegExp(`create or replace function public\\.${fn}[\\s\\S]{0,400}?security definer set search_path = ''`));
+  }
+});
+
+test("100: the confirm route decides nothing itself any more", () => {
+  const code = stripJs(confirmRouteSrc);
+  assert.match(code, /supabase\.rpc\("confirm_launch_signup"/);
+  // No status write, no expiry arithmetic, no consent handling in the route.
+  assert.ok(!code.includes(".update("), "the confirm route writes directly");
+  assert.ok(!code.includes("isConfirmationExpired"), "the confirm route re-implements the expiry");
+  assert.ok(!code.includes("consent"), "the confirm route touches consent columns");
+  // The TTL still comes from the one shared constant.
+  assert.match(code, /p_ttl_days: CONFIRMATION_TOKEN_TTL_DAYS/);
+  // Every outcome maps to an existing page state, and an unknown one is
+  // treated as invalid rather than as success.
+  assert.match(code, /outcome !== "confirmed"\) return redirect\("invalid"\)/);
 });

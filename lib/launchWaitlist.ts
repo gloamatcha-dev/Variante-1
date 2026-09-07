@@ -87,87 +87,19 @@ export const LAUNCH_CONSENT_TEXT =
 export const LAUNCH_CONSENT_VERSIONS = [LAUNCH_CONSENT_VERSION, LAUNCH_CONSENT_VERSION_V1] as const;
 
 /**
- * WHAT TO DO WHEN AN ADDRESS IS SUBMITTED THAT IS ALREADY ON THE LIST.
+ * NOTE ON WHERE THE RE-SUBMISSION RULE LIVES.
  *
- * This decision used to be made by an unconditional upsert, and it got
- * it wrong in two ways that both showed up in live data:
+ * It used to be a pure function here, mirrored by an upsert in the
+ * route. Migration 046 moved the whole decision into
+ * submit_launch_signup(), where it is taken under a row lock in one
+ * statement - which is what made it atomic, and what lets a consent
+ * that is already in force survive a re-submission.
  *
- *   1. IT DEMOTED CONFIRMED PEOPLE. The upsert cannot express "only if
- *      this row is still pending", so it wrote status='pending' over a
- *      confirmed row - while leaving confirmed_at untouched, because
- *      that column is not in its payload. The result was a row reading
- *      pending with a confirmed_at from an hour earlier: somebody who
- *      HAD confirmed, silently unconfirmed by typing their address in
- *      again, excluded from the send they had opted into and due for
- *      deletion by the retention sweep as "never confirmed".
- *
- *   2. IT REWROTE THE CONSENT VERSION WITHOUT A NEW CONFIRMATION. The
- *      upsert also overwrites consent_version and consent_text. So a
- *      person who agreed to version 1 and later re-submitted would have
- *      version 2 stored against them - and if the row were simply put
- *      back to 'confirmed', they would count as having consented to the
- *      welcome mail and its discount code WITHOUT ever confirming that
- *      wording. A double opt-in that can be skipped by re-submitting a
- *      form is not a double opt-in.
- *
- * So the decision is taken here, from the row as it stands BEFORE
- * anything is written, and it is a pure function so the four cases can
- * be tested directly.
- *
- * ── THE FOUR ANSWERS ──────────────────────────────────────────
- *
- *   create            no such row yet. Insert it, send the confirmation.
- *
- *   refresh           the row is unconfirmed, OR it is confirmed under a
- *                     DIFFERENT consent wording than the one just shown.
- *                     Either way this person has to confirm: new tokens,
- *                     status pending, send the mail. The second case is
- *                     the one that keeps a wording change honest.
- *
- *   leave_confirmed   already confirmed under exactly this wording.
- *                     Change nothing and send nothing: they are on the
- *                     list, and mailing them another confirmation link
- *                     is how somebody ends up clicking one that demotes
- *                     them.
- *
- *   leave_withdrawn   consent was taken back. A withdrawal is not undone
- *                     by somebody typing the address into a form.
- *
- * `notified` is deliberately folded into leave_confirmed: that row has
- * had its one launch mail, it is not pending, and re-submitting must not
- * reopen it. mayReceiveLaunchNotification already refuses to send to it
- * again.
+ * The mirror was deleted rather than kept. Two copies of a rule about
+ * consent are two copies that can disagree, and only one of them is the
+ * one the database actually enforces. The behaviour is asserted against
+ * the SQL in tests/launch-waitlist.test.mjs (91-99).
  */
-export type ResubmissionAction = "create" | "refresh" | "leave_confirmed" | "leave_withdrawn";
-
-export function decideResubmission(
-  existing: {
-    status: LaunchStatus;
-    confirmed_at: string | null;
-    withdrawn_at: string | null;
-    consent_version: string;
-  } | null,
-  currentConsentVersion: string = LAUNCH_CONSENT_VERSION
-): ResubmissionAction {
-  if (!existing) return "create";
-
-  // Checked first and on BOTH signals: a withdrawal outranks everything,
-  // and a row carrying either mark is treated as withdrawn even if the
-  // other is missing.
-  if (existing.status === "withdrawn" || existing.withdrawn_at !== null) {
-    return "leave_withdrawn";
-  }
-
-  const isConfirmed = existing.status === "confirmed" || existing.status === "notified";
-  if (!isConfirmed) return "refresh";
-
-  // Confirmed, but under wording that is no longer the current one. The
-  // new wording has NOT been confirmed, so it must be - otherwise a form
-  // re-submission would silently upgrade an old consent into a new one.
-  if (existing.consent_version !== currentConsentVersion) return "refresh";
-
-  return "leave_confirmed";
-}
 
 /**
  * MAY THIS PERSON RECEIVE THE WELCOME MAIL WITH THE DISCOUNT CODE?

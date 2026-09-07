@@ -85,12 +85,12 @@ const selectColumns = select => select.split(",").map(c => c.trim()).filter(Bool
 test("1: 042 is the newest migration, and 001-041 are untouched", () => {
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 45);
+  assert.equal(migrations.length, 46);
   assert.equal(migrations[38], "039_b2c_annual_plan_foundation.sql");
   assert.equal(migrations[39], "040_annual_checkout_retry_fingerprints.sql");
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
   assert.equal(migrations[41], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 45), [], "a 045 appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 46), [], "a 045 appeared");
 
   // No live migration was edited to make room for this one.
   const changed = execFileSync("git", ["diff", "--name-only", "HEAD", "--", "supabase/migrations/"],

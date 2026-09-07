@@ -113,7 +113,7 @@ test("035 exists, is the only 035, and only 036 and 037 follow it", () => {
      // Phase 5. public.launch_waitlist: one new table for the one-time
      // launch notification, RLS on, no anon/authenticated grant, and no
      // existing object touched. Reviewed in tests/launch-waitlist.test.mjs.
-     "043_launch_waitlist.sql", "044_launch_send.sql", "045_launch_welcome_email.sql"],
+     "043_launch_waitlist.sql", "044_launch_send.sql", "045_launch_welcome_email.sql", "046_launch_signup_atomic.sql"],
     "an unreviewed migration above 035 appeared"
   );
   // And 039 leaves this table entirely alone. An annual plan's one

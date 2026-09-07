@@ -103,17 +103,17 @@ test("1, 2: 036 exists, owns its number, and 037 is the only thing above it", ()
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(files[files.length - 1], "045_launch_welcome_email.sql");
-  assert.equal(files[files.length - 2], "044_launch_send.sql");
-  assert.equal(files[files.length - 3], "043_launch_waitlist.sql");
-  assert.equal(files[files.length - 4], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.equal(files[files.length - 5], "041_annual_account_column_privileges.sql");
-  assert.equal(files[files.length - 6], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(files[files.length - 7], "039_b2c_annual_plan_foundation.sql");
-  assert.equal(files[files.length - 10], MIGRATION_036, "036 must still be the one before 037");
+  assert.equal(files[files.length - 1], "046_launch_signup_atomic.sql");
+  assert.equal(files[files.length - 2], "045_launch_welcome_email.sql");
+  assert.equal(files[files.length - 3], "044_launch_send.sql");
+  assert.equal(files[files.length - 4], "043_launch_waitlist.sql");
+  assert.equal(files[files.length - 5], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(files[files.length - 6], "041_annual_account_column_privileges.sql");
+  assert.equal(files[files.length - 7], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 11], MIGRATION_036, "036 must still be the one before 037");
   assert.deepEqual(files.filter(f => f.startsWith("037")), ["037_subscription_refund_correlation.sql"]);
-  assert.ok(!files.some(f => f.startsWith("046")), "a 045 appeared");
-  assert.equal(files.length, 45);
+  assert.ok(!files.some(f => f.startsWith("047")), "a 045 appeared");
+  assert.equal(files.length, 46);
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length);

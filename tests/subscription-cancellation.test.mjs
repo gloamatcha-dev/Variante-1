@@ -1997,7 +1997,7 @@ test("034: it is the next free number and 022-033 are untouched", () => {
      // Phase 5. public.launch_waitlist: one new table for the one-time
      // launch notification, RLS on, no anon/authenticated grant, and no
      // existing object touched. Reviewed in tests/launch-waitlist.test.mjs.
-     "043_launch_waitlist.sql", "044_launch_send.sql", "045_launch_welcome_email.sql"],
+     "043_launch_waitlist.sql", "044_launch_send.sql", "045_launch_welcome_email.sql", "046_launch_signup_atomic.sql"],
     "an unreviewed migration above 034 appeared"
   );
   // AND 039 REDEFINES NOTHING 034 OWNS. It is a prepaid plan with no

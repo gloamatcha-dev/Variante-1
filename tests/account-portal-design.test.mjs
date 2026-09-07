@@ -110,7 +110,7 @@ test("1e: no auth, guard, data or backend logic changed", () => {
     // Reviewed in tests/launch-send.test.mjs.
     ["admin", "annual-plan", "checkout", "contact", "cron", "internal", "launch",
      "orders", "stripe", "subscriptions", "withdrawal"], "an API route changed");
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("046")),
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("047")),
     "migration 044 exists");
 });
 

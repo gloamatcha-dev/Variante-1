@@ -6,10 +6,8 @@ import { buildLaunchConfirmationEmail } from "../../../lib/email/launchConfirmat
 import {
   LAUNCH_CONSENT_TEXT,
   LAUNCH_CONSENT_VERSION,
-  LAUNCH_PURPOSE,
   MAX_EMAIL_LEN,
   createToken,
-  decideResubmission,
   hashToken,
   isValidEmail,
   normalizeEmail,
@@ -292,81 +290,52 @@ export async function POST(request: Request): Promise<Response> {
 
   const confirmationToken = createToken();
   const withdrawalToken = createToken();
-  const nowIso = new Date().toISOString();
 
-  // WHAT HAPPENS WHEN THIS ADDRESS IS ALREADY ON THE LIST.
+  // ONE STATEMENT DECIDES AND WRITES.
   //
-  // The row is READ first and the decision is taken by
-  // decideResubmission() in lib/launchWaitlist.ts, which is a pure
-  // function so its four cases are testable directly.
+  // submit_launch_signup (migration 046) takes a row lock, decides and
+  // writes inside a single transaction, and returns what it did. That
+  // replaces a read in this file followed by an upsert, which had two
+  // defects:
   //
-  // This replaces an unconditional upsert that got two things wrong. It
-  // demoted confirmed people to pending while leaving confirmed_at set,
-  // and it rewrote consent_version without requiring the new wording to
-  // be confirmed - which would have let a form re-submission silently
-  // upgrade a version 1 consent into a version 2 one, and with it into
-  // the discount mail nobody had agreed to.
+  //   - A confirmation click landing between the read and the write
+  //     could be overwritten, undoing a confirmation somebody had just
+  //     made.
+  //   - The upsert overwrote consent_version, consent_text and
+  //     consent_given_at with the CURRENT wording, destroying the record
+  //     of what a person had actually agreed to.
   //
-  // ON THE RACE THIS REINTRODUCES, honestly: two simultaneous
-  // submissions of the same address can both read "no such row". The
-  // unique constraint on the normalised email still makes duplicates
-  // impossible - the second insert conflicts and is merged by the same
-  // upsert below - so the worst case is two confirmation mails carrying
-  // different tokens, of which only the later one works. That is a
-  // cosmetic fault on a path a person walks once, and a far smaller
-  // price than the two correctness bugs above.
-  const { data: existing, error: readError } = await supabase
-    .from("launch_waitlist")
-    .select("id, status, confirmed_at, withdrawn_at, consent_version")
-    .eq("email", normalizedEmail)
-    .maybeSingle();
+  // The function keeps the in-force consent untouched and parks a newer
+  // wording in the pending_consent_* columns until it is confirmed, so a
+  // contact who agreed to version 1 stays entitled to version 1 and
+  // gains nothing until they click a new link.
+  //
+  // The four outcomes are the four things that can be true of an address;
+  // only two of them mean a mail goes out.
+  const { data: outcome, error: signupError } = await supabase.rpc("submit_launch_signup", {
+    p_email: normalizedEmail,
+    p_first_name: resolvedFirstName,
+    p_audience_type: resolvedAudienceType,
+    p_source: resolvedSource,
+    p_consent_version: LAUNCH_CONSENT_VERSION,
+    p_consent_text: LAUNCH_CONSENT_TEXT,
+    p_confirmation_token_hash: hashToken(confirmationToken),
+    p_withdrawal_token_hash: hashToken(withdrawalToken),
+  });
 
-  if (readError) {
-    console.error("Launch waitlist: could not read the entry:", readError.message);
-    return temporarilyUnavailable();
-  }
-
-  const action = decideResubmission(existing, LAUNCH_CONSENT_VERSION);
-
-  // Already settled: on the list under this exact wording, or withdrawn.
-  // Nothing is written and nothing is sent. The response is the same
-  // neutral success a new signup gets, so the endpoint still cannot be
-  // used to ask whether GLOA holds a given address.
-  if (action === "leave_confirmed" || action === "leave_withdrawn") {
-    return neutralSuccess();
-  }
-
-  const { error: upsertError } = await supabase
-    .from("launch_waitlist")
-    .upsert(
-      {
-        email: normalizedEmail,
-        first_name: resolvedFirstName,
-        audience_type: resolvedAudienceType,
-        purpose: LAUNCH_PURPOSE,
-        status: "pending",
-        source: resolvedSource,
-        consent_version: LAUNCH_CONSENT_VERSION,
-        consent_text: LAUNCH_CONSENT_TEXT,
-        consent_given_at: nowIso,
-        confirmation_token_hash: hashToken(confirmationToken),
-        confirmation_sent_at: nowIso,
-        withdrawal_token_hash: hashToken(withdrawalToken),
-        // Cleared deliberately. This row is going back to unconfirmed, so
-        // the timestamp saying otherwise must not survive it - that
-        // inconsistency is the bug this whole branch exists to end. A
-        // person who re-confirms gets a fresh confirmed_at, which is the
-        // date of the consent that actually applies to them.
-        confirmed_at: null,
-      },
-      { onConflict: "email", ignoreDuplicates: false }
-    );
-
-  if (upsertError) {
+  if (signupError) {
     // Never log the address, never log a token, never return the driver
     // message to the caller.
-    console.error("Launch waitlist: could not record the entry:", upsertError.message);
+    console.error("Launch waitlist: could not record the entry:", signupError.message);
     return temporarilyUnavailable();
+  }
+
+  // Already on the list under this exact wording, or withdrawn. Nothing
+  // was written and nothing is sent - and the answer is the same neutral
+  // success a new signup gets, so the endpoint still cannot be asked
+  // whether GLOA holds a given address.
+  if (outcome !== "created" && outcome !== "refreshed") {
+    return neutralSuccess();
   }
 
   const { subject, html, text } = buildLaunchConfirmationEmail({

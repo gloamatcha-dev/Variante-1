@@ -1,6 +1,6 @@
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { getSiteOrigin } from "../../../../lib/siteUrl";
-import { hashToken, isConfirmationExpired, isWellFormedToken } from "../../../../lib/launchWaitlist";
+import { CONFIRMATION_TOKEN_TTL_DAYS, hashToken, isWellFormedToken } from "../../../../lib/launchWaitlist";
 
 /**
  * DOUBLE OPT-IN, SECOND HALF.
@@ -52,43 +52,39 @@ export async function GET(request: Request): Promise<Response> {
     return redirect("error");
   }
 
-  const { data: row, error } = await supabase
-    .from("launch_waitlist")
-    .select("id, status, confirmation_sent_at")
-    .eq("confirmation_token_hash", hashToken(token))
-    .maybeSingle();
+  // ONE STATEMENT CONFIRMS, PROMOTES AND SPENDS THE TOKEN.
+  //
+  // confirm_launch_signup (migration 046) takes a row lock, checks the
+  // withdrawal and the expiry, promotes any pending consent wording to
+  // the one in force, and clears the token - all inside one transaction.
+  //
+  // THAT PROMOTION IS THE POINT. A person who agreed to version 1 and
+  // later re-submitted the form keeps version 1 in force until this
+  // moment; the newer wording waits in the pending_consent_* columns and
+  // becomes effective only here, because somebody clicked a link sent to
+  // their address. That is what a double opt-in is, and it is why the
+  // signup endpoint cannot grant it.
+  //
+  // Doing it in one statement also makes a second click, a prefetching
+  // mail client and two parallel requests harmless: the token is spent
+  // by whichever transaction wins the lock, and the other finds nothing.
+  const { data: result, error: confirmError } = await supabase.rpc("confirm_launch_signup", {
+    p_token_hash: hashToken(token),
+    p_ttl_days: CONFIRMATION_TOKEN_TTL_DAYS,
+  });
 
-  if (error) {
-    console.error("Launch waitlist confirm: lookup failed:", error.message);
+  if (confirmError) {
+    console.error("Launch waitlist confirm: rpc failed:", confirmError.message);
     return redirect("error");
   }
 
-  // No row: an unknown token, a link already used, or an entry that was
-  // deleted by the retention rule. All three are the same neutral answer.
-  if (!row) return redirect("invalid");
+  // `returns table (...)` arrives as an array of rows through PostgREST.
+  const row = Array.isArray(result) ? result[0] : result;
+  const outcome = row && typeof row === "object" ? (row as { outcome?: unknown }).outcome : null;
 
-  if (row.status === "withdrawn") return redirect("withdrawn");
-
-  if (isConfirmationExpired(row.confirmation_sent_at, Date.now())) {
-    return redirect("expired");
-  }
-
-  // Confirming clears the token in the same statement that sets the
-  // status, so the link is spent exactly once.
-  const { error: updateError } = await supabase
-    .from("launch_waitlist")
-    .update({
-      status: "confirmed",
-      confirmed_at: new Date().toISOString(),
-      confirmation_token_hash: null,
-    })
-    .eq("id", row.id)
-    .eq("status", "pending");
-
-  if (updateError) {
-    console.error("Launch waitlist confirm: update failed:", updateError.message);
-    return redirect("error");
-  }
+  if (outcome === "withdrawn") return redirect("withdrawn");
+  if (outcome === "expired") return redirect("expired");
+  if (outcome !== "confirmed") return redirect("invalid");
 
   return redirect("confirmed");
 }
