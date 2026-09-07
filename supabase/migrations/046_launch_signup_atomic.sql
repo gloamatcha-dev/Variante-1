@@ -113,10 +113,10 @@ alter table public.launch_waitlist
 -- the evidence log into a log of things people were asked, which is
 -- exactly the confusion it exists to prevent.
 --
--- IT IS APPEND-ONLY. service_role is granted select and insert and
--- nothing else - no update, no delete. Evidence that can be edited is
--- not evidence, and the grant is where that is enforced rather than in
--- a comment. The rows carry no token, no IP address and no marketing
+-- IT IS APPEND-ONLY, enforced twice: service_role is granted select and
+-- insert and nothing else, and a trigger refuses UPDATE for every role
+-- including the owner. The limits of that are set out where the trigger
+-- is created - a grant alone would not have been enough to say this. The rows carry no token, no IP address and no marketing
 -- flag: the address is reachable through waitlist_id and nothing here
 -- duplicates it.
 
@@ -153,6 +153,63 @@ alter table public.launch_consent_history enable row level security;
 -- Append-only, and server-side only. No update and no delete for
 -- anybody, including service_role.
 grant select, insert on public.launch_consent_history to service_role;
+
+-- WHAT "APPEND-ONLY" HERE ACTUALLY MEANS, AND WHAT IT DOES NOT.
+--
+-- The grant above withholds update and delete from service_role, the
+-- role every application path uses. That closes the route that matters
+-- in practice: no endpoint, no RPC the app calls, and no compromised
+-- application key can rewrite a consent record.
+--
+-- IT IS NOT A CLAIM OF ABSOLUTE IMMUTABILITY, and describing it as one
+-- would be dishonest. Three things outrank a table grant:
+--
+--   * THE TABLE OWNER, who is whoever runs this migration and is not
+--     restrained by grants at all.
+--   * A SUPERUSER, including any session in the Supabase SQL editor,
+--     which runs as an administrative role.
+--   * A SECURITY DEFINER FUNCTION owned by that role, which executes
+--     with the owner's rights rather than the caller's - exactly why the
+--     functions in this file can write to a table service_role cannot
+--     write to directly.
+--
+-- The trigger below adds the layer a grant cannot: it refuses UPDATE for
+-- EVERY role, owner and security definer function included, because a
+-- trigger fires on the statement rather than on the privilege behind it.
+-- Falsifying a consent record now takes a deliberate, privileged and
+-- visible act - dropping the trigger first - rather than a stray UPDATE.
+--
+-- DELETE IS DELIBERATELY NOT BLOCKED BY THE TRIGGER, and that is a
+-- decision rather than an oversight. The foreign key above cascades:
+-- deleting a waitlist row takes its consent records with it, which is
+-- what the retention sweep does to unconfirmed entries after fourteen
+-- days and what an Article 17 erasure request has to do. A row-level
+-- BEFORE DELETE trigger fires on the cascade too, so blocking deletes
+-- here would leave retention unable to delete an expired entry and an
+-- erasure request unable to complete - trading a real obligation for a
+-- theoretical one.
+--
+-- Direct deletion of a history row is instead prevented the way it
+-- should be: service_role has no delete privilege on this table, so no
+-- application path can reach it. Records disappear only with the person
+-- they belong to.
+
+create or replace function public.launch_consent_history_is_append_only()
+returns trigger
+language plpgsql
+as $$
+begin
+  raise exception
+    'launch_consent_history is append-only: a consent record may not be modified';
+end;
+$$;
+
+drop trigger if exists trg_launch_consent_history_append_only
+  on public.launch_consent_history;
+
+create trigger trg_launch_consent_history_append_only
+  before update on public.launch_consent_history
+  for each row execute function public.launch_consent_history_is_append_only();
 
 -- BACKFILL FOR CONSENTS ALREADY CONFIRMED.
 --
@@ -476,20 +533,48 @@ grant execute on function public.confirm_launch_signup(text, integer) to service
 
 commit;
 
--- VERIFY (read-only, commented out; run separately):
+-- VERIFY (read-only, commented out; run separately)
 --
---   -- The new columns exist and every existing row has nothing pending:
---   select count(*) filter (where pending_consent_version is null) as nothing_pending,
---          count(*) as total
---     from public.launch_waitlist;
+-- THE EXPECTED NUMBERS DEPEND ON THE BESTAND AT THE TIME OF APPLYING,
+-- so they are written as questions rather than as assertions of a fixed
+-- value. Measure first, then compare - a verification that asserts 0 or
+-- 1 without looking is not a verification.
 --
---   -- No row may read as pending while carrying a confirmed_at. This
---   -- must be zero, now and after every signup:
---   select count(*) from public.launch_waitlist
+--   -- 1. How many rows carry a confirmation? The backfill writes
+--   --    exactly this many history rows, no more and no fewer.
+--   select count(*) as rows_with_confirmed_at
+--     from public.launch_waitlist where confirmed_at is not null;
+--
+--   select count(*) as history_rows from public.launch_consent_history;
+--   -- The two numbers above must be EQUAL after applying.
+--
+--   -- 2. Rows reading pending while carrying a confirmed_at. This is
+--   --    the known inconsistency. It is NOT expected to be zero: the
+--   --    migration does not repair existing rows, and at the time of
+--   --    writing the live list holds one. Note the number before and
+--   --    after - it must not GROW.
+--   select count(*) as pending_with_confirmed_at
+--     from public.launch_waitlist
 --    where status = 'pending' and confirmed_at is not null;
 --
---   -- Which consent is actually in force, per version:
+--   -- 3. Which consent is actually in force, per version and status.
 --   select consent_version, status, count(*)
 --     from public.launch_waitlist
 --    group by consent_version, status
 --    order by consent_version, status;
+--
+--   -- 4. Nothing may be pending-consent immediately after applying:
+--   --    the columns are new and only a signup writes them.
+--   select count(*) as with_pending_consent
+--     from public.launch_waitlist where pending_consent_version is not null;
+--
+--   -- 5. The append-only trigger is in place and actually refuses:
+--   select tgname, tgenabled from pg_trigger
+--    where tgrelid = 'public.launch_consent_history'::regclass
+--      and not tgisinternal;
+--
+--   -- This must FAIL with 'launch_consent_history is append-only'.
+--   -- Run it inside a transaction you roll back:
+--   -- begin;
+--   --   update public.launch_consent_history set consent_text = 'x';
+--   -- rollback;

@@ -2823,3 +2823,47 @@ test("126: both routes prefer the RPC and only fall back on its absence", () => 
   assert.ok(legacyAt > 0 && welcomeAt > legacyAt,
     "the legacy confirmation path tries to send the welcome mail");
 });
+
+test("127: the consent history is protected by a trigger, not only by a grant", () => {
+  // A grant withholds update and delete from service_role, which closes
+  // every application path. It does NOT restrain the table owner, a
+  // superuser, a Supabase SQL editor session, or a security definer
+  // function owned by that role - and this file creates two of those.
+  // Calling a grant alone "immutable" would have been an overstatement.
+  const sql = stripSql(atomicMigration);
+
+  assert.match(sql, /create trigger trg_launch_consent_history_append_only/);
+  assert.match(sql, /before update on public\.launch_consent_history/);
+  assert.match(sql, /raise exception\s*'launch_consent_history is append-only/);
+
+  // DELETE IS DELIBERATELY NOT BLOCKED. The foreign key cascades, so a
+  // row-level BEFORE DELETE trigger would fire on the cascade too and
+  // leave the retention sweep unable to delete an expired entry and an
+  // erasure request unable to complete.
+  assert.ok(!/before update or delete on public\.launch_consent_history/.test(sql),
+    "the trigger blocks the cascade that retention and erasure depend on");
+  assert.match(sql, /on delete cascade/);
+
+  // And the file says what the protection is worth rather than
+  // overclaiming it.
+  assert.match(atomicMigration, /IT IS NOT A CLAIM OF ABSOLUTE IMMUTABILITY/);
+  assert.match(atomicMigration, /THE TABLE OWNER/);
+  assert.match(atomicMigration, /SECURITY DEFINER FUNCTION/);
+});
+
+test("128: the verification queries measure rather than assume", () => {
+  // The known inconsistent row means "pending with a confirmed_at" is
+  // NOT zero after applying, and the backfill count depends on how many
+  // rows carry a confirmation. A verification block that asserted fixed
+  // numbers would have been wrong on this database on the day it ran.
+  const verify = atomicMigration.slice(atomicMigration.indexOf("-- VERIFY"));
+
+  assert.match(verify, /written as questions rather than as assertions of a fixed/);
+  assert.match(verify, /rows_with_confirmed_at/);
+  assert.match(verify, /The two numbers above must be EQUAL/);
+  assert.match(verify, /It is NOT expected to be zero/);
+  assert.match(verify, /must not GROW/);
+  // And it checks the trigger actually refuses, inside a rolled-back
+  // transaction rather than by trusting the DDL.
+  assert.match(verify, /rollback;/);
+});
