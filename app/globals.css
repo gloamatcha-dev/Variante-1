@@ -8671,3 +8671,249 @@ header nav{gap:18px;font-size:12px}
      screen edge to edge for the sake of it. */
   .launch-cta{align-self:stretch;text-align:center}
 }
+
+/* ══════════════════════════════════════════════════════════════
+   THE INTERNAL OVERVIEW (/adminxyzuebersicht)
+
+   Same palette and same type as the rest of GLOA, deliberately quieter:
+   this is a working screen, not a page anybody is being sold anything
+   on. Cream ground, Blue for structure, Plum for secondary text, and no
+   decoration that is not carrying information.
+
+   It renders outside GloaSite, so none of the shop chrome applies here
+   and none of these rules can leak into it either.
+   ══════════════════════════════════════════════════════════════ */
+
+.ops{
+  min-height:100vh;
+  background:var(--cream);
+  color:var(--ink);
+  font-family:var(--font-sans),Arial,sans-serif;
+  padding:clamp(20px,3vw,44px);
+}
+.ops-loading{ font-size:var(--type-body); color:var(--plum); }
+
+.ops-eyebrow{
+  margin:0;
+  font-size:11px;
+  font-weight:600;
+  letter-spacing:.2em;
+  text-transform:uppercase;
+  color:var(--berry);
+}
+
+/* ── The sign-in card ─────────────────────────────────────────
+   Centred, narrow, and carrying nothing else: no navigation, no link
+   back to the shop, no hint about what is behind it. */
+.ops-login{ display:flex; align-items:center; justify-content:center; }
+.ops-login-card{
+  width:100%;
+  max-width:360px;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  padding:clamp(24px,4vw,36px);
+  background:transparent;
+  border:1px solid rgba(23,70,209,.22);
+}
+.ops-login-title{
+  margin:6px 0 18px;
+  font-size:clamp(24px,3vw,30px);
+  font-weight:800;
+  letter-spacing:-.03em;
+}
+.ops-login-card label{
+  margin-top:10px;
+  font-size:12px;
+  font-weight:600;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:var(--plum);
+}
+.ops-login-card input{
+  padding:12px 14px;
+  font:inherit;
+  font-size:15px;
+  color:var(--ink);
+  background:var(--cream);
+  border:1px solid rgba(79,58,91,.34);
+}
+.ops-login-card input:focus-visible,
+.ops-search input:focus-visible{ outline:2px solid var(--blue); outline-offset:1px; }
+.ops-login-card button{
+  margin-top:20px;
+  padding:14px 18px;
+  font:inherit;
+  font-size:12px;
+  font-weight:600;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  color:var(--cream);
+  background:var(--blue);
+  border:0;
+  cursor:pointer;
+}
+.ops-login-card button[disabled]{ opacity:.6; cursor:default; }
+.ops-error{ margin:12px 0 0; font-size:13px; color:var(--berry); }
+
+/* ── Head ─────────────────────────────────────────────────── */
+.ops-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-end;
+  gap:16px;
+  flex-wrap:wrap;
+  margin-bottom:clamp(20px,2.6vw,30px);
+}
+.ops-title{ margin:4px 0 0; font-size:clamp(26px,3.4vw,38px); font-weight:800; letter-spacing:-.035em; }
+.ops-head-right{ display:flex; align-items:center; gap:14px; }
+.ops-who{ font-size:13px; color:var(--plum); }
+.ops-signout{
+  padding:9px 14px;
+  font:inherit;
+  font-size:11px;
+  font-weight:600;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--blue);
+  background:none;
+  border:1px solid var(--blue);
+  cursor:pointer;
+}
+
+/* ── Counters ─────────────────────────────────────────────── */
+.ops-counts{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(112px,1fr));
+  gap:1px;
+  background:rgba(79,58,91,.2);
+  border:1px solid rgba(79,58,91,.2);
+  margin-bottom:clamp(16px,2vw,24px);
+}
+.ops-count{ background:var(--cream); padding:16px 18px; display:flex; flex-direction:column; gap:4px; }
+.ops-count-value{ font-size:clamp(22px,2.6vw,30px); font-weight:800; letter-spacing:-.03em; }
+.ops-count-label{ font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--plum); }
+
+/* ── Status panel ─────────────────────────────────────────── */
+.ops-panel{
+  border:1px solid rgba(79,58,91,.2);
+  padding:clamp(16px,2vw,22px);
+  margin-bottom:clamp(16px,2vw,24px);
+}
+.ops-facts{ display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px; margin:0; }
+.ops-facts div{ display:flex; flex-direction:column; gap:3px; }
+.ops-facts dt{ font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--plum); }
+.ops-facts dd{ margin:0; font-size:14px; font-weight:600; }
+.ops-blockers{ margin:16px 0 0; padding-left:18px; font-size:13px; color:var(--berry); }
+.ops-note{ margin:14px 0 0; font-size:12px; color:var(--plum); }
+
+/* ── Controls ─────────────────────────────────────────────── */
+.ops-controls{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-end;
+  gap:16px;
+  flex-wrap:wrap;
+  margin-bottom:12px;
+}
+.ops-filters{ display:flex; flex-wrap:wrap; gap:6px; }
+.ops-filters button{
+  padding:9px 14px;
+  font:inherit;
+  font-size:11px;
+  font-weight:600;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  color:var(--plum);
+  background:none;
+  border:1px solid rgba(79,58,91,.3);
+  cursor:pointer;
+}
+.ops-filters button.is-active{ color:var(--cream); background:var(--blue); border-color:var(--blue); }
+.ops-search{ display:flex; align-items:flex-end; gap:8px; }
+.ops-search label{ font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--plum); }
+.ops-search input{
+  padding:9px 12px;
+  font:inherit;
+  font-size:14px;
+  color:var(--ink);
+  background:transparent;
+  border:1px solid rgba(79,58,91,.34);
+  min-width:min(240px,60vw);
+}
+.ops-search button{
+  padding:10px 14px;
+  font:inherit;
+  font-size:11px;
+  font-weight:600;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  color:var(--cream);
+  background:var(--blue);
+  border:0;
+  cursor:pointer;
+}
+
+/* ── Table ────────────────────────────────────────────────────
+   The wrapper scrolls on its own so a wide table never makes the PAGE
+   scroll sideways - on a phone the columns stay readable and the row
+   moves under the thumb instead. */
+.ops-table-wrap{ overflow-x:auto; border:1px solid rgba(79,58,91,.2); }
+.ops-table{ width:100%; border-collapse:collapse; font-size:13px; min-width:840px; }
+.ops-table th,.ops-table td{
+  padding:11px 14px;
+  text-align:left;
+  border-bottom:1px solid rgba(79,58,91,.14);
+  white-space:nowrap;
+}
+.ops-table th{
+  font-size:10px;
+  font-weight:700;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--plum);
+  background:rgba(23,70,209,.05);
+}
+.ops-table tr:last-child td{ border-bottom:0; }
+.ops-mail{ font-variant-numeric:tabular-nums; }
+.ops-empty{ text-align:center; color:var(--plum); padding:26px; }
+
+/* Status as a word with weight, not a coloured pill. */
+.ops-status{ font-weight:700; }
+.ops-status-confirmed{ color:var(--blue); }
+.ops-status-pending{ color:var(--plum); }
+.ops-status-withdrawn{ color:var(--berry); }
+.ops-status-notified{ color:var(--ink); }
+.ops-pending{ color:var(--berry); font-weight:600; }
+.ops-review{ color:var(--berry); font-weight:700; }
+
+/* ── Pager ────────────────────────────────────────────────── */
+.ops-pager{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  flex-wrap:wrap;
+  margin-top:14px;
+  font-size:13px;
+  color:var(--plum);
+}
+.ops-pager button{
+  padding:9px 14px;
+  font:inherit;
+  font-size:11px;
+  font-weight:600;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  color:var(--blue);
+  background:none;
+  border:1px solid var(--blue);
+  cursor:pointer;
+}
+.ops-pager button[disabled]{ opacity:.4; cursor:default; }
+
+@media (max-width:640px){
+  .ops-head{ align-items:flex-start; }
+  .ops-controls{ flex-direction:column; align-items:stretch; }
+  .ops-search{ flex-wrap:wrap; }
+}

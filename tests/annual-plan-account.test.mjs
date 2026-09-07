@@ -818,6 +818,14 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
     "/admin/launch/release",
     "/admin/launch/send",
     "/admin/launch/status",
+    // The private overview: a session endpoint (sign in / sign out,
+    // which writes only a cookie) and a read-only data endpoint. Both
+    // are gated by an HttpOnly session belonging to an address on
+    // ADMIN_EMAILS. Neither can release or send anything - those stay
+    // behind LAUNCH_ADMIN_SECRET in /admin/launch/*. Reviewed in
+    // tests/admin-overview.test.mjs.
+    "/admin/session",
+    "/admin/waitlist",
     "/annual-plan/checkout/session",
     "/checkout/quote",
     "/checkout/session",
