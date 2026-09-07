@@ -9,6 +9,7 @@ import {
   LAUNCH_PURPOSE,
   MAX_EMAIL_LEN,
   createToken,
+  decideResubmission,
   hashToken,
   isValidEmail,
   normalizeEmail,
@@ -293,18 +294,49 @@ export async function POST(request: Request): Promise<Response> {
   const withdrawalToken = createToken();
   const nowIso = new Date().toISOString();
 
-  // ONE ROW PER ADDRESS. The unique constraint on the normalised email
-  // is the actual guard against duplicates - not a "select, then insert"
-  // in application code, which two concurrent submissions would both
-  // pass. On conflict the row is refreshed with a new token pair rather
-  // than duplicated, which is also what makes "I never got the mail,
-  // let me try again" work.
+  // WHAT HAPPENS WHEN THIS ADDRESS IS ALREADY ON THE LIST.
   //
-  // WITHDRAWN ROWS ARE NOT REVIVED HERE. `where` restricts the update to
-  // rows that are pending or confirmed, so somebody who withdrew stays
-  // withdrawn and gets no further mail from this endpoint - see the
-  // outcome handling below.
-  const { data: upserted, error: upsertError } = await supabase
+  // The row is READ first and the decision is taken by
+  // decideResubmission() in lib/launchWaitlist.ts, which is a pure
+  // function so its four cases are testable directly.
+  //
+  // This replaces an unconditional upsert that got two things wrong. It
+  // demoted confirmed people to pending while leaving confirmed_at set,
+  // and it rewrote consent_version without requiring the new wording to
+  // be confirmed - which would have let a form re-submission silently
+  // upgrade a version 1 consent into a version 2 one, and with it into
+  // the discount mail nobody had agreed to.
+  //
+  // ON THE RACE THIS REINTRODUCES, honestly: two simultaneous
+  // submissions of the same address can both read "no such row". The
+  // unique constraint on the normalised email still makes duplicates
+  // impossible - the second insert conflicts and is merged by the same
+  // upsert below - so the worst case is two confirmation mails carrying
+  // different tokens, of which only the later one works. That is a
+  // cosmetic fault on a path a person walks once, and a far smaller
+  // price than the two correctness bugs above.
+  const { data: existing, error: readError } = await supabase
+    .from("launch_waitlist")
+    .select("id, status, confirmed_at, withdrawn_at, consent_version")
+    .eq("email", normalizedEmail)
+    .maybeSingle();
+
+  if (readError) {
+    console.error("Launch waitlist: could not read the entry:", readError.message);
+    return temporarilyUnavailable();
+  }
+
+  const action = decideResubmission(existing, LAUNCH_CONSENT_VERSION);
+
+  // Already settled: on the list under this exact wording, or withdrawn.
+  // Nothing is written and nothing is sent. The response is the same
+  // neutral success a new signup gets, so the endpoint still cannot be
+  // used to ask whether GLOA holds a given address.
+  if (action === "leave_confirmed" || action === "leave_withdrawn") {
+    return neutralSuccess();
+  }
+
+  const { error: upsertError } = await supabase
     .from("launch_waitlist")
     .upsert(
       {
@@ -320,57 +352,21 @@ export async function POST(request: Request): Promise<Response> {
         confirmation_token_hash: hashToken(confirmationToken),
         confirmation_sent_at: nowIso,
         withdrawal_token_hash: hashToken(withdrawalToken),
+        // Cleared deliberately. This row is going back to unconfirmed, so
+        // the timestamp saying otherwise must not survive it - that
+        // inconsistency is the bug this whole branch exists to end. A
+        // person who re-confirms gets a fresh confirmed_at, which is the
+        // date of the consent that actually applies to them.
+        confirmed_at: null,
       },
       { onConflict: "email", ignoreDuplicates: false }
-    )
-    .select("id, status, withdrawn_at, confirmed_at")
-    .maybeSingle();
+    );
 
   if (upsertError) {
     // Never log the address, never log a token, never return the driver
     // message to the caller.
     console.error("Launch waitlist: could not record the entry:", upsertError.message);
     return temporarilyUnavailable();
-  }
-
-  // A row that had already been withdrawn is left alone. The upsert above
-  // would have reset it to pending, so it is put back and no mail goes
-  // out: a withdrawal is not undone by somebody typing the address into
-  // the form again.
-  if (upserted && upserted.withdrawn_at) {
-    await supabase
-      .from("launch_waitlist")
-      .update({ status: "withdrawn", confirmation_token_hash: null, confirmation_sent_at: null })
-      .eq("id", upserted.id);
-    return neutralSuccess();
-  }
-
-  // AN ALREADY CONFIRMED ROW IS PUT BACK TOO.
-  //
-  // The upsert cannot express "only if it is still pending", so it
-  // overwrites `status` with 'pending' whatever the row said before -
-  // and it does NOT clear `confirmed_at`, because that column is not in
-  // the payload. The result was a row reading status='pending' with a
-  // confirmed_at from days earlier: a person who HAD confirmed, silently
-  // demoted to unconfirmed by typing their address in again.
-  //
-  // That is wrong twice over. They would have been excluded from the
-  // launch send they had already opted in to, and the retention sweep
-  // would have deleted them fourteen days later as "never confirmed",
-  // with a confirmed_at sitting right there saying otherwise.
-  //
-  // `confirmed_at` is the evidence and it survives the upsert, so it is
-  // exactly what tells us the row was confirmed BEFORE this request.
-  // The row is restored and no mail goes out: somebody who is already on
-  // the list does not need to confirm a second time, and re-sending a
-  // confirmation link to a confirmed address is how a person ends up
-  // clicking a link that demotes them.
-  if (upserted && upserted.confirmed_at) {
-    await supabase
-      .from("launch_waitlist")
-      .update({ status: "confirmed", confirmation_token_hash: null, confirmation_sent_at: null })
-      .eq("id", upserted.id);
-    return neutralSuccess();
   }
 
   const { subject, html, text } = buildLaunchConfirmationEmail({

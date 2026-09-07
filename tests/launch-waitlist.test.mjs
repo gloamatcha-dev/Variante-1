@@ -16,6 +16,7 @@ import {
   LAUNCH_SOURCES,
   PENDING_RETENTION_DAYS,
   createToken,
+  decideResubmission,
   hashToken,
   isConfirmationExpired,
   isValidEmail,
@@ -410,12 +411,32 @@ test("22: withdrawing takes one click, needs no login, and is final for this lis
 });
 
 test("23: re-submitting a withdrawn address does not revive it or send mail", () => {
-  // The upsert would otherwise reset a withdrawn row to pending.
-  assert.match(signupRoute, /if \(upserted && upserted\.withdrawn_at\)/);
-  const revive = signupRoute.indexOf("upserted.withdrawn_at");
-  const send = signupRoute.indexOf("resend.emails.send");
-  assert.ok(revive !== -1 && send !== -1 && revive < send, "the withdrawn check must precede the send");
-  assert.match(signupRoute, /status: "withdrawn", confirmation_token_hash: null/);
+  // A withdrawal is not undone by somebody typing the address into a
+  // form. It is now decided BEFORE anything is written, rather than by
+  // putting the row back after an upsert had already reset it.
+  assert.equal(
+    decideResubmission({ status: "withdrawn", confirmed_at: null, withdrawn_at: "2026-09-01T00:00:00Z", consent_version: LAUNCH_CONSENT_VERSION }),
+    "leave_withdrawn"
+  );
+  // Either mark alone is enough - a row carrying one but not the other
+  // is still a withdrawal.
+  assert.equal(
+    decideResubmission({ status: "withdrawn", confirmed_at: null, withdrawn_at: null, consent_version: LAUNCH_CONSENT_VERSION }),
+    "leave_withdrawn"
+  );
+  assert.equal(
+    decideResubmission({ status: "confirmed", confirmed_at: "x", withdrawn_at: "y", consent_version: LAUNCH_CONSENT_VERSION }),
+    "leave_withdrawn"
+  );
+
+  // The route acts on it before it writes or sends anything.
+  const code = stripJs(signupRoute);
+  assert.match(code, /action === "leave_confirmed" || action === "leave_withdrawn"/);
+  const decide = code.indexOf("decideResubmission");
+  const write = code.indexOf(".upsert(");
+  const send = code.indexOf("resend.emails.send");
+  assert.ok(decide > 0 && decide < write, "the route writes before it decides");
+  assert.ok(decide < send, "the route sends before it decides");
 });
 
 test("24: clicking a withdrawal link twice is a no-op, not an error", () => {
@@ -424,13 +445,37 @@ test("24: clicking a withdrawal link twice is a no-op, not an error", () => {
 
 /* ── 9. Duplicates and enumeration ──────────────────────────── */
 
-test("25: duplicates are prevented by the database, not by a racy read-then-write", () => {
+test("25: duplicates are prevented by the database, not by application code", () => {
+  // WHAT CHANGED, AND WHY THE GUARD NARROWED.
+  //
+  // This used to forbid ANY select before the write, because a
+  // "select then insert" would let two concurrent submissions both
+  // pass and create two rows. That reasoning is still right about
+  // DUPLICATES - and duplicates are still prevented the same way: the
+  // unique constraint on the normalised email, plus an upsert that
+  // merges on conflict. Neither has changed, and both are asserted
+  // here.
+  //
+  // What the route now reads the row for is a different question: not
+  // "does this address exist" but "has this person already confirmed,
+  // and under which consent wording". That cannot be answered after
+  // the write, because the write destroys both answers - which is
+  // exactly how a confirmed contact ended up demoted to pending with a
+  // confirmed_at from an hour earlier, and how a version 1 consent
+  // could have been silently upgraded to version 2 without anybody
+  // confirming the new wording.
+  //
+  // The read decides WHETHER to write. It does not prevent duplicates
+  // and is not relied on to.
   assert.match(migration, /email\s+text not null unique/);
   assert.match(signupRoute, /onConflict: "email"/);
-  // A "select then insert" would let two concurrent submissions both
-  // pass. There must be no such lookup before the write.
-  const beforeWrite = signupRoute.slice(0, signupRoute.indexOf(".upsert("));
-  assert.ok(!beforeWrite.includes('.select("id, status'), "the route reads the row before writing it");
+
+  // The decision is a pure function, not ad-hoc branching in the route.
+  assert.ok(signupRoute.includes("const action = decideResubmission(existing, LAUNCH_CONSENT_VERSION)"));
+
+  // And the read selects only what the decision needs - no address, no
+  // token, no consent text.
+  assert.ok(signupRoute.includes(String.raw`.select("id, status, confirmed_at, withdrawn_at, consent_version")`));
 });
 
 test("26: the response never reveals whether an address is already on the list", () => {
@@ -1829,35 +1874,72 @@ test("87: the welcome mail states no percentage or date of its own", () => {
   assert.ok(!/Date\.now|new Date/.test(code), "the template reads a clock");
 });
 
-test("88: re-submitting a CONFIRMED address does not demote it or re-send mail", () => {
-  // THE BUG THIS FIXES. The upsert cannot say "only if still pending",
-  // so it overwrote status with 'pending' - while leaving confirmed_at
-  // untouched, because that column is not in the payload. The result was
-  // a row reading pending with a confirmed_at from days earlier: someone
-  // who HAD confirmed, silently demoted by typing their address again,
-  // excluded from the send they had opted into, and due for deletion by
-  // the retention sweep as "never confirmed".
+test("88: a re-submission never demotes a confirmed contact, and never upgrades a consent", () => {
+  // THE TWO BUGS THIS CLOSES, both of which reached live data.
+  //
+  // 1. DEMOTION. The upsert cannot say "only if this row is still
+  //    pending", so it wrote status='pending' over a confirmed row while
+  //    leaving confirmed_at set - because that column is not in its
+  //    payload. The live list held exactly that: a contact who confirmed
+  //    at 18:23 and was demoted at 19:32 by a second form submission,
+  //    with consent_given_at LATER than confirmed_at as the fingerprint.
+  //    They would have been excluded from the send they had opted into,
+  //    and deleted by the retention sweep as "never confirmed".
+  //
+  // 2. SILENT CONSENT UPGRADE. The upsert also overwrites
+  //    consent_version. A person who agreed to version 1 and later
+  //    re-submitted would have version 2 stored against them - and if
+  //    the row were simply restored to 'confirmed', they would count as
+  //    having consented to the welcome mail and its discount code
+  //    without ever confirming that wording. A double opt-in that can be
+  //    skipped by re-submitting a form is not a double opt-in.
+  const V2 = LAUNCH_CONSENT_VERSION;
+  const V1 = LAUNCH_CONSENT_VERSION_V1;
+
+  // Confirmed under the CURRENT wording: nothing happens at all.
+  assert.equal(
+    decideResubmission({ status: "confirmed", confirmed_at: "2026-09-07T18:23:30Z", withdrawn_at: null, consent_version: V2 }),
+    "leave_confirmed"
+  );
+  // Already notified: the launch mail has gone out. Re-submitting must
+  // not reopen the row.
+  assert.equal(
+    decideResubmission({ status: "notified", confirmed_at: "x", withdrawn_at: null, consent_version: V2 }),
+    "leave_confirmed"
+  );
+
+  // CONFIRMED UNDER THE OLD WORDING: the new wording has not been
+  // confirmed, so it must be. This is the case that keeps a consent
+  // change honest, and it is why the version is part of the decision.
+  assert.equal(
+    decideResubmission({ status: "confirmed", confirmed_at: "x", withdrawn_at: null, consent_version: V1 }),
+    "refresh"
+  );
+  assert.equal(
+    decideResubmission({ status: "notified", confirmed_at: "x", withdrawn_at: null, consent_version: V1 }),
+    "refresh"
+  );
+
+  // Unconfirmed rows are refreshed, which is what makes "I never got the
+  // mail, let me try again" work.
+  assert.equal(
+    decideResubmission({ status: "pending", confirmed_at: null, withdrawn_at: null, consent_version: V2 }),
+    "refresh"
+  );
+  // And a brand new address is created.
+  assert.equal(decideResubmission(null), "create");
+
+  // THE ROUTE CLEARS confirmed_at WHEN IT WRITES A PENDING ROW. That
+  // inconsistency - pending with a confirmed_at - is the bug itself, and
+  // it must not survive the fix.
+  assert.match(signupRoute, /confirmed_at: null,/);
   const code = stripJs(signupRoute);
-
-  // confirmed_at is read back from the upsert - it is the evidence that
-  // survives, and therefore what identifies a previously confirmed row.
-  assert.match(code, /\.select\("id, status, withdrawn_at, confirmed_at"\)/);
-  assert.match(code, /if \(upserted && upserted\.confirmed_at\)/);
-  // The row is restored to confirmed, and the confirmation token it just
-  // got is discarded so nobody can click a link that demotes them.
-  assert.match(code, /status: "confirmed", confirmation_token_hash: null, confirmation_sent_at: null/);
-
-  // And no mail goes out on that path: the restore returns before the
-  // send, exactly as the withdrawn branch does.
-  const confirmedBranch = code.slice(code.indexOf("if (upserted && upserted.confirmed_at)"));
-  const returnAt = confirmedBranch.indexOf("return neutralSuccess()");
-  const sendAt = confirmedBranch.indexOf("emails.send");
-  assert.ok(returnAt > 0 && (sendAt === -1 || returnAt < sendAt),
-    "a confirmed re-submission still sends a confirmation mail");
-
-  // The withdrawn branch is still there and still first.
-  assert.ok(code.indexOf("upserted.withdrawn_at") < code.indexOf("upserted.confirmed_at"),
-    "the withdrawn check must stay ahead of the confirmed check");
+  // The settled cases return before any write and before any send.
+  const decide = code.indexOf("decideResubmission");
+  const write = code.indexOf(".upsert(");
+  assert.ok(decide > 0 && decide < write, "the route writes before it decides");
+  assert.ok(!code.includes("upserted.confirmed_at"),
+    "the route still patches the row up after writing it");
 });
 
 test("89: the privacy notice matches what is actually sent", () => {
