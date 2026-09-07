@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -28,9 +28,14 @@ import {
 import {
   LAUNCH_RATE_LIMIT_MAX,
   LAUNCH_RATE_LIMIT_WINDOW_MS,
+  LAUNCH_RATE_LIMIT_WINDOW_SECONDS,
   consumeRateLimit,
+  isBucketKey,
+  pseudonymizeBucketKey,
   rateLimitKeyFromRequest,
 } from "../lib/launchRateLimit.ts";
+
+import { consumePersistentRateLimit } from "../lib/launchRateLimitStore.ts";
 
 import { buildLaunchConfirmationEmail } from "../lib/email/launchConfirmation.ts";
 
@@ -477,11 +482,22 @@ test("32: a request with no forwarding header still lands in a bucket", () => {
   assert.equal(rateLimitKeyFromRequest(headers({})), "unknown");
 });
 
-test("33: the route rate limits before it parses the body, and returns Retry-After", () => {
-  const limit = signupRoute.indexOf("consumeRateLimit");
-  const parse = signupRoute.indexOf("await request.json()");
-  assert.ok(limit !== -1 && parse !== -1 && limit < parse, "the body is parsed before the limit is checked");
+test("33: the route rate limits before it reads the body, and returns Retry-After", () => {
+  const limit = signupRoute.indexOf("consumeRateLimit(rateLimitState");
+  const read = signupRoute.indexOf("await request.text()");
+  assert.ok(limit !== -1 && read !== -1 && limit < read, "the body is read before the limit is checked");
   assert.match(signupRoute, /status: 429, headers: \{ "Retry-After"/);
+});
+
+test("33a: the body cap is enforced on the bytes that arrived, not on the header", () => {
+  // content-length is a claim by the caller and a chunked request need
+  // not send one at all, so the header check alone is not a cap.
+  assert.match(signupRoute, /Buffer\.byteLength\(raw, "utf8"\) > MAX_BODY_BYTES/);
+  const measured = signupRoute.indexOf("Buffer.byteLength(raw");
+  const parsed = signupRoute.indexOf("JSON.parse(raw)");
+  assert.ok(measured !== -1 && parsed !== -1 && measured < parsed, "the body is parsed before it is measured");
+  // And the old header-trusting read is gone.
+  assert.ok(!stripJs(signupRoute).includes("await request.json()"), "the route still trusts content-length alone");
 });
 
 test("34: the honeypot discards silently, with the same shape as a real success", () => {
@@ -684,14 +700,20 @@ test("48: 043 is additive and touches nothing that already exists", () => {
   for (const destructive of [
     "drop table", "drop column", "drop policy", "alter table public.orders",
     "alter table public.customer", "alter table public.checkout_attempts",
-    "revoke", "truncate", "delete from public.",
+    "revoke all on table", "truncate", "delete from public.launch_waitlist",
   ]) {
     assert.ok(!stripSql(migration).toLowerCase().includes(destructive), `043 performs: ${destructive}`);
   }
-  // The only table it names is its own.
+  // The only objects it names are its own. The rate limit counter and
+  // its writer joined this file in the production-hardening pass -
+  // see tests 60 to 62 - and 001's trigger function is reused rather
+  // than redefined. Nothing else may appear here.
   const tables = [...stripSql(migration).matchAll(/public\.(\w+)/g)].map((m) => m[1]);
   for (const t of tables) {
-    assert.ok(["launch_waitlist", "set_updated_at"].includes(t), `043 touches another object: ${t}`);
+    assert.ok(
+      ["launch_waitlist", "launch_rate_limit", "consume_launch_rate_limit", "set_updated_at"].includes(t),
+      `043 touches another object: ${t}`
+    );
   }
 });
 
@@ -743,4 +765,297 @@ test("51: the section numbering stayed sequential after the insert", () => {
   );
   const numbers = [...privacy.matchAll(/<h2>(\d+)\./g)].map((m) => Number(m[1]));
   assert.deepEqual(numbers, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], `privacy headings out of order: ${numbers}`);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   17. THE PERSISTENT RATE LIMIT
+
+   The in-process limiter above is a speed bump per instance. On a
+   serverless platform that is defeated by the platform itself: the
+   process is per instance and is discarded without warning, so
+   sustained load is exactly what produces fresh instances with empty
+   counters.
+
+   The limit that actually holds is therefore a shared counter in
+   Postgres (sections 4 and 5 of migration 043). These tests hold two promises about it:
+
+     1. it is REAL - one atomic statement, applied before a row is
+        written and before any mail is sent, and it counts refusals;
+     2. it costs nobody their IP address - what is stored is an HMAC
+        digest, and a raw address cannot physically be written.
+   ══════════════════════════════════════════════════════════════ */
+
+const rateLimitModule = read("lib/launchRateLimit.ts");
+const rateLimitStore = read("lib/launchRateLimitStore.ts");
+// Sections 4 and 5 of 043. Not a 044: 043 has not been applied
+// anywhere, and this repository's rule for that case is written into
+// tests/one-time-refund-writer-concurrency.test.mjs - an unapplied
+// migration is still the right place to fix itself, and a hardening
+// pass must not become a second migration.
+const rateLimitMigration = migration;
+
+/**
+ * Just the rate limit's own sections of 043.
+ *
+ * The assertions that say "this must not mention an email address" or
+ * "this must not name another table" are about the counter, not about
+ * the consent table it happens to share a file with - and the consent
+ * table quite properly says "email" all over itself. Slicing here is
+ * what keeps those assertions meaningful instead of vacuously false.
+ */
+const rateLimitSection = rateLimitMigration.slice(
+  rateLimitMigration.indexOf("-- 4. THE RATE LIMIT COUNTER")
+);
+
+test("52: a bucket key is a keyed digest, and the address is not recoverable from it", () => {
+  const a = pseudonymizeBucketKey("203.0.113.9", "secret-one");
+
+  // The shape migration 043 pins.
+  assert.match(a, /^[0-9a-f]{64}$/);
+  assert.ok(isBucketKey(a));
+
+  // Stable for the same caller, or it would not be a bucket at all.
+  assert.equal(pseudonymizeBucketKey("203.0.113.9", "secret-one"), a);
+
+  // Different callers do not share a bucket.
+  assert.notEqual(pseudonymizeBucketKey("203.0.113.10", "secret-one"), a);
+
+  // KEYED, not merely hashed. The IPv4 space is small enough to
+  // enumerate, so an unkeyed digest of an address is reversible by
+  // brute force and would be personal data in everything but name.
+  assert.notEqual(pseudonymizeBucketKey("203.0.113.9", "secret-two"), a);
+
+  // The address does not survive into the value.
+  assert.ok(!a.includes("203"), "the digest contains the address");
+});
+
+test("53: nothing on the persistent path can carry a raw address", () => {
+  // The route turns the address into a digest immediately and passes
+  // only the digest onward.
+  assert.match(signupRoute, /const callerBucket = rateLimitKeyFromRequest\(request\);/);
+  assert.match(signupRoute, /pseudonymizeBucketKey\(callerBucket, bucketSecret\)/);
+  // Layer 2 is handed the digest, never the address.
+  assert.match(signupRoute, /consumePersistentRateLimit\(\s*supabase,\s*bucketKey,/);
+  assert.ok(!/consumePersistentRateLimit\([^)]*callerBucket/.test(signupRoute), "the address reaches the database");
+
+  // The store refuses anything that is not already a digest rather
+  // than putting it on the wire.
+  assert.match(rateLimitStore, /if \(!isBucketKey\(bucketKey\)\)/);
+  const guard = rateLimitStore.indexOf("isBucketKey(bucketKey)");
+  const call = rateLimitStore.indexOf("client.rpc(");
+  assert.ok(guard !== -1 && call !== -1 && guard < call, "the digest is sent before it is checked");
+
+  // And the database refuses it a third time.
+  assert.match(rateLimitMigration, /bucket_key\s+text primary key\s*\r?\n\s*check \(bucket_key ~ '\^\[0-9a-f\]\{64\}\$'\)/);
+  assert.match(rateLimitMigration, /p_bucket_key !~ '\^\[0-9a-f\]\{64\}\$'/);
+
+  // The three statements of the shape must be the same shape. The
+  // store cannot import the module's copy - it has to stay a leaf so
+  // this suite can load it - so the agreement is asserted instead of
+  // assumed.
+  assert.match(rateLimitModule, /\/\^\[0-9a-f\]\{64\}\$\/\.test\(value\)/);
+  assert.match(rateLimitStore, /BUCKET_KEY_PATTERN = \/\^\[0-9a-f\]\{64\}\$\//);
+  assert.equal(isBucketKey("2".repeat(64)), true);
+  assert.equal(isBucketKey("2".repeat(63)), false);
+  assert.equal(isBucketKey("203.0.113.9"), false);
+  assert.equal(isBucketKey("A".repeat(64)), false);
+
+  // No column that could hold one, and no email either.
+  const strippedSection = stripSql(rateLimitSection);
+  const columns = strippedSection.slice(
+    strippedSection.indexOf("create table public.launch_rate_limit"),
+    strippedSection.indexOf("create index idx_launch_rate_limit_window_started")
+  );
+  for (const banned of ["ip", "ip_address", "email", "user_agent", "first_name", "user_id"]) {
+    assert.ok(!new RegExp(`\\b${banned}\\s`, "i").test(columns), `the counter stores a ${banned} column`);
+  }
+});
+
+test("54: the shared counter is spent by one atomic statement that counts refusals", () => {
+  // Read-modify-write from application code is two statements with a
+  // gap, and two instances racing through that gap is the exact
+  // situation a shared counter exists to fix.
+  assert.match(rateLimitMigration, /insert into public\.launch_rate_limit as l[\s\S]*?on conflict \(bucket_key\) do update/);
+
+  // Every attempt is counted, including one that is about to be
+  // refused - otherwise a caller over the limit could hold its own
+  // window open by continuing to knock.
+  assert.match(rateLimitMigration, /else l\.attempt_count \+ 1/);
+  const increment = rateLimitMigration.indexOf("l.attempt_count + 1");
+  const verdict = rateLimitMigration.indexOf("if v_count > p_max then");
+  assert.ok(increment < verdict, "the verdict is taken before the attempt is counted");
+
+  // The window is not extended by the attempts inside it.
+  assert.match(rateLimitMigration, /else l\.window_started_at\s*\r?\n?\s*end/);
+});
+
+test("55: the limit is 5 attempts per 10 minutes, in one place, in both units", () => {
+  assert.match(rateLimitModule, /LAUNCH_RATE_LIMIT_MAX = 5\b/);
+  assert.match(rateLimitModule, /LAUNCH_RATE_LIMIT_WINDOW_MS = 10 \* 60 \* 1000/);
+  // Derived, not written twice, so the two layers cannot drift apart.
+  assert.match(rateLimitModule, /LAUNCH_RATE_LIMIT_WINDOW_SECONDS = LAUNCH_RATE_LIMIT_WINDOW_MS \/ 1000/);
+  assert.equal(LAUNCH_RATE_LIMIT_MAX, 5);
+  assert.equal(LAUNCH_RATE_LIMIT_WINDOW_SECONDS, 600);
+  assert.equal(LAUNCH_RATE_LIMIT_WINDOW_MS, LAUNCH_RATE_LIMIT_WINDOW_SECONDS * 1000);
+});
+
+test("56: the shared limit is applied before a row is written and before mail is sent", () => {
+  const shared = signupRoute.indexOf("consumePersistentRateLimit");
+  const upsert = signupRoute.indexOf(".upsert(");
+  const send = signupRoute.indexOf("resend.emails.send");
+  assert.ok(shared !== -1, "the route does not consult the shared limit");
+  assert.ok(shared < upsert, "a refused caller can still write a row");
+  assert.ok(shared < send, "a refused caller can still make GLOA send mail");
+  assert.match(signupRoute, /if \(shared\.kind === "limited"\) return tooManyRequests\(/);
+});
+
+test("57: a refused caller is told to wait, and never told to retry immediately", async () => {
+  const limited = await consumePersistentRateLimit(
+    { rpc: async () => ({ data: [{ allowed: false, retry_after_seconds: 421 }], error: null }) },
+    "a".repeat(64),
+    5,
+    600
+  );
+  assert.deepEqual(limited, { kind: "limited", retryAfterSeconds: 421 });
+
+  // A refusal without a usable number still has to produce a header,
+  // and "0" - try again now - is the one answer a limit must not give.
+  for (const bad of [null, undefined, 0, -1, "nonsense"]) {
+    const out = await consumePersistentRateLimit(
+      { rpc: async () => ({ data: [{ allowed: false, retry_after_seconds: bad }], error: null }) },
+      "a".repeat(64),
+      5,
+      600
+    );
+    assert.equal(out.kind, "limited");
+    assert.equal(out.retryAfterSeconds, 600, `retry_after_seconds ${String(bad)} produced ${out.retryAfterSeconds}`);
+  }
+
+  const allowed = await consumePersistentRateLimit(
+    { rpc: async () => ({ data: [{ allowed: true, retry_after_seconds: 0 }], error: null }) },
+    "a".repeat(64),
+    5,
+    600
+  );
+  assert.deepEqual(allowed, { kind: "allowed" });
+});
+
+test("58: a database that cannot answer degrades the limit, it does not close the form", async () => {
+  // Failing closed here would mean one database hiccup - or a
+  // deployment that has not run 044 yet - takes the signup off the
+  // site. Failing open is only acceptable because layer 1 still
+  // applies, which the route asserts by logging the degradation.
+  const cases = [
+    { rpc: async () => ({ data: null, error: { message: "function does not exist" } }) },
+    { rpc: async () => ({ data: null, error: null }) },
+    { rpc: async () => ({ data: [{}], error: null }) },
+    { rpc: async () => { throw new Error("socket closed"); } },
+  ];
+  for (const client of cases) {
+    const out = await consumePersistentRateLimit(client, "a".repeat(64), 5, 600);
+    assert.equal(out.kind, "unavailable");
+    assert.equal(typeof out.reason, "string");
+  }
+
+  // A non-digest never reaches the database at all.
+  const refused = await consumePersistentRateLimit(
+    { rpc: async () => { throw new Error("must not be called"); } },
+    "203.0.113.9",
+    5,
+    600
+  );
+  assert.equal(refused.kind, "unavailable");
+
+  assert.match(signupRoute, /shared rate limit unavailable, falling back to per-instance/);
+});
+
+test("59: neither the address nor the bucket key is ever logged or stored", () => {
+  const code = stripJs(signupRoute);
+  // Nothing is logged that could carry the address. The reason string
+  // from the store is the only value logged on the limit path, and the
+  // store builds it from driver messages, never from its input.
+  assert.ok(!/console\.\w+\([^)]*bucketKey/.test(code), "the route logs the bucket key");
+  assert.ok(!/console\.\w+\([^)]*callerBucket/.test(code), "the route logs the client address");
+  assert.ok(!/console\.\w+\([^)]*normalizedEmail/.test(code), "the route logs the email address");
+  assert.ok(!/console\.\w+\([^)]*Token/.test(code), "the route logs a token");
+
+  // The waitlist table has no column for either, and the rate limit
+  // table has no column that outlives its window.
+  assert.ok(!/ip_address|client_ip|remote_addr/i.test(stripSql(migration)), "043 stores an address");
+  assert.match(rateLimitMigration, /window_started_at < v_now - v_window/);
+});
+
+test("60: the counter is locked to service_role, exactly as the list is", () => {
+  assert.match(rateLimitSection, /create table public\.launch_rate_limit/);
+  assert.match(rateLimitSection, /alter table public\.launch_rate_limit enable row level security/);
+  assert.match(rateLimitSection, /grant select, insert, update, delete on public\.launch_rate_limit to service_role/);
+
+  // No policy and no grant for anon or authenticated: a client that
+  // could write here could zero its own counter, which is the whole
+  // limit; a client that could read it could test whether a given
+  // address digest has been seen recently.
+  assert.ok(!/create policy/i.test(rateLimitSection), "the counter has an RLS policy");
+  assert.ok(!/\bto anon\b/.test(rateLimitSection), "the counter is granted to anon");
+  assert.ok(!/\bto authenticated\b/.test(rateLimitSection), "the counter is granted to authenticated");
+
+  // Execute on the writer is revoked from everyone and re-granted to
+  // one role, the same way 038 and 040 do it.
+  for (const role of ["public", "anon", "authenticated"]) {
+    assert.ok(
+      rateLimitSection.includes(
+        `revoke all on function public.consume_launch_rate_limit(text, integer, integer) from ${role};`
+      ),
+      `execute is not revoked from ${role}`
+    );
+  }
+  assert.match(
+    rateLimitSection,
+    /grant execute on function public\.consume_launch_rate_limit\(text, integer, integer\) to service_role;/
+  );
+
+  // Two tables, a function and a trigger now. It applies as a whole or
+  // not at all.
+  assert.match(rateLimitMigration, /^begin;$/m);
+  assert.match(rateLimitMigration, /^commit;$/m);
+});
+
+test("61: the rate limit went into 043 rather than into a 044, and 043 is still additive", () => {
+  // 043 has not been applied anywhere, and this repository's rule for
+  // that case is written into
+  // tests/one-time-refund-writer-concurrency.test.mjs: an unapplied
+  // migration is still the right place to fix itself, and "a hardening
+  // pass must not become a second migration". That test is also what
+  // would fail if a 044 appeared, so this one only has to hold the
+  // other half of the bargain: 043 stayed additive while it grew.
+  const files = readdirSync(path.join(ROOT, "supabase/migrations")).filter((f) => f.endsWith(".sql"));
+  assert.deepEqual(files.filter((f) => Number(f.slice(0, 3)) > 43), [], "a 044 appeared after all");
+
+  const sql = stripSql(migration);
+  for (const destructive of [
+    "drop table", "drop column", "drop policy", "revoke all on table", "truncate",
+    "alter table public.orders", "alter table public.customer", "alter table public.checkout_attempts",
+  ]) {
+    assert.ok(!sql.toLowerCase().includes(destructive), `043 performs: ${destructive}`);
+  }
+
+  // The consent table is still never deleted from by this file. The one
+  // deletion it now contains is the counter's own expiry sweep.
+  const deletes = [...sql.matchAll(/delete from (\S+)/gi)].map((m) => m[1]);
+  assert.deepEqual([...new Set(deletes)], ["public.launch_rate_limit"], `043 deletes from: ${deletes}`);
+});
+
+test("62: the counter is not a second purpose for the waitlist data", () => {
+  // The two tables share no key, no column and no foreign key. A row in
+  // the counter cannot be joined to a person, to a waitlist entry or to
+  // an order - which is what keeps the launch consent single-purpose
+  // even though a second table now shares its file.
+  assert.ok(!/references /i.test(stripSql(rateLimitSection)), "the counter references another table");
+  assert.ok(!/launch_waitlist/.test(stripSql(rateLimitSection)), "the counter names the waitlist table");
+
+  for (const banned of ["email", "consent", "purpose", "marketing", "newsletter", "first_name"]) {
+    assert.ok(
+      !new RegExp(`\\b${banned}\\b`, "i").test(stripSql(rateLimitSection)),
+      `the counter names waitlist data: ${banned}`
+    );
+  }
 });

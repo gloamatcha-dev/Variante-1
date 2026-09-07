@@ -26,7 +26,31 @@
 -- phone number, no address, no date of birth, no tracking identifier
 -- and no free-text field of any kind - a person can join this list
 -- while telling GLOA one thing about themselves.
+--
+-- THE SECOND TABLE
+-- ----------------
+-- Section 4 adds public.launch_rate_limit, which is NOT a list of
+-- people and shares nothing with the one above. Its reasons are set
+-- out where it is defined. It is in this file rather than in a 044
+-- because 043 has not been applied anywhere yet, and this repository's
+-- rule for that case is written down in
+-- tests/one-time-refund-writer-concurrency.test.mjs: an unapplied
+-- migration is still the right place to fix itself, and "a hardening
+-- pass must not become a second migration".
+--
+-- THIS FILE IS EXPLICITLY TRANSACTIONAL. Every executable statement
+-- sits between the begin; below and the commit; at the end, so the
+-- whole migration applies or none of it does. It now creates two
+-- tables, four indexes, a trigger and a function, and a partial run
+-- would leave the signup endpoint talking to half a schema.
+--
+-- RUN THE WHOLE FILE AS ONE EXECUTION. Do not run sections separately
+-- and do not use "run selection": a partial run would send a BEGIN with
+-- no COMMIT, or a COMMIT with no BEGIN. Do not add a second wrapping
+-- transaction around it either; Postgres does not nest them.
 -- ============================================================
+
+begin;
 
 -- 1. THE TABLE -------------------------------------------------
 
@@ -171,3 +195,200 @@ grant select, insert, update, delete on public.launch_waitlist to service_role;
 --   delete from public.launch_waitlist
 --    where status = 'pending'
 --      and created_at < now() - interval '14 days';
+
+
+-- 4. THE RATE LIMIT COUNTER ------------------------------------
+--
+-- WHY THIS IS HERE AT ALL
+-- -----------------------
+-- POST /api/launch is public, unauthenticated, and it sends mail to an
+-- address the caller chose. Its first rate limit was a fixed window in
+-- the server process's memory. On a single long-lived server that
+-- would have been an honest speed bump.
+--
+-- This site is not deployed as one. It is deployed to a serverless
+-- platform, where the process holding that counter is created per
+-- instance, frozen between requests and discarded without warning. So
+-- the limit was per instance, reset by every cold start, and weakest
+-- against exactly the traffic pattern it exists to stop: sustained
+-- load is what makes the platform hand out fresh instances with empty
+-- counters.
+--
+-- A shared counter has to live somewhere every instance can see. This
+-- project already has exactly one such place - this database - and
+-- adding a second datastore (Redis, Upstash, a rate-limit SaaS) for one
+-- form would add a vendor, a credential, a failure mode and a
+-- data-processing agreement to a repository that needs none of them.
+--
+-- THIS IS NOT A SECOND PURPOSE FOR THE LIST ABOVE
+-- -----------------------------------------------
+-- The two tables share no key, no column and no foreign key. A row here
+-- cannot be joined to a person, to a waitlist entry or to an order, and
+-- nothing in this section reads or writes public.launch_waitlist. The
+-- consent recorded above still permits exactly one message and nothing
+-- else.
+--
+-- THE KEY IS NOT AN IP ADDRESS
+-- ----------------------------
+-- An IP address is personal data, and a rate limit has no need of one:
+-- it only ever has to answer "is this the same caller as a moment
+-- ago?", which a stable pseudonym answers exactly as well.
+--
+-- lib/launchRateLimit.ts therefore HMACs the client address with a
+-- server-side secret before it ever leaves the request handler, and
+-- only the digest is sent here. A plain hash would not have done - the
+-- IPv4 space is small enough to enumerate, so an unkeyed SHA-256 of an
+-- address is reversible by brute force and would be personal data in
+-- everything but name. The secret is what makes the digest a pseudonym.
+--
+-- The CHECK constraint below pins the column to a 64-character hex
+-- digest, so a raw address cannot be written into this table even by
+-- mistake: '203.0.113.9' does not match the pattern and the insert
+-- fails.
+--
+-- There is no email column, no name, no user id, no user agent, no
+-- request path, no per-attempt timestamp and no free-text field.
+--
+-- RETENTION IS AUTOMATIC HERE, AND THAT IS THE POINT
+-- --------------------------------------------------
+-- Unlike the list above, this is not consent evidence and there is
+-- nothing to prove later. A window that has closed is worthless, so the
+-- function in section 5 deletes closed windows as it goes, in bounded
+-- batches. The steady state of this table is "the callers of the last
+-- ten minutes", and a bucket that stops calling disappears on its own.
+
+create table public.launch_rate_limit (
+  -- Hex SHA-256 of an HMAC over the client address, keyed with a
+  -- server-only secret. Never a raw address - see above, and see
+  -- pseudonymizeBucketKey in lib/launchRateLimit.ts.
+  bucket_key        text primary key
+                    check (bucket_key ~ '^[0-9a-f]{64}$'),
+
+  -- Start of the window this counter belongs to. A window older than
+  -- the caller's window length is treated as closed and replaced.
+  window_started_at timestamptz not null default now(),
+
+  attempt_count     integer not null default 0 check (attempt_count >= 0),
+
+  -- Set explicitly by the function below rather than by 001's trigger:
+  -- this table is written on a hot public path and does not need a
+  -- per-row trigger to keep one column current.
+  updated_at        timestamptz not null default now()
+);
+
+-- Supports the bounded cleanup inside the function.
+create index idx_launch_rate_limit_window_started
+  on public.launch_rate_limit (window_started_at);
+
+-- Same posture as section 2: RLS on, and no SELECT/INSERT/UPDATE/DELETE
+-- policy for anon or authenticated, so neither role can read or write
+-- this table at all. A client that could write here could zero its own
+-- counter, which is the whole limit; a client that could read it could
+-- test whether a given address digest has been seen recently.
+alter table public.launch_rate_limit enable row level security;
+
+grant select, insert, update, delete on public.launch_rate_limit to service_role;
+
+-- 5. THE ONE WAY TO SPEND AN ATTEMPT ---------------------------
+--
+-- Read-modify-write from application code would be two statements with
+-- a gap between them, and two instances racing through that gap is
+-- precisely the situation a shared counter exists to fix. So the whole
+-- decision is one INSERT ... ON CONFLICT DO UPDATE: the row is locked,
+-- incremented and read back in a single atomic statement, whatever
+-- number of instances arrive at once.
+--
+-- COUNTS EVERY ATTEMPT, INCLUDING REFUSED ONES. A caller that is
+-- already over the limit must not be able to hold its window open or
+-- reset it by continuing to knock.
+--
+-- The deletion inside this function is the ONLY deletion in this file,
+-- it names only public.launch_rate_limit, and it can never reach the
+-- consent table above.
+
+create or replace function public.consume_launch_rate_limit(
+  p_bucket_key text,
+  p_max integer,
+  p_window_seconds integer
+)
+returns table (allowed boolean, retry_after_seconds integer)
+language plpgsql
+security definer set search_path = ''
+as $$
+declare
+  v_now     timestamptz := now();
+  v_window  interval;
+  v_count   integer;
+  v_started timestamptz;
+begin
+  -- The digest shape is checked here as well as by the CHECK
+  -- constraint, so a caller that passed a raw address is refused before
+  -- any row is written rather than leaving a constraint violation - and
+  -- a raw address - in the database logs.
+  if p_bucket_key is null or p_bucket_key !~ '^[0-9a-f]{64}$' then
+    raise exception 'launch rate limit: bucket key must be a 64-character hex digest';
+  end if;
+
+  if p_max is null or p_max < 1 then
+    raise exception 'launch rate limit: max must be at least 1';
+  end if;
+
+  if p_window_seconds is null or p_window_seconds < 1 or p_window_seconds > 86400 then
+    raise exception 'launch rate limit: window must be between 1 and 86400 seconds';
+  end if;
+
+  v_window := make_interval(secs => p_window_seconds);
+
+  -- Closed windows carry no information. Bounded, so this stays a cheap
+  -- indexed delete on a hot path rather than an unbounded sweep.
+  delete from public.launch_rate_limit
+   where ctid in (
+     select l.ctid
+       from public.launch_rate_limit l
+      where l.window_started_at < v_now - v_window
+      limit 100
+   );
+
+  insert into public.launch_rate_limit as l (bucket_key, window_started_at, attempt_count, updated_at)
+  values (p_bucket_key, v_now, 1, v_now)
+  on conflict (bucket_key) do update
+     set attempt_count = case
+           when l.window_started_at <= v_now - v_window then 1
+           else l.attempt_count + 1
+         end,
+         window_started_at = case
+           when l.window_started_at <= v_now - v_window then v_now
+           else l.window_started_at
+         end,
+         updated_at = v_now
+  returning l.attempt_count, l.window_started_at
+  into v_count, v_started;
+
+  if v_count > p_max then
+    return query
+      select false,
+             greatest(1, ceil(extract(epoch from (v_started + v_window - v_now)))::integer);
+    return;
+  end if;
+
+  return query select true, 0;
+end;
+$$;
+
+-- Only the server-side secret key may spend an attempt. anon and
+-- authenticated are revoked explicitly rather than relying on the
+-- default, the same way 038 and 040 do.
+revoke all on function public.consume_launch_rate_limit(text, integer, integer) from public;
+revoke all on function public.consume_launch_rate_limit(text, integer, integer) from anon;
+revoke all on function public.consume_launch_rate_limit(text, integer, integer) from authenticated;
+
+grant execute on function public.consume_launch_rate_limit(text, integer, integer) to service_role;
+
+commit;
+
+-- VERIFY (read-only, commented out; run separately if you want to see
+-- the limiter work, then drop the probe row):
+--
+--   select * from public.consume_launch_rate_limit(repeat('a', 64), 5, 600);
+--   select bucket_key, attempt_count, window_started_at
+--     from public.launch_rate_limit;

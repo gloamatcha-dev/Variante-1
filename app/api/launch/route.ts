@@ -17,10 +17,14 @@ import {
   resolveSource,
 } from "../../../lib/launchWaitlist";
 import {
+  LAUNCH_RATE_LIMIT_MAX,
+  LAUNCH_RATE_LIMIT_WINDOW_SECONDS,
   consumeRateLimit,
+  pseudonymizeBucketKey,
   rateLimitKeyFromRequest,
   type RateLimitState,
 } from "../../../lib/launchRateLimit";
+import { consumePersistentRateLimit } from "../../../lib/launchRateLimitStore";
 
 /**
  * JOIN THE LAUNCH LIST.
@@ -55,15 +59,46 @@ type ErrorResponse = { error: string };
 type SuccessResponse = { ok: true };
 
 /**
- * Module-scope, so it survives between requests in one server instance.
- * Its limits are documented in lib/launchRateLimit.ts - this is a speed
- * bump, not a distributed rate limiter, and it is not sold as one.
+ * LAYER 1 of the rate limit: module scope, so it survives between
+ * requests within one server instance.
+ *
+ * On a serverless platform that is a smaller promise than it looks -
+ * the process is per instance and is discarded without warning - so
+ * this is the cheap first pass that absorbs a flood arriving at one
+ * instance, and NOT the limit that actually holds. Layer 2, the shared
+ * counter in Postgres, is applied further down.
  */
 const rateLimitState: RateLimitState = new Map();
+
+/**
+ * The HMAC key that turns a client address into a bucket key.
+ *
+ * Prefers a dedicated secret, and falls back to the Supabase secret key
+ * so the persistent limit works on an existing deployment without a new
+ * environment variable having to be set first. Both are server-only;
+ * neither is ever sent anywhere - only the digest is. Rotating either
+ * one simply starts every bucket again, which for a ten-minute window
+ * costs nothing.
+ *
+ * Returns null when neither is configured. The endpoint already refuses
+ * to run without SUPABASE_SECRET_KEY, so in practice this is null only
+ * in a deployment that could not have served the request anyway.
+ */
+function getBucketSecret(): string | null {
+  return process.env.LAUNCH_RATE_LIMIT_SECRET || process.env.SUPABASE_SECRET_KEY || null;
+}
 
 /** The one response a valid submission ever gets. */
 function neutralSuccess(): Response {
   return Response.json({ ok: true } as SuccessResponse, { status: 200 });
+}
+
+/** The one response a refused caller ever gets. */
+function tooManyRequests(retryAfterSeconds: number): Response {
+  return Response.json(
+    { error: "Zu viele Versuche. Bitte versuch es später noch einmal." } as ErrorResponse,
+    { status: 429, headers: { "Retry-After": String(Math.max(1, Math.ceil(retryAfterSeconds))) } }
+  );
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -77,17 +112,37 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: "Anfrage zu groß." } as ErrorResponse, { status: 413 });
   }
 
-  const limit = consumeRateLimit(rateLimitState, rateLimitKeyFromRequest(request), Date.now());
-  if (!limit.allowed) {
-    return Response.json(
-      { error: "Zu viele Versuche. Bitte versuch es später noch einmal." } as ErrorResponse,
-      { status: 429, headers: { "Retry-After": String(limit.retryAfterSeconds) } }
-    );
+  // Both layers bucket the same caller, so the header is read once. The
+  // address exists only inside this handler and only as `callerBucket`;
+  // what is carried into layer 2, and what could ever reach the
+  // database, is the digest below and nothing else.
+  const callerBucket = rateLimitKeyFromRequest(request);
+  const bucketSecret = getBucketSecret();
+  const bucketKey = bucketSecret ? pseudonymizeBucketKey(callerBucket, bucketSecret) : null;
+
+  // LAYER 1: in-process, before the body is even read. Counts every
+  // request that gets this far, valid or not.
+  const localLimit = consumeRateLimit(rateLimitState, callerBucket, Date.now());
+  if (!localLimit.allowed) return tooManyRequests(localLimit.retryAfterSeconds);
+
+  // The content-length header is a claim by the caller, and a chunked
+  // request need not send one at all. Read the body once and measure
+  // what actually arrived, so the cap is enforced on bytes rather than
+  // on the sender's word for them.
+  let raw: string;
+  try {
+    raw = await request.text();
+  } catch {
+    return Response.json({ error: "Ungültige Anfrage." } as ErrorResponse, { status: 400 });
+  }
+
+  if (Buffer.byteLength(raw, "utf8") > MAX_BODY_BYTES) {
+    return Response.json({ error: "Anfrage zu groß." } as ErrorResponse, { status: 413 });
   }
 
   let body: unknown;
   try {
-    body = await request.json();
+    body = JSON.parse(raw);
   } catch {
     return Response.json({ error: "Ungültige Anfrage." } as ErrorResponse, { status: 400 });
   }
@@ -147,6 +202,35 @@ export async function POST(request: Request): Promise<Response> {
       { error: "Die Eintragung ist gerade nicht möglich. Bitte versuch es später noch einmal." } as ErrorResponse,
       { status: 503 }
     );
+  }
+
+  // LAYER 2: the shared counter, and the limit that actually holds
+  // across instances. Placed here, after validation, so what it counts
+  // is real signup attempts - a caller posting rubbish is already being
+  // counted by layer 1 and has no business spending a database round
+  // trip as well.
+  //
+  // It runs BEFORE the upsert and before the mail, which is the whole
+  // point: a refused caller must not be able to write a row or make
+  // GLOA's domain send a message.
+  if (bucketKey) {
+    const shared = await consumePersistentRateLimit(
+      supabase,
+      bucketKey,
+      LAUNCH_RATE_LIMIT_MAX,
+      LAUNCH_RATE_LIMIT_WINDOW_SECONDS
+    );
+    if (shared.kind === "limited") return tooManyRequests(shared.retryAfterSeconds);
+    if (shared.kind === "unavailable") {
+      // Degraded, not off: layer 1 still applied to this request. Said
+      // out loud in the log rather than passed over, because "the
+      // shared limit is not running" is an operational fact somebody
+      // has to be able to see. The reason never contains the address or
+      // the bucket key.
+      console.error("Launch waitlist: shared rate limit unavailable, falling back to per-instance:", shared.reason);
+    }
+  } else {
+    console.error("Launch waitlist: no bucket secret configured, shared rate limit not applied.");
   }
 
   const confirmationToken = createToken();
