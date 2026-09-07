@@ -651,8 +651,11 @@ test("52: the sweep has its own error boundary and reports errored", () => {
   assert.ok(block.includes("emptySubscriptionEmailRetrySummary(true)"),
     "a thrown sweep must report errored: true");
   // The earlier results still reach the response, alongside the annual
-  // block Phase 4B6 merged into it.
-  assert.ok(cronCode.includes("{ ...summary, deferredCancellations, subscriptionEmails, annual },"));
+  // block Phase 4B6 merged into it and the launch waitlist's retention
+  // sweep merged in after that.
+  assert.ok(
+    cronCode.includes("{ ...summary, deferredCancellations, subscriptionEmails, annual, launchRetention },")
+  );
   // Per family isolation inside the sweep too.
   assert.equal((retryCode.match(/} catch \(err\) \{/g) ?? []).length, 2,
     "each family's retry and stale inspection need their own guard");

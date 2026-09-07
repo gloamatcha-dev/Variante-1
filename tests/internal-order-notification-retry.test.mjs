@@ -584,10 +584,24 @@ test("endpoint: it is server-only and takes no input from the caller", () => {
 
 test("endpoint: it answers with counts and no customer data", () => {
   // Phase 3C.3 merged one further counter block into the answer, Phase
-  // 3H.5B2 merged a second and Phase 4B6 merged a third (the annual
-  // plan's daily maintenance). Still counts only - asserted on the merged
-  // shape, with each added block checked field by field below.
-  assert.match(routeCode, /Response\.json\(\s*\{ \.\.\.summary, deferredCancellations, subscriptionEmails, annual \},/);
+  // 3H.5B2 merged a second, Phase 4B6 merged a third (the annual plan's
+  // daily maintenance) and the launch waitlist's retention sweep merged
+  // a fourth. Still counts only - asserted on the merged shape, with
+  // each added block checked field by field below.
+  assert.match(
+    routeCode,
+    /Response\.json\(\s*\{ \.\.\.summary, deferredCancellations, subscriptionEmails, annual, launchRetention \},/
+  );
+  // The retention block is three integers and a flag. It is the only
+  // job in this endpoint that deletes personal data, so what it reports
+  // matters: no address, no id, no name, no count broken down by anything
+  // that could identify a person.
+  const retentionLib = withoutComments(
+    readFileSync(path.join(ROOT, "lib/launchWaitlistRetention.ts"), "utf-8")
+  );
+  for (const leak of ["email", "first_name", "consent", "@"]) {
+    assert.ok(!retentionLib.includes(leak), `the retention summary carries ${leak}`);
+  }
   // The annual block is counters, an errored flag per step and sanitised
   // reason strings. No plan id, order id, recipient, address or amount.
   const annualSummary = withoutComments(readFileSync(path.join(ROOT, "lib/annualPlanMaintenance.ts"), "utf-8"));

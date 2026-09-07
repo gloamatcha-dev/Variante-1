@@ -37,6 +37,15 @@ import {
 
 import { consumePersistentRateLimit } from "../lib/launchRateLimitStore.ts";
 
+import {
+  RETENTION_BATCH_LIMIT,
+  RETENTION_PENDING_DAYS,
+  RETENTION_SWEEPABLE_STATUS,
+  emptyRetentionSummary,
+  isSweepablePendingEntry,
+  pendingRetentionCutoff,
+  sweepExpiredPendingEntries,
+} from "../lib/launchWaitlistRetention.ts";
 
 import { buildLaunchConfirmationEmail } from "../lib/email/launchConfirmation.ts";
 
@@ -83,6 +92,8 @@ const signupRoute = read("app/api/launch/route.ts");
 const confirmRoute = read("app/api/launch/confirm/route.ts");
 const withdrawRoute = read("app/api/launch/withdraw/route.ts");
 const migration = read("supabase/migrations/043_launch_waitlist.sql");
+const retentionLib = read("lib/launchWaitlistRetention.ts");
+const cronRoute = read("app/api/cron/retry-order-notifications/route.ts");
 const gloaSite = read("app/GloaSite.tsx");
 const emailTemplate = read("lib/email/launchConfirmation.ts");
 
@@ -1103,4 +1114,274 @@ test("62: the counter is not a second purpose for the waitlist data", () => {
       `the counter names waitlist data: ${banned}`
     );
   }
+});
+
+/* ── 12. Retention: the deletion the privacy notice promises ──
+ *
+ * The notice tells every person who signs up: "Bestätigst du sie nicht,
+ * löschen wir die Eintragung nach 14 Tagen." Migration 043 wrote that
+ * rule down and built the index for it, but deliberately implemented
+ * nothing - it says the deletion is an operational job. Until
+ * lib/launchWaitlistRetention.ts existed, that job did not exist either,
+ * so the promise was a sentence rather than a behaviour.
+ *
+ * These tests drive the sweep with a fake client. Nothing here opens a
+ * socket, builds a Supabase client or reads a clock: `now` is passed in,
+ * so the fourteen-day boundary can be put anywhere without waiting.
+ * ────────────────────────────────────────────────────────────── */
+
+test("63: the retention period is the one the privacy notice states, not a second number", () => {
+  // THE PERIOD LIVES IN THREE PLACES and this is what keeps them equal.
+  //
+  // The sweep is a leaf with no runtime imports, so the suite can load
+  // it under plain Node - the same constraint lib/launchRateLimitStore.ts
+  // records for its digest pattern. The price is that the number is
+  // stated twice; this assertion is what makes that repetition checked
+  // rather than trusted.
+  //
+  //   1. PENDING_RETENTION_DAYS      lib/launchWaitlist.ts
+  //   2. RETENTION_PENDING_DAYS      lib/launchWaitlistRetention.ts
+  //   3. the sentence a person reads app/GloaSite.tsx
+  //
+  // If any one of them moves, this fails.
+  assert.equal(PENDING_RETENTION_DAYS, 14);
+  assert.equal(RETENTION_PENDING_DAYS, PENDING_RETENTION_DAYS);
+
+  // A link that no longer works must not leave a row behind that still
+  // holds an address, so the token TTL is the same number.
+  assert.equal(CONFIRMATION_TOKEN_TTL_DAYS, PENDING_RETENTION_DAYS);
+
+  // The notice still says it, in these words, and says the SAME number.
+  const promised = gloaSite.match(/löschen wir die Eintragung nach (\d+) Tagen/);
+  assert.ok(promised, "the privacy notice no longer promises a deletion period");
+  assert.equal(
+    Number(promised[1]),
+    RETENTION_PENDING_DAYS,
+    "the notice promises a period the sweep does not implement"
+  );
+
+  const now = Date.parse("2026-09-20T12:00:00.000Z");
+  assert.equal(pendingRetentionCutoff(now).toISOString(), "2026-09-06T12:00:00.000Z");
+});
+
+test("64: only unconfirmed entries are sweepable - confirmed, withdrawn and notified are out of reach", () => {
+  const now = Date.parse("2026-09-20T12:00:00.000Z");
+  const cutoff = pendingRetentionCutoff(now);
+  const old = "2026-09-01T00:00:00.000Z";   // 19 days
+  const fresh = "2026-09-19T00:00:00.000Z"; // 1 day
+
+  assert.equal(RETENTION_SWEEPABLE_STATUS, "pending");
+  assert.equal(isSweepablePendingEntry({ status: "pending", created_at: old }, cutoff), true);
+
+  // A person who confirmed gave consent; a person who withdrew left
+  // evidence that must outlive the entry; a notified row is the send
+  // log. None of them may be deleted by a timer.
+  for (const status of ["confirmed", "withdrawn", "notified"]) {
+    assert.equal(
+      isSweepablePendingEntry({ status, created_at: old }, cutoff),
+      false,
+      `a ${status} entry is sweepable`
+    );
+  }
+
+  // Inside the period, and exactly on the boundary, the row stays.
+  assert.equal(isSweepablePendingEntry({ status: "pending", created_at: fresh }, cutoff), false);
+  assert.equal(
+    isSweepablePendingEntry({ status: "pending", created_at: cutoff.toISOString() }, cutoff),
+    false,
+    "a row exactly at the cutoff is deleted a moment early"
+  );
+
+  // An unreadable or missing date is not evidence that fourteen days
+  // have passed, so it is not a licence to delete.
+  assert.equal(isSweepablePendingEntry({ status: "pending", created_at: null }, cutoff), false);
+  assert.equal(isSweepablePendingEntry({ status: "pending", created_at: "soon" }, cutoff), false);
+});
+
+/** A fake Supabase surface that records what the sweep asked for. */
+function fakeRetentionClient({ count = 0, rows = [], failOn = null } = {}) {
+  const calls = { selects: [], deletes: [] };
+  const err = (stage) => (failOn === stage ? { message: `${stage} failed` } : null);
+
+  const client = {
+    from(table) {
+      calls.table = table;
+      return {
+        select(columns, options) {
+          const spec = { columns, head: Boolean(options?.head), filters: [], limit: null };
+          calls.selects.push(spec);
+          const builder = {
+            eq(column, value) { spec.filters.push(["eq", column, value]); return builder; },
+            lt(column, value) { spec.filters.push(["lt", column, value]); return builder; },
+            limit(n) {
+              spec.limit = n;
+              return Promise.resolve({ data: rows.slice(0, n), count: null, error: err("list") });
+            },
+            then(resolve, reject) {
+              return Promise.resolve({ data: null, count, error: err("count") }).then(resolve, reject);
+            },
+          };
+          return builder;
+        },
+        delete() {
+          const spec = { filters: [], ids: null };
+          calls.deletes.push(spec);
+          const builder = {
+            eq(column, value) { spec.filters.push(["eq", column, value]); return builder; },
+            in(column, values) {
+              spec.ids = { column, values };
+              return Promise.resolve({ error: err("delete") });
+            },
+          };
+          return builder;
+        },
+      };
+    },
+  };
+  return { client, calls };
+}
+
+test("65: the sweep deletes expired pending entries and reports counts, not people", async () => {
+  const now = Date.parse("2026-09-20T12:00:00.000Z");
+  const { client, calls } = fakeRetentionClient({
+    count: 3,
+    rows: [{ id: "a" }, { id: "b" }, { id: "c" }],
+  });
+
+  const summary = await sweepExpiredPendingEntries(client, now);
+  assert.deepEqual(summary, { due: 3, deleted: 3, remaining: 0, errored: false });
+
+  assert.equal(calls.table, "launch_waitlist");
+
+  // The count is head-only: no address is read into the process to
+  // produce a number, and the id select asks for the id column alone.
+  assert.equal(calls.selects[0].head, true);
+  assert.equal(calls.selects[1].columns, "id");
+  for (const spec of calls.selects) {
+    assert.deepEqual(spec.filters[0], ["eq", "status", "pending"]);
+    assert.equal(spec.filters[1][0], "lt");
+    assert.equal(spec.filters[1][1], "created_at");
+    assert.equal(spec.filters[1][2], "2026-09-06T12:00:00.000Z");
+  }
+
+  // THE DELETE IS NARROWED BY STATUS AGAIN, not only by the id list.
+  // Between reading the ids and deleting them somebody may have clicked
+  // their confirmation link, and the database - not a snapshot taken a
+  // moment ago - is what decides whether the row is still pending.
+  assert.equal(calls.deletes.length, 1);
+  assert.deepEqual(calls.deletes[0].filters, [["eq", "status", "pending"]]);
+  assert.deepEqual(calls.deletes[0].ids, { column: "id", values: ["a", "b", "c"] });
+
+  // The summary is four scalars. No address, no id, no name.
+  assert.deepEqual(Object.keys(summary).sort(), ["deleted", "due", "errored", "remaining"]);
+});
+
+test("66: nothing due means nothing is read and nothing is deleted", async () => {
+  const { client, calls } = fakeRetentionClient({ count: 0 });
+  const summary = await sweepExpiredPendingEntries(client, Date.now());
+
+  assert.deepEqual(summary, { due: 0, deleted: 0, remaining: 0, errored: false });
+  assert.equal(calls.selects.length, 1, "the sweep listed ids with nothing due");
+  assert.equal(calls.deletes.length, 0, "the sweep issued a delete with nothing due");
+});
+
+test("67: the batch is bounded, and a capped run says so instead of looking complete", async () => {
+  const now = Date.parse("2026-09-20T12:00:00.000Z");
+  const rows = Array.from({ length: 5 }, (_, i) => ({ id: `id-${i}` }));
+  const { client, calls } = fakeRetentionClient({ count: 900, rows });
+
+  const summary = await sweepExpiredPendingEntries(client, now, 5);
+  assert.deepEqual(summary, { due: 900, deleted: 5, remaining: 895, errored: false });
+  assert.equal(calls.selects[1].limit, 5);
+
+  // The default cap is a real number, and the job is idempotent, so a
+  // backlog drains across consecutive daily runs rather than in one
+  // statement that might time out halfway.
+  assert.equal(typeof RETENTION_BATCH_LIMIT, "number");
+  assert.ok(RETENTION_BATCH_LIMIT > 0 && RETENTION_BATCH_LIMIT <= 1000);
+});
+
+test("68: a failure at any stage is reported, and never deletes on a guess", async () => {
+  const now = Date.parse("2026-09-20T12:00:00.000Z");
+
+  const counting = fakeRetentionClient({ count: 3, rows: [{ id: "a" }], failOn: "count" });
+  assert.deepEqual(await sweepExpiredPendingEntries(counting.client, now), emptyRetentionSummary(true));
+  assert.equal(counting.calls.deletes.length, 0, "a failed count still deleted rows");
+
+  const listing = fakeRetentionClient({ count: 3, rows: [{ id: "a" }], failOn: "list" });
+  assert.deepEqual(await sweepExpiredPendingEntries(listing.client, now), {
+    due: 3, deleted: 0, remaining: 3, errored: true,
+  });
+  assert.equal(listing.calls.deletes.length, 0, "a failed id read still deleted rows");
+
+  const deleting = fakeRetentionClient({ count: 3, rows: [{ id: "a" }], failOn: "delete" });
+  assert.deepEqual(await sweepExpiredPendingEntries(deleting.client, now), {
+    due: 3, deleted: 0, remaining: 3, errored: true,
+  });
+
+  // A count that came back due but whose id read returned nothing is not
+  // an error and not a licence to delete something else.
+  const empty = fakeRetentionClient({ count: 3, rows: [] });
+  assert.deepEqual(await sweepExpiredPendingEntries(empty.client, now), {
+    due: 3, deleted: 0, remaining: 3, errored: false,
+  });
+  assert.equal(empty.calls.deletes.length, 0);
+});
+
+test("69: the sweep touches one table, and cannot reach an order or a customer", () => {
+  const code = stripJs(retentionLib);
+
+  // One table name, one constant, and it is the waitlist.
+  const tables = [...code.matchAll(/\.from\((\w+)\)/g)].map((m) => m[1]);
+  assert.deepEqual([...new Set(tables)], ["WAITLIST_TABLE"]);
+  assert.match(code, /WAITLIST_TABLE = "launch_waitlist"/);
+
+  for (const banned of ["orders", "customer", "checkout_attempts", "subscriptions", "launch_rate_limit"]) {
+    assert.ok(!new RegExp(`"${banned}"`).test(code), `the sweep names another table: ${banned}`);
+  }
+
+  // Every delete this file performs is narrowed to pending.
+  const deletes = [...code.matchAll(/\.delete\(\)([\s\S]{0,200})/g)];
+  assert.equal(deletes.length, 1);
+  assert.match(deletes[0][1], /\.eq\("status", RETENTION_SWEEPABLE_STATUS\)/);
+
+  // It logs driver messages only - never a row, an address or an id.
+  assert.ok(!/console\.\w+\([^)]*\bids\b/.test(code), "the sweep logs the ids it deleted");
+  assert.ok(!/console\.\w+\([^)]*email/i.test(code), "the sweep logs an address");
+});
+
+test("70: the sweep actually runs - it is wired into the daily cron, last and guarded", () => {
+  // A retention rule nothing invokes is a comment. This is the assertion
+  // that the job is reachable in a deployment rather than merely present
+  // in the repository.
+  assert.match(cronRoute, /sweepExpiredPendingEntries[\s\S]{0,200}?from "\.\.\/\.\.\/\.\.\/\.\.\/lib\/launchWaitlistRetention"/);
+  assert.match(cronRoute, /await sweepExpiredPendingEntries\(/);
+
+  // vercel.json registers the schedule this endpoint runs on.
+  const vercelJson = JSON.parse(read("vercel.json"));
+  const cron = vercelJson.crons.find((c) => c.path === "/api/cron/retry-order-notifications");
+  assert.ok(cron, "the cron endpoint is not registered in vercel.json");
+  assert.equal(typeof cron.schedule, "string");
+
+  // Its own try/catch, so a retention failure cannot stop the four jobs
+  // above it - and cannot be silently swallowed either.
+  assert.match(cronRoute, /launchRetention = emptyRetentionSummary\(true\)/);
+
+  // It runs LAST: nothing that sends or creates may be blocked by a
+  // deletion sweep going wrong.
+  const sweepAt = cronRoute.indexOf("await sweepExpiredPendingEntries(");
+  for (const earlier of [
+    "runTransactionalEmailRetryCron(",
+    "sweepDueDeferredCancellations(",
+    "runSubscriptionEmailRetrySweep(",
+    "runAnnualPlanMaintenanceJob(",
+  ]) {
+    assert.ok(cronRoute.indexOf(earlier) < sweepAt, `the sweep runs before ${earlier}`);
+  }
+
+  // The endpoint is still authenticated by CRON_SECRET and still fails
+  // closed without one - this change adds a deletion to it, so that
+  // matters more than it did.
+  assert.match(cronRoute, /const secret = process\.env\.CRON_SECRET/);
+  assert.match(cronRoute, /if \(!secret\)[\s\S]{0,300}?status: 503/);
 });

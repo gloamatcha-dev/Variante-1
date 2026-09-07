@@ -11,6 +11,12 @@ import {
 // Phase 4B6. Same cron, fourth job, its own error boundary.
 import { emptyAnnualMaintenanceSummary } from "../../../../lib/annualPlanMaintenance";
 import { runAnnualPlanMaintenanceJob } from "../../../../lib/annualPlanMaintenanceDeps";
+// Same cron, fifth job, its own error boundary. This one deletes rows.
+import {
+  emptyRetentionSummary,
+  sweepExpiredPendingEntries,
+  type RetentionClient,
+} from "../../../../lib/launchWaitlistRetention";
 
 /**
  * Vercel Cron entry point for the transactional email safety net.
@@ -277,14 +283,68 @@ export async function GET(request: Request): Promise<Response> {
       annual = emptyAnnualMaintenanceSummary(true);
     }
 
+    // ── THE LAUNCH WAITLIST'S RETENTION SWEEP ─────────────────
+    //
+    // FIFTH, AND LAST, and the only job in this endpoint that deletes
+    // personal data rather than sending or creating something.
+    //
+    // It is here for the reason the three jobs above it are: the Vercel
+    // Hobby plan permits ONE cron invocation per day, and a second
+    // endpoint would have needed a second schedule this plan does not
+    // have. vercel.json is unchanged, the path is unchanged, and the
+    // authentication is the same CRON_SECRET.
+    //
+    // WHAT IT DELETES IS NOT DECIDED HERE. The rule lives in
+    // lib/launchWaitlistRetention.ts and is exactly the one the privacy
+    // notice states to every person who signs up: an entry nobody
+    // confirmed is deleted after fourteen days. Status 'pending' only -
+    // confirmed, withdrawn and notified rows are out of its reach by
+    // construction, and this endpoint passes no status, no id, no date
+    // and no batch size into any of it.
+    //
+    // LAST, deliberately. A failure in a deletion sweep must not cost an
+    // order email its retry, a cancellation its trip to Stripe, a
+    // subscription email its sweep or an annual delivery its order. Its
+    // own guard, like every job above it: a retention failure is
+    // reported as errored: true and nothing else stops.
+    //
+    // Once daily is more than the rule needs. The promise is "after
+    // fourteen days", not "at the fourteenth day to the minute", so a
+    // sweep that runs at 05:20 UTC satisfies it with a margin of hours
+    // on a period of a fortnight.
+    let launchRetention;
+    try {
+      // Re-read rather than reuse the check above: this endpoint is
+      // schedule-agnostic and the client is a lazily built singleton, so
+      // the null branch is asserted here too rather than assumed.
+      const admin = getSupabaseAdmin();
+      launchRetention = admin
+        ? // The sweep takes a narrow structural client - three methods -
+          // so tests can drive it without a key or a socket, the way
+          // lib/launchRateLimitStore.ts is driven. Supabase's own
+          // query-builder types are generic enough that checking the
+          // real client against that shape exceeds the compiler's
+          // instantiation depth, so the assertion is made once, here,
+          // rather than widening the sweep's contract to `any`.
+          await sweepExpiredPendingEntries(admin as unknown as RetentionClient, Date.now())
+        : emptyRetentionSummary(true);
+    } catch (err) {
+      console.error(
+        "Launch waitlist retention: sweep failed:",
+        err instanceof Error ? err.message : "unknown error"
+      );
+      launchRetention = emptyRetentionSummary(true);
+    }
+
     // Counts only, exactly like the email families. No subscription id,
     // no Stripe id, no customer fact. The subscription block adds
     // delivery uuids for stale 'sending' rows, which are the one thing an
     // operator needs to find them - and are not customer data. The annual
     // block adds counts and sanitised failure reasons, and no plan id,
-    // order id, recipient or amount at all.
+    // order id, recipient or amount at all. The retention block adds
+    // three integers and a flag - never an address, an id or a name.
     return Response.json(
-      { ...summary, deferredCancellations, subscriptionEmails, annual },
+      { ...summary, deferredCancellations, subscriptionEmails, annual, launchRetention },
       { status: 200 }
     );
   } catch (err) {

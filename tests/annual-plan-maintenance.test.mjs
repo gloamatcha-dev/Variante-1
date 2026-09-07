@@ -1172,9 +1172,13 @@ test("31: ONE cron schedule, unchanged, and the annual job runs inside it", () =
     .filter(entry => entry.isDirectory())
     .map(entry => entry.name);
   assert.deepEqual(cronRoutes, ["retry-order-notifications"]);
-  // And the annual maintenance is reached from it.
+  // And the annual maintenance is reached from it. A fifth job (the
+  // launch waitlist's retention sweep) has since been merged into the
+  // same answer, for the same reason this one was: the Hobby plan
+  // permits one invocation a day. What matters here is that the annual
+  // block is still in the response, not that it is the last block in it.
   assert.match(cronRoute, /runAnnualPlanMaintenanceJob\(\)/);
-  assert.match(cronRoute, /\{ \.\.\.summary, deferredCancellations, subscriptionEmails, annual \}/);
+  assert.match(cronRoute, /\{ \.\.\.summary, deferredCancellations, subscriptionEmails, annual[,}]/);
 });
 
 test("32: the annual job is behind the SAME authentication, and takes no input", () => {
