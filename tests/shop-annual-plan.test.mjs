@@ -317,7 +317,12 @@ test("5d: no backend, migration or commercial logic changed", () => {
     // namespace, touches no route listed here, and is reviewed in
     // tests/launch-waitlist.test.mjs. This guard protects "no
     // UNREVIEWED route appeared", never "the surface stopped growing".
-    ["annual-plan", "checkout", "contact", "cron", "internal", "launch",
+    // The launch admin surface: POST-only /api/admin/launch/{status,
+    // release,send}, each behind LAUNCH_ADMIN_SECRET, a shared rate
+    // limit and a typed confirmation phrase. It is the trigger for the
+    // one-time launch announcement and touches no route listed here.
+    // Reviewed in tests/launch-send.test.mjs.
+    ["admin", "annual-plan", "checkout", "contact", "cron", "internal", "launch",
      "orders", "stripe", "subscriptions", "withdrawal"], "an API route changed");
   assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("045")),
     "migration 044 exists");

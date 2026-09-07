@@ -89,7 +89,31 @@ alter table public.launch_waitlist
   -- Why the last attempt failed. A PROVIDER MESSAGE ONLY - never an
   -- address, never a token, never a name. It exists so an operator can
   -- tell "mailbox full" from "domain not verified" without opening a log.
-  add column if not exists launch_send_failed_reason text;
+  add column if not exists launch_send_failed_reason text,
+
+  -- THE ROW WHOSE OUTCOME IS NOT KNOWN.
+  --
+  -- Set when an attempt ended without an answer the system can act on: a
+  -- provider timeout after the request was accepted for processing, a
+  -- 409 saying another request with this idempotency key is already in
+  -- flight, or a mark that failed after the provider had taken the
+  -- message. In all three the honest state is "we do not know whether
+  -- this person received the mail".
+  --
+  -- A row carrying this flag is EXCLUDED FROM THE CLAIM and is therefore
+  -- never retried automatically. That is the point. Retrying an unknown
+  -- outcome is a coin flip between a missing mail and a duplicate one,
+  -- and the provider's idempotency key - which would otherwise decide it
+  -- - only lives for 24 hours (see the note in section 3). Past that
+  -- window a blind retry is simply a second mail.
+  --
+  -- Clearing it is a human act: look at the provider's own delivery log
+  -- for that message, decide, and then either mark it sent or release it
+  -- for one more attempt.
+  add column if not exists launch_send_needs_review boolean not null default false,
+
+  -- What made the outcome unclear. Provider text only, same rule as above.
+  add column if not exists launch_send_review_reason text;
 
 -- The claim query's index: confirmed, not yet notified, ordered by when
 -- consent was given so the earliest supporters are mailed first.
@@ -215,6 +239,12 @@ begin
          and c.purpose = 'launch_notification'
          and c.launch_notification_sent_at is null
          and c.withdrawn_at is null
+         -- Never hand back a row whose last outcome is unknown. See the
+         -- column comment in section 1: the provider's idempotency key
+         -- expires after 24 hours, so an automatic retry past that point
+         -- is a second mail rather than a safe repeat. These are
+         -- reconciled by a person.
+         and c.launch_send_needs_review is not true
          and c.launch_send_attempts < p_max_attempts
          -- Unclaimed, or claimed by a worker that has since died.
          and (
@@ -307,6 +337,50 @@ begin
 end;
 $$;
 
+-- 5b. PARKING A ROW WHOSE OUTCOME IS UNKNOWN -------------------
+--
+-- The third possible ending for an attempt, and the one that matters
+-- most. Not "it worked" and not "it failed", but "we do not know".
+--
+-- THE PROVIDER'S GUARANTEE HAS AN EXPIRY DATE, AND THAT IS WHY THIS
+-- EXISTS. Resend keeps an idempotency key for 24 HOURS and returns 409
+-- while a request with the same key is still in flight. Inside that
+-- window a repeat is safe and the provider itself refuses to deliver
+-- twice. Outside it the key means nothing, and a retry is simply a
+-- second mail to somebody who consented to exactly one.
+--
+-- So an unknown outcome is parked rather than retried. The claim in
+-- section 3 cannot see these rows, the attempt count is left where it
+-- is, and an operator reconciles them against the provider's own
+-- delivery log: mark_launch_notification_sent for the ones that
+-- arrived, release_launch_notification_claim for the ones that did not.
+
+create or replace function public.flag_launch_notification_for_review(
+  p_id uuid,
+  p_claim_id uuid,
+  p_reason text
+)
+returns boolean
+language plpgsql
+security definer set search_path = ''
+as $$
+declare
+  v_updated integer;
+begin
+  update public.launch_waitlist
+     set launch_send_needs_review = true,
+         launch_send_review_reason = left(p_reason, 500),
+         launch_send_claim_id      = null,
+         launch_send_claimed_at    = null
+   where id = p_id
+     and launch_send_claim_id = p_claim_id
+     and launch_notification_sent_at is null;
+
+  get diagnostics v_updated = row_count;
+  return v_updated = 1;
+end;
+$$;
+
 -- 6. PRIVILEGES ------------------------------------------------
 --
 -- Only the server-side secret key may claim, mark or release. anon and
@@ -327,6 +401,11 @@ revoke all on function public.release_launch_notification_claim(uuid, uuid, text
 revoke all on function public.release_launch_notification_claim(uuid, uuid, text) from anon;
 revoke all on function public.release_launch_notification_claim(uuid, uuid, text) from authenticated;
 grant execute on function public.release_launch_notification_claim(uuid, uuid, text) to service_role;
+
+revoke all on function public.flag_launch_notification_for_review(uuid, uuid, text) from public;
+revoke all on function public.flag_launch_notification_for_review(uuid, uuid, text) from anon;
+revoke all on function public.flag_launch_notification_for_review(uuid, uuid, text) from authenticated;
+grant execute on function public.flag_launch_notification_for_review(uuid, uuid, text) to service_role;
 
 commit;
 

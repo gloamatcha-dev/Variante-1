@@ -19,6 +19,22 @@ import {
   buildLaunchDayEmail,
 } from "../lib/email/launchDay.ts";
 
+import {
+  ADMIN_RATE_LIMIT_MAX,
+  LAUNCH_ADMIN_SECRET_MIN_LENGTH,
+  RELEASE_CONFIRMATION,
+  SEND_CONFIRMATION,
+  authorizeLaunchAdmin,
+  hasConfirmation,
+} from "../lib/launchAdminAuth.ts";
+
+import {
+  launchSendBlockers,
+  readLaunchStatus,
+} from "../lib/launchStatus.ts";
+
+import { launchSendMailer } from "../lib/launchSendMailer.ts";
+
 /* ══════════════════════════════════════════════════════════════
    THE ONE-TIME LAUNCH SEND
 
@@ -55,8 +71,9 @@ function fakeDb(rows, opts = {}) {
     claim: null,
     sentAt: null,
     attempts: 0,
+    needsReview: false,
   }));
-  const calls = { claims: 0, marks: 0, releases: 0 };
+  const calls = { claims: 0, marks: 0, releases: 0, reviews: 0 };
 
   const db = {
     state,
@@ -67,7 +84,7 @@ function fakeDb(rows, opts = {}) {
       // Released gate, exactly as the SQL function's early return.
       if (opts.released === false) return [];
       const picked = state
-        .filter((r) => r.sentAt === null && r.claim === null && r.status === "confirmed")
+        .filter((r) => r.sentAt === null && r.claim === null && r.status === "confirmed" && r.needsReview !== true)
         .slice(0, limit);
       for (const r of picked) {
         r.claim = claimId;
@@ -89,6 +106,15 @@ function fakeDb(rows, opts = {}) {
       r.sentAt = "now";
       r.status = "notified";
       r.claim = null;
+      return true;
+    },
+    async flagForReview(id, claimId, reason) {
+      calls.reviews += 1;
+      const r = state.find((x) => x.id === id);
+      if (!r || r.claim !== claimId || r.sentAt !== null) return false;
+      r.claim = null;
+      r.needsReview = true;
+      r.reviewReason = reason;
       return true;
     },
     async releaseClaim(id, claimId, reason) {
@@ -218,7 +244,7 @@ test("5: a refused message gives the claim back and is retried, not lost", async
   assert.equal(second.sent, 1);
 });
 
-test("6: a thrown provider error is a failure, not a crash", async () => {
+test("6: a thrown provider error is an UNKNOWN outcome, not a failure", async () => {
   const db = fakeDb(confirmed(2));
   const mailer = {
     seen: [],
@@ -227,9 +253,13 @@ test("6: a thrown provider error is a failure, not a crash", async () => {
     },
   };
   const summary = await runLaunchSend(db, mailer, {});
-  assert.equal(summary.failed, 2);
+  // A socket that died mid-request tells us nothing about whether the
+  // provider took the message, so these are parked rather than retried.
+  assert.equal(summary.needsReview, 2);
+  assert.equal(summary.failed, 0);
   assert.equal(summary.sent, 0);
   assert.ok(db.state.every((r) => r.sentAt === null && r.claim === null));
+  assert.ok(db.state.every((r) => r.needsReview === true));
 });
 
 test("7: the retry carries the SAME idempotency key, so the provider dedupes", async () => {
@@ -330,7 +360,7 @@ test("13: the summary is counts only - no address, no id, no key", async () => {
   const summary = await runLaunchSend(db, fakeMailer(), {});
   assert.deepEqual(
     Object.keys(summary).sort(),
-    ["claimed", "failed", "sent", "stopped", "stoppedReason", "unmarked"]
+    ["claimed", "failed", "needsReview", "sent", "stopped", "stoppedReason", "unmarked"]
   );
   const asText = JSON.stringify(summary);
   assert.ok(!asText.includes("@"), "the summary carries an address");
@@ -529,4 +559,413 @@ test("27: the greeting degrades without a name, and escapes what it is given", (
   const hostile = buildLaunchDayEmail({ firstName: '<script>alert(1)</script>', origin: ORIGIN });
   assert.ok(!hostile.html.includes("<script>"), "the name is not escaped");
   assert.ok(hostile.html.includes("&lt;script&gt;"));
+});
+
+/* ══════════════════════════════════════════════════════════════
+   9. THE ADMIN ENDPOINTS
+
+   Three routes that can release and run the one-time send. Nothing
+   here starts a server or opens a socket: the guard and the rules are
+   driven directly, and the routes themselves are checked at source
+   level for the things that must be true of every one of them.
+   ══════════════════════════════════════════════════════════════ */
+
+const statusRoute = read("app/api/admin/launch/status/route.ts");
+const releaseRoute = read("app/api/admin/launch/release/route.ts");
+const sendRoute = read("app/api/admin/launch/send/route.ts");
+const adminGate = read("lib/launchAdminRoute.ts");
+const adminAuth = read("lib/launchAdminAuth.ts");
+const sendDeps = read("lib/launchSendMailer.ts");
+const ADMIN_ROUTES = [statusRoute, releaseRoute, sendRoute];
+
+const req = (headers = {}, method = "POST") => ({
+  method,
+  headers: { get: (n) => headers[n.toLowerCase()] ?? null },
+});
+
+const STRONG = "a".repeat(64);
+
+/* ── Authentication ──────────────────────────────────────────── */
+
+test("28: a valid bearer secret authorizes, anything else does not", () => {
+  assert.deepEqual(authorizeLaunchAdmin(req({ authorization: `Bearer ${STRONG}` }), STRONG), { kind: "ok" });
+
+  for (const header of [
+    undefined,
+    "",
+    "Bearer wrong",
+    STRONG,                    // no scheme
+    `bearer ${STRONG}`,        // wrong case: the comparison is exact
+    `Bearer ${STRONG} `,       // trailing space
+    `Basic ${STRONG}`,
+  ]) {
+    const outcome = authorizeLaunchAdmin(req(header === undefined ? {} : { authorization: header }), STRONG);
+    assert.equal(outcome.kind, "unauthorized", `accepted: ${JSON.stringify(header)}`);
+  }
+});
+
+test("29: an unset or short secret refuses EVERYBODY - it never means 'open'", () => {
+  // The failure mode this closes: a new environment where the variable
+  // was forgotten, leaving an endpoint that mails the whole list public.
+  for (const secret of [undefined, null, ""]) {
+    const outcome = authorizeLaunchAdmin(req({ authorization: `Bearer ${STRONG}` }), secret);
+    assert.equal(outcome.kind, "misconfigured", `an unset secret was not refused: ${secret}`);
+  }
+
+  // Timing safety does not save a short secret from a dictionary, so a
+  // short one is a configuration error rather than a weak lock.
+  const short = "x".repeat(LAUNCH_ADMIN_SECRET_MIN_LENGTH - 1);
+  const outcome = authorizeLaunchAdmin(req({ authorization: `Bearer ${short}` }), short);
+  assert.equal(outcome.kind, "misconfigured");
+  assert.match(outcome.reason, /shorter than/);
+
+  // Exactly at the minimum it works.
+  const ok = "y".repeat(LAUNCH_ADMIN_SECRET_MIN_LENGTH);
+  assert.deepEqual(authorizeLaunchAdmin(req({ authorization: `Bearer ${ok}` }), ok), { kind: "ok" });
+  assert.ok(LAUNCH_ADMIN_SECRET_MIN_LENGTH >= 32);
+});
+
+test("30: the secret is this feature's own, and no other secret is reachable from here", () => {
+  // A shared comparison is safety; a shared secret is the opposite. This
+  // endpoint can mail the whole list, so it may not be as reachable as
+  // the most widely distributed copy of a value issued for something else.
+  assert.match(adminGate, /process\.env\.LAUNCH_ADMIN_SECRET/);
+  // Comments are not code: launchAdminAuth.ts names those secrets in
+  // prose precisely to explain why it does not reuse them.
+  for (const source of [adminGate, adminAuth, ...ADMIN_ROUTES]) {
+    for (const foreign of ["CRON_SECRET", "FULFILLMENT_ADMIN_SECRET", "STRIPE_SECRET_KEY"]) {
+      assert.ok(!stripJs(source).includes(foreign), `a launch admin file reads ${foreign}`);
+    }
+  }
+  // And the shared timing-safe comparison is reused rather than re-written.
+  assert.match(adminAuth, /isBearerSecretAuthorized/);
+  assert.ok(!/timingSafeEqual|createHash/.test(adminAuth), "the auth module re-implements the comparison");
+});
+
+test("31: the secret never reaches a log, a response or a URL", () => {
+  for (const source of [adminGate, adminAuth, ...ADMIN_ROUTES]) {
+    const code = stripJs(source);
+    assert.ok(!/console\.\w+\([^)]*LAUNCH_ADMIN_SECRET/.test(code), "a file logs the secret");
+    assert.ok(!/searchParams[^;]*secret/i.test(code), "a file reads the secret from the URL");
+    assert.ok(!/Response\.json\([^)]*secret/i.test(code), "a file returns the secret");
+  }
+  // The log names the ABSENCE, which is an operational fact, and stops there.
+  assert.match(adminGate, /console\.error\("Launch admin: refusing every request -", outcome\.reason\)/);
+});
+
+/* ── The shape of the door ───────────────────────────────────── */
+
+test("32: every admin route is POST-only, and none of them has a GET handler", () => {
+  // A GET that starts a send is triggerable by a link in a chat window,
+  // a prefetch or a restored tab, and lands in every proxy log on the way.
+  assert.match(adminGate, /request\.method !== "POST"/);
+  for (const route of ADMIN_ROUTES) {
+    const handlers = [...route.matchAll(/export async function ([A-Z]+)\(/g)].map((m) => m[1]);
+    assert.deepEqual(handlers, ["POST"], `a route exports something other than POST: ${handlers}`);
+  }
+});
+
+test("33: every admin route goes through the one guard, first", () => {
+  for (const route of ADMIN_ROUTES) {
+    assert.match(route, /const gate = await guardLaunchAdmin\(request\)/);
+    assert.match(route, /if \(!gate\.ok\) return gate\.response/);
+    // Nothing happens before it.
+    const body = route.slice(route.indexOf("export async function POST"));
+    const gateAt = body.indexOf("guardLaunchAdmin");
+    const work = [body.indexOf("supabase"), body.indexOf("runLaunchSend"), body.indexOf(".update(")]
+      .filter((i) => i > 0);
+    for (const at of work) {
+      assert.ok(at > gateAt, "a route does work before the guard");
+    }
+  }
+});
+
+test("34: attempts are rate limited BEFORE the secret is compared, and it fails closed", () => {
+  // Limiting only after a failed comparison still lets an attacker spend
+  // the endpoint's whole capacity guessing.
+  const limitAt = adminGate.indexOf("consumePersistentRateLimit");
+  const authAt = adminGate.indexOf("authorizeLaunchAdmin(request");
+  assert.ok(limitAt > 0 && authAt > limitAt, "the secret is compared before the attempt is counted");
+
+  // The SHARED counter, not a per-instance one - a serverless instance
+  // resets its memory on every cold start.
+  assert.match(adminGate, /consumePersistentRateLimit\(\s*supabase/);
+  // An unreachable counter refuses. An admin endpoint is the wrong place
+  // to degrade to unlimited attempts.
+  assert.match(adminGate, /limit\.kind === "unavailable"[\s\S]{0,300}?status 503|limit\.kind === "unavailable"[\s\S]{0,300}?503/);
+  assert.ok(ADMIN_RATE_LIMIT_MAX <= 10, "the admin limit is looser than the public signup's");
+
+  // The bucket is namespaced, so admin attempts and public signups from
+  // one address cannot exhaust each other's budget.
+  assert.match(adminGate, /`admin:\$\{rateLimitKeyFromRequest\(request\)\}`/);
+});
+
+test("35: a wrong secret and a missing secret are indistinguishable from outside", () => {
+  // Otherwise the endpoint answers "is this deployment configured?" for
+  // anyone who asks.
+  const refusals = [...adminGate.matchAll(/return \{ ok: false, response: unauthorized\(\) \}/g)];
+  assert.equal(refusals.length, 2, "the two 401 paths diverged");
+  assert.match(adminGate, /function unauthorized\(\)[\s\S]*?401/);
+});
+
+/* ── Confirmation, and the ordering the code enforces ────────── */
+
+test("36: the destructive actions need a typed phrase, not a boolean", () => {
+  assert.equal(RELEASE_CONFIRMATION, "RELEASE GLOA LAUNCH");
+  assert.equal(SEND_CONFIRMATION, "SEND GLOA LAUNCH ANNOUNCEMENT");
+  assert.notEqual(RELEASE_CONFIRMATION, SEND_CONFIRMATION, "one phrase would confirm both actions");
+
+  // `{"confirm": true}` is what a copy-pasted runbook line carries by
+  // accident and what a retry replays without thinking.
+  for (const body of [null, undefined, {}, { confirm: true }, { confirm: 1 }, { confirm: "yes" },
+                      { confirm: RELEASE_CONFIRMATION.toLowerCase() }, { confirm: SEND_CONFIRMATION }]) {
+    assert.equal(hasConfirmation(body, RELEASE_CONFIRMATION), false, `accepted: ${JSON.stringify(body)}`);
+  }
+  assert.equal(hasConfirmation({ confirm: RELEASE_CONFIRMATION }, RELEASE_CONFIRMATION), true);
+
+  // Both routes actually require theirs.
+  assert.match(releaseRoute, /hasConfirmation\(body, RELEASE_CONFIRMATION\)/);
+  assert.match(sendRoute, /hasConfirmation\(body, SEND_CONFIRMATION\)/);
+  assert.ok(!statusRoute.includes("hasConfirmation"), "the read-only dry run demands a confirmation");
+});
+
+test("37: releasing and sending are two separate endpoints, and neither is a timer", () => {
+  // One decision - "the shop works, we are going" - must not also be the
+  // irreversible act of mailing everybody.
+  assert.ok(!releaseRoute.includes("runLaunchSend"), "the release endpoint also sends");
+  assert.ok(!releaseRoute.includes("emails.send"), "the release endpoint sends mail");
+
+  // NOTHING here flips the release on a schedule.
+  for (const source of [...ADMIN_ROUTES, read("lib/launchAdminRoute.ts")]) {
+    assert.ok(!/GLOA_LAUNCH_MS >|>= GLOA_LAUNCH_MS/.test(stripJs(source)),
+      "an admin route gates on the launch instant");
+  }
+  // The status route may READ the planned instant - it reports it.
+  assert.match(statusRoute, /plannedLaunchIso: GLOA_LAUNCH_ISO/);
+  // But no route sets `released` from a clock.
+  assert.ok(!/released: *true/.test(stripJs(statusRoute)));
+  assert.match(releaseRoute, /released: shouldRelease/);
+});
+
+test("38: the shop must be live before the launch is released or sent", () => {
+  // The announcement says the shop is open. Releasing it while the cart
+  // still routes to /contact would mail an invitation to a shut door.
+  for (const route of [releaseRoute, sendRoute]) {
+    assert.match(route, /shopStatus !== "live"/);
+    assert.match(route, /status: 409/);
+  }
+  // And the shop release itself is still a deployed constant, not
+  // something these endpoints can set.
+  for (const route of ADMIN_ROUTES) {
+    assert.ok(!/SHOP_STATUS *=[^=]/.test(route), "an admin route assigns SHOP_STATUS");
+  }
+});
+
+/* ── The dry run ─────────────────────────────────────────────── */
+
+function fakeStatusClient(counts, release, { releaseThrows = false } = {}) {
+  return {
+    async countWaitlist(filter) {
+      if (!(filter in counts)) throw new Error("no such count");
+      return counts[filter];
+    },
+    async readRelease() {
+      if (releaseThrows) throw new Error('relation "public.launch_release" does not exist');
+      return release;
+    },
+  };
+}
+
+test("39: the dry run reports every state separately and sends nothing", async () => {
+  const status = await readLaunchStatus(
+    fakeStatusClient(
+      { confirmedUnsent: 1200, pending: 40, withdrawn: 7, notified: 0, openClaims: 0, needsReview: 0 },
+      { released: false, released_at: null }
+    ),
+    { nowMs: Date.parse("2026-09-20T00:00:00Z"), plannedLaunchIso: "2026-10-01T12:00:00+02:00",
+      plannedLaunchMs: Date.parse("2026-10-01T10:00:00Z"), shopStatus: "prelaunch" }
+  );
+
+  // The four consent states are NOT summed. "2000 people are on the
+  // list" is the number that gets quoted and it is the wrong one.
+  assert.equal(status.counts.confirmedUnsent, 1200);
+  assert.equal(status.counts.pending, 40);
+  assert.equal(status.counts.withdrawn, 7);
+  assert.equal(status.counts.notified, 0);
+  assert.equal(status.released, false);
+  assert.equal(status.plannedInstantReached, false);
+
+  // Integers and booleans only - this answer ends up in a screenshot.
+  const asText = JSON.stringify(status);
+  assert.ok(!asText.includes("@"), "the dry run leaks an address");
+  assert.ok(!/[0-9a-f]{8}-[0-9a-f]{4}/.test(asText), "the dry run leaks a row id");
+
+  // The route that serves it does no writing at all.
+  const code = stripJs(statusRoute);
+  for (const write of [".update(", ".insert(", ".upsert(", ".delete(", "runLaunchSend", "emails.send", "rpc("]) {
+    assert.ok(!code.includes(write), `the dry run performs a write: ${write}`);
+  }
+  // And it counts with head:true, so no address is read to produce a number.
+  assert.match(statusRoute, /count: "exact", head: true/);
+});
+
+test("40: the dry run names what is blocking a send, and the clock is never a blocker", () => {
+  const base = {
+    plannedLaunchIso: "x", plannedInstantReached: false, shopStatus: "live",
+    released: true, releasedAt: null, migrationMissing: false,
+    counts: { confirmedUnsent: 10, pending: 0, withdrawn: 0, notified: 0, openClaims: 0, needsReview: 0 },
+  };
+  assert.deepEqual(launchSendBlockers(base), []);
+
+  assert.deepEqual(launchSendBlockers({ ...base, released: false }), ["the launch has not been released"]);
+  assert.deepEqual(launchSendBlockers({ ...base, shopStatus: "prelaunch" }), ["the shop is still prelaunch"]);
+  assert.deepEqual(launchSendBlockers({ ...base, migrationMissing: true }),
+    ["migration 044 is not applied"]);
+  assert.deepEqual(launchSendBlockers({ ...base, counts: { ...base.counts, confirmedUnsent: 0 } }),
+    ["no confirmed recipient is waiting"]);
+
+  // NOT reaching the planned instant blocks nothing, and reaching it
+  // permits nothing. It is context, not a gate.
+  assert.deepEqual(launchSendBlockers({ ...base, plannedInstantReached: false }), []);
+  assert.deepEqual(launchSendBlockers({ ...base, plannedInstantReached: true }), []);
+});
+
+test("41: a missing migration 044 is reported, not thrown", async () => {
+  // This is the single most useful thing the endpoint can say on
+  // 1 October, and it must not arrive as a 500 with a driver message.
+  const status = await readLaunchStatus(
+    fakeStatusClient({ pending: 3, withdrawn: 1, notified: 0 }, null, { releaseThrows: true }),
+    { nowMs: 0, plannedLaunchIso: "x", plannedLaunchMs: 1, shopStatus: "prelaunch" }
+  );
+  assert.equal(status.migrationMissing, true);
+  assert.equal(status.released, false, "a missing migration must not read as released");
+  // 043's own columns can still be counted.
+  assert.equal(status.counts.pending, 3);
+  assert.ok(launchSendBlockers(status).includes("migration 044 is not applied"));
+});
+
+/* ── Idempotency, as the provider actually defines it ────────── */
+
+test("42: the provider's 409s are mapped to the right outcome, not lumped together", async () => {
+  const seen = [];
+  const fetcher = async (url, init) => {
+    seen.push({ url, headers: init.headers });
+    return next();
+  };
+  let next = () => ({ status: 200, json: async () => ({ id: "x" }) });
+
+  const mailer = launchSendMailer("key", ORIGIN, fetcher);
+  const person = { id: "row-1", email: "a@example.com", first_name: null, attempts: 1 };
+
+  assert.deepEqual(await mailer.send(person, "k"), { ok: true });
+
+  // Another request with this key is IN FLIGHT - somebody may already be
+  // delivering it, so the outcome is unknown, not failed.
+  next = () => ({ status: 409, json: async () => ({ name: "concurrent_idempotent_requests" }) });
+  const concurrent = await mailer.send(person, "k");
+  assert.equal(concurrent.ok, false);
+  assert.equal(concurrent.unclear, true);
+
+  // The key was reused with a DIFFERENT payload. That is a caller bug
+  // and repeating it will never succeed - a plain failure.
+  next = () => ({ status: 409, json: async () => ({ name: "invalid_idempotent_request" }) });
+  const invalid = await mailer.send(person, "k");
+  assert.equal(invalid.ok, false);
+  assert.notEqual(invalid.unclear, true);
+
+  // A provider that broke AFTER accepting the request may have queued
+  // the message. Conservative: unknown.
+  next = () => ({ status: 503, json: async () => ({}) });
+  const broken = await mailer.send(person, "k");
+  assert.equal(broken.unclear, true);
+
+  // An ordinary refusal stays a refusal.
+  next = () => ({ status: 422, json: async () => ({ name: "validation_error" }) });
+  const refused = await mailer.send(person, "k");
+  assert.equal(refused.ok, false);
+  assert.notEqual(refused.unclear, true);
+
+  // The key travels in the documented header, and stays inside the
+  // documented 256-character limit.
+  assert.equal(seen[0].headers["Idempotency-Key"], "k");
+  assert.ok(idempotencyKey("00000000-0000-0000-0000-000000000000").length <= 256);
+});
+
+test("43: the provider's error body never reaches a response or a log", () => {
+  // Resend echoes the recipient address on several error paths.
+  const code = stripJs(sendDeps);
+  assert.ok(!/reason: *[^;]*body\.message/.test(code), "the provider's message is passed through");
+  assert.ok(!/console\./.test(code), "the deps module logs");
+  // Only the status and the error NAME are used to build a reason.
+  assert.match(code, /provider refused with \$\{response\.status\}/);
+});
+
+test("44: an unknown outcome is parked for review and never retried automatically", async () => {
+  const db = fakeDb(confirmed(2));
+  const mailer = {
+    seen: [],
+    async send() {
+      return { ok: false, unclear: true, reason: "provider reports the same key already in flight" };
+    },
+  };
+
+  const summary = await runLaunchSend(db, mailer, {});
+  assert.equal(summary.needsReview, 2);
+  assert.equal(summary.failed, 0);
+  assert.equal(summary.sent, 0);
+
+  // Parked rows are invisible to the claim, so a second run - or a
+  // hundred - cannot turn an unknown outcome into a duplicate.
+  const again = await runLaunchSend(db, { seen: [], async send() { throw new Error("must not be called"); } }, {});
+  assert.equal(again.claimed, 0, "a parked row was claimed again");
+});
+
+test("45: a throw mid-request is unknown, not failed", async () => {
+  // A socket that died tells us nothing about whether the provider took
+  // the message. Retrying it is a coin flip between a missing mail and a
+  // duplicate one.
+  const db = fakeDb(confirmed(1));
+  const mailer = { seen: [], async send() { throw new Error("socket hang up"); } };
+  const summary = await runLaunchSend(db, mailer, {});
+  assert.equal(summary.needsReview, 1);
+  assert.equal(summary.failed, 0);
+  assert.equal(db.state[0].needsReview, true);
+});
+
+test("46: a mark that fails after the provider accepted parks the row and stops", async () => {
+  // The worst case: the provider has the message and the database will
+  // not record it. Continuing would burn more claims the same way.
+  const db = fakeDb(confirmed(3), { markThrows: true });
+  const summary = await runLaunchSend(db, fakeMailer(), {});
+  assert.equal(summary.unmarked, 1);
+  assert.ok(summary.stopped);
+  assert.match(summary.stoppedReason, /mark failed/);
+  assert.equal(db.state[0].needsReview, true, "the unknown row was not parked");
+});
+
+test("47: the send endpoint is bounded per call and safe to call twice", () => {
+  // A serverless runtime kills a long request, so one call drains a
+  // bounded slice and the operator repeats it.
+  assert.match(sendRoute, /DEFAULT_MAX_ROWS_PER_CALL = 200/);
+  assert.match(sendRoute, /Math\.min\(Math\.floor\(requested\), DEFAULT_MAX_ROWS_PER_CALL\)/);
+  // The response is counts only.
+  assert.match(sendRoute, /return Response\.json\(summary, \{ status: 200 \}\)/);
+  for (const leak of ["email", "recipient", "first_name"]) {
+    assert.ok(!stripJs(sendRoute).includes(leak), `the send response carries ${leak}`);
+  }
+});
+
+test("48: nothing in this feature can send without the release, whatever the endpoint does", () => {
+  // The gate lives in the SQL, so an endpoint cannot forget it and a
+  // future caller cannot skip it. This is the assertion that the check
+  // is NOT merely in application code.
+  const sql = stripSql(migration);
+  const claim = sql.slice(sql.indexOf("function public.claim_launch_notifications"),
+                          sql.indexOf("function public.mark_launch_notification_sent"));
+  assert.match(claim, /from public\.launch_release/);
+  assert.match(claim, /if v_released is not true then\s*return;/);
+  // And no admin route writes `released: true` on its own initiative -
+  // only from an explicitly confirmed request body.
+  assert.match(releaseRoute, /const shouldRelease = release !== false/);
+  assert.match(releaseRoute, /hasConfirmation\(body, RELEASE_CONFIRMATION\)/);
 });

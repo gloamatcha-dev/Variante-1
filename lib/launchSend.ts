@@ -17,28 +17,41 @@
  * finishing it keeps the window between "this row is mine" and "this row
  * is done" as short as one provider round trip.
  *
- * ── WHY A DUPLICATE CANNOT HAPPEN ─────────────────────────────
+ * ── WHAT IS ACTUALLY GUARANTEED, AND WHAT IS NOT ──────────────
  *
- * Four things have to fail at once for somebody to get two mails, and
- * each is closed separately:
+ * Three duplicate paths are closed outright, by the database:
  *
  *   1. Two workers claiming the same row - impossible: the claim is one
  *      UPDATE ... FOR UPDATE SKIP LOCKED (migration 044 §3).
  *   2. A retry re-sending an already-sent row - impossible: the claim
  *      selects `launch_notification_sent_at is null`, and marking is
  *      idempotent.
- *   3. A crash between the send and the mark - the row stays claimed,
- *      becomes reclaimable after the stale window, and the SECOND
- *      attempt carries the SAME idempotency key, so the provider itself
- *      refuses to deliver it twice.
- *   4. A worker whose claim expired marking a row it no longer owns -
+ *   3. A worker whose claim expired marking a row it no longer owns -
  *      impossible: mark_launch_notification_sent matches on the claim id
  *      and reports false.
  *
- * Point 3 is the one that needs the provider's help, which is why
- * `idempotencyKey` below is derived from the row id and nothing else. It
- * is stable across retries, deploys and workers, and it is not a secret:
- * it identifies a message, not a person.
+ * The fourth is NOT closed outright, and saying otherwise would be a
+ * lie worth avoiding: a crash between the provider accepting a message
+ * and the row being marked leaves an outcome nobody knows.
+ *
+ * THE PROVIDER'S HELP HAS AN EXPIRY DATE. Resend keeps an idempotency
+ * key for TWENTY-FOUR HOURS and answers 409 while a request with the
+ * same key is still in flight. Inside that window a repeat is genuinely
+ * safe - the provider returns the original response without sending
+ * again. Outside it the key means nothing and a "retry" is a second
+ * mail to somebody who consented to exactly one.
+ *
+ * So this module does not retry an unknown outcome. It reports
+ * `unclear`, the caller parks the row for review (migration 044 §5b),
+ * and the claim can no longer see it. A person reconciles it against
+ * the provider's own delivery log. That is slower than an automatic
+ * retry and it is the correct trade: a missing mail can be sent later,
+ * a duplicate cannot be unsent.
+ *
+ * `idempotencyKey` below is derived from the row id and nothing else, so
+ * it is stable across retries, deploys and workers. It is not a secret:
+ * it identifies a message, not a person, and it stays well inside the
+ * provider's 256-character limit.
  *
  * ── PURE ENOUGH TO TEST ───────────────────────────────────────
  *
@@ -79,6 +92,11 @@ export type LaunchSendSummary = {
   /** Rows the provider refused. The claim was given back. */
   failed: number;
   /**
+   * Rows whose outcome is unknown and which were parked for a human to
+   * reconcile. NOT retried: see the note at the top of this file.
+   */
+  needsReview: number;
+  /**
    * Rows the provider accepted but that could NOT be marked - the claim
    * had expired and another worker owned the row. Non-zero here means a
    * duplicate may have been delivered and is worth investigating.
@@ -94,6 +112,7 @@ export function emptyLaunchSendSummary(stoppedReason: string | null = null): Lau
     claimed: 0,
     sent: 0,
     failed: 0,
+    needsReview: 0,
     unmarked: 0,
     stopped: stoppedReason !== null,
     stoppedReason,
@@ -105,11 +124,27 @@ export type LaunchSendDb = {
   claim(claimId: string, limit: number): Promise<ClaimedRecipient[]>;
   markSent(id: string, claimId: string): Promise<boolean>;
   releaseClaim(id: string, claimId: string, reason: string | null): Promise<boolean>;
+  /** Parks a row whose outcome is unknown. It is never claimed again. */
+  flagForReview(id: string, claimId: string, reason: string): Promise<boolean>;
 };
 
-/** The mailer surface. Returns nothing on success, throws or returns a reason on failure. */
+/**
+ * What one send attempt can end as.
+ *
+ * THREE OUTCOMES, NOT TWO. `unclear` is the one that matters: the
+ * provider neither confirmed nor refused, so whether this person
+ * received the mail is unknown. It is kept separate from `failed`
+ * because the two must be handled differently - a refusal may be
+ * retried, an unknown outcome may not.
+ */
+export type SendAttempt =
+  | { ok: true }
+  | { ok: false; unclear?: false; reason: string }
+  | { ok: false; unclear: true; reason: string };
+
+/** The mailer surface. Narrow, so a test can supply it. */
 export type LaunchSendMailer = {
-  send(recipient: ClaimedRecipient, key: string): Promise<{ ok: true } | { ok: false; reason: string }>;
+  send(recipient: ClaimedRecipient, key: string): Promise<SendAttempt>;
 };
 
 export type LaunchSendOptions = {
@@ -204,16 +239,25 @@ export async function runLaunchSend(
         return summary;
       }
 
-      let outcome: { ok: true } | { ok: false; reason: string };
+      let outcome: SendAttempt;
       try {
         outcome = await mailer.send(recipient, idempotencyKey(recipient.id));
       } catch (err) {
-        outcome = { ok: false, reason: errText(err) };
+        // A THROW IS NOT A REFUSAL. A socket that died mid-request tells
+        // us nothing about whether the provider took the message, so
+        // this is unknown rather than failed - and unknown is never
+        // retried automatically.
+        outcome = { ok: false, unclear: true, reason: errText(err) };
       }
 
       if (!outcome.ok) {
-        summary.failed += 1;
-        await safeRelease(db, recipient.id, claimId, outcome.reason, summary);
+        if (outcome.unclear) {
+          summary.needsReview += 1;
+          await safeFlag(db, recipient.id, claimId, outcome.reason, summary);
+        } else {
+          summary.failed += 1;
+          await safeRelease(db, recipient.id, claimId, outcome.reason, summary);
+        }
         continue;
       }
 
@@ -231,7 +275,12 @@ export async function runLaunchSend(
           summary.unmarked += 1;
         }
       } catch (err) {
+        // THE WORST CASE: the provider has the message and the database
+        // would not record it. Park the row so no automatic retry can
+        // turn this into a second mail, then stop - a database that
+        // cannot be written to will not do better on the next row.
         summary.unmarked += 1;
+        await safeFlag(db, recipient.id, claimId, `mark failed after send: ${errText(err)}`, summary);
         summary.stopped = true;
         summary.stoppedReason = `mark failed after a send: ${errText(err)}`;
         return summary;
@@ -245,6 +294,27 @@ export async function runLaunchSend(
   summary.stopped = true;
   summary.stoppedReason = "row ceiling reached";
   return summary;
+}
+
+/**
+ * Parks a row whose outcome is unknown.
+ *
+ * A flag that cannot be written is itself a problem, but not one worth
+ * throwing over: the row stays claimed and expires, and the operator
+ * sees it in the open-claims count. Recorded, never thrown.
+ */
+async function safeFlag(
+  db: LaunchSendDb,
+  id: string,
+  claimId: string,
+  reason: string,
+  summary: LaunchSendSummary
+): Promise<void> {
+  try {
+    await db.flagForReview(id, claimId, reason);
+  } catch (err) {
+    summary.stoppedReason = summary.stoppedReason ?? `flag failed: ${errText(err)}`;
+  }
 }
 
 async function safeRelease(

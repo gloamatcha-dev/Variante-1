@@ -256,7 +256,12 @@ test("4c: no API, no server action, no migration was added for this page", () =>
     // namespace, touches no route listed here, and is reviewed in
     // tests/launch-waitlist.test.mjs. This guard protects "no
     // UNREVIEWED route appeared", never "the surface stopped growing".
-    ["annual-plan", "checkout", "contact", "cron", "internal", "launch",
+    // The launch admin surface: POST-only /api/admin/launch/{status,
+    // release,send}, each behind LAUNCH_ADMIN_SECRET, a shared rate
+    // limit and a typed confirmation phrase. It is the trigger for the
+    // one-time launch announcement and touches no route listed here.
+    // Reviewed in tests/launch-send.test.mjs.
+    ["admin", "annual-plan", "checkout", "contact", "cron", "internal", "launch",
      "orders", "stripe", "subscriptions", "withdrawal"],
     "an API route was added or removed");
   assert.ok(!page.includes('"use server"'), "a server action was added");
