@@ -807,6 +807,17 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
   };
   walk("app/api");
   assert.deepEqual(apiDirs.sort(), [
+    // The launch admin surface. Three POST-only routes behind
+    // LAUNCH_ADMIN_SECRET that release and run the one-time launch
+    // announcement. They touch no account, order, subscription or annual
+    // route, and no browser reaches them - authorization is a Bearer
+    // header the client never holds. Reviewed in
+    // tests/launch-send.test.mjs. Re-pinned rather than deleted: this
+    // guard protects "no UNREVIEWED endpoint appeared", never "the API
+    // stopped growing".
+    "/admin/launch/release",
+    "/admin/launch/send",
+    "/admin/launch/status",
     "/annual-plan/checkout/session",
     "/checkout/quote",
     "/checkout/session",
