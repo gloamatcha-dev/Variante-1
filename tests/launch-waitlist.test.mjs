@@ -60,6 +60,8 @@ import {
 } from "../lib/launchWelcomeSend.ts";
 
 import {
+  LAUNCH_DISCOUNT_CODE,
+  LAUNCH_DISCOUNT_PERCENT,
   LAUNCH_DISCOUNT_FROM_LABEL,
   LAUNCH_DISCOUNT_UNTIL_LABEL,
 } from "../lib/launchDiscount.ts";
@@ -632,10 +634,11 @@ test("35: the double opt-in mail asks one question and advertises nothing", () =
     assert.match(part, /Fast geschafft/);
     assert.match(part, /Bestätige kurz, dass wir dir Bescheid geben dürfen/);
     assert.match(part, /keine regelmäßigen Newsletter/);
-    assert.match(part, /ausschließlich für die Launch-Benachrichtigung verwendet/);
+    assert.match(part, /Launch-Rabattcode/);
+    assert.match(part, /keine weitere Werbung/);
     assert.match(part, /Cara 2 GmbH/);
     // No marketing of any kind.
-    for (const term of ["Shop", "kaufen", "Rabatt", "Angebot", "Produkt", "€", "Preis", "Event"]) {
+    for (const term of ["Shop", "kaufen", "Angebot", "Produkt", "€", "Preis", "Event"]) {
       assert.ok(!part.includes(term), `the confirmation mail advertises: ${term}`);
     }
   }
@@ -1650,14 +1653,22 @@ test("76: the confirmation mail's wording and purpose are untouched by the rebra
 
   // A visual pass may not change what a consent mail says.
   assert.equal(subject, "GLOA Launch List bestätigen");
-  assert.ok(html.includes("Du erhältst über diese Eintragung keine regelmäßigen Newsletter."));
-  assert.ok(html.includes("ausschließlich für die Launch-Benachrichtigung verwendet"));
+  assert.ok(html.includes("Gleich nach deiner Bestätigung schicken wir dir deinen Launch-Rabattcode"));
+  assert.ok(html.includes("keine regelmäßigen Newsletter und keine weitere Werbung."));
   assert.ok(html.includes("Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin"));
-  assert.ok(text.includes("Du erhältst über diese Eintragung keine regelmäßigen Newsletter."));
+  assert.ok(text.includes("keine regelmäßigen Newsletter und keine weitere Werbung."));
 
   // Still exactly one action, and still no marketing of any kind.
-  for (const banned of ["/shop", "Rabatt", "Gutschein", "% ", "Angebot", "jetzt kaufen", "Produkte"]) {
+  for (const banned of ["/shop", "Gutschein", "% ", "Angebot", "jetzt kaufen", "Produkte"]) {
     assert.ok(!html.includes(banned), `the consent mail advertises: ${banned}`);
+  }
+
+  // NAMING the second mail is not advertising it. The offer itself is
+  // what must never appear here: a consent mail that already carries the
+  // code has stopped being a consent mail. Both parts, both values.
+  for (const part of [html, text]) {
+    assert.ok(!part.includes(LAUNCH_DISCOUNT_CODE), "the consent mail carries the code");
+    assert.ok(!part.includes(`${LAUNCH_DISCOUNT_PERCENT} %`), "the consent mail carries the offer");
   }
 });
 

@@ -51,6 +51,21 @@ export type BuiltLaunchConfirmationEmail = {
  * not been given for yet - and the whole promise of this list is that
  * the address is used for the launch and for nothing else.
  *
+ * -- THE FOOTER HAS TO MATCH THE CONSENT BEING CONFIRMED --
+ *
+ * This mail used to promise the address would be used for the launch
+ * notification and nothing else. That was true under consent version
+ * one. Version two asks the same person to agree to TWO mails - the
+ * welcome mail carrying the discount code, and the launch notification
+ * itself - so the old sentence claimed less than the person had just
+ * agreed to, and gave no warning of a mail arriving seconds later.
+ *
+ * This wording is template prose, not the stored consent text, which is
+ * why nothing broke when the consent version moved and why the
+ * contradiction survived the whole suite: the test asserted the old
+ * string. It names both mails now, and still says plainly that there is
+ * nothing beyond them.
+ *
  * The Instagram line is the one soft link, and it stays a link to a
  * public profile: no tracking, no offer, and nothing that needs consent.
  *
@@ -76,8 +91,9 @@ export function buildLaunchConfirmationEmail(input: LaunchConfirmationInput): Bu
     "EINTRAGUNG BESTÄTIGEN:",
     confirmUrl,
     "",
-    "Du erhältst über diese Eintragung keine regelmäßigen Newsletter.",
-    "Deine E-Mail-Adresse wird ausschließlich für die Launch-Benachrichtigung verwendet.",
+    "Gleich nach deiner Bestätigung schicken wir dir deinen Launch-Rabattcode,",
+    "und zum Start einmalig die Launch-Benachrichtigung. Mehr sind es nicht:",
+    "keine regelmäßigen Newsletter und keine weitere Werbung.",
     "",
     "Du warst das nicht oder hast es dir anders überlegt? Dann ignoriere diese",
     "E-Mail einfach, oder trag dich hier direkt wieder aus:",
@@ -102,7 +118,7 @@ ${emailHeadline("Fast geschafft.")}
 ${emailButton(escapeHtml(confirmUrl), "Eintragung bestätigen")}
 </td></tr>
 <tr><td style="padding:0 0 24px 0;font-size:13px;line-height:1.6;color:${GLOA_PLUM};">Falls der Button nicht funktioniert, öffne diesen Link:<br/><a href="${escapeHtml(confirmUrl)}" style="color:${GLOA_BLUE};word-break:break-all;">${escapeHtml(confirmUrl)}</a></td></tr>
-${emailFooter(`Du erhältst über diese Eintragung keine regelmäßigen Newsletter. Deine E-Mail-Adresse wird ausschließlich für die Launch-Benachrichtigung verwendet.
+${emailFooter(`Gleich nach deiner Bestätigung schicken wir dir deinen Launch-Rabattcode, und zum Start einmalig die Launch-Benachrichtigung. Mehr sind es nicht: keine regelmäßigen Newsletter und keine weitere Werbung.
 <br/><br/>
 Du warst das nicht oder hast es dir anders überlegt? Dann ignoriere diese E-Mail einfach, oder <a href="${escapeHtml(withdrawUrl)}" style="color:${GLOA_BERRY};">trag dich hier direkt wieder aus</a>.
 <br/><br/>
