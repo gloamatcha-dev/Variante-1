@@ -60,6 +60,16 @@ export type LaunchWelcomeInput = {
   validFromLabel: string;
   /** Last day it can be used, as printed. e.g. "31.10.2026, 23:59 Uhr". */
   validUntilLabel: string;
+  /**
+   * Marks the message as a pre-launch preview.
+   *
+   * A preview is a real send through the real provider to an explicitly
+   * authorized address, so it must be impossible to mistake for the real
+   * thing sitting in an inbox beside it. Everything else is byte-identical
+   * to what a confirmed contact receives - a preview that differs from the
+   * real mail is a preview of nothing.
+   */
+  preview?: boolean;
 };
 
 export type BuiltLaunchWelcomeEmail = {
@@ -69,13 +79,14 @@ export type BuiltLaunchWelcomeEmail = {
 };
 
 export const LAUNCH_WELCOME_SUBJECT = "Willkommen bei GLOA. Hier ist dein Launch-Code.";
+export const LAUNCH_WELCOME_PREVIEW_SUBJECT = `[TEST] ${LAUNCH_WELCOME_SUBJECT}`;
 
 export function buildLaunchWelcomeEmail(input: LaunchWelcomeInput): BuiltLaunchWelcomeEmail {
-  const { firstName, origin, code, percentLabel, validFromLabel, validUntilLabel } = input;
+  const { firstName, origin, code, percentLabel, validFromLabel, validUntilLabel, preview = false } = input;
 
   const base = origin.replace(/\/+$/, "");
   const greeting = firstName ? `Hi ${firstName},` : "Hi,";
-  const subject = LAUNCH_WELCOME_SUBJECT;
+  const subject = preview ? LAUNCH_WELCOME_PREVIEW_SUBJECT : LAUNCH_WELCOME_SUBJECT;
 
   const body =
     "deine Eintragung ist bestätigt. Als Dankeschön bekommst du " +
@@ -91,6 +102,7 @@ export function buildLaunchWelcomeEmail(input: LaunchWelcomeInput): BuiltLaunchW
     "und keine regelmäßigen Newsletter.";
 
   const text = [
+    ...(preview ? ["[TEST] Vorschau der Willkommensmail. Diese Nachricht ging nur an dich.", ""] : []),
     greeting,
     "",
     body,
@@ -114,9 +126,16 @@ export function buildLaunchWelcomeEmail(input: LaunchWelcomeInput): BuiltLaunchW
 </table>
 </td></tr>`;
 
+  // The preview banner. Plum on Cream, no new colour, above the mark so
+  // it is the first thing read.
+  const previewBanner = preview
+    ? `<tr><td style="padding:0 0 24px 0;font-size:12px;line-height:1.6;letter-spacing:.06em;color:${GLOA_PLUM};border-bottom:1px solid ${GLOA_BLUE};padding-bottom:14px;"><strong>[TEST]</strong> Vorschau der Willkommensmail. Diese Nachricht ging nur an dich, nicht an die Launch List.</td></tr>`
+    : "";
+
   const html = emailShell(
     escapeHtml(subject),
     `${emailPreheader(`${percentLabel} auf deine erste Bestellung.`)}
+${previewBanner}
 ${emailHeader(base)}
 ${emailEyebrow("GLOA LAUNCH LIST")}
 ${emailHeadline("WILLKOMMEN.")}
