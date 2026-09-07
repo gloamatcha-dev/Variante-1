@@ -37,6 +37,7 @@ import {
 
 import { consumePersistentRateLimit } from "../lib/launchRateLimitStore.ts";
 
+
 import { buildLaunchConfirmationEmail } from "../lib/email/launchConfirmation.ts";
 
 /* ══════════════════════════════════════════════════════════════
@@ -940,11 +941,18 @@ test("57: a refused caller is told to wait, and never told to retry immediately"
   assert.deepEqual(allowed, { kind: "allowed" });
 });
 
-test("58: a database that cannot answer degrades the limit, it does not close the form", async () => {
-  // Failing closed here would mean one database hiccup - or a
-  // deployment that has not run 044 yet - takes the signup off the
-  // site. Failing open is only acceptable because layer 1 still
-  // applies, which the route asserts by logging the degradation.
+test("58: a database that cannot answer refuses the signup rather than waving it through", async () => {
+  // The store reports `unavailable` and decides nothing; the POLICY for
+  // that outcome belongs to the route, and the route's policy is to
+  // refuse.
+  //
+  // The earlier version degraded to the in-process limiter instead. On
+  // a serverless deployment that is not a weaker limit but an absent
+  // one - fresh instances arrive with empty counters exactly under the
+  // load the limit exists for - so the failure mode was confirmation
+  // mail leaving GLOA's sending domain, at an address the caller chose,
+  // at whatever rate the platform would scale to. Losing signups during
+  // an outage is recoverable; that is not.
   const cases = [
     { rpc: async () => ({ data: null, error: { message: "function does not exist" } }) },
     { rpc: async () => ({ data: null, error: null }) },
@@ -966,7 +974,44 @@ test("58: a database that cannot answer degrades the limit, it does not close th
   );
   assert.equal(refused.kind, "unavailable");
 
-  assert.match(signupRoute, /shared rate limit unavailable, falling back to per-instance/);
+  // THE ROUTE REFUSES. Both ways the shared counter can be missing - it
+  // answered `unavailable`, or there was no secret to build the digest
+  // with - end in the same neutral refusal, and neither falls through.
+  const code = stripJs(signupRoute);
+  assert.match(code, /shared\.kind === "unavailable"[\s\S]{0,400}?return temporarilyUnavailable\(\)/);
+  assert.match(code, /if \(!bucketKey\)[\s\S]{0,400}?return temporarilyUnavailable\(\)/);
+
+  // And it is genuinely a refusal, not a log line before the old path:
+  // nothing in this file falls back to the per-instance limiter.
+  assert.ok(
+    !/falling back to per-instance/.test(code),
+    "the route still degrades to the per-instance limiter"
+  );
+
+  // The refusal happens BEFORE anything is written or sent. If the
+  // upsert or the mail moved above the limit check this would catch it.
+  const limitAt = code.indexOf("consumePersistentRateLimit");
+  const upsertAt = code.indexOf(".upsert(");
+  const sendAt = code.indexOf("emails.send");
+  assert.ok(limitAt > 0 && upsertAt > limitAt, "the row is written before the shared limit is spent");
+  assert.ok(sendAt > limitAt, "the mail is sent before the shared limit is spent");
+});
+
+test("58b: the refusal is the same neutral answer every other outage gives", () => {
+  const code = stripJs(signupRoute);
+
+  // One helper produces every temporary refusal, so a caller cannot tell
+  // "the rate limiter is down" from "Resend is not configured" by
+  // comparing responses - which would turn the endpoint into a probe for
+  // which part of the deployment is unhealthy.
+  assert.match(code, /function temporarilyUnavailable\(\)[\s\S]*?status: 503/);
+  const refusals = [...code.matchAll(/status: 503/g)];
+  assert.equal(refusals.length, 1, "503 is built in more than one place");
+
+  // The reason is logged for the operator and never returned, and what
+  // is logged is the store's reason string - built from driver messages,
+  // never from the address or the digest. Test 59 pins that separately.
+  assert.match(code, /console\.error\("Launch waitlist: shared rate limit unavailable[^"]*", shared\.reason\)/);
 });
 
 test("59: neither the address nor the bucket key is ever logged or stored", () => {

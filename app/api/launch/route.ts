@@ -51,6 +51,13 @@ import { consumePersistentRateLimit } from "../../../lib/launchRateLimitStore";
  * from lib/launchWaitlist.ts. A consent record whose wording came from
  * the request body would prove nothing, since the caller could have
  * written any wording it liked.
+ *
+ * -- THE RATE LIMIT IS A PRECONDITION, NOT A BEST EFFORT --------
+ * Nothing is written and no mail is sent unless the SHARED counter in
+ * Postgres said yes. If that counter cannot be consulted - no secret to
+ * key the digest with, database unreachable, migration 043 not applied -
+ * the request is refused with a neutral 503 rather than allowed through
+ * on the in-process limiter alone. The reasoning is at the call site.
  */
 
 const MAX_BODY_BYTES = 20_000;
@@ -98,6 +105,29 @@ function tooManyRequests(retryAfterSeconds: number): Response {
   return Response.json(
     { error: "Zu viele Versuche. Bitte versuch es später noch einmal." } as ErrorResponse,
     { status: 429, headers: { "Retry-After": String(Math.max(1, Math.ceil(retryAfterSeconds))) } }
+  );
+}
+
+/**
+ * THE ONE ANSWER FOR "THIS CANNOT BE DONE RIGHT NOW".
+ *
+ * Every temporary refusal on this endpoint comes back through here, with
+ * the same status, the same body and no detail at all - a missing
+ * Supabase client, a missing Resend client, a missing site origin, a
+ * shared rate limit that cannot be consulted and a write that failed are
+ * indistinguishable from outside.
+ *
+ * That is deliberate. This is a public endpoint, so which piece of a
+ * deployment is unhealthy is not something a caller may probe for by
+ * comparing responses. It is also what lets the limiter fail closed
+ * without announcing that it has: a caller who has just been refused
+ * because the counter is unreachable learns exactly what a caller sees
+ * during any other outage, and nothing more.
+ */
+function temporarilyUnavailable(): Response {
+  return Response.json(
+    { error: "Die Eintragung ist gerade nicht möglich. Bitte versuch es später noch einmal." } as ErrorResponse,
+    { status: 503 }
   );
 }
 
@@ -198,10 +228,7 @@ export async function POST(request: Request): Promise<Response> {
       Boolean(resend),
       Boolean(origin)
     );
-    return Response.json(
-      { error: "Die Eintragung ist gerade nicht möglich. Bitte versuch es später noch einmal." } as ErrorResponse,
-      { status: 503 }
-    );
+    return temporarilyUnavailable();
   }
 
   // LAYER 2: the shared counter, and the limit that actually holds
@@ -213,24 +240,53 @@ export async function POST(request: Request): Promise<Response> {
   // It runs BEFORE the upsert and before the mail, which is the whole
   // point: a refused caller must not be able to write a row or make
   // GLOA's domain send a message.
-  if (bucketKey) {
-    const shared = await consumePersistentRateLimit(
-      supabase,
-      bucketKey,
-      LAUNCH_RATE_LIMIT_MAX,
-      LAUNCH_RATE_LIMIT_WINDOW_SECONDS
-    );
-    if (shared.kind === "limited") return tooManyRequests(shared.retryAfterSeconds);
-    if (shared.kind === "unavailable") {
-      // Degraded, not off: layer 1 still applied to this request. Said
-      // out loud in the log rather than passed over, because "the
-      // shared limit is not running" is an operational fact somebody
-      // has to be able to see. The reason never contains the address or
-      // the bucket key.
-      console.error("Launch waitlist: shared rate limit unavailable, falling back to per-instance:", shared.reason);
-    }
-  } else {
-    console.error("Launch waitlist: no bucket secret configured, shared rate limit not applied.");
+  //
+  // ── THIS FAILS CLOSED, AND THAT IS THE WHOLE POINT ──────────
+  //
+  // An earlier version degraded to layer 1 when the shared counter
+  // could not be consulted, on the reasoning that a per-instance limit
+  // is better than none. That reasoning does not survive contact with
+  // this deployment.
+  //
+  // Layer 1 lives in the memory of a serverless instance. When the
+  // shared counter is unreachable, what remains is not "a weaker
+  // limit" - it is five signups per instance per ten minutes, on a
+  // platform that hands out fresh instances precisely under the
+  // sustained load this exists to stop. The failure mode is therefore
+  // silent and unbounded: mail leaves GLOA's sending domain, addressed
+  // to whoever the caller named, at whatever rate the platform will
+  // scale to, and the only trace is a log line nobody is watching at
+  // 03:00.
+  //
+  // The cost of the other direction is that a database outage, or a
+  // deployment that has not run migration 043, takes the signup form
+  // off the site until it is fixed. That is a visible, bounded,
+  // reversible failure that loses signups. Losing signups is recoverable;
+  // having posted confirmation mail at strangers is not.
+  //
+  // So: no shared counter, no signup. Nothing is written and nothing is
+  // sent. The caller gets the same neutral 503 that every other
+  // temporary failure produces - see temporarilyUnavailable() - and the
+  // operator gets a log line naming the reason. The reason comes from
+  // driver messages only; it never contains the address or the bucket
+  // key.
+  if (!bucketKey) {
+    // No HMAC secret means the digest cannot be computed, which means
+    // the shared counter cannot be addressed at all. Same answer.
+    console.error("Launch waitlist: no bucket secret configured - refusing the signup.");
+    return temporarilyUnavailable();
+  }
+
+  const shared = await consumePersistentRateLimit(
+    supabase,
+    bucketKey,
+    LAUNCH_RATE_LIMIT_MAX,
+    LAUNCH_RATE_LIMIT_WINDOW_SECONDS
+  );
+  if (shared.kind === "limited") return tooManyRequests(shared.retryAfterSeconds);
+  if (shared.kind === "unavailable") {
+    console.error("Launch waitlist: shared rate limit unavailable - refusing the signup:", shared.reason);
+    return temporarilyUnavailable();
   }
 
   const confirmationToken = createToken();
@@ -274,10 +330,7 @@ export async function POST(request: Request): Promise<Response> {
     // Never log the address, never log a token, never return the driver
     // message to the caller.
     console.error("Launch waitlist: could not record the entry:", upsertError.message);
-    return Response.json(
-      { error: "Die Eintragung ist gerade nicht möglich. Bitte versuch es später noch einmal." } as ErrorResponse,
-      { status: 503 }
-    );
+    return temporarilyUnavailable();
   }
 
   // A row that had already been withdrawn is left alone. The upsert above

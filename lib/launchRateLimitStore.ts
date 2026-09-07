@@ -22,14 +22,24 @@
  * -- WHAT HAPPENS WHEN THE DATABASE CANNOT ANSWER --------------
  * The call reports `unavailable` rather than throwing or guessing.
  *
- * That is a deliberate choice and it deserves its reason in writing:
- * failing CLOSED here would mean a database hiccup, or a deployment
- * that has not run 043 yet, takes the signup form off the site
- * entirely. Failing OPEN is acceptable only because it is not actually
- * open - the in-process limiter in the route still applies to every
- * request, so the endpoint degrades from "limited globally" to
- * "limited per instance", which is precisely where it stood before this
- * module existed. The route logs the degradation.
+ * THIS MODULE DOES NOT DECIDE WHAT THAT MEANS. It reports three
+ * outcomes - allowed, limited, unavailable - and the policy for the
+ * third belongs to the caller, because only the caller knows what it
+ * was about to do.
+ *
+ * The one caller today, POST /api/launch, treats `unavailable` as a
+ * refusal: it writes nothing and sends nothing, and answers with a
+ * neutral 503. An earlier version let the request through on the
+ * in-process limiter alone, which on a serverless deployment is not a
+ * weaker limit but an effectively absent one - fresh instances arrive
+ * with empty counters exactly under the load the limit exists for, and
+ * the resulting failure mode is confirmation mail leaving GLOA's
+ * sending domain at whatever rate the platform will scale to. The
+ * reasoning is written out in full at that call site.
+ *
+ * Keeping the policy there rather than here is what lets a future
+ * caller with nothing to send - a read-only probe, an internal tool -
+ * choose differently without editing this module.
  */
 
 /** The Supabase surface this module uses. Narrow, so a test can supply it. */
@@ -79,7 +89,7 @@ export async function consumePersistentRateLimit(
   max: number,
   windowSeconds: number
 ): Promise<PersistentRateLimitOutcome> {
-  // Belt and braces with the CHECK constraint in 044: a value that is
+  // Belt and braces with the CHECK constraint in 043: a value that is
   // not a digest is never put on the wire, so a mistake upstream cannot
   // turn into a raw address in a database log line.
   if (!isBucketKey(bucketKey)) {
