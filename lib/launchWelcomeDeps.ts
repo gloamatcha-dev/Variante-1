@@ -32,11 +32,13 @@ type Rpc = {
 
 export function welcomeSendDb(client: Rpc): WelcomeSendDb {
   return {
-    async claim(rowId, claimId, consentVersion): Promise<WelcomeClaim> {
+    async claim(rowId, claimId): Promise<WelcomeClaim> {
+      // The consent version is NOT passed. It is a literal inside
+      // claim_welcome_email, so no caller can widen the gate by handing
+      // it a different string - see the note in migration 045.
       const { data, error } = await client.rpc(CLAIM_FN, {
         p_id: rowId,
         p_claim_id: claimId,
-        p_consent_version: consentVersion,
       });
       // Thrown, not returned false: "the database could not be asked" is
       // a different thing from "you did not win the claim", and only the

@@ -84,6 +84,101 @@ alter table public.launch_waitlist
     check (pending_consent_text is null or length(pending_consent_text) between 1 and 4000),
   add column if not exists pending_consent_given_at timestamptz;
 
+-- 1b. THE PERMANENT RECORD OF CONFIRMED CONSENTS ----------------
+--
+-- WHY THE COLUMNS ON THE ROW ARE NOT ENOUGH.
+--
+-- consent_version, consent_text and consent_given_at describe the
+-- consent CURRENTLY in force. When somebody confirms a newer wording,
+-- those three are overwritten - correctly, because the newer wording is
+-- now the one that governs. What is lost in that moment is the proof of
+-- the EARLIER one: that this person confirmed version 1, on that day,
+-- to that exact text.
+--
+-- Article 7(1) GDPR requires the controller to be able to demonstrate
+-- that consent was given. "Was given" is past tense, and a column that
+-- only ever holds the current value cannot answer it. A withdrawal
+-- dispute, a complaint, or a question about who was entitled to the
+-- launch mail three weeks ago all need the history, not the snapshot.
+--
+-- WHAT GOES IN, AND WHEN.
+--
+-- One row per CONFIRMATION, written by confirm_launch_signup at the
+-- moment a consent takes effect - see section 3. Nothing else writes
+-- here.
+--
+-- A PENDING WORDING NEVER REACHES THIS TABLE. Being shown a text and
+-- ticking a box is a request; it becomes a consent when the link in the
+-- mail is clicked, and not before. Recording proposals here would turn
+-- the evidence log into a log of things people were asked, which is
+-- exactly the confusion it exists to prevent.
+--
+-- IT IS APPEND-ONLY. service_role is granted select and insert and
+-- nothing else - no update, no delete. Evidence that can be edited is
+-- not evidence, and the grant is where that is enforced rather than in
+-- a comment. The rows carry no token, no IP address and no marketing
+-- flag: the address is reachable through waitlist_id and nothing here
+-- duplicates it.
+
+create table if not exists public.launch_consent_history (
+  id              uuid primary key default gen_random_uuid(),
+
+  -- Cascades, so deleting a waitlist entry - which the retention rule
+  -- and an erasure request both do - takes its consent record with it.
+  -- Keeping consent evidence for somebody whose data was erased would
+  -- be the wrong kind of thorough.
+  waitlist_id     uuid not null references public.launch_waitlist(id) on delete cascade,
+
+  -- The wording that took effect, stored in full. Not a reference to a
+  -- constant in a deployment that will be replaced.
+  consent_version text not null check (length(consent_version) between 1 and 200),
+  consent_text    text not null check (length(consent_text) between 1 and 4000),
+
+  -- When the person submitted the form, and when they confirmed it. Two
+  -- different facts, both required: the gap between them is the double
+  -- opt-in, and collapsing them would hide it.
+  given_at        timestamptz not null,
+  confirmed_at    timestamptz not null,
+
+  -- When this row was written. Distinct from confirmed_at so a backfill
+  -- is visibly a backfill and never looks like a live confirmation.
+  recorded_at     timestamptz not null default now()
+);
+
+create index if not exists idx_launch_consent_history_waitlist
+  on public.launch_consent_history (waitlist_id, confirmed_at desc);
+
+alter table public.launch_consent_history enable row level security;
+
+-- Append-only, and server-side only. No update and no delete for
+-- anybody, including service_role.
+grant select, insert on public.launch_consent_history to service_role;
+
+-- BACKFILL FOR CONSENTS ALREADY CONFIRMED.
+--
+-- Only rows that CARRY a confirmation already - confirmed_at is not
+-- null - and only with the values those rows actually hold. Nothing is
+-- invented, nothing is dated to a time that was not recorded, and a row
+-- that was never confirmed gets no entry.
+--
+-- recorded_at is now(), not confirmed_at: this row is being written
+-- today from evidence that already existed, and pretending otherwise
+-- would be the one thing a consent log must never do.
+--
+-- Guarded by the not-exists, so re-running the migration cannot
+-- duplicate an entry.
+insert into public.launch_consent_history
+  (waitlist_id, consent_version, consent_text, given_at, confirmed_at)
+select w.id, w.consent_version, w.consent_text,
+       coalesce(w.consent_given_at, w.confirmed_at), w.confirmed_at
+  from public.launch_waitlist w
+ where w.confirmed_at is not null
+   and not exists (
+     select 1 from public.launch_consent_history h
+      where h.waitlist_id = w.id
+        and h.confirmed_at = w.confirmed_at
+   );
+
 -- 2. THE ONE WAY TO SIGN UP -------------------------------------
 --
 -- Replaces the read-then-upsert entirely. Returns what it did, so the
@@ -268,8 +363,12 @@ language plpgsql
 security definer set search_path = ''
 as $$
 declare
-  v_row public.launch_waitlist%rowtype;
-  v_now timestamptz := now();
+  v_row     public.launch_waitlist%rowtype;
+  v_now     timestamptz := now();
+  v_status  text;
+  v_version text;
+  v_text    text;
+  v_given   timestamptz;
 begin
   if p_token_hash is null or p_token_hash !~ '^[0-9a-f]{64}$' then
     return query select 'invalid'::text, null::uuid, null::text;
@@ -297,15 +396,41 @@ begin
     return;
   end if;
 
+  -- ── THE STATUS A CONFIRMATION MAY SET ───────────────────────
+  --
+  -- 'notified' IS TERMINAL AND STAYS TERMINAL.
+  --
+  -- This function used to write 'confirmed' unconditionally, which was
+  -- wrong for one row in particular: somebody who has already received
+  -- the launch announcement, then re-submits the form (getting a fresh
+  -- token while keeping status 'notified'), then clicks it. That would
+  -- have moved a spent row back to 'confirmed'.
+  --
+  -- The launch send itself would still have refused them -
+  -- launch_notification_sent_at is set and both the claim in 044 and
+  -- mayReceiveLaunchNotification() test it - so no second announcement
+  -- could have gone out. But the status would have been a lie, and
+  -- mayReceiveWelcomeEmail() reads exactly that status: a spent contact
+  -- would have become eligible for the welcome mail and its discount
+  -- code, weeks after the launch it was written for.
+  --
+  -- So a consent confirmation records the consent and nothing else. It
+  -- never rewinds the lifecycle.
+  v_status := case when v_row.status = 'notified' then 'notified' else 'confirmed' end;
+
+  -- What is actually taking effect. Null-safe: an ordinary first
+  -- confirmation has nothing pending and the in-force columns already
+  -- hold the right values.
+  v_version := coalesce(v_row.pending_consent_version, v_row.consent_version);
+  v_text    := coalesce(v_row.pending_consent_text, v_row.consent_text);
+  v_given   := coalesce(v_row.pending_consent_given_at, v_row.consent_given_at);
+
   update public.launch_waitlist
-     set status = 'confirmed',
+     set status = v_status,
          confirmed_at = v_now,
-         -- The proposed wording becomes the wording in force. When there
-         -- is nothing pending - the ordinary first confirmation - the
-         -- in-force columns are already right and are left alone.
-         consent_version = coalesce(v_row.pending_consent_version, v_row.consent_version),
-         consent_text = coalesce(v_row.pending_consent_text, v_row.consent_text),
-         consent_given_at = coalesce(v_row.pending_consent_given_at, v_row.consent_given_at),
+         consent_version = v_version,
+         consent_text = v_text,
+         consent_given_at = v_given,
          pending_consent_version = null,
          pending_consent_text = null,
          pending_consent_given_at = null,
@@ -313,10 +438,22 @@ begin
          confirmation_token_hash = null
    where id = v_row.id;
 
-  return query
-    select 'confirmed'::text,
-           v_row.id,
-           coalesce(v_row.pending_consent_version, v_row.consent_version);
+  -- ── THE PERMANENT RECORD ────────────────────────────────────
+  --
+  -- Written HERE and only here, because this is the only moment a
+  -- consent becomes effective. A row in launch_consent_history means
+  -- "this person confirmed this wording at this time" and nothing else -
+  -- a pending wording never reaches it, because a pending wording is not
+  -- a consent.
+  --
+  -- The columns above will be overwritten by the NEXT confirmation; this
+  -- table is what makes the earlier one still provable afterwards.
+  insert into public.launch_consent_history
+    (waitlist_id, consent_version, consent_text, given_at, confirmed_at)
+  values
+    (v_row.id, v_version, v_text, v_given, v_now);
+
+  return query select 'confirmed'::text, v_row.id, v_version;
 end;
 $$;
 

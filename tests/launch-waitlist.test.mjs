@@ -1811,8 +1811,20 @@ test("83: the launch notification gate is unchanged by any of this", () => {
 
 test("84: 045 checks the consent version in SQL, not only in the application", () => {
   const sql = stripSql(welcomeMigration);
-  // A caller that forgot the check cannot get a v1 row out of the claim.
-  assert.match(sql, /and consent_version = p_consent_version/);
+  // THE GATE IS A LITERAL, NOT A PARAMETER. It used to be
+  // `consent_version = p_consent_version`, which let the CALLER decide
+  // which wording counts - so anything able to execute the function
+  // could pass the version 1 string and claim a version 1 contact for a
+  // mail carrying an offer they never agreed to. A gate whose key the
+  // caller supplies is not a gate.
+  assert.ok(!sql.includes("p_consent_version"),
+    "the welcome claim still takes the consent version from its caller");
+  assert.ok(sql.includes(`and consent_version = '${LAUNCH_CONSENT_VERSION}'`),
+    "the welcome claim does not pin the consent version itself");
+  // The literal in the SQL and the constant in the code must agree, and
+  // the version 1 string must appear nowhere in this migration.
+  assert.ok(!sql.includes(LAUNCH_CONSENT_VERSION_V1),
+    "045 mentions the version 1 wording");
   assert.match(sql, /and status = 'confirmed'/);
   assert.match(sql, /and withdrawn_at is null/);
   assert.match(sql, /and welcome_email_sent_at is null/);
@@ -2054,8 +2066,12 @@ test("94: a proposed consent carries no permission until it is confirmed", () =>
   // promotes them, and only because somebody clicked a link sent to that
   // address.
   const fn = confirmFn();
-  assert.match(fn, /consent_version = coalesce\(v_row\.pending_consent_version, v_row\.consent_version\)/);
-  assert.match(fn, /consent_text = coalesce\(v_row\.pending_consent_text, v_row\.consent_text\)/);
+  // The pending wording is resolved once into locals and then written,
+  // so the same values reach the row AND the permanent history.
+  assert.match(fn, /v_version := coalesce\(v_row\.pending_consent_version, v_row\.consent_version\)/);
+  assert.match(fn, /v_text\s*:= coalesce\(v_row\.pending_consent_text, v_row\.consent_text\)/);
+  assert.match(fn, /consent_version = v_version/);
+  assert.match(fn, /consent_text = v_text/);
   assert.match(fn, /pending_consent_version = null/);
   // The token is spent in the same statement, so the link works once.
   assert.match(fn, /confirmation_token_hash = null/);
@@ -2063,7 +2079,7 @@ test("94: a proposed consent carries no permission until it is confirmed", () =>
   // NOTHING ELSE promotes a pending consent. Not the signup, not an
   // admin route, not a sweep.
   const sql = stripSql(atomicMigration);
-  const promotions = [...sql.matchAll(/consent_version = coalesce\(/g)];
+  const promotions = [...sql.matchAll(/v_version := coalesce\(/g)];
   assert.equal(promotions.length, 1, "a second place promotes a pending consent");
   for (const rel of ["app/api/launch/route.ts", "lib/launchSend.ts", "lib/launchWaitlist.ts"]) {
     assert.ok(!/pending_consent/.test(stripJs(read(rel))),
@@ -2204,12 +2220,13 @@ function fakeWelcomeDb(opts = {}) {
   return {
     state,
     calls,
-    async claim(rowId, claimId, consentVersion) {
+    async claim(rowId, claimId) {
       calls.claims += 1;
       if (opts.claimThrows) throw new Error("relation does not exist");
-      // The SQL checks the consent version, the watermark, the review
-      // flag and the existing claim. The fake enforces the same rules.
-      if (consentVersion !== state.consentVersion) return { claimed: false };
+      // The SQL checks the consent version against ITS OWN literal, the
+      // watermark, the review flag and the existing claim. The fake
+      // enforces the same rules - note the caller passes no version.
+      if (state.consentVersion !== LAUNCH_CONSENT_VERSION) return { claimed: false };
       if (state.sent || state.needsReview || state.claim !== null) return { claimed: false };
       state.claim = claimId;
       return { claimed: true, email: "person@example.com", firstName: "Anna" };
@@ -2245,7 +2262,7 @@ test("101: a confirmed v2 contact receives the welcome mail exactly once", async
   const db = fakeWelcomeDb();
   const mailer = okMailer();
 
-  const first = await sendWelcomeEmail(db, mailer, "row-1", LAUNCH_CONSENT_VERSION, nextClaimId);
+  const first = await sendWelcomeEmail(db, mailer, "row-1", nextClaimId);
   assert.deepEqual(first, { kind: "sent" });
   assert.equal(mailer.seen.length, 1);
   assert.equal(mailer.seen[0].email, "person@example.com");
@@ -2254,7 +2271,7 @@ test("101: a confirmed v2 contact receives the welcome mail exactly once", async
 
   // A SECOND CLICK SENDS NOTHING. The watermark is set, so the claim
   // refuses - which is the whole reason it exists.
-  const second = await sendWelcomeEmail(db, mailer, "row-1", LAUNCH_CONSENT_VERSION, nextClaimId);
+  const second = await sendWelcomeEmail(db, mailer, "row-1", nextClaimId);
   assert.deepEqual(second, { kind: "not_claimed" });
   assert.equal(mailer.seen.length, 1, "the welcome mail was sent twice");
 });
@@ -2264,8 +2281,8 @@ test("102: two simultaneous clicks produce exactly one mail", async () => {
   const mailer = okMailer();
 
   const [a, b] = await Promise.all([
-    sendWelcomeEmail(db, mailer, "row-1", LAUNCH_CONSENT_VERSION, nextClaimId),
-    sendWelcomeEmail(db, mailer, "row-1", LAUNCH_CONSENT_VERSION, nextClaimId),
+    sendWelcomeEmail(db, mailer, "row-1", nextClaimId),
+    sendWelcomeEmail(db, mailer, "row-1", nextClaimId),
   ]);
 
   const kinds = [a.kind, b.kind].sort();
@@ -2280,7 +2297,7 @@ test("103: a version 1 contact can never be claimed for it", async () => {
   const db = fakeWelcomeDb({ consentVersion: LAUNCH_CONSENT_VERSION_V1 });
   const mailer = okMailer();
 
-  const outcome = await sendWelcomeEmail(db, mailer, "row-1", LAUNCH_CONSENT_VERSION, nextClaimId);
+  const outcome = await sendWelcomeEmail(db, mailer, "row-1", nextClaimId);
   assert.deepEqual(outcome, { kind: "not_claimed" });
   assert.equal(mailer.seen.length, 0, "a version 1 contact was sent the discount mail");
 });
@@ -2289,19 +2306,19 @@ test("104: an unknown provider outcome parks the row and is never retried", asyn
   const db = fakeWelcomeDb();
   const mailer = okMailer(() => ({ ok: false, unclear: true, reason: "key already in flight" }));
 
-  const outcome = await sendWelcomeEmail(db, mailer, "row-1", LAUNCH_CONSENT_VERSION, nextClaimId);
+  const outcome = await sendWelcomeEmail(db, mailer, "row-1", nextClaimId);
   assert.equal(outcome.kind, "needs_review");
   assert.equal(db.state.needsReview, true);
 
   // Parked rows are invisible to the claim, so nothing retries them.
-  const again = await sendWelcomeEmail(db, mailer, "row-1", LAUNCH_CONSENT_VERSION, nextClaimId);
+  const again = await sendWelcomeEmail(db, mailer, "row-1", nextClaimId);
   assert.deepEqual(again, { kind: "not_claimed" });
 
   // A thrown request is treated the same way: a dead socket says nothing
   // about whether the provider took the message.
   const db2 = fakeWelcomeDb();
   const throwing = { seen: [], async send() { throw new Error("socket hang up"); } };
-  const thrown = await sendWelcomeEmail(db2, throwing, "row-2", LAUNCH_CONSENT_VERSION, nextClaimId);
+  const thrown = await sendWelcomeEmail(db2, throwing, "row-2", nextClaimId);
   assert.equal(thrown.kind, "needs_review");
   assert.equal(db2.state.needsReview, true);
 });
@@ -2311,12 +2328,12 @@ test("105: a plain refusal gives the claim back so it can be retried", async () 
   let attempt = 0;
   const mailer = okMailer(() => (++attempt === 1 ? { ok: false, reason: "mailbox full" } : { ok: true }));
 
-  const first = await sendWelcomeEmail(db, mailer, "row-1", LAUNCH_CONSENT_VERSION, nextClaimId);
+  const first = await sendWelcomeEmail(db, mailer, "row-1", nextClaimId);
   assert.equal(first.kind, "failed");
   assert.equal(db.state.needsReview, false, "a plain refusal parked the row");
   assert.equal(db.state.claim, null, "the claim was not given back");
 
-  const second = await sendWelcomeEmail(db, mailer, "row-1", LAUNCH_CONSENT_VERSION, nextClaimId);
+  const second = await sendWelcomeEmail(db, mailer, "row-1", nextClaimId);
   assert.deepEqual(second, { kind: "sent" });
 });
 
@@ -2324,7 +2341,7 @@ test("106: a mark that fails after the provider accepted parks the row", async (
   // The provider has the message and the database will not record it -
   // the one path on which a duplicate can exist.
   const db = fakeWelcomeDb({ markThrows: true });
-  const outcome = await sendWelcomeEmail(db, okMailer(), "row-1", LAUNCH_CONSENT_VERSION, nextClaimId);
+  const outcome = await sendWelcomeEmail(db, okMailer(), "row-1", nextClaimId);
   assert.equal(outcome.kind, "needs_review");
   assert.match(outcome.reason, /mark failed after send/);
   assert.equal(db.state.needsReview, true);
@@ -2334,7 +2351,7 @@ test("107: a missing migration 045 reports unavailable and sends nothing", async
   // 045 is not applied yet. Confirming must still work.
   const db = fakeWelcomeDb({ claimThrows: true });
   const mailer = okMailer();
-  const outcome = await sendWelcomeEmail(db, mailer, "row-1", LAUNCH_CONSENT_VERSION, nextClaimId);
+  const outcome = await sendWelcomeEmail(db, mailer, "row-1", nextClaimId);
   assert.equal(outcome.kind, "unavailable");
   assert.equal(mailer.seen.length, 0);
 });
@@ -2441,4 +2458,197 @@ test("113: the offer block uses only the approved palette and no sale decoration
   assert.match(block, /flex-direction:column/);
   // And the figure is fluid, so 320px never clips it.
   assert.match(block, /font-size:clamp\(56px,11vw,104px\)/);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   17. THE AUDIT FINDINGS
+
+   Five defects found by reading the migrations before applying them.
+   Each of these tests is the one that would have caught it.
+   ══════════════════════════════════════════════════════════════ */
+
+const sendMigration = read("supabase/migrations/044_launch_send.sql");
+
+/* ── 1. notified is terminal ─────────────────────────────────── */
+
+test("114: confirming a consent never rewinds a notified contact", () => {
+  // THE DEFECT. confirm_launch_signup wrote status = 'confirmed'
+  // unconditionally. A contact who had already received the launch
+  // announcement, then re-submitted the form (getting a fresh token
+  // while keeping status 'notified'), then clicked it, would have been
+  // moved back to 'confirmed'.
+  //
+  // No second announcement could have followed - the claim in 044 and
+  // mayReceiveLaunchNotification both test launch_notification_sent_at -
+  // but mayReceiveWelcomeEmail reads the STATUS, so a spent contact
+  // would have become eligible for the welcome mail and its discount
+  // code weeks after the launch it was written for.
+  const sql = stripSql(atomicMigration);
+  const fn = sql.slice(sql.indexOf("function public.confirm_launch_signup"));
+
+  assert.match(fn, /v_status := case when v_row\.status = 'notified' then 'notified' else 'confirmed' end/);
+  assert.match(fn, /set status = v_status/);
+  // And nowhere in that function is the status written as a bare literal.
+  assert.ok(!/set status = 'confirmed'/.test(fn),
+    "the confirm function still forces status to confirmed");
+
+  // The lifecycle gate in the application agrees: a notified row is not
+  // eligible for either mail.
+  assert.equal(mayReceiveLaunchNotification({
+    status: "notified", purpose: LAUNCH_PURPOSE, launch_notification_sent_at: "2026-10-01T10:00:00Z",
+  }), false);
+  assert.equal(mayReceiveWelcomeEmail({
+    status: "notified", purpose: LAUNCH_PURPOSE,
+    consent_version: LAUNCH_CONSENT_VERSION, welcome_email_sent_at: null,
+  }), false);
+});
+
+/* ── 2. A permanent record of confirmed consents ─────────────── */
+
+test("115: every confirmation is written to an append-only history", () => {
+  const sql = stripSql(atomicMigration);
+
+  assert.match(sql, /create table if not exists public\.launch_consent_history/);
+  // The two facts that make a double opt-in provable, kept apart.
+  assert.match(sql, /given_at\s+timestamptz not null/);
+  assert.match(sql, /confirmed_at\s+timestamptz not null/);
+  // recorded_at is distinct, so a backfill can never pass for a live
+  // confirmation.
+  assert.match(sql, /recorded_at\s+timestamptz not null default now\(\)/);
+
+  // APPEND-ONLY, ENFORCED BY THE GRANT rather than by a comment.
+  assert.match(sql, /grant select, insert on public\.launch_consent_history to service_role;/);
+  assert.ok(!/grant[^;]*\b(update|delete)\b[^;]*launch_consent_history/i.test(sql),
+    "the consent history can be edited");
+  assert.match(sql, /alter table public\.launch_consent_history enable row level security/);
+  assert.ok(!/launch_consent_history[^;]*to (anon|authenticated)/.test(sql),
+    "a browser role can read the consent history");
+
+  // Written by the confirmation and by nothing else.
+  const inserts = [...sql.matchAll(/insert into public\.launch_consent_history/g)];
+  assert.equal(inserts.length, 2, "unexpected number of writers to the consent history");
+  const fn = sql.slice(sql.indexOf("function public.confirm_launch_signup"));
+  assert.match(fn, /insert into public\.launch_consent_history/);
+});
+
+test("116: a v1 proof survives a later v2 confirmation", () => {
+  // THE DEFECT. consent_version, consent_text and consent_given_at are
+  // overwritten when a newer wording takes effect - correctly, because
+  // the newer one now governs. What was lost was the proof of the
+  // earlier one: that this person confirmed version 1, on that day, to
+  // that exact text. Article 7(1) is in the past tense, and a column
+  // holding only the current value cannot answer it.
+  const sql = stripSql(atomicMigration);
+  const fn = sql.slice(sql.indexOf("function public.confirm_launch_signup"));
+
+  // The history row carries the wording that took effect AT THAT TIME,
+  // stored in full rather than as a reference to a constant that will be
+  // redeployed.
+  assert.match(fn, /values\s*\(v_row\.id, v_version, v_text, v_given, v_now\)/);
+  // So a second confirmation adds a second row rather than replacing the
+  // first: nothing in the function updates or deletes history.
+  assert.ok(!/update public\.launch_consent_history|delete from public\.launch_consent_history/.test(sql),
+    "a confirmation rewrites earlier consent history");
+});
+
+test("117: a pending wording never reaches the history, and nothing is back-dated", () => {
+  const sql = stripSql(atomicMigration);
+  // Only the confirm function writes, so a signup - which only ever
+  // writes pending_consent_* - cannot record a consent.
+  const signup = sql.slice(sql.indexOf("function public.submit_launch_signup"),
+                           sql.indexOf("function public.confirm_launch_signup"));
+  assert.ok(!signup.includes("launch_consent_history"),
+    "signing up writes to the consent history");
+
+  // THE BACKFILL TAKES ONLY WHAT IS ALREADY THERE. Rows that carry a
+  // confirmation, with their own recorded values, and nothing else.
+  const backfill = sql.slice(sql.indexOf("insert into public.launch_consent_history\n  (waitlist_id"));
+  assert.match(backfill, /where w\.confirmed_at is not null/);
+  assert.match(backfill, /select w\.id, w\.consent_version, w\.consent_text,/);
+  // recorded_at is left to its default of now() - a row written today
+  // must not claim to have been written when the consent was given.
+  assert.ok(!/recorded_at/.test(backfill.slice(0, backfill.indexOf(";"))),
+    "the backfill sets its own recorded_at");
+  // Re-running the migration cannot duplicate an entry.
+  assert.match(backfill, /and not exists \(/);
+});
+
+/* ── 4. Claims, timeouts and recovery ────────────────────────── */
+
+test("118: an expired claim is parked, never silently reissued", () => {
+  // THE DEFECT, in both migrations. The stale window handed an abandoned
+  // claim to the next caller. That is right for work that was never
+  // started and wrong for work that may already have finished: a worker
+  // that died AFTER the provider accepted leaves the same trace as one
+  // that died before it.
+  //
+  // Resend keeps an idempotency key for 24 hours. A stale claim can be
+  // older than that, so re-sending on the strength of one is a coin flip
+  // between a missing mail and a duplicate.
+  for (const [name, sql, prefix] of [
+    ["044", stripSql(sendMigration), "launch_send"],
+    ["045", stripSql(welcomeMigration), "welcome_email"],
+  ]) {
+    // Expired claims become review cases...
+    assert.match(sql, new RegExp(`set ${prefix}_needs_review\\s*= true,\\s*${prefix}_failed_reason = 'claim expired with an unknown send outcome'`),
+      `${name} does not park expired claims`);
+    // ...and the claim itself only ever takes an UNCLAIMED row.
+    assert.ok(!new RegExp(`or c?\\.?${prefix}_claimed_at < now\\(\\)`).test(sql),
+      `${name} still takes over a stale claim`);
+    // A parked row is invisible to the claim.
+    assert.match(sql, new RegExp(`${prefix}_needs_review is not true`),
+      `${name} claims rows that are under review`);
+  }
+});
+
+test("119: the full chain - claim, provider, mark, failure, recovery", async () => {
+  // Driven end to end against the fake, which mirrors the SQL.
+
+  // (a) The happy path closes the row for good.
+  let db = fakeWelcomeDb();
+  assert.deepEqual(await sendWelcomeEmail(db, okMailer(), "r", nextClaimId), { kind: "sent" });
+  assert.equal(db.state.sent, true);
+
+  // (b) A provider TIMEOUT is unknown, so the row is parked and stays
+  //     parked - no later call may pick it up.
+  db = fakeWelcomeDb();
+  const timeout = { seen: [], async send() { throw new Error("ETIMEDOUT"); } };
+  const parked = await sendWelcomeEmail(db, timeout, "r", nextClaimId);
+  assert.equal(parked.kind, "needs_review");
+  assert.equal(db.state.needsReview, true);
+  for (let i = 0; i < 5; i += 1) {
+    assert.deepEqual(await sendWelcomeEmail(db, okMailer(), "r", nextClaimId), { kind: "not_claimed" });
+  }
+  assert.equal(db.state.sent, false, "a parked row was eventually sent anyway");
+
+  // (c) A plain refusal is recoverable - the claim is given back and the
+  //     row is NOT parked.
+  db = fakeWelcomeDb();
+  let n = 0;
+  const flaky = okMailer(() => (++n === 1 ? { ok: false, reason: "mailbox full" } : { ok: true }));
+  assert.equal((await sendWelcomeEmail(db, flaky, "r", nextClaimId)).kind, "failed");
+  assert.equal(db.state.needsReview, false);
+  assert.deepEqual(await sendWelcomeEmail(db, flaky, "r", nextClaimId), { kind: "sent" });
+
+  // (d) The database being unreachable is neither sent nor parked - the
+  //     row is untouched and the confirmation still succeeded.
+  db = fakeWelcomeDb({ claimThrows: true });
+  const down = await sendWelcomeEmail(db, okMailer(), "r", nextClaimId);
+  assert.equal(down.kind, "unavailable");
+  assert.equal(db.state.sent, false);
+  assert.equal(db.state.needsReview, false);
+});
+
+test("120: a withdrawal outranks a pending confirmation in both directions", () => {
+  const sql = stripSql(atomicMigration);
+  const confirm = sql.slice(sql.indexOf("function public.confirm_launch_signup"));
+
+  // Confirming a withdrawn row does nothing and says so.
+  assert.match(confirm, /if v_row\.status = 'withdrawn' or v_row\.withdrawn_at is not null then\s*return query select 'withdrawn'/);
+  // The check comes before the update, so no consent is recorded for it.
+  assert.ok(confirm.indexOf("'withdrawn'") < confirm.indexOf("insert into public.launch_consent_history"),
+    "a withdrawn row can still record a consent");
+
+  // And the welcome claim excludes withdrawn rows outright.
+  assert.match(stripSql(welcomeMigration), /and withdrawn_at is null/);
 });

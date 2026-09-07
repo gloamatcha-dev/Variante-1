@@ -79,7 +79,7 @@ export type WelcomeClaim =
   | { claimed: false };
 
 export type WelcomeSendDb = {
-  claim(rowId: string, claimId: string, consentVersion: string): Promise<WelcomeClaim>;
+  claim(rowId: string, claimId: string): Promise<WelcomeClaim>;
   markSent(rowId: string, claimId: string): Promise<boolean>;
   release(rowId: string, claimId: string, reason: string, needsReview: boolean): Promise<boolean>;
 };
@@ -94,23 +94,23 @@ export type WelcomeSendMailer = {
 /**
  * Sends the welcome mail to one person, if they are owed it.
  *
- * `consentVersion` is passed through to the claim, which checks it in
- * SQL - so a caller that forgot to check cannot get a version 1 row out
- * of it. That is the gate protecting people who never agreed to receive
- * an offer.
+ * THE CONSENT GATE IS NOT AN ARGUMENT. Which wording permits this mail
+ * is a literal inside claim_welcome_email (migration 045), so neither
+ * this function nor anything else able to execute it can be talked into
+ * claiming a version 1 contact by passing a different string. A gate
+ * whose key the caller supplies is not a gate.
  */
 export async function sendWelcomeEmail(
   db: WelcomeSendDb,
   mailer: WelcomeSendMailer,
   rowId: string,
-  consentVersion: string,
   newClaimId: () => string
 ): Promise<WelcomeSendOutcome> {
   const claimId = newClaimId();
 
   let claim: WelcomeClaim;
   try {
-    claim = await db.claim(rowId, claimId, consentVersion);
+    claim = await db.claim(rowId, claimId);
   } catch (err) {
     return { kind: "unavailable", reason: errText(err) };
   }

@@ -71,15 +71,44 @@ create index if not exists idx_launch_waitlist_welcome_pending
 -- requests for the same row. Without a claim both would see
 -- welcome_email_sent_at as null and both would send.
 --
--- So the claim is one conditional UPDATE. Exactly one caller can move
--- the row from unclaimed to claimed; the other is told no and sends
--- nothing. The consent version is checked HERE as well as in the
--- application, so a caller that forgot cannot get a v1 row out of it.
+-- ── THE CONSENT VERSION IS NOT A PARAMETER ANY MORE ───────────
+--
+-- It used to be, and that was a hole. `and consent_version =
+-- p_consent_version` lets the CALLER decide which wording counts, so
+-- anything able to execute this function could pass the version 1 string
+-- and claim a version 1 contact for a mail carrying an offer they never
+-- agreed to receive. A gate the caller supplies the key to is not a
+-- gate.
+--
+-- The version that permits this mail is therefore written here, as a
+-- literal. It must equal LAUNCH_CONSENT_VERSION in lib/launchWaitlist.ts
+-- and tests/launch-waitlist.test.mjs asserts that the two agree, so the
+-- repetition is checked on every run rather than trusted.
+--
+-- ── AN EXPIRED CLAIM IS NOT A FREE RETRY ──────────────────────
+--
+-- The stale window used to hand an abandoned claim to the next caller.
+-- That is right for work that was never started and wrong for work that
+-- may already have finished: a worker that died AFTER the provider
+-- accepted the message leaves exactly the same trace as one that died
+-- before it, and the difference cannot be recovered from this table.
+--
+-- Resend keeps an idempotency key for 24 hours. Inside that window a
+-- repeat is genuinely safe. A stale claim can be far older than that -
+-- a process that crashed and was replaced hours later - so re-sending
+-- on the strength of an expired claim is a coin flip between a missing
+-- mail and a duplicate one.
+--
+-- So an expired claim is PARKED, not reissued: the row is marked for
+-- review, this call returns claimed=false, and a person reconciles it
+-- against the provider's delivery log. That is deliberately
+-- conservative - a crash before the send also parks the row - because
+-- the cost of being wrong in the other direction is a mail somebody
+-- never consented to receive twice.
 
 create or replace function public.claim_welcome_email(
   p_id uuid,
   p_claim_id uuid,
-  p_consent_version text,
   p_stale_seconds integer default 900
 )
 -- Returns the recipient WITH the claim, so a successful claim and the
@@ -94,10 +123,26 @@ declare
   v_updated integer;
   v_email text;
   v_first_name text;
+  v_stale integer;
 begin
-  if p_claim_id is null or p_consent_version is null then
-    raise exception 'welcome mail: a claim id and a consent version are required';
+  if p_claim_id is null then
+    raise exception 'welcome mail: a claim id is required';
   end if;
+
+  v_stale := greatest(coalesce(p_stale_seconds, 900), 60);
+
+  -- ── EXPIRED CLAIMS ARE PARKED FIRST ─────────────────────────
+  -- Before anything can be claimed, an abandoned claim on this row is
+  -- turned into a review case. It is never simply taken over.
+  update public.launch_waitlist
+     set welcome_email_needs_review  = true,
+         welcome_email_failed_reason = 'claim expired with an unknown send outcome',
+         welcome_email_claim_id      = null,
+         welcome_email_claimed_at    = null
+   where id = p_id
+     and welcome_email_sent_at is null
+     and welcome_email_claim_id is not null
+     and welcome_email_claimed_at < now() - make_interval(secs => v_stale);
 
   update public.launch_waitlist
      set welcome_email_claim_id   = p_claim_id,
@@ -106,14 +151,14 @@ begin
      and status = 'confirmed'
      and purpose = 'launch_notification'
      and withdrawn_at is null
-     -- THE CONSENT GATE. Only the wording that names this mail.
-     and consent_version = p_consent_version
+     -- THE CONSENT GATE, as a literal. Only the wording that names this
+     -- mail, and the caller cannot widen it.
+     and consent_version = '2026-09-07.launch-notification-with-code.v2'
      and welcome_email_sent_at is null
      and welcome_email_needs_review is not true
-     and (
-       welcome_email_claim_id is null
-       or welcome_email_claimed_at < now() - make_interval(secs => p_stale_seconds)
-     )
+     -- Unclaimed only. An expired claim was parked above and is now
+     -- excluded by needs_review, so there is no stale branch here.
+     and welcome_email_claim_id is null
    returning launch_waitlist.email, launch_waitlist.first_name
         into v_email, v_first_name;
 
@@ -183,10 +228,10 @@ $$;
 
 -- 4. PRIVILEGES ------------------------------------------------
 
-revoke all on function public.claim_welcome_email(uuid, uuid, text, integer) from public;
-revoke all on function public.claim_welcome_email(uuid, uuid, text, integer) from anon;
-revoke all on function public.claim_welcome_email(uuid, uuid, text, integer) from authenticated;
-grant execute on function public.claim_welcome_email(uuid, uuid, text, integer) to service_role;
+revoke all on function public.claim_welcome_email(uuid, uuid, integer) from public;
+revoke all on function public.claim_welcome_email(uuid, uuid, integer) from anon;
+revoke all on function public.claim_welcome_email(uuid, uuid, integer) from authenticated;
+grant execute on function public.claim_welcome_email(uuid, uuid, integer) to service_role;
 
 revoke all on function public.mark_welcome_email_sent(uuid, uuid) from public;
 revoke all on function public.mark_welcome_email_sent(uuid, uuid) from anon;

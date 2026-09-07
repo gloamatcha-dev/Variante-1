@@ -113,13 +113,7 @@ export async function GET(request: Request): Promise<Response> {
     if (!wiring.ok) {
       console.error("Launch welcome mail: not configured -", wiring.reason);
     } else {
-      const sent = await sendWelcomeEmail(
-        wiring.db,
-        wiring.mailer,
-        rowId,
-        LAUNCH_CONSENT_VERSION,
-        () => randomUUID()
-      );
+      const sent = await sendWelcomeEmail(wiring.db, wiring.mailer, rowId, () => randomUUID());
       // Counts and reasons only - never the address, never the row id.
       if (sent.kind === "needs_review" || sent.kind === "failed" || sent.kind === "unavailable") {
         console.error("Launch welcome mail:", sent.kind, "-", sent.reason);

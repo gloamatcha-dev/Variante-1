@@ -227,6 +227,34 @@ begin
     return;
   end if;
 
+
+  -- ── EXPIRED CLAIMS ARE PARKED, NOT REISSUED ───────────────
+  --
+  -- Handing an abandoned claim to the next worker is right for work
+  -- that was never started and wrong for work that may already have
+  -- finished. A worker that died AFTER the provider accepted a message
+  -- leaves exactly the same trace as one that died before it, and this
+  -- table cannot tell them apart.
+  --
+  -- The provider can, but only for 24 hours - that is how long Resend
+  -- keeps an idempotency key. A stale claim can easily be older than
+  -- that, so re-sending on the strength of one is a coin flip between a
+  -- missing mail and a duplicate.
+  --
+  -- So they become review cases. Deliberately conservative: a crash
+  -- BEFORE the send parks the row too, and a person releases it after
+  -- checking the delivery log. The cost of being wrong the other way is
+  -- a second announcement to somebody who consented to one.
+  update public.launch_waitlist
+     set launch_send_needs_review  = true,
+         launch_send_failed_reason = 'claim expired with an unknown send outcome',
+         launch_send_claim_id      = null,
+         launch_send_claimed_at    = null
+   where launch_notification_sent_at is null
+     and launch_send_claim_id is not null
+     and launch_send_needs_review is not true
+     and launch_send_claimed_at < now() - make_interval(secs => p_stale_seconds);
+
   return query
   update public.launch_waitlist w
      set launch_send_claim_id   = p_claim_id,
@@ -246,11 +274,10 @@ begin
          -- reconciled by a person.
          and c.launch_send_needs_review is not true
          and c.launch_send_attempts < p_max_attempts
-         -- Unclaimed, or claimed by a worker that has since died.
-         and (
-           c.launch_send_claim_id is null
-           or c.launch_send_claimed_at < now() - make_interval(secs => p_stale_seconds)
-         )
+         -- Unclaimed only. An expired claim was parked above and is now
+         -- excluded by launch_send_needs_review, so there is no stale
+         -- branch here to take one over.
+         and c.launch_send_claim_id is null
        order by c.confirmed_at
        limit p_limit
        for update skip locked
