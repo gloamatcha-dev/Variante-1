@@ -1119,26 +1119,70 @@ return <main className="contact-main">
 function Legal({route}:{route:string}){
 const title:Record<string,string>={impressum:"Impressum",datenschutz:"Datenschutz",agb:"Allgemeine Geschäftsbedingungen",widerruf:"Widerruf",versand:"Versandinformationen"};
 if(route==="versand"){
-const zoneLabel:Record<string,string>={germany:"Deutschland",eu:"EU",nonEuCore:"Schweiz / UK / Norwegen",restOfEurope:"Übriges Europa"};
-return <main className="legal-page">
-<p className="eyebrow">LEGAL</p>
-<h1>{title.versand}</h1>
-<div className="legal-shipping-zones">
-{(Object.keys(SHIPPING_ZONES) as (keyof typeof SHIPPING_ZONES)[]).map(key=>{
+/*
+  THE SHIPPING PAGE, ON THE SHARED LEGAL-DOC HEAD.
+
+  Every number on this page is read from lib/shipping.ts at render time -
+  SHIPPING_ZONES for the delivery windows, SHIPPING_PRICING for the
+  prices and thresholds, getCountryLabel for the destinations. That was
+  already true before this pass and is the reason the page cannot
+  promise a price the checkout will not charge. Nothing here is typed.
+
+  ── WHAT THE REDESIGN ADDS ───────────────────────────────────
+  The destinations. The old table named the zones "EU" and "Übriges
+  Europa" and left it there, which reads as a geographic promise rather
+  than a list: a customer in Ukraine or Moldova would reasonably think
+  "übriges Europa" covers them, and neither is an enabled destination.
+  Each zone now lists the countries it actually contains, generated from
+  the same array the checkout validates against, so the list cannot
+  drift from what ALLOWED_SHIPPING_COUNTRIES accepts.
+
+  It also states what the free-shipping threshold is measured on.
+  computeShippingGrossCents compares the threshold against the
+  merchandise subtotal only - never subtotal plus shipping - and the
+  page now says so instead of leaving a customer to discover it at 48,50.
+
+  ── SCOPE ────────────────────────────────────────────────────
+  These are the terms for ordinary single orders. The prepaid annual
+  plan carries its own rule (ANNUAL_SHIPPING_ZONE = "germany", Germany
+  only) and is not bookable, and subscriptions are not bookable either -
+  so neither is described here rather than being quietly folded into a
+  table that would misstate them.
+*/
+const zoneLabel:Record<string,string>={germany:"Deutschland",eu:"Europäische Union",nonEuCore:"Schweiz, UK, Norwegen",restOfEurope:"Übriges Europa"};
+const zoneKeys=Object.keys(SHIPPING_ZONES) as (keyof typeof SHIPPING_ZONES)[];
+return <main className="legal-page legal-doc legal-versand">
+<div className="legal-doc-head">
+<p className="eyebrow">GLOA · RECHTLICHES</p>
+<h1>Versandinformationen.</h1>
+<p className="legal-doc-sub">Liefergebiete, Versandkosten und Lieferzeiten im Überblick.</p>
+<p className="legal-doc-lead">Wir versenden in {SHIPPING_COUNTRY_OPTIONS.length} Länder. Welches Liefergebiet für dich gilt, ergibt sich aus deiner Lieferadresse; die Versandkosten weisen wir dir vor Abschluss der Bestellung gesondert aus.</p>
+</div>
+
+<div className="legal-ship-grid">
+{zoneKeys.map(key=>{
 const zone=SHIPPING_ZONES[key];
 const pricing=SHIPPING_PRICING[key];
-return <div className="legal-shipping-zone" key={key}>
-<h3>{zoneLabel[key]}</h3>
-<dl>
+const countries=zone.countryCodes.map(c=>getCountryLabel(c)).sort((x,y)=>x.localeCompare(y,"de"));
+return <section className="legal-ship-zone" key={key}>
+<h2>{zoneLabel[key]}</h2>
+<dl className="legal-ship-facts">
 <div><dt>Lieferzeit</dt><dd>{zone.deliveryTimeLabel}</dd></div>
 <div><dt>Versand</dt><dd>{fmtCents(pricing.shippingGrossCents)} €</dd></div>
-{pricing.freeShippingThresholdGrossCents!==null&&<div><dt>Kostenlos ab</dt><dd>{fmtCents(pricing.freeShippingThresholdGrossCents)} €</dd></div>}
+<div><dt>Kostenlos ab</dt><dd>{pricing.freeShippingThresholdGrossCents!==null?`${fmtCents(pricing.freeShippingThresholdGrossCents)} €`:"—"}</dd></div>
 </dl>
-</div>
+<p className="legal-ship-countries"><span>{countries.length===1?"Land":`${countries.length} Länder`}</span>{countries.join(", ")}</p>
+</section>
 })}
 </div>
-<p className="legal-note">{DELIVERY_TIME_NOTE}</p>
-<p className="legal-note">{CUSTOMS_NOTE}</p>
+
+<div className="legal-ship-notes">
+<h2>Gut zu wissen</h2>
+<p><strong>Kostenloser Versand</strong> richtet sich nach dem Warenwert deiner Bestellung ohne Versandkosten. Für Liefergebiete ohne Angabe gilt der reguläre Versandpreis unabhängig vom Bestellwert.</p>
+<p>{DELIVERY_TIME_NOTE}</p>
+<p>{CUSTOMS_NOTE}</p>
+<p>Die Versandkosten für deine konkrete Bestellung siehst du im Warenkorb und in der Kasse, bevor du verbindlich bestellst. Es gelten ergänzend unsere <Link href="/agb">Allgemeinen Geschäftsbedingungen</Link>.</p>
+</div>
 </main>;
 }
 if(route==="widerruf"){

@@ -735,3 +735,90 @@ test("Widerruf: the statutory form shows the keyboard where it is", () => {
   assert.match(css, /\.legal-doc \.legal-withdrawal input:focus-visible/);
   assert.match(css, /\.legal-doc \.legal-withdrawal button:focus-visible\{outline:3px solid var\(--blue\)/);
 });
+
+/* ── The shipping page, redesigned (DESIGN-LEGAL-06) ─────────── */
+
+const versandSource = gloaSiteSource.slice(
+  gloaSiteSource.indexOf('route==="versand"'),
+  gloaSiteSource.indexOf('route==="widerruf"')
+);
+
+test("Versand: every figure is read from the config, never typed", () => {
+  // The page cannot promise a price the checkout will not charge,
+  // because it does not hold one. Each value comes from lib/shipping.ts
+  // at render time.
+  assert.match(versandSource, /SHIPPING_ZONES\[key\]/);
+  assert.match(versandSource, /SHIPPING_PRICING\[key\]/);
+  assert.match(versandSource, /\{zone\.deliveryTimeLabel\}/);
+  assert.match(versandSource, /fmtCents\(pricing\.shippingGrossCents\)/);
+  assert.match(versandSource, /fmtCents\(pricing\.freeShippingThresholdGrossCents\)/);
+  // Countries are generated from the zone arrays, not listed by hand.
+  assert.match(versandSource, /zone\.countryCodes\.map\(c=>getCountryLabel\(c\)\)/);
+  assert.match(versandSource, /SHIPPING_COUNTRY_OPTIONS\.length/);
+
+  // Nothing may be hard-coded alongside them. A literal price here is
+  // how the page and the checkout start disagreeing.
+  const copy = versandSource.replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const literal of ["5,90", "12,90", "17,90", "19,90", "49,00", "79,00"]) {
+    assert.ok(!copy.includes(literal), `a shipping figure is hard-coded on the page: ${literal}`);
+  }
+});
+
+test("Versand: the zones name their destinations instead of implying them", () => {
+  // "EU" and "Übriges Europa" alone read as a geographic promise. Two
+  // European countries are deliberately NOT destinations - Ukraine
+  // (feasibility unconfirmed) and Moldova (business decision) - and a
+  // customer there would reasonably read "übriges Europa" as including
+  // them. The generated list is what stops that.
+  assert.match(versandSource, /legal-ship-countries/);
+  const shipping = readFileSync(new URL("../lib/shipping.ts", import.meta.url), "utf-8");
+  // Sliced, not matched: written as a RegExp this guard needed \[ and
+  // \] inside a template literal, both of which collapse to bare
+  // brackets and turn the pattern into one that matches nothing. It
+  // passed against a deliberately broken config until that was caught,
+  // so it reads the array text directly now.
+  const start = shipping.indexOf("const REST_OF_EUROPE = [");
+  assert.ok(start > 0, "REST_OF_EUROPE could not be located");
+  const zoneText = shipping.slice(start, shipping.indexOf("]", start));
+  for (const excluded of ["UA", "MD", "RU", "BY"]) {
+    assert.ok(
+      !zoneText.includes(`"${excluded}"`),
+      `${excluded} became a destination without the shipping page being rechecked`
+    );
+  }
+});
+
+test("Versand: the free-shipping basis is stated, and matches the server rule", () => {
+  // computeShippingGrossCents compares the threshold against the
+  // merchandise subtotal only - never subtotal plus shipping.
+  const shipping = readFileSync(new URL("../lib/shipping.ts", import.meta.url), "utf-8");
+  assert.match(shipping, /merchandiseSubtotalGrossCents >= pricing\.freeShippingThresholdGrossCents/);
+  assert.match(versandSource, /Warenwert deiner Bestellung ohne Versandkosten/);
+  // Zones without a threshold say so rather than showing a blank.
+  assert.match(versandSource, /freeShippingThresholdGrossCents!==null\?/);
+});
+
+test("Versand: single orders only - the annual plan's own rule is not folded in", () => {
+  // ANNUAL_SHIPPING_ZONE is "germany": the prepaid plan ships to one
+  // country while single orders reach forty. Describing them together
+  // would misstate both, so the page describes neither subscription nor
+  // annual plan while they are unbookable.
+  const annual = readFileSync(new URL("../lib/annualPlanCheckoutRules.ts", import.meta.url), "utf-8");
+  assert.match(annual, /ANNUAL_SHIPPING_ZONE = "germany"/);
+  const copy = versandSource.replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const term of ["Abonnement", "Jahresplan", "Abo-"]) {
+    assert.ok(!copy.includes(term), `the shipping page describes an unbookable contract type: ${term}`);
+  }
+});
+
+test("Versand: the one-word headline is sized and hyphenated to fit", () => {
+  const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf-8");
+  // "Versandinformationen." cannot break on its own; at the shared
+  // clamp it pushed the document 106px wide at 320px. Measured.
+  assert.match(css, /\.legal-page\.legal-versand h1\{font-size:clamp\(30px,4\.6vw,68px\);hyphens:auto/);
+  assert.match(css, /\.legal-ship-grid\{[^}]*grid-template-columns:repeat\(2,1fr\)/);
+  const mq = css.slice(css.indexOf("@media(max-width:1023px)"));
+  assert.ok(mq.slice(0, 200).includes(".legal-ship-grid{grid-template-columns:1fr}"), "the zone grid does not collapse");
+  // The figures are the point of the page and must not shrink below body text.
+  assert.match(css, /\.legal-ship-facts dd\{[^}]*font-size:19px/);
+});

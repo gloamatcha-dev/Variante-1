@@ -373,6 +373,49 @@ Diese Bedingungen werden **vor** dem Aktivieren der jeweiligen Produkte
 gesondert finalisiert. Bestehende Abo-, Jahresplan- und Zahlungsregeln wurden
 dabei nicht angefasst.
 
+### Versand: Befund und offene Punkte (DESIGN-LEGAL-06)
+
+**V1 — Alle vier Zonen sind bereits aktiv. [BELEGT]**
+Die Annahme, der B2C-Checkout sei „zunächst Deutschland", ist **überholt**.
+`ALLOWED_SHIPPING_COUNTRIES` in `lib/shipping.ts` ist die Vereinigung aller
+vier Zonen und umfasst **40 Länder**; `app/api/checkout/quote/route.ts` und
+`app/api/checkout/session/route.ts` validieren dagegen, und der Warenkorb
+bietet über `SHIPPING_COUNTRY_OPTIONS` alle zur Auswahl an. Die Ein-Land-
+Beschränkung in der Stripe-Session (`allowed_countries: [frozenShippingCountry]`)
+gilt **pro Bestellversuch**, damit niemand nach dem Preisen die Zone wechselt —
+sie ist keine globale Begrenzung auf Deutschland.
+
+Die Werte im Seitentext stimmen **exakt** mit `SHIPPING_PRICING` überein:
+Deutschland 590/4900, EU 1290/7900, CH-UK-NO 1790/keine Schwelle,
+Übriges Europa 1990/keine Schwelle. Es war also nichts zurückzuhalten.
+
+**V2 — Nicht belieferte europäische Länder. [ENTSCHEIDUNG DOKUMENTIERT]**
+Bewusst ausgeschlossen und im Code begründet: **Russland** und **Belarus**
+(Sanktionen), **Ukraine** (Machbarkeit operativ nicht bestätigt), **Moldau**
+(Geschäftsentscheidung). Die Versandseite listet deshalb je Zone die
+tatsächlichen Länder auf, damit „Übriges Europa" nicht mehr verspricht, als
+der Checkout annimmt. Ein Test schlägt fehl, sobald eines dieser Länder
+aufgenommen wird, ohne die Seite erneut zu prüfen.
+
+**V3 — Einfuhrabgaben: Verantwortlichkeit. [OFFEN, Betreiber]**
+Die Seite sagt zutreffend, dass bei Lieferungen außerhalb der EU Zölle,
+Steuern oder Einfuhrabgaben anfallen **können** und von Behörden bzw.
+Versanddienstleister erhoben werden. Nicht festgelegt ist, ob mit
+**DDP** (verzollt, GLOA trägt die Abgaben) oder **DAP** (unverzollt, die
+Kundschaft trägt sie) versendet wird. Für CH, UK, NO und das übrige Europa —
+13 aktive Länder — ist das eine kaufmännische und zolltechnische Entscheidung,
+die vor nennenswertem Auslandsvolumen getroffen und dann auf der Seite
+benannt werden sollte. Keine Beträge erfunden.
+
+**V4 — Jahresplan liefert nur nach Deutschland. GO-LIVE-PUNKT.**
+`ANNUAL_SHIPPING_ZONE = "germany"` (`lib/annualPlanCheckoutRules.ts`): Der
+vorausbezahlte Jahresplan ist auf **ein** Land beschränkt, während
+Einzelbestellungen 40 erreichen. Laufende Abos haben **gar keine** eigene
+Versandregel. Die Versandseite beschreibt deshalb ausdrücklich nur
+Einzelbestellungen und erwähnt beide Modelle nicht. Vor ihrer Aktivierung
+müssen die jeweiligen Versandkosten, Lieferintervalle und Liefergebiete
+festgelegt und auf der Seite ergänzt werden — siehe B1–B7.
+
 ### Widerrufsbelehrung: zwei offene Punkte (DESIGN-LEGAL-05)
 
 **W1 — Rücksendeadresse. [OFFEN, Betreiber]**
