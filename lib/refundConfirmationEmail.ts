@@ -327,7 +327,7 @@ async function deliverClaimedRefundConfirmation(
     return "failed";
   }
 
-  const { subject, html, text } = buildRefundConfirmationEmail({
+  const { subject, html, text } = buildRefundConfirmationEmail({ origin: getSiteOrigin() ?? undefined,
     order: {
       order_number: order.order_number,
       // Derived from the persisted amounts by the same comparison

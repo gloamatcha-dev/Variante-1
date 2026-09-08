@@ -408,7 +408,7 @@ export async function deliverClaimedCancellationConfirmation(
     return "failed";
   }
 
-  const { subject, html, text } = buildCancellationConfirmationEmail({
+  const { subject, html, text } = buildCancellationConfirmationEmail({ origin: getSiteOrigin() ?? undefined,
     cancellation: {
       // Straight from the event this delivery represents, so a retry
       // renders the same two dates the first attempt would have.

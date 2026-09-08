@@ -188,7 +188,7 @@ async function sendAnnualPurchaseEmail(
     return { kind: "definite_failure", message: "RESEND_API_KEY is not configured" };
   }
 
-  const { subject, html, text } = buildAnnualPurchaseConfirmationEmail({
+  const { subject, html, text } = buildAnnualPurchaseConfirmationEmail({ origin: getSiteOrigin() ?? undefined,
     plan: { ...message.facts, accountOrdersUrl: buildAccountOrdersUrl() },
   });
 

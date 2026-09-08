@@ -401,7 +401,7 @@ export async function deliverClaimedPaymentProblem(
     return "failed";
   }
 
-  const { subject, html, text } = buildPaymentProblemEmail({
+  const { subject, html, text } = buildPaymentProblemEmail({ origin: getSiteOrigin() ?? undefined,
     payment: { accountSubscriptionsUrl: buildAccountSubscriptionsUrl() },
   });
 

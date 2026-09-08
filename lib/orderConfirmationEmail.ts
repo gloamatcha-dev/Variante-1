@@ -144,7 +144,7 @@ export async function sendOrderConfirmationEmailIfNeeded(params: SendOrderConfir
     shippingAddress: toEmailAddress(order.shipping_address_snapshot),
     accountOrderUrl: buildAccountOrderUrl(order.id, order.user_id),
   };
-  const { subject, html, text } = buildOrderConfirmationEmail({ order: emailOrder, items, customerEmail });
+  const { subject, html, text } = buildOrderConfirmationEmail({ origin: getSiteOrigin() ?? undefined, order: emailOrder, items, customerEmail });
 
   let sendErrorMessage: string | null = null;
   try {

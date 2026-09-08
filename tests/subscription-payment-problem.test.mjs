@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+
+/** Visible text only: styles and tags are not customer-facing copy. */
+const stripTags = (html) => html.replace(/<[^>]*>/g, " ");
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -473,6 +476,12 @@ test("46, 47: no monthly language, and no moving values at all", () => {
   for (const surface of [subject, html, text]) {
     assert.ok(!surface.includes(INVOICE_ID), "the invoice id reached the customer");
     assert.ok(!surface.includes("in_"), "a Stripe id reached the customer");
+  }
+  // Amounts are checked against what a READER sees, not the markup.
+  // Run against raw HTML this matched rgba(79,58,91,.22) - the shared
+  // rule colour - and called a border an amount. The property is that
+  // no money is stated, and money is visible text.
+  for (const surface of [subject, stripTags(html), text]) {
     assert.ok(!/\d+,\d{2}/.test(surface), "an amount reached the customer");
   }
   // The build function is handed exactly one field, and it is the URL.

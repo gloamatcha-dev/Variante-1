@@ -291,7 +291,7 @@ async function deliverClaimedCancellationOutcome(order: OrderRow): Promise<Outco
     return "failed";
   }
 
-  const { subject, html, text } = buildCancellationOutcomeEmail({
+  const { subject, html, text } = buildCancellationOutcomeEmail({ origin: getSiteOrigin() ?? undefined,
     order: {
       order_number: order.order_number,
       outcome,

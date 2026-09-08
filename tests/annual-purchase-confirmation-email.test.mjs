@@ -1233,8 +1233,15 @@ test("the decision module and the template are both leaves", () => {
   // also the only shape Node's test runner can load: extension-less
   // relative imports do not resolve outside the bundler.
   assert.doesNotMatch(senderSource, /^import /m, "the sender imports nothing");
-  assert.doesNotMatch(read("lib/email/annualPurchaseConfirmation.ts"), /^import /m,
-    "the template imports nothing");
+  // The template imports exactly one thing: ./brand.ts, the shared
+  // branding foundation. It is itself a leaf - no env, no clock, no
+  // network - so the property this guards is intact; the rule was
+  // "nothing that can do anything", not "no import statement". Same
+  // shape as tests/launch-send.test.mjs case 26.
+  const templateImports = [...read("lib/email/annualPurchaseConfirmation.ts")
+    .matchAll(/from "([^"]+)"/g)].map(m => m[1]);
+  assert.deepEqual(templateImports, ["./brand.ts"],
+    "the template imports something other than the branding foundation");
   // The effects all live in the deps module instead.
   assert.match(emailDeps, /^import /m);
 });

@@ -424,7 +424,7 @@ export async function deliverClaimedSubscriptionStarted(
     return "failed";
   }
 
-  const { subject, html, text } = buildSubscriptionStartedEmail({
+  const { subject, html, text } = buildSubscriptionStartedEmail({ origin: getSiteOrigin() ?? undefined,
     subscription: {
       packageName: preflight.content.packageName,
       quantity: preflight.content.quantity,

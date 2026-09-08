@@ -320,7 +320,7 @@ export async function deliverClaimedShipmentConfirmation(order: OrderRow): Promi
     accountOrderUrl: buildAccountOrderUrl(order.id, order.user_id),
   };
 
-  const { subject, html, text } = buildShipmentConfirmationEmail({ order: emailOrder, customerEmail });
+  const { subject, html, text } = buildShipmentConfirmationEmail({ origin: getSiteOrigin() ?? undefined, order: emailOrder, customerEmail });
 
   // The provider-side half of the duplicate guard. The database claim
   // stops two workers from both starting a send; this stops an attempt

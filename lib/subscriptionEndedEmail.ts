@@ -390,7 +390,7 @@ export async function deliverClaimedSubscriptionEnded(
     return "failed";
   }
 
-  const { subject, html, text } = buildSubscriptionEndedEmail({
+  const { subject, html, text } = buildSubscriptionEndedEmail({ origin: getSiteOrigin() ?? undefined,
     subscription: {
       // The one durable instant that describes the ending. Written once
       // by migration 034 and never moved, so a retry renders the same

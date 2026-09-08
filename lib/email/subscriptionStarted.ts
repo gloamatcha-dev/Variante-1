@@ -1,3 +1,14 @@
+import {
+  emailShell,
+  emailHeader,
+  emailEyebrow,
+  emailHeadline,
+  emailFooter,
+  GLOA_NEAR_BLACK,
+  GLOA_BERRY,
+  GLOA_POSTAL_ADDRESS,
+} from "./brand.ts";
+
 /**
  * "Dein GLOA Abo ist aktiv" - the customer's subscription start message
  * (Phase 3H.2).
@@ -178,6 +189,12 @@ function quantityLabel(quantity: number): string {
  */
 export function buildSubscriptionStartedEmail(params: {
   subscription: SubscriptionStartedFacts;
+  /**
+   * Absolute site origin, for the logo in the mail header. Optional:
+   * without it the mail is built without the mark rather than with a
+   * broken image, which is what a relative path becomes in an inbox.
+   */
+  origin?: string;
 }): BuiltSubscriptionStartedEmail {
   const { subscription } = params;
 
@@ -199,19 +216,15 @@ export function buildSubscriptionStartedEmail(params: {
     ? `<p style="font-size:13px;margin:24px 0 0;"><a href="${escapeHtml(subscription.accountSubscriptionsUrl)}" style="color:${BRAND.blue};">Abo in deinem Konto ansehen &rarr;</a></p>`
     : "";
 
-  const html = `<!doctype html>
-<html lang="de">
-<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>${escapeHtml(SUBJECT)}</title></head>
-<body style="margin:0;padding:0;background-color:${BRAND.cream};font-family:Arial,Helvetica,sans-serif;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${BRAND.cream};padding:32px 16px;">
-<tr><td align="center">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background-color:#ffffff;">
-<tr><td style="background-color:${BRAND.blue};padding:20px 32px;">
-<span style="font-size:22px;font-weight:900;color:${BRAND.cream};letter-spacing:-0.03em;">GLOA</span>
-</td></tr>
-<tr><td style="padding:32px;">
-<p style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:${BRAND.berry};font-weight:700;margin:0 0 10px;">${escapeHtml(EYEBROW)}</p>
-<h1 style="font-size:22px;line-height:1.2;letter-spacing:-0.02em;margin:0 0 14px;color:${BRAND.ink};">${escapeHtml(HEADLINE)}</h1>
+    // The approved mark, when an origin was supplied. Without one the
+  // mail is built without it rather than with a broken image - the
+  // same rule the launch mails already follow.
+  const header = params.origin ? emailHeader(params.origin) : "";
+
+  const html = emailShell(escapeHtml(SUBJECT), `${header}
+${emailEyebrow(`${escapeHtml(EYEBROW)}`)}
+${emailHeadline(`${escapeHtml(HEADLINE)}`)}
+<tr><td style="padding:16px 0 28px 0;font-size:15px;line-height:1.6;color:${GLOA_NEAR_BLACK};">
 <p style="font-size:14px;line-height:1.6;margin:0 0 20px;color:${BRAND.ink};">${escapeHtml(INTRO)}</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid ${BRAND.cream};border-bottom:1px solid ${BRAND.cream};padding:16px 0;margin:0 0 20px;">
 <tr><td style="padding:16px 0;">
@@ -221,14 +234,9 @@ export function buildSubscriptionStartedEmail(params: {
 <p style="font-size:14px;line-height:1.6;margin:0;color:${BRAND.ink};">${escapeHtml(ACCOUNT_LINE)}</p>
 ${accountLinkHtml}
 </td></tr>
-<tr><td style="background-color:${BRAND.plum};padding:20px 32px;">
-<p style="font-size:12px;line-height:1.5;color:${BRAND.cream};margin:0;">GLOA &middot; Fragen zu deinem Abo? <a href="mailto:${SUPPORT_ADDRESS}" style="color:${BRAND.cream};">${SUPPORT_ADDRESS}</a></p>
-</td></tr>
-</table>
-</td></tr>
-</table>
-</body>
-</html>`;
+${emailFooter(`Fragen zu deinem Abo? <a href="mailto:${SUPPORT_ADDRESS}" style="color:${GLOA_BERRY};">${SUPPORT_ADDRESS}</a>
+<br/><br/>
+${GLOA_POSTAL_ADDRESS}`)}`);
 
   const accountLinkText = subscription.accountSubscriptionsUrl
     ? `Abo in deinem Konto ansehen: ${subscription.accountSubscriptionsUrl}`

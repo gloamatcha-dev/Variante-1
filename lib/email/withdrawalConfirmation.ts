@@ -1,3 +1,14 @@
+import {
+  emailShell,
+  emailHeader,
+  emailEyebrow,
+  emailHeadline,
+  emailFooter,
+  GLOA_NEAR_BLACK,
+  GLOA_BERRY,
+  GLOA_POSTAL_ADDRESS,
+} from "./brand.ts";
+
 export type WithdrawalConfirmationInput = {
   customerName: string;
   orderReference: string;
@@ -5,6 +16,12 @@ export type WithdrawalConfirmationInput = {
   scopeNote: string | null;
   customerNote: string | null;
   submittedAt: string; // ISO timestamp
+  /**
+   * Absolute site origin, for the logo in the mail header. Optional:
+   * without it the mail is built without the mark rather than with a
+   * broken image, which is what a relative path becomes in an inbox.
+   */
+  origin?: string;
 };
 
 export type BuiltWithdrawalConfirmationEmail = {
@@ -52,19 +69,15 @@ export function buildWithdrawalConfirmationEmail(input: WithdrawalConfirmationIn
     ? `<p style="font-size:14px;line-height:1.5;margin:0 0 8px;">Anmerkung: ${escapeHtml(customerNote)}</p>`
     : "";
 
-  const html = `<!doctype html>
-<html lang="de">
-<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>${escapeHtml(subject)}</title></head>
-<body style="margin:0;padding:0;background-color:#F5EBE2;font-family:Arial,Helvetica,sans-serif;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F5EBE2;padding:32px 16px;">
-<tr><td align="center">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background-color:#ffffff;">
-<tr><td style="background-color:#1746D1;padding:20px 32px;">
-<span style="font-size:22px;font-weight:900;color:#F5EBE2;letter-spacing:-0.03em;">GLOA</span>
-</td></tr>
-<tr><td style="padding:32px;">
-<p style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#A61E59;font-weight:700;margin:0 0 10px;">Widerruf erhalten</p>
-<h1 style="font-size:22px;line-height:1.2;letter-spacing:-0.02em;margin:0 0 14px;color:#111111;">Eingangsbestätigung deines Widerrufs.</h1>
+    // The approved mark, when an origin was supplied. Without one the
+  // mail is built without it rather than with a broken image - the
+  // same rule the launch mails already follow.
+  const header = input.origin ? emailHeader(input.origin) : "";
+
+  const html = emailShell(escapeHtml(subject), `${header}
+${emailEyebrow(`Widerruf erhalten`)}
+${emailHeadline(`Eingangsbestätigung deines Widerrufs.`)}
+<tr><td style="padding:16px 0 28px 0;font-size:15px;line-height:1.6;color:${GLOA_NEAR_BLACK};">
 <p style="font-size:14px;line-height:1.5;margin:0 0 8px;">Name: ${escapeHtml(customerName)}</p>
 <p style="font-size:14px;line-height:1.5;margin:0 0 8px;">Bestellung/Vertrag: ${escapeHtml(orderReference)}</p>
 <p style="font-size:14px;line-height:1.5;margin:0 0 8px;">Umfang: ${escapeHtml(scopeLabel)}</p>
@@ -72,14 +85,9 @@ ${scopeNoteHtml}
 ${customerNoteHtml}
 <p style="font-size:14px;line-height:1.5;margin:16px 0 0;">Eingegangen am ${escapeHtml(date)} um ${escapeHtml(time)} Uhr.</p>
 </td></tr>
-<tr><td style="background-color:#4F3A5B;padding:20px 32px;">
-<p style="font-size:12px;line-height:1.5;color:#F5EBE2;margin:0;">GLOA · Fragen zu deinem Widerruf? <a href="mailto:hello@gloamatcha.com" style="color:#F5EBE2;">hello@gloamatcha.com</a></p>
-</td></tr>
-</table>
-</td></tr>
-</table>
-</body>
-</html>`;
+${emailFooter(`Fragen zu deinem Widerruf? <a href="mailto:hello@gloamatcha.com" style="color:${GLOA_BERRY};">hello@gloamatcha.com</a>
+<br/><br/>
+${GLOA_POSTAL_ADDRESS}`)}`);
 
   const text = [
     "GLOA · Widerruf erhalten",

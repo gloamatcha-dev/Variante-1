@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
+import { getSiteOrigin } from "../../../lib/siteUrl";
 import { getResendClient } from "../../../lib/resend";
 import { buildWithdrawalConfirmationEmail } from "../../../lib/email/withdrawalConfirmation";
 
@@ -133,7 +134,7 @@ export async function POST(request: Request): Promise<Response> {
   const resend = getResendClient();
   const fromAddress = process.env.RESEND_CONTACT_FROM;
   if (resend && fromAddress) {
-    const { subject, html, text } = buildWithdrawalConfirmationEmail({
+    const { subject, html, text } = buildWithdrawalConfirmationEmail({ origin: getSiteOrigin() ?? undefined,
       customerName: trimmedName,
       orderReference: trimmedOrderReference,
       scope,

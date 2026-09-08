@@ -595,12 +595,37 @@ test("43: the refund runtime is untouched - this is a migration-only phase", () 
   // subject of this guard is the REFUND RUNTIME, and the route's refund
   // wiring is asserted directly against the source below - which is the
   // stronger check anyway, since it also holds after a commit.
+  //
+  // EMAIL-02 moved the two PRESENTATION files out of this list for the
+  // same reason and on the same terms. A branding pass rewrote the
+  // template's scaffold and handed the sender a site origin for the
+  // logo; neither is refund runtime, and holding a design change
+  // hostage to a migration-phase guard would only teach the next person
+  // to delete the guard. What actually matters - that the presentation
+  // change did not alter WHICH refund facts are sent - is asserted
+  // directly below, and that holds after a commit too.
   for (const rel of [
-    "lib/orderRefunds.ts", "lib/stripeRefunds.ts", "lib/refundConfirmationEmail.ts",
-    "lib/refundConfirmationRules.ts", "lib/email/refundConfirmation.ts",
+    "lib/orderRefunds.ts", "lib/stripeRefunds.ts", "lib/refundConfirmationRules.ts",
   ]) {
     assert.ok(!touched.includes(rel), `${rel} was modified by a migration-only phase`);
   }
+
+  // The refund facts the sender hands the template, unchanged. If a
+  // later pass drops one or starts computing it differently, this fails
+  // whether or not the working tree is clean.
+  const sender = read("lib/refundConfirmationEmail.ts");
+  for (const fact of [
+    "order_number: order.order_number",
+    "kind: refundKind(refundedTotalCents, order.total_gross_cents)",
+    "refundedTotalCents,",
+    "originalTotalGrossCents: order.total_gross_cents",
+    "currency: order.currency",
+  ]) {
+    assert.ok(sender.includes(fact), `the refund email no longer sends: ${fact}`);
+  }
+  // And the template still renders from those facts rather than its own.
+  const tpl = read("lib/email/refundConfirmation.ts");
+  assert.ok(!/process\.env|Date\.now|new Date\(/.test(tpl), "the refund template acquired a moving value");
   const webhook = read("app/api/stripe/webhook/route.ts");
   assert.ok(webhook.includes("isRefundEventType(event.type)"), "the refund discriminator left the webhook");
   assert.ok(webhook.includes("await handleRefundEvent(stripe, event);"), "the refund branch left the webhook");

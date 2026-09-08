@@ -927,10 +927,28 @@ test("email: the account link is escaped and omitted when absent", () => {
 
 test("email: it uses the established GLOA transactional branding", () => {
   const { html } = built("approved");
-  for (const token of ["#1746D1", "#A61E59", "#F5EBE2", "#4F3A5B"]) {
+  // The ground palette every GLOA mail carries.
+  for (const token of ["#A61E59", "#F5EBE2", "#4F3A5B", "#111111"]) {
     assert.ok(html.includes(token), `missing brand token ${token}`);
   }
-  assert.ok(html.includes(">GLOA<"));
+  // Blue is the ACTION colour. This fixture has no account link, so it
+  // must not appear - requiring it here only passed while the old
+  // scaffold painted a blue bar behind a typed wordmark.
+  assert.ok(!html.includes("#1746D1"), "Blue appears without an action to carry it");
+
+  // The mark is the approved artwork, not the word set in a bold face.
+  // This line used to assert >GLOA< - the typed form - so it would have
+  // passed a rebuilt wordmark forever.
+  const branded = buildCancellationOutcomeEmail({
+    order: { order_number: ORDER_NUMBER, outcome: "approved", accountOrderUrl: null },
+    origin: "https://gloamatcha.com",
+  }).html;
+  assert.ok(branded.includes('alt="GLOA"'), "the approved mark is missing");
+  assert.ok(branded.includes("https://gloamatcha.com/gloa-logo-blue-600.png"), "the mark is not the approved file at an absolute URL");
+  assert.ok(!html.includes("<img"), "a mark was rendered without an origin to make it absolute");
+  for (const surface of [html, branded]) {
+    assert.ok(!surface.includes(">GLOA<"), "the wordmark was typed instead of used");
+  }
   assert.ok(html.includes('<html lang="de">'));
   assert.ok(html.includes("support@gloamatcha.com"));
   // Transactional, not marketing.
@@ -954,7 +972,13 @@ test("email: it makes no health or product claim", () => {
 });
 
 test("email: the template is a pure leaf, like its siblings", () => {
-  assert.ok(!/from "\.\//.test(templateCode), "the template has a relative import");
+  // One relative import is allowed, and only one: ./brand.ts, the
+  // shared branding foundation this same test file describes below.
+  // A flat ban on relative imports predates these templates using it
+  // and would forbid the very sharing it asks for elsewhere. Same
+  // shape as tests/launch-send.test.mjs case 26.
+  const imports = [...templateCode.matchAll(/from "([^"]+)"/g)].map(m => m[1]);
+  assert.deepEqual(imports, ["./brand.ts"], "the template imports something other than the branding foundation");
   assert.ok(!templateCode.includes("supabase"), "the template touches the database");
   assert.ok(!templateCode.includes("fetch("), "the template makes a network call");
   for (const volatile of ["Date.now", "new Date()", "Math.random"]) {
