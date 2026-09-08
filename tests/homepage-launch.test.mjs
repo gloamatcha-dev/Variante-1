@@ -244,8 +244,21 @@ test("8: the hero effect is scroll-linked, and reduced motion turns it off", () 
   // The progress value is eased, so the movement starts and ends softly.
   assert.match(site, /const progress=raw\*raw\*\(3-2\*raw\);/);
   // At rest the variable is 0, so the type sits where the static layout
-  // puts it even before the first frame.
-  assert.match(css, /\.hero-copy h1\{--hero-scroll:0/);
+  // puts it even before the first frame - declared on .hero-copy, which
+  // is the element the hook writes to, so the lines below INHERIT it.
+  assert.match(css, /\.hero-copy\{--hero-scroll:0\}/);
+  // AND IT IS DECLARED NOWHERE ELSE. A `--hero-scroll` on a line that
+  // READS the variable is not a fallback: a declaration on the element
+  // beats the value inherited from .hero-copy, so every write the hook
+  // makes is shadowed and the hero sits perfectly still at every scroll
+  // position - which is exactly what shipped, with all three amplitudes
+  // reading correctly in the stylesheet. A source assertion cannot see
+  // that, so this one names the single legal owner of the declaration.
+  const heroScrollOwners = [
+    ...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{[^{}]*--hero-scroll\s*:/g),
+  ].flatMap(m => m[1].trim().split(",").map(s => s.trim()));
+  assert.deepEqual([...new Set(heroScrollOwners)], [".hero-copy"],
+    "--hero-scroll is declared on an element that reads it, which shadows the hook");
   // The second headline line is a span now, and the effect follows it.
   assert.match(heroBlockForEffect, /\.hero \.hero-copy h1 \.hero-line-2\{transform:translate3d/);
 
