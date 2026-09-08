@@ -589,7 +589,13 @@ test("44: this suite reaches no network and no database", () => {
   const self = readFileSync(fileURLToPath(import.meta.url), "utf-8");
   const specifiers = self
     .split(NEWLINE)
-    .map(line => /^(?:import .*|\}) from "([^"]+)";$/.exec(line))
+    // CR-TOLERANT, because this checkout is CRLF (core.autocrlf=true).
+    // Split on the line feed alone and every line still ends in a
+    // carriage return, which $ does not step over - so this inventory
+    // silently extracted NOTHING and the comparison below could only
+    // ever fail. The same guard written as one /…/gm over the raw file
+    // elsewhere in this suite works, which is what hid it.
+    .map(line => /^(?:import .*|\}) from "([^"]+)";\r?$/.exec(line))
     .filter(Boolean)
     .map(m => m[1])
     .sort();

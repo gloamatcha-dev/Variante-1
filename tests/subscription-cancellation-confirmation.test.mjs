@@ -802,13 +802,38 @@ test("42: nothing in this feature can reach a network or a database in a test", 
     assert.ok(!source.includes("process.env"), `the ${name} reads the environment`);
     assert.ok(!source.includes("resend"), `the ${name} reaches the provider`);
   }
-  assert.ok(!/from "\.\//.test(templateCode), "the template has a relative import");
+  // ONE ALLOWED RELATIVE IMPORT, AND IT IS NAMED. Every template here
+  // was a leaf with no imports at all until the GLOA mark, the shell and
+  // the § 35a footer were lifted into lib/email/brand.ts, which thirteen
+  // templates now share. So the blanket ban became a list of exactly one.
+  // A sender, a rules module or a client smuggled in behind a relative
+  // path is still refused - the list is compared, not searched.
+  const templateRelativeImports = [...new Set(
+    [...templateCode.matchAll(/from "(\.[^"]*)"/g)].map(m => m[1]))];
+  assert.deepEqual(templateRelativeImports, ["./brand.ts"],
+    "the template imports a relative module other than the brand helpers");
+  // AND THE ONE IT IS ALLOWED IS ITSELF A LEAF. That is what makes
+  // allowing it safe: brand.ts imports nothing at all, so it cannot
+  // carry a database, a provider, an environment read or a clock in
+  // behind the template. Asserted here rather than assumed.
+  const brandCode = read("lib/email/brand.ts");
+  for (const forbidden of ["supabase", "fetch(", "process.env", "resend"]) {
+    assert.ok(!brandCode.includes(forbidden), `the brand helpers reach ${forbidden}`);
+  }
+  assert.equal([...brandCode.matchAll(/^[ \t]*import[\s{]/gm)].length, 0,
+    "the brand helpers stopped being a leaf");
   assert.ok(!/from "\.\//.test(rulesCode), "the rules module has a relative import");
 
   const self = readFileSync(fileURLToPath(import.meta.url), "utf-8");
   const specifiers = self
     .split(NEWLINE)
-    .map(line => /^(?:import .*|\}) from "([^"]+)";$/.exec(line))
+    // CR-TOLERANT, because this checkout is CRLF (core.autocrlf=true).
+    // Split on the line feed alone and every line still ends in a
+    // carriage return, which $ does not step over - so this inventory
+    // silently extracted NOTHING and the comparison below could only
+    // ever fail. The same guard written as one /…/gm over the raw file
+    // elsewhere in this suite works, which is what hid it.
+    .map(line => /^(?:import .*|\}) from "([^"]+)";\r?$/.exec(line))
     .filter(Boolean)
     .map(m => m[1])
     .sort();
