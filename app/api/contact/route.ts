@@ -1,7 +1,7 @@
 import { getResendClient } from "../../../lib/resend";
 
 // Fixed, server-chosen recipient - never taken from the client.
-const CONTACT_RECIPIENT = "info@gloamatcha.com";
+const CONTACT_RECIPIENT = "hello@gloamatcha.com";
 
 const ALLOWED_ANLIEGEN = ["Bestellung", "Produkt", "Abo", "Sonstiges"] as const;
 type Anliegen = (typeof ALLOWED_ANLIEGEN)[number];
@@ -94,7 +94,7 @@ export async function POST(request: Request): Promise<Response> {
   const fromAddress = process.env.RESEND_CONTACT_FROM;
   if (!resend || !fromAddress) {
     console.error("Contact form error: RESEND_API_KEY or RESEND_CONTACT_FROM is not configured.");
-    return Response.json({ error: "Kontaktformular vorübergehend nicht verfügbar. Schreib uns direkt an info@gloamatcha.com." } as ErrorResponse, { status: 503 });
+    return Response.json({ error: "Kontaktformular vorübergehend nicht verfügbar. Schreib uns direkt an hello@gloamatcha.com." } as ErrorResponse, { status: 503 });
   }
 
   // Plain text only - never renders any client-supplied string as HTML.
@@ -121,11 +121,11 @@ export async function POST(request: Request): Promise<Response> {
 
     if (error) {
       console.error("Contact form error: Resend rejected the message:", error.message);
-      return Response.json({ error: "Nachricht konnte nicht gesendet werden. Schreib uns direkt an info@gloamatcha.com." } as ErrorResponse, { status: 502 });
+      return Response.json({ error: "Nachricht konnte nicht gesendet werden. Schreib uns direkt an hello@gloamatcha.com." } as ErrorResponse, { status: 502 });
     }
   } catch (err) {
     console.error("Contact form error:", err instanceof Error ? err.message : err);
-    return Response.json({ error: "Nachricht konnte nicht gesendet werden. Schreib uns direkt an info@gloamatcha.com." } as ErrorResponse, { status: 502 });
+    return Response.json({ error: "Nachricht konnte nicht gesendet werden. Schreib uns direkt an hello@gloamatcha.com." } as ErrorResponse, { status: 502 });
   }
 
   return Response.json({ ok: true } as SuccessResponse, { status: 200 });

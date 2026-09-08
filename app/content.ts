@@ -1,7 +1,7 @@
 export const BRAND = {
   name: "GLOA",
   origin: "Shizuoka, Japan",
-  contactEmail: "info@gloamatcha.com",
+  contactEmail: "hello@gloamatcha.com",
   instagram: "gloa.matcha",
   tiktok: "gloa.matcha",
   companyLegalName: null as string | null,

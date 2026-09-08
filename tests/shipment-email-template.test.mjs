@@ -41,7 +41,7 @@ test("shipment email: renders order number, tracking and address", () => {
     assert.ok(output.includes("00340434161094042557"));
     assert.ok(output.includes("https://tracking.example.com/xyz"));
     assert.ok(output.includes("Musterstraße 1"));
-    assert.ok(output.includes("info@gloamatcha.com"));
+    assert.ok(output.includes("support@gloamatcha.com"));
   }
 });
 

@@ -1087,14 +1087,14 @@ website:String(f.get("website")||""),
 const body=await res.json().catch(()=>null);
 if(!res.ok){
 setStatus("error");
-setErrorMsg(body?.error||"Nachricht konnte nicht gesendet werden. Schreib uns direkt an info@gloamatcha.com.");
+setErrorMsg(body?.error||"Nachricht konnte nicht gesendet werden. Schreib uns direkt an hello@gloamatcha.com.");
 return;
 }
 setStatus("success");
 form.reset();
 }catch{
 setStatus("error");
-setErrorMsg("Nachricht konnte nicht gesendet werden. Schreib uns direkt an info@gloamatcha.com.");
+setErrorMsg("Nachricht konnte nicht gesendet werden. Schreib uns direkt an hello@gloamatcha.com.");
 }
 };
 
@@ -1112,7 +1112,7 @@ return <main className="contact-main">
 <label>Nachricht*<textarea required name="message" placeholder="Wie können wir helfen?" rows={5} minLength={10} maxLength={5000} disabled={status==="sending"}/></label>
 {status==="error"&&<p className="account-error">{errorMsg}</p>}
 <button className="cta" type="submit" disabled={status==="sending"}>{status==="sending"?"Wird gesendet …":"Nachricht senden"}</button>
-<p className="legal-note">Lieber direkt per E-Mail? Schreib uns an <a href="mailto:info@gloamatcha.com">info@gloamatcha.com</a>.</p>
+<p className="legal-note">Lieber direkt per E-Mail? Schreib uns an <a href="mailto:hello@gloamatcha.com">hello@gloamatcha.com</a>.</p>
 </form>
 }
 </main>}
@@ -1757,7 +1757,7 @@ if(!res.ok){setError(body?.error||"Widerruf konnte nicht übermittelt werden.");
 setResult({submittedAt:body.submittedAt,confirmationEmailSent:body.confirmationEmailSent});
 setStep("success");
 }catch{
-setError("Widerruf konnte nicht übermittelt werden. Bitte versuche es erneut oder schreib uns an info@gloamatcha.com.");
+setError("Widerruf konnte nicht übermittelt werden. Bitte versuche es erneut oder schreib uns an hello@gloamatcha.com.");
 }
 setBusy(false);
 };

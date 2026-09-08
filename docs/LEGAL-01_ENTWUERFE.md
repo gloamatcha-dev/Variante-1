@@ -154,7 +154,7 @@ mit Ausnahme der markierten Klammer.
 > aufnehmen, wenn die Verträge vorliegen und der Status geprüft ist.]*
 >
 > Eine Kopie der vereinbarten Garantien stellen wir dir auf Anfrage unter
-> info@gloamatcha.com zur Verfügung.
+> hello@gloamatcha.com zur Verfügung.
 
 **Warum kein DPF-Satz drinsteht:** weil ich den Zertifizierungsstatus nicht aus
 der amtlichen Liste lesen konnte. Ein Verweis auf einen Angemessenheitsbeschluss,

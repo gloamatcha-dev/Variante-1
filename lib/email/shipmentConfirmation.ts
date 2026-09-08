@@ -159,7 +159,7 @@ ${addressHtml}
 ${accountLinkHtml}
 </td></tr>
 <tr><td style="background-color:${BRAND.plum};padding:20px 32px;">
-<p style="font-size:12px;line-height:1.5;color:${BRAND.cream};margin:0;">GLOA · Fragen zu deiner Bestellung? <a href="mailto:info@gloamatcha.com" style="color:${BRAND.cream};">info@gloamatcha.com</a></p>
+<p style="font-size:12px;line-height:1.5;color:${BRAND.cream};margin:0;">GLOA · Fragen zu deiner Bestellung? <a href="mailto:support@gloamatcha.com" style="color:${BRAND.cream};">support@gloamatcha.com</a></p>
 </td></tr>
 </table>
 </td></tr>
@@ -191,7 +191,7 @@ ${accountLinkHtml}
     addressLinesText,
     accountLinkText,
     "",
-    "Fragen zu deiner Bestellung? info@gloamatcha.com",
+    "Fragen zu deiner Bestellung? support@gloamatcha.com",
   ]
     .filter(line => line !== "")
     .join("\n");

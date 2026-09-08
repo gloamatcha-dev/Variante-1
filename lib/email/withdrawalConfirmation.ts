@@ -73,7 +73,7 @@ ${customerNoteHtml}
 <p style="font-size:14px;line-height:1.5;margin:16px 0 0;">Eingegangen am ${escapeHtml(date)} um ${escapeHtml(time)} Uhr.</p>
 </td></tr>
 <tr><td style="background-color:#4F3A5B;padding:20px 32px;">
-<p style="font-size:12px;line-height:1.5;color:#F5EBE2;margin:0;">GLOA · Fragen zu deinem Widerruf? <a href="mailto:info@gloamatcha.com" style="color:#F5EBE2;">info@gloamatcha.com</a></p>
+<p style="font-size:12px;line-height:1.5;color:#F5EBE2;margin:0;">GLOA · Fragen zu deinem Widerruf? <a href="mailto:hello@gloamatcha.com" style="color:#F5EBE2;">hello@gloamatcha.com</a></p>
 </td></tr>
 </table>
 </td></tr>
@@ -92,7 +92,7 @@ ${customerNoteHtml}
     customerNote ? `Anmerkung: ${customerNote}` : "",
     `Eingegangen am ${date} um ${time} Uhr.`,
     "",
-    "Fragen zu deinem Widerruf? info@gloamatcha.com",
+    "Fragen zu deinem Widerruf? hello@gloamatcha.com",
   ]
     .filter(line => line !== "")
     .join("\n");

@@ -822,3 +822,56 @@ test("Versand: the one-word headline is sized and hyphenated to fit", () => {
   // The figures are the point of the page and must not shrink below body text.
   assert.match(css, /\.legal-ship-facts dd\{[^}]*font-size:19px/);
 });
+
+/* ── The published contact address (EMAIL-01) ────────────────── */
+
+test("Contact address: info@ is retired everywhere a customer could see it", () => {
+  // The site published hello@ on four legal pages while the contact
+  // form still delivered to info@, the withdrawal confirmation still
+  // replied to it, and two footers still printed it. People were being
+  // told to write to one address and having their messages routed to
+  // another. This guard is why that cannot come back quietly.
+  const files = [
+    "../app/content.ts",
+    "../app/api/contact/route.ts",
+    "../app/api/withdrawal/route.ts",
+    "../app/api/orders/cancellation-request/route.ts",
+    "../lib/email/withdrawalConfirmation.ts",
+    "../lib/email/shipmentConfirmation.ts",
+    "../lib/email/orderConfirmation.ts",
+  ];
+  for (const rel of files) {
+    const src = readFileSync(new URL(rel, import.meta.url), "utf-8");
+    assert.ok(!src.includes("info@gloamatcha.com"), `the retired address is back in ${rel}`);
+  }
+  // GloaSite carries every customer-facing page; comments are stripped
+  // so an explanation naming the old address cannot trip this.
+  const site = gloaSiteSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  assert.ok(!site.includes("info@gloamatcha.com"), "the retired address is back in a page");
+});
+
+test("Contact address: the form delivers where the site says to write", () => {
+  const contact = readFileSync(new URL("../app/api/contact/route.ts", import.meta.url), "utf-8");
+  const content = readFileSync(new URL("../app/content.ts", import.meta.url), "utf-8");
+  // A server-chosen recipient, never taken from the client, and the same
+  // address app/content.ts publishes.
+  assert.match(contact, /const CONTACT_RECIPIENT = "hello@gloamatcha\.com"/);
+  assert.match(content, /contactEmail: "hello@gloamatcha\.com"/);
+});
+
+test("Contact address: order mail prints the address a reply actually reaches", () => {
+  // Order and shipment confirmations both reply to GLOA_REPLY_TO_SUPPORT.
+  // The shipment footer used to print info@ under the same sentence the
+  // order footer printed support@ under - so the printed address was not
+  // the one a reply would land in. Both print support@ now.
+  const senders = readFileSync(new URL("../lib/emailSenders.ts", import.meta.url), "utf-8");
+  assert.match(senders, /GLOA_REPLY_TO_SUPPORT = "support@gloamatcha\.com"/);
+  for (const rel of ["../lib/email/orderConfirmation.ts", "../lib/email/shipmentConfirmation.ts"]) {
+    const src = readFileSync(new URL(rel, import.meta.url), "utf-8");
+    assert.ok(src.includes("Fragen zu deiner Bestellung? support@gloamatcha.com"), `${rel} prints a different address than the reply-to`);
+  }
+  // The withdrawal confirmation is not order mail: it is a statutory
+  // receipt, and its reply-to is the published contact address.
+  const withdrawal = readFileSync(new URL("../app/api/withdrawal/route.ts", import.meta.url), "utf-8");
+  assert.match(withdrawal, /replyTo: "hello@gloamatcha\.com"/);
+});

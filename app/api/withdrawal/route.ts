@@ -103,7 +103,7 @@ export async function POST(request: Request): Promise<Response> {
   const admin = getSupabaseAdmin();
   if (!admin) {
     console.error("Withdrawal error: Supabase admin client is not configured.");
-    return Response.json({ error: "Widerruf kann gerade nicht gespeichert werden. Schreib uns direkt an info@gloamatcha.com." } as ErrorResponse, { status: 503 });
+    return Response.json({ error: "Widerruf kann gerade nicht gespeichert werden. Schreib uns direkt an hello@gloamatcha.com." } as ErrorResponse, { status: 503 });
   }
 
   const { data: inserted, error: insertError } = await admin
@@ -121,7 +121,7 @@ export async function POST(request: Request): Promise<Response> {
 
   if (insertError || !inserted) {
     console.error("Withdrawal error: could not persist withdrawal request:", insertError?.message);
-    return Response.json({ error: "Widerruf kann gerade nicht gespeichert werden. Schreib uns direkt an info@gloamatcha.com." } as ErrorResponse, { status: 503 });
+    return Response.json({ error: "Widerruf kann gerade nicht gespeichert werden. Schreib uns direkt an hello@gloamatcha.com." } as ErrorResponse, { status: 503 });
   }
 
   // The durable record above is the legally required part and has
@@ -145,7 +145,7 @@ export async function POST(request: Request): Promise<Response> {
       const { error: sendError } = await resend.emails.send({
         from: fromAddress,
         to: trimmedEmail,
-        replyTo: "info@gloamatcha.com",
+        replyTo: "hello@gloamatcha.com",
         subject,
         html,
         text,

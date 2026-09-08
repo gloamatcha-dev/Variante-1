@@ -777,7 +777,7 @@ test("the shipment email carries the order number and the support contact", () =
   assert.ok(built.subject.includes("GLOA-2026-000123"));
   assert.ok(built.html.includes("GLOA-2026-000123"));
   assert.ok(built.html.includes("Versendet"));
-  assert.ok(built.text.includes("info@gloamatcha.com"), "no support contact in the plain text part");
+  assert.ok(built.text.includes("support@gloamatcha.com"), "no support contact in the plain text part");
 });
 
 test("no real Resend request and no production Supabase in this suite", () => {

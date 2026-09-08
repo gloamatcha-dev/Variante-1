@@ -8,8 +8,16 @@
  * The sending DOMAIN is verified with Resend, so any address on it can
  * send. These constants pick which, deliberately:
  *
- *   hello@    the brand voice. What a customer sees a message arrive from.
- *   support@  where a reply to an order email should land.
+ *   hello@    the brand voice, AND the company's published contact
+ *             address. What a customer sees a message arrive from, and
+ *             what the legal pages tell them to write to - so it has to
+ *             receive as well as send. A verified Resend sender proves
+ *             only the sending half; the mailbox is a Zoho fact.
+ *   support@  where a reply to an ORDER email should land, and what
+ *             order and shipment mail print in their footer. Kept as its
+ *             own role rather than folded into hello@: the address a
+ *             customer sees under "Fragen zu deiner Bestellung?" should
+ *             be the one their reply actually reaches.
  *   orders@   internal fulfillment. Recipient only - never a From on a
  *             customer-facing message, and never printed in customer copy.
  *
@@ -19,12 +27,17 @@
  * value threw and turned every paid-order webhook into a repeating 500.
  * A sender address is not per-environment configuration.
  *
- * Note on info@gloamatcha.com: that is the address published in the
- * Impressum and in app/content.ts, and it remains the one printed in
- * customer-facing footers. It is deliberately not listed here - this
- * module is about which mailbox SENDS and receives replies, not about the
- * company's published contact address, which is legal copy and belongs
- * where it already is.
+ * info@gloamatcha.com is RETIRED. It used to be the published contact
+ * address and the note here said so; the legal pages moved to hello@,
+ * and this comment outlived that by four commits while three error
+ * messages, the contact form's recipient, the withdrawal reply-to and
+ * two mail footers still pointed at it. The site was telling people to
+ * write to one address and delivering their messages to another.
+ *
+ * Nothing in the codebase addresses info@ any more. If it still exists
+ * as a Zoho alias it should forward to hello@ rather than be deleted -
+ * mail sent to the old address by somebody reading an old page should
+ * not bounce.
  *
  * Pure and leaf: no imports, no env read, no network, so it is directly
  * unit-testable and cannot drift per environment.

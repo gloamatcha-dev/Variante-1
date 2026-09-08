@@ -112,7 +112,7 @@ test("contact: a valid payload is accepted and sent through the configured provi
 
   assert.equal(receivedRequests.length, 1);
   const sent = receivedRequests[0].body;
-  assert.equal(sent.to, "info@gloamatcha.com");
+  assert.equal(sent.to, "hello@gloamatcha.com");
   assert.equal(sent.from, MOCK_FROM);
   assert.equal(sent.reply_to, "max@example.com");
   assert.match(sent.subject, /Bestellung/);
@@ -135,7 +135,7 @@ test("contact: HTML/script content in free-text fields is carried as inert plain
 test("contact: the recipient is always the fixed GLOA address, even if the client tries to override it", async () => {
   const { status } = await post(validPayload({ to: "attacker@example.invalid", recipient: "attacker@example.invalid" }));
   assert.equal(status, 200);
-  assert.equal(receivedRequests[0].body.to, "info@gloamatcha.com");
+  assert.equal(receivedRequests[0].body.to, "hello@gloamatcha.com");
 });
 
 test("contact: missing name is rejected", async () => {

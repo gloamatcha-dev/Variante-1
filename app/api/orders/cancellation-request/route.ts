@@ -109,7 +109,7 @@ export async function POST(request: Request): Promise<Response> {
   if (!admin) {
     console.error("Cancellation request error: Supabase admin client is not configured.");
     return Response.json(
-      { error: "Das klappt gerade nicht. Schreib uns direkt an info@gloamatcha.com." } as ErrorResponse,
+      { error: "Das klappt gerade nicht. Schreib uns direkt an hello@gloamatcha.com." } as ErrorResponse,
       { status: 503 }
     );
   }
