@@ -196,6 +196,56 @@ Jede Datei **als Ganzes** im SQL Editor ausführen, nicht abschnittsweise.
       19:32. Er kann durch Klick des Links regulär auf `confirmed`
       zurückkehren; Token und Retention laufen um den 21.09. ab.
 
+### PRODUCT-01 — zurückgestellte Produktthemen
+
+**PRODUCT-01 ist für diesen Launch abgeschlossen** (Befund 09.09.2026,
+kleine Korrekturen in PRODUCT-01B). Drei Themen sind bewusst vertagt und
+blockieren den Launch nicht:
+
+- [ ] **Finale Produktfotos.** Die aktuell verwendeten Bilder sind
+      vorläufig freigegeben und bleiben unverändert. Wenn die
+      endgültigen Fotos da sind, werden sie **gesammelt** ersetzt - nicht
+      einzeln. Bis dahin nichts austauschen, optimieren, zuschneiden,
+      umbenennen oder löschen, auch keine untracked Assets.
+      Mitzuerledigen, wenn es so weit ist: Das Retail-Foto
+      `gloa-hero-packaging.jpg` zeigt eine Dose mit der abgelösten
+      Tagline „MATCHA FOR REAL LIFE" und einer Serifen-Wortmarke; die
+      Website und `gloa-logo-slogan-link.png` führen inzwischen
+      „MATCHA IS FOR EVERYONE." mit der Grotesk-Marke.
+
+- [ ] **GLOA Metal Case, nach der Verpackungsbestellung.** Wird vorerst
+      **nicht verkauft**. Bleibt über `SHOP_HIDDEN_SLUGS` aus `/shop`
+      ausgeblendet; Daten, Katalogzeile und Dateien bleiben erhalten.
+      Offen für später, alles zusammen zu erledigen:
+      - eigenes Foto der **leeren** Dose (aktuell teilt sie sich das Bild
+        mit dem Matcha, das eine etikettierte Matcha-Packung zeigt - der
+        Hinweis „Matcha nicht enthalten" fängt das nur im Text ab)
+      - Alt-Text, der die Datei beschreibt statt nur den Produktnamen
+      - Grammatik: „**die** GLOA Metal Case" steht an vier Stellen
+        konsistent, Duden führt „das Case". **Jetzt nicht geändert**,
+        weil eine der vier Stellen die `short_description` der bereits
+        angewendeten Migration 020 ist, also Live-Datenbestand: eine
+        reine Code-Änderung würde Hinweistext und Produktbeschreibung
+        auseinanderlaufen lassen. Zusammen mit dem DB-Update erledigen.
+      - `PRODUCT_FALLBACK_IMAGE` hat keinen Eintrag für `metal-case`:
+        verlöre die Katalogzeile ihren Bildpfad, bliebe die Produktseite
+        kommentarlos bildlos
+      - Material, Maße, Fassungsvermögen sind unbestätigt
+
+- [ ] **Bio-Zertifikat, nach Erhalt.** `ORGANIC_CERTIFICATION` bleibt
+      `PENDING OWNER DOCUMENT`, alle Felder `null`. Die in SITE-01B
+      entfernten Bio-Aussagen bleiben entfernt; der bedingte Guard in
+      `tests/legal-content.test.mjs` hebt sich von selbst auf, sobald
+      `controlBodyCode` oder `certificateReference` gefüllt sind.
+      Benötigt: Kontrollstellen-Code, Name der Kontrollstelle,
+      Zertifikatsnummer, Gültigkeit - jeweils vom echten Dokument der
+      Cara 2 GmbH, nicht vom Lieferantenzertifikat. Danach separat
+      freigeben, welche Formulierung zurückkehrt.
+
+Ebenfalls notiert, ohne Termin und ohne Launch-Bezug: „GLOA®" steht nur
+auf dem B2B-Beutel und nirgends sonst - falls die Marke nicht eingetragen
+ist, gehört das in die rechtliche Endabnahme.
+
 ### ROUTING-01 — Soft-404: unbekannte Pfade antworten mit HTTP 200
 
 **Aufgenommen 09.09.2026 im Zuge von SITE-01. Bewusst NICHT dort behoben:**

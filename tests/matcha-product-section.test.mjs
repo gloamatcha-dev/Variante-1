@@ -75,7 +75,8 @@ test("2: the copy moved without being rewritten", () => {
     // SITE-01B: organic claim out, every other fact in the sentence kept.
     "GLOA Matcha kommt aus Shizuoka, Japan: fein gemahlenes Grünteepulver, kein Zusatz, keine Mischung. Die Verpackung ist licht-, luft- und feuchtigkeitsdicht, damit Farbe und Geschmack erhalten bleiben.",
     "HERKUNFT", "Shizuoka, Japan",
-    "QUALITÄT", "100 % Matcha-Grünteepulver",
+    // PRODUCT-01B: renamed to what the value actually is.
+    "ZUTAT", "100 % Matcha-Grünteepulver",
     "VERWENDUNG", "Latte · Iced · Pur",
     "GRÖSSEN", "30 g · 50 g · 100 g",
     "LAGER", "Deutschland",
@@ -89,7 +90,7 @@ test("2: the copy moved without being rewritten", () => {
   // Five facts, then the taste pair - and no invented sixth cell.
   const facts = section.slice(section.indexOf('className="matcha-fact-grid"'), section.indexOf('className="matcha-taste-block"'));
   assert.deepEqual([...facts.matchAll(/<dt>([^<]+)<\/dt>/g)].map(m => m[1]),
-    ["HERKUNFT", "QUALITÄT", "VERWENDUNG", "GRÖSSEN", "BESTAND"]);
+    ["HERKUNFT", "ZUTAT", "VERWENDUNG", "GRÖSSEN", "BESTAND"]);
   assert.match(rules, /\.matcha-fact-grid\{[\s\S]*?grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
   const pair = section.slice(section.indexOf('className="matcha-taste-pair"'));
   assert.deepEqual([...pair.matchAll(/<dt>([^<]+)<\/dt>/g)].map(m => m[1]), ["GESCHMACK", "AROMA"]);
@@ -349,4 +350,43 @@ test("7: what-is-matcha and storage are areas of this section now", () => {
   // the divider stays in the first one.
   assert.match(rules, /\.matcha-what-block,\s*\.matcha-storage-row\{[\s\S]*?border-top:1px solid rgba\(245,235,226,\.24\)/);
   assert.ok(section.indexOf("matcha-product-divider") < section.indexOf("matcha-what-block"));
+});
+
+test("8: the sizes on this page cannot drift away from the catalog", () => {
+  // /our-matcha is editorial: it does not fetch the catalog, so its size
+  // row is a LITERAL, while the shop card and the product page both build
+  // theirs from product.variants. That is fine - but only for as long as
+  // the literal is checked against the same sizes everyone else uses.
+  // Pinning the string on its own, which is what test 2 does, would keep
+  // passing while a fourth size, or a changed one, left this page quietly
+  // stating the old set.
+  //
+  // Three sources are locked together here, none of them this page:
+  //   1. lib/annualPlans.ts   - ANNUAL_LAUNCH_GRAMS_BY_SKU, the map the
+  //                             annual plan is priced and shipped from
+  //   2. migration 008        - the seed the catalog rows were created by
+  //   3. this section         - the literal a customer reads
+  // Read as source text rather than imported, so this test stays a leaf.
+  const plans = read("lib/annualPlans.ts");
+  const map = plans.slice(plans.indexOf("ANNUAL_LAUNCH_GRAMS_BY_SKU"),
+                          plans.indexOf("}", plans.indexOf("ANNUAL_LAUNCH_GRAMS_BY_SKU")));
+  const grams = [...map.matchAll(/"GLOA-MATCHA-\d+G":\s*(\d+)/g)].map(m => Number(m[1]));
+  assert.ok(grams.length >= 3, "the launch sizes moved out of ANNUAL_LAUNCH_GRAMS_BY_SKU");
+  grams.sort((a, b) => a - b);
+
+  // 2. The catalog seed declares the same set, with matching labels.
+  const seed = read("supabase/migrations/008_b2c_launch_products.sql");
+  const seeded = [...seed.matchAll(/'GLOA-MATCHA-(\d+)G',\s*'(\d+) g',\s*(\d+),/g)]
+    .map(m => [Number(m[1]), m[2] + " g", Number(m[3])]);
+  assert.deepEqual(seeded.map(s => s[0]).sort((a, b) => a - b), grams,
+    "the seeded SKUs and the annual size map disagree");
+  for (const [sku, label, size] of seeded) {
+    assert.equal(size, sku, `GLOA-MATCHA-${sku}G is seeded with size_grams ${size}`);
+    assert.equal(label, `${sku} g`, `GLOA-MATCHA-${sku}G is labelled "${label}"`);
+  }
+
+  // 3. And the sentence on this page is exactly that set, in order.
+  const expected = grams.map(g => `${g} g`).join(" · ");
+  assert.ok(section.includes(`<dt>GRÖSSEN</dt><dd>${expected}</dd>`),
+    `the page states sizes the catalog does not have - expected "${expected}"`);
 });

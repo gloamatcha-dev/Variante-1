@@ -142,7 +142,9 @@ test("4: four rows, native disclosure, and no mandatory line lost", () => {
     "HERKUNFT", "Shizuoka, Japan",
     // SITE-01B: the same neutral composition line the matcha page now
     // carries, for as long as the certificate is outstanding.
-    "QUALITÄT", "100 % Matcha-Grünteepulver",
+    // PRODUCT-01B: the row states a composition, not a quality grade -
+    // the product page already called it ZUTAT and the card follows.
+    "ZUTAT", "100 % Matcha-Grünteepulver",
     "LAGERUNG", "{PRODUCT.storage}",
     // SITE-01 re-pinned the ASCII transliteration to the umlaut the rest
     // of the site already used (matcha page, account portal). Same label,
