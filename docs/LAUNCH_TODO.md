@@ -187,11 +187,48 @@ Jede Datei **als Ganzes** im SQL Editor ausführen, nicht abschnittsweise.
       `lib/email/brand.ts` steht bereit; bewusst nicht angefasst, weil
       rechtlich relevante Mails ohne Anlass umzubauen ein
       Regressionsrisiko ist.
-- [ ] Neun vorbestehende Testfehler in der Suite (Baseline), unabhängig
-      von der Launch-Arbeit.
+- [x] ~~Neun vorbestehende Testfehler in der Suite (Baseline)~~ — erledigt.
+      QA-EMAIL-04 hat die letzten sechs behoben (veralteter Import-Guard
+      nach `lib/email/brand.ts` plus ein CRLF-Fehler, der das Inventar
+      leer laufen ließ). Die Gesamtsuite ist seither vollständig grün:
+      3.085 Tests, Exit 0, Stand 09.09.2026.
 - [ ] Testkontakt steht auf `pending` mit gültigem Bestätigungstoken von
       19:32. Er kann durch Klick des Links regulär auf `confirmed`
       zurückkehren; Token und Retention laufen um den 21.09. ab.
+
+### ROUTING-01 — Soft-404: unbekannte Pfade antworten mit HTTP 200
+
+**Aufgenommen 09.09.2026 im Zuge von SITE-01. Bewusst NICHT dort behoben:**
+ein Copy- und Navigations-Pass ist nicht der Ort, um Routing-Verhalten zu
+ändern.
+
+**Befund.** `/definitely-not-a-page` und jeder andere unbekannte Pfad
+rendern die 404-Seite korrekt, antworten aber mit **Status 200**. Gemessen
+über den Render-Harness gegen den echten Build.
+
+**Warum es zählt.** Suchmaschinen indexieren eine 200-Antwort. Jede
+Falschschreibung einer URL kann so als eigene Seite in den Index geraten,
+und Monitoring, das auf Statuscodes schaut, sieht keinen Fehler.
+
+**Wo es sitzt.** `app/[...slug]/page.tsx` reicht jeden Pfad an
+`GloaSite` weiter; der Route-Switch in `app/GloaSite.tsx` fällt am Ende
+auf `<main className="not-found">` zurück. Der Status wird nirgends
+gesetzt — deshalb 200.
+
+**Zu klären, bevor jemand anfängt:**
+
+- Welche Pfade sind wirklich unbekannt und welche nur katalogabhängig?
+  `/shop/<slug>` und `/rezepte/<slug>` rendern ebenfalls die 404-Ansicht,
+  wenn der Slug fehlt. Ein leerer Katalog darf keine echten Produktseiten
+  auf 404 setzen.
+- Getrennt behandeln: Route existiert nicht (404) gegen Inhalt derzeit
+  nicht verfügbar (200 mit Hinweis).
+- `robots`/`noindex` als Zwischenschritt, falls der Statuscode in dieser
+  Architektur nicht sauber setzbar ist.
+
+**Nicht Teil der Aufgabe:** Route-Struktur, Navigation oder Copy ändern.
+Ein Regressionstest gehört dazu — `tests/public-routes.test.mjs` prüft
+unbekannte Pfade bereits, aktuell nur auf „stürzt nicht ab".
 
 ---
 
