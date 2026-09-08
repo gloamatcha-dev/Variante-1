@@ -31,15 +31,42 @@ import {
 
 type FormStatus = "idle" | "sending" | "submitted" | "error";
 
-/** Set by /api/launch/confirm and /api/launch/withdraw. */
-type OutcomeState = "confirmed" | "withdrawn" | "expired" | "invalid" | "error";
+/**
+ * Set by /api/launch/confirm and /api/launch/withdraw.
+ *
+ * TWO CONFIRMED STATES, BECAUSE THERE ARE TWO TRUTHS.
+ *
+ * `confirmed-code` is the only one that says a mail with the code is on
+ * its way, and the confirm route emits it only after the provider took
+ * that mail and the row recorded it. `confirmed` is the neutral one: a
+ * version 1 contact, whose consent never covered a code, and every send
+ * that failed or ended unclear. Both are true statements about the
+ * confirmation, which is what the visitor actually came here to do.
+ *
+ * Telling somebody to search their spam folder for a mail that was never
+ * sent wastes their time and teaches them we do not know what we did.
+ */
+type OutcomeState = "confirmed" | "confirmed-code" | "withdrawn" | "expired" | "invalid" | "error";
 
-const OUTCOMES: Record<OutcomeState, { eyebrow: string; primary: string; secondary: string; body: string }> = {
+const OUTCOMES: Record<
+  OutcomeState,
+  { eyebrow: string; primary: string; secondary: string; body: string; hint?: string }
+> = {
   confirmed: {
     eyebrow: "BESTÄTIGT",
     primary: "YOU'RE ON",
     secondary: "THE LIST.",
     body: "Wir sagen dir Bescheid, sobald GLOA live geht.",
+  },
+  "confirmed-code": {
+    eyebrow: "BESTÄTIGT",
+    primary: "YOU'RE ON",
+    secondary: "THE LIST.",
+    // The percentage comes from lib/launchDiscount.ts for the same reason
+    // the hero figure does: this page may not name a number the checkout
+    // does not honour.
+    body: `Deine Eintragung ist bestätigt. Deinen ${LAUNCH_DISCOUNT_PERCENT}-%-Code haben wir dir per E-Mail geschickt.`,
+    hint: "Du findest die Mail nicht? Schau bitte auch in deinem Spam- oder Werbung-Ordner nach.",
   },
   withdrawn: {
     eyebrow: "AUSGETRAGEN",
@@ -142,7 +169,7 @@ export function LaunchPage() {
 
   // A confirmed or withdrawn visitor is done. Showing them the form
   // again would be asking for something they have already answered.
-  const done = outcome === "confirmed" || outcome === "withdrawn";
+  const done = outcome === "confirmed" || outcome === "confirmed-code" || outcome === "withdrawn";
   const shown = outcome ? OUTCOMES[outcome] : null;
 
   return (
@@ -157,6 +184,7 @@ export function LaunchPage() {
                 <i className="gloa-hero-secondary">{shown.secondary}</i>
               </h1>
               <p className="launch-hero-lead">{shown.body}</p>
+              {shown.hint && <p className="launch-hero-hint">{shown.hint}</p>}
               {done && (
                 <p className="launch-hero-social">
                   Bis dahin findest du uns auf Instagram.{" "}

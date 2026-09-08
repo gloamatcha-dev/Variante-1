@@ -138,12 +138,27 @@ export async function GET(request: Request): Promise<Response> {
       : null;
   const rowId = row && typeof row === "object" ? (row as { row_id?: unknown }).row_id : null;
 
+  // ONLY A PROVEN DISPATCH MAY BE ANNOUNCED.
+  //
+  // The confirmation page offers to help people find the code in a spam
+  // folder, which is only honest if the mail exists. This flag is set by
+  // exactly one outcome - `sent`, meaning the provider returned 2xx AND
+  // the row accepted the mark - and it is what picks the wording.
+  //
+  // Every other outcome stays quiet, and `not_claimed` is why it has to:
+  // it covers a version 1 contact, a withdrawal, a parked row and an
+  // already-sent one, and nothing here can tell those apart. Announcing a
+  // mail on a maybe is how somebody ends up searching a spam folder for
+  // something nobody sent them.
+  let welcomeAccepted = false;
+
   if (typeof rowId === "string" && effectiveVersion === LAUNCH_CONSENT_VERSION) {
     const wiring = buildWelcomeWiring();
     if (!wiring.ok) {
       console.error("Launch welcome mail: not configured -", wiring.reason);
     } else {
       const sent = await sendWelcomeEmail(wiring.db, wiring.mailer, rowId, () => randomUUID());
+      welcomeAccepted = sent.kind === "sent";
       // Counts and reasons only - never the address, never the row id.
       if (sent.kind === "needs_review" || sent.kind === "failed" || sent.kind === "unavailable") {
         console.error("Launch welcome mail:", sent.kind, "-", sent.reason);
@@ -151,5 +166,5 @@ export async function GET(request: Request): Promise<Response> {
     }
   }
 
-  return redirect("confirmed");
+  return redirect(welcomeAccepted ? "confirmed-code" : "confirmed");
 }

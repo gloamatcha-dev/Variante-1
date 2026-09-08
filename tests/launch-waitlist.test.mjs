@@ -2382,10 +2382,28 @@ test("108: the welcome mail never fails a confirmation", () => {
   // the welcome mail did. Losing your place on the list because a second
   // mail failed would be the worse bug by far.
   const code = stripJs(confirmRouteSrc);
-  const sendAt = code.indexOf("sendWelcomeEmail");
-  const redirectAt = code.lastIndexOf('redirect("confirmed")');
+  // The CALL, not the import at the top of the file - which is what the
+  // first occurrence of the name is.
+  const sendAt = code.lastIndexOf("await sendWelcomeEmail(");
   assert.ok(sendAt > 0, "the confirm route does not send the welcome mail");
-  assert.ok(redirectAt > sendAt, "the confirmation is not returned after the welcome attempt");
+
+  // The last redirect in the route is the one the welcome attempt falls
+  // through to. Matched by shape rather than by an exact string, so the
+  // guard survives the wording of the outcome changing - what it protects
+  // is that EVERY branch of it still confirms.
+  const redirects = [...code.matchAll(/return redirect\(([^;]*)\);/g)];
+  const final = redirects[redirects.length - 1];
+  assert.ok(final, "the confirm route returns no redirect at all");
+  assert.ok(final.index > sendAt, "the confirmation is not returned after the welcome attempt");
+
+  const states = [...final[1].matchAll(/"([a-z-]+)"/g)].map((m) => m[1]);
+  assert.ok(states.length > 0, "the final redirect names no state");
+  for (const state of states) {
+    assert.ok(
+      state.startsWith("confirmed"),
+      `a welcome-mail outcome can send the visitor to "${state}"`
+    );
+  }
   // Its failures are logged, not thrown, and never reach the visitor.
   assert.ok(!/throw/.test(code.slice(sendAt)), "a welcome failure can throw out of the confirm route");
 });
@@ -2877,4 +2895,65 @@ test("128: the verification queries measure rather than assume", () => {
   // And it checks the trigger actually refuses, inside a rolled-back
   // transaction rather than by trusting the DDL.
   assert.match(verify, /rollback;/);
+});
+
+/* ── 26. The spam-folder hint on a confirmed outcome ─────────── */
+
+test("129: only a proven dispatch may claim the code was mailed", () => {
+  const code = stripJs(confirmRoute);
+
+  // The flag exists, starts false, and is set by exactly one outcome.
+  assert.match(code, /let welcomeAccepted = false;/);
+  assert.match(code, /welcomeAccepted = sent\.kind === "sent";/);
+  assert.match(code, /return redirect\(welcomeAccepted \? "confirmed-code" : "confirmed"\);/);
+
+  // `sent` is the only kind that survives both the provider AND the mark,
+  // so no other kind may reach the flag. Rather than banning four names -
+  // a list that goes stale the moment a fifth outcome is added - every
+  // assignment in the file is collected and each one must be the expected
+  // one. A widening to not_claimed or needs_review would start telling
+  // people to hunt for a mail nobody sent, which is what this guards.
+  const assignments = [...code.matchAll(/welcomeAccepted\s*=\s*([^;]+);/g)].map((m) => m[1].trim());
+  assert.deepEqual(
+    assignments,
+    ["false", 'sent.kind === "sent"'],
+    "the dispatch flag is set by something other than a proven send"
+  );
+});
+
+test("130: the neutral confirmation promises no mail, and the code one names the source of its number", () => {
+  const code = stripJs(launchPage);
+
+  // Two states, and only one of them mentions a mail.
+  assert.match(code, /type OutcomeState =[^;]*"confirmed-code"/);
+  assert.match(code, /Deine Eintragung ist bestätigt\. Deinen \$\{LAUNCH_DISCOUNT_PERCENT\}-%-Code haben wir dir per E-Mail geschickt\./);
+  assert.match(code, /Schau bitte auch in deinem Spam- oder Werbung-Ordner nach\./);
+
+  // The percentage is read, never typed. A literal here could promise a
+  // discount the checkout does not honour - the same rule the hero figure
+  // and the welcome mail already follow.
+  assert.ok(
+    !/Deinen 10-%-Code/.test(code),
+    "the confirmed-code wording hard-codes the percentage"
+  );
+
+  // The plain `confirmed` state stays neutral: a version 1 contact and
+  // every unclear send land there, and neither is owed a code.
+  const neutral = code.slice(code.indexOf("  confirmed: {"), code.indexOf('  "confirmed-code": {'));
+  for (const word of ["Code", "E-Mail", "Spam", "Werbung"]) {
+    assert.ok(!neutral.includes(word), `the neutral confirmation mentions: ${word}`);
+  }
+
+  // A confirmed visitor is done either way - the form must not come back
+  // on the new state any more than on the old one.
+  assert.match(code, /outcome === "confirmed" \|\| outcome === "confirmed-code" \|\| outcome === "withdrawn"/);
+
+  // The hint renders only where one is defined, so no other outcome grows
+  // a stray element.
+  assert.match(code, /\{shown\.hint && <p className="launch-hero-hint">\{shown\.hint\}<\/p>\}/);
+  assert.equal((code.match(/hint:/g) || []).length, 1, "more than one outcome carries a hint");
+
+  // And it is styled in the hero's own palette, not a new one.
+  const css = read("app/globals.css");
+  assert.match(css, /\.launch-hero-hint\{[\s\S]*?color:var\(--cream\)/);
 });

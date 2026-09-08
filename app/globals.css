@@ -8514,6 +8514,26 @@ header nav{gap:18px;font-size:12px}
   color:var(--cream);
   opacity:.62;
 }
+/*
+  THE SPAM-FOLDER LINE, UNDER A CONFIRMED OUTCOME.
+
+  Quieter than the lead above it and set against a rule rather than a
+  panel: it is help for the minority who cannot find the mail, not a
+  second announcement. Same measure as the lead so the two read as one
+  block, and the same Cream at a lower opacity so nothing new enters the
+  hero's palette.
+*/
+.launch-hero-hint{
+  margin:clamp(14px,1.6vw,20px) 0 0;
+  padding:clamp(12px,1.4vw,16px) 0 0;
+  border-top:1px solid rgba(245,235,226,.28);
+  max-width:34ch;
+  font-size:var(--type-card);
+  line-height:1.55;
+  color:var(--cream);
+  opacity:.72;
+}
+
 .launch-hero-social{
   margin:clamp(24px,2.8vw,34px) 0 0;
   font-size:var(--type-body);
