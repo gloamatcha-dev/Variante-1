@@ -187,3 +187,47 @@ test("the preview harness renders every customer mail from synthetic data only",
   assert.ok(harness.includes("example.invalid"), "the harness should use a reserved domain");
   assert.ok(harness.includes("GLOA-DEMO-"), "the harness should use obviously-fake order numbers");
 });
+
+/* ── The controlled test-send harness (EMAIL-03) ─────────────── */
+
+test("the test-send harness cannot reach a customer, and sends nothing by default", () => {
+  const harness = read("scripts/email-testsend.mjs");
+
+  // It never touches the database, and it never uses the production
+  // senders - those claim rows in public.orders and hold idempotency
+  // keys, so calling one to look at a layout would leave real marks and
+  // could suppress a genuine later send that shares the key.
+  for (const f of ["supabase", "createClient", '.from("orders")', ".rpc("]) {
+    assert.ok(!harness.includes(f), `the harness reaches for ${f}`);
+  }
+  for (const sender of [
+    "sendOrderConfirmationEmailIfNeeded", "sendShipmentConfirmationEmailIfNeeded",
+    "sendRefundConfirmationEmailIfNeeded", "sendPaymentProblemEmailIfNeeded",
+    "sendSubscriptionStartedEmailIfNeeded", "sendSubscriptionEndedEmailIfNeeded",
+  ]) {
+    assert.ok(!harness.includes(sender), `the harness calls the production sender ${sender}`);
+  }
+
+  // The recipient is always explicit. No default, no fallback, and no
+  // address is ever read from anywhere.
+  assert.match(harness, /if \(!to\) \{/, "the harness has no missing-recipient guard");
+  assert.ok(!/to:\s*"[^"]*@/.test(harness), "a recipient address is hard-coded in the harness");
+
+  // And it is a dry run until somebody says otherwise, in as many words.
+  assert.match(harness, /const confirmed = has\("confirm-send"\)/);
+  assert.match(harness, /if \(!confirmed\) \{/);
+  assert.match(harness, /TROCKENLAUF/);
+});
+
+test("the test-send harness mirrors production's From and Reply-To", () => {
+  const harness = read("scripts/email-testsend.mjs");
+  // Same constants the real senders use - a test that reviews a
+  // different Reply-To reviews the wrong thing.
+  assert.match(harness, /from: GLOA_FROM_HELLO/);
+  assert.match(harness, /GLOA_REPLY_TO_SUPPORT/);
+  // The statutory withdrawal receipt answers to the published contact
+  // address, not to order support, exactly as app/api/withdrawal does.
+  assert.match(harness, /"03 Widerrufseingang", "hello@gloamatcha\.com"/);
+  const route = read("app/api/withdrawal/route.ts");
+  assert.match(route, /replyTo: "hello@gloamatcha\.com"/);
+});
