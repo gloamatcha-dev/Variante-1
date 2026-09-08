@@ -1151,7 +1151,7 @@ return <main className="legal-page">
 <p>Du hast das Recht, binnen vierzehn Tagen ohne Angabe von Gründen diesen Vertrag zu widerrufen.</p>
 <p>Die Widerrufsfrist beträgt vierzehn Tage ab dem Tag, an dem du oder ein von dir benannter Dritter, der nicht der Beförderer ist, die Waren in Besitz genommen hat bzw. haben. Hast du in einer einheitlichen Bestellung mehrere Waren bestellt, die getrennt geliefert werden, beginnt die Frist mit dem Erhalt der letzten Ware.</p>
 <p>Um dein Widerrufsrecht auszuüben, musst du uns</p>
-<p>Cara 2 GmbH<br/>Hardenbergstr. 4<br/>10623 Berlin<br/>Deutschland<br/>E-Mail: <a href="mailto:info@gloamatcha.com">info@gloamatcha.com</a></p>
+<p>Cara 2 GmbH<br/>Hardenbergstr. 4<br/>10623 Berlin<br/>Deutschland<br/>E-Mail: <a href="mailto:hello@gloamatcha.com">hello@gloamatcha.com</a></p>
 <p>mittels einer eindeutigen Erklärung (z. B. ein mit der Post versandter Brief oder eine E-Mail) über deinen Entschluss, diesen Vertrag zu widerrufen, informieren. Du kannst dafür das Muster-Widerrufsformular weiter unten verwenden, das ist aber nicht vorgeschrieben.</p>
 <p>Zur Wahrung der Widerrufsfrist reicht es aus, dass du die Mitteilung über die Ausübung des Widerrufsrechts vor Ablauf der Widerrufsfrist absendest.</p>
 
@@ -1166,7 +1166,7 @@ return <main className="legal-page">
 
 <h2>Muster-Widerrufsformular</h2>
 <p>(Wenn du den Vertrag widerrufen willst, fülle bitte dieses Formular aus und sende es zurück, oder nutze die elektronische Widerrufsfunktion unten.)</p>
-<p>An:<br/>Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin, Deutschland, E-Mail: info@gloamatcha.com</p>
+<p>An:<br/>Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin, Deutschland, E-Mail: hello@gloamatcha.com</p>
 <p>Hiermit widerrufe(n) ich/wir den von mir/uns abgeschlossenen Vertrag über den Kauf der folgenden Waren:<br/>
 Bestellt am:<br/>
 Name des/der Verbraucher(s):<br/>
@@ -1179,16 +1179,71 @@ Datum:</p>
 </main>;
 }
 if(route==="impressum"){
-return <main className="legal-page">
-<p className="eyebrow">LEGAL</p>
-<h1>{title.impressum}</h1>
-<div className="legal-placeholder">
-<h2>Angaben gemäß § 5 DDG</h2>
-<p>Cara 2 GmbH<br/>Hardenbergstr. 4<br/>10623 Berlin<br/>Deutschland</p>
-<p>Vertreten durch: Serwan Amedi (Geschäftsführer)</p>
-<p>E-Mail: <a href="mailto:info@gloamatcha.com">info@gloamatcha.com</a></p>
-<p>Registergericht: Amtsgericht Charlottenburg<br/>Handelsregisternummer: HRB 278728 B</p>
-<p>Umsatzsteuer-Identifikationsnummer gemäß § 27a Umsatzsteuergesetz: DE457414734</p>
+/*
+  THE IMPRESSUM IS A RECORD, SO IT IS SET LIKE ONE.
+
+  It used to be one oversized headline above a single bordered box
+  holding every particular as a run of paragraphs. Nothing was wrong
+  with the facts; they were simply undifferentiated - a register number
+  read the same as a street, and the box left a wide empty column beside
+  it on any desktop.
+
+  Four labelled groups on a ruled grid instead, because that is what the
+  content already is: who the company is, how to reach it, where it is
+  registered, and its tax identifiers. Every value carries a term, so a
+  reader looking for the HRB number finds a heading rather than scanning
+  prose.
+
+  EVERY PARTICULAR IS UNCHANGED. This is a typographic pass over
+  confirmed company data, and the only substantive edit is the contact
+  address, which moved to hello@ on the operator's instruction.
+
+  The dl/dt/dd shape and the border-top/border-left ruling are the ones
+  .legal-shipping-zone already uses on /versand - the same page family,
+  the same grammar, no new vocabulary.
+*/
+return <main className="legal-page legal-imprint">
+{/*
+  A div, NOT a <header>. globals.css styles the bare `header` element for
+  the site navigation - 86px tall, sticky, three grid columns, a bottom
+  rule - and a semantic <header> here inherits all of it: the eyebrow,
+  the headline and the subline become its three columns, side by side
+  and clipped. The page banner is the one in Chrome.tsx; this is just a
+  block of introductory text.
+*/}
+<div className="legal-imprint-head">
+<p className="eyebrow">GLOA · RECHTLICHES</p>
+<h1>Impressum.</h1>
+<p className="legal-imprint-sub">Angaben gemäß § 5 DDG</p>
+</div>
+<div className="legal-imprint-grid">
+<section className="legal-imprint-block">
+<h2>Unternehmen und Anschrift</h2>
+<dl>
+<div><dt>Firma</dt><dd>Cara 2 GmbH</dd></div>
+<div><dt>Anschrift</dt><dd>Hardenbergstr. 4<br/>10623 Berlin<br/>Deutschland</dd></div>
+</dl>
+</section>
+<section className="legal-imprint-block">
+<h2>Kontakt und Geschäftsführung</h2>
+<dl>
+<div><dt>Vertreten durch</dt><dd>Serwan Amedi (Geschäftsführer)</dd></div>
+<div><dt>E-Mail</dt><dd><a href="mailto:hello@gloamatcha.com">hello@gloamatcha.com</a></dd></div>
+</dl>
+</section>
+<section className="legal-imprint-block">
+<h2>Handelsregister</h2>
+<dl>
+<div><dt>Registergericht</dt><dd>Amtsgericht Charlottenburg</dd></div>
+<div><dt>Handelsregisternummer</dt><dd>HRB 278728 B</dd></div>
+</dl>
+</section>
+<section className="legal-imprint-block">
+<h2>Steuerliche Angaben</h2>
+<dl>
+<div><dt>Umsatzsteuer-Identifikationsnummer gemäß § 27a Umsatzsteuergesetz</dt><dd>DE457414734</dd></div>
+</dl>
+</section>
 </div>
 </main>;
 }
@@ -1198,7 +1253,7 @@ return <main className="legal-page">
 <h1>{title.datenschutz}</h1>
 
 <h2>1. Verantwortlicher</h2>
-<p>Cara 2 GmbH<br/>Hardenbergstr. 4<br/>10623 Berlin<br/>Deutschland<br/>E-Mail: <a href="mailto:info@gloamatcha.com">info@gloamatcha.com</a></p>
+<p>Cara 2 GmbH<br/>Hardenbergstr. 4<br/>10623 Berlin<br/>Deutschland<br/>E-Mail: <a href="mailto:hello@gloamatcha.com">hello@gloamatcha.com</a></p>
 <p>Für alle Anliegen zum Datenschutz erreichst du uns unter der oben genannten E-Mail-Adresse.</p>
 
 <h2>2. Bereitstellung der Website (Hosting)</h2>
@@ -1217,7 +1272,7 @@ return <main className="legal-page">
 <p>Auf der Seite <Link href="/launch">Launch List</Link> kannst du dich eintragen, um einmalig darüber informiert zu werden, dass GLOA offiziell startet. Dabei verarbeiten wir deine E-Mail-Adresse sowie, wenn du sie angibst, deinen Vornamen und eine freiwillige Angabe dazu, als was du dich für GLOA interessierst (z. B. Privatperson oder Café). Pflichtangabe ist ausschließlich die E-Mail-Adresse.</p>
 <p>Rechtsgrundlage ist deine Einwilligung nach Art. 6 Abs. 1 lit. a DSGVO. Wir verwenden ein Double-Opt-In-Verfahren: Nach deiner Eintragung senden wir dir eine E-Mail mit einem Bestätigungslink. Erst wenn du diesen Link anklickst, gilt deine Eintragung als bestätigt. Bestätigst du sie nicht, löschen wir die Eintragung nach 14 Tagen. Zur Dokumentation deiner Einwilligung speichern wir zusätzlich den Zeitpunkt der Eintragung sowie den Einwilligungstext, der dir dabei angezeigt wurde. Weil sich der Einwilligungstext ändern kann, speichern wir ihn samt Version bei deiner Eintragung; maßgeblich ist immer der Text, der dir angezeigt wurde.</p>
 <p>Diese E-Mail-Adresse verwenden wir ausschließlich für die Bestätigung deiner Eintragung, für eine einmalige Willkommens-E-Mail mit deinem Launch-Rabattcode und für die Benachrichtigung über den Launch. Insgesamt sind das nach der Bestätigung genau zwei E-Mails. Ein Newsletter ist damit nicht verbunden: Du erhältst über diese Eintragung keine regelmäßigen Marketing-E-Mails, keine weitere Produktwerbung, keine weiteren Angebote und keine Event-Einladungen, und wir übertragen die Daten nicht in andere Marketing- oder Verteilerlisten. Möchten wir dir darüber hinaus E-Mails senden, holen wir dafür vorher eine gesonderte Einwilligung ein. Wer sich vor Einführung des Rabattcodes eingetragen hat, erhält ausschließlich die Launch-Benachrichtigung; wir deuten bestehende Einwilligungen nicht nachträglich um.</p>
-<p>Du kannst deine Einwilligung jederzeit mit Wirkung für die Zukunft widerrufen. Dafür genügt der Abmeldelink in unserer Bestätigungs-E-Mail; alternativ schreibst du uns an <a href="mailto:info@gloamatcha.com">info@gloamatcha.com</a>. Nach einem Widerruf senden wir dir keine Launch-Benachrichtigung mehr. Die Eintragung speichern wir bei unserem Datenbank-Dienstleister Supabase, für den Versand der E-Mails setzen wir den E-Mail-Dienstleister Resend ein. Mit dem Versand der Launch-Benachrichtigung ist der Zweck der Verarbeitung erfüllt; die Liste wird anschließend gelöscht oder anonymisiert.</p>
+<p>Du kannst deine Einwilligung jederzeit mit Wirkung für die Zukunft widerrufen. Dafür genügt der Abmeldelink in unserer Bestätigungs-E-Mail; alternativ schreibst du uns an <a href="mailto:hello@gloamatcha.com">hello@gloamatcha.com</a>. Nach einem Widerruf senden wir dir keine Launch-Benachrichtigung mehr. Die Eintragung speichern wir bei unserem Datenbank-Dienstleister Supabase, für den Versand der E-Mails setzen wir den E-Mail-Dienstleister Resend ein. Mit dem Versand der Launch-Benachrichtigung ist der Zweck der Verarbeitung erfüllt; die Liste wird anschließend gelöscht oder anonymisiert.</p>
 
 <h2>7. Cookies und lokale Speicherung</h2>
 <p>Diese Website verwendet ausschließlich technisch notwendige Speicherung: den Inhalt deines Warenkorbs (lokal in deinem Browser) und, falls du dich anmeldest, deine Anmeldesitzung. Ohne diese Speicherung stünden Warenkorb und Login-Funktion nicht zur Verfügung. Rechtsgrundlage ist § 25 Abs. 2 Nr. 2 TDDDG (vormals TTDSG) in Verbindung mit Art. 6 Abs. 1 lit. b DSGVO. Es werden keine Marketing-, Analyse- oder Tracking-Cookies gesetzt und keine entsprechenden Drittanbieter-Tools eingebunden.</p>
@@ -1232,7 +1287,7 @@ return <main className="legal-page">
 <p>Wir speichern personenbezogene Daten nur so lange, wie es für die genannten Zwecke erforderlich ist oder wie es gesetzliche Aufbewahrungspflichten (z. B. handels- und steuerrechtliche Vorgaben) verlangen. Die konkrete Aufbewahrungsfrist hängt von der Datenkategorie ab und wird laufend anhand dieser Vorgaben bestimmt.</p>
 
 <h2>11. Deine Rechte</h2>
-<p>Du hast das Recht auf Auskunft (Art. 15 DSGVO), Berichtigung (Art. 16 DSGVO), Löschung (Art. 17 DSGVO), Einschränkung der Verarbeitung (Art. 18 DSGVO), Datenübertragbarkeit (Art. 20 DSGVO) sowie Widerspruch gegen die Verarbeitung (Art. 21 DSGVO). Wende dich dafür an <a href="mailto:info@gloamatcha.com">info@gloamatcha.com</a>.</p>
+<p>Du hast das Recht auf Auskunft (Art. 15 DSGVO), Berichtigung (Art. 16 DSGVO), Löschung (Art. 17 DSGVO), Einschränkung der Verarbeitung (Art. 18 DSGVO), Datenübertragbarkeit (Art. 20 DSGVO) sowie Widerspruch gegen die Verarbeitung (Art. 21 DSGVO). Wende dich dafür an <a href="mailto:hello@gloamatcha.com">hello@gloamatcha.com</a>.</p>
 <p>Außerdem hast du das Recht, dich bei einer Datenschutz-Aufsichtsbehörde zu beschweren, insbesondere in dem Mitgliedstaat deines Aufenthaltsorts, Arbeitsplatzes oder des Orts des mutmaßlichen Verstoßes. Für uns als Unternehmen mit Sitz in Berlin ist dies die Berliner Beauftragte für Datenschutz und Informationsfreiheit.</p>
 </main>;
 }

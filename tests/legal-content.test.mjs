@@ -239,10 +239,66 @@ test("Impressum: uses § 5 DDG and never the repealed § 5 TMG", () => {
   assert.ok(!gloaSiteSource.includes("§ 5 TMG"), "TMG was replaced by the DDG in 2024");
 });
 
+/**
+ * The Impressum's own source, sliced out of the route table.
+ *
+ * The whole-file check this replaces asserted that
+ * "info@gloamatcha.com" appeared SOMEWHERE in GloaSite.tsx. That was
+ * true of the file long after it stopped being true of the Impressum -
+ * the address also sits in three error messages and on /contact - so
+ * the guard kept passing while the thing it guarded had moved. Scoped
+ * to the block, it fails when the Impressum changes rather than when
+ * the file does.
+ */
+const imprintSource = gloaSiteSource.slice(
+  gloaSiteSource.indexOf('route==="impressum"'),
+  gloaSiteSource.indexOf('route==="datenschutz"')
+);
+
 test("Impressum: carries the company, register and VAT identifiers", () => {
-  for (const fact of ["Cara 2 GmbH", "Hardenbergstr. 4", "10623 Berlin", "Amtsgericht Charlottenburg", "HRB 278728 B", "DE457414734", "info@gloamatcha.com"]) {
-    assert.ok(gloaSiteSource.includes(fact), `Impressum is missing: ${fact}`);
+  assert.ok(imprintSource.length > 200, "the Impressum block could not be located");
+  for (const fact of ["Cara 2 GmbH", "Hardenbergstr. 4", "10623 Berlin", "Deutschland", "Serwan Amedi", "Amtsgericht Charlottenburg", "HRB 278728 B", "DE457414734", "§ 27a Umsatzsteuergesetz"]) {
+    assert.ok(imprintSource.includes(fact), `Impressum is missing: ${fact}`);
   }
+});
+
+test("Impressum: publishes hello@ as the contact address, as a working mailto", () => {
+  assert.ok(imprintSource.includes('href="mailto:hello@gloamatcha.com"'), "the contact address is not a mailto link");
+  assert.ok(imprintSource.includes(">hello@gloamatcha.com<"), "the address is linked but not shown");
+  // The old address must not survive anywhere in this block - a stale
+  // mailto here points § 5 DDG contact at a mailbox we no longer name.
+  assert.ok(!imprintSource.includes("info@gloamatcha.com"), "the superseded address is still in the Impressum");
+});
+
+test("Impressum: the particulars are labelled groups, not one undifferentiated box", () => {
+  // The redesign's substance: every value carries a term, and the
+  // oversized single frame is gone.
+  assert.ok(!imprintSource.includes("legal-placeholder"), "the Impressum is still inside the placeholder box");
+  for (const group of ["Unternehmen und Anschrift", "Kontakt und Geschäftsführung", "Handelsregister", "Steuerliche Angaben"]) {
+    assert.ok(imprintSource.includes(group), `missing group heading: ${group}`);
+  }
+  const terms = (imprintSource.match(/<dt>/g) || []).length;
+  const values = (imprintSource.match(/<dd>/g) || []).length;
+  assert.equal(terms, values, "a term is missing its value, or the other way round");
+  assert.ok(terms >= 7, `expected every particular to be labelled, found ${terms} terms`);
+});
+
+test("Impressum: the headline is scoped down from the poster size", () => {
+  const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf-8");
+  // .legal-page h1 is clamp(55px,9vw,120px) and still is - other legal
+  // pages keep it. The Impressum overrides it at higher specificity so
+  // the override cannot be undone by re-ordering the file.
+  assert.match(css, /\.legal-page\.legal-imprint h1\{font-size:clamp\(44px,6\.2vw,86px\)/);
+  assert.match(css, /\.legal-imprint-grid\{[^}]*grid-template-columns:repeat\(2,1fr\)/);
+  // Sliced rather than matched in one expression: the 800px block holds
+  // more than one rule, so a [^}]* cannot reach across the first one.
+  const mq = css.slice(css.indexOf("@media(max-width:800px){.legal-shipping-zones"));
+  assert.ok(
+    mq.slice(0, mq.indexOf("}}") + 2).includes(".legal-imprint-grid{grid-template-columns:1fr}"),
+    "the Impressum grid does not collapse to one column on small screens"
+  );
+  // The particulars must not be the smallest type on the page.
+  assert.match(css, /\.legal-imprint-block dd\{[^}]*font-size:17px/);
 });
 
 test("Legal: the discontinued EU ODR/OS platform is not linked anywhere", () => {
