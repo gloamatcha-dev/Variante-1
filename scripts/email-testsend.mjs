@@ -26,11 +26,21 @@
  *   node --env-file=.env.local scripts/email-testsend.mjs --to=you@example.com
  *   node --env-file=.env.local scripts/email-testsend.mjs --to=you@example.com --confirm-send
  *
- * THE --env-file MATTERS. A bare `node` does not read .env.local - that
- * is the bundler's job - so SITE_URL comes back null and the mails go
- * out with no logo and no account links. They would still send, and you
- * would review something production never produces. The banner below
- * says which of the two you are about to get.
+ * ON THE ORIGIN, WHICH IS WHAT WENT WRONG THE FIRST TIME.
+ *
+ * A bare `node` does not read .env.local - that is the bundler's job -
+ * and .env.local's SITE_URL is http://localhost:3000 anyway. Either way
+ * the mails point at something no inbox can fetch. The first real test
+ * send did exactly that and Gmail on iOS drew a broken image.
+ *
+ * A send now refuses unless the origin is one an inbox can load, and
+ * --origin= supplies the production one without editing any env file:
+ *
+ *   node scripts/email-testsend.mjs --to=you@example.com --origin=https://gloamatcha.com
+ *   node --env-file=.env.local scripts/email-testsend.mjs --to=you@example.com \
+ *     --origin=https://gloamatcha.com --confirm-send
+ *
+ * (--env-file is still needed for RESEND_API_KEY.)
  *
  * The data is the synthetic set from scripts/email-preview.mjs. The
  * amounts are arithmetic fixtures and are NOT approved GLOA prices.
@@ -38,6 +48,7 @@
 
 import { getResendClient } from "../lib/resend.ts";
 import { GLOA_FROM_HELLO, GLOA_REPLY_TO_SUPPORT } from "../lib/emailSenders.ts";
+import { isMailableOrigin, logoUrl } from "../lib/email/brand.ts";
 import { getSiteOrigin } from "../lib/siteUrl.ts";
 
 import { buildOrderConfirmationEmail } from "../lib/email/orderConfirmation.ts";
@@ -70,7 +81,19 @@ if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) {
   process.exit(2);
 }
 
-const ORIGIN = getSiteOrigin();
+/**
+ * The origin the mails will point at, and why it is checked here.
+ *
+ * The first real test send went out with SITE_URL from .env.local, which
+ * is http://localhost:3000, so every mail carried
+ * <img src="http://localhost:3000/gloa-logo-blue-600.png"> and Gmail on
+ * iOS drew a broken image. The banner said "SITE_URL: gesetzt", which
+ * was true and useless - it was set to something no inbox can reach.
+ *
+ * So this refuses rather than warns, and --origin= exists so a send can
+ * use the production origin without anybody editing .env.local.
+ */
+const ORIGIN = arg("origin") ?? getSiteOrigin();
 const NR = "GLOA-DEMO-000000";
 const ACCOUNT = ORIGIN ? `${ORIGIN}/account/orders/demo` : null;
 const SUBS = ORIGIN ? `${ORIGIN}/account/subscriptions` : null;
@@ -147,7 +170,8 @@ const CASES = [
 
 console.log(`Empfaenger : ${to}`);
 console.log(`Absender   : ${GLOA_FROM_HELLO}`);
-console.log(`SITE_URL   : ${ORIGIN ? "gesetzt - Logo und Links werden absolut" : "NICHT GESETZT - Mails gingen OHNE Logo und ohne Kontolinks (--env-file=.env.local vergessen?)"}`);
+console.log(`Origin     : ${ORIGIN ?? "(keiner)"}`);
+console.log(`Logo       : ${isMailableOrigin(ORIGIN) ? `${logoUrl(ORIGIN)} - laedt im Postfach` : "WIRD NICHT MITGESENDET"}`);
 console.log(`Mails      : ${CASES.length}`);
 console.log("");
 
@@ -167,6 +191,17 @@ if (!confirmed) {
   console.log("\nTROCKENLAUF. Es wurde nichts gesendet.");
   console.log("Zum tatsaechlichen Versand dieselbe Zeile mit --confirm-send wiederholen.");
   process.exit(0);
+}
+
+// A send that carries no logo, or the wrong one, reviews nothing. This
+// is the one thing the harness refuses outright rather than warning
+// about, because the warning is exactly what got ignored last time.
+if (!isMailableOrigin(ORIGIN)) {
+  console.error(`\nAbbruch: ${ORIGIN ? `"${ORIGIN}" ist keine Adresse, die ein Postfach laden kann.` : "Es gibt keinen Origin."}`);
+  console.error("Die Mails gingen ohne Logo und ohne funktionierende Kontolinks raus.");
+  console.error("\nMit der Produktionsadresse senden:");
+  console.error(`  node --env-file=.env.local scripts/email-testsend.mjs --to=${to} --origin=https://gloamatcha.com --confirm-send`);
+  process.exit(1);
 }
 
 const resend = getResendClient();

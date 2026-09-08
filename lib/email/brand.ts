@@ -81,6 +81,42 @@ export function logoUrl(origin: string): string {
   return `${origin.replace(/\/+$/, "")}/gloa-logo-blue-600.png`;
 }
 
+/**
+ * Can this origin actually produce an image an inbox will load?
+ *
+ * The comment above has said since the launch mails were built that a
+ * relative path is meaningless in an inbox and an http:// URL is blocked
+ * or downgraded by most clients. It was a reason, not a rule, and the
+ * difference cost a delivered mail: a test send picked up SITE_URL from
+ * .env.local, which is http://localhost:3000, and Gmail on iOS drew the
+ * broken-image glyph. The file on the real domain was fine the whole
+ * time - it was never asked for.
+ *
+ * So the reason is now enforced. An origin that cannot work in an inbox
+ * is treated exactly like a missing one, because the existing rule -
+ * build the mail WITHOUT the mark rather than with a broken image - is
+ * the right answer to both.
+ *
+ * Deliberately narrow: https, a host with a dot in it, and not a
+ * loopback or .local name. It does not try to guess whether a given
+ * public host is the right one; that is the caller's business, and a
+ * check that pretended otherwise would be false comfort.
+ */
+export function isMailableOrigin(origin: string | null | undefined): boolean {
+  if (!origin) return false;
+  let url: URL;
+  try {
+    url = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:") return false;
+  const host = url.hostname.toLowerCase();
+  if (host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1") return false;
+  if (host.endsWith(".local") || host.endsWith(".localhost")) return false;
+  return host.includes(".");
+}
+
 /** Display width of the mark in the mail header, in CSS pixels. */
 export const LOGO_DISPLAY_WIDTH = 132;
 
@@ -103,6 +139,10 @@ export const LOGO_DISPLAY_HEIGHT = Math.round((LOGO_DISPLAY_WIDTH * 248.443) / 8
  * where the mark is standing in for the word.
  */
 export function emailHeader(origin: string): string {
+  // An origin that cannot load in an inbox is treated as no origin at
+  // all. Callers already write `origin ? emailHeader(origin) : ""`, so
+  // an empty string here lands them in the branch they already handle.
+  if (!isMailableOrigin(origin)) return "";
   return `<tr><td style="padding:0 0 32px 0;">
 <img src="${logoUrl(origin)}" alt="GLOA" width="${LOGO_DISPLAY_WIDTH}" height="${LOGO_DISPLAY_HEIGHT}" style="display:block;width:${LOGO_DISPLAY_WIDTH}px;height:${LOGO_DISPLAY_HEIGHT}px;border:0;outline:none;text-decoration:none;"/>
 </td></tr>`;

@@ -265,3 +265,50 @@ test("cancellation confirmation: the effective date, distinct from the request d
     assert.ok(/6\.10\.2026|06\.10\.2026/.test(surface), "the effective date is missing");
   }
 });
+
+/* ── The origin an inbox can actually fetch (EMAIL-02B) ──────── */
+
+test("an origin no inbox can load produces no image at all", () => {
+  // The first real test send carried SITE_URL from .env.local -
+  // http://localhost:3000 - so every mail shipped
+  // <img src="http://localhost:3000/gloa-logo-blue-600.png"> and Gmail
+  // on iOS drew the broken-image glyph. The hosted file was fine; it was
+  // never asked for.
+  //
+  // brand.ts had said since it was written that an http:// URL is
+  // blocked or downgraded by most clients. That was a reason in a
+  // comment. It is a rule now, and this is what holds it there.
+  const unusable = [
+    "http://localhost:3000",
+    "https://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://gloamatcha.com",
+    "https://localhost",
+    "gloamatcha.com",
+    "//gloamatcha.com",
+    "",
+  ];
+  for (const origin of unusable) {
+    const fns = build(origin);
+    for (const name of NAMES) {
+      const { html } = fns[name]();
+      assert.ok(!html.includes("<img"), `${name} rendered an image for an unusable origin: ${JSON.stringify(origin)}`);
+      assert.ok(!html.includes("localhost"), `${name} leaked localhost for origin ${JSON.stringify(origin)}`);
+      assert.ok(!html.includes("127.0.0.1"), `${name} leaked a loopback address for origin ${JSON.stringify(origin)}`);
+      assert.ok(html.length > 0, `${name} produced nothing at all for origin ${JSON.stringify(origin)}`);
+    }
+  }
+});
+
+test("a public https origin still carries the mark, unchanged", () => {
+  // The fix must not have turned the logo off everywhere.
+  for (const origin of ["https://gloamatcha.com", "https://www.gloamatcha.com", "https://gloamatcha.com/"]) {
+    const fns = build(origin);
+    const { html } = fns.orderConfirmation();
+    assert.ok(html.includes("<img"), `no mark for ${origin}`);
+    assert.ok(html.includes("/gloa-logo-blue-600.png"), `wrong file for ${origin}`);
+    assert.ok(html.includes('src="https://'), `the mark is not https for ${origin}`);
+    // A trailing slash must not produce a double slash in the path.
+    assert.ok(!html.includes("//gloa-logo-blue-600.png"), `double slash in the image path for ${origin}`);
+  }
+});
