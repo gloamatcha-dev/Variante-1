@@ -106,7 +106,7 @@ const SUBS = ORIGIN ? `${ORIGIN}/account/subscriptions` : null;
  * this wrong in a test would review the wrong thing.
  */
 const CASES = [
-  ["01 Bestellbestaetigung", GLOA_REPLY_TO_SUPPORT, () => buildOrderConfirmationEmail({
+  ["01-bestellbestaetigung", GLOA_REPLY_TO_SUPPORT, () => buildOrderConfirmationEmail({
     origin: ORIGIN ?? undefined, customerEmail: to,
     items: [
       { productName: "GLOA Matcha", variantLabel: "30 g", quantity: 1, unitGrossCents: 2900, lineGrossCents: 2900 },
@@ -118,7 +118,7 @@ const CASES = [
       accountOrderUrl: ACCOUNT,
     },
   })],
-  ["02 Versandbestaetigung", GLOA_REPLY_TO_SUPPORT, () => buildShipmentConfirmationEmail({
+  ["02-versandbestaetigung", GLOA_REPLY_TO_SUPPORT, () => buildShipmentConfirmationEmail({
     origin: ORIGIN ?? undefined, customerEmail: to,
     order: {
       order_number: NR,
@@ -127,35 +127,35 @@ const CASES = [
       accountOrderUrl: ACCOUNT,
     },
   })],
-  ["03 Widerrufseingang", "hello@gloamatcha.com", () => buildWithdrawalConfirmationEmail({
+  ["03-widerrufseingang", "hello@gloamatcha.com", () => buildWithdrawalConfirmationEmail({
     origin: ORIGIN ?? undefined, customerName: "Beispiel Musterperson", orderReference: NR,
     scope: "whole_order", scopeNote: null, customerNote: null,
     submittedAt: "2026-09-08T10:00:00.000Z",
   })],
-  ["04 Erstattung", GLOA_REPLY_TO_SUPPORT, () => buildRefundConfirmationEmail({
+  ["04-erstattung", GLOA_REPLY_TO_SUPPORT, () => buildRefundConfirmationEmail({
     origin: ORIGIN ?? undefined,
     order: { order_number: NR, kind: "partial", refundedTotalCents: 2900, originalTotalGrossCents: 9290, currency: "EUR", accountOrderUrl: ACCOUNT },
   })],
-  ["05 Stornobestaetigung", GLOA_REPLY_TO_SUPPORT, () => buildCancellationConfirmationEmail({
+  ["05-stornobestaetigung", GLOA_REPLY_TO_SUPPORT, () => buildCancellationConfirmationEmail({
     origin: ORIGIN ?? undefined,
     cancellation: { requestedAtIso: "2026-09-08T10:00:00.000Z", effectiveAtIso: "2026-10-06T10:00:00.000Z", accountSubscriptionsUrl: SUBS },
   })],
-  ["06 Storno-Ergebnis", GLOA_REPLY_TO_SUPPORT, () => buildCancellationOutcomeEmail({
+  ["06-storno-ergebnis", GLOA_REPLY_TO_SUPPORT, () => buildCancellationOutcomeEmail({
     origin: ORIGIN ?? undefined,
     order: { order_number: NR, outcome: "approved", accountOrderUrl: ACCOUNT },
   })],
-  ["07 Zahlungsproblem", GLOA_REPLY_TO_SUPPORT, () => buildPaymentProblemEmail({
+  ["07-zahlungsproblem", GLOA_REPLY_TO_SUPPORT, () => buildPaymentProblemEmail({
     origin: ORIGIN ?? undefined, payment: { accountSubscriptionsUrl: SUBS },
   })],
-  ["08 Abo gestartet", GLOA_REPLY_TO_SUPPORT, () => buildSubscriptionStartedEmail({
+  ["08-abo-gestartet", GLOA_REPLY_TO_SUPPORT, () => buildSubscriptionStartedEmail({
     origin: ORIGIN ?? undefined,
     subscription: { packageName: "GLOA Matcha 50 g", quantity: 1, cadenceWeeks: 4, accountSubscriptionsUrl: SUBS },
   })],
-  ["09 Abo beendet", GLOA_REPLY_TO_SUPPORT, () => buildSubscriptionEndedEmail({
+  ["09-abo-beendet", GLOA_REPLY_TO_SUPPORT, () => buildSubscriptionEndedEmail({
     origin: ORIGIN ?? undefined,
     subscription: { endedAtIso: "2026-10-06T10:00:00.000Z", accountUrl: SUBS },
   })],
-  ["10 Jahresplan", GLOA_REPLY_TO_SUPPORT, () => buildAnnualPurchaseConfirmationEmail({
+  ["10-jahresplan", GLOA_REPLY_TO_SUPPORT, () => buildAnnualPurchaseConfirmationEmail({
     origin: ORIGIN ?? undefined,
     plan: {
       productName: "GLOA Matcha", variantLabel: "50 g", deliveryCount: 13, cadenceWeeks: 4, currency: "EUR",
@@ -168,16 +168,44 @@ const CASES = [
   })],
 ];
 
+/**
+ * --only=<name>, validated against the real list before anything else.
+ *
+ * The names are the ones scripts/email-preview.mjs writes its files
+ * under, so what you reviewed in the browser and what you ask for here
+ * are the same string. A typo must stop the run rather than quietly
+ * fall back to sending all ten - which is the failure mode a selector
+ * without validation actually has.
+ */
+const only = arg("only");
+const NAMES = CASES.map(([name]) => name);
+
+if (only !== null) {
+  if (!NAMES.includes(only)) {
+    console.error(`Unbekannte Vorlage: ${JSON.stringify(only)}`);
+    console.error("\nGueltige Werte:");
+    for (const name of NAMES) console.error(`  ${name}`);
+    process.exit(2);
+  }
+}
+
+const SELECTED = only === null ? CASES : CASES.filter(([name]) => name === only);
+if (SELECTED.length === 0) {
+  console.error("Auswahl ist leer - Abbruch, damit ein Tippfehler nicht als 'nichts zu tun' durchgeht.");
+  process.exit(2);
+}
+
 console.log(`Empfaenger : ${to}`);
 console.log(`Absender   : ${GLOA_FROM_HELLO}`);
 console.log(`Origin     : ${ORIGIN ?? "(keiner)"}`);
 console.log(`Logo       : ${isMailableOrigin(ORIGIN) ? `${logoUrl(ORIGIN)} - laedt im Postfach` : "WIRD NICHT MITGESENDET"}`);
-console.log(`Mails      : ${CASES.length}`);
+console.log(`Auswahl    : ${only === null ? "alle zehn" : only}`);
+console.log(`Mails      : ${SELECTED.length}`);
 console.log("");
 
 let built;
 try {
-  built = CASES.map(([name, replyTo, fn]) => [name, replyTo, fn()]);
+  built = SELECTED.map(([name, replyTo, fn]) => [name, replyTo, fn()]);
 } catch (err) {
   console.error("Abbruch: eine Vorlage liess sich nicht bauen -", err && err.message);
   process.exit(1);

@@ -227,7 +227,29 @@ test("the test-send harness mirrors production's From and Reply-To", () => {
   assert.match(harness, /GLOA_REPLY_TO_SUPPORT/);
   // The statutory withdrawal receipt answers to the published contact
   // address, not to order support, exactly as app/api/withdrawal does.
-  assert.match(harness, /"03 Widerrufseingang", "hello@gloamatcha\.com"/);
+  // Named after the preview file, so what was reviewed in the browser
+  // and what --only asks for are the same string.
+  assert.match(harness, /"03-widerrufseingang", "hello@gloamatcha\.com"/);
   const route = read("app/api/withdrawal/route.ts");
   assert.match(route, /replyTo: "hello@gloamatcha\.com"/);
+});
+
+test("the --only selector is validated before anything is sent", () => {
+  const harness = read("scripts/email-testsend.mjs");
+  // A selector without validation fails by silently sending everything,
+  // which is the opposite of what somebody typing --only wants.
+  assert.match(harness, /if \(!NAMES\.includes\(only\)\)/,
+    "the selector is not checked against the real list");
+  assert.match(harness, /process\.exit\(2\)/);
+  // An empty selection must stop rather than read as "nothing to do".
+  assert.match(harness, /if \(SELECTED\.length === 0\)/);
+  // The send loop must use the selection, not the full set.
+  assert.match(harness, /built = SELECTED\.map/);
+  assert.ok(!/built = CASES\.map/.test(harness), "the send still builds every template");
+
+  // The names are the preview filenames, so what was reviewed in the
+  // browser and what is asked for here are the same string.
+  for (const name of ["01-bestellbestaetigung", "03-widerrufseingang", "09-abo-beendet", "10-jahresplan"]) {
+    assert.ok(harness.includes(`["${name}",`), `the harness does not know the preview name ${name}`);
+  }
 });
