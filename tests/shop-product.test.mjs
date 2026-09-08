@@ -142,7 +142,10 @@ test("4: four rows, native disclosure, and no mandatory line lost", () => {
     "HERKUNFT", "Shizuoka, Japan",
     "QUALITÄT", "100 % Bio-Matcha",
     "LAGERUNG", "{PRODUCT.storage}",
-    "GROESSEN", "ZUBEREITUNG", "VERSAND",
+    // SITE-01 re-pinned the ASCII transliteration to the umlaut the rest
+    // of the site already used (matcha page, account portal). Same label,
+    // spelled the same way everywhere now.
+    "GRÖSSEN", "ZUBEREITUNG", "VERSAND",
     "Deutschland: 2–4 Werktage · Andere Länder: 3–10 Werktage",
     "Lebensmittelunternehmer: Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin, Deutschland",
     "MEHR ÜBER UNSEREN MATCHA →", "VERSAND & LIEFERZEITEN →",

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { startRenderServer } from "./helpers/renderServer.mjs";
 
 // SAFE DEFAULT SUITE: renders the CURRENT build (.output/server) with the
@@ -182,4 +183,61 @@ test("routes: an unknown path does not crash the renderer", async () => {
   const { status, html } = await server.getHtml("/definitely-not-a-real-gloa-page");
   assert.ok(status === 200 || status === 404, `unexpected status ${status}`);
   assert.doesNotMatch(html, /TypeError|Cannot read|undefined is not/i);
+});
+
+/* ── SITE-01: no public route falls back to the generic title ─ */
+
+// generateMetadata ends in `seo[path]||["GLOA","Matcha aus Japan."]`, and
+// the pair is rendered as `${base[0]} · GLOA`. A route with no entry
+// therefore titles itself "GLOA · GLOA", which is what the five legal
+// routes and every /shop/<slug> page were doing. Read from the rendered
+// HTML, not from the map, so an entry that exists but never reaches the
+// page still fails.
+const FALLBACK_TITLE = "<title>GLOA · GLOA</title>";
+
+const TITLED_ROUTES = [
+  { path: "/impressum", title: "Impressum · GLOA" },
+  { path: "/datenschutz", title: "Datenschutz · GLOA" },
+  { path: "/agb", title: "AGB · GLOA" },
+  { path: "/widerruf", title: "Widerruf · GLOA" },
+  { path: "/versand", title: "Versandinformationen · GLOA" },
+];
+
+for (const route of TITLED_ROUTES) {
+  test(`route ${route.path}: has a title of its own, not the fallback`, async () => {
+    const { status, html } = await server.getHtml(route.path);
+    assert.equal(status, 200);
+    assert.ok(!html.includes(FALLBACK_TITLE), `${route.path} still renders the generic title`);
+    assert.ok(html.includes(`<title>${route.title}</title>`),
+      `missing title on ${route.path}: ${route.title}`);
+  });
+}
+
+test("routes: a product page is titled by the shop, not by the fallback", async () => {
+  // Product names come from the catalog and are not available when
+  // metadata is generated, so /shop/<slug> inherits the shop's pair - the
+  // same way /rezepte/<slug> already inherits the recipes' one. What it
+  // must not do is title itself "GLOA · GLOA".
+  const { status, html } = await server.getHtml("/shop/matcha");
+  assert.equal(status, 200);
+  assert.ok(!html.includes(FALLBACK_TITLE), "a product page renders the generic title");
+});
+
+/* ── SITE-01: the header can be dismissed from the keyboard ─── */
+
+test("header: Escape closes the mobile menu and gives focus back", () => {
+  const chrome = readFileSync(new URL("../app/Chrome.tsx", import.meta.url), "utf-8");
+  // The mobile menu locks body scroll and covers the page, so a visitor
+  // who cannot dismiss it is left with a frozen page behind it. The cart
+  // drawer already answered Escape; the header did not.
+  assert.match(chrome, /document\.body\.style\.overflow=open\?"hidden":""/);
+  assert.match(chrome, /e\.key!=="Escape"/);
+  assert.match(chrome, /if\(open\)\{setOpen\(false\);menuButtonRef\.current\?\.focus\(\)\}/);
+  assert.match(chrome, /else setSearch\(false\)/);
+  // Registered and torn down, so a closed menu costs no listener.
+  assert.match(chrome, /document\.addEventListener\("keydown",onKey\)/);
+  assert.match(chrome, /return\(\)=>document\.removeEventListener\("keydown",onKey\)/);
+  // The focus target is the control that opened it.
+  assert.match(chrome, /<button className="menu" ref=\{menuButtonRef\}/);
+  assert.match(chrome, /const menuButtonRef=useRef<HTMLButtonElement>\(null\)/);
 });

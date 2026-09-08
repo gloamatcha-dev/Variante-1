@@ -6,6 +6,10 @@ const seo:Record<string,[string,string]>={
  "our-matcha":["Unser Matcha","GLOA Matcha aus Shizuoka, Japan. Herkunft, Fakten und Zubereitung."],
  "about":["Über GLOA","Wer hinter GLOA steht, warum wir Matcha machen und wie du den Aufbau begleiten kannst."],
  "for-cafes":["GLOA for Cafés","Matcha aus Shizuoka für deine Karte. Potenzial berechnen oder Sample anfragen."],
+ // The legacy alias of /for-cafes, the way "journal" is the alias of
+ // "rezepte". It routes to the same page, so it gets the same pair
+ // instead of falling through to the generic one.
+ "wholesale":["GLOA for Cafés","Matcha aus Shizuoka für deine Karte. Potenzial berechnen oder Sample anfragen."],
  "rezepte":["Matcha Rezepte","GLOA Signature Drinks. Affogato, Strawberry, Tonic und mehr."],
  "journal":["Matcha Rezepte","GLOA Signature Drinks. Affogato, Strawberry, Tonic und mehr."],
  "launch":["GLOA Launch List","Trag dich ein und wir sagen dir Bescheid, sobald GLOA offiziell startet."],
@@ -21,6 +25,15 @@ const seo:Record<string,[string,string]>={
  "account/addresses":["Adressen","Deine Lieferadressen bei GLOA."],
  "account/profile":["Kontodaten","Dein GLOA Profil und Kontodaten."],
  "account/business":["B2B bei GLOA","Preise, Konditionen, Belieferung und alles für deine Zusammenarbeit mit GLOA."],
+ // The five legal routes had NO entry, so generateMetadata fell through
+ // to the generic pair and every one of them rendered the browser title
+ // "GLOA · GLOA". Each description below is the page's OWN lead
+ // sentence, copied verbatim - no legal wording was written here.
+ "impressum":["Impressum","Angaben gemäß § 5 DDG."],
+ "datenschutz":["Datenschutz","Informationen zum Umgang mit deinen Daten."],
+ "agb":["AGB","Unsere Bedingungen für Bestellungen im GLOA Online-Shop."],
+ "widerruf":["Widerruf","Informationen zu deinem gesetzlichen Widerrufsrecht."],
+ "versand":["Versandinformationen","Liefergebiete, Versandkosten und Lieferzeiten im Überblick."],
 };
-export async function generateMetadata({params}:{params:Promise<{slug:string[]}>}):Promise<Metadata>{const{slug}=await params;const path=slug.join("/");const base=path.startsWith("account/orders/")?seo["account/orders"]:path.startsWith("account/subscriptions/")?seo["account/subscriptions"]:path.startsWith("rezepte/")?seo.rezepte:path.startsWith("journal/")?seo.journal:seo[path]||["GLOA","Matcha aus Japan."];const noIndex=path.startsWith("account")||path.startsWith("auth/")||path.startsWith("order/");return{title:`${base[0]} · GLOA`,description:base[1],...(noIndex?{robots:{index:false,follow:false}}:{}),alternates:{canonical:`/${path}`},openGraph:{title:`${base[0]} · GLOA`,description:base[1],images:["/gloa-logo-slogan-link.png"]}}}
+export async function generateMetadata({params}:{params:Promise<{slug:string[]}>}):Promise<Metadata>{const{slug}=await params;const path=slug.join("/");const base=path.startsWith("account/orders/")?seo["account/orders"]:path.startsWith("account/subscriptions/")?seo["account/subscriptions"]:path.startsWith("rezepte/")?seo.rezepte:path.startsWith("journal/")?seo.journal:path.startsWith("shop/")?seo.shop:seo[path]||["GLOA","Matcha aus Japan."];const noIndex=path.startsWith("account")||path.startsWith("auth/")||path.startsWith("order/");return{title:`${base[0]} · GLOA`,description:base[1],...(noIndex?{robots:{index:false,follow:false}}:{}),alternates:{canonical:`/${path}`},openGraph:{title:`${base[0]} · GLOA`,description:base[1],images:["/gloa-logo-slogan-link.png"]}}}
 export default async function Page({params}:{params:Promise<{slug:string[]}>}){const{slug}=await params;return <GloaSite route={slug.join("/")}/>}
