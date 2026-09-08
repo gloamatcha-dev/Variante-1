@@ -851,7 +851,9 @@ test("50: the privacy notice describes this list, accurately and without overcla
   assert.match(privacy, /Art\. 6 Abs\. 1 lit\. a DSGVO/, "the legal basis must be consent");
   assert.match(privacy, /Double-Opt-In/);
   assert.match(privacy, /jederzeit mit Wirkung für die Zukunft widerrufen/);
-  assert.match(privacy, /Pflichtangabe ist ausschließlich die E-Mail-Adresse/);
+  // Same statement, second person: the notice was rewritten to address
+  // the reader as "du", which the rest of the page already did.
+  assert.match(privacy, /Pflichtangabe ist ausschließlich deine E-Mail-Adresse/);
   assert.match(privacy, /Ein Newsletter ist damit nicht verbunden/);
   assert.match(privacy, /gesonderte Einwilligung/);
   // Only providers actually used.
@@ -874,8 +876,12 @@ test("51: the section numbering stayed sequential after the insert", () => {
     gloaSite.indexOf('if(route==="datenschutz")'),
     gloaSite.indexOf('if(route==="agb")')
   );
-  const numbers = [...privacy.matchAll(/<h2>(\d+)\./g)].map((m) => Number(m[1]));
-  assert.deepEqual(numbers, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], `privacy headings out of order: ${numbers}`);
+  // The number moved out of the <h2> into its own element when the page
+  // was redesigned, and a twelfth section - third-country processing -
+  // was added. What this guards has not changed: the sections are
+  // numbered sequentially, with none missing, repeated or out of order.
+  const numbers = [...privacy.matchAll(/legal-doc-num">(\d+)</g)].map((m) => Number(m[1]));
+  assert.deepEqual(numbers, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], `privacy headings out of order: ${numbers}`);
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -1977,8 +1983,18 @@ test("89: the privacy notice matches what is actually sent", () => {
   // It names the welcome mail, bounds the count, and protects the people
   // who signed the earlier wording.
   assert.match(gloaSite, /Willkommens-E-Mail mit deinem Launch-Rabattcode/);
-  assert.match(gloaSite, /genau zwei E-Mails/);
-  assert.match(gloaSite, /deuten bestehende Einwilligungen nicht nachträglich um/);
+
+  // CHANGED DELIBERATELY, and the old wording is now banned.
+  //
+  // "Genau zwei E-Mails" counted only what follows confirmation while
+  // reading as the total, and the confirmation mail is itself one of
+  // them - so the notice understated what it was announcing. Three is
+  // the honest bound, and "höchstens" is the right qualifier because
+  // somebody who never clicks the link receives exactly one.
+  assert.match(gloaSite, /höchstens drei E-Mails/);
+  assert.ok(!gloaSite.includes("genau zwei E-Mails"), "the understated mail count is back");
+
+  assert.match(gloaSite, /Bestehende Einwilligungen deuten wir nicht nachträglich um/);
 
   // Still no newsletter, and still no transfer into other lists.
   assert.match(gloaSite, /keine regelmäßigen Marketing-E-Mails/);

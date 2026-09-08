@@ -1248,47 +1248,206 @@ return <main className="legal-page legal-imprint">
 </main>;
 }
 if(route==="datenschutz"){
-return <main className="legal-page">
-<p className="eyebrow">LEGAL</p>
-<h1>{title.datenschutz}</h1>
+const jumpToSection=(e:React.MouseEvent<HTMLAnchorElement>)=>{
+const href=e.currentTarget.getAttribute("href")||"";
+const target=href.startsWith("#")?document.getElementById(href.slice(1)):null;
+if(!target)return;
+e.preventDefault();
+target.scrollIntoView({behavior:"instant",block:"start"});
+history.replaceState(null,"",href);
+};
+/*
+  THE PRIVACY NOTICE, SET AS A DOCUMENT.
 
-<h2>1. Verantwortlicher</h2>
-<p>Cara 2 GmbH<br/>Hardenbergstr. 4<br/>10623 Berlin<br/>Deutschland<br/>E-Mail: <a href="mailto:hello@gloamatcha.com">hello@gloamatcha.com</a></p>
-<p>Für alle Anliegen zum Datenschutz erreichst du uns unter der oben genannten E-Mail-Adresse.</p>
+  Same column, same rules and the same head as the Impressum - a reader
+  moving between two legal pages should not feel they changed sites. The
+  difference is what the content is: the Impressum is a register of
+  short particulars and takes a grid; this is continuous prose and takes
+  a measure. Body text is capped at 68 characters and set at 17px, the
+  same size the Impressum gives its particulars, because mandatory
+  information may not be the smallest type on the page.
 
-<h2>2. Bereitstellung der Website (Hosting)</h2>
-<p>Beim Aufruf dieser Website verarbeitet die Hosting-Infrastruktur, über die sie technisch bereitgestellt wird, automatisch Verbindungsdaten (u. a. IP-Adresse, Datum und Uhrzeit des Zugriffs, aufgerufene Seite, verwendeter Browser), wie es für die technisch sichere Auslieferung jeder Website zwangsläufig erforderlich ist. Rechtsgrundlage ist Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse an einem funktionsfähigen, sicheren Betrieb der Website).</p>
+  A sticky table of contents on desktop, because twelve sections is more
+  than a reader holds in their head and Art. 13 information is worth
+  navigating. It collapses to a plain list above the text below 900px.
+  Nothing is behind an accordion: every duty of information here is
+  visible without a click.
 
-<h2>3. Kontoerstellung und Bestellung</h2>
-<p>Wenn du ein GLOA-Konto erstellst oder als Gast bestellst, verarbeiten wir die dafür notwendigen Angaben (z. B. Name, Kontaktdaten, Lieferadresse, Bestellinhalt) über unseren Datenbank- und Authentifizierungs-Dienstleister Supabase. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO (Vertragserfüllung bzw. vorvertragliche Maßnahmen). Einen Newsletter bieten wir nicht an: Es gibt weder eine Newsletter-Anmeldung noch eine entsprechende Einwilligung oder einen Newsletter-Versand. Wir verarbeiten deine E-Mail-Adresse nur für die Abwicklung deines Kontos und deiner Bestellung sowie für Nachrichten, die du uns selbst schickst.</p>
+  NOT a <header> for the page head - globals.css styles the bare header
+  element for the site navigation, which cost the Impressum a broken
+  layout before it was caught.
+*/
+return <main className="legal-page legal-doc legal-privacy">
+<div className="legal-doc-head">
+<p className="eyebrow">GLOA · RECHTLICHES</p>
+<h1>Datenschutz.</h1>
+<p className="legal-doc-sub">Informationen zum Umgang mit deinen Daten.</p>
+</div>
+<div className="legal-doc-body">
+{/*
+  THE CONTENTS LIST SCROLLS ITSELF.
 
-<h2>4. Zahlungsabwicklung</h2>
-<p>Die Zahlungsabwicklung erfolgt über unseren Zahlungsdienstleister Stripe. Dabei werden die für die Zahlung notwendigen Daten (u. a. Bestellbetrag, Zahlungsart, Rechnungs-/Lieferadresse) an Stripe übermittelt. Stripe verarbeitet Zahlungsdaten wie Kartendaten ausschließlich auf eigenen, gesicherten Systemen; wir selbst erhalten und speichern keine vollständigen Zahlungsdaten. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO.</p>
+  A plain href="#id" does not work here. The router owns navigation, and
+  a hash-only link updates location.hash without the browser ever
+  performing the fragment jump - verified in the browser: 3.5 seconds
+  after a click the hash read "#rechte" and scrollY was still 0. A
+  contents list that does not move the page is decoration, and this one
+  was only worth adding if it genuinely helps somebody read.
 
-<h2>5. Kontaktformular, B2B-Anfrage und Bestell-/Widerrufsbestätigungen</h2>
-<p>Nutzt du das Kontaktformular oder die B2B-Anfrage, verarbeiten wir deine Angaben (Name, E-Mail, Nachricht, ggf. Bestellnummer bzw. Unternehmensangaben), um deine Anfrage zu beantworten. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b bzw. lit. f DSGVO. Nach einer Bestellung bzw. einem Widerruf verwenden wir dieselbe technische Anbindung, um dir eine Bestell- oder Widerrufsbestätigung zuzusenden. Für den Versand dieser E-Mails setzen wir den E-Mail-Dienstleister Resend ein.</p>
+  So the click is handled: preventDefault, then scrollIntoView, then the
+  hash is written to history so the section stays linkable and the back
+  button behaves. The jump is instant, not smooth: globals.css sets
+  scroll-behavior:smooth, and a smooth scroll never arrives on this page
+  - the sticky header changes height while scrolling and the animation
+  is cancelled under it. Measured both ways; instant lands and stays. The href stays real - it is what a middle-click, a
+  "copy link address" and a screen reader all rely on, and scroll-margin
+  -top:110px keeps the target clear of the 86px sticky header either way.
+*/}
+<nav className="legal-doc-toc" aria-label="Abschnitte">
+<p className="legal-doc-toc-label">Inhalt</p>
+<ol>
+<li><a href="#verantwortlicher" onClick={jumpToSection}><span>01</span>Verantwortlicher und Kontakt</a></li>
+<li><a href="#hosting" onClick={jumpToSection}><span>02</span>Bereitstellung der Website</a></li>
+<li><a href="#konto" onClick={jumpToSection}><span>03</span>Kundenkonto, Gastbestellung und Bestellung</a></li>
+<li><a href="#zahlung" onClick={jumpToSection}><span>04</span>Zahlungsabwicklung</a></li>
+<li><a href="#email" onClick={jumpToSection}><span>05</span>Kontaktanfragen und E-Mail-Versand</a></li>
+<li><a href="#launch" onClick={jumpToSection}><span>06</span>GLOA Launch List</a></li>
+<li><a href="#speicherung" onClick={jumpToSection}><span>07</span>Speicherung auf deinem Endgerät</a></li>
+<li><a href="#tracking" onClick={jumpToSection}><span>08</span>Keine Analyse- oder Tracking-Tools</a></li>
+<li><a href="#empfaenger" onClick={jumpToSection}><span>09</span>Empfänger deiner Daten</a></li>
+<li><a href="#drittland" onClick={jumpToSection}><span>10</span>Verarbeitung außerhalb der EU</a></li>
+<li><a href="#dauer" onClick={jumpToSection}><span>11</span>Speicherdauer</a></li>
+<li><a href="#rechte" onClick={jumpToSection}><span>12</span>Deine Rechte</a></li>
+</ol>
+</nav>
+<div className="legal-doc-main">
 
-<h2>6. Launch-Benachrichtigung (GLOA Launch List)</h2>
-<p>Auf der Seite <Link href="/launch">Launch List</Link> kannst du dich eintragen, um einmalig darüber informiert zu werden, dass GLOA offiziell startet. Dabei verarbeiten wir deine E-Mail-Adresse sowie, wenn du sie angibst, deinen Vornamen und eine freiwillige Angabe dazu, als was du dich für GLOA interessierst (z. B. Privatperson oder Café). Pflichtangabe ist ausschließlich die E-Mail-Adresse.</p>
-<p>Rechtsgrundlage ist deine Einwilligung nach Art. 6 Abs. 1 lit. a DSGVO. Wir verwenden ein Double-Opt-In-Verfahren: Nach deiner Eintragung senden wir dir eine E-Mail mit einem Bestätigungslink. Erst wenn du diesen Link anklickst, gilt deine Eintragung als bestätigt. Bestätigst du sie nicht, löschen wir die Eintragung nach 14 Tagen. Zur Dokumentation deiner Einwilligung speichern wir zusätzlich den Zeitpunkt der Eintragung sowie den Einwilligungstext, der dir dabei angezeigt wurde. Weil sich der Einwilligungstext ändern kann, speichern wir ihn samt Version bei deiner Eintragung; maßgeblich ist immer der Text, der dir angezeigt wurde.</p>
-<p>Diese E-Mail-Adresse verwenden wir ausschließlich für die Bestätigung deiner Eintragung, für eine einmalige Willkommens-E-Mail mit deinem Launch-Rabattcode und für die Benachrichtigung über den Launch. Insgesamt sind das nach der Bestätigung genau zwei E-Mails. Ein Newsletter ist damit nicht verbunden: Du erhältst über diese Eintragung keine regelmäßigen Marketing-E-Mails, keine weitere Produktwerbung, keine weiteren Angebote und keine Event-Einladungen, und wir übertragen die Daten nicht in andere Marketing- oder Verteilerlisten. Möchten wir dir darüber hinaus E-Mails senden, holen wir dafür vorher eine gesonderte Einwilligung ein. Wer sich vor Einführung des Rabattcodes eingetragen hat, erhält ausschließlich die Launch-Benachrichtigung; wir deuten bestehende Einwilligungen nicht nachträglich um.</p>
-<p>Du kannst deine Einwilligung jederzeit mit Wirkung für die Zukunft widerrufen. Dafür genügt der Abmeldelink in unserer Bestätigungs-E-Mail; alternativ schreibst du uns an <a href="mailto:hello@gloamatcha.com">hello@gloamatcha.com</a>. Nach einem Widerruf senden wir dir keine Launch-Benachrichtigung mehr. Die Eintragung speichern wir bei unserem Datenbank-Dienstleister Supabase, für den Versand der E-Mails setzen wir den E-Mail-Dienstleister Resend ein. Mit dem Versand der Launch-Benachrichtigung ist der Zweck der Verarbeitung erfüllt; die Liste wird anschließend gelöscht oder anonymisiert.</p>
+<section className="legal-doc-section" id="verantwortlicher">
+<p className="legal-doc-num">01</p>
+<h2>Verantwortlicher und Kontakt</h2>
+<p>Verantwortlich für die auf dieser Website beschriebenen Verarbeitungen ist:</p>
+<p className="legal-doc-address">Cara 2 GmbH<br/>Hardenbergstr. 4<br/>10623 Berlin<br/>Deutschland</p>
+<p>Für alle Anliegen zum Datenschutz erreichst du uns unter <a href="mailto:hello@gloamatcha.com">hello@gloamatcha.com</a>. Einen Datenschutzbeauftragten haben wir nicht bestellt; eine gesetzliche Pflicht dazu besteht für uns derzeit nicht.</p>
+</section>
 
-<h2>7. Cookies und lokale Speicherung</h2>
-<p>Diese Website verwendet ausschließlich technisch notwendige Speicherung: den Inhalt deines Warenkorbs (lokal in deinem Browser) und, falls du dich anmeldest, deine Anmeldesitzung. Ohne diese Speicherung stünden Warenkorb und Login-Funktion nicht zur Verfügung. Rechtsgrundlage ist § 25 Abs. 2 Nr. 2 TDDDG (vormals TTDSG) in Verbindung mit Art. 6 Abs. 1 lit. b DSGVO. Es werden keine Marketing-, Analyse- oder Tracking-Cookies gesetzt und keine entsprechenden Drittanbieter-Tools eingebunden.</p>
+<section className="legal-doc-section" id="hosting">
+<p className="legal-doc-num">02</p>
+<h2>Bereitstellung der Website</h2>
+<p>Diese Website wird über die Infrastruktur von Vercel bereitgestellt. Beim Aufruf einer Seite verarbeitet diese Infrastruktur automatisch Verbindungsdaten, wie es für die technisch sichere Auslieferung jeder Website zwangsläufig erforderlich ist – unter anderem IP-Adresse, Datum und Uhrzeit des Zugriffs, die aufgerufene Adresse und Angaben zum verwendeten Browser. Diese Daten fallen serverseitig an und werden in technischen Protokollen verarbeitet.</p>
+<p>Die Serverfunktionen dieser Website – etwa die Verarbeitung von Formularen und Bestellungen – werden derzeit in einer Region in den Vereinigten Staaten ausgeführt. Näheres dazu findest du unter <a href="#drittland">Verarbeitung außerhalb der EU</a>.</p>
+<p>Rechtsgrundlage ist Art. 6 Abs. 1 lit. f DSGVO, unser berechtigtes Interesse an einem funktionsfähigen und sicheren Betrieb der Website.</p>
+</section>
 
-<h2>8. Keine Analyse- oder Tracking-Tools</h2>
-<p>Wir setzen aktuell keine Web-Analyse-, Tracking- oder Werbetools ein.</p>
+<section className="legal-doc-section" id="konto">
+<p className="legal-doc-num">03</p>
+<h2>Kundenkonto, Gastbestellung und Bestellung</h2>
+<p>Wenn du ein GLOA-Konto erstellst oder als Gast bestellst, verarbeiten wir die dafür notwendigen Angaben: Name, E-Mail-Adresse, Liefer- und Rechnungsanschrift, Bestellinhalt sowie den Status deiner Bestellung. Für Konto und Datenbank setzen wir Supabase ein.</p>
+<p>Wir verwenden deine E-Mail-Adresse aus einer Bestellung ausschließlich zur Abwicklung deines Kontos und deiner Bestellung sowie für die dazugehörigen Nachrichten – etwa Bestell-, Versand-, Storno- oder Widerrufsbestätigungen. Die Eintragung in die <a href="#launch">GLOA Launch List</a> ist davon getrennt und beruht auf einer eigenen Einwilligung. Eine Bestellung führt nicht zu einer Eintragung, und eine Eintragung führt nicht zu Werbung für Bestellungen. Einen Newsletter bieten wir nicht an: Es gibt weder eine Newsletter-Anmeldung noch einen Newsletter-Versand.</p>
+<p>Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO, die Erfüllung des Vertrags beziehungsweise vorvertragliche Maßnahmen; für gesetzlich vorgeschriebene Aufbewahrungen Art. 6 Abs. 1 lit. c DSGVO.</p>
+<p>Für die interne Verwaltung nutzen wir einen nicht öffentlichen, passwortgeschützten Verwaltungsbereich. Der Zugang ist auf ausdrücklich berechtigte Personen beschränkt; dabei werden eine Anmeldesitzung und Sicherheitsmerkmale wie Zeitpunkt und Ablauf der Sitzung verarbeitet. Rechtsgrundlage ist Art. 6 Abs. 1 lit. f DSGVO, unser berechtigtes Interesse an einem abgesicherten Zugang.</p>
+</section>
 
-<h2>9. Empfänger deiner Daten</h2>
-<p>Im Rahmen der oben beschriebenen Zwecke geben wir Daten an folgende Dienstleister weiter, die als Auftragsverarbeiter bzw. eigenständig Verantwortliche für uns tätig werden: Supabase (Datenbank/Authentifizierung), Stripe (Zahlungsabwicklung), Resend (E-Mail-Versand) sowie den Anbieter der technischen Hosting-Infrastruktur. Eine Weitergabe darüber hinaus findet nicht statt, außer wir sind gesetzlich dazu verpflichtet.</p>
+<section className="legal-doc-section" id="zahlung">
+<p className="legal-doc-num">04</p>
+<h2>Zahlungsabwicklung</h2>
+<p>Die Zahlungsabwicklung erfolgt über Stripe. Vertragspartner ist für Nutzerinnen und Nutzer im Europäischen Wirtschaftsraum die Stripe Payments Europe, Limited mit Sitz in Irland. Stripe wird dabei je nach Produkt eigenständig oder gemeinsam mit uns verantwortlich tätig und nicht ausschließlich als Auftragsverarbeiter.</p>
+<p>Der Bezahlvorgang findet auf einer von Stripe betriebenen Bezahlseite statt. Die dort eingegebenen Zahlungsdaten – etwa Kartendaten – werden unmittelbar an Stripe übermittelt. Von Stripe erhalten wir für die Bestellabwicklung deine E-Mail-Adresse, deinen Namen, die Liefer- und Rechnungsanschrift sowie den Zahlungsstatus und den Betrag; vollständige Kartendaten werden von unserer Anwendung weder abgefragt noch gespeichert.</p>
+<p>Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO. Zu den Datenschutzhinweisen von Stripe gelangst du über <a href="https://stripe.com/privacy" target="_blank" rel="noopener noreferrer">stripe.com/privacy</a>.</p>
+</section>
 
-<h2>10. Speicherdauer</h2>
-<p>Wir speichern personenbezogene Daten nur so lange, wie es für die genannten Zwecke erforderlich ist oder wie es gesetzliche Aufbewahrungspflichten (z. B. handels- und steuerrechtliche Vorgaben) verlangen. Die konkrete Aufbewahrungsfrist hängt von der Datenkategorie ab und wird laufend anhand dieser Vorgaben bestimmt.</p>
+<section className="legal-doc-section" id="email">
+<p className="legal-doc-num">05</p>
+<h2>Kontaktanfragen und E-Mail-Versand</h2>
+<p>Nutzt du das Kontaktformular oder die B2B-Anfrage, verarbeiten wir deine Angaben – Name, E-Mail-Adresse, Nachricht und gegebenenfalls Bestellnummer oder Unternehmensangaben –, um deine Anfrage zu beantworten. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO, wenn es um einen Vertrag oder seine Anbahnung geht, sonst Art. 6 Abs. 1 lit. f DSGVO.</p>
+<p>Für den Versand unserer E-Mails setzen wir den Dienstleister Resend ein. Das betrifft alle E-Mails, die wir dir schicken: Bestell- und Versandbestätigungen, Storno- und Widerrufsbestätigungen, Antworten auf Anfragen sowie die E-Mails der Launch List. Dabei werden deine E-Mail-Adresse, der Inhalt der jeweiligen Nachricht und Protokolle über die Zustellung verarbeitet.</p>
+</section>
 
-<h2>11. Deine Rechte</h2>
-<p>Du hast das Recht auf Auskunft (Art. 15 DSGVO), Berichtigung (Art. 16 DSGVO), Löschung (Art. 17 DSGVO), Einschränkung der Verarbeitung (Art. 18 DSGVO), Datenübertragbarkeit (Art. 20 DSGVO) sowie Widerspruch gegen die Verarbeitung (Art. 21 DSGVO). Wende dich dafür an <a href="mailto:hello@gloamatcha.com">hello@gloamatcha.com</a>.</p>
-<p>Außerdem hast du das Recht, dich bei einer Datenschutz-Aufsichtsbehörde zu beschweren, insbesondere in dem Mitgliedstaat deines Aufenthaltsorts, Arbeitsplatzes oder des Orts des mutmaßlichen Verstoßes. Für uns als Unternehmen mit Sitz in Berlin ist dies die Berliner Beauftragte für Datenschutz und Informationsfreiheit.</p>
+<section className="legal-doc-section" id="launch">
+<p className="legal-doc-num">06</p>
+<h2>GLOA Launch List</h2>
+<p>Auf der Seite <Link href="/launch">Launch List</Link> kannst du dich eintragen, um zum Start von GLOA benachrichtigt zu werden. Pflichtangabe ist ausschließlich deine E-Mail-Adresse. Freiwillig sind dein Vorname und die Angabe, als was du dich für GLOA interessierst, etwa als Privatperson oder als Café.</p>
+<p>Rechtsgrundlage ist deine Einwilligung nach Art. 6 Abs. 1 lit. a DSGVO. Wir verwenden ein Double-Opt-In-Verfahren: Nach deiner Eintragung senden wir dir eine E-Mail mit einem Bestätigungslink. Erst wenn du diesen Link anklickst, gilt deine Einwilligung als erteilt. Bestätigst du nicht, löschen wir die Eintragung nach 14 Tagen.</p>
+<p>Über diese Eintragung erhältst du höchstens drei E-Mails: zuerst die Bestätigungsmail, mit der du deine Einwilligung bestätigst, danach einmalig eine Willkommens-E-Mail mit deinem Launch-Rabattcode und schließlich einmalig die Benachrichtigung zum Start. Danach endet der Versand über diese Einwilligung.</p>
+<p>Ein Newsletter ist damit nicht verbunden. Du erhältst über diese Eintragung keine regelmäßigen Marketing-E-Mails, keine weitere Produktwerbung, keine weiteren Angebote und keine Event-Einladungen. Wir übernehmen die Daten nicht in andere Marketing- oder Verteilerlisten und nutzen sie nicht für Kundenakquise oder Werbemessung. Möchten wir dir darüber hinaus E-Mails senden, holen wir dafür vorher eine gesonderte Einwilligung ein.</p>
+<p>Wer sich vor Einführung des Rabattcodes eingetragen hat, hat ausschließlich in die Launch-Benachrichtigung eingewilligt und erhält auch nur diese. Bestehende Einwilligungen deuten wir nicht nachträglich um.</p>
+<p>Zum Nachweis deiner Einwilligung speichern wir den Zeitpunkt der Eintragung, den Zeitpunkt deiner Bestätigung sowie den Einwilligungstext samt seiner Version, der dir dabei angezeigt wurde. Maßgeblich ist immer der Text, den du gesehen hast. Ändert sich der Text, gilt für dich weiterhin deine Fassung, bis du einer neuen ausdrücklich zustimmst.</p>
+<p>Du kannst deine Einwilligung jederzeit mit Wirkung für die Zukunft widerrufen. Dafür genügt der Abmeldelink in der Bestätigungs-E-Mail; er bleibt auch nach deiner Bestätigung gültig. Alternativ schreibst du uns an <a href="mailto:hello@gloamatcha.com">hello@gloamatcha.com</a>. Nach einem Widerruf senden wir dir über diese Eintragung keine weiteren E-Mails. Damit eine widerrufene Adresse nicht versehentlich erneut angeschrieben wird, speichern wir den Widerruf als Nachweis.</p>
+</section>
+
+<section className="legal-doc-section" id="speicherung">
+<p className="legal-doc-num">07</p>
+<h2>Speicherung auf deinem Endgerät</h2>
+<p>Diese Website speichert nur, was für die von dir gewünschten Funktionen erforderlich ist. Das sind der Inhalt deines Warenkorbs, der lokal in deinem Browser abgelegt wird, und – wenn du dich anmeldest – deine Anmeldesitzung. Für den nicht öffentlichen Verwaltungsbereich wird beim Anmelden zusätzlich ein Sitzungs-Cookie gesetzt, das ausschließlich berechtigte Personen betrifft.</p>
+<p>Ohne diese Speicherung stünden Warenkorb, Login und Verwaltungsbereich nicht zur Verfügung. Sie ist deshalb unbedingt erforderlich im Sinne von § 25 Abs. 2 Nr. 2 TDDDG und benötigt keine Einwilligung. Die anschließende Verarbeitung der dabei gespeicherten Daten stützen wir auf Art. 6 Abs. 1 lit. b DSGVO, für den Verwaltungsbereich auf Art. 6 Abs. 1 lit. f DSGVO.</p>
+<p>Marketing-, Analyse- oder Tracking-Cookies setzen wir nicht, und wir binden keine entsprechenden Drittanbieter-Werkzeuge ein. Ein Einwilligungsbanner ist deshalb nicht erforderlich.</p>
+</section>
+
+<section className="legal-doc-section" id="tracking">
+<p className="legal-doc-num">08</p>
+<h2>Keine Analyse- oder Tracking-Tools</h2>
+<p>Wir setzen derzeit keine Web-Analyse-, Tracking- oder Werbewerkzeuge ein. Es findet keine Reichweitenmessung, keine Profilbildung und kein Retargeting statt. Sollte sich das ändern, informieren wir dich hier vorab und holen, soweit erforderlich, deine Einwilligung ein.</p>
+</section>
+
+<section className="legal-doc-section" id="empfaenger">
+<p className="legal-doc-num">09</p>
+<h2>Empfänger deiner Daten</h2>
+<p>Im Rahmen der oben beschriebenen Zwecke geben wir Daten an folgende Dienstleister weiter:</p>
+<ul className="legal-doc-list">
+<li><strong>Vercel</strong> – Bereitstellung und Betrieb der Website</li>
+<li><strong>Supabase</strong> – Datenbank und Authentifizierung</li>
+<li><strong>Stripe</strong> – Zahlungsabwicklung</li>
+<li><strong>Resend</strong> – Versand unserer E-Mails</li>
+</ul>
+<p>Diese Dienstleister setzen ihrerseits weitere Unterauftragsverarbeiter ein, insbesondere Anbieter von Rechenzentrums- und Netzwerkinfrastruktur. Über die aktuell eingesetzten Unterauftragsverarbeiter informieren wir dich auf Anfrage unter <a href="mailto:hello@gloamatcha.com">hello@gloamatcha.com</a>.</p>
+<p>Eine Weitergabe darüber hinaus findet nicht statt, außer wir sind gesetzlich dazu verpflichtet. Wir verkaufen keine personenbezogenen Daten.</p>
+</section>
+
+<section className="legal-doc-section" id="drittland">
+<p className="legal-doc-num">10</p>
+<h2>Verarbeitung außerhalb der EU</h2>
+<p>Nicht jede Verarbeitung findet am selben Ort statt, deshalb hier im Einzelnen:</p>
+<ul className="legal-doc-list">
+<li>Deine <strong>Konto- und Bestelldaten</strong> speichern wir in einer Datenbank, die in einer Region innerhalb der Europäischen Union betrieben wird.</li>
+<li>Die <strong>Serverfunktionen</strong> dieser Website werden derzeit in einer Region in den Vereinigten Staaten ausgeführt. Daten, die du über ein Formular oder eine Bestellung übermittelst, werden dabei in den Vereinigten Staaten verarbeitet.</li>
+<li>Unser <strong>E-Mail-Dienstleister</strong> speichert die für den Versand erforderlichen Daten nach eigenen Angaben in den Vereinigten Staaten.</li>
+<li>Für die <strong>Zahlungsabwicklung</strong> ist unser Vertragspartner eine Gesellschaft mit Sitz in Irland.</li>
+</ul>
+<p>Über die vertraglichen Grundlagen, auf die wir eine Verarbeitung außerhalb der Europäischen Union stützen, informieren wir dich auf Anfrage unter <a href="mailto:hello@gloamatcha.com">hello@gloamatcha.com</a>.</p>
+</section>
+
+<section className="legal-doc-section" id="dauer">
+<p className="legal-doc-num">11</p>
+<h2>Speicherdauer</h2>
+<p>Wir speichern personenbezogene Daten nur so lange, wie es für den jeweiligen Zweck erforderlich ist oder wie es gesetzliche Aufbewahrungspflichten verlangen. Weil sich die Zwecke unterscheiden, unterscheiden sich auch die Fristen:</p>
+<ul className="legal-doc-list">
+<li><strong>Nicht bestätigte Eintragungen in die Launch List</strong> löschen wir 14 Tage nach der Eintragung.</li>
+<li><strong>Bestätigte Eintragungen</strong> löschen oder anonymisieren wir, sobald der Zweck erfüllt ist – also nachdem die einmalige Launch-Benachrichtigung versendet und abgeglichen wurde, der Aktionszeitraum des Rabattcodes abgelaufen ist und keine offenen Zustellfälle mehr bestehen. Wir prüfen das zu einem festgelegten Termin nach Ablauf des Aktionszeitraums.</li>
+<li><strong>Nachweise über erteilte und widerrufene Einwilligungen</strong> bewahren wir davon getrennt so lange auf, wie wir sie zum Nachweis der Rechtmäßigkeit der Verarbeitung und zur Beachtung eines Widerrufs benötigen.</li>
+<li><strong>Bestell- und Rechnungsdaten</strong> unterliegen den handels- und steuerrechtlichen Aufbewahrungspflichten und werden für deren Dauer aufbewahrt, auch wenn du dein Konto löschst.</li>
+<li><strong>Kontaktanfragen</strong> löschen wir, sobald das Anliegen abschließend bearbeitet ist und keine Aufbewahrungspflicht entgegensteht.</li>
+<li><strong>Technische Protokolldaten</strong> werden nur für den Betrieb und die Sicherheit der Website verarbeitet und in kurzen Abständen gelöscht oder überschrieben.</li>
+</ul>
+</section>
+
+<section className="legal-doc-section" id="rechte">
+<p className="legal-doc-num">12</p>
+<h2>Deine Rechte</h2>
+<p>Dir stehen gegenüber uns die folgenden Rechte zu:</p>
+<ul className="legal-doc-list">
+<li><strong>Auskunft</strong> darüber, ob und welche Daten wir zu dir verarbeiten (Art. 15 DSGVO)</li>
+<li><strong>Berichtigung</strong> unrichtiger oder unvollständiger Daten (Art. 16 DSGVO)</li>
+<li><strong>Löschung</strong> deiner Daten (Art. 17 DSGVO)</li>
+<li><strong>Einschränkung</strong> der Verarbeitung (Art. 18 DSGVO)</li>
+<li><strong>Datenübertragbarkeit</strong> in einem gängigen Format (Art. 20 DSGVO)</li>
+<li><strong>Widerspruch</strong> gegen Verarbeitungen, die wir auf ein berechtigtes Interesse stützen (Art. 21 DSGVO)</li>
+</ul>
+<p>Beruht eine Verarbeitung auf deiner Einwilligung, kannst du diese jederzeit mit Wirkung für die Zukunft widerrufen, ohne dass die Rechtmäßigkeit der bis dahin erfolgten Verarbeitung berührt wird. Für die Launch List genügt dafür der Abmeldelink; siehe <a href="#launch">GLOA Launch List</a>.</p>
+<p>Für alle diese Anliegen genügt eine Nachricht an <a href="mailto:hello@gloamatcha.com">hello@gloamatcha.com</a>. Wir beantworten sie unentgeltlich und ohne besondere Form.</p>
+<p>Außerdem hast du das Recht, dich bei einer Datenschutz-Aufsichtsbehörde zu beschweren, insbesondere in dem Mitgliedstaat deines Aufenthaltsorts, deines Arbeitsplatzes oder des Orts des mutmaßlichen Verstoßes. Für uns als Unternehmen mit Sitz in Berlin ist das die <a href="https://www.datenschutz-berlin.de" target="_blank" rel="noopener noreferrer">Berliner Beauftragte für Datenschutz und Informationsfreiheit</a>.</p>
+</section>
+
+</div>
+</div>
 </main>;
 }
 if(route==="agb"){

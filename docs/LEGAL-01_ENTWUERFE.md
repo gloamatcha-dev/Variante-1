@@ -98,12 +98,21 @@ ein Hinweis, kein Nachweis, und ich behandle ihn nicht als solchen.
 
 **Deshalb steht in keinem Entwurfstext unten eine DPF-Behauptung.**
 
-**Die Supabase-Projektregion. [OFFEN]**
+**Die Supabase-Projektregion. [BELEGT — nachgetragen 08.09.2026]**
 
-Von außen nicht sichtbar, weil Cloudflare davorsteht. Sie entscheidet aber
-darüber, ob Bestell-, Konto- und Launch-Daten in der EU liegen — und damit über
-den halben Drittland-Abschnitt.
-→ **Supabase-Dashboard, Project Settings → General → Region ablesen.**
+Zunächst als offen geführt, weil die REST-Domain hinter Cloudflare liegt.
+Über den **direkten** Datenbank-Host geht es doch: `db.<ref>.supabase.co`
+löst auf `2a05:d014:415:500:14:679a:7e3e:4d70` auf, und laut der amtlichen
+AWS-Bereichsliste (`ip-ranges.amazonaws.com/ip-ranges.json`, Stand
+08.09.2026) gehört `2a05:d014::/35` zu **eu-central-1, Frankfurt am Main**.
+
+**Die Datenbank liegt in der EU.** Damit ist die pauschale Annahme, alle Daten
+gingen in die USA, widerlegt — und die Drittlandfrage betrifft die
+Serverfunktionen (`iad1`) und den E-Mail-Versand, nicht den Datenbestand.
+
+Eine Bestätigung im Dashboard (Project Settings → General → Region) bleibt
+sinnvoll, weil DNS eine Momentaufnahme ist; der Befund selbst ist aber belegt
+und nicht geraten.
 
 **Die Vercel-Funktionsregion als Einstellung. [OFFEN]**
 
@@ -314,7 +323,7 @@ Pflicht behaupten.
 
 | # | Frage | Wer |
 |---|---|---|
-| T1 | Supabase-Projektregion (Dashboard → Project Settings → General) | Betreiber |
+| ~~T1~~ | ~~Supabase-Projektregion~~ — **beantwortet:** eu-central-1 (Frankfurt), belegt über AWS-Bereichsliste. Dashboard-Bestätigung optional. | erledigt |
 | T2 | Vercel-Projektregion für Funktionen — Ist-Einstellung, und ob eine EU-Region gewählt werden soll | Betreiber |
 | T3 | DPF-Status der vier Anbieter aus der amtlichen Liste | Rechtsberatung |
 | T4 | Vorliegende AV-Verträge und deren SCC-Module je Anbieter | Betreiber / Rechtsberatung |

@@ -228,9 +228,22 @@ test("Datenschutz: describes no newsletter processing, because none exists", asy
 });
 
 test("Datenschutz: claims no tracking, analytics or cookie consent that the site does not run", () => {
-  // Nothing may be described that is not actually implemented.
-  for (const invented of ["Google Analytics", "Matomo", "Facebook Pixel", "Cookie-Banner", "Einwilligungsbanner"]) {
+  // Named tools must never appear at all - none of them is integrated.
+  for (const invented of ["Google Analytics", "Matomo", "Facebook Pixel", "Hotjar", "Google Tag Manager"]) {
     assert.ok(!gloaSiteSource.includes(invented), `privacy notice must not claim ${invented}`);
+  }
+
+  // Banners are different: the notice is now allowed to SAY there is no
+  // banner, which is both true and useful, so a flat substring ban on
+  // the word rejected an accurate sentence. What must not appear is a
+  // claim to operate one. The assertion moved from the word to the
+  // claim - narrower in what it forbids, not weaker.
+  for (const claim of [
+    /wir (setzen|verwenden|nutzen)[^.]{0,40}(Cookie-Banner|Einwilligungsbanner)/i,
+    /(Cookie-Banner|Einwilligungsbanner)[^.]{0,30}(wird|werden) (dir )?(angezeigt|eingeblendet)/i,
+    /über (unser|das) (Cookie-Banner|Einwilligungsbanner)/i,
+  ]) {
+    assert.ok(!claim.test(gloaSiteSource), `privacy notice claims to operate a consent banner: ${claim}`);
   }
 });
 
@@ -447,4 +460,93 @@ test("Shop layout: one product per row, so an accordion moves nothing else", () 
   assert.ok(!css.includes(".shop-products::before"), "the centre divider came back");
   // The accordions sit under the row, full width, on the same rail.
   assert.match(css, /\.shop-accordion\{[\s\S]*?background:var\(--cream\)/);
+});
+
+/* ── The privacy notice, redesigned (DESIGN-LEGAL-03) ────────── */
+
+const privacySource = gloaSiteSource.slice(
+  gloaSiteSource.indexOf('route==="datenschutz"'),
+  gloaSiteSource.indexOf('route==="agb"')
+);
+
+test("Datenschutz: publishes hello@ as a working mailto, and nowhere the superseded address", () => {
+  assert.ok(privacySource.length > 2000, "the privacy block could not be located");
+  assert.ok(privacySource.includes('href="mailto:hello@gloamatcha.com"'), "no mailto link");
+  assert.ok(!privacySource.includes("info@gloamatcha.com"), "the superseded address survived");
+});
+
+test("Datenschutz: every section is reachable, and none is hidden behind a click", () => {
+  const ids = [...privacySource.matchAll(/<section className="legal-doc-section" id="([a-z]+)">/g)].map(m => m[1]);
+  assert.equal(ids.length, 12, `expected 12 sections, found ${ids.length}`);
+  assert.equal(new Set(ids).size, ids.length, "two sections share an id");
+
+  // Every contents entry points at a section that exists.
+  const hrefs = [...privacySource.matchAll(/<li><a href="#([a-z]+)"/g)].map(m => m[1]);
+  assert.equal(hrefs.length, 12, "the contents list is out of step with the sections");
+  for (const h of hrefs) assert.ok(ids.includes(h), `contents entry points at a missing section: #${h}`);
+
+  // Mandatory information may not sit behind a disclosure control.
+  assert.ok(!/<details|<summary/.test(privacySource), "a section is hidden inside an accordion");
+});
+
+test("Datenschutz: the contents list scrolls the page itself, because the router swallows fragments", () => {
+  // Verified in the browser: a hash-only href updates location.hash and
+  // the page never moves. Without the handler the list is decoration.
+  assert.match(privacySource, /e\.preventDefault\(\)/);
+  assert.match(privacySource, /scrollIntoView\(\{behavior:"instant",block:"start"\}\)/);
+  // Real hrefs stay, for middle-click, "copy link address" and a11y.
+  assert.match(privacySource, /<li><a href="#/);
+});
+
+test("Datenschutz: states the launch-list mail count without understating it", () => {
+  // Three mails, not two: the confirmation itself is one of them, and
+  // the earlier wording said "genau zwei" after confirmation.
+  assert.match(privacySource, /höchstens drei E-Mails/);
+  assert.ok(!privacySource.includes("genau zwei E-Mails"), "the old two-mail wording is back");
+  // A version 1 contact is never treated as a version 2 one.
+  assert.match(privacySource, /Bestehende Einwilligungen deuten wir nicht nachträglich um/);
+  // Only the address is mandatory.
+  assert.match(privacySource, /Pflichtangabe ist ausschließlich deine E-Mail-Adresse/);
+  // The unsubscribe link genuinely survives confirmation - 046's
+  // confirm_launch_signup clears confirmation_token_hash and never
+  // withdrawal_token_hash, which is what makes this sentence true.
+  assert.match(privacySource, /bleibt auch nach deiner Bestätigung gültig/);
+});
+
+test("Datenschutz: the third-country section asserts no safeguard it has not verified", () => {
+  const third = privacySource.slice(privacySource.indexOf('id="drittland"'));
+  const section = third.slice(0, third.indexOf("</section>"));
+
+  // It must say that processing happens outside the EU at all.
+  assert.match(section, /Vereinigten Staaten/);
+  // And it must not claim a specific mechanism nobody has checked.
+  for (const unproven of [
+    "Standardvertragsklauseln", "Data Privacy Framework", "Angemessenheitsbeschluss",
+    "DPF", "zertifiziert", "Art. 46",
+  ]) {
+    assert.ok(!section.includes(unproven), `unverified transfer safeguard claimed: ${unproven}`);
+  }
+  // No bracketed audit note may ever reach a reader.
+  assert.ok(!/\[(ZU BESTÄTIGEN|OFFEN|BELEGT|TODO)/.test(privacySource), "an internal audit marker is on the public page");
+});
+
+test("Datenschutz: retention is stated per category, with no invented statutory period", () => {
+  assert.match(privacySource, /14 Tage nach der Eintragung/);
+  assert.match(privacySource, /Nachweise über erteilte und widerrufene Einwilligungen/);
+  // The 14-day figure is the one the sweep actually enforces.
+  const retention = readFileSync(new URL("../lib/launchWaitlistRetention.ts", import.meta.url), "utf-8");
+  assert.match(retention, /RETENTION_PENDING_DAYS[^\n]*=\s*14/);
+});
+
+test("Datenschutz: the document reads at a measure, and the contents list collapses", () => {
+  const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf-8");
+  // 56ch, not 68ch: ch measures the digit glyph (0.63em here), so 68ch
+  // produced a median line of 83 characters. Measured in the browser.
+  assert.match(css, /\.legal-doc-section p\{[^}]*max-width:56ch/);
+  assert.match(css, /\.legal-doc-section p\{[^}]*font-size:17px/);
+  assert.match(css, /\.legal-doc-body\{[^}]*grid-template-columns:210px 1fr/);
+  const mq = css.slice(css.indexOf("@media(max-width:900px)"));
+  assert.ok(mq.slice(0, 600).includes(".legal-doc-body{grid-template-columns:1fr"), "the sidebar does not collapse");
+  // Anchors must clear the 86px sticky header.
+  assert.match(css, /\.legal-doc-section\{[^}]*scroll-margin-top:110px/);
 });
