@@ -1813,3 +1813,60 @@ test("48: the band is plum, cream, and on the two families only", () => {
   // On the canonical rail, like every other homepage section.
   assert.ok(site.includes('className="habit-inner home-rail"'), "the band is not on the rail");
 });
+
+/* ══════════════════════════════════════════════════════════════
+   QA-EMAIL-04 - THE SERVER SNAPSHOT THAT WAS NEVER THE SAME TWICE
+   ══════════════════════════════════════════════════════════════ */
+
+test("49: every server snapshot is one value, not a new one per call", () => {
+  // WHAT THIS CATCHES. react-dom's mountSyncExternalStore calls
+  // getServerSnapshot TWICE while hydrating and compares the two results
+  // with === :
+  //
+  //     var nextSnapshot = getServerSnapshot();
+  //     didWarnUncachedGetSnapshot || nextSnapshot === getServerSnapshot() ||
+  //       console.error("The result of getServerSnapshot should be cached
+  //                      to avoid an infinite loop")
+  //
+  // app/cart.ts returned a fresh `[]`, so the two were never the same
+  // object and every page load logged that error.
+  //
+  // AND WHY IT AUDITS EVERY STORE, not only the one that broke:
+  // didWarnUncachedGetSnapshot is set after the FIRST offender and
+  // react-dom stays silent afterwards. One unstable snapshot anywhere in
+  // the app therefore hides every other one - which is exactly how this
+  // warning came to be read as a LaunchCountdown problem when it came
+  // from the cart. A second offender must fail here, not go quiet.
+  const snapshots = [];
+  for (const rel of ["app/cart.ts", "app/GloaSite.tsx"]) {
+    for (const m of read(rel).matchAll(/getServerSnapshot\s*\([^)]*\)\s*(?::[^{]+)?\{\s*return ([^;}]+)/g)) {
+      snapshots.push([rel, m[1].trim()]);
+    }
+  }
+  assert.ok(snapshots.length >= 2,
+    `the server snapshots moved - found ${snapshots.length}, re-pin this guard`);
+  for (const [rel, expr] of snapshots) {
+    // A trailing TypeScript cast is not part of the value.
+    const value = expr.replace(/\s+as\s+[\s\S]+$/, "").trim();
+    assert.ok(!/^[[{]|^new\b|\(/.test(value),
+      `${rel}: getServerSnapshot builds a new value on every call: ${expr}`);
+    assert.match(value, /^(null|undefined|true|false|-?\d+(\.\d+)?|"[^"]*"|'[^']*'|[A-Za-z_$][\w$]*)$/,
+      `${rel}: getServerSnapshot returns something that is not one stable value: ${expr}`);
+  }
+
+  // THE CART, NAMED. One shared constant, and frozen - it is now handed
+  // to every server render and every hydration, so a push into it would
+  // leak into all of them.
+  const cart = read("app/cart.ts");
+  assert.match(cart, /const SERVER_SNAPSHOT: CartItem\[\] = \[\];/);
+  assert.match(cart, /Object\.freeze\(SERVER_SNAPSHOT\);/);
+  assert.match(cart, /function getServerSnapshot\(\): CartItem\[\] \{ return SERVER_SNAPSHOT; \}/);
+  assert.ok(!/getServerSnapshot\(\): CartItem\[\] \{ return \[\]; \}/.test(cart),
+    "the cart returns a fresh array per call again");
+
+  // THE COUNTDOWN'S CLOCK WAS NEVER THE CAUSE and is unchanged: null is a
+  // primitive, and null === null, so this store cannot trip the check.
+  // The countdown still renders without numbers on the server.
+  assert.match(site, /getServerSnapshot\(\)\{return null as number\|null\}/);
+  assert.match(site, /const now=useSyncExternalStore\(clockStore\.subscribe,clockStore\.getSnapshot,clockStore\.getServerSnapshot\)/);
+});

@@ -81,7 +81,23 @@ function subscribe(cb: () => void) {
 }
 
 function getSnapshot() { init(); return snapshot; }
-function getServerSnapshot(): CartItem[] { return []; }
+/* ONE array, not a fresh one per call.
+ *
+ * React's useSyncExternalStore calls getServerSnapshot TWICE while
+ * hydrating and compares the two results with ===, so `return []`
+ * handed it two different arrays every time and it reported "The
+ * result of getServerSnapshot should be cached to avoid an infinite
+ * loop". The server cart is always empty, so one shared empty array is
+ * the entire fix - the value is identical, only its identity changes.
+ *
+ * Frozen because it is now shared across every server render and every
+ * hydration: a push into it would leak into all of them. Nothing
+ * mutates the snapshot today - persist() assigns a new array - and this
+ * makes sure that stays true.
+ */
+const SERVER_SNAPSHOT: CartItem[] = [];
+Object.freeze(SERVER_SNAPSHOT);
+function getServerSnapshot(): CartItem[] { return SERVER_SNAPSHOT; }
 
 export function useCart() {
   const items = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
