@@ -6,7 +6,6 @@ import {
   emailFooter,
   GLOA_NEAR_BLACK,
   GLOA_BERRY,
-  GLOA_POSTAL_ADDRESS,
 } from "./brand.ts";
 
 /**
@@ -300,9 +299,7 @@ ${emailHeadline(`${escapeHtml(HEADLINE)}`)}
 ${bodyHtml}
 ${accountLinkHtml}
 </td></tr>
-${emailFooter(`Fragen zu deinem Jahresabo? <a href="mailto:${SUPPORT_ADDRESS}" style="color:${GLOA_BERRY};">${SUPPORT_ADDRESS}</a>
-<br/><br/>
-${GLOA_POSTAL_ADDRESS}`)}`);
+${emailFooter(`Fragen zu deinem Jahresabo? <a href="mailto:${SUPPORT_ADDRESS}" style="color:${GLOA_BERRY};">${SUPPORT_ADDRESS}</a>`)}`);
 
   const accountLinkText = plan.accountOrdersUrl
     ? `Bestellungen in deinem Konto ansehen: ${plan.accountOrdersUrl}`

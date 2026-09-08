@@ -6,7 +6,6 @@ import {
   emailFooter,
   GLOA_NEAR_BLACK,
   GLOA_BERRY,
-  GLOA_POSTAL_ADDRESS,
 } from "./brand.ts";
 
 export type OrderConfirmationItem = {
@@ -189,9 +188,7 @@ ${emailHeadline(`Danke für deine Bestellung.`)}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${addressHtml}</table>
 ${accountLinkHtml}
 </td></tr>
-${emailFooter(`Fragen zu deiner Bestellung? <a href="mailto:support@gloamatcha.com" style="color:${GLOA_BERRY};">support@gloamatcha.com</a>
-<br/><br/>
-${GLOA_POSTAL_ADDRESS}`)}`);
+${emailFooter(`Fragen zu deiner Bestellung? <a href="mailto:support@gloamatcha.com" style="color:${GLOA_BERRY};">support@gloamatcha.com</a>`)}`);
 
   // ---- Plain text ----
   const itemLinesText = items

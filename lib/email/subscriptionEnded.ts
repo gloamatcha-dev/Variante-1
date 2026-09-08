@@ -6,7 +6,6 @@ import {
   emailFooter,
   GLOA_NEAR_BLACK,
   GLOA_BERRY,
-  GLOA_POSTAL_ADDRESS,
 } from "./brand.ts";
 
 /**
@@ -229,9 +228,7 @@ ${endedLineHtml}
 <p style="font-size:14px;line-height:1.6;margin:0;color:${BRAND.ink};">${escapeHtml(CLOSING)}</p>
 ${accountLinkHtml}
 </td></tr>
-${emailFooter(`Fragen? <a href="mailto:${SUPPORT_ADDRESS}" style="color:${GLOA_BERRY};">${SUPPORT_ADDRESS}</a>
-<br/><br/>
-${GLOA_POSTAL_ADDRESS}`)}`);
+${emailFooter(`Fragen? <a href="mailto:${SUPPORT_ADDRESS}" style="color:${GLOA_BERRY};">${SUPPORT_ADDRESS}</a>`)}`);
 
   const text = [
     `GLOA · ${EYEBROW}`,

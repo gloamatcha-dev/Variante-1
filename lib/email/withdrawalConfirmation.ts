@@ -6,7 +6,6 @@ import {
   emailFooter,
   GLOA_NEAR_BLACK,
   GLOA_BERRY,
-  GLOA_POSTAL_ADDRESS,
 } from "./brand.ts";
 
 export type WithdrawalConfirmationInput = {
@@ -85,9 +84,7 @@ ${scopeNoteHtml}
 ${customerNoteHtml}
 <p style="font-size:14px;line-height:1.5;margin:16px 0 0;">Eingegangen am ${escapeHtml(date)} um ${escapeHtml(time)} Uhr.</p>
 </td></tr>
-${emailFooter(`Fragen zu deinem Widerruf? <a href="mailto:hello@gloamatcha.com" style="color:${GLOA_BERRY};">hello@gloamatcha.com</a>
-<br/><br/>
-${GLOA_POSTAL_ADDRESS}`)}`);
+${emailFooter(`Fragen zu deinem Widerruf? <a href="mailto:hello@gloamatcha.com" style="color:${GLOA_BERRY};">hello@gloamatcha.com</a>`)}`);
 
   const text = [
     "GLOA · Widerruf erhalten",

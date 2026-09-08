@@ -6,7 +6,6 @@ import {
   emailFooter,
   GLOA_NEAR_BLACK,
   GLOA_BERRY,
-  GLOA_POSTAL_ADDRESS,
 } from "./brand.ts";
 
 /**
@@ -277,9 +276,7 @@ ${emailHeadline(`${escapeHtml(copy.headline)}`)}
 <p style="font-size:14px;line-height:1.6;margin:10px 0 0;color:${BRAND.ink};">${escapeHtml(SUPPORT_LINE)}</p>
 ${accountLinkHtml}
 </td></tr>
-${emailFooter(`Fragen zu deiner Bestellung? <a href="mailto:${SUPPORT_ADDRESS}" style="color:${GLOA_BERRY};">${SUPPORT_ADDRESS}</a>
-<br/><br/>
-${GLOA_POSTAL_ADDRESS}`)}`);
+${emailFooter(`Fragen zu deiner Bestellung? <a href="mailto:${SUPPORT_ADDRESS}" style="color:${GLOA_BERRY};">${SUPPORT_ADDRESS}</a>`)}`);
 
   const accountLinkText = order.accountOrderUrl
     ? `\nBestellung in deinem Konto ansehen: ${order.accountOrderUrl}`

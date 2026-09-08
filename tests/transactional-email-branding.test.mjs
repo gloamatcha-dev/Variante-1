@@ -110,6 +110,62 @@ test("the internal notifications are excluded on purpose, and still reach only o
   }
 });
 
+/**
+ * WHICH MAILS CARRY THE COMPANY BLOCK, AND WHY THE OTHERS DO NOT.
+ *
+ * § 35a Abs. 1 GmbHG puts the company particulars on a GmbH's business
+ * letters, and an email is one. § 35a Abs. 2 lifts that for messages
+ * sent WITHIN AN EXISTING BUSINESS RELATIONSHIP for which standardised
+ * forms are used, with only the case-specific values filled in.
+ *
+ * The ten transactional mails are exactly that shape: a fixed template
+ * with an order number, an amount or a date inserted, sent to somebody
+ * who already has a contract with GLOA. So they carry the contact
+ * address and their links, and no address block.
+ *
+ * The three launch mails do NOT qualify. Their recipients have signed up
+ * to a list and have no business relationship at all, so the first
+ * condition of the exception is simply absent. Theirs stays.
+ *
+ * This reading has not been through legal review, and the split is here
+ * so that review has something explicit to agree or disagree with rather
+ * than a difference nobody wrote down.
+ */
+const CARRIES_COMPANY_BLOCK = ["launchConfirmation", "launchWelcome", "launchDay"];
+
+test("the company block appears only where the § 35a Abs. 2 exception cannot apply", () => {
+  for (const name of CUSTOMER) {
+    const src = template(name);
+    const expected = CARRIES_COMPANY_BLOCK.includes(name);
+    const has = src.includes("GLOA_POSTAL_ADDRESS");
+    if (expected) {
+      assert.ok(has, `${name} lost the company block, and its recipients have no business relationship`);
+    } else {
+      assert.ok(!has, `${name} carries a company block it does not need`);
+    }
+  }
+});
+
+test("dropping the block took nothing else with it", () => {
+  // The contact address and the account links are what a reader
+  // actually needs from a footer, and they are not company particulars.
+  const needsSupport = ["orderConfirmation", "shipmentConfirmation", "refundConfirmation",
+                        "cancellationConfirmation", "cancellationOutcome", "paymentProblem",
+                        "subscriptionStarted", "subscriptionEnded", "annualPurchaseConfirmation"];
+  for (const name of needsSupport) {
+    assert.ok(template(name).includes("support@gloamatcha.com"),
+      `${name} lost its contact address`);
+  }
+  // The statutory withdrawal receipt answers to hello@, the published
+  // contact address, not to order support.
+  assert.ok(template("withdrawalConfirmation").includes("hello@gloamatcha.com"),
+    "the withdrawal receipt lost its contact address");
+  // And every one still has a footer at all.
+  for (const name of CUSTOMER) {
+    assert.ok(template(name).includes("emailFooter("), `${name} has no footer`);
+  }
+});
+
 test("the set is complete: every template in lib/email is accounted for", () => {
   // brand.ts is the foundation, not a template. If a new mail appears,
   // this fails until somebody decides which list it belongs in - which
