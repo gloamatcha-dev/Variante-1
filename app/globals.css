@@ -82,6 +82,34 @@ h1 i,h2 i,h3 i,.display-italic{font-family:var(--font-display),Georgia,serif;fon
    overflows, so this page takes a smaller curve and German hyphenation
    (the document is lang="de", so hyphens:auto has a dictionary). */
 .legal-page.legal-agb h1{font-size:clamp(30px,4.6vw,68px);hyphens:auto;overflow-wrap:break-word}
+/* THE STATUTORY FORM MUST SHOW WHERE THE KEYBOARD IS.
+   globals.css defines :focus-visible{outline:3px solid var(--blue)} for
+   the whole site, but this component's wrapper carries `account-form`,
+   and .account-form input:focus removes the outline and recolours the
+   border instead. Measured with a real Tab press on this page: the
+   outline is gone AND the border stays rgba(79,58,91,.22), so a keyboard
+   user gets no focus indicator at all on the one form the law requires
+   to be usable. This restores the site's own ring for this form only -
+   same token, same 3px - and changes .account-form nowhere else.
+
+   Prefixed with .legal-doc for SPECIFICITY, not for scoping: without it
+   the selector ties .account-form input:focus at (0,2,1) and loses on
+   source order, which is how the first attempt failed. Verified with a
+   real Tab press, not by reading the rule. */
+.legal-doc .legal-withdrawal input:focus-visible,
+.legal-doc .legal-withdrawal select:focus-visible,
+.legal-doc .legal-withdrawal textarea:focus-visible,
+.legal-doc .legal-withdrawal button:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+
+/* The statutory model form. A ruled block rather than a card: it is a
+   document to be copied or printed, so it keeps the page's own type at
+   full size, generous leading and a border that survives printing. No
+   monospace - this is prose with blanks, not code. */
+.legal-doc-form{margin:0 0 18px;padding:clamp(22px,2.6vw,32px);border:1px solid var(--line);max-width:56ch}
+.legal-doc-form p{font-size:17px;line-height:1.75;margin:0 0 14px;max-width:none}
+.legal-doc-form p:last-child{margin-bottom:0}
+.legal-doc-form-note{font-size:15px;opacity:.7;padding-top:14px;border-top:1px solid var(--line)}
+@media print{.legal-doc-form{break-inside:avoid;border-color:#000}}
 .legal-doc-body{display:grid;grid-template-columns:210px 1fr;gap:clamp(36px,5vw,88px);align-items:start}
 /* 110px clears the 86px sticky site header plus a little air. */
 .legal-doc-toc{position:sticky;top:110px}

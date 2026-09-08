@@ -373,6 +373,40 @@ Diese Bedingungen werden **vor** dem Aktivieren der jeweiligen Produkte
 gesondert finalisiert. Bestehende Abo-, Jahresplan- und Zahlungsregeln wurden
 dabei nicht angefasst.
 
+### Widerrufsbelehrung: zwei offene Punkte (DESIGN-LEGAL-05)
+
+**W1 — Rücksendeadresse. [OFFEN, Betreiber]**
+Die Widerrufsbelehrung und das Musterformular nennen Hardenbergstr. 4 als
+Adresse, an die der Widerruf zu erklären ist. Das ist die **Geschäftsanschrift**
+aus dem Impressum. Ob dorthin auch die **Waren** zurückgehen sollen, ist eine
+operative Frage, die ich nicht beantworten kann und nicht erfunden habe.
+Falls Retouren an eine andere Adresse gehen, muss diese in § 3 („Folgen des
+Widerrufs") ergänzt werden — die Erklärungsadresse und die Rücksendeadresse
+dürfen auseinanderfallen, müssen dann aber beide genannt sein.
+
+**W2 — Fristbeginn bei Teilsendungen. [ENTWURF, nicht veröffentlicht]**
+Das gesetzliche Muster kennt eine Variante für Waren, die in **mehreren
+Teilsendungen oder Stücken** geliefert werden: Die Frist beginnt dann mit der
+letzten Teilsendung bzw. dem letzten Stück. Der Text enthält sie **nicht**,
+weil Teilsendungen technisch nicht abgebildet sind — `fulfillment_status` ist
+ein Status je Bestellung, „partial" im Code betrifft ausschließlich
+Erstattungen. Sobald Teillieferungen möglich werden, ist dieser Satz zu
+ergänzen:
+
+> Haben wir dir eine Ware in mehreren Teilsendungen oder Stücken geliefert,
+> beginnt die Frist mit dem Erhalt der letzten Teilsendung bzw. des letzten
+> Stücks.
+
+**W3 — Widerrufsbelehrung für Abo und Jahresplan. GO-LIVE-BLOCKER.**
+Die vorhandene Belehrung ist für den **Warenkauf** geschrieben. Sie deckt die
+Variante für **regelmäßige Lieferungen über einen festgelegten Zeitraum**
+nicht ab, bei der die Frist mit dem Erhalt der **ersten** Ware beginnt. Solange
+Abos und Jahresplan nicht buchbar sind, ist das korrekt; vor ihrer Aktivierung
+muss die Belehrung um die passende Variante ergänzt werden — siehe B5 oben.
+Die 28-Tage-Zyklen, die 13 festgelegten Lieferungen und die fehlende
+automatische Verlängerung dürfen dabei **nicht** durch Textänderungen
+umgedeutet werden.
+
 ### Offene Entscheidung: Verweis auf die Aktionsbedingungen
 
 Geprüft, wie beauftragt: Die AGB **sollten** in § 3 auf die jeweils gültigen

@@ -646,3 +646,92 @@ test("AGB: the long headline is sized to fit, not to fill", () => {
   assert.match(css, /\.legal-doc-lead\{[^}]*border-top:1px solid var\(--line\)/);
   assert.ok(!/\.legal-doc-lead\{[^}]*background:/.test(css), "the lead was turned into a box");
 });
+
+/* ── The withdrawal page, redesigned (DESIGN-LEGAL-05) ───────── */
+
+const widerrufSource = gloaSiteSource.slice(
+  gloaSiteSource.indexOf('route==="widerruf"'),
+  gloaSiteSource.indexOf('route==="impressum"')
+);
+
+test("Widerruf: structured as a document, and the § 356a function is still rendered", () => {
+  const ids = [...widerrufSource.matchAll(/<section className="legal-doc-section" id="([a-z]+)">/g)].map(m => m[1]);
+  assert.equal(ids.length, 5, `expected 5 sections, found ${ids.length}`);
+  const hrefs = [...widerrufSource.matchAll(/<li><a href="#([a-z]+)"/g)].map(m => m[1]);
+  assert.deepEqual(hrefs, ids, "the contents list is out of step with the sections");
+
+  // The statutory function must still be on the page, and nothing may be
+  // folded away behind a disclosure control.
+  assert.match(widerrufSource, /<WithdrawalFunction\/>/);
+  assert.ok(!/<details|<summary/.test(widerrufSource), "withdrawal information is hidden in an accordion");
+  assert.ok(widerrufSource.includes('href="mailto:hello@gloamatcha.com"'), "no contact mailto");
+  assert.ok(!widerrufSource.includes("info@gloamatcha.com"), "the superseded address is on the withdrawal page");
+});
+
+test("Widerruf: the model form is the complete statutory one", () => {
+  // Anlage 2 to Art. 246a § 1 Abs. 2 EGBGB. Three prescribed elements
+  // were missing from the copy that was published: the "erhalten am"
+  // alternative, the signature line, and the footnote the asterisks
+  // point at. The form is fixed by law, so it is quoted, not adapted.
+  for (const required of [
+    "Bestellt am (*) / erhalten am (*)",
+    "Name des/der Verbraucher(s)",
+    "Anschrift des/der Verbraucher(s)",
+    "Unterschrift des/der Verbraucher(s) (nur bei Mitteilung auf Papier)",
+    "Datum",
+    "(*) Unzutreffendes streichen.",
+  ]) {
+    assert.ok(widerrufSource.includes(required), `the model form is missing: ${required}`);
+  }
+  // The form carries the trader's full address and address, as Anlage 2
+  // requires - not just a link to the imprint.
+  for (const trader of ["Cara 2 GmbH", "Hardenbergstr. 4", "10623 Berlin"]) {
+    assert.ok(widerrufSource.includes(trader), `the model form is missing the trader detail: ${trader}`);
+  }
+});
+
+test("Widerruf: no blanket food exclusion, and no invented consumer duty", () => {
+  for (const wrong of [
+    /Lebensmittel[^.]{0,80}(ausgeschlossen|kein Widerrufsrecht)/i,
+    /Matcha[^.]{0,80}(ausgeschlossen|kein Widerrufsrecht)/i,
+    /versiegelt[^.]{0,60}ausgeschlossen/i,
+    /Originalverpackung/i,
+  ]) {
+    assert.ok(!wrong.test(widerrufSource), `an exclusion or duty was invented: ${wrong}`);
+  }
+
+  // On the reason, the guarantee is asserted rather than every way of
+  // breaking it guessed at. A ban on /Begründung.*angeben/ matched the
+  // page's own "eine Begründung musst du nicht angeben" - a negative
+  // pattern that fires on the sentence promising the opposite is worse
+  // than no pattern, so both statements are required to be present.
+  assert.match(widerrufSource, /ohne Angabe von Gründen/);
+  assert.match(widerrufSource, /eine Begründung musst du nicht angeben/);
+  // And the form must not carry a required reason field.
+  const fn = gloaSiteSource.slice(gloaSiteSource.indexOf("function WithdrawalFunction()"));
+  assert.ok(!/required[^>]*name="customerNote"/.test(fn), "the reason field was made mandatory");
+});
+
+test("Widerruf: receipt is described as receipt, not as a refund", () => {
+  assert.match(widerrufSource, /Eingang, Bearbeitung und Rückzahlung sind getrennte Schritte/);
+  // The success screen of the function says the same - it reports a
+  // receipt with date and time and never claims money moved.
+  const fn = gloaSiteSource.slice(gloaSiteSource.indexOf("function WithdrawalFunction()"));
+  const success = fn.slice(fn.indexOf('step==="success"'), fn.indexOf('step==="review"'));
+  assert.match(success, /Dein Widerruf wurde aufgenommen/);
+  for (const claim of ["erstattet", "Erstattung", "zurückgezahlt", "storniert"]) {
+    assert.ok(!success.includes(claim), `the receipt screen claims a refund: ${claim}`);
+  }
+});
+
+test("Widerruf: the statutory form shows the keyboard where it is", () => {
+  const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf-8");
+  // globals.css defines a site-wide :focus-visible ring, but this
+  // component's wrapper carries `account-form`, whose :focus rule strips
+  // the outline - measured with a real Tab press, the fields had no
+  // focus indicator at all. The .legal-doc prefix is for specificity:
+  // without it the selector ties .account-form input:focus and loses on
+  // source order.
+  assert.match(css, /\.legal-doc \.legal-withdrawal input:focus-visible/);
+  assert.match(css, /\.legal-doc \.legal-withdrawal button:focus-visible\{outline:3px solid var\(--blue\)/);
+});

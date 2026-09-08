@@ -1142,40 +1142,123 @@ return <div className="legal-shipping-zone" key={key}>
 </main>;
 }
 if(route==="widerruf"){
-return <main className="legal-page">
-<p className="eyebrow">LEGAL</p>
-<h1>{title.widerruf}</h1>
+/*
+  THE WITHDRAWAL PAGE, ON THE SHARED LEGAL-DOC PATTERN.
 
+  Fourth and last of the legal documents to move onto the same column,
+  head, contents list and measure. The statutory copy is UNCHANGED apart
+  from one correction, described below - a visual pass may not reword a
+  Widerrufsbelehrung.
+
+  ── WHAT <WithdrawalFunction/> IS, AND WHY IT IS UNTOUCHED ────
+  The § 356a electronic withdrawal function is a two-step client
+  component with its own state, validation and POST. It was read and
+  verified before this pass, not assumed from its tests: no login, no
+  reason demanded, the contract reference explicitly accepts something
+  other than an order number, the second step is labelled "Widerruf
+  bestätigen", "Zurück" allows correction, and the success screen
+  reports receipt with date and time WITHOUT claiming a refund was made.
+  Not one line of it changed here. It is rendered from section 05 exactly
+  as before.
+
+  ── THE ONE CONTENT CORRECTION ───────────────────────────────
+  The model form was an incomplete copy of Anlage 2 to Art. 246a § 1
+  Abs. 2 EGBGB. Three prescribed elements were missing: the "erhalten am"
+  alternative beside "Bestellt am", the signature line for a paper
+  notice, and the "(*) Unzutreffendes streichen" footnote that the
+  asterisks refer to. The statutory form is fixed by law, so completing
+  it is a correction rather than a rewrite, and every added element
+  helps the consumer rather than binding them.
+
+  What is deliberately NOT added: the "Teilsendungen oder Stücke"
+  variant of when the period starts. Partial shipments are not modelled -
+  fulfillment_status is one status per order - so the sentence would
+  describe a case that cannot occur today. It is written up as a draft
+  instead.
+*/
+const jumpToSection=(e:React.MouseEvent<HTMLAnchorElement>)=>{
+const href=e.currentTarget.getAttribute("href")||"";
+const target=href.startsWith("#")?document.getElementById(href.slice(1)):null;
+if(!target)return;
+e.preventDefault();
+target.scrollIntoView({behavior:"instant",block:"start"});
+history.replaceState(null,"",href);
+};
+return <main className="legal-page legal-doc legal-widerruf">
+<div className="legal-doc-head">
+<p className="eyebrow">GLOA · RECHTLICHES</p>
+<h1>Widerruf.</h1>
+<p className="legal-doc-sub">Informationen zu deinem gesetzlichen Widerrufsrecht.</p>
+<p className="legal-doc-lead">Du kannst deinen Vertrag binnen vierzehn Tagen ohne Angabe von Gründen widerrufen. Am schnellsten geht das über die <a href="#ausueben" onClick={jumpToSection}>elektronische Widerrufsfunktion</a> weiter unten – ohne Konto und ohne Anmeldung.</p>
+</div>
+<div className="legal-doc-body">
+<nav className="legal-doc-toc" aria-label="Abschnitte">
+<p className="legal-doc-toc-label">Inhalt</p>
+<ol>
+<li><a href="#recht" onClick={jumpToSection}><span>01</span>Widerrufsrecht</a></li>
+<li><a href="#elektronisch" onClick={jumpToSection}><span>02</span>Elektronische Widerrufsfunktion</a></li>
+<li><a href="#folgen" onClick={jumpToSection}><span>03</span>Folgen des Widerrufs</a></li>
+<li><a href="#formular" onClick={jumpToSection}><span>04</span>Muster-Widerrufsformular</a></li>
+<li><a href="#ausueben" onClick={jumpToSection}><span>05</span>Vertrag widerrufen</a></li>
+</ol>
+</nav>
+<div className="legal-doc-main">
+
+<section className="legal-doc-section" id="recht">
+<p className="legal-doc-num">01</p>
 <h2>Widerrufsrecht</h2>
 <p>Verbraucherinnen und Verbrauchern steht ein gesetzliches Widerrufsrecht zu. Verbraucher ist jede natürliche Person, die ein Rechtsgeschäft zu Zwecken abschließt, die überwiegend weder ihrer gewerblichen noch ihrer selbständigen beruflichen Tätigkeit zugerechnet werden können.</p>
 <p>Du hast das Recht, binnen vierzehn Tagen ohne Angabe von Gründen diesen Vertrag zu widerrufen.</p>
 <p>Die Widerrufsfrist beträgt vierzehn Tage ab dem Tag, an dem du oder ein von dir benannter Dritter, der nicht der Beförderer ist, die Waren in Besitz genommen hat bzw. haben. Hast du in einer einheitlichen Bestellung mehrere Waren bestellt, die getrennt geliefert werden, beginnt die Frist mit dem Erhalt der letzten Ware.</p>
 <p>Um dein Widerrufsrecht auszuüben, musst du uns</p>
-<p>Cara 2 GmbH<br/>Hardenbergstr. 4<br/>10623 Berlin<br/>Deutschland<br/>E-Mail: <a href="mailto:hello@gloamatcha.com">hello@gloamatcha.com</a></p>
-<p>mittels einer eindeutigen Erklärung (z. B. ein mit der Post versandter Brief oder eine E-Mail) über deinen Entschluss, diesen Vertrag zu widerrufen, informieren. Du kannst dafür das Muster-Widerrufsformular weiter unten verwenden, das ist aber nicht vorgeschrieben.</p>
+<p className="legal-doc-address">Cara 2 GmbH<br/>Hardenbergstr. 4<br/>10623 Berlin<br/>Deutschland<br/>E-Mail: <a href="mailto:hello@gloamatcha.com">hello@gloamatcha.com</a></p>
+<p>mittels einer eindeutigen Erklärung (z. B. ein mit der Post versandter Brief oder eine E-Mail) über deinen Entschluss, diesen Vertrag zu widerrufen, informieren. Du kannst dafür das <a href="#formular" onClick={jumpToSection}>Muster-Widerrufsformular</a> verwenden, das ist aber nicht vorgeschrieben.</p>
 <p>Zur Wahrung der Widerrufsfrist reicht es aus, dass du die Mitteilung über die Ausübung des Widerrufsrechts vor Ablauf der Widerrufsfrist absendest.</p>
+</section>
 
+<section className="legal-doc-section" id="elektronisch">
+<p className="legal-doc-num">02</p>
 <h2>Elektronische Widerrufsfunktion</h2>
-<p>Für Verträge, die du über unsere Online-Benutzeroberfläche geschlossen hast, kannst du dein Widerrufsrecht zusätzlich über die elektronische Widerrufsfunktion weiter unten auf dieser Seite ausüben. Sie steht während der gesamten Widerrufsfrist zur Verfügung und ist ohne Anmeldung nutzbar, auch als Gast. Nach dem Absenden bestätigen wir dir unverzüglich auf einem dauerhaften Datenträger (in der Regel per E-Mail) den Eingang deiner Widerrufserklärung mit Inhalt, Datum und Uhrzeit.</p>
+<p>Für Verträge, die du über unsere Online-Benutzeroberfläche geschlossen hast, kannst du dein Widerrufsrecht zusätzlich über die elektronische Widerrufsfunktion weiter unten auf dieser Seite ausüben. Sie steht während der gesamten Widerrufsfrist zur Verfügung und ist ohne Anmeldung nutzbar, auch als Gast.</p>
+<p>Nach dem Absenden bestätigen wir dir unverzüglich auf einem dauerhaften Datenträger (in der Regel per E-Mail) den Eingang deiner Widerrufserklärung mit Inhalt, Datum und Uhrzeit.</p>
+<p>Diese Eingangsbestätigung bestätigt, dass deine Erklärung bei uns angekommen ist. Sie ist noch keine Erstattung und keine abschließende Prüfung: Eingang, Bearbeitung und Rückzahlung sind getrennte Schritte, über die wir dich gesondert informieren.</p>
+</section>
 
+<section className="legal-doc-section" id="folgen">
+<p className="legal-doc-num">03</p>
 <h2>Folgen des Widerrufs</h2>
 <p>Wenn du diesen Vertrag widerrufst, haben wir dir alle Zahlungen, die wir von dir erhalten haben, einschließlich der Lieferkosten (mit Ausnahme der zusätzlichen Kosten, die sich daraus ergeben, dass du eine andere Art der Lieferung als die von uns angebotene, günstigste Standardlieferung gewählt hast), unverzüglich und spätestens binnen vierzehn Tagen ab dem Tag zurückzuzahlen, an dem die Mitteilung über deinen Widerruf dieses Vertrags bei uns eingegangen ist. Für diese Rückzahlung verwenden wir dasselbe Zahlungsmittel, das du bei der ursprünglichen Transaktion eingesetzt hast, es sei denn, mit dir wurde ausdrücklich etwas anderes vereinbart; in keinem Fall werden dir wegen dieser Rückzahlung Entgelte berechnet.</p>
 <p>Wir können die Rückzahlung verweigern, bis wir die Waren wieder zurückerhalten haben oder bis du den Nachweis erbracht hast, dass du die Waren zurückgesandt hast, je nachdem, welches der frühere Zeitpunkt ist.</p>
 <p>Du hast die Waren unverzüglich und in jedem Fall spätestens binnen vierzehn Tagen ab dem Tag, an dem du uns über den Widerruf dieses Vertrags unterrichtest, an uns zurückzusenden oder zu übergeben. Die Frist ist gewahrt, wenn du die Waren vor Ablauf der Frist von vierzehn Tagen absendest. Du trägst die unmittelbaren Kosten der Rücksendung der Waren.</p>
 <p>Du musst für einen etwaigen Wertverlust der Waren nur aufkommen, wenn dieser Wertverlust auf einen zur Prüfung der Beschaffenheit, Eigenschaften und Funktionsweise der Waren nicht notwendigen Umgang mit ihnen zurückzuführen ist.</p>
+</section>
 
+<section className="legal-doc-section" id="formular">
+<p className="legal-doc-num">04</p>
 <h2>Muster-Widerrufsformular</h2>
-<p>(Wenn du den Vertrag widerrufen willst, fülle bitte dieses Formular aus und sende es zurück, oder nutze die elektronische Widerrufsfunktion unten.)</p>
-<p>An:<br/>Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin, Deutschland, E-Mail: hello@gloamatcha.com</p>
-<p>Hiermit widerrufe(n) ich/wir den von mir/uns abgeschlossenen Vertrag über den Kauf der folgenden Waren:<br/>
-Bestellt am:<br/>
-Name des/der Verbraucher(s):<br/>
-Anschrift des/der Verbraucher(s):<br/>
-Datum:</p>
+<p>Wenn du den Vertrag widerrufen willst, kannst du dieses Formular ausfüllen und uns zurücksenden. Vorgeschrieben ist das nicht – eine formlose eindeutige Erklärung genügt ebenso, und über die <a href="#ausueben" onClick={jumpToSection}>elektronische Widerrufsfunktion</a> geht es direkt hier auf der Seite.</p>
+<div className="legal-doc-form">
+<p>An:<br/>Cara 2 GmbH<br/>Hardenbergstr. 4<br/>10623 Berlin<br/>Deutschland<br/>E-Mail: hello@gloamatcha.com</p>
+<p>Hiermit widerrufe(n) ich/wir (*) den von mir/uns (*) abgeschlossenen Vertrag über den Kauf der folgenden Waren:</p>
+<p>&nbsp;</p>
+<p>Bestellt am (*) / erhalten am (*):</p>
+<p>Name des/der Verbraucher(s):</p>
+<p>Anschrift des/der Verbraucher(s):</p>
+<p>Unterschrift des/der Verbraucher(s) (nur bei Mitteilung auf Papier):</p>
+<p>Datum:</p>
+<p className="legal-doc-form-note">(*) Unzutreffendes streichen.</p>
+</div>
+</section>
 
+<section className="legal-doc-section" id="ausueben">
+<p className="legal-doc-num">05</p>
 <h2>Vertrag widerrufen</h2>
-<p>Alternativ kannst du dein Widerrufsrecht direkt hier elektronisch ausüben (§ 356a BGB). Ein Konto ist dafür nicht nötig.</p>
+<p>Hier kannst du dein Widerrufsrecht direkt elektronisch ausüben (§ 356a BGB). Ein Konto ist dafür nicht nötig, und eine Begründung musst du nicht angeben.</p>
 <WithdrawalFunction/>
+</section>
+
+</div>
+</div>
 </main>;
 }
 if(route==="impressum"){
