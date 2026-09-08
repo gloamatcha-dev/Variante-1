@@ -37,9 +37,20 @@ export const PRODUCT = {
  *
  * Status: PENDING OWNER DOCUMENT.
  *
- * Why it exists: the shop describes the Matcha as "100 % Bio-Matcha", so
- * this is the slot the confirmed values go into, and nobody has to invent
- * one under time pressure later.
+ * Why it exists: this is the slot the confirmed values go into, so nobody
+ * has to invent one under time pressure later.
+ *
+ * SITE-01B removed every organic claim from the public site rather than
+ * leave it standing on a document nobody has. "100 % Bio-Matcha" is gone
+ * from the homepage, the shop card, the product page, /our-matcha and
+ * /about, and the FAQ pair that answered "Ist GLOA Matcha Bio?" with
+ * "Ja, unser Matcha ist Bio-zertifiziert." was withheld outright - there
+ * is no honest neutral wording for a direct yes/no on a certificate that
+ * does not exist yet. Origin, grind and composition were untouched: only
+ * the certification claim came out.
+ *
+ * Filling the fields below is therefore what unblocks putting any of it
+ * back, and the wording that returns needs the legal review named below.
  *
  * Website disclosure requirements for organic certification data remain
  * subject to final legal review. Do not render any control-body code,

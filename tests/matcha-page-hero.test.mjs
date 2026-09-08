@@ -135,7 +135,10 @@ test("3: two families, unchanged copy, canonical rail", () => {
   assert.ok(hero.includes('<p className="eyebrow matcha-hero-eyebrow gloa-hero-eyebrow">UNSER MATCHA</p>'));
   assert.ok(hero.includes('<span className="matcha-hero-line gloa-hero-primary">Matcha.</span>'));
   assert.ok(hero.includes('<i className="matcha-hero-line matcha-hero-line-accent gloa-hero-secondary">Ohne Umwege.</i>'));
-  assert.ok(hero.includes("100 % Bio-Matcha aus Shizuoka, Japan.<br/>Für Latte, pur oder iced.<br/>Klar beschrieben, nichts erfunden."));
+  // SITE-01B: the lead promised "nichts erfunden" while carrying an
+  // organic claim no certificate backs yet. The claim went, the line
+  // and its promise stayed.
+  assert.ok(hero.includes("Matcha aus Shizuoka, Japan.<br/>Für Latte, pur oder iced.<br/>Klar beschrieben, nichts erfunden."));
   for (const dash of ["–", "—"]) assert.ok(!hero.includes(dash), `a dash was introduced: ${dash}`);
 
   // -- THE HEADLINE LINES ARE THE SHARED SCALE ------------------

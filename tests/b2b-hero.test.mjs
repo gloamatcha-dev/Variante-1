@@ -386,6 +386,6 @@ test("7b: every selector is hero-scoped, and no other page moved", () => {
   }
   // Ticker and navigation are in Chrome.tsx, which this pass never opens.
   const chrome = read("app/Chrome.tsx");
-  assert.ok(chrome.includes("<span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA FOR REAL LIFE.</span>"));
+  assert.ok(chrome.includes("<span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span>"));
   assert.ok(chrome.includes('["/for-cafes","B2B"]'));
 });

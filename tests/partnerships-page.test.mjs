@@ -64,8 +64,10 @@ test("1: /partnerships resolves through the public site architecture", async () 
   // The catch-all hands the joined path to GloaSite, which dispatches it.
   assert.match(site, /else if\(route==="partnerships"\)page=<Partnerships\/>;/);
   // And the same catch-all supplies the metadata.
-  assert.match(slugPage, /"partnerships":\["Partnerships",/);
-  assert.ok(html.includes("<title>Partnerships · GLOA</title>"), "the page title is missing");
+  // SITE-01B: the metadata name follows the navigation label, which has
+  // said "Partnerschaften" since the route was added.
+  assert.match(slugPage, /"partnerships":\["Partnerschaften",/);
+  assert.ok(html.includes("<title>Partnerschaften · GLOA</title>"), "the page title is missing");
 
   // The shared header and footer are reused. The page IS in the main
   // navigation now, between B2B and Rezepte, and in exactly one place:
@@ -208,8 +210,11 @@ test("4: the request form exists, with real labels and real groups", () => {
   assert.ok(html.includes("<form"), "the form is missing");
   assert.equal((html.match(/<fieldset/g) || []).length, 8, "the eight field groups changed");
   for (const legend of ["ÜBER DICH", "ART DER PARTNERSCHAFT*", "DEIN PROJEKT",
-                        "WAS WÜNSCHT IHR EUCH VON GLOA?",
-                        "WAS BRINGT IHR IN DIE PARTNERSCHAFT EIN?",
+                        // SITE-01B: the form addressed one person as du and
+                        // then as ihr in the same set of legends. Du wins,
+                        // as everywhere else on the site.
+                        "WAS WÜNSCHST DU DIR VON GLOA?",
+                        "WAS BRINGST DU IN DIE PARTNERSCHAFT EIN?",
                         "REICHWEITE &amp; SICHTBARKEIT", "BUDGET"]) {
     assert.ok(html.includes(`<legend class="pt-legend">${legend}`), `missing legend: ${legend}`);
   }

@@ -341,6 +341,45 @@ test("Food info: still no invented durability, allergen or nutrition data", () =
   }
 });
 
+test("Food info: no organic claim while the certificate is still outstanding", () => {
+  // ORGANIC_CERTIFICATION in app/content.ts is the ONE slot the real
+  // document goes into. While every field in it is null, nothing a
+  // customer can read may assert organic certification - the supplier
+  // being certified says nothing about whether this shop is.
+  //
+  // SITE-01B removed eight such lines: the homepage origin band and its
+  // fact list, the shop card, the product page, the /our-matcha hero and
+  // product block, the /about origin band, and the FAQ pair that answered
+  // "Ist GLOA Matcha Bio?" with "Ja, unser Matcha ist Bio-zertifiziert."
+  // Origin, grind and composition were left exactly as they were. This is
+  // what stops a ninth line appearing while the document is missing.
+  //
+  // CONDITIONAL, NOT PERMANENT. Fill the certificate fields from the real
+  // document and this guard lifts by itself - at which point the wording
+  // that returns is a legal-review question, not this test's. That is why
+  // it can stay rather than become something to delete later.
+  const content = readFileSync(new URL("../app/content.ts", import.meta.url), "utf-8");
+  const cert = content.slice(content.indexOf("export const ORGANIC_CERTIFICATION"));
+  const documented = /controlBodyCode:\s*"[^"]/.test(cert) || /certificateReference:\s*"[^"]/.test(cert);
+  if (documented) return;
+
+  const customerFacing = [
+    ["app/GloaSite.tsx", gloaSiteSource],
+    ["app/Chrome.tsx", readFileSync(new URL("../app/Chrome.tsx", import.meta.url), "utf-8")],
+    ["app/BusinessCalculator.tsx", readFileSync(new URL("../app/BusinessCalculator.tsx", import.meta.url), "utf-8")],
+    ["app/[...slug]/page.tsx", readFileSync(new URL("../app/[...slug]/page.tsx", import.meta.url), "utf-8")],
+  ];
+  // Word-bounded, so "Biologie" or a "bio" inside an identifier is not
+  // mistaken for a claim, and the control-body code shape is banned
+  // outright - it may only ever be printed from the real certificate.
+  for (const [name, source] of customerFacing) {
+    assert.doesNotMatch(source, /\bBio\b|\bBio-[A-Za-zäöüß]/,
+      `${name} carries an organic claim while ORGANIC_CERTIFICATION is empty`);
+    assert.doesNotMatch(source, /\bDE-ÖKO-\d{3}\b/,
+      `${name} prints a control-body code that no certificate in this repo supports`);
+  }
+});
+
 test("Prelaunch CTA: promises no notification service, because none exists", () => {
   // The newsletter is gone, so the button must not imply the customer
   // will be told about the launch automatically.

@@ -46,7 +46,7 @@ test("1: no markup, no copy and no behaviour changed in either section", () => {
   assert.ok([...data.matchAll(/\["/g)].length >= 4, "questions were removed");
 
   // The CTA is the same markup and the same two routes.
-  assert.match(cta, /<section className="matcha-cta"><p className="eyebrow">MATCHA FOR REAL LIFE\.<\/p><h2>Bereit für<br\/><i>deinen Matcha\?<\/i><\/h2>/);
+  assert.match(cta, /<section className="matcha-cta"><p className="eyebrow">MATCHA IS FOR EVERYONE\.<\/p><h2>Bereit für<br\/><i>deinen Matcha\?<\/i><\/h2>/);
   assert.match(cta, /<Link className="cta" href="\/shop">Zum Shop<\/Link>/);
   assert.match(cta, /<Link className="cta secondary" href="\/for-cafes">B2B →<\/Link>/);
   // "ZUM SHOP" is CSS uppercase, not a rewritten string - and the

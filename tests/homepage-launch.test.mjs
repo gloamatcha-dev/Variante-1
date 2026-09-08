@@ -1000,7 +1000,13 @@ test("31: the section's type stays inside the two families", () => {
   assert.match(daily, /<i className="daily-line daily-line-accent">Nachmittags\.<\/i>/);
   assert.ok(daily.includes("MATCHA FÜR JEDEN TAG"));
   // The micro-copy and the editorial link.
-  assert.ok(daily.includes("Reiner Genuss. Klare Energie."));
+  // SITE-01B: "Klare Energie" was an effect claim on a page that
+  // otherwise promises nothing it cannot show. Replaced, not dropped.
+  // The break sits at the sentence break: .daily-note is capped at 300px
+  // and the new line is ~378px at the 18px body size, so one <br/> would
+  // have wrapped it mid-sentence and left "Geschmack." alone on a line.
+  // Three clean lines instead, echoing the three-line headline above it.
+  assert.ok(daily.includes("Reiner Genuss.<br/>Ganz nach deinem Geschmack.<br/>Für jeden Moment deines Tages."));
   assert.ok(daily.includes("Für jeden Moment deines Tages."));
   assert.match(daily, /<Link className="daily-link" href="\/our-matcha">Matcha entdecken/);
   assert.ok(read("app/Chrome.tsx").includes('href="/our-matcha"'), "the route left the navigation");
@@ -1035,8 +1041,10 @@ test("32: the origin copy is exactly the approved lines, with no repetition", ()
   assert.ok(origin.length > 0, "the origin section is missing");
   for (const line of [
     "ORIGIN", "From Shizuoka,", "Japan.",
-    "100 % Bio-Matcha aus Shizuoka, fein vermahlen.",
-    "MATCHA", "100 % Bio", "MADE FOR", "Latte + pur",
+    // SITE-01B: the organic claim came out of both lines below. The
+    // origin and the grind stayed; only the certification wording went.
+    "Matcha aus Shizuoka, fein vermahlen.",
+    "MATCHA", "100 % Grünteepulver", "MADE FOR", "Latte + pur",
   ]) {
     assert.ok(origin.includes(line), `the origin section lost: ${line}`);
   }
@@ -1051,7 +1059,7 @@ test("32: the origin copy is exactly the approved lines, with no repetition", ()
   }
   // Exactly two rows now.
   assert.equal([...origin.matchAll(/<dt>/g)].length, 2, "the fact list is not two rows");
-  assert.match(origin, /<dt>MATCHA<\/dt><dd>100 % Bio<\/dd>/);
+  assert.match(origin, /<dt>MATCHA<\/dt><dd>100 % Grünteepulver<\/dd>/);
   assert.match(origin, /<dt>MADE FOR<\/dt><dd>Latte \+ pur<\/dd>/);
 });
 

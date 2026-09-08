@@ -110,7 +110,10 @@ test("2: the one authorised copy correction, and nothing else", () => {
 });
 
 test("2b: every form question, every name and every required is unchanged", () => {
-  for (const label of ["Ansprechpartner/in*", "Unternehmen / Café*", "E-Mail*", "Stadt*",
+  // SITE-01B: "Ansprechperson" replaced the slash form here and on the
+  // partnerships form. The field name, required and validation are the
+  // same - only the visible word changed.
+  for (const label of ["Ansprechperson*", "Unternehmen / Café*", "E-Mail*", "Stadt*",
                        "Unternehmenstyp*", "Anzahl Standorte*", "Interesse an",
                        "Geplanter monatlicher Bedarf", "Aktueller Matcha-Lieferant", "Nachricht"]) {
     assert.ok(form.includes(label), `a form question changed: ${label}`);

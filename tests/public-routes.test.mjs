@@ -44,7 +44,7 @@ const ROUTES = [
   // system: the shared pair still carries the type, the route pair the
   // colour. Same two lines, same words.
   { path: "/rezepte", title: "Matcha Rezepte · GLOA", heading: '<h1 class="rezepte-hero-headline"><span class="rezepte-hero-line gloa-hero-primary">Matcha Rezepte.</span><i class="rezepte-hero-line rezepte-hero-line-accent gloa-hero-secondary">GLOA Edition.</i></h1>' },
-  { path: "/contact", title: "Contact GLOA · GLOA", heading: '<h1 class="gloa-hero-primary">Schreib<br/><i class="gloa-hero-secondary">uns.</i></h1>' },
+  { path: "/contact", title: "Kontakt · GLOA", heading: '<h1 class="gloa-hero-primary">Schreib<br/><i class="gloa-hero-secondary">uns.</i></h1>' },
 ];
 
 for (const route of ROUTES) {
@@ -224,6 +224,32 @@ test("routes: a product page is titled by the shop, not by the fallback", async 
 });
 
 /* ── SITE-01: the header can be dismissed from the keyboard ─── */
+
+test("header: the search entry is withheld until a real search exists", () => {
+  const chrome = readFileSync(new URL("../app/Chrome.tsx", import.meta.url), "utf-8");
+  // The panel searched nothing: its form called preventDefault and stopped
+  // there, on every page, beside a real cart and a real account link.
+  assert.match(chrome, /const SEARCH_ENABLED = false;/);
+  assert.match(chrome, /\{SEARCH_ENABLED&&<button onClick=\{\(\)=>setSearch\(!search\)\}/);
+  assert.match(chrome, /\{SEARCH_ENABLED&&search&&<form className="search-bar"/);
+  // NOTHING WAS DELETED - the state, the panel, its label and its input are
+  // all still here, so the real search task starts from the groundwork
+  // rather than from nothing. Turning it back on is one word.
+  assert.match(chrome, /const \[search,setSearch\]=useState\(false\)/);
+  assert.match(chrome, /id="site-search"/);
+  assert.match(chrome, /GLOA durchsuchen/);
+});
+
+test("header: no search control reaches a rendered page", async () => {
+  // Read from the page, not the source: a flag that is false in the file
+  // but true after a build would still ship the field.
+  const { html } = await server.getHtml("/");
+  assert.ok(!html.includes('id="site-search"'), "the search field is still rendered");
+  assert.ok(!html.includes("search-bar"), "the search panel is still rendered");
+  // The two real controls beside it are untouched.
+  assert.ok(html.includes("Warenkorb"), "the cart control went missing");
+  assert.ok(html.includes("account-link"), "the account link went missing");
+});
 
 test("header: Escape closes the mobile menu and gives focus back", () => {
   const chrome = readFileSync(new URL("../app/Chrome.tsx", import.meta.url), "utf-8");

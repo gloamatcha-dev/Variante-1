@@ -72,9 +72,10 @@ test("1: product and taste share one wrapper, and the old pair is gone", () => {
 test("2: the copy moved without being rewritten", () => {
   for (const line of [
     "DAS PRODUKT", "Ein Grün.", "Klar erklärt.",
-    "GLOA Matcha ist 100 % Bio-Matcha aus Shizuoka, Japan: fein gemahlenes Grünteepulver, kein Zusatz, keine Mischung. Die Verpackung ist licht-, luft- und feuchtigkeitsdicht, damit Farbe und Geschmack erhalten bleiben.",
+    // SITE-01B: organic claim out, every other fact in the sentence kept.
+    "GLOA Matcha kommt aus Shizuoka, Japan: fein gemahlenes Grünteepulver, kein Zusatz, keine Mischung. Die Verpackung ist licht-, luft- und feuchtigkeitsdicht, damit Farbe und Geschmack erhalten bleiben.",
     "HERKUNFT", "Shizuoka, Japan",
-    "QUALITÄT", "100 % Bio-Matcha",
+    "QUALITÄT", "100 % Matcha-Grünteepulver",
     "VERWENDUNG", "Latte · Iced · Pur",
     "GRÖSSEN", "30 g · 50 g · 100 g",
     "LAGER", "Deutschland",

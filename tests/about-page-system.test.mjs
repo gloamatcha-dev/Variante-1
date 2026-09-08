@@ -508,8 +508,12 @@ test("7: the authorised copy, and nothing else, changed", () => {
     "Für Latte, iced, pur oder genau so, wie du ihn magst.",
     "SHIZUOKA / JAPAN", "BERLIN / GERMANY", "EST. 2026",
     "WHY GLOA EXISTS", "Matcha gehört", "nicht in eine", "Schublade.",
-    "MATCHA FOR REAL LIFE", "Nicht", "kompliziert.", "Einfach gut.",
-    "HERKUNFT", "Unser Matcha kommt aus Shizuoka, Japan: 100 % Bio-Matcha, fein vermahlen.",
+    // SITE-01B: the official slogan replaced the old tagline here and in
+    // the ticker. One slogan site-wide, no second one alongside it.
+    "MATCHA IS FOR EVERYONE", "Nicht", "kompliziert.", "Einfach gut.",
+    // SITE-01B: the organic claim came out while ORGANIC_CERTIFICATION is
+    // still PENDING OWNER DOCUMENT. Origin and grind are unchanged.
+    "HERKUNFT", "Unser Matcha kommt aus Shizuoka, Japan: fein vermahlenes Grünteepulver.",
     "WAS UNS WICHTIG IST", "Worauf wir", "Wert legen.",
     "BUILDING GLOA", "Schau vorbei,", "während es entsteht.",
     "@gloa.matcha", "Auf TikTok folgen ↗", "BUILDING IN PUBLIC · BERLIN · 2026",
@@ -564,7 +568,7 @@ test("9: ticker, nav, footer and the other pages are untouched", () => {
   // The ticker and the navigation live in app/Chrome.tsx, which this
   // pass does not open at all. Their copy, verbatim.
   const chrome = read("app/Chrome.tsx");
-  assert.ok(chrome.includes("<span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA FOR REAL LIFE.</span>"));
+  assert.ok(chrome.includes("<span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span>"));
   assert.ok(chrome.includes('<Link href="/for-cafes">B2B</Link>'));
   assert.match(chrome, /className="brand-bar"/);
   assert.match(chrome, /className="bb-track"/);
