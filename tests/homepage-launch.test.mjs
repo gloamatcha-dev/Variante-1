@@ -1332,8 +1332,11 @@ test("39: every homepage section starts on one rail, and it is the lifestyle one
   // ── EVERY HOMEPAGE WRAPPER IS ON IT ──────────────────────────
   // .home-rail sits inside a section whose full-width background carries
   // the gutter; .home-rail-pad IS the rail where there is no wrapper.
+  // DESIGN-07B added habit-inner - the three-sentence band between
+  // how-to and the carousel. Re-pinned, not relaxed: the guard still
+  // says every homepage wrapper is on the one rail.
   for (const wrapper of ["countdown-inner", "daily-inner", "origin-inner", "how-to-inner",
-                         "community-inner", "brand-note-inner"]) {
+                         "habit-inner", "community-inner", "brand-note-inner"]) {
     assert.ok(site.includes(`className="${wrapper} home-rail"`), `${wrapper} is not on the rail`);
   }
   for (const wrapper of ["featured-recipes-head", "featured-recipes-foot"]) {
@@ -1344,7 +1347,7 @@ test("39: every homepage section starts on one rail, and it is the lifestyle one
   // 4.5vw / 5vw / 6vw and 22px.
   // The shop hero and its launch band read the same gutter - section 20
   // of the brief: the shop is on the canonical rail too.
-  assert.match(railCss, /\.countdown,\s*\.prelaunch,\s*\.daily,\s*\.origin,\s*\.how-to,\s*\.community,\s*\.brand-note,\s*\.shop-hero,\s*\.shop-strip,\s*\.shop-column,\s*\.shop-accordion,\s*\.matcha-hero,\s*\.matcha-product,\s*\.matcha-research,\s*\.matcha-use,\s*\.matcha-page \.faq,\s*\.matcha-cta\{padding-inline:var\(--rail-gutter\)\}/);
+  assert.match(railCss, /\.countdown,\s*\.prelaunch,\s*\.daily,\s*\.origin,\s*\.how-to,\s*\.habit,\s*\.community,\s*\.brand-note,\s*\.shop-hero,\s*\.shop-strip,\s*\.shop-column,\s*\.shop-accordion,\s*\.matcha-hero,\s*\.matcha-product,\s*\.matcha-research,\s*\.matcha-use,\s*\.matcha-page \.faq,\s*\.matcha-cta\{padding-inline:var\(--rail-gutter\)\}/);
   // The hero has no wrapper - its own padding IS the rail, in the same
   // shape, at desktop and on mobile.
   assert.match(css, /\.hero\{[\s\S]*?padding-inline:max\(var\(--rail-gutter\),calc\(\(100% - var\(--rail-max\)\) \/ 2\)\)/);
@@ -1593,7 +1596,8 @@ test("43: one scale below the hero, and the hero stays above it at every width",
   // Every section title below the hero, including the two that are not in
   // an appended block.
   for (const name of [".daily-line{", ".origin-line{", ".how-to-line{", ".featured-recipes-line{",
-                      ".community-line{", ".prelaunch-line-1{", ".prelaunch-line-3{", ".brand-note-text{"]) {
+                      ".community-line{", ".prelaunch-line-1{", ".prelaunch-line-3{", ".brand-note-text{",
+                      ".habit-line{"]) {
     const r = rule(name);
     assert.match(r, /font-size:var\(--type-title\)/, `${name} is not on the section scale`);
     assert.match(r, /font-family:var\(--font-sans\)/, `${name} is not on the sans`);
@@ -1601,7 +1605,7 @@ test("43: one scale below the hero, and the hero stays above it at every width",
   // Every editorial accent.
   for (const name of [".daily-line-accent{", ".origin-line-accent{", ".how-to-line-accent{",
                       ".featured-recipes-line-accent{", ".community-line-accent{",
-                      ".prelaunch-line-2{", ".brand-note-text i{"]) {
+                      ".prelaunch-line-2{", ".brand-note-text i{", ".habit-line-accent{"]) {
     const r = rule(name);
     assert.match(r, /font-size:var\(--type-editorial\)/, `${name} is not on the editorial scale`);
     assert.match(r, /font-family:var\(--font-display\)/, `${name} is not on the display face`);
@@ -1653,4 +1657,159 @@ test("43: one scale below the hero, and the hero stays above it at every width",
   for (const m of css.matchAll(/font-family:[^;}]*\b(Georgia|Arial|Helvetica|Times)\b/g)) {
     assert.match(m[0], /var\(--font-(sans|display)\)[^;}]*\b(Georgia|Arial)\b/, `an active fallback face: ${m[0]}`);
   }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   DESIGN-07B - THE HABIT SECTION
+
+   Three sentences between how-to and the recipe carousel, moved
+   horizontally by the reader's own vertical scrolling. Everything the
+   hero effect got wrong once is asserted here on its own terms.
+   ══════════════════════════════════════════════════════════════ */
+
+const habitHook = site.slice(site.indexOf("function useHabitScrollProgress"),
+                             site.indexOf("function HabitLoop()"));
+const habitComponent = site.slice(site.indexOf("function HabitLoop()"), site.indexOf("function CommunityFeed()"));
+// BOUNDED at the next block. Unbounded it ran to the end of the file
+// and this section's bans were reading the launch page's rules.
+const habitCss = cssBlockRules("HOMEPAGE HABIT SECTION", "/launch — THE LAUNCH LIST");
+
+test("44: the three sentences are exact, and nothing else was written", () => {
+  // Verbatim, with the typographic apostrophe they were given in - a
+  // straight one is a different character and a different rendering.
+  for (const s of ["You’ll whisk.", "You’ll sip.", "You’ll come back for more."]) {
+    assert.equal(site.split(s).length - 1, 1,
+      `the sentence is missing, duplicated or reworded: ${s}`);
+  }
+  for (const straight of ["You'll whisk", "You'll sip", "You'll come back"]) {
+    assert.ok(!site.includes(straight), `a straight apostrophe crept in: ${straight}`);
+  }
+  // NO INVENTED COPY. Every other homepage section carries an eyebrow;
+  // this one carries the three sentences and nothing else - no eyebrow,
+  // no supporting line, no button, no link.
+  assert.ok(!habitComponent.includes("eyebrow"), "the section grew an eyebrow nobody wrote");
+  assert.ok(!habitComponent.includes("<Link"), "the section grew a call to action nobody wrote");
+  assert.ok(!/<p[ >]/.test(habitComponent), "the section grew a paragraph nobody wrote");
+  // One heading, three lines, and the third is the editorial <i> the
+  // house style uses for its accent everywhere else on this page.
+  assert.equal([...habitComponent.matchAll(/<h2[ >]/g)].length, 1);
+  assert.equal([...habitComponent.matchAll(/className="habit-line /g)].length, 3);
+  assert.match(habitComponent, /<i className="habit-line habit-line-3 habit-line-accent">/);
+});
+
+test("45: it sits between how-to and the carousel, and displaces nothing", () => {
+  const homepage = site.slice(homeStart, site.indexOf("// -- Catalog-driven shop"));
+  let at = -1;
+  for (const tag of ["<HowTo/>", "<HabitLoop/>", "<RecipeCarousel/>"]) {
+    const next = homepage.indexOf(tag);
+    assert.ok(next > at, `${tag} is out of order`);
+    at = next;
+  }
+  // Every section that was on the page before is still on it, in the
+  // same order. The new band was inserted, never swapped in.
+  let seen = -1;
+  for (const marker of ['className="hero"', "<LaunchCountdown/>", 'className="prelaunch"',
+                        'className="daily"', 'className="origin"', "<HowTo/>",
+                        "<RecipeCarousel/>", 'className="community"', "<BrandNote/>"]) {
+    const next = homepage.indexOf(marker);
+    assert.ok(next > seen, `a pre-existing section was moved or removed: ${marker}`);
+    seen = next;
+  }
+  // And the hero it sits below is untouched - same copy, same hook.
+  assert.match(site, /<h1>Matcha\.<br\/><span className="hero-line-2">Is for everyone\.<\/span><\/h1>/);
+  assert.ok(site.includes("function useHeroScrollProgress"), "the hero hook was replaced");
+});
+
+test("46: the movement is scroll-linked, and the variable cannot be shadowed", () => {
+  // ONE rAF READER, ONE PROPERTY, NO LIBRARY AND NO CLOCK.
+  assert.match(habitHook, /requestAnimationFrame/);
+  assert.match(habitHook, /setProperty\("--habit-scroll"/);
+  assert.match(habitHook, /window\.matchMedia\("\(prefers-reduced-motion: reduce\)"\)\.matches/);
+  assert.match(habitHook, /removeEventListener\("scroll"/);
+  assert.match(habitHook, /cancelAnimationFrame/);
+  for (const banned of ["setInterval", "setTimeout", "framer-motion", "gsap", "@keyframes", "useState"]) {
+    assert.ok(!habitHook.includes(banned), `the habit effect uses ${banned}`);
+  }
+  // PROGRESS IS THE SECTION'S OWN TRAVEL, not the page's. The hero hook
+  // reads scrollY against the first viewport, which says nothing about a
+  // section two thirds of the way down - so this one measures the box.
+  assert.match(habitHook, /getBoundingClientRect\(\)/);
+  assert.ok(!habitHook.includes("scrollY"), "the habit effect is anchored to the top of the page");
+  // Eased, so the movement settles rather than stopping dead.
+  assert.match(habitHook, /const progress=raw\*raw\*\(3-2\*raw\);/);
+
+  // ── THE cf5b192 REGRESSION, ON THE NEW EFFECT ────────────────
+  // The hook writes --habit-scroll on the section and the lines INHERIT
+  // it. A declaration on a line that READS the variable beats the
+  // inherited value, so the writes would never arrive and the type would
+  // sit perfectly still with every amplitude below still reading right.
+  assert.match(css, /\.habit\{[^}]*--habit-scroll:0/);
+  const owners = [
+    ...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{[^{}]*--habit-scroll\s*:/g),
+  ].flatMap(m => m[1].trim().split(",").map(s => s.trim()));
+  assert.deepEqual([...new Set(owners)], [".habit"],
+    "--habit-scroll is declared on an element that reads it, which shadows the hook");
+});
+
+test("47: it fans in one direction, steps down twice, and clips nothing", () => {
+  const amp = (sel, block) => {
+    const m = new RegExp("\\." + sel + "\\{transform:translate3d\\(calc\\(var\\(--habit-scroll\\)\\*(-?[\\d.]+)px\\)").exec(block);
+    assert.ok(m, `missing amplitude for .${sel}`);
+    return Number(m[1]);
+  };
+  const media = width => {
+    const at = habitCss.indexOf(`@media (max-width:${width}px)`);
+    assert.notEqual(at, -1, `missing the ${width}px band`);
+    return habitCss.slice(at, habitCss.indexOf("\n}", at));
+  };
+  const desktop = habitCss.slice(0, habitCss.indexOf("@media"));
+
+  // ONE DIRECTION, THREE DISTANCES. All positive, so the left edge never
+  // moves toward the gutter and no line can drift off the reading edge.
+  for (const band of [desktop, media(900), media(640)]) {
+    const a = [1, 2, 3].map(i => amp(`habit-line-${i}`, band));
+    assert.ok(a.every(v => v > 0), "a line drifts toward the reading edge");
+    assert.ok(a[0] < a[1] && a[1] < a[2], "the three lines no longer fan");
+  }
+  // AND IT STEPS DOWN TWICE. Desktop > tablet > phone, for every line.
+  for (let i = 1; i <= 3; i++) {
+    assert.ok(amp(`habit-line-${i}`, desktop) > amp(`habit-line-${i}`, media(900)),
+      `line ${i} travels as far on a tablet as on a desktop`);
+    assert.ok(amp(`habit-line-${i}`, media(900)) > amp(`habit-line-${i}`, media(640)),
+      `line ${i} travels as far on a phone as on a tablet`);
+  }
+  // THE PHONE CAP IS THE GUTTER. Below 640px the longest sentence wraps,
+  // so its box is the full width of the rail and any drift eats straight
+  // into the gutter - which is 20px from 640px all the way down to 320px.
+  assert.ok(amp("habit-line-3", media(640)) < 20,
+    "the phone travel is wider than the gutter it has to fit inside");
+
+  // TRANSFORM ONLY - no timed animation, no animated layout property.
+  for (const banned of ["animation:", "@keyframes", "transition:transform",
+                        "left:calc(var(--habit-scroll)", "margin-left:calc"]) {
+    assert.ok(!habitCss.includes(banned), `the habit section animates with ${banned}`);
+  }
+  // A PAGE SCROLLBAR IS IMPOSSIBLE, whatever the amplitudes become.
+  // Clip rather than hidden: hidden would make this a scroll container.
+  assert.match(habitCss, /\.habit\{[^}]*overflow-x:clip/);
+  assert.ok(!/\.habit\{[^}]*overflow-x:hidden/.test(habitCss));
+
+  // REDUCED MOTION WINS OVER ALL THREE BANDS.
+  assert.match(habitCss, /@media \(prefers-reduced-motion:reduce\)\{[\s\S]*?transform:none!important/);
+});
+
+test("48: the band is plum, cream, and on the two families only", () => {
+  // Plum ground, cream type - both existing tokens. No gradient, no
+  // glow, no shadow, no card, no radius, no hand-written hex.
+  assert.match(habitCss, /\.habit\{[^}]*background:var\(--plum\)/);
+  assert.match(habitCss, /\.habit\{[^}]*color:var\(--cream\)/);
+  for (const banned of ["gradient", "backdrop-filter", "box-shadow", "border-radius", "#"]) {
+    assert.ok(!habitCss.includes(banned), `the band uses ${banned}`);
+  }
+  // Every size in the section is a scale token, never a raw pixel.
+  for (const m of habitCss.matchAll(/font-size:([^;}]+)/g)) {
+    assert.match(m[1], /^var\(--type-(title|editorial)\)$/, `an off-scale size: ${m[1]}`);
+  }
+  // On the canonical rail, like every other homepage section.
+  assert.ok(site.includes('className="habit-inner home-rail"'), "the band is not on the rail");
 });

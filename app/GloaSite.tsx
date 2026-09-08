@@ -73,6 +73,97 @@ const howToModules=[{
   icon:<svg className="how-to-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M3.4 10.6h17.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><path d="M4.9 10.6a7.1 7.1 0 0 0 14.2 0" fill="none" stroke="currentColor" strokeWidth="1.4"/><path d="M9.6 7.4c0-1.3 1.3-1.6 1.3-2.9" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><path d="M13.6 7.4c0-1.3 1.3-1.6 1.3-2.9" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>,
 }];
 function HowTo(){return <section className="how-to"><div className="how-to-inner home-rail"><div className="how-to-body"><div className="how-to-copy"><p className="eyebrow how-to-eyebrow">HOW TO GLOA</p><h2 className="how-to-headline"><span className="how-to-line">Latte oder pur.</span><i className="how-to-line how-to-line-accent">Mehr brauchst du nicht.</i></h2></div><div className="how-to-modules">{howToModules.map(m=><article className="how-to-module" key={m.number}><div className="how-to-module-head">{m.icon}<span className="how-to-module-number">{m.number}</span></div><h3 className="how-to-module-title">{m.title}</h3><p className="how-to-module-dose">{m.dose}</p><ol className="how-to-steps">{m.steps.map((step,i)=><li key={step}><span className="how-to-step-number">{String(i+1).padStart(2,"0")}</span><span className="how-to-step-text">{step}</span></li>)}</ol></article>)}</div></div></div></section>}
+
+/**
+ * The habit section's scroll-linked typography.
+ *
+ * ── THE VARIABLE IS WRITTEN WHERE IT IS READ THROUGH ───────────
+ *
+ * This hook writes ONE custom property, --habit-scroll, on the <section>
+ * itself, and the three lines INHERIT it. Not one of them declares it.
+ * That is deliberate: a `--habit-scroll:0` on a line that READS the
+ * variable would beat the value inherited from the section, every write
+ * this hook makes would be shadowed, and the type would sit perfectly
+ * still while the stylesheet still read correctly. That is exactly how
+ * the hero effect shipped dead until cf5b192, and globals.css keeps the
+ * rest value of 0 on .habit and nowhere else so it cannot happen twice.
+ *
+ * ── PROGRESS IS THIS SECTION'S OWN TRAVEL, NOT THE PAGE'S ───────
+ *
+ * 0 the moment the section's top edge reaches the bottom of the
+ * viewport, 1 once its bottom edge has passed the top. The reader's own
+ * scrolling is the entire clock: nothing loops, nothing runs on a timer,
+ * and scrolling back up runs the movement backwards through the same
+ * positions. The hero's hook cannot serve this - it measures scrollY
+ * against the FIRST viewport, which is a page-top anchor and says
+ * nothing about a section two thirds of the way down.
+ *
+ * One rAF-coalesced reader writes one property. There is no React state
+ * here at all, so a scroll event re-renders nothing.
+ *
+ * prefers-reduced-motion: reduce returns before the listener is ever
+ * attached, so a reduced-motion visitor pays for no scroll work, and
+ * globals.css independently pins the three lines to transform:none.
+ */
+function useHabitScrollProgress(){
+const ref=useRef<HTMLElement|null>(null);
+useEffect(()=>{
+const node=ref.current;
+if(!node)return;
+if(window.matchMedia("(prefers-reduced-motion: reduce)").matches)return;
+let frame=0;
+const read=()=>{
+frame=0;
+const viewport=window.innerHeight||1;
+const box=node.getBoundingClientRect();
+// The section travels its own height PLUS one viewport between
+// entering at the bottom edge and leaving at the top, so that span -
+// never the document height - is what progress is measured against.
+const span=box.height+viewport||1;
+const raw=Math.min(1,Math.max(0,(viewport-box.top)/span));
+// SMOOTHSTEP, the same easing the hero uses: the raw ratio is linear,
+// which reads as mechanical - the lines start moving the instant the
+// section appears and stop dead. Eased, they settle instead.
+const progress=raw*raw*(3-2*raw);
+node.style.setProperty("--habit-scroll",progress.toFixed(4));
+};
+const onScroll=()=>{if(!frame)frame=window.requestAnimationFrame(read)};
+read();
+window.addEventListener("scroll",onScroll,{passive:true});
+window.addEventListener("resize",onScroll,{passive:true});
+return()=>{
+if(frame)window.cancelAnimationFrame(frame);
+window.removeEventListener("scroll",onScroll);
+window.removeEventListener("resize",onScroll);
+};
+},[]);
+return ref;
+}
+
+/**
+ * Three sentences, one plum band, and nothing else.
+ *
+ * The copy is English on a German page BY REQUEST and is reproduced
+ * verbatim - no eyebrow, no supporting line, no button. Anything else in
+ * here would be invented copy, and the point of the section is that the
+ * three sentences carry it alone.
+ *
+ * The lines are explicit elements rather than one wrapped sentence, so
+ * the break can never re-flow, and the third is the <i> the house style
+ * uses for its editorial accent - the same shape as .daily-line-accent.
+ */
+function HabitLoop(){
+const ref=useHabitScrollProgress();
+return <section className="habit" ref={ref as React.RefObject<HTMLElement>}>
+<div className="habit-inner home-rail">
+<h2 className="habit-headline">
+<span className="habit-line habit-line-1">You’ll whisk.</span>
+<span className="habit-line habit-line-2">You’ll sip.</span>
+<i className="habit-line habit-line-3 habit-line-accent">You’ll come back for more.</i>
+</h2>
+</div>
+</section>
+}
 /**
  * The community photo strip.
  *
@@ -239,7 +330,7 @@ return ref;
 
 function Home(){
 const heroRef=useHeroScrollProgress();
-return <main><section className="hero"><div className="hero-copy" ref={heroRef as React.RefObject<HTMLDivElement>}><p className="eyebrow">MATCHA AUS SHIZUOKA.</p><h1>Matcha.<br/><span className="hero-line-2">Is for everyone.</span></h1><p className="lead">Für Latte, pur, iced oder wie du willst.</p><div className="hero-actions"><Link className="cta berry" href="/about">GLOA entdecken</Link></div></div><div className="hero-art"><img src="/img/Header.png" alt="GLOA Matcha in Bewegung" className="hero-img" fetchPriority="high"/></div></section><LaunchCountdown/><section className="prelaunch"><div className="prelaunch-inner"><p className="eyebrow prelaunch-eyebrow">PRELAUNCH</p><h2 className="prelaunch-headline"><span className="prelaunch-line-1">Zum Launch</span><i className="prelaunch-line-2">benachrichtigt</i><span className="prelaunch-line-3">werden.</span></h2><p className="prelaunch-date">{GLOA_LAUNCH_FULL_LABEL}</p><p className="prelaunch-body">Trag dich ein und wir schicken dir eine Nachricht,<br/>wenn GLOA online geht. Nur ein kurzes Update zum Launch.</p><Link className="cta prelaunch-cta" href="/launch" onClick={()=>track("notify_click")}>Zum Launch benachrichtigen</Link><a className="prelaunch-social" href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer"><svg className="prelaunch-social-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="currentColor" strokeWidth="1.6"/><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.6"/><circle cx="17.2" cy="6.8" r="1.1" fill="currentColor"/></svg><span>Oder folge uns einfach auf Instagram →</span></a></div></section><section className="daily"><div className="daily-inner home-rail"><div className="daily-copy"><p className="eyebrow daily-eyebrow">MATCHA FÜR JEDEN TAG</p><h2 className="daily-headline"><span className="daily-line">Morgens.</span><span className="daily-line">Im Meeting.</span><i className="daily-line daily-line-accent">Nachmittags.</i></h2><span className="daily-rule" aria-hidden="true"/><p className="daily-note">Reiner Genuss. Klare Energie.<br/>Für jeden Moment deines Tages.</p><Link className="daily-link" href="/our-matcha">Matcha entdecken <span aria-hidden="true">→</span></Link></div><div className="daily-grid">{dailyTiles.map(t=><figure className="daily-tile" key={t.label}><img src={t.src} alt={t.alt} loading="lazy" style={{objectPosition:t.focus}}/><figcaption>{t.label}</figcaption></figure>)}</div></div></section><section className="origin"><div className="origin-inner home-rail"><div className="origin-copy"><p className="eyebrow origin-eyebrow">ORIGIN</p><h2 className="origin-headline"><span className="origin-line">From Shizuoka,</span><i className="origin-line origin-line-accent">Japan.</i></h2></div><span className="origin-divider" aria-hidden="true"/><div className="origin-facts"><p className="origin-intro">100 % Bio-Matcha aus Shizuoka, fein vermahlen.</p><dl className="origin-list"><div><dt>MATCHA</dt><dd>100 % Bio</dd></div><div><dt>MADE FOR</dt><dd>Latte + pur</dd></div></dl></div></div></section><HowTo/><RecipeCarousel/><section className="community"><div className="community-inner home-rail"><div className="community-copy"><p className="eyebrow community-eyebrow">#GLOAMATCHA</p><h2 className="community-headline"><span className="community-line">Zeig uns</span><i className="community-line community-line-accent">deinen Matcha.</i></h2><a className="community-cta" href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">{`@${BRAND.instagram} folgen`}</a></div><CommunityFeed/></div></section><BrandNote/></main>}
+return <main><section className="hero"><div className="hero-copy" ref={heroRef as React.RefObject<HTMLDivElement>}><p className="eyebrow">MATCHA AUS SHIZUOKA.</p><h1>Matcha.<br/><span className="hero-line-2">Is for everyone.</span></h1><p className="lead">Für Latte, pur, iced oder wie du willst.</p><div className="hero-actions"><Link className="cta berry" href="/about">GLOA entdecken</Link></div></div><div className="hero-art"><img src="/img/Header.png" alt="GLOA Matcha in Bewegung" className="hero-img" fetchPriority="high"/></div></section><LaunchCountdown/><section className="prelaunch"><div className="prelaunch-inner"><p className="eyebrow prelaunch-eyebrow">PRELAUNCH</p><h2 className="prelaunch-headline"><span className="prelaunch-line-1">Zum Launch</span><i className="prelaunch-line-2">benachrichtigt</i><span className="prelaunch-line-3">werden.</span></h2><p className="prelaunch-date">{GLOA_LAUNCH_FULL_LABEL}</p><p className="prelaunch-body">Trag dich ein und wir schicken dir eine Nachricht,<br/>wenn GLOA online geht. Nur ein kurzes Update zum Launch.</p><Link className="cta prelaunch-cta" href="/launch" onClick={()=>track("notify_click")}>Zum Launch benachrichtigen</Link><a className="prelaunch-social" href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer"><svg className="prelaunch-social-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="currentColor" strokeWidth="1.6"/><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.6"/><circle cx="17.2" cy="6.8" r="1.1" fill="currentColor"/></svg><span>Oder folge uns einfach auf Instagram →</span></a></div></section><section className="daily"><div className="daily-inner home-rail"><div className="daily-copy"><p className="eyebrow daily-eyebrow">MATCHA FÜR JEDEN TAG</p><h2 className="daily-headline"><span className="daily-line">Morgens.</span><span className="daily-line">Im Meeting.</span><i className="daily-line daily-line-accent">Nachmittags.</i></h2><span className="daily-rule" aria-hidden="true"/><p className="daily-note">Reiner Genuss. Klare Energie.<br/>Für jeden Moment deines Tages.</p><Link className="daily-link" href="/our-matcha">Matcha entdecken <span aria-hidden="true">→</span></Link></div><div className="daily-grid">{dailyTiles.map(t=><figure className="daily-tile" key={t.label}><img src={t.src} alt={t.alt} loading="lazy" style={{objectPosition:t.focus}}/><figcaption>{t.label}</figcaption></figure>)}</div></div></section><section className="origin"><div className="origin-inner home-rail"><div className="origin-copy"><p className="eyebrow origin-eyebrow">ORIGIN</p><h2 className="origin-headline"><span className="origin-line">From Shizuoka,</span><i className="origin-line origin-line-accent">Japan.</i></h2></div><span className="origin-divider" aria-hidden="true"/><div className="origin-facts"><p className="origin-intro">100 % Bio-Matcha aus Shizuoka, fein vermahlen.</p><dl className="origin-list"><div><dt>MATCHA</dt><dd>100 % Bio</dd></div><div><dt>MADE FOR</dt><dd>Latte + pur</dd></div></dl></div></div></section><HowTo/><HabitLoop/><RecipeCarousel/><section className="community"><div className="community-inner home-rail"><div className="community-copy"><p className="eyebrow community-eyebrow">#GLOAMATCHA</p><h2 className="community-headline"><span className="community-line">Zeig uns</span><i className="community-line community-line-accent">deinen Matcha.</i></h2><a className="community-cta" href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">{`@${BRAND.instagram} folgen`}</a></div><CommunityFeed/></div></section><BrandNote/></main>}
 
 // -- Catalog-driven shop --------------------------------------------
 //

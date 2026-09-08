@@ -1735,6 +1735,7 @@ header nav{gap:18px;font-size:12px}
 .daily,
 .origin,
 .how-to,
+.habit,
 .community,
 .brand-note,
 .shop-hero,
@@ -8515,6 +8516,148 @@ header nav{gap:18px;font-size:12px}
     font-size:12px;
     letter-spacing:.04em;
   }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   HOMEPAGE HABIT SECTION ─ THREE SENTENCES, MOVED BY THE READER
+
+   WHERE IT SITS. Between HOW TO GLOA and the recipe carousel. How-to
+   ends on the preparation - "mit Wasser aufschlagen" - and the carousel
+   opens on "Mach was draus."; this is the beat between the instruction
+   and the invitation, and the one place the three sentences read as a
+   consequence rather than a slogan. Nothing was displaced: the hero,
+   countdown, prelaunch, lifestyle, origin, how-to, recipes, community
+   and brand-note sections keep their order, their copy and their rules.
+
+   WHY PLUM. How-to and the carousel are both cream, so a cream band
+   between them would not read as a section at all. Plum is the one
+   brand ground the homepage had not used, the token is already in
+   :root, and the type on it is the same cream every dark section uses.
+   No new colour, no gradient, no card.
+
+   NO EYEBROW, NO SUPPORTING LINE, NO BUTTON. Every other section has
+   one; this one deliberately does not. The three sentences are the
+   whole section, and anything else here would be copy nobody wrote.
+
+   WHY THIS BLOCK IS NOT AT THE END OF THE FILE. tests/launch-waitlist
+   audits the launch page by slicing from its own header to the END of
+   the stylesheet, so anything appended after it is read as part of that
+   page - a homepage band at the bottom of this file made the launch
+   page's "no decorative colour ramps" guard count rules that are not
+   the launch page's. Appended here instead: after every homepage block
+   it has to outrank, before the first page-specific one.
+
+   ── THE MOTION ────────────────────────────────────────────────
+   SCROLL-LINKED, NOT A MARQUEE. useHabitScrollProgress() writes
+   --habit-scroll as a 0..1 measure of THIS SECTION's travel through the
+   viewport, and the three lines each translate by a different multiple
+   of it. Nothing loops, nothing runs on a timer, and scrolling back up
+   runs the same positions in reverse.
+
+   ONE DECLARATION, ON .habit, AND NOWHERE ELSE. The lines READ the
+   variable. A `--habit-scroll:0` on any of them would beat the value
+   inherited from the section, every write the hook makes would be
+   shadowed, and the type would sit still while these amplitudes still
+   read correctly in this file. That is precisely the bug cf5b192 fixed
+   in the hero, and this shape cannot reproduce it. The 0 below is also
+   the static fallback: with JavaScript off, or before the first frame,
+   the three lines sit exactly where the layout puts them.
+
+   THEY FAN, THEY DO NOT SCATTER. All three drift the same way by
+   increasing amounts, so the block opens into a diagonal as the section
+   crosses the screen and closes again on the way back up. The left edge
+   never moves toward the gutter, so no line can drift off the reading
+   edge - only into the empty right half the rail already has.
+
+   ── WHY THE AMPLITUDES STEP DOWN TWICE ─────────────────────────
+   The lines are flex items on align-items:flex-start, so each box is as
+   wide as its own text - until the text no longer fits, at which point
+   it wraps and the box becomes the full width of the rail. Above 640px
+   the longest sentence still fits on one line, so its box ends well
+   short of the right gutter and 88px of travel changes nothing about
+   where the section ends. Below 640px it wraps, the box IS the rail,
+   and any drift eats directly into the gutter - which is 20px at every
+   width from 640px down to 320px. So the travel there is capped at
+   10px, measured to leave 9px of screen edge at 320px.
+   ══════════════════════════════════════════════════════════════ */
+
+.habit{
+  background:var(--plum);
+  color:var(--cream);
+  padding-block:clamp(72px,9vw,132px);
+  /* THE REST VALUE - AND THE ONLY DECLARATION OF IT ANYWHERE. */
+  --habit-scroll:0;
+  /* A GUARANTEE, NOT A CROP. The amplitudes are chosen so no line ever
+     reaches this edge; clip is here so that a future font, a longer
+     word or a rounding difference can cost a clipped pixel instead of a
+     horizontal scrollbar on the whole page. Clip rather than hidden:
+     hidden would make this a scroll container. */
+  overflow-x:clip;
+}
+.habit-headline{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  margin:0;
+  gap:clamp(2px,.5vw,8px);
+}
+.habit-line{
+  display:block;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:500;
+  font-style:normal;
+  font-size:var(--type-title);
+  line-height:.98;
+  letter-spacing:-.04em;
+  /* TRANSFORM ONLY, so a scroll frame costs a composite and never a
+     reflow. No layout property is animated anywhere in this block. */
+  will-change:transform;
+}
+/* The one editorial accent, on the same terms as .daily-line-accent. */
+.habit-line-accent{
+  font-family:var(--font-display),Georgia,serif;
+  font-style:italic;
+  font-weight:400;
+  font-size:var(--type-editorial);
+  line-height:.95;
+  letter-spacing:-.015em;
+}
+.habit-line-1{transform:translate3d(calc(var(--habit-scroll)*24px),0,0)}
+.habit-line-2{transform:translate3d(calc(var(--habit-scroll)*54px),0,0)}
+.habit-line-3{transform:translate3d(calc(var(--habit-scroll)*88px),0,0)}
+
+@media (max-width:900px){
+  /* The rail is a fraction of the desktop one here, so the desktop
+     travel would carry the longest line most of the way across it. */
+  .habit{padding-block:clamp(56px,11vw,84px)}
+  .habit-line-1{transform:translate3d(calc(var(--habit-scroll)*12px),0,0)}
+  .habit-line-2{transform:translate3d(calc(var(--habit-scroll)*26px),0,0)}
+  .habit-line-3{transform:translate3d(calc(var(--habit-scroll)*40px),0,0)}
+}
+
+@media (max-width:640px){
+  /* MEASURED, NOT GUESSED. At 320px the third sentence already spans
+     the rail almost exactly - 260px of text in a 259px column - so its
+     whole travel comes out of the 20px gutter. Measured at 320px: the
+     line ends 19px short of the screen edge at rest, so 10px of travel
+     leaves 9px. 14px left 5px, which reads as touching the edge and
+     gives a wider font metric nowhere to go. The movement is a nudge at
+     this width rather than a sweep, which is the point: the sentences
+     have to stay readable before they are allowed to move at all. */
+  .habit-line-1{transform:translate3d(calc(var(--habit-scroll)*4px),0,0)}
+  .habit-line-2{transform:translate3d(calc(var(--habit-scroll)*7px),0,0)}
+  .habit-line-3{transform:translate3d(calc(var(--habit-scroll)*10px),0,0)}
+}
+
+@media (prefers-reduced-motion:reduce){
+  /* !important, so this beats every amplitude above whatever a later
+     pass appends - the same guarantee the hero carries. The hook also
+     returns before attaching a listener, so the variable never leaves
+     0 either: the section is simply three sentences, held still. */
+  .habit-line,
+  .habit-line-1,
+  .habit-line-2,
+  .habit-line-3{transform:none!important}
 }
 
 /* ══════════════════════════════════════════════════════════════
