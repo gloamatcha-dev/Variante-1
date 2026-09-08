@@ -349,6 +349,40 @@ Pflicht behaupten.
 
 ---
 
+## 6a. GO-LIVE-BLOCKER: Abo und Jahresplan in den AGB
+
+*Nachgetragen 08.09.2026 (DESIGN-LEGAL-04).*
+
+Die AGB decken ausschließlich den **einmaligen B2C-Warenkauf**. Das ist heute
+zutreffend — `SHOP_STATUS = "prelaunch"`, das Kundenkonto sagt „Buchbar sind
+Abos noch nicht", und `B2C_ANNUAL_PLAN_ENABLED` ist nicht gesetzt. Sobald eines
+der beiden Produkte freigeschaltet wird, **darf der Shop ohne diese Ergänzungen
+nicht live gehen**:
+
+| # | Erforderlich vor Freigabe |
+|---|---|
+| B1 | **Laufendes B2C-Abo:** Vertragsbedingungen mit dem tatsächlichen **28-Tage-Zyklus** (`CADENCE_DAYS = 28`, `lib/subscriptionCancellationRules.ts`) — **nirgends „monatlich" nennen**, 28 Tage sind keine Kalendermonate |
+| B2 | **Kündigungsbedingungen:** Frist **14 Tage** vor der nächsten Abrechnung (`CANCELLATION_CUTOFF_DAYS = 14`), inklusive der Regel, dass eine verspätete Kündigung erst nach dem folgenden Zyklus wirkt |
+| B3 | **Kündigungsschaltfläche nach § 312k BGB** — existiert derzeit **nicht** |
+| B4 | **Vorausbezahlter Jahresplan:** einmalige Zahlung, **13 Lieferungen im 28-Tage-Abstand (364 Tage)**, **keine automatische Verlängerung** — nicht als laufendes Stripe-Abonnement beschreiben |
+| B5 | **Eigene Widerrufsbelehrung** für Dauerschuldverhältnisse und für den vorausbezahlten Jahresplan; die bestehende ist für Warenkauf geschrieben |
+| B6 | **Vorvertragliche Informationen** nach Art. 246a EGBGB für beide Modelle |
+| B7 | **Konsistenz** zwischen Produktseite, Checkout, Bestätigungsmail, Kundenkonto und AGB — heute sagt nur das Kundenkonto etwas dazu |
+
+Diese Bedingungen werden **vor** dem Aktivieren der jeweiligen Produkte
+gesondert finalisiert. Bestehende Abo-, Jahresplan- und Zahlungsregeln wurden
+dabei nicht angefasst.
+
+### Offene Entscheidung: Verweis auf die Aktionsbedingungen
+
+Geprüft, wie beauftragt: Die AGB **sollten** in § 3 auf die jeweils gültigen
+Aktionsbedingungen verweisen, sobald es welche gibt. Derzeit **nicht ergänzt**,
+weil die Bedingungen zu GLOALAUNCH10 noch nicht veröffentlicht sind — ein
+Verweis würde ins Leere zeigen. Sobald Entwurf C (Abschnitt 4) freigegeben und
+veröffentlicht ist, gehört ein Satz in § 3.
+
+---
+
 ## 7. Was in diesem Durchgang NICHT verändert wurde
 
 Keine Zeile in `app/GloaSite.tsx`. Keine Datenschutzerklärung, keine AGB, keine

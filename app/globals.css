@@ -69,6 +69,19 @@ h1 i,h2 i,h3 i,.display-italic{font-family:var(--font-display),Georgia,serif;fon
 .legal-doc-head{max-width:760px;margin-bottom:clamp(44px,5.5vw,76px)}
 .legal-page.legal-doc h1{font-size:clamp(44px,6.2vw,86px);line-height:.95;letter-spacing:-.055em;margin:16px 0 0}
 .legal-doc-sub{font:13px/1.5 var(--font-mono);letter-spacing:.1em;text-transform:uppercase;opacity:.6;margin:20px 0 0}
+/* The lead under the head: the B2C/B2B distinction. Slightly larger
+   than body text and separated by a rule, so it reads as the document's
+   opening sentence rather than as a warning panel - no fill, no border
+   box, no icon. */
+.legal-doc-lead{margin:clamp(26px,3vw,36px) 0 0;padding-top:clamp(22px,2.6vw,30px);border-top:1px solid var(--line);max-width:56ch;font-size:18px;line-height:1.6}
+.legal-doc-lead a{color:var(--blue);text-decoration:none;border-bottom:1px solid rgba(23,70,209,.35)}
+.legal-doc-lead a:hover{border-bottom-color:var(--blue)}
+/* "Allgemeine Geschäftsbedingungen." is the longest headline on the
+   site: 32 characters in two very long words. At the shared size a
+   320px column cannot hold "Geschäftsbedingungen" on one line and it
+   overflows, so this page takes a smaller curve and German hyphenation
+   (the document is lang="de", so hyphens:auto has a dictionary). */
+.legal-page.legal-agb h1{font-size:clamp(30px,4.6vw,68px);hyphens:auto;overflow-wrap:break-word}
 .legal-doc-body{display:grid;grid-template-columns:210px 1fr;gap:clamp(36px,5vw,88px);align-items:start}
 /* 110px clears the 86px sticky site header plus a little air. */
 .legal-doc-toc{position:sticky;top:110px}

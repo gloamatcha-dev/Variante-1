@@ -285,9 +285,26 @@ test("7c: no non-hero heading was pulled into the hero scale", () => {
   }
   // The product, article, account and legal headings carry no class at all.
   for (const plain of ["<h1>{PRODUCT.name}</h1>", "<h1>{product.name}</h1>",
-                       "<h1>{r.title}</h1>", "<h1>{title.agb}</h1>",
+                       "<h1>{r.title}</h1>",
+                       // The three legal documents now set their own title
+                       // rather than reading the route map. They are still
+                       // bare <h1> elements outside the hero scale, which is
+                       // what this guards - checked below by class, not by
+                       // the words in them.
+                       "<h1>Impressum.</h1>", "<h1>Datenschutz.</h1>",
+                       "<h1>Allgemeine Geschäftsbedingungen.</h1>",
                        "<h1>Anmelden.</h1>", "<h1>404</h1>"]) {
     assert.ok(site.includes(plain), `a non-hero heading changed: ${plain}`);
+  }
+  // Stronger than the literals above, and the reason they are safe to
+  // change: a legal heading may never acquire a class. Their size comes
+  // from .legal-page / .legal-doc rules on the <main>, so a className on
+  // the <h1> itself is how one would get pulled into the hero scale.
+  for (const legal of ["Impressum\\.", "Datenschutz\\.", "Allgemeine Geschäftsbedingungen\\."]) {
+    assert.ok(
+      !new RegExp(`<h1[^>]+>${legal}</h1>`).test(site),
+      `a legal heading acquired an attribute: ${legal}`
+    );
   }
   // The old page-hero tokens are still defined; nothing reads them for a
   // hero any more, and no non-hero consumer was resized.

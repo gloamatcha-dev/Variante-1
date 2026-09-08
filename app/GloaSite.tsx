@@ -1451,40 +1451,145 @@ return <main className="legal-page legal-doc legal-privacy">
 </main>;
 }
 if(route==="agb"){
-return <main className="legal-page">
-<p className="eyebrow">LEGAL</p>
-<h1>{title.agb}</h1>
-<p className="legal-note">Diese AGB gelten für Bestellungen von Privatkunden (B2C) im GLOA Online-Shop. Für Geschäftskunden (GLOA for Business) gelten individuell vereinbarte Konditionen, die gesondert und vertraulich zwischen GLOA und dem jeweiligen Geschäftskunden abgestimmt werden.</p>
+/*
+  THE TERMS, SET LIKE THE OTHER TWO LEGAL DOCUMENTS.
 
-<h2>1. Geltungsbereich, Vertragspartner</h2>
-<p>Vertragspartner ist die Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin, Deutschland (im Folgenden &bdquo;GLOA&ldquo;). Diese AGB gelten für alle Bestellungen von Waren über den GLOA Online-Shop durch Verbraucher.</p>
+  Same legal-doc column, head, contents list and measure as
+  /datenschutz, and the same jumpToSection handler for the same reason:
+  the router swallows fragment navigation, so a plain href="#id" changes
+  the hash and moves nothing.
 
-<h2>2. Vertragsschluss</h2>
-<p>Die Darstellung der Produkte im Shop stellt kein bindendes Angebot dar, sondern eine Aufforderung zur Bestellung. Mit dem Absenden der Bestellung über die Kasse (Stripe Checkout) gibst du ein verbindliches Angebot zum Kauf der ausgewählten Waren ab. Der Kaufvertrag kommt zustande, sobald wir deine Bestellung bestätigen bzw. die Ware versenden.</p>
+  The headline is the longest on the site - "Allgemeine
+  Geschäftsbedingungen." is 32 characters in two very long words - so
+  this page overrides the shared h1 size downwards and turns on German
+  hyphenation. Without both, "Geschäftsbedingungen" alone overflows a
+  320px column.
 
-<h2>3. Preise und Zahlung</h2>
-<p>Alle angegebenen Preise sind Endpreise. Die Zahlung erfolgt über die im Bestellvorgang angebotenen, tatsächlich verfügbaren Zahlungsarten. Der Versandpreis wird dir vor Abschluss der Bestellung gesondert ausgewiesen, siehe <Link href="/versand">Versandinformationen</Link>.</p>
+  ── WHAT CHANGED IN THE TEXT, AND WHY ─────────────────────────
+  Section 2 was the reason to look. It said the contract concludes "sobald
+  wir deine Bestellung bestätigen bzw. die Ware versenden" - two
+  different moments, neither tied to what the code does, and silent about
+  the fact that payment is already gone by then.
 
-<h2>4. Lieferung und Versand</h2>
-<p>Es gelten die auf <Link href="/versand">/versand</Link> ausgewiesenen Liefergebiete, Versandkosten und Lieferzeiten. Nicht alle Länder werden beliefert.</p>
+  Traced against the implementation: the Checkout Session is created with
+  mode:"payment" and no capture_method, so Stripe captures immediately
+  when the customer confirms. The order row is written by the
+  checkout.session.completed webhook branch, and exactly one mail exists
+  for it - lib/email/orderConfirmation.ts. There is no separate
+  acknowledgement mail, so that one mail is the acceptance and the
+  durable-medium confirmation at once, and it carries items, prices,
+  shipping and the address to be one.
 
-<h2>5. Eigentumsvorbehalt</h2>
+  Because money moves before acceptance, the refusal case now says what
+  happens to it. That is not an invention: it is the necessary other half
+  of a construction that takes payment first.
+*/
+const jumpToSection=(e:React.MouseEvent<HTMLAnchorElement>)=>{
+const href=e.currentTarget.getAttribute("href")||"";
+const target=href.startsWith("#")?document.getElementById(href.slice(1)):null;
+if(!target)return;
+e.preventDefault();
+target.scrollIntoView({behavior:"instant",block:"start"});
+history.replaceState(null,"",href);
+};
+return <main className="legal-page legal-doc legal-agb">
+<div className="legal-doc-head">
+<p className="eyebrow">GLOA · RECHTLICHES</p>
+<h1>Allgemeine Geschäftsbedingungen.</h1>
+<p className="legal-doc-sub">Unsere Bedingungen für Bestellungen im GLOA Online-Shop.</p>
+<p className="legal-doc-lead">Diese Bedingungen gelten für Bestellungen von Privatkundinnen und Privatkunden. Geschäftskunden bestellen über <Link href="/for-cafes">GLOA for Business</Link> zu individuell vereinbarten Konditionen, die gesondert zwischen GLOA und dem jeweiligen Unternehmen abgestimmt werden.</p>
+</div>
+<div className="legal-doc-body">
+<nav className="legal-doc-toc" aria-label="Abschnitte">
+<p className="legal-doc-toc-label">Inhalt</p>
+<ol>
+<li><a href="#geltung" onClick={jumpToSection}><span>01</span>Geltungsbereich, Vertragspartner</a></li>
+<li><a href="#vertragsschluss" onClick={jumpToSection}><span>02</span>Vertragsschluss</a></li>
+<li><a href="#preise" onClick={jumpToSection}><span>03</span>Preise und Zahlung</a></li>
+<li><a href="#lieferung" onClick={jumpToSection}><span>04</span>Lieferung und Versand</a></li>
+<li><a href="#eigentum" onClick={jumpToSection}><span>05</span>Eigentumsvorbehalt</a></li>
+<li><a href="#gewaehrleistung" onClick={jumpToSection}><span>06</span>Gewährleistung</a></li>
+<li><a href="#widerruf" onClick={jumpToSection}><span>07</span>Widerrufsrecht</a></li>
+<li><a href="#haftung" onClick={jumpToSection}><span>08</span>Haftung</a></li>
+<li><a href="#sprache" onClick={jumpToSection}><span>09</span>Vertragssprache</a></li>
+<li><a href="#schluss" onClick={jumpToSection}><span>10</span>Schlussbestimmungen</a></li>
+</ol>
+</nav>
+<div className="legal-doc-main">
+
+<section className="legal-doc-section" id="geltung">
+<p className="legal-doc-num">01</p>
+<h2>Geltungsbereich, Vertragspartner</h2>
+<p>Vertragspartner ist die Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin, Deutschland (im Folgenden &bdquo;GLOA&ldquo;). Du erreichst uns unter <a href="mailto:hello@gloamatcha.com">hello@gloamatcha.com</a>; die vollständigen Anbieterangaben findest du im <Link href="/impressum">Impressum</Link>.</p>
+<p>Diese Bedingungen gelten für alle Bestellungen von Waren über den GLOA Online-Shop durch Verbraucher. Verbraucher ist jede natürliche Person, die ein Rechtsgeschäft zu Zwecken abschließt, die überwiegend weder ihrer gewerblichen noch ihrer selbständigen beruflichen Tätigkeit zugerechnet werden können.</p>
+</section>
+
+<section className="legal-doc-section" id="vertragsschluss">
+<p className="legal-doc-num">02</p>
+<h2>Vertragsschluss</h2>
+<p>Die Darstellung der Produkte im Shop ist kein bindendes Angebot, sondern eine Aufforderung an dich, eine Bestellung abzugeben.</p>
+<p>Der Bestellvorgang läuft in diesen Schritten ab: Du legst die gewünschten Artikel in den Warenkorb, öffnest die Kasse, prüfst dort Artikel, Menge, Preis, Versandkosten und Lieferadresse und schließt die Bestellung mit der zahlungspflichtigen Schaltfläche ab. Bis dahin kannst du Eingaben jederzeit korrigieren: Im Warenkorb änderst du Mengen oder entfernst Artikel, und aus der Kasse gelangst du zurück in den Shop.</p>
+<p>Mit dem Abschluss über die zahlungspflichtige Schaltfläche gibst du ein verbindliches Angebot zum Kauf der ausgewählten Waren ab. Der Kaufpreis wird zu diesem Zeitpunkt über den von dir gewählten Zahlungsweg eingezogen.</p>
+<p>Wir nehmen dein Angebot mit der Bestellbestätigung an, die wir dir nach erfolgreicher Zahlung automatisch per E-Mail senden. Erst mit dieser E-Mail kommt der Kaufvertrag zustande. Eine gesonderte Eingangsbestätigung versenden wir nicht; diese eine E-Mail bestätigt den Eingang und erklärt zugleich die Annahme.</p>
+<p>Können wir dein Angebot ausnahmsweise nicht annehmen – etwa weil ein Artikel nicht mehr verfügbar ist –, teilen wir dir das mit und erstatten dir den bereits gezahlten Betrag unverzüglich und vollständig zurück.</p>
+<p>Die Bestellbestätigung enthält die Bestellnummer, die bestellten Artikel, die Preise, die Versandkosten und die Lieferanschrift; sie ist damit zugleich die Bestätigung des Vertrags auf einem dauerhaften Datenträger. Den Vertragstext speichern wir nicht in einer gesondert abrufbaren Form – bewahre die Bestellbestätigung deshalb bitte auf. Wenn du ein GLOA-Konto hast, findest du deine Bestellung zusätzlich in deinem <Link href="/account">Kundenkonto</Link>.</p>
+</section>
+
+<section className="legal-doc-section" id="preise">
+<p className="legal-doc-num">03</p>
+<h2>Preise und Zahlung</h2>
+<p>Alle im Shop angegebenen Preise sind Endpreise. Die Versandkosten werden dir vor Abschluss der Bestellung gesondert ausgewiesen; die Einzelheiten stehen unter <Link href="/versand">Versandinformationen</Link>.</p>
+<p>Die Zahlung erfolgt über die im Bestellvorgang tatsächlich angebotenen Zahlungsarten. Welche das im Einzelfall sind, siehst du in der Kasse. Der Kaufpreis einschließlich Versandkosten wird mit Abschluss der Bestellung fällig.</p>
+</section>
+
+<section className="legal-doc-section" id="lieferung">
+<p className="legal-doc-num">04</p>
+<h2>Lieferung und Versand</h2>
+<p>Es gelten die unter <Link href="/versand">Versandinformationen</Link> ausgewiesenen Liefergebiete, Versandkosten und Lieferzeiten. Wir liefern nicht in alle Länder; welche Lieferländer möglich sind, siehst du bei der Adresseingabe in der Kasse.</p>
+<p>Angegebene Lieferzeiten sind voraussichtliche Zeiträume und beginnen mit dem Vertragsschluss. Wir versenden an die von dir angegebene Lieferanschrift.</p>
+</section>
+
+<section className="legal-doc-section" id="eigentum">
+<p className="legal-doc-num">05</p>
+<h2>Eigentumsvorbehalt</h2>
 <p>Die gelieferte Ware bleibt bis zur vollständigen Bezahlung Eigentum von GLOA.</p>
+</section>
 
-<h2>6. Gewährleistung</h2>
-<p>Es gelten die gesetzlichen Gewährleistungsrechte.</p>
+<section className="legal-doc-section" id="gewaehrleistung">
+<p className="legal-doc-num">06</p>
+<h2>Gewährleistung</h2>
+<p>Es gelten die gesetzlichen Gewährleistungsrechte. Ist die gelieferte Ware mangelhaft, stehen dir die gesetzlichen Rechte auf Nacherfüllung, Minderung, Rücktritt und Schadensersatz zu; wir schränken diese Rechte nicht ein und verkürzen keine gesetzlichen Fristen.</p>
+<p>Melde einen Mangel gern unter <a href="mailto:hello@gloamatcha.com">hello@gloamatcha.com</a>, damit wir ihn schnell klären können. Deine gesetzlichen Rechte hängen nicht davon ab, dass du uns zuerst kontaktierst.</p>
+</section>
 
-<h2>7. Widerrufsrecht</h2>
-<p>Als Verbraucher steht dir ein gesetzliches Widerrufsrecht zu. Einzelheiten findest du in unserer <Link href="/widerruf">Widerrufsbelehrung</Link>, einschließlich der elektronischen Widerrufsfunktion.</p>
+<section className="legal-doc-section" id="widerruf">
+<p className="legal-doc-num">07</p>
+<h2>Widerrufsrecht</h2>
+<p>Als Verbraucher steht dir ein gesetzliches Widerrufsrecht zu. Alle Einzelheiten – Frist, Fristbeginn, Folgen des Widerrufs und das Muster-Widerrufsformular – findest du in unserer <Link href="/widerruf">Widerrufsbelehrung</Link>. Dort kannst du den Widerruf auch direkt über die elektronische Widerrufsfunktion erklären, ohne Konto und ohne Anmeldung.</p>
+<p>Der Widerruf ist etwas anderes als eine Stornierung. Der Widerruf ist dein gesetzliches Recht, das du innerhalb der Frist ohne Angabe von Gründen ausüben kannst. Eine Stornierung ist demgegenüber die Bitte, eine noch nicht versandte Bestellung abzubrechen; ob wir das noch können, hängt vom Bearbeitungsstand ab. Dein Widerrufsrecht bleibt davon in jedem Fall unberührt.</p>
+</section>
 
-<h2>8. Haftung</h2>
-<p>GLOA haftet unbeschränkt für Vorsatz und grobe Fahrlässigkeit sowie nach den gesetzlichen Vorschriften für Schäden aus der Verletzung des Lebens, des Körpers oder der Gesundheit sowie nach dem Produkthaftungsgesetz. Im Übrigen haftet GLOA im Rahmen der gesetzlichen Vorschriften.</p>
+<section className="legal-doc-section" id="haftung">
+<p className="legal-doc-num">08</p>
+<h2>Haftung</h2>
+<p>GLOA haftet unbeschränkt für Vorsatz und grobe Fahrlässigkeit, für Schäden aus der Verletzung des Lebens, des Körpers oder der Gesundheit sowie nach dem Produkthaftungsgesetz. Im Übrigen haftet GLOA nach den gesetzlichen Vorschriften.</p>
+</section>
 
-<h2>9. Vertragssprache</h2>
-<p>Der Vertrag wird in deutscher Sprache geschlossen.</p>
+<section className="legal-doc-section" id="sprache">
+<p className="legal-doc-num">09</p>
+<h2>Vertragssprache</h2>
+<p>Der Vertrag wird in deutscher Sprache geschlossen. Auch die weitere Abwicklung und unsere Nachrichten an dich erfolgen auf Deutsch.</p>
+</section>
 
-<h2>10. Schlussbestimmungen</h2>
-<p>Es gilt das Recht der Bundesrepublik Deutschland unter Ausschluss des UN-Kaufrechts; zwingende verbraucherschützende Bestimmungen deines gewöhnlichen Aufenthaltsorts bleiben unberührt. Sollte eine Bestimmung dieser AGB unwirksam sein, bleibt die Wirksamkeit der übrigen Bestimmungen unberührt.</p>
+<section className="legal-doc-section" id="schluss">
+<p className="legal-doc-num">10</p>
+<h2>Schlussbestimmungen</h2>
+<p>Es gilt das Recht der Bundesrepublik Deutschland unter Ausschluss des UN-Kaufrechts. Zwingende verbraucherschützende Bestimmungen des Staates, in dem du deinen gewöhnlichen Aufenthalt hast, bleiben davon unberührt.</p>
+<p>Sollte eine Bestimmung dieser Bedingungen unwirksam sein, bleibt die Wirksamkeit der übrigen Bestimmungen unberührt.</p>
+</section>
+
+</div>
+</div>
 </main>;
 }
 return <main className="legal-page"><p className="eyebrow">LEGAL</p><h1>{title[route]||"Legal"}</h1><div className="legal-placeholder"><h2>Rechtlicher Inhalt ausstehend.</h2><p>Vor dem öffentlichen Shop-Launch muss dieser Inhalt von GLOA beziehungsweise einer qualifizierten Rechtsberatung bereitgestellt und geprüft werden.</p></div></main>}

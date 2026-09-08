@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { writeBlockedServerEnv } from "./helpers/testSupabase.mjs";
@@ -549,4 +549,100 @@ test("Datenschutz: the document reads at a measure, and the contents list collap
   assert.ok(mq.slice(0, 600).includes(".legal-doc-body{grid-template-columns:1fr"), "the sidebar does not collapse");
   // Anchors must clear the 86px sticky header.
   assert.match(css, /\.legal-doc-section\{[^}]*scroll-margin-top:110px/);
+});
+
+/* ── The terms, redesigned (DESIGN-LEGAL-04) ─────────────────── */
+
+const agbSource = gloaSiteSource.slice(
+  gloaSiteSource.indexOf('route==="agb"'),
+  gloaSiteSource.indexOf('title[route]||"Legal"')
+);
+
+test("AGB: structured as a document, with every section reachable", () => {
+  assert.ok(agbSource.length > 2000, "the AGB block could not be located");
+  const ids = [...agbSource.matchAll(/<section className="legal-doc-section" id="([a-z]+)">/g)].map(m => m[1]);
+  assert.equal(ids.length, 10, `expected 10 sections, found ${ids.length}`);
+  assert.equal(new Set(ids).size, ids.length, "two sections share an id");
+
+  const hrefs = [...agbSource.matchAll(/<li><a href="#([a-z]+)"/g)].map(m => m[1]);
+  assert.deepEqual(hrefs, ids, "the contents list is out of step with the sections");
+
+  assert.ok(!/<details|<summary/.test(agbSource), "a term is hidden inside an accordion");
+  assert.ok(!agbSource.includes("legal-placeholder"), "the terms are still inside the placeholder box");
+  assert.ok(agbSource.includes('href="mailto:hello@gloamatcha.com"'), "no contact mailto");
+  assert.ok(!agbSource.includes("info@gloamatcha.com"), "the superseded address is in the terms");
+});
+
+test("AGB §2: what it says about payment and acceptance is what the code does", () => {
+  const checkout = readFileSync(new URL("../app/api/checkout/session/route.ts", import.meta.url), "utf-8");
+
+  // Immediate capture: mode "payment" and no capture_method override, so
+  // Stripe takes the money when the customer confirms. The terms say the
+  // price is collected at that moment - if this ever became a manual
+  // capture or an authorisation-only flow, the sentence would be false.
+  assert.match(checkout, /mode: "payment"/);
+  assert.ok(!checkout.includes("capture_method"), "capture is no longer immediate - §2 says the price is collected on order");
+  assert.match(agbSource, /Der Kaufpreis wird zu diesem Zeitpunkt über den von dir gewählten Zahlungsweg eingezogen/);
+
+  // Exactly one order mail exists, so it is both the acknowledgement and
+  // the acceptance - which is what §2 now states. A second order mail
+  // would make "eine gesonderte Eingangsbestätigung versenden wir nicht"
+  // wrong, so the count is the guard.
+  const orderTemplates = readdirSync(new URL("../lib/email", import.meta.url))
+    .filter(f => /^order[A-Z]/.test(f));
+  assert.deepEqual(orderTemplates, ["orderConfirmation.ts"], "a second order email exists - §2 claims there is only one");
+  assert.match(agbSource, /Eine gesonderte Eingangsbestätigung versenden wir nicht/);
+  assert.match(agbSource, /Erst mit dieser E-Mail kommt der Kaufvertrag zustande/);
+
+  // Money moves before acceptance, so the refusal case must say what
+  // happens to it.
+  assert.match(agbSource, /erstatten dir den bereits gezahlten Betrag/);
+
+  // The old wording named two different moments and is gone from the
+  // COPY. Checked against the source with comments stripped, because the
+  // block's own explanation quotes the sentence it replaced - the usual
+  // trap in this repository, where a comment names what it forbids.
+  const agbCopy = agbSource.replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.ok(!agbCopy.includes("bzw. die Ware versenden"), "the ambiguous acceptance wording is back");
+
+  // § 312i information: steps, correction, storage of the contract text.
+  assert.match(agbSource, /Der Bestellvorgang läuft in diesen Schritten ab/);
+  assert.match(agbSource, /kannst du Eingaben jederzeit korrigieren/);
+  assert.match(agbSource, /Den Vertragstext speichern wir nicht in einer gesondert abrufbaren Form/);
+});
+
+test("AGB: still only the goods purchase, with no subscription or annual terms", () => {
+  // The audit left these as a go-live blocker to be written separately.
+  // Publishing them early would announce contracts nobody can book.
+  for (const term of ["Abonnement", "Abo-", "Jahresplan", "28 Tage", "Mindestlaufzeit", "Kündigungsfrist"]) {
+    assert.ok(!agbSource.includes(term), `the terms describe a contract type that is not bookable: ${term}`);
+  }
+  // And nothing may claim the launch code is redeemable yet.
+  assert.ok(!agbSource.includes("GLOALAUNCH10"), "the terms name a code the checkout cannot redeem");
+});
+
+test("AGB: statutory consumer rights are not narrowed anywhere", () => {
+  // No shortened warranty period, no blanket exclusion, no attempt to
+  // put withdrawal and cancellation on the same footing.
+  for (const narrowing of [
+    /Gewährleistung[^.]{0,60}(ein Jahr|12 Monate|ausgeschlossen)/i,
+    /Haftung[^.]{0,40}(ausgeschlossen|wird nicht übernommen)/i,
+    /kein Widerrufsrecht/i,
+    /Lebensmittel[^.]{0,60}vom Widerruf ausgeschlossen/i,
+  ]) {
+    assert.ok(!narrowing.test(agbSource), `statutory rights narrowed: ${narrowing}`);
+  }
+  assert.match(agbSource, /wir schränken diese Rechte nicht ein und verkürzen keine gesetzlichen Fristen/);
+  // Withdrawal and cancellation are told apart, not equated.
+  assert.match(agbSource, /Der Widerruf ist etwas anderes als eine Stornierung/);
+});
+
+test("AGB: the long headline is sized to fit, not to fill", () => {
+  const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf-8");
+  // "Allgemeine Geschäftsbedingungen." is the longest headline on the
+  // site; at the shared clamp a 320px column cannot hold the second word.
+  assert.match(css, /\.legal-page\.legal-agb h1\{font-size:clamp\(30px,4\.6vw,68px\);hyphens:auto/);
+  // The B2C/B2B distinction reads as an opening sentence, not a panel.
+  assert.match(css, /\.legal-doc-lead\{[^}]*border-top:1px solid var\(--line\)/);
+  assert.ok(!/\.legal-doc-lead\{[^}]*background:/.test(css), "the lead was turned into a box");
 });
