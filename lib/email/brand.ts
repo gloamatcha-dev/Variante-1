@@ -207,8 +207,65 @@ ${html}
 </td></tr>`;
 }
 
-/** The postal identity every GLOA mail carries. */
-export const GLOA_POSTAL_ADDRESS = "GLOA &middot; Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin";
+/**
+ * THE § 35a GmbHG PARTICULARS, AND ONLY THOSE.
+ *
+ * § 35a Abs. 1 GmbHG asks a business letter to carry the legal form and
+ * seat, the register court, the register number, and every managing
+ * director by surname and at least one written-out forename. That is
+ * the whole list.
+ *
+ * It does NOT ask for a street address, a VAT identification number, a
+ * telephone number or an email address. Those come from elsewhere - the
+ * street and the VAT ID from § 5 DDG for the website, the VAT ID again
+ * from § 14 UStG for an invoice - and carrying them here on the theory
+ * that § 35a wants them is how a footer grows without becoming any more
+ * compliant.
+ *
+ * Which is precisely what the previous line did. It read "GLOA · Cara 2
+ * GmbH, Hardenbergstr. 4, 10623 Berlin": a street § 35a never asked
+ * for, and no register court, no HRB number and no managing director -
+ * three of the four things it does ask for. Longer than necessary and
+ * incomplete at the same time.
+ */
+export const GLOA_COMPANY_PARTICULARS =
+  "Cara 2 GmbH &middot; Sitz Berlin &middot; Amtsgericht Charlottenburg HRB 278728 B &middot; Gesch&auml;ftsf&uuml;hrer Serwan Amedi";
+
+/** The same particulars for the plain-text part. */
+export const GLOA_COMPANY_PARTICULARS_TEXT =
+  "Cara 2 GmbH · Sitz Berlin · Amtsgericht Charlottenburg HRB 278728 B · Geschäftsführer Serwan Amedi";
+
+/* ══════════════════════════════════════════════════════════════
+   THE LEGAL LINKS
+   ══════════════════════════════════════════════════════════════ */
+
+export const IMPRINT_PATH = "/impressum";
+export const PRIVACY_PATH = "/datenschutz";
+
+/**
+ * Imprint and privacy, as links a reader can actually follow.
+ *
+ * THESE ARE NOT A SUBSTITUTE FOR THE PARTICULARS ABOVE. Whether a link
+ * to an imprint discharges § 35a at all is contested, so the mails that
+ * need the particulars carry them in the message and these links as
+ * well. The links are here because somebody reading a mail should be
+ * able to reach both pages, which is worth doing on its own.
+ *
+ * Absolute or absent, on the same rule as the logo: a relative href in
+ * an inbox resolves against nothing.
+ */
+export function legalLinks(origin: string | null | undefined): string {
+  if (!isMailableOrigin(origin)) return "";
+  const base = String(origin).replace(/\/+$/, "");
+  return `<a href="${base}${IMPRINT_PATH}" style="color:${GLOA_BERRY};">Impressum</a> &middot; <a href="${base}${PRIVACY_PATH}" style="color:${GLOA_BERRY};">Datenschutz</a>`;
+}
+
+/** The same two links for the plain-text part, one per line. */
+export function legalLinksText(origin: string | null | undefined): string {
+  if (!isMailableOrigin(origin)) return "";
+  const base = String(origin).replace(/\/+$/, "");
+  return `Impressum: ${base}${IMPRINT_PATH}\nDatenschutz: ${base}${PRIVACY_PATH}`;
+}
 
 /**
  * The preheader: the line a client shows next to the subject.

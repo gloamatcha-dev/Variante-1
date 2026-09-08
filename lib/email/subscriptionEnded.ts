@@ -1,4 +1,6 @@
 import {
+  legalLinks,
+  legalLinksText,
   emailShell,
   emailHeader,
   emailEyebrow,
@@ -228,7 +230,9 @@ ${endedLineHtml}
 <p style="font-size:14px;line-height:1.6;margin:0;color:${BRAND.ink};">${escapeHtml(CLOSING)}</p>
 ${accountLinkHtml}
 </td></tr>
-${emailFooter(`Fragen? <a href="mailto:${SUPPORT_ADDRESS}" style="color:${GLOA_BERRY};">${SUPPORT_ADDRESS}</a>`)}`);
+${emailFooter(`Fragen? <a href="mailto:${SUPPORT_ADDRESS}" style="color:${GLOA_BERRY};">${SUPPORT_ADDRESS}</a>
+<br/><br/>
+${legalLinks(params.origin)}`)}`);
 
   const text = [
     `GLOA · ${EYEBROW}`,
@@ -242,6 +246,7 @@ ${emailFooter(`Fragen? <a href="mailto:${SUPPORT_ADDRESS}" style="color:${GLOA_B
     subscription.accountUrl ? `Zu deinem GLOA Konto: ${subscription.accountUrl}` : "",
     "",
     `Fragen? ${SUPPORT_ADDRESS}`,
+    legalLinksText(params.origin),
   ]
     .filter(line => line !== "")
     .join("\n");

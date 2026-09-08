@@ -1,4 +1,6 @@
 import {
+  legalLinks,
+  legalLinksText,
   emailShell,
   emailHeader,
   emailEyebrow,
@@ -188,7 +190,9 @@ ${emailHeadline(`Danke für deine Bestellung.`)}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${addressHtml}</table>
 ${accountLinkHtml}
 </td></tr>
-${emailFooter(`Fragen zu deiner Bestellung? <a href="mailto:support@gloamatcha.com" style="color:${GLOA_BERRY};">support@gloamatcha.com</a>`)}`);
+${emailFooter(`Fragen zu deiner Bestellung? <a href="mailto:support@gloamatcha.com" style="color:${GLOA_BERRY};">support@gloamatcha.com</a>
+<br/><br/>
+${legalLinks(params.origin)}`)}`);
 
   // ---- Plain text ----
   const itemLinesText = items
@@ -220,6 +224,7 @@ ${emailFooter(`Fragen zu deiner Bestellung? <a href="mailto:support@gloamatcha.c
     accountLinkText,
     "",
     "Fragen zu deiner Bestellung? support@gloamatcha.com",
+    legalLinksText(params.origin),
   ]
     .filter(line => line !== "")
     .join("\n");

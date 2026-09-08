@@ -1,4 +1,6 @@
 import {
+  legalLinks,
+  legalLinksText,
   emailShell,
   emailHeader,
   emailEyebrow,
@@ -84,7 +86,9 @@ ${scopeNoteHtml}
 ${customerNoteHtml}
 <p style="font-size:14px;line-height:1.5;margin:16px 0 0;">Eingegangen am ${escapeHtml(date)} um ${escapeHtml(time)} Uhr.</p>
 </td></tr>
-${emailFooter(`Fragen zu deinem Widerruf? <a href="mailto:hello@gloamatcha.com" style="color:${GLOA_BERRY};">hello@gloamatcha.com</a>`)}`);
+${emailFooter(`Fragen zu deinem Widerruf? <a href="mailto:hello@gloamatcha.com" style="color:${GLOA_BERRY};">hello@gloamatcha.com</a>
+<br/><br/>
+${legalLinks(input.origin)}`)}`);
 
   const text = [
     "GLOA · Widerruf erhalten",
@@ -98,6 +102,7 @@ ${emailFooter(`Fragen zu deinem Widerruf? <a href="mailto:hello@gloamatcha.com" 
     `Eingegangen am ${date} um ${time} Uhr.`,
     "",
     "Fragen zu deinem Widerruf? hello@gloamatcha.com",
+    legalLinksText(input.origin),
   ]
     .filter(line => line !== "")
     .join("\n");

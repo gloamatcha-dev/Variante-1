@@ -2,7 +2,10 @@ import {
   GLOA_BERRY,
   GLOA_BLUE,
   GLOA_PLUM,
-  GLOA_POSTAL_ADDRESS,
+  GLOA_COMPANY_PARTICULARS,
+  GLOA_COMPANY_PARTICULARS_TEXT,
+  legalLinks,
+  legalLinksText,
   emailButton,
   emailEyebrow,
   emailFooter,
@@ -100,7 +103,9 @@ export function buildLaunchConfirmationEmail(input: LaunchConfirmationInput): Bu
     withdrawUrl,
     "",
     "GLOA",
-    "Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin",
+    GLOA_COMPANY_PARTICULARS_TEXT,
+
+    legalLinksText(origin),
   ].join("\n");
 
   // The mark, when an origin was supplied. A mail with no absolute
@@ -122,7 +127,9 @@ ${emailFooter(`Gleich nach deiner Bestätigung schicken wir dir deinen Launch-Ra
 <br/><br/>
 Du warst das nicht oder hast es dir anders überlegt? Dann ignoriere diese E-Mail einfach, oder <a href="${escapeHtml(withdrawUrl)}" style="color:${GLOA_BERRY};">trag dich hier direkt wieder aus</a>.
 <br/><br/>
-${GLOA_POSTAL_ADDRESS}`)}`
+${GLOA_COMPANY_PARTICULARS}
+<br/>
+${legalLinks(origin)}`)}`
   );
 
   return { subject, html, text };

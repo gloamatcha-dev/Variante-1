@@ -1,7 +1,10 @@
 import {
+  legalLinks,
+  legalLinksText,
+  GLOA_COMPANY_PARTICULARS,
+  GLOA_COMPANY_PARTICULARS_TEXT,
   GLOA_BLUE,
   GLOA_PLUM,
-  GLOA_POSTAL_ADDRESS,
   emailButton,
   emailEyebrow,
   emailFooter,
@@ -115,7 +118,8 @@ export function buildLaunchDayEmail(input: LaunchDayInput): BuiltLaunchDayEmail 
     footerText,
     "",
     "GLOA",
-    "Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin",
+    GLOA_COMPANY_PARTICULARS_TEXT,
+    legalLinksText(origin),
   ].join("\n");
 
   // The preview banner. Plum on Cream, no new colour, and it sits above
@@ -138,7 +142,9 @@ ${emailButton(escapeHtml(shopUrl), "Jetzt Matcha entdecken")}
 <tr><td style="padding:0 0 24px 0;font-size:13px;line-height:1.6;color:${GLOA_PLUM};">Falls der Button nicht funktioniert, öffne diesen Link:<br/><a href="${escapeHtml(shopUrl)}" style="color:${GLOA_BLUE};word-break:break-all;">${escapeHtml(shopUrl)}</a></td></tr>
 ${emailFooter(`${escapeHtml(footerText)}
 <br/><br/>
-${GLOA_POSTAL_ADDRESS}`)}`
+${GLOA_COMPANY_PARTICULARS}
+<br/>
+${legalLinks(origin)}`)}`
   );
 
   return { subject, html, text };

@@ -1,8 +1,11 @@
 import {
+  legalLinks,
+  legalLinksText,
+  GLOA_COMPANY_PARTICULARS,
+  GLOA_COMPANY_PARTICULARS_TEXT,
   GLOA_BLUE,
   GLOA_NEAR_BLACK,
   GLOA_PLUM,
-  GLOA_POSTAL_ADDRESS,
   GLOA_RULE,
   emailEyebrow,
   emailFooter,
@@ -114,7 +117,8 @@ export function buildLaunchWelcomeEmail(input: LaunchWelcomeInput): BuiltLaunchW
     footerText,
     "",
     "GLOA",
-    "Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin",
+    GLOA_COMPANY_PARTICULARS_TEXT,
+    legalLinksText(origin),
   ].join("\n");
 
   // The code, set as the one object in the mail. A bordered block rather
@@ -144,7 +148,9 @@ ${codeBlock}
 <tr><td style="padding:0 0 24px 0;font-size:14px;line-height:1.6;color:${GLOA_NEAR_BLACK};border-top:1px solid ${GLOA_RULE};padding-top:20px;">${escapeHtml(validity)}</td></tr>
 ${emailFooter(`${escapeHtml(footerText)}
 <br/><br/>
-${GLOA_POSTAL_ADDRESS}`)}`
+${GLOA_COMPANY_PARTICULARS}
+<br/>
+${legalLinks(origin)}`)}`
   );
 
   return { subject, html, text };

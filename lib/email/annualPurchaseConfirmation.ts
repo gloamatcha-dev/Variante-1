@@ -1,4 +1,6 @@
 import {
+  legalLinks,
+  legalLinksText,
   emailShell,
   emailHeader,
   emailEyebrow,
@@ -299,7 +301,9 @@ ${emailHeadline(`${escapeHtml(HEADLINE)}`)}
 ${bodyHtml}
 ${accountLinkHtml}
 </td></tr>
-${emailFooter(`Fragen zu deinem Jahresabo? <a href="mailto:${SUPPORT_ADDRESS}" style="color:${GLOA_BERRY};">${SUPPORT_ADDRESS}</a>`)}`);
+${emailFooter(`Fragen zu deinem Jahresabo? <a href="mailto:${SUPPORT_ADDRESS}" style="color:${GLOA_BERRY};">${SUPPORT_ADDRESS}</a>
+<br/><br/>
+${legalLinks(params.origin)}`)}`);
 
   const accountLinkText = plan.accountOrdersUrl
     ? `Bestellungen in deinem Konto ansehen: ${plan.accountOrdersUrl}`
@@ -317,6 +321,7 @@ ${emailFooter(`Fragen zu deinem Jahresabo? <a href="mailto:${SUPPORT_ADDRESS}" s
     accountLinkText,
     "",
     `Fragen zu deinem Jahresabo? ${SUPPORT_ADDRESS}`,
+    legalLinksText(params.origin),
   ]
     .filter(line => line !== "")
     .join("\n");

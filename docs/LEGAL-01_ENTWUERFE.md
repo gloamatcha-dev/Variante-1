@@ -373,6 +373,66 @@ Diese Bedingungen werden **vor** dem Aktivieren der jeweiligen Produkte
 gesondert finalisiert. Bestehende Abo-, Jahresplan- und Zahlungsregeln wurden
 dabei nicht angefasst.
 
+### E-Mail-Fußzeilen: § 35a GmbHG je Vorlage (EMAIL-02C)
+
+*Nachgetragen 08.09.2026. Begründete Lesart, **keine geprüfte Rechtsauskunft** —
+gehört zur Endfreigabe.*
+
+**Was § 35a Abs. 1 GmbHG verlangt:** Rechtsform und Sitz, Registergericht,
+Handelsregisternummer, alle Geschäftsführer (Familienname + mindestens ein
+ausgeschriebener Vorname). **Das ist die ganze Liste.**
+
+**Was er *nicht* verlangt:** Straßenanschrift, USt-IdNr., Telefon, E-Mail. Die
+Straße und die USt-IdNr. folgen aus § 5 DDG für die *Website*, die USt-IdNr.
+zusätzlich aus § 14 UStG für eine *Rechnung*. Keines davon wird dadurch
+erfüllt, dass man es in eine Mail-Fußzeile schreibt.
+
+**§ 35a Abs. 2** nimmt Mitteilungen aus, die **innerhalb einer bestehenden
+Geschäftsverbindung** ergehen und für die **Vordrucke** verwendet werden, in
+die nur die im Einzelfall erforderlichen Angaben eingefügt werden.
+
+| # | Vorlage | Geschäftsverbindung | Vordruck | § 35a | Fußzeile |
+|---|---|---|---|---|---|
+| 1 | orderConfirmation | Vertrag geschlossen | ja | **Abs. 2** | Kontakt + Links |
+| 2 | shipmentConfirmation | Vertragserfüllung | ja | **Abs. 2** | Kontakt + Links |
+| 3 | withdrawalConfirmation | Rückabwicklung | ja | **Abs. 2** | Kontakt + Links |
+| 4 | refundConfirmation | Rückabwicklung | ja | **Abs. 2** | Kontakt + Links |
+| 5 | cancellationConfirmation | Abo-Beendigung | ja | **Abs. 2** | Kontakt + Links |
+| 6 | cancellationOutcome | Bestellstorno | ja | **Abs. 2** | Kontakt + Links |
+| 7 | paymentProblem | Vertragserfüllung | ja | **Abs. 2** | Kontakt + Links |
+| 8 | subscriptionStarted | Vertrag | ja | **Abs. 2** | Kontakt + Links |
+| 9 | subscriptionEnded | Vertrag | ja | **Abs. 2** | Kontakt + Links |
+| 10 | annualPurchaseConfirmation | Vertrag | ja | **Abs. 2** | Kontakt + Links |
+| 11 | launchConfirmation | **keine** | ja | **Abs. 1** | Kontakt + Links + **Pflichtangaben** |
+| 12 | launchWelcome | **keine** | ja | **Abs. 1** | Kontakt + Links + **Pflichtangaben** |
+| 13 | launchDay | **keine** | ja | **Abs. 1** | Kontakt + Links + **Pflichtangaben** |
+| 14 | internalOrderNotification | intern an orders@ | — | **nicht einschlägig** | unverändert |
+| 15 | cancellationRequestNotification | intern an orders@ | — | **nicht einschlägig** | unverändert |
+
+**Die Pflichtangaben, kompakt und vollständig:**
+> Cara 2 GmbH · Sitz Berlin · Amtsgericht Charlottenburg HRB 278728 B ·
+> Geschäftsführer Serwan Amedi
+
+Ohne Straße, ohne USt-IdNr. — beides verlangt § 35a nicht.
+
+**Was ersetzt wurde:** Die frühere Zeile lautete „GLOA · Cara 2 GmbH,
+Hardenbergstr. 4, 10623 Berlin". Sie trug die Straße, die § 35a nie verlangt,
+und **keines** von Registergericht, HRB-Nummer und Geschäftsführer — drei der
+vier Angaben, die er verlangt. Länger als nötig und zugleich unvollständig.
+
+**Der Impressumslink ersetzt nichts.** Ob ein Link auf ein Impressum § 35a
+überhaupt erfüllt, wird uneinheitlich beurteilt. Die drei Mails, die die
+Angaben brauchen, tragen sie deshalb **in der Nachricht** — und die Links
+zusätzlich. Die Links stehen in allen dreizehn Mails, weil eine lesende Person
+beide Seiten erreichen können soll; das ist für sich genommen sinnvoll.
+
+**Offene Frage für die Endfreigabe:** Ob eine einwilligungsbasierte
+Launch-Mail überhaupt ein „Geschäftsbrief" im Sinne von § 35a ist, wird
+diskutiert — reine Werbung fällt nach einer Ansicht nicht darunter. Wir haben
+den vorsichtigen Weg gewählt und die Angaben aufgenommen. Fällt die Prüfung
+anders aus, können sie entfallen; die Aufteilung liegt in
+`tests/transactional-email-branding.test.mjs` und ist an einer Stelle änderbar.
+
 ### Versand: Befund und offene Punkte (DESIGN-LEGAL-06)
 
 **V1 — Alle vier Zonen sind bereits aktiv. [BELEGT]**

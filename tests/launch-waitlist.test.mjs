@@ -1661,7 +1661,16 @@ test("76: the confirmation mail's wording and purpose are untouched by the rebra
   assert.equal(subject, "GLOA Launch List bestätigen");
   assert.ok(html.includes("Gleich nach deiner Bestätigung schicken wir dir deinen Launch-Rabattcode"));
   assert.ok(html.includes("keine regelmäßigen Newsletter und keine weitere Werbung."));
-  assert.ok(html.includes("Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin"));
+  // CHANGED, and the intent is stricter than before.
+  //
+  // This pinned "Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin" - a street
+  // § 35a Abs. 1 GmbHG never asks for, and none of the three things it
+  // does: register court, HRB number, managing director. The mail now
+  // carries the whole statutory set instead, so the assertion moved
+  // from an incomplete line to a complete one.
+  for (const particular of ["Cara 2 GmbH", "Amtsgericht Charlottenburg", "HRB 278728 B", "Serwan Amedi"]) {
+    assert.ok(html.includes(particular), `the confirmation mail lost: ${particular}`);
+  }
   assert.ok(text.includes("keine regelmäßigen Newsletter und keine weitere Werbung."));
 
   // Still exactly one action, and still no marketing of any kind.

@@ -137,11 +137,11 @@ test("the company block appears only where the § 35a Abs. 2 exception cannot ap
   for (const name of CUSTOMER) {
     const src = template(name);
     const expected = CARRIES_COMPANY_BLOCK.includes(name);
-    const has = src.includes("GLOA_POSTAL_ADDRESS");
+    const has = src.includes("GLOA_COMPANY_PARTICULARS");
     if (expected) {
-      assert.ok(has, `${name} lost the company block, and its recipients have no business relationship`);
+      assert.ok(has, `${name} lost the § 35a particulars, and its recipients have no business relationship`);
     } else {
-      assert.ok(!has, `${name} carries a company block it does not need`);
+      assert.ok(!has, `${name} carries § 35a particulars it does not need`);
     }
   }
 });
@@ -251,5 +251,52 @@ test("the --only selector is validated before anything is sent", () => {
   // browser and what is asked for here are the same string.
   for (const name of ["01-bestellbestaetigung", "03-widerrufseingang", "09-abo-beendet", "10-jahresplan"]) {
     assert.ok(harness.includes(`["${name}",`), `the harness does not know the preview name ${name}`);
+  }
+});
+
+/* ── The footer's two links, and what § 35a does NOT ask for ─── */
+
+test("every customer mail links the imprint and the privacy notice", () => {
+  for (const name of CUSTOMER) {
+    const src = template(name);
+    assert.ok(src.includes("legalLinks("), `${name} has no imprint/privacy links in the html`);
+    assert.ok(src.includes("legalLinksText("), `${name} has no imprint/privacy links in the plain text`);
+  }
+  // Both are built from the origin, so they are absolute or absent -
+  // the same rule the mark follows, for the same reason.
+  const brand = read("lib/email/brand.ts");
+  assert.match(brand, /export const IMPRINT_PATH = "\/impressum"/);
+  assert.match(brand, /export const PRIVACY_PATH = "\/datenschutz"/);
+  assert.match(brand, /export function legalLinks[\s\S]{0,200}isMailableOrigin/);
+  assert.match(brand, /export function legalLinksText[\s\S]{0,200}isMailableOrigin/);
+});
+
+test("the particulars are the § 35a set, and not the things § 35a never asked for", () => {
+  const brand = read("lib/email/brand.ts");
+  // What § 35a Abs. 1 GmbHG actually lists.
+  for (const required of ["Cara 2 GmbH", "Sitz Berlin", "Amtsgericht Charlottenburg", "HRB 278728 B", "Serwan Amedi"]) {
+    assert.ok(brand.includes(required), `the particulars are missing: ${required}`);
+  }
+  // What it does not. The line this replaced carried the street and
+  // none of the register data - longer than needed and incomplete at
+  // once. The street belongs to § 5 DDG, the VAT id to § 5 DDG and
+  // § 14 UStG, and neither is discharged by putting it in a footer.
+  const particulars = brand.slice(brand.indexOf("GLOA_COMPANY_PARTICULARS ="), brand.indexOf("IMPRINT_PATH"));
+  for (const notRequired of ["Hardenbergstr", "DE457414734", "10623"]) {
+    assert.ok(!particulars.includes(notRequired), `§ 35a does not ask for ${notRequired}`);
+  }
+  // The retired line is gone entirely.
+  assert.ok(!brand.includes("GLOA_POSTAL_ADDRESS"), "the old postal line is back");
+});
+
+test("a link is never treated as a substitute for the particulars", () => {
+  // The mails that need them carry BOTH: the particulars in the message
+  // and the links as well. Whether a link alone discharges § 35a is
+  // contested, so the question is not asked.
+  for (const name of CARRIES_COMPANY_BLOCK) {
+    const src = template(name);
+    assert.ok(src.includes("GLOA_COMPANY_PARTICULARS"), `${name} relies on a link alone`);
+    assert.ok(src.includes("GLOA_COMPANY_PARTICULARS_TEXT"), `${name} omits the particulars from the plain text`);
+    assert.ok(src.includes("legalLinks("), `${name} has no links`);
   }
 });
