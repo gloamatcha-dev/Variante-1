@@ -594,10 +594,12 @@ test("8d: the homepage recipe section is not rendered, and leaves no gap", async
   assert.ok(!sections.includes("featured-recipes"), "an empty recipe section is still in the DOM");
   // Its two neighbours now meet directly, and each carries its own
   // padding, so the seam needs no compensation.
-  const i = sections.indexOf("habit");
-  assert.notEqual(i, -1, "the habit section disappeared");
+  // The carousel sat between how-to and community; with it withheld the
+  // two meet directly, and each carries its own padding.
+  const i = sections.indexOf("how-to");
+  assert.notEqual(i, -1, "the how-to section disappeared");
   assert.equal(sections[i + 1], "community", "the homepage order changed beyond the recipe section");
-  assert.match(css, /\.habit\{[^}]*padding-block:/);
+  assert.match(css, /\.how-to\{[^}]*padding:/);
   assert.match(css, /\.community\{[^}]*padding:/);
   // Gating is a render condition, not a deletion.
   assert.match(site, /\{RECIPES_VISIBLE&&<RecipeCarousel\/>\}/,

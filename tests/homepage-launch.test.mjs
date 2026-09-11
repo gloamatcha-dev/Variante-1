@@ -55,7 +55,6 @@ const cssBlockRules = (from, to) => {
 const HERO_BLOCK = "HOMEPAGE HERO - FINAL PASS";
 const PRELAUNCH_BLOCK = "HOMEPAGE PRELAUNCH SECTION";
 const DAILY_BLOCK = "HOMEPAGE DAILY LIFESTYLE SECTION";
-const ORIGIN_BLOCK = "HOMEPAGE ORIGIN SECTION";
 const HOWTO_BLOCK = "HOMEPAGE HOW TO GLOA SECTION";
 const RECIPES_BLOCK = "HOMEPAGE RECIPES CAROUSEL";
 const COMMUNITY_BLOCK = "HOMEPAGE COMMUNITY SECTION";
@@ -928,9 +927,9 @@ test("28: the section is narrow, hairlined in raspberry, and typed correctly", (
 
 const daily = homepage.slice(
   homepage.indexOf('<section className="daily">'),
-  homepage.indexOf('<section className="origin">')
+  homepage.indexOf("<HowTo/>")
 );
-const dailyCss = cssBlockRules(DAILY_BLOCK, ORIGIN_BLOCK);
+const dailyCss = cssBlockRules(DAILY_BLOCK, HOWTO_BLOCK);
 
 test("29: the copy and the six tiles are one horizontal composition", () => {
   assert.ok(daily.length > 0, "the daily section is missing");
@@ -1028,100 +1027,93 @@ test("31: the section's type stays inside the two families", () => {
 });
 
 /* ══════════════════════════════════════════════════════════════
-   32-34. THE ORIGIN SECTION
+   32-34. THE ORIGIN, NOW INSIDE THE HOW-TO SECTION
+
+   "From Shizuoka, Japan." used to be a cream section of its own, a full
+   band between the blue lifestyle band and the plum how-to one, saying
+   where the matcha comes from and then handing over to a section about
+   preparing it. Two bands, one subject, and the origin read as an
+   island.
+
+   It is not deleted and it is not duplicated: the origin is now the
+   how-to section's eyebrow, and the two product facts that stood under
+   it are two hairline rows in the same copy column. Origin and
+   preparation are one block.
    ══════════════════════════════════════════════════════════════ */
 
-const origin = homepage.slice(
-  homepage.indexOf('<section className="origin">'),
-  homepage.indexOf("<HowTo/>")
-);
-const originCss = cssBlockRules(ORIGIN_BLOCK, HOWTO_BLOCK);
-
-test("32: the origin copy is exactly the approved lines, with no repetition", () => {
-  assert.ok(origin.length > 0, "the origin section is missing");
-  for (const line of [
-    "ORIGIN", "From Shizuoka,", "Japan.",
-    // SITE-01B: the organic claim came out of both lines below. The
-    // origin and the grind stayed; only the certification wording went.
-    "Matcha aus Shizuoka, fein vermahlen.",
-    "MATCHA", "100 % Grünteepulver", "MADE FOR", "Latte + pur",
-  ]) {
-    assert.ok(origin.includes(line), `the origin section lost: ${line}`);
+test("32: the standalone origin band is gone, markup and rules alike", () => {
+  // Matched on the full attribute value: /about carries its own
+  // about-origin-* classes and a bare "origin-inner" would hit those.
+  for (const gone of ['<section className="origin">', 'className="origin-inner home-rail"',
+                      'className="origin-copy"', 'className="eyebrow origin-eyebrow"',
+                      'className="origin-headline"', 'className="origin-divider"',
+                      'className="origin-facts"', 'className="origin-intro"',
+                      'className="origin-list"']) {
+    assert.ok(!site.includes(gone), `the origin band survives in the source: ${gone}`);
   }
-  // The three repetitions are gone: the duplicate ORIGIN row, the longer
-  // sentence that restated the headline, and the English value.
-  for (const gone of [
-    "<dd>Shizuoka, Japan</dd>",
-    "GLOA Matcha kommt aus Shizuoka, Japan",
-    "Latte + pure preparation",
-  ]) {
-    assert.ok(!origin.includes(gone), `the origin section still carries: ${gone}`);
+  // And /about's own origin strip is untouched by this pass.
+  assert.ok(site.includes('className="about-origin-inner home-rail"'), "/about lost its origin strip");
+  // Its own appended stylesheet block left with it.
+  assert.equal(css.indexOf("HOMEPAGE ORIGIN SECTION"), -1, "the origin css block is still here");
+  for (const gone of [".origin-inner", ".origin-line", ".origin-divider",
+                      ".origin-intro", ".origin-list", ".origin-eyebrow"]) {
+    assert.ok(!css.includes(gone), `a dead origin rule is still shipped: ${gone}`);
   }
-  // Exactly two rows now.
-  assert.equal([...origin.matchAll(/<dt>/g)].length, 2, "the fact list is not two rows");
-  assert.match(origin, /<dt>MATCHA<\/dt><dd>100 % Grünteepulver<\/dd>/);
-  assert.match(origin, /<dt>MADE FOR<\/dt><dd>Latte \+ pur<\/dd>/);
+  // The homepage now runs lifestyle -> how-to with nothing between them.
+  assert.match(homepage, /<\/section><HowTo\/>/);
 });
 
-test("33: the section is compact, railed and deliberately smaller than the hero", () => {
-  // WAS a 1240px container of its own, which started this section 57px
-  // right of the lifestyle section. It is on the shared rail now (test 39)
-  // and stays compact through its columns instead of its container.
-  assert.match(homepage, /<div className="origin-inner home-rail">/);
-  assert.ok(!css.includes("max-width:1240px"), "the origin kept its own container");
-  assert.match(originCss, /\.origin\{[\s\S]*?background:var\(--cream\)/);
-  assert.match(originCss, /\.origin\{[\s\S]*?padding:clamp\(68px,6vw,92px\)/);
-  assert.ok(!originCss.includes("100vh"), "the section reserves a viewport");
-  assert.ok(!/text-align:center/.test(originCss), "the content was centred like a card");
+test("33: the origin is stated ONCE, as the how-to eyebrow", () => {
+  // The eyebrow carries it, in the section's own meta voice.
+  assert.match(howTo, /<p className="eyebrow how-to-eyebrow">FROM SHIZUOKA, JAPAN<\/p>/);
+  // And the how-to section says it exactly once - no second headline and
+  // no restating sentence underneath it.
+  assert.equal(howTo.split("SHIZUOKA").length - 1, 1, "the origin is stated more than once here");
+  for (const gone of ["From Shizuoka,", "Matcha aus Shizuoka, fein vermahlen.", "HOW TO GLOA"]) {
+    assert.ok(!howTo.includes(gone), `superseded origin copy is still rendered: ${gone}`);
+  }
+  // The hero's own line is untouched and is a different sentence.
+  assert.ok(site.includes("MATCHA AUS SHIZUOKA."), "the hero eyebrow changed");
+});
+
+test("34: the two product facts moved with it, unchanged and on hairlines", () => {
+  // Exactly the two rows the origin band carried, word for word.
+  assert.match(howTo, /<dt>MATCHA<\/dt><dd>100 % Grünteepulver<\/dd>/);
+  assert.match(howTo, /<dt>MADE FOR<\/dt><dd>Latte \+ pur<\/dd>/);
+  assert.equal([...howTo.matchAll(/<dt>/g)].length, 2, "the fact list is not two rows");
+  // Inside the copy column that was already there - not a new band and
+  // not a card.
+  assert.match(howTo, /<\/h2><dl className="how-to-origin">/);
+
+  // Hairlines in the band's own cream, like every other list on plum.
+  assert.match(howToCss, /\.how-to-origin\{[\s\S]*?border-top:1px solid rgba\(245,235,226/);
+  assert.match(howToCss, /\.how-to-origin div\{[\s\S]*?border-bottom:1px solid rgba\(245,235,226/);
   for (const banned of ["border-radius", "box-shadow", "gradient", "backdrop-filter"]) {
-    assert.ok(!originCss.includes(banned), `the origin section uses ${banned}`);
+    assert.ok(!howToCss.includes(banned), `the origin facts became a card: ${banned}`);
   }
-
-  // THE HIERARCHY IS A SHARED SCALE NOW, not a per-section number: the
-  // whole page below the hero reads from the same two tokens. Test 43
-  // proves the tokens themselves stay under the hero at every width.
-  assert.match(originCss, /\.origin-line\{[\s\S]*?font-size:var\(--type-title\)/);
-  assert.match(originCss, /\.origin-line-accent\{[\s\S]*?font-size:var\(--type-editorial\)/);
-  assert.ok(!/\.origin-line(-accent)?\{[^}]*font-size:clamp/.test(originCss),
-    "the origin section went back to a scale of its own");
-
-  // Two columns with a short, centred raspberry seam between them.
-  // The facts take a fixed compact column that ends ON the right rail;
-  // the headline absorbs the rest. A proportional split would have
-  // stretched the two fact rows to ~830px at 1520.
-  assert.match(originCss, /grid-template-columns:minmax\(0,1fr\) 1px minmax\(320px,560px\)/);
-  assert.match(originCss, /\.origin-divider\{[\s\S]*?width:1px[\s\S]*?background:var\(--berry\)/);
-  assert.match(originCss, /\.origin-divider\{[\s\S]*?height:76%/);
-  // Tablet turns the seam horizontal; mobile stacks the rows.
-  assert.match(originCss, /@media \(max-width:1024px\)\{[\s\S]*?\.origin-divider\{width:72px;height:1px/);
-  assert.match(originCss, /@media \(max-width:640px\)\{[\s\S]*?\.origin-list div\{flex-direction:column/);
-});
-
-test("34: the origin type stays inside the two families", () => {
-  // Only "Japan." uses the display face; everything else is the sans.
-  const accent = originCss.slice(originCss.indexOf(".origin-line-accent{"), originCss.indexOf("}", originCss.indexOf(".origin-line-accent{")));
-  assert.match(accent, /font-family:var\(--font-display\)/);
-  assert.match(accent, /font-style:italic/);
-  assert.match(accent, /color:var\(--berry\)/);
-  assert.match(origin, /<i className="origin-line origin-line-accent">Japan\.<\/i>/);
-
-  for (const name of [".origin-eyebrow{", ".origin-line{", ".origin-intro{", ".origin-list dt{", ".origin-list dd{"]) {
-    const rule = originCss.slice(originCss.indexOf(name), originCss.indexOf("}", originCss.indexOf(name)));
-    assert.match(rule, /font-family:var\(--font-sans\)/, `${name} is not on the sans`);
-    assert.ok(!rule.includes("--font-display"), `${name} uses the display face`);
-    assert.ok(!/Georgia|Cormorant|[^-]serif/.test(rule), `${name} reaches for a serif`);
-  }
-  // The eyebrow matches the site's meta voice exactly.
-  const eyebrow = originCss.slice(originCss.indexOf(".origin-eyebrow{"), originCss.indexOf("}", originCss.indexOf(".origin-eyebrow{")));
-  assert.match(eyebrow, /font-weight:600/);
-  assert.match(eyebrow, /font-size:var\(--type-meta\)/);
-  assert.match(eyebrow, /letter-spacing:\.2em/);
-  assert.match(eyebrow, /text-transform:uppercase/);
-  assert.match(eyebrow, /color:var\(--berry\)/);
-  // "From Shizuoka," is lighter than the hero anchor, on purpose.
-  const line = originCss.slice(originCss.indexOf(".origin-line{"), originCss.indexOf("}", originCss.indexOf(".origin-line{")));
-  assert.match(line, /font-weight:500/);
-  assert.ok(!/font-weight:[89]00/.test(line), "the origin headline is hero-weight");
+  // Legible on plum, and on the sans like every other meta line here.
+  assert.match(howToCss, /\.how-to-origin dt\{[\s\S]*?font-family:var\(--font-sans\)/);
+  assert.match(howToCss, /\.how-to-origin dt\{[\s\S]*?text-transform:uppercase/);
+  assert.match(howToCss, /\.how-to-origin dd\{[\s\S]*?color:var\(--cream\)/);
+  // Label and value stack on a phone instead of splitting to two edges.
+  // Read from the BALANCED media block, not with a lazy span: `[\s\S]*?`
+  // from one @media marker will happily run into the next block and
+  // report a rule as living at a breakpoint it does not live at.
+  const mq = w => {
+    const at = howToCss.indexOf(`@media (max-width:${w}px){`);
+    assert.notEqual(at, -1, `the how-to block has no ${w}px media query`);
+    const from = howToCss.indexOf("{", at);
+    let depth = 0, i = from;
+    for (; i < howToCss.length; i++) {
+      if (howToCss[i] === "{") depth++;
+      else if (howToCss[i] === "}" && --depth === 0) break;
+    }
+    return howToCss.slice(from + 1, i);
+  };
+  assert.match(mq(1024), /\.how-to-origin\{max-width:420px\}/);
+  assert.match(mq(640), /\.how-to-origin\{max-width:none\}/);
+  assert.match(mq(640), /\.how-to-origin div\{flex-direction:column/);
+  assert.match(mq(640), /\.how-to-origin dd\{text-align:left\}/);
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -1195,11 +1187,13 @@ test("35: the section paints one blue, one cream, and nothing else", () => {
   // ── THE FROZEN SECTIONS ──────────────────────────────────────
   // This pass touched no rule any other section reads. The shared h2 rule
   // that .daily co-owns with five other sections is intact, and the hero,
-  // prelaunch and origin blocks still carry their own raspberry.
+  // prelaunch blocks still carry their own raspberry. The shared h2 rule
+  // still names .origin: it is co-owned with .pdp-facts and five other
+  // sections and is not this pass's to edit, so it is left exactly as it
+  // was and simply no longer matches anything on this page.
   assert.match(css, /\.product-intro h2,\.daily h2,\.origin h2,[^{]*\{font-size:clamp\(48px,7vw,98px\)/);
   assert.match(cssBlockRules(HERO_BLOCK, PRELAUNCH_BLOCK), /var\(--berry\)/);
   assert.match(cssBlockRules(PRELAUNCH_BLOCK, DAILY_BLOCK), /var\(--berry\)/);
-  assert.match(cssBlockRules(ORIGIN_BLOCK), /var\(--berry\)/);
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -1211,7 +1205,10 @@ const howToCss = cssBlockRules(HOWTO_BLOCK, RECIPES_BLOCK);
 
 test("36: the copy is exactly the approved lines, stated once", () => {
   assert.ok(howTo.length > 0, "the how-to section is missing");
-  assert.ok(howTo.includes('<p className="eyebrow how-to-eyebrow">HOW TO GLOA</p>'));
+  // The eyebrow carries the ORIGIN now - see tests 32-34. "HOW TO GLOA"
+  // said what the section obviously is; the origin says something the
+  // page would otherwise have to spend a band on.
+  assert.ok(howTo.includes('<p className="eyebrow how-to-eyebrow">FROM SHIZUOKA, JAPAN</p>'));
   assert.ok(howTo.includes('<span className="how-to-line">Latte oder pur.</span>'));
   assert.ok(howTo.includes('<i className="how-to-line how-to-line-accent">Mehr brauchst du nicht.</i>'));
   // The old headline capitalised "Pur."; the approved line does not.
@@ -1340,11 +1337,11 @@ test("39: every homepage section starts on one rail, and it is the lifestyle one
   // ── EVERY HOMEPAGE WRAPPER IS ON IT ──────────────────────────
   // .home-rail sits inside a section whose full-width background carries
   // the gutter; .home-rail-pad IS the rail where there is no wrapper.
-  // DESIGN-07B added habit-inner - the three-sentence band between
-  // how-to and the carousel. Re-pinned, not relaxed: the guard still
-  // says every homepage wrapper is on the one rail.
-  for (const wrapper of ["countdown-inner", "daily-inner", "origin-inner", "how-to-inner",
-                         "habit-inner", "community-inner", "brand-note-inner"]) {
+  // origin-inner and habit-inner left with their sections. Re-pinned,
+  // not relaxed: the guard still says every homepage wrapper that EXISTS
+  // is on the one rail.
+  for (const wrapper of ["countdown-inner", "daily-inner", "how-to-inner",
+                         "community-inner", "brand-note-inner"]) {
     assert.ok(site.includes(`className="${wrapper} home-rail"`), `${wrapper} is not on the rail`);
   }
   for (const wrapper of ["featured-recipes-head", "featured-recipes-foot"]) {
@@ -1355,7 +1352,7 @@ test("39: every homepage section starts on one rail, and it is the lifestyle one
   // 4.5vw / 5vw / 6vw and 22px.
   // The shop hero and its launch band read the same gutter - section 20
   // of the brief: the shop is on the canonical rail too.
-  assert.match(railCss, /\.countdown,\s*\.prelaunch,\s*\.daily,\s*\.origin,\s*\.how-to,\s*\.habit,\s*\.community,\s*\.brand-note,\s*\.shop-hero,\s*\.shop-strip,\s*\.shop-column,\s*\.shop-accordion,\s*\.matcha-hero,\s*\.matcha-product,\s*\.matcha-research,\s*\.matcha-use,\s*\.matcha-page \.faq,\s*\.matcha-cta\{padding-inline:var\(--rail-gutter\)\}/);
+  assert.match(railCss, /\.countdown,\s*\.prelaunch,\s*\.daily,\s*\.how-to,\s*\.community,\s*\.brand-note,\s*\.shop-hero,\s*\.shop-strip,\s*\.shop-column,\s*\.shop-accordion,\s*\.matcha-hero,\s*\.matcha-product,\s*\.matcha-research,\s*\.matcha-use,\s*\.matcha-page \.faq,\s*\.matcha-cta\{padding-inline:var\(--rail-gutter\)\}/);
   // The hero has no wrapper - its own padding IS the rail, in the same
   // shape, at desktop and on mobile.
   assert.match(css, /\.hero\{[\s\S]*?padding-inline:max\(var\(--rail-gutter\),calc\(\(100% - var\(--rail-max\)\) \/ 2\)\)/);
@@ -1603,17 +1600,16 @@ test("43: one scale below the hero, and the hero stays above it at every width",
   };
   // Every section title below the hero, including the two that are not in
   // an appended block.
-  for (const name of [".daily-line{", ".origin-line{", ".how-to-line{", ".featured-recipes-line{",
-                      ".community-line{", ".prelaunch-line-1{", ".prelaunch-line-3{", ".brand-note-text{",
-                      ".habit-line{"]) {
+  for (const name of [".daily-line{", ".how-to-line{", ".featured-recipes-line{",
+                      ".community-line{", ".prelaunch-line-1{", ".prelaunch-line-3{", ".brand-note-text{"]) {
     const r = rule(name);
     assert.match(r, /font-size:var\(--type-title\)/, `${name} is not on the section scale`);
     assert.match(r, /font-family:var\(--font-sans\)/, `${name} is not on the sans`);
   }
   // Every editorial accent.
-  for (const name of [".daily-line-accent{", ".origin-line-accent{", ".how-to-line-accent{",
+  for (const name of [".daily-line-accent{", ".how-to-line-accent{",
                       ".featured-recipes-line-accent{", ".community-line-accent{",
-                      ".prelaunch-line-2{", ".brand-note-text i{", ".habit-line-accent{"]) {
+                      ".prelaunch-line-2{", ".brand-note-text i{"]) {
     const r = rule(name);
     assert.match(r, /font-size:var\(--type-editorial\)/, `${name} is not on the editorial scale`);
     assert.match(r, /font-family:var\(--font-display\)/, `${name} is not on the display face`);
@@ -1622,7 +1618,7 @@ test("43: one scale below the hero, and the hero stays above it at every width",
   }
   // Every eyebrow, including the anti-newsletter one that was still on
   // the generic 12px/.14em rule.
-  for (const name of [".daily-eyebrow{", ".origin-eyebrow{", ".how-to-eyebrow{",
+  for (const name of [".daily-eyebrow{", ".how-to-eyebrow{",
                       ".featured-recipes-eyebrow{", ".community-eyebrow{",
                       ".prelaunch-eyebrow{", ".brand-note .eyebrow{"]) {
     const r = rule(name);
@@ -1632,13 +1628,13 @@ test("43: one scale below the hero, and the hero stays above it at every width",
     assert.match(r, /text-transform:uppercase/, `${name} is not uppercase`);
   }
   // Every body sentence.
-  for (const name of [".daily-note{", ".origin-intro{", ".featured-recipes-sub{",
+  for (const name of [".daily-note{", ".daily-lead{", ".featured-recipes-sub{",
                       ".prelaunch-body{", ".brand-note-sub{"]) {
     assert.match(rule(name), /font-size:var\(--type-body\)/, `${name} is not on the body scale`);
   }
   // Every CTA and meta line.
   for (const name of [".daily-link{", ".featured-recipes-cta{", ".community-cta{",
-                      ".prelaunch .prelaunch-cta{", ".recipe-card-time{", ".origin-list dt{",
+                      ".prelaunch .prelaunch-cta{", ".recipe-card-time{",
                       ".how-to-step-number{", ".how-to-module-number{"]) {
     assert.match(rule(name), /font-size:var\(--type-meta\)/, `${name} is not on the meta scale`);
   }
@@ -1665,161 +1661,6 @@ test("43: one scale below the hero, and the hero stays above it at every width",
   for (const m of css.matchAll(/font-family:[^;}]*\b(Georgia|Arial|Helvetica|Times)\b/g)) {
     assert.match(m[0], /var\(--font-(sans|display)\)[^;}]*\b(Georgia|Arial)\b/, `an active fallback face: ${m[0]}`);
   }
-});
-
-/* ══════════════════════════════════════════════════════════════
-   DESIGN-07B - THE HABIT SECTION
-
-   Three sentences between how-to and the recipe carousel, moved
-   horizontally by the reader's own vertical scrolling. Everything the
-   hero effect got wrong once is asserted here on its own terms.
-   ══════════════════════════════════════════════════════════════ */
-
-const habitHook = site.slice(site.indexOf("function useHabitScrollProgress"),
-                             site.indexOf("function HabitLoop()"));
-const habitComponent = site.slice(site.indexOf("function HabitLoop()"), site.indexOf("function CommunityFeed()"));
-// BOUNDED at the next block. Unbounded it ran to the end of the file
-// and this section's bans were reading the launch page's rules.
-const habitCss = cssBlockRules("HOMEPAGE HABIT SECTION", "/launch — THE LAUNCH LIST");
-
-test("44: the three sentences are exact, and nothing else was written", () => {
-  // Verbatim, with the typographic apostrophe they were given in - a
-  // straight one is a different character and a different rendering.
-  for (const s of ["You’ll whisk.", "You’ll sip.", "You’ll come back for more."]) {
-    assert.equal(site.split(s).length - 1, 1,
-      `the sentence is missing, duplicated or reworded: ${s}`);
-  }
-  for (const straight of ["You'll whisk", "You'll sip", "You'll come back"]) {
-    assert.ok(!site.includes(straight), `a straight apostrophe crept in: ${straight}`);
-  }
-  // NO INVENTED COPY. Every other homepage section carries an eyebrow;
-  // this one carries the three sentences and nothing else - no eyebrow,
-  // no supporting line, no button, no link.
-  assert.ok(!habitComponent.includes("eyebrow"), "the section grew an eyebrow nobody wrote");
-  assert.ok(!habitComponent.includes("<Link"), "the section grew a call to action nobody wrote");
-  assert.ok(!/<p[ >]/.test(habitComponent), "the section grew a paragraph nobody wrote");
-  // One heading, three lines, and the third is the editorial <i> the
-  // house style uses for its accent everywhere else on this page.
-  assert.equal([...habitComponent.matchAll(/<h2[ >]/g)].length, 1);
-  assert.equal([...habitComponent.matchAll(/className="habit-line /g)].length, 3);
-  assert.match(habitComponent, /<i className="habit-line habit-line-3 habit-line-accent">/);
-});
-
-test("45: it sits between how-to and the carousel, and displaces nothing", () => {
-  const homepage = site.slice(homeStart, site.indexOf("// -- Catalog-driven shop"));
-  let at = -1;
-  for (const tag of ["<HowTo/>", "<HabitLoop/>", "<RecipeCarousel/>"]) {
-    const next = homepage.indexOf(tag);
-    assert.ok(next > at, `${tag} is out of order`);
-    at = next;
-  }
-  // Every section that was on the page before is still on it, in the
-  // same order. The new band was inserted, never swapped in.
-  let seen = -1;
-  for (const marker of ['className="hero"', "<LaunchCountdown/>", 'className="prelaunch"',
-                        'className="daily"', 'className="origin"', "<HowTo/>",
-                        "<RecipeCarousel/>", 'className="community"', "<BrandNote/>"]) {
-    const next = homepage.indexOf(marker);
-    assert.ok(next > seen, `a pre-existing section was moved or removed: ${marker}`);
-    seen = next;
-  }
-  // And the hero it sits below is untouched - same copy, same hook.
-  assert.match(site, /<h1>Matcha\.<br\/><span className="hero-line-2">Is for everyone\.<\/span><\/h1>/);
-  assert.ok(site.includes("function useHeroScrollProgress"), "the hero hook was replaced");
-});
-
-test("46: the movement is scroll-linked, and the variable cannot be shadowed", () => {
-  // ONE rAF READER, ONE PROPERTY, NO LIBRARY AND NO CLOCK.
-  assert.match(habitHook, /requestAnimationFrame/);
-  assert.match(habitHook, /setProperty\("--habit-scroll"/);
-  assert.match(habitHook, /window\.matchMedia\("\(prefers-reduced-motion: reduce\)"\)\.matches/);
-  assert.match(habitHook, /removeEventListener\("scroll"/);
-  assert.match(habitHook, /cancelAnimationFrame/);
-  for (const banned of ["setInterval", "setTimeout", "framer-motion", "gsap", "@keyframes", "useState"]) {
-    assert.ok(!habitHook.includes(banned), `the habit effect uses ${banned}`);
-  }
-  // PROGRESS IS THE SECTION'S OWN TRAVEL, not the page's. The hero hook
-  // reads scrollY against the first viewport, which says nothing about a
-  // section two thirds of the way down - so this one measures the box.
-  assert.match(habitHook, /getBoundingClientRect\(\)/);
-  assert.ok(!habitHook.includes("scrollY"), "the habit effect is anchored to the top of the page");
-  // Eased, so the movement settles rather than stopping dead.
-  assert.match(habitHook, /const progress=raw\*raw\*\(3-2\*raw\);/);
-
-  // ── THE cf5b192 REGRESSION, ON THE NEW EFFECT ────────────────
-  // The hook writes --habit-scroll on the section and the lines INHERIT
-  // it. A declaration on a line that READS the variable beats the
-  // inherited value, so the writes would never arrive and the type would
-  // sit perfectly still with every amplitude below still reading right.
-  assert.match(css, /\.habit\{[^}]*--habit-scroll:0/);
-  const owners = [
-    ...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{[^{}]*--habit-scroll\s*:/g),
-  ].flatMap(m => m[1].trim().split(",").map(s => s.trim()));
-  assert.deepEqual([...new Set(owners)], [".habit"],
-    "--habit-scroll is declared on an element that reads it, which shadows the hook");
-});
-
-test("47: it fans in one direction, steps down twice, and clips nothing", () => {
-  const amp = (sel, block) => {
-    const m = new RegExp("\\." + sel + "\\{transform:translate3d\\(calc\\(var\\(--habit-scroll\\)\\*(-?[\\d.]+)px\\)").exec(block);
-    assert.ok(m, `missing amplitude for .${sel}`);
-    return Number(m[1]);
-  };
-  const media = width => {
-    const at = habitCss.indexOf(`@media (max-width:${width}px)`);
-    assert.notEqual(at, -1, `missing the ${width}px band`);
-    return habitCss.slice(at, habitCss.indexOf("\n}", at));
-  };
-  const desktop = habitCss.slice(0, habitCss.indexOf("@media"));
-
-  // ONE DIRECTION, THREE DISTANCES. All positive, so the left edge never
-  // moves toward the gutter and no line can drift off the reading edge.
-  for (const band of [desktop, media(900), media(640)]) {
-    const a = [1, 2, 3].map(i => amp(`habit-line-${i}`, band));
-    assert.ok(a.every(v => v > 0), "a line drifts toward the reading edge");
-    assert.ok(a[0] < a[1] && a[1] < a[2], "the three lines no longer fan");
-  }
-  // AND IT STEPS DOWN TWICE. Desktop > tablet > phone, for every line.
-  for (let i = 1; i <= 3; i++) {
-    assert.ok(amp(`habit-line-${i}`, desktop) > amp(`habit-line-${i}`, media(900)),
-      `line ${i} travels as far on a tablet as on a desktop`);
-    assert.ok(amp(`habit-line-${i}`, media(900)) > amp(`habit-line-${i}`, media(640)),
-      `line ${i} travels as far on a phone as on a tablet`);
-  }
-  // THE PHONE CAP IS THE GUTTER. Below 640px the longest sentence wraps,
-  // so its box is the full width of the rail and any drift eats straight
-  // into the gutter - which is 20px from 640px all the way down to 320px.
-  assert.ok(amp("habit-line-3", media(640)) < 20,
-    "the phone travel is wider than the gutter it has to fit inside");
-
-  // TRANSFORM ONLY - no timed animation, no animated layout property.
-  for (const banned of ["animation:", "@keyframes", "transition:transform",
-                        "left:calc(var(--habit-scroll)", "margin-left:calc"]) {
-    assert.ok(!habitCss.includes(banned), `the habit section animates with ${banned}`);
-  }
-  // A PAGE SCROLLBAR IS IMPOSSIBLE, whatever the amplitudes become.
-  // Clip rather than hidden: hidden would make this a scroll container.
-  assert.match(habitCss, /\.habit\{[^}]*overflow-x:clip/);
-  assert.ok(!/\.habit\{[^}]*overflow-x:hidden/.test(habitCss));
-
-  // REDUCED MOTION WINS OVER ALL THREE BANDS.
-  assert.match(habitCss, /@media \(prefers-reduced-motion:reduce\)\{[\s\S]*?transform:none!important/);
-});
-
-test("48: the band is plum, cream, and on the two families only", () => {
-  // Plum ground, cream type - both existing tokens. No gradient, no
-  // glow, no shadow, no card, no radius, no hand-written hex.
-  assert.match(habitCss, /\.habit\{[^}]*background:var\(--plum\)/);
-  assert.match(habitCss, /\.habit\{[^}]*color:var\(--cream\)/);
-  for (const banned of ["gradient", "backdrop-filter", "box-shadow", "border-radius", "#"]) {
-    assert.ok(!habitCss.includes(banned), `the band uses ${banned}`);
-  }
-  // Every size in the section is a scale token, never a raw pixel.
-  for (const m of habitCss.matchAll(/font-size:([^;}]+)/g)) {
-    assert.match(m[1], /^var\(--type-(title|editorial)\)$/, `an off-scale size: ${m[1]}`);
-  }
-  // On the canonical rail, like every other homepage section.
-  assert.ok(site.includes('className="habit-inner home-rail"'), "the band is not on the rail");
 });
 
 /* ══════════════════════════════════════════════════════════════

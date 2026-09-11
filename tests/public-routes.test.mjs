@@ -68,8 +68,11 @@ test("homepage: the consumer sections still render", async () => {
   // was the newsletter band's eyebrow and was dropped in Task 27E when
   // the newsletter was removed site-wide.
   const { html } = await server.getHtml("/");
-  assert.match(html, /From Shizuoka/);
-  assert.match(html, /HOW TO GLOA/);
+  // The origin used to be a cream band headlined "From Shizuoka," and is
+  // now the how-to section's eyebrow - same fact, one band fewer. The
+  // preparation section it opens is still there.
+  assert.match(html, /FROM SHIZUOKA, JAPAN/);
+  assert.match(html, /Latte oder pur\./);
 });
 
 /* -- No newsletter anywhere (Task 27E) ----------------------- */
