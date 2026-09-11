@@ -47,7 +47,9 @@ const lpEnd = css.indexOf("/* " + "═".repeat(6), lpAt);
 const lpCss = css.slice(lpStart, lpEnd === -1 ? undefined : lpEnd)
   .replace(/\/\*[\s\S]*?\*\//g, "");
 
-const PORT = 8937;
+// 8937 belongs to account-landing and to the secured-port case in
+// internal-order-notification-retry; this suite needs its own.
+const PORT = 8951;
 let server, home, shop;
 test.before(async () => {
   server = await startRenderServer(PORT);

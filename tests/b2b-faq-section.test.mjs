@@ -287,7 +287,7 @@ test("5b: nothing else on either page moved", () => {
   assert.match(site, /src="\/img\/B2B Packung\.png"/);
   assert.match(site, /const b2bFacts=\["SHIZUOKA, JAPAN"/);
   // The other pages' blocks.
-  for (const marker of ["/about — ONE EDITORIAL SYSTEM", "/our-matcha PAGE HERO",
+  for (const marker of ["/about — THREE BANDS", "/our-matcha PAGE HERO",
                         "/our-matcha FAQ + FINAL CTA", ".home-rail{"]) {
     assert.ok(css.includes(marker), `a frozen block went missing: ${marker}`);
   }

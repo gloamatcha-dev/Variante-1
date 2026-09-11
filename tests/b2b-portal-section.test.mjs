@@ -293,7 +293,7 @@ test("4c: every selector is scoped, and nothing else on the page moved", () => {
                      'window.dispatchEvent(new CustomEvent("gloa:b2b-lead",{detail:payload}))']) {
     assert.ok(src.includes(sig), `the lead machinery changed: ${sig}`);
   }
-  for (const marker of ["/about — ONE EDITORIAL SYSTEM", "/our-matcha PAGE HERO", ".home-rail{"]) {
+  for (const marker of ["/about — THREE BANDS", "/our-matcha PAGE HERO", ".home-rail{"]) {
     assert.ok(css.includes(marker), `a frozen block went missing: ${marker}`);
   }
 });

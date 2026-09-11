@@ -680,8 +680,8 @@ test("5b: section headings are the established GLOA section scale, not hero-size
   assert.match(ital, /font-family:var\(--font-display\),Georgia,serif/);
   assert.match(ital, /font-style:italic/);
   // Exactly what /about already sets, so no second section scale exists.
-  assert.match(css, /\.about-why-line,[^{]*\{[^}]*font-size:clamp\(42px,4\.2vw,60px\)/);
-  assert.match(css, /\.about-why-line-accent,[^{]*\{[^}]*font-size:clamp\(44px,4\.6vw,64px\)/);
+  assert.match(css, /\.about-name-line,[^{]*\{[^}]*font-size:clamp\(42px,4\.2vw,60px\)/);
+  assert.match(css, /\.about-story-line-accent\{[^}]*font-size:clamp\(44px,4\.6vw,64px\)/);
 
   // A section heading never reaches the page hero, at any width.
   const at = (lo, vw, hi, w) => Math.max(lo, Math.min(vw / 100 * w, hi));

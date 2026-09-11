@@ -3573,62 +3573,48 @@ header nav{gap:18px;font-size:12px}
 }
 
 /* ══════════════════════════════════════════════════════════════
-   /about — ONE EDITORIAL SYSTEM FOR THE WHOLE PAGE
+   /about — THREE BANDS, ONE EDITORIAL SYSTEM
 
-   Was: seven sections built independently. A 122px page h1 over a 12%
-   index gutter and a 630px min-height, a 98px h2 shared by four
-   sections, a 44px statement list, a 64px TikTok handle, section
-   paddings of 120px / 110px / 90px / 70px, and content left edges at
-   5vw, 20%, 12% and 45%. Nothing on the page agreed with anything else
-   on it.
+   Was seven sections and 103 rules: a hero with a metadata column, a
+   raspberry WHY band, a cream NOT COMPLICATED band, a HERKUNFT strip
+   with its own drawn mark, a values list, a BUILDING GLOA band and a
+   closing CTA band. Each said one thing, most of them said it twice,
+   and the page read as a stack of coloured panels.
 
-   Now: the system /our-matcha and the homepage already carry.
+   Now three, and the colour does the structuring:
 
-   ── THE ROLES ────────────────────────────────────────────────
-     eyebrow      Inter 600 / 11px / .2em / uppercase - every section
-     page hero    the ONE h1, "Good energy. / No theatre."
-     section      Inter 500 + Cormorant italic, four sections share it
-     values intro deliberately a step below section scale
-     statement    Inter 600, max 32px - the 01/02/03 rows
-     body         Inter 400, 16-17px / 1.55-1.65
-     meta         Inter 500-600, 10-11px, uppercase, tracked
+       1  .about-hero    BLUE   #1746D1   cream on blue
+       2  .about-name    CREAM  #F5EBE2   near black on cream
+       3  .about-story   BLUE   #1746D1   cream on blue
 
-   ── WHY THE HERO CURVE IS NOT clamp(64px,6vw,84px) ───────────
-   The caps the brief asks for are kept exactly - 84px sans, 76px
-   italic - but its FLOORS are not reachable. The homepage hero dips to
-   its own 54px floor just above 900px, and /about must never read
-   larger than it; a 64px floor would sit 10px OVER the homepage hero
-   from 901px to about 1085px. clamp(52px,5.4vw,84px) stays under it at
-   every width from 320px up and still stays clear of the 60px section
-   cap.
+   Then the existing black footer. CREAM IN THE MIDDLE, NOT RASPBERRY:
+   band 2 carries almost all of the page's reading - the name, three
+   paragraphs and four values - and cream is the ground this site reads
+   on everywhere else. Raspberry stays exactly where it already lives on
+   cream: as the accent on the eyebrows, the wordmark and the value
+   numbers. Two blue fields frame the page instead of two saturated ones
+   competing in the middle.
 
-   The same arithmetic sets the section floors. The 46/50 floors would
-   put the section ITALIC (50px) above the hero italic (48px) between
-   901px and ~1090px, inverting the one hierarchy the brief cares about
-   most. 42/44 floors keep the order intact; the caps - 60px sans, 64px
-   italic - are the brief's, unchanged.
+   ── NOTHING NEW WAS INVENTED ─────────────────────────────────
+   The hero reads the canonical page-hero classes (gloa-hero-*), so
+   /about sets no hero size of its own. Section headings read the
+   established GLOA section scale that /partnerships and /our-matcha
+   already use. The eyebrow is the site's 11px / .2em meta role. The
+   values sit on the same hairline rhythm as the process steps and the
+   form fieldsets. Every section is on .home-rail inside a full-width
+   background.
 
-   ── THE RAIL ─────────────────────────────────────────────────
-   Every section's content sits on .home-rail inside a full-width
-   background, so the left edge is max(--rail-gutter, (vw - 1520) / 2) -
-   the same edge the homepage, /shop and /our-matcha use. The 50/50
-   split is the one shape .home-rail cannot express, so it computes that
-   same edge from its own half-width column; see the rule.
-
-   ── NO MIN-HEIGHTS ───────────────────────────────────────────
-   Every height here is content-driven. The 630px hero and 600px split
-   min-heights are what produced the empty blue and raspberry bands.
+   ── NO RESERVED HEIGHT ───────────────────────────────────────
+   Every height here is content-driven. The old hero carried a
+   min-height grid floor to fill a blue field its own copy could not,
+   and that is exactly the empty band this pass removes.
    ══════════════════════════════════════════════════════════════ */
 
-/* ── SHARED ROLES ──────────────────────────────────────────── */
 .about-page{background:var(--cream)}
 
-.about-hero-eyebrow,
-.about-why-eyebrow,
-.about-real-eyebrow,
-.about-origin-eyebrow,
-.about-cares-eyebrow,
-.about-tiktok-eyebrow{
+/* ── SHARED ROLES ──────────────────────────────────────────── */
+/* (0,2,0) so it outranks the global .eyebrow, which is 12px / .14em. */
+.about-page .about-eyebrow{
   margin:0;
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:600;
@@ -3638,26 +3624,11 @@ header nav{gap:18px;font-size:12px}
   letter-spacing:.2em;
   text-transform:uppercase;
 }
-
-.about-hero-headline,
-.about-why-headline,
-.about-real-headline,
-.about-cares-headline,
-.about-tiktok-headline,
-.about-final-headline{
-  display:flex;
-  flex-direction:column;
-  align-items:flex-start;
-  margin:clamp(18px,1.8vw,26px) 0 0;
-  letter-spacing:normal;
-  line-height:1;
-}
-
-/* THE SECTION HEADLINE PAIR. Four sections read exactly this. */
-.about-why-line,
-.about-real-line,
-.about-tiktok-line,
-.about-final-line{
+/* The section headline pair, the same two tokens every finished GLOA
+   section is set in. The hero does NOT read these - it reads the
+   canonical page-hero scale instead. */
+.about-name-line,
+.about-story-line{
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:500;
   font-style:normal;
@@ -3665,10 +3636,7 @@ header nav{gap:18px;font-size:12px}
   line-height:.98;
   letter-spacing:-.04em;
 }
-.about-why-line-accent,
-.about-real-line-accent,
-.about-tiktok-line-accent,
-.about-final-line-accent{
+.about-story-line-accent{
   font-family:var(--font-display),Georgia,serif;
   font-weight:400;
   font-style:italic;
@@ -3677,252 +3645,167 @@ header nav{gap:18px;font-size:12px}
   letter-spacing:-.01em;
   margin-top:3px;
 }
+.about-name-headline,
+.about-story-headline,
+.about-values-headline{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  margin:clamp(18px,1.8vw,26px) 0 0;
+  letter-spacing:normal;
+  line-height:1;
+}
+.about-hero :focus-visible,
+.about-story :focus-visible{outline-color:var(--cream)}
 
-/* ── 01. PAGE HERO ─────────────────────────────────────────── */
+/* ══ 1 — THE HERO, ON BLUE ═════════════════════════════════ */
+/* One column. The old hero put the brand copy and a metadata stack in a
+   second column beside the headline, which is what made the phone read
+   the page as two conversations at once. One vertical order, at every
+   width, and the headline is the first thing on the screen. */
 .about-hero{
   background:var(--blue);
   color:var(--cream);
-  padding-block:clamp(88px,8vw,130px);
+  padding-block:clamp(84px,7.4vw,124px);
   padding-inline:var(--rail-gutter);
 }
-/* THE ONE DELIBERATE HEIGHT ON THE PAGE, and it is a CONTENT floor on
-   the grid rather than a min-height on the section: the brief asks the
-   hero to land around 580-680px on desktop, which its own copy does not
-   fill. It resolves to about 590px at 1440 and 630px at 1680, and it is
-   dropped entirely below 1024px so the stacked hero stays content-
-   driven. Nothing else on /about reserves space. */
-.about-hero-inner{
-  display:grid;
-  grid-template-columns:minmax(0,1.05fr) minmax(360px,.75fr);
-  gap:clamp(36px,4.5vw,80px);
-  align-items:stretch;
-  min-height:clamp(300px,25vw,370px);
-}
-/* Headline top left, brand copy top right, metadata bottom right - the
-   composition the brief describes, with the blue field between them. */
-.about-hero-copy{display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;min-width:0}
+.about-hero-inner{display:flex;flex-direction:column;align-items:flex-start}
 .about-hero-eyebrow{color:rgba(245,235,226,.72)}
-.about-hero-line{color:var(--cream)}
-.about-hero-line-accent{margin-top:4px}
-.about-hero-side{display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;min-width:0}
-.about-hero-lead,
-.about-hero-sub{
-  margin:0;
-  max-width:460px;
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:400;
-  font-style:normal;
-  font-size:clamp(16px,1.3vw,17px);
-  line-height:1.55;
-  letter-spacing:0;
-  color:var(--cream);
-}
-.about-hero-sub{margin-top:14px;color:rgba(245,235,226,.72)}
-/* The three metadata lines, at meta scale and no larger. */
-.about-hero-meta{
+.about-hero-headline{
   display:flex;
   flex-direction:column;
-  gap:5px;
-  /* Bottom right, pushed there by the column rather than positioned
-     absolutely - so it can never sit on top of the copy. The padding is
-     the minimum gap when the column is short. */
-  margin:auto 0 0;
-  padding-top:clamp(34px,3.4vw,52px);
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:500;
-  font-style:normal;
-  font-size:11px;
-  line-height:1.3;
-  letter-spacing:.14em;
-  text-transform:uppercase;
-  color:rgba(245,235,226,.62);
+  align-items:flex-start;
+  max-width:1080px;
+  margin:clamp(18px,1.8vw,26px) 0 0;
+  letter-spacing:normal;
+  line-height:1;
 }
-
-/* ── 02. WHY GLOA EXISTS ───────────────────────────────────── */
-/* Was a 50/50 split - a raspberry headline half butted against a cream
-   copy half, with the seam running down the middle of the page and
-   near-black type on the cream side. It was the one section on /about
-   with a shape of its own, and it needed a bespoke rail calculation to
-   sit on the page's left edge at all.
-
-   Now ONE raspberry ground, edge to edge, with both columns on the
-   canonical .home-rail - the same shape MATCHA FOR REAL LIFE and
-   BUILDING GLOA use. The section is a module in a sequence rather than
-   a device, and the rail arithmetic goes with the split.
-
-   THE TYPE IS THE PAGE'S, UNCHANGED. The shared section headline pair
-   (60px sans / 64px italic caps), the 11px/.2em eyebrow every GLOA
-   eyebrow on every finished page uses, and a right column that steps
-   500/18px -> 400/17px -> 500/17px without ever leaving the body role,
-   whose ceiling site-wide is --type-body's 18px. Nothing here is sized
-   for this section alone. */
-.about-why{
-  background:var(--berry);
-  color:var(--cream);
-  padding-block:clamp(92px,7.8vw,124px);
-  padding-inline:var(--rail-gutter);
-}
-.about-why-inner{
-  display:grid;
-  grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);
-  gap:clamp(40px,4.8vw,88px);
-  align-items:center;
-}
-.about-why-copy{display:flex;flex-direction:column;align-items:flex-start;min-width:0}
-.about-why-eyebrow{color:rgba(245,235,226,.72)}
-.about-why-headline{color:var(--cream)}
-
-/* ── THE RIGHT COLUMN: THREE BLOCKS, ONE ROLE ──────────────── */
-.about-why-detail{min-width:0;max-width:560px}
-/* The opening claim carries the section, so it is the heaviest and the
-   largest the body role goes - not a fourth type size. */
-.about-why-lead{
-  margin:0;
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:500;
-  font-style:normal;
-  font-size:clamp(17px,1.45vw,18px);
-  line-height:1.5;
-  letter-spacing:0;
-  color:var(--cream);
-}
-.about-why-body{
-  margin:clamp(24px,2.4vw,32px) 0 0;
+.about-hero-line{color:var(--cream)}
+.about-hero-line-accent{margin-top:4px}
+.about-hero-lead{
+  margin:clamp(30px,3vw,42px) 0 0;
+  max-width:620px;
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:400;
   font-style:normal;
-  font-size:clamp(16px,1.3vw,17px);
-  line-height:1.6;
-  letter-spacing:0;
-  color:var(--cream);
-}
-/* THE ONE HAIRLINE IN THIS SECTION. The four closing lines are its
-   cadence, so they get a rule and their own leading - not a card, not a
-   box, not a second background. */
-.about-why-close{
-  margin:clamp(28px,2.8vw,40px) 0 0;
-  padding-top:clamp(26px,2.6vw,34px);
-  border-top:1px solid rgba(245,235,226,.22);
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:500;
-  font-style:normal;
-  font-size:clamp(16px,1.3vw,17px);
-  line-height:1.85;
-  letter-spacing:0;
+  font-size:var(--type-body);
+  line-height:1.55;
   color:var(--cream);
 }
 
-/* ── 03. MATCHA FOR REAL LIFE ──────────────────────────────── */
-.about-real{
+/* ══ 2 — THE NAME AND THE VALUES, ON CREAM ═════════════════ */
+.about-name{
   background:var(--cream);
   color:var(--ink);
-  padding-block:clamp(80px,7vw,110px);
+  padding-block:clamp(82px,7vw,116px);
   padding-inline:var(--rail-gutter);
 }
-.about-real-inner{
-  display:grid;
-  grid-template-columns:minmax(0,.45fr) minmax(0,.55fr);
-  gap:clamp(32px,4vw,72px);
-  align-items:start;
-}
-.about-real-copy{display:flex;flex-direction:column;align-items:flex-start;min-width:0}
-.about-real-detail{min-width:0;padding-top:clamp(6px,1.2vw,18px)}
-.about-real-body{
-  margin:0 0 clamp(16px,1.5vw,20px);
-  max-width:480px;
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:400;
-  font-style:normal;
-  font-size:clamp(16px,1.3vw,17px);
-  line-height:1.6;
-  letter-spacing:0;
-  color:var(--ink);
-}
-.about-real-body:last-child{margin-bottom:0}
+.about-name-head{max-width:940px}
+.about-name-eyebrow{color:var(--berry)}
+.about-name-line{color:var(--ink)}
 
-/* ── 04. HERKUNFT - A COMPACT BAND, NOT A SECTION ──────────── */
-.about-origin{
-  background:var(--plum);
-  color:var(--cream);
-  padding-block:clamp(54px,4.6vw,70px);
-  padding-inline:var(--rail-gutter);
+/* THE NAME, SET RATHER THAN DRAWN. Two columns: the wordmark on the
+   left, the sentences on the right. No arrow, no plus, no sticker - the
+   hairlines and the scale carry the explanation. */
+.about-name-body{
+  display:grid;
+  grid-template-columns:minmax(260px,.62fr) minmax(0,1fr);
+  gap:clamp(34px,4vw,80px);
+  align-items:start;
+  margin-top:clamp(44px,4.4vw,64px);
 }
-.about-origin-inner{
+.about-name-mark{
   display:flex;
-  align-items:center;
-  gap:clamp(24px,3vw,48px);
+  flex-direction:column;
+  align-items:flex-start;
+  min-width:0;
+  padding-top:clamp(16px,1.6vw,22px);
+  border-top:1px solid var(--berry);
 }
-/* Decorative, drawn on the band itself - no container, no dependency. */
-.about-origin-mark{display:block;flex:0 0 auto;width:88px;height:auto;color:var(--berry)}
-.about-origin-copy{flex:1 1 auto;min-width:0}
-.about-origin-eyebrow{color:rgba(245,235,226,.72)}
-.about-origin-body{
-  margin:clamp(10px,1vw,14px) 0 0;
-  max-width:560px;
+.about-name-whole{
   font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:400;
+  font-weight:700;
   font-style:normal;
-  font-size:clamp(16px,1.3vw,17px);
-  line-height:1.55;
-  letter-spacing:0;
-  color:var(--cream);
+  font-size:clamp(56px,6vw,92px);
+  line-height:.9;
+  letter-spacing:-.055em;
+  color:var(--berry);
 }
-.about-origin-link{
-  flex:0 0 auto;
-  align-self:center;
-  padding-bottom:6px;
-  border-bottom:1px solid rgba(245,235,226,.45);
+/* The two halves, under one hairline and split by a second - the same
+   structural pair the process steps and the fact rows already use. */
+.about-name-parts{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  width:100%;
+  margin-top:clamp(20px,2vw,28px);
+  border-top:1px solid rgba(17,17,17,.18);
+}
+.about-name-part{
+  padding:clamp(13px,1.3vw,18px) clamp(10px,1.4vw,20px) 0 0;
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:600;
   font-style:normal;
-  font-size:12px;
-  line-height:1;
-  letter-spacing:.14em;
+  font-size:clamp(13px,1.1vw,15px);
+  line-height:1.2;
+  letter-spacing:.18em;
   text-transform:uppercase;
-  color:var(--cream);
-  transition:border-color .2s ease,opacity .2s ease;
+  color:rgba(17,17,17,.82);
 }
-.about-origin-link:hover{border-bottom-color:var(--cream);opacity:.82}
+.about-name-part+.about-name-part{
+  padding-left:clamp(14px,1.6vw,24px);
+  border-left:1px solid rgba(17,17,17,.18);
+}
+.about-name-copy{min-width:0;max-width:620px;padding-top:clamp(16px,1.6vw,22px)}
+.about-name-text{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:var(--type-body);
+  line-height:1.6;
+  color:rgba(17,17,17,.82);
+}
+.about-name-text+.about-name-text{margin-top:clamp(16px,1.6vw,22px)}
 
-/* ── 05. WAS UNS WICHTIG IST ───────────────────────────────── */
-.about-cares{
-  background:var(--cream);
-  color:var(--ink);
-  padding-block:clamp(80px,7vw,110px);
-  padding-inline:var(--rail-gutter);
+/* ── THE VALUES, IN THE SAME BAND ──────────────────────────── */
+/* A hairline across the rail separates them from the name without a
+   second background, a second heading level or a second section. */
+.about-values{
+  margin-top:clamp(56px,5.4vw,84px);
+  padding-top:clamp(40px,4vw,58px);
+  border-top:1px solid rgba(17,17,17,.18);
 }
-/* Deliberately a step below the section pair: this intro opens a list,
-   it does not open a section of its own. */
-.about-cares-line{
+.about-values-eyebrow{color:var(--berry)}
+/* A step below the section scale on purpose: these open a block inside
+   a band, they do not open a band. */
+.about-values-line{
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:500;
   font-style:normal;
-  font-size:clamp(34px,3.4vw,50px);
-  line-height:1;
+  font-size:clamp(30px,3vw,44px);
+  line-height:1.02;
   letter-spacing:-.035em;
   color:var(--ink);
 }
-.about-cares-line-accent{
-  font-family:var(--font-display),Georgia,serif;
-  font-weight:400;
-  font-style:italic;
-  font-size:clamp(37px,3.8vw,54px);
-  line-height:.95;
-  letter-spacing:-.01em;
-  margin-top:3px;
-  color:var(--ink);
-}
-/* Rows, not cards: two hairlines and a number column. */
-.about-cares-list{margin:clamp(44px,4.4vw,64px) 0 0;border-top:1px solid rgba(17,17,17,.14)}
-.about-cares-list>div{
+.about-values-list{
+  list-style:none;
   display:grid;
-  grid-template-columns:clamp(56px,5vw,88px) minmax(0,1fr);
-  gap:clamp(16px,2vw,32px);
-  align-items:baseline;
-  padding:clamp(26px,2.6vw,34px) 0;
-  border-bottom:1px solid rgba(17,17,17,.14);
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:0;
+  margin:clamp(44px,4.4vw,64px) 0 0;
+  padding:0;
 }
-.about-cares-number{
+/* Four raspberry hairlines meeting to read as ONE rule across the rail,
+   the way the process steps already do. No card, no panel, no shadow. */
+.about-value{
+  display:grid;
+  gap:clamp(9px,.9vw,13px);
+  align-content:start;
+  padding:clamp(18px,1.8vw,24px) clamp(20px,2vw,34px) 0 0;
+  border-top:1px solid var(--berry);
+}
+.about-value-num{
+  display:block;
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:600;
   font-style:normal;
@@ -3931,71 +3814,65 @@ header nav{gap:18px;font-size:12px}
   letter-spacing:.08em;
   color:var(--berry);
 }
-.about-cares-statement{
+.about-value-title{
   margin:0;
-  max-width:820px;
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:600;
   font-style:normal;
-  font-size:clamp(24px,2.4vw,32px);
-  line-height:1.2;
-  letter-spacing:-.025em;
+  font-size:clamp(16px,1.3vw,19px);
+  line-height:1.25;
+  letter-spacing:.02em;
+  text-transform:uppercase;
   color:var(--ink);
 }
-
-/* ── 06. BUILDING GLOA ─────────────────────────────────────── */
-/* TYPOGRAPHY-LED, ON PURPOSE. The brief allows ONE existing approved
-   lifestyle image here. public/img holds no such asset: every lifestyle
-   photograph in the library - gloa-cafe, gloa-work, gloa-on-the-go and
-   the rest - carries a burned-in "PLACEHOLDER — <LABEL>" mark. They are
-   fine at homepage-tile size, where they already live, but promoting
-   one to a 500px editorial slab would put the word PLACEHOLDER on the
-   brand page. So this section takes the same two-column shape as
-   MATCHA FOR REAL LIFE and no image was invented. */
-.about-tiktok{
-  background:var(--blue);
-  color:var(--cream);
-  padding-block:clamp(80px,7vw,110px);
-  padding-inline:var(--rail-gutter);
-}
-.about-tiktok-inner{
-  display:grid;
-  grid-template-columns:minmax(0,.45fr) minmax(0,.55fr);
-  gap:clamp(32px,4vw,72px);
-  align-items:start;
-}
-.about-tiktok-copy{display:flex;flex-direction:column;align-items:flex-start;min-width:0}
-.about-tiktok-detail{display:flex;flex-direction:column;align-items:flex-start;min-width:0;padding-top:clamp(6px,1.2vw,18px)}
-.about-tiktok-eyebrow{color:rgba(245,235,226,.72)}
-.about-tiktok-headline{color:var(--cream)}
-.about-tiktok-body{
+.about-value-text{
   margin:0;
-  max-width:500px;
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:400;
   font-style:normal;
-  font-size:clamp(16px,1.3vw,17px);
+  font-size:clamp(15px,1.1vw,16px);
   line-height:1.6;
-  letter-spacing:0;
-  color:var(--cream);
+  color:rgba(17,17,17,.82);
 }
-.about-tiktok-body+.about-tiktok-body{margin-top:clamp(14px,1.4vw,18px)}
-/* Was clamp(32px,5vw,64px) - a handle at page-hero scale. */
-.about-handle{
-  display:block;
-  margin:clamp(28px,2.8vw,38px) 0 clamp(22px,2.2vw,28px);
+
+/* ══ 3 — THE STORY, ON BLUE ════════════════════════════════ */
+.about-story{
+  background:var(--blue);
+  color:var(--cream);
+  padding-block:clamp(82px,7vw,116px);
+  padding-inline:var(--rail-gutter);
+}
+.about-story-inner{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  gap:clamp(36px,4.4vw,88px);
+  align-items:start;
+}
+.about-story-head{min-width:0}
+.about-story-eyebrow{color:rgba(245,235,226,.72)}
+.about-story-line{color:var(--cream)}
+.about-story-detail{min-width:0;max-width:560px;padding-top:clamp(6px,1.2vw,18px)}
+.about-story-text{
+  margin:0;
   font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:700;
+  font-weight:400;
   font-style:normal;
-  font-size:clamp(26px,2.6vw,36px);
-  line-height:1;
-  letter-spacing:-.03em;
+  font-size:var(--type-body);
+  line-height:1.6;
   color:var(--cream);
-  transition:opacity .2s ease;
 }
-.about-handle:hover{opacity:.72}
-.about-tiktok .about-tiktok-cta{
-  min-height:52px;
+.about-story-text+.about-story-text{margin-top:clamp(16px,1.6vw,22px)}
+/* The page's only two actions, and they sit in the story rather than in
+   a band of their own. Square and flat, the canonical GLOA button. */
+.about-story-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:clamp(12px,1.2vw,18px);
+  margin-top:clamp(30px,3vw,42px);
+}
+.about-page .about-story-cta{
+  width:max-content;
+  min-height:50px;
   padding:16px 28px;
   border-radius:0;
   box-shadow:none;
@@ -4005,135 +3882,59 @@ header nav{gap:18px;font-size:12px}
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:600;
   font-style:normal;
-  font-size:12px;
+  font-size:var(--type-meta);
   line-height:1;
   letter-spacing:.14em;
   text-transform:uppercase;
   transition:background .2s ease,color .2s ease,border-color .2s ease;
 }
-.about-tiktok .about-tiktok-cta:hover{background:transparent;color:var(--cream);border-color:var(--cream)}
-.about-micro{
-  margin:clamp(30px,3vw,42px) 0 0;
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:500;
-  font-style:normal;
-  font-size:11px;
-  line-height:1.3;
-  letter-spacing:.14em;
-  text-transform:uppercase;
-  color:rgba(245,235,226,.62);
-}
-/* ── 07. FINAL CTA ─────────────────────────────────────────── */
-.about-final{
-  background:var(--plum);
-  color:var(--cream);
-  padding-block:clamp(92px,8vw,130px);
-  padding-inline:var(--rail-gutter);
-  text-align:center;
-}
-.about-final-inner{display:flex;flex-direction:column;align-items:center}
-.about-page .about-final-headline{align-items:center;margin:0}
-.about-final-line{color:var(--cream)}
-.about-final-line-accent{color:var(--cream)}
-.about-final-actions{
-  display:flex;
-  gap:14px;
-  justify-content:center;
-  flex-wrap:wrap;
-  margin-top:clamp(34px,3.4vw,46px);
-}
-.about-final-actions .cta{
-  min-height:54px;
-  padding:17px 30px;
-  border-radius:0;
-  box-shadow:none;
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:600;
-  font-style:normal;
-  font-size:12px;
-  line-height:1;
-  letter-spacing:.14em;
-  text-transform:uppercase;
-  transition:background .2s ease,color .2s ease,border-color .2s ease;
-}
-.about-final-actions .cta.about-final-primary{background:var(--cream);color:var(--plum);border:1px solid var(--cream)}
-.about-final-actions .cta.about-final-primary:hover{background:transparent;color:var(--cream);border-color:var(--cream)}
-.about-final-actions .cta.about-final-secondary{background:transparent;color:var(--cream);border:1px solid rgba(245,235,226,.65)}
-.about-final-actions .cta.about-final-secondary:hover{background:var(--cream);color:var(--plum);border-color:var(--cream)}
+.about-page .about-story-cta:hover{background:transparent;color:var(--cream);border-color:var(--cream)}
+/* The second action is the quieter one: outline only, same box. */
+.about-page .about-story-cta-quiet{background:transparent;color:var(--cream)}
+.about-page .about-story-cta-quiet:hover{background:var(--cream);color:var(--blue)}
 
-/* ── TABLET ────────────────────────────────────────────────── */
-@media (max-width:1024px){
-  /* Stacked, and content-driven again - the desktop floor is dropped. */
-  .about-hero-inner{grid-template-columns:1fr;gap:clamp(30px,4.5vw,44px);align-items:start;min-height:0}
-  .about-hero-meta{margin-top:0;padding-top:clamp(28px,3.4vw,40px)}
-  .about-real-inner{grid-template-columns:1fr;gap:clamp(26px,3.5vw,38px)}
-  .about-real-detail{padding-top:0}
-  .about-tiktok-inner{grid-template-columns:1fr;gap:clamp(26px,3.5vw,38px)}
-  .about-tiktok-detail{padding-top:0}
+/* ══ RESPONSIVE ════════════════════════════════════════════ */
+@media (max-width:1100px){
+  .about-values-list{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:clamp(30px,3.4vw,42px)}
 }
 
-/* ── MOBILE ────────────────────────────────────────────────── */
 @media (max-width:900px){
-  .about-hero{padding-block:clamp(64px,11vw,84px)}
-
-
-  .about-hero-lead,.about-hero-sub{max-width:none;font-size:16px}
-  .about-hero-meta{flex-direction:row;flex-wrap:wrap;gap:6px 18px;font-size:10px;letter-spacing:.12em}
-
-  /* Eyebrow, headline, then the copy - one column, with air between
-     the two blocks rather than a squeezed 50/50. */
-  .about-why{padding-block:clamp(64px,11vw,86px)}
-  .about-why-inner{grid-template-columns:1fr;gap:clamp(30px,4.5vw,44px);align-items:start}
-  .about-why-detail{max-width:none}
-  .about-why-lead{font-size:17px}
-  .about-why-body,
-  .about-why-close{font-size:16px}
-
-  .about-real{padding-block:clamp(60px,11vw,80px)}
-  .about-real-body{max-width:none;font-size:16px}
-
-  .about-origin{padding-block:clamp(42px,8vw,56px)}
-  .about-origin-inner{flex-wrap:wrap;align-items:flex-start;gap:clamp(18px,4vw,26px)}
-  .about-origin-mark{width:70px}
-  .about-origin-copy{flex:1 1 100%;order:2}
-  .about-origin-body{max-width:none;font-size:16px}
-  .about-origin-link{order:3;flex:0 0 auto;align-self:flex-start}
-
-  .about-cares{padding-block:clamp(60px,11vw,80px)}
-  .about-cares-line{font-size:clamp(30px,7.6vw,38px)}
-  .about-cares-line-accent{font-size:clamp(32px,8.2vw,40px)}
-  .about-cares-list>div{grid-template-columns:44px minmax(0,1fr);gap:14px;padding:24px 0}
-  .about-cares-statement{font-size:clamp(22px,5.4vw,26px)}
-
-  .about-tiktok{padding-block:clamp(60px,11vw,80px)}
-  .about-tiktok-body{max-width:none;font-size:16px}
-  .about-handle{font-size:clamp(24px,6.4vw,30px)}
-
-  .about-final{padding-block:clamp(70px,12vw,92px)}
-  /* Side by side while they fit COMFORTABLY: natural width, so neither
-     label is squeezed, and flex-wrap drops the second button onto its
-     own line the moment the pair no longer fits. Below 420px they stack
-     to full width instead. */
-  .about-final-actions{width:100%}
-  .about-final-actions .cta{flex:0 1 auto;justify-content:center}
-
-  /* THE SECTION PAIR, ONE STEP DOWN. Still under the hero at every
-     width, and still under the homepage hero. */
-  .about-why-line,
-  .about-real-line,
-  .about-tiktok-line,
-  .about-final-line{font-size:clamp(36px,9.2vw,44px)}
-  .about-why-line-accent,
-  .about-real-line-accent,
-  .about-tiktok-line-accent,
-  .about-final-line-accent{font-size:clamp(38px,10vw,46px)}
+  .about-hero{padding-block:clamp(62px,10vw,84px)}
+  .about-name,
+  .about-story{padding-block:clamp(62px,10vw,86px)}
+  /* One section scale down, in one place, exactly as /partnerships and
+     /our-matcha do it. */
+  .about-page .about-name-line,
+  .about-page .about-story-line{font-size:clamp(36px,9.2vw,44px)}
+  .about-page .about-story-line-accent{font-size:clamp(38px,10vw,46px)}
+  .about-page .about-values-line{font-size:clamp(28px,7.4vw,36px)}
+  /* Both two-column shapes stack, and the reading order is the DOM
+     order in each case. */
+  .about-name-body{grid-template-columns:minmax(0,1fr);gap:clamp(28px,4vw,40px)}
+  .about-story-inner{grid-template-columns:minmax(0,1fr);gap:clamp(26px,4vw,38px)}
+  .about-values-list{grid-template-columns:minmax(0,1fr);row-gap:clamp(26px,4.4vw,34px)}
+  .about-value{padding-right:0}
 }
 
-@media (max-width:420px){
-  .about-final-actions{flex-direction:column;align-items:stretch}
-  /* flex-basis is the MAIN axis, so the row rule's `flex:1 1 200px`
-     would become a 200px tall button once the pair stacks. */
-  .about-final-actions .cta{flex:0 0 auto;width:100%}
+@media (max-width:760px){
+  .about-hero-lead,
+  .about-name-copy,
+  .about-story-detail{max-width:none}
+  /* Full-width actions, and a target that stays comfortable. */
+  .about-page .about-story-cta{width:100%;justify-content:center;padding:16px 20px}
+}
+
+@media (max-width:520px){
+  /* The two halves of the name stack rather than squeezing to 40px
+     columns, and the vertical hairline becomes a horizontal one. */
+  .about-name-parts{grid-template-columns:minmax(0,1fr)}
+  .about-name-part{padding-right:0}
+  .about-name-part+.about-name-part{
+    padding-left:0;
+    padding-top:clamp(11px,3vw,15px);
+    border-left:0;
+    border-top:1px solid rgba(17,17,17,.18);
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════

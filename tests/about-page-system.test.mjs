@@ -3,19 +3,26 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { startRenderServer } from "./helpers/renderServer.mjs";
 
 /**
- * /about, AS ONE EDITORIAL SYSTEM.
+ * /about — THE BRAND PAGE, IN THREE BANDS.
  *
- * The pass replaced seven independently built sections with the system
- * /our-matcha and the homepage already carry. These tests pin the things
- * that made the page look like several sites - the type scale, the rail,
- * the section grounds, the min-heights - and the things a redesign must
- * never quietly take with it: the routes, the ticker, the nav, the
- * footer, and the exact authorised copy.
+ * It was seven sections and read as a second product page: a hero that
+ * explained how to drink matcha, a WHY band, a NOT COMPLICATED band
+ * saying much the same thing, a standalone HERKUNFT strip, a values list
+ * about the product, a BUILDING GLOA band telling visitors the company
+ * was still under construction, and a closing CTA band.
  *
- * They are deliberately not pixel tests. Paddings and gaps are free to
- * move; the ROLES and the HIERARCHY are not.
+ * Now: who GLOA is, where the name comes from and what it stands for,
+ * and the story. The product lives on /our-matcha and is not
+ * re-explained here.
+ *
+ * What these tests hold hardest:
+ *   * exactly three bands before the footer, and no fourth creeping back
+ *   * every removed section stays removed, in markup AND in the sheet
+ *   * no dash in any visible sentence
+ *   * the page still reads the shared type, rail and colour system
  */
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = rel => readFileSync(path.join(ROOT, rel), "utf8");
@@ -24,564 +31,317 @@ const site = read("app/GloaSite.tsx");
 const css = read("app/globals.css");
 
 const about = site.slice(site.indexOf("function About(){return <main"), site.indexOf("\nfunction ForCafes()"));
-const blockAt = css.indexOf("/about — ONE EDITORIAL SYSTEM");
-assert.notEqual(blockAt, -1, "the About CSS block was not found");
-// Bounded at the NEXT page block, so a block appended after this one
-// cannot answer for - or trip - an assertion about /about.
-const rules = css.slice(css.lastIndexOf("/*", blockAt), css.lastIndexOf("/*", css.indexOf("/for-cafes PAGE HERO")));
-assert.ok(rules.length > 4000, "the About CSS block was not found");
+assert.ok(about.length > 1500, "the About component was not found");
 
-/* The block opens with a long explanatory comment. Every structural
-   check below reads the comment-free view, so the prose describing what
-   the page USED to be cannot answer for the rules. */
+/** The About block, bounded at the next banner. */
+const blockAt = css.indexOf("/about — THREE BANDS");
+assert.notEqual(blockAt, -1, "the About CSS block was not found");
+const rules = css.slice(css.lastIndexOf("/*", blockAt), css.indexOf("/* " + "═".repeat(6), blockAt));
 const code = rules.replace(/\/\*[\s\S]*?\*\//g, "");
+assert.ok(code.length > 2000, "the About CSS block is suspiciously short");
 
 const rule = name => {
   const at = code.indexOf(name);
   assert.notEqual(at, -1, `missing rule: ${name}`);
   return code.slice(at, code.indexOf("}", at));
 };
-/* Desktop rules only - everything before the first @media. */
 const desktop = code.slice(0, code.indexOf("@media"));
-const mobile = code.slice(code.indexOf("@media (max-width:900px)"));
+
+// 8939 belongs to account-portal-design; every render suite needs its
+// own port or the two servers fight over the socket in a full run.
+const PORT = 8950;
+let server, html;
+test.before(async () => {
+  server = await startRenderServer(PORT);
+  const res = await server.getHtml("/about");
+  assert.equal(res.status, 200, "/about did not resolve");
+  html = res.html;
+});
+test.after(() => server?.stop());
+
+/** THE PAGE'S OWN MARKUP, WITHOUT THE SHELL. The brand-bar ticker says
+    "MATCHA IS FOR EVERYONE." and the footer carries Berlin, TikTok and a
+    /our-matcha link - all of them global chrome this page does not own.
+    Reading the whole document would make every copy assertion below a
+    test of Chrome.tsx instead. */
+const mainHtml = () => html.slice(html.indexOf("<main"), html.indexOf("</main>") + 7);
+/** JSX writes &#x27; for an apostrophe, so rendered text is compared decoded. */
+const text = () => mainHtml().replace(/&#x27;/g, "'").replace(/&amp;/g, "&");
 
 /* ══════════════════════════════════════════════════════════════
-   1. THE SECTION SEQUENCE AND ITS GROUNDS
+   1. THREE BANDS, THEN THE FOOTER
    ══════════════════════════════════════════════════════════════ */
 
-test("1: seven sections, in the intended blue/raspberry/cream/plum rhythm", () => {
-  const order = [...about.matchAll(/<section className="(about-[a-z]+)"/g)].map(m => m[1]);
-  assert.deepEqual(order, [
-    "about-hero", "about-why", "about-real",
-    "about-origin", "about-cares", "about-tiktok", "about-final",
-  ]);
-
-  const ground = (sel, token) =>
-    assert.match(rule(sel), new RegExp(`background:var\\(--${token}\\)`), `${sel} is not ${token}`);
-  ground(".about-hero{", "blue");
-  ground(".about-why{", "berry");
-  ground(".about-real{", "cream");
-  ground(".about-origin{", "plum");
-  ground(".about-cares{", "cream");
-  ground(".about-tiktok{", "blue");
-  ground(".about-final{", "plum");
-
-  // The four brand values, exactly - and no fifth colour anywhere in
-  // the block. Every colour here is a token or a cream/ink alpha.
-  assert.match(css, /--blue:#1746D1;/);
-  assert.match(css, /--berry:#A61E59;/);
-  assert.match(css, /--cream:#F5EBE2;/);
-  assert.match(css, /--plum:#4F3A5B;/);
-  assert.match(css, /--ink:#111111;/);
-  for (const m of code.matchAll(/#[0-9a-fA-F]{3,8}\b/g)) {
-    assert.fail(`a literal hex colour in the About block: ${m[0]}`);
+test("1: exactly three content bands, in the blue / cream / blue rhythm", () => {
+  const sections = [...mainHtml().matchAll(/<section class="(about-[a-z]+)"/g)].map(m => m[1]);
+  assert.deepEqual(sections, ["about-hero", "about-name", "about-story"]);
+  const bands = [[".about-hero{", "var(--blue)", "var(--cream)"],
+                 [".about-name{", "var(--cream)", "var(--ink)"],
+                 [".about-story{", "var(--blue)", "var(--cream)"]];
+  for (const [sel, bg, fg] of bands) {
+    const r = rule(sel);
+    assert.ok(r.includes(`background:${bg}`), `${sel} is not on ${bg}`);
+    assert.ok(r.includes(`color:${fg}`), `${sel} does not write in ${fg}`);
   }
-  for (const m of code.matchAll(/rgba\(([^)]+)\)/g)) {
-    const [r, g, b] = m[1].split(",").map(n => Number(n.trim()));
-    const cream = r === 245 && g === 235 && b === 226;
-    const ink = r === 17 && g === 17 && b === 17;
-    assert.ok(cream || ink, `a non-brand rgba in the About block: rgba(${m[1]})`);
+  // No band paints itself anything outside the palette.
+  for (const m of code.matchAll(/background:([^;}]+)/g)) {
+    assert.ok(/^(var\(--(blue|berry|cream|ink)\)|transparent|none)$/.test(m[1].trim()),
+      `a background outside the palette: ${m[1]}`);
   }
 });
 
-test("1b: no gradient, no card, no pill, no shadow, no glass", () => {
-  for (const banned of [
-    "gradient", "box-shadow:0", "backdrop-filter", "filter:blur",
-    "border-radius:4", "border-radius:8", "border-radius:12",
-    "border-radius:99", "border-radius:50%",
-  ]) {
-    assert.ok(!code.includes(banned), `the About block grew ${banned}`);
-  }
-  // Radius is declared only to pin it to zero.
-  for (const m of code.matchAll(/border-radius:([^;}]+)/g)) {
-    assert.equal(m[1].trim(), "0", `a non-zero radius: ${m[1]}`);
-  }
+test("1b: nothing stands between the last band and the global footer", () => {
+  const storyAt = html.indexOf('<section class="about-story"');
+  const after = html.slice(storyAt + '<section class="about-story"'.length);
+  const closeAt = after.indexOf("</main>");
+  assert.notEqual(closeAt, -1, "the page main never closes");
+  assert.equal((after.slice(0, closeAt).match(/<section/g) || []).length, 0,
+    "a section still follows the story band");
+  assert.ok(after.indexOf("<footer") > closeAt, "the footer does not follow the story");
+  // The shared header and footer, unchanged and not rebuilt for this page.
+  assert.ok(html.includes("<header"), "the shared header is missing");
+  assert.ok(html.includes("<footer"), "the shared footer is missing");
+  assert.ok(!about.includes("<header") && !about.includes("<footer"),
+    "/about built a header or footer of its own");
 });
 
-/* ══════════════════════════════════════════════════════════════
-   2. NO EMPTY COLOUR BANDS
-   ══════════════════════════════════════════════════════════════ */
-
-test("2: every height is content-driven - no min-height, no vh", () => {
-  // The 630px hero and the 600px split half were what produced the empty
-  // blue and raspberry stripes between sections. What is left is the
-  // shared button box (52/54px, a tap target), and ONE deliberate
-  // content floor on the hero grid - the height the brief specifies for
-  // it, dropped again below 1024px.
-  const allowed = new Set(["52px", "54px", "clamp(300px,25vw,370px)", "0"]);
-  for (const m of code.matchAll(/min-height:([^;}]+)/g)) {
-    assert.ok(allowed.has(m[1].trim()), `an unexpected min-height: ${m[1].trim()}`);
-  }
-  // The floor is on the hero's grid, never on a section - so no section
-  // can reserve blank ground.
-  assert.match(rule(".about-hero-inner{"), /min-height:clamp\(300px,25vw,370px\)/);
-  assert.match(rules, /\.about-hero-inner\{grid-template-columns:1fr;[^}]*min-height:0\}/);
-  for (const sel of [".about-hero{", ".about-why{", ".about-real{", ".about-origin{",
-                     ".about-cares{", ".about-tiktok{", ".about-final{"]) {
-    assert.ok(!/min-height|height:/.test(rule(sel)), `${sel} reserves height`);
-  }
-  assert.ok(!/\d+vh/.test(code), "a viewport height came back to /about");
-  // And the legacy rules that carried them are gone from the file.
-  assert.ok(!css.includes(".about-hero{min-height:630px"), "the legacy hero rule survived");
-  assert.ok(!css.includes(".about-why{display:grid;grid-template-columns:1fr 1fr;min-height:600px}"),
-    "the legacy split rule survived");
-  assert.ok(!css.includes(".about-page h1{font-size:clamp(64px,8vw,122px)"),
-    "the legacy 122px page h1 survived");
-  // Nothing renders an empty wrapper: every section's children carry
-  // either text, a link or the one decorative svg.
-  assert.ok(!/<div[^>]*\/>|<span className="[^"]*"\/>/.test(about),
-    "an empty element was left in the markup");
-  // The standalone hero sequence number is gone, and no section
-  // numbering replaced it.
-  assert.ok(!about.includes("page-index"), "the hero index number survived");
-  assert.equal([...about.matchAll(/>0[1-9]</g)].length, 0,
-    "a bare section number is rendered in the markup");
+test("1c: one h1, then h2s - and no heading level was skipped", () => {
+  assert.equal((mainHtml().match(/<h1/g) || []).length, 1, "the page does not have exactly one h1");
+  // Two band headings, the values intro, and the four value titles.
+  assert.equal((mainHtml().match(/<h2/g) || []).length, 2, "the band headings changed");
+  assert.equal((mainHtml().match(/<h3/g) || []).length, 1, "the values intro changed");
+  assert.equal((mainHtml().match(/<h4/g) || []).length, 4, "the value titles changed");
 });
 
 /* ══════════════════════════════════════════════════════════════
-   3. THE TYPE SYSTEM
+   2. THE COPY
    ══════════════════════════════════════════════════════════════ */
 
-const clampAt = (text, w) => {
-  const [lo, vw, hi] = /clamp\(([\d.]+)px,([\d.]+)vw,([\d.]+)px\)/.exec(text).slice(1).map(Number);
-  return Math.max(lo, Math.min((vw / 100) * w, hi));
-};
-const size = (scope, sel) => {
-  const at = scope.indexOf(sel);
-  assert.notEqual(at, -1, `missing rule: ${sel}`);
-  return /font-size:(clamp\([^)]*\)|\d+px)/.exec(scope.slice(at))[1];
-};
-const at = (text, w) => (text.endsWith("px") && !text.startsWith("clamp") ? Number.parseFloat(text) : clampAt(text, w));
+test("2: the brand statement, the name and the story all render", () => {
+  for (const copy of ["ÜBER GLOA", "Good energy.", "No theatre.",
+                      "GLOA steht für gute Energie, klare Gestaltung und eine Haltung, die unkompliziert bleibt. Modern, offen und nahbar.",
+                      "DER NAME GLOA", "Glow trifft Aura.",
+                      "WAS UNS WICHTIG IST", "Klarheit, Qualität", "und ein gutes Gefühl.",
+                      "UNSERE GESCHICHTE", "Unsere Geschichte", "wird noch geschrieben."]) {
+    assert.ok(text().includes(copy), `missing page copy: ${copy}`);
+  }
+  // "No theatre." and "wird noch geschrieben." are the two display italics.
+  assert.match(about, /<i className="about-hero-line about-hero-line-accent gloa-hero-secondary">No theatre\.<\/i>/);
+  assert.match(about, /<i className="about-story-line about-story-line-accent">wird noch geschrieben\.<\/i>/);
+});
 
-/* The homepage hero curves. This page's hero no longer sits UNDER them -
-   it IS them: every true page hero reads the shared scale now, so these
-   two functions are the About hero as well as the homepage's. Pinned
-   against the tokens below so the literals cannot drift. */
-const homepageHero = w => (w <= 900 ? Math.max(44, Math.min(0.12 * w, 64)) : Math.max(54, Math.min(0.059 * w, 100)));
-const homepageHeroItalic = w => (w <= 900 ? Math.max(38, Math.min(0.105 * w, 56)) : Math.max(48, Math.min(0.05 * w, 86)));
+test("2b: the name is explained as a combination of Glow and Aura", () => {
+  assert.ok(text().includes("GLOA ist eine Wortkombination aus Glow und Aura."),
+    "the page never says what the name is made of");
+  assert.ok(text().includes("Glow steht für Ausstrahlung. Aura steht für die Atmosphäre, die wir mitbringen und hinterlassen."));
+  assert.ok(text().includes("Zusammen beschreibt der Name das Gefühl, das wir mit GLOA schaffen möchten. Positiv, klar und nahbar."));
+  // And it is SET as well as said: three words, two hairlines, no arrow,
+  // no plus sign, no drawn device.
+  assert.match(mainHtml(), /<span class="about-name-whole">GLOA<\/span>/);
+  assert.deepEqual([...mainHtml().matchAll(/<span class="about-name-part">([^<]+)<\/span>/g)].map(m => m[1]),
+    ["GLOW", "AURA"]);
+  assert.match(code, /\.about-name-mark\{[\s\S]*?border-top:1px solid var\(--berry\)/);
+  assert.match(code, /\.about-name-parts\{[\s\S]*?border-top:1px solid rgba\(17,17,17/);
+  assert.ok(!/<svg|→|↗|\+<\/|"\+"/.test(about), "the name device grew an arrow or a plus");
+});
 
-test("3-pre: the curves above are the tokens every page hero reads", () => {
-  const bare = css.replace(/\/\*[\s\S]*?\*\//g, "");
-  for (const [name, want] of [["--type-hero-primary", ["clamp(54px,5.9vw,100px)", "clamp(44px,12vw,64px)"]],
-                              ["--type-hero-secondary", ["clamp(48px,5vw,86px)", "clamp(38px,10.5vw,56px)"]]]) {
-    const all = bare.split(name + ":").slice(1).map((t) => t.slice(0, t.indexOf(")") + 1));
-    assert.deepEqual(all, want, `${name} moved`);
+test("2c: the four values are the brand's, not the product's", () => {
+  const titles = [...mainHtml().matchAll(/<h4 class="about-value-title">([^<]+)<\/h4>/g)].map(m => m[1]);
+  assert.deepEqual(titles, ["KLARHEIT", "QUALITÄT", "GESTALTUNG", "NÄHE"]);
+  assert.deepEqual([...mainHtml().matchAll(/<span class="about-value-num">(\d+)<\/span>/g)].map(m => m[1]),
+    ["01", "02", "03", "04"]);
+  for (const copy of ["Wir sagen, was wir meinen und machen Dinge nicht komplizierter als nötig.",
+                      "Wir haben hohe Ansprüche an das, was unseren Namen trägt.",
+                      "Gutes Design soll nicht nur gut aussehen. Es soll sich selbstverständlich anfühlen.",
+                      "GLOA soll Menschen einladen und nicht ausschließen."]) {
+    assert.ok(text().includes(copy), `missing value copy: ${copy}`);
+  }
+  // The retired product-flavoured values are gone.
+  for (const gone of ["Gutes Produkt statt komplizierter Begriffe.",
+                      "Klare Infos statt erfundenem Prestige.",
+                      "Matcha, der pur genauso funktioniert wie als Latte."]) {
+    assert.ok(!text().includes(gone), `a retired value survived: ${gone}`);
   }
 });
 
-const WIDTHS = [320, 360, 390, 430, 480, 640, 768, 900, 901, 1024, 1200, 1280, 1440, 1536, 1680, 1920];
-
-test("3: the caps the brief specifies, exactly", () => {
-  const cap = t => /clamp\([\d.]+px,[\d.]+vw,([\d.]+)px\)/.exec(t)[1];
-  // The hero's own caps are gone: it reads --type-hero-primary and
-  // --type-hero-secondary, checked in 3-pre. What remains here is the
-  // page's section scale, which this pass did not touch.
-  assert.equal(cap(size(desktop, ".about-why-line,")), "60");           // section sans
-  assert.equal(cap(size(desktop, ".about-why-line-accent,")), "64");    // section italic
-  assert.equal(cap(size(desktop, ".about-cares-line{")), "50");         // values intro sans
-  assert.equal(cap(size(desktop, ".about-cares-line-accent{")), "54");  // values intro italic
-  assert.equal(cap(size(desktop, ".about-cares-statement{")), "32");    // 01/02/03 rows
-  assert.equal(cap(size(desktop, ".about-handle{")), "36");             // @gloa.matcha
+test("2d: the story reads as a future, not as a building site", () => {
+  for (const copy of ["GLOA wurde 2026 in Berlin gegründet.",
+                      "Was uns von Anfang an wichtig war, bleibt auch für alles, was noch kommt, gleich. Klarheit, Qualität, gute Gestaltung und eine Marke, die nahbar bleibt.",
+                      "Unsere Geschichte wächst mit jedem neuen Kapitel weiter."]) {
+    assert.ok(text().includes(copy), `missing story copy: ${copy}`);
+  }
+  for (const banned of [/wir bauen/i, /entsteht/i, /schau vorbei/i, /in vorbereitung/i,
+                        /baustelle/i, /demnächst/i, /coming soon/i, /behind the scenes/i,
+                        /tiktok/i, /building in public/i]) {
+    assert.ok(!banned.test(text()), `the story sounds unfinished: ${banned}`);
+  }
+  // Exactly two actions, and they sit inside the story band.
+  const story = mainHtml().slice(mainHtml().indexOf('<section class="about-story"'));
+  const ctas = [...story.matchAll(/<a href="([^"]+)" class="cta about-story-cta[^"]*">([^<]+)</g)].map(m => [m[2], m[1]]);
+  assert.deepEqual(ctas, [["UNSER MATCHA", "/our-matcha"], ["ZUM SHOP", "/shop"]]);
+  // And they are the only links in the band.
+  assert.equal((story.match(/<a /g) || []).length, 2, "the story band grew another link");
 });
 
-test("3b: the hero is the ONLY page-hero-scale title, at every width", () => {
-  const pick = (sel, w) => at(size(w <= 900 ? mobile : desktop, sel), w);
-  for (const w of WIDTHS) {
-    // The hero IS the homepage hero now, not something measured under it.
-    const heroSans = homepageHero(w);
-    const heroItalic = homepageHeroItalic(w);
-
-    // Every other title on the page stays under the hero.
-    for (const sel of [".about-why-line,", ".about-why-line-accent,",
-                       ".about-cares-line{", ".about-cares-line-accent{",
-                       ".about-cares-statement{", ".about-handle{"]) {
-      const other = pick(sel, w);
-      assert.ok(other < heroSans, `${sel} (${other}) reaches the hero sans (${heroSans}) at ${w}px`);
-      assert.ok(other <= heroItalic || sel.includes("statement") || sel.includes("handle") || sel.includes("cares"),
-        `${sel} (${other}) passes the hero italic (${heroItalic}) at ${w}px`);
+test("2e: NO DASH in any visible sentence", () => {
+  // The brief rules out em and en dashes in rendered copy. Read from the
+  // rendered prose rather than the source, so a dash cannot hide in an
+  // attribute or a comment and still reach the screen.
+  const prose = [...mainHtml().matchAll(/<(?:p|h1|h2|h3|h4|span|i)[^>]*>([^<]+)</g)].map(m => m[1]);
+  assert.ok(prose.length >= 20, `only ${prose.length} text nodes found`);
+  for (const t of prose) {
+    for (const dash of ["—", "–", " - "]) {
+      assert.ok(!t.includes(dash), `a dash reached the screen: ${t}`);
     }
-    // The section italic is the tallest non-hero line, so it is the one
-    // that has to clear the hero italic too.
-    //
-    // BELOW 362px THE TWO ARE EQUAL, at 38px, and that is deliberate.
-    // The hero italic's mobile floor is 38px - the shared homepage scale,
-    // which this page's hero adopted and which no route may re-cut - and
-    // the section italic's own floor is also 38px. Under 362px both sit
-    // on their floors, so neither is scaling past the other. The hero
-    // still leads on the line that carries the page: 44px sans against
-    // the section's 36px. Above 362px the hero italic pulls away and the
-    // gap only widens.
-    const floorBand = w < 362;
-    const sectionItalic = pick(".about-why-line-accent,", w);
-    assert.ok(floorBand ? sectionItalic === heroItalic : sectionItalic < heroItalic,
-      `the section italic (${sectionItalic}) passes the hero italic (${heroItalic}) at ${w}px`);
-    assert.ok(pick(".about-why-line,", w) < heroSans,
-      `the section sans reaches the hero sans at ${w}px`);
-
-    // The values intro is deliberately BELOW section scale, and the
-    // statement rows below that.
-    assert.ok(pick(".about-cares-line{", w) < pick(".about-why-line,", w),
-      `the values intro is not below section scale at ${w}px`);
-    assert.ok(pick(".about-cares-statement{", w) < pick(".about-cares-line{", w),
-      `a statement row outgrew the values intro at ${w}px`);
   }
 });
 
-test("3c: the four normal sections share ONE headline pair", () => {
-  // One rule, four selectors - drift is not expressible.
-  assert.match(desktop, /\.about-why-line,\s*\.about-real-line,\s*\.about-tiktok-line,\s*\.about-final-line\{/);
-  assert.match(desktop, /\.about-why-line-accent,\s*\.about-real-line-accent,\s*\.about-tiktok-line-accent,\s*\.about-final-line-accent\{/);
-  // The sans is Inter 500, the accent is a real Cormorant italic.
-  assert.match(rule(".about-why-line,"), /font-weight:500/);
-  assert.match(rule(".about-why-line,"), /font-family:var\(--font-sans\)/);
-  assert.match(rule(".about-why-line-accent,"), /font-family:var\(--font-display\)/);
-  assert.match(rule(".about-why-line-accent,"), /font-style:italic/);
-  assert.match(rule(".about-why-line-accent,"), /font-weight:400/);
+/* ══════════════════════════════════════════════════════════════
+   3. WHAT WAS REMOVED STAYS REMOVED
+   ══════════════════════════════════════════════════════════════ */
+
+test("3: the four retired bands are gone, from markup and from the sheet", () => {
+  for (const gone of ["WHY GLOA EXISTS", "Matcha gehört", "Schublade.",
+                      "MATCHA IS FOR EVERYONE", "Nicht", "kompliziert.", "Einfach gut.",
+                      "HERKUNFT", "Unser Matcha kommt aus Shizuoka",
+                      "BUILDING GLOA", "Schau vorbei,", "während es entsteht.",
+                      "Genug über uns.", "Zeit für Matcha.",
+                      "@gloa.matcha", "BUILDING IN PUBLIC"]) {
+    assert.ok(!text().includes(gone), `a retired band is still on the page: ${gone}`);
+  }
+  // Their markup and their rules left together - nothing kept "in case".
+  for (const cls of ["about-why", "about-real", "about-origin", "about-cares",
+                     "about-tiktok", "about-final", "about-handle", "about-micro"]) {
+    assert.ok(!about.includes(cls), `${cls} survives in the component`);
+    assert.ok(!code.includes(`.${cls}`), `${cls} still has rules in the About block`);
+  }
+  assert.ok(!site.includes("aboutCares"), "the old values data is still in the source");
 });
 
-test("3d: one eyebrow rule for all six eyebrows, at 11px / .2em", () => {
-  const eyebrow = rule(".about-hero-eyebrow,");
-  assert.match(eyebrow, /font-size:var\(--type-meta\)/);
-  assert.match(css, /--type-meta:11px/);
-  assert.match(eyebrow, /letter-spacing:\.2em/);
-  assert.match(eyebrow, /font-weight:600/);
-  assert.match(eyebrow, /text-transform:uppercase/);
-  for (const name of ["about-why-eyebrow", "about-real-eyebrow", "about-origin-eyebrow",
-                      "about-cares-eyebrow", "about-tiktok-eyebrow"]) {
-    assert.ok(eyebrow.includes(name), `${name} is not on the shared eyebrow rule`);
+test("3b: the hero no longer repeats facts other pages already carry", () => {
+  const hero = mainHtml().slice(mainHtml().indexOf('<section class="about-hero"'), mainHtml().indexOf('<section class="about-name"'));
+  for (const gone of ["SHIZUOKA / JAPAN", "BERLIN / GERMANY", "EST. 2026",
+                      "GLOA bringt Matcha aus Shizuoka", "Für Latte, iced, pur",
+                      "about-hero-meta", "about-hero-sub"]) {
+    assert.ok(!hero.includes(gone), `the hero still carries: ${gone}`);
   }
-  // Every eyebrow in the markup carries the shared .eyebrow class too.
-  for (const m of about.matchAll(/className="([^"]*about-\w+-eyebrow)"/g)) {
-    assert.match(m[1], /^eyebrow /, `${m[1]} is missing the shared class`);
-  }
+  // The hero is one vertical column - no second copy column beside the
+  // headline, which is what made the phone read two conversations.
+  assert.match(rule(".about-hero-inner{"), /flex-direction:column/);
+  assert.ok(!/grid-template-columns/.test(rule(".about-hero-inner{")), "the hero is a two-column grid again");
 });
 
-test("3e: body copy is 16-17px everywhere, and 16px on mobile", () => {
-  for (const sel of [".about-hero-lead,", ".about-why-body{", ".about-real-body{",
-                     ".about-origin-body{", ".about-tiktok-body{"]) {
-    assert.match(rule(sel), /font-size:clamp\(16px,1\.3vw,17px\)/, `${sel} is off the body role`);
-    assert.match(rule(sel), /line-height:1\.5[5-9]|line-height:1\.6[0-9]?/, `${sel} is off the body leading`);
+test("3c: each message is made ONCE on the whole page", () => {
+  const t = text();
+  for (const [phrase, times] of [["Glow", 3], ["Aura", 3], ["Berlin", 1], ["2026", 1]]) {
+    const n = t.split(phrase).length - 1;
+    assert.ok(n <= times, `"${phrase}" appears ${n} times, expected at most ${times}`);
   }
-  assert.match(mobile, /\.about-real-body\{max-width:none;font-size:16px\}/);
-  // No 20-22px default body, and no 12px body copy.
-  for (const m of desktop.matchAll(/font-size:(\d+)px/g)) {
-    const px = Number(m[1]);
-    assert.ok(px <= 12 || px >= 16, `a stray ${px}px type size`);
+  // The page does not re-explain the product.
+  for (const banned of [/iced/i, /\bpur\b/i, /latte/i, /grünteepulver/i, /zubereit/i]) {
+    assert.ok(!banned.test(t), `/about explains the product again: ${banned}`);
   }
+  // Shizuoka belongs to /our-matcha, and is not repeated here.
+  assert.ok(!t.includes("Shizuoka"), "/about repeats the origin story");
 });
 
-test("3f: two families, and only two", () => {
-  for (const m of rules.matchAll(/font-family:([^;}]+)/g)) {
+/* ══════════════════════════════════════════════════════════════
+   4. THE SHARED SYSTEM, STILL SHARED
+   ══════════════════════════════════════════════════════════════ */
+
+test("4: the hero reads the canonical page-hero scale, and sets none of its own", () => {
+  assert.ok(about.includes('<p className="eyebrow about-eyebrow about-hero-eyebrow gloa-hero-eyebrow">'));
+  assert.ok(about.includes('<span className="about-hero-line gloa-hero-primary">Good energy.</span>'));
+  assert.ok(about.includes('<i className="about-hero-line about-hero-line-accent gloa-hero-secondary">No theatre.</i>'));
+  for (const sel of [".about-hero-line{", ".about-hero-line-accent{"]) {
+    assert.ok(!/font-family|font-size|font-weight|font-style|line-height|letter-spacing/.test(rule(sel)),
+      `${sel} sets hero typography of its own`);
+  }
+  // And the shared scale is still the homepage's.
+  assert.match(css, /--type-hero-primary:clamp\(54px,5\.9vw,100px\)/);
+  assert.match(css, /--type-hero-secondary:clamp\(48px,5vw,86px\)/);
+});
+
+test("4b: section headings are the established GLOA section scale", () => {
+  assert.match(desktop, /\.about-name-line,\s*\.about-story-line\{[\s\S]*?font-size:clamp\(42px,4\.2vw,60px\)/);
+  assert.match(rule(".about-story-line-accent{"), /font-size:clamp\(44px,4\.6vw,64px\)/);
+  assert.match(rule(".about-story-line-accent{"), /font-family:var\(--font-display\),Georgia,serif/);
+  assert.match(rule(".about-story-line-accent{"), /font-style:italic/);
+  // Exactly what /partnerships already sets, so no second scale exists.
+  assert.match(css, /font-size:clamp\(42px,4\.2vw,60px\)/);
+  // The values intro is a STEP BELOW the band scale - it opens a block,
+  // not a band.
+  const values = /clamp\(([\d.]+)px,[\d.]+vw,([\d.]+)px\)/.exec(rule(".about-values-line{"));
+  assert.ok(Number(values[2]) < 60, `the values intro (${values[2]}px) reaches the section scale`);
+  // Two families, and only two.
+  for (const m of code.matchAll(/font-family:([^;}]+)/g)) {
     assert.match(m[1], /^var\(--font-(sans|display)\)/, `a third family: ${m[1]}`);
   }
-  // Georgia survives only as the technical fallback after the variable,
-  // which is the site-wide contract.
-  for (const m of rules.matchAll(/font-family:var\(--font-display\),([^;}]+)/g)) {
-    assert.equal(m[1].trim(), "Georgia,serif");
-  }
-  assert.ok(!rules.includes("@import") && !rules.includes("@font-face"),
-    "the About block loads a font");
-  // Both families are still the two next/font faces, unchanged.
-  const layout = read("app/layout.tsx");
-  assert.match(layout, /Inter\(\{/);
-  assert.match(layout, /Cormorant_Garamond\(\{/);
-  assert.equal([...layout.matchAll(/from "next\/font\/google"/g)].length, 1);
+  // One eyebrow rule, at the site's meta scale.
+  const eyebrow = rule(".about-page .about-eyebrow{");
+  assert.match(eyebrow, /font-size:var\(--type-meta\)/);
+  assert.match(eyebrow, /letter-spacing:\.2em/);
+  assert.match(eyebrow, /text-transform:uppercase/);
+  assert.match(eyebrow, /font-weight:600/);
+  assert.equal((mainHtml().match(/class="eyebrow about-eyebrow/g) || []).length, 4,
+    "the eyebrows are not all on the one role");
 });
 
-/* ══════════════════════════════════════════════════════════════
-   4. THE CANONICAL RAIL
-   ══════════════════════════════════════════════════════════════ */
-
-test("4: every section content block sits on the canonical rail", () => {
-  // All seven sections use the shared utility inside a full-width ground.
-  for (const inner of ["about-hero-inner", "about-why-inner", "about-real-inner", "about-origin-inner",
-                       "about-cares-inner", "about-tiktok-inner", "about-final-inner"]) {
+test("4c: every band sits on the canonical rail, and reserves no height", () => {
+  for (const inner of ["about-hero-inner", "about-name-inner", "about-story-inner"]) {
     assert.ok(about.includes(`className="${inner} home-rail"`), `${inner} is off the rail`);
   }
-  assert.match(css, /\.home-rail\{\s*width:100%;\s*max-width:var\(--rail-max\);\s*margin-inline:auto;\s*\}/);
-  // Their grounds hand the horizontal gutter to the shared token - no
-  // section-specific 5vw survives.
-  for (const sel of [".about-hero{", ".about-real{", ".about-origin{",
-                     ".about-cares{", ".about-tiktok{", ".about-final{"]) {
-    assert.match(rule(sel), /padding-inline:var\(--rail-gutter\)/, `${sel} sets its own gutter`);
+  for (const band of [".about-hero{", ".about-name{", ".about-story{"]) {
+    assert.match(rule(band), /padding-inline:var\(--rail-gutter\)/, `${band} is off the shared gutter`);
   }
-  assert.ok(!/padding[^;}]*\dvw/.test(desktop.replace(/clamp\([^)]*\)/g, "")),
-    "a section-specific vw gutter survived");
-
-  // ALL SEVEN sections are now the same shape - a full-width ground
-  // handing its gutter to the token, with .home-rail inside. The
-  // half-column rail arithmetic the old 50/50 split needed is gone,
-  // and with it the last bespoke geometry on the page.
-  assert.ok(!code.includes("100% * 2"), "the split's bespoke rail maths survived");
-  assert.equal([...about.matchAll(/ home-rail"/g)].length, 7,
-    "a section content block is off the shared rail utility");
-  assert.equal([...code.matchAll(/padding-inline:var\(--rail-gutter\)/g)].length, 7,
-    "a section ground is not on the shared gutter");
+  // NO RESERVED SPACE. The old hero carried a min-height grid floor to
+  // fill a blue field its own copy could not.
+  // The ONE min-height left is the 50px tap target on the two buttons,
+  // which is an accessibility floor rather than a band filling itself.
+  const heights = [...code.matchAll(/([^{}]+)\{[^}]*min-height/g)]
+    .map(m => m[1].split(/[\r\n]/).pop().trim());
+  assert.deepEqual(heights, [".about-page .about-story-cta"], "a band reserves height again");
+  assert.ok(!/100vh|\d+vh/.test(code), "a band reserves a viewport");
 });
 
-/* ══════════════════════════════════════════════════════════════
-   5. LAYOUT SHAPES
-   ══════════════════════════════════════════════════════════════ */
-
-test("5: WHY GLOA EXISTS is ONE raspberry ground, not a split", () => {
-  // The cream half, the seam and the near-black copy are gone, and so
-  // is the bespoke half-column rail arithmetic the split needed.
-  assert.ok(!about.includes("about-why-left") && !about.includes("about-why-right"),
-    "a half of the old split survived in the markup");
-  assert.ok(!code.includes("about-why-left") && !code.includes("about-why-right"),
-    "a half of the old split survived in the CSS");
-  const why = rule(".about-why{");
-  assert.match(why, /background:var\(--berry\)/);
-  assert.match(why, /color:var\(--cream\)/);
-  assert.ok(!/var\(--ink\)/.test(rules.slice(rules.indexOf(".about-why{"), rules.indexOf("/* ── 03"))),
-    "near-black type survived in the raspberry section");
-  // It is a normal railed section now, exactly like the other five.
-  assert.match(why, /padding-inline:var\(--rail-gutter\)/);
-  assert.ok(about.includes('className="about-why-inner home-rail"'));
-
-  // Two columns, headline-dominant, with a real column gap.
-  const inner = rule(".about-why-inner{");
-  assert.match(inner, /grid-template-columns:minmax\(0,1\.05fr\) minmax\(0,\.95fr\)/);
-  assert.match(inner, /gap:clamp\(40px,4\.8vw,88px\)/);
-  assert.match(inner, /align-items:center/);
-  assert.ok(!/border-radius|box-shadow|background/.test(inner), "the columns grew a container");
-
-  // Eyebrow, headline, then copy - the order the stacked view needs.
-  assert.ok(about.indexOf("about-why-eyebrow") < about.indexOf("about-why-headline"));
-  assert.ok(about.indexOf("about-why-headline") < about.indexOf("about-why-detail"));
-  assert.match(mobile, /\.about-why-inner\{grid-template-columns:1fr/);
-});
-
-test("5a: the right column is three blocks that never leave the body role", () => {
-  for (const cls of ["about-why-lead", "about-why-body", "about-why-close"]) {
-    assert.ok(about.includes(`className="${cls}"`), `${cls} is not rendered`);
+test("4d: editorial, not a card deck", () => {
+  assert.ok(!/box-shadow:(?!none)/.test(code), "a shadow was introduced");
+  assert.ok(!/border-radius:(?!0)/.test(code), "a rounded container was introduced");
+  assert.ok(!/gradient|backdrop-filter|\bblur\(/.test(code), "a gradient or blur was introduced");
+  // Structure comes from hairlines: 1px, and nothing heavier.
+  for (const m of code.matchAll(/border(?:-(?:top|right|bottom|left))?:\s*([^;}]+)/g)) {
+    if (m[1].trim() === "0") continue;
+    assert.match(m[1], /^1px solid /, `a border heavier than a hairline: ${m[1]}`);
   }
-  // 500/18 -> 400/17 -> 500/17. A step in weight and one in size, and
-  // the top of it is --type-body's own 18px ceiling.
-  const lead = rule(".about-why-lead{");
-  assert.match(lead, /font-weight:500/);
-  assert.match(lead, /font-size:clamp\(17px,1\.45vw,18px\)/);
-  assert.match(rule(".about-why-body{"), /font-weight:400/);
-  assert.match(rule(".about-why-body{"), /font-size:clamp\(16px,1\.3vw,17px\)/);
-  assert.match(rule(".about-why-close{"), /font-weight:500/);
-  const bodyCap = Number(/clamp\([\d.]+px,[\d.]+vw,([\d.]+)px\)/.exec(/--type-body:([^;]+);/.exec(css)[1])[1]);
-  for (const sel of [".about-why-lead{", ".about-why-body{", ".about-why-close{"]) {
-    const px = Number(/font-size:clamp\([\d.]+px,[\d.]+vw,([\d.]+)px\)/.exec(rule(sel))[1]);
-    assert.ok(px <= bodyCap, `${sel} (${px}px) is above the site body ceiling (${bodyCap}px)`);
-  }
-  // All three are cream, and the blocks are separated by space.
-  for (const sel of [".about-why-lead{", ".about-why-body{", ".about-why-close{"]) {
-    assert.match(rule(sel), /color:var\(--cream\)/, `${sel} is not cream`);
-  }
-  assert.match(rule(".about-why-body{"), /margin:clamp\(24px,2\.4vw,32px\) 0 0/);
-  assert.match(rule(".about-why-close{"), /margin:clamp\(28px,2\.8vw,40px\) 0 0/);
-  // One subtle hairline, inside the dark-ground band the rest of the
-  // site uses (.20-.28), and no box around anything.
-  const close = rule(".about-why-close{");
-  assert.match(close, /border-top:1px solid rgba\(245,235,226,\.22\)/);
-  // Exactly one such rule - the section grew no second divider.
-  assert.equal([...code.matchAll(/rgba\(245,235,226,\.22\)/g)].length, 1);
-  assert.match(close, /line-height:1\.85/);
-  assert.match(rule(".about-why-detail{"), /max-width:560px/);
-});
-
-test("5b: Herkunft is a compact band, with a decorative line mark", () => {
-  const band = rule(".about-origin{");
-  assert.match(band, /padding-block:clamp\(54px,4\.6vw,70px\)/);
-  // Smaller than every normal section on the page.
-  for (const sel of [".about-real{", ".about-cares{", ".about-tiktok{", ".about-final{"]) {
-    const other = /padding-block:clamp\(([\d.]+)px/.exec(rule(sel))[1];
-    assert.ok(Number(other) > 54, `${sel} is not taller than the compact band`);
-  }
-  // One inline svg, decorative, no dependency and no emoji.
-  assert.equal([...about.matchAll(/<svg/g)].length, 1);
-  const svg = about.slice(about.indexOf("<svg"), about.indexOf("</svg>"));
-  assert.match(svg, /aria-hidden="true"/);
-  assert.match(svg, /focusable="false"/);
-  assert.match(svg, /stroke="currentColor"/);
-  assert.ok(!/fill="(?!none)/.test(svg), "the mark is not a line drawing");
-  assert.match(rule(".about-origin-mark{"), /color:var\(--berry\)/);
-  assert.match(rule(".about-origin-mark{"), /width:88px/);
-  assert.ok(!site.includes("import ") || !/react-icons|lucide|@heroicons/.test(site),
-    "an icon library was added");
-});
-
-test("5c: the values list is rows and hairlines, never cards", () => {
-  assert.match(rule(".about-cares-list{"), /border-top:1px solid rgba\(17,17,17,\.14\)/);
-  assert.match(rule(".about-cares-list>div{"), /border-bottom:1px solid rgba\(17,17,17,\.14\)/);
-  const row = rule(".about-cares-list>div{");
-  assert.ok(!/background/.test(row), "the rows grew a background");
-  assert.ok(!/border-radius|box-shadow/.test(row));
-  assert.match(rule(".about-cares-number{"), /color:var\(--berry\)/);
-  assert.match(rule(".about-cares-number{"), /font-size:12px/);
-  // Three rows, three numbers, no icon per row.
-  const data = site.slice(site.indexOf("const aboutCares"), site.indexOf("];", site.indexOf("const aboutCares")));
-  assert.equal([...data.matchAll(/\["0[1-9]"/g)].length, 3);
-  assert.ok(!/<svg/.test(about.slice(about.indexOf("about-cares-list"), about.indexOf("about-tiktok"))),
-    "an icon was added to the statement rows");
-});
-
-test("5d: Building GLOA is typography-led - no image was invented", () => {
-  // The brief permits ONE existing APPROVED lifestyle image here. There
-  // is none: every lifestyle photograph in public/img carries a
-  // burned-in PLACEHOLDER mark, so the section stays typographic and no
-  // asset was created, renamed or edited.
-  assert.equal([...about.matchAll(/<img /g)].length, 0, "/about renders an image");
-  assert.ok(!about.includes("/img/"), "/about references an image asset");
-  assert.ok(!code.includes("about-tiktok-photo"), "the photo rules survived");
-  // The assets the homepage uses are still referenced there, unchanged.
-  assert.ok(site.includes('image:"/img/gloa-cafe.jpg"'));
-  assert.ok(site.includes('src:"/img/gloa-work.jpg"'));
-
-  // It takes the same two-column shape as MATCHA FOR REAL LIFE, so the
-  // page has one section grammar rather than a second one here.
-  assert.equal(
-    /grid-template-columns:([^;}]+)/.exec(rule(".about-tiktok-inner{"))[1],
-    /grid-template-columns:([^;}]+)/.exec(rule(".about-real-inner{"))[1],
-  );
-  // And it stacks on narrow viewports.
-  assert.match(rules, /\.about-tiktok-inner\{grid-template-columns:1fr/);
-  assert.ok(about.indexOf("about-tiktok-copy") < about.indexOf("about-tiktok-detail"));
-});
-
-/* ══════════════════════════════════════════════════════════════
-   6. THE BUTTONS
-   ══════════════════════════════════════════════════════════════ */
-
-test("6: square editorial rectangles, in the brief's exact colours", () => {
-  const tiktok = rule(".about-tiktok .about-tiktok-cta{");
-  assert.match(tiktok, /background:var\(--cream\)/);
-  assert.match(tiktok, /color:var\(--blue\)/);
-  assert.match(tiktok, /border:1px solid var\(--cream\)/);
-  assert.match(tiktok, /border-radius:0/);
-  assert.match(tiktok, /letter-spacing:\.14em/);
-
-  assert.match(rule(".about-final-actions .cta.about-final-primary{"),
-    /background:var\(--cream\);color:var\(--plum\);border:1px solid var\(--cream\)/);
-  assert.match(rule(".about-final-actions .cta.about-final-secondary{"),
-    /background:transparent;color:var\(--cream\);border:1px solid rgba\(245,235,226,\.65\)/);
-  const box = rule(".about-final-actions .cta{");
-  assert.match(box, /border-radius:0/);
-  assert.match(box, /font-size:12px/);
-  assert.match(box, /text-transform:uppercase/);
-
-  // The Herkunft CTA is a hairline text link, not a filled button.
-  const link = rule(".about-origin-link{");
-  assert.match(link, /border-bottom:1px solid rgba\(245,235,226,\.45\)/);
-  assert.ok(!/background:/.test(link), "the Herkunft CTA became a filled button");
-  assert.ok(!about.includes('className="cta" href="/our-matcha"'));
-
-  // Hovers stay short.
-  for (const m of rules.matchAll(/transition:([^;}]+)/g)) {
-    assert.ok(!/\d{3,}ms|[3-9]s/.test(m[1]), `a slow transition: ${m[1]}`);
+  // NO PURE WHITE, and every tint is derived from cream or near black.
+  assert.ok(!/#fff\b|#ffffff\b/i.test(code), "a white hex appeared");
+  for (const m of code.matchAll(/rgba\((\d+),\s*(\d+),\s*(\d+),[^)]*\)/g)) {
+    const rgb = `${m[1]},${m[2]},${m[3]}`;
+    assert.ok(rgb === "245,235,226" || rgb === "17,17,17", `an rgba outside the palette: ${m[0]}`);
   }
 });
 
-/* ══════════════════════════════════════════════════════════════
-   7. COPY AND ROUTES
-   ══════════════════════════════════════════════════════════════ */
+test("4e: the grids reflow and the reading order never does", () => {
+  const at1100 = code.slice(code.indexOf("@media (max-width:1100px)"), code.indexOf("@media (max-width:900px)"));
+  const at900 = code.slice(code.indexOf("@media (max-width:900px)"), code.indexOf("@media (max-width:760px)"));
+  const at520 = code.slice(code.indexOf("@media (max-width:520px)"));
 
-test("7: the authorised copy, and nothing else, changed", () => {
-  // The three refinements, verbatim.
-  assert.ok(about.includes("Wir mögen Matcha. Nur nicht die Regeln, die manchmal darum gebaut werden."));
-  assert.ok(about.includes("GLOA soll unkompliziert funktionieren: im Café, im Büro, unterwegs oder zu Hause."));
-  assert.ok(about.includes("Kein Dresscode.<br/>Kein Pflichtprogramm.<br/>Ein gutes Produkt.<br/>Du entscheidest, was du daraus machst."));
-  assert.ok(about.includes("Morgens, im Büro, im Café oder unterwegs.<br/>Iced, als Latte oder pur."));
-  assert.ok(about.includes("Dein Tag entscheidet, nicht ein Regelwerk."));
-  assert.ok(about.includes("Wir bauen GLOA gerade auf:<br/>Produkt, Packaging, Cafés und alles dazwischen."));
-  assert.ok(about.includes("Auf TikTok zeigen wir,<br/>was hinter der Marke passiert."));
-
-  // The superseded sentences are gone.
-  for (const old of [
-    "Wir mögen Matcha, aber nicht die Regeln",
-    "GLOA funktioniert überall dort, wo du gerade bist",
-    "Und du entscheidest, was du daraus machst",
-    "Auf TikTok zeigen wir, was hinter der Marke passiert.</p>",
-  ]) {
-    assert.ok(!about.includes(old), `superseded copy survived: ${old}`);
-  }
-
-  // Everything NOT on the authorised list is untouched.
-  for (const kept of [
-    "ÜBER GLOA", "Good energy.", "No theatre.",
-    "GLOA bringt Matcha aus Shizuoka in einen Alltag, der nicht nach Regeln fragt.",
-    "Für Latte, iced, pur oder genau so, wie du ihn magst.",
-    "SHIZUOKA / JAPAN", "BERLIN / GERMANY", "EST. 2026",
-    "WHY GLOA EXISTS", "Matcha gehört", "nicht in eine", "Schublade.",
-    // SITE-01B: the official slogan replaced the old tagline here and in
-    // the ticker. One slogan site-wide, no second one alongside it.
-    "MATCHA IS FOR EVERYONE", "Nicht", "kompliziert.", "Einfach gut.",
-    // SITE-01B: the organic claim came out while ORGANIC_CERTIFICATION is
-    // still PENDING OWNER DOCUMENT. Origin and grind are unchanged.
-    "HERKUNFT", "Unser Matcha kommt aus Shizuoka, Japan: fein vermahlenes Grünteepulver.",
-    "WAS UNS WICHTIG IST", "Worauf wir", "Wert legen.",
-    "BUILDING GLOA", "Schau vorbei,", "während es entsteht.",
-    "@gloa.matcha", "Auf TikTok folgen ↗", "BUILDING IN PUBLIC · BERLIN · 2026",
-    "Genug über uns.", "Zeit für Matcha.", "Zum Shop", "Unser Matcha →",
-  ]) {
-    assert.ok(about.includes(kept), `copy went missing: ${kept}`);
-  }
-  const data = site.slice(site.indexOf("const aboutCares"), site.indexOf("];", site.indexOf("const aboutCares")));
-  for (const statement of [
-    "Gutes Produkt statt komplizierter Begriffe.",
-    "Klare Infos statt erfundenem Prestige.",
-    "Matcha, der pur genauso funktioniert wie als Latte.",
-  ]) assert.ok(data.includes(statement), `a value statement changed: ${statement}`);
+  assert.match(rule(".about-values-list{"), /grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
+  assert.match(at1100, /\.about-values-list\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+  assert.match(at900, /\.about-values-list\{grid-template-columns:minmax\(0,1fr\)/);
+  // Both two-column shapes stack at the same width.
+  assert.match(at900, /\.about-name-body\{grid-template-columns:minmax\(0,1fr\)/);
+  assert.match(at900, /\.about-story-inner\{grid-template-columns:minmax\(0,1fr\)/);
+  // The name halves stack rather than squeezing on a phone.
+  assert.match(at520, /\.about-name-parts\{grid-template-columns:minmax\(0,1fr\)\}/);
+  // Nothing is reordered.
+  assert.ok(!/\border:\s*-?\d/.test(code) && !/grid-auto-flow:\s*dense/.test(code),
+    "a reflow changed the reading order");
+  // The section scale steps down once, at the same 900px the hero uses.
+  assert.match(at900, /font-size:clamp\(36px,9\.2vw,44px\)/);
 });
 
-test("7b: every destination is the one it was", () => {
-  assert.ok(about.includes('className="about-origin-link" href="/our-matcha"'));
-  assert.ok(about.includes('className="cta about-final-primary" href="/shop"'));
-  assert.ok(about.includes('className="cta about-final-secondary" href="/our-matcha"'));
-  assert.equal([...about.matchAll(/href="https:\/\/www\.tiktok\.com\/@gloa\.matcha"/g)].length, 2);
-  for (const m of about.matchAll(/href="([^"]+)"/g)) {
-    assert.ok(["/our-matcha", "/shop", "https://www.tiktok.com/@gloa.matcha"].includes(m[1]),
-      `an unexpected destination: ${m[1]}`);
-  }
-  // The external links keep target/rel; the internal ones do not have them.
-  assert.equal([...about.matchAll(/target="_blank" rel="noopener noreferrer"/g)].length, 2);
-  // ↗ for external, → for internal - and no arrow on the primary CTA.
-  assert.ok(!/Zum Shop\s*→/.test(about), "an arrow was added to the primary CTA");
-});
-
-/* ══════════════════════════════════════════════════════════════
-   8. SEMANTICS
-   ══════════════════════════════════════════════════════════════ */
-
-test("8: one h1, then h2s, then h3s", () => {
-  assert.equal([...about.matchAll(/<h1[ >]/g)].length, 1);
-  assert.match(about, /<h1 className="about-hero-headline">/);
-  // Five section titles, all h2 - the Herkunft band is a band, so it
-  // carries an eyebrow and a sentence and no heading of its own.
-  assert.equal([...about.matchAll(/<h2[ >]/g)].length, 5);
-  // The three statements are h3 - under the "Worauf wir Wert legen." h2.
-  assert.equal([...about.matchAll(/<h3[ >]/g)].length, 1);
-  assert.ok(about.includes('<h3 className="about-cares-statement">'));
-  assert.ok(!/<h[4-6][ >]/.test(about));
-});
-
-/* ══════════════════════════════════════════════════════════════
-   9. THE FREEZES
-   ══════════════════════════════════════════════════════════════ */
-
-test("9: ticker, nav, footer and the other pages are untouched", () => {
-  // The ticker and the navigation live in app/Chrome.tsx, which this
-  // pass does not open at all. Their copy, verbatim.
-  const chrome = read("app/Chrome.tsx");
-  assert.ok(chrome.includes("<span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span>"));
-  assert.ok(chrome.includes('<Link href="/for-cafes">B2B</Link>'));
-  assert.match(chrome, /className="brand-bar"/);
-  assert.match(chrome, /className="bb-track"/);
-  // The nav, its ÜBER GLOA label and its active state.
-  assert.ok(chrome.includes('["/about","Über GLOA"]'));
-  assert.match(chrome, /nav-active/);
-  assert.match(chrome, /export function Header/);
-  assert.match(chrome, /export function Footer/);
-
-  // The About block cannot reach any of them, or any other page: every
-  // selector in it is About-scoped. A selector prelude is the run of
-  // text between a brace and the next `{`, so declarations - which never
-  // reach a `{` before their block closes - cannot match here.
+test("5: every rule is About-scoped, and no other page moved", () => {
   let preludes = 0;
   for (const m of code.matchAll(/[}{]\s*([^{}@]+?)\s*\{/g)) {
     for (const sel of m[1].split(",")) {
@@ -591,18 +351,27 @@ test("9: ticker, nav, footer and the other pages are untouched", () => {
       assert.ok(/^\.about-/.test(s), `an unscoped selector in the About block: ${s}`);
     }
   }
-  assert.ok(preludes > 40, `only ${preludes} selectors were scanned`);
-  // The pages the brief freezes still have their own blocks.
-  for (const marker of ["/our-matcha PAGE HERO", "/our-matcha FAQ + FINAL CTA",
-                        ".home-rail{", ".featured-recipes{"]) {
+  assert.ok(preludes > 25, `only ${preludes} selectors were scanned`);
+  assert.ok(!code.includes("!important"), "specificity was solved with !important");
+  // Nothing outside /about renders an About class.
+  const others = site.replace(about, "");
+  for (const cls of ["about-hero", "about-name", "about-story", "about-value"]) {
+    assert.ok(!others.includes(cls), `${cls} is rendered outside /about`);
+  }
+  // The chrome and the other pages' blocks are untouched.
+  const chrome = read("app/Chrome.tsx");
+  assert.ok(chrome.includes('["/about","Über GLOA"]'), "the nav label changed");
+  assert.match(chrome, /export function Header/);
+  assert.match(chrome, /export function Footer/);
+  for (const marker of ["/our-matcha PAGE HERO", ".home-rail{", "/partnerships — EVENTS"]) {
     assert.ok(css.includes(marker), `a frozen block went missing: ${marker}`);
   }
 });
 
-test("9b: nothing outside /about renders the About classes", () => {
-  const others = site.replace(about, "");
-  for (const cls of ["about-hero", "about-why", "about-real", "about-origin",
-                     "about-cares", "about-tiktok", "about-final", "about-handle"]) {
-    assert.ok(!others.includes(cls), `${cls} is rendered outside /about`);
-  }
+test("5b: the page got shorter, not just rearranged", () => {
+  // Seven bands became three, and the sheet lost roughly a third of its
+  // rules with them. A regression here means a band came back.
+  assert.equal((mainHtml().match(/<section class="about-/g) || []).length, 3);
+  assert.ok(code.length < 14000, `the About block grew back to ${code.length} characters`);
+  assert.ok(about.length < 6000, `the About component grew back to ${about.length} characters`);
 });

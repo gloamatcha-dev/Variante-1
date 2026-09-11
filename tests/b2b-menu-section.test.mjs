@@ -336,7 +336,7 @@ test("5b: every selector is scoped, and nothing else on the page moved", () => {
   assert.match(read("app/BusinessCalculator.tsx"), /className="b2b-flow"/);
   assert.match(read("app/B2bCalculator.tsx"), /export function B2bCalculator\(/);
   // And the other finished pages still have their own blocks.
-  for (const marker of ["/about — ONE EDITORIAL SYSTEM", "/our-matcha PAGE HERO", ".home-rail{"]) {
+  for (const marker of ["/about — THREE BANDS", "/our-matcha PAGE HERO", ".home-rail{"]) {
     assert.ok(css.includes(marker), `a frozen block went missing: ${marker}`);
   }
 });

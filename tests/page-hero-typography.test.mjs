@@ -143,7 +143,7 @@ const HEROES = [
   ["/our-matcha", '<p className="eyebrow matcha-hero-eyebrow gloa-hero-eyebrow">',
     ['<span className="matcha-hero-line gloa-hero-primary">Matcha.</span>'],
     '<i className="matcha-hero-line matcha-hero-line-accent gloa-hero-secondary">'],
-  ["/about", '<p className="eyebrow about-hero-eyebrow gloa-hero-eyebrow">',
+  ["/about", '<p className="eyebrow about-eyebrow about-hero-eyebrow gloa-hero-eyebrow">',
     ['<span className="about-hero-line gloa-hero-primary">Good energy.</span>'],
     '<i className="about-hero-line about-hero-line-accent gloa-hero-secondary">'],
   ["/for-cafes", '<p className="eyebrow b2b-hero-eyebrow gloa-hero-eyebrow">',
@@ -254,7 +254,7 @@ test("7b: Cormorant is untouched everywhere it is not a page hero", () => {
   // Some of these sit in grouped selectors, so the rule is found by
   // scanning blocks rather than by an exact "selector{" match.
   const blocks = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^}]*)\}/g)];
-  for (const sel of [".about-why-line-accent", ".about-real-line-accent",
+  for (const sel of [".about-story-line-accent",
                      ".matcha-product-line-accent", ".matcha-research-line-accent",
                      ".b2b-menu .b2b-menu-line-accent", ".b2b-compare .b2b-compare-line-accent",
                      ".b2b-flow .b2b-flow-line-accent", ".b2b-support .b2b-support-line-accent",

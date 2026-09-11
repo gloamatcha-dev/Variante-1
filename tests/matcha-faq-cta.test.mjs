@@ -24,7 +24,7 @@ const faq = page.slice(page.indexOf('<section className="faq"'), page.indexOf('<
 const cta = page.slice(page.indexOf('<section className="matcha-cta">'));
 // Bounded at the NEXT page block. Without an end this slice ran to the
 // end of the file and silently absorbed every block appended after it.
-const rules = css.slice(css.indexOf("/our-matcha FAQ + FINAL CTA"), css.indexOf("/about — ONE EDITORIAL SYSTEM"));
+const rules = css.slice(css.indexOf("/our-matcha FAQ + FINAL CTA"), css.indexOf("/about — THREE BANDS"));
 const rule = name => {
   const at = rules.indexOf(name);
   assert.notEqual(at, -1, `missing rule: ${name}`);

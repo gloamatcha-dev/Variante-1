@@ -380,7 +380,7 @@ test("7b: every selector is hero-scoped, and no other page moved", () => {
   // otherwise untouched and still serves its three h2 consumers.
   assert.match(css, /\.behind-bar h2 i,\.business-support h2 i,\.faq h2 i\{/);
   // The other finished pages still have their own blocks.
-  for (const marker of ["/about — ONE EDITORIAL SYSTEM", "/our-matcha PAGE HERO",
+  for (const marker of ["/about — THREE BANDS", "/our-matcha PAGE HERO",
                         "/our-matcha FAQ + FINAL CTA", ".home-rail{"]) {
     assert.ok(css.includes(marker), `a frozen block went missing: ${marker}`);
   }

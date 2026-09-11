@@ -816,31 +816,104 @@ function MatchaPage(){return <main className="matcha-page">
 
 <section className="matcha-cta"><p className="eyebrow">MATCHA IS FOR EVERYONE.</p><h2>Bereit für<br/><i>deinen Matcha?</i></h2><div className="matcha-cta-actions"><Link className="cta" href="/shop">Zum Shop</Link><Link className="cta secondary" href="/for-cafes">B2B →</Link></div></section>
 </main>}
-const aboutCares:[string,string][]=[
-["01","Gutes Produkt statt komplizierter Begriffe."],
-["02","Klare Infos statt erfundenem Prestige."],
-["03","Matcha, der pur genauso funktioniert wie als Latte."],
+/* /about — THE BRAND, AND ONLY THE BRAND.
+
+   Was seven sections: a hero that explained how to drink matcha, a WHY
+   GLOA EXISTS band, a MATCHA IS FOR EVERYONE band saying much the same
+   thing again, a standalone HERKUNFT strip, a values list about the
+   product, a BUILDING GLOA band that told visitors the company was
+   still under construction, and a closing CTA. Read end to end it was a
+   second product page with a name on it, and it said "unkompliziert",
+   "Regeln", "Latte", "pur" and "Shizuoka" more than once each.
+
+   Now three: who GLOA is, where the name comes from and what it stands
+   for, and the story. The product lives on /our-matcha and is not
+   re-explained here. Nothing was deleted blindly - the few claims worth
+   keeping moved into the three bands, and the rest were repetitions of
+   what other pages already say better.
+
+   THE VALUES SIT INSIDE THE NAME BAND on purpose. They are what the
+   name means in practice, and giving them a band of their own is what
+   produced the wall of single-message sections in the first place. */
+const aboutValues:[string,string,string][]=[
+["01","KLARHEIT","Wir sagen, was wir meinen und machen Dinge nicht komplizierter als nötig."],
+["02","QUALITÄT","Wir haben hohe Ansprüche an das, was unseren Namen trägt."],
+["03","GESTALTUNG","Gutes Design soll nicht nur gut aussehen. Es soll sich selbstverständlich anfühlen."],
+["04","NÄHE","GLOA soll Menschen einladen und nicht ausschließen."],
 ];
-/* /about, ONE EDITORIAL SYSTEM.
-   Every section below reads the same four things: the canonical rail
-   (.home-rail inside a section whose background stays full width), the
-   eyebrow role, the section headline pair (Inter 500 + Cormorant italic)
-   and the body role. The hero is the only Page-Hero-scale title on the
-   page - see the ABOUT PAGE block in globals.css. */
 function About(){return <main className="about-page">
-<section className="about-hero"><div className="about-hero-inner home-rail"><div className="about-hero-copy"><p className="eyebrow about-hero-eyebrow gloa-hero-eyebrow">ÜBER GLOA</p><h1 className="about-hero-headline"><span className="about-hero-line gloa-hero-primary">Good energy.</span><i className="about-hero-line about-hero-line-accent gloa-hero-secondary">No theatre.</i></h1></div><div className="about-hero-side"><p className="about-hero-lead">GLOA bringt Matcha aus Shizuoka in einen Alltag, der nicht nach Regeln fragt.</p><p className="about-hero-sub">Für Latte, iced, pur oder genau so, wie du ihn magst.</p><p className="about-hero-meta"><span>SHIZUOKA / JAPAN</span><span>BERLIN / GERMANY</span><span>EST. 2026</span></p></div></div></section>
 
-<section className="about-why"><div className="about-why-inner home-rail"><div className="about-why-copy"><p className="eyebrow about-why-eyebrow">WHY GLOA EXISTS</p><h2 className="about-why-headline"><span className="about-why-line">Matcha gehört</span><span className="about-why-line">nicht in eine</span><i className="about-why-line about-why-line-accent">Schublade.</i></h2></div><div className="about-why-detail"><p className="about-why-lead">Wir mögen Matcha. Nur nicht die Regeln, die manchmal darum gebaut werden.</p><p className="about-why-body">GLOA soll unkompliziert funktionieren: im Café, im Büro, unterwegs oder zu Hause.</p><p className="about-why-close">Kein Dresscode.<br/>Kein Pflichtprogramm.<br/>Ein gutes Produkt.<br/>Du entscheidest, was du daraus machst.</p></div></div></section>
+{/* ── 01. BLUE. The brand in one sentence, and nothing else. The
+       metadata triple (SHIZUOKA / BERLIN / EST. 2026) left with this
+       pass: two of the three are stated once, in their proper place, in
+       the story band below. */}
+<section className="about-hero"><div className="about-hero-inner home-rail">
+<p className="eyebrow about-eyebrow about-hero-eyebrow gloa-hero-eyebrow">ÜBER GLOA</p>
+<h1 className="about-hero-headline"><span className="about-hero-line gloa-hero-primary">Good energy.</span><i className="about-hero-line about-hero-line-accent gloa-hero-secondary">No theatre.</i></h1>
+<p className="about-hero-lead">GLOA steht für gute Energie, klare Gestaltung und eine Haltung, die unkompliziert bleibt. Modern, offen und nahbar.</p>
+</div></section>
 
-<section className="about-real"><div className="about-real-inner home-rail"><div className="about-real-copy"><p className="eyebrow about-real-eyebrow">MATCHA IS FOR EVERYONE</p><h2 className="about-real-headline"><span className="about-real-line">Nicht</span><span className="about-real-line">kompliziert.</span><i className="about-real-line about-real-line-accent">Einfach gut.</i></h2></div><div className="about-real-detail"><p className="about-real-body">Morgens, im Büro, im Café oder unterwegs.<br/>Iced, als Latte oder pur.</p><p className="about-real-body">Dein Tag entscheidet, nicht ein Regelwerk.</p></div></div></section>
+{/* ── 02. CREAM. The name and the values, one band.
 
-<section className="about-origin"><div className="about-origin-inner home-rail"><svg className="about-origin-mark" viewBox="0 0 88 44" width="88" height="44" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d="M2 38 L23 13 L33 24 L45 8 L63 30 L73 20 L86 38"/><path d="M2 38 H86" opacity=".4"/><circle cx="69" cy="9" r="4.4"/></svg><div className="about-origin-copy"><p className="eyebrow about-origin-eyebrow">HERKUNFT</p><p className="about-origin-body">Unser Matcha kommt aus Shizuoka, Japan: fein vermahlenes Grünteepulver.</p></div><Link className="about-origin-link" href="/our-matcha">Unser Matcha →</Link></div></section>
+       Cream rather than raspberry: this band carries almost all of the
+       page's reading, and cream is the ground the site reads on
+       everywhere else. It also lets the two blue bands frame the page
+       instead of two saturated fields fighting each other. Raspberry
+       stays present as the accent it is elsewhere on cream - the
+       eyebrows, the wordmark and the value numbers. */}
+<section className="about-name"><div className="about-name-inner home-rail">
 
-<section className="about-cares"><div className="about-cares-inner home-rail"><p className="eyebrow about-cares-eyebrow">WAS UNS WICHTIG IST</p><h2 className="about-cares-headline"><span className="about-cares-line">Worauf wir</span><i className="about-cares-line about-cares-line-accent">Wert legen.</i></h2><div className="about-cares-list">{aboutCares.map(([n,text])=><div key={n}><span className="about-cares-number">{n}</span><h3 className="about-cares-statement">{text}</h3></div>)}</div></div></section>
+<div className="about-name-head">
+<p className="eyebrow about-eyebrow about-name-eyebrow">DER NAME GLOA</p>
+<h2 className="about-name-headline"><span className="about-name-line">Glow trifft Aura.</span></h2>
+</div>
 
-<section className="about-tiktok"><div className="about-tiktok-inner home-rail"><div className="about-tiktok-copy"><p className="eyebrow about-tiktok-eyebrow">BUILDING GLOA</p><h2 className="about-tiktok-headline"><span className="about-tiktok-line">Schau vorbei,</span><i className="about-tiktok-line about-tiktok-line-accent">während es entsteht.</i></h2></div><div className="about-tiktok-detail"><p className="about-tiktok-body">Wir bauen GLOA gerade auf:<br/>Produkt, Packaging, Cafés und alles dazwischen.</p><p className="about-tiktok-body">Auf TikTok zeigen wir,<br/>was hinter der Marke passiert.</p><Link className="about-handle" href="https://www.tiktok.com/@gloa.matcha" target="_blank" rel="noopener noreferrer">@gloa.matcha</Link><Link className="cta about-tiktok-cta" href="https://www.tiktok.com/@gloa.matcha" target="_blank" rel="noopener noreferrer">Auf TikTok folgen ↗</Link><p className="about-micro">BUILDING IN PUBLIC · BERLIN · 2026</p></div></div></section>
+<div className="about-name-body">
+{/* THE NAME, SET RATHER THAN ILLUSTRATED. Two hairlines and three
+    words: the site's own structural vocabulary doing the explaining,
+    so no arrow, plus sign or drawn device is needed. */}
+<div className="about-name-mark">
+<span className="about-name-whole">GLOA</span>
+<span className="about-name-parts">
+<span className="about-name-part">GLOW</span>
+<span className="about-name-part">AURA</span>
+</span>
+</div>
+<div className="about-name-copy">
+<p className="about-name-text">GLOA ist eine Wortkombination aus Glow und Aura.</p>
+<p className="about-name-text">Glow steht für Ausstrahlung. Aura steht für die Atmosphäre, die wir mitbringen und hinterlassen.</p>
+<p className="about-name-text">Zusammen beschreibt der Name das Gefühl, das wir mit GLOA schaffen möchten. Positiv, klar und nahbar.</p>
+</div>
+</div>
 
-<section className="about-final"><div className="about-final-inner home-rail"><h2 className="about-final-headline"><span className="about-final-line">Genug über uns.</span><i className="about-final-line about-final-line-accent">Zeit für Matcha.</i></h2><div className="about-final-actions"><Link className="cta about-final-primary" href="/shop">Zum Shop</Link><Link className="cta about-final-secondary" href="/our-matcha">Unser Matcha →</Link></div></div></section>
+<div className="about-values">
+<p className="eyebrow about-eyebrow about-values-eyebrow">WAS UNS WICHTIG IST</p>
+<h3 className="about-values-headline"><span className="about-values-line">Klarheit, Qualität</span><span className="about-values-line">und ein gutes Gefühl.</span></h3>
+<ol className="about-values-list">{aboutValues.map(([n,title,text])=><li key={n} className="about-value"><span className="about-value-num">{n}</span><h4 className="about-value-title">{title}</h4><p className="about-value-text">{text}</p></li>)}</ol>
+</div>
+
+</div></section>
+
+{/* ── 03. BLUE. The story, and the only two calls to action on the
+       page. The old "Genug über uns. Zeit für Matcha." band was a
+       whole section for two buttons; they live here now and the page
+       hands straight over to the footer. */}
+<section className="about-story"><div className="about-story-inner home-rail">
+<div className="about-story-head">
+<p className="eyebrow about-eyebrow about-story-eyebrow">UNSERE GESCHICHTE</p>
+<h2 className="about-story-headline"><span className="about-story-line">Unsere Geschichte</span><i className="about-story-line about-story-line-accent">wird noch geschrieben.</i></h2>
+</div>
+<div className="about-story-detail">
+<p className="about-story-text">GLOA wurde 2026 in Berlin gegründet.</p>
+<p className="about-story-text">Was uns von Anfang an wichtig war, bleibt auch für alles, was noch kommt, gleich. Klarheit, Qualität, gute Gestaltung und eine Marke, die nahbar bleibt.</p>
+<p className="about-story-text">Unsere Geschichte wächst mit jedem neuen Kapitel weiter.</p>
+<div className="about-story-actions">
+<Link className="cta about-story-cta" href="/our-matcha">UNSER MATCHA</Link>
+<Link className="cta about-story-cta about-story-cta-quiet" href="/shop">ZUM SHOP</Link>
+</div>
+</div>
+</div></section>
+
 </main>}
 /* THE FOUR B2B AUDIENCES. One <path> each, drawn on a 24 grid so every
    icon carries the same optical weight at 17px. Decorative - the label

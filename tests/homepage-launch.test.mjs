@@ -1051,8 +1051,11 @@ test("32: the standalone origin band is gone, markup and rules alike", () => {
                       'className="origin-list"']) {
     assert.ok(!site.includes(gone), `the origin band survives in the source: ${gone}`);
   }
-  // And /about's own origin strip is untouched by this pass.
-  assert.ok(site.includes('className="about-origin-inner home-rail"'), "/about lost its origin strip");
+  // /about used to carry an about-origin-* strip of its own, which is
+  // why the list above matches full attribute values rather than the
+  // bare class name. That strip has since been removed with the /about
+  // simplification, so neither origin block exists anywhere now.
+  assert.ok(!site.includes("about-origin"), "the /about origin strip came back");
   // Its own appended stylesheet block left with it.
   assert.equal(css.indexOf("HOMEPAGE ORIGIN SECTION"), -1, "the origin css block is still here");
   for (const gone of [".origin-inner", ".origin-line", ".origin-divider",
