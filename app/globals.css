@@ -6332,31 +6332,29 @@ header nav{gap:18px;font-size:12px}
 
        1  .pt-hero      BLUE       #1746D1   cream on blue
        2  .pt-types     CREAM      #F5EBE2   near black on cream
-       3  .pt-process   CREAM      #F5EBE2   near black on cream
-       4  .pt-request   PLUM       #4F3A5B   cream on plum
+       3  .pt-process   RASPBERRY  #A61E59   cream on raspberry
+       4  .pt-request   PLUM -> CREAM        near black on cream
 
    Then the existing black footer, directly. The colour changes
-   ARE the transitions - there is no decorative divider anywhere.
-   Bands 2 and 3 are the one place that is NOT a colour change,
-   because the raspberry band that used to separate them is gone;
-   the seam is handled at `.pt-types+.pt-process`, and the
-   reasoning is written there rather than here.
+   ARE the transitions - there is no decorative divider anywhere,
+   and every one of the four boundaries is now a change again.
 
-   NO HAIRLINE WAS ADDED AT THAT SEAM, deliberately. It was
-   considered: the page does use hairlines, and one across the
-   rail would mark the transition the missing colour change used
-   to mark. But every hairline here is the top EDGE of a content
-   block - a step, a fieldset, a row of the hero index - never a
-   rule drawn between two things, and this band already carries
-   one about 150px further down, over 01/02/03. A second line in
-   the same cream field would be the decorative divider the
-   paragraph above says does not exist. The eyebrow opens every
-   band on this page; it is what marks the new section here too.
+   RASPBERRY IS BACK, on the process rather than on GOOD FIT, and
+   PLUM HAS LEFT the page with the form's old background. Neither
+   is a new colour: both are the tokens that were already here.
+   The seam rule that used to collapse the padding between two
+   adjacent cream bands is gone with the condition that needed it
+   - see the note above `.pt-process`.
 
-   RASPBERRY LEFT THIS PAGE with the GOOD FIT band. var(--berry)
-   still paints the hairline over each process step, so the
-   colour is still in the palette here - it just no longer owns a
-   band of its own.
+   THE FORM IS THE ONE BAND THAT INVERTS. Everything in it that
+   carried contrast against plum now carries it against cream:
+   cream text becomes var(--ink), and each rgba tint keeps its
+   alpha and swaps 245,235,226 for 17,17,17. Three things take
+   berry instead, because that is how the rest of the site marks
+   an accent on a light ground: the chosen checkbox, the error
+   line, and the submit button, which is the same cream-on-berry
+   as the global `.cta.berry`. The focus ring on cream is the
+   site-wide blue; only the two coloured bands override it.
 
    ── WHAT THE REDUCTION PASSES TOOK OUT ───────────────────────
    The page named the partnership kinds three times on the way
@@ -6484,7 +6482,7 @@ header nav{gap:18px;font-size:12px}
 }
 /* Keyboard users get the ring in the colour of the band they are on. */
 .pt-hero :focus-visible,
-.pt-request :focus-visible{outline-color:var(--cream)}
+.pt-process :focus-visible{outline-color:var(--cream)}
 
 /* ══ 1 — THE HERO, ON BLUE ═════════════════════════════════ */
 .pt-hero{
@@ -6580,39 +6578,30 @@ header nav{gap:18px;font-size:12px}
 .pt-types-head{max-width:940px}
 .pt-types .pt-intro{color:rgba(17,17,17,.82)}
 
-/* ══ 3 — HOW WE WORK, ON CREAM ═════════════════════════════ */
+/* ══ 3 — HOW WE WORK, ON RASPBERRY ═════════════════════════ */
+/* This band was cream and is now raspberry, which puts a colour change
+   back between PARTNERSCHAFTEN and the process. Only the paint changed:
+   the padding, the three-column grid, the type scale and the rail are
+   the same values they were on cream. */
 .pt-process{
-  background:var(--cream);
-  color:var(--ink);
+  background:var(--berry);
+  color:var(--cream);
   padding-block:clamp(80px,6.6vw,116px);
   padding-inline:var(--rail-gutter);
 }
-/* THE SEAM. The raspberry GOOD FIT band used to sit between this and
-   PARTNERSCHAFTEN. It is gone, so two cream bands now meet.
-
-   Every other transition on this page is a colour change, and the two
-   paddings either side of it are what give that change room. Here there
-   is no change: cream runs into cream, and keeping both paddings would
-   leave clamp(160px,13.2vw,232px) of empty cream that reads as a hole
-   rather than as a break. So the second band drops its top padding and
-   the first band's bottom padding alone carries the gap - one section's
-   worth of air, not two. The two read as one stretch of cream with two
-   heads in it, which is what they are.
-
-   Written as an adjacent-sibling rule rather than baked into
-   `.pt-process` above, so it applies ONLY while the two are actually
-   neighbours: put anything back between them and the normal padding
-   returns by itself. (0,2,0) also outranks the 900px rule further down,
-   so this one declaration covers every width.
-
-   It sits AFTER the base rule deliberately: the higher-specificity
-   override belongs downstream of what it overrides. */
-.pt-types+.pt-process{padding-block-start:0}
+/* NO SEAM RULE HERE ANY MORE. While this band was cream it sat directly
+   against the cream PARTNERSCHAFTEN band with no colour change between
+   them, and `.pt-types+.pt-process{padding-block-start:0}` collapsed the
+   doubled padding so the two read as one stretch of cream. Raspberry
+   restores the colour change, and a colour change needs both paddings to
+   have room; with the collapse still in place the eyebrow would sit hard
+   against the top edge of the raspberry. The rule is deleted rather than
+   kept, because it was compensation for a condition that is gone. */
 .pt-process .pt-eyebrow,
 .pt-process .pt-line,
-.pt-process .pt-line-accent{color:var(--ink)}
+.pt-process .pt-line-accent{color:var(--cream)}
 .pt-process-head{max-width:940px}
-.pt-process .pt-intro{color:rgba(17,17,17,.82)}
+.pt-process .pt-intro{color:rgba(245,235,226,.88)}
 /* Three columns, and the three top borders meet to read as ONE hairline
    running the width of the rail. That is the process line - there is
    no drawn connector and no card. Was four; "gemeinsam abstimmen" and
@@ -6630,9 +6619,13 @@ header nav{gap:18px;font-size:12px}
   gap:clamp(10px,1vw,14px);
   align-content:start;
   padding:clamp(18px,1.8vw,24px) clamp(20px,2vw,34px) 0 0;
-  border-top:1px solid var(--berry);
+  border-top:1px solid rgba(245,235,226,.34);
 }
-.pt-process .pt-num{color:var(--berry)}
+/* .88, not the .72 the hero index uses on blue. The number is 12px and
+   bold, which WCAG counts as normal text, so it needs 4.5:1 - cream at
+   .72 on raspberry is 3.81 and fails, at .88 it is 4.99 and passes. It
+   stays a quiet marker through size and letter-spacing, not opacity. */
+.pt-process .pt-num{color:rgba(245,235,226,.88)}
 .pt-step-title{
   margin:0;
   font-family:var(--font-sans),Arial,sans-serif;
@@ -6642,7 +6635,7 @@ header nav{gap:18px;font-size:12px}
   line-height:1.25;
   letter-spacing:.02em;
   text-transform:uppercase;
-  color:var(--ink);
+  color:var(--cream);
 }
 .pt-step-copy{
   margin:0;
@@ -6651,26 +6644,26 @@ header nav{gap:18px;font-size:12px}
   font-style:normal;
   font-size:clamp(15px,1.1vw,16px);
   line-height:1.6;
-  color:rgba(17,17,17,.82);
+  color:rgba(245,235,226,.88);
 }
 
-/* ══ 4 — THE REQUEST FORM, ON PLUM ═════════════════════════ */
+/* ══ 4 — THE REQUEST FORM, ON CREAM ════════════════════════ */
 /* THE SHORT FIRST ASK. Two fieldsets, nine questions, and it posts to
    /api/partnerships. The band, the hairlines, the bottom-border fields
    and the square checkboxes are exactly what they were when this was a
    fifty-field design mock - shortening the form did not restyle it. */
 .pt-request{
-  background:var(--plum);
-  color:var(--cream);
+  background:var(--cream);
+  color:var(--ink);
   padding-block:clamp(86px,7vw,124px);
   padding-inline:var(--rail-gutter);
   scroll-margin-top:clamp(70px,8vw,110px);
 }
 .pt-request .pt-eyebrow,
 .pt-request .pt-line,
-.pt-request .pt-line-accent{color:var(--cream)}
+.pt-request .pt-line-accent{color:var(--ink)}
 .pt-request-head{max-width:940px}
-.pt-request .pt-intro{color:rgba(245,235,226,.88)}
+.pt-request .pt-intro{color:rgba(17,17,17,.82)}
 .pt-form{
   display:grid;
   gap:clamp(42px,4vw,60px);
@@ -6683,7 +6676,7 @@ header nav{gap:18px;font-size:12px}
   margin:0;
   padding:clamp(22px,2.2vw,30px) 0 0;
   border:0;
-  border-top:1px solid rgba(245,235,226,.34);
+  border-top:1px solid rgba(17,17,17,.34);
 }
 .pt-legend{
   padding:0;
@@ -6695,7 +6688,7 @@ header nav{gap:18px;font-size:12px}
   line-height:1.2;
   letter-spacing:.2em;
   text-transform:uppercase;
-  color:rgba(245,235,226,.72);
+  color:rgba(17,17,17,.72);
 }
 .pt-fields{
   display:grid;
@@ -6715,18 +6708,19 @@ header nav{gap:18px;font-size:12px}
   line-height:1.25;
   letter-spacing:.1em;
   text-transform:uppercase;
-  color:var(--cream);
+  color:var(--ink);
 }
-/* Bottom-border fields, never boxes. Cream, never white. */
+/* Bottom-border fields, never boxes. Still a rule under the text, never
+   a filled input and never a card. */
 .pt-form input[type="text"],
 .pt-form input[type="email"],
 .pt-form textarea{
   width:100%;
   min-width:0;
   background:transparent;
-  color:var(--cream);
+  color:var(--ink);
   border:0;
-  border-bottom:1px solid rgba(245,235,226,.62);
+  border-bottom:1px solid rgba(17,17,17,.62);
   border-radius:0;
   padding:13px 0;
   font-family:var(--font-sans),Arial,sans-serif;
@@ -6738,9 +6732,9 @@ header nav{gap:18px;font-size:12px}
   transition:border-color .2s ease;
 }
 .pt-form input::placeholder,
-.pt-form textarea::placeholder{color:rgba(245,235,226,.60)}
+.pt-form textarea::placeholder{color:rgba(17,17,17,.60)}
 .pt-form input:focus,
-.pt-form textarea:focus{border-bottom-color:var(--cream)}
+.pt-form textarea:focus{border-bottom-color:var(--ink)}
 .pt-form textarea{resize:vertical}
 /* While the request is in flight every control is disabled. Dimming is
    the only signal - no colour outside the band's own palette. */
@@ -6748,8 +6742,9 @@ header nav{gap:18px;font-size:12px}
 .pt-form textarea:disabled{opacity:.55;cursor:default}
 
 /* ── THE MULTI-SELECTS ─────────────────────────────────────── */
-/* Square boxes, cream hairline, cream fill when chosen. The tick is
-   drawn from the box's own borders so no image is needed. */
+/* Square boxes, a near black hairline, a BERRY fill when chosen with
+   the tick knocked out in cream. The tick is drawn from the box's own
+   borders so no image is needed. */
 .pt-checks{
   display:grid;
   grid-template-columns:repeat(4,minmax(0,1fr));
@@ -6770,7 +6765,7 @@ header nav{gap:18px;font-size:12px}
   line-height:1.3;
   letter-spacing:.08em;
   text-transform:uppercase;
-  color:var(--cream);
+  color:var(--ink);
 }
 /* The native control stays in the accessibility tree and keeps the
    keyboard behaviour; only its paint is replaced. */
@@ -6787,14 +6782,14 @@ header nav{gap:18px;font-size:12px}
   flex:0 0 auto;
   width:18px;
   height:18px;
-  border:1px solid rgba(245,235,226,.62);
+  border:1px solid rgba(17,17,17,.62);
   background:transparent;
   transition:background .15s ease,border-color .15s ease;
 }
-.pt-check:hover .pt-check-box{border-color:var(--cream)}
+.pt-check:hover .pt-check-box{border-color:var(--ink)}
 .pt-check input:checked+.pt-check-box{
-  background:var(--cream);
-  border-color:var(--cream);
+  background:var(--berry);
+  border-color:var(--berry);
 }
 .pt-check input:checked+.pt-check-box::after{
   content:"";
@@ -6803,12 +6798,12 @@ header nav{gap:18px;font-size:12px}
   top:1px;
   width:5px;
   height:10px;
-  border-right:2px solid var(--plum);
-  border-bottom:2px solid var(--plum);
+  border-right:2px solid var(--cream);
+  border-bottom:2px solid var(--cream);
   transform:rotate(43deg);
 }
 .pt-check input:focus-visible+.pt-check-box{
-  outline:3px solid var(--cream);
+  outline:3px solid var(--blue);
   outline-offset:3px;
 }
 
@@ -6821,12 +6816,13 @@ header nav{gap:18px;font-size:12px}
   line-height:1.4;
   letter-spacing:.08em;
   text-transform:uppercase;
-  color:var(--cream);
+  color:var(--ink);
 }
 /* The type multi-select sits above the rest of "DEINE ANFRAGE", so the
    fields below it keep the group's own row rhythm. */
 .pt-checks+.pt-fields{margin-top:clamp(26px,2.6vw,34px)}
-/* One message, above the button, in the band's own cream. */
+/* One message, above the button, in berry: the one place on this page
+   where something has gone wrong, and the accent already carries it. */
 .pt-form-error{
   margin:0;
   max-width:620px;
@@ -6835,16 +6831,29 @@ header nav{gap:18px;font-size:12px}
   font-style:normal;
   font-size:clamp(14px,1.05vw,15px);
   line-height:1.6;
+  color:var(--berry);
+}
+/* On cream, a cream button would be invisible, so the submit inverts to
+   the site's own berry CTA - the same fill, text and hover the global
+   `.cta.berry` uses on every other light background. */
+.pt-request .pt-submit{
+  margin-top:0;
+  background:var(--berry);
+  border-color:var(--berry);
   color:var(--cream);
 }
-.pt-request .pt-submit{margin-top:0;color:var(--plum)}
+.partnerships-page .pt-submit:hover{
+  background:transparent;
+  color:var(--berry);
+  border-color:var(--berry);
+}
 /* A sending button stays the button it was - dimmed, and it does not
    answer the hover. */
 .partnerships-page .pt-submit:disabled{opacity:.6;cursor:default}
 .partnerships-page .pt-submit:disabled:hover{
-  background:var(--cream);
-  color:var(--plum);
-  border-color:var(--cream);
+  background:var(--berry);
+  color:var(--cream);
+  border-color:var(--berry);
 }
 
 /* ══ RESPONSIVE ════════════════════════════════════════════ */

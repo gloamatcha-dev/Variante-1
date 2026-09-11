@@ -265,33 +265,36 @@ test("2Rb: the whole GOOD FIT band is gone - markup, copy and rules", () => {
   assert.ok(!code.includes(".pt-fit"), "the removed band still has rules");
   assert.ok(!code.includes(".pt-principle"), "the removed principles still have rules");
 
-  // NO EMPTY COLOURED AREA. The raspberry band is not left standing as a
-  // blank stripe: var(--berry) no longer paints a background anywhere on
-  // this page, only the hairline over each process step.
-  for (const m of code.matchAll(/background:([^;}]+)/g)) {
-    assert.notEqual(m[1].trim(), "var(--berry)", "an empty raspberry area was left behind");
-  }
-  assert.ok(code.includes("border-top:1px solid var(--berry)"),
-    "the process hairline lost its colour with the band");
+  // NO EMPTY COLOURED AREA. Raspberry paints a band again, but it is the
+  // process band, which has a head and three steps in it - never a blank
+  // stripe where GOOD FIT used to be.
+  // Raspberry paints exactly three things: the process band, and the two
+  // accents on the cream form. Nothing else, and no bare stripe.
+  const berry = [...code.matchAll(/([^{}]+)\{[^}]*background:var\(--berry\)/g)]
+    .map(m => m[1].split(/[\r\n]/).pop().trim());
+  assert.deepEqual(berry.sort(),
+    [".partnerships-page .pt-submit:disabled:hover", ".pt-check input:checked+.pt-check-box",
+     ".pt-process", ".pt-request .pt-submit"],
+    "raspberry paints something other than the process band and the form's two accents");
 });
 
-test("2Rc0: the two cream bands that now meet do not leave a hole between them", () => {
-  // PARTNERSCHAFTEN runs straight into SO FUNKTIONIERT'S. Every other
-  // seam on this page is a colour change, and the two paddings either
-  // side of it are what give that change room; this one is not, so
-  // keeping both would be ~160-232px of empty cream.
-  assert.match(code, /\.pt-types\+\.pt-process\{padding-block-start:0\}/,
-    "the cream-to-cream seam still carries both paddings");
-  // The first band keeps its own bottom padding, so the two heads are
-  // not jammed together either.
+test("2Rc0: every band boundary is a colour change, so no seam is collapsed", () => {
+  // While the process band was cream it sat against the cream
+  // PARTNERSCHAFTEN band and the doubled padding was collapsed. Raspberry
+  // restores the colour change, and a colour change needs both paddings
+  // to have room - a collapsed one would put the eyebrow hard against the
+  // top edge of the raspberry.
+  assert.ok(!code.includes(".pt-types+.pt-process"),
+    "the cream-to-cream seam collapse outlived the condition that needed it");
   assert.match(rule(".pt-types{"), /padding-block:clamp\(80px,6\.6vw,116px\)/);
-  // The collapse is an adjacency rule, not baked into .pt-process, so
-  // .pt-process still carries normal padding wherever it stands alone.
   assert.match(rule(".pt-process{"), /padding-block:clamp\(80px,6\.6vw,116px\)/);
-  // (0,2,0) outranks the 900px .pt-types,.pt-process rule (0,1,0), so
-  // one declaration holds at every width and no second rule is needed.
-  const at900 = code.slice(code.indexOf("@media (max-width:900px)"), code.indexOf("@media (max-width:760px)"));
-  assert.ok(!at900.includes(".pt-types+.pt-process"), "the seam was re-declared per breakpoint");
+  // No two adjacent bands share a background any more.
+  const paint = ["pt-hero", "pt-types", "pt-process", "pt-request"]
+    .map(b => (rule(`.${b}{`).match(/background:(var\(--[a-z]+\))/) || [])[1]);
+  assert.deepEqual(paint, ["var(--blue)", "var(--cream)", "var(--berry)", "var(--cream)"]);
+  for (let i = 1; i < paint.length; i++) {
+    assert.notEqual(paint[i], paint[i - 1], `bands ${i} and ${i + 1} share a background`);
+  }
 });
 
 test("2Rc: three steps, and not one of them is a test to pass", () => {
@@ -358,11 +361,11 @@ test("3: four sections, in the intended semantic order, then the footer", () => 
   assert.ok(after.indexOf("<footer") > closeAt, "the footer does not follow the form");
 });
 
-test("3b: blue, cream, cream, plum - and nothing else", () => {
+test("3b: blue, cream, raspberry, cream - and nothing else", () => {
   const bands = [[".pt-hero{", "var(--blue)", "var(--cream)"],
                  [".pt-types{", "var(--cream)", "var(--ink)"],
-                 [".pt-process{", "var(--cream)", "var(--ink)"],
-                 [".pt-request{", "var(--plum)", "var(--cream)"]];
+                 [".pt-process{", "var(--berry)", "var(--cream)"],
+                 [".pt-request{", "var(--cream)", "var(--ink)"]];
   for (const [sel, bg, fg] of bands) {
     const r = rule(sel);
     assert.ok(r.includes(`background:${bg}`), `${sel} is not on ${bg}`);
@@ -380,6 +383,73 @@ test("3b: blue, cream, cream, plum - and nothing else", () => {
     assert.ok(/^(var\(--(blue|berry|cream|plum|ink)\)|transparent|none)$/.test(b),
       `a background outside the palette: ${b}`);
   }
+});
+
+test("3b2: nothing light is written on cream, nothing dark on raspberry", () => {
+  // The two bands that changed colour are the two that could go
+  // unreadable. Every declaration scoped INTO a band has to agree with
+  // that band's ground.
+  // Rules scoped into a band, EXCEPT any that paints its own ground. A
+  // light colour is only wrong when it sits on the band's own cream; the
+  // submit button and the chosen checkbox carry berry underneath them and
+  // are read against that instead.
+  const declarations = sel => [...code.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+    .filter(m => m[1].split(/[\r\n]/).pop().trim().startsWith(sel))
+    .filter(m => !/background:var\(--/.test(m[2]))
+    .flatMap(m => m[2].split(";"));
+
+  const LIGHT = /var\(--cream\)|rgba\(245,235,226/;
+  const DARK = /var\(--ink\)|rgba\(17,17,17/;
+
+  // RASPBERRY BAND: every colour it sets is cream or a cream tint.
+  for (const d of declarations(".pt-process")) {
+    const m = d.match(/^\s*(color|border-top|border-color|outline-color)\s*:\s*(.+)$/);
+    if (!m) continue;
+    assert.ok(!DARK.test(m[2]), `dark value on the raspberry band: ${d.trim()}`);
+  }
+  for (const sel of [".pt-step-title{", ".pt-step-copy{"]) {
+    assert.match(rule(sel), LIGHT, `${sel} is not legible on raspberry`);
+  }
+  assert.match(rule(".pt-step{"), /border-top:1px solid rgba\(245,235,226/,
+    "the step hairline is still the berry it was on cream, so it is invisible");
+
+  // CREAM FORM BAND: no cream text, and the controls are dark-on-light.
+  for (const d of declarations(".pt-request")) {
+    const m = d.match(/^\s*color\s*:\s*(.+)$/);
+    if (!m) continue;
+    assert.ok(!LIGHT.test(m[1]), `cream text on the cream form band: ${d.trim()}`);
+  }
+  for (const sel of [".pt-form label{", ".pt-legend{", ".pt-check{", ".pt-question{"]) {
+    assert.match(rule(sel), DARK, `${sel} is not legible on cream`);
+  }
+  // Inputs keep the reduced bottom-border look, now as a dark rule.
+  const input = rule('.pt-form input[type="text"],');
+  assert.match(input, /border:0/);
+  assert.match(input, /border-bottom:1px solid rgba\(17,17,17/);
+  assert.match(input, /background:transparent/);
+  assert.match(input, /color:var\(--ink\)/);
+  assert.match(rule(".pt-form input::placeholder,"), /rgba\(17,17,17/);
+  assert.match(rule(".pt-group{"), /border-top:1px solid rgba\(17,17,17/);
+
+  // Checkbox: dark hairline unchecked, berry fill with a cream tick when
+  // chosen - visible either way on cream.
+  assert.match(rule(".pt-check-box{"), /border:1px solid rgba\(17,17,17/);
+  assert.match(rule(".pt-check input:checked+.pt-check-box{"), /background:var\(--berry\)/);
+  assert.match(rule(".pt-check input:checked+.pt-check-box::after{"), /border-right:2px solid var\(--cream\)/);
+
+  // The submit stays an obvious CTA: berry fill, cream text.
+  const submit = rule(".pt-request .pt-submit{");
+  assert.match(submit, /background:var\(--berry\)/);
+  assert.match(submit, /color:var\(--cream\)/);
+  assert.doesNotMatch(submit, /color:var\(--plum\)/);
+
+  // FOCUS IS VISIBLE ON ALL THREE GROUNDS. globals.css rings in blue;
+  // only the two coloured bands override that, and the cream form keeps
+  // the site-wide ring.
+  assert.match(code, /\.pt-hero :focus-visible,\s*\.pt-process :focus-visible\{outline-color:var\(--cream\)\}/);
+  assert.ok(!code.includes(".pt-request :focus-visible"),
+    "the cream form still overrides the focus ring to cream");
+  assert.match(rule(".pt-check input:focus-visible+.pt-check-box{"), /outline:3px solid var\(--blue\)/);
 });
 
 test("3c: NO PURE WHITE, in any form", () => {
