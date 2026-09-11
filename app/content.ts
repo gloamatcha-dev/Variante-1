@@ -11,6 +11,29 @@ export const BRAND = {
 export const SHOP_STATUS = "prelaunch" as const; // "prelaunch" | "live"
 
 /**
+ * PUBLIC PRODUCT PRICES ARE WITHHELD UNTIL THE SHOP IS LIVE.
+ *
+ * DERIVED FROM SHOP_STATUS, never set by hand. There is no second flag
+ * to remember: flipping SHOP_STATUS to "live" brings every price back in
+ * one step, everywhere, automatically.
+ *
+ * WHAT THIS IS NOT. No price is deleted, zeroed or rewritten. The
+ * catalog, the Stripe price ids, the cart arithmetic, the checkout, the
+ * tax rules and the database are untouched - v.price_gross_cents is the
+ * same number it always was, and the cart drawer still adds up what a
+ * customer put in it. This decides one thing only: whether a public
+ * PRODUCT surface prints a selling price while the shop cannot sell.
+ *
+ * It is also why the prelaunch shop already routes every buy button to
+ * /contact rather than to the cart - showing a price next to a button
+ * that cannot take the money is the mismatch this closes.
+ *
+ * Typed `boolean` rather than left as a narrowed literal, so the true
+ * branch is not compiled away and reads as live code.
+ */
+export const PRICES_VISIBLE: boolean = SHOP_STATUS !== "prelaunch";
+
+/**
  * RECIPES ARE WITHHELD FOR THIS LAUNCH, NOT REMOVED.
  *
  * Flip this to true and every entry point comes back in one step. It is

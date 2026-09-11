@@ -712,7 +712,15 @@ test("41: the hero uses the shared page-hero scale rather than inventing one", (
   assert.match(launchPage, /THE FIRST\./);
 
   const css = read("app/globals.css");
-  const block = css.slice(css.indexOf("/launch — THE LAUNCH LIST"));
+  // BOUNDED AT THE NEXT BLOCK. Unbounded this ran to the end of the file,
+  // so every bit of styling appended after the launch block was read as
+  // the launch page's own - and the bans below started failing on rules
+  // belonging to other components. The same fix the partnerships and
+  // habit slices already carry.
+  const blockAt = css.indexOf("/launch — THE LAUNCH LIST");
+  assert.notEqual(blockAt, -1, "the launch css block is missing");
+  const blockEnd = css.indexOf("/* " + "═".repeat(6), blockAt);
+  const block = css.slice(blockAt, blockEnd === -1 ? undefined : blockEnd);
   assert.ok(block.length > 0, "the launch css block is missing");
   assert.match(block, /\.launch-hero\{[\s\S]*?background:var\(--blue\)/);
   assert.match(block, /\.launch-form-band\{[\s\S]*?background:var\(--cream\)/);

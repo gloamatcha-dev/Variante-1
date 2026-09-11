@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef, useCallback, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { Header, Footer } from "./Chrome";
-import { BRAND, PRODUCT, SHOP_STATUS, RECIPES_VISIBLE } from "./content";
+import { BRAND, PRODUCT, SHOP_STATUS, RECIPES_VISIBLE, PRICES_VISIBLE } from "./content";
 import { useCatalog, useCatalogList, fmtCents, per100gCents } from "./useCatalog";
 import type { CatalogProduct, CatalogVariant } from "./useCatalog";
 // THE SAME ARITHMETIC THE SERVER USES, NOT A COPY OF ITS ANSWERS.
@@ -18,6 +18,10 @@ import { BusinessCalculator } from "./BusinessCalculator";
 import { AccountPortal } from "./AccountPortal";
 import { OrderSuccess } from "./OrderSuccess";
 import { LaunchPage } from "./LaunchPage";
+// A pointer to /launch, mounted beside the cart drawer as the last child
+// of the shell. It renders null until it opens, so the page under it is
+// untouched. See app/LaunchPopup.tsx for the triggers and the dismissal.
+import { LaunchPopup } from "./LaunchPopup";
 import { track } from "./analytics";
 // The launch countdown's arithmetic lives in a pure leaf: it takes `now`
 // as an argument, clamps at zero and owns the one new fact this page
@@ -292,7 +296,7 @@ function VariantSelector({product,selected,onSelect,name}:{product:CatalogProduc
 if(product.variants.length<2)return null;
 const weighed=isWeighedProduct(product.variants[selected]);
 return <div className="size-selector" role="radiogroup" aria-label={weighed?"Größe wählen":"Variante wählen"}>
-{product.variants.map((mv,i)=><label key={mv.id} className={`size-option${i===selected?" active":""}`}><input type="radio" name={name} className="sr-only" value={mv.id} checked={i===selected} onChange={()=>onSelect(i)}/><span className="size-option-size">{mv.label}</span><span className="size-option-price">{fmtCents(mv.price_gross_cents)} €</span></label>)}
+{product.variants.map((mv,i)=><label key={mv.id} className={`size-option${i===selected?" active":""}`}><input type="radio" name={name} className="sr-only" value={mv.id} checked={i===selected} onChange={()=>onSelect(i)}/><span className="size-option-size">{mv.label}</span>{PRICES_VISIBLE&&<span className="size-option-price">{fmtCents(mv.price_gross_cents)} €</span>}</label>)}
 </div>}
 
 /* ══ THE ANNUAL PLAN, IN THE SHOP ══════════════════════════════
@@ -352,7 +356,7 @@ return <div className="purchase-mode" role="radiogroup" aria-label="Kaufoption w
 <label className={`purchase-mode-option${mode==="one_time"?" active":""}`}>
 <input type="radio" name={name} className="sr-only" value="one_time" checked={mode==="one_time"} onChange={()=>onSelect("one_time")}/>
 <span className="purchase-mode-label">Einmalig kaufen</span>
-<span className="purchase-mode-meta">{fmtCents(oncePriceCents)} € einmalig</span>
+{PRICES_VISIBLE&&<span className="purchase-mode-meta">{fmtCents(oncePriceCents)} € einmalig</span>}
 </label>
 <label className={`purchase-mode-option${mode==="annual"?" active":""}`}>
 <input type="radio" name={name} className="sr-only" value="annual" checked={mode==="annual"} onChange={()=>onSelect("annual")}/>
@@ -382,14 +386,14 @@ return <div className="annual-panel">
 <p className="annual-panel-title">Alle {ANNUAL_DELIVERY_INTERVAL_DAYS} Tage Matcha.</p>
 <p className="annual-panel-sub">{variant.label} · {ANNUAL_DELIVERY_COUNT} Lieferungen · einmal bezahlen · keine automatische Verlängerung</p>
 <dl className="annual-panel-lines">
-<div><dt>Matcha je Lieferung</dt><dd>{fmtCents(annual.annualUnitGrossCents)} €</dd></div>
-<div><dt>Versand je Lieferung</dt><dd>{shipsFree?"inklusive":`${fmtCents(annual.shippingPerDeliveryGrossCents)} €`}</dd></div>
+{PRICES_VISIBLE&&<div><dt>Matcha je Lieferung</dt><dd>{fmtCents(annual.annualUnitGrossCents)} €</dd></div>}
+{PRICES_VISIBLE&&<div><dt>Versand je Lieferung</dt><dd>{shipsFree?"inklusive":`${fmtCents(annual.shippingPerDeliveryGrossCents)} €`}</dd></div>}
 <div><dt>Lieferungen</dt><dd>{annual.deliveryCount}</dd></div>
 </dl>
-<p className="annual-panel-total"><span className="annual-panel-total-label">Jahresgesamtbetrag</span><b>{fmtCents(annual.totalGrossCents)} €</b><span className="annual-panel-total-note">einmalig</span></p>
+{PRICES_VISIBLE&&<p className="annual-panel-total"><span className="annual-panel-total-label">Jahresgesamtbetrag</span><b>{fmtCents(annual.totalGrossCents)} €</b><span className="annual-panel-total-note">einmalig</span></p>}
 <p className="annual-panel-terms">
 {annual.deliveryCount} Lieferungen im {ANNUAL_DELIVERY_INTERVAL_DAYS}-Tage-Rhythmus.
-{" "}{shipsFree
+{" "}{shipsFree||!PRICES_VISIBLE
 ?"Versand ist im Jahresgesamtbetrag enthalten."
 :`Der Versand von ${fmtCents(annual.shippingPerDeliveryGrossCents)} € je Lieferung ist im Jahresgesamtbetrag bereits enthalten.`}
 {" "}Du zahlst den Jahresgesamtbetrag einmalig. Keine automatische Verlängerung, keine weitere Abbuchung.
@@ -443,8 +447,8 @@ return <div className="shop-product-row home-rail">
 {annualActive&&annual
 ?<AnnualPlanPanel variant={v} annual={annual}/>
 :<>
-<p className="shop-product-price">{fmtCents(v.price_gross_cents)} €</p>
-{per100!==null&&<p className="shop-product-per100g">{fmtCents(per100)} € / 100 g</p>}
+{PRICES_VISIBLE&&<p className="shop-product-price">{fmtCents(v.price_gross_cents)} €</p>}
+{PRICES_VISIBLE&&per100!==null&&<p className="shop-product-per100g">{fmtCents(per100)} € / 100 g</p>}
 {presentation.matchaNotIncludedNotice&&<p className="product-not-included">{presentation.matchaNotIncludedNotice}</p>}
 </>}
 
@@ -627,7 +631,7 @@ const lowestCents=Math.min(...shown.flatMap(p=>p.variants.map(x=>x.price_gross_c
 const hasAnnual=shown.some(p=>p.variants.some(v=>annualPricingFor(v)!==null));
 
 return <main className="shop-page">
-<ShopHero lead={SHOP_HERO_LEAD} price={<p className="shop-hero-price">AB {fmtCents(lowestCents)} €</p>}/>
+<ShopHero lead={SHOP_HERO_LEAD} price={PRICES_VISIBLE?<p className="shop-hero-price">AB {fmtCents(lowestCents)} €</p>:null}/>
 <ShopLaunchStrip/>
 
 <section id="product" className="shop-products">
@@ -661,8 +665,8 @@ return <main className="pdp">
 
 <VariantSelector product={product} selected={safe} onSelect={setSizeIdx} name="pdp-size"/>
 
-<p className="pdp-price">{fmtCents(v.price_gross_cents)} €</p>
-{per100!==null&&<p className="pdp-per100g">{fmtCents(per100)} € / 100 g</p>}
+{PRICES_VISIBLE&&<p className="pdp-price">{fmtCents(v.price_gross_cents)} €</p>}
+{PRICES_VISIBLE&&per100!==null&&<p className="pdp-per100g">{fmtCents(per100)} € / 100 g</p>}
 
 <button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":handleAdd}>{SHOP_STATUS==="prelaunch"?"Fragen zum Launch":"In den Warenkorb"}</button>
 </div></section>
@@ -692,7 +696,7 @@ return <main className="pdp">
 
 <VariantSelector product={product} selected={safe} onSelect={setIdx} name={`pdp-variant-${product.slug}`}/>
 
-<p className="pdp-price">{fmtCents(v.price_gross_cents)} €</p>
+{PRICES_VISIBLE&&<p className="pdp-price">{fmtCents(v.price_gross_cents)} €</p>}
 {presentation.matchaNotIncludedNotice&&<p className="product-not-included">{presentation.matchaNotIncludedNotice}</p>}
 
 <button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":handleAdd}>{SHOP_STATUS==="prelaunch"?"Fragen zum Launch":"In den Warenkorb"}</button>
@@ -2260,7 +2264,7 @@ else if(route==="partnerships")page=<Partnerships/>;
 else if(["impressum","datenschutz","agb","widerruf","versand"].includes(route))page=<Legal route={route}/>;
 else page=<main className="not-found"><h1>404</h1><Link href="/">Zurück zu GLOA →</Link></main>;
 
-return <><Header onCart={openCart} cartCount={cart.totalCount}/>{page}<Footer/><CartDrawer open={cartOpen} onClose={closeCart}/></>
+return <><Header onCart={openCart} cartCount={cart.totalCount}/>{page}<Footer/><CartDrawer open={cartOpen} onClose={closeCart}/><LaunchPopup route={route}/></>
 }
 
 export function GloaSite({route}:{route:string}){

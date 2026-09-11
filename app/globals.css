@@ -8995,3 +8995,185 @@ header nav{gap:18px;font-size:12px}
   .ops-controls{ flex-direction:column; align-items:stretch; }
   .ops-search{ flex-wrap:wrap; }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   THE LAUNCH-LIST POPUP
+
+   One blue panel over the page. Every rule here is scoped to a `.lp-`
+   class of its own, so nothing shared is edited and no finished page can
+   move because of this block. The panel is the LAST thing in the shell
+   and renders null while closed - the page underneath is untouched.
+
+   ── THE COLOUR ───────────────────────────────────────────────
+   var(--blue), the brand blue the countdown and the hero bands already
+   use. No new hue, no gradient, no second blue.
+
+   THE ACCENT IS ON A MARKER, AND HERE IS WHY. The brief asked for
+   "benachrichtigt" in raspberry, as it is on the cream homepage
+   prelaunch block. On GLOA blue that pairing measures 1.04:1 - berry
+   #A61E59 and blue #1746D1 sit at almost the same relative luminance, so
+   the word would read as a blank space. It keeps its raspberry on a
+   cream ground instead: 6.05:1, and the same flat cream marker the
+   homepage lifestyle band already uses on this exact blue. Square, no
+   rotation, no radius. Nothing was added to the palette to do it.
+
+   ── THE SHAPE ────────────────────────────────────────────────
+   Square. GLOA has no rounded containers anywhere and this does not
+   introduce one. 520px on desktop, inside the 480-560 the brief names;
+   on a phone the panel takes the width minus a real margin and stays
+   short enough that it never needs its own scrollbar.
+
+   ── THE MOTION ───────────────────────────────────────────────
+   A fade and an 8px rise, 180ms, once. Under prefers-reduced-motion both
+   are dropped entirely - not shortened, dropped.
+   ══════════════════════════════════════════════════════════════ */
+
+.lp-backdrop{
+  position:fixed;
+  inset:0;
+  z-index:60;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:clamp(16px,4vw,40px);
+  /* Near black at 58%, the same ground the cart drawer darkens with. The
+     site stays visible behind it rather than being blanked out. */
+  background:rgba(17,17,17,.58);
+  border:0;
+  animation:lp-fade .18s ease-out both;
+}
+.lp-panel{
+  position:relative;
+  width:100%;
+  max-width:520px;
+  max-height:calc(100dvh - clamp(32px,8vw,80px));
+  overflow-y:auto;
+  box-sizing:border-box;
+  padding:clamp(30px,3.2vw,44px) clamp(22px,3vw,40px) clamp(28px,3vw,40px);
+  background:var(--blue);
+  color:var(--cream);
+  border-radius:0;
+  text-align:left;
+  animation:lp-rise .18s ease-out both;
+}
+/* The close control sits in the panel's own padding, at a real tap size
+   rather than a 12px glyph with a big hit area nobody can see. */
+.lp-close{
+  position:absolute;
+  top:clamp(8px,1vw,14px);
+  right:clamp(8px,1vw,14px);
+  width:44px;
+  height:44px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border:0;
+  background:none;
+  color:var(--cream);
+  font:300 30px/1 var(--font-sans),Arial,sans-serif;
+  opacity:.8;
+  transition:opacity .2s ease;
+}
+.lp-close:hover{opacity:1}
+.lp-backdrop :focus-visible{outline-color:var(--cream)}
+
+/* (0,2,0) so it outranks the global .eyebrow, which is 12px/.14em. */
+.lp-panel .lp-eyebrow{
+  margin:0;
+  padding-right:44px;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:var(--type-meta);
+  line-height:1.2;
+  letter-spacing:.2em;
+  text-transform:uppercase;
+  color:rgba(245,235,226,.72);
+}
+/* Three explicit lines, so the break can never re-flow - the same shape
+   the homepage prelaunch headline uses. */
+.lp-headline{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  margin:clamp(14px,1.6vw,20px) 0 0;
+  letter-spacing:-.03em;
+  line-height:1;
+  color:var(--cream);
+}
+.lp-line-1,
+.lp-line-3{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-style:normal;
+  font-size:clamp(30px,3.4vw,42px);
+  line-height:.98;
+}
+.lp-line-1{font-weight:400}
+.lp-line-3{font-weight:600}
+/* THE MARKER. Cream ground, raspberry type - both already in the
+   palette, and legible where raspberry on blue is not. The em-based
+   padding scales with the line, and the matching negative margin pulls
+   the ground back so the LETTERS stay flush with the two lines around
+   it. */
+.lp-line-2{
+  font-family:var(--font-display),Georgia,serif;
+  font-style:italic;
+  font-weight:400;
+  font-size:clamp(32px,3.7vw,46px);
+  line-height:.95;
+  letter-spacing:-.015em;
+  background:var(--cream);
+  color:var(--berry);
+  padding:.02em .12em .06em;
+  margin-left:-.12em;
+}
+.lp-body{
+  margin:clamp(16px,1.8vw,22px) 0 0;
+  max-width:40ch;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:var(--type-body);
+  line-height:1.55;
+  color:rgba(245,235,226,.88);
+}
+/* The canonical cream-on-blue button, square and flat, exactly as the
+   coloured bands already carry it. */
+.lp-panel .lp-cta{
+  margin-top:clamp(20px,2.2vw,28px);
+  width:max-content;
+  min-height:48px;
+  padding:15px 30px;
+  border-radius:0;
+  box-shadow:none;
+  background:var(--cream);
+  color:var(--blue);
+  border:1px solid var(--cream);
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:var(--type-meta);
+  line-height:1;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  transition:background .2s ease,color .2s ease;
+}
+.lp-panel .lp-cta:hover{background:transparent;color:var(--cream)}
+
+@keyframes lp-fade{from{opacity:0}to{opacity:1}}
+@keyframes lp-rise{from{opacity:0;transform:translate3d(0,8px,0)}to{opacity:1;transform:none}}
+
+@media (max-width:520px){
+  /* Full width minus a real margin, and the button spans it so the tap
+     target is the whole line rather than a word. */
+  .lp-backdrop{padding:16px;align-items:center}
+  .lp-panel{max-width:none}
+  .lp-panel .lp-cta{width:100%;justify-content:center;padding:15px 20px}
+}
+
+@media (prefers-reduced-motion:reduce){
+  /* Dropped, not shortened - the same guarantee the hero and the habit
+     band carried. */
+  .lp-backdrop,
+  .lp-panel{animation:none}
+}
