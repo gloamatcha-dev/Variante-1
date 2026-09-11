@@ -980,17 +980,28 @@ function RezeptDetail({slug}:{slug:string}){const r=recipes.find(x=>x.slug===slu
 </main>}
 /* /partnerships — EVENTS, BRANDS, CREATORS, GIFTING, EXPERIENCES.
 
-   THE PAGE SAYS EACH THING ONCE.
+   THE PAGE SAYS EACH THING ONCE, AND ASKS FOR NOTHING TWICE.
    It used to name the partnership kinds three times before the visitor
    could choose one: five index words in the hero, six numbered category
-   blocks below, then the form's checkboxes. The middle list is gone, as
-   is one of the four process steps. Nothing was added in their place -
-   no card, no panel, no substitute list - and no colour or type size
-   moved. Hero = overview, form = choice.
+   blocks below, then the form's checkboxes. The middle list is gone,
+   the GOOD FIT band is gone whole, one process step is gone, and the
+   blue closing band with its second request button is gone. Nothing was
+   added in their place - no card, no panel, no substitute list - and no
+   colour or type size moved. Hero = invitation, form = request, footer.
 
-   The GOOD FIT band went too, whole: eyebrow, headline and sentence.
-   Five bands are left, and two of them are cream and adjacent - see the
-   seam note in the stylesheet.
+   AND IT DOES NOT SET CONDITIONS.
+   The old copy told a stranger four separate times that their idea
+   would be weighed: "wenn GLOA zu deinem Projekt passt" in the hero,
+   "wir suchen Ideen, die zu GLOA passen" under PARTNERSCHAFTEN, a
+   process step called WIR PRÜFEN, a note above the send button, and a
+   success message promising a detail form "wenn es grundsätzlich
+   passt". Read end to end that is an application process, and it is
+   the small or unfinished idea that reads itself out of it. None of
+   those sentences survive. The page invites, says GLOA is open, says
+   what happens next, and asks.
+
+   Four bands are left, two of them cream and adjacent - see the seam
+   note in the stylesheet.
 
    THE FORM IS A FIRST HELLO, NOT A BRIEF.
    It used to ask fifty questions - budget, reach, guest numbers, media
@@ -1016,13 +1027,15 @@ function RezeptDetail({slug}:{slug:string}){const r=recipes.find(x=>x.slug===slu
    stays as the quick overview, and the form is where the choice is
    actually made. */
 const ptIndex:[string,string][]=[["01","EVENTS"],["02","BRANDS"],["03","CREATORS"],["04","GIFTING"],["05","EXPERIENCES"]];
-/* Three steps, not four. "Gemeinsam abstimmen" and "Let's make it
-   happen" described the same stretch of the collaboration from two
-   angles, so the abstimmen half folded into 03. */
+/* Three steps, and none of them is a test the visitor has to pass.
+   "WIR PRÜFEN" told a stranger their idea would be assessed before
+   anyone replied, which is how a form starts reading as an application.
+   The step says what GLOA does - it gets back to you - and nothing
+   about whether the idea qualified. */
 const ptProcess:[string,string,string][]=[
-["01","ANFRAGE SENDEN","Schick uns kurz die wichtigsten Eckdaten."],
-["02","WIR PRÜFEN","Passt die Idee zu GLOA, melden wir uns mit den nächsten Schritten und ggf. einem Detailformular."],
-["03","LET'S MAKE IT HAPPEN","Wir stimmen die Details ab und setzen die Zusammenarbeit gemeinsam um."],
+["01","ANFRAGE SENDEN","Erzähl uns kurz, was du vorhast."],
+["02","WIR MELDEN UNS","Wir schauen uns deine Anfrage an und kommen auf dich zurück."],
+["03","GEMEINSAM UMSETZEN","Alles Weitere stimmen wir gemeinsam ab."],
 ];
 /* The visible list and the server allow-list are the same array. */
 const ptTypeOptions:readonly string[]=PARTNERSHIP_TYPE_OPTIONS;
@@ -1092,22 +1105,23 @@ return <main className="partnerships-page">
 <div className="pt-hero-copy">
 <p className="eyebrow pt-eyebrow pt-hero-eyebrow gloa-hero-eyebrow">LET&apos;S WORK TOGETHER</p>
 <h1 className="pt-hero-headline"><span className="pt-hero-line gloa-hero-primary">Your idea.</span><i className="pt-hero-line pt-hero-line-accent gloa-hero-secondary">Our Matcha.</i></h1>
-<p className="pt-hero-lead">Events, Brand Collaborations, Gifting oder etwas, das wir noch nicht auf dem Schirm haben. Wenn GLOA zu deinem Projekt passt, erzähl uns davon.</p>
+<p className="pt-hero-lead">Groß oder klein, fertig geplant oder erst eine Idee. Wir freuen uns, von dir zu hören.</p>
 <a className="cta pt-cta" href="#partnership-request">PARTNERSCHAFT ANFRAGEN</a>
 </div>
 <ol className="pt-hero-index">{ptIndex.map(([n,label])=><li key={n}><span className="pt-hero-index-num">{n}</span><span className="pt-hero-index-label">{label}</span></li>)}</ol>
 </div>
 </section>
 
-{/* Headline and one sentence. The six numbered category blocks that
-    used to sit under this head are gone - they restated the hero index
-    and the form's checkboxes at length, and nothing replaced them. */}
+{/* Headline and one sentence. This band says GLOA is open; it does not
+    list what to. The kinds are named once, in the hero index, and
+    chosen once, in the form's checkboxes - naming them a third time
+    here is what made the page feel like it was setting conditions. */}
 <section className="pt-types">
 <div className="pt-types-inner home-rail">
 <div className="pt-types-head">
 <p className="eyebrow pt-eyebrow">PARTNERSCHAFTEN</p>
 <h2 className="pt-headline"><span className="pt-line">Good things.</span><i className="pt-line pt-line-accent">Made together.</i></h2>
-<p className="pt-intro">Von Events und Brand Collaborations bis zu Creator-Projekten und Gifting – wir suchen Ideen, die zu GLOA passen und für beide Seiten Mehrwert schaffen.</p>
+<p className="pt-intro">Wir sind offen für unterschiedliche Projekte, Formate und Kooperationen. Auch für Ideen, an die wir selbst noch nicht gedacht haben.</p>
 </div>
 </div>
 </section>
@@ -1116,14 +1130,15 @@ return <main className="partnerships-page">
     headline and sentence - and its copy was NOT moved anywhere else.
     PARTNERSCHAFTEN now runs straight into SO FUNKTIONIERT'S, which
     means two cream bands meet with no colour change between them; the
-    stylesheet collapses that seam so they read as one stretch of cream
-    rather than as two sections with a hole between them. */}
+    stylesheet collapses that seam and draws the hairline the page
+    already uses, so they read as one stretch of cream with two heads
+    in it rather than as two sections with a hole between them. */}
 <section className="pt-process">
 <div className="pt-process-inner home-rail">
 <div className="pt-process-head">
 <p className="eyebrow pt-eyebrow">SO FUNKTIONIERT&apos;S</p>
 <h2 className="pt-headline"><span className="pt-line">Von der Idee.</span><i className="pt-line pt-line-accent">Zur Zusammenarbeit.</i></h2>
-<p className="pt-intro">Schick uns die wichtigsten Infos zu deiner Idee. Wir prüfen, ob und wie GLOA dazu passt.</p>
+<p className="pt-intro">Für den Anfang reichen ein paar Eckdaten.</p>
 </div>
 <ol className="pt-process-steps">{ptProcess.map(([n,title,copy])=><li key={n} className="pt-step"><span className="pt-num">{n}</span><h3 className="pt-step-title">{title}</h3><p className="pt-step-copy">{copy}</p></li>)}</ol>
 </div>
@@ -1134,18 +1149,23 @@ return <main className="partnerships-page">
 {status==="success"?
 /* The head IS the success state: same eyebrow, same scale, same band.
    Nothing new is painted, so the confirmation cannot look like a
-   different page than the form it replaced. */
+   different page than the form it replaced.
+
+   It also passes no judgement. The old version promised a detail form
+   "wenn es grundsätzlich passt", which told someone who had just hit
+   send that their idea still had to clear a bar. Two sentences, no
+   condition. */
 <div className="pt-request-head">
 <p className="eyebrow pt-eyebrow">PARTNERSHIP REQUEST</p>
 <h2 className="pt-headline"><span className="pt-line">Danke für deine Anfrage.</span></h2>
-<p className="pt-intro">Wir schauen uns dein Projekt an und melden uns bei dir. Wenn es grundsätzlich passt, erhältst du von uns im nächsten Schritt ein kurzes Detailformular.</p>
+<p className="pt-intro">Wir melden uns bei dir und klären alles Weitere gemeinsam.</p>
 </div>
 :
 <>
 <div className="pt-request-head">
 <p className="eyebrow pt-eyebrow">PARTNERSHIP REQUEST</p>
 <h2 className="pt-headline"><span className="pt-line">Tell us.</span><i className="pt-line pt-line-accent">What you have in mind.</i></h2>
-<p className="pt-intro">Erzähl uns kurz, was du planst. Wenn wir Potenzial für eine Zusammenarbeit sehen, melden wir uns bei dir mit den nächsten Schritten.</p>
+<p className="pt-intro">Ein paar Infos reichen für den Anfang.</p>
 </div>
 
 <form className="pt-form" onSubmit={handleSubmit}>
@@ -1171,26 +1191,21 @@ return <main className="partnerships-page">
 </div>
 </fieldset>
 
+{/* The note that used to stand here said every request is reviewed
+    individually and that GLOA gets in touch "wenn es passt". Directly
+    above the send button, that reads as a condition attached to
+    pressing it. Nothing replaced it; the button follows the fields. */}
 {status==="error"&&<p className="pt-form-error" role="alert">{errorMsg}</p>}
-<p className="pt-form-note">Wir prüfen jede Anfrage individuell. Wenn es passt, melden wir uns mit den nächsten Schritten.</p>
 <button className="cta pt-cta pt-submit" type="submit" disabled={sending}>{sending?"WIRD GESENDET …":"PARTNERSCHAFT ANFRAGEN"}</button>
 </form>
 </>}
 </div>
 </section>
 
-<section className="pt-final">
-<div className="pt-final-inner home-rail">
-<div className="pt-final-copy">
-<p className="eyebrow pt-eyebrow">GOT SOMETHING IN MIND?</p>
-<h2 className="pt-headline"><span className="pt-line">Let&apos;s make.</span><i className="pt-line pt-line-accent">Something good.</i></h2>
-</div>
-<div className="pt-final-side">
-<p className="pt-final-lead">Eine gute Idee beginnt meistens mit einer Nachricht.</p>
-<a className="cta pt-cta" href="#partnership-request">PARTNERSCHAFT ANFRAGEN</a>
-</div>
-</div>
-</section>
+{/* The blue closing band stood here, with a second PARTNERSCHAFT
+    ANFRAGEN button. It asked for the request the visitor had just been
+    given a button for, one scroll further down. The footer follows the
+    form directly. */}
 
 </main>;
 }

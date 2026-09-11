@@ -6328,20 +6328,30 @@ header nav{gap:18px;font-size:12px}
    exactly as they are.
 
    ── THE COLOUR RHYTHM ────────────────────────────────────────
-   Five full-width bands, in this order and no other:
+   Four full-width bands, in this order and no other:
 
        1  .pt-hero      BLUE       #1746D1   cream on blue
        2  .pt-types     CREAM      #F5EBE2   near black on cream
        3  .pt-process   CREAM      #F5EBE2   near black on cream
        4  .pt-request   PLUM       #4F3A5B   cream on plum
-       5  .pt-final     BLUE       #1746D1   cream on blue
 
-   Then the existing black footer. The colour changes ARE the
-   transitions - there is no decorative divider anywhere. Bands 2
-   and 3 are the one place that is NOT a colour change, because
-   the raspberry band that used to separate them is gone; the
-   seam between them is handled at `.pt-types+.pt-process`, and
-   the reasoning is written there rather than here.
+   Then the existing black footer, directly. The colour changes
+   ARE the transitions - there is no decorative divider anywhere.
+   Bands 2 and 3 are the one place that is NOT a colour change,
+   because the raspberry band that used to separate them is gone;
+   the seam is handled at `.pt-types+.pt-process`, and the
+   reasoning is written there rather than here.
+
+   NO HAIRLINE WAS ADDED AT THAT SEAM, deliberately. It was
+   considered: the page does use hairlines, and one across the
+   rail would mark the transition the missing colour change used
+   to mark. But every hairline here is the top EDGE of a content
+   block - a step, a fieldset, a row of the hero index - never a
+   rule drawn between two things, and this band already carries
+   one about 150px further down, over 01/02/03. A second line in
+   the same cream field would be the decorative divider the
+   paragraph above says does not exist. The eyebrow opens every
+   band on this page; it is what marks the new section here too.
 
    RASPBERRY LEFT THIS PAGE with the GOOD FIT band. var(--berry)
    still paints the hairline over each process step, so the
@@ -6353,16 +6363,18 @@ header nav{gap:18px;font-size:12px}
    down: five index words in the hero, six category blocks below,
    then the form's own checkboxes. The six blocks are gone. So is
    the whole GOOD FIT band - eyebrow, headline and sentence, not
-   trimmed and not moved elsewhere - and one of the four process
-   steps. NOTHING replaced any of them: no card, no panel, no
-   substitute list, and no empty coloured area left standing.
-   Colours, padding and the type scale are otherwise untouched:
-   what left is content, not design.
+   trimmed and not moved elsewhere - one of the four process
+   steps, and the blue closing band that asked a second time for
+   the request the form's own button had just asked for. NOTHING
+   replaced any of them: no card, no panel, no substitute list,
+   and no empty coloured area left standing. Colours, padding and
+   the type scale are otherwise untouched: what left is content,
+   not design.
 
    The dead rules left with the markup rather than being kept
-   "in case" - .pt-types-grid, .pt-type*, .pt-fit*, .pt-principle*
-   are all gone, and the page test asserts they have not come
-   back.
+   "in case" - .pt-types-grid, .pt-type*, .pt-fit*, .pt-principle*,
+   .pt-final*, .pt-form-note are all gone, and the page test
+   asserts they have not come back.
 
    NO PURE WHITE. Every light value in this block is var(--cream)
    or an rgba derived from it: rgba(245,235,226,a) IS #F5EBE2.
@@ -6472,8 +6484,7 @@ header nav{gap:18px;font-size:12px}
 }
 /* Keyboard users get the ring in the colour of the band they are on. */
 .pt-hero :focus-visible,
-.pt-request :focus-visible,
-.pt-final :focus-visible{outline-color:var(--cream)}
+.pt-request :focus-visible{outline-color:var(--cream)}
 
 /* ══ 1 — THE HERO, ON BLUE ═════════════════════════════════ */
 .pt-hero{
@@ -6826,16 +6837,6 @@ header nav{gap:18px;font-size:12px}
   line-height:1.6;
   color:var(--cream);
 }
-.pt-form-note{
-  margin:0;
-  max-width:620px;
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:400;
-  font-style:normal;
-  font-size:clamp(14px,1.05vw,15px);
-  line-height:1.6;
-  color:rgba(245,235,226,.78);
-}
 .pt-request .pt-submit{margin-top:0;color:var(--plum)}
 /* A sending button stays the button it was - dimmed, and it does not
    answer the hover. */
@@ -6846,43 +6847,12 @@ header nav{gap:18px;font-size:12px}
   border-color:var(--cream);
 }
 
-/* ══ 5 — THE FINAL CTA, ON BLUE ════════════════════════════ */
-/* Compact on purpose: an ending, not a second hero. */
-.pt-final{
-  background:var(--blue);
-  color:var(--cream);
-  padding-block:clamp(72px,5.6vw,96px);
-  padding-inline:var(--rail-gutter);
-}
-.pt-final-inner{
-  display:grid;
-  grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr);
-  gap:clamp(34px,4vw,80px);
-  align-items:end;
-}
-.pt-final .pt-eyebrow{color:rgba(245,235,226,.72)}
-.pt-final .pt-line,
-.pt-final .pt-line-accent{color:var(--cream)}
-.pt-final-side{display:flex;flex-direction:column;align-items:flex-start;gap:clamp(22px,2.2vw,30px)}
-.pt-final-lead{
-  margin:0;
-  max-width:420px;
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:400;
-  font-style:normal;
-  font-size:var(--type-body);
-  line-height:1.55;
-  color:var(--cream);
-}
-.pt-final .pt-cta{color:var(--blue)}
-
 /* ══ RESPONSIVE ════════════════════════════════════════════ */
 @media (max-width:1100px){
   /* The hero index drops under the copy rather than squeezing it. */
   .pt-hero-inner{grid-template-columns:minmax(0,1fr)}
   .pt-hero-index{margin-top:clamp(34px,4vw,48px);max-width:520px}
   .pt-checks{grid-template-columns:repeat(3,minmax(0,1fr))}
-  .pt-final-inner{grid-template-columns:minmax(0,1fr);align-items:start}
 }
 
 @media (max-width:900px){
@@ -6890,7 +6860,6 @@ header nav{gap:18px;font-size:12px}
   .pt-types,
   .pt-process{padding-block:clamp(62px,10vw,84px)}
   .pt-request{padding-block:clamp(66px,10vw,90px)}
-  .pt-final{padding-block:clamp(56px,9vw,74px)}
   /* One section scale down, in one place, exactly as /about does it. */
   .partnerships-page .pt-line{font-size:clamp(36px,9.2vw,44px)}
   .partnerships-page .pt-line-accent{font-size:clamp(38px,10vw,46px)}
@@ -6907,7 +6876,6 @@ header nav{gap:18px;font-size:12px}
 @media (max-width:760px){
   .pt-hero-lead,
   .pt-hero-index{max-width:none}
-  .pt-form-note,
   .pt-form-error{max-width:none}
   /* Full-width controls, and a target that stays comfortable. */
   .partnerships-page .pt-cta{width:100%;justify-content:center;padding:18px 20px}

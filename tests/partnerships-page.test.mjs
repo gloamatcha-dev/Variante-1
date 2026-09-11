@@ -98,30 +98,86 @@ test("1: /partnerships resolves through the public site architecture", async () 
    ══════════════════════════════════════════════════════════════ */
 
 test("2: every contracted string renders", () => {
+  // The English that stays is brand headline only. Everything that
+  // explains anything is German.
   for (const copy of ["LET'S WORK TOGETHER", "Your idea.", "Our Matcha.",
                       "PARTNERSCHAFTEN", "Good things.", "Made together.",
                       "SO FUNKTIONIERT'S", "Von der Idee.", "Zur Zusammenarbeit.",
                       "PARTNERSHIP REQUEST", "Tell us.", "What you have in mind.",
-                      "GOT SOMETHING IN MIND?", "Let's make.", "Something good.",
                       "PARTNERSCHAFT ANFRAGEN"]) {
     assert.ok(text().includes(copy), `missing page copy: ${copy}`);
   }
-  // Both CTAs are internal anchors to the request section, which exists.
-  assert.equal((html.match(/href="#partnership-request"/g) || []).length, 2);
+  // ONE internal anchor now - the hero's. The closing band carried the
+  // second and is gone; the form's own submit button is what asks at the
+  // bottom of the page.
+  assert.equal((html.match(/href="#partnership-request"/g) || []).length, 1,
+    "a second request CTA came back");
   assert.ok(html.includes('id="partnership-request"'), "the anchor target is missing");
 });
 
-test("2d: each shortened band is a head and ONE sentence", () => {
+test("2d: each band is a head and one short sentence", () => {
   for (const sentence of [
-    "Von Events und Brand Collaborations bis zu Creator-Projekten und Gifting – wir suchen Ideen, die zu GLOA passen und für beide Seiten Mehrwert schaffen.",
-    "Schick uns die wichtigsten Infos zu deiner Idee. Wir prüfen, ob und wie GLOA dazu passt.",
+    "Groß oder klein, fertig geplant oder erst eine Idee. Wir freuen uns, von dir zu hören.",
+    "Wir sind offen für unterschiedliche Projekte, Formate und Kooperationen. Auch für Ideen, an die wir selbst noch nicht gedacht haben.",
+    "Für den Anfang reichen ein paar Eckdaten.",
+    "Ein paar Infos reichen für den Anfang.",
   ]) {
     assert.ok(text().includes(sentence), `missing band copy: ${sentence}`);
   }
-  // The copy each one replaced is gone.
+  // Every sentence each one replaced is gone.
   for (const old of ["Von Events bis Brand Collaboration:",
-                     "Eine kurze Anfrage reicht."]) {
+                     "Von Events und Brand Collaborations bis zu Creator-Projekten",
+                     "Eine kurze Anfrage reicht.",
+                     "Schick uns die wichtigsten Infos zu deiner Idee.",
+                     "Events, Brand Collaborations, Gifting oder etwas",
+                     "Erzähl uns kurz, was du planst."]) {
     assert.ok(!text().includes(old), `superseded copy survived: ${old}`);
+  }
+});
+
+test("2e: the page never tells the visitor their idea has to qualify", () => {
+  // THE POINT OF THIS SUITE'S LAST PASS. The old copy said, in five
+  // different places, that the idea would be weighed before anyone
+  // replied. Read end to end that is an application process, and it is
+  // the small or unfinished idea that reads itself out of it.
+  for (const gone of ["Wenn GLOA zu deinem Projekt passt", "wenn es passt", "Wenn es passt",
+                      "Wenn es grundsätzlich passt", "Potenzial für eine Zusammenarbeit",
+                      "Wir prüfen jede Anfrage individuell", "Wir prüfen, ob und wie GLOA dazu passt",
+                      "GOOD FIT", "Not just good reach.", "WIR PRÜFEN",
+                      "LET'S MAKE IT HAPPEN", "GOT SOMETHING IN MIND?",
+                      "Let's make.", "Something good.",
+                      "Eine gute Idee beginnt meistens mit einer Nachricht."]) {
+    assert.ok(!text().includes(gone), `conditional or removed copy is still rendered: ${gone}`);
+  }
+  // And no reworded version of the same idea crept back in.
+  for (const banned of [/passt (es|die Idee|GLOA)/i, /prüfen wir/i, /wir prüfen/i,
+                        /geeignet/i, /qualifiz/i, /Auswahlverfahren/i, /Bewerbung/i,
+                        /sofern/i, /vorausgesetzt/i]) {
+    assert.ok(!banned.test(text()), `the page set a condition again: ${banned}`);
+  }
+});
+
+test("2f: no dashes in the visible copy, and no invented English sentence", () => {
+  // A dash is the punctuation the previous pass reached for when a
+  // sentence carried two clauses. The brief asks for a full stop or a
+  // comma instead, so none may appear in rendered prose.
+  const prose = [...html.matchAll(/<p class="pt-(?:intro|hero-lead|step-copy)"[^>]*>([^<]*)</g)].map(m => m[1]);
+  assert.ok(prose.length >= 6, `only ${prose.length} prose paragraphs found`);
+  for (const p of prose) {
+    for (const dash of ["—", "–", " - "]) {
+      assert.ok(!p.includes(dash), `a dash appeared in visible copy: ${p}`);
+    }
+  }
+  // The explaining copy is German. The only English left is the brand
+  // headline set, which is allowed to stay.
+  const ALLOWED_ENGLISH = ["LET'S WORK TOGETHER", "Your idea.", "Our Matcha.",
+                           "Good things.", "Made together.", "PARTNERSHIP REQUEST",
+                           "Tell us.", "What you have in mind."];
+  for (const p of prose) {
+    assert.ok(!ALLOWED_ENGLISH.some(e => p.includes(e)),
+      `a brand headline leaked into explaining copy: ${p}`);
+    assert.ok(!/\b(we|your|our|the|and|with)\b/i.test(p),
+      `an English sentence was invented in explaining copy: ${p}`);
   }
 });
 
@@ -136,22 +192,24 @@ test("2b: no invented business claim, partner, logo or response time", () => {
   }
   // No logo wall, no partner imagery, no stock photography.
   assert.ok(!/<img/.test(page), "the page introduced an image");
-  // The honest note is the one that is actually there.
-  assert.ok(text().includes("Wir prüfen jede Anfrage individuell."), "the helper note is missing");
+  // The note that used to stand above the send button is gone, and
+  // nothing was put in its place - the button follows the fields.
+  assert.ok(!text().includes("Wir prüfen jede Anfrage individuell."), "the old helper note is back");
+  assert.ok(!page.includes("pt-form-note"), "the helper note survives in the source");
+  assert.ok(!code.includes(".pt-form-note"), "the helper note still has rules");
 });
 
-test("2c: the request section says what this form is, and what comes after it", () => {
-  // The short-ask intro replaced the "tell us everything" one.
-  assert.ok(text().includes("Erzähl uns kurz, was du planst. Wenn wir Potenzial für eine Zusammenarbeit sehen, melden wir uns bei dir mit den nächsten Schritten."),
-    "the request intro is missing");
+test("2c: the request section asks, and the success state does not judge", () => {
+  assert.ok(text().includes("Ein paar Infos reichen für den Anfang."), "the request intro is missing");
   assert.ok(!text().includes("Je mehr wir über dein Projekt wissen"),
     "the old long-brief intro survived");
-  // The success state is the promise the business actually makes: a
-  // detail form later, for the requests it wants to take further. It is
+  // The success state is two sentences with no condition in them. It is
   // in the source only - it never renders until a send has succeeded.
   assert.ok(page.includes("Danke für deine Anfrage."), "the success headline is missing");
-  assert.ok(page.includes("Wir schauen uns dein Projekt an und melden uns bei dir. Wenn es grundsätzlich passt, erhältst du von uns im nächsten Schritt ein kurzes Detailformular."),
+  assert.ok(page.includes("Wir melden uns bei dir und klären alles Weitere gemeinsam."),
     "the success copy is missing");
+  assert.ok(!page.includes("erhältst du von uns im nächsten Schritt ein kurzes Detailformular"),
+    "the conditional detail-form promise survived");
   for (const banned of [/danke[!,. ]/i, /anfrage gesendet/i, /erfolgreich (gesendet|übermittelt|verschickt)/i]) {
     assert.ok(!banned.test(text()), `a confirmation renders before anything was sent: ${banned}`);
   }
@@ -236,19 +294,24 @@ test("2Rc0: the two cream bands that now meet do not leave a hole between them",
   assert.ok(!at900.includes(".pt-types+.pt-process"), "the seam was re-declared per breakpoint");
 });
 
-test("2Rc: the process is exactly three steps, and GEMEINSAM ABSTIMMEN is not one of them", () => {
+test("2Rc: three steps, and not one of them is a test to pass", () => {
   const band = html.slice(html.indexOf('<section class="pt-process"'), html.indexOf('<section class="pt-request"'));
   const steps = [...band.matchAll(/<h3 class="pt-step-title">([^<]+)<\/h3>/g)].map(m => m[1]);
   assert.deepEqual(steps.map(s => s.replace(/&#x27;/g, "'")),
-    ["ANFRAGE SENDEN", "WIR PRÜFEN", "LET'S MAKE IT HAPPEN"]);
+    ["ANFRAGE SENDEN", "WIR MELDEN UNS", "GEMEINSAM UMSETZEN"]);
   assert.equal((band.match(/<li class="pt-step">/g) || []).length, 3, "the step count changed");
   // The numbers run 01 02 03 - no 04 was left behind.
   assert.deepEqual([...band.matchAll(/<span class="pt-num">(\d+)<\/span>/g)].map(m => m[1]),
     ["01", "02", "03"]);
-  assert.ok(!text().includes("GEMEINSAM ABSTIMMEN"), "the removed step is still on the page");
-  assert.ok(!page.includes("GEMEINSAM ABSTIMMEN"), "the removed step survives in the source");
-  // Its copy folded into 03 rather than disappearing with the promise.
-  assert.ok(text().includes("Wir stimmen die Details ab und setzen die Zusammenarbeit gemeinsam um."));
+  // Step 02 says what GLOA does, not what it decides.
+  for (const copy of ["Erzähl uns kurz, was du vorhast.",
+                      "Wir schauen uns deine Anfrage an und kommen auf dich zurück.",
+                      "Alles Weitere stimmen wir gemeinsam ab."]) {
+    assert.ok(text().includes(copy), `missing step copy: ${copy}`);
+  }
+  for (const gone of ["WIR PRÜFEN", "GEMEINSAM ABSTIMMEN", "LET'S MAKE IT HAPPEN"]) {
+    assert.ok(!text().includes(gone), `a superseded step title is still rendered: ${gone}`);
+  }
 });
 
 test("2Rd: the partnership kinds are named ONCE before the form", () => {
@@ -266,7 +329,7 @@ test("2Rd: the partnership kinds are named ONCE before the form", () => {
   // numbered blocks standing in for the six that were removed.
   const between = html.slice(html.indexOf('<section class="pt-types"'), html.indexOf('<section class="pt-request"'));
   const headings = [...between.matchAll(/<h3[^>]*>([^<]+)<\/h3>/g)].map(m => m[1].replace(/&#x27;/g, "'"));
-  assert.deepEqual(headings, ["ANFRAGE SENDEN", "WIR PRÜFEN", "LET'S MAKE IT HAPPEN"],
+  assert.deepEqual(headings, ["ANFRAGE SENDEN", "WIR MELDEN UNS", "GEMEINSAM UMSETZEN"],
     "a band between the hero and the form grew a list of its own");
   assert.equal((between.match(/<article\b/g) || []).length, 0, "a category block came back");
   // The only numbered sequence left in there is the three-step process.
@@ -283,17 +346,23 @@ test("2Rd: the partnership kinds are named ONCE before the form", () => {
    3. THE COLOUR RHYTHM AND THE DESIGN LANGUAGE
    ══════════════════════════════════════════════════════════════ */
 
-test("3: five sections, in the intended semantic order", () => {
+test("3: four sections, in the intended semantic order, then the footer", () => {
   const sections = [...html.matchAll(/<section class="(pt-[a-z]+)"/g)].map(m => m[1]);
-  assert.deepEqual(sections, ["pt-hero", "pt-types", "pt-process", "pt-request", "pt-final"]);
+  assert.deepEqual(sections, ["pt-hero", "pt-types", "pt-process", "pt-request"]);
+  // NOTHING stands between the form and the global footer.
+  const after = html.slice(html.indexOf('id="partnership-request"'));
+  const closeAt = after.indexOf("</main>");
+  assert.notEqual(closeAt, -1, "the page main never closes");
+  assert.equal((after.slice(0, closeAt).match(/<section/g) || []).length, 0,
+    "a section still follows the request form");
+  assert.ok(after.indexOf("<footer") > closeAt, "the footer does not follow the form");
 });
 
-test("3b: blue, cream, cream, plum, blue - and nothing else", () => {
+test("3b: blue, cream, cream, plum - and nothing else", () => {
   const bands = [[".pt-hero{", "var(--blue)", "var(--cream)"],
                  [".pt-types{", "var(--cream)", "var(--ink)"],
                  [".pt-process{", "var(--cream)", "var(--ink)"],
-                 [".pt-request{", "var(--plum)", "var(--cream)"],
-                 [".pt-final{", "var(--blue)", "var(--cream)"]];
+                 [".pt-request{", "var(--plum)", "var(--cream)"]];
   for (const [sel, bg, fg] of bands) {
     const r = rule(sel);
     assert.ok(r.includes(`background:${bg}`), `${sel} is not on ${bg}`);
@@ -348,7 +417,7 @@ test("3d: editorial, not a card deck", () => {
   }
   // On the canonical rail, and no reserved viewport height.
   for (const inner of ["pt-hero-inner", "pt-types-inner",
-                       "pt-process-inner", "pt-request-inner", "pt-final-inner"]) {
+                       "pt-process-inner", "pt-request-inner"]) {
     assert.ok(page.includes(`className="${inner} home-rail"`), `${inner} is off the shared rail`);
   }
   assert.ok(!/100vh|min-height:\s*\d+vh/.test(code), "the page reserves a viewport");
@@ -397,8 +466,8 @@ test("4: two groups, nine questions, and every control inside its own label", ()
   assert.equal(controls, 15, `${controls} controls rendered, not 15`);
   // One h1 for the hero, h2 for every other section.
   assert.equal((html.match(/<h1/g) || []).length, 1, "the page does not have exactly one h1");
-  // One per band below the hero: types, process, request, final.
-  assert.equal((html.match(/<h2/g) || []).length, 4, "the section headings changed");
+  // One per band below the hero: types, process, request.
+  assert.equal((html.match(/<h2/g) || []).length, 3, "the section headings changed");
 });
 
 test("4a: the long-brief questions are gone, from the markup and the source", () => {
