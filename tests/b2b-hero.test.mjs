@@ -143,7 +143,7 @@ test("3: exactly one image, and it is the B2B Packung asset", () => {
 
   // No other product visual came with it.
   for (const other of ["hero-tin", "Placeholder", "Produkt BILD", "Produkt Bild",
-                       "gloa-work", "gloa-hero-packaging", "Header.png"]) {
+                       "gloa-work", "gloa-hero-packaging", "Startseite.png"]) {
     assert.ok(!hero.includes(other), `a second product visual: ${other}`);
   }
   // The CSS tin and its Placeholder chip are gone from the whole app.

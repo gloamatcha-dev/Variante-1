@@ -45,7 +45,7 @@ test("1: the hero renders the map, and the packaging photo only left THIS hero",
   assert.ok(site.includes("gloa-hero-packaging"), "the packaging photo left the site entirely");
   // And no other image was smuggled into this hero.
   assert.equal([...hero.matchAll(/<img /g)].length, 1);
-  for (const banned of ["Header.png", "Produkt Bild (2).png", "Produkt BILD.png", "Landkarte Japan.png"]) {
+  for (const banned of ["Startseite.png", "Produkt Bild (2).png", "Produkt BILD.png", "Landkarte Japan.png"]) {
     assert.ok(!hero.includes(banned), `the hero renders ${banned}`);
   }
 

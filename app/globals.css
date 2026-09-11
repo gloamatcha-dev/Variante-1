@@ -918,9 +918,9 @@ header nav{gap:18px;font-size:12px}
 .cta.berry{background:var(--berry);color:var(--cream);border-color:var(--berry)}
 .cta.berry:hover{background:#8d1a4b;border-color:#8d1a4b}
 
-/* THE IMAGE. Header.png is a near-square 891x941 artwork, so it is
+/* THE IMAGE. Startseite.png is a 1448x1086 artwork, so it is
    CONTAINED rather than cropped - a cover fit in a wide box would cut the
-   powder movement straight off. Height is what limits it: capped so the
+   row of packs straight off. Height is what limits it: capped so the
    image reads as a placed object and not as a billboard filling the
    right half of the screen. */
 .hero .hero-art{

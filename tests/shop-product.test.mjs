@@ -66,7 +66,7 @@ test("2: the matcha shows exactly the approved file, unmodified", () => {
   assert.ok(statSync(path.join(ROOT, "public/img/Produkt Bild (2).png")).size > 0);
   // NOT the pouch, NOT the header, NOT an automatically chosen asset.
   assert.ok(!block.includes("Produkt BILD.png"), "the shop section renders the pouch");
-  assert.ok(!block.includes("Header.png"), "the shop section renders the hero image");
+  assert.ok(!block.includes("Startseite.png"), "the shop section renders the hero image");
   // The shared presentation map is untouched: the cart line, the card
   // and the product page still resolve their own image.
   assert.match(block, /getProductImage\(product\)/);

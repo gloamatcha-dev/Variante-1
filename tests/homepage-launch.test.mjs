@@ -168,11 +168,11 @@ test("5: units render two digits, so the layout never jumps", () => {
    ══════════════════════════════════════════════════════════════ */
 
 test("6: the hero and the product feature use the new images", () => {
-  assert.ok(existsSync(path.join(ROOT, "public/img/Header.png")), "Header.png is missing");
+  assert.ok(existsSync(path.join(ROOT, "public/img/Startseite.png")), "Startseite.png is missing");
   assert.ok(existsSync(path.join(ROOT, "public/img/Produkt BILD.png")), "Produkt BILD.png is missing");
 
-  // The hero carries Header.png, with real alt text and no old packaging.
-  assert.match(homepage, /<img src="\/img\/Header\.png" alt="[^"]+" className="hero-img"/);
+  // The hero carries Startseite.png, with real alt text and no old packaging.
+  assert.match(homepage, /<img src="\/img\/Startseite\.png" alt="[^"]+" className="hero-img"/);
   assert.ok(!homepage.includes("gloa-hero-packaging"), "the old hero packaging image is still in the hero");
 
   // THE PRODUCT IMAGE LEFT THE HOMEPAGE with the prelaunch redesign: the
@@ -183,7 +183,7 @@ test("6: the hero and the product feature use the new images", () => {
   assert.ok(!homepage.includes("ProductCard"), "the homepage still renders the product card");
 
   // The hero image is not duplicated into a second DOM layer.
-  assert.equal([...homepage.matchAll(/\/img\/Header\.png/g)].length, 1);
+  assert.equal([...homepage.matchAll(/\/img\/Startseite\.png/g)].length, 1);
 });
 
 test("7: the countdown appears exactly once, in blue, between hero and product", () => {
@@ -683,12 +683,12 @@ test("20: the hero copy is exactly the four approved lines", () => {
 test("21: the hero image is contained, capped, and the only one in the hero", () => {
   const hero = homepage.slice(homepage.indexOf('<section className="hero">'), homepage.indexOf('<LaunchCountdown/>'));
   assert.equal([...hero.matchAll(/<img /g)].length, 1, "the hero carries more than one image");
-  assert.match(hero, /src="\/img\/Header\.png"/);
+  assert.match(hero, /src="\/img\/Startseite\.png"/);
   for (const old of ["gloa-hero-packaging", "Produkt BILD", "gloa-matcha-in-the-city"]) {
     assert.ok(!hero.includes(old), `the hero uses ${old}`);
   }
-  // CONTAIN, because the asset is near-square artwork: a cover fit in a
-  // wide box would cut the powder movement off.
+  // CONTAIN, because the asset is wide artwork: a cover fit in this box
+  // would cut the row of packs off.
   assert.match(heroCss, /\.hero \.hero-img\{[\s\S]*?object-fit:contain/);
   assert.match(heroCss, /max-width:min\(100%,720px\)/);
   assert.match(heroCss, /max-height:clamp\(340px,36vw,520px\)/);
