@@ -6340,6 +6340,21 @@ header nav{gap:18px;font-size:12px}
    Then the existing black footer. The colour changes ARE the
    transitions - there is no decorative divider anywhere.
 
+   ── WHAT THE REDUCTION PASS TOOK OUT ─────────────────────────
+   Bands 2 and 3 were each a head plus a numbered list, and the
+   page named the partnership kinds three times on the way down:
+   five index words in the hero, six category blocks in band 2,
+   then the form's own checkboxes. Band 2's six blocks and band
+   3's three principles are gone, and NOTHING replaced them - no
+   card, no panel, no substitute list. Band 4 lost a step, from
+   four to three. The bands, their colours, their padding and the
+   type scale are untouched: what left is content, not design.
+
+   The dead rules left with the markup rather than being kept
+   "in case" - .pt-types-grid, .pt-type*, .pt-fit-list,
+   .pt-principle* are all gone, and the page test asserts they
+   have not come back.
+
    NO PURE WHITE. Every light value in this block is var(--cream)
    or an rgba derived from it: rgba(245,235,226,a) IS #F5EBE2.
 
@@ -6528,7 +6543,12 @@ header nav{gap:18px;font-size:12px}
   color:var(--cream);
 }
 
-/* ══ 2 — PARTNERSHIP TYPES, ON CREAM ═══════════════════════ */
+/* ══ 2 — PARTNERSCHAFTEN, ON CREAM ═════════════════════════ */
+/* A head and one sentence. The six numbered category blocks that used
+   to run under it are gone, and nothing took their place - the band is
+   short on purpose. Its padding is unchanged, so the rhythm between the
+   coloured bands is the one the rest of the page already keeps; what
+   left is content, not air. */
 .pt-types{
   background:var(--cream);
   color:var(--ink);
@@ -6537,48 +6557,9 @@ header nav{gap:18px;font-size:12px}
 }
 .pt-types .pt-eyebrow,
 .pt-types .pt-line,
-.pt-types .pt-line-accent,
-.pt-types .pt-num{color:var(--ink)}
+.pt-types .pt-line-accent{color:var(--ink)}
 .pt-types-head{max-width:940px}
 .pt-types .pt-intro{color:rgba(17,17,17,.82)}
-/* Three across, two rows. Open: one raspberry hairline per item and
-   nothing else - no panel, no border box, no shadow. */
-.pt-types-grid{
-  display:grid;
-  grid-template-columns:repeat(3,minmax(0,1fr));
-  column-gap:clamp(28px,3vw,56px);
-  row-gap:clamp(38px,3.6vw,54px);
-  margin-top:clamp(48px,4.6vw,72px);
-}
-.pt-type{
-  display:grid;
-  gap:clamp(10px,1vw,14px);
-  align-content:start;
-  padding-top:clamp(18px,1.8vw,24px);
-  border-top:1px solid var(--berry);
-}
-.pt-types .pt-num{color:var(--berry)}
-.pt-type-title{
-  margin:0;
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:600;
-  font-style:normal;
-  font-size:clamp(17px,1.35vw,20px);
-  line-height:1.25;
-  letter-spacing:.02em;
-  text-transform:uppercase;
-  color:var(--ink);
-}
-.pt-type-copy{
-  margin:0;
-  max-width:420px;
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:400;
-  font-style:normal;
-  font-size:clamp(15px,1.1vw,16px);
-  line-height:1.6;
-  color:rgba(17,17,17,.82);
-}
 
 /* ══ 3 — GOOD FIT, ON RASPBERRY ════════════════════════════ */
 .pt-fit{
@@ -6587,50 +6568,19 @@ header nav{gap:18px;font-size:12px}
   padding-block:clamp(80px,6.6vw,116px);
   padding-inline:var(--rail-gutter);
 }
-/* Copy left, the three principles stacked right. */
+/* One column now. The three numbered principles that used to sit in the
+   right-hand column are gone, and the copy is NOT stretched across the
+   full rail to fill the gap they left: it keeps a reading measure and
+   the band stays open to its right, which is what the raspberry is for. */
 .pt-fit-inner{
   display:grid;
-  grid-template-columns:minmax(0,1fr) minmax(0,1fr);
-  gap:clamp(40px,5vw,96px);
-  align-items:start;
+  grid-template-columns:minmax(0,1fr);
 }
+.pt-fit-copy{max-width:820px}
 .pt-fit .pt-eyebrow,
 .pt-fit .pt-line,
 .pt-fit .pt-line-accent{color:var(--cream)}
 .pt-fit .pt-intro{color:rgba(245,235,226,.88)}
-.pt-fit-list{
-  margin-top:clamp(6px,.8vw,14px);
-  border-top:1px solid rgba(245,235,226,.34);
-}
-.pt-principle{
-  display:grid;
-  grid-template-columns:clamp(46px,4vw,72px) minmax(0,1fr);
-  gap:clamp(8px,1vw,14px) clamp(16px,2vw,30px);
-  padding:clamp(24px,2.4vw,32px) 0;
-  border-bottom:1px solid rgba(245,235,226,.34);
-}
-.pt-fit .pt-num{color:rgba(245,235,226,.72);grid-row:1 / span 2}
-.pt-principle-title{
-  margin:0;
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:600;
-  font-style:normal;
-  font-size:clamp(17px,1.35vw,20px);
-  line-height:1.25;
-  letter-spacing:.02em;
-  text-transform:uppercase;
-  color:var(--cream);
-}
-.pt-principle-copy{
-  margin:0;
-  max-width:460px;
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:400;
-  font-style:normal;
-  font-size:clamp(15px,1.1vw,16px);
-  line-height:1.6;
-  color:rgba(245,235,226,.88);
-}
 
 /* ══ 4 — HOW WE WORK, ON CREAM ═════════════════════════════ */
 .pt-process{
@@ -6644,13 +6594,14 @@ header nav{gap:18px;font-size:12px}
 .pt-process .pt-line-accent{color:var(--ink)}
 .pt-process-head{max-width:940px}
 .pt-process .pt-intro{color:rgba(17,17,17,.82)}
-/* Four columns, and the four top borders meet to read as ONE hairline
+/* Three columns, and the three top borders meet to read as ONE hairline
    running the width of the rail. That is the process line - there is
-   no drawn connector and no card. */
+   no drawn connector and no card. Was four; "gemeinsam abstimmen" and
+   "let's make it happen" described the same stretch twice. */
 .pt-process-steps{
   list-style:none;
   display:grid;
-  grid-template-columns:repeat(4,minmax(0,1fr));
+  grid-template-columns:repeat(3,minmax(0,1fr));
   gap:0;
   margin:clamp(48px,4.6vw,72px) 0 0;
   padding:0;
@@ -6685,8 +6636,10 @@ header nav{gap:18px;font-size:12px}
 }
 
 /* ══ 5 — THE REQUEST FORM, ON PLUM ═════════════════════════ */
-/* DESIGN PHASE. This is form UI: real labels, real fieldsets, real
-   legends, and no submission path of any kind. */
+/* THE SHORT FIRST ASK. Two fieldsets, nine questions, and it posts to
+   /api/partnerships. The band, the hairlines, the bottom-border fields
+   and the square checkboxes are exactly what they were when this was a
+   fifty-field design mock - shortening the form did not restyle it. */
 .pt-request{
   background:var(--plum);
   color:var(--cream);
@@ -6748,8 +6701,6 @@ header nav{gap:18px;font-size:12px}
 /* Bottom-border fields, never boxes. Cream, never white. */
 .pt-form input[type="text"],
 .pt-form input[type="email"],
-.pt-form input[type="tel"],
-.pt-form input[type="url"],
 .pt-form textarea{
   width:100%;
   min-width:0;
@@ -6772,6 +6723,10 @@ header nav{gap:18px;font-size:12px}
 .pt-form input:focus,
 .pt-form textarea:focus{border-bottom-color:var(--cream)}
 .pt-form textarea{resize:vertical}
+/* While the request is in flight every control is disabled. Dimming is
+   the only signal - no colour outside the band's own palette. */
+.pt-form input:disabled,
+.pt-form textarea:disabled{opacity:.55;cursor:default}
 
 /* ── THE MULTI-SELECTS ─────────────────────────────────────── */
 /* Square boxes, cream hairline, cream fill when chosen. The tick is
@@ -6782,7 +6737,6 @@ header nav{gap:18px;font-size:12px}
   column-gap:clamp(20px,2vw,32px);
   row-gap:clamp(14px,1.4vw,18px);
 }
-.pt-checks-radio{grid-template-columns:repeat(3,minmax(0,1fr));max-width:600px}
 .pt-check{
   display:flex;
   flex-direction:row;
@@ -6850,7 +6804,20 @@ header nav{gap:18px;font-size:12px}
   text-transform:uppercase;
   color:var(--cream);
 }
-.pt-checks-radio+.pt-fields{margin-top:clamp(26px,2.6vw,34px);max-width:600px}
+/* The type multi-select sits above the rest of "DEINE ANFRAGE", so the
+   fields below it keep the group's own row rhythm. */
+.pt-checks+.pt-fields{margin-top:clamp(26px,2.6vw,34px)}
+/* One message, above the button, in the band's own cream. */
+.pt-form-error{
+  margin:0;
+  max-width:620px;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:clamp(14px,1.05vw,15px);
+  line-height:1.6;
+  color:var(--cream);
+}
 .pt-form-note{
   margin:0;
   max-width:620px;
@@ -6862,6 +6829,14 @@ header nav{gap:18px;font-size:12px}
   color:rgba(245,235,226,.78);
 }
 .pt-request .pt-submit{margin-top:0;color:var(--plum)}
+/* A sending button stays the button it was - dimmed, and it does not
+   answer the hover. */
+.partnerships-page .pt-submit:disabled{opacity:.6;cursor:default}
+.partnerships-page .pt-submit:disabled:hover{
+  background:var(--cream);
+  color:var(--plum);
+  border-color:var(--cream);
+}
 
 /* ══ 6 — THE FINAL CTA, ON BLUE ════════════════════════════ */
 /* Compact on purpose: an ending, not a second hero. */
@@ -6898,10 +6873,6 @@ header nav{gap:18px;font-size:12px}
   /* The hero index drops under the copy rather than squeezing it. */
   .pt-hero-inner{grid-template-columns:minmax(0,1fr)}
   .pt-hero-index{margin-top:clamp(34px,4vw,48px);max-width:520px}
-  .pt-fit-inner{grid-template-columns:minmax(0,1fr)}
-  .pt-types-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-  /* Two by two, and the reading order stays 01 02 / 03 04. */
-  .pt-process-steps{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:clamp(30px,3.4vw,42px)}
   .pt-checks{grid-template-columns:repeat(3,minmax(0,1fr))}
   .pt-final-inner{grid-template-columns:minmax(0,1fr);align-items:start}
 }
@@ -6918,29 +6889,26 @@ header nav{gap:18px;font-size:12px}
   .partnerships-page .pt-line-accent{font-size:clamp(38px,10vw,46px)}
   .pt-fields{grid-template-columns:minmax(0,1fr)}
   .pt-checks{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .pt-checks-radio{grid-template-columns:repeat(3,minmax(0,1fr))}
+  /* Three steps go straight from three columns to one, at the same
+     width the form's fields do. There is no two-across state: three
+     items across two columns would read 01 02 / 03, which is neither
+     the row the desktop shows nor the list the phone shows. */
+  .pt-process-steps{grid-template-columns:minmax(0,1fr);row-gap:clamp(26px,4.4vw,34px)}
+  .pt-step{padding-right:0}
 }
 
 @media (max-width:760px){
-  .pt-types-grid{grid-template-columns:minmax(0,1fr);row-gap:clamp(30px,5vw,40px)}
-  .pt-type-copy,
-  .pt-principle-copy{max-width:none}
-  /* Vertical sequence, 01 through 04, each keeping its hairline. */
-  .pt-process-steps{grid-template-columns:minmax(0,1fr);row-gap:clamp(26px,4.4vw,34px)}
-  .pt-step{padding-right:0}
-  .pt-principle{grid-template-columns:minmax(0,1fr);gap:clamp(8px,2vw,12px)}
-  .partnerships-page .pt-fit .pt-num{grid-row:auto}
+  .pt-fit-copy{max-width:none}
   .pt-hero-lead,
   .pt-hero-index{max-width:none}
-  .pt-form-note{max-width:none}
+  .pt-form-note,
+  .pt-form-error{max-width:none}
   /* Full-width controls, and a target that stays comfortable. */
   .partnerships-page .pt-cta{width:100%;justify-content:center;padding:18px 20px}
 }
 
 @media (max-width:520px){
   .pt-checks{grid-template-columns:minmax(0,1fr)}
-  .pt-checks-radio{grid-template-columns:minmax(0,1fr);max-width:none}
-  .pt-checks-radio+.pt-fields{max-width:none}
   .pt-check{min-height:46px}
 }
 

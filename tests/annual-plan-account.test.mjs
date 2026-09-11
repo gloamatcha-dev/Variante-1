@@ -844,6 +844,12 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
     "/launch/withdraw",
     "/orders/cancellation-request",
     "/orders/success",
+    // The public partnership request: one POST that validates a short
+    // form and sends ONE internal email. No account, order, subscription
+    // or annual row is read or written - the route holds no database
+    // client at all - and it is reachable without an account, exactly
+    // like /contact above it. Reviewed in tests/partnerships-api.test.mjs.
+    "/partnerships",
     "/stripe/webhook",
     "/subscriptions/cancel",
     "/subscriptions/checkout/session",

@@ -322,8 +322,13 @@ test("5d: no backend, migration or commercial logic changed", () => {
     // limit and a typed confirmation phrase. It is the trigger for the
     // one-time launch announcement and touches no route listed here.
     // Reviewed in tests/launch-send.test.mjs.
+    // "partnerships" is POST /api/partnerships: the short public
+    // partnership request, one internal email, no table and no write.
+    // Same shape and same defences as /api/contact - honeypot, JSON-only,
+    // byte ceiling, server-fixed recipient - and reviewed in
+    // tests/partnerships-api.test.mjs.
     ["admin", "annual-plan", "checkout", "contact", "cron", "internal", "launch",
-     "orders", "stripe", "subscriptions", "withdrawal"], "an API route changed");
+     "orders", "partnerships", "stripe", "subscriptions", "withdrawal"], "an API route changed");
   assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("047")),
     "migration 044 exists");
   assert.equal(readdirSync(path.join(ROOT, "supabase/migrations")).filter(f => f.endsWith(".sql")).length, 46,

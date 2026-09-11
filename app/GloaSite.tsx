@@ -28,6 +28,10 @@ import { AuthProvider, useAuth } from "../lib/auth";
 import { supabase } from "../lib/supabase";
 import { AUTH_CONFIRM_PATH, PASSWORD_RESET_PATH, browserAuthRedirectUrl } from "../lib/authRedirect";
 import { SHIPPING_ZONES, SHIPPING_PRICING, getShippingZone, getCountryLabel, computeShippingGrossCents, SHIPPING_COUNTRY_OPTIONS, DELIVERY_TIME_NOTE, CUSTOMS_NOTE } from "../lib/shipping";
+// The partnership form's checkbox list IS the server's allow-list. Both
+// sides read the one array in this zero-import leaf, so a value the form
+// can render is always a value POST /api/partnerships accepts.
+import { PARTNERSHIP_TYPE_OPTIONS } from "../lib/partnershipRequest";
 import { createCheckoutSession } from "./createCheckoutSession";
 
 
@@ -975,45 +979,109 @@ function RezeptDetail({slug}:{slug:string}){const r=recipes.find(x=>x.slug===slu
 <section className="rezept-detail-nav"><Link href="/rezepte">← Alle Rezepte</Link><Link href="/shop" className="cta">Matcha kaufen</Link></section>
 </main>}
 /* /partnerships — EVENTS, BRANDS, CREATORS, GIFTING, EXPERIENCES.
-   Design phase only: the request form below is real markup with real
-   labels and real fieldsets, and it has no submission path of any kind.
-   No action, no method, no fetch, no state, no storage. See the CSS
-   block and tests/partnerships-page.test.mjs. */
-const ptIndex:[string,string][]=[["01","EVENTS"],["02","BRANDS"],["03","CREATORS"],["04","GIFTING"],["05","EXPERIENCES"]];
-const ptTypes:[string,string,string][]=[
-["01","EVENTS & POP-UPS","Openings, Community Events, Sport, Fashion, Beauty oder Culture."],
-["02","BRAND COLLABORATIONS","Gemeinsame Kampagnen, Produkte, Drops oder besondere Projekte."],
-["03","SPONSORING & SEEDING","Produkt, Sampling oder Support für ausgewählte Events und Projekte."],
-["04","CREATORS & CONTENT","Content, Community und kreative Formate mit passenden Creators."],
-["05","CORPORATE GIFTING","Gifting für Teams, Kunden, Events, PR oder besondere Anlässe."],
-["06","HOSPITALITY & EXPERIENCES","Hotels, Studios, Wellness, Restaurants und besondere Experiences."],
-];
-const ptPrinciples:[string,string,string][]=[
-["01","DIE IDEE","Eine Zusammenarbeit sollte einen Grund haben, nicht nur ein Logo."],
-["02","DER FIT","Marke, Community und Moment müssen zusammenpassen."],
-["03","DER MEHRWERT","Die besten Partnerschaften funktionieren für beide Seiten."],
-];
-const ptProcess:[string,string,string][]=[
-["01","ANFRAGE SENDEN","Erzähl uns, was du planst und was du dir von GLOA wünschst."],
-["02","WIR PRÜFEN","Wir schauen uns Projekt, Timing, Zielgruppe und Rahmenbedingungen an."],
-["03","GEMEINSAM ABSTIMMEN","Wenn es passt, klären wir Idee, Umfang und die nächsten Schritte."],
-["04","LET'S MAKE IT HAPPEN","Dann machen wir aus der Idee eine Zusammenarbeit."],
-];
-const ptTypeOptions=["EVENT / POP-UP","BRAND COLLABORATION","SPONSORING","PRODUCT SEEDING","CREATOR / CONTENT","CORPORATE GIFTING","HOSPITALITY / EXPERIENCE","ANDERE"];
-const ptNeedOptions=["MATCHA / PRODUKT","MATCHA BAR / POP-UP","GOODIE BAGS / GIFTING","SPONSORING","GEMEINSAMER CONTENT","CO-BRANDING","GIVEAWAYS","LANGFRISTIGE PARTNERSCHAFT","ANDERES"];
-const ptOfferOptions=["SOCIAL CONTENT","REELS / POSTS","LOGO-PLATZIERUNG","EVENT-PRÄSENZ","STANDFLÄCHE","SAMPLING","NEWSLETTER / WEBSITE","PRESSE","CREATOR-REICHWEITE","CONTENT / NUTZUNGSRECHTE","EXKLUSIVITÄT","ANDERES"];
-const ptBudgetOptions=["JA","NEIN","NOCH OFFEN"];
 
-function PartnershipChecks({name,options}:{name:string;options:string[]}){
-return <div className="pt-checks">{options.map(o=><label key={o} className="pt-check"><input type="checkbox" name={name} value={o}/><span className="pt-check-box" aria-hidden="true"/><span className="pt-check-label">{o}</span></label>)}</div>;
+   THE PAGE SAYS EACH THING ONCE.
+   It used to name the partnership kinds three times before the visitor
+   could choose one: five index words in the hero, six numbered category
+   blocks below, then the form's checkboxes. The middle list is gone, as
+   are the three numbered principles under GOOD FIT and one of the four
+   process steps. Nothing was added in their place - no card, no panel,
+   no substitute list - and no band, colour, padding or type size moved.
+   Hero = overview, form = choice, and the copy between them is a
+   sentence each.
+
+   THE FORM IS A FIRST HELLO, NOT A BRIEF.
+   It used to ask fifty questions - budget, reach, guest numbers, media
+   kit, what you want from GLOA and what you bring to it - before anyone
+   had decided the conversation was worth having. It now asks nine
+   things: who you are, how to reach you, what kind of partnership, and
+   the idea in your own words. The detail form is sent by hand, later,
+   to the requests GLOA wants to take further; it is not this form and
+   must not grow back into it.
+
+   The form SENDS now. POST /api/partnerships turns one submission into
+   one internal email and writes nothing. The field limits and the
+   partnership-type list come from lib/partnershipRequest.ts, which the
+   route validates against, so the checkboxes rendered here and the
+   server's allow-list are the same array.
+
+   See the CSS block and tests/partnerships-page.test.mjs. */
+/* THE ONE PLACE THE PARTNERSHIP KINDS ARE LISTED BEFORE THE FORM.
+   They used to be named three times on the way down the page: here as
+   five index words, again as six numbered category blocks, and a third
+   time as the form's own checkboxes. A visitor read the same taxonomy
+   three times and chose from it once. The middle list is gone; this one
+   stays as the quick overview, and the form is where the choice is
+   actually made. */
+const ptIndex:[string,string][]=[["01","EVENTS"],["02","BRANDS"],["03","CREATORS"],["04","GIFTING"],["05","EXPERIENCES"]];
+/* Three steps, not four. "Gemeinsam abstimmen" and "Let's make it
+   happen" described the same stretch of the collaboration from two
+   angles, so the abstimmen half folded into 03. */
+const ptProcess:[string,string,string][]=[
+["01","ANFRAGE SENDEN","Schick uns kurz die wichtigsten Eckdaten."],
+["02","WIR PRÜFEN","Passt die Idee zu GLOA, melden wir uns mit den nächsten Schritten und ggf. einem Detailformular."],
+["03","LET'S MAKE IT HAPPEN","Wir stimmen die Details ab und setzen die Zusammenarbeit gemeinsam um."],
+];
+/* The visible list and the server allow-list are the same array. */
+const ptTypeOptions:readonly string[]=PARTNERSHIP_TYPE_OPTIONS;
+const PT_SEND_FAILED="Anfrage konnte nicht gesendet werden. Schreib uns direkt an hello@gloamatcha.com.";
+
+function PartnershipChecks({name,options,labelledBy,disabled}:{name:string;options:readonly string[];labelledBy:string;disabled:boolean}){
+return <div className="pt-checks" role="group" aria-labelledby={labelledBy}>{options.map(o=><label key={o} className="pt-check"><input type="checkbox" name={name} value={o} disabled={disabled}/><span className="pt-check-box" aria-hidden="true"/><span className="pt-check-label">{o}</span></label>)}</div>;
 }
 
 function Partnerships(){
-/* DESIGN PHASE. There is no partnership submission infrastructure yet, so
-   nothing here may send, store or pretend to send anything. The button is
-   type="button" so it can never submit, and the guard below stops an
-   implicit submission from putting personal data into the URL. */
-const blockSubmit=useCallback((e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault()},[]);
+/* One request, one POST, one internal mail. The required fields are
+   marked required so the browser stops an empty submit before any
+   network call; the checkbox group cannot use required (that would
+   demand every box), so its "at least one" rule is checked here AND
+   again on the server, which is the one that decides. */
+const [status,setStatus]=useState<"idle"|"sending"|"success"|"error">("idle");
+const [errorMsg,setErrorMsg]=useState("");
+const sending=status==="sending";
+
+const handleSubmit=async(e:React.FormEvent<HTMLFormElement>)=>{
+e.preventDefault();
+if(sending)return;
+const form=e.currentTarget;
+const f=new FormData(form);
+const types=f.getAll("pt-type").map(v=>String(v));
+if(types.length===0){
+setStatus("error");
+setErrorMsg("Bitte wähle mindestens eine Art der Partnerschaft.");
+return;
+}
+setStatus("sending");setErrorMsg("");
+try{
+const res=await fetch("/api/partnerships",{
+method:"POST",
+headers:{"Content-Type":"application/json"},
+body:JSON.stringify({
+contactName:String(f.get("pt-contact")||""),
+company:String(f.get("pt-company")||""),
+email:String(f.get("pt-email")||""),
+link:String(f.get("pt-link")||""),
+types,
+project:String(f.get("pt-project")||""),
+timeframe:String(f.get("pt-when")||""),
+place:String(f.get("pt-place")||""),
+idea:String(f.get("pt-idea")||""),
+website:String(f.get("website")||""),
+}),
+});
+const body=await res.json().catch(()=>null);
+if(!res.ok){
+setStatus("error");
+setErrorMsg(body?.error||PT_SEND_FAILED);
+return;
+}
+setStatus("success");
+form.reset();
+}catch{
+setStatus("error");
+setErrorMsg(PT_SEND_FAILED);
+}
+};
 
 return <main className="partnerships-page">
 
@@ -1029,25 +1097,29 @@ return <main className="partnerships-page">
 </div>
 </section>
 
+{/* Headline and one sentence. The six numbered category blocks that
+    used to sit under this head are gone - they restated the hero index
+    and the form's checkboxes at length, and nothing replaced them. */}
 <section className="pt-types">
 <div className="pt-types-inner home-rail">
 <div className="pt-types-head">
 <p className="eyebrow pt-eyebrow">PARTNERSCHAFTEN</p>
 <h2 className="pt-headline"><span className="pt-line">Good things.</span><i className="pt-line pt-line-accent">Made together.</i></h2>
-<p className="pt-intro">Von Events bis Brand Collaboration: Wir suchen Partnerschaften, die zu GLOA, zur Community und zum Moment passen.</p>
+<p className="pt-intro">Von Events und Brand Collaborations bis zu Creator-Projekten und Gifting – wir suchen Ideen, die zu GLOA passen und für beide Seiten Mehrwert schaffen.</p>
 </div>
-<div className="pt-types-grid">{ptTypes.map(([n,title,copy])=><article key={n} className="pt-type"><span className="pt-num">{n}</span><h3 className="pt-type-title">{title}</h3><p className="pt-type-copy">{copy}</p></article>)}</div>
 </div>
 </section>
 
+{/* Same band, same scale, no companion column: the three numbered
+    principles said in three headings what the sentence below says in
+    one, so the copy now runs alone on the rail. */}
 <section className="pt-fit">
 <div className="pt-fit-inner home-rail">
 <div className="pt-fit-copy">
 <p className="eyebrow pt-eyebrow">GOOD FIT</p>
 <h2 className="pt-headline"><span className="pt-line">Good fit.</span><i className="pt-line pt-line-accent">Not just good reach.</i></h2>
-<p className="pt-intro">Für uns zählt nicht nur, wie viele Menschen du erreichst. Eine gute Partnerschaft braucht eine klare Idee, einen passenden Kontext und echten Mehrwert auf beiden Seiten.</p>
+<p className="pt-intro">Für uns zählen nicht nur Zahlen. Wir suchen Partnerschaften, die zur Marke passen und für beide Seiten Sinn ergeben.</p>
 </div>
-<div className="pt-fit-list">{ptPrinciples.map(([n,title,copy])=><div key={n} className="pt-principle"><span className="pt-num">{n}</span><h3 className="pt-principle-title">{title}</h3><p className="pt-principle-copy">{copy}</p></div>)}</div>
 </div>
 </section>
 
@@ -1056,7 +1128,7 @@ return <main className="partnerships-page">
 <div className="pt-process-head">
 <p className="eyebrow pt-eyebrow">SO FUNKTIONIERT&apos;S</p>
 <h2 className="pt-headline"><span className="pt-line">Von der Idee.</span><i className="pt-line pt-line-accent">Zur Zusammenarbeit.</i></h2>
-<p className="pt-intro">Je konkreter deine Anfrage, desto schneller können wir einschätzen, ob und wie GLOA dazu passt.</p>
+<p className="pt-intro">Schick uns die wichtigsten Infos zu deiner Idee. Wir prüfen, ob und wie GLOA dazu passt.</p>
 </div>
 <ol className="pt-process-steps">{ptProcess.map(([n,title,copy])=><li key={n} className="pt-step"><span className="pt-num">{n}</span><h3 className="pt-step-title">{title}</h3><p className="pt-step-copy">{copy}</p></li>)}</ol>
 </div>
@@ -1064,75 +1136,51 @@ return <main className="partnerships-page">
 
 <section className="pt-request" id="partnership-request">
 <div className="pt-request-inner home-rail">
+{status==="success"?
+/* The head IS the success state: same eyebrow, same scale, same band.
+   Nothing new is painted, so the confirmation cannot look like a
+   different page than the form it replaced. */
+<div className="pt-request-head">
+<p className="eyebrow pt-eyebrow">PARTNERSHIP REQUEST</p>
+<h2 className="pt-headline"><span className="pt-line">Danke für deine Anfrage.</span></h2>
+<p className="pt-intro">Wir schauen uns dein Projekt an und melden uns bei dir. Wenn es grundsätzlich passt, erhältst du von uns im nächsten Schritt ein kurzes Detailformular.</p>
+</div>
+:
+<>
 <div className="pt-request-head">
 <p className="eyebrow pt-eyebrow">PARTNERSHIP REQUEST</p>
 <h2 className="pt-headline"><span className="pt-line">Tell us.</span><i className="pt-line pt-line-accent">What you have in mind.</i></h2>
-<p className="pt-intro">Je mehr wir über dein Projekt wissen, desto besser können wir einschätzen, ob und wie eine Zusammenarbeit mit GLOA funktionieren kann.</p>
+<p className="pt-intro">Erzähl uns kurz, was du planst. Wenn wir Potenzial für eine Zusammenarbeit sehen, melden wir uns bei dir mit den nächsten Schritten.</p>
 </div>
 
-<form className="pt-form" onSubmit={blockSubmit}>
+<form className="pt-form" onSubmit={handleSubmit}>
+<input type="text" name="website" tabIndex={-1} autoComplete="off" aria-hidden="true" style={{position:"absolute",left:"-9999px",width:1,height:1,opacity:0}}/>
 
 <fieldset className="pt-group"><legend className="pt-legend">ÜBER DICH</legend>
 <div className="pt-fields">
-<label>Ansprechperson*<input name="pt-contact" type="text" autoComplete="name" maxLength={200}/></label>
-<label>Unternehmen / Brand / Organisation*<input name="pt-company" type="text" autoComplete="organization" maxLength={200}/></label>
-<label>E-Mail*<input name="pt-email" type="email" autoComplete="email" maxLength={254}/></label>
-<label>Telefon<input name="pt-phone" type="tel" autoComplete="tel" maxLength={60}/></label>
-<label>Website<input name="pt-website" type="url" placeholder="https://" maxLength={300}/></label>
-<label>Instagram / TikTok / Social Link<input name="pt-social" type="text" maxLength={300}/></label>
-<label>Stadt / Land*<input name="pt-location" type="text" maxLength={200}/></label>
+<label>Ansprechperson*<input required name="pt-contact" type="text" autoComplete="name" maxLength={200} disabled={sending}/></label>
+<label>Unternehmen / Brand / Organisation*<input required name="pt-company" type="text" autoComplete="organization" maxLength={200} disabled={sending}/></label>
+<label>E-Mail*<input required name="pt-email" type="email" autoComplete="email" maxLength={254} disabled={sending}/></label>
+<label>Website / Instagram / Social Link<input name="pt-link" type="text" maxLength={300} disabled={sending}/></label>
 </div>
 </fieldset>
 
-<fieldset className="pt-group"><legend className="pt-legend">ART DER PARTNERSCHAFT*</legend>
-<PartnershipChecks name="pt-type" options={ptTypeOptions}/>
-</fieldset>
-
-<fieldset className="pt-group"><legend className="pt-legend">DEIN PROJEKT</legend>
+<fieldset className="pt-group"><legend className="pt-legend">DEINE ANFRAGE</legend>
+<p className="pt-question" id="pt-type-question">ART DER PARTNERSCHAFT*</p>
+<PartnershipChecks name="pt-type" options={ptTypeOptions} labelledBy="pt-type-question" disabled={sending}/>
 <div className="pt-fields">
-<label>Name des Projekts / Events*<input name="pt-project" type="text" maxLength={200}/></label>
-<label>Datum / Zeitraum*<input name="pt-when" type="text" placeholder="TT.MM.JJJJ oder Zeitraum" maxLength={120}/></label>
-<label className="pt-wide">Worum geht&apos;s?*<textarea name="pt-about" rows={5} maxLength={5000}/></label>
-<label>Ort*<input name="pt-place" type="text" maxLength={200}/></label>
-<label>Projekt- / Event-Link<input name="pt-project-link" type="url" placeholder="https://" maxLength={300}/></label>
-<label>Media Kit / Deck Link<input name="pt-deck" type="url" placeholder="https://" maxLength={300}/></label>
+<label>Name des Projekts / Events<input name="pt-project" type="text" maxLength={200} disabled={sending}/></label>
+<label>Datum / Zeitraum<input name="pt-when" type="text" placeholder="TT.MM.JJJJ oder Zeitraum" maxLength={120} disabled={sending}/></label>
+<label>Ort<input name="pt-place" type="text" maxLength={200} disabled={sending}/></label>
+<label className="pt-wide">Erzähl uns kurz von deiner Idee*<textarea required name="pt-idea" rows={6} minLength={10} maxLength={5000} disabled={sending}/></label>
 </div>
 </fieldset>
 
-<fieldset className="pt-group"><legend className="pt-legend">WAS WÜNSCHST DU DIR VON GLOA?</legend>
-<PartnershipChecks name="pt-need" options={ptNeedOptions}/>
-</fieldset>
-
-<fieldset className="pt-group"><legend className="pt-legend">WAS BRINGST DU IN DIE PARTNERSCHAFT EIN?</legend>
-<PartnershipChecks name="pt-offer" options={ptOfferOptions}/>
-</fieldset>
-
-<fieldset className="pt-group"><legend className="pt-legend">REICHWEITE &amp; SICHTBARKEIT</legend>
-<div className="pt-fields">
-<label>Erwartete Gäste / Teilnehmende<input name="pt-guests" type="text" maxLength={120}/></label>
-<label>Social Reach<input name="pt-reach" type="text" maxLength={200}/></label>
-<label className="pt-wide">Relevante Creator / Partner / Accounts<textarea name="pt-accounts" rows={3} maxLength={2000}/></label>
-</div>
-</fieldset>
-
-<fieldset className="pt-group"><legend className="pt-legend">BUDGET</legend>
-<p className="pt-question">GIBT ES FÜR DIE ZUSAMMENARBEIT EIN VORGESEHENES BUDGET?</p>
-<div className="pt-checks pt-checks-radio">{ptBudgetOptions.map(o=><label key={o} className="pt-check"><input type="radio" name="pt-budget" value={o}/><span className="pt-check-box" aria-hidden="true"/><span className="pt-check-label">{o}</span></label>)}</div>
-<div className="pt-fields">
-<label>Budget / Range<input name="pt-budget-range" type="text" maxLength={120}/></label>
-</div>
-</fieldset>
-
-<fieldset className="pt-group"><legend className="pt-legend">ZUM SCHLUSS</legend>
-<div className="pt-fields">
-<label className="pt-wide">Was würde eine erfolgreiche Partnerschaft für dich ausmachen?<textarea name="pt-success" rows={4} maxLength={3000}/></label>
-<label className="pt-wide">Sonst noch was?<textarea name="pt-anything" rows={3} maxLength={3000}/></label>
-</div>
-</fieldset>
-
-<p className="pt-form-note">Wir prüfen jede Anfrage individuell. Je konkreter dein Projekt, desto besser können wir einschätzen, ob und wie GLOA dazu passt.</p>
-<button className="cta pt-cta pt-submit" type="button">PARTNERSCHAFT ANFRAGEN</button>
+{status==="error"&&<p className="pt-form-error" role="alert">{errorMsg}</p>}
+<p className="pt-form-note">Wir prüfen jede Anfrage individuell. Wenn es passt, melden wir uns mit den nächsten Schritten.</p>
+<button className="cta pt-cta pt-submit" type="submit" disabled={sending}>{sending?"WIRD GESENDET …":"PARTNERSCHAFT ANFRAGEN"}</button>
 </form>
+</>}
 </div>
 </section>
 
