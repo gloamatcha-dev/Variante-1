@@ -10,6 +10,28 @@ export const BRAND = {
 
 export const SHOP_STATUS = "prelaunch" as const; // "prelaunch" | "live"
 
+/**
+ * RECIPES ARE WITHHELD FOR THIS LAUNCH, NOT REMOVED.
+ *
+ * Flip this to true and every entry point comes back in one step. It is
+ * read in exactly three places, all of them presentation:
+ *
+ *   app/Chrome.tsx   the "Rezepte" entry in `links` (desktop nav AND
+ *                    mobile menu read that one array) and the footer link
+ *   app/GloaSite.tsx <RecipeCarousel/> on the homepage
+ *
+ * NOTHING WAS DELETED. The recipe data, the /rezepte listing, the
+ * /rezepte/[slug] detail pages, RezepteCommunity, the RecipeCarousel
+ * component, every image and the whole CSS block are exactly where they
+ * were, and the routes still resolve for anyone who knows the URL - no
+ * redirect, no 404, no route guard. This withholds the links, it does
+ * not take the feature out.
+ *
+ * Typed `boolean` rather than left as the literal `false`, so the true
+ * branch is not narrowed away and reads as live code to a reader.
+ */
+export const RECIPES_VISIBLE: boolean = false;
+
 
 export const PRODUCT = {
   slug: "gloa-matcha",

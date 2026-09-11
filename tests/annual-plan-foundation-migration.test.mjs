@@ -1085,6 +1085,14 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // two cannot diverge. tests/partnerships-page.test.mjs asserts the
     // position and the single occurrence directly against the source.
     "app/Chrome.tsx",
+    // LAUNCH CONTENT: one added constant, RECIPES_VISIBLE, beside the
+    // existing SHOP_STATUS. It is a presentation flag read by the header,
+    // the footer and the homepage to withhold the recipe entry points for
+    // this launch; nothing is deleted and /rezepte still resolves. No
+    // payment, fulfillment, account or annual value lives behind it, and
+    // SHOP_STATUS itself is untouched - test 42 in this file asserts that
+    // directly. Reviewed in tests/rezepte-page.test.mjs.
+    "app/content.ts",
   ];
 
   for (const rel of touched) {

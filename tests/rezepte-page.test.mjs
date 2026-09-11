@@ -523,3 +523,135 @@ test("7c: this pass added no backend of any kind", () => {
       `the recipes page reaches for ${banned}`);
   }
 });
+
+/* ══════════════════════════════════════════════════════════════
+   8. WITHHELD FOR THE LAUNCH — LINKS GONE, FEATURE INTACT
+
+   Recipes are hidden from the public site for this launch behind
+   RECIPES_VISIBLE in app/content.ts. These tests hold both halves of
+   that: no visitor finds a way in from the navigation, the homepage or
+   the footer, AND nothing was deleted - the route still answers, the
+   data is all there, and flipping one constant brings it back.
+
+   The tests above this line are the ones that guard the page itself.
+   They still run, against the still-rendering /rezepte, and none of
+   them was weakened to make the hiding pass.
+   ══════════════════════════════════════════════════════════════ */
+
+test("8: the flag exists, is off, and is the single switch", () => {
+  const content = read("app/content.ts");
+  assert.match(content, /export const RECIPES_VISIBLE: boolean = false;/,
+    "the launch flag is missing or is no longer a plain boolean");
+  // Read in exactly the two presentation modules, nowhere else.
+  for (const rel of ["app/Chrome.tsx", "app/GloaSite.tsx"]) {
+    assert.ok(read(rel).includes("RECIPES_VISIBLE"), `${rel} does not read the flag`);
+  }
+  // No server route, no API and no data module gates on it: this hides
+  // links, it does not disable the feature.
+  for (const rel of ["app/[...slug]/page.tsx", "app/api/contact/route.ts"]) {
+    assert.ok(!read(rel).includes("RECIPES_VISIBLE"), `${rel} gates on the launch flag`);
+  }
+  // SHOP_STATUS, the flag it sits beside, is untouched.
+  assert.match(content, /export const SHOP_STATUS = "prelaunch" as const;/);
+});
+
+test("8b: Rezepte is in neither navigation, and the link array is intact", () => {
+  const chrome = read("app/Chrome.tsx");
+  // THE ARRAY ITSELF IS UNCHANGED, in its intended order, so turning the
+  // flag back on restores the entry in place rather than appending it.
+  assert.ok(chrome.includes('["/for-cafes","B2B"],["/partnerships","Partnerschaften"],["/rezepte","Rezepte"]'),
+    "the links array was edited instead of filtered");
+  // One filter, and BOTH navigations read its result - the desktop row
+  // and the mobile menu still cannot diverge.
+  assert.match(chrome, /const visibleLinks = links\.filter\(\(\[href\]\) => RECIPES_VISIBLE \|\| href !== "\/rezepte"\)/);
+  assert.ok(!/<nav aria-label="Hauptnavigation">\{links\.map/.test(chrome),
+    "the desktop nav still reads the unfiltered array");
+  assert.ok(!/className="mobile-nav"[^>]*>\{links\.map/.test(chrome),
+    "the mobile menu still reads the unfiltered array");
+  assert.equal((chrome.match(/visibleLinks\.map/g) || []).length, 2,
+    "the two navigations do not both read the filtered list");
+});
+
+test("8c: no rendered page offers a way to /rezepte", async () => {
+  for (const route of ["/", "/shop", "/our-matcha", "/about", "/for-cafes", "/partnerships", "/contact"]) {
+    const res = await server.getHtml(route);
+    assert.equal(res.status, 200, `${route} does not resolve`);
+    assert.deepEqual(res.html.match(/href="\/rezepte[^"]*"/g) || [], [],
+      `${route} still links to /rezepte`);
+    // The word must not survive as a nav label either.
+    assert.ok(!/>Rezepte</.test(res.html), `${route} still shows a Rezepte entry`);
+  }
+});
+
+test("8d: the homepage recipe section is not rendered, and leaves no gap", async () => {
+  const home = (await server.getHtml("/")).html;
+  for (const gone of ["featured-recipes", "recipe-marquee", "recipe-card",
+                      "GLOA RECIPES", "ALLE REZEPTE", "Unsere liebsten Matcha-Rezepte."]) {
+    assert.ok(!home.includes(gone), `the homepage still renders: ${gone}`);
+  }
+  // The section is ABSENT, not emptied - nothing is left to collapse.
+  const sections = [...home.matchAll(/<section class="([a-z-]+)"/g)].map(m => m[1]);
+  assert.ok(!sections.includes("featured-recipes"), "an empty recipe section is still in the DOM");
+  // Its two neighbours now meet directly, and each carries its own
+  // padding, so the seam needs no compensation.
+  const i = sections.indexOf("habit");
+  assert.notEqual(i, -1, "the habit section disappeared");
+  assert.equal(sections[i + 1], "community", "the homepage order changed beyond the recipe section");
+  assert.match(css, /\.habit\{[^}]*padding-block:/);
+  assert.match(css, /\.community\{[^}]*padding:/);
+  // Gating is a render condition, not a deletion.
+  assert.match(site, /\{RECIPES_VISIBLE&&<RecipeCarousel\/>\}/,
+    "the homepage carousel is not behind the flag");
+});
+
+test("8e: the footer drops the link and keeps every other one", async () => {
+  const home = (await server.getHtml("/")).html;
+  const footer = home.slice(home.indexOf("<footer"), home.indexOf("</footer>"));
+  assert.ok(!footer.includes("/rezepte"), "the footer still links recipes");
+  // Its column is otherwise untouched, and no other footer link moved.
+  for (const href of ["/about", "/contact", "/shop", "/our-matcha", "/for-cafes",
+                      "/impressum", "/datenschutz", "/agb", "/widerruf", "/versand"]) {
+    assert.ok(footer.includes(`href="${href}"`), `the footer lost ${href}`);
+  }
+  assert.match(read("app/Chrome.tsx"),
+    /\{RECIPES_VISIBLE&&<Link href="\/rezepte">Rezepte<\/Link>\}/,
+    "the footer link was deleted instead of gated");
+});
+
+test("8f: the route still answers - no redirect, no 404, no guard", async () => {
+  const listing = await server.getHtml("/rezepte");
+  assert.equal(listing.status, 200, "/rezepte no longer resolves");
+  assert.ok(listing.html.includes('class="rezepte-page"'), "/rezepte renders something else now");
+  assert.equal((listing.html.match(/<article class="rezept-card">/g) || []).length, 6,
+    "the listing lost recipes");
+  // Every detail page too.
+  for (const href of [...listing.html.matchAll(/href="(\/rezepte\/[^"]+)"/g)].map(m => m[1])) {
+    const { status } = await server.getHtml(href);
+    assert.equal(status, 200, `${href} no longer resolves`);
+  }
+  // The route dispatch and the SEO entry are untouched.
+  assert.match(site, /else if\(route==="rezepte"\|\|route==="journal"\)page=<Rezepte\/>;/);
+  assert.match(site, /else if\(route\.startsWith\("rezepte\/"\)\)page=<RezeptDetail/);
+  assert.match(read("app/[...slug]/page.tsx"), /"rezepte":\["Matcha Rezepte"/);
+});
+
+test("8g: NOTHING WAS DELETED - data, components and styles are all still here", () => {
+  // The six recipes, with their steps and ingredients.
+  const data = site.slice(site.indexOf("const recipes"), site.indexOf("const ALL_TAGS"));
+  assert.equal((data.match(/slug:/g) || []).length, 6, "a recipe was deleted from the data");
+  for (const key of ["ingredients:", "steps:", "image:", "alt:", "excerpt:", "tags:"]) {
+    assert.ok(data.includes(key), `the recipe data lost ${key}`);
+  }
+  // Every component that renders them.
+  for (const fn of ["function RecipeCarousel(", "function Rezepte(",
+                    "function RezepteCommunity(", "function RezeptDetail("]) {
+    assert.ok(site.includes(fn), `${fn} was removed`);
+  }
+  // And the stylesheet, for both the homepage carousel and the page.
+  // (.rezepte-page is a wrapper class with no rule of its own, so the
+  //  blocks that actually carry the styling are the ones checked here.)
+  for (const sel of [".featured-recipes", ".recipe-marquee", ".recipe-card",
+                     ".rezepte-hero", ".rezepte-grid", ".rezept-card", ".rezept-detail"]) {
+    assert.ok(css.includes(sel), `${sel} was removed from the stylesheet`);
+  }
+});
