@@ -984,11 +984,13 @@ function RezeptDetail({slug}:{slug:string}){const r=recipes.find(x=>x.slug===slu
    It used to name the partnership kinds three times before the visitor
    could choose one: five index words in the hero, six numbered category
    blocks below, then the form's checkboxes. The middle list is gone, as
-   are the three numbered principles under GOOD FIT and one of the four
-   process steps. Nothing was added in their place - no card, no panel,
-   no substitute list - and no band, colour, padding or type size moved.
-   Hero = overview, form = choice, and the copy between them is a
-   sentence each.
+   is one of the four process steps. Nothing was added in their place -
+   no card, no panel, no substitute list - and no colour or type size
+   moved. Hero = overview, form = choice.
+
+   The GOOD FIT band went too, whole: eyebrow, headline and sentence.
+   Five bands are left, and two of them are cream and adjacent - see the
+   seam note in the stylesheet.
 
    THE FORM IS A FIRST HELLO, NOT A BRIEF.
    It used to ask fifty questions - budget, reach, guest numbers, media
@@ -1110,19 +1112,12 @@ return <main className="partnerships-page">
 </div>
 </section>
 
-{/* Same band, same scale, no companion column: the three numbered
-    principles said in three headings what the sentence below says in
-    one, so the copy now runs alone on the rail. */}
-<section className="pt-fit">
-<div className="pt-fit-inner home-rail">
-<div className="pt-fit-copy">
-<p className="eyebrow pt-eyebrow">GOOD FIT</p>
-<h2 className="pt-headline"><span className="pt-line">Good fit.</span><i className="pt-line pt-line-accent">Not just good reach.</i></h2>
-<p className="pt-intro">Für uns zählen nicht nur Zahlen. Wir suchen Partnerschaften, die zur Marke passen und für beide Seiten Sinn ergeben.</p>
-</div>
-</div>
-</section>
-
+{/* The GOOD FIT band stood here. It is gone entirely - eyebrow,
+    headline and sentence - and its copy was NOT moved anywhere else.
+    PARTNERSCHAFTEN now runs straight into SO FUNKTIONIERT'S, which
+    means two cream bands meet with no colour change between them; the
+    stylesheet collapses that seam so they read as one stretch of cream
+    rather than as two sections with a hole between them. */}
 <section className="pt-process">
 <div className="pt-process-inner home-rail">
 <div className="pt-process-head">

@@ -100,7 +100,6 @@ test("1: /partnerships resolves through the public site architecture", async () 
 test("2: every contracted string renders", () => {
   for (const copy of ["LET'S WORK TOGETHER", "Your idea.", "Our Matcha.",
                       "PARTNERSCHAFTEN", "Good things.", "Made together.",
-                      "GOOD FIT", "Good fit.", "Not just good reach.",
                       "SO FUNKTIONIERT'S", "Von der Idee.", "Zur Zusammenarbeit.",
                       "PARTNERSHIP REQUEST", "Tell us.", "What you have in mind.",
                       "GOT SOMETHING IN MIND?", "Let's make.", "Something good.",
@@ -115,14 +114,12 @@ test("2: every contracted string renders", () => {
 test("2d: each shortened band is a head and ONE sentence", () => {
   for (const sentence of [
     "Von Events und Brand Collaborations bis zu Creator-Projekten und Gifting – wir suchen Ideen, die zu GLOA passen und für beide Seiten Mehrwert schaffen.",
-    "Für uns zählen nicht nur Zahlen. Wir suchen Partnerschaften, die zur Marke passen und für beide Seiten Sinn ergeben.",
     "Schick uns die wichtigsten Infos zu deiner Idee. Wir prüfen, ob und wie GLOA dazu passt.",
   ]) {
     assert.ok(text().includes(sentence), `missing band copy: ${sentence}`);
   }
   // The copy each one replaced is gone.
   for (const old of ["Von Events bis Brand Collaboration:",
-                     "Für uns zählt nicht nur, wie viele Menschen du erreichst.",
                      "Eine kurze Anfrage reicht."]) {
     assert.ok(!text().includes(old), `superseded copy survived: ${old}`);
   }
@@ -182,34 +179,61 @@ test("2R: the six partnership category blocks are gone, and nothing replaced the
     assert.ok(!code.includes(gone), `a removed category still has rules: ${gone}`);
   }
   // The band is now a head and nothing else: no grid, no list, no card.
-  const band = html.slice(html.indexOf('<section class="pt-types"'), html.indexOf('<section class="pt-fit"'));
+  const band = html.slice(html.indexOf('<section class="pt-types"'), html.indexOf('<section class="pt-process"'));
   assert.ok(band.includes('class="pt-types-head"'), "the PARTNERSCHAFTEN head is missing");
   assert.equal((band.match(/<(article|li|h3)\b/g) || []).length, 0,
     "the band grew a replacement list");
   assert.equal((band.match(/<p\b/g) || []).length, 2, "the band is not eyebrow + one sentence");
 });
 
-test("2Rb: DIE IDEE / DER FIT / DER MEHRWERT are gone, and nothing replaced them", () => {
-  for (const gone of ["DIE IDEE", "DER FIT", "DER MEHRWERT",
+test("2Rb: the whole GOOD FIT band is gone - markup, copy and rules", () => {
+  // The band's own words, including the three numbered principles it
+  // carried before it was removed outright.
+  for (const gone of ["GOOD FIT", "Good fit.", "Not just good reach.",
+                      "Für uns zählen nicht nur Zahlen.",
+                      "Wir suchen Partnerschaften, die zur Marke passen",
+                      "DIE IDEE", "DER FIT", "DER MEHRWERT",
                       "Eine Zusammenarbeit sollte einen Grund haben",
                       "Marke, Community und Moment", "Die besten Partnerschaften funktionieren"]) {
-    assert.ok(!text().includes(gone), `a removed principle is still on the page: ${gone}`);
+    assert.ok(!text().includes(gone), `removed GOOD FIT copy is still on the page: ${gone}`);
   }
-  for (const gone of ["ptPrinciples", "pt-fit-list", "pt-principle"]) {
-    assert.ok(!page.includes(gone), `a removed principle survives in the source: ${gone}`);
+  // No section, and no element of it, survives in the render.
+  assert.ok(!html.includes('class="pt-fit'), "a pt-fit element is still rendered");
+  // Not in the component source either - not commented out, not moved.
+  for (const gone of ['className="pt-fit', "ptPrinciples", "pt-fit-list", "pt-principle"]) {
+    assert.ok(!page.includes(gone), `GOOD FIT survives in the source: ${gone}`);
   }
-  for (const gone of [".pt-fit-list", ".pt-principle"]) {
-    assert.ok(!code.includes(gone), `a removed principle still has rules: ${gone}`);
+  // And every rule it owned left with it, so no dead CSS is shipped.
+  assert.ok(!code.includes(".pt-fit"), "the removed band still has rules");
+  assert.ok(!code.includes(".pt-principle"), "the removed principles still have rules");
+
+  // NO EMPTY COLOURED AREA. The raspberry band is not left standing as a
+  // blank stripe: var(--berry) no longer paints a background anywhere on
+  // this page, only the hairline over each process step.
+  for (const m of code.matchAll(/background:([^;}]+)/g)) {
+    assert.notEqual(m[1].trim(), "var(--berry)", "an empty raspberry area was left behind");
   }
-  // Eyebrow + headline + one sentence, and no companion column.
-  const band = html.slice(html.indexOf('<section class="pt-fit"'), html.indexOf('<section class="pt-process"'));
-  assert.equal((band.match(/<(article|li|h3)\b/g) || []).length, 0,
-    "the band grew a replacement list");
-  assert.equal((band.match(/<p\b/g) || []).length, 2, "the band is not eyebrow + one sentence");
-  // The copy keeps a reading measure rather than being stretched across
-  // the whole rail to fill the space the list left.
-  assert.match(rule(".pt-fit-inner{"), /grid-template-columns:minmax\(0,1fr\)/);
-  assert.match(rule(".pt-fit-copy{"), /max-width:820px/);
+  assert.ok(code.includes("border-top:1px solid var(--berry)"),
+    "the process hairline lost its colour with the band");
+});
+
+test("2Rc0: the two cream bands that now meet do not leave a hole between them", () => {
+  // PARTNERSCHAFTEN runs straight into SO FUNKTIONIERT'S. Every other
+  // seam on this page is a colour change, and the two paddings either
+  // side of it are what give that change room; this one is not, so
+  // keeping both would be ~160-232px of empty cream.
+  assert.match(code, /\.pt-types\+\.pt-process\{padding-block-start:0\}/,
+    "the cream-to-cream seam still carries both paddings");
+  // The first band keeps its own bottom padding, so the two heads are
+  // not jammed together either.
+  assert.match(rule(".pt-types{"), /padding-block:clamp\(80px,6\.6vw,116px\)/);
+  // The collapse is an adjacency rule, not baked into .pt-process, so
+  // .pt-process still carries normal padding wherever it stands alone.
+  assert.match(rule(".pt-process{"), /padding-block:clamp\(80px,6\.6vw,116px\)/);
+  // (0,2,0) outranks the 900px .pt-types,.pt-process rule (0,1,0), so
+  // one declaration holds at every width and no second rule is needed.
+  const at900 = code.slice(code.indexOf("@media (max-width:900px)"), code.indexOf("@media (max-width:760px)"));
+  assert.ok(!at900.includes(".pt-types+.pt-process"), "the seam was re-declared per breakpoint");
 });
 
 test("2Rc: the process is exactly three steps, and GEMEINSAM ABSTIMMEN is not one of them", () => {
@@ -259,15 +283,14 @@ test("2Rd: the partnership kinds are named ONCE before the form", () => {
    3. THE COLOUR RHYTHM AND THE DESIGN LANGUAGE
    ══════════════════════════════════════════════════════════════ */
 
-test("3: six sections, in the intended semantic order", () => {
+test("3: five sections, in the intended semantic order", () => {
   const sections = [...html.matchAll(/<section class="(pt-[a-z]+)"/g)].map(m => m[1]);
-  assert.deepEqual(sections, ["pt-hero", "pt-types", "pt-fit", "pt-process", "pt-request", "pt-final"]);
+  assert.deepEqual(sections, ["pt-hero", "pt-types", "pt-process", "pt-request", "pt-final"]);
 });
 
-test("3b: blue, cream, raspberry, cream, plum, blue - and nothing else", () => {
+test("3b: blue, cream, cream, plum, blue - and nothing else", () => {
   const bands = [[".pt-hero{", "var(--blue)", "var(--cream)"],
                  [".pt-types{", "var(--cream)", "var(--ink)"],
-                 [".pt-fit{", "var(--berry)", "var(--cream)"],
                  [".pt-process{", "var(--cream)", "var(--ink)"],
                  [".pt-request{", "var(--plum)", "var(--cream)"],
                  [".pt-final{", "var(--blue)", "var(--cream)"]];
@@ -324,7 +347,7 @@ test("3d: editorial, not a card deck", () => {
     assert.match(m[1], /^1px solid /, `a border heavier than a hairline: ${m[1]}`);
   }
   // On the canonical rail, and no reserved viewport height.
-  for (const inner of ["pt-hero-inner", "pt-types-inner", "pt-fit-inner",
+  for (const inner of ["pt-hero-inner", "pt-types-inner",
                        "pt-process-inner", "pt-request-inner", "pt-final-inner"]) {
     assert.ok(page.includes(`className="${inner} home-rail"`), `${inner} is off the shared rail`);
   }
@@ -374,7 +397,8 @@ test("4: two groups, nine questions, and every control inside its own label", ()
   assert.equal(controls, 15, `${controls} controls rendered, not 15`);
   // One h1 for the hero, h2 for every other section.
   assert.equal((html.match(/<h1/g) || []).length, 1, "the page does not have exactly one h1");
-  assert.equal((html.match(/<h2/g) || []).length, 5, "the section headings changed");
+  // One per band below the hero: types, process, request, final.
+  assert.equal((html.match(/<h2/g) || []).length, 4, "the section headings changed");
 });
 
 test("4a: the long-brief questions are gone, from the markup and the source", () => {
@@ -562,9 +586,9 @@ test("6: the grids reflow, and the reading order never does", () => {
   assert.match(rule(".pt-fields{"), /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
   assert.match(at900, /\.pt-fields\{grid-template-columns:minmax\(0,1fr\)\}/);
   assert.match(at520, /\.pt-checks\{grid-template-columns:minmax\(0,1fr\)\}/);
-  // The GOOD FIT measure is a desktop device; on a phone the copy uses
-  // the rail it is given.
-  assert.match(at760, /\.pt-fit-copy\{max-width:none\}/);
+  // The measures that ARE dropped on a phone are the hero's and the
+  // form's - the GOOD FIT one left with its band.
+  assert.match(at760, /\.pt-hero-lead,\s*\.pt-hero-index\{max-width:none\}/);
 
   // The order is the DOM order in every case - nothing is reordered.
   assert.ok(!/\border:\s*-?\d/.test(code) && !/grid-auto-flow:\s*dense/.test(code),
