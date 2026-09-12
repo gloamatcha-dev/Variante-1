@@ -258,7 +258,7 @@ test("7b: Cormorant is untouched everywhere it is not a page hero", () => {
                      ".matcha-explain-line-accent", ".matcha-research-line-accent",
                      ".b2b-menu .b2b-menu-line-accent", ".b2b-compare .b2b-compare-line-accent",
                      ".b2b-flow .b2b-flow-line-accent", ".b2b-support .b2b-support-line-accent",
-                     ".business .faq h2 i", ".matcha-page .faq h2 i"]) {
+                     ".business .faq h2 i"]) {
     const hit = blocks.find(b => b[1].split(",").some(x => x.trim() === sel)
       && /font-family/.test(b[2]));
     assert.ok(hit, `missing rule: ${sel}`);

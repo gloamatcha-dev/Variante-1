@@ -124,13 +124,20 @@ test("2: every rule here is .business-scoped, and the shared base survives", () 
   assert.match(css, /\.faq details\{border-top:1px solid var\(--plum\)\}/);
   assert.match(css, /\.faq summary\{padding:25px 0/);
   // And so is every /our-matcha override.
-  for (const marker of [".matcha-page .faq{", ".matcha-page .faq .eyebrow{", ".matcha-page .faq h2{",
-                        ".matcha-page .faq h2 i{", ".matcha-page .faq summary{",
+  for (const marker of [".matcha-page .faq{", ".matcha-page .faq h2{",
+                        ".matcha-page .faq summary{",
                         ".matcha-page .faq summary span{", ".matcha-page .faq details p{"]) {
     assert.ok(css.includes(marker), `a /our-matcha FAQ rule went missing: ${marker}`);
   }
   assert.match(css, /\.matcha-page \.faq h2\{[\s\S]*?font-size:clamp\(48px,4\.3vw,60px\)/);
-  assert.match(css, /\.matcha-page \.faq h2 i\{[\s\S]*?font-size:clamp\(50px,4\.6vw,64px\)/);
+  // The eyebrow and the italic second line are /for-cafes' alone now:
+  // /our-matcha's FAQ headline is the single word F&Q, so the two rules
+  // that styled them there were removed rather than left orphaned.
+  for (const gone of [".matcha-page .faq .eyebrow", ".matcha-page .faq h2 i"]) {
+    assert.ok(!css.includes(gone), `a rule outlived the element it styled: ${gone}`);
+  }
+  // /for-cafes still has both, and still renders both.
+  assert.match(site, /<section className="faq"><p className="eyebrow">B2B FAQ<\/p><h2>Fragen\?<br\/><i>Antworten\.<\/i><\/h2>/);
   // The /our-matcha FAQ markup is the same one, still rendered there.
   assert.equal([...site.matchAll(/className="faq"/g)].length, 2);
   assert.match(site, /function MatchaPage\(\)/);

@@ -44,7 +44,6 @@ test("1: not one regulated sentence was rewritten", () => {
   for (const line of [
     "MATCHA & SCIENCE", "Forschung.", "Ehrlich eingeordnet.",
     "Wir wollen nichts versprechen, was sich nicht belegen lässt. Deshalb trennen wir hier klar, was Matcha enthält, was untersucht wurde und was offen bleibt.",
-    "Wir behaupten nichts, was wir nicht belegen können.",
   ]) {
     assert.ok(section.includes(line), `the redesign lost: ${line}`);
   }
@@ -58,6 +57,12 @@ test("1: not one regulated sentence was rewritten", () => {
   ]) {
     assert.ok(data.includes(line), `the redesign lost: ${line}`);
   }
+  // THE SECOND DISCLAIMER LINE IS GONE, ON REQUEST, AND NOTHING WAS
+  // PUT IN ITS PLACE. The intro above still carries the promise, which
+  // is why removing the repeat costs the section nothing: the sentence
+  // that remains says the same thing once.
+  assert.ok(!site.includes("Wir behaupten nichts"), "the removed disclaimer came back");
+  assert.ok(!css.includes(".matcha-research-note"), "its rule outlived it");
   // EXACTLY THREE BLOCKS, and the labels stay sentence case in the
   // source - the uppercase is CSS, not a rewrite.
   assert.equal([...data.matchAll(/label:"/g)].length, 3);
@@ -113,7 +118,7 @@ test("3: three colours, open columns, hairlines instead of boxes", () => {
   for (const name of [".matcha-research-eyebrow{", ".matcha-research-line{", ".matcha-research-intro{", ".matcha-research-body{"]) {
     assert.match(rule(name), /color:var\(--ink\)/, `${name} is not near black`);
   }
-  for (const name of [".matcha-research-line-accent{", ".matcha-research-note{", ".matcha-research-label{", ".matcha-research-icon{"]) {
+  for (const name of [".matcha-research-line-accent{", ".matcha-research-label{", ".matcha-research-icon{"]) {
     assert.match(rule(name), /color:var\(--berry\)/, `${name} is not raspberry`);
   }
   for (const banned of ["var(--blue)", "var(--plum)", "var(--matcha)", "gradient", "backdrop-filter"]) {
@@ -186,8 +191,8 @@ test("4: a section, not a hero - and it stacks cleanly", () => {
   // Body is a body, not a headline.
   assert.match(rule(".matcha-research-body{"), /font-size:clamp\(14\.5px,1\.1vw,16px\)/);
   assert.match(rule(".matcha-research-label{"), /font-size:var\(--type-meta\)/);
-  // The closing statement is a sentence, so it is NOT uppercased.
-  assert.ok(!rule(".matcha-research-note{").includes("text-transform"), "the closing sentence was uppercased");
+  // The intro is a sentence, so it is NOT uppercased.
+  assert.ok(!rule(".matcha-research-intro{").includes("text-transform"), "the intro was uppercased");
 
   // Two families only.
   assert.match(rule(".matcha-research-line-accent{"), /font-family:var\(--font-display\)/);

@@ -2689,20 +2689,25 @@ header nav{gap:18px;font-size:12px}
    ══════════════════════════════════════════════════════════════ */
 
 .matcha-explain{
-  background:var(--cream);
-  color:var(--ink);
+  /* GLOA BLUE, the token the homepage daily band and the about hero
+     already stand on. Nothing new was mixed for this. Every colour
+     below is cream at an opacity that clears AA on it, checked by
+     arithmetic in tests/matcha-product-section.test.mjs. */
+  background:var(--blue);
+  color:var(--cream);
   padding-block:clamp(78px,6.6vw,112px);
   padding-inline:var(--rail-gutter);
 }
-/* Three columns on desktop: the explanation leads, the process sits in
-   the middle, the powder closes the row. */
+/* TWO columns, not three. The powder photo that used to close the row
+   was removed; rather than leave its track empty, the explanation and
+   the process share the width the three of them used to split. */
 .matcha-explain-top{
   display:grid;
-  grid-template-columns:minmax(0,1fr) minmax(0,1.05fr) minmax(220px,.7fr);
-  gap:clamp(30px,3.4vw,64px);
+  grid-template-columns:minmax(0,.92fr) minmax(0,1.08fr);
+  gap:clamp(30px,4vw,80px);
   align-items:start;
 }
-.matcha-explain-copy{min-width:0;max-width:460px}
+.matcha-explain-copy{min-width:0;max-width:none}
 .matcha-explain-eyebrow{
   margin:0;
   font-family:var(--font-sans),Arial,sans-serif;
@@ -2712,7 +2717,10 @@ header nav{gap:18px;font-size:12px}
   line-height:1.2;
   letter-spacing:.2em;
   text-transform:uppercase;
-  color:var(--berry);
+  /* 4.7:1. Raspberry, which this eyebrow used to take on cream, sits at
+     almost the same luminance as GLOA blue and measures 1.04:1 there -
+     the word would not be on the screen at all. */
+  color:rgba(245,235,226,.82);
 }
 .matcha-explain-headline{
   display:flex;
@@ -2726,29 +2734,30 @@ header nav{gap:18px;font-size:12px}
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:500;
   font-style:normal;
-  font-size:clamp(38px,3.8vw,54px);
+  font-size:clamp(38px,4vw,58px);
   line-height:.98;
   letter-spacing:-.04em;
-  color:var(--ink);
+  color:var(--cream);
 }
 .matcha-explain-line-accent{
   font-family:var(--font-display),Georgia,serif;
   font-weight:400;
   font-style:italic;
-  font-size:clamp(40px,4.1vw,58px);
+  font-size:clamp(40px,4.3vw,62px);
   line-height:.93;
   letter-spacing:-.01em;
   margin-top:3px;
-  color:var(--ink);
+  color:var(--cream);
 }
 .matcha-explain-body{
-  margin:clamp(20px,2vw,28px) 0 0;
+  margin:clamp(18px,1.8vw,26px) 0 0;
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:400;
   font-style:normal;
   font-size:var(--type-body);
   line-height:1.6;
-  color:rgba(17,17,17,.82);
+  max-width:46ch;
+  color:rgba(245,235,226,.92);
 }
 
 /* ── HOW MATCHA IS MADE ────────────────────────────────────── */
@@ -2760,10 +2769,10 @@ header nav{gap:18px;font-size:12px}
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:600;
   font-style:normal;
-  font-size:clamp(20px,1.7vw,24px);
+  font-size:clamp(21px,1.8vw,26px);
   line-height:1.2;
   letter-spacing:-.02em;
-  color:var(--ink);
+  color:var(--cream);
 }
 .matcha-process-note{
   margin:8px 0 0;
@@ -2772,20 +2781,33 @@ header nav{gap:18px;font-size:12px}
   font-style:normal;
   font-size:clamp(14px,1.05vw,15px);
   line-height:1.5;
-  color:rgba(17,17,17,.62);
+  /* .7 measured 3.9:1 on this ground, under AA for 15px text. */
+  color:rgba(245,235,226,.82);
+}
+/* Only rendered while the steps ARE an accordion - see MatchaProcess. */
+.matcha-process-hint{
+  margin:10px 0 0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:12px;
+  line-height:1.2;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  color:rgba(245,235,226,.82);
 }
 .matcha-process-list{
   list-style:none;
   margin:clamp(22px,2.2vw,30px) 0 0;
   padding:0;
-  border-top:1px solid rgba(17,17,17,.18);
+  border-top:1px solid rgba(245,235,226,.28);
 }
 .matcha-process-step{
   display:grid;
   grid-template-columns:clamp(40px,3.4vw,56px) minmax(0,1fr);
   gap:4px clamp(12px,1.4vw,20px);
   padding:clamp(15px,1.5vw,20px) 0;
-  border-bottom:1px solid rgba(17,17,17,.18);
+  border-bottom:1px solid rgba(245,235,226,.28);
 }
 .matcha-process-num{
   grid-row:1 / span 2;
@@ -2795,7 +2817,9 @@ header nav{gap:18px;font-size:12px}
   font-size:12px;
   line-height:1.4;
   letter-spacing:.08em;
-  color:var(--berry);
+  /* Raspberry is 1.04:1 on this ground, so the numbers take the same
+     cream the rest of the band does. */
+  color:rgba(245,235,226,.82);
 }
 .matcha-process-label{
   margin:0;
@@ -2806,7 +2830,7 @@ header nav{gap:18px;font-size:12px}
   line-height:1.3;
   letter-spacing:.12em;
   text-transform:uppercase;
-  color:var(--ink);
+  color:var(--cream);
 }
 .matcha-process-text{
   margin:0;
@@ -2815,32 +2839,29 @@ header nav{gap:18px;font-size:12px}
   font-style:normal;
   font-size:clamp(14px,1.05vw,15px);
   line-height:1.6;
-  color:rgba(17,17,17,.82);
+  color:rgba(245,235,226,.92);
 }
-
-/* The powder. Square, no frame, no shadow.
-
-   It STRETCHES to the row instead of sitting at its natural height at
-   the top of the column: the process list beside it is roughly twice as
-   tall, and a photo that stops early leaves a column of empty cream
-   under it. object-fit:cover crops rather than distorts, so filling the
-   row costs nothing. The stacked layouts below put it back on its own
-   height, where there is no row left to match. */
-.matcha-explain-photo{margin:0;min-width:0;align-self:stretch}
-.matcha-explain-photo img{
-  display:block;
+/* Desktop never collapses: the panel is a plain wrapper and the toggle
+   is not rendered at all. Both only become meaningful under the
+   accordion breakpoint, where the rules live. */
+.matcha-process-panel{min-width:0}
+.matcha-process-toggle{
+  display:none;
   width:100%;
-  height:100%;
-  min-height:clamp(300px,32vw,420px);
-  object-fit:cover;
+  margin:0;
+  padding:0;
+  background:none;
+  border:0;
   border-radius:0;
+  text-align:left;
+  color:var(--cream);
 }
 
 /* ── THE FACT ROW, STORAGE INCLUDED ────────────────────────── */
 .matcha-facts{
   margin-top:clamp(52px,5vw,78px);
   padding-top:clamp(32px,3.2vw,46px);
-  border-top:1px solid rgba(17,17,17,.18);
+  border-top:1px solid rgba(245,235,226,.28);
 }
 .matcha-facts-eyebrow{
   margin:0;
@@ -2851,7 +2872,7 @@ header nav{gap:18px;font-size:12px}
   line-height:1.2;
   letter-spacing:.2em;
   text-transform:uppercase;
-  color:var(--berry);
+  color:rgba(245,235,226,.82);
 }
 .matcha-facts-list{
   display:grid;
@@ -2864,7 +2885,7 @@ header nav{gap:18px;font-size:12px}
   gap:clamp(7px,.8vw,11px);
   align-content:start;
   padding:clamp(17px,1.7vw,23px) clamp(20px,2vw,34px) 0 0;
-  border-top:1px solid var(--berry);
+  border-top:1px solid rgba(245,235,226,.45);
 }
 .matcha-fact-label{
   font-family:var(--font-sans),Arial,sans-serif;
@@ -2874,7 +2895,7 @@ header nav{gap:18px;font-size:12px}
   line-height:1.2;
   letter-spacing:.18em;
   text-transform:uppercase;
-  color:var(--berry);
+  color:rgba(245,235,226,.82);
 }
 .matcha-fact-value{
   margin:0;
@@ -2884,7 +2905,7 @@ header nav{gap:18px;font-size:12px}
   font-size:clamp(15px,1.25vw,18px);
   line-height:1.3;
   letter-spacing:-.015em;
-  color:var(--ink);
+  color:var(--cream);
 }
 .matcha-fact-text{
   margin:0;
@@ -2893,7 +2914,7 @@ header nav{gap:18px;font-size:12px}
   font-style:normal;
   font-size:clamp(14px,1.05vw,15px);
   line-height:1.6;
-  color:rgba(17,17,17,.82);
+  color:rgba(245,235,226,.92);
 }
 
 /* ══ TASTE ═════════════════════════════════════════════════ */
@@ -2984,33 +3005,59 @@ header nav{gap:18px;font-size:12px}
 
 /* ══ RESPONSIVE ════════════════════════════════════════════ */
 @media (max-width:1100px){
-  /* The powder drops under the two text columns rather than squeezing
-     them; the reading order is unchanged. */
-  .matcha-explain-top{grid-template-columns:minmax(0,1fr) minmax(0,1.05fr)}
-  .matcha-explain-photo{grid-column:1 / -1;align-self:auto}
-  .matcha-explain-photo img{height:auto;min-height:0;max-height:clamp(240px,30vw,340px)}
+  .matcha-explain-top{grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:clamp(28px,3.4vw,52px)}
   .matcha-facts-list{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:clamp(26px,3vw,36px)}
 }
 
 @media (max-width:900px){
-  .matcha-explain{padding-block:clamp(58px,9vw,78px)}
-  .matcha-taste{padding-block:clamp(56px,9vw,76px)}
-  .matcha-explain-top{grid-template-columns:minmax(0,1fr);gap:clamp(30px,4.6vw,44px)}
-  .matcha-explain-copy{max-width:none}
-  .matcha-taste-inner{grid-template-columns:minmax(0,1fr);gap:clamp(24px,4vw,34px)}
-  .matcha-taste-detail{max-width:none}
+  .matcha-explain-top{grid-template-columns:minmax(0,1fr);gap:clamp(26px,4vw,38px)}
+  .matcha-explain-body{max-width:none}
   .matcha-page .matcha-explain-line{font-size:clamp(32px,8vw,40px)}
   .matcha-page .matcha-explain-line-accent{font-size:clamp(34px,8.6vw,42px)}
   .matcha-page .matcha-taste-line{font-size:clamp(32px,8vw,40px)}
+  .matcha-taste-inner{grid-template-columns:minmax(0,1fr);gap:clamp(22px,3.4vw,30px)}
+  .matcha-taste-detail{max-width:none}
+}
+
+/* ── THE FOUR STEPS BECOME AN ACCORDION ────────────────────── */
+/* Paired with MATCHA_PROCESS_ACCORDION_QUERY in app/GloaSite.tsx: the
+   component swaps the markup at exactly this width, so the styling and
+   the aria state can never describe different shapes. */
+@media (max-width:760px){
+  .matcha-process-step{
+    display:block;
+    padding:0;
+  }
+  .matcha-process-toggle{
+    display:grid;
+    grid-template-columns:34px minmax(0,1fr) 24px;
+    align-items:center;
+    gap:12px;
+    min-height:52px;
+    padding:13px 0;
+  }
+  .matcha-process-toggle .matcha-process-num{grid-row:auto}
+  .matcha-process-toggle .matcha-process-label{letter-spacing:.1em}
+  .matcha-process-mark{
+    justify-self:end;
+    font-family:var(--font-sans),Arial,sans-serif;
+    font-weight:400;
+    font-size:22px;
+    line-height:1;
+    color:var(--cream);
+  }
+  /* The panel only pads when it is open; a closed one is `hidden`, so
+     no rule here can leave a gap behind it. */
+  .matcha-process-panel{padding:0 0 15px}
+  .matcha-process-toggle+.matcha-process-panel .matcha-process-text{padding-right:34px}
 }
 
 @media (max-width:640px){
   /* One column each. No squeezed two-column grids on a phone. */
-  .matcha-facts-list{grid-template-columns:minmax(0,1fr);row-gap:clamp(22px,4.4vw,30px)}
+  .matcha-facts-list{grid-template-columns:minmax(0,1fr);row-gap:clamp(20px,4vw,26px)}
   .matcha-fact{padding-right:0}
   .matcha-taste-notes{grid-template-columns:minmax(0,1fr)}
   .matcha-taste-note{padding-right:0}
-  .matcha-explain-photo img{height:auto;min-height:0;max-height:clamp(220px,54vw,300px)}
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -3103,16 +3150,6 @@ header nav{gap:18px;font-size:12px}
 }
 /* The closing statement. Raspberry, small, and NOT uppercased - it is a
    sentence, not a label. */
-.matcha-research-note{
-  margin:clamp(28px,2.8vw,40px) 0 0;
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:600;
-  font-style:normal;
-  font-size:clamp(11px,.9vw,12px);
-  line-height:1.5;
-  letter-spacing:.03em;
-  color:var(--berry);
-}
 
 /* ── THE THREE COLUMNS ─────────────────────────────────────── */
 .matcha-research-grid{
@@ -3517,36 +3554,16 @@ header nav{gap:18px;font-size:12px}
   max-width:calc(var(--rail-max) + var(--rail-gutter) * 2);
   margin-inline:auto;
 }
-.matcha-page .faq .eyebrow{
-  margin:0;
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:600;
-  font-style:normal;
-  font-size:var(--type-meta);
-  line-height:1.2;
-  letter-spacing:.2em;
-  text-transform:uppercase;
-  color:var(--ink);
-}
 /* (0,2,1) - the shared `.faq h2` list is (0,1,1) and would otherwise
    hold this at clamp(48px,7vw,98px). */
 .matcha-page .faq h2{
-  margin:clamp(18px,1.8vw,26px) 0 clamp(40px,4vw,56px);
+  margin:0 0 clamp(40px,4vw,56px);
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:500;
   font-style:normal;
   font-size:clamp(48px,4.3vw,60px);
   line-height:.98;
   letter-spacing:-.04em;
-  color:var(--ink);
-}
-.matcha-page .faq h2 i{
-  font-family:var(--font-display),Georgia,serif;
-  font-weight:400;
-  font-style:italic;
-  font-size:clamp(50px,4.6vw,64px);
-  line-height:.93;
-  letter-spacing:-.01em;
   color:var(--ink);
 }
 .matcha-page .faq summary{
@@ -3651,7 +3668,6 @@ header nav{gap:18px;font-size:12px}
 @media (max-width:640px){
   .matcha-page .faq{padding-block:clamp(64px,13vw,84px)}
   .matcha-page .faq h2{font-size:clamp(40px,10.5vw,50px)}
-  .matcha-page .faq h2 i{font-size:clamp(42px,11.2vw,54px)}
   .matcha-page .faq summary{font-size:16px}
   .matcha-page .faq details p{font-size:15px;max-width:none}
   .matcha-cta{padding-block:clamp(72px,14vw,96px)}
@@ -3660,6 +3676,51 @@ header nav{gap:18px;font-size:12px}
   /* The two buttons keep their row while they fit; the existing
      stacking rule below 800px still applies underneath. */
   .matcha-cta .matcha-cta-actions .cta{width:100%;justify-content:center}
+}
+
+/* ═════════════════════════════════════════════════════════════
+   /our-matcha MOBILE RHYTHM
+
+   Seven bands, each of which was reserving 64px to 72px of padding at
+   both ends on a phone. That is roughly 900px of deliberate emptiness
+   in a 7000px page, and it reads as scrolling rather than as air.
+
+   Every band is cut to the same smaller pair here, in ONE place, so
+   the page keeps a single rhythm instead of seven local decisions.
+   Nothing is squeezed: 40px to 46px on a 390px screen is still a clear
+   gap between two grounds, and the desktop values above are untouched.
+
+   The other half of the problem was internal: headline-to-body and
+   block-to-block margins that were tuned for a 1440px column and
+   simply repeated at 390px. Those come down with it.
+
+   No min-height is touched. The two on this page - the research card's
+   48px and the FAQ row's 54px - are touch targets, not spacing.
+   ═════════════════════════════════════════════════════════════ */
+
+@media (max-width:640px){
+  /* ── THE BAND RHYTHM ───────────────────────────────────── */
+  .matcha-hero{padding-block:clamp(36px,9vw,48px)}
+  .matcha-explain{padding-block:clamp(42px,10vw,56px)}
+  .matcha-taste{padding-block:clamp(40px,10vw,54px)}
+  .matcha-research{padding-block:clamp(42px,10vw,56px)}
+  .matcha-use{padding-block:clamp(40px,10vw,54px)}
+  .matcha-page .faq{padding-block:clamp(40px,10vw,54px)}
+  .matcha-cta{padding-block:clamp(46px,11vw,62px)}
+
+  /* ── INSIDE THE BANDS ──────────────────────────────────── */
+  .matcha-hero-inner{gap:clamp(20px,5vw,28px)}
+  .matcha-explain-headline{margin-top:clamp(10px,2.6vw,14px)}
+  .matcha-explain-body{margin-top:clamp(13px,3.4vw,18px)}
+  .matcha-process-list{margin-top:clamp(14px,3.6vw,18px)}
+  .matcha-facts{margin-top:clamp(30px,7vw,40px);padding-top:clamp(22px,5vw,28px)}
+  .matcha-facts-list{margin-top:clamp(18px,4.4vw,24px)}
+  .matcha-taste-headline{margin-top:clamp(10px,2.6vw,14px)}
+  .matcha-taste-notes{margin-top:clamp(20px,5vw,28px)}
+  .matcha-research-headline{margin-top:clamp(10px,2.6vw,14px)}
+  .matcha-research-inner{gap:clamp(22px,5.4vw,30px)}
+  .matcha-research-grid{gap:clamp(16px,4vw,22px)}
+  .matcha-use-grid{margin-top:clamp(24px,6vw,34px)}
 }
 
 /* ══════════════════════════════════════════════════════════════

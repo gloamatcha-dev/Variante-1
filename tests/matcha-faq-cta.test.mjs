@@ -36,8 +36,18 @@ const rule = name => {
    ══════════════════════════════════════════════════════════════ */
 
 test("1: no markup, no copy and no behaviour changed in either section", () => {
-  // The FAQ is the same three elements it always was.
-  assert.match(faq, /<section className="faq"><p className="eyebrow">FAQ<\/p><h2>Fragen\?<br\/><i>Antworten\.<\/i><\/h2>\{matchaFaq\.map\(\(\[q,a\]\)=><details key=\{q\}><summary>\{q\}<span>\+<\/span><\/summary><p>\{a\}<\/p><\/details>\)\}<\/section>/);
+  // ONE HEADLINE, AND IT IS THE WHOLE HEAD OF THE SECTION.
+  // "FAQ" as an eyebrow directly above "F&Q" would have been the same
+  // word twice, so the eyebrow went with the rename. The <details> rows
+  // underneath are untouched.
+  assert.match(faq, /<section className="faq"><h2>F&amp;Q<\/h2>\{matchaFaq\.map\(\(\[q,a\]\)=><details key=\{q\}><summary>\{q\}<span>\+<\/span><\/summary><p>\{a\}<\/p><\/details>\)\}<\/section>/);
+  // The retired headline is gone from this page in every form.
+  for (const gone of ["Fragen?", "Antworten."]) {
+    assert.ok(!faq.includes(gone), `the retired FAQ headline survived: ${gone}`);
+  }
+  assert.ok(!faq.includes("eyebrow"), "the eyebrow would have read FAQ above F&Q");
+  // And /for-cafes, which renders the same class, keeps its own.
+  assert.match(site, /<p className="eyebrow">B2B FAQ<\/p><h2>Fragen\?<br\/><i>Antworten\.<\/i><\/h2>/);
   // Native <details>, no hand-rolled state, no click handler.
   assert.ok(!faq.includes("onClick") && !faq.includes("aria-expanded") && !faq.includes("useState"));
   // Every question and answer still comes from the same list.
@@ -107,14 +117,16 @@ test("3: section scale, not the 98px the shared h2 rule was giving it", () => {
   assert.match(title, /font-size:clamp\(48px,4\.3vw,60px\)/);
   assert.match(title, /font-family:var\(--font-sans\)/);
   assert.match(title, /color:var\(--ink\)/);
-  const accent = rule(".matcha-page .faq h2 i{");
-  assert.match(accent, /font-size:clamp\(50px,4\.6vw,64px\)/);
-  assert.match(accent, /font-family:var\(--font-display\)/);
-  assert.match(accent, /font-style:italic/);
+  // ONE LINE, ONE FAMILY. The italic second line and the eyebrow above
+  // it were removed with the rename, and so were their rules - nothing
+  // here styles an element this page cannot render.
+  assert.ok(!rules.includes(".matcha-page .faq h2 i"), "the italic rule outlived the italic line");
+  assert.ok(!rules.includes(".matcha-page .faq .eyebrow"), "the eyebrow rule outlived the eyebrow");
+  // The headline opens the band, so it carries no top margin any more.
+  assert.match(title, /margin:0 0 clamp\(40px,4vw,56px\)/);
   // The shared 98px rule still exists for the sections that need it -
   // it is answered here, not edited there.
   assert.match(css, /\.faq h2\{font-size:clamp\(48px,7vw,98px\)|,\.faq h2[,{]/);
-  assert.match(rule(".matcha-page .faq .eyebrow{"), /font-size:var\(--type-meta\)/);
   assert.match(rule(".matcha-page .faq summary{"), /font-size:clamp\(16px,1\.2vw,17px\)/);
   assert.match(rule(".matcha-page .faq details p{"), /font-size:clamp\(15px,1\.1vw,16px\)/);
   assert.match(rule(".matcha-page .faq details p{"), /max-width:760px/);
@@ -183,7 +195,7 @@ test("5: both headlines stay under the page hero, on the canonical rail", () => 
     return /font-size:(clamp\([^)]*\))/.exec(scope.slice(scope.indexOf(sel)))[1];
   };
   const homeHero = w => (w <= 900 ? clamp(44, 0.12 * w, 64) : clamp(54, 0.059 * w, 100));
-  for (const sel of [".matcha-page .faq h2{", ".matcha-page .faq h2 i{",
+  for (const sel of [".matcha-page .faq h2{",
                      ".matcha-page .matcha-cta h2{", ".matcha-page .matcha-cta h2 i{"]) {
     const desktop = pick(sel, false);
     const mobile = pick(sel, true);

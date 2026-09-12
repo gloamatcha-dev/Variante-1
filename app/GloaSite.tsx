@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useRef, useCallback, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useState, useRef, useCallback, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { Header, Footer } from "./Chrome";
 import { BRAND, PRODUCT, SHOP_STATUS, RECIPES_VISIBLE, PRICES_VISIBLE } from "./content";
@@ -864,6 +864,74 @@ const matchaTaste:[string,string][]=[
  * There is no studies page in this project, so no card links to one and
  * no source is invented to fill the space.
  */
+/** The width at which the four production steps collapse into an
+ *  accordion. The same breakpoint the research cards use, so the two
+ *  tap-to-read patterns on this page appear together rather than one
+ *  at a time. */
+const MATCHA_PROCESS_ACCORDION_QUERY="(max-width:760px)";
+
+/**
+ * HOW MATCHA IS MADE - FOUR STEPS, TWO SHAPES.
+ *
+ * Desktop prints all four, the way it always did. On a phone four
+ * paragraphs of general tea production is most of a screen's worth of
+ * scrolling before the reader reaches anything about OUR product, so
+ * there the steps collapse into an accordion and one opens at a time.
+ *
+ * ── WHY A MEDIA QUERY AND NOT CSS ALONE ───────────────────────
+ * The honest version of this control has to know which shape it is in.
+ * A <button aria-expanded="false"> whose panel is nonetheless visible
+ * because a desktop media query overrode it tells a screen reader the
+ * opposite of what is on the screen. So the accordion attributes exist
+ * only while the accordion does.
+ *
+ * ── AND WHY IT STARTS AS THE PLAIN LIST ───────────────────────
+ * `accordion` is false on the server AND on the first client render, so
+ * the markup both sides produce is identical and hydration cannot
+ * mismatch. It also means the full text is what ships in the HTML: with
+ * JavaScript off, at any width, every step is readable. The switch runs
+ * in a layout effect rather than a passive one so the collapse happens
+ * before the browser paints, not as a visible flash of open text.
+ */
+const useIsomorphicLayoutEffect=typeof window!=="undefined"?useLayoutEffect:useEffect;
+
+function MatchaProcess(){
+const [accordion,setAccordion]=useState(false);
+const [open,setOpen]=useState<number|null>(null);
+
+useIsomorphicLayoutEffect(()=>{
+const mq=window.matchMedia(MATCHA_PROCESS_ACCORDION_QUERY);
+const sync=()=>{setAccordion(mq.matches);if(!mq.matches)setOpen(null)};
+sync();
+mq.addEventListener("change",sync);
+return()=>mq.removeEventListener("change",sync);
+},[]);
+
+return <div className="matcha-process">
+<h3 className="matcha-process-title">Wie Matcha entsteht</h3>
+<p className="matcha-process-note">So wird Matcha allgemein hergestellt.</p>
+{accordion&&<p className="matcha-process-hint">Zum Lesen antippen</p>}
+<ol className="matcha-process-list">{matchaProcess.map(([n,title,text],i)=>{
+const panelId=`matcha-process-panel-${n}`;
+const isOpen=open===i;
+return <li key={n} className="matcha-process-step">
+{accordion
+?<button type="button" className="matcha-process-toggle" aria-expanded={isOpen} aria-controls={panelId}
+         onClick={()=>setOpen(prev=>prev===i?null:i)}>
+   <span className="matcha-process-num">{n}</span>
+   <span className="matcha-process-label">{title}</span>
+   {/* Decorative: the state a reader needs is on aria-expanded. */}
+   <span className="matcha-process-mark" aria-hidden="true">{isOpen?"−":"+"}</span>
+ </button>
+:<><span className="matcha-process-num">{n}</span><h4 className="matcha-process-label">{title}</h4></>}
+<div id={panelId} className="matcha-process-panel" hidden={accordion&&!isOpen}>
+<p className="matcha-process-text">{text}</p>
+</div>
+</li>;
+})}</ol>
+</div>;
+}
+
 function MatchaResearchSheet({block,onClose}:{block:typeof researchBlocks[number];onClose:()=>void}){
 const closeRef=useRef<HTMLButtonElement>(null);
 useEffect(()=>{
@@ -905,15 +973,8 @@ return <main className="matcha-page">
 <p className="matcha-explain-body">Dadurch unterscheidet sich Matcha sowohl in seiner Herstellung als auch in seiner Zubereitung von klassischem Grüntee.</p>
 </div>
 
-<div className="matcha-process">
-<h3 className="matcha-process-title">Wie Matcha entsteht</h3>
-<p className="matcha-process-note">So wird Matcha allgemein hergestellt.</p>
-<ol className="matcha-process-list">{matchaProcess.map(([n,title,text])=><li key={n} className="matcha-process-step"><span className="matcha-process-num">{n}</span><h4 className="matcha-process-label">{title}</h4><p className="matcha-process-text">{text}</p></li>)}</ol>
-</div>
+<MatchaProcess/>
 
-{/* The powder itself. The laptop photo that used to sit here showed a
-    workplace, which is not what a paragraph about what matcha IS needs. */}
-<figure className="matcha-explain-photo"><img src="/img/Produkt Bild (2).png" alt="Fein vermahlenes grünes Matcha-Pulver" width="964" height="908" loading="lazy"/></figure>
 </div>
 
 <div className="matcha-facts">
@@ -941,7 +1002,7 @@ return <main className="matcha-page">
 </div></section>
 
 {/* ── 5. RESEARCH. The regulated copy, unchanged. ───────────── */}
-<section className="matcha-research"><div className="matcha-research-inner home-rail"><div className="matcha-research-copy"><p className="eyebrow matcha-research-eyebrow">MATCHA & SCIENCE</p><h2 className="matcha-research-headline"><span className="matcha-research-line">Forschung.</span><i className="matcha-research-line matcha-research-line-accent">Ehrlich eingeordnet.</i></h2><p className="matcha-research-intro">Wir wollen nichts versprechen, was sich nicht belegen lässt. Deshalb trennen wir hier klar, was Matcha enthält, was untersucht wurde und was offen bleibt.</p><p className="matcha-research-note">Wir behaupten nichts, was wir nicht belegen können.</p></div><div className="matcha-research-grid">{researchBlocks.map((b,i)=><article className="matcha-research-block" key={b.label}><div className="matcha-research-head">{b.icon}<h3 className="matcha-research-label">{b.label}</h3></div><p className="matcha-research-body">{b.body}</p><button type="button" className="matcha-research-open" onClick={()=>setOpenResearch(i)} aria-haspopup="dialog"><span className="matcha-research-open-label">Zum Lesen antippen</span><span className="matcha-research-open-mark" aria-hidden="true">+</span></button></article>)}</div></div></section>
+<section className="matcha-research"><div className="matcha-research-inner home-rail"><div className="matcha-research-copy"><p className="eyebrow matcha-research-eyebrow">MATCHA & SCIENCE</p><h2 className="matcha-research-headline"><span className="matcha-research-line">Forschung.</span><i className="matcha-research-line matcha-research-line-accent">Ehrlich eingeordnet.</i></h2><p className="matcha-research-intro">Wir wollen nichts versprechen, was sich nicht belegen lässt. Deshalb trennen wir hier klar, was Matcha enthält, was untersucht wurde und was offen bleibt.</p></div><div className="matcha-research-grid">{researchBlocks.map((b,i)=><article className="matcha-research-block" key={b.label}><div className="matcha-research-head">{b.icon}<h3 className="matcha-research-label">{b.label}</h3></div><p className="matcha-research-body">{b.body}</p><button type="button" className="matcha-research-open" onClick={()=>setOpenResearch(i)} aria-haspopup="dialog"><span className="matcha-research-open-label">Zum Lesen antippen</span><span className="matcha-research-open-mark" aria-hidden="true">+</span></button></article>)}</div></div></section>
 {openResearch!==null&&<MatchaResearchSheet block={researchBlocks[openResearch]} onClose={closeResearch}/>}
 
 {/* The legacy step-by-step preparation band. HIDDEN, NOT DELETED -
@@ -952,7 +1013,7 @@ return <main className="matcha-page">
 <section className="matcha-use"><div className="matcha-use-inner home-rail"><div className="matcha-use-head"><p className="eyebrow matcha-use-eyebrow">VERWENDUNG</p><h2 className="matcha-use-headline"><span className="matcha-use-line">Latte. Iced. Pur.</span><i className="matcha-use-line matcha-use-line-accent">Deine Wahl.</i></h2></div><div className="matcha-use-grid">{usageModes.map(m=><article className="matcha-use-item" key={m.label}><div className="matcha-use-meta">{m.icon}<span className="matcha-use-number">{m.number}</span></div><h3 className="matcha-use-label">{m.label}</h3><span className="matcha-use-rule" aria-hidden="true"/><p className="matcha-use-body">{m.body}</p></article>)}</div></div></section>
 
 {/* ── 7. FAQ. Only what the page has not already answered. ──── */}
-<section className="faq"><p className="eyebrow">FAQ</p><h2>Fragen?<br/><i>Antworten.</i></h2>{matchaFaq.map(([q,a])=><details key={q}><summary>{q}<span>+</span></summary><p>{a}</p></details>)}</section>
+<section className="faq"><h2>F&amp;Q</h2>{matchaFaq.map(([q,a])=><details key={q}><summary>{q}<span>+</span></summary><p>{a}</p></details>)}</section>
 
 {/* ── 8. CTA. ───────────────────────────────────────────────── */}
 <section className="matcha-cta"><p className="eyebrow">MATCHA IS FOR EVERYONE.</p><h2>Bereit für<br/><i>deinen Matcha?</i></h2><div className="matcha-cta-actions"><Link className="cta" href="/shop">Zum Shop</Link><Link className="cta secondary" href="/for-cafes">B2B →</Link></div></section>

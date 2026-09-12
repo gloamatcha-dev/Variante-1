@@ -36,6 +36,11 @@ const rule = name => {
   assert.notEqual(at, -1, `missing rule: ${name}`);
   return rules.slice(at, rules.indexOf("}", at));
 };
+// The four steps live in their own component now: they render as a
+// plain list or as an accordion depending on the width, and that
+// decision needs state.
+const process = site.slice(site.indexOf("function MatchaProcess()"),
+                           site.indexOf("function MatchaResearchSheet"));
 // The three data lists the band renders from.
 const list = name => site.slice(site.indexOf(`const ${name}`), site.indexOf("];", site.indexOf(`const ${name}`)));
 
@@ -61,14 +66,27 @@ test("1: explanation, process, photo and facts share one section", () => {
   assert.ok(page.indexOf('<section className="faq"') > page.indexOf('<section className="matcha-use">'));
   assert.ok(page.indexOf('<section className="faq"') < page.indexOf('<section className="matcha-cta">'));
 
-  // The band's four areas, in order.
-  for (const part of ["matcha-explain-top", "matcha-explain-copy", "matcha-process",
-                      "matcha-explain-photo", "matcha-facts"]) {
+  // The band's three areas, in order.
+  for (const part of ["matcha-explain-top", "matcha-explain-copy", "<MatchaProcess/>", "matcha-facts"]) {
     assert.ok(section.includes(part), `missing area: ${part}`);
   }
-  assert.ok(section.indexOf("matcha-explain-copy") < section.indexOf("matcha-process"));
-  assert.ok(section.indexOf("matcha-process") < section.indexOf("matcha-explain-photo"));
+  assert.ok(section.indexOf("matcha-explain-copy") < section.indexOf("<MatchaProcess/>"));
   assert.ok(section.indexOf("matcha-explain-top") < section.indexOf("matcha-facts"));
+
+  // THE POWDER PHOTO IS GONE, and it left no track behind: the row is
+  // two content columns, not two plus an empty one.
+  assert.ok(!site.includes("matcha-explain-photo"), "the photo markup survived");
+  assert.ok(!css.includes("matcha-explain-photo"), "the photo CSS survived");
+  // Scoped to this page: the same file is the shop's product imagery
+  // and is not this pass's to remove.
+  assert.ok(!page.includes("Produkt Bild"), "the powder image is still on /our-matcha");
+  assert.ok(!process.includes("Produkt Bild"), "the powder image moved into the process block");
+  assert.ok(!/<img|<figure/.test(section + process), "the band renders an image again");
+  assert.match(rule(".matcha-explain-top{"), /grid-template-columns:minmax\(0,\.92fr\) minmax\(0,1\.08fr\)/);
+  // The only image left on the page is the hero's map, which this pass
+  // was told not to touch.
+  assert.equal([...page.matchAll(/<img /g)].length, 1);
+  assert.match(page, /<img src="\/img\/Japan_Karte\.png"/);
 
   // THE RETIRED BLOCKS. Not renamed, not orphaned: gone from markup and
   // from the stylesheet, so nothing styles an element that cannot exist.
@@ -100,13 +118,10 @@ test("2: the explanation is general, in full sentences, and said once", () => {
   for (const early of ["schmeckt", "Umami", "lagern", "Latte", "Iced"]) {
     assert.ok(!copy.includes(early), `the explanation answers ${early} too early`);
   }
-  // The photo is the powder, not the workplace shot that used to sit here.
-  // The intrinsic size is on the tag, not only in CSS. height:auto over
-  // an image that has not loaded computes to 0px, and a zero-height
-  // lazy image never intersects the viewport - so it never loads at
-  // all. The attributes also mean the row does not jump when it does.
-  assert.match(section, /<img src="\/img\/Produkt Bild \(2\)\.png" alt="Fein vermahlenes grünes Matcha-Pulver" width="964" height="908" loading="lazy"\/>/);
-  assert.ok(!section.includes("gloa-work.jpg"), "the laptop photo survived");
+  // No illustration stands in for the removed photo either.
+  for (const asset of ["gloa-work.jpg", "gloa-iced.jpg", ".svg", "background-image"]) {
+    assert.ok(!section.includes(asset), `an image came back into the band: ${asset}`);
+  }
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -114,10 +129,10 @@ test("2: the explanation is general, in full sentences, and said once", () => {
    ══════════════════════════════════════════════════════════════ */
 
 test("3: four steps, in full sentences, describing MATCHA and not our supplier", () => {
-  assert.ok(section.includes('<h3 className="matcha-process-title">Wie Matcha entsteht</h3>'));
+  assert.ok(process.includes('<h3 className="matcha-process-title">Wie Matcha entsteht</h3>'));
   // It says out loud that this is general production. That sentence is
   // what keeps the four steps from reading as a supply-chain claim.
-  assert.ok(section.includes('<p className="matcha-process-note">So wird Matcha allgemein hergestellt.</p>'));
+  assert.ok(process.includes('<p className="matcha-process-note">So wird Matcha allgemein hergestellt.</p>'));
 
   const steps = [...list("matchaProcess").matchAll(/\["(\d\d)","([^"]+)","([^"]+)"\]/g)];
   assert.equal(steps.length, 4, "the brief caps this at four steps");
@@ -218,9 +233,12 @@ test("5: the taste band describes THIS matcha, with no health angle", () => {
    ══════════════════════════════════════════════════════════════ */
 
 test("6: the band alternates the page's two grounds and invents nothing", () => {
-  // Cream then berry - the alternation /our-matcha already runs.
-  assert.match(rule(".matcha-explain{"), /background:var\(--cream\)/);
-  assert.match(rule(".matcha-explain{"), /color:var\(--ink\)/);
+  // GLOA BLUE then berry. The band changed ground in this pass; blue is
+  // the token the homepage daily band and the about hero already stand
+  // on, so no colour was mixed for it.
+  assert.match(rule(".matcha-explain{"), /background:var\(--blue\)/);
+  assert.match(rule(".matcha-explain{"), /color:var\(--cream\)/);
+  assert.ok(!rules.includes("#"), "a raw hex colour entered the band");
   assert.match(rule(".matcha-taste{"), /background:var\(--berry\)/);
   assert.match(rule(".matcha-taste{"), /color:var\(--cream\)/);
   // No third ground, no gradient, no glass.
@@ -241,6 +259,59 @@ test("6: the band alternates the page's two grounds and invents nothing", () => 
   }
   // Hairlines separate the rows; no bordered boxes.
   assert.match(rule(".matcha-fact{"), /border-top:1px solid/);
+
+  // ── EVERY COLOUR ON THE NEW GROUND, BY ARITHMETIC ──────────
+  // Raspberry, which several of these carried while the band was cream,
+  // measures 1.04:1 on GLOA blue - the eyebrow, the step numbers and
+  // the fact labels would simply not be on the screen. So each one is
+  // checked against the ground it actually sits on.
+  const BLUE = [23, 70, 209], CREAM = [245, 235, 226], BERRY = [166, 30, 89];
+  const lum = ([r, g, b]) => {
+    const f = c => (c /= 255) <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+  };
+  const ratio = (fg, bg) => {
+    const [hi, lo] = [lum(fg), lum(bg)].sort((a, b) => b - a);
+    return (hi + 0.05) / (lo + 0.05);
+  };
+  const over = (fg, alpha, bg) => fg.map((c, i) => Math.round(c * alpha + bg[i] * (1 - alpha)));
+  const colourOf = selector => {
+    const body = rule(selector).replace(/\/\*[\s\S]*?\*\//g, "");
+    const hit = body.split(/[;{]/).map(d => d.trim()).find(d => d.startsWith("color:"));
+    assert.ok(hit, `${selector} declares no colour`);
+    const value = hit.slice(6).trim();
+    if (value === "var(--cream)") return [CREAM, 1];
+    if (value === "var(--berry)") return [BERRY, 1];
+    const rgba = value.match(/^rgba\((\d+),(\d+),(\d+),([\d.]+)\)$/);
+    assert.ok(rgba, `unparseable colour on ${selector}: ${value}`);
+    return [[+rgba[1], +rgba[2], +rgba[3]], +rgba[4]];
+  };
+  const onBlue = [
+    ".matcha-explain-eyebrow{", ".matcha-explain-line{", ".matcha-explain-line-accent{",
+    ".matcha-explain-body{", ".matcha-process-title{", ".matcha-process-note{",
+    ".matcha-process-hint{", ".matcha-process-num{", ".matcha-process-label{",
+    ".matcha-process-text{", ".matcha-facts-eyebrow{", ".matcha-fact-label{",
+    ".matcha-fact-value{", ".matcha-fact-text{",
+  ];
+  for (const selector of onBlue) {
+    const [rgb, alpha] = colourOf(selector);
+    const measured = ratio(over(rgb, alpha, BLUE), BLUE);
+    assert.ok(measured >= 4.5,
+      `${selector} measures ${measured.toFixed(2)}:1 on GLOA blue - needs 4.5:1`);
+  }
+  // The accordion "+" is a 22px glyph, so 3:1 is its bar.
+  const mark = (() => {
+    const at = rules.indexOf(".matcha-process-mark{");
+    assert.notEqual(at, -1, "the accordion mark has no rule");
+    return rules.slice(at, rules.indexOf("}", at));
+  })();
+  assert.match(mark, /color:var\(--cream\)/);
+  assert.ok(ratio(CREAM, BLUE) >= 3);
+  // And the hairlines are light on it, not the ink ones they were.
+  for (const hairline of [".matcha-process-list{", ".matcha-process-step{", ".matcha-facts{", ".matcha-fact{"]) {
+    assert.match(rule(hairline), /border-(top|bottom):1px solid rgba\(245,235,226,/,
+      `${hairline} keeps an ink hairline on a blue ground`);
+  }
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -332,18 +403,15 @@ test("9: every new grid track can shrink, and nothing reserves a viewport", () =
   // every column that holds text carries min-width:0.
   for (const [, tracks] of rules.matchAll(/grid-template-columns:([^;}]+)/g)) {
     for (const track of tracks.split(/\s+(?![^(]*\))/)) {
-      assert.match(track.trim(), /^(minmax\(|repeat\(|clamp\(|1fr$|auto$|max-content$)/,
+      assert.match(track.trim(), /^(minmax\(|repeat\(|clamp\(|\d+px$|1fr$|auto$|max-content$)/,
         `a track cannot shrink: ${track} in "${tracks}"`);
     }
   }
   assert.match(rule(".matcha-explain-copy{"), /min-width:0/);
-  // The photo is capped to its column rather than to a viewport width.
-  assert.match(rules, /\.matcha-explain-photo img\{[\s\S]*?width:100%/);
-  // It fills the row on desktop and returns to its own height once the
-  // columns stack, so neither layout leaves a column of empty ground.
-  assert.match(rules, /\.matcha-explain-photo\{[^}]*align-self:stretch/);
-  assert.match(rules, /@media \(max-width:1100px\)\{[\s\S]*?\.matcha-explain-photo\{[^}]*align-self:auto/);
-  assert.match(rules, /\.matcha-explain-photo img\{[\s\S]*?object-fit:cover/);
+  // The photo is gone entirely, so nothing in this band reserves a
+  // height for an image that will never load.
+  assert.ok(!rules.includes("matcha-explain-photo"));
+  assert.ok(!rules.includes("object-fit"), "an image box survived the removal");
   // No viewport heights, no fixed widths, no negative margins that could
   // reach past the rail.
   for (const banned of ["100vh", "100vw", "position:absolute", "margin-left:-", "margin-inline:-"]) {
@@ -370,4 +438,107 @@ test("10: the restructure did not reach the header or the footer", () => {
   assert.equal([...page.matchAll(/<main/g)].length, 1);
   // And the sheet is the page's own overlay, not a shell-level one.
   assert.ok(!chrome.includes("MatchaResearchSheet"));
+});
+
+/* ══════════════════════════════════════════════════════════════
+   11. THE FOUR STEPS, IN TWO SHAPES
+   Brief 14.4 and 14.5: desktop prints all four, mobile collapses them
+   into an accordion. The interesting part is that the aria state and
+   the styling describe the SAME shape at every width.
+   ══════════════════════════════════════════════════════════════ */
+
+test("11a: desktop prints every step, with no accordion machinery", () => {
+  // The plain branch renders the label as a heading, not as a control.
+  assert.match(process, /<span className="matcha-process-num">\{n\}<\/span><h4 className="matcha-process-label">\{title\}<\/h4>/);
+  // All four texts are in the markup unconditionally - the panel is
+  // never conditionally rendered, only conditionally `hidden`.
+  assert.match(process, /<div id=\{panelId\} className="matcha-process-panel" hidden=\{accordion&&!isOpen\}>/);
+  assert.match(process, /<p className="matcha-process-text">\{text\}<\/p>/);
+  // The toggle is display:none outside the accordion query, so a wide
+  // viewport cannot show a button the component did not render either.
+  assert.match(rules, /\.matcha-process-toggle\{[\s\S]*?display:none/);
+});
+
+test("11b: the accordion is a real one - button, state, and a single open step", () => {
+  assert.match(process, /<button type="button" className="matcha-process-toggle"/);
+  assert.match(process, /aria-expanded=\{isOpen\}/);
+  assert.match(process, /aria-controls=\{panelId\}/);
+  assert.match(process, /const panelId=`matcha-process-panel-\$\{n\}`/);
+  // ONE AT A TIME: the setter replaces the open index rather than
+  // adding to a set, and clicking the open one closes it.
+  assert.match(process, /setOpen\(prev=>prev===i\?null:i\)/);
+  assert.match(process, /useState<number\|null>\(null\)/);
+  // The "+" carries no meaning a reader needs - aria-expanded does.
+  assert.match(process, /className="matcha-process-mark" aria-hidden="true"/);
+  // The hint exists, and only while the accordion does.
+  assert.match(process, /\{accordion&&<p className="matcha-process-hint">Zum Lesen antippen<\/p>\}/);
+  // A real <button> is keyboard-operable without a keydown handler, so
+  // there must not be one faking it.
+  assert.ok(!process.includes("onKeyDown"), "a hand-rolled key handler was added to a native button");
+  assert.ok(!process.includes("role=\"button\""), "a div was dressed up as a button");
+  // Touch target.
+  assert.match(rules, /\.matcha-process-toggle\{[\s\S]*?min-height:52px/);
+});
+
+test("11c: the two shapes cannot disagree about which one is on screen", () => {
+  // The component and the stylesheet read the SAME breakpoint. If they
+  // drifted, a button would claim aria-expanded="false" over a panel a
+  // desktop media query had made visible - the exact failure this
+  // pairing exists to prevent.
+  const query = /const MATCHA_PROCESS_ACCORDION_QUERY="\(max-width:(\d+)px\)"/.exec(site);
+  assert.ok(query, "the breakpoint constant is missing");
+  assert.ok(rules.includes(`@media (max-width:${query[1]}px)`),
+    `the stylesheet does not switch at ${query[1]}px`);
+  // It is also the width the research cards switch at, so the page has
+  // one tap-to-read breakpoint rather than two.
+  assert.match(css, new RegExp(`\\.matcha-research-open\\{[\\s\\S]*?@media \\(max-width:${query[1]}px\\)`));
+  // SSR AND THE FIRST CLIENT RENDER ARE THE PLAIN LIST, so hydration
+  // cannot mismatch and the full text is what ships in the HTML.
+  assert.match(process, /const \[accordion,setAccordion\]=useState\(false\)/);
+  assert.match(process, /window\.matchMedia\(MATCHA_PROCESS_ACCORDION_QUERY\)/);
+  assert.match(process, /mq\.addEventListener\("change",sync\)/);
+  assert.match(process, /removeEventListener\("change",sync\)/);
+  // Leaving the accordion closes whatever was open, so a step cannot
+  // stay half-open in a layout that has no toggles.
+  assert.match(process, /if\(!mq\.matches\)setOpen\(null\)/);
+  // The switch runs before paint, so mobile never flashes the open text.
+  assert.match(site, /typeof window!=="undefined"\?useLayoutEffect:useEffect/);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   12. THE MOBILE RHYTHM
+   Brief 14.13: no fixed or minimum height may reserve empty ground on
+   a phone, and the band padding actually came down.
+   ══════════════════════════════════════════════════════════════ */
+
+test("12: nothing on this page reserves height it does not fill", () => {
+  const mobile = css.slice(css.indexOf("/our-matcha MOBILE RHYTHM"), css.indexOf("/about — THREE BANDS"));
+  assert.ok(mobile.length > 0, "the mobile rhythm block is missing");
+
+  // THE SEVEN BANDS ALL COME DOWN, and they are all named here so a new
+  // band cannot quietly keep the old desktop padding on a phone.
+  for (const band of [".matcha-hero{", ".matcha-explain{", ".matcha-taste{", ".matcha-research{",
+                      ".matcha-use{", ".matcha-page .faq{", ".matcha-cta{"]) {
+    const at = mobile.indexOf(band);
+    assert.notEqual(at, -1, `no mobile padding for ${band}`);
+    const value = /clamp\((\d+)px,/.exec(mobile.slice(at, mobile.indexOf("}", at)));
+    assert.ok(value, `${band} does not clamp its mobile padding`);
+    assert.ok(Number(value[1]) <= 46,
+      `${band} still reserves ${value[1]}px per side on a phone`);
+  }
+
+  // NO RESERVED HEIGHT ANYWHERE ON THE PAGE, at any width. The only two
+  // minimums left are touch targets, and they are named rather than
+  // pattern-matched so a third one has to be argued for.
+  const pageCss = [
+    css.slice(css.indexOf("/our-matcha PAGE HERO"), css.indexOf("/our-matcha — WHAT IT IS")),
+    rules,
+    css.slice(css.indexOf("/our-matcha RESEARCH SECTION"), css.indexOf("/about — THREE BANDS")),
+  ].join("\n");
+  for (const banned of ["100vh", "min-height:100", "height:70vh", "height:55vh"]) {
+    assert.ok(!pageCss.includes(banned), `the page reserves a viewport: ${banned}`);
+  }
+  const minimums = [...pageCss.matchAll(/min-height:([^;}]+)/g)].map(m => m[1].trim());
+  assert.deepEqual(minimums.sort(), ["48px", "52px", "54px"],
+    "a new reserved height appeared - touch targets are 48px, 52px and 54px");
 });
