@@ -722,15 +722,14 @@ return showsFoodInformation(product.slug)
 
 // Unused - kept for potential future use
 // function PageHero({index,eyebrow,title,text,tone}:{index:string;eyebrow:string;title:React.ReactNode;text:string;tone:string}){return <section className={`inner-hero ${tone}`}><span className="page-index">{index}</span><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="lead">{text}</p></div></section>}
+/* THE FAQ IS NOT A SECOND CONTENT AREA.
+   Six questions came out because the page above now answers them in
+   full: what matcha is, where it comes from, how it tastes, whether it
+   works pur, whether it works as a latte, and how to store it. What is
+   left is the two things the page does NOT answer anywhere else. */
 const matchaFaq:[string,string][]=[
-["Was ist Matcha?","Matcha ist gemahlener grüner Tee. Du trinkst dabei das fein vermahlene Blatt direkt mit, nicht nur einen Aufguss."],
-["Woher kommt GLOA Matcha?","Aus Shizuoka, einer der bekanntesten Teeregionen Japans."],
-["Wie schmeckt er?","Ausgewogen und cremig, mit natürlicher Süße und angenehmem Umami, dazu eine dezente, frische Herbe."],
-["Kann ich ihn pur trinken?","Ja. Matcha mit wenig heißem Wasser glattrühren, aufgießen und direkt genießen."],
-["Funktioniert er für Matcha Latte?","Ja. GLOA Matcha ist weich genug für den puren Genuss und gleichzeitig intensiv genug für Lattes."],
-["Wie bereite ich ihn zu?","Matcha mit wenig heißem Wasser (ca. 80 °C) glattrühren, dann mit Wasser, Milch oder Pflanzendrink auffüllen, heiß oder auf Eis."],
+["Wie bereite ich Matcha zu?","Matcha mit wenig heißem Wasser (ca. 80 °C) glattrühren, dann mit Wasser, Milch oder Pflanzendrink auffüllen, heiß oder auf Eis."],
 ["Enthält Matcha Koffein?","Ja, Matcha enthält von Natur aus Koffein. Wie viel genau, hängt unter anderem von Zubereitung und Dosierung ab."],
-["Wie lagere ich ihn?","Kühl, trocken und lichtgeschützt. Nach dem Öffnen gut verschlossen aufbewahren."],
 ];
 /**
  * The legacy plum origin section on /our-matcha.
@@ -766,15 +765,15 @@ const SHOW_LEGACY_PREPARATION_SECTION:boolean=false;
 // homepage how-to marks, and decorative - the label carries the meaning.
 const usageModes=[{
   number:"01",label:"LATTE",
-  body:<>Cremig, warm oder kalt.<br/>Mit Milch oder Pflanzendrink.</>,
+  body:"Mit Milch oder Pflanzendrink wird Matcha cremig und mild. Er kann warm oder kalt zubereitet werden.",
   icon:<svg className="matcha-use-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M5.2 5.4h10.3v9.4a4.6 4.6 0 0 1-4.6 4.6h-1.1a4.6 4.6 0 0 1-4.6-4.6z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/><path d="M15.5 8.1h1.8a2.5 2.5 0 0 1 0 5h-1.8" fill="none" stroke="currentColor" strokeWidth="1.6"/></svg>,
 },{
   number:"02",label:"ICED",
-  body:<>Erfrischend, klar und leicht.<br/>Auf Eis, für unterwegs oder heiße Tage.</>,
+  body:"Auf Eis wird Matcha frisch und leicht. Besonders an warmen Tagen ist das eine unkomplizierte Variante.",
   icon:<svg className="matcha-use-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M7.1 7.2h9.1l-1 12a1.6 1.6 0 0 1-1.6 1.5h-3.9a1.6 1.6 0 0 1-1.6-1.5z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/><path d="M13.6 7.2 16.9 3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/><path d="M7.6 11.6h8.1" fill="none" stroke="currentColor" strokeWidth="1.6"/></svg>,
 },{
   number:"03",label:"PUR",
-  body:<>Nur Matcha und Wasser.<br/>Direkt, klar, ohne Umwege.</>,
+  body:"Für Pure Matcha wird das Pulver nur mit Wasser zubereitet. So steht der Geschmack des Matchas selbst im Mittelpunkt.",
   icon:<svg className="matcha-use-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M3.6 10.8h16.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/><path d="M5.1 10.8a6.9 6.9 0 0 0 13.8 0" fill="none" stroke="currentColor" strokeWidth="1.6"/><path d="M9.8 7.6c0-1.2 1.3-1.6 1.3-2.8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/><path d="M13.6 7.6c0-1.2 1.3-1.6 1.3-2.8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>,
 }];
 
@@ -796,24 +795,166 @@ const researchBlocks=[{
   icon:<svg className="matcha-research-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.6" fill="none" stroke="currentColor" strokeWidth="1.6"/><path d="M9.5 9.6a2.6 2.6 0 0 1 5.1.7c0 1.7-2.5 2-2.5 3.6" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/><circle cx="12.1" cy="16.6" r=".95" fill="currentColor"/></svg>,
 }];
 
-function MatchaPage(){return <main className="matcha-page">
+/* HOW MATCHA IS MADE, IN GENERAL.
+   Deliberately written as the general production of matcha rather than
+   as a claim about our own supplier's process, because that is what we
+   can stand behind. The section says so in its own copy.
 
-<section className="matcha-hero"><div className="matcha-hero-inner home-rail"><div className="matcha-hero-copy"><p className="eyebrow matcha-hero-eyebrow gloa-hero-eyebrow">UNSER MATCHA</p><h1 className="matcha-hero-headline"><span className="matcha-hero-line gloa-hero-primary">Matcha.</span><i className="matcha-hero-line matcha-hero-line-accent gloa-hero-secondary">Ohne Umwege.</i></h1><p className="matcha-hero-lead">Matcha aus Shizuoka, Japan.<br/>Für Latte, pur oder iced.<br/>Klar beschrieben, nichts erfunden.</p></div><div className="matcha-hero-map"><img src="/img/Japan_Karte.png" alt="Karte von Japan mit Shizuoka markiert" fetchPriority="high"/></div></div></section>
+   Step 02 deliberately carries no harvest or grade wording. That
+   wording was removed from the whole site on request and is pinned by
+   tests/legal-content.test.mjs, which scans this file as raw text - a
+   process section is not a reason to reintroduce it, not even inside a
+   comment. */
+const matchaProcess:[string,string,string][]=[
+["01","BESCHATTUNG","Vor der Ernte werden die Teepflanzen für einen bestimmten Zeitraum beschattet. Dadurch verändert sich die Zusammensetzung der Blätter und die Pflanze entwickelt unter anderem mehr Chlorophyll."],
+["02","BLÄTTER","Verwendet werden die jungen Blätter der Teepflanze. Sie werden nach der Beschattung zügig weiterverarbeitet."],
+["03","VERARBEITUNG","Die Blätter werden gedämpft und getrocknet. Stiele und Blattadern werden weitgehend entfernt. Das daraus entstehende Blattmaterial wird als Tencha bezeichnet."],
+["04","VERMAHLUNG","Der getrocknete Tencha wird sehr fein vermahlen. So entsteht das feine grüne Pulver, das wir als Matcha kennen."],
+];
 
-<section className="matcha-product"><div className="matcha-product-inner home-rail"><div className="matcha-product-copy"><p className="eyebrow matcha-product-eyebrow">DAS PRODUKT</p><h2 className="matcha-product-headline"><span className="matcha-product-line">Ein Grün.</span><i className="matcha-product-line matcha-product-line-accent">Klar erklärt.</i></h2></div><span className="matcha-product-divider" aria-hidden="true"/><div className="matcha-product-detail"><p className="matcha-product-intro">GLOA Matcha kommt aus Shizuoka, Japan: fein gemahlenes Grünteepulver, kein Zusatz, keine Mischung. Die Verpackung ist licht-, luft- und feuchtigkeitsdicht, damit Farbe und Geschmack erhalten bleiben.</p><dl className="matcha-fact-grid"><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>ZUTAT</dt><dd>100 % Matcha-Grünteepulver</dd></div><div><dt>VERWENDUNG</dt><dd>Latte · Iced · Pur</dd></div><div><dt>GRÖSSEN</dt><dd>30 g · 50 g · 100 g</dd></div><div><dt>BESTAND</dt><dd>Deutschland</dd></div></dl><div className="matcha-taste-block"><p className="eyebrow matcha-taste-eyebrow">GESCHMACK</p><h3 className="matcha-taste-headline"><span className="matcha-taste-line">Wie schmeckt</span><i className="matcha-taste-line matcha-taste-line-accent">GLOA?</i></h3><p className="matcha-taste-body">Der Matcha zeichnet sich durch seine leuchtend grüne Farbe, feine Textur und seinen ausgewogenen Geschmack aus. Natürliche Süße und angenehmes Umami treffen auf eine dezente, frische Herbe, weich genug für den puren Genuss und gleichzeitig intensiv genug für Matcha Lattes.</p><dl className="matcha-taste-pair"><div><dt>GESCHMACK</dt><dd>Ausgewogen, cremig, leicht süßlich & umami</dd></div><div><dt>AROMA</dt><dd>Frisch, vegetal & fein</dd></div></dl></div></div><div className="matcha-what-block"><div className="matcha-what-copy"><p className="eyebrow matcha-what-eyebrow">WAS IST MATCHA</p><h3 className="matcha-what-headline"><span className="matcha-what-line">Pulver statt</span><i className="matcha-what-line matcha-what-line-accent">Aufguss.</i></h3><p className="matcha-what-body">Matcha ist gemahlener grüner Tee. Anders als bei klassisch aufgegossenem Tee trinkst du bei Matcha das fein vermahlene Blatt direkt mit, nicht nur den Sud. Deshalb enthält Matcha von Natur aus mehr Koffein, L-Theanin und Catechine wie EGCG als ein Aufguss aus derselben Teemenge. Wie viel genau, hängt unter anderem von Anbau, Ernte, Verarbeitung und Zubereitung ab.</p></div><figure className="matcha-what-photo"><img src="/img/gloa-work.jpg" alt="Iced Matcha am Arbeitsplatz" loading="lazy"/></figure></div><div className="matcha-storage-row"><p className="eyebrow matcha-storage-eyebrow">LAGERUNG</p><p className="matcha-storage-body">Kühl, trocken und lichtgeschützt lagern. Nach dem Öffnen gut verschlossen aufbewahren.</p></div></div></section>
+/* THE PRODUCT FACTS, AND STORAGE AMONG THEM.
+   Storage used to be a band of its own. It is a product fact, so it
+   sits with the other product facts and is written as a sentence rather
+   than as a label fragment. The old BESTAND / Deutschland row is gone:
+   it named a warehouse, which tells a customer nothing about the tea.
+   VERWENDUNG is gone too - Latte, Iced and Pur have their own section
+   further down and do not need a preview here. */
+const matchaFacts:[string,string,string][]=[
+["HERKUNFT","Shizuoka, Japan","Unser Matcha stammt aus Shizuoka, einer bekannten Teeregion Japans."],
+["ZUTAT","100 % Matcha-Grünteepulver","Das Produkt besteht ausschließlich aus Matcha und enthält keine Mischungen oder zugesetzten Aromen."],
+["GRÖSSEN","30 g · 50 g · 100 g","So kann je nach Nutzung die passende Größe gewählt werden."],
+["LAGERUNG",PRODUCT.storage,"So bleiben Farbe, Aroma und Qualität möglichst lange erhalten. Sauerstoff, Wärme und Licht sind das, was Matcha am schnellsten altern lässt."],
+];
 
+/* The four taste notes. Each one is a short description of what the
+   existing taste paragraph already says, not a new sensory claim. */
+const matchaTaste:[string,string][]=[
+["AUSGEWOGEN","Cremig und harmonisch."],
+["UMAMI","Leicht süßlich mit angenehmem Umami."],
+["AROMA","Frisch und vegetal."],
+["FINISH","Feine Herbe ohne dominierende Bitterkeit."],
+];
+
+/**
+ * /our-matcha — THE MATCHA GUIDE.
+ *
+ * The page used to answer the same question several times. Shizuoka was
+ * explained in the hero, again in the product intro and again in the
+ * fact grid; what matcha is was in a product block and repeated in the
+ * FAQ; taste, storage and the three ways to drink it each appeared
+ * twice. Storage had a band of its own for two sentence fragments.
+ *
+ * Now every fact has ONE primary place:
+ *
+ *   hero        where it comes from
+ *   explain     what matcha is, how it is made, and the product facts
+ *               including storage
+ *   taste       how it tastes
+ *   research    what is in it and what the evidence does and does not say
+ *   use         latte, iced, pur
+ *   faq         only what the page has NOT already answered
+ *
+ * ── THE RESEARCH SECTION IS THE ONE INTERACTIVE PART ──────────
+ * On desktop the three blocks read as they always did. On a phone the
+ * full text of three regulated paragraphs is a wall, so each block
+ * collapses to a tappable card and the text opens in a sheet. The copy
+ * itself is UNCHANGED and stays the regulated wording; only where it is
+ * shown changed.
+ *
+ * There is no studies page in this project, so no card links to one and
+ * no source is invented to fill the space.
+ */
+function MatchaResearchSheet({block,onClose}:{block:typeof researchBlocks[number];onClose:()=>void}){
+const closeRef=useRef<HTMLButtonElement>(null);
+useEffect(()=>{
+const prev=document.activeElement as HTMLElement|null;
+document.body.style.overflow="hidden";
+requestAnimationFrame(()=>closeRef.current?.focus());
+const onKey=(e:KeyboardEvent)=>{if(e.key==="Escape")onClose()};
+document.addEventListener("keydown",onKey);
+return()=>{document.removeEventListener("keydown",onKey);document.body.style.overflow="";prev?.focus?.()};
+},[onClose]);
+return <div className="mr-sheet-backdrop" onClick={onClose} onKeyDown={e=>e.key==="Escape"&&onClose()} role="button" tabIndex={-1} aria-hidden="true">
+{/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
+<div className="mr-sheet" onClick={e=>e.stopPropagation()} onKeyDown={e=>e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="mr-sheet-title">
+<button ref={closeRef} type="button" className="mr-sheet-close" onClick={onClose} aria-label="Schließen">×</button>
+<div className="mr-sheet-head">{block.icon}<h3 className="mr-sheet-title" id="mr-sheet-title">{block.label}</h3></div>
+<p className="mr-sheet-body">{block.body}</p>
+</div>
+</div>;
+}
+
+function MatchaPage(){
+const [openResearch,setOpenResearch]=useState<number|null>(null);
+const closeResearch=useCallback(()=>setOpenResearch(null),[]);
+return <main className="matcha-page">
+
+{/* ── 1. HERO. Where it comes from, and why that region. ───── */}
+<section className="matcha-hero"><div className="matcha-hero-inner home-rail"><div className="matcha-hero-copy"><p className="eyebrow matcha-hero-eyebrow gloa-hero-eyebrow">UNSER MATCHA</p><h1 className="matcha-hero-headline"><span className="matcha-hero-line gloa-hero-primary">Matcha.</span><i className="matcha-hero-line matcha-hero-line-accent gloa-hero-secondary">Ohne Umwege.</i></h1><p className="matcha-hero-lead">Unser Matcha kommt aus Shizuoka in Japan, einer Region mit langer Teetradition. Das milde Klima, die fruchtbaren Böden und die Erfahrung im Teeanbau machen Shizuoka zu einer der bekannten Teeregionen Japans.</p><p className="matcha-hero-sub">Von dort kommt der Matcha, den wir für GLOA ausgewählt haben.</p></div><div className="matcha-hero-map"><img src="/img/Japan_Karte.png" alt="Karte von Japan mit Shizuoka markiert" fetchPriority="high"/></div></div></section>
+
+{/* ── 2 + 3. WHAT IT IS, HOW IT IS MADE, AND THE FACTS. One band:
+       three columns above, one fact row below. Storage is in the fact
+       row, where it belongs, instead of in a band of its own. */}
+<section className="matcha-explain"><div className="matcha-explain-inner home-rail">
+
+<div className="matcha-explain-top">
+<div className="matcha-explain-copy">
+<p className="eyebrow matcha-explain-eyebrow">WAS IST MATCHA?</p>
+<h2 className="matcha-explain-headline"><span className="matcha-explain-line">Matcha.</span><i className="matcha-explain-line matcha-explain-line-accent">Klar erklärt.</i></h2>
+<p className="matcha-explain-body">Matcha ist fein vermahlener grüner Tee. Anders als bei aufgegossenem Tee wird bei Matcha das gemahlene Teeblatt direkt mitgetrunken.</p>
+<p className="matcha-explain-body">Dadurch unterscheidet sich Matcha sowohl in seiner Herstellung als auch in seiner Zubereitung von klassischem Grüntee.</p>
+</div>
+
+<div className="matcha-process">
+<h3 className="matcha-process-title">Wie Matcha entsteht</h3>
+<p className="matcha-process-note">So wird Matcha allgemein hergestellt.</p>
+<ol className="matcha-process-list">{matchaProcess.map(([n,title,text])=><li key={n} className="matcha-process-step"><span className="matcha-process-num">{n}</span><h4 className="matcha-process-label">{title}</h4><p className="matcha-process-text">{text}</p></li>)}</ol>
+</div>
+
+{/* The powder itself. The laptop photo that used to sit here showed a
+    workplace, which is not what a paragraph about what matcha IS needs. */}
+<figure className="matcha-explain-photo"><img src="/img/Produkt Bild (2).png" alt="Fein vermahlenes grünes Matcha-Pulver" width="964" height="908" loading="lazy"/></figure>
+</div>
+
+<div className="matcha-facts">
+<p className="eyebrow matcha-facts-eyebrow">DAS PRODUKT</p>
+<dl className="matcha-facts-list">{matchaFacts.map(([label,value,text])=><div key={label} className="matcha-fact"><dt className="matcha-fact-label">{label}</dt><dd className="matcha-fact-value">{value}</dd><dd className="matcha-fact-text">{text}</dd></div>)}</dl>
+</div>
+
+</div></section>
+
+{/* The legacy plum origin band. HIDDEN, NOT DELETED - see the flag
+    above. The hero carries the Shizuoka story now. */}
 {SHOW_LEGACY_ORIGIN_SECTION&&<section className="matcha-shizuoka"><p className="eyebrow">HERKUNFT</p><h2>Aus Shizuoka,<br/><i>Japan.</i></h2><p>Unser Matcha kommt aus Shizuoka, einer der bekanntesten Teeregionen Japans. Das Blatt wird industriell zu feinem Pulver vermahlen.</p><p className="matcha-build-note">Wir planen, Shizuoka in Zukunft selbst zu besuchen und dir mehr von dort zu zeigen.</p><Link className="cta cream" href="https://www.tiktok.com/@gloa.matcha" target="_blank" rel="noopener noreferrer">AUF TIKTOK FOLGEN ↗</Link></section>}
 
-<section className="matcha-research"><div className="matcha-research-inner home-rail"><div className="matcha-research-copy"><p className="eyebrow matcha-research-eyebrow">MATCHA & SCIENCE</p><h2 className="matcha-research-headline"><span className="matcha-research-line">Forschung.</span><i className="matcha-research-line matcha-research-line-accent">Ehrlich eingeordnet.</i></h2><p className="matcha-research-intro">Wir wollen nichts versprechen, was sich nicht belegen lässt. Deshalb trennen wir hier klar, was Matcha enthält, was untersucht wurde und was offen bleibt.</p><p className="matcha-research-note">Wir behaupten nichts, was wir nicht belegen können.</p></div><div className="matcha-research-grid">{researchBlocks.map(b=><article className="matcha-research-block" key={b.label}><div className="matcha-research-head">{b.icon}<h3 className="matcha-research-label">{b.label}</h3></div><p className="matcha-research-body">{b.body}</p></article>)}</div></div></section>
+{/* ── 4. TASTE. ─────────────────────────────────────────────── */}
+<section className="matcha-taste"><div className="matcha-taste-inner home-rail">
+<div className="matcha-taste-head">
+<p className="eyebrow matcha-taste-eyebrow">GESCHMACK</p>
+<h2 className="matcha-taste-headline"><span className="matcha-taste-line">Wie GLOA schmeckt.</span></h2>
+</div>
+<div className="matcha-taste-detail">
+<p className="matcha-taste-body">GLOA Matcha hat eine leuchtend grüne Farbe, eine feine Textur und einen ausgewogenen Geschmack. Eine natürliche Süße und angenehmes Umami treffen auf eine dezente, frische Herbe.</p>
+<p className="matcha-taste-body">Dadurch funktioniert er sowohl pur als auch in einem Matcha Latte.</p>
+<dl className="matcha-taste-notes">{matchaTaste.map(([label,text])=><div key={label} className="matcha-taste-note"><dt className="matcha-taste-note-label">{label}</dt><dd className="matcha-taste-note-text">{text}</dd></div>)}</dl>
+</div>
+</div></section>
 
+{/* ── 5. RESEARCH. The regulated copy, unchanged. ───────────── */}
+<section className="matcha-research"><div className="matcha-research-inner home-rail"><div className="matcha-research-copy"><p className="eyebrow matcha-research-eyebrow">MATCHA & SCIENCE</p><h2 className="matcha-research-headline"><span className="matcha-research-line">Forschung.</span><i className="matcha-research-line matcha-research-line-accent">Ehrlich eingeordnet.</i></h2><p className="matcha-research-intro">Wir wollen nichts versprechen, was sich nicht belegen lässt. Deshalb trennen wir hier klar, was Matcha enthält, was untersucht wurde und was offen bleibt.</p><p className="matcha-research-note">Wir behaupten nichts, was wir nicht belegen können.</p></div><div className="matcha-research-grid">{researchBlocks.map((b,i)=><article className="matcha-research-block" key={b.label}><div className="matcha-research-head">{b.icon}<h3 className="matcha-research-label">{b.label}</h3></div><p className="matcha-research-body">{b.body}</p><button type="button" className="matcha-research-open" onClick={()=>setOpenResearch(i)} aria-haspopup="dialog"><span className="matcha-research-open-label">Zum Lesen antippen</span><span className="matcha-research-open-mark" aria-hidden="true">+</span></button></article>)}</div></div></section>
+{openResearch!==null&&<MatchaResearchSheet block={researchBlocks[openResearch]} onClose={closeResearch}/>}
+
+{/* The legacy step-by-step preparation band. HIDDEN, NOT DELETED -
+    see the flag above. */}
 {SHOW_LEGACY_PREPARATION_SECTION&&<section className="matcha-howto"><div className="section-head"><div><p className="eyebrow">ZUBEREITUNG</p><h2>Drei Wege.<br/><i>Alle einfach.</i></h2></div></div><div className="matcha-method-grid"><article><span>01</span><h3>Matcha Latte</h3><ol><li>Ca. 3 g Matcha mit wenig heißem Wasser (ca. 80 °C) glattrühren.</li><li>Milch oder Pflanzendrink erwärmen und dazugeben.</li><li>Heiß genießen.</li></ol></article><article><span>02</span><h3>Iced Matcha</h3><ol><li>Ca. 3 g Matcha mit wenig heißem Wasser (ca. 80 °C) glattrühren.</li><li>Über Eis geben.</li><li>Kalte Milch oder Pflanzendrink dazugeben.</li></ol></article><article><span>03</span><h3>Pure Matcha</h3><ol><li>Ca. 3 g Matcha mit wenig heißem Wasser (ca. 80 °C) glattrühren.</li><li>Mit ca. 60-70 ml Wasser aufgießen.</li><li>Direkt genießen.</li></ol></article></div><p className="matcha-section-text">Mengenangaben sind Zubereitungsempfehlungen, pass sie gern an deinen Geschmack an.</p></section>}
 
+{/* ── 6. LATTE, ICED, PUR. ──────────────────────────────────── */}
 <section className="matcha-use"><div className="matcha-use-inner home-rail"><div className="matcha-use-head"><p className="eyebrow matcha-use-eyebrow">VERWENDUNG</p><h2 className="matcha-use-headline"><span className="matcha-use-line">Latte. Iced. Pur.</span><i className="matcha-use-line matcha-use-line-accent">Deine Wahl.</i></h2></div><div className="matcha-use-grid">{usageModes.map(m=><article className="matcha-use-item" key={m.label}><div className="matcha-use-meta">{m.icon}<span className="matcha-use-number">{m.number}</span></div><h3 className="matcha-use-label">{m.label}</h3><span className="matcha-use-rule" aria-hidden="true"/><p className="matcha-use-body">{m.body}</p></article>)}</div></div></section>
 
-<section className="matcha-image"><img src="/img/gloa-iced.jpg" alt="Iced Matcha von GLOA"/></section>
-
+{/* ── 7. FAQ. Only what the page has not already answered. ──── */}
 <section className="faq"><p className="eyebrow">FAQ</p><h2>Fragen?<br/><i>Antworten.</i></h2>{matchaFaq.map(([q,a])=><details key={q}><summary>{q}<span>+</span></summary><p>{a}</p></details>)}</section>
 
+{/* ── 8. CTA. ───────────────────────────────────────────────── */}
 <section className="matcha-cta"><p className="eyebrow">MATCHA IS FOR EVERYONE.</p><h2>Bereit für<br/><i>deinen Matcha?</i></h2><div className="matcha-cta-actions"><Link className="cta" href="/shop">Zum Shop</Link><Link className="cta secondary" href="/for-cafes">B2B →</Link></div></section>
 </main>}
 /* /about — THE BRAND, AND ONLY THE BRAND.

@@ -22,7 +22,7 @@ const css = read("app/globals.css");
 const data = site.slice(site.indexOf("const usageModes=["), site.indexOf("// The three research blocks."));
 const page = site.slice(site.indexOf("function MatchaPage()"), site.indexOf("\nfunction ", site.indexOf("function MatchaPage()") + 5));
 const section = page.slice(page.indexOf('<section className="matcha-use">'));
-const rules = css.slice(css.indexOf("/our-matcha USAGE SECTION"), css.indexOf("/our-matcha PRODUCT STORY - THE MOVED AREAS"));
+const rules = css.slice(css.indexOf("/our-matcha USAGE SECTION"), css.indexOf("/our-matcha FAQ + FINAL CTA"));
 const rule = name => {
   const at = rules.indexOf(name);
   assert.notEqual(at, -1, `missing rule: ${name}`);
@@ -70,12 +70,22 @@ test("2: usage copy, with no dose, temperature or step in sight", () => {
   assert.ok(section.includes('<i className="matcha-use-line matcha-use-line-accent">Deine Wahl.</i>'));
   assert.deepEqual([...data.matchAll(/number:"(\d\d)",label:"([A-Z]+)"/g)].map(m => m.slice(1)),
     [["01", "LATTE"], ["02", "ICED"], ["03", "PUR"]]);
+  // BRIEF 14: the three ways are still the three ways. The fragments
+  // these used to be ("Cremig, warm oder kalt.") are now full sentences,
+  // because the page asked for prose rather than label-speak - the same
+  // change storage got. The MEANING is pinned, not the old shape.
   for (const line of [
-    "Cremig, warm oder kalt.", "Mit Milch oder Pflanzendrink.",
-    "Erfrischend, klar und leicht.", "Auf Eis, für unterwegs oder heiße Tage.",
-    "Nur Matcha und Wasser.", "Direkt, klar, ohne Umwege.",
+    "Mit Milch oder Pflanzendrink wird Matcha cremig und mild. Er kann warm oder kalt zubereitet werden.",
+    "Auf Eis wird Matcha frisch und leicht. Besonders an warmen Tagen ist das eine unkomplizierte Variante.",
+    "Für Pure Matcha wird das Pulver nur mit Wasser zubereitet. So steht der Geschmack des Matchas selbst im Mittelpunkt.",
   ]) {
     assert.ok(data.includes(line), `the usage copy is missing: ${line}`);
+  }
+  // Every body is a real sentence now: it ends in a full stop and is
+  // not a comma-separated fragment.
+  for (const [, body] of data.matchAll(/body:"([^"]+)"/g)) {
+    assert.match(body, /\.$/, `not a sentence: ${body}`);
+    assert.ok(body.split(" ").length >= 8, `still a fragment: ${body}`);
   }
   // NO PREPARATION DETAIL. That is the homepage's job and the hidden
   // section's - repeating it here is what this pass removed.

@@ -201,8 +201,17 @@ test("Food info: net quantities (30 g / 50 g / 100 g) remain visible in the purc
 });
 
 test("Food info: storage instructions use the full confirmed wording, not a truncated version", () => {
-  const occurrences = gloaSiteSource.match(/Kühl, trocken und lichtgeschützt lagern\. Nach dem Öffnen gut verschlossen aufbewahren\./g) || [];
-  assert.ok(occurrences.length >= 1);
+  // The confirmed wording lives once, in app/content.ts, and every place
+  // that shows it interpolates that value. Pinning the SOURCE rather than
+  // a hand-typed copy is why a truncation cannot slip in: there is no
+  // second copy left to truncate.
+  const content = readFileSync(new URL("../app/content.ts", import.meta.url), "utf-8");
+  assert.match(content, /storage: "Kühl, trocken und lichtgeschützt lagern\. Nach dem Öffnen gut verschlossen aufbewahren\.",/);
+  const renders = gloaSiteSource.match(/PRODUCT\.storage/g) || [];
+  assert.ok(renders.length >= 3, "the detail table, the PDP facts and the matcha guide all read the one value");
+  // No shortened label-fragment variant anywhere.
+  assert.ok(!/Kühl, trocken, lichtgeschützt/.test(gloaSiteSource), "a truncated storage fragment survived");
+  assert.ok(!/Kühl, trocken, lichtgeschützt/.test(content), "a truncated storage fragment survived");
 });
 
 test("Checkout: legal links (AGB/Datenschutz/Widerruf) appear next to the checkout button", () => {

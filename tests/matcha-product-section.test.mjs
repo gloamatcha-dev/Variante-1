@@ -5,12 +5,18 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
- * THE MERGED PRODUCT + TASTE SECTION ON /our-matcha.
+ * WHAT MATCHA IS, HOW IT IS MADE, THE FACTS, AND HOW IT TASTES.
  *
- * The page is statically composed, so the facts worth pinning are in the
- * source: that the two sections became ONE, that every line of copy
- * survived the move, and that a section-scale headline stays under the
- * page hero while the taste sub-heading stays under it in turn.
+ * /our-matcha used to answer the same question in four places: a fact
+ * grid, a taste block, a "was ist Matcha" block, and a storage band that
+ * existed for two sentence fragments. This pass merged the first three
+ * into ONE band and folded storage into the fact row, then gave taste a
+ * band of its own.
+ *
+ * The page is statically composed, so everything worth pinning is in the
+ * source: which blocks exist, that no line of copy was lost on the way,
+ * that the production steps make no claim about our own supplier, and
+ * that nothing here can state a size the catalog does not sell.
  */
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = rel => readFileSync(path.join(ROOT, rel), "utf8");
@@ -19,208 +25,236 @@ const site = read("app/GloaSite.tsx");
 const css = read("app/globals.css");
 
 const page = site.slice(site.indexOf("function MatchaPage()"), site.indexOf("\nfunction ", site.indexOf("function MatchaPage()") + 5));
-const section = page.slice(page.indexOf('<section className="matcha-product">'),
-                           page.indexOf('<section className="matcha-shizuoka">'));
-// The section's styles live in two appended blocks: the original
-// merged one, and the moved areas that came in later. Both belong to
-// the same section, so both are read here.
-const rules = css.slice(css.indexOf("/our-matcha PRODUCT + TASTE, MERGED"), css.indexOf("/our-matcha RESEARCH SECTION"))
-  + css.slice(css.indexOf("/our-matcha PRODUCT STORY - THE MOVED AREAS"), css.indexOf("/our-matcha FAQ + FINAL CTA"));
+const section = page.slice(page.indexOf('<section className="matcha-explain">'),
+                           page.indexOf('{SHOW_LEGACY_ORIGIN_SECTION'));
+const taste = page.slice(page.indexOf('<section className="matcha-taste">'),
+                         page.indexOf('<section className="matcha-research">'));
+const rules = css.slice(css.indexOf("/our-matcha — WHAT IT IS, HOW IT IS MADE, AND THE FACTS"),
+                        css.indexOf("/our-matcha RESEARCH SECTION"));
 const rule = name => {
   const at = rules.indexOf(name);
   assert.notEqual(at, -1, `missing rule: ${name}`);
   return rules.slice(at, rules.indexOf("}", at));
 };
+// The three data lists the band renders from.
+const list = name => site.slice(site.indexOf(`const ${name}`), site.indexOf("];", site.indexOf(`const ${name}`)));
 
 /* ══════════════════════════════════════════════════════════════
-   1. ONE SECTION
+   1. ONE BAND, AND THE OLD ONES ARE GONE
    ══════════════════════════════════════════════════════════════ */
 
-test("1: product and taste share one wrapper, and the old pair is gone", () => {
-  // ONE <section>, holding both content groups.
-  assert.equal([...section.matchAll(/<section /g)].length, 1, "the taste content is still its own section");
-  assert.ok(section.indexOf("DAS PRODUKT") < section.indexOf("GESCHMACK"), "the groups swapped order");
-  assert.match(section, /<div className="matcha-product-inner home-rail">/);
-  // The taste block is INSIDE the right column, under a hairline.
-  const detail = section.slice(section.indexOf('className="matcha-product-detail"'));
-  assert.ok(detail.includes('className="matcha-taste-block"'), "the taste block left the product column");
-  assert.match(rules, /\.matcha-taste-block\{[\s\S]*?border-top:1px solid rgba\(245,235,226,\.3\)/);
+test("1: explanation, process, photo and facts share one section", () => {
+  // Brief 1: the page's order is fixed, and no extra section was
+  // invented to hold any of this.
+  const flow = [...page.matchAll(/<section className="(matcha-[a-z-]+)"/g)].map(m => m[1]);
+  assert.deepEqual(flow, [
+    "matcha-hero",      // 1 HERO / HERKUNFT
+    "matcha-explain",   // 2 + 3 what it is, how it is made, the facts
+    "matcha-shizuoka",  //     the hidden legacy block, see test 7
+    "matcha-taste",     // 4 how GLOA tastes
+    "matcha-research",  // 5
+    "matcha-howto",     //     the hidden legacy block, see test 7
+    "matcha-use",       // 6 latte / iced / pur
+    "matcha-cta",       // 8
+  ], "the page order changed");
+  // 7 (FAQ) renders <section className="faq">, shared with /for-cafes.
+  assert.ok(page.indexOf('<section className="faq"') > page.indexOf('<section className="matcha-use">'));
+  assert.ok(page.indexOf('<section className="faq"') < page.indexOf('<section className="matcha-cta">'));
 
-  // ── THE TWO RETIRED SECTIONS ARE GONE, MARKUP AND STYLE ──────
-  for (const gone of ['className="matcha-facts"', 'className="matcha-taste"',
-                      "matcha-facts-grid", "matcha-taste-grid"]) {
-    assert.ok(!site.includes(gone), `the retired markup survived: ${gone}`);
+  // The band's four areas, in order.
+  for (const part of ["matcha-explain-top", "matcha-explain-copy", "matcha-process",
+                      "matcha-explain-photo", "matcha-facts"]) {
+    assert.ok(section.includes(part), `missing area: ${part}`);
   }
-  for (const gone of [".matcha-facts{padding:110px", ".matcha-taste{padding:110px",
-                      ".matcha-facts-grid{", ".matcha-taste-grid{"]) {
-    assert.ok(!css.includes(gone), `the retired rule survived: ${gone}`);
+  assert.ok(section.indexOf("matcha-explain-copy") < section.indexOf("matcha-process"));
+  assert.ok(section.indexOf("matcha-process") < section.indexOf("matcha-explain-photo"));
+  assert.ok(section.indexOf("matcha-explain-top") < section.indexOf("matcha-facts"));
+
+  // THE RETIRED BLOCKS. Not renamed, not orphaned: gone from markup and
+  // from the stylesheet, so nothing styles an element that cannot exist.
+  for (const dead of ["matcha-product", "matcha-storage", "matcha-what", "matcha-image"]) {
+    assert.ok(!page.includes(dead), `retired markup survived: ${dead}`);
+    assert.ok(!css.includes(`.${dead}`), `retired CSS survived: .${dead}`);
   }
-  // ONE SURFACE. The only other background in the block is the 1px
-  // divider's own fade, which paints a line rather than an area.
-  const surfaces = [...rules.matchAll(/background:([^;}]+)/g)].map(m => m[1].trim());
-  const areas = surfaces.filter(v => !v.startsWith("linear-gradient") && v !== "transparent");
-  assert.deepEqual([...new Set(areas)], ["var(--blue)"]);
-  assert.equal(surfaces.filter(v => v.startsWith("linear-gradient")).length, 1,
-    "more than one gradient appeared");
-  assert.match(css, /--blue:#1746D1;/);
 });
 
 /* ══════════════════════════════════════════════════════════════
-   2. EVERY LINE OF COPY SURVIVED
+   2. WHAT MATCHA IS - BRIEF 2 AND 3
    ══════════════════════════════════════════════════════════════ */
 
-test("2: the copy moved without being rewritten", () => {
+test("2: the explanation is general, in full sentences, and said once", () => {
+  assert.ok(section.includes('<p className="eyebrow matcha-explain-eyebrow">WAS IST MATCHA?</p>'));
+  assert.ok(section.includes('<span className="matcha-explain-line">Matcha.</span>'));
+  assert.ok(section.includes('<i className="matcha-explain-line matcha-explain-line-accent">Klar erklärt.</i>'));
+  // The abstract headline this replaced is gone.
+  assert.ok(!page.includes("Ein Grün."), "the retired headline survived");
+
   for (const line of [
-    "DAS PRODUKT", "Ein Grün.", "Klar erklärt.",
-    // SITE-01B: organic claim out, every other fact in the sentence kept.
-    "GLOA Matcha kommt aus Shizuoka, Japan: fein gemahlenes Grünteepulver, kein Zusatz, keine Mischung. Die Verpackung ist licht-, luft- und feuchtigkeitsdicht, damit Farbe und Geschmack erhalten bleiben.",
-    "HERKUNFT", "Shizuoka, Japan",
-    // PRODUCT-01B: renamed to what the value actually is.
-    "ZUTAT", "100 % Matcha-Grünteepulver",
-    "VERWENDUNG", "Latte · Iced · Pur",
-    "GRÖSSEN", "30 g · 50 g · 100 g",
-    "LAGER", "Deutschland",
-    "GESCHMACK", "Wie schmeckt", "GLOA?",
-    "Der Matcha zeichnet sich durch seine leuchtend grüne Farbe, feine Textur und seinen ausgewogenen Geschmack aus. Natürliche Süße und angenehmes Umami treffen auf eine dezente, frische Herbe, weich genug für den puren Genuss und gleichzeitig intensiv genug für Matcha Lattes.",
-    "Ausgewogen, cremig, leicht süßlich & umami",
-    "AROMA", "Frisch, vegetal & fein",
+    "Matcha ist fein vermahlener grüner Tee. Anders als bei aufgegossenem Tee wird bei Matcha das gemahlene Teeblatt direkt mitgetrunken.",
+    "Dadurch unterscheidet sich Matcha sowohl in seiner Herstellung als auch in seiner Zubereitung von klassischem Grüntee.",
   ]) {
-    assert.ok(section.includes(line), `the merge lost: ${line}`);
+    assert.ok(section.includes(line), `the explanation is missing: ${line}`);
   }
-  // Five facts, then the taste pair - and no invented sixth cell.
-  const facts = section.slice(section.indexOf('className="matcha-fact-grid"'), section.indexOf('className="matcha-taste-block"'));
-  assert.deepEqual([...facts.matchAll(/<dt>([^<]+)<\/dt>/g)].map(m => m[1]),
-    ["HERKUNFT", "ZUTAT", "VERWENDUNG", "GRÖSSEN", "BESTAND"]);
-  assert.match(rules, /\.matcha-fact-grid\{[\s\S]*?grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
-  const pair = section.slice(section.indexOf('className="matcha-taste-pair"'));
-  assert.deepEqual([...pair.matchAll(/<dt>([^<]+)<\/dt>/g)].map(m => m[1]), ["GESCHMACK", "AROMA"]);
+  // It does NOT pre-empt taste, storage or usage - each has its own home.
+  const copy = section.slice(section.indexOf("matcha-explain-copy"), section.indexOf("matcha-process"));
+  for (const early of ["schmeckt", "Umami", "lagern", "Latte", "Iced"]) {
+    assert.ok(!copy.includes(early), `the explanation answers ${early} too early`);
+  }
+  // The photo is the powder, not the workplace shot that used to sit here.
+  // The intrinsic size is on the tag, not only in CSS. height:auto over
+  // an image that has not loaded computes to 0px, and a zero-height
+  // lazy image never intersects the viewport - so it never loads at
+  // all. The attributes also mean the row does not jump when it does.
+  assert.match(section, /<img src="\/img\/Produkt Bild \(2\)\.png" alt="Fein vermahlenes grünes Matcha-Pulver" width="964" height="908" loading="lazy"\/>/);
+  assert.ok(!section.includes("gloa-work.jpg"), "the laptop photo survived");
+});
 
-  // ── NO ICONS, NO CARDS ───────────────────────────────────────
-  // No ICONS - the section is typography-led. The one image is the
-  // editorial insert that moved in with "was ist Matcha" (test 7).
-  assert.ok(!/<svg/.test(section), "an icon was added");
-  assert.equal([...section.matchAll(/<img /g)].length, 1, "a second image appeared");
-  // border-radius:0 / box-shadow:none are the photo REFUSING a card, so
-  // the ban is on non-zero values.
-  for (const m of rules.matchAll(/border-radius:([^;}]+)/g)) assert.equal(m[1].trim(), "0");
-  for (const m of rules.matchAll(/box-shadow:([^;}]+)/g)) assert.equal(m[1].trim(), "none");
-  assert.ok(!rules.includes("backdrop-filter"), "the section grew a card");
-  // The one gradient in the block belongs to the divider and softens its
-  // two ends - it is not an area fill.
-  assert.equal([...rules.matchAll(/linear-gradient/g)].length, 1);
-  assert.match(rule(".matcha-product-divider{"), /background:linear-gradient\(/);
-  // Only the two hairline colours the brief allows.
-  // .3 separates rows INSIDE a block; .24 separates the story's areas.
-  for (const m of rules.matchAll(/border-top:1px solid ([^;}]+)/g)) {
-    assert.ok(["rgba(245,235,226,.3)", "rgba(245,235,226,.24)"].includes(m[1].trim()),
-      `an unapproved hairline: ${m[1]}`);
+/* ══════════════════════════════════════════════════════════════
+   3. HOW MATCHA IS MADE - BRIEF 4 AND 5
+   ══════════════════════════════════════════════════════════════ */
+
+test("3: four steps, in full sentences, describing MATCHA and not our supplier", () => {
+  assert.ok(section.includes('<h3 className="matcha-process-title">Wie Matcha entsteht</h3>'));
+  // It says out loud that this is general production. That sentence is
+  // what keeps the four steps from reading as a supply-chain claim.
+  assert.ok(section.includes('<p className="matcha-process-note">So wird Matcha allgemein hergestellt.</p>'));
+
+  const steps = [...list("matchaProcess").matchAll(/\["(\d\d)","([^"]+)","([^"]+)"\]/g)];
+  assert.equal(steps.length, 4, "the brief caps this at four steps");
+  assert.deepEqual(steps.map(s => s[1]), ["01", "02", "03", "04"]);
+  assert.deepEqual(steps.map(s => s[2]), ["BESCHATTUNG", "BLÄTTER", "VERARBEITUNG", "VERMAHLUNG"]);
+
+  // Brief 5 asks that shading, harvest, processing and grinding are all
+  // covered. The HARVEST STAGE is covered in prose ("Vor der Ernte...")
+  // rather than as a labelled step, because tests/legal-content.test.mjs
+  // bans harvest and grade wording as a heading across the whole site -
+  // that ban came from the business and a process section is not a
+  // reason to reopen it.
+  const prose = steps.map(s => s[3]).join(" ");
+  for (const stage of ["beschattet", "Ernte", "gedämpft", "vermahlen"]) {
+    assert.ok(prose.includes(stage), `the process skips a stage: ${stage}`);
+  }
+  assert.ok(prose.includes("Tencha"), "the tencha step was dropped");
+
+  // Full sentences, not label fragments.
+  for (const [, , label, text] of steps) {
+    assert.match(text, /\.$/, `not a sentence: ${label}`);
+    assert.ok(text.split(" ").length >= 10, `still a fragment: ${label}`);
+  }
+  // NO CLAIM ABOUT OUR OWN PRODUCT, and no grade vocabulary.
+  for (const claim of ["unser", "Unser", "GLOA", "hochwertig", "beste", "Premium", "handverlesen"]) {
+    assert.ok(!prose.includes(claim), `the process claims something about us: ${claim}`);
+  }
+  for (const dash of ["–", "—"]) {
+    assert.ok(!prose.includes(dash), `a dash was introduced: ${dash}`);
   }
 });
 
 /* ══════════════════════════════════════════════════════════════
-   3. THE SCALE
+   4. THE FACTS, AND STORAGE AMONG THEM - BRIEF 6 AND 7
    ══════════════════════════════════════════════════════════════ */
 
-test("3: a section under the page hero, and a sub-heading under that", () => {
-  const clamp = (lo, mid, hi) => Math.max(lo, Math.min(mid, hi));
-  const parse = t => /clamp\(([\d.]+)px,([\d.]+)vw,([\d.]+)px\)/.exec(t).slice(1).map(Number);
-  const at = (t, w) => { const [lo, vw, hi] = parse(t); return clamp(lo, (vw / 100) * w, hi); };
-  const token = n => new RegExp("--type-" + n + ":([^;]+);").exec(css)[1];
-  // The section headline reads the page-wide tokens rather than its own
-  // numbers, so it cannot drift from the homepage's own sections.
-  assert.match(rule(".matcha-product-line{"), /font-size:var\(--type-title\)/);
-  assert.match(rule(".matcha-product-line-accent{"), /font-size:var\(--type-editorial\)/);
-  assert.equal(parse(token("title"))[2], 64);
-  assert.equal(parse(token("editorial"))[2], 68);
+test("4: storage is a product fact now, not a band of its own", () => {
+  // 6. NO SEPARATE STORAGE SECTION anywhere on the page.
+  assert.ok(!page.includes("matcha-storage"), "the storage band survived");
+  assert.ok(!/<section[^>]*>\s*<p className="eyebrow[^"]*">LAGERUNG/.test(page),
+    "storage got a section of its own again");
 
-  // The page hero reads the SHARED HOMEPAGE SCALE now - every true page
-  // hero does - so the curve is taken from that token rather than from
-  // this page's own rule, which no longer carries a size at all.
-  const heroTail = css.split("--type-hero-primary:")[1];
-  const pageHero = heroTail.slice(0, heroTail.indexOf(")") + 1);
-  assert.equal(pageHero, "clamp(54px,5.9vw,100px)", "the page hero token moved");
-  const tasteSans = /\.matcha-taste-line\{[\s\S]*?font-size:(clamp\([^)]*\))/.exec(rules)[1];
-  const tasteAccent = /\.matcha-taste-line-accent\{[\s\S]*?font-size:(clamp\([^)]*\))/.exec(rules)[1];
-  for (const w of [320, 390, 430, 640, 900, 1024, 1200, 1440, 1536, 1920]) {
-    const title = at(token("title"), w);
-    const editorial = at(token("editorial"), w);
-    // PAGE HERO > SECTION TITLE.
-    assert.ok(at(pageHero, w) > title, `the section title reaches the page hero at ${w}px`);
-    // SECTION TITLE > TASTE SUB-HEADING.
-    assert.ok(title > at(tasteSans, w), `the taste heading reaches the section title at ${w}px`);
-    assert.ok(editorial > at(tasteAccent, w), `the taste accent reaches the section accent at ${w}px`);
+  // 7. It is a row in the fact list, and it reads the ONE confirmed
+  // value rather than a hand-typed copy of it, so the food-info wording
+  // on this page cannot drift from the product page's.
+  const facts = [...list("matchaFacts").matchAll(/\["([A-ZÄÖÜ]+)",(PRODUCT\.storage|"[^"]*"),"([^"]+)"\]/g)];
+  assert.deepEqual(facts.map(f => f[1]), ["HERKUNFT", "ZUTAT", "GRÖSSEN", "LAGERUNG"]);
+  const storage = facts.find(f => f[1] === "LAGERUNG");
+  assert.equal(storage[2].trim(), "PRODUCT.storage", "the page hand-types the storage wording");
+  assert.match(read("app/content.ts"),
+    /storage: "Kühl, trocken und lichtgeschützt lagern\. Nach dem Öffnen gut verschlossen aufbewahren\.",/);
+
+  // Every fact carries an explaining sentence, which is what made the
+  // old label-fragment rows readable.
+  for (const [, label, , text] of facts) {
+    assert.match(text, /\.$/, `not a sentence: ${label}`);
+    assert.ok(text.split(" ").length >= 8, `still a fragment: ${label}`);
   }
-  // The 98px shared h2 scale this section used to inherit is not read here.
-  assert.ok(!rules.includes("clamp(48px,7vw,98px)"), "the retired 98px scale survived");
+  // BESTAND named a warehouse and VERWENDUNG previewed a section three
+  // bands further down. Both left, and neither came back.
+  for (const gone of ["BESTAND", "VERWENDUNG"]) {
+    assert.ok(!section.includes(gone), `a retired fact came back: ${gone}`);
+  }
+  // Rendered as a description list, so it is a fact table to a reader.
+  assert.match(section, /<dl className="matcha-facts-list">/);
+  assert.match(section, /<dt className="matcha-fact-label">\{label\}<\/dt>/);
 });
 
 /* ══════════════════════════════════════════════════════════════
-   4. TYPE, COLOUR, RAIL
+   5. HOW GLOA TASTES - BRIEF 8
    ══════════════════════════════════════════════════════════════ */
 
-test("4: two families, cream on blue, canonical rail", () => {
-  // Cream everywhere - no near black, no raspberry, no plum.
-  for (const name of [".matcha-product-eyebrow{", ".matcha-product-line{", ".matcha-product-line-accent{",
-                      ".matcha-product-intro{", ".matcha-fact-grid dt{", ".matcha-fact-grid dd{",
-                      ".matcha-taste-eyebrow{", ".matcha-taste-line{", ".matcha-taste-line-accent{",
-                      ".matcha-taste-body{", ".matcha-taste-pair dt{", ".matcha-taste-pair dd{"]) {
-    assert.match(rule(name), /color:var\(--cream\)/, `${name} is not cream`);
+test("5: the taste band describes THIS matcha, with no health angle", () => {
+  assert.ok(taste.includes('<p className="eyebrow matcha-taste-eyebrow">GESCHMACK</p>'));
+  assert.ok(taste.includes('<span className="matcha-taste-line">Wie GLOA schmeckt.</span>'));
+  for (const line of [
+    "GLOA Matcha hat eine leuchtend grüne Farbe, eine feine Textur und einen ausgewogenen Geschmack. Eine natürliche Süße und angenehmes Umami treffen auf eine dezente, frische Herbe.",
+    "Dadurch funktioniert er sowohl pur als auch in einem Matcha Latte.",
+  ]) {
+    assert.ok(taste.includes(line), `the taste copy is missing: ${line}`);
   }
-  for (const banned of ["var(--berry)", "var(--plum)", "var(--ink)", "var(--matcha)", "var(--line)"]) {
-    assert.ok(!rules.includes(banned), `the section uses ${banned}`);
+  const notes = [...list("matchaTaste").matchAll(/\["([A-ZÄÖÜ]+)","([^"]+)"\]/g)];
+  assert.deepEqual(notes.map(n => n[1]), ["AUSGEWOGEN", "UMAMI", "AROMA", "FINISH"]);
+  // The notes restate the paragraph above them; they do not add a new
+  // sensory claim, and they never stray into effect.
+  for (const [, label, text] of notes) {
+    for (const claim of ["gesund", "wirkt", "Energie", "Fokus", "beruhigt", "Wachheit"]) {
+      assert.ok(!text.includes(claim), `${label} makes an effect claim: ${claim}`);
+    }
   }
+  for (const dash of ["–", "—"]) {
+    assert.ok(!taste.includes(dash), `a dash was introduced: ${dash}`);
+  }
+});
 
-  // TWO FAMILIES. The display face carries the two editorial lines and
-  // nothing else; the facts are functional and stay on the sans.
-  for (const name of [".matcha-product-line-accent{", ".matcha-taste-line-accent{"]) {
-    const r = rule(name);
-    assert.match(r, /font-family:var\(--font-display\)/);
-    assert.match(r, /font-style:italic/);
-    assert.match(r, /font-weight:400/);
+/* ══════════════════════════════════════════════════════════════
+   6. THE LOOK: TWO FAMILIES, THE PAGE'S OWN COLOURS, NO CARDS
+   ══════════════════════════════════════════════════════════════ */
+
+test("6: the band alternates the page's two grounds and invents nothing", () => {
+  // Cream then berry - the alternation /our-matcha already runs.
+  assert.match(rule(".matcha-explain{"), /background:var\(--cream\)/);
+  assert.match(rule(".matcha-explain{"), /color:var\(--ink\)/);
+  assert.match(rule(".matcha-taste{"), /background:var\(--berry\)/);
+  assert.match(rule(".matcha-taste{"), /color:var\(--cream\)/);
+  // No third ground, no gradient, no glass.
+  for (const banned of ["var(--plum)", "var(--matcha)", "gradient", "backdrop-filter", "box-shadow"]) {
+    assert.ok(!rules.includes(banned), `the band uses ${banned}`);
   }
-  for (const name of [".matcha-product-line{", ".matcha-fact-grid dd{", ".matcha-taste-line{", ".matcha-taste-pair dd{"]) {
-    const r = rule(name);
-    assert.match(r, /font-family:var\(--font-sans\)/, `${name} is not on the sans`);
-    assert.ok(!r.includes("--font-display"), `${name} uses the display face`);
+  for (const [, value] of rules.matchAll(/border-radius:([^;}]+)/g)) {
+    assert.match(value.trim(), /^0[a-z%]*$/, `the blocks became cards: border-radius:${value}`);
   }
+  // Two families only, and the accent line is the display italic.
   for (const m of rules.matchAll(/font-family:([^;}]+)/g)) {
     assert.match(m[1], /^var\(--font-(sans|display)\)/, `a third family: ${m[1]}`);
   }
-  // Meta reads the shared token; values are Inter 600.
-  for (const name of [".matcha-product-eyebrow{", ".matcha-taste-eyebrow{", ".matcha-fact-grid dt{", ".matcha-taste-pair dt{"]) {
-    assert.match(rule(name), /font-size:var\(--type-meta\)/, `${name} is not on the meta scale`);
+  assert.match(rule(".matcha-explain-line-accent{"), /font-family:var\(--font-display\)/);
+  // The eyebrows read the page-wide meta token rather than a local size.
+  for (const eyebrow of [".matcha-explain-eyebrow{", ".matcha-facts-eyebrow{", ".matcha-taste-eyebrow{"]) {
+    assert.match(rule(eyebrow), /font-size:var\(--type-meta\)/, `${eyebrow} sets its own size`);
   }
-  assert.match(rule(".matcha-fact-grid dd{"), /font-weight:600/);
-  assert.match(rule(".matcha-product-intro{"), /font-size:var\(--type-body\)/);
-
-  // ── RAIL, RATIO, HEIGHT ──────────────────────────────────────
-  assert.match(css, /\.matcha-hero,\s*\.matcha-product,\s*\.matcha-research,\s*\.matcha-use,\s*\.matcha-page \.faq,\s*\.matcha-cta\{padding-inline:var\(--rail-gutter\)\}/);
-  assert.match(rules, /\.matcha-product-inner\{[\s\S]*?grid-template-columns:minmax\(0,\.45fr\) 1px minmax\(0,\.55fr\)/);
-  assert.match(rules, /\.matcha-product-inner\{[\s\S]*?align-items:start/);
-  assert.match(rules, /\.matcha-product\{[\s\S]*?padding-block:clamp\(90px,8vw,110px\)/);
-  assert.ok(!rules.includes("100vh"), "the section reserves a viewport");
-  assert.ok(!/\.matcha-product\{[^}]*min-height/.test(rules), "the section has a fixed height");
-  assert.ok(!rules.includes("position:sticky"), "an unrequested sticky column appeared");
-  // Stacks to one column, and the facts stop being three-up on a phone.
-  assert.match(rules, /@media \(max-width:1024px\)\{[\s\S]*?\.matcha-product-inner\{grid-template-columns:1fr/);
-  assert.match(rules, /@media \(max-width:640px\)\{[\s\S]*?grid-template-columns:1fr;gap:0\}/);
+  // Hairlines separate the rows; no bordered boxes.
+  assert.match(rule(".matcha-fact{"), /border-top:1px solid/);
 });
 
 /* ══════════════════════════════════════════════════════════════
-   5. THE LEGACY PLUM ORIGIN SECTION
+   7. THE LEGACY BLOCKS: HIDDEN, NOT DELETED
    ══════════════════════════════════════════════════════════════ */
 
-test("5: the plum origin block is hidden, and every line of it survives", () => {
+test("7: the plum origin block is hidden, and every line of it survives", () => {
   // ── NOT RENDERED ─────────────────────────────────────────────
   // One named flag decides, in the same shape SHOP_STATUS and
   // SHOP_HIDDEN_SLUGS already use elsewhere in this file.
   assert.match(site, /const SHOW_LEGACY_ORIGIN_SECTION:boolean=false;/);
   assert.match(page, /\{SHOW_LEGACY_ORIGIN_SECTION&&<section className="matcha-shizuoka">/);
-  // The blue product section is followed by the berry one directly - the
-  // plum block is not between them any more.
-  const flow = [...page.matchAll(/<section className="(matcha-[a-z-]+)"/g)].map(m => m[1]);
-  assert.ok(flow.indexOf("matcha-product") + 1 === flow.indexOf("matcha-shizuoka"),
-    "the flag no longer sits where the section used to render");
+  assert.match(site, /const SHOW_LEGACY_PREPARATION_SECTION:boolean=false;/);
+  assert.match(page, /\{SHOW_LEGACY_PREPARATION_SECTION&&<section className="matcha-howto">/);
 
   // ── NOT DELETED ──────────────────────────────────────────────
   for (const line of [
@@ -237,129 +271,25 @@ test("5: the plum origin block is hidden, and every line of it survives", () => 
   // reads it, so nothing else lost its link.
   assert.match(read("app/Chrome.tsx"), /tiktok\.com\/@gloa\.matcha/);
 
-  // ── NOTHING REPLACED IT, AND NO GAP WAS LEFT ─────────────────
-  // The berry "was ist Matcha" section that used to follow it has since
-  // been absorbed INTO the blue story, so the research section is what
-  // comes next now - and it brings its own padding.
-  assert.match(css, /\.matcha-research\{[\s\S]*?padding-block:clamp\(84px,7vw,110px\)/);
+  // ── NOTHING WAS SLOTTED INTO THE SPACE ───────────────────────
   assert.ok(!page.includes("matcha-origin-spacer") && !page.includes('className="spacer"'),
     "a spacer was left behind");
-  // The next section after the hidden block is the one that always
-  // followed it - nothing was slotted into the space.
   const after = page.slice(page.indexOf('<section className="matcha-shizuoka">'));
-  assert.match(after.slice(after.indexOf("</section>")), /^<\/section>\}\s*<section className="matcha-research">/,
+  assert.match(after.slice(after.indexOf("</section>")), /^<\/section>\}\s*\{\/\*[\s\S]*?\*\/\}\s*<section className="matcha-taste">/,
     "something was inserted where the section used to be");
 });
 
 /* ══════════════════════════════════════════════════════════════
-   6. THE CENTRE DIVIDER
+   8. THE SIZES CANNOT DRIFT AWAY FROM THE CATALOG
    ══════════════════════════════════════════════════════════════ */
-
-test("6: a partial, decorative seam between the two main columns", () => {
-  // ── ITS OWN GRID TRACK, NOT A GUESSED OFFSET ─────────────────
-  // The split is .45/.55, so anything anchored at 50% would miss the
-  // seam. A 1px track puts it exactly on the column boundary and gives
-  // it the section's gap on BOTH sides.
-  assert.match(rules, /\.matcha-product-inner\{[\s\S]*?grid-template-columns:minmax\(0,\.45fr\) 1px minmax\(0,\.55fr\)/);
-  assert.match(section, /<\/div><span className="matcha-product-divider" aria-hidden="true"\/><div className="matcha-product-detail">/);
-  assert.ok(section.indexOf("matcha-product-copy") < section.indexOf("matcha-product-divider"));
-  assert.ok(section.indexOf("matcha-product-divider") < section.indexOf("matcha-product-detail"));
-
-  // ── 1PX, CREAM AT .28, PARTIAL HEIGHT, CENTRED ───────────────
-  const divider = rule(".matcha-product-divider{");
-  assert.match(divider, /width:1px/);
-  assert.match(divider, /height:clamp\(260px,38vw,440px\)/);
-  assert.match(divider, /align-self:center/);
-  assert.match(divider, /rgba\(245,235,226,\.28\)/);
-  // NOT full height, and nothing else paints it.
-  assert.ok(!/\.matcha-product-divider\{[^}]*height:100%/.test(rules), "the seam runs the full height");
-  assert.ok(!/\.matcha-product-divider\{[^}]*(border|box-shadow|border-radius)/.test(rules));
-  // The gap is the spacing on each side - 57.6px at 1440, 72px at cap.
-  assert.match(rules, /\.matcha-product-inner\{[\s\S]*?gap:clamp\(32px,4vw,72px\)/);
-
-  // ── DECORATIVE, AND GONE WHEN THE SECTION STACKS ─────────────
-  assert.match(section, /aria-hidden="true"/);
-  assert.ok(!/matcha-product-divider[^>]*>[^<]/.test(section), "the seam carries text");
-  assert.match(rules, /@media \(max-width:1024px\)\{[\s\S]*?\.matcha-product-divider\{display:none\}/);
-
-  // ── THE INTERNAL HAIRLINES ARE A DIFFERENT THING, AND STAY ───
-  assert.match(rules, /\.matcha-fact-grid>div\{[\s\S]*?border-top:1px solid rgba\(245,235,226,\.3\)/);
-  assert.match(rules, /\.matcha-taste-pair>div\{[\s\S]*?border-top:1px solid rgba\(245,235,226,\.3\)/);
-  assert.match(rules, /\.matcha-taste-block\{[\s\S]*?border-top:1px solid rgba\(245,235,226,\.3\)/);
-});
-
-/* ══════════════════════════════════════════════════════════════
-   7. THE TWO AREAS THAT MOVED IN
-   ══════════════════════════════════════════════════════════════ */
-
-test("7: what-is-matcha and storage are areas of this section now", () => {
-  // ── ONE SECTION, NOT THREE STACKED ───────────────────────────
-  // Both blocks are children of the SAME rail wrapper as the product
-  // and taste content - not sections of their own that were recoloured.
-  assert.ok(!page.includes('<section className="matcha-what">'), "the berry section still renders");
-  assert.ok(!page.includes('<section className="matcha-storage">'), "the cream storage strip still renders");
-  const inner = section.slice(section.indexOf('className="matcha-product-inner home-rail"'));
-  assert.ok(inner.includes('className="matcha-what-block"'), "what-is-matcha is outside the rail wrapper");
-  assert.ok(inner.includes('className="matcha-storage-row"'), "storage is outside the rail wrapper");
-  assert.match(rules, /\.matcha-what-block,\s*\.matcha-storage-row\{[\s\S]*?grid-column:1\/-1/);
-  // Order: product, taste, what-is-matcha, storage.
-  const order = ["matcha-product-detail", "matcha-taste-block", "matcha-what-block", "matcha-storage-row"];
-  const at = order.map(c => section.indexOf(c));
-  assert.deepEqual(at, [...at].sort((x, y) => x - y), "the four areas are out of order");
-  // Their own full-width backgrounds are gone from the stylesheet.
-  assert.ok(!css.includes(".matcha-what{"), "the berry background survived");
-  assert.ok(!css.includes(".matcha-storage{"), "the cream storage background survived");
-
-  // ── EVERY LINE MOVED UNCHANGED, AND EXACTLY ONCE ─────────────
-  for (const line of [
-    "WAS IST MATCHA", "Pulver statt", "Aufguss.",
-    "Matcha ist gemahlener grüner Tee. Anders als bei klassisch aufgegossenem Tee trinkst du bei Matcha das fein vermahlene Blatt direkt mit, nicht nur den Sud. Deshalb enthält Matcha von Natur aus mehr Koffein, L-Theanin und Catechine wie EGCG als ein Aufguss aus derselben Teemenge. Wie viel genau, hängt unter anderem von Anbau, Ernte, Verarbeitung und Zubereitung ab.",
-    "LAGERUNG",
-    "Kühl, trocken und lichtgeschützt lagern. Nach dem Öffnen gut verschlossen aufbewahren.",
-    "/img/gloa-work.jpg",
-  ]) {
-    assert.ok(section.includes(line), `the move lost: ${line}`);
-    // Counted by splitting rather than by a built regex - these lines
-    // contain brackets and dots that would need escaping twice over.
-    assert.equal(page.split(line).length - 1, 1, `duplicated on the page: ${line}`);
-  }
-
-  // ── THE PHOTO IS AN INSERT, NOT A HERO ───────────────────────
-  const photo = rule(".matcha-what-photo{");
-  assert.match(photo, /width:clamp\(300px,26vw,420px\)/);
-  assert.match(photo, /max-width:420px/);
-  assert.match(photo, /background:transparent/);
-  assert.match(photo, /border:0/);
-  assert.match(photo, /border-radius:0/);
-  assert.match(photo, /box-shadow:none/);
-  assert.match(rules, /\.matcha-what-photo img\{display:block;width:100%;height:auto\}/);
-  assert.ok(!rules.includes("object-fit:cover"), "the photo is cropped again");
-  assert.ok(!css.includes(".matcha-what-img{overflow:hidden;height:480px}"), "the 480px crop survived");
-  assert.match(rules, /@media \(max-width:640px\)\{[\s\S]*?\.matcha-what-photo\{width:100%;max-width:360px/);
-
-  // ── THE STORAGE ROW STAYS A ROW ──────────────────────────────
-  // Two rules carry .matcha-storage-row: the shared one it opens with,
-  // then its own - so the grid is read from the block, not the first hit.
-  assert.match(rules, /\.matcha-storage-row\{[\s\S]*?grid-template-columns:minmax\(0,\.33fr\) minmax\(0,\.67fr\)/);
-  assert.match(rule(".matcha-storage-eyebrow{"), /font-size:var\(--type-meta\)/);
-  assert.match(rule(".matcha-storage-body{"), /font-size:clamp\(15px,1\.1vw,16px\)/);
-  assert.ok(!/matcha-storage-row[^{]*\{[^}]*min-height/.test(rules), "the storage row grew a height");
-
-  // ── THE DIVIDER STILL BELONGS TO THE TOP ROW ONLY ────────────
-  // The moved areas span all three tracks, so they open new grid rows;
-  // the divider stays in the first one.
-  assert.match(rules, /\.matcha-what-block,\s*\.matcha-storage-row\{[\s\S]*?border-top:1px solid rgba\(245,235,226,\.24\)/);
-  assert.ok(section.indexOf("matcha-product-divider") < section.indexOf("matcha-what-block"));
-});
 
 test("8: the sizes on this page cannot drift away from the catalog", () => {
   // /our-matcha is editorial: it does not fetch the catalog, so its size
   // row is a LITERAL, while the shop card and the product page both build
   // theirs from product.variants. That is fine - but only for as long as
   // the literal is checked against the same sizes everyone else uses.
-  // Pinning the string on its own, which is what test 2 does, would keep
-  // passing while a fourth size, or a changed one, left this page quietly
-  // stating the old set.
+  // Pinning the string on its own would keep passing while a fourth
+  // size, or a changed one, left this page quietly stating the old set.
   //
   // Three sources are locked together here, none of them this page:
   //   1. lib/annualPlans.ts   - ANNUAL_LAUNCH_GRAMS_BY_SKU, the map the
@@ -387,6 +317,57 @@ test("8: the sizes on this page cannot drift away from the catalog", () => {
 
   // 3. And the sentence on this page is exactly that set, in order.
   const expected = grams.map(g => `${g} g`).join(" · ");
-  assert.ok(section.includes(`<dt>GRÖSSEN</dt><dd>${expected}</dd>`),
+  assert.ok(list("matchaFacts").includes(`["GRÖSSEN","${expected}"`),
     `the page states sizes the catalog does not have - expected "${expected}"`);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   9. NOTHING CAN PUSH THE PAGE SIDEWAYS - BRIEF 17
+   ══════════════════════════════════════════════════════════════ */
+
+test("9: every new grid track can shrink, and nothing reserves a viewport", () => {
+  // A grid column defaults to min-content, which is what makes a long
+  // word or a wide image widen the whole page on a phone. Every track
+  // the restructure added is declared minmax(0,...) or a fixed unit, and
+  // every column that holds text carries min-width:0.
+  for (const [, tracks] of rules.matchAll(/grid-template-columns:([^;}]+)/g)) {
+    for (const track of tracks.split(/\s+(?![^(]*\))/)) {
+      assert.match(track.trim(), /^(minmax\(|repeat\(|clamp\(|1fr$|auto$|max-content$)/,
+        `a track cannot shrink: ${track} in "${tracks}"`);
+    }
+  }
+  assert.match(rule(".matcha-explain-copy{"), /min-width:0/);
+  // The photo is capped to its column rather than to a viewport width.
+  assert.match(rules, /\.matcha-explain-photo img\{[\s\S]*?width:100%/);
+  // It fills the row on desktop and returns to its own height once the
+  // columns stack, so neither layout leaves a column of empty ground.
+  assert.match(rules, /\.matcha-explain-photo\{[^}]*align-self:stretch/);
+  assert.match(rules, /@media \(max-width:1100px\)\{[\s\S]*?\.matcha-explain-photo\{[^}]*align-self:auto/);
+  assert.match(rules, /\.matcha-explain-photo img\{[\s\S]*?object-fit:cover/);
+  // No viewport heights, no fixed widths, no negative margins that could
+  // reach past the rail.
+  for (const banned of ["100vh", "100vw", "position:absolute", "margin-left:-", "margin-inline:-"]) {
+    assert.ok(!rules.includes(banned), `the band uses ${banned}`);
+  }
+  // And it stacks before the columns can crush each other.
+  assert.match(rules, /@media \(max-width:1100px\)\{[\s\S]*?\.matcha-explain-top\{grid-template-columns:/);
+  assert.match(rules, /@media \(max-width:640px\)/);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   10. THE CHROME IS NOT PART OF THIS PASS - BRIEF 16
+   ══════════════════════════════════════════════════════════════ */
+
+test("10: the restructure did not reach the header or the footer", () => {
+  // /our-matcha renders inside the shared shell. This pass touched the
+  // page's own <main> and nothing around it.
+  const chrome = read("app/Chrome.tsx");
+  assert.match(chrome, /href="\/our-matcha"/, "the nav entry is missing");
+  assert.ok(!chrome.includes("matcha-explain") && !chrome.includes("matcha-process")
+    && !chrome.includes("mr-sheet"), "the restructure leaked into the site chrome");
+  // The page is still one <main> with the page class on it.
+  assert.match(page, /return <main className="matcha-page">/);
+  assert.equal([...page.matchAll(/<main/g)].length, 1);
+  // And the sheet is the page's own overlay, not a shell-level one.
+  assert.ok(!chrome.includes("MatchaResearchSheet"));
 });

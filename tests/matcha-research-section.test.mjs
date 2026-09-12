@@ -22,7 +22,14 @@ const data = site.slice(site.indexOf("const researchBlocks=["), site.indexOf("fu
 const page = site.slice(site.indexOf("function MatchaPage()"), site.indexOf("\nfunction ", site.indexOf("function MatchaPage()") + 5));
 const section = page.slice(page.indexOf('<section className="matcha-research">'),
                            page.indexOf('<section className="matcha-howto">'));
-const rules = css.slice(css.indexOf("/our-matcha RESEARCH SECTION"), css.indexOf("/our-matcha USAGE SECTION"));
+const block = css.slice(css.indexOf("/our-matcha RESEARCH SECTION"), css.indexOf("/our-matcha USAGE SECTION"));
+// The section's own surfaces end where the tap-to-read overlay begins.
+// The layout guards below were written about the SECTION - an overlay
+// panel is a different thing and gets its own checks in part 5.
+const SHEET_AT = block.indexOf("THE MOBILE RESEARCH CARDS AND THEIR SHEET");
+assert.notEqual(SHEET_AT, -1, "the mobile research cards block is missing");
+const rules = block.slice(0, SHEET_AT);
+const sheetRules = block.slice(SHEET_AT);
 const rule = name => {
   const at = rules.indexOf(name);
   assert.notEqual(at, -1, `missing rule: ${name}`);
@@ -115,8 +122,14 @@ test("3: three colours, open columns, hairlines instead of boxes", () => {
   // ── NO CARDS ─────────────────────────────────────────────────
   // A 1px seam is allowed a colour; an AREA is not - the surfaces check
   // below is what actually holds that line.
-  for (const banned of ["border-radius", "box-shadow", "background:#", "background:var(--berry)"]) {
+  for (const banned of ["box-shadow", "background:#", "background:var(--berry)"]) {
     assert.ok(!rules.includes(banned), `the blocks became cards: ${banned}`);
+  }
+  // A radius is banned; `border-radius:0` is the house idiom for KILLING
+  // one (a UA stylesheet rounds buttons on iOS), so it is the rounded
+  // values that are checked for, not the property name.
+  for (const [, value] of rules.matchAll(/border-radius:([^;}]+)/g)) {
+    assert.match(value.trim(), /^0[a-z%]*$/, `the blocks became cards: border-radius:${value}`);
   }
   // The only surface in the section is its own cream.
   const surfaces = [...rules.matchAll(/background:([^;}]+)/g)].map(m => m[1].trim());
@@ -192,4 +205,163 @@ test("4: a section, not a hero - and it stacks cleanly", () => {
   assert.match(rules, /@media \(max-width:1024px\)\{[\s\S]*?\.matcha-research-inner\{grid-template-columns:1fr/);
   assert.match(rules, /@media \(max-width:900px\)\{[\s\S]*?\.matcha-research-grid\{grid-template-columns:1fr/);
   assert.match(rules, /@media \(max-width:640px\)\{[\s\S]*?\.matcha-research-line\{font-size:clamp\(38px,10\.5vw,50px\)/);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   5. THE TAP-TO-READ CARDS AND THEIR SHEET
+   Brief points 10-13. Mobile used to print all three research texts
+   underneath each other, which is what made the page long. The texts
+   are unchanged - only WHEN they are shown moved.
+   ══════════════════════════════════════════════════════════════ */
+
+const sheet = site.slice(site.indexOf("function MatchaResearchSheet"), site.indexOf("function MatchaPage()"));
+
+test("5a: every card is a real button and says so, in words", () => {
+  // 11 + 12: the affordance is visible copy, not an icon a visitor has
+  // to guess at. The "+" is decorative and hidden from the reader.
+  assert.match(section, /<button type="button" className="matcha-research-open"/);
+  assert.ok(section.includes("Zum Lesen antippen"), "the tap hint is missing");
+  assert.match(section, /aria-haspopup="dialog"/);
+  assert.match(section, /className="matcha-research-open-mark" aria-hidden="true">\+</);
+  // One button per block, and the label is the block's own label.
+  assert.match(section, /onClick=\{\(\)=>setOpenResearch\(i\)\}/);
+});
+
+test("5b: the cards are the MOBILE presentation - desktop still reads in place", () => {
+  // The body text stays in the DOM at every width; the sheet is an
+  // additional way to read it, never the only one. That is also why
+  // this cannot cost the page its content for a crawler.
+  assert.match(section, /<p className="matcha-research-body">\{b\.body\}<\/p>/);
+  const hidesButtonOnDesktop = /\.matcha-research-open\{[^}]*display:none/.test(sheetRules)
+    || /\.matcha-research-open\{[^}]*display:none/.test(rules);
+  assert.ok(hidesButtonOnDesktop, "the tap affordance must not show where the text is already open");
+});
+
+test("5c: the sheet honours the same modal contract the cart drawer set", () => {
+  // 13. Not a new modal behaviour - the one the site already has.
+  assert.match(sheet, /role="dialog"/);
+  assert.match(sheet, /aria-modal="true"/);
+  assert.match(sheet, /aria-labelledby="mr-sheet-title"/);
+  assert.match(sheet, /id="mr-sheet-title"/);
+  assert.match(sheet, /e\.key==="Escape"/, "Escape must close it");
+  assert.match(sheet, /document\.body\.style\.overflow="hidden"/, "the page behind it must not scroll");
+  assert.match(sheet, /document\.body\.style\.overflow=""/, "and must scroll again afterwards");
+  assert.match(sheet, /closeRef\.current\?\.focus\(\)/, "focus moves in");
+  assert.match(sheet, /prev\?\.focus\?\.\(\)/, "and is handed back");
+  assert.match(sheet, /aria-label="Schlie\u00dfen"/, "the X needs an accessible name");
+  assert.match(sheet, /removeEventListener\("keydown",onKey\)/, "the listener must be torn down");
+  // It closes on the backdrop too, and the panel does not close itself.
+  assert.match(sheet, /className="mr-sheet-backdrop" onClick=\{onClose\}/);
+  assert.match(sheet, /className="mr-sheet" onClick=\{e=>e\.stopPropagation\(\)\}/);
+});
+
+test("5d: the sheet shows the block's OWN copy, never a second version of it", () => {
+  // Brief point 11 of the source doc: the same science is not explained
+  // twice. The sheet renders the same values the card does.
+  assert.match(sheet, /\{block\.icon\}/);
+  assert.match(sheet, /\{block\.label\}/);
+  assert.match(sheet, /\{block\.body\}/);
+  // No hand-typed prose of its own.
+  assert.ok(!/<p className="mr-sheet-body">[A-Z\u00c4\u00d6\u00dc]/.test(sheet), "the sheet hard-codes copy");
+  // And no invented "read the studies" link: there is no sources page.
+  assert.ok(!/STUDIEN\u00dcBERBLICK|Studien ansehen|\/studien/i.test(sheet + section),
+    "a studies link was added without a studies page to point at");
+});
+
+test("5e: no health promise entered through the new surfaces", () => {
+  // 10. The regulated wording is pinned in part 1; this bans the claim
+  // vocabulary outright, in the card markup AND in the sheet.
+  const surfaces = section + sheet;
+  for (const claim of [
+    "gesund", "heilt", "wirkt gegen", "beugt vor", "senkt ", "st\u00e4rkt das Immunsystem",
+    "Detox", "entgiftet", "Fettverbrennung", "Stoffwechsel ankurbeln", "beweist", "bewiesen",
+    "garantiert", "hilft gegen",
+  ]) {
+    assert.ok(!surfaces.includes(claim), `a health claim entered the research surfaces: ${claim}`);
+  }
+});
+
+test("5f: the sheet is only mounted while a block is open", () => {
+  const page2 = site.slice(site.indexOf("function MatchaPage()"), site.indexOf("\nfunction ", site.indexOf("function MatchaPage()") + 5));
+  assert.match(page2, /openResearch!==null&&<MatchaResearchSheet/);
+  assert.match(page2, /useState<number\|null>\(null\)/, "it must start closed, so SSR and hydration agree");
+});
+
+/* ══════════════════════════════════════════════════════════════
+   6. NOTHING IS PAINTED ITS OWN BACKGROUND
+   Both new surfaces shipped a first draft where an element carried the
+   colour of the ground it sits on: the tap hint was cream on the cream
+   section (1:1), and the sheet icon was raspberry on the raspberry
+   panel (1:1). Neither is a subtle contrast problem - the element is
+   simply not there. Checked by arithmetic rather than by eye.
+   ══════════════════════════════════════════════════════════════ */
+
+const TOKENS = { cream: [245, 235, 226], ink: [17, 17, 17], berry: [166, 30, 89] };
+
+/** WCAG relative luminance, then the 4.5:1 ratio, on opaque colours. */
+const luminance = ([r, g, b]) => {
+  const f = c => (c /= 255) <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+};
+const contrast = (a, b) => {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+};
+/** An alpha colour over a known ground, the way the browser composites. */
+const over = (fg, alpha, bg) => fg.map((c, i) => Math.round(c * alpha + bg[i] * (1 - alpha)));
+
+const declared = (scope, selector, prop) => {
+  // A selector can appear more than once - .matcha-research-open is
+  // display:none at the top of the block and takes its colours inside
+  // the mobile media query. Every occurrence is read, and the one that
+  // actually declares the property wins.
+  const bodies = [];
+  for (let at = scope.indexOf(selector); at !== -1; at = scope.indexOf(selector, at + 1)) {
+    // Comments are stripped first: a declaration preceded by one would
+    // otherwise read as part of the comment's own chunk.
+    bodies.push(scope.slice(at, scope.indexOf("}", at)).replace(/\/\*[\s\S]*?\*\//g, ""));
+  }
+  assert.ok(bodies.length, `missing rule: ${selector}`);
+  const body = bodies.find(b => b.split(/[;{]/).some(d => d.trim().slice(0, prop.length + 1) === `${prop}:`))
+    ?? bodies[0];
+  // Split into declarations rather than pattern-matching around the
+  // property name: "background" would otherwise also match inside
+  // "background-color", and the escape rules for a class holding both
+  // a brace and \s are easy to get subtly wrong.
+  const hit = body.split(/[;{]/).map(d => d.trim())
+    .find(d => d.slice(0, prop.length + 1) === `${prop}:`);
+  assert.ok(hit, `${selector} declares no ${prop}`);
+  return hit.slice(prop.length + 1).trim();
+};
+/** var(--token) or rgba(r,g,b,a) -> [[r,g,b], alpha] */
+const parse = value => {
+  const token = value.match(/^var\(--(cream|ink|berry)\)$/);
+  if (token) return [TOKENS[token[1]], 1];
+  const rgba = value.match(/^rgba?\((\d+),(\d+),(\d+)(?:,([\d.]+))?\)$/);
+  assert.ok(rgba, `unparseable colour: ${value}`);
+  return [[+rgba[1], +rgba[2], +rgba[3]], rgba[4] === undefined ? 1 : +rgba[4]];
+};
+
+test("6: every colour on the two new surfaces clears AA on its own ground", () => {
+  // The section is cream; the sheet panel is raspberry. Both grounds are
+  // read from the stylesheet rather than assumed.
+  assert.equal(declared(rules, ".matcha-research{", "background"), "var(--cream)");
+  assert.equal(declared(sheetRules, ".mr-sheet{", "background"), "var(--berry)");
+
+  const cases = [
+    // [where, selector, ground, minimum]
+    [sheetRules, ".matcha-research-open{", TOKENS.cream, 4.5],
+    [sheetRules, ".matcha-research-open-label{", TOKENS.cream, 4.5],
+    [sheetRules, ".matcha-research-open-mark{", TOKENS.cream, 3],   // a 22px glyph
+    [sheetRules, ".mr-sheet-head{", TOKENS.berry, 4.5],
+    [sheetRules, ".mr-sheet-head .matcha-research-icon{", TOKENS.berry, 3],
+    [sheetRules, ".mr-sheet-close{", TOKENS.berry, 4.5],
+    [sheetRules, ".mr-sheet-body{", TOKENS.berry, 4.5],
+  ];
+  for (const [scope, selector, ground, min] of cases) {
+    const [rgb, alpha] = parse(declared(scope, selector, "color"));
+    const ratio = contrast(over(rgb, alpha, ground), ground);
+    assert.ok(ratio >= min,
+      `${selector} measures ${ratio.toFixed(2)}:1 on its own ground - needs ${min}:1`);
+  }
 });

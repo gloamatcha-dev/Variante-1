@@ -255,7 +255,7 @@ test("7b: Cormorant is untouched everywhere it is not a page hero", () => {
   // scanning blocks rather than by an exact "selector{" match.
   const blocks = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^}]*)\}/g)];
   for (const sel of [".about-story-line-accent",
-                     ".matcha-product-line-accent", ".matcha-research-line-accent",
+                     ".matcha-explain-line-accent", ".matcha-research-line-accent",
                      ".b2b-menu .b2b-menu-line-accent", ".b2b-compare .b2b-compare-line-accent",
                      ".b2b-flow .b2b-flow-line-accent", ".b2b-support .b2b-support-line-accent",
                      ".business .faq h2 i", ".matcha-page .faq h2 i"]) {

@@ -43,7 +43,26 @@ test("1: no markup, no copy and no behaviour changed in either section", () => {
   // Every question and answer still comes from the same list.
   const data = site.slice(site.indexOf("const matchaFaq"), site.indexOf("];", site.indexOf("const matchaFaq")));
   assert.ok(data.length > 0, "the FAQ data moved");
-  assert.ok([...data.matchAll(/\["/g)].length >= 4, "questions were removed");
+  // BRIEF 15: the FAQ answers what the page does NOT already answer.
+  // Six questions were removed because the restructure answers each of
+  // them in full further up - keeping them made the page repeat itself.
+  const questions = [...data.matchAll(/\["([^"]+)"/g)].map(m => m[1]);
+  assert.deepEqual(questions, ["Wie bereite ich Matcha zu?", "Enthält Matcha Koffein?"]);
+  // Each removed question is answered by a section above, so nothing was
+  // simply dropped. The section that now carries it is named here so a
+  // future edit cannot remove BOTH the answer and its FAQ row.
+  const answeredAbove = {
+    "Was ist Matcha": "matcha-explain",
+    "Woher kommt": "matcha-hero",
+    "Wie schmeckt": "matcha-taste",
+    "Wie lagere": "matcha-facts",
+    "Wie verwende": "matcha-use",
+    "Was sagt die Forschung": "matcha-research",
+  };
+  for (const [gone, home] of Object.entries(answeredAbove)) {
+    assert.ok(!data.includes(gone), `a question the page already answers came back: ${gone}`);
+    assert.ok(page.includes(home), `${home} must survive - it carries the answer to "${gone}"`);
+  }
 
   // The CTA is the same markup and the same two routes.
   assert.match(cta, /<section className="matcha-cta"><p className="eyebrow">MATCHA IS FOR EVERYONE\.<\/p><h2>Bereit für<br\/><i>deinen Matcha\?<\/i><\/h2>/);

@@ -178,12 +178,12 @@ h1 i,h2 i,h3 i,.display-italic{font-family:var(--font-display),Georgia,serif;fon
 }
 @media(max-width:520px){.legal-doc-toc ol{columns:1}}
 @media(max-width:800px){.legal-shipping-zones{grid-template-columns:1fr}.legal-imprint-grid{grid-template-columns:1fr}}.not-found{min-height:70vh;padding:100px 5vw}.not-found h1{font-size:25vw;margin:0}.behind-bar h2 i,.business-support h2 i,.faq h2 i{font-family:var(--font-display),Georgia,serif;font-weight:400}.calculator{padding:110px 5vw;background:var(--blue);color:white}.calc-intro h2{font-size:clamp(50px,6vw,90px);line-height:.9;letter-spacing:-.06em;margin:0}.calc-panel{display:grid;grid-template-columns:1fr 1fr;margin-top:70px;border:1px solid rgba(255,255,255,.55)}.ranges{padding:45px}.range{display:block;margin-bottom:42px}.range>span{display:flex;justify-content:space-between;font:13px var(--font-mono)}.range b{font-size:16px}.range input{width:100%;accent-color:var(--cream);height:35px}.range small{display:flex;justify-content:space-between;font:13px var(--font-mono)}.range small i{font-style:normal}.results{background:var(--cream);color:var(--plum);padding:45px;display:flex;flex-direction:column}.results>div{display:flex;justify-content:space-between;padding:18px 0;border-top:1px solid var(--line)}.results span{font:13px var(--font-mono)}.results strong{font-size:20px}.results .scenario{margin-top:auto;background:rgba(166,30,89,.1);padding:20px;display:block}.results .scenario strong{display:block;margin-top:10px}.results small{font:13px/1.5 var(--font-mono);margin-top:12px}.wide{grid-column:1/-1}.calc-summary{background:rgba(0,0,0,.14);padding:18px;font:13px var(--font-mono)}.calc-method{border-top:1px solid rgba(255,255,255,.3);padding:50px 0 0;margin-top:50px}.calc-method>div{margin-top:25px}.calc-method>div>div{padding:16px 0;border-top:1px solid rgba(255,255,255,.3);display:flex;justify-content:space-between;align-items:baseline}.calc-method span{font:13px var(--font-mono);display:block;margin-bottom:8px}.calc-method strong{font-size:14px}.calc-method>small{font:13px/1.5 var(--font-mono);opacity:.6;display:block;margin-top:20px}.calc-transparency-note{margin-top:30px}.calc-transparency-note p{font:13px/1.6 var(--font-mono);opacity:.7;margin:0}.calc-roi-placeholder{border-top:1px solid rgba(255,255,255,.3);padding-top:25px;margin-top:30px}.calc-roi-placeholder div{display:flex;justify-content:space-between;align-items:center}.calc-roi-placeholder span{font:13px var(--font-mono)}.calc-roi-placeholder strong{font:13px var(--font-mono);opacity:.6}.calc-roi-placeholder p{font:13px/1.6 var(--font-mono);opacity:.7;margin:12px 0 0}.b2b-outline{background:transparent;color:var(--cream);border-color:var(--cream)}.b2b-outline:hover{background:var(--cream);color:var(--blue)}.model-tabs{margin-top:10px}.model-tabs .eyebrow{margin-bottom:14px}.model-tabs button{display:block;width:100%;text-align:left;background:none;border:1px solid rgba(255,255,255,.3);color:white;padding:14px 18px;margin-bottom:8px;font:13px var(--font-mono);letter-spacing:.04em;transition:background .2s,border-color .2s}.model-tabs button span{float:right;font-weight:700}.model-tabs button.active{background:rgba(255,255,255,.15);border-color:white}.b2b-pricing{padding:110px 5vw}.b2b-pricing h2{font-size:clamp(48px,7vw,98px);line-height:.9;letter-spacing:-.065em;margin:24px 0}.b2b-pricing h2 i{font-family:var(--font-display),Georgia,serif;font-weight:400}.b2b-pricing-lead{font-size:18px;line-height:1.55;max-width:620px;margin-bottom:60px}.b2b-pricing-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}.b2b-pricing-card{border:1px solid var(--line);padding:40px 30px;display:flex;flex-direction:column}.b2b-pricing-card.highlight{border:2px solid var(--blue);background:rgba(23,70,209,.04)}.b2b-pricing-price{margin:20px 0}.b2b-pricing-price b{font-size:42px;letter-spacing:-.04em}.b2b-pricing-price span{font:13px var(--font-mono);margin-left:6px}.b2b-pricing-discount{display:inline-block;background:var(--blue);color:white;padding:5px 10px;font:600 12px var(--font-mono);letter-spacing:.08em}.b2b-pricing-desc{font-size:16px;line-height:1.5;margin:10px 0 25px}.b2b-pricing-details{list-style:none;padding:0;margin:0 0 30px;flex:1}.b2b-pricing-details li{padding:10px 0;border-top:1px solid var(--line);font:13px/1.4 var(--font-mono)}.b2b-pricing-card .cta{margin-top:auto;width:100%;justify-content:center}.b2b-example{padding:80px 5vw;background:var(--blue);color:white}.b2b-example .eyebrow{margin-bottom:30px}.b2b-example-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}.b2b-example-card{padding:30px;border:1px solid rgba(255,255,255,.3)}.b2b-example-card span{font:13px var(--font-mono);display:block;margin-bottom:12px}.b2b-example-card strong{font-size:24px;display:block}.b2b-example-card small{display:block;font:13px/1.6 var(--font-mono);margin-top:14px;opacity:.7}.faq{padding:110px 10vw}.faq details{border-top:1px solid var(--plum)}.faq summary{padding:25px 0;display:flex;justify-content:space-between;cursor:pointer;font-size:18px}.faq details p{max-width:700px;line-height:1.55;padding-bottom:25px}footer{grid-template-columns:1.2fr repeat(5,.65fr)}.social-note small{font:12px var(--font-mono)}
-.matcha-facts h2 i,.matcha-transparency h2 i,.matcha-howto h2 i,.matcha-cta h2 i,.matcha-taste h2 i,.matcha-use h2 i,.matcha-shizuoka h2 i,.matcha-what h2 i{font-family:var(--font-display),Georgia,serif;font-weight:400}.matcha-facts h2,.matcha-transparency h2,.matcha-howto h2,.matcha-cta h2,.matcha-taste h2,.matcha-use h2,.matcha-shizuoka h2,.matcha-what h2{font-size:clamp(48px,7vw,98px);line-height:.9;letter-spacing:-.065em;margin:24px 0}.matcha-facts-secondary{margin-top:45px;border-top:1px solid var(--line);padding-top:20px}.matcha-facts-secondary p{font:13px var(--font-mono);letter-spacing:.1em;opacity:.55;margin:0 0 8px}.matcha-howto{padding:110px 5vw;background:var(--plum);color:var(--cream)}.matcha-method-grid{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid rgba(245,235,226,.4);border-bottom:1px solid rgba(245,235,226,.4)}.matcha-method-grid article{padding:35px 4vw;border-right:1px solid rgba(245,235,226,.4)}.matcha-method-grid article:last-child{border-right:0}.matcha-method-grid span{font:13px var(--font-mono)}.matcha-method-grid h3{font-size:38px}.matcha-method-grid li{padding:12px 0;border-top:1px solid rgba(245,235,226,.25)}.matcha-section-text{font-size:18px;line-height:1.6;max-width:620px;margin:30px 0 0}.matcha-known{border-top:1px solid var(--line)}.matcha-shizuoka{padding:110px 5vw;background:var(--plum);color:var(--cream)}.matcha-shizuoka>p:not(.eyebrow):not(.matcha-build-note){font-size:18px;line-height:1.6;max-width:620px;margin:30px 0 0}.matcha-build-note{font:600 14px/1.5 var(--font-mono);letter-spacing:.06em;margin:35px 0 30px;opacity:.7}.matcha-image{height:70vh;min-height:500px;position:relative;overflow:hidden}.matcha-image img{width:100%;height:100%;object-fit:cover;object-position:center}.matcha-cta{padding:110px 5vw;text-align:center}.matcha-cta h2{margin-bottom:45px}.matcha-cta-actions{display:flex;gap:16px;justify-content:center}
+.matcha-facts h2 i,.matcha-transparency h2 i,.matcha-howto h2 i,.matcha-cta h2 i,.matcha-taste h2 i,.matcha-use h2 i,.matcha-shizuoka h2 i{font-family:var(--font-display),Georgia,serif;font-weight:400}.matcha-facts h2,.matcha-transparency h2,.matcha-howto h2,.matcha-cta h2,.matcha-taste h2,.matcha-use h2,.matcha-shizuoka h2{font-size:clamp(48px,7vw,98px);line-height:.9;letter-spacing:-.065em;margin:24px 0}.matcha-facts-secondary{margin-top:45px;border-top:1px solid var(--line);padding-top:20px}.matcha-facts-secondary p{font:13px var(--font-mono);letter-spacing:.1em;opacity:.55;margin:0 0 8px}.matcha-howto{padding:110px 5vw;background:var(--plum);color:var(--cream)}.matcha-method-grid{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid rgba(245,235,226,.4);border-bottom:1px solid rgba(245,235,226,.4)}.matcha-method-grid article{padding:35px 4vw;border-right:1px solid rgba(245,235,226,.4)}.matcha-method-grid article:last-child{border-right:0}.matcha-method-grid span{font:13px var(--font-mono)}.matcha-method-grid h3{font-size:38px}.matcha-method-grid li{padding:12px 0;border-top:1px solid rgba(245,235,226,.25)}.matcha-section-text{font-size:18px;line-height:1.6;max-width:620px;margin:30px 0 0}.matcha-known{border-top:1px solid var(--line)}.matcha-shizuoka{padding:110px 5vw;background:var(--plum);color:var(--cream)}.matcha-shizuoka>p:not(.eyebrow):not(.matcha-build-note){font-size:18px;line-height:1.6;max-width:620px;margin:30px 0 0}.matcha-build-note{font:600 14px/1.5 var(--font-mono);letter-spacing:.06em;margin:35px 0 30px;opacity:.7}.matcha-cta{padding:110px 5vw;text-align:center}.matcha-cta h2{margin-bottom:45px}.matcha-cta-actions{display:flex;gap:16px;justify-content:center}
 /* The legacy /about block that stood here - one 122px page h1 above a 12%
    index gutter, 630px and 600px min-heights, a 98px h2 shared by four
    sections and a 64px TikTok handle - was replaced wholesale by the ABOUT
    PAGE block at the end of this file. Nothing else read those selectors. */
-@media(max-width:800px){.cta{padding:14px 24px;min-height:50px}.search-bar{top:100%;grid-template-columns:1fr auto}.search-bar label{display:none}.hero-actions{align-items:flex-start;flex-direction:column}.product-intro,.origin,.pdp-facts,.behind-bar{grid-template-columns:1fr}.product-intro{padding:75px 5vw}.origin{padding:80px 5vw}.newsletter-band{grid-template-columns:1fr}.newsletter-img{height:300px}.pdp-hero{grid-template-columns:1fr}.pdp-hero-image{height:450px;position:relative}.pdp-hero-info{padding:50px 5vw}.pdp-hero h1{font-size:42px}.facts-table>div{grid-template-columns:.7fr 1.3fr}.contact-choices{grid-template-columns:1fr}.contact-choices a{min-height:330px}.calc-intro h2{margin:25px 0}.calc-panel{grid-template-columns:1fr}.ranges,.results{padding:28px 20px}.results>div{display:block}.results strong{display:block;margin-top:7px}.calc-method>div>div{flex-direction:column;gap:4px}.calc-roi-placeholder div{flex-direction:column;align-items:flex-start;gap:8px}.b2b-pricing{padding:75px 5vw}.b2b-pricing-grid{grid-template-columns:1fr}.b2b-pricing-card{padding:30px 20px}.b2b-pricing-price b{font-size:34px}.b2b-example{padding:60px 5vw}.b2b-example-grid{grid-template-columns:1fr}footer{grid-template-columns:1fr 1fr}.article-image{height:55vh;min-height:400px}.matcha-shizuoka{padding:75px 5vw}.matcha-howto{padding:75px 5vw}.matcha-method-grid{grid-template-columns:1fr}.matcha-method-grid article{border-right:0;border-bottom:1px solid rgba(245,235,226,.4)}.matcha-image{height:55vh;min-height:400px}.matcha-cta{padding:75px 5vw}.matcha-cta-actions{flex-direction:column;align-items:center}}
+@media(max-width:800px){.cta{padding:14px 24px;min-height:50px}.search-bar{top:100%;grid-template-columns:1fr auto}.search-bar label{display:none}.hero-actions{align-items:flex-start;flex-direction:column}.product-intro,.origin,.pdp-facts,.behind-bar{grid-template-columns:1fr}.product-intro{padding:75px 5vw}.origin{padding:80px 5vw}.newsletter-band{grid-template-columns:1fr}.newsletter-img{height:300px}.pdp-hero{grid-template-columns:1fr}.pdp-hero-image{height:450px;position:relative}.pdp-hero-info{padding:50px 5vw}.pdp-hero h1{font-size:42px}.facts-table>div{grid-template-columns:.7fr 1.3fr}.contact-choices{grid-template-columns:1fr}.contact-choices a{min-height:330px}.calc-intro h2{margin:25px 0}.calc-panel{grid-template-columns:1fr}.ranges,.results{padding:28px 20px}.results>div{display:block}.results strong{display:block;margin-top:7px}.calc-method>div>div{flex-direction:column;gap:4px}.calc-roi-placeholder div{flex-direction:column;align-items:flex-start;gap:8px}.b2b-pricing{padding:75px 5vw}.b2b-pricing-grid{grid-template-columns:1fr}.b2b-pricing-card{padding:30px 20px}.b2b-pricing-price b{font-size:34px}.b2b-example{padding:60px 5vw}.b2b-example-grid{grid-template-columns:1fr}footer{grid-template-columns:1fr 1fr}.article-image{height:55vh;min-height:400px}.matcha-shizuoka{padding:75px 5vw}.matcha-howto{padding:75px 5vw}.matcha-method-grid{grid-template-columns:1fr}.matcha-method-grid article{border-right:0;border-bottom:1px solid rgba(245,235,226,.4)}.matcha-cta{padding:75px 5vw}.matcha-cta-actions{flex-direction:column;align-items:center}}
 
 /* SHOP PAGE */
 
@@ -701,7 +701,6 @@ select.calc-field{appearance:none;background-image:url("data:image/svg+xml,%3Csv
 .contact-sub{font-size:18px;line-height:1.5;max-width:520px;opacity:.7}
 .customer-form-row{display:grid;grid-template-columns:1fr 1fr;gap:20px}
 
-.matcha-image{background:var(--plum)}
 
 /* ── Tablet Breakpoint ── */
 @media(max-width:960px){
@@ -1691,7 +1690,6 @@ header nav{gap:18px;font-size:12px}
 .shop-column,
 .shop-accordion,
 .matcha-hero,
-.matcha-product,
 .matcha-research,
 .matcha-use,
 .matcha-page .faq,
@@ -2668,50 +2666,44 @@ header nav{gap:18px;font-size:12px}
 }
 
 /* ══════════════════════════════════════════════════════════════
-   /our-matcha PRODUCT + TASTE, MERGED
+   /our-matcha — WHAT IT IS, HOW IT IS MADE, AND THE FACTS
 
-   Was: TWO sections. "Ein Grün. Klar erklärt." on cream at 98px - the
-   page's shared h2 scale - and then a second cream section for "Wie
-   schmeckt GLOA?", with both sections' 110px paddings meeting in the
-   middle. Reading them meant crossing a seam that said nothing.
+   Replaces the old PRODUCT + TASTE band and the PRODUCT STORY band that
+   followed it. Between them they carried a fact grid, a taste block, a
+   "was ist Matcha" block with a photo of a laptop, and a storage row
+   that had a band of its own for two sentence fragments.
 
-   Now: ONE blue section. The headline holds the left column, the product
-   copy, the facts and the taste block share the right one, and the taste
-   content is separated by a hairline rather than by a section boundary.
+   Now one band with a clear shape:
 
-   ── THE SCALE IS THE PAGE'S, NOT ITS OWN ─────────────────────
-   This is a SECTION, so it reads the section tokens the typography pass
-   established - the same ones the homepage's own sections use:
+       top    explanation  |  how matcha is made  |  the powder
+       below  one fact row: HERKUNFT, ZUTAT, GRÖSSEN, LAGERUNG
 
-       page hero        clamp(40px,5.2vw,84px) / clamp(37px,4.8vw,78px)
-       --type-title     clamp(34px,4.4vw,64px)   <- "Ein Grün."
-       --type-editorial clamp(37px,4.7vw,68px)   <- "Klar erklärt."
+   STORAGE SITS WITH THE OTHER PRODUCT FACTS, written as a sentence
+   rather than as a label fragment, which is where a customer looks for
+   it. VERWENDUNG left the row entirely: Latte, Iced and Pur have their
+   own section further down and do not need a preview here.
 
-   Their 64/68 caps are exactly the ones the brief asks for, and reading
-   the tokens means this section cannot drift from the rest of the site.
-
-   The taste heading is a SUB-heading of that, smaller again, so the
-   right column has its own internal order.
+   Nothing new was invented: the eyebrow role, the section headline
+   pair, the rail and the hairline rhythm are the page's own, and the
+   colours are the two the page already alternates.
    ══════════════════════════════════════════════════════════════ */
 
-.matcha-product{
-  background:var(--blue);
-  color:var(--cream);
-  padding-block:clamp(90px,8vw,110px);
-  border-bottom:0;
+.matcha-explain{
+  background:var(--cream);
+  color:var(--ink);
+  padding-block:clamp(78px,6.6vw,112px);
+  padding-inline:var(--rail-gutter);
 }
-.matcha-product-inner{
+/* Three columns on desktop: the explanation leads, the process sits in
+   the middle, the powder closes the row. */
+.matcha-explain-top{
   display:grid;
-  grid-template-columns:minmax(0,.45fr) 1px minmax(0,.55fr);
-  gap:clamp(32px,4vw,72px);
-  /* Top-aligned: centring would push "DAS PRODUKT" far down the page,
-     because the right column is much taller than the left. */
+  grid-template-columns:minmax(0,1fr) minmax(0,1.05fr) minmax(220px,.7fr);
+  gap:clamp(30px,3.4vw,64px);
   align-items:start;
 }
-
-/* ── THE LEFT COLUMN: A HEADLINE, AND NOTHING ELSE ─────────── */
-.matcha-product-copy{display:flex;flex-direction:column;align-items:flex-start;min-width:0}
-.matcha-product-eyebrow{
+.matcha-explain-copy{min-width:0;max-width:460px}
+.matcha-explain-eyebrow{
   margin:0;
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:600;
@@ -2720,110 +2712,204 @@ header nav{gap:18px;font-size:12px}
   line-height:1.2;
   letter-spacing:.2em;
   text-transform:uppercase;
-  color:var(--cream);
+  color:var(--berry);
 }
-.matcha-page .matcha-product-headline{
+.matcha-explain-headline{
   display:flex;
   flex-direction:column;
   align-items:flex-start;
-  margin:clamp(18px,1.8vw,26px) 0 0;
-  color:var(--cream);
+  margin:clamp(16px,1.6vw,24px) 0 0;
   letter-spacing:normal;
   line-height:1;
 }
-.matcha-product-line{
+.matcha-explain-line{
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:500;
   font-style:normal;
-  font-size:var(--type-title);
+  font-size:clamp(38px,3.8vw,54px);
   line-height:.98;
   letter-spacing:-.04em;
-  color:var(--cream);
+  color:var(--ink);
 }
-.matcha-product-line-accent{
+.matcha-explain-line-accent{
   font-family:var(--font-display),Georgia,serif;
   font-weight:400;
   font-style:italic;
-  font-size:var(--type-editorial);
-  line-height:.95;
-  letter-spacing:-.015em;
+  font-size:clamp(40px,4.1vw,58px);
+  line-height:.93;
+  letter-spacing:-.01em;
   margin-top:3px;
-  color:var(--cream);
+  color:var(--ink);
 }
-
-/* THE SEAM BETWEEN THE TWO MAIN COLUMNS. Partial height and vertically
-   centred, so it structures the two halves without drawing a table edge
-   down the section. The gradient only softens the two ends - at .28
-   alpha over blue there is nothing else to see. Purely decorative, so
-   the element is aria-hidden and carries no text. */
-.matcha-product-divider{
-  display:block;
-  width:1px;
-  height:clamp(260px,38vw,440px);
-  align-self:center;
-  background:linear-gradient(
-    to bottom,
-    transparent,
-    rgba(245,235,226,.28) 12%,
-    rgba(245,235,226,.28) 88%,
-    transparent
-  );
-}
-
-/* ── THE RIGHT COLUMN ──────────────────────────────────────── */
-.matcha-product-detail{min-width:0}
-.matcha-product-intro{
-  margin:0;
-  max-width:620px;
+.matcha-explain-body{
+  margin:clamp(20px,2vw,28px) 0 0;
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:400;
   font-style:normal;
   font-size:var(--type-body);
-  line-height:1.55;
-  color:var(--cream);
+  line-height:1.6;
+  color:rgba(17,17,17,.82);
 }
 
-/* Three across, then two - the sixth cell stays empty on purpose. */
-.matcha-fact-grid{
+/* ── HOW MATCHA IS MADE ────────────────────────────────────── */
+/* Four steps on one hairline rhythm, the same shape the homepage
+   process and the partnership steps already use. Not a card deck. */
+.matcha-process{min-width:0}
+.matcha-process-title{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:clamp(20px,1.7vw,24px);
+  line-height:1.2;
+  letter-spacing:-.02em;
+  color:var(--ink);
+}
+.matcha-process-note{
+  margin:8px 0 0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:clamp(14px,1.05vw,15px);
+  line-height:1.5;
+  color:rgba(17,17,17,.62);
+}
+.matcha-process-list{
+  list-style:none;
+  margin:clamp(22px,2.2vw,30px) 0 0;
+  padding:0;
+  border-top:1px solid rgba(17,17,17,.18);
+}
+.matcha-process-step{
   display:grid;
-  grid-template-columns:repeat(3,minmax(0,1fr));
-  gap:0 clamp(20px,2.4vw,40px);
-  margin:clamp(34px,3.4vw,48px) 0 0;
+  grid-template-columns:clamp(40px,3.4vw,56px) minmax(0,1fr);
+  gap:4px clamp(12px,1.4vw,20px);
+  padding:clamp(15px,1.5vw,20px) 0;
+  border-bottom:1px solid rgba(17,17,17,.18);
 }
-.matcha-fact-grid>div{
-  border-top:1px solid rgba(245,235,226,.3);
-  padding:clamp(18px,1.8vw,24px) 0;
-  min-width:0;
+.matcha-process-num{
+  grid-row:1 / span 2;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:12px;
+  line-height:1.4;
+  letter-spacing:.08em;
+  color:var(--berry);
 }
-.matcha-fact-grid dt{
-  margin:0 0 8px;
+.matcha-process-label{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:clamp(13px,1.05vw,15px);
+  line-height:1.3;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  color:var(--ink);
+}
+.matcha-process-text{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:clamp(14px,1.05vw,15px);
+  line-height:1.6;
+  color:rgba(17,17,17,.82);
+}
+
+/* The powder. Square, no frame, no shadow.
+
+   It STRETCHES to the row instead of sitting at its natural height at
+   the top of the column: the process list beside it is roughly twice as
+   tall, and a photo that stops early leaves a column of empty cream
+   under it. object-fit:cover crops rather than distorts, so filling the
+   row costs nothing. The stacked layouts below put it back on its own
+   height, where there is no row left to match. */
+.matcha-explain-photo{margin:0;min-width:0;align-self:stretch}
+.matcha-explain-photo img{
+  display:block;
+  width:100%;
+  height:100%;
+  min-height:clamp(300px,32vw,420px);
+  object-fit:cover;
+  border-radius:0;
+}
+
+/* ── THE FACT ROW, STORAGE INCLUDED ────────────────────────── */
+.matcha-facts{
+  margin-top:clamp(52px,5vw,78px);
+  padding-top:clamp(32px,3.2vw,46px);
+  border-top:1px solid rgba(17,17,17,.18);
+}
+.matcha-facts-eyebrow{
+  margin:0;
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:600;
   font-style:normal;
   font-size:var(--type-meta);
   line-height:1.2;
+  letter-spacing:.2em;
+  text-transform:uppercase;
+  color:var(--berry);
+}
+.matcha-facts-list{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:0;
+  margin:clamp(30px,3vw,44px) 0 0;
+}
+.matcha-fact{
+  display:grid;
+  gap:clamp(7px,.8vw,11px);
+  align-content:start;
+  padding:clamp(17px,1.7vw,23px) clamp(20px,2vw,34px) 0 0;
+  border-top:1px solid var(--berry);
+}
+.matcha-fact-label{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:11px;
+  line-height:1.2;
   letter-spacing:.18em;
   text-transform:uppercase;
-  color:var(--cream);
-  opacity:.8;
+  color:var(--berry);
 }
-.matcha-fact-grid dd{
+.matcha-fact-value{
   margin:0;
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:600;
   font-style:normal;
-  font-size:clamp(18px,1.5vw,20px);
+  font-size:clamp(15px,1.25vw,18px);
   line-height:1.3;
-  letter-spacing:-.01em;
-  color:var(--cream);
+  letter-spacing:-.015em;
+  color:var(--ink);
+}
+.matcha-fact-text{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:clamp(14px,1.05vw,15px);
+  line-height:1.6;
+  color:rgba(17,17,17,.82);
 }
 
-/* ── THE TASTE BLOCK: A HAIRLINE, NOT A SECTION ────────────── */
-.matcha-taste-block{
-  margin:clamp(40px,4vw,60px) 0 0;
-  padding:clamp(34px,3.4vw,48px) 0 0;
-  border-top:1px solid rgba(245,235,226,.3);
+/* ══ TASTE ═════════════════════════════════════════════════ */
+.matcha-taste{
+  background:var(--berry);
+  color:var(--cream);
+  padding-block:clamp(74px,6.2vw,104px);
+  padding-inline:var(--rail-gutter);
 }
+.matcha-taste-inner{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);
+  gap:clamp(30px,3.8vw,76px);
+  align-items:start;
+}
+.matcha-taste-head{min-width:0}
 .matcha-taste-eyebrow{
   margin:0;
   font-family:var(--font-sans),Arial,sans-serif;
@@ -2833,17 +2919,13 @@ header nav{gap:18px;font-size:12px}
   line-height:1.2;
   letter-spacing:.2em;
   text-transform:uppercase;
-  color:var(--cream);
-  opacity:.8;
+  color:rgba(245,235,226,.72);
 }
-/* A SUB-heading: smaller than "Ein Grün. Klar erklärt." at every width,
-   because the right column answers to the left one. */
 .matcha-taste-headline{
   display:flex;
   flex-direction:column;
   align-items:flex-start;
-  margin:clamp(14px,1.4vw,20px) 0 0;
-  color:var(--cream);
+  margin:clamp(16px,1.6vw,24px) 0 0;
   letter-spacing:normal;
   line-height:1;
 }
@@ -2851,81 +2933,84 @@ header nav{gap:18px;font-size:12px}
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:500;
   font-style:normal;
-  font-size:clamp(30px,3vw,46px);
+  font-size:clamp(38px,3.8vw,54px);
   line-height:.98;
-  letter-spacing:-.035em;
+  letter-spacing:-.04em;
   color:var(--cream);
 }
-.matcha-taste-line-accent{
-  font-family:var(--font-display),Georgia,serif;
-  font-weight:400;
-  font-style:italic;
-  font-size:clamp(33px,3.3vw,50px);
-  line-height:.95;
-  letter-spacing:-.015em;
-  margin-top:2px;
-  color:var(--cream);
-}
+.matcha-taste-detail{min-width:0;max-width:620px;padding-top:clamp(6px,1vw,16px)}
 .matcha-taste-body{
-  margin:clamp(20px,2vw,28px) 0 0;
-  max-width:640px;
+  margin:0;
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:400;
   font-style:normal;
-  font-size:clamp(15px,1.2vw,17px);
+  font-size:var(--type-body);
   line-height:1.6;
   color:var(--cream);
 }
-.matcha-taste-pair{
+.matcha-taste-body+.matcha-taste-body{margin-top:clamp(14px,1.4vw,20px)}
+.matcha-taste-notes{
   display:grid;
   grid-template-columns:repeat(2,minmax(0,1fr));
-  gap:0 clamp(20px,2.4vw,40px);
-  margin:clamp(28px,2.8vw,38px) 0 0;
-  max-width:700px;
+  gap:0;
+  margin:clamp(30px,3vw,42px) 0 0;
 }
-.matcha-taste-pair>div{
-  border-top:1px solid rgba(245,235,226,.3);
-  padding:clamp(16px,1.6vw,22px) 0;
-  min-width:0;
+.matcha-taste-note{
+  display:grid;
+  gap:6px;
+  align-content:start;
+  padding:clamp(15px,1.5vw,20px) clamp(16px,1.8vw,28px) clamp(15px,1.5vw,20px) 0;
+  border-top:1px solid rgba(245,235,226,.34);
 }
-.matcha-taste-pair dt{
-  margin:0 0 8px;
+.matcha-taste-note-label{
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:600;
   font-style:normal;
-  font-size:var(--type-meta);
+  font-size:11px;
   line-height:1.2;
   letter-spacing:.18em;
   text-transform:uppercase;
-  color:var(--cream);
-  opacity:.75;
+  color:rgba(245,235,226,.72);
 }
-.matcha-taste-pair dd{
+.matcha-taste-note-text{
   margin:0;
   font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:600;
+  font-weight:400;
   font-style:normal;
-  font-size:clamp(16px,1.3vw,18px);
-  line-height:1.35;
+  font-size:clamp(14px,1.05vw,15px);
+  line-height:1.55;
   color:var(--cream);
 }
 
-@media (max-width:1024px){
-  /* One column, in the reading order the brief sets out - and still one
-     blue section. */
-  .matcha-product-inner{grid-template-columns:1fr;gap:clamp(28px,4vw,40px)}
-  .matcha-product-divider{display:none}
+/* ══ RESPONSIVE ════════════════════════════════════════════ */
+@media (max-width:1100px){
+  /* The powder drops under the two text columns rather than squeezing
+     them; the reading order is unchanged. */
+  .matcha-explain-top{grid-template-columns:minmax(0,1fr) minmax(0,1.05fr)}
+  .matcha-explain-photo{grid-column:1 / -1;align-self:auto}
+  .matcha-explain-photo img{height:auto;min-height:0;max-height:clamp(240px,30vw,340px)}
+  .matcha-facts-list{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:clamp(26px,3vw,36px)}
+}
+
+@media (max-width:900px){
+  .matcha-explain{padding-block:clamp(58px,9vw,78px)}
+  .matcha-taste{padding-block:clamp(56px,9vw,76px)}
+  .matcha-explain-top{grid-template-columns:minmax(0,1fr);gap:clamp(30px,4.6vw,44px)}
+  .matcha-explain-copy{max-width:none}
+  .matcha-taste-inner{grid-template-columns:minmax(0,1fr);gap:clamp(24px,4vw,34px)}
+  .matcha-taste-detail{max-width:none}
+  .matcha-page .matcha-explain-line{font-size:clamp(32px,8vw,40px)}
+  .matcha-page .matcha-explain-line-accent{font-size:clamp(34px,8.6vw,42px)}
+  .matcha-page .matcha-taste-line{font-size:clamp(32px,8vw,40px)}
 }
 
 @media (max-width:640px){
-  .matcha-product{padding-block:clamp(64px,13vw,84px)}
-  .matcha-product-intro{max-width:none}
-  .matcha-taste-body{max-width:none}
-  /* Label over value, one fact per row - never a squeezed three-up. */
-  .matcha-fact-grid,
-  .matcha-taste-pair{grid-template-columns:1fr;gap:0}
-  .matcha-fact-grid>div,
-  .matcha-taste-pair>div{padding:16px 0}
+  /* One column each. No squeezed two-column grids on a phone. */
+  .matcha-facts-list{grid-template-columns:minmax(0,1fr);row-gap:clamp(22px,4.4vw,30px)}
+  .matcha-fact{padding-right:0}
+  .matcha-taste-notes{grid-template-columns:minmax(0,1fr)}
+  .matcha-taste-note{padding-right:0}
+  .matcha-explain-photo img{height:auto;min-height:0;max-height:clamp(220px,54vw,300px)}
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -3104,6 +3189,152 @@ header nav{gap:18px;font-size:12px}
   .matcha-research-body{font-size:15px}
 }
 
+
+/* ── THE MOBILE RESEARCH CARDS AND THEIR SHEET ─────────────── */
+/* On desktop the three blocks read exactly as they always did: the
+   regulated paragraph is on the page and the affordance below is not
+   rendered at all. On a phone three regulated paragraphs stacked in
+   full are a wall, so the body is withheld and each block becomes a
+   tappable card that opens the SAME text in a sheet.
+
+   THE COPY IS UNCHANGED. Only where it is shown changed. There is no
+   studies page in this project, so no card links to one and no source
+   was invented to fill the button. */
+.matcha-research-open{display:none}
+
+@media (max-width:760px){
+  .matcha-research-body{display:none}
+  .matcha-research-open{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:16px;
+    width:100%;
+    min-height:48px;
+    margin-top:clamp(10px,2.4vw,14px);
+    padding:0;
+    background:none;
+    border:0;
+    border-radius:0;
+    text-align:left;
+    /* THE SECTION IS CREAM. Cream type on it measures 1:1 and the hint
+       is simply not there - the same trap the launch popup's accent hit
+       on blue. Ink and raspberry are the colours this section already
+       uses, and both clear AA on this ground. */
+    color:var(--ink);
+  }
+  /* The words are the point: a card that looks tappable but never says
+     so is a card most people scroll past. */
+  .matcha-research-open-label{
+    font-family:var(--font-sans),Arial,sans-serif;
+    font-weight:600;
+    font-style:normal;
+    font-size:12px;
+    line-height:1.2;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    /* 7.0:1 on cream. */
+    color:rgba(17,17,17,.72);
+  }
+  /* The same "+" the FAQ rows carry, in the same raspberry: 6.1:1. */
+  .matcha-research-open-mark{
+    font-family:var(--font-sans),Arial,sans-serif;
+    font-weight:400;
+    font-size:22px;
+    line-height:1;
+    color:var(--berry);
+  }
+}
+
+/* THE SHEET. Bottom sheet on a phone, centred panel above it. Same
+   modal contract as the cart drawer and the launch popup: role=dialog,
+   aria-modal, focus in and back out, Escape, backdrop, scroll lock. */
+.mr-sheet-backdrop{
+  position:fixed;
+  inset:0;
+  z-index:60;
+  display:flex;
+  align-items:flex-end;
+  justify-content:center;
+  background:rgba(17,17,17,.58);
+  border:0;
+}
+.mr-sheet{
+  position:relative;
+  width:100%;
+  max-width:560px;
+  max-height:calc(100dvh - 64px);
+  overflow-y:auto;
+  box-sizing:border-box;
+  padding:clamp(26px,5vw,34px) clamp(20px,5vw,30px) clamp(28px,6vw,36px);
+  background:var(--berry);
+  color:var(--cream);
+  border-radius:0;
+  animation:mr-sheet-rise .18s ease-out both;
+}
+.mr-sheet-close{
+  position:absolute;
+  top:6px;
+  right:6px;
+  width:44px;
+  height:44px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border:0;
+  background:none;
+  color:var(--cream);
+  font:300 30px/1 var(--font-sans),Arial,sans-serif;
+  opacity:.82;
+}
+.mr-sheet-close:hover{opacity:1}
+.mr-sheet-backdrop :focus-visible{outline-color:var(--cream)}
+.mr-sheet-head{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding-right:44px;
+  color:var(--cream);
+}
+/* THE ICON IS THE SAME GLYPH THE CARD RENDERS, ON THE OTHER GROUND.
+   .matcha-research-icon paints itself raspberry, which is right on the
+   section's cream and invisible on this panel. It takes the panel's
+   own colour here rather than the card's. */
+.mr-sheet-head .matcha-research-icon{color:var(--cream)}
+.mr-sheet-title{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:clamp(16px,4vw,19px);
+  line-height:1.25;
+  letter-spacing:.02em;
+  text-transform:uppercase;
+  color:var(--cream);
+}
+.mr-sheet-body{
+  margin:clamp(16px,3.4vw,22px) 0 0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:400;
+  font-style:normal;
+  font-size:clamp(15px,3.8vw,16px);
+  line-height:1.65;
+  color:var(--cream);
+}
+
+@keyframes mr-sheet-rise{from{opacity:0;transform:translate3d(0,12px,0)}to{opacity:1;transform:none}}
+
+@media (min-width:761px){
+  /* Above the phone breakpoint it is a centred panel, not a sheet -
+     though the affordance that opens it is mobile only. */
+  .mr-sheet-backdrop{align-items:center;padding:32px}
+  .mr-sheet{max-height:calc(100dvh - 64px)}
+}
+
+@media (prefers-reduced-motion:reduce){
+  .mr-sheet{animation:none}
+}
+
 /* ══════════════════════════════════════════════════════════════
    /our-matcha USAGE SECTION
 
@@ -3256,147 +3487,6 @@ header nav{gap:18px;font-size:12px}
   .matcha-use-line-accent{font-size:clamp(42px,11.2vw,54px)}
   .matcha-use-label{font-size:clamp(17px,4.6vw,18px)}
   .matcha-use-body{font-size:15px}
-}
-
-/* ══════════════════════════════════════════════════════════════
-   /our-matcha PRODUCT STORY - THE MOVED AREAS
-
-   "Was ist Matcha" was a raspberry full-width section with a 480px
-   photo filling half the screen, and the storage note was a cream strip
-   between two hairlines much further down the page. Both said something
-   about the same product, so both are areas of the product story now -
-   moved into .matcha-product-inner as full-rail rows, not recoloured
-   sections stacked behind each other.
-
-   They span the grid's three tracks, so THE PARTIAL DIVIDER STAYS IN
-   ITS OWN ROW: it separates the headline from the facts and nothing
-   below it, exactly as before.
-
-   The photo is an editorial insert now - clamp(300px,26vw,420px)
-   against the old half-screen 480px crop - and it sits directly on the
-   blue with no frame of any kind.
-   ══════════════════════════════════════════════════════════════ */
-
-.matcha-what-block,
-.matcha-storage-row{
-  grid-column:1/-1;
-  margin-top:clamp(64px,6vw,88px);
-  padding-top:clamp(40px,4vw,56px);
-  border-top:1px solid rgba(245,235,226,.24);
-}
-
-/* ── AREA C: WHAT IS MATCHA ────────────────────────────────── */
-.matcha-what-block{
-  display:grid;
-  grid-template-columns:minmax(0,1fr) auto;
-  gap:clamp(32px,4vw,72px);
-  align-items:start;
-}
-.matcha-what-copy{min-width:0;max-width:640px}
-.matcha-what-eyebrow{
-  margin:0;
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:600;
-  font-style:normal;
-  font-size:var(--type-meta);
-  line-height:1.2;
-  letter-spacing:.2em;
-  text-transform:uppercase;
-  color:var(--cream);
-}
-.matcha-what-headline{
-  display:flex;
-  flex-direction:column;
-  align-items:flex-start;
-  margin:clamp(16px,1.6vw,22px) 0 0;
-  color:var(--cream);
-  letter-spacing:normal;
-  line-height:1;
-}
-.matcha-what-line{
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:500;
-  font-style:normal;
-  font-size:clamp(44px,4vw,58px);
-  line-height:.98;
-  letter-spacing:-.04em;
-  color:var(--cream);
-}
-.matcha-what-line-accent{
-  font-family:var(--font-display),Georgia,serif;
-  font-weight:400;
-  font-style:italic;
-  font-size:clamp(48px,4.3vw,62px);
-  line-height:.93;
-  letter-spacing:-.015em;
-  color:var(--cream);
-  margin-top:3px;
-}
-.matcha-what-body{
-  margin:clamp(22px,2.2vw,30px) 0 0;
-  max-width:620px;
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:400;
-  font-style:normal;
-  font-size:var(--type-body);
-  line-height:1.6;
-  color:var(--cream);
-}
-/* AN INSERT, NOT A HERO IMAGE. No frame, no crop, straight on the blue. */
-.matcha-what-photo{
-  margin:0;
-  width:clamp(300px,26vw,420px);
-  max-width:420px;
-  border:0;
-  border-radius:0;
-  box-shadow:none;
-  background:transparent;
-}
-.matcha-what-photo img{display:block;width:100%;height:auto}
-
-/* ── AREA D: STORAGE ───────────────────────────────────────── */
-/* A row, not a section: the label on the left, the two sentences on the
-   right, and nothing else. */
-.matcha-storage-row{
-  display:grid;
-  grid-template-columns:minmax(0,.33fr) minmax(0,.67fr);
-  gap:clamp(20px,2.4vw,40px);
-  align-items:start;
-}
-.matcha-storage-eyebrow{
-  margin:0;
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:600;
-  font-style:normal;
-  font-size:var(--type-meta);
-  line-height:1.2;
-  letter-spacing:.2em;
-  text-transform:uppercase;
-  color:var(--cream);
-}
-.matcha-storage-body{
-  margin:0;
-  max-width:620px;
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:400;
-  font-style:normal;
-  font-size:clamp(15px,1.1vw,16px);
-  line-height:1.55;
-  color:var(--cream);
-}
-
-@media (max-width:1024px){
-  .matcha-what-block{grid-template-columns:1fr;gap:clamp(28px,4vw,40px)}
-  .matcha-what-photo{width:min(100%,420px)}
-  .matcha-storage-row{grid-template-columns:1fr;gap:clamp(12px,2vw,18px)}
-}
-
-@media (max-width:640px){
-  .matcha-what-line{font-size:clamp(34px,9.5vw,44px)}
-  .matcha-what-line-accent{font-size:clamp(36px,10.2vw,48px)}
-  .matcha-what-body{max-width:none}
-  .matcha-what-photo{width:100%;max-width:360px;margin-top:clamp(24px,6vw,32px)}
-  .matcha-storage-body{max-width:none}
 }
 
 /* ══════════════════════════════════════════════════════════════

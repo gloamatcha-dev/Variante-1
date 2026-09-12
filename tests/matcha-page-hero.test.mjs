@@ -20,7 +20,7 @@ const css = read("app/globals.css");
 
 const page = site.slice(site.indexOf("function MatchaPage()"), site.indexOf("\nfunction ", site.indexOf("function MatchaPage()") + 5));
 const hero = page.slice(page.indexOf('<section className="matcha-hero">'), page.indexOf("</section>") + 10);
-const rules = css.slice(css.indexOf("/our-matcha PAGE HERO"), css.indexOf("/our-matcha PRODUCT + TASTE, MERGED"));
+const rules = css.slice(css.indexOf("/our-matcha PAGE HERO"), css.indexOf("/our-matcha — WHAT IT IS, HOW IT IS MADE, AND THE FACTS"));
 const rule = name => {
   const at = rules.indexOf(name);
   assert.notEqual(at, -1, `missing rule: ${name}`);
@@ -135,10 +135,22 @@ test("3: two families, unchanged copy, canonical rail", () => {
   assert.ok(hero.includes('<p className="eyebrow matcha-hero-eyebrow gloa-hero-eyebrow">UNSER MATCHA</p>'));
   assert.ok(hero.includes('<span className="matcha-hero-line gloa-hero-primary">Matcha.</span>'));
   assert.ok(hero.includes('<i className="matcha-hero-line matcha-hero-line-accent gloa-hero-secondary">Ohne Umwege.</i>'));
-  // SITE-01B: the lead promised "nichts erfunden" while carrying an
-  // organic claim no certificate backs yet. The claim went, the line
-  // and its promise stayed.
-  assert.ok(hero.includes("Matcha aus Shizuoka, Japan.<br/>Für Latte, pur oder iced.<br/>Klar beschrieben, nichts erfunden."));
+  // BRIEF 1 + 2: the hero is the page's HERKUNFT section now, so the
+  // lead explains Shizuoka instead of listing product data that the
+  // fact row below repeats in full. Pinned word for word, because
+  // every sentence in it is a claim about a real region.
+  assert.ok(hero.includes("Unser Matcha kommt aus Shizuoka in Japan, einer Region mit langer Teetradition. Das milde Klima, die fruchtbaren Böden und die Erfahrung im Teeanbau machen Shizuoka zu einer der bekannten Teeregionen Japans."));
+  assert.ok(hero.includes("Von dort kommt der Matcha, den wir für GLOA ausgewählt haben."));
+  // SITE-01B still holds: no organic or grade claim may come back in
+  // through the rewritten lead, and no superlative about the region.
+  for (const claim of ["bio", "Bio", "zertifiziert", "First Harvest", "Ceremonial", "beste", "höchste"]) {
+    assert.ok(!hero.includes(claim), `an unbacked claim entered the hero: ${claim}`);
+  }
+  // The product data the hero used to carry lives further down exactly
+  // once, so the page does not answer the same question twice.
+  for (const moved of ["Für Latte, pur oder iced", "Klar beschrieben, nichts erfunden"]) {
+    assert.ok(!hero.includes(moved), `the hero still duplicates: ${moved}`);
+  }
   for (const dash of ["–", "—"]) assert.ok(!hero.includes(dash), `a dash was introduced: ${dash}`);
 
   // -- THE HEADLINE LINES ARE THE SHARED SCALE ------------------
@@ -149,7 +161,6 @@ test("3: two families, unchanged copy, canonical rail", () => {
   assert.match(css, /\.gloa-hero-primary\{[\s\S]*?font-weight:800/);
   assert.match(css, /\.gloa-hero-secondary\{[\s\S]*?font-style:italic/);
   assert.match(css, /\.gloa-hero-secondary\{[\s\S]*?font-weight:400/);
-  assert.match(css, /\.matcha-facts h2 i[,{][^{]*\{[^}]*font-family:var\(--font-display\)/);
   for (const m of rules.matchAll(/font-family:([^;}]+)/g)) {
     assert.match(m[1], /^var\(--font-(sans|display)\)/, `a third family: ${m[1]}`);
   }
@@ -161,7 +172,18 @@ test("3: two families, unchanged copy, canonical rail", () => {
 
   // ── THE RAIL, AND A CONTENT-DRIVEN HEIGHT ────────────────────
   assert.match(hero, /<div className="matcha-hero-inner home-rail">/);
-  assert.match(css, /\.shop-accordion,\s*\.matcha-hero,\s*\.matcha-product,\s*\.matcha-research,\s*\.matcha-use,\s*\.matcha-page \.faq,\s*\.matcha-cta\{padding-inline:var\(--rail-gutter\)\}/);
+  // Every band on the page takes the SAME gutter - some through the
+  // shared selector list, the two new ones in their own block, the way
+  // /about does it. Checked by value, so a new band cannot invent a
+  // second rail.
+  assert.match(css, /\.shop-accordion,\s*\.matcha-hero,\s*\.matcha-research,\s*\.matcha-use,\s*\.matcha-page \.faq,\s*\.matcha-cta\{padding-inline:var\(--rail-gutter\)\}/);
+  for (const band of ["matcha-explain", "matcha-taste"]) {
+    const at = css.indexOf(`.${band}{`);
+    assert.notEqual(at, -1, `missing band: ${band}`);
+    assert.match(css.slice(at, css.indexOf("}", at)), /padding-inline:var\(--rail-gutter\)/,
+      `${band} does not sit on the canonical rail`);
+  }
+  assert.ok(!css.includes(".matcha-product"), "a dead selector survived the restructure");
   assert.match(rules, /\.matcha-hero-inner\{[\s\S]*?grid-template-columns:minmax\(0,\.95fr\) minmax\(0,1\.05fr\)/);
   assert.match(rules, /\.matcha-hero\{[\s\S]*?padding-block:clamp\(72px,7vw,110px\)/);
   assert.ok(!rules.includes("100vh"), "the hero reserves a viewport");
