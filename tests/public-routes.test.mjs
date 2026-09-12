@@ -69,10 +69,13 @@ test("homepage: the consumer sections still render", async () => {
   // the newsletter was removed site-wide.
   const { html } = await server.getHtml("/");
   // The origin used to be a cream band headlined "From Shizuoka," and is
-  // now the how-to section's eyebrow - same fact, one band fewer. The
-  // preparation section it opens is still there.
-  assert.match(html, /FROM SHIZUOKA, JAPAN/);
-  assert.match(html, /Latte oder pur\./);
+  // now a labelled fact in the AUF EINEN BLICK row - same fact, one
+  // band fewer, and the preparation steps that used to fill this band
+  // moved to the pages that own them.
+  assert.match(html, /AUF EINEN BLICK/);
+  assert.match(html, /Klar, was drin ist\./);
+  assert.match(html, /Und wo es herkommt\./);
+  assert.match(html, /Shizuoka, Japan/);
 });
 
 /* -- No newsletter anywhere (Task 27E) ----------------------- */
@@ -269,4 +272,71 @@ test("header: Escape closes the mobile menu and gives focus back", () => {
   // The focus target is the control that opened it.
   assert.match(chrome, /<button className="menu" ref=\{menuButtonRef\}/);
   assert.match(chrome, /const menuButtonRef=useRef<HTMLButtonElement>\(null\)/);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   THE GLOBAL AI IMAGE NOTICE
+
+   Every image on the site is currently a placeholder visualisation.
+   That is a statement about the SITE, so it is made once, in the one
+   element every route renders, rather than stamped on each image or
+   repeated per section.
+   ══════════════════════════════════════════════════════════════ */
+
+const IMAGE_NOTICE = "Bildhinweis: Die aktuell auf dieser Website gezeigten Bilder sind KI-generierte Visualisierungen und werden schrittweise durch finale Fotografien ersetzt.";
+
+test("AI image notice: rendered once, in the footer, on every public route", async () => {
+  for (const route of ["/", "/our-matcha", "/about", "/for-cafes", "/contact"]) {
+    const { status, html } = await server.getHtml(route);
+    assert.equal(status, 200, `${route} did not render`);
+    const hits = html.split(IMAGE_NOTICE).length - 1;
+    assert.equal(hits, 1, `${route} states the image notice ${hits} times, not once`);
+    // IN THE FOOTER, and after the last footer link rather than among
+    // them: it is a statement about the site, not a legal page.
+    const footer = html.slice(html.lastIndexOf("<footer"));
+    assert.ok(footer.includes(IMAGE_NOTICE), `${route} states it outside the footer`);
+    assert.match(footer, /<p class="image-note">/);
+    assert.ok(footer.indexOf("image-note") > footer.lastIndexOf('href="/versand"'),
+      "the notice sits between the legal links");
+  }
+});
+
+test("AI image notice: not an overlay, a banner or a per-image caption", async () => {
+  const { html } = await server.getHtml("/");
+  // ONE element, and it is not attached to any <img> or <figure>.
+  assert.equal(html.split('class="image-note"').length - 1, 1);
+  for (const shape of ["image-note-overlay", "ai-badge", "img-ai", "role=\"alert\"", "role=\"banner\""]) {
+    assert.ok(!html.includes(shape), `the notice turned into a ${shape}`);
+  }
+  // Every homepage image is still a plain image with its own alt text.
+  const imgs = [...html.matchAll(/<img [^>]*>/g)].map(m => m[0]);
+  assert.ok(imgs.length >= 3, "the homepage lost its images");
+  for (const img of imgs) {
+    // An alt attribute on every one. Some are deliberately empty: the
+    // lifestyle tiles are decorative and their <figcaption> carries the
+    // label, which is the correct shape for those.
+    assert.match(img, /alt="/, `an image has no alt attribute: ${img}`);
+    assert.ok(!img.includes("KI-generiert"), "the notice was stamped onto an image");
+  }
+  // And no alt text was rewritten into a disclosure.
+  assert.ok(!/alt="[^"]*(KI|AI-generated)[^"]*"/.test(html), "an alt text became a disclosure");
+});
+
+test("AI image notice: smaller than the footer navigation, and still readable", () => {
+  const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf-8");
+  const rule = css.slice(css.indexOf(".image-note{"), css.indexOf("}", css.indexOf(".image-note{")));
+  assert.ok(rule.length > 0, "the notice has no rule");
+  // 13px against the footer links' 14px: quieter, not hidden. A size
+  // below 12px, or an opacity that dims it into the background, is
+  // what "dezent" must not be allowed to mean.
+  const size = /font:[^;]*?(\d+)px/.exec(rule);
+  assert.ok(size, "the notice does not set a size");
+  assert.ok(Number(size[1]) >= 12 && Number(size[1]) < 14,
+    `the notice is ${size[1]}px - footer links are 14px`);
+  assert.ok(!rule.includes("opacity"), "the notice was dimmed with opacity");
+  // Cream at .78 on the ink footer is about 9:1.
+  assert.match(rule, /color:rgba\(245,235,226,\.78\)/);
+  // It is its own line, not a cell in the legal row.
+  assert.match(rule, /grid-column:1\/-1/);
+  assert.ok(!css.includes(".legal .image-note"), "the notice was nested into the legal row");
 });

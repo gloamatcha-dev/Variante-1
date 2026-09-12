@@ -49,15 +49,17 @@ test("1: the instructions are hidden here and untouched on the homepage", () => 
   assert.match(css, /\.matcha-howto\{padding:110px 5vw;background:var\(--plum\)/);
   assert.match(css, /\.matcha-method-grid\{display:grid/);
 
-  // ── THE HOMEPAGE STILL MAKES IT ──────────────────────────────
-  const homeStart = site.indexOf("function HowTo()");
-  const howTo = site.slice(homeStart, site.indexOf("\nfunction ", homeStart + 5));
-  for (const line of ["HOW TO GLOA", "Latte oder pur.", "Mehr brauchst du nicht.",
-                      "MATCHA LATTE", "PURE MATCHA", "3 g Matcha"]) {
-    assert.ok(howTo.includes(line) || site.includes(line), `the homepage how-to lost: ${line}`);
-  }
-  assert.match(css, /HOMEPAGE HOW TO GLOA SECTION/);
-  assert.match(css, /\.how-to\{[\s\S]*?background:var\(--plum\)/);
+  // ── PREPARATION STILL EXISTS, JUST NOT HERE AND NOT ON THE
+  //    HOMEPAGE ANY MORE ──────────────────────────────────────
+  // This section deliberately carries no dose, temperature or step. It
+  // used to be able to say "the homepage does that" - the homepage's
+  // preparation band has since been replaced by a fact row, so the
+  // guard names where the instructions actually live now.
+  assert.ok(!site.includes("function HowTo("), "the retired homepage band came back");
+  assert.match(site, /Ca\. 3 g Matcha mit wenig hei\u00dfem Wasser/, "the product page lost its method cards");
+  assert.match(site, /Wie bereite ich Matcha zu\?/, "the /our-matcha FAQ lost the preparation answer");
+  // And the hidden legacy block on this page still holds its own copy.
+  assert.match(site, /SHOW_LEGACY_PREPARATION_SECTION&&<section className="matcha-howto">/);
 });
 
 /* ══════════════════════════════════════════════════════════════

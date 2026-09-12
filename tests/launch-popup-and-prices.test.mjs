@@ -204,7 +204,7 @@ test("1h: closed, it renders NOTHING - the page underneath is untouched", async 
   assert.match(site, /<Footer\/><CartDrawer open=\{cartOpen\} onClose=\{closeCart\}\/><LaunchPopup route=\{route\}\/><\/>/);
   // The homepage still renders exactly the sections it did.
   assert.deepEqual([...home.matchAll(/<section class="([a-z-]+)"/g)].map(m => m[1]),
-    ["hero", "countdown", "prelaunch", "daily", "how-to", "community", "brand-note"]);
+    ["hero", "countdown", "prelaunch", "daily", "glance", "community", "brand-note"]);
 });
 
 test("1i: every rule is scoped to the popup, so no finished page moved", () => {

@@ -20,14 +20,17 @@ const css = read("app/globals.css");
 
 const data = site.slice(site.indexOf("const researchBlocks=["), site.indexOf("function MatchaPage()"));
 const page = site.slice(site.indexOf("function MatchaPage()"), site.indexOf("\nfunction ", site.indexOf("function MatchaPage()") + 5));
+// The section's markup now lives in <MatchaResearch/>; the <section>
+// wrapper keeps the copy.
 const section = page.slice(page.indexOf('<section className="matcha-research">'),
-                           page.indexOf('<section className="matcha-howto">'));
+                           page.indexOf('<section className="matcha-howto">'))
+  + site.slice(site.indexOf("function MatchaResearch()"), site.indexOf("function MatchaPage()"));
 const block = css.slice(css.indexOf("/our-matcha RESEARCH SECTION"), css.indexOf("/our-matcha USAGE SECTION"));
-// The section's own surfaces end where the tap-to-read overlay begins.
-// The layout guards below were written about the SECTION - an overlay
-// panel is a different thing and gets its own checks in part 5.
-const SHEET_AT = block.indexOf("THE MOBILE RESEARCH CARDS AND THEIR SHEET");
-assert.notEqual(SHEET_AT, -1, "the mobile research cards block is missing");
+// The section's own surfaces end where the SHARED tap-to-read control
+// begins. The layout guards below were written about the SECTION; the
+// control is used by the production steps too and gets its own checks.
+const SHEET_AT = block.indexOf("TAP TO READ: ONE ROW, TWO BLOCKS");
+assert.notEqual(SHEET_AT, -1, "the shared tap-to-read block is missing");
 const rules = block.slice(0, SHEET_AT);
 const sheetRules = block.slice(SHEET_AT);
 const rule = name => {
@@ -213,72 +216,83 @@ test("4: a section, not a hero - and it stacks cleanly", () => {
 });
 
 /* ══════════════════════════════════════════════════════════════
-   5. THE TAP-TO-READ CARDS AND THEIR SHEET
-   Brief points 10-13. Mobile used to print all three research texts
-   underneath each other, which is what made the page long. The texts
-   are unchanged - only WHEN they are shown moved.
+   5. THE TAP-TO-READ ROWS
+   Mobile used to print all three research texts underneath each other,
+   which is what made the page long. They opened in a bottom sheet for
+   one pass; they open IN PLACE now, on exactly the control the four
+   production steps above them use. Two tap-to-read patterns on one
+   page, one opening inline and one over it, was a difference a reader
+   had to learn for no reason.
    ══════════════════════════════════════════════════════════════ */
 
-const sheet = site.slice(site.indexOf("function MatchaResearchSheet"), site.indexOf("function MatchaPage()"));
+const shared = site.slice(site.indexOf("function useTapToRead()"), site.indexOf("function MatchaProcess()"));
 
-test("5a: every card is a real button and says so, in words", () => {
-  // 11 + 12: the affordance is visible copy, not an icon a visitor has
-  // to guess at. The "+" is decorative and hidden from the reader.
-  assert.match(section, /<button type="button" className="matcha-research-open"/);
-  assert.ok(section.includes("Zum Lesen antippen"), "the tap hint is missing");
-  assert.match(section, /aria-haspopup="dialog"/);
-  assert.match(section, /className="matcha-research-open-mark" aria-hidden="true">\+</);
-  // One button per block, and the label is the block's own label.
-  assert.match(section, /onClick=\{\(\)=>setOpenResearch\(i\)\}/);
+test("5a: every topic is a real button and says so, in words", () => {
+  // The affordance is visible copy, not an icon a visitor has to guess
+  // at. The "+" is decorative and hidden from the reader.
+  assert.match(shared, /<button type="button" className="tap-toggle"/);
+  assert.ok(shared.includes("Zum Lesen antippen"), "the tap hint is missing");
+  assert.match(section, /onToggle=\{\(\)=>toggle\(i\)\} hint/, "the research rows opt into the hint");
+  assert.match(shared, /className="tap-mark" aria-hidden="true">\{isOpen\?"−":"\+"\}/);
+  // Tapping anywhere on the row works: the label and the hint are
+  // INSIDE the button, not siblings of it.
+  assert.match(shared, /<span className="tap-text">[\s\S]*?<span className="tap-label">/);
 });
 
-test("5b: the cards are the MOBILE presentation - desktop still reads in place", () => {
-  // The body text stays in the DOM at every width; the sheet is an
+test("5b: the rows are the MOBILE presentation - desktop still reads in place", () => {
+  // The body text stays in the DOM at every width; the accordion is an
   // additional way to read it, never the only one. That is also why
   // this cannot cost the page its content for a crawler.
   assert.match(section, /<p className="matcha-research-body">\{b\.body\}<\/p>/);
-  const hidesButtonOnDesktop = /\.matcha-research-open\{[^}]*display:none/.test(sheetRules)
-    || /\.matcha-research-open\{[^}]*display:none/.test(rules);
-  assert.ok(hidesButtonOnDesktop, "the tap affordance must not show where the text is already open");
+  // Desktop renders the plain head and no button at all.
+  assert.match(section, /plain=\{<div className="matcha-research-head">/);
+  // The default lives with the block that owns the layout; the
+  // accordion rules live in the shared block below it.
+  assert.ok(css.includes(".tap-toggle{display:none}"), "the control shows where there is no accordion");
 });
 
-test("5c: the sheet honours the same modal contract the cart drawer set", () => {
-  // 13. Not a new modal behaviour - the one the site already has.
-  assert.match(sheet, /role="dialog"/);
-  assert.match(sheet, /aria-modal="true"/);
-  assert.match(sheet, /aria-labelledby="mr-sheet-title"/);
-  assert.match(sheet, /id="mr-sheet-title"/);
-  assert.match(sheet, /e\.key==="Escape"/, "Escape must close it");
-  assert.match(sheet, /document\.body\.style\.overflow="hidden"/, "the page behind it must not scroll");
-  assert.match(sheet, /document\.body\.style\.overflow=""/, "and must scroll again afterwards");
-  assert.match(sheet, /closeRef\.current\?\.focus\(\)/, "focus moves in");
-  assert.match(sheet, /prev\?\.focus\?\.\(\)/, "and is handed back");
-  assert.match(sheet, /aria-label="Schlie\u00dfen"/, "the X needs an accessible name");
-  assert.match(sheet, /removeEventListener\("keydown",onKey\)/, "the listener must be torn down");
-  // It closes on the backdrop too, and the panel does not close itself.
-  assert.match(sheet, /className="mr-sheet-backdrop" onClick=\{onClose\}/);
-  assert.match(sheet, /className="mr-sheet" onClick=\{e=>e\.stopPropagation\(\)\}/);
+test("5c: it is an accordion, not a dialog - and it is keyboard operable", () => {
+  assert.match(shared, /aria-expanded=\{isOpen\}/);
+  assert.match(shared, /aria-controls=\{panelId\}/);
+  assert.match(section, /panelId=\{`matcha-research-panel-\$\{i\+1\}`\}/);
+  // ONE OPEN AT A TIME, and tapping the open one closes it.
+  assert.match(shared, /setOpen\(prev=>prev===i\?null:i\)/);
+  // A native <button> is keyboard-operable without help, so there must
+  // not be a hand-rolled key handler faking it, and no div-with-onClick.
+  assert.ok(!shared.includes("onKeyDown"), "a hand-rolled key handler was added to a native button");
+  assert.ok(!shared.includes('role="button"'), "a div was dressed up as a button");
+  // Touch target.
+  assert.match(sheetRules, /\.tap-toggle\{[\s\S]*?min-height:56px/);
+  // THE BOTTOM SHEET IS GONE, and so is everything it needed.
+  for (const gone of ["MatchaResearchSheet", "mr-sheet", "aria-haspopup"]) {
+    assert.ok(!site.includes(gone), `a piece of the retired sheet survives: ${gone}`);
+  }
+  // aria-modal still belongs to the cart drawer and the launch popup;
+  // it must not be back on THIS page.
+  assert.ok(!page.includes("aria-modal") && !section.includes("aria-modal"),
+    "the research block opens a dialog again");
+  assert.ok(!css.includes("mr-sheet"), "the sheet's rules outlived it");
+  // A visible focus ring: the global one is blue, which is invisible on
+  // the blue band the production steps sit on.
+  assert.match(css, /\.matcha-explain :focus-visible\{outline-color:var\(--cream\)\}/);
 });
 
-test("5d: the sheet shows the block's OWN copy, never a second version of it", () => {
-  // Brief point 11 of the source doc: the same science is not explained
-  // twice. The sheet renders the same values the card does.
-  assert.match(sheet, /\{block\.icon\}/);
-  assert.match(sheet, /\{block\.label\}/);
-  assert.match(sheet, /\{block\.body\}/);
-  // No hand-typed prose of its own.
-  assert.ok(!/<p className="mr-sheet-body">[A-Z\u00c4\u00d6\u00dc]/.test(sheet), "the sheet hard-codes copy");
-  // And no invented "read the studies" link: there is no sources page.
-  assert.ok(!/STUDIEN\u00dcBERBLICK|Studien ansehen|\/studien/i.test(sheet + section),
+test("5d: the row shows the block's OWN copy, never a second version of it", () => {
+  assert.match(section, /lead=\{b\.icon\}/);
+  assert.match(section, /label=\{b\.label\}/);
+  assert.match(section, /\{b\.body\}/);
+  // No hand-typed prose of its own, and no invented "read the studies"
+  // link: there is no sources page.
+  assert.ok(!/STUDIENÜBERBLICK|Studien ansehen|\/studien/i.test(section),
     "a studies link was added without a studies page to point at");
 });
 
 test("5e: no health promise entered through the new surfaces", () => {
-  // 10. The regulated wording is pinned in part 1; this bans the claim
-  // vocabulary outright, in the card markup AND in the sheet.
-  const surfaces = section + sheet;
+  // The regulated wording is pinned in part 1; this bans the claim
+  // vocabulary outright, in the markup AND in the shared control.
+  const surfaces = section + shared;
   for (const claim of [
-    "gesund", "heilt", "wirkt gegen", "beugt vor", "senkt ", "st\u00e4rkt das Immunsystem",
+    "gesund", "heilt", "wirkt gegen", "beugt vor", "senkt ", "stärkt das Immunsystem",
     "Detox", "entgiftet", "Fettverbrennung", "Stoffwechsel ankurbeln", "beweist", "bewiesen",
     "garantiert", "hilft gegen",
   ]) {
@@ -286,10 +300,17 @@ test("5e: no health promise entered through the new surfaces", () => {
   }
 });
 
-test("5f: the sheet is only mounted while a block is open", () => {
-  const page2 = site.slice(site.indexOf("function MatchaPage()"), site.indexOf("\nfunction ", site.indexOf("function MatchaPage()") + 5));
-  assert.match(page2, /openResearch!==null&&<MatchaResearchSheet/);
-  assert.match(page2, /useState<number\|null>\(null\)/, "it must start closed, so SSR and hydration agree");
+test("5f: the block ships open and collapses only once the client knows the width", () => {
+  // `accordion` is false on the server AND on the first client render,
+  // so hydration cannot mismatch and the full text is in the HTML.
+  assert.match(shared, /const \[accordion,setAccordion\]=useState\(false\)/);
+  assert.match(shared, /window\.matchMedia\(MATCHA_PROCESS_ACCORDION_QUERY\)/);
+  assert.match(shared, /if\(!mq\.matches\)setOpen\(null\)/);
+  assert.match(shared, /removeEventListener\("change",sync\)/);
+  assert.match(site, /typeof window!=="undefined"\?useLayoutEffect:useEffect/);
+  // ONE implementation, used twice - not a second accordion.
+  assert.equal([...site.matchAll(/function useTapToRead\(\)/g)].length, 1);
+  assert.equal([...site.matchAll(/<TapToReadRow /g)].length, 2);
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -348,20 +369,23 @@ const parse = value => {
 };
 
 test("6: every colour on the two new surfaces clears AA on its own ground", () => {
-  // The section is cream; the sheet panel is raspberry. Both grounds are
-  // read from the stylesheet rather than assumed.
+  // The section is cream and the rows open in place on it, so there is
+  // one ground here, read from the stylesheet rather than assumed. The
+  // shared control inherits its colour, which is what lets the same
+  // rows work on the blue band four sections up.
   assert.equal(declared(rules, ".matcha-research{", "background"), "var(--cream)");
-  assert.equal(declared(sheetRules, ".mr-sheet{", "background"), "var(--berry)");
+  assert.equal(declared(sheetRules, ".tap-toggle{", "color"), "inherit");
+  assert.equal(declared(sheetRules, ".tap-label{", "color"), "inherit");
+  // The hint and the mark carry no colour of their own either: an
+  // opacity and currentColor work on cream and on blue alike.
+  assert.match(sheetRules, /\.tap-hint\{[\s\S]*?opacity:\.82/);
+  assert.ok(!/\.tap-mark\{[^}]*color:/.test(sheetRules), "the mark hard-codes a colour");
 
   const cases = [
-    // [where, selector, ground, minimum]
-    [sheetRules, ".matcha-research-open{", TOKENS.cream, 4.5],
-    [sheetRules, ".matcha-research-open-label{", TOKENS.cream, 4.5],
-    [sheetRules, ".matcha-research-open-mark{", TOKENS.cream, 3],   // a 22px glyph
-    [sheetRules, ".mr-sheet-head{", TOKENS.berry, 4.5],
-    [sheetRules, ".mr-sheet-head .matcha-research-icon{", TOKENS.berry, 3],
-    [sheetRules, ".mr-sheet-close{", TOKENS.berry, 4.5],
-    [sheetRules, ".mr-sheet-body{", TOKENS.berry, 4.5],
+    [rules, ".matcha-research-label{", TOKENS.cream, 4.5],
+    [rules, ".matcha-research-body{", TOKENS.cream, 4.5],
+    [rules, ".matcha-research-intro{", TOKENS.cream, 4.5],
+    [rules, ".matcha-research-icon{", TOKENS.cream, 3],
   ];
   for (const [scope, selector, ground, min] of cases) {
     const [rgb, alpha] = parse(declared(scope, selector, "color"));
@@ -369,4 +393,6 @@ test("6: every colour on the two new surfaces clears AA on its own ground", () =
     assert.ok(ratio >= min,
       `${selector} measures ${ratio.toFixed(2)}:1 on its own ground - needs ${min}:1`);
   }
+  // On the blue band the same rows inherit cream, which part 6 of
+  // tests/matcha-product-section.test.mjs measures.
 });

@@ -3,13 +3,13 @@
 :root{--blue:#1746D1;--berry:#A61E59;--cream:#F5EBE2;--plum:#4F3A5B;--ink:#111111;--line:rgba(79,58,91,.22);--matcha:#9DBF7F;--rail-gutter:clamp(20px,3vw,48px);--rail-max:1520px;/* THE HOMEPAGE TYPE SCALE. SAME ROLE = SAME SCALE; the hero is the one deliberate exception and keeps its own larger values. *//* LEVEL 2. Both secondary page heroes read these; the homepage hero keeps its own larger curve, and every section title stays below them. *//* SUPERSEDED, and kept only so nothing external breaks: --type-page-hero and
    --type-page-hero-accent have no consumer left. Every true page hero reads
    --type-hero-primary / --type-hero-secondary below. Do not reach for these. */--type-page-hero:clamp(40px,5.2vw,84px);/* THE PAGE HERO SCALE. The homepage hero IS the master: these are its exact values, and every true page hero reads them. Redefined once at 900px below, so no route carries a hero media query of its own. */--type-hero-primary:clamp(54px,5.9vw,100px);--type-hero-secondary:clamp(48px,5vw,86px);--type-page-hero-accent:clamp(37px,4.8vw,78px);--type-title:clamp(34px,4.4vw,64px);--type-editorial:clamp(37px,4.7vw,68px);--type-body:clamp(15px,2vw,18px);--type-meta:11px;--type-card:clamp(16px,1.25vw,18px);/* TWO FAMILIES. --font-mono is an ALIAS for Inter, not a third face: every uppercase metadata rule in this file already carries letter-spacing, which is what carries that voice now. Renaming ~40 call sites would have been a bigger diff than this one line. */--font-mono:var(--font-sans)}
-h1 i,h2 i,h3 i,.display-italic{font-family:var(--font-display),Georgia,serif;font-style:italic;font-weight:400;letter-spacing:-.01em}h1 i,h2 i{font-size:1.06em;line-height:.98}/* SCROLL-LINKED, NOT A MARQUEE. --hero-scroll is written by one requestAnimationFrame reader in GloaSite.tsx and is 0 at rest, so with JavaScript off or before the first frame the type sits exactly where the static layout puts it. *//* THE THREE HERO LINES, AND NOTHING ELSE ON THE PAGE. Amplitudes are deliberately small - the point is a slow parting of the two headline lines, not a slide. The lead drifts a few pixels down and softens instead of moving sideways, so it stays the calm line of the three. *//* THE VARIABLE IS DECLARED ON THE ELEMENT THE HOOK WRITES TO, AND NOWHERE ELSE. useHeroScrollProgress() sets --hero-scroll on .hero-copy; the lines below inherit it. Declaring it on h1 or .lead themselves is not a fallback - a declaration on the element WINS over the inherited value, so every write the hook made was shadowed and the type sat still at every scroll position. The rest value belongs here, on .hero-copy: with JavaScript off, or before the first frame, the lines still sit exactly where the static layout puts them. */.hero-copy{--hero-scroll:0}.hero-copy h1{transform:translate3d(calc(var(--hero-scroll)*-16px),0,0);will-change:transform}.hero-copy h1 i{display:inline-block;transform:translate3d(calc(var(--hero-scroll)*28px),0,0)}.hero-copy .lead{transform:translate3d(0,calc(var(--hero-scroll)*7px),0);opacity:calc(1 - var(--hero-scroll)*.35)}@media (prefers-reduced-motion:reduce){.hero-copy h1,.hero-copy h1 i,.hero-copy .lead{transform:none!important;opacity:1!important}}@media (max-width:900px){.hero-copy h1{transform:translate3d(calc(var(--hero-scroll)*-6px),0,0)}.hero-copy h1 i{transform:translate3d(calc(var(--hero-scroll)*9px),0,0)}.hero-copy .lead{transform:none;opacity:1}}.countdown{background:var(--blue);color:var(--cream);padding:clamp(38px,4.6vw,64px) 4vw;border-bottom:1px solid rgba(245,235,226,.25)}.countdown-inner{display:flex;flex-direction:column;gap:clamp(22px,2.6vw,34px)}.countdown-head{display:flex;justify-content:space-between;align-items:baseline;gap:24px;flex-wrap:wrap}.countdown-title{font:800 clamp(26px,3.4vw,46px)/1 var(--font-sans);letter-spacing:-.045em;margin:0;text-transform:uppercase}.countdown-date{font:600 12px/1 var(--font-sans);letter-spacing:.18em;text-transform:uppercase;opacity:.78;margin:0}.countdown-units{display:grid;grid-template-columns:repeat(4,1fr);gap:clamp(12px,2vw,28px);border-top:1px solid rgba(245,235,226,.32);padding-top:clamp(18px,2.2vw,28px)}.countdown-unit{display:flex;flex-direction:column;gap:8px;min-width:0}.countdown-value{font:800 clamp(34px,5.4vw,76px)/.9 var(--font-sans);letter-spacing:-.05em;font-variant-numeric:tabular-nums;font-feature-settings:'tnum' 1}.countdown-label{font:600 11px/1 var(--font-sans);letter-spacing:.2em;text-transform:uppercase;opacity:.72}.countdown-live{font:800 clamp(30px,4.4vw,60px)/1 var(--font-sans);letter-spacing:-.045em;margin:0;text-transform:uppercase}@media (max-width:640px){.countdown-units{grid-template-columns:repeat(2,1fr);row-gap:clamp(18px,5vw,26px)}.countdown-value{font-size:clamp(38px,13vw,56px)}}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--cream);color:var(--ink);font-family:var(--font-sans),Arial,sans-serif}a{color:inherit;text-decoration:none}button,input,textarea,select{font:inherit}button{cursor:pointer}.eyebrow{font:600 12px/1.2 var(--font-mono);letter-spacing:.14em;text-transform:uppercase}.brand-bar{height:32px;background:var(--blue);color:var(--cream);overflow:hidden;position:relative;font:12px/1 var(--font-mono);letter-spacing:.14em;text-transform:uppercase}.bb-track{display:flex;height:100%;animation:bb-marquee 30s linear infinite}.brand-bar:hover .bb-track{animation-play-state:paused}.bb-group{display:flex;align-items:center;gap:60px;flex-shrink:0;padding-right:60px;height:100%}.bb-group span,.bb-group a{white-space:nowrap}.bb-group a{color:inherit;transition:opacity .2s}.bb-group a:hover{opacity:.7}@keyframes bb-marquee{to{transform:translateX(-50%)}}header{height:86px;display:grid;grid-template-columns:auto 1fr auto;align-items:center;padding:0 3vw;border-bottom:1px solid var(--line);background:var(--cream);position:sticky;top:0;z-index:40;transition:height .25s ease}header.compact{height:64px}.wordmark{--wordmark-h:22px;display:inline-flex;align-items:flex-start;width:max-content}.wordmark-glyph{display:block;height:var(--wordmark-h);width:auto;aspect-ratio:825.444/248.443;background-color:currentColor;-webkit-mask:url('/gloa-logo-schwarz.svg') no-repeat center/contain;mask:url('/gloa-logo-schwarz.svg') no-repeat center/contain}header nav{display:flex;justify-self:center;gap:32px;font-size:13px;text-transform:uppercase;letter-spacing:.1em}header nav a{transition:color .2s ease}header nav a:hover{color:var(--berry);text-decoration:underline;text-underline-offset:6px;text-decoration-thickness:1.5px;text-decoration-color:var(--berry)}.nav-active{color:var(--berry)}.head-actions{justify-self:end;display:flex;align-items:center;gap:18px;white-space:nowrap}.head-actions button{border:0;background:none;text-transform:uppercase;font:13px var(--font-mono);letter-spacing:.08em}.head-actions .bag-btn{display:inline-flex;align-items:center;gap:4px}.bag-count{background:var(--blue);color:var(--cream);border-radius:50%;padding:2px 7px;font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;min-width:18px;min-height:18px;line-height:1}.menu{display:none;border:0;background:none;text-transform:uppercase;font:13px var(--font-mono);letter-spacing:.08em;padding:0;cursor:pointer}.mobile-nav{display:none}/* 53/47 the other way round: the image was the dominant half and read as the subject of the page. Centred rather than stretched, so neither column is padded out to match the other's height. */.hero{display:grid;grid-template-columns:53% 47%;border-bottom:1px solid var(--line);align-items:center;overflow:visible;background:var(--cream)}.hero-copy{padding:clamp(44px,5vw,76px) clamp(26px,3.4vw,56px) clamp(44px,5vw,76px);display:flex;flex-direction:column;justify-content:center;gap:clamp(12px,1.1vw,17px);max-width:620px}.hero-copy .eyebrow{color:var(--berry)}.hero-copy h1{margin:0}.hero-copy .lead{margin:0;max-width:34ch;opacity:.78}/* The actions sit under a hairline, so the type block above them reads as one unit and the buttons as another. *//* One row, one baseline, one hairline above it. The tertiary link is pushed a little further out so the two boxed buttons read as the pair they are. */.hero-actions{display:flex;align-items:center;gap:clamp(10px,1.1vw,16px);flex-wrap:wrap;margin-top:clamp(10px,1.2vw,18px);padding-top:clamp(16px,1.8vw,24px);border-top:1px solid var(--line)}.hero-actions .link-cta{margin-left:clamp(2px,.8vw,12px)}.hero h1,.inner h1{font-size:clamp(64px,8vw,122px);line-height:.79;letter-spacing:-.075em;margin:24px 0 38px;font-weight:800}.hero h1 i,.inner h1 i,.statement i,.story-copy i,.ritual i,.manifesto i{font-family:var(--font-display),Georgia,serif;font-weight:400}.lead{font-size:17px;line-height:1.5;max-width:480px}/* ── THE BUTTON SYSTEM. THREE STYLES, ONE SET OF MEASUREMENTS ── A. .cta            primary   solid blue, the one action that matters B. .cta.secondary  secondary quiet outline, same box C. .link-cta       tertiary  a text link with an arrow, no box Height, padding, type and tracking are tokens below, so the three can never drift apart again and a fourth look cannot appear by accident. Square by design: no pill, no radius, no shadow. */:root{--cta-pad:15px 26px;--cta-h:52px;--cta-type:600 13px/1 var(--font-sans);--cta-track:.1em}.cta{display:inline-flex;width:max-content;gap:10px;align-items:center;justify-content:center;margin-top:0;padding:var(--cta-pad);min-height:var(--cta-h);background:var(--blue);color:var(--cream);text-transform:uppercase;font:var(--cta-type);letter-spacing:var(--cta-track);border-radius:0;border:1px solid var(--blue);transition:background .2s ease,color .2s ease,border-color .2s ease}.cta:hover{background:#123bb0;border-color:#123bb0}.link-cta{display:inline-flex;align-items:center;gap:8px;font:var(--cta-type);letter-spacing:var(--cta-track);text-transform:uppercase;color:var(--ink);text-decoration:underline;text-underline-offset:7px;text-decoration-thickness:1.5px;text-decoration-color:var(--line);transition:color .2s ease,text-decoration-color .2s ease}.link-cta:hover{color:var(--berry);text-decoration-color:var(--berry)}.cta span{font-size:18px}.cta:hover{background:#1239b0}.cta.cream:hover{background:#e8ddd3}/* The image was 46vw tall and bled to three page edges, which is what made it the loudest thing on the screen. It is now a framed panel: noticeably shorter, inset on every side, and holding its own whitespace instead of taking the section's. */.hero-art{position:relative;background:var(--cream);overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:clamp(320px,34vw,470px);padding:clamp(16px,2vw,34px);padding-right:clamp(20px,2.6vw,44px);border-left:1px solid var(--line)}/* RELATIVE, not inset:0, so the padding above is real breathing room rather than a value the absolute layer ignores. The height is capped so a very wide viewport cannot grow the image back into the dominant element it used to be. */.hero-img{position:relative;width:100%;height:100%;max-height:clamp(300px,32vw,440px);object-fit:cover;object-position:center 45%}.hero-pack{width:270px;height:370px;background:var(--blue);position:relative;z-index:2;color:var(--cream);display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:-20px 26px 0 rgba(245,235,226,.35);transform:rotate(5deg);transition:transform .3s ease}.hero-pack:hover{transform:rotate(5deg) translateY(-4px)}.hero-pack span{font-size:72px;font-weight:900;letter-spacing:-.12em}.hero-pack em{font:11px/1.4 var(--font-mono);font-style:normal;text-align:center;letter-spacing:.08em;margin-top:6px}.hero-side{border-left:1px solid var(--line);display:flex;flex-direction:column;justify-content:space-between;padding:25px 18px}.hero-side span,.big-num{font:11px var(--font-mono)}.hero-side p{writing-mode:vertical-rl;font:12px/1.5 var(--font-mono);align-self:center}.statement{padding:120px 5vw;display:grid;grid-template-columns:20% 45% 35%;border-bottom:1px solid var(--line)}.statement h2,.section-head h2,.story-copy h2,.ritual h2,.b2b-strip h2,.manifesto h2,.b2b-content h2{font-size:clamp(45px,6vw,88px);line-height:.91;letter-spacing:-.06em;margin:0}.statement>p:last-child{font-size:18px;line-height:1.55;max-width:430px;padding-top:10px}.products{padding:100px 4vw}.section-head{display:flex;justify-content:space-between;align-items:end;margin-bottom:45px}.section-head a,.text-link,.journal-grid a{font:13px var(--font-mono);text-transform:uppercase;text-decoration:underline}.product-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.product-visual{height:clamp(380px,42vw,560px);position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}/* CONTAIN, never cover: the pouch and its COMING SOON stamp are the subject, and a crop would cut one of them. */.product-visual img{width:100%;height:100%;object-fit:contain;object-position:center}.product-visual img{width:100%;height:100%;object-fit:cover;object-position:center}.product-visual.lime{background:var(--berry)}.product-visual.pink{background:var(--berry)}.product-visual.blue{background:var(--blue)}.tin{width:190px;height:260px;background:var(--cream);border-radius:50%/8%;box-shadow:-17px 22px 0 rgba(0,0,0,.13);display:flex;flex-direction:column;align-items:center;justify-content:center;transform:rotate(-5deg);color:var(--blue);position:relative}.pink .tin{background:var(--berry);color:white;transform:rotate(6deg)}.blue .tin{background:var(--blue);color:white}.tin span{font-size:48px;font-weight:900;letter-spacing:-.12em}.tin em{font:10px/1.3 var(--font-mono);font-style:normal;text-align:center}.tin small{position:absolute;bottom:22px;font:12px var(--font-mono)}.badge{position:absolute;left:12px;top:12px;background:var(--plum);color:white;padding:7px 9px;font:12px var(--font-mono)}.product-info{display:flex;justify-content:space-between;padding:18px 2px 14px}.product-info h3{font-size:20px;margin:0 0 5px}.product-info p{font:13px var(--font-mono);margin:0}.product-info strong{font:13px var(--font-mono)}.add{width:100%;border:1px solid var(--plum);background:transparent;padding:13px 16px;display:flex;justify-content:space-between;text-transform:uppercase;font:13px var(--font-mono)}.add:hover{background:var(--plum);color:white}.disclaimer{font:12px/1.5 var(--font-mono);opacity:.65;margin-top:25px}.split-story{display:grid;grid-template-columns:1.05fr .95fr;min-height:760px}.photo{position:relative;background-size:cover;background-position:center}.matcha-photo{background-image:linear-gradient(20deg,rgba(23,70,209,.25),rgba(79,58,91,.15)),url('https://images.unsplash.com/photo-1565802700474-1c8b57596859?auto=format&fit=crop&w=1400&q=85')}.city-photo{background-image:linear-gradient(rgba(23,70,209,.15),rgba(23,70,209,.15)),url('https://images.unsplash.com/photo-1560969184-10fe8719e047?auto=format&fit=crop&w=1400&q=85')}.story-copy{background:var(--blue);color:white;padding:65px 6vw;display:flex;flex-direction:column;justify-content:center}.story-copy .big-num{position:absolute}.story-copy h2{margin:22px 0 35px}.story-copy>p:not(.eyebrow){font-size:18px;line-height:1.55;max-width:470px}.story-copy .text-link{margin-top:25px}.ritual{padding:120px 5vw;background:var(--plum);color:var(--cream);text-align:center}.ritual h2{margin:25px 0 70px}.steps{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid rgba(255,255,255,.5);border-bottom:1px solid rgba(255,255,255,.5);text-align:left}.steps div{padding:30px;min-height:180px;border-right:1px solid rgba(255,255,255,.5)}.steps div:last-child{border:0}.steps b{font:12px var(--font-mono)}.steps h3{font-size:24px;margin:38px 0 8px}.steps p{font:13px var(--font-mono)}.ritual .cta{margin:40px auto 0}.cta.cream{background:var(--cream);color:var(--blue);border-color:var(--cream)}.cta.cream:hover{background:transparent;color:var(--cream);border-color:var(--cream)}.cta.dark{background:var(--plum);color:var(--cream)}.cta.dark:hover{background:#3d2d47}.cta.secondary{background:transparent;color:var(--ink);border-color:var(--ink)}.cta.secondary:hover{background:var(--ink);color:var(--cream);border-color:var(--ink)}.cta.secondary:hover{background:#8e1a4e}.b2b-strip{display:grid;grid-template-columns:1.3fr .7fr;gap:60px;padding:100px 5vw;background:var(--cream)}.b2b-strip>div:last-child{padding-top:35px}.b2b-strip>div:last-child>p{font-size:18px;line-height:1.5}.b2b-strip .cta{background:var(--blue)}footer{background:var(--ink);color:var(--cream);padding:75px 4vw 25px;display:grid;grid-template-columns:1.2fr .7fr .8fr 1.3fr;gap:35px}footer .wordmark{--wordmark-h:40px}footer>div{display:flex;flex-direction:column;align-items:flex-start;gap:9px}footer>div>p{line-height:1.5}footer a{font-size:14px;transition:opacity .2s}footer a:hover{opacity:.7}.newsletter h3{font-size:30px;margin:10px 0}.newsletter form{width:100%;display:flex;border-bottom:1px solid var(--cream)}.newsletter input{flex:1;background:none;border:0;color:white;padding:12px 0;outline:none}.newsletter button{background:none;border:0;color:white;font-size:20px}.newsletter small{font:12px var(--font-mono);opacity:.6}.legal{grid-column:1/-1!important;display:flex!important;flex-direction:row!important;justify-content:space-between!important;border-top:1px solid rgba(245,235,226,.25);padding-top:22px;margin-top:45px;font:12px var(--font-mono)}
+h1 i,h2 i,h3 i,.display-italic{font-family:var(--font-display),Georgia,serif;font-style:italic;font-weight:400;letter-spacing:-.01em}h1 i,h2 i{font-size:1.06em;line-height:.98}/* SCROLL-LINKED, NOT A MARQUEE. --hero-scroll is written by one requestAnimationFrame reader in GloaSite.tsx and is 0 at rest, so with JavaScript off or before the first frame the type sits exactly where the static layout puts it. *//* THE THREE HERO LINES, AND NOTHING ELSE ON THE PAGE. Amplitudes are deliberately small - the point is a slow parting of the two headline lines, not a slide. The lead drifts a few pixels down and softens instead of moving sideways, so it stays the calm line of the three. *//* THE VARIABLE IS DECLARED ON THE ELEMENT THE HOOK WRITES TO, AND NOWHERE ELSE. useHeroScrollProgress() sets --hero-scroll on .hero-copy; the lines below inherit it. Declaring it on h1 or .lead themselves is not a fallback - a declaration on the element WINS over the inherited value, so every write the hook made was shadowed and the type sat still at every scroll position. The rest value belongs here, on .hero-copy: with JavaScript off, or before the first frame, the lines still sit exactly where the static layout puts them. */.hero-copy{--hero-scroll:0}.hero-copy h1{transform:translate3d(calc(var(--hero-scroll)*-16px),0,0);will-change:transform}.hero-copy h1 i{display:inline-block;transform:translate3d(calc(var(--hero-scroll)*28px),0,0)}.hero-copy .lead{transform:translate3d(0,calc(var(--hero-scroll)*7px),0);opacity:calc(1 - var(--hero-scroll)*.35)}@media (prefers-reduced-motion:reduce){.hero-copy h1,.hero-copy h1 i,.hero-copy .lead{transform:none!important;opacity:1!important}}@media (max-width:900px){.hero-copy h1{transform:translate3d(calc(var(--hero-scroll)*-6px),0,0)}.hero-copy h1 i{transform:translate3d(calc(var(--hero-scroll)*9px),0,0)}.hero-copy .lead{transform:none;opacity:1}}.countdown{background:var(--blue);color:var(--cream);padding:clamp(38px,4.6vw,64px) 4vw;border-bottom:1px solid rgba(245,235,226,.25)}.countdown-inner{display:flex;flex-direction:column;gap:clamp(22px,2.6vw,34px)}.countdown-head{display:flex;justify-content:space-between;align-items:baseline;gap:24px;flex-wrap:wrap}.countdown-title{font:800 clamp(26px,3.4vw,46px)/1 var(--font-sans);letter-spacing:-.045em;margin:0;text-transform:uppercase}.countdown-date{font:600 12px/1 var(--font-sans);letter-spacing:.18em;text-transform:uppercase;opacity:.78;margin:0}.countdown-units{display:grid;grid-template-columns:repeat(4,1fr);gap:clamp(12px,2vw,28px);border-top:1px solid rgba(245,235,226,.32);padding-top:clamp(18px,2.2vw,28px)}.countdown-unit{display:flex;flex-direction:column;gap:8px;min-width:0}.countdown-value{font:800 clamp(34px,5.4vw,76px)/.9 var(--font-sans);letter-spacing:-.05em;font-variant-numeric:tabular-nums;font-feature-settings:'tnum' 1}.countdown-label{font:600 11px/1 var(--font-sans);letter-spacing:.2em;text-transform:uppercase;opacity:.72}.countdown-live{font:800 clamp(30px,4.4vw,60px)/1 var(--font-sans);letter-spacing:-.045em;margin:0;text-transform:uppercase}@media (max-width:640px){.countdown-units{grid-template-columns:repeat(2,1fr);row-gap:clamp(18px,5vw,26px)}.countdown-value{font-size:clamp(38px,13vw,56px)}}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--cream);color:var(--ink);font-family:var(--font-sans),Arial,sans-serif}a{color:inherit;text-decoration:none}button,input,textarea,select{font:inherit}button{cursor:pointer}.eyebrow{font:600 12px/1.2 var(--font-mono);letter-spacing:.14em;text-transform:uppercase}.brand-bar{height:32px;background:var(--blue);color:var(--cream);overflow:hidden;position:relative;font:12px/1 var(--font-mono);letter-spacing:.14em;text-transform:uppercase}.bb-track{display:flex;height:100%;animation:bb-marquee 30s linear infinite}.brand-bar:hover .bb-track{animation-play-state:paused}.bb-group{display:flex;align-items:center;gap:60px;flex-shrink:0;padding-right:60px;height:100%}.bb-group span,.bb-group a{white-space:nowrap}.bb-group a{color:inherit;transition:opacity .2s}.bb-group a:hover{opacity:.7}@keyframes bb-marquee{to{transform:translateX(-50%)}}header{height:86px;display:grid;grid-template-columns:auto 1fr auto;align-items:center;padding:0 3vw;border-bottom:1px solid var(--line);background:var(--cream);position:sticky;top:0;z-index:40;transition:height .25s ease}header.compact{height:64px}.wordmark{--wordmark-h:22px;display:inline-flex;align-items:flex-start;width:max-content}.wordmark-glyph{display:block;height:var(--wordmark-h);width:auto;aspect-ratio:825.444/248.443;background-color:currentColor;-webkit-mask:url('/gloa-logo-schwarz.svg') no-repeat center/contain;mask:url('/gloa-logo-schwarz.svg') no-repeat center/contain}header nav{display:flex;justify-self:center;gap:32px;font-size:13px;text-transform:uppercase;letter-spacing:.1em}header nav a{transition:color .2s ease}header nav a:hover{color:var(--berry);text-decoration:underline;text-underline-offset:6px;text-decoration-thickness:1.5px;text-decoration-color:var(--berry)}.nav-active{color:var(--berry)}.head-actions{justify-self:end;display:flex;align-items:center;gap:18px;white-space:nowrap}.head-actions button{border:0;background:none;text-transform:uppercase;font:13px var(--font-mono);letter-spacing:.08em}.head-actions .bag-btn{display:inline-flex;align-items:center;gap:4px}.bag-count{background:var(--blue);color:var(--cream);border-radius:50%;padding:2px 7px;font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;min-width:18px;min-height:18px;line-height:1}.menu{display:none;border:0;background:none;text-transform:uppercase;font:13px var(--font-mono);letter-spacing:.08em;padding:0;cursor:pointer}.mobile-nav{display:none}/* 53/47 the other way round: the image was the dominant half and read as the subject of the page. Centred rather than stretched, so neither column is padded out to match the other's height. */.hero{display:grid;grid-template-columns:53% 47%;border-bottom:1px solid var(--line);align-items:center;overflow:visible;background:var(--cream)}.hero-copy{padding:clamp(44px,5vw,76px) clamp(26px,3.4vw,56px) clamp(44px,5vw,76px);display:flex;flex-direction:column;justify-content:center;gap:clamp(12px,1.1vw,17px);max-width:620px}.hero-copy .eyebrow{color:var(--berry)}.hero-copy h1{margin:0}.hero-copy .lead{margin:0;max-width:34ch;opacity:.78}/* The actions sit under a hairline, so the type block above them reads as one unit and the buttons as another. *//* One row, one baseline, one hairline above it. The tertiary link is pushed a little further out so the two boxed buttons read as the pair they are. */.hero-actions{display:flex;align-items:center;gap:clamp(10px,1.1vw,16px);flex-wrap:wrap;margin-top:clamp(10px,1.2vw,18px);padding-top:clamp(16px,1.8vw,24px);border-top:1px solid var(--line)}.hero-actions .link-cta{margin-left:clamp(2px,.8vw,12px)}.hero h1,.inner h1{font-size:clamp(64px,8vw,122px);line-height:.79;letter-spacing:-.075em;margin:24px 0 38px;font-weight:800}.hero h1 i,.inner h1 i,.statement i,.story-copy i,.ritual i,.manifesto i{font-family:var(--font-display),Georgia,serif;font-weight:400}.lead{font-size:17px;line-height:1.5;max-width:480px}/* ── THE BUTTON SYSTEM. THREE STYLES, ONE SET OF MEASUREMENTS ── A. .cta            primary   solid blue, the one action that matters B. .cta.secondary  secondary quiet outline, same box C. .link-cta       tertiary  a text link with an arrow, no box Height, padding, type and tracking are tokens below, so the three can never drift apart again and a fourth look cannot appear by accident. Square by design: no pill, no radius, no shadow. */:root{--cta-pad:15px 26px;--cta-h:52px;--cta-type:600 13px/1 var(--font-sans);--cta-track:.1em}.cta{display:inline-flex;width:max-content;gap:10px;align-items:center;justify-content:center;margin-top:0;padding:var(--cta-pad);min-height:var(--cta-h);background:var(--blue);color:var(--cream);text-transform:uppercase;font:var(--cta-type);letter-spacing:var(--cta-track);border-radius:0;border:1px solid var(--blue);transition:background .2s ease,color .2s ease,border-color .2s ease}.cta:hover{background:#123bb0;border-color:#123bb0}.link-cta{display:inline-flex;align-items:center;gap:8px;font:var(--cta-type);letter-spacing:var(--cta-track);text-transform:uppercase;color:var(--ink);text-decoration:underline;text-underline-offset:7px;text-decoration-thickness:1.5px;text-decoration-color:var(--line);transition:color .2s ease,text-decoration-color .2s ease}.link-cta:hover{color:var(--berry);text-decoration-color:var(--berry)}.cta span{font-size:18px}.cta:hover{background:#1239b0}.cta.cream:hover{background:#e8ddd3}/* The image was 46vw tall and bled to three page edges, which is what made it the loudest thing on the screen. It is now a framed panel: noticeably shorter, inset on every side, and holding its own whitespace instead of taking the section's. */.hero-art{position:relative;background:var(--cream);overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:clamp(320px,34vw,470px);padding:clamp(16px,2vw,34px);padding-right:clamp(20px,2.6vw,44px);border-left:1px solid var(--line)}/* RELATIVE, not inset:0, so the padding above is real breathing room rather than a value the absolute layer ignores. The height is capped so a very wide viewport cannot grow the image back into the dominant element it used to be. */.hero-img{position:relative;width:100%;height:100%;max-height:clamp(300px,32vw,440px);object-fit:cover;object-position:center 45%}.hero-pack{width:270px;height:370px;background:var(--blue);position:relative;z-index:2;color:var(--cream);display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:-20px 26px 0 rgba(245,235,226,.35);transform:rotate(5deg);transition:transform .3s ease}.hero-pack:hover{transform:rotate(5deg) translateY(-4px)}.hero-pack span{font-size:72px;font-weight:900;letter-spacing:-.12em}.hero-pack em{font:11px/1.4 var(--font-mono);font-style:normal;text-align:center;letter-spacing:.08em;margin-top:6px}.hero-side{border-left:1px solid var(--line);display:flex;flex-direction:column;justify-content:space-between;padding:25px 18px}.hero-side span,.big-num{font:11px var(--font-mono)}.hero-side p{writing-mode:vertical-rl;font:12px/1.5 var(--font-mono);align-self:center}.statement{padding:120px 5vw;display:grid;grid-template-columns:20% 45% 35%;border-bottom:1px solid var(--line)}.statement h2,.section-head h2,.story-copy h2,.ritual h2,.b2b-strip h2,.manifesto h2,.b2b-content h2{font-size:clamp(45px,6vw,88px);line-height:.91;letter-spacing:-.06em;margin:0}.statement>p:last-child{font-size:18px;line-height:1.55;max-width:430px;padding-top:10px}.products{padding:100px 4vw}.section-head{display:flex;justify-content:space-between;align-items:end;margin-bottom:45px}.section-head a,.text-link,.journal-grid a{font:13px var(--font-mono);text-transform:uppercase;text-decoration:underline}.product-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.product-visual{height:clamp(380px,42vw,560px);position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}/* CONTAIN, never cover: the pouch and its COMING SOON stamp are the subject, and a crop would cut one of them. */.product-visual img{width:100%;height:100%;object-fit:contain;object-position:center}.product-visual img{width:100%;height:100%;object-fit:cover;object-position:center}.product-visual.lime{background:var(--berry)}.product-visual.pink{background:var(--berry)}.product-visual.blue{background:var(--blue)}.tin{width:190px;height:260px;background:var(--cream);border-radius:50%/8%;box-shadow:-17px 22px 0 rgba(0,0,0,.13);display:flex;flex-direction:column;align-items:center;justify-content:center;transform:rotate(-5deg);color:var(--blue);position:relative}.pink .tin{background:var(--berry);color:white;transform:rotate(6deg)}.blue .tin{background:var(--blue);color:white}.tin span{font-size:48px;font-weight:900;letter-spacing:-.12em}.tin em{font:10px/1.3 var(--font-mono);font-style:normal;text-align:center}.tin small{position:absolute;bottom:22px;font:12px var(--font-mono)}.badge{position:absolute;left:12px;top:12px;background:var(--plum);color:white;padding:7px 9px;font:12px var(--font-mono)}.product-info{display:flex;justify-content:space-between;padding:18px 2px 14px}.product-info h3{font-size:20px;margin:0 0 5px}.product-info p{font:13px var(--font-mono);margin:0}.product-info strong{font:13px var(--font-mono)}.add{width:100%;border:1px solid var(--plum);background:transparent;padding:13px 16px;display:flex;justify-content:space-between;text-transform:uppercase;font:13px var(--font-mono)}.add:hover{background:var(--plum);color:white}.disclaimer{font:12px/1.5 var(--font-mono);opacity:.65;margin-top:25px}.split-story{display:grid;grid-template-columns:1.05fr .95fr;min-height:760px}.photo{position:relative;background-size:cover;background-position:center}.matcha-photo{background-image:linear-gradient(20deg,rgba(23,70,209,.25),rgba(79,58,91,.15)),url('https://images.unsplash.com/photo-1565802700474-1c8b57596859?auto=format&fit=crop&w=1400&q=85')}.city-photo{background-image:linear-gradient(rgba(23,70,209,.15),rgba(23,70,209,.15)),url('https://images.unsplash.com/photo-1560969184-10fe8719e047?auto=format&fit=crop&w=1400&q=85')}.story-copy{background:var(--blue);color:white;padding:65px 6vw;display:flex;flex-direction:column;justify-content:center}.story-copy .big-num{position:absolute}.story-copy h2{margin:22px 0 35px}.story-copy>p:not(.eyebrow){font-size:18px;line-height:1.55;max-width:470px}.story-copy .text-link{margin-top:25px}.ritual{padding:120px 5vw;background:var(--plum);color:var(--cream);text-align:center}.ritual h2{margin:25px 0 70px}.steps{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid rgba(255,255,255,.5);border-bottom:1px solid rgba(255,255,255,.5);text-align:left}.steps div{padding:30px;min-height:180px;border-right:1px solid rgba(255,255,255,.5)}.steps div:last-child{border:0}.steps b{font:12px var(--font-mono)}.steps h3{font-size:24px;margin:38px 0 8px}.steps p{font:13px var(--font-mono)}.ritual .cta{margin:40px auto 0}.cta.cream{background:var(--cream);color:var(--blue);border-color:var(--cream)}.cta.cream:hover{background:transparent;color:var(--cream);border-color:var(--cream)}.cta.dark{background:var(--plum);color:var(--cream)}.cta.dark:hover{background:#3d2d47}.cta.secondary{background:transparent;color:var(--ink);border-color:var(--ink)}.cta.secondary:hover{background:var(--ink);color:var(--cream);border-color:var(--ink)}.cta.secondary:hover{background:#8e1a4e}.b2b-strip{display:grid;grid-template-columns:1.3fr .7fr;gap:60px;padding:100px 5vw;background:var(--cream)}.b2b-strip>div:last-child{padding-top:35px}.b2b-strip>div:last-child>p{font-size:18px;line-height:1.5}.b2b-strip .cta{background:var(--blue)}footer{background:var(--ink);color:var(--cream);padding:75px 4vw 25px;display:grid;grid-template-columns:1.2fr .7fr .8fr 1.3fr;gap:35px}footer .wordmark{--wordmark-h:40px}footer>div{display:flex;flex-direction:column;align-items:flex-start;gap:9px}footer>div>p{line-height:1.5}footer a{font-size:14px;transition:opacity .2s}footer a:hover{opacity:.7}.newsletter h3{font-size:30px;margin:10px 0}.newsletter form{width:100%;display:flex;border-bottom:1px solid var(--cream)}.newsletter input{flex:1;background:none;border:0;color:white;padding:12px 0;outline:none}.newsletter button{background:none;border:0;color:white;font-size:20px}.newsletter small{font:12px var(--font-mono);opacity:.6}.image-note{grid-column:1/-1;margin:38px 0 0;max-width:78ch;font:400 13px/1.55 var(--font-sans),Arial,sans-serif;letter-spacing:.005em;color:rgba(245,235,226,.78)}.legal{grid-column:1/-1!important;display:flex!important;flex-direction:row!important;justify-content:space-between!important;border-top:1px solid rgba(245,235,226,.25);padding-top:22px;margin-top:45px;font:12px var(--font-mono)}
 .inner-hero{min-height:630px;padding:70px 5vw;display:grid;grid-template-columns:12% 1fr;position:relative;border-bottom:1px solid var(--line)}.inner-hero.shop{background:var(--berry);color:var(--cream)}.inner-hero.about{background:var(--blue);color:white}.inner-hero.b2b{background:var(--blue);color:white}.inner-hero.journal{background:var(--plum);color:var(--cream)}.inner-hero.contact{background:var(--cream)}.inner-hero h1{max-width:1100px}.inner-hero .lead{margin-left:45%;max-width:520px}.page-index{font:11px var(--font-mono)}.inner-products{padding-top:45px}.filters{display:flex;gap:8px;margin-bottom:30px}.filters button{padding:8px 12px;border:1px solid var(--plum);background:transparent;font:13px var(--font-mono)}.filters button:first-child{background:var(--plum);color:white}.manifesto{padding:120px 5vw;text-align:center}.manifesto>p{font:12px var(--font-mono)}.manifesto h2{margin-top:30px}.reversed .photo{order:2}.reversed .story-copy{background:var(--berry)}.b2b-content{padding:100px 5vw;display:grid;grid-template-columns:1fr 1fr;gap:70px}.benefits div{display:grid;grid-template-columns:50px 1fr;border-top:1px solid var(--line);padding:22px 0}.benefits span{font:12px var(--font-mono)}.benefits h3{margin:0;font-size:21px}.contact-form{grid-column:1/-1;margin-top:60px;background:var(--blue);color:white;padding:6vw;display:grid;grid-template-columns:1fr 1fr;gap:18px}.contact-form h2{grid-column:1/-1;margin-bottom:20px}.contact-form input,.contact-form textarea,.contact-form select{background:transparent;color:inherit;border:0;border-bottom:1px solid currentColor;padding:18px 4px;outline:none}.contact-form select option{color:var(--ink)}.contact-form textarea{grid-column:1/-1;min-height:100px}.contact-form .cta{background:var(--cream);color:var(--plum)}.contact-form small{align-self:end;font:12px var(--font-mono);opacity:.7}.journal-grid{padding:80px 4vw;display:grid;grid-template-columns:1fr 1fr;gap:70px 20px}.journal-img{height:520px;position:relative;background-size:cover;background-position:center;overflow:hidden}.journal-img img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.j0{background-image:url('https://images.unsplash.com/photo-1565802700474-1c8b57596859?auto=format&fit=crop&w=1200&q=80')}.j1{background:var(--blue)}.j2{background:var(--cream)}.j3{background:var(--berry)}.journal-grid article:nth-child(even){margin-top:45px}.journal-grid h2{font-size:36px;line-height:1.05;margin:12px 0}.contact-page{padding:100px 5vw;display:grid;grid-template-columns:.7fr 1.3fr;gap:80px}.contact-page>div{display:flex;flex-direction:column}.contact-page>div a{font-size:22px;margin:8px 0 45px;text-decoration:underline}.contact-page>div small{font:12px var(--font-mono)}.contact-page .contact-form{grid-column:auto;margin:0;display:flex;flex-direction:column}.cart-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:50}.cart{position:absolute;right:0;top:0;height:100%;width:min(460px,100%);background:var(--cream);padding:40px;display:flex;flex-direction:column;overflow-y:auto;-webkit-overflow-scrolling:touch}.cart-close{align-self:end;background:none;border:0;font-size:30px;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0}.cart .eyebrow{margin:10px 0 0;flex-shrink:0}.cart-empty{display:flex;flex-direction:column;justify-content:center;flex:1}.cart-empty h2{font-size:clamp(40px,6vw,50px);line-height:.9;letter-spacing:-.06em;font-weight:800;margin:0 0 20px}.cart-empty p{font-size:17px;line-height:1.5;margin:0 0 30px}.cart-empty .cta{align-self:flex-start}.cart-items{flex:1;margin-top:30px}.cart-item{border-top:1px solid var(--line);padding:20px 0}.cart-item-info{margin-bottom:10px}.cart-item-info strong{display:block;font-size:16px;letter-spacing:-.02em}.cart-item-info span{font:13px var(--font-mono);opacity:.7}.cart-item-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}.cart-qty{display:flex;align-items:center;gap:0;border:1px solid var(--line)}.cart-qty button{width:36px;height:36px;border:0;background:none;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;min-width:44px;min-height:44px}.cart-qty span{min-width:32px;text-align:center;font:12px var(--font-mono)}.cart-item-row>strong{font:14px var(--font-mono)}.cart-item-remove{background:none;border:0;font:13px var(--font-mono);text-decoration:underline;text-underline-offset:3px;cursor:pointer;padding:0;opacity:.6}.cart-item-remove:hover{opacity:1}.cart-shipping{flex-shrink:0;border-top:1px solid var(--line);padding-top:20px;margin-top:10px}.cart-shipping-label{display:block;font:600 12px/1 var(--font-mono);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;opacity:.7}.cart-shipping select{width:100%;padding:12px 10px;border:1px solid var(--line);background:var(--cream);font:14px var(--font-sans);color:var(--ink)}.cart-shipping-info{display:flex;justify-content:space-between;margin-top:12px;font:13px var(--font-mono);opacity:.8}.cart-shipping-hint{margin:8px 0 0;font:12px/1.4 var(--font-mono);opacity:.6}.cart-error{font:13px/1.4 var(--font-mono);color:var(--berry);margin:12px 0 0}.cart-checkout-cta{width:100%;justify-content:center;margin-top:16px}.cart-footer{flex-shrink:0;border-top:1px solid var(--plum);padding-top:20px;margin-top:20px}.cart-total{display:flex;justify-content:space-between;align-items:center}.cart-total span{font:13px var(--font-mono);letter-spacing:.1em}.cart-total strong{font-size:20px;letter-spacing:-.02em}
 @media(max-width:800px){.bb-group{gap:35px;padding-right:35px}header{height:64px;grid-template-columns:1fr auto 1fr}header.compact{height:56px}header nav{display:none}.menu{display:block;justify-self:start}.head-actions{justify-self:end}.mobile-nav{display:flex;position:fixed;inset:0;z-index:35;background:var(--cream);flex-direction:column;justify-content:center;padding:0 8vw}.mobile-nav a{font-size:clamp(36px,8vw,52px);font-weight:800;letter-spacing:-.03em;padding:20px 0;border-bottom:1px solid var(--line);display:block;transition:color .2s ease}.mobile-nav a:hover{color:var(--berry)}.hero{display:block}.hero-copy{padding:clamp(40px,10vw,58px) 6vw;max-width:none}.hero h1,.inner h1{font-size:58px;margin-bottom:28px}.hero-art{height:auto;min-height:clamp(280px,72vw,400px);padding:0 6vw clamp(28px,7vw,40px);border-left:0}.hero-pack{width:220px;height:310px}.hero-pack span{font-size:56px}.statement{padding:80px 5vw;display:block}.statement h2{margin:28px 0 35px}.product-grid{display:flex;overflow-x:auto;scroll-snap-type:x mandatory}.product-card{min-width:86vw;scroll-snap-align:start}.product-visual{height:430px}.section-head{align-items:start}.section-head a{display:none}.split-story{display:flex;flex-direction:column}.photo{height:540px}.story-copy{min-height:570px}.reversed .photo{order:0}.steps{display:block}.steps div{border-right:0;border-bottom:1px solid rgba(255,255,255,.5)}.b2b-strip{grid-template-columns:1fr;gap:10px}footer{grid-template-columns:1fr 1fr}footer>div:first-child,footer .newsletter{grid-column:1/-1}.legal{flex-direction:column!important;gap:8px}.inner-hero{display:block;padding-top:65px;min-height:590px}.inner-hero .lead{margin:30px 0 0}.page-index{display:block;margin-bottom:50px}.manifesto{padding:80px 5vw}.b2b-content{grid-template-columns:1fr;padding:70px 5vw}.contact-form{display:flex;flex-direction:column;padding:35px 22px}.journal-grid{display:block}.journal-grid{grid-template-columns:1fr}.journal-grid article,.journal-grid article:nth-child(even){margin:0 0 70px}.journal-img{height:400px}.contact-page{grid-template-columns:1fr;padding:70px 5vw}.contact-page .contact-form{margin-top:30px}.head-actions button:first-child{display:none}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}header{transition:none}header nav a,.bb-group a,.mobile-nav a,.hero-pack,.hero .cta,.hero .text-link,.community-track{transition:none}.hero-pack:hover{transform:rotate(5deg)}.bb-track{animation:none}}
 
 /* GLOA launch architecture */
-:focus-visible{outline:3px solid var(--blue);outline-offset:3px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.business-link{color:var(--blue);font-weight:700}.search-bar{position:absolute;z-index:20;top:100%;left:0;right:0;background:var(--cream);border-bottom:1px solid var(--plum);padding:22px 4vw;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:18px}.search-bar label{font:13px var(--font-mono)}.search-bar input{border:0;border-bottom:1px solid var(--plum);background:none;padding:10px}.search-bar button{background:var(--plum);color:#fff;border:0;padding:12px 18px}.hero-actions{display:flex;align-items:center;gap:16px;margin-top:34px}.hero-actions .cta,.matcha-cta-actions .cta,.about-final-actions .cta{margin-top:0}.cta.secondary{background:transparent;color:var(--ink);border:1px solid var(--ink)}.cta.secondary:hover{background:var(--plum);color:white}.hero .cta{transition:background .2s ease,color .2s ease}.hero .cta:hover{background:#1239b0;color:white}.hero .cta.secondary:hover{background:var(--plum);color:white}.product-intro{padding:clamp(64px,7vw,110px) 5vw;display:grid;grid-template-columns:1fr .86fr;gap:clamp(32px,5vw,7vw);align-items:center}.product-intro>div:first-child{display:flex;flex-direction:column;gap:clamp(14px,1.4vw,20px);max-width:46ch}.product-intro .eyebrow{color:var(--berry)}.product-intro h2{margin:0}.product-intro>div:first-child>p{margin:0;opacity:.78;max-width:38ch}.product-intro .cta{margin-top:clamp(10px,1.2vw,18px)}.product-intro h2,.daily h2,.origin h2,.how-to h2,.community h2,.newsletter-band h2,.pdp-facts h2,.behind-bar h2,.business-support h2,.faq h2{font-size:clamp(48px,7vw,98px);line-height:.9;letter-spacing:-.065em;margin:24px 0}.product-intro>div:first-child>p:not(.eyebrow){font-size:18px;line-height:1.55;max-width:480px}.origin{padding:120px 5vw;display:grid;grid-template-columns:1fr 1fr;gap:8vw}.origin>div:last-child>p{font-size:20px;line-height:1.55}.origin dl div,.pdp-facts dl div{display:flex;justify-content:space-between;border-top:1px solid var(--line);padding:18px 0}.origin dt,.pdp-facts dt{font:13px var(--font-mono)}.origin dd,.pdp-facts dd{margin:0}.community{padding:110px 4vw}.newsletter-band{padding:100px 5vw;background:var(--blue);color:var(--cream);display:grid;grid-template-columns:.7fr 1fr .8fr;gap:30px;align-items:center}.newsletter-img{overflow:hidden}.newsletter-img img{width:100%;height:100%;object-fit:cover;display:block;min-height:280px}.newsletter-band form{display:grid;grid-template-columns:1fr auto}.newsletter-band input[type=email]{background:none;border:0;border-bottom:1px solid rgba(245,235,226,.5);padding:15px;color:var(--cream)}.newsletter-band input[type=email]::placeholder{color:rgba(245,235,226,.6)}.newsletter-band button{border:0;background:var(--cream);color:var(--plum);padding:15px 25px}.consent{grid-column:1/-1!important;display:flex!important;flex-direction:row!important;gap:10px!important;align-items:flex-start!important;font:13px/1.5 var(--font-mono)!important;margin-top:14px;color:inherit}.consent input{width:auto!important}.success-line{font-size:22px}.product-grid.single{grid-template-columns:minmax(280px,520px)}.pdp-hero{display:grid;grid-template-columns:1.15fr .85fr;min-height:700px}
+:focus-visible{outline:3px solid var(--blue);outline-offset:3px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.business-link{color:var(--blue);font-weight:700}.search-bar{position:absolute;z-index:20;top:100%;left:0;right:0;background:var(--cream);border-bottom:1px solid var(--plum);padding:22px 4vw;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:18px}.search-bar label{font:13px var(--font-mono)}.search-bar input{border:0;border-bottom:1px solid var(--plum);background:none;padding:10px}.search-bar button{background:var(--plum);color:#fff;border:0;padding:12px 18px}.hero-actions{display:flex;align-items:center;gap:16px;margin-top:34px}.hero-actions .cta,.matcha-cta-actions .cta,.about-final-actions .cta{margin-top:0}.cta.secondary{background:transparent;color:var(--ink);border:1px solid var(--ink)}.cta.secondary:hover{background:var(--plum);color:white}.hero .cta{transition:background .2s ease,color .2s ease}.hero .cta:hover{background:#1239b0;color:white}.hero .cta.secondary:hover{background:var(--plum);color:white}.product-intro{padding:clamp(64px,7vw,110px) 5vw;display:grid;grid-template-columns:1fr .86fr;gap:clamp(32px,5vw,7vw);align-items:center}.product-intro>div:first-child{display:flex;flex-direction:column;gap:clamp(14px,1.4vw,20px);max-width:46ch}.product-intro .eyebrow{color:var(--berry)}.product-intro h2{margin:0}.product-intro>div:first-child>p{margin:0;opacity:.78;max-width:38ch}.product-intro .cta{margin-top:clamp(10px,1.2vw,18px)}.product-intro h2,.daily h2,.origin h2,.community h2,.newsletter-band h2,.pdp-facts h2,.behind-bar h2,.business-support h2,.faq h2{font-size:clamp(48px,7vw,98px);line-height:.9;letter-spacing:-.065em;margin:24px 0}.product-intro>div:first-child>p:not(.eyebrow){font-size:18px;line-height:1.55;max-width:480px}.origin{padding:120px 5vw;display:grid;grid-template-columns:1fr 1fr;gap:8vw}.origin>div:last-child>p{font-size:20px;line-height:1.55}.origin dl div,.pdp-facts dl div{display:flex;justify-content:space-between;border-top:1px solid var(--line);padding:18px 0}.origin dt,.pdp-facts dt{font:13px var(--font-mono)}.origin dd,.pdp-facts dd{margin:0}.community{padding:110px 4vw}.newsletter-band{padding:100px 5vw;background:var(--blue);color:var(--cream);display:grid;grid-template-columns:.7fr 1fr .8fr;gap:30px;align-items:center}.newsletter-img{overflow:hidden}.newsletter-img img{width:100%;height:100%;object-fit:cover;display:block;min-height:280px}.newsletter-band form{display:grid;grid-template-columns:1fr auto}.newsletter-band input[type=email]{background:none;border:0;border-bottom:1px solid rgba(245,235,226,.5);padding:15px;color:var(--cream)}.newsletter-band input[type=email]::placeholder{color:rgba(245,235,226,.6)}.newsletter-band button{border:0;background:var(--cream);color:var(--plum);padding:15px 25px}.consent{grid-column:1/-1!important;display:flex!important;flex-direction:row!important;gap:10px!important;align-items:flex-start!important;font:13px/1.5 var(--font-mono)!important;margin-top:14px;color:inherit}.consent input{width:auto!important}.success-line{font-size:22px}.product-grid.single{grid-template-columns:minmax(280px,520px)}.pdp-hero{display:grid;grid-template-columns:1.15fr .85fr;min-height:700px}
 .pdp-hero-image{position:relative;overflow:hidden;background:var(--berry)}
 .pdp-hero-image img{width:100%;height:100%;object-fit:cover;object-position:center;position:absolute;inset:0}
 .pdp-hero-info{padding:80px 5vw;display:flex;flex-direction:column;justify-content:center}
@@ -1372,58 +1372,32 @@ header nav{gap:18px;font-size:12px}
 }
 
 /* ══════════════════════════════════════════════════════════════
-   HOMEPAGE HOW TO GLOA SECTION
+   HOMEPAGE AT A GLANCE
 
-   Was: a full-bleed two-column table - two 38px headings, two bordered
-   cells, 110px of padding above and below. It read as the heaviest block
-   on a page whose other sections had already been quietened.
+   Replaces the preparation band that stood here. That band taught the
+   reader to make matcha before the page had said what GLOA is, and the
+   same steps are already on the product page and on /our-matcha.
 
-   Now: a compact editorial banner. One hairline across the top, the
-   headline unit on the left, the two preparations side by side on the
-   right, and the whole thing shorter than what it replaced.
+   Four facts on one row, each under a hairline: what a reader scanning
+   the page needs, in the order they tend to ask for it. Not cards - no
+   box, no shadow, no filled icon circles. The hairline and the small
+   line mark are the only ornament, which is what the daily band and
+   the /our-matcha fact row already do.
 
-   -- THE CANONICAL CONTENT RAIL -------------------------------
-   This section adopts the LIFESTYLE section's rail exactly:
-
-       horizontal padding : clamp(20px,3vw,48px)   (identical to .daily)
-       rail               : max-width 1520px, margin-inline auto
-       column ratio       : minmax(300px,.85fr) minmax(0,1.7fr)
-
-   so its left edge starts at the same X as the lifestyle wall's and its
-   two halves break on the same axis. No narrower container of its own.
-
-   -- SCALE ----------------------------------------------------
-   Capped at 46/50px. The page's intended order is
-     hero (100) > lifestyle (82) > origin (68) > how-to (50)
-   which is what stops this from reading as a second hero.
-
-   Every selector is scoped to .how-to and appended last, so the frozen
-   hero, prelaunch, lifestyle and origin rules are untouched - including
-   the shared .how-to h2 rule, which is overridden here rather than
-   edited where it also serves six other sections.
+   Plum on cream is the ground this band already had, so the page's
+   colour rhythm is unchanged. Every value below reads a token.
    ══════════════════════════════════════════════════════════════ */
 
-.how-to{
+.glance{
   background:var(--plum);
   color:var(--cream);
-  padding:clamp(48px,4.6vw,72px) clamp(20px,3vw,48px);
+  padding-block:clamp(56px,5vw,84px);
+  padding-inline:var(--rail-gutter);
 }
-.how-to-inner{
-  /* the one line that spans the whole block */
-  border-top:1px solid rgba(245,235,226,.28);
-  padding-top:clamp(28px,2.8vw,40px);
-}
-.how-to-body{
-  display:grid;
-  grid-template-columns:minmax(300px,.85fr) minmax(0,1.7fr);
-  gap:clamp(28px,3.4vw,64px);
-  align-items:start;
-}
-
-/* -- THE LEFT UNIT ------------------------------------------- */
-.how-to-copy{min-width:0;max-width:420px}
-.how-to-eyebrow{
-  margin:0 0 clamp(18px,1.8vw,26px);
+.glance-inner{display:flex;flex-direction:column}
+.glance-head{max-width:none}
+.glance-eyebrow{
+  margin:0;
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:600;
   font-style:normal;
@@ -1431,191 +1405,98 @@ header nav{gap:18px;font-size:12px}
   line-height:1.2;
   letter-spacing:.2em;
   text-transform:uppercase;
-  color:var(--cream);
+  /* 5.3:1 on plum. */
+  color:rgba(245,235,226,.72);
 }
-/* .how-to h2 is (0,1,1) and would otherwise win on font-size and margin,
-   so the override carries the same weight. */
-.how-to .how-to-headline{
+.glance-headline{
   display:flex;
   flex-direction:column;
   align-items:flex-start;
-  margin:0;
-  color:var(--cream);
+  margin:clamp(14px,1.5vw,22px) 0 0;
   letter-spacing:normal;
   line-height:1;
 }
-.how-to-line{
+.glance-line{
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:500;
   font-style:normal;
   font-size:var(--type-title);
   line-height:.98;
   letter-spacing:-.04em;
+  color:var(--cream);
 }
-/* The section's ONE editorial accent, on the existing display face. */
-.how-to-line-accent{
+/* The GLOA display italic, the same second line the daily band and the
+   /our-matcha headlines take. */
+.glance-line-accent{
   font-family:var(--font-display),Georgia,serif;
-  font-style:italic;
   font-weight:400;
+  font-style:italic;
   font-size:var(--type-editorial);
-  line-height:.95;
-  letter-spacing:-.015em;
-  margin-top:2px;
+  line-height:.93;
+  letter-spacing:-.01em;
+  margin-top:3px;
+  color:var(--cream);
 }
 
-/* -- THE TWO MODULES ----------------------------------------- */
-.how-to-modules{
+/* ── THE FOUR FACTS ────────────────────────────────────────── */
+.glance-grid{
   display:grid;
-  grid-template-columns:repeat(2,minmax(0,1fr));
-  gap:clamp(24px,2.6vw,44px);
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:0;
+  margin:clamp(38px,3.6vw,58px) 0 0;
 }
-.how-to-module{min-width:0}
-/* A seam between them, not a card around each. */
-.how-to-module+.how-to-module{
-  padding-left:clamp(24px,2.6vw,44px);
-  border-left:1px solid rgba(245,235,226,.22);
+.glance-fact{
+  display:grid;
+  gap:clamp(7px,.8vw,11px);
+  align-content:start;
+  min-width:0;
+  padding:clamp(18px,1.8vw,24px) clamp(22px,2.2vw,38px) 0 0;
+  border-top:1px solid rgba(245,235,226,.4);
 }
-.how-to-module-head{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:12px;
-  margin:0 0 clamp(14px,1.4vw,18px);
-}
-.how-to-icon{display:block;color:var(--matcha)}
-.how-to-module-number{
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:500;
-  font-style:normal;
-  font-size:var(--type-meta);
-  line-height:1;
-  letter-spacing:.18em;
-  color:rgba(245,235,226,.55);
-}
-.how-to-module-title{
-  margin:0;
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:700;
-  font-style:normal;
-  font-size:16px;
-  line-height:1.2;
-  letter-spacing:.14em;
-  text-transform:uppercase;
-  color:var(--cream);
-}
-.how-to-module-dose{
-  margin:7px 0 0;
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:500;
-  font-style:normal;
-  font-size:12px;
-  line-height:1.2;
-  letter-spacing:.08em;
-  color:rgba(245,235,226,.6);
-}
-.how-to-steps{
-  list-style:none;
-  margin:clamp(16px,1.6vw,22px) 0 0;
-  padding:0;
-}
-.how-to-steps li{
-  display:flex;
-  align-items:baseline;
-  gap:14px;
-  padding:11px 0;
-  border-top:1px solid rgba(245,235,226,.18);
-}
-.how-to-step-number{
-  flex:0 0 auto;
-  width:20px;
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:500;
-  font-style:normal;
-  font-size:var(--type-meta);
-  line-height:1.4;
-  letter-spacing:.12em;
-  color:rgba(245,235,226,.5);
-}
-.how-to-step-text{
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:500;
-  font-style:normal;
-  font-size:15px;
-  line-height:1.35;
-  color:var(--cream);
-}
-
-/* ── THE ORIGIN FACTS ──────────────────────────────────────── */
-/* These two rows are the ONLY thing that moved here from the cream
-   "From Shizuoka, Japan." band, which was a full section of its own
-   between the blue band and this one and read as an island. The origin
-   itself is now this section's eyebrow, so it is stated once; these are
-   the product facts that stood under it, on the same hairline rhythm
-   the fieldsets and the process steps already use.
-
-   NOT a card and NOT a new band: two hairlines and a pair of rows,
-   inside the copy column that was already there. */
-.how-to-origin{
-  margin:clamp(26px,2.6vw,36px) 0 0;
-  border-top:1px solid rgba(245,235,226,.28);
-}
-.how-to-origin div{
-  display:flex;
-  justify-content:space-between;
-  align-items:baseline;
-  gap:clamp(14px,1.6vw,24px);
-  padding:clamp(11px,1.1vw,14px) 0;
-  border-bottom:1px solid rgba(245,235,226,.28);
-}
-.how-to-origin dt{
+.glance-fact-head{display:flex;align-items:center;gap:9px;min-width:0}
+.glance-icon{display:block;flex:0 0 auto;color:rgba(245,235,226,.72)}
+.glance-fact-label{
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:600;
   font-style:normal;
-  font-size:11px;
+  font-size:var(--type-meta);
   line-height:1.2;
   letter-spacing:.18em;
   text-transform:uppercase;
   color:rgba(245,235,226,.72);
 }
-.how-to-origin dd{
+.glance-fact-title{
+  margin:0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-style:normal;
+  font-size:clamp(16px,1.3vw,19px);
+  line-height:1.3;
+  letter-spacing:-.015em;
+  color:var(--cream);
+}
+.glance-fact-body{
   margin:0;
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:400;
   font-style:normal;
   font-size:clamp(14px,1.05vw,15px);
-  line-height:1.5;
-  text-align:right;
-  color:var(--cream);
+  line-height:1.6;
+  /* 7.0:1 on plum. */
+  color:rgba(245,235,226,.88);
 }
 
-@media (max-width:1024px){
-  /* The copy takes the full rail and the modules keep their pair. */
-  .how-to-body{grid-template-columns:1fr;gap:clamp(26px,4vw,38px)}
-  .how-to-copy{max-width:none}
-  /* On the full rail the two columns would sit at opposite screen
-     edges, so the pair reads as one row rather than two. */
-  .how-to-origin{max-width:420px}
+@media (max-width:1100px){
+  .glance-grid{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:clamp(24px,3vw,34px)}
 }
-
 @media (max-width:760px){
-  /* Stacked and quiet: the seam turns horizontal rather than pinching
-     two columns into a mini table. */
-  .how-to-modules{grid-template-columns:1fr;gap:0}
-  .how-to-module+.how-to-module{
-    padding-left:0;
-    border-left:0;
-    margin-top:clamp(26px,6vw,34px);
-    padding-top:clamp(26px,6vw,34px);
-    border-top:1px solid rgba(245,235,226,.22);
-  }
-}
-
-@media (max-width:640px){
-  .how-to{padding:clamp(40px,9vw,56px) 22px}
-  .how-to-origin{max-width:none}
-  .how-to-origin div{flex-direction:column;align-items:flex-start;gap:5px;padding:12px 0}
-  .how-to-origin dd{text-align:left}
-  .how-to-step-text{font-size:14px}
+  /* One under the other rather than two cramped columns: the bodies are
+     full sentences and two of them side by side at 390px would be four
+     words per line. */
+  .glance{padding-block:clamp(42px,10vw,56px)}
+  .glance-grid{grid-template-columns:minmax(0,1fr);row-gap:clamp(18px,4.4vw,24px);margin-top:clamp(24px,6vw,34px)}
+  .glance-fact{padding:clamp(14px,3.4vw,18px) 0 0}
+  .glance-headline{margin-top:clamp(10px,2.6vw,14px)}
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -1682,7 +1563,7 @@ header nav{gap:18px;font-size:12px}
 .countdown,
 .prelaunch,
 .daily,
-.how-to,
+.glance,
 .community,
 .brand-note,
 .shop-hero,
@@ -1713,7 +1594,7 @@ header nav{gap:18px;font-size:12px}
    of a three-pass track is exactly one pass, trailing gutter included.
 
    Scoped to .featured-recipes / .recipe-*, appended last, so the frozen
-   hero, countdown, prelaunch, lifestyle, origin and how-to blocks and
+   hero, countdown, prelaunch, lifestyle and origin blocks and
    the shared rail utilities are untouched.
    ══════════════════════════════════════════════════════════════ */
 
@@ -2134,7 +2015,7 @@ header nav{gap:18px;font-size:12px}
 
    Four of these headline elements are <h2>s, so the shared rule
 
-     .product-intro h2,.daily h2,.origin h2,.how-to h2,.community h2,...
+     .product-intro h2,.daily h2,.origin h2,.community h2,...
      {font-size:clamp(48px,7vw,98px)}
 
    still puts 98px on the ELEMENT even though every line inside them
@@ -2147,7 +2028,6 @@ header nav{gap:18px;font-size:12px}
    ══════════════════════════════════════════════════════════════ */
 
 .daily .daily-headline,
-.how-to .how-to-headline,
 .community .community-headline{font-size:var(--type-title)}
 
 /* ══════════════════════════════════════════════════════════════
@@ -2688,6 +2568,7 @@ header nav{gap:18px;font-size:12px}
    colours are the two the page already alternates.
    ══════════════════════════════════════════════════════════════ */
 
+.matcha-explain :focus-visible{outline-color:var(--cream)}
 .matcha-explain{
   /* GLOA BLUE, the token the homepage daily band and the about hero
      already stand on. Nothing new was mixed for this. Every colour
@@ -2842,20 +2723,10 @@ header nav{gap:18px;font-size:12px}
   color:rgba(245,235,226,.92);
 }
 /* Desktop never collapses: the panel is a plain wrapper and the toggle
-   is not rendered at all. Both only become meaningful under the
-   accordion breakpoint, where the rules live. */
-.matcha-process-panel{min-width:0}
-.matcha-process-toggle{
-  display:none;
-  width:100%;
-  margin:0;
-  padding:0;
-  background:none;
-  border:0;
-  border-radius:0;
-  text-align:left;
-  color:var(--cream);
-}
+   is not rendered at all. Both only become meaningful under the shared
+   accordion breakpoint, where the .tap-* rules live. */
+.tap-panel{min-width:0}
+.tap-toggle{display:none}
 
 /* ── THE FACT ROW, STORAGE INCLUDED ────────────────────────── */
 .matcha-facts{
@@ -2876,7 +2747,8 @@ header nav{gap:18px;font-size:12px}
 }
 .matcha-facts-list{
   display:grid;
-  grid-template-columns:repeat(4,minmax(0,1fr));
+  /* Five since the bio certification joined the row. */
+  grid-template-columns:repeat(5,minmax(0,1fr));
   gap:0;
   margin:clamp(30px,3vw,44px) 0 0;
 }
@@ -3006,50 +2878,18 @@ header nav{gap:18px;font-size:12px}
 /* ══ RESPONSIVE ════════════════════════════════════════════ */
 @media (max-width:1100px){
   .matcha-explain-top{grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:clamp(28px,3.4vw,52px)}
-  .matcha-facts-list{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:clamp(26px,3vw,36px)}
+  .matcha-facts-list{grid-template-columns:repeat(3,minmax(0,1fr));row-gap:clamp(26px,3vw,36px)}
 }
 
 @media (max-width:900px){
   .matcha-explain-top{grid-template-columns:minmax(0,1fr);gap:clamp(26px,4vw,38px)}
+  .matcha-facts-list{grid-template-columns:repeat(2,minmax(0,1fr))}
   .matcha-explain-body{max-width:none}
   .matcha-page .matcha-explain-line{font-size:clamp(32px,8vw,40px)}
   .matcha-page .matcha-explain-line-accent{font-size:clamp(34px,8.6vw,42px)}
   .matcha-page .matcha-taste-line{font-size:clamp(32px,8vw,40px)}
   .matcha-taste-inner{grid-template-columns:minmax(0,1fr);gap:clamp(22px,3.4vw,30px)}
   .matcha-taste-detail{max-width:none}
-}
-
-/* ── THE FOUR STEPS BECOME AN ACCORDION ────────────────────── */
-/* Paired with MATCHA_PROCESS_ACCORDION_QUERY in app/GloaSite.tsx: the
-   component swaps the markup at exactly this width, so the styling and
-   the aria state can never describe different shapes. */
-@media (max-width:760px){
-  .matcha-process-step{
-    display:block;
-    padding:0;
-  }
-  .matcha-process-toggle{
-    display:grid;
-    grid-template-columns:34px minmax(0,1fr) 24px;
-    align-items:center;
-    gap:12px;
-    min-height:52px;
-    padding:13px 0;
-  }
-  .matcha-process-toggle .matcha-process-num{grid-row:auto}
-  .matcha-process-toggle .matcha-process-label{letter-spacing:.1em}
-  .matcha-process-mark{
-    justify-self:end;
-    font-family:var(--font-sans),Arial,sans-serif;
-    font-weight:400;
-    font-size:22px;
-    line-height:1;
-    color:var(--cream);
-  }
-  /* The panel only pads when it is open; a closed one is `hidden`, so
-     no rule here can leave a gap behind it. */
-  .matcha-process-panel{padding:0 0 15px}
-  .matcha-process-toggle+.matcha-process-panel .matcha-process-text{padding-right:34px}
 }
 
 @media (max-width:640px){
@@ -3227,149 +3067,63 @@ header nav{gap:18px;font-size:12px}
 }
 
 
-/* ── THE MOBILE RESEARCH CARDS AND THEIR SHEET ─────────────── */
-/* On desktop the three blocks read exactly as they always did: the
-   regulated paragraph is on the page and the affordance below is not
-   rendered at all. On a phone three regulated paragraphs stacked in
-   full are a wall, so the body is withheld and each block becomes a
-   tappable card that opens the SAME text in a sheet.
+/* ── TAP TO READ: ONE ROW, TWO BLOCKS ──────────────────────── */
+/* The production steps and the research topics share a control, so
+   they share its styling. Paired with useTapToRead() in GloaSite.tsx:
+   the component swaps the markup at exactly this width, so the aria
+   state and what is on the screen can never describe different shapes.
 
-   THE COPY IS UNCHANGED. Only where it is shown changed. There is no
-   studies page in this project, so no card links to one and no source
-   was invented to fill the button. */
-.matcha-research-open{display:none}
-
+   The rows themselves stay owned by their own block - a step is a
+   hairline row in a list, a research topic is a column on desktop -
+   and only the CONTROL is shared. */
 @media (max-width:760px){
-  .matcha-research-body{display:none}
-  .matcha-research-open{
-    display:flex;
+  .tap-row{display:block}
+  .tap-toggle{
+    display:grid;
+    grid-template-columns:34px minmax(0,1fr) 24px;
     align-items:center;
-    justify-content:space-between;
-    gap:16px;
+    gap:12px;
     width:100%;
-    min-height:48px;
-    margin-top:clamp(10px,2.4vw,14px);
-    padding:0;
+    min-height:56px;
+    margin:0;
+    padding:14px 0;
     background:none;
     border:0;
     border-radius:0;
     text-align:left;
-    /* THE SECTION IS CREAM. Cream type on it measures 1:1 and the hint
-       is simply not there - the same trap the launch popup's accent hit
-       on blue. Ink and raspberry are the colours this section already
-       uses, and both clear AA on this ground. */
-    color:var(--ink);
+    color:inherit;
   }
-  /* The words are the point: a card that looks tappable but never says
-     so is a card most people scroll past. */
-  .matcha-research-open-label{
+  /* The whole row is the target, not just the "+". */
+  .tap-text{display:flex;flex-direction:column;gap:3px;min-width:0}
+  .tap-label{
     font-family:var(--font-sans),Arial,sans-serif;
     font-weight:600;
     font-style:normal;
-    font-size:12px;
+    font-size:clamp(13px,3.4vw,15px);
+    line-height:1.3;
+    letter-spacing:.1em;
+    text-transform:uppercase;
+    color:inherit;
+  }
+  .tap-hint{
+    font-family:var(--font-sans),Arial,sans-serif;
+    font-weight:600;
+    font-style:normal;
+    font-size:11px;
     line-height:1.2;
     letter-spacing:.12em;
     text-transform:uppercase;
-    /* 7.0:1 on cream. */
-    color:rgba(17,17,17,.72);
+    opacity:.82;
   }
-  /* The same "+" the FAQ rows carry, in the same raspberry: 6.1:1. */
-  .matcha-research-open-mark{
+  .tap-mark{
+    justify-self:end;
     font-family:var(--font-sans),Arial,sans-serif;
     font-weight:400;
     font-size:22px;
     line-height:1;
-    color:var(--berry);
   }
-}
-
-/* THE SHEET. Bottom sheet on a phone, centred panel above it. Same
-   modal contract as the cart drawer and the launch popup: role=dialog,
-   aria-modal, focus in and back out, Escape, backdrop, scroll lock. */
-.mr-sheet-backdrop{
-  position:fixed;
-  inset:0;
-  z-index:60;
-  display:flex;
-  align-items:flex-end;
-  justify-content:center;
-  background:rgba(17,17,17,.58);
-  border:0;
-}
-.mr-sheet{
-  position:relative;
-  width:100%;
-  max-width:560px;
-  max-height:calc(100dvh - 64px);
-  overflow-y:auto;
-  box-sizing:border-box;
-  padding:clamp(26px,5vw,34px) clamp(20px,5vw,30px) clamp(28px,6vw,36px);
-  background:var(--berry);
-  color:var(--cream);
-  border-radius:0;
-  animation:mr-sheet-rise .18s ease-out both;
-}
-.mr-sheet-close{
-  position:absolute;
-  top:6px;
-  right:6px;
-  width:44px;
-  height:44px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  border:0;
-  background:none;
-  color:var(--cream);
-  font:300 30px/1 var(--font-sans),Arial,sans-serif;
-  opacity:.82;
-}
-.mr-sheet-close:hover{opacity:1}
-.mr-sheet-backdrop :focus-visible{outline-color:var(--cream)}
-.mr-sheet-head{
-  display:flex;
-  align-items:center;
-  gap:12px;
-  padding-right:44px;
-  color:var(--cream);
-}
-/* THE ICON IS THE SAME GLYPH THE CARD RENDERS, ON THE OTHER GROUND.
-   .matcha-research-icon paints itself raspberry, which is right on the
-   section's cream and invisible on this panel. It takes the panel's
-   own colour here rather than the card's. */
-.mr-sheet-head .matcha-research-icon{color:var(--cream)}
-.mr-sheet-title{
-  margin:0;
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:600;
-  font-style:normal;
-  font-size:clamp(16px,4vw,19px);
-  line-height:1.25;
-  letter-spacing:.02em;
-  text-transform:uppercase;
-  color:var(--cream);
-}
-.mr-sheet-body{
-  margin:clamp(16px,3.4vw,22px) 0 0;
-  font-family:var(--font-sans),Arial,sans-serif;
-  font-weight:400;
-  font-style:normal;
-  font-size:clamp(15px,3.8vw,16px);
-  line-height:1.65;
-  color:var(--cream);
-}
-
-@keyframes mr-sheet-rise{from{opacity:0;transform:translate3d(0,12px,0)}to{opacity:1;transform:none}}
-
-@media (min-width:761px){
-  /* Above the phone breakpoint it is a centred panel, not a sheet -
-     though the affordance that opens it is mobile only. */
-  .mr-sheet-backdrop{align-items:center;padding:32px}
-  .mr-sheet{max-height:calc(100dvh - 64px)}
-}
-
-@media (prefers-reduced-motion:reduce){
-  .mr-sheet{animation:none}
+  .tap-lead{display:flex;align-items:center}
+  .tap-panel{padding:0 34px 16px 0}
 }
 
 /* ══════════════════════════════════════════════════════════════

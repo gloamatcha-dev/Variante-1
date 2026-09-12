@@ -40,7 +40,9 @@ const rule = name => {
 // plain list or as an accordion depending on the width, and that
 // decision needs state.
 const process = site.slice(site.indexOf("function MatchaProcess()"),
-                           site.indexOf("function MatchaResearchSheet"));
+                           site.indexOf("function MatchaResearch()"));
+// The behaviour behind both accordions on this page.
+const shared = site.slice(site.indexOf("function useTapToRead()"), site.indexOf("function MatchaProcess()"));
 // The three data lists the band renders from.
 const list = name => site.slice(site.indexOf(`const ${name}`), site.indexOf("];", site.indexOf(`const ${name}`)));
 
@@ -299,14 +301,17 @@ test("6: the band alternates the page's two grounds and invents nothing", () => 
     assert.ok(measured >= 4.5,
       `${selector} measures ${measured.toFixed(2)}:1 on GLOA blue - needs 4.5:1`);
   }
-  // The accordion "+" is a 22px glyph, so 3:1 is its bar.
-  const mark = (() => {
-    const at = rules.indexOf(".matcha-process-mark{");
-    assert.notEqual(at, -1, "the accordion mark has no rule");
-    return rules.slice(at, rules.indexOf("}", at));
-  })();
-  assert.match(mark, /color:var\(--cream\)/);
-  assert.ok(ratio(CREAM, BLUE) >= 3);
+  // The accordion control is SHARED with the research block on cream,
+  // so it carries no colour of its own: it inherits the band's, which
+  // is what makes one control work on two grounds. Here that is cream
+  // on blue, 6.3:1 for the label and 4.7:1 for the hint at .72.
+  const tap = css.slice(css.indexOf("TAP TO READ: ONE ROW, TWO BLOCKS"));
+  assert.match(tap, /\.tap-toggle\{[\s\S]*?color:inherit/);
+  assert.match(tap, /\.tap-label\{[\s\S]*?color:inherit/);
+  assert.ok(!/\.tap-mark\{[^}]*color:/.test(tap), "the mark hard-codes a colour");
+  assert.ok(ratio(CREAM, BLUE) >= 4.5);
+  assert.ok(ratio(over(CREAM, 0.82, BLUE), BLUE) >= 4.5, "the hint is under AA on blue");
+  assert.match(tap, /\.tap-hint\{[\s\S]*?opacity:\.82/);
   // And the hairlines are light on it, not the ink ones they were.
   for (const hairline of [".matcha-process-list{", ".matcha-process-step{", ".matcha-facts{", ".matcha-fact{"]) {
     assert.match(rule(hairline), /border-(top|bottom):1px solid rgba\(245,235,226,/,
@@ -452,32 +457,32 @@ test("11a: desktop prints every step, with no accordion machinery", () => {
   assert.match(process, /<span className="matcha-process-num">\{n\}<\/span><h4 className="matcha-process-label">\{title\}<\/h4>/);
   // All four texts are in the markup unconditionally - the panel is
   // never conditionally rendered, only conditionally `hidden`.
-  assert.match(process, /<div id=\{panelId\} className="matcha-process-panel" hidden=\{accordion&&!isOpen\}>/);
+  assert.match(shared, /<div id=\{panelId\} className="tap-panel" hidden=\{accordion&&!isOpen\}>/);
   assert.match(process, /<p className="matcha-process-text">\{text\}<\/p>/);
   // The toggle is display:none outside the accordion query, so a wide
   // viewport cannot show a button the component did not render either.
-  assert.match(rules, /\.matcha-process-toggle\{[\s\S]*?display:none/);
+  assert.ok(css.includes(".tap-toggle{display:none}"), "the control shows where there is no accordion");
 });
 
 test("11b: the accordion is a real one - button, state, and a single open step", () => {
-  assert.match(process, /<button type="button" className="matcha-process-toggle"/);
-  assert.match(process, /aria-expanded=\{isOpen\}/);
-  assert.match(process, /aria-controls=\{panelId\}/);
-  assert.match(process, /const panelId=`matcha-process-panel-\$\{n\}`/);
+  assert.match(shared, /<button type="button" className="tap-toggle"/);
+  assert.match(shared, /aria-expanded=\{isOpen\}/);
+  assert.match(shared, /aria-controls=\{panelId\}/);
+  assert.match(process, /panelId=\{`matcha-process-panel-\$\{n\}`\}/);
   // ONE AT A TIME: the setter replaces the open index rather than
   // adding to a set, and clicking the open one closes it.
-  assert.match(process, /setOpen\(prev=>prev===i\?null:i\)/);
-  assert.match(process, /useState<number\|null>\(null\)/);
+  assert.match(shared, /setOpen\(prev=>prev===i\?null:i\)/);
+  assert.match(shared, /useState<number\|null>\(null\)/);
   // The "+" carries no meaning a reader needs - aria-expanded does.
-  assert.match(process, /className="matcha-process-mark" aria-hidden="true"/);
+  assert.match(shared, /className="tap-mark" aria-hidden="true"/);
   // The hint exists, and only while the accordion does.
   assert.match(process, /\{accordion&&<p className="matcha-process-hint">Zum Lesen antippen<\/p>\}/);
   // A real <button> is keyboard-operable without a keydown handler, so
   // there must not be one faking it.
-  assert.ok(!process.includes("onKeyDown"), "a hand-rolled key handler was added to a native button");
-  assert.ok(!process.includes("role=\"button\""), "a div was dressed up as a button");
+  assert.ok(!shared.includes("onKeyDown"), "a hand-rolled key handler was added to a native button");
+  assert.ok(!shared.includes("role=\"button\""), "a div was dressed up as a button");
   // Touch target.
-  assert.match(rules, /\.matcha-process-toggle\{[\s\S]*?min-height:52px/);
+  assert.match(css, /\.tap-toggle\{[\s\S]*?min-height:56px/);
 });
 
 test("11c: the two shapes cannot disagree about which one is on screen", () => {
@@ -487,20 +492,26 @@ test("11c: the two shapes cannot disagree about which one is on screen", () => {
   // pairing exists to prevent.
   const query = /const MATCHA_PROCESS_ACCORDION_QUERY="\(max-width:(\d+)px\)"/.exec(site);
   assert.ok(query, "the breakpoint constant is missing");
-  assert.ok(rules.includes(`@media (max-width:${query[1]}px)`),
+  assert.ok(css.includes(`@media (max-width:${query[1]}px)`),
     `the stylesheet does not switch at ${query[1]}px`);
   // It is also the width the research cards switch at, so the page has
   // one tap-to-read breakpoint rather than two.
-  assert.match(css, new RegExp(`\\.matcha-research-open\\{[\\s\\S]*?@media \\(max-width:${query[1]}px\\)`));
+  // Both blocks reach the SAME control, so there is one breakpoint on
+  // the page rather than two that can drift apart.
+  const tapBlock = css.slice(css.indexOf("TAP TO READ: ONE ROW, TWO BLOCKS"));
+  assert.ok(tapBlock.startsWith("TAP TO READ"), "the shared block is missing");
+  assert.ok(tapBlock.includes(`@media (max-width:${query[1]}px)`),
+    `the shared control does not switch at ${query[1]}px`);
+  assert.equal([...css.matchAll(/\.tap-toggle\{/g)].length, 2, "one default rule, one accordion rule");
   // SSR AND THE FIRST CLIENT RENDER ARE THE PLAIN LIST, so hydration
   // cannot mismatch and the full text is what ships in the HTML.
-  assert.match(process, /const \[accordion,setAccordion\]=useState\(false\)/);
-  assert.match(process, /window\.matchMedia\(MATCHA_PROCESS_ACCORDION_QUERY\)/);
-  assert.match(process, /mq\.addEventListener\("change",sync\)/);
-  assert.match(process, /removeEventListener\("change",sync\)/);
+  assert.match(shared, /const \[accordion,setAccordion\]=useState\(false\)/);
+  assert.match(shared, /window\.matchMedia\(MATCHA_PROCESS_ACCORDION_QUERY\)/);
+  assert.match(shared, /mq\.addEventListener\("change",sync\)/);
+  assert.match(shared, /removeEventListener\("change",sync\)/);
   // Leaving the accordion closes whatever was open, so a step cannot
   // stay half-open in a layout that has no toggles.
-  assert.match(process, /if\(!mq\.matches\)setOpen\(null\)/);
+  assert.match(shared, /if\(!mq\.matches\)setOpen\(null\)/);
   // The switch runs before paint, so mobile never flashes the open text.
   assert.match(site, /typeof window!=="undefined"\?useLayoutEffect:useEffect/);
 });
@@ -539,6 +550,6 @@ test("12: nothing on this page reserves height it does not fill", () => {
     assert.ok(!pageCss.includes(banned), `the page reserves a viewport: ${banned}`);
   }
   const minimums = [...pageCss.matchAll(/min-height:([^;}]+)/g)].map(m => m[1].trim());
-  assert.deepEqual(minimums.sort(), ["48px", "52px", "54px"],
-    "a new reserved height appeared - touch targets are 48px, 52px and 54px");
+  assert.deepEqual(minimums.sort(), ["54px", "56px"],
+    "a new reserved height appeared - the only minimums are the two touch targets");
 });

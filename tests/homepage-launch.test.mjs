@@ -55,7 +55,7 @@ const cssBlockRules = (from, to) => {
 const HERO_BLOCK = "HOMEPAGE HERO - FINAL PASS";
 const PRELAUNCH_BLOCK = "HOMEPAGE PRELAUNCH SECTION";
 const DAILY_BLOCK = "HOMEPAGE DAILY LIFESTYLE SECTION";
-const HOWTO_BLOCK = "HOMEPAGE HOW TO GLOA SECTION";
+const GLANCE_BLOCK = "HOMEPAGE AT A GLANCE";
 const RECIPES_BLOCK = "HOMEPAGE RECIPES CAROUSEL";
 const COMMUNITY_BLOCK = "HOMEPAGE COMMUNITY SECTION";
 const SHOP_BLOCK = "SHOP LAUNCH HERO";
@@ -927,9 +927,9 @@ test("28: the section is narrow, hairlined in raspberry, and typed correctly", (
 
 const daily = homepage.slice(
   homepage.indexOf('<section className="daily">'),
-  homepage.indexOf("<HowTo/>")
+  homepage.indexOf("<AtAGlance/>")
 );
-const dailyCss = cssBlockRules(DAILY_BLOCK, HOWTO_BLOCK);
+const dailyCss = cssBlockRules(DAILY_BLOCK, GLANCE_BLOCK);
 
 test("29: the copy and the six tiles are one horizontal composition", () => {
   assert.ok(daily.length > 0, "the daily section is missing");
@@ -1062,62 +1062,51 @@ test("32: the standalone origin band is gone, markup and rules alike", () => {
                       ".origin-intro", ".origin-list", ".origin-eyebrow"]) {
     assert.ok(!css.includes(gone), `a dead origin rule is still shipped: ${gone}`);
   }
-  // The homepage now runs lifestyle -> how-to with nothing between them.
-  assert.match(homepage, /<\/section><HowTo\/>/);
+  // The homepage now runs lifestyle -> at a glance with nothing between them.
+  assert.match(homepage, /<\/section><AtAGlance\/>/);
 });
 
-test("33: the origin is stated ONCE, as the how-to eyebrow", () => {
-  // The eyebrow carries it, in the section's own meta voice.
-  assert.match(howTo, /<p className="eyebrow how-to-eyebrow">FROM SHIZUOKA, JAPAN<\/p>/);
-  // And the how-to section says it exactly once - no second headline and
-  // no restating sentence underneath it.
-  assert.equal(howTo.split("SHIZUOKA").length - 1, 1, "the origin is stated more than once here");
-  for (const gone of ["From Shizuoka,", "Matcha aus Shizuoka, fein vermahlen.", "HOW TO GLOA"]) {
-    assert.ok(!howTo.includes(gone), `superseded origin copy is still rendered: ${gone}`);
+test("33: the origin is stated ONCE on the homepage, and it is a fact now", () => {
+  // It used to be the retired band's eyebrow. It is a labelled fact in
+  // the glance row instead, which says the same thing in a place a
+  // reader scanning for it will actually look.
+  assert.match(glance, /label:"HERKUNFT",title:"Shizuoka, Japan"/);
+  for (const gone of ["FROM SHIZUOKA, JAPAN", "From Shizuoka,",
+                      "Matcha aus Shizuoka, fein vermahlen.", "HOW TO GLOA"]) {
+    assert.ok(!homepage.includes(gone), `superseded origin copy is still rendered: ${gone}`);
   }
-  // The hero's own line is untouched and is a different sentence.
+  // Twice on the whole page and no more: the hero eyebrow, and this
+  // fact. The hero's line is untouched and is a different sentence.
   assert.ok(site.includes("MATCHA AUS SHIZUOKA."), "the hero eyebrow changed");
+  assert.equal(homepage.toUpperCase().split("SHIZUOKA").length - 1, 1,
+    "the hero is the only place outside the fact row that names it");
+  assert.equal(glance.split("Shizuoka").length - 1, 2, "one fact, its title and its sentence");
+  // The long version stays where it belongs, one click away.
+  assert.match(homepage, /href="\/our-matcha"/);
 });
 
-test("34: the two product facts moved with it, unchanged and on hairlines", () => {
-  // Exactly the two rows the origin band carried, word for word.
-  assert.match(howTo, /<dt>MATCHA<\/dt><dd>100 % Grünteepulver<\/dd>/);
-  assert.match(howTo, /<dt>MADE FOR<\/dt><dd>Latte \+ pur<\/dd>/);
-  assert.equal([...howTo.matchAll(/<dt>/g)].length, 2, "the fact list is not two rows");
-  // Inside the copy column that was already there - not a new band and
-  // not a card.
-  assert.match(howTo, /<\/h2><dl className="how-to-origin">/);
+test("34: the two product facts survived the band they lived in", () => {
+  // The retired origin band carried MATCHA / 100 % Grünteepulver and
+  // MADE FOR / Latte + pur. Composition is now the ZUTAT fact; the
+  // "made for" pair is gone from the homepage on purpose, because
+  // Latte, Iced and Pur have a section of their own on /our-matcha and
+  // the hero lead already says it.
+  assert.match(glance, /label:"ZUTAT",title:"100 % Matcha"/);
+  assert.match(glance, /reines Matcha-Grünteepulver ohne zugesetzte Aromen oder Mischungen/);
+  assert.ok(site.includes("Latte. Iced. Pur."), "/our-matcha lost the usage section");
+  assert.ok(homepage.includes("Für Latte, pur, iced oder wie du willst."), "the hero lead changed");
 
   // Hairlines in the band's own cream, like every other list on plum.
-  assert.match(howToCss, /\.how-to-origin\{[\s\S]*?border-top:1px solid rgba\(245,235,226/);
-  assert.match(howToCss, /\.how-to-origin div\{[\s\S]*?border-bottom:1px solid rgba\(245,235,226/);
+  assert.match(glanceCss, /\.glance-fact\{[\s\S]*?border-top:1px solid rgba\(245,235,226/);
   for (const banned of ["border-radius", "box-shadow", "gradient", "backdrop-filter"]) {
-    assert.ok(!howToCss.includes(banned), `the origin facts became a card: ${banned}`);
+    assert.ok(!glanceCss.includes(banned), `the facts became a card: ${banned}`);
   }
   // Legible on plum, and on the sans like every other meta line here.
-  assert.match(howToCss, /\.how-to-origin dt\{[\s\S]*?font-family:var\(--font-sans\)/);
-  assert.match(howToCss, /\.how-to-origin dt\{[\s\S]*?text-transform:uppercase/);
-  assert.match(howToCss, /\.how-to-origin dd\{[\s\S]*?color:var\(--cream\)/);
-  // Label and value stack on a phone instead of splitting to two edges.
-  // Read from the BALANCED media block, not with a lazy span: `[\s\S]*?`
-  // from one @media marker will happily run into the next block and
-  // report a rule as living at a breakpoint it does not live at.
-  const mq = w => {
-    const at = howToCss.indexOf(`@media (max-width:${w}px){`);
-    assert.notEqual(at, -1, `the how-to block has no ${w}px media query`);
-    const from = howToCss.indexOf("{", at);
-    let depth = 0, i = from;
-    for (; i < howToCss.length; i++) {
-      if (howToCss[i] === "{") depth++;
-      else if (howToCss[i] === "}" && --depth === 0) break;
-    }
-    return howToCss.slice(from + 1, i);
-  };
-  assert.match(mq(1024), /\.how-to-origin\{max-width:420px\}/);
-  assert.match(mq(640), /\.how-to-origin\{max-width:none\}/);
-  assert.match(mq(640), /\.how-to-origin div\{flex-direction:column/);
-  assert.match(mq(640), /\.how-to-origin dd\{text-align:left\}/);
+  assert.match(glanceCss, /\.glance-fact-label\{[\s\S]*?font-family:var\(--font-sans\)/);
+  assert.match(glanceCss, /\.glance-fact-label\{[\s\S]*?text-transform:uppercase/);
+  assert.match(glanceCss, /\.glance-fact-value\{|\.glance-fact-title\{[\s\S]*?color:var\(--cream\)/);
 });
+
 
 /* ══════════════════════════════════════════════════════════════
    35. THE LIFESTYLE SECTION'S TWO-COLOUR CONTRACT
@@ -1200,123 +1189,128 @@ test("35: the section paints one blue, one cream, and nothing else", () => {
 });
 
 /* ══════════════════════════════════════════════════════════════
-   36-38. THE HOW TO GLOA SECTION
+   36-38. AT A GLANCE
+
+   This band was a second preparation guide. The steps it printed are
+   still on the product page and on /our-matcha; what the homepage
+   needed instead was the short answer to what is in the tin and where
+   it comes from.
    ══════════════════════════════════════════════════════════════ */
 
-const howTo = site.slice(site.indexOf("const howToModules=["), site.indexOf("function CommunityFeed()"));
-const howToCss = cssBlockRules(HOWTO_BLOCK, RECIPES_BLOCK);
+const glance = site.slice(site.indexOf("const glanceFacts"), site.indexOf("function CommunityFeed()"));
+const glanceCss = cssBlockRules(GLANCE_BLOCK, RECIPES_BLOCK);
+// The facts are module-level data, so "everything the homepage shows"
+// is the render slice plus that data, not the render slice alone.
+const homeAll = homepage + glance;
 
-test("36: the copy is exactly the approved lines, stated once", () => {
-  assert.ok(howTo.length > 0, "the how-to section is missing");
-  // The eyebrow carries the ORIGIN now - see tests 32-34. "HOW TO GLOA"
-  // said what the section obviously is; the origin says something the
-  // page would otherwise have to spend a band on.
-  assert.ok(howTo.includes('<p className="eyebrow how-to-eyebrow">FROM SHIZUOKA, JAPAN</p>'));
-  assert.ok(howTo.includes('<span className="how-to-line">Latte oder pur.</span>'));
-  assert.ok(howTo.includes('<i className="how-to-line how-to-line-accent">Mehr brauchst du nicht.</i>'));
-  // The old headline capitalised "Pur."; the approved line does not.
-  assert.ok(!howTo.includes("Latte oder Pur."), "the retired capitalisation survived");
-
-  // Two modules, each stated once, with the dose on its own small line.
-  const modules = [...howTo.matchAll(/number:"(\d\d)",title:"([^"]+)",dose:"([^"]+)"/g)].map(m => m.slice(1));
-  assert.deepEqual(modules, [["01", "MATCHA LATTE", "3 g Matcha"], ["02", "PURE MATCHA", "3 g Matcha"]]);
-  // Four steps each, in the approved wording and order.
-  const steps = [...howTo.matchAll(/steps:\[([^\]]+)\]/g)].map(m => m[1].split('","').map(x => x.replace(/"/g, "")));
-  assert.deepEqual(steps, [
-    ["Matcha dosieren", "mit Wasser aufschlagen", "Milch oder Pflanzendrink dazu", "heiß oder iced genießen"],
-    ["Matcha dosieren", "mit wenig Wasser glattrühren", "mit Wasser aufschlagen", "direkt genießen"],
-  ]);
-  // NOTHING was invented alongside it: no explanatory prose, no CTA, no
-  // repeated brewing advice, and no second copy of the section.
-  assert.ok(!/<p className="how-to-(?!module-dose)/.test(howTo.replace('<p className="eyebrow how-to-eyebrow">', "")),
-    "the section grew an extra paragraph");
-  for (const invented of ["Sekunden", "Temperatur", "80 °C", "Tipp", "cta", "Link "]) {
-    assert.ok(!howTo.includes(invented), `the section invents: ${invented}`);
+test("36: the preparation band is gone from the homepage, markup and rules alike", () => {
+  // THE COPY. Every visible line the retired band carried, checked
+  // against the whole page rather than the section, so it cannot have
+  // moved somewhere else on the way out.
+  for (const gone of ["Latte oder pur.", "Mehr brauchst du nicht.", "FROM SHIZUOKA, JAPAN",
+                      "MATCHA LATTE", "PURE MATCHA", "Matcha dosieren", "mit Wasser aufschlagen",
+                      "Milch oder Pflanzendrink dazu", "heiß oder iced genießen",
+                      "mit wenig Wasser glattrühren", "direkt genießen",
+                      "MADE FOR", "Latte + pur", "3 g Matcha"]) {
+    assert.ok(!homeAll.includes(gone), `the retired preparation band survives: ${gone}`);
   }
-  // The retired table is gone from the markup AND the stylesheet.
-  assert.ok(!site.includes('className="method-grid"'), "the table markup survived");
-  assert.ok(!css.includes(".method-grid{"), "the table stylesheet survived");
-  // .section-head still serves the matcha page, so its rules stay.
-  assert.match(css, /\.section-head\{display:flex/);
-  assert.match(css, /\.matcha-method-grid\{display:grid/);
+  // THE COMPONENT AND ITS DATA.
+  for (const gone of ["howToModules", "function HowTo(", "<HowTo/>"]) {
+    assert.ok(!site.includes(gone), `the retired component survives: ${gone}`);
+  }
+  // AND ITS RULES. No selector may outlive the element it styled.
+  assert.ok(!css.includes("how-to"), "a dead how-to rule is still shipped");
+  assert.equal(css.indexOf("HOMEPAGE HOW TO GLOA SECTION"), -1, "the how-to css block is still here");
+
+  // PREPARATION STILL EXISTS, on the two pages that own it. The steps
+  // were retired from the HOMEPAGE, not from the site.
+  assert.match(site, /Ca\. 3 g Matcha/, "the product page lost its preparation detail");
+  assert.match(site, /Wie bereite ich Matcha zu\?/, "the /our-matcha FAQ lost the preparation answer");
 });
 
-test("37: the section sits on the canonical content rail and is compact", () => {
-  // ── THE GLOBAL RAIL RULE ─────────────────────────────────────
-  // Every homepage section shares one desktop left/right rail, with the
-  // lifestyle section as the reference. A section may paint edge to edge;
-  // its CONTENT may not start at its own X.
-  // Both wrappers carry the same utility, so they cannot drift apart.
-  assert.match(site, /<div className="how-to-inner home-rail">/);
-  assert.match(site, /<div className="daily-inner home-rail">/);
-  assert.ok(!/\.how-to-inner\{[^}]*max-width/.test(howToCss), "the how-to declared its own container");
-  // Same split as the lifestyle wall, so the two sections break on one axis.
-  assert.match(howToCss, /\.how-to-body\{[\s\S]*?grid-template-columns:minmax\(300px,\.85fr\) minmax\(0,1\.7fr\)/);
+test("37: four facts, in full sentences, each stated once on the page", () => {
+  assert.ok(glance.length > 0, "the glance section is missing");
+  assert.match(glance, /<p className="eyebrow glance-eyebrow">AUF EINEN BLICK<\/p>/);
+  assert.match(glance, /<span className="glance-line">Klar, was drin ist\.<\/span>/);
+  // The second line is the GLOA display italic, the same <i> the daily
+  // band and the community band use.
+  assert.match(glance, /<i className="glance-line glance-line-accent">Und wo es herkommt\.<\/i>/);
+  assert.match(glanceCss, /\.glance-line-accent\{[\s\S]*?font-family:var\(--font-display\)/);
+  assert.match(glanceCss, /\.glance-line-accent\{[\s\S]*?font-style:italic/);
 
-  // ── COMPACT, AND BELOW THE OTHER SECTIONS IN SCALE ───────────
-  // The retired layout was a flat 110px of padding; this one is capped
-  // well under it and is the smallest headline on the page.
-  assert.ok(!howToCss.includes("110px"), "the retired padding is back");
-  // This section used to run at 46/50px - the smallest headline on the
-  // page - which was its own scale rather than the shared one. It is a
-  // SECTION TITLE like the others now; test 43 owns the hierarchy.
-  assert.match(howToCss, /\.how-to-line\{[\s\S]*?font-size:var\(--type-title\)/);
-  assert.match(howToCss, /\.how-to-line-accent\{[\s\S]*?font-size:var\(--type-editorial\)/);
-  assert.ok(!/\.how-to-line(-accent)?\{[^}]*font-size:clamp/.test(howToCss),
-    "the how-to section went back to a scale of its own");
+  const facts = [...glance.matchAll(/label:"([^"]+)",title:"([^"]+)",\s*body:"([^"]+)"/g)];
+  assert.equal(facts.length, 4, "the brief asks for exactly four");
+  assert.deepEqual(facts.map(f => f[1]), ["BIO-ZERTIFIZIERT", "HERKUNFT", "ZUTAT", "ALLTAG"]);
+  assert.deepEqual(facts.map(f => f[2]), ["Bio-zertifiziert", "Shizuoka, Japan", "100 % Matcha", "Für deinen Alltag"]);
+  for (const [, , title, body] of facts) {
+    // Full sentences, not label fragments.
+    assert.match(body, /\.$/, `not a sentence: ${title}`);
+    assert.ok(body.split(" ").length >= 10, `still a fragment: ${title}`);
+    for (const dash of ["–", "—"]) assert.ok(!body.includes(dash), `a dash was introduced: ${title}`);
+  }
 
-  // One hairline across the top of the block, and no table borders.
-  assert.match(howToCss, /\.how-to-inner\{[\s\S]*?border-top:1px solid rgba\(245,235,226,\.28\)/);
-  assert.ok(!/\.how-to[^{]*\{[^}]*border-radius|box-shadow/.test(howToCss), "the modules became cards");
-  // A seam between the modules, hairlines inside each list.
-  assert.match(howToCss, /\.how-to-module\+\.how-to-module\{[\s\S]*?border-left:1px solid/);
-  assert.match(howToCss, /\.how-to-steps li\{[\s\S]*?border-top:1px solid/);
-  // Mobile: stacked, the seam turns horizontal, nothing is squeezed.
-  assert.match(howToCss, /@media \(max-width:760px\)\{[\s\S]*?\.how-to-modules\{grid-template-columns:1fr/);
-  assert.match(howToCss, /@media \(max-width:760px\)\{[\s\S]*?border-left:0/);
+  // SAID ONCE. Each of the four is a short form of something /our-matcha
+  // explains in full, and the homepage must not start repeating itself
+  // the way the retired band did.
+  // ONE fact names the origin, and it is the one whose label says so.
+  const namesOrigin = facts.filter(f => /Shizuoka/.test(f[2] + f[3]));
+  assert.equal(namesOrigin.length, 1, "more than one fact tells the origin story");
+  assert.equal(namesOrigin[0][1], "HERKUNFT");
+  // And outside the fact row the homepage says it once, in the hero.
+  assert.equal(homepage.toUpperCase().split("SHIZUOKA").length - 1, 1,
+    "the origin is stated more than once outside the fact row");
+  // Each fact states its subject in its title and again in its sentence,
+  // which is the shape; what must not happen is a SECOND fact repeating
+  // someone else's subject.
+  for (const [subject, owner] of [[/bio-zertifiziert/i, "BIO-ZERTIFIZIERT"],
+                                  [/Shizuoka/, "HERKUNFT"],
+                                  [/Matcha-Grünteepulver/, "ZUTAT"]]) {
+    const owners = facts.filter(f => subject.test(f[1] + f[2] + f[3])).map(f => f[1]);
+    assert.deepEqual(owners, [owner], `${subject} is claimed by more than one fact`);
+  }
+
+  // NO CERTIFICATE DATA. The claim is released; a control body, a seal
+  // or a number is a different thing and none of it is in this repo.
+  for (const invented of ["DE-ÖKO", "EU-Bio-Logo", "Kontrollstelle", "Zertifikat", "zertifiziert nach"]) {
+    assert.ok(!glance.includes(invented), `an unbacked certification detail entered the homepage: ${invented}`);
+  }
 });
 
-test("38: plum, cream and one matcha green - on the existing two families", () => {
-  // The plum ground is kept deliberately.
-  assert.match(howToCss, /\.how-to\{[\s\S]*?background:var\(--plum\)/);
-  assert.match(css, /--plum:#4F3A5B;/);
-  // ONE new token, and it is the icon colour.
-  assert.match(css, /--matcha:#9DBF7F;/);
-  assert.match(howToCss, /\.how-to-icon\{[\s\S]*?color:var\(--matcha\)/);
-  // No raspberry, no blue: this section is plum + cream + green.
-  for (const banned of ["--berry", "--blue", "gradient", "backdrop-filter"]) {
-    assert.ok(!howToCss.includes(banned), `the how-to section uses ${banned}`);
+test("38: plum and cream, hairlines instead of cards, and it stays compact", () => {
+  // The ground this band already had, so the page's colour rhythm is
+  // unchanged: blue lifestyle, then plum, then the raspberry brand note.
+  assert.match(glanceCss, /\.glance\{[\s\S]*?background:var\(--plum\)/);
+  assert.match(glanceCss, /\.glance\{[\s\S]*?color:var\(--cream\)/);
+  for (const banned of ["var(--blue)", "var(--berry)", "var(--matcha)", "gradient", "backdrop-filter",
+                        "box-shadow", "border-radius", "background:#"]) {
+    assert.ok(!glanceCss.includes(banned), `the band uses ${banned}`);
   }
-  // Every surface and every line is cream, the lines at reduced opacity.
-  for (const m of howToCss.matchAll(/(?:border-top|border-left):1px solid ([^;}]+)/g)) {
-    assert.match(m[1], /^rgba\(245,235,226,\.\d+\)$/, `an unapproved divider colour: ${m[1]}`);
+  // NOT CARDS: a hairline over each fact and nothing else.
+  assert.match(glanceCss, /\.glance-fact\{[\s\S]*?border-top:1px solid rgba\(245,235,226/);
+  assert.ok(!/\.glance-fact\{[^}]*background/.test(glanceCss), "the facts became boxes");
+  // Two families only.
+  for (const m of glanceCss.matchAll(/font-family:([^;}]+)/g)) {
+    assert.match(m[1], /^var\(--font-(sans|display)\)/, `a third family: ${m[1]}`);
   }
+  // The icons are drawn here on currentColor, not installed.
+  assert.equal([...glance.matchAll(/<svg className="glance-icon"/g)].length, 4);
+  assert.match(glanceCss, /\.glance-icon\{[\s\S]*?color:rgba\(245,235,226/);
+  assert.ok(!/\.glance-icon\{[^}]*border-radius|\.glance-icon\{[^}]*background/.test(glanceCss),
+    "the icons were put in filled circles");
 
-  // ── THE ICONS ARE DRAWN HERE, NOT INSTALLED ──────────────────
-  // Two inline SVGs, on currentColor, no dependency and no asset.
-  assert.equal([...howTo.matchAll(/<svg className="how-to-icon"/g)].length, 2);
-  assert.equal([...howTo.matchAll(/stroke="currentColor"/g)].length, 7);
-  assert.ok(!/fill="#|stroke="#/.test(howTo), "an icon hard-codes a colour");
-  assert.equal([...howTo.matchAll(/aria-hidden="true" focusable="false"/g)].length, 2);
-  const pkg = JSON.parse(read("package.json"));
-  for (const dep of Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })) {
-    assert.ok(!/icon|lucide|feather|heroicon/i.test(dep), `an icon package was added: ${dep}`);
+  // COMPACT: no reserved height, and it stacks to one column on a phone
+  // rather than four columns of four-word lines.
+  // `height:` on its own would match line-height, so the reserved-space
+  // check names the properties that actually reserve it.
+  for (const banned of ["min-height", "100vh", "aspect-ratio"]) {
+    assert.ok(!glanceCss.includes(banned), `the band reserves space: ${banned}`);
   }
-
-  // ── TWO FAMILIES, DISPLAY FACE ON ONE LINE ONLY ──────────────
-  const accent = howToCss.slice(howToCss.indexOf(".how-to-line-accent{"), howToCss.indexOf("}", howToCss.indexOf(".how-to-line-accent{")));
-  assert.match(accent, /font-family:var\(--font-display\)/);
-  assert.match(accent, /font-style:italic/);
-  for (const name of [".how-to-eyebrow{", ".how-to-line{", ".how-to-module-number{", ".how-to-module-title{",
-                      ".how-to-module-dose{", ".how-to-step-number{", ".how-to-step-text{"]) {
-    const rule = howToCss.slice(howToCss.indexOf(name), howToCss.indexOf("}", howToCss.indexOf(name)));
-    assert.match(rule, /font-family:var\(--font-sans\)/, `${name} is not on the sans`);
-    assert.ok(!rule.includes("--font-display"), `${name} uses the display face`);
-  }
-  // The weights the brief names: 600 eyebrow, 700 module title, 500 steps.
-  assert.match(howToCss, /\.how-to-eyebrow\{[\s\S]*?font-weight:600/);
-  assert.match(howToCss, /\.how-to-module-title\{[\s\S]*?font-weight:700/);
-  assert.match(howToCss, /\.how-to-step-text\{[\s\S]*?font-weight:500/);
+  assert.ok(!/[;{]height:/.test(glanceCss), "the band sets a fixed height");
+  assert.match(glanceCss, /\.glance-grid\{[\s\S]*?grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
+  assert.match(glanceCss, /@media \(max-width:1100px\)\{[\s\S]*?\.glance-grid\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+  assert.match(glanceCss, /@media \(max-width:760px\)\{[\s\S]*?\.glance-grid\{grid-template-columns:minmax\(0,1fr\)/);
+  // Mobile padding comes down with it.
+  assert.match(glanceCss, /@media \(max-width:760px\)\{[\s\S]*?\.glance\{padding-block:clamp\(42px,10vw,56px\)/);
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -1343,7 +1337,7 @@ test("39: every homepage section starts on one rail, and it is the lifestyle one
   // origin-inner and habit-inner left with their sections. Re-pinned,
   // not relaxed: the guard still says every homepage wrapper that EXISTS
   // is on the one rail.
-  for (const wrapper of ["countdown-inner", "daily-inner", "how-to-inner",
+  for (const wrapper of ["countdown-inner", "daily-inner", "glance-inner",
                          "community-inner", "brand-note-inner"]) {
     assert.ok(site.includes(`className="${wrapper} home-rail"`), `${wrapper} is not on the rail`);
   }
@@ -1355,7 +1349,7 @@ test("39: every homepage section starts on one rail, and it is the lifestyle one
   // 4.5vw / 5vw / 6vw and 22px.
   // The shop hero and its launch band read the same gutter - section 20
   // of the brief: the shop is on the canonical rail too.
-  assert.match(railCss, /\.countdown,\s*\.prelaunch,\s*\.daily,\s*\.how-to,\s*\.community,\s*\.brand-note,\s*\.shop-hero,\s*\.shop-strip,\s*\.shop-column,\s*\.shop-accordion,\s*\.matcha-hero,\s*\.matcha-research,\s*\.matcha-use,\s*\.matcha-page \.faq,\s*\.matcha-cta\{padding-inline:var\(--rail-gutter\)\}/);
+  assert.match(railCss, /\.countdown,\s*\.prelaunch,\s*\.daily,\s*\.glance,\s*\.community,\s*\.brand-note,\s*\.shop-hero,\s*\.shop-strip,\s*\.shop-column,\s*\.shop-accordion,\s*\.matcha-hero,\s*\.matcha-research,\s*\.matcha-use,\s*\.matcha-page \.faq,\s*\.matcha-cta\{padding-inline:var\(--rail-gutter\)\}/);
   // The hero has no wrapper - its own padding IS the rail, in the same
   // shape, at desktop and on mobile.
   assert.match(css, /\.hero\{[\s\S]*?padding-inline:max\(var\(--rail-gutter\),calc\(\(100% - var\(--rail-max\)\) \/ 2\)\)/);
@@ -1380,7 +1374,7 @@ test("39: every homepage section starts on one rail, and it is the lifestyle one
   // Backgrounds still run edge to edge: the rail is on content only.
   assert.match(dailyCss, /\.daily\{background:var\(--blue\)/);
   assert.ok(!/\.daily\{[^}]*max-width/.test(dailyCss), "the blue ground stopped being full width");
-  assert.ok(!/\.how-to\{[^}]*max-width/.test(howToCss), "the plum ground stopped being full width");
+  assert.ok(!/\.glance\{[^}]*max-width/.test(glanceCss), "the plum ground stopped being full width");
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -1603,14 +1597,14 @@ test("43: one scale below the hero, and the hero stays above it at every width",
   };
   // Every section title below the hero, including the two that are not in
   // an appended block.
-  for (const name of [".daily-line{", ".how-to-line{", ".featured-recipes-line{",
+  for (const name of [".daily-line{", ".glance-line{", ".featured-recipes-line{",
                       ".community-line{", ".prelaunch-line-1{", ".prelaunch-line-3{", ".brand-note-text{"]) {
     const r = rule(name);
     assert.match(r, /font-size:var\(--type-title\)/, `${name} is not on the section scale`);
     assert.match(r, /font-family:var\(--font-sans\)/, `${name} is not on the sans`);
   }
   // Every editorial accent.
-  for (const name of [".daily-line-accent{", ".how-to-line-accent{",
+  for (const name of [".daily-line-accent{", ".glance-line-accent{",
                       ".featured-recipes-line-accent{", ".community-line-accent{",
                       ".prelaunch-line-2{", ".brand-note-text i{"]) {
     const r = rule(name);
@@ -1621,7 +1615,7 @@ test("43: one scale below the hero, and the hero stays above it at every width",
   }
   // Every eyebrow, including the anti-newsletter one that was still on
   // the generic 12px/.14em rule.
-  for (const name of [".daily-eyebrow{", ".how-to-eyebrow{",
+  for (const name of [".daily-eyebrow{", ".glance-eyebrow{",
                       ".featured-recipes-eyebrow{", ".community-eyebrow{",
                       ".prelaunch-eyebrow{", ".brand-note .eyebrow{"]) {
     const r = rule(name);
@@ -1638,7 +1632,7 @@ test("43: one scale below the hero, and the hero stays above it at every width",
   // Every CTA and meta line.
   for (const name of [".daily-link{", ".featured-recipes-cta{", ".community-cta{",
                       ".prelaunch .prelaunch-cta{", ".recipe-card-time{",
-                      ".how-to-step-number{", ".how-to-module-number{"]) {
+                      ".glance-fact-label{"]) {
     assert.match(rule(name), /font-size:var\(--type-meta\)/, `${name} is not on the meta scale`);
   }
   assert.match(rule(".recipe-card-title{"), /font-size:var\(--type-card\)/);

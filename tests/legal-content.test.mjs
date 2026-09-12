@@ -370,7 +370,10 @@ test("Food info: no organic claim while the certificate is still outstanding", (
   const content = readFileSync(new URL("../app/content.ts", import.meta.url), "utf-8");
   const cert = content.slice(content.indexOf("export const ORGANIC_CERTIFICATION"));
   const documented = /controlBodyCode:\s*"[^"]/.test(cert) || /certificateReference:\s*"[^"]/.test(cert);
-  if (documented) return;
+  // The owner can release the plain sentence ahead of the document, and
+  // did on 2026-09-12. That is a decision about a fact they know and we
+  // do not, so it is recorded in content.ts rather than argued here.
+  const released = /claimReleased:\s*true/.test(cert);
 
   const customerFacing = [
     ["app/GloaSite.tsx", gloaSiteSource],
@@ -378,14 +381,30 @@ test("Food info: no organic claim while the certificate is still outstanding", (
     ["app/BusinessCalculator.tsx", readFileSync(new URL("../app/BusinessCalculator.tsx", import.meta.url), "utf-8")],
     ["app/[...slug]/page.tsx", readFileSync(new URL("../app/[...slug]/page.tsx", import.meta.url), "utf-8")],
   ];
+  // THE CONTROL-BODY CODE BAN IS NOT CONDITIONAL. A code may only ever
+  // be printed from the real document, so this runs whether the claim
+  // was released or not, and whether the fields are filled or not.
   // Word-bounded, so "Biologie" or a "bio" inside an identifier is not
-  // mistaken for a claim, and the control-body code shape is banned
-  // outright - it may only ever be printed from the real certificate.
+  // mistaken for a claim.
+  for (const [name, source] of customerFacing) {
+    assert.doesNotMatch(source, /\bDE-ÖKO-\d{3}\b/,
+      `${name} prints a control-body code that no certificate in this repo supports`);
+  }
+  if (documented || released) {
+    // Released means the SENTENCE is allowed. Certificate data is not,
+    // and neither is a seal, so those stay banned on their own terms.
+    for (const [name, source] of customerFacing) {
+      for (const forbidden of ["EU-Bio-Logo", "Öko-Kontrollstelle", "Zertifikatsnummer", "Kontrollstellennummer"]) {
+        assert.ok(!source.includes(forbidden),
+          `${name} renders certificate data that no document in this repo supports: ${forbidden}`);
+      }
+    }
+    return;
+  }
+
   for (const [name, source] of customerFacing) {
     assert.doesNotMatch(source, /\bBio\b|\bBio-[A-Za-zäöüß]/,
       `${name} carries an organic claim while ORGANIC_CERTIFICATION is empty`);
-    assert.doesNotMatch(source, /\bDE-ÖKO-\d{3}\b/,
-      `${name} prints a control-body code that no certificate in this repo supports`);
   }
 });
 
@@ -419,13 +438,20 @@ test("Bio: the certification placeholder exists and is entirely unfilled", async
   const { ORGANIC_CERTIFICATION } = await import("../app/content.ts");
   // Every field null means nothing can be rendered by accident, and it
   // records that the document is still outstanding.
-  assert.deepEqual(ORGANIC_CERTIFICATION, {
+  // EVERY DOCUMENT FIELD IS STILL NULL. The owner released the plain
+  // sentence on 2026-09-12, which is a different thing from having the
+  // certificate: nothing below may be rendered until the real document
+  // fills these in.
+  const { claimReleased, claimReleasedOn, ...document } = ORGANIC_CERTIFICATION;
+  assert.deepEqual(document, {
     controlBodyCode: null,
     controlBodyName: null,
     certificateReference: null,
     certificateUrl: null,
     validUntil: null,
   });
+  assert.equal(claimReleased, true, "the release is what unblocks the sentence, and it is recorded here");
+  assert.match(claimReleasedOn, /^\d{4}-\d{2}-\d{2}$/, "the release carries the date it was given");
 });
 
 test("Bio: the placeholder is internal and reaches no customer-facing page", () => {

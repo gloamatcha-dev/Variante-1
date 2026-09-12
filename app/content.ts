@@ -114,6 +114,29 @@ export const ORGANIC_CERTIFICATION = {
   certificateUrl: null as string | null,
   /** Certificate validity, straight from the document. */
   validUntil: null as string | null,
+  /**
+   * THE OWNER RELEASED THE PLAIN CLAIM, THE DOCUMENT IS STILL PENDING.
+   *
+   * On 2026-09-12 the owner confirmed in writing that GLOA Matcha is
+   * organically certified and released the sentence "Unser Matcha ist
+   * bio-zertifiziert und stammt aus kontrolliert oekologischem Anbau."
+   * for the homepage and for /our-matcha, while explicitly instructing
+   * that no control body, seal number or certificate reference be
+   * added.
+   *
+   * So this flag unblocks THE SENTENCE and nothing else. Every field
+   * above stays null until the real document is in hand, and
+   * tests/legal-content.test.mjs still refuses a control-body code
+   * anywhere on the site - now unconditionally, released or not.
+   *
+   * Still open, and named here so it is not forgotten: EU organic
+   * labelling normally expects the control body code alongside an
+   * organic claim on a product presentation, and the note above says
+   * website disclosure is subject to final legal review. Filling the
+   * fields above is what settles that.
+   */
+  claimReleased: true,
+  claimReleasedOn: "2026-09-12",
 };
 
 export const BUSINESS_FACTS = {

@@ -68,19 +68,53 @@ const communityItems:CommunityItem[]=[{id:"1",image:"/img/gloa-cafe.jpg",alt:"Ma
  * prelaunch redesign: this page no longer merchandises the product
  * before it is on sale. The shop, the product pages, the catalog and
  * public/img/Produkt BILD.png are all untouched and still carry it. */
-// The two preparation modules. Inline SVG rather than an icon package:
-// two 22px line marks are not worth a dependency, and drawing them here
-// keeps them on currentColor, which is what makes them matcha green.
-const howToModules=[{
-  number:"01",title:"MATCHA LATTE",dose:"3 g Matcha",
-  steps:["Matcha dosieren","mit Wasser aufschlagen","Milch oder Pflanzendrink dazu","heiß oder iced genießen"],
-  icon:<svg className="how-to-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M5.4 5h10.2v9.6a4.6 4.6 0 0 1-4.6 4.6h-1a4.6 4.6 0 0 1-4.6-4.6z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/><path d="M15.6 7.8h1.8a2.5 2.5 0 0 1 0 5h-1.8" fill="none" stroke="currentColor" strokeWidth="1.4"/><path d="M5.4 10.2h10.2" stroke="currentColor" strokeWidth="1.4"/></svg>,
+/**
+ * THE HOMEPAGE FACT ROW.
+ *
+ * This band used to be a second preparation guide: two modules, eight
+ * numbered steps, a dose for each. The homepage was explaining HOW to
+ * make matcha before it had said what GLOA is, and the same eight steps
+ * are already on the product page and on /our-matcha. They stay there.
+ *
+ * What the homepage owes a first-time reader is the short version of
+ * what is in the tin and where it comes from, in four facts that can be
+ * read at a glance. Each one is said ONCE on this page; the long form
+ * of every one of them lives on /our-matcha, which the band above this
+ * one already links to.
+ *
+ * Plum on cream is what this band already was, so the page's colour
+ * rhythm is unchanged. Four line marks on currentColor rather than an
+ * icon package, the way the retired modules drew theirs.
+ */
+const glanceFacts:{label:string;title:string;body:string;icon:React.ReactElement}[]=[{
+  label:"BIO-ZERTIFIZIERT",title:"Bio-zertifiziert",
+  body:"Unser Matcha ist bio-zertifiziert und stammt aus kontrolliert ökologischem Anbau.",
+  icon:<svg className="glance-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M5.2 18.8c0-6.4 4.6-11 13.6-13.6 0 9-4.6 13.6-13.6 13.6z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/><path d="M5.2 18.8c2-5 5.3-8.3 9.6-10.3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>,
 },{
-  number:"02",title:"PURE MATCHA",dose:"3 g Matcha",
-  steps:["Matcha dosieren","mit wenig Wasser glattrühren","mit Wasser aufschlagen","direkt genießen"],
-  icon:<svg className="how-to-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M3.4 10.6h17.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><path d="M4.9 10.6a7.1 7.1 0 0 0 14.2 0" fill="none" stroke="currentColor" strokeWidth="1.4"/><path d="M9.6 7.4c0-1.3 1.3-1.6 1.3-2.9" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><path d="M13.6 7.4c0-1.3 1.3-1.6 1.3-2.9" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>,
+  label:"HERKUNFT",title:"Shizuoka, Japan",
+  body:"Unser Matcha stammt aus Shizuoka in Japan, einer Region mit langer Teetradition.",
+  icon:<svg className="glance-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M12 21c-3.8-4.6-5.7-8-5.7-10.4a5.7 5.7 0 0 1 11.4 0C17.7 13 15.8 16.4 12 21z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/><circle cx="12" cy="10.4" r="2.2" fill="none" stroke="currentColor" strokeWidth="1.4"/></svg>,
+},{
+  label:"ZUTAT",title:"100 % Matcha",
+  body:"In der Packung steckt reines Matcha-Grünteepulver ohne zugesetzte Aromen oder Mischungen.",
+  icon:<svg className="glance-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M4.6 17.6c1.6-4.6 4.1-6.9 7.4-6.9s5.8 2.3 7.4 6.9z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/><path d="M3.4 17.6h17.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><path d="M12 10.7V6.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>,
+},{
+  label:"ALLTAG",title:"Für deinen Alltag",
+  body:"Ob zuhause, unterwegs oder im Café. GLOA soll Matcha unkompliziert in deinen Alltag bringen.",
+  icon:<svg className="glance-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.4" fill="none" stroke="currentColor" strokeWidth="1.4"/><path d="M12 7.1V12l3.3 2.1" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>,
 }];
-function HowTo(){return <section className="how-to"><div className="how-to-inner home-rail"><div className="how-to-body"><div className="how-to-copy"><p className="eyebrow how-to-eyebrow">FROM SHIZUOKA, JAPAN</p><h2 className="how-to-headline"><span className="how-to-line">Latte oder pur.</span><i className="how-to-line how-to-line-accent">Mehr brauchst du nicht.</i></h2><dl className="how-to-origin"><div><dt>MATCHA</dt><dd>100 % Grünteepulver</dd></div><div><dt>MADE FOR</dt><dd>Latte + pur</dd></div></dl></div><div className="how-to-modules">{howToModules.map(m=><article className="how-to-module" key={m.number}><div className="how-to-module-head">{m.icon}<span className="how-to-module-number">{m.number}</span></div><h3 className="how-to-module-title">{m.title}</h3><p className="how-to-module-dose">{m.dose}</p><ol className="how-to-steps">{m.steps.map((step,i)=><li key={step}><span className="how-to-step-number">{String(i+1).padStart(2,"0")}</span><span className="how-to-step-text">{step}</span></li>)}</ol></article>)}</div></div></div></section>}
+
+function AtAGlance(){return <section className="glance"><div className="glance-inner home-rail">
+<div className="glance-head">
+<p className="eyebrow glance-eyebrow">AUF EINEN BLICK</p>
+<h2 className="glance-headline"><span className="glance-line">Klar, was drin ist.</span><i className="glance-line glance-line-accent">Und wo es herkommt.</i></h2>
+</div>
+<dl className="glance-grid">{glanceFacts.map(f=><div className="glance-fact" key={f.label}>
+<div className="glance-fact-head">{f.icon}<dt className="glance-fact-label">{f.label}</dt></div>
+<dd className="glance-fact-title">{f.title}</dd>
+<dd className="glance-fact-body">{f.body}</dd>
+</div>)}</dl>
+</div></section>}
 
 /**
  * The community photo strip.
@@ -253,7 +287,7 @@ return ref;
 
 function Home(){
 const heroRef=useHeroScrollProgress();
-return <main><section className="hero"><div className="hero-copy" ref={heroRef as React.RefObject<HTMLDivElement>}><p className="eyebrow">MATCHA AUS SHIZUOKA.</p><h1>Matcha.<br/><span className="hero-line-2">Is for everyone.</span></h1><p className="lead">Für Latte, pur, iced oder wie du willst.</p><div className="hero-actions"><Link className="cta berry" href="/about">GLOA entdecken</Link></div></div><div className="hero-art"><img src="/img/Startseite.png" alt="Vier GLOA Matcha-Packungen in Blau, Beere, Creme und Aubergine" className="hero-img" fetchPriority="high"/></div></section><LaunchCountdown/><section className="prelaunch"><div className="prelaunch-inner"><p className="eyebrow prelaunch-eyebrow">PRELAUNCH</p><h2 className="prelaunch-headline"><span className="prelaunch-line-1">Zum Launch</span><i className="prelaunch-line-2">benachrichtigt</i><span className="prelaunch-line-3">werden.</span></h2><p className="prelaunch-date">{GLOA_LAUNCH_FULL_LABEL}</p><p className="prelaunch-body">Trag dich ein und wir schicken dir eine Nachricht,<br/>wenn GLOA online geht. Nur ein kurzes Update zum Launch.</p><Link className="cta prelaunch-cta" href="/launch" onClick={()=>track("notify_click")}>Zum Launch benachrichtigen</Link><a className="prelaunch-social" href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer"><svg className="prelaunch-social-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="currentColor" strokeWidth="1.6"/><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.6"/><circle cx="17.2" cy="6.8" r="1.1" fill="currentColor"/></svg><span>Oder folge uns einfach auf Instagram →</span></a></div></section><section className="daily"><div className="daily-inner home-rail"><div className="daily-copy"><p className="eyebrow daily-eyebrow">MATCHA FÜR JEDEN TAG</p><h2 className="daily-headline"><span className="daily-line">Morgens.</span><span className="daily-line daily-line-mark">Im Meeting.</span><i className="daily-line daily-line-accent">Nachmittags.</i></h2><p className="daily-lead">Matcha, wann immer du ihn brauchst.<br/>Morgens zum Start, nachmittags im Meeting oder einfach zwischendurch.</p><span className="daily-rule" aria-hidden="true"/><p className="daily-note">Reiner Genuss.<br/>Ganz nach deinem Geschmack.<br/>Für jeden Moment deines Tages.</p><Link className="daily-link" href="/our-matcha">Matcha entdecken <span aria-hidden="true">→</span></Link></div><div className="daily-grid">{dailyTiles.map(t=><figure className="daily-tile" key={t.label}><img src={t.src} alt={t.alt} loading="lazy" style={{objectPosition:t.focus}}/><figcaption>{t.label}</figcaption></figure>)}</div></div></section><HowTo/>{RECIPES_VISIBLE&&<RecipeCarousel/>}<section className="community"><div className="community-inner home-rail"><div className="community-copy"><p className="eyebrow community-eyebrow">#GLOAMATCHA</p><h2 className="community-headline"><span className="community-line">Zeig uns</span><i className="community-line community-line-accent">deinen Matcha.</i></h2><a className="community-cta" href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">{`@${BRAND.instagram} folgen`}</a></div><CommunityFeed/></div></section><BrandNote/></main>}
+return <main><section className="hero"><div className="hero-copy" ref={heroRef as React.RefObject<HTMLDivElement>}><p className="eyebrow">MATCHA AUS SHIZUOKA.</p><h1>Matcha.<br/><span className="hero-line-2">Is for everyone.</span></h1><p className="lead">Für Latte, pur, iced oder wie du willst.</p><div className="hero-actions"><Link className="cta berry" href="/about">GLOA entdecken</Link></div></div><div className="hero-art"><img src="/img/Startseite.png" alt="Vier GLOA Matcha-Packungen in Blau, Beere, Creme und Aubergine" className="hero-img" fetchPriority="high"/></div></section><LaunchCountdown/><section className="prelaunch"><div className="prelaunch-inner"><p className="eyebrow prelaunch-eyebrow">PRELAUNCH</p><h2 className="prelaunch-headline"><span className="prelaunch-line-1">Zum Launch</span><i className="prelaunch-line-2">benachrichtigt</i><span className="prelaunch-line-3">werden.</span></h2><p className="prelaunch-date">{GLOA_LAUNCH_FULL_LABEL}</p><p className="prelaunch-body">Trag dich ein und wir schicken dir eine Nachricht,<br/>wenn GLOA online geht. Nur ein kurzes Update zum Launch.</p><Link className="cta prelaunch-cta" href="/launch" onClick={()=>track("notify_click")}>Zum Launch benachrichtigen</Link><a className="prelaunch-social" href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer"><svg className="prelaunch-social-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="currentColor" strokeWidth="1.6"/><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.6"/><circle cx="17.2" cy="6.8" r="1.1" fill="currentColor"/></svg><span>Oder folge uns einfach auf Instagram →</span></a></div></section><section className="daily"><div className="daily-inner home-rail"><div className="daily-copy"><p className="eyebrow daily-eyebrow">MATCHA FÜR JEDEN TAG</p><h2 className="daily-headline"><span className="daily-line">Morgens.</span><span className="daily-line daily-line-mark">Im Meeting.</span><i className="daily-line daily-line-accent">Nachmittags.</i></h2><p className="daily-lead">Matcha, wann immer du ihn brauchst.<br/>Morgens zum Start, nachmittags im Meeting oder einfach zwischendurch.</p><span className="daily-rule" aria-hidden="true"/><p className="daily-note">Reiner Genuss.<br/>Ganz nach deinem Geschmack.<br/>Für jeden Moment deines Tages.</p><Link className="daily-link" href="/our-matcha">Matcha entdecken <span aria-hidden="true">→</span></Link></div><div className="daily-grid">{dailyTiles.map(t=><figure className="daily-tile" key={t.label}><img src={t.src} alt={t.alt} loading="lazy" style={{objectPosition:t.focus}}/><figcaption>{t.label}</figcaption></figure>)}</div></div></section><AtAGlance/>{RECIPES_VISIBLE&&<RecipeCarousel/>}<section className="community"><div className="community-inner home-rail"><div className="community-copy"><p className="eyebrow community-eyebrow">#GLOAMATCHA</p><h2 className="community-headline"><span className="community-line">Zeig uns</span><i className="community-line community-line-accent">deinen Matcha.</i></h2><a className="community-cta" href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">{`@${BRAND.instagram} folgen`}</a></div><CommunityFeed/></div></section><BrandNote/></main>}
 
 // -- Catalog-driven shop --------------------------------------------
 //
@@ -672,7 +706,7 @@ return <main className="pdp">
 </div></section>
 
 <section className="pdp-facts"><div><p className="eyebrow">WHAT WE KNOW</p><h2>Clear facts.<br/>Nothing invented.</h2></div><dl><div><dt>LEBENSMITTELBEZEICHNUNG</dt><dd>Matcha (Grünteepulver)</dd></div><div><dt>ZUTAT</dt><dd>100 % Matcha-Grünteepulver, keine Zusätze</dd></div><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>VERWENDUNG</dt><dd>Latte · Iced · Pur</dd></div><div><dt>LAGERUNG</dt><dd>{PRODUCT.storage}</dd></div><div><dt>GRÖSSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div></dl><p className="product-operator-note">Lebensmittelunternehmer: Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin, Deutschland</p></section>
-<HowTo/>
+<AtAGlance/>
 </main>}
 
 /** Detail page for a non-food product. Deliberately short: name, image,
@@ -820,6 +854,7 @@ const matchaProcess:[string,string,string][]=[
    VERWENDUNG is gone too - Latte, Iced and Pur have their own section
    further down and do not need a preview here. */
 const matchaFacts:[string,string,string][]=[
+["BIO-ZERTIFIZIERT","Kontrolliert ökologischer Anbau","Unser Matcha ist bio-zertifiziert und stammt aus kontrolliert ökologischem Anbau."],
 ["HERKUNFT","Shizuoka, Japan","Unser Matcha stammt aus Shizuoka, einer bekannten Teeregion Japans."],
 ["ZUTAT","100 % Matcha-Grünteepulver","Das Produkt besteht ausschließlich aus Matcha und enthält keine Mischungen oder zugesetzten Aromen."],
 ["GRÖSSEN","30 g · 50 g · 100 g","So kann je nach Nutzung die passende Größe gewählt werden."],
@@ -864,19 +899,22 @@ const matchaTaste:[string,string][]=[
  * There is no studies page in this project, so no card links to one and
  * no source is invented to fill the space.
  */
-/** The width at which the four production steps collapse into an
- *  accordion. The same breakpoint the research cards use, so the two
- *  tap-to-read patterns on this page appear together rather than one
- *  at a time. */
+/** The width at which /our-matcha's long-form blocks collapse into
+ *  tap-to-read accordions. ONE value for the production steps and the
+ *  research topics, so the page never shows one of the two patterns
+ *  without the other. */
 const MATCHA_PROCESS_ACCORDION_QUERY="(max-width:760px)";
 
+const useIsomorphicLayoutEffect=typeof window!=="undefined"?useLayoutEffect:useEffect;
+
 /**
- * HOW MATCHA IS MADE - FOUR STEPS, TWO SHAPES.
+ * TAP TO READ - THE SHARED BEHAVIOUR BEHIND BOTH ACCORDIONS ON
+ * /our-matcha.
  *
- * Desktop prints all four, the way it always did. On a phone four
- * paragraphs of general tea production is most of a screen's worth of
- * scrolling before the reader reaches anything about OUR product, so
- * there the steps collapse into an accordion and one opens at a time.
+ * Two blocks on this page are long prose that a phone should not print
+ * in full: the four production steps and the three research topics.
+ * They look different and they say different things, but the DECISIONS
+ * are identical, so they are made once, here.
  *
  * ── WHY A MEDIA QUERY AND NOT CSS ALONE ───────────────────────
  * The honest version of this control has to know which shape it is in.
@@ -889,13 +927,14 @@ const MATCHA_PROCESS_ACCORDION_QUERY="(max-width:760px)";
  * `accordion` is false on the server AND on the first client render, so
  * the markup both sides produce is identical and hydration cannot
  * mismatch. It also means the full text is what ships in the HTML: with
- * JavaScript off, at any width, every step is readable. The switch runs
+ * JavaScript off, at any width, every word is readable. The switch runs
  * in a layout effect rather than a passive one so the collapse happens
  * before the browser paints, not as a visible flash of open text.
+ *
+ * Leaving the breakpoint closes whatever was open, so nothing can stay
+ * half-collapsed in a layout that has no toggles.
  */
-const useIsomorphicLayoutEffect=typeof window!=="undefined"?useLayoutEffect:useEffect;
-
-function MatchaProcess(){
+function useTapToRead(){
 const [accordion,setAccordion]=useState(false);
 const [open,setOpen]=useState<number|null>(null);
 
@@ -907,54 +946,92 @@ mq.addEventListener("change",sync);
 return()=>mq.removeEventListener("change",sync);
 },[]);
 
+/** One open at a time, and tapping the open one closes it. */
+const toggle=useCallback((i:number)=>setOpen(prev=>prev===i?null:i),[]);
+return {accordion,open,toggle};
+}
+
+/**
+ * One row of a tap-to-read block: the header, and the panel under it.
+ *
+ * `lead` is whatever sits before the label - a step number, an icon -
+ * and `plain` is what the row looks like when it is NOT an accordion,
+ * which is the only part the two callers really disagree about. The
+ * button, the aria wiring and the panel are shared, so a fix to one is
+ * a fix to both.
+ */
+function TapToReadRow({panelId,accordion,isOpen,onToggle,lead,label,hint,plain,children}:{
+panelId:string;accordion:boolean;isOpen:boolean;onToggle:()=>void;
+lead:React.ReactNode;label:React.ReactNode;hint?:boolean;
+plain:React.ReactNode;children:React.ReactNode;
+}){
+return <>
+{accordion
+?<button type="button" className="tap-toggle" aria-expanded={isOpen} aria-controls={panelId} onClick={onToggle}>
+   <span className="tap-lead">{lead}</span>
+   <span className="tap-text">
+     <span className="tap-label">{label}</span>
+     {hint&&<span className="tap-hint">Zum Lesen antippen</span>}
+   </span>
+   {/* Decorative: the state a reader needs is on aria-expanded. */}
+   <span className="tap-mark" aria-hidden="true">{isOpen?"−":"+"}</span>
+ </button>
+:plain}
+<div id={panelId} className="tap-panel" hidden={accordion&&!isOpen}>{children}</div>
+</>;
+}
+
+/**
+ * HOW MATCHA IS MADE - FOUR STEPS, TWO SHAPES.
+ *
+ * Desktop prints all four, the way it always did. On a phone four
+ * paragraphs of general tea production is most of a screen's worth of
+ * scrolling before the reader reaches anything about OUR product, so
+ * there the steps collapse. The behaviour is useTapToRead(); this
+ * component only decides what a step LOOKS like.
+ */
+function MatchaProcess(){
+const {accordion,open,toggle}=useTapToRead();
 return <div className="matcha-process">
 <h3 className="matcha-process-title">Wie Matcha entsteht</h3>
 <p className="matcha-process-note">So wird Matcha allgemein hergestellt.</p>
 {accordion&&<p className="matcha-process-hint">Zum Lesen antippen</p>}
-<ol className="matcha-process-list">{matchaProcess.map(([n,title,text],i)=>{
-const panelId=`matcha-process-panel-${n}`;
-const isOpen=open===i;
-return <li key={n} className="matcha-process-step">
-{accordion
-?<button type="button" className="matcha-process-toggle" aria-expanded={isOpen} aria-controls={panelId}
-         onClick={()=>setOpen(prev=>prev===i?null:i)}>
-   <span className="matcha-process-num">{n}</span>
-   <span className="matcha-process-label">{title}</span>
-   {/* Decorative: the state a reader needs is on aria-expanded. */}
-   <span className="matcha-process-mark" aria-hidden="true">{isOpen?"−":"+"}</span>
- </button>
-:<><span className="matcha-process-num">{n}</span><h4 className="matcha-process-label">{title}</h4></>}
-<div id={panelId} className="matcha-process-panel" hidden={accordion&&!isOpen}>
+<ol className="matcha-process-list tap-list">{matchaProcess.map(([n,title,text],i)=>
+<li key={n} className="matcha-process-step tap-row">
+<TapToReadRow panelId={`matcha-process-panel-${n}`} accordion={accordion} isOpen={open===i}
+  onToggle={()=>toggle(i)}
+  lead={<span className="matcha-process-num">{n}</span>}
+  label={title}
+  plain={<><span className="matcha-process-num">{n}</span><h4 className="matcha-process-label">{title}</h4></>}>
 <p className="matcha-process-text">{text}</p>
-</div>
-</li>;
-})}</ol>
+</TapToReadRow>
+</li>)}</ol>
 </div>;
 }
 
-function MatchaResearchSheet({block,onClose}:{block:typeof researchBlocks[number];onClose:()=>void}){
-const closeRef=useRef<HTMLButtonElement>(null);
-useEffect(()=>{
-const prev=document.activeElement as HTMLElement|null;
-document.body.style.overflow="hidden";
-requestAnimationFrame(()=>closeRef.current?.focus());
-const onKey=(e:KeyboardEvent)=>{if(e.key==="Escape")onClose()};
-document.addEventListener("keydown",onKey);
-return()=>{document.removeEventListener("keydown",onKey);document.body.style.overflow="";prev?.focus?.()};
-},[onClose]);
-return <div className="mr-sheet-backdrop" onClick={onClose} onKeyDown={e=>e.key==="Escape"&&onClose()} role="button" tabIndex={-1} aria-hidden="true">
-{/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
-<div className="mr-sheet" onClick={e=>e.stopPropagation()} onKeyDown={e=>e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="mr-sheet-title">
-<button ref={closeRef} type="button" className="mr-sheet-close" onClick={onClose} aria-label="Schließen">×</button>
-<div className="mr-sheet-head">{block.icon}<h3 className="mr-sheet-title" id="mr-sheet-title">{block.label}</h3></div>
-<p className="mr-sheet-body">{block.body}</p>
-</div>
-</div>;
+/**
+ * THE RESEARCH TOPICS - THE SAME TAP-TO-READ ROW AS THE STEPS ABOVE.
+ *
+ * These used to open in a bottom sheet. Two tap-to-read patterns on one
+ * page, one opening in place and one over it, is a difference a reader
+ * has to learn for no reason - so the sheet is gone and both now open
+ * inline. Desktop keeps the three columns, which read well at width.
+ */
+function MatchaResearch(){
+const {accordion,open,toggle}=useTapToRead();
+return <div className="matcha-research-grid tap-list">{researchBlocks.map((b,i)=>
+<article className="matcha-research-block tap-row" key={b.label}>
+<TapToReadRow panelId={`matcha-research-panel-${i+1}`} accordion={accordion} isOpen={open===i}
+  onToggle={()=>toggle(i)} hint
+  lead={b.icon}
+  label={b.label}
+  plain={<div className="matcha-research-head">{b.icon}<h3 className="matcha-research-label">{b.label}</h3></div>}>
+<p className="matcha-research-body">{b.body}</p>
+</TapToReadRow>
+</article>)}</div>;
 }
 
 function MatchaPage(){
-const [openResearch,setOpenResearch]=useState<number|null>(null);
-const closeResearch=useCallback(()=>setOpenResearch(null),[]);
 return <main className="matcha-page">
 
 {/* ── 1. HERO. Where it comes from, and why that region. ───── */}
@@ -1002,8 +1079,7 @@ return <main className="matcha-page">
 </div></section>
 
 {/* ── 5. RESEARCH. The regulated copy, unchanged. ───────────── */}
-<section className="matcha-research"><div className="matcha-research-inner home-rail"><div className="matcha-research-copy"><p className="eyebrow matcha-research-eyebrow">MATCHA & SCIENCE</p><h2 className="matcha-research-headline"><span className="matcha-research-line">Forschung.</span><i className="matcha-research-line matcha-research-line-accent">Ehrlich eingeordnet.</i></h2><p className="matcha-research-intro">Wir wollen nichts versprechen, was sich nicht belegen lässt. Deshalb trennen wir hier klar, was Matcha enthält, was untersucht wurde und was offen bleibt.</p></div><div className="matcha-research-grid">{researchBlocks.map((b,i)=><article className="matcha-research-block" key={b.label}><div className="matcha-research-head">{b.icon}<h3 className="matcha-research-label">{b.label}</h3></div><p className="matcha-research-body">{b.body}</p><button type="button" className="matcha-research-open" onClick={()=>setOpenResearch(i)} aria-haspopup="dialog"><span className="matcha-research-open-label">Zum Lesen antippen</span><span className="matcha-research-open-mark" aria-hidden="true">+</span></button></article>)}</div></div></section>
-{openResearch!==null&&<MatchaResearchSheet block={researchBlocks[openResearch]} onClose={closeResearch}/>}
+<section className="matcha-research"><div className="matcha-research-inner home-rail"><div className="matcha-research-copy"><p className="eyebrow matcha-research-eyebrow">MATCHA & SCIENCE</p><h2 className="matcha-research-headline"><span className="matcha-research-line">Forschung.</span><i className="matcha-research-line matcha-research-line-accent">Ehrlich eingeordnet.</i></h2><p className="matcha-research-intro">Wir wollen nichts versprechen, was sich nicht belegen lässt. Deshalb trennen wir hier klar, was Matcha enthält, was untersucht wurde und was offen bleibt.</p></div><MatchaResearch/></div></section>
 
 {/* The legacy step-by-step preparation band. HIDDEN, NOT DELETED -
     see the flag above. */}
