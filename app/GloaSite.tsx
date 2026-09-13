@@ -1586,7 +1586,7 @@ return <section className="legal-ship-zone" key={key}>
 <dl className="legal-ship-facts">
 <div><dt>Lieferzeit</dt><dd>{zone.deliveryTimeLabel}</dd></div>
 <div><dt>Versand</dt><dd>{fmtCents(pricing.shippingGrossCents)} €</dd></div>
-<div><dt>Kostenlos ab</dt><dd>{pricing.freeShippingThresholdGrossCents!==null?`${fmtCents(pricing.freeShippingThresholdGrossCents)} €`:"—"}</dd></div>
+{pricing.freeShippingThresholdGrossCents!==null&&<div><dt>Kostenlos ab</dt><dd>{`${fmtCents(pricing.freeShippingThresholdGrossCents)} €`}</dd></div>}
 </dl>
 <p className="legal-ship-countries"><span>{countries.length===1?"Land":`${countries.length} Länder`}</span>{countries.join(", ")}</p>
 </section>
@@ -1650,7 +1650,7 @@ return <main className="legal-page legal-doc legal-widerruf">
 <p className="eyebrow">GLOA · RECHTLICHES</p>
 <h1>Widerruf.</h1>
 <p className="legal-doc-sub">Informationen zu deinem gesetzlichen Widerrufsrecht.</p>
-<p className="legal-doc-lead">Du kannst deinen Vertrag binnen vierzehn Tagen ohne Angabe von Gründen widerrufen. Am schnellsten geht das über die <a href="#ausueben" onClick={jumpToSection}>elektronische Widerrufsfunktion</a> weiter unten – ohne Konto und ohne Anmeldung.</p>
+<p className="legal-doc-lead">Du kannst deinen Vertrag binnen vierzehn Tagen ohne Angabe von Gründen widerrufen. Am schnellsten geht das über die <a href="#ausueben" onClick={jumpToSection}>elektronische Widerrufsfunktion</a> weiter unten, ohne Konto und ohne Anmeldung.</p>
 </div>
 <div className="legal-doc-body">
 <nav className="legal-doc-toc" aria-label="Abschnitte">
@@ -1697,7 +1697,7 @@ return <main className="legal-page legal-doc legal-widerruf">
 <section className="legal-doc-section" id="formular">
 <p className="legal-doc-num">04</p>
 <h2>Muster-Widerrufsformular</h2>
-<p>Wenn du den Vertrag widerrufen willst, kannst du dieses Formular ausfüllen und uns zurücksenden. Vorgeschrieben ist das nicht – eine formlose eindeutige Erklärung genügt ebenso, und über die <a href="#ausueben" onClick={jumpToSection}>elektronische Widerrufsfunktion</a> geht es direkt hier auf der Seite.</p>
+<p>Wenn du den Vertrag widerrufen willst, kannst du dieses Formular ausfüllen und uns zurücksenden. Vorgeschrieben ist das nicht. Eine formlose eindeutige Erklärung genügt ebenso, und über die <a href="#ausueben" onClick={jumpToSection}>elektronische Widerrufsfunktion</a> geht es direkt hier auf der Seite.</p>
 <div className="legal-doc-form">
 <p>An:<br/>Cara 2 GmbH<br/>Hardenbergstr. 4<br/>10623 Berlin<br/>Deutschland<br/>E-Mail: hello@gloamatcha.com</p>
 <p>Hiermit widerrufe(n) ich/wir (*) den von mir/uns (*) abgeschlossenen Vertrag über den Kauf der folgenden Waren:</p>
@@ -1877,8 +1877,8 @@ return <main className="legal-page legal-doc legal-privacy">
 <section className="legal-doc-section" id="hosting">
 <p className="legal-doc-num">02</p>
 <h2>Bereitstellung der Website</h2>
-<p>Diese Website wird über die Infrastruktur von Vercel bereitgestellt. Beim Aufruf einer Seite verarbeitet diese Infrastruktur automatisch Verbindungsdaten, wie es für die technisch sichere Auslieferung jeder Website zwangsläufig erforderlich ist – unter anderem IP-Adresse, Datum und Uhrzeit des Zugriffs, die aufgerufene Adresse und Angaben zum verwendeten Browser. Diese Daten fallen serverseitig an und werden in technischen Protokollen verarbeitet.</p>
-<p>Die Serverfunktionen dieser Website – etwa die Verarbeitung von Formularen und Bestellungen – werden derzeit in einer Region in den Vereinigten Staaten ausgeführt. Näheres dazu findest du unter <a href="#drittland">Verarbeitung außerhalb der EU</a>.</p>
+<p>Diese Website wird über die Infrastruktur von Vercel bereitgestellt. Beim Aufruf einer Seite verarbeitet diese Infrastruktur automatisch Verbindungsdaten, wie es für die technisch sichere Auslieferung jeder Website zwangsläufig erforderlich ist, unter anderem IP-Adresse, Datum und Uhrzeit des Zugriffs, die aufgerufene Adresse und Angaben zum verwendeten Browser. Diese Daten fallen serverseitig an und werden in technischen Protokollen verarbeitet.</p>
+<p>Die Serverfunktionen dieser Website, etwa die Verarbeitung von Formularen und Bestellungen, werden derzeit in einer Region in den Vereinigten Staaten ausgeführt. Näheres dazu findest du unter <a href="#drittland">Verarbeitung außerhalb der EU</a>.</p>
 <p>Rechtsgrundlage ist Art. 6 Abs. 1 lit. f DSGVO, unser berechtigtes Interesse an einem funktionsfähigen und sicheren Betrieb der Website.</p>
 </section>
 
@@ -1886,7 +1886,7 @@ return <main className="legal-page legal-doc legal-privacy">
 <p className="legal-doc-num">03</p>
 <h2>Kundenkonto, Gastbestellung und Bestellung</h2>
 <p>Wenn du ein GLOA-Konto erstellst oder als Gast bestellst, verarbeiten wir die dafür notwendigen Angaben: Name, E-Mail-Adresse, Liefer- und Rechnungsanschrift, Bestellinhalt sowie den Status deiner Bestellung. Für Konto und Datenbank setzen wir Supabase ein.</p>
-<p>Wir verwenden deine E-Mail-Adresse aus einer Bestellung ausschließlich zur Abwicklung deines Kontos und deiner Bestellung sowie für die dazugehörigen Nachrichten – etwa Bestell-, Versand-, Storno- oder Widerrufsbestätigungen. Die Eintragung in die <a href="#launch">GLOA Launch List</a> ist davon getrennt und beruht auf einer eigenen Einwilligung. Eine Bestellung führt nicht zu einer Eintragung, und eine Eintragung führt nicht zu Werbung für Bestellungen. Einen Newsletter bieten wir nicht an: Es gibt weder eine Newsletter-Anmeldung noch einen Newsletter-Versand.</p>
+<p>Wir verwenden deine E-Mail-Adresse aus einer Bestellung ausschließlich zur Abwicklung deines Kontos und deiner Bestellung sowie für die dazugehörigen Nachrichten, etwa Bestell-, Versand-, Storno- oder Widerrufsbestätigungen. Die Eintragung in die <a href="#launch">GLOA Launch List</a> ist davon getrennt und beruht auf einer eigenen Einwilligung. Eine Bestellung führt nicht zu einer Eintragung, und eine Eintragung führt nicht zu Werbung für Bestellungen. Einen Newsletter bieten wir nicht an: Es gibt weder eine Newsletter-Anmeldung noch einen Newsletter-Versand.</p>
 <p>Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO, die Erfüllung des Vertrags beziehungsweise vorvertragliche Maßnahmen; für gesetzlich vorgeschriebene Aufbewahrungen Art. 6 Abs. 1 lit. c DSGVO.</p>
 <p>Für die interne Verwaltung nutzen wir einen nicht öffentlichen, passwortgeschützten Verwaltungsbereich. Der Zugang ist auf ausdrücklich berechtigte Personen beschränkt; dabei werden eine Anmeldesitzung und Sicherheitsmerkmale wie Zeitpunkt und Ablauf der Sitzung verarbeitet. Rechtsgrundlage ist Art. 6 Abs. 1 lit. f DSGVO, unser berechtigtes Interesse an einem abgesicherten Zugang.</p>
 </section>
@@ -1895,14 +1895,14 @@ return <main className="legal-page legal-doc legal-privacy">
 <p className="legal-doc-num">04</p>
 <h2>Zahlungsabwicklung</h2>
 <p>Die Zahlungsabwicklung erfolgt über Stripe. Vertragspartner ist für Nutzerinnen und Nutzer im Europäischen Wirtschaftsraum die Stripe Payments Europe, Limited mit Sitz in Irland. Stripe wird dabei je nach Produkt eigenständig oder gemeinsam mit uns verantwortlich tätig und nicht ausschließlich als Auftragsverarbeiter.</p>
-<p>Der Bezahlvorgang findet auf einer von Stripe betriebenen Bezahlseite statt. Die dort eingegebenen Zahlungsdaten – etwa Kartendaten – werden unmittelbar an Stripe übermittelt. Von Stripe erhalten wir für die Bestellabwicklung deine E-Mail-Adresse, deinen Namen, die Liefer- und Rechnungsanschrift sowie den Zahlungsstatus und den Betrag; vollständige Kartendaten werden von unserer Anwendung weder abgefragt noch gespeichert.</p>
+<p>Der Bezahlvorgang findet auf einer von Stripe betriebenen Bezahlseite statt. Die dort eingegebenen Zahlungsdaten, etwa Kartendaten, werden unmittelbar an Stripe übermittelt. Von Stripe erhalten wir für die Bestellabwicklung deine E-Mail-Adresse, deinen Namen, die Liefer- und Rechnungsanschrift sowie den Zahlungsstatus und den Betrag; vollständige Kartendaten werden von unserer Anwendung weder abgefragt noch gespeichert.</p>
 <p>Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO. Zu den Datenschutzhinweisen von Stripe gelangst du über <a href="https://stripe.com/privacy" target="_blank" rel="noopener noreferrer">stripe.com/privacy</a>.</p>
 </section>
 
 <section className="legal-doc-section" id="email">
 <p className="legal-doc-num">05</p>
 <h2>Kontaktanfragen und E-Mail-Versand</h2>
-<p>Nutzt du das Kontaktformular oder die B2B-Anfrage, verarbeiten wir deine Angaben – Name, E-Mail-Adresse, Nachricht und gegebenenfalls Bestellnummer oder Unternehmensangaben –, um deine Anfrage zu beantworten. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO, wenn es um einen Vertrag oder seine Anbahnung geht, sonst Art. 6 Abs. 1 lit. f DSGVO.</p>
+<p>Nutzt du das Kontaktformular oder die B2B-Anfrage, verarbeiten wir deine Angaben (Name, E-Mail-Adresse, Nachricht und gegebenenfalls Bestellnummer oder Unternehmensangaben), um deine Anfrage zu beantworten. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO, wenn es um einen Vertrag oder seine Anbahnung geht, sonst Art. 6 Abs. 1 lit. f DSGVO.</p>
 <p>Für den Versand unserer E-Mails setzen wir den Dienstleister Resend ein. Das betrifft alle E-Mails, die wir dir schicken: Bestell- und Versandbestätigungen, Storno- und Widerrufsbestätigungen, Antworten auf Anfragen sowie die E-Mails der Launch List. Dabei werden deine E-Mail-Adresse, der Inhalt der jeweiligen Nachricht und Protokolle über die Zustellung verarbeitet.</p>
 </section>
 
@@ -1921,7 +1921,7 @@ return <main className="legal-page legal-doc legal-privacy">
 <section className="legal-doc-section" id="speicherung">
 <p className="legal-doc-num">07</p>
 <h2>Speicherung auf deinem Endgerät</h2>
-<p>Diese Website speichert nur, was für die von dir gewünschten Funktionen erforderlich ist. Das sind der Inhalt deines Warenkorbs, der lokal in deinem Browser abgelegt wird, und – wenn du dich anmeldest – deine Anmeldesitzung. Für den nicht öffentlichen Verwaltungsbereich wird beim Anmelden zusätzlich ein Sitzungs-Cookie gesetzt, das ausschließlich berechtigte Personen betrifft.</p>
+<p>Diese Website speichert nur, was für die von dir gewünschten Funktionen erforderlich ist. Das sind der Inhalt deines Warenkorbs, der lokal in deinem Browser abgelegt wird, und, wenn du dich anmeldest, deine Anmeldesitzung. Für den nicht öffentlichen Verwaltungsbereich wird beim Anmelden zusätzlich ein Sitzungs-Cookie gesetzt, das ausschließlich berechtigte Personen betrifft.</p>
 <p>Ohne diese Speicherung stünden Warenkorb, Login und Verwaltungsbereich nicht zur Verfügung. Sie ist deshalb unbedingt erforderlich im Sinne von § 25 Abs. 2 Nr. 2 TDDDG und benötigt keine Einwilligung. Die anschließende Verarbeitung der dabei gespeicherten Daten stützen wir auf Art. 6 Abs. 1 lit. b DSGVO, für den Verwaltungsbereich auf Art. 6 Abs. 1 lit. f DSGVO.</p>
 <p>Marketing-, Analyse- oder Tracking-Cookies setzen wir nicht, und wir binden keine entsprechenden Drittanbieter-Werkzeuge ein. Ein Einwilligungsbanner ist deshalb nicht erforderlich.</p>
 </section>
@@ -1937,10 +1937,10 @@ return <main className="legal-page legal-doc legal-privacy">
 <h2>Empfänger deiner Daten</h2>
 <p>Im Rahmen der oben beschriebenen Zwecke geben wir Daten an folgende Dienstleister weiter:</p>
 <ul className="legal-doc-list">
-<li><strong>Vercel</strong> – Bereitstellung und Betrieb der Website</li>
-<li><strong>Supabase</strong> – Datenbank und Authentifizierung</li>
-<li><strong>Stripe</strong> – Zahlungsabwicklung</li>
-<li><strong>Resend</strong> – Versand unserer E-Mails</li>
+<li><strong>Vercel</strong>: Bereitstellung und Betrieb der Website</li>
+<li><strong>Supabase</strong>: Datenbank und Authentifizierung</li>
+<li><strong>Stripe</strong>: Zahlungsabwicklung</li>
+<li><strong>Resend</strong>: Versand unserer E-Mails</li>
 </ul>
 <p>Diese Dienstleister setzen ihrerseits weitere Unterauftragsverarbeiter ein, insbesondere Anbieter von Rechenzentrums- und Netzwerkinfrastruktur. Über die aktuell eingesetzten Unterauftragsverarbeiter informieren wir dich auf Anfrage unter <a href="mailto:hello@gloamatcha.com">hello@gloamatcha.com</a>.</p>
 <p>Eine Weitergabe darüber hinaus findet nicht statt, außer wir sind gesetzlich dazu verpflichtet. Wir verkaufen keine personenbezogenen Daten.</p>
@@ -1965,7 +1965,7 @@ return <main className="legal-page legal-doc legal-privacy">
 <p>Wir speichern personenbezogene Daten nur so lange, wie es für den jeweiligen Zweck erforderlich ist oder wie es gesetzliche Aufbewahrungspflichten verlangen. Weil sich die Zwecke unterscheiden, unterscheiden sich auch die Fristen:</p>
 <ul className="legal-doc-list">
 <li><strong>Nicht bestätigte Eintragungen in die Launch List</strong> löschen wir 14 Tage nach der Eintragung.</li>
-<li><strong>Bestätigte Eintragungen</strong> löschen oder anonymisieren wir, sobald der Zweck erfüllt ist – also nachdem die einmalige Launch-Benachrichtigung versendet und abgeglichen wurde, der Aktionszeitraum des Rabattcodes abgelaufen ist und keine offenen Zustellfälle mehr bestehen. Wir prüfen das zu einem festgelegten Termin nach Ablauf des Aktionszeitraums.</li>
+<li><strong>Bestätigte Eintragungen</strong> löschen oder anonymisieren wir, sobald der Zweck erfüllt ist, also nachdem die einmalige Launch-Benachrichtigung versendet und abgeglichen wurde, der Aktionszeitraum des Rabattcodes abgelaufen ist und keine offenen Zustellfälle mehr bestehen. Wir prüfen das zu einem festgelegten Termin nach Ablauf des Aktionszeitraums.</li>
 <li><strong>Nachweise über erteilte und widerrufene Einwilligungen</strong> bewahren wir davon getrennt so lange auf, wie wir sie zum Nachweis der Rechtmäßigkeit der Verarbeitung und zur Beachtung eines Widerrufs benötigen.</li>
 <li><strong>Bestell- und Rechnungsdaten</strong> unterliegen den handels- und steuerrechtlichen Aufbewahrungspflichten und werden für deren Dauer aufbewahrt, auch wenn du dein Konto löschst.</li>
 <li><strong>Kontaktanfragen</strong> löschen wir, sobald das Anliegen abschließend bearbeitet ist und keine Aufbewahrungspflicht entgegensteht.</li>
@@ -2075,8 +2075,8 @@ return <main className="legal-page legal-doc legal-agb">
 <p>Der Bestellvorgang läuft in diesen Schritten ab: Du legst die gewünschten Artikel in den Warenkorb, öffnest die Kasse, prüfst dort Artikel, Menge, Preis, Versandkosten und Lieferadresse und schließt die Bestellung mit der zahlungspflichtigen Schaltfläche ab. Bis dahin kannst du Eingaben jederzeit korrigieren: Im Warenkorb änderst du Mengen oder entfernst Artikel, und aus der Kasse gelangst du zurück in den Shop.</p>
 <p>Mit dem Abschluss über die zahlungspflichtige Schaltfläche gibst du ein verbindliches Angebot zum Kauf der ausgewählten Waren ab. Der Kaufpreis wird zu diesem Zeitpunkt über den von dir gewählten Zahlungsweg eingezogen.</p>
 <p>Wir nehmen dein Angebot mit der Bestellbestätigung an, die wir dir nach erfolgreicher Zahlung automatisch per E-Mail senden. Erst mit dieser E-Mail kommt der Kaufvertrag zustande. Eine gesonderte Eingangsbestätigung versenden wir nicht; diese eine E-Mail bestätigt den Eingang und erklärt zugleich die Annahme.</p>
-<p>Können wir dein Angebot ausnahmsweise nicht annehmen – etwa weil ein Artikel nicht mehr verfügbar ist –, teilen wir dir das mit und erstatten dir den bereits gezahlten Betrag unverzüglich und vollständig zurück.</p>
-<p>Die Bestellbestätigung enthält die Bestellnummer, die bestellten Artikel, die Preise, die Versandkosten und die Lieferanschrift; sie ist damit zugleich die Bestätigung des Vertrags auf einem dauerhaften Datenträger. Den Vertragstext speichern wir nicht in einer gesondert abrufbaren Form – bewahre die Bestellbestätigung deshalb bitte auf. Wenn du ein GLOA-Konto hast, findest du deine Bestellung zusätzlich in deinem <Link href="/account">Kundenkonto</Link>.</p>
+<p>Können wir dein Angebot ausnahmsweise nicht annehmen, etwa weil ein Artikel nicht mehr verfügbar ist, teilen wir dir das mit und erstatten dir den bereits gezahlten Betrag unverzüglich und vollständig zurück.</p>
+<p>Die Bestellbestätigung enthält die Bestellnummer, die bestellten Artikel, die Preise, die Versandkosten und die Lieferanschrift; sie ist damit zugleich die Bestätigung des Vertrags auf einem dauerhaften Datenträger. Den Vertragstext speichern wir nicht in einer gesondert abrufbaren Form. Bewahre die Bestellbestätigung deshalb bitte auf. Wenn du ein GLOA-Konto hast, findest du deine Bestellung zusätzlich in deinem <Link href="/account">Kundenkonto</Link>.</p>
 </section>
 
 <section className="legal-doc-section" id="preise">
@@ -2109,7 +2109,7 @@ return <main className="legal-page legal-doc legal-agb">
 <section className="legal-doc-section" id="widerruf">
 <p className="legal-doc-num">07</p>
 <h2>Widerrufsrecht</h2>
-<p>Als Verbraucher steht dir ein gesetzliches Widerrufsrecht zu. Alle Einzelheiten – Frist, Fristbeginn, Folgen des Widerrufs und das Muster-Widerrufsformular – findest du in unserer <Link href="/widerruf">Widerrufsbelehrung</Link>. Dort kannst du den Widerruf auch direkt über die elektronische Widerrufsfunktion erklären, ohne Konto und ohne Anmeldung.</p>
+<p>Als Verbraucher steht dir ein gesetzliches Widerrufsrecht zu. Alle Einzelheiten (Frist, Fristbeginn, Folgen des Widerrufs und das Muster-Widerrufsformular) findest du in unserer <Link href="/widerruf">Widerrufsbelehrung</Link>. Dort kannst du den Widerruf auch direkt über die elektronische Widerrufsfunktion erklären, ohne Konto und ohne Anmeldung.</p>
 <p>Der Widerruf ist etwas anderes als eine Stornierung. Der Widerruf ist dein gesetzliches Recht, das du innerhalb der Frist ohne Angabe von Gründen ausüben kannst. Eine Stornierung ist demgegenüber die Bitte, eine noch nicht versandte Bestellung abzubrechen; ob wir das noch können, hängt vom Bearbeitungsstand ab. Dein Widerrufsrecht bleibt davon in jedem Fall unberührt.</p>
 </section>
 

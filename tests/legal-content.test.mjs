@@ -868,8 +868,11 @@ test("Versand: the free-shipping basis is stated, and matches the server rule", 
   const shipping = readFileSync(new URL("../lib/shipping.ts", import.meta.url), "utf-8");
   assert.match(shipping, /merchandiseSubtotalGrossCents >= pricing\.freeShippingThresholdGrossCents/);
   assert.match(versandSource, /Warenwert deiner Bestellung ohne Versandkosten/);
-  // Zones without a threshold say so rather than showing a blank.
-  assert.match(versandSource, /freeShippingThresholdGrossCents!==null\?/);
+  // Zones without a threshold omit the row entirely rather than
+  // printing a placeholder glyph; the note below the grid carries the
+  // rule for them.
+  assert.match(versandSource, /freeShippingThresholdGrossCents!==null&&<div><dt>Kostenlos ab<\/dt>/);
+  assert.match(versandSource, /Liefergebiete ohne Angabe gilt der regul\u00e4re Versandpreis/);
 });
 
 test("Versand: single orders only - the annual plan's own rule is not folded in", () => {
