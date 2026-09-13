@@ -310,8 +310,12 @@ test("6: the band alternates the page's two grounds and invents nothing", () => 
   assert.match(tap, /\.tap-label\{[\s\S]*?color:inherit/);
   assert.ok(!/\.tap-mark\{[^}]*color:/.test(tap), "the mark hard-codes a colour");
   assert.ok(ratio(CREAM, BLUE) >= 4.5);
-  assert.ok(ratio(over(CREAM, 0.82, BLUE), BLUE) >= 4.5, "the hint is under AA on blue");
-  assert.match(tap, /\.tap-hint\{[\s\S]*?opacity:\.82/);
+  const [hr, hg, hb] = over(CREAM, 0.82, BLUE);
+  assert.ok(ratio([hr, hg, hb], BLUE) >= 4.5, "the process hint is under AA on blue");
+  assert.match(rules, /\.matcha-process-hint\{[\s\S]*?color:rgba\(245,235,226,\.82\)/);
+  // Nothing is left of the per-row hint the research block dropped.
+  assert.ok(!css.includes("tap-hint"), "the hint rule outlived the hint");
+  assert.ok(!site.includes("tap-hint"), "the hint markup outlived it");
   // And the hairlines are light on it, not the ink ones they were.
   for (const hairline of [".matcha-process-list{", ".matcha-process-step{", ".matcha-facts{", ".matcha-fact{"]) {
     assert.match(rule(hairline), /border-(top|bottom):1px solid rgba\(245,235,226,/,
@@ -502,7 +506,11 @@ test("11c: the two shapes cannot disagree about which one is on screen", () => {
   assert.ok(tapBlock.startsWith("TAP TO READ"), "the shared block is missing");
   assert.ok(tapBlock.includes(`@media (max-width:${query[1]}px)`),
     `the shared control does not switch at ${query[1]}px`);
-  assert.equal([...css.matchAll(/\.tap-toggle\{/g)].length, 2, "one default rule, one accordion rule");
+  // One default rule, one accordion rule, and one scoped tightening for
+  // the research rows, which lost a line and close up because of it.
+  assert.equal([...css.matchAll(/\.tap-toggle\{/g)].length, 3,
+    "one default rule, one accordion rule, one research override");
+  assert.match(css, /\.matcha-research-block \.tap-toggle\{min-height:52px/);
   // SSR AND THE FIRST CLIENT RENDER ARE THE PLAIN LIST, so hydration
   // cannot mismatch and the full text is what ships in the HTML.
   assert.match(shared, /const \[accordion,setAccordion\]=useState\(false\)/);
@@ -550,6 +558,8 @@ test("12: nothing on this page reserves height it does not fill", () => {
     assert.ok(!pageCss.includes(banned), `the page reserves a viewport: ${banned}`);
   }
   const minimums = [...pageCss.matchAll(/min-height:([^;}]+)/g)].map(m => m[1].trim());
-  assert.deepEqual(minimums.sort(), ["54px", "56px"],
-    "a new reserved height appeared - the only minimums are the two touch targets");
+  assert.deepEqual(minimums.sort(), ["52px", "54px", "56px"],
+    "a new reserved height appeared - the only minimums are touch targets");
+  // And every one of them clears the 48px a finger needs.
+  for (const m of minimums) assert.ok(Number(m.replace("px", "")) >= 48, `${m} is under a touch target`);
 });

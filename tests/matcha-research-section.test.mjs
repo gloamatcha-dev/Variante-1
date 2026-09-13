@@ -227,16 +227,37 @@ test("4: a section, not a hero - and it stacks cleanly", () => {
 
 const shared = site.slice(site.indexOf("function useTapToRead()"), site.indexOf("function MatchaProcess()"));
 
-test("5a: every topic is a real button and says so, in words", () => {
-  // The affordance is visible copy, not an icon a visitor has to guess
-  // at. The "+" is decorative and hidden from the reader.
+test("5a: every topic is a real button, and the mark is the affordance", () => {
   assert.match(shared, /<button type="button" className="tap-toggle"/);
-  assert.ok(shared.includes("Zum Lesen antippen"), "the tap hint is missing");
-  assert.match(section, /onToggle=\{\(\)=>toggle\(i\)\} hint/, "the research rows opt into the hint");
+  // NO INSTRUCTION LINE. "Zum Lesen antippen" under every title was a
+  // third line per row for something the "+" already says, and it is
+  // what made the rows a line taller than their content. The mark is
+  // decorative to a screen reader; aria-expanded carries the state.
   assert.match(shared, /className="tap-mark" aria-hidden="true">\{isOpen\?"−":"\+"\}/);
-  // Tapping anywhere on the row works: the label and the hint are
-  // INSIDE the button, not siblings of it.
+  assert.ok(!section.includes("Zum Lesen antippen"), "the instruction line came back");
+  assert.ok(!shared.includes("Zum Lesen antippen"), "the shared row hard-codes an instruction");
+  assert.ok(!site.includes("tap-hint") && !css.includes("tap-hint"), "the hint outlived its removal");
+  assert.ok(!/hint\??:/.test(shared), "the row still takes a hint prop nothing passes");
+  // The production steps keep the single hint above THEIR list - a
+  // different element, deliberately untouched by this pass.
+  assert.match(site, /<p className="matcha-process-hint">Zum Lesen antippen<\/p>/);
+
+  // Tapping anywhere on the row works: the label is INSIDE the button,
+  // not a sibling of it, and the row is the full width.
   assert.match(shared, /<span className="tap-text">[\s\S]*?<span className="tap-label">/);
+  assert.match(sheetRules, /\.tap-toggle\{[\s\S]*?width:100%/);
+  // Icon, title and mark all sit on one centre line.
+  assert.match(sheetRules, /\.tap-toggle\{[\s\S]*?align-items:center/);
+  assert.match(sheetRules, /\.tap-lead\{[\s\S]*?align-items:center/);
+  assert.match(sheetRules, /\.tap-mark\{[\s\S]*?justify-self:end/);
+  // A long third title wraps inside its track rather than widening it.
+  assert.match(sheetRules, /\.tap-text\{min-width:0\}/);
+  assert.match(sheetRules, /\.tap-toggle\{[\s\S]*?grid-template-columns:34px minmax\(0,1fr\) 24px/);
+  // The rows closed up, and the hairlines between them stayed.
+  assert.match(sheetRules, /\.matcha-research-grid\{gap:0\}/);
+  assert.match(sheetRules, /\.matcha-research-block\{padding-top:0\}/);
+  assert.match(sheetRules, /\.matcha-research-block \.tap-toggle\{min-height:52px;padding:12px 0\}/);
+  assert.match(rules, /\.matcha-research-block\{[\s\S]*?border-top:1px solid rgba\(166,30,89/);
 });
 
 test("5b: the rows are the MOBILE presentation - desktop still reads in place", () => {
@@ -376,9 +397,8 @@ test("6: every colour on the two new surfaces clears AA on its own ground", () =
   assert.equal(declared(rules, ".matcha-research{", "background"), "var(--cream)");
   assert.equal(declared(sheetRules, ".tap-toggle{", "color"), "inherit");
   assert.equal(declared(sheetRules, ".tap-label{", "color"), "inherit");
-  // The hint and the mark carry no colour of their own either: an
-  // opacity and currentColor work on cream and on blue alike.
-  assert.match(sheetRules, /\.tap-hint\{[\s\S]*?opacity:\.82/);
+  // The mark carries no colour of its own either: currentColor works on
+  // cream and on blue alike, which is what lets one row serve both.
   assert.ok(!/\.tap-mark\{[^}]*color:/.test(sheetRules), "the mark hard-codes a colour");
 
   const cases = [

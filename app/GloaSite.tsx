@@ -960,9 +960,9 @@ return {accordion,open,toggle};
  * button, the aria wiring and the panel are shared, so a fix to one is
  * a fix to both.
  */
-function TapToReadRow({panelId,accordion,isOpen,onToggle,lead,label,hint,plain,children}:{
+function TapToReadRow({panelId,accordion,isOpen,onToggle,lead,label,plain,children}:{
 panelId:string;accordion:boolean;isOpen:boolean;onToggle:()=>void;
-lead:React.ReactNode;label:React.ReactNode;hint?:boolean;
+lead:React.ReactNode;label:React.ReactNode;
 plain:React.ReactNode;children:React.ReactNode;
 }){
 return <>
@@ -971,7 +971,6 @@ return <>
    <span className="tap-lead">{lead}</span>
    <span className="tap-text">
      <span className="tap-label">{label}</span>
-     {hint&&<span className="tap-hint">Zum Lesen antippen</span>}
    </span>
    {/* Decorative: the state a reader needs is on aria-expanded. */}
    <span className="tap-mark" aria-hidden="true">{isOpen?"−":"+"}</span>
@@ -1022,7 +1021,7 @@ const {accordion,open,toggle}=useTapToRead();
 return <div className="matcha-research-grid tap-list">{researchBlocks.map((b,i)=>
 <article className="matcha-research-block tap-row" key={b.label}>
 <TapToReadRow panelId={`matcha-research-panel-${i+1}`} accordion={accordion} isOpen={open===i}
-  onToggle={()=>toggle(i)} hint
+  onToggle={()=>toggle(i)}
   lead={b.icon}
   label={b.label}
   plain={<div className="matcha-research-head">{b.icon}<h3 className="matcha-research-label">{b.label}</h3></div>}>

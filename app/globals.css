@@ -3094,7 +3094,9 @@ header nav{gap:18px;font-size:12px}
     color:inherit;
   }
   /* The whole row is the target, not just the "+". */
-  .tap-text{display:flex;flex-direction:column;gap:3px;min-width:0}
+  /* min-width:0 is what lets a long title wrap inside its track
+     instead of widening the row. */
+  .tap-text{min-width:0}
   .tap-label{
     font-family:var(--font-sans),Arial,sans-serif;
     font-weight:600;
@@ -3105,16 +3107,6 @@ header nav{gap:18px;font-size:12px}
     text-transform:uppercase;
     color:inherit;
   }
-  .tap-hint{
-    font-family:var(--font-sans),Arial,sans-serif;
-    font-weight:600;
-    font-style:normal;
-    font-size:11px;
-    line-height:1.2;
-    letter-spacing:.12em;
-    text-transform:uppercase;
-    opacity:.82;
-  }
   .tap-mark{
     justify-self:end;
     font-family:var(--font-sans),Arial,sans-serif;
@@ -3124,6 +3116,14 @@ header nav{gap:18px;font-size:12px}
   }
   .tap-lead{display:flex;align-items:center}
   .tap-panel{padding:0 34px 16px 0}
+
+  /* Losing the hint left the research rows a line taller than their
+     content. They close up to a continuous hairline list, the same
+     rhythm the production steps above them already read as - and the
+     steps themselves are untouched, which is why this is scoped. */
+  .matcha-research-grid{gap:0}
+  .matcha-research-block{padding-top:0}
+  .matcha-research-block .tap-toggle{min-height:52px;padding:12px 0}
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -3473,7 +3473,6 @@ header nav{gap:18px;font-size:12px}
   .matcha-taste-notes{margin-top:clamp(20px,5vw,28px)}
   .matcha-research-headline{margin-top:clamp(10px,2.6vw,14px)}
   .matcha-research-inner{gap:clamp(22px,5.4vw,30px)}
-  .matcha-research-grid{gap:clamp(16px,4vw,22px)}
   .matcha-use-grid{margin-top:clamp(24px,6vw,34px)}
 }
 
