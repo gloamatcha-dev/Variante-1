@@ -145,8 +145,8 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
   const files = readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith(".sql")).sort();
   assert.deepEqual(files.filter(f => f.startsWith("039")), [MIGRATION_039],
     "there must be exactly one migration 039");
-  assert.equal(files[files.length - 8], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 9], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 9], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 10], MIGRATION_038, "038 must be the one before it");
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
@@ -154,7 +154,7 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
 test("2: no migration 044 or beyond", () => {
   // 039 is not applied anywhere, so it is still the right place to fix
   // 039. A hardening pass must not become a second migration.
-  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 46);
+  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 47);
   assert.deepEqual(beyond, [], "an unreviewed migration appeared after 039");
 });
 
@@ -1022,6 +1022,25 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // grants.
     "lib/annualPlanCheckout.ts",
     "lib/annualPlanAccount.ts",
+    // THE ONE-TIME QUOTE BUILDER, edited twice and both times to REFUSE
+    // more than it used to - which is the direction this guard exists to
+    // scrutinise, so the two changes are stated exactly.
+    //
+    // 1. A withheld product (lib/catalogAvailability.ts) is refused with
+    //    the status and the sentence an inactive product already got.
+    //    The GLOA Metal Case is active in the catalog and must not be
+    //    sold; hiding its card never stopped this endpoint pricing it.
+    // 2. An exhausted catalog read reports 503 instead of 500. Same
+    //    customer-facing sentence; only the class of the answer changes,
+    //    from "this request was bad" to "this is temporary".
+    //
+    // Nothing else moved: the item validation, the price/size/currency
+    // checks, the active-product checks, the arithmetic and the
+    // annual-plan and subscription paths are byte-identical, and no
+    // retry, clock or write was introduced. Reviewed directly against
+    // the source in tests/catalog-availability.test.mjs and
+    // tests/catalog-read-resilience.test.mjs.
+    "lib/checkoutQuote.ts",
   ];
 
   // Phase 4B4 edits ONE application module: the single canonical Stripe

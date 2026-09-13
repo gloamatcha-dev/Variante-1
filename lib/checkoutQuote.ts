@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { isProductWithheld, WITHHELD_PRODUCT_STATUS, WITHHELD_PRODUCT_MESSAGE } from "./catalogAvailability";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -93,6 +94,30 @@ export async function buildAuthoritativeQuote(items: QuoteRequestItem[]): Promis
     return fail(500, "Shop vorübergehend nicht verfügbar.");
   }
 
+  // THE CATALOG READ, AND WHAT ALREADY PROTECTS IT.
+  //
+  // A transient failure here is the one thing between a customer and a
+  // checkout they are entitled to, so it was worth establishing exactly
+  // what happens - by reproduction, against a proxy that fails this call
+  // on demand, rather than by assumption:
+  //
+  //   ONE transient failure   recovered, the request completes normally
+  //   TWO transient failures  recovered, the request completes normally
+  //   THREE                   recovered
+  //   FOUR or more            gives up and reports the failure below
+  //
+  // That retry is postgrest-js's own (@supabase/postgrest-js, bundled
+  // with supabase-js 2.112). Its policy is already stricter than
+  // anything worth hand-rolling here: three retries with exponential
+  // backoff, ONLY for idempotent methods (GET/HEAD/OPTIONS), and ONLY
+  // for a thrown transport error or status 503/520. A 4xx is never
+  // retried, a business error is never retried, and no write is ever
+  // retried - a POST is excluded by method.
+  //
+  // So there is deliberately NO retry loop in this file. A second one
+  // would multiply the attempts (4 x 2 = 8 upstream calls) and stack a
+  // second backoff on top of a request a customer is waiting on, which
+  // is worse on both counts than the policy already in force.
   const variantIds = items.map(item => item.variantId);
   const { data: variants, error: dbError } = await supabase
     .from("product_variants")
@@ -100,8 +125,16 @@ export async function buildAuthoritativeQuote(items: QuoteRequestItem[]): Promis
     .in("id", variantIds);
 
   if (dbError) {
+    // 503, not 500. Reaching this line means the catalog was unreachable
+    // across every attempt above - the shop is temporarily unavailable,
+    // which is an upstream availability problem and not a fault in this
+    // code. The distinction is not cosmetic: a 500 is a page-somebody
+    // signal and tells a caller the request itself was bad, while a 503
+    // says "this worked yesterday and will work again", which is both
+    // true and the only honest thing to tell a customer holding a cart.
+    // The customer-facing sentence is unchanged.
     console.error("Quote DB error:", dbError.message);
-    return fail(500, "Shop vorübergehend nicht verfügbar.");
+    return fail(503, "Shop vorübergehend nicht verfügbar.");
   }
 
   if (!variants || variants.length === 0) {
@@ -173,6 +206,21 @@ export async function buildAuthoritativeQuote(items: QuoteRequestItem[]): Promis
     }
     if (typeof productSlug !== "string" || productSlug.trim() === "") {
       return fail(500, "Ungültiges Produkt.");
+    }
+
+    // WITHHELD FOR THIS LAUNCH (lib/catalogAvailability.ts). The product
+    // may still be active in Supabase - the GLOA Metal Case is, at the
+    // time of writing - which is exactly why hiding its card was never
+    // enough: this endpoint would otherwise price and sell a variant id
+    // the shop refuses to show. Refused with the same status and the same
+    // sentence as an inactive product, so a probing caller cannot tell
+    // "deliberately held back" from "switched off".
+    //
+    // Checked HERE rather than in the route: every checkout path that can
+    // ever price a one-time cart comes through this function, so there is
+    // one place to pass and none to forget.
+    if (isProductWithheld(productSlug)) {
+      return fail(WITHHELD_PRODUCT_STATUS, WITHHELD_PRODUCT_MESSAGE);
     }
 
     quoteItems.push({

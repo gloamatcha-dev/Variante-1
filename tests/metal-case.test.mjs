@@ -311,7 +311,16 @@ test("shop: the section lists one product per row, and the case is only hidden",
   assert.match(css, /\.shop-product-row\{[\s\S]*?grid-template-columns:minmax\(280px,\.85fr\) minmax\(0,1\.15fr\)/);
 
   // ── THE CASE IS HIDDEN, NOT DELETED ──────────────────────────
-  assert.match(site, /const SHOP_HIDDEN_SLUGS=Object\.freeze\(\["metal-case"\]\);/);
+  // The list moved out of this component into lib/catalogAvailability.ts
+  // so the SERVER reads the same one - hiding the card here never
+  // stopped /shop/metal-case or the checkout endpoint. Asserted here as
+  // "this page still filters on the shared list"; that the list contains
+  // the case, and that the other two layers refuse it, is
+  // tests/catalog-availability.test.mjs.
+  assert.match(site, /import \{ isProductWithheld \} from "\.\.\/lib\/catalogAvailability";/);
+  assert.match(site, /products\.filter\(p=>!isProductWithheld\(p\.slug\)\)/);
+  assert.match(readFileSync(path.join(ROOT, "lib/catalogAvailability.ts"), "utf-8"),
+    /Object\.freeze\(\["metal-case"\]\)/);
   assert.match(site, /\{shown\.map\(p=>/, "the shop still renders every catalog product");
   // Everything the case needs to come back is still here.
   assert.match(readFileSync(path.join(ROOT, "lib/productPresentation.ts"), "utf-8"), /"metal-case"/);

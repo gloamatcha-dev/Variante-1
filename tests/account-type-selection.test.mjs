@@ -121,7 +121,7 @@ test("1c: no backend, auth or database was touched", () => {
     // tests/partnerships-api.test.mjs.
     ["admin", "annual-plan", "checkout", "contact", "cron", "internal", "launch",
      "orders", "partnerships", "stripe", "subscriptions", "withdrawal"], "an API route changed");
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("047")),
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("048")),
     "migration 044 exists");
 });
 

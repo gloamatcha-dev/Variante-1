@@ -138,16 +138,16 @@ test("1, 2: 037 exists, owns its number, and is the highest migration", () => {
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(files[files.length - 1], "046_launch_signup_atomic.sql");
-  assert.equal(files[files.length - 2], "045_launch_welcome_email.sql");
-  assert.equal(files[files.length - 3], "044_launch_send.sql");
-  assert.equal(files[files.length - 4], "043_launch_waitlist.sql");
-  assert.equal(files[files.length - 5], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.equal(files[files.length - 6], "041_annual_account_column_privileges.sql",
+  assert.equal(files[files.length - 2], "046_launch_signup_atomic.sql");
+  assert.equal(files[files.length - 3], "045_launch_welcome_email.sql");
+  assert.equal(files[files.length - 4], "044_launch_send.sql");
+  assert.equal(files[files.length - 5], "043_launch_waitlist.sql");
+  assert.equal(files[files.length - 6], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(files[files.length - 7], "041_annual_account_column_privileges.sql",
     "038 is the one-time writer concurrency fix and must be the highest");
-  assert.equal(files[files.length - 10], MIGRATION_037, "037 must still be the one before it");
-  assert.ok(!files.some(f => f.startsWith("047")), "a 045 appeared");
-  assert.equal(files.length, 46);
+  assert.equal(files[files.length - 11], MIGRATION_037, "037 must still be the one before it");
+  assert.ok(!files.some(f => f.startsWith("048")), "a 045 appeared");
+  assert.equal(files.length, 47);
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length);

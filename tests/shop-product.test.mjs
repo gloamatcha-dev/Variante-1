@@ -35,9 +35,12 @@ const rule = name => {
 
 test("1: only the matcha is listed, and the case is hidden rather than removed", () => {
   // ONE named list decides, and it is the only thing to edit to bring
-  // the case back.
-  assert.match(site, /const SHOP_HIDDEN_SLUGS=Object\.freeze\(\["metal-case"\]\);/);
-  assert.match(site, /const visibleShopProducts=\(products:CatalogProduct\[\]\)=>products\.filter\(p=>!SHOP_HIDDEN_SLUGS\.includes\(p\.slug\)\);/);
+  // the case back. It moved to lib/catalogAvailability.ts so the SERVER
+  // reads the same list - hiding the card here never stopped
+  // /shop/metal-case or a hand-written checkout request, which
+  // tests/catalog-availability.test.mjs now covers.
+  assert.match(site, /import \{ isProductWithheld \} from "\.\.\/lib\/catalogAvailability";/);
+  assert.match(site, /const visibleShopProducts=\(products:CatalogProduct\[\]\)=>products\.filter\(p=>!isProductWithheld\(p\.slug\)\);/);
   // Both the section AND the hero's "ab" price read the filtered list,
   // so the page cannot quote a price for something it does not show.
   assert.match(shop, /const shown=visibleShopProducts\(products\);/);

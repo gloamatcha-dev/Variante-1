@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Header, Footer, MobileDock } from "./Chrome";
 import { BRAND, PRODUCT, SHOP_STATUS, RECIPES_VISIBLE, PRICES_VISIBLE } from "./content";
 import { useCatalog, useCatalogList, fmtCents, per100gCents } from "./useCatalog";
+import { isProductWithheld } from "../lib/catalogAvailability";
 import type { CatalogProduct, CatalogVariant } from "./useCatalog";
 // THE SAME ARITHMETIC THE SERVER USES, NOT A COPY OF ITS ANSWERS.
 // lib/annualPlanRules.ts is a zero-import leaf, so the browser can run
@@ -311,8 +312,13 @@ const MATCHA_SLUG="matcha";
  *
  * Bringing the case back is deleting one string from this array.
  */
-const SHOP_HIDDEN_SLUGS=Object.freeze(["metal-case"]);
-const visibleShopProducts=(products:CatalogProduct[])=>products.filter(p=>!SHOP_HIDDEN_SLUGS.includes(p.slug));
+// MOVED, NOT REWRITTEN: the list now lives in lib/catalogAvailability.ts
+// so the SERVER reads the same one. Hiding a card here never stopped
+// /shop/metal-case rendering a purchase page, nor stopped the checkout
+// endpoint accepting the variant id - both are refused at their own layer
+// now, from that single list. What used to be SHOP_HIDDEN_SLUGS is
+// isProductWithheld, and this page is one of its three readers.
+const visibleShopProducts=(products:CatalogProduct[])=>products.filter(p=>!isProductWithheld(p.slug));
 
 /**
  * The image /shop renders for a product, when it differs from the shared
@@ -748,6 +754,15 @@ const shell=(message:string)=><main className="pdp"><section className="pdp-hero
 
 if(loading)return shell("Laden…");
 if(error||!product)return shell("Produkt vorübergehend nicht verfügbar.");
+// WITHHELD FOR THIS LAUNCH. Knowing the slug was the last way to reach a
+// full purchase page for a product /shop refuses to list, so the detail
+// route reads the same list the listing does. An inactive product never
+// arrives here at all - RLS does not hand it over, and the catalog hook
+// drops a product with no purchasable variant - so this covers only the
+// case the database still calls active while the shop does not sell it.
+// Same wording as an empty variant list: a customer learns the product
+// is not available, and a prober learns nothing else.
+if(isProductWithheld(product.slug))return shell("Aktuell nicht verfügbar.");
 if(!product.variants.length)return shell("Aktuell nicht verfügbar.");
 
 return showsFoodInformation(product.slug)
