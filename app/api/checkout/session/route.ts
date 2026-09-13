@@ -7,6 +7,8 @@ import { verifyUserId } from "../../../../lib/verifyUser";
 import { ALLOWED_SHIPPING_COUNTRIES, getShippingZone, computeShippingGrossCents, SHIPPING_ZONES } from "../../../../lib/shipping";
 import { resolveTaxJurisdiction } from "../../../../lib/taxJurisdiction";
 import { resolveCheckoutTax, toTaxableCartItems, TAX_DESTINATION_UNAVAILABLE_MESSAGE } from "../../../../lib/tax";
+import { checkoutRefusalFor } from "../../../../lib/shopAvailability";
+import { SHOP_STATUS } from "../../../content";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -98,6 +100,35 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json(
       { error: "Zahlungsfunktion vorübergehend nicht verfügbar." } as ErrorResponse,
       { status: 503 }
+    );
+  }
+
+  // THE LAUNCH GATE - the last thing before the first side effect.
+  //
+  // Everything above this line is validation and pure reads: the request
+  // shape, the destination, the authoritative catalog quote, and whether
+  // Stripe and SITE_URL are configured at all. Everything below it
+  // writes or charges - the user verification calls Supabase Auth, the
+  // checkout attempt inserts a row, and the Stripe call at the end hands
+  // the customer a payable page.
+  //
+  // So this sits exactly between them. While SHOP_STATUS is anything
+  // other than "live" no checkout attempt is written and no Stripe
+  // session is created, no matter how the request got here - a saved
+  // cart from a live build, a replayed request, or a hand-written POST.
+  // Hiding the buy buttons is presentation; this is the part that holds.
+  //
+  // Placed here rather than at the top of the handler on purpose: a
+  // malformed request must still be told it is malformed (400), and a
+  // shop whose payment provider is unconfigured must still say so (503).
+  // A closed shop is not a reason to stop answering those accurately,
+  // and the suite's proofs that client-supplied prices, user ids and
+  // shipping fields are inert all depend on reaching the quote stage.
+  const closed = checkoutRefusalFor(SHOP_STATUS);
+  if (closed) {
+    return Response.json(
+      { error: closed.error } as ErrorResponse,
+      { status: closed.status }
     );
   }
 

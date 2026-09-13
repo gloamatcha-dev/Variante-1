@@ -1077,6 +1077,20 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // tests/account-portal-design.test.mjs asserts that directly against
     // the source rather than leaving it to this diff.
     "app/AccountPortal.tsx",
+    // THE LAUNCH GATE: the one-time checkout session route gains a
+    // refusal, and nothing else. It is the most sensitive file on this
+    // list, so what the edit does is stated exactly: two imports, and one
+    // early return that answers 409 while SHOP_STATUS is not "live".
+    // Every existing step is byte-identical and in the same order - the
+    // item validation, the country validation, buildAuthoritativeQuote,
+    // the Stripe/SITE_URL configuration checks, computeShippingGrossCents,
+    // resolveCheckoutTax, the attempt writer, the frozen shipping data
+    // and the idempotency key. The annual and subscription session routes
+    // are untouched and keep their own env flags. The gate is placed
+    // after the configuration checks and before the first side effect,
+    // which tests/shop-launch-gate.test.mjs asserts against the source
+    // rather than leaving it to this diff.
+    "app/api/checkout/session/route.ts",
     // SITE CHROME: one entry added to the `links` array, so /partnerships
     // is reachable from the main navigation between B2B and Rezepte
     // instead of by direct URL only. Presentation and routing only - no

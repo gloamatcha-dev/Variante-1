@@ -1,8 +1,33 @@
 import { GloaSite } from "../GloaSite";
+import { PRICES_VISIBLE } from "../content";
 import type { Metadata } from "next";
 
+/**
+ * THE SHOP DESCRIPTION IS THE ONE PIECE OF METADATA THAT CARRIES A PRICE.
+ *
+ * /shop itself withholds every price while SHOP_STATUS is "prelaunch"
+ * (PRICES_VISIBLE, app/content.ts), but the page's own meta description
+ * and its OpenGraph twin are rendered server-side from the table below,
+ * and were publishing "Ab 19,99 Euro" to search engines and to every
+ * link preview while the page beneath them refused to show it. A price a
+ * customer cannot see on the page is not one the markup may publish.
+ *
+ * Gated on the SAME derived flag as every visible price, so the sentence
+ * returns with them in one step and cannot be forgotten on launch day.
+ * Nothing else about the description changes.
+ *
+ * The amount stays written out because metadata renders without a
+ * catalog read; tests/shop-launch-gate.test.mjs asserts it still matches
+ * the cheapest active variant in Supabase, so it cannot drift silently.
+ */
+const SHOP_DESCRIPTION_BASE = "GLOA Matcha aus Shizuoka. 30 g, 50 g, 100 g.";
+const SHOP_DESCRIPTION_PRICE = "Ab 19,99 Euro.";
+const SHOP_DESCRIPTION = PRICES_VISIBLE
+ ? `${SHOP_DESCRIPTION_BASE} ${SHOP_DESCRIPTION_PRICE}`
+ : SHOP_DESCRIPTION_BASE;
+
 const seo:Record<string,[string,string]>={
- "shop":["Shop Matcha","GLOA Matcha aus Shizuoka. 30 g, 50 g, 100 g. Ab 19,99 Euro."],
+ "shop":["Shop Matcha",SHOP_DESCRIPTION],
  "our-matcha":["Unser Matcha","GLOA Matcha aus Shizuoka, Japan. Herkunft, Fakten und Zubereitung."],
  "about":["Über GLOA","Wer hinter GLOA steht, warum wir Matcha machen und wie du den Aufbau begleiten kannst."],
  "for-cafes":["GLOA for Cafés","Matcha aus Shizuoka für deine Karte. Potenzial berechnen oder Sample anfragen."],
