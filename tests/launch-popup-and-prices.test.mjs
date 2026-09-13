@@ -199,9 +199,9 @@ test("1h: closed, it renders NOTHING - the page underneath is untouched", async 
     assert.ok(!html.includes("lp-backdrop"), `${name} ships a popup backdrop`);
     assert.ok(!html.includes("ZUR LAUNCH LIST"), `${name} ships the popup cta`);
   }
-  // It is the LAST child of the shell, after the footer and the cart -
-  // so mounting it cannot move anything above it.
-  assert.match(site, /<Footer\/><CartDrawer open=\{cartOpen\} onClose=\{closeCart\}\/><LaunchPopup route=\{route\}\/><\/>/);
+  // It is the LAST child of the shell, after the footer, the mobile
+  // dock and the cart - so mounting it cannot move anything above it.
+  assert.match(site, /<Footer\/><MobileDock [^/]*\/><CartDrawer open=\{cartOpen\} onClose=\{closeCart\}\/><LaunchPopup route=\{route\}\/><\/>/);
   // The homepage still renders exactly the sections it did.
   assert.deepEqual([...home.matchAll(/<section class="([a-z-]+)"/g)].map(m => m[1]),
     ["hero", "countdown", "prelaunch", "daily", "glance", "community", "brand-note"]);

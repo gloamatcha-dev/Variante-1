@@ -8882,3 +8882,159 @@ header nav{gap:18px;font-size:12px}
   .lp-backdrop,
   .lp-panel{animation:none}
 }
+
+/* ══════════════════════════════════════════════════════════════
+   THE MOBILE DOCK
+
+   A floating bar over the page on phones. Five targets, held off all
+   four edges so it reads as an object on the page rather than a strip
+   welded to the bottom of the window.
+
+   ── PHONES ONLY ──────────────────────────────────────────────
+   640px, which is the width this stylesheet already treats as a phone
+   everywhere else. The hamburger appears at 800px, so tablets between
+   the two keep exactly what they had: header, menu, no dock. Desktop
+   never renders it at all.
+
+   ── THE ONE DEPARTURE FROM THE SYSTEM ────────────────────────
+   GLOA is square: no radius, no shadow. This bar has both, on purpose
+   and only here. It is not content - it is a control layer floating
+   OVER content, and the corner and the shadow are what say so. Every
+   colour, type size and hairline in it is still a token.
+
+   ── AND IT DOES NOT COVER ANYTHING ───────────────────────────
+   --dock-space is the height it occupies including the home-bar inset.
+   The footer reserves exactly that below 640px, so the last line of
+   every page clears the bar. One declaration, so the two cannot drift.
+   ══════════════════════════════════════════════════════════════ */
+
+:root{
+  --dock-h:60px;
+  --dock-gap:14px;
+  /* env() with a fallback: a browser without safe-area support reads
+     0px rather than dropping the whole calc. */
+  --dock-space:calc(var(--dock-h) + var(--dock-gap) + env(safe-area-inset-bottom,0px));
+}
+
+.dock{display:none}
+
+@media (max-width:640px){
+  .dock{
+    display:block;
+    position:fixed;
+    left:var(--dock-gap);
+    right:var(--dock-gap);
+    /* Off the bottom edge AND clear of the home bar. */
+    bottom:calc(var(--dock-gap) + env(safe-area-inset-bottom,0px));
+    /* One below the full-screen mobile menu's 35: while the index is
+       open the shortcut belongs behind it. The cart drawer (50) and
+       the launch popup (60) cover it for the same reason. */
+    z-index:34;
+  }
+  .dock-inner{
+    display:grid;
+    grid-template-columns:repeat(5,minmax(0,1fr));
+    align-items:stretch;
+    gap:2px;
+    padding:6px;
+    min-height:var(--dock-h);
+    /* Cream, but not opaque: the page moving underneath is what makes
+       it read as a layer rather than a block. */
+    background:rgba(245,235,226,.88);
+    -webkit-backdrop-filter:blur(16px) saturate(1.15);
+    backdrop-filter:blur(16px) saturate(1.15);
+    border:1px solid rgba(79,58,91,.16);
+    border-radius:20px;
+    box-shadow:0 10px 30px rgba(17,17,17,.14), 0 2px 6px rgba(17,17,17,.06);
+  }
+  /* A browser without backdrop-filter gets the solid cream instead of a
+     washed-out panel over live text. */
+  @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+    .dock-inner{background:var(--cream)}
+  }
+
+  .dock-item{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:4px;
+    min-width:0;
+    min-height:48px;
+    margin:0;
+    padding:6px 2px;
+    background:none;
+    border:0;
+    border-radius:14px;
+    color:var(--ink);
+    text-align:center;
+    -webkit-tap-highlight-color:transparent;
+    transition:background .18s ease,color .18s ease;
+  }
+  .dock-icon{
+    position:relative;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    width:22px;
+    height:22px;
+  }
+  .dock-icon svg{display:block;width:22px;height:22px}
+  .dock-label{
+    font-family:var(--font-sans),Arial,sans-serif;
+    font-weight:600;
+    font-style:normal;
+    font-size:10px;
+    line-height:1.1;
+    letter-spacing:.04em;
+    text-transform:uppercase;
+    /* 5.9:1 on the bar. Quieter than the active item, still AA. */
+    color:rgba(17,17,17,.7);
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    max-width:100%;
+  }
+
+  /* ── ACTIVE ────────────────────────────────────────────────
+     Raspberry on a raspberry tint: the colour alone is a 6.1:1 change,
+     and the pill behind it means the current tab is findable without
+     reading the labels. */
+  .dock-item-active{background:rgba(166,30,89,.1);color:var(--berry)}
+  .dock-item-active .dock-label{color:var(--berry)}
+
+  /* The count, on the icon rather than beside it, so the cell width is
+     the same as every other one. */
+  .dock-badge{
+    position:absolute;
+    top:-5px;
+    left:calc(50% + 5px);
+    min-width:16px;
+    height:16px;
+    padding:0 4px;
+    box-sizing:border-box;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:var(--blue);
+    color:var(--cream);
+    border-radius:9px;
+    font-family:var(--font-sans),Arial,sans-serif;
+    font-weight:700;
+    font-size:10px;
+    line-height:1;
+    letter-spacing:0;
+  }
+
+  /* The global focus ring is blue, which is legible on this cream. */
+  .dock-item:focus-visible{outline-offset:-2px}
+
+  /* THE PAGE ENDS ABOVE THE BAR. The footer is the last element on
+     every route, so it carries the reservation. */
+  footer{padding-bottom:calc(25px + var(--dock-space))}
+}
+
+@media (max-width:640px) and (prefers-reduced-motion:reduce){
+  .dock-item{transition:none}
+}
+

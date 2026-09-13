@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useLayoutEffect, useState, useRef, useCallback, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { Header, Footer } from "./Chrome";
+import { Header, Footer, MobileDock } from "./Chrome";
 import { BRAND, PRODUCT, SHOP_STATUS, RECIPES_VISIBLE, PRICES_VISIBLE } from "./content";
 import { useCatalog, useCatalogList, fmtCents, per100gCents } from "./useCatalog";
 import type { CatalogProduct, CatalogVariant } from "./useCatalog";
@@ -2614,7 +2614,7 @@ else if(route==="partnerships")page=<Partnerships/>;
 else if(["impressum","datenschutz","agb","widerruf","versand"].includes(route))page=<Legal route={route}/>;
 else page=<main className="not-found"><h1>404</h1><Link href="/">Zurück zu GLOA →</Link></main>;
 
-return <><Header onCart={openCart} cartCount={cart.totalCount}/>{page}<Footer/><CartDrawer open={cartOpen} onClose={closeCart}/><LaunchPopup route={route}/></>
+return <><Header onCart={openCart} cartCount={cart.totalCount}/>{page}<Footer/><MobileDock onCart={openCart} cartCount={cart.totalCount}/><CartDrawer open={cartOpen} onClose={closeCart}/><LaunchPopup route={route}/></>
 }
 
 export function GloaSite({route}:{route:string}){

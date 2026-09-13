@@ -54,4 +54,80 @@ export function Header({onCart,cartCount}:{onCart:()=>void;cartCount:number}){
  const marqueeGroup=<div className="bb-group"><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link></div>;
  return <><div className="brand-bar"><div className="bb-track">{marqueeGroup}<div className="bb-group" aria-hidden="true"><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link></div></div></div><header className={scrolled?"compact":""}><button className="menu" ref={menuButtonRef} onClick={()=>setOpen(!open)} aria-expanded={open} aria-controls="mobile-menu">{open?"Schließen":"Menü"}</button><Mark/><nav aria-label="Hauptnavigation">{visibleLinks.map(([h,l])=><Link key={h} href={h} className={(h==="/"?path===h:path===h||path.startsWith(h+"/"))?"nav-active":""}>{l}</Link>)}</nav><div className="head-actions">{SEARCH_ENABLED&&<button onClick={()=>setSearch(!search)} aria-expanded={search}>Suche</button>}<Link href="/account" className="account-link">Konto</Link><button className="bag-btn" onClick={onCart}>Warenkorb <span className="bag-count">{cartCount}</span></button></div>{SEARCH_ENABLED&&search&&<form className="search-bar" role="search" onSubmit={e=>e.preventDefault()}><label htmlFor="site-search">GLOA durchsuchen</label><input id="site-search" placeholder="Matcha, Rezepte, Cafés…"/><button>Suche</button></form>}</header>{open&&<nav id="mobile-menu" className="mobile-nav" aria-label="Mobile Navigation">{visibleLinks.map(([h,l])=><Link key={h} href={h} onClick={()=>setOpen(false)}>{l}</Link>)}<Link href="/account" onClick={()=>setOpen(false)}>Konto</Link></nav>}</>
 }
+/**
+ * THE MOBILE DOCK.
+ *
+ * A floating bar over the page on phones, holding the five things a
+ * visitor actually reaches for. It does NOT replace anything: the
+ * hamburger and its full-screen menu still carry the complete
+ * navigation, and this is the shortcut to the routes that matter.
+ *
+ * ── WHY IT IS NOT THE FULL NAV ────────────────────────────────
+ * Seven routes at 390px is a row nobody can hit. Five is what fits
+ * with a real touch target, so the dock is a shortcut and the menu
+ * stays the index.
+ *
+ * ── IT SITS UNDER THE MENU, NOT OVER IT ───────────────────────
+ * z-index 34, one below the full-screen mobile menu's 35. Open the
+ * menu and the dock is behind it, which is where a shortcut belongs
+ * while the index is on screen. The cart drawer (50) and the launch
+ * popup (60) cover it for the same reason.
+ *
+ * ── AND IT DOES NOT COVER THE PAGE ────────────────────────────
+ * --dock-space in globals.css is the height it occupies including the
+ * home-bar inset, and the footer reserves exactly that on mobile. The
+ * value is declared once so the bar and the space it needs cannot
+ * drift apart.
+ */
+const dockIcons = {
+  home: <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 10.6 12 4l8 6.6V19a1 1 0 0 1-1 1h-4.3v-5.2H9.3V20H5a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/></svg>,
+  shop: <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6.2 8h11.6l1 11.2a1 1 0 0 1-1 1.1H6.2a1 1 0 0 1-1-1.1z" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/><path d="M9.2 10.4V7.6a2.8 2.8 0 0 1 5.6 0v2.8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>,
+  matcha: <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5.6 9.8h12.8l-.9 8.1a2 2 0 0 1-2 1.8H8.5a2 2 0 0 1-2-1.8z" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/><path d="M18.1 11.6h1.1a2.2 2.2 0 0 1 0 4.4h-1.5" fill="none" stroke="currentColor" strokeWidth="1.5"/><path d="M10 7.2c0-1.2 1.2-1.5 1.2-2.7M13.6 7.2c0-1.2 1.2-1.5 1.2-2.7" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>,
+  account: <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="8.8" r="3.6" fill="none" stroke="currentColor" strokeWidth="1.5"/><path d="M5.3 19.6a6.9 6.9 0 0 1 13.4 0" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>,
+  cart: <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.6 5h2.1l2.1 9.5h8.9l2-7H7" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><circle cx="9.4" cy="18.6" r="1.4" fill="currentColor"/><circle cx="16.4" cy="18.6" r="1.4" fill="currentColor"/></svg>,
+};
+
+/**
+ * The four routes, in the order a visitor meets them. The cart is a
+ * drawer rather than a route, so it is a button and sits last.
+ *
+ * TWO LABELS, BECAUSE THE CELL IS 65px. The visible one has to fit on
+ * one line at 10px or it ends in an ellipsis, which is worse than a
+ * short word. The accessible name keeps the full route name and
+ * CONTAINS the visible one, so a voice-control user saying "Start" or
+ * "Korb" still hits it.
+ */
+const dockRoutes:[string,string,string,keyof typeof dockIcons][] = [
+  ["/", "Start", "Startseite", "home"],
+  ["/shop", "Kaufen", "Kaufen", "shop"],
+  ["/our-matcha", "Matcha", "Unser Matcha", "matcha"],
+  ["/account", "Konto", "Konto", "account"],
+];
+
+export function MobileDock({onCart,cartCount}:{onCart:()=>void;cartCount:number}){
+const path=usePathname();
+const isActive=(href:string)=>href==="/"?path===href:path===href||path.startsWith(href+"/");
+return <nav className="dock" aria-label="Schnellnavigation">
+<div className="dock-inner">
+{dockRoutes.map(([href,short,full,icon])=>{
+const active=isActive(href);
+return <Link key={href} href={href} className={"dock-item"+(active?" dock-item-active":"")}
+             aria-current={active?"page":undefined}
+             aria-label={short===full?undefined:full}>
+  <span className="dock-icon" aria-hidden="true">{dockIcons[icon]}</span>
+  <span className="dock-label">{short}</span>
+</Link>;
+})}
+<button type="button" className="dock-item dock-cart" onClick={onCart}
+        aria-label={cartCount>0?`Warenkorb, ${cartCount} Artikel`:"Warenkorb, leer"}>
+  <span className="dock-icon" aria-hidden="true">
+    {dockIcons.cart}
+    {cartCount>0&&<span className="dock-badge" aria-hidden="true">{cartCount}</span>}
+  </span>
+  <span className="dock-label">Korb</span>
+</button>
+</div>
+</nav>;
+}
+
 export function Footer(){return <footer><div><Mark/><p>Matcha aus Japan.<br/>Gemacht in Berlin.</p></div><div><p className="eyebrow">KAUFEN</p><Link href="/shop">Matcha</Link><Link href="/our-matcha">Unser Matcha</Link></div><div><p className="eyebrow">GLOA</p><Link href="/about">Über GLOA</Link>{RECIPES_VISIBLE&&<Link href="/rezepte">Rezepte</Link>}<Link href="/contact">Kontakt</Link></div><div><p className="eyebrow">BUSINESS</p><Link href="/for-cafes">B2B</Link><Link href="/for-cafes#lead">B2B-Anfrage</Link><Link href="/for-cafes?intent=sample#lead">Sample anfragen</Link></div><div><p className="eyebrow">LEGAL</p>{[["impressum","Impressum"],["datenschutz","Datenschutz"],["agb","AGB"],["widerruf","Widerruf"],["versand","Versand"]].map(([h,l])=><Link key={h} href={`/${h}`}>{l}</Link>)}</div><div className="social-note"><p className="eyebrow">SOCIAL</p><a href="https://www.tiktok.com/@gloa.matcha" target="_blank" rel="noopener noreferrer">TikTok</a><a href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">Instagram</a></div><p className="image-note">Bildhinweis: Die aktuell auf dieser Website gezeigten Bilder sind KI-generierte Visualisierungen und werden schrittweise durch finale Fotografien ersetzt.</p><div className="legal"><span>© 2026 GLOA</span><span>GLOA · BERLIN</span></div></footer>}
