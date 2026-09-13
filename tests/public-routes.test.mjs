@@ -262,16 +262,23 @@ test("header: Escape closes the mobile menu and gives focus back", () => {
   // The mobile menu locks body scroll and covers the page, so a visitor
   // who cannot dismiss it is left with a frozen page behind it. The cart
   // drawer already answered Escape; the header did not.
-  assert.match(chrome, /document\.body\.style\.overflow=open\?"hidden":""/);
+  assert.match(chrome, /document\.body\.style\.overflow="hidden"/);
+  assert.match(chrome, /document\.body\.style\.overflow=""/);
   assert.match(chrome, /e\.key!=="Escape"/);
-  assert.match(chrome, /if\(open\)\{setOpen\(false\);menuButtonRef\.current\?\.focus\(\)\}/);
+  assert.match(chrome, /if\(menuOpen\)onMenuOpenChange\(false\)/);
   assert.match(chrome, /else setSearch\(false\)/);
   // Registered and torn down, so a closed menu costs no listener.
   assert.match(chrome, /document\.addEventListener\("keydown",onKey\)/);
   assert.match(chrome, /return\(\)=>document\.removeEventListener\("keydown",onKey\)/);
-  // The focus target is the control that opened it.
+  // THE OPENER GETS IT BACK, WHOEVER THAT WAS. Two controls open this
+  // drawer now - the header hamburger between 641 and 800px, the dock's
+  // MENU below 640 - and the header button is display:none at the width
+  // where the dock exists. Hard-coding its ref would have handed focus
+  // to a hidden element; capturing document.activeElement is the same
+  // pattern <CartDrawer/> and the launch popup use.
+  assert.match(chrome, /const prev=document\.activeElement as HTMLElement\|null/);
+  assert.match(chrome, /prev\?\.focus\?\.\(\)/);
   assert.match(chrome, /<button className="menu" ref=\{menuButtonRef\}/);
-  assert.match(chrome, /const menuButtonRef=useRef<HTMLButtonElement>\(null\)/);
 });
 
 /* ══════════════════════════════════════════════════════════════

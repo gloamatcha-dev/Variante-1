@@ -29,11 +29,34 @@ const links:[ string, string ][] = [["/","Startseite"],["/shop","Kaufen"],["/our
 // which is the whole reason `links` is one array.
 const visibleLinks = links.filter(([href]) => RECIPES_VISIBLE || href !== "/rezepte");
 export function Mark(){return <Link className="wordmark" href="/" aria-label="GLOA Startseite"><span className="wordmark-glyph" aria-hidden="true"/></Link>}
-export function Header({onCart,cartCount}:{onCart:()=>void;cartCount:number}){
- const [open,setOpen]=useState(false);const [search,setSearch]=useState(false);const [scrolled,setScrolled]=useState(false);const path=usePathname();
+/**
+ * THE HEADER.
+ *
+ * ── WHY THE MENU STATE IS NOT IN HERE ─────────────────────────
+ * Two controls open the same drawer now: this header's hamburger,
+ * which is the only navigation between 641px and 800px, and the mobile
+ * dock's MENU, which takes over below 640px where the hamburger is
+ * hidden. One drawer with two openers means one piece of state, and it
+ * lives in the shell that renders both. There is still exactly one
+ * <nav id="mobile-menu">, rendered here.
+ */
+export function Header({onCart,cartCount,menuOpen,onMenuOpenChange}:{
+onCart:()=>void;cartCount:number;menuOpen:boolean;onMenuOpenChange:(next:boolean)=>void;
+}){
+ const [search,setSearch]=useState(false);const [scrolled,setScrolled]=useState(false);const path=usePathname();
  const menuButtonRef=useRef<HTMLButtonElement>(null);
  useEffect(()=>{const s=()=>{setScrolled(window.scrollY>10)};window.addEventListener("scroll",s,{passive:true});s();return()=>window.removeEventListener("scroll",s)},[]);
- useEffect(()=>{document.body.style.overflow=open?"hidden":"";return()=>{document.body.style.overflow=""}},[open]);
+ // THE OPENER GETS THE FOCUS BACK, whichever one it was. This used to
+ // hand it to the header button unconditionally, which is a dead target
+ // below 640px where that button is display:none - the dock opened it
+ // there. Capturing document.activeElement is what <CartDrawer/> and
+ // the launch popup already do.
+ useEffect(()=>{
+  if(!menuOpen)return;
+  const prev=document.activeElement as HTMLElement|null;
+  document.body.style.overflow="hidden";
+  return()=>{document.body.style.overflow="";prev?.focus?.()};
+ },[menuOpen]);
  // ESCAPE CLOSES WHAT COVERS THE PAGE, and hands focus back to the
  // control that opened it. The mobile menu locks body scroll and fills
  // the screen, so a keyboard visitor who could not dismiss it was stuck
@@ -42,17 +65,17 @@ export function Header({onCart,cartCount}:{onCart:()=>void;cartCount:number}){
  // focus move - it does not take the screen, so returning focus would
  // yank it from wherever the visitor actually was.
  useEffect(()=>{
-  if(!open&&!search)return;
+  if(!menuOpen&&!search)return;
   const onKey=(e:KeyboardEvent)=>{
    if(e.key!=="Escape")return;
-   if(open){setOpen(false);menuButtonRef.current?.focus()}
+   if(menuOpen)onMenuOpenChange(false);
    else setSearch(false);
   };
   document.addEventListener("keydown",onKey);
   return()=>document.removeEventListener("keydown",onKey);
- },[open,search]);
+ },[menuOpen,search,onMenuOpenChange]);
  const marqueeGroup=<div className="bb-group"><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link></div>;
- return <><div className="brand-bar"><div className="bb-track">{marqueeGroup}<div className="bb-group" aria-hidden="true"><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link></div></div></div><header className={scrolled?"compact":""}><button className="menu" ref={menuButtonRef} onClick={()=>setOpen(!open)} aria-expanded={open} aria-controls="mobile-menu">{open?"Schließen":"Menü"}</button><Mark/><nav aria-label="Hauptnavigation">{visibleLinks.map(([h,l])=><Link key={h} href={h} className={(h==="/"?path===h:path===h||path.startsWith(h+"/"))?"nav-active":""}>{l}</Link>)}</nav><div className="head-actions">{SEARCH_ENABLED&&<button onClick={()=>setSearch(!search)} aria-expanded={search}>Suche</button>}<Link href="/account" className="account-link">Konto</Link><button className="bag-btn" onClick={onCart}>Warenkorb <span className="bag-count">{cartCount}</span></button></div>{SEARCH_ENABLED&&search&&<form className="search-bar" role="search" onSubmit={e=>e.preventDefault()}><label htmlFor="site-search">GLOA durchsuchen</label><input id="site-search" placeholder="Matcha, Rezepte, Cafés…"/><button>Suche</button></form>}</header>{open&&<nav id="mobile-menu" className="mobile-nav" aria-label="Mobile Navigation">{visibleLinks.map(([h,l])=><Link key={h} href={h} onClick={()=>setOpen(false)}>{l}</Link>)}<Link href="/account" onClick={()=>setOpen(false)}>Konto</Link></nav>}</>
+ return <><div className="brand-bar"><div className="bb-track">{marqueeGroup}<div className="bb-group" aria-hidden="true"><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link></div></div></div><header className={scrolled?"compact":""}><button className="menu" ref={menuButtonRef} onClick={()=>onMenuOpenChange(!menuOpen)} aria-expanded={menuOpen} aria-controls="mobile-menu">{menuOpen?"Schließen":"Menü"}</button><Mark/><nav aria-label="Hauptnavigation">{visibleLinks.map(([h,l])=><Link key={h} href={h} className={(h==="/"?path===h:path===h||path.startsWith(h+"/"))?"nav-active":""}>{l}</Link>)}</nav><div className="head-actions">{SEARCH_ENABLED&&<button onClick={()=>setSearch(!search)} aria-expanded={search}>Suche</button>}<Link href="/account" className="account-link">Konto</Link><button className="bag-btn" onClick={onCart}>Warenkorb <span className="bag-count">{cartCount}</span></button></div>{SEARCH_ENABLED&&search&&<form className="search-bar" role="search" onSubmit={e=>e.preventDefault()}><label htmlFor="site-search">GLOA durchsuchen</label><input id="site-search" placeholder="Matcha, Rezepte, Cafés…"/><button>Suche</button></form>}</header>{menuOpen&&<nav id="mobile-menu" className="mobile-nav" aria-label="Mobile Navigation">{visibleLinks.map(([h,l])=><Link key={h} href={h} onClick={()=>onMenuOpenChange(false)}>{l}</Link>)}<Link href="/account" onClick={()=>onMenuOpenChange(false)}>Konto</Link></nav>}</>
 }
 /**
  * THE MOBILE DOCK.
@@ -64,8 +87,9 @@ export function Header({onCart,cartCount}:{onCart:()=>void;cartCount:number}){
  *
  * ── WHY IT IS NOT THE FULL NAV ────────────────────────────────
  * Seven routes at 390px is a row nobody can hit. Five is what fits
- * with a real touch target, so the dock is a shortcut and the menu
- * stays the index.
+ * with a real touch target, so the dock holds three of them plus the
+ * two things that are not routes at all: the drawer and the cart. The
+ * full index is one tap away behind MENU.
  *
  * ── IT SITS UNDER THE MENU, NOT OVER IT ───────────────────────
  * z-index 34, one below the full-screen mobile menu's 35. Open the
@@ -80,7 +104,7 @@ export function Header({onCart,cartCount}:{onCart:()=>void;cartCount:number}){
  * drift apart.
  */
 const dockIcons = {
-  home: <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 10.6 12 4l8 6.6V19a1 1 0 0 1-1 1h-4.3v-5.2H9.3V20H5a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/></svg>,
+  menu: <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4.5 7.4h15M4.5 12h15M4.5 16.6h15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>,
   shop: <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6.2 8h11.6l1 11.2a1 1 0 0 1-1 1.1H6.2a1 1 0 0 1-1-1.1z" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/><path d="M9.2 10.4V7.6a2.8 2.8 0 0 1 5.6 0v2.8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>,
   matcha: <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5.6 9.8h12.8l-.9 8.1a2 2 0 0 1-2 1.8H8.5a2 2 0 0 1-2-1.8z" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/><path d="M18.1 11.6h1.1a2.2 2.2 0 0 1 0 4.4h-1.5" fill="none" stroke="currentColor" strokeWidth="1.5"/><path d="M10 7.2c0-1.2 1.2-1.5 1.2-2.7M13.6 7.2c0-1.2 1.2-1.5 1.2-2.7" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>,
   account: <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="8.8" r="3.6" fill="none" stroke="currentColor" strokeWidth="1.5"/><path d="M5.3 19.6a6.9 6.9 0 0 1 13.4 0" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>,
@@ -98,17 +122,29 @@ const dockIcons = {
  * "Korb" still hits it.
  */
 const dockRoutes:[string,string,string,keyof typeof dockIcons][] = [
-  ["/", "Start", "Startseite", "home"],
   ["/shop", "Kaufen", "Kaufen", "shop"],
   ["/our-matcha", "Matcha", "Unser Matcha", "matcha"],
   ["/account", "Konto", "Konto", "account"],
 ];
 
-export function MobileDock({onCart,cartCount}:{onCart:()=>void;cartCount:number}){
+export function MobileDock({onCart,cartCount,cartOpen,menuOpen,onMenuOpenChange}:{
+onCart:()=>void;cartCount:number;cartOpen:boolean;
+menuOpen:boolean;onMenuOpenChange:(next:boolean)=>void;
+}){
 const path=usePathname();
-const isActive=(href:string)=>href==="/"?path===href:path===href||path.startsWith(href+"/");
+const isActive=(href:string)=>path===href||path.startsWith(href+"/");
 return <nav className="dock" aria-label="Schnellnavigation">
 <div className="dock-inner">
+{/* THE SAME DRAWER THE HEADER OPENS. aria-controls points at the one
+    <nav id="mobile-menu"> the header renders; nothing here duplicates
+    it. The home entry that used to sit in this slot went: the wordmark
+    in the header is already the way back to the start. */}
+<button type="button" className={"dock-item dock-menu"+(menuOpen?" dock-item-active":"")}
+        onClick={()=>onMenuOpenChange(!menuOpen)}
+        aria-expanded={menuOpen} aria-controls="mobile-menu">
+  <span className="dock-icon" aria-hidden="true">{dockIcons.menu}</span>
+  <span className="dock-label">Menü</span>
+</button>
 {dockRoutes.map(([href,short,full,icon])=>{
 const active=isActive(href);
 return <Link key={href} href={href} className={"dock-item"+(active?" dock-item-active":"")}
@@ -118,7 +154,8 @@ return <Link key={href} href={href} className={"dock-item"+(active?" dock-item-a
   <span className="dock-label">{short}</span>
 </Link>;
 })}
-<button type="button" className="dock-item dock-cart" onClick={onCart}
+<button type="button" className={"dock-item dock-cart"+(cartOpen?" dock-item-active":"")} onClick={onCart}
+        aria-expanded={cartOpen}
         aria-label={cartCount>0?`Warenkorb, ${cartCount} Artikel`:"Warenkorb, leer"}>
   <span className="dock-icon" aria-hidden="true">
     {dockIcons.cart}

@@ -25,6 +25,9 @@ const site = read("app/GloaSite.tsx");
 const css = read("app/globals.css");
 
 const dockSource = chrome.slice(chrome.indexOf("const dockIcons"), chrome.indexOf("export function Footer()"));
+// The doc comments quote the markup they describe, so a count of
+// elements has to read the code without them.
+const chromeCode = chrome.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 const rules = css.slice(css.indexOf("THE MOBILE DOCK"));
 const rule = name => {
   const at = rules.indexOf(name);
@@ -107,8 +110,11 @@ test("3: cream, rounded, blurred, and lifted - with a solid fallback", () => {
 
 test("4: five entries, real touch targets, and no truncated label", () => {
   const routes = [...dockSource.matchAll(/\["(\/[a-z-]*)", "([^"]+)", "([^"]+)", "(\w+)"\]/g)];
-  assert.equal(routes.length, 4, "four routes plus the cart button is five entries");
-  assert.deepEqual(routes.map(r => r[1]), ["/", "/shop", "/our-matcha", "/account"]);
+  // THREE routes, plus the two entries that are not routes at all: the
+  // drawer and the cart.
+  assert.equal(routes.length, 3, "three routes plus menu and cart is five entries");
+  assert.deepEqual(routes.map(r => r[1]), ["/shop", "/our-matcha", "/account"]);
+  assert.deepEqual(routes.map(r => r[2]), ["Kaufen", "Matcha", "Konto"]);
   // TWO LABELS. The visible one has to fit a 65px cell at 10px; the
   // accessible one keeps the full route name and CONTAINS the visible
   // one, so voice control still reaches it (WCAG 2.5.3).
@@ -117,35 +123,91 @@ test("4: five entries, real touch targets, and no truncated label", () => {
     assert.ok(short.length <= 7, `"${short}" is too long for the cell`);
   }
   assert.match(dockSource, /aria-label=\{short===full\?undefined:full\}/);
-  // The cart is a drawer, not a route, so it is a button - and its name
-  // says what is in it.
-  assert.match(dockSource, /<button type="button" className="dock-item dock-cart" onClick=\{onCart\}/);
+
+  // START IS GONE. The wordmark in the header is already the way back.
+  assert.ok(!dockSource.includes('"/", "Start"'), "the home entry came back");
+  assert.ok(!dockSource.includes("Startseite"), "the home entry came back");
+  assert.ok(!dockSource.includes("home:"), "the home icon outlived its entry");
+
+  // MENU OPENS THE DRAWER THAT ALREADY EXISTS. One panel, two openers.
+  assert.match(dockSource, /<button type="button" className=\{"dock-item dock-menu"/);
+  assert.match(dockSource, /onClick=\{\(\)=>onMenuOpenChange\(!menuOpen\)\}/);
+  assert.match(dockSource, /aria-expanded=\{menuOpen\} aria-controls="mobile-menu"/);
+  assert.match(dockSource, /<span className="dock-label">Men\u00fc<\/span>/);
+  // It builds no drawer of its own.
+  assert.ok(!dockSource.includes("mobile-nav"), "the dock renders a second menu");
+  assert.equal([...chromeCode.matchAll(/<nav id="mobile-menu"/g)].length, 1, "there is more than one drawer");
+
+  // THE CART IS THE EXISTING ONE, with the existing count.
+  assert.match(dockSource, /<button type="button" className=\{"dock-item dock-cart"/);
+  assert.match(dockSource, /onClick=\{onCart\}/);
   assert.match(dockSource, /aria-label=\{cartCount>0\?`Warenkorb, \$\{cartCount\} Artikel`:"Warenkorb, leer"\}/);
   assert.match(dockSource, /\{cartCount>0&&<span className="dock-badge"/);
+  // ONE count, from the shell's one cart - the dock does not tally.
+  assert.ok(!dockSource.includes("useState"), "the dock keeps state of its own");
+  assert.ok(!dockSource.includes("reduce("), "the dock counts the cart a second time");
+
+  // NO SEARCH, and no sixth cell.
+  for (const gone of ["Suche", "search", "Search"]) {
+    assert.ok(!dockSource.includes(gone), `a search entry appeared: ${gone}`);
+  }
+  assert.match(rule(".dock-inner{"), /grid-template-columns:repeat\(5,minmax\(0,1fr\)\)/);
+
   // 48px is the smallest a finger can be asked to hit.
   assert.match(rule(".dock-item{"), /min-height:48px/);
-  // Five equal columns that can shrink, so a long label cannot widen
-  // the bar past the viewport.
-  assert.match(rule(".dock-inner{"), /grid-template-columns:repeat\(5,minmax\(0,1fr\)\)/);
   assert.match(rule(".dock-label{"), /text-overflow:ellipsis/);
 });
 
-test("5: the active entry is marked for the eye AND for a screen reader", () => {
+test("5: exactly one entry is marked, and only when it should be", () => {
+  // ROUTES match on the path. "/" is no longer among them, so the
+  // special case it needed is gone with it.
+  assert.match(dockSource, /const isActive=\(href:string\)=>path===href\|\|path\.startsWith\(href\+"\/"\)/);
   assert.match(dockSource, /aria-current=\{active\?"page":undefined\}/);
-  assert.match(dockSource, /const isActive=\(href:string\)=>href==="\/"\?path===href:path===href\|\|path\.startsWith\(href\+"\/"\)/);
+  // THE TWO NON-ROUTES mark themselves from the state they control, so
+  // a route entry and a drawer entry cannot both claim to be current.
+  assert.match(dockSource, /"dock-item dock-menu"\+\(menuOpen\?" dock-item-active":""\)/);
+  assert.match(dockSource, /"dock-item dock-cart"\+\(cartOpen\?" dock-item-active":""\)/);
+  assert.ok(!/dock-menu[^\n]*aria-current/.test(dockSource), "the drawer claims to be a page");
+  assert.ok(!/dock-cart[^\n]*aria-current/.test(dockSource), "the cart claims to be a page");
   // Raspberry type on a raspberry tint: colour alone would be a change
   // only a sighted user who knows the palette would catch.
   assert.match(rule(".dock-item-active{"), /background:rgba\(166,30,89,\.1\)/);
   assert.match(rule(".dock-item-active{"), /color:var\(--berry\)/);
   assert.match(rules, /\.dock-item-active \.dock-label\{color:var\(--berry\)\}/);
+  // The active state is a colour and a background, not a size - so
+  // marking one cannot move the row.
+  const active = rule(".dock-item-active{");
+  for (const shifts of ["font-size", "padding", "margin", "border", "transform", "min-height"]) {
+    assert.ok(!active.includes(shifts), `the active state moves the layout: ${shifts}`);
+  }
   // Focus stays visible: the global ring is blue and legible on cream.
   assert.match(rules, /\.dock-item:focus-visible\{/);
   assert.ok(!rules.includes("outline:none"), "the focus ring was removed");
 });
 
 /* ══════════════════════════════════════════════════════════════
-   6. IT COVERS NOTHING, AND EVERYTHING COVERS IT
+   5b. THE MOBILE HEADER IS THE WORDMARK
    ══════════════════════════════════════════════════════════════ */
+
+test("5b: below 640px the top bar carries the logo and nothing else", () => {
+  const phone = rules.slice(rules.indexOf("@media (max-width:640px){"));
+  // The hamburger and the cart moved into the dock, so they leave the
+  // top bar - but only BELOW 640. Between 641 and 800 the hamburger is
+  // still the entire navigation, because the dock does not exist there.
+  assert.match(phone, /\.menu\{display:none\}/);
+  assert.match(phone, /\.head-actions\{display:none\}/);
+  assert.match(css, /@media\(max-width:800px\)\{[\s\S]*?\.menu\{display:block;justify-self:start\}/);
+  // One centred track, so the wordmark is centred rather than left in
+  // the first of three columns once its neighbours stop being items.
+  assert.match(phone, /header\{grid-template-columns:1fr;justify-items:center\}/);
+  // The height is not touched by any of it.
+  assert.ok(!/@media \(max-width:640px\)\{[\s\S]*?header\{[^}]*height:/.test(rules),
+    "the mobile header changed height");
+  // The wordmark is still a link to the start, and still the only one
+  // in the header.
+  assert.match(chrome, /<Link className="wordmark" href="\/" aria-label="GLOA Startseite">/);
+});
+
 
 test("6: the page reserves exactly the space the bar occupies", () => {
   // ONE declaration for both. If the bar grows, the reservation grows
@@ -190,7 +252,11 @@ test("8: the header, the menu and the desktop nav are untouched", () => {
   // not claim to be the index.
   assert.ok([...chrome.matchAll(/\["\/[a-z-]*","[^"]+"\]/g)].length >= 6);
   // It is mounted by the shell, once, next to the drawer it opens.
-  assert.match(site, /<Footer\/><MobileDock onCart=\{openCart\} cartCount=\{cart\.totalCount\}\/><CartDrawer/);
+  assert.match(site, /<Footer\/><MobileDock onCart=\{openCart\} cartCount=\{cart\.totalCount\} cartOpen=\{cartOpen\} menuOpen=\{menuOpen\} onMenuOpenChange=\{setMenuOpen\}\/><CartDrawer/);
+  // ONE piece of menu state, in the shell that renders both openers.
+  assert.match(site, /const \[menuOpen,setMenuOpen\]=useState\(false\)/);
+  assert.equal([...site.matchAll(/setMenuOpen/g)].length, 3, "the menu state is set from more than the two controls");
+  assert.match(site, /<Header onCart=\{openCart\} cartCount=\{cart\.totalCount\} menuOpen=\{menuOpen\} onMenuOpenChange=\{setMenuOpen\}\/>/);
   assert.equal([...site.matchAll(/<MobileDock/g)].length, 1);
 });
 
@@ -205,9 +271,15 @@ test("9: every public route ships the dock, once, with its five entries", async 
     assert.equal(html.split('<nav class="dock"').length - 1, 1, `${route} renders the dock ${html.split('<nav class="dock"').length - 1} times`);
     const dock = html.slice(html.indexOf('<nav class="dock"'), html.indexOf("</nav>", html.indexOf('<nav class="dock"')));
     assert.equal(dock.split('class="dock-item').length - 1, 5, `${route} does not have five entries`);
-    for (const label of ["Start", "Kaufen", "Matcha", "Konto", "Korb"]) {
+    for (const label of ["Menü", "Kaufen", "Matcha", "Konto", "Korb"]) {
       assert.ok(dock.includes(`>${label}<`), `${route} lost the ${label} entry`);
     }
+    assert.ok(!dock.includes(">Start<"), `${route} still ships the home entry`);
+    assert.ok(!/Suche|>Search</.test(dock), `${route} ships a search entry`);
+    // The top bar ships the wordmark and, on this width, nothing a
+    // phone visitor can see beside it.
+    const head = html.slice(html.indexOf("<header"), html.indexOf("</header>"));
+    assert.match(head, /<a href="\/" class="wordmark" aria-label="GLOA Startseite">/);
     assert.match(dock, /aria-label="Schnellnavigation"/);
     // An empty cart shows no badge.
     assert.ok(!dock.includes("dock-badge"), `${route} renders a count for an empty cart`);
@@ -215,7 +287,7 @@ test("9: every public route ships the dock, once, with its five entries", async 
 });
 
 test("10: the dock marks the route it is on, and only that one", async () => {
-  for (const [route, label] of [["/", "Start"], ["/shop", "Kaufen"], ["/our-matcha", "Matcha"]]) {
+  for (const [route, label] of [["/shop", "Kaufen"], ["/our-matcha", "Matcha"], ["/account", "Konto"]]) {
     const { html } = await server.getHtml(route);
     const dock = html.slice(html.indexOf('<nav class="dock"'), html.indexOf("</nav>", html.indexOf('<nav class="dock"')));
     assert.equal(dock.split('aria-current="page"').length - 1, 1, `${route} marks more than one entry`);
@@ -225,8 +297,94 @@ test("10: the dock marks the route it is on, and only that one", async () => {
     assert.ok(active.slice(0, active.indexOf("</a>")).includes(`>${label}<`),
       `${route} marks the wrong entry`);
   }
-  // A route the dock does not list marks nothing at all.
+  // A route the dock does not list marks nothing at all - including the
+  // homepage, which no longer has an entry.
+  for (const route of ["/", "/about"]) {
+    const { html: h } = await server.getHtml(route);
+    const dk = h.slice(h.indexOf('<nav class="dock"'), h.indexOf("</nav>", h.indexOf('<nav class="dock"')));
+    assert.ok(!dk.includes("dock-item-active"), `${route} marked an entry it is not`);
+  }
   const { html } = await server.getHtml("/about");
   const dock = html.slice(html.indexOf('<nav class="dock"'), html.indexOf("</nav>", html.indexOf('<nav class="dock"')));
   assert.ok(!dock.includes('aria-current="page"'), "/about marked an entry it is not");
+});
+
+/* ══════════════════════════════════════════════════════════════
+   11. THE PAGE END
+
+   The cream band a visitor saw past the black footer was NOT extra
+   layout: measured on /, /shop, /our-matcha, /about, /for-cafes,
+   /partnerships and /account at 390px and 430px, the footer ends at
+   document bottom every time. It was the native rubber-band revealing
+   the canvas, which the body's cream was painting.
+
+   So the fix is two rules, because different browsers honour different
+   halves of it, and NEITHER of them stops the page scrolling.
+   ══════════════════════════════════════════════════════════════ */
+
+test("11: the root limits overscroll and the canvas matches the footer", () => {
+  const root = css.slice(css.indexOf("html{scroll-behavior"), css.indexOf("}", css.indexOf("html{scroll-behavior")));
+  // Where it is supported, the root scroller cannot be dragged past its
+  // own content at all.
+  assert.match(root, /overscroll-behavior-y:none/);
+  // Where it is not, the bounce shows the canvas - so the canvas is the
+  // footer's ink rather than the page's cream.
+  assert.match(root, /background:var\(--ink\)/);
+  const body = css.slice(css.indexOf("body{margin:0"), css.indexOf("}", css.indexOf("body{margin:0")));
+  assert.match(body, /background:var\(--cream\)/);
+  // min-height keeps the body covering the viewport, so the ink can only
+  // ever appear OUTSIDE the page and never under a short one.
+  assert.match(body, /min-height:100vh/);
+
+  // SCROLLING STILL WORKS. No document-level lock, no fixed height.
+  assert.ok(!/(^|[;{\s])html\{[^}]*overflow:hidden/.test(css), "the document was locked");
+  assert.ok(!/(^|[;{\s])body\{[^}]*overflow:hidden/.test(css), "the body was locked");
+  assert.ok(!/(^|[;{\s])html\{[^}]*height:100/.test(css), "the document was given a fixed height");
+  // The only body overflow lock in the repo is the JS one the drawers
+  // set while they are open, and it is always paired with a release.
+  const chromeJs = readFileSync(new URL("../app/Chrome.tsx", import.meta.url), "utf-8");
+  assert.match(chromeJs, /document\.body\.style\.overflow="hidden"/);
+  assert.match(chromeJs, /document\.body\.style\.overflow=""/);
+
+  // Drawers keep their own scroll rather than chaining it to the page
+  // behind them.
+  assert.match(css, /\.mobile-nav\{[^}]*overscroll-behavior:contain/);
+  assert.match(css, /\.cart\{overscroll-behavior:contain\}/);
+});
+
+test("12: no spacer reserves the dock's height outside the footer", () => {
+  // The reserve is INSIDE the footer, which is why the black runs to the
+  // true end of the document. A padding on the body, the root or a
+  // wrapper would have put that reserve after the footer, as a band of
+  // page background - which is exactly the thing being fixed.
+  const phone = rules.slice(rules.indexOf("@media (max-width:640px){"));
+  assert.match(phone, /footer\{padding-bottom:calc\(25px \+ var\(--dock-space\)\)\}/);
+  for (const wrong of ["body{padding-bottom", "html{padding-bottom", "main{padding-bottom",
+                       "footer{margin-bottom", "dock-spacer", "mobile-nav-spacer"]) {
+    assert.ok(!css.includes(wrong), `the dock reserve leaked outside the footer: ${wrong}`);
+  }
+  // And nothing is rendered after the footer that could occupy space:
+  // the dock, the cart and the popup are all fixed-position layers.
+  assert.match(site, /<Footer\/><MobileDock/);
+  assert.match(rules, /\.dock\{\s*display:block;\s*position:fixed/);
+});
+
+test("13: as rendered, the footer is the last thing in the document", async () => {
+  // A structural stand-in for the visual check: nothing may follow the
+  // closing </footer> except the fixed layers, which take no space.
+  for (const route of ["/", "/our-matcha", "/about"]) {
+    const { html } = await server.getHtml(route);
+    const after = html.slice(html.lastIndexOf("</footer>") + "</footer>".length);
+    const tags = [...after.matchAll(/<(\w+)[^>]*>/g)].map(m => m[1]);
+    for (const tag of tags) {
+      assert.ok(["nav", "span", "svg", "path", "circle", "script", "a", "button", "div", "template",
+                 "title", "meta", "link", "style", "noscript"].includes(tag),
+        `${route} renders <${tag}> after the footer`);
+    }
+    // Whatever is there is the dock, and the dock is fixed.
+    const nonDock = after.replace(/<nav class="dock"[\s\S]*?<\/nav>/, "");
+    for (const [, attrs] of nonDock.matchAll(/<div([^>]*)>/g)) {
+      assert.ok(attrs.includes("hidden"), `${route} has a visible div after the footer: <div${attrs}>`);
+    }
+  }
 });
