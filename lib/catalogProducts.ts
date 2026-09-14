@@ -213,3 +213,150 @@ export const lookupProductBySlug = cache(async function lookupProductBySlug(
     },
   };
 });
+
+/* ══════════════════════════════════════════════════════════════
+   THE SERVER-RENDERED HALF OF THE SHOP
+   ══════════════════════════════════════════════════════════════
+
+   /shop and /shop/matcha read the catalog in the BROWSER, so the HTML a
+   crawler receives was the loading state and nothing else:
+
+     <h1>Produkt</h1><p>Laden…</p>
+
+   No product name, no description, no sizes, and on /shop no link to
+   the product page at all. Google executes JavaScript and eventually
+   sees the real page; Bing is slower at it and an answer engine reading
+   a raw fetch never sees it. For the one product GLOA is launching,
+   that is the whole entity description missing from the source.
+
+   The server already reads this product - lookupProductBySlug above
+   does it for the 404 check. This section hands the SAME read to the
+   page so the first HTML carries real content.
+
+   ── THE SEED CARRIES NO PRICE. IN ANY MODE. ───────────────────
+
+   Everything passed to a client component is serialised into the HTML,
+   so a seed carrying prices would publish them in the source of a page
+   that refuses to display them - exactly the leak PRICES_VISIBLE
+   exists to prevent - and it would do so on the one route a crawler
+   reads most carefully.
+
+   It is stripped in LIVE mode too, and that is the more important half:
+   the browser keeps fetching prices from Supabase on every page view,
+   so there is no second price source, nothing to invalidate, and no way
+   for an HTML response to hand anyone a stale amount. app/useCatalog.ts
+   remains the only thing that ever learns what a variant costs, and
+   lib/checkoutQuote.ts remains the only thing that decides what it
+   costs at checkout. Names and sizes are safe to publish; money is not.
+*/
+
+/** One variant, as it may appear in HTML. Note what is absent. */
+export type SeedCatalogVariant = {
+  id: string;
+  sku: string;
+  label: string;
+  size_grams: number | null;
+  sort_order: number;
+};
+
+/** One product, as it may appear in HTML. No price, no currency. */
+export type SeedCatalogProduct = {
+  id: string;
+  slug: string;
+  name: string;
+  short_description: string | null;
+  description: string | null;
+  primary_image_path: string | null;
+  variants: SeedCatalogVariant[];
+};
+
+/**
+ * Drops every money field from a product the server read.
+ *
+ * Written as an explicit field list rather than a spread-and-delete so
+ * that a column added to ServerCatalogVariant cannot travel into the
+ * HTML by being forgotten here. tests/ssr-product-content.test.mjs
+ * asserts the result contains no price for the real catalog shape.
+ */
+export function toSeedProduct(product: ServerCatalogProduct): SeedCatalogProduct {
+  return {
+    id: product.id,
+    slug: product.slug,
+    name: product.name,
+    short_description: product.short_description,
+    description: product.description,
+    primary_image_path: product.primary_image_path,
+    variants: product.variants.map(v => ({
+      id: v.id,
+      sku: v.sku,
+      label: v.label,
+      size_grams: v.size_grams,
+      sort_order: v.sort_order,
+    })),
+  };
+}
+
+/**
+ * Every product the public catalog lists, for /shop's first render.
+ *
+ * A SECOND CALLER of the catalog, never a second catalog - the same
+ * project, the same publishable key, the same RLS as app/useCatalog.ts,
+ * and the same two rules about what counts: a variant needs a real
+ * price to be purchasable (so an unpriced row is not advertised), and a
+ * product with no purchasable variant is not listed at all. The prices
+ * that decide both are read and then dropped; none of them leaves this
+ * function.
+ *
+ * Returns null - not an empty list - when the catalog could not be
+ * asked, so the caller can tell "nothing to show" from "could not
+ * look", and a blip keeps the existing client-side loading behaviour
+ * instead of rendering an empty shop into the HTML.
+ *
+ * cache()d for the same reason lookupProductBySlug is: one read per
+ * request, shared with anything else on the page that wants it.
+ */
+export const lookupCatalogSeed = cache(async function lookupCatalogSeed(): Promise<SeedCatalogProduct[] | null> {
+  if (!supabase) return null;
+
+  const { data, error } = await supabase
+    .from("products")
+    .select(
+      "id, slug, name, short_description, description, primary_image_path, sort_order, " +
+        "product_variants(id, sku, label, size_grams, price_gross_cents, sort_order)",
+    )
+    .order("sort_order", { ascending: true });
+
+  if (error) {
+    console.error("Catalog seed error:", error.message);
+    return null;
+  }
+
+  type SeedRow = DbProductRow & { sort_order: number };
+  const rows = (data ?? []) as unknown as SeedRow[];
+  return rows
+    .map(row => ({
+      id: row.id,
+      slug: row.slug,
+      name: row.name,
+      short_description: row.short_description ?? null,
+      description: row.description ?? null,
+      primary_image_path: row.primary_image_path ?? null,
+      variants: (row.product_variants ?? [])
+        .filter(isPurchasable)
+        .map(v => ({
+          id: v.id,
+          sku: v.sku,
+          label: v.label,
+          size_grams: v.size_grams,
+          sort_order: v.sort_order,
+        }))
+        .sort((a, b) => a.sort_order - b.sort_order),
+    }))
+    // The same two filters /shop applies in the browser, applied here
+    // so a withheld product cannot reach the HTML either: unpriced
+    // variants are dropped above, and a product this launch refuses to
+    // sell is dropped now. app/GloaSite.tsx's visibleShopProducts()
+    // still runs on the client list - two independent refusals, the
+    // number lib/catalogAvailability.ts asks for.
+    .filter(p => p.variants.length > 0 && !isProductWithheld(p.slug));
+});

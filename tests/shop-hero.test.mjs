@@ -18,9 +18,9 @@ const read = rel => readFileSync(path.join(ROOT, rel), "utf8");
 const site = read("app/GloaSite.tsx");
 const css = read("app/globals.css");
 
-const hero = site.slice(site.indexOf("function ShopHero("), site.indexOf("function Shop({onAdd}"));
+const hero = site.slice(site.indexOf("function ShopHero("), site.indexOf("function Shop({"));
 const strip = site.slice(site.indexOf("function ShopLaunchStrip()"), site.indexOf("const SHOP_HERO_LEAD"));
-const shop = site.slice(site.indexOf("function Shop({onAdd}"), site.indexOf("// -- Product detail ---"));
+const shop = site.slice(site.indexOf("function Shop({"), site.indexOf("// -- Product detail ---"));
 const block = css.slice(css.indexOf("SHOP LAUNCH HERO"), css.indexOf("SHOP MATCHA PRODUCT SECTION"));
 const rules = block.slice(block.indexOf("*/") + 2);
 const rule = name => {
@@ -129,7 +129,10 @@ test("4: the launch band reuses the existing countdown and sits under the hero",
   // ── EXACTLY ONE BAND, AND IT IS BELOW THE HERO ───────────────
   // Twice: once in the shell the loading/error/empty states share, once
   // in the full page. Every state gets a band, and no state gets two.
-  assert.equal([...shop.matchAll(/<ShopLaunchStrip\/>/g)].length, 2, "the band count changed");
+  // Three now, not two: the loading/error/empty shell, the server-seeded
+  // first render, and the full page. Still one band per state and still
+  // never two in one - which is what the next assertion proves.
+  assert.equal([...shop.matchAll(/<ShopLaunchStrip\/>/g)].length, 3, "the band count changed");
   // Every band is immediately preceded by a hero, with nothing
   // between them.
   for (const m of shop.matchAll(/<ShopLaunchStrip\/>/g)) {

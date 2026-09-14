@@ -339,7 +339,7 @@ test("5b: every selector is scoped, and nothing else on the page moved", () => {
   const site = read("app/GloaSite.tsx");
   assert.match(site, /Dein Matcha\./);
   assert.match(site, /Dein Signature-Drink\./);
-  assert.match(site, /src="\/img\/B2B Packung\.png"/);
+  assert.match(site, /src="\/img\/B2B Packung\.webp"/);
   assert.match(site, /const b2bFacts=\["SHIZUOKA, JAPAN"/);
   assert.match(site, /FÜR DEINE KARTE GEMACHT\./);
   assert.match(site, /Einfach zubereitet\./);

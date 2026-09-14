@@ -32,7 +32,12 @@ const rule = name => {
    ══════════════════════════════════════════════════════════════ */
 
 test("1: the hero renders the map, and the packaging photo only left THIS hero", () => {
-  assert.match(hero, /<img src="\/img\/Japan_Karte\.png" alt="Karte von Japan mit Shizuoka markiert"/);
+  // .webp, not .png: same artwork, same 1448x1086 frame, 401 KiB -> 123 KiB.
+  // The PNG is the source and stays on disk (asserted below); it is simply
+  // no longer the file a visitor downloads. This hero is the LCP element of
+  // /our-matcha, which is why it was converted.
+  assert.match(hero, /<img src="\/img\/Japan_Karte\.webp" alt="Karte von Japan mit Shizuoka markiert"/);
+  assert.ok(existsSync(path.join(ROOT, "public/img/Japan_Karte.webp")), "the optimised map is missing");
   assert.ok(existsSync(path.join(ROOT, "public/img/Japan_Karte.png")), "the map asset is missing");
   assert.ok(statSync(path.join(ROOT, "public/img/Japan_Karte.png")).size > 0);
   // The retired map is not rendered here - and not deleted either.

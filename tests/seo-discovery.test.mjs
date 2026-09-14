@@ -146,7 +146,7 @@ test("2c: every real route still answers 200", async () => {
 test("2d: the guard runs before the page renders", () => {
   assert.match(slugPage, /if\(!isKnownRoute\(path\)\)notFound\(\);/);
   const guardAt = slugPage.indexOf("if(!isKnownRoute(path))notFound()");
-  assert.ok(guardAt > 0 && slugPage.indexOf("<GloaSite route={path}/>") > guardAt,
+  assert.ok(guardAt > 0 && slugPage.indexOf("<GloaSite route={path}") > guardAt,
     "the site renders before the 404 guard");
 });
 

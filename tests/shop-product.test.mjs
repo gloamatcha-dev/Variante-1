@@ -21,7 +21,7 @@ const css = read("app/globals.css");
 
 const block = site.slice(site.indexOf("function ShopProductBlock("), site.indexOf("function MatchaShopDetails("));
 const details = site.slice(site.indexOf("function MatchaShopDetails("), site.indexOf("/** Replaces the newsletter signup"));
-const shop = site.slice(site.indexOf("function Shop({onAdd}"), site.indexOf("// -- Product detail ---"));
+const shop = site.slice(site.indexOf("function Shop({"), site.indexOf("// -- Product detail ---"));
 const rules = css.slice(css.indexOf("SHOP MATCHA PRODUCT SECTION"), css.indexOf("/our-matcha PAGE HERO"));
 const rule = name => {
   const at = rules.indexOf(name);
@@ -64,7 +64,12 @@ test("1: only the matcha is listed, and the case is hidden rather than removed",
    ══════════════════════════════════════════════════════════════ */
 
 test("2: the matcha shows exactly the approved file, unmodified", () => {
-  assert.match(site, /\[MATCHA_SLUG\]:\{src:"\/img\/Produkt Bild \(2\)\.png",alt:"Grünes Matcha-Pulver"\}/);
+  // .webp, not .png: 906,588 bytes of a flat powder render became 70,702,
+  // same pixels at q90 (mean per-channel difference 1.18 of 255) and the
+  // source PNG's alpha was fully opaque, so nothing was lost by dropping
+  // it. The PNG stays on disk, asserted below.
+  assert.match(site, /\[MATCHA_SLUG\]:\{src:"\/img\/Produkt Bild \(2\)\.webp",alt:"Grünes Matcha-Pulver",width:964,height:908\}/);
+  assert.ok(existsSync(path.join(ROOT, "public/img/Produkt Bild (2).webp")), "the optimised image is missing");
   assert.ok(existsSync(path.join(ROOT, "public/img/Produkt Bild (2).png")), "the approved image is missing");
   assert.ok(statSync(path.join(ROOT, "public/img/Produkt Bild (2).png")).size > 0);
   // NOT the pouch, NOT the header, NOT an automatically chosen asset.

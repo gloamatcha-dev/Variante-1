@@ -1051,6 +1051,17 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // alone, and tests/seo-discovery.test.mjs measures the behaviour
     // itself rather than trusting the prose.
     "lib/publicRoutes.ts",
+    // SERVER-RENDERED SHOP CONTENT: additive only. The existing
+    // lookupProductBySlug is untouched; the file gains a price-free view
+    // of a product (toSeedProduct) and a second read of the same public
+    // catalog (lookupCatalogSeed) so /shop and /shop/<slug> can put real
+    // product content in their first HTML instead of the word "Laden…".
+    // Both are reads, both go through the publishable client under the
+    // same RLS, and neither can carry money into markup - the seed type
+    // has no price field at all, in prelaunch and live alike. No pricing,
+    // checkout, fulfillment or annual path reads any of it.
+    // Reviewed in tests/ssr-product-content.test.mjs.
+    "lib/catalogProducts.ts",
   ];
 
   // Phase 4B4 edits ONE application module: the single canonical Stripe

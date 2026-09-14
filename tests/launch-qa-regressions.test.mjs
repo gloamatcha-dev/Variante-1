@@ -283,12 +283,18 @@ test("5: /shop/metal-case names itself", async () => {
    ══════════════════════════════════════════════════════════════ */
 
 test("6: both loading shells reserve the space they are about to fill", () => {
-  assert.match(site, /if\(loading\)return shell\(SHOP_HERO_LEAD,<p className="shop-hero-price">Laden…<\/p>,true\);/);
-  assert.match(site, /if\(loading\)return shell\("Laden…",true\);/);
-  assert.equal([...site.matchAll(/className="shop-products-reserve" aria-hidden="true"/g)].length, 2,
-    "a loading shell lost its reserve");
+  // THE RESERVE IS NOW THE FALLBACK, NOT THE FIRST ANSWER. Both routes
+  // render the server's own catalog read when it is there
+  // (tests/ssr-product-content.test.mjs), and fall back to the reserved
+  // shell only when the server could not reach the catalog - which is
+  // exactly the case that still needs the space held.
+  assert.ok(site.includes("if(loading)return seed?.length"), "/shop lost its seeded first render");
+  assert.match(site, /<ShopSeedProducts seed=\{seed\}\/>/);
+  assert.match(site, /:shell\(SHOP_HERO_LEAD,<p className="shop-hero-price">Laden…<\/p>,true\);/);
+  assert.match(site, /if\(loading\)return seed\?<ProductSeedPage seed=\{seed\}\/>:shell\("Laden…",true\);/);
+  assert.equal([...site.matchAll(/className="shop-products-reserve" aria-hidden="true"/g)].length, 3,
+    "a loading path lost its reserve");
   assert.match(css, /\.shop-products-reserve\{min-height:100vh\}/);
-  // It is empty and announced to nobody: it must never carry content.
   assert.ok(!/shop-products-reserve"[^/]*>[^<]/.test(site), "the reserve gained content");
   // The error and empty states are unchanged - they reserve nothing.
   assert.match(site, /if\(error\)return shell\("Shop vorübergehend nicht verfügbar\.",null\);/);
@@ -365,21 +371,32 @@ test("8b: no corrected rule slipped back to a failing alpha", () => {
 });
 
 /* ══════════════════════════════════════════════════════════════
-   9. WHAT THE QA PASS MEASURED AND DID NOT CHANGE
+   9. THE THREE DECISIONS, AFTER THEY WERE TAKEN
    ══════════════════════════════════════════════════════════════
-   Three findings were left alone on purpose, because each one is a
-   decision this repository already took deliberately and records in a
-   test of its own. They are pinned here too, so that "we chose this"
-   stays distinguishable from "nobody noticed".
+   This block used to pin three findings the audit reported and left
+   alone, because each collided with a decision the repository had
+   already taken deliberately. All three were then decided the other
+   way, in writing, and fixed. It now pins the OUTCOME, so the old
+   behaviour cannot creep back as "the design".
    ══════════════════════════════════════════════════════════════ */
 
-test("9: the deliberate decisions the audit did not overrule", () => {
-  // The /our-matcha usage band is raspberry on plum - 1.41:1 for its
-  // eyebrow, numbers and icons - and tests/matcha-usage-section.test.mjs
-  // pins that composition to exactly three colours. Reported, not edited.
-  assert.match(css, /\.matcha-use-icon\{display:block;flex:0 0 auto;color:var\(--berry\)\}/);
-  // The audited artwork is untouched, byte for byte, including the
-  // 1.2 MB hero PNG the report names as the LCP bottleneck.
-  assert.ok(existsSync(path.join(ROOT, "public/img/Startseite.png")));
-  assert.match(site, /<img src="\/img\/Startseite\.png"/);
+test("9: the three reported findings are fixed, not re-decided", () => {
+  // 1. The hero is the optimised artwork, and the source is still there.
+  assert.match(site, /<img src="\/img\/Startseite\.webp"/);
+  assert.ok(!site.includes("/img/Startseite.png"), "the 1.2 MB PNG is being served again");
+  assert.ok(existsSync(path.join(ROOT, "public/img/Startseite.png")), "the source artwork was deleted");
+  assert.ok(existsSync(path.join(ROOT, "public/img/Startseite.webp")));
+  // No double transfer: one <img>, one file, no <picture> fallback that
+  // would make a browser fetch both.
+  assert.ok(!/<picture/.test(site), "a <picture> element would ship both encodings");
+
+  // 2. The /our-matcha usage band is legible. Raspberry stays the
+  //    section's accent on the decorative seam and nowhere else.
+  assert.match(css, /\.matcha-use-icon\{display:block;flex:0 0 auto;color:rgba\(245,235,226,\.72\)\}/);
+  assert.ok(!/\.matcha-use-eyebrow\{[^}]*color:var\(--berry\)/.test(css), "the eyebrow is unreadable again");
+  assert.ok(!/\.matcha-use-number\{[^}]*color:var\(--berry\)/.test(css), "the numbers are unreadable again");
+
+  // 3. The product page carries real content in its first HTML.
+  assert.match(site, /function ProductSeedPage\(\{seed\}/);
+  assert.match(slugPage, /const productSeed=lookup\?\.state==="found"\?toSeedProduct\(lookup\.product\):null;/);
 });

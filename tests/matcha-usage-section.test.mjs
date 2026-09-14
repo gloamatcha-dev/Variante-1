@@ -114,14 +114,17 @@ test("3: three small raspberry line icons, decorative", () => {
   // Outlines only, and no colour is written into the markup.
   assert.deepEqual([...new Set([...data.matchAll(/fill="([^"]+)"/g)].map(m => m[1]))], ["none"]);
   assert.ok(!/fill="#|stroke="#/.test(data), "an icon hard-codes a colour");
-  assert.match(rule(".matcha-use-icon{"), /color:var\(--berry\)/);
+  // NOT raspberry any more, and deliberately. Raspberry on this section's
+  // plum ground measured 1.41:1 - the icons were invisible, not subtle.
+  // The cream tint is the one every other mark on plum already uses.
+  assert.match(rule(".matcha-use-icon{"), /color:rgba\(245,235,226,\.72\)/);
   // No badge: the icon is a bare mark, not a circle with a background.
   assert.ok(!/\.matcha-use-icon\{[^}]*(background|border-radius|width:[4-9]\dpx)/.test(rules),
     "the icon was put in a badge");
   // The number sits opposite it, small.
   assert.match(rule(".matcha-use-meta{"), /justify-content:space-between/);
   assert.match(rule(".matcha-use-number{"), /font-size:var\(--type-meta\)/);
-  assert.match(rule(".matcha-use-number{"), /color:var\(--berry\)/);
+  assert.match(rule(".matcha-use-number{"), /color:rgba\(245,235,226,\.72\)/);
   const pkg = JSON.parse(read("package.json"));
   for (const dep of Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })) {
     assert.ok(!/icon|lucide|feather|heroicon/i.test(dep), `an icon package was added: ${dep}`);
@@ -140,8 +143,22 @@ test("4: three colours, open columns, hairlines instead of boxes", () => {
   for (const name of [".matcha-use-line{", ".matcha-use-line-accent{", ".matcha-use-label{", ".matcha-use-body{"]) {
     assert.match(rule(name), /color:var\(--cream\)/, `${name} is not cream`);
   }
-  for (const name of [".matcha-use-eyebrow{", ".matcha-use-number{", ".matcha-use-icon{", ".matcha-use-rule{"]) {
-    assert.match(rule(name), /(color|background):var\(--berry\)/, `${name} is not raspberry`);
+  // ── RASPBERRY IS STILL HERE, AND NOW ONLY WHERE IT IS LEGIBLE ──
+  //
+  // This block used to require raspberry on all four. Three of them
+  // carry TEXT or a meaningful mark, and raspberry #A61E59 on plum
+  // #4F3A5B is 1.41:1 - below every legibility floor there is, so the
+  // eyebrow, the step numbers and the step icons were not a quiet
+  // accent, they were unreadable. They now carry the cream tint the
+  // rest of the stylesheet uses on a plum ground (5.3:1, past AA).
+  //
+  // .matcha-use-rule is the one that stays: a 46x1px decorative seam,
+  // no text, no meaning - so the section keeps its third colour and
+  // this file still proves it.
+  assert.match(rule(".matcha-use-rule{"), /background:var\(--berry\)/, "the section lost its raspberry");
+  for (const name of [".matcha-use-eyebrow{", ".matcha-use-number{", ".matcha-use-icon{"]) {
+    assert.match(rule(name), /color:rgba\(245,235,226,\.72\)/, `${name} is not the accessible cream tint`);
+    assert.ok(!/color:var\(--berry\)/.test(rule(name)), `${name} went back to unreadable raspberry`);
   }
   for (const banned of ["var(--blue)", "var(--ink)", "var(--matcha)", "gradient", "backdrop-filter",
                         "border-radius", "box-shadow"]) {

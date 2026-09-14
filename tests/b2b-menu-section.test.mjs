@@ -324,7 +324,7 @@ test("5b: every selector is scoped, and nothing else on the page moved", () => {
   const hero = site.slice(site.indexOf('<section className="b2b-hero"'), site.indexOf('<section className="b2b-facts">'));
   assert.match(hero, /Dein Matcha\./);
   assert.match(hero, /Dein Signature-Drink\./);
-  assert.match(hero, /src="\/img\/B2B Packung\.png"/);
+  assert.match(hero, /src="\/img\/B2B Packung\.webp"/);
   assert.match(hero, /href="\?intent=sample#lead"/);
   assert.match(css, /\.b2b-hero\{[\s\S]{0,200}background:var\(--plum\)/);
 

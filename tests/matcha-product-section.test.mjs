@@ -88,7 +88,7 @@ test("1: explanation, process, photo and facts share one section", () => {
   // The only image left on the page is the hero's map, which this pass
   // was told not to touch.
   assert.equal([...page.matchAll(/<img /g)].length, 1);
-  assert.match(page, /<img src="\/img\/Japan_Karte\.png"/);
+  assert.match(page, /<img src="\/img\/Japan_Karte\.webp"/);
 
   // THE RETIRED BLOCKS. Not renamed, not orphaned: gone from markup and
   // from the stylesheet, so nothing styles an element that cannot exist.

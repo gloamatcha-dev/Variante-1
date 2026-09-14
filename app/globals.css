@@ -3177,7 +3177,17 @@ header nav{gap:18px;font-size:12px}
   line-height:1.2;
   letter-spacing:.2em;
   text-transform:uppercase;
-  color:var(--berry);
+  /* WAS var(--berry) ON PLUM: 1.41:1 - text nobody could read. The
+     eyebrow, the step numbers and the step icons all disappeared into
+     the section's own ground; the QA screenshot shows "VERWENDUNG" as a
+     smudge. This is the SAME cream tint every other label on a plum
+     ground in this stylesheet already uses (.glance-eyebrow,
+     .glance-fact-label, .matcha-taste-note-label), so the section
+     rejoins the system rather than gaining a colour of its own: 5.3:1,
+     comfortably past AA for 11px uppercase. Raspberry stays the
+     section's accent - .matcha-use-rule is still var(--berry) - it
+     simply no longer carries text. */
+  color:rgba(245,235,226,.72);
 }
 .matcha-page .matcha-use-headline{
   display:flex;
@@ -3237,7 +3247,9 @@ header nav{gap:18px;font-size:12px}
   gap:16px;
   margin:0 0 clamp(18px,1.8vw,24px);
 }
-.matcha-use-icon{display:block;flex:0 0 auto;color:var(--berry)}
+/* Non-text, but it sat at the same 1.41:1 and was equally invisible.
+   3:1 is the floor for a meaningful graphic; this is 5.3:1. */
+.matcha-use-icon{display:block;flex:0 0 auto;color:rgba(245,235,226,.72)}
 .matcha-use-number{
   font-family:var(--font-sans),Arial,sans-serif;
   font-weight:600;
@@ -3245,7 +3257,8 @@ header nav{gap:18px;font-size:12px}
   font-size:var(--type-meta);
   line-height:1;
   letter-spacing:.1em;
-  color:var(--berry);
+  /* Same ground, same reason as .matcha-use-eyebrow above. 5.3:1. */
+  color:rgba(245,235,226,.72);
 }
 .matcha-use-label{
   margin:0;
@@ -9089,3 +9102,33 @@ header nav{gap:18px;font-size:12px}
    own rules stay content-driven with no viewport floor - which is what
    tests/shop-product.test.mjs guards, unweakened. */
 .shop-products-reserve{min-height:100vh}
+
+/* ══════════════════════════════════════════════════════════════
+   SERVER-RENDERED SHOP CONTENT
+   ══════════════════════════════════════════════════════════════
+   Two rules for the markup that now exists before any JavaScript runs.
+
+   .shop-product-link is the product title on /shop, which is a real
+   <a href="/shop/<slug>"> now: it was the one page of this site that
+   showed the product and never linked to its page, so the PDP had no
+   internal link anywhere and lived on the sitemap alone. The title
+   keeps every one of its own type rules - this only gives the link the
+   hover the rest of the site uses, so it reads as a link on the way to
+   being one.
+
+   .pdp-seed-sizes is the sizes line in the server-rendered product
+   hero, in the same meta voice as every other label on the page. It is
+   replaced by the real variant selector on hydration. */
+.shop-product-link{color:inherit;text-decoration:none;transition:color .2s ease}
+.shop-product-link:hover{color:var(--berry);text-decoration:underline;text-underline-offset:8px;text-decoration-thickness:2px}
+.pdp-seed-sizes{
+  margin:clamp(14px,1.6vw,20px) 0 0;
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:600;
+  font-size:var(--type-meta);
+  line-height:1.2;
+  letter-spacing:.18em;
+  text-transform:uppercase;
+  /* 5.0:1 on cream. */
+  color:rgba(17,17,17,.62);
+}

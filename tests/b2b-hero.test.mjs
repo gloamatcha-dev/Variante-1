@@ -128,18 +128,47 @@ test("2c: the sections below the hero are untouched", () => {
 
 test("3: exactly one image, and it is the B2B Packung asset", () => {
   const imgs = [...hero.matchAll(/<img [^>]*src="([^"]+)"/g)].map(m => m[1]);
-  assert.deepEqual(imgs, ["/img/B2B Packung.png"]);
+  assert.deepEqual(imgs, ["/img/B2B Packung.webp"]);
   assert.match(hero, /alt="GLOA Matcha B2B Packung"/);
 
-  // The file on disk is the one that was audited, byte for byte.
-  const bytes = readFileSync(path.join(ROOT, "public/img/B2B Packung.png"));
+  // ── THE AUDITED ASSET IS NOW THE WEBP, AND IT IS PINNED THE SAME WAY ──
+  //
+  // This block has always existed to stop the artwork being swapped,
+  // recropped or re-rendered without anyone noticing, and it still does.
+  // What changed is the container: the PNG shipped 1,075,497 bytes of a
+  // flat product render, which is 1 MB a phone downloaded before it could
+  // paint the B2B hero. The WebP is the SAME pixels at q90 - same
+  // 1448x1086 frame, same alpha, mean per-channel difference 0.60 out of
+  // 255 - at 91,028 bytes, a 91.5% cut with nothing visible lost. The crop
+  // maths in globals.css reads the same 1448x1086 box it always did.
+  //
+  // Both files are pinned below: the WebP because it is what a browser
+  // now receives, and the PNG because it is the source the WebP was made
+  // from and must not drift either.
+  const bytes = readFileSync(path.join(ROOT, "public/img/B2B Packung.webp"));
+  assert.equal(statSync(path.join(ROOT, "public/img/B2B Packung.webp")).size, 91028);
+  assert.equal(createHash("md5").update(bytes).digest("hex"), "0b49cb37527e3dad25fcb8c8a8a98f79");
+  // A real WebP at the dimensions the crop maths assumes, still carrying
+  // its alpha. Read out of the container rather than trusted: "RIFF" and
+  // "WEBP" are the file magic, VP8X is the extended chunk an alpha image
+  // gets, its flag byte carries the alpha bit, and the canvas size is two
+  // 24-bit little-endian minus-one values at offsets 24 and 27.
+  assert.equal(bytes.slice(0, 4).toString(), "RIFF");
+  assert.equal(bytes.slice(8, 12).toString(), "WEBP");
+  assert.equal(bytes.slice(12, 16).toString(), "VP8X", "the asset is not an extended WebP");
+  assert.equal((bytes[20] >> 4) & 1, 1, "the asset lost its alpha channel");
+  assert.equal(1 + (bytes[24] | bytes[25] << 8 | bytes[26] << 16), 1448);
+  assert.equal(1 + (bytes[27] | bytes[28] << 8 | bytes[29] << 16), 1086);
+
+  // THE SOURCE PNG IS NOT DELETED, and is still the audited one byte for
+  // byte - it is simply no longer served.
+  const png = readFileSync(path.join(ROOT, "public/img/B2B Packung.png"));
   assert.equal(statSync(path.join(ROOT, "public/img/B2B Packung.png")).size, 1075497);
-  assert.equal(createHash("md5").update(bytes).digest("hex"), "1f2a24309867e53a322e7f351d323a97");
-  // A real RGBA PNG at the dimensions the crop maths assumes.
-  assert.equal(bytes.slice(1, 4).toString(), "PNG");
-  assert.equal(bytes.readUInt32BE(16), 1448);
-  assert.equal(bytes.readUInt32BE(20), 1086);
-  assert.equal(bytes[25], 6, "the asset lost its alpha channel");
+  assert.equal(createHash("md5").update(png).digest("hex"), "1f2a24309867e53a322e7f351d323a97");
+  assert.equal(png.slice(1, 4).toString(), "PNG");
+  assert.equal(png.readUInt32BE(16), 1448);
+  assert.equal(png.readUInt32BE(20), 1086);
+  assert.equal(png[25], 6, "the source asset lost its alpha channel");
 
   // No other product visual came with it.
   for (const other of ["hero-tin", "Placeholder", "Produkt BILD", "Produkt Bild",

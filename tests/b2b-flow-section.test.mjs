@@ -314,7 +314,7 @@ test("5c: nothing else on the page moved", () => {
   }
   const site = read("app/GloaSite.tsx");
   assert.match(site, /Dein Matcha\./);
-  assert.match(site, /src="\/img\/B2B Packung\.png"/);
+  assert.match(site, /src="\/img\/B2B Packung\.webp"/);
   assert.match(site, /const b2bFacts=\["SHIZUOKA, JAPAN"/);
   assert.match(site, /Einfach zubereitet\./);
   for (const marker of ["/about — THREE BANDS", "/our-matcha PAGE HERO", ".home-rail{"]) {

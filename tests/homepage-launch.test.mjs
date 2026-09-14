@@ -170,8 +170,21 @@ test("6: the hero and the product feature use the new images", () => {
   assert.ok(existsSync(path.join(ROOT, "public/img/Startseite.png")), "Startseite.png is missing");
   assert.ok(existsSync(path.join(ROOT, "public/img/Produkt BILD.png")), "Produkt BILD.png is missing");
 
-  // The hero carries Startseite.png, with real alt text and no old packaging.
-  assert.match(homepage, /<img src="\/img\/Startseite\.png" alt="[^"]+" className="hero-img"/);
+  // The hero carries the optimised Startseite artwork, with real alt text
+  // and no old packaging.
+  // .webp, not .png. The homepage hero is the LCP element on every
+  // viewport and shipped as a 1.2 MB PNG: 1,223,454 bytes for a
+  // photographic render, preloaded at fetchpriority=high, which alone
+  // accounted for a 13.9s mobile LCP. The same artwork at WebP q90 is
+  // 49,106 bytes - a 96% cut with a mean per-channel difference of 1.02/255
+  // and no visible change at any size. Same pixels, same frame, same
+  // composition; only the container changed. The PNG stays on disk as the
+  // source (asserted above).
+  assert.match(homepage, /<img src="\/img\/Startseite\.webp" alt="[^"]+" className="hero-img"/);
+  assert.ok(existsSync(path.join(ROOT, "public/img/Startseite.webp")), "the optimised hero is missing");
+  // width/height so the box is known before the bytes are: the CSS still
+  // owns the rendered size, these only supply the intrinsic ratio.
+  assert.match(homepage, /className="hero-img" width=\{1448\} height=\{1086\}/);
   assert.ok(!homepage.includes("gloa-hero-packaging"), "the old hero packaging image is still in the hero");
 
   // THE PRODUCT IMAGE LEFT THE HOMEPAGE with the prelaunch redesign: the
@@ -182,7 +195,7 @@ test("6: the hero and the product feature use the new images", () => {
   assert.ok(!homepage.includes("ProductCard"), "the homepage still renders the product card");
 
   // The hero image is not duplicated into a second DOM layer.
-  assert.equal([...homepage.matchAll(/\/img\/Startseite\.png/g)].length, 1);
+  assert.equal([...homepage.matchAll(/\/img\/Startseite\.webp/g)].length, 1);
 });
 
 test("7: the countdown appears exactly once, in blue, between hero and product", () => {
@@ -682,7 +695,7 @@ test("20: the hero copy is exactly the four approved lines", () => {
 test("21: the hero image is contained, capped, and the only one in the hero", () => {
   const hero = homepage.slice(homepage.indexOf('<section className="hero">'), homepage.indexOf('<LaunchCountdown/>'));
   assert.equal([...hero.matchAll(/<img /g)].length, 1, "the hero carries more than one image");
-  assert.match(hero, /src="\/img\/Startseite\.png"/);
+  assert.match(hero, /src="\/img\/Startseite\.webp"/);
   for (const old of ["gloa-hero-packaging", "Produkt BILD", "gloa-matcha-in-the-city"]) {
     assert.ok(!hero.includes(old), `the hero uses ${old}`);
   }

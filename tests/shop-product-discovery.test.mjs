@@ -149,8 +149,15 @@ test("the lookup reads the catalog and writes nothing", () => {
     "the product lookup must be read-only");
   assert.ok(!/supabaseAdmin|SUPABASE_SECRET_KEY/.test(lookupSource),
     "the product lookup must not use the service role");
-  // One select, from the public catalog, through the publishable client.
-  assert.equal((lookupSource.match(/\.select\(/g) || []).length, 1);
+  // TWO selects, because there are two callers of the same catalog and no
+  // second catalog: lookupProductBySlug answers "does this product
+  // exist" for /shop/<slug>, and lookupCatalogSeed lists the shop for
+  // /shop's first HTML. Both go through the publishable client, both are
+  // read-only, and the assertions above cover both.
+  assert.equal((lookupSource.match(/\.select\(/g) || []).length, 2);
+  // Neither of them may ever hand a price to the markup.
+  assert.ok(!/price_gross_cents: /.test(lookupSource.slice(lookupSource.indexOf("export function toSeedProduct"))),
+    "the seed carries a price");
   assert.match(lookupSource, /from\("products"\)/);
 });
 

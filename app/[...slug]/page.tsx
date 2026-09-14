@@ -3,7 +3,7 @@ import { GloaSite } from "../GloaSite";
 import { PRICES_VISIBLE } from "../content";
 import { isKnownRoute, absoluteUrl, SITE_ORIGIN, INDEXABLE_ROUTES } from "../../lib/publicRoutes";
 import { isProductWithheld } from "../../lib/catalogAvailability";
-import { lookupProductBySlug } from "../../lib/catalogProducts";
+import { lookupProductBySlug, lookupCatalogSeed, toSeedProduct } from "../../lib/catalogProducts";
 import { resolveProductSlug } from "../../lib/productSlugs";
 import { buildProductSchema } from "../../lib/productStructuredData";
 import { getProductImage } from "../../lib/productPresentation";
@@ -245,5 +245,25 @@ export default async function Page({params}:{params:Promise<{slug:string[]}>}){c
  const productSchema=lookup?.state==="found"
   ?buildProductSchema(lookup.product,{origin:SITE_ORIGIN,url:absoluteUrl(canonicalPathFor(path)),offersVisible:PRICES_VISIBLE,imagePath:getProductImage(lookup.product),fallbackDescription:PRODUCT_SEO[canonicalPathFor(path)]?.[1]??null})
   :null;
- if(productSchema)return <><script type="application/ld+json" dangerouslySetInnerHTML={{__html:JSON.stringify(productSchema)}}/><GloaSite route={path}/></>;
- return <GloaSite route={path}/>}
+ // THE FIRST HTML CARRIES THE PRODUCT, NOT A SPINNER.
+ //
+ // The catalog was read exclusively in the browser, so the HTML this
+ // route sent for its most important page was <h1>Produkt</h1> and the
+ // word "Laden…". The read three lines up already has the product; it
+ // was being used to decide 404-or-not and then thrown away.
+ //
+ // lib/catalogProducts.ts strips every money field on the way out, in
+ // prelaunch AND live, so what crosses into the markup is name,
+ // description and variant labels and nothing a customer pays. The
+ // browser still fetches the catalog itself and still owns every price.
+ //
+ // "unavailable" deliberately yields no seed: a catalog that could not
+ // be asked keeps exactly the client-side loading behaviour it had, and
+ // still answers 200 rather than de-listing a real product.
+ const productSeed=lookup?.state==="found"?toSeedProduct(lookup.product):null;
+ // /shop is the other half: its product band was client-only too, so
+ // the HTML had no link to /shop/matcha anywhere on the site.
+ const shopSeed=path==="shop"?await lookupCatalogSeed():null;
+ const site=<GloaSite route={path} productSeed={productSeed} shopSeed={shopSeed}/>;
+ if(productSchema)return <><script type="application/ld+json" dangerouslySetInnerHTML={{__html:JSON.stringify(productSchema)}}/>{site}</>;
+ return site}
