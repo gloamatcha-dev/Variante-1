@@ -116,7 +116,16 @@ function AtAGlance(){return <section className="glance"><div className="glance-i
 <h2 className="glance-headline"><span className="glance-line">Klar, was drin ist.</span><i className="glance-line glance-line-accent">Und wo es herkommt.</i></h2>
 </div>
 <dl className="glance-grid">{glanceFacts.map(f=><div className="glance-fact" key={f.label}>
-<div className="glance-fact-head">{f.icon}<dt className="glance-fact-label">{f.label}</dt></div>
+{/* THE <dt> IS A CHILD OF THE GROUP, NOT OF A SECOND WRAPPER.
+    It used to sit inside a second div carrying glance-fact-head, two
+    divs below the list - which is not a definition list: axe fired
+    both definition-list and dlitem (serious) on / and /shop/matcha,
+    and a screen reader got four orphaned terms. A single <div> per
+    dt/dd group IS allowed, so .glance-fact stays; the flex row that
+    holds the icon beside the label simply becomes the <dt> itself,
+    and the label keeps its own class on a <span>. Same box, same
+    rules, same pixels. */}
+<dt className="glance-fact-head">{f.icon}<span className="glance-fact-label">{f.label}</span></dt>
 <dd className="glance-fact-title">{f.title}</dd>
 <dd className="glance-fact-body">{f.body}</dd>
 </div>)}</dl>
@@ -660,9 +669,31 @@ const {products,loading,error}=useCatalogList();
 // second time it is pressed, after the customer has switched back to
 // one-time in between.
 const [annualRequest,setAnnualRequest]=useState(0);
-const shell=(lead:React.ReactNode,price:React.ReactNode)=><main className="shop-page"><ShopHero lead={lead} price={price}/><ShopLaunchStrip/></main>;
+// THE LOADING SHELL RESERVES THE BAND IT IS ABOUT TO FILL.
+//
+// It used to render the hero and the launch strip and NOTHING else, so
+// the footer sat just under the strip until the catalog answered and
+// the whole product band - card, purchase column, four accordions -
+// was inserted above it. Measured on a throttled phone that was a
+// single 0.406 layout shift roughly 2.6s in, taking /shop to CLS 0.444
+// against a 0.1 budget: the launch strip, its CTA and the footer all
+// jumped down while someone was reading them.
+//
+// The reserve is an empty, aria-hidden box the height of a viewport.
+// It cannot match the final band exactly - the band's height is
+// catalog data and a viewport is not - and it does not have to: what
+// CLS counts is VISIBLE content moving, and one viewport of reserved
+// space is enough to push the footer below the fold, so the insertion
+// happens off-screen. Nothing is drawn, so nothing about the page's
+// appearance changes once the catalog is in.
+//
+// The real fix is rendering the catalog on the server, which the route
+// already reads for its 404 check (lib/catalogProducts.ts). That is a
+// data-flow change through a client component boundary and is written
+// up in the audit rather than done here.
+const shell=(lead:React.ReactNode,price:React.ReactNode,reserve=false)=><main className="shop-page"><ShopHero lead={lead} price={price}/><ShopLaunchStrip/>{reserve&&<div className="shop-products-reserve" aria-hidden="true"/>}</main>;
 
-if(loading)return shell(SHOP_HERO_LEAD,<p className="shop-hero-price">Laden…</p>);
+if(loading)return shell(SHOP_HERO_LEAD,<p className="shop-hero-price">Laden…</p>,true);
 if(error)return shell("Shop vorübergehend nicht verfügbar.",null);
 if(!visibleShopProducts(products).length)return shell("Aktuell keine Produkte verfügbar.",null);
 
@@ -755,9 +786,12 @@ return <main className="pdp">
 function ProductPage({slug,onAdd}:{slug:string;onAdd:()=>void}){
 const {product,loading,error}=useCatalog(slug);
 
-const shell=(message:string)=><main className="pdp"><section className="pdp-hero"><div className="pdp-hero-info"><p className="eyebrow">GLOA</p><h1>{product?.name||"Produkt"}</h1><p>{message}</p></div></section></main>;
+// Same reserve, same reason as /shop above: without it the footer
+// sits under a one-line hero until the catalog answers and then
+// drops a full product page on top of it.
+const shell=(message:string,reserve=false)=><main className="pdp"><section className="pdp-hero"><div className="pdp-hero-info"><p className="eyebrow">GLOA</p><h1>{product?.name||"Produkt"}</h1><p>{message}</p></div></section>{reserve&&<div className="shop-products-reserve" aria-hidden="true"/>}</main>;
 
-if(loading)return shell("Laden…");
+if(loading)return shell("Laden…",true);
 if(error||!product)return shell("Produkt vorübergehend nicht verfügbar.");
 // WITHHELD FOR THIS LAUNCH. Knowing the slug was the last way to reach a
 // full purchase page for a product /shop refuses to list, so the detail

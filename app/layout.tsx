@@ -15,14 +15,39 @@ import "./globals.css";
 // request to Google and no @import in the stylesheet. Only the weights
 // actually used are fetched, and the italic is a REAL italic face rather
 // than a synthetic slant.
+//
+// ── NOTHING MAY BE COMMENTED *INSIDE* THESE OPTION LITERALS ───
+//
+// This is not a style rule, it is what decides whether the font is
+// self-hosted at all. vinext's Google-fonts plugin reads the options
+// object statically (parseStaticObjectLiteral in
+// vinext/dist/plugins/fonts.js); anything it cannot parse makes
+// injectSelfHostedCss() return early and the build falls through -
+// SILENTLY, with no warning - to a runtime <link> at
+// fonts.googleapis.com.
+//
+// Inter shipped exactly that regression: a comment block sat between
+// `weight:` and `style:` below, so every production page loaded Inter
+// from Google's CDN and handed every visitor's IP to Google, while
+// Cormorant (no inner comment) was self-hosted correctly. Both of the
+// comments that used to live inside the literals are therefore out
+// here, where they document the same decisions and cost nothing.
+//
+// The check that this still holds: after a build, .vinext/fonts must
+// contain BOTH an inter-* and a cormorant-garamond-* directory, and
+// the served HTML must contain no fonts.googleapis.com link at all.
+// tests/font-self-hosting.test.mjs asserts the first half.
+//
+// ── REAL ITALIC FACES, added deliberately ────────────────────
+//
+// The typography audit found Inter was loaded without them, so any
+// italic in a sans context could only ever have been a browser-
+// synthesised slant. The hero's second headline line is Inter 800
+// ITALIC, which needs the actual face.
 const sans = Inter({
   variable: "--font-sans",
   subsets: ["latin"],
   weight: ["400", "500", "600", "700", "800", "900"],
-  // REAL ITALIC FACES, added deliberately. The typography audit found
-  // Inter was loaded without them, so any italic in a sans context could
-  // only ever have been a browser-synthesised slant. The hero's second
-  // headline line is Inter 800 ITALIC, which needs the actual face.
   style: ["normal", "italic"],
   display: "swap",
 });

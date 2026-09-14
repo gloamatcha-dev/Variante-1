@@ -230,7 +230,10 @@ test("7: typography only - no colour, layout or copy in the hero system", () => 
   assert.match(css, /\.about-hero-line\{color:var\(--cream\)\}/);
   assert.match(css, /\.b2b-hero \.b2b-hero-line\{color:var\(--cream\)\}/);
   assert.match(css, /\.b2b-hero \.b2b-hero-line-accent\{margin-top:6px;color:var\(--cream\)\}/);
-  assert.match(css, /\.about-hero-eyebrow\{color:rgba\(245,235,226,\.72\)\}/);
+  // .82, not .72: at .72 this eyebrow measured 4.0:1 on the blue hero
+  // ground, under AA for 11px text, and the QA pass raised it. Still
+  // pinned exactly, so a colour change here still has to be deliberate.
+  assert.match(css, /\.about-hero-eyebrow\{color:rgba\(245,235,226,\.82\)\}/);
   assert.match(css, /\.pt-hero-line\{color:var\(--cream\)\}/);
   assert.match(css, /\.rezepte-hero-line\{color:var\(--cream\)\}/);
 

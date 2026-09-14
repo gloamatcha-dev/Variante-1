@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { GloaSite } from "../GloaSite";
 import { PRICES_VISIBLE } from "../content";
-import { isKnownRoute, absoluteUrl, SITE_ORIGIN } from "../../lib/publicRoutes";
+import { isKnownRoute, absoluteUrl, SITE_ORIGIN, INDEXABLE_ROUTES } from "../../lib/publicRoutes";
 import { isProductWithheld } from "../../lib/catalogAvailability";
 import { lookupProductBySlug } from "../../lib/catalogProducts";
 import { resolveProductSlug } from "../../lib/productSlugs";
@@ -83,6 +83,13 @@ const seo:Record<string,[string,string]>={
  */
 const PRODUCT_SEO:Record<string,[string,string]>={
  "shop/matcha":["GLOA Matcha","GLOA Matcha aus Shizuoka, Japan. Bio-zertifiziert und steinvermahlen, in 30 g, 50 g und 100 g."],
+ // The Metal Case is noindex, so this pair never reaches a search
+ // result - but it IS the browser tab title, the bookmark and the link
+ // preview of anyone who has the URL, and the shop fallback made all
+ // three read "Shop Matcha · GLOA / GLOA Matcha aus Shizuoka. 30 g,
+ // 50 g, 100 g." on a page that sells no matcha and states no size.
+ // The page's own sentence instead, which is what it actually says.
+ "shop/metal-case":["GLOA Metal Case","Das GLOA Metal Case ist aktuell nicht verfügbar."],
 };
 
 /**
@@ -107,6 +114,24 @@ function withBrand(title:string):string{
 const NOT_FOUND_METADATA:Metadata={title:"Seite nicht gefunden · GLOA",description:"Diese Seite gibt es nicht.",robots:{index:false,follow:true}};
 
 /**
+ * The two PAGE-level aliases, the way PRODUCT_SLUG_ALIASES holds the
+ * product one.
+ *
+ * lib/publicRoutes.ts has always said so in prose - "wholesale: alias;
+ * /for-cafes is the canonical one", "journal: legacy alias of /rezepte"
+ * - and the sitemap already leaves both out. The markup did not agree:
+ * each shipped a canonical naming ITSELF, so /wholesale and /for-cafes
+ * were two byte-identical indexable pages - same title, same
+ * description, same H1 - each telling a search engine it was the
+ * original. The same fix canonicalPathFor below already made for the
+ * product alias /shop/gloa-matcha, applied to the two page aliases.
+ */
+const ROUTE_ALIASES:Readonly<Record<string,string>>=Object.freeze({
+ "wholesale":"for-cafes",
+ "journal":"rezepte",
+});
+
+/**
  * THE URL THIS PAGE WANTS TO BE INDEXED AS.
  *
  * /shop/gloa-matcha has always rendered the matcha product page - an
@@ -116,7 +141,10 @@ const NOT_FOUND_METADATA:Metadata={title:"Seite nicht gefunden · GLOA",descript
  * is its own canonical, unchanged.
  */
 function canonicalPathFor(path:string):string{
- return path.startsWith("shop/")&&path.length>5 ? `shop/${resolveProductSlug(path.slice(5))}` : path;
+ if(path.startsWith("shop/")&&path.length>5)return `shop/${resolveProductSlug(path.slice(5))}`;
+ // /journal/<slug> is an alias of /rezepte/<slug>, tail included.
+ if(path.startsWith("journal/")&&path.length>8)return `rezepte/${path.slice(8)}`;
+ return ROUTE_ALIASES[path]??path;
 }
 
 /**
@@ -151,7 +179,42 @@ export async function generateMetadata({params}:{params:Promise<{slug:string[]}>
  // robots.txt Disallow, because noindex removes an already-indexed URL
  // while Disallow only stops the recrawl that would have removed it.
  const withheldProduct=path.startsWith("shop/")&&isProductWithheld(resolveProductSlug(path.slice(5)));
- const noIndex=withheldProduct||path.startsWith("account")||path.startsWith("auth/")||path.startsWith("order/");
+ // NOT IN THE SITEMAP MEANT NOT INDEXABLE - EVERYWHERE EXCEPT HERE.
+ //
+ // The noindex list used to be written out by hand: account, auth,
+ // order, plus the withheld product. Everything ELSE the catch-all
+ // serves was offered to a search engine, including two routes
+ // lib/publicRoutes.ts deliberately keeps out of INDEXABLE_ROUTES:
+ //
+ //   /rezepte, /journal   withheld for this launch. The recipes flag
+ //                        in app/content.ts is off, so the header, the
+ //                        footer and the homepage carousel all drop the
+ //                        link - yet the page still answered 200 with a
+ //                        self-canonical and no robots directive. An
+ //                        orphan copy of a section this launch is
+ //                        holding back was free to be indexed, which is
+ //                        the exact opposite of the decision taken for
+ //                        /shop/metal-case.
+ //
+ // So the question is asked of the one list that already answers it.
+ // INDEXABLE_ROUTES is documented as "the URLs a search engine may
+ // list", the sitemap is built from it, and a test already fails if the
+ // renderer and that list disagree - so a page cannot now be quietly
+ // indexable without also being in the sitemap.
+ //
+ // It reads the CANONICAL path, so an alias is judged by what it points
+ // at: /wholesale and /shop/gloa-matcha resolve to indexable routes and
+ // stay indexable behind their canonical, exactly as before, while
+ // /journal resolves to /rezepte and is withheld with it.
+ //
+ // NO CONTENT FLAG IS READ HERE, deliberately: tests/rezepte-page
+ // .test.mjs records that the recipes switch hides links and does not
+ // disable the feature, and that no server route may gate on it. This
+ // route asks the route list instead. Recipes become indexable when
+ // "rezepte" joins INDEXABLE_ROUTES, which is the same edit that puts
+ // them in the sitemap - one switch, not two.
+ const notListed=!INDEXABLE_ROUTES.includes(canonicalPathFor(path));
+ const noIndex=withheldProduct||notListed||path.startsWith("account")||path.startsWith("auth/")||path.startsWith("order/");
  const canonical=`/${canonicalPathFor(path)}`;
  return{title,description:base[1],...(noIndex?{robots:{index:false,follow:false}}:{}),alternates:{canonical},openGraph:{type:"website",url:canonical,siteName:"GLOA",title,description:base[1],images:["/gloa-logo-slogan-link.png"]},twitter:{card:"summary_large_image",title,description:base[1],images:["/gloa-logo-slogan-link.png"]}}}
 

@@ -3,7 +3,7 @@
 :root{--blue:#1746D1;--berry:#A61E59;--cream:#F5EBE2;--plum:#4F3A5B;--ink:#111111;--line:rgba(79,58,91,.22);--matcha:#9DBF7F;--rail-gutter:clamp(20px,3vw,48px);--rail-max:1520px;/* THE HOMEPAGE TYPE SCALE. SAME ROLE = SAME SCALE; the hero is the one deliberate exception and keeps its own larger values. *//* LEVEL 2. Both secondary page heroes read these; the homepage hero keeps its own larger curve, and every section title stays below them. *//* SUPERSEDED, and kept only so nothing external breaks: --type-page-hero and
    --type-page-hero-accent have no consumer left. Every true page hero reads
    --type-hero-primary / --type-hero-secondary below. Do not reach for these. */--type-page-hero:clamp(40px,5.2vw,84px);/* THE PAGE HERO SCALE. The homepage hero IS the master: these are its exact values, and every true page hero reads them. Redefined once at 900px below, so no route carries a hero media query of its own. */--type-hero-primary:clamp(54px,5.9vw,100px);--type-hero-secondary:clamp(48px,5vw,86px);--type-page-hero-accent:clamp(37px,4.8vw,78px);--type-title:clamp(34px,4.4vw,64px);--type-editorial:clamp(37px,4.7vw,68px);--type-body:clamp(15px,2vw,18px);--type-meta:11px;--type-card:clamp(16px,1.25vw,18px);/* TWO FAMILIES. --font-mono is an ALIAS for Inter, not a third face: every uppercase metadata rule in this file already carries letter-spacing, which is what carries that voice now. Renaming ~40 call sites would have been a bigger diff than this one line. */--font-mono:var(--font-sans)}
-h1 i,h2 i,h3 i,.display-italic{font-family:var(--font-display),Georgia,serif;font-style:italic;font-weight:400;letter-spacing:-.01em}h1 i,h2 i{font-size:1.06em;line-height:.98}/* SCROLL-LINKED, NOT A MARQUEE. --hero-scroll is written by one requestAnimationFrame reader in GloaSite.tsx and is 0 at rest, so with JavaScript off or before the first frame the type sits exactly where the static layout puts it. *//* THE THREE HERO LINES, AND NOTHING ELSE ON THE PAGE. Amplitudes are deliberately small - the point is a slow parting of the two headline lines, not a slide. The lead drifts a few pixels down and softens instead of moving sideways, so it stays the calm line of the three. *//* THE VARIABLE IS DECLARED ON THE ELEMENT THE HOOK WRITES TO, AND NOWHERE ELSE. useHeroScrollProgress() sets --hero-scroll on .hero-copy; the lines below inherit it. Declaring it on h1 or .lead themselves is not a fallback - a declaration on the element WINS over the inherited value, so every write the hook made was shadowed and the type sat still at every scroll position. The rest value belongs here, on .hero-copy: with JavaScript off, or before the first frame, the lines still sit exactly where the static layout puts them. */.hero-copy{--hero-scroll:0}.hero-copy h1{transform:translate3d(calc(var(--hero-scroll)*-16px),0,0);will-change:transform}.hero-copy h1 i{display:inline-block;transform:translate3d(calc(var(--hero-scroll)*28px),0,0)}.hero-copy .lead{transform:translate3d(0,calc(var(--hero-scroll)*7px),0);opacity:calc(1 - var(--hero-scroll)*.35)}@media (prefers-reduced-motion:reduce){.hero-copy h1,.hero-copy h1 i,.hero-copy .lead{transform:none!important;opacity:1!important}}@media (max-width:900px){.hero-copy h1{transform:translate3d(calc(var(--hero-scroll)*-6px),0,0)}.hero-copy h1 i{transform:translate3d(calc(var(--hero-scroll)*9px),0,0)}.hero-copy .lead{transform:none;opacity:1}}.countdown{background:var(--blue);color:var(--cream);padding:clamp(38px,4.6vw,64px) 4vw;border-bottom:1px solid rgba(245,235,226,.25)}.countdown-inner{display:flex;flex-direction:column;gap:clamp(22px,2.6vw,34px)}.countdown-head{display:flex;justify-content:space-between;align-items:baseline;gap:24px;flex-wrap:wrap}.countdown-title{font:800 clamp(26px,3.4vw,46px)/1 var(--font-sans);letter-spacing:-.045em;margin:0;text-transform:uppercase}.countdown-date{font:600 12px/1 var(--font-sans);letter-spacing:.18em;text-transform:uppercase;opacity:.78;margin:0}.countdown-units{display:grid;grid-template-columns:repeat(4,1fr);gap:clamp(12px,2vw,28px);border-top:1px solid rgba(245,235,226,.32);padding-top:clamp(18px,2.2vw,28px)}.countdown-unit{display:flex;flex-direction:column;gap:8px;min-width:0}.countdown-value{font:800 clamp(34px,5.4vw,76px)/.9 var(--font-sans);letter-spacing:-.05em;font-variant-numeric:tabular-nums;font-feature-settings:'tnum' 1}.countdown-label{font:600 11px/1 var(--font-sans);letter-spacing:.2em;text-transform:uppercase;opacity:.72}.countdown-live{font:800 clamp(30px,4.4vw,60px)/1 var(--font-sans);letter-spacing:-.045em;margin:0;text-transform:uppercase}@media (max-width:640px){.countdown-units{grid-template-columns:repeat(2,1fr);row-gap:clamp(18px,5vw,26px)}.countdown-value{font-size:clamp(38px,13vw,56px)}}*{box-sizing:border-box}/* THE PAGE END. Two things, because one browser honours each.
+h1 i,h2 i,h3 i,.display-italic{font-family:var(--font-display),Georgia,serif;font-style:italic;font-weight:400;letter-spacing:-.01em}h1 i,h2 i{font-size:1.06em;line-height:.98}/* SCROLL-LINKED, NOT A MARQUEE. --hero-scroll is written by one requestAnimationFrame reader in GloaSite.tsx and is 0 at rest, so with JavaScript off or before the first frame the type sits exactly where the static layout puts it. *//* THE THREE HERO LINES, AND NOTHING ELSE ON THE PAGE. Amplitudes are deliberately small - the point is a slow parting of the two headline lines, not a slide. The lead drifts a few pixels down and softens instead of moving sideways, so it stays the calm line of the three. *//* THE VARIABLE IS DECLARED ON THE ELEMENT THE HOOK WRITES TO, AND NOWHERE ELSE. useHeroScrollProgress() sets --hero-scroll on .hero-copy; the lines below inherit it. Declaring it on h1 or .lead themselves is not a fallback - a declaration on the element WINS over the inherited value, so every write the hook made was shadowed and the type sat still at every scroll position. The rest value belongs here, on .hero-copy: with JavaScript off, or before the first frame, the lines still sit exactly where the static layout puts them. */.hero-copy{--hero-scroll:0}.hero-copy h1{transform:translate3d(calc(var(--hero-scroll)*-16px),0,0);will-change:transform}.hero-copy h1 i{display:inline-block;transform:translate3d(calc(var(--hero-scroll)*28px),0,0)}.hero-copy .lead{transform:translate3d(0,calc(var(--hero-scroll)*7px),0);opacity:calc(1 - var(--hero-scroll)*.35)}@media (prefers-reduced-motion:reduce){.hero-copy h1,.hero-copy h1 i,.hero-copy .lead{transform:none!important;opacity:1!important}}@media (max-width:900px){.hero-copy h1{transform:translate3d(calc(var(--hero-scroll)*-6px),0,0)}.hero-copy h1 i{transform:translate3d(calc(var(--hero-scroll)*9px),0,0)}.hero-copy .lead{transform:none;opacity:1}}.countdown{background:var(--blue);color:var(--cream);padding:clamp(38px,4.6vw,64px) 4vw;border-bottom:1px solid rgba(245,235,226,.25)}.countdown-inner{display:flex;flex-direction:column;gap:clamp(22px,2.6vw,34px)}.countdown-head{display:flex;justify-content:space-between;align-items:baseline;gap:24px;flex-wrap:wrap}.countdown-title{font:800 clamp(26px,3.4vw,46px)/1 var(--font-sans);letter-spacing:-.045em;margin:0;text-transform:uppercase}.countdown-date{font:600 12px/1 var(--font-sans);letter-spacing:.18em;text-transform:uppercase;opacity:.82;margin:0}.countdown-units{display:grid;grid-template-columns:repeat(4,1fr);gap:clamp(12px,2vw,28px);border-top:1px solid rgba(245,235,226,.32);padding-top:clamp(18px,2.2vw,28px)}.countdown-unit{display:flex;flex-direction:column;gap:8px;min-width:0}.countdown-value{font:800 clamp(34px,5.4vw,76px)/.9 var(--font-sans);letter-spacing:-.05em;font-variant-numeric:tabular-nums;font-feature-settings:'tnum' 1}.countdown-label{font:600 11px/1 var(--font-sans);letter-spacing:.2em;text-transform:uppercase;opacity:.82}.countdown-live{font:800 clamp(30px,4.4vw,60px)/1 var(--font-sans);letter-spacing:-.045em;margin:0;text-transform:uppercase}@media (max-width:640px){.countdown-units{grid-template-columns:repeat(2,1fr);row-gap:clamp(18px,5vw,26px)}.countdown-value{font-size:clamp(38px,13vw,56px)}}*{box-sizing:border-box}/* THE PAGE END. Two things, because one browser honours each.
    overscroll-behavior-y stops the root scroller being dragged past
    its own content where it is supported, which costs pull-to-refresh
    on Android - the trade the brief asked for.
@@ -58,7 +58,7 @@ html{scroll-behavior:smooth;overscroll-behavior-y:none;background:var(--ink)}bod
 .legal-imprint-block h2{font:13px/1.4 var(--font-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--berry);margin:0 0 26px}
 .legal-imprint-block dl{margin:0}
 .legal-imprint-block dl>div+div{margin-top:22px;padding-top:22px;border-top:1px solid var(--line)}
-.legal-imprint-block dt{font:12px/1.45 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;opacity:.55;margin:0 0 8px}
+.legal-imprint-block dt{font:12px/1.45 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;opacity:.62;margin:0 0 8px}
 /* 17px, not a legal-fine-print size. These particulars are the reason
    the page exists and must not be the smallest type on it. */
 .legal-imprint-block dd{margin:0;font-size:17px;line-height:1.5;overflow-wrap:break-word}
@@ -110,7 +110,7 @@ html{scroll-behavior:smooth;overscroll-behavior-y:none;background:var(--ink)}bod
 .legal-ship-zone{padding:clamp(26px,3.1vw,42px);border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
 .legal-ship-zone h2{font-size:clamp(20px,1.9vw,25px);line-height:1.2;letter-spacing:-.02em;margin:0 0 22px}
 .legal-ship-facts{margin:0;display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(12px,1.4vw,20px)}
-.legal-ship-facts dt{font:11px/1.4 var(--font-mono);letter-spacing:.09em;text-transform:uppercase;opacity:.55;margin:0 0 7px}
+.legal-ship-facts dt{font:11px/1.4 var(--font-mono);letter-spacing:.09em;text-transform:uppercase;opacity:.62;margin:0 0 7px}
 /* The numbers are the reason for the page: set larger than body text,
    never smaller. */
 .legal-ship-facts dd{margin:0;font-size:19px;line-height:1.3;letter-spacing:-.015em;white-space:nowrap}
@@ -558,7 +558,7 @@ a.portal-summary-row:hover{color:var(--blue)}
 /* ── Brand note, replacing the newsletter signup on /shop ── */
 .brand-note{background:var(--blue);color:var(--cream);padding:clamp(60px,7vw,104px) 4.5vw;border-top:0}
 .brand-note-inner{display:grid;grid-template-columns:1.05fr .95fr;gap:clamp(28px,5vw,86px);align-items:end;padding-top:clamp(24px,2.6vw,36px);border-top:1px solid rgba(245,235,226,.32)}.brand-note-left{min-width:0}.brand-note-right{min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:clamp(16px,1.8vw,24px)}@media (max-width:900px){.brand-note-inner{grid-template-columns:1fr;align-items:start;gap:clamp(22px,6vw,32px)}}
-.brand-note .eyebrow{font-family:var(--font-sans),Arial,sans-serif;font-weight:600;font-size:var(--type-meta);line-height:1.25;letter-spacing:.2em;text-transform:uppercase;color:var(--cream);opacity:.72}.brand-note-text{font-family:var(--font-sans),Arial,sans-serif;font-size:var(--type-title);line-height:.98;letter-spacing:-.04em;font-weight:500;margin:16px 0 0}
+.brand-note .eyebrow{font-family:var(--font-sans),Arial,sans-serif;font-weight:600;font-size:var(--type-meta);line-height:1.25;letter-spacing:.2em;text-transform:uppercase;color:var(--cream);opacity:.82}.brand-note-text{font-family:var(--font-sans),Arial,sans-serif;font-size:var(--type-title);line-height:.98;letter-spacing:-.04em;font-weight:500;margin:16px 0 0}
 .brand-note-sub{font-family:var(--font-sans),Arial,sans-serif;font-weight:400;font-size:var(--type-body);line-height:1.55;margin:0;max-width:46ch;opacity:.86}
 .brand-note-micro{font:600 var(--type-meta)/1 var(--font-sans);letter-spacing:.18em;text-transform:uppercase;margin:0;color:var(--cream);opacity:.9}
 .brand-note-text i{font-family:var(--font-display),Georgia,serif;font-style:italic;font-weight:400;font-size:var(--type-editorial);line-height:.95;letter-spacing:-.015em}
@@ -2822,7 +2822,8 @@ header nav{gap:18px;font-size:12px}
   line-height:1.2;
   letter-spacing:.2em;
   text-transform:uppercase;
-  color:rgba(245,235,226,.72);
+  /* 4.8:1 on raspberry. Was .72 - 3.8:1 for 11px uppercase. */
+  color:rgba(245,235,226,.86);
 }
 .matcha-taste-headline{
   display:flex;
@@ -2873,7 +2874,8 @@ header nav{gap:18px;font-size:12px}
   line-height:1.2;
   letter-spacing:.18em;
   text-transform:uppercase;
-  color:rgba(245,235,226,.72);
+  /* 4.8:1 on raspberry. Was .72 - 3.8:1 for 11px uppercase. */
+  color:rgba(245,235,226,.86);
 }
 .matcha-taste-note-text{
   margin:0;
@@ -3584,7 +3586,7 @@ header nav{gap:18px;font-size:12px}
   padding-inline:var(--rail-gutter);
 }
 .about-hero-inner{display:flex;flex-direction:column;align-items:flex-start}
-.about-hero-eyebrow{color:rgba(245,235,226,.72)}
+.about-hero-eyebrow{color:rgba(245,235,226,.82)}
 .about-hero-headline{
   display:flex;
   flex-direction:column;
@@ -3763,7 +3765,7 @@ header nav{gap:18px;font-size:12px}
   align-items:start;
 }
 .about-story-head{min-width:0}
-.about-story-eyebrow{color:rgba(245,235,226,.72)}
+.about-story-eyebrow{color:rgba(245,235,226,.82)}
 .about-story-line{color:var(--cream)}
 .about-story-detail{min-width:0;max-width:560px;padding-top:clamp(6px,1.2vw,18px)}
 .about-story-text{
@@ -8082,7 +8084,8 @@ header nav{gap:18px;font-size:12px}
   font-size:11px;
   line-height:1.2;
   letter-spacing:.16em;
-  color:rgba(245,235,226,.6);
+  /* 4.7:1 on blue. Was .6 - 3.2:1, the worst miss on /shop. */
+  color:rgba(245,235,226,.82);
 }
 .shop-annual-fact-label{
   font-family:var(--font-sans),Arial,sans-serif;
@@ -8170,7 +8173,7 @@ header nav{gap:18px;font-size:12px}
   padding:clamp(88px,10vw,150px) var(--rail-gutter) clamp(72px,8vw,120px);
 }
 .launch-hero-inner{max-width:860px;margin:0 auto}
-.launch-hero-eyebrow{color:var(--cream);opacity:.75;margin:0 0 clamp(20px,2.4vw,30px)}
+.launch-hero-eyebrow{color:var(--cream);opacity:.82;margin:0 0 clamp(20px,2.4vw,30px)}
 .launch-hero-headline{margin:0;color:var(--cream)}
 .launch-hero-headline span,
 .launch-hero-headline i{display:block}
@@ -8285,7 +8288,8 @@ header nav{gap:18px;font-size:12px}
   letter-spacing:.2em;
   text-transform:uppercase;
   color:var(--cream);
-  opacity:.62;
+  /* 4.7:1 on blue. Was .62 - 3.3:1, under AA for 11px text. */
+  opacity:.82;
 }
 /*
   THE SPAM-FOLDER LINE, UNDER A CONFIRMED OUTCOME.
@@ -8370,7 +8374,8 @@ header nav{gap:18px;font-size:12px}
   font-weight:400;
   letter-spacing:.08em;
   text-transform:none;
-  opacity:.72;
+  /* 5.1:1 on cream. Was .72 - 4.1:1. */
+  opacity:.8;
 }
 .launch-field input,
 .launch-field select{
@@ -9065,3 +9070,22 @@ header nav{gap:18px;font-size:12px}
   .dock-item{transition:none}
 }
 
+/* ══════════════════════════════════════════════════════════════
+   CATALOG LOADING RESERVE
+   ══════════════════════════════════════════════════════════════
+   Space held while the catalog is still in flight, for /shop AND for
+   /shop/<slug>. Empty, aria-hidden, drawn as nothing, and gone the
+   moment the products arrive.
+
+   WHY IT EXISTS. Both loading shells used to render a hero and then the
+   footer, so when the catalog answered - measured at ~2.6s on a
+   throttled phone - the entire product band was inserted ABOVE content
+   someone was already reading. That was a single 0.406 layout shift and
+   took /shop to CLS 0.444 against a 0.1 budget.
+
+   WHY IT IS HERE AND NOT IN THE SHOP SECTION BLOCK. It is not a rule of
+   the product section: it belongs to neither page's design, it is a
+   loading affordance shared by both routes, and the product section's
+   own rules stay content-driven with no viewport floor - which is what
+   tests/shop-product.test.mjs guards, unweakened. */
+.shop-products-reserve{min-height:100vh}

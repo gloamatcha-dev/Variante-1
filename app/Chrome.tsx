@@ -74,8 +74,33 @@ onCart:()=>void;cartCount:number;menuOpen:boolean;onMenuOpenChange:(next:boolean
   document.addEventListener("keydown",onKey);
   return()=>document.removeEventListener("keydown",onKey);
  },[menuOpen,search,onMenuOpenChange]);
- const marqueeGroup=<div className="bb-group"><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link></div>;
- return <><div className="brand-bar"><div className="bb-track">{marqueeGroup}<div className="bb-group" aria-hidden="true"><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes">B2B</Link></div></div></div><header className={scrolled?"compact":""}><button className="menu" ref={menuButtonRef} onClick={()=>onMenuOpenChange(!menuOpen)} aria-expanded={menuOpen} aria-controls="mobile-menu">{menuOpen?"Schließen":"Menü"}</button><Mark/><nav aria-label="Hauptnavigation">{visibleLinks.map(([h,l])=><Link key={h} href={h} className={(h==="/"?path===h:path===h||path.startsWith(h+"/"))?"nav-active":""}>{l}</Link>)}</nav><div className="head-actions">{SEARCH_ENABLED&&<button onClick={()=>setSearch(!search)} aria-expanded={search}>Suche</button>}<Link href="/account" className="account-link">Konto</Link><button className="bag-btn" onClick={onCart}>Warenkorb <span className="bag-count">{cartCount}</span></button></div>{SEARCH_ENABLED&&search&&<form className="search-bar" role="search" onSubmit={e=>e.preventDefault()}><label htmlFor="site-search">GLOA durchsuchen</label><input id="site-search" placeholder="Matcha, Rezepte, Cafés…"/><button>Suche</button></form>}</header>{menuOpen&&<nav id="mobile-menu" className="mobile-nav" aria-label="Mobile Navigation">{visibleLinks.map(([h,l])=><Link key={h} href={h} onClick={()=>onMenuOpenChange(false)}>{l}</Link>)}<Link href="/account" onClick={()=>onMenuOpenChange(false)}>Konto</Link></nav>}</>
+ // THE MARQUEE IS DECORATION, AND IS NOW MARKED AS SUCH.
+ //
+ // It rendered two .bb-group copies - the second aria-hidden, so the
+ // loop reads seamlessly - and each copy carried FOUR real <Link>s to
+ // /for-cafes. That produced three separate defects on every page of
+ // the site:
+ //
+ //   axe aria-hidden-focus (serious)  four focusable links sat inside
+ //                                    aria-hidden="true", so a keyboard
+ //                                    user could focus what assistive
+ //                                    technology had been told is not
+ //                                    there.
+ //   eight tab stops before the logo  the first eight Tab presses on
+ //                                    EVERY page landed on the same
+ //                                    "B2B" link, inside a moving band.
+ //   25x12 px targets                 far under any touch-target floor,
+ //                                    and animated while being aimed at.
+ //
+ // A scrolling brand band is decoration: the text is repeated eight
+ // times and says nothing a screen reader needs to hear eight times,
+ // and B2B is already a header nav item AND a footer link, so nothing
+ // becomes unreachable. So the whole band is aria-hidden and every
+ // link inside it is taken out of the tab order. A mouse can still
+ // click it; the keyboard and the screen reader skip straight to the
+ // header, which is where the same destinations live.
+ const marqueeGroup=<div className="bb-group"><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes" tabIndex={-1}>B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes" tabIndex={-1}>B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes" tabIndex={-1}>B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes" tabIndex={-1}>B2B</Link></div>;
+ return <><div className="brand-bar" aria-hidden="true"><div className="bb-track">{marqueeGroup}{marqueeGroup}</div></div><header className={scrolled?"compact":""}><button className="menu" ref={menuButtonRef} onClick={()=>onMenuOpenChange(!menuOpen)} aria-expanded={menuOpen} aria-controls="mobile-menu">{menuOpen?"Schließen":"Menü"}</button><Mark/><nav aria-label="Hauptnavigation">{visibleLinks.map(([h,l])=><Link key={h} href={h} className={(h==="/"?path===h:path===h||path.startsWith(h+"/"))?"nav-active":""}>{l}</Link>)}</nav><div className="head-actions">{SEARCH_ENABLED&&<button onClick={()=>setSearch(!search)} aria-expanded={search}>Suche</button>}<Link href="/account" className="account-link">Konto</Link><button className="bag-btn" onClick={onCart}>Warenkorb <span className="bag-count">{cartCount}</span></button></div>{SEARCH_ENABLED&&search&&<form className="search-bar" role="search" onSubmit={e=>e.preventDefault()}><label htmlFor="site-search">GLOA durchsuchen</label><input id="site-search" placeholder="Matcha, Rezepte, Cafés…"/><button>Suche</button></form>}</header>{menuOpen&&<nav id="mobile-menu" className="mobile-nav" aria-label="Mobile Navigation">{visibleLinks.map(([h,l])=><Link key={h} href={h} onClick={()=>onMenuOpenChange(false)}>{l}</Link>)}<Link href="/account" onClick={()=>onMenuOpenChange(false)}>Konto</Link></nav>}</>
 }
 /**
  * THE MOBILE DOCK.
