@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  GLOA sitemap.
+
+  There was none: /sitemap.xml fell through to the catch-all and
+  answered HTTP 200 with the site's HTML.
+
+  This lists exactly the URLs in INDEXABLE_ROUTES (lib/publicRoutes.ts),
+  in the same order, and tests/seo-discovery.test.mjs fails if the two
+  ever disagree - so a page added to the site cannot silently go missing
+  here, and a URL cannot appear here without existing.
+
+  DELIBERATELY ABSENT:
+    /account/*, /auth/*, /order/*   private or transactional
+    /rezepte, /journal              withheld for this launch
+    /shop/metal-case                not a launch product
+    /wholesale                      alias; /for-cafes is canonical
+    /adminxyzuebersicht             not public
+
+  No <lastmod>, <changefreq> or <priority>. A lastmod that is not
+  maintained is worse than none - it teaches a crawler to distrust the
+  file - and changefreq/priority are hints search engines have long
+  ignored. Omitting them is valid sitemap XML and states nothing false.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://gloamatcha.com/</loc></url>
+  <url><loc>https://gloamatcha.com/shop</loc></url>
+  <url><loc>https://gloamatcha.com/shop/matcha</loc></url>
+  <url><loc>https://gloamatcha.com/our-matcha</loc></url>
+  <url><loc>https://gloamatcha.com/about</loc></url>
+  <url><loc>https://gloamatcha.com/launch</loc></url>
+  <url><loc>https://gloamatcha.com/for-cafes</loc></url>
+  <url><loc>https://gloamatcha.com/partnerships</loc></url>
+  <url><loc>https://gloamatcha.com/contact</loc></url>
+  <url><loc>https://gloamatcha.com/impressum</loc></url>
+  <url><loc>https://gloamatcha.com/datenschutz</loc></url>
+  <url><loc>https://gloamatcha.com/agb</loc></url>
+  <url><loc>https://gloamatcha.com/widerruf</loc></url>
+  <url><loc>https://gloamatcha.com/versand</loc></url>
+</urlset>

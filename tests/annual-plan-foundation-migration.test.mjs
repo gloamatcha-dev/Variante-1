@@ -1118,6 +1118,28 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // two cannot diverge. tests/partnerships-page.test.mjs asserts the
     // position and the single occurrence directly against the source.
     "app/Chrome.tsx",
+    // DISCOVERY PASS: three presentation/metadata files, no payment,
+    // fulfillment, account or annual logic among them.
+    //
+    //   app/page.tsx     gained a metadata export. The homepage was the
+    //                    one route shipping no canonical at all, so every
+    //                    ?utm_/?fbclid copy of the front page was its own
+    //                    indexable URL. The component it renders is
+    //                    byte-identical: still <GloaSite route="home"/>.
+    //   app/layout.tsx   metadataBase stopped being built from the
+    //                    caller-controlled Host header and is pinned to
+    //                    the production origin; the Organization JSON-LD
+    //                    gained absolute URLs, sameAs and an address from
+    //                    /impressum, plus Brand and WebSite nodes. No
+    //                    price, offer or availability is published -
+    //                    tests/seo-discovery.test.mjs asserts that
+    //                    directly against the served markup.
+    //   next.config.ts   four response headers (nosniff, Referrer-Policy,
+    //                    Permissions-Policy, X-Frame-Options). No CSP was
+    //                    guessed at, so no resource the shop needs can be
+    //                    blocked by this.
+    "app/page.tsx",
+    "next.config.ts",
     // LAUNCH CONTENT: one added constant, RECIPES_VISIBLE, beside the
     // existing SHOP_STATUS. It is a presentation flag read by the header,
     // the footer and the homepage to withhold the recipe entry points for

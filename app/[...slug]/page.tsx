@@ -1,5 +1,8 @@
+import { notFound } from "next/navigation";
 import { GloaSite } from "../GloaSite";
 import { PRICES_VISIBLE } from "../content";
+import { isKnownRoute } from "../../lib/publicRoutes";
+import { isProductWithheld } from "../../lib/catalogAvailability";
 import type { Metadata } from "next";
 
 /**
@@ -60,5 +63,55 @@ const seo:Record<string,[string,string]>={
  "widerruf":["Widerruf","Informationen zu deinem gesetzlichen Widerrufsrecht."],
  "versand":["Versandinformationen","Liefergebiete, Versandkosten und Lieferzeiten im Überblick."],
 };
-export async function generateMetadata({params}:{params:Promise<{slug:string[]}>}):Promise<Metadata>{const{slug}=await params;const path=slug.join("/");const base=path.startsWith("account/orders/")?seo["account/orders"]:path.startsWith("account/subscriptions/")?seo["account/subscriptions"]:path.startsWith("rezepte/")?seo.rezepte:path.startsWith("journal/")?seo.journal:path.startsWith("shop/")?seo.shop:seo[path]||["GLOA","Matcha aus Japan."];const noIndex=path.startsWith("account")||path.startsWith("auth/")||path.startsWith("order/");return{title:`${base[0]} · GLOA`,description:base[1],...(noIndex?{robots:{index:false,follow:false}}:{}),alternates:{canonical:`/${path}`},openGraph:{title:`${base[0]} · GLOA`,description:base[1],images:["/gloa-logo-slogan-link.png"]}}}
-export default async function Page({params}:{params:Promise<{slug:string[]}>}){const{slug}=await params;return <GloaSite route={slug.join("/")}/>}
+/**
+ * THE PRODUCT PAGE NEEDS ITS OWN TITLE.
+ *
+ * Every /shop/<slug> fell back to the /shop pair, so /shop and
+ * /shop/matcha shipped the identical title AND description - two
+ * indexable pages telling a search engine they are the same page.
+ * /shop/matcha is the one product page this launch has, so it gets its
+ * own pair; any other slug keeps the shop fallback, which is right for
+ * a page whose product the server cannot resolve.
+ *
+ * The description states only what the Impressum, the catalog and
+ * app/content.ts already say: origin Shizuoka, organic, stone-ground,
+ * three sizes. No award, rating or superlative.
+ */
+const PRODUCT_SEO:Record<string,[string,string]>={
+ "shop/matcha":["GLOA Matcha","GLOA Matcha aus Shizuoka, Japan. Bio-zertifiziert und steinvermahlen, in 30 g, 50 g und 100 g."],
+};
+
+/**
+ * TITLES CARRY THE BRAND ONCE.
+ *
+ * "Über GLOA · GLOA", "GLOA Launch List · GLOA" and "GLOA for Cafés ·
+ * GLOA" all shipped the word twice, because the suffix was appended
+ * unconditionally. A title that already names the brand keeps it as it
+ * is; everything else still gets the suffix.
+ */
+function withBrand(title:string):string{
+ return /\bGLOA\b/.test(title) ? title : `${title} · GLOA`;
+}
+
+export async function generateMetadata({params}:{params:Promise<{slug:string[]}>}):Promise<Metadata>{const{slug}=await params;const path=slug.join("/");
+ // An unknown URL gets no metadata worth computing - app/not-found.tsx
+ // supplies the 404's own title.
+ if(!isKnownRoute(path))return{title:"Seite nicht gefunden · GLOA",description:"Diese Seite gibt es nicht.",robots:{index:false,follow:true}};
+ const base=PRODUCT_SEO[path]||(path.startsWith("account/orders/")?seo["account/orders"]:path.startsWith("account/subscriptions/")?seo["account/subscriptions"]:path.startsWith("rezepte/")?seo.rezepte:path.startsWith("journal/")?seo.journal:path.startsWith("shop/")?seo.shop:seo[path]||["GLOA","Matcha aus Japan."]);
+ const title=withBrand(base[0]);
+ // A product the shop withholds must not be indexed either. The page
+ // still resolves and still says "nicht verfügbar" - it is simply not
+ // offered to a search engine as a result, which would otherwise send
+ // people to a product they cannot buy. Handled here rather than by a
+ // robots.txt Disallow, because noindex removes an already-indexed URL
+ // while Disallow only stops the recrawl that would have removed it.
+ const withheldProduct=path.startsWith("shop/")&&isProductWithheld(path.slice(5));
+ const noIndex=withheldProduct||path.startsWith("account")||path.startsWith("auth/")||path.startsWith("order/");
+ return{title,description:base[1],...(noIndex?{robots:{index:false,follow:false}}:{}),alternates:{canonical:`/${path}`},openGraph:{type:"website",url:`/${path}`,siteName:"GLOA",title,description:base[1],images:["/gloa-logo-slogan-link.png"]},twitter:{card:"summary_large_image",title,description:base[1],images:["/gloa-logo-slogan-link.png"]}}}
+
+export default async function Page({params}:{params:Promise<{slug:string[]}>}){const{slug}=await params;const path=slug.join("/");
+ // THE SOFT-404 ENDS HERE. Every unknown URL used to render the site's
+ // own "404" heading under an HTTP 200, which tells a crawler the page
+ // is real. notFound() sends a genuine 404 and renders app/not-found.tsx.
+ if(!isKnownRoute(path))notFound();
+ return <GloaSite route={path}/>}

@@ -1699,7 +1699,10 @@ test("77: the structured-data logo is the wordmark, not the social preview", () 
   // schema.org/logo is cropped to a square or a small box by whatever
   // consumes it, which cuts the slogan off the lockup and shrinks the
   // mark inside its own baked-in margins.
-  assert.match(layout, /"@type": "Organization"[\s\S]*?logo: "\/gloa-logo-blue-600\.png"/);
+  // The URL is absolute now: JSON-LD is not resolved against the page,
+  // so a consumer reading it out of a crawl index had nothing to resolve
+  // "/gloa-logo-blue-600.png" against. Same asset, stated usably.
+  assert.match(layout, /"@type": "Organization"[\s\S]*?logo: `\$\{SITE_ORIGIN\}\/gloa-logo-blue-600\.png`/);
   // The Open Graph and Twitter cards keep the lockup - that IS what it
   // is for.
   assert.match(layout, /openGraph:[\s\S]*?gloa-logo-slogan-link\.png/);

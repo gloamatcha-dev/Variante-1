@@ -1,0 +1,27 @@
+# GLOA - https://gloamatcha.com
+#
+# There was no robots.txt at all: /robots.txt fell through to the
+# catch-all route and answered HTTP 200 with the site's HTML, which is
+# not a robots file and is not parseable as one.
+#
+# DEFAULT-ALLOW ON PURPOSE. Search and answer engines may read the whole
+# public site. No per-crawler allowlist is maintained here, because one
+# has to be kept up to date to keep working and a forgotten entry
+# silently removes the site from a search surface.
+#
+# The Disallow lines below are about crawl waste, not about protection:
+# they keep crawlers out of private, transactional and API paths that
+# have nothing to index. Real access control lives in the application -
+# RLS on every table, auth on every account route, and a bearer secret
+# on every internal endpoint. Nothing here is load-bearing for security,
+# and nothing here should ever be relied on for it.
+
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /account
+Disallow: /auth/
+Disallow: /order/
+Disallow: /adminxyzuebersicht
+
+Sitemap: https://gloamatcha.com/sitemap.xml

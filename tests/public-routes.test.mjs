@@ -32,14 +32,22 @@ test.after(() => {
 // One stable marker per route: the page title plus the h1, both read from
 // the current build rather than guessed. A heading is what actually
 // identifies a page to a customer, so it is a fair thing to pin.
+// TITLES THAT NAME THE BRAND ONCE. "Über GLOA · GLOA" and "GLOA for
+// Cafés · GLOA" shipped the word twice, because the suffix was appended
+// unconditionally in app/[...slug]/page.tsx. A title that already
+// contains GLOA now keeps it as it is, which is what these pins record.
+// The homepage title also states the bio positioning, which is the one
+// fact about the product a search result should carry.
+// tests/seo-discovery.test.mjs enforces uniqueness across every
+// indexable page; these pins are the per-route spelling.
 const ROUTES = [
-  { path: "/", title: "GLOA · Matcha aus Japan", heading: "<h1>Matcha.<br/><span class=\"hero-line-2\">Is for everyone.</span></h1>" },
+  { path: "/", title: "GLOA · Bio-Matcha aus Japan", heading: "<h1>Matcha.<br/><span class=\"hero-line-2\">Is for everyone.</span></h1>" },
   // The same two lines. The route classes stayed; the gloa-hero-* pair
   // is the shared homepage scale every page hero now reads - see
   // tests/page-hero-typography.test.mjs.
   { path: "/our-matcha", title: "Unser Matcha · GLOA", heading: '<h1 class="matcha-hero-headline"><span class="matcha-hero-line gloa-hero-primary">Matcha.</span><i class="matcha-hero-line matcha-hero-line-accent gloa-hero-secondary">Ohne Umwege.</i></h1>' },
-  { path: "/about", title: "Über GLOA · GLOA", heading: '<h1 class="about-hero-headline"><span class="about-hero-line gloa-hero-primary">Good energy.</span><i class="about-hero-line about-hero-line-accent gloa-hero-secondary">No theatre.</i></h1>' },
-  { path: "/for-cafes", title: "GLOA for Cafés · GLOA", heading: '<h1 class="b2b-hero-headline"><span class="b2b-hero-line gloa-hero-primary">Dein Matcha.</span><i class="b2b-hero-line b2b-hero-line-accent gloa-hero-secondary">Dein Signature-Drink.</i></h1>' },
+  { path: "/about", title: "Über GLOA", heading: '<h1 class="about-hero-headline"><span class="about-hero-line gloa-hero-primary">Good energy.</span><i class="about-hero-line about-hero-line-accent gloa-hero-secondary">No theatre.</i></h1>' },
+  { path: "/for-cafes", title: "GLOA for Cafés", heading: '<h1 class="b2b-hero-headline"><span class="b2b-hero-line gloa-hero-primary">Dein Matcha.</span><i class="b2b-hero-line b2b-hero-line-accent gloa-hero-secondary">Dein Signature-Drink.</i></h1>' },
   // /rezepte gained a route class of its own when the page moved onto the
   // system: the shared pair still carries the type, the route pair the
   // colour. Same two lines, same words.

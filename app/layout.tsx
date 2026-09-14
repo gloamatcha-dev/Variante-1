@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
+import { SITE_ORIGIN } from "../lib/publicRoutes";
 import { Inter, Cormorant_Garamond } from "next/font/google";
 import "./globals.css";
 
@@ -34,18 +34,28 @@ const display = Cormorant_Garamond({
   display: "swap",
 });
 
+/**
+ * metadataBase IS PINNED, NOT DERIVED FROM THE REQUEST.
+ *
+ * It used to be built from x-forwarded-host / host. Those headers are
+ * caller-controlled - lib/siteUrl.ts refuses to trust them for exactly
+ * this reason when building Stripe redirects - and metadataBase is what
+ * every relative canonical and every Open Graph image URL is resolved
+ * against. A request carrying a different Host would have produced
+ * canonicals pointing somewhere else entirely, and a preview deployment
+ * produced canonicals naming the preview domain.
+ *
+ * A canonical URL only has one correct value, on every host that ever
+ * serves this bundle: the production origin. So it is a constant.
+ */
 export async function generateMetadata(): Promise<Metadata> {
-  const requestHeaders = await headers();
-  const host = requestHeaders.get("x-forwarded-host") || requestHeaders.get("host") || "gloa.example";
-  const protocol = requestHeaders.get("x-forwarded-proto") || (host.includes("localhost") ? "http" : "https");
-  const base = new URL(`${protocol}://${host}`);
   return {
-    metadataBase: base,
-    title: "GLOA · Matcha aus Japan",
-    description: "Matcha aus Shizuoka, Japan. Für Latte, pur oder wie du willst.",
+    metadataBase: new URL(SITE_ORIGIN),
+    title: "GLOA · Bio-Matcha aus Japan",
+    description: "Bio-zertifizierter Matcha aus Shizuoka, Japan. Eine Matcha-Marke aus Berlin.",
     icons: { icon: "/favicon.svg" },
-    openGraph: { title: "GLOA · Matcha aus Japan", description: "Matcha aus Japan. Bald in Berlin.", images: [{ url: "/gloa-logo-slogan-link.png", width: 1731, height: 909 }] },
-    twitter: { card: "summary_large_image", title: "GLOA · Matcha aus Japan", description: "Matcha aus Japan. Bald in Berlin.", images: ["/gloa-logo-slogan-link.png"] },
+    openGraph: { type: "website", url: SITE_ORIGIN, siteName: "GLOA", locale: "de_DE", title: "GLOA · Bio-Matcha aus Japan", description: "Bio-zertifizierter Matcha aus Shizuoka, Japan. Eine Matcha-Marke aus Berlin.", images: [{ url: "/gloa-logo-slogan-link.png", width: 1731, height: 909 }] },
+    twitter: { card: "summary_large_image", title: "GLOA · Bio-Matcha aus Japan", description: "Bio-zertifizierter Matcha aus Shizuoka, Japan. Eine Matcha-Marke aus Berlin.", images: ["/gloa-logo-slogan-link.png"] },
   };
 }
 
@@ -64,12 +74,81 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   // /gloa-logo-blue-600.png is the approved wordmark itself: GLOA Blue,
   // transparent, no slogan, no padding. The Open Graph and Twitter cards
   // above keep the lockup, because that is what they are for.
+  // ── WHY THESE URLS ARE ABSOLUTE NOW ──────────────────────────
+  //
+  // This block shipped `url: "/"` and `logo: "/gloa-logo-blue-600.png"`.
+  // JSON-LD is not resolved against the page the way an <img src> is -
+  // a consumer reading it out of a crawl index has no base to resolve
+  // "/" against, so the two most identifying fields of the whole entity
+  // were unusable. Every URL below is absolute and points at the one
+  // production origin.
+  //
+  // ── ONLY PUBLISHED FACTS ─────────────────────────────────────
+  //
+  // legalName, the address and the email are exactly what /impressum
+  // already states publicly. sameAs carries the two profiles the footer
+  // already links and nothing else - no LinkedIn, no Facebook, no
+  // Pinterest, because no such profile is established anywhere in this
+  // project. There is no foundingDate, no employee count, no rating and
+  // no award: none of those are verified here, and a knowledge panel
+  // built on a guess is worse than one built on less.
+  //
+  // No organic certification body or certificate number appears either.
+  // app/content.ts records that the plain "bio" claim is released while
+  // the document itself is still pending, so the claim lives in the
+  // description as prose and no machine-readable certification field is
+  // fabricated around it.
   const organization = {
     "@context": "https://schema.org",
     "@type": "Organization",
+    "@id": `${SITE_ORIGIN}/#organization`,
     name: "GLOA",
-    url: "/",
-    logo: "/gloa-logo-blue-600.png",
+    legalName: "Cara 2 GmbH",
+    url: `${SITE_ORIGIN}/`,
+    logo: `${SITE_ORIGIN}/gloa-logo-blue-600.png`,
+    image: `${SITE_ORIGIN}/gloa-logo-slogan-link.png`,
+    description:
+      "GLOA ist eine Matcha-Marke aus Berlin. Bio-zertifizierter Matcha aus Shizuoka, Japan.",
+    email: "hello@gloamatcha.com",
+    address: {
+      "@type": "PostalAddress",
+      streetAddress: "Hardenbergstr. 4",
+      postalCode: "10623",
+      addressLocality: "Berlin",
+      addressCountry: "DE",
+    },
+    sameAs: [
+      "https://instagram.com/gloa.matcha",
+      "https://www.tiktok.com/@gloa.matcha",
+    ],
   };
-  return <html lang="de"><body className={`${sans.variable} ${display.variable}`}><script type="application/ld+json" dangerouslySetInnerHTML={{__html:JSON.stringify(organization)}} />{children}</body></html>;
+
+  // The brand as its own node, referenced by @id from the organization
+  // rather than repeated. One entity, two roles - a consumer that
+  // understands Brand gets it, one that only reads Organization is not
+  // handed a second, competing description of the same company.
+  const brand = {
+    "@context": "https://schema.org",
+    "@type": "Brand",
+    "@id": `${SITE_ORIGIN}/#brand`,
+    name: "GLOA",
+    url: `${SITE_ORIGIN}/`,
+    logo: `${SITE_ORIGIN}/gloa-logo-blue-600.png`,
+    description: "Bio-zertifizierter Matcha aus Shizuoka, Japan.",
+  };
+
+  // NO SearchAction. The site has no site-search, and declaring a
+  // potentialAction that resolves to nothing is a claim about a feature
+  // that does not exist.
+  const website = {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "@id": `${SITE_ORIGIN}/#website`,
+    name: "GLOA",
+    url: `${SITE_ORIGIN}/`,
+    inLanguage: "de-DE",
+    publisher: { "@id": `${SITE_ORIGIN}/#organization` },
+  };
+
+  return <html lang="de"><body className={`${sans.variable} ${display.variable}`}><script type="application/ld+json" dangerouslySetInnerHTML={{__html:JSON.stringify([organization,brand,website])}} />{children}</body></html>;
 }
