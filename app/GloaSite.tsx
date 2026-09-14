@@ -856,6 +856,19 @@ return <main className="pdp">
 {seed.description&&<p className="pdp-description">{seed.description}</p>}
 {sizes&&<p className="pdp-seed-sizes">{sizes}</p>}
 </div></section>
+{/* THE SAME RESERVE /shop's SEEDED BRANCH ALREADY CARRIES.
+    This page is the hero and nothing else, because the facts, the
+    glance band and the purchase column all belong to the interactive
+    page. That makes it 1315px tall against the finished page's 2590px,
+    so on a 940px desktop viewport the footer sat INSIDE the fold at
+    first paint and was pushed out of it on hydration: one 0.123 shift,
+    /shop/matcha at CLS 0.124 against a 0.1 budget. Mobile hid it - only
+    9.8px of footer was visible there, so the same event cost 0.012.
+
+    /shop never had the problem because its seeded branch kept the
+    reserve; this one dropped it. Same element, same rule, same reason:
+    hold a viewport so the growth happens below the fold. */}
+<div className="shop-products-reserve" aria-hidden="true"/>
 </main>}
 
 /** Route entry for /shop/<slug>. Picks the layout from the catalog rather

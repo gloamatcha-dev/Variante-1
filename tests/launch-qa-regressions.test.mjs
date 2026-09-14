@@ -292,8 +292,20 @@ test("6: both loading shells reserve the space they are about to fill", () => {
   assert.match(site, /<ShopSeedProducts seed=\{seed\}\/>/);
   assert.match(site, /:shell\(SHOP_HERO_LEAD,<p className="shop-hero-price">Laden…<\/p>,true\);/);
   assert.match(site, /if\(loading\)return seed\?<ProductSeedPage seed=\{seed\}\/>:shell\("Laden…",true\);/);
-  assert.equal([...site.matchAll(/className="shop-products-reserve" aria-hidden="true"/g)].length, 3,
+  // FOUR, one per loading path, and the count is the whole point: the
+  // seeded product page shipped without one and put /shop/matcha at
+  // desktop CLS 0.124 while /shop - same build, same mechanic, reserve
+  // intact - measured 0.000. Both shells and both seeded branches hold
+  // the space now, so a path that drops it again fails here rather than
+  // in a Core Web Vitals report weeks later.
+  assert.equal([...site.matchAll(/className="shop-products-reserve" aria-hidden="true"/g)].length, 4,
     "a loading path lost its reserve");
+  // Named individually, so the count cannot be satisfied by four of the
+  // same one.
+  const seedPageBlock = site.slice(site.indexOf("function ProductSeedPage("),
+                                   site.indexOf("/** Route entry for /shop/<slug>"));
+  assert.match(seedPageBlock, /<div className="shop-products-reserve" aria-hidden="true"\/>/,
+    "the seeded product page does not hold its layout");
   assert.match(css, /\.shop-products-reserve\{min-height:100vh\}/);
   assert.ok(!/shop-products-reserve"[^/]*>[^<]/.test(site), "the reserve gained content");
   // The error and empty states are unchanged - they reserve nothing.
