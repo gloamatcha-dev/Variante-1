@@ -1041,6 +1041,16 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // the source in tests/catalog-availability.test.mjs and
     // tests/catalog-read-resilience.test.mjs.
     "lib/checkoutQuote.ts",
+    // THE PRODUCT SOFT-404 CLOSEOUT: comments only. Two notes in this
+    // module described the OLD behaviour - that the server could not
+    // know whether a product slug exists, so every /shop/<slug> had to
+    // answer 200 - and a third named a test file that does not exist.
+    // Both are false statements in a load-bearing file now, so they
+    // were corrected. Not one route, prefix, indexable entry, origin or
+    // function body changed; the diff on this file is comment lines
+    // alone, and tests/seo-discovery.test.mjs measures the behaviour
+    // itself rather than trusting the prose.
+    "lib/publicRoutes.ts",
   ];
 
   // Phase 4B4 edits ONE application module: the single canonical Stripe

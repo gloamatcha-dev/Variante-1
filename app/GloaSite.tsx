@@ -5,6 +5,11 @@ import { Header, Footer, MobileDock } from "./Chrome";
 import { BRAND, PRODUCT, SHOP_STATUS, RECIPES_VISIBLE, PRICES_VISIBLE } from "./content";
 import { useCatalog, useCatalogList, fmtCents, per100gCents } from "./useCatalog";
 import { isProductWithheld } from "../lib/catalogAvailability";
+// The /shop/gloa-matcha alias used to be spelled out inline here. It is
+// now one map in a zero-import leaf, read by this renderer AND by the
+// server-side existence check - two readers that must agree about what
+// a URL means, and cannot drift.
+import { resolveProductSlug } from "../lib/productSlugs";
 import type { CatalogProduct, CatalogVariant } from "./useCatalog";
 // THE SAME ARITHMETIC THE SERVER USES, NOT A COPY OF ITS ANSWERS.
 // lib/annualPlanRules.ts is a zero-import leaf, so the browser can run
@@ -2609,7 +2614,7 @@ const closeCart=useCallback(()=>setCartOpen(false),[]);
 let page:React.ReactNode;
 if(route==="home")page=<Home/>;
 else if(route==="shop")page=<Shop onAdd={openCart}/>;
-else if(route.startsWith("shop/"))page=<ProductPage slug={route.slice(5)==="gloa-matcha"?"matcha":route.slice(5)} onAdd={openCart}/>;
+else if(route.startsWith("shop/"))page=<ProductPage slug={resolveProductSlug(route.slice(5))} onAdd={openCart}/>;
 else if(route==="our-matcha")page=<MatchaPage/>;
 else if(route==="about")page=<About/>;
 else if(route==="for-cafes"||route==="wholesale")page=<ForCafes/>;

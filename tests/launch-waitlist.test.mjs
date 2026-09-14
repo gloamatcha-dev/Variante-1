@@ -700,8 +700,11 @@ test("40: /launch is a real route with its own metadata", () => {
   assert.match(seo, /"launch":\["GLOA Launch List"/);
   assert.match(seo, /Trag dich ein und wir sagen dir Bescheid, sobald GLOA offiziell startet\./);
   // The shared canonical/openGraph builder covers it, so nothing extra
-  // had to be invented for this page.
-  assert.match(seo, /alternates:\{canonical:`\/\$\{path\}`\}/);
+  // had to be invented for this page. The canonical is now computed one
+  // line earlier (canonicalPathFor, which only differs for an aliased
+  // product URL), so /launch still canonicalises to itself.
+  assert.match(seo, /const canonical=`\/\$\{canonicalPathFor\(path\)\}`;/);
+  assert.match(seo, /alternates:\{canonical\}/);
 });
 
 test("41: the hero uses the shared page-hero scale rather than inventing one", () => {

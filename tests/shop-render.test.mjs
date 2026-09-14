@@ -98,9 +98,14 @@ test("shop: the historic /shop/gloa-matcha URL still resolves", async () => {
   assert.equal(status, 200);
 });
 
-test("shop: an unknown product slug does not crash the page", async () => {
+test("shop: an unknown product slug answers a real 404", async () => {
+  // It used to answer 200 with "Produkt vorübergehend nicht verfügbar.",
+  // because the catalog was read only in the browser and the server had
+  // no way to tell a typo from a product. It is read server-side now
+  // (lib/catalogProducts.ts), so an invented slug is a genuine 404.
+  // The full behaviour lives in tests/shop-product-discovery.test.mjs.
   const { status, html } = await getHtml("/shop/does-not-exist-abc");
-  assert.equal(status, 200);
+  assert.equal(status, 404);
   assert.doesNotMatch(html, /Cannot read|undefined is not|TypeError/i);
 });
 
@@ -108,8 +113,10 @@ test("shop: an unknown product slug does not crash the page", async () => {
 
 test("shop: the standalone accessory route renders", async () => {
   // Generic /shop/<slug> route. This proves the route and layout resolve,
-  // not that the catalog row exists - catalog data is fetched client-side,
-  // so server rendering returns the shell either way.
+  // not that the catalog row exists - the product is withheld for this
+  // launch (lib/catalogAvailability.ts) and its page is a deliberate
+  // 200 + noindex rather than a 404, which is what the server-side
+  // existence check deliberately steps around.
   const { status, html } = await getHtml("/shop/metal-case");
   assert.equal(status, 200);
   assert.doesNotMatch(html, /Cannot read|undefined is not|TypeError/i);

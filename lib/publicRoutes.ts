@@ -23,10 +23,10 @@
  *
  * The router that decides what to RENDER is the branch chain in
  * app/GloaSite.tsx. This module decides what EXISTS. Two lists that
- * must agree are two lists that can drift, so tests/route-integrity
- * .test.mjs reads both and fails if a route appears in one and not the
- * other. Adding a page therefore means adding it here, and forgetting
- * is loud rather than silent.
+ * must agree are two lists that can drift, so tests/seo-discovery
+ * .test.mjs reads both and fails if the renderer serves a route this
+ * list does not know. Adding a page therefore means adding it here, and
+ * forgetting is loud rather than silent.
  */
 
 /** Exact routes, written as the catch-all sees them: no leading slash. */
@@ -64,14 +64,13 @@ export const ROUTES: readonly string[] = Object.freeze([
  * `segments` is how many path segments the whole URL has, so
  * /account/orders/<id> (3) cannot be satisfied by /account/orders/a/b.
  *
- * NOTE ON /shop/: the product catalog is read in the browser (RLS,
- * publishable key), so the server genuinely cannot know whether a given
- * product slug exists. Every /shop/<slug> therefore answers 200 and the
- * page itself renders "Produkt vorübergehend nicht verfügbar." for a
- * slug the catalog does not return. That is a real soft-404 for
- * invented product slugs and is listed as such in the report rather
- * than papered over - fixing it properly means a server-side catalog
- * read, which is a bigger change than this pass.
+ * NOTE ON /shop/: this list answers the SHAPE of a product URL, not
+ * whether the product exists. It cannot: the tail is a catalog slug,
+ * and only the catalog knows. lib/catalogProducts.ts asks it, on the
+ * server, before the page renders - so /shop/does-not-exist is a
+ * genuine 404 rather than the 200 it used to be, while a catalog that
+ * could not be reached still renders the page rather than de-listing a
+ * real product over a blip.
  */
 export const DYNAMIC_PREFIXES: readonly { prefix: string; segments: number }[] = Object.freeze([
   { prefix: "shop/", segments: 2 },

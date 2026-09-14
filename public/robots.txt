@@ -15,6 +15,35 @@
 # RLS on every table, auth on every account route, and a bearer secret
 # on every internal endpoint. Nothing here is load-bearing for security,
 # and nothing here should ever be relied on for it.
+#
+# ── SEARCH CRAWLERS VS TRAINING CRAWLERS ────────────────────
+#
+# Documented, not decided here. A robots.txt cannot express the
+# difference by itself, so it is worth writing down what the one
+# "User-agent: *" block above actually covers:
+#
+#   SEARCH / DISCOVERY   Googlebot, Bingbot, DuckDuckBot and the
+#                        crawlers that build a search index. Allowed.
+#                        This is what puts GLOA in results at all.
+#   USER-REQUESTED       OAI-SearchBot, ChatGPT-User,
+#                        PerplexityBot, Google-Extended reading for a
+#                        grounded answer - an agent fetching a page
+#                        because a person asked about GLOA. Allowed,
+#                        and deliberately: an answer engine that
+#                        cannot read the site describes it from
+#                        hearsay instead.
+#   TRAINING             GPTBot, CCBot, ClaudeBot, Applebot-Extended
+#                        and the rest collecting corpus material.
+#                        Also allowed, by the same default-allow rule
+#                        and NOT by a decision recorded here.
+#
+# Blocking the training group is a business decision with a real cost
+# on both sides, and it is not made in this pass. If it is ever made,
+# it belongs here as explicit per-agent Disallow blocks placed BELOW
+# the "User-agent: *" block - and it must not touch the search or
+# user-requested agents, which share no user-agent token with them.
+# A site is not "removed from AI" by blocking training crawlers, and
+# blocking the wrong token removes it from search instead.
 
 User-agent: *
 Allow: /
