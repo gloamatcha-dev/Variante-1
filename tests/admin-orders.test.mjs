@@ -364,16 +364,30 @@ test("5e: 'today' is the operator's day in Berlin, not UTC's", () => {
    6. THE SHELL
    ══════════════════════════════════════════════════════════════ */
 
-test("6: the navigation offers three real sections and fakes none", () => {
-  assert.match(shell, /const \[view, setView\] = useState<"overview" \| "orders" \| "waitlist">\("overview"\)/);
-  for (const label of ["Übersicht", "Bestellungen", "Launch List"]) {
+test("6: the navigation offers four real sections and fakes none", () => {
+  // PAKET 4A.2 made Inventar real. It used to be one of the three
+  // "bald" labels; a tab that opens nothing is worse than one that says
+  // it is not here yet, and the inverse is also true - a section that
+  // exists must not still be advertised as coming.
+  assert.match(shell, /const \[view, setView\] = useState<"overview" \| "orders" \| "inventory" \| "waitlist">\("overview"\)/);
+  // The "bald" list must no longer name a section that exists.
+  const soon = shell.slice(shell.indexOf("ops-nav-soon") - 400, shell.indexOf("ops-nav-soon"));
+  assert.ok(!soon.includes("Inventar"),
+    "Inventar is still listed as coming while its tab exists");
+  assert.ok(soon.includes("B2B") && soon.includes("Kosten"),
+    "the two sections that really are still coming stopped saying so");
+  for (const label of ["Übersicht", "Bestellungen", "Inventar", "Launch List"]) {
     assert.ok(shell.includes(`"${label}"`) || shell.includes(`>${label}<`), `no nav entry for ${label}`);
   }
-  // Coming sections are named but are not buttons and open nothing.
-  assert.match(shell, /\["Inventar", "B2B", "Kosten"\]\.map/);
+  // Coming sections are still named but are not buttons and open
+  // nothing. Two of them now, because Inventar graduated.
+  assert.match(shell, /\["B2B", "Kosten"\]\.map/);
   assert.match(shell, /<span className="ops-nav-soon"/);
-  assert.ok(!/setView\("inventory"\)|setView\("b2b"\)|setView\("costs"\)/.test(shell),
+  assert.ok(!/setView\("b2b"\)|setView\("costs"\)/.test(shell),
     "a coming section is wired to a view");
+  // And Inventar IS wired to one, which is the other half of the claim.
+  assert.match(shell, /view === "inventory" && <AdminInventory/,
+    "the inventory tab renders nothing");
 });
 
 test("6b: the waitlist screen is intact, not replaced", () => {
@@ -438,7 +452,12 @@ test("6f: mobile turns the table into rows and never scrolls the page sideways",
 test("7: /api/admin gained orders and nothing else", () => {
   const dirs = readdirSync(path.join(ROOT, "app/api/admin"), { withFileTypes: true })
     .filter(e => e.isDirectory()).map(e => e.name).sort();
-  assert.deepEqual(dirs, ["launch", "orders", "session", "waitlist"]);
+  // PAKET 4A.2 added the inventory. Every route under it is POST-only
+  // and opens through the same session gate; none of them is reachable
+  // from a customer-facing page, and none is called by an order, a
+  // shipment, a refund or a cancellation. Reviewed in
+  // tests/inventory.test.mjs.
+  assert.deepEqual(dirs, ["inventory", "launch", "orders", "session", "waitlist"]);
   const orderDirs = readdirSync(path.join(ROOT, "app/api/admin/orders"), { withFileTypes: true })
     .filter(e => e.isDirectory()).map(e => e.name).sort();
   // PAKET 4A.1B added the four actions, one route each rather than one

@@ -792,9 +792,9 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
   // only - no table, no column, no function, no policy, no row.
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 49);
+  assert.equal(migrations.length, 50);
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 49), [], "a migration 050 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 50), [], "a migration 051 or beyond appeared");
 
   // The API surface is unchanged: no account endpoint exists, because the
   // portal reads its own rows under RLS.
@@ -807,6 +807,23 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
   };
   walk("app/api");
   assert.deepEqual(apiDirs.sort(), [
+    // PAKET 4A.2. The manual inventory: two reads (a page of items, one
+    // item with its history), four writes that change descriptive fields
+    // or create an item, and two that book stock - both of the latter
+    // through migration 050's atomic functions rather than a column
+    // write. All nine are POST-only, all open through the same session
+    // gate, none reads a price or an order, and none is called by the
+    // checkout, a shipment, a refund or a cancellation. Reviewed in
+    // tests/inventory.test.mjs.
+    "/admin/inventory/categories",
+    "/admin/inventory/categories/save",
+    "/admin/inventory/items",
+    "/admin/inventory/items/archive",
+    "/admin/inventory/items/create",
+    "/admin/inventory/items/detail",
+    "/admin/inventory/items/update",
+    "/admin/inventory/movement",
+    "/admin/inventory/stocktake",
     // The launch admin surface. Three POST-only routes behind
     // LAUNCH_ADMIN_SECRET that release and run the one-time launch
     // announcement. They touch no account, order, subscription or annual

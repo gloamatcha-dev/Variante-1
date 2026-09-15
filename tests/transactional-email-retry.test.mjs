@@ -1091,13 +1091,29 @@ test("regression: no migration was added and 022-033 are untouched", () => {
     // `owned` has already proved that for it like every other file), and
     // it may only ADD: a drop or an alter of an existing column is still
     // a failure here, for 049 as for anything else.
-    if (name === "049_direct_cancellation_and_refund_lock.sql") {
-      assert.ok(!/drop column/i.test(later), "049 drops a column from public.orders");
-      assert.ok(!/alter column/i.test(later), "049 alters an existing column on public.orders");
-      assert.ok(!/drop constraint/i.test(later), "049 drops a constraint from public.orders");
-      assert.ok(!/create policy/i.test(later), "049 creates a policy");
+    // TWO NAMED EXCEPTIONS.
+    //
+    // 049 adds a SEVENTH state machine - the direct cancellation
+    // confirmation - and the refund lock's two claim columns. 050 is the
+    // manual inventory and does not touch public.orders at all; it is
+    // named here only so that the rule it must obey is stated rather
+    // than assumed.
+    //
+    // Both may only ADD. A drop or an alter of an existing column is
+    // still a failure, for them as for anything else.
+    if (name === "049_direct_cancellation_and_refund_lock.sql"
+        || name === "050_inventory_foundation.sql") {
+      assert.ok(!/drop column/i.test(later), `${name} drops a column`);
+      assert.ok(!/alter column/i.test(later), `${name} alters an existing column`);
+      // Scoped to public.orders: 050 creates four tables of its own and
+      // whatever it does inside them is its own business. What neither
+      // file may do is reach into the table the six states live on.
+      assert.ok(!/alter table public\.orders[\s\S]*?drop constraint/i.test(later),
+        `${name} drops a constraint from public.orders`);
+      assert.ok(!/create policy[^;]*on public\.orders/i.test(later),
+        `${name} creates a policy on public.orders`);
       assert.ok(!/grant[^;]*to (anon|authenticated)/i.test(later),
-        "049 grants something to a browser role");
+        `${name} grants something to a browser role`);
       continue;
     }
     assert.ok(!/alter table public\.orders/i.test(later),

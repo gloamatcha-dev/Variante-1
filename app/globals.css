@@ -9090,6 +9090,138 @@ header nav{gap:18px;font-size:12px}
 
 
 /* ══════════════════════════════════════════════════════════════
+   INVENTORY (Paket 4A.2)
+
+   Deliberately almost no new CSS. The inventory reuses the
+   operations vocabulary the order screen already established -
+   .ops-table, .ops-facts, .ops-action-block, .ops-confirm, the
+   drawer - because a second visual language for a second tab is
+   how an admin stops looking like one product.
+
+   What is genuinely new: a status colour per stock level, the
+   area picker, the before/after preview and the empty state.
+   ══════════════════════════════════════════════════════════════ */
+
+/* Stock status. Negative is berry because it is a bookkeeping error
+   waiting to be explained, not a shade of "running low". */
+.ops-stock-ok{ color:var(--blue); }
+.ops-stock-low{ color:var(--plum); }
+.ops-stock-out,.ops-stock-negative{ color:var(--berry); }
+
+/* The four counters above the table, same idiom as the order summary. */
+.ops-summary{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  gap:14px;
+  margin:22px 0 0;
+}
+.ops-summary div{ display:flex; flex-direction:column; gap:3px; min-width:0; }
+.ops-summary dt{
+  font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--plum); overflow-wrap:anywhere;
+}
+.ops-summary dd{ margin:0; font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; }
+
+.ops-inventory .ops-mail{ display:block; font-size:12px; color:rgba(17,17,17,.62); }
+.ops-inventory td{ vertical-align:top; }
+
+/* The area picker: checkboxes, because an item genuinely serves several
+   channels and duplicating it per channel would split its history. */
+.ops-area-picker{
+  border:1px solid var(--line);
+  padding:12px 14px;
+  margin:16px 0 0;
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px 18px;
+}
+.ops-area-picker legend{
+  font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--plum);
+  padding:0 6px;
+}
+.ops-area-picker .ops-radio{ flex:0 0 auto; }
+
+/* Before / movement / after, shown before anything is booked. Reading
+   the consequence is the point of the second click. */
+.ops-preview{
+  margin-top:16px;
+  padding:12px 14px;
+  background:rgba(79,58,91,.05);
+  border-left:2px solid var(--plum);
+}
+
+/* The negative-stock acknowledgement. Not a red wall - a sentence the
+   operator has to tick, because a late booking legitimately goes below
+   zero and refusing it would only make somebody fake a number. */
+.ops-negative-confirm{
+  align-items:flex-start !important;
+  margin-top:16px;
+  padding:12px 14px;
+  border-left:2px solid var(--berry);
+  background:rgba(166,30,89,.05);
+}
+.ops-negative-confirm span{ font-size:13px !important; line-height:1.5; }
+
+.ops-empty-state{
+  margin:26px 0 0;
+  padding:38px 28px;
+  border:1px solid var(--line);
+  text-align:center;
+}
+.ops-empty-state h3{ margin:0 0 10px; font-size:20px; letter-spacing:-.02em; }
+.ops-empty-state p{
+  margin:0 auto 20px; max-width:46ch; font-size:14px; line-height:1.6; color:var(--plum);
+}
+
+.ops-movements td{ font-variant-numeric:tabular-nums; }
+
+@media (max-width:760px){
+  /* The same card treatment the order and positions tables get. The
+     cells already carry data-label, so this is the existing idiom
+     rather than a third layout. */
+  .ops-inventory thead,.ops-movements thead{
+    position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0);
+  }
+  /* min-width:0 IS THE LOAD-BEARING HALF. The base .ops-table rule sets
+     min-width:840px so a seven-column table never crushes itself on
+     desktop; display:block alone does not undo that, and the table stays
+     840px wide inside a 350px wrapper - which is 490px of content the
+     operator cannot reach. The order list resets it the same way. */
+  .ops-inventory,.ops-movements{ min-width:0; }
+  .ops-inventory,.ops-inventory tbody,.ops-inventory tr,.ops-inventory td,
+  .ops-movements,.ops-movements tbody,.ops-movements tr,.ops-movements td{
+    display:block; width:auto;
+  }
+  .ops-inventory tr,.ops-movements tr{
+    border:1px solid rgba(79,58,91,.2);
+    padding:12px 14px;
+    margin:0 0 10px;
+  }
+  .ops-inventory tbody td,.ops-movements tbody td{
+    display:flex;
+    justify-content:space-between;
+    gap:14px;
+    padding:5px 0;
+    border:0;
+    white-space:normal;
+    text-align:right;
+    min-width:0;
+    overflow-wrap:anywhere;
+  }
+  .ops-inventory tbody td::before,.ops-movements tbody td::before{
+    content:attr(data-label);
+    flex:0 0 auto;
+    min-width:0;
+    font-size:10px; font-weight:700; letter-spacing:.12em; text-transform:uppercase;
+    color:var(--plum);
+    text-align:left;
+  }
+  .ops-summary{ grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); }
+  .ops-area-picker{ flex-direction:column; gap:6px; }
+  .ops-empty-state{ padding:28px 18px; }
+}
+
+/* ══════════════════════════════════════════════════════════════
    THE MOBILE DOCK
 
    A floating bar over the page on phones. Five targets, held off all

@@ -94,6 +94,30 @@ const routeSources = Object.fromEntries(
    order" for an order they placed weeks ago.
    ══════════════════════════════════════════════════════════════ */
 
+/**
+ * Every @media (max-width:760px) block in the stylesheet, concatenated.
+ *
+ * These tests ask "what happens on a phone", and that is not "whatever
+ * is in the LAST such block" - which is what lastIndexOf() used to
+ * return, and which silently pointed somewhere else the moment Paket
+ * 4A.2 added a block of its own below the order screen's.
+ */
+function mobileRules(source) {
+  let out = "", i = 0;
+  const marker = "@media (max-width:760px){";
+  while ((i = source.indexOf(marker, i)) !== -1) {
+    let depth = 1, j = i + marker.length;
+    while (j < source.length && depth > 0) {
+      if (source[j] === "{") depth += 1;
+      else if (source[j] === "}") depth -= 1;
+      j += 1;
+    }
+    out += source.slice(i, j) + "\n";
+    i = j;
+  }
+  return out;
+}
+
 test("1: no admin action can send an order confirmation", () => {
   for (const [name, src] of [["actions", actionsCode], ["ui", uiCode], ...Object.entries(routeSources)]) {
     for (const banned of [
@@ -722,7 +746,7 @@ test("8e: the operator sees the real email state, and no invented one", () => {
 });
 
 test("8f: the action panels work on a phone", () => {
-  const mobile = css.slice(css.lastIndexOf("@media (max-width:760px){", css.indexOf("THE MOBILE DOCK")));
+  const mobile = mobileRules(css);
   assert.ok(mobile.includes(".ops-action-buttons"), "the action buttons are not adapted for mobile");
   assert.match(mobile, /flex-direction:column/);
   assert.match(mobile, /width:100%/);
@@ -819,7 +843,7 @@ test("8g2: nothing in the order drawer can scroll sideways", () => {
 
 test("8g3: the five customer emails are two columns on desktop and one on a phone", () => {
   const always = outsideMediaQueries(css);
-  const mobile = css.slice(css.lastIndexOf("@media (max-width:760px){", css.indexOf("THE MOBILE DOCK")));
+  const mobile = mobileRules(css);
 
   assert.match(always, /\.ops-emails\{ grid-template-columns:repeat\(2,minmax\(0,1fr\)\); \}/,
     "the email list is not two columns on desktop");
@@ -846,7 +870,7 @@ test("8h: the positions table becomes cards on a phone", () => {
   // Five columns do not fit in 390px minus the drawer's padding. The
   // table was 17px wider than the drawer holding it, so the operator had
   // to swipe sideways inside the panel to reach the line total.
-  const mobile = css.slice(css.lastIndexOf("@media (max-width:760px){", css.indexOf("THE MOBILE DOCK")));
+  const mobile = mobileRules(css);
   assert.ok(mobile.includes(".ops-items thead"), "the positions header is not hidden on mobile");
   assert.match(mobile, /\.ops-items tbody td::before\{\s*content:attr\(data-label\)/,
     "the positions cells carry no label on mobile");

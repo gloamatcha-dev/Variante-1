@@ -2008,7 +2008,15 @@ test("034: it is the next free number and 022-033 are untouched", () => {
     // release_order_refund. It creates no policy, grants nothing to anon
     // or authenticated, drops nothing and alters no existing column.
     // Reviewed in tests/admin-order-actions.test.mjs.
-    "049_direct_cancellation_and_refund_lock.sql"],
+    "049_direct_cancellation_and_refund_lock.sql",
+    // PAKET 4A.2. 050 creates the manual inventory: four NEW tables
+    // (categories, items, areas, movements) plus two functions that book
+    // a movement atomically. RLS is on for all four with NOT ONE POLICY,
+    // so anon and authenticated can reach none of it. It creates no
+    // policy on any existing table, grants nothing to a browser role,
+    // alters no existing column and touches no order, payment or email
+    // state. Reviewed in tests/inventory.test.mjs.
+    "050_inventory_foundation.sql"],
     "an unreviewed migration above 034 appeared"
   );
   // AND 039 REDEFINES NOTHING 034 OWNS. It is a prepaid plan with no

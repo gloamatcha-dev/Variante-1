@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { AdminOrders } from "./AdminOrders";
+import { AdminInventory } from "./AdminInventory";
 import { WAITLIST_FILTERS, type WaitlistFilter } from "../lib/adminWaitlistQuery";
 
 /**
@@ -104,12 +105,12 @@ function consentShort(version: string): string {
 
 export function AdminOverview() {
   // WHICH SECTION IS OPEN. The waitlist screen this file has always
-  // been is now one of three, and it is unchanged - it simply renders
-  // under a tab instead of on its own. Orders and the overview are new;
-  // inventory, B2B and costs are named in the navigation as coming and
-  // are not clickable, because a tab that opens nothing is worse than a
-  // tab that says it is not here yet.
-  const [view, setView] = useState<"overview" | "orders" | "waitlist">("overview");
+  // been is now one of four, and it is unchanged - it simply renders
+  // under a tab instead of on its own. B2B and costs are still named in
+  // the navigation as coming and are not clickable, because a tab that
+  // opens nothing is worse than a tab that says it is not here yet.
+  // Inventory stopped being one of those in Paket 4A.2.
+  const [view, setView] = useState<"overview" | "orders" | "inventory" | "waitlist">("overview");
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -267,7 +268,7 @@ export function AdminOverview() {
   if (data.launch.shopStatus !== "live") blockers.push(`Shop ist ${data.launch.shopStatus}`);
   if (data.counts.confirmed === 0) blockers.push("kein bestätigter Kontakt");
 
-  const TITLE = { overview: "Übersicht", orders: "Bestellungen", waitlist: "Launch List" } as const;
+  const TITLE = { overview: "Übersicht", orders: "Bestellungen", inventory: "Inventar", waitlist: "Launch List" } as const;
 
   return (
     <main className="ops">
@@ -283,7 +284,7 @@ export function AdminOverview() {
       </header>
 
       <nav className="ops-nav" aria-label="Bereiche">
-        {([["overview", "Übersicht"], ["orders", "Bestellungen"], ["waitlist", "Launch List"]] as const).map(([key, label]) => (
+        {([["overview", "Übersicht"], ["orders", "Bestellungen"], ["inventory", "Inventar"], ["waitlist", "Launch List"]] as const).map(([key, label]) => (
           <button
             key={key}
             type="button"
@@ -297,17 +298,20 @@ export function AdminOverview() {
         {/* Named, not faked. These open nothing and say so, because a tab
             that leads to an empty screen costs more trust than an honest
             "bald". They arrive with their own packages. */}
-        {["Inventar", "B2B", "Kosten"].map((label) => (
+        {["B2B", "Kosten"].map((label) => (
           <span className="ops-nav-soon" key={label}>{label}<i>bald</i></span>
         ))}
       </nav>
 
       {view === "orders" && <AdminOrders onSessionLost={() => setSignedIn(false)} />}
 
+      {view === "inventory" && <AdminInventory onSessionLost={() => setSignedIn(false)} />}
+
       {view === "overview" && (
         <section className="ops-panel" aria-label="Operations">
           <p className="ops-note">
             Bestellungen, Umsatz und Versandstatus stehen unter <strong>Bestellungen</strong>.
+            Warenbestand und Bewegungen unter <strong>Inventar</strong>.
             Die Launch List liegt unter <strong>Launch List</strong>.
           </p>
           <dl className="ops-facts">

@@ -400,7 +400,12 @@ test("23: the admin API surface is exactly these four, all POST-gated", () => {
     .filter((e) => e.isDirectory()).map((e) => e.name).sort();
   // Paket 4A.1 added "orders" - the read-only operations view, covered
   // in tests/admin-orders.test.mjs. Nothing else joined it.
-  assert.deepEqual(dirs, ["launch", "orders", "session", "waitlist"]);
+  // PAKET 4A.2 added the inventory. Every route under it is POST-only
+  // and opens through the same session gate; none of them is reachable
+  // from a customer-facing page, and none is called by an order, a
+  // shipment, a refund or a cancellation. Reviewed in
+  // tests/inventory.test.mjs.
+  assert.deepEqual(dirs, ["inventory", "launch", "orders", "session", "waitlist"]);
 
   // The session route is the only one that may write anything, and what
   // it writes is a cookie.

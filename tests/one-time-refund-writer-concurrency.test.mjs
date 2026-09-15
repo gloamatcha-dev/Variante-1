@@ -101,9 +101,9 @@ test("1: 038 exists, owns its number, and 039 is the only one above it", () => {
   // in tests/annual-plan-foundation-migration.test.mjs. 038 is therefore
   // no longer the highest, and this is re-pinned rather than deleted:
   // what it protects is that no UNREVIEWED migration appeared.
-  assert.equal(files[files.length - 11], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 12], MIGRATION_038, "038 must be the one before it");
-  assert.equal(files[files.length - 13], MIGRATION_037, "037 must be the one before that");
+  assert.equal(files[files.length - 12], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 13], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 14], MIGRATION_037, "037 must be the one before that");
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
@@ -130,7 +130,15 @@ test("2: no migration 044 or beyond", () => {
     // release_order_refund. It creates no policy, grants nothing to anon
     // or authenticated, drops nothing and alters no existing column.
     // Reviewed in tests/admin-order-actions.test.mjs.
-    "049_direct_cancellation_and_refund_lock.sql"],
+    "049_direct_cancellation_and_refund_lock.sql",
+    // PAKET 4A.2. 050 creates the manual inventory: four NEW tables
+    // (categories, items, areas, movements) plus two functions that book
+    // a movement atomically. RLS is on for all four with NOT ONE POLICY,
+    // so anon and authenticated can reach none of it. It creates no
+    // policy on any existing table, grants nothing to a browser role,
+    // alters no existing column and touches no order, payment or email
+    // state. Reviewed in tests/inventory.test.mjs.
+    "050_inventory_foundation.sql"],
     "an unreviewed migration appeared after 043");
   // And 039 kept its hands off this phase's writer entirely.
   for (const name of [MIGRATION_039, MIGRATION_040, MIGRATION_041, MIGRATION_042]) {

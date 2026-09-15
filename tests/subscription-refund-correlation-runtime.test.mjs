@@ -689,7 +689,15 @@ test("55: this phase added no migration, and the only ones after it are 038 and 
     // release_order_refund. It creates no policy, grants nothing to anon
     // or authenticated, drops nothing and alters no existing column.
     // Reviewed in tests/admin-order-actions.test.mjs.
-    "049_direct_cancellation_and_refund_lock.sql"],
+    "049_direct_cancellation_and_refund_lock.sql",
+    // PAKET 4A.2. 050 creates the manual inventory: four NEW tables
+    // (categories, items, areas, movements) plus two functions that book
+    // a movement atomically. RLS is on for all four with NOT ONE POLICY,
+    // so anon and authenticated can reach none of it. It creates no
+    // policy on any existing table, grants nothing to a browser role,
+    // alters no existing column and touches no order, payment or email
+    // state. Reviewed in tests/inventory.test.mjs.
+    "050_inventory_foundation.sql"],
     "an unreviewed migration appeared after 037");
   const sql039 = withoutComments(read("supabase/migrations/039_b2c_annual_plan_foundation.sql"));
   assert.ok(!sql039.includes("apply_order_refund_state_by_invoice"),
