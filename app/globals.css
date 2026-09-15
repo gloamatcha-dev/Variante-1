@@ -8615,6 +8615,24 @@ header nav{gap:18px;font-size:12px}
 .ops-facts div{ display:flex; flex-direction:column; gap:3px; }
 .ops-facts dt{ font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--plum); }
 .ops-facts dd{ margin:0; font-size:14px; font-weight:600; }
+/* A FACT CELL MAY NEVER ESCAPE ITS TRACK, AT ANY WIDTH.
+
+   German compounds do not break. "Stornierungsbestätigung" is one word,
+   and at 11px uppercase with .14em letter spacing it is 198px wide -
+   38px more than the track it was given. With nothing to break on it
+   simply painted past the cell, and that overflow is what put a
+   horizontal scrollbar on the drawer.
+
+   min-width:0 lets the track shrink to the space available instead of
+   to the longest word, and overflow-wrap:anywhere gives the word a
+   break opportunity when there is genuinely no other. It is deliberately
+   `anywhere` rather than `break-word`: only `anywhere` also shrinks the
+   MIN-CONTENT size a grid track is sized from, which is the half that
+   actually stops the overflow.
+
+   Global, not inside a media query. The first version of this fix was
+   mobile-only, and desktop is where the labels are longest. */
+.ops-facts div,.ops-facts dt,.ops-facts dd{ min-width:0; overflow-wrap:anywhere; }
 .ops-blockers{ margin:16px 0 0; padding-left:18px; font-size:13px; color:var(--berry); }
 .ops-note{ margin:14px 0 0; font-size:12px; color:var(--plum); }
 
@@ -8938,7 +8956,21 @@ header nav{gap:18px;font-size:12px}
   border-left:2px solid var(--berry);
   padding-left:14px;
 }
-.ops-facts-tight{ grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
+/* 150px was narrower than the labels that go in it, so every track was
+   over-full and the text had to be clipped or pushed out. 190px gives
+   two columns in the 499px the drawer has - roughly 245px each - which
+   is enough for "Erstattungsbestätigung" on one line and lets "Antwort
+   auf Stornierungsanfrage" break at its spaces instead of mid-word. */
+.ops-facts-tight{ grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px; }
+
+/* THE FIVE CUSTOMER EMAILS: two columns on desktop, one on a phone.
+
+   Five items in an auto-fit grid land as 2+2+1, which reads as a list
+   of pairs rather than five squeezed cells. Their labels are the longest
+   on the screen and two of them - the direct cancellation confirmation
+   and the answer to a cancellation request - have to stay clearly
+   distinguishable, which they cannot be when both are clipped. */
+.ops-emails{ grid-template-columns:repeat(2,minmax(0,1fr)); }
 .ops-action-note{ margin:10px 0 0; font-size:12px; line-height:1.5; color:var(--plum); }
 .ops-open-refund{ color:var(--berry); }
 
@@ -9039,13 +9071,16 @@ header nav{gap:18px;font-size:12px}
   .ops-items tbody td[data-label="Produkt"]{ overflow-wrap:anywhere; }
 
   /* THE FACT GRID MUST BE ABLE TO SHRINK.
-     minmax(150px,1fr) is a MINIMUM, not a maximum: a label longer than
-     that - "Antwort auf Stornierungsanfrage", uppercase with letter
-     spacing - widens its track instead of wrapping, and two widened
-     tracks pushed the drawer 8px past the viewport. On a phone the
-     labels may wrap; what they may not do is scroll the panel. */
+     minmax(...) is a MINIMUM, not a maximum: a track never gets narrower
+     than its floor, so on a 390px screen the floor has to be low enough
+     that two tracks plus the gap still fit. The cell-level min-width:0
+     and overflow-wrap now live with the base rule, because desktop needs
+     them just as much - that was the bug this pass fixed. */
   .ops-facts,.ops-facts-tight{ grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); }
-  .ops-facts div,.ops-facts dt,.ops-facts dd{ min-width:0; overflow-wrap:anywhere; }
+  /* ONE COLUMN for the five customer emails. Two 170px cells fit, but
+     "Antwort auf Stornierungsanfrage" then takes three lines and the
+     five rows stop being scannable. */
+  .ops-emails{ grid-template-columns:1fr; }
 
   .ops-action-buttons,.ops-confirm-buttons{ flex-direction:column; }
   .ops-action-buttons .ops-btn,.ops-confirm-buttons .ops-btn{ width:100%; min-width:0; }
@@ -9389,6 +9424,17 @@ header nav{gap:18px;font-size:12px}
 }
 .ops-order-name{ display:block; }
 .ops-orders .ops-mail{ display:block; font-size:12px; color:rgba(17,17,17,.62); }
+/* THE POSITIONS TABLE INSIDE THE DRAWER.
+
+   Five columns in a 499px panel. It does not overflow today, but only
+   because the product names happen to be short: one long SKU or a long
+   variant name and the table would push the drawer sideways again.
+   table-layout:fixed makes the columns share the width they have rather
+   than grow to their content, and the product cell is the one allowed
+   to wrap. */
+.ops-drawer .ops-items{ table-layout:fixed; width:100%; }
+.ops-drawer .ops-items th,.ops-drawer .ops-items td{ overflow-wrap:anywhere; }
+
 /* The contents cell: what was ordered, in two lines.
 
    The product line is allowed to wrap and is clamped to two lines so a
@@ -9443,10 +9489,24 @@ header nav{gap:18px;font-size:12px}
   display:flex;
   justify-content:flex-end;
 }
+/* WHY overflow-x IS NAMED HERE.
+   overflow-y:auto alone is not "vertical scrolling only": when one axis
+   is a scroll container the other computes from `visible` to `auto`, so
+   this panel has always had an implicit horizontal scroll axis waiting
+   for anything inside it to overflow. That is how a 38px-too-wide label
+   became a scrollbar.
+   The labels can no longer overflow - .ops-facts cells carry min-width:0
+   and overflow-wrap:anywhere, and the positions table is table-layout:
+   fixed - so nothing is being hidden here. This states the intent that
+   was always meant: this drawer scrolls down, never sideways. A future
+   regression is still caught, by the element-level overflow assertions
+   in tests/admin-order-actions.test.mjs rather than by a stray
+   scrollbar. */
 .ops-drawer{
   width:min(560px,100%);
   height:100%;
   overflow-y:auto;
+  overflow-x:hidden;
   background:var(--cream);
   border-left:1px solid rgba(79,58,91,.3);
   padding:clamp(20px,3vw,30px);

@@ -449,7 +449,7 @@ export function OrderActions({ order, onDone }: { order: ActionOrder; onDone: ()
             an order, "Antwort auf Stornierungsanfrage" when a customer
             asked and an operator answered. An operator fielding a reply
             needs to know which one the customer is holding. */}
-        <dl className="ops-facts ops-facts-tight">
+        <dl className="ops-facts ops-facts-tight ops-emails">
           {ORDER_EMAIL_KINDS.map(kind => (
             <div key={kind.key}>
               <dt>{kind.label}</dt>

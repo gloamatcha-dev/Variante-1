@@ -737,8 +737,13 @@ test("8f: the action panels work on a phone", () => {
   // viewport. Found by measuring, after the five email rows landed.
   assert.match(mobile, /\.ops-facts,\.ops-facts-tight\{ grid-template-columns:repeat\(auto-fit,minmax\(120px,1fr\)\); \}/,
     "the fact grid keeps a minimum wider than a phone can give it");
-  assert.match(mobile, /\.ops-facts div,\.ops-facts dt,\.ops-facts dd\{ min-width:0; overflow-wrap:anywhere; \}/,
-    "a long label cannot wrap and will widen its track");
+  // The cell rule MOVED OUT of this media query and is now global -
+  // desktop needed it just as much, which is what test 8g2 pins. What
+  // stays mobile-specific is the grid FLOOR: 190px is wider than half a
+  // 390px screen, so the floor has to come down or two tracks plus the
+  // gap will not fit.
+  assert.ok(!mobile.includes("overflow-wrap:anywhere; }") || mobile.includes(".ops-items"),
+    "the cell wrap rule is mobile-only again");
 });
 
 test("8g: the refund confirmation says it is real money and cannot be undone", () => {
@@ -756,6 +761,85 @@ test("8g: the refund confirmation says it is real money and cannot be undone", (
   // A full refund sends NO amount: the server computes the maximum.
   assert.ok(uiCode.includes('{ id: order.id }'),
     "a full refund sends a client-computed amount instead of letting the server decide");
+});
+
+/**
+ * CSS with every @media block removed, so a rule can be proved to apply
+ * at EVERY width rather than only inside the one query somebody
+ * remembered. The first version of the wrap fix lived in the mobile
+ * block, and desktop - where the labels are longest - kept overflowing.
+ */
+function outsideMediaQueries(source) {
+  let out = "", depth = 0, i = 0;
+  while (i < source.length) {
+    if (depth === 0 && source.startsWith("@media", i)) {
+      const open = source.indexOf("{", i);
+      let d = 1, j = open + 1;
+      while (j < source.length && d > 0) {
+        if (source[j] === "{") d += 1;
+        else if (source[j] === "}") d -= 1;
+        j += 1;
+      }
+      i = j;
+      continue;
+    }
+    out += source[i];
+    i += 1;
+  }
+  return out;
+}
+
+test("8g2: nothing in the order drawer can scroll sideways", () => {
+  const always = outsideMediaQueries(css);
+
+  // THE STRUCTURAL HALF. A German compound does not break:
+  // "Stornierungsbestätigung" is one word and at 11px uppercase with
+  // .14em letter spacing it is ~198px, which is wider than the track it
+  // was given. min-width:0 lets the track size to the space available
+  // instead of to the longest word, and overflow-wrap:anywhere gives
+  // that word a break opportunity - `anywhere` specifically, because
+  // only `anywhere` also shrinks the min-content size a grid track is
+  // sized from.
+  assert.match(always, /\.ops-facts div,\.ops-facts dt,\.ops-facts dd\{ min-width:0; overflow-wrap:anywhere; \}/,
+    "the fact cells can only wrap inside a media query, or not at all");
+
+  // THE DECLARED HALF. overflow-y:auto alone is not "vertical only":
+  // when one axis becomes a scroll container the other computes from
+  // visible to auto, so this panel always had a horizontal scroll axis
+  // waiting for something to overflow into it.
+  const drawer = always.slice(always.indexOf(".ops-drawer{"), always.indexOf("}", always.indexOf(".ops-drawer{")));
+  assert.match(drawer, /overflow-y:auto/, "the drawer stopped scrolling vertically");
+  assert.match(drawer, /overflow-x:hidden/, "the drawer's horizontal axis is implicit again");
+
+  // The positions table shares the width it has rather than growing to
+  // its content, so one long SKU cannot push the panel sideways.
+  assert.match(always, /\.ops-drawer \.ops-items\{ table-layout:fixed; width:100%; \}/);
+  assert.match(always, /\.ops-drawer \.ops-items th,\.ops-drawer \.ops-items td\{ overflow-wrap:anywhere; \}/);
+});
+
+test("8g3: the five customer emails are two columns on desktop and one on a phone", () => {
+  const always = outsideMediaQueries(css);
+  const mobile = css.slice(css.lastIndexOf("@media (max-width:760px){", css.indexOf("THE MOBILE DOCK")));
+
+  assert.match(always, /\.ops-emails\{ grid-template-columns:repeat\(2,minmax\(0,1fr\)\); \}/,
+    "the email list is not two columns on desktop");
+  assert.match(mobile, /\.ops-emails\{ grid-template-columns:1fr; \}/,
+    "the email list is not one column on a phone");
+  // minmax(0,...) rather than a pixel floor: a floor wider than half the
+  // panel is what produced squeezed cells in the first place.
+  assert.ok(!/\.ops-emails\{[^}]*minmax\(\d+px/.test(always),
+    "the email grid has a pixel floor again");
+
+  // The grid the other fact blocks use has room for a real label.
+  const tight = always.match(/\.ops-facts-tight\{ grid-template-columns:repeat\(auto-fit,minmax\((\d+)px,1fr\)\)/);
+  assert.ok(tight, "the tight grid lost its definition");
+  assert.ok(Number(tight[1]) >= 190,
+    `the tight grid's floor is ${tight[1]}px, narrower than the labels that go in it`);
+
+  // And the screen actually asks for that grid.
+  assert.ok(ui.includes('className="ops-facts ops-facts-tight ops-emails"'),
+    "the email list does not use its own grid");
+  assert.equal([...ui.matchAll(/ops-emails/g)].length, 1, "ops-emails is used for more than the email list");
 });
 
 test("8h: the positions table becomes cards on a phone", () => {
