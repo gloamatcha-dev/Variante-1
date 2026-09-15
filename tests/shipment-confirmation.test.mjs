@@ -603,8 +603,24 @@ test("no route can mark an order shipped", () => {
   // tests/shipment-transition-api.test.mjs.
   const AUTHORIZED = "app/api/internal/orders/ship/route.ts";
   assert.ok(routes.includes(AUTHORIZED), "the authorized shipment route is missing");
+  // Paket 4A.1 added two read-only admin routes that SELECT these
+  // columns to show them. Naming a column and being able to set it are
+  // different things, so they are listed here rather than the ban being
+  // loosened - and the assertion right below proves they hold no write
+  // verb at all, which is what actually makes them harmless.
+  const READ_ONLY = [
+    "app/api/admin/orders/route.ts",
+    "app/api/admin/orders/detail/route.ts",
+  ];
+  for (const rel of READ_ONLY) {
+    assert.ok(routes.includes(rel), `the read-only order route is missing: ${rel}`);
+    const source = withoutComments(read(rel));
+    for (const verb of [".update(", ".insert(", ".upsert(", ".delete(", ".rpc("]) {
+      assert.ok(!source.includes(verb), `${rel} gained a write verb and may no longer read shipping columns`);
+    }
+  }
   for (const rel of routes) {
-    if (rel === AUTHORIZED) continue;
+    if (rel === AUTHORIZED || READ_ONLY.includes(rel)) continue;
     const source = withoutComments(read(rel));
     for (const write of [
       "fulfillment_status", "shipped_at", "tracking_number",

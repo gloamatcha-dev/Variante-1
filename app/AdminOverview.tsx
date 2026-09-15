@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import { AdminOrders } from "./AdminOrders";
 import { WAITLIST_FILTERS, type WaitlistFilter } from "../lib/adminWaitlistQuery";
 
 /**
@@ -102,6 +103,13 @@ function consentShort(version: string): string {
 }
 
 export function AdminOverview() {
+  // WHICH SECTION IS OPEN. The waitlist screen this file has always
+  // been is now one of three, and it is unchanged - it simply renders
+  // under a tab instead of on its own. Orders and the overview are new;
+  // inventory, B2B and costs are named in the navigation as coming and
+  // are not clickable, because a tab that opens nothing is worse than a
+  // tab that says it is not here yet.
+  const [view, setView] = useState<"overview" | "orders" | "waitlist">("overview");
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -259,18 +267,59 @@ export function AdminOverview() {
   if (data.launch.shopStatus !== "live") blockers.push(`Shop ist ${data.launch.shopStatus}`);
   if (data.counts.confirmed === 0) blockers.push("kein bestätigter Kontakt");
 
+  const TITLE = { overview: "Übersicht", orders: "Bestellungen", waitlist: "Launch List" } as const;
+
   return (
     <main className="ops">
       <header className="ops-head">
         <div>
-          <p className="ops-eyebrow">GLOA · LAUNCH LIST</p>
-          <h1 className="ops-title">Übersicht</h1>
+          <p className="ops-eyebrow">GLOA · OPERATIONS</p>
+          <h1 className="ops-title">{TITLE[view]}</h1>
         </div>
         <div className="ops-head-right">
           <span className="ops-who">{data.signedInAs}</span>
           <button type="button" className="ops-signout" onClick={signOut}>Abmelden</button>
         </div>
       </header>
+
+      <nav className="ops-nav" aria-label="Bereiche">
+        {([["overview", "Übersicht"], ["orders", "Bestellungen"], ["waitlist", "Launch List"]] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            className={view === key ? "is-active" : ""}
+            aria-current={view === key ? "page" : undefined}
+            onClick={() => setView(key)}
+          >
+            {label}
+          </button>
+        ))}
+        {/* Named, not faked. These open nothing and say so, because a tab
+            that leads to an empty screen costs more trust than an honest
+            "bald". They arrive with their own packages. */}
+        {["Inventar", "B2B", "Kosten"].map((label) => (
+          <span className="ops-nav-soon" key={label}>{label}<i>bald</i></span>
+        ))}
+      </nav>
+
+      {view === "orders" && <AdminOrders onSessionLost={() => setSignedIn(false)} />}
+
+      {view === "overview" && (
+        <section className="ops-panel" aria-label="Operations">
+          <p className="ops-note">
+            Bestellungen, Umsatz und Versandstatus stehen unter <strong>Bestellungen</strong>.
+            Die Launch List liegt unter <strong>Launch List</strong>.
+          </p>
+          <dl className="ops-facts">
+            <div><dt>Shop</dt><dd>{data.launch.shopStatus}</dd></div>
+            <div><dt>Launch geplant</dt><dd>{fmtDate(data.launch.plannedIso)}</dd></div>
+            <div><dt>Launch List bestätigt</dt><dd>{data.counts.confirmed}</dd></div>
+            <div><dt>Versandfreigabe</dt><dd>{blockers.length === 0 ? "bereit" : "gesperrt"}</dd></div>
+          </dl>
+        </section>
+      )}
+
+      {view === "waitlist" && <>
 
       <section className="ops-counts" aria-label="Zähler">
         {[
@@ -382,6 +431,7 @@ export function AdminOverview() {
           Weiter
         </button>
       </nav>
+      </>}
     </main>
   );
 }

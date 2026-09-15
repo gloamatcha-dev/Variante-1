@@ -824,6 +824,15 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
     // ADMIN_EMAILS. Neither can release or send anything - those stay
     // behind LAUNCH_ADMIN_SECRET in /admin/launch/*. Reviewed in
     // tests/admin-overview.test.mjs.
+    // PAKET 4A.1. The read-only order operations view: one POST for a
+    // page of orders with its counters, one for a single order with its
+    // items. Both sit behind the same admin session as the two below,
+    // both are POST-only, and neither holds a write verb of any kind -
+    // refunds, cancellation and shipping stay behind their own bearer
+    // secrets in /internal/orders/*. Reviewed in
+    // tests/admin-orders.test.mjs.
+    "/admin/orders",
+    "/admin/orders/detail",
     "/admin/session",
     "/admin/waitlist",
     "/annual-plan/checkout/session",

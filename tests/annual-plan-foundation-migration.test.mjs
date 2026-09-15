@@ -1169,6 +1169,13 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // SHOP_STATUS itself is untouched - test 42 in this file asserts that
     // directly. Reviewed in tests/rezepte-page.test.mjs.
     "app/content.ts",
+    // ADMIN OPERATIONS SHELL (Paket 4A.1). The internal screen gained a
+    // three-way navigation and renders the new read-only order section
+    // beside the launch list it already had. The waitlist markup, its
+    // state and its endpoint are untouched; nothing here reads a price,
+    // writes an order, or touches a customer-facing page. Reviewed in
+    // tests/admin-orders.test.mjs.
+    "app/AdminOverview.tsx",
   ];
 
   for (const rel of touched) {

@@ -395,10 +395,12 @@ test("22: release and send are absent from this screen", () => {
   assert.match(overview, /Freigabe und Versand sind in dieser Ansicht bewusst nicht möglich/);
 });
 
-test("23: exactly the two admin API routes were added, both POST-gated", () => {
+test("23: the admin API surface is exactly these four, all POST-gated", () => {
   const dirs = readdirSync(path.join(ROOT, "app/api/admin"), { withFileTypes: true })
     .filter((e) => e.isDirectory()).map((e) => e.name).sort();
-  assert.deepEqual(dirs, ["launch", "session", "waitlist"]);
+  // Paket 4A.1 added "orders" - the read-only operations view, covered
+  // in tests/admin-orders.test.mjs. Nothing else joined it.
+  assert.deepEqual(dirs, ["launch", "orders", "session", "waitlist"]);
 
   // The session route is the only one that may write anything, and what
   // it writes is a cookie.

@@ -9132,3 +9132,246 @@ header nav{gap:18px;font-size:12px}
   /* 5.0:1 on cream. */
   color:rgba(17,17,17,.62);
 }
+
+/* ══════════════════════════════════════════════════════════════
+   ADMIN OPERATIONS — NAVIGATION, ORDERS, DETAIL DRAWER
+   ══════════════════════════════════════════════════════════════
+   Paket 4A.1. The internal screen gained two sections beside the
+   launch list, so it needed a way to move between them and a place to
+   read one order. Everything below reuses the tokens the rest of the
+   admin already uses - Blue, Cream, Plum, Berry, the same hairlines,
+   the same uppercase meta voice. No card stack, no shadow, no second
+   design language: this is the same editorial surface, with tabs.
+   ══════════════════════════════════════════════════════════════ */
+
+.ops-nav{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:2px;
+  margin:0 0 clamp(18px,2.4vw,26px);
+  border-bottom:1px solid rgba(79,58,91,.2);
+}
+.ops-nav button{
+  padding:11px 16px;
+  font:inherit;
+  font-size:11px;
+  font-weight:700;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--plum);
+  background:transparent;
+  border:0;
+  border-bottom:2px solid transparent;
+  cursor:pointer;
+  transition:color .18s ease,border-color .18s ease;
+}
+.ops-nav button:hover{ color:var(--ink); }
+.ops-nav button.is-active{ color:var(--blue); border-bottom-color:var(--blue); }
+/* Named but not offered. Muted, not a control, and not focusable. */
+.ops-nav-soon{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:11px 12px;
+  font-size:11px;
+  font-weight:600;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  /* 4.6:1 on cream. */
+  color:rgba(17,17,17,.58);
+}
+.ops-nav-soon i{
+  font-style:normal;
+  font-size:9px;
+  letter-spacing:.1em;
+  padding:2px 6px;
+  color:var(--cream);
+  background:rgba(79,58,91,.55);
+}
+
+/* ── Refresh bar ───────────────────────────────────────────── */
+.ops-refresh-bar{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:12px;
+  margin:0 0 12px;
+}
+.ops-refresh{
+  padding:9px 14px;
+  font:inherit;
+  font-size:11px;
+  font-weight:600;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  color:var(--cream);
+  background:var(--blue);
+  border:0;
+  cursor:pointer;
+}
+.ops-refresh:disabled{ opacity:.55; cursor:default; }
+.ops-refresh-at{ font-size:12px; color:rgba(17,17,17,.62); }
+
+/* ── Filter row ────────────────────────────────────────────── */
+.ops-filter-row{ display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; }
+.ops-filter-row label{
+  font-size:10px;
+  font-weight:700;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--plum);
+}
+.ops-filter-row select{
+  padding:9px 10px;
+  font:inherit;
+  font-size:13px;
+  color:var(--ink);
+  background:transparent;
+  border:1px solid rgba(79,58,91,.34);
+}
+
+/* ── Order rows ────────────────────────────────────────────── */
+.ops-orders tbody tr{ cursor:pointer; }
+.ops-orders tbody tr:hover{ background:rgba(23,70,209,.045); }
+.ops-order-open{
+  font:inherit;
+  font-weight:700;
+  color:var(--blue);
+  background:none;
+  border:0;
+  padding:0;
+  cursor:pointer;
+  font-variant-numeric:tabular-nums;
+}
+.ops-order-name{ display:block; }
+.ops-orders .ops-mail{ display:block; font-size:12px; color:rgba(17,17,17,.62); }
+.ops-order-flags .ops-flag{ margin:0 6px 0 0; }
+.ops-order-flags .ops-flag:last-child{ margin-right:0; }
+.ops-flag{
+  display:inline-block;
+  font-size:10px;
+  font-weight:700;
+  letter-spacing:.1em;
+  text-transform:uppercase;
+  padding:2px 7px;
+  border:1px solid currentColor;
+}
+.ops-flag-refund{ color:var(--berry); }
+.ops-flag-cancel{ color:var(--plum); }
+.ops-flag-track{ color:var(--blue); }
+
+/* Status words, same idiom as the waitlist: weight and colour, no pill. */
+.ops-pay-paid,.ops-ord-confirmed,.ops-ful-shipped,.ops-ord-shipped{ color:var(--blue); }
+.ops-pay-pending,.ops-ful-unfulfilled,.ops-ord-pending,.ops-ful-processing,.ops-ord-processing{ color:var(--plum); }
+.ops-pay-failed,.ops-pay-refunded,.ops-pay-partially_refunded,
+.ops-ord-cancelled,.ops-ord-refunded,.ops-ful-cancelled{ color:var(--berry); }
+.ops-ful-delivered,.ops-ord-delivered{ color:var(--ink); }
+
+/* ── Detail drawer ─────────────────────────────────────────── */
+.ops-drawer-backdrop{
+  position:fixed;
+  inset:0;
+  z-index:60;
+  background:rgba(17,17,17,.42);
+  display:flex;
+  justify-content:flex-end;
+}
+.ops-drawer{
+  width:min(560px,100%);
+  height:100%;
+  overflow-y:auto;
+  background:var(--cream);
+  border-left:1px solid rgba(79,58,91,.3);
+  padding:clamp(20px,3vw,30px);
+}
+.ops-drawer-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  margin:0 0 20px;
+  padding-bottom:14px;
+  border-bottom:1px solid rgba(79,58,91,.2);
+}
+.ops-drawer-head h2{
+  margin:0;
+  font-size:clamp(20px,2.4vw,26px);
+  letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums;
+}
+.ops-drawer-close{
+  font:inherit;
+  font-size:26px;
+  line-height:1;
+  width:40px;
+  height:40px;
+  color:var(--plum);
+  background:none;
+  border:1px solid rgba(79,58,91,.3);
+  cursor:pointer;
+}
+.ops-drawer-section{ margin:0 0 24px; }
+.ops-drawer-section h3{
+  margin:0 0 10px;
+  font-size:10px;
+  font-weight:700;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  color:var(--plum);
+}
+.ops-drawer-section .ops-table{ min-width:0; }
+.ops-drawer-section .ops-table th,
+.ops-drawer-section .ops-table td{ padding:8px 10px; white-space:normal; }
+/* The address keeps its line breaks without needing <br> in the markup. */
+.ops-address{ white-space:pre-line; }
+.ops-drawer code{ font-size:12px; word-break:break-all; }
+
+/* ── Mobile ────────────────────────────────────────────────────
+   The order table stops being a table and becomes one block per
+   order: each cell carries its own label, so nothing depends on a
+   header row that is no longer above it, and the page never scrolls
+   sideways. */
+@media (max-width:760px){
+  .ops-table-wrap{ overflow-x:visible; border:0; }
+  .ops-orders{ min-width:0; }
+  .ops-orders thead{ position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+  .ops-orders tbody tr{
+    display:block;
+    margin:0 0 10px;
+    padding:12px 14px;
+    border:1px solid rgba(79,58,91,.2);
+  }
+  .ops-orders tbody td{
+    display:flex;
+    justify-content:space-between;
+    gap:14px;
+    padding:5px 0;
+    border:0;
+    white-space:normal;
+    text-align:right;
+  }
+  .ops-orders tbody td::before{
+    content:attr(data-label);
+    flex:0 0 auto;
+    font-size:10px;
+    font-weight:700;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    color:var(--plum);
+    text-align:left;
+  }
+  .ops-orders tbody td.ops-order-flags{ flex-wrap:wrap; justify-content:flex-end; }
+  .ops-drawer{ width:100%; border-left:0; }
+  .ops-filter-row select{ flex:1 1 140px; min-width:0; }
+}
+
+/* The scrim is a button so it is keyboard-reachable and announced;
+   it is invisible, fills what the drawer leaves, and carries no text. */
+.ops-drawer-scrim{
+  flex:1 1 auto;
+  border:0;
+  padding:0;
+  background:transparent;
+  cursor:pointer;
+}
