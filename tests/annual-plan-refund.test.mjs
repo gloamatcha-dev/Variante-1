@@ -397,7 +397,7 @@ test("8: the existing refund modules know nothing about the annual plan", () => 
   assert.match(orderRefundsCode, /correlateInvoiceFromInvoicePayments\(/);
   assert.match(orderRefundsCode, /\.eq\("stripe_payment_intent_id", trimmedId\)/);
   // The working tree agrees too, while it still can.
-  const changed = execFileSync("git", ["diff", "--name-only", "HEAD", "--"],
+  const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   for (const rel of changed ? changed.split(NEWLINE) : []) {
     assert.ok(!rel.startsWith("lib/orderRefunds") && !rel.startsWith("lib/stripeRefunds"),
@@ -793,7 +793,7 @@ test("25: no lifecycle, completion or cancellation semantics are invented", () =
     }
   }
   // The completion function is untouched by this phase.
-  const changed = execFileSync("git", ["diff", "--name-only", "HEAD", "--", "supabase/migrations/"],
+  const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   assert.equal(changed, "", "a live, immutable migration was edited");
 });
@@ -848,7 +848,7 @@ test("28: the rules module is a leaf, and the wiring is where the effects are", 
 test("29: this phase adds no migration, no route and no customer action", () => {
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 47);
+  assert.equal(migrations.length, 48);
   // PHASE 4B8.2 ADDED MIGRATION 042: the ONE column privilege 041
   // was short of, so migration 039's delivery policy can still read
   // the parent's user_id while resolving ownership. Reviewed in
@@ -857,11 +857,11 @@ test("29: this phase adds no migration, no route and no customer action", () => 
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(migrations[migrations.length - 2], "046_launch_signup_atomic.sql");
-  assert.equal(migrations[migrations.length - 3], "045_launch_welcome_email.sql");
-  assert.equal(migrations[migrations.length - 4], "044_launch_send.sql");
-  assert.equal(migrations[migrations.length - 5], "043_launch_waitlist.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 47), [], "a 045 appeared");
+  assert.equal(migrations[migrations.length - 3], "046_launch_signup_atomic.sql");
+  assert.equal(migrations[migrations.length - 4], "045_launch_welcome_email.sql");
+  assert.equal(migrations[migrations.length - 5], "044_launch_send.sql");
+  assert.equal(migrations[migrations.length - 6], "043_launch_waitlist.sql");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 48), [], "a migration 049 or beyond appeared");
 
   // No annual refund endpoint, and no browser-triggered refund anywhere.
   const annualRoutes = readdirSync(path.join(ROOT, "app/api/annual-plan"), { withFileTypes: true })

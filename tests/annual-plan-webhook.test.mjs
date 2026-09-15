@@ -810,7 +810,7 @@ test("32: a redelivered event converges instead of duplicating", () => {
 test("33: this phase stays inside its boundaries", () => {
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 47);
+  assert.equal(migrations.length, 48);
   // PHASE 4B8.2 ADDED MIGRATION 042: the ONE column privilege 041
   // was short of, so migration 039's delivery policy can still read
   // the parent's user_id while resolving ownership. Reviewed in
@@ -819,13 +819,13 @@ test("33: this phase stays inside its boundaries", () => {
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(migrations[migrations.length - 2], "046_launch_signup_atomic.sql");
-  assert.equal(migrations[migrations.length - 3], "045_launch_welcome_email.sql");
-  assert.equal(migrations[migrations.length - 4], "044_launch_send.sql");
-  assert.equal(migrations[migrations.length - 5], "043_launch_waitlist.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 47), [], "a 045 appeared");
+  assert.equal(migrations[migrations.length - 3], "046_launch_signup_atomic.sql");
+  assert.equal(migrations[migrations.length - 4], "045_launch_welcome_email.sql");
+  assert.equal(migrations[migrations.length - 5], "044_launch_send.sql");
+  assert.equal(migrations[migrations.length - 6], "043_launch_waitlist.sql");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 48), [], "a migration 049 or beyond appeared");
   // 039 and 040 are both live now: no migration may be edited at all.
-  const changed = execFileSync("git", ["diff", "--name-only", "HEAD", "--", "supabase/migrations/"],
+  const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   assert.equal(changed, "", "a live, immutable migration was edited");
 
@@ -1703,10 +1703,10 @@ test("61: 4B4.1's hardening is intact and this phase added no migration", () => 
   // No migration, and no new database call anywhere in this phase.
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 47);
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 47), [], "a 045 appeared");
+  assert.equal(migrations.length, 48);
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 48), [], "a migration 049 or beyond appeared");
   assert.equal(
-    execFileSync("git", ["diff", "--name-only", "HEAD", "--", "supabase/migrations/"],
+    execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
       { cwd: ROOT, encoding: "utf-8" }).trim(),
     "", "a live, immutable migration was edited");
   // The two new decisions are PURE: the leaf still imports no value.

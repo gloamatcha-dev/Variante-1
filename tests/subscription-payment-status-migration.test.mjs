@@ -103,17 +103,17 @@ test("1, 2: 036 exists, owns its number, and 037 is the only thing above it", ()
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(files[files.length - 2], "046_launch_signup_atomic.sql");
-  assert.equal(files[files.length - 3], "045_launch_welcome_email.sql");
-  assert.equal(files[files.length - 4], "044_launch_send.sql");
-  assert.equal(files[files.length - 5], "043_launch_waitlist.sql");
-  assert.equal(files[files.length - 6], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.equal(files[files.length - 7], "041_annual_account_column_privileges.sql");
-  assert.equal(files[files.length - 8], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(files[files.length - 12], MIGRATION_036, "036 must still be the one before 037");
+  assert.equal(files[files.length - 3], "046_launch_signup_atomic.sql");
+  assert.equal(files[files.length - 4], "045_launch_welcome_email.sql");
+  assert.equal(files[files.length - 5], "044_launch_send.sql");
+  assert.equal(files[files.length - 6], "043_launch_waitlist.sql");
+  assert.equal(files[files.length - 7], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(files[files.length - 8], "041_annual_account_column_privileges.sql");
+  assert.equal(files[files.length - 9], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 13], MIGRATION_036, "036 must still be the one before 037");
   assert.deepEqual(files.filter(f => f.startsWith("037")), ["037_subscription_refund_correlation.sql"]);
-  assert.ok(!files.some(f => f.startsWith("048")), "a 045 appeared");
-  assert.equal(files.length, 47);
+  assert.ok(!files.some(f => f.startsWith("049")), "a migration 049 or beyond appeared");
+  assert.equal(files.length, 48);
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length);
@@ -125,7 +125,7 @@ test("3: migrations 022 through 035 are all still present, none renamed", () => 
     assert.ok(files.includes(name), `${name} was renamed or deleted`);
   }
   // And none of them was edited in this working tree.
-  const changed = execFileSync("git", ["diff", "--name-only", "HEAD", "--", "supabase/migrations/"], {
+  const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"], {
     cwd: ROOT,
     encoding: "utf-8",
   }).trim();

@@ -85,15 +85,15 @@ const selectColumns = select => select.split(",").map(c => c.trim()).filter(Bool
 test("1: 042 is the newest migration, and 001-041 are untouched", () => {
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 47);
+  assert.equal(migrations.length, 48);
   assert.equal(migrations[38], "039_b2c_annual_plan_foundation.sql");
   assert.equal(migrations[39], "040_annual_checkout_retry_fingerprints.sql");
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
   assert.equal(migrations[41], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 47), [], "a 045 appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 48), [], "a migration 049 or beyond appeared");
 
   // No live migration was edited to make room for this one.
-  const changed = execFileSync("git", ["diff", "--name-only", "HEAD", "--", "supabase/migrations/"],
+  const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   assert.equal(changed, "", "a live, immutable migration was edited");
 });
@@ -460,7 +460,7 @@ test("19: 042 changes no schema, no policy, no RLS and no data", () => {
 
 test("20: 041 itself is untouched, and so is every migration below it", () => {
   // 041 is LIVE now. The fix is a new file, never an edit to it.
-  const changed = execFileSync("git", ["diff", "--name-only", "HEAD", "--", "supabase/migrations/"],
+  const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   assert.equal(changed, "", "a live, immutable migration was edited");
   // 041 still says what it said: the same revokes and the same grants.

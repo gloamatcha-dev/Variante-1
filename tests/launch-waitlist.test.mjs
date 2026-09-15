@@ -1218,7 +1218,11 @@ test("61: the rate limit went into 043 rather than into a 044, and 043 is still 
     //      of this file. Both are additive and neither touches 043.
     // 046: atomic signup and the consent-history split, reviewed in
     // tests 91-100 of this file.
-    ["044_launch_send.sql", "045_launch_welcome_email.sql", "046_launch_signup_atomic.sql", "047_withhold_metal_case.sql"],
+    ["044_launch_send.sql", "045_launch_welcome_email.sql", "046_launch_signup_atomic.sql", "047_withhold_metal_case.sql",
+     // Paket 4A.0. Ten SELECT grants to service_role and nothing else: no
+     // table, no column, no policy, no function, and not one byte more for
+     // anon or authenticated - so it cannot touch what this suite proves.
+     "048_service_role_read_grants.sql"],
     "an unreviewed migration appeared after 043"
   );
 

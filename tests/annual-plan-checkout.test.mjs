@@ -903,12 +903,12 @@ test("32: the checkout phase's own migrations are untouched, and 041 is not its 
   // phase's own migrations are live and immutable.
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 47);
+  assert.equal(migrations.length, 48);
   assert.equal(migrations[38], "039_b2c_annual_plan_foundation.sql");
   assert.equal(migrations[39], "040_annual_checkout_retry_fingerprints.sql");
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 47), [],
-    "a migration 044 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 48), [],
+    "a migration 049 or beyond appeared");
   // 041 touches privileges only: it creates no table, no column and no
   // function, so it cannot have changed anything this suite proves.
   const m041 = read("supabase/migrations/041_annual_account_column_privileges.sql");
@@ -924,7 +924,7 @@ test("32: the checkout phase's own migrations are untouched, and 041 is not its 
     assert.ok(!executable.includes(banned), `041 contains ${banned}`);
   }
   assert.ok(executable.includes("revoke select on table public.annual_plans"));
-  const changed = execFileSync("git", ["diff", "--name-only", "HEAD", "--", "supabase/migrations/"],
+  const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
   assert.deepEqual(touched, [], "a live, immutable migration was edited");

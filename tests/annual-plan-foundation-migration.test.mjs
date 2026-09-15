@@ -145,8 +145,8 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
   const files = readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith(".sql")).sort();
   assert.deepEqual(files.filter(f => f.startsWith("039")), [MIGRATION_039],
     "there must be exactly one migration 039");
-  assert.equal(files[files.length - 9], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 10], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 10], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 11], MIGRATION_038, "038 must be the one before it");
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
@@ -154,12 +154,12 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
 test("2: no migration 044 or beyond", () => {
   // 039 is not applied anywhere, so it is still the right place to fix
   // 039. A hardening pass must not become a second migration.
-  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 47);
+  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 48);
   assert.deepEqual(beyond, [], "an unreviewed migration appeared after 039");
 });
 
 test("3: migrations 001 through 038 are unmodified", () => {
-  const changed = execFileSync("git", ["diff", "--name-only", "HEAD", "--", "supabase/migrations/"],
+  const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
   // 040 is NOT APPLIED yet, so it may still be edited in place; every
@@ -972,7 +972,7 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
   // Written when 039 was a database-only phase, as "no application module
   // changed at all". Phase 4B3 legitimately edits one, so the guard is
   // re-pinned rather than deleted.
-  const changed = execFileSync("git", ["diff", "--name-only", "HEAD"],
+  const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
 

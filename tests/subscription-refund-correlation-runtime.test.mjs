@@ -639,7 +639,7 @@ test("52-53: a historical order is refundable after its subscription ended", () 
    ══════════════════════════════════════════════════════════════ */
 
 test("54: migrations 019 and 022-037 are unmodified", () => {
-  const changed = execFileSync("git", ["diff", "--name-only", "HEAD"], { cwd: ROOT, encoding: "utf-8" })
+  const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD"], { cwd: ROOT, encoding: "utf-8" })
     .trim();
   const touched = changed ? changed.split(NEWLINE) : [];
   // 038 is still UNAPPLIED, so it may be edited in place until the owner
@@ -678,7 +678,11 @@ test("55: this phase added no migration, and the only ones after it are 038 and 
      // Phase 5. public.launch_waitlist: one new table for the one-time
      // launch notification, RLS on, no anon/authenticated grant, and no
      // existing object touched. Reviewed in tests/launch-waitlist.test.mjs.
-     "043_launch_waitlist.sql", "044_launch_send.sql", "045_launch_welcome_email.sql", "046_launch_signup_atomic.sql", "047_withhold_metal_case.sql"],
+     "043_launch_waitlist.sql", "044_launch_send.sql", "045_launch_welcome_email.sql", "046_launch_signup_atomic.sql", "047_withhold_metal_case.sql",
+     // Paket 4A.0. Ten SELECT grants to service_role and nothing else: no
+     // table, no column, no policy, no function, and not one byte more for
+     // anon or authenticated - so it cannot touch what this suite proves.
+     "048_service_role_read_grants.sql"],
     "an unreviewed migration appeared after 037");
   const sql039 = withoutComments(read("supabase/migrations/039_b2c_annual_plan_foundation.sql"));
   assert.ok(!sql039.includes("apply_order_refund_state_by_invoice"),
