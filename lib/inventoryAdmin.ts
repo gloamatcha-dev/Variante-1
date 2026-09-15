@@ -22,6 +22,13 @@ import {
  * inventory_items.current_quantity, so an attempt would be refused by
  * the database rather than by a code review.
  *
+ * ── IT READS AND WRITES QUANTITIES, NEVER MONEY ───────────────
+ *
+ * No price reaches this module in either direction. Accounting owns what
+ * things cost and arrives with its own package; a price cached here
+ * would be a second version of what GLOA spent, and two versions of one
+ * number is worse than one version elsewhere.
+ *
  * ── MANUAL, AND NOTHING HERE IS CALLED BY AN ORDER ────────────
  *
  * Nothing in this file is reachable from the checkout, the Stripe
@@ -346,7 +353,6 @@ export async function recordMovement(request: MovementRequest, actorEmail: strin
     p_supplier: request.supplier,
     p_batch_number: request.batchNumber,
     p_best_before_date: request.bestBeforeDate,
-    p_purchase_price_cents: request.purchasePriceCents,
     p_occurred_at: null,
     p_actor_email: actorEmail,
     p_allow_negative: request.allowNegative,
@@ -443,7 +449,6 @@ export async function createInventoryItem(request: CreateItemRequest, actorEmail
       unit: request.unit,
       low_stock_threshold: request.lowStockThreshold,
       supplier: request.supplier,
-      purchase_price_cents: request.purchasePriceCents,
       notes: request.notes,
     })
     .select(ITEM_COLUMNS)
@@ -474,7 +479,6 @@ export async function createInventoryItem(request: CreateItemRequest, actorEmail
         reason: "initial_stock",
         area: null, note: null, reference: null, supplier: request.supplier,
         batchNumber: null, bestBeforeDate: null,
-        purchasePriceCents: request.purchasePriceCents,
         allowNegative: false,
       },
       actorEmail
@@ -505,7 +509,6 @@ export async function updateInventoryItem(request: UpdateItemRequest) {
       unit: request.unit,
       low_stock_threshold: request.lowStockThreshold,
       supplier: request.supplier,
-      purchase_price_cents: request.purchasePriceCents,
       notes: request.notes,
     })
     .eq("id", request.itemId)

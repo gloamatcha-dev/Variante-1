@@ -5,8 +5,12 @@ import { updateInventoryItem } from "../../../../../../lib/inventoryAdmin";
 /**
  * THE DESCRIPTIVE FIELDS OF AN ITEM.
  *
- * Name, SKU, category, unit, areas, threshold, supplier, default
- * purchase price, notes.
+ * Name, SKU, category, unit, areas, threshold, supplier, notes.
+ *
+ * NOT A PRICE. What an item cost is a financial fact and belongs to
+ * accounting, which arrives with its own package and its own tables; a
+ * price kept on a stock row would be a second, never-reconciled source
+ * of what GLOA spent. The validator has no field for it.
  *
  * NOT THE STOCK. current_quantity is refused by the validator and could
  * not be written anyway: migration 050 lists every column service_role

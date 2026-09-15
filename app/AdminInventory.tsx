@@ -31,10 +31,18 @@ import {
  * decision; guessing at it now would produce a stock figure nobody
  * trusts and everybody has to check by hand anyway.
  *
+ * ── AND NO PRICE FIELD EITHER ─────────────────────────────────
+ *
+ * Nothing on this screen asks what something cost, and nothing displays
+ * it. Money belongs to accounting and arrives with its own package -
+ * what an operator needs here is where a batch came from and when it
+ * stops being usable, which is why supplier, batch and best-before
+ * stayed.
+ *
  * ── THERE IS NO STOCK FIELD ───────────────────────────────────
  *
  * The edit form has a name, a SKU, a category, a unit, areas, a
- * threshold, a supplier, a price and a note - and no quantity. Stock
+ * threshold, a supplier and a note - and no quantity. Stock
  * changes through a receipt, a withdrawal, a correction or a count, each
  * of which writes a row saying what changed and what it left behind.
  * That is not a UI convention: migration 050 grants the server no UPDATE
@@ -58,7 +66,6 @@ type Item = {
   current_quantity: number | string | null;
   low_stock_threshold: number | string | null;
   supplier: string | null;
-  purchase_price_cents: number | null;
   notes: string | null;
   is_active: boolean;
   updated_at: string;
@@ -484,10 +491,11 @@ function ItemDetail({
         ["Bereiche", detail.areas.length ? detail.areas.map(a => AREA_LABEL[a]).join(" · ") : "—"],
       ]} />
 
+      {/* Where it came from and what was noted about it. NOT what it
+          cost: that is accounting's, and a price shown here would invite
+          somebody to treat this screen as a spend report. */}
       <Facts title="Beschaffung" rows={[
         ["Lieferant", item.supplier || "—"],
-        ["Einkaufspreis", item.purchase_price_cents === null
-          ? "—" : `${(item.purchase_price_cents / 100).toLocaleString("de-DE", { minimumFractionDigits: 2 })} €`],
         ["Notiz", item.notes || "—"],
       ]} />
 
@@ -666,7 +674,6 @@ function MovementForm({
             supplier: mode === "receipt" ? (supplier || null) : null,
             batchNumber: mode === "receipt" ? (batchNumber || null) : null,
             bestBeforeDate: mode === "receipt" ? (bestBefore || null) : null,
-            purchasePriceCents: null,
             allowNegative,
           };
       const { status, data } = await post(path, body);
@@ -844,10 +851,6 @@ function ItemForm({
       ? "" : String(item.low_stock_threshold)
   );
   const [supplier, setSupplier] = useState(item?.supplier ?? "");
-  const [price, setPrice] = useState(
-    item?.purchase_price_cents === null || item?.purchase_price_cents === undefined
-      ? "" : (item.purchase_price_cents / 100).toFixed(2).replace(".", ",")
-  );
   const [notes, setNotes] = useState(item?.notes ?? "");
   const [initial, setInitial] = useState("");
   const [newCategory, setNewCategory] = useState("");
@@ -859,11 +862,6 @@ function ItemForm({
 
   const toggleArea = (a: InventoryArea) =>
     setSelectedAreas(prev => (prev.includes(a) ? prev.filter(x => x !== a) : [...prev, a]));
-
-  const priceCents = (() => {
-    const q = parseQuantity(price);
-    return q === null ? null : Math.round(q * 100);
-  })();
 
   const valid = name.trim().length > 0 && unit.trim().length > 0 && categoryId.length > 0;
 
@@ -896,7 +894,6 @@ function ItemForm({
         areas: selectedAreas,
         lowStockThreshold: threshold || null,
         supplier: supplier || null,
-        purchasePriceCents: priceCents,
         notes: notes || null,
       };
       const { status, data } = item
@@ -951,11 +948,6 @@ function ItemForm({
           <span>Lieferant</span>
           <input type="text" value={supplier} maxLength={120} disabled={busy}
             onChange={e => setSupplier(e.target.value)} placeholder="optional" />
-        </label>
-        <label>
-          <span>Einkaufspreis (€)</span>
-          <input type="text" inputMode="decimal" value={price} disabled={busy}
-            onChange={e => setPrice(e.target.value)} placeholder="optional" />
         </label>
         <label>
           <span>Notiz</span>

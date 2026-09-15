@@ -4,8 +4,28 @@
 --
 -- GLOA needs to know what it has, what came in, what went out and what
 -- it went out FOR. Nothing more: this is a stock account, not an ERP.
--- There is no bill of materials, no FIFO valuation, no reservation, no
--- purchase order and no automatic anything.
+-- There is no bill of materials, no reservation, no purchase order and
+-- no automatic anything.
+--
+-- ── IT ANSWERS QUANTITIES, NEVER MONEY ────────────────────────
+--
+-- Not one column here holds a price, a value, a cost or an amount. That
+-- is a deliberate boundary, not an omission: what something cost is a
+-- financial fact that belongs to accounting, and it arrives with its own
+-- package and its own tables.
+--
+-- The temptation is obvious - the price is right there on the delivery
+-- note when a receipt is booked - and it is exactly the wrong place to
+-- put it. A price in the stock ledger becomes a SECOND source of what
+-- GLOA spent: never reconciled against an invoice, silently wrong the
+-- first time a supplier credits something, and authoritative-looking
+-- enough that somebody eventually computes a margin from it. Two
+-- versions of one number is worse than one version elsewhere.
+--
+-- So: supplier, batch and best-before stay, because they are
+-- operational. Prices do not. A valuation, an average cost, FIFO, LIFO
+-- and a margin are all out of scope here and will not be "prepared for"
+-- with a spare column or a foreign key either.
 --
 -- ── WHY NEW TABLES AND NOT public.products ────────────────────
 --
@@ -98,8 +118,9 @@ create table if not exists public.inventory_items (
   current_quantity      numeric(14,3) not null default 0,
 
   low_stock_threshold   numeric(14,3) check (low_stock_threshold is null or low_stock_threshold >= 0),
+  -- The supplier stays: "who did this come from" is an operational
+  -- fact and the first question asked when a batch turns out wrong.
   supplier              text check (supplier is null or length(btrim(supplier)) <= 120),
-  purchase_price_cents  integer check (purchase_price_cents is null or purchase_price_cents >= 0),
   notes                 text check (notes is null or length(notes) <= 2000),
   is_active             boolean not null default true,
 
@@ -211,10 +232,21 @@ create table if not exists public.inventory_movements (
   -- would invite exactly the automatic coupling this package forbids.
   reference            text check (reference is null or length(reference) <= 120),
 
+  -- WHAT A RECEIPT RECORDS, AND WHAT IT DELIBERATELY DOES NOT.
+  --
+  -- Supplier, batch and best-before are operational: they answer "where
+  -- did this come from" and "when does it stop being usable", which is
+  -- what somebody standing at a shelf needs.
+  --
+  -- THERE IS NO PRICE COLUMN HERE, ON PURPOSE. What something cost is a
+  -- financial fact, it belongs to accounting, and it arrives with its
+  -- own package. Keeping a price in the stock ledger would make this
+  -- table a second, partial and always slightly wrong source of what
+  -- GLOA spent - and the first person to compute a margin from it would
+  -- get a number nobody can reconcile against an invoice.
   supplier             text check (supplier is null or length(supplier) <= 120),
   batch_number         text check (batch_number is null or length(batch_number) <= 80),
   best_before_date     date,
-  purchase_price_cents integer check (purchase_price_cents is null or purchase_price_cents >= 0),
 
   -- When it happened in the world, which is not always when it was
   -- typed in.
@@ -279,7 +311,6 @@ create or replace function public.record_inventory_movement(
   p_supplier             text default null,
   p_batch_number         text default null,
   p_best_before_date     date default null,
-  p_purchase_price_cents integer default null,
   p_occurred_at          timestamptz default null,
   p_actor_email          text default null,
   p_allow_negative       boolean default false
@@ -358,12 +389,12 @@ begin
   insert into public.inventory_movements (
     inventory_item_id, operation_id, quantity_delta, balance_after,
     movement_type, reason, area, note, reference, supplier,
-    batch_number, best_before_date, purchase_price_cents,
+    batch_number, best_before_date,
     occurred_at, actor_email
   ) values (
     p_item_id, p_operation_id, v_delta, v_balance,
     p_movement_type, p_reason, p_area, p_note, p_reference, p_supplier,
-    p_batch_number, p_best_before_date, p_purchase_price_cents,
+    p_batch_number, p_best_before_date,
     coalesce(p_occurred_at, now()), p_actor_email
   )
   returning * into v_movement;
@@ -526,7 +557,7 @@ grant select, insert on public.inventory_items to service_role;
 -- structural half of "no silent stock field".
 grant update (
   name, sku, category_id, unit, low_stock_threshold,
-  supplier, purchase_price_cents, notes, is_active, updated_at
+  supplier, notes, is_active, updated_at
 ) on public.inventory_items to service_role;
 
 grant select, insert, delete on public.inventory_item_areas to service_role;
@@ -537,10 +568,10 @@ grant select, insert, delete on public.inventory_item_areas to service_role;
 -- produced, and nobody can edit or delete one at all.
 grant select on public.inventory_movements to service_role;
 
-revoke all on function public.record_inventory_movement(uuid, uuid, numeric, text, text, text, text, text, text, text, date, integer, timestamptz, text, boolean) from public;
-revoke all on function public.record_inventory_movement(uuid, uuid, numeric, text, text, text, text, text, text, text, date, integer, timestamptz, text, boolean) from anon;
-revoke all on function public.record_inventory_movement(uuid, uuid, numeric, text, text, text, text, text, text, text, date, integer, timestamptz, text, boolean) from authenticated;
-grant execute on function public.record_inventory_movement(uuid, uuid, numeric, text, text, text, text, text, text, text, date, integer, timestamptz, text, boolean) to service_role;
+revoke all on function public.record_inventory_movement(uuid, uuid, numeric, text, text, text, text, text, text, text, date, timestamptz, text, boolean) from public;
+revoke all on function public.record_inventory_movement(uuid, uuid, numeric, text, text, text, text, text, text, text, date, timestamptz, text, boolean) from anon;
+revoke all on function public.record_inventory_movement(uuid, uuid, numeric, text, text, text, text, text, text, text, date, timestamptz, text, boolean) from authenticated;
+grant execute on function public.record_inventory_movement(uuid, uuid, numeric, text, text, text, text, text, text, text, date, timestamptz, text, boolean) to service_role;
 
 revoke all on function public.record_inventory_stocktake(uuid, uuid, numeric, text, text, timestamptz, text) from public;
 revoke all on function public.record_inventory_stocktake(uuid, uuid, numeric, text, text, timestamptz, text) from anon;

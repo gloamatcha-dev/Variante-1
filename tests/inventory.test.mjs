@@ -145,15 +145,21 @@ test("1b: not one policy, and nothing at all for a browser role", () => {
 test("1c: THE STOCK COLUMN IS NOT WRITABLE, and the ledger is append-only", () => {
   // The structural half of "no silent stock field": every column
   // service_role may update is listed, and current_quantity is not one.
-  const itemGrant = sql.match(/grant update \(([\s\S]*?)\) on public\.inventory_items to service_role/);
+  // [^)] and not [\s\S]*? : the categories grant appears first, and a
+  // lazy match happily ran from THAT opening paren to the items suffix,
+  // which quietly made the column list three entries too long.
+  const itemGrant = sql.match(/grant update \(([^)]*)\) on public\.inventory_items to service_role/);
   assert.ok(itemGrant, "the item update grant is missing");
   const columns = itemGrant[1].split(",").map(c => c.trim());
   assert.ok(!columns.includes("current_quantity"),
     "service_role can set stock directly, which makes the ledger optional");
   for (const editable of ["name", "sku", "category_id", "unit", "low_stock_threshold",
-                          "supplier", "purchase_price_cents", "notes", "is_active"]) {
+                          "supplier", "notes", "is_active"]) {
     assert.ok(columns.includes(editable), `${editable} cannot be edited`);
   }
+  // The grant is the WHOLE list, so a price could not be edited into
+  // existence either - see section 10.
+  assert.equal(columns.length, 9, `the item update grant changed: ${columns.join(",")}`);
 
   // The ledger: SELECT and nothing else. The functions write it as owner.
   assert.match(sql, /grant select on public\.inventory_movements to service_role/);
@@ -372,8 +378,6 @@ test("4b: a hostile or malformed booking is refused with a code, not a guess", (
     [{ reference: "a\nb" }, "invalid_reference", "a newline in the reference"],
     [{ batchNumber: "x".repeat(200) }, "invalid_batch_number", "an over-long batch"],
     [{ bestBeforeDate: "31.12.2026" }, "invalid_best_before_date", "a German date"],
-    [{ purchasePriceCents: 12.5 }, "invalid_purchase_price", "a fractional cent"],
-    [{ purchasePriceCents: -1 }, "invalid_purchase_price", "a negative price"],
   ]) {
     const out = validateMovementRequest({ ...goodMovement, ...patch });
     assert.equal(out.ok, false, `${why} was accepted`);
@@ -434,7 +438,6 @@ test("4f: item fields are trimmed, bounded and control-character free", () => {
     [{ sku: "x".repeat(100) }, "invalid_sku", "an over-long SKU"],
     [{ lowStockThreshold: "-5" }, "invalid_threshold", "a negative threshold"],
     [{ initialQuantity: "-1" }, "invalid_quantity", "a negative opening stock"],
-    [{ purchasePriceCents: 1.5 }, "invalid_purchase_price", "a fractional cent"],
   ]) {
     const out = validateCreateItemRequest({ ...base, ...patch });
     assert.equal(out.ok, false, `${why} was accepted`);
@@ -854,6 +857,198 @@ test("9b: THE 4A.1B OVERFLOW RULES ARE INTACT", () => {
   assert.match(drawer, /overflow-x:hidden/);
   assert.match(always, /\.ops-drawer \.ops-items\{ table-layout:fixed; width:100%; \}/);
   assert.match(always, /\.ops-emails\{ grid-template-columns:repeat\(2,minmax\(0,1fr\)\); \}/);
+});
+
+/* ════════════════════════════════════════════════════════════════════
+   10. INVENTORY IS NOT ACCOUNTING
+   ════════════════════════════════════════════════════════════════════ */
+
+/**
+ * THE BOUNDARY THIS SECTION DEFENDS.
+ *
+ * The inventory answers what GLOA has, what came in, what went out and
+ * what it went out for. It does not answer what any of it cost - that is
+ * a financial question, it belongs to accounting, and accounting arrives
+ * with its own package and its own tables.
+ *
+ * The boundary erodes by accident rather than by decision: the price is
+ * printed on the delivery note the operator is already holding when they
+ * book a receipt, so "while we are here" is always one field away. The
+ * damage shows up much later, when somebody reports a margin computed
+ * from a number no invoice ever agreed to and nobody can say which of
+ * the two sources is the wrong one.
+ *
+ * So the ban is asserted against the SOURCE of every layer at once - the
+ * migration, the pure leaf, the writer, all nine routes and the screen -
+ * and comments are stripped first. That is what lets those files explain
+ * the boundary in prose without prose satisfying or breaking a check.
+ *
+ * SUPPLIER, BATCH AND BEST-BEFORE ARE NOT MONEY and stay: they answer
+ * where something came from and when it stops being usable, which is
+ * what somebody standing at a shelf needs. 10d guards them, because a
+ * removal is as easy to overdo as to underdo.
+ */
+const MONEY_TERMS = [
+  [/purchase[_ ]?price/i, "a purchase price"],
+  [/price[_ ]?cents|priceCents/i, "a price in cents"],
+  [/\bprices?\b/i, "a price"],
+  [/\bcents?\b/i, "an amount in cents"],
+  [/\bcosts?\b/i, "a cost"],
+  [/\bmargins?\b/i, "a margin"],
+  [/\binvoices?\b/i, "an invoice"],
+  [/\bexpenses?\b/i, "an expense"],
+  [/financ/i, "a finance field"],
+  [/accounting/i, "an accounting field"],
+  [/valuation|\bfifo\b|\blifo\b|average_cost|avg_cost/i, "a stock valuation"],
+  [/Einkaufspreis|Verkaufspreis|Warenwert|Bestandswert|Buchhaltung|Rechnung|Kosten/i,
+    "a German money field"],
+  [/\u20ac|\bEUR\b/, "a currency amount"],
+];
+
+/** Assert that not one money term appears in `source`. */
+function assertHoldsNoMoney(label, source) {
+  for (const [pattern, what] of MONEY_TERMS) {
+    const hit = source.match(pattern);
+    assert.equal(hit, null, `${label} carries ${what}: ${JSON.stringify(hit?.[0])}`);
+  }
+}
+
+test("10: MIGRATION 050 HOLDS NO MONEY - no column, no parameter, no grant", () => {
+  assertHoldsNoMoney("migration 050", sql);
+  // The two tables a price would have hung on do exist, so this is an
+  // absent column and not an absent table.
+  assert.match(sql, /create table if not exists public\.inventory_items/);
+  assert.match(sql, /create table if not exists public\.inventory_movements/);
+  // The booking function takes fourteen arguments and none is an amount.
+  // The signature is asserted as a WHOLE: a price added back as a
+  // defaulted parameter would be invisible to a term scan of the call
+  // sites, because no caller would have to pass it.
+  const signature = sql.slice(sql.indexOf("function public.record_inventory_movement("));
+  const params = signature.slice(signature.indexOf("(") + 1, signature.indexOf(")")).trim();
+  const names = params.split(",").map(one => one.trim().split(/\s+/)[0]).filter(Boolean);
+  assert.deepEqual(names,
+    ["p_operation_id", "p_item_id", "p_quantity", "p_movement_type", "p_reason",
+     "p_area", "p_note", "p_reference", "p_supplier", "p_batch_number",
+     "p_best_before_date", "p_occurred_at", "p_actor_email", "p_allow_negative"],
+    "the booking function's parameters changed");
+  // ...and its four grant/revoke statements name that same arity, so a
+  // parameter cannot be added without the grants pointing at nothing.
+  const arity = "(uuid, uuid, numeric, text, text, text, text, text, text, text, date, timestamptz, text, boolean)";
+  assert.equal(sql.split(`record_inventory_movement${arity}`).length - 1, 4,
+    "the booking function's grants no longer match its signature");
+});
+
+test("10b: NO LAYER OF THE INVENTORY CODE KNOWS A PRICE", () => {
+  const layers = {
+    "lib/inventoryRules.ts": codeOnly(rules),
+    "lib/inventoryAdmin.ts": adminCode,
+    "app/AdminInventory.tsx": uiCode,
+    ...Object.fromEntries(Object.entries(routeSources).map(([key, src]) => [ROUTES[key], codeOnly(src)])),
+  };
+  assert.equal(Object.keys(layers).length, 12, "a layer stopped being checked");
+  for (const [file, source] of Object.entries(layers)) {
+    assert.ok(source.length > 200, `${file} read as empty, so it proves nothing`);
+    assertHoldsNoMoney(file, source);
+  }
+  // No layer turns cents into euros, which is the shape a price takes
+  // even when it is not called one.
+  const everything = Object.values(layers).join("\n");
+  assert.ok(!/\/ *100\b|\* *0?\.01\b/.test(everything), "something converts cents somewhere");
+  assert.ok(!/toLocaleString\([^)]*currency/i.test(everything), "something formats a currency");
+});
+
+test("10c: there is no PREPARATORY link to a finance table either", () => {
+  // Not "we will need it later, so here is the column already". A spare
+  // foreign key is an invitation, and the next person to read it takes it
+  // for a decision that has already been made.
+  const code = codeOnly(rules) + adminCode + uiCode;
+  for (const id of ["finance_id", "expense_id", "invoice_id", "accounting_reference_id",
+                    "cost_center", "cost_centre", "ledger_account", "booking_id",
+                    "journal_entry_id"]) {
+    assert.ok(!sql.includes(id), `050 prepares a finance link: ${id}`);
+    assert.ok(!code.includes(id), `the inventory code prepares a finance link: ${id}`);
+  }
+  // Every foreign key 050 declares points back into the inventory.
+  const targets = [...sql.matchAll(/references\s+public\.(\w+)/g)].map(m => m[1]);
+  assert.ok(targets.length >= 3, `the foreign keys disappeared: ${targets.length}`);
+  for (const target of targets) {
+    assert.ok(target.startsWith("inventory_"), `050 points a foreign key at ${target}`);
+  }
+});
+
+test("10d: THE OPERATIONAL FIELDS SURVIVED THE REMOVAL", () => {
+  // Taking the price out must not take the delivery facts with it. Where
+  // a batch came from and when it expires are the first two questions
+  // asked when something turns out wrong, and neither is financial.
+  for (const column of ["supplier", "batch_number", "best_before_date", "sku",
+                        "category_id", "area", "quantity_delta", "unit",
+                        "low_stock_threshold", "note", "reference"]) {
+    assert.ok(sql.includes(column), `${column} was removed along with the price`);
+  }
+  for (const column of ["supplier", "batch_number", "best_before_date"]) {
+    assert.ok(MOVEMENT_COLUMNS.split(",").includes(column), `the ledger stopped reading ${column}`);
+  }
+  for (const column of ["supplier", "low_stock_threshold", "notes"]) {
+    assert.ok(ITEM_COLUMNS.split(",").includes(column), `the item stopped reading ${column}`);
+  }
+  for (const [label, columns] of [["ITEM_COLUMNS", ITEM_COLUMNS],
+                                  ["MOVEMENT_COLUMNS", MOVEMENT_COLUMNS],
+                                  ["CATEGORY_COLUMNS", CATEGORY_COLUMNS]]) {
+    assertHoldsNoMoney(label, columns);
+  }
+
+  // A receipt still carries everything a receipt is for...
+  const receipt = {
+    operationId: UUID_A, itemId: UUID_B, movementType: "receipt", reason: "goods_receipt",
+    quantity: "500", supplier: "Uji Tea", batchNumber: "L-2026-04", bestBeforeDate: "2027-04-01",
+  };
+  const booked = validateMovementRequest(receipt);
+  assert.equal(booked.ok, true);
+  assert.equal(booked.request.supplier, "Uji Tea");
+  assert.equal(booked.request.batchNumber, "L-2026-04");
+  assert.equal(booked.request.bestBeforeDate, "2027-04-01");
+
+  // ...and a price sent anyway is not validated, not carried and not
+  // echoed back. It is not an error either: refusing it by name would
+  // tell a client the field is known here.
+  const withPrice = validateMovementRequest({ ...receipt, purchasePriceCents: 4999, priceCents: 4999 });
+  assert.equal(withPrice.ok, true, "an unknown field must not break a valid booking");
+  assert.ok(!Object.keys(withPrice.request).some(key => /price|cost|cent/i.test(key)),
+    `the validator carried a price through: ${Object.keys(withPrice.request).join(",")}`);
+  assert.ok(!JSON.stringify(withPrice.request).includes("4999"),
+    "a client-sent price survived validation");
+
+  const item = validateCreateItemRequest({
+    operationId: UUID_A, name: "Matcha Rohware", unit: "g", categoryId: UUID_B,
+    supplier: "Uji Tea", purchasePriceCents: 4999,
+  });
+  assert.equal(item.ok, true);
+  assert.equal(item.request.supplier, "Uji Tea", "the supplier was removed from the item form");
+  assert.ok(!JSON.stringify(item.request).includes("4999"), "a new item stored a price");
+});
+
+test("10e: NOTHING ON THE SCREEN ASKS FOR OR SHOWS A PRICE", () => {
+  const MONEY_WORD = /preis|kosten|betrag|wert$|\u20ac|\beur\b/i;
+  // Every field label the operator can read.
+  const labels = [...ui.matchAll(/<span>([^<{]+)<\/span>/g)].map(m => m[1]);
+  assert.ok(labels.length >= 14, `the form labels stopped being found: ${labels.length}`);
+  for (const label of labels) assert.ok(!MONEY_WORD.test(label), `a form field asks for: ${label}`);
+  assert.ok(labels.includes("Lieferant"), "the supplier field went with the price");
+  assert.ok(labels.includes("Chargennummer"), "the batch field went with the price");
+  assert.ok(labels.includes("Mindestens haltbar bis"), "the best-before field went with the price");
+
+  // Every row the detail drawer prints.
+  const rows = [...ui.matchAll(/\["([^"]+)", /g)].map(m => m[1]);
+  assert.ok(rows.length >= 10, `the drawer rows stopped being found: ${rows.length}`);
+  for (const row of rows) assert.ok(!MONEY_WORD.test(row), `the drawer shows: ${row}`);
+  assert.ok(rows.includes("Lieferant"), "the drawer stopped showing the supplier");
+
+  // No input on the screen is a money input.
+  for (const input of uiCode.match(/<input[^>]*>/g) ?? []) {
+    assert.ok(!/price|cost|betrag|preis/i.test(input), `a money input exists: ${input}`);
+  }
+  // The procurement block is still there - it simply has no price in it.
+  assert.ok(uiCode.includes('title="Beschaffung"'), "the procurement block disappeared entirely");
 });
 
 /** Every @media (max-width:760px) block, concatenated. */

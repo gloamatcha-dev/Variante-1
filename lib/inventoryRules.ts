@@ -21,6 +21,18 @@
  * or a cancellation could call, and nothing that computes a stock
  * consequence from a sale. Inventory moves because somebody typed a
  * number and confirmed it.
+ *
+ * ── QUANTITIES, NEVER MONEY ───────────────────────────────────
+ *
+ * Nothing here validates, parses, stores or formats a price. What
+ * something cost is a financial fact and belongs to accounting; a price
+ * kept in the stock ledger would be a second source of what GLOA spent -
+ * never reconciled against an invoice and authoritative-looking enough
+ * that somebody eventually computes a margin from it.
+ *
+ * Supplier, batch and best-before DO belong here: they answer "where did
+ * this come from" and "when does it stop being usable", which is what
+ * somebody standing at a shelf needs.
  */
 
 /* ══════════════════════════════════════════════════════════════
@@ -307,7 +319,6 @@ export type MovementRequest = {
   supplier: string | null;
   batchNumber: string | null;
   bestBeforeDate: string | null;
-  purchasePriceCents: number | null;
   allowNegative: boolean;
 };
 
@@ -361,9 +372,6 @@ export function validateMovementRequest(body: unknown): Validated<MovementReques
   const bestBeforeDate = cleanDate(raw.bestBeforeDate);
   if (bestBeforeDate === undefined) return bad("invalid_best_before_date");
 
-  const purchasePriceCents = cleanCents(raw.purchasePriceCents);
-  if (purchasePriceCents === undefined) return bad("invalid_purchase_price");
-
   return {
     ok: true,
     request: {
@@ -373,7 +381,7 @@ export function validateMovementRequest(body: unknown): Validated<MovementReques
       movementType: movementType as RequestableMovementType,
       reason: reason as MovementReason,
       area,
-      note, reference, supplier, batchNumber, bestBeforeDate, purchasePriceCents,
+      note, reference, supplier, batchNumber, bestBeforeDate,
       allowNegative: raw.allowNegative === true,
     },
   };
@@ -416,7 +424,6 @@ export type ItemFields = {
   areas: InventoryArea[];
   lowStockThreshold: number | null;
   supplier: string | null;
-  purchasePriceCents: number | null;
   notes: string | null;
 };
 
@@ -490,25 +497,14 @@ function validateItemFields(raw: Record<string, unknown>): Validated<ItemFields>
     lowStockThreshold = parsed;
   }
 
-  const purchasePriceCents = cleanCents(raw.purchasePriceCents);
-  if (purchasePriceCents === undefined) return bad("invalid_purchase_price");
-
   return {
     ok: true,
     request: {
       name, sku, categoryId: raw.categoryId as string, unit,
       areas: cleanAreas(raw.areas),
-      lowStockThreshold, supplier, purchasePriceCents, notes,
+      lowStockThreshold, supplier, notes,
     },
   };
-}
-
-/** Integer cents, or null. Money never arrives here as a float. */
-function cleanCents(raw: unknown): number | null | undefined {
-  if (raw === undefined || raw === null || raw === "") return null;
-  if (typeof raw !== "number" || !Number.isFinite(raw)) return undefined;
-  if (!Number.isInteger(raw) || raw < 0 || raw > 100_000_000) return undefined;
-  return raw;
 }
 
 /** An ISO date (YYYY-MM-DD), or null. */
@@ -596,14 +592,14 @@ export function resolveItemsQuery(input: unknown): ItemsQuery {
 
 export const ITEM_COLUMNS = [
   "id", "name", "sku", "category_id", "unit", "current_quantity",
-  "low_stock_threshold", "supplier", "purchase_price_cents", "notes",
+  "low_stock_threshold", "supplier", "notes",
   "is_active", "created_at", "updated_at",
 ].join(",");
 
 export const MOVEMENT_COLUMNS = [
   "id", "inventory_item_id", "quantity_delta", "balance_after",
   "movement_type", "reason", "area", "note", "reference", "supplier",
-  "batch_number", "best_before_date", "purchase_price_cents",
+  "batch_number", "best_before_date",
   "occurred_at", "created_at", "actor_email",
 ].join(",");
 
