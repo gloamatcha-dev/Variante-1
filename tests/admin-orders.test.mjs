@@ -19,8 +19,17 @@ import {
   berlinDayStartIso,
   customerFromSnapshot,
   formatCents,
+  ITEM_LINES_PER_ORDER_CAP,
+  ITEM_SUMMARY_MAX_LINES,
+  ORDER_ITEM_SUMMARY_COLUMNS,
+  UNNAMED_ITEM_LABEL,
+  formatItemSummary,
+  formatPieces,
+  groupOrderItems,
   normalizeOrderSearch,
+  orderItemLabel,
   orderTotalGrams,
+  summarizeOrderItems,
   ordersPageRange,
   resolveOrdersPage,
   resolveOrdersPageSize,
@@ -368,7 +377,7 @@ test("6f: mobile turns the table into rows and never scrolls the page sideways",
   assert.ok(mobile.includes("overflow-x:visible"), "the wrapper still scrolls sideways on mobile");
   // Every cell carries the label its header would have given it.
   const labels = [...ui.matchAll(/data-label="([^"]+)"/g)].map(m => m[1]);
-  for (const header of ["Bestellung", "Datum", "Kunde", "Betrag", "Zahlung", "Versand", "Status", "Hinweis"]) {
+  for (const header of ["Bestellung", "Datum", "Kunde", "Inhalt", "Betrag", "Zahlung", "Versand", "Status", "Hinweis"]) {
     assert.ok(labels.includes(header), `no data-label for column ${header}`);
   }
 });
@@ -392,4 +401,269 @@ test("7b: the query leaf stays a leaf", () => {
   for (const banned of ["supabase", "process.env", "fetch(", "Date.now()"]) {
     assert.ok(!codeOnly(leaf).includes(banned), `the leaf reaches for ${banned}`);
   }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   8. SEARCH FINDS AN ORDER BY ALL THREE OF ITS HANDLES
+
+   The operator gets a question by phone, by mail or by order
+   number, and has to find the same order from any of them. The
+   three fields below are the three ways that happens; a search
+   that covers two of them sends the operator to the Supabase
+   console for the third.
+
+   Name and email are read out of customer_snapshot rather than a
+   customers join on purpose: the snapshot is what the order was
+   placed with, so it still finds the order after the customer
+   renames themselves or changes address.
+   ══════════════════════════════════════════════════════════════ */
+
+test("8: search covers order number, customer name AND email", () => {
+  const at = listRoute.indexOf("rows.or(");
+  assert.notEqual(at, -1, "the list route has no search clause at all");
+  const clause = listRoute.slice(at, at + 400);
+  for (const field of ["order_number.ilike.", "customer_snapshot->>email.ilike.", "customer_snapshot->>name.ilike."]) {
+    assert.ok(clause.includes(field), `search cannot find an order by ${field}`);
+  }
+  // One or= expression, so the three are alternatives rather than a
+  // conjunction that would only match a row carrying all three.
+  assert.equal((listRoute.match(/rows\.or\(/g) ?? []).length, 1);
+});
+
+test("8b: the name search reads the key production actually stores", () => {
+  // All 458 production rows carry exactly {email, name} - no
+  // first_name/last_name variant exists in the table - so ->>name is
+  // the whole name. customerFromSnapshot still accepts the split shape
+  // for rows a future checkout might write, and this pins the pair:
+  // the shape the reader understands must contain the one the query
+  // filters on.
+  assert.equal(customerFromSnapshot({ name: "Anna Muster", email: "a@b.de" }).name, "Anna Muster");
+  assert.ok(listRoute.includes("customer_snapshot->>name"),
+    "the query filters on a key customerFromSnapshot does not read");
+});
+
+test("8c: a hostile search string reaches the database as a literal", () => {
+  const hostile = [
+    "anna,order_number.ilike.*",
+    "a')--",
+    "%",
+    "_",
+    "a%b_c",
+    "*",
+    'x" or "1"="1',
+    "a\\b",
+    "(status.eq.paid)",
+  ];
+  for (const raw of hostile) {
+    const out = normalizeOrderSearch(raw);
+    for (const ch of [",", "(", ")", "%", "_", "*", "\\", '"', "'"]) {
+      assert.ok(!out.includes(ch), `normalizeOrderSearch(${JSON.stringify(raw)}) kept ${ch}`);
+    }
+  }
+});
+
+test("8d: an ordinary name, email and order number survive the cleaner intact", () => {
+  // The guard must not be so eager that it breaks the searches it
+  // exists to protect. Hyphens, dots, at-signs, umlauts and spaces are
+  // all ordinary in these three fields and all meaningless to or=.
+  assert.equal(normalizeOrderSearch("  GLOA-2026-000123  "), "GLOA-2026-000123");
+  assert.equal(normalizeOrderSearch("anna.mueller@example.de"), "anna.mueller@example.de");
+  assert.equal(normalizeOrderSearch("Anna Müller-Schmidt"), "Anna Müller-Schmidt");
+  assert.equal(normalizeOrderSearch("Ökotest"), "Ökotest");
+  // And it stays bounded, so a megabyte of text cannot be sent as a filter.
+  assert.equal(normalizeOrderSearch("a".repeat(5000)).length, 120);
+});
+
+test("8e: the search box tells the operator all three work", () => {
+  const at = ui.indexOf('type="search"');
+  assert.notEqual(at, -1, "there is no search input in the order screen");
+  const box = ui.slice(Math.max(0, at - 700), at + 400);
+  assert.match(box, /Bestellnummer/i);
+  assert.match(box, /Name/i);
+  assert.match(box, /Mail/i);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   9. THE LIST SHOWS WHAT WAS ORDERED
+
+   Without this the operator opens 25 drawers to learn that all 25
+   are the same tin. With it the page answers the question it is
+   actually asked. The cost has to stay one request: a summary
+   fetched per row turns one page view into 26 round trips, and at
+   458 orders that is how an admin screen becomes unusable.
+   ══════════════════════════════════════════════════════════════ */
+
+test("9: quantities are summed per product, and identical lines merge", () => {
+  const s1 = summarizeOrderItems([
+    { product_name: "Matcha", variant_name: "30 g", quantity: 2 },
+    { product_name: "Matcha", variant_name: "50 g", quantity: 1 },
+  ]);
+  assert.equal(s1.pieces, 3);
+  assert.deepEqual(s1.lines.map(l => l.quantity + "x " + l.label),
+    ["2x Matcha · 30 g", "1x Matcha · 50 g"]);
+  assert.equal(formatItemSummary(s1), "2× Matcha · 30 g · 1× Matcha · 50 g");
+  assert.equal(formatPieces(s1.pieces), "3 Artikel");
+
+  // The same product twice is one line with the quantities added.
+  const s2 = summarizeOrderItems([
+    { product_name: "Matcha", variant_name: "30 g", quantity: 1 },
+    { product_name: "Matcha", variant_name: "30 g", quantity: 4 },
+  ]);
+  assert.equal(s2.lines.length, 1);
+  assert.equal(s2.lines[0].quantity, 5);
+  assert.equal(s2.pieces, 5);
+});
+
+test("9b: a single-line order - production's actual shape - reads correctly", () => {
+  // Every one of the 458 production orders carries exactly one item.
+  const s = summarizeOrderItems([{ product_name: "GLOA Matcha", variant_name: "30 g", quantity: 1 }]);
+  assert.equal(s.pieces, 1);
+  assert.equal(s.hidden, 0);
+  assert.equal(formatItemSummary(s), "1× GLOA Matcha · 30 g");
+  assert.equal(formatPieces(s.pieces), "1 Artikel");
+});
+
+test("9c: many positions abbreviate rather than growing the row without limit", () => {
+  const many = Array.from({ length: 7 }, (_, i) => ({
+    product_name: `Produkt ${i}`, variant_name: null, quantity: 7 - i,
+  }));
+  const s = summarizeOrderItems(many);
+  assert.equal(s.lines.length, ITEM_SUMMARY_MAX_LINES);
+  assert.equal(s.hidden, 7 - ITEM_SUMMARY_MAX_LINES);
+  assert.equal(s.pieces, 7 + 6 + 5 + 4 + 3 + 2 + 1);
+  assert.match(formatItemSummary(s), /\+4 weitere$/);
+  // Largest first, so what is hidden is the smallest part of the order.
+  assert.deepEqual(s.lines.map(l => l.quantity), [7, 6, 5]);
+});
+
+test("9d: an order with no items, or an unusable quantity, says so instead of lying", () => {
+  const empty = summarizeOrderItems([]);
+  assert.deepEqual(empty.lines, []);
+  assert.equal(empty.pieces, null, "an order with no items must not read as 0 Artikel");
+  assert.equal(formatItemSummary(empty), "—");
+  assert.equal(formatPieces(empty.pieces), "—");
+
+  // One bad quantity poisons the TOTAL - the same rule orderTotalGrams
+  // follows - because a count that silently omits a line is worse than
+  // no count for somebody deciding what to pick.
+  for (const bad of [null, undefined, 0, -3, Number.NaN, "2"]) {
+    const s = summarizeOrderItems([
+      { product_name: "A", quantity: 2 },
+      { product_name: "B", quantity: bad },
+    ]);
+    assert.equal(s.pieces, null, `quantity ${String(bad)} was counted anyway`);
+    assert.equal(s.lines.length, 2, "the products are still named even when the count is not trusted");
+  }
+
+  // A line with no usable name is labelled honestly, not dropped.
+  assert.equal(orderItemLabel({ product_name: null, variant_name: "" }), UNNAMED_ITEM_LABEL);
+  assert.equal(orderItemLabel({ product_name: "  Matcha  ", variant_name: null }), "Matcha");
+  // A missing summary renders as a dash, never as a crash.
+  assert.equal(formatItemSummary(null), "—");
+  assert.equal(formatItemSummary(undefined), "—");
+  assert.equal(formatPieces(undefined), "—");
+});
+
+test("9e: grouping buckets one query's rows by order and ignores junk", () => {
+  const grouped = groupOrderItems([
+    { order_id: "a", product_name: "X", quantity: 1 },
+    { order_id: "b", product_name: "Y", quantity: 2 },
+    { order_id: "a", product_name: "X", quantity: 3 },
+    { order_id: null, product_name: "orphan", quantity: 9 },
+    { product_name: "no id at all", quantity: 9 },
+  ]);
+  assert.deepEqual(Object.keys(grouped).sort(), ["a", "b"]);
+  assert.equal(grouped.a.pieces, 4);
+  assert.equal(grouped.a.lines.length, 1);
+  assert.equal(grouped.b.pieces, 2);
+});
+
+test("9f: the page's items are ONE request, filtered to the page's ids", () => {
+  const code = codeOnly(listRoute);
+  assert.ok(code.includes('.from("order_items")'), "the list never reads order_items");
+  assert.equal((code.match(/\.from\("order_items"\)/g) ?? []).length, 1,
+    "order_items is read more than once per page - that is the N+1 this avoids");
+  assert.ok(code.includes('.in("order_id", pageIds)'),
+    "the item read is not filtered to the ids of the page that was just read");
+  // Bounded, and the bound is derived from the page rather than fixed.
+  assert.ok(code.includes("pageIds.length * ITEM_LINES_PER_ORDER_CAP"));
+  assert.ok(ITEM_LINES_PER_ORDER_CAP > 0 && ITEM_LINES_PER_ORDER_CAP <= 100);
+  // Skipped entirely when the page is empty.
+  assert.ok(code.includes("if (pageIds.length > 0)"));
+});
+
+test("9g: the summary read stays narrow - no prices, no metadata", () => {
+  const cols = ORDER_ITEM_SUMMARY_COLUMNS.split(",");
+  assert.deepEqual([...cols].sort(), ["order_id", "product_name", "quantity", "variant_name"]);
+  for (const forbidden of ["price", "cents", "metadata", "sku", "tax"]) {
+    assert.ok(!ORDER_ITEM_SUMMARY_COLUMNS.includes(forbidden),
+      `the list-level item read pulls ${forbidden}, which only the detail needs`);
+  }
+  // Still a subset of what the opened order reads.
+  const detailCols = ORDER_ITEM_COLUMNS.split(",");
+  for (const c of cols) {
+    if (c === "order_id") continue;
+    assert.ok(detailCols.includes(c), `${c} is in the list read but not the detail read`);
+  }
+});
+
+test("9h: a short item read announces itself instead of showing a small order", () => {
+  const code = codeOnly(listRoute);
+  assert.ok(/count:\s*"exact"/.test(code.slice(code.indexOf("order_items"))),
+    "the item read cannot tell whether it was truncated");
+  assert.ok(/itemsCapped\s*=\s*typeof itemCount === "number" && itemCount > received\.length/.test(code),
+    "truncation is not derived from the exact count");
+  assert.ok(code.includes("itemsCapped = true"), "a failed item read does not set the flag");
+  assert.ok(code.includes("itemsCapped,"), "the flag never reaches the client");
+  assert.ok(ui.includes("data.itemsCapped"), "the UI never reads the flag");
+  assert.match(ui, /unvollst/i, "the UI does not tell the operator the column may be short");
+});
+
+test("9i: a failed item read degrades the column, it does not fail the page", () => {
+  const code = codeOnly(listRoute);
+  const from = code.indexOf("order_items");
+  const to = code.indexOf("dayStart =");
+  const block = code.slice(from, to > from ? to : code.length);
+  assert.ok(block.includes("itemError"), "this test is looking at the wrong block");
+  assert.ok(!/502/.test(block), "one failed item read takes the whole order list down with it");
+  assert.ok(!/return Response\.json/.test(block), "a failed item read returns early instead of degrading");
+});
+
+test("9j: the browser never fetches items per row", () => {
+  // The only fetches in the component are the page and the opened order.
+  const endpoints = [...ui.matchAll(/fetch\("([^"]+)"/g)].map(m => m[1]).sort();
+  assert.deepEqual(endpoints, ["/api/admin/orders", "/api/admin/orders/detail"]);
+  // and the summary a row renders comes from the page payload, not a call.
+  assert.ok(ui.includes("data.itemSummaries?.[r.id]"),
+    "the row builds its contents from something other than the page payload");
+});
+
+test("9k: the contents column exists, is read-only, and keeps pagination", () => {
+  assert.ok(ui.includes('<th scope="col">Inhalt</th>'), "no contents column in the list header");
+  assert.ok(ui.includes('data-label="Inhalt"'), "the contents cell has no mobile label");
+  assert.ok(ui.includes("formatItemSummary(contents)") && ui.includes("formatPieces(contents?.pieces)"),
+    "the cell does not render both the products and the article count");
+  // The empty row still spans exactly the number of columns there are.
+  const headerBlock = ui.slice(ui.indexOf('<table className="ops-table ops-orders">'));
+  const headers = (headerBlock.slice(0, headerBlock.indexOf("</thead>")).match(/<th scope="col">/g) ?? []).length;
+  assert.equal(headers, 9);
+  assert.ok(ui.includes("colSpan={9}"), "the empty row spans the wrong number of columns");
+  // Pagination is untouched and still server-side.
+  assert.ok(codeOnly(listRoute).includes(".range(from, to)"));
+  assert.ok(ui.includes("ops-pager"));
+  // And nothing in the new column can change anything.
+  for (const verb of [".insert(", ".update(", ".upsert(", ".delete(", ".rpc("]) {
+    assert.ok(!codeOnly(listRoute).includes(verb), `the list route gained ${verb}`);
+  }
+});
+
+test("9l: the contents cell cannot push a phone sideways", () => {
+  const mobile = css.slice(css.lastIndexOf("@media (max-width:760px){"));
+  assert.ok(css.includes(".ops-item-line"), "the product line has no styling at all");
+  assert.match(css, /\.ops-item-line\{[\s\S]*?-webkit-line-clamp:2/,
+    "a long order is not clamped on desktop and will stretch its row");
+  assert.ok(mobile.includes("overflow-wrap:anywhere"),
+    "an unbroken product name cannot wrap on mobile and will overflow");
+  assert.ok(mobile.includes("min-width:0"),
+    "the flex cell has no min-width:0, so its text sets the track width and the card overflows");
 });

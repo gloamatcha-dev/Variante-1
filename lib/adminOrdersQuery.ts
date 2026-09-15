@@ -241,6 +241,140 @@ export function orderTotalGrams(items: readonly OrderItemLike[]): number | null 
   return items.length > 0 ? total : null;
 }
 
+/**
+ * How many item lines one page of the list will read.
+ *
+ * The list shows what was ordered, so it needs order_items for the
+ * orders on screen - but only for those. The route asks for them in ONE
+ * request filtered to the page's ids, never one request per row, and
+ * this multiplier bounds that request: a page of 25 may read up to
+ * 25 x 50 lines. Production's orders carry one line each, so the cap is
+ * far out of reach; it exists so that a single pathological order
+ * cannot turn a page view into an unbounded read.
+ *
+ * The route compares the rows it got against the exact count and sets
+ * itemsCapped when they differ, so a short summary announces itself
+ * instead of quietly showing too few products.
+ */
+export const ITEM_LINES_PER_ORDER_CAP = 50;
+
+/** The four fields the compact list summary needs, and nothing else. */
+export const ORDER_ITEM_SUMMARY_COLUMNS = [
+  "order_id", "product_name", "variant_name", "quantity",
+].join(",");
+
+/** How many distinct products one list cell names before it abbreviates. */
+export const ITEM_SUMMARY_MAX_LINES = 3;
+
+export type OrderItemSummaryRow = {
+  order_id?: string | null;
+  product_name?: string | null;
+  variant_name?: string | null;
+  quantity?: number | null;
+};
+
+export type OrderItemSummaryLine = { label: string; quantity: number | null };
+
+export type OrderItemSummary = {
+  /** Distinct products, largest quantity first, already merged. */
+  lines: OrderItemSummaryLine[];
+  /** sum(quantity), or null when any line's quantity is unusable. */
+  pieces: number | null;
+  /** Distinct products beyond ITEM_SUMMARY_MAX_LINES, for "+N weitere". */
+  hidden: number;
+};
+
+/** What a line is called when neither a product nor a variant name survived. */
+export const UNNAMED_ITEM_LABEL = "Unbenannte Position";
+
+/** "Matcha Ceremonial · 30 g", or the honest fallback. */
+export function orderItemLabel(item: OrderItemSummaryRow): string {
+  const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  return [str(item.product_name), str(item.variant_name)].filter(Boolean).join(" · ") || UNNAMED_ITEM_LABEL;
+}
+
+/**
+ * One order's lines, merged by product and counted.
+ *
+ * Two rows for the same product and variant become one line with the
+ * quantities added, because the operator wants to read "3x Matcha 30 g",
+ * not the same name twice.
+ *
+ * The piece count follows orderTotalGrams' rule: a line whose quantity
+ * is not a usable positive number makes the WHOLE count null rather than
+ * counting as zero. Somebody reads this number to decide what to pick,
+ * and a total that silently omits a line is worse than no total.
+ */
+export function summarizeOrderItems(items: readonly OrderItemSummaryRow[]): OrderItemSummary {
+  const merged = new Map<string, OrderItemSummaryLine>();
+  let pieces: number | null = 0;
+
+  for (const item of items) {
+    const label = orderItemLabel(item);
+    const qty = item.quantity;
+    const usable = typeof qty === "number" && Number.isFinite(qty) && qty > 0;
+    if (!usable) pieces = null;
+    else if (pieces !== null) pieces += qty as number;
+
+    const existing = merged.get(label);
+    if (!existing) {
+      merged.set(label, { label, quantity: usable ? (qty as number) : null });
+    } else if (usable && existing.quantity !== null) {
+      existing.quantity += qty as number;
+    } else {
+      existing.quantity = null;
+    }
+  }
+
+  const lines = [...merged.values()].sort(
+    (a, b) => (b.quantity ?? 0) - (a.quantity ?? 0) || a.label.localeCompare(b.label, "de")
+  );
+
+  return {
+    lines: lines.slice(0, ITEM_SUMMARY_MAX_LINES),
+    pieces: items.length === 0 ? null : pieces,
+    hidden: Math.max(0, lines.length - ITEM_SUMMARY_MAX_LINES),
+  };
+}
+
+/**
+ * The page's item rows, bucketed by order id.
+ *
+ * Plain grouping of ONE query's result. The route runs a single
+ * .in("order_id", ids) for the whole page and hands the rows here; there
+ * is no request per order anywhere in the path.
+ */
+export function groupOrderItems(
+  rows: readonly OrderItemSummaryRow[]
+): Record<string, OrderItemSummary> {
+  const byOrder = new Map<string, OrderItemSummaryRow[]>();
+  for (const row of rows) {
+    const id = typeof row.order_id === "string" ? row.order_id : "";
+    if (!id) continue;
+    const bucket = byOrder.get(id);
+    if (bucket) bucket.push(row);
+    else byOrder.set(id, [row]);
+  }
+  const out: Record<string, OrderItemSummary> = {};
+  for (const [id, items] of byOrder) out[id] = summarizeOrderItems(items);
+  return out;
+}
+
+/** "2× Matcha 30 g · 1× Matcha 50 g", with "+2 weitere" when abbreviated. */
+export function formatItemSummary(summary: OrderItemSummary | null | undefined): string {
+  if (!summary || summary.lines.length === 0) return "—";
+  const parts = summary.lines.map(l => (l.quantity === null ? l.label : `${l.quantity}× ${l.label}`));
+  if (summary.hidden > 0) parts.push(`+${summary.hidden} weitere`);
+  return parts.join(" · ");
+}
+
+/** "3 Artikel", or a dash when the count cannot be trusted. German does
+ *  not inflect "Artikel" in the plural, so there is nothing to branch on. */
+export function formatPieces(pieces: number | null | undefined): string {
+  if (typeof pieces !== "number" || !Number.isFinite(pieces)) return "—";
+  return `${pieces} Artikel`;
+}
+
 /** Columns the LIST needs. Deliberately narrower than the detail. */
 export const ORDER_LIST_COLUMNS = [
   "id", "order_number", "created_at", "placed_at",

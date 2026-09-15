@@ -10,7 +10,10 @@ import {
   addressLines,
   customerFromSnapshot,
   formatCents,
+  formatItemSummary,
+  formatPieces,
   orderTotalGrams,
+  type OrderItemSummary,
   type FulfillmentStatus,
   type OrderStatus,
   type PaymentStatus,
@@ -30,6 +33,13 @@ import {
  * already wrote. Nothing here computes a price, a tax or a total: the
  * order snapshots carry all of them and a second calculation would be
  * a second truth.
+ *
+ * The "Inhalt" column is the same discipline. Product names, variants
+ * and quantities are read from order_items - the rows the checkout
+ * wrote - and merged for display only. The server sends one summary per
+ * order alongside the page, so the browser never fetches per row, and
+ * when that summary could not be read in full the column says so rather
+ * than showing an order as smaller than it is.
  */
 
 type OrderRow = {
@@ -102,6 +112,10 @@ export type OrdersSummary = {
 
 type OrdersPayload = {
   rows: OrderRow[];
+  /** Compact contents per order id - one server request for the page. */
+  itemSummaries: Record<string, OrderItemSummary>;
+  /** True when the page's item read was short or failed; the UI says so. */
+  itemsCapped: boolean;
   page: number;
   pageSize: number;
   total: number;
@@ -330,6 +344,12 @@ export function AdminOrders({ onSessionLost }: { onSessionLost: () => void }) {
         </button>
         <span className="ops-refresh-at">Zuletzt aktualisiert {fmtTimeOnly(data.fetchedAt)} Uhr</span>
         {loadError && <span className="ops-error" role="alert">{loadError}</span>}
+        {data.itemsCapped && (
+          <span className="ops-note">
+            Der Inhalt einzelner Bestellungen konnte nicht vollständig gelesen werden – die Spalte
+            {" "}„Inhalt“ kann unvollständig sein. Die Detailansicht zeigt alle Positionen.
+          </span>
+        )}
       </div>
 
       <div className="ops-table-wrap">
@@ -339,6 +359,7 @@ export function AdminOrders({ onSessionLost }: { onSessionLost: () => void }) {
               <th scope="col">Bestellung</th>
               <th scope="col">Datum</th>
               <th scope="col">Kunde</th>
+              <th scope="col">Inhalt</th>
               <th scope="col">Betrag</th>
               <th scope="col">Zahlung</th>
               <th scope="col">Versand</th>
@@ -349,7 +370,7 @@ export function AdminOrders({ onSessionLost }: { onSessionLost: () => void }) {
           <tbody>
             {data.rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="ops-empty">
+                <td colSpan={9} className="ops-empty">
                   {filtered ? "Keine Bestellung passt zu diesem Filter." : "Noch keine Bestellungen."}
                 </td>
               </tr>
@@ -357,6 +378,7 @@ export function AdminOrders({ onSessionLost }: { onSessionLost: () => void }) {
             {data.rows.map(r => {
               const c = customerFromSnapshot(r.customer_snapshot);
               const refunded = (r.refunded_total_cents ?? 0) > 0;
+              const contents = data.itemSummaries?.[r.id];
               return (
                 <tr key={r.id} className="ops-order-row" onClick={() => void openOrder(r.id)}>
                   <td data-label="Bestellung">
@@ -366,6 +388,10 @@ export function AdminOrders({ onSessionLost }: { onSessionLost: () => void }) {
                   <td data-label="Kunde">
                     <span className="ops-order-name">{c.name || "—"}</span>
                     {c.email && <span className="ops-mail">{c.email}</span>}
+                  </td>
+                  <td data-label="Inhalt" className="ops-order-items">
+                    <span className="ops-item-line">{formatItemSummary(contents)}</span>
+                    <span className="ops-item-count">{formatPieces(contents?.pieces)}</span>
                   </td>
                   <td data-label="Betrag">{formatCents(r.total_gross_cents, r.currency)}</td>
                   <td data-label="Zahlung">

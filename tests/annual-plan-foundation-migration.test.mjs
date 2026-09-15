@@ -1003,6 +1003,14 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
   // and subscription paths keep their existing labels, which
   // tests/annual-plan-maintenance.test.mjs asserts directly.
   const ALLOWED_LIB_EDITS = [
+    // ADMIN ORDER OVERVIEW, COMPLETION FIX (Paket 4A.1). The zero-import
+    // leaf behind the admin order list gained the item-summary helpers
+    // the new contents column needs: grouping, quantity aggregation and
+    // formatting. Pure functions over rows that are handed to them - no
+    // Supabase, no clock, no price arithmetic - and the whole file is
+    // exercised directly by tests/admin-orders.test.mjs. Nothing in the
+    // checkout, webhook or annual path imports it.
+    "lib/adminOrdersQuery.ts",
     "lib/checkoutAttempts.ts",
     "lib/annualPlanCheckout.ts",
     "lib/annualPlanCheckoutRules.ts",
@@ -1176,6 +1184,26 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // writes an order, or touches a customer-facing page. Reviewed in
     // tests/admin-orders.test.mjs.
     "app/AdminOverview.tsx",
+    // ADMIN ORDER OVERVIEW, COMPLETION FIX (Paket 4A.1). Three files of
+    // the same read-only screen:
+    //
+    //   AdminOrders.tsx        one column added - what was ordered, from
+    //                          the summary the page already receives. It
+    //                          renders order_items rows; it computes no
+    //                          price and offers no control.
+    //   api/admin/orders       one extra read per page, filtered to that
+    //                          page's ids. Session check, POST-only and
+    //                          the absence of every write verb are
+    //                          unchanged and asserted in section 3 of
+    //                          tests/admin-orders.test.mjs.
+    //   globals.css            presentation for that column only.
+    //
+    // None of the three is a payment, fulfillment, account-security or
+    // annual module, and no customer-facing page reads any of them.
+    // Reviewed in tests/admin-orders.test.mjs sections 8 and 9.
+    "app/AdminOrders.tsx",
+    "app/api/admin/orders/route.ts",
+    "app/globals.css",
   ];
 
   for (const rel of touched) {

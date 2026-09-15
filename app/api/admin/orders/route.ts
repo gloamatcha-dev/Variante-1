@@ -1,9 +1,12 @@
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { verifyAdminRequest } from "../../../../lib/adminSessionDeps.ts";
 import {
+  ITEM_LINES_PER_ORDER_CAP,
+  ORDER_ITEM_SUMMARY_COLUMNS,
   ORDER_LIST_COLUMNS,
   REVENUE_ROW_CAP,
   berlinDayStartIso,
+  groupOrderItems,
   ordersPageRange,
   resolveOrdersQuery,
 } from "../../../../lib/adminOrdersQuery.ts";
@@ -39,6 +42,18 @@ import {
  * the Stripe identifiers are personal data and payment identifiers that
  * a table of 25 rows has no use for, so they are fetched only when a
  * single order is actually opened.
+ *
+ * ── WHAT WAS ORDERED, WITHOUT OPENING ANYTHING ────────────────
+ *
+ * The operator should not have to open 25 orders to see that they are
+ * all the same 30 g tin, so the page carries a compact item summary per
+ * order. It costs exactly ONE more request: the page's ids go into a
+ * single .in("order_id", ids) read of four columns, and the grouping
+ * happens here. There is no request per row on either side of the wire.
+ *
+ * Those four columns are also the narrowest set that can answer the
+ * question - no prices, no SKUs, no metadata - so the list still moves
+ * less about each order than the detail does.
  */
 
 const MAX_BODY_BYTES = 2000;
@@ -75,6 +90,16 @@ export async function POST(request: Request): Promise<Response> {
   if (query.payment !== "all") rows = rows.eq("payment_status", query.payment);
   if (query.fulfillment !== "all") rows = rows.eq("fulfillment_status", query.fulfillment);
   if (query.search) {
+    // The three fields the operator actually searches by: order number,
+    // customer name and email.
+    //
+    // Name and email are read out of customer_snapshot rather than a
+    // customers join, because the snapshot is what the order was placed
+    // with and it does not move when a customer later edits their
+    // profile. Every one of the 458 production rows carries exactly
+    // {email, name} - no first_name/last_name variant exists in the
+    // table - so ->>name is the whole name, not half of it.
+    //
     // Every character PostgREST's or= grammar would read as syntax is
     // already gone (normalizeOrderSearch), so this interpolation can
     // only ever carry a literal.
@@ -92,6 +117,42 @@ export async function POST(request: Request): Promise<Response> {
   if (error) {
     console.error("Admin orders: list read failed:", error.message);
     return Response.json({ error: "Die Bestellungen konnten nicht geladen werden." }, { status: 502 });
+  }
+
+  // ── What each order on this page contains ──────────────────────────
+  //
+  // ONE request for the whole page, filtered to the ids we just read.
+  // The ids come from our own rows, never from the client, so nothing
+  // client-controlled reaches this filter at all.
+  //
+  // count:"exact" is what makes the cap honest: if PostgREST holds back
+  // rows - our limit or its own max-rows - the exact count exceeds what
+  // arrived and itemsCapped says so, instead of the page quietly showing
+  // an order as smaller than it is.
+  const pageRows = (data as { id?: string }[] | null) ?? [];
+  const pageIds = pageRows.map(r => r.id).filter((id): id is string => typeof id === "string");
+
+  let itemSummaries: Record<string, unknown> = {};
+  let itemsCapped = false;
+  if (pageIds.length > 0) {
+    const itemLimit = pageIds.length * ITEM_LINES_PER_ORDER_CAP;
+    const { data: itemRows, count: itemCount, error: itemError } = await supabase
+      .from("order_items")
+      .select(ORDER_ITEM_SUMMARY_COLUMNS, { count: "exact" })
+      .in("order_id", pageIds)
+      .limit(itemLimit);
+
+    if (itemError) {
+      // Not fatal: the list is still readable without the content
+      // column, and an empty summary renders as a dash. Failing the
+      // whole page because one extra read failed would be worse.
+      console.error("Admin orders: item summary read failed:", itemError.message);
+      itemsCapped = true;
+    } else {
+      const received = (itemRows as { order_id?: string | null }[] | null) ?? [];
+      itemsCapped = typeof itemCount === "number" && itemCount > received.length;
+      itemSummaries = groupOrderItems(received);
+    }
   }
 
   // ── The counters, as counts rather than rows ───────────────────────
@@ -149,7 +210,9 @@ export async function POST(request: Request): Promise<Response> {
 
   return Response.json(
     {
-      rows: (data as unknown[]) ?? [],
+      rows: pageRows as unknown[],
+      itemSummaries,
+      itemsCapped,
       page: query.page,
       pageSize: query.pageSize,
       total: count ?? 0,
