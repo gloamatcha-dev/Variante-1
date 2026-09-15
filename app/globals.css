@@ -9038,6 +9038,15 @@ header nav{gap:18px;font-size:12px}
   }
   .ops-items tbody td[data-label="Produkt"]{ overflow-wrap:anywhere; }
 
+  /* THE FACT GRID MUST BE ABLE TO SHRINK.
+     minmax(150px,1fr) is a MINIMUM, not a maximum: a label longer than
+     that - "Antwort auf Stornierungsanfrage", uppercase with letter
+     spacing - widens its track instead of wrapping, and two widened
+     tracks pushed the drawer 8px past the viewport. On a phone the
+     labels may wrap; what they may not do is scroll the panel. */
+  .ops-facts,.ops-facts-tight{ grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); }
+  .ops-facts div,.ops-facts dt,.ops-facts dd{ min-width:0; overflow-wrap:anywhere; }
+
   .ops-action-buttons,.ops-confirm-buttons{ flex-direction:column; }
   .ops-action-buttons .ops-btn,.ops-confirm-buttons .ops-btn{ width:100%; min-width:0; }
   .ops-action-fields label{ flex:1 1 100%; }

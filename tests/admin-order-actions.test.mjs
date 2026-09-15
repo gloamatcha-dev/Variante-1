@@ -730,6 +730,15 @@ test("8f: the action panels work on a phone", () => {
     "a long button label can set the track width and push the card sideways");
   assert.ok(css.includes(".ops-action-fields label{ display:flex"), "the fields have no layout");
   assert.ok(css.includes("min-width:0"), "an input can overflow its container");
+  // THE FACT GRID MUST BE ABLE TO SHRINK on a phone. minmax(150px,1fr)
+  // is a minimum, not a maximum: the longest label - "Antwort auf
+  // Stornierungsanfrage", uppercase with letter spacing - widened its
+  // track instead of wrapping and pushed the drawer 8px past the
+  // viewport. Found by measuring, after the five email rows landed.
+  assert.match(mobile, /\.ops-facts,\.ops-facts-tight\{ grid-template-columns:repeat\(auto-fit,minmax\(120px,1fr\)\); \}/,
+    "the fact grid keeps a minimum wider than a phone can give it");
+  assert.match(mobile, /\.ops-facts div,\.ops-facts dt,\.ops-facts dd\{ min-width:0; overflow-wrap:anywhere; \}/,
+    "a long label cannot wrap and will widen its track");
 });
 
 test("8g: the refund confirmation says it is real money and cannot be undone", () => {

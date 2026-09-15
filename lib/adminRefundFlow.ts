@@ -114,7 +114,21 @@ export async function runAdminRefund(
     deps.log(`Admin refund: claim failed for order ${orderId}: ${claim.error}`);
     return { ok: false, status: 500, error: "Interner Fehler." };
   }
-  if (!claim.claimed) return BUSY;
+  if (!claim.claimed) {
+    // A FAILED CLAIM HAS TWO CAUSES AND THEY DESERVE DIFFERENT ANSWERS.
+    //
+    // claim_order_refund updates a row and reports whether it matched
+    // one, so "somebody else holds the lock" and "there is no such
+    // order" both come back as false. Telling an operator that a
+    // mistyped order id is "gerade in Bearbeitung" sends them off to
+    // wait for something that will never finish.
+    //
+    // The extra read costs nothing in the normal case: it happens only
+    // on the failure path, and only to choose a sentence.
+    const { order } = await deps.loadOrder(orderId);
+    if (!order) return { ok: false, status: 404, error: "Bestellung nicht gefunden." };
+    return BUSY;
+  }
 
   try {
     return await refundUnderClaim(deps, orderId, rawAmount);

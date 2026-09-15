@@ -1046,6 +1046,14 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // transition. Reviewed in tests/admin-order-actions.test.mjs.
     "lib/adminOrderActionRules.ts",
     "lib/adminOrderActions.ts",
+    // PAKET 4A.1B (FINAL SAFETY), FOUND AGAINST THE MIGRATED DATABASE:
+    // claim_order_refund reports "false" both when somebody else holds
+    // the lock AND when there is no such order, so a mistyped id came
+    // back as "wird gerade verarbeitet". The failure path now reads the
+    // order once to choose between 404 and 409. No change to the lock,
+    // the money path or the ordering. Reviewed in
+    // tests/admin-order-safety.test.mjs.
+    "lib/adminRefundFlow.ts",
     "lib/checkoutAttempts.ts",
     "lib/annualPlanCheckout.ts",
     "lib/annualPlanCheckoutRules.ts",

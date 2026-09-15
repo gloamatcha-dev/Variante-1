@@ -371,12 +371,32 @@ test("L: an unrefundable order is refused without reaching Stripe", async () => 
     assert.equal(w.stripeCalls.length, 0, `an order with ${why} reached Stripe`);
     assert.equal(w.claims.size, 0, `an order with ${why} stranded the lock`);
   }
-  // And an unknown order is a 404, not a crash.
+  // AN UNKNOWN ORDER IS A 404, NOT "wird gerade verarbeitet".
+  //
+  // claim_order_refund updates a row and reports whether it matched one,
+  // so a missing order and a held lock both come back as false. The first
+  // version of the lock returned 409 for both, which would have sent an
+  // operator who mistyped an id away to wait for something that was never
+  // going to finish. Found against the real database, after the
+  // migration landed.
   const w = makeWorld();
   const missing = await refund(w, "00000000-0000-4000-8000-000000000000", 100);
   assert.equal(missing.ok, false);
-  assert.equal(missing.status, 404);
+  assert.equal(missing.status, 404, "an unknown order is reported as busy");
+  assert.match(missing.error, /nicht gefunden/);
   assert.equal(w.claims.size, 0);
+
+  // ...while a genuinely held lock still says busy. Proven by holding it.
+  const held = makeWorld();
+  held.claims.set(PAID_ORDER.id, "somebody-else");
+  held.claimedAt.set(PAID_ORDER.id, Date.now());
+  const busy = await refund(held, PAID_ORDER.id, 100);
+  assert.equal(busy.ok, false);
+  assert.equal(busy.status, 409, "a held lock is no longer reported as busy");
+  assert.match(busy.error, /gerade eine Erstattung verarbeitet/);
+  // And the other holder's lock was NOT taken away on the way out.
+  assert.equal(held.claims.get(PAID_ORDER.id), "somebody-else",
+    "the loser released the winner's lock");
 });
 
 test("M: nothing is mailed unless the sync says the fact is new", async () => {
