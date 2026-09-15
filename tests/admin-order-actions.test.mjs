@@ -61,6 +61,13 @@ const codeOnly = src => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\
 
 const rules = read("lib/adminOrderActionRules.ts");
 const actions = read("lib/adminOrderActions.ts");
+// PAKET 4A.1B (FINAL SAFETY) split the refund SEQUENCE into its own
+// module so it could be run against fakes - a claim about two
+// overlapping calls cannot be proved by reading source. The two are
+// checked together wherever the property spans both: adminOrderActions
+// supplies the real dependencies, adminRefundFlow decides the order.
+const flow = read("lib/adminRefundFlow.ts");
+const flowCode = codeOnly(flow);
 const gate = read("lib/adminActionRoute.ts");
 const actionsCode = codeOnly(actions);
 const ui = read("app/AdminOrderActions.tsx");
@@ -188,8 +195,16 @@ test("3: every transition goes through its database function, never a table writ
   for (const write of ['.from("orders").update(', ".insert(", ".upsert(", ".delete("]) {
     assert.ok(!actionsCode.includes(write), `the action module writes a table directly: ${write}`);
   }
-  const rpcs = [...actionsCode.matchAll(/\.rpc\("(\w+)"/g)].map(m => m[1]).sort();
-  assert.deepEqual(rpcs, ["cancel_order", "mark_order_shipped", "resolve_order_cancellation_request"]);
+  const rpcs = [...new Set([...actionsCode.matchAll(/\.rpc\("(\w+)"/g)].map(m => m[1]))].sort();
+  assert.deepEqual(rpcs, [
+    // The refund lock (migration 049). Not a transition: these decide
+    // WHO may proceed, never what happens to the order.
+    "cancel_order",
+    "claim_order_refund",
+    "mark_order_shipped",
+    "release_order_refund",
+    "resolve_order_cancellation_request",
+  ]);
   // The refund's write is apply_order_refund_state, reached through the
   // existing sync rather than called here - which is what makes it an
   // absolute re-read instead of a delta this module invents.
@@ -416,16 +431,20 @@ test("5e: the client cannot name the Stripe object or raise its own ceiling", ()
   for (const banned of ["payment_intent", "paymentIntent", "maxCents", "currency", "refunded_total"]) {
     assert.ok(!refundRoute.includes(banned), `the refund route trusts the client for ${banned}`);
   }
-  // The action module loads the order and takes the intent from it.
+  // The server loads the order and takes the intent from it.
   assert.ok(actionsCode.includes('.from("orders")'), "the refund never loads the order");
-  assert.ok(actionsCode.includes("order.stripe_payment_intent_id"),
+  assert.ok(flowCode.includes("order.stripe_payment_intent_id"),
     "the payment intent does not come from the loaded order");
-  const createAt = actionsCode.indexOf("refunds" + ".create(");
-  const loadAt = actionsCode.indexOf('.from("orders")');
-  const guardAt = actionsCode.indexOf("canRefund(order)");
-  const amountAt = actionsCode.indexOf("resolveRefundAmount(");
+  const loadAt = flowCode.indexOf("deps.loadOrder(");
+  const guardAt = flowCode.indexOf("canRefund(order)");
+  const amountAt = flowCode.indexOf("resolveRefundAmount(");
+  const createAt = flowCode.indexOf("deps.createRefund(");
   assert.ok(loadAt < guardAt && guardAt < amountAt && amountAt < createAt,
     "the refund reaches Stripe before it has loaded, checked and bounded itself");
+  // And exactly one place actually calls Stripe.
+  const bothHalves = actionsCode + "\n" + flowCode;
+  assert.equal([...bothHalves.matchAll(/refunds\.create\(/g)].length, 1,
+    "more than one place creates a Stripe refund");
 });
 
 test("5f: a retry cannot become a second refund", () => {
@@ -440,35 +459,40 @@ test("5f: a retry cannot become a second refund", () => {
   assert.notEqual(refundIdempotencyKey("abc", 0, 1000), refundIdempotencyKey("abc", 0, 2000));
   assert.notEqual(refundIdempotencyKey("abc", 0, 1000), refundIdempotencyKey("xyz", 0, 1000));
   // It is actually passed to Stripe.
-  assert.match(actionsCode, /idempotencyKey:\s*refundIdempotencyKey\(/);
+  assert.match(flowCode, /idempotencyKey: refundIdempotencyKey\(/);
+  assert.match(actionsCode, /\{ idempotencyKey \}/, "the real Stripe call drops the key");
   // And the order's absolute total is what gets written, so even a
   // duplicate that slipped through cannot inflate the row.
   assert.ok(actionsCode.includes("syncOrderRefundStateFromStripe(stripe, paymentIntentId)"));
 });
 
 test("5g: the refund email is gated exactly as the webhook gates it", () => {
-  const syncAt = actionsCode.indexOf("syncOrderRefundStateFromStripe(");
-  const gateAt = actionsCode.indexOf("isNewSettledRefundFact(");
-  const sendAt = actionsCode.indexOf("sendRefundConfirmationIfNeeded(");
+  const syncAt = flowCode.indexOf("deps.syncRefundState(");
+  const gateAt = flowCode.indexOf("deps.isNewSettledFact(");
+  const sendAt = flowCode.indexOf("deps.sendConfirmation(");
+  assert.ok(syncAt > -1 && gateAt > -1 && sendAt > -1, "the refund lost a step");
   assert.ok(syncAt < gateAt && gateAt < sendAt,
     "the refund mails before the state is durable, or without the new-fact guard");
-  // A pending refund mails nothing - isNewSettledRefundFact only passes
-  // 'applied', and a sync that threw reports not-attempted.
-  assert.ok(actionsCode.includes('emailOutcome = "not-attempted"') ||
-            actionsCode.includes('syncResult: "sync_failed"'),
+  // The gate really is the webhook's, not a local re-implementation.
+  assert.ok(actionsCode.includes("isNewSettledFact: isNewSettledRefundFact"));
+  // A sync that threw says so instead of claiming an email was weighed.
+  assert.ok(flowCode.includes('syncResult: "sync_failed"'),
     "a refund whose sync failed claims an email was considered");
 });
 
 test("5h: a refund that succeeded is never reported as a failure", () => {
-  const at = actionsCode.indexOf("export async function adminRefundOrder");
-  const body = actionsCode.slice(at);
-  const createAt = body.indexOf("refunds" + ".create(");
-  const after = body.slice(createAt);
-  // After the money has moved there is no failure return anywhere.
-  assert.ok(!/ok:\s*false/.test(after.slice(0, after.indexOf("return {\n    ok: true"))) ||
-            after.includes('syncResult: "sync_failed"'),
-    "a failed sync after a successful refund is reported as a failed refund");
-  assert.match(actions, /The money HAS moved/);
+  // A sync that throws AFTER the money moved must report ok:true with
+  // syncResult "sync_failed". Anything else reads as "try again", and
+  // trying again after a settled refund is how a customer gets paid
+  // twice.
+  const catchAt = flowCode.indexOf("catch (cause)", flowCode.indexOf("deps.syncRefundState("));
+  assert.notEqual(catchAt, -1, "the sync is no longer guarded");
+  const handler = flowCode.slice(catchAt, flowCode.indexOf("};", catchAt));
+  assert.ok(handler.includes("ok: true"), "a failed sync is reported as a failed refund");
+  assert.ok(handler.includes('syncResult: "sync_failed"'));
+  assert.ok(handler.includes('emailOutcome: "not-attempted"'));
+  assert.ok(!handler.includes("ok: false"));
+  assert.match(flow, /The money HAS moved/);
 });
 
 /* ══════════════════════════════════════════════════════════════

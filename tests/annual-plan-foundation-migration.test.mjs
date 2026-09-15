@@ -145,8 +145,8 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
   const files = readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith(".sql")).sort();
   assert.deepEqual(files.filter(f => f.startsWith("039")), [MIGRATION_039],
     "there must be exactly one migration 039");
-  assert.equal(files[files.length - 10], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 11], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 11], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 12], MIGRATION_038, "038 must be the one before it");
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
@@ -154,7 +154,7 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
 test("2: no migration 044 or beyond", () => {
   // 039 is not applied anywhere, so it is still the right place to fix
   // 039. A hardening pass must not become a second migration.
-  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 48);
+  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 49);
   assert.deepEqual(beyond, [], "an unreviewed migration appeared after 039");
 });
 
@@ -1029,6 +1029,23 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // Reviewed in tests/admin-orders.test.mjs and
     // tests/admin-order-actions.test.mjs.
     "lib/shipmentTransitionRules.ts",
+    // PAKET 4A.1B (FINAL SAFETY):
+    //
+    //   adminOrderActions.ts       the direct cancellation now mails the
+    //                              customer through its own sender, and
+    //                              the refund is wrapped in migration
+    //                              049's durable lock. Both additive; the
+    //                              transitions themselves are unchanged.
+    //   adminOrderActionRules.ts   the fifth email kind, and a refusal
+    //                              sentence that names the checkout
+    //                              session when there is one.
+    //   adminOrdersQuery.ts        two more email-state columns in the
+    //                              detail read.
+    //
+    // None of the three writes a table, reaches Stripe or decides a
+    // transition. Reviewed in tests/admin-order-actions.test.mjs.
+    "lib/adminOrderActionRules.ts",
+    "lib/adminOrderActions.ts",
     "lib/checkoutAttempts.ts",
     "lib/annualPlanCheckout.ts",
     "lib/annualPlanCheckoutRules.ts",
@@ -1222,6 +1239,14 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     "app/AdminOrders.tsx",
     "app/api/admin/orders/route.ts",
     "app/globals.css",
+    // PAKET 4A.1B (FINAL SAFETY). The order actions screen gained the
+    // direct cancellation's email status and now lists all five customer
+    // emails separately - the direct confirmation and the answer to a
+    // request are different messages and an operator has to be able to
+    // tell which one went out. Presentation only: it reads columns, it
+    // writes nothing, and it holds no secret. Reviewed in
+    // tests/admin-order-actions.test.mjs.
+    "app/AdminOrderActions.tsx",
   ];
   // NOTE. Both lists are about UNCOMMITTED edits to files that already
   // exist, so a file this package CREATES does not belong in either -

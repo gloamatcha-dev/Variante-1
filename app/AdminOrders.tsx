@@ -108,6 +108,8 @@ type OrderDetail = OrderRow & {
   refund_email_sent_at: string | null;
   cancellation_outcome_email_status: string | null;
   cancellation_outcome_email_sent_at: string | null;
+  cancellation_confirmation_email_status: string | null;
+  cancellation_confirmation_email_sent_at: string | null;
 };
 
 export type OrdersSummary = {

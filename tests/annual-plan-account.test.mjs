@@ -792,9 +792,9 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
   // only - no table, no column, no function, no policy, no row.
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 48);
+  assert.equal(migrations.length, 49);
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 48), [], "a migration 049 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 49), [], "a migration 050 or beyond appeared");
 
   // The API surface is unchanged: no account endpoint exists, because the
   // portal reads its own rows under RLS.

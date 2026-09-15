@@ -9,6 +9,7 @@ import {
   cancellationRefundState,
   emailStatusLabel,
   hasOpenCancellationRequest,
+  ORDER_EMAIL_KINDS,
   maxRefundableCents,
   parseEuroToCents,
   type ActionableOrder,
@@ -62,6 +63,7 @@ type ActionOrder = ActionableOrder & {
   shipment_email_status?: string | null;
   refund_email_status?: string | null;
   cancellation_outcome_email_status?: string | null;
+  cancellation_confirmation_email_status?: string | null;
 };
 
 type Pending =
@@ -92,9 +94,10 @@ function describeResult(kind: string, data: Record<string, unknown>): string {
     return `${base} ${mail(data.emailOutcome)}`;
   }
   if (kind === "cancel") {
-    return data.applied
+    const base = data.applied
       ? "Die Bestellung ist storniert. Es wurde KEINE Erstattung ausgelöst."
       : "Die Bestellung war bereits storniert.";
+    return `${base} ${mail(data.emailOutcome)}`;
   }
   if (kind === "resolve") {
     const word = data.resolution === "approved" ? "angenommen" : "abgelehnt";
@@ -409,7 +412,7 @@ export function OrderActions({ order, onDone }: { order: ActionOrder; onDone: ()
             </div>
           )}
           <div><dt>Anfrage entschieden</dt><dd>{order.cancellation_request_resolution || "—"}</dd></div>
-          <div><dt>Stornobestätigung</dt><dd>{emailStatusLabel(order.cancellation_outcome_email_status)}</dd></div>
+          <div><dt>Stornobestätigung</dt><dd>{emailStatusLabel(order.cancellation_confirmation_email_status)}</dd></div>
         </dl>
 
         {!cancel.allowed && <p className="ops-action-note">{cancel.reason}</p>}
@@ -426,6 +429,7 @@ export function OrderActions({ order, onDone }: { order: ActionOrder; onDone: ()
                 summary: [
                   `Bestellung ${order.order_number} wird storniert.`,
                   "Die Bestellung wird dadurch nicht mehr versendet.",
+                  "Der Kunde erhält anschließend automatisch eine Stornierungsbestätigung.",
                   "Es wird KEINE Erstattung ausgelöst – Geld zurückzahlen ist ein eigener Schritt.",
                   maxRefund > 0
                     ? `Offen bleiben ${formatCents(maxRefund, currency)}.`
@@ -440,15 +444,23 @@ export function OrderActions({ order, onDone }: { order: ActionOrder; onDone: ()
       {/* ── EMAIL STATE ──────────────────────────────────────── */}
       <div className="ops-action-block">
         <h4>E-Mails an den Kunden</h4>
+        {/* FIVE ROWS, ONE PER STATE MACHINE. The last two look alike and
+            are not: "Stornierungsbestätigung" is sent when GLOA cancels
+            an order, "Antwort auf Stornierungsanfrage" when a customer
+            asked and an operator answered. An operator fielding a reply
+            needs to know which one the customer is holding. */}
         <dl className="ops-facts ops-facts-tight">
-          <div><dt>Bestellbestätigung</dt><dd>{emailStatusLabel(order.confirmation_email_status)}</dd></div>
-          <div><dt>Versandbestätigung</dt><dd>{emailStatusLabel(order.shipment_email_status)}</dd></div>
-          <div><dt>Erstattungsbestätigung</dt><dd>{emailStatusLabel(order.refund_email_status)}</dd></div>
-          <div><dt>Stornoentscheidung</dt><dd>{emailStatusLabel(order.cancellation_outcome_email_status)}</dd></div>
+          {ORDER_EMAIL_KINDS.map(kind => (
+            <div key={kind.key}>
+              <dt>{kind.label}</dt>
+              <dd>{emailStatusLabel((order as Record<string, unknown>)[kind.column])}</dd>
+            </div>
+          ))}
         </dl>
         <p className="ops-action-note">
           Die Bestellbestätigung wird automatisch nach der Zahlung versendet und kann von hier
-          aus nicht erneut ausgelöst werden.
+          aus nicht erneut ausgelöst werden. Ein Strich bedeutet, dass diese E-Mail für
+          diese Bestellung nie fällig war.
         </p>
       </div>
     </section>

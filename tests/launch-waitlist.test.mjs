@@ -1222,7 +1222,14 @@ test("61: the rate limit went into 043 rather than into a 044, and 043 is still 
      // Paket 4A.0. Ten SELECT grants to service_role and nothing else: no
      // table, no column, no policy, no function, and not one byte more for
      // anon or authenticated - so it cannot touch what this suite proves.
-     "048_service_role_read_grants.sql"],
+     "048_service_role_read_grants.sql",
+    // PAKET 4A.1B (FINAL SAFETY). 049 adds the direct cancellation
+    // confirmation's two email-state columns and the refund lock's two
+    // claim columns to public.orders, plus claim_order_refund and
+    // release_order_refund. It creates no policy, grants nothing to anon
+    // or authenticated, drops nothing and alters no existing column.
+    // Reviewed in tests/admin-order-actions.test.mjs.
+    "049_direct_cancellation_and_refund_lock.sql"],
     "an unreviewed migration appeared after 043"
   );
 

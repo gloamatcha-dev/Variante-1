@@ -1185,7 +1185,15 @@ test("regression: the OPERATOR cancel route still sends nothing at all", () => {
     // in tests/launch-waitlist.test.mjs (84-87).
     "launchWelcome.ts",
 
-    "orderConfirmation.ts", "paymentProblem.ts",
+    
+        // PAKET 4A.1B (FINAL SAFETY). The DIRECT cancellation
+        // confirmation: what a customer is told when GLOA cancels their
+        // order. NOT the reply to a cancellation they requested - that
+        // is cancellationOutcome.ts and it is untouched. Separate
+        // template, separate state columns, separate provider key, so
+        // the two can never be mistaken for one another. Reviewed in
+        // tests/admin-order-actions.test.mjs.
+        "orderCancellationConfirmation.ts", "orderConfirmation.ts", "paymentProblem.ts",
     "refundConfirmation.ts", "shipmentConfirmation.ts", "subscriptionEnded.ts",
     "subscriptionStarted.ts",
     "withdrawalConfirmation.ts",

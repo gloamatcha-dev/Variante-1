@@ -444,13 +444,26 @@ test("historical: the only sweep is failed-only, and it is not this feature's", 
     "lib/refundConfirmationEmail.ts",
     "lib/transactionalEmailRetry.ts",
   ]);
-  const adminActions = withoutComments(read("lib/adminOrderActions.ts"));
-  const syncAt = adminActions.indexOf("syncOrderRefundStateFromStripe(");
-  const gateAt = adminActions.indexOf("isNewSettledRefundFact(");
-  const sendAt = adminActions.indexOf("sendRefundConfirmationIfNeeded(");
+  // PAKET 4A.1B (FINAL SAFETY) moved the sequence into
+  // lib/adminRefundFlow.ts so it could be RUN against fakes - the refund
+  // lock's behaviour under two overlapping calls cannot be proved by
+  // reading source. lib/adminOrderActions.ts now supplies the real
+  // dependencies, and both halves are checked.
+  const flow = withoutComments(read("lib/adminRefundFlow.ts"));
+  const syncAt = flow.indexOf("deps.syncRefundState(");
+  const gateAt = flow.indexOf("deps.isNewSettledFact(");
+  const sendAt = flow.indexOf("deps.sendConfirmation(");
   assert.ok(syncAt > -1 && gateAt > -1 && sendAt > -1, "the admin refund skips a step");
   assert.ok(syncAt < gateAt && gateAt < sendAt,
     "the admin refund mails before the state is durable or without the new-fact guard");
+  // And the real dependencies are the existing pipeline, not a copy.
+  const adminActions = withoutComments(read("lib/adminOrderActions.ts"));
+  assert.ok(adminActions.includes("syncOrderRefundStateFromStripe(stripe, paymentIntentId)"),
+    "the admin refund no longer uses the existing sync");
+  assert.ok(adminActions.includes("isNewSettledFact: isNewSettledRefundFact"),
+    "the admin refund uses a gate of its own");
+  assert.ok(adminActions.includes("sendConfirmation: sendRefundConfirmationIfNeeded"),
+    "the admin refund uses a sender of its own");
   // Phase 2E-B added the transactional email retry cron as a SECOND,
   // intended caller of every sender. That is the whole point of a safety
   // net: it re-attempts a delivery that already failed. What still must
@@ -914,7 +927,15 @@ test("email: the template is a pure leaf, like the other six", () => {
     // in tests/launch-waitlist.test.mjs (84-87).
     "launchWelcome.ts",
 
-    "orderConfirmation.ts", "paymentProblem.ts",
+    
+        // PAKET 4A.1B (FINAL SAFETY). The DIRECT cancellation
+        // confirmation: what a customer is told when GLOA cancels their
+        // order. NOT the reply to a cancellation they requested - that
+        // is cancellationOutcome.ts and it is untouched. Separate
+        // template, separate state columns, separate provider key, so
+        // the two can never be mistaken for one another. Reviewed in
+        // tests/admin-order-actions.test.mjs.
+        "orderCancellationConfirmation.ts", "orderConfirmation.ts", "paymentProblem.ts",
     "refundConfirmation.ts", "shipmentConfirmation.ts", "subscriptionEnded.ts",
     "subscriptionStarted.ts",
     "withdrawalConfirmation.ts",

@@ -117,7 +117,14 @@ test("035 exists, is the only 035, and only 036 and 037 follow it", () => {
      // Paket 4A.0. Ten SELECT grants to service_role and nothing else: no
      // table, no column, no policy, no function, and not one byte more for
      // anon or authenticated - so it cannot touch what this suite proves.
-     "048_service_role_read_grants.sql"],
+     "048_service_role_read_grants.sql",
+    // PAKET 4A.1B (FINAL SAFETY). 049 adds the direct cancellation
+    // confirmation's two email-state columns and the refund lock's two
+    // claim columns to public.orders, plus claim_order_refund and
+    // release_order_refund. It creates no policy, grants nothing to anon
+    // or authenticated, drops nothing and alters no existing column.
+    // Reviewed in tests/admin-order-actions.test.mjs.
+    "049_direct_cancellation_and_refund_lock.sql"],
     "an unreviewed migration above 035 appeared"
   );
   // And 039 leaves this table entirely alone. An annual plan's one
@@ -647,7 +654,15 @@ test("exactly the three reviewed lifecycle templates were built on this foundati
     // in tests/launch-waitlist.test.mjs (84-87).
     "launchWelcome.ts",
 
-    "orderConfirmation.ts",
+    
+        // PAKET 4A.1B (FINAL SAFETY). The DIRECT cancellation
+        // confirmation: what a customer is told when GLOA cancels their
+        // order. NOT the reply to a cancellation they requested - that
+        // is cancellationOutcome.ts and it is untouched. Separate
+        // template, separate state columns, separate provider key, so
+        // the two can never be mistaken for one another. Reviewed in
+        // tests/admin-order-actions.test.mjs.
+        "orderCancellationConfirmation.ts", "orderConfirmation.ts",
     "paymentProblem.ts",
     "refundConfirmation.ts",
     "shipmentConfirmation.ts",

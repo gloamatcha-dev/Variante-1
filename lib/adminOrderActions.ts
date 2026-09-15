@@ -3,8 +3,11 @@ import { getStripeClient } from "./stripe";
 import { sendShipmentConfirmationIfNeeded } from "./shipmentConfirmationEmail";
 import { sendCancellationOutcomeEmailIfNeeded } from "./cancellationOutcomeEmail";
 import { sendRefundConfirmationIfNeeded } from "./refundConfirmationEmail";
+import { sendCancellationConfirmationIfNeeded } from "./orderCancellationConfirmationEmail";
 import { syncOrderRefundStateFromStripe } from "./orderRefunds";
 import { isNewSettledRefundFact } from "./refundConfirmationRules";
+import { randomUUID } from "node:crypto";
+import { runAdminRefund, type RefundFlowDeps } from "./adminRefundFlow.ts";
 import {
   isShipmentResult,
   shipmentIsDurable,
@@ -30,13 +33,7 @@ import {
   validateResolutionRequest,
   type RefusedResolutionResult,
 } from "./cancellationResolutionRules";
-import {
-  canRefund,
-  maxRefundableCents,
-  refundIdempotencyKey,
-  resolveRefundAmount,
-  type ActionableOrder,
-} from "./adminOrderActionRules";
+import { type ActionableOrder } from "./adminOrderActionRules";
 
 /**
  * THE FOUR ORDER ACTIONS, BEHIND THE ADMIN SESSION.
@@ -110,7 +107,14 @@ export type ShipOutcome =
 
 export type CancelOutcome =
   | ActionFailure
-  | { ok: true; orderNumber: string; cancelledAt: string | null; applied: boolean };
+  | {
+      ok: true;
+      orderNumber: string;
+      cancelledAt: string | null;
+      applied: boolean;
+      /** The direct cancellation confirmation's own outcome (migration 049). */
+      emailOutcome: "sent" | "already-sent" | "not-eligible" | "failed";
+    };
 
 export type ResolveOutcome =
   | ActionFailure
@@ -251,12 +255,23 @@ export async function adminShipOrder(input: unknown): Promise<ShipOutcome> {
  * the world - fulfillment has stopped, the money has not moved back -
  * and the admin screen says exactly that rather than implying a refund.
  *
- * There is no customer email on this path, because the repository has
- * none for a direct cancellation. The only cancellation mail that exists
- * for an ORDER is the outcome of a customer's cancellation REQUEST
- * (lib/cancellationOutcomeEmail.ts), which is a different event and is
- * sent by adminResolveCancellationRequest below. Sending it from here
- * would answer a question the customer never asked.
+ * ── THE CUSTOMER IS TOLD, BY ITS OWN MESSAGE ──────────────────
+ *
+ * Strictly after the transition commits, and by
+ * lib/orderCancellationConfirmationEmail.ts - NOT by the outcome sender.
+ * The outcome email answers a cancellation the CUSTOMER requested and
+ * reads its eligibility from cancellation_request_resolution, which an
+ * operator-initiated cancellation does not have. Sending it here would
+ * describe a conversation that never happened.
+ *
+ * The confirmation reads the refund state off the row at send time and
+ * says one of exactly three things about it. It is given no amount and
+ * no date, so it cannot claim money went back when it did not.
+ *
+ * A send failure never un-cancels anything: there is no reverse
+ * operation for the RPC, service_role could not perform one, and the
+ * outcome is reported as data so the operator sees "storniert,
+ * Stornobestätigung fehlgeschlagen" rather than a failed cancellation.
  */
 export async function adminCancelOrder(input: unknown): Promise<CancelOutcome> {
   const validated = validateCancellationRequest(input);
@@ -277,7 +292,7 @@ export async function adminCancelOrder(input: unknown): Promise<CancelOutcome> {
     return internal();
   }
 
-  const payload = (data ?? {}) as { result?: unknown; cancelled_at?: unknown };
+  const payload = (data ?? {}) as { result?: unknown; cancelled_at?: unknown; order_id?: unknown };
   if (!isCancellationResult(payload.result)) {
     console.error(`Admin cancel: unexpected RPC result for ${orderNumber}.`);
     return internal();
@@ -288,12 +303,24 @@ export async function adminCancelOrder(input: unknown): Promise<CancelOutcome> {
     return { ok: false, status: cancellationResultStatus(result), error: CANCEL_REFUSALS[result] };
   }
 
-  return {
-    ok: true,
-    orderNumber,
-    cancelledAt: typeof payload.cancelled_at === "string" ? payload.cancelled_at : null,
-    applied: cancellationWasNewlyApplied(result),
-  };
+  const cancelledAt = typeof payload.cancelled_at === "string" ? payload.cancelled_at : null;
+  const applied = cancellationWasNewlyApplied(result);
+  const orderId = typeof payload.order_id === "string" ? payload.order_id : null;
+
+  if (!orderId) {
+    // The cancellation is committed either way - this is only about
+    // whether the confirmation can be addressed to the right order.
+    console.error(`Admin cancel: no order id returned for ${orderNumber}; email not attempted.`);
+    return { ok: true, orderNumber, cancelledAt, applied, emailOutcome: "failed" };
+  }
+
+  // Strictly after the transition committed. The sender re-reads the
+  // order, re-checks that it is genuinely cancelled, claims the right to
+  // send atomically and takes both its recipient and its refund sentence
+  // from the row. Nothing from this request reaches it except the id.
+  const emailOutcome = await sendCancellationConfirmationIfNeeded(orderId);
+
+  return { ok: true, orderNumber, cancelledAt, applied, emailOutcome };
 }
 
 /**
@@ -390,6 +417,31 @@ const REFUND_ORDER_COLUMNS =
  * written is the sum Stripe reports, not a delta this function adds. And
  * step 3's key means a retry of the SAME intent returns Stripe's existing
  * refund instead of creating a second one.
+ *
+ * ── TWO DIFFERENT PROBLEMS, TWO DIFFERENT MECHANISMS ──────────
+ *
+ * The Stripe idempotency key collapses REPETITIONS OF ONE INTENT: a
+ * double click, a lost response, a network retry. It cannot help with
+ * two GENUINELY DIFFERENT intents - 10,00 EUR from one tab and 20,00 EUR
+ * from another, started at the same moment - because those produce two
+ * different keys and Stripe would honour both.
+ *
+ * So the whole refund is wrapped in a durable lock (migration 049):
+ * claim_order_refund takes it with an UPDATE that only matches an
+ * unclaimed row, so two concurrent callers serialize on the row lock and
+ * exactly one proceeds. The loser gets 409 and its operator is told the
+ * order is already being processed.
+ *
+ * IT HAS TO BE DURABLE. A JavaScript variable, a disabled button or an
+ * in-memory mutex would all be per-process, and this runs as several
+ * instances that share no memory; a reload would clear the first two
+ * anyway. The lock lives in the row that the money belongs to.
+ *
+ * The lock is released in a finally block, so a throw anywhere - Stripe,
+ * the sync, a bug - gives it straight back and the operator can try
+ * again deliberately. Even a hard process death is not a deadlock:
+ * claim_order_refund expires a claim older than its stale window in the
+ * same statement that takes it.
  */
 export async function adminRefundOrder(orderId: string, rawAmount: unknown): Promise<RefundOutcome> {
   const admin = getSupabaseAdmin();
@@ -397,98 +449,69 @@ export async function adminRefundOrder(orderId: string, rawAmount: unknown): Pro
     console.error("Admin refund: SUPABASE_SECRET_KEY is not configured.");
     return unavailable();
   }
-
-  const { data, error } = await admin
-    .from("orders")
-    .select(REFUND_ORDER_COLUMNS)
-    .eq("id", orderId)
-    .maybeSingle();
-
-  if (error) {
-    console.error(`Admin refund: order load failed for ${orderId}:`, error.message);
-    return internal();
-  }
-  if (!data) return { ok: false, status: 404, error: "Bestellung nicht gefunden." };
-
-  const order = data as unknown as ActionableOrder & { id: string; order_number: string };
-  const orderNumber = typeof order.order_number === "string" ? order.order_number : orderId;
-
-  const verdict = canRefund(order);
-  if (!verdict.allowed) return { ok: false, status: 409, error: verdict.reason };
-
-  const maxCents = maxRefundableCents(order);
-  const amount = resolveRefundAmount(rawAmount, maxCents);
-  if (!amount.ok) return { ok: false, status: 400, error: amount.message };
-
-  const paymentIntentId = String(order.stripe_payment_intent_id ?? "").trim();
-  const alreadyRefunded = typeof order.refunded_total_cents === "number" && order.refunded_total_cents > 0
-    ? Math.trunc(order.refunded_total_cents)
-    : 0;
-
   const stripe = getStripeClient();
   if (!stripe) {
     console.error("Admin refund: STRIPE_SECRET_KEY is not configured.");
     return unavailable();
   }
 
-  let refundStatus: string | null = null;
-  try {
-    const refund = await stripe.refunds.create(
-      { payment_intent: paymentIntentId, amount: amount.amountCents },
-      { idempotencyKey: refundIdempotencyKey(order.id, alreadyRefunded, amount.amountCents) }
-    );
-    refundStatus = typeof refund.status === "string" ? refund.status : null;
-  } catch (cause) {
-    // The order number and Stripe's own message. Never the intent id,
-    // never the key, never the customer - and never any of it to the
-    // browser, which gets one generic sentence.
-    const message = cause instanceof Error ? cause.message : "unknown";
-    console.error(`Admin refund: Stripe refused the refund for ${orderNumber}: ${message}`);
-    return { ok: false, status: 502, error: "Die Erstattung konnte bei Stripe nicht ausgelöst werden." };
-  }
+  // THE REAL DEPENDENCIES. Everything the sequence touches is supplied
+  // here and nowhere else, which is what lets the test suite overlap two
+  // refunds and watch what the lock actually does.
+  const deps: RefundFlowDeps = {
+    newClaimId: () => randomUUID(),
 
-  // The existing pipeline, unchanged. It re-reads EVERY refund Stripe
-  // holds for this payment intent and writes the absolute sum through
-  // apply_order_refund_state, so it converges rather than accumulating.
-  let syncResult: string;
-  let refundedTotalCents: number | null;
-  try {
-    const outcome = await syncOrderRefundStateFromStripe(stripe, paymentIntentId);
-    syncResult = outcome.result;
-    refundedTotalCents = outcome.refundedTotalCents;
-  } catch (cause) {
-    // The money HAS moved. Reporting this as a failed refund would be a
-    // lie and would invite the operator to try again. Say what is true:
-    // the refund happened, the order has not caught up yet, and the
-    // webhook will reconcile it.
-    const message = cause instanceof Error ? cause.message : "unknown";
-    console.error(`Admin refund: refund succeeded but sync failed for ${orderNumber}: ${message}`);
-    return {
-      ok: true,
-      orderNumber,
-      amountCents: amount.amountCents,
-      refundStatus,
-      refundedTotalCents: null,
-      syncResult: "sync_failed",
-      emailOutcome: "not-attempted",
-    };
-  }
+    async claim(id, claimId) {
+      const { data, error } = await admin.rpc("claim_order_refund", {
+        p_order_id: id,
+        p_claim_id: claimId,
+      });
+      return { claimed: data === true, error: error ? error.message : null };
+    },
 
-  // The same gate the Stripe webhook uses. 'applied' is the only result
-  // that means this write moved something; 'refund_pending' and
-  // 'unchanged' mail nothing.
-  let emailOutcome: "sent" | "already-sent" | "not-eligible" | "failed" | "not-attempted" = "not-attempted";
-  if (isNewSettledRefundFact(syncResult)) {
-    emailOutcome = await sendRefundConfirmationIfNeeded(order.id);
-  }
+    async release(id, claimId) {
+      const { error } = await admin.rpc("release_order_refund", {
+        p_order_id: id,
+        p_claim_id: claimId,
+      });
+      if (error) {
+        // Not fatal and not worth failing a completed refund over: the
+        // claim expires by itself.
+        console.error(`Admin refund: release failed for order ${id}:`, error.message);
+      }
+    },
 
-  return {
-    ok: true,
-    orderNumber,
-    amountCents: amount.amountCents,
-    refundStatus,
-    refundedTotalCents,
-    syncResult,
-    emailOutcome,
+    async loadOrder(id) {
+      const { data, error } = await admin
+        .from("orders")
+        .select(REFUND_ORDER_COLUMNS)
+        .eq("id", id)
+        .maybeSingle();
+      if (error) return { order: null, error: error.message };
+      if (!data) return { order: null, error: null };
+      return {
+        order: data as unknown as ActionableOrder & { id: string; order_number: string },
+        error: null,
+      };
+    },
+
+    async createRefund({ paymentIntentId, amountCents, idempotencyKey }) {
+      const refund = await stripe.refunds.create(
+        { payment_intent: paymentIntentId, amount: amountCents },
+        { idempotencyKey }
+      );
+      return { status: typeof refund.status === "string" ? refund.status : null };
+    },
+
+    async syncRefundState(paymentIntentId) {
+      const outcome = await syncOrderRefundStateFromStripe(stripe, paymentIntentId);
+      return { result: outcome.result, refundedTotalCents: outcome.refundedTotalCents };
+    },
+
+    isNewSettledFact: isNewSettledRefundFact,
+    sendConfirmation: sendRefundConfirmationIfNeeded,
+    log: message => console.error(message),
   };
+
+  return runAdminRefund(deps, orderId, rawAmount);
 }

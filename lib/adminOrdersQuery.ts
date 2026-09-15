@@ -415,6 +415,9 @@ export const ORDER_DETAIL_COLUMNS = [
   "shipment_email_status", "shipment_email_sent_at",
   "refund_email_status", "refund_email_sent_at",
   "cancellation_outcome_email_status", "cancellation_outcome_email_sent_at",
+  // Migration 049: the direct cancellation confirmation, which is a
+  // different message from the outcome above and has its own state.
+  "cancellation_confirmation_email_status", "cancellation_confirmation_email_sent_at",
 ].join(",");
 
 export const ORDER_ITEM_COLUMNS = [

@@ -867,7 +867,14 @@ test("idempotency: all six deterministic namespaces still exist and are distinct
   assert.deepEqual(namespaces.sort(), [
     "annual-purchase-confirmation",
     "cancellation-confirmation", "cancellation-outcome", "cancellation-request",
-    "internal-order", "payment-problem", "refund", "shipment",
+    "internal-order",
+    // PAKET 4A.1B (FINAL SAFETY). The DIRECT order cancellation
+    // confirmation. Deliberately not "cancellation-confirmation", which
+    // is the SUBSCRIPTION one above: two templates sharing a provider
+    // namespace is how one message suppresses another at Resend, and the
+    // uniqueness assertion below is what caught the first attempt.
+    "order-cancellation-confirmation",
+    "payment-problem", "refund", "shipment",
     "subscription-ended", "subscription-started",
   ]);
   assert.equal(new Set(namespaces).size, namespaces.length, "two templates share a namespace");
@@ -1022,6 +1029,16 @@ test("regression: every sender keeps its own claim and its own contract", () => 
   }
 });
 
+test("regression: the retry sweep still drains exactly the six it always did", () => {
+  // 049 adds a seventh order email state machine. The sweep must NOT
+  // have silently acquired it: a direct cancellation confirmation that
+  // failed is not something this cron was designed or reviewed to
+  // re-send, and adding it would need its own phase.
+  const columns = withoutComments(read("lib/transactionalEmailRetry.ts"));
+  assert.ok(!columns.includes("cancellation_confirmation_email_status"),
+    "the retry sweep silently acquired the direct cancellation confirmation");
+});
+
 test("regression: the Stripe webhook and every business flow are unchanged", () => {
   const webhook = withoutComments(read("app/api/stripe/webhook/route.ts"));
   assert.ok(webhook.includes("isRefundEventType(event.type)"));
@@ -1067,6 +1084,22 @@ test("regression: no migration was added and 022-033 are untouched", () => {
       assert.ok(!new RegExp(`(?<![a-z_])${owned}`).test(later), `${name} touches ${owned}`);
     }
     // And what the six actually live on is untouched by anything later.
+    //
+    // ONE NAMED EXCEPTION. Migration 049 adds a SEVENTH state machine -
+    // the direct cancellation confirmation - and the refund lock's two
+    // claim columns. It names none of the six above (the loop over
+    // `owned` has already proved that for it like every other file), and
+    // it may only ADD: a drop or an alter of an existing column is still
+    // a failure here, for 049 as for anything else.
+    if (name === "049_direct_cancellation_and_refund_lock.sql") {
+      assert.ok(!/drop column/i.test(later), "049 drops a column from public.orders");
+      assert.ok(!/alter column/i.test(later), "049 alters an existing column on public.orders");
+      assert.ok(!/drop constraint/i.test(later), "049 drops a constraint from public.orders");
+      assert.ok(!/create policy/i.test(later), "049 creates a policy");
+      assert.ok(!/grant[^;]*to (anon|authenticated)/i.test(later),
+        "049 grants something to a browser role");
+      continue;
+    }
     assert.ok(!/alter table public\.orders/i.test(later),
       `${name} alters public.orders, where the six email states live`);
   }

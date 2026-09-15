@@ -107,6 +107,7 @@ export type ActionableOrder = {
   total_gross_cents?: number | null;
   refunded_total_cents?: number | null;
   stripe_payment_intent_id?: string | null;
+  stripe_checkout_session_id?: string | null;
   currency?: string | null;
 };
 
@@ -213,10 +214,23 @@ export function canRefund(order: ActionableOrder): ActionVerdict {
   }
   const intent = typeof order.stripe_payment_intent_id === "string" ? order.stripe_payment_intent_id.trim() : "";
   if (!intent) {
-    // Honest and specific: the money exists, the reference to it does
-    // not. Without a payment intent there is nothing to refund AGAINST,
-    // and inventing one is out of the question.
-    return no("Zu dieser Bestellung ist keine Stripe-Zahlungsreferenz gespeichert. Erstattung nur direkt in Stripe möglich.");
+    // Honest and specific: the money may well exist, the reference to it
+    // does not. Without a payment intent there is nothing to refund
+    // AGAINST, and inventing one is out of the question.
+    //
+    // The sentence has to be useful, not just true. "Do it in Stripe"
+    // alone sends the operator to a dashboard with no idea what to
+    // search for, so it names what they DO have: the checkout session
+    // when the order carries one, and otherwise the order number and
+    // date, which is what a Stripe payment search actually takes.
+    const session = typeof order.stripe_checkout_session_id === "string"
+      ? order.stripe_checkout_session_id.trim()
+      : "";
+    return no(
+      session
+        ? `Zu dieser Bestellung ist keine Stripe-Zahlungsreferenz gespeichert. Eine Erstattung ist nur direkt in Stripe möglich – die Zahlung lässt sich dort über die Checkout-Session ${session} finden.`
+        : "Zu dieser Bestellung ist keine Stripe-Zahlungsreferenz gespeichert. Eine Erstattung ist nur direkt in Stripe möglich – suche die Zahlung dort über Bestelldatum und Betrag."
+    );
   }
   if (maxRefundableCents(order) <= 0) return no("Es ist kein erstattbarer Betrag mehr offen.");
   return YES;
@@ -309,6 +323,27 @@ export const ORDER_EMAIL_STATE_COLUMNS = [
   "shipment_email_status", "shipment_email_sent_at",
   "refund_email_status", "refund_email_sent_at", "refund_email_notified_total_cents",
   "cancellation_outcome_email_status", "cancellation_outcome_email_sent_at",
+  // Migration 049. A DIRECT cancellation and the answer to a REQUESTED
+  // one are different events, so they get different columns - and the
+  // operator can see which of the two a customer actually received.
+  "cancellation_confirmation_email_status", "cancellation_confirmation_email_sent_at",
+] as const;
+
+/**
+ * The five customer emails an order can carry, as the admin lists them.
+ *
+ * FIVE, NOT FOUR, AND THE LAST TWO ARE NOT THE SAME MESSAGE. One
+ * confirms a cancellation GLOA decided on; the other answers a
+ * cancellation the customer asked for. Collapsing them into one row
+ * would hide which one went out, which is exactly what an operator
+ * fielding a reply needs to know.
+ */
+export const ORDER_EMAIL_KINDS = [
+  { key: "confirmation", label: "Bestellbestätigung", column: "confirmation_email_status" },
+  { key: "shipment", label: "Versandbestätigung", column: "shipment_email_status" },
+  { key: "refund", label: "Erstattungsbestätigung", column: "refund_email_status" },
+  { key: "cancellation", label: "Stornierungsbestätigung", column: "cancellation_confirmation_email_status" },
+  { key: "outcome", label: "Antwort auf Stornierungsanfrage", column: "cancellation_outcome_email_status" },
 ] as const;
 
 /** The status words those columns actually hold. */

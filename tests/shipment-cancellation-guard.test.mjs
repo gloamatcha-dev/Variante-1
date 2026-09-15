@@ -561,7 +561,15 @@ test("email: no new template and no new Resend namespace", () => {
     // in tests/launch-waitlist.test.mjs (84-87).
     "launchWelcome.ts",
 
-    "orderConfirmation.ts", "paymentProblem.ts",
+    
+        // PAKET 4A.1B (FINAL SAFETY). The DIRECT cancellation
+        // confirmation: what a customer is told when GLOA cancels their
+        // order. NOT the reply to a cancellation they requested - that
+        // is cancellationOutcome.ts and it is untouched. Separate
+        // template, separate state columns, separate provider key, so
+        // the two can never be mistaken for one another. Reviewed in
+        // tests/admin-order-actions.test.mjs.
+        "orderCancellationConfirmation.ts", "orderConfirmation.ts", "paymentProblem.ts",
     "refundConfirmation.ts", "shipmentConfirmation.ts", "subscriptionEnded.ts",
     "subscriptionStarted.ts",
     "withdrawalConfirmation.ts",
@@ -575,8 +583,16 @@ test("email: no new template and no new Resend namespace", () => {
   // subscription lifecycle, not to the shipment guard, and what this
   // assertion protects is that THIS task still added nothing of its own.
   assert.deepEqual(namespaces.sort(), [
+    // PAKET 4A.1B (FINAL SAFETY). order-cancellation-confirmation is the
+    // DIRECT order cancellation's provider namespace - deliberately its
+    // own, because cancellation-confirmation above belongs to the
+    // SUBSCRIPTION message. Neither is the shipment guard's, and what
+    // this assertion protects is that THIS task still added nothing of
+    // its own - which it did not.
     "cancellation-confirmation", "cancellation-outcome", "cancellation-request",
-    "internal-order", "payment-problem", "refund", "shipment",
+    "internal-order",
+    "order-cancellation-confirmation",
+    "payment-problem", "refund", "shipment",
     "subscription-ended", "subscription-started",
   ], "a Resend idempotency namespace was added or removed");
 });

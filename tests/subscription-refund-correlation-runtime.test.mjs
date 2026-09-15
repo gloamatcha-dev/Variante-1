@@ -682,7 +682,14 @@ test("55: this phase added no migration, and the only ones after it are 038 and 
      // Paket 4A.0. Ten SELECT grants to service_role and nothing else: no
      // table, no column, no policy, no function, and not one byte more for
      // anon or authenticated - so it cannot touch what this suite proves.
-     "048_service_role_read_grants.sql"],
+     "048_service_role_read_grants.sql",
+    // PAKET 4A.1B (FINAL SAFETY). 049 adds the direct cancellation
+    // confirmation's two email-state columns and the refund lock's two
+    // claim columns to public.orders, plus claim_order_refund and
+    // release_order_refund. It creates no policy, grants nothing to anon
+    // or authenticated, drops nothing and alters no existing column.
+    // Reviewed in tests/admin-order-actions.test.mjs.
+    "049_direct_cancellation_and_refund_lock.sql"],
     "an unreviewed migration appeared after 037");
   const sql039 = withoutComments(read("supabase/migrations/039_b2c_annual_plan_foundation.sql"));
   assert.ok(!sql039.includes("apply_order_refund_state_by_invoice"),

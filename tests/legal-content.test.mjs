@@ -663,8 +663,28 @@ test("AGB §2: what it says about payment and acceptance is what the code does",
   // would make "eine gesonderte Eingangsbestätigung versenden wir nicht"
   // wrong, so the count is the guard.
   const orderTemplates = readdirSync(new URL("../lib/email", import.meta.url))
-    .filter(f => /^order[A-Z]/.test(f));
-  assert.deepEqual(orderTemplates, ["orderConfirmation.ts"], "a second order email exists - §2 claims there is only one");
+    .filter(f => /^order[A-Z]/.test(f)).sort();
+  // PAKET 4A.1B (FINAL SAFETY) ADDED orderCancellationConfirmation.ts,
+  // and it is NOT an order-placement email. It is sent when an order is
+  // CANCELLED, which is a different moment and a different message, so
+  // §2's "eine gesonderte Eingangsbestätigung versenden wir nicht" is
+  // untouched by it.
+  //
+  // THE FILENAME WAS ONLY EVER A PROXY. What §2 actually claims is that
+  // exactly one message goes out when an order is placed, so that is
+  // what is checked now: the placement template is still the only one,
+  // AND the code path that creates an order is proven not to reach the
+  // cancellation one. A second genuine placement email still fails this.
+  assert.deepEqual(orderTemplates,
+    ["orderCancellationConfirmation.ts", "orderConfirmation.ts"],
+    "an unreviewed order email template exists - §2 claims one is sent on ordering");
+  const webhook = readFileSync(new URL("../app/api/stripe/webhook/route.ts", import.meta.url), "utf-8");
+  assert.ok(webhook.includes("sendOrderConfirmationEmailIfNeeded"),
+    "the order-placement email is no longer sent where orders are created");
+  for (const notOnOrdering of ["orderCancellationConfirmation", "sendCancellationConfirmationIfNeeded"]) {
+    assert.ok(!webhook.includes(notOnOrdering),
+      `${notOnOrdering} is reachable from order creation - §2 would then be false`);
+  }
   assert.match(agbSource, /Eine gesonderte Eingangsbestätigung versenden wir nicht/);
   assert.match(agbSource, /Erst mit dieser E-Mail kommt der Kaufvertrag zustande/);
 
