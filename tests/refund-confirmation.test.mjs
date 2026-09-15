@@ -437,9 +437,20 @@ test("historical: the only sweep is failed-only, and it is not this feature's", 
   walk(path.join(ROOT, "lib"));
   assert.deepEqual(callers.sort(), [
     "app/api/stripe/webhook/route.ts",
+    // PAKET 4A.1B. The admin refund gates its send on exactly the same
+    // isNewSettledRefundFact(...) the webhook uses, and only after the
+    // same absolute re-read has committed - asserted directly below.
+    "lib/adminOrderActions.ts",
     "lib/refundConfirmationEmail.ts",
     "lib/transactionalEmailRetry.ts",
   ]);
+  const adminActions = withoutComments(read("lib/adminOrderActions.ts"));
+  const syncAt = adminActions.indexOf("syncOrderRefundStateFromStripe(");
+  const gateAt = adminActions.indexOf("isNewSettledRefundFact(");
+  const sendAt = adminActions.indexOf("sendRefundConfirmationIfNeeded(");
+  assert.ok(syncAt > -1 && gateAt > -1 && sendAt > -1, "the admin refund skips a step");
+  assert.ok(syncAt < gateAt && gateAt < sendAt,
+    "the admin refund mails before the state is durable or without the new-fact guard");
   // Phase 2E-B added the transactional email retry cron as a SECOND,
   // intended caller of every sender. That is the whole point of a safety
   // net: it re-attempts a delivery that already failed. What still must
@@ -1051,7 +1062,34 @@ test("refunds: no Stripe write API anywhere in the repository", () => {
   };
   walk(path.join(ROOT, "app"));
   walk(path.join(ROOT, "lib"));
-  assert.deepEqual(offenders, [], `a Stripe write API appeared: ${offenders.join(", ")}`);
+  // PAKET 4A.1B AUTHORISED EXACTLY ONE REFUND WRITER.
+  //
+  // Before it, this repository could not create a refund at all:
+  // refunds were made by hand in the Stripe dashboard and the webhook
+  // reconciled the outcome. That is no longer true, and pretending
+  // otherwise would make this guard a lie rather than a protection.
+  //
+  // So the ban stays for every file but one, and the exception is
+  // named rather than pattern-matched. lib/adminOrderActions.ts is
+  // reachable only from /api/admin/orders/refund, which checks the
+  // admin session before it reads the body, and the amount it may
+  // send is computed from the order the server loaded itself.
+  //
+  // .cancel on a refund or a payment intent is still banned
+  // everywhere, this file included - 4A.1B authorised sending money
+  // BACK, not taking it back.
+  // Built from parts, like every other reference to this API in the
+  // suites: a suite that contains the literal call would trip the
+  // self-scan asserting these tests make no real Stripe request.
+  const REFUND_WRITER = `adminOrderActions.ts: ${["refunds", ".create"].join("")}`;
+  assert.deepEqual(
+    offenders.filter(o => o !== REFUND_WRITER), [],
+    `a Stripe write API appeared: ${offenders.join(", ")}`
+  );
+  // And the one exception is genuinely the only creator, so a second
+  // one cannot hide behind the filter above.
+  assert.equal(offenders.filter(o => o.endsWith(["refunds", ".create"].join(""))).length, 1,
+    "a second refund writer appeared");
 });
 
 test("refunds: this feature imports no Stripe client at all", () => {
@@ -1070,7 +1108,18 @@ test("refunds: this feature imports no Stripe client at all", () => {
     }
   };
   walk(path.join(ROOT, "app/api"));
-  assert.ok(!apiFiles.some(f => f.includes("refund")), "a refund endpoint was created");
+  // PAKET 4A.1B CREATED THE ONE REFUND ENDPOINT, and it is named here
+  // rather than allowed by pattern, so a second one still fails this.
+  // The sender, the template and the rules above are still Stripe-free;
+  // what changed is that an operator can now start a refund, from behind
+  // the admin session and nowhere else.
+  assert.deepEqual(apiFiles.filter(f => f.includes("refund")),
+    ["app/api/admin/orders/refund/route.ts"], "an unexpected refund endpoint exists");
+  const refundRoute = withoutComments(read("app/api/admin/orders/refund/route.ts"));
+  assert.ok(refundRoute.includes("openAdminAction(request)"),
+    "the refund endpoint does not check the admin session");
+  assert.ok(!refundRoute.includes("stripe") && !refundRoute.includes("Stripe"),
+    "the refund endpoint touches Stripe directly instead of going through the action module");
 });
 
 /* ══════════════════════════════════════════════════════════════

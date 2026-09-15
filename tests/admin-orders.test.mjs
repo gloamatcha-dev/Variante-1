@@ -67,9 +67,11 @@ const listRoute = read("app/api/admin/orders/route.ts");
 const detailRoute = read("app/api/admin/orders/detail/route.ts");
 const leaf = read("lib/adminOrdersQuery.ts");
 const ui = read("app/AdminOrders.tsx");
+const actionsUi = read("app/AdminOrderActions.tsx");
 const shell = read("app/AdminOverview.tsx");
 const css = read("app/globals.css");
 const migration004 = read("supabase/migrations/004_orders.sql");
+const migration019 = read("supabase/migrations/019_order_lifecycle_tracking.sql");
 
 /** Source with comments removed, so prose cannot satisfy an assertion. */
 const codeOnly = src => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
@@ -90,8 +92,36 @@ test("1: every status the UI knows is one the CHECK constraint allows", () => {
     return [...block.matchAll(/'([a-z_]+)'/g)].map(m => m[1]);
   };
   assert.deepEqual([...ORDER_STATUSES].sort(), checkValues("status").sort());
-  assert.deepEqual([...PAYMENT_STATUSES].sort(), checkValues("payment_status").sort());
   assert.deepEqual([...FULFILLMENT_STATUSES].sort(), checkValues("fulfillment_status").sort());
+
+  // PAYMENT_STATUS IS NOT 004'S ANY MORE, AND READING 004 FOR IT WAS A
+  // BUG IN THIS TEST.
+  //
+  // Migration 019 DROPS orders_payment_status_check and adds its own,
+  // with 'refund_pending' in it. 019 is what constrains the live table;
+  // 004's version has not existed since. Checking the superseded
+  // constraint made this guard agree with a list that was one value
+  // short - and short of exactly the value a refund in flight writes,
+  // which is the state Paket 4A.1B creates. An order in it would have
+  // rendered as a raw word with an unknown status class.
+  const at019 = migration019.indexOf("add constraint orders_payment_status_check");
+  assert.notEqual(at019, -1, "migration 019 no longer defines the payment CHECK");
+  const block019 = migration019.slice(at019, migration019.indexOf("));", at019));
+  const values019 = [...block019.matchAll(/'([a-z_]+)'/g)].map(m => m[1]);
+  assert.deepEqual([...PAYMENT_STATUSES].sort(), values019.sort());
+  assert.ok(values019.includes("refund_pending"),
+    "this test is reading the wrong constraint again");
+  // And 019 really is the last word on it: no later migration redefines
+  // it. Comments are stripped first - 029 through 033 each quote the
+  // constraint's name in a verification query written as a comment, and
+  // counting those as a redefinition would make this assertion cry wolf
+  // on every future migration that documents the same check.
+  for (const file of readdirSync(path.join(ROOT, "supabase/migrations")).sort()) {
+    if (!file.endsWith(".sql") || Number(file.slice(0, 3)) <= 19) continue;
+    const sql = read(`supabase/migrations/${file}`).replace(/^\s*--.*$/gm, "");
+    assert.ok(!/(add|drop)\s+constraint\s+orders_payment_status_check/i.test(sql),
+      `${file} redefines the payment CHECK and this test still reads 019`);
+  }
 });
 
 test("1b: every status has a German label, and no label invents a status", () => {
@@ -178,21 +208,40 @@ test("3b: POST only - no GET handler exists on either route", () => {
   }
 });
 
-test("3c: NOT ONE WRITE. 4A.1 is read-only and says so structurally", () => {
+test("3c: THE READING ROUTES STILL WRITE NOTHING", () => {
+  // PAKET 4A.1B ADDED ACTIONS, AND THIS GUARD IS NARROWED TO MATCH -
+  // narrowed, not dropped.
+  //
+  // 4A.1 was read-only and this test said so for the whole screen. The
+  // screen can now ship, cancel, resolve and refund, so asserting "not
+  // one write anywhere" would be asserting something untrue.
+  //
+  // What is still true, and still worth pinning, is that the two
+  // READING routes remain reading routes. A list or a detail request
+  // must never change an order, and the moment one of them grows a
+  // write the separation between looking and acting is gone.
   for (const [name, src] of [["list", listRoute], ["detail", detailRoute]]) {
     const code = codeOnly(src);
     for (const write of [".update(", ".insert(", ".upsert(", ".delete(", ".rpc(", "emails.send"]) {
       assert.ok(!code.includes(write), `the ${name} route performs a write: ${write}`);
     }
   }
-  // And the screen offers no action that would need one.
-  const uiCode = codeOnly(ui);
-  for (const action of ["/api/internal/orders", "refunds.create", "mark_order_shipped",
-                        "cancel_order", "Erstatten", "Stornieren", "Als versendet"]) {
-    assert.ok(!uiCode.includes(action), `the order screen can trigger: ${action}`);
+  // The browser still holds no secret and no Stripe call: every action
+  // is a POST to an admin route, and the work happens on the server.
+  for (const src of [ui, actionsUi]) {
+    const code = codeOnly(src);
+    for (const banned of [
+      "/api/internal/orders", "FULFILLMENT_ADMIN_SECRET", "CANCELLATION_ADMIN_SECRET",
+      "STRIPE_SECRET_KEY", "stripe.", "mark_order_shipped", "cancel_order",
+      "resolve_order_cancellation_request", "getSupabaseAdmin", "service_role",
+    ]) {
+      assert.ok(!code.includes(banned), `the order screen reaches ${banned} directly`);
+    }
   }
-  // It tells the operator rather than leaving them hunting for a button.
-  assert.match(ui, /bewusst nur lesend/);
+  // The reading component itself still offers no action - the actions
+  // live in their own component, which is what keeps this separable.
+  assert.ok(!codeOnly(ui).includes("/api/admin/orders/refund"),
+    "the list component can start a refund");
 });
 
 test("3d: the service role never leaves the server", () => {
@@ -392,7 +441,11 @@ test("7: /api/admin gained orders and nothing else", () => {
   assert.deepEqual(dirs, ["launch", "orders", "session", "waitlist"]);
   const orderDirs = readdirSync(path.join(ROOT, "app/api/admin/orders"), { withFileTypes: true })
     .filter(e => e.isDirectory()).map(e => e.name).sort();
-  assert.deepEqual(orderDirs, ["detail"]);
+  // PAKET 4A.1B added the four actions, one route each rather than one
+  // route with an `action` field: a refund and a shipment have very
+  // different blast radii and deserve to be separately auditable. The
+  // list is exact, so a fifth still fails this.
+  assert.deepEqual(orderDirs, ["cancel", "detail", "refund", "resolve-request", "ship"]);
 });
 
 test("7b: the query leaf stays a leaf", () => {
@@ -631,8 +684,13 @@ test("9i: a failed item read degrades the column, it does not fail the page", ()
 
 test("9j: the browser never fetches items per row", () => {
   // The only fetches in the component are the page and the opened order.
-  const endpoints = [...ui.matchAll(/fetch\("([^"]+)"/g)].map(m => m[1]).sort();
+  // Deduped: PAKET 4A.1B re-reads the open order after an action, so
+  // the detail endpoint appears twice in the source. What matters is the
+  // SET of endpoints the list component talks to, not the count.
+  const endpoints = [...new Set([...ui.matchAll(/fetch\("([^"]+)"/g)].map(m => m[1]))].sort();
   assert.deepEqual(endpoints, ["/api/admin/orders", "/api/admin/orders/detail"]);
+  // The reload is a fresh server read, not a local patch of the row.
+  assert.ok(ui.includes("reloadAfterAction"), "an action does not refresh anything");
   // and the summary a row renders comes from the page payload, not a call.
   assert.ok(ui.includes("data.itemSummaries?.[r.id]"),
     "the row builds its contents from something other than the page payload");

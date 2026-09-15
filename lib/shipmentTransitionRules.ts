@@ -79,10 +79,41 @@ function fail(code: ShipmentRequestFailure["code"]): ShipmentRequestFailure {
  * the idempotent-repeat comparison in the RPC would treat "" and NULL as
  * a conflict.
  */
+/**
+ * Whether a string carries a C0 or C1 control character, which is never
+ * part of a carrier name or a tracking number.
+ *
+ * Added when the admin screen gained these two fields. Until then the
+ * only caller was an operator with a bearer secret typing into curl;
+ * now it is a text input a browser posts. A NUL, a newline or an ANSI
+ * escape in a carrier would travel into an email template and into a log
+ * line, and no legitimate value contains one. The tracking URL was
+ * already covered - both this module and migration 019's CHECK refuse
+ * whitespace in it - so this closes the same hole on the two fields that
+ * had it.
+ *
+ * A TIGHTENING, deliberately applied to the shared validator so the
+ * authorized internal route benefits from it too. No value that was
+ * valid before stops being valid.
+ *
+ * Written as a code-point scan rather than a regular expression: a
+ * character class holding literal control characters is unreadable in a
+ * diff and eslint refuses it outright (no-control-regex), and silencing
+ * that rule to keep a clever one-liner would be the wrong trade.
+ */
+function hasControlCharacter(value: string): boolean {
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return true;
+  }
+  return false;
+}
+
 function normalizeOptional(value: unknown): string | null | undefined {
   if (value === undefined || value === null) return null;
   if (typeof value !== "string") return undefined; // signals a type error
   const trimmed = value.trim();
+  if (hasControlCharacter(trimmed)) return undefined;
   return trimmed === "" ? null : trimmed;
 }
 

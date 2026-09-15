@@ -2438,7 +2438,25 @@ test("regression: no Stripe write API for refunds appeared", () => {
   };
   walk(path.join(ROOT, "app"));
   walk(path.join(ROOT, "lib"));
-  assert.deepEqual(offenders, []);
+  // PAKET 4A.1B AUTHORISED EXACTLY ONE REFUND WRITER.
+  //
+  // Before it, this repository could not create a refund at all:
+  // refunds were made by hand in the Stripe dashboard and the webhook
+  // reconciled the outcome. That is no longer true, and pretending
+  // otherwise would make this guard a lie rather than a protection.
+  //
+  // So the ban stays for every file but one, and the exception is
+  // named rather than pattern-matched. lib/adminOrderActions.ts is
+  // reachable only from /api/admin/orders/refund, which checks the
+  // admin session before it reads the body. Nothing in the
+  // SUBSCRIPTION path may create a refund, and nothing does.
+  //
+  // .cancel on a refund or a payment intent is still banned
+  // everywhere, this file included.
+  const REFUND_WRITER = `adminOrderActions.ts: ${["refunds", ".create"].join("")}`;
+  assert.deepEqual(offenders.filter(o => o !== REFUND_WRITER), []);
+  assert.equal(offenders.filter(o => o.endsWith(["refunds", ".create"].join(""))).length, 1,
+    "a second refund writer appeared");
 });
 
 test("regression: the account reaches this feature ONLY through the endpoint", () => {

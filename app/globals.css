@@ -8912,6 +8912,140 @@ header nav{gap:18px;font-size:12px}
 }
 
 /* ══════════════════════════════════════════════════════════════
+   ORDER ACTIONS (Paket 4A.1B)
+
+   The order drawer stops being read-only here, so the visual job
+   changes: the operator has to be able to tell at a glance which
+   controls spend money and which do not. The answer is restraint -
+   ONE colour, used only where money moves. A screen where every
+   control is red teaches the reader to stop seeing red.
+   ══════════════════════════════════════════════════════════════ */
+
+.ops-actions{ margin-top:26px; border-top:1px solid var(--line); padding-top:6px; }
+.ops-action-block{ padding:18px 0; border-bottom:1px solid var(--line); }
+.ops-action-block:last-child{ border-bottom:0; }
+.ops-action-block h4{
+  margin:0 0 12px;
+  font-size:11px;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  color:var(--plum);
+  font-weight:700;
+}
+/* An open cancellation request is the one thing that blocks shipping,
+   so it is the one block that announces itself. */
+.ops-action-attention{
+  border-left:2px solid var(--berry);
+  padding-left:14px;
+}
+.ops-facts-tight{ grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
+.ops-action-note{ margin:10px 0 0; font-size:12px; line-height:1.5; color:var(--plum); }
+.ops-open-refund{ color:var(--berry); }
+
+.ops-action-fields{ display:flex; flex-wrap:wrap; gap:12px; margin-top:14px; }
+.ops-action-fields label{ display:flex; flex-direction:column; gap:4px; flex:1 1 190px; min-width:0; }
+.ops-action-fields label span{
+  font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--plum);
+}
+.ops-action-fields input[type=text],
+.ops-action-fields input[type=url]{
+  width:100%;
+  min-width:0;
+  padding:9px 11px;
+  border:1px solid var(--line);
+  background:transparent;
+  font:inherit;
+  font-size:14px;
+}
+.ops-action-fields input:disabled{ opacity:.55; }
+.ops-radio{ flex:1 1 100%; flex-direction:row !important; align-items:center; gap:9px !important; }
+.ops-radio span{ text-transform:none !important; letter-spacing:0 !important; font-size:14px !important; color:var(--ink) !important; }
+
+.ops-action-buttons{ display:flex; flex-wrap:wrap; gap:10px; margin-top:16px; }
+.ops-btn{
+  padding:10px 18px;
+  border:1px solid var(--plum);
+  background:transparent;
+  color:var(--plum);
+  font:inherit;
+  font-size:13px;
+  font-weight:600;
+  cursor:pointer;
+}
+.ops-btn:disabled{ opacity:.45; cursor:default; }
+.ops-btn-primary{ border-color:var(--blue); color:var(--cream); background:var(--blue); }
+/* The only red on the screen, and only on the two controls that move
+   money or stop an order for good. */
+.ops-btn-danger{ border-color:var(--berry); color:var(--cream); background:var(--berry); }
+
+/* The second step. It states what will happen in sentences, because a
+   button label cannot carry "this cannot be undone". */
+.ops-confirm{
+  margin-top:14px;
+  padding:14px 16px;
+  border:1px solid var(--plum);
+  background:rgba(79,58,91,.05);
+}
+.ops-confirm-danger{ border-color:var(--berry); background:rgba(166,30,89,.05); }
+.ops-confirm-facts{ margin:0; padding-left:18px; font-size:13px; line-height:1.6; }
+.ops-confirm-facts li{ margin:0 0 2px; }
+.ops-confirm-buttons{ display:flex; flex-wrap:wrap; gap:10px; margin-top:14px; }
+.ops-action-ok{
+  margin:0 0 14px;
+  padding:11px 14px;
+  border-left:2px solid var(--blue);
+  background:rgba(23,70,209,.05);
+  font-size:13px;
+  line-height:1.5;
+}
+
+@media (max-width:760px){
+  /* Every control goes full width on a phone: a half-width "endgültig
+     erstatten" next to a half-width "Abbrechen" is a mis-tap waiting to
+     happen, and min-width:0 keeps a long label from widening the card. */
+  /* THE POSITIONS TABLE, WHICH HAS BEEN SCROLLING THE DRAWER SIDEWAYS.
+     Five columns do not fit in 390px minus the drawer's padding, so the
+     table was 17px wider than the panel holding it and the operator had
+     to swipe to reach the line total. Its cells already carry data-label
+     - the same idiom the order list uses - so the fix is to apply the
+     same card layout here rather than to invent a second one. */
+  .ops-items thead{ position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); }
+  .ops-items,.ops-items tbody,.ops-items tr,.ops-items td{ display:block; width:auto; }
+  .ops-items tr{
+    border:1px solid rgba(79,58,91,.2);
+    padding:10px 12px;
+    margin:0 0 8px;
+  }
+  .ops-items tbody td{
+    display:flex;
+    justify-content:space-between;
+    gap:12px;
+    padding:4px 0;
+    border:0;
+    white-space:normal;
+    text-align:right;
+  }
+  .ops-items tbody td::before{
+    content:attr(data-label);
+    flex:0 0 auto;
+    min-width:0;
+    font-size:10px;
+    font-weight:700;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    color:var(--plum);
+    text-align:left;
+  }
+  .ops-items tbody td[data-label="Produkt"]{ overflow-wrap:anywhere; }
+
+  .ops-action-buttons,.ops-confirm-buttons{ flex-direction:column; }
+  .ops-action-buttons .ops-btn,.ops-confirm-buttons .ops-btn{ width:100%; min-width:0; }
+  .ops-action-fields label{ flex:1 1 100%; }
+  .ops-confirm-facts{ overflow-wrap:anywhere; }
+}
+
+
+/* ══════════════════════════════════════════════════════════════
    THE MOBILE DOCK
 
    A floating bar over the page on phones. Five targets, held off all
@@ -9285,7 +9419,8 @@ header nav{gap:18px;font-size:12px}
 
 /* Status words, same idiom as the waitlist: weight and colour, no pill. */
 .ops-pay-paid,.ops-ord-confirmed,.ops-ful-shipped,.ops-ord-shipped{ color:var(--blue); }
-.ops-pay-pending,.ops-ful-unfulfilled,.ops-ord-pending,.ops-ful-processing,.ops-ord-processing{ color:var(--plum); }
+.ops-pay-pending,.ops-ful-unfulfilled,.ops-ord-pending,.ops-ful-processing,.ops-ord-processing,
+.ops-pay-refund_pending{ color:var(--plum); }
 .ops-pay-failed,.ops-pay-refunded,.ops-pay-partially_refunded,
 .ops-ord-cancelled,.ops-ord-refunded,.ops-ful-cancelled{ color:var(--berry); }
 .ops-ful-delivered,.ops-ord-delivered{ color:var(--ink); }

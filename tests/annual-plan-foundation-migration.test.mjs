@@ -1011,6 +1011,24 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // exercised directly by tests/admin-orders.test.mjs. Nothing in the
     // checkout, webhook or annual path imports it.
     "lib/adminOrdersQuery.ts",
+    // PAKET 4A.1B, TWO EDITS TO EXISTING LEAVES:
+    //
+    //   adminOrdersQuery.ts        PAYMENT_STATUSES was copied from
+    //                              migration 004, whose CHECK migration
+    //                              019 replaced. It was missing
+    //                              'refund_pending' - the state a refund
+    //                              in flight writes. Plus the four email
+    //                              state columns in the detail read.
+    //   shipmentTransitionRules.ts control characters are now refused in
+    //                              the carrier and the tracking number.
+    //                              A TIGHTENING: no value that was valid
+    //                              before stops being valid, and the
+    //                              authorized internal route gets it too.
+    //
+    // Neither changes a transition, a guard's outcome or a money rule.
+    // Reviewed in tests/admin-orders.test.mjs and
+    // tests/admin-order-actions.test.mjs.
+    "lib/shipmentTransitionRules.ts",
     "lib/checkoutAttempts.ts",
     "lib/annualPlanCheckout.ts",
     "lib/annualPlanCheckoutRules.ts",
@@ -1205,6 +1223,10 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     "app/api/admin/orders/route.ts",
     "app/globals.css",
   ];
+  // NOTE. Both lists are about UNCOMMITTED edits to files that already
+  // exist, so a file this package CREATES does not belong in either -
+  // git reports it as untracked, not modified, and adding it here would
+  // be dead weight that outlives the reason for it.
 
   for (const rel of touched) {
     if (rel.startsWith("app/")) {

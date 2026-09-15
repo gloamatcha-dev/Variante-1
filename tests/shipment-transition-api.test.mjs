@@ -867,7 +867,16 @@ test("regression: only the one authorized route can reach the shipment RPC", () 
     }
   };
   for (const dir of ["app", "lib", "worker"]) walk(dir);
-  assert.deepEqual(callers, ["app/api/internal/orders/ship/route.ts"]);
+    // PAKET 4A.1B: the admin screen performs the same transition from
+    // behind the admin session, and it reaches it through the SAME
+    // database function and the SAME sender rather than a second
+    // implementation. The list is still closed - this entry is named,
+    // not a pattern - and lib/adminOrderActions.ts holds no table
+    // write of its own, which is asserted below.
+  assert.deepEqual(callers.sort(), [
+    "app/api/internal/orders/ship/route.ts",
+    "lib/adminOrderActions.ts",
+  ]);
 });
 
 test("regression: only the one authorized route can reach the shipment sender", () => {
@@ -883,8 +892,15 @@ test("regression: only the one authorized route can reach the shipment sender", 
     }
   };
   for (const dir of ["app", "lib", "worker"]) walk(dir);
+    // PAKET 4A.1B: the admin screen performs the same transition from
+    // behind the admin session, and it reaches it through the SAME
+    // database function and the SAME sender rather than a second
+    // implementation. The list is still closed - this entry is named,
+    // not a pattern - and lib/adminOrderActions.ts holds no table
+    // write of its own, which is asserted below.
   assert.deepEqual(callers.sort(), [
     "app/api/internal/orders/ship/route.ts",
+    "lib/adminOrderActions.ts",
     "lib/transactionalEmailRetry.ts",
   ]);
   // Phase 2E-B added the transactional email retry cron as a second,

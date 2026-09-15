@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import { OrderActions } from "./AdminOrderActions";
 import {
   FULFILLMENT_STATUSES,
   FULFILLMENT_STATUS_LABEL,
@@ -96,6 +97,17 @@ type OrderDetail = OrderRow & {
   refund_updated_at: string | null;
   cancellation_request_note: string | null;
   cancellation_request_resolved_at: string | null;
+  // The four email state machines, so the operator can see whether the
+  // customer was actually told. Written by existing senders; none of
+  // them is written from this screen.
+  confirmation_email_status: string | null;
+  confirmation_email_sent_at: string | null;
+  shipment_email_status: string | null;
+  shipment_email_sent_at: string | null;
+  refund_email_status: string | null;
+  refund_email_sent_at: string | null;
+  cancellation_outcome_email_status: string | null;
+  cancellation_outcome_email_sent_at: string | null;
 };
 
 export type OrdersSummary = {
@@ -257,6 +269,30 @@ export function AdminOrders({ onSessionLost }: { onSessionLost: () => void }) {
   }, [onSessionLost]);
 
   const closeDetail = useCallback(() => { setOpenId(null); setDetail(null); setDetailError(""); }, []);
+
+  // AFTER AN ACTION, THE SERVER IS ASKED AGAIN - both for the open order
+  // and for the page behind it. Nothing is patched locally and nothing
+  // waits for the 45-second poll: an operator who just shipped an order
+  // must see what the order actually says now, not what this tab
+  // predicted it would say.
+  const reloadAfterAction = useCallback(async () => {
+    const id = openId;
+    await load({ status, payment, fulfillment, search, page });
+    if (!id) return;
+    try {
+      const res = await fetch("/api/admin/orders/detail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      if (res.status === 401) { onSessionLost(); return; }
+      if (!res.ok) return;
+      setDetail((await res.json()) as { order: OrderDetail; items: OrderItem[] });
+    } catch {
+      // The action already succeeded and said so. A failed re-read is
+      // not a failed action, and the next poll will catch up.
+    }
+  }, [load, openId, status, payment, fulfillment, search, page, onSessionLost]);
 
   useEffect(() => {
     if (!openId) return;
@@ -437,7 +473,7 @@ export function AdminOrders({ onSessionLost }: { onSessionLost: () => void }) {
             {detailError && <p className="ops-error" role="alert">{detailError}</p>}
             {!detail && !detailError && <p className="ops-loading">Wird geladen…</p>}
 
-            {detail && <OrderDetailBody order={detail.order} items={detail.items} />}
+            {detail && <OrderDetailBody order={detail.order} items={detail.items} onActionDone={reloadAfterAction} />}
           </aside>
         </div>
       )}
@@ -458,7 +494,10 @@ function Facts({ title, rows }: { title: string; rows: [string, React.ReactNode]
   );
 }
 
-function OrderDetailBody({ order, items }: { order: OrderDetail; items: OrderItem[] }) {
+function OrderDetailBody(
+  { order, items, onActionDone }:
+  { order: OrderDetail; items: OrderItem[]; onActionDone: () => Promise<void> }
+) {
   const customer = customerFromSnapshot(order.customer_snapshot);
   const shipping = addressLines(order.shipping_address_snapshot);
   const billing = addressLines(order.billing_address_snapshot);
@@ -549,10 +588,7 @@ function OrderDetailBody({ order, items }: { order: OrderDetail; items: OrderIte
         ]} />
       )}
 
-      <p className="ops-note">
-        Diese Ansicht ist bewusst nur lesend. Erstattung, Stornierung und Versand
-        werden hier nicht ausgelöst.
-      </p>
+      <OrderActions order={order} onDone={onActionDone} />
     </>
   );
 }

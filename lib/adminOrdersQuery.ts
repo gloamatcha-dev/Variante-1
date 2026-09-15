@@ -38,9 +38,19 @@ export const ORDER_STATUSES = [
 ] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
-/** orders.payment_status - migration 004's CHECK. */
+/**
+ * orders.payment_status - MIGRATION 019's CHECK, not 004's.
+ *
+ * 004 defined this column and 019 REDEFINED it, dropping the old
+ * constraint and adding 'refund_pending'. 019 is what constrains the live
+ * table. The first version of this list was copied from 004 and was
+ * therefore one value short - and short of exactly the value a refund in
+ * flight produces, which is the state the admin refund action creates.
+ * An order in it would have rendered as a raw word with an unknown status
+ * class and been impossible to filter for.
+ */
 export const PAYMENT_STATUSES = [
-  "pending", "paid", "failed", "partially_refunded", "refunded",
+  "pending", "paid", "failed", "refund_pending", "partially_refunded", "refunded",
 ] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
@@ -64,6 +74,7 @@ export const PAYMENT_STATUS_LABEL: Readonly<Record<PaymentStatus, string>> = Obj
   pending: "Offen",
   paid: "Bezahlt",
   failed: "Fehlgeschlagen",
+  refund_pending: "Erstattung läuft",
   partially_refunded: "Teilweise erstattet",
   refunded: "Erstattet",
 });
@@ -397,6 +408,13 @@ export const ORDER_DETAIL_COLUMNS = [
   "shipped_at", "tracking_url",
   "refund_updated_at",
   "cancellation_request_note", "cancellation_request_resolved_at",
+  // The four email state machines, so the operator can see whether the
+  // customer was actually told. Every column exists on public.orders and
+  // is written by an existing sender; none is invented here.
+  "confirmation_email_status", "confirmation_email_sent_at",
+  "shipment_email_status", "shipment_email_sent_at",
+  "refund_email_status", "refund_email_sent_at",
+  "cancellation_outcome_email_status", "cancellation_outcome_email_sent_at",
 ].join(",");
 
 export const ORDER_ITEM_COLUMNS = [

@@ -1340,9 +1340,19 @@ test("security: only the one route can reach the resolution RPC and the sender",
   };
   walk(path.join(ROOT, "app"));
   walk(path.join(ROOT, "lib"));
-  assert.deepEqual(rpcCallers, ["app/api/internal/orders/cancellation-request/resolve/route.ts"]);
+    // PAKET 4A.1B: the admin screen performs the same transition from
+    // behind the admin session, and it reaches it through the SAME
+    // database function and the SAME sender rather than a second
+    // implementation. The list is still closed - this entry is named,
+    // not a pattern - and lib/adminOrderActions.ts holds no table
+    // write of its own, which is asserted below.
+  assert.deepEqual(rpcCallers.sort(), [
+    "app/api/internal/orders/cancellation-request/resolve/route.ts",
+    "lib/adminOrderActions.ts",
+  ]);
   assert.deepEqual(senderCallers.sort(), [
     "app/api/internal/orders/cancellation-request/resolve/route.ts",
+    "lib/adminOrderActions.ts",
     "lib/cancellationOutcomeEmail.ts",
     "lib/transactionalEmailRetry.ts",
   ]);
@@ -1420,7 +1430,34 @@ test("refunds: no Stripe write API anywhere in the repository", () => {
   };
   walk(path.join(ROOT, "app"));
   walk(path.join(ROOT, "lib"));
-  assert.deepEqual(offenders, [], `a Stripe write API appeared: ${offenders.join(", ")}`);
+  // PAKET 4A.1B AUTHORISED EXACTLY ONE REFUND WRITER.
+  //
+  // Before it, this repository could not create a refund at all:
+  // refunds were made by hand in the Stripe dashboard and the webhook
+  // reconciled the outcome. That is no longer true, and pretending
+  // otherwise would make this guard a lie rather than a protection.
+  //
+  // So the ban stays for every file but one, and the exception is
+  // named rather than pattern-matched. lib/adminOrderActions.ts is
+  // reachable only from /api/admin/orders/refund, which checks the
+  // admin session before it reads the body, and the amount it may
+  // send is computed from the order the server loaded itself.
+  //
+  // .cancel on a refund or a payment intent is still banned
+  // everywhere, this file included - 4A.1B authorised sending money
+  // BACK, not taking it back.
+  // Built from parts, like every other reference to this API in the
+  // suites: a suite that contains the literal call would trip the
+  // self-scan asserting these tests make no real Stripe request.
+  const REFUND_WRITER = `adminOrderActions.ts: ${["refunds", ".create"].join("")}`;
+  assert.deepEqual(
+    offenders.filter(o => o !== REFUND_WRITER), [],
+    `a Stripe write API appeared: ${offenders.join(", ")}`
+  );
+  // And the one exception is genuinely the only creator, so a second
+  // one cannot hide behind the filter above.
+  assert.equal(offenders.filter(o => o.endsWith(["refunds", ".create"].join(""))).length, 1,
+    "a second refund writer appeared");
 });
 
 test("refunds: this feature imports no Stripe client and mutates no refund column", () => {

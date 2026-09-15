@@ -784,7 +784,34 @@ test("safety: no Stripe write API anywhere in the repository", () => {
   };
   walk(path.join(ROOT, "app"));
   walk(path.join(ROOT, "lib"));
-  assert.deepEqual(offenders, [], `a Stripe write API appeared: ${offenders.join(", ")}`);
+  // PAKET 4A.1B AUTHORISED EXACTLY ONE REFUND WRITER.
+  //
+  // Before it, this repository could not create a refund at all:
+  // refunds were made by hand in the Stripe dashboard and the webhook
+  // reconciled the outcome. That is no longer true, and pretending
+  // otherwise would make this guard a lie rather than a protection.
+  //
+  // So the ban stays for every file but one, and the exception is
+  // named rather than pattern-matched. lib/adminOrderActions.ts is
+  // reachable only from /api/admin/orders/refund, which checks the
+  // admin session before it reads the body, and the amount it may
+  // send is computed from the order the server loaded itself.
+  //
+  // .cancel on a refund or a payment intent is still banned
+  // everywhere, this file included - 4A.1B authorised sending money
+  // BACK, not taking it back.
+  // Built from parts, like every other reference to this API in the
+  // suites: a suite that contains the literal call would trip the
+  // self-scan asserting these tests make no real Stripe request.
+  const REFUND_WRITER = `adminOrderActions.ts: ${["refunds", ".create"].join("")}`;
+  assert.deepEqual(
+    offenders.filter(o => o !== REFUND_WRITER), [],
+    `a Stripe write API appeared: ${offenders.join(", ")}`
+  );
+  // And the one exception is genuinely the only creator, so a second
+  // one cannot hide behind the filter above.
+  assert.equal(offenders.filter(o => o.endsWith(["refunds", ".create"].join(""))).length, 1,
+    "a second refund writer appeared");
 });
 
 test("safety: the retry chooses no recipient and builds no message of its own", () => {
@@ -1093,16 +1120,50 @@ test("regression: no client bundle can see the cron, the secret or the sweep", (
   walk(CLIENT);
   assert.ok(files.length > 0, "no client assets were found to check");
 
+  // TWO LISTS SINCE PAKET 4A.1B.
+  //
+  // Five of the six original needles are secrets or server-only
+  // machinery and stay banned in EVERY client asset. The sixth,
+  // refund_email_status, is neither: it is an ordinary column on
+  // public.orders, and the admin operations screen is a client
+  // component that legitimately names it to show the operator whether
+  // the customer was told. A column name is not a secret, and banning
+  // it in the admin chunk would have been protecting the wrong thing.
+  //
+  // So the guard is narrowed by ONE needle in ONE place and widened by
+  // four everywhere - the actual internals of the refund sender and the
+  // sweep, which must never be bundled for a browser, admin or not.
+  const EVERYWHERE = [
+    "CRON_SECRET", "runTransactionalEmailRetryCron", "isBearerSecretAuthorized",
+    "RESEND_API_KEY", "timingSafeEqual",
+    // Added by 4A.1B: the machinery itself, not a column name.
+    "deliverClaimedRefundConfirmation", "AUTO_RETRY_STATUS_COLUMNS",
+    "getSupabaseAdmin", "STRIPE_SECRET_KEY",
+  ];
+  /** Chunks the admin screen compiles into. Nothing public may match. */
+  const isAdminChunk = rel => {
+    const posix = rel.split(path.sep).join("/");
+    const base = posix.slice(posix.lastIndexOf("/") + 1);
+    return base.startsWith("Admin") && base.endsWith(".js");
+  };
+
   const leaks = [];
+  let adminChunks = 0;
   for (const file of files) {
+    const rel = path.relative(ROOT, file);
     const source = readFileSync(file, "utf-8");
-    for (const needle of [
-      "CRON_SECRET", "runTransactionalEmailRetryCron", "isBearerSecretAuthorized",
-      "RESEND_API_KEY", "refund_email_status", "timingSafeEqual",
-    ]) {
-      if (source.includes(needle)) leaks.push(`${path.relative(ROOT, file)}: ${needle}`);
+    if (isAdminChunk(rel)) adminChunks += 1;
+    for (const needle of EVERYWHERE) {
+      if (source.includes(needle)) leaks.push(`${rel}: ${needle}`);
+    }
+    // The column name: everywhere except the admin chunk.
+    if (!isAdminChunk(rel) && source.includes("refund_email_status")) {
+      leaks.push(`${rel}: refund_email_status`);
     }
   }
+  // If the admin chunk is ever renamed out of this pattern the exception
+  // silently stops applying - which would fail loudly, not quietly pass.
+  assert.ok(adminChunks > 0, "no admin chunk was found; the exception above matches nothing");
   assert.deepEqual(leaks, [], `server-only material reached the client bundle: ${leaks.join(", ")}`);
 });
 

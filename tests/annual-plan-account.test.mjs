@@ -832,7 +832,22 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
     // secrets in /internal/orders/*. Reviewed in
     // tests/admin-orders.test.mjs.
     "/admin/orders",
+    // PAKET 4A.1B. The four order actions, one route each rather than one
+    // route with an `action` field: a refund and a shipment have very
+    // different blast radii and deserve to be separately auditable. All
+    // four check the admin session BEFORE reading the body, none reads a
+    // bearer secret, and none reaches Stripe or an RPC itself - they call
+    // lib/adminOrderActions.ts, which calls the SAME database functions
+    // and the SAME email state machines as /internal/orders/*. Refund is
+    // the only route in the repository that can create a Stripe refund,
+    // and the amount it may send is computed from the order the server
+    // loaded rather than from anything the client said. Reviewed in
+    // tests/admin-order-actions.test.mjs.
+    "/admin/orders/cancel",
     "/admin/orders/detail",
+    "/admin/orders/refund",
+    "/admin/orders/resolve-request",
+    "/admin/orders/ship",
     "/admin/session",
     "/admin/waitlist",
     "/annual-plan/checkout/session",
