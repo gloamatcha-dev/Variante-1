@@ -478,3 +478,139 @@ test("4h: the panel's own look and modal contract are untouched", () => {
   assert.match(popup, /aria-label="Popup schließen"/);
   assert.match(popup, /ZUR LAUNCH LIST/);
 });
+
+/* ════════════════════════════════════════════════════════════════════
+   5. ROUTE STATE — WHAT IS PER PAGE, AND WHAT IS PERSISTENT
+
+   THE QUESTION THIS SECTION SETTLES. The panel carries four pieces of
+   state: `due`, `open`, `shownRef` and `heldRef`. Only `due` is reset by
+   name in the route cleanup, so the obvious worry is that the two refs
+   leak from one route to the next - a heldRef from page A imposing an
+   unnecessary settle pause on page B, or a shownRef spending the one
+   appearance of page B before it starts.
+
+   MEASURED, NOT ASSUMED. Driven as real client-side navigation in
+   Chrome at 393x852 against the built app:
+
+     forward nav  /about -> /contact with the panel OPEN: it is gone on
+                  arrival, and window state set before the click
+                  survives - so the navigation really was client-side
+                  and the component really did remount.
+     back nav     /about -> /our-matcha, same result.
+     heldRef      blocked behind the menu on /our-matcha, then a menu
+                  link to /about: the panel appeared 8074ms after the
+                  click. A leaked heldRef would have made that ~8600ms
+                  plus navigation. It is fresh.
+     due          the held panel of route A never appeared on route B;
+                  route B armed its own 8s trigger instead.
+
+   So every piece of transient state is per route ALREADY, because the
+   shell remounts per route - the refs cannot leak because the instance
+   holding them does not survive. The route cleanup's setDue(false) is
+   the belt to that pair of braces: it is what keeps this true if the
+   shell is ever hoisted into a layout, which is exactly the refactor
+   that would otherwise turn all four into cross-route state.
+
+   These assertions pin what CAN be pinned from source: that the refs
+   are per-instance, that the reset is route-scoped, that the guard
+   re-checks the route, and that none of it touched the seven-day
+   dismissal. The runtime behaviour above is browser QA, not a claim
+   this file can make.
+   ════════════════════════════════════════════════════════════════════ */
+
+test("5: every piece of transient state is PER INSTANCE, not module-level", () => {
+  // The one way the refs could leak regardless of remounting: hoisting
+  // them out of the component, where every instance would share them.
+  for (const name of ["shownRef", "heldRef", "due", "open"]) {
+    assert.ok(popup.includes(name), `${name} is gone`);
+  }
+  const body = popup.slice(popup.indexOf("export function LaunchPopup("));
+  for (const decl of ["const [due, setDue] = useState(false)",
+                      "const [open, setOpen] = useState(false)",
+                      "const shownRef = useRef(false)",
+                      "const heldRef = useRef(false)"]) {
+    assert.ok(body.includes(decl), `${decl} is not declared inside the component`);
+  }
+  // Nothing mutable at module scope that a second instance could share.
+  const moduleScope = popup.slice(0, popup.indexOf("export function LaunchPopup("));
+  assert.ok(!/^\s*(let|var)\s/m.test(moduleScope), "the popup module holds mutable top-level state");
+});
+
+test("5b: the transient reset is ROUTE-SCOPED", () => {
+  // The arming effect keys on route and clears the owed flag on the way
+  // out, so a panel owed by page A is not owed by page B.
+  const arming = popup.slice(popup.indexOf("if (suppressesLaunchPopup(route)) return;"));
+  const effect = arming.slice(0, arming.indexOf("}, [route]);"));
+  assert.ok(effect.includes("setDue(false)"), "an owed panel survives navigation");
+  assert.match(popup, /\}, \[route\]\);/, "the arming effect is no longer keyed on the route");
+  // And the coordination effect is keyed on the route too, so a change
+  // of page re-evaluates whether the panel may be shown at all.
+  assert.match(popup, /\}, \[due, open, blocked, route\]\);/,
+    "the coordination effect stopped depending on the route");
+});
+
+test("5c: a held panel can never surface on a route that suppresses it", () => {
+  // Belt and braces: the arming effect already refuses to arm there, and
+  // the guard checks again before showing - so even a panel that somehow
+  // arrived still owed cannot appear on /launch or a task flow.
+  const guard = popup.slice(popup.indexOf("if (!due || open || shownRef.current) return;"),
+                            popup.indexOf("}, [due, open, blocked, route]);"));
+  assert.ok(guard.includes("suppressesLaunchPopup(route)"),
+    "the guard does not re-check the route");
+  assert.ok(guard.indexOf("suppressesLaunchPopup(route)") < guard.indexOf("setOpen(true)"),
+    "the route is checked after the panel is shown");
+  // Both places consult the SAME predicate - no second copy to drift.
+  assert.equal((popup.match(/suppressesLaunchPopup\(route\)/g) || []).length, 2,
+    "the suppression check was duplicated or dropped");
+});
+
+test("5d: shownRef spends ONE appearance, and only on a real one", () => {
+  // It is set in the same statement that opens the panel, so it cannot
+  // be spent by a trigger that was held and never shown.
+  assert.match(popup, /shownRef\.current = true; setOpen\(true\)/,
+    "the once-per-page latch and the open are no longer one statement");
+  assert.equal((popup.match(/shownRef\.current = true/g) || []).length, 1,
+    "the latch is spent from more than one place");
+  // And being blocked spends heldRef, never shownRef.
+  assert.match(popup, /if \(blocked\) \{ heldRef\.current = true; return; \}/);
+  const blockedLine = popup.slice(popup.indexOf("if (blocked) {"));
+  assert.ok(!blockedLine.slice(0, blockedLine.indexOf("\n")).includes("shownRef"),
+    "being blocked spends the one appearance");
+});
+
+test("5e: THE SEVEN-DAY DISMISSAL IS UNTOUCHED, and is the only persistent thing", () => {
+  // The audit was about transient route state. Nothing here may have
+  // moved the persistent half.
+  assert.equal(LAUNCH_POPUP_DISMISS_MS, 7 * 24 * 60 * 60 * 1000);
+  assert.equal(LAUNCH_POPUP_STORAGE_KEY, "gloa_launch_popup_dismissed_at");
+  assert.equal(launchPopupDismissed(String(Date.now()), Date.now()), true,
+    "a fresh dismissal is not in force");
+  assert.equal(launchPopupDismissed(String(Date.now() - 6 * 24 * 60 * 60 * 1000), Date.now()), true,
+    "a six-day-old dismissal expired early");
+  assert.equal(launchPopupDismissed(String(Date.now() - 8 * 24 * 60 * 60 * 1000), Date.now()), false,
+    "an eight-day-old dismissal is still in force");
+  // Storage is the ONLY thing that crosses a page load; the transient
+  // state is not written anywhere that survives one.
+  assert.equal((popup.match(/window\.localStorage\.getItem/g) || []).length, 1,
+    "the popup reads storage somewhere new");
+  assert.equal((popup.match(/window\.localStorage\.setItem/g) || []).length, 1,
+    "the popup writes storage somewhere new");
+  for (const name of ["shownRef", "heldRef", "due"]) {
+    assert.ok(!new RegExp(`setItem\\([^)]*${name}`).test(popup),
+      `${name} is being persisted across page loads`);
+  }
+  // The triggers and the overlay coordination are unchanged by this audit.
+  assert.equal(LAUNCH_POPUP_DELAY_MS, 8000);
+  assert.equal(LAUNCH_POPUP_SCROLL_RATIO, 0.3);
+  assert.equal(LAUNCH_POPUP_SETTLE_MS, 600);
+  assert.equal(overlayBlocksLaunchPopup({ menuOpen: true }), true);
+  assert.equal(overlayBlocksLaunchPopup({ cartOpen: true }), true);
+});
+
+test("5f: the CTA closes the panel on its way to /launch", () => {
+  // The one link that navigates FROM an open panel, and it goes to a
+  // suppressed route. Without the close it would rely entirely on the
+  // remount to not be visible there.
+  assert.match(popup, /<Link className="cta lp-cta" href="\/launch" onClick=\{close\}>/,
+    "the CTA no longer closes the panel as it navigates");
+});
