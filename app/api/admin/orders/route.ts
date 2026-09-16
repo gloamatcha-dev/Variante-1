@@ -110,9 +110,70 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const { data, count, error } = await rows
-    .order("created_at", { ascending: false })
-    .range(from, to);
+  // ── THE INDEPENDENT READS ALL LEAVE AT ONCE ────────────────────────
+  //
+  // This route made four SEQUENTIAL round trips: the page, then its
+  // items, then the counters, then today's revenue. Only the second one
+  // needs anything from the first - it filters on the ids the page just
+  // returned - and the other two were simply waiting their turn.
+  //
+  // That wait is not free here. Measured: the deployment's functions run
+  // in iad1 and the database is in eu-central-1, so ONE Supabase round
+  // trip costs ~350-400ms from the running function (production
+  // /impressum 158ms with no read against /shop/matcha 558ms with one).
+  // Four waves of that is most of the time the operator spends waiting.
+  //
+  // Promise.resolve() rather than a bare assignment on purpose: a
+  // PostgREST builder is lazy and does not issue anything until it is
+  // awaited, so assigning it to a name would have kept the sequence
+  // exactly as it was. Adopting it starts the request now.
+  //
+  // Nothing is cached and nothing is reused across requests: these are
+  // the same queries that ran before, issued in the same handler, for
+  // the same session - they simply overlap. The data is exactly as
+  // fresh as it was.
+  const listPromise = Promise.resolve(
+    rows.order("created_at", { ascending: false }).range(from, to)
+  );
+
+  const dayStart = berlinDayStartIso(Date.now());
+  const head = () => supabase.from("orders").select("id", { count: "exact", head: true });
+
+  /** A count, or null when the read failed - never a silent zero. */
+  async function countOf(
+    q: PromiseLike<{ count: number | null; error: { message: string } | null }>,
+    label: string
+  ): Promise<number | null> {
+    const { count: n, error: e } = await q;
+    if (e) {
+      console.error(`Admin orders: ${label} count failed:`, e.message);
+      return null;
+    }
+    return n ?? 0;
+  }
+
+  const countsPromise = Promise.all([
+    countOf(head(), "total"),
+    countOf(head().gte("created_at", dayStart), "today"),
+    countOf(head().eq("payment_status", "paid"), "paid"),
+    countOf(head().eq("fulfillment_status", "unfulfilled"), "open fulfillment"),
+    countOf(head().eq("status", "cancelled"), "cancelled"),
+    countOf(head().gt("refunded_total_cents", 0), "refunded"),
+  ]);
+
+  // Revenue today. Summed over the rows because PostgREST cannot sum and
+  // this package adds no database function. Only today's rows are read,
+  // capped, and the cap is reported rather than hidden: a number that is
+  // quietly short is worse than one that says it is.
+  const revenuePromise = Promise.resolve(
+    supabase
+      .from("orders")
+      .select("total_gross_cents,payment_status")
+      .gte("created_at", dayStart)
+      .limit(REVENUE_ROW_CAP)
+  );
+
+  const { data, count, error } = await listPromise;
 
   if (error) {
     console.error("Admin orders: list read failed:", error.message);
@@ -158,43 +219,12 @@ export async function POST(request: Request): Promise<Response> {
   // ── The counters, as counts rather than rows ───────────────────────
   //
   // head:true asks PostgREST for the number and no payload at all, so
-  // the overview costs six tiny requests instead of 458 rows.
-  const dayStart = berlinDayStartIso(Date.now());
-  const head = () => supabase.from("orders").select("id", { count: "exact", head: true });
+  // the overview costs six tiny requests instead of 458 rows. They were
+  // already issued above, alongside the page itself, and are collected
+  // here.
+  const [total, today, paid, openFulfillment, cancelled, refunded] = await countsPromise;
 
-  /** A count, or null when the read failed - never a silent zero. */
-  async function countOf(
-    q: PromiseLike<{ count: number | null; error: { message: string } | null }>,
-    label: string
-  ): Promise<number | null> {
-    const { count: n, error: e } = await q;
-    if (e) {
-      console.error(`Admin orders: ${label} count failed:`, e.message);
-      return null;
-    }
-    return n ?? 0;
-  }
-
-  const [total, today, paid, openFulfillment, cancelled, refunded] = await Promise.all([
-    countOf(head(), "total"),
-    countOf(head().gte("created_at", dayStart), "today"),
-    countOf(head().eq("payment_status", "paid"), "paid"),
-    countOf(head().eq("fulfillment_status", "unfulfilled"), "open fulfillment"),
-    countOf(head().eq("status", "cancelled"), "cancelled"),
-    countOf(head().gt("refunded_total_cents", 0), "refunded"),
-  ]);
-
-  // ── Revenue today ──────────────────────────────────────────────────
-  //
-  // Summed over the rows because PostgREST cannot sum and this package
-  // adds no database function. Only today's rows are read, capped, and
-  // the cap is reported rather than hidden: a number that is quietly
-  // short is worse than one that says it is.
-  const { data: todayRows, error: revenueError } = await supabase
-    .from("orders")
-    .select("total_gross_cents,payment_status")
-    .gte("created_at", dayStart)
-    .limit(REVENUE_ROW_CAP);
+  const { data: todayRows, error: revenueError } = await revenuePromise;
 
   let revenueTodayCents: number | null = null;
   let revenueCapped = false;

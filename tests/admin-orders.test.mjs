@@ -74,6 +74,7 @@ const migration004 = read("supabase/migrations/004_orders.sql");
 const migration019 = read("supabase/migrations/019_order_lifecycle_tracking.sql");
 
 /** Source with comments removed, so prose cannot satisfy an assertion. */
+const inventoryLib = read("lib/inventoryAdmin.ts");
 const codeOnly = src => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
 
 /* ══════════════════════════════════════════════════════════════
@@ -693,9 +694,16 @@ test("9h: a short item read announces itself instead of showing a small order", 
 
 test("9i: a failed item read degrades the column, it does not fail the page", () => {
   const code = codeOnly(listRoute);
+  // Bounded by the statement that FOLLOWS the item read rather than by
+  // "dayStart =": the counters and today's revenue are now issued at the
+  // top of the handler, alongside the page, so that marker no longer
+  // sits after this block. Anchored on code rather than on a comment,
+  // because codeOnly() strips comments. The block itself is unchanged
+  // and both assertions below are exactly as strict as they were.
   const from = code.indexOf("order_items");
-  const to = code.indexOf("dayStart =");
-  const block = code.slice(from, to > from ? to : code.length);
+  const to = code.indexOf("await countsPromise", from);
+  assert.ok(from >= 0 && to > from, "this test is looking at the wrong block");
+  const block = code.slice(from, to);
   assert.ok(block.includes("itemError"), "this test is looking at the wrong block");
   assert.ok(!/502/.test(block), "one failed item read takes the whole order list down with it");
   assert.ok(!/return Response\.json/.test(block), "a failed item read returns early instead of degrading");
@@ -743,4 +751,121 @@ test("9l: the contents cell cannot push a phone sideways", () => {
     "an unbroken product name cannot wrap on mobile and will overflow");
   assert.ok(mobile.includes("min-width:0"),
     "the flex cell has no min-width:0, so its text sets the track width and the card overflows");
+});
+
+/* ════════════════════════════════════════════════════════════════════
+   10. THE INDEPENDENT READS DO NOT QUEUE
+
+   WHY THIS SECTION EXISTS. Measured, not assumed: the deployment's
+   functions run in iad1 (X-Vercel-Id fra1::iad1::…) and the Supabase
+   project resolves into AWS EU address space, matching eu-central-1 on
+   latency (84ms from Berlin against 79ms to Frankfurt and 374ms to
+   us-east-1). So every Supabase round trip made by a running function
+   crosses the Atlantic - production /impressum answers in 158ms with no
+   read, /shop/matcha in 558ms with one.
+
+   That makes the NUMBER OF SEQUENTIAL WAVES the thing that decides how
+   long the operator waits. This route used to make four: the page, then
+   its items, then the counters, then today's revenue - although only the
+   items ever needed anything from the page.
+
+   Locally (one round trip ~85ms) the change measured p50 390ms -> 147ms
+   for this route. The responses were compared byte-for-byte across three
+   query shapes before and after: identical.
+
+   THE ONE THING THESE TESTS MUST NOT ALLOW is the obvious wrong way to
+   get the same number: caching. Nothing here may be stored between
+   requests, so section 10c checks for that directly.
+   ════════════════════════════════════════════════════════════════════ */
+
+test("10: the counters and the revenue read no longer wait for the page", () => {
+  const code = codeOnly(listRoute);
+  const list = code.indexOf("listPromise");
+  const counts = code.indexOf("countsPromise");
+  const revenue = code.indexOf("revenuePromise");
+  const awaitList = code.indexOf("await listPromise");
+  assert.ok(list >= 0 && counts >= 0 && revenue >= 0, "the independent reads are not started up front");
+  // All three are STARTED before the page is awaited - that is the whole
+  // point. Started after, they would queue exactly as before.
+  assert.ok(counts < awaitList, "the counters are started only after the page has come back");
+  assert.ok(revenue < awaitList, "the revenue read is started only after the page has come back");
+});
+
+test("10b: a PostgREST builder is adopted, not merely named", () => {
+  // The trap this guards: a builder issues nothing until it is awaited,
+  // so `const p = supabase.from(...)...` looks parallel and is not.
+  const code = codeOnly(listRoute);
+  assert.match(code, /const listPromise = Promise\.resolve\(/,
+    "the page read is named rather than started");
+  assert.match(code, /const revenuePromise = Promise\.resolve\(/,
+    "the revenue read is named rather than started");
+  assert.match(code, /const countsPromise = Promise\.all\(\[/,
+    "the counters are no longer issued as one batch");
+});
+
+test("10c: NOTHING IS CACHED - the speed comes from overlap, not from staleness", () => {
+  const code = codeOnly(listRoute);
+  for (const banned of ["unstable_cache", "revalidate", "cache(", "next: {", "globalThis.__", "Map()", "new Map"]) {
+    assert.ok(!code.includes(banned), `the order list introduced caching: ${banned}`);
+  }
+  // No module-level mutable state: a store outside the handler would
+  // outlive the request and could serve one operator another's page.
+  const beforeHandler = code.slice(0, code.indexOf("export async function POST"));
+  assert.ok(!/^\s*(let|var)\s/m.test(beforeHandler), "the route holds mutable module state");
+  // The session is still verified first, before any read is issued.
+  const handler = code.slice(code.indexOf("export async function POST"));
+  assert.ok(handler.indexOf("verifyAdminRequest(request)") < handler.indexOf("listPromise"),
+    "a read is issued before the session is checked");
+});
+
+test("10d: every read still has its own failure path", () => {
+  // Parallel must not mean "one failure loses the others". The page
+  // still 502s, and the counters, the items and the revenue each still
+  // degrade on their own.
+  const code = codeOnly(listRoute);
+  assert.ok(code.includes("Die Bestellungen konnten nicht geladen werden."),
+    "the page read lost its failure response");
+  assert.ok(code.includes("revenueError"), "the revenue read lost its own error branch");
+  assert.ok(code.includes("itemError"), "the item read lost its own error branch");
+  assert.ok(code.includes("count failed:"), "the counters lost their own error branch");
+});
+
+test("10e: the inventory listing overlaps the same way, and caches nothing", () => {
+  const inv = codeOnly(inventoryLib);
+  const awaitList = inv.indexOf("await listPromise");
+  assert.ok(inv.indexOf("const listPromise = Promise.resolve(") >= 0,
+    "the item page is named rather than started");
+  assert.ok(inv.indexOf("const categoriesPromise = Promise.resolve(") < awaitList,
+    "the category read still waits for the item page");
+  assert.ok(inv.indexOf("const summaryPromise = summarize(admin)") < awaitList,
+    "the summary still waits for the item page");
+  // The two reads that DO need the page's ids run together, not in turn.
+  assert.match(inv, /await Promise\.all\(\[\s*admin\s*\.from\("inventory_item_areas"\)/,
+    "areas and last movements are still read one after the other");
+  assert.ok(inv.includes("inventory_movements"), "the last-movement read is gone");
+  // Still one grouped read per concern - no per-row queries reappeared.
+  assert.equal((inv.match(/\.in\("inventory_item_id", ids\)/g) || []).length, 2,
+    "the page's ids are no longer used for exactly the two grouped reads");
+  for (const banned of ["unstable_cache", "revalidate", "new Map", "globalThis.__"]) {
+    assert.ok(!inv.includes(banned), `the inventory listing introduced caching: ${banned}`);
+  }
+});
+
+test("10f: no stock, grant, RPC or pagination behaviour moved with it", () => {
+  const inv = codeOnly(inventoryLib);
+  // The writes are still the two security-definer functions and nothing else.
+  assert.ok(inv.includes('admin.rpc("record_inventory_movement"'), "the movement RPC changed");
+  assert.ok(inv.includes('admin.rpc("record_inventory_stocktake"'), "the stocktake RPC changed");
+  // Still no direct quantity write: current_quantity appears only as a
+  // READ (a type, a select list, a comparison), never inside an update
+  // payload. tests/inventory.test.mjs proves the database refuses it too.
+  for (const m of inv.matchAll(/\.update\(\{([^}]*)\}/g)) {
+    assert.ok(!m[1].includes("current_quantity"),
+      "an update payload now carries current_quantity");
+  }
+  // Pagination untouched.
+  assert.ok(inv.includes("itemsPageRange(query)"), "the inventory page range changed");
+  const code = codeOnly(listRoute);
+  assert.ok(code.includes("ordersPageRange(query)"), "the orders page range changed");
+  assert.ok(code.includes(".range(from, to)"), "the orders page no longer uses a range");
 });

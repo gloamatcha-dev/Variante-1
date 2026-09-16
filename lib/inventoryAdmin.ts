@@ -155,8 +155,33 @@ export async function listInventoryItems(query: ItemsQuery): Promise<ItemsPayloa
     );
   }
 
+  // ── THE INDEPENDENT READS ALL LEAVE AT ONCE ────────────────────────
+  //
+  // This listing made FIVE sequential round trips: the page, its areas,
+  // its last movements, the category list, then the summary. Only the
+  // areas and the movements need anything from the page - they filter on
+  // the ids it returned - and those two never needed each other.
+  //
+  // The wait is the expensive part: the deployment's functions run in
+  // iad1 and the database is in eu-central-1, so one Supabase round trip
+  // costs ~350-400ms from the running function. Five waves of that is
+  // most of the time the screen takes to appear.
+  //
+  // Promise.resolve() rather than a bare assignment on purpose: a
+  // PostgREST builder is lazy and issues nothing until awaited, so
+  // naming it would have left the sequence exactly as it was.
+  //
+  // Nothing is cached and nothing is shared between requests - the same
+  // queries, in the same call, for the same session, simply overlapping.
+  // Stock and movements are exactly as fresh as they were.
   const { from, to } = itemsPageRange(query);
-  const { data, count, error } = await rows.order("name", { ascending: true }).range(from, to);
+  const listPromise = Promise.resolve(rows.order("name", { ascending: true }).range(from, to));
+  const categoriesPromise = Promise.resolve(
+    admin.from("inventory_categories").select(CATEGORY_COLUMNS).order("name", { ascending: true })
+  );
+  const summaryPromise = summarize(admin);
+
+  const { data, count, error } = await listPromise;
   if (error) {
     console.error("Inventory: item read failed:", error.message);
     return internal();
@@ -169,12 +194,34 @@ export async function listInventoryItems(query: ItemsQuery): Promise<ItemsPayloa
   }
 
   const ids = pageRows.map(r => r.id);
+  // The two reads that DO need the page's ids, issued together rather
+  // than one after the other - neither has ever needed the other.
+  const [areaResult, recentResult] = ids.length > 0
+    ? await Promise.all([
+        admin
+          .from("inventory_item_areas")
+          .select("inventory_item_id,area")
+          .in("inventory_item_id", ids),
+        // THE LAST MOVEMENT PER ITEM, in ONE request for the whole page.
+        //
+        // Not one query per row: at fifty rows that is fifty-one round
+        // trips and the screen becomes unusable at exactly the point the
+        // inventory gets big enough to need it. The page's ids go into a
+        // single ordered read and the first row seen for each id is its
+        // latest - the order by occurred_at desc is what makes "first
+        // seen" mean "most recent".
+        admin
+          .from("inventory_movements")
+          .select("inventory_item_id,occurred_at")
+          .in("inventory_item_id", ids)
+          .order("occurred_at", { ascending: false })
+          .limit(ids.length * MOVEMENTS_SCANNED_PER_ITEM),
+      ])
+    : [null, null];
+
   const areasByItem: Record<string, InventoryArea[]> = {};
-  if (ids.length > 0) {
-    const { data: areaRows, error: areaError } = await admin
-      .from("inventory_item_areas")
-      .select("inventory_item_id,area")
-      .in("inventory_item_id", ids);
+  if (areaResult) {
+    const { data: areaRows, error: areaError } = areaResult;
     if (areaError) {
       console.error("Inventory: area read failed:", areaError.message);
     } else {
@@ -184,21 +231,9 @@ export async function listInventoryItems(query: ItemsQuery): Promise<ItemsPayloa
     }
   }
 
-  // THE LAST MOVEMENT PER ITEM, in ONE request for the whole page.
-  //
-  // Not one query per row: at fifty rows that is fifty-one round trips
-  // and the screen becomes unusable at exactly the point the inventory
-  // gets big enough to need it. The page's ids go into a single ordered
-  // read and the first row seen for each id is its latest - the order by
-  // occurred_at desc is what makes "first seen" mean "most recent".
   const lastMovementByItem: Record<string, string> = {};
-  if (ids.length > 0) {
-    const { data: recent, error: recentError } = await admin
-      .from("inventory_movements")
-      .select("inventory_item_id,occurred_at")
-      .in("inventory_item_id", ids)
-      .order("occurred_at", { ascending: false })
-      .limit(ids.length * MOVEMENTS_SCANNED_PER_ITEM);
+  if (recentResult) {
+    const { data: recent, error: recentError } = recentResult;
     if (recentError) {
       console.error("Inventory: last movement read failed:", recentError.message);
     } else {
@@ -210,8 +245,8 @@ export async function listInventoryItems(query: ItemsQuery): Promise<ItemsPayloa
     }
   }
 
-  const { data: categories, error: catError } = await admin
-    .from("inventory_categories").select(CATEGORY_COLUMNS).order("name", { ascending: true });
+  // Issued at the top, collected here.
+  const { data: categories, error: catError } = await categoriesPromise;
   if (catError) console.error("Inventory: category read failed:", catError.message);
 
   return {
@@ -222,7 +257,7 @@ export async function listInventoryItems(query: ItemsQuery): Promise<ItemsPayloa
     total: count ?? pageRows.length,
     page: query.page,
     pageSize: query.pageSize,
-    summary: await summarize(admin),
+    summary: await summaryPromise,
     fetchedAt: new Date().toISOString(),
   };
 }

@@ -1123,6 +1123,19 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // the storage key and the 7-day dismissal are all unchanged. No
     // payment, fulfillment, account or annual module is involved.
     "lib/launchPopupRules.ts",
+    // ADMIN PERFORMANCE PHASE 2. The inventory listing issued its five
+    // reads one after another; the four that never depended on each
+    // other now leave together. Measured cause: the deployment's
+    // functions run in iad1 and the database is in eu-central-1, so each
+    // wave costs a transatlantic round trip.
+    //
+    // NOT a caching change - no store, no reuse between requests, no TTL.
+    // The same queries, in the same call, for the same session, simply
+    // overlapping, so stock and movements are exactly as fresh as they
+    // were. The RPCs, the grants, the pagination and every filter are
+    // untouched, and the responses were compared byte-for-byte across
+    // six query shapes before and after.
+    "lib/inventoryAdmin.ts",
   ];
 
   // Phase 4B4 edits ONE application module: the single canonical Stripe
