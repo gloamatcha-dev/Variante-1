@@ -8979,8 +8979,13 @@ header nav{gap:18px;font-size:12px}
 .ops-action-fields label span{
   font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--plum);
 }
+/* The select joins the inputs in ONE declaration block rather than
+   getting a lookalike of its own: a second copy is how the two drift
+   apart later. Scoped to .ops-action-fields, so the filter bar keeps
+   .ops-filter-row select and nothing outside these forms is touched. */
 .ops-action-fields input[type=text],
-.ops-action-fields input[type=url]{
+.ops-action-fields input[type=url],
+.ops-action-fields select{
   width:100%;
   min-width:0;
   padding:9px 11px;
@@ -8989,7 +8994,12 @@ header nav{gap:18px;font-size:12px}
   font:inherit;
   font-size:14px;
 }
-.ops-action-fields input:disabled{ opacity:.55; }
+/* Only the box is matched, never the control itself: the native arrow
+   and the native focus ring are what tell a select apart from a text
+   field, and the inputs here have no focus style of their own to copy. */
+.ops-action-fields select{ line-height:normal; height:auto; }
+.ops-action-fields input:disabled,
+.ops-action-fields select:disabled{ opacity:.55; }
 .ops-radio{ flex:1 1 100%; flex-direction:row !important; align-items:center; gap:9px !important; }
 .ops-radio span{ text-transform:none !important; letter-spacing:0 !important; font-size:14px !important; color:var(--ink) !important; }
 

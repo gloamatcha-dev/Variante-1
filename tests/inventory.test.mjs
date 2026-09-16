@@ -895,6 +895,44 @@ test("9b: THE 4A.1B OVERFLOW RULES ARE INTACT", () => {
   assert.match(always, /\.ops-emails\{ grid-template-columns:repeat\(2,minmax\(0,1fr\)\); \}/);
 });
 
+test("9c: the category select is styled BY the input rule, not beside it", () => {
+  // The select had no box at all next to bordered text fields. It is
+  // fixed by JOINING the input declaration block - one block, so border,
+  // height, background, padding and type cannot drift apart later - and
+  // a lookalike copy would defeat the point.
+  const always = outsideMediaQueries(css);
+  const i = always.indexOf(".ops-action-fields input[type=text],");
+  assert.ok(i >= 0, "the shared field rule is gone");
+  const rule = always.slice(i, always.indexOf("}", i) + 1);
+  assert.match(rule, /\.ops-action-fields select\{/,
+    "the select is not in the input's own declaration block");
+  for (const decl of ["border:1px solid var(--line)", "background:transparent",
+                      "padding:9px 11px", "font:inherit", "font-size:14px",
+                      "width:100%", "min-width:0"]) {
+    assert.ok(rule.includes(decl), `the shared field rule lost ${decl}`);
+  }
+
+  // Disabled parity: the select is disabled while a save is in flight.
+  assert.match(always, /\.ops-action-fields input:disabled,\s*\.ops-action-fields select:disabled\{ opacity:\.55; \}/,
+    "a disabled select no longer dims like a disabled input");
+
+  // SCOPE. The filter bar keeps its own select rule, and nothing global
+  // was restyled - every select rule in the file is scoped to one of the
+  // two admin containers.
+  assert.match(always, /\.ops-filter-row select\{/, "the filter bar lost its own select rule");
+  // Every ADMIN select rule names one of the two containers. Scoped to
+  // `.ops-` on purpose: the rest of the stylesheet has its own select
+  // rules for the contact, account, lead and launch forms, and none of
+  // them is this package's business.
+  for (const m of css.matchAll(/(^|[},])\s*([^{},]*\bselect\b[^{},]*)\{/g)) {
+    const sel = m[2].trim();
+    if (!sel.includes(".ops-")) continue;
+    assert.ok(/\.ops-action-fields|\.ops-filter-row/.test(sel),
+      `an admin select rule escaped the two containers: ${sel}`);
+  }
+});
+
+
 /* ════════════════════════════════════════════════════════════════════
    10. INVENTORY IS NOT ACCOUNTING
    ════════════════════════════════════════════════════════════════════ */
