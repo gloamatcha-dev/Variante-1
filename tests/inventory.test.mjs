@@ -777,6 +777,42 @@ test("8e: the history is shown newest first and says it cannot be edited", () =>
   assert.match(ui, /Korrekturbuchung/);
 });
 
+test("8j: A NEW ARTICLE PRESELECTS NO CATEGORY", () => {
+  const form = uiCode.slice(uiCode.indexOf("function ItemForm"), uiCode.indexOf("function ItemDialog"));
+
+  // The bug this locks out: falling back to the first option attached
+  // whichever category happened to sort first to every item filed in a
+  // hurry, and a wrong category is harder to spot later than an empty one.
+  assert.ok(!/useState\(item\?\.category_id \?\? categories\[0\]/.test(form),
+    "a new article still preselects the first category");
+  assert.ok(!form.includes("categories[0]?.id"),
+    "some other path still reaches for the first category");
+  assert.match(form, /useState\(item\?\.category_id \?\? ""\)/,
+    "a new article does not start without a category");
+
+  // Neutral placeholder, shown only while nothing is chosen and never
+  // selectable - it admits the field is empty, it is not a storable value.
+  assert.match(form, /Kategorie auswählen …/, "the placeholder is missing");
+  assert.match(form, /categoryId === "" && <option value="" disabled>/,
+    "the placeholder is either always present or selectable");
+
+  // Required stays required, and the button is the actual enforcement.
+  assert.match(form, /<select value=\{categoryId\} disabled=\{busy\} required/,
+    "the category select lost its required flag");
+  assert.ok(form.includes("categoryId.length > 0"),
+    "an article can be created without a category");
+  assert.match(form, /disabled=\{busy \|\| !valid\}/,
+    "the create button is not gated on a valid form");
+
+  // Editing is untouched: a saved item still arrives with its own.
+  assert.ok(form.includes("item?.category_id ??"),
+    "editing no longer preselects the stored category");
+
+  // A freshly created category is still the sensible selection.
+  assert.ok(form.includes("setCategoryId(created.id)"),
+    "creating a category no longer selects it");
+});
+
 test("8f: the empty state invites a first item rather than inventing one", () => {
   assert.match(ui, /Dein Inventar ist noch leer/);
   assert.match(ui, /Lege deinen ersten Artikel an/);

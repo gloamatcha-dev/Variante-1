@@ -843,7 +843,12 @@ function ItemForm({
 }) {
   const [name, setName] = useState(item?.name ?? "");
   const [sku, setSku] = useState(item?.sku ?? "");
-  const [categoryId, setCategoryId] = useState(item?.category_id ?? categories[0]?.id ?? "");
+  // A NEW ARTICLE STARTS WITHOUT A CATEGORY. Falling back to the first
+  // option looked helpful and was not: whichever category happened to
+  // sort first got silently attached to every item somebody filed in a
+  // hurry, and a wrong category is harder to notice afterwards than an
+  // empty one. Editing is unaffected - a saved item keeps its own.
+  const [categoryId, setCategoryId] = useState(item?.category_id ?? "");
   const [unit, setUnit] = useState(item?.unit ?? "");
   const [selectedAreas, setSelectedAreas] = useState<InventoryArea[]>(areas);
   const [threshold, setThreshold] = useState(
@@ -930,7 +935,13 @@ function ItemForm({
         </label>
         <label>
           <span>Kategorie *</span>
-          <select value={categoryId} disabled={busy} onChange={e => setCategoryId(e.target.value)}>
+          <select value={categoryId} disabled={busy} required
+            onChange={e => setCategoryId(e.target.value)}>
+            {/* Only while nothing is chosen, and never selectable again:
+                the placeholder is how the field admits it is empty, not
+                a value anybody may store. "Artikel anlegen" stays
+                disabled until a real category replaces it. */}
+            {categoryId === "" && <option value="" disabled>Kategorie auswählen …</option>}
             {options.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </label>

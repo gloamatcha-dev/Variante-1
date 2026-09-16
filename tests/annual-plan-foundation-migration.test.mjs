@@ -1255,6 +1255,19 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // writes nothing, and it holds no secret. Reviewed in
     // tests/admin-order-actions.test.mjs.
     "app/AdminOrderActions.tsx",
+    // PAKET 4A.2 (FINAL UI SAFETY). The item form stopped preselecting a
+    // category for a NEW article and shows a neutral placeholder until
+    // one is chosen. A data-quality fix, not a behaviour change: whichever
+    // category sorted first was being attached silently to anything filed
+    // in a hurry, and a wrong category is harder to spot afterwards than
+    // an empty one. Category stays required and "Artikel anlegen" stays
+    // disabled until one is picked - both were already enforced by the
+    // existing `valid` guard, which is byte-identical. Editing an
+    // existing article is untouched and still arrives with its stored
+    // category, and creating a category still selects it. No stock path,
+    // no booking, no RPC, no price and no migration is involved.
+    // Reviewed in test 8j of tests/inventory.test.mjs.
+    "app/AdminInventory.tsx",
   ];
   // NOTE. Both lists are about UNCOMMITTED edits to files that already
   // exist, so a file this package CREATES does not belong in either -
