@@ -45,17 +45,50 @@ onCart:()=>void;cartCount:number;menuOpen:boolean;onMenuOpenChange:(next:boolean
 }){
  const [search,setSearch]=useState(false);const [scrolled,setScrolled]=useState(false);const path=usePathname();
  const menuButtonRef=useRef<HTMLButtonElement>(null);
- useEffect(()=>{const s=()=>{setScrolled(window.scrollY>10)};window.addEventListener("scroll",s,{passive:true});s();return()=>window.removeEventListener("scroll",s)},[]);
+ // THE HEADER STOPS LISTENING WHILE THE MENU IS OPEN.
+ //
+ // The scroll lock below parks the document at 0, so this reader would
+ // see "top of page", drop .compact, and the header would change height
+ // underneath the open menu - the exact scroll-dependent wobble this
+ // whole fix is about. It also cost 8px of scroll position on every
+ // close: the header grew 56px -> 64px while locked, and Chrome's
+ // scroll anchoring then subtracted the difference from the restore.
+ // Frozen while open, both go away.
+ useEffect(()=>{if(menuOpen)return;const s=()=>{setScrolled(window.scrollY>10)};window.addEventListener("scroll",s,{passive:true});s();return()=>window.removeEventListener("scroll",s)},[menuOpen]);
  // THE OPENER GETS THE FOCUS BACK, whichever one it was. This used to
  // hand it to the header button unconditionally, which is a dead target
  // below 640px where that button is display:none - the dock opened it
  // there. Capturing document.activeElement is what <CartDrawer/> and
  // the launch popup already do.
+ // THE LOCK KEEPS THE PLACE IT LOCKED.
+ //
+ // `overflow:hidden` on the body alone is not a scroll lock on iOS
+ // Safari - the page keeps moving behind the menu there - so the body
+ // is taken out of flow at a negative offset instead, which every
+ // engine honours. That technique loses the scroll position by
+ // definition, so the offset is remembered and restored on close.
+ //
+ // scroll-behavior:smooth is suspended for that one restore: html has
+ // it globally, and without this the page ANIMATES back to where it
+ // already was, which is the visible jump the lock exists to prevent.
  useEffect(()=>{
   if(!menuOpen)return;
   const prev=document.activeElement as HTMLElement|null;
-  document.body.style.overflow="hidden";
-  return()=>{document.body.style.overflow="";prev?.focus?.()};
+  const body=document.body,html=document.documentElement;
+  const y=window.scrollY;
+  const prior={position:body.style.position,top:body.style.top,left:body.style.left,
+               right:body.style.right,width:body.style.width,overflow:body.style.overflow};
+  body.style.position="fixed";body.style.top=`-${y}px`;body.style.left="0";
+  body.style.right="0";body.style.width="100%";body.style.overflow="hidden";
+  return()=>{
+   body.style.position=prior.position;body.style.top=prior.top;body.style.left=prior.left;
+   body.style.right=prior.right;body.style.width=prior.width;body.style.overflow=prior.overflow;
+   const behavior=html.style.scrollBehavior;
+   html.style.scrollBehavior="auto";
+   window.scrollTo(0,y);
+   html.style.scrollBehavior=behavior;
+   prev?.focus?.();
+  };
  },[menuOpen]);
  // ESCAPE CLOSES WHAT COVERS THE PAGE, and hands focus back to the
  // control that opened it. The mobile menu locks body scroll and fills
@@ -100,7 +133,7 @@ onCart:()=>void;cartCount:number;menuOpen:boolean;onMenuOpenChange:(next:boolean
  // click it; the keyboard and the screen reader skip straight to the
  // header, which is where the same destinations live.
  const marqueeGroup=<div className="bb-group"><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes" tabIndex={-1}>B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes" tabIndex={-1}>B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes" tabIndex={-1}>B2B</Link><span>GLOA · SHIZUOKA, JAPAN</span><span>MATCHA IS FOR EVERYONE.</span><Link href="/for-cafes" tabIndex={-1}>B2B</Link></div>;
- return <><div className="brand-bar" aria-hidden="true"><div className="bb-track">{marqueeGroup}{marqueeGroup}</div></div><header className={scrolled?"compact":""}><button className="menu" ref={menuButtonRef} onClick={()=>onMenuOpenChange(!menuOpen)} aria-expanded={menuOpen} aria-controls="mobile-menu">{menuOpen?"Schließen":"Menü"}</button><Mark/><nav aria-label="Hauptnavigation">{visibleLinks.map(([h,l])=><Link key={h} href={h} className={(h==="/"?path===h:path===h||path.startsWith(h+"/"))?"nav-active":""}>{l}</Link>)}</nav><div className="head-actions">{SEARCH_ENABLED&&<button onClick={()=>setSearch(!search)} aria-expanded={search}>Suche</button>}<Link href="/account" className="account-link">Konto</Link><button className="bag-btn" onClick={onCart}>Warenkorb <span className="bag-count">{cartCount}</span></button></div>{SEARCH_ENABLED&&search&&<form className="search-bar" role="search" onSubmit={e=>e.preventDefault()}><label htmlFor="site-search">GLOA durchsuchen</label><input id="site-search" placeholder="Matcha, Rezepte, Cafés…"/><button>Suche</button></form>}</header>{menuOpen&&<nav id="mobile-menu" className="mobile-nav" aria-label="Mobile Navigation">{visibleLinks.map(([h,l])=><Link key={h} href={h} onClick={()=>onMenuOpenChange(false)}>{l}</Link>)}<Link href="/account" onClick={()=>onMenuOpenChange(false)}>Konto</Link></nav>}</>
+ return <><div className="brand-bar" aria-hidden="true"><div className="bb-track">{marqueeGroup}{marqueeGroup}</div></div><header className={menuOpen?"nav-open":scrolled?"compact":""}><button className="menu" ref={menuButtonRef} onClick={()=>onMenuOpenChange(!menuOpen)} aria-expanded={menuOpen} aria-controls="mobile-menu">{menuOpen?"Schließen":"Menü"}</button><Mark/><nav aria-label="Hauptnavigation">{visibleLinks.map(([h,l])=><Link key={h} href={h} className={(h==="/"?path===h:path===h||path.startsWith(h+"/"))?"nav-active":""}>{l}</Link>)}</nav><div className="head-actions">{SEARCH_ENABLED&&<button onClick={()=>setSearch(!search)} aria-expanded={search}>Suche</button>}<Link href="/account" className="account-link">Konto</Link><button className="bag-btn" onClick={onCart}>Warenkorb <span className="bag-count">{cartCount}</span></button></div>{SEARCH_ENABLED&&search&&<form className="search-bar" role="search" onSubmit={e=>e.preventDefault()}><label htmlFor="site-search">GLOA durchsuchen</label><input id="site-search" placeholder="Matcha, Rezepte, Cafés…"/><button>Suche</button></form>}</header>{menuOpen&&<nav id="mobile-menu" className="mobile-nav" aria-label="Mobile Navigation">{visibleLinks.map(([h,l])=><Link key={h} href={h} onClick={()=>onMenuOpenChange(false)}>{l}</Link>)}<Link href="/account" onClick={()=>onMenuOpenChange(false)}>Konto</Link></nav>}</>
 }
 /**
  * THE MOBILE DOCK.
@@ -158,7 +191,14 @@ menuOpen:boolean;onMenuOpenChange:(next:boolean)=>void;
 }){
 const path=usePathname();
 const isActive=(href:string)=>path===href||path.startsWith(href+"/");
-return <nav className="dock" aria-label="Schnellnavigation">
+// THE TOGGLE THAT OPENED THE MENU HAS TO STAY REACHABLE.
+// Below 640px the header's own hamburger is display:none, so this bar
+// is the ONLY menu control - and at z-index 34 it sat behind the
+// opaque full-screen menu, which left an open menu with no close
+// control a thumb could reach. While the menu is open the bar comes
+// forward; the menu reserves --dock-space below its last link so
+// nothing hides under it.
+return <nav className={"dock"+(menuOpen?" dock-over-menu":"")} aria-label="Schnellnavigation">
 <div className="dock-inner">
 {/* THE SAME DRAWER THE HEADER OPENS. aria-controls points at the one
     <nav id="mobile-menu"> the header renders; nothing here duplicates

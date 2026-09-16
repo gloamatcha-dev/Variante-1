@@ -9279,6 +9279,15 @@ header nav{gap:18px;font-size:12px}
        the launch popup (60) cover it for the same reason. */
     z-index:34;
   }
+  /* ...EXCEPT WHILE THE MENU IT OPENS IS OPEN.
+     Below 640px the header's own hamburger is display:none, so this bar
+     is the ONLY menu control - and at 34 it sat behind the opaque menu.
+     elementFromPoint on its centre returned <nav#mobile-menu>, which
+     left an open menu with no close control a thumb could reach and
+     navigating away as the only exit. 36 is one above the menu's 35 and
+     still below the cart drawer (50) and the launch popup (60), which
+     must keep covering it. */
+  .dock.dock-over-menu{z-index:36}
   .dock-inner{
     display:grid;
     grid-template-columns:repeat(5,minmax(0,1fr));
@@ -9757,4 +9766,110 @@ header nav{gap:18px;font-size:12px}
   padding:0;
   background:transparent;
   cursor:pointer;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   MOBILE NAVIGATION — ONE LAYOUT STATE, WHATEVER THE SCROLL DID
+
+   THE BUG. The open menu inherited whichever state the last scroll
+   left behind, so it had three of them. The header is sticky with a
+   scroll-driven .compact class (64px -> 56px past 10px of scroll),
+   and the .brand-bar above it is in normal flow, so:
+
+     at the page top   header 64px sitting at y=32, the brand bar
+                       still visible above it, and the first menu
+                       link UNDERNEATH the header - measured, not
+                       guessed: "Startseite" was covered.
+     scrolled a little header 64px at y=28, brand bar half gone.
+     scrolled down     header 56px at y=0, brand bar gone.
+
+   The menu itself was always inset:0 and always right; what moved was
+   the opaque header layered over its top edge at z-index 40, one
+   above the menu's 35. That is the "the logo appears again at the
+   top and the menu shifts" report, and it is a layering problem, not
+   a menu problem.
+
+   THE FIX, in two halves. Chrome.tsx stops applying .compact while
+   the menu is open and applies .nav-open instead, so the header has
+   exactly ONE state to be in. Here that state is pinned with
+   position:fixed, so it no longer depends on the brand bar's place in
+   the flow or on where the document happens to be scrolled.
+
+   Nothing is redesigned: the height is the header's own base mobile
+   height, the type, colour and padding are untouched, and above
+   800px - where there is no mobile menu to open - not one
+   declaration below applies.
+   ══════════════════════════════════════════════════════════════ */
+
+:root{
+  /* The mobile header's height WHILE THE MENU IS OPEN, named once. The
+     open menu starts exactly below it, and a second copy of the number
+     is how a link would end up back underneath the bar.
+
+     It is the COMPACT height on purpose, not the 64px base. The header
+     animates height (transition:height .25s), and on close it is back
+     in flow - so a 64px open state shrinking to 56px moved 8px of
+     content above the viewport, and Chrome's scroll anchoring quietly
+     subtracted those 8px from the restored scroll position. Measured:
+     3000 restored exactly on the first frame, then drifted to 2992
+     across the transition. Matching the compact height means the
+     header's height never changes on open or close, so there is
+     nothing for anchoring to compensate for. */
+  --mobile-header-h:56px;
+}
+
+@media (max-width:800px){
+  header.nav-open{
+    position:fixed;
+    top:0;
+    left:0;
+    right:0;
+    /* The notch is padding, not height: box-sizing:border-box is
+       global, so the content box stays exactly --mobile-header-h and
+       the bar grows only by the inset it has to clear. */
+    height:calc(var(--mobile-header-h) + env(safe-area-inset-top,0px));
+    padding-top:env(safe-area-inset-top,0px);
+  }
+
+  /* BELOW THE HEADER, NEVER UNDER IT. This replaces the inset:0 above
+     - the menu still fills the width and reaches the bottom edge, but
+     its top edge starts where the header ends, so no link can be
+     covered at any scroll position. */
+  .mobile-nav{
+    top:calc(var(--mobile-header-h) + env(safe-area-inset-top,0px));
+    left:0;
+    right:0;
+    bottom:0;
+    padding-bottom:calc(env(safe-area-inset-bottom,0px) + 24px);
+  }
+
+  /* DYNAMIC VIEWPORT, WHERE IT EXISTS. A fixed bottom:0 is pinned to
+     the LAYOUT viewport, so on mobile Safari the last link can sit
+     behind the browser chrome while it is shown. 100dvh is the height
+     actually visible right now and follows the bar in and out; the
+     bottom:0 above stays as the fallback for engines without it. */
+  @supports (height:100dvh){
+    .mobile-nav{
+      height:calc(100dvh - var(--mobile-header-h) - env(safe-area-inset-top,0px));
+      bottom:auto;
+    }
+  }
+}
+
+@media (max-width:640px){
+  /* THE ONLY CLOSE CONTROL A THUMB HAS DOWN HERE. The header's
+     hamburger is display:none below 640px, so the dock is it - and at
+     z-index 34 it was behind the opaque menu, measured with
+     elementFromPoint as BLOCKED by <nav#mobile-menu>. An open menu
+     with no reachable close control leaves navigating away as the
+     only exit. 36 is one above the menu and still below the cart
+     drawer (50) and the launch popup (60), which must keep covering
+     it. */
+  /* The bar itself comes forward in the dock's own section, where every
+     other rule for it lives. Since it is now in front, the menu reserves
+     its space the same way the footer already does - one shared
+     --dock-space, so the two cannot drift apart. */
+  .mobile-nav{
+    padding-bottom:calc(var(--dock-space) + 18px);
+  }
 }

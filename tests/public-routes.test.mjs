@@ -270,8 +270,15 @@ test("header: Escape closes the mobile menu and gives focus back", () => {
   // The mobile menu locks body scroll and covers the page, so a visitor
   // who cannot dismiss it is left with a frozen page behind it. The cart
   // drawer already answered Escape; the header did not.
-  assert.match(chrome, /document\.body\.style\.overflow="hidden"/);
-  assert.match(chrome, /document\.body\.style\.overflow=""/);
+  // THE LOCK IS position:fixed PLUS A REMEMBERED OFFSET, not overflow
+  // alone: body{overflow:hidden} does not stop the page moving on iOS
+  // Safari. It still locks and it still releases - and it now puts back
+  // what it found rather than blanking the property, so a lock taken
+  // while another drawer held one cannot clear that drawer's.
+  assert.match(chrome, /body\.style\.overflow="hidden"/);
+  assert.match(chrome, /body\.style\.overflow=prior\.overflow/);
+  assert.match(chrome, /body\.style\.position="fixed"/);
+  assert.match(chrome, /window\.scrollTo\(0,y\)/);
   assert.match(chrome, /e\.key!=="Escape"/);
   assert.match(chrome, /if\(menuOpen\)onMenuOpenChange\(false\)/);
   assert.match(chrome, /else setSearch\(false\)/);

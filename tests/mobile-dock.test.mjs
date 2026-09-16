@@ -28,7 +28,17 @@ const dockSource = chrome.slice(chrome.indexOf("const dockIcons"), chrome.indexO
 // The doc comments quote the markup they describe, so a count of
 // elements has to read the code without them.
 const chromeCode = chrome.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-const rules = css.slice(css.indexOf("THE MOBILE DOCK"));
+// THE DOCK'S OWN RULES, AND NOT THE SECTION AFTER IT. This used to run
+// to the end of the file, so the mobile-navigation section appended
+// below it - which legitimately carries an 800px block for the HEADER -
+// was read as the dock reaching into tablet widths. Bounded, the
+// assertions below say exactly what they always meant to.
+const DOCK_SECTION_END = "MOBILE NAVIGATION — ONE LAYOUT STATE";
+const rules = (() => {
+  const from = css.indexOf("THE MOBILE DOCK");
+  const to = css.indexOf(DOCK_SECTION_END);
+  return to > from ? css.slice(from, to) : css.slice(from);
+})();
 const rule = name => {
   const at = rules.indexOf(name);
   assert.notEqual(at, -1, `missing rule: ${name}`);
@@ -343,8 +353,14 @@ test("11: the root limits overscroll and the canvas matches the footer", () => {
   // The only body overflow lock in the repo is the JS one the drawers
   // set while they are open, and it is always paired with a release.
   const chromeJs = readFileSync(new URL("../app/Chrome.tsx", import.meta.url), "utf-8");
-  assert.match(chromeJs, /document\.body\.style\.overflow="hidden"/);
-  assert.match(chromeJs, /document\.body\.style\.overflow=""/);
+  // The menu's lock is position:fixed plus a remembered offset now -
+  // overflow:hidden alone is not a scroll lock on iOS Safari - and the
+  // release restores what it found instead of blanking it. Still a JS
+  // lock, still always paired, which is what this test is about.
+  assert.match(chromeJs, /body\.style\.overflow="hidden"/);
+  assert.match(chromeJs, /body\.style\.overflow=prior\.overflow/);
+  assert.match(chromeJs, /body\.style\.position="fixed"/);
+  assert.match(chromeJs, /body\.style\.position=prior\.position/);
 
   // Drawers keep their own scroll rather than chaining it to the page
   // behind them.
