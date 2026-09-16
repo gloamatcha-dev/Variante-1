@@ -11,6 +11,8 @@ import {
   LAUNCH_POPUP_DISMISS_MS,
   LAUNCH_POPUP_DELAY_MS,
   LAUNCH_POPUP_SCROLL_RATIO,
+  LAUNCH_POPUP_SETTLE_MS,
+  overlayBlocksLaunchPopup,
 } from "../lib/launchPopupRules.ts";
 
 /**
@@ -144,10 +146,18 @@ test("1e: the triggers are 8s OR 30% scroll, first one only", () => {
   assert.match(popup, /LAUNCH_POPUP_SCROLL_RATIO as SCROLL_RATIO/);
   // A single latch, so the two triggers can never both open it.
   assert.match(popup, /if \(done\) return;\s*done = true;/);
-  assert.match(popup, /window\.clearTimeout\(timer\);\s*window\.removeEventListener\("scroll", onScroll\);\s*setOpen\(true\);/);
+  // The trigger marks the panel OWED. Whether it may be SHOWN is a
+  // separate decision - see the overlay coordination tests below - so a
+  // timer coming due behind an open menu is deferred rather than landing
+  // on top of it.
+  assert.match(popup, /window\.clearTimeout\(timer\);\s*window\.removeEventListener\("scroll", onScroll\);[\s\S]{0,120}?setDue\(true\);/);
   // It is closed on the first render, so it can never flash on paint.
   assert.match(popup, /useState\(false\)/);
-  assert.ok(!popup.includes("setOpen(true)\n"), "it opens outside the trigger");
+  // STILL EXACTLY ONE PLACE THAT OPENS IT, which is what this assertion
+  // has always been about - that place is now the coordination effect
+  // rather than the trigger itself.
+  assert.equal((popup.match(/setOpen\(true\)/g) || []).length, 1, "it opens from more than one place");
+  assert.equal((popup.match(/setDue\(true\)/g) || []).length, 1, "it is armed from more than one place");
 });
 
 test("1f: dismissal is one local timestamp, good for 7 days, and nothing else", () => {
@@ -187,8 +197,10 @@ test("1g: it stays away from /launch and from task flows", () => {
                        "for-cafes", "partnerships", "contact", "rezepte"]) {
     assert.equal(suppressesLaunchPopup(route), false, `it is suppressed on /${route}`);
   }
-  // The shell passes the route in, so the decision is made once.
-  assert.match(site, /<LaunchPopup route=\{route\}\/>/);
+  // The shell passes the route in, so the decision is made once - and
+  // the overlay state alongside it, so the panel can never cover a menu
+  // or a cart the visitor already opened.
+  assert.match(site, /<LaunchPopup route=\{route\} menuOpen=\{menuOpen\} cartOpen=\{cartOpen\}\/>/);
 });
 
 test("1h: closed, it renders NOTHING - the page underneath is untouched", async () => {
@@ -201,7 +213,7 @@ test("1h: closed, it renders NOTHING - the page underneath is untouched", async 
   }
   // It is the LAST child of the shell, after the footer, the mobile
   // dock and the cart - so mounting it cannot move anything above it.
-  assert.match(site, /<Footer\/><MobileDock [^/]*\/><CartDrawer open=\{cartOpen\} onClose=\{closeCart\}\/><LaunchPopup route=\{route\}\/><\/>/);
+  assert.match(site, /<Footer\/><MobileDock [^/]*\/><CartDrawer open=\{cartOpen\} onClose=\{closeCart\}\/><LaunchPopup route=\{route\} menuOpen=\{menuOpen\} cartOpen=\{cartOpen\}\/><\/>/);
   // The homepage still renders exactly the sections it did.
   assert.deepEqual([...home.matchAll(/<section class="([a-z-]+)"/g)].map(m => m[1]),
     ["hero", "countdown", "prelaunch", "daily", "glance", "community", "brand-note"]);
@@ -350,4 +362,119 @@ test("3: the popup knows nothing about prices, and prices nothing about the popu
   // No shared machine was built for two unrelated behaviours.
   assert.ok(!site.includes("launchState") && !site.includes("prelaunchState"),
     "a shared state machine was introduced");
+});
+
+/* ════════════════════════════════════════════════════════════════════
+   4. ONE SCREEN, ONE OVERLAY
+
+   THE BUG THIS SECTION EXISTS FOR. The popup arms itself on a timer, so
+   it was free to land on top of a mobile menu or a cart drawer the
+   visitor had already opened - two modals at once, the second one
+   interrupting a deliberate action with an offer nobody asked for.
+   Measured at 393x852: open the menu, wait out the 8s, and .lp-backdrop
+   appeared over the navigation.
+
+   Fixed as a state guard rather than a z-index: a z-index only decides
+   which of the two wins, and both would still be there. The behaviour
+   itself was measured in a real browser at 393x852, 390x844 and
+   430x932; what is pinned here is the mechanism.
+   ════════════════════════════════════════════════════════════════════ */
+
+test("4: an overlay that owns the screen blocks the panel", () => {
+  assert.equal(overlayBlocksLaunchPopup({}), false, "nothing open still blocks");
+  assert.equal(overlayBlocksLaunchPopup({ menuOpen: false, cartOpen: false }), false,
+    "both closed still blocks");
+  assert.equal(overlayBlocksLaunchPopup({ menuOpen: true }), true, "the mobile menu does not block");
+  assert.equal(overlayBlocksLaunchPopup({ cartOpen: true }), true, "the cart drawer does not block");
+  assert.equal(overlayBlocksLaunchPopup({ menuOpen: true, cartOpen: true }), true,
+    "both open does not block");
+  // Still a pure leaf: the predicate takes the state, it does not reach
+  // for a DOM node or a global to find it.
+  const rules = readFileSync(new URL("../lib/launchPopupRules.ts", import.meta.url), "utf-8");
+  assert.ok(!rules.includes("document."), "the rules leaf reached for the DOM");
+  assert.ok(!rules.includes("window."), "the rules leaf reached for a global");
+  assert.ok(!/^import /m.test(rules), "the rules leaf gained an import");
+});
+
+test("4b: BLOCKED IS NOT CANCELLED - the panel is held, not lost", () => {
+  // The whole point. `due` survives the block, so a timer that came due
+  // behind an open menu is offered once the screen is free rather than
+  // being thrown away.
+  assert.match(popup, /const \[due, setDue\] = useState\(false\)/, "there is no owed state");
+  assert.match(popup, /if \(blocked\) \{ heldRef\.current = true; return; \}/,
+    "a blocked panel is not held");
+  // Blocking must not clear `due` - only a dismissal and a route change do.
+  const guard = popup.slice(popup.indexOf("if (!due || open || shownRef.current) return;"));
+  const effect = guard.slice(0, guard.indexOf("}, [due, open, blocked, route]);"));
+  assert.ok(!effect.includes("setDue(false)"), "being blocked throws the owed panel away");
+});
+
+test("4c: the panel can only be shown when nothing else owns the screen", () => {
+  // One place sets open, and it is behind the guard.
+  assert.equal((popup.match(/setOpen\(true\)/g) || []).length, 1);
+  const effect = popup.slice(popup.indexOf("if (!due || open || shownRef.current) return;"),
+                             popup.indexOf("}, [due, open, blocked, route]);"));
+  assert.ok(effect.indexOf("if (blocked)") < effect.indexOf("setOpen(true)"),
+    "the panel is shown before the block is checked");
+  assert.ok(effect.includes("suppressesLaunchPopup(route)"),
+    "a held panel could still surface on a route that suppresses it");
+  // And the shell actually hands it the state to check.
+  assert.match(popup, /overlayBlocksLaunchPopup\(\{ menuOpen, cartOpen \}\)/,
+    "the component does not consult the overlay rule");
+});
+
+test("4d: only a panel that WAITED gets the settle pause", () => {
+  // The 8s/30% contract is unchanged for the normal path; the pause is
+  // for the handover, where the menu is restoring body.style and
+  // scrolling back in the same commit.
+  assert.equal(LAUNCH_POPUP_DELAY_MS, 8000, "the trigger timing changed");
+  assert.equal(LAUNCH_POPUP_SCROLL_RATIO, 0.3, "the scroll trigger changed");
+  assert.ok(LAUNCH_POPUP_SETTLE_MS > 0 && LAUNCH_POPUP_SETTLE_MS <= 1500,
+    "the settle pause is not a sane handover delay");
+  assert.match(popup, /const wait = heldRef\.current \? SETTLE_MS : 0;/,
+    "an unblocked panel was given the settle delay too");
+});
+
+test("4e: it still gets exactly one appearance per page", () => {
+  assert.match(popup, /if \(!due \|\| open \|\| shownRef\.current\) return;/,
+    "the once-per-page latch is gone, so it could reopen after a dismissal");
+  assert.match(popup, /shownRef\.current = true; setOpen\(true\)/,
+    "showing the panel does not spend its one appearance");
+  // A dismissal clears BOTH, so nothing is left owed behind it.
+  const close = popup.slice(popup.indexOf("const close = useCallback"));
+  assert.ok(close.slice(0, close.indexOf("}, [])")).includes("setDue(false)"),
+    "a dismissed panel is still owed and could come back");
+});
+
+test("4f: a new route is a new decision", () => {
+  // Without this a panel still owed from the previous page would land the
+  // instant the next one mounted - including on a route that suppresses
+  // it entirely.
+  const arming = popup.slice(popup.indexOf("if (suppressesLaunchPopup(route)) return;"));
+  assert.ok(arming.slice(0, arming.indexOf("}, [route]);")).includes("setDue(false)"),
+    "an owed panel survives navigation");
+});
+
+test("4g: no second scroll lock, and no z-index war", () => {
+  // The guard means the popup can never mount while the menu or the cart
+  // holds the body, so there is only ever one lock in force.
+  assert.equal((popup.match(/document\.body\.style\.overflow = "hidden"/g) || []).length, 1,
+    "the popup locks the body more than once");
+  assert.equal((popup.match(/document\.body\.style\.overflow = ""/g) || []).length, 1,
+    "the popup's lock is not paired with exactly one release");
+  // The fix is state, not layering: no z-index was touched for this.
+  const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf-8");
+  assert.match(css, /\.lp-backdrop\{[^}]*z-index:60/, "the popup's z-index was changed");
+  assert.match(css, /\.mobile-nav\{[^}]*z-index:35/, "the menu's z-index was changed");
+  assert.match(css, /\.cart-backdrop\{[^}]*z-index:50/, "the cart's z-index was changed");
+});
+
+test("4h: the panel's own look and modal contract are untouched", () => {
+  // This package coordinated WHEN it appears, nothing about what it is.
+  assert.match(popup, /className="lp-backdrop"/);
+  assert.match(popup, /className="lp-panel"/);
+  assert.match(popup, /role="dialog" aria-modal="true"/);
+  assert.match(popup, /e\.key === "Escape"/);
+  assert.match(popup, /aria-label="Popup schließen"/);
+  assert.match(popup, /ZUR LAUNCH LIST/);
 });

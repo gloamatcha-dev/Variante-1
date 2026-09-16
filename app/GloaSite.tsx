@@ -2761,7 +2761,7 @@ else if(route==="partnerships")page=<Partnerships/>;
 else if(["impressum","datenschutz","agb","widerruf","versand"].includes(route))page=<Legal route={route}/>;
 else page=<main className="not-found"><h1>404</h1><Link href="/">Zurück zu GLOA →</Link></main>;
 
-return <><Header onCart={openCart} cartCount={cart.totalCount} menuOpen={menuOpen} onMenuOpenChange={setMenuOpen}/>{page}<Footer/><MobileDock onCart={openCart} cartCount={cart.totalCount} cartOpen={cartOpen} menuOpen={menuOpen} onMenuOpenChange={setMenuOpen}/><CartDrawer open={cartOpen} onClose={closeCart}/><LaunchPopup route={route}/></>
+return <><Header onCart={openCart} cartCount={cart.totalCount} menuOpen={menuOpen} onMenuOpenChange={setMenuOpen}/>{page}<Footer/><MobileDock onCart={openCart} cartCount={cart.totalCount} cartOpen={cartOpen} menuOpen={menuOpen} onMenuOpenChange={setMenuOpen}/><CartDrawer open={cartOpen} onClose={closeCart}/><LaunchPopup route={route} menuOpen={menuOpen} cartOpen={cartOpen}/></>
 }
 
 /**

@@ -42,6 +42,48 @@ export function suppressesLaunchPopup(route: string): boolean {
 }
 
 /**
+ * ONE SCREEN, ONE OVERLAY.
+ *
+ * The popup arms itself on a timer, so it was free to land on top of a
+ * mobile menu or a cart drawer the visitor had already opened - two
+ * modals at once, the second one interrupting a deliberate action with
+ * an offer nobody asked for. A z-index would only decide which of the
+ * two won; this decides that there is never a second one.
+ *
+ * Takes the shell's EXISTING overlay state rather than introducing its
+ * own: app/GloaSite.tsx already holds menuOpen and cartOpen and already
+ * hands both to the header, the dock and the drawer.
+ *
+ * Blocking is not cancelling. app/LaunchPopup.tsx keeps the fact that
+ * the panel is owed and offers it once the screen is free again, so a
+ * timer that came due behind a menu is deferred rather than lost.
+ */
+export function overlayBlocksLaunchPopup(
+  overlays: { menuOpen?: boolean; cartOpen?: boolean }
+): boolean {
+  return Boolean(overlays.menuOpen || overlays.cartOpen);
+}
+
+/**
+ * How long to wait after the last overlay closes before a HELD panel
+ * appears.
+ *
+ * Only ever applied to a panel that was actually blocked - an unblocked
+ * one still opens the moment its trigger fires, so the 8s/30% contract
+ * above is unchanged. The pause exists for two concrete reasons:
+ *
+ *   the scroll lock  the menu restores body.style and calls scrollTo on
+ *                    close. A panel mounting in that same commit would
+ *                    set overflow:hidden while the menu was putting it
+ *                    back, and whichever ran last would win - a leaked
+ *                    lock in one order, a scroll jump in the other.
+ *   the eye          a panel appearing in the same frame the menu
+ *                    disappears reads as a flicker of one thing rather
+ *                    than the arrival of another.
+ */
+export const LAUNCH_POPUP_SETTLE_MS = 600;
+
+/**
  * Whether a stored dismissal is still in force.
  *
  * `raw` is whatever came out of localStorage - null, a number, or the

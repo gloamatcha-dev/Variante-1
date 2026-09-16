@@ -54,8 +54,10 @@ import {
   LAUNCH_POPUP_STORAGE_KEY as STORAGE_KEY,
   LAUNCH_POPUP_DELAY_MS as DELAY_MS,
   LAUNCH_POPUP_SCROLL_RATIO as SCROLL_RATIO,
+  LAUNCH_POPUP_SETTLE_MS as SETTLE_MS,
   suppressesLaunchPopup,
   launchPopupDismissed,
+  overlayBlocksLaunchPopup,
 } from "../lib/launchPopupRules";
 
 /** Storage can throw (Safari private mode, blocked cookies). A failure
@@ -77,15 +79,33 @@ function rememberDismissal(now: number): void {
   }
 }
 
-export function LaunchPopup({ route }: { route: string }) {
+export function LaunchPopup({ route, menuOpen = false, cartOpen = false }: {
+  route: string;
+  /** The shell's existing overlay state. See overlayBlocksLaunchPopup. */
+  menuOpen?: boolean;
+  cartOpen?: boolean;
+}) {
+  // OWED AND VISIBLE ARE TWO DIFFERENT THINGS.
+  //
+  // `due` is "the trigger fired and this panel is owed"; `open` is "it is
+  // on the screen". They used to be one flag, which is why a timer that
+  // came due behind an open menu put the panel straight over it. Keeping
+  // them apart is what lets the panel be HELD rather than lost.
+  const [due, setDue] = useState(false);
   // Starts closed on the server AND on the first client render, so the
   // markup both sides produce is identical and hydration cannot mismatch.
   const [open, setOpen] = useState(false);
   const closeRef = useRef<HTMLButtonElement>(null);
+  // Its one appearance per page, and whether it ever had to wait.
+  const shownRef = useRef(false);
+  const heldRef = useRef(false);
+
+  const blocked = overlayBlocksLaunchPopup({ menuOpen, cartOpen });
 
   const close = useCallback(() => {
     rememberDismissal(Date.now());
     setOpen(false);
+    setDue(false);
   }, []);
 
   // ── ARMING ──────────────────────────────────────────────────
@@ -99,7 +119,8 @@ export function LaunchPopup({ route }: { route: string }) {
       done = true;
       window.clearTimeout(timer);
       window.removeEventListener("scroll", onScroll);
-      setOpen(true);
+      // Owed, not shown. Whether it may be shown is decided below.
+      setDue(true);
     };
     const onScroll = () => {
       const scrollable = document.documentElement.scrollHeight - window.innerHeight;
@@ -112,8 +133,32 @@ export function LaunchPopup({ route }: { route: string }) {
       done = true;
       window.clearTimeout(timer);
       window.removeEventListener("scroll", onScroll);
+      // A NEW PAGE IS A NEW DECISION. Without this a panel still owed
+      // from the previous route would land the instant the next one
+      // mounted - including on a route that suppresses it entirely.
+      // The new route arms its own trigger a line above.
+      setDue(false);
     };
   }, [route]);
+
+  // ── ONE SCREEN, ONE OVERLAY ─────────────────────────────────
+  //
+  // The only place `open` is ever set to true. While the mobile menu or
+  // the cart drawer owns the screen this holds - `due` stays true, so
+  // nothing is lost - and it offers the panel once the screen is free.
+  //
+  // shownRef keeps the once-per-page contract: after a dismissal `due`
+  // is false anyway, and this must not re-open behind it either way.
+  useEffect(() => {
+    if (!due || open || shownRef.current) return;
+    if (suppressesLaunchPopup(route)) return;
+    if (blocked) { heldRef.current = true; return; }
+    // Only a panel that actually waited gets the settle pause; one that
+    // was never blocked keeps the timing it always had.
+    const wait = heldRef.current ? SETTLE_MS : 0;
+    const t = window.setTimeout(() => { shownRef.current = true; setOpen(true); }, wait);
+    return () => window.clearTimeout(t);
+  }, [due, open, blocked, route]);
 
   // ── THE MODAL CONTRACT, THE WAY THE CART DRAWER DOES IT ──────
   useEffect(() => {

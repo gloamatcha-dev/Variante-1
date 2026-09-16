@@ -1113,6 +1113,16 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // checkout, fulfillment or annual path reads any of it.
     // Reviewed in tests/ssr-product-content.test.mjs.
     "lib/catalogProducts.ts",
+    // MOBILE NAVIGATION, OVERLAY COORDINATION. The launch popup's rules
+    // leaf gains one predicate and one constant: whether another overlay
+    // owns the screen, and how long a HELD panel waits after it closes.
+    // The popup armed itself on a timer, so it could land on top of a
+    // mobile menu or a cart drawer the visitor had already opened. Still
+    // a pure leaf - no imports, no clock, no DOM, asserted directly in
+    // tests/launch-popup-and-prices.test.mjs - and the 8s/30% triggers,
+    // the storage key and the 7-day dismissal are all unchanged. No
+    // payment, fulfillment, account or annual module is involved.
+    "lib/launchPopupRules.ts",
   ];
 
   // Phase 4B4 edits ONE application module: the single canonical Stripe
@@ -1268,6 +1278,17 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // no booking, no RPC, no price and no migration is involved.
     // Reviewed in test 8j of tests/inventory.test.mjs.
     "app/AdminInventory.tsx",
+    // MOBILE NAVIGATION, OVERLAY COORDINATION. The launch popup splits
+    // "owed" from "visible": the timer now marks the panel due, and a
+    // separate guard shows it only when neither the mobile menu nor the
+    // cart drawer owns the screen. Blocking holds it rather than losing
+    // it, so nothing about WHAT the panel is changes - the copy, the
+    // markup, the dialog contract, the 8s/30% triggers and the 7-day
+    // dismissal are all untouched, and section 4 of
+    // tests/launch-popup-and-prices.test.mjs asserts that directly. It
+    // is a marketing panel: no payment, fulfillment, account or annual
+    // module is involved.
+    "app/LaunchPopup.tsx",
   ];
   // NOTE. Both lists are about UNCOMMITTED edits to files that already
   // exist, so a file this package CREATES does not belong in either -
