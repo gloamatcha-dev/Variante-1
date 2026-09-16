@@ -3,6 +3,10 @@ import { useCallback, useEffect, useState } from "react";
 import { AdminOrders } from "./AdminOrders";
 import { AdminInventory } from "./AdminInventory";
 import { WAITLIST_FILTERS, type WaitlistFilter } from "../lib/adminWaitlistQuery";
+import {
+  ADMIN_DESKTOP_MEDIA_QUERY,
+  ADMIN_DESKTOP_ONLY_COPY,
+} from "../lib/adminViewport.ts";
 
 /**
  * THE PRIVATE LAUNCH LIST OVERVIEW.
@@ -105,6 +109,61 @@ function consentShort(version: string): string {
   return version.slice(-6);
 }
 
+/**
+ * IS THIS A DESKTOP? null UNTIL THE CLIENT HAS ACTUALLY LOOKED.
+ *
+ * Three states, and the third is the one that matters:
+ *
+ *   null   nobody has measured yet - the server render and the FIRST
+ *          client render. Both produce the same markup, so there is no
+ *          hydration mismatch, and nothing is fetched or flashed.
+ *   false  a small viewport. The blocker, and no admin data.
+ *   true   the operations screen, exactly as before.
+ *
+ * matchMedia rather than window.innerWidth: the browser evaluates the
+ * same query the stylesheet would, it reports changes without a resize
+ * listener of our own, and there is no timeout anywhere - the value is
+ * either known or honestly unknown.
+ */
+function useIsAdminDesktop(): boolean | null {
+  const [isDesktop, setIsDesktop] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    // Guarded because this file also renders on the server, where
+    // matchMedia does not exist.
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia(ADMIN_DESKTOP_MEDIA_QUERY);
+    const apply = () => setIsDesktop(mq.matches);
+    apply();
+    // Resizing across the boundary switches the screen immediately -
+    // no refresh, in either direction.
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+
+  return isDesktop;
+}
+
+/**
+ * What a viewport below the minimum gets INSTEAD of the admin.
+ *
+ * Its own screen rather than the admin with things hidden: nothing
+ * operational is rendered, so there is nothing to reveal with a
+ * stylesheet. No public header, no footer, no cart, no launch popup -
+ * this is the internal surface, not the shop.
+ */
+function AdminDesktopOnly() {
+  return (
+    <main className="ops ops-desktop-only">
+      <div className="ops-desktop-only-card">
+        <p className="ops-eyebrow">{ADMIN_DESKTOP_ONLY_COPY.eyebrow}</p>
+        <h1 className="ops-desktop-only-title">{ADMIN_DESKTOP_ONLY_COPY.title}</h1>
+        <p className="ops-desktop-only-body">{ADMIN_DESKTOP_ONLY_COPY.body}</p>
+      </div>
+    </main>
+  );
+}
+
 export function AdminOverview() {
   // WHICH SECTION IS OPEN. The waitlist screen this file has always
   // been is now one of four, and it is unchanged - it simply renders
@@ -112,6 +171,10 @@ export function AdminOverview() {
   // the navigation as coming and are not clickable, because a tab that
   // opens nothing is worse than a tab that says it is not here yet.
   // Inventory stopped being one of those in Paket 4A.2.
+  // BEFORE ANY ADMIN STATE. Whether this viewport may operate the admin
+  // decides whether the data below is ever asked for.
+  const isDesktop = useIsAdminDesktop();
+
   const [view, setView] = useState<"overview" | "orders" | "inventory" | "waitlist">("overview");
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [email, setEmail] = useState("");
@@ -157,6 +220,13 @@ export function AdminOverview() {
   // visitor who navigates away mid-request does not have state written
   // into an unmounted component.
   useEffect(() => {
+    // NOT A REQUEST UNTIL THIS VIEWPORT MAY OPERATE THE ADMIN.
+    //
+    // The blocker is not a stylesheet over loaded content: below the
+    // minimum width the probe never runs, so no admin business data is
+    // requested and none is in the page to be revealed. `null` waits
+    // too - an unresolved viewport fetches nothing either.
+    if (isDesktop !== true) return;
     let cancelled = false;
     (async () => {
       try {
@@ -184,7 +254,7 @@ export function AdminOverview() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [isDesktop]);
 
   const submitLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -232,6 +302,21 @@ export function AdminOverview() {
     setPage(merged.page);
     void load(merged);
   };
+
+  // ── THE VIEWPORT GATE, BEFORE EVERY OTHER BRANCH ────────────
+  //
+  // Ordered first on purpose. Below the minimum nothing operational is
+  // reached: not the login form (there is nothing to sign in TO here),
+  // not the identity, not a tab, not a count. An existing session makes
+  // no difference - a valid cookie on a phone still gets this screen.
+  if (isDesktop === false) return <AdminDesktopOnly />;
+
+  // Viewport not measured yet: the server render and the first client
+  // render both land here, identical, so hydration matches. Neutral and
+  // minimal rather than a flash of Orders.
+  if (isDesktop === null) {
+    return <main className="ops" aria-busy="true" />;
+  }
 
   if (signedIn === null) {
     return <main className="ops"><p className="ops-loading">Wird geladen…</p></main>;

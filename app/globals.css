@@ -9913,3 +9913,47 @@ header nav{gap:18px;font-size:12px}
   .ops-who-mail{ display:none; }
   .ops-who{ align-items:flex-end; }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   THE ADMIN IS A DESKTOP TOOL (4A.2B-1, desktop-only)
+
+   Below lib/adminViewport.ts's minimum width the operations screen is
+   not rendered at all - the component returns this instead. So there is
+   no admin markup here to hide, and these rules style a screen rather
+   than conceal one.
+
+   The visual language is the admin's own: cream ground, the existing
+   eyebrow, the same title weight and letter-spacing as .ops-title, and
+   the plum used for quiet text elsewhere. No new colour, no new face.
+
+   NOT A SECURITY BOUNDARY. A viewport is a hint the client supplies;
+   every real gate is on the server. See lib/adminViewport.ts.
+   ══════════════════════════════════════════════════════════════ */
+
+.ops-desktop-only{
+  min-height:100svh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:32px 6vw;
+}
+.ops-desktop-only-card{
+  max-width:34rem;
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+}
+.ops-desktop-only-title{
+  margin:0;
+  font-size:clamp(26px,6vw,34px);
+  font-weight:800;
+  letter-spacing:-.035em;
+  line-height:1.1;
+}
+.ops-desktop-only-body{
+  margin:0;
+  font-size:var(--type-body);
+  line-height:1.55;
+  color:var(--plum);
+  overflow-wrap:anywhere;
+}

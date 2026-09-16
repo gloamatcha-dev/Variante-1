@@ -16,6 +16,12 @@ import {
   issueAdminSession,
   readAdminSession,
 } from "../lib/adminSession.ts";
+import {
+  ADMIN_DESKTOP_MEDIA_QUERY,
+  ADMIN_DESKTOP_ONLY_COPY,
+  ADMIN_MIN_DESKTOP_WIDTH,
+  isAdminDesktopWidth,
+} from "../lib/adminViewport.ts";
 
 /**
  * 4A.2B-1 — WHO AN ADMIN IS, AND WHAT THEY MAY DO.
@@ -51,6 +57,7 @@ const sessionDeps = read("lib/adminSessionDeps.ts");
 const sessionRoute = read("app/api/admin/session/route.ts");
 const shell = read("app/AdminOverview.tsx");
 const css = read("app/globals.css");
+const viewportLib = read("lib/adminViewport.ts");
 
 /** Source with comments removed, so prose cannot satisfy an assertion. */
 const codeOnly = src => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "")
@@ -546,4 +553,185 @@ test("8g: 051 still does only what 4A.2B-1 is allowed to do", () => {
                        "alter table public.orders", "b2b_", "invoice"]) {
     assert.ok(!sql.includes(later), `051 reaches beyond its scope: ${later}`);
   }
+});
+
+/* ════════════════════════════════════════════════════════════════════
+   9. THE ADMIN IS A DESKTOP TOOL
+
+   A PRODUCT decision, not a technical one: the operations screen is
+   tables, filters, drawers and destructive actions, and a phone-sized
+   version of it was dense enough to be a hazard. Below the minimum
+   width GLOA shows one sentence instead.
+
+   THE ONE THING THESE TESTS EXIST TO PREVENT is this being mistaken for
+   security. A viewport is a hint the client supplies - resizable,
+   spoofable, and absent entirely from curl. Section 9d asserts that
+   nothing on the server consults it.
+   ════════════════════════════════════════════════════════════════════ */
+
+test("9: the boundary is 1024, inclusive, and defined once", () => {
+  assert.equal(ADMIN_MIN_DESKTOP_WIDTH, 1024);
+  // Exactly where `(min-width: 1024px)` puts it, so the media query and
+  // the component can never disagree about the edge.
+  assert.equal(isAdminDesktopWidth(1023), false, "1023 was allowed");
+  assert.equal(isAdminDesktopWidth(1024), true, "1024 was blocked");
+  assert.equal(isAdminDesktopWidth(1025), true);
+  for (const w of [320, 390, 393, 430, 768, 1023]) {
+    assert.equal(isAdminDesktopWidth(w), false, `${w} was allowed`);
+  }
+  for (const w of [1024, 1280, 1440, 1920]) {
+    assert.equal(isAdminDesktopWidth(w), true, `${w} was blocked`);
+  }
+  // Nonsense is refused rather than allowed.
+  for (const bad of [NaN, Infinity, -Infinity]) {
+    assert.equal(isAdminDesktopWidth(bad), false, `accepted ${bad}`);
+  }
+  // ONE definition: the query is built from the same number.
+  assert.equal(ADMIN_DESKTOP_MEDIA_QUERY, "(min-width: 1024px)");
+  assert.ok(ADMIN_DESKTOP_MEDIA_QUERY.includes(String(ADMIN_MIN_DESKTOP_WIDTH)));
+});
+
+test("9b: the viewport leaf is pure, and says it is not a security boundary", () => {
+  assert.ok(!/^import /m.test(viewportLib), "the viewport leaf gained an import");
+  // Against the CODE, not the prose: the doc comment legitimately says
+  // "no window", and a substring search would fail on its own promise.
+  const viewportCode = codeOnly(viewportLib);
+  for (const banned of ["window.", "document.", "navigator", "process.", "fetch(", "supabase",
+                        "matchMedia", "addEventListener"]) {
+    assert.ok(!viewportCode.includes(banned), `the viewport leaf reaches for ${banned}`);
+  }
+  // Written down where somebody changing it will read it.
+  assert.match(viewportLib, /THIS IS NOT A SECURITY BOUNDARY/);
+  // Whitespace-tolerant: the sentence wraps across two comment lines.
+  assert.match(viewportLib.replace(/^\s*\*/gm, "").replace(/\s+/g, " "),
+    /NOTHING here authorises anything/);
+});
+
+test("9c: below the minimum, nothing operational is rendered", () => {
+  const code = codeOnly(shell);
+  // The gate is the FIRST branch: before the login form, before the
+  // identity, before any tab.
+  const gateAt = code.indexOf("if (isDesktop === false) return <AdminDesktopOnly />;");
+  assert.ok(gateAt > -1, "there is no viewport gate");
+  for (const later of ["if (signedIn === null)", "if (!signedIn)", "if (!data)"]) {
+    assert.ok(code.indexOf(later) > gateAt, `${later} is reachable before the viewport gate`);
+  }
+  // The blocker is its own screen, not the admin with things hidden.
+  const blocker = code.slice(code.indexOf("function AdminDesktopOnly()"),
+                             code.indexOf("export function AdminOverview()"));
+  for (const operational of ["ops-nav", "ops-who", "AdminOrders", "AdminInventory",
+                             "ops-facts", "ops-counts", "type=\"password\"", "ops-login",
+                             "signedInAs", "identity", "Abmelden"]) {
+    assert.ok(!blocker.includes(operational), `the blocker renders ${operational}`);
+  }
+  // No public chrome either - this is the internal surface.
+  for (const publicChrome of ["Header", "Footer", "CartDrawer", "LaunchPopup", "bag-btn", "dock"]) {
+    assert.ok(!blocker.includes(publicChrome), `the blocker pulls in ${publicChrome}`);
+  }
+  // The approved copy, and nothing added to it.
+  assert.equal(ADMIN_DESKTOP_ONLY_COPY.eyebrow, "GLOA · OPERATIONS");
+  assert.equal(ADMIN_DESKTOP_ONLY_COPY.title, "Admin nur am Desktop verfügbar");
+  assert.match(ADMIN_DESKTOP_ONLY_COPY.body, /^Der interne GLOA Admin ist für die Nutzung am Desktop optimiert\./);
+  assert.match(ADMIN_DESKTOP_ONLY_COPY.body, /größerem Bildschirm\.$/);
+});
+
+test("9d: THE SERVER NEVER CONSULTS A VIEWPORT", () => {
+  // The decisive test of the whole package. If any route, gate or
+  // identity module read a width, a user agent or a client hint, the
+  // product decision would have become a fake authorisation rule.
+  const serverFiles = {
+    gate, identityDeps, sessionLib, sessionDeps, sessionRoute,
+    ...Object.fromEntries(adminRoutes().map(r =>
+      [r, read(`app/api/admin/${r}/route.ts`)])),
+  };
+  for (const [name, src] of Object.entries(serverFiles)) {
+    for (const banned of ["adminViewport", "ADMIN_MIN_DESKTOP_WIDTH", "isAdminDesktopWidth",
+                          "user-agent", "User-Agent", "innerWidth", "sec-ch-ua",
+                          "viewport", "isMobile"]) {
+      assert.ok(!src.includes(banned), `${name} consults the client's device: ${banned}`);
+    }
+  }
+  // And the admin API answers exactly as it did - no new status, no new
+  // branch. 401 unauthenticated, 403 insufficient role.
+  assert.match(codeOnly(gate), /json\(\{ error: "Nicht autorisiert\." \}, 401\)/);
+  assert.match(codeOnly(gate), /json\(\{ error: "Keine Berechtigung\." \}, 403\)/);
+});
+
+test("9e: no admin business data is fetched below the minimum", () => {
+  const code = codeOnly(shell);
+  // The probe is gated on the resolved desktop state, not merely hidden.
+  assert.match(code, /if \(isDesktop !== true\) return;/,
+    "the mount probe runs regardless of viewport");
+  const effect = code.slice(code.indexOf("if (isDesktop !== true) return;"));
+  assert.ok(effect.indexOf('fetch("/api/admin/waitlist"') > 0,
+    "the guard is not in front of the probe");
+  // `null` waits too: an unresolved viewport fetches nothing either.
+  assert.ok(!code.includes("if (isDesktop === false) return;"),
+    "an unresolved viewport would still fetch");
+  // And the effect re-runs when the viewport resolves or changes.
+  assert.match(code, /\}, \[isDesktop\]\);/, "the probe does not react to the viewport");
+  // The heavy panels only ever mount under the desktop branch, which is
+  // below the gate - so their own fetches cannot run either.
+  const gateAt = code.indexOf("if (isDesktop === false)");
+  for (const panel of ["<AdminOrders", "<AdminInventory"]) {
+    assert.ok(code.indexOf(panel) > gateAt, `${panel} is reachable above the viewport gate`);
+  }
+});
+
+test("9f: hydration cannot mismatch, and there is no timeout anywhere", () => {
+  const code = codeOnly(shell);
+  // Server render and first client render agree: both see null.
+  assert.match(code, /useState<boolean \| null>\(null\)/,
+    "the viewport state does not start unresolved");
+  assert.match(code, /if \(isDesktop === null\) \{/, "there is no neutral unresolved branch");
+  // matchMedia, guarded for the server, with a real subscription.
+  assert.match(code, /typeof window === "undefined" \|\| typeof window\.matchMedia !== "function"/);
+  assert.match(code, /window\.matchMedia\(ADMIN_DESKTOP_MEDIA_QUERY\)/);
+  assert.match(code, /mq\.addEventListener\("change", apply\)/, "resize does not switch the screen");
+  assert.match(code, /mq\.removeEventListener\("change", apply\)/, "the listener leaks");
+  // No arbitrary delay deciding what the visitor sees.
+  const hook = code.slice(code.indexOf("function useIsAdminDesktop"), code.indexOf("function AdminDesktopOnly"));
+  for (const banned of ["setTimeout", "setInterval", "requestIdleCallback", "innerWidth"]) {
+    assert.ok(!hook.includes(banned), `the viewport hook uses ${banned}`);
+  }
+});
+
+test("9g: the desktop admin is unchanged", () => {
+  const code = codeOnly(shell);
+  // Everything the operator sees at 1440 is still built the same way.
+  for (const kept of ["GLOA · OPERATIONS", 'data.identity.displayName', 'data.identity.email',
+                      'data.identity.role.toUpperCase()', "Abmelden", "ops-nav",
+                      '["overview", "Übersicht"]', '["orders", "Bestellungen"]',
+                      '["inventory", "Inventar"]', '["waitlist", "Launch List"]',
+                      '["B2B", "Kosten"]', "<AdminOrders", "<AdminInventory"]) {
+    assert.ok(code.includes(kept), `the desktop admin lost: ${kept}`);
+  }
+  // The blocker's styles are additive and touch no existing admin rule.
+  for (const rule of [".ops-desktop-only{", ".ops-desktop-only-card{",
+                      ".ops-desktop-only-title{", ".ops-desktop-only-body{"]) {
+    assert.ok(css.includes(rule), `${rule} is missing`);
+  }
+  assert.ok(css.includes(".ops-who-name") && css.includes(".ops-who-role"),
+    "the identity header styles were disturbed");
+});
+
+test("9h: this package changed nothing else", () => {
+  // No migration, no audit trail, no public surface.
+  const files = readdirSync(path.join(ROOT, "supabase/migrations"));
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 51), [],
+    "a migration beyond 051 appeared");
+  for (const forbidden of ["admin_activity_log", "record_admin_activity", "actor_user_id"]) {
+    assert.ok(!shell.includes(forbidden) && !viewportLib.includes(forbidden),
+      `4A.2B-2 work appeared: ${forbidden}`);
+  }
+  // The public stylesheet already had 1024px breakpoints of its own long
+  // before this package; what matters is that THIS package added none and
+  // that its own rules are additive. Asserted as "the admin blocker owns
+  // no media query" rather than as a global ban that was never true.
+  const added = css.slice(css.indexOf("THE ADMIN IS A DESKTOP TOOL"));
+  assert.ok(!added.includes("@media"),
+    "the desktop-only block introduced a media query instead of rendering a screen");
+  // The gate is the COMPONENT's decision, not CSS hiding loaded markup.
+  assert.ok(!added.includes("display:none"),
+    "the blocker hides admin content with CSS instead of not rendering it");
 });
