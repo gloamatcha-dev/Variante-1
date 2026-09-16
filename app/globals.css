@@ -9873,3 +9873,43 @@ header nav{gap:18px;font-size:12px}
     padding-bottom:calc(var(--dock-space) + 18px);
   }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   THE OPERATOR IN THE ADMIN HEADER (4A.2B-1)
+
+   The header showed one address because an address was all the session
+   knew. It now shows the admin_users row: a name, the address under it,
+   and the role as a quiet badge.
+
+   NOT A REDESIGN. .ops-who keeps its size and its plum; what changes is
+   that it holds three lines instead of one string. The badge borrows
+   the tokens .ops-nav-soon i already uses for "bald", so no new colour
+   or type enters the screen.
+   ══════════════════════════════════════════════════════════════ */
+
+.ops-who{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-end;
+  gap:1px;
+  line-height:1.25;
+  min-width:0;
+}
+.ops-who-name{ font-weight:700; color:var(--ink); }
+.ops-who-mail{ font-size:12px; opacity:.72; overflow-wrap:anywhere; }
+.ops-who-role{
+  font:600 10px/1 var(--font-mono);
+  letter-spacing:.14em;
+  color:var(--plum);
+  border:1px solid var(--line);
+  padding:3px 6px;
+  margin-top:3px;
+}
+
+@media (max-width:640px){
+  /* On a phone the header is already tight: the name and the badge are
+     what identify the operator, and the address is the line that can go
+     without anything becoming ambiguous. */
+  .ops-who-mail{ display:none; }
+  .ops-who{ align-items:flex-end; }
+}

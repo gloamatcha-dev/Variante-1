@@ -1,5 +1,5 @@
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
-import { verifyAdminRequest } from "../../../../lib/adminSessionDeps.ts";
+import { requireAdminIdentity } from "../../../../lib/adminActionRoute.ts";
 import {
   ITEM_LINES_PER_ORDER_CAP,
   ORDER_ITEM_SUMMARY_COLUMNS,
@@ -58,13 +58,13 @@ import {
 
 const MAX_BODY_BYTES = 2000;
 
-function unauthorized(): Response {
-  return Response.json({ error: "Nicht autorisiert." }, { status: 401 });
-}
+// The 401 now comes from the shared gate, so every admin route answers
+// an absent or unusable session with exactly the same body.
 
 export async function POST(request: Request): Promise<Response> {
-  const session = verifyAdminRequest(request);
-  if (!session) return unauthorized();
+  // READ. Session, an active admin_users row, and a role that may read.
+  const gate = await requireAdminIdentity(request, "read");
+  if (!gate.ok) return gate.response;
 
   const supabase = getSupabaseAdmin();
   if (!supabase) {
@@ -256,7 +256,7 @@ export async function POST(request: Request): Promise<Response> {
         dayStartIso: dayStart,
       },
       fetchedAt: new Date().toISOString(),
-      signedInAs: session.email,
+      signedInAs: gate.identity.email,
     },
     { status: 200 }
   );

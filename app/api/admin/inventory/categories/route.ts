@@ -12,7 +12,8 @@ import { listInventoryCategories } from "../../../../../lib/inventoryAdmin";
  * READ ONLY. Creating and renaming live next door in categories/save.
  */
 export async function POST(request: Request): Promise<Response> {
-  const gate = await openAdminAction(request);
+  // READ. A viewer may see the inventory; "read" is what lets them.
+  const gate = await openAdminAction(request, "read");
   if (!gate.ok) return gate.response;
 
   const result = await listInventoryCategories();

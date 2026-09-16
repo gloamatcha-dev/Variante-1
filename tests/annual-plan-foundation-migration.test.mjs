@@ -145,8 +145,8 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
   const files = readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith(".sql")).sort();
   assert.deepEqual(files.filter(f => f.startsWith("039")), [MIGRATION_039],
     "there must be exactly one migration 039");
-  assert.equal(files[files.length - 12], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 13], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 13], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 14], MIGRATION_038, "038 must be the one before it");
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
@@ -154,7 +154,7 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
 test("2: no migration 044 or beyond", () => {
   // 039 is not applied anywhere, so it is still the right place to fix
   // 039. A hardening pass must not become a second migration.
-  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 50);
+  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 51);
   assert.deepEqual(beyond, [], "an unreviewed migration appeared after 039");
 });
 
@@ -1136,6 +1136,31 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // untouched, and the responses were compared byte-for-byte across
     // six query shapes before and after.
     "lib/inventoryAdmin.ts",
+    // 4A.2B-1 ADMIN IDENTITY AND ROLES. Three session/identity leaves,
+    // all additive and all in one direction - they REFUSE more than they
+    // used to:
+    //
+    //   adminSession.ts      the signed payload gains the Supabase Auth
+    //                        user id and the version moves v1 -> v2, so
+    //                        "who" stops being a mutable string. A v1
+    //                        token no longer parses, which ends every
+    //                        existing session once. No cookie flag, no
+    //                        TTL and no signing rule changed.
+    //   adminSessionDeps.ts  checkAdminPassword keeps the user id it was
+    //                        already given and still discards the
+    //                        Supabase token. The allowlist and the
+    //                        per-request re-check are untouched.
+    //   adminActionRoute.ts  the shared gate resolves admin_users and
+    //                        enforces a role. Reads may be asked for
+    //                        explicitly; the DEFAULT is write, so a
+    //                        route that forgets gets the restrictive
+    //                        answer. Nothing became more permissive.
+    //
+    // No payment, fulfillment or annual module is involved. Reviewed in
+    // tests/admin-identity.test.mjs and tests/admin-overview.test.mjs.
+    "lib/adminSession.ts",
+    "lib/adminSessionDeps.ts",
+    "lib/adminActionRoute.ts",
   ];
 
   // Phase 4B4 edits ONE application module: the single canonical Stripe
@@ -1302,6 +1327,33 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // is a marketing panel: no payment, fulfillment, account or annual
     // module is involved.
     "app/LaunchPopup.tsx",
+    // 4A.2B-1 ADMIN IDENTITY AND ROLES, the route half. Every one of
+    // these gained the same thing: the caller is resolved against
+    // admin_users and a role is enforced server-side. Reads say "read";
+    // writes keep the restrictive default.
+    //
+    //   session/route.ts     issues the v2 token and refuses a sign-in
+    //                        whose admin_users row is missing or off -
+    //                        a THIRD condition beside password and
+    //                        allowlist, not a replacement for either.
+    //   orders, orders/detail, waitlist, inventory items/detail/
+    //   categories           read routes, now behind the same identity
+    //                        check so a deactivated operator loses them
+    //                        at once instead of when the cookie lapses.
+    //   AdminOverview.tsx    the header shows the admin_users row -
+    //                        name, address, role - instead of one
+    //                        address. No layout, colour or type changed.
+    //   globals.css          three presentation rules for that header.
+    //
+    // Not one of them writes anything new, and none touches an order,
+    // an inventory quantity, a price or an email. Reviewed in
+    // tests/admin-identity.test.mjs.
+    "app/api/admin/session/route.ts",
+    "app/api/admin/orders/detail/route.ts",
+    "app/api/admin/waitlist/route.ts",
+    "app/api/admin/inventory/items/route.ts",
+    "app/api/admin/inventory/items/detail/route.ts",
+    "app/api/admin/inventory/categories/route.ts",
   ];
   // NOTE. Both lists are about UNCOMMITTED edits to files that already
   // exist, so a file this package CREATES does not belong in either -

@@ -4,6 +4,7 @@ import {
   clearedAdminSessionCookie,
   isAllowedAdmin,
   issueAdminSession,
+  normalizeAdminEmail,
 } from "../../../../lib/adminSession.ts";
 import {
   checkAdminPassword,
@@ -11,6 +12,7 @@ import {
   getAdminSessionSecret,
   verifyAdminRequest,
 } from "../../../../lib/adminSessionDeps.ts";
+import { resolveAdminIdentity } from "../../../../lib/adminIdentityDeps.ts";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import {
   LAUNCH_RATE_LIMIT_WINDOW_SECONDS,
@@ -137,7 +139,24 @@ export async function POST(request: Request): Promise<Response> {
   // claimed - they are the same here, but only one of them is verified.
   if (!isAllowedAdmin(check.email, allowlist)) return unauthorized();
 
-  const token = issueAdminSession(check.email.toLowerCase(), Date.now(), secret);
+  // ── AND THE ROW IN admin_users HAS TO AGREE ─────────────────
+  //
+  // A THIRD independent condition, checked here as well as on every
+  // later request: proving a password and appearing on the allowlist
+  // still does not make somebody an administrator. Missing, switched
+  // off, or carrying a role this build does not recognise - all of them
+  // end here, with the same answer as a wrong password, because which
+  // of the two failed is not the caller's business.
+  const lookup = await resolveAdminIdentity(check.userId, check.email);
+  if (!lookup.ok) {
+    console.error("Admin session: no usable admin_users row -", lookup.reason);
+    return unauthorized();
+  }
+
+  // Signed with the id Supabase confirmed, not with anything the body
+  // sent. The role is deliberately NOT in the token - see
+  // lib/adminIdentityDeps.ts.
+  const token = issueAdminSession(check.userId, normalizeAdminEmail(check.email), Date.now(), secret);
 
   return Response.json(
     { ok: true },

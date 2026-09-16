@@ -26,11 +26,32 @@ import { createHmac, timingSafeEqual } from "node:crypto";
  *
  * ── THE TOKEN, AND WHY IT LOOKS LIKE THIS ─────────────────────
  *
- *   v1.<base64url payload>.<hmac>
+ *   v2.<base64url payload>.<hmac>
  *
- * Signed, not encrypted: the payload is an email and an expiry, neither
- * of which is a secret from the person already holding the cookie. What
- * matters is that it cannot be FORGED, which the HMAC gives.
+ * Signed, not encrypted: the payload is a user id, an email and an
+ * expiry, none of which is a secret from the person already holding the
+ * cookie. What matters is that it cannot be FORGED, which the HMAC
+ * gives.
+ *
+ * ── WHY THE USER ID IS IN HERE, AND WHY THE VERSION MOVED ─────
+ *
+ * v1 carried an email and nothing else, so "who" was a STRING. An
+ * address is not stable - change it and the same person becomes a
+ * different one - which is no anchor for a role lookup and none at all
+ * for the audit trail that follows. v2 carries the Supabase Auth user
+ * id, which does not move.
+ *
+ * The version is bumped rather than made optional ON PURPOSE. A v1
+ * token simply fails to parse here, so every existing session ends and
+ * everybody signs in once more. Three people sign in again; the
+ * alternative is dual-format code living in the one file where a
+ * mistake is an authentication bypass. The cost is a login, and the
+ * saving is that there is only ever one shape to reason about.
+ *
+ * WHAT THE ROLE IS NOT: it is NOT in this token. A cookie minted eight
+ * hours ago must not be able to assert that its holder is still an
+ * owner. The role is read from admin_users on every request, the same
+ * way the allowlist already is.
  *
  * The expiry is inside the signed payload rather than left to the
  * cookie's own Max-Age, because a cookie's lifetime is a hint the client
@@ -63,7 +84,7 @@ export const ADMIN_SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 /** Below this a signing key is refused as misconfigured, not merely weak. */
 export const ADMIN_SESSION_SECRET_MIN_LENGTH = 32;
 
-export type AdminSession = { email: string; expiresAtMs: number };
+export type AdminSession = { userId: string; email: string; expiresAtMs: number };
 
 function b64url(input: string): string {
   return Buffer.from(input, "utf8").toString("base64url");
@@ -78,9 +99,14 @@ function sign(payload: string, secret: string): string {
  * authenticated and authorised. This function does neither - it is the
  * last step, not the check.
  */
-export function issueAdminSession(email: string, nowMs: number, secret: string): string {
-  const payload = b64url(JSON.stringify({ e: email, x: nowMs + ADMIN_SESSION_TTL_MS }));
-  return `v1.${payload}.${sign(payload, secret)}`;
+export function issueAdminSession(
+  userId: string,
+  email: string,
+  nowMs: number,
+  secret: string
+): string {
+  const payload = b64url(JSON.stringify({ u: userId, e: email, x: nowMs + ADMIN_SESSION_TTL_MS }));
+  return `v2.${payload}.${sign(payload, secret)}`;
 }
 
 /**
@@ -98,7 +124,9 @@ export function readAdminSession(
   if (!token || !secret || secret.length < ADMIN_SESSION_SECRET_MIN_LENGTH) return null;
 
   const parts = token.split(".");
-  if (parts.length !== 3 || parts[0] !== "v1") return null;
+  // A v1 token is not upgraded and not tolerated - it is simply not a
+  // token this deployment issued. See the note on the version above.
+  if (parts.length !== 3 || parts[0] !== "v2") return null;
   const [, payload, mac] = parts;
 
   const expected = sign(payload, secret);
@@ -116,14 +144,15 @@ export function readAdminSession(
   }
   if (!parsed || typeof parsed !== "object") return null;
 
-  const { e, x } = parsed as { e?: unknown; x?: unknown };
+  const { u, e, x } = parsed as { u?: unknown; e?: unknown; x?: unknown };
+  if (typeof u !== "string" || !u) return null;
   if (typeof e !== "string" || !e || typeof x !== "number" || !Number.isFinite(x)) return null;
 
   // THE EXPIRY IS ENFORCED HERE, from the signed payload - not from the
   // cookie's Max-Age, which the client controls.
   if (nowMs >= x) return null;
 
-  return { email: e, expiresAtMs: x };
+  return { userId: u, email: e, expiresAtMs: x };
 }
 
 /**
@@ -181,7 +210,20 @@ export function parseAdminAllowlist(raw: string | undefined | null): string[] {
     .filter((entry) => entry.length > 0 && entry.includes("@"));
 }
 
+/**
+ * THE ONE DEFINITION OF A CANONICAL ADMIN ADDRESS.
+ *
+ * Used by the allowlist, by the session route, by the per-request
+ * identity check and by migration 051's CHECK constraint - which is the
+ * point. Four places comparing addresses with four slightly different
+ * notions of "the same" is how an operator ends up refused for a reason
+ * nobody can see.
+ */
+export function normalizeAdminEmail(email: string | null | undefined): string {
+  return typeof email === "string" ? email.trim().toLowerCase() : "";
+}
+
 export function isAllowedAdmin(email: string | null | undefined, allowlist: readonly string[]): boolean {
   if (!email || allowlist.length === 0) return false;
-  return allowlist.includes(email.trim().toLowerCase());
+  return allowlist.includes(normalizeAdminEmail(email));
 }

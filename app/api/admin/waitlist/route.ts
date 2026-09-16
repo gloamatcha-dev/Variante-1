@@ -1,5 +1,5 @@
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
-import { verifyAdminRequest } from "../../../../lib/adminSessionDeps.ts";
+import { requireAdminIdentity } from "../../../../lib/adminActionRoute.ts";
 import {
   WAITLIST_COLUMNS,
   WAITLIST_COLUMNS_EXTENDED,
@@ -35,15 +35,11 @@ import { SHOP_STATUS } from "../../../content";
 
 const MAX_BODY_BYTES = 2000;
 
-function unauthorized(): Response {
-  // Same answer whether the cookie is missing, forged, expired, or names
-  // somebody who has since been removed from the allowlist.
-  return Response.json({ error: "Nicht autorisiert." }, { status: 401 });
-}
 
 export async function POST(request: Request): Promise<Response> {
-  const session = verifyAdminRequest(request);
-  if (!session) return unauthorized();
+  // READ. Session, an active admin_users row, and a role that may read.
+  const gate = await requireAdminIdentity(request, "read");
+  if (!gate.ok) return gate.response;
 
   const supabase = getSupabaseAdmin();
   if (!supabase) {
@@ -121,7 +117,19 @@ export async function POST(request: Request): Promise<Response> {
       },
       // The signed-in operator, so the page can name who is looking.
       // Their own address, never anybody else's.
-      signedInAs: session.email,
+      signedInAs: gate.identity.email,
+      // WHO IS LOOKING, FOR THE HEADER.
+      //
+      // Exactly three fields, all of them already on the operator's own
+      // admin_users row: a name to greet, the address it belongs to, and
+      // the role as a badge. No user id - the browser has no use for it
+      // and it is the key the server authorises on. No token, no
+      // allowlist, no other administrator.
+      identity: {
+        displayName: gate.identity.displayName,
+        email: gate.identity.email,
+        role: gate.identity.role,
+      },
     },
     { status: 200, headers: { "Cache-Control": "no-store" } }
   );

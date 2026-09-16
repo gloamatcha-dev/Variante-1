@@ -101,9 +101,9 @@ test("1: 038 exists, owns its number, and 039 is the only one above it", () => {
   // in tests/annual-plan-foundation-migration.test.mjs. 038 is therefore
   // no longer the highest, and this is re-pinned rather than deleted:
   // what it protects is that no UNREVIEWED migration appeared.
-  assert.equal(files[files.length - 12], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 13], MIGRATION_038, "038 must be the one before it");
-  assert.equal(files[files.length - 14], MIGRATION_037, "037 must be the one before that");
+  assert.equal(files[files.length - 13], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 14], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 15], MIGRATION_037, "037 must be the one before that");
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
@@ -138,7 +138,16 @@ test("2: no migration 044 or beyond", () => {
     // policy on any existing table, grants nothing to a browser role,
     // alters no existing column and touches no order, payment or email
     // state. Reviewed in tests/inventory.test.mjs.
-    "050_inventory_foundation.sql"],
+    "050_inventory_foundation.sql",
+    // 051 IS THE ADMIN IDENTITY FOUNDATION: one new table,
+    // public.admin_users, keyed on auth.users(id) and carrying a
+    // display name, a role (owner/admin/viewer) and an active flag. RLS
+    // is on with NOT ONE POLICY and every grant to anon/authenticated is
+    // revoked, so no browser role can read who the administrators are.
+    // It creates no policy on any existing table, alters no existing
+    // column, and touches no order, payment, inventory or email state.
+    // Reviewed in tests/admin-identity.test.mjs.
+    "051_admin_identity_foundation.sql"],
     "an unreviewed migration appeared after 043");
   // And 039 kept its hands off this phase's writer entirely.
   for (const name of [MIGRATION_039, MIGRATION_040, MIGRATION_041, MIGRATION_042]) {

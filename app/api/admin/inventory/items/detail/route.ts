@@ -14,7 +14,8 @@ import { readInventoryItem } from "../../../../../../lib/inventoryAdmin";
  * is a 400 that says so instead of a 502 from deep in PostgREST.
  */
 export async function POST(request: Request): Promise<Response> {
-  const gate = await openAdminAction(request);
+  // READ. A viewer may see the inventory; "read" is what lets them.
+  const gate = await openAdminAction(request, "read");
   if (!gate.ok) return gate.response;
 
   const id = (gate.context.body as Record<string, unknown>).id;

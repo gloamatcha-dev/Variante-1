@@ -1,5 +1,5 @@
 import { getSupabaseAdmin } from "../../../../../lib/supabaseAdmin";
-import { verifyAdminRequest } from "../../../../../lib/adminSessionDeps.ts";
+import { requireAdminIdentity } from "../../../../../lib/adminActionRoute.ts";
 import { ORDER_DETAIL_COLUMNS, ORDER_ITEM_COLUMNS } from "../../../../../lib/adminOrdersQuery.ts";
 
 /**
@@ -23,13 +23,11 @@ import { ORDER_DETAIL_COLUMNS, ORDER_ITEM_COLUMNS } from "../../../../../lib/adm
 const MAX_BODY_BYTES = 500;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function unauthorized(): Response {
-  return Response.json({ error: "Nicht autorisiert." }, { status: 401 });
-}
 
 export async function POST(request: Request): Promise<Response> {
-  const session = verifyAdminRequest(request);
-  if (!session) return unauthorized();
+  // READ. Session, an active admin_users row, and a role that may read.
+  const gate = await requireAdminIdentity(request, "read");
+  if (!gate.ok) return gate.response;
 
   const supabase = getSupabaseAdmin();
   if (!supabase) {

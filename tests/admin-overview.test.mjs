@@ -60,13 +60,20 @@ const NOW = Date.parse("2026-09-08T10:00:00Z");
 
 /* ── 1. The session token ────────────────────────────────────── */
 
+const USER_ID = "11111111-2222-4333-8444-555555555555";
+
 test("1: a session round-trips, and only with the key that signed it", () => {
-  const token = issueAdminSession("ops@gloamatcha.com", NOW, SECRET);
+  const token = issueAdminSession(USER_ID, "ops@gloamatcha.com", NOW, SECRET);
   const session = readAdminSession(token, NOW, SECRET);
+  // THE USER ID IS PART OF THE SESSION NOW. 4A.2B-1: "who" used to be a
+  // mutable string, which is no anchor for a role lookup and none at all
+  // for an audit trail. The Supabase Auth id does not move.
   assert.deepEqual(session, {
+    userId: USER_ID,
     email: "ops@gloamatcha.com",
     expiresAtMs: NOW + ADMIN_SESSION_TTL_MS,
   });
+  assert.match(token, /^v2\./, "the token is not the v2 format");
 
   // A different key does not verify it. That is what makes the token
   // worthless if it is copied to another deployment.
@@ -74,26 +81,32 @@ test("1: a session round-trips, and only with the key that signed it", () => {
 });
 
 test("2: a forged, altered or malformed token is refused", () => {
-  const token = issueAdminSession("ops@gloamatcha.com", NOW, SECRET);
+  const token = issueAdminSession(USER_ID, "ops@gloamatcha.com", NOW, SECRET);
   const [, payload, mac] = token.split(".");
 
   for (const bad of [
-    null, undefined, "", "v1", "v1.a", "v1.a.b.c",
-    `v2.${payload}.${mac}`,                         // wrong version
-    `v1.${payload}.${"x".repeat(mac.length)}`,      // wrong signature
-    `v1.${payload}.`,                               // no signature
-    `v1..${mac}`,                                   // no payload
+    null, undefined, "", "v2", "v2.a", "v2.a.b.c",
+    `v1.${payload}.${mac}`,                         // wrong version
+    `v3.${payload}.${mac}`,                         // wrong version
+    `v2.${payload}.${"x".repeat(mac.length)}`,      // wrong signature
+    `v2.${payload}.`,                               // no signature
+    `v2..${mac}`,                                   // no payload
     // Payload edited to name somebody else, signature left alone.
-    `v1.${Buffer.from(JSON.stringify({ e: "attacker@example.com", x: NOW + 1000 })).toString("base64url")}.${mac}`,
+    `v2.${Buffer.from(JSON.stringify({ u: USER_ID, e: "attacker@example.com", x: NOW + 1000 })).toString("base64url")}.${mac}`,
+    // Payload edited to claim a DIFFERENT user id - the field the server
+    // now authorises on - with the signature left alone.
+    `v2.${Buffer.from(JSON.stringify({ u: "99999999-9999-4999-8999-999999999999", e: "ops@gloamatcha.com", x: NOW + 1000 })).toString("base64url")}.${mac}`,
+    // A v2 shape with no user id at all.
+    `v2.${Buffer.from(JSON.stringify({ e: "ops@gloamatcha.com", x: NOW + 1000 })).toString("base64url")}.${mac}`,
     // Not JSON at all.
-    `v1.${Buffer.from("not json").toString("base64url")}.${mac}`,
+    `v2.${Buffer.from("not json").toString("base64url")}.${mac}`,
   ]) {
     assert.equal(readAdminSession(bad, NOW, SECRET), null, `accepted: ${String(bad).slice(0, 40)}`);
   }
 });
 
 test("3: the expiry is enforced from the signed payload, not from the cookie", () => {
-  const token = issueAdminSession("ops@gloamatcha.com", NOW, SECRET);
+  const token = issueAdminSession(USER_ID, "ops@gloamatcha.com", NOW, SECRET);
 
   assert.ok(readAdminSession(token, NOW + ADMIN_SESSION_TTL_MS - 1, SECRET));
   // At the expiry it is already gone.
@@ -108,7 +121,7 @@ test("3: the expiry is enforced from the signed payload, not from the cookie", (
 
 test("4: a short or missing signing key refuses everybody", () => {
   const short = "x".repeat(ADMIN_SESSION_SECRET_MIN_LENGTH - 1);
-  const token = issueAdminSession("ops@gloamatcha.com", NOW, short);
+  const token = issueAdminSession(USER_ID, "ops@gloamatcha.com", NOW, short);
   assert.equal(readAdminSession(token, NOW, short), null, "a short key was accepted");
   assert.equal(readAdminSession(token, NOW, null), null);
   assert.equal(readAdminSession(token, NOW, ""), null);
@@ -209,7 +222,13 @@ test("11: the Supabase token proves the password and is then discarded", () => {
   // database directly.
   assert.match(sessionDeps, /signInWithPassword/);
   assert.match(sessionDeps, /client\.auth\.signOut\(\)/);
-  assert.match(sessionDeps, /The token is not returned and not stored/);
+  // The access token still does exactly one job and is discarded. What
+  // changed in 4A.2B-1 is that the user ID beside it is now KEPT - it is
+  // the stable identifier roles and, later, the audit trail anchor to.
+  assert.match(sessionDeps, /THE USER ID IS KEPT, THE TOKEN IS NOT/);
+  assert.match(sessionDeps, /const userId = data\.user\.id;/);
+  assert.ok(!/session\.access_token|data\.session/.test(sessionDeps),
+    "a Supabase session token is being retained");
   const deps = stripJs(sessionDeps);
   assert.ok(!/return[^;]*data\.session/.test(deps), "the Supabase session is returned");
   assert.ok(!/access_token/.test(deps), "the Supabase access token is handled");
@@ -259,8 +278,14 @@ test("14: an address not on the allowlist never reaches the password check", () 
 test("15: the data endpoint is session-gated, POST-only and read-only", () => {
   const code = stripJs(waitlistRoute);
 
-  // The session check is the very first thing that happens.
-  assert.match(code, /const session = verifyAdminRequest\(request\);\s*if \(!session\) return unauthorized\(\);/);
+  // The session check is the very first thing that happens - and since
+  // 4A.2B-1 it also resolves the admin_users row, so a deactivated
+  // operator loses this read immediately rather than when their cookie
+  // lapses. Both conditions live in requireAdminIdentity.
+  assert.match(code, /const gate = await requireAdminIdentity\(request, "read"\);\s*if \(!gate\.ok\) return gate\.response;/);
+  const body = code.slice(code.indexOf("export async function POST"));
+  assert.ok(body.indexOf("requireAdminIdentity") < body.indexOf("getSupabaseAdmin"),
+    "something runs before the session is checked");
 
   // POST only - no GET handler exists.
   const handlers = [...waitlistRoute.matchAll(/export async function ([A-Z]+)\(/g)].map((m) => m[1]);

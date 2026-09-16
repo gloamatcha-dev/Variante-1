@@ -592,8 +592,14 @@ test("5e: a category still in use cannot be archived silently", () => {
 test("6: every route checks the admin session before anything else", () => {
   for (const [name, src] of Object.entries(routeSources)) {
     const code = codeOnly(src);
-    const gateAt = code.indexOf("const gate = await openAdminAction(request)");
+    // 4A.2B-1: the shared gate now takes the capability the ROUTE needs.
+    // Reads say "read"; writes take the default, which is "write" - so a
+    // route that forgets to say gets the restrictive answer.
+    const gateAt = code.indexOf("const gate = await openAdminAction(request");
     assert.notEqual(gateAt, -1, `${name} does not open through the shared gate`);
+    const call = code.slice(gateAt, code.indexOf(")", gateAt) + 1);
+    assert.match(call, /openAdminAction\(request(, "(read|write)")?\)/,
+      `${name} passes something unexpected to the shared gate`);
     const before = code.slice(code.indexOf("export async function POST"), gateAt);
     assert.ok(!/await|\.from\(|\.rpc\(|console\./.test(before), `${name} does work before the session check`);
   }

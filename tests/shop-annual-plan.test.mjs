@@ -329,12 +329,12 @@ test("5d: no backend, migration or commercial logic changed", () => {
     // tests/partnerships-api.test.mjs.
     ["admin", "annual-plan", "checkout", "contact", "cron", "internal", "launch",
      "orders", "partnerships", "stripe", "subscriptions", "withdrawal"], "an API route changed");
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("051")),
-    "a migration 051 or beyond appeared");
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("052")),
+    "a migration 052 or beyond appeared");
   // 047 withdraws the metal case from the catalog, reviewed in
   // tests/catalog-availability.test.mjs. Re-pinned rather than removed:
   // the guard protects "no UNREVIEWED migration appeared".
-  assert.equal(readdirSync(path.join(ROOT, "supabase/migrations")).filter(f => f.endsWith(".sql")).length, 50,
+  assert.equal(readdirSync(path.join(ROOT, "supabase/migrations")).filter(f => f.endsWith(".sql")).length, 51,
     "the migration count changed");
   // The one-time path is untouched.
   assert.ok(site.includes('purchaseType:"once",unitPriceCents:v.price_gross_cents'),

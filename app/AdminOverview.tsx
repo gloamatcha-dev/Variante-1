@@ -62,6 +62,8 @@ type Payload = {
     migrationsApplied: boolean;
   };
   signedInAs: string;
+  /** The operator's own admin_users row: a name, an address, a role. */
+  identity?: { displayName: string; email: string; role: string };
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -278,7 +280,19 @@ export function AdminOverview() {
           <h1 className="ops-title">{TITLE[view]}</h1>
         </div>
         <div className="ops-head-right">
-          <span className="ops-who">{data.signedInAs}</span>
+          {/* WHO IS SIGNED IN. The name the admin_users row carries, the
+              address under it, and the role as a quiet badge. Falls back
+              to the address alone if identity is ever absent, so the
+              header can never render empty. */}
+          <span className="ops-who">
+            {data.identity ? (
+              <>
+                <strong className="ops-who-name">{data.identity.displayName}</strong>
+                <span className="ops-who-mail">{data.identity.email}</span>
+                <span className="ops-who-role">{data.identity.role.toUpperCase()}</span>
+              </>
+            ) : data.signedInAs}
+          </span>
           <button type="button" className="ops-signout" onClick={signOut}>Abmelden</button>
         </div>
       </header>

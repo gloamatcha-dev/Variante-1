@@ -66,7 +66,7 @@ export function verifyAdminRequest(request: Request, nowMs: number = Date.now())
 }
 
 export type PasswordCheck =
-  | { ok: true; email: string }
+  | { ok: true; userId: string; email: string }
   | { ok: false; reason: "invalid" | "unconfigured" };
 
 /**
@@ -95,10 +95,19 @@ export async function checkAdminPassword(email: string, password: string): Promi
   });
 
   const { data, error } = await client.auth.signInWithPassword({ email, password });
-  if (error || !data.user?.email) return { ok: false, reason: "invalid" };
+  if (error || !data.user?.id || !data.user?.email) return { ok: false, reason: "invalid" };
 
-  // The token is not returned and not stored. It has done its one job.
+  // THE USER ID IS KEPT, THE TOKEN IS NOT.
+  //
+  // Supabase hands back both. The access token has done its one job and
+  // is discarded exactly as before - no Supabase credential reaches a
+  // script on the page. The id is a different thing: it is the stable
+  // identifier this application anchors identity and roles to, and
+  // throwing it away was what left "who" as a mutable string.
+  const userId = data.user.id;
+  const confirmed = data.user.email;
+
   await client.auth.signOut().catch(() => undefined);
 
-  return { ok: true, email: data.user.email };
+  return { ok: true, userId, email: confirmed };
 }

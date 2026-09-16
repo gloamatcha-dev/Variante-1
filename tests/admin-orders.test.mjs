@@ -196,9 +196,22 @@ test("2d: pagination is bounded at both ends", () => {
 test("3: both routes check the admin session before anything else", () => {
   for (const [name, src] of [["list", listRoute], ["detail", detailRoute]]) {
     const code = codeOnly(src);
-    assert.match(code, /const session = verifyAdminRequest\(request\);\s*if \(!session\) return unauthorized\(\);/,
+    // Since 4A.2B-1 the gate is requireAdminIdentity: it verifies the
+    // session AND resolves the admin_users row, so a deactivated
+    // operator loses these reads at once rather than when the cookie
+    // lapses. "read" is the capability a read route may ask for - a
+    // viewer may see orders, and could not write them through here even
+    // if this said otherwise, because these routes hold no write.
+    assert.match(code, /const gate = await requireAdminIdentity\(request, "read"\);\s*if \(!gate\.ok\) return gate\.response;/,
       `${name} does not gate on the session first`);
-    assert.match(code, /status: 401/, `${name} does not answer 401`);
+    // NOTHING runs before it.
+    const body = code.slice(code.indexOf("export async function POST"));
+    // Anchored on the whole statement: slicing at the identifier would
+    // leave that call's own "await" in the text being checked.
+    const gateAt = body.indexOf("const gate = await requireAdminIdentity");
+    assert.ok(gateAt > -1, `${name} does not call the shared gate`);
+    assert.ok(!/await|\.from\(|\.rpc\(|getSupabaseAdmin/.test(body.slice(0, gateAt)),
+      `${name} does work before the session check`);
   }
 });
 

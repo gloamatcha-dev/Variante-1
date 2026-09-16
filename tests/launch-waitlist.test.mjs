@@ -1237,7 +1237,16 @@ test("61: the rate limit went into 043 rather than into a 044, and 043 is still 
     // policy on any existing table, grants nothing to a browser role,
     // alters no existing column and touches no order, payment or email
     // state. Reviewed in tests/inventory.test.mjs.
-    "050_inventory_foundation.sql"],
+    "050_inventory_foundation.sql",
+    // 051 IS THE ADMIN IDENTITY FOUNDATION: one new table,
+    // public.admin_users, keyed on auth.users(id) and carrying a
+    // display name, a role (owner/admin/viewer) and an active flag. RLS
+    // is on with NOT ONE POLICY and every grant to anon/authenticated is
+    // revoked, so no browser role can read who the administrators are.
+    // It creates no policy on any existing table, alters no existing
+    // column, and touches no order, payment, inventory or email state.
+    // Reviewed in tests/admin-identity.test.mjs.
+    "051_admin_identity_foundation.sql"],
     "an unreviewed migration appeared after 043"
   );
 

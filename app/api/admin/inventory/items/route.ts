@@ -14,7 +14,8 @@ import { listInventoryItems } from "../../../../../lib/inventoryAdmin";
  * performs none for a list.
  */
 export async function POST(request: Request): Promise<Response> {
-  const gate = await openAdminAction(request);
+  // READ. A viewer may see the inventory; "read" is what lets them.
+  const gate = await openAdminAction(request, "read");
   if (!gate.ok) return gate.response;
 
   const payload = await listInventoryItems(resolveItemsQuery(gate.context.body));
