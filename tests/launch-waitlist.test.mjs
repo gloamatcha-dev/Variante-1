@@ -1246,7 +1246,17 @@ test("61: the rate limit went into 043 rather than into a 044, and 043 is still 
     // It creates no policy on any existing table, alters no existing
     // column, and touches no order, payment, inventory or email state.
     // Reviewed in tests/admin-identity.test.mjs.
-    "051_admin_identity_foundation.sql"],
+    "051_admin_identity_foundation.sql",
+    // 052 IS THE ADMIN ACTIVITY LOG: one new append-only table,
+    // public.admin_activity_log, plus a controlled insert function and
+    // five wrappers under NEW names around the existing order and
+    // inventory functions. RLS is on with NOT ONE POLICY, anon and
+    // authenticated are revoked, and service_role is granted SELECT
+    // only - it cannot write the log even by accident. No existing
+    // function signature changed, so no older overload is left
+    // callable, and no row is backfilled. Reviewed in
+    // tests/admin-audit.test.mjs.
+    "052_admin_activity_audit.sql"],
     "an unreviewed migration appeared after 043"
   );
 

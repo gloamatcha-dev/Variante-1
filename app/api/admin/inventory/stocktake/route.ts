@@ -24,7 +24,7 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: `Ungültige Inventur: ${validated.code}.` }, { status: 400 });
   }
 
-  const result = await recordStocktake(validated.request, gate.context.session.email);
+  const result = await recordStocktake(validated.request, gate.context.identity.userId);
   if (!result.ok) {
     return Response.json({ error: result.error }, { status: result.status });
   }

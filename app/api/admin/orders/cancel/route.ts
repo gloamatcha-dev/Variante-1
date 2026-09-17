@@ -19,6 +19,6 @@ export async function POST(request: Request): Promise<Response> {
   const gate = await openAdminAction(request);
   if (!gate.ok) return gate.response;
 
-  const outcome = await adminCancelOrder(gate.context.body);
+  const outcome = await adminCancelOrder(gate.context.body, gate.context.identity.userId);
   return adminActionResponse(outcome);
 }

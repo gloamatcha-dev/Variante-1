@@ -792,9 +792,9 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
   // only - no table, no column, no function, no policy, no row.
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 51);
+  assert.equal(migrations.length, 52);
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 51), [], "a migration 052 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 52), [], "a migration 053 or beyond appeared");
 
   // The API surface is unchanged: no account endpoint exists, because the
   // portal reads its own rows under RLS.
@@ -807,6 +807,10 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
   };
   walk("app/api");
   assert.deepEqual(apiDirs.sort(), [
+    // 4A.2B-2. The audit trail, read-only: POST-gated like every other
+    // admin read, open to all three roles, and with no way to write
+    // through it. Reviewed in tests/admin-audit.test.mjs.
+    "/admin/activity",
     // PAKET 4A.2. The manual inventory: two reads (a page of items, one
     // item with its history), four writes that change descriptive fields
     // or create an item, and two that book stock - both of the latter

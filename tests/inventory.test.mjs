@@ -108,6 +108,7 @@ const routeSources = Object.fromEntries(Object.entries(ROUTES).map(([k, v]) => [
 
 const UUID_A = "11111111-1111-4111-8111-111111111111";
 const UUID_B = "22222222-2222-4222-8222-222222222222";
+const UUID_C = "33333333-3333-4333-8333-333333333333";
 
 /* ══════════════════════════════════════════════════════════════
    1. THE SCHEMA
@@ -410,9 +411,20 @@ test("4d: a stocktake takes a COUNT, and a count is never negative", () => {
 
 test("4e: THE EDIT FORM CANNOT TOUCH STOCK", () => {
   const fields = {
-    itemId: UUID_A, name: "Matcha Rohware", unit: "g", categoryId: UUID_B, areas: ["b2c", "event"],
+    itemId: UUID_A, operationId: UUID_C, name: "Matcha Rohware", unit: "g",
+    categoryId: UUID_B, areas: ["b2c", "event"],
   };
   assert.equal(validateUpdateItemRequest(fields).ok, true);
+  // 4A.2B-2: the edit carries an idempotency key, because the audit row
+  // it produces must survive a retry without becoming two rows. A
+  // missing or malformed one is refused here rather than replaced with
+  // a fresh id at the retry point, which is exactly what would defeat
+  // the deduplication.
+  for (const bad of [undefined, "", "not-a-uuid"]) {
+    const out = validateUpdateItemRequest({ ...fields, operationId: bad });
+    assert.equal(out.ok, false, `an edit with operationId=${String(bad)} was accepted`);
+    assert.equal(out.code, "invalid_operation_id");
+  }
   // The two spellings a client might reach for are both refused by name,
   // and the database would refuse them again.
   for (const key of ["currentQuantity", "current_quantity"]) {
@@ -468,13 +480,22 @@ test("4g: areas are allowlisted, de-duplicated and may be several", () => {
 });
 
 test("4h: a category is created, renamed or archived - never nothing", () => {
-  assert.equal(validateCategoryRequest({ name: "Café Samples" }).request.name, "Café Samples");
-  assert.equal(validateCategoryRequest({ categoryId: UUID_A, name: "Neu" }).ok, true);
-  assert.equal(validateCategoryRequest({ categoryId: UUID_A, isActive: false }).ok, true);
-  assert.equal(validateCategoryRequest({}).ok, false, "a nameless new category was accepted");
-  assert.equal(validateCategoryRequest({ categoryId: UUID_A }).code, "nothing_to_change");
-  assert.equal(validateCategoryRequest({ categoryId: "nope", name: "x" }).code, "invalid_category");
-  assert.equal(validateCategoryRequest({ name: "  " }).code, "invalid_name");
+  // 4A.2B-2: every category save carries the same idempotency key its
+  // audit row is written under, so a double submit is one category and
+  // one line of history.
+  const op = { operationId: UUID_C };
+  assert.equal(validateCategoryRequest({ ...op, name: "Café Samples" }).request.name, "Café Samples");
+  assert.equal(validateCategoryRequest({ ...op, categoryId: UUID_A, name: "Neu" }).ok, true);
+  assert.equal(validateCategoryRequest({ ...op, categoryId: UUID_A, isActive: false }).ok, true);
+  assert.equal(validateCategoryRequest({ ...op }).ok, false, "a nameless new category was accepted");
+  assert.equal(validateCategoryRequest({ ...op, categoryId: UUID_A }).code, "nothing_to_change");
+  assert.equal(validateCategoryRequest({ ...op, categoryId: "nope", name: "x" }).code, "invalid_category");
+  assert.equal(validateCategoryRequest({ ...op, name: "  " }).code, "invalid_name");
+  for (const bad of [undefined, "", "not-a-uuid"]) {
+    const out = validateCategoryRequest({ name: "Café Samples", operationId: bad });
+    assert.equal(out.ok, false, `a category save with operationId=${String(bad)} was accepted`);
+    assert.equal(out.code, "invalid_operation_id");
+  }
   // Case and padding do not make a second category.
   assert.match(sql, /create unique index if not exists idx_inventory_categories_name\s*\n?\s*on public\.inventory_categories \(lower\(btrim\(name\)\)\)/);
 });
@@ -525,7 +546,17 @@ test("4i: the list query allowlists everything and bounds the page", () => {
 
 test("5: stock moves through the two functions and through nothing else", () => {
   const rpcs = [...new Set([...adminCode.matchAll(/\.rpc\("(\w+)"/g)].map(m => m[1]))].sort();
-  assert.deepEqual(rpcs, ["record_inventory_movement", "record_inventory_stocktake"]);
+  // 4A.2B-2: the audited wrappers of migration 052. Each calls the SAME
+  // 050 function inside itself and writes the audit row in that one
+  // transaction - so this is still exactly two booking functions, now
+  // with an actor attached to each booking.
+  assert.deepEqual(rpcs, ["admin_record_inventory_movement", "admin_record_inventory_stocktake"]);
+  // Compared by name, never by substring: "admin_record_inventory_movement"
+  // CONTAINS "record_inventory_movement", so a substring assertion here
+  // would keep passing if an unaudited call came back beside it.
+  for (const bare of ["record_inventory_movement", "record_inventory_stocktake"]) {
+    assert.ok(!rpcs.includes(bare), `stock still moves through ${bare} unaudited`);
+  }
   // No update of the items table ever names the quantity.
   for (const m of adminCode.matchAll(/\.from\("inventory_items"\)[\s\S]{0,200}?\.update\(\{([\s\S]*?)\}\)/g)) {
     assert.ok(!m[1].includes("current_quantity"),
@@ -704,8 +735,26 @@ test("7b: and no migration wires an order trigger into stock", () => {
     if (!file.endsWith(".sql")) continue;
     const source = sqlOnly(read(`supabase/migrations/${file}`));
     if (!/inventory_/.test(source)) continue;
-    assert.equal(file, "050_inventory_foundation.sql",
-      `${file} touches inventory and is not the inventory migration`);
+    if (file === "050_inventory_foundation.sql") continue;
+    // 4A.2B-2: 052 names the inventory because it wraps the two booking
+    // functions and READS an item's name for the audit summary. That is
+    // allowed; owning the schema or writing the data is not. So the rule
+    // is stated as what it always meant rather than widened to a second
+    // exempt filename: no other migration may define, alter, drop, write
+    // to, or hang a trigger on an inventory table.
+    assert.equal(file, "052_admin_activity_audit.sql",
+      `${file} touches inventory and is neither the inventory migration nor the audit one`);
+    const TABLE = "(inventory_items|inventory_movements|inventory_categories|inventory_item_areas)";
+    for (const [pattern, why] of [
+      [`(create|alter|drop)\\s+table[^;]*${TABLE}`, "defines or changes an inventory table"],
+      [`insert\\s+into\\s+(public\\.)?${TABLE}`, "inserts into an inventory table"],
+      [`update\\s+(public\\.)?${TABLE}\\s+set`, "updates an inventory table"],
+      [`delete\\s+from\\s+(public\\.)?${TABLE}`, "deletes from an inventory table"],
+      [`create\\s+trigger[^;]*on\\s+(public\\.)?${TABLE}`, "hangs a trigger on an inventory table"],
+      [`(create|drop)\\s+(or replace\\s+)?function[^(]*[\\s.](record_inventory_\\w+)\\s*\\(`, "redefines a 050 booking function"],
+    ]) {
+      assert.ok(!new RegExp(pattern, "i").test(source), `${file} ${why}`);
+    }
   }
   // 050 itself creates no trigger on an order table.
   assert.ok(!/create trigger[^;]*on public\.(orders|order_items)/i.test(sql),

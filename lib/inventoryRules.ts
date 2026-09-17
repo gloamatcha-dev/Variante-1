@@ -452,7 +452,7 @@ export function validateCreateItemRequest(body: unknown): Validated<CreateItemRe
   return { ok: true, request: { ...fields.request, operationId: raw.operationId, initialQuantity } };
 }
 
-export type UpdateItemRequest = ItemFields & { itemId: string };
+export type UpdateItemRequest = ItemFields & { itemId: string; operationId: string };
 
 /**
  * The editable fields, and current_quantity is not one of them.
@@ -465,11 +465,15 @@ export function validateUpdateItemRequest(body: unknown): Validated<UpdateItemRe
   if (!body || typeof body !== "object" || Array.isArray(body)) return bad("invalid_body");
   const raw = body as Record<string, unknown>;
   if (!isUuid(raw.itemId)) return bad("invalid_item_id");
+  // The idempotency key for the activity log, chosen by the client
+  // BEFORE the request - the same pattern every other inventory act
+  // already uses, so a retry cannot produce a second history line.
+  if (!isUuid(raw.operationId)) return bad("invalid_operation_id");
   if ("currentQuantity" in raw || "current_quantity" in raw) return bad("stock_is_not_editable");
 
   const fields = validateItemFields(raw);
   if (!fields.ok) return fields;
-  return { ok: true, request: { ...fields.request, itemId: raw.itemId } };
+  return { ok: true, request: { ...fields.request, itemId: raw.itemId, operationId: raw.operationId } };
 }
 
 function validateItemFields(raw: Record<string, unknown>): Validated<ItemFields> {
@@ -517,7 +521,7 @@ function cleanDate(raw: unknown): string | null | undefined {
   return Number.isNaN(parsed.getTime()) ? undefined : trimmed;
 }
 
-export type CategoryRequest = { categoryId: string | null; name: string | null; isActive: boolean | null };
+export type CategoryRequest = { categoryId: string | null; name: string | null; isActive: boolean | null; operationId: string };
 
 /** Create (no id), rename (id + name) or archive (id + isActive). */
 export function validateCategoryRequest(body: unknown): Validated<CategoryRequest> {
@@ -526,6 +530,8 @@ export function validateCategoryRequest(body: unknown): Validated<CategoryReques
 
   const categoryId = raw.categoryId === undefined || raw.categoryId === null ? null : raw.categoryId;
   if (categoryId !== null && !isUuid(categoryId)) return bad("invalid_category");
+  // The activity log's idempotency key, chosen before the request.
+  if (!isUuid(raw.operationId)) return bad("invalid_operation_id");
 
   let name: string | null = null;
   if (raw.name !== undefined && raw.name !== null) {
@@ -538,7 +544,7 @@ export function validateCategoryRequest(body: unknown): Validated<CategoryReques
   if (categoryId === null && !name) return bad("invalid_name");
   if (categoryId !== null && name === null && isActive === null) return bad("nothing_to_change");
 
-  return { ok: true, request: { categoryId: categoryId as string | null, name, isActive } };
+  return { ok: true, request: { categoryId: categoryId as string | null, name, isActive, operationId: raw.operationId as string } };
 }
 
 /* ══════════════════════════════════════════════════════════════

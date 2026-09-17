@@ -1,4 +1,6 @@
 import { getSupabaseAdmin } from "./supabaseAdmin";
+import { recordAdminActivity } from "./adminAuditDeps.ts";
+import { AUDIT_ACTIONS } from "./adminAudit.ts";
 import {
   CATEGORY_COLUMNS,
   ITEM_COLUMNS,
@@ -372,11 +374,24 @@ export async function listInventoryCategories() {
  * gone on reload and was never there for a retry the browser made by
  * itself.
  */
-export async function recordMovement(request: MovementRequest, actorEmail: string) {
+/**
+ * THE ACTOR IS A USER ID NOW, AND THE ADDRESS IS DERIVED IN THE DATABASE.
+ *
+ * 052's wrapper reads the operator's address from admin_users using the
+ * verified id and hands THAT to 050's function, so the value written
+ * into the ledger's actor_email can no longer originate anywhere near a
+ * request body - not even in principle. The wrapper also records the
+ * activity row in the SAME transaction as the movement.
+ *
+ * 050's function is untouched and still does all the work: the row
+ * lock, the balance, the append-only entry, the negative-stock rule.
+ */
+export async function recordMovement(request: MovementRequest, actorUserId: string) {
   const admin = getSupabaseAdmin();
   if (!admin) return unavailable();
 
-  const { data, error } = await admin.rpc("record_inventory_movement", {
+  const { data, error } = await admin.rpc("admin_record_inventory_movement", {
+    p_actor_user_id: actorUserId,
     p_operation_id: request.operationId,
     p_item_id: request.itemId,
     p_quantity: request.quantity,
@@ -389,7 +404,6 @@ export async function recordMovement(request: MovementRequest, actorEmail: strin
     p_batch_number: request.batchNumber,
     p_best_before_date: request.bestBeforeDate,
     p_occurred_at: null,
-    p_actor_email: actorEmail,
     p_allow_negative: request.allowNegative,
   });
 
@@ -401,18 +415,18 @@ export async function recordMovement(request: MovementRequest, actorEmail: strin
 }
 
 /** Books a physical count. The count is the input; the delta is derived. */
-export async function recordStocktake(request: StocktakeRequest, actorEmail: string) {
+export async function recordStocktake(request: StocktakeRequest, actorUserId: string) {
   const admin = getSupabaseAdmin();
   if (!admin) return unavailable();
 
-  const { data, error } = await admin.rpc("record_inventory_stocktake", {
+  const { data, error } = await admin.rpc("admin_record_inventory_stocktake", {
+    p_actor_user_id: actorUserId,
     p_operation_id: request.operationId,
     p_item_id: request.itemId,
     p_physical: request.physicalQuantity,
     p_note: request.note,
     p_reference: request.reference,
     p_occurred_at: null,
-    p_actor_email: actorEmail,
   });
 
   if (error) {
@@ -471,7 +485,7 @@ function numberOf(value: unknown): number | null {
  * behind it is an inventory whose history starts with a claim, and every
  * later reconciliation has to take that claim on trust.
  */
-export async function createInventoryItem(request: CreateItemRequest, actorEmail: string) {
+export async function createInventoryItem(request: CreateItemRequest, actorUserId: string) {
   const admin = getSupabaseAdmin();
   if (!admin) return unavailable();
 
@@ -516,9 +530,45 @@ export async function createInventoryItem(request: CreateItemRequest, actorEmail
         batchNumber: null, bestBeforeDate: null,
         allowNegative: false,
       },
-      actorEmail
+      actorUserId
     );
   }
+
+  // NOT ATOMIC WITH THE INSERT, and deliberately so: creating an item is
+  // several statements today (the row, its areas, sometimes an opening
+  // movement), and wrapping that in a function would mean rewriting
+  // working code for a line of history. Recorded once the item exists.
+  //
+  // The opening movement, if there was one, recorded its OWN audit row
+  // inside 050's transaction - so a created item with stock produces two
+  // truthful lines rather than one that guesses.
+  //
+  // ── AND IT SHARES THE REQUEST'S OPERATION ID ──────────────
+  //
+  // The opening movement above is booked under request.operationId, and
+  // 052's wrapper writes ITS audit row under that same id. That is
+  // correct and no longer a collision: the audit's key is
+  // (module, action, operation_id), so one operator action can produce
+  // an item_created AND a movement_recorded, both truthfully part of the
+  // same operation. Keying this on something else would break that link
+  // for no gain.
+  //
+  // A retry that creates a SECOND item under the same operation id is
+  // refused by record_admin_activity rather than recorded, because the
+  // key would then describe a different entity. That is the intended
+  // signal: item creation is not idempotent on operationId today (see
+  // the note above the insert), and the audit now says so loudly instead
+  // of recording two creations as though both were meant.
+  await recordAdminActivity({
+    actorUserId,
+    module: "inventory",
+    action: AUDIT_ACTIONS.inventoryItemCreated,
+    entityType: "inventory_item",
+    entityId: item.id,
+    summary: `Artikel ${request.name} angelegt`,
+    operationId: request.operationId,
+    metadata: { item_name: request.name, unit: request.unit, areas: request.areas },
+  });
 
   return { ok: true as const, item, areas: request.areas, opening };
 }
@@ -531,7 +581,7 @@ export async function createInventoryItem(request: CreateItemRequest, actorEmail
  * a request carrying it is refused by the database as well as by the
  * validator.
  */
-export async function updateInventoryItem(request: UpdateItemRequest) {
+export async function updateInventoryItem(request: UpdateItemRequest, actorUserId: string) {
   const admin = getSupabaseAdmin();
   if (!admin) return unavailable();
 
@@ -567,11 +617,23 @@ export async function updateInventoryItem(request: UpdateItemRequest) {
   if (!data) return { ok: false as const, status: 404, error: "Artikel nicht gefunden." };
 
   await replaceItemAreas(admin, request.itemId, request.areas);
+
+  await recordAdminActivity({
+    actorUserId,
+    module: "inventory",
+    action: AUDIT_ACTIONS.inventoryItemUpdated,
+    entityType: "inventory_item",
+    entityId: request.itemId,
+    summary: `Artikel ${request.name} bearbeitet`,
+    operationId: request.operationId,
+    metadata: { item_name: request.name, areas: request.areas },
+  });
+
   return { ok: true as const, item: data as unknown as ItemRow, areas: request.areas };
 }
 
 /** Archives or restores. Never deletes: the history has to survive. */
-export async function setItemActive(itemId: string, isActive: boolean) {
+export async function setItemActive(itemId: string, isActive: boolean, actorUserId: string, operationId: string) {
   const admin = getSupabaseAdmin();
   if (!admin) return unavailable();
   const { data, error } = await admin
@@ -582,7 +644,20 @@ export async function setItemActive(itemId: string, isActive: boolean) {
     return internal();
   }
   if (!data) return { ok: false as const, status: 404, error: "Artikel nicht gefunden." };
-  return { ok: true as const, item: data as unknown as ItemRow };
+
+  const item = data as unknown as ItemRow;
+  await recordAdminActivity({
+    actorUserId,
+    module: "inventory",
+    action: AUDIT_ACTIONS.inventoryItemArchived,
+    entityType: "inventory_item",
+    entityId: itemId,
+    summary: `Artikel ${String(item.name ?? "")} ${isActive ? "wiederhergestellt" : "archiviert"}`,
+    operationId,
+    metadata: { item_name: String(item.name ?? ""), archived: !isActive },
+  });
+
+  return { ok: true as const, item };
 }
 
 async function replaceItemAreas(
@@ -605,7 +680,9 @@ async function replaceItemAreas(
 
 /** Creates, renames or archives a category. Never deletes one. */
 export async function saveInventoryCategory(
-  request: { categoryId: string | null; name: string | null; isActive: boolean | null }
+  request: { categoryId: string | null; name: string | null; isActive: boolean | null },
+  actorUserId: string,
+  operationId: string
 ) {
   const admin = getSupabaseAdmin();
   if (!admin) return unavailable();
@@ -620,7 +697,18 @@ export async function saveInventoryCategory(
       console.error("Inventory: category create failed:", error.message);
       return internal();
     }
-    return { ok: true as const, category: data as unknown as Record<string, unknown> };
+    const created = data as unknown as Record<string, unknown>;
+    await recordAdminActivity({
+      actorUserId,
+      module: "inventory",
+      action: AUDIT_ACTIONS.inventoryCategorySaved,
+      entityType: "inventory_category",
+      entityId: String(created.id ?? ""),
+      summary: `Kategorie ${String(request.name ?? "")} angelegt`,
+      operationId,
+      metadata: { category_name: String(request.name ?? "") },
+    });
+    return { ok: true as const, category: created };
   }
 
   // ARCHIVING A CATEGORY THAT IS STILL IN USE IS REFUSED, not silently
@@ -661,5 +749,18 @@ export async function saveInventoryCategory(
     return internal();
   }
   if (!data) return { ok: false as const, status: 404, error: "Kategorie nicht gefunden." };
-  return { ok: true as const, category: data as unknown as Record<string, unknown> };
+
+  const saved = data as unknown as Record<string, unknown>;
+  await recordAdminActivity({
+    actorUserId,
+    module: "inventory",
+    action: AUDIT_ACTIONS.inventoryCategorySaved,
+    entityType: "inventory_category",
+    entityId: request.categoryId,
+    summary: `Kategorie ${String(saved.name ?? "")} ${request.isActive === false ? "archiviert" : "gespeichert"}`,
+    operationId,
+    metadata: { category_name: String(saved.name ?? ""), archived: request.isActive === false },
+  });
+
+  return { ok: true as const, category: saved };
 }

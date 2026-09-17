@@ -9957,3 +9957,18 @@ header nav{gap:18px;font-size:12px}
   color:var(--plum);
   overflow-wrap:anywhere;
 }
+
+/* ── THE ACTIVITY VIEW (4A.2B-2) ───────────────────────────────
+   Reuses the inventory's table, the filter row and the pager, so the
+   screen belongs to Orders and Inventar rather than looking like a
+   second product. Three small rules, and no new colour or face. */
+.ops-act-who{ display:block; font-weight:600; }
+.ops-act-role{
+  display:block;
+  font:600 10px/1 var(--font-mono);
+  letter-spacing:.12em;
+  color:var(--plum);
+  opacity:.8;
+}
+.ops-act-summary{ display:block; }
+.ops-act-facts{ display:block; font-size:12px; color:var(--plum); opacity:.8; margin-top:2px; }

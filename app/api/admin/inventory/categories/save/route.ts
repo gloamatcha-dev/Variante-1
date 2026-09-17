@@ -23,7 +23,9 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: `Ungültige Kategorie: ${validated.code}.` }, { status: 400 });
   }
 
-  const result = await saveInventoryCategory(validated.request);
+  const result = await saveInventoryCategory(
+    validated.request, gate.context.identity.userId, validated.request.operationId
+  );
   if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
   return Response.json(result, { status: 200 });
 }

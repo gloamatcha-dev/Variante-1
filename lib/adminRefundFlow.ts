@@ -87,6 +87,20 @@ export type RefundFlowDeps = {
   }): Promise<{ status: string | null }>;
   /** syncOrderRefundStateFromStripe. Throws on a transient failure. */
   syncRefundState(paymentIntentId: string): Promise<{ result: string; refundedTotalCents: number | null }>;
+  /**
+   * Records the act, AFTER GLOA has committed the state Stripe
+   * confirmed. Injected rather than imported so this module stays a
+   * testable leaf. See the note at the call site for why this one audit
+   * is not transactional.
+   *
+   * SHOULD NEVER THROW, like sendConfirmation. The call site guards it
+   * anyway - a refund that already moved money must not be reported as
+   * a failure because the log was briefly unreachable.
+   */
+  recordActivity(input: {
+    orderId: string; orderNumber: string; claimId: string;
+    amountCents: number; refundStatus: string | null;
+  }): Promise<void>;
   /** isNewSettledRefundFact - the same gate the Stripe webhook uses. */
   isNewSettledFact(syncResult: string): boolean;
   /** sendRefundConfirmationIfNeeded. Never throws. */
@@ -131,7 +145,7 @@ export async function runAdminRefund(
   }
 
   try {
-    return await refundUnderClaim(deps, orderId, rawAmount);
+    return await refundUnderClaim(deps, orderId, rawAmount, claimId);
   } finally {
     await deps.release(orderId, claimId);
   }
@@ -140,7 +154,9 @@ export async function runAdminRefund(
 async function refundUnderClaim(
   deps: RefundFlowDeps,
   orderId: string,
-  rawAmount: unknown
+  rawAmount: unknown,
+  /** The claim held by the caller - also the audit's idempotency key. */
+  claimId: string
 ): Promise<RefundFlowResult> {
   const { order, error } = await deps.loadOrder(orderId);
   if (error) {
@@ -216,6 +232,34 @@ async function refundUnderClaim(
   // 'unchanged' mail nothing.
   let emailOutcome: RefundFlowSuccess["emailOutcome"] = "not-attempted";
   if (deps.isNewSettledFact(syncResult)) {
+    // ── THE ONE AUDIT THAT CANNOT BE TRANSACTIONAL ────────────
+    //
+    // Stripe cannot join a Postgres transaction, so this is recorded
+    // after the fact rather than with it - and only for a result that
+    // means GLOA ACCEPTED a new settled refund. It never claims a
+    // refund on 'refund_pending', on 'unchanged', or when the sync
+    // failed above.
+    //
+    // The claim id from migration 049 is the idempotency key: a retry
+    // holds the same claim, so the log cannot gain a second line for
+    // one refund. Nothing about the PaymentIntent or the Refund object
+    // is stored - an amount and a status, and no more.
+    // Guarded rather than trusted. The recorder returns a boolean and
+    // swallows its own errors today; this is the second belt, so a
+    // future implementation that throws still cannot turn a settled
+    // refund into an error message for the operator.
+    try {
+      await deps.recordActivity({
+        orderId: order.id,
+        orderNumber,
+        claimId,
+        amountCents: amount.amountCents,
+        refundStatus,
+      });
+    } catch {
+      deps.log(`Admin refund: the act on ${orderNumber} was not recorded.`);
+    }
+
     emailOutcome = await deps.sendConfirmation(order.id);
   }
 

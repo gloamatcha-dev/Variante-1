@@ -378,19 +378,23 @@ test("5e: 'today' is the operator's day in Berlin, not UTC's", () => {
    6. THE SHELL
    ══════════════════════════════════════════════════════════════ */
 
-test("6: the navigation offers four real sections and fakes none", () => {
+test("6: the navigation offers five real sections and fakes none", () => {
   // PAKET 4A.2 made Inventar real. It used to be one of the three
   // "bald" labels; a tab that opens nothing is worse than one that says
   // it is not here yet, and the inverse is also true - a section that
   // exists must not still be advertised as coming.
-  assert.match(shell, /const \[view, setView\] = useState<"overview" \| "orders" \| "inventory" \| "waitlist">\("overview"\)/);
+  // 4A.2B-2 added Aktivität, which is real from the day it appears: it
+  // opens the audit log rather than a placeholder.
+  assert.match(shell, /const \[view, setView\] = useState<"overview" \| "orders" \| "inventory" \| "activity" \| "waitlist">\("overview"\)/);
   // The "bald" list must no longer name a section that exists.
   const soon = shell.slice(shell.indexOf("ops-nav-soon") - 400, shell.indexOf("ops-nav-soon"));
   assert.ok(!soon.includes("Inventar"),
     "Inventar is still listed as coming while its tab exists");
   assert.ok(soon.includes("B2B") && soon.includes("Kosten"),
     "the two sections that really are still coming stopped saying so");
-  for (const label of ["Übersicht", "Bestellungen", "Inventar", "Launch List"]) {
+  assert.ok(!soon.includes("Aktivität"),
+    "Aktivität is listed as coming while its tab exists");
+  for (const label of ["Übersicht", "Bestellungen", "Inventar", "Aktivität", "Launch List"]) {
     assert.ok(shell.includes(`"${label}"`) || shell.includes(`>${label}<`), `no nav entry for ${label}`);
   }
   // Coming sections are still named but are not buttons and open
@@ -471,7 +475,11 @@ test("7: /api/admin gained orders and nothing else", () => {
   // from a customer-facing page, and none is called by an order, a
   // shipment, a refund or a cancellation. Reviewed in
   // tests/inventory.test.mjs.
-  assert.deepEqual(dirs, ["inventory", "launch", "orders", "session", "waitlist"]);
+  // 4A.2B-2 added the activity log. It is the one admin route that
+  // only READS: no wrapper, no RPC that writes, and the table grants
+  // service_role SELECT alone, so it could not write if it tried.
+  // Reviewed in tests/admin-audit.test.mjs.
+  assert.deepEqual(dirs, ["activity", "inventory", "launch", "orders", "session", "waitlist"]);
   const orderDirs = readdirSync(path.join(ROOT, "app/api/admin/orders"), { withFileTypes: true })
     .filter(e => e.isDirectory()).map(e => e.name).sort();
   // PAKET 4A.1B added the four actions, one route each rather than one
@@ -867,8 +875,19 @@ test("10e: the inventory listing overlaps the same way, and caches nothing", () 
 test("10f: no stock, grant, RPC or pagination behaviour moved with it", () => {
   const inv = codeOnly(inventoryLib);
   // The writes are still the two security-definer functions and nothing else.
-  assert.ok(inv.includes('admin.rpc("record_inventory_movement"'), "the movement RPC changed");
-  assert.ok(inv.includes('admin.rpc("record_inventory_stocktake"'), "the stocktake RPC changed");
+  // 4A.2B-2: the audited 052 wrappers. Each calls the SAME
+  // security-definer function inside itself and writes the audit row in
+  // that one transaction, so "the writes are two functions and nothing
+  // else" still holds - with a record of who performed them.
+  assert.ok(inv.includes('admin.rpc("admin_record_inventory_movement"'), "the movement RPC changed");
+  assert.ok(inv.includes('admin.rpc("admin_record_inventory_stocktake"'), "the stocktake RPC changed");
+  // By name, not by substring: "admin_record_inventory_movement"
+  // CONTAINS "record_inventory_movement", so a substring test would not
+  // notice an unaudited call surviving next to the audited one.
+  const called = new Set([...inv.matchAll(/\.rpc\("(\w+)"/g)].map(m => m[1]));
+  for (const bare of ["record_inventory_movement", "record_inventory_stocktake"]) {
+    assert.ok(!called.has(bare), `stock still moves through ${bare} unaudited`);
+  }
   // Still no direct quantity write: current_quantity appears only as a
   // READ (a type, a select list, a comparison), never inside an update
   // payload. tests/inventory.test.mjs proves the database refuses it too.

@@ -454,7 +454,7 @@ function ItemDetail({
     setBusy(true); setError(null); setResult(null);
     try {
       const { status, data } = await post("/api/admin/inventory/items/archive",
-        { itemId: item.id, isActive: next });
+        { itemId: item.id, isActive: next, operationId: newOperationId() });
       if (status === 401) { onSessionLost(); return; }
       if (status !== 200) {
         setError(typeof data.error === "string" ? data.error : "Die Aktion ist fehlgeschlagen.");
@@ -874,7 +874,8 @@ function ItemForm({
     if (busy || !newCategory.trim()) return;
     setBusy(true); setError(null);
     try {
-      const { status, data } = await post("/api/admin/inventory/categories/save", { name: newCategory });
+      const { status, data } = await post("/api/admin/inventory/categories/save",
+        { name: newCategory, operationId: newOperationId() });
       if (status === 401) { onSessionLost(); return; }
       if (status !== 200) {
         setError(typeof data.error === "string" ? data.error : "Die Kategorie konnte nicht angelegt werden.");
@@ -902,7 +903,7 @@ function ItemForm({
         notes: notes || null,
       };
       const { status, data } = item
-        ? await post("/api/admin/inventory/items/update", { ...shared, itemId: item.id })
+        ? await post("/api/admin/inventory/items/update", { ...shared, itemId: item.id, operationId })
         : await post("/api/admin/inventory/items/create", { ...shared, operationId, initialQuantity: initial || null });
       if (status === 401) { onSessionLost(); return; }
       if (status !== 200) {

@@ -706,7 +706,17 @@ test("55: this phase added no migration, and the only ones after it are 038 and 
     // It creates no policy on any existing table, alters no existing
     // column, and touches no order, payment, inventory or email state.
     // Reviewed in tests/admin-identity.test.mjs.
-    "051_admin_identity_foundation.sql"],
+    "051_admin_identity_foundation.sql",
+    // 052 IS THE ADMIN ACTIVITY LOG: one new append-only table,
+    // public.admin_activity_log, plus a controlled insert function and
+    // five wrappers under NEW names around the existing order and
+    // inventory functions. RLS is on with NOT ONE POLICY, anon and
+    // authenticated are revoked, and service_role is granted SELECT
+    // only - it cannot write the log even by accident. No existing
+    // function signature changed, so no older overload is left
+    // callable, and no row is backfilled. Reviewed in
+    // tests/admin-audit.test.mjs.
+    "052_admin_activity_audit.sql"],
     "an unreviewed migration appeared after 037");
   const sql039 = withoutComments(read("supabase/migrations/039_b2c_annual_plan_foundation.sql"));
   assert.ok(!sql039.includes("apply_order_refund_state_by_invoice"),

@@ -25,7 +25,7 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: `Ungültiger Artikel: ${validated.code}.` }, { status: 400 });
   }
 
-  const result = await createInventoryItem(validated.request, gate.context.session.email);
+  const result = await createInventoryItem(validated.request, gate.context.identity.userId);
   if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
   return Response.json(result, { status: 200 });
 }

@@ -5,6 +5,8 @@ import { sendCancellationOutcomeEmailIfNeeded } from "./cancellationOutcomeEmail
 import { sendRefundConfirmationIfNeeded } from "./refundConfirmationEmail";
 import { sendCancellationConfirmationIfNeeded } from "./orderCancellationConfirmationEmail";
 import { syncOrderRefundStateFromStripe } from "./orderRefunds";
+import { recordAdminActivity } from "./adminAuditDeps.ts";
+import { AUDIT_ACTIONS } from "./adminAudit.ts";
 import { isNewSettledRefundFact } from "./refundConfirmationRules";
 import { randomUUID } from "node:crypto";
 import { runAdminRefund, type RefundFlowDeps } from "./adminRefundFlow.ts";
@@ -190,7 +192,17 @@ const internal = (): ActionFailure => ({ ok: false, status: 500, error: "Interne
  * outcome is reported so the operator sees "versendet, Mail
  * fehlgeschlagen" rather than being told the shipment failed.
  */
-export async function adminShipOrder(input: unknown): Promise<ShipOutcome> {
+/**
+ * THE ACTOR TRAVELS AS A VERIFIED USER ID, AND THE AUDIT IS ATOMIC.
+ *
+ * admin_mark_order_shipped (052) runs the UNCHANGED mark_order_shipped
+ * and writes the activity row in the same transaction, so there is no
+ * state in which the order shipped and the log cannot say who shipped
+ * it. The internal bearer-secret route still calls the original
+ * function directly and is deliberately not audited - it names no
+ * person, and a log entry attributed to nobody would be worse than none.
+ */
+export async function adminShipOrder(input: unknown, actorUserId: string): Promise<ShipOutcome> {
   const validated = validateShipmentRequest(input);
   if (!validated.ok) {
     return { ok: false, status: 400, error: `Ungültige Versanddaten: ${validated.code}.` };
@@ -203,7 +215,8 @@ export async function adminShipOrder(input: unknown): Promise<ShipOutcome> {
     return unavailable();
   }
 
-  const { data, error } = await admin.rpc("mark_order_shipped", {
+  const { data, error } = await admin.rpc("admin_mark_order_shipped", {
+    p_actor_user_id: actorUserId,
     p_order_number: orderNumber,
     p_carrier: carrier,
     p_tracking_number: trackingNumber,
@@ -273,7 +286,7 @@ export async function adminShipOrder(input: unknown): Promise<ShipOutcome> {
  * outcome is reported as data so the operator sees "storniert,
  * Stornobestätigung fehlgeschlagen" rather than a failed cancellation.
  */
-export async function adminCancelOrder(input: unknown): Promise<CancelOutcome> {
+export async function adminCancelOrder(input: unknown, actorUserId: string): Promise<CancelOutcome> {
   const validated = validateCancellationRequest(input);
   if (!validated.ok) {
     return { ok: false, status: 400, error: `Ungültige Anfrage: ${validated.code}.` };
@@ -286,7 +299,10 @@ export async function adminCancelOrder(input: unknown): Promise<CancelOutcome> {
     return unavailable();
   }
 
-  const { data, error } = await admin.rpc("cancel_order", { p_order_number: orderNumber });
+  const { data, error } = await admin.rpc("admin_cancel_order", {
+    p_actor_user_id: actorUserId,
+    p_order_number: orderNumber,
+  });
   if (error) {
     console.error(`Admin cancel: RPC failed for ${orderNumber}:`, error.message);
     return internal();
@@ -330,7 +346,7 @@ export async function adminCancelOrder(input: unknown): Promise<CancelOutcome> {
  * cancel_order on approval. The outcome email is the existing one and is
  * sent strictly after the resolution committed.
  */
-export async function adminResolveCancellationRequest(input: unknown): Promise<ResolveOutcome> {
+export async function adminResolveCancellationRequest(input: unknown, actorUserId: string): Promise<ResolveOutcome> {
   const validated = validateResolutionRequest(input);
   if (!validated.ok) {
     return { ok: false, status: 400, error: `Ungültige Anfrage: ${validated.code}.` };
@@ -343,7 +359,8 @@ export async function adminResolveCancellationRequest(input: unknown): Promise<R
     return unavailable();
   }
 
-  const { data, error } = await admin.rpc("resolve_order_cancellation_request", {
+  const { data, error } = await admin.rpc("admin_resolve_order_cancellation_request", {
+    p_actor_user_id: actorUserId,
     p_order_number: orderNumber,
     p_decision: decision,
   });
@@ -443,7 +460,7 @@ const REFUND_ORDER_COLUMNS =
  * claim_order_refund expires a claim older than its stale window in the
  * same statement that takes it.
  */
-export async function adminRefundOrder(orderId: string, rawAmount: unknown): Promise<RefundOutcome> {
+export async function adminRefundOrder(orderId: string, rawAmount: unknown, actorUserId: string): Promise<RefundOutcome> {
   const admin = getSupabaseAdmin();
   if (!admin) {
     console.error("Admin refund: SUPABASE_SECRET_KEY is not configured.");
@@ -506,6 +523,20 @@ export async function adminRefundOrder(orderId: string, rawAmount: unknown): Pro
     async syncRefundState(paymentIntentId) {
       const outcome = await syncOrderRefundStateFromStripe(stripe, paymentIntentId);
       return { result: outcome.result, refundedTotalCents: outcome.refundedTotalCents };
+    },
+
+    async recordActivity({ orderId: id, orderNumber, claimId, amountCents, refundStatus }) {
+      await recordAdminActivity({
+        actorUserId,
+        module: "orders",
+        action: AUDIT_ACTIONS.orderRefunded,
+        entityType: "order",
+        entityId: orderNumber,
+        summary: `Bestellung ${orderNumber} erstattet`,
+        operationId: claimId,
+        metadata: { refund_amount_cents: amountCents, refund_status: refundStatus },
+      });
+      void id;
     },
 
     isNewSettledFact: isNewSettledRefundFact,

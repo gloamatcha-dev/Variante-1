@@ -27,7 +27,7 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: `Ungültige Buchung: ${validated.code}.` }, { status: 400 });
   }
 
-  const result = await recordMovement(validated.request, gate.context.session.email);
+  const result = await recordMovement(validated.request, gate.context.identity.userId);
   if (!result.ok) {
     return Response.json({ error: result.error, code: "code" in result ? result.code : undefined },
       { status: result.status });

@@ -101,9 +101,9 @@ test("1: 038 exists, owns its number, and 039 is the only one above it", () => {
   // in tests/annual-plan-foundation-migration.test.mjs. 038 is therefore
   // no longer the highest, and this is re-pinned rather than deleted:
   // what it protects is that no UNREVIEWED migration appeared.
-  assert.equal(files[files.length - 13], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 14], MIGRATION_038, "038 must be the one before it");
-  assert.equal(files[files.length - 15], MIGRATION_037, "037 must be the one before that");
+  assert.equal(files[files.length - 14], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 15], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 16], MIGRATION_037, "037 must be the one before that");
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
@@ -147,7 +147,17 @@ test("2: no migration 044 or beyond", () => {
     // It creates no policy on any existing table, alters no existing
     // column, and touches no order, payment, inventory or email state.
     // Reviewed in tests/admin-identity.test.mjs.
-    "051_admin_identity_foundation.sql"],
+    "051_admin_identity_foundation.sql",
+    // 052 IS THE ADMIN ACTIVITY LOG: one new append-only table,
+    // public.admin_activity_log, plus a controlled insert function and
+    // five wrappers under NEW names around the existing order and
+    // inventory functions. RLS is on with NOT ONE POLICY, anon and
+    // authenticated are revoked, and service_role is granted SELECT
+    // only - it cannot write the log even by accident. No existing
+    // function signature changed, so no older overload is left
+    // callable, and no row is backfilled. Reviewed in
+    // tests/admin-audit.test.mjs.
+    "052_admin_activity_audit.sql"],
     "an unreviewed migration appeared after 043");
   // And 039 kept its hands off this phase's writer entirely.
   for (const name of [MIGRATION_039, MIGRATION_040, MIGRATION_041, MIGRATION_042]) {

@@ -74,6 +74,7 @@ function makeWorld(overrides = {}) {
     syncThrows: false,
     mails: [],
     logs: [],
+    activity: [],
     stripeDelayMs: 5,
     staleSeconds: 180,
     nextClaim: 0,
@@ -131,6 +132,7 @@ function depsFor(w) {
       return { result: w.syncResult, refundedTotalCents: 3998 };
     },
 
+    recordActivity: async input => { w.activity.push(input); },
     isNewSettledFact: r => r === "applied",
     async sendConfirmation(orderId) { w.mails.push(orderId); return "sent"; },
     log: m => w.logs.push(m),
@@ -523,7 +525,10 @@ test("Q: the cancellation mails strictly after the transition, and only if durab
   const actions = codeOnly(read("lib/adminOrderActions.ts"));
   const at = actions.indexOf("export async function adminCancelOrder");
   const body = actions.slice(at, actions.indexOf("\n}", at));
-  const rpcAt = body.indexOf('.rpc("cancel_order"');
+  // 4A.2B-2: the audited wrapper of migration 052. It calls the same
+  // cancel_order inside itself and adds the audit row to that same
+  // transaction, so the ordering this test protects is unchanged.
+  const rpcAt = body.indexOf('.rpc("admin_cancel_order"');
   const durableAt = body.indexOf("cancellationIsDurable(result)");
   const mailAt = body.indexOf("sendCancellationConfirmationIfNeeded(");
   assert.ok(rpcAt > -1 && durableAt > -1 && mailAt > -1, "the cancel action lost a step");

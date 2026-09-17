@@ -285,6 +285,12 @@ test("4d: every WRITE route takes the write capability, every read says so", () 
   const READS = [
     "orders", "orders/detail", "waitlist",
     "inventory/items", "inventory/items/detail", "inventory/categories",
+    // 4A.2B-2. The audit trail is a READ for all three roles: a viewer
+    // is somebody trusted to look at what the shop is doing, and the log
+    // holds the least sensitive thing there is to look at. It appears in
+    // no WRITES list because the table grants service_role SELECT alone -
+    // there is no write path to classify.
+    "activity",
   ];
 
   for (const route of WRITES) {
@@ -426,7 +432,7 @@ test("6c: no admin secret or identity machinery can reach a client bundle", () =
 test("7: no audit trail, no actor columns, no new real accounts", () => {
   // 4A.2B-2 owns all of this. Asserted here so the boundary is visible.
   const files = readdirSync(path.join(ROOT, "supabase/migrations"));
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 51), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 52), [],
     "a migration beyond 051 appeared");
 
   const sql = codeOnly(migration);
@@ -718,7 +724,7 @@ test("9g: the desktop admin is unchanged", () => {
 test("9h: this package changed nothing else", () => {
   // No migration, no audit trail, no public surface.
   const files = readdirSync(path.join(ROOT, "supabase/migrations"));
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 51), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 52), [],
     "a migration beyond 051 appeared");
   for (const forbidden of ["admin_activity_log", "record_admin_activity", "actor_user_id"]) {
     assert.ok(!shell.includes(forbidden) && !viewportLib.includes(forbidden),

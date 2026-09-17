@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AdminOrders } from "./AdminOrders";
 import { AdminInventory } from "./AdminInventory";
 import { WAITLIST_FILTERS, type WaitlistFilter } from "../lib/adminWaitlistQuery";
+import { AdminActivity } from "./AdminActivity";
 import {
   ADMIN_DESKTOP_MEDIA_QUERY,
   ADMIN_DESKTOP_ONLY_COPY,
@@ -175,7 +176,7 @@ export function AdminOverview() {
   // decides whether the data below is ever asked for.
   const isDesktop = useIsAdminDesktop();
 
-  const [view, setView] = useState<"overview" | "orders" | "inventory" | "waitlist">("overview");
+  const [view, setView] = useState<"overview" | "orders" | "inventory" | "activity" | "waitlist">("overview");
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -355,7 +356,7 @@ export function AdminOverview() {
   if (data.launch.shopStatus !== "live") blockers.push(`Shop ist ${data.launch.shopStatus}`);
   if (data.counts.confirmed === 0) blockers.push("kein bestätigter Kontakt");
 
-  const TITLE = { overview: "Übersicht", orders: "Bestellungen", inventory: "Inventar", waitlist: "Launch List" } as const;
+  const TITLE = { overview: "Übersicht", orders: "Bestellungen", inventory: "Inventar", activity: "Aktivität", waitlist: "Launch List" } as const;
 
   return (
     <main className="ops">
@@ -383,7 +384,7 @@ export function AdminOverview() {
       </header>
 
       <nav className="ops-nav" aria-label="Bereiche">
-        {([["overview", "Übersicht"], ["orders", "Bestellungen"], ["inventory", "Inventar"], ["waitlist", "Launch List"]] as const).map(([key, label]) => (
+        {([["overview", "Übersicht"], ["orders", "Bestellungen"], ["inventory", "Inventar"], ["activity", "Aktivität"], ["waitlist", "Launch List"]] as const).map(([key, label]) => (
           <button
             key={key}
             type="button"
@@ -405,6 +406,11 @@ export function AdminOverview() {
       {view === "orders" && <AdminOrders onSessionLost={() => setSignedIn(false)} />}
 
       {view === "inventory" && <AdminInventory onSessionLost={() => setSignedIn(false)} />}
+
+      {/* MOUNTED ONLY WHEN ITS TAB IS OPEN, so the overview, the orders
+          screen and the inventory never pay for a query nobody asked
+          for. Closing the tab unmounts it; nothing keeps polling. */}
+      {view === "activity" && <AdminActivity onSessionLost={() => setSignedIn(false)} />}
 
       {view === "overview" && (
         <section className="ops-panel" aria-label="Operations">

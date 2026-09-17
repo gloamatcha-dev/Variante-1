@@ -1237,7 +1237,7 @@ test("33: B2C_ANNUAL_PLAN_ENABLED cannot stop an existing contract", () => {
 test("34: this phase adds no migration and edits none", () => {
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 51);
+  assert.equal(migrations.length, 52);
   // PHASE 4B8.2 ADDED MIGRATION 042: the ONE column privilege 041
   // was short of, so migration 039's delivery policy can still read
   // the parent's user_id while resolving ownership. Reviewed in
@@ -1246,11 +1246,11 @@ test("34: this phase adds no migration and edits none", () => {
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(migrations[migrations.length - 6], "046_launch_signup_atomic.sql");
-  assert.equal(migrations[migrations.length - 7], "045_launch_welcome_email.sql");
-  assert.equal(migrations[migrations.length - 8], "044_launch_send.sql");
-  assert.equal(migrations[migrations.length - 9], "043_launch_waitlist.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 51), [], "a migration 052 or beyond appeared");
+  assert.equal(migrations[migrations.length - 7], "046_launch_signup_atomic.sql");
+  assert.equal(migrations[migrations.length - 8], "045_launch_welcome_email.sql");
+  assert.equal(migrations[migrations.length - 9], "044_launch_send.sql");
+  assert.equal(migrations[migrations.length - 10], "043_launch_waitlist.sql");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 52), [], "a migration 053 or beyond appeared");
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   assert.equal(changed, "", "a live, immutable migration was edited");

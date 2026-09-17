@@ -145,8 +145,8 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
   const files = readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith(".sql")).sort();
   assert.deepEqual(files.filter(f => f.startsWith("039")), [MIGRATION_039],
     "there must be exactly one migration 039");
-  assert.equal(files[files.length - 13], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 14], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 14], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 15], MIGRATION_038, "038 must be the one before it");
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
@@ -154,7 +154,7 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
 test("2: no migration 044 or beyond", () => {
   // 039 is not applied anywhere, so it is still the right place to fix
   // 039. A hardening pass must not become a second migration.
-  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 51);
+  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 52);
   assert.deepEqual(beyond, [], "an unreviewed migration appeared after 039");
 });
 
@@ -1161,6 +1161,28 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     "lib/adminSession.ts",
     "lib/adminSessionDeps.ts",
     "lib/adminActionRoute.ts",
+    // 4A.2B-2, THE AUDIT TRAIL. One lib module is edited that is not
+    // already on this list:
+    //
+    //   inventoryRules.ts    the edit and the category save each gained
+    //                        a REQUIRED operationId, validated as a uuid
+    //                        exactly like the one the movement and the
+    //                        stocktake have always carried. It is the
+    //                        key the audit row is written under, so a
+    //                        double submit is one act and one line of
+    //                        history. Nothing existing was relaxed - the
+    //                        new field is an additional refusal - and
+    //                        the stock rules are untouched: the edit
+    //                        form still cannot name a quantity.
+    //
+    // The three already listed above gain their audit calls:
+    // adminOrderActions.ts and inventoryAdmin.ts now call the 052
+    // wrappers, which perform the SAME transition and write the audit
+    // row in one transaction, and adminRefundFlow.ts records the refund
+    // after the sync says the settled fact is new. No payment,
+    // fulfillment or annual module is involved. Reviewed in
+    // tests/admin-audit.test.mjs.
+    "lib/inventoryRules.ts",
   ];
 
   // Phase 4B4 edits ONE application module: the single canonical Stripe
@@ -1354,6 +1376,32 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     "app/api/admin/inventory/items/route.ts",
     "app/api/admin/inventory/items/detail/route.ts",
     "app/api/admin/inventory/categories/route.ts",
+    // 4A.2B-2, THE AUDIT TRAIL. Every admin route that CHANGES something
+    // is edited, and all ten edits are the same one line: the verified
+    // actor from the gate is handed to the action.
+    //
+    //   ... gate.context.identity.userId ...
+    //
+    // The actor therefore comes from the session and the admin_users row
+    // behind it - never from the body, a query parameter or a header.
+    // The gate itself, the capability each route asks for, the
+    // validation and the order of every existing step are unchanged; the
+    // three item/category routes additionally forward the operationId
+    // the client now sends, which lib/inventoryRules.ts refuses if it is
+    // missing or malformed.
+    //
+    // No payment, fulfillment or annual module is involved. Reviewed in
+    // tests/admin-audit.test.mjs and tests/admin-identity.test.mjs.
+    "app/api/admin/orders/ship/route.ts",
+    "app/api/admin/orders/cancel/route.ts",
+    "app/api/admin/orders/refund/route.ts",
+    "app/api/admin/orders/resolve-request/route.ts",
+    "app/api/admin/inventory/movement/route.ts",
+    "app/api/admin/inventory/stocktake/route.ts",
+    "app/api/admin/inventory/items/create/route.ts",
+    "app/api/admin/inventory/items/update/route.ts",
+    "app/api/admin/inventory/items/archive/route.ts",
+    "app/api/admin/inventory/categories/save/route.ts",
   ];
   // NOTE. Both lists are about UNCOMMITTED edits to files that already
   // exist, so a file this package CREATES does not belong in either -

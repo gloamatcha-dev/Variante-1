@@ -45,6 +45,6 @@ export async function POST(request: Request): Promise<Response> {
 
   // Passed through untouched: resolveRefundAmount decides what it means,
   // against a maximum the server computed from the order it loaded.
-  const outcome = await adminRefundOrder(id, body.amountCents);
+  const outcome = await adminRefundOrder(id, body.amountCents, gate.context.identity.userId);
   return adminActionResponse(outcome);
 }

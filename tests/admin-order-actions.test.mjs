@@ -203,8 +203,26 @@ test("2d: no internal HTTP loop - the admin path calls the functions directly", 
   // Calling /api/internal/* from the server would mean holding one of
   // those bearer secrets in this process's request path for no gain.
   assert.ok(!actionsCode.includes("fetch("), "the action module makes an HTTP call");
-  for (const rpc of ["mark_order_shipped", "cancel_order", "resolve_order_cancellation_request"]) {
+  // 4A.2B-2: the admin path now goes through the audited wrappers of
+  // migration 052. Each still performs exactly one transition - the
+  // wrapper CALLS the same function - and additionally writes the audit
+  // row in the SAME transaction, which is why the admin path must not
+  // reach the bare function any more: that would be a transition with no
+  // record of who made it. The internal bearer routes and the webhook
+  // still call the bare functions, and this module is not them.
+  for (const rpc of [
+    "admin_mark_order_shipped",
+    "admin_cancel_order",
+    "admin_resolve_order_cancellation_request",
+  ]) {
     assert.ok(actionsCode.includes(`.rpc("${rpc}"`), `the action module does not call ${rpc} directly`);
+  }
+  // Extracted by name rather than by substring: "admin_cancel_order"
+  // CONTAINS "cancel_order", so a substring test would pass while the
+  // unaudited door stood open.
+  const called = new Set([...actionsCode.matchAll(/\.rpc\("(\w+)"/g)].map(m => m[1]));
+  for (const bare of ["mark_order_shipped", "cancel_order", "resolve_order_cancellation_request"]) {
+    assert.ok(!called.has(bare), `the admin path still reaches ${bare} unaudited`);
   }
 });
 
@@ -221,13 +239,16 @@ test("3: every transition goes through its database function, never a table writ
   }
   const rpcs = [...new Set([...actionsCode.matchAll(/\.rpc\("(\w+)"/g)].map(m => m[1]))].sort();
   assert.deepEqual(rpcs, [
+    // 4A.2B-2: the three transitions are the audited 052 wrappers. Each
+    // is the one authority for its transition on the admin path, and it
+    // records the actor in the same transaction.
+    "admin_cancel_order",
+    "admin_mark_order_shipped",
+    "admin_resolve_order_cancellation_request",
     // The refund lock (migration 049). Not a transition: these decide
     // WHO may proceed, never what happens to the order.
-    "cancel_order",
     "claim_order_refund",
-    "mark_order_shipped",
     "release_order_refund",
-    "resolve_order_cancellation_request",
   ]);
   // The refund's write is apply_order_refund_state, reached through the
   // existing sync rather than called here - which is what makes it an

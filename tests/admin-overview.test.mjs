@@ -420,7 +420,7 @@ test("22: release and send are absent from this screen", () => {
   assert.match(overview, /Freigabe und Versand sind in dieser Ansicht bewusst nicht möglich/);
 });
 
-test("23: the admin API surface is exactly these four, all POST-gated", () => {
+test("23: the admin API surface is exactly these five, all POST-gated", () => {
   const dirs = readdirSync(path.join(ROOT, "app/api/admin"), { withFileTypes: true })
     .filter((e) => e.isDirectory()).map((e) => e.name).sort();
   // Paket 4A.1 added "orders" - the read-only operations view, covered
@@ -430,7 +430,12 @@ test("23: the admin API surface is exactly these four, all POST-gated", () => {
   // from a customer-facing page, and none is called by an order, a
   // shipment, a refund or a cancellation. Reviewed in
   // tests/inventory.test.mjs.
-  assert.deepEqual(dirs, ["inventory", "launch", "orders", "session", "waitlist"]);
+  // 4A.2B-2 added "activity": the audit trail, read-only and POST-gated
+  // like the rest. It is the only admin route with no write path at all -
+  // the log's single door is record_admin_activity, which the business
+  // flows call from inside the database. Reviewed in
+  // tests/admin-audit.test.mjs.
+  assert.deepEqual(dirs, ["activity", "inventory", "launch", "orders", "session", "waitlist"]);
 
   // The session route is the only one that may write anything, and what
   // it writes is a cookie.
