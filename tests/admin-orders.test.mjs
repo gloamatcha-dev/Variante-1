@@ -394,9 +394,22 @@ test("6: the navigation offers five real sections and fakes none", () => {
     "the two sections that really are still coming stopped saying so");
   assert.ok(!soon.includes("Aktivität"),
     "Aktivität is listed as coming while its tab exists");
-  for (const label of ["Übersicht", "Bestellungen", "Inventar", "Aktivität", "Launch List"]) {
-    assert.ok(shell.includes(`"${label}"`) || shell.includes(`>${label}<`), `no nav entry for ${label}`);
-  }
+  // ── PARSED FROM THE NAV ARRAY, NOT FOUND ANYWHERE IN THE FILE ──
+  //
+  // This used to read `shell.includes('"Aktivität"')`, which the TITLE
+  // map alone satisfies - so deleting the nav entry would have left the
+  // tab invisible with this test still green. It now reads the array the
+  // buttons are actually rendered from, and compares it exactly.
+  const navArray = /\(\[(\["overview"[\s\S]*?)\] as const\)\.map\(\(\[key, label\]\)/.exec(shell);
+  assert.ok(navArray, "the nav array is no longer recognisable");
+  const navPairs = [...navArray[1].matchAll(/\["(\w+)", "([^"]+)"\]/g)].map(m => [m[1], m[2]]);
+  assert.deepEqual(navPairs, [
+    ["overview", "Übersicht"],
+    ["orders", "Bestellungen"],
+    ["inventory", "Inventar"],
+    ["activity", "Aktivität"],
+    ["waitlist", "Launch List"],
+  ], "the navigation lost, gained or reordered a tab");
   // Coming sections are still named but are not buttons and open
   // nothing. Two of them now, because Inventar graduated.
   assert.match(shell, /\["B2B", "Kosten"\]\.map/);

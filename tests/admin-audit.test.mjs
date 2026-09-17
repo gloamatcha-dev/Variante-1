@@ -936,3 +936,164 @@ test("7f: a lost session is reported, never rendered as an empty history", () =>
   assert.match(activityUi, /if \(res\.status === 401\) \{ onSessionLost\(\); return; \}/);
   assert.match(activityUi, /setLoadError\("Die Aktivität konnte nicht geladen werden\."\)/);
 });
+
+/* ════════════════════════════════════════════════════════════════════
+   8. THE TAB IS ACTUALLY IN THE NAVIGATION
+
+   Added after the audit trail was deployed and the Aktivität tab was
+   reported missing from the live admin. It was not missing: the built
+   and deployed bundle contained it, and a signed-in render shows it in
+   place. What WAS missing is this section - test 7e only checked that
+   the component is rendered under its view, and tests/admin-orders
+   test 6 looked for the word "Aktivität" ANYWHERE in the file, which
+   the TITLE map alone satisfies. Deleting the nav entry would have left
+   the tab unreachable with every test still green.
+
+   So these read the array the buttons are rendered from.
+   ════════════════════════════════════════════════════════════════════ */
+
+/** The nav entries, parsed from the array the buttons are built from. */
+function navPairs() {
+  const m = /\(\[(\["overview"[\s\S]*?)\] as const\)\.map\(\(\[key, label\]\)/.exec(shell);
+  assert.ok(m, "the admin nav array is no longer recognisable");
+  return [...m[1].matchAll(/\["(\w+)", "([^"]+)"\]/g)].map(x => [x[1], x[2]]);
+}
+
+test("8: AKTIVITÄT is a real entry in the navigation array, in its required place", () => {
+  assert.deepEqual(navPairs(), [
+    ["overview", "Übersicht"],
+    ["orders", "Bestellungen"],
+    ["inventory", "Inventar"],
+    ["activity", "Aktivität"],
+    ["waitlist", "Launch List"],
+  ], "the navigation lost, gained or reordered a tab");
+
+  // The required order, stated as the relationship rather than as an
+  // index, so a future sixth tab elsewhere does not silently break it.
+  const keys = navPairs().map(([k]) => k);
+  assert.ok(keys.indexOf("inventory") < keys.indexOf("activity"),
+    "Aktivität is not after Inventar");
+  assert.ok(keys.indexOf("activity") < keys.indexOf("waitlist"),
+    "Aktivität is not before Launch List");
+
+  // NO EXISTING TAB DISAPPEARED.
+  for (const key of ["overview", "orders", "inventory", "waitlist"]) {
+    assert.ok(keys.includes(key), `the ${key} tab disappeared`);
+  }
+  // And Aktivität is a real tab, never advertised as "bald".
+  const soon = shell.slice(shell.indexOf("ops-nav-soon") - 400, shell.indexOf("ops-nav-soon"));
+  assert.ok(!soon.includes("Aktivität"), "Aktivität is listed as coming while its tab exists");
+});
+
+test("8b: every nav entry is a button that switches the view, with an active state", () => {
+  // The tab has to be operable, not merely present: rendered as a
+  // button, wired to setView, and carrying the same active state and
+  // aria-current as its neighbours. One shared map does all five, so
+  // Aktivität cannot behave differently from the rest.
+  const nav = shell.slice(shell.indexOf('<nav className="ops-nav"'), shell.indexOf("</nav>"));
+  assert.match(nav, /onClick=\{\(\) => setView\(key\)\}/, "the tabs no longer switch the view");
+  assert.match(nav, /className=\{view === key \? "is-active" : ""\}/, "the active state is gone");
+  assert.match(nav, /aria-current=\{view === key \? "page" : undefined\}/, "aria-current is gone");
+  // One map for all five - no per-tab special case to diverge.
+  assert.equal((nav.match(/\.map\(/g) ?? []).length, 2,
+    "the nav gained a third map, so a tab can now be rendered differently");
+  // The view union carries the key, so the button cannot point nowhere.
+  const keys = navPairs().map(([k]) => k);
+  const union = /const \[view, setView\] = useState<([^>]*)>/.exec(shell);
+  assert.ok(union, "the view state is no longer recognisable");
+  for (const key of keys) {
+    assert.ok(union[1].includes(`"${key}"`), `${key} is a nav button but not a view`);
+  }
+});
+
+test("8c: choosing the tab renders AdminActivity, and only that tab does", () => {
+  assert.match(shell, /\{view === "activity" && <AdminActivity onSessionLost=/,
+    "the activity view no longer renders AdminActivity");
+  assert.equal((shell.match(/<AdminActivity/g) ?? []).length, 1,
+    "AdminActivity is rendered from more than one place");
+  assert.match(shell, /import \{ AdminActivity \}/, "AdminActivity is not imported");
+  // Each view renders its own screen; none renders another's.
+  for (const [view, component] of [
+    ["orders", "AdminOrders"], ["inventory", "AdminInventory"], ["activity", "AdminActivity"],
+  ]) {
+    assert.ok(shell.includes(`{view === "${view}" && <${component}`),
+      `the ${view} view does not render ${component}`);
+  }
+});
+
+test("8d: the tab is shown to every signed-in role - it is a read", () => {
+  // A viewer is somebody trusted to LOOK at what the shop is doing, and
+  // the log is the least sensitive thing there is to look at. Hiding the
+  // tab by role would also be the wrong mechanism: authorisation is the
+  // server's answer, not a button the UI withheld.
+  const nav = shell.slice(shell.indexOf('<nav className="ops-nav"'), shell.indexOf("</nav>"));
+  for (const roleWord of ["role", "owner", "admin ===", "viewer", "canWrite", "canRead"]) {
+    assert.ok(!nav.includes(roleWord), `the navigation branches on ${roleWord}`);
+  }
+  // Nor is the render of the activity screen gated by a role.
+  const render = shell.slice(shell.indexOf('{view === "activity"'), shell.indexOf('{view === "activity"') + 200);
+  for (const roleWord of ["role", "owner", "viewer"]) {
+    assert.ok(!render.includes(roleWord), `rendering the activity screen branches on ${roleWord}`);
+  }
+  // The server still decides, and it asks only for "read".
+  assert.match(activityRoute, /requireAdminIdentity\(request, "read"\)/);
+});
+
+test("8e: the activity is fetched only while its own tab is open", () => {
+  // Mounted under its view and nowhere else, and the fetch lives inside
+  // the component - so a closed tab is an unmounted component is no
+  // request. Nothing else in the admin may reach the endpoint.
+  assert.ok(activityUi.includes('fetch("/api/admin/activity"'),
+    "the activity screen no longer owns its own fetch");
+  for (const rel of ["app/AdminOverview.tsx", "app/AdminOrders.tsx", "app/AdminInventory.tsx"]) {
+    const code = codeOnly(read(rel));
+    assert.ok(!code.includes("/api/admin/activity"),
+      `${rel} fetches the activity while another tab is open`);
+  }
+  // The effect that loads it depends on the component's own state only,
+  // so opening a different tab cannot trigger it.
+  assert.match(activityUi, /useEffect\(\(\) => \{[\s\S]*?load\(\{ filter, page \}[\s\S]*?\}, \[load, filter, page\]\)/,
+    "the activity load is no longer driven by its own state alone");
+});
+
+test("8f: below 1024 there is no navigation at all, so no tab and no request", () => {
+  // The desktop rule is upstream of every tab: the blocker replaces the
+  // whole shell, so Aktivität cannot appear on a phone and cannot fetch.
+  assert.ok(codeOnly(shell).includes("isDesktop"), "the shell lost its desktop gate");
+  assert.match(shell, /if \(isDesktop !== true\) return;/,
+    "the session probe no longer waits for a desktop viewport");
+  // The blocker returns before the navigation is reached.
+  const blockerAt = shell.indexOf("ADMIN_DESKTOP_ONLY_COPY");
+  const navAt = shell.indexOf('<nav className="ops-nav"');
+  assert.ok(blockerAt > -1 && blockerAt < navAt,
+    "the desktop blocker no longer precedes the navigation");
+  // And the activity screen carries no viewport logic of its own.
+  for (const banned of ["matchMedia", "innerWidth", "ADMIN_MIN_DESKTOP_WIDTH"]) {
+    assert.ok(!activityUi.includes(banned), `the activity screen re-implements the desktop gate: ${banned}`);
+  }
+});
+
+test("8g: no public navigation learned about the admin", () => {
+  for (const rel of ["app/Chrome.tsx", "app/GloaSite.tsx"]) {
+    const code = codeOnly(read(rel));
+    for (const banned of ["Aktivität", "AdminActivity", "/api/admin/activity", "adminxyzuebersicht"]) {
+      assert.ok(!code.includes(banned), `${rel} reaches the admin: ${banned}`);
+    }
+  }
+});
+
+test("8h: exposing the tab is a UI concern - it touched no migration", () => {
+  // Stated here because the fix that added this section was reported as
+  // a database-looking bug. The audit schema is already in production
+  // and nothing about it moved.
+  const files = readdirSync(path.join(ROOT, "supabase/migrations")).filter(f => f.endsWith(".sql"));
+  assert.equal(files.length, 52, "a migration was added or removed by a navigation fix");
+  assert.ok(!files.includes("053_admin_activity_nav.sql"), "a migration was invented for a UI fix");
+  // And no migration knows what a tab is.
+  for (const f of files) {
+    const sqlSrc = read(`supabase/migrations/${f}`);
+    for (const uiWord of ["ops-nav", "setView", "AdminActivity", "Aktivität"]) {
+      assert.ok(!sqlSrc.includes(uiWord), `${f} mentions the user interface: ${uiWord}`);
+    }
+  }
+});
