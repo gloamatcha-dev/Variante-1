@@ -143,15 +143,63 @@ test("2c: the tab state, the handler and the submit labels are untouched", () =>
   assert.match(form, /className=\{intent==="wholesale"\?"active":""\} onClick=\{\(\)=>setIntent\("wholesale"\)\}/);
   assert.match(form, /className=\{intent==="sample"\?"active":""\} onClick=\{\(\)=>setIntent\("sample"\)\}/);
   // The Sample flow keeps its OWN submit label.
-  assert.match(form, /\{intent==="sample"\?"Sample-Anfrage senden":"B2B-Konditionen anfragen"\}/);
+  // The two labels and their ternary survive; 4A.4a only puts a sending
+  // state in front of them.
+  assert.match(form, /intent==="sample"\?"Sample-Anfrage senden":"B2B-Konditionen anfragen"\}/);
   assert.match(callout, /onClick=\{\(\)=>choose\("sample"\)\}/);
-  // The machinery behind them, unchanged.
-  for (const sig of ["const submit=(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault()",
+  // The machinery behind them. 4A.4a made the handler ASYNC and gave it
+  // a delivery step - everything else below is what it always was.
+  for (const sig of ["const submit=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault()",
                      "const payload:LeadPayload={",
                      'window.dispatchEvent(new CustomEvent("gloa:b2b-lead",{detail:payload}))',
                      'track(intent==="sample"?"sample_request_submit":"wholesale_request_submit")',
                      "setSuccess(true)"]) {
     assert.ok(src.includes(sig), `the form logic changed: ${sig}`);
+  }
+
+  // ── AND THE ENQUIRY ACTUALLY LEAVES THE BROWSER ────────────
+  //
+  // This form used to dispatch gloa:b2b-lead and call setSuccess(true)
+  // synchronously. Nothing listened for that event anywhere in the
+  // codebase, so every enquiry was discarded while the visitor was told
+  // "Danke. Wir melden uns." These assertions exist so that can never be
+  // true again.
+  assert.match(src, /await fetch\("\/api\/b2b-lead",\{method:"POST"/,
+    "the enquiry is not POSTed to the delivery endpoint");
+  assert.match(src, /body:JSON\.stringify\(payload\)/,
+    "the POST does not carry the payload the form built");
+
+  // Success is reached ONLY after the request came back ok. Both failure
+  // paths return before it.
+  const handler = src.slice(src.indexOf("const submit=async"), src.indexOf("setSuccess(true)};") + 18);
+  assert.ok(handler.indexOf('fetch("/api/b2b-lead"') < handler.indexOf("setSuccess(true)"),
+    "success is set before the enquiry is sent");
+  assert.match(handler, /if\(!res\.ok\)\{setSendError\(SEND_ERROR\);return\}/,
+    "a refused request still reports success");
+  assert.match(handler, /catch\{setSendError\(SEND_ERROR\);return\}/,
+    "a network failure still reports success");
+
+  // The custom event survives as ANALYTICS, fired after a successful
+  // send - never again as the transport.
+  assert.ok(handler.indexOf('fetch("/api/b2b-lead"') < handler.indexOf("gloa:b2b-lead"),
+    "the custom event is dispatched before the enquiry is delivered");
+
+  // One submission at a time, and the button says so.
+  assert.match(handler, /if\(sending\)return;/, "a second click can send a second enquiry");
+  assert.match(src, /disabled=\{sending\}/, "the submit button stays pressable while sending");
+  assert.match(src, /\{sending\?"WIRD GESENDET…"/, "the button does not report progress");
+
+  // A failure is shown, and the form stays usable for a retry: `sending`
+  // is cleared in a finally, so the button comes back either way.
+  assert.match(handler, /finally\{setSending\(false\)\}/,
+    "a failed send leaves the form permanently disabled");
+  assert.match(src, /\{sendError&&<p className="lead-form-error" role="alert">\{sendError\}<\/p>\}/,
+    "the failure message is not rendered");
+  assert.match(src, /const SEND_ERROR = "Die Anfrage konnte gerade nicht gesendet werden\. Bitte versuche es noch einmal\.";/,
+    "the failure copy changed");
+  // And it never leaks a reason the visitor cannot act on.
+  for (const leak of ["res.status", "err.message", "error.message", "Resend"]) {
+    assert.ok(!handler.includes(leak), `the failure path exposes ${leak}`);
   }
   // Success state still renders both of its messages.
   assert.ok(form.includes('intent==="sample"?"Deine Sample-Anfrage ist drin.":"Danke. Wir melden uns."'));

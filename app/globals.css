@@ -5643,6 +5643,21 @@ header nav{gap:18px;font-size:12px}
 /* ── CONSENT ───────────────────────────────────────────────── */
 /* .consent is shared with the account forms and carries !important, so
    it is answered here under .lead-form instead of being edited. */
+/* ── DELIVERY FAILED ──────────────────────────────────────────
+   Only rendered when the enquiry could not be sent. Cream on the
+   form's raspberry ground rather than the account forms' dark red on
+   light, which would be unreadable here. */
+.lead-form-error{
+  margin:clamp(10px,1.4vw,16px) 0 0;
+  padding:12px 16px;
+  border:1px solid rgba(245,235,226,.42);
+  background:rgba(245,235,226,.10);
+  color:var(--cream);
+  font:14px/1.5 var(--font-sans),Arial,sans-serif;
+  letter-spacing:0;
+  text-transform:none;
+}
+
 .lead-form .consent{
   align-items:flex-start!important;
   gap:12px!important;

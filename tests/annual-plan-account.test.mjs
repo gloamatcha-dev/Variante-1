@@ -872,6 +872,11 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
     "/admin/session",
     "/admin/waitlist",
     "/annual-plan/checkout/session",
+    // 4A.4a. The B2B enquiry from /for-cafes. That form was live and
+    // discarding every submission; this route delivers it as one
+    // internal email. No table, no migration, no write - the same shape
+    // as /api/contact. Reviewed in tests/b2b-lead-api.test.mjs.
+    "/b2b-lead",
     "/checkout/quote",
     "/checkout/session",
     "/contact",

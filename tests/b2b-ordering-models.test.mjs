@@ -114,9 +114,15 @@ test("1e: the lead machinery in this file was not touched", () => {
   // the working-tree guard in tests/annual-plan-foundation-migration.mjs.
   // The claim made there - that this pass is presentation only - is
   // asserted HERE, against the source, so it survives the commit.
+  //
+  // 4A.4a made the handler ASYNC and gave it a delivery step, because
+  // until then it discarded every enquiry. That is the ONE change to the
+  // signature below; the fields, the payload, the tabs and the analytics
+  // are what they were, and tests/b2b-sample-and-form.test.mjs asserts
+  // the new delivery behaviour in full.
   for (const sig of [
     'const [intent,setIntent]=useState<"wholesale"|"sample">',
-    'const submit=(e:React.FormEvent<HTMLFormElement>)=>{',
+    'const submit=async(e:React.FormEvent<HTMLFormElement>)=>{',
     "const payload:LeadPayload={",
     'window.dispatchEvent(new CustomEvent("gloa:b2b-lead",{detail:payload}))',
     'track(intent==="sample"?"sample_request_submit":"wholesale_request_submit")',
@@ -124,6 +130,13 @@ test("1e: the lead machinery in this file was not touched", () => {
     'name="contact_name"', 'name="business_name"', 'name="email"',
     'name="business_type"', 'name="locations"',
   ]) assert.ok(src.includes(sig), `the lead machinery changed: ${sig}`);
+  // The enquiry now leaves the browser, and the ONLY endpoint it may
+  // reach is the one that delivers it.
+  assert.match(src, /fetch\("\/api\/b2b-lead",\{method:"POST"/,
+    "the lead form stopped delivering its enquiry");
+  const endpoints = [...new Set([...src.matchAll(/fetch\("([^"]+)"/g)].map(m => m[1]))];
+  assert.deepEqual(endpoints, ["/api/b2b-lead"],
+    "this file reaches an endpoint other than the enquiry route");
   // And nothing in this pass reaches a network, a store or a price.
   assert.ok(!section.includes("fetch(") && !section.includes("supabase")
     && !section.includes("stripe") && !section.includes("price"),

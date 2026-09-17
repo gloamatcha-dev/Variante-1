@@ -144,7 +144,13 @@ test("1e: no backend, auth, data or commercial logic changed", () => {
     // Same shape and same defences as /api/contact - honeypot, JSON-only,
     // byte ceiling, server-fixed recipient - and reviewed in
     // tests/partnerships-api.test.mjs.
-    ["admin", "annual-plan", "checkout", "contact", "cron", "internal", "launch",
+        // 4A.4a ADDED "b2b-lead": POST /api/b2b-lead, the enquiry from
+    // /for-cafes. That form was live and DISCARDING every submission -
+    // it dispatched a browser event nothing listened for and then said
+    // "Danke. Wir melden uns." The route is the same shape as
+    // /api/contact and /api/partnerships: one internal email, no table,
+    // no migration, no write. Reviewed in tests/b2b-lead-api.test.mjs.
+["admin", "annual-plan", "b2b-lead", "checkout", "contact", "cron", "internal", "launch",
      "orders", "partnerships", "stripe", "subscriptions", "withdrawal"], "an API route changed");
   assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("053")),
     "a migration 053 or beyond appeared");
