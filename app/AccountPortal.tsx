@@ -6,7 +6,6 @@ import { useAuth } from "../lib/auth";
 import type { AddressRow } from "../lib/auth";
 import { supabase } from "../lib/supabase";
 import { PASSWORD_RESET_PATH, browserAuthRedirectUrl } from "../lib/authRedirect";
-import { B2bCalculator } from "./B2bCalculator";
 import { useCatalog } from "./useCatalog";
 import {
   AccountEmptyState,
@@ -1674,36 +1673,36 @@ function PortalProfile() {
 
 // ── B2B Bereich ────────────────────────────────────────────────────────
 
-type OfferModel = { id: number; slug: string; label: string; discount_pct: number; description: string | null; sort_order: number };
-type ProductSize = { id: number; grams: number; label: string; price_per_kg_net: number; sort_order: number };
-type GeneralTerm = { id: number; key: string; label: string; value: string; sort_order: number };
+// 4A.4b: the row types and the price helpers that used to live here
+// went with the sections that rendered them. They described
+// b2b_product_sizes / b2b_offer_models / b2b_general_terms, which the
+// portal no longer reads - and migration 053 takes the browser's
+// access to them away, so nothing here can start reading them again
+// by accident.
 
-const fmtEur = (n: number) => n.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const calcPrice = (pricePerKg: number, grams: number, discountPct: number) =>
-  Math.round(pricePerKg * grams / 1000 * (1 - discountPct / 100) * 100) / 100;
 
 function PortalBusiness() {
   const { businessProfile } = useAuth();
-  const [models, setModels] = useState<OfferModel[]>([]);
-  const [sizes, setSizes] = useState<ProductSize[]>([]);
-  const [terms, setTerms] = useState<GeneralTerm[]>([]);
   const [agreements, setAgreements] = useState<SupplyAgreementRow[]>([]);
-  const [loading, setLoading] = useState(() => !!supabase);
+  // 4A.4b: the `loading` flag that used to stand here went with the
+  // commercial reads it gated. The supply agreements below have always
+  // had their own, and the rest of this screen renders from props.
   const [supplyLoading, setSupplyLoading] = useState(() => !!supabase);
   const [supplyError, setSupplyError] = useState("");
 
   useEffect(() => {
     if (!supabase) return;
-    Promise.all([
-      supabase.from("b2b_offer_models").select("*").order("sort_order"),
-      supabase.from("b2b_product_sizes").select("*").order("sort_order"),
-      supabase.from("b2b_general_terms").select("*").order("sort_order"),
-    ]).then(([m, s, t]) => {
-      setModels(m.data ?? []);
-      setSizes(s.data ?? []);
-      setTerms(t.data ?? []);
-      setLoading(false);
-    });
+    // 4A.4b: the three commercial configuration tables are NO LONGER
+    // read here. They still hold the first draft of a wholesale model -
+    // a price per kilo and two discount tiers - and none of it is a
+    // current GLOA offer. Reading them meant a signed-in business
+    // account was shown terms nobody had approved.
+    //
+    // Nothing replaced the read, because the portal no longer needs it:
+    // prices and conditions are agreed individually until the B2B
+    // commerce package exists. Migration 053 removes the browser's
+    // access to those tables as well, so this cannot come back by
+    // accident.
     supabase.from("b2b_supply_agreements").select("*").order("created_at", { ascending: false })
       .then(({ data, error: err }) => {
         if (err) { setSupplyError("Deine Belieferung konnte gerade nicht geladen werden."); }
@@ -1719,8 +1718,6 @@ function PortalBusiness() {
         setSupplyLoading(false);
       });
   }, []);
-
-  if (loading) return <p className="portal-loading">Laden…</p>;
 
   return (
     <>
@@ -1771,73 +1768,39 @@ function PortalBusiness() {
         )}
       </section>
 
-      {/* ── Pricing Table ── */}
-      <section className="b2b-section">
-        <p className="eyebrow">DEINE B2B-PREISE</p>
-        <p className="b2b-section-lead">Alle Preise netto zzgl. gesetzlicher MwSt.</p>
-        {sizes.length > 0 && models.length > 0 && (
-          <div className="b2b-pricing-table">
-            <div className="b2b-pricing-header">
-              <div className="b2b-pricing-cell b2b-pricing-label" />
-              {sizes.map(s => <div key={s.id} className="b2b-pricing-cell">{s.label}</div>)}
-            </div>
-            {models.map(m => (
-              <div key={m.id} className="b2b-pricing-row">
-                <div className="b2b-pricing-cell b2b-pricing-label">
-                  <strong>{m.label}</strong>
-                  {m.discount_pct > 0 && <span className="b2b-discount">{"\u2212"}{m.discount_pct} %</span>}
-                </div>
-                {sizes.map(s => (
-                  <div key={s.id} className="b2b-pricing-cell b2b-pricing-value">
-                    {fmtEur(calcPrice(s.price_per_kg_net, s.grams, m.discount_pct))} €
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-        )}
-        {sizes.length > 0 && (
-          <p className="b2b-pricing-note">Basis: {fmtEur(sizes[0].price_per_kg_net)} € / kg netto</p>
-        )}
-      </section>
+      {/* ── Conditions: agreed, not published ── */}
+      {/*
+        4A.4b REMOVED FOUR SECTIONS FROM HERE: a price table, the offer
+        models with their discount tiers, the calculator that multiplied
+        the two together, and a general-terms list.
 
-      {/* ── Offer Models ── */}
+        All four rendered b2b_product_sizes / b2b_offer_models /
+        b2b_general_terms straight from the browser, and what those
+        tables hold is the FIRST DRAFT of a wholesale model - a single
+        price per kilo, minus five percent, minus ten percent. None of
+        it is a current GLOA offer, and the prices it produced were not
+        the ones GLOA intends to charge.
+
+        A signed-in business account was therefore being shown
+        conditions nobody had approved, in the one place a customer
+        would most reasonably treat them as binding. That is worse than
+        showing nothing, so it now shows nothing - and says so plainly,
+        which is also what the public page has always said.
+
+        The real price list arrives with the B2B commerce package. It is
+        not restored here by editing the old rows, because the old shape
+        (a rate per kilo) cannot express the intended one.
+      */}
       <section className="b2b-section">
-        <p className="eyebrow">BEZUGSMODELLE</p>
-        <div className="b2b-models-grid">
-          {models.map(m => (
-            <div key={m.id} className="b2b-model-card">
-              <p className="b2b-model-label">{m.label}</p>
-              {m.discount_pct > 0 && <p className="b2b-model-discount">{"\u2212"}{m.discount_pct} % auf den Basispreis</p>}
-              {m.description && <p className="b2b-model-desc">{m.description}</p>}
-            </div>
-          ))}
+        <p className="eyebrow">PREISE &amp; KONDITIONEN</p>
+        <p className="b2b-section-lead">
+          B2B-Preise und Konditionen stimmen wir individuell mit dir ab – abhängig von
+          Menge, Rhythmus und deinem Betrieb.
+        </p>
+        <div className="portal-actions">
+          <Link href="/for-cafes#lead" className="portal-action">KONDITIONEN ANFRAGEN</Link>
         </div>
       </section>
-
-      {/* ── Calculator ── */}
-      {sizes.length > 0 && models.length > 0 && (
-        <section className="b2b-section">
-          <p className="eyebrow">KALKULATION</p>
-          <h2 className="b2b-section-title">Matcha-Kalkulations&shy;rechner</h2>
-          <B2bCalculator models={models} sizes={sizes} />
-        </section>
-      )}
-
-      {/* ── Terms ── */}
-      {terms.length > 0 && (
-        <section className="b2b-section">
-          <p className="eyebrow">KONDITIONEN</p>
-          <div className="b2b-terms-list">
-            {terms.map(t => (
-              <div key={t.id} className="b2b-term-row">
-                <span className="b2b-term-key">{t.label}</span>
-                <span>{t.value}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
 
       {/* ── Company Data ── */}
       {businessProfile && (
@@ -1918,13 +1881,11 @@ function SupplyDetail({ supplyId }: { supplyId: string }) {
         {agreement.ended_at && <div className="portal-profile-row"><span>Beendet am</span><strong>{fmtDate(agreement.ended_at)}</strong></div>}
       </div>
 
-      {/* ── Pricing Model ── */}
-      {typeof model.discount_pct === "number" && (model.discount_pct as number) > 0 && (
-        <section className="order-detail-section">
-          <p className="eyebrow">PREISMODELL</p>
-          <div className="portal-profile-row"><span>Rabatt</span><strong>{"\u2212"}{model.discount_pct} %</strong></div>
-        </section>
-      )}
+      {/* 4A.4b: the agreement's snapshotted discount is not rendered.
+          It came from the same non-final offer model as the price table
+          that used to stand above, and a percentage shown without the
+          price it applies to told the customer even less than nothing.
+          The snapshot itself is untouched on the row. */}
 
       {/* ── Items ── */}
       {items.length > 0 && (

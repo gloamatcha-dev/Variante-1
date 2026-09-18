@@ -6,7 +6,6 @@ import { setTimeout as delay } from "node:timers/promises";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { writeBlockedServerEnv } from "./helpers/testSupabase.mjs";
 import {
   B2B_LEAD_LIMITS,
   B2B_LEAD_TYPES,
@@ -33,6 +32,20 @@ const PORT = 8931;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
 const MOCK_RESEND_PORT = 8932;
 const MOCK_FROM = "GLOA <kontakt@gloamatcha.invalid>";
+
+// THE RATE LIMITER, WITHOUT A DATABASE.
+//
+// The Supabase host is inlined into the server bundle at build time, so
+// it cannot be redirected with an environment variable the way Resend
+// can. tests/helpers/mockSupabaseFetch.mjs is preloaded into the child
+// instead and answers the rate-limit RPC locally; nothing reaches
+// Supabase, and an unmocked Supabase call fails loudly rather than
+// silently hitting production. See that file for the full reasoning.
+//
+// The verdict is fixed per server, so the three cases run against three
+// short-lived servers rather than one shared mutable one.
+const ALLOWED = JSON.stringify([{ allowed: true }]);
+const LIMITED = JSON.stringify([{ allowed: false, retry_after_seconds: 42 }]);
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = rel => readFileSync(path.join(ROOT, rel), "utf8");
@@ -67,23 +80,44 @@ test.before(async () => {
   });
   await new Promise(resolve => mockResendServer.listen(MOCK_RESEND_PORT, "127.0.0.1", resolve));
 
-  serverProcess = spawn(process.execPath, [".output/server/index.mjs"], {
+
+
+  serverProcess = await startServer(PORT, ALLOWED);
+});
+
+/**
+ * One application server, with the rate limiter answering `rpcBody`.
+ *
+ * The service key is a fake string: it only has to be non-empty for
+ * getSupabaseAdmin() to build a client, and the preloaded fetch mock
+ * guarantees that client never reaches Supabase.
+ */
+async function startServer(port, rpcBody, extraEnv = {}) {
+  const proc = spawn(process.execPath, [
+    "--import", "./tests/helpers/mockSupabaseFetch.mjs",
+    ".output/server/index.mjs",
+  ], {
     cwd: new URL("..", import.meta.url),
-    env: writeBlockedServerEnv({
-      PORT: String(PORT),
+    env: {
+      ...process.env,
+      PORT: String(port),
+      SUPABASE_SECRET_KEY: "test-mock-service-key-not-real",
+      LAUNCH_RATE_LIMIT_SECRET: "test-mock-bucket-secret-not-real",
+      MOCK_SUPABASE_RPC: rpcBody,
       RESEND_API_KEY: "test-mock-key-not-real",
       RESEND_CONTACT_FROM: MOCK_FROM,
       RESEND_BASE_URL: `http://127.0.0.1:${MOCK_RESEND_PORT}`,
-    }),
+      ...extraEnv,
+    },
     stdio: "ignore",
   });
 
-  const ready = new Promise((resolveReady, rejectReady) => {
-    serverProcess.once("exit", (code) => rejectReady(new Error(`server exited early (code ${code})`)));
+  await new Promise((resolveReady, rejectReady) => {
+    proc.once("exit", (code) => rejectReady(new Error(`server exited early (code ${code})`)));
     (async () => {
       for (let attempt = 0; attempt < 50; attempt++) {
         try {
-          const res = await fetch(`${BASE_URL}/`);
+          const res = await fetch(`http://127.0.0.1:${port}/`);
           if (res.ok) { resolveReady(); return; }
         } catch { /* server not up yet */ }
         await delay(200);
@@ -91,8 +125,8 @@ test.before(async () => {
       rejectReady(new Error("server did not become ready in time"));
     })();
   });
-  await ready;
-});
+  return proc;
+}
 
 test.after(() => {
   serverProcess?.kill();
@@ -302,6 +336,151 @@ test("2j: unknown fields are ignored, never carried into the mail", async () => 
 });
 
 /* ══════════════════════════════════════════════════════════════
+   2b. THE RATE LIMIT
+   ══════════════════════════════════════════════════════════════ */
+
+test("2k: a refused caller gets 429 and NO MAIL IS SENT", async () => {
+  // The whole point of the limiter: a caller past the limit must not be
+  // able to make GLOA's sending domain deliver anything.
+  const port = 8941;
+  const proc = await startServer(port, LIMITED);
+  try {
+    receivedRequests = [];
+    const res = await fetch(`http://127.0.0.1:${port}/api/b2b-lead`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(validPayload()),
+    });
+    assert.equal(res.status, 429, "a refused enquiry was not rate limited");
+    assert.equal(receivedRequests.length, 0, "a rate-limited enquiry was still mailed");
+
+    // Retry-After is present and usable - "try again immediately" is the
+    // one answer a limit must not give.
+    const retry = Number(res.headers.get("retry-after"));
+    assert.ok(Number.isFinite(retry) && retry > 0, `Retry-After was ${res.headers.get("retry-after")}`);
+
+    // And the visitor learns nothing about the limiter.
+    const body = await res.json();
+    assert.ok(body?.error, "the refusal carries no message");
+    assert.ok(!/429|limit|rate|bucket|ip|Supabase/i.test(JSON.stringify(body)),
+      "the refusal leaks limiter internals");
+  } finally {
+    proc.kill();
+  }
+});
+
+test("2l: an unreachable limiter FAILS CLOSED - 503, and no mail", async () => {
+  // What is left when the shared counter cannot be consulted is not a
+  // weaker limit, it is no limit across instances. /api/launch made the
+  // same call for the same reason.
+  const port = 8942;
+  const proc = await startServer(port, "[]", { MOCK_SUPABASE_STATUS: "500" });
+  try {
+    receivedRequests = [];
+    const res = await fetch(`http://127.0.0.1:${port}/api/b2b-lead`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(validPayload()),
+    });
+    assert.equal(res.status, 503, "an unreachable limiter did not fail closed");
+    assert.equal(receivedRequests.length, 0, "mail was sent while the limiter was unreachable");
+  } finally {
+    proc.kill();
+  }
+});
+
+test("2m: with no service key at all, the route still refuses rather than skipping the limit", async () => {
+  // The safe-suite shape: no Supabase client can be built. The route
+  // must not treat "I could not check" as "go ahead".
+  const port = 8943;
+  const proc = await startServer(port, ALLOWED, { SUPABASE_SECRET_KEY: "" });
+  try {
+    receivedRequests = [];
+    const res = await fetch(`http://127.0.0.1:${port}/api/b2b-lead`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(validPayload()),
+    });
+    assert.equal(res.status, 503, "a missing limiter was treated as permission to send");
+    assert.equal(receivedRequests.length, 0, "mail was sent with no rate limit in place");
+  } finally {
+    proc.kill();
+  }
+});
+
+test("2n: the limiter runs AFTER validation and BEFORE the mail", () => {
+  const code = read("app/api/b2b-lead/route.ts")
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  const validateAt = code.indexOf("validateB2bLeadRequest(body)");
+  const limitAt = code.indexOf("consumePersistentRateLimit(");
+  const sendAt = code.indexOf("resend.emails.send(");
+  assert.ok(validateAt > -1 && limitAt > -1 && sendAt > -1, "the route lost a step");
+  assert.ok(validateAt < limitAt,
+    "rubbish spends a database round trip before it is refused");
+  assert.ok(limitAt < sendAt,
+    "the mail is sent before the caller has been counted");
+});
+
+test("2o: the caller's address is pseudonymised, and never logged", () => {
+  const src = read("app/api/b2b-lead/route.ts");
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  // The raw key goes through the shared digest helper before it can
+  // reach the database, exactly as /api/launch does.
+  assert.match(code, /rateLimitKeyFromRequest\(request\)/);
+  assert.match(code, /pseudonymizeBucketKey\(`b2b-lead:\$\{callerBucket\}`, bucketSecret\)/);
+  // The bucket is namespaced, so B2B enquiries and launch signups from
+  // one caller do not share a quota.
+  assert.ok(code.includes("b2b-lead:"), "the bucket is not namespaced to this form");
+  // And neither the address nor the digest is ever written to a log.
+  const logged = [...code.matchAll(/console\.(error|log|warn|info)\(([^;]*)\);/g)].map(m => m[2]);
+  for (const call of logged) {
+    for (const leak of ["callerBucket", "bucketKey", "bucketSecret", "pseudonymize", "rateLimitKeyFromRequest"]) {
+      assert.ok(!call.includes(leak), `a log line carries the rate-limit identity: ${leak}`);
+    }
+  }
+  // It reuses the shared window rather than inventing a second one.
+  assert.match(code, /LAUNCH_RATE_LIMIT_WINDOW_SECONDS/);
+  assert.match(code, /const ENQUIRIES_PER_WINDOW = \d+;/);
+});
+
+test("2p: an invalid enquiry never reaches the limiter at all", async () => {
+  // Refused for free, so a caller posting rubbish cannot exhaust the
+  // quota of the address they are pretending to be.
+  const port = 8944;
+  const proc = await startServer(port, LIMITED);  // limiter would refuse
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/b2b-lead`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(validPayload({ email: "nope" })),
+    });
+    // 400 from validation, NOT 429 - proof the limiter was never asked.
+    assert.equal(res.status, 400, "an invalid enquiry was counted against the limit");
+  } finally {
+    proc.kill();
+  }
+});
+
+test("2q: the honeypot is answered before the limiter too", async () => {
+  const port = 8945;
+  const proc = await startServer(port, LIMITED);
+  try {
+    receivedRequests = [];
+    const res = await fetch(`http://127.0.0.1:${port}/api/b2b-lead`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(validPayload({ website: "http://spam.example" })),
+    });
+    // A bot learns nothing: the same success shape as always, and still
+    // no mail - the limiter's verdict never enters into it.
+    assert.equal(res.status, 200);
+    assert.equal(receivedRequests.length, 0, "a honeypot submission was mailed");
+  } finally {
+    proc.kill();
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
    3. THE LEAF, DIRECTLY
    ══════════════════════════════════════════════════════════════ */
 
@@ -364,18 +543,25 @@ test("3d: a blank optional prints as an em dash, so the mail keeps its shape", (
    4. WHAT THE ROUTE MUST NEVER DO
    ══════════════════════════════════════════════════════════════ */
 
-test("4: the route writes NOTHING - no database, no audit row", () => {
+test("4: the route writes NO BUSINESS DATA - no table, no audit row", () => {
   const src = read("app/api/b2b-lead/route.ts");
   const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  // 4A.4b: the route now holds a Supabase client, and it exists for ONE
+  // reason - the shared rate-limit counter. It must still not touch a
+  // table, and there is still no enquiries table to touch.
   for (const banned of [
-    "getSupabaseAdmin", "supabase", ".from(", ".insert(", ".update(", ".delete(", ".rpc(",
-    "admin_activity_log", "recordAdminActivity",
+    ".from(", ".insert(", ".update(", ".delete(", ".upsert(",
+    "admin_activity_log", "recordAdminActivity", "b2b_lead", "leads",
   ]) {
     assert.ok(!code.includes(banned), `the enquiry route reaches for ${banned}`);
   }
   // A public enquiry is not an administrative act and must never appear
   // in the audit trail as one.
   assert.ok(!code.includes("audit"), "the enquiry route touches the audit trail");
+  // The only database call it makes is the limiter's, and it goes
+  // through the shared helper rather than a hand-rolled rpc here.
+  assert.ok(!code.includes(".rpc("), "the route calls an RPC directly instead of via the shared limiter");
+  assert.match(code, /consumePersistentRateLimit\(/);
 });
 
 test("4b: it is POST-only", async () => {

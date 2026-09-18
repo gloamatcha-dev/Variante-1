@@ -124,10 +124,17 @@ test("1e: no backend, auth, data or commercial logic changed", () => {
     'supabase.from("orders").select("*")',
     'const isBusiness = profile?.customer_type === "business";',
     'fmtCents(isBusiness ? o.total_net_cents ?? o.total_gross_cents : o.total_gross_cents)',
-    'const calcPrice = (pricePerKg: number, grams: number, discountPct: number) =>',
   ]) {
     assert.ok(portal.includes(kept), `logic changed: ${kept}`);
   }
+  // 4A.4b REMOVED calcPrice from this file along with the price table it
+  // fed. It computed a line price from a per-kilo rate and a discount,
+  // and both inputs came from the non-final commercial draft. The pure
+  // version in lib/b2bCalculator.ts is untouched and still covered by
+  // tests/b2b-calculator.test.mjs - what changed is that no customer
+  // screen calls it.
+  assert.ok(!portal.includes("const calcPrice ="),
+    "the portal still computes a wholesale price");
   assert.deepEqual(readdirSync(path.join(ROOT, "app/api")).sort(),
     // PHASE 5 ADDED "launch": the one-time launch notification list
     // (POST /api/launch plus its confirm/withdraw links). It is its own
@@ -152,8 +159,8 @@ test("1e: no backend, auth, data or commercial logic changed", () => {
     // no migration, no write. Reviewed in tests/b2b-lead-api.test.mjs.
 ["admin", "annual-plan", "b2b-lead", "checkout", "contact", "cron", "internal", "launch",
      "orders", "partnerships", "stripe", "subscriptions", "withdrawal"], "an API route changed");
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("053")),
-    "a migration 053 or beyond appeared");
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("054")),
+    "a migration 054 or beyond appeared");
   // The presentation primitives stayed presentation.
   assert.ok(!/supabase|useAuth|customer_type/.test(ui), "AccountUI grew a data dependency");
 });

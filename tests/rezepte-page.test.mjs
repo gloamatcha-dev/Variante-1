@@ -521,8 +521,8 @@ test("7c: this pass added no backend of any kind", () => {
 ["admin", "annual-plan", "b2b-lead", "checkout", "contact", "cron", "internal", "launch",
      "orders", "partnerships", "stripe", "subscriptions", "withdrawal"],
     "an API route was added or removed");
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("053")),
-    "a migration 053 or beyond appeared");
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("054")),
+    "a migration 054 or beyond appeared");
   for (const banned of ['"use server"', "fetch(", "supabase", "resend",
                         "localStorage", "sessionStorage", "<form", "onSubmit"]) {
     assert.ok(!page.toLowerCase().includes(banned.toLowerCase()),

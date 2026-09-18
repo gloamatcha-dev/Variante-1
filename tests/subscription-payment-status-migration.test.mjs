@@ -103,17 +103,17 @@ test("1, 2: 036 exists, owns its number, and 037 is the only thing above it", ()
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(files[files.length - 7], "046_launch_signup_atomic.sql");
-  assert.equal(files[files.length - 8], "045_launch_welcome_email.sql");
-  assert.equal(files[files.length - 9], "044_launch_send.sql");
-  assert.equal(files[files.length - 10], "043_launch_waitlist.sql");
-  assert.equal(files[files.length - 11], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.equal(files[files.length - 12], "041_annual_account_column_privileges.sql");
-  assert.equal(files[files.length - 13], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(files[files.length - 17], MIGRATION_036, "036 must still be the one before 037");
+  assert.equal(files[files.length - 8], "046_launch_signup_atomic.sql");
+  assert.equal(files[files.length - 9], "045_launch_welcome_email.sql");
+  assert.equal(files[files.length - 10], "044_launch_send.sql");
+  assert.equal(files[files.length - 11], "043_launch_waitlist.sql");
+  assert.equal(files[files.length - 12], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(files[files.length - 13], "041_annual_account_column_privileges.sql");
+  assert.equal(files[files.length - 14], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 18], MIGRATION_036, "036 must still be the one before 037");
   assert.deepEqual(files.filter(f => f.startsWith("037")), ["037_subscription_refund_correlation.sql"]);
-  assert.ok(!files.some(f => f.startsWith("053")), "a migration 049 or beyond appeared");
-  assert.equal(files.length, 52);
+  assert.ok(!files.some(f => f.startsWith("054")), "a migration 049 or beyond appeared");
+  assert.equal(files.length, 53);
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length);

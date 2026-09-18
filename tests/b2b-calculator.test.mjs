@@ -307,10 +307,46 @@ test("page: the B2B area stays business-only", () => {
   assert.match(portal, /\{ key: "business", label: "B2B", b2bOnly: true \}/);
 });
 
-test("page: the calculator still receives the real catalog rows", () => {
-  assert.match(businessPage, /supabase\.from\("b2b_offer_models"\)/);
-  assert.match(businessPage, /supabase\.from\("b2b_product_sizes"\)/);
-  assert.match(businessPage, /<B2bCalculator models=\{models\} sizes=\{sizes\} \/>/);
+test("page: THE PORTAL NO LONGER READS THE COMMERCIAL DRAFT", () => {
+  // 4A.4b. This used to assert the opposite - that the portal reads
+  // b2b_offer_models and b2b_product_sizes and hands them to the
+  // calculator. It did, and that was the defect: those tables hold a
+  // first draft (one rate of 125.00/kg, minus five, minus ten) that is
+  // not a GLOA offer, and a signed-in business account was shown it as
+  // though it were.
+  //
+  // The customer-facing rule is the one the public page has always
+  // stated: prices and conditions on request.
+  for (const table of ["b2b_offer_models", "b2b_product_sizes", "b2b_general_terms"]) {
+    assert.ok(!portal.includes(`supabase.from("${table}")`),
+      `the portal still reads ${table} from the browser`);
+  }
+  assert.ok(!portal.includes("<B2bCalculator"),
+    "the portal still renders the price calculator");
+  // Migration 053 takes the browser's access away as well, so this
+  // cannot come back by editing the portal alone.
+  const m053 = read("supabase/migrations/053_b2b_commercial_containment.sql");
+  for (const table of ["b2b_offer_models", "b2b_product_sizes", "b2b_general_terms"]) {
+    assert.ok(new RegExp(`revoke all privileges on table public\\.${table}\\s+from anon, authenticated`).test(m053),
+      `053 does not revoke browser access to ${table}`);
+  }
+});
+
+test("page: and no stale price or discount is rendered anywhere in it", () => {
+  // Semantic rather than by wording: the portal must not compute a
+  // price from a per-kilo rate, nor print a discount percentage.
+  for (const banned of ["price_per_kg_net", "discount_pct", "calcPrice", "b2b-pricing-table",
+                        "b2b-model-discount", "b2b-pricing-note", "DEINE B2B-PREISE", "BEZUGSMODELLE"]) {
+    assert.ok(!portal.includes(banned), `the portal still renders ${banned}`);
+  }
+  // The numbers the old table produced, by value.
+  for (const price of ["31,25", "62,50", "31.25", "62.50"]) {
+    assert.ok(!portal.includes(price), `the portal prints the stale price ${price}`);
+  }
+  // What stands in their place says what is actually true.
+  assert.match(portal, /PREISE &amp; KONDITIONEN/);
+  assert.match(portal, /individuell mit dir ab/);
+  assert.match(portal, /\/for-cafes#lead/);
 });
 
 test("page: the real company data section is untouched and stays below", () => {

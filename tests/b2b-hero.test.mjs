@@ -92,13 +92,22 @@ test("2: the Umsatzpotenzial CTA is gone from the hero, not hidden", () => {
 });
 
 test("2b: the calculator code was not touched", () => {
-  // The live calculator lives in the authenticated business account and
-  // is not on /for-cafes at all - the hero's #calculator anchor had
-  // already been archived before this pass, so removing that button also
-  // removed a dead link.
+  // The calculator was never on /for-cafes - the hero's #calculator
+  // anchor had already been archived before that pass, so removing the
+  // button also removed a dead link.
+  //
+  // 4A.4b then stopped the ACCOUNT from rendering it too: it multiplied
+  // a per-kilo rate by a discount, and both came from a commercial draft
+  // that is not a GLOA offer. The component and its pure module survive
+  // untouched for the future B2B commerce package; what changed is that
+  // no customer screen calls them.
   const calc = read("app/B2bCalculator.tsx");
   assert.match(calc, /export function B2bCalculator\(/);
-  assert.match(read("app/AccountPortal.tsx"), /<B2bCalculator models=\{models\} sizes=\{sizes\} \/>/);
+  // The portal no longer renders it - see tests/b2b-calculator.test.mjs
+  // for why, and for the assertion that the commercial tables are not
+  // read from the browser any more.
+  assert.ok(!read("app/AccountPortal.tsx").includes("<B2bCalculator"),
+    "the portal renders the price calculator again");
   assert.ok(read("lib/b2bCalculator.ts").length > 0, "the calculator library went missing");
   // The archive note that records where the public section went is still
   // there, so the history is not lost.

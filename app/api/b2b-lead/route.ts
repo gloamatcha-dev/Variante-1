@@ -1,4 +1,11 @@
 import { getResendClient } from "../../../lib/resend";
+import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
+import {
+  LAUNCH_RATE_LIMIT_WINDOW_SECONDS,
+  pseudonymizeBucketKey,
+  rateLimitKeyFromRequest,
+} from "../../../lib/launchRateLimit";
+import { consumePersistentRateLimit } from "../../../lib/launchRateLimitStore";
 import {
   validateB2bLeadRequest,
   buildB2bLeadNotificationSubject,
@@ -26,20 +33,27 @@ import {
  *   - the recipient is a server constant, never read from the client
  *   - plain text only, so nothing submitted is ever rendered as markup
  *
- * ── WHY NO RATE LIMITER, WHEN /api/launch HAS ONE ────────────
+ * ── AND IT IS RATE LIMITED, SHARING /api/launch's COUNTER ────
  *
- * /api/launch rate-limits because it sends mail TO AN ADDRESS THE
- * CALLER CHOSE - that is a form that can be pointed at a stranger.
- * This one, like /api/contact and /api/partnerships, sends to a fixed
- * internal address and can only ever spam GLOA's own inbox. The
- * honeypot is the defence those two use, and matching them is worth
- * more than a fourth variation of the same idea.
+ * 4A.4a shipped without one on the reasoning that this form mails a
+ * FIXED internal address and can therefore only ever spam GLOA's own
+ * inbox - which is true, and is why /api/contact and /api/partnerships
+ * have never had one either. It is also not much comfort at three in
+ * the morning: a bot that gets past the honeypot can fill the inbox the
+ * enquiries are supposed to arrive in, which is the same outcome as
+ * losing them.
  *
- * ── AND IT WRITES NOTHING ────────────────────────────────────
+ * So it uses the SHARED PERSISTENT counter from migration 043, the one
+ * /api/launch already uses - not a new limiter, and not an in-process
+ * one, which on a platform that hands out fresh instances under load is
+ * a limit per instance rather than a limit.
  *
- * No Supabase client, no table, no migration, and no admin activity
- * row - a public enquiry is not an administrative act and must not
- * appear in the audit trail as one.
+ * ── AND IT WRITES NO BUSINESS DATA ───────────────────────────
+ *
+ * The Supabase client below exists ONLY to reach that counter. There is
+ * no table for enquiries, no migration behind them, and no admin
+ * activity row - a public enquiry is not an administrative act and must
+ * not appear in the audit trail as one.
  */
 
 // Fixed, server-chosen recipient - never taken from the client.
@@ -49,6 +63,13 @@ const B2B_RECIPIENT = "hello@gloamatcha.com";
 // submission, just to reject obviously oversized payloads before
 // they're even parsed as JSON.
 const MAX_BODY_BYTES = 20_000;
+
+/**
+ * Conservative, and sized for a human rather than for a campaign: a café
+ * owner writes to GLOA once, maybe twice if they mistyped something. The
+ * window is the shared one from migration 043.
+ */
+const ENQUIRIES_PER_WINDOW = 5;
 
 const SEND_FAILED = "Anfrage konnte nicht gesendet werden. Schreib uns direkt an hello@gloamatcha.com.";
 
@@ -91,6 +112,47 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: validated.error } as ErrorResponse, { status: 400 });
   }
   const lead = validated.value;
+
+  // ── THE LIMIT, AFTER VALIDATION AND BEFORE THE MAIL ─────────
+  //
+  // After validation, so a caller posting rubbish does not get to spend
+  // a database round trip - it was already refused for free. Before
+  // Resend, which is the whole point: a refused caller must not be able
+  // to make GLOA's sending domain deliver anything.
+  //
+  // The caller's address exists only as `callerBucket` inside this
+  // handler. What reaches the database, and what could ever reach a
+  // database log, is the digest below and nothing else - and neither is
+  // ever written to a log line here.
+  const supabase = getSupabaseAdmin();
+  const bucketSecret = process.env.LAUNCH_RATE_LIMIT_SECRET || process.env.SUPABASE_SECRET_KEY;
+  if (!supabase || !bucketSecret) {
+    console.error("B2B lead form error: the shared rate limit is not configured - refusing.");
+    return Response.json({ error: SEND_FAILED } as ErrorResponse, { status: 503 });
+  }
+
+  const callerBucket = rateLimitKeyFromRequest(request);
+  const limit = await consumePersistentRateLimit(
+    supabase,
+    pseudonymizeBucketKey(`b2b-lead:${callerBucket}`, bucketSecret),
+    ENQUIRIES_PER_WINDOW,
+    LAUNCH_RATE_LIMIT_WINDOW_SECONDS
+  );
+
+  if (limit.kind === "limited") {
+    return Response.json({ error: SEND_FAILED } as ErrorResponse, {
+      status: 429,
+      headers: { "Retry-After": String(Math.max(1, Math.ceil(limit.retryAfterSeconds))) },
+    });
+  }
+  // FAILS CLOSED, for the same reason /api/launch does: what is left
+  // when the shared counter cannot be reached is not a weaker limit, it
+  // is no limit at all across instances. A database outage costing GLOA
+  // a few enquiries is recoverable; an unbounded one is not.
+  if (limit.kind === "unavailable") {
+    console.error("B2B lead form error: shared rate limit unavailable - refusing:", limit.reason);
+    return Response.json({ error: SEND_FAILED } as ErrorResponse, { status: 503 });
+  }
 
   const resend = getResendClient();
   const fromAddress = process.env.RESEND_CONTACT_FROM;

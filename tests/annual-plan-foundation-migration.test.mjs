@@ -145,8 +145,8 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
   const files = readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith(".sql")).sort();
   assert.deepEqual(files.filter(f => f.startsWith("039")), [MIGRATION_039],
     "there must be exactly one migration 039");
-  assert.equal(files[files.length - 14], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 15], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 15], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 16], MIGRATION_038, "038 must be the one before it");
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
@@ -154,7 +154,7 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
 test("2: no migration 044 or beyond", () => {
   // 039 is not applied anywhere, so it is still the right place to fix
   // 039. A hardening pass must not become a second migration.
-  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 52);
+  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 53);
   assert.deepEqual(beyond, [], "an unreviewed migration appeared after 039");
 });
 
@@ -1259,6 +1259,15 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // array is read by the desktop nav and the mobile menu alike so the
     // two cannot diverge. tests/partnerships-page.test.mjs asserts the
     // position and the single occurrence directly against the source.
+    // 4A.4b HARDENS THE B2B ENQUIRY ROUTE. It gained the SHARED
+    // persistent rate limiter - the same counter /api/launch uses, from
+    // migration 043 - placed after validation and before Resend, and
+    // failing closed when it cannot be consulted. The route still writes
+    // no business data: the Supabase client it now holds exists only to
+    // reach that counter, which tests/b2b-lead-api.test.mjs asserts
+    // directly. No payment, fulfillment, account or annual module is
+    // involved.
+    "app/api/b2b-lead/route.ts",
     "app/Chrome.tsx",
     // DISCOVERY PASS: three presentation/metadata files, no payment,
     // fulfillment, account or annual logic among them.

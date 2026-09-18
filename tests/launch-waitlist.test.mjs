@@ -1256,7 +1256,8 @@ test("61: the rate limit went into 043 rather than into a 044, and 043 is still 
     // function signature changed, so no older overload is left
     // callable, and no row is backfilled. Reviewed in
     // tests/admin-audit.test.mjs.
-    "052_admin_activity_audit.sql"],
+    "052_admin_activity_audit.sql",
+    "053_b2b_commercial_containment.sql"],
     "an unreviewed migration appeared after 043"
   );
 
