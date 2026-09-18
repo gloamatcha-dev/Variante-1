@@ -61,15 +61,32 @@ begin;
 -- learned the hard way: Supabase carries default privileges for these
 -- roles on tables in `public`, so "revoke the thing I granted" leaves
 -- whatever arrived by default. Take everything away, then give back
--- exactly what is needed - which here is nothing.
+-- exactly what is needed.
+--
+-- ── AND service_role IS REVOKED TOO, NOT JUST THE BROWSER ────
+--
+-- The first draft of this migration revoked from anon and authenticated
+-- and then granted SELECT to service_role - which is the SAME mistake
+-- 052 made, one role along. `grant select` adds a privilege; it removes
+-- none. If service_role already held INSERT, UPDATE, DELETE, TRUNCATE,
+-- REFERENCES or TRIGGER on these tables - from migration 048, from a
+-- Supabase default, or from anything else - that grant would have left
+-- every one of them in place while the file appeared to say otherwise.
+--
+-- TRUNCATE is again the one that matters: a role that can empty a table
+-- is not a role that can only read it.
+--
+-- So all three roles are stripped first and exactly one privilege is
+-- given back. The end state is then a property of these two statements
+-- rather than of whatever the table happened to arrive with.
 
 drop policy if exists "Business users can read product sizes" on public.b2b_product_sizes;
 drop policy if exists "Business users can read offer models"  on public.b2b_offer_models;
 drop policy if exists "Business users can read general terms" on public.b2b_general_terms;
 
-revoke all privileges on table public.b2b_product_sizes  from anon, authenticated;
-revoke all privileges on table public.b2b_offer_models   from anon, authenticated;
-revoke all privileges on table public.b2b_general_terms  from anon, authenticated;
+revoke all privileges on table public.b2b_product_sizes  from anon, authenticated, service_role;
+revoke all privileges on table public.b2b_offer_models   from anon, authenticated, service_role;
+revoke all privileges on table public.b2b_general_terms  from anon, authenticated, service_role;
 
 -- RLS stays on. With no policy and no grant, a browser role now gets
 -- nothing from any of the three, whichever way it asks.
@@ -77,13 +94,21 @@ alter table public.b2b_product_sizes  enable row level security;
 alter table public.b2b_offer_models   enable row level security;
 alter table public.b2b_general_terms  enable row level security;
 
--- ── 2. THE SERVER KEEPS READING THEM ──────────────────────────
+-- ── 2. AND EXACTLY ONE PRIVILEGE GOES BACK ────────────────────
 --
--- Migration 048 granted service_role SELECT on all three. That stays:
--- the rows are the only written record of what the first draft said,
--- and trusted server code - or a future admin screen - has a legitimate
--- reason to look at them. No role gains INSERT, UPDATE or DELETE here,
--- and none had it before.
+-- Migration 048 granted service_role SELECT on all three, and reading
+-- them is still legitimate: the rows are the only written record of
+-- what the first draft said, and trusted server code - or a future
+-- admin screen - has reason to look at it.
+--
+-- Reading is ALL it gets. Section 1 took everything away from
+-- service_role as well, so after these three statements its privileges
+-- on these tables are exactly SELECT, whatever they were before this
+-- migration ran. No WITH GRANT OPTION, so it cannot pass even that on.
+--
+-- No role gains INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES or TRIGGER
+-- here, and section 3's own writes run as the migration's owner rather
+-- than as service_role.
 
 grant select on table public.b2b_product_sizes  to service_role;
 grant select on table public.b2b_offer_models   to service_role;
@@ -130,17 +155,38 @@ commit;
 -- ══════════════════════════════════════════════════════════════
 -- VERIFYING THIS MIGRATION, read-only:
 --
---   1. No browser role can read any of the three. Grouped by role,
---      because a per-row query is what missed the 052 grant problem:
+--   1. THE EXACT PRIVILEGE SET. Grouped by role and printing the
+--      grant option too, because a per-row query is what missed the
+--      052 problem and a privilege list without is_grantable does not
+--      say whether a role can pass what it holds to another:
 --        select table_name, grantee,
---               string_agg(privilege_type, ', ' order by privilege_type)
+--               string_agg(privilege_type, ', ' order by privilege_type) as privileges,
+--               string_agg(distinct is_grantable, ',') as grantable
 --        from information_schema.role_table_grants
 --        where table_schema = 'public'
 --          and table_name in ('b2b_product_sizes','b2b_offer_models','b2b_general_terms')
 --          and grantee in ('anon','authenticated','service_role')
---        group by table_name, grantee;
---      -> three rows, all service_role, all SELECT.
+--        group by table_name, grantee
+--        order by table_name, grantee;
+--      -> EXACTLY three rows:
+--           b2b_general_terms  | service_role | SELECT | NO
+--           b2b_offer_models   | service_role | SELECT | NO
+--           b2b_product_sizes  | service_role | SELECT | NO
 --      -> anon and authenticated do not appear at all.
+--      -> the privileges column is the single word SELECT, never
+--         "INSERT, SELECT" or anything longer.
+--
+--   1b. The same thing asked the other way round, so a missed
+--       privilege cannot hide inside an aggregate:
+--         select table_name, grantee, privilege_type
+--         from information_schema.role_table_grants
+--         where table_schema = 'public'
+--           and table_name in ('b2b_product_sizes','b2b_offer_models','b2b_general_terms')
+--           and privilege_type in
+--               ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER')
+--           and grantee in ('anon','authenticated','service_role');
+--       -> NO ROWS. Not one write, reference or trigger privilege
+--          survives on any of the three, for any of the three roles.
 --
 --   2. And no policy lets them in the other way:
 --        select tablename, count(*) from pg_policies

@@ -40,18 +40,35 @@ const DRAFT_TABLES = ["b2b_product_sizes", "b2b_offer_models", "b2b_general_term
    1. NO BROWSER ROLE MAY READ THE DRAFT
    ══════════════════════════════════════════════════════════════ */
 
-test("1: every browser grant is revoked, as an end state rather than a delta", () => {
-  // Stated as "take everything away" for the reason 052 learned the hard
-  // way: Supabase carries default privileges for these roles on tables
-  // in `public`, so revoking only what was granted leaves whatever
-  // arrived by default.
+test("1: EVERY role is stripped first - service_role included", () => {
+  // The whole point of an end state. `grant select` ADDS a privilege and
+  // removes none, so granting SELECT to a role that already held
+  // INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES or TRIGGER leaves all
+  // of them in place while the file appears to say otherwise.
+  //
+  // 052 made exactly this mistake with service_role's default
+  // privileges, and the first draft of 053 repeated it one role along:
+  // it revoked from anon and authenticated only, then granted SELECT to
+  // service_role - which proves nothing about what service_role kept.
   for (const table of DRAFT_TABLES) {
     const re = new RegExp(`revoke all privileges on table public\\.${table}\\s+from ([a-z_, ]+);`);
     const m = re.exec(sql);
     assert.ok(m, `053 does not revoke all privileges on ${table}`);
     const roles = m[1].split(",").map(r => r.trim()).sort();
-    assert.deepEqual(roles, ["anon", "authenticated"],
-      `${table} keeps privileges for a browser role`);
+    assert.deepEqual(roles, ["anon", "authenticated", "service_role"],
+      `${table} is not stripped for every role - a pre-existing privilege would survive`);
+  }
+});
+
+test("1a2: and the strip happens BEFORE the re-grant, or it would undo it", () => {
+  // Order is the whole mechanism: revoke then grant leaves SELECT;
+  // grant then revoke leaves nothing at all.
+  for (const table of DRAFT_TABLES) {
+    const revokeAt = sql.indexOf(`revoke all privileges on table public.${table}`);
+    const grantAt = sql.indexOf(`grant select on table public.${table}`);
+    assert.ok(revokeAt > -1 && grantAt > -1, `${table} is missing a revoke or a grant`);
+    assert.ok(revokeAt < grantAt,
+      `${table} is granted before it is revoked, which leaves it with nothing`);
   }
 });
 
@@ -73,7 +90,7 @@ test("1b: and no policy lets a browser role in the other way", () => {
   }
 });
 
-test("1c: the server keeps SELECT, and nobody gains a write", () => {
+test("1c: exactly one privilege goes back, and it is SELECT to service_role", () => {
   const grants = [...sql.matchAll(/grant ([a-z, ]+) on table public\.(b2b_\w+)\s+to (\w+)/g)]
     .map(m => [m[2], m[3], m[1].trim()]);
   assert.equal(grants.length, 3, "053 grants something other than the three server reads");
@@ -88,6 +105,42 @@ test("1c: the server keeps SELECT, and nobody gains a write", () => {
   }
   assert.ok(!/with grant option/i.test(sql), "a privilege is grantable onward");
   assert.ok(!/revoke[^;]*from[^;]*\bpostgres\b/i.test(sql), "053 revokes the owner's own privileges");
+
+  // THE END STATE, ASSERTED AS A PAIR. For each table the file must
+  // contain both halves: everything taken from all three roles, and
+  // SELECT given back to exactly one. Either alone is not a contract.
+  for (const table of DRAFT_TABLES) {
+    assert.match(sql, new RegExp(
+      `revoke all privileges on table public\\.${table}\\s+from anon, authenticated, service_role;`),
+      `${table} does not state its end state`);
+    assert.match(sql, new RegExp(`grant select on table public\\.${table}\\s+to service_role;`),
+      `${table} does not give SELECT back`);
+    // And nothing else is granted on it, to anyone.
+    const grantsForTable = [...sql.matchAll(
+      new RegExp(`grant ([a-z, ]+) on table public\\.${table}\\s+to (\\w+)`, "g"))];
+    assert.equal(grantsForTable.length, 1, `${table} is granted more than once`);
+    assert.equal(grantsForTable[0][1].trim(), "select");
+    assert.equal(grantsForTable[0][2], "service_role");
+  }
+});
+
+test("1d: the verification query proves the privilege set, not just its shape", () => {
+  // A privilege list without is_grantable does not say whether a role
+  // can pass what it holds to another, and an aggregate can hide an
+  // extra privilege inside a comma. The migration asks both ways.
+  assert.match(migration, /is_grantable/,
+    "the verification does not check the grant option");
+  assert.match(migration, /string_agg\(privilege_type, ', ' order by privilege_type\)/);
+  // The explicit no-write query, naming every privilege that must not
+  // survive for any of the three roles.
+  for (const privilege of ["INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"]) {
+    assert.ok(migration.includes(`'${privilege}'`),
+      `the verification does not look for a surviving ${privilege}`);
+  }
+  assert.match(migration, /-> NO ROWS\./,
+    "the verification does not state the expected empty result");
+  assert.match(migration, /service_role \| SELECT \| NO/,
+    "the verification does not state the expected privilege row");
 });
 
 /* ══════════════════════════════════════════════════════════════
