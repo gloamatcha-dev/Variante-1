@@ -127,8 +127,8 @@ test("1c: no backend, auth or database was touched", () => {
     // no migration, no write. Reviewed in tests/b2b-lead-api.test.mjs.
 ["admin", "annual-plan", "b2b-lead", "checkout", "contact", "cron", "internal", "launch",
      "orders", "partnerships", "stripe", "subscriptions", "withdrawal"], "an API route changed");
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("054")),
-    "a migration 054 or beyond appeared");
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("055")),
+    "a migration 055 or beyond appeared");
 });
 
 /* ══════════════════════════════════════════════════════════════

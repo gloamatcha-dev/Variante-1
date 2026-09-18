@@ -2036,7 +2036,8 @@ test("034: it is the next free number and 022-033 are untouched", () => {
     // callable, and no row is backfilled. Reviewed in
     // tests/admin-audit.test.mjs.
     "052_admin_activity_audit.sql",
-    "053_b2b_commercial_containment.sql"],
+    "053_b2b_commercial_containment.sql",
+    "054_b2c_price_alignment.sql"],
     "an unreviewed migration above 034 appeared"
   );
   // AND 039 REDEFINES NOTHING 034 OWNS. It is a prepaid plan with no

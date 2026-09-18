@@ -273,13 +273,17 @@ test("4e: the calculator survives as code, unrendered", () => {
    5. THE MIGRATION STACK
    ══════════════════════════════════════════════════════════════ */
 
-test("5: 053 is the newest migration, and 001-052 are untouched by it", () => {
+test("5: 053 owns its number, and 001-052 are untouched by it", () => {
   const files = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.length, 53);
-  assert.equal(files[files.length - 1], MIGRATION, "053 is not the newest migration");
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 53), [],
-    "a migration 054 or beyond appeared");
+  assert.equal(files.length, 54);
+  // 054 (the B2C price alignment) now sits above it, so 053 is no longer
+  // the newest. What this guard is about is that 053 occupies its own
+  // number and nothing was slipped in beside it.
+  assert.deepEqual(files.filter(f => f.startsWith("053")), [MIGRATION],
+    "there must be exactly one migration 053");
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 54), [],
+    "a migration 055 or beyond appeared");
   // It names none of them as something to change.
   for (const f of files.slice(0, -1)) {
     assert.ok(!sql.includes(f), `053 refers to ${f} as something to change`);
