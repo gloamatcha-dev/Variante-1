@@ -718,7 +718,8 @@ test("55: this phase added no migration, and the only ones after it are 038 and 
     // tests/admin-audit.test.mjs.
     "052_admin_activity_audit.sql",
     "053_b2b_commercial_containment.sql",
-    "054_b2c_price_alignment.sql"],
+    "054_b2c_price_alignment.sql",
+    "055_checkout_email_identity.sql"],
     "an unreviewed migration appeared after 037");
   const sql039 = withoutComments(read("supabase/migrations/039_b2c_annual_plan_foundation.sql"));
   assert.ok(!sql039.includes("apply_order_refund_state_by_invoice"),

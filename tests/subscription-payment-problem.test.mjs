@@ -668,7 +668,7 @@ test("72-74: no migration was added, edited or required", () => {
   // writer), reviewed in
   // tests/subscription-refund-correlation-migration.test.mjs. THIS phase
   // still needed no migration, which is what the guard protects.
-  assert.equal(files.length, 54);
+  assert.equal(files.length, 55);
   // Phase 4B1 added 039, the B2C prepaid annual plan foundation,
   // reviewed in tests/annual-plan-foundation-migration.test.mjs. The
   // guard is re-pinned, not deleted: it protects "no UNREVIEWED
@@ -686,15 +686,15 @@ test("72-74: no migration was added, edited or required", () => {
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(files[files.length - 9], "046_launch_signup_atomic.sql");
-  assert.equal(files[files.length - 10], "045_launch_welcome_email.sql");
-  assert.equal(files[files.length - 11], "044_launch_send.sql");
-  assert.equal(files[files.length - 12], "043_launch_waitlist.sql");
-  assert.equal(files[files.length - 13], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.equal(files[files.length - 14], "041_annual_account_column_privileges.sql");
-  assert.equal(files[files.length - 15], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(files[files.length - 16], "039_b2c_annual_plan_foundation.sql");
-  assert.ok(!files.some(f => f.startsWith("055")), "an unreviewed migration appeared");
+  assert.equal(files[files.length - 10], "046_launch_signup_atomic.sql");
+  assert.equal(files[files.length - 11], "045_launch_welcome_email.sql");
+  assert.equal(files[files.length - 12], "044_launch_send.sql");
+  assert.equal(files[files.length - 13], "043_launch_waitlist.sql");
+  assert.equal(files[files.length - 14], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(files[files.length - 15], "041_annual_account_column_privileges.sql");
+  assert.equal(files[files.length - 16], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 17], "039_b2c_annual_plan_foundation.sql");
+  assert.ok(!files.some(f => f.startsWith("056")), "an unreviewed migration appeared");
   // Everything this phase needed, 036 already grants.
   assert.ok(sql036.includes("'payment_problem'"));
   assert.ok(sql036.includes("grant execute on function public.sync_subscription_payment_status(text, text) to service_role;"));
@@ -966,7 +966,7 @@ test("21, 22, 23: no migration was added, edited or required", () => {
   // writer), reviewed in
   // tests/subscription-refund-correlation-migration.test.mjs. THIS phase
   // still needed no migration, which is what the guard protects.
-  assert.equal(files.length, 54);
+  assert.equal(files.length, 55);
   // Phase 4B1 added 039, the B2C prepaid annual plan foundation,
   // reviewed in tests/annual-plan-foundation-migration.test.mjs. The
   // guard is re-pinned, not deleted: it protects "no UNREVIEWED
@@ -975,15 +975,15 @@ test("21, 22, 23: no migration was added, edited or required", () => {
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(files[files.length - 9], "046_launch_signup_atomic.sql");
-  assert.equal(files[files.length - 10], "045_launch_welcome_email.sql");
-  assert.equal(files[files.length - 11], "044_launch_send.sql");
-  assert.equal(files[files.length - 12], "043_launch_waitlist.sql");
-  assert.equal(files[files.length - 13], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.equal(files[files.length - 14], "041_annual_account_column_privileges.sql");
-  assert.equal(files[files.length - 15], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(files[files.length - 16], "039_b2c_annual_plan_foundation.sql");
-  assert.ok(!files.some(f => f.startsWith("055")), "an unreviewed migration appeared");
+  assert.equal(files[files.length - 10], "046_launch_signup_atomic.sql");
+  assert.equal(files[files.length - 11], "045_launch_welcome_email.sql");
+  assert.equal(files[files.length - 12], "044_launch_send.sql");
+  assert.equal(files[files.length - 13], "043_launch_waitlist.sql");
+  assert.equal(files[files.length - 14], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(files[files.length - 15], "041_annual_account_column_privileges.sql");
+  assert.equal(files[files.length - 16], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 17], "039_b2c_annual_plan_foundation.sql");
+  assert.ok(!files.some(f => f.startsWith("056")), "an unreviewed migration appeared");
   // The guard needs no schema: stripe_subscription_id is migration 022's
   // column, and 022 is the single statement that binds it - which is why
   // it is the authoritative side of the ownership comparison.

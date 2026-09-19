@@ -153,7 +153,8 @@ test("035 exists, is the only 035, and only 036 and 037 follow it", () => {
     // tests/admin-audit.test.mjs.
     "052_admin_activity_audit.sql",
     "053_b2b_commercial_containment.sql",
-    "054_b2c_price_alignment.sql"],
+    "054_b2c_price_alignment.sql",
+    "055_checkout_email_identity.sql"],
     "an unreviewed migration above 035 appeared"
   );
   // And 039 leaves this table entirely alone. An annual plan's one
