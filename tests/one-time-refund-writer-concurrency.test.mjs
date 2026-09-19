@@ -26,6 +26,7 @@ const MIGRATION_040 = "040_annual_checkout_retry_fingerprints.sql";
 const MIGRATION_041 = "041_annual_account_column_privileges.sql";
 const MIGRATION_042 = "042_annual_delivery_rls_parent_user_privilege.sql";
 const MIGRATION_037 = "037_subscription_refund_correlation.sql";
+const MIGRATION_056 = "056_launch_discount.sql";
 const MIGRATION_019 = "019_order_lifecycle_tracking.sql";
 
 const withoutComments = source => source
@@ -194,9 +195,14 @@ test("3, 4, 5: migrations 019 and 022 through 037 are unmodified", () => {
   // it may be edited in place. Everything below it is live.
   // 040 is NOT APPLIED yet, so it may still be edited in place; every
   // migration below it is live and may not be.
+  // 056 is the launch-discount foundation. It is committed but has NOT
+  // been applied to production, so correcting it in place is right and a
+  // 057 would be wrong: a 057 would have to alter a table that does not
+  // exist anywhere yet. The moment it IS applied, it joins the immutable
+  // set below and this exemption must be removed.
   const immutable = touched.filter(rel =>
     !rel.endsWith(MIGRATION_038) && !rel.endsWith(MIGRATION_039)
-    && !rel.endsWith(MIGRATION_040));
+    && !rel.endsWith(MIGRATION_040) && !rel.endsWith(MIGRATION_056));
   assert.deepEqual(immutable, [], "a live, immutable migration was edited");
   // And the two this phase reasons about still read the way they were applied.
   assert.ok(read(`supabase/migrations/${MIGRATION_019}`)

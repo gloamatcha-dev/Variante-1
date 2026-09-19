@@ -827,7 +827,13 @@ test("33: this phase stays inside its boundaries", () => {
   // 039 and 040 are both live now: no migration may be edited at all.
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
-  assert.equal(changed, "", "a live, immutable migration was edited");
+  // 056 is committed but NOT APPLIED to production, so it is still
+  // corrected in place rather than by a 057 - a 057 would have to alter
+  // a table that exists nowhere yet. The moment it IS applied it joins
+  // the immutable set and this exemption must go.
+  const live = (changed ? changed.split(/\r?\n/) : [])
+    .filter(rel => !rel.endsWith("056_launch_discount.sql"));
+  assert.deepEqual(live, [], "a live, immutable migration was edited");
 
   // Out of scope, and provably not called.
   for (const source of [flow, rulesCode, workerCode, depsCode]) {
@@ -1705,10 +1711,17 @@ test("61: 4B4.1's hardening is intact and this phase added no migration", () => 
     .filter(f => f.endsWith(".sql")).sort();
   assert.equal(migrations.length, 56);
   assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 56), [], "a migration 057 or beyond appeared");
-  assert.equal(
-    execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
-      { cwd: ROOT, encoding: "utf-8" }).trim(),
-    "", "a live, immutable migration was edited");
+  const editedMigrations = execFileSync("git",
+    ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
+    { cwd: ROOT, encoding: "utf-8" }).trim();
+  // 056 is committed but NOT APPLIED to production, so it is still
+  // corrected in place rather than by a 057 - a 057 would have to alter
+  // a table that exists nowhere yet. The moment it IS applied it joins
+  // the immutable set and this exemption must go.
+  assert.deepEqual(
+    (editedMigrations ? editedMigrations.split(/\r?\n/) : [])
+      .filter(rel => !rel.endsWith("056_launch_discount.sql")),
+    [], "a live, immutable migration was edited");
   // The two new decisions are PURE: the leaf still imports no value.
   const rulesImports = rulesCode.slice(0, rulesCode.indexOf("export"));
   assert.ok(rulesImports.includes("import type Stripe from"));

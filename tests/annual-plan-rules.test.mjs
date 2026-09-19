@@ -611,7 +611,10 @@ test("27: 039 and 040 are untouched, 041 is the highest, and there is no 042", (
   // under review rather than a 041 - and it is the only one that may.
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
+  // 056 is committed but NOT APPLIED to production either, so it is
+  // still corrected in place rather than by a 057.
   const live = (changed ? changed.split(NEWLINE) : [])
-    .filter(rel => !rel.endsWith("040_annual_checkout_retry_fingerprints.sql"));
+    .filter(rel => !rel.endsWith("040_annual_checkout_retry_fingerprints.sql"))
+    .filter(rel => !rel.endsWith("056_launch_discount.sql"));
   assert.deepEqual(live, [], "a live, immutable migration was edited");
 });

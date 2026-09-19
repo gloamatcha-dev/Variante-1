@@ -795,7 +795,13 @@ test("25: no lifecycle, completion or cancellation semantics are invented", () =
   // The completion function is untouched by this phase.
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
-  assert.equal(changed, "", "a live, immutable migration was edited");
+  // 056 is committed but NOT APPLIED to production, so it is still
+  // corrected in place rather than by a 057 - a 057 would have to alter
+  // a table that exists nowhere yet. The moment it IS applied it joins
+  // the immutable set and this exemption must go.
+  const live = (changed ? changed.split(/\r?\n/) : [])
+    .filter(rel => !rel.endsWith("056_launch_discount.sql"));
+  assert.deepEqual(live, [], "a live, immutable migration was edited");
 });
 
 test("26: the sales feature flag cannot gate refund truth", () => {

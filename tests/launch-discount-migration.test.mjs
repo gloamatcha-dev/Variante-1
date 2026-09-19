@@ -24,10 +24,19 @@ import { fileURLToPath } from "node:url";
  * assertions below are unusually insistent about three things:
  *
  *   1. the decision is ONE statement, never a read followed by a write
- *   2. a delayed payment - SEPA, bank transfer - can never lose its
- *      claim to a reservation timeout while the money is still coming
- *   3. redemption is terminal, and a paid order can never be refused
- *      because of claim bookkeeping
+ *   2. A PAYABLE DISCOUNTED STRIPE SESSION CAN NEVER LOSE ITS CLAIM.
+ *      Not to a reservation timeout, not to a second checkout, not to
+ *      an abandoned tab. A Checkout Session stays payable for up to 24
+ *      hours, so the only thing allowed to end one is Stripe saying it
+ *      ended - expired, or the payment failed.
+ *   3. a delayed payment - SEPA, bank transfer - can never lose its
+ *      claim while the money is still coming
+ *   4. redemption is terminal, spends the PAYER'S OWN claim, and a paid
+ *      order can never be refused because of claim bookkeeping
+ *
+ * THE INVARIANT, IN ONE LINE: at most one payable discounted Stripe
+ * Checkout Session per (code, normalised email) at any moment. Not
+ * "rarely two", and not "two, but counted".
  *
  * SAFE: reads SQL and source. No database, no network, no Stripe, no
  * clock.
@@ -64,7 +73,23 @@ const readCode = (rel) => read(rel)
  * does at runtime; an INSERT in the migration would be a business row
  * this file has no right to create. The two must not be confused.
  */
-const migrationBody = statements.replace(/create or replace function[\s\S]*?^\$\$;/gm, "");
+/**
+ * THE PRE-COMMIT SHAPE PROBES. The migration attempts the three rows the
+ * corrected state model must refuse - inside subtransactions it then
+ * rolls back - so a database that applied 056 has already proved the
+ * constraint refuses rather than merely exists. Held separately here
+ * because those statements ARE inserts, and every other assertion in
+ * this file is about a migration that must not insert a business row.
+ */
+const PROBE_MARKER = "select id into v_attempt from public.checkout_attempts limit 1;";
+const probeAt = statements.indexOf(PROBE_MARKER);
+assert.ok(probeAt > 0, "056 no longer tries the forbidden shapes before committing");
+const probeStart = statements.lastIndexOf("do $$", probeAt);
+const probeBlock = statements.slice(probeStart, statements.indexOf("end $$;", probeStart) + 7);
+
+const migrationBody = statements
+  .replace(/create or replace function[\s\S]*?^\$\$;/gm, "")
+  .replace(probeBlock, "");
 
 /**
  * Statements with the COMMENT ON documentation removed as well. A column
@@ -136,6 +161,11 @@ test("1b: it is idempotent - a second run changes nothing and still passes", () 
     "056: public\\.launch_discount_claims was not created",
     "056: the claim ledger is not keyed on \\(code, customer_key\\)",
     "056: the claim ledger has no state shape constraint",
+    "056: the state machine has no session_open",
+    "056: the claim ledger cannot name the payable session it is protecting",
+    "056: a session_open claim was allowed to carry an expiry",
+    "056: a session_open claim was allowed with no Stripe session",
+    "056: a reserved claim was allowed to hold a Stripe session",
     "056: row level security is not enabled on the claim ledger",
     "056: the claim ledger has a policy",
     "056: a role holds a privilege on the claim ledger",
@@ -175,6 +205,7 @@ test("2: one MUTABLE row per (code, customer_key) - a log cannot be a lock", () 
 
   // Everything the state machine needs, and nothing else.
   for (const column of ["code", "customer_key", "state", "claim_id", "checkout_attempt_id",
+                        "stripe_checkout_session_id", "session_opened_at",
                         "order_id", "claimed_at", "expires_at", "released_at", "redeemed_at",
                         "created_at", "updated_at"]) {
     assert.match(table, new RegExp(`^\\s{2}${column}\\s`, "m"), `the ledger has no ${column}`);
@@ -224,8 +255,10 @@ test("2c: the customer key is the canonical email, enforced at the boundary", ()
 
   // Every function normalises its argument the same way before touching
   // the table, so a caller that forgets cannot create a second row.
-  for (const name of ["claim_launch_discount", "mark_launch_discount_payment_pending",
-                      "release_launch_discount", "release_launch_discount_after_failed_payment",
+  for (const name of ["claim_launch_discount", "mark_launch_discount_session_open",
+                      "mark_launch_discount_payment_pending", "release_launch_discount",
+                      "release_launch_discount_after_expired_session",
+                      "release_launch_discount_after_failed_payment",
                       "redeem_launch_discount"]) {
     const body = fn(name);
     assert.match(body, /v_key\s*:=\s*lower\(btrim\(p_customer_key\)\)/, `${name} does not normalise the key`);
@@ -237,14 +270,14 @@ test("2c: the customer key is the canonical email, enforced at the boundary", ()
    3. THE STATE MODEL
    ══════════════════════════════════════════════════════════════ */
 
-test("3: four states, closed, and each one is a shape the database enforces", () => {
+test("3: FIVE states, closed, and each one is a shape the database enforces", () => {
   const shape = statements.slice(
     statements.indexOf("constraint launch_discount_claims_state_shape"),
     statements.indexOf("comment on table public.launch_discount_claims")
   );
   assert.ok(shape.length > 0, "there is no state shape constraint");
 
-  for (const state of ["reserved", "payment_pending", "released", "redeemed"]) {
+  for (const state of ["reserved", "session_open", "payment_pending", "released", "redeemed"]) {
     assert.match(shape, new RegExp(`when '${state}' then`), `the state model has no ${state}`);
   }
 
@@ -252,58 +285,272 @@ test("3: four states, closed, and each one is a shape the database enforces", ()
   // written by anything, including a future function.
   assert.match(shape, /else false/);
 
-  // reserved: a holder, an attempt and an expiry. Nothing terminal.
-  assert.match(shape, /when 'reserved' then\s*\n\s*claim_id is not null and checkout_attempt_id is not null\s*\n\s*and claimed_at is not null and expires_at is not null\s*\n\s*and redeemed_at is null and order_id is null/);
+  // reserved: a holder, an attempt and an expiry - AND NO STRIPE
+  // SESSION. That last clause is the one that makes a lapse safe here:
+  // while a claim is reserved, nothing discounted is payable anywhere,
+  // and the database refuses to record otherwise.
+  assert.match(shape, /when 'reserved' then\s*\n\s*claim_id is not null and checkout_attempt_id is not null\s*\n\s*and claimed_at is not null and expires_at is not null\s*\n\s*and stripe_checkout_session_id is null and session_opened_at is null\s*\n\s*and released_at is null\s*\n\s*and redeemed_at is null and order_id is null/);
 
-  // released: nobody holds it and it references nothing.
-  assert.match(shape, /when 'released' then\s*\n\s*claim_id is null and checkout_attempt_id is null\s*\n\s*and expires_at is null and released_at is not null\s*\n\s*and redeemed_at is null and order_id is null/);
+  // released: nobody holds it, it references nothing, and it carries no
+  // session - a released claim cannot point at something still payable.
+  assert.match(shape, /when 'released' then\s*\n\s*claim_id is null and checkout_attempt_id is null\s*\n\s*and expires_at is null and released_at is not null\s*\n\s*and stripe_checkout_session_id is null and session_opened_at is null\s*\n\s*and redeemed_at is null and order_id is null/);
 
   // redeemed: an order, a timestamp, and it cannot lapse.
   assert.match(shape, /when 'redeemed' then\s*\n\s*claim_id is not null and checkout_attempt_id is not null\s*\n\s*and order_id is not null and redeemed_at is not null\s*\n\s*and expires_at is null/);
 });
 
-test("3b: ASYNC PAYMENT SAFETY - payment_pending cannot lapse, by constraint", () => {
-  // SEPA Direct Debit and the bank-transfer family complete a Checkout
-  // Session immediately and confirm the money DAYS later; the webhook
-  // route already handles that for one-time orders. A reservation that
-  // simply timed out after thirty minutes would therefore release a code
-  // while a payment that will SUCCEED is still travelling.
+test("3b: PAYABLE SESSION SAFETY - session_open cannot lapse, by constraint", () => {
+  // THIS IS THE CORRECTION. A Stripe Checkout Session is payable from
+  // the moment it is created until Stripe expires it - up to 24 hours -
+  // not until a reservation of ours runs out. A claim that could lapse
+  // while its session was still payable would let a SECOND checkout
+  // take the code and open a second discounted session, and both could
+  // then be paid. So the state that means "a session is payable" is
+  // structurally unexpirable: expires_at NULL, enforced by the shape.
   const shape = statements.slice(
     statements.indexOf("constraint launch_discount_claims_state_shape"),
     statements.indexOf("comment on table public.launch_discount_claims")
   );
-  assert.match(shape, /when 'payment_pending' then\s*\n\s*claim_id is not null and checkout_attempt_id is not null\s*\n\s*and claimed_at is not null and expires_at is null\s*\n\s*and redeemed_at is null and order_id is null/);
+  assert.match(shape, /when 'session_open' then\s*\n\s*claim_id is not null and checkout_attempt_id is not null\s*\n\s*and claimed_at is not null and expires_at is null\s*\n\s*and stripe_checkout_session_id is not null and session_opened_at is not null\s*\n\s*and released_at is null\s*\n\s*and redeemed_at is null and order_id is null/);
 
-  // The transition clears the expiry, which the shape then keeps NULL.
-  const pending = fn("mark_launch_discount_payment_pending");
-  assert.match(pending, /set state\s*=\s*'payment_pending',\s*\n\s*expires_at = null/);
-  // Only the holder, and never from a terminal state.
-  assert.match(pending, /and claim_id = p_claim_id\s*\n\s*and state in \('reserved', 'payment_pending'\)/);
-  assert.ok(!/state in \([^)]*'redeemed'/.test(pending), "a redeemed claim can be sent back to pending");
+  // And it must NAME the session it is protecting, so the expiry event
+  // Stripe later sends can be matched to the claim that opened it.
+  assert.match(statements, /stripe_checkout_session_id text,/);
+  assert.match(statements, /session_opened_at\s+timestamptz,/);
 
   // AND NOTHING MAY TAKE IT. claim_launch_discount's takeover condition
-  // names only 'released' and 'reserved', so payment_pending is excluded
+  // names only 'released' and 'reserved', so session_open is excluded
   // entirely rather than "excluded unless it is old".
   const claim = fn("claim_launch_discount");
   const takeover = claim.slice(claim.indexOf("on conflict"), claim.indexOf("get diagnostics"));
-  assert.ok(!takeover.includes("payment_pending"),
+  assert.ok(!takeover.includes("'session_open'"),
+    "a claim whose Stripe session is still payable can be taken over");
+  assert.ok(!takeover.includes("'payment_pending'"),
     "a claim whose payment may still succeed can be taken over");
-  assert.ok(!takeover.includes("redeemed"), "a redeemed claim appears in the takeover condition");
+  assert.ok(!takeover.includes("'redeemed'"), "a redeemed claim appears in the takeover condition");
 
-  // The ORDINARY release cannot reach it either - structurally, not by a
-  // condition somebody has to remember. A flag on one function would
-  // have been one wrong argument away from releasing a live payment.
+  // The ONLY takeover is of a 'reserved' row, and a reserved row
+  // provably has no session.
+  assert.match(takeover, /where c\.state = 'released'\s*\n\s*or \(c\.state = 'reserved'/);
+
+  // A new reservation NEVER inherits the previous holder's session id.
+  assert.match(claim, /stripe_checkout_session_id = null,\s*\n\s*session_opened_at\s*=\s*null/);
+
+  // The ordinary release cannot reach it either - it is 'reserved' only.
   const release = fn("release_launch_discount");
   assert.match(release, /and claim_id = p_claim_id\s*\n\s*and state = 'reserved';/);
   assert.ok(!/state in \(/.test(release.slice(release.indexOf("update public."), release.indexOf("get diagnostics"))),
     "the ordinary release accepts more than one state");
+});
 
-  // The only way out is the function that exists for a payment Stripe
-  // has said FAILED - at which point the money cannot still arrive.
+test("3c: ASYNC PAYMENT SAFETY - payment_pending cannot lapse either", () => {
+  // SEPA Direct Debit and the bank-transfer family complete a Checkout
+  // Session immediately and confirm the money DAYS later; the webhook
+  // route already handles that for one-time orders. A reservation that
+  // simply timed out would therefore release a code while a payment
+  // that will SUCCEED is still travelling.
+  const shape = statements.slice(
+    statements.indexOf("constraint launch_discount_claims_state_shape"),
+    statements.indexOf("comment on table public.launch_discount_claims")
+  );
+  assert.match(shape, /when 'payment_pending' then\s*\n\s*claim_id is not null and checkout_attempt_id is not null\s*\n\s*and claimed_at is not null and expires_at is null\s*\n\s*and released_at is null\s*\n\s*and redeemed_at is null and order_id is null/);
+
+  // The transition clears the expiry, which the shape then keeps NULL.
+  const pending = fn("mark_launch_discount_payment_pending");
+  assert.match(pending, /set state\s*=\s*'payment_pending',\s*\n\s*expires_at = null/);
+
+  // Only the holder, and never from a terminal state. 'reserved' is
+  // accepted alongside 'session_open' because a completion can arrive
+  // for a claim whose session-open write was lost - and moving THAT to
+  // an unexpirable state is strictly safer than leaving it lapsable.
+  assert.match(pending, /and claim_id = p_claim_id\s*\n\s*and state in \('reserved', 'session_open', 'payment_pending'\)/);
+  assert.ok(!/state in \([^)]*'redeemed'/.test(pending), "a redeemed claim can be sent back to pending");
+
+  // THE ORDINARY RELEASE CANNOT TOUCH IT - structurally, not by a
+  // condition somebody has to remember. A flag on one function would
+  // have been one wrong argument away from releasing a live payment.
+  const release = fn("release_launch_discount");
+  const update = release.slice(release.indexOf("update public."), release.indexOf("get diagnostics"));
+  assert.ok(!update.includes("'payment_pending'"),
+    "the ordinary release can reach a claim whose payment may still succeed");
+  assert.ok(!update.includes("'session_open'"),
+    "the ordinary release can reach a claim with a payable session");
+  // It still REPORTS both, so a caller learns why it was refused.
+  assert.ok(/when v_state = 'payment_pending' then 'payment_pending'/.test(release));
+  assert.ok(/when v_state = 'session_open'\s+then 'session_open'/.test(release));
+
+  // The only way out is a function that exists for something Stripe has
+  // said - at which point the money cannot still arrive.
   const failed = fn("release_launch_discount_after_failed_payment");
-  assert.match(failed, /and claim_id = p_claim_id\s*\n\s*and state in \('reserved', 'payment_pending'\);/);
-  assert.ok(!failed.includes("'redeemed'") || !/state in \([^)]*redeemed/.test(failed),
+  assert.match(failed, /and claim_id = p_claim_id\s*\n\s*and state in \('reserved', 'session_open', 'payment_pending'\);/);
+  assert.ok(!/state in \([^)]*redeemed/.test(failed),
     "a redeemed claim can be released by the failed-payment path");
+});
+
+test("3d: THE SESSION-OPEN TRANSITION - only the holder, and only once", () => {
+  const open = fn("mark_launch_discount_session_open");
+
+  // ── ONE STATEMENT, AND IT PROVES OWNERSHIP THREE WAYS ──────
+  //
+  // The claim token, the attempt it was minted for, and a starting
+  // state that is either 'reserved' (the first time) or 'session_open'
+  // with the SAME session id (a retry). A different claim id affects
+  // zero rows: it cannot mark, cannot overwrite and cannot release.
+  assert.match(open, /where code = v_code\s*\n\s*and customer_key = v_key\s*\n\s*and claim_id = p_claim_id\s*\n\s*and checkout_attempt_id = p_checkout_attempt_id\s*\n\s*and \(state = 'reserved'\s*\n\s*or \(state = 'session_open' and stripe_checkout_session_id = v_session\)\);/);
+
+  // It makes the claim unexpirable in the same statement that records
+  // the session. There is no window between the two.
+  assert.match(open, /set state\s*=\s*'session_open',\s*\n\s*expires_at\s*=\s*null,\s*\n\s*stripe_checkout_session_id = v_session/);
+
+  // SAME-HOLDER RETRY IS IDEMPOTENT, and keeps the FIRST instant.
+  assert.match(open, /session_opened_at\s*=\s*coalesce\(session_opened_at, v_now\)/);
+  assert.match(open, /if v_rows = 1 then\s*\n\s*return jsonb_build_object\('opened', true/);
+
+  // A DIFFERENT HOLDER IS TOLD SO, AND LEARNS NOTHING ELSE.
+  assert.match(open, /'not_holder'/);
+  assert.match(open, /case when v_claim_id = p_claim_id then v_open else null end/);
+
+  // A SECOND PAYABLE SESSION FOR ONE CLAIM IS REFUSED, not recorded.
+  // Two payable sessions is exactly the state that must not exist, so
+  // the database will not write the second one.
+  assert.match(open, /then 'session_already_open'/);
+
+  // It cannot run backwards: a completed session and a paid order are
+  // both terminal as far as this transition is concerned.
+  const update = open.slice(open.indexOf("update public."), open.indexOf("get diagnostics"));
+  assert.ok(!update.includes("'payment_pending'"), "a completed session can be re-opened");
+  assert.ok(!update.includes("'redeemed'"), "a redeemed claim can be re-opened");
+
+  // A session that cannot be named cannot be accounted for.
+  assert.match(open, /raise exception 'launch discount session open: a stripe checkout session id is required/);
+  assert.match(open, /raise exception 'launch discount session open: a code, a customer key, a claim id and a checkout attempt are all required'/);
+
+  // And it is a narrow, security definer door like every other one.
+  assert.match(open, /security definer set search_path = ''/);
+});
+
+test("3e: checkout.session.expired IS THE AUTHORITATIVE END of a payable session", () => {
+  // A session we cannot see is finished only when Stripe says it is.
+  // This is the door phase B will wire checkout.session.expired to, and
+  // it is the ONLY ordinary way out of session_open.
+  const expired = fn("release_launch_discount_after_expired_session");
+
+  assert.match(expired, /and claim_id = p_claim_id\s*\n\s*and state = 'session_open'\s*\n\s*and stripe_checkout_session_id = v_session;/);
+  assert.match(expired, /set state\s*=\s*'released',\s*\n\s*claim_id\s*=\s*null,\s*\n\s*checkout_attempt_id\s*=\s*null,\s*\n\s*expires_at\s*=\s*null,\s*\n\s*stripe_checkout_session_id = null,\s*\n\s*session_opened_at\s*=\s*null,\s*\n\s*released_at\s*=\s*now\(\)/);
+
+  // IT NAMES THE SESSION, not just the holder: an expiry notice for a
+  // session the claim no longer has - the orphan left behind when a
+  // process died, arriving 24 hours later - must not release whatever
+  // claim has since been taken for that address.
+  assert.match(expired, /raise exception 'launch discount release after expired session: the expired stripe checkout session id is required'/);
+
+  // Never a claim whose money may still arrive, and never a terminal one.
+  const update = expired.slice(expired.indexOf("update public."), expired.indexOf("get diagnostics"));
+  assert.ok(!update.includes("'payment_pending'"), "an expiry notice can release a travelling payment");
+  assert.ok(!update.includes("'redeemed'"), "an expiry notice can release a paid order's claim");
+
+  // Redelivery is a cleanup that has already happened, not a failure.
+  assert.match(expired, /'already_released'/);
+
+  // PHASE A ONLY. The webhook does not subscribe to the event yet, and
+  // this suite is what will notice when phase B changes that.
+  assert.ok(!readCode("app/api/stripe/webhook/route.ts").includes("checkout.session.expired"),
+    "the webhook already handles checkout.session.expired - that is phase B");
+});
+
+test("3f: TWO CHECKOUTS CANNOT BOTH OWN PAYABLE-SESSION STATE", () => {
+  // The whole point, asked as one question: is there any path by which
+  // a second checkout acquires a claim while the first one's session is
+  // still payable?
+  const claim = fn("claim_launch_discount");
+  const takeover = claim.slice(claim.indexOf("on conflict"), claim.indexOf("get diagnostics"));
+
+  // The ONLY states a claim can be taken from are 'released' - where
+  // the previous session provably cannot be paid - and 'reserved',
+  // which provably never had a session at all.
+  const takeable = [...takeover.matchAll(/c\.state = '(\w+)'/g)].map((m) => m[1]);
+  assert.deepEqual([...new Set(takeable)].sort(), ["released", "reserved"],
+    "a claim can be taken from a state that may still be payable");
+
+  // And every function that WRITES 'released' is either the reserved-only
+  // cleanup or one of the two Stripe-authoritative endings. Nothing else
+  // in the file releases anything.
+  const releasers = [...statements.matchAll(/create or replace function public\.(\w+)\(/g)]
+    .map((m) => m[1])
+    .filter((name) => /set state\s*=\s*'released'/.test(fn(name)));
+  assert.deepEqual(releasers.sort(), [
+    "release_launch_discount",
+    "release_launch_discount_after_expired_session",
+    "release_launch_discount_after_failed_payment",
+  ]);
+
+  // NO TIMER RELEASES A PAYABLE SESSION. The only expiry comparison in
+  // the file is the reserved-only lapse in the takeover condition.
+  const lapses = statements.match(/expires_at\s*<=?\s*\w/g) || [];
+  assert.equal(lapses.length, 1, "something other than the reserved lapse compares an expiry");
+  assert.ok(takeover.includes("c.expires_at <= excluded.claimed_at"),
+    "the one expiry comparison is not the reserved lapse");
+});
+
+test("3g: NO ACCEPTED DOUBLE SETTLEMENT - not in the design, not in the prose", () => {
+  // The migration used to trade a lockout against a "rare double
+  // settlement" and write that trade down. It no longer does, and the
+  // absence is asserted against the FULL text - comments included -
+  // because a design decision that is documented is a design decision.
+  assert.ok(!/double settlement/i.test(migration),
+    "056 still documents an accepted double settlement");
+  assert.ok(!/rare double/i.test(migration));
+
+  // What it says instead.
+  assert.match(migration, /AT MOST ONE PAYABLE DISCOUNTED STRIPE CHECKOUT SESSION PER/);
+  assert.match(migration, /\(code, normalised customer email\) AT ANY MOMENT\./);
+
+  // ── redemption_conflicts IS TELEMETRY, NOT PERMISSION ──────
+  //
+  // It may count an anomaly. It may not be the mechanism that stands
+  // between two customers and two discounts, and nothing may branch on
+  // its value: the only comparison anywhere is the constraint that says
+  // it cannot go negative.
+  const comparisons = statements.match(/redemption_conflicts\s*[<>]=?\s*\d+/g) || [];
+  assert.deepEqual(comparisons, ["redemption_conflicts >= 0"],
+    "something reads redemption_conflicts as a budget");
+  assert.ok(!/if [^\n]*redemption_conflicts/i.test(statements),
+    "a decision is taken on the conflict counter");
+
+  // And it is described as what it is.
+  assert.match(statements, /Anomaly telemetry\./);
+  assert.match(statements, /this must stay 0; a non-zero value is an incident, not an allowance/);
+  assert.match(migration, /ANOMALY TELEMETRY, NOT A BUDGET/);
+});
+
+test("3h: the migration TRIES the forbidden shapes before it commits", () => {
+  // A constraint that exists is not a constraint that refuses. Three
+  // rows - the exact incoherences the corrected model forbids - are
+  // attempted for real inside subtransactions that are then rolled
+  // back, so applying 056 proves the refusal rather than assuming it.
+  assert.equal((probeBlock.match(/insert into public\.launch_discount_claims/g) || []).length, 3);
+  assert.equal((probeBlock.match(/exception when check_violation then/g) || []).length, 3);
+
+  // Each probe raises if the row was ACCEPTED, which aborts the whole
+  // migration - a half-applied state machine is worse than none.
+  for (const raised of [
+    "a session_open claim was allowed to carry an expiry",
+    "a session_open claim was allowed with no Stripe session",
+    "a reserved claim was allowed to hold a Stripe session",
+  ]) {
+    assert.ok(probeBlock.includes(raised), `056 does not probe: ${raised}`);
+  }
+
+  // It borrows an existing attempt so the CHECK is what refuses, not the
+  // foreign key - and skips rather than weakens when there is none.
+  assert.match(probeBlock, /select id into v_attempt from public\.checkout_attempts limit 1;/);
+  assert.match(probeBlock, /if v_attempt is null then[\s\S]{0,200}return;/);
+
+  // AND NOTHING SURVIVES IT. Every insert is inside a block that rolls
+  // back, and the migration still asserts the ledger is empty.
+  assert.ok(!migrationBody.includes("insert into public.launch_discount_claims"),
+    "the probes are not the only inserts in 056");
+  assert.match(sql, /raise exception '056: the claim ledger is not empty/);
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -328,7 +575,12 @@ test("4: the claim is taken by ONE statement, and the database arbitrates", () =
   assert.ok(!beforeUpsert.includes("from public.launch_discount_claims"),
     "the claim function reads the ledger before deciding - that is the race");
   const afterUpsert = claim.slice(claim.indexOf("get diagnostics"));
-  assert.match(afterUpsert, /select state into v_state/);
+  assert.match(afterUpsert, /select state, claim_id into v_state, v_claim_id/);
+  // It reports whether the refusing row is the CALLER'S own, which is
+  // what lets a retried checkout recognise its own open session instead
+  // of trying to open a second one - the thing the invariant forbids.
+  assert.match(claim, /'holder', \(v_claim_id is not null and v_claim_id = p_claim_id\)/);
+  assert.match(claim, /when 'session_open'\s+then 'session_open'/);
   assert.ok(!/for update/.test(claim), "the claim function locks a row it has already decided about");
 
   // There is no advisory lock, no sleep and no retry loop standing in
@@ -352,10 +604,19 @@ test("4b: SAME-REQUEST RETRY IS IDEMPOTENT, and a stranger's is not", () => {
   // Only from 'reserved' - the two forbidden states are absent.
   assert.match(where, /c\.state = 'reserved'/);
 
-  // The TTL is bounded at both ends: floored so a caller cannot make the
-  // reservation meaningless, capped so nobody can hold the code hostage.
-  assert.match(claim, /v_ttl\s*:=\s*least\(greatest\(coalesce\(p_ttl_seconds, 1800\), 300\), 86400\)/);
-  assert.match(claim, /p_ttl_seconds integer default 1800/);
+  // THE TTL IS SIZED FOR ONE STRIPE API CALL, not for an abandoned
+  // basket. 'reserved' is the only state that can lapse and it is
+  // provably a state in which nothing is payable, so the reservation
+  // only has to survive the round trip that creates the session - five
+  // minutes by default. Floored so a caller cannot make the reservation
+  // meaningless, capped at an hour so a crashed process cannot hold the
+  // code hostage for a day.
+  assert.match(claim, /v_ttl\s*:=\s*least\(greatest\(coalesce\(p_ttl_seconds, 300\), 60\), 3600\)/);
+  assert.match(claim, /p_ttl_seconds integer default 300/);
+  // AND IT IS NOT THE THING PROTECTING A PAYABLE SESSION. Extending it
+  // to cover a checkout would be the discarded design: the answer is
+  // session_open, not a longer timer.
+  assert.ok(!/86400/.test(claim), "the reservation can be held for a day");
 
   // A null argument is an error, not a claim.
   assert.match(claim, /raise exception 'launch discount claim: a code, a customer key, a claim id and a checkout attempt are all required'/);
@@ -364,12 +625,17 @@ test("4b: SAME-REQUEST RETRY IS IDEMPOTENT, and a stranger's is not", () => {
 test("4c: RELEASE OWNERSHIP - an old claim id can never free the new holder", () => {
   // Migration 049's rule, for the same reason: a caller whose
   // reservation lapsed and was taken over must not be able to release
-  // somebody else's claim on its way out.
-  for (const name of ["release_launch_discount", "release_launch_discount_after_failed_payment"]) {
+  // somebody else's claim on its way out. All three releases obey it.
+  for (const name of ["release_launch_discount",
+                      "release_launch_discount_after_expired_session",
+                      "release_launch_discount_after_failed_payment"]) {
     const body = fn(name);
     assert.match(body, /and claim_id = p_claim_id/, `${name} releases without proving ownership`);
-    assert.match(body, /set state\s*=\s*'released',\s*\n\s*claim_id\s*=\s*null,\s*\n\s*checkout_attempt_id = null,\s*\n\s*expires_at\s*=\s*null,\s*\n\s*released_at\s*=\s*now\(\)/,
-      `${name} leaves a released row holding a holder`);
+    // A RELEASED ROW POINTS AT NOTHING - no holder, no attempt, no
+    // expiry and NO STRIPE SESSION. A released claim that still named a
+    // session would be a released claim that might still be payable.
+    assert.match(body, /set state\s*=\s*'released',\s*\n\s*claim_id\s*=\s*null,\s*\n\s*checkout_attempt_id\s*=\s*null,\s*\n\s*expires_at\s*=\s*null,\s*\n\s*stripe_checkout_session_id = null,\s*\n\s*session_opened_at\s*=\s*null,\s*\n\s*released_at\s*=\s*now\(\)/,
+      `${name} leaves a released row holding a holder or a session`);
     // Never terminal.
     const update = body.slice(body.indexOf("update public."), body.indexOf("get diagnostics"));
     assert.ok(!update.includes("'redeemed'"), `${name} can release a redeemed claim`);
@@ -387,16 +653,21 @@ test("4c: RELEASE OWNERSHIP - an old claim id can never free the new holder", ()
 test("5: redeemed is terminal - nothing reserves, releases or un-spends it", () => {
   const redeem = fn("redeem_launch_discount");
 
-  // One upsert, and it only moves a row that is not already terminal.
+  // ONE UPSERT, AND IT SPENDS THE PAYER'S OWN CLAIM. Free - no row, or
+  // 'released' - or held by THIS attempt's claim id, which is the only
+  // sequence the state machine can produce. 'redeemed' is absent, so
+  // the terminal state is never moved by the ordinary path.
   assert.match(redeem, /on conflict \(code, customer_key\) do update/);
-  assert.match(redeem, /where c\.state <> 'redeemed';/);
+  assert.match(redeem, /where c\.state = 'released'\s*\n\s*or \(c\.state in \('reserved', 'session_open', 'payment_pending'\)\s*\n\s*and c\.claim_id = excluded\.claim_id\);/);
   assert.match(redeem, /set state\s*=\s*'redeemed'/);
   assert.match(redeem, /expires_at\s*=\s*null/);
   assert.match(redeem, /redeemed_at\s*=\s*excluded\.redeemed_at/);
 
   // Nothing anywhere in the file moves a row OUT of 'redeemed'.
-  for (const name of ["claim_launch_discount", "mark_launch_discount_payment_pending",
-                      "release_launch_discount", "release_launch_discount_after_failed_payment"]) {
+  for (const name of ["claim_launch_discount", "mark_launch_discount_session_open",
+                      "mark_launch_discount_payment_pending", "release_launch_discount",
+                      "release_launch_discount_after_expired_session",
+                      "release_launch_discount_after_failed_payment"]) {
     const body = fn(name);
     assert.ok(!/set state\s*=\s*'redeemed'/.test(body), `${name} writes the terminal state`);
     assert.ok(!/redeemed_at\s*=\s*(now\(\)|v_now|excluded)/.test(body), `${name} stamps a redemption`);
@@ -418,11 +689,27 @@ test("5b: a paid order is NEVER refused because of claim bookkeeping", () => {
   assert.ok(!/raise exception/.test(redeem.slice(redeem.indexOf("insert into"))),
     "redemption raises after the money has moved");
 
-  // The one unsatisfiable case - already spent by a DIFFERENT order - is
-  // COUNTED on the row so an invisible commercial leak becomes a visible
-  // number, and reported to the caller.
+  // ── THE TWO ANOMALIES, AND WHY NEITHER RAISES ─────────────
+  //
+  // With session_open in the model neither is reachable in ordinary
+  // operation: a claim with a payable session cannot lapse, cannot be
+  // taken over, and is released only when Stripe says its session is
+  // finished. Both are therefore INVARIANT VIOLATIONS - counted so an
+  // operator sees them, never raised, because the money has moved.
+  //
+  //   already spent by a DIFFERENT order   the earlier order keeps it
+  //   held by a DIFFERENT, UNPAID holder   the PAID order takes it,
+  //                                        because leaving the other
+  //                                        holder live would let it
+  //                                        redeem later and produce a
+  //                                        second discounted order
   assert.match(redeem, /set redemption_conflicts = redemption_conflicts \+ 1,\s*\n\s*last_conflict_at\s*=\s*v_now/);
   assert.match(redeem, /'already_redeemed_by_another_order'/);
+  assert.match(redeem, /'redeemed_over_foreign_holder'/);
+  assert.match(redeem, /redemption_conflicts = redemption_conflicts \+ 1,\s*\n\s*last_conflict_at\s*=\s*v_now,?\s*\n?\s*where code = v_code and customer_key = v_key\s*\n\s*and state <> 'redeemed';/);
+  // The forced takeover is still bounded by the terminal state: it
+  // cannot overwrite an order that already spent the claim.
+  assert.ok(!/set[\s\S]*?state\s*=\s*'redeemed'[\s\S]*?where[^;]*state = 'redeemed'/.test(redeem));
   assert.match(statements, /redemption_conflicts integer not null default 0/);
   assert.match(statements, /constraint launch_discount_claims_conflicts_nonnegative\s*\n\s*check \(redemption_conflicts >= 0\)/);
 
@@ -453,8 +740,13 @@ test("6: the order RPC spends the claim in its own transaction", () => {
   assert.match(early, /if found then[\s\S]{0,600}return v_order;/);
   assert.ok(rpc.indexOf("return v_order;") < rpc.indexOf("redeem_launch_discount"));
 
-  // A failed redemption warns; it does not abort a paid order.
-  assert.match(rpc, /raise warning 'launch discount: order % settled attempt % but the claim was already spent/);
+  // ANY OUTCOME BUT THE TWO ORDINARY ONES IS SAID OUT LOUD - and it
+  // still does not abort a paid order. 'redeemed' is the normal
+  // settlement, 'already_redeemed' is this same order's webhook
+  // arriving twice; everything else means the state machine was broken
+  // upstream, which is a warning, not a reason to strand a payment.
+  assert.match(rpc, /if v_redemption->>'outcome' not in \('redeemed', 'already_redeemed'\) then/);
+  assert.match(rpc, /raise warning 'launch discount: order % settled attempt % against a claim it did not hold alone \(%\) - the one-payable-session invariant was broken upstream/);
 
   // A discounted attempt that cannot be accounted for DOES abort, before
   // any money is written down as an unexplained reduction.
@@ -568,8 +860,10 @@ test("7b: NO SUBSCRIPTION, ANNUAL OR B2B COUPLING - the scope is a constraint", 
     "create_order_from_paid_checkout",
     "launch_discount_is_first_order",
     "mark_launch_discount_payment_pending",
+    "mark_launch_discount_session_open",
     "redeem_launch_discount",
     "release_launch_discount",
+    "release_launch_discount_after_expired_session",
     "release_launch_discount_after_failed_payment",
   ]);
 });
@@ -672,8 +966,10 @@ test("9b: every new function is SECURITY DEFINER with an empty search_path", () 
   const FUNCTIONS = [
     "launch_discount_is_first_order",
     "claim_launch_discount",
+    "mark_launch_discount_session_open",
     "mark_launch_discount_payment_pending",
     "release_launch_discount",
+    "release_launch_discount_after_expired_session",
     "release_launch_discount_after_failed_payment",
     "redeem_launch_discount",
     "create_order_from_paid_checkout",
@@ -704,8 +1000,10 @@ test("9c: EXECUTE is revoked from every role first, then given back to one", () 
   for (const signature of [
     "public.launch_discount_is_first_order(text)",
     "public.claim_launch_discount(text, text, uuid, uuid, integer)",
+    "public.mark_launch_discount_session_open(text, text, uuid, uuid, text)",
     "public.mark_launch_discount_payment_pending(text, text, uuid)",
     "public.release_launch_discount(text, text, uuid)",
+    "public.release_launch_discount_after_expired_session(text, text, uuid, text)",
     "public.release_launch_discount_after_failed_payment(text, text, uuid)",
   ]) {
     assert.ok(statements.includes(`'${signature}'`), `${signature} is not in the grant loop`);
@@ -772,7 +1070,9 @@ test("10: the running application does not depend on 056 in any way", () => {
     "launch_discount_claims",
     "claim_launch_discount",
     "release_launch_discount",
+    "release_launch_discount_after_expired_session",
     "release_launch_discount_after_failed_payment",
+    "mark_launch_discount_session_open",
     "mark_launch_discount_payment_pending",
     "redeem_launch_discount",
     "launch_discount_is_first_order",
@@ -840,7 +1140,13 @@ test("10c: it carries its own read-only verification, asked both ways", () => {
   // The function privileges, asked per role, including the one that must
   // be FALSE for service_role.
   assert.match(migration, /has_function_privilege\('service_role',\s+p\.oid, 'execute'\) as service_role/);
-  assert.match(migration, /service_role true for six, and FALSE for redeem_launch_discount/);
+  assert.match(migration, /service_role true for eight, and FALSE for redeem_launch_discount/);
+  // And the footer asks the two questions the corrected model added:
+  // what the shape says about the protected states, and what the claim
+  // function is allowed to take a claim from.
+  assert.match(migration, /THE INVARIANT, ASKED OF THE CONSTRAINT ITSELF/);
+  assert.match(migration, /AND NOTHING CAN TAKE A CLAIM THAT IS PAYABLE/);
+  assert.match(migration, /AND THE TELEMETRY THAT MUST STAY ZERO/);
   // And that nothing moved.
   assert.match(migration, /where discount_code is not null;\s*-> 0/);
   assert.match(migration, /select count\(\*\) from public\.orders;\s*-> unchanged \(458\)/);

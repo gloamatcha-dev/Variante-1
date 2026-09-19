@@ -169,10 +169,13 @@ test("3: every immutable migration is still present and unedited", () => {
     // older may not.
     // 039, the annual plan foundation, is UNAPPLIED and may likewise be
     // edited in place until the owner applies it.
+    // 056, the launch discount foundation, is UNAPPLIED as well and is
+    // corrected in place rather than by a 057.
     assert.ok(file.endsWith(MIGRATION_037)
       || file.endsWith("038_one_time_refund_writer_concurrency.sql")
       || file.endsWith("039_b2c_annual_plan_foundation.sql")
-      || file.endsWith("040_annual_checkout_retry_fingerprints.sql"),
+      || file.endsWith("040_annual_checkout_retry_fingerprints.sql")
+      || file.endsWith("056_launch_discount.sql"),
       `an immutable migration was modified: ${file}`);
   }
 });

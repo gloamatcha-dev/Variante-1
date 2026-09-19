@@ -63,25 +63,92 @@
 -- creates the row or is told by the database that somebody already has
 -- it. No caller ever reads to decide.
 --
--- ── WHY payment_pending IS A STATE AND NOT AN OVERSIGHT ───────
+-- ══════════════════════════════════════════════════════════════
+-- THE INVARIANT THIS FILE EXISTS TO HOLD
+-- ══════════════════════════════════════════════════════════════
 --
--- SEPA Direct Debit and the bank-transfer family complete a Checkout
--- Session immediately and confirm the money DAYS LATER. This repository
--- already handles that for one-time orders: the session arrives at
--- checkout.session.completed with payment_status "unpaid", no order is
--- created, and checkout.session.async_payment_succeeded is what later
--- says the money arrived (app/api/stripe/webhook/route.ts).
+--   AT MOST ONE PAYABLE DISCOUNTED STRIPE CHECKOUT SESSION PER
+--   (code, normalised customer email) AT ANY MOMENT.
 --
--- A reservation that simply expired after thirty minutes would therefore
--- be released while a payment that will SUCCEED is still in flight -
--- another checkout could take the code, and the person who actually paid
--- would find it gone. So a claim whose session has completed but whose
--- money is still travelling moves to 'payment_pending', where
--- expires_at is NULL and the state shape CHECK forbids it being
--- anything else. Nothing can lapse it. It leaves that state in exactly
--- two ways: forward to 'redeemed' when the money arrives, or back to
--- 'released' by the one function that exists for a payment Stripe has
--- told us FAILED.
+-- Not "rarely two". Not "two, but counted". One. Everything below is
+-- shaped by that sentence, and the state model exists because a
+-- reservation with a timeout CANNOT hold it.
+--
+-- ── WHY A TIMEOUT ALONE IS NOT ENOUGH ─────────────────────────
+--
+-- A Stripe Checkout Session is payable from the moment it is created
+-- until Stripe expires it, which is up to 24 hours later - NOT until
+-- the customer closes the tab, and not until some reservation of ours
+-- runs out. So a claim that merely lapsed after thirty minutes would
+-- become takeable by a second checkout while the FIRST checkout's
+-- session was still sitting in a browser tab, still payable, still
+-- discounted. Both could then be paid. That is two discounted orders
+-- for one address, and no amount of counting afterwards turns it back
+-- into one.
+--
+-- Protecting only the delayed-payment window is not enough either:
+-- 'payment_pending' begins at checkout.session.completed, and the
+-- dangerous interval starts long BEFORE that - the moment Stripe hands
+-- back a payable session.
+--
+-- ── THE STATE MODEL, AND WHAT EACH STATE PROMISES ─────────────
+--
+--   reserved         The claim is held, but NO Stripe session exists
+--                    yet - the shape CHECK forces
+--                    stripe_checkout_session_id NULL, so that is a fact
+--                    rather than a convention. This is the ONLY state
+--                    that can lapse, and it exists solely so that a
+--                    process dying between taking the claim and calling
+--                    Stripe does not lock the customer out of their own
+--                    discount. Its TTL is therefore SHORT: it covers
+--                    one API call, not a shopping session.
+--
+--   session_open     Stripe returned a Checkout Session and it is
+--                    payable. expires_at is NULL and the shape CHECK
+--                    forbids it being anything else, so NOTHING can
+--                    lapse it and no second checkout can take it over.
+--                    It leaves only on an authoritative Stripe signal:
+--                    completed (to payment_pending or to redeemed),
+--                    expired (to released), or a failed asynchronous
+--                    payment (to released).
+--
+--   payment_pending  The session completed but the money is still
+--                    travelling - SEPA Direct Debit and the
+--                    bank-transfer family confirm DAYS later. Also
+--                    unexpirable and also not takeable: a payment that
+--                    will SUCCEED must never lose its claim.
+--
+--   released         Nobody holds it. Safely available again, and the
+--                    only way back to it is a signal that says the
+--                    previous session can no longer be paid.
+--
+--   redeemed         TERMINAL. An order exists. Never released, never
+--                    re-reserved, and a refund does not undo it.
+--
+-- ── THE ONE INTERVAL THAT REMAINS, AND ITS BOUND ──────────────
+--
+-- Between "the claim row says reserved" and "Stripe has returned a
+-- payable session and we have written session_open" there is an
+-- interval no database can remove, because during it the database
+-- cannot yet know whether a payable session exists. It is bounded by a
+-- single Stripe API call. Two things keep it from becoming the hole
+-- this file is shaped to prevent:
+--
+--   1. only 'reserved' can lapse, and its TTL is short - five minutes
+--      by default rather than thirty - so the recovery window is sized
+--      to a failed API call rather than to an abandoned basket
+--   2. PHASE B'S OBLIGATION, stated here because this file is where the
+--      invariant lives: the session-open transition must be attempted
+--      IMMEDIATELY after Stripe returns, and if it does not succeed the
+--      Stripe session must be expired through the API before the
+--      request ends. A session nothing can account for must not be left
+--      payable.
+--
+-- Nothing here treats two paid discounted orders for one address as a
+-- tolerable outcome, and nothing here trades a lockout against one.
+-- redemption_conflicts below is ANOMALY TELEMETRY, NOT A BUDGET - a
+-- number that must stay zero and that an operator can alert on - and it
+-- is never a licence for a second discounted order.
 --
 -- ── WHAT IS DELIBERATELY NOT HERE ─────────────────────────────
 --
@@ -134,25 +201,38 @@ create table if not exists public.launch_discount_claims (
   state                text not null,
 
   -- The CURRENT holder. A token minted per checkout attempt, not a
-  -- counter: release and redemption both compare against it so a caller
-  -- whose reservation lapsed cannot act on the claim that replaced it.
+  -- counter: every transition compares against it, so a caller whose
+  -- reservation lapsed cannot act on the claim that replaced it.
   claim_id             uuid,
   checkout_attempt_id  uuid references public.checkout_attempts(id),
+
+  -- THE PAYABLE SESSION, and the reason this column exists at all: it
+  -- makes "a discounted Stripe session is open for this claim" a fact
+  -- the database holds rather than something only the application
+  -- remembers. The shape CHECK ties it to the state - NULL in
+  -- 'reserved', where none can be payable yet, NOT NULL in
+  -- 'session_open', where one is, and NULL again in 'released'.
+  stripe_checkout_session_id text,
+  session_opened_at    timestamptz,
 
   -- Set once, when the claim becomes terminal.
   order_id             uuid references public.orders(id),
 
   claimed_at           timestamptz,
-  -- NULL means "cannot lapse", which is true of exactly three states:
-  -- payment_pending, released and redeemed. See the shape CHECK.
+  -- NULL means "cannot lapse", which is true of every state except
+  -- 'reserved'. See the shape CHECK.
   expires_at           timestamptz,
   released_at          timestamptz,
   redeemed_at          timestamptz,
 
-  -- A REDEMPTION THAT ARRIVED AFTER THE CLAIM WAS ALREADY SPENT BY A
-  -- DIFFERENT ORDER. It cannot be refused - see section 8 - so it is
-  -- counted, because an invisible commercial leak is worse than a
-  -- visible number. Zero forever means the state machine held.
+  -- ANOMALY TELEMETRY, NOT A BUDGET. A redemption that met a claim a
+  -- DIFFERENT order had already spent, or one held by a different
+  -- holder. The state machine makes both unreachable in normal
+  -- operation, so this must stay 0 forever and a non-zero value is an
+  -- incident rather than an accepted cost. It is recorded rather than
+  -- raised for one reason: by the time it can happen the customer HAS
+  -- PAID, and refusing the order would strand a real payment. See
+  -- section 8.
   redemption_conflicts integer not null default 0,
   last_conflict_at     timestamptz,
 
@@ -183,8 +263,21 @@ create table if not exists public.launch_discount_claims (
   -- forgets. The `else false` matters: it is what makes the list of
   -- states closed, so a mistyped state cannot be written by anything.
   --
-  --   reserved         a checkout holds it; it CAN lapse
+  -- THE TWO LINES THAT CARRY THE WHOLE INVARIANT:
+  --
+  --   'reserved'      expires_at NOT NULL and stripe_checkout_session_id NULL.
+  --                   It can lapse, and it is provably a state in which
+  --                   no discounted session is payable.
+  --   'session_open'  expires_at NULL and stripe_checkout_session_id NOT NULL. A
+  --                   session is payable, and nothing can lapse the
+  --                   claim while it is.
+  --
+  --   reserved         a checkout holds it and no Stripe session exists
+  --                    yet; it CAN lapse
+  --   session_open     a payable discounted Stripe session exists; it
+  --                    CANNOT lapse and CANNOT be taken over
   --   payment_pending  a delayed payment is in flight; it CANNOT lapse
+  --                    and CANNOT be taken over
   --   released         nobody holds it; anybody with this email may take it
   --   redeemed         TERMINAL. An order exists. Never released, never
   --                    re-reserved, and a refund does not undo it.
@@ -193,14 +286,24 @@ create table if not exists public.launch_discount_claims (
       when 'reserved' then
         claim_id is not null and checkout_attempt_id is not null
         and claimed_at is not null and expires_at is not null
+        and stripe_checkout_session_id is null and session_opened_at is null
+        and released_at is null
+        and redeemed_at is null and order_id is null
+      when 'session_open' then
+        claim_id is not null and checkout_attempt_id is not null
+        and claimed_at is not null and expires_at is null
+        and stripe_checkout_session_id is not null and session_opened_at is not null
+        and released_at is null
         and redeemed_at is null and order_id is null
       when 'payment_pending' then
         claim_id is not null and checkout_attempt_id is not null
         and claimed_at is not null and expires_at is null
+        and released_at is null
         and redeemed_at is null and order_id is null
       when 'released' then
         claim_id is null and checkout_attempt_id is null
         and expires_at is null and released_at is not null
+        and stripe_checkout_session_id is null and session_opened_at is null
         and redeemed_at is null and order_id is null
       when 'redeemed' then
         claim_id is not null and checkout_attempt_id is not null
@@ -212,13 +315,15 @@ create table if not exists public.launch_discount_claims (
 );
 
 comment on table public.launch_discount_claims is
-  'One mutable row per (launch code, normalised customer email). The durable one-use lock for GLOALAUNCH10. Not a redemption log and not a promotions engine.';
+  'One mutable row per (launch code, normalised customer email). The durable one-use lock for GLOALAUNCH10, and the guarantee that at most one discounted Stripe session is payable for an address at a time. Not a redemption log and not a promotions engine.';
 comment on column public.launch_discount_claims.customer_key is
   'Normalised authoritative checkout email - lower(btrim(...)), the same canonical form as checkout_attempts.customer_email.';
+comment on column public.launch_discount_claims.stripe_checkout_session_id is
+  'The payable discounted Checkout Session this claim opened. NULL in reserved, where none can exist yet, and NOT NULL in session_open.';
 comment on column public.launch_discount_claims.expires_at is
-  'When a reservation lapses. NULL means it cannot lapse, which is required for payment_pending: a delayed payment may still succeed.';
+  'When a reservation lapses. Only reserved ever carries one: a claim with a payable session, or with a delayed payment in flight, must never lapse.';
 comment on column public.launch_discount_claims.redemption_conflicts is
-  'Redemptions that arrived after a different order had already spent this claim. Expected to stay 0.';
+  'Anomaly telemetry. Redemptions that met a claim already spent by another order or held by another checkout. The state machine makes both unreachable in normal operation, so this must stay 0; a non-zero value is an incident, not an allowance.';
 
 -- updated_at, by the same trigger function every other table here uses.
 -- Guarded because CREATE TRIGGER has no IF NOT EXISTS.
@@ -562,36 +667,60 @@ $$;
  * A caller never reads to decide. The read afterwards exists ONLY to put
  * a word in the answer, and nothing acts on it.
  *
+ * ── WHAT 'reserved' MEANS, EXACTLY ────────────────────────────
+ *
+ * NO STRIPE SESSION EXISTS FOR THIS CLAIM. The shape CHECK forces
+ * stripe_checkout_session_id NULL in this state, so it is not a hope
+ * about timing: while a claim is 'reserved', nothing discounted is
+ * payable anywhere. That is what makes a lapse safe here and nowhere
+ * else.
+ *
+ * The reservation covers ONE Stripe API call. The moment that call
+ * returns a payable session, phase B must move the claim to
+ * 'session_open' through mark_launch_discount_session_open, and from
+ * then on nothing can lapse or take it.
+ *
  * ── WHEN A CLAIM MAY BE TAKEN ─────────────────────────────────
  *
  *   the row does not exist      nobody has ever used the code here
- *   state = 'released'          a checkout was abandoned, or a delayed
- *                               payment failed
+ *   state = 'released'          a checkout was abandoned, its session
+ *                               expired, or a delayed payment failed
  *   state = 'reserved' and the  the SAME request again. Idempotent: the
  *   claim id is the caller's    reservation is refreshed and the caller
  *                               is told it holds it. A retried checkout
  *                               must not be refused its own claim.
- *   state = 'reserved' and the  the previous reservation lapsed
- *   reservation has lapsed
+ *   state = 'reserved' and the  the previous reservation lapsed BEFORE
+ *   reservation has lapsed      it ever opened a session
  *
- * AND NEVER OTHERWISE. 'redeemed' is terminal, and 'payment_pending' is
- * excluded ENTIRELY - not "unless it is old", not "unless the same
- * caller asks", but excluded - because a payment that may still succeed
- * must never lose its claim, and because moving back to 'reserved' would
- * restore an expires_at that could then lapse it.
+ * AND NEVER OTHERWISE. Three states are excluded ENTIRELY - not "unless
+ * they are old", not "unless the same caller asks":
  *
- * ── THE LAPSE, AND WHY IT IS SAFE HERE ────────────────────────
+ *   'session_open'     a discounted session is payable RIGHT NOW. A
+ *                      takeover here is the bug this state exists to
+ *                      make impossible: it would produce two
+ *                      independently payable discounted sessions for
+ *                      one address.
+ *   'payment_pending'  a payment that may still succeed must never lose
+ *                      its claim.
+ *   'redeemed'         terminal.
  *
- * The row is keyed by the EMAIL, so a takeover is always the same person
- * starting another checkout - never a stranger taking their discount.
- * The only cost of a lapse is that this person's abandoned session, if
- * they ever pay it, redeems a claim somebody else's reservation now
- * holds; section 8 makes that a counted conflict rather than a lost
- * order. The TTL therefore trades a lockout after abandonment against
- * that rare double settlement, and 30 minutes is the middle of it.
- * Floored at 300 seconds so a caller cannot pass a value small enough to
- * make the reservation meaningless, and capped at a day so one cannot
- * hold the code hostage.
+ * Moving any of them back to 'reserved' would also restore an
+ * expires_at, which could then lapse them - so their absence from the
+ * WHERE is doing two jobs.
+ *
+ * ── THE LAPSE, AND WHY IT IS SHORT ────────────────────────────
+ *
+ * The only thing a lapse recovers from is a process that died between
+ * taking the claim and hearing back from Stripe. That is one API call,
+ * so the TTL is sized for one API call: five minutes by default,
+ * floored at 60 seconds so a caller cannot pass a value small enough to
+ * make the reservation meaningless, and capped at an hour so a crash
+ * cannot hold the code hostage for a day.
+ *
+ * It is deliberately NOT sized for an abandoned basket. An abandoned
+ * basket has a payable session behind it, and a payable session is
+ * released by Stripe telling us it expired - not by a timer of ours
+ * guessing.
  *
  * ── AND IT IS THE FIRST-ORDER GATE TOO ────────────────────────
  *
@@ -601,26 +730,27 @@ $$;
  * "no paid order yet", but only one of them can then take the claim,
  * which is the invariant that matters.
  *
- * Returns { claimed, state, outcome }.
+ * Returns { claimed, state, outcome, holder }.
  */
 create or replace function public.claim_launch_discount(
   p_code text,
   p_customer_key text,
   p_claim_id uuid,
   p_checkout_attempt_id uuid,
-  p_ttl_seconds integer default 1800
+  p_ttl_seconds integer default 300
 )
 returns jsonb
 language plpgsql
 security definer set search_path = ''
 as $$
 declare
-  v_code  text;
-  v_key   text;
-  v_ttl   integer;
-  v_now   timestamptz := now();
-  v_rows  integer;
-  v_state text;
+  v_code     text;
+  v_key      text;
+  v_ttl      integer;
+  v_now      timestamptz := now();
+  v_rows     integer;
+  v_state    text;
+  v_claim_id uuid;
 begin
   if p_code is null or p_customer_key is null
      or p_claim_id is null or p_checkout_attempt_id is null then
@@ -629,7 +759,7 @@ begin
 
   v_code := upper(btrim(p_code));
   v_key  := lower(btrim(p_customer_key));
-  v_ttl  := least(greatest(coalesce(p_ttl_seconds, 1800), 300), 86400);
+  v_ttl  := least(greatest(coalesce(p_ttl_seconds, 300), 60), 3600);
 
   if not public.launch_discount_is_first_order(v_key) then
     return jsonb_build_object('claimed', false, 'state', null, 'outcome', 'not_first_order');
@@ -637,18 +767,26 @@ begin
 
   insert into public.launch_discount_claims as c (
     code, customer_key, state, claim_id, checkout_attempt_id,
-    claimed_at, expires_at, released_at
+    claimed_at, expires_at, released_at,
+    stripe_checkout_session_id, session_opened_at
   ) values (
     v_code, v_key, 'reserved', p_claim_id, p_checkout_attempt_id,
-    v_now, v_now + make_interval(secs => v_ttl), null
+    v_now, v_now + make_interval(secs => v_ttl), null,
+    null, null
   )
   on conflict (code, customer_key) do update
-     set state               = 'reserved',
-         claim_id            = excluded.claim_id,
-         checkout_attempt_id = excluded.checkout_attempt_id,
-         claimed_at          = excluded.claimed_at,
-         expires_at          = excluded.expires_at,
-         released_at         = null
+     set state                      = 'reserved',
+         claim_id                   = excluded.claim_id,
+         checkout_attempt_id        = excluded.checkout_attempt_id,
+         claimed_at                 = excluded.claimed_at,
+         expires_at                 = excluded.expires_at,
+         released_at                = null,
+         -- A NEW RESERVATION OWNS NO SESSION. Written explicitly rather
+         -- than relied upon: the shape CHECK forbids 'reserved' from
+         -- carrying one, and a takeover must never inherit the previous
+         -- holder's session id.
+         stripe_checkout_session_id = null,
+         session_opened_at          = null
    where c.state = 'released'
       or (c.state = 'reserved'
           and (c.claim_id = excluded.claim_id
@@ -661,17 +799,22 @@ begin
   end if;
 
   -- The decision is already made and cannot be revisited. This read only
-  -- names the reason, so a route can say something true to a customer.
-  select state into v_state
+  -- names the reason, so a route can say something true to a customer -
+  -- and says whether the refusing row belongs to this caller, which is
+  -- what lets a retried checkout recognise its own open session instead
+  -- of trying to open a second one.
+  select state, claim_id into v_state, v_claim_id
   from public.launch_discount_claims
   where code = v_code and customer_key = v_key;
 
   return jsonb_build_object(
     'claimed', false,
     'state', v_state,
+    'holder', (v_claim_id is not null and v_claim_id = p_claim_id),
     'outcome', case v_state
                  when 'redeemed'        then 'already_redeemed'
                  when 'payment_pending' then 'payment_pending'
+                 when 'session_open'    then 'session_open'
                  when 'reserved'        then 'held_by_another_checkout'
                  else 'unavailable'
                end
@@ -680,15 +823,137 @@ end;
 $$;
 
 -- ══════════════════════════════════════════════════════════════
--- 7. THE DELAYED PAYMENT, AND GIVING THE CLAIM BACK
+-- 7. THE PAYABLE SESSION, THE DELAYED PAYMENT, AND GIVING IT BACK
 -- ══════════════════════════════════════════════════════════════
+
+/**
+ * STRIPE RETURNED A PAYABLE SESSION. Close the claim to everybody else.
+ *
+ * THIS IS THE FUNCTION THE WHOLE STATE MODEL EXISTS FOR. Up to this
+ * moment the claim was 'reserved' and could lapse, which was safe
+ * because no discounted session existed. From this moment a session is
+ * payable - for up to 24 hours, in a tab we cannot see - so the claim
+ * must stop being lapsable and stop being takeable, and it must do both
+ * in one statement that only the current holder can perform.
+ *
+ * ── OWNERSHIP IS PROVEN THREE WAYS ────────────────────────────
+ *
+ *   claim_id             the rotating holder token, as everywhere else
+ *   checkout_attempt_id  the attempt that token was minted for
+ *   state                'reserved' (first time) or 'session_open' with
+ *                        the SAME session id (a retry)
+ *
+ * A different claim id cannot mark, cannot overwrite and cannot learn
+ * anything: it simply affects zero rows and is told 'not_holder'.
+ *
+ * ── IDEMPOTENT FOR THE SAME SESSION, REFUSING FOR A SECOND ────
+ *
+ * Calling it twice with the same session id succeeds twice, and
+ * session_opened_at keeps the FIRST instant.
+ *
+ * Calling it with a DIFFERENT session id while one is already open is
+ * refused - 'session_already_open'. That refusal is the invariant
+ * speaking: two payable sessions for one claim is exactly the thing
+ * that must not exist, so the database will not record the second, and
+ * phase B must expire it through the Stripe API rather than leave it
+ * payable.
+ *
+ * Never from 'payment_pending' (the session has already completed) and
+ * never from 'redeemed' (an order exists).
+ */
+create or replace function public.mark_launch_discount_session_open(
+  p_code text,
+  p_customer_key text,
+  p_claim_id uuid,
+  p_checkout_attempt_id uuid,
+  p_stripe_checkout_session_id text
+)
+returns jsonb
+language plpgsql
+security definer set search_path = ''
+as $$
+declare
+  v_code       text;
+  v_key        text;
+  v_session    text;
+  v_now        timestamptz := now();
+  v_rows       integer;
+  v_state      text;
+  v_claim_id   uuid;
+  v_open       text;
+begin
+  if p_code is null or p_customer_key is null or p_claim_id is null
+     or p_checkout_attempt_id is null then
+    raise exception 'launch discount session open: a code, a customer key, a claim id and a checkout attempt are all required';
+  end if;
+
+  v_session := btrim(coalesce(p_stripe_checkout_session_id, ''));
+  if v_session = '' then
+    raise exception 'launch discount session open: a stripe checkout session id is required - a session that cannot be named cannot be accounted for';
+  end if;
+
+  v_code := upper(btrim(p_code));
+  v_key  := lower(btrim(p_customer_key));
+
+  update public.launch_discount_claims
+     set state                      = 'session_open',
+         expires_at                 = null,
+         stripe_checkout_session_id = v_session,
+         -- The FIRST time it opened, kept across retries.
+         session_opened_at          = coalesce(session_opened_at, v_now)
+   where code = v_code
+     and customer_key = v_key
+     and claim_id = p_claim_id
+     and checkout_attempt_id = p_checkout_attempt_id
+     and (state = 'reserved'
+          or (state = 'session_open' and stripe_checkout_session_id = v_session));
+
+  get diagnostics v_rows = row_count;
+
+  if v_rows = 1 then
+    return jsonb_build_object('opened', true, 'state', 'session_open', 'outcome', 'session_open');
+  end if;
+
+  select state, claim_id, stripe_checkout_session_id
+    into v_state, v_claim_id, v_open
+  from public.launch_discount_claims
+  where code = v_code and customer_key = v_key;
+
+  return jsonb_build_object(
+    'opened', false,
+    'state', v_state,
+    'outcome', case
+                 when v_state is null              then 'no_claim'
+                 when v_state = 'redeemed'         then 'already_redeemed'
+                 when v_state = 'payment_pending'  then 'payment_pending'
+                 when v_state = 'session_open'
+                      and v_claim_id = p_claim_id  then 'session_already_open'
+                 else 'not_holder'
+               end,
+    -- Only ever to the holder: a caller that does not hold the claim
+    -- learns nothing about the session that does.
+    'stripe_checkout_session_id',
+      case when v_claim_id = p_claim_id then v_open else null end
+  );
+end;
+$$;
 
 /**
  * The session completed but the money is still travelling.
  *
- * Moves a reservation to 'payment_pending' and CLEARS expires_at, which
- * the shape CHECK then keeps NULL. From here nothing can lapse the
- * claim: not this function, not claim_launch_discount, not time.
+ * Moves the claim to 'payment_pending' and CLEARS expires_at, which the
+ * shape CHECK then keeps NULL. From here nothing can lapse the claim:
+ * not this function, not claim_launch_discount, not time.
+ *
+ * ── WHY 'reserved' IS STILL ACCEPTED ──────────────────────────
+ *
+ * In the ordinary lifecycle this is only ever reached from
+ * 'session_open', because a session cannot complete without having been
+ * open. 'reserved' is accepted anyway for the one abnormal case the
+ * model admits: the process that created the session died before it
+ * could mark it open. Refusing that would leave a claim that can LAPSE
+ * while a delayed payment is in flight - the exact failure this whole
+ * file is against. Accepting it only ever makes the claim safer.
  *
  * ONLY THE CURRENT HOLDER, and idempotent for a redelivered webhook -
  * 'payment_pending' is an accepted starting state, so a second delivery
@@ -725,7 +990,7 @@ begin
    where code = v_code
      and customer_key = v_key
      and claim_id = p_claim_id
-     and state in ('reserved', 'payment_pending');
+     and state in ('reserved', 'session_open', 'payment_pending');
 
   get diagnostics v_rows = row_count;
 
@@ -750,8 +1015,7 @@ end;
 $$;
 
 /**
- * The ordinary release: the customer abandoned the checkout, or the
- * session could not be created.
+ * The ordinary release: nothing payable was ever created.
  *
  * ONLY FROM 'reserved', AND ONLY BY THE HOLDER. Two separate rules and
  * both matter:
@@ -762,14 +1026,21 @@ $$;
  *                              This is migration 049's rule, for the
  *                              same reason.
  *
- *   the state must be          a payment that may still succeed must
- *   'reserved'                 never lose its claim, and this path
- *                              cannot tell whether one is in flight. So
- *                              it simply cannot touch 'payment_pending'
- *                              at all - the guarantee is structural
- *                              rather than a condition somebody has to
- *                              get right. The one caller that KNOWS a
- *                              payment failed uses the next function.
+ *   the state must be          'reserved' is the ONLY state in which no
+ *   'reserved'                 discounted session can be payable - the
+ *                              shape CHECK guarantees it. So this path,
+ *                              which is called when session creation
+ *                              FAILED or the customer left before it
+ *                              happened, cannot touch a claim that has
+ *                              a live session or a travelling payment
+ *                              even if a caller asks it to. The
+ *                              guarantee is structural rather than a
+ *                              condition somebody has to get right.
+ *
+ * 'session_open' and 'payment_pending' are therefore unreachable from
+ * here. Each has its own narrow function, and each of those exists
+ * because Stripe told us something authoritative: the session expired,
+ * or the payment failed. A timer of ours is not that.
  *
  * And never 'redeemed', which is terminal.
  *
@@ -800,15 +1071,111 @@ begin
   v_key  := lower(btrim(p_customer_key));
 
   update public.launch_discount_claims
-     set state               = 'released',
-         claim_id            = null,
-         checkout_attempt_id = null,
-         expires_at          = null,
-         released_at         = now()
+     set state                      = 'released',
+         claim_id                   = null,
+         checkout_attempt_id        = null,
+         expires_at                 = null,
+         stripe_checkout_session_id = null,
+         session_opened_at          = null,
+         released_at                = now()
    where code = v_code
      and customer_key = v_key
      and claim_id = p_claim_id
      and state = 'reserved';
+
+  get diagnostics v_rows = row_count;
+
+  if v_rows = 1 then
+    return jsonb_build_object('released', true, 'state', 'released', 'outcome', 'released');
+  end if;
+
+  select state into v_state
+  from public.launch_discount_claims
+  where code = v_code and customer_key = v_key;
+
+  return jsonb_build_object(
+    'released', false,
+    'state', v_state,
+    'outcome', case
+                 when v_state is null             then 'no_claim'
+                 when v_state = 'released'        then 'already_released'
+                 when v_state = 'redeemed'        then 'already_redeemed'
+                 when v_state = 'session_open'    then 'session_open'
+                 when v_state = 'payment_pending' then 'payment_pending'
+                 else 'not_holder'
+               end
+  );
+end;
+$$;
+
+/**
+ * STRIPE SAID THE SESSION EXPIRED. It can never be paid again.
+ *
+ * This is the authoritative end of a payable session, and therefore the
+ * ONLY ordinary way out of 'session_open'. checkout.session.expired is
+ * Stripe telling us the thing we could not observe ourselves: that an
+ * unpaid open session is finished. Nothing else - no timer, no cleanup
+ * job, no second checkout - is allowed to make that judgement, which is
+ * why the ordinary release above cannot reach this state at all.
+ *
+ * ── IT NAMES THE SESSION, NOT JUST THE HOLDER ─────────────────
+ *
+ * The claim id AND the session id must both match. An expiry notice for
+ * a session the claim no longer has - the orphan left behind when a
+ * process died before marking it open, arriving 24 hours later - must
+ * not release whatever claim has since been taken for that address.
+ *
+ * Idempotent: a redelivered expiry reports 'already_released'.
+ * Never from 'payment_pending' (Stripe expires unpaid sessions; a
+ * completed one with money in flight is not this event's business) and
+ * never from 'redeemed'.
+ *
+ * PHASE B USES THIS, AND NOTHING USES IT YET. The webhook does not
+ * subscribe to checkout.session.expired today; wiring it is phase B's
+ * job, and this function is the door it will need to exist.
+ */
+create or replace function public.release_launch_discount_after_expired_session(
+  p_code text,
+  p_customer_key text,
+  p_claim_id uuid,
+  p_stripe_checkout_session_id text
+)
+returns jsonb
+language plpgsql
+security definer set search_path = ''
+as $$
+declare
+  v_code    text;
+  v_key     text;
+  v_session text;
+  v_rows    integer;
+  v_state   text;
+begin
+  if p_code is null or p_customer_key is null or p_claim_id is null then
+    raise exception 'launch discount release after expired session: a code, a customer key and a claim id are required';
+  end if;
+
+  v_session := btrim(coalesce(p_stripe_checkout_session_id, ''));
+  if v_session = '' then
+    raise exception 'launch discount release after expired session: the expired stripe checkout session id is required';
+  end if;
+
+  v_code := upper(btrim(p_code));
+  v_key  := lower(btrim(p_customer_key));
+
+  update public.launch_discount_claims
+     set state                      = 'released',
+         claim_id                   = null,
+         checkout_attempt_id        = null,
+         expires_at                 = null,
+         stripe_checkout_session_id = null,
+         session_opened_at          = null,
+         released_at                = now()
+   where code = v_code
+     and customer_key = v_key
+     and claim_id = p_claim_id
+     and state = 'session_open'
+     and stripe_checkout_session_id = v_session;
 
   get diagnostics v_rows = row_count;
 
@@ -837,11 +1204,17 @@ $$;
 /**
  * Stripe said the delayed payment FAILED. The money is not coming.
  *
- * The ONLY way out of 'payment_pending' other than redemption, and it
- * exists as a separate function rather than a flag on the one above so
- * that the ordinary abandon path CANNOT reach that state even by passing
- * the wrong argument. Reachable from 'reserved' too, because a failure
- * can arrive before anything marked the claim pending.
+ * The other authoritative ending, and a separate function from the
+ * ordinary release for the same reason as the one above: the abandon
+ * path must not be able to reach a protected state even by passing the
+ * wrong argument.
+ *
+ * Reachable from 'payment_pending', which is where a completed session
+ * with travelling money sits; from 'session_open', because a failure
+ * can arrive before anything recorded the completion; and from
+ * 'reserved', because it can arrive before anything recorded the
+ * session either. In every one of those, Stripe has said the money will
+ * not arrive, so the claim is genuinely free.
  *
  * Still only by the holder, and still never from 'redeemed' - if an
  * order exists, the money arrived, whatever a later event says.
@@ -869,15 +1242,17 @@ begin
   v_key  := lower(btrim(p_customer_key));
 
   update public.launch_discount_claims
-     set state               = 'released',
-         claim_id            = null,
-         checkout_attempt_id = null,
-         expires_at          = null,
-         released_at         = now()
+     set state                      = 'released',
+         claim_id                   = null,
+         checkout_attempt_id        = null,
+         expires_at                 = null,
+         stripe_checkout_session_id = null,
+         session_opened_at          = null,
+         released_at                = now()
    where code = v_code
      and customer_key = v_key
      and claim_id = p_claim_id
-     and state in ('reserved', 'payment_pending');
+     and state in ('reserved', 'session_open', 'payment_pending');
 
   get diagnostics v_rows = row_count;
 
@@ -903,7 +1278,7 @@ end;
 $$;
 
 -- ══════════════════════════════════════════════════════════════
--- 8. SPENDING THE CLAIM - TERMINAL, AND IT WINS
+-- 8. SPENDING THE CLAIM - TERMINAL, AND HELD BY THE PAYER
 -- ══════════════════════════════════════════════════════════════
 
 /**
@@ -919,32 +1294,48 @@ $$;
  * even by accident. That is 049's decision not to grant the refund lock
  * columns to service_role, applied to a function.
  *
- * ── REDEMPTION WINS OVER RESERVATION ──────────────────────────
+ * ── THE NORMAL PATH REDEEMS THE PAYER'S OWN CLAIM ─────────────
  *
- * It succeeds from 'reserved', from 'payment_pending', from 'released',
- * and from no row at all - it does NOT require the caller to still be
- * the holder. That is deliberate, and it is the only defensible answer:
- * by the time this is called the customer HAS PAID a discounted amount.
- * Refusing to record the redemption because a reservation lapsed in the
- * meantime would leave a paid discounted order with no accounting of the
- * discount it used, which is strictly worse than recording it.
+ * The upsert moves the row only when it is free - no row at all, or
+ * 'released' - or when the claim is held by THIS attempt's claim id.
+ * That is the ordinary lifecycle and the only one the state machine
+ * above can produce: a paid order settles the very claim its checkout
+ * opened, from 'session_open' or 'payment_pending'.
  *
- * ── AND IT NEVER ABORTS AN ORDER ──────────────────────────────
+ * A webhook redelivery for the SAME order is idempotent: the row is
+ * already 'redeemed' with that order id, and the answer says so.
  *
- * The one case it cannot satisfy is a claim ALREADY redeemed by a
- * DIFFERENT order. It does not raise: the order being created has been
- * paid for, and raising would strand a real payment with no order - the
- * worst outcome available. So it counts the conflict on the row
- * (redemption_conflicts, last_conflict_at) and reports it, leaving a
- * number an operator can find. Expected to stay zero: reaching it needs
- * one person to pay two separately-discounted sessions for one address,
- * which the lapse window is sized to make rare and the first-order gate
- * independently discourages.
+ * ── THE TWO ANOMALIES, AND WHY NEITHER RAISES ─────────────────
  *
- * A REDELIVERED WEBHOOK IS NOT THAT CASE. The same order id reports
- * 'already_redeemed' with redeemed true, and in practice does not even
- * get here: create_order_from_paid_checkout returns the existing order
- * before reaching this call.
+ * Both are INVARIANT VIOLATIONS, not tolerated behaviour. With
+ * 'session_open' in the model there is no ordinary sequence that
+ * reaches either: a claim with a payable session cannot lapse, cannot
+ * be taken over, and cannot be released by anything but Stripe saying
+ * the session is finished. If one of them happens, something outside
+ * this state machine has gone wrong and an operator must know.
+ *
+ *   held by a DIFFERENT holder   the paying order wins. Money outranks
+ *                                an unpaid reservation, and leaving the
+ *                                other holder live would let it redeem
+ *                                later and produce a SECOND discounted
+ *                                order. Taking it over makes any such
+ *                                later attempt hit a terminal row and
+ *                                be refused.
+ *
+ *   already spent by a DIFFERENT the row stays as it is. The earlier
+ *   order                        order keeps the claim; this one is
+ *                                reported as unredeemed.
+ *
+ * Neither raises, and that is deliberate: by the time this runs the
+ * customer HAS PAID a discounted amount. Raising would roll back the
+ * order and strand a real payment with nothing to show for it - the
+ * worst outcome available. So each is COUNTED on the row
+ * (redemption_conflicts, last_conflict_at) and reported to the caller.
+ *
+ * THAT COUNTER IS TELEMETRY, NOT A BUDGET. It must stay 0. It is not a
+ * mechanism for allowing a second discounted order and it is never the
+ * thing standing between two customers and two discounts - the state
+ * machine is. A non-zero value is an incident to investigate.
  *
  * A REFUND DOES NOT COME BACK HERE. Nothing releases a redeemed claim,
  * by construction, so a refunded order leaves the code used - which is
@@ -966,6 +1357,8 @@ declare
   v_key      text;
   v_now      timestamptz := now();
   v_rows     integer;
+  v_state    text;
+  v_claim_id uuid;
   v_order_id uuid;
 begin
   if p_code is null or p_customer_key is null or p_claim_id is null
@@ -976,6 +1369,7 @@ begin
   v_code := upper(btrim(p_code));
   v_key  := lower(btrim(p_customer_key));
 
+  -- THE NORMAL PATH. Free, or held by the attempt that paid.
   insert into public.launch_discount_claims as c (
     code, customer_key, state, claim_id, checkout_attempt_id, order_id,
     claimed_at, expires_at, redeemed_at
@@ -991,7 +1385,9 @@ begin
          claimed_at          = coalesce(c.claimed_at, excluded.claimed_at),
          expires_at          = null,
          redeemed_at         = excluded.redeemed_at
-   where c.state <> 'redeemed';
+   where c.state = 'released'
+      or (c.state in ('reserved', 'session_open', 'payment_pending')
+          and c.claim_id = excluded.claim_id);
 
   get diagnostics v_rows = row_count;
 
@@ -999,8 +1395,62 @@ begin
     return jsonb_build_object('redeemed', true, 'state', 'redeemed', 'outcome', 'redeemed');
   end if;
 
-  -- Already terminal. Either this very order settled it - a replay - or
-  -- a different one did, which is the counted conflict.
+  select state, claim_id, order_id into v_state, v_claim_id, v_order_id
+  from public.launch_discount_claims
+  where code = v_code and customer_key = v_key;
+
+  -- A replay of this very order.
+  if v_state = 'redeemed' and v_order_id = p_order_id then
+    return jsonb_build_object('redeemed', true, 'state', 'redeemed', 'outcome', 'already_redeemed');
+  end if;
+
+  -- ANOMALY 1: a different order already spent it. The earlier order
+  -- keeps the claim; this one is counted and reported.
+  if v_state = 'redeemed' then
+    update public.launch_discount_claims
+       set redemption_conflicts = redemption_conflicts + 1,
+           last_conflict_at     = v_now
+     where code = v_code and customer_key = v_key;
+
+    return jsonb_build_object(
+      'redeemed', false,
+      'state', 'redeemed',
+      'outcome', 'already_redeemed_by_another_order',
+      'order_id', v_order_id
+    );
+  end if;
+
+  -- ANOMALY 2: a different, UNPAID holder has it. The paid order takes
+  -- it, because the alternative is leaving a live claim that could be
+  -- redeemed a second time - two discounted orders instead of one
+  -- counted anomaly.
+  update public.launch_discount_claims
+     set state                = 'redeemed',
+         claim_id             = p_claim_id,
+         checkout_attempt_id  = p_checkout_attempt_id,
+         order_id             = p_order_id,
+         claimed_at           = coalesce(claimed_at, v_now),
+         expires_at           = null,
+         released_at          = null,
+         redeemed_at          = v_now,
+         redemption_conflicts = redemption_conflicts + 1,
+         last_conflict_at     = v_now
+   where code = v_code and customer_key = v_key
+     and state <> 'redeemed';
+
+  get diagnostics v_rows = row_count;
+
+  if v_rows = 1 then
+    return jsonb_build_object(
+      'redeemed', true,
+      'state', 'redeemed',
+      'outcome', 'redeemed_over_foreign_holder',
+      'previous_claim_id', v_claim_id
+    );
+  end if;
+
+  -- The row became terminal between the two statements. Whoever won,
+  -- the paid order still must not be refused.
   select order_id into v_order_id
   from public.launch_discount_claims
   where code = v_code and customer_key = v_key;
@@ -1284,10 +1734,16 @@ begin
       v_order.id
     );
 
-    if not (v_redemption->>'redeemed')::boolean then
-      -- Counted on the claim row by the function itself. Not fatal, by
-      -- design: the money has already moved.
-      raise warning 'launch discount: order % settled attempt % but the claim was already spent (%)',
+    -- ANY OUTCOME BUT THE TWO ORDINARY ONES IS AN INVARIANT VIOLATION,
+    -- and it is said out loud. 'redeemed' is the normal settlement and
+    -- 'already_redeemed' is this same order's webhook arriving twice;
+    -- everything else means the claim was held or spent by somebody
+    -- else, which the state machine in section 1 is supposed to make
+    -- unreachable. Counted on the claim row by the function itself, and
+    -- still not fatal - the money has already moved, and refusing the
+    -- order now would strand a real payment.
+    if v_redemption->>'outcome' not in ('redeemed', 'already_redeemed') then
+      raise warning 'launch discount: order % settled attempt % against a claim it did not hold alone (%) - the one-payable-session invariant was broken upstream',
         v_order.id, v_attempt.id, v_redemption->>'outcome';
     end if;
   end if;
@@ -1308,10 +1764,11 @@ $$;
 -- names first, and exactly what is needed is given back.
 --
 -- WHAT THE BROWSER CANNOT DO, as a consequence: it cannot read a claim,
--- take one, release one, mark one payment_pending, redeem one, ask
--- whether somebody is a first-time buyer, or influence the discount
--- amount. Not "does not"; cannot. The claims table has no grant at all
--- (section 2) and every door is revoked below.
+-- take one, release one, open a session on one, mark one
+-- payment_pending, redeem one, ask whether somebody is a first-time
+-- buyer, or influence the discount amount. Not "does not"; cannot. The
+-- claims table has no grant at all (section 2) and every door is
+-- revoked below.
 --
 -- AND redeem_launch_discount IS GRANTED TO NOBODY. Not even the server.
 -- Its only caller is create_order_from_paid_checkout, which is SECURITY
@@ -1325,8 +1782,10 @@ begin
   foreach fn in array array[
     'public.launch_discount_is_first_order(text)',
     'public.claim_launch_discount(text, text, uuid, uuid, integer)',
+    'public.mark_launch_discount_session_open(text, text, uuid, uuid, text)',
     'public.mark_launch_discount_payment_pending(text, text, uuid)',
     'public.release_launch_discount(text, text, uuid)',
+    'public.release_launch_discount_after_expired_session(text, text, uuid, text)',
     'public.release_launch_discount_after_failed_payment(text, text, uuid)'
   ] loop
     execute format('revoke all on function %s from public, anon, authenticated, service_role', fn);
@@ -1356,6 +1815,7 @@ grant execute on function public.create_order_from_paid_checkout(uuid, jsonb, te
 do $$
 declare
   v_missing text;
+  v_shape   text;
 begin
   -- The ledger exists, keyed on the pair.
   if not exists (
@@ -1380,12 +1840,28 @@ begin
   end if;
 
   -- The state machine is a constraint, not a convention.
-  if not exists (
-    select 1 from pg_constraint
-    where conrelid = 'public.launch_discount_claims'::regclass
-      and conname = 'launch_discount_claims_state_shape'
-  ) then
+  select pg_get_constraintdef(oid) into v_shape
+  from pg_constraint
+  where conrelid = 'public.launch_discount_claims'::regclass
+    and conname = 'launch_discount_claims_state_shape';
+
+  if v_shape is null then
     raise exception '056: the claim ledger has no state shape constraint';
+  end if;
+
+  -- AND IT KNOWS ABOUT THE PAYABLE SESSION. Without this state the
+  -- ledger is back to a reservation with a timeout, which cannot hold
+  -- "at most one payable discounted session per address".
+  if position('session_open' in v_shape) = 0 then
+    raise exception '056: the state machine has no session_open - a payable Stripe session would be lapsable';
+  end if;
+
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'launch_discount_claims'
+      and column_name = 'stripe_checkout_session_id'
+  ) then
+    raise exception '056: the claim ledger cannot name the payable session it is protecting';
   end if;
 
   if not exists (
@@ -1478,13 +1954,15 @@ begin
     raise exception '056: the paid-order-by-email index is missing';
   end if;
 
-  -- Seven functions, every one of them SECURITY DEFINER with an empty
+  -- Nine functions, every one of them SECURITY DEFINER with an empty
   -- search_path, and no older overload left callable beside them.
   for v_missing in
     select unnest(array['launch_discount_is_first_order',
                         'claim_launch_discount',
+                        'mark_launch_discount_session_open',
                         'mark_launch_discount_payment_pending',
                         'release_launch_discount',
+                        'release_launch_discount_after_expired_session',
                         'release_launch_discount_after_failed_payment',
                         'redeem_launch_discount',
                         'create_order_from_paid_checkout'])
@@ -1553,8 +2031,10 @@ begin
   for v_missing in
     select unnest(array['launch_discount_is_first_order',
                         'claim_launch_discount',
+                        'mark_launch_discount_session_open',
                         'mark_launch_discount_payment_pending',
                         'release_launch_discount',
+                        'release_launch_discount_after_expired_session',
                         'release_launch_discount_after_failed_payment',
                         'create_order_from_paid_checkout'])
   loop
@@ -1578,6 +2058,86 @@ begin
 
   if exists (select 1 from public.orders where discount_code is not null) then
     raise exception '056: an order was backfilled with a discount code';
+  end if;
+end $$;
+
+-- ══════════════════════════════════════════════════════════════
+-- 11b. AND THE TWO SHAPES THAT CARRY THE INVARIANT ARE TRIED
+-- ══════════════════════════════════════════════════════════════
+--
+-- A constraint that exists is not the same as a constraint that
+-- refuses. These three rows are the exact incoherences the corrected
+-- model is here to forbid, and each one is attempted for real inside a
+-- subtransaction that is then rolled back - so nothing is left behind
+-- and the ledger is still empty when the checks above are re-run on a
+-- second application.
+--
+--   1. a session_open claim carrying an expires_at    it could lapse
+--   2. a session_open claim with no session named     nothing to expire
+--   3. a reserved claim already holding a session     lapsable while
+--                                                     payable: THE BUG
+--
+-- An existing checkout attempt is borrowed for the foreign key so the
+-- CHECK is what refuses, not the reference. If there is no attempt to
+-- borrow - an empty database - the probes are skipped rather than
+-- weakened into something that proves less.
+
+do $$
+declare
+  v_attempt uuid;
+  v_probe   uuid := '00000000-0000-0000-0000-000000000056';
+  v_key     text := 'state-machine-probe@gloa.invalid';
+  v_ok      boolean;
+begin
+  select id into v_attempt from public.checkout_attempts limit 1;
+  if v_attempt is null then
+    raise notice '056: no checkout attempt to borrow - the state machine probes were skipped';
+    return;
+  end if;
+
+  -- 1. session_open MUST NOT be able to carry an expiry.
+  v_ok := false;
+  begin
+    insert into public.launch_discount_claims
+      (code, customer_key, state, claim_id, checkout_attempt_id,
+       claimed_at, expires_at, stripe_checkout_session_id, session_opened_at)
+    values ('GLOALAUNCH10', v_key, 'session_open', v_probe, v_attempt,
+            now(), now() + interval '30 minutes', 'cs_test_probe', now());
+  exception when check_violation then
+    v_ok := true;
+  end;
+  if not v_ok then
+    raise exception '056: a session_open claim was allowed to carry an expiry - a payable session could still lapse';
+  end if;
+
+  -- 2. session_open MUST name the session it is protecting.
+  v_ok := false;
+  begin
+    insert into public.launch_discount_claims
+      (code, customer_key, state, claim_id, checkout_attempt_id,
+       claimed_at, expires_at, stripe_checkout_session_id, session_opened_at)
+    values ('GLOALAUNCH10', v_key, 'session_open', v_probe, v_attempt,
+            now(), null, null, now());
+  exception when check_violation then
+    v_ok := true;
+  end;
+  if not v_ok then
+    raise exception '056: a session_open claim was allowed with no Stripe session - nothing could ever expire it';
+  end if;
+
+  -- 3. reserved MUST mean that no discounted session is payable.
+  v_ok := false;
+  begin
+    insert into public.launch_discount_claims
+      (code, customer_key, state, claim_id, checkout_attempt_id,
+       claimed_at, expires_at, stripe_checkout_session_id, session_opened_at)
+    values ('GLOALAUNCH10', v_key, 'reserved', v_probe, v_attempt,
+            now(), now() + interval '5 minutes', 'cs_test_probe', now());
+  exception when check_violation then
+    v_ok := true;
+  end;
+  if not v_ok then
+    raise exception '056: a reserved claim was allowed to hold a Stripe session - it would be lapsable while payable';
   end if;
 end $$;
 
@@ -1623,15 +2183,17 @@ commit;
 --        where n.nspname = 'public'
 --          and p.proname in ('launch_discount_is_first_order',
 --                            'claim_launch_discount',
+--                            'mark_launch_discount_session_open',
 --                            'mark_launch_discount_payment_pending',
 --                            'release_launch_discount',
+--                            'release_launch_discount_after_expired_session',
 --                            'release_launch_discount_after_failed_payment',
 --                            'redeem_launch_discount',
 --                            'create_order_from_paid_checkout')
 --        order by p.proname;
---      -> prosecdef true and proconfig {search_path=} for all seven.
---      -> anon false and authenticated false for all seven.
---      -> service_role true for six, and FALSE for redeem_launch_discount.
+--      -> prosecdef true and proconfig {search_path=} for all nine.
+--      -> anon false and authenticated false for all nine.
+--      -> service_role true for eight, and FALSE for redeem_launch_discount.
 --
 --   3b. No overload was left behind. Every name above must return
 --       exactly ONE row:
@@ -1639,7 +2201,9 @@ commit;
 --        join pg_namespace n on n.oid = p.pronamespace
 --        where n.nspname = 'public' and proname in (
 --          'launch_discount_is_first_order','claim_launch_discount',
+--          'mark_launch_discount_session_open',
 --          'mark_launch_discount_payment_pending','release_launch_discount',
+--          'release_launch_discount_after_expired_session',
 --          'release_launch_discount_after_failed_payment',
 --          'redeem_launch_discount','create_order_from_paid_checkout')
 --        group by proname order by proname;
@@ -1654,6 +2218,28 @@ commit;
 --      canonical:
 --        ... values ('SOMETHINGELSE', 'a@b.de', 'released');   -> refused
 --        ... values ('GLOALAUNCH10', 'A@B.de', 'released');    -> refused
+--
+--   4b. THE INVARIANT, ASKED OF THE CONSTRAINT ITSELF. Read the shape
+--       and confirm that the protected states cannot lapse and that
+--       'reserved' cannot hold a session:
+--        select pg_get_constraintdef(oid)
+--        from pg_constraint
+--        where conrelid = 'public.launch_discount_claims'::regclass
+--          and conname = 'launch_discount_claims_state_shape';
+--      -> 'session_open'    ... expires_at IS NULL
+--                           ... stripe_checkout_session_id IS NOT NULL
+--      -> 'payment_pending' ... expires_at IS NULL
+--      -> 'reserved'        ... expires_at IS NOT NULL
+--                           ... stripe_checkout_session_id IS NULL
+--      The migration itself tries all three as real rows before it
+--      commits (section 11b), so a database that reached this point has
+--      already refused them.
+--
+--   4c. AND NOTHING CAN TAKE A CLAIM THAT IS PAYABLE. Read the claim
+--       function's conflict clause:
+--        select pg_get_functiondef('public.claim_launch_discount(text, text, uuid, uuid, integer)'::regprocedure);
+--      -> the WHERE names only 'released' and 'reserved'. Neither
+--         'session_open' nor 'payment_pending' nor 'redeemed' appears.
 --
 --   5. The first-order cutoff sees the August test orders as history:
 --        select count(*) from public.orders
@@ -1685,4 +2271,12 @@ commit;
 --        where discount_code is not null;                     -> 0
 --        select count(*) from public.orders
 --        where discount_total_cents <> 0;                     -> 0
+--
+--   7. AND THE TELEMETRY THAT MUST STAY ZERO. Not a budget, not an
+--      allowance - a number that is 0 for as long as the state machine
+--      holds, and an incident the moment it is not:
+--        select code, customer_key, redemption_conflicts, last_conflict_at
+--        from public.launch_discount_claims
+--        where redemption_conflicts > 0;
+--      -> NO ROWS.
 -- ══════════════════════════════════════════════════════════════
