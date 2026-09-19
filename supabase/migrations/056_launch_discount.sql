@@ -799,9 +799,9 @@ $$;
  *   the row does not exist      nobody has ever used the code here
  *   state = 'released'          an authoritative Stripe signal said the
  *                               previous session can never be paid
- *   state = 'reserved' and BOTH  the SAME request again. Idempotent: the
- *   the claim id AND the        reservation is refreshed and the caller
- *   attempt are the caller's    is told it holds it. A retried checkout
+ *   state = 'reserved' and the  the SAME request again. Idempotent: the
+ *   claim id AND the attempt    reservation is refreshed and the caller
+ *   are both the caller's       is told it holds it. A retried checkout
  *                               must not be refused its own claim.
  *   state = 'reserved' and the  the previous reservation lapsed BEFORE
  *   reservation has lapsed      any Stripe work was declared
@@ -869,10 +869,10 @@ language plpgsql
 security definer set search_path = ''
 as $$
 declare
-  v_code     text;
-  v_key      text;
-  v_ttl      integer;
-  v_now      timestamptz := now();
+  v_code       text;
+  v_key        text;
+  v_ttl        integer;
+  v_now        timestamptz := now();
   v_rows       integer;
   v_state      text;
   v_claim_id   uuid;
