@@ -11,6 +11,7 @@ import {
   markAttemptPaid,
 } from "../../../../lib/checkoutAttempts";
 import { evaluateStripeSessionPayment } from "../../../../lib/stripeFulfillment";
+import { verifyPaidSessionIdentity } from "../../../../lib/checkoutIdentity";
 import { isRefundEventType, paymentIntentIdFromRefundEvent } from "../../../../lib/stripeRefunds";
 import { syncOrderRefundStateFromStripe } from "../../../../lib/orderRefunds";
 // Phase 4B7. The annual parent's own refund correlation, tried before the
@@ -663,6 +664,46 @@ async function handleCheckoutSessionCompleted(stripe: Stripe, eventSession: Stri
   // never silently re-zone a paid attempt after the fact. Payment is
   // still marked paid above (that's a true fact); only order creation is
   // withheld.
+  // Security check: the person Stripe actually collected payment from
+  // must be the person this attempt was created for (migration 055).
+  //
+  // Stripe should make divergence impossible - the session was created
+  // against a Customer that already carried the address, so Checkout
+  // rendered it non-editable - which makes this the second lock, not
+  // the first. Its job is to NOTICE if that ever stops being true, and
+  // to stop before an order exists rather than after.
+  //
+  // Placed exactly where the shipping-country check is, and for the same
+  // reason: the payment is already marked paid above because it genuinely
+  // was paid, and that fact must stay recorded. Only ORDER CREATION is
+  // withheld - which also withholds the confirmation email, and (when
+  // 056 arrives) any redemption that would have been keyed on this
+  // identity. Nothing is rewritten to agree; a mismatch is reported.
+  //
+  // Legacy attempts - the 729 that predate 055 - carry no identity at
+  // all and pass straight through to the old path. That is deliberate:
+  // they were fulfilled safely without this check for 458 orders, and
+  // failing them now would break fulfilment to punish a row for when it
+  // was written.
+  const sessionCustomerId =
+    typeof session.customer === "string" ? session.customer : session.customer?.id ?? null;
+  const identity = verifyPaidSessionIdentity(
+    {
+      customerEmail: session.customer_details?.email ?? null,
+      customerId: sessionCustomerId,
+    },
+    {
+      customer_email: attempt.customer_email,
+      stripe_customer_id: attempt.stripe_customer_id,
+    }
+  );
+  if (!identity.ok) {
+    console.error(
+      `Stripe webhook: attempt ${attempt.id} identity verification failed - ${identity.reason} - fulfillment withheld.`
+    );
+    return;
+  }
+
   const confirmedShippingCountry = session.collected_information?.shipping_details?.address?.country ?? null;
   if (!attempt.shipping_country || attempt.shipping_gross_cents === null || confirmedShippingCountry !== attempt.shipping_country) {
     console.error(

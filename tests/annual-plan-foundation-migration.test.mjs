@@ -1411,6 +1411,20 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     "app/api/admin/inventory/items/update/route.ts",
     "app/api/admin/inventory/items/archive/route.ts",
     "app/api/admin/inventory/categories/save/route.ts",
+    // 055 PHASE B, THE CHECKOUT EMAIL IDENTITY. The client half of the
+    // one-time checkout gains ONE request field: `email`, sent raw. It
+    // sends no normalized form, no customer key and no Stripe Customer
+    // id - the server derives every authoritative identity value itself
+    // (lib/checkoutIdentity.ts), which is the same rule this file already
+    // follows for prices, zones and user ids.
+    //
+    // The three other modules this package edits are already listed
+    // above for earlier reasons: app/GloaSite.tsx (the cart field),
+    // app/api/checkout/session/route.ts (the resolution, below the
+    // launch gate) and app/api/stripe/webhook/route.ts (the paid-session
+    // verification). No annual, subscription or B2B path is involved.
+    // Reviewed in tests/checkout-email-identity-runtime.test.mjs.
+    "app/createCheckoutSession.ts",
   ];
   // NOTE. Both lists are about UNCOMMITTED edits to files that already
   // exist, so a file this package CREATES does not belong in either -

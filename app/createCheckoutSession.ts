@@ -22,11 +22,19 @@ export type CheckoutSession = {
  * e.g. "DE"). The server independently validates it and computes the
  * shipping zone/price/free-shipping eligibility itself - this function
  * never sends a zone, price, or free-shipping flag.
+ *
+ * email is the address the customer typed, sent RAW. The server
+ * normalizes it, validates it, and resolves it to a Stripe Customer
+ * itself - so this function never sends a normalized form, a customer
+ * key, a Stripe Customer id or anything else that would let a browser
+ * nominate an identity. The same rule as prices: the client says what it
+ * wants, the server decides what that means.
  */
 export async function createCheckoutSession(
   cartItems: CartItem[],
   requestId: string,
   shippingCountry: string,
+  email: string,
   accessToken?: string | null
 ): Promise<CheckoutSession> {
   const payload = {
@@ -36,6 +44,7 @@ export async function createCheckoutSession(
     })),
     requestId,
     shippingCountry,
+    email,
   };
 
   const response = await fetch("/api/checkout/session", {

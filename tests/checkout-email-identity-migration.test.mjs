@@ -30,6 +30,22 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = rel => readFileSync(path.join(ROOT, rel), "utf8");
+const NEWLINE = String.fromCharCode(10);
+
+/**
+ * "Which modules TOUCH the identity map?" is a question about code. Both
+ * the rules leaf and the session route explain the table and the column
+ * in their comments - deliberately, since that is where the reasoning
+ * belongs - so scanning raw source would count every explanation as a
+ * violation.
+ */
+const readCode = rel => read(rel)
+  .split(NEWLINE)
+  .filter(line => {
+    const t = line.trim();
+    return !t.startsWith("//") && !t.startsWith("*") && !t.startsWith("/*");
+  })
+  .join(NEWLINE);
 
 const MIGRATION = "055_checkout_email_identity.sql";
 const migration = read(`supabase/migrations/${MIGRATION}`);
@@ -257,36 +273,62 @@ test("5c: it carries its own read-only verification, asked both ways", () => {
    6. PHASE A IS SCHEMA ONLY
    ══════════════════════════════════════════════════════════════ */
 
-test("6: no runtime code depends on 055 yet", () => {
-  // The whole point of the two-phase rollout: production must never run
-  // code that expects a table it does not have. Phase B wires this up
-  // AFTER the migration is verified in production.
-  for (const rel of [
+test("6: exactly one module reaches the identity map, and it is server-only", () => {
+  // PHASE B MOVED THIS BOUNDARY, ON PURPOSE. While 055 was unapplied
+  // this asserted that NOTHING referenced the table, because production
+  // must never run code that expects a table it does not have. The
+  // migration is applied and verified now, so the question changes from
+  // "does anything touch it?" to "does anything touch it that should
+  // not?" - which is the invariant worth keeping permanently.
+  //
+  // The table name may appear in exactly one runtime module: the
+  // service-role adapter. It has no anon or authenticated grant
+  // (section 2 of the migration), so anywhere else is either a bug or a
+  // browser bundle about to get a 42501.
+  const reachers = [
     "app/api/checkout/session/route.ts",
     "app/api/checkout/quote/route.ts",
     "app/api/stripe/webhook/route.ts",
     "lib/checkoutAttempts.ts",
     "lib/stripeCustomers.ts",
+    "lib/checkoutIdentity.ts",
+    "lib/checkoutCustomerIdentity.ts",
+    "lib/checkoutCustomerIdentityDeps.ts",
     "app/createCheckoutSession.ts",
-  ]) {
-    const src = read(rel);
-    assert.ok(!src.includes(TABLE),
-      `${rel} already reads the identity map - phase A must not depend on 055`);
-    assert.ok(!src.includes("customer_email"),
-      `${rel} already uses customer_email - that is phase B`);
+    "app/GloaSite.tsx",
+  ].filter(rel => readCode(rel).includes(TABLE));
+
+  assert.deepEqual(reachers, ["lib/checkoutCustomerIdentityDeps.ts"],
+    `the identity map must be reached from the service-role adapter alone, not from ${reachers.join(", ")}`);
+
+  // And the browser half never names the column either - the client
+  // sends a raw address and nothing derived from it.
+  for (const rel of ["app/createCheckoutSession.ts", "app/GloaSite.tsx", "app/api/checkout/quote/route.ts"]) {
+    assert.ok(!readCode(rel).includes("customer_email"),
+      `${rel} names the frozen identity column - only the server may`);
   }
 });
 
-test("6b: the one-time checkout is unchanged, and still creates no Customer", () => {
+test("6b: the one-time checkout binds the session to a resolved Customer", () => {
   const route = read("app/api/checkout/session/route.ts");
-  // Still the three inputs and nothing more.
-  assert.match(route, /const \{ items, requestId, shippingCountry \} = body/);
-  // Still no identity passed to Stripe - that is phase B, and saying so
-  // here is what makes phase A provably inert.
-  assert.ok(!route.includes("customer:"), "the session already passes a Customer");
-  assert.ok(!route.includes("customer_creation"), "the session already configures customer creation");
-  // And the prelaunch gate is untouched.
+  // Four inputs now. `email` is the only one added, and it is a raw
+  // address - no normalized form, no customer key, no Stripe id.
+  assert.match(route, /const \{ items, requestId, shippingCountry, email \} = body/);
+  // THE LOCK ITSELF. `customer:` is what makes the email non-editable in
+  // Checkout; customer_email alone would only prefill it.
+  assert.match(route, /customer: frozenStripeCustomerId,/);
+  assert.ok(!/customer_email:/.test(route),
+    "the session must not fall back to customer_email as its identity binding");
+  // And the value handed to Stripe comes from the ATTEMPT's frozen
+  // column, not from this request's freshly resolved variable.
+  assert.match(route, /const frozenStripeCustomerId = attempt\.stripe_customer_id;/);
+  // The prelaunch gate is untouched, and still above all of it.
   assert.match(route, /checkoutRefusalFor\(SHOP_STATUS\)/);
+  const gateAt = route.indexOf("checkoutRefusalFor(SHOP_STATUS)");
+  for (const sideEffect of ["checkoutIdentityDeps(stripe)", "getOrCreateCheckoutCustomerByEmail("]) {
+    assert.ok(route.indexOf(sideEffect) > gateAt,
+      `${sideEffect} can run before the launch gate - a closed shop would mint Stripe Customers`);
+  }
 });
 
 test("6c: the subscription Customer helper is byte-identical in behaviour", () => {

@@ -40,10 +40,32 @@ export type CheckoutAttempt = {
   tax_snapshot: CartTaxSnapshot | null;
   stripe_checkout_session_id: string | null;
   stripe_payment_intent_id: string | null;
+  /**
+   * The identity this attempt was created for, frozen before Stripe was
+   * contacted (migration 055). Null on the 729 attempts that predate it,
+   * and on every flow that does not collect an email up front - which is
+   * why the webhook reads "both null" as legacy rather than as an error.
+   */
+  customer_email: string | null;
+  stripe_customer_id: string | null;
 };
 
 const ATTEMPT_COLUMNS =
-  "id, request_id, status, currency, expected_total_gross_cents, items_snapshot, shipping_country, shipping_zone, shipping_gross_cents, tax_snapshot, stripe_checkout_session_id, stripe_payment_intent_id";
+  "id, request_id, status, currency, expected_total_gross_cents, items_snapshot, shipping_country, shipping_zone, shipping_gross_cents, tax_snapshot, stripe_checkout_session_id, stripe_payment_intent_id, customer_email, stripe_customer_id";
+
+/**
+ * The identity a one-time attempt freezes: the normalized email the
+ * customer gave GLOA, and the Stripe Customer that email resolved to.
+ *
+ * Passed as one value rather than two arguments because they are one
+ * fact. An attempt carrying an email but no Customer would be an
+ * identity that Stripe never enforced, and the webhook treats exactly
+ * that shape as evidence of a bad write (verifyPaidSessionIdentity).
+ */
+export type CheckoutAttemptIdentity = {
+  email: string;
+  stripeCustomerId: string;
+};
 
 export type GetOrCreateAttemptResult =
   | { ok: true; attempt: CheckoutAttempt }
@@ -62,7 +84,8 @@ export async function getOrCreateCheckoutAttempt(
   quote: CheckoutQuote,
   shipping: CheckoutAttemptShipping,
   taxSnapshot: CartTaxSnapshot | null,
-  userId: string | null = null
+  userId: string | null = null,
+  identity: CheckoutAttemptIdentity | null = null
 ): Promise<GetOrCreateAttemptResult> {
   const admin = getSupabaseAdmin();
   if (!admin) {
@@ -88,6 +111,17 @@ export async function getOrCreateCheckoutAttempt(
         // state happens to be when they come back. ignoreDuplicates
         // means an existing attempt keeps its original snapshot.
         tax_snapshot: taxSnapshot,
+        // The same freeze, applied to WHO is buying (migration 055).
+        // ignoreDuplicates is what makes this immutable in practice: a
+        // retry of an existing request_id cannot repoint an attempt from
+        // one person to another, exactly as it cannot re-zone its
+        // shipping or re-price its cart. The caller compares what comes
+        // back against what it asked for and refuses on divergence -
+        // silently settling against the frozen identity while the
+        // customer is looking at a different address would be worse than
+        // either failing or overwriting.
+        customer_email: identity?.email ?? null,
+        stripe_customer_id: identity?.stripeCustomerId ?? null,
       },
       { onConflict: "request_id", ignoreDuplicates: true }
     );

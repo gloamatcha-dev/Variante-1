@@ -2,8 +2,11 @@ import type Stripe from "stripe";
 import { getStripeClient } from "../../../../lib/stripe";
 import { validateQuoteItems, buildAuthoritativeQuote } from "../../../../lib/checkoutQuote";
 import { getSiteOrigin } from "../../../../lib/siteUrl";
-import { getOrCreateCheckoutAttempt, linkStripeSession } from "../../../../lib/checkoutAttempts";
+import { getOrCreateCheckoutAttempt, linkStripeSession, findAttemptByRequestId } from "../../../../lib/checkoutAttempts";
 import { verifyUserId } from "../../../../lib/verifyUser";
+import { validateCheckoutEmail, CHECKOUT_IDENTITY_CONFLICT_MESSAGE } from "../../../../lib/checkoutIdentity";
+import { getOrCreateCheckoutCustomerByEmail } from "../../../../lib/checkoutCustomerIdentity";
+import { checkoutIdentityDeps } from "../../../../lib/checkoutCustomerIdentityDeps";
 import { ALLOWED_SHIPPING_COUNTRIES, getShippingZone, computeShippingGrossCents, SHIPPING_ZONES } from "../../../../lib/shipping";
 import { resolveTaxJurisdiction } from "../../../../lib/taxJurisdiction";
 import { resolveCheckoutTax, toTaxableCartItems, TAX_DESTINATION_UNAVAILABLE_MESSAGE } from "../../../../lib/tax";
@@ -39,7 +42,17 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const { items, requestId, shippingCountry } = body as { items?: unknown; requestId?: unknown; shippingCountry?: unknown };
+  // Exactly four inputs, and not one of them is an identity. The browser
+  // may say which address it wants the order sent to; it may never say
+  // which Stripe Customer, which normalized form, or which identity row
+  // that address resolves to. Every one of those is derived below from
+  // `email` alone, by the server, through lib/checkoutIdentity.ts.
+  const { items, requestId, shippingCountry, email } = body as {
+    items?: unknown;
+    requestId?: unknown;
+    shippingCountry?: unknown;
+    email?: unknown;
+  };
 
   if (typeof requestId !== "string" || !UUID_RE.test(requestId)) {
     return Response.json(
@@ -47,6 +60,19 @@ export async function POST(request: Request): Promise<Response> {
       { status: 400 }
     );
   }
+
+  // The authoritative email, canonicalised once, here. Validation is
+  // pure and writes nothing, so it belongs above the launch gate with
+  // the rest of the request checks: a malformed request must still be
+  // told it is malformed, whether or not the shop is open.
+  const emailResult = validateCheckoutEmail(email);
+  if (!emailResult.ok) {
+    return Response.json(
+      { error: emailResult.error } as ErrorResponse,
+      { status: 400 }
+    );
+  }
+  const customerEmail = emailResult.email;
 
   const validatedItems = validateQuoteItems(items);
   if (!validatedItems) {
@@ -165,9 +191,66 @@ export async function POST(request: Request): Promise<Response> {
   // and the order is not blocked on that account.
   const attemptTaxSnapshot = taxOutcome.kind === "calculated" ? taxOutcome.snapshot : null;
 
+  // ── THE IDENTITY, RESOLVED BEFORE STRIPE IS TOLD ANYTHING ───
+  //
+  // Everything from here down is below the launch gate, and that
+  // placement is the point: a visitor POSTing to a prelaunch shop must
+  // not be able to create a Stripe Customer or an identity mapping any
+  // more than they can create a payable session. Nothing above this
+  // line writes to Stripe or to the identity map.
+  //
+  // First, cheaply: if this request_id already has an attempt, its
+  // identity is frozen and this request cannot change it. Refusing here
+  // rather than after resolution means a retry that arrives with a
+  // different address does not leave a stray Stripe Customer behind for
+  // an address that will never be allowed to buy under this request id.
+  // It is an optimisation, not the guarantee - the authoritative check
+  // is against the attempt this request actually gets, further down.
+  const existingAttempt = await findAttemptByRequestId(requestId);
+  if (existingAttempt && existingAttempt.customer_email && existingAttempt.customer_email !== customerEmail) {
+    console.error(
+      `Checkout session: request ${requestId} was frozen for a different identity - refusing to repoint it.`
+    );
+    return Response.json(
+      { error: CHECKOUT_IDENTITY_CONFLICT_MESSAGE } as ErrorResponse,
+      { status: 409 }
+    );
+  }
+
+  const identityDeps = checkoutIdentityDeps(stripe);
+  if (!identityDeps) {
+    console.error("Checkout session error: the identity resolver has no service-role client.");
+    return Response.json(
+      { error: "Zahlungsfunktion vorübergehend nicht verfügbar." } as ErrorResponse,
+      { status: 503 }
+    );
+  }
+
+  const identity = await getOrCreateCheckoutCustomerByEmail(identityDeps, customerEmail);
+  if (!identity.ok) {
+    // The address is never echoed. `conflict` separates "this identity
+    // needs a human" (409, and no retry will help) from "Stripe or the
+    // database was briefly unavailable" (503, and a retry might).
+    console.error(`Checkout session: identity unresolved for request ${requestId} -`, identity.reason);
+    return Response.json(
+      {
+        error: identity.conflict
+          ? CHECKOUT_IDENTITY_CONFLICT_MESSAGE
+          : "Zahlungsfunktion vorübergehend nicht verfügbar.",
+      } as ErrorResponse,
+      { status: identity.conflict ? 409 : 503 }
+    );
+  }
+  const stripeCustomerId = identity.stripeCustomerId;
+
   // Never trust a client-supplied user id - re-verify the bearer token
   // (if any) against Supabase Auth. Guest checkout (no/invalid token)
   // simply links no user, it never fails the request.
+  //
+  // Deliberately NOT an identity source. The authoritative identity for
+  // this checkout is the email above, for a signed-in customer exactly
+  // as for a guest - so nothing here reads public.stripe_customers, and
+  // a one-time order never borrows the subscription flow's Customer.
   const userId = await verifyUserId(request);
 
   // Persists (or reuses, on retry) the authoritative server-side snapshot
@@ -182,7 +265,8 @@ export async function POST(request: Request): Promise<Response> {
     quote,
     { country: normalizedShippingCountry, zone: shippingZone, grossCents: shippingGrossCents },
     attemptTaxSnapshot,
-    userId
+    userId,
+    { email: customerEmail, stripeCustomerId }
   );
   if (!attemptResult.ok) {
     return Response.json(
@@ -199,6 +283,38 @@ export async function POST(request: Request): Promise<Response> {
       { status: 409 }
     );
   }
+
+  // THE AUTHORITATIVE IDENTITY CHECK, against the attempt that actually
+  // came back rather than the one this request hoped to create.
+  //
+  // The upsert above ignores duplicates, so on a retry these are the
+  // ORIGINAL frozen values. If they disagree with what this request
+  // resolved, the attempt belongs to a different person and settling it
+  // against this one would mean charging an address the customer never
+  // confirmed - and rewriting the attempt to agree is not an option
+  // either, since a frozen identity that can be edited is not frozen.
+  // Both directions are refused; the attempt stands untouched.
+  //
+  // The pre-read above catches the ordinary retry-with-a-new-address
+  // case before any Stripe write. This catches the rest: a genuine race
+  // between two first-time requests sharing one request_id, and any
+  // attempt written without an identity at all.
+  if (
+    attempt.customer_email !== customerEmail ||
+    attempt.stripe_customer_id === null ||
+    attempt.stripe_customer_id !== stripeCustomerId
+  ) {
+    console.error(
+      `Checkout session: attempt ${attempt.id} holds a different frozen identity (customer ${attempt.stripe_customer_id ?? "none"}, resolved ${stripeCustomerId}) - session withheld.`
+    );
+    return Response.json(
+      { error: CHECKOUT_IDENTITY_CONFLICT_MESSAGE } as ErrorResponse,
+      { status: 409 }
+    );
+  }
+  // Read from the attempt, not from this request - the same rule the
+  // frozen shipping data below follows, for the same reason.
+  const frozenStripeCustomerId = attempt.stripe_customer_id;
 
   // Always build the Stripe session from the attempt's frozen shipping
   // data, never from this request's freshly computed values - a retry
@@ -237,6 +353,14 @@ export async function POST(request: Request): Promise<Response> {
     const session = await stripe.checkout.sessions.create(
       {
         mode: "payment",
+        // THE LOCK. Not customer_email - that one only PREFILLS a field
+        // the buyer can still change, which would make the identity this
+        // attempt froze a suggestion rather than a fact. A `customer`
+        // that already carries a valid email is prefilled AND NOT
+        // EDITABLE in Checkout (migration 055's header quotes the SDK on
+        // exactly this), and getOrCreateCheckoutCustomerByEmail
+        // guarantees the email is on it before we get here.
+        customer: frozenStripeCustomerId,
         line_items: lineItems,
         // Restricted to exactly the one country this attempt was priced
         // for - Stripe shipping rates have no per-country filtering, so

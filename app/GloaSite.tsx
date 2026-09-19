@@ -48,6 +48,10 @@ import { SHIPPING_ZONES, SHIPPING_PRICING, getShippingZone, getCountryLabel, com
 // can render is always a value POST /api/partnerships accepts.
 import { PARTNERSHIP_TYPE_OPTIONS } from "../lib/partnershipRequest";
 import { createCheckoutSession } from "./createCheckoutSession";
+// The checkout's identity rule, shared with the server rather than
+// restated here - a second copy of "what counts as a valid address"
+// would be a second copy that can disagree.
+import { validateCheckoutEmail } from "../lib/checkoutIdentity";
 
 
 type Recipe={slug:string;title:string;category:string;time:string;servings:string;tags:string[];image:string;alt:string;excerpt:string;description:string;ingredients:string[];steps:string[];featured:boolean};
@@ -2563,11 +2567,24 @@ const SHIPPING_COUNTRY_GROUPS:{label:string;codes:string[]}[]=[
 
 function CartDrawer({open,onClose}:{open:boolean;onClose:()=>void}){
 const cart=useCart();
-const { session }=useAuth();
+const { session,user }=useAuth();
 const closeRef=useRef<HTMLButtonElement>(null);
 const [shippingCountry,setShippingCountry]=useState("DE");
 const [checkoutBusy,setCheckoutBusy]=useState(false);
 const [checkoutError,setCheckoutError]=useState("");
+// The address GLOA needs BEFORE Stripe, so the Customer the session is
+// created against already carries it and Checkout renders it
+// non-editable (migration 055). Guest checkout is unaffected: this is a
+// field, not an account.
+// null until the customer types, which is what lets a signed-in
+// address be OFFERED without being imposed: the field shows their own
+// verified address until they replace it, and derives rather than
+// syncs, so a session that resolves after the drawer opened still
+// prefills. A courtesy, never a source of authority - the server
+// validates and normalizes whatever finally arrives either way.
+const [typedEmail,setTypedEmail]=useState<string|null>(null);
+const email=typedEmail??user?.email??"";
+const [emailError,setEmailError]=useState("");
 
 useEffect(()=>{
 if(!open)return;
@@ -2591,10 +2608,17 @@ const remainingForFreeShipping=threshold!==null?Math.max(0,threshold-cart.totalC
 
 const handleCheckout=async()=>{
 if(SHOP_STATUS==="prelaunch"){onClose();window.location.href="/contact";return}
+// The same rule the server enforces, from the same module - so the
+// customer is told about a typo here instead of by a 400. It is a
+// courtesy check, not the check: validateCheckoutEmail runs again on
+// the server, where it is the only one that counts.
+const checked=validateCheckoutEmail(email);
+if(!checked.ok){setEmailError(checked.error);return}
+setEmailError("");
 setCheckoutBusy(true);setCheckoutError("");
 try{
 const requestId=crypto.randomUUID();
-const{url}=await createCheckoutSession(cart.items,requestId,shippingCountry,session?.access_token);
+const{url}=await createCheckoutSession(cart.items,requestId,shippingCountry,email,session?.access_token);
 window.location.href=url;
 }catch(err){
 setCheckoutError(err instanceof Error?err.message:"Checkout konnte nicht gestartet werden.");
@@ -2620,6 +2644,26 @@ return <div className="cart-backdrop" onClick={onClose} onKeyDown={e=>e.key==="E
 </div>
 <button className="cart-item-remove" onClick={()=>cart.removeItem(item.productId,item.variantId)} aria-label="Artikel entfernen">Entfernen</button>
 </div>)}</div>
+{SHOP_STATUS!=="prelaunch"&&<div className="cart-email">
+<label className="cart-email-label" htmlFor="cart-email">E-MAIL</label>
+<input
+id="cart-email"
+type="email"
+name="email"
+autoComplete="email"
+inputMode="email"
+required
+maxLength={254}
+placeholder="du@beispiel.de"
+value={email}
+onChange={e=>{setTypedEmail(e.target.value);if(emailError)setEmailError("")}}
+aria-invalid={emailError?"true":undefined}
+aria-describedby={emailError?"cart-email-error":"cart-email-note"}
+/>
+{emailError
+?<p className="cart-email-error" id="cart-email-error" role="alert">{emailError}</p>
+:<p className="cart-email-note" id="cart-email-note">Für Bestellbestätigung und Versandinfos.</p>}
+</div>}
 <div className="cart-shipping">
 <label className="cart-shipping-label" htmlFor="cart-shipping-country">LIEFERLAND</label>
 <select id="cart-shipping-country" value={shippingCountry} onChange={e=>setShippingCountry(e.target.value)}>

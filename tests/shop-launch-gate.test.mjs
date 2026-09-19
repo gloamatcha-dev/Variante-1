@@ -57,6 +57,13 @@ const slugPage = read("app/[...slug]/page.tsx");
 const PORT = 8961;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
 const REQUEST_ID = "3f1c9a52-7d84-4f1e-9b6a-2c5d8e0a4b71";
+// A request is only "fully valid" since 055 Phase B if it carries an
+// address: the route resolves one to a Stripe Customer before Checkout.
+// Every fixture below that is meant to REACH the gate must have it, or
+// it would be refused at validation and stop proving anything about the
+// gate at all - including 3c, which passes either way and would have
+// quietly stopped testing the refusal.
+const CUSTOMER_EMAIL = "launch-gate@example.com";
 
 let serverProcess;
 let variant30g;
@@ -197,6 +204,7 @@ test("3b: a fully valid checkout request is refused - with Stripe configured", a
     items: [{ variantId: variant30g.id, quantity: 1 }],
     requestId: REQUEST_ID,
     shippingCountry: "DE",
+    email: CUSTOMER_EMAIL,
   });
   // Not 503: the payment provider IS configured on this server, so this
   // can only be the launch gate. Not 500: a closed shop is an answer.
@@ -209,6 +217,7 @@ test("3c: the refusal carries no session, no url and no price", async () => {
     items: [{ variantId: variant30g.id, quantity: 1 }],
     requestId: REQUEST_ID,
     shippingCountry: "DE",
+    email: CUSTOMER_EMAIL,
   });
   assert.deepEqual(Object.keys(body), ["error"]);
   assert.ok(!/checkout\.stripe\.com|cs_test_|cs_live_/.test(text), "a Stripe session leaked into the refusal");
@@ -225,18 +234,25 @@ test("3d: manipulated quantities and prices are refused the same way, never proc
       items: [item],
       requestId: REQUEST_ID,
       shippingCountry: "DE",
+      email: CUSTOMER_EMAIL,
     });
     assert.equal(status, CHECKOUT_CLOSED_STATUS);
   }
   // A malformed request is still told it is malformed rather than being
   // swallowed by the gate - the shop being shut is not a reason to stop
   // answering accurately.
+  const ok = { items: [{ variantId: variant30g.id, quantity: 1 }], requestId: REQUEST_ID, shippingCountry: "DE", email: CUSTOMER_EMAIL };
   for (const bad of [
-    { items: [], requestId: REQUEST_ID, shippingCountry: "DE" },
-    { items: [{ variantId: variant30g.id, quantity: 0 }], requestId: REQUEST_ID, shippingCountry: "DE" },
-    { items: [{ variantId: variant30g.id, quantity: -1 }], requestId: REQUEST_ID, shippingCountry: "DE" },
-    { items: [{ variantId: variant30g.id, quantity: 1 }], requestId: "not-a-uuid", shippingCountry: "DE" },
-    { items: [{ variantId: variant30g.id, quantity: 1 }], requestId: REQUEST_ID, shippingCountry: "US" },
+    { ...ok, items: [] },
+    { ...ok, items: [{ variantId: variant30g.id, quantity: 0 }] },
+    { ...ok, items: [{ variantId: variant30g.id, quantity: -1 }] },
+    { ...ok, requestId: "not-a-uuid" },
+    { ...ok, shippingCountry: "US" },
+    // The address is validated with the rest of the request shape, above
+    // the gate, so a closed shop still answers a typo accurately.
+    { ...ok, email: undefined },
+    { ...ok, email: "not-an-email" },
+    { ...ok, email: `${"a".repeat(250)}@example.com` },
   ]) {
     const { status } = await post("/api/checkout/session", bad);
     assert.equal(status, 400, `expected 400 for ${JSON.stringify(bad)}`);

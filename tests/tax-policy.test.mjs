@@ -338,9 +338,15 @@ test("stripe: Stripe Tax is not enabled and no tax rate is sent to Stripe", () =
 /* ── Server authority ───────────────────────────────────────── */
 
 test("security: the browser can state a destination country and nothing else about tax", () => {
-  // Exactly three fields are read off the request body, and none of them
+  // Exactly four fields are read off the request body, and none of them
   // is a tax value. `body` is not referenced anywhere else.
-  assert.match(sessionRoute, /const \{ items, requestId, shippingCountry \} = body as \{ items\?: unknown; requestId\?: unknown; shippingCountry\?: unknown \};/);
+  //
+  // 055 Phase B added the fourth - `email`, a raw address the server
+  // normalizes and resolves itself. It carries no more tax authority
+  // than the other three: a destination is still the only thing the
+  // browser may state, and the identity it names changes no rate, no
+  // jurisdiction and no net amount.
+  assert.match(sessionRoute, /const \{ items, requestId, shippingCountry, email \} = body as \{\s*items\?: unknown;\s*requestId\?: unknown;\s*shippingCountry\?: unknown;\s*email\?: unknown;\s*\};/);
   assert.ok(
     sessionBody.lastIndexOf("body") < sessionBody.indexOf("const validatedItems"),
     "the raw request body is read after validation"

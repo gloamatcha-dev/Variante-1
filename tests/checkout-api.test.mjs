@@ -17,6 +17,12 @@ let variant50g;
 
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
 const REQUEST_ID = "11111111-1111-1111-1111-111111111111";
+// Every session request carries one since 055 Phase B: the route
+// resolves it to a Stripe Customer before Checkout, so an omitted or
+// malformed address is now a 400 in its own right. Added to the fixtures
+// below rather than removed from the assertions - each of those tests is
+// about a DIFFERENT field being inert, and still is.
+const CUSTOMER_EMAIL = "checkout-api@example.com";
 
 const PORT = 8917;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
@@ -147,6 +153,7 @@ test("session: ignores client-supplied price fields and fails gracefully without
     ],
     requestId: REQUEST_ID,
     shippingCountry: "DE",
+    email: CUSTOMER_EMAIL,
   });
   // Reaching the "payment provider unavailable" response proves the
   // authoritative DB quote was built successfully first (manipulated price
@@ -161,6 +168,7 @@ test("session: ignores any client-supplied user id field in the request body", a
     items: [{ variantId: variant30g.id, quantity: 1 }],
     requestId: REQUEST_ID,
     shippingCountry: "DE",
+    email: CUSTOMER_EMAIL,
     userId: "11111111-1111-1111-1111-111111111111",
     user_id: "22222222-2222-2222-2222-222222222222",
   });
@@ -198,6 +206,7 @@ test("session: ignores any client-supplied shipping zone/price/free-shipping fie
     items: [{ variantId: variant30g.id, quantity: 1 }],
     requestId: REQUEST_ID,
     shippingCountry: "DE",
+    email: CUSTOMER_EMAIL,
     shippingZone: "restOfEurope",
     shippingPrice: 1,
     shippingGrossCents: 1,

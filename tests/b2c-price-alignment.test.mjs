@@ -205,8 +205,10 @@ test("3b: the authoritative quote still reads product_variants", () => {
 test("3c: the checkout session prices from the frozen attempt, not the request", () => {
   const route = read("app/api/checkout/session/route.ts");
   assert.match(route, /unit_amount: item\.unitGrossCents/);
-  // The body carries no money at all.
-  assert.match(route, /const \{ items, requestId, shippingCountry \} = body/);
+  // The body carries no money at all. 055 Phase B added `email` to it,
+  // which is an identity and not an amount - every price below still
+  // comes from the attempt's frozen snapshot.
+  assert.match(route, /const \{ items, requestId, shippingCountry, email \} = body/);
   for (const banned of ["body.price", "body.total", "body.amount", "body.shipping", "body.tax", "body.discount"]) {
     assert.ok(!route.includes(banned), `the checkout accepts ${banned} from the browser`);
   }
