@@ -28,7 +28,7 @@ import type { Metadata } from "next";
  * the cheapest active variant in Supabase, so it cannot drift silently.
  */
 const SHOP_DESCRIPTION_BASE = "GLOA Matcha aus Shizuoka. 30 g, 50 g, 100 g.";
-const SHOP_DESCRIPTION_PRICE = "Ab 19,99 Euro.";
+const SHOP_DESCRIPTION_PRICE = "Ab 14,99 Euro.";
 const SHOP_DESCRIPTION = PRICES_VISIBLE
  ? `${SHOP_DESCRIPTION_BASE} ${SHOP_DESCRIPTION_PRICE}`
  : SHOP_DESCRIPTION_BASE;
