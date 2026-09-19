@@ -159,8 +159,8 @@ test("1e: no backend, auth, data or commercial logic changed", () => {
     // no migration, no write. Reviewed in tests/b2b-lead-api.test.mjs.
 ["admin", "annual-plan", "b2b-lead", "checkout", "contact", "cron", "internal", "launch",
      "orders", "partnerships", "stripe", "subscriptions", "withdrawal"], "an API route changed");
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("056")),
-    "a migration 056 or beyond appeared");
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("057")),
+    "a migration 057 or beyond appeared");
   // The presentation primitives stayed presentation.
   assert.ok(!/supabase|useAuth|customer_type/.test(ui), "AccountUI grew a data dependency");
 });

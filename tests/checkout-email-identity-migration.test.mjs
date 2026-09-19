@@ -227,16 +227,21 @@ test("4c: it creates no Stripe object and no function", () => {
    5. THE MIGRATION ITSELF
    ══════════════════════════════════════════════════════════════ */
 
-test("5: 055 is the newest migration, in one transaction, self-verifying", () => {
+test("5: 055 owns its number, in one transaction, self-verifying", () => {
   const files = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.length, 55);
-  assert.equal(files[files.length - 1], MIGRATION, "055 is not the newest migration");
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 55), [],
-    "a migration 056 or beyond appeared");
+  assert.equal(files.length, 56);
+  // 056 (the GLOALAUNCH10 database foundation, reviewed in
+  // tests/launch-discount-migration.test.mjs) landed after this one, so
+  // 055 is no longer the last file. What has to stay true is that it is
+  // still at its own number and that nothing above it is unreviewed.
+  assert.equal(files[files.length - 2], MIGRATION, "055 is not at its own number");
+  assert.equal(files[files.length - 1], "056_launch_discount.sql");
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 56), [],
+    "a migration 057 or beyond appeared");
   // 001-054 are immutable; what this can assert is that 055 names none
-  // of them as something to change.
-  for (const f of files.slice(0, -1)) {
+  // of them - nor 056 - as something to change.
+  for (const f of files.filter(f => f !== MIGRATION)) {
     assert.ok(!sql.includes(f), `055 refers to ${f} as something to change`);
   }
   assert.match(sql, /^\s*begin;/m);

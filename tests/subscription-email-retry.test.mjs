@@ -684,7 +684,7 @@ test("55-57: no migration was added, edited or required", () => {
   // guard still protects is that no UNREVIEWED migration appeared.
   // PHASE 3J.B1 THEN ADDED 037 (the invoice-keyed refund-state writer),
   // reviewed in tests/subscription-refund-correlation-migration.test.mjs.
-  assert.equal(files.length, 55);
+  assert.equal(files.length, 56);
   // Phase 4B1 added 039, the B2C prepaid annual plan foundation,
   // reviewed in tests/annual-plan-foundation-migration.test.mjs. The
   // guard is re-pinned, not deleted: it protects "no UNREVIEWED
@@ -702,17 +702,17 @@ test("55-57: no migration was added, edited or required", () => {
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(files[files.length - 10], "046_launch_signup_atomic.sql");
-  assert.equal(files[files.length - 11], "045_launch_welcome_email.sql");
-  assert.equal(files[files.length - 12], "044_launch_send.sql");
-  assert.equal(files[files.length - 13], "043_launch_waitlist.sql");
-  assert.equal(files[files.length - 14], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.equal(files[files.length - 15], "041_annual_account_column_privileges.sql");
-  assert.equal(files[files.length - 16], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(files[files.length - 17], "039_b2c_annual_plan_foundation.sql");
-  assert.equal(files[files.length - 18], "038_one_time_refund_writer_concurrency.sql");
+  assert.equal(files[files.length - 11], "046_launch_signup_atomic.sql");
+  assert.equal(files[files.length - 12], "045_launch_welcome_email.sql");
+  assert.equal(files[files.length - 13], "044_launch_send.sql");
+  assert.equal(files[files.length - 14], "043_launch_waitlist.sql");
+  assert.equal(files[files.length - 15], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(files[files.length - 16], "041_annual_account_column_privileges.sql");
+  assert.equal(files[files.length - 17], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 18], "039_b2c_annual_plan_foundation.sql");
+  assert.equal(files[files.length - 19], "038_one_time_refund_writer_concurrency.sql");
   assert.deepEqual(files.filter(f => f.startsWith("037")), ["037_subscription_refund_correlation.sql"]);
-  assert.ok(!files.some(f => f.startsWith("056")));
+  assert.ok(!files.some(f => f.startsWith("057")));
   const sql035 = withoutComments(read("supabase/migrations/035_subscription_email_deliveries.sql"));
   // The sweep needs exactly what 035 already grants: SELECT, and UPDATE
   // on status and sent_at.

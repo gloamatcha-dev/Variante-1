@@ -1091,18 +1091,21 @@ test("regression: no migration was added and 022-033 are untouched", () => {
     // `owned` has already proved that for it like every other file), and
     // it may only ADD: a drop or an alter of an existing column is still
     // a failure here, for 049 as for anything else.
-    // TWO NAMED EXCEPTIONS.
+    // THREE NAMED EXCEPTIONS.
     //
     // 049 adds a SEVENTH state machine - the direct cancellation
     // confirmation - and the refund lock's two claim columns. 050 is the
     // manual inventory and does not touch public.orders at all; it is
     // named here only so that the rule it must obey is stated rather
-    // than assumed.
+    // than assumed. 056 is the GLOALAUNCH10 database foundation and adds
+    // ONE column, orders.discount_code, plus two CHECK constraints of
+    // its own on it - reviewed in tests/launch-discount-migration.test.mjs.
     //
-    // Both may only ADD. A drop or an alter of an existing column is
+    // All three may only ADD. A drop or an alter of an existing column is
     // still a failure, for them as for anything else.
     if (name === "049_direct_cancellation_and_refund_lock.sql"
-        || name === "050_inventory_foundation.sql") {
+        || name === "050_inventory_foundation.sql"
+        || name === "056_launch_discount.sql") {
       assert.ok(!/drop column/i.test(later), `${name} drops a column`);
       assert.ok(!/alter column/i.test(later), `${name} alters an existing column`);
       // Scoped to public.orders: 050 creates four tables of its own and

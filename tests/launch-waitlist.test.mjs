@@ -1259,7 +1259,17 @@ test("61: the rate limit went into 043 rather than into a 044, and 043 is still 
     "052_admin_activity_audit.sql",
     "053_b2b_commercial_containment.sql",
     "054_b2c_price_alignment.sql",
-    "055_checkout_email_identity.sql"],
+    "055_checkout_email_identity.sql",
+    // 056 IS THE GLOALAUNCH10 DATABASE FOUNDATION: one new table,
+    // public.launch_discount_claims, three nullable columns on
+    // checkout_attempts, one on orders, one partial index, and the
+    // one-time order RPC extended in place to spend a claim in the same
+    // transaction. RLS is on with NOT ONE POLICY and NO role holds a
+    // privilege on the new table at all; nothing is granted to anon or
+    // authenticated anywhere. No subscription, annual or B2B object is
+    // touched, and no row is backfilled. Reviewed in
+    // tests/launch-discount-migration.test.mjs.
+    "056_launch_discount.sql"],
     "an unreviewed migration appeared after 043"
   );
 

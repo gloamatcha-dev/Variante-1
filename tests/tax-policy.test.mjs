@@ -175,15 +175,76 @@ test("migration: 021 owns its number and no later migration undoes it", () => {
     // comment while explaining what it deliberately does not touch, and a
     // scan that read comments would call that a modification.
     const later = withoutComments(readFileSync(path.join(MIGRATIONS_DIR, name), "utf-8"));
-    for (const owned of [
-      "create_order_from_paid_checkout",
-      "tax_treatment",
-      "tax_calculation_version",
-      "shipping_tax_allocation",
-      "order_items",
-    ]) {
+    // ONE NAMED EXCEPTION, AND IT IS NOT A WAIVER.
+    //
+    // Migration 056 (the GLOALAUNCH10 database foundation) replaces
+    // create_order_from_paid_checkout IN PLACE, under 021's own
+    // six-argument signature, to record the discount an order was
+    // charged with and to spend the launch claim in the same
+    // transaction. A blanket ban on naming the function would have
+    // forced that into a SECOND overload, which is worse: two callable
+    // order writers, one of them with 021's tax logic and one without.
+    //
+    // So the ban is replaced by the stronger question - is 021's tax
+    // contract still intact inside the new body? - asked as statements.
+    // The other four objects 021 owns are still banned outright for 056
+    // like for everything else.
+    const OWNED = ["tax_treatment", "tax_calculation_version",
+                   "shipping_tax_allocation", "order_items"];
+    for (const owned of name === "056_launch_discount.sql"
+                          ? OWNED
+                          : ["create_order_from_paid_checkout", ...OWNED]) {
       assert.ok(!new RegExp(`(alter|drop|create or replace)[^;]*${owned}`, "i").test(later),
         `${name} modifies the tax object ${owned}`);
+    }
+    if (name === "056_launch_discount.sql") {
+      // The signature is 021's, so this is a replacement and not a
+      // second door.
+      const signature = later.slice(
+        later.indexOf("create or replace function public.create_order_from_paid_checkout("),
+        later.indexOf("returns public.orders")
+      );
+      assert.ok(signature.length > 0, "056 does not declare the order writer");
+      for (const arg of ["p_checkout_attempt_id uuid", "p_customer_snapshot jsonb",
+                         "p_stripe_payment_intent_id text", "p_shipping_address_snapshot jsonb",
+                         "p_billing_address_snapshot jsonb", "p_shipping_gross_cents integer"]) {
+        assert.ok(signature.includes(arg), `056 changed 021's signature: ${arg} is gone`);
+      }
+      // Six arguments and not a seventh: a new parameter would be a new
+      // overload, and two callable order writers is the failure this
+      // exception exists to avoid.
+      assert.equal((signature.match(/p_\w+ /g) || []).length, 6,
+        "056 added or removed an argument on the order writer");
+      // Every tax invariant 021 wrote is reproduced verbatim: the
+      // snapshot is copied rather than recomputed, both cross-checks
+      // still fail closed, and the per-line match is still on variantId.
+      for (const kept of [
+        "v_tax := v_attempt.tax_snapshot;",
+        "v_totals := v_tax->'totals';",
+        "tax snapshot shipping (%) does not match the paid shipping (%) for attempt %",
+        "tax snapshot total (%) does not match the expected total (%) for attempt %",
+        "tax snapshot for attempt % has no line for variant %",
+        "where tax_item->>'variantId' = v_item->>'variantId'",
+        "v_tax->>'treatment',",
+        "v_tax->>'jurisdictionKind',",
+        "v_tax->>'taxCountry',",
+        "v_tax->>'calculationVersion',",
+        "v_tax->'shipping'->'allocations',",
+        "(v_totals->>'subtotalNetCents')::integer,",
+        "(v_totals->>'shippingNetCents')::integer,",
+        "(v_totals->>'taxTotalCents')::integer,",
+        "(v_totals->>'totalNetCents')::integer,",
+      ]) {
+        assert.ok(later.includes(kept), `056 lost 021's tax invariant: ${kept}`);
+      }
+      // And it decides no tax of its own: no rate, no treatment, no
+      // jurisdiction is computed here. Every tax value it writes is read
+      // back out of the attempt's frozen snapshot, which is 021's rule.
+      for (const banned of ["de_domestic", "de_origin_intra_eu", "EU_B2C_TAX_MODE",
+                            "jurisdiction_kind in", "tax_rate_percent numeric",
+                            "* 0.19", "/ 1.19", "* 1.19"]) {
+        assert.ok(!later.includes(banned), `056 decides tax: ${banned}`);
+      }
     }
   }
 });

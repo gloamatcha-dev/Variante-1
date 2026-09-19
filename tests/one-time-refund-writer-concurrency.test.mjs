@@ -101,9 +101,9 @@ test("1: 038 exists, owns its number, and 039 is the only one above it", () => {
   // in tests/annual-plan-foundation-migration.test.mjs. 038 is therefore
   // no longer the highest, and this is re-pinned rather than deleted:
   // what it protects is that no UNREVIEWED migration appeared.
-  assert.equal(files[files.length - 17], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 18], MIGRATION_038, "038 must be the one before it");
-  assert.equal(files[files.length - 19], MIGRATION_037, "037 must be the one before that");
+  assert.equal(files[files.length - 18], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 19], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 20], MIGRATION_037, "037 must be the one before that");
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
@@ -160,7 +160,17 @@ test("2: no migration 044 or beyond", () => {
     "052_admin_activity_audit.sql",
     "053_b2b_commercial_containment.sql",
     "054_b2c_price_alignment.sql",
-    "055_checkout_email_identity.sql"],
+    "055_checkout_email_identity.sql",
+    // 056 IS THE GLOALAUNCH10 DATABASE FOUNDATION: one new table,
+    // public.launch_discount_claims, three nullable columns on
+    // checkout_attempts, one on orders, one partial index, and the
+    // one-time order RPC extended in place to spend a claim in the same
+    // transaction. RLS is on with NOT ONE POLICY and NO role holds a
+    // privilege on the new table at all; nothing is granted to anon or
+    // authenticated anywhere. No subscription, annual or B2B object is
+    // touched, and no row is backfilled. Reviewed in
+    // tests/launch-discount-migration.test.mjs.
+    "056_launch_discount.sql"],
     "an unreviewed migration appeared after 043");
   // And 039 kept its hands off this phase's writer entirely.
   for (const name of [MIGRATION_039, MIGRATION_040, MIGRATION_041, MIGRATION_042]) {

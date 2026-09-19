@@ -652,7 +652,7 @@ test("4c: one API route, no server action, no migration was added for this page"
   }
   // No migration 043, and the live set is unchanged.
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"));
-  assert.ok(!migrations.some(f => f.startsWith("056")), "a migration 056 or beyond appeared");
+  assert.ok(!migrations.some(f => f.startsWith("057")), "a migration 057 or beyond appeared");
 });
 
 /* ══════════════════════════════════════════════════════════════
