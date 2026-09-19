@@ -171,6 +171,22 @@
 -- 'session_creating_required', loudly, in phase B's tests - rather than
 -- being silently recorded and leaving the crash window open.
 --
+-- ── WHO "THE HOLDER" IS, AND IT IS A PAIR ────────────────────
+--
+-- A claim is held by (claim_id, checkout_attempt_id) TOGETHER, never by
+-- the token alone. The token is minted per checkout attempt, so in
+-- ordinary operation the two always travel together - but "ordinarily"
+-- is not a security property, and a rule with an exception is a rule
+-- somebody will get wrong. Every function that acts on an ACTIVE claim
+-- therefore proves both, including the idempotent retry path of
+-- claim_launch_discount itself: a second attempt presenting the same
+-- token is NOT the holder, and it does not get to move the claim onto
+-- itself.
+--
+-- The one place the pair is not required is acquisition from a state
+-- nobody holds - 'released', or a 'reserved' row whose expiry has
+-- passed - because there is no holder there to impersonate.
+--
 -- ── STRIPE IDEMPOTENCY IS PART OF THE INVARIANT ───────────────
 --
 -- Retrying step 3 must retry the SAME Stripe create operation, not
@@ -518,7 +534,7 @@ revoke all privileges on table public.launch_discount_claims
 -- recorded as no discount rather than as a code that reduced zero. That
 -- is only reachable at all on a basket of four cents or less -
 -- discountGrossCents rounds half up, so 4 cents gives 0 - which no real
--- basket is (the smallest tin is 19,99 EUR). Stated as a constraint
+-- basket is (the smallest tin is 14,99 EUR). Stated as a constraint
 -- anyway, because "a code was applied and changed nothing" is a row
 -- nobody could explain later.
 
@@ -783,12 +799,21 @@ $$;
  *   the row does not exist      nobody has ever used the code here
  *   state = 'released'          an authoritative Stripe signal said the
  *                               previous session can never be paid
- *   state = 'reserved' and the  the SAME request again. Idempotent: the
- *   claim id is the caller's    reservation is refreshed and the caller
- *                               is told it holds it. A retried checkout
+ *   state = 'reserved' and BOTH  the SAME request again. Idempotent: the
+ *   the claim id AND the        reservation is refreshed and the caller
+ *   attempt are the caller's    is told it holds it. A retried checkout
  *                               must not be refused its own claim.
  *   state = 'reserved' and the  the previous reservation lapsed BEFORE
  *   reservation has lapsed      any Stripe work was declared
+ *
+ * THE PAIR IS REQUIRED, NOT JUST THE TOKEN. An ACTIVE reservation held
+ * by attempt A must not be moved onto attempt B because B happened to
+ * present A's claim id - that is not a retry, it is a different
+ * checkout taking over a live claim, and the row would silently start
+ * pointing at the wrong attempt. Such a caller affects zero rows and is
+ * told 'held_by_another_attempt'. Acquisition from 'released' or from a
+ * LAPSED 'reserved' row needs no pair, because there is no holder there
+ * to impersonate.
  *
  * AND NEVER OTHERWISE. Four states are excluded ENTIRELY - not "unless
  * they are old", not "unless the same caller asks":
@@ -848,9 +873,10 @@ declare
   v_key      text;
   v_ttl      integer;
   v_now      timestamptz := now();
-  v_rows     integer;
-  v_state    text;
-  v_claim_id uuid;
+  v_rows       integer;
+  v_state      text;
+  v_claim_id   uuid;
+  v_attempt_id uuid;
 begin
   if p_code is null or p_customer_key is null
      or p_claim_id is null or p_checkout_attempt_id is null then
@@ -890,7 +916,8 @@ begin
          session_opened_at          = null
    where c.state = 'released'
       or (c.state = 'reserved'
-          and (c.claim_id = excluded.claim_id
+          and ((c.claim_id = excluded.claim_id
+                and c.checkout_attempt_id = excluded.checkout_attempt_id)
                or c.expires_at <= excluded.claimed_at));
 
   get diagnostics v_rows = row_count;
@@ -904,20 +931,26 @@ begin
   -- and says whether the refusing row belongs to this caller, which is
   -- what lets a retried checkout recognise its own Stripe work instead
   -- of trying to start a second lot of it.
-  select state, claim_id into v_state, v_claim_id
+  select state, claim_id, checkout_attempt_id
+    into v_state, v_claim_id, v_attempt_id
   from public.launch_discount_claims
   where code = v_code and customer_key = v_key;
 
   return jsonb_build_object(
     'claimed', false,
     'state', v_state,
-    'holder', (v_claim_id is not null and v_claim_id = p_claim_id),
-    'outcome', case v_state
-                 when 'redeemed'         then 'already_redeemed'
-                 when 'payment_pending'  then 'payment_pending'
-                 when 'session_open'     then 'session_open'
-                 when 'session_creating' then 'session_creating'
-                 when 'reserved'         then 'held_by_another_checkout'
+    -- THE PAIR, not the token: a caller holding somebody else's claim id
+    -- with its own attempt is not the holder and is not told it is.
+    'holder', (v_claim_id is not null and v_claim_id = p_claim_id
+               and v_attempt_id = p_checkout_attempt_id),
+    'outcome', case
+                 when v_state = 'redeemed'         then 'already_redeemed'
+                 when v_state = 'payment_pending'  then 'payment_pending'
+                 when v_state = 'session_open'     then 'session_open'
+                 when v_state = 'session_creating' then 'session_creating'
+                 when v_state = 'reserved'
+                      and v_claim_id = p_claim_id  then 'held_by_another_attempt'
+                 when v_state = 'reserved'         then 'held_by_another_checkout'
                  else 'unavailable'
                end
   );
@@ -1178,17 +1211,25 @@ $$;
  * transitions only ever makes the claim more protected, which is the
  * direction this function is allowed to move it.
  *
- * ONLY THE CURRENT HOLDER, and idempotent for a redelivered webhook -
- * 'payment_pending' is an accepted starting state, so a second delivery
- * of the same event reports success rather than a failure somebody has
- * to interpret.
+ * ONLY THE CURRENT HOLDER - the claim id AND the attempt, like every
+ * other transition that acts on an active claim. This one cannot free
+ * anything, so an impersonator could at worst lock a claim that was
+ * already locked; the pair is required anyway, because a holder rule
+ * with an exception is a rule somebody will apply to the wrong
+ * function. The webhook resolves the claim through the attempt, so it
+ * has both in hand.
+ *
+ * Idempotent for a redelivered webhook - 'payment_pending' is an
+ * accepted starting state, so a second delivery of the same event
+ * reports success rather than a failure somebody has to interpret.
  *
  * Never from 'redeemed': a paid order does not go back to waiting.
  */
 create or replace function public.mark_launch_discount_payment_pending(
   p_code text,
   p_customer_key text,
-  p_claim_id uuid
+  p_claim_id uuid,
+  p_checkout_attempt_id uuid
 )
 returns jsonb
 language plpgsql
@@ -1200,8 +1241,9 @@ declare
   v_rows  integer;
   v_state text;
 begin
-  if p_code is null or p_customer_key is null or p_claim_id is null then
-    raise exception 'launch discount payment pending: a code, a customer key and a claim id are required';
+  if p_code is null or p_customer_key is null or p_claim_id is null
+     or p_checkout_attempt_id is null then
+    raise exception 'launch discount payment pending: a code, a customer key, a claim id and a checkout attempt are all required';
   end if;
 
   v_code := upper(btrim(p_code));
@@ -1213,6 +1255,7 @@ begin
    where code = v_code
      and customer_key = v_key
      and claim_id = p_claim_id
+     and checkout_attempt_id = p_checkout_attempt_id
      and state in ('reserved', 'session_creating', 'session_open', 'payment_pending');
 
   get diagnostics v_rows = row_count;
@@ -1243,11 +1286,15 @@ $$;
  * ONLY FROM 'reserved', AND ONLY BY THE HOLDER. Two separate rules and
  * both matter:
  *
- *   the claim id must match    a caller whose reservation lapsed and was
- *                              taken over must not be able to release
+ *   the claim id AND the       a caller whose reservation lapsed and was
+ *   attempt must both match    taken over must not be able to release
  *                              the NEW holder's claim on its way out.
  *                              This is migration 049's rule, for the
- *                              same reason.
+ *                              same reason - and the attempt is checked
+ *                              alongside the token because a holder is
+ *                              the PAIR: a different checkout that
+ *                              somehow presents this token is not
+ *                              entitled to free this reservation.
  *
  *   the state must be          'reserved' is the only state in which no
  *   'reserved'                 Stripe create request has been declared,
@@ -1278,7 +1325,8 @@ $$;
 create or replace function public.release_launch_discount(
   p_code text,
   p_customer_key text,
-  p_claim_id uuid
+  p_claim_id uuid,
+  p_checkout_attempt_id uuid
 )
 returns jsonb
 language plpgsql
@@ -1290,8 +1338,9 @@ declare
   v_rows  integer;
   v_state text;
 begin
-  if p_code is null or p_customer_key is null or p_claim_id is null then
-    raise exception 'launch discount release: a code, a customer key and a claim id are required';
+  if p_code is null or p_customer_key is null or p_claim_id is null
+     or p_checkout_attempt_id is null then
+    raise exception 'launch discount release: a code, a customer key, a claim id and a checkout attempt are all required';
   end if;
 
   v_code := upper(btrim(p_code));
@@ -1309,6 +1358,7 @@ begin
    where code = v_code
      and customer_key = v_key
      and claim_id = p_claim_id
+     and checkout_attempt_id = p_checkout_attempt_id
      and state = 'reserved';
 
   get diagnostics v_rows = row_count;
@@ -1467,13 +1517,16 @@ $$;
  * is genuinely free - which is the distinction that matters. A local
  * exception is not this event.
  *
- * Still only by the holder, and still never from 'redeemed' - if an
- * order exists, the money arrived, whatever a later event says.
+ * Still only by the holder - the claim id AND the attempt, because this
+ * one DOES free a claim and a different checkout presenting this token
+ * must not be able to. Still never from 'redeemed' - if an order
+ * exists, the money arrived, whatever a later event says.
  */
 create or replace function public.release_launch_discount_after_failed_payment(
   p_code text,
   p_customer_key text,
-  p_claim_id uuid
+  p_claim_id uuid,
+  p_checkout_attempt_id uuid
 )
 returns jsonb
 language plpgsql
@@ -1485,8 +1538,9 @@ declare
   v_rows  integer;
   v_state text;
 begin
-  if p_code is null or p_customer_key is null or p_claim_id is null then
-    raise exception 'launch discount release after failed payment: a code, a customer key and a claim id are required';
+  if p_code is null or p_customer_key is null or p_claim_id is null
+     or p_checkout_attempt_id is null then
+    raise exception 'launch discount release after failed payment: a code, a customer key, a claim id and a checkout attempt are all required';
   end if;
 
   v_code := upper(btrim(p_code));
@@ -1504,6 +1558,7 @@ begin
    where code = v_code
      and customer_key = v_key
      and claim_id = p_claim_id
+     and checkout_attempt_id = p_checkout_attempt_id
      and state in ('reserved', 'session_creating', 'session_open', 'payment_pending');
 
   get diagnostics v_rows = row_count;
@@ -1549,9 +1604,15 @@ $$;
  * ── THE NORMAL PATH REDEEMS THE PAYER'S OWN CLAIM ─────────────
  *
  * The upsert moves the row only when it is free - no row at all, or
- * 'released' - or when the claim is held by THIS attempt's claim id.
- * That is the ordinary lifecycle: a paid order settles the very claim
- * its checkout opened, from 'session_open' or 'payment_pending'.
+ * 'released' - or when the claim is held by THIS attempt: the claim id
+ * AND the checkout_attempt_id, both. That is the ordinary lifecycle: a
+ * paid order settles the very claim its own checkout opened, from
+ * 'session_open' or 'payment_pending'.
+ *
+ * "SAME TOKEN, DIFFERENT ATTEMPT" IS NOT ORDINARY OWNERSHIP. It falls
+ * through to the anomaly path below, where the paid order still wins -
+ * money is not refused for bookkeeping - but the conflict is COUNTED
+ * and reported rather than settled silently as if it were normal.
  *
  * 'session_creating' IS IN THAT SET TOO, and deliberately: the crashed
  * checkout whose session id never reached us is still the same holder,
@@ -1571,7 +1632,9 @@ $$;
  * session is finished. If one of them happens, something outside this
  * state machine has gone wrong and an operator must know.
  *
- *   held by a DIFFERENT holder   the paying order wins. Money outranks
+ *   held by a DIFFERENT holder   - a different claim token, or the same
+ *                                token on a different attempt - the
+ *                                paying order wins. Money outranks
  *                                an unpaid reservation, and leaving the
  *                                other holder live would let it redeem
  *                                later and produce a SECOND discounted
@@ -1644,7 +1707,8 @@ begin
          redeemed_at         = excluded.redeemed_at
    where c.state = 'released'
       or (c.state in ('reserved', 'session_creating', 'session_open', 'payment_pending')
-          and c.claim_id = excluded.claim_id);
+          and c.claim_id = excluded.claim_id
+          and c.checkout_attempt_id = excluded.checkout_attempt_id);
 
   get diagnostics v_rows = row_count;
 
@@ -2041,10 +2105,10 @@ begin
     'public.claim_launch_discount(text, text, uuid, uuid, integer)',
     'public.mark_launch_discount_session_creating(text, text, uuid, uuid)',
     'public.mark_launch_discount_session_open(text, text, uuid, uuid, text)',
-    'public.mark_launch_discount_payment_pending(text, text, uuid)',
-    'public.release_launch_discount(text, text, uuid)',
+    'public.mark_launch_discount_payment_pending(text, text, uuid, uuid)',
+    'public.release_launch_discount(text, text, uuid, uuid)',
     'public.release_launch_discount_after_expired_session(text, text, uuid, uuid, text)',
-    'public.release_launch_discount_after_failed_payment(text, text, uuid)'
+    'public.release_launch_discount_after_failed_payment(text, text, uuid, uuid)'
   ] loop
     execute format('revoke all on function %s from public, anon, authenticated, service_role', fn);
     execute format('grant execute on function %s to service_role', fn);
@@ -2575,6 +2639,15 @@ commit;
 --      -> the WHERE names only 'released' and 'reserved'. Neither
 --         'session_creating' nor 'session_open' nor 'payment_pending'
 --         nor 'redeemed' appears.
+--
+--   4c-bis. AND AN ACTIVE CLAIM CANNOT BE MOVED ONTO A DIFFERENT
+--       ATTEMPT BY REUSING ITS TOKEN. The idempotent retry branch of
+--       the same conflict clause requires the PAIR:
+--      -> (c.claim_id = excluded.claim_id
+--          and c.checkout_attempt_id = excluded.checkout_attempt_id)
+--         or c.expires_at <= excluded.claimed_at
+--      The second disjunct needs no pair because a lapsed reservation
+--      has no holder left to impersonate.
 --
 --   4d. AND A SESSION CANNOT BE RECORDED FOR A CLAIM THAT NEVER
 --       DECLARED ONE. Read the session-open transition:

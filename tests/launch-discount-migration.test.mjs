@@ -394,7 +394,7 @@ test("3b: PAYABLE SESSION SAFETY - session_open cannot lapse, by constraint", ()
 
   // The ordinary release cannot reach it either - it is 'reserved' only.
   const release = fn("release_launch_discount");
-  assert.match(release, /and claim_id = p_claim_id\s*\n\s*and state = 'reserved';/);
+  assert.match(release, /and claim_id = p_claim_id\s*\n\s*and checkout_attempt_id = p_checkout_attempt_id\s*\n\s*and state = 'reserved';/);
   assert.ok(!/state in \(/.test(release.slice(release.indexOf("update public."), release.indexOf("get diagnostics"))),
     "the ordinary release accepts more than one state");
 });
@@ -419,7 +419,7 @@ test("3c: ASYNC PAYMENT SAFETY - payment_pending cannot lapse either", () => {
   // predecessor is accepted because each of those transitions only ever
   // makes the claim MORE protected, and refusing would leave a lapsable
   // claim with a delayed payment in flight.
-  assert.match(pending, /and claim_id = p_claim_id\s*\n\s*and state in \('reserved', 'session_creating', 'session_open', 'payment_pending'\)/);
+  assert.match(pending, /and claim_id = p_claim_id\s*\n\s*and checkout_attempt_id = p_checkout_attempt_id\s*\n\s*and state in \('reserved', 'session_creating', 'session_open', 'payment_pending'\)/);
   assert.ok(!/state in \([^)]*'redeemed'/.test(pending), "a redeemed claim can be sent back to pending");
 
   // THE ORDINARY RELEASE CANNOT TOUCH IT - structurally, not by a
@@ -437,7 +437,7 @@ test("3c: ASYNC PAYMENT SAFETY - payment_pending cannot lapse either", () => {
   // The only way out is a function that exists for something Stripe has
   // said - at which point the money cannot still arrive.
   const failed = fn("release_launch_discount_after_failed_payment");
-  assert.match(failed, /and claim_id = p_claim_id\s*\n\s*and state in \('reserved', 'session_creating', 'session_open', 'payment_pending'\);/);
+  assert.match(failed, /and claim_id = p_claim_id\s*\n\s*and checkout_attempt_id = p_checkout_attempt_id\s*\n\s*and state in \('reserved', 'session_creating', 'session_open', 'payment_pending'\);/);
   assert.ok(!/state in \([^)]*redeemed/.test(failed),
     "a redeemed claim can be released by the failed-payment path");
 });
@@ -551,7 +551,7 @@ test("3f: A CRASHED CHECKOUT IS LOCKED, NOT FREED - and its customer is not stra
   // session_creating -> session_open and settles; and redemption itself
   // accepts a claim still held in session_creating.
   assert.match(migration, /AND A PAID CUSTOMER IS NEVER STRANDED BY IT/);
-  assert.match(fn("redeem_launch_discount"), /c\.state in \('reserved', 'session_creating', 'session_open', 'payment_pending'\)\s*\n\s*and c\.claim_id = excluded\.claim_id\);/);
+  assert.match(fn("redeem_launch_discount"), /c\.state in \('reserved', 'session_creating', 'session_open', 'payment_pending'\)\s*\n\s*and c\.claim_id = excluded\.claim_id\s*\n\s*and c\.checkout_attempt_id = excluded\.checkout_attempt_id\);/);
 
   // AND THE OPERATOR HAS A QUERY FOR IT.
   assert.match(migration, /where state = 'session_creating'\s*\n--\s*order by session_creating_at;/);
@@ -708,13 +708,16 @@ test("4: the claim is taken by ONE statement, and the database arbitrates", () =
   assert.ok(!beforeUpsert.includes("from public.launch_discount_claims"),
     "the claim function reads the ledger before deciding - that is the race");
   const afterUpsert = claim.slice(claim.indexOf("get diagnostics"));
-  assert.match(afterUpsert, /select state, claim_id into v_state, v_claim_id/);
+  assert.match(afterUpsert, /select state, claim_id, checkout_attempt_id\s*\n\s*into v_state, v_claim_id, v_attempt_id/);
   // It reports whether the refusing row is the CALLER'S own, which is
   // what lets a retried checkout recognise its own open session instead
   // of trying to open a second one - the thing the invariant forbids.
-  assert.match(claim, /'holder', \(v_claim_id is not null and v_claim_id = p_claim_id\)/);
-  assert.match(claim, /when 'session_open'\s+then 'session_open'/);
-  assert.match(claim, /when 'session_creating' then 'session_creating'/);
+  // AND "holder" MEANS THE PAIR. A caller presenting somebody else's
+  // claim id with its own attempt is not told it holds anything.
+  assert.match(claim, /'holder', \(v_claim_id is not null and v_claim_id = p_claim_id\s*\n\s*and v_attempt_id = p_checkout_attempt_id\)/);
+  assert.match(claim, /when v_state = 'session_open'\s+then 'session_open'/);
+  assert.match(claim, /when v_state = 'session_creating' then 'session_creating'/);
+  assert.match(claim, /when v_state = 'reserved'\s*\n\s*and v_claim_id = p_claim_id\s+then 'held_by_another_attempt'/);
   assert.ok(!/for update/.test(claim), "the claim function locks a row it has already decided about");
 
   // There is no advisory lock, no sleep and no retry loop standing in
@@ -782,6 +785,127 @@ test("4c: RELEASE OWNERSHIP - an old claim id can never free the new holder", ()
   }
 });
 
+test("4d: THE HOLDER IS A PAIR - a claim token alone is not an identity", () => {
+  // THE RULE: a claim is held by (claim_id, checkout_attempt_id)
+  // together. The token is minted per attempt, so in ordinary operation
+  // they always travel together - but "ordinarily" is not a security
+  // property, and the idempotent retry path is exactly where a rule
+  // with an exception would be applied to the wrong caller.
+  const claim = fn("claim_launch_discount");
+  const takeover = claim.slice(claim.indexOf("on conflict"), claim.indexOf("get diagnostics"));
+
+  // 1. SAME CLAIM, SAME ATTEMPT -> idempotent. The retry branch matches
+  //    only when BOTH halves do.
+  assert.match(takeover, /\(c\.claim_id = excluded\.claim_id\s*\n\s*and c\.checkout_attempt_id = excluded\.checkout_attempt_id\)/);
+
+  // 2. SAME CLAIM, DIFFERENT ATTEMPT -> refused, and the row is not
+  //    mutated. There is NO disjunct anywhere that accepts the token on
+  //    its own, so the statement affects zero rows and
+  //    checkout_attempt_id keeps pointing at the attempt that took it.
+  assert.ok(!/c\.claim_id = excluded\.claim_id\s*\n\s*or /.test(takeover),
+    "an active reservation can be moved onto another attempt by reusing its token");
+  assert.ok(!/c\.claim_id = excluded\.claim_id\)/.test(takeover.replace(
+    /\(c\.claim_id = excluded\.claim_id\s*\n\s*and c\.checkout_attempt_id = excluded\.checkout_attempt_id\)/, "")),
+    "a second disjunct accepts the claim token alone");
+  // And the caller is told which of the two it is.
+  assert.match(claim, /'held_by_another_attempt'/);
+  assert.match(claim, /'held_by_another_checkout'/);
+
+  // 3. LAPSED RESERVATION -> a NEW claim and a NEW attempt may take it.
+  //    The lapse disjunct requires no pair, and must not: there is no
+  //    holder left to impersonate.
+  assert.match(takeover, /or c\.expires_at <= excluded\.claimed_at\)\);/);
+
+  // 4. RELEASED -> anybody with this email may take it, with a new
+  //    token and a new attempt. Again no holder to prove.
+  assert.match(takeover, /where c\.state = 'released'\s*\n\s*or \(c\.state = 'reserved'/);
+
+  // 5. AND NOTHING PAST THE RESERVATION MAY BE TAKEN AT ALL, pair or no
+  //    pair. This is the check the ownership rule must never weaken.
+  for (const forbidden of ["session_creating", "session_open", "payment_pending", "redeemed"]) {
+    assert.ok(!takeover.includes(`'${forbidden}'`),
+      `${forbidden} appears in the takeover condition`);
+  }
+
+  // THE RULE IS WRITTEN DOWN ONCE, where the next reader will find it.
+  assert.match(migration, /WHO "THE HOLDER" IS, AND IT IS A PAIR/);
+  assert.match(migration, /A claim is held by \(claim_id, checkout_attempt_id\) TOGETHER/);
+});
+
+test("4e: EVERY transition that acts on an ACTIVE claim proves the pair", () => {
+  // Not "most of them". The four functions that move or free a live
+  // claim all check the attempt alongside the token, and the two that
+  // already did keep doing it. A uniform rule is one nobody has to
+  // remember the exception to.
+  for (const name of ["mark_launch_discount_session_creating",
+                      "mark_launch_discount_session_open",
+                      "mark_launch_discount_payment_pending",
+                      "release_launch_discount",
+                      "release_launch_discount_after_expired_session",
+                      "release_launch_discount_after_failed_payment"]) {
+    const body = fn(name);
+    const where = body.slice(body.indexOf("where code = v_code"), body.indexOf("get diagnostics"));
+    assert.match(where, /and claim_id = p_claim_id/, `${name} does not prove the claim token`);
+    assert.match(where, /and checkout_attempt_id = p_checkout_attempt_id/,
+      `${name} accepts the claim token without the attempt it was minted for`);
+    // And every one of them takes the attempt as an argument rather than
+    // inferring it.
+    assert.match(body, /p_checkout_attempt_id uuid/, `${name} has no attempt argument`);
+  }
+
+  // The argument is required, not optional-by-omission.
+  for (const [name, message] of [
+    ["release_launch_discount", "launch discount release: a code, a customer key, a claim id and a checkout attempt are all required"],
+    ["mark_launch_discount_payment_pending", "launch discount payment pending: a code, a customer key, a claim id and a checkout attempt are all required"],
+    ["release_launch_discount_after_failed_payment", "launch discount release after failed payment: a code, a customer key, a claim id and a checkout attempt are all required"],
+  ]) {
+    assert.ok(fn(name).includes(message), `${name} does not require the attempt`);
+  }
+});
+
+test("4f: ORDINARY REDEMPTION IS THE PAYING ATTEMPT'S OWN CLAIM", () => {
+  const redeem = fn("redeem_launch_discount");
+  const upsert = redeem.slice(redeem.indexOf("on conflict"), redeem.indexOf("get diagnostics"));
+
+  // 6. The normal path settles a claim held by THIS attempt: the token
+  //    AND the attempt.
+  assert.match(upsert, /and c\.claim_id = excluded\.claim_id\s*\n\s*and c\.checkout_attempt_id = excluded\.checkout_attempt_id\);/);
+
+  // 7. "SAME TOKEN, DIFFERENT ATTEMPT" IS NOT ORDINARY OWNERSHIP. It
+  //    misses the upsert entirely and falls through to the anomaly
+  //    path, where the paid order still wins - money is never refused
+  //    for bookkeeping - but the conflict is COUNTED and named rather
+  //    than settled silently as if it were normal.
+  assert.ok(!/and c\.claim_id = excluded\.claim_id\);/.test(upsert),
+    "redemption treats a bare claim token as ownership");
+  assert.match(redeem, /'redeemed_over_foreign_holder'/);
+  assert.match(redeem, /set state\s+= 'redeemed',[\s\S]{0,400}redemption_conflicts = redemption_conflicts \+ 1/);
+  assert.match(migration, /"SAME TOKEN, DIFFERENT ATTEMPT" IS NOT ORDINARY OWNERSHIP/);
+
+  // And the order is still created either way - that contract is not
+  // weakened by the stricter ownership.
+  assert.ok(!/raise exception/.test(redeem.slice(redeem.indexOf("insert into"))),
+    "redemption raises after the money has moved");
+});
+
+test("4g: the stale starting price in the arithmetic note is the current one", () => {
+  // Migration 054 moved the B2C catalogue to 14,99 / 22,99 / 39,99. The
+  // note explaining why discount_gross_cents > 0 is safe cited the old
+  // cheapest tin. A comment nobody can check against the catalogue is a
+  // comment that will mislead somebody later; the reasoning is
+  // unchanged, only the number.
+  assert.match(migration, /the smallest tin is 14,99 EUR/);
+  assert.ok(!migration.includes("19,99"), "056 still cites a superseded price");
+  // AND NO PRICING LOGIC MOVED WITH IT. 056 reads no catalogue row and
+  // decides no amount: the only price columns it writes are 021's own
+  // order_items lines, copied from the attempt's frozen snapshot.
+  for (const catalogue of ["product_variants", "products", "b2c_subscription_plans"]) {
+    assert.ok(!statements.includes(catalogue), `056 reads the catalogue: ${catalogue}`);
+  }
+  assert.ok(!/price/i.test(declarations.replace(/create or replace function[\s\S]*?^\$\$;/gm, "")),
+    "056 declares a price of its own");
+});
+
 /* ══════════════════════════════════════════════════════════════
    5. REDEMPTION IS TERMINAL, AND IT NEVER COSTS AN ORDER
    ══════════════════════════════════════════════════════════════ */
@@ -794,7 +918,7 @@ test("5: redeemed is terminal - nothing reserves, releases or un-spends it", () 
   // sequence the state machine can produce. 'redeemed' is absent, so
   // the terminal state is never moved by the ordinary path.
   assert.match(redeem, /on conflict \(code, customer_key\) do update/);
-  assert.match(redeem, /where c\.state = 'released'\s*\n\s*or \(c\.state in \('reserved', 'session_creating', 'session_open', 'payment_pending'\)\s*\n\s*and c\.claim_id = excluded\.claim_id\);/);
+  assert.match(redeem, /where c\.state = 'released'\s*\n\s*or \(c\.state in \('reserved', 'session_creating', 'session_open', 'payment_pending'\)\s*\n\s*and c\.claim_id = excluded\.claim_id\s*\n\s*and c\.checkout_attempt_id = excluded\.checkout_attempt_id\);/);
   assert.match(redeem, /set state\s*=\s*'redeemed'/);
   assert.match(redeem, /expires_at\s*=\s*null/);
   assert.match(redeem, /redeemed_at\s*=\s*excluded\.redeemed_at/);
@@ -1141,10 +1265,10 @@ test("9c: EXECUTE is revoked from every role first, then given back to one", () 
     "public.claim_launch_discount(text, text, uuid, uuid, integer)",
     "public.mark_launch_discount_session_creating(text, text, uuid, uuid)",
     "public.mark_launch_discount_session_open(text, text, uuid, uuid, text)",
-    "public.mark_launch_discount_payment_pending(text, text, uuid)",
-    "public.release_launch_discount(text, text, uuid)",
+    "public.mark_launch_discount_payment_pending(text, text, uuid, uuid)",
+    "public.release_launch_discount(text, text, uuid, uuid)",
     "public.release_launch_discount_after_expired_session(text, text, uuid, uuid, text)",
-    "public.release_launch_discount_after_failed_payment(text, text, uuid)",
+    "public.release_launch_discount_after_failed_payment(text, text, uuid, uuid)",
   ]) {
     assert.ok(statements.includes(`'${signature}'`), `${signature} is not in the grant loop`);
   }
@@ -1287,6 +1411,7 @@ test("10c: it carries its own read-only verification, asked both ways", () => {
   // function is allowed to take a claim from.
   assert.match(migration, /THE INVARIANT, ASKED OF THE CONSTRAINT ITSELF/);
   assert.match(migration, /AND NOTHING CAN TAKE A CLAIM ONCE STRIPE WORK WAS DECLARED/);
+  assert.match(migration, /AND AN ACTIVE CLAIM CANNOT BE MOVED ONTO A DIFFERENT/);
   assert.match(migration, /AND A SESSION CANNOT BE RECORDED FOR A CLAIM THAT NEVER/);
   assert.match(migration, /AND THE TELEMETRY THAT MUST STAY ZERO/);
   assert.match(migration, /THE OPERATIONAL QUERY THE CRASH POLICY IMPLIES/);
