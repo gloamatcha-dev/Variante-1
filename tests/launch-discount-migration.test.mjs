@@ -476,14 +476,16 @@ test("6c: NO SUBSCRIPTION, ANNUAL, B2B, CATALOGUE OR PRICE IS TOUCHED", () => {
    7. STILL DATABASE ONLY
    ══════════════════════════════════════════════════════════════ */
 
-test("7: no runtime depends on the discount, before or after 057", () => {
-  // THE PHASE BOUNDARY, unchanged. 056 was phase A and stayed phase A:
-  // not one line of this repository reads or writes a discount column, a
-  // claim, a session state or the first-order function. That is what
-  // makes this cleanup a schema change with no application change - and
-  // it is what the later runtime package will deliberately move.
+test("7: NOT ONE LINE OF THE CLAIM ARCHITECTURE SURVIVES IN THE RUNTIME", () => {
+  // THE PHASE BOUNDARY, MOVED DELIBERATELY. When 057 landed, nothing in
+  // this repository read a discount column - the whole feature was
+  // schema. The runtime package then wired the reusable code in, so
+  // this assertion changed shape: what it forbids is no longer "the
+  // discount" but the ONE-USE MACHINERY, which the database no longer
+  // has and the application must never grow a private copy of.
   const SOURCES = [
     "lib/launchDiscount.ts",
+    "lib/launchDiscountCart.ts",
     "lib/checkoutAttempts.ts",
     "lib/checkoutQuote.ts",
     "lib/checkoutIdentity.ts",
@@ -501,7 +503,7 @@ test("7: no runtime depends on the discount, before or after 057", () => {
     "app/AccountPortal.tsx",
     "app/AdminOrders.tsx",
   ];
-  const OBJECTS = [
+  const GONE = [
     "launch_discount_claims",
     "claim_launch_discount",
     "release_launch_discount",
@@ -509,36 +511,42 @@ test("7: no runtime depends on the discount, before or after 057", () => {
     "redeem_launch_discount",
     "launch_discount_is_first_order",
     "discount_claim_id",
-    "discount_gross_cents",
-    "discountCode",
+    "isFirstOrder",
+    "not_first_order",
+    "already_redeemed",
   ];
   for (const rel of SOURCES) {
     const code = readCode(rel);
-    for (const object of OBJECTS) {
-      assert.ok(!code.includes(object), `${rel} already uses ${object} - that is the runtime package`);
+    for (const object of GONE) {
+      assert.ok(!code.includes(object), `${rel} still carries ${object} - 057 removed that rule`);
     }
   }
 
-  // The cart still has no code field, so the discount cannot be typed.
-  const site = read("app/GloaSite.tsx");
-  assert.ok(!site.includes("GLOALAUNCH10"), "the cart already accepts the launch code");
-  assert.ok(!/cart-discount|discount-code|cart-code/.test(site), "the cart already has a code field");
+  // AND NO APPLICATION CODE TALKS TO THE CLAIM LEDGER, because there is
+  // no ledger: no RPC name, no table name, anywhere under lib/ or app/.
+  const everything = [...SOURCES].map(readCode).join("\n");
+  assert.ok(!/\.rpc\(\s*"(claim|redeem|mark|release)_launch/.test(everything),
+    "application code calls a claim RPC");
 
   // And the strict Stripe amount check the whole feature is shaped
   // around is untouched.
   assert.match(read("lib/stripeFulfillment.ts"), /session\.amount_total !== attempt\.expected_total_gross_cents/);
 });
 
-test("7b: the pure engine is NOT changed by this package", () => {
-  // lib/launchDiscount.ts still requires isFirstOrder and can still
-  // answer "not_first_order". That is deliberate: 057 is database
-  // cleanup, and the engine's simplification belongs with the runtime
-  // that will call it. Pinned here so the two do not drift apart
-  // silently - when the runtime package lands, this assertion is the one
-  // that says so.
+test("7b: the pure engine has lost the rule 057 removed from the database", () => {
+  // 057 dropped the first-order query and the one-use ledger; the
+  // runtime package then took the matching argument out of the engine,
+  // so the schema and the code now describe the same offer. An engine
+  // that could still answer "not your first order" would be a second,
+  // private copy of a rule nothing enforces.
   const engine = read("lib/launchDiscount.ts");
-  assert.match(engine, /isFirstOrder: boolean;/);
-  assert.match(engine, /"not_first_order"/);
+  assert.ok(!engine.includes("isFirstOrder"), "the engine still takes a first-order answer");
+  assert.ok(!engine.includes("not_first_order"), "the engine can still refuse a repeat customer");
+  assert.match(engine, /export function decideLaunchDiscount\(input: \{\s*\n\s*code: unknown;\s*\n\s*nowMs: number;\s*\n\s*subtotalGrossCents: number;\s*\n\s*\}\)/);
+
+  // What it still owns is the offer itself.
+  assert.match(engine, /LAUNCH_DISCOUNT_CODE = "GLOALAUNCH10"/);
+  assert.match(engine, /LAUNCH_DISCOUNT_PERCENT = 10/);
   assert.match(engine, /FREE_SHIPPING_MEASURED_BEFORE_DISCOUNT = true/);
 });
 

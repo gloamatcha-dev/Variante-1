@@ -323,7 +323,7 @@ test("6b: the one-time checkout binds the session to a resolved Customer", () =>
   const route = read("app/api/checkout/session/route.ts");
   // Four inputs now. `email` is the only one added, and it is a raw
   // address - no normalized form, no customer key, no Stripe id.
-  assert.match(route, /const \{ items, requestId, shippingCountry, email \} = body/);
+  assert.match(route, /const \{ items, requestId, shippingCountry, email, discountCode \} = body/);
   // THE LOCK ITSELF. `customer:` is what makes the email non-editable in
   // Checkout; customer_email alone would only prefill it.
   assert.match(route, /customer: frozenStripeCustomerId,/);

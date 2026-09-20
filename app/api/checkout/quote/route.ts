@@ -1,7 +1,9 @@
 import { validateQuoteItems, buildAuthoritativeQuote, type CheckoutQuote } from "../../../../lib/checkoutQuote";
 import { ALLOWED_SHIPPING_COUNTRIES, getShippingZone, computeShippingGrossCents } from "../../../../lib/shipping";
 import { resolveTaxJurisdiction } from "../../../../lib/taxJurisdiction";
-import { resolveCheckoutTax, toTaxableCartItems, type CartTaxSnapshot } from "../../../../lib/tax";
+import { resolveCheckoutTax, toTaxableCartItems, type CartTaxSnapshot, type TaxableCartItem } from "../../../../lib/tax";
+import { normalizeDiscountCode } from "../../../../lib/launchDiscount";
+import { priceLaunchDiscountForCart, launchDiscountMessage } from "../../../../lib/launchDiscountCart";
 
 type ErrorResponse = {
   error: string;
@@ -24,6 +26,26 @@ type QuoteTaxResponse = {
   rateBreakdown: CartTaxSnapshot["rateBreakdown"];
 };
 
+/**
+ * The discount, as a browser may be shown it: an amount in whole cents,
+ * or one sentence saying why not.
+ *
+ * Every figure here is the SERVER's. The browser sent a code string; it
+ * did not send a percent, an amount, an eligibility verdict or a line
+ * allocation, and none would be read if it did - exactly the rule the
+ * prices above already follow.
+ */
+type QuoteDiscountResponse =
+  | {
+      applied: true;
+      code: string;
+      percent: number;
+      eligibleSubtotalGrossCents: number;
+      discountGrossCents: number;
+      discountedSubtotalGrossCents: number;
+    }
+  | { applied: false; message: string };
+
 export async function POST(request: Request): Promise<Response> {
   let body: unknown;
   try {
@@ -42,7 +64,11 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const { items, shippingCountry } = body as { items?: unknown; shippingCountry?: unknown };
+  const { items, shippingCountry, discountCode } = body as {
+    items?: unknown;
+    shippingCountry?: unknown;
+    discountCode?: unknown;
+  };
   const validatedItems = validateQuoteItems(items);
   if (!validatedItems) {
     return Response.json(
@@ -59,7 +85,75 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  return Response.json({ ...result.quote, ...buildQuoteTax(result.quote, shippingCountry) }, { status: 200 });
+  // THE DISCOUNT IS DECIDED BEFORE THE TAX, because the tax has to
+  // describe the amounts the customer would actually pay. Nothing here
+  // writes: no attempt, no Stripe object, no row. The session endpoint
+  // re-derives every cent from the frozen attempt and reads none of
+  // this back.
+  const discount = buildQuoteDiscount(result.quote, discountCode);
+  const discountedLineGrossCents = discount?.applied
+    ? discount.perLine
+    : result.quote.items.map(item => item.lineGrossCents);
+
+  return Response.json(
+    {
+      ...result.quote,
+      ...buildQuoteTax(result.quote, shippingCountry, discountedLineGrossCents),
+      ...(discount ? { discount: discount.response } : {}),
+    },
+    { status: 200 }
+  );
+}
+
+/**
+ * WHAT A CODE IS WORTH ON THIS BASKET, ANSWERED BY THE SERVER.
+ *
+ * GLOALAUNCH10 is reusable, so this endpoint can answer completely: the
+ * code, the window and the basket are all it needs, and there is no
+ * per-customer limit left to make the answer depend on who is asking.
+ * No email is accepted here and none is needed - which also means this
+ * quote cannot be used to learn anything about anybody.
+ */
+function buildQuoteDiscount(
+  quote: CheckoutQuote,
+  discountCode: unknown
+): { applied: true; perLine: number[]; response: QuoteDiscountResponse }
+  | { applied: false; response: QuoteDiscountResponse }
+  | null {
+  if (discountCode !== undefined && discountCode !== null && typeof discountCode !== "string") {
+    return { applied: false, response: { applied: false, message: launchDiscountMessage("unknown_code") } };
+  }
+  const code = normalizeDiscountCode(discountCode);
+  if (code.length === 0) return null;
+
+  const decision = priceLaunchDiscountForCart({
+    code,
+    nowMs: Date.now(),
+    lines: quote.items.map(item => ({
+      variantId: item.variantId,
+      sku: item.sku,
+      quantity: item.quantity,
+      unitGrossCents: item.unitGrossCents,
+      lineGrossCents: item.lineGrossCents,
+    })),
+  });
+
+  if (!decision.applies) {
+    return { applied: false, response: { applied: false, message: launchDiscountMessage(decision.reason) } };
+  }
+
+  return {
+    applied: true,
+    perLine: decision.discountedLineGrossCents,
+    response: {
+      applied: true,
+      code: decision.code,
+      percent: decision.percent,
+      eligibleSubtotalGrossCents: decision.eligibleSubtotalGrossCents,
+      discountGrossCents: decision.discountGrossCents,
+      discountedSubtotalGrossCents: decision.discountedSubtotalGrossCents,
+    },
+  };
 }
 
 /**
@@ -73,7 +167,11 @@ export async function POST(request: Request): Promise<Response> {
  * yields no tax block: a quote that shows nothing is correct, a quote
  * that shows a made-up rate is not.
  */
-function buildQuoteTax(quote: CheckoutQuote, shippingCountry: unknown): { tax?: QuoteTaxResponse } {
+function buildQuoteTax(
+  quote: CheckoutQuote,
+  shippingCountry: unknown,
+  discountedLineGrossCents: number[]
+): { tax?: QuoteTaxResponse } {
   if (typeof shippingCountry !== "string") return {};
   const country = shippingCountry.trim().toUpperCase();
   if (!ALLOWED_SHIPPING_COUNTRIES.includes(country)) return {};
@@ -81,10 +179,21 @@ function buildQuoteTax(quote: CheckoutQuote, shippingCountry: unknown): { tax?: 
   const zone = getShippingZone(country);
   if (!zone) return {};
 
+  // THE THRESHOLD IS MEASURED ON THE MERCHANDISE THE CUSTOMER CHOSE,
+  // BEFORE ANY CODE - quote.subtotalGrossCents, never the discounted
+  // figure. A basket just over it must not LOSE free shipping because a
+  // ten percent code was applied, and the session endpoint computes it
+  // from the same pre-discount value.
   const shippingGrossCents = computeShippingGrossCents(zone, quote.subtotalGrossCents);
   const outcome = resolveCheckoutTax({
     jurisdictionResult: resolveTaxJurisdiction(country),
-    items: toTaxableCartItems(quote),
+    // Taxed on what would actually be charged. The unit stays the
+    // catalogue's and only the line carries the reduction, which is the
+    // same shape the checkout freezes.
+    items: toTaxableCartItems(quote).map((item, index): TaxableCartItem => ({
+      ...item,
+      lineGrossCents: discountedLineGrossCents[index],
+    })),
     shippingGrossCents,
   });
   if (outcome.kind !== "calculated") return {};

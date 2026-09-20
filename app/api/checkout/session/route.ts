@@ -2,14 +2,27 @@ import type Stripe from "stripe";
 import { getStripeClient } from "../../../../lib/stripe";
 import { validateQuoteItems, buildAuthoritativeQuote } from "../../../../lib/checkoutQuote";
 import { getSiteOrigin } from "../../../../lib/siteUrl";
-import { getOrCreateCheckoutAttempt, linkStripeSession, findAttemptByRequestId } from "../../../../lib/checkoutAttempts";
+import {
+  getOrCreateCheckoutAttempt,
+  linkStripeSession,
+  findAttemptByRequestId,
+  type CheckoutAttemptDiscount,
+} from "../../../../lib/checkoutAttempts";
+import { normalizeDiscountCode } from "../../../../lib/launchDiscount";
+import {
+  priceLaunchDiscountForCart,
+  splitFrozenDiscountAcrossCart,
+  allocateDiscountedStripeLines,
+  launchDiscountMessage,
+  type DiscountableLine,
+} from "../../../../lib/launchDiscountCart";
 import { verifyUserId } from "../../../../lib/verifyUser";
-import { validateCheckoutEmail, CHECKOUT_IDENTITY_CONFLICT_MESSAGE } from "../../../../lib/checkoutIdentity";
+import { validateCheckoutEmail, CHECKOUT_IDENTITY_CONFLICT_MESSAGE, CHECKOUT_TERMS_CONFLICT_MESSAGE } from "../../../../lib/checkoutIdentity";
 import { getOrCreateCheckoutCustomerByEmail } from "../../../../lib/checkoutCustomerIdentity";
 import { checkoutIdentityDeps } from "../../../../lib/checkoutCustomerIdentityDeps";
 import { ALLOWED_SHIPPING_COUNTRIES, getShippingZone, computeShippingGrossCents, SHIPPING_ZONES } from "../../../../lib/shipping";
 import { resolveTaxJurisdiction } from "../../../../lib/taxJurisdiction";
-import { resolveCheckoutTax, toTaxableCartItems, TAX_DESTINATION_UNAVAILABLE_MESSAGE } from "../../../../lib/tax";
+import { resolveCheckoutTax, toTaxableCartItems, TAX_DESTINATION_UNAVAILABLE_MESSAGE, type TaxableCartItem } from "../../../../lib/tax";
 import { checkoutRefusalFor } from "../../../../lib/shopAvailability";
 import { SHOP_STATUS } from "../../../content";
 
@@ -42,16 +55,24 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  // Exactly four inputs, and not one of them is an identity. The browser
-  // may say which address it wants the order sent to; it may never say
-  // which Stripe Customer, which normalized form, or which identity row
-  // that address resolves to. Every one of those is derived below from
-  // `email` alone, by the server, through lib/checkoutIdentity.ts.
-  const { items, requestId, shippingCountry, email } = body as {
+  // Exactly five inputs, and not one of them is an identity or an
+  // amount. The browser may say which address it wants the order sent
+  // to and which code it typed; it may never say which Stripe Customer,
+  // which normalized form, which identity row that address resolves to,
+  // or what the code is worth. Every one of those is derived below by
+  // the server - the identity through lib/checkoutIdentity.ts, the
+  // discount through lib/launchDiscountCart.ts.
+  //
+  // `discountCode` is a STRING and nothing else. There is deliberately
+  // no discountCents, no percent, no eligibility flag and no line
+  // allocation in this shape: a browser that could send any of those
+  // could nominate its own price.
+  const { items, requestId, shippingCountry, email, discountCode } = body as {
     items?: unknown;
     requestId?: unknown;
     shippingCountry?: unknown;
     email?: unknown;
+    discountCode?: unknown;
   };
 
   if (typeof requestId !== "string" || !UUID_RE.test(requestId)) {
@@ -81,6 +102,18 @@ export async function POST(request: Request): Promise<Response> {
       { status: 400 }
     );
   }
+
+  // Shape only, here with the other 400s: a malformed request is told so
+  // whether or not the shop is open. WHETHER the code applies is a
+  // business decision and lives below the launch gate, with the writes.
+  if (discountCode !== undefined && discountCode !== null && typeof discountCode !== "string") {
+    return Response.json(
+      { error: launchDiscountMessage("unknown_code") } as ErrorResponse,
+      { status: 400 }
+    );
+  }
+  const requestedDiscountCode = normalizeDiscountCode(discountCode);
+  const wantsDiscount = requestedDiscountCode.length > 0;
 
   // The client may only tell us WHICH country it wants to ship to - never
   // the resulting zone, price, or free-shipping eligibility. Those are
@@ -160,18 +193,77 @@ export async function POST(request: Request): Promise<Response> {
 
   const { quote } = quoteResult;
 
-  // Shipping price is computed server-side from the zone and the
-  // authoritative merchandise subtotal above - never a client-supplied
-  // amount, zone, or free-shipping flag.
+  // SHIPPING IS PRICED ON THE MERCHANDISE THE CUSTOMER CHOSE, BEFORE
+  // ANY CODE. quote.subtotalGrossCents is the PRE-DISCOUNT value, and
+  // this line is deliberately unchanged by the discount below: a basket
+  // just over the free-shipping threshold must not LOSE free shipping
+  // because a ten percent code was applied. A 50,00 EUR basket in
+  // Germany still ships free after 5,00 EUR off.
   const shippingGrossCents = computeShippingGrossCents(shippingZone, quote.subtotalGrossCents);
+
+  // ── THE DISCOUNT, DECIDED BY THE SERVER ─────────────────────
+  //
+  // Everything about it is computed here from the authoritative quote:
+  // which lines are eligible, what ten percent of them is in whole
+  // cents, and how that splits across the lines. The browser sent a
+  // string.
+  //
+  // GLOALAUNCH10 is REUSABLE, so there is nothing to look up and no
+  // one to ask: no claim, no reservation, no redemption ledger, no
+  // "has this address used it". Migration 057 removed all of that, and
+  // this route is the shape that leaves behind - a pure decision about
+  // a code, a clock and a basket.
+  const discountLines: DiscountableLine[] = quote.items.map(item => ({
+    variantId: item.variantId,
+    sku: item.sku,
+    quantity: item.quantity,
+    unitGrossCents: item.unitGrossCents,
+    lineGrossCents: item.lineGrossCents,
+  }));
+
+  let discount: CheckoutAttemptDiscount | null = null;
+  let discountedLineGrossCents: number[] = discountLines.map(line => line.lineGrossCents);
+
+  if (wantsDiscount) {
+    const priced = priceLaunchDiscountForCart({
+      code: requestedDiscountCode,
+      nowMs: Date.now(),
+      lines: discountLines,
+    });
+    if (!priced.applies) {
+      // A wrong, early or expired code is refused rather than silently
+      // ignored: a customer who typed one must not be charged full
+      // price while believing otherwise.
+      return Response.json(
+        { error: launchDiscountMessage(priced.reason) } as ErrorResponse,
+        { status: 409 }
+      );
+    }
+    discount = { code: priced.code, grossCents: priced.discountGrossCents };
+    discountedLineGrossCents = priced.discountedLineGrossCents;
+  }
 
   // Authoritative tax, derived only from the catalog quote, the
   // server-computed shipping charge and the validated destination. The
   // browser sends no rate, net amount, tax total or jurisdiction, and
   // none would be read if it did.
+  //
+  // THE LINES ARE THE DISCOUNTED ONES, because the tax snapshot has to
+  // describe the transaction that is actually settled:
+  // create_order_from_paid_checkout refuses a snapshot whose total
+  // disagrees with the attempt's frozen total, and that total is now
+  // net of the discount. The UNIT stays the catalogue's, so the order's
+  // per-unit columns keep agreeing with items_snapshot - only the LINE
+  // carries the reduction, and only the line feeds the totals.
+  //
+  // Shipping is passed unchanged: it is never discounted, and it is
+  // taxed exactly as it was before this package.
   const taxOutcome = resolveCheckoutTax({
     jurisdictionResult: resolveTaxJurisdiction(normalizedShippingCountry),
-    items: toTaxableCartItems(quote),
+    items: toTaxableCartItems(quote).map((item, index): TaxableCartItem => ({
+      ...item,
+      lineGrossCents: discountedLineGrossCents[index],
+    })),
     shippingGrossCents,
   });
 
@@ -266,7 +358,8 @@ export async function POST(request: Request): Promise<Response> {
     { country: normalizedShippingCountry, zone: shippingZone, grossCents: shippingGrossCents },
     attemptTaxSnapshot,
     userId,
-    { email: customerEmail, stripeCustomerId }
+    { email: customerEmail, stripeCustomerId },
+    discount
   );
   if (!attemptResult.ok) {
     return Response.json(
@@ -316,6 +409,33 @@ export async function POST(request: Request): Promise<Response> {
   // frozen shipping data below follows, for the same reason.
   const frozenStripeCustomerId = attempt.stripe_customer_id;
 
+  // THE SAME RULE, APPLIED TO THE COMMERCIAL TERMS.
+  //
+  // The upsert ignores duplicates, so on a retry these are the ORIGINAL
+  // frozen values. A request that arrives with a code the attempt does
+  // not carry, without the code it does, or with an amount that no
+  // longer matches - because the basket changed, or the window closed
+  // in between - is asking to settle a DIFFERENT checkout under an old
+  // request id.
+  //
+  // Refused, in both directions, and the attempt stands untouched.
+  // Rewriting it to agree is not an option either: a frozen price that
+  // can be edited is not frozen, and the customer is looking at the
+  // other one.
+  if (
+    attempt.discount_code !== (discount?.code ?? null) ||
+    attempt.discount_gross_cents !== (discount?.grossCents ?? null)
+  ) {
+    console.error(
+      `Checkout session: attempt ${attempt.id} holds a different frozen discount (frozen ${attempt.discount_code ?? "none"}/${attempt.discount_gross_cents ?? 0}, requested ${discount?.code ?? "none"}/${discount?.grossCents ?? 0}) - session withheld.`
+    );
+    return Response.json(
+      { error: CHECKOUT_TERMS_CONFLICT_MESSAGE } as ErrorResponse,
+      { status: 409 }
+    );
+  }
+  const frozenDiscountGrossCents = attempt.discount_gross_cents ?? 0;
+
   // Always build the Stripe session from the attempt's frozen shipping
   // data, never from this request's freshly computed values - a retry
   // with a different shippingCountry must not change an already-created
@@ -331,23 +451,63 @@ export async function POST(request: Request): Promise<Response> {
   const frozenShippingZone = SHIPPING_ZONES[attempt.shipping_zone];
   const frozenShippingGrossCents = attempt.shipping_gross_cents;
 
-  const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = attempt.items_snapshot.map(item => ({
+  // WHAT STRIPE IS CHARGED, PER LINE.
+  //
+  // Built from the ATTEMPT, never from this request's fresh quote - the
+  // same rule the frozen shipping above follows - and from the FROZEN
+  // discount amount, so the lines sum to exactly the frozen total
+  // lib/stripeFulfillment.ts will hold the payment to.
+  //
+  // Undiscounted, this is byte-for-byte what it always was: one line
+  // item per snapshot item at the catalogue unit price. Discounted, the
+  // allocation runs per UNIT so unit_amount x quantity is exact - a line
+  // whose units end up a cent apart becomes two Stripe line items,
+  // which is the only way `unit_amount` can express an uneven split.
+  //
+  // NO STRIPE COUPON AND NO PROMOTION CODE. GLOALAUNCH10 is computed
+  // here and folded into the amounts, because a promotion code entered
+  // at the till would reduce amount_total below the frozen total and
+  // the order would never be created.
+  const frozenLines: DiscountableLine[] = attempt.items_snapshot.map(item => ({
+    variantId: item.variantId,
+    sku: item.sku,
     quantity: item.quantity,
-    price_data: {
-      currency: item.currency.toLowerCase(),
-      unit_amount: item.unitGrossCents,
-      product_data: {
-        name: `${item.productName} · ${item.variantLabel}`,
-      },
-    },
-    metadata: {
-      variant_id: item.variantId,
-      sku: item.sku,
-      // Only sent when the product actually has a net weight. An
-      // accessory sold as a unit would otherwise carry size_grams:"null".
-      ...(typeof item.sizeGrams === "number" ? { size_grams: String(item.sizeGrams) } : {}),
-    },
+    unitGrossCents: item.unitGrossCents,
+    lineGrossCents: item.lineGrossCents,
   }));
+
+  const stripeLines = frozenDiscountGrossCents > 0
+    ? allocateDiscountedStripeLines(
+        frozenLines,
+        splitFrozenDiscountAcrossCart(frozenLines, frozenDiscountGrossCents)
+      )
+    : frozenLines.map((line, index) => ({
+        sourceIndex: index,
+        quantity: line.quantity,
+        unitGrossCents: line.unitGrossCents,
+        lineGrossCents: line.lineGrossCents,
+      }));
+
+  const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = stripeLines.map(line => {
+    const item = attempt.items_snapshot[line.sourceIndex];
+    return {
+      quantity: line.quantity,
+      price_data: {
+        currency: item.currency.toLowerCase(),
+        unit_amount: line.unitGrossCents,
+        product_data: {
+          name: `${item.productName} · ${item.variantLabel}`,
+        },
+      },
+      metadata: {
+        variant_id: item.variantId,
+        sku: item.sku,
+        // Only sent when the product actually has a net weight. An
+        // accessory sold as a unit would otherwise carry size_grams:"null".
+        ...(typeof item.sizeGrams === "number" ? { size_grams: String(item.sizeGrams) } : {}),
+      },
+    };
+  });
 
   try {
     const session = await stripe.checkout.sessions.create(
@@ -387,6 +547,11 @@ export async function POST(request: Request): Promise<Response> {
           checkout_version: "1",
           request_id: requestId,
           checkout_attempt_id: attempt.id,
+          // The CODE, which is a public string anyone may type, and
+          // only when one was actually applied. Never the amount, never
+          // the address: Stripe metadata is not where this shop keeps
+          // money or identities.
+          ...(attempt.discount_code ? { discount_code: attempt.discount_code } : {}),
         },
       },
       { idempotencyKey: `gloa-checkout-${requestId}` }

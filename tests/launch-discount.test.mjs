@@ -21,6 +21,15 @@ import {
   splitDiscountAcrossLines,
 } from "../lib/launchDiscount.ts";
 
+import {
+  LAUNCH_DISCOUNT_ELIGIBLE_SKUS,
+  allocateDiscountedStripeLines,
+  isLaunchDiscountEligibleSku,
+  launchDiscountMessage,
+  priceLaunchDiscountForCart,
+  splitFrozenDiscountAcrossCart,
+} from "../lib/launchDiscountCart.ts";
+
 /* ══════════════════════════════════════════════════════════════
    THE LAUNCH DISCOUNT
 
@@ -105,8 +114,8 @@ test("3: the code is not redeemable one millisecond before the launch", () => {
 
 const INSIDE = Date.parse("2026-10-05T09:00:00Z");
 
-test("4: every gate is checked, and a missing first-order answer cannot grant it", () => {
-  const base = { code: LAUNCH_DISCOUNT_CODE, nowMs: INSIDE, subtotalGrossCents: 5000, isFirstOrder: true };
+test("4: three gates, and not one of them is about who is buying", () => {
+  const base = { code: LAUNCH_DISCOUNT_CODE, nowMs: INSIDE, subtotalGrossCents: 5000 };
 
   assert.deepEqual(decideLaunchDiscount(base), {
     applies: true, percent: 10, discountGrossCents: 500,
@@ -118,17 +127,25 @@ test("4: every gate is checked, and a missing first-order answer cannot grant it
     { applies: false, reason: "not_yet_active" });
   assert.deepEqual(decideLaunchDiscount({ ...base, nowMs: LAUNCH_DISCOUNT_UNTIL_MS + 1 }),
     { applies: false, reason: "expired" });
-  assert.deepEqual(decideLaunchDiscount({ ...base, isFirstOrder: false }),
-    { applies: false, reason: "not_first_order" });
   assert.deepEqual(decideLaunchDiscount({ ...base, subtotalGrossCents: 0 }),
     { applies: false, reason: "empty_basket" });
   assert.deepEqual(decideLaunchDiscount({ ...base, subtotalGrossCents: -100 }),
     { applies: false, reason: "empty_basket" });
 
-  // isFirstOrder is a REQUIRED input with no default, so a caller cannot
-  // grant the discount by forgetting to answer it.
-  assert.match(discountLib, /isFirstOrder: boolean;/);
-  assert.ok(!/isFirstOrder\s*=\s*true/.test(stripJs(discountLib)), "first-order defaults to true");
+  // THE SAME INPUT TWICE GIVES THE SAME ANSWER, for ever. GLOALAUNCH10
+  // is reusable: there is no counter, no memory and no customer, so
+  // calling it a hundred times cannot exhaust it.
+  for (let i = 0; i < 100; i += 1) {
+    assert.deepEqual(decideLaunchDiscount(base), {
+      applies: true, percent: 10, discountGrossCents: 500,
+    });
+  }
+
+  // And the rules 057 removed cannot be expressed here at all.
+  const code = stripJs(discountLib);
+  for (const gone of ["isFirstOrder", "not_first_order", "already_redeemed", "claim", "redeem", "email"]) {
+    assert.ok(!code.includes(gone), `the engine still knows about ${gone}`);
+  }
 });
 
 test("5: ten percent is rounded half up, once, on the subtotal", () => {
@@ -256,4 +273,160 @@ test("12: subscriptions, annual plans and B2B are out of scope by construction",
   }
   // The one-time checkout is the only caller that will be wired to it.
   assert.ok(!/lineItems|checkout\.sessions/.test(code));
+});
+
+/* ══════════════════════════════════════════════════════════════
+   13-20. THE BASKET: WHICH LINES, AND WHAT STRIPE IS CHARGED
+
+   lib/launchDiscountCart.ts is the half that knows about products.
+   Still pure: a code, an instant and a list of lines in, cents out.
+   ══════════════════════════════════════════════════════════════ */
+
+const MATCHA_30 = { variantId: "v30", sku: "GLOA-MATCHA-30G", quantity: 1, unitGrossCents: 1499, lineGrossCents: 1499 };
+const MATCHA_50 = { variantId: "v50", sku: "GLOA-MATCHA-50G", quantity: 1, unitGrossCents: 2299, lineGrossCents: 2299 };
+const MATCHA_100 = { variantId: "v100", sku: "GLOA-MATCHA-100G", quantity: 1, unitGrossCents: 3999, lineGrossCents: 3999 };
+const METAL_CASE = { variantId: "vcase", sku: "GLOA-METAL-CASE", quantity: 1, unitGrossCents: 999, lineGrossCents: 999 };
+
+const priceCart = (lines, over = {}) =>
+  priceLaunchDiscountForCart({ code: LAUNCH_DISCOUNT_CODE, nowMs: INSIDE, lines, ...over });
+
+test("13: exactly three SKUs are eligible, by allowlist", () => {
+  assert.deepEqual([...LAUNCH_DISCOUNT_ELIGIBLE_SKUS],
+    ["GLOA-MATCHA-30G", "GLOA-MATCHA-50G", "GLOA-MATCHA-100G"]);
+  for (const sku of LAUNCH_DISCOUNT_ELIGIBLE_SKUS) {
+    assert.equal(isLaunchDiscountEligibleSku(sku), true);
+  }
+  // FAIL CLOSED. Anything not on the list is excluded - a fourth SKU
+  // appearing in the catalogue must not become discountable by
+  // omission, which is why this is an allowlist and not "not the case".
+  for (const sku of ["GLOA-METAL-CASE", "GLOA-MATCHA-500G", "", null, undefined, 42]) {
+    assert.equal(isLaunchDiscountEligibleSku(sku), false, `${String(sku)} is eligible`);
+  }
+});
+
+test("14: ten percent of each eligible tin, on its own", () => {
+  assert.equal(priceCart([MATCHA_30]).discountGrossCents, 150);   // 149.9 -> 150
+  assert.equal(priceCart([MATCHA_50]).discountGrossCents, 230);   // 229.9 -> 230
+  assert.equal(priceCart([MATCHA_100]).discountGrossCents, 400);  // 399.9 -> 400
+});
+
+test("15: the Metal Case and every other excluded line keep their price", () => {
+  // The case alone: the code is real and the window is open, but there
+  // is nothing here it applies to.
+  const alone = priceCart([METAL_CASE]);
+  assert.equal(alone.applies, false);
+  assert.equal(alone.reason, "no_eligible_items");
+
+  // Mixed: the discount is ten percent of the MATCHA only, and the case
+  // pays full price.
+  const mixed = priceCart([MATCHA_50, METAL_CASE]);
+  assert.equal(mixed.applies, true);
+  assert.equal(mixed.eligibleSubtotalGrossCents, 2299);
+  assert.equal(mixed.discountGrossCents, 230);
+  assert.deepEqual(mixed.lineDiscountGrossCents, [230, 0]);
+  assert.deepEqual(mixed.discountedLineGrossCents, [2069, 999]);
+  assert.equal(mixed.discountedSubtotalGrossCents, 3068);
+});
+
+test("16: several eligible lines split the discount exactly", () => {
+  const cart = priceCart([MATCHA_30, MATCHA_50, MATCHA_100]);
+  assert.equal(cart.eligibleSubtotalGrossCents, 7797);
+  assert.equal(cart.discountGrossCents, 780);   // 779.7 -> 780
+  // Every cent is allocated, and none is invented.
+  assert.equal(cart.lineDiscountGrossCents.reduce((a, b) => a + b, 0), 780);
+  assert.equal(cart.discountedSubtotalGrossCents, 7797 - 780);
+  // Deterministic: the same basket splits the same way, every time.
+  assert.deepEqual(priceCart([MATCHA_30, MATCHA_50, MATCHA_100]).lineDiscountGrossCents,
+                   cart.lineDiscountGrossCents);
+});
+
+test("17: the code is normalised before it is judged", () => {
+  for (const typed of ["gloalaunch10", "GloaLaunch10", "  GLOALAUNCH10  ", "\tgloalaunch10\n"]) {
+    assert.equal(priceCart([MATCHA_50], { code: typed }).applies, true, `${JSON.stringify(typed)} was refused`);
+  }
+  for (const wrong of ["GLOALAUNCH", "GLOALAUNCH11", "", "   ", null, undefined, 10]) {
+    const out = priceCart([MATCHA_50], { code: wrong });
+    assert.equal(out.applies, false);
+    assert.equal(out.reason, "unknown_code");
+  }
+});
+
+test("18: the window is judged to the millisecond, and says which side", () => {
+  assert.equal(priceCart([MATCHA_50], { nowMs: LAUNCH_DISCOUNT_FROM_MS - 1 }).reason, "not_yet_active");
+  assert.equal(priceCart([MATCHA_50], { nowMs: LAUNCH_DISCOUNT_FROM_MS }).applies, true);
+  assert.equal(priceCart([MATCHA_50], { nowMs: LAUNCH_DISCOUNT_UNTIL_MS }).applies, true);
+  assert.equal(priceCart([MATCHA_50], { nowMs: LAUNCH_DISCOUNT_UNTIL_MS + 1 }).reason, "expired");
+});
+
+test("19: a frozen amount splits the same way it was decided", () => {
+  // The checkout recomputes nothing at settlement: it splits the amount
+  // the attempt froze. Both paths must agree to the cent, or Stripe's
+  // total would not match the frozen total.
+  const lines = [MATCHA_30, { ...MATCHA_50, quantity: 2, lineGrossCents: 4598 }, METAL_CASE];
+  const decided = priceCart(lines);
+  assert.deepEqual(splitFrozenDiscountAcrossCart(lines, decided.discountGrossCents),
+                   decided.lineDiscountGrossCents);
+  // And an excluded line never absorbs a cent of a frozen amount either.
+  assert.equal(splitFrozenDiscountAcrossCart(lines, decided.discountGrossCents).at(-1), 0);
+});
+
+test("20: STRIPE GETS unit_amount x quantity, EXACTLY", () => {
+  // A line of three tins carrying an uneven discount cannot be one
+  // unit_amount, so it becomes two line items one cent apart - and the
+  // two together are exactly the discounted line.
+  const three = { variantId: "v50", sku: "GLOA-MATCHA-50G", quantity: 3, unitGrossCents: 2299, lineGrossCents: 6897 };
+  const decided = priceCart([three]);
+  assert.equal(decided.discountGrossCents, 690);   // 689.7 -> 690
+  const stripeLines = allocateDiscountedStripeLines([three], decided.lineDiscountGrossCents);
+  assert.equal(stripeLines.reduce((sum, l) => sum + l.unitGrossCents * l.quantity, 0), 6897 - 690);
+  assert.equal(stripeLines.reduce((sum, l) => sum + l.quantity, 0), 3);
+  for (const line of stripeLines) {
+    assert.ok(Number.isSafeInteger(line.unitGrossCents) && line.unitGrossCents > 0);
+    assert.equal(line.sourceIndex, 0);
+  }
+
+  // Undiscounted, nothing is split and nothing moves.
+  const plain = allocateDiscountedStripeLines([three], [0]);
+  assert.deepEqual(plain, [{ sourceIndex: 0, quantity: 3, unitGrossCents: 2299, lineGrossCents: 6897 }]);
+
+  // And over a whole mixed basket the Stripe lines still sum to the
+  // discounted subtotal, which is what the frozen total is built from.
+  const cart = [MATCHA_30, three, METAL_CASE];
+  const priced = priceCart(cart);
+  const allocated = allocateDiscountedStripeLines(cart, priced.lineDiscountGrossCents);
+  assert.equal(allocated.reduce((sum, l) => sum + l.unitGrossCents * l.quantity, 0),
+               priced.discountedSubtotalGrossCents);
+});
+
+test("21: there is no minimum, and no customer anywhere in the module", () => {
+  // The smallest possible eligible basket still gets its ten percent.
+  assert.equal(priceCart([MATCHA_30]).applies, true);
+
+  // REUSE IS UNLIMITED, and it is unlimited because there is nothing to
+  // count. No email, no identity, no order history, no ledger.
+  const cartLib = stripJs(read("lib/launchDiscountCart.ts"));
+  for (const gone of ["email", "customer", "isFirstOrder", "firstOrder", "claim",
+                      "redeem", "supabase", "fetch(", "Date.now"]) {
+    assert.ok(!cartLib.includes(gone), `the cart module reaches for ${gone}`);
+  }
+});
+
+test("22: every refusal has one German sentence, and none of them leaks", () => {
+  assert.equal(launchDiscountMessage("unknown_code"), "Rabattcode ist ungültig.");
+  assert.equal(launchDiscountMessage("not_yet_active"), "Der Rabattcode ist noch nicht gültig.");
+  assert.equal(launchDiscountMessage("expired"), "Der Rabattcode ist abgelaufen.");
+  assert.equal(launchDiscountMessage("no_eligible_items"),
+    "Für diese Produkte kann der Rabattcode nicht verwendet werden.");
+  assert.equal(launchDiscountMessage("unavailable"),
+    "Rabattcode konnte gerade nicht geprüft werden. Bitte versuche es erneut.");
+  // An unknown reason still produces a sentence a customer can act on
+  // rather than undefined.
+  assert.equal(launchDiscountMessage("something_new"), launchDiscountMessage("unavailable"));
+
+  // No internal word, no id, no state name reaches a customer.
+  const cartLib = read("lib/launchDiscountCart.ts");
+  const messages = cartLib.slice(cartLib.indexOf("LAUNCH_DISCOUNT_MESSAGES = Object.freeze("));
+  for (const leak of ["attempt", "session", "stripe", "claim", "sql", "postgres", "supabase"]) {
+    assert.ok(!messages.toLowerCase().includes(leak), `a customer message mentions ${leak}`);
+  }
 });

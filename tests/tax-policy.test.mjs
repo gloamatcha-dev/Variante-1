@@ -399,8 +399,11 @@ test("stripe: Stripe Tax is not enabled and no tax rate is sent to Stripe", () =
   assert.ok(!/tax_rates/.test(sessionRoute));
   assert.ok(!/tax_behavior/.test(sessionRoute));
   assert.ok(!/taxRegistrations|tax_registrations/.test(sessionRoute));
-  // Stripe line items still carry the authoritative gross amounts.
-  assert.match(sessionRoute, /unit_amount: item\.unitGrossCents/);
+  // Stripe line items still carry the authoritative gross amounts -
+  // now read off the server-built line, because GLOALAUNCH10's runtime
+  // allocates its discount per unit. Still no tax field of any kind
+  // goes to Stripe.
+  assert.match(sessionRoute, /unit_amount: line\.unitGrossCents/);
 });
 
 /* ── Server authority ───────────────────────────────────────── */
@@ -409,12 +412,14 @@ test("security: the browser can state a destination country and nothing else abo
   // Exactly four fields are read off the request body, and none of them
   // is a tax value. `body` is not referenced anywhere else.
   //
-  // 055 Phase B added the fourth - `email`, a raw address the server
-  // normalizes and resolves itself. It carries no more tax authority
-  // than the other three: a destination is still the only thing the
-  // browser may state, and the identity it names changes no rate, no
-  // jurisdiction and no net amount.
-  assert.match(sessionRoute, /const \{ items, requestId, shippingCountry, email \} = body as \{\s*items\?: unknown;\s*requestId\?: unknown;\s*shippingCountry\?: unknown;\s*email\?: unknown;\s*\};/);
+  // 055 added the fourth - `email`, a raw address the server normalizes
+  // and resolves itself - and GLOALAUNCH10's runtime added the fifth,
+  // `discountCode`, a string the customer types. Neither carries any
+  // tax authority: a destination is still the only thing the browser
+  // may state, and neither an identity nor a code changes a rate, a
+  // jurisdiction or a net amount. What the code DOES change is the
+  // gross line the server then taxes, which is server-computed.
+  assert.match(sessionRoute, /const \{ items, requestId, shippingCountry, email, discountCode \} = body as \{\s*items\?: unknown;\s*requestId\?: unknown;\s*shippingCountry\?: unknown;\s*email\?: unknown;\s*discountCode\?: unknown;\s*\};/);
   assert.ok(
     sessionBody.lastIndexOf("body") < sessionBody.indexOf("const validatedItems"),
     "the raw request body is read after validation"
@@ -423,7 +428,11 @@ test("security: the browser can state a destination country and nothing else abo
     assert.ok(!sessionBody.includes(field), `session route handles a client "${field}"`);
   }
   // The quote route accepts a country too, and derives everything else.
-  assert.match(quoteRoute, /const \{ items, shippingCountry \} = body/);
+  // The quote endpoint reads three: the basket, the destination, and -
+  // since GLOALAUNCH10's runtime - the code string a customer typed.
+  // None of them is a tax value, and the code changes only the gross
+  // line the server then taxes itself.
+  assert.match(quoteRoute, /const \{ items, shippingCountry, discountCode \} = body/);
   assert.match(quoteRoute, /ALLOWED_SHIPPING_COUNTRIES\.includes\(country\)/);
 });
 

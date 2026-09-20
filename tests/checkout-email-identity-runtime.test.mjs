@@ -417,10 +417,19 @@ test("4f: different addresses stay independent", async () => {
    ══════════════════════════════════════════════════════════════ */
 
 test("5: the browser may send an address and nothing derived from it", () => {
-  assert.match(sessionRoute, /const \{ items, requestId, shippingCountry, email \} = body/);
+  assert.match(sessionRoute, /const \{ items, requestId, shippingCountry, email, discountCode \} = body/);
   for (const forbidden of [
     "normalizedEmail", "customerKey", "stripeCustomerId:", "identityId",
-    "trustedEmail", "eligibility", "discount",
+    "trustedEmail", "eligibility",
+    // THE BROWSER MAY SEND THE CODE STRING AND NOTHING ELSE ABOUT IT.
+    // GLOALAUNCH10's runtime landed after 055, which is why the bare
+    // word "discount" is no longer the right ban - `discountCode` is a
+    // string a customer types, pinned in the destructure above, and
+    // every figure it leads to is the server's. What must never appear
+    // is an amount, a percent or a verdict arriving from outside - and
+    // the destructure pinned above is what proves the five names are
+    // the only ones read off the request at all.
+    "body.discount", "body.discountCode", "body.discountCents",
     "body.email", "body.customer", "body.stripeCustomer",
   ]) {
     assert.ok(!sessionCode.includes(forbidden), `the session route reads ${forbidden} from the request`);
@@ -525,7 +534,7 @@ test("6: a new attempt freezes both halves of the identity", () => {
   assert.match(attempts, /stripe_customer_id: identity\?\.stripeCustomerId \?\? null,/);
   // Both columns are selected back, so the caller can verify what was
   // actually frozen rather than assume its own values were written.
-  assert.match(attempts, /const ATTEMPT_COLUMNS =\s*\n?\s*"[^"]*customer_email, stripe_customer_id"/);
+  assert.match(attempts, /const ATTEMPT_COLUMNS =\s*\n?\s*"[^"]*customer_email, stripe_customer_id, discount_code, discount_gross_cents"/);
   assert.match(sessionRoute, /\{ email: customerEmail, stripeCustomerId \}/);
 });
 
@@ -714,14 +723,37 @@ test("8e: subscription and annual attempts still freeze no identity", () => {
   assert.ok(!annual.includes("customer_email:"), "the annual writer now freezes an identity");
 });
 
-test("8f: no launch code, no discount, no eligibility - 055 is identity only", () => {
+test("8f: the identity modules are identity only, and the discount never touches one", () => {
+  // THE IDENTITY SIDE IS STILL SEALED. None of the three modules that
+  // resolve who is buying knows anything about a code, and that is what
+  // 055 exists to keep true.
   for (const rel of ["lib/checkoutIdentity.ts", "lib/checkoutCustomerIdentity.ts",
-                     "lib/checkoutCustomerIdentityDeps.ts", "app/api/checkout/session/route.ts"]) {
+                     "lib/checkoutCustomerIdentityDeps.ts"]) {
     const src = readCode(rel);
-    for (const banned of ["GLOALAUNCH10", "discountCode", "redemption", "first_order", "firstOrder", "coupon", "promotion_code"]) {
-      assert.ok(!src.includes(banned), `${rel} mentions ${banned} - that is package 056`);
+    for (const banned of ["GLOALAUNCH10", "discountCode", "discount_code", "redemption",
+                          "first_order", "firstOrder", "coupon", "promotion_code"]) {
+      assert.ok(!src.includes(banned), `${rel} mentions ${banned} - identity is not commerce`);
     }
   }
+
+  // THE SESSION ROUTE NOW CARRIES BOTH, and the bans that survive are
+  // the ones that still mean something. GLOALAUNCH10's runtime landed
+  // after 055 and added `discountCode` here - a string a customer types
+  // - but the code is never spelled out in this file (the literal lives
+  // in lib/launchDiscount.ts), and none of the one-use machinery 056
+  // briefly built and 057 removed may come back.
+  const route = readCode("app/api/checkout/session/route.ts");
+  for (const banned of ["GLOALAUNCH10", "redemption", "redeem_", "first_order", "firstOrder",
+                        "isFirstOrder", "coupon", "promotion_code", "launch_discount_claims",
+                        "claim_launch_discount", "discount_claim_id"]) {
+    assert.ok(!route.includes(banned), `the session route mentions ${banned}`);
+  }
+
+  // And the identity is still resolved before, and independently of,
+  // anything commercial: the email decides the Stripe Customer, the
+  // code decides nothing about who is buying.
+  assert.ok(!/getOrCreateCheckoutCustomerByEmail\([^)]*discount/.test(route),
+    "the identity resolver was handed a discount");
 });
 
 test("8g: commercial values, shipping, tax and the prelaunch flag are unchanged", () => {

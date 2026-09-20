@@ -209,11 +209,19 @@ test("3b: the authoritative quote still reads product_variants", () => {
 
 test("3c: the checkout session prices from the frozen attempt, not the request", () => {
   const route = read("app/api/checkout/session/route.ts");
-  assert.match(route, /unit_amount: item\.unitGrossCents/);
-  // The body carries no money at all. 055 Phase B added `email` to it,
-  // which is an identity and not an amount - every price below still
-  // comes from the attempt's frozen snapshot.
-  assert.match(route, /const \{ items, requestId, shippingCountry, email \} = body/);
+  // The unit amount Stripe is charged comes from a line the SERVER
+  // built out of the frozen snapshot. GLOALAUNCH10's runtime allocates
+  // the discount per unit, so the amount is now read off that line
+  // rather than straight off the snapshot item - the source is the same
+  // frozen attempt either way, and the item it belongs to is looked up
+  // from it. Reviewed in tests/launch-discount-runtime.test.mjs.
+  assert.match(route, /unit_amount: line\.unitGrossCents/);
+  assert.match(route, /const item = attempt\.items_snapshot\[line\.sourceIndex\];/);
+  // The body carries no money at all. 055 added `email` to it, which is
+  // an identity; the launch runtime added `discountCode`, which is a
+  // string a customer types. Neither is an amount - every price below
+  // still comes from the attempt's frozen snapshot.
+  assert.match(route, /const \{ items, requestId, shippingCountry, email, discountCode \} = body/);
   for (const banned of ["body.price", "body.total", "body.amount", "body.shipping", "body.tax", "body.discount"]) {
     assert.ok(!route.includes(banned), `the checkout accepts ${banned} from the browser`);
   }

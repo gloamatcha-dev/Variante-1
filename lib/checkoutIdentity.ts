@@ -107,6 +107,19 @@ export const CHECKOUT_EMAIL_INVALID_MESSAGE = "Bitte gib eine gültige E-Mail-Ad
  * records that the person in front of the form cannot act on and should
  * not be told. They get a route to a human instead.
  */
+/**
+ * A retry that arrives with different COMMERCIAL terms than the attempt
+ * this request id already froze - a code that was added, removed or is
+ * now worth a different amount.
+ *
+ * Deliberately not the identity message: nothing is wrong with the
+ * customer, and support cannot help. The way out is a fresh checkout,
+ * which is what the sentence says. The conflicting values are logged,
+ * never shown.
+ */
+export const CHECKOUT_TERMS_CONFLICT_MESSAGE =
+  "Dieser Checkout wurde bereits mit anderen Angaben gestartet. Bitte lade die Seite neu und starte den Checkout erneut.";
+
 export const CHECKOUT_IDENTITY_CONFLICT_MESSAGE =
   "Der Checkout konnte mit dieser E-Mail-Adresse nicht gestartet werden. Bitte wende dich an support@gloamatcha.com.";
 

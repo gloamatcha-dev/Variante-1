@@ -48,10 +48,22 @@ export type CheckoutAttempt = {
    */
   customer_email: string | null;
   stripe_customer_id: string | null;
+  /**
+   * The launch discount this attempt was quoted with, frozen before
+   * Stripe was called. Both or neither - migration 057's paired CHECK
+   * refuses any other shape - and null on every attempt that used no
+   * code, including the 729 that predate all of this.
+   *
+   * There is no third column and no claim: GLOALAUNCH10 is reusable, so
+   * there is nothing to hold and nothing to redeem. What the attempt
+   * freezes is the money, which is the only part settlement needs.
+   */
+  discount_code: string | null;
+  discount_gross_cents: number | null;
 };
 
 const ATTEMPT_COLUMNS =
-  "id, request_id, status, currency, expected_total_gross_cents, items_snapshot, shipping_country, shipping_zone, shipping_gross_cents, tax_snapshot, stripe_checkout_session_id, stripe_payment_intent_id, customer_email, stripe_customer_id";
+  "id, request_id, status, currency, expected_total_gross_cents, items_snapshot, shipping_country, shipping_zone, shipping_gross_cents, tax_snapshot, stripe_checkout_session_id, stripe_payment_intent_id, customer_email, stripe_customer_id, discount_code, discount_gross_cents";
 
 /**
  * The identity a one-time attempt freezes: the normalized email the
@@ -65,6 +77,19 @@ const ATTEMPT_COLUMNS =
 export type CheckoutAttemptIdentity = {
   email: string;
   stripeCustomerId: string;
+};
+
+/**
+ * The discount an attempt is being created with, or null.
+ *
+ * Passed as one value rather than two arguments because they are one
+ * fact, and because the database refuses a half of it: a code with no
+ * amount, or an amount with no code, fails
+ * checkout_attempts_discount_snapshot_paired.
+ */
+export type CheckoutAttemptDiscount = {
+  code: string;
+  grossCents: number;
 };
 
 export type GetOrCreateAttemptResult =
@@ -85,7 +110,8 @@ export async function getOrCreateCheckoutAttempt(
   shipping: CheckoutAttemptShipping,
   taxSnapshot: CartTaxSnapshot | null,
   userId: string | null = null,
-  identity: CheckoutAttemptIdentity | null = null
+  identity: CheckoutAttemptIdentity | null = null,
+  discount: CheckoutAttemptDiscount | null = null
 ): Promise<GetOrCreateAttemptResult> {
   const admin = getSupabaseAdmin();
   if (!admin) {
@@ -99,9 +125,17 @@ export async function getOrCreateCheckoutAttempt(
         request_id: requestId,
         user_id: userId,
         currency: quote.currency,
-        // The customer's total obligation is merchandise + shipping -
-        // Stripe's amount_total must match this exactly.
-        expected_total_gross_cents: quote.subtotalGrossCents + shipping.grossCents,
+        // The customer's total obligation is merchandise, less any
+        // discount, plus shipping - and Stripe's amount_total must match
+        // this exactly (lib/stripeFulfillment.ts refuses an order that
+        // differs by a cent).
+        //
+        // THE DISCOUNT IS SUBTRACTED HERE AND NOWHERE ELSE, so the
+        // frozen total and the line amounts Stripe is sent are computed
+        // from the same decision. Shipping is added AFTER it, because
+        // shipping is never discounted.
+        expected_total_gross_cents:
+          quote.subtotalGrossCents - (discount?.grossCents ?? 0) + shipping.grossCents,
         items_snapshot: buildItemsSnapshot(quote),
         shipping_country: shipping.country,
         shipping_zone: shipping.zone,
@@ -122,6 +156,14 @@ export async function getOrCreateCheckoutAttempt(
         // either failing or overwriting.
         customer_email: identity?.email ?? null,
         stripe_customer_id: identity?.stripeCustomerId ?? null,
+        // The same freeze again, applied to WHAT WAS TAKEN OFF. Frozen
+        // with the prices for the same reason: a retry settles the
+        // discount the customer was quoted, not whatever a recomputation
+        // would produce if the window closed in between. The caller
+        // compares what comes back against what it asked for and refuses
+        // on divergence.
+        discount_code: discount?.code ?? null,
+        discount_gross_cents: discount?.grossCents ?? null,
       },
       { onConflict: "request_id", ignoreDuplicates: true }
     );

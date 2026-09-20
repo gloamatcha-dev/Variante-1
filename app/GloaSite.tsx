@@ -48,6 +48,7 @@ import { SHIPPING_ZONES, SHIPPING_PRICING, getShippingZone, getCountryLabel, com
 // can render is always a value POST /api/partnerships accepts.
 import { PARTNERSHIP_TYPE_OPTIONS } from "../lib/partnershipRequest";
 import { createCheckoutSession } from "./createCheckoutSession";
+import { requestCheckoutQuote } from "./checkoutQuote";
 // The checkout's identity rule, shared with the server rather than
 // restated here - a second copy of "what counts as a valid address"
 // would be a second copy that can disagree.
@@ -2565,6 +2566,9 @@ const SHIPPING_COUNTRY_GROUPS:{label:string;codes:string[]}[]=[
 {label:"Übriges Europa",codes:[...SHIPPING_ZONES.restOfEurope.countryCodes].sort((a,b)=>getCountryLabel(a).localeCompare(getCountryLabel(b),"de"))},
 ];
 
+/** The one thing a customer is told when the check itself failed. */
+const FALLBACK_DISCOUNT_ERROR="Rabattcode konnte gerade nicht geprüft werden. Bitte versuche es erneut.";
+
 function CartDrawer({open,onClose}:{open:boolean;onClose:()=>void}){
 const cart=useCart();
 const { session,user }=useAuth();
@@ -2585,6 +2589,23 @@ const [checkoutError,setCheckoutError]=useState("");
 const [typedEmail,setTypedEmail]=useState<string|null>(null);
 const email=typedEmail??user?.email??"";
 const [emailError,setEmailError]=useState("");
+// THE CODE THE CUSTOMER TYPED, and what the SERVER said it is worth.
+// `discount` only ever holds a figure that came back from
+// /api/checkout/quote - the browser computes no money - and the
+// checkout re-derives it from the frozen attempt regardless.
+const [discountInput,setDiscountInput]=useState("");
+// A code priced against one basket says nothing about another, so each
+// answer carries the basket it was priced for and is simply not used
+// once that changes. DERIVED rather than reset in an effect: an effect
+// that setStates on every cart change is a cascading render, and there
+// is nothing here that needs to happen - only something that stops
+// being true.
+const cartSignature=cart.items.map(i=>`${i.variantId}:${i.quantity}`).join("|");
+const [pricedDiscount,setPricedDiscount]=useState<{code:string;percent:number;discountGrossCents:number;signature:string}|null>(null);
+const [pricedError,setPricedError]=useState<{message:string;signature:string}|null>(null);
+const [discountBusy,setDiscountBusy]=useState(false);
+const discount=pricedDiscount&&pricedDiscount.signature===cartSignature?pricedDiscount:null;
+const discountError=pricedError&&pricedError.signature===cartSignature?pricedError.message:"";
 
 useEffect(()=>{
 if(!open)return;
@@ -2601,10 +2622,44 @@ if(!open)return null;
 // Display-only: helps the customer see what to expect before checkout.
 // Never trusted as-is - the server independently validates the country
 // and recomputes the zone/price/free-shipping eligibility itself.
+// THE THRESHOLD IS MEASURED ON THE MERCHANDISE THE CUSTOMER CHOSE,
+// BEFORE ANY CODE - cart.totalCents, never the discounted figure. A
+// basket just over it must not LOSE free shipping because a ten percent
+// code was applied, and the server computes it from the same
+// pre-discount value.
 const zone=getShippingZone(shippingCountry);
 const shippingCents=zone?computeShippingGrossCents(zone,cart.totalCents):null;
 const threshold=zone?SHIPPING_PRICING[zone].freeShippingThresholdGrossCents:null;
 const remainingForFreeShipping=threshold!==null?Math.max(0,threshold-cart.totalCents):null;
+const discountCents=discount?.discountGrossCents??0;
+const payableCents=Math.max(0,cart.totalCents-discountCents);
+
+const applyDiscount=async()=>{
+const code=discountInput.trim();
+if(code===""||discountBusy)return;
+setDiscountBusy(true);setPricedError(null);
+try{
+// The server prices it. The browser sends the string and is told cents.
+const quote=await requestCheckoutQuote(cart.items,{discountCode:code});
+if(quote.discount?.applied){
+setPricedDiscount({code:quote.discount.code,percent:quote.discount.percent,discountGrossCents:quote.discount.discountGrossCents,signature:cartSignature});
+setPricedError(null);
+setDiscountInput(quote.discount.code);
+}else{
+setPricedDiscount(null);
+setPricedError({message:quote.discount?.message??FALLBACK_DISCOUNT_ERROR,signature:cartSignature});
+}
+}catch{
+// Never the underlying error: a customer gets something they can act
+// on, not a database or Stripe message.
+setPricedDiscount(null);
+setPricedError({message:FALLBACK_DISCOUNT_ERROR,signature:cartSignature});
+}finally{
+setDiscountBusy(false);
+}
+};
+
+const removeDiscount=()=>{setPricedDiscount(null);setPricedError(null);setDiscountInput("")};
 
 const handleCheckout=async()=>{
 if(SHOP_STATUS==="prelaunch"){onClose();window.location.href="/contact";return}
@@ -2618,7 +2673,7 @@ setEmailError("");
 setCheckoutBusy(true);setCheckoutError("");
 try{
 const requestId=crypto.randomUUID();
-const{url}=await createCheckoutSession(cart.items,requestId,shippingCountry,email,session?.access_token);
+const{url}=await createCheckoutSession(cart.items,requestId,shippingCountry,email,session?.access_token,discount?.code??null);
 window.location.href=url;
 }catch(err){
 setCheckoutError(err instanceof Error?err.message:"Checkout konnte nicht gestartet werden.");
@@ -2678,8 +2733,42 @@ aria-describedby={emailError?"cart-email-error":"cart-email-note"}
 {remainingForFreeShipping!==null&&remainingForFreeShipping>0&&<p className="cart-shipping-hint">Noch {fmtCents(remainingForFreeShipping)} € bis zum kostenlosen Versand</p>}
 {threshold!==null&&shippingCents===0&&<p className="cart-shipping-hint">Kostenloser Versand ab {fmtCents(threshold)} €</p>}
 </div>
+{SHOP_STATUS!=="prelaunch"&&<div className="cart-discount">
+<label className="cart-discount-label" htmlFor="cart-discount-code">RABATTCODE</label>
+<div className="cart-discount-row">
+<input
+id="cart-discount-code"
+type="text"
+name="discountCode"
+autoComplete="off"
+autoCapitalize="characters"
+autoCorrect="off"
+spellCheck={false}
+maxLength={64}
+placeholder="Code eingeben"
+value={discountInput}
+disabled={discount!==null||discountBusy}
+onChange={e=>{setDiscountInput(e.target.value);if(pricedError)setPricedError(null)}}
+onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();applyDiscount()}}}
+aria-invalid={discountError?"true":undefined}
+aria-describedby={discountError?"cart-discount-error":"cart-discount-note"}
+/>
+{discount
+?<button type="button" className="cart-discount-action" onClick={removeDiscount}>Entfernen</button>
+:<button type="button" className="cart-discount-action" onClick={applyDiscount} disabled={discountBusy||discountInput.trim()===""}>{discountBusy?"PRÜFT…":"Einlösen"}</button>}
+</div>
+{discountError
+?<p className="cart-discount-error" id="cart-discount-error" role="alert">{discountError}</p>
+:discount
+?<p className="cart-discount-ok" id="cart-discount-note" role="status">{discount.code} angewendet &middot; &minus;{discount.percent} %</p>
+:<p className="cart-discount-note" id="cart-discount-note">Optional. Groß- und Kleinschreibung spielt keine Rolle.</p>}
+</div>}
 <div className="cart-footer">
-<div className="cart-total"><span>SUMME</span><strong>{fmtCents(cart.totalCents)} €</strong></div>
+{discount&&<>
+<div className="cart-total cart-total-line"><span>ZWISCHENSUMME</span><strong>{fmtCents(cart.totalCents)} €</strong></div>
+<div className="cart-total cart-total-line cart-total-discount"><span>RABATT</span><strong>&minus;{fmtCents(discountCents)} €</strong></div>
+</>}
+<div className="cart-total"><span>SUMME</span><strong>{fmtCents(payableCents)} €</strong></div>
 {checkoutError&&<p className="cart-error">{checkoutError}</p>}
 <button className="cta cart-checkout-cta" onClick={handleCheckout} disabled={checkoutBusy}>{checkoutBusy?"WIRD GELADEN…":SHOP_STATUS==="prelaunch"?"FRAGEN ZUM LAUNCH":"ZUR KASSE"}</button>
 {SHOP_STATUS!=="prelaunch"&&<p className="cart-legal-note">Mit dem Bestellabschluss akzeptierst du unsere <Link href="/agb" onClick={onClose}>AGB</Link>. Es gilt unsere <Link href="/datenschutz" onClick={onClose}>Datenschutzerklärung</Link>. Informationen zu deinem <Link href="/widerruf" onClick={onClose}>Widerrufsrecht</Link>.</p>}

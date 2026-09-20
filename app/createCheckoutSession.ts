@@ -29,13 +29,22 @@ export type CheckoutSession = {
  * key, a Stripe Customer id or anything else that would let a browser
  * nominate an identity. The same rule as prices: the client says what it
  * wants, the server decides what that means.
+ *
+ * discountCode is the same rule again, and the last place it could have
+ * been broken. The browser sends the STRING the customer typed and
+ * nothing else - no discount cents, no percent, no eligibility verdict,
+ * no line allocation. The server normalizes the code, checks the
+ * window, filters the basket to the eligible SKUs, computes the
+ * discount and freezes it on the checkout attempt. A browser that could
+ * send any of those could name its own price.
  */
 export async function createCheckoutSession(
   cartItems: CartItem[],
   requestId: string,
   shippingCountry: string,
   email: string,
-  accessToken?: string | null
+  accessToken?: string | null,
+  discountCode?: string | null
 ): Promise<CheckoutSession> {
   const payload = {
     items: cartItems.map(item => ({
@@ -45,6 +54,7 @@ export async function createCheckoutSession(
     requestId,
     shippingCountry,
     email,
+    ...(discountCode ? { discountCode } : {}),
   };
 
   const response = await fetch("/api/checkout/session", {

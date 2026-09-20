@@ -1188,6 +1188,13 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // fulfillment or annual module is involved. Reviewed in
     // tests/admin-audit.test.mjs.
     "lib/inventoryRules.ts",
+    // GLOALAUNCH10's RUNTIME: the pure engine loses its superseded
+    // first-order rule, the cart leaf owns the SKU allowlist and the
+    // arithmetic, the attempt freezes the amount, and the identity
+    // module gains one refusal sentence. No annual object is involved.
+    // Reviewed in tests/launch-discount-runtime.test.mjs.
+    "lib/launchDiscount.ts",
+    "lib/checkoutIdentity.ts",
   ];
 
   // Phase 4B4 edits ONE application module: the single canonical Stripe
@@ -1430,6 +1437,13 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // verification). No annual, subscription or B2B path is involved.
     // Reviewed in tests/checkout-email-identity-runtime.test.mjs.
     "app/createCheckoutSession.ts",
+    // GLOALAUNCH10's RUNTIME. The reusable launch code is typed in the
+    // cart (app/GloaSite.tsx, already listed), priced by the
+    // authoritative quote and frozen by the session route - all three
+    // below the launch gate, none of them annual, subscription or B2B.
+    // Reviewed in tests/launch-discount-runtime.test.mjs.
+    "app/api/checkout/quote/route.ts",
+    "app/checkoutQuote.ts",
   ];
   // NOTE. Both lists are about UNCOMMITTED edits to files that already
   // exist, so a file this package CREATES does not belong in either -

@@ -1,11 +1,25 @@
 /**
  * THE LAUNCH DISCOUNT, AS ARITHMETIC.
  *
- * One shared code, ten percent, first order only, October 2026. This
- * module decides everything about it that can be decided from inputs
- * alone: whether a code is the code, whether an instant is inside the
- * window, what the discount is worth, and how it is split across the
- * lines of a basket.
+ * One shared code, ten percent, October 2026. This module decides
+ * everything about it that can be decided from inputs alone: whether a
+ * code is the code, whether an instant is inside the window, what the
+ * discount is worth, and how it is split across the lines of a basket.
+ *
+ * ── IT IS A REUSABLE CODE, AND THAT IS THE WHOLE RULE ─────────
+ *
+ * GLOALAUNCH10 was briefly designed as a one-use, first-order-only
+ * offer: migration 056 built a claim ledger, a redemption and a
+ * first-order query for it, and this module carried a first-order
+ * argument to match. The commercial decision changed and migration 057
+ * removed all of it.
+ *
+ * So there is nothing left for a caller to ask a database about. Who is
+ * buying, whether they have bought before, and how often they have used
+ * the code are not inputs any more - the answer is the same for
+ * everybody who knows it while the window is open. What remains is a
+ * function of the code, the clock and the basket, which is exactly what
+ * this file was always good at.
  *
  * ── IT IS APPLIED BEFORE STRIPE EVER SEES A NUMBER ────────────
  *
@@ -88,12 +102,19 @@ export function isWithinLaunchDiscountWindow(
   return nowMs >= fromMs && nowMs <= untilMs;
 }
 
-/** Why a code was refused. Each maps to a message the customer can act on. */
+/**
+ * Why a code was refused. Each maps to a message the customer can act
+ * on - and each is decidable here, without an identity and without a
+ * database.
+ *
+ * There is deliberately no "already used" and no "not your first
+ * order": 057 removed both rules, and a refusal this module cannot
+ * decide is a refusal it must not be able to express.
+ */
 export type DiscountRefusal =
   | "unknown_code"
   | "not_yet_active"
   | "expired"
-  | "not_first_order"
   | "empty_basket";
 
 export type DiscountDecision =
@@ -103,16 +124,19 @@ export type DiscountDecision =
 /**
  * THE WHOLE DECISION, in one place.
  *
- * `isFirstOrder` is supplied by the caller because answering it needs a
- * database, and this module does not have one. What matters here is
- * that the answer is REQUIRED: there is no default, so a caller cannot
- * accidentally grant the discount by forgetting to check.
+ * Three inputs and no fourth: the code the customer typed, the instant
+ * to judge it at, and the value of the merchandise it may reduce. No
+ * identity, no order history, no database handle - not because they are
+ * inconvenient, but because the rule no longer depends on them.
+ *
+ * `subtotalGrossCents` is the ELIGIBLE merchandise, already filtered by
+ * the caller. This module knows nothing about SKUs; lib/launchDiscountCart.ts
+ * owns which lines the code may touch and hands the total down.
  */
 export function decideLaunchDiscount(input: {
   code: unknown;
   nowMs: number;
   subtotalGrossCents: number;
-  isFirstOrder: boolean;
 }): DiscountDecision {
   if (!isLaunchDiscountCode(input.code)) return { applies: false, reason: "unknown_code" };
 
@@ -122,8 +146,6 @@ export function decideLaunchDiscount(input: {
 
   if (input.nowMs < LAUNCH_DISCOUNT_FROM_MS) return { applies: false, reason: "not_yet_active" };
   if (input.nowMs > LAUNCH_DISCOUNT_UNTIL_MS) return { applies: false, reason: "expired" };
-
-  if (!input.isFirstOrder) return { applies: false, reason: "not_first_order" };
 
   return {
     applies: true,
