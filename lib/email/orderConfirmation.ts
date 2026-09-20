@@ -40,6 +40,17 @@ export type OrderConfirmationAddress = {
 export type OrderConfirmationOrder = {
   order_number: string;
   subtotal_gross_cents: number;
+  /**
+   * What GLOALAUNCH10 took off this order, in whole cents, as
+   * create_order_from_paid_checkout froze it. Zero when nothing was
+   * discounted - a real zero, not an unknown.
+   *
+   * READ FROM THE ORDER, NEVER RECOMPUTED. The code, the clock and the
+   * basket that produced it are gone by the time a mail is built; a
+   * second opinion about money already charged is the one thing a
+   * confirmation must not offer.
+   */
+  discount_total_cents: number;
   shipping_gross_cents: number | null;
   total_gross_cents: number;
   shippingAddress: OrderConfirmationAddress | null;
@@ -131,6 +142,29 @@ export function buildOrderConfirmationEmail(params: {
 
   const shippingLabel = order.shipping_gross_cents === null ? null : fmtShipping(order.shipping_gross_cents);
 
+  /*
+    THE DISCOUNT ROW.
+
+    This email is not a courtesy note. The AGB call it "zugleich die
+    Bestatigung des Vertrags auf einem dauerhaften Datentraeger", so the
+    figures in it are the ones the customer keeps. Without this row a
+    discounted order printed
+
+        Zwischensumme  22,99
+        Versand         5,90
+        Gesamt         26,59
+
+    which does not add up, and the only way to make it add up was to
+    guess that a discount had been applied and how much.
+
+    Computed once, rendered into BOTH the HTML and the plain text below.
+    A discount visible in one and absent from the other would be the
+    same defect in half the inboxes.
+  */
+  const discountLabel = order.discount_total_cents > 0
+    ? `-${fmtCents(order.discount_total_cents)} \u20AC`
+    : null;
+
   // ---- HTML ----
   const itemRowsHtml = items
     .map(
@@ -149,6 +183,7 @@ export function buildOrderConfirmationEmail(params: {
 
   const totalsRowsHtml = [
     ["Zwischensumme", `${fmtCents(order.subtotal_gross_cents)} €`, false],
+    ...(discountLabel !== null ? [["Rabatt", discountLabel, false]] : []),
     ...(shippingLabel !== null ? [["Versand", shippingLabel, false]] : []),
     ["Gesamt", `${fmtCents(order.total_gross_cents)} €`, true],
   ]
@@ -201,6 +236,7 @@ ${legalLinks(params.origin)}`)}`);
 
   const totalsLinesText = [
     `Zwischensumme: ${fmtCents(order.subtotal_gross_cents)} €`,
+    ...(discountLabel !== null ? [`Rabatt: ${discountLabel}`] : []),
     ...(shippingLabel !== null ? [`Versand: ${shippingLabel}`] : []),
     `Gesamt: ${fmtCents(order.total_gross_cents)} €`,
   ].join("\n");

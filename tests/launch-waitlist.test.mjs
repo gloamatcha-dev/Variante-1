@@ -2550,12 +2550,19 @@ test("112: the discount is a block on the page, not a line lost in the blue", ()
   // now the only Cream surface above the fold.
   assert.match(launchPage, /className="launch-offer"/);
   assert.match(launchPage, /\{LAUNCH_DISCOUNT_PERCENT\}<\/span>/);
-  assert.match(launchPage, /AUF DEINE ERSTE BESTELLUNG/);
+  // LAUNCH FIX A. The line used to read "AUF DEINE ERSTE BESTELLUNG".
+  // Migration 057 removed the claim ledger, the first-order query and
+  // the per-email lock, so that was the last surface still promising a
+  // rule nothing enforces. The block itself is unchanged - same figure,
+  // same qualifying line beneath it, same Cream interruption.
+  assert.match(launchPage, /AUF DEINEN GLOA MATCHA/);
+  assert.equal(/ERSTE BESTELLUNG/.test(launchPage), false,
+    "the launch page still promises a first-order-only discount");
   assert.match(launchPage, /Einlösbar bis \{LAUNCH_DISCOUNT_UNTIL_LABEL\}/);
 
   // The requested copy, and it says where the code comes from - the page
   // deliberately does not print the code itself.
-  assert.match(launchPage, /sichere dir \{LAUNCH_DISCOUNT_PERCENT\} % auf deine erste/);
+  assert.match(launchPage, /sichere dir \{LAUNCH_DISCOUNT_PERCENT\} % auf deinen GLOA/);
   assert.match(launchPage, /Deinen Code erhältst du nach der Bestätigung deiner E-Mail-Adresse/);
   assert.ok(!launchPage.includes("GLOALAUNCH10"), "the launch page prints the shared code");
 

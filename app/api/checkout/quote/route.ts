@@ -4,10 +4,44 @@ import { resolveTaxJurisdiction } from "../../../../lib/taxJurisdiction";
 import { resolveCheckoutTax, toTaxableCartItems, type CartTaxSnapshot, type TaxableCartItem } from "../../../../lib/tax";
 import { normalizeDiscountCode } from "../../../../lib/launchDiscount";
 import { priceLaunchDiscountForCart, launchDiscountMessage } from "../../../../lib/launchDiscountCart";
+import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
+import type { RateLimitState } from "../../../../lib/launchRateLimit";
+import {
+  consumeLocalCheckoutRateLimit,
+  consumeSharedCheckoutRateLimit,
+  getCheckoutBucketSecret,
+  CHECKOUT_QUOTE_RATE_LIMIT,
+  CHECKOUT_RATE_LIMITED_MESSAGE,
+} from "../../../../lib/checkoutRateLimit";
 
 type ErrorResponse = {
   error: string;
 };
+
+/**
+ * THE ROUTE'S OWN IN-PROCESS COUNTER.
+ *
+ * Declared here rather than in lib/checkoutRateLimit.ts so the two
+ * checkout endpoints cannot end up sharing one map - the same reason
+ * POST /api/launch owns its own. Module scope, so it survives between
+ * requests to the same warm instance and is lost when that instance is,
+ * which is exactly what layer 2 exists to cover.
+ */
+const rateLimitState: RateLimitState = new Map();
+
+/** The one answer a rate-limited caller ever gets. */
+function rateLimitRefusal(decision: { status: number; retryAfterSeconds: number | null }): Response {
+  return Response.json(
+    { error: CHECKOUT_RATE_LIMITED_MESSAGE } as ErrorResponse,
+    {
+      status: decision.status,
+      headers:
+        decision.retryAfterSeconds === null
+          ? undefined
+          : { "Retry-After": String(Math.max(1, Math.ceil(decision.retryAfterSeconds))) },
+    }
+  );
+}
 
 /**
  * The tax information a browser may be shown (Task 21D). Present only
@@ -47,6 +81,18 @@ type QuoteDiscountResponse =
   | { applied: false; message: string };
 
 export async function POST(request: Request): Promise<Response> {
+  // LAYER 1, BEFORE THE BODY IS EVEN READ. Free, no round trip, and it
+  // counts every request that reaches this endpoint whether or not the
+  // body turns out to be valid - a caller hammering it must not be able
+  // to reset its own window by sending rubbish.
+  const localLimit = consumeLocalCheckoutRateLimit({
+    policy: CHECKOUT_QUOTE_RATE_LIMIT,
+    state: rateLimitState,
+    request,
+    nowMs: Date.now(),
+  });
+  if (!localLimit.allow) return rateLimitRefusal(localLimit);
+
   let body: unknown;
   try {
     body = await request.json();
@@ -76,6 +122,26 @@ export async function POST(request: Request): Promise<Response> {
       { status: 400 }
     );
   }
+
+  // LAYER 2, THE SHARED COUNTER, IMMEDIATELY ABOVE THE READ IT GUARDS.
+  //
+  // buildAuthoritativeQuote is the Supabase read this endpoint exists to
+  // protect, and pricing a code below it is what turns this into
+  // something worth scripting. So the limit lands here: after the shape
+  // checks, so a malformed request is still told it is malformed, and
+  // before the first database query.
+  //
+  // A counter that cannot be reached lets the request through - see
+  // CHECKOUT_QUOTE_RATE_LIMIT. Nothing below this line writes, charges
+  // or creates anything, so the worst a missed limit costs is reads,
+  // and refusing would break a real customer's cart over a blip.
+  const sharedLimit = await consumeSharedCheckoutRateLimit({
+    policy: CHECKOUT_QUOTE_RATE_LIMIT,
+    request,
+    client: getSupabaseAdmin(),
+    secret: getCheckoutBucketSecret(),
+  });
+  if (!sharedLimit.allow) return rateLimitRefusal(sharedLimit);
 
   const result = await buildAuthoritativeQuote(validatedItems);
   if (!result.ok) {

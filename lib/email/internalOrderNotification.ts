@@ -64,6 +64,17 @@ export type InternalOrderNotificationOrder = {
   order_number: string;
   currency: string;
   subtotal_gross_cents: number;
+  /**
+   * What GLOALAUNCH10 took off this order, in whole cents, as
+   * create_order_from_paid_checkout froze it. Zero when nothing was
+   * discounted - a real zero, not an unknown.
+   *
+   * READ FROM THE ORDER, NEVER RECOMPUTED. The code, the clock and the
+   * basket that produced it are gone by the time a mail is built; a
+   * second opinion about money already charged is the one thing a
+   * confirmation must not offer.
+   */
+  discount_total_cents: number;
   shipping_gross_cents: number | null;
   total_gross_cents: number;
   shippingAddress: InternalOrderAddress | null;
@@ -201,8 +212,18 @@ export function buildInternalOrderNotificationEmail(params: {
 
   // ---- Totals ----
   const shippingLabel = order.shipping_gross_cents === null ? null : fmtShipping(order.shipping_gross_cents);
+  /*
+    Fulfillment reads this to pack a box and to reconcile a payout. A
+    Zwischensumme and a Versand that do not sum to the Bezahlt line send
+    somebody looking for a bug in the payment, so the reduction is named
+    rather than left as an unexplained gap.
+  */
+  const discountLabel = order.discount_total_cents > 0
+    ? `-${fmtCents(order.discount_total_cents)} \u20AC`
+    : null;
   const totalsRows: [string, string, boolean][] = [
     ["Zwischensumme", `${fmtCents(order.subtotal_gross_cents)} €`, false],
+    ...(discountLabel !== null ? ([["Rabatt", discountLabel, false]] as [string, string, boolean][]) : []),
     ...(shippingLabel !== null ? ([["Versand", shippingLabel, false]] as [string, string, boolean][]) : []),
     ["Bezahlt", `${fmtCents(order.total_gross_cents)} ${order.currency}`, true],
   ];
@@ -284,6 +305,7 @@ export function buildInternalOrderNotificationEmail(params: {
 
   const totalsLinesText = [
     `Zwischensumme: ${fmtCents(order.subtotal_gross_cents)} €`,
+    ...(discountLabel !== null ? [`Rabatt: ${discountLabel}`] : []),
     ...(shippingLabel !== null ? [`Versand: ${shippingLabel}`] : []),
     `Bezahlt: ${fmtCents(order.total_gross_cents)} ${order.currency}`,
   ].join("\n");

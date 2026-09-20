@@ -87,6 +87,7 @@ export type RetryOrderRow<TAddress> = {
   order_number: string;
   currency: string;
   subtotal_gross_cents: number;
+  discount_total_cents: number;
   shipping_gross_cents: number | null;
   total_gross_cents: number;
   shipping_address_snapshot: TAddress | null;
@@ -121,6 +122,7 @@ export type RetryNotificationParams<TAddress> = {
     order_number: string;
     currency: string;
     subtotal_gross_cents: number;
+    discount_total_cents: number;
     shipping_gross_cents: number | null;
     total_gross_cents: number;
     shipping_address_snapshot: TAddress | null;
@@ -189,6 +191,9 @@ export function buildRetryNotificationParams<TAddress>(
       order_number: row.order_number,
       currency: row.currency,
       subtotal_gross_cents: row.subtotal_gross_cents,
+      // A redelivered notification must describe the same order the
+      // first attempt described, discount included.
+      discount_total_cents: row.discount_total_cents,
       shipping_gross_cents: row.shipping_gross_cents,
       total_gross_cents: row.total_gross_cents,
       shipping_address_snapshot: row.shipping_address_snapshot,

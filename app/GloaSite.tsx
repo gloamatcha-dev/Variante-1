@@ -2632,7 +2632,26 @@ const shippingCents=zone?computeShippingGrossCents(zone,cart.totalCents):null;
 const threshold=zone?SHIPPING_PRICING[zone].freeShippingThresholdGrossCents:null;
 const remainingForFreeShipping=threshold!==null?Math.max(0,threshold-cart.totalCents):null;
 const discountCents=discount?.discountGrossCents??0;
-const payableCents=Math.max(0,cart.totalCents-discountCents);
+// SUMME IS WHAT THE CUSTOMER WILL BE CHARGED, SHIPPING INCLUDED.
+//
+// It used to be the merchandise total minus the discount, which meant a
+// 22,99 EUR basket to Germany showed SUMME 22,99 EUR immediately above
+// a button that leads to a 28,89 EUR payment. The 5,90 EUR was on the
+// screen - in the shipping block above - but it was not in the figure
+// labelled as the sum, and a labelled sum is the one number a customer
+// reads.
+//
+// Order matters and is the same everywhere else in this shop:
+// merchandise, less the code, plus the shipping the zone charges. The
+// shipping itself is NOT discounted and its free-shipping threshold is
+// still measured on cart.totalCents above, before any code - so
+// applying a code can never push a basket back into paying for
+// delivery, and can never make this figure go up.
+//
+// When no zone resolves (no country selected yet, or an unknown one)
+// the shipping is genuinely unknown, so it is left out of both the
+// breakdown and the sum rather than guessed at zero.
+const payableCents=Math.max(0,cart.totalCents-discountCents)+(shippingCents??0);
 
 const applyDiscount=async()=>{
 const code=discountInput.trim();
@@ -2764,9 +2783,18 @@ aria-describedby={discountError?"cart-discount-error":"cart-discount-note"}
 :<p className="cart-discount-note" id="cart-discount-note">Optional. Groß- und Kleinschreibung spielt keine Rolle.</p>}
 </div>}
 <div className="cart-footer">
-{discount&&<>
+{/*
+  THE BREAKDOWN, WHENEVER THERE IS ANYTHING TO BREAK DOWN.
+  Previously it appeared only with a discount; now that SUMME carries
+  the shipping too, a customer with no code would otherwise see a sum
+  larger than their basket and nothing explaining the difference.
+  The rows read as the arithmetic they are:
+    ZWISCHENSUMME - RABATT + VERSAND = SUMME
+*/}
+{(discount||shippingCents!==null)&&<>
 <div className="cart-total cart-total-line"><span>ZWISCHENSUMME</span><strong>{fmtCents(cart.totalCents)} €</strong></div>
-<div className="cart-total cart-total-line cart-total-discount"><span>RABATT</span><strong>&minus;{fmtCents(discountCents)} €</strong></div>
+{discount&&<div className="cart-total cart-total-line cart-total-discount"><span>RABATT</span><strong>&minus;{fmtCents(discountCents)} €</strong></div>}
+{shippingCents!==null&&<div className="cart-total cart-total-line"><span>VERSAND</span><strong>{shippingCents===0?"Kostenlos":`${fmtCents(shippingCents)} €`}</strong></div>}
 </>}
 <div className="cart-total"><span>SUMME</span><strong>{fmtCents(payableCents)} €</strong></div>
 {checkoutError&&<p className="cart-error">{checkoutError}</p>}

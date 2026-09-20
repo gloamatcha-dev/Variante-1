@@ -13,6 +13,13 @@ export type CreatedOrder = {
   user_id: string | null;
   currency: string;
   subtotal_gross_cents: number;
+  /**
+   * The frozen launch discount, in whole cents. The RPC returns the
+   * whole orders row, so this was always present - it was simply absent
+   * from this type, which is why every mail built from a CreatedOrder
+   * showed a Zwischensumme and a Gesamt that did not reconcile.
+   */
+  discount_total_cents: number;
   shipping_gross_cents: number | null;
   total_gross_cents: number;
   shipping_address_snapshot: AddressSnapshot | null;

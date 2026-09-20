@@ -24,6 +24,15 @@ import { ALLOWED_SHIPPING_COUNTRIES, getShippingZone, computeShippingGrossCents,
 import { resolveTaxJurisdiction } from "../../../../lib/taxJurisdiction";
 import { resolveCheckoutTax, toTaxableCartItems, TAX_DESTINATION_UNAVAILABLE_MESSAGE, type TaxableCartItem } from "../../../../lib/tax";
 import { checkoutRefusalFor } from "../../../../lib/shopAvailability";
+import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
+import type { RateLimitState } from "../../../../lib/launchRateLimit";
+import {
+  consumeLocalCheckoutRateLimit,
+  consumeSharedCheckoutRateLimit,
+  getCheckoutBucketSecret,
+  CHECKOUT_SESSION_RATE_LIMIT,
+  CHECKOUT_RATE_LIMITED_MESSAGE,
+} from "../../../../lib/checkoutRateLimit";
 import { SHOP_STATUS } from "../../../content";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -37,7 +46,42 @@ type SessionResponse = {
   url: string;
 };
 
+/**
+ * THE ROUTE'S OWN IN-PROCESS COUNTER.
+ *
+ * Declared here rather than in lib/checkoutRateLimit.ts so the two
+ * checkout endpoints cannot end up sharing one map - the same reason
+ * POST /api/launch owns its own. Module scope, so it survives between
+ * requests to the same warm instance and is lost when that instance is,
+ * which is exactly what layer 2 exists to cover.
+ */
+const rateLimitState: RateLimitState = new Map();
+
+/** The one answer a rate-limited caller ever gets. */
+function rateLimitRefusal(decision: { status: number; retryAfterSeconds: number | null }): Response {
+  return Response.json(
+    { error: CHECKOUT_RATE_LIMITED_MESSAGE } as ErrorResponse,
+    {
+      status: decision.status,
+      headers:
+        decision.retryAfterSeconds === null
+          ? undefined
+          : { "Retry-After": String(Math.max(1, Math.ceil(decision.retryAfterSeconds))) },
+    }
+  );
+}
+
 export async function POST(request: Request): Promise<Response> {
+  // LAYER 1, BEFORE THE BODY IS EVEN READ. See the quote endpoint: free,
+  // counts every request valid or not, and worth an instance's lifetime.
+  const localLimit = consumeLocalCheckoutRateLimit({
+    policy: CHECKOUT_SESSION_RATE_LIMIT,
+    state: rateLimitState,
+    request,
+    nowMs: Date.now(),
+  });
+  if (!localLimit.allow) return rateLimitRefusal(localLimit);
+
   let body: unknown;
   try {
     body = await request.json();
@@ -189,6 +233,42 @@ export async function POST(request: Request): Promise<Response> {
       { error: closed.error } as ErrorResponse,
       { status: closed.status }
     );
+  }
+
+  // LAYER 2, THE SHARED COUNTER - DIRECTLY BELOW THE GATE, WITH THE
+  // THINGS IT PROTECTS.
+  //
+  // What makes this endpoint worth limiting is what sits underneath it:
+  // an identity resolution that can create a STRIPE CUSTOMER, a checkout
+  // attempt, and a payable Checkout Session. Those are exactly the
+  // things the gate withholds, so the limit belongs on the same side of
+  // it - and a shop that is shut then answers "not open yet" cheaply,
+  // accurately and without a database round trip for a request that
+  // could not have bought anything anyway.
+  //
+  // The catalog read above this line is left to layer 1. That is a real
+  // limitation and it is the right trade: metering one read by
+  // performing one write is not a saving, the read needs a valid UUID, a
+  // valid request id, a valid address and a supported country to reach
+  // at all, and the endpoint a script would actually use to mine the
+  // catalog or guess a code - /api/checkout/quote - carries the shared
+  // counter ABOVE its own read for that very reason.
+  //
+  // A counter that cannot be reached REFUSES here - see
+  // CHECKOUT_SESSION_RATE_LIMIT. On a serverless deployment layer 1
+  // alone is not a weaker limit but an effectively absent one, and what
+  // follows creates durable objects in Stripe.
+  const sharedLimit = await consumeSharedCheckoutRateLimit({
+    policy: CHECKOUT_SESSION_RATE_LIMIT,
+    request,
+    client: getSupabaseAdmin(),
+    secret: getCheckoutBucketSecret(),
+  });
+  if (!sharedLimit.allow) {
+    if (sharedLimit.status === 503) {
+      console.error("Checkout session: shared rate limit unavailable - refusing:", sharedLimit.reason);
+    }
+    return rateLimitRefusal(sharedLimit);
   }
 
   const { quote } = quoteResult;

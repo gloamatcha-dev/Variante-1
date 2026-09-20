@@ -233,15 +233,15 @@ export function LaunchPage() {
                   <span className="launch-offer-percent">%</span>
                 </p>
                 <div className="launch-offer-copy">
-                  <p className="launch-offer-line">AUF DEINE ERSTE BESTELLUNG</p>
+                  <p className="launch-offer-line">AUF DEINEN GLOA MATCHA</p>
                   <p className="launch-offer-valid">
                     Einlösbar bis {LAUNCH_DISCOUNT_UNTIL_LABEL}
                   </p>
                 </div>
               </div>
               <p className="launch-hero-lead">
-                Trag dich ein und sichere dir {LAUNCH_DISCOUNT_PERCENT} % auf deine erste
-                Bestellung. Deinen Code erhältst du nach der Bestätigung deiner E-Mail-Adresse.
+                Trag dich ein und sichere dir {LAUNCH_DISCOUNT_PERCENT} % auf deinen GLOA
+                Matcha. Deinen Code erhältst du nach der Bestätigung deiner E-Mail-Adresse.
               </p>
               {/*
                 The trust line says what the list is and what it is not.

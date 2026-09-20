@@ -90,6 +90,7 @@ export type OrderForConfirmationEmail = {
   order_number: string;
   user_id: string | null;
   subtotal_gross_cents: number;
+  discount_total_cents: number;
   shipping_gross_cents: number | null;
   total_gross_cents: number;
   shipping_address_snapshot: AddressSnapshot | null;
@@ -139,6 +140,7 @@ export async function sendOrderConfirmationEmailIfNeeded(params: SendOrderConfir
   const emailOrder: OrderConfirmationOrder = {
     order_number: order.order_number,
     subtotal_gross_cents: order.subtotal_gross_cents,
+    discount_total_cents: order.discount_total_cents,
     shipping_gross_cents: order.shipping_gross_cents,
     total_gross_cents: order.total_gross_cents,
     shippingAddress: toEmailAddress(order.shipping_address_snapshot),

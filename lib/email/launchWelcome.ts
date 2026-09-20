@@ -91,9 +91,13 @@ export function buildLaunchWelcomeEmail(input: LaunchWelcomeInput): BuiltLaunchW
   const greeting = firstName ? `Hi ${firstName},` : "Hi,";
   const subject = preview ? LAUNCH_WELCOME_PREVIEW_SUBJECT : LAUNCH_WELCOME_SUBJECT;
 
+  // NOT "auf deine erste Bestellung". The code is reusable - 057 took
+  // out the ledger that would have made a first-order rule enforceable -
+  // so the mail says what it is actually worth and on what: the three
+  // Matcha tins, not the Metal Case and not the shipping.
   const body =
     "deine Eintragung ist bestätigt. Als Dankeschön bekommst du " +
-    `${percentLabel} auf deine erste Bestellung.`;
+    `${percentLabel} auf deinen GLOA Matcha.`;
 
   const validity =
     `Einlösbar ab ${validFromLabel} bis einschließlich ${validUntilLabel}. ` +
@@ -138,7 +142,7 @@ export function buildLaunchWelcomeEmail(input: LaunchWelcomeInput): BuiltLaunchW
 
   const html = emailShell(
     escapeHtml(subject),
-    `${emailPreheader(`${percentLabel} auf deine erste Bestellung.`)}
+    `${emailPreheader(`${percentLabel} auf deinen GLOA Matcha.`)}
 ${previewBanner}
 ${emailHeader(base)}
 ${emailEyebrow("GLOA LAUNCH LIST")}

@@ -155,8 +155,21 @@ export function rateLimitKeyFromRequest(request: { headers: { get(name: string):
  * digests, and neither can be replayed as the other. Bump the version
  * if the meaning of the input ever changes; every bucket resets, which
  * for a ten-minute window costs nothing.
+ *
+ * IT IS NOW A PARAMETER, defaulting to this value.
+ *
+ * The launch signup is no longer the only limited endpoint: the two
+ * checkout endpoints bucket the same callers through the same table
+ * (lib/checkoutRateLimit.ts). Sharing one label would have meant
+ * sharing one counter - a customer who had confirmed their waitlist
+ * signup would arrive at the checkout with part of their budget
+ * already spent, and hammering one endpoint would quietly close the
+ * other. Different label, different digest, different row.
+ *
+ * The default keeps every existing caller and every existing bucket
+ * exactly where it was.
  */
-const BUCKET_HMAC_LABEL = "gloa:launch-rate-limit:v1";
+export const LAUNCH_BUCKET_HMAC_LABEL = "gloa:launch-rate-limit:v1";
 
 /**
  * TURNS A CLIENT ADDRESS INTO A BUCKET KEY THAT IS NOT AN ADDRESS.
@@ -178,8 +191,12 @@ const BUCKET_HMAC_LABEL = "gloa:launch-rate-limit:v1";
  * and a raw address is passed through, the database refuses the row
  * instead of storing it.
  */
-export function pseudonymizeBucketKey(rawKey: string, secret: string): string {
-  return createHmac("sha256", secret).update(`${BUCKET_HMAC_LABEL}:${rawKey}`, "utf8").digest("hex");
+export function pseudonymizeBucketKey(
+  rawKey: string,
+  secret: string,
+  label: string = LAUNCH_BUCKET_HMAC_LABEL
+): string {
+  return createHmac("sha256", secret).update(`${label}:${rawKey}`, "utf8").digest("hex");
 }
 
 /** The shape migration 043 accepts. Checked before the round trip. */

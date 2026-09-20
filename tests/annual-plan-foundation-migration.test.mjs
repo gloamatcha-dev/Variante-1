@@ -1195,6 +1195,46 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // Reviewed in tests/launch-discount-runtime.test.mjs.
     "lib/launchDiscount.ts",
     "lib/checkoutIdentity.ts",
+    // LAUNCH FIX A - THE DISCOUNTED ORDER'S MONEY, WHEREVER IT IS
+    // STATED. Six leaves, all additive, all carrying ONE stored column
+    // (orders.discount_total_cents) from the row the order writer froze
+    // to the messages that describe it. Before this, a discounted order
+    // printed a Zwischensumme and a Gesamt that did not reconcile - in
+    // the mail the AGB call the contract confirmation.
+    //
+    //   orderFulfillment.ts          the RPC returns the whole orders
+    //                                row; the TYPE was one field short.
+    //   orderConfirmationEmail.ts    type + pass-through.
+    //   email/orderConfirmation.ts   one conditional row, HTML and text.
+    //   internalOrderNotificationEmail.ts   type + pass-through.
+    //
+    // Nothing recomputes a discount: the code, the window and the basket
+    // are gone by the time a mail is built, and none of these modules
+    // imports the discount engine. No money rule, no tax value, no
+    // transition and no recipient changed. Reviewed in
+    // tests/discounted-order-surfaces.test.mjs.
+    "lib/orderFulfillment.ts",
+    "lib/orderConfirmationEmail.ts",
+    "lib/email/orderConfirmation.ts",
+    "lib/internalOrderNotificationEmail.ts",
+    // LAUNCH FIX A - THE SUPERSEDED FIRST-ORDER PROMISE. Migration 057
+    // removed the claim ledger, the first-order query and the per-email
+    // lock; decideLaunchDiscount takes no identity at all. These two
+    // were the last places still telling a customer the code was for
+    // "deine erste Bestellung" - a promise NARROWER than the truth, so
+    // nobody was mis-sold, but not what the code does. Copy only: the
+    // percentage, the code, the window and every date still come from
+    // lib/launchDiscount.ts.
+    "lib/email/launchWelcome.ts",
+    // LAUNCH FIX A - THE RATE LIMIT'S HMAC LABEL BECOMES A PARAMETER,
+    // defaulting to the value it has always had, so the launch signup's
+    // existing buckets are untouched to the byte. The two checkout
+    // endpoints pass their own labels and therefore occupy their own
+    // rows - a confirmed waitlist signup must not arrive at the checkout
+    // with a partly-spent budget. No counter, window, maximum, digest
+    // shape or failure policy changed. Reviewed in
+    // tests/checkout-rate-limit.test.mjs.
+    "lib/launchRateLimit.ts",
   ];
 
   // Phase 4B4 edits ONE application module: the single canonical Stripe
@@ -1444,6 +1484,25 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // Reviewed in tests/launch-discount-runtime.test.mjs.
     "app/api/checkout/quote/route.ts",
     "app/checkoutQuote.ts",
+    // LAUNCH FIX A. Three presentation/read surfaces, for the reason the
+    // four email leaves above are listed: a discounted order has to state
+    // its money correctly wherever it states it.
+    //
+    //   api/orders/success/route.ts  ONE column added to the existing
+    //                                orders SELECT and passed through.
+    //                                A read. No auth, ownership or
+    //                                lookup rule moved, and the route
+    //                                imports no discount module.
+    //   OrderSuccess.tsx             one conditional row, rendered only
+    //                                above zero.
+    //   LaunchPage.tsx               copy: the superseded "erste
+    //                                Bestellung" line. No form, consent
+    //                                text, state or request changed.
+    //
+    // Reviewed in tests/discounted-order-surfaces.test.mjs.
+    "app/api/orders/success/route.ts",
+    "app/OrderSuccess.tsx",
+    "app/LaunchPage.tsx",
   ];
   // NOTE. Both lists are about UNCOMMITTED edits to files that already
   // exist, so a file this package CREATES does not belong in either -

@@ -13,6 +13,7 @@ type OrderData = {
   placedAt: string;
   currency: string;
   subtotalGrossCents: number;
+  discountGrossCents: number;
   shippingGrossCents: number | null;
   totalGrossCents: number;
   paymentStatus: string;
@@ -205,6 +206,26 @@ export function OrderSuccess() {
           <div className="portal-profile-row"><span>Datum</span><strong>{fmtDate(order.placedAt)}</strong></div>
           <div className="portal-profile-row"><span>Zahlungsstatus</span><strong>Bezahlt</strong></div>
           <div className="portal-profile-row"><span>Zwischensumme</span><strong>{fmtCents(order.subtotalGrossCents)} €</strong></div>
+          {/*
+            THE DISCOUNT, BETWEEN THE MERCHANDISE AND THE SHIPPING, so
+            the four rows read as the arithmetic they are:
+
+              Zwischensumme - Rabatt + Versand = Gesamt
+
+            Without this row the page showed a Zwischensumme and a
+            Versand that did not add up to the Gesamt underneath them -
+            on the first screen a paying customer sees. Same markup and
+            same wording as the account order detail, deliberately: a
+            customer who opens both should not have to work out whether
+            they are looking at the same order.
+
+            Rendered only when there is something to render. An empty
+            "Rabatt 0,00 €" on every undiscounted order would be noise
+            that reads like a failed code.
+          */}
+          {order.discountGrossCents > 0 && (
+            <div className="portal-profile-row"><span>Rabatt</span><strong>&minus;{fmtCents(order.discountGrossCents)} €</strong></div>
+          )}
           {typeof order.shippingGrossCents === "number" && (
             <div className="portal-profile-row"><span>Versand</span><strong>{order.shippingGrossCents === 0 ? "Kostenlos" : `${fmtCents(order.shippingGrossCents)} €`}</strong></div>
           )}

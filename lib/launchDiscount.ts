@@ -73,8 +73,22 @@ export const LAUNCH_DISCOUNT_UNTIL_ISO = "2026-10-31T23:59:59.999+01:00";
 export const LAUNCH_DISCOUNT_FROM_MS = Date.parse(LAUNCH_DISCOUNT_FROM_ISO);
 export const LAUNCH_DISCOUNT_UNTIL_MS = Date.parse(LAUNCH_DISCOUNT_UNTIL_ISO);
 
-/** How the code is printed to a customer. Display only. */
-export const LAUNCH_DISCOUNT_LABEL = "10 % auf deine erste Bestellung";
+/**
+ * How the code is printed to a customer. Display only.
+ *
+ * IT SAID "auf deine erste Bestellung" UNTIL NOW, and that restriction
+ * no longer exists: migration 057 removed the claim ledger, the
+ * first-order query and the per-email lock, and decideLaunchDiscount
+ * takes no identity at all. The label was the last place still
+ * promising a rule nothing enforces - a promise narrower than the
+ * truth, which costs a customer nothing but is still not what the code
+ * does.
+ *
+ * Built from the two constants above rather than typed out, so the
+ * percentage and the spelling of the code cannot drift from the engine
+ * that honours them.
+ */
+export const LAUNCH_DISCOUNT_LABEL = `${LAUNCH_DISCOUNT_PERCENT} % Rabatt mit ${LAUNCH_DISCOUNT_CODE}`;
 
 /** Normalises what a customer typed. Trimmed, upper-cased, nothing else. */
 export function normalizeDiscountCode(raw: unknown): string {

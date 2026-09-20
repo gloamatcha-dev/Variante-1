@@ -100,14 +100,34 @@ test("2: the quote endpoint prices the code itself, and writes nothing", () => {
   assert.match(quoteCode, /priceLaunchDiscountForCart\(\{/);
   assert.match(quoteCode, /normalizeDiscountCode\(discountCode\)/);
 
-  // READ-ONLY. No attempt, no Stripe object, no claim, no row of any
-  // kind - it is a quote, and the session endpoint re-derives every
-  // cent from the frozen attempt anyway.
-  for (const forbidden of ["getOrCreateCheckoutAttempt", "stripe.", "supabaseAdmin",
-                           "getSupabaseAdmin", "insert(", "update(", "upsert("]) {
+  // READ-ONLY, AS TO BUSINESS DATA. No attempt, no Stripe object, no
+  // claim, no order, no row of any kind - it is a quote, and the session
+  // endpoint re-derives every cent from the frozen attempt anyway.
+  for (const forbidden of ["getOrCreateCheckoutAttempt", "stripe.",
+                           "insert(", "update(", "upsert(",
+                           "from(\"orders\")", "from(\"checkout_attempts\")"]) {
     assert.ok(!quoteCode.includes(forbidden), `the quote endpoint calls ${forbidden}`);
   }
-  // And it takes no identity, so it cannot be asked about a person.
+
+  // LAUNCH FIX A RE-PINS THIS ONE. The service-role client used to be
+  // forbidden outright, as shorthand for "writes nothing". It is now
+  // present for exactly one purpose - spending the shared rate-limit
+  // counter (migration 043's consume_launch_rate_limit) before the
+  // catalog read, because an unauthenticated endpoint that will answer
+  // "is this code worth anything" needs a ceiling.
+  //
+  // So the guarantee is stated directly instead of by proxy: the client
+  // may be obtained, and the ONLY thing it may be handed to is the rate
+  // limiter.
+  const adminUses = [...quoteCode.matchAll(/getSupabaseAdmin\(\)/g)].length;
+  assert.equal(adminUses, 1, "the quote endpoint uses the service-role client more than once");
+  assert.match(quoteCode, /consumeSharedCheckoutRateLimit\(\{[\s\S]{0,200}client: getSupabaseAdmin\(\),/);
+  // A rate-limit counter is not business data: it holds a digest, a
+  // count and a timestamp, and never an address, an email or an order.
+  assert.ok(!quoteCode.includes("launch_rate_limit"), "the quote endpoint names the limiter's table itself");
+  // And it takes no identity, so it cannot be asked about a person -
+  // the rate limiter included, which buckets on a pseudonymised
+  // forwarding header and never on an address.
   for (const forbidden of ["email", "customerKey", "customer_email"]) {
     assert.ok(!quoteCode.includes(forbidden), `the quote endpoint accepts ${forbidden}`);
   }
@@ -262,8 +282,24 @@ test("5: the order records the discount through the RPC, and nothing else does",
   const rpc = read("supabase/migrations/057_simplify_launch_discount.sql");
   assert.match(rpc, /coalesce\(v_attempt\.discount_gross_cents, 0\),\s*\n\s*v_attempt\.discount_code,/);
   assert.match(read("lib/orderFulfillment.ts"), /p_shipping_gross_cents: shippingGrossCents,/);
-  assert.ok(!readCode("lib/orderFulfillment.ts").includes("discount"),
-    "the order writer's caller handles a discount itself");
+
+  // LAUNCH FIX A RE-PINS THIS ONE. The caller used to be forbidden the
+  // word outright. It now CARRIES the frozen amount - the RPC returns
+  // the whole orders row and the type was simply one field short, which
+  // is why every mail built from a CreatedOrder printed a Zwischensumme
+  // and a Gesamt that did not reconcile.
+  //
+  // Carrying is not deciding, and the distinction is what this asserts:
+  // the column appears exactly once, as a field on the returned row, and
+  // nothing here computes, re-derives or adjusts it.
+  const fulfillment = readCode("lib/orderFulfillment.ts");
+  assert.match(fulfillment, /discount_total_cents: number;/);
+  assert.equal([...fulfillment.matchAll(/discount/g)].length, 1,
+    "the order writer's caller does more with a discount than carry it");
+  for (const forbidden of ["LAUNCH_DISCOUNT", "priceLaunchDiscount", "decideLaunchDiscount",
+                           "p_discount", "discountGrossCents"]) {
+    assert.ok(!fulfillment.includes(forbidden), `the order writer's caller handles a discount itself: ${forbidden}`);
+  }
 });
 
 test("5b: NO CLAIM LIFECYCLE ANYWHERE IN THE WEBHOOK", () => {

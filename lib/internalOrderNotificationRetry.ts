@@ -58,7 +58,7 @@ import type { AddressSnapshot } from "./orderAddressSnapshot";
  * reading different facts about one order.
  */
 export const ORDER_COLUMNS =
-  "id, order_number, currency, subtotal_gross_cents, shipping_gross_cents, total_gross_cents, shipping_address_snapshot, customer_snapshot, checkout_attempt_id, internal_notification_status";
+  "id, order_number, currency, subtotal_gross_cents, discount_total_cents, shipping_gross_cents, total_gross_cents, shipping_address_snapshot, customer_snapshot, checkout_attempt_id, internal_notification_status";
 
 /**
  * The work list.

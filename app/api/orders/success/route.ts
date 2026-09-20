@@ -18,6 +18,19 @@ type SuccessResponse =
         placedAt: string;
         currency: string;
         subtotalGrossCents: number;
+        /**
+         * What GLOALAUNCH10 took off, in whole cents, exactly as
+         * create_order_from_paid_checkout froze it onto the order. Zero
+         * for an undiscounted order - a real zero, not an unknown, which
+         * is the decision migration 004's NOT NULL DEFAULT 0 already
+         * encoded and 057 kept.
+         *
+         * READ, NEVER RECOMPUTED. The code, the window and the basket
+         * that produced this number are all long gone by the time this
+         * page is opened; re-deriving it here would be a second opinion
+         * about money that has already been charged.
+         */
+        discountGrossCents: number;
         shippingGrossCents: number | null;
         totalGrossCents: number;
         paymentStatus: string;
@@ -87,7 +100,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const { data: order, error: orderError } = await admin
     .from("orders")
-    .select("id, order_number, currency, subtotal_gross_cents, shipping_gross_cents, total_gross_cents, payment_status, placed_at, created_at, shipping_address_snapshot")
+    .select("id, order_number, currency, subtotal_gross_cents, discount_total_cents, shipping_gross_cents, total_gross_cents, payment_status, placed_at, created_at, shipping_address_snapshot")
     .eq("checkout_attempt_id", attempt.id)
     .maybeSingle();
 
@@ -122,6 +135,10 @@ export async function GET(request: Request): Promise<Response> {
         placedAt: order.placed_at ?? order.created_at,
         currency: order.currency,
         subtotalGrossCents: order.subtotal_gross_cents,
+        // coalesced, not defaulted: the column is NOT NULL DEFAULT 0, so
+        // this only covers a row written before 004 - and 0 is the right
+        // answer for those, because no discount existed to apply.
+        discountGrossCents: order.discount_total_cents ?? 0,
         shippingGrossCents: order.shipping_gross_cents,
         totalGrossCents: order.total_gross_cents,
         paymentStatus: order.payment_status,
