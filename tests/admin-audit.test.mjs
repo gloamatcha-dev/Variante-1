@@ -781,15 +781,15 @@ test("6c: 052 is additive, and edits none of the 51 before it", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(files.length, 57);
+  assert.equal(files.length, 58);
   // 4A.4b added 053, so 052 is no longer the newest - it is the one
   // before it. What this guard is actually about is that 052 sits at its
   // own number and nothing was slipped in between.
-  assert.equal(files[files.length - 4], "054_b2c_price_alignment.sql",
+  assert.equal(files[files.length - 5], "054_b2c_price_alignment.sql",
     "054 is no longer the migration directly below the newest");
-  assert.equal(files[files.length - 6], "052_admin_activity_audit.sql",
+  assert.equal(files[files.length - 7], "052_admin_activity_audit.sql",
     "052 is no longer the migration before the newest");
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 57), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 58), [],
     "a migration 058 or beyond appeared");
   // 001-051 are immutable, which git - not a regex - is the authority on.
   // What this can assert is that 052 names none of them as something to
@@ -1097,7 +1097,7 @@ test("8h: exposing the tab is a UI concern - it touched no migration", () => {
   // a database-looking bug. The audit schema is already in production
   // and nothing about it moved.
   const files = readdirSync(path.join(ROOT, "supabase/migrations")).filter(f => f.endsWith(".sql"));
-  assert.equal(files.length, 57, "a migration was added or removed by a navigation fix");
+  assert.equal(files.length, 58, "a migration was added or removed by a navigation fix");
   assert.ok(!files.includes("053_admin_activity_nav.sql"), "a migration was invented for a UI fix");
   // And no migration knows what a tab is.
   for (const f of files) {

@@ -283,6 +283,90 @@ export function allocateDiscountedStripeLines(
  * attempt id, no internal word - and nothing about anybody else,
  * because with a reusable code there is nobody else to leak.
  */
+/* ── THE ALLOCATION, AS THE DATABASE KEEPS IT ───────────────── */
+
+/**
+ * One basket line's share of the discount, as migration 058 stores it
+ * on the checkout attempt.
+ *
+ * KEYED BY variantId, NOT BY POSITION. The order writer matches on it,
+ * the same way it already matches the tax snapshot's lines - the two
+ * arrays are built from one quote today, and relying on that would be a
+ * silent mis-accounting the day it stops being true. validateQuoteItems
+ * merges duplicate variant ids before a quote is built, so one entry per
+ * variant is guaranteed upstream.
+ */
+export type DiscountLineAllocationEntry = {
+  variantId: string;
+  discountGrossCents: number;
+};
+
+/**
+ * Pairs the split this module just computed with the lines it was
+ * computed over.
+ *
+ * EVERY LINE IS PRESENT, INCLUDING THE EXCLUDED ONES, at zero. "This
+ * line was considered and got nothing" and "this line was forgotten"
+ * must not look the same to the order writer, because one is a Metal
+ * Case and the other is a bug that would leave an order whose lines do
+ * not sum to its own discount_total_cents. 058 refuses an allocation
+ * that is missing a line, so the zeros are load-bearing.
+ */
+export function buildDiscountLineAllocation(
+  lines: readonly DiscountableLine[],
+  lineDiscountGrossCents: readonly number[]
+): DiscountLineAllocationEntry[] {
+  return lines.map((line, index) => ({
+    variantId: line.variantId,
+    discountGrossCents: lineDiscountGrossCents[index] ?? 0,
+  }));
+}
+
+/**
+ * Do two allocations say the same thing?
+ *
+ * Compared as a variantId -> cents mapping rather than as two arrays, so
+ * a different ordering of the same facts is not read as a conflict. Used
+ * by the checkout to decide whether a retry may settle against a frozen
+ * attempt: same lines, same shares, same total, or refuse.
+ */
+export function sameDiscountLineAllocation(
+  a: readonly DiscountLineAllocationEntry[] | null,
+  b: readonly DiscountLineAllocationEntry[] | null
+): boolean {
+  if (a === null || b === null) return a === b;
+  if (a.length !== b.length) return false;
+  const byVariant = new Map(a.map((entry) => [entry.variantId, entry.discountGrossCents]));
+  if (byVariant.size !== a.length) return false; // a duplicate variant is never equal to anything
+  for (const entry of b) {
+    if (byVariant.get(entry.variantId) !== entry.discountGrossCents) return false;
+  }
+  return true;
+}
+
+/**
+ * Is this value an allocation at all?
+ *
+ * The attempt row comes back as `unknown` from PostgREST, and a frozen
+ * attempt written before 058 carries null. Everything the order writer
+ * will refuse is refused here first, so the checkout fails with a
+ * sentence rather than leaving it to a paid webhook.
+ */
+export function isDiscountLineAllocation(value: unknown): value is DiscountLineAllocationEntry[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every(
+      (entry) =>
+        typeof entry === "object" &&
+        entry !== null &&
+        typeof (entry as DiscountLineAllocationEntry).variantId === "string" &&
+        Number.isSafeInteger((entry as DiscountLineAllocationEntry).discountGrossCents) &&
+        (entry as DiscountLineAllocationEntry).discountGrossCents >= 0
+    )
+  );
+}
+
 export const LAUNCH_DISCOUNT_MESSAGES = Object.freeze({
   unknown_code: "Rabattcode ist ungültig.",
   not_yet_active: "Der Rabattcode ist noch nicht gültig.",

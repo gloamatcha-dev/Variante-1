@@ -340,17 +340,20 @@ test("5d: no backend, migration or commercial logic changed", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("058")),
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("059")),
     "a migration 058 or beyond appeared");
   // 047 withdraws the metal case from the catalog, reviewed in
   // tests/catalog-availability.test.mjs. Re-pinned rather than removed:
   // the guard protects "no UNREVIEWED migration appeared".
   // 057 SIMPLIFIED THE LAUNCH DISCOUNT: the one-use claim architecture
-  // 056 built is removed, because the code became reusable. Re-pinned
-  // rather than deleted - what this guard protects is that nothing
-  // UNREVIEWED appeared. Reviewed in
-  // tests/launch-discount-migration.test.mjs.
-  assert.equal(readdirSync(path.join(ROOT, "supabase/migrations")).filter(f => f.endsWith(".sql")).length, 57,
+  // 056 built is removed, because the code became reusable. 058 then
+  // gave a discounted ORDER LINE its own accounting - one jsonb column
+  // on checkout_attempts and two integer columns on order_items, all
+  // additive, none of them annual. Re-pinned rather than deleted: what
+  // this guard protects is that nothing UNREVIEWED appeared. Reviewed
+  // in tests/launch-discount-migration.test.mjs and
+  // tests/discounted-line-accounting.test.mjs.
+  assert.equal(readdirSync(path.join(ROOT, "supabase/migrations")).filter(f => f.endsWith(".sql")).length, 58,
     "the migration count changed");
   // The one-time path is untouched.
   assert.ok(site.includes('purchaseType:"once",unitPriceCents:v.price_gross_cents'),

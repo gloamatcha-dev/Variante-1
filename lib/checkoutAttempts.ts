@@ -1,6 +1,7 @@
 import { getSupabaseAdmin } from "./supabaseAdmin";
 import type { CheckoutQuote } from "./checkoutQuote";
 import { buildItemsSnapshot, type CheckoutAttemptItemSnapshot } from "./checkoutAttemptSnapshot";
+import type { DiscountLineAllocationEntry } from "./launchDiscountCart";
 import type { ShippingZoneKey } from "./shipping";
 import type { CartTaxSnapshot } from "./tax";
 // Phase 4B4.1. The annual settlement writers below are compare-and-set,
@@ -60,10 +61,26 @@ export type CheckoutAttempt = {
    */
   discount_code: string | null;
   discount_gross_cents: number | null;
+  /**
+   * WHICH LINES THE DISCOUNT CAME OFF, frozen with the amount
+   * (migration 058). One entry per items_snapshot line, keyed by
+   * variantId, excluded lines carried as 0.
+   *
+   * Before 058 the amount was frozen and its split was not, so a
+   * discounted order's lines could only be described by re-running the
+   * allocator - which the order writer cannot do, because it is SQL.
+   * The result was a paid line whose gross and net were computed on
+   * different bases with nothing in between to explain the gap.
+   *
+   * Null on every attempt that used no code, and on all 729 that
+   * predate the column. Never recomputed from the percentage: it IS
+   * what lib/launchDiscountCart.ts decided, carried forward.
+   */
+  discount_line_allocation: DiscountLineAllocationEntry[] | null;
 };
 
 const ATTEMPT_COLUMNS =
-  "id, request_id, status, currency, expected_total_gross_cents, items_snapshot, shipping_country, shipping_zone, shipping_gross_cents, tax_snapshot, stripe_checkout_session_id, stripe_payment_intent_id, customer_email, stripe_customer_id, discount_code, discount_gross_cents";
+  "id, request_id, status, currency, expected_total_gross_cents, items_snapshot, shipping_country, shipping_zone, shipping_gross_cents, tax_snapshot, stripe_checkout_session_id, stripe_payment_intent_id, customer_email, stripe_customer_id, discount_code, discount_gross_cents, discount_line_allocation";
 
 /**
  * The identity a one-time attempt freezes: the normalized email the
@@ -90,6 +107,13 @@ export type CheckoutAttemptIdentity = {
 export type CheckoutAttemptDiscount = {
   code: string;
   grossCents: number;
+  /**
+   * The exact split the amount was made of. Part of the same one fact:
+   * migration 058's pairing constraint refuses a code and an amount
+   * without it, and the order writer refuses to mint an order whose
+   * line shares do not sum back to the amount.
+   */
+  lineAllocation: DiscountLineAllocationEntry[];
 };
 
 export type GetOrCreateAttemptResult =
@@ -164,6 +188,14 @@ export async function getOrCreateCheckoutAttempt(
         // on divergence.
         discount_code: discount?.code ?? null,
         discount_gross_cents: discount?.grossCents ?? null,
+        // And the same freeze once more, applied to WHICH LINES it came
+        // off. Frozen here rather than derived later because the order
+        // writer is PL/pgSQL and the allocator is TypeScript: porting
+        // largest-remainder into SQL would be a second implementation of
+        // one money rule, and deriving it from the tax snapshot would
+        // leave a discounted order to an untaxed destination with no
+        // per-line figure at all.
+        discount_line_allocation: discount?.lineAllocation ?? null,
       },
       { onConflict: "request_id", ignoreDuplicates: true }
     );

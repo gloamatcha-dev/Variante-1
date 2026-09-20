@@ -734,7 +734,16 @@ test("55: this phase added no migration, and the only ones after it are 038 and 
      // one-use claim architecture 056 built and touches nothing this
      // suite protects. Reviewed in
      // tests/launch-discount-migration.test.mjs.
-     "057_simplify_launch_discount.sql"],
+     "057_simplify_launch_discount.sql",
+     // 058: THE DISCOUNTED ORDER LINE ACCOUNTING. It adds one jsonb column
+     // to checkout_attempts (the frozen per-line discount split), two
+     // integer columns to order_items (that line's share, and its actual
+     // tax), and replaces the paid-order writer IN PLACE on its existing
+     // six-argument signature. Additive: no existing column changes
+     // meaning, no row is backfilled, nothing is granted to anon or
+     // authenticated, and no subscription, annual or B2B object is
+     // touched. Reviewed in tests/discounted-line-accounting.test.mjs.
+     "058_discounted_order_line_accounting.sql"],
     "an unreviewed migration appeared after 037");
   const sql039 = withoutComments(read("supabase/migrations/039_b2c_annual_plan_foundation.sql"));
   assert.ok(!sql039.includes("apply_order_refund_state_by_invoice"),

@@ -603,14 +603,14 @@ test("27: 039 and 040 are untouched, 041 is the highest, and there is no 042", (
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations[migrations.length - 12], "046_launch_signup_atomic.sql");
-  assert.equal(migrations[migrations.length - 13], "045_launch_welcome_email.sql");
-  assert.equal(migrations[migrations.length - 14], "044_launch_send.sql");
-  assert.equal(migrations[migrations.length - 15], "043_launch_waitlist.sql");
-  assert.equal(migrations[migrations.length - 16], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 57), [],
+  assert.equal(migrations[migrations.length - 13], "046_launch_signup_atomic.sql");
+  assert.equal(migrations[migrations.length - 14], "045_launch_welcome_email.sql");
+  assert.equal(migrations[migrations.length - 15], "044_launch_send.sql");
+  assert.equal(migrations[migrations.length - 16], "043_launch_waitlist.sql");
+  assert.equal(migrations[migrations.length - 17], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 58), [],
     "a migration 058 or beyond appeared");
-  assert.equal(migrations.length, 57);
+  assert.equal(migrations.length, 58);
   // 039 is LIVE and therefore immutable. 040 is NOT APPLIED yet, so it
   // may still be edited in place - that is the whole reason it is a file
   // under review rather than a 041 - and it is the only one that may.

@@ -106,9 +106,9 @@ test("1: 038 exists, owns its number, and 039 is the only one above it", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(files[files.length - 19], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 20], MIGRATION_038, "038 must be the one before it");
-  assert.equal(files[files.length - 21], MIGRATION_037, "037 must be the one before that");
+  assert.equal(files[files.length - 20], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 21], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 22], MIGRATION_037, "037 must be the one before that");
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
@@ -180,7 +180,16 @@ test("2: no migration 044 or beyond", () => {
      // one-use claim architecture 056 built and touches nothing this
      // suite protects. Reviewed in
      // tests/launch-discount-migration.test.mjs.
-     "057_simplify_launch_discount.sql"],
+     "057_simplify_launch_discount.sql",
+     // 058: THE DISCOUNTED ORDER LINE ACCOUNTING. It adds one jsonb column
+     // to checkout_attempts (the frozen per-line discount split), two
+     // integer columns to order_items (that line's share, and its actual
+     // tax), and replaces the paid-order writer IN PLACE on its existing
+     // six-argument signature. Additive: no existing column changes
+     // meaning, no row is backfilled, nothing is granted to anon or
+     // authenticated, and no subscription, annual or B2B object is
+     // touched. Reviewed in tests/discounted-line-accounting.test.mjs.
+     "058_discounted_order_line_accounting.sql"],
     "an unreviewed migration appeared after 043");
   // And 039 kept its hands off this phase's writer entirely.
   for (const name of [MIGRATION_039, MIGRATION_040, MIGRATION_041, MIGRATION_042]) {

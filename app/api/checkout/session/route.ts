@@ -13,6 +13,9 @@ import {
   priceLaunchDiscountForCart,
   splitFrozenDiscountAcrossCart,
   allocateDiscountedStripeLines,
+  buildDiscountLineAllocation,
+  sameDiscountLineAllocation,
+  isDiscountLineAllocation,
   launchDiscountMessage,
   type DiscountableLine,
 } from "../../../../lib/launchDiscountCart";
@@ -319,7 +322,19 @@ export async function POST(request: Request): Promise<Response> {
         { status: 409 }
       );
     }
-    discount = { code: priced.code, grossCents: priced.discountGrossCents };
+    // THE AMOUNT AND ITS SPLIT ARE FROZEN TOGETHER. The split is not a
+    // derived convenience: migration 058 stores it on the attempt
+    // because the order writer is SQL and cannot re-run the allocator,
+    // and because a discounted order to a destination whose VAT is not
+    // implemented has no tax snapshot to recover it from.
+    //
+    // Every line is present, excluded ones at zero, so "considered and
+    // got nothing" stays distinguishable from "forgotten".
+    discount = {
+      code: priced.code,
+      grossCents: priced.discountGrossCents,
+      lineAllocation: buildDiscountLineAllocation(discountLines, priced.lineDiscountGrossCents),
+    };
     discountedLineGrossCents = priced.discountedLineGrossCents;
   }
 
@@ -502,12 +517,22 @@ export async function POST(request: Request): Promise<Response> {
   // Rewriting it to agree is not an option either: a frozen price that
   // can be edited is not frozen, and the customer is looking at the
   // other one.
+  //
+  // THE SPLIT IS PART OF THE TERMS, not a detail of them. Two baskets
+  // can produce the same total discount from different lines, and the
+  // order this attempt will become records the shares - so an attempt
+  // frozen with one allocation must not be settled against another.
+  const frozenAllocation = isDiscountLineAllocation(attempt.discount_line_allocation)
+    ? attempt.discount_line_allocation
+    : null;
+
   if (
     attempt.discount_code !== (discount?.code ?? null) ||
-    attempt.discount_gross_cents !== (discount?.grossCents ?? null)
+    attempt.discount_gross_cents !== (discount?.grossCents ?? null) ||
+    !sameDiscountLineAllocation(frozenAllocation, discount?.lineAllocation ?? null)
   ) {
     console.error(
-      `Checkout session: attempt ${attempt.id} holds a different frozen discount (frozen ${attempt.discount_code ?? "none"}/${attempt.discount_gross_cents ?? 0}, requested ${discount?.code ?? "none"}/${discount?.grossCents ?? 0}) - session withheld.`
+      `Checkout session: attempt ${attempt.id} holds a different frozen discount (frozen ${attempt.discount_code ?? "none"}/${attempt.discount_gross_cents ?? 0}/${frozenAllocation?.length ?? 0} lines, requested ${discount?.code ?? "none"}/${discount?.grossCents ?? 0}/${discount?.lineAllocation.length ?? 0} lines) - session withheld.`
     );
     return Response.json(
       { error: CHECKOUT_TERMS_CONFLICT_MESSAGE } as ErrorResponse,

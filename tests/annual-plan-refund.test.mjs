@@ -853,7 +853,7 @@ test("29: this phase adds no migration, no route and no customer action", () => 
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 57);
+  assert.equal(migrations.length, 58);
   // PHASE 4B8.2 ADDED MIGRATION 042: the ONE column privilege 041
   // was short of, so migration 039's delivery policy can still read
   // the parent's user_id while resolving ownership. Reviewed in
@@ -862,11 +862,11 @@ test("29: this phase adds no migration, no route and no customer action", () => 
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(migrations[migrations.length - 12], "046_launch_signup_atomic.sql");
-  assert.equal(migrations[migrations.length - 13], "045_launch_welcome_email.sql");
-  assert.equal(migrations[migrations.length - 14], "044_launch_send.sql");
-  assert.equal(migrations[migrations.length - 15], "043_launch_waitlist.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 57), [], "a migration 058 or beyond appeared");
+  assert.equal(migrations[migrations.length - 13], "046_launch_signup_atomic.sql");
+  assert.equal(migrations[migrations.length - 14], "045_launch_welcome_email.sql");
+  assert.equal(migrations[migrations.length - 15], "044_launch_send.sql");
+  assert.equal(migrations[migrations.length - 16], "043_launch_waitlist.sql");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 58), [], "a migration 058 or beyond appeared");
 
   // No annual refund endpoint, and no browser-triggered refund anywhere.
   const annualRoutes = readdirSync(path.join(ROOT, "app/api/annual-plan"), { withFileTypes: true })

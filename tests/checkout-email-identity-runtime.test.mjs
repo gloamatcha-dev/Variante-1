@@ -534,7 +534,7 @@ test("6: a new attempt freezes both halves of the identity", () => {
   assert.match(attempts, /stripe_customer_id: identity\?\.stripeCustomerId \?\? null,/);
   // Both columns are selected back, so the caller can verify what was
   // actually frozen rather than assume its own values were written.
-  assert.match(attempts, /const ATTEMPT_COLUMNS =\s*\n?\s*"[^"]*customer_email, stripe_customer_id, discount_code, discount_gross_cents"/);
+  assert.match(attempts, /const ATTEMPT_COLUMNS =\s*\n?\s*"[^"]*customer_email, stripe_customer_id, discount_code, discount_gross_cents, discount_line_allocation"/);
   assert.match(sessionRoute, /\{ email: customerEmail, stripeCustomerId \}/);
 });
 

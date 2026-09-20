@@ -164,7 +164,7 @@ test("1e: no backend, auth, data or commercial logic changed", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("058")),
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("059")),
     "a migration 058 or beyond appeared");
   // The presentation primitives stayed presentation.
   assert.ok(!/supabase|useAuth|customer_type/.test(ui), "AccountUI grew a data dependency");

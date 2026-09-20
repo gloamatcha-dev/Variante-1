@@ -108,17 +108,17 @@ test("1, 2: 036 exists, owns its number, and 037 is the only thing above it", ()
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(files[files.length - 12], "046_launch_signup_atomic.sql");
-  assert.equal(files[files.length - 13], "045_launch_welcome_email.sql");
-  assert.equal(files[files.length - 14], "044_launch_send.sql");
-  assert.equal(files[files.length - 15], "043_launch_waitlist.sql");
-  assert.equal(files[files.length - 16], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.equal(files[files.length - 17], "041_annual_account_column_privileges.sql");
-  assert.equal(files[files.length - 18], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(files[files.length - 22], MIGRATION_036, "036 must still be the one before 037");
+  assert.equal(files[files.length - 13], "046_launch_signup_atomic.sql");
+  assert.equal(files[files.length - 14], "045_launch_welcome_email.sql");
+  assert.equal(files[files.length - 15], "044_launch_send.sql");
+  assert.equal(files[files.length - 16], "043_launch_waitlist.sql");
+  assert.equal(files[files.length - 17], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(files[files.length - 18], "041_annual_account_column_privileges.sql");
+  assert.equal(files[files.length - 19], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 23], MIGRATION_036, "036 must still be the one before 037");
   assert.deepEqual(files.filter(f => f.startsWith("037")), ["037_subscription_refund_correlation.sql"]);
-  assert.ok(!files.some(f => f.startsWith("058")), "a migration 058 or beyond appeared");
-  assert.equal(files.length, 57);
+  assert.ok(!files.some(f => f.startsWith("059")), "a migration 058 or beyond appeared");
+  assert.equal(files.length, 58);
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length);

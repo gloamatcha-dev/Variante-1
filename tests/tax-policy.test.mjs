@@ -193,16 +193,56 @@ test("migration: 021 owns its number and no later migration undoes it", () => {
                    "shipping_tax_allocation", "order_items"];
     // 057 replaces the order writer for the SECOND time, and for the
     // opposite reason: it removes the claim redemption 056 put in, now
-    // that the launch code is reusable. The exception is therefore the
+    // that the launch code is reusable. 058 replaces it a THIRD time,
+    // to write two new per-line columns. The exception is therefore the
     // same exception, extended - the signature and 021's tax contract
     // are re-proved below for whichever migration claims it.
     const REPLACES_THE_ORDER_WRITER =
-      name === "056_launch_discount.sql" || name === "057_simplify_launch_discount.sql";
-    for (const owned of REPLACES_THE_ORDER_WRITER
-                          ? OWNED
-                          : ["create_order_from_paid_checkout", ...OWNED]) {
+      name === "056_launch_discount.sql"
+      || name === "057_simplify_launch_discount.sql"
+      || name === "058_discounted_order_line_accounting.sql";
+
+    // 058 ALSO ALTERS order_items, which 021 owns - and that is the
+    // whole point of it, so a blanket ban would be a ban on fixing the
+    // table. The waiver is narrowed to what 058 actually does rather
+    // than widened to whatever it might: ADD COLUMN and ADD/DROP
+    // CONSTRAINT only. Nothing may change or remove a column 021's tax
+    // snapshot writes into, and the additive-only rule is asserted
+    // directly below rather than assumed.
+    const ADDS_ORDER_ITEM_COLUMNS = name === "058_discounted_order_line_accounting.sql";
+    const banned = REPLACES_THE_ORDER_WRITER
+      ? OWNED.filter(owned => !(ADDS_ORDER_ITEM_COLUMNS && owned === "order_items"))
+      : ["create_order_from_paid_checkout", ...OWNED];
+    for (const owned of banned) {
       assert.ok(!new RegExp(`(alter|drop|create or replace)[^;]*${owned}`, "i").test(later),
         `${name} modifies the tax object ${owned}`);
+    }
+
+    if (ADDS_ORDER_ITEM_COLUMNS) {
+      // Every statement aimed at order_items, and what it is allowed to
+      // be. ADD COLUMN IF NOT EXISTS for the two new accounting fields;
+      // ADD/DROP CONSTRAINT for the three CHECKs that police them. No
+      // ALTER COLUMN, no DROP COLUMN, no RENAME, and no UPDATE - so not
+      // one of 021's columns can change type, nullability or meaning,
+      // and not one historical row can be rewritten.
+      const statements = later.split(";").filter(s => /alter table public\.order_items/i.test(s));
+      assert.ok(statements.length > 0, "058 no longer touches order_items at all");
+      for (const statement of statements) {
+        assert.ok(
+          /add column if not exists (discount_gross_cents|line_total_tax_cents)/i.test(statement)
+          || /(add|drop) constraint/i.test(statement),
+          `058 does something other than add a column or a constraint to order_items: ${statement.trim().slice(0, 120)}`
+        );
+      }
+      for (const forbidden of [/alter column/i, /drop column/i, /rename/i]) {
+        assert.ok(!forbidden.test(later.slice(later.indexOf("alter table public.order_items"))),
+          `058 rewrites an existing order_items column (${forbidden})`);
+      }
+      assert.ok(!/update\s+public\.order_items/i.test(later), "058 rewrites historical order items");
+      // And 021's own columns are still written by the new body.
+      for (const column of ["line_total_net_cents", "tax_rate_percent", "tax_category"]) {
+        assert.ok(later.includes(column), `058 stopped writing 021's ${column}`);
+      }
     }
     if (REPLACES_THE_ORDER_WRITER) {
       // The signature is 021's, so this is a replacement and not a

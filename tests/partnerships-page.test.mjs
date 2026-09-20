@@ -657,7 +657,7 @@ test("4c: one API route, no server action, no migration was added for this page"
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.ok(!migrations.some(f => f.startsWith("058")), "a migration 058 or beyond appeared");
+  assert.ok(!migrations.some(f => f.startsWith("059")), "a migration 058 or beyond appeared");
 });
 
 /* ══════════════════════════════════════════════════════════════

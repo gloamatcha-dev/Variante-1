@@ -90,12 +90,12 @@ test("1: 042 is the newest migration, and 001-041 are untouched", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 57);
+  assert.equal(migrations.length, 58);
   assert.equal(migrations[38], "039_b2c_annual_plan_foundation.sql");
   assert.equal(migrations[39], "040_annual_checkout_retry_fingerprints.sql");
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
   assert.equal(migrations[41], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 57), [], "a migration 058 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 58), [], "a migration 058 or beyond appeared");
 
   // No live migration was edited to make room for this one.
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],

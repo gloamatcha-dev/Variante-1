@@ -150,8 +150,8 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(files[files.length - 19], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 20], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 20], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 21], MIGRATION_038, "038 must be the one before it");
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
@@ -159,7 +159,7 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
 test("2: no migration 044 or beyond", () => {
   // 039 is not applied anywhere, so it is still the right place to fix
   // 039. A hardening pass must not become a second migration.
-  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 57);
+  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 58);
   assert.deepEqual(beyond, [], "an unreviewed migration appeared after 039");
 });
 
@@ -1235,6 +1235,15 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // shape or failure policy changed. Reviewed in
     // tests/checkout-rate-limit.test.mjs.
     "lib/launchRateLimit.ts",
+    // MIGRATION 058'S RUNTIME HALF. The pure cart leaf gains the
+    // allocation's three helpers - build it from a split it already
+    // computed, compare two of them, and recognise one coming back from
+    // PostgREST - and lib/checkoutAttempts.ts freezes the result in a
+    // new column. Nothing existing changed: the allocator, the SKU
+    // allowlist, the Stripe per-unit split and every existing writer
+    // are untouched, and no annual object is involved. Reviewed in
+    // tests/discounted-line-accounting.test.mjs.
+    "lib/launchDiscountCart.ts",
   ];
 
   // Phase 4B4 edits ONE application module: the single canonical Stripe

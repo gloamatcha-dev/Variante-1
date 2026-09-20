@@ -187,13 +187,27 @@ test("2d: TAX IS RECOMPUTED ON THE DISCOUNTED LINES", () => {
 
 test("3: the attempt freezes the code and the exact amount, or neither", () => {
   assert.match(attempts, /discount_code: string \| null;\s*\n\s*discount_gross_cents: number \| null;/);
-  assert.match(attempts, /discount_code, discount_gross_cents"/);
+  assert.match(attempts, /discount_code, discount_gross_cents, discount_line_allocation"/);
   assert.match(attempts, /discount_code: discount\?\.code \?\? null,\s*\n\s*discount_gross_cents: discount\?\.grossCents \?\? null,/);
 
-  // BOTH OR NEITHER, which migration 057's paired CHECK enforces at the
-  // database - so an undiscounted attempt writes two nulls and cannot
-  // write half a discount.
-  assert.match(attempts, /export type CheckoutAttemptDiscount = \{\s*\n\s*code: string;\s*\n\s*grossCents: number;\s*\n\};/);
+  // ALL THREE OR NONE, which migration 058's paired CHECK enforces at
+  // the database - so an undiscounted attempt writes three nulls and
+  // cannot write part of a discount.
+  //
+  // 058 ADDED THE THIRD. The amount was frozen and its split was not,
+  // so a discounted order's lines could only be described by re-running
+  // the allocator - which the PL/pgSQL order writer cannot do. The
+  // split is now part of the same one fact, which is why it is a field
+  // on this type rather than a fourth argument somewhere.
+  const discountType = attempts.slice(
+    attempts.indexOf("export type CheckoutAttemptDiscount = {")
+  );
+  const discountBody = discountType.slice(0, discountType.indexOf("};"));
+  assert.match(discountBody, /code: string;/);
+  assert.match(discountBody, /grossCents: number;/);
+  assert.match(discountBody, /lineAllocation: DiscountLineAllocationEntry\[\];/);
+  assert.match(attempts, /discount_line_allocation: discount\?\.lineAllocation \?\? null,/);
+  assert.match(attempts, /discount_line_allocation: DiscountLineAllocationEntry\[\] \| null;/);
 
   // THE FROZEN TOTAL IS THE DISCOUNTED ONE. Stripe's amount_total is
   // held to it to the cent, and shipping is added after the reduction
@@ -210,6 +224,11 @@ test("3b: A RETRY CANNOT CHANGE THE COMMERCIAL TERMS IT ALREADY FROZE", () => {
   // carry, without the code it does, or with a different amount is
   // asking to settle a different checkout under an old request id.
   assert.match(sessionCode, /attempt\.discount_code !== \(discount\?\.code \?\? null\) \|\|\s*\n\s*attempt\.discount_gross_cents !== \(discount\?\.grossCents \?\? null\)/);
+  // AND SINCE 058, THE SPLIT TOO. Two baskets can reach the same total
+  // discount from different lines, and the order this attempt becomes
+  // records the shares - so an attempt frozen with one allocation must
+  // not be settled against another.
+  assert.match(sessionCode, /!sameDiscountLineAllocation\(frozenAllocation, discount\?\.lineAllocation \?\? null\)/);
   assert.match(sessionCode, /CHECKOUT_TERMS_CONFLICT_MESSAGE/);
   assert.match(read("lib/checkoutIdentity.ts"), /CHECKOUT_TERMS_CONFLICT_MESSAGE =\s*\n\s*"Dieser Checkout wurde bereits mit anderen Angaben gestartet/);
 
