@@ -903,12 +903,17 @@ test("32: the checkout phase's own migrations are untouched, and 041 is not its 
   // phase's own migrations are live and immutable.
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 56);
+  // 057 SIMPLIFIED THE LAUNCH DISCOUNT: the one-use claim architecture
+  // 056 built is removed, because the code became reusable. Re-pinned
+  // rather than deleted - what this guard protects is that nothing
+  // UNREVIEWED appeared. Reviewed in
+  // tests/launch-discount-migration.test.mjs.
+  assert.equal(migrations.length, 57);
   assert.equal(migrations[38], "039_b2c_annual_plan_foundation.sql");
   assert.equal(migrations[39], "040_annual_checkout_retry_fingerprints.sql");
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 56), [],
-    "a migration 057 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 57), [],
+    "a migration 058 or beyond appeared");
   // 041 touches privileges only: it creates no table, no column and no
   // function, so it cannot have changed anything this suite proves.
   const m041 = read("supabase/migrations/041_annual_account_column_privileges.sql");
@@ -926,12 +931,7 @@ test("32: the checkout phase's own migrations are untouched, and 041 is not its 
   assert.ok(executable.includes("revoke select on table public.annual_plans"));
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
-  const touched = (changed ? changed.split(NEWLINE) : [])
-  // 056 is committed but NOT APPLIED to production, so it is still
-  // corrected in place rather than by a 057 - a 057 would have to alter
-  // a table that exists nowhere yet. The moment it IS applied it joins
-  // the immutable set and this exemption must go.
-    .filter(rel => !rel.endsWith("056_launch_discount.sql"));
+  const touched = changed ? changed.split(NEWLINE) : [];
   assert.deepEqual(touched, [], "a live, immutable migration was edited");
 });
 

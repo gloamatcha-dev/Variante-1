@@ -85,23 +85,22 @@ const selectColumns = select => select.split(",").map(c => c.trim()).filter(Bool
 test("1: 042 is the newest migration, and 001-041 are untouched", () => {
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 56);
+  // 057 SIMPLIFIED THE LAUNCH DISCOUNT: the one-use claim architecture
+  // 056 built is removed, because the code became reusable. Re-pinned
+  // rather than deleted - what this guard protects is that nothing
+  // UNREVIEWED appeared. Reviewed in
+  // tests/launch-discount-migration.test.mjs.
+  assert.equal(migrations.length, 57);
   assert.equal(migrations[38], "039_b2c_annual_plan_foundation.sql");
   assert.equal(migrations[39], "040_annual_checkout_retry_fingerprints.sql");
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
   assert.equal(migrations[41], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 56), [], "a migration 057 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 57), [], "a migration 058 or beyond appeared");
 
   // No live migration was edited to make room for this one.
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
-  // 056 is committed but NOT APPLIED to production, so it is still
-  // corrected in place rather than by a 057 - a 057 would have to alter
-  // a table that exists nowhere yet. The moment it IS applied it joins
-  // the immutable set and this exemption must go.
-  const live = (changed ? changed.split(/\r?\n/) : [])
-    .filter(rel => !rel.endsWith("056_launch_discount.sql"));
-  assert.deepEqual(live, [], "a live, immutable migration was edited");
+  assert.equal(changed, "", "a live, immutable migration was edited");
 });
 
 test("2: everything executable is inside ONE transaction", () => {
@@ -468,13 +467,7 @@ test("20: 041 itself is untouched, and so is every migration below it", () => {
   // 041 is LIVE now. The fix is a new file, never an edit to it.
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
-  // 056 is committed but NOT APPLIED to production, so it is still
-  // corrected in place rather than by a 057 - a 057 would have to alter
-  // a table that exists nowhere yet. The moment it IS applied it joins
-  // the immutable set and this exemption must go.
-  const live = (changed ? changed.split(/\r?\n/) : [])
-    .filter(rel => !rel.endsWith("056_launch_discount.sql"));
-  assert.deepEqual(live, [], "a live, immutable migration was edited");
+  assert.equal(changed, "", "a live, immutable migration was edited");
   // 041 still says what it said: the same revokes and the same grants.
   assert.match(executable, /revoke select on table public\.annual_plans\s+from authenticated;/);
   assert.equal(PLAN_GRANTS.length, 18);

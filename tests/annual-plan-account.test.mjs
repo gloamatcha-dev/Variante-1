@@ -792,9 +792,14 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
   // only - no table, no column, no function, no policy, no row.
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 56);
+  // 057 SIMPLIFIED THE LAUNCH DISCOUNT: the one-use claim architecture
+  // 056 built is removed, because the code became reusable. Re-pinned
+  // rather than deleted - what this guard protects is that nothing
+  // UNREVIEWED appeared. Reviewed in
+  // tests/launch-discount-migration.test.mjs.
+  assert.equal(migrations.length, 57);
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 56), [], "a migration 057 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 57), [], "a migration 058 or beyond appeared");
 
   // The API surface is unchanged: no account endpoint exists, because the
   // portal reads its own rows under RLS.

@@ -103,17 +103,22 @@ test("1, 2: 036 exists, owns its number, and 037 is the only thing above it", ()
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(files[files.length - 11], "046_launch_signup_atomic.sql");
-  assert.equal(files[files.length - 12], "045_launch_welcome_email.sql");
-  assert.equal(files[files.length - 13], "044_launch_send.sql");
-  assert.equal(files[files.length - 14], "043_launch_waitlist.sql");
-  assert.equal(files[files.length - 15], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.equal(files[files.length - 16], "041_annual_account_column_privileges.sql");
-  assert.equal(files[files.length - 17], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(files[files.length - 21], MIGRATION_036, "036 must still be the one before 037");
+  // 057 SIMPLIFIED THE LAUNCH DISCOUNT: the one-use claim architecture
+  // 056 built is removed, because the code became reusable. Re-pinned
+  // rather than deleted - what this guard protects is that nothing
+  // UNREVIEWED appeared. Reviewed in
+  // tests/launch-discount-migration.test.mjs.
+  assert.equal(files[files.length - 12], "046_launch_signup_atomic.sql");
+  assert.equal(files[files.length - 13], "045_launch_welcome_email.sql");
+  assert.equal(files[files.length - 14], "044_launch_send.sql");
+  assert.equal(files[files.length - 15], "043_launch_waitlist.sql");
+  assert.equal(files[files.length - 16], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(files[files.length - 17], "041_annual_account_column_privileges.sql");
+  assert.equal(files[files.length - 18], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 22], MIGRATION_036, "036 must still be the one before 037");
   assert.deepEqual(files.filter(f => f.startsWith("037")), ["037_subscription_refund_correlation.sql"]);
-  assert.ok(!files.some(f => f.startsWith("057")), "a migration 057 or beyond appeared");
-  assert.equal(files.length, 56);
+  assert.ok(!files.some(f => f.startsWith("058")), "a migration 058 or beyond appeared");
+  assert.equal(files.length, 57);
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length);
@@ -136,13 +141,10 @@ test("3: migrations 022 through 035 are all still present, none renamed", () => 
     // edited in place. Nothing older may.
     // 039, the annual plan foundation, is UNAPPLIED and may likewise be
     // edited in place until the owner applies it.
-    // 056, the launch discount foundation, is UNAPPLIED as well and is
-    // corrected in place rather than by a 057.
     assert.ok(file.endsWith(MIGRATION_036)
       || file.endsWith("037_subscription_refund_correlation.sql")
       || file.endsWith("038_one_time_refund_writer_concurrency.sql")
       || file.endsWith("039_b2c_annual_plan_foundation.sql")
-      || file.endsWith("056_launch_discount.sql")
       || file.endsWith("040_annual_checkout_retry_fingerprints.sql"),
       `an immutable migration was modified: ${file}`);
   }

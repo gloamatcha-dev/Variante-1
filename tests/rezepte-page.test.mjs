@@ -521,8 +521,13 @@ test("7c: this pass added no backend of any kind", () => {
 ["admin", "annual-plan", "b2b-lead", "checkout", "contact", "cron", "internal", "launch",
      "orders", "partnerships", "stripe", "subscriptions", "withdrawal"],
     "an API route was added or removed");
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("057")),
-    "a migration 057 or beyond appeared");
+  // 057 SIMPLIFIED THE LAUNCH DISCOUNT: the one-use claim architecture
+  // 056 built is removed, because the code became reusable. Re-pinned
+  // rather than deleted - what this guard protects is that nothing
+  // UNREVIEWED appeared. Reviewed in
+  // tests/launch-discount-migration.test.mjs.
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("058")),
+    "a migration 058 or beyond appeared");
   for (const banned of ['"use server"', "fetch(", "supabase", "resend",
                         "localStorage", "sessionStorage", "<form", "onSubmit"]) {
     assert.ok(!page.toLowerCase().includes(banned.toLowerCase()),

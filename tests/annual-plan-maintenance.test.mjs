@@ -1237,7 +1237,12 @@ test("33: B2C_ANNUAL_PLAN_ENABLED cannot stop an existing contract", () => {
 test("34: this phase adds no migration and edits none", () => {
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 56);
+  // 057 SIMPLIFIED THE LAUNCH DISCOUNT: the one-use claim architecture
+  // 056 built is removed, because the code became reusable. Re-pinned
+  // rather than deleted - what this guard protects is that nothing
+  // UNREVIEWED appeared. Reviewed in
+  // tests/launch-discount-migration.test.mjs.
+  assert.equal(migrations.length, 57);
   // PHASE 4B8.2 ADDED MIGRATION 042: the ONE column privilege 041
   // was short of, so migration 039's delivery policy can still read
   // the parent's user_id while resolving ownership. Reviewed in
@@ -1246,20 +1251,14 @@ test("34: this phase adds no migration and edits none", () => {
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(migrations[migrations.length - 11], "046_launch_signup_atomic.sql");
-  assert.equal(migrations[migrations.length - 12], "045_launch_welcome_email.sql");
-  assert.equal(migrations[migrations.length - 13], "044_launch_send.sql");
-  assert.equal(migrations[migrations.length - 14], "043_launch_waitlist.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 56), [], "a migration 057 or beyond appeared");
+  assert.equal(migrations[migrations.length - 12], "046_launch_signup_atomic.sql");
+  assert.equal(migrations[migrations.length - 13], "045_launch_welcome_email.sql");
+  assert.equal(migrations[migrations.length - 14], "044_launch_send.sql");
+  assert.equal(migrations[migrations.length - 15], "043_launch_waitlist.sql");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 57), [], "a migration 058 or beyond appeared");
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
-  // 056 is committed but NOT APPLIED to production, so it is still
-  // corrected in place rather than by a 057 - a 057 would have to alter
-  // a table that exists nowhere yet. The moment it IS applied it joins
-  // the immutable set and this exemption must go.
-  const live = (changed ? changed.split(/\r?\n/) : [])
-    .filter(rel => !rel.endsWith("056_launch_discount.sql"));
-  assert.deepEqual(live, [], "a live, immutable migration was edited");
+  assert.equal(changed, "", "a live, immutable migration was edited");
 
   // The maintenance calls exactly the four installed functions it may,
   // and creates nothing itself.

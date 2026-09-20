@@ -157,11 +157,16 @@ test("2d: 008 is left exactly as it is", () => {
 test("2e: 054 is still the price migration, and adds no schema", () => {
   const files = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.length, 56);
-  assert.equal(files[files.length - 3], MIGRATION,
+  // 057 SIMPLIFIED THE LAUNCH DISCOUNT: the one-use claim architecture
+  // 056 built is removed, because the code became reusable. Re-pinned
+  // rather than deleted - what this guard protects is that nothing
+  // UNREVIEWED appeared. Reviewed in
+  // tests/launch-discount-migration.test.mjs.
+  assert.equal(files.length, 57);
+  assert.equal(files[files.length - 4], MIGRATION,
     "054 is no longer where its own number puts it");
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 56), [],
-    "a migration 057 or beyond appeared");
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 57), [],
+    "a migration 058 or beyond appeared");
   for (const banned of ["create table", "create function", "create policy",
                         "grant ", "revoke ", "add column"]) {
     assert.ok(!sql.toLowerCase().includes(banned), `054 does ${banned} - it is a data correction`);

@@ -335,12 +335,22 @@ test("5d: no backend, migration or commercial logic changed", () => {
     // no migration, no write. Reviewed in tests/b2b-lead-api.test.mjs.
 ["admin", "annual-plan", "b2b-lead", "checkout", "contact", "cron", "internal", "launch",
      "orders", "partnerships", "stripe", "subscriptions", "withdrawal"], "an API route changed");
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("057")),
-    "a migration 057 or beyond appeared");
+  // 057 SIMPLIFIED THE LAUNCH DISCOUNT: the one-use claim architecture
+  // 056 built is removed, because the code became reusable. Re-pinned
+  // rather than deleted - what this guard protects is that nothing
+  // UNREVIEWED appeared. Reviewed in
+  // tests/launch-discount-migration.test.mjs.
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("058")),
+    "a migration 058 or beyond appeared");
   // 047 withdraws the metal case from the catalog, reviewed in
   // tests/catalog-availability.test.mjs. Re-pinned rather than removed:
   // the guard protects "no UNREVIEWED migration appeared".
-  assert.equal(readdirSync(path.join(ROOT, "supabase/migrations")).filter(f => f.endsWith(".sql")).length, 56,
+  // 057 SIMPLIFIED THE LAUNCH DISCOUNT: the one-use claim architecture
+  // 056 built is removed, because the code became reusable. Re-pinned
+  // rather than deleted - what this guard protects is that nothing
+  // UNREVIEWED appeared. Reviewed in
+  // tests/launch-discount-migration.test.mjs.
+  assert.equal(readdirSync(path.join(ROOT, "supabase/migrations")).filter(f => f.endsWith(".sql")).length, 57,
     "the migration count changed");
   // The one-time path is untouched.
   assert.ok(site.includes('purchaseType:"once",unitPriceCents:v.price_gross_cents'),

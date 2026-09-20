@@ -26,7 +26,6 @@ const MIGRATION_040 = "040_annual_checkout_retry_fingerprints.sql";
 const MIGRATION_041 = "041_annual_account_column_privileges.sql";
 const MIGRATION_042 = "042_annual_delivery_rls_parent_user_privilege.sql";
 const MIGRATION_037 = "037_subscription_refund_correlation.sql";
-const MIGRATION_056 = "056_launch_discount.sql";
 const MIGRATION_019 = "019_order_lifecycle_tracking.sql";
 
 const withoutComments = source => source
@@ -102,9 +101,14 @@ test("1: 038 exists, owns its number, and 039 is the only one above it", () => {
   // in tests/annual-plan-foundation-migration.test.mjs. 038 is therefore
   // no longer the highest, and this is re-pinned rather than deleted:
   // what it protects is that no UNREVIEWED migration appeared.
-  assert.equal(files[files.length - 18], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 19], MIGRATION_038, "038 must be the one before it");
-  assert.equal(files[files.length - 20], MIGRATION_037, "037 must be the one before that");
+  // 057 SIMPLIFIED THE LAUNCH DISCOUNT: the one-use claim architecture
+  // 056 built is removed, because the code became reusable. Re-pinned
+  // rather than deleted - what this guard protects is that nothing
+  // UNREVIEWED appeared. Reviewed in
+  // tests/launch-discount-migration.test.mjs.
+  assert.equal(files[files.length - 19], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 20], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 21], MIGRATION_037, "037 must be the one before that");
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
@@ -171,7 +175,12 @@ test("2: no migration 044 or beyond", () => {
     // authenticated anywhere. No subscription, annual or B2B object is
     // touched, and no row is backfilled. Reviewed in
     // tests/launch-discount-migration.test.mjs.
-    "056_launch_discount.sql"],
+    "056_launch_discount.sql",
+     // 057: the launch discount becomes a reusable code. It removes the
+     // one-use claim architecture 056 built and touches nothing this
+     // suite protects. Reviewed in
+     // tests/launch-discount-migration.test.mjs.
+     "057_simplify_launch_discount.sql"],
     "an unreviewed migration appeared after 043");
   // And 039 kept its hands off this phase's writer entirely.
   for (const name of [MIGRATION_039, MIGRATION_040, MIGRATION_041, MIGRATION_042]) {
@@ -195,14 +204,9 @@ test("3, 4, 5: migrations 019 and 022 through 037 are unmodified", () => {
   // it may be edited in place. Everything below it is live.
   // 040 is NOT APPLIED yet, so it may still be edited in place; every
   // migration below it is live and may not be.
-  // 056 is the launch-discount foundation. It is committed but has NOT
-  // been applied to production, so correcting it in place is right and a
-  // 057 would be wrong: a 057 would have to alter a table that does not
-  // exist anywhere yet. The moment it IS applied, it joins the immutable
-  // set below and this exemption must be removed.
   const immutable = touched.filter(rel =>
     !rel.endsWith(MIGRATION_038) && !rel.endsWith(MIGRATION_039)
-    && !rel.endsWith(MIGRATION_040) && !rel.endsWith(MIGRATION_056));
+    && !rel.endsWith(MIGRATION_040));
   assert.deepEqual(immutable, [], "a live, immutable migration was edited");
   // And the two this phase reasons about still read the way they were applied.
   assert.ok(read(`supabase/migrations/${MIGRATION_019}`)

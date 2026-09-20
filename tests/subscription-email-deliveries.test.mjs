@@ -164,7 +164,12 @@ test("035 exists, is the only 035, and only 036 and 037 follow it", () => {
     // authenticated anywhere. No subscription, annual or B2B object is
     // touched, and no row is backfilled. Reviewed in
     // tests/launch-discount-migration.test.mjs.
-    "056_launch_discount.sql"],
+    "056_launch_discount.sql",
+     // 057: the launch discount becomes a reusable code. It removes the
+     // one-use claim architecture 056 built and touches nothing this
+     // suite protects. Reviewed in
+     // tests/launch-discount-migration.test.mjs.
+     "057_simplify_launch_discount.sql"],
     "an unreviewed migration above 035 appeared"
   );
   // And 039 leaves this table entirely alone. An annual plan's one

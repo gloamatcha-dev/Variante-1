@@ -651,10 +651,7 @@ test("54: migrations 019 and 022-037 are unmodified", () => {
     .filter(rel => !rel.endsWith("038_one_time_refund_writer_concurrency.sql"))
     .filter(rel => !rel.endsWith("039_b2c_annual_plan_foundation.sql"))
     // 040 is NOT APPLIED yet, so it may still be edited in place.
-    .filter(rel => !rel.endsWith("040_annual_checkout_retry_fingerprints.sql"))
-    // 056, the launch discount foundation, is UNAPPLIED as well and is
-    // corrected in place rather than by a 057.
-    .filter(rel => !rel.endsWith("056_launch_discount.sql"));
+    .filter(rel => !rel.endsWith("040_annual_checkout_retry_fingerprints.sql"));
   assert.deepEqual(migrations, [], "a live, immutable migration was edited");
   // And the two functions this phase depends on still read the way they
   // were applied to production.
@@ -732,7 +729,12 @@ test("55: this phase added no migration, and the only ones after it are 038 and 
     // authenticated anywhere. No subscription, annual or B2B object is
     // touched, and no row is backfilled. Reviewed in
     // tests/launch-discount-migration.test.mjs.
-    "056_launch_discount.sql"],
+    "056_launch_discount.sql",
+     // 057: the launch discount becomes a reusable code. It removes the
+     // one-use claim architecture 056 built and touches nothing this
+     // suite protects. Reviewed in
+     // tests/launch-discount-migration.test.mjs.
+     "057_simplify_launch_discount.sql"],
     "an unreviewed migration appeared after 037");
   const sql039 = withoutComments(read("supabase/migrations/039_b2c_annual_plan_foundation.sql"));
   assert.ok(!sql039.includes("apply_order_refund_state_by_invoice"),

@@ -1166,6 +1166,15 @@ test("migrations: 026 was not created and 022-024 are untouched", () => {
   // or rename of an existing column or constraint is not.
   for (const statement of later.split(";")) {
     if (!/alter table public\.checkout_attempts/.test(statement)) continue;
+    // 057 DOES drop a constraint and a column here: it removes
+    // discount_claim_id and replaces the paired CHECK, both of which 056
+    // added, because the launch discount became a REUSABLE code with no
+    // claim to hold. Neither object is this foundation's - the list
+    // below is what 022 owns, and none of it moves - so only the two
+    // statements that name 056's own discount objects step aside.
+    // Everything else 057 does stays under this guard. Reviewed in
+    // tests/launch-discount-migration.test.mjs.
+    if (/discount_claim_id|checkout_attempts_discount_snapshot_paired/.test(statement)) continue;
     for (const forbidden of [/alter column/i, /drop column/i, /drop constraint/i, /rename/i]) {
       assert.ok(!forbidden.test(statement),
         "a later migration changes an existing checkout_attempts column or constraint");

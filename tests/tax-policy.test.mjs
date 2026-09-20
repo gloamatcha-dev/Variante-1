@@ -191,30 +191,37 @@ test("migration: 021 owns its number and no later migration undoes it", () => {
     // like for everything else.
     const OWNED = ["tax_treatment", "tax_calculation_version",
                    "shipping_tax_allocation", "order_items"];
-    for (const owned of name === "056_launch_discount.sql"
+    // 057 replaces the order writer for the SECOND time, and for the
+    // opposite reason: it removes the claim redemption 056 put in, now
+    // that the launch code is reusable. The exception is therefore the
+    // same exception, extended - the signature and 021's tax contract
+    // are re-proved below for whichever migration claims it.
+    const REPLACES_THE_ORDER_WRITER =
+      name === "056_launch_discount.sql" || name === "057_simplify_launch_discount.sql";
+    for (const owned of REPLACES_THE_ORDER_WRITER
                           ? OWNED
                           : ["create_order_from_paid_checkout", ...OWNED]) {
       assert.ok(!new RegExp(`(alter|drop|create or replace)[^;]*${owned}`, "i").test(later),
         `${name} modifies the tax object ${owned}`);
     }
-    if (name === "056_launch_discount.sql") {
+    if (REPLACES_THE_ORDER_WRITER) {
       // The signature is 021's, so this is a replacement and not a
       // second door.
       const signature = later.slice(
         later.indexOf("create or replace function public.create_order_from_paid_checkout("),
         later.indexOf("returns public.orders")
       );
-      assert.ok(signature.length > 0, "056 does not declare the order writer");
+      assert.ok(signature.length > 0, `${name} does not declare the order writer`);
       for (const arg of ["p_checkout_attempt_id uuid", "p_customer_snapshot jsonb",
                          "p_stripe_payment_intent_id text", "p_shipping_address_snapshot jsonb",
                          "p_billing_address_snapshot jsonb", "p_shipping_gross_cents integer"]) {
-        assert.ok(signature.includes(arg), `056 changed 021's signature: ${arg} is gone`);
+        assert.ok(signature.includes(arg), `${name} changed 021's signature: ${arg} is gone`);
       }
       // Six arguments and not a seventh: a new parameter would be a new
       // overload, and two callable order writers is the failure this
       // exception exists to avoid.
       assert.equal((signature.match(/p_\w+ /g) || []).length, 6,
-        "056 added or removed an argument on the order writer");
+        `${name} added or removed an argument on the order writer`);
       // Every tax invariant 021 wrote is reproduced verbatim: the
       // snapshot is copied rather than recomputed, both cross-checks
       // still fail closed, and the per-line match is still on variantId.

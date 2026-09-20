@@ -230,15 +230,20 @@ test("4c: it creates no Stripe object and no function", () => {
 test("5: 055 owns its number, in one transaction, self-verifying", () => {
   const files = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.length, 56);
+  // 057 SIMPLIFIED THE LAUNCH DISCOUNT: the one-use claim architecture
+  // 056 built is removed, because the code became reusable. Re-pinned
+  // rather than deleted - what this guard protects is that nothing
+  // UNREVIEWED appeared. Reviewed in
+  // tests/launch-discount-migration.test.mjs.
+  assert.equal(files.length, 57);
   // 056 (the GLOALAUNCH10 database foundation, reviewed in
   // tests/launch-discount-migration.test.mjs) landed after this one, so
   // 055 is no longer the last file. What has to stay true is that it is
   // still at its own number and that nothing above it is unreviewed.
-  assert.equal(files[files.length - 2], MIGRATION, "055 is not at its own number");
-  assert.equal(files[files.length - 1], "056_launch_discount.sql");
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 56), [],
-    "a migration 057 or beyond appeared");
+  assert.equal(files[files.length - 3], MIGRATION, "055 is not at its own number");
+  assert.equal(files[files.length - 2], "056_launch_discount.sql");
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 57), [],
+    "a migration 058 or beyond appeared");
   // 001-054 are immutable; what this can assert is that 055 names none
   // of them - nor 056 - as something to change.
   for (const f of files.filter(f => f !== MIGRATION)) {
