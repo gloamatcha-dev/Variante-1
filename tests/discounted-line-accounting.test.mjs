@@ -45,8 +45,21 @@ const read = p => readFileSync(new URL(p, ROOT), "utf-8");
 const MIGRATION = read("supabase/migrations/058_discounted_order_line_accounting.sql");
 const NEWLINE = String.fromCharCode(10);
 
-/** SQL with its -- comments removed, so a sentence ABOUT a statement is not read as one. */
-const statementsOnly = sql => sql.split(NEWLINE).map(l => l.replace(/--.*$/, "")).join(NEWLINE);
+/**
+ * SQL with its -- comments removed, so a sentence ABOUT a statement is
+ * not read as one.
+ *
+ * THE \r IS STRIPPED FIRST, AND THAT IS NOT COSMETIC. Twelve of the
+ * migrations in this repository are CRLF. JavaScript's `.` does not
+ * match \r, so `/--.*$/` never reached the end of a CRLF line and every
+ * comment in those files survived the strip - silently, making each
+ * "statements, not prose" assertion below weaker than it claimed to be.
+ * Found by the repository-wide proconfig test at the bottom of this
+ * file, which reported 022 as having an executable proconfig check when
+ * it has only a commented one.
+ */
+const statementsOnly = sql =>
+  sql.replace(/\r/g, "").split(NEWLINE).map(l => l.replace(/--.*$/, "")).join(NEWLINE);
 const STATEMENTS = statementsOnly(MIGRATION);
 
 /** A line as the checkout builds it for the discount engine. */
@@ -766,4 +779,149 @@ test("isDiscountLineAllocation refuses everything the database would", () => {
   ]) {
     assert.equal(isDiscountLineAllocation(bad), false, `accepted: ${JSON.stringify(bad)}`);
   }
+});
+/* ══════════════════════════════════════════════════════════════
+   11. THE EMPTY search_path, AS POSTGRESQL ACTUALLY SERIALISES IT
+
+   058's first application to Production ABORTED here:
+
+     ERROR: P0001: 058: public.create_order_from_paid_checkout does not
+     pin an empty search_path
+
+   The function was correct. The CHECK was wrong. `SET search_path = ''`
+   is stored in pg_proc.proconfig as
+
+       search_path=""
+
+   on this server, and the assertion had guessed the other spelling,
+   `search_path=`. Because 058 is wrapped in BEGIN/COMMIT the whole
+   transaction rolled back, so nothing was half-applied - but a correct
+   migration was refused by its own guard.
+
+   056 had written the warning down before 058 was ever drafted: "A
+   check that guessed wrong would abort a correct migration, which is a
+   worse failure than the one it was trying to catch."
+
+   These tests exist so the same guess cannot be made again.
+   ══════════════════════════════════════════════════════════════ */
+
+/**
+ * The exact literals a migration's proconfig check accepts, read out of
+ * its `cfg.v in (...)` clause. Returns null when the migration does not
+ * use that form at all - which is itself a failure below.
+ */
+function acceptedSearchPathSpellings(sql) {
+  const marker = "cfg.v in (";
+  const at = sql.indexOf(marker);
+  if (at === -1) return null;
+  const list = sql.slice(at + marker.length, sql.indexOf(")", at));
+  return [...list.matchAll(/'([^']*)'/g)].map(m => m[1]);
+}
+
+test("058 accepts the spelling Production actually produces", () => {
+  const accepted = acceptedSearchPathSpellings(MIGRATION);
+  assert.ok(accepted, "058 no longer tests proconfig entries by equality");
+
+  // THE ONE THAT ABORTED THE MIGRATION. A read-only query against
+  // Production returned proconfig ["search_path=\"\""] for a function
+  // declared `set search_path = ''`.
+  assert.ok(accepted.includes('search_path=""'),
+    "058 would abort again: it does not accept the spelling this server stores");
+
+  // And the other empty spelling, which other PostgreSQL builds emit
+  // for the same setting. Accepting both is what makes the check
+  // independent of a serialisation detail it has no business asserting.
+  assert.ok(accepted.includes("search_path="),
+    "058 now guesses the opposite spelling instead");
+
+  assert.equal(accepted.length, 2, "058 accepts something beyond the two empty spellings");
+});
+
+test("058 still refuses every NON-empty search_path", () => {
+  const accepted = acceptedSearchPathSpellings(MIGRATION);
+  // The whole point of the assertion is that the function cannot be
+  // reached through an attacker-chosen schema. Widening it to fix the
+  // abort would have thrown that away.
+  for (const unsafe of [
+    "search_path=public",
+    "search_path=public,extensions",
+    'search_path="$user",public',
+    "search_path=pg_temp",
+    "search_path=public, pg_catalog",
+  ]) {
+    assert.equal(accepted.includes(unsafe), false, `058 would accept ${unsafe}`);
+  }
+});
+
+test("058 was not weakened into a presence check", () => {
+  const fn = MIGRATION.slice(MIGRATION.indexOf("6. THE END STATE IS PROVEN BEFORE COMMIT"));
+  const check = fn.slice(fn.indexOf("unnest(coalesce(p.proconfig"));
+  const clause = check.slice(0, check.indexOf("then"));
+
+  // An equality test against a literal set, over a NULL-safe unnest.
+  assert.match(clause, /unnest\(coalesce\(p\.proconfig, array\[\]::text\[\]\)\) as cfg\(v\)/);
+  assert.match(clause, /cfg\.v in \('search_path=', 'search_path=""'\)/);
+
+  // NOT any of the looser things this could have become.
+  for (const weakened of [
+    /proconfig is not null/i,
+    /proconfig::text like/i,
+    /position\('search_path'/i,
+    /array_to_string\(p\.proconfig/i,
+  ]) {
+    assert.equal(weakened.test(clause), false, `the search_path check was weakened: ${weakened}`);
+  }
+  // And the containment operator that caused the abort is gone from the
+  // STATEMENTS. It survives in a comment, on purpose: the file explains
+  // what it used to read and why that aborted a correct migration.
+  assert.equal(/proconfig @> array\['search_path='\]/.test(STATEMENTS), false,
+    "the single-spelling containment check is still there");
+  assert.ok(MIGRATION.includes("proconfig @> array['search_path=']"),
+    "058 no longer records what the failed check was");
+});
+
+test("all three launch-discount migrations assert the empty search_path identically", () => {
+  // 056 and 057 have BOTH applied to this database with this exact
+  // form. 058 now matches them, so the family cannot drift again - and
+  // a future migration that copies any of the three copies a correct
+  // one.
+  const spellings = {};
+  for (const [label, file] of [
+    ["056", "supabase/migrations/056_launch_discount.sql"],
+    ["057", "supabase/migrations/057_simplify_launch_discount.sql"],
+    ["058", "supabase/migrations/058_discounted_order_line_accounting.sql"],
+  ]) {
+    const accepted = acceptedSearchPathSpellings(read(file));
+    assert.ok(accepted, `${label} does not test proconfig by equality`);
+    spellings[label] = accepted.slice().sort();
+  }
+  assert.deepEqual(spellings["058"], spellings["057"]);
+  assert.deepEqual(spellings["058"], spellings["056"]);
+});
+
+test("no executable proconfig check anywhere accepts only one spelling", () => {
+  // The repository-wide version of the assertion above. Comments are
+  // stripped, because several migrations legitimately PRINT the
+  // expected proconfig in their verify-afterwards notes.
+  const files = readdirSync(new URL("supabase/migrations/", ROOT)).filter(f => f.endsWith(".sql")).sort();
+  for (const file of files) {
+    const sql = statementsOnly(read(`supabase/migrations/${file}`));
+    if (!sql.includes("proconfig")) continue;
+    const accepted = acceptedSearchPathSpellings(sql);
+    assert.ok(accepted, `${file} inspects proconfig without an equality test`);
+    assert.deepEqual(accepted.slice().sort(), ['search_path=', 'search_path=""'],
+      `${file} does not accept exactly the two empty spellings`);
+  }
+});
+
+test("the function 058 checks really does declare an empty search_path", () => {
+  // The assertion is only worth having if the thing it asserts is true.
+  const writer = MIGRATION.slice(
+    MIGRATION.indexOf("create or replace function public.create_order_from_paid_checkout"),
+    MIGRATION.indexOf(NEWLINE + "as $$")
+  );
+  assert.match(writer, /security definer/);
+  assert.match(writer, /set search_path = ''/);
+  // Never a named schema - that is what the proconfig check is for.
+  assert.equal(/set search_path = '[^']/.test(writer), false);
 });

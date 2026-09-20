@@ -878,10 +878,36 @@ begin
     raise exception '058: public.create_order_from_paid_checkout is not security definer';
   end if;
 
+  -- BOTH SERIALISATIONS OF THE EMPTY search_path ARE ACCEPTED, which is
+  -- what 056 and 057 already do - and the first attempt at applying 058
+  -- is why their wording is quoted rather than paraphrased here.
+  --
+  -- This check originally read `proconfig @> array['search_path=']`, and
+  -- it aborted a correct migration in Production. The function DOES pin
+  -- an empty search_path; this server simply serialises `SET search_path
+  -- = ''` into pg_proc.proconfig as
+  --
+  --     search_path=""
+  --
+  -- rather than as `search_path=`. A read-only query confirmed it:
+  -- prosecdef true, proconfig {"search_path=\"\""}, six arguments.
+  --
+  -- 056 wrote down the reason in advance: "A check that guessed wrong
+  -- would abort a correct migration, which is a worse failure than the
+  -- one it was trying to catch." That is exactly what happened, so this
+  -- now matches the form that has already applied successfully against
+  -- this very database - twice.
+  --
+  -- NOT WEAKENED. It is still an equality test against the two empty
+  -- spellings and nothing else: a NULL proconfig fails, an absent entry
+  -- fails, and 'search_path=public' or 'search_path=public,extensions'
+  -- fails. What is asserted is the EMPTY VALUE, not one particular way
+  -- PostgreSQL happens to store it.
   if not exists (
-    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace,
+         unnest(coalesce(p.proconfig, array[]::text[])) as cfg(v)
     where n.nspname = 'public' and p.proname = 'create_order_from_paid_checkout'
-      and p.proconfig @> array['search_path=']
+      and cfg.v in ('search_path=', 'search_path=""')
   ) then
     raise exception '058: public.create_order_from_paid_checkout does not pin an empty search_path';
   end if;
@@ -961,3 +987,5 @@ commit;
 --          pg_get_function_identity_arguments(p.oid)
 --     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
 --    where n.nspname = 'public' and p.proname = 'create_order_from_paid_checkout';
+--   -- expect ONE row, prosecdef true, proconfig {"search_path=\"\""},
+--   -- and the six arguments unchanged.
