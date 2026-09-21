@@ -385,7 +385,9 @@ test("6: the navigation offers five real sections and fakes none", () => {
   // exists must not still be advertised as coming.
   // 4A.2B-2 added Aktivität, which is real from the day it appears: it
   // opens the audit log rather than a placeholder.
-  assert.match(shell, /const \[view, setView\] = useState<"overview" \| "orders" \| "inventory" \| "activity" \| "waitlist">\("overview"\)/);
+  // The B2C subscription launch surface added Abos, also real from the
+  // day it appears: it opens the read-only list, not a placeholder.
+  assert.match(shell, /const \[view, setView\] = useState<"overview" \| "orders" \| "subscriptions" \| "inventory" \| "activity" \| "waitlist">\("overview"\)/);
   // The "bald" list must no longer name a section that exists.
   const soon = shell.slice(shell.indexOf("ops-nav-soon") - 400, shell.indexOf("ops-nav-soon"));
   assert.ok(!soon.includes("Inventar"),
@@ -406,10 +408,20 @@ test("6: the navigation offers five real sections and fakes none", () => {
   assert.deepEqual(navPairs, [
     ["overview", "Übersicht"],
     ["orders", "Bestellungen"],
+    // Abos sits beside Bestellungen because it is the other commerce
+    // screen, and it is real from the day it appears.
+    ["subscriptions", "Abos"],
     ["inventory", "Inventar"],
     ["activity", "Aktivität"],
     ["waitlist", "Launch List"],
   ], "the navigation lost, gained or reordered a tab");
+  // The subscription tab renders its screen, and only for a role that
+  // may open it - owner and admin, never viewer. The server refuses a
+  // viewer regardless; this is so one is not offered a door that would
+  // only refuse them.
+  assert.match(shell, /view === "subscriptions" && maySeeSubscriptions && <AdminSubscriptions/,
+    "the subscription tab renders nothing, or lost its role guard");
+  assert.ok(!soon.includes("Abos"), "Abos is listed as coming while its tab exists");
   // Coming sections are still named but are not buttons and open
   // nothing. Two of them now, because Inventar graduated.
   assert.match(shell, /\["B2B", "Kosten"\]\.map/);
@@ -492,7 +504,14 @@ test("7: /api/admin gained orders and nothing else", () => {
   // only READS: no wrapper, no RPC that writes, and the table grants
   // service_role SELECT alone, so it could not write if it tried.
   // Reviewed in tests/admin-audit.test.mjs.
-  assert.deepEqual(dirs, ["activity", "inventory", "launch", "orders", "session", "waitlist"]);
+  // THE B2C SUBSCRIPTION LAUNCH SURFACE added "subscriptions": the
+  // read-only list of running subscriptions, POST-gated like the rest.
+  // It is the second admin route with no write path at all - every
+  // subscription write already has exactly one home (the customer's own
+  // checkout, the customer's own cancellation endpoint, the Stripe
+  // refund branch) and none of them is an admin route. Reviewed in
+  // tests/subscription-purchase-surface.test.mjs.
+  assert.deepEqual(dirs, ["activity", "inventory", "launch", "orders", "session", "subscriptions", "waitlist"]);
   const orderDirs = readdirSync(path.join(ROOT, "app/api/admin/orders"), { withFileTypes: true })
     .filter(e => e.isDirectory()).map(e => e.name).sort();
   // PAKET 4A.1B added the four actions, one route each rather than one

@@ -23,8 +23,30 @@
 export const ADMIN_ROLES = ["owner", "admin", "viewer"] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 
-/** What a route needs from the caller. Writes are the default elsewhere. */
-export type AdminCapability = "read" | "write";
+/**
+ * What a route needs from the caller. Writes are the default elsewhere.
+ *
+ * ── WHY THERE IS A THIRD VALUE AND NOT A PERMISSION MATRIX ────
+ *
+ * "read_sensitive" is a READ that a viewer may not perform. It exists
+ * because one such read now does: the subscription list carries running
+ * contracts, their billing dates and their Stripe identifiers, and the
+ * decision was that only the two roles who operate the shop should see
+ * it.
+ *
+ * It is one more CAPABILITY, not a per-feature permission. The
+ * alternative - a canReadSubscriptions(), then canReadOrders(), then one
+ * per screen - is exactly the matrix this module was written to avoid,
+ * and it would put the decision in as many places as there are features.
+ * A route still declares one capability, roleSatisfies still decides,
+ * and every existing route keeps the capability it already had.
+ *
+ * Marking the route "write" instead would have been the smaller diff and
+ * the wrong one: the route performs no write, every audit that
+ * classifies routes by capability would have mis-filed it, and the next
+ * person reading it would reasonably assume it changes something.
+ */
+export type AdminCapability = "read" | "read_sensitive" | "write";
 
 /**
  * Whatever came out of the database, as a role or nothing.
@@ -55,12 +77,31 @@ export function canRead(role: AdminRole | null | undefined): boolean {
  *
  * The capability is the ROUTE's own statement about itself and never
  * comes from the request - a caller cannot declare its own call a read.
+ *
+ * "read_sensitive" is DERIVED from canWrite rather than re-listing owner
+ * and admin. The set is the same set - the roles that operate the shop -
+ * and stating it twice would be two places to change it and one chance
+ * for them to disagree. If the write set ever narrows, the sensitive
+ * read narrows with it, which is the safe direction.
+ *
+ * Written as an exhaustive switch rather than a ternary chain so a
+ * fourth capability added later cannot silently fall through to the
+ * weakest answer: an unrecognised value returns false.
  */
 export function roleSatisfies(
   role: AdminRole | null | undefined,
   capability: AdminCapability
 ): boolean {
-  return capability === "write" ? canWrite(role) : canRead(role);
+  switch (capability) {
+    case "write":
+      return canWrite(role);
+    case "read_sensitive":
+      return canWrite(role);
+    case "read":
+      return canRead(role);
+    default:
+      return false;
+  }
 }
 
 /**

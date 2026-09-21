@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import type { CustomerType } from "./content";
 import { useAuth } from "../lib/auth";
@@ -967,16 +967,295 @@ function OrderDetail({ orderId }: { orderId: string }) {
   );
 }
 
+// ── Abo starten ────────────────────────────────────────────────────────
+
+type SubscriptionPlanRow = {
+  id: string;
+  slug: string;
+  name: string;
+  variant_id: string | null;
+  sort_order: number;
+};
+
+/**
+ * THE ONE PLACE A B2C SUBSCRIPTION IS STARTED.
+ *
+ * The engine behind it has been complete since Task 29D-E. What never
+ * existed was a caller: nothing in the browser posted to
+ * /api/subscriptions/checkout/session, so the whole flow - recurring
+ * Stripe Prices, invoice.paid activation, cancellation, refunds and four
+ * transactional mails - was reachable only by hand. This form is that
+ * caller, and it is deliberately the only one.
+ *
+ * ── WHY IT LIVES HERE AND NOT IN THE SHOP ─────────────────────
+ *
+ * The route accepts exactly planId, addressId and requestId, and refuses
+ * a body carrying anything else. Two of those three are things only a
+ * signed-in account has:
+ *
+ *   planId     b2c_subscription_plans grants SELECT to `authenticated`
+ *              and its RLS policy shows only active rows. A signed-out
+ *              shop visitor cannot read the plans at all.
+ *   addressId  one of the customer's OWN saved addresses. The route has
+ *              no guest path - it answers 401 without a verified bearer
+ *              token - because a recurring contract belongs to a person.
+ *
+ * So the shop states the offer and links here with the chosen size as a
+ * `?sku=` hint. The hint preselects and nothing more: the plans are
+ * re-read here, and the server re-resolves the price from the plan's own
+ * variant regardless of what any URL said.
+ *
+ * ── NOT ONE COMMERCIAL VALUE IS SENT ──────────────────────────
+ *
+ * No price, no shipping, no tax, no quantity, no currency, no user id.
+ * Every one of them is resolved server-side by handleSubscriptionCheckout
+ * against the catalog and the customer's own address row. This component
+ * cannot mis-price a subscription because it never states a price - the
+ * euro figures it renders are the shop's own catalog prices, shown so the
+ * customer knows what they are choosing, and they travel nowhere.
+ *
+ * ── THE REQUEST ID IS AN IDEMPOTENCY TOKEN, NOT A NONCE ───────
+ *
+ * It is minted once per (plan, address) pair and kept while that pair
+ * stands, so pressing the button twice - or pressing it again after a
+ * failed Stripe call - reuses the same checkout attempt instead of
+ * minting a second one. Changing the plan or the address is a different
+ * intent and gets a different token, which is exactly the distinction
+ * the route's own fingerprint comparison draws on the other side.
+ */
+function SubscriptionStartForm({ onStarted }: { onStarted?: () => void }) {
+  const { session, addresses } = useAuth();
+  const { product, loading: catalogLoading } = useCatalog("matcha");
+  const [plans, setPlans] = useState<SubscriptionPlanRow[]>([]);
+  const [plansLoading, setPlansLoading] = useState(() => !!supabase);
+  const [plansError, setPlansError] = useState("");
+
+  // The CHOICES, not the values. Null means "the customer has not picked
+  // yet", and the value below is derived - so a preselection never has to
+  // be written by an effect and can never fight a later choice.
+  const [planChoice, setPlanChoice] = useState<string | null>(null);
+  const [addressChoice, setAddressChoice] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  /*
+    THE `?sku=` HINT, READ ONCE AND ONLY IN A BROWSER.
+
+    A lazy useState initialiser rather than an effect: the value cannot
+    change while this component lives, and reading it in an effect would
+    mean a first render that shows the wrong size selected. The typeof
+    guard is what makes it safe during server rendering, where there is
+    no location to read.
+  */
+  const [skuHint] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("sku")
+  );
+
+  /*
+    ACTIVE PLANS ONLY, AND THE DATABASE DECIDES WHICH. Migration 005's
+    policy is `using (is_active = true)`, so an inactive plan is not
+    filtered out here - it never arrives. That matters: the filter and
+    the guarantee are the same statement, and a client-side `.eq` would
+    have been a second one free to drift.
+  */
+  useEffect(() => {
+    if (!supabase) return;
+    supabase
+      .from("b2c_subscription_plans")
+      .select("id, slug, name, variant_id, sort_order")
+      .order("sort_order", { ascending: true })
+      .then(({ data, error: err }) => {
+        if (err) setPlansError("Die Abo-Größen konnten gerade nicht geladen werden.");
+        else setPlans((data ?? []) as unknown as SubscriptionPlanRow[]);
+        setPlansLoading(false);
+      });
+  }, []);
+
+  /*
+    THE PRESELECTED PLAN, DERIVED RATHER THAN WRITTEN.
+
+    A plan row carries variant_id, not a SKU - migration 024 keyed it on
+    the variant for the reason it gives there, that a renamed identifier
+    must not be able to silently repoint a plan at a different product.
+    So the hint is matched by looking the SKU up in the catalog the page
+    already loaded, and an unknown or absent hint simply falls back to
+    the first active plan. It is never an error: the customer is standing
+    in front of the list either way.
+
+    Derived every render instead of set by an effect, which is both the
+    repository's standing preference and the only way this cannot render
+    once with the wrong size selected.
+  */
+  const hintedPlanId = (() => {
+    if (!product || plans.length === 0) return "";
+    const variant = skuHint ? product.variants.find(v => v.sku === skuHint) : null;
+    const hinted = variant ? plans.find(p => p.variant_id === variant.id) : null;
+    return (hinted ?? plans[0]).id;
+  })();
+  const planId = planChoice ?? hintedPlanId;
+
+  /* The default shipping address, preselected the same way and never forced. */
+  const defaultAddressId = (addresses.find(a => a.is_default_shipping) ?? addresses[0])?.id ?? "";
+  const addressId = addressChoice ?? defaultAddressId;
+
+  /*
+    THE IDEMPOTENCY TOKEN, MINTED IN THE HANDLER AND NOT IN RENDER.
+
+    randomUUID is not a pure function, so it has no business in
+    a render pass. Keyed on the (plan, address) pair in a ref: pressing
+    the button twice for the same intent reuses the same token and
+    therefore the same checkout attempt, while changing the size or the
+    address is a different intent and gets a new one - which is exactly
+    the distinction the route's own fingerprint comparison draws on the
+    other side.
+  */
+  const tokenRef = useRef<{ key: string; id: string } | null>(null);
+
+  const priceFor = (plan: SubscriptionPlanRow): number | null => {
+    const variant = product?.variants.find(v => v.id === plan.variant_id);
+    return variant ? variant.price_gross_cents : null;
+  };
+
+  const start = async () => {
+    if (!session?.access_token) { setError("Bitte melde dich an."); return; }
+    if (!planId) { setError("Bitte wähle eine Größe."); return; }
+    if (!addressId) { setError("Bitte wähle eine Lieferadresse."); return; }
+    const intentKey = `${planId}|${addressId}`;
+    if (tokenRef.current?.key !== intentKey) {
+      tokenRef.current = { key: intentKey, id: crypto.randomUUID() };
+    }
+    const requestId = tokenRef.current.id;
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch("/api/subscriptions/checkout/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        // EXACTLY the three fields the route allows. A fourth would be
+        // refused outright rather than ignored, which is the property
+        // that keeps "the browser cannot submit a price" checked.
+        body: JSON.stringify({ planId, addressId, requestId }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        // Every refusal the route can produce already carries
+        // customer-safe German copy - including the 503 it answers while
+        // B2C_SUBSCRIPTIONS_ENABLED is closed. It is shown as-is rather
+        // than replaced, so the page never claims a state the server did
+        // not report. The fallback is generic on purpose: a raw server
+        // string must never reach the page.
+        setError(typeof body?.error === "string" ? body.error : "Das hat gerade nicht geklappt.");
+        return;
+      }
+      const url = typeof body?.url === "string" ? body.url : "";
+      if (!url) { setError("Das hat gerade nicht geklappt."); return; }
+      onStarted?.();
+      // Stripe Checkout is where the binding total - price, shipping and
+      // tax, all resolved server-side - is shown and confirmed. Nothing
+      // is charged before that page.
+      window.location.href = url;
+    } catch {
+      setError("Das hat gerade nicht geklappt.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const loading = catalogLoading || plansLoading;
+
+  return (
+    <section className="portal-section">
+      <AccountSectionHeader label="ABO STARTEN" />
+      <p className="portal-note">
+        {SUBSCRIPTION_CADENCE_LABEL} eine Lieferung, {SUBSCRIPTION_QUANTITY_LABEL} pro Lieferung, zum normalen
+        Shop-Preis. Für ein Abo ist kein gesonderter Preis und kein Rabatt hinterlegt.
+        Es gibt keine Mindestlaufzeit; kündigen kannst du hier im Konto.
+      </p>
+
+      {loading ? (
+        <AccountEmptyState>Laden…</AccountEmptyState>
+      ) : plansError ? (
+        <AccountEmptyState>{plansError}</AccountEmptyState>
+      ) : plans.length === 0 ? (
+        <AccountEmptyState action={<AccountAction href="/shop">ZUM SHOP</AccountAction>}>
+          Aktuell ist keine Abo-Größe hinterlegt.
+        </AccountEmptyState>
+      ) : addresses.length === 0 ? (
+        /*
+          NO ADDRESS, NO FORM. The route answers 404 for a missing or
+          incomplete address, and a submit button that can only produce
+          that is worse than the one action which genuinely helps.
+        */
+        <AccountEmptyState action={<AccountAction href="/account/addresses">ADRESSE HINTERLEGEN</AccountAction>}>
+          Für ein Abo brauchen wir eine Lieferadresse in deinem Konto.
+        </AccountEmptyState>
+      ) : (
+        <div className="sub-start">
+          <fieldset className="sub-start-field">
+            <legend>Größe</legend>
+            <div className="sub-start-options" role="radiogroup" aria-label="Abo-Größe wählen">
+              {plans.map(p => {
+                const cents = priceFor(p);
+                return (
+                  <label key={p.id} className={`sub-start-option${planId === p.id ? " active" : ""}`}>
+                    <input
+                      type="radio" name="sub-plan" className="sr-only" value={p.id}
+                      checked={planId === p.id} onChange={() => setPlanChoice(p.id)}
+                    />
+                    <span className="sub-start-option-label">{p.name}</span>
+                    {/* The catalog price, shown so the choice is informed.
+                        It is never sent: the server prices the plan from
+                        its own variant. */}
+                    {cents !== null && <span className="sub-start-option-meta">{fmtCents(cents)} € je Lieferung</span>}
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+
+          <fieldset className="sub-start-field">
+            <legend>Lieferadresse</legend>
+            <select
+              className="sub-start-select" value={addressId}
+              onChange={e => setAddressChoice(e.target.value)} aria-label="Lieferadresse wählen"
+            >
+              {addresses.map(a => (
+                <option key={a.id} value={a.id}>
+                  {[a.first_name, a.last_name].filter(Boolean).join(" ")}, {a.street} {a.house_number}, {a.zip} {a.city}
+                </option>
+              ))}
+            </select>
+            <p className="portal-note sub-start-shipping">
+              Versandkosten werden je Lieferung nach den normalen Versandregeln berechnet und
+              vor der Zahlung angezeigt.
+            </p>
+          </fieldset>
+
+          {error && <p className="sub-start-error" role="alert">{error}</p>}
+
+          <button
+            type="button" className="cta sub-start-cta" onClick={() => void start()}
+            disabled={busy || !planId || !addressId}
+          >
+            {busy ? "WIRD GEÖFFNET…" : "ZUR ZAHLUNG"}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
 // ── Abos ───────────────────────────────────────────────────────────────
 
 function PortalSubscriptions() {
   const [subs, setSubs] = useState<SubscriptionRow[]>([]);
   const [loading, setLoading] = useState(() => !!supabase);
   const [error, setError] = useState("");
-  // The real Matcha variants and their real catalog prices. Nothing about
-  // a subscription changes them: no subscription price exists in the
-  // database, so the prices shown here are the ordinary shop prices.
-  const { product, loading: catalogLoading } = useCatalog("matcha");
+  // The catalog is no longer read here. SubscriptionStartForm owns it
+  // now, because it is the component that actually needs a price next to
+  // a choosable size; this one lists what already exists, and every
+  // figure on a subscription card comes from that subscription's own
+  // frozen columns.
 
   useEffect(() => {
     if (!supabase) return;
@@ -1012,7 +1291,7 @@ function PortalSubscriptions() {
         <p className="portal-page-lead">
           {hasSubs
             ? "Hier findest du deine regelmäßigen Lieferungen."
-            : "Regelmäßige Lieferungen für deinen GLOA Matcha, in Vorbereitung."}
+            : "Regelmäßige Lieferungen für deinen GLOA Matcha."}
         </p>
       </section>
 
@@ -1054,60 +1333,31 @@ function PortalSubscriptions() {
           })}
         </div>
       ) : (
-        <>
-          {/*
-            Still deliberately NOT a booking form. The cadence IS confirmed
-            now - every 4 weeks, and the three launch plans exist - but the
-            server route behind it is gated by B2C_SUBSCRIPTIONS_ENABLED
-            and stays closed until Task 29D-E handles invoice.paid. A start
-            button today would be a button that can only return 503, and it
-            could take a payment nothing would activate. So the page states
-            the confirmed terms and offers the one action that genuinely
-            works, exactly as before.
-          */}
-          <section className="portal-section">
-            <AccountSectionHeader label="STATUS" />
-            <AccountEmptyState>Du hast aktuell kein Abonnement.</AccountEmptyState>
-            <p className="portal-note">
-              Geplant ist eine Lieferung alle 4 Wochen, zum normalen Shop-Preis. Buchbar sind
-              Abos noch nicht. Bis dahin bestellst du deinen Matcha wie gewohnt im Shop.
-            </p>
-          </section>
-
-          <section className="portal-section">
-            <AccountSectionHeader label="GRÖSSEN" />
-            {catalogLoading ? (
-              <AccountEmptyState>Laden…</AccountEmptyState>
-            ) : product && product.variants.length > 0 ? (
-              <>
-                <div className="portal-summary-rows">
-                  {product.variants.map(v => (
-                    <AccountSummaryRow
-                      key={v.id}
-                      icon="repeat"
-                      label={product.name}
-                      primary={v.label}
-                      secondary={v.size_grams !== null ? `${v.size_grams} g` : undefined}
-                      value={`${fmtCents(v.price_gross_cents)} €`}
-                    />
-                  ))}
-                </div>
-                <p className="portal-note">
-                  Preise wie im Shop, geliefert alle 4 Wochen. Für ein Abo ist kein gesonderter
-                  Preis und kein Rabatt hinterlegt.
-                </p>
-                <div className="portal-actions">
-                  <Link href="/shop" className="portal-action">MATCHA BESTELLEN</Link>
-                </div>
-              </>
-            ) : (
-              <AccountEmptyState action={<AccountAction href="/shop">ZUM SHOP</AccountAction>}>
-                Produkte konnten gerade nicht geladen werden.
-              </AccountEmptyState>
-            )}
-          </section>
-        </>
+        <section className="portal-section">
+          <AccountSectionHeader label="STATUS" />
+          <AccountEmptyState>Du hast aktuell kein Abonnement.</AccountEmptyState>
+          <p className="portal-note">
+            {SUBSCRIPTION_CADENCE_LABEL} eine Lieferung, zum normalen Shop-Preis. Unten kannst du
+            ein Abo starten; einzelne Bestellungen gehen weiterhin über den Shop.
+          </p>
+        </section>
       )}
+
+      {/*
+        THE BOOKING FORM, SHOWN WITH OR WITHOUT AN EXISTING ABO.
+
+        A customer whose subscription ended must be able to start another
+        without a detour through the shop, and one running a 30 g abo may
+        legitimately want a second in another size - migration 024's
+        partial unique index is on (variant, interval) per PLAN, not per
+        customer, and nothing in the schema forbids two subscriptions.
+        So the form is a sibling of the list rather than an empty state.
+
+        The one thing it never does is reimplement the checkout: it calls
+        the same POST /api/subscriptions/checkout/session that has existed
+        since Task 29D-D, with the same three fields.
+      */}
+      {!loading && !error && <SubscriptionStartForm />}
     </>
   );
 }

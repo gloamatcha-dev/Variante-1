@@ -9,11 +9,18 @@ import { startRenderServer } from "./helpers/renderServer.mjs";
 // of the CURRENT build through the shared harness (which strips the
 // service-role key). No DB writes, no network to Supabase.
 //
-// Task 29C. The audit found no way to CREATE a recurring purchase: the
-// subscriptions and supply tables grant select only, no API route inserts
-// either, and Stripe runs in one-time payment mode. So the single most
-// important thing these tests protect is that the account never grows a
-// button claiming to start something the backend cannot start.
+// Task 29C found no way to CREATE a recurring purchase and these tests
+// pinned that absence. The B2C subscription engine has since been
+// completed - checkout route, recurring Stripe Prices, invoice.paid
+// activation, cancellation, refunds, four transactional mails - and the
+// portal now has the form that calls it.
+//
+// So what they protect has moved on, and deliberately: not "no button
+// exists", but "the button calls the ONE engine". No second checkout, no
+// browser-side price, no direct write to either table, and no claim the
+// server did not make. The B2B half is unchanged and still has no writer
+// at all, which is why the audit assertions below stay exactly as they
+// were.
 
 const ROOT = path.resolve(fileURLToPath(import.meta.url), "../..");
 const read = rel => readFileSync(path.join(ROOT, rel), "utf-8");
@@ -54,6 +61,10 @@ const businessPage = fnBody(portal, "function PortalBusiness()", "\nfunction Sup
 const businessDash = fnBody(portal, "function BusinessDashboard()", "\nfunction PortalOrders(");
 const privateDash = fnBody(portal, "function PrivateDashboard()", "\nfunction BusinessDashboard(");
 const subsMarkup = withoutComments(subsPage);
+// THE BOOKING FORM IS ITS OWN COMPONENT, so it gets its own slice. It
+// sits above PortalSubscriptions in the file and is rendered by it.
+const startForm = fnBody(portal, "function SubscriptionStartForm(", "\nfunction PortalSubscriptions(");
+const startMarkup = withoutComments(startForm);
 
 /* ── The backend audit, pinned so it cannot rot silently ────── */
 
@@ -134,51 +145,136 @@ test("audit: the only cadence the app names is the confirmed one", () => {
 
 /* ── B2C subscriptions page ─────────────────────────────────── */
 
-test("subscriptions: the page is no longer a dead end pointing at the shop", () => {
-  // The old page was one sentence and a ZUM SHOP button.
+test("subscriptions: the page offers the real way to start one", () => {
+  /*
+    THIS TEST WAS DELIBERATELY INVERTED.
+
+    It used to pin the ABSENCE of a booking form, on the audit finding
+    quoted at the top of this file: "no way to CREATE a recurring
+    purchase". That finding is out of date. The checkout route, the
+    recurring Stripe Prices, invoice.paid activation, the cancellation
+    endpoint, the refund branch and four transactional mails have all
+    existed for some time; the only missing piece was a caller.
+
+    What is pinned now is the property that actually matters and that
+    the old assertions were a proxy for: the page calls THAT engine and
+    never grows a second one. Every check below is about reuse, not
+    about absence.
+  */
   assert.ok(!subsMarkup.includes('<section className="portal-empty-state">'), "the bare empty-state card survives");
   assert.match(subsMarkup, /Dein Matcha, regelmäßig\./, "the page needs its own headline when empty");
-  assert.match(subsMarkup, /GRÖSSEN/);
-  assert.match(subsMarkup, /useCatalog\("matcha"\)/, "sizes must come from the real catalog");
+  assert.match(subsMarkup, /<SubscriptionStartForm \/>/, "the page no longer renders the booking form");
+  // And the stale "not bookable yet" copy is gone from the page.
+  assert.ok(!subsMarkup.includes("Buchbar sind Abos noch nicht"), "the page still says abos cannot be booked");
+  assert.ok(!subsMarkup.includes("in Vorbereitung"), "the page still calls the product unfinished");
+});
+
+test("subscriptions: the form posts to the EXISTING route and builds no second checkout", () => {
+  // The single most important property in this package. There is exactly
+  // one subscription checkout in this repository, and the portal calls
+  // it rather than reimplementing any part of it.
+  assert.match(startMarkup, /fetch\("\/api\/subscriptions\/checkout\/session"/,
+    "the form no longer calls the existing subscription checkout");
+  assert.equal((startMarkup.match(/\/api\/subscriptions\/checkout/g) || []).length, 1,
+    "the form calls the checkout more than once");
+  // No second engine: no Stripe, no price construction, no plan
+  // creation, and no write of any kind from the browser.
+  for (const banned of ["stripe", "Stripe", "price_data", "unit_amount", "createCheckoutSession",
+                        ".insert(", ".update(", ".upsert(", ".delete(", ".rpc("]) {
+    assert.ok(!startMarkup.includes(banned), `the form reimplements checkout: ${banned}`);
+  }
+  // The bearer token is the caller's own session, exactly as the
+  // cancellation call already does it.
+  assert.ok(startMarkup.includes("Authorization: `Bearer ${session.access_token}`"),
+    "the form does not authenticate as the caller");
+});
+
+test("subscriptions: exactly the three allowed fields are sent, and no money", () => {
+  // ALLOWED_REQUEST_FIELDS is planId, addressId, requestId, and the route
+  // REFUSES a body carrying anything else rather than ignoring it. So the
+  // form must send those three and nothing more.
+  assert.match(startMarkup, /body: JSON\.stringify\(\{ planId, addressId, requestId \}\)/,
+    "the request body changed shape");
+  for (const forbidden of ["unitAmount", "priceCents", "totalGrossCents", "shippingGrossCents",
+                           "taxTotalCents", "quantity:", "currency", "userId", "stripeCustomerId"]) {
+    assert.ok(!startMarkup.includes(forbidden), `a commercial value is sent: ${forbidden}`);
+  }
+  // The rules module still agrees about which three they are.
+  const rules = read("lib/subscriptionCheckoutRules.ts");
+  assert.match(rules, /ALLOWED_REQUEST_FIELDS: readonly string\[\] = Object\.freeze\(\["planId", "addressId", "requestId"\]\)/);
+});
+
+test("subscriptions: the idempotency token is per intent, not per click", () => {
+  // A fresh uuid on every press would mint a second checkout attempt for
+  // the same intent. Keyed on (plan, address) in a ref, so a retry after
+  // a failed Stripe call reuses the attempt the first press created -
+  // which is the same distinction the route's fingerprint comparison
+  // draws on the other side.
+  assert.ok(startMarkup.includes("const intentKey = `${planId}|${addressId}`"),
+    "the token is no longer keyed on the intent");
+  assert.match(startMarkup, /tokenRef\.current\?\.key !== intentKey/);
+  assert.match(startMarkup, /crypto\.randomUUID\(\)/);
+  // And it is minted in the handler, never during render.
+  const beforeStart = startMarkup.slice(0, startMarkup.indexOf("const start ="));
+  assert.ok(!beforeStart.includes("crypto.randomUUID()"), "a uuid is minted during render");
 });
 
 test("subscriptions: sizes and prices come from the catalog, never from a literal", () => {
-  assert.match(subsMarkup, /product\.variants\.map\(v =>/);
-  assert.match(subsMarkup, /fmtCents\(v\.price_gross_cents\)/);
-  assert.match(subsMarkup, /v\.size_grams/);
+  assert.match(startMarkup, /useCatalog\("matcha"\)/, "sizes must come from the real catalog");
+  assert.match(startMarkup, /variant \? variant\.price_gross_cents : null/);
+  assert.match(startMarkup, /fmtCents\(cents\)/);
+  // The plans themselves are read from the database, never listed here.
+  assert.match(startMarkup, /from\("b2c_subscription_plans"\)/);
   // No invented size and no invented price.
-  assert.ok(!/\b(150|200|250)\s*g\b/.test(subsMarkup), "an invented size appeared");
-  assert.ok(!/\d+[.,]\d{2}\s*€/.test(subsMarkup), "a hardcoded price appeared");
+  assert.ok(!/\b(150|200|250)\s*g\b/.test(startMarkup), "an invented size appeared");
+  assert.ok(!/\d+[.,]\d{2}\s*€/.test(startMarkup), "a hardcoded price appeared");
 });
 
 test("subscriptions: no subscription discount is promised, because none exists", () => {
-  // The page states the absence of a discount, so "Rabatt" is allowed
+  // The form states the absence of a discount, so "Rabatt" is allowed
   // exactly once, inside that sentence, and nowhere else.
   // Compared with whitespace collapsed, because the sentence is wrapped
   // across source lines in the JSX.
-  const flat = subsMarkup.replace(/\s+/g, " ");
-  const DISCLAIMER = "Preise wie im Shop, geliefert alle 4 Wochen. Für ein Abo ist kein gesonderter Preis und kein Rabatt hinterlegt.";
-  assert.ok(flat.includes(DISCLAIMER), "the page must say no subscription price exists");
+  const flat = startMarkup.replace(/\s+/g, " ");
+  const DISCLAIMER = "Für ein Abo ist kein gesonderter Preis und kein Rabatt hinterlegt.";
+  assert.ok(flat.includes(DISCLAIMER), "the form must say no subscription price exists");
   const rest = flat.replace(DISCLAIMER, "");
   for (const fake of ["Abo-Rabatt", "Rabatt", "gratis", "kostenlos", "spare", "Spare", "Vorteil"]) {
     assert.ok(!rest.includes(fake), `an invented benefit appeared: ${fake}`);
   }
-  assert.ok(!/\d\s*%/.test(subsMarkup), "a percentage appeared on the subscriptions page");
+  assert.ok(!/\d\s*%/.test(startMarkup), "a percentage appeared on the subscriptions page");
+  // The cadence and the quantity are READ from the rules module, so the
+  // page cannot promise a rhythm the cutoff arithmetic does not use.
+  assert.match(startMarkup, /\{SUBSCRIPTION_CADENCE_LABEL\}/);
+  assert.match(startMarkup, /\{SUBSCRIPTION_QUANTITY_LABEL\}/);
 });
 
-test("subscriptions: the page never claims an Abo can be started right now", () => {
-  // The cadence and the price are confirmed now, but the server route is
-  // gated shut until Task 29D-E handles invoice.paid, so the page still
-  // offers no way to start one.
-  // Whitespace-collapsed: the sentence wraps across source lines.
-  assert.match(subsMarkup.replace(/\s+/g, " "), /Buchbar sind Abos noch nicht/);
-  assert.ok(!/api\/subscriptions\/checkout/.test(subsMarkup), "a CTA calls the gated route");
-  // No CTA that would have to do something it cannot do.
-  assert.ok(!/ABO STARTEN/.test(subsMarkup), "a start button appeared without a backend");
-  assert.ok(!/<form/.test(subsMarkup), "a booking form appeared without a backend");
-  assert.ok(!/onSubmit|\.insert\(/.test(subsMarkup), "the page attempts a write");
-  // The one action offered is the one that genuinely works.
-  assert.match(subsMarkup, /href="\/shop" className="portal-action">MATCHA BESTELLEN/);
+test("subscriptions: the form refuses to appear where it could only fail", () => {
+  // No saved address means the route can only answer 404, so the form is
+  // replaced by the one action that helps. No active plan means there is
+  // nothing to book at all.
+  assert.match(startMarkup, /addresses\.length === 0/);
+  assert.match(startMarkup, /ADRESSE HINTERLEGEN/);
+  assert.match(startMarkup, /plans\.length === 0/);
+  // The server's own refusal text is shown rather than replaced - which
+  // includes the 503 it answers while the feature flag is closed.
+  assert.match(startMarkup, /typeof body\?\.error === "string" \? body\.error/);
+  // The page never invents success: it navigates to the url the server
+  // returned, and to nothing else.
+  assert.match(startMarkup, /window\.location\.href = url/);
+  assert.ok(!/Abo gestartet|Abo aktiv|erfolgreich/i.test(startMarkup), "the form fakes an activated abo");
+});
+
+test("subscriptions: the feature flag is never mirrored into the browser", () => {
+  // B2C_SUBSCRIPTIONS_ENABLED is server-side only. A client copy would be
+  // a second place for it to disagree with the server, and the route is
+  // the only thing entitled to answer "is this open".
+  // Comments stripped: the portal explains WHY it shows the route's own
+  // 503 text, and naming the flag in that explanation is not reading it.
+  assert.ok(!withoutComments(portal).includes("B2C_SUBSCRIPTIONS_ENABLED"), "the portal reads the server flag");
+  assert.ok(!withoutComments(read("app/GloaSite.tsx")).includes("B2C_SUBSCRIPTIONS_ENABLED"), "the shop reads the server flag");
+  // And no VITE_ mirror of it exists anywhere.
+  assert.ok(!read(".env.example").includes("VITE_B2C_SUBSCRIPTIONS"), "a public mirror of the flag appeared");
 });
 
 test("subscriptions: a real subscription is still rendered from real columns", () => {

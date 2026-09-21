@@ -435,7 +435,11 @@ test("23: the admin API surface is exactly these five, all POST-gated", () => {
   // the log's single door is record_admin_activity, which the business
   // flows call from inside the database. Reviewed in
   // tests/admin-audit.test.mjs.
-  assert.deepEqual(dirs, ["activity", "inventory", "launch", "orders", "session", "waitlist"]);
+  // THE B2C SUBSCRIPTION LAUNCH SURFACE added "subscriptions": the
+  // read-only list of running subscriptions, POST-gated like the rest,
+  // and the second admin route with no write path at all. Reviewed in
+  // tests/subscription-purchase-surface.test.mjs.
+  assert.deepEqual(dirs, ["activity", "inventory", "launch", "orders", "session", "subscriptions", "waitlist"]);
 
   // The session route is the only one that may write anything, and what
   // it writes is a cookie.

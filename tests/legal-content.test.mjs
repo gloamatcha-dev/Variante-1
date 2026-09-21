@@ -4,6 +4,13 @@ import { readFileSync, readdirSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { writeBlockedServerEnv } from "./helpers/testSupabase.mjs";
+// The two constants the subscription terms describe, imported from the
+// leaf the cutoff arithmetic actually uses - so the AGB cannot promise a
+// rhythm or a notice period the code does not honour.
+import { CADENCE_DAYS, CANCELLATION_CUTOFF_DAYS } from "../lib/subscriptionCancellationRules.ts";
+
+/** This file reads sources by URL; one helper so the new checks match. */
+const readSrc = rel => readFileSync(new URL("../" + rel, import.meta.url), "utf-8");
 
 // SAFE DEFAULT SUITE: the spawned server is started without a Supabase
 // service-role key, so every write path in the app degrades to its
@@ -635,7 +642,10 @@ const agbSource = gloaSiteSource.slice(
 test("AGB: structured as a document, with every section reachable", () => {
   assert.ok(agbSource.length > 2000, "the AGB block could not be located");
   const ids = [...agbSource.matchAll(/<section className="legal-doc-section" id="([a-z]+)">/g)].map(m => m[1]);
-  assert.equal(ids.length, 10, `expected 10 sections, found ${ids.length}`);
+  // ELEVEN since the subscription section was added after "Lieferung und
+  // Versand", where it belongs: it is about the delivery and billing
+  // rhythm. Everything below it renumbered by one.
+  assert.equal(ids.length, 11, `expected 11 sections, found ${ids.length}`);
   assert.equal(new Set(ids).size, ids.length, "two sections share an id");
 
   const hrefs = [...agbSource.matchAll(/<li><a href="#([a-z]+)"/g)].map(m => m[1]);
@@ -705,14 +715,95 @@ test("AGB §2: what it says about payment and acceptance is what the code does",
   assert.match(agbSource, /Den Vertragstext speichern wir nicht in einer gesondert abrufbaren Form/);
 });
 
-test("AGB: still only the goods purchase, with no subscription or annual terms", () => {
-  // The audit left these as a go-live blocker to be written separately.
-  // Publishing them early would announce contracts nobody can book.
-  for (const term of ["Abonnement", "Abo-", "Jahresplan", "28 Tage", "Mindestlaufzeit", "Kündigungsfrist"]) {
-    assert.ok(!agbSource.includes(term), `the terms describe a contract type that is not bookable: ${term}`);
+test("AGB: the subscription is described, and only as the code performs it", () => {
+  /*
+    DELIBERATELY INVERTED. This test used to forbid every subscription
+    word in the terms, because the audit that wrote it found the contract
+    unbookable and "publishing them early would announce contracts nobody
+    can book". The account portal now books one through the existing
+    checkout route, so the opposite is true: terms that stay silent about
+    a contract the shop sells would be the defect.
+
+    The ANNUAL plan is a different matter and stays out. It still has no
+    caller anywhere - the shop's Jahresplan CTA goes to /contact - so
+    "Jahresplan" remains forbidden here, and this package does not touch
+    its wording.
+  */
+  assert.ok(!agbSource.includes("Jahresplan"), "the terms describe the still-unbookable annual plan");
+
+  // ── WHAT THE SECTION MUST SAY, AND WHY EACH IS CHECKABLE ────
+  const abo = agbSource.slice(agbSource.indexOf('id="abo"'), agbSource.indexOf('id="eigentum"'));
+  assert.ok(abo.length > 400, "the subscription section could not be located");
+
+  // The cadence, as the code bills it. 28 days, never a calendar month.
+  assert.match(abo, /vier Wochen, also genau 28 Tage/);
+  assert.ok(!/monatlich|pro Monat|Kalendermonat abgerechnet/.test(abo), "the terms make it monthly");
+  assert.equal(CADENCE_DAYS, 28, "the cadence the terms describe changed");
+
+  // One package per cycle - SUBSCRIPTION_QUANTITY is 1 and the flow
+  // refuses a frozen item with any other quantity.
+  assert.match(abo, /eine Packung/);
+  assert.match(readSrc("lib/subscriptionCheckoutRules.ts"), /export const SUBSCRIPTION_QUANTITY = 1;/);
+
+  // NO DISCOUNT, stated. All three seeded plans carry NULL.
+  assert.match(abo, /Abonnementrabatt bestehen nicht/);
+  assert.match(readSrc("supabase/migrations/024_seed_b2c_subscription_plans.sql"), /discount_percent/);
+
+  // Shipping is the ordinary rule, per delivery - which is exactly what
+  // step 6 of the checkout flow does.
+  assert.match(abo, /Versandkosten fallen je Lieferung/);
+  assert.match(readSrc("lib/subscriptionCheckout.ts"),
+    /const shippingGrossCents = computeShippingGrossCents\(shippingZone, quote\.subtotalGrossCents\);/);
+
+  // NO MINIMUM TERM AND NO FEE - and the terms may only say so because
+  // no commitment_months is ever written and no fee exists in any writer.
+  assert.match(abo, /Eine Mindestlaufzeit besteht nicht/);
+  assert.match(abo, /eine Kündigungsgebühr fällt nicht an/);
+  for (const invented of ["Mindestabnahme", "Vertragsstrafe", "Bearbeitungsgebühr"]) {
+    assert.ok(!abo.includes(invented), `the terms invent a ${invented}`);
   }
+
+  // THE 14-DAY CUTOFF, described exactly as resolveCancellationSchedule
+  // computes it: early cancels the upcoming cycle, late lets it run.
+  assert.equal(CANCELLATION_CUTOFF_DAYS, 14, "the cutoff the terms describe changed");
+  assert.match(abo, /mindestens vierzehn Tage vor der nächsten Abbuchung/);
+  assert.match(abo, /entfällt der kommende Zeitraum/);
+  assert.match(abo, /wird der bereits angestoßene Zeitraum noch geliefert und abgerechnet/);
+
+  // Cancellation happens in the account, which is where the only
+  // cancellation caller in the repository lives.
+  assert.match(abo, /Kundenkonto/);
+
+  // A PRICE CHANGE CANNOT REACH A RUNNING SUBSCRIPTION. The terms may
+  // only promise this because the Stripe Price lookup key contains the
+  // amount, so an existing subscription keeps the Price it was created
+  // with and repricing is an explicit act.
+  assert.match(abo, /wird dadurch nicht teurer/);
+  assert.match(readSrc("lib/stripeRecurringPrice.ts"),
+    /return `gloa-\$\{kind\}-\$\{slug\}-\$\{unitAmountCents\}-w\$\{SUBSCRIPTION_INTERVAL_COUNT\}`;/);
+
+  // Withdrawal is not renamed into cancellation.
+  assert.match(abo, /Widerrufsrecht bleibt unberührt/);
+
   // And nothing may claim the launch code is redeemable yet.
   assert.ok(!agbSource.includes("GLOALAUNCH10"), "the terms name a code the checkout cannot redeem");
+});
+
+test("Widerruf: the subscription's own withdrawal start is stated, and kept apart from cancellation", () => {
+  // A contract for the regular delivery of goods starts its period with
+  // the FIRST delivery, not the last of one order. Stating the ordinary
+  // rule alone would have been wrong for a subscription.
+  assert.match(widerrufSource, /regelmäßige Lieferung von Waren/);
+  assert.match(widerrufSource, /die erste Ware in Besitz genommen/);
+  assert.match(widerrufSource, /weitere Lieferungen finden nicht mehr statt/);
+  // Withdrawal and cancellation are told apart rather than equated.
+  assert.match(widerrufSource, /Der Widerruf ist etwas anderes als die Kündigung/);
+  assert.match(widerrufSource, /ohne Mindestlaufzeit und ohne Gebühr/);
+  assert.ok(!/kein Widerrufsrecht/i.test(widerrufSource), "the subscription copy narrowed the right");
+  // The section count is unchanged: this is prose inside §1, not a new
+  // section, so the contents list still matches the document.
+  const ids = [...widerrufSource.matchAll(/<section className="legal-doc-section" id="([a-z]+)">/g)].map(m => m[1]);
+  assert.equal(ids.length, 5, `expected 5 sections, found ${ids.length}`);
 });
 
 test("AGB: statutory consumer rights are not narrowed anywhere", () => {

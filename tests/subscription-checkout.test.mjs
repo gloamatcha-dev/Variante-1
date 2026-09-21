@@ -479,7 +479,11 @@ test("subscription: the local row is created pending BEFORE the Stripe session",
 
   // The RPC writes it as 'pending' and nothing in this task moves it.
   assert.match(read("supabase/migrations/022_recurring_subscription_foundation.sql"), /'pending',\s*$/m);
-  assert.ok(!/status: "active"|'active'|activate_subscription_from_invoice/.test(flowCode + deps + route),
+  // Comment-stripped on all three: the route's docblock now explains
+  // that invoice.paid IS handled elsewhere, and naming the activation
+  // function in that explanation is not calling it.
+  assert.ok(!/status: "active"|'active'|activate_subscription_from_invoice/
+    .test(flowCode + withoutComments(deps) + withoutComments(route)),
     "this task must not activate a subscription");
 });
 

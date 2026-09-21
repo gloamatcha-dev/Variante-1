@@ -1244,6 +1244,41 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // are untouched, and no annual object is involved. Reviewed in
     // tests/discounted-line-accounting.test.mjs.
     "lib/launchDiscountCart.ts",
+    // B2C SUBSCRIPTION LAUNCH SURFACE: a COMMENT ONLY, in the leaf that
+    // owns the subscription feature gate.
+    //
+    // The docblock beside isSubscriptionCheckoutEnabled said Task 29D-E
+    // had not been built and nothing handled invoice.paid, so a
+    // subscription could be paid for and never activated. That stopped
+    // being true when the webhook gained its invoice.paid branch. A
+    // stale reason for a closed flag is how a flag gets opened for the
+    // wrong reason later, so it now records what the gate actually
+    // guards: the commercial decision to open the offer.
+    //
+    // NOT ONE LINE OF CODE CHANGED. The flag name, the exact-string
+    // comparison, SUBSCRIPTION_QUANTITY, LAUNCH_SUBSCRIPTION_SKUS,
+    // ALLOWED_REQUEST_FIELDS, the body parser, both fingerprints and
+    // buildSubscriptionLineItems are byte-identical, and
+    // tests/subscription-purchase-surface.test.mjs asserts the gate
+    // itself against the source rather than leaving it to this diff. No
+    // annual object is involved.
+    "lib/subscriptionCheckoutRules.ts",
+    // B2C SUBSCRIPTION ADMIN ACCESS. The role leaf gains ONE capability
+    // value, "read_sensitive": a read that a viewer may not perform,
+    // added because one such read now exists (the subscription list).
+    //
+    // NO EXISTING ANSWER MOVED. parseAdminRole, canRead and canWrite are
+    // byte-identical; roleSatisfies became an exhaustive switch that
+    // returns the same thing it did for "read" and "write" and refuses
+    // an unrecognised capability instead of falling through to the
+    // weakest one. The new value is DERIVED from canWrite rather than
+    // re-listing owner and admin, so the two sets cannot drift.
+    //
+    // No route other than the new subscription list declares it, and
+    // tests/admin-identity.test.mjs pins every role/capability pair -
+    // including the ones this edit did not touch - against the source.
+    // No annual object is involved.
+    "lib/adminRoles.ts",
   ];
 
   // Phase 4B4 edits ONE application module: the single canonical Stripe
@@ -1512,6 +1547,22 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     "app/api/orders/success/route.ts",
     "app/OrderSuccess.tsx",
     "app/LaunchPage.tsx",
+    // B2C SUBSCRIPTION LAUNCH SURFACE: a COMMENT ONLY, on the most
+    // sensitive file this package touches, so it is listed rather than
+    // waved through.
+    //
+    // The docblock said Task 29D-E was not built and a subscription
+    // could therefore be paid for and never activated. That has not been
+    // true since the webhook gained its invoice.paid branch, and a stale
+    // reason for a closed flag is how a flag gets opened for the wrong
+    // reason later. It now says what the gate actually guards: the
+    // commercial decision to open the offer.
+    //
+    // NOT ONE LINE OF CODE CHANGED. The file is still two imports and a
+    // single delegating POST, byte-identical below the comment, and
+    // tests/subscription-purchase-surface.test.mjs asserts that against
+    // the source rather than leaving it to this diff.
+    "app/api/subscriptions/checkout/session/route.ts",
   ];
   // NOTE. Both lists are about UNCOMMITTED edits to files that already
   // exist, so a file this package CREATES does not belong in either -

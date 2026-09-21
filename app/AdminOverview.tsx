@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { AdminOrders } from "./AdminOrders";
+import { AdminSubscriptions } from "./AdminSubscriptions";
 import { AdminInventory } from "./AdminInventory";
 import { WAITLIST_FILTERS, type WaitlistFilter } from "../lib/adminWaitlistQuery";
 import { AdminActivity } from "./AdminActivity";
@@ -8,6 +9,10 @@ import {
   ADMIN_DESKTOP_MEDIA_QUERY,
   ADMIN_DESKTOP_ONLY_COPY,
 } from "../lib/adminViewport.ts";
+// The SAME predicate the subscription route gates on, from the same
+// zero-import leaf. The screen must not decide for itself who may look:
+// a second rule here would be a second answer, and the two would drift.
+import { canWrite, parseAdminRole } from "../lib/adminRoles";
 
 /**
  * THE PRIVATE LAUNCH LIST OVERVIEW.
@@ -176,7 +181,7 @@ export function AdminOverview() {
   // decides whether the data below is ever asked for.
   const isDesktop = useIsAdminDesktop();
 
-  const [view, setView] = useState<"overview" | "orders" | "inventory" | "activity" | "waitlist">("overview");
+  const [view, setView] = useState<"overview" | "orders" | "subscriptions" | "inventory" | "activity" | "waitlist">("overview");
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -356,7 +361,24 @@ export function AdminOverview() {
   if (data.launch.shopStatus !== "live") blockers.push(`Shop ist ${data.launch.shopStatus}`);
   if (data.counts.confirmed === 0) blockers.push("kein bestätigter Kontakt");
 
-  const TITLE = { overview: "Übersicht", orders: "Bestellungen", inventory: "Inventar", activity: "Aktivität", waitlist: "Launch List" } as const;
+  const TITLE = { overview: "Übersicht", orders: "Bestellungen", subscriptions: "Abos", inventory: "Inventar", activity: "Aktivität", waitlist: "Launch List" } as const;
+
+  /*
+    MAY THIS OPERATOR OPEN THE ABOS TAB?
+
+    canWrite is the "read_sensitive" set - owner and admin, never viewer -
+    read through parseAdminRole so an unrecognised value from the wire
+    becomes null and null is refused. FAILS CLOSED on every uncertain
+    path: no identity, an unknown role, or a payload without one, all
+    answer false.
+
+    THIS IS NOT THE ACCESS CONTROL. The server is - /api/admin/subscriptions
+    answers 403 to a viewer whatever this screen renders, and the tab
+    being absent is not what stops them. Hiding it is so a viewer is not
+    shown a door that would only refuse them; a hidden button is a
+    suggestion, which is the rule lib/adminRoles.ts already states.
+  */
+  const maySeeSubscriptions = canWrite(parseAdminRole(data.identity?.role));
 
   return (
     <main className="ops">
@@ -384,7 +406,12 @@ export function AdminOverview() {
       </header>
 
       <nav className="ops-nav" aria-label="Bereiche">
-        {([["overview", "Übersicht"], ["orders", "Bestellungen"], ["inventory", "Inventar"], ["activity", "Aktivität"], ["waitlist", "Launch List"]] as const).map(([key, label]) => (
+        {([["overview", "Übersicht"], ["orders", "Bestellungen"], ["subscriptions", "Abos"], ["inventory", "Inventar"], ["activity", "Aktivität"], ["waitlist", "Launch List"]] as const).map(([key, label]) => (
+          // The array stays the full list of sections that EXIST; this
+          // decides which of them this operator is offered. A tab the
+          // role may not open renders nothing at all - not a disabled
+          // button, which would still announce the section.
+          key === "subscriptions" && !maySeeSubscriptions ? null : (
           <button
             key={key}
             type="button"
@@ -394,6 +421,7 @@ export function AdminOverview() {
           >
             {label}
           </button>
+          )
         ))}
         {/* Named, not faked. These open nothing and say so, because a tab
             that leads to an empty screen costs more trust than an honest
@@ -404,6 +432,19 @@ export function AdminOverview() {
       </nav>
 
       {view === "orders" && <AdminOrders onSessionLost={() => setSignedIn(false)} />}
+
+      {/* MOUNTED ONLY WHEN ITS TAB IS OPEN, like the activity log below
+          and for the same reason: the overview and the orders screen
+          must not pay for a query nobody asked for. Read only - the
+          section offers no action, and /api/admin/subscriptions has no
+          write verb to offer one with.
+
+          AND ONLY FOR A ROLE THAT MAY OPEN IT, checked with the same
+          predicate the nav uses. A viewer cannot reach this state - the
+          tab is the only caller of setView("subscriptions") - but the
+          component is what issues the request, so the guard belongs on
+          the mount as well as on the button. */}
+      {view === "subscriptions" && maySeeSubscriptions && <AdminSubscriptions onSessionLost={() => setSignedIn(false)} />}
 
       {view === "inventory" && <AdminInventory onSessionLost={() => setSignedIn(false)} />}
 
@@ -416,7 +457,10 @@ export function AdminOverview() {
         <section className="ops-panel" aria-label="Operations">
           <p className="ops-note">
             Bestellungen, Umsatz und Versandstatus stehen unter <strong>Bestellungen</strong>.
-            Warenbestand und Bewegungen unter <strong>Inventar</strong>.
+            {/* Named only for the roles that have the tab, so a viewer is
+                not pointed at a section they cannot open. */}
+            {maySeeSubscriptions && <> Laufende Abos unter <strong>Abos</strong> – nur zur Ansicht.</>}
+            {" "}Warenbestand und Bewegungen unter <strong>Inventar</strong>.
             Die Launch List liegt unter <strong>Launch List</strong>.
           </p>
           <dl className="ops-facts">

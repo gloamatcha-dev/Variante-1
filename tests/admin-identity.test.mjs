@@ -292,6 +292,19 @@ test("4d: every WRITE route takes the write capability, every read says so", () 
     // there is no write path to classify.
     "activity",
   ];
+  /*
+    A THIRD CLASS: READS THAT A VIEWER MAY NOT PERFORM.
+
+    The subscription list is a read - nothing in the file writes - but it
+    carries running contracts, their next billing dates and their Stripe
+    identifiers. A viewer is somebody trusted to see what the shop is
+    doing, not somebody trusted with its live billing relationships.
+
+    It declares "read_sensitive", which lib/adminRoles.ts resolves to the
+    same set as canWrite: owner and admin, never viewer. That set is
+    DERIVED from canWrite rather than re-listed, so the two cannot drift.
+  */
+  const RESTRICTED_READS = ["subscriptions"];
 
   for (const route of WRITES) {
     const code = codeOnly(read(`app/api/admin/${route}/route.ts`));
@@ -305,11 +318,38 @@ test("4d: every WRITE route takes the write capability, every read says so", () 
     assert.match(code, /(openAdminAction|requireAdminIdentity)\(request, "read"\)/,
       `${route} is a read but does not say so`);
   }
+  for (const route of RESTRICTED_READS) {
+    const code = codeOnly(read(`app/api/admin/${route}/route.ts`));
+    assert.match(code, /requireAdminIdentity\(request, "read_sensitive"\)/,
+      `${route} is a restricted read but does not say so`);
+    // It really is a read: no write verb anywhere in the file.
+    for (const banned of [".insert(", ".update(", ".upsert(", ".delete(", ".rpc("]) {
+      assert.ok(!code.includes(banned), `${route} claims to be a read but contains ${banned}`);
+    }
+    // And it does not restate the role matrix for itself.
+    for (const banned of ["owner", "viewer", "canWrite", "canRead"]) {
+      assert.ok(!code.includes(banned), `${route} decides roles for itself: ${banned}`);
+    }
+  }
 
-  // And the two lists together are every session-gated admin route, so a
-  // new one cannot be added without appearing in this test.
+  // THE THREE CAPABILITIES ARE THE WHOLE VOCABULARY, and the restricted
+  // read is exactly the write set - owner and admin, never viewer.
+  assert.equal(roleSatisfies("owner", "read_sensitive"), true);
+  assert.equal(roleSatisfies("admin", "read_sensitive"), true);
+  assert.equal(roleSatisfies("viewer", "read_sensitive"), false);
+  assert.equal(roleSatisfies(null, "read_sensitive"), false);
+  // No other role answer moved.
+  for (const role of ["owner", "admin", "viewer", null]) {
+    assert.equal(roleSatisfies(role, "read"), canRead(role), `read changed for ${role}`);
+    assert.equal(roleSatisfies(role, "write"), canWrite(role), `write changed for ${role}`);
+    assert.equal(roleSatisfies(role, "read_sensitive"), canWrite(role),
+      `the restricted read drifted from the write set for ${role}`);
+  }
+
+  // And the three lists together are every session-gated admin route, so
+  // a new one cannot be added without appearing in this test.
   const gated = adminRoutes().filter(r => !r.startsWith("launch/") && r !== "session");
-  assert.deepEqual(gated.sort(), [...WRITES, ...READS].sort(),
+  assert.deepEqual(gated.sort(), [...WRITES, ...READS, ...RESTRICTED_READS].sort(),
     "an admin route exists that this test does not classify");
 });
 
@@ -399,11 +439,36 @@ test("6b: the header shows the operator, and holds no secret", () => {
   assert.match(code, /data\.identity\.displayName/);
   assert.match(code, /data\.identity\.email/);
   assert.match(code, /data\.identity\.role\.toUpperCase\(\)/);
-  // Nothing about authorisation is decided in the browser.
-  for (const banned of ["canWrite", "roleSatisfies", "ADMIN_EMAILS", "gloa_ops",
+  /*
+    NOTHING ABOUT AUTHORISATION IS DECIDED IN THE BROWSER.
+
+    One documented exception, and it is a PRESENTATION decision rather
+    than an authorisation one: the shell reads canWrite/parseAdminRole
+    from the role leaf to decide whether to OFFER the Abos tab. A viewer
+    who reached the endpoint anyway is refused by the server, which is
+    asserted directly below so this exception can never become the only
+    guard.
+
+    The leaf is safe to share - test 6c says so and checks it carries no
+    secret - and importing the shared predicate is what stops the screen
+    from inventing a second rule that could drift from the server's.
+
+    roleSatisfies stays banned: that is the SERVER's decision function,
+    taking a capability a route declares about itself, and a browser has
+    no business evaluating one.
+  */
+  for (const banned of ["roleSatisfies", "ADMIN_EMAILS", "gloa_ops",
                         "SUPABASE_SECRET_KEY", "ADMIN_SESSION_SECRET", "service_role"]) {
     assert.ok(!code.includes(banned), `the admin shell contains ${banned}`);
   }
+  // The only role branch the shell may hold is the Abos tab's, and the
+  // server refuses a viewer whatever the shell rendered.
+  const roleUses = [...code.matchAll(/canWrite\(/g)].length;
+  assert.equal(roleUses, 1, "the shell gained a second role decision");
+  assert.match(code, /const maySeeSubscriptions = canWrite\(parseAdminRole\(data\.identity\?\.role\)\);/);
+  assert.match(read("app/api/admin/subscriptions/route.ts"),
+    /requireAdminIdentity\(request, "read_sensitive"\)/,
+    "the server stopped gating the subscription list");
   // The three header rules exist and are presentation only.
   for (const rule of [".ops-who-name", ".ops-who-mail", ".ops-who-role"]) {
     assert.ok(css.includes(rule), `${rule} is missing`);

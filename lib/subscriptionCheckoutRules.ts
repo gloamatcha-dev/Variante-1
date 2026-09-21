@@ -24,10 +24,16 @@ export const SUBSCRIPTION_FEATURE_FLAG = "B2C_SUBSCRIPTIONS_ENABLED";
  * than the exact string "true" - missing, empty, "1", "TRUE", "yes",
  * " true " - leaves subscriptions unavailable.
  *
- * Closed-by-default matters here more than usual: Task 29D-E has not been
- * built, so nothing yet handles invoice.paid. A subscription started
- * today could be paid for and never activated, which is a worse failure
- * than not offering it.
+ * Closed-by-default still matters, but NOT for the reason this comment
+ * used to give. It said Task 29D-E had not been built and nothing
+ * handled invoice.paid, so a subscription could be paid for and never
+ * activated. That stopped being true when the webhook gained its
+ * invoice.paid branch and activate_subscription_from_invoice behind it,
+ * together with cancellation, refunds and the lifecycle mails.
+ *
+ * What the flag guards now is the commercial decision to open the offer
+ * at all: it is a launch switch, and the exact-string rule keeps it from
+ * being opened by a stray "1" or "TRUE" in an environment file.
  */
 export function isSubscriptionCheckoutEnabled(env: Record<string, string | undefined> = process.env): boolean {
   return env[SUBSCRIPTION_FEATURE_FLAG] === "true";

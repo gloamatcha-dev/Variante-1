@@ -16,8 +16,20 @@ import { defaultSubscriptionCheckoutDeps } from "../../../../../lib/subscription
  * object, no database write.
  *
  * Gated by B2C_SUBSCRIPTIONS_ENABLED, server-side, before anything else
- * happens. Task 29D-E is not built yet, so a subscription started today
- * could be paid for and never activated.
+ * happens.
+ *
+ * ── THE ORIGINAL REASON FOR THE GATE IS GONE ──────────────────
+ *
+ * This comment used to say Task 29D-E was not built, so a subscription
+ * started here could be paid for and never activated. That has not been
+ * true for some time: invoice.paid is handled in the webhook and calls
+ * activate_subscription_from_invoice, and the cancellation, refund and
+ * lifecycle-mail paths exist as well.
+ *
+ * The flag stays closed for a different and current reason - the offer
+ * has not been opened commercially, and the account portal is only now
+ * gaining the form that calls this route. It is a launch switch, not a
+ * placeholder for missing machinery.
  */
 export async function POST(request: Request): Promise<Response> {
   return handleSubscriptionCheckout(request, defaultSubscriptionCheckoutDeps);

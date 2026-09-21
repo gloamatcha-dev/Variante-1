@@ -24,6 +24,13 @@ import type { SeedCatalogProduct } from "../lib/catalogProducts";
 // server still resolves the money independently - see AnnualPlanPanel.
 import { ANNUAL_DELIVERY_COUNT, ANNUAL_DELIVERY_INTERVAL_DAYS, buildAnnualPricing, type AnnualPricing } from "../lib/annualPlanRules";
 import { ANNUAL_LAUNCH_SIZE_BY_SKU } from "../lib/annualPlans";
+// The 4-week product's two leaves, both zero-import for the same reason
+// the annual pair is: the browser has to run them. The cadence copy comes
+// from the module the cancellation cutoff computes against, so the shop
+// cannot promise a rhythm the server does not bill; eligibility comes
+// from the SKU allowlist the focused suite pins to the server's own.
+import { CADENCE_DAYS, SUBSCRIPTION_CADENCE_LABEL, SUBSCRIPTION_QUANTITY_LABEL } from "../lib/subscriptionCancellationRules";
+import { isSubscribableVariant, subscriptionPortalHref } from "../lib/subscriptionPurchaseRules";
 import { getProductPresentation, showsUnitPricePer100g, showsFoodInformation, isWeighedProduct, getProductImage, getProductSubtitle, getProductEyebrow, MATCHA_NOT_INCLUDED_SHORT } from "../lib/productPresentation";
 import { BusinessCalculator } from "./BusinessCalculator";
 import { AccountPortal } from "./AccountPortal";
@@ -400,35 +407,6 @@ function annualPricingFor(variant: CatalogVariant): AnnualPricing | null {
   return result.ok ? result.pricing : null;
 }
 
-type PurchaseMode = "one_time" | "annual";
-
-/**
- * One-time or annual, as a real radio group.
- *
- * The SAME control the size selector is: a role="radiogroup" of labels
- * wrapping visually-hidden native radios. Native inputs mean arrow keys,
- * focus and announcement come from the browser rather than from
- * hand-rolled key handlers, and the selected state is carried by the
- * radio itself - so it never rests on colour alone.
- *
- * Deliberately not a pill toggle and not a card: the same hairline box
- * and the same raspberry active state the size selector already uses,
- * because the shop had a selection language before this feature arrived.
- */
-function PurchaseModeSelector({mode,onSelect,name,oncePriceCents}:{mode:PurchaseMode;onSelect:(m:PurchaseMode)=>void;name:string;oncePriceCents:number}){
-return <div className="purchase-mode" role="radiogroup" aria-label="Kaufoption wählen">
-<label className={`purchase-mode-option${mode==="one_time"?" active":""}`}>
-<input type="radio" name={name} className="sr-only" value="one_time" checked={mode==="one_time"} onChange={()=>onSelect("one_time")}/>
-<span className="purchase-mode-label">Einmalig kaufen</span>
-{PRICES_VISIBLE&&<span className="purchase-mode-meta">{fmtCents(oncePriceCents)} € einmalig</span>}
-</label>
-<label className={`purchase-mode-option${mode==="annual"?" active":""}`}>
-<input type="radio" name={name} className="sr-only" value="annual" checked={mode==="annual"} onChange={()=>onSelect("annual")}/>
-<span className="purchase-mode-label">Jahresplan</span>
-<span className="purchase-mode-meta">{ANNUAL_DELIVERY_COUNT} Lieferungen · alle {ANNUAL_DELIVERY_INTERVAL_DAYS} Tage</span>
-</label>
-</div>}
-
 /**
  * The whole commercial truth of the plan, as ordinary readable text.
  *
@@ -465,6 +443,128 @@ return <div className="annual-panel">
 <p className="annual-panel-note">Jahresplan-Lieferungen gehen aktuell nur innerhalb Deutschlands.</p>
 </div>}
 
+/* ══ THE 4-WEEK SUBSCRIPTION, IN THE SHOP ══════════════════════
+ *
+ * EVERYTHING BELOW THIS MARKER IS THE RECURRING PRODUCT, NOT THE
+ * PREPAID PLAN. The two are different contracts and the tests slice this
+ * file on exactly this comment so they can say so: the annual
+ * components above must never use the word Abo, and these must, because
+ * this one genuinely is one.
+ *
+ * ── WHAT THE PANEL IS ALLOWED TO CLAIM ────────────────────────
+ *
+ * Only what the server already does. The engine behind it has been
+ * complete since Task 29D-E - checkout route, recurring Stripe Prices,
+ * invoice.paid activation, cancellation, refunds and four transactional
+ * mails - and the one thing it never had was a way in. This is that way
+ * in, and nothing more:
+ *
+ *   price       product_variants.price_gross_cents, the same column
+ *               buildAuthoritativeQuote resolves server-side. No
+ *               subscription price exists in the database, so there is
+ *               nothing else it could be.
+ *   cadence     SUBSCRIPTION_CADENCE_LABEL and CADENCE_DAYS, read from
+ *               the module the cutoff arithmetic uses, so the page
+ *               cannot say four weeks while the server bills otherwise.
+ *   quantity    SUBSCRIPTION_QUANTITY_LABEL. One package per cycle is
+ *               not a default here; lib/subscriptionCheckout.ts refuses
+ *               a frozen item whose quantity is anything else.
+ *   discount    NONE, stated as a fact. All three seeded plans carry
+ *               discount_percent NULL, so a saved-amount line would be
+ *               a number nobody could produce.
+ *
+ * ── AND NO TOTAL IS COMPUTED HERE ─────────────────────────────
+ *
+ * Shipping is the ORDINARY shop rule applied per cycle - step 6 of
+ * handleSubscriptionCheckout calls the same computeShippingGrossCents
+ * the one-time cart uses, against the same threshold. Its amount
+ * therefore depends on the delivery address, which a signed-out shop
+ * page does not have and must not guess. So the panel states the rule
+ * and links to the shipping page; the binding figure is resolved
+ * server-side and shown in Stripe Checkout before anything is charged.
+ * A browser total here would be a second source of truth for money.
+ */
+
+/**
+ * The 4-week option's own panel, in the same hairline language.
+ *
+ * Deliberately quieter than the annual panel, because the number being
+ * decided on is smaller: a customer commits one cycle at a time, so the
+ * per-delivery price IS the headline rather than a data row under a
+ * yearly sum.
+ */
+function SubscriptionPlanPanel({variant}:{variant:CatalogVariant}){
+return <div className="sub-panel">
+<p className="eyebrow sub-panel-eyebrow">ABO</p>
+<p className="sub-panel-title">{SUBSCRIPTION_CADENCE_LABEL} Matcha.</p>
+<p className="sub-panel-sub">{variant.label} · {SUBSCRIPTION_QUANTITY_LABEL} je Lieferung · läuft, bis du kündigst</p>
+<dl className="sub-panel-lines">
+{PRICES_VISIBLE&&<div><dt>Matcha je Lieferung</dt><dd>{fmtCents(variant.price_gross_cents)} €</dd></div>}
+<div><dt>Rhythmus</dt><dd>{SUBSCRIPTION_CADENCE_LABEL} ({CADENCE_DAYS} Tage)</dd></div>
+<div><dt>Menge je Lieferung</dt><dd>{SUBSCRIPTION_QUANTITY_LABEL}</dd></div>
+</dl>
+<p className="sub-panel-discount">Kein Abo-Rabatt.</p>
+<p className="sub-panel-terms">
+Du zahlst den normalen Shop-Preis, {SUBSCRIPTION_QUANTITY_LABEL} alle {CADENCE_DAYS} Tage.
+{" "}Lieferung und Abbuchung laufen im selben Rhythmus.
+{" "}Es gibt keine Mindestlaufzeit; es läuft, bis du kündigst.
+</p>
+<p className="sub-panel-note">
+Versandkosten richten sich nach den normalen <Link href="/versand">Versandinformationen</Link> und
+{" "}werden je Lieferung berechnet. Den genauen Betrag siehst du vor der Zahlung.
+{" "}Kündigen kannst du jederzeit selbst in deinem <Link href="/account">Kundenkonto</Link>.
+</p>
+</div>}
+
+/* ══ THE SHARED PURCHASE MODE ══════════════════════════════════ */
+
+type PurchaseMode = "one_time" | "subscription" | "annual";
+
+/**
+ * One-time, 4-week or annual, as a real radio group.
+ *
+ * The SAME control the size selector is: a role="radiogroup" of labels
+ * wrapping visually-hidden native radios. Native inputs mean arrow keys,
+ * focus and announcement come from the browser rather than from
+ * hand-rolled key handlers, and the selected state is carried by the
+ * radio itself - so it never rests on colour alone.
+ *
+ * Deliberately not a pill toggle and not a card: the same hairline box
+ * and the same raspberry active state the size selector already uses,
+ * because the shop had a selection language before this feature arrived.
+ *
+ * ── THE TWO PLANS ARE OPTIONAL, INDEPENDENTLY ─────────────────
+ *
+ * Each recurring option renders only where its own eligibility says so.
+ * They happen to allow the same three Matcha SKUs today, but they are
+ * separate allowlists answering to separate server rules, and a product
+ * that is one but not the other must show one option rather than both -
+ * which is also what keeps the Metal Case out of either.
+ */
+function PurchaseModeSelector({mode,onSelect,name,oncePriceCents,showSubscription,showAnnual}:{mode:PurchaseMode;onSelect:(m:PurchaseMode)=>void;name:string;oncePriceCents:number;showSubscription:boolean;showAnnual:boolean}){
+// How many boxes this row actually has, handed to the grid so two
+// options share the row instead of leaving an empty third track. A
+// custom property rather than a modifier class, because the value IS a
+// count and a class would have to enumerate every count.
+const modes=1+(showSubscription?1:0)+(showAnnual?1:0);
+return <div className="purchase-mode" role="radiogroup" aria-label="Kaufoption wählen" style={{"--modes":modes} as React.CSSProperties}>
+<label className={`purchase-mode-option${mode==="one_time"?" active":""}`}>
+<input type="radio" name={name} className="sr-only" value="one_time" checked={mode==="one_time"} onChange={()=>onSelect("one_time")}/>
+<span className="purchase-mode-label">Einmalig kaufen</span>
+{PRICES_VISIBLE&&<span className="purchase-mode-meta">{fmtCents(oncePriceCents)} € einmalig</span>}
+</label>
+{showSubscription&&<label className={`purchase-mode-option${mode==="subscription"?" active":""}`}>
+<input type="radio" name={name} className="sr-only" value="subscription" checked={mode==="subscription"} onChange={()=>onSelect("subscription")}/>
+<span className="purchase-mode-label">{SUBSCRIPTION_CADENCE_LABEL}</span>
+<span className="purchase-mode-meta">{PRICES_VISIBLE?`${fmtCents(oncePriceCents)} € je Lieferung · `:""}Kein Abo-Rabatt</span>
+</label>}
+{showAnnual&&<label className={`purchase-mode-option${mode==="annual"?" active":""}`}>
+<input type="radio" name={name} className="sr-only" value="annual" checked={mode==="annual"} onChange={()=>onSelect("annual")}/>
+<span className="purchase-mode-label">Jahresplan</span>
+<span className="purchase-mode-meta">{ANNUAL_DELIVERY_COUNT} Lieferungen · alle {ANNUAL_DELIVERY_INTERVAL_DAYS} Tage</span>
+</label>}
+</div>}
+
 /** One product's purchase block on the shop page. Keeps its own variant
  *  state, so several products on one page never share a selection. */
 function ShopProductBlock({product,onAdd,annualRequest=0}:{product:CatalogProduct;onAdd:()=>void;annualRequest?:number}){
@@ -489,6 +589,14 @@ const annual=annualPricingFor(v);
 // with no annual plan cannot show an annual panel, because this is an
 // AND: the mode alone is never enough.
 const annualActive=mode==="annual"&&annual!==null;
+// The SAME shape for the recurring option, and the same reason: the
+// selected size decides eligibility every render, so switching 30 g ->
+// Metal Case cannot leave a subscription panel standing over a product
+// that has no subscription. isSubscribableVariant checks the SKU AND
+// the net weight, so the Metal Case - unlisted and weightless - fails
+// both halves rather than one.
+const subscribable=isSubscribableVariant(v);
+const subscriptionActive=mode==="subscription"&&subscribable;
 // The blue band's CTA asks for annual mode from outside this block by
 // incrementing a counter. Adjusted during render rather than in an
 // effect - React's own "derive state from props" pattern - so there is
@@ -498,6 +606,14 @@ if(annualRequest!==seenRequest){
   setSeenRequest(annualRequest);
   if(annual)setMode("annual");
 }
+// A mode whose product stopped offering it falls back rather than
+// rendering nothing. Derived during render for the same reason as
+// above; without it, choosing "Alle 4 Wochen" on the Matcha and then
+// selecting an ineligible variant would leave a checked radio with no
+// panel and a CTA pointing nowhere.
+if((mode==="subscription"&&!subscribable)||(mode==="annual"&&!annual)){
+  setMode("one_time");
+}
 
 return <div className="shop-product-row home-rail">
 {img&&<div className="shop-product-visual"><img src={img.src} alt={img.alt} width={img.width} height={img.height} loading="lazy"/></div>}
@@ -506,21 +622,33 @@ return <div className="shop-product-row home-rail">
 
 <VariantSelector product={product} selected={safe} onSelect={setIdx} name={`variant-${product.slug}`}/>
 
-{annual&&<PurchaseModeSelector mode={mode} onSelect={setMode} name={`mode-${product.slug}`} oncePriceCents={v.price_gross_cents}/>}
+{(annual||subscribable)&&<PurchaseModeSelector mode={mode} onSelect={setMode} name={`mode-${product.slug}`} oncePriceCents={v.price_gross_cents} showSubscription={subscribable} showAnnual={annual!==null}/>}
 
 {annualActive&&annual
 ?<AnnualPlanPanel variant={v} annual={annual}/>
+:subscriptionActive
+?<SubscriptionPlanPanel variant={v}/>
 :<>
 {PRICES_VISIBLE&&<p className="shop-product-price">{fmtCents(v.price_gross_cents)} €</p>}
 {PRICES_VISIBLE&&per100!==null&&<p className="shop-product-per100g">{fmtCents(per100)} € / 100 g</p>}
 {presentation.matchaNotIncludedNotice&&<p className="product-not-included">{presentation.matchaNotIncludedNotice}</p>}
 </>}
 
-{/* THE ANNUAL CTA NEVER TOUCHES THE CART. An annual plan is a
-    dedicated account-bound checkout, not a cart line, so the one-time
-    handler is not reachable from annual mode at all. In prelaunch both
-    modes route where every other shop CTA routes. */}
-<button className="cta shop-cta" onClick={annualActive?()=>{track("shop_annual_interest");window.location.href="/contact"}:SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":handleAdd}>{SHOP_STATUS==="prelaunch"?"Fragen zum Launch":annualActive?"Jahresplan anfragen":"In den Warenkorb"}</button>
+{/* NEITHER RECURRING CTA TOUCHES THE CART. A plan is an account-bound
+    checkout, not a cart line, so the one-time handler is unreachable
+    from either mode.
+
+    The 4-week CTA is a LINK to the account, not a fetch. POST
+    /api/subscriptions/checkout/session takes planId, addressId and
+    requestId and refuses a body carrying anything else; two of those
+    are a plan row the signed-out shop cannot read under RLS and one of
+    the customer's own saved addresses. So the shop hands over with the
+    chosen SKU as a hint and the portal - which has the session and the
+    addresses - performs the one checkout call. That also keeps the
+    shop free of a second checkout implementation.
+
+    In prelaunch every mode routes where every other shop CTA routes. */}
+<button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":annualActive?()=>{track("shop_annual_interest");window.location.href="/contact"}:subscriptionActive?()=>{track("shop_subscription_start");window.location.href=subscriptionPortalHref(v.sku)}:handleAdd}>{SHOP_STATUS==="prelaunch"?"Fragen zum Launch":annualActive?"Jahresplan anfragen":subscriptionActive?"Abo im Konto starten":"In den Warenkorb"}</button>
 </div></div>}
 
 /** Confirmed GLOA Matcha food information. Rendered only for the Matcha
@@ -1822,6 +1950,8 @@ return <main className="legal-page legal-doc legal-widerruf">
 <p>Verbraucherinnen und Verbrauchern steht ein gesetzliches Widerrufsrecht zu. Verbraucher ist jede natürliche Person, die ein Rechtsgeschäft zu Zwecken abschließt, die überwiegend weder ihrer gewerblichen noch ihrer selbständigen beruflichen Tätigkeit zugerechnet werden können.</p>
 <p>Du hast das Recht, binnen vierzehn Tagen ohne Angabe von Gründen diesen Vertrag zu widerrufen.</p>
 <p>Die Widerrufsfrist beträgt vierzehn Tage ab dem Tag, an dem du oder ein von dir benannter Dritter, der nicht der Beförderer ist, die Waren in Besitz genommen hat bzw. haben. Hast du in einer einheitlichen Bestellung mehrere Waren bestellt, die getrennt geliefert werden, beginnt die Frist mit dem Erhalt der letzten Ware.</p>
+<p>Bei einem Abonnement, also einem Vertrag über die regelmäßige Lieferung von Waren, beträgt die Widerrufsfrist vierzehn Tage ab dem Tag, an dem du oder ein von dir benannter Dritter, der nicht der Beförderer ist, die erste Ware in Besitz genommen hat bzw. haben. Der Widerruf betrifft dann den gesamten Abonnementvertrag; weitere Lieferungen finden nicht mehr statt.</p>
+<p>Der Widerruf ist etwas anderes als die Kündigung des Abonnements. Der Widerruf ist dein gesetzliches Recht innerhalb der Frist. Die Kündigung beendet ein laufendes Abonnement für die Zukunft; sie ist jederzeit ohne Mindestlaufzeit und ohne Gebühr in deinem <Link href="/account">Kundenkonto</Link> möglich und lässt dein Widerrufsrecht unberührt.</p>
 <p>Um dein Widerrufsrecht auszuüben, musst du uns</p>
 <p className="legal-doc-address">Cara 2 GmbH<br/>Hardenbergstr. 4<br/>10623 Berlin<br/>Deutschland<br/>E-Mail: <a href="mailto:hello@gloamatcha.com">hello@gloamatcha.com</a></p>
 <p>mittels einer eindeutigen Erklärung (z. B. ein mit der Post versandter Brief oder eine E-Mail) über deinen Entschluss, diesen Vertrag zu widerrufen, informieren. Du kannst dafür das <a href="#formular" onClick={jumpToSection}>Muster-Widerrufsformular</a> verwenden, das ist aber nicht vorgeschrieben.</p>
@@ -2202,12 +2332,13 @@ return <main className="legal-page legal-doc legal-agb">
 <li><a href="#vertragsschluss" onClick={jumpToSection}><span>02</span>Vertragsschluss</a></li>
 <li><a href="#preise" onClick={jumpToSection}><span>03</span>Preise und Zahlung</a></li>
 <li><a href="#lieferung" onClick={jumpToSection}><span>04</span>Lieferung und Versand</a></li>
-<li><a href="#eigentum" onClick={jumpToSection}><span>05</span>Eigentumsvorbehalt</a></li>
-<li><a href="#gewaehrleistung" onClick={jumpToSection}><span>06</span>Gewährleistung</a></li>
-<li><a href="#widerruf" onClick={jumpToSection}><span>07</span>Widerrufsrecht</a></li>
-<li><a href="#haftung" onClick={jumpToSection}><span>08</span>Haftung</a></li>
-<li><a href="#sprache" onClick={jumpToSection}><span>09</span>Vertragssprache</a></li>
-<li><a href="#schluss" onClick={jumpToSection}><span>10</span>Schlussbestimmungen</a></li>
+<li><a href="#abo" onClick={jumpToSection}><span>05</span>Abonnement</a></li>
+<li><a href="#eigentum" onClick={jumpToSection}><span>06</span>Eigentumsvorbehalt</a></li>
+<li><a href="#gewaehrleistung" onClick={jumpToSection}><span>07</span>Gewährleistung</a></li>
+<li><a href="#widerruf" onClick={jumpToSection}><span>08</span>Widerrufsrecht</a></li>
+<li><a href="#haftung" onClick={jumpToSection}><span>09</span>Haftung</a></li>
+<li><a href="#sprache" onClick={jumpToSection}><span>10</span>Vertragssprache</a></li>
+<li><a href="#schluss" onClick={jumpToSection}><span>11</span>Schlussbestimmungen</a></li>
 </ol>
 </nav>
 <div className="legal-doc-main">
@@ -2244,40 +2375,52 @@ return <main className="legal-page legal-doc legal-agb">
 <p>Angegebene Lieferzeiten sind voraussichtliche Zeiträume und beginnen mit dem Vertragsschluss. Wir versenden an die von dir angegebene Lieferanschrift.</p>
 </section>
 
-<section className="legal-doc-section" id="eigentum">
+<section className="legal-doc-section" id="abo">
 <p className="legal-doc-num">05</p>
+<h2>Abonnement</h2>
+<p>Neben dem Einzelkauf kannst du GLOA Matcha als Abonnement beziehen. Das Abonnement ist ein Dauerschuldverhältnis: Du erhältst regelmäßig dieselbe Ware, und der Preis wird im selben Rhythmus abgebucht.</p>
+<p>Der Rhythmus beträgt vier Wochen, also genau 28 Tage. Er ist kein Kalendermonat. Je Lieferung erhältst du eine Packung in der von dir gewählten Größe.</p>
+<p>Es gilt der jeweils im Shop ausgewiesene Preis der gewählten Größe. Ein gesonderter Abonnementpreis und ein Abonnementrabatt bestehen nicht. Versandkosten fallen je Lieferung nach den unter <Link href="/versand">Versandinformationen</Link> ausgewiesenen Regeln an; den für dich geltenden Gesamtbetrag siehst du vor Abschluss der Bestellung.</p>
+<p>Das Abonnement wird über dein GLOA-Kundenkonto abgeschlossen; dafür benötigen wir eine in deinem Konto hinterlegte Lieferadresse. Der Vertrag über das Abonnement kommt mit unserer Bestätigung nach der ersten erfolgreichen Zahlung zustande. Für jede Lieferung erhältst du eine Bestätigung per E-Mail.</p>
+<p>Das Abonnement läuft, bis es gekündigt wird. Eine Mindestlaufzeit besteht nicht. Du kündigst es jederzeit selbst in deinem <Link href="/account">Kundenkonto</Link>; eine Kündigungsgebühr fällt nicht an. Geht deine Kündigung mindestens vierzehn Tage vor der nächsten Abbuchung bei uns ein, entfällt der kommende Zeitraum. Geht sie später ein, wird der bereits angestoßene Zeitraum noch geliefert und abgerechnet, und das Abonnement endet danach. Welches Datum für dich gilt, zeigen wir dir vor dem Absenden der Kündigung an.</p>
+<p>Ändert sich der Preis, gilt die Änderung nur für Abonnements, die danach abgeschlossen werden. Ein bereits laufendes Abonnement wird dadurch nicht teurer; eine Preisänderung für ein laufendes Abonnement setzt deine Zustimmung voraus.</p>
+<p>Dein gesetzliches Widerrufsrecht bleibt unberührt und ist etwas anderes als die Kündigung. Die Einzelheiten stehen in der <Link href="/widerruf">Widerrufsbelehrung</Link>.</p>
+</section>
+
+<section className="legal-doc-section" id="eigentum">
+<p className="legal-doc-num">06</p>
 <h2>Eigentumsvorbehalt</h2>
 <p>Die gelieferte Ware bleibt bis zur vollständigen Bezahlung Eigentum von GLOA.</p>
 </section>
 
 <section className="legal-doc-section" id="gewaehrleistung">
-<p className="legal-doc-num">06</p>
+<p className="legal-doc-num">07</p>
 <h2>Gewährleistung</h2>
 <p>Es gelten die gesetzlichen Gewährleistungsrechte. Ist die gelieferte Ware mangelhaft, stehen dir die gesetzlichen Rechte auf Nacherfüllung, Minderung, Rücktritt und Schadensersatz zu; wir schränken diese Rechte nicht ein und verkürzen keine gesetzlichen Fristen.</p>
 <p>Melde einen Mangel gern unter <a href="mailto:hello@gloamatcha.com">hello@gloamatcha.com</a>, damit wir ihn schnell klären können. Deine gesetzlichen Rechte hängen nicht davon ab, dass du uns zuerst kontaktierst.</p>
 </section>
 
 <section className="legal-doc-section" id="widerruf">
-<p className="legal-doc-num">07</p>
+<p className="legal-doc-num">08</p>
 <h2>Widerrufsrecht</h2>
 <p>Als Verbraucher steht dir ein gesetzliches Widerrufsrecht zu. Alle Einzelheiten (Frist, Fristbeginn, Folgen des Widerrufs und das Muster-Widerrufsformular) findest du in unserer <Link href="/widerruf">Widerrufsbelehrung</Link>. Dort kannst du den Widerruf auch direkt über die elektronische Widerrufsfunktion erklären, ohne Konto und ohne Anmeldung.</p>
 <p>Der Widerruf ist etwas anderes als eine Stornierung. Der Widerruf ist dein gesetzliches Recht, das du innerhalb der Frist ohne Angabe von Gründen ausüben kannst. Eine Stornierung ist demgegenüber die Bitte, eine noch nicht versandte Bestellung abzubrechen; ob wir das noch können, hängt vom Bearbeitungsstand ab. Dein Widerrufsrecht bleibt davon in jedem Fall unberührt.</p>
 </section>
 
 <section className="legal-doc-section" id="haftung">
-<p className="legal-doc-num">08</p>
+<p className="legal-doc-num">09</p>
 <h2>Haftung</h2>
 <p>GLOA haftet unbeschränkt für Vorsatz und grobe Fahrlässigkeit, für Schäden aus der Verletzung des Lebens, des Körpers oder der Gesundheit sowie nach dem Produkthaftungsgesetz. Im Übrigen haftet GLOA nach den gesetzlichen Vorschriften.</p>
 </section>
 
 <section className="legal-doc-section" id="sprache">
-<p className="legal-doc-num">09</p>
+<p className="legal-doc-num">10</p>
 <h2>Vertragssprache</h2>
 <p>Der Vertrag wird in deutscher Sprache geschlossen. Auch die weitere Abwicklung und unsere Nachrichten an dich erfolgen auf Deutsch.</p>
 </section>
 
 <section className="legal-doc-section" id="schluss">
-<p className="legal-doc-num">10</p>
+<p className="legal-doc-num">11</p>
 <h2>Schlussbestimmungen</h2>
 <p>Es gilt das Recht der Bundesrepublik Deutschland unter Ausschluss des UN-Kaufrechts. Zwingende verbraucherschützende Bestimmungen des Staates, in dem du deinen gewöhnlichen Aufenthalt hast, bleiben davon unberührt.</p>
 <p>Sollte eine Bestimmung dieser Bedingungen unwirksam sein, bleibt die Wirksamkeit der übrigen Bestimmungen unberührt.</p>

@@ -81,7 +81,13 @@ const viewCode = withoutComments(view);
  * as this phase's, and the B2B side is never in view.
  */
 const subscriptionsSection = (() => {
-  const at = portalCode.indexOf("function PortalSubscriptions()");
+  // FROM THE BOOKING FORM, not from the list. SubscriptionStartForm is
+  // part of the subscription screens and sits directly above
+  // PortalSubscriptions, so starting the slice there keeps every
+  // assertion in this file - the discount copy, the banned controls, the
+  // no-fake-data rules - covering the whole surface rather than the half
+  // that happens to come after it.
+  const at = portalCode.indexOf("function SubscriptionStartForm(");
   const end = portalCode.indexOf("function PortalAddresses()");
   assert.ok(at > -1 && end > at, "the subscription screens moved");
   return portalCode.slice(at, end);
@@ -690,23 +696,47 @@ test("3F: no pause, resume, change, skip or address control exists - not even di
     "the discount row is no longer conditional on a real amount");
   // Not as a disabled control either: the section has no disabled button
   // other than the two the cancellation flow owns while it is sending.
+  //
+  // Two reasons a control may be disabled, and both are "this request is
+  // in flight or cannot be made yet" - never "this feature does not
+  // exist". The booking CTA waits for a plan and an address because the
+  // route needs both; the cancellation buttons wait for their own send.
   const disabled = [...subscriptionsSection.matchAll(/disabled=\{([^}]*)\}/g)].map(m => m[1].trim());
-  assert.deepEqual([...new Set(disabled)], ["cancelBusy"], "a control is disabled for another reason");
+  assert.deepEqual([...new Set(disabled)].sort(),
+    ["busy || !planId || !addressId", "cancelBusy"],
+    "a control is disabled for another reason");
 });
 
-test("3F: no subscription checkout is offered while the flag is closed", () => {
-  // The empty state stays truthful: bookings are still disabled, and the
-  // one action it offers is the shop, which genuinely works.
-  assert.match(subscriptionsSection, /Buchbar sind/);
-  assert.match(subscriptionsSection, /MATCHA BESTELLEN/);
-  // No call to the subscription checkout session route from the account.
-  assert.ok(!portal.includes("/api/subscriptions/checkout"),
-    "the account can start a subscription checkout");
-  for (const banned of ["ABO STARTEN", "Abo starten", "Jetzt abonnieren", "ABO BUCHEN"]) {
-    assert.ok(!subscriptionsSection.includes(banned), `the UI offers ${banned}`);
+test("3F: the checkout is offered, and the flag stays the server's business", () => {
+  /*
+    DELIBERATELY INVERTED, in the same package that added the form.
+
+    This test used to require the empty state to say bookings were
+    disabled and to forbid any call to the checkout route. Both existed
+    because the account had no way to start a subscription; it now has
+    one, and it is the ONLY one.
+
+    What survives unchanged is the part that was never about the button:
+    the feature flag is not touched, not mirrored into the browser, and
+    not consulted by the UI. The route answers 503 while it is closed and
+    the form shows that answer verbatim.
+  */
+  assert.ok(subscriptionsSection.includes("/api/subscriptions/checkout/session"),
+    "the account can no longer start a subscription checkout");
+  // Counted on the COMMENT-STRIPPED source: the form explains at length
+  // why it is the only caller, and that prose names the route.
+  assert.equal([...portalCode.matchAll(/\/api\/subscriptions\/checkout/g)].length, 1,
+    "the account calls the subscription checkout more than once");
+  // The server's refusal is rendered, never replaced by an invented one.
+  assert.match(subscriptionsSection, /typeof body\?\.error === "string" \? body\.error/);
+  // No fabricated success state anywhere.
+  for (const banned of ["Abo gestartet", "Abo ist aktiv", "Abo erfolgreich", "Danke für dein Abo"]) {
+    assert.ok(!subscriptionsSection.includes(banned), `the UI fakes ${banned}`);
   }
-  // And the flag itself is untouched and still closed.
+  // THE FLAG IS UNTOUCHED AND STILL CLOSED, and the UI never reads it.
   assert.match(read(".env.example"), /^B2C_SUBSCRIPTIONS_ENABLED=$/m);
+  assert.ok(!subscriptionsSection.includes("B2C_SUBSCRIPTIONS_ENABLED"),
+    "the UI decides availability for itself");
   assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "prelaunch" as const;'));
 });
 
@@ -782,7 +812,8 @@ test("3F: the list is not a desktop table squeezed onto mobile", () => {
 test("3F: the controls are real buttons, focusable, and status is not colour-only", () => {
   // Real buttons with an explicit type, never a div with onClick.
   const buttons = [...subscriptionsSection.matchAll(/<button[\s\S]*?>/g)].map(m => m[0]);
-  assert.equal(buttons.length, 3, "the subscription screens gained or lost a button");
+  // Four: the booking CTA, and the three the cancellation flow owns.
+  assert.equal(buttons.length, 4, "the subscription screens gained or lost a button");
   for (const button of buttons) {
     assert.match(button, /type="button"/, `a button has no explicit type: ${button.slice(0, 60)}`);
   }

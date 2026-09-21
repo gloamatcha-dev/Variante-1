@@ -649,6 +649,32 @@ a.portal-summary-row:hover{color:var(--blue)}
 .sub-cancel-back:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 .sub-cancel-back:disabled{cursor:not-allowed;opacity:.35}
 
+/* ── Abo starten ──
+   The booking form. Same hairline language as the cancellation block
+   below it: no card, no shadow, the page's own ground showing through.
+   The size options reuse the shop's selection state (border + ground +
+   the native radio underneath) so the two surfaces read as one product
+   rather than two. */
+.sub-start{max-width:520px;margin-top:18px}
+.sub-start-field{border:0;padding:0;margin:0 0 22px;min-width:0}
+.sub-start-field legend{display:block;font:600 12px/1 var(--font-mono);letter-spacing:.1em;text-transform:uppercase;opacity:.7;margin:0 0 10px;padding:0}
+.sub-start-options{display:grid;gap:8px}
+.sub-start-option{display:flex;flex-direction:column;gap:4px;padding:14px 16px;border:1px solid var(--line);cursor:pointer;transition:border-color .2s ease,background .2s ease;min-width:0}
+.sub-start-option.active{border-color:var(--berry);background:rgba(166,30,89,.06)}
+.sub-start-option:hover{border-color:var(--berry)}
+.sub-start-option:focus-within{outline:3px solid var(--blue);outline-offset:2px}
+.sub-start-option-label{font:600 14px/1.3 var(--font-sans);letter-spacing:-.01em;color:var(--ink)}
+.sub-start-option-meta{font:13px/1.35 var(--font-mono);opacity:.6}
+.sub-start-select{width:100%;padding:12px 10px;border:1px solid var(--line);background:transparent;color:var(--ink);font:14px/1.5 var(--font-sans)}
+.sub-start-select:focus{outline:2px solid var(--blue);outline-offset:1px}
+.sub-start-shipping{margin-top:10px}
+.sub-start-error{font:13px/1.4 var(--font-mono);color:var(--berry);margin:0 0 16px}
+.sub-start-cta{margin-top:4px}
+.sub-start-cta:disabled{cursor:not-allowed;opacity:.45}
+@media (max-width:560px){
+  .sub-start-cta{width:100%;justify-content:center}
+}
+
 /* ── Supply List ── */
 .supply-list{border-top:2px solid var(--ink)}
 .supply-list-header{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;padding:14px 0;border-bottom:1px solid var(--line);font:600 12px/1 var(--font-mono);letter-spacing:.1em;text-transform:uppercase}
@@ -7842,11 +7868,22 @@ header nav{gap:18px;font-size:12px}
    ══════════════════════════════════════════════════════════════ */
 
 /* ══ THE PURCHASE MODE ═════════════════════════════════════ */
-/* Two equal columns, not a pill toggle. Same geometry as the size
-   selector above it, so the two read as one control stack. */
+/* Equal columns, not a pill toggle. Same geometry as the size selector
+   above it, so the two read as one control stack.
+
+   UP TO THREE columns since the 4-week option joined: one-time, alle 4
+   Wochen, Jahresplan. The count comes from --modes, which the selector
+   sets to the number of options it actually rendered - a product that
+   offers only one of the two plans gets two equal boxes rather than two
+   boxes and an empty third track.
+
+   minmax(0,1fr) rather than a bare 1fr because a grid item's default
+   min-width is auto: "Einmalig kaufen" and a price on one line would
+   otherwise push its track wider than its share and spill the row past
+   the column. */
 .purchase-mode{
   display:grid;
-  grid-template-columns:1fr 1fr;
+  grid-template-columns:repeat(var(--modes,3),minmax(0,1fr));
   gap:10px;
   margin:clamp(20px,2vw,26px) 0 0;
   width:100%;
@@ -8136,6 +8173,116 @@ header nav{gap:18px;font-size:12px}
   .purchase-mode{grid-template-columns:1fr}
   .annual-panel{max-width:none}
   .annual-panel-lines>div{gap:12px}
+}
+
+/* ══════════════════════════════════════════════════════════════
+   /shop — THE 4-WEEK SUBSCRIPTION
+
+   The recurring product's own panel, next to the annual one and in the
+   same hairline language. Its own block rather than more rules inside
+   the annual block above, so the two can be read - and tested - apart:
+   the annual block must never describe a recurring contract, and this
+   one is nothing else.
+
+   ── IT IS QUIETER THAN THE ANNUAL PANEL, DELIBERATELY ─────────
+   No loud total. The annual panel shouts its year sum because that is
+   what gets charged at once; here the charge is one cycle's price, and
+   that figure is already the product price the page shows in one-time
+   mode. Repeating it at display size would suggest a different,
+   larger commitment than the one being made.
+
+   ── THE ABSENCE OF A DISCOUNT IS A LINE, NOT A SILENCE ────────
+   `.sub-panel-discount` is its own row because "Kein Abo-Rabatt" is a
+   commercial fact a customer will look for, and a plan page that simply
+   omits it reads as if the discount were merely unstated.
+
+   NO PURE WHITE, no radius, no shadow - the shop's existing surface
+   language, unchanged.
+   ══════════════════════════════════════════════════════════════ */
+
+.sub-panel{
+  margin:clamp(20px,2vw,26px) 0 clamp(24px,2.4vw,30px);
+  padding:clamp(20px,2vw,26px) 0;
+  border-top:1px solid var(--line);
+  border-bottom:1px solid var(--line);
+  width:100%;
+  max-width:44ch;
+}
+.sub-panel-eyebrow{margin:0 0 10px;color:var(--berry)}
+/* The same face and weight .annual-panel-title uses. The display token
+   is deliberately NOT reached for: this is a panel heading inside a
+   product block, not an editorial line, and the stylesheet keeps
+   Cormorant for the latter. */
+.sub-panel-title{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-weight:700;
+  font-size:clamp(20px,1.8vw,24px);
+  line-height:1.15;
+  letter-spacing:-.02em;
+  margin:0 0 6px;
+  color:var(--ink);
+}
+.sub-panel-sub{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-size:14px;
+  line-height:1.45;
+  margin:0 0 clamp(14px,1.4vw,18px);
+  color:rgba(17,17,17,.62);
+}
+.sub-panel-lines{margin:0 0 14px;display:grid;gap:8px}
+.sub-panel-lines>div{
+  display:flex;
+  justify-content:space-between;
+  align-items:baseline;
+  gap:16px;
+}
+.sub-panel-lines dt{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-size:14px;
+  color:rgba(17,17,17,.62);
+  margin:0;
+}
+.sub-panel-lines dd{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-size:14px;
+  font-weight:600;
+  color:var(--ink);
+  margin:0;
+  text-align:right;
+}
+/* The one statement in the panel that is about what is NOT offered, so
+   it carries the ink weight of a fact rather than the grey of a note. */
+.sub-panel-discount{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-size:14px;
+  font-weight:600;
+  letter-spacing:.01em;
+  color:var(--ink);
+  margin:0 0 12px;
+  padding-top:12px;
+  border-top:1px solid var(--line);
+}
+.sub-panel-terms,
+.sub-panel-note{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-size:13px;
+  line-height:1.55;
+  color:rgba(17,17,17,.62);
+  margin:0 0 8px;
+}
+.sub-panel-note{margin-bottom:0}
+.sub-panel-note a,
+.sub-panel-terms a{color:var(--ink);text-decoration:underline;text-underline-offset:2px}
+
+/* Three boxes at 13px/.1em stop fitting the shop column before the
+   560px breakpoint the annual block already had, so the stack starts
+   earlier. Measured against the longest label pair. */
+@media (max-width:760px){
+  .purchase-mode{grid-template-columns:1fr}
+}
+@media (max-width:560px){
+  .sub-panel{max-width:none}
+  .sub-panel-lines>div{gap:12px}
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -9590,6 +9737,36 @@ header nav{gap:18px;font-size:12px}
 }
 .ops-order-name{ display:block; }
 .ops-orders .ops-mail{ display:block; font-size:12px; color:rgba(17,17,17,.62); }
+
+/* ── THE SUBSCRIPTION TABLE ───────────────────────────────────
+   Twelve columns, so it is wider than the order list and scrolls inside
+   .ops-table-wrap like every other ops table. Nothing here is a
+   control: there is no open button and no action cell, because the
+   screen has no action to offer - a subscription is started by the
+   customer and cancelled by the customer. */
+.ops-subs{ min-width:1180px; }
+.ops-subs .ops-mail{ display:block; font-size:12px; color:rgba(17,17,17,.62); }
+/* The identifiers are selectable text, not links: there is no detail
+   panel to open and a dead link would promise one. Monospace so a uuid
+   and a Stripe id can actually be read and compared. */
+.ops-subs-id,.ops-subs-stripe{
+  font-family:var(--font-mono);
+  font-size:11px;
+  color:rgba(17,17,17,.72);
+  overflow-wrap:anywhere;
+  user-select:all;
+}
+.ops-subs-sku{ display:block; font-weight:700; font-variant-numeric:tabular-nums; }
+.ops-subs-plan{ display:block; font-size:12px; color:rgba(17,17,17,.62); }
+.ops-subs-when{ display:block; font-size:12px; color:rgba(17,17,17,.62); }
+/* A scheduled cancellation is the state an operator most needs to spot:
+   the subscription is still running AND already ending. Weight and the
+   berry, the same treatment .ops-pending gets. */
+.ops-subs-scheduled{ color:var(--berry); font-weight:600; }
+.ops-subs-ended{ color:var(--plum); font-weight:600; }
+/* The read-only statement sits above the filters, so it is read before
+   an operator starts hunting for a button that is not there. */
+.ops-subs-readonly{ margin:14px 0 0; max-width:74ch; }
 /* THE POSITIONS TABLE INSIDE THE DRAWER.
 
    Five columns in a 499px panel. It does not overflow today, but only

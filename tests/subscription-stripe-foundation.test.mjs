@@ -315,7 +315,29 @@ test("grants: 024 grants service_role nothing, and 025 grants it exactly where a
   };
   walk("lib");
   walk("app");
-  assert.deepEqual(callers, ["lib/subscriptionPlans.ts"], "the set of plan-table callers changed unexpectedly");
+  /*
+    TWO CALLERS NOW, AND THEY READ AS DIFFERENT ROLES.
+
+    lib/subscriptionPlans.ts reads with the SERVICE ROLE, which is the
+    caller migration 025's grant exists for and the one this test was
+    written about.
+
+    app/AccountPortal.tsx reads from the BROWSER as the signed-in
+    customer, to render the size choice in the booking form. It needs no
+    service-role grant at all: migration 005 already grants SELECT to
+    `authenticated` under a policy of `is_active = true`, so the database
+    decides which plans it may see and an inactive plan never arrives.
+    Both halves are pinned below, because "a client can read it" is only
+    safe while that policy is what bounds the read.
+  */
+  assert.deepEqual(callers.sort(), ["app/AccountPortal.tsx", "lib/subscriptionPlans.ts"],
+    "the set of plan-table callers changed unexpectedly");
+  const plansSchema = read("supabase/migrations/005_b2c_subscriptions.sql");
+  assert.match(plansSchema, /on public\.b2c_subscription_plans for select\s*\n\s*using \(is_active = true\);/,
+    "the active-only policy behind the browser read changed");
+  assert.match(plansSchema, /grant select on public\.b2c_subscription_plans to authenticated;/);
+  assert.ok(!/grant (insert|update|delete)[^;]*b2c_subscription_plans[^;]*authenticated/i.test(plansSchema),
+    "the browser gained a write on the plan table");
 
   // 024 promised that the grant would arrive with that caller, and 025 is
   // where it did - SELECT only, and only on this table.
@@ -732,17 +754,36 @@ test("boundary: the one-time checkout is untouched", () => {
   assert.ok(!/getOrCreateStripeCustomer|getOrCreateRecurringPrice/.test(session), "the foundation is not wired in yet");
 });
 
-test("boundary: the account page still makes no subscription promise", () => {
+test("boundary: the account page promises exactly what the server does", () => {
   const portal = read("app/AccountPortal.tsx");
-  // Task 29D-D confirmed the cadence, so the page may now state it. What
-  // it must still not do is offer a booking action: the server route is
-  // gated shut until Task 29D-E handles invoice.paid.
-  // Whitespace-collapsed: the sentence wraps across source lines.
-  assert.match(portal.replace(/\s+/g, " "), /Buchbar sind Abos noch nicht/);
-  assert.match(portal, /alle 4 Wochen/);
+  /*
+    DELIBERATELY INVERTED. This used to require the page to say abos were
+    not bookable and to forbid any call to the checkout route, because
+    Task 29D-E was open. It has been closed for some time - invoice.paid
+    is handled and activates the subscription - and the portal now has
+    the booking form that calls the route.
+
+    The boundary this file is really about is unmoved and is asserted
+    below: the cadence is never monthly, the flag is the server's alone,
+    and nothing here reimplements the flow.
+  */
+  const portalCode = portal
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n").filter(l => !l.trim().startsWith("//")).join("\n");
+  assert.ok(portalCode.includes("/api/subscriptions/checkout/session"),
+    "the account lost its only way to start a subscription");
+  assert.equal((portalCode.match(/\/api\/subscriptions\/checkout/g) || []).length, 1,
+    "a second subscription checkout call appeared");
+  assert.match(portal, /SUBSCRIPTION_CADENCE_LABEL/, "the cadence is no longer read from the rules");
   assert.ok(!/monatlich/i.test(portal.replace(/Monatlich",/g, "")), "the cadence must never be called monthly");
-  assert.ok(!/ABO STARTEN/.test(portal), "no start button until the flow can complete");
-  assert.ok(!/api\/subscriptions\/checkout/.test(portal), "no client CTA may call the gated route yet");
+  // The flag stays server-side, and the UI renders the server's own
+  // refusal rather than deciding availability for itself.
+  assert.ok(!portalCode.includes("B2C_SUBSCRIPTIONS_ENABLED"), "the portal reads the server flag");
+  assert.match(portal, /typeof body\?\.error === "string" \? body\.error/);
+  // And no part of the checkout is rebuilt in the browser.
+  for (const banned of ["stripe", "price_data", "unit_amount", "recurring:"]) {
+    assert.ok(!portalCode.includes(banned), `the portal reimplements checkout: ${banned}`);
+  }
 });
 
 test("boundary: shipping and tax rules are unchanged", () => {

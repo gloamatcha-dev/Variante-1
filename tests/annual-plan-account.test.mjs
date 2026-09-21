@@ -875,6 +875,13 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
     "/admin/orders/resolve-request",
     "/admin/orders/ship",
     "/admin/session",
+    // THE B2C SUBSCRIPTION LAUNCH SURFACE. The read-only subscription
+    // list: POST-gated like every other admin read, open to the roles
+    // lib/adminRoles.ts says may read, and with no write verb in the
+    // file at all. It touches no annual table, no annual function and
+    // no annual route. Reviewed in
+    // tests/subscription-purchase-surface.test.mjs.
+    "/admin/subscriptions",
     "/admin/waitlist",
     "/annual-plan/checkout/session",
     // 4A.4a. The B2B enquiry from /for-cafes. That form was live and

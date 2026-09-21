@@ -973,6 +973,9 @@ test("8: AKTIVITÄT is a real entry in the navigation array, in its required pla
   assert.deepEqual(navPairs(), [
     ["overview", "Übersicht"],
     ["orders", "Bestellungen"],
+    // The read-only subscription view, between orders and inventory:
+    // it is a commerce screen, so it belongs beside Bestellungen.
+    ["subscriptions", "Abos"],
     ["inventory", "Inventar"],
     ["activity", "Aktivität"],
     ["waitlist", "Launch List"],
@@ -1031,21 +1034,35 @@ test("8c: choosing the tab renders AdminActivity, and only that tab does", () =>
   }
 });
 
-test("8d: the tab is shown to every signed-in role - it is a read", () => {
+test("8d: the AKTIVITÄT tab is shown to every signed-in role - it is a read", () => {
   // A viewer is somebody trusted to LOOK at what the shop is doing, and
-  // the log is the least sensitive thing there is to look at. Hiding the
-  // tab by role would also be the wrong mechanism: authorisation is the
-  // server's answer, not a button the UI withheld.
+  // the log is the least sensitive thing there is to look at.
+  //
+  // ── NARROWED FROM "THE NAVIGATION" TO "THIS TAB" ──────────────
+  //
+  // This used to scan the whole <nav> for any role word, which was an
+  // accurate proxy while no tab was role-gated. One now is: the Abos
+  // section is a read a viewer may not perform, so the shell holds
+  // exactly one role branch. The claim this test actually makes is
+  // about the ACTIVITY tab, and it is now made about that tab.
   const nav = shell.slice(shell.indexOf('<nav className="ops-nav"'), shell.indexOf("</nav>"));
-  for (const roleWord of ["role", "owner", "admin ===", "viewer", "canWrite", "canRead"]) {
+  // The activity entry itself carries no role condition...
+  assert.match(nav, /\["activity", "Aktivität"\]/);
+  assert.ok(!/activity[^\]]*canWrite|canWrite[^)]*activity/.test(nav),
+    "the activity tab became role-gated");
+  // ...and the ONE branch the nav holds is the subscription tab's.
+  const branches = [...nav.matchAll(/maySeeSubscriptions/g)].length;
+  assert.equal(branches, 1, "the navigation gained a second role branch");
+  for (const roleWord of ["owner", "viewer", "canRead", "roleSatisfies"]) {
     assert.ok(!nav.includes(roleWord), `the navigation branches on ${roleWord}`);
   }
   // Nor is the render of the activity screen gated by a role.
   const render = shell.slice(shell.indexOf('{view === "activity"'), shell.indexOf('{view === "activity"') + 200);
-  for (const roleWord of ["role", "owner", "viewer"]) {
+  for (const roleWord of ["role", "owner", "viewer", "maySee"]) {
     assert.ok(!render.includes(roleWord), `rendering the activity screen branches on ${roleWord}`);
   }
-  // The server still decides, and it asks only for "read".
+  // The server still decides, and for the activity it asks only for
+  // "read" - so a viewer keeps this tab whatever the shell does.
   assert.match(activityRoute, /requireAdminIdentity\(request, "read"\)/);
 });
 

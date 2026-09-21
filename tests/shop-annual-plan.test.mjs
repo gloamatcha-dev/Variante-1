@@ -56,8 +56,12 @@ const shopRendered = stripJs(shopCode);
  * selector, the plan panel and the blue band. Deliberately excludes
  * ShopProductBlock, which legitimately owns the one-time cart call.
  */
+const subscriptionFrom = site.indexOf("/* ══ THE 4-WEEK SUBSCRIPTION, IN THE SHOP ══");
+assert.notEqual(subscriptionFrom, -1, "the 4-week subscription marker was not found");
+assert.ok(subscriptionFrom > shopFrom && subscriptionFrom < shopTo,
+  "the subscription block is not inside the shop block");
 const annualOnly = stripJs(
-  site.slice(shopFrom, site.indexOf("/** One product's purchase block")) +
+  site.slice(shopFrom, subscriptionFrom) +
   site.slice(site.indexOf("function ShopAnnualPlan"), shopTo)
 );
 assert.ok(annualOnly.length > 1500, "the annual components were not found");
@@ -104,9 +108,28 @@ test("1b: it is never described as monthly, and never as a subscription", () => 
   // The cadence is 28 days. Thirteen 28-day steps are 364 days; twelve
   // calendar months are 365 or 366, so "monatlich" would misstate the
   // rhythm, the count AND the number of payments.
+  //
+  // ── SCOPED TO THE ANNUAL COMPONENTS, DELIBERATELY ─────────────
+  //
+  // This ban used to run against the whole shop block, which was correct
+  // while the annual plan was the only recurring-looking thing on the
+  // page. The shop now also offers the REAL 4-week subscription, and
+  // that one genuinely is an Abo - forbidding the word across the whole
+  // block would force the subscription to be described in language that
+  // is wrong for it.
+  //
+  // So the rule keeps its actual meaning: the ANNUAL plan must never be
+  // called an Abo or described as monthly. annualOnly is sliced at the
+  // subscription marker, so a stray "Abo" drifting up into the annual
+  // panel or the blue band still fails here.
   for (const banned of [/monatlich/i, /monthly/i, /pro Monat/i, /jederzeit kündbar/i,
                         /automatisch verlängert/i, /Abo\b/, /Abonnement/i]) {
-    assert.ok(!banned.test(shopRendered), `misleading wording in the shop: ${banned}`);
+    assert.ok(!banned.test(annualOnly), `misleading wording in the annual plan: ${banned}`);
+  }
+  // And the whole shop block still never says "monatlich" about anything:
+  // neither product is billed on a calendar month.
+  for (const banned of [/monatlich/i, /monthly/i, /pro Monat/i]) {
+    assert.ok(!banned.test(shopRendered), `a calendar month appeared in the shop: ${banned}`);
   }
   for (const banned of [/monatlich/i, /monthly/i, /subscription/i]) {
     assert.ok(!banned.test(cssCode), `misleading wording in the styles: ${banned}`);
@@ -216,20 +239,28 @@ test("3: only the three annual launch SKUs get the option", () => {
    4. THE PURCHASE MODE
    ══════════════════════════════════════════════════════════════ */
 
-test("4: one-time is the default and both modes exist", () => {
-  assert.ok(shopCode.includes('type PurchaseMode = "one_time" | "annual"'), "the mode union changed");
+test("4: one-time is the default and all three modes exist", () => {
+  // The union gained the 4-week option. The ORDER matters to the reader
+  // of the page - one-time, then the smaller commitment, then the
+  // largest - so it is pinned rather than left to a set.
+  assert.ok(shopCode.includes('type PurchaseMode = "one_time" | "subscription" | "annual"'), "the mode union changed");
   assert.ok(site.includes('const [mode,setMode]=useState<PurchaseMode>("one_time");'),
     "the shop no longer defaults to one-time");
   assert.ok(shopCode.includes(">Einmalig kaufen<"), "the one-time option label changed");
   assert.ok(shopCode.includes(">Jahresplan<"), "the annual option label changed");
-  // The selector only appears where an annual plan actually exists.
-  assert.ok(site.includes("{annual&&<PurchaseModeSelector"), "the selector renders without an annual plan");
+  // The selector appears where EITHER plan exists, and each option is
+  // gated on its own eligibility rather than on the other's.
+  assert.ok(site.includes("{(annual||subscribable)&&<PurchaseModeSelector"),
+    "the selector no longer tracks both plans");
+  assert.ok(site.includes("showSubscription={subscribable}"), "the 4-week option lost its own gate");
+  assert.ok(site.includes("showAnnual={annual!==null}"), "the annual option lost its own gate");
+  assert.ok(shopCode.includes("{showAnnual&&<label"), "the annual option is no longer conditional");
 });
 
 test("4b: it is a real radio group, and selection is not colour alone", () => {
   assert.ok(shopCode.includes('role="radiogroup"'), "the purchase mode is not a radio group");
   assert.ok(shopCode.includes('aria-label="Kaufoption wählen"'), "the radio group lost its name");
-  assert.equal((shopCode.match(/type="radio"/g) || []).length, 2, "there are not exactly two radios");
+  assert.equal((shopCode.match(/type="radio"/g) || []).length, 3, "there are not exactly three radios");
   assert.ok(shopCode.includes('className="sr-only"'), "the radios are not real inputs");
   // The active state is a border AND a ground, and the native radio
   // underneath carries it a third time.
@@ -249,7 +280,10 @@ test("4c: switching size or mode leaves nothing stale", () => {
   assert.ok(site.includes('const annualActive=mode==="annual"&&annual!==null;'),
     "an annual panel can render for a product with no annual plan");
   // One-time restores the ordinary display - price, Grundpreis and all.
+  // The annual branch is still FIRST and still gated on the pricing
+  // object, so a subscription panel can never stand in for an annual one.
   assert.ok(site.includes("{annualActive&&annual\n?<AnnualPlanPanel"), "the mode no longer switches the panel");
+  assert.ok(site.includes(":subscriptionActive\n?<SubscriptionPlanPanel"), "the 4-week panel lost its branch");
   assert.ok(site.includes('<p className="shop-product-price">{fmtCents(v.price_gross_cents)} €</p>'),
     "the ordinary one-time price display changed");
   // No effect-driven state, so no cascading render on mode change.
@@ -263,8 +297,15 @@ test("4c: switching size or mode leaves nothing stale", () => {
 test("5: the annual CTA never adds to the cart and never posts a checkout", () => {
   // An annual plan is a dedicated account-bound checkout, not a cart
   // line. The one-time handler is unreachable from annual mode.
-  assert.ok(site.includes('onClick={annualActive?()=>{track("shop_annual_interest");window.location.href="/contact"}:SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":handleAdd}'),
+  //
+  // The prelaunch branch moved to the FRONT of the chain when the 4-week
+  // option arrived - previously it sat between the annual branch and
+  // handleAdd, which meant annual mode bypassed it. The annual arm
+  // itself is unchanged: same event name, same destination.
+  assert.ok(site.includes('annualActive?()=>{track("shop_annual_interest");window.location.href="/contact"}'),
     "the annual CTA changed its action");
+  assert.ok(site.includes('onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":annualActive?'),
+    "prelaunch no longer takes precedence over every mode");
   assert.ok(!annualOnly.includes("addItem"), "an annual component reaches the cart");
   assert.ok(!site.includes('purchaseType:"annual"'), "an annual plan was given a cart purchase type");
   // And nothing in the shop calls the annual checkout endpoint.
