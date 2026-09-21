@@ -1279,6 +1279,22 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // including the ones this edit did not touch - against the source.
     // No annual object is involved.
     "lib/adminRoles.ts",
+    // B2C SUBSCRIPTION ADMIN OVERVIEW V2. The admin list's own leaf
+    // gains display groups, sorting, the cycle-history grouping and the
+    // per-cycle revenue sum - all pure functions over rows handed to
+    // them, still with no relative import, no Supabase, no React and no
+    // clock, and exercised directly by
+    // tests/subscription-purchase-surface.test.mjs.
+    //
+    // It also LOSES cancellationView(), which was wrong: it read
+    // cancel_at_period_end, a migration 005 column the cancellation flow
+    // never writes. The classification now comes from
+    // lib/subscriptionCancellationRules.ts - the same module the
+    // customer's own account page and the cancellation endpoint use - so
+    // the admin and the customer cannot disagree about whether a
+    // subscription is ending. Nothing in the checkout, webhook, order or
+    // annual path imports this file.
+    "lib/adminSubscriptionsQuery.ts",
   ];
 
   // Phase 4B4 edits ONE application module: the single canonical Stripe
@@ -1563,6 +1579,27 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // tests/subscription-purchase-surface.test.mjs asserts that against
     // the source rather than leaving it to this diff.
     "app/api/subscriptions/checkout/session/route.ts",
+    // B2C SUBSCRIPTION ADMIN OVERVIEW V2. The read-only Abos screen and
+    // its read-only route grow into a full operational view: summary
+    // cards, the cycle history, filters and sorting.
+    //
+    // STILL READ ONLY, and structurally so - neither file contains
+    // .insert, .update, .upsert, .delete or .rpc, which
+    // tests/subscription-purchase-surface.test.mjs asserts against the
+    // source. No Stripe object, no order writer, no second subscription
+    // engine, and no annual or B2B module is involved.
+    //
+    // The one behavioural correction: the screen stopped classifying
+    // cancellations itself and now calls the same helpers the customer's
+    // account page calls. V1 read cancel_at_period_end, which the
+    // cancellation flow never writes - production carries false on rows
+    // that genuinely have a scheduled cancellation, so the admin showed
+    // "—" over a contract that was ending.
+    "app/AdminSubscriptions.tsx",
+    // Its route, for the same package: four bounded page-wide reads
+    // replacing two, and the sort/group the leaf resolves. No write verb
+    // and no new capability - it keeps "read_sensitive".
+    "app/api/admin/subscriptions/route.ts",
   ];
   // NOTE. Both lists are about UNCOMMITTED edits to files that already
   // exist, so a file this package CREATES does not belong in either -

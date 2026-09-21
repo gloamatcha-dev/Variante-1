@@ -9738,24 +9738,53 @@ header nav{gap:18px;font-size:12px}
 .ops-order-name{ display:block; }
 .ops-orders .ops-mail{ display:block; font-size:12px; color:rgba(17,17,17,.62); }
 
+/* ── THE SUMMARY CARDS THAT ARE ALSO FILTERS ──────────────────
+   A count an operator reads is a list they want next, so each card is
+   a real <button> with aria-pressed rather than a figure beside a
+   separate control. Same geometry as .ops-count so the row still reads
+   as one band of numbers; the active card carries the berry the rest of
+   the admin uses for a current selection. */
+.ops-count-button{
+  font:inherit;
+  color:inherit;
+  background:none;
+  border:1px solid transparent;
+  cursor:pointer;
+  text-align:inherit;
+  transition:border-color .2s ease,background .2s ease;
+}
+.ops-count-button:hover{ border-color:rgba(166,30,89,.45); }
+.ops-count-button:focus-visible{ outline:3px solid var(--blue); outline-offset:2px; }
+.ops-count-button.is-active{ border-color:var(--berry); background:rgba(166,30,89,.06); }
+/* The recurring figure is not a filter - there is no list of "revenue" -
+   so it stays a plain cell and does not offer a pointer. */
+.ops-count-revenue .ops-count-value{ font-variant-numeric:tabular-nums; }
+.ops-count-capped{ font-style:normal; opacity:.6; }
+
 /* ── THE SUBSCRIPTION TABLE ───────────────────────────────────
-   Twelve columns, so it is wider than the order list and scrolls inside
-   .ops-table-wrap like every other ops table. Nothing here is a
+   Fifteen columns, so it is wider than the order list and scrolls
+   inside .ops-table-wrap like every other ops table. Nothing here is a
    control: there is no open button and no action cell, because the
    screen has no action to offer - a subscription is started by the
    customer and cancelled by the customer. */
-.ops-subs{ min-width:1180px; }
+.ops-subs{ min-width:1720px; }
+.ops-subs-num,.ops-subs-total{ font-variant-numeric:tabular-nums; text-align:right; }
+.ops-subs-total{ font-weight:700; }
 .ops-subs .ops-mail{ display:block; font-size:12px; color:rgba(17,17,17,.62); }
 /* The identifiers are selectable text, not links: there is no detail
    panel to open and a dead link would promise one. Monospace so a uuid
    and a Stripe id can actually be read and compared. */
 .ops-subs-id,.ops-subs-stripe{
+  display:block;
   font-family:var(--font-mono);
   font-size:11px;
   color:rgba(17,17,17,.72);
   overflow-wrap:anywhere;
   user-select:all;
 }
+/* The local id sits under the Stripe one and is quieter: an operator
+   reaches for the Stripe id far more often. */
+.ops-subs-id{ font-size:10px; color:rgba(17,17,17,.5); }
 .ops-subs-sku{ display:block; font-weight:700; font-variant-numeric:tabular-nums; }
 .ops-subs-plan{ display:block; font-size:12px; color:rgba(17,17,17,.62); }
 .ops-subs-when{ display:block; font-size:12px; color:rgba(17,17,17,.62); }

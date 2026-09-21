@@ -17,7 +17,6 @@ import { SUBSCRIPTION_CADENCE_LABEL, SUBSCRIPTION_QUANTITY_LABEL, CADENCE_DAYS }
 import {
   SUBSCRIPTION_STATUSES,
   SUBSCRIPTION_STATUS_LABEL,
-  cancellationView,
   formatCadence,
   formatCents,
   normalizeSubscriptionSearch,
@@ -28,7 +27,33 @@ import {
   subscriptionPlanFacts,
   subscriptionsPageRange,
   SUBSCRIPTION_LIST_COLUMNS,
+  SUBSCRIPTION_ATTEMPT_COLUMNS,
+  SUBSCRIPTION_ORDER_COLUMNS,
+  SUBSCRIPTION_GROUPS,
+  SUBSCRIPTION_GROUP_LABEL,
+  SUBSCRIPTION_SORTS,
+  SUBSCRIPTION_SORT_COLUMN,
+  SUMMARY_GROUPS,
+  PAID_ATTEMPTS_PER_SUBSCRIPTION_CAP,
+  REVENUE_CYCLE_DAYS,
+  REVENUE_CYCLE_LABEL,
+  REVENUE_ROW_CAP,
+  buildCycleFacts,
+  emptyCycleFacts,
+  parseSubscriptionGroup,
+  parseSubscriptionSort,
+  recurringCycleRevenueCents,
+  subscriptionGroupFilter,
 } from "../lib/adminSubscriptionsQuery.ts";
+// The shared view helpers the admin now reuses instead of rebuilding.
+import {
+  getEffectiveEndAt,
+  getNextBillingAt,
+  getNextDeliveryAt,
+  getSubscriptionStatusLabel,
+  hasEnded,
+  isCancellationScheduled,
+} from "../lib/subscriptionCancellationRules.ts";
 import { normalizeOrderSearch } from "../lib/adminOrdersQuery.ts";
 // The role leaf, imported rather than described: the access rule is
 // checked against the function that decides it, not against a comment.
@@ -412,6 +437,60 @@ test("6a2: the UI does not offer the section to a VIEWER", () => {
     "the role predicate reaches more of the shell than the Abos section");
 });
 
+test("6b2: the summary counts are database counts, built from the filters they label", () => {
+  // One HEAD request per card, with count:"exact" - the database counts
+  // and not one row crosses the wire for them.
+  assert.match(adminRoute, /const head = \(\) => supabase\.from\("subscriptions"\)\.select\("id", \{ count: "exact", head: true \}\)/);
+  // Each card's count is built from the SAME filter the card's tab
+  // applies, so a number and the list behind it cannot disagree.
+  assert.match(adminRoute, /SUMMARY_GROUPS\.map\(group =>\s*\n?\s*countOf\(applyGroup\(head\(\), subscriptionGroupFilter\(group\)\), group\)/);
+  assert.deepEqual([...SUMMARY_GROUPS], ["aktiv", "gekuendigt", "zahlungsproblem", "beendet"]);
+  // A failed count is null and renders as a dash - never a silent zero.
+  assert.match(adminRoute, /return null;\n\s*\}\n\s*return count \?\? null;/);
+  assert.match(adminUi, /s\[key\] === null \? "—" : s\[key\]/);
+  assert.match(adminUi, /s\.recurringCycleGrossCents === null \? "—" :/);
+  // The cards are the filters: clicking one narrows the list.
+  assert.match(adminUi, /aria-pressed=\{group === key\}/);
+});
+
+test("6b3: a page of 25 costs the same round trips as a page of 1 - no N+1", () => {
+  const route = withoutComments(adminRoute);
+  /*
+    EVERY read is either a single request or ONE `.in(...)` over the
+    whole page. Nothing iterates rows issuing requests, so the query
+    budget is constant in the page size.
+  */
+  // The two page-wide reads are `.in(...)` over the ids, not per row.
+  assert.match(route, /\.in\("subscription_id", ids\)/);
+  assert.match(route, /\.in\("checkout_attempt_id", attemptIds\)/);
+  assert.equal((route.match(/\.in\(/g) || []).length, 4,
+    "the route gained an .in() - check it is still page-wide");
+
+  // NO REQUEST INSIDE A LOOP. These are the shapes an N+1 takes.
+  for (const shape of [
+    /for\s*\([^)]*\)\s*\{[^}]*supabase\./,
+    /\.map\([^)]*=>\s*supabase\./,
+    /\.forEach\([^)]*supabase\./,
+    /rows\.map\([^)]*await/,
+  ]) {
+    assert.ok(!shape.test(route), `a per-row request appeared: ${shape}`);
+  }
+  // Every page-wide read is bounded, and every bound is reported.
+  assert.match(route, /\.limit\(itemLimit\)/);
+  assert.match(route, /\.limit\(attemptLimit\)/);
+  assert.match(route, /\.limit\(attemptIds\.length\)/);
+  assert.match(route, /\.limit\(REVENUE_ROW_CAP\)/);
+  for (const flag of ["itemsCapped", "historyCapped", "recurringCapped"]) {
+    assert.ok(route.includes(flag), `the route stopped reporting ${flag}`);
+  }
+  // The independent reads overlap rather than queue.
+  assert.match(route, /await Promise\.all\(\[/);
+  // And the SCREEN issues exactly one request, with no second endpoint.
+  const ui = withoutComments(adminUi);
+  assert.equal((ui.match(/fetch\(/g) || []).length, 1, "the screen makes a second request");
+  assert.match(ui, /fetch\("\/api\/admin\/subscriptions"/);
+});
+
 test("6b: THERE IS NO WRITE VERB IN THE ADMIN SUBSCRIPTION AREA", () => {
   for (const source of [adminRoute, adminUi]) {
     for (const banned of [".insert(", ".update(", ".upsert(", ".delete(", ".rpc(", "mark_subscription_cancelled"]) {
@@ -429,19 +508,136 @@ test("6b: THERE IS NO WRITE VERB IN THE ADMIN SUBSCRIPTION AREA", () => {
 test("6c: it shows every field the operator was promised", () => {
   const columns = SUBSCRIPTION_LIST_COLUMNS.split(",");
   for (const column of ["id", "status", "total_gross_cents", "shipping_gross_cents",
-                        "current_period_end", "next_delivery_at", "stripe_subscription_id",
-                        "created_at", "cancelled_at", "cancel_at_period_end",
+                        "subtotal_gross_cents", "current_period_end", "next_delivery_at",
+                        "stripe_subscription_id", "created_at", "started_at", "cancelled_at",
+                        "cancellation_requested_at", "cancellation_effective_at",
                         "customer_snapshot", "plan_snapshot"]) {
     assert.ok(columns.includes(column), `the list stopped reading ${column}`);
   }
-  for (const header of ["Abo", "Kunde", "Produkt", "Rhythmus", "Status", "Betrag", "Versand",
-                        "Nächste Abbuchung", "Nächste Lieferung", "Stripe", "Angelegt", "Kündigung"]) {
+  // THE MISLEADING COLUMN IS NOT FETCHED. cancel_at_period_end is
+  // migration 005's, nothing in the cancellation flow writes it, and
+  // every production row carries false while two have a real scheduled
+  // cancellation. Fetching it would only invite somebody to read it.
+  assert.ok(!columns.includes("cancel_at_period_end"),
+    "the misleading cancellation column is back in the wire format");
+
+  for (const header of ["Kunde", "Produkt", "Status", "Angelegt", "Zyklen",
+                        "Letzte Zahlung", "Letzte Bestellung", "Letzter Versand",
+                        "Nächste Abbuchung", "Nächste Lieferung", "Matcha", "Versand",
+                        "Gesamt", "Kündigung", "Stripe / Abo-ID"]) {
     assert.ok(adminUi.includes(`>${header}</th>`), `the table lost the ${header} column`);
   }
-  // AND NOT ONE PERSONAL FIELD MORE than name and email.
-  for (const forbidden of ["shipping_address_snapshot", "billing_address_snapshot", "tax_snapshot"]) {
-    assert.ok(!SUBSCRIPTION_LIST_COLUMNS.includes(forbidden), `the list moves ${forbidden}`);
+  // AND NOT ONE PERSONAL FIELD MORE than name and email, on any of the
+  // four reads this screen makes.
+  for (const forbidden of ["shipping_address_snapshot", "billing_address_snapshot", "tax_snapshot",
+                           "items_snapshot", "delivery_tax_snapshot"]) {
+    for (const [name, cols] of Object.entries({
+      list: SUBSCRIPTION_LIST_COLUMNS,
+      attempts: SUBSCRIPTION_ATTEMPT_COLUMNS,
+      orders: SUBSCRIPTION_ORDER_COLUMNS,
+    })) {
+      assert.ok(!cols.includes(forbidden), `the ${name} read moves ${forbidden}`);
+    }
   }
+});
+
+test("6c2: LETZTER VERSAND, never LETZTE LIEFERUNG - the audit's finding, pinned", () => {
+  /*
+    THE SYSTEM DOES NOT KNOW THAT ANYTHING WAS DELIVERED.
+
+    public.orders has no delivered_at column. 'delivered' exists in the
+    fulfillment_status CHECK and is READ by lib/orderStatus.ts, but
+    nothing in this repository ever writes it - migration 019 says so
+    explicitly. mark_order_shipped is the only writer of fulfilment
+    state and it sets 'shipped' with a shipped_at.
+
+    So the column is named for the fact that exists. If a real delivery
+    confirmation is ever recorded, this test is where the rename starts.
+  */
+  const orders004 = read("supabase/migrations/004_orders.sql");
+  assert.ok(!/delivered_at/.test(orders004), "orders gained a delivered_at column");
+  for (const migration of readdirSync(path.join(ROOT, "supabase/migrations"))) {
+    assert.ok(!/add column[^;]*delivered_at/i.test(read(`supabase/migrations/${migration}`)),
+      `${migration} added a delivered_at column`);
+  }
+  assert.match(read("supabase/migrations/019_order_lifecycle_tracking.sql"),
+    /'delivered' is deliberately never set automatically anywhere in this/,
+    "the never-set-automatically guarantee changed");
+  // The shipment value read is shipped_at, and the heading says Versand.
+  assert.ok(SUBSCRIPTION_ORDER_COLUMNS.split(",").includes("shipped_at"));
+  assert.ok(adminUi.includes(">Letzter Versand</th>"), "the shipment column was renamed");
+  assert.ok(!adminUi.includes(">Letzte Lieferung</th>"),
+    "the admin claims a delivery date the database does not hold");
+  // "Nächste Lieferung" IS legitimate - it is a scheduled future date
+  // from subscriptions.next_delivery_at, not a claim about the past.
+  assert.ok(adminUi.includes(">Nächste Lieferung</th>"));
+  assert.match(adminUi, /getNextDeliveryAt\(r\)/);
+});
+
+test("6c3: the cycle history comes from the three traces, and nothing is invented", () => {
+  // PAYMENT -> ORDER -> SHIPMENT, grouped from two bounded reads.
+  const A = (id, sub, paid, inv) => ({ id, subscription_id: sub, paid_at: paid, stripe_invoice_id: inv });
+  const O = (attempt, num, placed, fulfil, shipped) => ({
+    checkout_attempt_id: attempt, order_number: num, placed_at: placed,
+    fulfillment_status: fulfil, shipped_at: shipped,
+  });
+  const facts = buildCycleFacts(
+    [
+      A("a1", "s1", "2026-01-01T10:00:00Z", "in_1"),
+      A("a2", "s1", "2026-02-01T10:00:00Z", "in_2"),
+      A("a3", "s2", "2026-01-15T10:00:00Z", "in_3"),
+    ],
+    [
+      O("a1", "GLOA-1", "2026-01-01T10:05:00Z", "shipped", "2026-01-03T09:00:00Z"),
+      O("a2", "GLOA-2", "2026-02-01T10:05:00Z", "unfulfilled", null),
+      O("a3", "GLOA-3", "2026-01-15T10:05:00Z", "unfulfilled", null),
+    ]
+  );
+  // Latest PAYMENT wins, and brings its own invoice id with it.
+  assert.equal(facts.s1.lastPaymentAt, "2026-02-01T10:00:00Z");
+  assert.equal(facts.s1.lastInvoiceId, "in_2");
+  // Latest ORDER is the newest placed_at, with its number and state.
+  assert.equal(facts.s1.lastOrderAt, "2026-02-01T10:05:00Z");
+  assert.equal(facts.s1.lastOrderNumber, "GLOA-2");
+  assert.equal(facts.s1.lastOrderFulfillment, "unfulfilled");
+  // THE LAST SHIPMENT IS THE OLDER ORDER'S, because it is the only one
+  // that shipped. A newest-order-wins rule would have shown "—" here.
+  assert.equal(facts.s1.lastShipmentAt, "2026-01-03T09:00:00Z");
+  assert.equal(facts.s1.paidCycles, 2);
+  assert.equal(facts.s1.orderCount, 2);
+  // Rows are grouped per subscription and never bleed into each other.
+  assert.equal(facts.s2.paidCycles, 1);
+  assert.equal(facts.s2.lastShipmentAt, null);
+
+  // A paid attempt whose order does not exist counts as a CYCLE but not
+  // as an order - the two numbers are allowed to disagree and say so.
+  const partial = buildCycleFacts([A("a9", "s9", "2026-03-01T10:00:00Z", "in_9")], []);
+  assert.equal(partial.s9.paidCycles, 1);
+  assert.equal(partial.s9.orderCount, 0);
+  assert.equal(partial.s9.lastOrderAt, null);
+  assert.equal(partial.s9.lastShipmentAt, null);
+
+  // Nothing at all is invented for a subscription with no history.
+  assert.deepEqual(buildCycleFacts([], []), {});
+  assert.deepEqual(emptyCycleFacts(), {
+    lastPaymentAt: null, lastInvoiceId: null, lastOrderAt: null, lastOrderNumber: null,
+    lastShipmentAt: null, lastOrderFulfillment: null, paidCycles: 0, orderCount: 0,
+  });
+  // A missing timestamp never becomes "the last one".
+  const nulls = buildCycleFacts([A("a0", "s0", null, null)], []);
+  assert.equal(nulls.s0.lastPaymentAt, null);
+  assert.equal(nulls.s0.paidCycles, 1);
+});
+
+test("6c4: only PAID attempts count as cycles, and the read is bounded", () => {
+  // A 'stripe_session_created' attempt is a checkout that was started,
+  // not a cycle that was billed.
+  assert.match(adminRoute, /\.eq\("status", "paid"\)/, "the attempt read stopped filtering on paid");
+  // Bounded per page, and the cap is reported rather than silently hit.
+  assert.equal(PAID_ATTEMPTS_PER_SUBSCRIPTION_CAP, 26);
+  assert.match(adminRoute, /attemptLimit = Math\.max\(ids\.length, 1\) \* PAID_ATTEMPTS_PER_SUBSCRIPTION_CAP/);
+  assert.match(adminRoute, /historyCapped/);
+  assert.match(adminUi, /data\.historyCapped &&/, "the screen does not report a truncated history");
 });
 
 test("6d: the admin tab is mounted only when open, and named honestly", () => {
@@ -486,18 +682,166 @@ test("7b: the cadence is derived from each row, never printed as a constant", ()
     "Alle 3 Monate");
 });
 
-test("7c: cancellation state tells 'ended' from 'ending'", () => {
-  assert.deepEqual(cancellationView({ status: "active" }),
-    { label: "—", scheduled: false, ended: false });
-  assert.deepEqual(cancellationView({ status: "active", cancel_at_period_end: true }),
-    { label: "Kündigung vorgemerkt", scheduled: true, ended: false });
-  assert.deepEqual(cancellationView({ status: "cancelled", cancelled_at: "2026-01-01T00:00:00Z" }),
-    { label: "Beendet", scheduled: false, ended: true });
-  // A cancelled_at without the status still reads as ended - both
-  // columns are checked, not one.
-  assert.equal(cancellationView({ status: "active", cancelled_at: "2026-01-01T00:00:00Z" }).ended, true);
-  // An empty string is not a date.
-  assert.equal(cancellationView({ status: "active", cancelled_at: "   " }).ended, false);
+test("7c: cancellation state is the CUSTOMER's classification, not a second one", async () => {
+  /*
+    THE DEFECT THIS REPLACES, AND WHY THE TEST INVERTED.
+
+    V1 carried its own cancellationView() reading
+    subscriptions.cancel_at_period_end. Production disproved it: all
+    four rows carry cancel_at_period_end = false while two of them hold
+    a real scheduled cancellation in cancellation_requested_at /
+    cancellation_effective_at. The admin would have shown "—" over a
+    contract that is scheduled to end.
+
+    cancel_at_period_end is migration 005's column and the cancellation
+    flow never writes it; migration 034 introduced the columns it does
+    write. So the admin no longer classifies at all - it calls the same
+    helpers the customer's own account page calls.
+  */
+  assert.ok(!Object.keys(await import("../lib/adminSubscriptionsQuery.ts")).includes("cancellationView"),
+    "the admin grew its own cancellation classifier again");
+
+  const SCHEDULED = {
+    status: "active", current_period_end: "2026-10-25T00:11:48Z", next_delivery_at: "2026-10-25T00:11:48Z",
+    cancellation_requested_at: "2026-08-30T00:29:03Z", cancellation_effective_at: "2026-10-25T00:11:48Z",
+    cancelled_at: null,
+  };
+  const PLAIN = { ...SCHEDULED, cancellation_requested_at: null, cancellation_effective_at: null };
+  const ENDED = { ...SCHEDULED, status: "cancelled", cancelled_at: "2026-10-10T12:00:00Z" };
+
+  // The exact production shape: active, cancel_at_period_end false, and
+  // genuinely ending. The shared helper sees it; the old one did not.
+  assert.equal(isCancellationScheduled(SCHEDULED), true, "a scheduled cancellation is invisible again");
+  assert.equal(getSubscriptionStatusLabel(SCHEDULED), "Kündigung vorgemerkt");
+  assert.equal(getEffectiveEndAt(SCHEDULED), "2026-10-25T00:11:48Z");
+  assert.equal(hasEnded(SCHEDULED), false);
+
+  assert.equal(getSubscriptionStatusLabel(PLAIN), "Aktiv");
+  assert.equal(getEffectiveEndAt(PLAIN), null);
+
+  assert.equal(hasEnded(ENDED), true);
+  assert.equal(getSubscriptionStatusLabel(ENDED), "Beendet");
+
+  // A scheduled cancellation stops the future dates from being promised.
+  assert.equal(getNextBillingAt(ENDED), null, "an ended subscription still promises a billing date");
+  assert.equal(getNextDeliveryAt(ENDED), null, "an ended subscription still promises a delivery");
+
+  // And the SCREEN uses those helpers rather than reading the columns.
+  for (const helper of ["getSubscriptionStatusLabel(r)", "isCancellationScheduled(r)",
+                        "hasEnded(r)", "getEffectiveEndAt(r)",
+                        "getNextBillingAt(r)", "getNextDeliveryAt(r)"]) {
+    assert.ok(adminUi.includes(helper), `the admin stopped using ${helper}`);
+  }
+  assert.ok(!withoutComments(adminUi).includes("cancel_at_period_end === true"),
+    "the admin reads the misleading column again");
+});
+
+test("7c2: the display groups map to the database without changing it", () => {
+  assert.deepEqual([...SUBSCRIPTION_GROUPS], ["alle", "aktiv", "gekuendigt", "zahlungsproblem", "beendet"]);
+  assert.deepEqual(SUMMARY_GROUPS.map(g => SUBSCRIPTION_GROUP_LABEL[g]),
+    ["Aktiv", "Kündigung vorgemerkt", "Zahlungsproblem", "Beendet"]);
+
+  // "Aktiv" is running WITH NO cancellation on record.
+  assert.deepEqual(subscriptionGroupFilter("aktiv"),
+    { statusIn: ["active"], requested: "no", notEnded: true });
+  // "Kündigung vorgemerkt" is NOT keyed on a status, because a scheduled
+  // cancellation leaves the row 'active' - which is the whole point.
+  const scheduled = subscriptionGroupFilter("gekuendigt");
+  assert.equal(scheduled.requested, "yes");
+  assert.equal(scheduled.notEnded, true);
+  assert.ok(!scheduled.statusIn.includes("cancelled"), "an ended row would match the scheduled group");
+  // The two payment states, exactly as migration 022 spells them.
+  assert.deepEqual(subscriptionGroupFilter("zahlungsproblem"), { statusIn: ["past_due", "unpaid"] });
+  // "Beendet" is an OR, because the status and the date can arrive apart.
+  assert.equal(subscriptionGroupFilter("beendet").or, "status.eq.cancelled,cancelled_at.not.is.null");
+  // "Alle" filters nothing.
+  assert.deepEqual(subscriptionGroupFilter("alle"), {});
+
+  // Every status named by a group is one migration 022's CHECK allows -
+  // no group invents or remaps a stored value.
+  const migration = read("supabase/migrations/022_recurring_subscription_foundation.sql");
+  const check = migration.slice(migration.indexOf("add constraint subscriptions_status_check"));
+  for (const group of SUBSCRIPTION_GROUPS) {
+    for (const status of subscriptionGroupFilter(group).statusIn ?? []) {
+      assert.ok(check.includes(`'${status}'`), `${group} names a status the database does not have: ${status}`);
+    }
+  }
+  // NO WRITE, anywhere in the mapping or the route.
+  for (const banned of ["update", "insert", "upsert", "delete"]) {
+    assert.ok(!JSON.stringify(SUBSCRIPTION_GROUPS.map(subscriptionGroupFilter)).includes(banned),
+      `a group filter carries a ${banned}`);
+  }
+  // An unknown group shows everything rather than filtering on junk.
+  for (const junk of ["", "weird", null, 7, undefined]) {
+    assert.equal(parseSubscriptionGroup(junk), "alle", String(junk));
+  }
+});
+
+test("7c3: sorting is done by the database, on real columns", () => {
+  assert.deepEqual([...SUBSCRIPTION_SORTS], ["created", "next_billing", "next_delivery"]);
+  // Newest-first is the default, so the most relevant rows lead.
+  assert.equal(parseSubscriptionSort(undefined), "created");
+  assert.deepEqual(SUBSCRIPTION_SORT_COLUMN.created, { column: "created_at", ascending: false });
+  // The two forward-looking sorts are SOONEST first: the operator is
+  // looking for what happens next, not what happened longest ago.
+  assert.deepEqual(SUBSCRIPTION_SORT_COLUMN.next_billing, { column: "current_period_end", ascending: true });
+  assert.deepEqual(SUBSCRIPTION_SORT_COLUMN.next_delivery, { column: "next_delivery_at", ascending: true });
+  // Every sort names a column the list actually fetches.
+  const columns = SUBSCRIPTION_LIST_COLUMNS.split(",");
+  for (const sort of SUBSCRIPTION_SORTS) {
+    assert.ok(columns.includes(SUBSCRIPTION_SORT_COLUMN[sort].column),
+      `${sort} sorts on a column the list does not read`);
+  }
+  // The DATABASE sorts, and a tiebreaker keeps paging stable.
+  assert.match(adminRoute, /\.order\(sort\.column, \{ ascending: sort\.ascending, nullsFirst: false \}\)/);
+  assert.match(adminRoute, /\.order\("id", \{ ascending: true \}\)/);
+  // Nothing is re-sorted in the browser, which would sort only the 25
+  // rows it holds and lie about the rest.
+  assert.ok(!/\.sort\(/.test(withoutComments(adminUi)), "the screen re-sorts the page client-side");
+  for (const junk of ["", "price", null, 7]) {
+    assert.equal(parseSubscriptionSort(junk), "created", String(junk));
+  }
+});
+
+test("7c4: the recurring figure is per 4-week cycle and never called monthly", () => {
+  // 28 days, agreeing with the module the cutoff arithmetic uses.
+  assert.equal(REVENUE_CYCLE_DAYS, 28);
+  assert.equal(REVENUE_CYCLE_DAYS, CADENCE_DAYS, "the admin and the cadence rules disagree");
+  assert.equal(REVENUE_CYCLE_LABEL, "je 4 Wochen");
+  // Derived from the number, never typed out.
+  assert.match(read("lib/adminSubscriptionsQuery.ts"),
+    /REVENUE_CYCLE_LABEL = `je \$\{REVENUE_CYCLE_DAYS \/ 7\} Wochen`/);
+
+  // The sum itself: integer cents only, and junk contributes nothing.
+  assert.equal(recurringCycleRevenueCents([{ total_gross_cents: 2589 }, { total_gross_cents: 1499 }]), 4088);
+  assert.equal(recurringCycleRevenueCents([]), 0);
+  for (const junk of [{ total_gross_cents: null }, { total_gross_cents: "2589" },
+                      { total_gross_cents: 1.5 }, { total_gross_cents: -100 }, {}]) {
+    assert.equal(recurringCycleRevenueCents([junk]), 0, JSON.stringify(junk));
+  }
+
+  // IT COUNTS THE "aktiv" SET - running, no cancellation on record -
+  // because a scheduled cancellation stops billing on a known date.
+  assert.match(adminRoute, /subscriptionGroupFilter\("aktiv"\)\n?\s*\)\.limit\(REVENUE_ROW_CAP\)/);
+  assert.equal(REVENUE_ROW_CAP, 1000);
+  assert.match(adminRoute, /recurringCapped = list\.length >= REVENUE_ROW_CAP/);
+
+  // NEVER "monatlich", in the leaf, the route or the screen.
+  //
+  // Comment-stripped, the usual trap in this repository: all three files
+  // EXPLAIN at length why the figure is not monthly, and the prose
+  // defending the rule must not trip the rule.
+  for (const [name, src] of Object.entries({
+    leaf: withoutComments(read("lib/adminSubscriptionsQuery.ts")),
+    route: withoutComments(adminRoute),
+    ui: withoutComments(adminUi),
+  })) {
+    for (const banned of [/monatlich/i, /monthly/i, /pro Monat/i, /Monatsumsatz/i]) {
+      assert.ok(!banned.test(src), `${name} calls the 28-day cycle monthly: ${banned}`);
+    }
+  }
+  // And the card says what it is.
+  assert.match(adminUi, /Wiederkehrend \{REVENUE_CYCLE_LABEL\}/);
 });
 
 test("7d: snapshots are read tolerantly and never invented", () => {
@@ -518,15 +862,22 @@ test("7d: snapshots are read tolerantly and never invented", () => {
 });
 
 test("7e: the query allowlists every filter and cannot carry PostgREST syntax", () => {
-  const q = resolveSubscriptionsQuery({ status: "active", search: "  a,b(c)*d  ", page: "3", pageSize: 9999, evil: 1 });
-  assert.equal(q.status, "active");
+  const q = resolveSubscriptionsQuery({
+    group: "aktiv", sort: "next_billing", search: "  a,b(c)*d  ", page: "3", pageSize: 9999, evil: 1,
+  });
+  assert.equal(q.group, "aktiv");
+  assert.equal(q.sort, "next_billing");
   assert.equal(q.search, "abcd");
   assert.equal(q.page, 3);
   assert.equal(q.pageSize, 100, "the page size cap is gone");
   assert.ok(!("evil" in q), "an unknown filter survived");
-  // An unknown status degrades to "all" rather than filtering on junk.
-  assert.equal(resolveSubscriptionsQuery({ status: "trialing" }).status, "all");
+  // Unknown values degrade to the safe default rather than filtering or
+  // ordering on junk.
+  assert.equal(resolveSubscriptionsQuery({ group: "trialing" }).group, "alle");
+  assert.equal(resolveSubscriptionsQuery({ sort: "price" }).sort, "created");
   assert.equal(resolveSubscriptionsQuery(null).page, 1);
+  assert.equal(resolveSubscriptionsQuery(null).group, "alle");
+  assert.equal(resolveSubscriptionsQuery(null).sort, "created");
   assert.deepEqual(subscriptionsPageRange({ page: 2, pageSize: 25 }), { from: 25, to: 49 });
   // The duplicated normaliser agrees with the order list's, character
   // for character, on every input that matters.

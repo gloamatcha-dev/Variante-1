@@ -83,8 +83,9 @@ export const SUBSCRIPTIONS_MAX_PAGE_SIZE = 100;
 const SEARCH_MAX = 120;
 
 export type SubscriptionsQuery = {
-  status: SubscriptionStatus | "all";
+  group: SubscriptionGroup;
   search: string;
+  sort: SubscriptionSort;
   page: number;
   pageSize: number;
 };
@@ -123,10 +124,10 @@ export function normalizeSubscriptionSearch(raw: unknown): string {
 /** Every filter the route accepts, allowlisted. Anything else is ignored. */
 export function resolveSubscriptionsQuery(input: unknown): SubscriptionsQuery {
   const raw = (input ?? {}) as Record<string, unknown>;
-  const status = parseSubscriptionStatus(raw.status);
   return {
-    status: status ?? "all",
+    group: parseSubscriptionGroup(raw.group),
     search: normalizeSubscriptionSearch(raw.search),
+    sort: parseSubscriptionSort(raw.sort),
     page: resolvePage(raw.page),
     pageSize: resolvePageSize(raw.pageSize),
   };
@@ -155,8 +156,18 @@ export const SUBSCRIPTION_LIST_COLUMNS = [
   "currency",
   "created_at",
   "started_at",
+  // THE THREE COLUMNS THE CANCELLATION FLOW ACTUALLY WRITES
+  // (migration 034). getSubscriptionStatusLabel, isCancellationScheduled
+  // and getEffectiveEndAt read exactly these, so the admin and the
+  // customer's own page reach the same answer from the same values.
+  //
+  // cancel_at_period_end is deliberately NOT here. It is migration 005's
+  // column, nothing in the cancellation flow writes it, and every
+  // production row carries false while two of them have a real scheduled
+  // cancellation. Fetching it would only invite somebody to read it.
   "cancelled_at",
-  "cancel_at_period_end",
+  "cancellation_requested_at",
+  "cancellation_effective_at",
   "current_period_start",
   "current_period_end",
   "next_delivery_at",
@@ -174,8 +185,44 @@ export const SUBSCRIPTION_ITEM_COLUMNS = [
   "subscription_id", "sku", "product_name", "variant_name", "quantity",
 ].join(",");
 
+/**
+ * THE PAYMENT TRACE. One row per successful recurring charge, written by
+ * activate_subscription_from_invoice.
+ *
+ * Five columns and no more. items_snapshot, tax_snapshot and the
+ * shipping fields are on this table too and none of them is needed to
+ * answer "when was this last paid" - a snapshot per cycle per row would
+ * be the largest thing on the wire for no gain.
+ */
+export const SUBSCRIPTION_ATTEMPT_COLUMNS = [
+  "id", "subscription_id", "paid_at", "stripe_invoice_id",
+].join(",");
+
+/**
+ * THE ORDER AND SHIPMENT TRACE, keyed back to the attempt.
+ *
+ * shipped_at is the latest fact this system holds about a parcel. There
+ * is no delivered_at column to ask for - see the cycle-history block
+ * below for why, and why the column is labelled "Letzter Versand".
+ */
+export const SUBSCRIPTION_ORDER_COLUMNS = [
+  "checkout_attempt_id", "order_number", "placed_at", "fulfillment_status", "shipped_at",
+].join(",");
+
 /** A hard ceiling on the item read, so one page can never fan out. */
 export const ITEM_LINES_PER_SUBSCRIPTION_CAP = 10;
+
+/**
+ * A ceiling on the cycle history read, per subscription on the page.
+ *
+ * Thirteen 28-day cycles is a year, so 26 is two years of history for
+ * every row on the page - far more than any figure here needs, since
+ * only the LATEST payment and the COUNT are displayed. It exists so one
+ * page is bounded no matter how long a subscription has run, and the
+ * route reports when it is reached rather than quietly showing a short
+ * cycle count.
+ */
+export const PAID_ATTEMPTS_PER_SUBSCRIPTION_CAP = 26;
 
 /* ── Reading the frozen snapshots ───────────────────────────── */
 
@@ -249,40 +296,134 @@ export function formatCadence(unit: string, count: number | null): string {
   return count === 1 ? `Jede(n) ${pair[0]}` : `Alle ${count} ${pair[1]}`;
 }
 
-/* ── Cancellation state, as one readable fact ───────────────── */
-
-export type CancellationView = { label: string; scheduled: boolean; ended: boolean };
+/* ── The display groups an operator filters by ──────────────── */
 
 /**
- * What the cancellation columns actually mean together.
+ * ── WHY THE ADMIN DOES NOT CLASSIFY CANCELLATION ITSELF ───────
  *
- * Three distinct states, and the difference matters to an operator:
+ * The first version of this file carried a cancellationView() that read
+ * subscriptions.cancel_at_period_end. That was WRONG, and production
+ * proved it: all four rows carry cancel_at_period_end = false while two
+ * of them have a real scheduled cancellation in
+ * cancellation_requested_at / cancellation_effective_at. The admin would
+ * have shown "—" for a contract that is scheduled to end.
  *
- *   ended       cancelled_at is set and the status says cancelled. The
- *               contract is over.
- *   scheduled   cancel_at_period_end is true while the row is still
- *               running. The customer has cancelled and is still being
- *               delivered to until current_period_end.
- *   none        neither.
+ * cancel_at_period_end is migration 005's column and nothing in the
+ * cancellation flow writes it. Migration 034 introduced the columns that
+ * flow actually uses, and lib/subscriptionCancellationRules.ts is what
+ * reads them - isCancellationScheduled, hasEnded, getEffectiveEndAt,
+ * getNextBillingAt, getNextDeliveryAt and getSubscriptionStatusLabel.
  *
- * Derived from the columns rather than from a status string alone,
- * because "gekündigt, läuft noch" is exactly the state a status column
- * cannot express and the one an operator most needs to see.
+ * So the classification is NOT duplicated here. The route and the screen
+ * both call that module, which is the same one the customer's own
+ * account page calls, and the admin and the customer therefore cannot
+ * disagree about whether a subscription is ending. What lives in this
+ * file is only what that module does not do: which groups exist, how a
+ * group becomes a database filter, and the page-level arithmetic.
  */
-export function cancellationView(row: {
-  status?: unknown;
-  cancelled_at?: unknown;
-  cancel_at_period_end?: unknown;
-}): CancellationView {
-  const status = parseSubscriptionStatus(row.status);
-  const cancelledAt = typeof row.cancelled_at === "string" && row.cancelled_at.trim() !== "";
-  if (status === "cancelled" || cancelledAt) {
-    return { label: "Beendet", scheduled: false, ended: true };
+
+export const SUBSCRIPTION_GROUPS = ["alle", "aktiv", "gekuendigt", "zahlungsproblem", "beendet"] as const;
+export type SubscriptionGroup = (typeof SUBSCRIPTION_GROUPS)[number];
+
+/** The operator's own words for each group. */
+export const SUBSCRIPTION_GROUP_LABEL: Readonly<Record<SubscriptionGroup, string>> = Object.freeze({
+  alle: "Alle",
+  aktiv: "Aktiv",
+  gekuendigt: "Kündigung vorgemerkt",
+  zahlungsproblem: "Zahlungsproblem",
+  beendet: "Beendet",
+});
+
+/** An unknown group is "alle" - a filter nobody chose shows everything. */
+export function parseSubscriptionGroup(raw: unknown): SubscriptionGroup {
+  if (typeof raw !== "string") return "alle";
+  const value = raw.trim().toLowerCase();
+  return (SUBSCRIPTION_GROUPS as readonly string[]).includes(value)
+    ? (value as SubscriptionGroup)
+    : "alle";
+}
+
+/**
+ * How a display group becomes a database filter, as DATA.
+ *
+ * Returned as a description the route applies rather than as a built
+ * query string, so this stays a leaf the suite can check directly and
+ * the route keeps the only PostgREST knowledge.
+ *
+ *   eq / in        applied to `status`
+ *   requested      "cancellation_requested_at is (not) null"
+ *   notEnded       excludes rows that have already ended
+ *   endedOr        the OR that expresses "ended" in one filter
+ *
+ * NO STORED VALUE CHANGES. These are display groups over the six
+ * statuses migration 022's CHECK allows; nothing here writes, renames or
+ * remaps what the database holds.
+ */
+export type SubscriptionGroupFilter = {
+  statusIn?: readonly SubscriptionStatus[];
+  requested?: "yes" | "no";
+  /** Excludes rows with cancelled_at set. Used with statusIn. */
+  notEnded?: boolean;
+  /** PostgREST `.or()` argument, when the group cannot be an AND. */
+  or?: string;
+};
+
+export function subscriptionGroupFilter(group: SubscriptionGroup): SubscriptionGroupFilter {
+  switch (group) {
+    // Running, and nobody has asked to end it.
+    case "aktiv":
+      return { statusIn: ["active"], requested: "no", notEnded: true };
+    // A cancellation is on record and the contract has not ended yet.
+    // Deliberately not keyed on status: a scheduled cancellation leaves
+    // the row 'active', which is the whole point of the state.
+    case "gekuendigt":
+      return { requested: "yes", notEnded: true, statusIn: ["pending", "active", "past_due", "unpaid", "paused"] };
+    case "zahlungsproblem":
+      return { statusIn: ["past_due", "unpaid"] };
+    // Either the status says so or a real end date is recorded. Both,
+    // because sync_subscription_from_stripe can set one without the
+    // other having caught up yet.
+    case "beendet":
+      return { or: "status.eq.cancelled,cancelled_at.not.is.null" };
+    case "alle":
+    default:
+      return {};
   }
-  if (row.cancel_at_period_end === true) {
-    return { label: "Kündigung vorgemerkt", scheduled: true, ended: false };
-  }
-  return { label: "—", scheduled: false, ended: false };
+}
+
+/* ── Sorting ────────────────────────────────────────────────── */
+
+/**
+ * The three orderings an operator actually needs, and no more.
+ *
+ * Every one is a COLUMN, so the database sorts and the page stays one
+ * bounded request. Nothing is re-sorted in the browser, which would sort
+ * only the 25 rows it happens to hold and quietly lie about the rest.
+ */
+export const SUBSCRIPTION_SORTS = ["created", "next_billing", "next_delivery"] as const;
+export type SubscriptionSort = (typeof SUBSCRIPTION_SORTS)[number];
+
+export const SUBSCRIPTION_SORT_LABEL: Readonly<Record<SubscriptionSort, string>> = Object.freeze({
+  created: "Angelegt (neueste zuerst)",
+  next_billing: "Nächste Abbuchung",
+  next_delivery: "Nächste Lieferung",
+});
+
+/** Column and direction for each sort. Newest-first is the default. */
+export const SUBSCRIPTION_SORT_COLUMN: Readonly<Record<SubscriptionSort, { column: string; ascending: boolean }>> =
+  Object.freeze({
+    created: { column: "created_at", ascending: false },
+    // Soonest first: the operator is looking for what happens next.
+    next_billing: { column: "current_period_end", ascending: true },
+    next_delivery: { column: "next_delivery_at", ascending: true },
+  });
+
+export function parseSubscriptionSort(raw: unknown): SubscriptionSort {
+  if (typeof raw !== "string") return "created";
+  const value = raw.trim().toLowerCase();
+  return (SUBSCRIPTION_SORTS as readonly string[]).includes(value)
+    ? (value as SubscriptionSort)
+    : "created";
 }
 
 /* ── Formatting ─────────────────────────────────────────────── */
@@ -307,20 +448,231 @@ export function shortStripeId(id: string | null | undefined): string {
   return value.length <= 24 ? value : `${value.slice(0, 14)}…${value.slice(-6)}`;
 }
 
-/* ── The summary counts ─────────────────────────────────────── */
+/* ── THE CYCLE HISTORY, FROM THE ROWS THE SYSTEM ACTUALLY WROTE ─
+ *
+ * ══════════════════════════════════════════════════════════════
+ * WHAT THIS SYSTEM KNOWS, AND WHAT IT DOES NOT
+ * ══════════════════════════════════════════════════════════════
+ *
+ * A subscription cycle leaves exactly three durable traces, in this
+ * order, and every figure below is read from one of them:
+ *
+ *   1. PAYMENT   invoice.paid -> activate_subscription_from_invoice
+ *      (migration 022) inserts ONE checkout_attempts row with
+ *      status 'paid', paid_at = now() and the Stripe invoice id. That
+ *      row IS this system's record of a successful recurring charge.
+ *
+ *   2. ORDER     create_order_from_paid_checkout (migration 011) turns
+ *      that attempt into ONE order, with placed_at and an order number.
+ *      The unique index on orders.checkout_attempt_id is what makes it
+ *      one, so counting paid attempts and counting orders answer the
+ *      same question.
+ *
+ *   3. SHIPMENT  mark_order_shipped (migration 028) sets
+ *      fulfillment_status = 'shipped' and shipped_at. It is the ONLY
+ *      writer of fulfilment state in this repository.
+ *
+ * ── THERE IS NO DELIVERY DATE, AND NONE IS INVENTED ───────────
+ *
+ * public.orders has NO delivered_at column. 'delivered' exists in the
+ * fulfillment_status CHECK and is read by lib/orderStatus.ts, but
+ * NOTHING in this codebase ever writes it - migration 019 says so in as
+ * many words: "'delivered' is deliberately never set automatically
+ * anywhere in this codebase. Set fulfillment_status = 'delivered' only
+ * if there is a real delivery confirmation; otherwise 'shipped' remains
+ * the honest state."
+ *
+ * So the latest fact this system holds about a parcel is that it was
+ * HANDED OVER, not that it arrived. The field below is therefore named
+ * lastShipmentAt and the column is labelled "Letzter Versand". Calling
+ * it "Letzte Lieferung" would assert a delivery confirmation that no
+ * row in this database contains.
+ */
 
-export type SubscriptionsSummary = {
-  total: number | null;
-  active: number | null;
-  cancelled: number | null;
-  paymentProblem: number | null;
-  pending: number | null;
+/** One subscription's cycle history, derived from the three traces. */
+export type SubscriptionCycleFacts = {
+  /** paid_at of the most recent PAID checkout attempt. Null if never paid. */
+  lastPaymentAt: string | null;
+  /** The Stripe invoice behind that payment, for reconciliation. */
+  lastInvoiceId: string | null;
+  /** placed_at of the most recent order created from those attempts. */
+  lastOrderAt: string | null;
+  lastOrderNumber: string | null;
+  /**
+   * shipped_at of the most recently SHIPPED order. NOT a delivery date -
+   * see the block above. Null while nothing has shipped, which is the
+   * honest state for a subscription whose orders are still unfulfilled.
+   */
+  lastShipmentAt: string | null;
+  /** The fulfilment state of the most recent order, as stored. */
+  lastOrderFulfillment: string | null;
+  /** Paid cycles so far: one per paid attempt, which is one per order. */
+  paidCycles: number;
+  /** Orders actually created. Equal to paidCycles unless one failed. */
+  orderCount: number;
 };
 
-/** The status filters the summary is built from, so route and UI agree. */
-export const SUMMARY_STATUS_GROUPS: Readonly<Record<string, readonly SubscriptionStatus[]>> = Object.freeze({
-  active: ["active"],
-  cancelled: ["cancelled"],
-  paymentProblem: ["past_due", "unpaid"],
-  pending: ["pending"],
-});
+export function emptyCycleFacts(): SubscriptionCycleFacts {
+  return {
+    lastPaymentAt: null, lastInvoiceId: null, lastOrderAt: null, lastOrderNumber: null,
+    lastShipmentAt: null, lastOrderFulfillment: null, paidCycles: 0, orderCount: 0,
+  };
+}
+
+type AttemptRow = {
+  id: string; subscription_id: string; paid_at: string | null; stripe_invoice_id: string | null;
+};
+type OrderRow = {
+  checkout_attempt_id: string | null; order_number: string | null; placed_at: string | null;
+  fulfillment_status: string | null; shipped_at: string | null;
+};
+
+/**
+ * Builds one cycle-history record per subscription, from the PAGE's
+ * attempts and the orders behind them.
+ *
+ * Pure, and given everything it needs: the route fetches both sets in
+ * ONE request each for the whole page - `.in("subscription_id", ids)`
+ * and `.in("checkout_attempt_id", attemptIds)` - so there is no request
+ * per row on either side of the wire. Doing the grouping here rather
+ * than in the route is what lets the suite check it against fixtures.
+ *
+ * "Most recent" is decided by comparing ISO timestamps, which sort
+ * lexicographically when they carry the same offset - and every value
+ * here is written by the database as UTC. A missing timestamp never
+ * wins, so a half-written row cannot become "the last one".
+ */
+export function buildCycleFacts(
+  attempts: readonly AttemptRow[],
+  orders: readonly OrderRow[]
+): Record<string, SubscriptionCycleFacts> {
+  const ordersByAttempt = new Map<string, OrderRow>();
+  for (const order of orders) {
+    if (typeof order.checkout_attempt_id === "string") ordersByAttempt.set(order.checkout_attempt_id, order);
+  }
+
+  const out: Record<string, SubscriptionCycleFacts> = {};
+  const later = (a: string | null, b: string | null): boolean => {
+    if (typeof b !== "string" || b === "") return false;
+    if (typeof a !== "string" || a === "") return true;
+    return b > a;
+  };
+
+  for (const attempt of attempts) {
+    const key = attempt.subscription_id;
+    if (typeof key !== "string" || key === "") continue;
+    const facts = out[key] ?? (out[key] = emptyCycleFacts());
+
+    facts.paidCycles += 1;
+    if (later(facts.lastPaymentAt, attempt.paid_at)) {
+      facts.lastPaymentAt = attempt.paid_at;
+      facts.lastInvoiceId = attempt.stripe_invoice_id ?? null;
+    }
+
+    const order = ordersByAttempt.get(attempt.id);
+    if (!order) continue;
+    facts.orderCount += 1;
+    if (later(facts.lastOrderAt, order.placed_at)) {
+      facts.lastOrderAt = order.placed_at;
+      facts.lastOrderNumber = order.order_number ?? null;
+      facts.lastOrderFulfillment = order.fulfillment_status ?? null;
+    }
+    // The last SHIPMENT is the latest shipped_at among this
+    // subscription's orders - independently of which order is newest,
+    // because an older parcel may well be the only one that shipped.
+    if (later(facts.lastShipmentAt, order.shipped_at)) facts.lastShipmentAt = order.shipped_at;
+  }
+
+  return out;
+}
+
+/* ── Recurring revenue per cycle ────────────────────────────── */
+
+/**
+ * 28 days, restated from lib/subscriptionCancellationRules.ts.
+ *
+ * This file is a leaf and cannot import that one without ceasing to be
+ * one, so the value is duplicated and the focused suite asserts the two
+ * agree - the resolution this repository already uses for
+ * STALE_SENDING_AFTER_MS and divideRoundHalfUp.
+ */
+export const REVENUE_CYCLE_DAYS = 28;
+
+/** "je 4 Wochen", derived so the copy cannot drift from the number. */
+export const REVENUE_CYCLE_LABEL = `je ${REVENUE_CYCLE_DAYS / 7} Wochen`;
+
+/**
+ * A ceiling on the revenue read, so one request stays bounded.
+ *
+ * Same shape and the same reason as lib/adminOrdersQuery.ts's
+ * REVENUE_ROW_CAP: PostgREST has no SUM without a database function, so
+ * the sum runs over the rows themselves. The route reports when the cap
+ * is reached, so the figure is never quietly short.
+ */
+export const REVENUE_ROW_CAP = 1000;
+
+/**
+ * What the shop bills every 28 days, for the subscriptions that will
+ * actually be billed again.
+ *
+ * ── IT IS NOT "MONTHLY REVENUE", AND MUST NOT BE CALLED THAT ──
+ *
+ * The cadence is 28 days. Thirteen of those are 364 days; twelve
+ * calendar months are 365 or 366. Presenting this as a monthly figure
+ * would overstate the year by roughly one cycle, which is a reporting
+ * error with a real euro value.
+ *
+ * ── WHOSE MONEY IS COUNTED ────────────────────────────────────
+ *
+ * Only subscriptions that are running AND have no cancellation on
+ * record. A scheduled cancellation means this contract stops billing on
+ * a known date, so counting it in a forward-looking recurring figure
+ * would overstate it. The route selects exactly that set in the
+ * database; this function only adds up what it was handed and refuses
+ * anything that is not an integer number of cents.
+ */
+export function recurringCycleRevenueCents(rows: readonly { total_gross_cents?: unknown }[]): number {
+  let sum = 0;
+  for (const row of rows) {
+    const cents = row?.total_gross_cents;
+    if (typeof cents === "number" && Number.isSafeInteger(cents) && cents >= 0) sum += cents;
+  }
+  return sum;
+}
+
+/* ── The summary counts ─────────────────────────────────────── */
+
+/**
+ * The four counts the cards show, plus the recurring figure.
+ *
+ * Every count is a HEAD request with `count: "exact"` - the database
+ * counts, and not one row crosses the wire for them. null means the read
+ * failed and is rendered as a dash, never as a silent zero.
+ *
+ * The four groups are the same four the filter offers, built from the
+ * same subscriptionGroupFilter(), so a card and the filter it implies can
+ * never disagree about what they mean.
+ */
+export type SubscriptionsSummary = {
+  total: number | null;
+  aktiv: number | null;
+  gekuendigt: number | null;
+  zahlungsproblem: number | null;
+  beendet: number | null;
+  /** Gross cents billed every REVENUE_CYCLE_DAYS across `aktiv`. */
+  recurringCycleGrossCents: number | null;
+  /** True when REVENUE_ROW_CAP was reached, so the figure is a floor. */
+  recurringCapped: boolean;
+};
+
+/**
+ * The groups the cards count, in the order they are shown.
+ *
+ * "alle" is excluded by TYPE rather than by convention: it is the
+ * absence of a filter, so a card counting it would just restate `total`
+ * and a lookup for it on the summary object would not type-check.
+ */
+export type SummaryGroup = Exclude<SubscriptionGroup, "alle">;
+
+export const SUMMARY_GROUPS: readonly SummaryGroup[] =
+  Object.freeze(["aktiv", "gekuendigt", "zahlungsproblem", "beendet"]);

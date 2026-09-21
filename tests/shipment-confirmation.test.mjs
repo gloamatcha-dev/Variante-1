@@ -618,6 +618,14 @@ test("no route can mark an order shipped", () => {
   const READ_ONLY = [
     "app/api/admin/orders/route.ts",
     "app/api/admin/orders/detail/route.ts",
+    // The subscription overview reads a subscription's orders to answer
+    // "when did anything last ship". It names fulfillment_status and
+    // shipped_at in the columns it selects and in the row type it
+    // declares for them - both READS - and it is listed here for the
+    // same reason as the two above rather than the ban being loosened.
+    // The assertion below proves it holds no write verb at all, which is
+    // what actually makes it harmless.
+    "app/api/admin/subscriptions/route.ts",
   ];
   for (const rel of READ_ONLY) {
     assert.ok(routes.includes(rel), `the read-only order route is missing: ${rel}`);
