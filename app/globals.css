@@ -8262,6 +8262,17 @@ header nav{gap:18px;font-size:12px}
   padding-top:12px;
   border-top:1px solid var(--line);
 }
+/* The shipping headline. Same weight as the discount statement above it,
+   because both are commercial FACTS of the plan rather than notes: one
+   says what the customer does not get, the other what they do. */
+.sub-panel-shipping{
+  font-family:var(--font-sans),Arial,sans-serif;
+  font-size:14px;
+  font-weight:600;
+  letter-spacing:.01em;
+  color:var(--ink);
+  margin:0 0 12px;
+}
 .sub-panel-terms,
 .sub-panel-note{
   font-family:var(--font-sans),Arial,sans-serif;

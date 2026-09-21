@@ -17,6 +17,16 @@ import {
   type AccountQuickLink,
 } from "./AccountUI";
 import { resolveGreetingName } from "../lib/accountGreeting";
+// The ONE subscription shipping rule, the same table the server prices
+// from. A zero-import leaf, so the browser can read it without a second
+// copy of 590/0/0 existing anywhere.
+import {
+  SUBSCRIPTION_ABROAD_SHIPPING_NOTE,
+  SUBSCRIPTION_FREE_SHIPPING_FROM_GRAMS,
+  SUBSCRIPTION_FREE_SHIPPING_NOTE,
+  isSubscriptionBenefitCountry,
+  subscriptionDeShippingGrossCents,
+} from "../lib/subscriptionPurchaseRules";
 import type { AddressSnapshot } from "../lib/orderAddressSnapshot";
 import { getCountryLabel, normalizeCountryCode, SHIPPING_COUNTRY_OPTIONS } from "../lib/shipping";
 import {
@@ -1111,9 +1121,44 @@ function SubscriptionStartForm({ onStarted }: { onStarted?: () => void }) {
   */
   const tokenRef = useRef<{ key: string; id: string } | null>(null);
 
+  const variantFor = (plan: SubscriptionPlanRow) =>
+    product?.variants.find(v => v.id === plan.variant_id) ?? null;
+
   const priceFor = (plan: SubscriptionPlanRow): number | null => {
-    const variant = product?.variants.find(v => v.id === plan.variant_id);
+    const variant = variantFor(plan);
     return variant ? variant.price_gross_cents : null;
+  };
+
+  /*
+    SHIPPING, FOR THE ADDRESS THE CUSTOMER HAS ACTUALLY SELECTED.
+
+    Unlike the shop, this screen knows the destination - so it can be
+    exact instead of generic, but only where being exact costs nothing.
+
+    ── GERMANY: the real figures ─────────────────────────────────
+    Read per SKU out of lib/subscriptionPurchaseRules.ts, the very rule
+    handleSubscriptionCheckout applies, so this cannot show an amount
+    the server would not charge.
+
+    ── EVERY OTHER COUNTRY: the rule, not a number ───────────────
+    Computing it would mean importing computeShippingGrossCents AND
+    reproducing the merchandise subtotal the server derives from the
+    plan's own variant - a second copy of the monetary logic living in
+    a browser. That is exactly what must not happen, so the screen says
+    which rule applies and lets the payment page show the binding total.
+
+    Either way NOTHING travels: the request body carries planId,
+    addressId and requestId, and the server resolves every euro itself.
+  */
+  const selectedCountry = normalizeCountryCode(
+    addresses.find(a => a.id === addressId)?.country
+  );
+  const deliversToGermany = isSubscriptionBenefitCountry(selectedCountry);
+
+  const shippingFor = (plan: SubscriptionPlanRow): number | null => {
+    if (!deliversToGermany) return null;
+    const variant = variantFor(plan);
+    return variant ? subscriptionDeShippingGrossCents(variant.sku) : null;
   };
 
   const start = async () => {
@@ -1196,6 +1241,7 @@ function SubscriptionStartForm({ onStarted }: { onStarted?: () => void }) {
             <div className="sub-start-options" role="radiogroup" aria-label="Abo-Größe wählen">
               {plans.map(p => {
                 const cents = priceFor(p);
+                const shipping = shippingFor(p);
                 return (
                   <label key={p.id} className={`sub-start-option${planId === p.id ? " active" : ""}`}>
                     <input
@@ -1203,10 +1249,19 @@ function SubscriptionStartForm({ onStarted }: { onStarted?: () => void }) {
                       checked={planId === p.id} onChange={() => setPlanChoice(p.id)}
                     />
                     <span className="sub-start-option-label">{p.name}</span>
-                    {/* The catalog price, shown so the choice is informed.
-                        It is never sent: the server prices the plan from
-                        its own variant. */}
+                    {/* The catalog price and the delivery charge, shown so
+                        the choice is informed. Neither is sent: the server
+                        prices the plan from its own variant and applies
+                        the same shipping table this reads. */}
                     {cents !== null && <span className="sub-start-option-meta">{fmtCents(cents)} € je Lieferung</span>}
+                    {/* An exact figure only for a German address. For any
+                        other destination the row is absent and the note
+                        under the address field carries the rule. */}
+                    {shipping !== null && (
+                      <span className="sub-start-option-meta">
+                        {shipping === 0 ? "Kostenloser Versand" : `${fmtCents(shipping)} € Versand je Lieferung`}
+                      </span>
+                    )}
                   </label>
                 );
               })}
@@ -1225,9 +1280,14 @@ function SubscriptionStartForm({ onStarted }: { onStarted?: () => void }) {
                 </option>
               ))}
             </select>
+            {/* The rule for the SELECTED destination. A German address
+                gets the benefit named; anywhere else is told plainly
+                that its own shipping cost applies, rather than being
+                shown a German figure that would not be charged. */}
             <p className="portal-note sub-start-shipping">
-              Versandkosten werden je Lieferung nach den normalen Versandregeln berechnet und
-              vor der Zahlung angezeigt.
+              {deliversToGermany
+                ? `${SUBSCRIPTION_FREE_SHIPPING_NOTE} Der Versand gilt je Lieferung; den genauen Gesamtbetrag siehst du vor der Zahlung.`
+                : `${SUBSCRIPTION_ABROAD_SHIPPING_NOTE} Der kostenlose Versand ab ${SUBSCRIPTION_FREE_SHIPPING_FROM_GRAMS} g gilt nur innerhalb Deutschlands. Den genauen Gesamtbetrag siehst du vor der Zahlung.`}
             </p>
           </fieldset>
 

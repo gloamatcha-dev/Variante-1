@@ -25,6 +25,8 @@ import {
   validateLaunchPlan,
 } from "../lib/subscriptionCheckoutRules.ts";
 import { computeShippingGrossCents, getShippingZone, normalizeCountryCode } from "../lib/shipping.ts";
+// The ONE subscription shipping rule, imported rather than described.
+import { subscriptionShippingGrossCents } from "../lib/subscriptionPurchaseRules.ts";
 
 // SAFE DEFAULT SUITE: pure logic and source-level checks only. Nothing
 // here opens a socket, imports the Stripe SDK or touches a database, so
@@ -393,22 +395,99 @@ test("address: the frozen snapshot has the same shape an order snapshot has", ()
 
 /* ── O, P, Q, R. Shipping ───────────────────────────────────── */
 
-test("shipping: the amount comes from the existing rules, not from a new one", () => {
-  // No zone table, no threshold and no price is redefined for
-  // subscriptions - the flow calls the same functions the shop uses.
-  assert.match(flowCode, /computeShippingGrossCents\(shippingZone, quote\.subtotalGrossCents\)/);
+test("shipping: the destination's own amount, with ONE German exception", () => {
+  /*
+    DELIBERATELY CHANGED, TWICE, AND THIS IS THE FINAL SHAPE.
+
+    It originally required the flow to call computeShippingGrossCents and
+    nothing else - right while the subscription had no rule of its own,
+    but it meant no subscription could ever ship free: ONE delivery is
+    ONE tin, the largest is 39,99, and the 49,00 threshold is therefore
+    unreachable, so every size was charged 5,90 forever.
+
+    The correction is scoped to GERMANY. The flow still computes the
+    destination's normal amount from lib/shipping.ts - which remains the
+    single owner of every country's price - and hands it to the
+    subscription rule, which keeps it unchanged everywhere except
+    Germany.
+
+    What the test has always protected is unchanged: the flow defines no
+    shipping amount of its own, does not modify what the rule returns,
+    and invents no discount.
+  */
+  // BOTH halves are present: the destination authority AND the exception.
+  assert.match(flowCode, /const destinationGrossCents = computeShippingGrossCents\(shippingZone, quote\.subtotalGrossCents\);/,
+    "the flow stopped asking lib/shipping.ts what this destination costs");
+  assert.match(flowCode, /subscriptionShippingGrossCents\(\{\s*\n?\s*sku: item\.sku,\s*\n?\s*country: destinationCountry,\s*\n?\s*destinationGrossCents,/,
+    "the flow stopped layering the German exception over it");
+  // The zone is still resolved - for reachability and for the Stripe
+  // Price identifier - so an unshippable country is still refused.
   assert.match(flowCode, /getShippingZone\(destinationCountry\)/);
+  assert.match(flowCode, /In dieses Land liefern wir derzeit nicht/);
+  // NOT ONE AMOUNT IS WRITTEN INTO THE FLOW. 590 lives in the leaf; every
+  // country price lives in lib/shipping.ts.
   assert.ok(!/590|1290|1790|1990|4900|7900/.test(flowCode), "a shipping amount was hardcoded into the flow");
-  // No subscription-only reduction: the computed amount is used as it is
-  // and never scaled, discounted or zeroed on its way to Stripe.
+  // Used as it is: never scaled, discounted or zeroed on its way out.
   assert.ok(!/shippingGrossCents\s*[*/]|shippingGrossCents\s*-\s*\d/.test(flowCode), "the shipping amount was modified");
   assert.ok(!/discount|rabatt/i.test(flowCode), "a subscription shipping discount appeared");
+  // A size with no rule FAILS CLOSED rather than shipping free.
+  assert.match(flowCode, /if \(shippingGrossCents === null\)/);
 });
 
-test("shipping: the free-shipping threshold behaves exactly as the one-time rules", () => {
-  // 30 g at 19,99 is below the German 49,00 threshold, so shipping is
-  // charged; 100 g at 54,99 is above it, so it is free. Same numbers the
-  // one-time checkout produces for the same cart.
+test("shipping: GERMANY - 30 g pays, 50 g and 100 g are free", () => {
+  const de = (sku, destinationGrossCents = 590) =>
+    subscriptionShippingGrossCents({ sku, country: "DE", destinationGrossCents });
+  assert.equal(de("GLOA-MATCHA-30G"), 590);
+  assert.equal(de("GLOA-MATCHA-50G"), 0);
+  assert.equal(de("GLOA-MATCHA-100G"), 0);
+  // The German answer does NOT depend on what the shop rule computed -
+  // that is the whole point of the exception.
+  assert.equal(de("GLOA-MATCHA-50G", 590), 0);
+  assert.equal(de("GLOA-MATCHA-50G", 0), 0);
+  assert.equal(de("GLOA-MATCHA-30G", 0), 590);
+  // Anything else has no rule, and null means the caller must refuse.
+  for (const junk of ["GLOA-CASE-01", "", null, undefined, 30, "gloa-matcha-30g"]) {
+    assert.equal(de(junk), null, String(junk));
+  }
+});
+
+test("shipping: OUTSIDE GERMANY the benefit does not travel", () => {
+  // The destination's own amount, unchanged, for every size - including
+  // the two that ship free at home.
+  const eu = computeShippingGrossCents("eu", 2299);
+  assert.equal(eu, 1290, "the EU shipping price changed");
+  for (const sku of ["GLOA-MATCHA-30G", "GLOA-MATCHA-50G", "GLOA-MATCHA-100G"]) {
+    assert.equal(
+      subscriptionShippingGrossCents({ sku, country: "FR", destinationGrossCents: eu }),
+      1290,
+      `${sku} was waived outside Germany`);
+  }
+  // 50 g and 100 g are explicitly NOT free abroad.
+  for (const sku of ["GLOA-MATCHA-50G", "GLOA-MATCHA-100G"]) {
+    assert.notEqual(
+      subscriptionShippingGrossCents({ sku, country: "AT", destinationGrossCents: 1290 }), 0,
+      `${sku} ships free outside Germany`);
+  }
+  // Zones with no threshold keep charging, and the rule passes it through.
+  assert.equal(
+    subscriptionShippingGrossCents({
+      sku: "GLOA-MATCHA-100G", country: "CH",
+      destinationGrossCents: computeShippingGrossCents("nonEuCore", 3999),
+    }), 1790);
+  // An unusable destination amount fails closed rather than shipping free.
+  for (const bad of [null, undefined, "1290", -1, 1.5, NaN]) {
+    assert.equal(
+      subscriptionShippingGrossCents({ sku: "GLOA-MATCHA-50G", country: "FR", destinationGrossCents: bad }),
+      null, String(bad));
+  }
+  // And an ineligible SKU cannot acquire a price by travelling.
+  assert.equal(
+    subscriptionShippingGrossCents({ sku: "GLOA-CASE-01", country: "FR", destinationGrossCents: 1290 }), null);
+});
+
+test("shipping: THE ONE-TIME RULES ARE UNTOUCHED", () => {
+  // lib/shipping.ts still answers exactly what it always did. The
+  // subscription rule sits beside it and replaces nothing.
   assert.equal(getShippingZone("DE"), "germany");
   assert.equal(computeShippingGrossCents("germany", 1999), 590);
   assert.equal(computeShippingGrossCents("germany", 2999), 590);
@@ -419,6 +498,10 @@ test("shipping: the free-shipping threshold behaves exactly as the one-time rule
   // Zones with no threshold always charge.
   assert.equal(computeShippingGrossCents("nonEuCore", 5499), 1790);
   assert.equal(computeShippingGrossCents("restOfEurope", 5499), 1990);
+  // And the module itself never learned about subscriptions.
+  const shipping = read("lib/shipping.ts");
+  assert.ok(!/subscription/i.test(withoutComments(shipping)),
+    "lib/shipping.ts was taught about subscriptions");
 });
 
 test("shipping: a chargeable line is a RECURRING price on the same week/4 cadence", () => {

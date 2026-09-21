@@ -8,6 +8,13 @@ import { writeBlockedServerEnv } from "./helpers/testSupabase.mjs";
 // leaf the cutoff arithmetic actually uses - so the AGB cannot promise a
 // rhythm or a notice period the code does not honour.
 import { CADENCE_DAYS, CANCELLATION_CUTOFF_DAYS } from "../lib/subscriptionCancellationRules.ts";
+// The subscription shipping table the terms describe, imported so the
+// AGB cannot state a delivery charge nobody is actually billed.
+import {
+  SUBSCRIPTION_DE_SHIPPING_PER_DELIVERY_GROSS_CENTS,
+  SUBSCRIPTION_FREE_SHIPPING_FROM_GRAMS,
+  SUBSCRIPTION_SHIPPING_BENEFIT_COUNTRY,
+} from "../lib/subscriptionPurchaseRules.ts";
 
 /** This file reads sources by URL; one helper so the new checks match. */
 const readSrc = rel => readFileSync(new URL("../" + rel, import.meta.url), "utf-8");
@@ -749,11 +756,45 @@ test("AGB: the subscription is described, and only as the code performs it", () 
   assert.match(abo, /Abonnementrabatt bestehen nicht/);
   assert.match(readSrc("supabase/migrations/024_seed_b2c_subscription_plans.sql"), /discount_percent/);
 
-  // Shipping is the ordinary rule, per delivery - which is exactly what
-  // step 6 of the checkout flow does.
-  assert.match(abo, /Versandkosten fallen je Lieferung/);
-  assert.match(readSrc("lib/subscriptionCheckout.ts"),
-    /const shippingGrossCents = computeShippingGrossCents\(shippingZone, quote\.subtotalGrossCents\);/);
+  /*
+    SHIPPING: THE SUBSCRIPTION'S OWN RULE, PER SIZE.
+
+    This used to assert that the terms described the ordinary shop rule,
+    which was true while the subscription had none of its own. It now has
+    one - 30 g pays 5,90 per delivery, 50 g and 100 g ship free - and the
+    terms must describe THAT, because a delivery charge is a contractual
+    term and the old sentence would now be false.
+
+    Every figure in the paragraph is checked against the one table the
+    server prices from, so the terms cannot state an amount nobody is
+    charged.
+  */
+  assert.match(abo, /eigene Versandkosten je Lieferung/);
+  // GERMANY: the two figures, and both name the country.
+  assert.match(abo, /Bei Lieferadressen in Deutschland fallen für 30 g 5,90 EUR je Lieferung an/);
+  assert.match(abo, /ab 50 g ist der Versand innerhalb Deutschlands kostenlos/);
+  assert.equal(SUBSCRIPTION_DE_SHIPPING_PER_DELIVERY_GROSS_CENTS["GLOA-MATCHA-30G"], 590,
+    "the terms name 5,90 but the rule charges something else");
+  assert.equal(SUBSCRIPTION_DE_SHIPPING_PER_DELIVERY_GROSS_CENTS["GLOA-MATCHA-50G"], 0);
+  assert.equal(SUBSCRIPTION_DE_SHIPPING_PER_DELIVERY_GROSS_CENTS["GLOA-MATCHA-100G"], 0);
+  assert.equal(SUBSCRIPTION_FREE_SHIPPING_FROM_GRAMS, 50,
+    "the terms say 'ab 50 g' but the rule frees a different size");
+  assert.equal(SUBSCRIPTION_SHIPPING_BENEFIT_COUNTRY, "DE",
+    "the terms name Germany but the benefit applies somewhere else");
+
+  // OUTSIDE GERMANY: the destination's own cost, and the benefit is
+  // explicitly excluded. Without this sentence the paragraph would read
+  // as a promise of free shipping everywhere from 50 g.
+  assert.match(abo, /Für Lieferadressen außerhalb Deutschlands gelten die für das jeweilige Zielland ausgewiesenen Versandkosten/);
+  assert.match(abo, /der kostenlose Versand ab 50 g gilt dort nicht/);
+
+  // The server resolves exactly that way: the destination's normal
+  // amount from lib/shipping.ts, with the German exception over it.
+  const flow = readSrc("lib/subscriptionCheckout.ts");
+  assert.match(flow, /const destinationGrossCents = computeShippingGrossCents\(shippingZone, quote\.subtotalGrossCents\);/);
+  assert.match(flow, /country: destinationCountry,/);
+  // AND THE TERMS SAY THE ONE-TIME RULE IS UNCHANGED, because it is.
+  assert.match(abo, /Für Einzelbestellungen gelten unverändert die unter/);
 
   // NO MINIMUM TERM AND NO FEE - and the terms may only say so because
   // no commitment_months is ever written and no fee exists in any writer.

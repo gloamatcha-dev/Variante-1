@@ -1295,6 +1295,30 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // subscription is ending. Nothing in the checkout, webhook, order or
     // annual path imports this file.
     "lib/adminSubscriptionsQuery.ts",
+    // B2C NORMAL SUBSCRIPTION SHIPPING ALIGNMENT, two files.
+    //
+    //   subscriptionPurchaseRules.ts  gains the ONE shipping table -
+    //     30 g 590, 50 g and 100 g 0 - plus the derived "ab 50 g"
+    //     sentence. Still a zero-import leaf; pure data and three pure
+    //     functions over a SKU, exercised directly by
+    //     tests/subscription-purchase-surface.test.mjs.
+    //
+    //   subscriptionCheckout.ts       step 6 now reads that table
+    //     instead of computeShippingGrossCents. THE REASON: one delivery
+    //     is one tin, the largest is 39,99, and the shop's 49,00
+    //     threshold therefore charged 5,90 on all three sizes forever.
+    //     A SKU with no rule fails closed rather than shipping free.
+    //
+    // NOTHING ELSE IN THE FLOW MOVED. The zone is still resolved and
+    // still refuses an unshippable country, the tax call, the
+    // fingerprint, the attempt freeze, the Stripe Price reuse and the
+    // ordering are byte-identical, and free shipping still creates no
+    // Stripe line at all. lib/shipping.ts is untouched, so the one-time
+    // cart is unchanged; lib/annualPlanRules.ts is untouched, so the
+    // annual plan's own 590/0/0 table is unchanged. No B2B module is
+    // involved and no migration was added.
+    "lib/subscriptionPurchaseRules.ts",
+    "lib/subscriptionCheckout.ts",
   ];
 
   // Phase 4B4 edits ONE application module: the single canonical Stripe

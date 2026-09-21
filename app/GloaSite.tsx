@@ -30,7 +30,13 @@ import { ANNUAL_LAUNCH_SIZE_BY_SKU } from "../lib/annualPlans";
 // cannot promise a rhythm the server does not bill; eligibility comes
 // from the SKU allowlist the focused suite pins to the server's own.
 import { CADENCE_DAYS, SUBSCRIPTION_CADENCE_LABEL, SUBSCRIPTION_QUANTITY_LABEL } from "../lib/subscriptionCancellationRules";
-import { isSubscribableVariant, subscriptionPortalHref } from "../lib/subscriptionPurchaseRules";
+import {
+  SUBSCRIPTION_ABROAD_SHIPPING_NOTE,
+  SUBSCRIPTION_FREE_SHIPPING_NOTE,
+  isSubscribableVariant,
+  subscriptionDeShippingGrossCents,
+  subscriptionPortalHref,
+} from "../lib/subscriptionPurchaseRules";
 import { getProductPresentation, showsUnitPricePer100g, showsFoodInformation, isWeighedProduct, getProductImage, getProductSubtitle, getProductEyebrow, MATCHA_NOT_INCLUDED_SHORT } from "../lib/productPresentation";
 import { BusinessCalculator } from "./BusinessCalculator";
 import { AccountPortal } from "./AccountPortal";
@@ -494,12 +500,24 @@ return <div className="annual-panel">
  * yearly sum.
  */
 function SubscriptionPlanPanel({variant}:{variant:CatalogVariant}){
+// THE GERMAN rule, read per size. The shop has no delivery address -
+// a signed-out visitor has not chosen one - so it states the German
+// figures and says so in the same breath, rather than showing a number
+// that would be wrong for an Austrian customer.
+const deShippingCents=subscriptionDeShippingGrossCents(variant.sku);
+const shipsFreeInDe=deShippingCents===0;
 return <div className="sub-panel">
 <p className="eyebrow sub-panel-eyebrow">ABO</p>
 <p className="sub-panel-title">{SUBSCRIPTION_CADENCE_LABEL} Matcha.</p>
 <p className="sub-panel-sub">{variant.label} · {SUBSCRIPTION_QUANTITY_LABEL} je Lieferung · läuft, bis du kündigst</p>
 <dl className="sub-panel-lines">
 {PRICES_VISIBLE&&<div><dt>Matcha je Lieferung</dt><dd>{fmtCents(variant.price_gross_cents)} €</dd></div>}
+{/* The delivery charge is a FACT of the plan, so it is a data row and
+    not a footnote - and it is shown even while prices are hidden when
+    it is free, because "kostenlos" is not a price. The country is IN
+    the value: this figure is the German one and nothing here knows
+    where the customer will actually have it delivered. */}
+{deShippingCents!==null&&<div><dt>Versand je Lieferung</dt><dd>{shipsFreeInDe?"Kostenloser Versand innerhalb Deutschlands":PRICES_VISIBLE?`${fmtCents(deShippingCents)} € Versand je Lieferung innerhalb Deutschlands`:"—"}</dd></div>}
 <div><dt>Rhythmus</dt><dd>{SUBSCRIPTION_CADENCE_LABEL} ({CADENCE_DAYS} Tage)</dd></div>
 <div><dt>Menge je Lieferung</dt><dd>{SUBSCRIPTION_QUANTITY_LABEL}</dd></div>
 </dl>
@@ -509,9 +527,14 @@ Du zahlst den normalen Shop-Preis, {SUBSCRIPTION_QUANTITY_LABEL} alle {CADENCE_D
 {" "}Lieferung und Abbuchung laufen im selben Rhythmus.
 {" "}Es gibt keine Mindestlaufzeit; es läuft, bis du kündigst.
 </p>
+{/* The headline rule, derived from the table rather than typed, so it
+    cannot outlive the rule it describes - and never shown without the
+    sentence that bounds it geographically. Half of this pair on its own
+    would read as a promise to every country. */}
+{SUBSCRIPTION_FREE_SHIPPING_NOTE&&<p className="sub-panel-shipping">{SUBSCRIPTION_FREE_SHIPPING_NOTE} {SUBSCRIPTION_ABROAD_SHIPPING_NOTE}</p>}
 <p className="sub-panel-note">
-Versandkosten richten sich nach den normalen <Link href="/versand">Versandinformationen</Link> und
-{" "}werden je Lieferung berechnet. Den genauen Betrag siehst du vor der Zahlung.
+Der Versand gilt je Lieferung und ist im Abo-Betrag enthalten; den genauen Betrag siehst du vor der Zahlung.
+{" "}Für Einzelbestellungen gelten weiterhin die normalen <Link href="/versand">Versandinformationen</Link>.
 {" "}Kündigen kannst du jederzeit selbst in deinem <Link href="/account">Kundenkonto</Link>.
 </p>
 </div>}
@@ -2380,7 +2403,9 @@ return <main className="legal-page legal-doc legal-agb">
 <h2>Abonnement</h2>
 <p>Neben dem Einzelkauf kannst du GLOA Matcha als Abonnement beziehen. Das Abonnement ist ein Dauerschuldverhältnis: Du erhältst regelmäßig dieselbe Ware, und der Preis wird im selben Rhythmus abgebucht.</p>
 <p>Der Rhythmus beträgt vier Wochen, also genau 28 Tage. Er ist kein Kalendermonat. Je Lieferung erhältst du eine Packung in der von dir gewählten Größe.</p>
-<p>Es gilt der jeweils im Shop ausgewiesene Preis der gewählten Größe. Ein gesonderter Abonnementpreis und ein Abonnementrabatt bestehen nicht. Versandkosten fallen je Lieferung nach den unter <Link href="/versand">Versandinformationen</Link> ausgewiesenen Regeln an; den für dich geltenden Gesamtbetrag siehst du vor Abschluss der Bestellung.</p>
+<p>Es gilt der jeweils im Shop ausgewiesene Preis der gewählten Größe. Ein gesonderter Abonnementpreis und ein Abonnementrabatt bestehen nicht.</p>
+<p>Für das Abonnement gelten eigene Versandkosten je Lieferung. Bei Lieferadressen in Deutschland fallen für 30 g 5,90 EUR je Lieferung an; ab 50 g ist der Versand innerhalb Deutschlands kostenlos. Für Lieferadressen außerhalb Deutschlands gelten die für das jeweilige Zielland ausgewiesenen Versandkosten; der kostenlose Versand ab 50 g gilt dort nicht.</p>
+<p>Diese Versandregelung betrifft ausschließlich das Abonnement. Für Einzelbestellungen gelten unverändert die unter <Link href="/versand">Versandinformationen</Link> ausgewiesenen Regeln. Den für dich geltenden Gesamtbetrag siehst du in jedem Fall vor Abschluss der Bestellung.</p>
 <p>Das Abonnement wird über dein GLOA-Kundenkonto abgeschlossen; dafür benötigen wir eine in deinem Konto hinterlegte Lieferadresse. Der Vertrag über das Abonnement kommt mit unserer Bestätigung nach der ersten erfolgreichen Zahlung zustande. Für jede Lieferung erhältst du eine Bestätigung per E-Mail.</p>
 <p>Das Abonnement läuft, bis es gekündigt wird. Eine Mindestlaufzeit besteht nicht. Du kündigst es jederzeit selbst in deinem <Link href="/account">Kundenkonto</Link>; eine Kündigungsgebühr fällt nicht an. Geht deine Kündigung mindestens vierzehn Tage vor der nächsten Abbuchung bei uns ein, entfällt der kommende Zeitraum. Geht sie später ein, wird der bereits angestoßene Zeitraum noch geliefert und abgerechnet, und das Abonnement endet danach. Welches Datum für dich gilt, zeigen wir dir vor dem Absenden der Kündigung an.</p>
 <p>Ändert sich der Preis, gilt die Änderung nur für Abonnements, die danach abgeschlossen werden. Ein bereits laufendes Abonnement wird dadurch nicht teurer; eine Preisänderung für ein laufendes Abonnement setzt deine Zustimmung voraus.</p>

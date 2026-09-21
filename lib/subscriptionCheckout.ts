@@ -19,6 +19,8 @@ import {
 } from "./subscriptionCheckoutRules";
 import { buildItemsSnapshot } from "./checkoutAttemptSnapshot";
 import { buildPlanSnapshot } from "./subscriptions";
+// lib/shipping.ts remains the authority on what every DESTINATION
+// costs, and on which countries this shop reaches at all. Unchanged.
 import {
   computeShippingGrossCents,
   getShippingZone,
@@ -27,6 +29,10 @@ import {
   getCountryLabel,
   type ShippingZoneKey,
 } from "./shipping";
+// The ONE subscription exception, layered over that amount: Germany
+// only. A zero-import leaf, so the shop and the account read the very
+// same rule the server prices from.
+import { subscriptionShippingGrossCents } from "./subscriptionPurchaseRules";
 import { resolveTaxJurisdiction } from "./taxJurisdiction";
 import { resolveCheckoutTax, toTaxableCartItems, TAX_DESTINATION_UNAVAILABLE_MESSAGE } from "./tax";
 // Type-only, deliberately. lib/verifyUser.ts and lib/checkoutQuote.ts both
@@ -229,14 +235,50 @@ export async function handleSubscriptionCheckout(
   const { snapshot: addressSnapshot, recipientName } = addressResult;
   const destinationCountry = countryCode as string;
 
-  // 6. SHIPPING, from the existing rules and the server-side merchandise
-  //    subtotal. No subscription-specific zone logic and no subscription
-  //    shipping discount exists or is invented here.
+  // 6. SHIPPING: THE DESTINATION'S NORMAL AMOUNT, WITH ONE GERMAN
+  //    EXCEPTION LAYERED OVER IT.
+  //
+  //    ── GERMANY ───────────────────────────────────────────────
+  //    30 g pays 590 per delivery; 50 g and 100 g ship free. That is a
+  //    deliberate subscription BENEFIT and it needs to be stated,
+  //    because the shop's own rule cannot produce it: one delivery is
+  //    ONE tin, the largest is 39,99, and the 4900 free-shipping
+  //    threshold is therefore unreachable - it would charge 590 on all
+  //    three sizes forever.
+  //
+  //    ── EVERY OTHER SUPPORTED DESTINATION ─────────────────────
+  //    computeShippingGrossCents, unchanged. The benefit does NOT
+  //    travel: a 50 g or 100 g subscription to an EU address pays that
+  //    zone's normal shipping. lib/shipping.ts stays the single owner of
+  //    what each country costs, and not one of its amounts is copied
+  //    into the subscription rule.
+  //
+  //    The ZONE is still resolved, and still refuses a country this shop
+  //    does not ship to - that check is about reachability, not price,
+  //    and it also supplies the identifier the recurring shipping Price
+  //    is keyed on further down. lib/shipping.ts itself is untouched:
+  //    the one-time cart and the annual plan keep their own rules.
   const shippingZone = getShippingZone(destinationCountry);
   if (!shippingZone) {
     return fail(409, "In dieses Land liefern wir derzeit nicht.");
   }
-  const shippingGrossCents = computeShippingGrossCents(shippingZone, quote.subtotalGrossCents);
+  // The NORMAL amount for this destination, from the module that owns
+  // every country's shipping price. Computed for every destination and
+  // then handed to the subscription rule, which keeps it unchanged
+  // everywhere except Germany. No country price is copied anywhere.
+  const destinationGrossCents = computeShippingGrossCents(shippingZone, quote.subtotalGrossCents);
+  const shippingGrossCents = subscriptionShippingGrossCents({
+    sku: item.sku,
+    country: destinationCountry,
+    destinationGrossCents,
+  });
+  if (shippingGrossCents === null) {
+    // FAILS CLOSED. A launch SKU with no shipping rule is a product
+    // nobody priced a delivery for; shipping it free by accident or
+    // charging an unapproved amount are both worse than refusing.
+    console.error(`Subscription checkout: no shipping rule for sku ${item.sku}`);
+    return fail(409, PLAN_UNAVAILABLE);
+  }
 
   // 7. TAX, from the existing calculation. A subscription is STRICTER
   //    than a one-time order here: create_pending_subscription refuses a

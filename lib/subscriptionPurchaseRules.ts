@@ -83,6 +83,162 @@ export const SUBSCRIPTION_LAUNCH_SKUS: readonly string[] = Object.freeze(
   Object.keys(SUBSCRIPTION_LAUNCH_GRAMS_BY_SKU)
 );
 
+/* ── Shipping, per delivery ─────────────────────────────────── */
+
+/**
+ * The ONE country the subscription shipping benefit applies in.
+ *
+ * ISO 3166-1 alpha-2, compared against an already-normalised code so a
+ * saved address holding "Deutschland" is resolved before it gets here.
+ */
+export const SUBSCRIPTION_SHIPPING_BENEFIT_COUNTRY = "DE";
+
+/**
+ * WHAT A 4-WEEK SUBSCRIPTION DELIVERY COSTS TO SHIP **IN GERMANY**, in
+ * gross cents.
+ *
+ * ══════════════════════════════════════════════════════════════
+ * THIS TABLE IS AN EXCEPTION, NOT A SHIPPING PRICE LIST
+ * ══════════════════════════════════════════════════════════════
+ *
+ * It describes one country. Every other destination keeps the shipping
+ * price lib/shipping.ts already owns, and those prices are NOT copied
+ * here - a second country table is a second answer, and the one that
+ * would be wrong is whichever is not the shipping module's.
+ *
+ * The exception is layered over the normal amount by
+ * subscriptionShippingGrossCents below, which takes that normal amount
+ * as an ARGUMENT. That is what lets this file stay a zero-import leaf
+ * the browser can load while lib/shipping.ts remains the authority on
+ * what a destination costs.
+ *
+ * ── WHY GERMANY NEEDS AN EXCEPTION AT ALL ─────────────────────
+ *
+ * lib/shipping.ts charges 590 in Germany and waives it once the
+ * merchandise subtotal reaches 4900. A subscription delivery is ONE tin
+ * and the largest is 39,99, so that threshold can never be reached and
+ * the rule would charge 590 on all three sizes forever. Free shipping
+ * from 50 g is therefore a deliberate SUBSCRIPTION BENEFIT, stated per
+ * size rather than derived - so the day marketing moves the shop's
+ * threshold, no subscriber's delivery charge moves with it.
+ *
+ * ── AND IT IS NOT THE ANNUAL PLAN'S TABLE ─────────────────────
+ *
+ * lib/annualPlanRules.ts owns ANNUAL_SHIPPING_PER_DELIVERY_GROSS_CENTS
+ * for a different product with a different contract. The two agree on
+ * 590/0/0 in Germany today; they are separate decisions, neither file
+ * imports the other, and the focused suite asserts that.
+ *
+ * KEYED ON SKU, the stable identity: a renamed "30 g" must not be able
+ * to change what a delivery costs.
+ */
+export const SUBSCRIPTION_DE_SHIPPING_PER_DELIVERY_GROSS_CENTS: Readonly<Record<string, number>> = Object.freeze({
+  "GLOA-MATCHA-30G": 590,
+  "GLOA-MATCHA-50G": 0,
+  "GLOA-MATCHA-100G": 0,
+});
+
+/** Whether this destination gets the German subscription benefit. */
+export function isSubscriptionBenefitCountry(country: unknown): boolean {
+  return typeof country === "string"
+    && country.trim().toUpperCase() === SUBSCRIPTION_SHIPPING_BENEFIT_COUNTRY;
+}
+
+/**
+ * The German per-delivery charge for one SKU, or null.
+ *
+ * Exposed on its own because the SHOP needs it: a signed-out page has no
+ * delivery address, so it states the German rule explicitly and says so.
+ * Null for any SKU with no entry.
+ */
+export function subscriptionDeShippingGrossCents(sku: unknown): number | null {
+  if (typeof sku !== "string") return null;
+  const cents = SUBSCRIPTION_DE_SHIPPING_PER_DELIVERY_GROSS_CENTS[sku];
+  return typeof cents === "number" ? cents : null;
+}
+
+/** Whether this SKU's German deliveries ship free. Derived, never listed. */
+export function subscriptionShipsFreeInGermany(sku: unknown): boolean {
+  return subscriptionDeShippingGrossCents(sku) === 0;
+}
+
+/**
+ * WHAT ONE DELIVERY OF THIS SKU COSTS TO SHIP TO THIS DESTINATION.
+ *
+ * The whole rule, in one function, and the only one the server calls.
+ *
+ *   Germany              the table above. 30 g pays 590; 50 g and 100 g
+ *                        ship free as the subscription benefit.
+ *   every other country  destinationGrossCents, UNCHANGED - whatever
+ *                        lib/shipping.ts computed for that zone. The
+ *                        benefit is not applied, and a 50 g or 100 g
+ *                        subscription abroad is not waived.
+ *
+ * ── WHY THE NORMAL AMOUNT IS AN ARGUMENT ──────────────────────
+ *
+ * Because this file must stay importable by the browser, and
+ * lib/shipping.ts is not the problem - the LAYERING is. Passing the
+ * destination amount in means the country price has exactly one owner
+ * (the shipping module), this file adds exactly one exception, and
+ * neither can silently become a copy of the other.
+ *
+ * Returns null when it cannot answer: an unknown SKU in Germany, or a
+ * non-German destination whose normal amount is missing. Null is a real
+ * answer and the caller must refuse on it - defaulting to 0 would ship
+ * free by accident and defaulting to 590 would charge an unapproved
+ * German price to a foreign address.
+ */
+export function subscriptionShippingGrossCents(input: {
+  sku: unknown;
+  /** Normalised ISO alpha-2, as lib/shipping.ts's normalizeCountryCode returns. */
+  country: unknown;
+  /** What lib/shipping.ts charges this destination. Ignored for Germany. */
+  destinationGrossCents: unknown;
+}): number | null {
+  if (isSubscriptionBenefitCountry(input.country)) {
+    return subscriptionDeShippingGrossCents(input.sku);
+  }
+  // Outside Germany the subscription adds nothing and takes nothing
+  // away. The SKU is still validated, so an ineligible product cannot
+  // acquire a shipping price by travelling.
+  if (subscriptionDeShippingGrossCents(input.sku) === null) return null;
+  const cents = input.destinationGrossCents;
+  if (typeof cents !== "number" || !Number.isSafeInteger(cents) || cents < 0) return null;
+  return cents;
+}
+
+/**
+ * The smallest size that ships free IN GERMANY, in grams.
+ *
+ * DERIVED from the table rather than typed, so the headline copy cannot
+ * outlive the rule: if 50 g ever started costing something, this becomes
+ * 100 and every sentence built from it follows. Null would mean nothing
+ * ships free, and the surfaces then say nothing.
+ */
+export const SUBSCRIPTION_FREE_SHIPPING_FROM_GRAMS: number | null = (() => {
+  const free = Object.keys(SUBSCRIPTION_DE_SHIPPING_PER_DELIVERY_GROSS_CENTS)
+    .filter(sku => SUBSCRIPTION_DE_SHIPPING_PER_DELIVERY_GROSS_CENTS[sku] === 0)
+    .map(sku => SUBSCRIPTION_LAUNCH_GRAMS_BY_SKU[sku])
+    .filter(grams => typeof grams === "number");
+  return free.length === 0 ? null : Math.min(...free);
+})();
+
+/**
+ * "Ab 50 g kostenloser Versand innerhalb Deutschlands."
+ *
+ * The country is IN the sentence, not implied by context. The shop shows
+ * this before it knows any address, so a sentence that merely said "ab
+ * 50 g kostenloser Versand" would read as a promise to everyone.
+ */
+export const SUBSCRIPTION_FREE_SHIPPING_NOTE: string | null =
+  SUBSCRIPTION_FREE_SHIPPING_FROM_GRAMS === null
+    ? null
+    : `Ab ${SUBSCRIPTION_FREE_SHIPPING_FROM_GRAMS} g kostenloser Versand innerhalb Deutschlands.`;
+
+/** The other half of the same fact, and never shown without it. */
+export const SUBSCRIPTION_ABROAD_SHIPPING_NOTE =
+  "Für Lieferadressen außerhalb Deutschlands gelten die jeweiligen Versandkosten.";
+
 /* ── Eligibility ────────────────────────────────────────────── */
 
 /** The catalog facts a subscription decision is made from. */

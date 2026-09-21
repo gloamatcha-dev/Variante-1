@@ -238,10 +238,32 @@ test("subscriptions: no subscription discount is promised, because none exists",
   const flat = startMarkup.replace(/\s+/g, " ");
   const DISCLAIMER = "Für ein Abo ist kein gesonderter Preis und kein Rabatt hinterlegt.";
   assert.ok(flat.includes(DISCLAIMER), "the form must say no subscription price exists");
-  const rest = flat.replace(DISCLAIMER, "");
+  /*
+    FREE SHIPPING IS NOW A REAL, APPROVED BENEFIT - so the words that
+    describe it are removed before the invented-benefit scan, exactly as
+    the discount disclaimer above already is.
+
+    It is NOT a loosening. Each allowed phrase carries its geographic
+    bound in the same string, so a bare "Kostenloser Versand" - a
+    promise this shop does not make outside Germany - still trips the
+    scan, and so does any other invented benefit. The German-only
+    wording itself is asserted in
+    tests/subscription-purchase-surface.test.mjs.
+  */
+  const APPROVED_SHIPPING = [
+    "Kostenloser Versand innerhalb Deutschlands",
+    "Kostenloser Versand",                       // the option row, for a German address
+    // The grams come from the constant, so the SOURCE carries the
+    // placeholder rather than "50" - matched as it is actually written.
+    "kostenlose Versand ab ${SUBSCRIPTION_FREE_SHIPPING_FROM_GRAMS} g gilt nur innerhalb Deutschlands",
+  ];
+  let rest = flat.replace(DISCLAIMER, "");
+  for (const approved of APPROVED_SHIPPING) rest = rest.split(approved).join("");
   for (const fake of ["Abo-Rabatt", "Rabatt", "gratis", "kostenlos", "spare", "Spare", "Vorteil"]) {
     assert.ok(!rest.includes(fake), `an invented benefit appeared: ${fake}`);
   }
+  // And the approved wording really is what the form shows.
+  assert.ok(flat.includes("Kostenloser Versand"), "the free-shipping benefit disappeared");
   assert.ok(!/\d\s*%/.test(startMarkup), "a percentage appeared on the subscriptions page");
   // The cadence and the quantity are READ from the rules module, so the
   // page cannot promise a rhythm the cutoff arithmetic does not use.
