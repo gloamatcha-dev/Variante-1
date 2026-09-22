@@ -61,9 +61,14 @@ const businessPage = fnBody(portal, "function PortalBusiness()", "\nfunction Sup
 const businessDash = fnBody(portal, "function BusinessDashboard()", "\nfunction PortalOrders(");
 const privateDash = fnBody(portal, "function PrivateDashboard()", "\nfunction BusinessDashboard(");
 const subsMarkup = withoutComments(subsPage);
-// THE BOOKING FORM IS ITS OWN COMPONENT, so it gets its own slice. It
-// sits above PortalSubscriptions in the file and is rendered by it.
-const startForm = fnBody(portal, "function SubscriptionStartForm(", "\nfunction PortalSubscriptions(");
+// THE BOOKING FORM IS ITS OWN COMPONENT, so it gets its own slice.
+//
+// Bounded at the JAHRESPLAN marker rather than at PortalSubscriptions:
+// the prepaid plan's own components now sit between the two. They are a
+// different contract - one payment against thirteen fixed deliveries -
+// and they answer to tests/annual-plan-purchase-surface.test.mjs, so the
+// rules below must not be applied to them.
+const startForm = fnBody(portal, "function SubscriptionStartForm(", "/* ══ JAHRESPLAN: DIE VORAUSBEZAHLTEN KOMPONENTEN ══");
 const startMarkup = withoutComments(startForm);
 
 /* ── The backend audit, pinned so it cannot rot silently ────── */

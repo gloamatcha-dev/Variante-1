@@ -816,6 +816,11 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
     // admin read, open to all three roles, and with no way to write
     // through it. Reviewed in tests/admin-audit.test.mjs.
     "/admin/activity",
+    // THE PREPAID PLAN'S OWN OPERATOR VIEW. Read-only, POST-gated, and
+    // gated on read_sensitive so a viewer cannot open it. It reads
+    // annual_plans, annual_plan_deliveries and the orders behind them,
+    // and holds no write verb - which is what keeps it harmless.
+    "/admin/annual-plans",
     // PAKET 4A.2. The manual inventory: two reads (a page of items, one
     // item with its history), four writes that change descriptive fields
     // or create an item, and two that book stock - both of the latter
@@ -919,15 +924,44 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
   ], "the API surface changed in a read-model phase");
 });
 
-test("31: the account portal was not redesigned by this phase", () => {
-  // The read model exists to be wired up by the UI phase that follows.
-  // Nothing in this one renders it, and the portal's existing reads are
-  // untouched.
+test("31: the account portal now renders this read model, and only through it", () => {
+  /*
+    DELIBERATELY INVERTED, BY THE PHASE THIS ONE ANTICIPATED.
+
+    It used to require that nothing rendered the read model, because
+    4B8 built it "to be wired up by the UI phase that follows". This is
+    that phase. What the assertion becomes is the property that actually
+    matters: the portal reads the annual plan THROUGH this module and
+    never around it - no second column list, no derived schedule, no
+    arithmetic of its own.
+  */
   const portal = read("app/AccountPortal.tsx");
-  assert.ok(!portal.includes("annualPlanAccount"), "the portal was wired up in a read-model phase");
-  assert.ok(!portal.includes("ANNUAL_PLAN_ACCOUNT_SELECT"));
+  assert.ok(portal.includes("annualPlanAccount"), "the portal stopped using the annual read model");
+  assert.ok(portal.includes("ANNUAL_PLAN_ACCOUNT_SELECT"), "the portal names its own annual columns");
+  assert.ok(portal.includes("ANNUAL_PLAN_DELIVERY_ACCOUNT_SELECT"));
+  assert.ok(portal.includes("buildAnnualPlanAccountView"), "the portal derives the view itself");
+  assert.ok(portal.includes("resolveAnnualCheckoutReturnState"),
+    "the portal decides the return state itself");
+
+  // NO SECOND COLUMN LIST. The only annual selects are the two the read
+  // model exports, plus the four-column return probe - which names
+  // exactly what resolveAnnualCheckoutReturnState reads and nothing more.
+  const annualSelects = [...portal.matchAll(/from\("annual_plan[a-z_]*"\)\s*\.select\(([^)]*)\)/g)]
+    .map(m => m[1].trim());
+  for (const select of annualSelects) {
+    assert.ok(
+      select === "ANNUAL_PLAN_ACCOUNT_SELECT"
+      || select === "ANNUAL_PLAN_DELIVERY_ACCOUNT_SELECT"
+      || select === '"id, status, payment_status, purchased_at"',
+      `the portal selects annual columns of its own: ${select}`);
+  }
+  // And it computes no schedule: the dates are the frozen rows'.
+  for (const banned of ["672", "364", "* 28", "28 *", "setDate("]) {
+    assert.ok(!portal.includes(banned), `the portal computes an annual schedule: ${banned}`);
+  }
+
   // Its established pattern - the user's own client, named column lists -
-  // is what this module is shaped for.
+  // is what this module is shaped for, and is still what it uses.
   assert.ok(portal.includes("const SUBSCRIPTION_SELECT"));
   assert.match(portal, /import \{ supabase \} from "\.\.\/lib\/supabase"/);
 });

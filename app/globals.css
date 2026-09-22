@@ -10204,3 +10204,42 @@ header nav{gap:18px;font-size:12px}
 }
 .ops-act-summary{ display:block; }
 .ops-act-facts{ display:block; font-size:12px; color:var(--plum); opacity:.8; margin-top:2px; }
+
+/* ══════════════════════════════════════════════════════════════
+   THE PREPAID PLAN IN THE ACCOUNT, AND THE RETURN FROM STRIPE
+
+   Two small additions to surfaces that already exist: the annual
+   start form reuses .sub-start-* wholesale, so only its own figure
+   list is new, and the return banner is one bordered block shared by
+   both products.
+   ══════════════════════════════════════════════════════════════ */
+
+/* The full commercial truth of the selected size, above the address. */
+.annual-start-lines{margin:0 0 22px;display:grid;gap:8px;max-width:520px}
+.annual-start-lines>div{display:flex;justify-content:space-between;align-items:baseline;gap:16px}
+.annual-start-lines dt{font:14px/1.4 var(--font-mono);opacity:.6;margin:0}
+.annual-start-lines dd{font:14px/1.4 var(--font-mono);margin:0;text-align:right}
+/* The number being charged today is the loud one, for the reason the
+   shop's annual panel states: shouting a per-delivery figure over a
+   plan that bills the whole year at once is the one thing this must
+   never do. */
+.annual-start-total{padding-top:10px;border-top:1px solid var(--line)}
+.annual-start-total dt{opacity:1;font-weight:600}
+.annual-start-total dd{font-weight:700}
+
+/* An annual card is a subscription card without a link affordance. */
+.annual-card{cursor:default}
+.annual-card:hover{background:transparent}
+
+/* ── THE RETURN FROM STRIPE ──
+   A status block, not a toast: it must survive a reload, because the
+   customer is told a reload may be what they need. */
+.checkout-return{border-left:2px solid var(--ink);padding:2px 0 2px 18px}
+.checkout-return-title{font:600 16px/1.4 var(--font-sans);margin:0 0 6px}
+.checkout-return-body{font:14px/1.6 var(--font-mono);opacity:.7;margin:0;max-width:620px}
+.checkout-return-processing{border-left-color:var(--blue)}
+.checkout-return-ok{border-left-color:var(--berry)}
+.checkout-return-cancelled{border-left-color:var(--line)}
+
+/* Fifteen columns of prepaid plan, scrolling like every other ops table. */
+.ops-annual{min-width:1780px}

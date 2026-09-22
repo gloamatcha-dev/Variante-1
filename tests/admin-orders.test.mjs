@@ -387,7 +387,7 @@ test("6: the navigation offers five real sections and fakes none", () => {
   // opens the audit log rather than a placeholder.
   // The B2C subscription launch surface added Abos, also real from the
   // day it appears: it opens the read-only list, not a placeholder.
-  assert.match(shell, /const \[view, setView\] = useState<"overview" \| "orders" \| "subscriptions" \| "inventory" \| "activity" \| "waitlist">\("overview"\)/);
+  assert.match(shell, /const \[view, setView\] = useState<"overview" \| "orders" \| "subscriptions" \| "annual" \| "inventory" \| "activity" \| "waitlist">\("overview"\)/);
   // The "bald" list must no longer name a section that exists.
   const soon = shell.slice(shell.indexOf("ops-nav-soon") - 400, shell.indexOf("ops-nav-soon"));
   assert.ok(!soon.includes("Inventar"),
@@ -411,6 +411,7 @@ test("6: the navigation offers five real sections and fakes none", () => {
     // Abos sits beside Bestellungen because it is the other commerce
     // screen, and it is real from the day it appears.
     ["subscriptions", "Abos"],
+    ["annual", "Jahrespläne"],
     ["inventory", "Inventar"],
     ["activity", "Aktivität"],
     ["waitlist", "Launch List"],
@@ -511,7 +512,11 @@ test("7: /api/admin gained orders and nothing else", () => {
   // checkout, the customer's own cancellation endpoint, the Stripe
   // refund branch) and none of them is an admin route. Reviewed in
   // tests/subscription-purchase-surface.test.mjs.
-  assert.deepEqual(dirs, ["activity", "inventory", "launch", "orders", "session", "subscriptions", "waitlist"]);
+  // AND "annual-plans": the read-only prepaid annual-plan list, the
+  // third admin route with no write path at all. Same read_sensitive
+  // gate as the subscription list. Reviewed in
+  // tests/annual-plan-purchase-surface.test.mjs.
+  assert.deepEqual(dirs, ["activity", "annual-plans", "inventory", "launch", "orders", "session", "subscriptions", "waitlist"]);
   const orderDirs = readdirSync(path.join(ROOT, "app/api/admin/orders"), { withFileTypes: true })
     .filter(e => e.isDirectory()).map(e => e.name).sort();
   // PAKET 4A.1B added the four actions, one route each rather than one

@@ -85,7 +85,7 @@ test("1b: both actions still invoke exactly the handlers they did", () => {
 test("1c: no auth logic was touched", () => {
   for (const kept of [
     'const { user, loading: authLoading } = useAuth();',
-    'useEffect(()=>{if(!authLoading&&user)window.location.href="/account/dashboard"},[user,authLoading]);',
+    'useEffect(()=>{if(!authLoading&&user)window.location.href="/account/dashboard"+window.location.search},[user,authLoading]);',
     'supabase.auth.signInWithPassword',
     'supabase.auth.signUp',
     'supabase.auth.resetPasswordForEmail',

@@ -123,11 +123,13 @@ test("3: variants, price and base price still come from the catalog", () => {
   // account-bound checkout, not a cart line. See
   // tests/shop-annual-plan.test.mjs and
   // tests/subscription-purchase-surface.test.mjs.
-  assert.match(block, /annualActive\?\(\)=>\{track\("shop_annual_interest"\);window\.location\.href="\/contact"\}/);
+  // The annual arm hands over to the account now that a purchase path
+  // exists; it still never reaches the cart.
+  assert.match(block, /annualActive\?\(\)=>\{track\("shop_annual_start"\);window\.location\.href=annualPortalHref\(v\.sku\)\}/);
   assert.match(block, /subscriptionActive\?\(\)=>\{track\("shop_subscription_start"\);window\.location\.href=subscriptionPortalHref\(v\.sku\)\}/);
   // Prelaunch says the same thing in EVERY purchase mode, because in
   // prelaunch none of them sells anything.
-  assert.match(block, /SHOP_STATUS==="prelaunch"\?"Fragen zum Launch":annualActive\?"Jahresplan anfragen":subscriptionActive\?"Abo im Konto starten":"In den Warenkorb"/);
+  assert.match(block, /SHOP_STATUS==="prelaunch"\?"Fragen zum Launch":annualActive\?"Jahresplan im Konto starten":subscriptionActive\?"Abo im Konto starten":"In den Warenkorb"/);
   assert.match(read("app/content.ts"), /export const SHOP_STATUS = "prelaunch"/);
   // The hero's anchor still lands on the section.
   assert.match(shop, /<section id="product" className="shop-products">/);

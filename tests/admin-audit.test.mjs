@@ -976,6 +976,9 @@ test("8: AKTIVITÄT is a real entry in the navigation array, in its required pla
     // The read-only subscription view, between orders and inventory:
     // it is a commerce screen, so it belongs beside Bestellungen.
     ["subscriptions", "Abos"],
+    // The prepaid plan, beside the recurring one and under the same role
+    // gate. A different contract, so its own tab rather than a column.
+    ["annual", "Jahrespläne"],
     ["inventory", "Inventar"],
     ["activity", "Aktivität"],
     ["waitlist", "Launch List"],

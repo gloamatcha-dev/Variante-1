@@ -439,7 +439,11 @@ test("23: the admin API surface is exactly these five, all POST-gated", () => {
   // read-only list of running subscriptions, POST-gated like the rest,
   // and the second admin route with no write path at all. Reviewed in
   // tests/subscription-purchase-surface.test.mjs.
-  assert.deepEqual(dirs, ["activity", "inventory", "launch", "orders", "session", "subscriptions", "waitlist"]);
+  // AND "annual-plans": the read-only prepaid annual-plan list, the
+  // third admin route with no write path at all. Same read_sensitive
+  // gate as the subscription list. Reviewed in
+  // tests/annual-plan-purchase-surface.test.mjs.
+  assert.deepEqual(dirs, ["activity", "annual-plans", "inventory", "launch", "orders", "session", "subscriptions", "waitlist"]);
 
   // The session route is the only one that may write anything, and what
   // it writes is a cookie.

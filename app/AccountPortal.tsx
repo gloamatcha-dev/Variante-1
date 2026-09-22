@@ -17,6 +17,32 @@ import {
   type AccountQuickLink,
 } from "./AccountUI";
 import { resolveGreetingName } from "../lib/accountGreeting";
+// THE PREPAID ANNUAL PLAN, all from pure leaves the browser can load.
+// annualPlanAccount.ts was written for exactly this account area and had
+// never been rendered; annualPlanRules.ts is the same money leaf the
+// server prices with, so no figure here is a second calculation.
+import {
+  ANNUAL_CHECKOUT_RETURN_PARAM,
+  ANNUAL_PLAN_ACCOUNT_SELECT,
+  ANNUAL_PLAN_DELIVERY_ACCOUNT_SELECT,
+  buildAnnualPlanAccountView,
+  resolveAnnualCheckoutReturnState,
+  type AnnualCheckoutReturnState,
+  type AnnualPlanAccountRow,
+  type AnnualPlanAccountView,
+  type AnnualPlanDeliveryAccountRow,
+} from "../lib/annualPlanAccount";
+import {
+  ANNUAL_DELIVERY_COUNT,
+  ANNUAL_DELIVERY_INTERVAL_DAYS,
+  ANNUAL_DISCOUNT_PERCENT,
+  buildAnnualPricing,
+} from "../lib/annualPlanRules";
+import {
+  ANNUAL_GERMANY_ONLY_NOTE,
+  ANNUAL_LAUNCH_SIZE_BY_SKU,
+  isAnnualDeliveryCountry,
+} from "../lib/annualPlans";
 // The ONE subscription shipping rule, the same table the server prices
 // from. A zero-import leaf, so the browser can read it without a second
 // copy of 590/0/0 existing anywhere.
@@ -116,6 +142,11 @@ export function AccountPortal({ page, orderId, subscriptionId, supplyId }: { pag
       </nav>
 
       <div className={`portal-content${customerType === "business" ? " portal-content-wide" : ""}`}>
+        {/* THE RETURN FROM STRIPE, on whichever page the customer lands.
+            Mounted in the shell rather than on one page, because the two
+            products return to two different routes and neither URL is
+            changed by this package. */}
+        <CheckoutReturnBanner />
         {page === "dashboard" && <PortalDashboard customerType={customerType} />}
         {page === "orders" && <PortalOrders />}
         {page === "order-detail" && <OrderDetail orderId={orderId!} />}
@@ -1305,6 +1336,497 @@ function SubscriptionStartForm({ onStarted }: { onStarted?: () => void }) {
   );
 }
 
+/* ══ JAHRESPLAN: DIE VORAUSBEZAHLTEN KOMPONENTEN ══════════════
+ *
+ * EVERYTHING BELOW THIS MARKER AND ABOVE PortalSubscriptions BELONGS TO
+ * THE PREPAID PLAN, not to the recurring subscription. The two are
+ * different contracts - one payment against thirteen fixed deliveries
+ * versus a charge every 28 days until cancelled - and the tests slice
+ * this file on exactly this comment so each suite can hold its own
+ * surface to its own rules.
+ */
+
+// ── Jahresplan starten ─────────────────────────────────────────────────
+
+/**
+ * THE ONE PLACE A PREPAID ANNUAL PLAN IS STARTED.
+ *
+ * The engine behind it has been complete for some time: the checkout
+ * route, the payment webhook, activation with its thirteen frozen
+ * delivery dates, the daily maintenance job that fulfils deliveries 2 to
+ * 13, the refund writer and the purchase-confirmation mail. What never
+ * existed was a caller - nothing in the browser posted to
+ * /api/annual-plan/checkout/session. This form is that caller, and it is
+ * deliberately the only one.
+ *
+ * ── WHY IT LIVES HERE AND NOT IN THE SHOP ─────────────────────
+ *
+ * The route accepts exactly variantId, addressId and requestId. The
+ * addressId is one of the customer's OWN saved addresses, and there is
+ * no guest path at all: migration 039 made annual_plans.user_id NOT NULL
+ * with no "on delete set null", because a prepaid twelve-month contract
+ * must stay reachable for a year. So the shop states the offer and links
+ * here with the chosen size as a hint.
+ *
+ * ── NOT ONE COMMERCIAL VALUE IS SENT ──────────────────────────
+ *
+ * No price, no discount, no shipping, no tax, no total, no delivery
+ * count. Every one of them is resolved server-side by
+ * handleAnnualPlanCheckout from the catalog and the customer's own
+ * address row. The euro figures rendered here come from
+ * buildAnnualPricing - the SAME leaf the server prices with - so they
+ * cannot disagree, and they travel nowhere.
+ *
+ * ── GERMANY ONLY, AND THE FORM SAYS SO BEFORE THE PRICE ───────
+ *
+ * The server refuses a non-German address twice. This screen refuses it
+ * once more, up front, so a customer does not choose a size, read a
+ * total and only then discover the limit at the payment step.
+ */
+function AnnualPlanStartForm() {
+  const { session, addresses } = useAuth();
+  const { product, loading: catalogLoading } = useCatalog("matcha");
+
+  const [variantChoice, setVariantChoice] = useState<string | null>(null);
+  const [addressChoice, setAddressChoice] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  /* The `?sku=` hint, read once and only in a browser - see the note on
+     the subscription form for why this is a lazy initialiser rather than
+     an effect. */
+  const [skuHint] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("sku")
+  );
+
+  // ONLY THE THREE ANNUAL LAUNCH SIZES. The Metal Case is absent from
+  // ANNUAL_LAUNCH_SIZE_BY_SKU and carries no net weight, so it fails the
+  // allowlist here exactly as it fails resolveAnnualLaunchPlan server-side.
+  const eligible = (product?.variants ?? []).filter(v => ANNUAL_LAUNCH_SIZE_BY_SKU[v.sku] !== undefined);
+
+  const hintedVariantId = (() => {
+    if (eligible.length === 0) return "";
+    const hinted = skuHint ? eligible.find(v => v.sku === skuHint) : null;
+    return (hinted ?? eligible[0]).id;
+  })();
+  const variantId = variantChoice ?? hintedVariantId;
+  const variant = eligible.find(v => v.id === variantId) ?? null;
+
+  /* ONLY GERMAN ADDRESSES ARE OFFERED. A non-German one cannot start an
+     annual plan at all, so listing it would be offering a choice that
+     only leads to a refusal. The customer is told why below. */
+  const germanAddresses = addresses.filter(a => isAnnualDeliveryCountry(normalizeCountryCode(a.country)));
+  const defaultAddressId = (germanAddresses.find(a => a.is_default_shipping) ?? germanAddresses[0])?.id ?? "";
+  const addressId = addressChoice ?? defaultAddressId;
+
+  /* THE MONEY, from the rules module the server prices with. Rendered so
+     the customer knows what they are committing to; never transmitted. */
+  const pricing = (() => {
+    if (!variant) return null;
+    const size = ANNUAL_LAUNCH_SIZE_BY_SKU[variant.sku];
+    if (!size) return null;
+    const result = buildAnnualPricing({ size, catalogUnitGrossCents: variant.price_gross_cents });
+    return result.ok ? result.pricing : null;
+  })();
+
+  /* Minted per intent in the handler, never during render - randomUUID is
+     not a pure function. Keyed on (variant, address) so pressing twice
+     reuses the same annual plan rather than minting a second one, which
+     is exactly what annual_plans.payment_checkout_attempt_id's UNIQUE
+     constraint is there to make impossible anyway. */
+  const tokenRef = useRef<{ key: string; id: string } | null>(null);
+
+  const start = async () => {
+    if (!session?.access_token) { setError("Bitte melde dich an."); return; }
+    if (!variantId) { setError("Bitte wähle eine Größe."); return; }
+    if (!addressId) { setError("Bitte wähle eine Lieferadresse in Deutschland."); return; }
+    const intentKey = `${variantId}|${addressId}`;
+    if (tokenRef.current?.key !== intentKey) {
+      tokenRef.current = { key: intentKey, id: crypto.randomUUID() };
+    }
+    const requestId = tokenRef.current.id;
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch("/api/annual-plan/checkout/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        // EXACTLY the three fields the route allows. A fourth is refused
+        // outright rather than ignored, which is the property that keeps
+        // "the browser cannot submit a price" checked rather than agreed.
+        body: JSON.stringify({ variantId, addressId, requestId }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        // Every refusal the route produces already carries customer-safe
+        // German copy - including the 503 it answers while
+        // B2C_ANNUAL_PLAN_ENABLED is closed. Shown as-is, so the page
+        // never claims a state the server did not report.
+        setError(typeof body?.error === "string" ? body.error : "Das hat gerade nicht geklappt.");
+        return;
+      }
+      const url = typeof body?.url === "string" ? body.url : "";
+      if (!url) { setError("Das hat gerade nicht geklappt."); return; }
+      // The payment page is where the binding total is shown and
+      // confirmed. Nothing is charged before it.
+      window.location.href = url;
+    } catch {
+      setError("Das hat gerade nicht geklappt.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const loading = catalogLoading;
+  const shipsFree = pricing?.shippingPerDeliveryGrossCents === 0;
+
+  return (
+    <section className="portal-section">
+      <AccountSectionHeader label="JAHRESPLAN STARTEN" />
+      <p className="portal-note">
+        {ANNUAL_DELIVERY_COUNT} Lieferungen im {ANNUAL_DELIVERY_INTERVAL_DAYS}-Tage-Rhythmus,
+        {" "}{ANNUAL_DISCOUNT_PERCENT} % Rabatt auf den Matcha-Preis, einmal im Voraus bezahlt.
+        {" "}Keine automatische Verlängerung: der Plan endet nach der letzten Lieferung.
+        {" "}{ANNUAL_GERMANY_ONLY_NOTE}
+      </p>
+
+      {loading ? (
+        <AccountEmptyState>Laden…</AccountEmptyState>
+      ) : eligible.length === 0 ? (
+        <AccountEmptyState action={<AccountAction href="/shop">ZUM SHOP</AccountAction>}>
+          Aktuell ist keine Größe als Jahresplan hinterlegt.
+        </AccountEmptyState>
+      ) : germanAddresses.length === 0 ? (
+        /*
+          NO GERMAN ADDRESS, NO FORM. The route answers 409 for a
+          non-German destination, so a submit button here could only
+          produce that. The customer is told why and offered the one
+          action that helps.
+        */
+        <AccountEmptyState action={<AccountAction href="/account/addresses">ADRESSE HINTERLEGEN</AccountAction>}>
+          {addresses.length === 0
+            ? "Für einen Jahresplan brauchen wir eine Lieferadresse in Deutschland."
+            : "Für einen Jahresplan brauchen wir eine Lieferadresse in Deutschland. Deine hinterlegten Adressen liegen außerhalb Deutschlands."}
+        </AccountEmptyState>
+      ) : (
+        <div className="sub-start">
+          <fieldset className="sub-start-field">
+            <legend>Größe</legend>
+            <div className="sub-start-options" role="radiogroup" aria-label="Jahresplan-Größe wählen">
+              {eligible.map(v => {
+                const size = ANNUAL_LAUNCH_SIZE_BY_SKU[v.sku];
+                const p = size ? buildAnnualPricing({ size, catalogUnitGrossCents: v.price_gross_cents }) : null;
+                const cents = p?.ok ? p.pricing.totalGrossCents : null;
+                return (
+                  <label key={v.id} className={`sub-start-option${variantId === v.id ? " active" : ""}`}>
+                    <input
+                      type="radio" name="annual-variant" className="sr-only" value={v.id}
+                      checked={variantId === v.id} onChange={() => setVariantChoice(v.id)}
+                    />
+                    <span className="sub-start-option-label">{product?.name} · {v.label}</span>
+                    {cents !== null && (
+                      <span className="sub-start-option-meta">{fmtCents(cents)} € einmalig · {ANNUAL_DELIVERY_COUNT} Lieferungen</span>
+                    )}
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+
+          {/* THE FULL COMMERCIAL TRUTH OF THE SELECTED SIZE, from the
+              same leaf the server prices with. */}
+          {pricing && (
+            <dl className="annual-start-lines">
+              <div><dt>Rabatt</dt><dd>{pricing.discountPercentApplied} % auf den Matcha-Preis</dd></div>
+              <div><dt>Matcha je Lieferung</dt><dd>{fmtCents(pricing.annualUnitGrossCents)} €</dd></div>
+              <div><dt>Matcha gesamt</dt><dd>{fmtCents(pricing.merchandiseTotalGrossCents)} €</dd></div>
+              <div><dt>Versand je Lieferung</dt><dd>{shipsFree ? "kostenlos" : `${fmtCents(pricing.shippingPerDeliveryGrossCents)} €`}</dd></div>
+              <div><dt>Versand gesamt</dt><dd>{shipsFree ? "kostenlos" : `${fmtCents(pricing.shippingTotalGrossCents)} €`}</dd></div>
+              <div><dt>Lieferungen</dt><dd>{pricing.deliveryCount} · alle {ANNUAL_DELIVERY_INTERVAL_DAYS} Tage</dd></div>
+              <div className="annual-start-total"><dt>Gesamt, einmalig</dt><dd>{fmtCents(pricing.totalGrossCents)} €</dd></div>
+            </dl>
+          )}
+
+          <fieldset className="sub-start-field">
+            <legend>Lieferadresse (Deutschland)</legend>
+            <select
+              className="sub-start-select" value={addressId}
+              onChange={e => setAddressChoice(e.target.value)} aria-label="Lieferadresse wählen"
+            >
+              {germanAddresses.map(a => (
+                <option key={a.id} value={a.id}>
+                  {[a.first_name, a.last_name].filter(Boolean).join(" ")}, {a.street} {a.house_number}, {a.zip} {a.city}
+                </option>
+              ))}
+            </select>
+            <p className="portal-note sub-start-shipping">
+              {ANNUAL_GERMANY_ONLY_NOTE} Der Versand für alle {ANNUAL_DELIVERY_COUNT} Lieferungen ist im
+              {" "}Gesamtbetrag enthalten; es folgt keine weitere Abbuchung.
+            </p>
+          </fieldset>
+
+          {error && <p className="sub-start-error" role="alert">{error}</p>}
+
+          <button
+            type="button" className="cta sub-start-cta" onClick={() => void start()}
+            disabled={busy || !variantId || !addressId}
+          >
+            {busy ? "WIRD GEÖFFNET…" : "ZUR ZAHLUNG"}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ── Jahresplan: laufende Pläne ─────────────────────────────────────────
+
+/**
+ * THE CUSTOMER'S OWN PREPAID ANNUAL PLANS.
+ *
+ * Every value comes from lib/annualPlanAccount.ts, a pure leaf that was
+ * written for exactly this and had never been rendered by anything. It
+ * derives the view from the plan row and its thirteen delivery rows, and
+ * this component adds no arithmetic of its own.
+ *
+ * ── WHAT THE BROWSER IS ALLOWED TO SEE ────────────────────────
+ *
+ * Migration 041 replaced the table-level SELECT with a COLUMN grant, so
+ * the browser can read only the nineteen columns the account needs.
+ * ANNUAL_PLAN_ACCOUNT_SELECT names exactly those; asking for anything
+ * else is refused by the database rather than by this file. In
+ * particular stripe_payment_intent_id, the addresses, the tax snapshots
+ * and payment_checkout_attempt_id are unreachable from here.
+ *
+ * ── AND IT IS NOT AN ABO ──────────────────────────────────────
+ *
+ * A prepaid plan is a different contract from the recurring
+ * subscription: it is paid once, runs a fixed thirteen deliveries and
+ * ends. The copy never calls it an Abo and never offers a cancellation
+ * cutoff, because neither applies.
+ */
+function PortalAnnualPlans({ onCount }: { onCount?: (n: number) => void }) {
+  const [views, setViews] = useState<AnnualPlanAccountView[]>([]);
+  const [loading, setLoading] = useState(() => !!supabase);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!supabase) return;
+    let stale = false;
+    (async () => {
+      /*
+        TWO READS, NOT ONE PER PLAN. The plans first, then every delivery
+        row belonging to them in ONE `.in(...)`. RLS confines both to the
+        caller's own rows, so the id list can only ever hold their own.
+      */
+      const planRead = await supabase
+        .from("annual_plans").select(ANNUAL_PLAN_ACCOUNT_SELECT).order("purchased_at", { ascending: false });
+      if (stale) return;
+      if (planRead.error) {
+        setError("Deine Jahrespläne konnten gerade nicht geladen werden.");
+        setLoading(false);
+        return;
+      }
+      const plans = (planRead.data ?? []) as unknown as AnnualPlanAccountRow[];
+      let deliveries: (AnnualPlanDeliveryAccountRow & { annual_plan_id: string })[] = [];
+      if (plans.length > 0) {
+        const deliveryRead = await supabase
+          .from("annual_plan_deliveries")
+          .select(ANNUAL_PLAN_DELIVERY_ACCOUNT_SELECT)
+          .in("annual_plan_id", plans.map(p => p.id))
+          .order("delivery_number", { ascending: true });
+        if (stale) return;
+        if (!deliveryRead.error) {
+          deliveries = (deliveryRead.data ?? []) as unknown as (AnnualPlanDeliveryAccountRow & { annual_plan_id: string })[];
+        }
+      }
+      const built = plans
+        .map(plan => buildAnnualPlanAccountView(plan, deliveries.filter(d => d.annual_plan_id === plan.id)))
+        .filter((v): v is AnnualPlanAccountView => v !== null);
+      setViews(built);
+      onCount?.(built.length);
+      setLoading(false);
+    })();
+    return () => { stale = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (loading) return <p className="portal-loading">Laden…</p>;
+  if (error) return <section className="portal-section"><AccountEmptyState>{error}</AccountEmptyState></section>;
+  if (views.length === 0) return null;
+
+  return (
+    <section className="portal-section">
+      <AccountSectionHeader label="DEIN JAHRESPLAN" />
+      <div className="sub-list">
+        {views.map(v => (
+          <div key={v.id} className="sub-card annual-card">
+            <div className="sub-card-head">
+              <span className="sub-card-name">
+                {v.product?.name ?? "GLOA Matcha"}{v.product?.variantLabel ? ` · ${v.product.variantLabel}` : ""}
+              </span>
+              <span className="sub-card-status">{annualStatusLabel(v)}</span>
+            </div>
+            <dl className="sub-card-facts">
+              <div><dt>Gekauft am</dt><dd>{v.purchasedAt ? fmtDate(v.purchasedAt) : "—"}</dd></div>
+              {/* COMPLETED / TOTAL, both from the view. deliveryCount is
+                  the frozen 13; fulfilledDeliveries counts the rows the
+                  maintenance job actually settled. */}
+              <div><dt>Lieferungen</dt><dd>{v.fulfilledDeliveries} von {v.deliveryCount}</dd></div>
+              <div><dt>Offen</dt><dd>{Math.max(0, v.deliveryCount - v.fulfilledDeliveries)}</dd></div>
+              {v.nextDelivery && (
+                <div><dt>Nächste Lieferung</dt><dd>{fmtDate(v.nextDelivery.scheduledFor)}</dd></div>
+              )}
+              <div><dt>Läuft bis</dt><dd>{v.planEndAt ? fmtDate(v.planEndAt) : "—"}</dd></div>
+              <div><dt>Bezahlt</dt><dd>{fmtCents(v.totalGrossCents)} €</dd></div>
+              <div>
+                <dt>Versand</dt>
+                <dd>{v.shippingTotalGrossCents === 0
+                  ? "kostenlos"
+                  : `${fmtCents(v.shippingTotalGrossCents)} € · enthalten`}</dd>
+              </div>
+              {v.refundedTotalCents > 0 && (
+                <div><dt>Erstattet</dt><dd>{fmtCents(v.refundedTotalCents)} €</dd></div>
+              )}
+            </dl>
+            <p className="portal-note">
+              Einmal bezahlt, keine automatische Verlängerung. Der Plan endet nach der letzten
+              {" "}der {v.deliveryCount} Lieferungen; es folgt keine weitere Abbuchung.
+            </p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The status word for a plan, derived from the view's own flags.
+ *
+ * A refunded plan is never reported as running, and a cancelled one is
+ * never reported as active - the same discipline
+ * resolveAnnualCheckoutReturnState applies on the return page.
+ */
+function annualStatusLabel(v: AnnualPlanAccountView): string {
+  if (v.cancelledAt || v.status === "cancelled") return "Beendet";
+  if (v.paymentStatus === "refunded") return "Erstattet";
+  if (v.status === "completed") return "Abgeschlossen";
+  if (v.status === "active") return "Aktiv";
+  if (!v.purchasedAt) return "Zahlung wird verarbeitet";
+  return "Offen";
+}
+
+/**
+ * THE RETURN FROM STRIPE, FOR BOTH PRODUCTS.
+ *
+ * Nothing here celebrates a purchase the webhook has not confirmed. The
+ * annual state is resolved by resolveAnnualCheckoutReturnState against
+ * the customer's own rows; the subscription state has no id to resolve
+ * against, so it reports the only honest thing - the payment was
+ * submitted and activation is webhook-driven.
+ *
+ * ── AND NOTHING POLLS ─────────────────────────────────────────
+ *
+ * No interval, no retry loop and no Stripe call. A page that polled
+ * would be asking a second source of truth about money; the customer is
+ * told plainly that a reload may be needed in a moment.
+ */
+function CheckoutReturnBanner() {
+  /*
+    THE PARAMETERS ARE READ ONCE, IN A BROWSER.
+
+    Both return URLs are the routes' own and unchanged:
+      subscriptions  /account/subscriptions?subscription=processing|cancelled
+      annual         /account?annual=…&annualPlanId=…  →  the account
+                     landing forwards the query to /account/dashboard
+    So this banner is mounted in the portal shell and appears on
+    whichever page the customer actually lands on.
+  */
+  const [params] = useState<{ subscription: string | null; annual: string | null; annualPlanId: string | null }>(() => {
+    if (typeof window === "undefined") return { subscription: null, annual: null, annualPlanId: null };
+    const p = new URLSearchParams(window.location.search);
+    return {
+      subscription: p.get("subscription"),
+      annual: p.get("annual"),
+      annualPlanId: p.get(ANNUAL_CHECKOUT_RETURN_PARAM),
+    };
+  });
+
+  const [annualState, setAnnualState] = useState<AnnualCheckoutReturnState | null>(null);
+
+  useEffect(() => {
+    if (!supabase || !params.annual || !params.annualPlanId) return;
+    let stale = false;
+    (async () => {
+      /*
+        ONE READ, AND THE STATE IS DECIDED BY THE LEAF.
+
+        The id in the URL is untrusted and is only a selector: RLS returns
+        the caller's own plans, resolveAnnualCheckoutReturnState looks for
+        the target among them, and a stranger's id, a guess and a deleted
+        row all answer "none" identically. Nothing asks Stripe.
+      */
+      const read = await supabase
+        .from("annual_plans").select("id, status, payment_status, purchased_at");
+      if (stale) return;
+      setAnnualState(resolveAnnualCheckoutReturnState({
+        targetAnnualPlanId: params.annualPlanId,
+        plans: read.error ? [] : (read.data ?? []) as unknown as { id: string; status: string; payment_status: string; purchased_at: string | null }[],
+      }));
+    })();
+    return () => { stale = true; };
+  }, [params.annual, params.annualPlanId]);
+
+  const subscriptionState: "processing" | "cancelled" | null =
+    params.subscription === "processing" ? "processing"
+      : params.subscription === "cancelled" ? "cancelled"
+        : null;
+
+  if (!annualState && !subscriptionState) return null;
+
+  const copy: { tone: string; title: string; body: string } | null =
+    subscriptionState === "processing"
+      ? {
+        tone: "processing",
+        title: "Deine Zahlung wird verarbeitet.",
+        body: "Dein Abo erscheint hier, sobald Stripe die Zahlung bestätigt hat. Das dauert meist nur einen Moment – lade die Seite dann einfach neu.",
+      }
+      : subscriptionState === "cancelled"
+        ? {
+          tone: "cancelled",
+          title: "Du hast die Zahlung abgebrochen.",
+          body: "Es wurde nichts abgebucht und kein Abo gestartet. Du kannst jederzeit neu starten.",
+        }
+        : annualState === "processing"
+          ? {
+            tone: "processing",
+            title: "Deine Zahlung wird verarbeitet.",
+            body: "Dein Jahresplan erscheint hier, sobald Stripe die Zahlung bestätigt hat. Das dauert meist nur einen Moment – lade die Seite dann einfach neu.",
+          }
+          : annualState === "active"
+            ? {
+              tone: "ok",
+              title: "Dein Jahresplan läuft.",
+              body: "Die erste Lieferung ist angelegt; die weiteren folgen automatisch im 28-Tage-Rhythmus.",
+            }
+            : annualState === "completed"
+              ? { tone: "ok", title: "Dieser Jahresplan ist abgeschlossen.", body: "Alle Lieferungen wurden ausgeführt." }
+              : annualState === "refunded"
+                ? { tone: "cancelled", title: "Dieser Jahresplan wurde erstattet.", body: "Es besteht kein laufender Plan." }
+                : annualState === "ended"
+                  ? { tone: "cancelled", title: "Dieser Jahresplan ist beendet.", body: "Es folgen keine weiteren Lieferungen." }
+                  : null;
+
+  if (!copy) return null;
+
+  return (
+    <section className={`portal-section checkout-return checkout-return-${copy.tone}`} role="status">
+      <p className="checkout-return-title">{copy.title}</p>
+      <p className="checkout-return-body">{copy.body}</p>
+    </section>
+  );
+}
+
 // ── Abos ───────────────────────────────────────────────────────────────
 
 function PortalSubscriptions() {
@@ -1418,6 +1940,21 @@ function PortalSubscriptions() {
         since Task 29D-D, with the same three fields.
       */}
       {!loading && !error && <SubscriptionStartForm />}
+
+      {/*
+        THE PREPAID ANNUAL PLAN, ON THE SAME PAGE AND UNDER ITS OWN NAME.
+
+        It lives here because this is where a customer looks for regular
+        Matcha, and because Stripe returns an annual purchase into the
+        account. It is NEVER called an Abo in its own copy: it is paid
+        once, runs a fixed thirteen deliveries and ends, so neither the
+        recurring wording nor the 14-day cancellation cutoff applies.
+
+        Both components read the existing leaf and the existing route.
+        Nothing here is a second annual engine.
+      */}
+      <PortalAnnualPlans />
+      <AnnualPlanStartForm />
     </>
   );
 }

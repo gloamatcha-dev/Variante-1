@@ -162,7 +162,11 @@ test("recovery: a recovery session is never redirected away from the reset page"
   // must not apply here - a recovery session IS a session, and that
   // effect would bounce the customer off this page immediately.
   const account = site.slice(site.indexOf("function Account()"), site.indexOf("function Account()") + 1500);
-  assert.match(account, /useEffect\(\(\)=>\{if\(!authLoading&&user\)window\.location\.href="\/account\/dashboard"\}/);
+  // The destination now carries the query string forward, so Stripe's
+  // annual return parameters survive the bounce to the dashboard. The
+  // effect itself - its condition and its target page - is unchanged,
+  // and it still belongs to /account alone.
+  assert.match(account, /useEffect\(\(\)=>\{if\(!authLoading&&user\)window\.location\.href="\/account\/dashboard"\+window\.location\.search\}/);
   assert.ok(!/if\(!authLoading&&user\)window\.location\.href/.test(page), "the reset page redirects a recovery session away");
 });
 

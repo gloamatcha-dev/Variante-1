@@ -209,7 +209,9 @@ test("2c: annual shipping is the plan's own rule, not the shop threshold", () =>
   const thirty = buildAnnualPricing({ size: "30g", catalogUnitGrossCents: 1999 });
   assert.equal(thirty.pricing.shippingTotalGrossCents, 590 * 13);
   // Germany only, and the shop says so in the panel.
-  assert.ok(shopCode.includes("nur innerhalb Deutschlands"), "the Germany-only note went away");
+    // The note is now the shared constant, so the shop and the account say
+  // the same sentence about the same limit.
+  assert.ok(shopCode.includes("{ANNUAL_GERMANY_ONLY_NOTE}"), "the Germany-only note went away");
   assert.match(read("lib/annualPlanCheckoutRules.ts"), /snapshot\.country !== ANNUAL_ALLOWED_COUNTRY/,
     "the Germany-only server gate changed");
 });
@@ -298,19 +300,35 @@ test("5: the annual CTA never adds to the cart and never posts a checkout", () =
   // An annual plan is a dedicated account-bound checkout, not a cart
   // line. The one-time handler is unreachable from annual mode.
   //
-  // The prelaunch branch moved to the FRONT of the chain when the 4-week
-  // option arrived - previously it sat between the annual branch and
-  // handleAdd, which meant annual mode bypassed it. The annual arm
-  // itself is unchanged: same event name, same destination.
-  assert.ok(site.includes('annualActive?()=>{track("shop_annual_interest");window.location.href="/contact"}'),
+  /*
+    THE DESTINATION CHANGED, THE GUARANTEE DID NOT.
+
+    The CTA used to route to /contact, because no purchase path existed.
+    One does now - but it is still not IN the shop: the route takes an
+    addressId from the customer's own saved addresses and has no guest
+    path at all, so the shop hands over to the account exactly as the
+    4-week option does.
+
+    What this test has always protected is unchanged and is asserted
+    below: the annual CTA never reaches the cart and the shop never
+    posts to the annual checkout itself.
+  */
+  assert.ok(site.includes('annualActive?()=>{track("shop_annual_start");window.location.href=annualPortalHref(v.sku)}'),
     "the annual CTA changed its action");
   assert.ok(site.includes('onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":annualActive?'),
     "prelaunch no longer takes precedence over every mode");
   assert.ok(!annualOnly.includes("addItem"), "an annual component reaches the cart");
   assert.ok(!site.includes('purchaseType:"annual"'), "an annual plan was given a cart purchase type");
-  // And nothing in the shop calls the annual checkout endpoint.
-  assert.ok(!site.includes("/api/annual-plan"), "the shop posts to the annual checkout");
+  // AND THE SHOP STILL CALLS NOTHING. The handover is a link; the only
+  // caller of the annual checkout is the account's own form.
+  //
+  // ON THE RAW SOURCE, as it always was: the endpoint does not appear in
+  // this file at all, not even in a comment, so there is no reason to
+  // let the weaker stripped check stand in its place.
+  assert.ok(!site.includes("/api/annual-plan"), "the shop names the annual checkout");
+  assert.ok(!stripJs(site).includes("/api/annual-plan"), "the shop posts to the annual checkout");
   assert.ok(!site.includes("annualCheckout"), "the shop wires an annual checkout call");
+  assert.ok(!/fetch\(\s*["'`][^"'`]*annual/.test(site), "the shop fetches an annual endpoint");
   // No fake success anywhere.
   assert.ok(!/setTimeout[^)]*aktiviert|Jahresplan aktiviert|Plan aktiv/i.test(site),
     "the shop fakes an activated plan");

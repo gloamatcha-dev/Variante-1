@@ -87,10 +87,20 @@ const subscriptionsSection = (() => {
   // assertion in this file - the discount copy, the banned controls, the
   // no-fake-data rules - covering the whole surface rather than the half
   // that happens to come after it.
-  const at = portalCode.indexOf("function SubscriptionStartForm(");
-  const end = portalCode.indexOf("function PortalAddresses()");
-  assert.ok(at > -1 && end > at, "the subscription screens moved");
-  return portalCode.slice(at, end);
+  // TWO SLICES, because the prepaid plan's components sit between the
+  // booking form and the list. They are a different contract - one
+  // payment, thirteen fixed deliveries, no cancellation cutoff - so the
+  // rules in this file must not be applied to them.
+  // Sliced on the RAW source, because the boundary is a block comment
+  // and portalCode has had every comment removed. Each part is stripped
+  // afterwards, so the assertions still read code only.
+  const at = portal.indexOf("function SubscriptionStartForm(");
+  const annualAt = portal.indexOf("/* ══ JAHRESPLAN: DIE VORAUSBEZAHLTEN KOMPONENTEN ══");
+  const listAt = portal.indexOf("function PortalSubscriptions()");
+  const end = portal.indexOf("function PortalAddresses()");
+  assert.ok(at > -1 && annualAt > at && listAt > annualAt && end > listAt,
+    "the subscription screens moved");
+  return withoutComments(portal.slice(at, annualAt)) + withoutComments(portal.slice(listAt, end));
 })();
 
 /** The subscription tiles on the private dashboard. */

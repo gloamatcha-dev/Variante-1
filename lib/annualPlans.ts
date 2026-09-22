@@ -66,6 +66,77 @@ export function isAnnualPlanCheckoutEnabled(
   return env[ANNUAL_PLAN_FEATURE_FLAG] === "true";
 }
 
+/* ── Where an annual plan may be delivered ──────────────────── */
+
+/**
+ * THE ONE COUNTRY A PREPAID ANNUAL PLAN SHIPS TO.
+ *
+ * ISO 3166-1 alpha-2, compared against an already-normalised code.
+ *
+ * Restated from lib/annualPlanCheckoutRules.ts's ANNUAL_ALLOWED_COUNTRY
+ * rather than imported, and not for a stylistic reason: that module
+ * opens with `import { createHash } from "node:crypto"`, which no
+ * browser bundle can resolve. The surfaces that must TELL a customer
+ * the plan is Germany-only run in a browser, so the value is duplicated
+ * here and tests/annual-plan-purchase-surface.test.mjs asserts the two
+ * are equal - the resolution this repository already uses for
+ * STALE_SENDING_AFTER_MS and divideRoundHalfUp.
+ *
+ * THIS IS A DISPLAY AND PRE-FLIGHT CONSTANT ONLY. The server still
+ * refuses a non-German address itself, twice: once in
+ * validateAnnualAddress and again against the frozen attempt.
+ */
+export const ANNUAL_DELIVERY_COUNTRY = "DE";
+
+/** Whether an annual plan may be delivered to this normalised country. */
+export function isAnnualDeliveryCountry(country: unknown): boolean {
+  return typeof country === "string"
+    && country.trim().toUpperCase() === ANNUAL_DELIVERY_COUNTRY;
+}
+
+/**
+ * The sentence every annual surface shows, in one place.
+ *
+ * A customer choosing a twelve-month prepaid commitment must not
+ * discover the geographic limit at the payment step, so the shop says it
+ * before the price and the account says it beside the address.
+ */
+export const ANNUAL_GERMANY_ONLY_NOTE =
+  "Der Jahresplan ist aktuell nur für Lieferadressen in Deutschland verfügbar.";
+
+/* ── The handover to the account ────────────────────────────── */
+
+/**
+ * Where the shop sends a customer who chose the annual plan.
+ *
+ * ── WHY THE SHOP CANNOT START THE CHECKOUT ITSELF ─────────────
+ *
+ * POST /api/annual-plan/checkout/session takes exactly variantId,
+ * addressId and requestId, and refuses a body carrying anything else.
+ * The addressId is one of the customer's OWN saved addresses, and there
+ * is no guest path: a prepaid twelve-month contract has to be reachable
+ * for a year, so migration 039 made annual_plans.user_id NOT NULL with
+ * no "on delete set null".
+ *
+ * So the shop states the offer and hands over. It collects no address,
+ * mints no request id and posts nowhere - which also keeps the shop
+ * free of a second checkout implementation.
+ *
+ * The SKU travels as a hint so the account can preselect the size the
+ * customer was looking at. It is a hint and nothing more: the account
+ * re-reads the catalog, and the server re-resolves the price from the
+ * variant it validates itself.
+ */
+export const ANNUAL_PORTAL_PATH = "/account/subscriptions";
+
+/** The account link for one SKU, or the bare path for an unknown one. */
+export function annualPortalHref(sku: string | null | undefined): string {
+  if (typeof sku !== "string" || ANNUAL_LAUNCH_SIZE_BY_SKU[sku] === undefined) {
+    return `${ANNUAL_PORTAL_PATH}?plan=annual`;
+  }
+  return `${ANNUAL_PORTAL_PATH}?plan=annual&sku=${encodeURIComponent(sku)}`;
+}
+
 /* ── The launch allowlist ───────────────────────────────────── */
 
 /**

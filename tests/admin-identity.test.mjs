@@ -304,7 +304,7 @@ test("4d: every WRITE route takes the write capability, every read says so", () 
     same set as canWrite: owner and admin, never viewer. That set is
     DERIVED from canWrite rather than re-listed, so the two cannot drift.
   */
-  const RESTRICTED_READS = ["subscriptions"];
+  const RESTRICTED_READS = ["subscriptions", "annual-plans"];
 
   for (const route of WRITES) {
     const code = codeOnly(read(`app/api/admin/${route}/route.ts`));

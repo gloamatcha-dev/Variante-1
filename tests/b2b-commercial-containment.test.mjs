@@ -33,6 +33,31 @@ const sql = read(`supabase/migrations/${MIGRATION}`).replace(/^\s*--.*$/gm, "");
 const migration = read(`supabase/migrations/${MIGRATION}`);
 const portal = read("app/AccountPortal.tsx");
 
+/**
+ * THE PORTAL WITH THE B2C ANNUAL PLAN CUT OUT.
+ *
+ * The prepaid annual plan is a B2C product that legitimately renders a
+ * discount percentage of its own - its frozen discount_percent_applied,
+ * written by migration 039 and never read from any B2B table. It sits in
+ * one contiguous block between the marker below and PortalSubscriptions,
+ * and tests/annual-plan-purchase-surface.test.mjs holds it to its own
+ * rules.
+ *
+ * Everything OUTSIDE that block - the B2B pages, the supply agreement,
+ * the orders and the recurring subscription - is still held to the
+ * original containment rule, so the exemption is a hole of exactly one
+ * component group rather than a looser pattern applied everywhere.
+ *
+ * Joined with a newline so the two halves cannot form a match across
+ * the seam that exists in neither of them.
+ */
+const portalWithoutAnnual = (() => {
+  const at = portal.indexOf("/* ══ JAHRESPLAN: DIE VORAUSBEZAHLTEN KOMPONENTEN ══");
+  const end = portal.indexOf("function PortalSubscriptions()");
+  assert.ok(at > -1 && end > at, "the annual block could not be located");
+  return portal.slice(0, at) + "\n" + portal.slice(end);
+})();
+
 /** The three tables 003 created to describe a wholesale offer. */
 const DRAFT_TABLES = ["b2b_product_sizes", "b2b_offer_models", "b2b_general_terms"];
 
@@ -233,8 +258,46 @@ test("4b: and renders no price, no per-kilo rate and no discount", () => {
   for (const price of ["31,25", "62,50", "31.25", "62.50"]) {
     assert.ok(!portal.includes(price), `the portal prints the stale price ${price}`);
   }
-  // No discount percentage of any kind is printed from an offer model.
-  assert.ok(!/\{[^}]*discount[^}]*\} ?%/.test(portal), "the portal prints a discount percentage");
+  /*
+    NO DISCOUNT-LIKE FIELD IS RENDERED AS A PERCENTAGE.
+
+    THE ORIGINAL RULE, UNCHANGED - applied to the portal with the B2C
+    annual block cut out rather than to a looser pattern applied to the
+    whole file. The annual plan owns a legitimate B2C discount of its
+    own; B2B containment still applies to everything else, so a line
+    like {item.discount_percent} % anywhere outside that block still
+    fails here.
+
+    That column is not hypothetical: b2b_supply_items.discount_percent
+    exists (migration 006), is declared as a read type in the portal and
+    arrives in the browser through the agreement's select(*). It is
+    currently never printed, and this is what keeps it that way.
+  */
+  assert.ok(!/\{[^}]*discount[^}]*\} ?%/.test(portalWithoutAnnual),
+    "the portal prints a discount percentage");
+  // Restated as a named check, so a failure says which source it came
+  // from rather than only that some percentage appeared.
+  assert.ok(!/\{[^}]*discount_percent[^}]*\} ?%/.test(portalWithoutAnnual),
+    "the portal prints the B2B supply item's discount_percent");
+  // THE SAME RULE, CASE-INSENSITIVELY. The original pattern is
+  // lower-case only, so a camelCase field - b2bDiscount, offerDiscount -
+  // would have slipped past it. The source is clean under /i today, so
+  // closing that gap costs nothing and is strictly additional to the
+  // rule above rather than a replacement for it.
+  assert.ok(!/\{[^}]*discount[^}]*\} ?%/i.test(portalWithoutAnnual),
+    "the portal prints a discount percentage under a camelCase name");
+  assert.ok(!/\{[^}]*offer_model[^}]*\} ?%/.test(portal),
+    "the portal prints an offer model percentage");
+  // AND THE EXEMPTION IS EXACTLY ONE BLOCK WIDE. If the annual
+  // components were ever moved or the marker renamed, this collapses
+  // rather than silently widening the hole.
+  assert.ok(portalWithoutAnnual.length < portal.length, "the annual block was not excluded");
+  assert.ok(portalWithoutAnnual.includes('from("b2b_supply_items")'),
+    "the B2B surface fell outside the assertion");
+  assert.ok(portalWithoutAnnual.includes("function PortalSubscriptions()"),
+    "the recurring subscription fell outside the assertion");
+  assert.ok(!portalWithoutAnnual.includes("function AnnualPlanStartForm()"),
+    "the annual block is still inside the assertion");
 });
 
 test("4c: what stands in their place says what is actually true", () => {

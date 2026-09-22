@@ -396,7 +396,7 @@ test("3s3: the SERVER is the monetary authority, and it fails closed", () => {
     sending one.
   */
   const bookingForm = withoutComments(
-    portal.slice(portal.indexOf("function SubscriptionStartForm("), portal.indexOf("function PortalSubscriptions("))
+    portal.slice(portal.indexOf("function SubscriptionStartForm("), portal.indexOf("/* ══ JAHRESPLAN: DIE VORAUSBEZAHLTEN KOMPONENTEN ══"))
   );
   assert.match(bookingForm, /body: JSON\.stringify\(\{ planId, addressId, requestId \}\)/);
   for (const forbidden of ["shippingGrossCents", "shipping_gross_cents", "totalGrossCents"]) {
@@ -462,7 +462,7 @@ test("3s5: the shop copy states the GERMAN rule and says it is German", () => {
 test("3s6: the account copy follows the SELECTED address", () => {
   const portalSrc = read("app/AccountPortal.tsx");
   const form = portalSrc.slice(portalSrc.indexOf("function SubscriptionStartForm("),
-    portalSrc.indexOf("function PortalSubscriptions("));
+    portalSrc.indexOf("/* ══ JAHRESPLAN: DIE VORAUSBEZAHLTEN KOMPONENTEN ══"));
   // The destination comes from the address the customer picked, through
   // the same normaliser lib/shipping.ts exposes.
   assert.match(form, /normalizeCountryCode\(\s*\n?\s*addresses\.find\(a => a\.id === addressId\)\?\.country\s*\n?\s*\)/);
@@ -503,7 +503,10 @@ test("4: the annual option, panel and discount are byte-identical in intent", ()
   assert.match(read("lib/annualPlanRules.ts"), /export const ANNUAL_DISCOUNT_PERCENT = 10;/,
     "this package changed the annual discount");
   // The annual CTA still goes to /contact and still posts nowhere.
-  assert.ok(site.includes('track("shop_annual_interest");window.location.href="/contact"'));
+  // The annual CTA hands over to the account now that a purchase path
+  // exists - and the SHOP still posts nowhere, which is the half of this
+  // assertion that always mattered.
+  assert.ok(site.includes('track("shop_annual_start");window.location.href=annualPortalHref(v.sku)'));
   assert.ok(!withoutComments(site).includes("/api/annual-plan"), "the shop posts to the annual checkout");
 });
 
@@ -513,7 +516,7 @@ test("4: the annual option, panel and discount are byte-identical in intent", ()
 
 const startForm = (() => {
   const at = portal.indexOf("function SubscriptionStartForm(");
-  const end = portal.indexOf("function PortalSubscriptions(");
+  const end = portal.indexOf("/* ══ JAHRESPLAN: DIE VORAUSBEZAHLTEN KOMPONENTEN ══");
   assert.ok(at > -1 && end > at, "the booking form was not found");
   return portal.slice(at, end);
 })();
@@ -645,16 +648,20 @@ test("6a2: the UI does not offer the section to a VIEWER", () => {
   assert.equal(canWrite(parseAdminRole(undefined)), false);
   // The tab is not rendered at all for a role that may not open it -
   // not disabled, which would still announce the section.
-  assert.match(adminOverview, /key === "subscriptions" && !maySeeSubscriptions \? null :/);
+  // The prepaid plan is the same customer data under a second tab, so
+  // it shares this predicate rather than growing a weaker one of its own.
+  assert.match(adminOverview, /\(key === "subscriptions" \|\| key === "annual"\) && !maySeeSubscriptions \? null :/);
   // And the screen itself is not mounted, so no request is ever issued.
   assert.match(adminOverview, /view === "subscriptions" && maySeeSubscriptions && <AdminSubscriptions/);
   // The overview note does not point a viewer at a tab they lack.
   assert.match(adminOverview, /\{maySeeSubscriptions && <> Laufende Abos unter/);
+  assert.match(adminOverview, /view === "annual" && maySeeSubscriptions && <AdminAnnualPlans/);
   // No OTHER tab became role-gated by this change.
-  // Four: the definition, the tab, the mount, and the overview note.
-  // Counted so the predicate cannot quietly start gating another tab.
-  assert.equal([...adminOverview.matchAll(/maySeeSubscriptions/g)].length, 4,
-    "the role predicate reaches more of the shell than the Abos section");
+  // Five: the definition, the shared tab guard, the two mounts, and the
+  // overview note. Counted so the predicate cannot quietly start gating
+  // a tab that has nothing to do with the two subscription surfaces.
+  assert.equal([...adminOverview.matchAll(/maySeeSubscriptions/g)].length, 5,
+    "the role predicate reaches more of the shell than the two Abo sections");
 });
 
 test("6b2: the summary counts are database counts, built from the filters they label", () => {

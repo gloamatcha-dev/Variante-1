@@ -22,8 +22,8 @@ import type { SeedCatalogProduct } from "../lib/catalogProducts";
 // prints is derived here from the catalog price the catalog already
 // sent, and no annual total is written down anywhere in this file. The
 // server still resolves the money independently - see AnnualPlanPanel.
-import { ANNUAL_DELIVERY_COUNT, ANNUAL_DELIVERY_INTERVAL_DAYS, buildAnnualPricing, type AnnualPricing } from "../lib/annualPlanRules";
-import { ANNUAL_LAUNCH_SIZE_BY_SKU } from "../lib/annualPlans";
+import { ANNUAL_DELIVERY_COUNT, ANNUAL_DELIVERY_INTERVAL_DAYS, ANNUAL_DISCOUNT_PERCENT, buildAnnualPricing, type AnnualPricing } from "../lib/annualPlanRules";
+import { ANNUAL_GERMANY_ONLY_NOTE, ANNUAL_LAUNCH_SIZE_BY_SKU, annualPortalHref } from "../lib/annualPlans";
 // The 4-week product's two leaves, both zero-import for the same reason
 // the annual pair is: the browser has to run them. The cadence copy comes
 // from the module the cancellation cutoff computes against, so the shop
@@ -434,19 +434,25 @@ return <div className="annual-panel">
 <p className="annual-panel-title">Alle {ANNUAL_DELIVERY_INTERVAL_DAYS} Tage Matcha.</p>
 <p className="annual-panel-sub">{variant.label} · {ANNUAL_DELIVERY_COUNT} Lieferungen · einmal bezahlen · keine automatische Verlängerung</p>
 <dl className="annual-panel-lines">
-{PRICES_VISIBLE&&<div><dt>Matcha je Lieferung</dt><dd>{fmtCents(annual.annualUnitGrossCents)} €</dd></div>}
-{PRICES_VISIBLE&&<div><dt>Versand je Lieferung</dt><dd>{shipsFree?"inklusive":`${fmtCents(annual.shippingPerDeliveryGrossCents)} €`}</dd></div>}
-<div><dt>Lieferungen</dt><dd>{annual.deliveryCount}</dd></div>
+{/* The discount is READ from the rules module that applies it, so the
+    page cannot advertise a percentage the server does not charge.
+    Shown even while prices are hidden: a percentage is a term of the
+    offer, not a price. */}
+<div><dt>Rabatt</dt><dd>{ANNUAL_DISCOUNT_PERCENT} % auf den Matcha-Preis</dd></div>
+{PRICES_VISIBLE&&<div><dt>Matcha je Lieferung</dt><dd>{fmtCents(annual.annualUnitGrossCents)} € <s className="annual-panel-was">{fmtCents(annual.catalogUnitGrossCents)} €</s></dd></div>}
+{PRICES_VISIBLE&&<div><dt>Versand je Lieferung</dt><dd>{shipsFree?"kostenlos":`${fmtCents(annual.shippingPerDeliveryGrossCents)} €`}</dd></div>}
+<div><dt>Lieferungen</dt><dd>{annual.deliveryCount} · alle {ANNUAL_DELIVERY_INTERVAL_DAYS} Tage</dd></div>
+<div><dt>Zahlung</dt><dd>Einmal zahlen</dd></div>
 </dl>
 {PRICES_VISIBLE&&<p className="annual-panel-total"><span className="annual-panel-total-label">Jahresgesamtbetrag</span><b>{fmtCents(annual.totalGrossCents)} €</b><span className="annual-panel-total-note">einmalig</span></p>}
 <p className="annual-panel-terms">
 {annual.deliveryCount} Lieferungen im {ANNUAL_DELIVERY_INTERVAL_DAYS}-Tage-Rhythmus.
 {" "}{shipsFree||!PRICES_VISIBLE
 ?"Versand ist im Jahresgesamtbetrag enthalten."
-:`Der Versand von ${fmtCents(annual.shippingPerDeliveryGrossCents)} € je Lieferung ist im Jahresgesamtbetrag bereits enthalten.`}
+:`Der Versand von ${fmtCents(annual.shippingPerDeliveryGrossCents)} € je Lieferung ist für alle ${annual.deliveryCount} Lieferungen im Jahresgesamtbetrag bereits enthalten.`}
 {" "}Du zahlst den Jahresgesamtbetrag einmalig. Keine automatische Verlängerung, keine weitere Abbuchung.
 </p>
-<p className="annual-panel-note">Jahresplan-Lieferungen gehen aktuell nur innerhalb Deutschlands.</p>
+<p className="annual-panel-note">{ANNUAL_GERMANY_ONLY_NOTE}</p>
 </div>}
 
 /* ══ THE 4-WEEK SUBSCRIPTION, IN THE SHOP ══════════════════════
@@ -671,7 +677,7 @@ return <div className="shop-product-row home-rail">
     shop free of a second checkout implementation.
 
     In prelaunch every mode routes where every other shop CTA routes. */}
-<button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":annualActive?()=>{track("shop_annual_interest");window.location.href="/contact"}:subscriptionActive?()=>{track("shop_subscription_start");window.location.href=subscriptionPortalHref(v.sku)}:handleAdd}>{SHOP_STATUS==="prelaunch"?"Fragen zum Launch":annualActive?"Jahresplan anfragen":subscriptionActive?"Abo im Konto starten":"In den Warenkorb"}</button>
+<button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":annualActive?()=>{track("shop_annual_start");window.location.href=annualPortalHref(v.sku)}:subscriptionActive?()=>{track("shop_subscription_start");window.location.href=subscriptionPortalHref(v.sku)}:handleAdd}>{SHOP_STATUS==="prelaunch"?"Fragen zum Launch":annualActive?"Jahresplan im Konto starten":subscriptionActive?"Abo im Konto starten":"In den Warenkorb"}</button>
 </div></div>}
 
 /** Confirmed GLOA Matcha food information. Rendered only for the Matcha
@@ -2356,12 +2362,13 @@ return <main className="legal-page legal-doc legal-agb">
 <li><a href="#preise" onClick={jumpToSection}><span>03</span>Preise und Zahlung</a></li>
 <li><a href="#lieferung" onClick={jumpToSection}><span>04</span>Lieferung und Versand</a></li>
 <li><a href="#abo" onClick={jumpToSection}><span>05</span>Abonnement</a></li>
-<li><a href="#eigentum" onClick={jumpToSection}><span>06</span>Eigentumsvorbehalt</a></li>
-<li><a href="#gewaehrleistung" onClick={jumpToSection}><span>07</span>Gewährleistung</a></li>
-<li><a href="#widerruf" onClick={jumpToSection}><span>08</span>Widerrufsrecht</a></li>
-<li><a href="#haftung" onClick={jumpToSection}><span>09</span>Haftung</a></li>
-<li><a href="#sprache" onClick={jumpToSection}><span>10</span>Vertragssprache</a></li>
-<li><a href="#schluss" onClick={jumpToSection}><span>11</span>Schlussbestimmungen</a></li>
+<li><a href="#jahresplan" onClick={jumpToSection}><span>06</span>Jahresplan</a></li>
+<li><a href="#eigentum" onClick={jumpToSection}><span>07</span>Eigentumsvorbehalt</a></li>
+<li><a href="#gewaehrleistung" onClick={jumpToSection}><span>08</span>Gewährleistung</a></li>
+<li><a href="#widerruf" onClick={jumpToSection}><span>09</span>Widerrufsrecht</a></li>
+<li><a href="#haftung" onClick={jumpToSection}><span>10</span>Haftung</a></li>
+<li><a href="#sprache" onClick={jumpToSection}><span>11</span>Vertragssprache</a></li>
+<li><a href="#schluss" onClick={jumpToSection}><span>12</span>Schlussbestimmungen</a></li>
 </ol>
 </nav>
 <div className="legal-doc-main">
@@ -2412,40 +2419,52 @@ return <main className="legal-page legal-doc legal-agb">
 <p>Dein gesetzliches Widerrufsrecht bleibt unberührt und ist etwas anderes als die Kündigung. Die Einzelheiten stehen in der <Link href="/widerruf">Widerrufsbelehrung</Link>.</p>
 </section>
 
-<section className="legal-doc-section" id="eigentum">
+<section className="legal-doc-section" id="jahresplan">
 <p className="legal-doc-num">06</p>
+<h2>Jahresplan</h2>
+<p>Der Jahresplan ist ein im Voraus bezahlter Liefervertrag und damit etwas anderes als das Abonnement nach Ziffer 5. Er verlängert sich nicht automatisch.</p>
+<p>Der Jahresplan umfasst 13 Lieferungen im Abstand von jeweils 28 Tagen. Die erste Lieferung erfolgt nach Zahlungseingang, die weiteren jeweils 28 Tage später; der Plan läuft insgesamt 364 Tage ab dem Kauf. Je Lieferung erhältst du eine Packung in der von dir gewählten Größe.</p>
+<p>Auf den Matcha-Preis erhältst du einen Rabatt von 10 % gegenüber dem jeweils im Shop ausgewiesenen Preis. Der Rabatt gilt für die Ware; Versandkosten sind davon nicht erfasst.</p>
+<p>Der Jahresplan ist derzeit nur für Lieferadressen in Deutschland verfügbar. Für den Versand gilt: Bei 30 g fallen 5,90 EUR je Lieferung an, ab 50 g ist der Versand kostenlos. Die Versandkosten für alle 13 Lieferungen sind im Gesamtbetrag bereits enthalten.</p>
+<p>Du zahlst den Gesamtbetrag einmalig bei Vertragsschluss. Danach erfolgt keine weitere Abbuchung. Der Vertrag endet nach der letzten der 13 Lieferungen, ohne dass es einer Kündigung bedarf.</p>
+<p>Die Kündigungsregelung für das Abonnement nach Ziffer 5, insbesondere die dortige Frist von vierzehn Tagen vor der nächsten Abbuchung, gilt für den Jahresplan nicht: Beim Jahresplan gibt es keine wiederkehrende Abbuchung, die entfallen könnte.</p>
+<p>Dein gesetzliches Widerrufsrecht bleibt unberührt; die Einzelheiten stehen in der <Link href="/widerruf">Widerrufsbelehrung</Link>. Erstattungen im Zusammenhang mit dem Jahresplan wickeln wir über den ursprünglichen Zahlungsweg ab.</p>
+</section>
+
+<section className="legal-doc-section" id="eigentum">
+<p className="legal-doc-num">07</p>
 <h2>Eigentumsvorbehalt</h2>
 <p>Die gelieferte Ware bleibt bis zur vollständigen Bezahlung Eigentum von GLOA.</p>
 </section>
 
 <section className="legal-doc-section" id="gewaehrleistung">
-<p className="legal-doc-num">07</p>
+<p className="legal-doc-num">08</p>
 <h2>Gewährleistung</h2>
 <p>Es gelten die gesetzlichen Gewährleistungsrechte. Ist die gelieferte Ware mangelhaft, stehen dir die gesetzlichen Rechte auf Nacherfüllung, Minderung, Rücktritt und Schadensersatz zu; wir schränken diese Rechte nicht ein und verkürzen keine gesetzlichen Fristen.</p>
 <p>Melde einen Mangel gern unter <a href="mailto:hello@gloamatcha.com">hello@gloamatcha.com</a>, damit wir ihn schnell klären können. Deine gesetzlichen Rechte hängen nicht davon ab, dass du uns zuerst kontaktierst.</p>
 </section>
 
 <section className="legal-doc-section" id="widerruf">
-<p className="legal-doc-num">08</p>
+<p className="legal-doc-num">09</p>
 <h2>Widerrufsrecht</h2>
 <p>Als Verbraucher steht dir ein gesetzliches Widerrufsrecht zu. Alle Einzelheiten (Frist, Fristbeginn, Folgen des Widerrufs und das Muster-Widerrufsformular) findest du in unserer <Link href="/widerruf">Widerrufsbelehrung</Link>. Dort kannst du den Widerruf auch direkt über die elektronische Widerrufsfunktion erklären, ohne Konto und ohne Anmeldung.</p>
 <p>Der Widerruf ist etwas anderes als eine Stornierung. Der Widerruf ist dein gesetzliches Recht, das du innerhalb der Frist ohne Angabe von Gründen ausüben kannst. Eine Stornierung ist demgegenüber die Bitte, eine noch nicht versandte Bestellung abzubrechen; ob wir das noch können, hängt vom Bearbeitungsstand ab. Dein Widerrufsrecht bleibt davon in jedem Fall unberührt.</p>
 </section>
 
 <section className="legal-doc-section" id="haftung">
-<p className="legal-doc-num">09</p>
+<p className="legal-doc-num">10</p>
 <h2>Haftung</h2>
 <p>GLOA haftet unbeschränkt für Vorsatz und grobe Fahrlässigkeit, für Schäden aus der Verletzung des Lebens, des Körpers oder der Gesundheit sowie nach dem Produkthaftungsgesetz. Im Übrigen haftet GLOA nach den gesetzlichen Vorschriften.</p>
 </section>
 
 <section className="legal-doc-section" id="sprache">
-<p className="legal-doc-num">10</p>
+<p className="legal-doc-num">11</p>
 <h2>Vertragssprache</h2>
 <p>Der Vertrag wird in deutscher Sprache geschlossen. Auch die weitere Abwicklung und unsere Nachrichten an dich erfolgen auf Deutsch.</p>
 </section>
 
 <section className="legal-doc-section" id="schluss">
-<p className="legal-doc-num">11</p>
+<p className="legal-doc-num">12</p>
 <h2>Schlussbestimmungen</h2>
 <p>Es gilt das Recht der Bundesrepublik Deutschland unter Ausschluss des UN-Kaufrechts. Zwingende verbraucherschützende Bestimmungen des Staates, in dem du deinen gewöhnlichen Aufenthalt hast, bleiben davon unberührt.</p>
 <p>Sollte eine Bestimmung dieser Bedingungen unwirksam sein, bleibt die Wirksamkeit der übrigen Bestimmungen unberührt.</p>
@@ -2556,7 +2575,13 @@ const [forgotSent,setForgotSent]=useState(false);
 const translateAuthErr=(msg:string)=>{if(msg==="Invalid login credentials")return "E-Mail oder Passwort falsch.";if(msg.includes("already registered"))return "Diese E-Mail ist bereits registriert.";if(msg.toLowerCase().includes("rate limit")||msg.includes("security purposes"))return "Zu viele Anfragen. Bitte warte einen Moment.";return msg};
 
 // Logged-in users → dashboard
-useEffect(()=>{if(!authLoading&&user)window.location.href="/account/dashboard"},[user,authLoading]);
+// THE QUERY STRING SURVIVES THE REDIRECT. Stripe returns an annual
+// purchase to /account?annual=processing&annualPlanId=..., and a signed-in
+// visitor is bounced straight to the dashboard - which used to DROP those
+// parameters, so the customer landed on a normal dashboard with no sign
+// that their payment had been submitted. Carrying the search through is
+// the whole fix; the portal reads it from there.
+useEffect(()=>{if(!authLoading&&user)window.location.href="/account/dashboard"+window.location.search},[user,authLoading]);
 
 const validatePw=(form:FormData)=>{
 const pw=String(form.get("password")||"");

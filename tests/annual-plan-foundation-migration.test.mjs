@@ -1319,6 +1319,27 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // involved and no migration was added.
     "lib/subscriptionPurchaseRules.ts",
     "lib/subscriptionCheckout.ts",
+    // B2C ANNUAL PLAN, PURCHASE SURFACE. annualPlans.ts gains FOUR
+    // additive exports and changes nothing that existed:
+    //
+    //   ANNUAL_DELIVERY_COUNTRY / isAnnualDeliveryCountry  the DE-only
+    //     limit, named once so the shop, the account form and the terms
+    //     all state the same rule the checkout route already enforced
+    //     twice server-side.
+    //   ANNUAL_GERMANY_ONLY_NOTE                           the one
+    //     sentence that says so, derived from the constant above.
+    //   ANNUAL_PORTAL_PATH / annualPortalHref              where the
+    //     shop hands over, with the chosen SKU as a HINT. The account
+    //     re-derives eligibility from ANNUAL_LAUNCH_SIZE_BY_SKU, so a
+    //     hand-typed sku cannot widen the offer.
+    //
+    // The feature flag, the launch allowlist, resolveAnnualLaunchPlan
+    // and isAnnualPlanCheckoutEnabled are byte-identical, so the gate
+    // and the eligibility rule are exactly where they were. Still a
+    // zero-import leaf. No price, no schedule and no migration is
+    // involved, and it is exercised directly by
+    // tests/annual-plan-purchase-surface.test.mjs.
+    "lib/annualPlans.ts",
   ];
 
   // Phase 4B4 edits ONE application module: the single canonical Stripe

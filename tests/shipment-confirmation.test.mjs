@@ -626,6 +626,10 @@ test("no route can mark an order shipped", () => {
     // The assertion below proves it holds no write verb at all, which is
     // what actually makes it harmless.
     "app/api/admin/subscriptions/route.ts",
+    // The annual overview reads a plan's orders to answer "when did
+    // anything last ship", for the same reason and with the same
+    // guarantee: the assertion below proves it holds no write verb.
+    "app/api/admin/annual-plans/route.ts",
   ];
   for (const rel of READ_ONLY) {
     assert.ok(routes.includes(rel), `the read-only order route is missing: ${rel}`);

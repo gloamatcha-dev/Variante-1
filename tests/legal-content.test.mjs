@@ -15,6 +15,16 @@ import {
   SUBSCRIPTION_FREE_SHIPPING_FROM_GRAMS,
   SUBSCRIPTION_SHIPPING_BENEFIT_COUNTRY,
 } from "../lib/subscriptionPurchaseRules.ts";
+// The annual rules the AGB section describes, imported so the terms
+// cannot state a rhythm, a discount or a shipping charge nobody applies.
+import {
+  ANNUAL_DELIVERY_COUNT,
+  ANNUAL_DELIVERY_INTERVAL_DAYS,
+  ANNUAL_DISCOUNT_PERCENT,
+  ANNUAL_TERM_DAYS,
+  ANNUAL_SHIPPING_PER_DELIVERY_GROSS_CENTS as ANNUAL_SHIPPING,
+} from "../lib/annualPlanRules.ts";
+import { ANNUAL_DELIVERY_COUNTRY as ANNUAL_ALLOWED_COUNTRY_MIRROR } from "../lib/annualPlans.ts";
 
 /** This file reads sources by URL; one helper so the new checks match. */
 const readSrc = rel => readFileSync(new URL("../" + rel, import.meta.url), "utf-8");
@@ -649,10 +659,11 @@ const agbSource = gloaSiteSource.slice(
 test("AGB: structured as a document, with every section reachable", () => {
   assert.ok(agbSource.length > 2000, "the AGB block could not be located");
   const ids = [...agbSource.matchAll(/<section className="legal-doc-section" id="([a-z]+)">/g)].map(m => m[1]);
-  // ELEVEN since the subscription section was added after "Lieferung und
-  // Versand", where it belongs: it is about the delivery and billing
-  // rhythm. Everything below it renumbered by one.
-  assert.equal(ids.length, 11, `expected 11 sections, found ${ids.length}`);
+  // TWELVE: the subscription section sits after "Lieferung und Versand",
+  // and the prepaid annual plan directly after it - the two recurring
+  // contracts beside each other, each under its own heading because
+  // they are genuinely different agreements.
+  assert.equal(ids.length, 12, `expected 12 sections, found ${ids.length}`);
   assert.equal(new Set(ids).size, ids.length, "two sections share an id");
 
   const hrefs = [...agbSource.matchAll(/<li><a href="#([a-z]+)"/g)].map(m => m[1]);
@@ -736,10 +747,14 @@ test("AGB: the subscription is described, and only as the code performs it", () 
     "Jahresplan" remains forbidden here, and this package does not touch
     its wording.
   */
-  assert.ok(!agbSource.includes("Jahresplan"), "the terms describe the still-unbookable annual plan");
+  // The annual plan now has its OWN section - see the test below. What
+  // section 5 must not do is describe it, because the two contracts have
+  // different cadences, different payment shapes and different endings.
+  const aboOnly = agbSource.slice(agbSource.indexOf('id="abo"'), agbSource.indexOf('id="jahresplan"'));
+  assert.ok(!aboOnly.includes("Jahresplan"), "the subscription section describes the annual plan");
 
   // ── WHAT THE SECTION MUST SAY, AND WHY EACH IS CHECKABLE ────
-  const abo = agbSource.slice(agbSource.indexOf('id="abo"'), agbSource.indexOf('id="eigentum"'));
+  const abo = agbSource.slice(agbSource.indexOf('id="abo"'), agbSource.indexOf('id="jahresplan"'));
   assert.ok(abo.length > 400, "the subscription section could not be located");
 
   // The cadence, as the code bills it. 28 days, never a calendar month.
@@ -828,6 +843,69 @@ test("AGB: the subscription is described, and only as the code performs it", () 
 
   // And nothing may claim the launch code is redeemable yet.
   assert.ok(!agbSource.includes("GLOALAUNCH10"), "the terms name a code the checkout cannot redeem");
+});
+
+test("AGB: the prepaid annual plan has its own section, and only as the code performs it", () => {
+  /*
+    THE ANNUAL PLAN IS NO LONGER ABSENT.
+
+    It used to be forbidden here, because nothing could buy one - the
+    shop's CTA went to /contact. The account now starts one through the
+    existing checkout route, so terms that stayed silent about a
+    contract the shop sells would be the defect.
+
+    Every figure below is pinned to the module that produces it, so the
+    terms cannot state a rhythm, a discount or a shipping charge that
+    nobody is actually given.
+  */
+  const plan = agbSource.slice(agbSource.indexOf('id="jahresplan"'), agbSource.indexOf('id="eigentum"'));
+  assert.ok(plan.length > 400, "the annual section could not be located");
+
+  // PREPAID, AND DISTINCT FROM THE SUBSCRIPTION.
+  assert.match(plan, /im Voraus bezahlter Liefervertrag/);
+  assert.match(plan, /etwas anderes als das Abonnement/);
+  assert.match(plan, /verlängert sich nicht automatisch/);
+
+  // 13 DELIVERIES, 28 DAYS, 364 DAYS - all three from the rules module.
+  assert.match(plan, /13 Lieferungen im Abstand von jeweils 28 Tagen/);
+  assert.match(plan, /364 Tage/);
+  assert.equal(ANNUAL_DELIVERY_COUNT, 13, "the terms name 13 deliveries but the schedule differs");
+  assert.equal(ANNUAL_DELIVERY_INTERVAL_DAYS, 28);
+  assert.equal(ANNUAL_TERM_DAYS, 364);
+
+  // 10 %, ON THE MERCHANDISE ONLY.
+  assert.match(plan, /Rabatt von 10 %/);
+  assert.match(plan, /Der Rabatt gilt für die Ware; Versandkosten sind davon nicht erfasst/);
+  assert.equal(ANNUAL_DISCOUNT_PERCENT, 10, "the terms name 10 % but the rule applies something else");
+
+  // GERMANY ONLY, and the shipping table as the code holds it.
+  assert.match(plan, /nur für Lieferadressen in Deutschland verfügbar/);
+  assert.match(plan, /Bei 30 g fallen 5,90 EUR je Lieferung an, ab 50 g ist der Versand kostenlos/);
+  assert.match(plan, /Die Versandkosten für alle 13 Lieferungen sind im Gesamtbetrag bereits enthalten/);
+  assert.equal(ANNUAL_ALLOWED_COUNTRY_MIRROR, "DE");
+  assert.deepEqual(
+    Object.entries(ANNUAL_SHIPPING).map(([size, cents]) => `${size}:${cents}`),
+    ["30g:590", "50g:0", "100g:0"],
+    "the terms name a shipping charge the rules do not apply");
+
+  // ONE PAYMENT, AND AN ENDING THAT NEEDS NO CANCELLATION.
+  assert.match(plan, /Du zahlst den Gesamtbetrag einmalig/);
+  assert.match(plan, /Danach erfolgt keine weitere Abbuchung/);
+  assert.match(plan, /endet nach der letzten der 13 Lieferungen, ohne dass es einer Kündigung bedarf/);
+
+  // THE SUBSCRIPTION'S 14-DAY CUTOFF EXPLICITLY DOES NOT APPLY, and the
+  // terms may only say that because nothing in the annual path reads it.
+  assert.match(plan, /gilt für den Jahresplan nicht/);
+  assert.match(plan, /keine wiederkehrende Abbuchung, die entfallen könnte/);
+  assert.equal(CANCELLATION_CUTOFF_DAYS, 14, "the subscription cutoff moved");
+
+  // NO INVENTED RIGHT. The refund sentence promises only the original
+  // payment method, which is what the refund writer actually does.
+  assert.match(plan, /Widerrufsrecht bleibt unberührt/);
+  assert.match(plan, /über den ursprünglichen Zahlungsweg/);
+  for (const invented of ["Mindestlaufzeit", "Vertragsstrafe", "anteilige Erstattung", "Teilerstattung"]) {
+    assert.ok(!plan.includes(invented), `the annual terms invent a ${invented}`);
+  }
 });
 
 test("Widerruf: the subscription's own withdrawal start is stated, and kept apart from cancellation", () => {
