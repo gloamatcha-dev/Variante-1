@@ -36,6 +36,7 @@ import {
   ANNUAL_DELIVERY_COUNT,
   ANNUAL_DELIVERY_INTERVAL_DAYS,
   ANNUAL_DISCOUNT_PERCENT,
+  ANNUAL_FREE_SHIPPING_NOTE,
   buildAnnualPricing,
 } from "../lib/annualPlanRules";
 import {
@@ -1512,11 +1513,32 @@ function AnnualPlanStartForm() {
         <div className="sub-start">
           <fieldset className="sub-start-field">
             <legend>Größe</legend>
+            {/*
+              THE SHIPPING RULE, BEFORE A SIZE IS CHOSEN.
+
+              The cards below each state their own shipping, but a
+              customer reading the 30 g card first has no way to know
+              that a larger size removes the charge - they would have to
+              click through all three to find out. One derived sentence
+              above the group says it once.
+
+              From ANNUAL_FREE_SHIPPING_NOTE, computed from the same
+              frozen table buildAnnualPricing prices from, so this line
+              cannot drift from the cards underneath it.
+            */}
+            {ANNUAL_FREE_SHIPPING_NOTE && (
+              <p className="portal-note sub-start-free-shipping">{ANNUAL_FREE_SHIPPING_NOTE}</p>
+            )}
             <div className="sub-start-options" role="radiogroup" aria-label="Jahresplan-Größe wählen">
               {eligible.map(v => {
                 const size = ANNUAL_LAUNCH_SIZE_BY_SKU[v.sku];
                 const p = size ? buildAnnualPricing({ size, catalogUnitGrossCents: v.price_gross_cents }) : null;
                 const cents = p?.ok ? p.pricing.totalGrossCents : null;
+                /* Read off the SAME pricing object as the total above, so a
+                   card can never show one size's total beside another's
+                   shipping. Formatted here and nowhere else, exactly as the
+                   total is - no amount is computed in this file. */
+                const shippingCents = p?.ok ? p.pricing.shippingPerDeliveryGrossCents : null;
                 return (
                   <label key={v.id} className={`sub-start-option${variantId === v.id ? " active" : ""}`}>
                     <input
@@ -1526,6 +1548,11 @@ function AnnualPlanStartForm() {
                     <span className="sub-start-option-label">{product?.name} · {v.label}</span>
                     {cents !== null && (
                       <span className="sub-start-option-meta">{fmtCents(cents)} € einmalig · {ANNUAL_DELIVERY_COUNT} Lieferungen</span>
+                    )}
+                    {shippingCents !== null && (
+                      <span className="sub-start-option-meta">
+                        {shippingCents === 0 ? "Kostenloser Versand" : `${fmtCents(shippingCents)} € Versand je Lieferung`}
+                      </span>
                     )}
                   </label>
                 );

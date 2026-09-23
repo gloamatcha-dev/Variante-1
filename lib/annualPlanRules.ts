@@ -177,6 +177,45 @@ export function annualShippingPerDeliveryGrossCents(size: AnnualSize): number {
   return ANNUAL_SHIPPING_PER_DELIVERY_GROSS_CENTS[size];
 }
 
+/**
+ * The smallest annual size whose deliveries ship free, in grams.
+ *
+ * DERIVED from the table above rather than typed, so any sentence built
+ * from it cannot outlive the rule: if 50 g ever started costing
+ * something this becomes 100 and the copy follows by itself. Null would
+ * mean nothing ships free, and the surfaces then say nothing at all.
+ *
+ * The same shape lib/subscriptionPurchaseRules.ts uses for
+ * SUBSCRIPTION_FREE_SHIPPING_FROM_GRAMS, and for the same reason. They
+ * remain separate decisions about separate products: neither file
+ * imports the other, and neither number is copied from the other.
+ */
+export const ANNUAL_FREE_SHIPPING_FROM_GRAMS: number | null = (() => {
+  const free = ANNUAL_SIZES
+    .filter(size => ANNUAL_SHIPPING_PER_DELIVERY_GROSS_CENTS[size] === 0)
+    .map(size => ANNUAL_SIZE_GRAMS[size]);
+  return free.length === 0 ? null : Math.min(...free);
+})();
+
+/**
+ * "Kostenloser Versand ab 50 g." - the annual shipping rule as ONE line,
+ * for the surfaces that must state it BEFORE a size is chosen.
+ *
+ * PRESENTATION ONLY. It restates what the table above already decided
+ * and adds no rule of its own; buildAnnualPricing is untouched and the
+ * server still prices every plan exactly as it did before.
+ *
+ * Germany is not repeated inside this sentence, and that is the one
+ * difference from the subscription note. Every annual surface already
+ * carries ANNUAL_GERMANY_ONLY_NOTE and the plan ships nowhere else, so
+ * there is no second destination a reader could mistake it for - while
+ * the subscription note appears on a shop page that does reach other
+ * countries and therefore has to name the one it means.
+ */
+export const ANNUAL_FREE_SHIPPING_NOTE: string | null =
+  ANNUAL_FREE_SHIPPING_FROM_GRAMS === null
+    ? null
+    : `Kostenloser Versand ab ${ANNUAL_FREE_SHIPPING_FROM_GRAMS} g.`;
 /* ── Money ───────────────────────────────────────────────────── */
 
 /**

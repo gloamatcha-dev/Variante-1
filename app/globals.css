@@ -668,6 +668,10 @@ a.portal-summary-row:hover{color:var(--blue)}
 .sub-start-select{width:100%;padding:12px 10px;border:1px solid var(--line);background:transparent;color:var(--ink);font:14px/1.5 var(--font-sans)}
 .sub-start-select:focus{outline:2px solid var(--blue);outline-offset:1px}
 .sub-start-shipping{margin-top:10px}
+/* The free-shipping line sits ABOVE its radio group, so it needs the
+   mirror image of .sub-start-shipping's spacing rather than the 14px
+   top margin .portal-note carries for standalone prose. */
+.sub-start-free-shipping{margin:0 0 10px}
 .sub-start-error{font:13px/1.4 var(--font-mono);color:var(--berry);margin:0 0 16px}
 .sub-start-cta{margin-top:4px}
 .sub-start-cta:disabled{cursor:not-allowed;opacity:.45}

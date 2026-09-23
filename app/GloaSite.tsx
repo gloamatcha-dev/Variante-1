@@ -22,7 +22,7 @@ import type { SeedCatalogProduct } from "../lib/catalogProducts";
 // prints is derived here from the catalog price the catalog already
 // sent, and no annual total is written down anywhere in this file. The
 // server still resolves the money independently - see AnnualPlanPanel.
-import { ANNUAL_DELIVERY_COUNT, ANNUAL_DELIVERY_INTERVAL_DAYS, ANNUAL_DISCOUNT_PERCENT, buildAnnualPricing, type AnnualPricing } from "../lib/annualPlanRules";
+import { ANNUAL_DELIVERY_COUNT, ANNUAL_DELIVERY_INTERVAL_DAYS, ANNUAL_DISCOUNT_PERCENT, ANNUAL_FREE_SHIPPING_NOTE, buildAnnualPricing, type AnnualPricing } from "../lib/annualPlanRules";
 import { ANNUAL_GERMANY_ONLY_NOTE, ANNUAL_LAUNCH_SIZE_BY_SKU, annualPortalHref } from "../lib/annualPlans";
 // The 4-week product's two leaves, both zero-import for the same reason
 // the annual pair is: the browser has to run them. The cadence copy comes
@@ -433,6 +433,18 @@ return <div className="annual-panel">
 <p className="eyebrow annual-panel-eyebrow">JAHRESPLAN</p>
 <p className="annual-panel-title">Alle {ANNUAL_DELIVERY_INTERVAL_DAYS} Tage Matcha.</p>
 <p className="annual-panel-sub">{variant.label} · {ANNUAL_DELIVERY_COUNT} Lieferungen · einmal bezahlen · keine automatische Verlängerung</p>
+{/* THE SHIPPING RULE, WHATEVER SIZE IS SELECTED AND WHATEVER
+    PRICES_VISIBLE SAYS.
+
+    The dl below states THIS size's shipping and is withheld in
+    prelaunch because it prints an amount. This line prints none: it
+    names the size from which shipping stops being charged, which is
+    the half a customer needs before choosing. The same treatment the
+    subscription panel already gives its own free-shipping sentence.
+
+    Derived from the same frozen table this panel's figures come from,
+    so it cannot drift from the amount shown underneath it. */}
+{ANNUAL_FREE_SHIPPING_NOTE&&<p className="annual-panel-note">{ANNUAL_FREE_SHIPPING_NOTE}</p>}
 <dl className="annual-panel-lines">
 {/* The discount is READ from the rules module that applies it, so the
     page cannot advertise a percentage the server does not charge.
