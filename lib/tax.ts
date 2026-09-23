@@ -145,6 +145,136 @@ export function extractTaxFromGross(grossCents: number, taxRatePercent: number):
   return { grossCents, netCents, taxCents: grossCents - netCents, taxRatePercent };
 }
 
+/* ── The other direction: NET-origin ────────────────────────── */
+
+/**
+ * WHICH SIDE OF THE VAT THE AGREED PRICE SITS ON.
+ *
+ * B2C quotes a gross price: 22,99 is what the customer pays, and the net
+ * is whatever is left after the VAT is extracted. B2B quotes a net
+ * price: 52,50 is what the business owes before VAT, and the gross is
+ * that plus the tax. Same rate, same rounding primitive, opposite fixed
+ * point - and the two can disagree by a cent, which is exactly why a
+ * frozen snapshot has to record which one produced it.
+ *
+ * Exported as a type now so Package 4's B2B snapshot can carry it.
+ * DELIBERATELY NOT added to CartTaxSnapshot: every snapshot that type
+ * has ever produced is gross-origin, adding the field would rewrite
+ * their serialized shape, and a historical record that gains a key is
+ * no longer the record that was frozen.
+ */
+export type PriceOrigin = "gross" | "net";
+
+/**
+ * The calculation version for NET-ORIGIN results, and ONLY those.
+ *
+ * TAX_CALCULATION_VERSION stays "de-2026.1" and keeps belonging to the
+ * gross-origin cart snapshots that already exist in the database. It is
+ * not bumped here: nothing about how those were computed has changed,
+ * and moving their version would make every stored snapshot claim to
+ * have been produced by rules it never saw.
+ *
+ * This is a SECOND VERSION LINE inside the same authority, not a second
+ * engine. Both directions share divideRoundHalfUp, share
+ * TAX_CATEGORY_RATE_PERCENT and live in this file.
+ */
+export const NET_ORIGIN_TAX_CALCULATION_VERSION = "de-net-2026.1";
+
+/**
+ * Adds VAT ON TOP of a fixed net price. The exact inverse of
+ * extractTaxFromGross, and the direction B2B needs.
+ *
+ * gross = round(net * (100 + rate) / 100), half up; tax is the
+ * REMAINDER, which is what makes net + tax = gross exact for every
+ * input. Computing the tax independently and adding it would be the
+ * obvious way to end up a cent short of the total on some amounts.
+ *
+ * 5250 at 7 % is the case worth stating: 5250 * 7 / 100 is 367,5 cents,
+ * which rounds half up to 368, so the gross is 5618 and the tax is the
+ * 368 that separates them. Both figures fall out of one rounding rather
+ * than two, so they cannot contradict each other.
+ *
+ * Returns the same TaxAmount shape the gross direction returns, so a
+ * caller can hold either without a second type - only the fixed point
+ * differs, and PriceOrigin above is how a snapshot says which it was.
+ */
+export function addTaxToNet(netCents: number, taxRatePercent: number): TaxAmount {
+  if (!Number.isSafeInteger(netCents) || netCents < 0) {
+    throw new Error("addTaxToNet requires a non-negative integer net amount");
+  }
+  if (!Number.isSafeInteger(taxRatePercent) || taxRatePercent < 0) {
+    throw new Error("addTaxToNet requires a non-negative integer rate");
+  }
+
+  // TWO SAFE INTEGERS CAN MULTIPLY INTO AN UNSAFE ONE, and a helper
+  // whose whole contract is exact integer cents may not discover that
+  // afterwards. Each step is checked before the next consumes it.
+  //
+  // Rejecting is the right answer here rather than reaching for BigInt:
+  // the largest amount this shop could ever price is a five-figure euro
+  // contract, so an input that leaves the exact range is a bug upstream,
+  // not a number that needs bigger arithmetic.
+  const factor = 100 + taxRatePercent;
+  if (!Number.isSafeInteger(factor)) {
+    throw new Error("addTaxToNet requires a rate whose 100 + rate is still an exact integer");
+  }
+  const numerator = netCents * factor;
+  if (!Number.isSafeInteger(numerator)) {
+    throw new Error("addTaxToNet requires a net amount and rate whose product is an exact integer");
+  }
+
+  // AND THE HELPER'S OWN INTERMEDIATE, WHICH IS LARGER THAN WHAT IT IS
+  // HANDED.
+  //
+  // divideRoundHalfUp computes floor((2n + d) / 2d), so passing it a
+  // merely safe numerator is not enough: its internal 2n + d can leave
+  // the exact range while n is still inside it. Checking the RESULT
+  // afterwards cannot catch that - a value computed from an inexact
+  // intermediate is usually still a small, plausible-looking integer.
+  //
+  // The ceiling is DERIVED from Number.MAX_SAFE_INTEGER and the
+  // denominator this function actually uses, so it moves by itself if
+  // either ever changes and there is no unexplained literal to maintain:
+  //
+  //   2n + d <= MAX_SAFE_INTEGER   <=>   n <= floor((MAX_SAFE_INTEGER - d) / 2)
+  //
+  // divideRoundHalfUp itself is untouched. This is the caller refusing
+  // to hand it an input it cannot answer exactly, which is the only side
+  // of the contract Package 3 is allowed to change.
+  const roundingDenominator = 100;
+  const maxExactNumerator = Math.floor((Number.MAX_SAFE_INTEGER - roundingDenominator) / 2);
+  if (numerator > maxExactNumerator) {
+    throw new Error("addTaxToNet requires a net amount and rate whose rounding stays in exact integer arithmetic");
+  }
+
+  const grossCents = divideRoundHalfUp(numerator, roundingDenominator);
+  const taxCents = grossCents - netCents;
+
+  // The backstop, kept even though the guard above makes it unreachable
+  // for the current denominator: it is the assertion that the whole
+  // contract actually held, and it costs nothing.
+  if (!Number.isSafeInteger(grossCents) || !Number.isSafeInteger(taxCents)) {
+    throw new Error("addTaxToNet produced a result outside exact integer arithmetic");
+  }
+
+  return { grossCents, netCents, taxCents, taxRatePercent };
+}
+
+/**
+ * The metadata a NET-origin result must carry into a frozen snapshot.
+ *
+ * A function rather than a frozen constant so a caller cannot hold a
+ * reference to shared mutable state, and so the pair is impossible to
+ * write down half of: a net-origin amount recorded without its version,
+ * or with the gross-origin version, is a record nobody can reproduce.
+ *
+ * Package 4 persists these two values beside the B2B amounts. Nothing
+ * in this package writes them anywhere.
+ */
+export function netOriginTaxMetadata(): { calculationVersion: string; priceOrigin: PriceOrigin } {
+  return { calculationVersion: NET_ORIGIN_TAX_CALCULATION_VERSION, priceOrigin: "net" };
+}
+
 /* ── Configured EU B2C tax mode ─────────────────────────────── */
 
 /**
