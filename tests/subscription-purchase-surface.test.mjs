@@ -1130,7 +1130,12 @@ test("8: no backend, migration, cadence, price or shipping rule changed", () => 
   // NO MIGRATION WAS ADDED OR EDITED. This package is UI and one read
   // route; the schema it reads was complete before it started.
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations")).sort();
-  assert.equal(migrations.at(-1), "058_discounted_order_line_accounting.sql",
+  // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
+  // commerce foundation. It evolves the two b2b_supply_* tables 006
+  // built, adds no table of its own, and touches no subscription,
+  // annual or order object. Reviewed in
+  // tests/b2b-supply-commerce-foundation.test.mjs.
+  assert.equal(migrations.at(-1), "059_b2b_supply_commerce_foundation.sql",
     "a migration was added by a UI package");
   assert.match(read("supabase/migrations/024_seed_b2c_subscription_plans.sql"),
     /'week',\s*4,\s*'week',\s*4,\s*true,/, "the seeded cadence changed");

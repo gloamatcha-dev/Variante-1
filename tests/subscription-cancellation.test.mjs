@@ -2062,7 +2062,13 @@ test("034: it is the next free number and 022-033 are untouched", () => {
      // meaning, no row is backfilled, nothing is granted to anon or
      // authenticated, and no subscription, annual or B2B object is
      // touched. Reviewed in tests/discounted-line-accounting.test.mjs.
-     "058_discounted_order_line_accounting.sql"],
+     "058_discounted_order_line_accounting.sql",
+     // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
+     // commerce foundation. It evolves the two b2b_supply_* tables 006
+     // built, adds no table of its own, and touches no subscription,
+     // annual or order object. Reviewed in
+     // tests/b2b-supply-commerce-foundation.test.mjs.
+     "059_b2b_supply_commerce_foundation.sql"],
     "an unreviewed migration above 034 appeared"
   );
   // AND 039 REDEFINES NOTHING 034 OWNS. It is a prepaid plan with no

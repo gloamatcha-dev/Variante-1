@@ -657,7 +657,12 @@ test("4c: one API route, no server action, no migration was added for this page"
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.ok(!migrations.some(f => f.startsWith("059")), "a migration 058 or beyond appeared");
+  // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
+  // commerce foundation - it evolves the two tables 006 built for a
+  // negotiated agreement and adds no table of its own. Re-pinned rather
+  // than deleted - what this guard protects is that nothing UNREVIEWED
+  // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
+  assert.ok(!migrations.some(f => f.startsWith("060")), "a migration 060 or beyond appeared");
 });
 
 /* ══════════════════════════════════════════════════════════════

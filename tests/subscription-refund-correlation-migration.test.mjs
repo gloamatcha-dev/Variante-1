@@ -143,16 +143,21 @@ test("1, 2: 037 exists, owns its number, and is the highest migration", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(files[files.length - 13], "046_launch_signup_atomic.sql");
-  assert.equal(files[files.length - 14], "045_launch_welcome_email.sql");
-  assert.equal(files[files.length - 15], "044_launch_send.sql");
-  assert.equal(files[files.length - 16], "043_launch_waitlist.sql");
-  assert.equal(files[files.length - 17], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.equal(files[files.length - 18], "041_annual_account_column_privileges.sql",
+  // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
+  // commerce foundation - it evolves the two tables 006 built for a
+  // negotiated agreement and adds no table of its own. Re-pinned rather
+  // than deleted - what this guard protects is that nothing UNREVIEWED
+  // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
+  assert.equal(files[files.length - 14], "046_launch_signup_atomic.sql");
+  assert.equal(files[files.length - 15], "045_launch_welcome_email.sql");
+  assert.equal(files[files.length - 16], "044_launch_send.sql");
+  assert.equal(files[files.length - 17], "043_launch_waitlist.sql");
+  assert.equal(files[files.length - 18], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(files[files.length - 19], "041_annual_account_column_privileges.sql",
     "038 is the one-time writer concurrency fix and must be the highest");
-  assert.equal(files[files.length - 22], MIGRATION_037, "037 must still be the one before it");
-  assert.ok(!files.some(f => f.startsWith("059")), "a migration 058 or beyond appeared");
-  assert.equal(files.length, 58);
+  assert.equal(files[files.length - 23], MIGRATION_037, "037 must still be the one before it");
+  assert.ok(!files.some(f => f.startsWith("060")), "a migration 060 or beyond appeared");
+  assert.equal(files.length, 59);
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length);

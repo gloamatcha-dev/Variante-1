@@ -743,7 +743,13 @@ test("55: this phase added no migration, and the only ones after it are 038 and 
      // meaning, no row is backfilled, nothing is granted to anon or
      // authenticated, and no subscription, annual or B2B object is
      // touched. Reviewed in tests/discounted-line-accounting.test.mjs.
-     "058_discounted_order_line_accounting.sql"],
+     "058_discounted_order_line_accounting.sql",
+     // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
+     // commerce foundation. It evolves the two b2b_supply_* tables 006
+     // built, adds no table of its own, and touches no subscription,
+     // annual or order object. Reviewed in
+     // tests/b2b-supply-commerce-foundation.test.mjs.
+     "059_b2b_supply_commerce_foundation.sql"],
     "an unreviewed migration appeared after 037");
   const sql039 = withoutComments(read("supabase/migrations/039_b2c_annual_plan_foundation.sql"));
   assert.ok(!sql039.includes("apply_order_refund_state_by_invoice"),

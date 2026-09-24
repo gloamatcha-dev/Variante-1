@@ -797,9 +797,14 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 58);
+  assert.equal(migrations.length, 59);
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 58), [], "a migration 058 or beyond appeared");
+  // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
+  // commerce foundation - it evolves the two tables 006 built for a
+  // negotiated agreement and adds no table of its own. Re-pinned rather
+  // than deleted - what this guard protects is that nothing UNREVIEWED
+  // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 59), [], "a migration 060 or beyond appeared");
 
   // The API surface is unchanged: no account endpoint exists, because the
   // portal reads its own rows under RLS.

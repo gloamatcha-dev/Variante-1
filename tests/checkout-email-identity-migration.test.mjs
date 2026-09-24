@@ -235,15 +235,20 @@ test("5: 055 owns its number, in one transaction, self-verifying", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(files.length, 58);
+  // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
+  // commerce foundation - it evolves the two tables 006 built for a
+  // negotiated agreement and adds no table of its own. Re-pinned rather
+  // than deleted - what this guard protects is that nothing UNREVIEWED
+  // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
+  assert.equal(files.length, 59);
   // 056 (the GLOALAUNCH10 database foundation, reviewed in
   // tests/launch-discount-migration.test.mjs) landed after this one, so
   // 055 is no longer the last file. What has to stay true is that it is
   // still at its own number and that nothing above it is unreviewed.
-  assert.equal(files[files.length - 4], MIGRATION, "055 is not at its own number");
-  assert.equal(files[files.length - 3], "056_launch_discount.sql");
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 58), [],
-    "a migration 058 or beyond appeared");
+  assert.equal(files[files.length - 5], MIGRATION, "055 is not at its own number");
+  assert.equal(files[files.length - 4], "056_launch_discount.sql");
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 59), [],
+    "a migration 060 or beyond appeared");
   // 001-054 are immutable; what this can assert is that 055 names none
   // of them - nor 056 - as something to change.
   for (const f of files.filter(f => f !== MIGRATION)) {

@@ -613,8 +613,19 @@ test("hardening: 023 owns its number and the live migrations are not edited", ()
     // 022 wrote for THAT invoice is already there. Reading the bindings
     // 022 established is the opposite of reaching into them; what is
     // still forbidden is redefining them or writing them.
-    assert.ok(!/create unique index[^;]*stripe_subscription_id/i.test(later),
-      `${name} redefines the stripe subscription binding`);
+    // PACKAGE 4A's 059 DOES create a unique index naming
+    // stripe_subscription_id - on public.b2b_supply_agreements, so one
+    // Stripe subscription can never bill two B2B supply agreements. That
+    // is a binding on a table 022 and 023 do not own and have never
+    // written, and it leaves public.subscriptions' own unique index
+    // exactly as 022 defined it. So the guard is NARROWED to the fact it
+    // actually protects - nothing may redefine the B2C subscription
+    // binding - rather than waived. Reviewed in
+    // tests/b2b-supply-commerce-foundation.test.mjs.
+    for (const index of later.match(/create unique index[^;]*stripe_subscription_id[^;]*/gi) ?? []) {
+      assert.ok(index.includes("on public.b2b_supply_agreements "),
+        `${name} redefines the stripe subscription binding`);
+    }
     assert.ok(!/create unique index[^;]*stripe_invoice_id/i.test(later),
       `${name} redefines the stripe invoice binding`);
     // A later migration may still write the attempts table - 025's

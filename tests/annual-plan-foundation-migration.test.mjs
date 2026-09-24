@@ -150,8 +150,13 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(files[files.length - 20], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 21], MIGRATION_038, "038 must be the one before it");
+  // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
+  // commerce foundation - it evolves the two tables 006 built for a
+  // negotiated agreement and adds no table of its own. Re-pinned rather
+  // than deleted - what this guard protects is that nothing UNREVIEWED
+  // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
+  assert.equal(files[files.length - 21], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 22], MIGRATION_038, "038 must be the one before it");
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
@@ -159,7 +164,7 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
 test("2: no migration 044 or beyond", () => {
   // 039 is not applied anywhere, so it is still the right place to fix
   // 039. A hardening pass must not become a second migration.
-  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 58);
+  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 59);
   assert.deepEqual(beyond, [], "an unreviewed migration appeared after 039");
 });
 

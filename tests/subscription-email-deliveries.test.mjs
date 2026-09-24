@@ -178,7 +178,13 @@ test("035 exists, is the only 035, and only 036 and 037 follow it", () => {
      // meaning, no row is backfilled, nothing is granted to anon or
      // authenticated, and no subscription, annual or B2B object is
      // touched. Reviewed in tests/discounted-line-accounting.test.mjs.
-     "058_discounted_order_line_accounting.sql"],
+     "058_discounted_order_line_accounting.sql",
+     // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
+     // commerce foundation. It evolves the two b2b_supply_* tables 006
+     // built, adds no table of its own, and touches no subscription,
+     // annual or order object. Reviewed in
+     // tests/b2b-supply-commerce-foundation.test.mjs.
+     "059_b2b_supply_commerce_foundation.sql"],
     "an unreviewed migration above 035 appeared"
   );
   // And 039 leaves this table entirely alone. An annual plan's one
