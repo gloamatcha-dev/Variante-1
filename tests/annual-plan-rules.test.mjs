@@ -603,19 +603,19 @@ test("27: 039 and 040 are untouched, 041 is the highest, and there is no 042", (
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations[migrations.length - 15], "046_launch_signup_atomic.sql");
-  assert.equal(migrations[migrations.length - 16], "045_launch_welcome_email.sql");
-  assert.equal(migrations[migrations.length - 17], "044_launch_send.sql");
-  assert.equal(migrations[migrations.length - 18], "043_launch_waitlist.sql");
-  assert.equal(migrations[migrations.length - 19], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(migrations[migrations.length - 16], "046_launch_signup_atomic.sql");
+  assert.equal(migrations[migrations.length - 17], "045_launch_welcome_email.sql");
+  assert.equal(migrations[migrations.length - 18], "044_launch_send.sql");
+  assert.equal(migrations[migrations.length - 19], "043_launch_waitlist.sql");
+  assert.equal(migrations[migrations.length - 20], "042_annual_delivery_rls_parent_user_privilege.sql");
   // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
   // commerce foundation - it evolves the two tables 006 built for a
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 60), [],
-    "a migration 061 or beyond appeared");
-  assert.equal(migrations.length, 60);
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 61), [],
+    "a migration 062 or beyond appeared");
+  assert.equal(migrations.length, 61);
   // 039 is LIVE and therefore immutable. 040 is NOT APPLIED yet, so it
   // may still be edited in place - that is the whole reason it is a file
   // under review rather than a 041 - and it is the only one that may.

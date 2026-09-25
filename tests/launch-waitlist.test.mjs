@@ -1294,7 +1294,13 @@ test("61: the rate limit went into 043 rather than into a 044, and 043 is still 
      // delivery foundation. Two NEW tables and their integrity layer;
      // no subscription, annual or order object is touched. Reviewed in
      // tests/b2b-payment-delivery-foundation.test.mjs.
-     "060_b2b_payment_delivery_foundation.sql"],
+     "060_b2b_payment_delivery_foundation.sql",
+     // PACKAGE 5A ADDED MIGRATION 061: the B2B pending agreement
+     // writer. ONE SECURITY DEFINER function and its EXECUTE grant to
+     // service_role; no table, no column, no policy and no table
+     // privilege. No subscription, annual or order object is touched.
+     // Reviewed in tests/b2b-pending-agreement-writer.test.mjs.
+     "061_b2b_pending_agreement_writer.sql"],
     "an unreviewed migration appeared after 043"
   );
 

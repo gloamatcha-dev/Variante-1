@@ -507,7 +507,7 @@ test("7: no audit trail, no actor columns, no new real accounts", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 60), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 61), [],
     "a migration beyond 051 appeared");
 
   const sql = codeOnly(migration);
@@ -799,7 +799,7 @@ test("9g: the desktop admin is unchanged", () => {
 test("9h: this package changed nothing else", () => {
   // No migration, no audit trail, no public surface.
   const files = readdirSync(path.join(ROOT, "supabase/migrations"));
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 60), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 61), [],
     "a migration beyond 051 appeared");
   for (const forbidden of ["admin_activity_log", "record_admin_activity", "actor_user_id"]) {
     assert.ok(!shell.includes(forbidden) && !viewportLib.includes(forbidden),

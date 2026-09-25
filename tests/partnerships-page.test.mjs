@@ -662,7 +662,7 @@ test("4c: one API route, no server action, no migration was added for this page"
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.ok(!migrations.some(f => f.startsWith("061")), "a migration 061 or beyond appeared");
+  assert.ok(!migrations.some(f => f.startsWith("062")), "a migration 062 or beyond appeared");
 });
 
 /* ══════════════════════════════════════════════════════════════

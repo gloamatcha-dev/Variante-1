@@ -148,16 +148,16 @@ test("1, 2: 037 exists, owns its number, and is the highest migration", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(files[files.length - 15], "046_launch_signup_atomic.sql");
-  assert.equal(files[files.length - 16], "045_launch_welcome_email.sql");
-  assert.equal(files[files.length - 17], "044_launch_send.sql");
-  assert.equal(files[files.length - 18], "043_launch_waitlist.sql");
-  assert.equal(files[files.length - 19], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.equal(files[files.length - 20], "041_annual_account_column_privileges.sql",
+  assert.equal(files[files.length - 16], "046_launch_signup_atomic.sql");
+  assert.equal(files[files.length - 17], "045_launch_welcome_email.sql");
+  assert.equal(files[files.length - 18], "044_launch_send.sql");
+  assert.equal(files[files.length - 19], "043_launch_waitlist.sql");
+  assert.equal(files[files.length - 20], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(files[files.length - 21], "041_annual_account_column_privileges.sql",
     "038 is the one-time writer concurrency fix and must be the highest");
-  assert.equal(files[files.length - 24], MIGRATION_037, "037 must still be the one before it");
-  assert.ok(!files.some(f => f.startsWith("061")), "a migration 061 or beyond appeared");
-  assert.equal(files.length, 60);
+  assert.equal(files[files.length - 25], MIGRATION_037, "037 must still be the one before it");
+  assert.ok(!files.some(f => f.startsWith("062")), "a migration 062 or beyond appeared");
+  assert.equal(files.length, 61);
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length);
