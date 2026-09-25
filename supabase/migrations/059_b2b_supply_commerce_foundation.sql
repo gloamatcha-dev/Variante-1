@@ -728,11 +728,11 @@ alter table public.b2b_supply_agreements
 
 alter table public.b2b_supply_agreements
   -- 1. a request always carries the promise it produced
-  add constraint b2b_supply_agreements_cancellation_requested_requires_effective_check
+  add constraint b2b_supply_agreements_cancellation_requested_requires_effective
     check (cancellation_requested_at is null or cancellation_effective_at is not null),
 
   -- 2. and a promise always carries the request that asked for it
-  add constraint b2b_supply_agreements_cancellation_effective_requires_requested_check
+  add constraint b2b_supply_agreements_cancellation_effective_requires_requested
     check (cancellation_effective_at is null or cancellation_requested_at is not null),
 
   -- 3. nothing ends before it was asked to end
@@ -741,7 +741,7 @@ alter table public.b2b_supply_agreements
            or cancellation_effective_at >= cancellation_requested_at),
 
   -- 4. a reason without a request is a note about nothing
-  add constraint b2b_supply_agreements_cancellation_reason_requires_request_check
+  add constraint b2b_supply_agreements_cancellation_reason_requires_request
     check (cancellation_reason is null or cancellation_requested_at is not null),
 
   -- 5. and it is real text rather than whitespace

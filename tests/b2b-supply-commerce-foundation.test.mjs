@@ -634,10 +634,10 @@ const DELIBERATELY_NULL_PERMISSIVE = [
   "b2b_supply_agreements_base_monthly_net_check",
   "b2b_supply_agreements_contract_net_check",
   "b2b_supply_agreements_self_service_status_check",
-  "b2b_supply_agreements_cancellation_requested_requires_effective_check",
-  "b2b_supply_agreements_cancellation_effective_requires_requested_check",
+  "b2b_supply_agreements_cancellation_requested_requires_effective",
+  "b2b_supply_agreements_cancellation_effective_requires_requested",
   "b2b_supply_agreements_cancellation_effective_order_check",
-  "b2b_supply_agreements_cancellation_reason_requires_request_check",
+  "b2b_supply_agreements_cancellation_reason_requires_request",
   "b2b_supply_agreements_cancellation_reason_length_check",
   "b2b_supply_agreements_termination_reason_requires_ended_check",
   "b2b_supply_agreements_termination_reason_length_check",
@@ -870,13 +870,13 @@ test("52: the safety patch changed no commercial figure", () => {
 
 test("27: the nine cancellation and termination invariants are all present", () => {
   const P = "b2b_supply_agreements_";
-  assert.ok(constraintBody(`${P}cancellation_requested_requires_effective_check`)
+  assert.ok(constraintBody(`${P}cancellation_requested_requires_effective`)
     .includes("cancellation_requested_at is null or cancellation_effective_at is not null"));
-  assert.ok(constraintBody(`${P}cancellation_effective_requires_requested_check`)
+  assert.ok(constraintBody(`${P}cancellation_effective_requires_requested`)
     .includes("cancellation_effective_at is null or cancellation_requested_at is not null"));
   assert.ok(constraintBody(`${P}cancellation_effective_order_check`)
     .includes("cancellation_effective_at >= cancellation_requested_at"));
-  assert.ok(constraintBody(`${P}cancellation_reason_requires_request_check`)
+  assert.ok(constraintBody(`${P}cancellation_reason_requires_request`)
     .includes("cancellation_reason is null or cancellation_requested_at is not null"));
   assert.ok(constraintBody(`${P}cancellation_reason_length_check`)
     .includes("char_length(btrim(cancellation_reason)) between 1 and 500"));
@@ -1153,4 +1153,118 @@ test("46: 059 is registered in the npm test script", () => {
   // that is not named here never runs at all.
   const pkg = JSON.parse(read("package.json"));
   assert.ok(pkg.scripts.test.includes("tests/b2b-supply-commerce-foundation.test.mjs"));
+});
+
+/* ══════════════════════════════════════════════════════════════
+   10. POSTGRESQL IDENTIFIER LENGTH
+   ══════════════════════════════════════════════════════════════
+
+   PostgreSQL's NAMEDATALEN is 64, which gives an effective identifier
+   limit of 63 BYTES. Over that it does not fail - it TRUNCATES, emits a
+   NOTICE, and creates the object under a name nobody declared.
+
+   That is the one defect class a suite reading SQL as TEXT is
+   structurally blind to: the migration says one name, the catalogue
+   holds another, and every assertion here would still pass. It was found
+   by applying 059 to a real PostgreSQL 17.10 cluster, where three
+   constraint names were silently shortened.
+
+   So the rule is asserted on the bytes, for every identifier BOTH
+   migrations declare. */
+
+/** The effective identifier limit: NAMEDATALEN (64) minus the terminator. */
+const PG_MAX_IDENTIFIER_BYTES = 63;
+
+/** Every identifier a migration explicitly declares, by kind. */
+const declaredIdentifiers = migrationSql => {
+  const text = migrationSql.replace(/^\s*--.*$/gm, "");
+  const patterns = [
+    ["constraint", /add constraint\s+([a-z0-9_]+)/gi],
+    ["constraint", /(?:^|,)\s*constraint\s+([a-z0-9_]+)\s+(?:check|unique|primary|foreign)/gim],
+    ["index", /create\s+(?:unique\s+)?index\s+(?:if not exists\s+)?([a-z0-9_]+)/gi],
+    ["function", /create\s+(?:or replace\s+)?function\s+public\.([a-z0-9_]+)/gi],
+    ["trigger", /create\s+(?:constraint\s+)?trigger\s+([a-z0-9_]+)/gi],
+    ["policy", /create\s+policy\s+"([^"]+)"/gi],
+    ["table", /create\s+table\s+(?:if not exists\s+)?public\.([a-z0-9_]+)/gi],
+  ];
+  const found = [];
+  for (const [kind, re] of patterns) {
+    for (const m of text.matchAll(re)) found.push({ kind, name: m[1] });
+  }
+  return found;
+};
+
+const MIGRATION_060 = "060_b2b_payment_delivery_foundation.sql";
+
+test("53: no identifier in 059 or 060 exceeds PostgreSQL's 63-byte limit", () => {
+  for (const [label, sqlText] of [
+    [MIGRATION, migration],
+    [MIGRATION_060, read(`supabase/migrations/${MIGRATION_060}`)],
+  ]) {
+    const declared = declaredIdentifiers(sqlText);
+    assert.ok(declared.length > 30,
+      `${label}: expected the declared identifiers to be found, got ${declared.length}`);
+    for (const { kind, name } of declared) {
+      const bytes = Buffer.byteLength(name, "utf8");
+      assert.ok(bytes <= PG_MAX_IDENTIFIER_BYTES,
+        `${label}: ${kind} "${name}" is ${bytes} bytes - PostgreSQL would silently truncate it to `
+        + `"${Buffer.from(name, "utf8").subarray(0, PG_MAX_IDENTIFIER_BYTES).toString("utf8")}", `
+        + `so the catalogue name would not be the declared name`);
+    }
+  }
+});
+
+test("54: the three shortened cancellation constraints are exactly these names", () => {
+  // Real PostgreSQL truncated all three. The replacements drop the
+  // redundant trailing _check, which for the first two happens to be
+  // character-for-character what the server already produced - so the
+  // rename is also the name anyone who inspected the truncated catalogue
+  // would already have seen.
+  const SHORTENED = [
+    ["b2b_supply_agreements_cancellation_requested_requires_effective", 63],
+    ["b2b_supply_agreements_cancellation_effective_requires_requested", 63],
+    ["b2b_supply_agreements_cancellation_reason_requires_request", 58],
+  ];
+  for (const [name, bytes] of SHORTENED) {
+    assert.strictEqual(Buffer.byteLength(name, "utf8"), bytes,
+      `${name} is no longer ${bytes} bytes`);
+    assert.ok(flat.includes(`add constraint ${name} check (`),
+      `the shortened constraint ${name} is not declared in 059`);
+  }
+  // AND THE OVERLONG ORIGINALS ARE GONE. Each is DERIVED by putting the
+  // redundant suffix back rather than written out, so this assertion
+  // does not contain the very strings it forbids - which is what made an
+  // earlier version of it match its own source.
+  for (const [name] of SHORTENED) {
+    const gone = `${name}_check`;
+    assert.ok(Buffer.byteLength(gone, "utf8") > PG_MAX_IDENTIFIER_BYTES,
+      `${gone} is not actually overlong, so this regression guard proves nothing`);
+    assert.ok(!migration.includes(gone),
+      `the overlong name ${gone} (${Buffer.byteLength(gone, "utf8")} bytes) is back in 059`);
+  }
+});
+
+test("55: every declared identifier is unique within its kind", () => {
+  for (const [label, sqlText] of [
+    [MIGRATION, migration],
+    [MIGRATION_060, read(`supabase/migrations/${MIGRATION_060}`)],
+  ]) {
+    const seen = new Map();
+    for (const { kind, name } of declaredIdentifiers(sqlText)) {
+      const key = `${kind}|${name}`;
+      assert.ok(!seen.has(key), `${label}: ${kind} "${name}" is declared twice`);
+      seen.set(key, true);
+    }
+    // And no two names collide once truncated to the limit, which is the
+    // silent-corruption case: two distinct declarations becoming one
+    // object. Constraint names share a per-table namespace, so this is
+    // the check that matters even though all names are now short enough.
+    const truncated = new Map();
+    for (const { kind, name } of declaredIdentifiers(sqlText)) {
+      const t = `${kind}|${Buffer.from(name, "utf8").subarray(0, PG_MAX_IDENTIFIER_BYTES).toString("utf8")}`;
+      assert.ok(!truncated.has(t),
+        `${label}: "${name}" and "${truncated.get(t)}" collide when truncated to ${PG_MAX_IDENTIFIER_BYTES} bytes`);
+      truncated.set(t, name);
+    }
+  }
 });
