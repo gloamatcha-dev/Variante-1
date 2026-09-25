@@ -176,13 +176,7 @@ test("3: migrations 001 through 038 are unmodified", () => {
   // migration below it is live and may not be.
   const immutable = touched.filter(rel =>
     !rel.endsWith(MIGRATION_039) && !rel.endsWith("040_annual_checkout_retry_fingerprints.sql"));
-  // 062 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061, so 062
-  // is still the right place to fix 062 and it may be edited in place -
-  // exactly the terms 038, 039 and 040 each had while they were pending.
-  // Everything BELOW it is live and may not move, which is what this
-  // guard is for. Remove this exclusion the moment 062 is applied.
-  // Reviewed in tests/b2b-checkout-settlement.test.mjs.
-  assert.deepEqual(immutable.filter(r => !r.endsWith("062_b2b_checkout_settlement.sql")), [], "a live, immutable migration was edited");
+  assert.deepEqual(immutable, [], "a live, immutable migration was edited");
 });
 
 test("4: migrations 037 and 038 still hold their refund writers, untouched", () => {

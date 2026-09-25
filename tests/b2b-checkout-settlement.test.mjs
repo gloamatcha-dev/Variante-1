@@ -848,13 +848,14 @@ test("30: 062 is the highest migration and 063 does not exist", () => {
   assert.equal(new Set(numbers).size, numbers.length);
 });
 
-test("31: migrations 001 through 061 are unmodified in the working tree", () => {
+test("31: migrations 001 through 062 are unmodified in the working tree", () => {
+  // 062 IS NOW APPLIED. Production is 058+059+060+061+062, so this suite's
+  // own migration is immutable too and the exemption it used to carry is
+  // gone. Nothing is pending; nothing may be edited.
   const changed = execFileSync("git",
     ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
-  const touched = changed ? changed.split(NEWLINE) : [];
-  assert.deepEqual(touched.filter(rel => !rel.endsWith(MIGRATION)), [],
-    "a live, immutable migration was edited");
+  assert.equal(changed, "", "a live, immutable migration was edited");
 });
 
 test("32: 062 is additive only - no table, policy, RLS, DROP or privilege change", () => {
@@ -1159,23 +1160,25 @@ test("48: the month-end behaviour this migration relies on is written down", () 
   assert.match(migration, /Europe\/Berlin/, "the pinned calendar is not documented");
 });
 
-test("49: 059, 060 and 061 are byte-identical, and no 063 was created", () => {
+test("49: 059 through 062 are byte-identical, and no 063 was created", () => {
   const changed = execFileSync("git",
     ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
   for (const live of ["059_b2b_supply_commerce_foundation.sql",
                       "060_b2b_payment_delivery_foundation.sql",
-                      "061_b2b_pending_agreement_writer.sql"]) {
+                      "061_b2b_pending_agreement_writer.sql",
+                      "062_b2b_checkout_settlement.sql"]) {
     assert.ok(!touched.some(rel => rel.endsWith(live)),
       `${live} was edited - it is applied in production and may not move`);
   }
-  // 062 is the ONLY migration this correction may touch, and there is no
-  // 063: the fix belongs in 062 because it has not been applied anywhere.
-  assert.deepEqual(touched.filter(rel => !rel.endsWith(MIGRATION)), []);
+  // AND 062 IS APPLIED TOO, so there is no migration left that may be
+  // edited at all: the exemption this assertion used to carry is gone.
+  // A correction from here on needs a NEW migration, reviewed on its own.
+  assert.deepEqual(touched, [], "a live, immutable migration was edited");
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql"));
   assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 62), [],
-    "a migration 063 was created for a correction that belongs in 062");
+    "an unreviewed migration appeared above 062");
 });
 
 test("41: every new suite is registered in the npm test script", () => {

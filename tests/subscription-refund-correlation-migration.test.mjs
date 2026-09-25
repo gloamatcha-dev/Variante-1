@@ -182,13 +182,7 @@ test("3: every immutable migration is still present and unedited", () => {
     assert.ok(file.endsWith(MIGRATION_037)
       || file.endsWith("038_one_time_refund_writer_concurrency.sql")
       || file.endsWith("039_b2c_annual_plan_foundation.sql")
-      || file.endsWith("040_annual_checkout_retry_fingerprints.sql")
-    // 062 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061, so it
-    // is still the right place to fix 062 and may be edited in place -
-    // the terms 038, 039 and 040 each had while pending. Remove this the
-    // moment 062 is applied. Reviewed in
-    // tests/b2b-checkout-settlement.test.mjs.
-      || file.endsWith("062_b2b_checkout_settlement.sql"),
+      || file.endsWith("040_annual_checkout_retry_fingerprints.sql"),
       `an immutable migration was modified: ${file}`);
   }
 });

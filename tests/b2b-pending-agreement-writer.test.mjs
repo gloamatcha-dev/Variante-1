@@ -120,32 +120,23 @@ test("1: 061 owns its number, and only the reviewed 062 follows it", () => {
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
 
-test("2: migrations 001 through 061 are unmodified in the working tree", () => {
-  // ── 061 IS APPLIED TO PRODUCTION. IT IS IMMUTABLE. ──────────
+test("2: migrations 001 through 062 are unmodified in the working tree", () => {
+  // ── EVERY MIGRATION IS NOW LIVE. THERE IS NO EXEMPTION. ─────
   //
-  // Production is 058 + 059 + 060 + 061. This guard was written before
-  // that migration reached production and correctly exempted it then;
-  // the moment it was applied, the exemption became a hole over LIVE
-  // schema - and a later pass widened the hole by listing it beside
-  // 062. Both are corrected here: the ONLY exemption is 062.
+  // Production is 058 + 059 + 060 + 061 + 062. This guard has carried a
+  // temporary exemption twice - for 061, then for 062 - and each was
+  // correct only while that migration was unapplied. Both are gone: the
+  // exemption list is EMPTY, so the filter below is the whole rule.
   //
-  // 062 has not been applied anywhere, which is why it is still the
-  // right place to fix 062 and may be edited in place - the same terms
-  // 038, 039 and 040 each had while pending. REMOVE THE 062 EXEMPTION
-  // THE MOMENT 062 IS APPLIED; test 50 below is what stops this file
-  // from ever again claiming that an applied migration is pending.
+  // An exemption is legitimate again only when a NEW migration exists
+  // that has not been applied. When that happens, add it here and
+  // remove it the moment it is applied - test 50 is what makes that
+  // second step impossible to forget.
   const changed = execFileSync("git",
     ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
-  const PENDING = ["062_b2b_checkout_settlement.sql"];
-  const immutable = touched.filter(rel => !PENDING.some(u => rel.endsWith(u)));
-  assert.deepEqual(immutable, [], "a live, immutable migration was edited");
-  // And the exemption list may not quietly grow back.
-  assert.deepEqual(PENDING, ["062_b2b_checkout_settlement.sql"],
-    "a second migration was exempted from the immutability guard");
-  assert.ok(!PENDING.some(u => u.startsWith("061")),
-    "061 is applied to production and must never be exempt");
+  assert.deepEqual(touched, [], "a live, immutable migration was edited");
 });
 
 test("3: 061 is wrapped in one transaction", () => {
@@ -989,7 +980,7 @@ test("49: the focused suite is registered in the npm test script", () => {
   }
 });
 
-test("50: NO SUITE MAY CLAIM THAT 061 IS STILL UNAPPLIED", () => {
+test("50: NO SUITE MAY CLAIM THAT AN APPLIED MIGRATION IS STILL PENDING", () => {
   // ── THE GUARD THAT STOPS THIS BUG COMING BACK ───────────────
   //
   // 061 is applied to production. Every migration guard in this
@@ -1004,34 +995,56 @@ test("50: NO SUITE MAY CLAIM THAT 061 IS STILL UNAPPLIED", () => {
   // holds over 056, and assembled from pieces for the same reason: a
   // literal pattern would match this file's own source and fail forever.
   const NL = String.fromCharCode(10);
-  const claims = [
-    new RegExp("061" + "[^" + NL + "]{0,80}" + "NOT APP" + "LIED", "i"),
-    new RegExp("061" + "[^" + NL + "]{0,80}" + "still " + "pending", "i"),
-    new RegExp("NEITHER " + "061", "i"),
-  ];
+  const APPLIED = ["061", "062"];
   for (const rel of readdirSync(path.join(ROOT, "tests")).filter(f => f.endsWith(".test.mjs"))) {
     const source = read(`tests/${rel}`);
-    for (const claim of claims) {
-      assert.ok(!claim.test(source),
-        `tests/${rel} still describes 061 as unapplied - it is live in production`);
+    for (const n of APPLIED) {
+      for (const claim of [
+        new RegExp(n + "[^" + NL + "]{0,80}" + "NOT APP" + "LIED", "i"),
+        new RegExp(n + "[^" + NL + "]{0,80}" + "still " + "pending", "i"),
+        new RegExp(n + "[^" + NL + "]{0,80}" + "may be edited in pla" + "ce", "i"),
+        new RegExp("NEITHER " + n, "i"),
+      ]) {
+        assert.ok(!claim.test(source),
+          `tests/${rel} still describes ${n} as unapplied - it is live in production`);
+      }
     }
   }
 
   // AND NO GUARD MAY EXEMPT IT IN CODE, whatever the prose says. The
   // exemption lists are the thing that actually decides, so they are
   // read directly: no test file may filter 061 out of a migration diff.
-  const exemptsInCode = new RegExp(
-    "endsWith\(\"" + "061" + "_b2b_pending_agreement_writer\.sql\"\)", "i");
+  // Plain substring checks, assembled from pieces so this file's own
+  // source cannot match them. A regex here is a trap: "\(" inside a
+  // JS STRING is just "(", which silently becomes a group opener.
+  const applied = [
+    "061" + "_b2b_pending_agreement_writer.sql",
+    "062" + "_b2b_checkout_settlement.sql",
+  ];
+  // The four shapes an exemption has ever taken in this repository.
+  const exemptionShapes = name => [
+    `!rel.endsWith("${name}")`,
+    `!r.endsWith("${name}")`,
+    `!f.endsWith("${name}")`,
+    `|| file.endsWith("${name}")`,
+  ];
   for (const rel of readdirSync(path.join(ROOT, "tests")).filter(f => f.endsWith(".test.mjs"))) {
     const code = read(`tests/${rel}`)
       .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-    assert.ok(!exemptsInCode.test(code),
-      `tests/${rel} exempts the applied migration 061 from an immutability guard`);
+    for (const name of applied) {
+      for (const shape of exemptionShapes(name)) {
+        assert.ok(!code.includes(shape),
+          `tests/${rel} exempts the APPLIED migration ${name.slice(0, 3)} `
+          + `from an immutability guard: ${shape}`);
+      }
+    }
   }
 
-  // The one migration that IS pending, stated once so the next reader
-  // knows which exemption is legitimate today.
+  // AND NOTHING IS PENDING TODAY. Production is 058+059+060+061+062, so
+  // 062 is the highest migration and every one of them is immutable. A
+  // new migration appearing above it is the moment an exemption becomes
+  // legitimate again - and the moment this assertion asks for review.
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
   assert.equal(files[files.length - 1], "062_b2b_checkout_settlement.sql",
-    "the pending migration is no longer the highest - re-check every exemption");
+    "a migration appeared above 062 - re-check every immutability exemption");
 });

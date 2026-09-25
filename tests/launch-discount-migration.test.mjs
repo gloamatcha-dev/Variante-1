@@ -113,13 +113,7 @@ test("1b: 056 IS APPLIED AND IS NEVER EDITED AGAIN", () => {
     { cwd: ROOT, encoding: "utf-8" }
   ).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
-  // 062 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061, so 062
-  // is still the right place to fix 062 and it may be edited in place -
-  // exactly the terms 038, 039 and 040 each had while they were pending.
-  // Everything BELOW it is live and may not move, which is what this
-  // guard is for. Remove this exclusion the moment 062 is applied.
-  // Reviewed in tests/b2b-checkout-settlement.test.mjs.
-  assert.deepEqual(touched.filter(r => !r.endsWith("062_b2b_checkout_settlement.sql")), [], "a live, immutable migration was edited");
+  assert.deepEqual(touched, [], "a live, immutable migration was edited");
 
   // And 056 still reads the way production is running it: the cleanup is
   // 057's job, not a rewrite of history.

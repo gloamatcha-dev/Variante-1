@@ -105,15 +105,7 @@ test("1: 042 is the newest migration, and 001-041 are untouched", () => {
   // No live migration was edited to make room for this one.
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
-  // 062 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061, so 062
-  // is still the right place to fix 062 and it may be edited in place -
-  // exactly the terms 038, 039 and 040 each had while they were pending.
-  // Everything BELOW it is live and may not move, which is what this
-  // guard is for. Remove this exclusion the moment 062 is applied.
-  // Reviewed in tests/b2b-checkout-settlement.test.mjs.
-  assert.deepEqual(
-    (changed ? changed.split(/\r?\n/) : []).filter(r => !r.endsWith("062_b2b_checkout_settlement.sql")),
-    [], "a live, immutable migration was edited");
+  assert.equal(changed, "", "a live, immutable migration was edited");
 });
 
 test("2: everything executable is inside ONE transaction", () => {
@@ -480,15 +472,7 @@ test("20: 041 itself is untouched, and so is every migration below it", () => {
   // 041 is LIVE now. The fix is a new file, never an edit to it.
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
-  // 062 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061, so 062
-  // is still the right place to fix 062 and it may be edited in place -
-  // exactly the terms 038, 039 and 040 each had while they were pending.
-  // Everything BELOW it is live and may not move, which is what this
-  // guard is for. Remove this exclusion the moment 062 is applied.
-  // Reviewed in tests/b2b-checkout-settlement.test.mjs.
-  assert.deepEqual(
-    (changed ? changed.split(/\r?\n/) : []).filter(r => !r.endsWith("062_b2b_checkout_settlement.sql")),
-    [], "a live, immutable migration was edited");
+  assert.equal(changed, "", "a live, immutable migration was edited");
   // 041 still says what it said: the same revokes and the same grants.
   assert.match(executable, /revoke select on table public\.annual_plans\s+from authenticated;/);
   assert.equal(PLAN_GRANTS.length, 18);

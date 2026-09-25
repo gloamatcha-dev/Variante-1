@@ -1263,15 +1263,7 @@ test("34: this phase adds no migration and edits none", () => {
   assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 62), [], "a migration 063 or beyond appeared");
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
-  // 062 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061, so 062
-  // is still the right place to fix 062 and it may be edited in place -
-  // exactly the terms 038, 039 and 040 each had while they were pending.
-  // Everything BELOW it is live and may not move, which is what this
-  // guard is for. Remove this exclusion the moment 062 is applied.
-  // Reviewed in tests/b2b-checkout-settlement.test.mjs.
-  assert.deepEqual(
-    (changed ? changed.split(/\r?\n/) : []).filter(r => !r.endsWith("062_b2b_checkout_settlement.sql")),
-    [], "a live, immutable migration was edited");
+  assert.equal(changed, "", "a live, immutable migration was edited");
 
   // The maintenance calls exactly the four installed functions it may,
   // and creates nothing itself.
