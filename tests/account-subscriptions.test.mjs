@@ -125,7 +125,13 @@ test("audit: Stripe is still one-time payment only", () => {
   // any file it did not list.
   const webhookSrc = read("app/api/stripe/webhook/route.ts");
   const subscriptionCalls = [...webhookSrc.matchAll(/\.subscriptions\.(\w+)\(/g)].map(m => m[1]);
-  assert.deepEqual(subscriptionCalls, ["retrieve"], "the webhook calls a Stripe subscription write");
+  // Package 5C added a SECOND retrieve: the B2B failure classification
+  // re-reads the subscription to decide whether an invoice belongs to a
+  // supply agreement. Still a read, so the guard is re-pinned on the SET
+  // of verbs rather than on how many times a read appears - which is the
+  // property it was always about, and the stricter statement of it.
+  assert.deepEqual([...new Set(subscriptionCalls)].sort(), ["retrieve"],
+    "the webhook calls a Stripe subscription write");
   for (const forbidden of [".prices.", ".products.", ".plans.", "recurring:", "price_data"]) {
     assert.ok(!webhookSrc.includes(forbidden), `the webhook uses ${forbidden}`);
   }

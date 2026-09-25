@@ -760,7 +760,13 @@ test("55: this phase added no migration, and the only ones after it are 038 and 
      // service_role; no table, no column, no policy and no table
      // privilege. No subscription, annual or order object is touched.
      // Reviewed in tests/b2b-pending-agreement-writer.test.mjs.
-     "061_b2b_pending_agreement_writer.sql"],
+     "061_b2b_pending_agreement_writer.sql",
+     // PACKAGES 5B/5C ADDED MIGRATION 062: the B2B settlement write
+     // surface. TWO SECURITY DEFINER writers and their EXECUTE grants to
+     // service_role; no table, no column, no policy and no table
+     // privilege. No subscription, annual or order object is touched.
+     // Reviewed in tests/b2b-checkout-settlement.test.mjs.
+     "062_b2b_checkout_settlement.sql"],
     "an unreviewed migration appeared after 037");
   const sql039 = withoutComments(read("supabase/migrations/039_b2c_annual_plan_foundation.sql"));
   assert.ok(!sql039.includes("apply_order_refund_state_by_invoice"),

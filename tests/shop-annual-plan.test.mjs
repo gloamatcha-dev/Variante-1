@@ -392,7 +392,12 @@ test("5d: no backend, migration or commercial logic changed", () => {
     // "Danke. Wir melden uns." The route is the same shape as
     // /api/contact and /api/partnerships: one internal email, no table,
     // no migration, no write. Reviewed in tests/b2b-lead-api.test.mjs.
-["admin", "annual-plan", "b2b-lead", "checkout", "contact", "cron", "internal", "launch",
+    // PACKAGES 5B/5C ADDED "b2b": POST /api/b2b/supply/checkout/session,
+    // the B2B self-service supply checkout. Account-bound, business-only,
+    // net-origin and gated by B2B_SELF_SERVICE_ENABLED, which is closed
+    // by default. No B2C route is touched. Reviewed in
+    // tests/b2b-checkout-settlement.test.mjs.
+["admin", "annual-plan", "b2b", "b2b-lead", "checkout", "contact", "cron", "internal", "launch",
      "orders", "partnerships", "stripe", "subscriptions", "withdrawal"], "an API route changed");
   // 057 SIMPLIFIED THE LAUNCH DISCOUNT: the one-use claim architecture
   // 056 built is removed, because the code became reusable. Re-pinned
@@ -404,8 +409,8 @@ test("5d: no backend, migration or commercial logic changed", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("062")),
-    "a migration 062 or beyond appeared");
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("063")),
+    "a migration 063 or beyond appeared");
   // 047 withdraws the metal case from the catalog, reviewed in
   // tests/catalog-availability.test.mjs. Re-pinned rather than removed:
   // the guard protects "no UNREVIEWED migration appeared".
@@ -421,7 +426,7 @@ test("5d: no backend, migration or commercial logic changed", () => {
   // foundation. It evolves the two b2b_supply_* tables 006 built, adds no
   // table, and touches nothing annual or B2C. Re-pinned rather than
   // deleted. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(readdirSync(path.join(ROOT, "supabase/migrations")).filter(f => f.endsWith(".sql")).length, 61,
+  assert.equal(readdirSync(path.join(ROOT, "supabase/migrations")).filter(f => f.endsWith(".sql")).length, 62,
     "the migration count changed");
   // The one-time path is untouched.
   assert.ok(site.includes('purchaseType:"once",unitPriceCents:v.price_gross_cents'),

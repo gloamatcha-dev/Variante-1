@@ -797,14 +797,14 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 61);
+  assert.equal(migrations.length, 62);
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
   // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
   // commerce foundation - it evolves the two tables 006 built for a
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 61), [], "a migration 062 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 62), [], "a migration 063 or beyond appeared");
 
   // The API surface is unchanged: no account endpoint exists, because the
   // portal reads its own rows under RLS.
@@ -899,6 +899,11 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
     // internal email. No table, no migration, no write - the same shape
     // as /api/contact. Reviewed in tests/b2b-lead-api.test.mjs.
     "/b2b-lead",
+    // PACKAGES 5B/5C: the B2B self-service supply checkout. Account-bound
+    // and business-only, it reads no annual row and writes none; the
+    // annual read model is untouched by it. Reviewed in
+    // tests/b2b-checkout-settlement.test.mjs.
+    "/b2b/supply/checkout/session",
     "/checkout/quote",
     "/checkout/session",
     "/contact",

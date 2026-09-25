@@ -857,3 +857,147 @@ export async function settleAnnualAttemptPaidAtomically(input: {
     expectedPaymentIntentId: input.stripePaymentIntentId,
   });
 }
+
+/* ══════════════════════════════════════════════════════════════
+   B2B SELF-SERVICE SUPPLY  (Package 5B)
+   ══════════════════════════════════════════════════════════════ */
+
+/**
+ * What a B2B attempt freezes in items_snapshot.
+ *
+ * NOT CheckoutAttemptItemSnapshot. That shape is the B2C catalog line -
+ * variantId, sku, unitGrossCents, lineGrossCents - and a B2B supply
+ * agreement has no catalog variant, no SKU and no gross line: it has a
+ * pack count, a net pack price and a plan. Forcing it into the consumer
+ * shape would mean inventing a variantId and calling a net figure a
+ * gross one.
+ *
+ * The column is plain jsonb with no shape constraint, so the two
+ * populations coexist; nothing that reads a B2C attempt can reach a B2B
+ * one, because every B2C reader resolves by its own request id, session
+ * id or fingerprint.
+ */
+export type B2bAttemptItemSnapshot = {
+  kind: "b2b_supply";
+  planType: "monthly" | "annual";
+  packs: number;
+  packGrams: number;
+  packNetCents: number;
+  instalmentCount: number | null;
+  /** The FIRST charge, which is what expected_total_gross_cents holds. */
+  firstChargeNetCents: number;
+  firstChargeTaxCents: number;
+  firstChargeGrossCents: number;
+  taxRatePercent: number;
+  calculationVersion: string;
+  priceOrigin: string;
+};
+
+export type B2bCheckoutAttempt = CheckoutAttempt & {
+  user_id: string | null;
+};
+
+export type B2bAttemptInput = {
+  requestId: string;
+  userId: string;
+  currency: string;
+  expectedTotalGrossCents: number;
+  items: B2bAttemptItemSnapshot[];
+  shippingCountry: string;
+  shippingGrossCents: number;
+};
+
+export type B2bAttemptResult =
+  | { ok: true; attempt: B2bCheckoutAttempt }
+  | { ok: false; error: string };
+
+const B2B_ATTEMPT_COLUMNS = `${ATTEMPT_COLUMNS}, user_id`;
+
+/**
+ * Gets or creates the checkout attempt for one B2B supply checkout.
+ *
+ * ignoreDuplicates, exactly as the one-time, subscription and annual
+ * writers: a retry of the same request_id returns the ORIGINAL frozen
+ * snapshot rather than overwriting it with a freshly recomputed one.
+ * That is what makes a double click safe and what stops a second request
+ * from quietly repricing a contract the customer is already looking at.
+ * The unique constraint on request_id is the real race guard, not the
+ * select-then-insert order.
+ *
+ * A SEPARATE WRITER rather than a reuse of an existing one, on the same
+ * terms Phase 4B3 used for the annual attempt: the four populations
+ * freeze different things, and teaching a live B2C writer about B2B
+ * would change a path it does not need to know about. NOTHING ABOVE
+ * THIS LINE IS MODIFIED.
+ *
+ * ── WHAT IS DELIBERATELY NOT WRITTEN ──────────────────────────
+ *
+ *   annual_* fingerprints        migration 040's, and migration 039
+ *                                reads their presence as "this is the
+ *                                B2C annual payment attempt"
+ *   subscription_* fingerprints  migration 025's, read the same way for
+ *                                the consumer subscription
+ *   annual_plan_id, subscription_id, stripe_*  all bindings that would
+ *                                make migration 061's pre-Stripe guard
+ *                                refuse to mint an agreement at all
+ *   tax_snapshot                 CartTaxSnapshot is the B2C
+ *                                GROSS-ORIGIN shape. B2B is net-origin
+ *                                and its VAT is established per
+ *                                instalment when that instalment is
+ *                                invoiced (migration 060), so a frozen
+ *                                cart-shaped tax object here would be a
+ *                                second answer in the wrong units. The
+ *                                B2B tax facts live in items_snapshot.
+ *   shipping_zone                the B2C zone vocabulary, which
+ *                                migration 015 constrains. Berlin free
+ *                                local delivery is not one of its
+ *                                values, so it stays NULL rather than
+ *                                borrowing a zone that means something
+ *                                else.
+ *
+ * So after this writer the five attempt populations remain structurally
+ * distinguishable, and a B2B attempt is exactly the one that is
+ * account-bound with every fingerprint and binding NULL and a
+ * b2b_supply items_snapshot.
+ */
+export async function getOrCreateB2bCheckoutAttempt(
+  input: B2bAttemptInput
+): Promise<B2bAttemptResult> {
+  const admin = getSupabaseAdmin();
+  if (!admin) {
+    return { ok: false, error: "Checkout-Speicherung vorübergehend nicht verfügbar." };
+  }
+
+  const { error: upsertError } = await admin
+    .from("checkout_attempts")
+    .upsert(
+      {
+        request_id: input.requestId,
+        user_id: input.userId,
+        currency: input.currency,
+        expected_total_gross_cents: input.expectedTotalGrossCents,
+        items_snapshot: input.items,
+        shipping_country: input.shippingCountry,
+        shipping_gross_cents: input.shippingGrossCents,
+      },
+      { onConflict: "request_id", ignoreDuplicates: true }
+    );
+
+  if (upsertError) {
+    console.error("B2B checkout attempt upsert error:", upsertError.message);
+    return { ok: false, error: "Checkout-Speicherung vorübergehend nicht verfügbar." };
+  }
+
+  const { data, error: selectError } = await admin
+    .from("checkout_attempts")
+    .select(B2B_ATTEMPT_COLUMNS)
+    .eq("request_id", input.requestId)
+    .single();
+
+  if (selectError || !data) {
+    console.error("B2B checkout attempt lookup error:", selectError?.message);
+    return { ok: false, error: "Checkout-Speicherung vorübergehend nicht verfügbar." };
+  }
+
+  return { ok: true, attempt: data as unknown as B2bCheckoutAttempt };
+}

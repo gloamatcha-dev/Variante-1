@@ -2079,7 +2079,13 @@ test("034: it is the next free number and 022-033 are untouched", () => {
      // service_role; no table, no column, no policy and no table
      // privilege. No subscription, annual or order object is touched.
      // Reviewed in tests/b2b-pending-agreement-writer.test.mjs.
-     "061_b2b_pending_agreement_writer.sql"],
+     "061_b2b_pending_agreement_writer.sql",
+     // PACKAGES 5B/5C ADDED MIGRATION 062: the B2B settlement write
+     // surface. TWO SECURITY DEFINER writers and their EXECUTE grants to
+     // service_role; no table, no column, no policy and no table
+     // privilege. No subscription, annual or order object is touched.
+     // Reviewed in tests/b2b-checkout-settlement.test.mjs.
+     "062_b2b_checkout_settlement.sql"],
     "an unreviewed migration above 034 appeared"
   );
   // AND 039 REDEFINES NOTHING 034 OWNS. It is a prepaid plan with no

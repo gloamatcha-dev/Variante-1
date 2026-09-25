@@ -81,9 +81,9 @@ test("058 still owns its number, and there is no 061", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  const last = files[files.length - 4];
+  const last = files[files.length - 5];
   assert.equal(last, "058_discounted_order_line_accounting.sql");
-  assert.equal(files.some(f => f.startsWith("062")), false, "a 062 exists");
+  assert.equal(files.some(f => f.startsWith("063")), false, "a 063 exists");
   assert.equal(files.filter(f => f.startsWith("058")).length, 1);
 });
 

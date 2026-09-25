@@ -155,8 +155,8 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(files[files.length - 23], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 24], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 24], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 25], MIGRATION_038, "038 must be the one before it");
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
@@ -164,7 +164,7 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
 test("2: no migration 044 or beyond", () => {
   // 039 is not applied anywhere, so it is still the right place to fix
   // 039. A hardening pass must not become a second migration.
-  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 61);
+  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 62);
   assert.deepEqual(beyond, [], "an unreviewed migration appeared after 039");
 });
 
@@ -1064,7 +1064,27 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // the money path or the ordering. Reviewed in
     // tests/admin-order-safety.test.mjs.
     "lib/adminRefundFlow.ts",
+    // PACKAGES 5B/5C, THREE EDITS, ALL ADDITIVE:
+    //
+    //   b2bCheckoutRules.ts  gains the TEMPORARY Berlin-only shipping
+    //                        gate and b2bFirstCharge, which closes the
+    //                        Package 5A deferral by defining
+    //                        expected_total_gross_cents as the FIRST
+    //                        charge. It still computes no price of its
+    //                        own - every figure comes from
+    //                        lib/b2bPricingRules.ts and lib/tax.ts - and
+    //                        the permanent validator is unchanged, which
+    //                        tests/b2b-checkout-settlement.test.mjs
+    //                        asserts by proving a Munich address still
+    //                        VALIDATES and is refused only by the gate.
+    //   checkoutAttempts.ts  gains getOrCreateB2bCheckoutAttempt, a
+    //                        fifth writer beside the four that exist.
+    //                        The live four are untouched, which test 54b
+    //                        below asserts directly.
+    //
+    // No B2C pricing, checkout, webhook or annual path imports any of it.
     "lib/checkoutAttempts.ts",
+    "lib/b2bCheckoutRules.ts",
     "lib/annualPlanCheckout.ts",
     "lib/annualPlanCheckoutRules.ts",
     "lib/annualPlanCheckoutDeps.ts",
@@ -1366,6 +1386,13 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
   // unchanged. They are listed so an edit to them is reviewed rather than
   // silent, exactly like the two API routes above.
   const ALLOWED_APP_EDITS = [
+    // PACKAGE 5C edits it again, additively: a B2B branch ahead of the
+    // three existing ones in each checkout.session.* arm, and a B2B
+    // classification ahead of the two invoice handlers. Every B2C call
+    // survives verbatim - tests/b2b-checkout-settlement.test.mjs asserts
+    // each one by its exact source line - and a B2B object is the only
+    // one carrying gloa_b2b_agreement_id, so no existing session, invoice
+    // or subscription changes branch.
     "app/api/stripe/webhook/route.ts",
     "app/api/cron/retry-order-notifications/route.ts",
     "app/GloaSite.tsx",

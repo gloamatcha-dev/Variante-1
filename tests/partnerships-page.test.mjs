@@ -638,7 +638,11 @@ test("4c: one API route, no server action, no migration was added for this page"
     // "Danke. Wir melden uns." The route is the same shape as
     // /api/contact and /api/partnerships: one internal email, no table,
     // no migration, no write. Reviewed in tests/b2b-lead-api.test.mjs.
-["admin", "annual-plan", "b2b-lead", "checkout", "contact", "cron", "internal", "launch",
+    // PACKAGES 5B/5C ADDED "b2b": POST /api/b2b/supply/checkout/session,
+    // the B2B self-service supply checkout. Gated by
+    // B2B_SELF_SERVICE_ENABLED, closed by default, and touching no B2C
+    // route. Reviewed in tests/b2b-checkout-settlement.test.mjs.
+["admin", "annual-plan", "b2b", "b2b-lead", "checkout", "contact", "cron", "internal", "launch",
      "orders", "partnerships", "stripe", "subscriptions", "withdrawal"],
     "an API route was added or removed");
   assert.ok(!page.includes('"use server"'), "a server action was added");
@@ -662,7 +666,7 @@ test("4c: one API route, no server action, no migration was added for this page"
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.ok(!migrations.some(f => f.startsWith("062")), "a migration 062 or beyond appeared");
+  assert.ok(!migrations.some(f => f.startsWith("063")), "a migration 063 or beyond appeared");
 });
 
 /* ══════════════════════════════════════════════════════════════

@@ -469,7 +469,7 @@ test("3F: only the owner's own private subscriptions are readable", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 61, "an unreviewed migration was added");
+  assert.equal(migrations.length, 62, "an unreviewed migration was added");
   assert.deepEqual(
     migrations.filter(f => f > "034_subscription_cancellation.sql").sort(),
     ["035_subscription_email_deliveries.sql", "036_subscription_payment_status.sql",
@@ -577,7 +577,13 @@ test("3F: only the owner's own private subscriptions are readable", () => {
      // service_role; no table, no column, no policy and no table
      // privilege. No subscription, annual or order object is touched.
      // Reviewed in tests/b2b-pending-agreement-writer.test.mjs.
-     "061_b2b_pending_agreement_writer.sql"],
+     "061_b2b_pending_agreement_writer.sql",
+     // PACKAGES 5B/5C ADDED MIGRATION 062: the B2B settlement write
+     // surface. TWO SECURITY DEFINER writers and their EXECUTE grants to
+     // service_role; no table, no column, no policy and no table
+     // privilege. No subscription, annual or order object is touched.
+     // Reviewed in tests/b2b-checkout-settlement.test.mjs.
+     "062_b2b_checkout_settlement.sql"],
     "a migration above 034 appeared that this suite has not been reviewed against"
   );
   // 038 is Phase 3K.B's one-time refund writer concurrency fix. Like 035
@@ -878,18 +884,18 @@ test("3F: migrations 022 through 034 are untouched and only 035, 036 and 037 fol
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(files.length, 61);
+  assert.equal(files.length, 62);
   // 034 remains the last of the cancellation work. 035 is Phase 3H.1's
   // delivery table, 036 is Phase 3I.B1's payment foundation, 037 is
   // Phase 3J.B1's invoice-keyed refund-state writer and 038 is Phase
   // 3K.B's one-time refund writer concurrency fix; those four are the
   // ONLY migrations allowed above it until a later phase is reviewed
   // here.
-  assert.equal(files[files.length - 25], "037_subscription_refund_correlation.sql");
-  assert.equal(files[files.length - 24], "038_one_time_refund_writer_concurrency.sql");
-  assert.equal(files[files.length - 23], "039_b2c_annual_plan_foundation.sql");
-  assert.equal(files[files.length - 22], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(files[files.length - 21], "041_annual_account_column_privileges.sql");
+  assert.equal(files[files.length - 26], "037_subscription_refund_correlation.sql");
+  assert.equal(files[files.length - 25], "038_one_time_refund_writer_concurrency.sql");
+  assert.equal(files[files.length - 24], "039_b2c_annual_plan_foundation.sql");
+  assert.equal(files[files.length - 23], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 22], "041_annual_account_column_privileges.sql");
   // 039 is Phase 4B1's annual plan foundation, reviewed in its own suite.
   // PHASE 4B8.1 ADDED MIGRATION 041 (column-level privileges that
   // narrow the annual account read surface), reviewed in
@@ -904,11 +910,11 @@ test("3F: migrations 022 through 034 are untouched and only 035, 036 and 037 fol
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(files[files.length - 16], "046_launch_signup_atomic.sql");
-  assert.equal(files[files.length - 17], "045_launch_welcome_email.sql");
-  assert.equal(files[files.length - 18], "044_launch_send.sql");
-  assert.equal(files[files.length - 19], "043_launch_waitlist.sql");
-  assert.equal(files[files.length - 20], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(files[files.length - 17], "046_launch_signup_atomic.sql");
+  assert.equal(files[files.length - 18], "045_launch_welcome_email.sql");
+  assert.equal(files[files.length - 19], "044_launch_send.sql");
+  assert.equal(files[files.length - 20], "043_launch_waitlist.sql");
+  assert.equal(files[files.length - 21], "042_annual_delivery_rls_parent_user_privilege.sql");
   // This phase writes no SQL at all: nothing in it references a
   // migration, a policy or a grant.
   for (const source of [viewCode, portalCode]) {

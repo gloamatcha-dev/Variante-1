@@ -14,7 +14,12 @@ import {
   resolveB2bBerlinEligibility,
   type B2bBerlinEligibility,
 } from "./b2bBerlinEligibility.ts";
-import { netOriginTaxMetadata } from "./tax.ts";
+import {
+  TAX_CATEGORY_RATE_PERCENT,
+  addTaxToNet,
+  netOriginTaxMetadata,
+  type TaxAmount,
+} from "./tax.ts";
 
 /**
  * Every decision the B2B self-service checkout makes, and none of the
@@ -387,6 +392,132 @@ export function validateB2bCheckoutRequest(input: B2bCheckoutRequest): B2bChecko
       normalizedCountry,
       normalizedPostcode: berlinEligibility.normalizedPostcode,
     },
+  };
+}
+
+/* ══════════════════════════════════════════════════════════════
+   THE TEMPORARY SHIPPING GATE (Package 5B, removed by 5E)
+   ══════════════════════════════════════════════════════════════
+
+   GLOA sells a supply contract anywhere in Germany. It cannot yet
+   CHARGE for delivering one anywhere but Berlin, and that is a
+   commercial fact rather than a coding gap:
+
+     * the physical tare and carton measurement DHL pricing needs is
+       still unmeasured, so lib/b2bShippingRules.ts answers
+       "measurement_required" for every non-Berlin address - a refusal,
+       not a route, and migration 060 refuses to store it as one;
+     * no customer shipping price and no shipping VAT treatment has been
+       approved for B2B, so b2b_deliveries.customer_shipping_*_cents are
+       deliberately NULL.
+
+   Berlin is unaffected because free local delivery is zero: there is
+   nothing to measure and nothing to charge.
+
+   So self-service checkout FAILS CLOSED outside Berlin until Package 5E
+   clears both facts. It is a deliberate temporary commercial gate, kept
+   as ITS OWN FUNCTION rather than folded into the validator, for three
+   reasons:
+
+     1. validateB2bCheckoutRequest states the PERMANENT rule - Germany
+        only, Berlin is a route and not a gate - and that rule does not
+        change in 5E. Editing it would mean 5E had to put it back.
+     2. Removing the gate is then one deleted call and one deleted test,
+        which is what "easy to remove" has to mean to be true.
+     3. The refusal is visible in the flow rather than hidden inside a
+        validator that also does five other things. */
+
+/**
+ * Whether this quote's delivery address can be SHIPPED under the
+ * commercial facts approved today.
+ *
+ * TEMPORARY. Package 5E deletes this function and its one call site
+ * once the DHL measurement and the B2B customer shipping charge exist.
+ * Nothing else in the module depends on it.
+ */
+export function isB2bSelfServiceShippable(quote: B2bAuthoritativeQuote): boolean {
+  return quote.berlinEligibility.eligible;
+}
+
+/**
+ * What GLOA charges the customer for delivery, today, for an address
+ * this gate admits.
+ *
+ * Always zero, and that is not a placeholder: it is the approved Berlin
+ * free-local-delivery price. Every other address is refused above rather
+ * than quietly given a zero it was not promised.
+ */
+export const B2B_BERLIN_SHIPPING_GROSS_CENTS = 0;
+
+/* ══════════════════════════════════════════════════════════════
+   THE FIRST CHARGE  (closes the Package 5A deferral)
+   ══════════════════════════════════════════════════════════════
+
+   Package 5A deliberately left the meaning of
+   checkout_attempts.expected_total_gross_cents open, because WHICH gross
+   an attempt freezes is a decision about the Stripe flow that 5A had not
+   made. 5B makes it, and states it here once so the attempt writer, the
+   Stripe session and the webhook's frozen-total comparison all read the
+   same definition from the same place.
+
+     MONTHLY   the gross of the FIRST monthly product charge.
+               Berlin shipping is zero, so the charge is the product
+               gross and nothing else. NOT twelve months, and not a
+               contract total - a monthly agreement has no lifetime
+               total, which is exactly why 059 forbids one on the row.
+
+     ANNUAL    the gross of INSTALMENT 1 ONLY.
+               NOT the full annual contract when 2 or 4 instalments were
+               chosen, NOT any future instalment, NOT any future
+               shipping. The customer is asked for one instalment today
+               and the Stripe Checkout charge must equal that number
+               exactly.
+
+   The net figure is always the canonical one from Package 1 -
+   monthlyProductNetCents, or instalmentNetCents[0] straight out of
+   allocateInstalments - and the tax is lib/tax.ts addTaxToNet at the
+   Matcha rate. No amount is computed here. */
+
+/** Matcha, the only product a B2B supply contract carries. */
+export const B2B_TAX_RATE_PERCENT = TAX_CATEGORY_RATE_PERCENT.matcha_reduced_de;
+
+export type B2bFirstCharge = {
+  /** The canonical net this charge is derived from. */
+  netCents: number;
+  taxCents: number;
+  /** THE FROZEN ATTEMPT TOTAL, and the exact Stripe charge. */
+  grossCents: number;
+  taxRatePercent: number;
+  /** Zero for Berlin, which is the only address the 5B gate admits. */
+  shippingGrossCents: number;
+  calculationVersion: string;
+  priceOrigin: string;
+};
+
+/**
+ * The first charge for a quote: what Stripe will take today, and what
+ * the checkout attempt freezes as expected_total_gross_cents.
+ */
+export function b2bFirstCharge(quote: B2bAuthoritativeQuote): B2bFirstCharge {
+  const netCents =
+    quote.planType === "monthly"
+      ? (quote.pricing as B2bMonthlyPricing).monthlyProductNetCents
+      : (quote.pricing as B2bAnnualPricing).instalmentNetCents[0];
+
+  const taxed: TaxAmount = addTaxToNet(netCents, B2B_TAX_RATE_PERCENT);
+  const meta = netOriginTaxMetadata();
+
+  return {
+    netCents: taxed.netCents,
+    taxCents: taxed.taxCents,
+    // Berlin shipping is zero, so the product gross IS the charge. Stated
+    // as an addition rather than assumed, so 5E changes one line here
+    // instead of discovering the assumption somewhere else.
+    grossCents: taxed.grossCents + B2B_BERLIN_SHIPPING_GROSS_CENTS,
+    taxRatePercent: taxed.taxRatePercent,
+    shippingGrossCents: B2B_BERLIN_SHIPPING_GROSS_CENTS,
+    calculationVersion: meta.calculationVersion,
+    priceOrigin: meta.priceOrigin,
   };
 }
 

@@ -45,6 +45,18 @@ import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { acknowledgeAnnualPaymentFailure, routeAnnualSession } from "../../../../lib/annualPlanWebhookRules";
 import { settleAnnualCheckoutSession } from "../../../../lib/annualPlanWebhook";
 import { annualWebhookDeps } from "../../../../lib/annualPlanWebhookDeps";
+// Package 5C. The B2B branch of this same endpoint - one canonical
+// Stripe webhook, a fourth payment model on it. Additive: every existing
+// branch below is reached on exactly the sessions it was reached on
+// before, because a B2B object is the only one carrying
+// gloa_b2b_agreement_id and no other flow ever writes that key.
+import {
+  acknowledgeB2bPaymentFailure,
+  routeB2bSession,
+  routeB2bSubscriptionInvoice,
+} from "../../../../lib/b2bWebhookRules";
+import { settleB2bCheckoutSession, settleB2bPaidInvoice, subscriptionIdOf } from "../../../../lib/b2bWebhook";
+import { b2bWebhookDeps } from "../../../../lib/b2bWebhookDeps";
 
 type ErrorResponse = {
   error: string;
@@ -119,6 +131,26 @@ export async function POST(request: Request): Promise<Response> {
       // deliveries are owed. The annual branch is therefore checked
       // first, and it routes on metadata rather than on anything about
       // the amount, the SKU, the quantity or the customer.
+      // ── PACKAGE 5C: B2B FIRST, AND IT HAS TO BE ─────────────
+      //
+      // A B2B MONTHLY session runs mode "subscription" and a B2B ANNUAL
+      // session runs mode "payment", so BOTH of the generic branches
+      // below would otherwise capture one. The monthly one is the worse
+      // case: handleSubscriptionSessionCompleted would look for a
+      // public.subscriptions row by gloa_subscription_id, find nothing,
+      // and a paid business supply contract would be settled as a
+      // consumer subscription that does not exist.
+      //
+      // Routing on gloa_b2b_agreement_id and nothing else means this
+      // branch is invisible to every existing session: no B2C flow
+      // writes that key, so routeB2bSession answers not_b2b for all of
+      // them and the three branches below keep exactly what they kept.
+      const b2b = routeB2bSession(session.metadata);
+      if (b2b.kind === "malformed") {
+        throw new Error(
+          `b2b checkout session ${session.id} has unusable metadata: ${b2b.reason}`
+        );
+      }
       const annual = routeAnnualSession(session.metadata);
       if (annual.kind === "malformed") {
         // A session carrying an annual plan id IS annual. Falling through
@@ -129,7 +161,15 @@ export async function POST(request: Request): Promise<Response> {
           `annual checkout session ${session.id} has unusable metadata: ${annual.reason}`
         );
       }
-      if (annual.kind === "annual") {
+      if (b2b.kind === "b2b") {
+        const outcome = await settleB2bCheckoutSession(
+          session.id, b2b.metadata, b2bWebhookDeps(stripe)
+        );
+        console.error(
+          `Stripe webhook: b2b session ${session.id} -> ${outcome.kind} `
+          + `(agreement ${b2b.metadata.agreementId})`
+        );
+      } else if (annual.kind === "annual") {
         await settleAnnualCheckoutSession(session.id, annual.metadata, annualWebhookDeps(stripe));
       } else if (session.mode === "subscription") {
         await handleSubscriptionSessionCompleted(stripe, session);
@@ -149,13 +189,35 @@ export async function POST(request: Request): Promise<Response> {
       // annual settlement is made safe for delayed methods rather than
       // made to depend on them being switched off.
       const session = event.data.object as Stripe.Checkout.Session;
+      // Package 5C. Same placement and same reason as the completed
+      // branch: a B2B session must never reach a handler written for
+      // another product.
+      const b2b = routeB2bSession(session.metadata);
+      if (b2b.kind === "malformed") {
+        throw new Error(
+          `b2b async payment for session ${session.id} has unusable metadata: ${b2b.reason}`
+        );
+      }
       const annual = routeAnnualSession(session.metadata);
       if (annual.kind === "malformed") {
         throw new Error(
           `annual async payment for session ${session.id} has unusable metadata: ${annual.reason}`
         );
       }
-      if (annual.kind === "annual") {
+      if (b2b.kind === "b2b") {
+        // THE SAME settlement path, not a second one. It re-retrieves the
+        // Session, re-proves the correlation, checks the frozen total and
+        // settles through the same compare-and-set writers, so
+        // completed-then-async, async-then-completed and any number of
+        // redeliveries of either converge on one activated agreement.
+        const outcome = await settleB2bCheckoutSession(
+          session.id, b2b.metadata, b2bWebhookDeps(stripe), "async_payment_succeeded"
+        );
+        console.error(
+          `Stripe webhook: b2b async payment ${session.id} -> ${outcome.kind} `
+          + `(agreement ${b2b.metadata.agreementId})`
+        );
+      } else if (annual.kind === "annual") {
         // THE SAME settlement path, not a second one. It re-retrieves the
         // Session, re-proves the correlation, checks the frozen total and
         // settles through the same compare-and-set writers, so a replay
@@ -213,22 +275,63 @@ export async function POST(request: Request): Promise<Response> {
       // evidence. Cancelling or expiring them would be inventing contract
       // semantics this event does not carry.
       const session = event.data.object as Stripe.Checkout.Session;
+      const b2b = routeB2bSession(session.metadata);
+      if (b2b.kind === "malformed") {
+        throw new Error(
+          `b2b async failure for session ${session.id} has unusable metadata: ${b2b.reason}`
+        );
+      }
       const annual = routeAnnualSession(session.metadata);
       if (annual.kind === "malformed") {
         throw new Error(
           `annual async failure for session ${session.id} has unusable metadata: ${annual.reason}`
         );
       }
-      if (annual.kind === "annual") {
+      if (b2b.kind === "b2b") {
+        // Package 5C. It creates NOTHING and mutates NOTHING: the pending
+        // agreement and the checkout attempt both survive as evidence,
+        // because cancelling or expiring them would be inventing contract
+        // semantics this event does not carry.
+        console.error(
+          acknowledgeB2bPaymentFailure(b2b.metadata.agreementId, session.id).message
+        );
+      } else if (annual.kind === "annual") {
         console.error(acknowledgeAnnualPaymentFailure(annual.metadata, session.id).message);
       }
     } else if (event.type === "invoice.paid") {
-      await handleInvoicePaid(stripe, event);
+      // ── PACKAGE 5C: B2B FIRST, ON THE SUBSCRIPTION'S METADATA ──
+      //
+      // invoice.paid is the CANONICAL activation event for a monthly B2B
+      // agreement - not checkout.session.completed, which fires before
+      // any invoice exists and before Stripe has a subscription id to
+      // record.
+      //
+      // The classification re-reads the SUBSCRIPTION from Stripe, because
+      // the invoice carries no GLOA metadata of its own. A consumer
+      // subscription carries gloa_subscription_id and no agreement key,
+      // so it answers not_b2b and handleInvoicePaid below keeps it
+      // entirely unchanged.
+      const b2bInvoice = await handleB2bInvoicePaid(stripe, event);
+      if (!b2bInvoice.handled) {
+        await handleInvoicePaid(stripe, event);
+      }
     } else if (event.type === "invoice.payment_failed") {
       // Phase 3I.B2. It creates NOTHING: no order, no shipment, no
       // fulfillment notice, no payment proof and no status write. Its
       // entire job is the customer's payment-problem message.
-      await handleInvoicePaymentFailed(stripe, event);
+      //
+      // ── PACKAGE 5C KEEPS B2B OUT OF IT ──────────────────────
+      //
+      // That message and its reconciliation are written for a
+      // public.subscriptions row, which a B2B agreement does not have.
+      // Package 5F owns the B2B failure and hold state machine; until it
+      // lands there is no correct B2B mutation here, so a B2B invoice
+      // takes an explicit no-op path that writes nothing, emails nobody
+      // and never enters the consumer handler.
+      const b2bFailure = await handleB2bInvoiceFailed(stripe, event);
+      if (!b2bFailure.handled) {
+        await handleInvoicePaymentFailed(stripe, event);
+      }
     } else if (isRefundEventType(event.type)) {
       await handleRefundEvent(stripe, event);
     } else if (event.type === "customer.subscription.updated") {
@@ -780,6 +883,98 @@ async function handleCheckoutSessionCompleted(stripe: Stripe, eventSession: Stri
  * processed, Stripe keeps retrying, and a genuinely paid invoice cannot
  * disappear because one delivery could not reconcile.
  */
+/**
+ * The B2B half of invoice.paid (Package 5C).
+ *
+ * Returns handled:false for EVERY non-B2B invoice, which is what keeps
+ * the consumer path byte-identical: the caller then runs
+ * handleInvoicePaid exactly as it always did.
+ *
+ * Nothing here decides money or dates. It proves the invoice belongs to
+ * a B2B supply agreement, re-reading the subscription from Stripe to do
+ * it, and hands three ids to migration 062's writer - which is idempotent
+ * on the Stripe invoice id, so a redelivery or a second event id for the
+ * same invoice creates nothing extra.
+ */
+async function handleB2bInvoicePaid(
+  stripe: Stripe,
+  event: Stripe.Event
+): Promise<{ handled: boolean }> {
+  const eventInvoice = event.data.object as Stripe.Invoice;
+  if (!eventInvoice.id) return { handled: false };
+
+  const outcome = await settleB2bPaidInvoice(
+    eventInvoice.id,
+    b2bWebhookDeps(stripe),
+    routeB2bSubscriptionInvoice
+  );
+
+  if (outcome.kind === "not_b2b") return { handled: false };
+
+  if (outcome.kind === "refused") {
+    // A B2B invoice this system cannot settle is a real problem and the
+    // right answer is a 500 so Stripe retries against fresh state -
+    // exactly what the consumer handler does with a failed fulfillment.
+    throw new Error(
+      `b2b invoice ${eventInvoice.id} could not be settled: ${outcome.reason}`
+    );
+  }
+
+  console.error(
+    `Stripe webhook: b2b invoice ${eventInvoice.id} -> ${outcome.kind} `
+    + `(agreement ${outcome.agreementId})`
+  );
+  return { handled: true };
+}
+
+/**
+ * The B2B half of invoice.payment_failed (Package 5C).
+ *
+ * ── IT IS A DELIBERATE NO-OP, AND THAT IS THE SAFE ANSWER ─────
+ *
+ * Package 5F owns the failure and hold state machine. Until it exists
+ * there is no correct B2B mutation for this event, and both alternatives
+ * were worse: letting it fall into the consumer handler would send the
+ * B2C payment-problem email and reconcile a public.subscriptions row a
+ * B2B agreement does not have, and inventing a hold here would be
+ * inventing the state machine 5F is supposed to review.
+ *
+ * It returns normally rather than throwing, so Stripe is not asked to
+ * retry an event nobody can act on; the event is then recorded as
+ * processed, which is correct because 5F acts on FUTURE failures and the
+ * feature flag is closed in production, so no real B2B invoice can fail
+ * before 5F ships.
+ */
+async function handleB2bInvoiceFailed(
+  stripe: Stripe,
+  event: Stripe.Event
+): Promise<{ handled: boolean }> {
+  const eventInvoice = event.data.object as Stripe.Invoice;
+  if (!eventInvoice.id) return { handled: false };
+
+  const subscriptionId = subscriptionIdOf(eventInvoice);
+  if (!subscriptionId) return { handled: false };
+
+  let subscription: Stripe.Subscription;
+  try {
+    subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  } catch (err) {
+    // Cannot classify it, so do not claim it. The consumer handler keeps
+    // the event, which is where it would have gone before Package 5C.
+    console.error(
+      `Stripe webhook: b2b failure classification could not read subscription ${subscriptionId}:`,
+      err instanceof Error ? err.message : err
+    );
+    return { handled: false };
+  }
+
+  const routed = routeB2bSubscriptionInvoice(subscription.metadata, subscription.id);
+  if (routed.kind !== "b2b") return { handled: false };
+
+  console.error(acknowledgeB2bPaymentFailure(routed.agreementId, eventInvoice.id).message);
+  return { handled: true };
+}
+
 async function handleInvoicePaid(stripe: Stripe, event: Stripe.Event): Promise<void> {
   const eventInvoice = event.data.object as Stripe.Invoice;
   if (!eventInvoice.id) {

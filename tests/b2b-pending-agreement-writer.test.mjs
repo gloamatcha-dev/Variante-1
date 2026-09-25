@@ -98,14 +98,23 @@ const rules = read("lib/b2bCheckoutRules.ts");
    1. THE MIGRATION EXISTS AND IS ADDITIVE ONLY
    ══════════════════════════════════════════════════════════════ */
 
-test("1: 061 is the highest migration and 062 does not exist", () => {
+test("1: 061 owns its number, and only the reviewed 062 follows it", () => {
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files[files.length - 1], MIGRATION, "061 must be the highest");
-  assert.equal(files[files.length - 2], "060_b2b_payment_delivery_foundation.sql");
-  assert.equal(files[files.length - 3], "059_b2b_supply_commerce_foundation.sql");
-  assert.equal(files.length, 61);
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 61), [],
-    "an unreviewed migration appeared after 061");
+  // PACKAGES 5B/5C ADDED MIGRATION 062: the settlement write surface -
+  // two SECURITY DEFINER writers and their EXECUTE grants, no table, no
+  // policy and no table privilege. Re-pinned rather than deleted: what
+  // this guard protects is that 061 still occupies its own number and
+  // that nothing UNREVIEWED appeared above it. Reviewed in
+  // tests/b2b-checkout-settlement.test.mjs.
+  assert.equal(files[files.length - 2], MIGRATION, "061 must be the one before the newest");
+  assert.equal(files[files.length - 3], "060_b2b_payment_delivery_foundation.sql");
+  assert.equal(files[files.length - 4], "059_b2b_supply_commerce_foundation.sql");
+  assert.equal(files.length, 62);
+  assert.deepStrictEqual(files.filter(f => Number(f.slice(0, 3)) > 61).sort(),
+    ["062_b2b_checkout_settlement.sql"],
+    "a migration above 061 appeared that this suite has not been reviewed against");
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 62), [],
+    "an unreviewed migration appeared after 062");
   // No number is used twice, which a copy-paste of a file name would do.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
@@ -917,21 +926,39 @@ test("47: Package 5A defines exactly one writer, and none of the later ones", ()
   }
 });
 
-test("48: no live application module was edited to make Package 5A work", () => {
-  const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD"],
-    { cwd: ROOT, encoding: "utf-8" }).trim();
-  const touched = changed ? changed.split(NEWLINE) : [];
-  // lib/b2bCheckoutRules.ts and the migration are NEW files, so git
-  // reports them as untracked and they never appear here. What this
-  // guard is for is an in-progress edit that bends an existing flow
-  // around B2B - a webhook branch, a B2C checkout change - and there
-  // must be none.
-  for (const rel of touched) {
-    assert.ok(!rel.startsWith("app/"),
-      `Package 5A edited an application route or component: ${rel}`);
+test("48: Package 5A's own writer is still callable by nothing in 5A", () => {
+  // ── WHY THIS GUARD CHANGED SHAPE ────────────────────────────
+  //
+  // It began as "no application module was edited", which was exactly
+  // right for 5A: that package created a writer and a pure leaf and had
+  // no runtime at all, so a webhook branch or a B2C checkout change
+  // would have meant something had gone wrong.
+  //
+  // PACKAGES 5B AND 5C legitimately add that runtime - an endpoint, and
+  // a B2B branch in the canonical Stripe webhook - so the diff-shaped
+  // version of this guard now fails on work it was never written to
+  // judge. Re-pinned rather than deleted, and narrowed to the invariant
+  // that actually belongs to 5A and still holds after a commit: the
+  // PENDING writer is reached only through the checkout deps, and 062's
+  // settlement writers never call it.
+  const deps = read("lib/b2bCheckoutDeps.ts");
+  assert.ok(deps.includes(`admin.rpc("${WRITER}"`),
+    "the pending writer is no longer reached through the checkout deps");
+
+  // It is called from exactly one place in the repository.
+  const callers = ["lib/b2bCheckoutDeps.ts", "lib/b2bCheckout.ts", "lib/b2bWebhook.ts",
+                   "lib/b2bWebhookDeps.ts", "app/api/stripe/webhook/route.ts"]
+    .filter(rel => read(rel).includes(`"${WRITER}"`));
+  assert.deepEqual(callers, ["lib/b2bCheckoutDeps.ts"],
+    "the pending writer gained a second caller");
+
+  // And no route writes the agreement table directly, which is the
+  // posture 059 to 062 were all built around.
+  for (const rel of ["lib/b2bCheckoutDeps.ts", "lib/b2bWebhookDeps.ts",
+                     "app/api/stripe/webhook/route.ts"]) {
+    assert.ok(!/from\("b2b_supply_agreements"\)/.test(read(rel)),
+      `${rel} writes the agreement table directly`);
   }
-  assert.ok(!touched.includes("app/api/stripe/webhook/route.ts"),
-    "the canonical Stripe webhook was edited by a package that creates no session");
 });
 
 test("49: the focused suite is registered in the npm test script", () => {
