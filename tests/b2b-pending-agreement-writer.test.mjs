@@ -120,25 +120,32 @@ test("1: 061 owns its number, and only the reviewed 062 follows it", () => {
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
 
-test("2: migrations 001 through 060 are unmodified in the working tree", () => {
-  // 061 itself may be edited while it is unapplied - that is the whole
-  // reason it is a new file rather than an edit to 060. Everything below
-  // it is LIVE IN PRODUCTION and may not move.
+test("2: migrations 001 through 061 are unmodified in the working tree", () => {
+  // ── 061 IS APPLIED TO PRODUCTION. IT IS IMMUTABLE. ──────────
+  //
+  // Production is 058 + 059 + 060 + 061. This guard was written before
+  // that migration reached production and correctly exempted it then;
+  // the moment it was applied, the exemption became a hole over LIVE
+  // schema - and a later pass widened the hole by listing it beside
+  // 062. Both are corrected here: the ONLY exemption is 062.
+  //
+  // 062 has not been applied anywhere, which is why it is still the
+  // right place to fix 062 and may be edited in place - the same terms
+  // 038, 039 and 040 each had while pending. REMOVE THE 062 EXEMPTION
+  // THE MOMENT 062 IS APPLIED; test 50 below is what stops this file
+  // from ever again claiming that an applied migration is pending.
   const changed = execFileSync("git",
     ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
-  // NEITHER 061 NOR 062 IS APPLIED TO PRODUCTION. Production is
-  // 058+059+060+061 for 061 and 058+059+060+061 for 062 alike - that is,
-  // 062 has not been applied at all - so each is still the right place to
-  // fix itself and may be edited in place. Exactly the terms 038, 039 and
-  // 040 each had while pending. Everything BELOW them is live and may not
-  // move, which is what this guard is for; remove an exclusion the moment
-  // that migration is applied. Reviewed in
-  // tests/b2b-checkout-settlement.test.mjs.
-  const UNAPPLIED = [MIGRATION, "062_b2b_checkout_settlement.sql"];
-  const immutable = touched.filter(rel => !UNAPPLIED.some(u => rel.endsWith(u)));
+  const PENDING = ["062_b2b_checkout_settlement.sql"];
+  const immutable = touched.filter(rel => !PENDING.some(u => rel.endsWith(u)));
   assert.deepEqual(immutable, [], "a live, immutable migration was edited");
+  // And the exemption list may not quietly grow back.
+  assert.deepEqual(PENDING, ["062_b2b_checkout_settlement.sql"],
+    "a second migration was exempted from the immutability guard");
+  assert.ok(!PENDING.some(u => u.startsWith("061")),
+    "061 is applied to production and must never be exempt");
 });
 
 test("3: 061 is wrapped in one transaction", () => {
@@ -980,4 +987,51 @@ test("49: the focused suite is registered in the npm test script", () => {
                          "tests/b2b-payment-delivery-foundation.test.mjs"]) {
     assert.ok(pkg.scripts.test.includes(sibling), `${sibling} fell out of the gate`);
   }
+});
+
+test("50: NO SUITE MAY CLAIM THAT 061 IS STILL UNAPPLIED", () => {
+  // ── THE GUARD THAT STOPS THIS BUG COMING BACK ───────────────
+  //
+  // 061 is applied to production. Every migration guard in this
+  // repository exempts a PENDING migration from immutability, and the
+  // exemption is correct exactly until the migration is applied - after
+  // which it is a hole over live schema. That transition has no natural
+  // trigger, so it is enforced here instead: a repository-wide scan for
+  // any suite still describing 061 as unapplied, or still listing it
+  // beside a genuinely pending migration.
+  //
+  // Modelled on the identical guard tests/launch-discount-migration.mjs
+  // holds over 056, and assembled from pieces for the same reason: a
+  // literal pattern would match this file's own source and fail forever.
+  const NL = String.fromCharCode(10);
+  const claims = [
+    new RegExp("061" + "[^" + NL + "]{0,80}" + "NOT APP" + "LIED", "i"),
+    new RegExp("061" + "[^" + NL + "]{0,80}" + "still " + "pending", "i"),
+    new RegExp("NEITHER " + "061", "i"),
+  ];
+  for (const rel of readdirSync(path.join(ROOT, "tests")).filter(f => f.endsWith(".test.mjs"))) {
+    const source = read(`tests/${rel}`);
+    for (const claim of claims) {
+      assert.ok(!claim.test(source),
+        `tests/${rel} still describes 061 as unapplied - it is live in production`);
+    }
+  }
+
+  // AND NO GUARD MAY EXEMPT IT IN CODE, whatever the prose says. The
+  // exemption lists are the thing that actually decides, so they are
+  // read directly: no test file may filter 061 out of a migration diff.
+  const exemptsInCode = new RegExp(
+    "endsWith\(\"" + "061" + "_b2b_pending_agreement_writer\.sql\"\)", "i");
+  for (const rel of readdirSync(path.join(ROOT, "tests")).filter(f => f.endsWith(".test.mjs"))) {
+    const code = read(`tests/${rel}`)
+      .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    assert.ok(!exemptsInCode.test(code),
+      `tests/${rel} exempts the applied migration 061 from an immutability guard`);
+  }
+
+  // The one migration that IS pending, stated once so the next reader
+  // knows which exemption is legitimate today.
+  const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
+  assert.equal(files[files.length - 1], "062_b2b_checkout_settlement.sql",
+    "the pending migration is no longer the highest - re-check every exemption");
 });
