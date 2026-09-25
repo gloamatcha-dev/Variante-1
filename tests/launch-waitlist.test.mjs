@@ -1289,7 +1289,12 @@ test("61: the rate limit went into 043 rather than into a 044, and 043 is still 
      // built, adds no table of its own, and touches no subscription,
      // annual or order object. Reviewed in
      // tests/b2b-supply-commerce-foundation.test.mjs.
-     "059_b2b_supply_commerce_foundation.sql"],
+     "059_b2b_supply_commerce_foundation.sql",
+     // PACKAGE 4B ADDED MIGRATION 060: the B2B payment schedule and
+     // delivery foundation. Two NEW tables and their integrity layer;
+     // no subscription, annual or order object is touched. Reviewed in
+     // tests/b2b-payment-delivery-foundation.test.mjs.
+     "060_b2b_payment_delivery_foundation.sql"],
     "an unreviewed migration appeared after 043"
   );
 

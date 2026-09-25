@@ -213,9 +213,35 @@ test("migration: 021 owns its number and no later migration undoes it", () => {
     const banned = REPLACES_THE_ORDER_WRITER
       ? OWNED.filter(owned => !(ADDS_ORDER_ITEM_COLUMNS && owned === "order_items"))
       : ["create_order_from_paid_checkout", ...OWNED];
+    // PACKAGE 4B ADDED MIGRATION 060, which declares its OWN
+    // tax_calculation_version column on its OWN new table
+    // public.b2b_payment_schedule - the canonical name lib/tax.ts emits
+    // for that fact, and the same name 059's pricing snapshot already
+    // uses as a JSON key. It is NOT 021's column on public.orders: 060
+    // names no table, column or function 021 owns anywhere in the file.
+    //
+    // The scan above is a NAME SUBSTRING match, so "alter table
+    // public.b2b_payment_schedule add constraint
+    // b2b_payment_schedule_tax_calculation_version_check" reads to it as
+    // a modification of 021's object. The guard is therefore NARROWED to
+    // the statement's actual TARGET rather than waived: a statement is
+    // still a violation unless it is 060 operating on one of the two
+    // tables 060 itself creates. Every other migration, and every other
+    // target, is banned exactly as before. Reviewed in
+    // tests/b2b-payment-delivery-foundation.test.mjs.
+    const OWNS_ITS_OWN_TAX_COLUMNS = name === "060_b2b_payment_delivery_foundation.sql";
     for (const owned of banned) {
-      assert.ok(!new RegExp(`(alter|drop|create or replace)[^;]*${owned}`, "i").test(later),
-        `${name} modifies the tax object ${owned}`);
+      const offending = later.split(";").filter(statement =>
+        new RegExp(`(alter|drop|create or replace)[^;]*${owned}`, "i").test(statement));
+      for (const statement of offending) {
+        // The statement's TARGET, not merely a table it mentions: an
+        // "alter table public.orders ... references public.b2b_deliveries"
+        // names a 060 table while modifying 021's.
+        assert.ok(
+          OWNS_ITS_OWN_TAX_COLUMNS
+            && /^\s*alter table public\.(b2b_payment_schedule|b2b_deliveries)\b/i.test(statement),
+          `${name} modifies the tax object ${owned}`);
+      }
     }
 
     if (ADDS_ORDER_ITEM_COLUMNS) {

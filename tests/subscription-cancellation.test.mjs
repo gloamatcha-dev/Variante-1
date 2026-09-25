@@ -2068,7 +2068,12 @@ test("034: it is the next free number and 022-033 are untouched", () => {
      // built, adds no table of its own, and touches no subscription,
      // annual or order object. Reviewed in
      // tests/b2b-supply-commerce-foundation.test.mjs.
-     "059_b2b_supply_commerce_foundation.sql"],
+     "059_b2b_supply_commerce_foundation.sql",
+     // PACKAGE 4B ADDED MIGRATION 060: the B2B payment schedule and
+     // delivery foundation. Two NEW tables and their integrity layer;
+     // no subscription, annual or order object is touched. Reviewed in
+     // tests/b2b-payment-delivery-foundation.test.mjs.
+     "060_b2b_payment_delivery_foundation.sql"],
     "an unreviewed migration above 034 appeared"
   );
   // AND 039 REDEFINES NOTHING 034 OWNS. It is a prepaid plan with no

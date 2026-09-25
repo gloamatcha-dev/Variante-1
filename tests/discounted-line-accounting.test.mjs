@@ -74,16 +74,16 @@ const price = lines => priceLaunchDiscountForCart({ code: LAUNCH_DISCOUNT_CODE, 
    1. THE MIGRATION'S SHAPE
    ══════════════════════════════════════════════════════════════ */
 
-test("058 still owns its number, and there is no 060", () => {
+test("058 still owns its number, and there is no 061", () => {
   const files = readdirSync(new URL("supabase/migrations/", ROOT)).filter(f => f.endsWith(".sql")).sort();
   // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
   // commerce foundation - it evolves the two tables 006 built for a
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  const last = files[files.length - 2];
+  const last = files[files.length - 3];
   assert.equal(last, "058_discounted_order_line_accounting.sql");
-  assert.equal(files.some(f => f.startsWith("060")), false, "a 060 exists");
+  assert.equal(files.some(f => f.startsWith("061")), false, "a 061 exists");
   assert.equal(files.filter(f => f.startsWith("058")).length, 1);
 });
 

@@ -100,14 +100,24 @@ const constraintBody = name => {
    1. THE FILE, AND ITS ONE TRANSACTION
    ══════════════════════════════════════════════════════════════ */
 
-test("1: 059 exists, is the highest migration, and 060 is NOT authored", () => {
+test("1: 059 owns its number, and only the reviewed 060 follows it", () => {
   const files = readdirSync(path.join(ROOT, "supabase/migrations")).filter(f => f.endsWith(".sql"));
   assert.ok(files.includes(MIGRATION), "059 is missing");
 
+  // PACKAGE 4B ADDED MIGRATION 060: the B2B payment schedule and
+  // delivery foundation, which 059 was deliberately written to be
+  // followed by - its header names 060 as the owner of the instalment
+  // and delivery tables. Re-pinned rather than deleted: what this guard
+  // protects is that 059 still occupies its own number and that nothing
+  // UNREVIEWED appeared above it. Reviewed in
+  // tests/b2b-payment-delivery-foundation.test.mjs.
   const numbers = files.map(f => Number(f.slice(0, 3))).filter(n => Number.isInteger(n));
-  assert.strictEqual(Math.max(...numbers), 59, "059 must be the newest migration");
-  assert.strictEqual(files.filter(f => f.startsWith("060")).length, 0,
-    "060 must NOT be authored in this package");
+  assert.strictEqual(Math.max(...numbers), 60, "060 must be the newest migration");
+  assert.deepStrictEqual(files.filter(f => Number(f.slice(0, 3)) > 59).sort(),
+    ["060_b2b_payment_delivery_foundation.sql"],
+    "a migration above 059 appeared that this suite has not been reviewed against");
+  assert.strictEqual(files.filter(f => f.startsWith("061")).length, 0,
+    "061 must NOT be authored in this package");
   assert.strictEqual(files.filter(f => f.startsWith("059")).length, 1,
     "there must be exactly one 059");
 });

@@ -404,8 +404,8 @@ test("5d: no backend, migration or commercial logic changed", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("060")),
-    "a migration 060 or beyond appeared");
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("061")),
+    "a migration 061 or beyond appeared");
   // 047 withdraws the metal case from the catalog, reviewed in
   // tests/catalog-availability.test.mjs. Re-pinned rather than removed:
   // the guard protects "no UNREVIEWED migration appeared".
@@ -421,7 +421,7 @@ test("5d: no backend, migration or commercial logic changed", () => {
   // foundation. It evolves the two b2b_supply_* tables 006 built, adds no
   // table, and touches nothing annual or B2C. Re-pinned rather than
   // deleted. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(readdirSync(path.join(ROOT, "supabase/migrations")).filter(f => f.endsWith(".sql")).length, 59,
+  assert.equal(readdirSync(path.join(ROOT, "supabase/migrations")).filter(f => f.endsWith(".sql")).length, 60,
     "the migration count changed");
   // The one-time path is untouched.
   assert.ok(site.includes('purchaseType:"once",unitPriceCents:v.price_gross_cents'),

@@ -111,9 +111,9 @@ test("1: 038 exists, owns its number, and 039 is the only one above it", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(files[files.length - 21], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 22], MIGRATION_038, "038 must be the one before it");
-  assert.equal(files[files.length - 23], MIGRATION_037, "037 must be the one before that");
+  assert.equal(files[files.length - 22], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 23], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 24], MIGRATION_037, "037 must be the one before that");
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
@@ -200,7 +200,12 @@ test("2: no migration 044 or beyond", () => {
      // built, adds no table of its own, and touches no subscription,
      // annual or order object. Reviewed in
      // tests/b2b-supply-commerce-foundation.test.mjs.
-     "059_b2b_supply_commerce_foundation.sql"],
+     "059_b2b_supply_commerce_foundation.sql",
+     // PACKAGE 4B ADDED MIGRATION 060: the B2B payment schedule and
+     // delivery foundation. Two NEW tables and their integrity layer;
+     // no subscription, annual or order object is touched. Reviewed in
+     // tests/b2b-payment-delivery-foundation.test.mjs.
+     "060_b2b_payment_delivery_foundation.sql"],
     "an unreviewed migration appeared after 043");
   // And 039 kept its hands off this phase's writer entirely.
   for (const name of [MIGRATION_039, MIGRATION_040, MIGRATION_041, MIGRATION_042]) {

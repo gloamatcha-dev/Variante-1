@@ -1242,7 +1242,7 @@ test("34: this phase adds no migration and edits none", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 59);
+  assert.equal(migrations.length, 60);
   // PHASE 4B8.2 ADDED MIGRATION 042: the ONE column privilege 041
   // was short of, so migration 039's delivery policy can still read
   // the parent's user_id while resolving ownership. Reviewed in
@@ -1251,16 +1251,16 @@ test("34: this phase adds no migration and edits none", () => {
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(migrations[migrations.length - 14], "046_launch_signup_atomic.sql");
-  assert.equal(migrations[migrations.length - 15], "045_launch_welcome_email.sql");
-  assert.equal(migrations[migrations.length - 16], "044_launch_send.sql");
-  assert.equal(migrations[migrations.length - 17], "043_launch_waitlist.sql");
+  assert.equal(migrations[migrations.length - 15], "046_launch_signup_atomic.sql");
+  assert.equal(migrations[migrations.length - 16], "045_launch_welcome_email.sql");
+  assert.equal(migrations[migrations.length - 17], "044_launch_send.sql");
+  assert.equal(migrations[migrations.length - 18], "043_launch_waitlist.sql");
   // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
   // commerce foundation - it evolves the two tables 006 built for a
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 59), [], "a migration 060 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 60), [], "a migration 061 or beyond appeared");
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   assert.equal(changed, "", "a live, immutable migration was edited");
