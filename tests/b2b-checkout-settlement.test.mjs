@@ -1017,6 +1017,167 @@ test("40: the settlement surface writes only through RPCs", () => {
   assert.ok(read("lib/b2bCheckoutDeps.ts").includes('admin.rpc("create_pending_b2b_agreement_for_attempt"'));
 });
 
+/* ══════════════════════════════════════════════════════════════
+   8. CALENDAR-MONTH DATE SEMANTICS
+   ══════════════════════════════════════════════════════════════
+
+   The approved contract is TWELVE CALENDAR MONTHS with a calendar
+   -monthly delivery rhythm and instalments every 12/n months. Day-count
+   approximations are forbidden: 365 days is not twelve months, 30 days
+   is not a month, and 365/n is not the instalment cadence. 059 already
+   says so in billing_interval_unit = 'month' with interval_count 12, 6
+   or 3; these assertions hold the runtime to it.
+
+   The month-end behaviour PostgreSQL actually produces - and the
+   timezone pinning that makes it deterministic - are proved against a
+   real cluster, because no text assertion can evaluate an interval. What
+   is asserted here is that the file still contains the expressions that
+   were proved there, and no day-count anywhere near them. */
+
+const annualWriterBody = sql.slice(sql.indexOf(`create function public.${ANNUAL_WRITER}`),
+                                   sql.indexOf(`create function public.${MONTHLY_WRITER}`));
+
+test("42: no executable 062 code approximates a month with days", () => {
+  // Scanned on the CODE, because the comments deliberately name the
+  // forbidden quantities in order to explain why they are absent.
+  for (const forbidden of [
+    /\b365\b/, /\b364\b/, /\b30 days\b/i, /\b31 days\b/i, /\b91\b/, /\b182\b/, /\b273\b/,
+    /interval\s*'\s*\d+\s*days?\s*'/i,
+    /make_interval\s*\(\s*days\s*=>/i,
+    /make_interval\s*\(\s*hours\s*=>/i,
+    /make_interval\s*\(\s*weeks\s*=>/i,
+    /\b86400\b/, /\b2592000\b/, /\b31536000\b/,
+  ]) {
+    assert.ok(!forbidden.test(sql), `062 approximates a month with days: ${forbidden}`);
+  }
+  // And the only interval unit it ever names is the month.
+  const units = [...sql.matchAll(/make_interval\s*\(\s*(\w+)\s*=>/g)].map(m => m[1]);
+  assert.ok(units.length >= 3, `expected the month intervals to be found, got ${units.length}`);
+  assert.deepEqual([...new Set(units)], ["months"],
+    "062 builds an interval out of something other than months");
+});
+
+test("43: the annual commitment end is start + 12 CALENDAR months", () => {
+  assert.ok(annualWriterBody.includes(
+    "commitment_end_at = (v_start + make_interval(months => 12)) at time zone v_zone"),
+    "the contract horizon is not twelve calendar months from the pinned start");
+  assert.ok(!/interval\s*'1 year'/i.test(sql), "062 uses a year interval");
+});
+
+test("44: instalment due dates are (j - 1) x (12 / n) calendar months", () => {
+  assert.ok(annualWriterBody.includes(
+    "(v_start + make_interval(months => (v_i - 1) * v_spacing)) at time zone v_zone"),
+    "the instalment cadence is not derived in calendar months from the start");
+  assert.ok(annualWriterBody.includes("v_spacing := 12 / v_n;"),
+    "the spacing is not 12 / instalment_count");
+  // The three approved schedules, as month offsets. Derived here rather
+  // than copied, so a change to the admitted counts fails this too.
+  const offsets = n => Array.from({ length: n }, (_, j) => j * (12 / n));
+  assert.deepEqual(offsets(1), [0]);
+  assert.deepEqual(offsets(2), [0, 6]);
+  assert.deepEqual(offsets(4), [0, 3, 6, 9]);
+  for (const n of B2B_INSTALMENT_COUNTS) {
+    assert.equal(12 % n, 0, `12 / ${n} is not exact`);
+    assert.ok(offsets(n).every(Number.isInteger), `${n} instalments give a fractional month`);
+    // The last instalment always falls INSIDE the twelve-month term.
+    assert.ok(offsets(n)[n - 1] < 12, `${n} instalments run past the contract end`);
+  }
+});
+
+test("45: all twelve delivery slots are one calendar month apart", () => {
+  assert.ok(annualWriterBody.includes(
+    "(v_start + make_interval(months => v_i - 1)) at time zone v_zone"),
+    "the delivery cadence is not one calendar month from the pinned start");
+  assert.ok(annualWriterBody.includes("for v_i in 1 .. 12 loop"),
+    "there are not exactly twelve delivery slots");
+  // EVERY date is computed from the ORIGINAL start, never from its
+  // predecessor - which is what stops a month-end clamp accumulating.
+  assert.ok(!/v_prev|previous_|last_scheduled/.test(annualWriterBody),
+    "a delivery date is derived from its predecessor, so a clamp would drift");
+});
+
+test("46: the calendar is PINNED, so the dates do not depend on the session", () => {
+  // THE SUBTLE HALF, and the one a text assertion can still reach.
+  //
+  // timestamptz + interval 'N months' is calendar arithmetic performed
+  // in the SESSION's TimeZone. Proved against a real PostgreSQL 17
+  // cluster: the same expression on the same input produced
+  //   UTC        2026-04-28 23:30:00Z
+  //   Berlin     2026-04-28 22:30:00Z
+  //   Kiritimati 2026-04-28 23:30:00Z
+  // - three sessions, two different instants. The pinned form produced
+  // 22:30:00Z in all three.
+  assert.ok(annualWriterBody.includes("v_zone      constant text := 'Europe/Berlin';"),
+    "the calendar timezone is not pinned to a named constant");
+  assert.ok(annualWriterBody.includes("v_start   := v_now at time zone v_zone;"),
+    "the month arithmetic does not start from a pinned wall-clock value");
+  // Line-wise rather than by one regex: the instalment expression nests
+  // parentheses - make_interval(months => (v_i - 1) * v_spacing) - which
+  // no [^)]* pattern can span.
+  const monthLines = annualWriterBody.split(/\r?\n/)
+    .filter(line => line.includes("make_interval(months =>"));
+  assert.equal(monthLines.length, 3,
+    `expected three month expressions, got ${monthLines.length}:\n${monthLines.join("\n")}`);
+  for (const line of monthLines) {
+    assert.match(line, /at time zone v_zone/,
+      `a month expression is not converted back through the pinned zone: ${line.trim()}`);
+  }
+  assert.ok(!/at time zone '(?!Europe\/Berlin)/.test(annualWriterBody),
+    "a second, unnamed timezone appears in the annual writer");
+  assert.ok(!/v_now \+ (make_interval\(months|interval '\d+ month)/.test(annualWriterBody),
+    "an unpinned timestamptz + month interval is still present");
+});
+
+test("47: the four schedule columns are all timestamptz, as 006 and 060 declared", () => {
+  // The pinning is only correct if these are instants. If one were a
+  // plain date or a timestamp, `at time zone` would mean the opposite
+  // thing and the round trip would be wrong.
+  const m006 = read("supabase/migrations/006_b2b_supply.sql");
+  const m060 = read("supabase/migrations/060_b2b_payment_delivery_foundation.sql");
+  assert.match(m006, /started_at\s+timestamptz/, "started_at is not timestamptz");
+  assert.match(m006, /commitment_end_at\s+timestamptz/, "commitment_end_at is not timestamptz");
+  assert.match(m060, /due_at\s+timestamptz not null/, "due_at is not timestamptz");
+  assert.match(m060, /scheduled_for\s+timestamptz not null/, "scheduled_for is not timestamptz");
+});
+
+test("48: the month-end behaviour this migration relies on is written down", () => {
+  // PostgreSQL CLAMPS: 31 Jan + 1 month is 28 Feb. Because every date is
+  // computed from the original start, the clamp never accumulates - 31
+  // Jan + 12 months is 31 Jan again. Measured on PostgreSQL 17.10:
+  //
+  //   start       +1m     +3m     +6m     +9m     +12m
+  //   2026-01-31  02-28   04-30   07-31   10-31   2027-01-31
+  //   2026-02-28  03-28   05-28   08-28   11-28   2027-02-28
+  //   2026-03-31  04-30   06-30   09-30   12-31   2027-03-31
+  //   2026-08-31  09-30   11-30   02-28   05-31   2027-08-31
+  //
+  // The migration must SAY this, because the behaviour is PostgreSQL's
+  // rather than ours and the next reader needs to know it was chosen.
+  assert.match(migration, /CLAMPS?\b/i, "the month-end clamp is not documented");
+  assert.match(migration, /never accumulates/i,
+    "the non-accumulating property is not documented");
+  assert.match(migration, /Europe\/Berlin/, "the pinned calendar is not documented");
+});
+
+test("49: 059, 060 and 061 are byte-identical, and no 063 was created", () => {
+  const changed = execFileSync("git",
+    ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
+    { cwd: ROOT, encoding: "utf-8" }).trim();
+  const touched = changed ? changed.split(NEWLINE) : [];
+  for (const live of ["059_b2b_supply_commerce_foundation.sql",
+                      "060_b2b_payment_delivery_foundation.sql",
+                      "061_b2b_pending_agreement_writer.sql"]) {
+    assert.ok(!touched.some(rel => rel.endsWith(live)),
+      `${live} was edited - it is applied in production and may not move`);
+  }
+  // 062 is the ONLY migration this correction may touch, and there is no
+  // 063: the fix belongs in 062 because it has not been applied anywhere.
+  assert.deepEqual(touched.filter(rel => !rel.endsWith(MIGRATION)), []);
+  const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql"));
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 62), [],
+    "a migration 063 was created for a correction that belongs in 062");
+});
+
 test("41: every new suite is registered in the npm test script", () => {
   const pkg = JSON.parse(read("package.json"));
   for (const suite of [

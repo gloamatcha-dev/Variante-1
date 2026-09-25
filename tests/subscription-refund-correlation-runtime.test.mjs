@@ -652,7 +652,13 @@ test("54: migrations 019 and 022-037 are unmodified", () => {
     .filter(rel => !rel.endsWith("039_b2c_annual_plan_foundation.sql"))
     // 040 is NOT APPLIED yet, so it may still be edited in place.
     .filter(rel => !rel.endsWith("040_annual_checkout_retry_fingerprints.sql"));
-  assert.deepEqual(migrations, [], "a live, immutable migration was edited");
+  // 062 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061, so 062
+  // is still the right place to fix 062 and it may be edited in place -
+  // exactly the terms 038, 039 and 040 each had while they were pending.
+  // Everything BELOW it is live and may not move, which is what this
+  // guard is for. Remove this exclusion the moment 062 is applied.
+  // Reviewed in tests/b2b-checkout-settlement.test.mjs.
+  assert.deepEqual(migrations.filter(r => !r.endsWith("062_b2b_checkout_settlement.sql")), [], "a live, immutable migration was edited");
   // And the two functions this phase depends on still read the way they
   // were applied to production.
   assert.ok(read("supabase/migrations/019_order_lifecycle_tracking.sql")

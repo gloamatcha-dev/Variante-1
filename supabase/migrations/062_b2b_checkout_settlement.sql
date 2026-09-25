@@ -103,21 +103,59 @@ begin;
 -- independently rounded figure, which is what makes net + tax = gross
 -- exact for every input.
 --
--- ── THE DATES ─────────────────────────────────────────────────
+-- ── THE DATES ARE CALENDAR MONTHS, AND THE CALENDAR IS PINNED ─
 --
 -- One activation instant, read once into v_now so every derived date in
 -- this transaction agrees:
 --
 --   started_at         v_now
---   commitment_end_at  v_now + 12 months
---   delivery k         v_now + (k - 1) months, k = 1 .. 12
---   instalment j       v_now + (j - 1) * (12 / n) months
+--   commitment_end_at  start + 12 months
+--   delivery k         start + (k - 1) months, k = 1 .. 12
+--   instalment j       start + (j - 1) * (12 / n) months
 --                      n=1 -> only j=1; n=2 -> 0, 6; n=4 -> 0, 3, 6, 9
 --
--- `interval '1 month'` is calendar-correct: it lands on the same day of
--- the following month and clamps at a short month end, which is what a
--- monthly supply contract means. Multiplying an interval by an integer
--- is exact for months.
+-- CALENDAR MONTHS, NEVER DAYS. Not 365, not 30, not 12/n of a year: the
+-- approved contract is twelve calendar months with a calendar-monthly
+-- delivery rhythm, and 059 already says so in
+-- billing_interval_unit = 'month' with interval_count 12, 6 or 3. A
+-- day-count approximation would put the second instalment of a January
+-- contract on the wrong side of a month boundary and would drift further
+-- every cycle.
+--
+-- make_interval(months => k) is exact for that: it lands on the same day
+-- of the later month and CLAMPS at a short month end - 31 Jan + 1 month
+-- is 28 Feb. Every date is computed from the ORIGINAL start rather than
+-- from its predecessor, so the clamp never accumulates: 31 Jan + 12
+-- months is 31 Jan again, not 28 Jan.
+--
+-- ── AND THE TIMEZONE IS PINNED, WHICH IS THE SUBTLE HALF ──────
+--
+-- All four columns are timestamptz, and `timestamptz + interval 'N
+-- months'` is CALENDAR arithmetic performed in the SESSION's TimeZone.
+-- That is not a detail: the same expression on the same input produces
+-- three DIFFERENT INSTANTS under UTC, Europe/Berlin and Pacific/
+-- Kiritimati, so a contract's dates would silently depend on whatever
+-- TimeZone the connection happened to carry.
+--
+-- Migration 039 met the same hazard and answered it by expressing the
+-- B2C annual cadence in HOURS, because a four-weekly rhythm is an
+-- absolute duration. That answer is not available here: a CALENDAR month
+-- is not a fixed number of hours, and the whole point of this schedule is
+-- that it follows the calendar.
+--
+-- So the calendar is named instead of inherited. The arithmetic is done
+-- in Europe/Berlin - the timezone of the business, the contract and the
+-- deliveries, and the one in which "the same day next month" means what
+-- the customer thinks it means - and converted straight back to
+-- timestamptz. The result is one deterministic instant per row whatever
+-- the session says, which `set time zone` in the focused suite proves.
+--
+-- The round trip is exact at zero months, so instalment 1 and delivery 1
+-- are started_at itself rather than a value near it.
+
+-- The calendar is stated as a constant inside each function rather than
+-- as a database setting: a GUC would be one more thing that can differ
+-- between environments, which is the failure this pinning exists to end.
 
 create function public.activate_b2b_annual_from_payment(
   p_agreement_id             uuid,
@@ -144,6 +182,13 @@ declare
   v_i         integer;
   v_pay_rows  integer;
   v_del_rows  integer;
+  -- The named calendar. See THE DATES above: an unpinned
+  -- `timestamptz + interval 'N months'` is evaluated in the SESSION's
+  -- TimeZone and would make a contract's dates depend on the connection.
+  v_zone      constant text := 'Europe/Berlin';
+  -- v_now as WALL-CLOCK TIME in that calendar. All month arithmetic
+  -- happens on this value and is converted straight back.
+  v_start     timestamp;
 begin
   if p_agreement_id is null or p_checkout_attempt_id is null then
     return pg_catalog.jsonb_build_object('result', 'invalid_input');
@@ -223,6 +268,7 @@ begin
   end if;
 
   v_now     := pg_catalog.now();
+  v_start   := v_now at time zone v_zone;
   v_base    := v_total::bigint / v_n::bigint;
   v_spacing := 12 / v_n;
 
@@ -235,7 +281,7 @@ begin
   update public.b2b_supply_agreements
      set status            = 'active',
          started_at        = v_now,
-         commitment_end_at = v_now + interval '12 months',
+         commitment_end_at = (v_start + make_interval(months => 12)) at time zone v_zone,
          next_delivery_at  = v_now
    where id = p_agreement_id;
 
@@ -273,7 +319,8 @@ begin
       insert into public.b2b_payment_schedule (
         supply_agreement_id, instalment_number, due_at, status, net_cents
       ) values (
-        p_agreement_id, v_i, v_now + (make_interval(months => v_spacing) * (v_i - 1)),
+        p_agreement_id, v_i,
+        (v_start + make_interval(months => (v_i - 1) * v_spacing)) at time zone v_zone,
         'scheduled', v_net::integer
       );
     end if;
@@ -292,7 +339,8 @@ begin
     insert into public.b2b_deliveries (
       supply_agreement_id, delivery_number, scheduled_for, quantity_packs, status
     ) values (
-      p_agreement_id, v_i, v_now + (interval '1 month' * (v_i - 1)),
+      p_agreement_id, v_i,
+      (v_start + make_interval(months => v_i - 1)) at time zone v_zone,
       v_agreement.quantity_packs, 'scheduled'
     );
   end loop;

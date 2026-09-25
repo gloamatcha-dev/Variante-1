@@ -1219,8 +1219,15 @@ test("57: no migration up to 059 is modified in the working tree", () => {
   const changed = execFileSync("git",
     ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
-  assert.strictEqual(changed, "",
-    `060 must add a file, not edit a live migration: ${changed}`);
+  // 062 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061, so 062
+  // is still the right place to fix 062 and it may be edited in place -
+  // exactly the terms 038, 039 and 040 each had while they were pending.
+  // Everything BELOW it is live and may not move, which is what this
+  // guard is for. Remove this exclusion the moment 062 is applied.
+  // Reviewed in tests/b2b-checkout-settlement.test.mjs.
+  assert.deepEqual(
+    (changed ? changed.split(/\r?\n/) : []).filter(r => !r.endsWith("062_b2b_checkout_settlement.sql")),
+    [], `060 must add a file, not edit a live migration: ${changed}`);
   // And 059 is exactly where it was left.
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
   assert.strictEqual(files[files.length - 4], "059_b2b_supply_commerce_foundation.sql");

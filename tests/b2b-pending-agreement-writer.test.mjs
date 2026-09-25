@@ -128,7 +128,16 @@ test("2: migrations 001 through 060 are unmodified in the working tree", () => {
     ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
-  const immutable = touched.filter(rel => !rel.endsWith(MIGRATION));
+  // NEITHER 061 NOR 062 IS APPLIED TO PRODUCTION. Production is
+  // 058+059+060+061 for 061 and 058+059+060+061 for 062 alike - that is,
+  // 062 has not been applied at all - so each is still the right place to
+  // fix itself and may be edited in place. Exactly the terms 038, 039 and
+  // 040 each had while pending. Everything BELOW them is live and may not
+  // move, which is what this guard is for; remove an exclusion the moment
+  // that migration is applied. Reviewed in
+  // tests/b2b-checkout-settlement.test.mjs.
+  const UNAPPLIED = [MIGRATION, "062_b2b_checkout_settlement.sql"];
+  const immutable = touched.filter(rel => !UNAPPLIED.some(u => rel.endsWith(u)));
   assert.deepEqual(immutable, [], "a live, immutable migration was edited");
 });
 
