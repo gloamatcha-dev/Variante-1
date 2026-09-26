@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AdminOrders } from "./AdminOrders";
 import { AdminSubscriptions } from "./AdminSubscriptions";
 import { AdminAnnualPlans } from "./AdminAnnualPlans";
+import { AdminB2b } from "./AdminB2b";
 import { AdminInventory } from "./AdminInventory";
 import { WAITLIST_FILTERS, type WaitlistFilter } from "../lib/adminWaitlistQuery";
 import { AdminActivity } from "./AdminActivity";
@@ -182,7 +183,7 @@ export function AdminOverview() {
   // decides whether the data below is ever asked for.
   const isDesktop = useIsAdminDesktop();
 
-  const [view, setView] = useState<"overview" | "orders" | "subscriptions" | "annual" | "inventory" | "activity" | "waitlist">("overview");
+  const [view, setView] = useState<"overview" | "orders" | "subscriptions" | "annual" | "inventory" | "activity" | "waitlist" | "b2b">("overview");
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -362,7 +363,7 @@ export function AdminOverview() {
   if (data.launch.shopStatus !== "live") blockers.push(`Shop ist ${data.launch.shopStatus}`);
   if (data.counts.confirmed === 0) blockers.push("kein bestätigter Kontakt");
 
-  const TITLE = { overview: "Übersicht", orders: "Bestellungen", subscriptions: "Abos", annual: "Jahrespläne", inventory: "Inventar", activity: "Aktivität", waitlist: "Launch List" } as const;
+  const TITLE = { overview: "Übersicht", orders: "Bestellungen", subscriptions: "Abos", annual: "Jahrespläne", inventory: "Inventar", activity: "Aktivität", waitlist: "Launch List", b2b: "B2B" } as const;
 
   /*
     MAY THIS OPERATOR OPEN THE ABOS TAB?
@@ -407,12 +408,12 @@ export function AdminOverview() {
       </header>
 
       <nav className="ops-nav" aria-label="Bereiche">
-        {([["overview", "Übersicht"], ["orders", "Bestellungen"], ["subscriptions", "Abos"], ["annual", "Jahrespläne"], ["inventory", "Inventar"], ["activity", "Aktivität"], ["waitlist", "Launch List"]] as const).map(([key, label]) => (
+        {([["overview", "Übersicht"], ["orders", "Bestellungen"], ["subscriptions", "Abos"], ["annual", "Jahrespläne"], ["inventory", "Inventar"], ["activity", "Aktivität"], ["waitlist", "Launch List"], ["b2b", "B2B"]] as const).map(([key, label]) => (
           // The array stays the full list of sections that EXIST; this
           // decides which of them this operator is offered. A tab the
           // role may not open renders nothing at all - not a disabled
           // button, which would still announce the section.
-          (key === "subscriptions" || key === "annual") && !maySeeSubscriptions ? null : (
+          (key === "subscriptions" || key === "annual" || key === "b2b") && !maySeeSubscriptions ? null : (
           <button
             key={key}
             type="button"
@@ -424,10 +425,11 @@ export function AdminOverview() {
           </button>
           )
         ))}
-        {/* Named, not faked. These open nothing and say so, because a tab
-            that leads to an empty screen costs more trust than an honest
-            "bald". They arrive with their own packages. */}
-        {["B2B", "Kosten"].map((label) => (
+        {/* Named, not faked. What is left here opens nothing and says so,
+            because a tab that leads to an empty screen costs more trust
+            than an honest "bald". B2B stopped being one of these in
+            Package 5G and is now a real section above. */}
+        {["Kosten"].map((label) => (
           <span className="ops-nav-soon" key={label}>{label}<i>bald</i></span>
         ))}
       </nav>
@@ -451,6 +453,13 @@ export function AdminOverview() {
           when open. Read only - /api/admin/annual-plans has no write
           verb to offer an action with. */}
       {view === "annual" && maySeeSubscriptions && <AdminAnnualPlans onSessionLost={() => setSignedIn(false)} />}
+
+      {/* PACKAGE 5G: the B2B supply contracts, under the SAME role gate
+          as the two commercial lists above and mounted only when open.
+          Read only - /api/admin/b2b has no write verb to offer an
+          action with, and every B2B write keeps its single existing
+          home. */}
+      {view === "b2b" && maySeeSubscriptions && <AdminB2b onSessionLost={() => setSignedIn(false)} />}
 
       {view === "inventory" && <AdminInventory onSessionLost={() => setSignedIn(false)} />}
 

@@ -607,10 +607,11 @@ test("31: both jobs live in the EXISTING daily cron - no second schedule", () =>
 test("32: each B2B job has its own error boundary and cannot starve the others", () => {
   const b2bBlock = cronSource.slice(cronSource.indexOf("RECOVERY FIRST"),
                                     cronSource.indexOf("Counts only, exactly like the email families"));
-  // THREE jobs now: recovery, invoicing, resolution - each with its own
-  // boundary, so a Stripe outage in one cannot stop the others.
-  assert.equal((b2bBlock.match(/try \{/g) ?? []).length, 3, "the three jobs share a try");
-  assert.equal((b2bBlock.match(/catch \(err\)/g) ?? []).length, 3);
+  // FOUR jobs now: recovery, invoicing, resolution and Package 5G's
+  // cancellation reconcile - each with its own boundary, so a Stripe
+  // outage in one cannot stop the others.
+  assert.equal((b2bBlock.match(/try \{/g) ?? []).length, 4, "the four jobs share a try");
+  assert.equal((b2bBlock.match(/catch \(err\)/g) ?? []).length, 4);
   assert.ok(b2bBlock.includes("emptyB2bReconcileSummary()"));
   assert.ok(b2bBlock.includes("emptyB2bInstalmentSummary()"));
   assert.ok(b2bBlock.includes("emptyB2bResolutionSummary()"));
@@ -646,10 +647,10 @@ test("34: the cron response carries counts only - no customer fact", () => {
 
 test("35: 063 is the highest migration and 064 does not exist", () => {
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files[files.length - 1], MIGRATION);
-  assert.equal(files[files.length - 2], "062_b2b_checkout_settlement.sql");
-  assert.equal(files.length, 63);
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 63), []);
+  assert.equal(files[files.length - 2], MIGRATION);
+  assert.equal(files[files.length - 3], "062_b2b_checkout_settlement.sql");
+  assert.equal(files.length, 64);
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 64), []);
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length);
 });
@@ -659,8 +660,11 @@ test("36: migrations 001 through 062 are unmodified - all are live", () => {
     ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
-  // 063 is the ONLY pending migration and may be edited in place.
-  assert.deepEqual(touched.filter(rel => !rel.endsWith(MIGRATION)), [],
+  // 063 IS LIVE. Production is 058+059+060+061+062+063, so nothing up
+  // to 063 may be edited. 064 is Package 5G's migration and the only
+  // pending one; tests/b2b-pending-agreement-writer.test.mjs test 50
+  // enforces the day that stops being true.
+  assert.deepEqual(touched.filter(rel => !rel.endsWith("064_b2b_account_change_management.sql")), [],
     "a live, immutable migration was edited");
 });
 

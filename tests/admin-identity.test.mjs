@@ -304,7 +304,7 @@ test("4d: every WRITE route takes the write capability, every read says so", () 
     same set as canWrite: owner and admin, never viewer. That set is
     DERIVED from canWrite rather than re-listed, so the two cannot drift.
   */
-  const RESTRICTED_READS = ["subscriptions", "annual-plans"];
+  const RESTRICTED_READS = ["subscriptions", "annual-plans", "b2b"];
 
   for (const route of WRITES) {
     const code = codeOnly(read(`app/api/admin/${route}/route.ts`));
@@ -507,7 +507,7 @@ test("7: no audit trail, no actor columns, no new real accounts", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 63), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 64), [],
     "a migration beyond 051 appeared");
 
   const sql = codeOnly(migration);
@@ -784,7 +784,12 @@ test("9g: the desktop admin is unchanged", () => {
                       'data.identity.role.toUpperCase()', "Abmelden", "ops-nav",
                       '["overview", "Übersicht"]', '["orders", "Bestellungen"]',
                       '["inventory", "Inventar"]', '["waitlist", "Launch List"]',
-                      '["B2B", "Kosten"]', "<AdminOrders", "<AdminInventory"]) {
+                      // PACKAGE 5G made B2B a REAL section, so it left the
+                      // "bald" list and gained a tab and a component of its
+                      // own. Kosten is still coming. Everything else the
+                      // operator sees at 1440 is unchanged.
+                      '["b2b", "B2B"]',
+                      '["Kosten"]', "<AdminOrders", "<AdminInventory", "<AdminB2b"]) {
     assert.ok(code.includes(kept), `the desktop admin lost: ${kept}`);
   }
   // The blocker's styles are additive and touch no existing admin rule.
@@ -799,7 +804,7 @@ test("9g: the desktop admin is unchanged", () => {
 test("9h: this package changed nothing else", () => {
   // No migration, no audit trail, no public surface.
   const files = readdirSync(path.join(ROOT, "supabase/migrations"));
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 63), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 64), [],
     "a migration beyond 051 appeared");
   for (const forbidden of ["admin_activity_log", "record_admin_activity", "actor_user_id"]) {
     assert.ok(!shell.includes(forbidden) && !viewportLib.includes(forbidden),

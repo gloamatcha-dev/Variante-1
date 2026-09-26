@@ -387,7 +387,10 @@ test("6: the navigation offers five real sections and fakes none", () => {
   // opens the audit log rather than a placeholder.
   // The B2C subscription launch surface added Abos, also real from the
   // day it appears: it opens the read-only list, not a placeholder.
-  assert.match(shell, /const \[view, setView\] = useState<"overview" \| "orders" \| "subscriptions" \| "annual" \| "inventory" \| "activity" \| "waitlist">\("overview"\)/);
+  // PACKAGE 5G added B2B, real from the day it appears: it opens the
+  // read-only supply-contract list, not a placeholder - which is why
+  // it also had to leave the "bald" list below.
+  assert.match(shell, /const \[view, setView\] = useState<"overview" \| "orders" \| "subscriptions" \| "annual" \| "inventory" \| "activity" \| "waitlist" \| "b2b">\("overview"\)/);
   // The "bald" list must no longer name a section that exists.
   const soon = shell.slice(shell.indexOf("ops-nav-soon") - 400, shell.indexOf("ops-nav-soon"));
   assert.ok(!soon.includes("Inventar"),
@@ -415,6 +418,9 @@ test("6: the navigation offers five real sections and fakes none", () => {
     ["inventory", "Inventar"],
     ["activity", "Aktivität"],
     ["waitlist", "Launch List"],
+    // PACKAGE 5G: the B2B supply contracts, last because it is the
+    // newest section and the one an operator opens least often.
+    ["b2b", "B2B"],
   ], "the navigation lost, gained or reordered a tab");
   // The subscription tab renders its screen, and only for a role that
   // may open it - owner and admin, never viewer. The server refuses a
@@ -425,7 +431,10 @@ test("6: the navigation offers five real sections and fakes none", () => {
   assert.ok(!soon.includes("Abos"), "Abos is listed as coming while its tab exists");
   // Coming sections are still named but are not buttons and open
   // nothing. Two of them now, because Inventar graduated.
-  assert.match(shell, /\["B2B", "Kosten"\]\.map/);
+  // PACKAGE 5G made B2B real, so the "bald" list is down to Kosten.
+  // The property is unchanged: the list exists and names no section
+  // that already has a tab.
+  assert.match(shell, /\["Kosten"\]\.map/);
   assert.match(shell, /<span className="ops-nav-soon"/);
   assert.ok(!/setView\("b2b"\)|setView\("costs"\)/.test(shell),
     "a coming section is wired to a view");
@@ -516,7 +525,16 @@ test("7: /api/admin gained orders and nothing else", () => {
   // third admin route with no write path at all. Same read_sensitive
   // gate as the subscription list. Reviewed in
   // tests/annual-plan-purchase-surface.test.mjs.
-  assert.deepEqual(dirs, ["activity", "annual-plans", "inventory", "launch", "orders", "session", "subscriptions", "waitlist"]);
+  // PACKAGE 5G ADDED "b2b": the read-only B2B supply-contract list, the
+  // FOURTH admin route with no write path at all. Same read_sensitive
+  // gate as the subscription and prepaid lists, and for the same
+  // reason - a supply agreement carries another company's open
+  // liabilities. Every B2B write keeps its single existing home: the
+  // checkout, the payment webhook, the daily job, and the customer's
+  // own quantity and cancellation routes. Reviewed in
+  // tests/b2b-account-change.test.mjs.
+  assert.deepEqual(dirs, ["activity", "annual-plans", "b2b", "inventory", "launch",
+    "orders", "session", "subscriptions", "waitlist"]);
   const orderDirs = readdirSync(path.join(ROOT, "app/api/admin/orders"), { withFileTypes: true })
     .filter(e => e.isDirectory()).map(e => e.name).sort();
   // PAKET 4A.1B added the four actions, one route each rather than one

@@ -56,6 +56,12 @@ import {
   routeB2bSubscriptionInvoice,
 } from "../../../../lib/b2bWebhookRules";
 import {
+  applyB2bPendingQuantity,
+  reconcileB2bCancelAt,
+  terminateB2bSubscription,
+} from "../../../../lib/b2bAccountWebhook";
+import { b2bAccountWebhookDeps } from "../../../../lib/b2bAccountWebhookDeps";
+import {
   holdB2bMonthlyForFailure,
   recordB2bAnnualInvoiceFailure,
   settleB2bAnnualPaidInvoice,
@@ -360,9 +366,17 @@ export async function POST(request: Request): Promise<Response> {
       // reached Stripe but failed to persist locally self-heal, because
       // Stripe emits this event for that very change.
       await handleSubscriptionUpdated(stripe, event);
+      // PACKAGE 5G: the same event is how a B2B cancellation that
+      // reached Stripe but not the database converges. It writes no
+      // status and never clears a promise - see reconcileB2bCancelAt.
+      await handleB2bSubscriptionUpdated(event);
     } else if (event.type === "customer.subscription.deleted") {
       // Phase 3C. The ONLY path that writes status = 'cancelled'.
       await handleSubscriptionDeleted(event);
+      // PACKAGE 5G: and the only path that ends a B2B monthly
+      // agreement. The B2C handler above writes public.subscriptions,
+      // which a B2B agreement does not have, so the two never collide.
+      await handleB2bSubscriptionDeleted(event);
     }
     // Other event types are acknowledged below with no action taken.
     // invoice.payment_failed is now handled above, and its contract has
@@ -952,12 +966,90 @@ async function handleB2bAnnualInvoicePaid(
   return { handled: true };
 }
 
+/**
+ * PACKAGE 5G: converges a B2B cancellation boundary from Stripe.
+ *
+ * Records a cancellation Stripe knows about and the database does
+ * not, and moves ours when Stripe carries a different date. It never
+ * writes status and never clears a promise, so a delayed or unrelated
+ * subscription update cannot un-cancel an agreement.
+ */
+async function handleB2bSubscriptionUpdated(event: Stripe.Event): Promise<void> {
+  const subscription = event.data.object as Stripe.Subscription;
+  if (!subscription?.id) return;
+
+  const outcome = await reconcileB2bCancelAt(subscription, b2bAccountWebhookDeps());
+  if (outcome.kind === "reconciled") {
+    console.error(
+      `Stripe webhook: b2b agreement ${outcome.agreementId} cancellation `
+      + `${outcome.result} from subscription ${subscription.id}`
+    );
+  } else if (outcome.kind === "failed") {
+    console.error(
+      `Stripe webhook: b2b agreement ${outcome.agreementId} cancellation could `
+      + `not be reconciled (${outcome.detail})`
+    );
+  }
+}
+
+/**
+ * PACKAGE 5G: the end of a B2B monthly agreement.
+ *
+ * Driven by the one Stripe event that means the subscription really
+ * stopped, exactly as Phase 3C decided for B2C. Idempotent: a
+ * redelivered event finds the agreement already ended.
+ */
+async function handleB2bSubscriptionDeleted(event: Stripe.Event): Promise<void> {
+  const subscription = event.data.object as Stripe.Subscription;
+  if (!subscription?.id) return;
+
+  const outcome = await terminateB2bSubscription(subscription.id, b2bAccountWebhookDeps());
+  if (outcome.kind === "cancelled" || outcome.kind === "already_cancelled") {
+    console.error(
+      `Stripe webhook: b2b agreement ${outcome.agreementId} -> ${outcome.kind}`
+    );
+  } else if (outcome.kind === "failed") {
+    console.error(
+      `Stripe webhook: b2b subscription ${subscription.id} could not be ended `
+      + `(${outcome.detail})`
+    );
+  }
+}
+
 async function handleB2bInvoicePaid(
   stripe: Stripe,
   event: Stripe.Event
 ): Promise<{ handled: boolean }> {
   const eventInvoice = event.data.object as Stripe.Invoice;
   if (!eventInvoice.id) return { handled: false };
+
+  // ── PACKAGE 5G: THE QUANTITY BOUNDARY, FIRST ───────────────
+  //
+  // 062's settle_b2b_monthly_paid_invoice reads the agreement's
+  // CURRENT quantity_packs to create this period's delivery, and 062
+  // is live and immutable. So a pending pack-count change is promoted
+  // HERE, in its own transaction, immediately before the settlement -
+  // which is how the money and the delivery move at the same boundary
+  // without that migration being touched.
+  //
+  // A failure is LOGGED, not thrown. The delivery then carries the old
+  // count for one more period and the pending change is still in the
+  // database for the next boundary; throwing would mean a paid invoice
+  // produced no delivery at all.
+  const quantity = await applyB2bPendingQuantity(
+    subscriptionIdOf(eventInvoice), b2bAccountWebhookDeps()
+  );
+  if (quantity.kind === "applied") {
+    console.error(
+      `Stripe webhook: b2b agreement ${quantity.agreementId} now bills `
+      + `${quantity.quantityPacks} packs from this period`
+    );
+  } else if (quantity.kind === "failed") {
+    console.error(
+      `Stripe webhook: b2b pending quantity for agreement ${quantity.agreementId} `
+      + `was not applied (${quantity.detail}); the delivery keeps the current count`
+    );
+  }
 
   const outcome = await settleB2bPaidInvoice(
     eventInvoice.id,

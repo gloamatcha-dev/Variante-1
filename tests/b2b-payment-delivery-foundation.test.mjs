@@ -138,10 +138,10 @@ test("1: 060 exists, is the highest migration, and 061 is NOT authored", () => {
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql"));
   assert.ok(files.includes(MIGRATION), "060 is missing");
   const numbers = files.map(f => Number(f.slice(0, 3))).filter(Number.isInteger);
-  assert.strictEqual(Math.max(...numbers), 63, "063 must be the newest migration");
+  assert.strictEqual(Math.max(...numbers), 64, "064 must be the newest migration");
   assert.strictEqual(files.filter(f => f.startsWith("060")).length, 1,
     "there must be exactly one 060");
-  assert.strictEqual(files.filter(f => f.startsWith("064")).length, 0,
+  assert.strictEqual(files.filter(f => f.startsWith("065")).length, 0,
     "061 must NOT be authored in this package");
 });
 
@@ -1219,20 +1219,20 @@ test("57: no migration up to 059 is modified in the working tree", () => {
   const changed = execFileSync("git",
     ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
-  // 063 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062, so
-  // 063 is still the right place to fix 063 and may be edited in place -
+  // 064 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062+063, so
+  // 064 is still the right place to fix 064 and may be edited in place -
   // the terms every pending migration has had. Everything BELOW it is
-  // live. Remove this the moment 063 is applied;
+  // live. Remove this the moment 064 is applied;
   // tests/b2b-pending-agreement-writer.test.mjs test 50 enforces that.
   assert.deepEqual(
     (changed ? changed.split(/\r?\n/) : [])
-      .filter(r => !r.endsWith("063_b2b_instalment_delivery_failure_runtime.sql")),
+      .filter(r => !r.endsWith("064_b2b_account_change_management.sql")),
     [], `060 must add a file, not edit a live migration: ${changed}`);
   // And 059 is exactly where it was left.
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
-  assert.strictEqual(files[files.length - 5], "059_b2b_supply_commerce_foundation.sql");
-  assert.strictEqual(files[files.length - 4], MIGRATION);
-  assert.strictEqual(files.length, 63);
+  assert.strictEqual(files[files.length - 6], "059_b2b_supply_commerce_foundation.sql");
+  assert.strictEqual(files[files.length - 5], MIGRATION);
+  assert.strictEqual(files.length, 64);
 });
 
 test("58: 060 is registered in the npm test script", () => {

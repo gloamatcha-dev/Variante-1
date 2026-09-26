@@ -797,14 +797,14 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 63);
+  assert.equal(migrations.length, 64);
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
   // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
   // commerce foundation - it evolves the two tables 006 built for a
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 63), [], "a migration 064 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 64), [], "a migration 065 or beyond appeared");
 
   // The API surface is unchanged: no account endpoint exists, because the
   // portal reads its own rows under RLS.
@@ -826,6 +826,10 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
     // annual_plans, annual_plan_deliveries and the orders behind them,
     // and holds no write verb - which is what keeps it harmless.
     "/admin/annual-plans",
+    // PACKAGE 5G: the read-only B2B supply-contract list. Read only,
+    // read_sensitive, and with no write path at all. Reviewed in
+    // tests/b2b-account-change.test.mjs.
+    "/admin/b2b",
     // PAKET 4A.2. The manual inventory: two reads (a page of items, one
     // item with its history), four writes that change descriptive fields
     // or create an item, and two that book stock - both of the latter
@@ -903,6 +907,14 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
     // and business-only, it reads no annual row and writes none; the
     // annual read model is untouched by it. Reviewed in
     // tests/b2b-checkout-settlement.test.mjs.
+    // PACKAGE 5G added the two B2B self-service change routes. Both are
+    // POST, both bearer-authenticated, both business-account gated and
+    // both behind B2B_SELF_SERVICE_ENABLED. Neither takes an amount, a
+    // price, a date or a Stripe id: the pack count is the whole body of
+    // one and the other has an optional reason. Reviewed in
+    // tests/b2b-account-change.test.mjs.
+    "/b2b/supply/[agreementId]/cancel",
+    "/b2b/supply/[agreementId]/quantity",
     "/b2b/supply/checkout/session",
     "/checkout/quote",
     "/checkout/session",

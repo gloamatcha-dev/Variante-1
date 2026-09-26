@@ -31,6 +31,13 @@ import {
   runB2bReconcileJob,
   runB2bResolutionJob,
 } from "../../../../lib/b2bRuntimeDeps";
+// Package 5G. Same cron, NINTH job, same error boundary. It finishes a
+// cancellation whose Stripe half never landed - see the write order in
+// lib/b2bAccountChange.ts.
+import {
+  emptyB2bCancelReconcileSummary,
+} from "../../../../lib/b2bAccountChange";
+import { runB2bCancelReconcileJob } from "../../../../lib/b2bAccountChangeDeps";
 import { isB2bSelfServiceEnabled } from "../../../../lib/b2bFeatureFlag";
 
 /**
@@ -363,6 +370,7 @@ export async function GET(request: Request): Promise<Response> {
     let b2bInstalments = emptyB2bInstalmentSummary();
     let b2bReconcile = emptyB2bReconcileSummary();
     let b2bDeliveries = emptyB2bResolutionSummary();
+    let b2bCancellations = emptyB2bCancelReconcileSummary();
     if (isB2bSelfServiceEnabled()) {
       // ── RECOVERY FIRST ──────────────────────────────────────
       //
@@ -415,6 +423,27 @@ export async function GET(request: Request): Promise<Response> {
         );
         b2bDeliveries = emptyB2bResolutionSummary();
       }
+
+      // ── PACKAGE 5G: FINISH A CANCELLATION STRIPE NEVER HEARD ─
+      //
+      // A cancellation writes the DATABASE first and Stripe second,
+      // because that order fails safely: the customer keeps their
+      // supply and keeps being billed, rather than having a
+      // subscription stop while every screen still says active.
+      //
+      // This is the retry for the half that may have been lost. It
+      // sets cancel_at to the boundary the customer was PROMISED, and
+      // an agreement already carrying it is left untouched.
+      try {
+        const stripe = getStripeClient();
+        if (stripe) b2bCancellations = await runB2bCancelReconcileJob(stripe);
+      } catch (err) {
+        console.error(
+          "B2B cancellation reconcile: sweep failed:",
+          err instanceof Error ? err.message : "unknown error"
+        );
+        b2bCancellations = emptyB2bCancelReconcileSummary();
+      }
     }
 
     // Counts only, exactly like the email families. No subscription id,
@@ -452,6 +481,12 @@ export async function GET(request: Request): Promise<Response> {
           refused: b2bDeliveries.refused,
           failed: b2bDeliveries.failed,
           refusals: b2bDeliveries.refusals,
+        },
+        b2bCancellations: {
+          promised: b2bCancellations.promised,
+          alreadyScheduled: b2bCancellations.alreadyScheduled,
+          repaired: b2bCancellations.repaired,
+          failed: b2bCancellations.failed,
         },
       },
       { status: 200 }

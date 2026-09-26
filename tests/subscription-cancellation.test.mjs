@@ -2092,7 +2092,15 @@ test("034: it is the next free number and 022-033 are untouched", () => {
      // column, no policy and no table privilege. No subscription,
      // annual or order object is touched. Reviewed in
      // tests/b2b-instalment-delivery-failure.test.mjs.
-     "063_b2b_instalment_delivery_failure_runtime.sql"],
+     "063_b2b_instalment_delivery_failure_runtime.sql",
+     // PACKAGE 5G ADDED MIGRATION 064: B2B account change management.
+     // Two nullable columns on b2b_supply_agreements - the pending
+     // monthly pack count and when it was asked for - and six SECURITY
+     // DEFINER functions with EXECUTE to service_role only. No table, no
+     // policy, no RLS change, no index and no table privilege. No
+     // subscription, annual or order object is touched. Reviewed in
+     // tests/b2b-account-change.test.mjs.
+     "064_b2b_account_change_management.sql"],
     "an unreviewed migration above 034 appeared"
   );
   // AND 039 REDEFINES NOTHING 034 OWNS. It is a prepaid plan with no

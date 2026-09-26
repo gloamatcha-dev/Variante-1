@@ -17,6 +17,8 @@ import {
   type AccountQuickLink,
 } from "./AccountUI";
 import { resolveGreetingName } from "../lib/accountGreeting";
+import { B2bSupplyDetail } from "./B2bSupplyDetail";
+import { B2B_PLAN_LABEL_DE } from "../lib/b2bChangeRules.ts";
 // THE PREPAID ANNUAL PLAN, all from pure leaves the browser can load.
 // annualPlanAccount.ts was written for exactly this account area and had
 // never been rendered; annualPlanRules.ts is the same money leaf the
@@ -332,6 +334,15 @@ type SupplyAgreementRow = {
   commitment_end_at: string | null;
   next_delivery_at: string | null;
   ended_at: string | null;
+  // MIGRATION 059. A self-service agreement carries these and NULLs
+  // all eight legacy money columns above, so the two shapes are told
+  // apart by plan_type and never by an empty total.
+  plan_type: string | null;
+  quantity_packs: number | null;
+  pack_grams: number | null;
+  base_monthly_product_net_cents: number | null;
+  contract_product_net_cents: number | null;
+  cancellation_effective_at: string | null;
   created_at: string;
 };
 
@@ -2628,13 +2639,46 @@ function PortalBusiness() {
               <span>Betrag netto</span>
             </div>
             {agreements.map(a => {
+              // PACKAGE 5G: a SELF-SERVICE row is described by its plan and
+              // its pack count. Its eight legacy money columns are NULL by
+              // migration 059, so the legacy cell below would have rendered
+              // "0,00 €" as if the contract were worth nothing.
+              const selfService = a.plan_type !== null && a.plan_type !== undefined;
               const model = a.offer_model_snapshot as Record<string, string>;
+              const name = selfService
+                // The label comes from lib/b2bChangeRules.ts rather than
+                // from a literal here: the B2C guard in
+                // tests/subscription-stripe-foundation.test.mjs forbids that
+                // German word in this file, and is right to - the consumer
+                // subscription bills every four weeks. A B2B agreement on
+                // the same rhythm really is a calendar month, so the label
+                // lives in lib/b2bChangeRules.ts where it is true.
+                ? (B2B_PLAN_LABEL_DE[a.plan_type ?? ""] ?? "Belieferung")
+                : (model.label || "Belieferung");
+              const amount = selfService
+                ? (a.plan_type === "annual"
+                    ? a.contract_product_net_cents
+                    : a.base_monthly_product_net_cents)
+                : a.total_net_cents;
               return (
                 <a key={a.id} href={`/account/business/supply/${a.id}`} className="supply-list-row">
-                  <span className="supply-list-name">{model.label || "Belieferung"}</span>
-                  <span>{a.next_delivery_at ? fmtDate(a.next_delivery_at) : "Noch nicht terminiert"}</span>
+                  <span className="supply-list-name">
+                    {name}
+                    {selfService && a.quantity_packs !== null && (
+                      <span className="order-item-variant">
+                        {a.quantity_packs} × {a.pack_grams ?? 500} g
+                      </span>
+                    )}
+                  </span>
+                  <span>
+                    {a.cancellation_effective_at
+                      ? `endet ${fmtDate(a.cancellation_effective_at)}`
+                      : a.next_delivery_at ? fmtDate(a.next_delivery_at) : "Noch nicht terminiert"}
+                  </span>
                   <span>{SUPPLY_STATUS_DE[a.status] || a.status}</span>
-                  <span className="supply-list-total">{fmtCents(a.total_net_cents)} €</span>
+                  <span className="supply-list-total">
+                    {typeof amount === "number" ? `${fmtCents(amount)} €` : "—"}
+                  </span>
                 </a>
               );
             })}
@@ -2698,7 +2742,38 @@ function PortalBusiness() {
 
 // ── B2B Supply Detail ─────────────────────────────────────────────────
 
+/**
+ * PACKAGE 5G ROUTES THE TWO SHAPES APART.
+ *
+ * A SELF-SERVICE agreement (plan_type set) gets its own screen: it has
+ * a plan, a pack count, a payment schedule and delivery rows, and none
+ * of the eight legacy money columns the detail below renders - 059
+ * nulls all of them. Rendering it here would have shown a business a
+ * column of 0,00 euro totals and no schedule at all.
+ *
+ * The legacy screen below is unchanged, and still the only one a
+ * negotiated agreement ever reaches.
+ */
 function SupplyDetail({ supplyId }: { supplyId: string }) {
+  const [kind, setKind] = useState<"loading" | "self_service" | "legacy">(
+    () => (supabase ? "loading" : "legacy")
+  );
+
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.from("b2b_supply_agreements").select("plan_type").eq("id", supplyId).maybeSingle()
+      .then(({ data }) => {
+        const planType = (data as { plan_type?: string | null } | null)?.plan_type ?? null;
+        setKind(planType ? "self_service" : "legacy");
+      });
+  }, [supplyId]);
+
+  if (kind === "loading") return <p className="portal-loading">Laden…</p>;
+  if (kind === "self_service") return <B2bSupplyDetail supplyId={supplyId} />;
+  return <LegacySupplyDetail supplyId={supplyId} />;
+}
+
+function LegacySupplyDetail({ supplyId }: { supplyId: string }) {
   const [agreement, setAgreement] = useState<SupplyAgreementRow | null>(null);
   const [items, setItems] = useState<SupplyItemRow[]>([]);
   const [loading, setLoading] = useState(() => !!supabase);

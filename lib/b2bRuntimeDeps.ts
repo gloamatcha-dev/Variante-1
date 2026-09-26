@@ -145,7 +145,7 @@ async function listResolvable(limit: number, horizonDays: number): Promise<B2bRe
     .from("b2b_deliveries")
     .select(
       "id, supply_agreement_id, delivery_number, quantity_packs, scheduled_for, "
-      + "b2b_supply_agreements!inner(status, plan_type, shipping_address_snapshot)"
+      + "b2b_supply_agreements!inner(status, plan_type, user_id, shipping_address_snapshot)"
     )
     .is("resolved_at", null)
     .eq("status", "scheduled")
@@ -166,24 +166,113 @@ async function listResolvable(limit: number, horizonDays: number): Promise<B2bRe
     scheduled_for: string;
     b2b_supply_agreements: {
       status?: string;
+      user_id?: string | null;
       plan_type?: string | null;
       shipping_address_snapshot?: Record<string, unknown> | null;
     } | null;
   };
 
-  return ((data ?? []) as unknown as Row[])
+  const candidates = ((data ?? []) as unknown as Row[])
     // Only a live self-service contract is routed. A pending or ended
     // agreement has nothing to deliver.
     .filter(r => r.b2b_supply_agreements?.status === "active"
-      && r.b2b_supply_agreements?.plan_type != null)
-    .map(r => ({
+      && r.b2b_supply_agreements?.plan_type != null);
+
+  // ── PACKAGE 5G: THE CURRENT ADDRESS, NOT THE FROZEN ONE ────
+  //
+  // An UNRESOLVED delivery is routed against the address the customer
+  // has TODAY. A resolved one is never re-read: 060 freezes
+  // delivery_address_snapshot at resolution and 063's resolve writer
+  // refuses to touch an already-resolved row, so history cannot be
+  // rewritten by an account edit.
+  //
+  // Before this, resolution read b2b_supply_agreements.
+  // shipping_address_snapshot - the address frozen at checkout. A
+  // business that moved and updated /account/addresses would have kept
+  // receiving Matcha at the old one, with no way to correct it short
+  // of a new contract. That is the bug this closes, and it needs no
+  // new column: the addresses table is already the customer's own
+  // editable record, and is where the checkout read the snapshot from
+  // in the first place.
+  //
+  // The agreement snapshot remains the FALLBACK, for the case where
+  // the customer has deleted every default shipping address: a
+  // delivery routed to the contracted address beats one that cannot be
+  // routed at all, and the Berlin gate is applied to whichever address
+  // wins.
+  const ownerIds = [...new Set(
+    candidates.map(r => r.b2b_supply_agreements?.user_id).filter((v): v is string => !!v)
+  )];
+  const current = await currentShippingAddresses(admin, ownerIds);
+
+  return candidates.map(r => {
+    const ownerId = r.b2b_supply_agreements?.user_id ?? null;
+    return {
       delivery_id: r.id,
       agreement_id: r.supply_agreement_id,
       delivery_number: r.delivery_number,
       quantity_packs: r.quantity_packs,
       scheduled_for: r.scheduled_for,
-      shipping_address_snapshot: r.b2b_supply_agreements?.shipping_address_snapshot ?? null,
-    }));
+      shipping_address_snapshot: (ownerId ? current.get(ownerId) : null)
+        ?? r.b2b_supply_agreements?.shipping_address_snapshot ?? null,
+    };
+  });
+}
+
+/**
+ * Each owner's CURRENT default shipping address, in the snapshot shape
+ * the checkout froze.
+ *
+ * One query for the whole batch, not one per delivery. 001 puts a
+ * partial unique index on (user_id) where is_default_shipping, so a
+ * user has at most one - no tie to break and nothing to choose.
+ *
+ * A user with none is simply absent from the map, and the caller falls
+ * back to the contracted address.
+ */
+async function currentShippingAddresses(
+  admin: NonNullable<ReturnType<typeof getSupabaseAdmin>>,
+  userIds: string[]
+): Promise<Map<string, Record<string, unknown>>> {
+  const byUser = new Map<string, Record<string, unknown>>();
+  if (userIds.length === 0) return byUser;
+
+  const { data, error } = await admin
+    .from("addresses")
+    .select("user_id, company, first_name, last_name, street, house_number, zip, city, country")
+    .in("user_id", userIds)
+    .eq("is_default_shipping", true);
+
+  if (error) {
+    // The message only, never a row: an address query that failed is
+    // not a reason to put somebody's address in a log. The caller
+    // falls back to the contracted address, which is safe.
+    console.error("B2B resolution: current address lookup error:", error.message);
+    return byUser;
+  }
+
+  type AddressRow = {
+    user_id: string; company: string | null;
+    first_name: string | null; last_name: string | null;
+    street: string | null; house_number: string | null;
+    zip: string | null; city: string | null; country: string | null;
+  };
+
+  for (const a of (data ?? []) as AddressRow[]) {
+    // EXACTLY the shape lib/b2bCheckout.ts froze, so the resolver and
+    // the Berlin gate cannot tell the two sources apart.
+    byUser.set(a.user_id, {
+      company: a.company,
+      firstName: a.first_name,
+      lastName: a.last_name,
+      street: a.street,
+      houseNumber: a.house_number,
+      zip: a.zip,
+      city: a.city,
+      country: a.country,
+    });
+  }
+  return byUser;
 }
 
 async function resolveDelivery(input: {

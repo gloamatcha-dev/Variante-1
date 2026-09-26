@@ -90,7 +90,7 @@ test("1: 042 is the newest migration, and 001-041 are untouched", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 63);
+  assert.equal(migrations.length, 64);
   assert.equal(migrations[38], "039_b2c_annual_plan_foundation.sql");
   assert.equal(migrations[39], "040_annual_checkout_retry_fingerprints.sql");
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
@@ -100,18 +100,18 @@ test("1: 042 is the newest migration, and 001-041 are untouched", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 63), [], "a migration 064 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 64), [], "a migration 065 or beyond appeared");
 
   // No live migration was edited to make room for this one.
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
-  // 063 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062,
-  // so 063 is still the right place to fix 063 and may be edited in
+  // 064 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062+063,
+  // so 064 is still the right place to fix 064 and may be edited in
   // place - the terms every pending migration has had. Everything
-  // BELOW it is live. Remove this the moment 063 is applied;
+  // BELOW it is live. Remove this the moment 064 is applied;
   // tests/b2b-pending-agreement-writer.test.mjs test 50 enforces that.
   assert.deepEqual(
-    (changed ? changed.split(/\r?\n/) : []).filter(r => !r.endsWith("063_b2b_instalment_delivery_failure_runtime.sql")),
+    (changed ? changed.split(/\r?\n/) : []).filter(r => !r.endsWith("064_b2b_account_change_management.sql")),
     [], "a live, immutable migration was edited");
 });
 
@@ -479,13 +479,13 @@ test("20: 041 itself is untouched, and so is every migration below it", () => {
   // 041 is LIVE now. The fix is a new file, never an edit to it.
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
-  // 063 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062,
-  // so 063 is still the right place to fix 063 and may be edited in
+  // 064 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062+063,
+  // so 064 is still the right place to fix 064 and may be edited in
   // place - the terms every pending migration has had. Everything
-  // BELOW it is live. Remove this the moment 063 is applied;
+  // BELOW it is live. Remove this the moment 064 is applied;
   // tests/b2b-pending-agreement-writer.test.mjs test 50 enforces that.
   assert.deepEqual(
-    (changed ? changed.split(/\r?\n/) : []).filter(r => !r.endsWith("063_b2b_instalment_delivery_failure_runtime.sql")),
+    (changed ? changed.split(/\r?\n/) : []).filter(r => !r.endsWith("064_b2b_account_change_management.sql")),
     [], "a live, immutable migration was edited");
   // 041 still says what it said: the same revokes and the same grants.
   assert.match(executable, /revoke select on table public\.annual_plans\s+from authenticated;/);

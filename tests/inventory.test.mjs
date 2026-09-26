@@ -908,7 +908,10 @@ test("8h: the list reads areas and last movement in ONE query each", () => {
 
 test("8i: the inventory tab is real and no longer advertised as coming", () => {
   assert.match(shell, /view === "inventory" && <AdminInventory/);
-  assert.match(shell, /\["B2B", "Kosten"\]\.map/);
+  // PACKAGE 5G made B2B real, so the "bald" list is down to Kosten.
+  // What this line protects is unchanged: the list still exists and
+  // still does not name Inventar.
+  assert.match(shell, /\["Kosten"\]\.map/);
   const soon = shell.slice(shell.indexOf("ops-nav-soon") - 400, shell.indexOf("ops-nav-soon"));
   assert.ok(!soon.includes("Inventar"), "Inventar is still listed as coming");
 });

@@ -443,7 +443,16 @@ test("23: the admin API surface is exactly these five, all POST-gated", () => {
   // third admin route with no write path at all. Same read_sensitive
   // gate as the subscription list. Reviewed in
   // tests/annual-plan-purchase-surface.test.mjs.
-  assert.deepEqual(dirs, ["activity", "annual-plans", "inventory", "launch", "orders", "session", "subscriptions", "waitlist"]);
+  // PACKAGE 5G ADDED "b2b": the read-only B2B supply-contract list, the
+  // FOURTH admin route with no write path at all. Same read_sensitive
+  // gate as the subscription and prepaid lists, and for the same
+  // reason - a supply agreement carries another company's open
+  // liabilities. Every B2B write keeps its single existing home: the
+  // checkout, the payment webhook, the daily job, and the customer's
+  // own quantity and cancellation routes. Reviewed in
+  // tests/b2b-account-change.test.mjs.
+  assert.deepEqual(dirs, ["activity", "annual-plans", "b2b", "inventory", "launch",
+    "orders", "session", "subscriptions", "waitlist"]);
 
   // The session route is the only one that may write anything, and what
   // it writes is a cookie.

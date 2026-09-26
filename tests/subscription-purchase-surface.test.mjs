@@ -650,18 +650,23 @@ test("6a2: the UI does not offer the section to a VIEWER", () => {
   // not disabled, which would still announce the section.
   // The prepaid plan is the same customer data under a second tab, so
   // it shares this predicate rather than growing a weaker one of its own.
-  assert.match(adminOverview, /\(key === "subscriptions" \|\| key === "annual"\) && !maySeeSubscriptions \? null :/);
+  // PACKAGE 5G put B2B behind the SAME predicate rather than a weaker
+  // one of its own - a supply contract is another company's open
+  // liabilities, which is the read a viewer may not perform.
+  assert.match(adminOverview, /\(key === "subscriptions" \|\| key === "annual" \|\| key === "b2b"\) && !maySeeSubscriptions \? null :/);
   // And the screen itself is not mounted, so no request is ever issued.
   assert.match(adminOverview, /view === "subscriptions" && maySeeSubscriptions && <AdminSubscriptions/);
   // The overview note does not point a viewer at a tab they lack.
   assert.match(adminOverview, /\{maySeeSubscriptions && <> Laufende Abos unter/);
   assert.match(adminOverview, /view === "annual" && maySeeSubscriptions && <AdminAnnualPlans/);
   // No OTHER tab became role-gated by this change.
-  // Five: the definition, the shared tab guard, the two mounts, and the
-  // overview note. Counted so the predicate cannot quietly start gating
+  // Six: the definition, the shared tab guard, the THREE mounts
+  // (Abos, Jahrespläne and Package 5G's B2B) and the overview note.
+  // Counted so the predicate cannot quietly start gating a tab that
+  // has nothing to do with the commercial screens.
   // a tab that has nothing to do with the two subscription surfaces.
-  assert.equal([...adminOverview.matchAll(/maySeeSubscriptions/g)].length, 5,
-    "the role predicate reaches more of the shell than the two Abo sections");
+  assert.equal([...adminOverview.matchAll(/maySeeSubscriptions/g)].length, 6,
+    "the role predicate reaches more of the shell than the commercial sections");
 });
 
 test("6b2: the summary counts are database counts, built from the filters they label", () => {
@@ -1135,7 +1140,7 @@ test("8: no backend, migration, cadence, price or shipping rule changed", () => 
   // built, adds no table of its own, and touches no subscription,
   // annual or order object. Reviewed in
   // tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(migrations.at(-1), "063_b2b_instalment_delivery_failure_runtime.sql",
+  assert.equal(migrations.at(-1), "064_b2b_account_change_management.sql",
     "a migration was added by a UI package");
   assert.match(read("supabase/migrations/024_seed_b2c_subscription_plans.sql"),
     /'week',\s*4,\s*'week',\s*4,\s*true,/, "the seeded cadence changed");
