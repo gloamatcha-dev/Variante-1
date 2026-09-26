@@ -15,9 +15,11 @@ import {
   b2bInstalmentItemIdempotencyKey,
   buildB2bInstalmentInvoiceParams,
   buildB2bInstalmentItemParams,
+  matchesB2bInstalmentIdentity,
   invoiceAmountMatches,
   resolveInstalmentPaymentMethod,
   routeB2bAnnualInvoice,
+  verifyB2bAdoptedDraft,
   verifyB2bInstalmentDraft,
 } from "../lib/b2bInstalmentRules.ts";
 import {
@@ -25,6 +27,9 @@ import {
   resolveB2bDeliveryRoute,
 } from "../lib/b2bDeliveryResolutionRules.ts";
 import {
+  B2B_ORPHAN_SCAN_MAX_PAGES,
+  B2B_ORPHAN_SCAN_PAGE_SIZE,
+  findB2bOrphanDraft,
   B2B_RESOLUTION_HORIZON_DAYS,
   runB2bDeliveryResolution,
   runB2bInstalmentInvoicing,
@@ -149,13 +154,16 @@ test("2: the Stripe parameters are exactly the approved shape", async () => {
   }
 });
 
-test("3: INVOICE, ITEM, RECORD, then FINALIZE - the order that makes a crash safe", async () => {
+test("3: SCAN, INVOICE, ITEM, RECORD, then FINALIZE - the order that makes a crash safe", async () => {
   const deps = stripeWorld();
   await runB2bInstalmentInvoicing(deps);
   const order = deps.world.calls.map(c => c.name).filter(n => n !== "retrieve");
   assert.deepEqual(order,
-    ["createInvoice", "createInvoiceItem", "recordInvoice", "finalizeInvoice"],
+    ["listDraftInvoices", "createInvoice", "createInvoiceItem", "recordInvoice", "finalizeInvoice"],
     "the object-creation order is not the one the Stripe semantics require");
+  // THE SCAN LEADS, because an orphan draft from a crash more than a day
+  // ago can no longer be caught by the idempotency key: Stripe prunes
+  // keys at 24h and a pruned key executes the request again.
   // And the draft is READ BACK before it is finalized - the step whose
   // absence let an empty invoice reach collection.
   const names = deps.world.calls.map(c => c.name);
@@ -801,7 +809,10 @@ const lineOf = over => ({
  * item only lands on an invoice if it names that invoice.
  */
 function stripeWorld(options = {}) {
-  const world = {
+  // A RETRY AFTER A CRASH is a SECOND run against the SAME Stripe
+  // account, so options.world hands an existing world to a fresh set
+  // of deps - which is exactly what the orphan tests need.
+  const world = options.world ?? {
     invoices: new Map(),
     items: [],
     pendingOnCustomer: options.pendingOnCustomer ?? [],
@@ -809,6 +820,14 @@ function stripeWorld(options = {}) {
     itemKeys: new Map(),
     finalized: [],
     seq: 0,
+    // STRIPE PRUNES IDEMPOTENCY KEYS once they are at least 24h old,
+    // and a request replayed with a pruned key EXECUTES AGAIN. Calling
+    // this models that day passing, so the orphan tests below prove
+    // recovery WITHOUT the key doing any of the work.
+    forgetIdempotencyCache() {
+      this.invoiceKeys.clear();
+      this.itemKeys.clear();
+    },
     calls: [],
   };
 
@@ -835,6 +854,29 @@ function stripeWorld(options = {}) {
         .map(i => ({ amount: i.amount, currency: i.currency, metadata: i.metadata }));
       return { ...inv, lines: { data: lines }, total: lines.reduce((a, l) => a + l.amount, 0) };
     },
+    // ONE PAGE of this Customer's drafts, newest first, WITH lines -
+    // modelling invoices.list, which is strongly consistent. The page
+    // ordering is insertion order reversed, so a draft created before a
+    // pile of noise really does land on a later page.
+    listDraftInvoices: async (customerId, page) => {
+      world.calls.push({ name: "listDraftInvoices", customerId, page });
+      const all = [...world.invoices.values()]
+        .filter(i => i.customer === customerId && i.status === "draft")
+        .filter(i => i.collection_method === "charge_automatically")
+        .reverse();
+      const from = page.startingAfter
+        ? all.findIndex(i => i.id === page.startingAfter) + 1
+        : 0;
+      const slice = all.slice(from, from + page.limit);
+      return {
+        data: slice.map(i => ({
+          ...i,
+          lines: { data: world.items.filter(t => t.invoice === i.id)
+            .map(t => ({ amount: t.amount, currency: t.currency, metadata: t.metadata })) },
+        })),
+        has_more: from + page.limit < all.length,
+      };
+    },
     createInvoice: async (params, opts) => {
       world.calls.push({ name: "createInvoice", params, opts });
       if (world.invoiceKeys.has(opts.idempotencyKey)) {
@@ -842,7 +884,9 @@ function stripeWorld(options = {}) {
       }
       world.seq += 1;
       const id = `in_${world.seq}`;
-      const inv = { id, status: "draft", currency: params.currency,
+      const inv = { id, status: "draft", customer: params.customer,
+                    currency: params.currency,
+                    collection_method: params.collection_method,
                     default_payment_method: params.default_payment_method,
                     metadata: params.metadata };
       world.invoices.set(id, inv);
@@ -875,7 +919,13 @@ function stripeWorld(options = {}) {
       world.calls.push({ name: "recordInvoice", input });
       const key = `${input.agreementId}:${input.instalmentNumber}`;
       if (world.recorded === undefined) world.recorded = new Map();
-      if (world.recorded.has(key)) return { result: "already_invoiced" };
+      if (world.recorded.has(key)) {
+        // 063 refuses a DIFFERENT invoice id for an already correlated
+        // instalment rather than overwriting the correlation.
+        return world.recorded.get(key) === input.stripeInvoiceId
+          ? { result: "already_invoiced" }
+          : { result: "invoice_conflict" };
+      }
       world.recorded.set(key, input.stripeInvoiceId);
       return { result: "invoiced" };
     },
@@ -1204,4 +1254,477 @@ test("43: the focused suite is registered in the npm test script", () => {
                        "tests/b2b-pending-agreement-writer.test.mjs"]) {
     assert.ok(pkg.scripts.test.includes(suite), `${suite} does not run in the gate`);
   }
+});
+
+
+/* ══════════════════════════════════════════════════════════════
+   6. DURABLE ORPHAN-DRAFT RECOVERY
+   ══════════════════════════════════════════════════════════════
+
+   The deterministic idempotency key makes a retry WITHIN THE DAY a
+   replay. It does not make a retry AFTER the day a replay: Stripe
+   documents that a key may be removed once it is at least 24 hours old,
+   and that reusing a removed key can execute a NEW request.
+
+   So the key closes only half of the crash window:
+
+     invoices.create succeeds -> the process dies before the database
+     correlation -> the row is still 'scheduled' -> nothing runs for more
+     than a day -> the key is gone -> the retry mints a SECOND draft.
+
+   Neither draft would collect on its own, because both are created with
+   auto_advance false. But two billing objects for one instalment is not
+   an acceptable resting state: somebody could finalize the wrong one by
+   hand, and the reconciliation pass would then meet an invoice the
+   database has never heard of.
+
+   The durable half is the METADATA. The agreement id and the instalment
+   number are on every invoice this package issues, together they name
+   exactly one instalment, and they never expire. So the tests below all
+   call world.forgetIdempotencyCache(): the recovery is proved with the
+   key doing none of the work. */
+
+/** A second run of the cron against the SAME Stripe account. */
+const retryAgainst = (world, overrides = {}) => stripeWorld({ world, overrides });
+
+/** A draft that IS this instalment's, so the scan finds it. */
+const ORPHAN_META = {
+  [B2B_INVOICE_AGREEMENT_METADATA_KEY]: AGREEMENT,
+  [B2B_INVOICE_INSTALMENT_METADATA_KEY]: "2",
+};
+const orphanDraft = (patch = {}) => ({
+  id: "in_orphan", status: "draft", customer: "cus_1", currency: "eur",
+  collection_method: "charge_automatically", default_payment_method: "pm_first",
+  metadata: ORPHAN_META, ...patch,
+});
+
+test("62: A - a crash before the correlation, then a PRUNED key: no second invoice", async () => {
+  // THE CRASH: the draft reaches Stripe, the database write dies.
+  const first = stripeWorld({
+    overrides: { recordInvoice: async () => { throw new Error("db died"); } },
+  });
+  const crashed = await runB2bInstalmentInvoicing(first);
+  assert.equal(crashed.failed, 1, "the crash should be reported, not swallowed");
+  assert.equal(crashed.outcomes[0].detail, "db died");
+  assert.equal(first.world.invoices.size, 1, "the first draft should exist");
+  const orphan = [...first.world.invoices.keys()][0];
+  assert.equal(first.world.invoices.get(orphan).status, "draft", "nobody may be charged");
+
+  // A DAY PASSES. The key is gone, so it can protect nothing.
+  first.world.forgetIdempotencyCache();
+
+  // THE RETRY, on the same Stripe account, with a database that works.
+  const summary = await runB2bInstalmentInvoicing(retryAgainst(first.world));
+  assert.equal(summary.invoiced, 1, JSON.stringify(summary.outcomes));
+  assert.equal(summary.adopted, 1, "the orphan should have been ADOPTED");
+  assert.ok(summary.outcomes[0].adopted, "the outcome should say so");
+  assert.equal(first.world.invoices.size, 1, "a SECOND invoice was created");
+  assert.deepEqual(first.world.finalized, [orphan], "the orphan is the one to finalize");
+});
+
+test("63: A - the adopted orphan collects EXACTLY the instalment, once", async () => {
+  const first = stripeWorld({
+    overrides: { recordInvoice: async () => { throw new Error("db died"); } },
+  });
+  const crashed = await runB2bInstalmentInvoicing(first);
+  assert.equal(crashed.failed, 1, "the crash should be reported, not swallowed");
+  assert.equal(crashed.outcomes[0].detail, "db died");
+  first.world.forgetIdempotencyCache();
+  await runB2bInstalmentInvoicing(retryAgainst(first.world));
+
+  // ONE invoice, not two: the adopted draft is the only billing object.
+  assert.equal(first.world.invoices.size, 1, "a SECOND invoice was created");
+  assert.equal(first.world.finalized.length, 1, "more than one invoice was finalized");
+  const id = first.world.finalized[0];
+  const lines = first.world.items.filter(i => i.invoice === id);
+  assert.equal(lines.length, 1, `expected one line, got ${lines.length}`);
+  assert.equal(lines[0].amount, charge(13387).grossCents, "the wrong amount is collected");
+  assert.equal(lines[0].currency, "eur");
+  assert.deepEqual(lines[0].metadata, ORPHAN_META);
+  // AND NOTHING IS PENDING on a Customer shared with every B2C product.
+  assert.deepEqual(first.world.pendingOnCustomer, []);
+});
+
+test("64: B - an orphan with NO line yet is adopted and then gets its line", async () => {
+  // THE EARLIER CRASH: between invoices.create and invoiceItems.create.
+  const first = stripeWorld({
+    overrides: { createInvoiceItem: async () => { throw new Error("died before the item"); } },
+  });
+  const crashed = await runB2bInstalmentInvoicing(first);
+  assert.equal(crashed.failed, 1, "the crash should be reported, not swallowed");
+  assert.equal(crashed.outcomes[0].detail, "died before the item");
+  assert.equal(first.world.invoices.size, 1, "the empty draft should exist");
+  assert.equal(first.world.items.length, 0, "no line should exist yet");
+  const orphan = [...first.world.invoices.keys()][0];
+
+  first.world.forgetIdempotencyCache();
+  const summary = await runB2bInstalmentInvoicing(retryAgainst(first.world));
+
+  assert.equal(summary.invoiced, 1, JSON.stringify(summary.outcomes));
+  assert.equal(summary.adopted, 1, "the EMPTY orphan should have been adopted");
+  assert.equal(first.world.invoices.size, 1, "a second invoice was created");
+  assert.deepEqual(first.world.finalized, [orphan]);
+  const lines = first.world.items.filter(i => i.invoice === orphan);
+  assert.equal(lines.length, 1, "the adopted empty draft never gained its line");
+  assert.equal(lines[0].amount, charge(13387).grossCents);
+});
+
+test("65: C - TWO matching drafts FAIL CLOSED, and neither is touched", async () => {
+  const deps = stripeWorld();
+  for (const id of ["in_orphan_a", "in_orphan_b"]) {
+    deps.world.invoices.set(id, orphanDraft({ id }));
+  }
+
+  const summary = await runB2bInstalmentInvoicing(deps);
+  assert.equal(summary.failed, 1, JSON.stringify(summary.outcomes));
+  assert.equal(summary.invoiced, 0, "something was invoiced anyway");
+  assert.match(summary.outcomes[0].detail, /2 draft invoices already exist/);
+
+  // NOTHING CREATED, NOTHING FINALIZED, NOTHING REPAIRED.
+  assert.equal(deps.world.invoices.size, 2, "a third invoice was created");
+  assert.deepEqual(deps.world.finalized, [], "a duplicate was finalized");
+  assert.deepEqual(deps.world.calls.filter(c => c.name === "createInvoice"), []);
+  assert.deepEqual(deps.world.calls.filter(c => c.name === "createInvoiceItem"), []);
+  for (const id of ["in_orphan_a", "in_orphan_b"]) {
+    assert.equal(deps.world.invoices.get(id).status, "draft", `${id} was modified`);
+  }
+});
+
+test("66: C - and the instalment stays uninvoiced rather than half-recorded", async () => {
+  const deps = stripeWorld();
+  for (const id of ["in_orphan_a", "in_orphan_b"]) {
+    deps.world.invoices.set(id, orphanDraft({ id }));
+  }
+  await runB2bInstalmentInvoicing(deps);
+  // NO CORRELATION: the row is still 'scheduled', so the next run scans
+  // again and a person can see an instalment that is not progressing.
+  assert.deepEqual(deps.world.calls.filter(c => c.name === "recordInvoice"), []);
+});
+
+test("67: D - a draft for another instalment or agreement is NOT adopted", async () => {
+  const wrong = [
+    ["another instalment of the same agreement", {
+      [B2B_INVOICE_AGREEMENT_METADATA_KEY]: AGREEMENT,
+      [B2B_INVOICE_INSTALMENT_METADATA_KEY]: "3",
+    }],
+    ["the same instalment of another agreement", {
+      [B2B_INVOICE_AGREEMENT_METADATA_KEY]: "44444444-4444-4444-8444-444444444444",
+      [B2B_INVOICE_INSTALMENT_METADATA_KEY]: "2",
+    }],
+    ["the agreement but no instalment number", {
+      [B2B_INVOICE_AGREEMENT_METADATA_KEY]: AGREEMENT,
+    }],
+    ["the instalment number but no agreement", {
+      [B2B_INVOICE_INSTALMENT_METADATA_KEY]: "2",
+    }],
+    ["no metadata at all - somebody else's draft", {}],
+  ];
+
+  for (const [label, metadata] of wrong) {
+    const deps = stripeWorld();
+    deps.world.invoices.set("in_other", orphanDraft({ id: "in_other", metadata }));
+    const summary = await runB2bInstalmentInvoicing(deps);
+
+    // A NEW invoice IS right here: no draft for THIS instalment existed.
+    assert.equal(summary.invoiced, 1, `${label}: ${JSON.stringify(summary.outcomes)}`);
+    assert.equal(summary.adopted, 0, `${label}: an unrelated draft was adopted`);
+    assert.equal(deps.world.invoices.get("in_other").status, "draft",
+      `${label}: the unrelated draft was modified`);
+    assert.ok(!deps.world.finalized.includes("in_other"),
+      `${label}: the unrelated draft was FINALIZED`);
+    assert.deepEqual(deps.world.items.filter(i => i.invoice === "in_other"), [],
+      `${label}: a line was added to the unrelated draft`);
+  }
+});
+
+test("68: D - BOTH keys must match, proved on the matcher directly", async () => {
+  const identity = { agreementId: AGREEMENT, instalmentNumber: 2 };
+  assert.ok(matchesB2bInstalmentIdentity({ metadata: ORPHAN_META }, identity));
+  // The instalment number is compared as the STRING Stripe stores.
+  assert.ok(matchesB2bInstalmentIdentity(
+    { metadata: { ...ORPHAN_META, [B2B_INVOICE_INSTALMENT_METADATA_KEY]: "2" } }, identity));
+  for (const bad of [
+    { ...ORPHAN_META, [B2B_INVOICE_INSTALMENT_METADATA_KEY]: "02" },
+    { ...ORPHAN_META, [B2B_INVOICE_INSTALMENT_METADATA_KEY]: " 2" },
+    { ...ORPHAN_META, [B2B_INVOICE_INSTALMENT_METADATA_KEY]: "3" },
+    { ...ORPHAN_META, [B2B_INVOICE_AGREEMENT_METADATA_KEY]: AGREEMENT.slice(0, -1) },
+    { ...ORPHAN_META, [B2B_INVOICE_AGREEMENT_METADATA_KEY]: AGREEMENT + "0" },
+    { [B2B_INVOICE_AGREEMENT_METADATA_KEY]: AGREEMENT },
+    { [B2B_INVOICE_INSTALMENT_METADATA_KEY]: "2" },
+    {},
+  ]) {
+    assert.ok(!matchesB2bInstalmentIdentity({ metadata: bad }, identity),
+      `matched on ${JSON.stringify(bad)}`);
+  }
+  assert.ok(!matchesB2bInstalmentIdentity({ metadata: null }, identity));
+  assert.ok(!matchesB2bInstalmentIdentity({}, identity));
+});
+
+test("69: E - a MATCHING draft that is wrong in any way fails closed", async () => {
+  // Every case below still matches on both metadata keys, so the scan
+  // finds it and then REFUSES it rather than repairing it.
+  const bad = [
+    ["another currency", { currency: "usd" }, /draft is in usd/],
+    ["another card", { default_payment_method: "pm_other" }, /different payment method/],
+  ];
+  for (const [label, patch, expected] of bad) {
+    const deps = stripeWorld();
+    deps.world.invoices.set("in_orphan", orphanDraft(patch));
+    const summary = await runB2bInstalmentInvoicing(deps);
+
+    assert.equal(summary.failed, 1, `${label}: ${JSON.stringify(summary.outcomes)}`);
+    assert.equal(summary.invoiced, 0, `${label}: something was invoiced anyway`);
+    assert.match(summary.outcomes[0].detail, expected, label);
+    assert.deepEqual(deps.world.finalized, [], `${label}: something was FINALIZED`);
+    assert.equal(deps.world.invoices.size, 1, `${label}: a second invoice was created`);
+    assert.equal(deps.world.invoices.get("in_orphan").status, "draft",
+      `${label}: the draft was modified`);
+  }
+});
+
+test("70: E - a foreign customer's draft is never even a candidate", async () => {
+  // The scan is scoped to the CANONICAL Stripe Customer, so another
+  // business's draft is filtered at the list. A new invoice is right.
+  for (const patch of [{ customer: "cus_someone_else" },
+                       { collection_method: "send_invoice" }]) {
+    const deps = stripeWorld();
+    deps.world.invoices.set("in_orphan", orphanDraft(patch));
+    const summary = await runB2bInstalmentInvoicing(deps);
+    const label = JSON.stringify(patch);
+    assert.equal(summary.invoiced, 1, `${label}: ${JSON.stringify(summary.outcomes)}`);
+    assert.equal(summary.adopted, 0, `${label}: it was adopted`);
+    assert.ok(!deps.world.finalized.includes("in_orphan"), `${label}: it was finalized`);
+    assert.equal(deps.world.invoices.get("in_orphan").status, "draft",
+      `${label}: it was modified`);
+  }
+  // AND THE VERIFIER REFUSES THEM TOO, so a wider list cannot slip one
+  // through: the scope is belt, the check is braces.
+  const input = {
+    agreementId: AGREEMENT, instalmentNumber: 2, stripeCustomerId: "cus_1",
+    currency: "EUR", charge: charge(13387), defaultPaymentMethodId: "pm_first",
+  };
+  assert.match(verifyB2bAdoptedDraft(orphanDraft({ customer: "cus_x" }), input).reason,
+    /different Stripe customer/);
+  assert.match(verifyB2bAdoptedDraft(orphanDraft({ collection_method: "send_invoice" }), input).reason,
+    /collects by send_invoice/);
+  for (const status of ["open", "paid", "void", "uncollectible"]) {
+    assert.match(verifyB2bAdoptedDraft(orphanDraft({ status }), input).reason,
+      new RegExp(`is ${status}, not draft`), status);
+  }
+});
+
+test("71: E - a matching draft with the WRONG LINES fails closed", async () => {
+  const gross = charge(13387).grossCents;
+  const line = (patch = {}) => ({ amount: gross, currency: "eur", metadata: ORPHAN_META, ...patch });
+  const cases = [
+    ["two identical lines - a doubled charge", [line(), line()], /holds 2 lines/],
+    ["a wrong amount", [line({ amount: gross + 100 })], new RegExp("expected " + gross)],
+    ["somebody else's line", [line({ metadata: {} })], /line metadata is not this instalment/],
+    ["a wrong currency", [line({ currency: "usd" })], /line is in usd/],
+    ["the right amount for the wrong instalment", [line({
+      metadata: { ...ORPHAN_META, [B2B_INVOICE_INSTALMENT_METADATA_KEY]: "3" },
+    })], /line metadata is not this instalment/],
+  ];
+
+  for (const [label, lines, expected] of cases) {
+    const deps = stripeWorld();
+    deps.world.invoices.set("in_orphan", orphanDraft());
+    for (const l of lines) deps.world.items.push({ ...l, invoice: "in_orphan" });
+
+    const summary = await runB2bInstalmentInvoicing(deps);
+    assert.equal(summary.failed, 1, `${label}: ${JSON.stringify(summary.outcomes)}`);
+    assert.equal(summary.invoiced, 0, label);
+    assert.match(summary.outcomes[0].detail, expected, label);
+    assert.deepEqual(deps.world.finalized, [], `${label}: something was FINALIZED`);
+    assert.equal(deps.world.invoices.size, 1, `${label}: a second invoice was created`);
+    // THE WRONG LINES ARE LEFT EXACTLY AS THEY WERE. A person resolves
+    // them; this code does not delete or rewrite a Stripe object.
+    assert.equal(deps.world.items.filter(i => i.invoice === "in_orphan").length, lines.length,
+      `${label}: the existing lines were changed`);
+  }
+});
+
+test("72: E - exactly ONE canonical line is REUSED, not duplicated", async () => {
+  const deps = stripeWorld();
+  deps.world.invoices.set("in_orphan", orphanDraft());
+  deps.world.items.push({
+    invoice: "in_orphan", amount: charge(13387).grossCents,
+    currency: "eur", metadata: ORPHAN_META,
+  });
+
+  const summary = await runB2bInstalmentInvoicing(deps);
+  assert.equal(summary.adopted, 1, JSON.stringify(summary.outcomes));
+  assert.deepEqual(deps.world.finalized, ["in_orphan"]);
+  // NO SECOND ITEM, which would double the charge.
+  assert.deepEqual(deps.world.calls.filter(c => c.name === "createInvoiceItem"), []);
+  assert.equal(deps.world.items.filter(i => i.invoice === "in_orphan").length, 1);
+});
+
+test("73: F - exceeding the page bound FAILS CLOSED rather than creating another", async () => {
+  // A Stripe that ALWAYS reports more, so only the bound stops the scan.
+  let pages = 0;
+  const deps = stripeWorld({
+    overrides: {
+      listDraftInvoices: async () => {
+        pages += 1;
+        return { data: [{ id: `in_noise_${pages}`, metadata: {} }], has_more: true };
+      },
+    },
+  });
+
+  const summary = await runB2bInstalmentInvoicing(deps);
+  assert.equal(summary.failed, 1, JSON.stringify(summary.outcomes));
+  assert.equal(summary.invoiced, 0);
+  assert.match(summary.outcomes[0].detail,
+    new RegExp(`exceeded ${B2B_ORPHAN_SCAN_MAX_PAGES} pages`));
+  assert.equal(pages, B2B_ORPHAN_SCAN_MAX_PAGES, "the scan must stop AT the bound");
+  // THE POINT: an unreachable candidate must not become a duplicate.
+  assert.equal(deps.world.invoices.size, 0, "something was created past the bound");
+  assert.deepEqual(deps.world.finalized, []);
+  assert.deepEqual(deps.world.calls.filter(c => c.name === "recordInvoice"), []);
+});
+
+test("74: F - has_more with nothing to page from also fails closed", async () => {
+  const deps = stripeWorld({
+    overrides: { listDraftInvoices: async () => ({ data: [], has_more: true }) },
+  });
+  const summary = await runB2bInstalmentInvoicing(deps);
+  assert.equal(summary.failed, 1, JSON.stringify(summary.outcomes));
+  assert.match(summary.outcomes[0].detail, /cannot page further/);
+  assert.equal(deps.world.invoices.size, 0, "something was created");
+});
+
+test("75: F - the scan pages with starting_after and finds a later-page candidate", async () => {
+  // The orphan first, then 150 unrelated drafts: newest-first ordering
+  // puts it past a single page of 100.
+  const deps = stripeWorld();
+  deps.world.invoices.set("in_orphan", orphanDraft());
+  for (let n = 0; n < 150; n += 1) {
+    deps.world.invoices.set(`in_noise_${n}`,
+      orphanDraft({ id: `in_noise_${n}`, metadata: {} }));
+  }
+
+  const summary = await runB2bInstalmentInvoicing(deps);
+  assert.equal(summary.adopted, 1, JSON.stringify(summary.outcomes));
+  assert.deepEqual(deps.world.finalized, ["in_orphan"], "the later-page orphan was missed");
+
+  const scans = deps.world.calls.filter(c => c.name === "listDraftInvoices");
+  assert.ok(scans.length >= 2, "a 151-draft customer needs more than one page");
+  assert.equal(scans[0].page.startingAfter, undefined, "page 1 must not page from anything");
+  assert.ok(scans[1].page.startingAfter, "page 2 must carry starting_after");
+  for (const s of scans) {
+    assert.equal(s.customerId, "cus_1", "the scan must be scoped to the canonical Customer");
+    assert.equal(s.page.limit, B2B_ORPHAN_SCAN_PAGE_SIZE);
+  }
+});
+
+test("76: F - the bound is a real number of invoices, stated once", async () => {
+  assert.equal(B2B_ORPHAN_SCAN_PAGE_SIZE, 100, "100 is Stripe's maximum page size");
+  assert.equal(B2B_ORPHAN_SCAN_MAX_PAGES, 5);
+  // 500 drafts for ONE business, where an agreement issues at most three
+  // later instalments a year. The bound is generous, not tight.
+  assert.ok(B2B_ORPHAN_SCAN_PAGE_SIZE * B2B_ORPHAN_SCAN_MAX_PAGES >= 500);
+});
+
+test("77: G - the runtime never deletes, voids or rewrites a Stripe object", async () => {
+  for (const rel of ["lib/b2bRuntime.ts", "lib/b2bRuntimeDeps.ts", "lib/b2bInstalmentRules.ts"]) {
+    const code = readCode(rel);
+    for (const forbidden of ["invoices.del", "voidInvoice", "invoices.update",
+                             "invoiceItems.del", "invoiceItems.update",
+                             "markUncollectible", "customers.update",
+                             "paymentMethods.detach", "invoices.sendInvoice"]) {
+      assert.ok(!code.includes(forbidden), `${rel} calls ${forbidden}`);
+    }
+  }
+});
+
+test("78: G - the recovery read is invoices.list for ONE customer, never Search", async () => {
+  const deps = readCode("lib/b2bRuntimeDeps.ts");
+  // STRIPE SEARCH IS EVENTUALLY CONSISTENT, so a draft created moments
+  // ago may be missing from it - which is the one case this scan exists
+  // for. invoices.list for a single Customer is strongly consistent.
+  assert.ok(!/invoices\.search/.test(deps), "the scan must not use Stripe Search");
+  assert.ok(!/\bsearch\(/.test(deps), "the deps must not search");
+  const call = deps.slice(deps.indexOf("listDraftInvoices"));
+  assert.ok(call.includes("stripe.invoices.list("), "the scan must use invoices.list");
+  for (const scope of ["customer: customerId", 'status: "draft"',
+                       'collection_method: "charge_automatically"',
+                       "limit: page.limit", "starting_after: page.startingAfter",
+                       'expand: ["data.lines"]']) {
+    assert.ok(call.includes(scope), `the list call is missing ${scope}`);
+  }
+});
+
+test("79: G - the scan happens BEFORE any invoice is created, on every path", async () => {
+  for (const world of [undefined]) {
+    const deps = stripeWorld({ world });
+    await runB2bInstalmentInvoicing(deps);
+    const names = deps.world.calls.map(c => c.name);
+    const scanned = names.indexOf("listDraftInvoices");
+    const created = names.indexOf("createInvoice");
+    assert.ok(scanned >= 0, "the scan never ran");
+    assert.ok(created >= 0, "nothing was created");
+    assert.ok(scanned < created, "the scan must PRECEDE invoices.create, not follow it");
+  }
+});
+
+test("80: the recovery pass still needs no scan - it has the invoice id", async () => {
+  // Once the correlation exists, 063's unfinalized list is the authority
+  // and no listing is involved. The scan is for the PRE-correlation
+  // window only.
+  const deps = stripeWorld({
+    unfinalized: [{
+      agreement_id: AGREEMENT, payment_id: "p1", instalment_number: 2, net_cents: 13387,
+      user_id: "u1", currency: "EUR", stripe_invoice_id: "in_known",
+    }],
+  });
+  deps.world.invoices.set("in_known", orphanDraft({ id: "in_known" }));
+  deps.world.items.push({
+    invoice: "in_known", amount: charge(13387).grossCents,
+    currency: "eur", metadata: ORPHAN_META,
+  });
+
+  await runB2bInstalmentReconciliation(deps);
+  assert.deepEqual(deps.world.calls.filter(c => c.name === "listDraftInvoices"), [],
+    "the recovery pass must not list: it already knows the invoice id");
+  assert.deepEqual(deps.world.finalized, ["in_known"]);
+});
+
+test("81: an ADOPTED draft whose id conflicts with the database is not finalized", async () => {
+  // 063 refuses a DIFFERENT invoice id for an already correlated
+  // instalment. If a scan ever adopted such a draft, the correlation
+  // refusal must stop it BEFORE collection.
+  const deps = stripeWorld();
+  deps.world.invoices.set("in_orphan", orphanDraft());
+  deps.world.recorded = new Map([[`${AGREEMENT}:2`, "in_somethingelse"]]);
+
+  const summary = await runB2bInstalmentInvoicing(deps);
+  assert.equal(summary.skipped, 1, JSON.stringify(summary.outcomes));
+  assert.equal(summary.outcomes[0].detail, "invoice_conflict");
+  assert.deepEqual(deps.world.finalized, [], "a conflicting invoice was FINALIZED");
+});
+
+test("82: the cron reports the adoption count, so a recurring one is visible", () => {
+  // An adoption is normal once. Every run adopting means a crash loop,
+  // and that has to be observable without reading Stripe.
+  assert.match(cronSource, /adopted: b2bInstalments\.adopted/,
+    "the cron response hides adoptions");
+  assert.equal(emptyB2bInstalmentSummaryHasAdopted(), true);
+});
+
+/** The empty summary must carry the field, or the cron reports undefined. */
+function emptyB2bInstalmentSummaryHasAdopted() {
+  const code = readCode("lib/b2bRuntime.ts");
+  const factory = code.slice(code.indexOf("emptyB2bInstalmentSummary"));
+  return /adopted: 0/.test(factory.slice(0, 200));
+}
+
+test("83: migration 063 is UNCHANGED by the orphan-draft recovery", () => {
+  // The recovery identity was already on the invoice: 063 writes the
+  // metadata nowhere and reads it nowhere, so this is a pure runtime
+  // correction with no schema or RPC consequence.
+  const touched = execFileSync("git",
+    ["diff", "--name-only", "HEAD", "--", "supabase/migrations/"],
+    { cwd: ROOT, encoding: "utf-8" }).trim();
+  assert.equal(touched, "", "a migration was edited for a runtime-only fix");
 });

@@ -5,7 +5,9 @@ import {
   b2bInstalmentItemIdempotencyKey,
   buildB2bInstalmentInvoiceParams,
   buildB2bInstalmentItemParams,
+  matchesB2bInstalmentIdentity,
   resolveInstalmentPaymentMethod,
+  verifyB2bAdoptedDraft,
   verifyB2bInstalmentDraft,
 } from "./b2bInstalmentRules.ts";
 import {
@@ -53,11 +55,15 @@ export type B2bInstalmentOutcome = {
   instalmentNumber: number;
   kind: "invoiced" | "already_invoiced" | "skipped" | "failed";
   detail?: string;
+  /** True when an orphan draft from an earlier crash was reused. */
+  adopted?: boolean;
 };
 
 export type B2bInstalmentSummary = {
   due: number;
   invoiced: number;
+  /** Orphan drafts adopted instead of duplicated. */
+  adopted: number;
   alreadyInvoiced: number;
   skipped: number;
   failed: number;
@@ -82,6 +88,16 @@ export type B2bInstalmentDeps = {
     => Promise<{ customer?: unknown; payment_method?: unknown } | null>;
   /** Read a draft back, WITH ITS LINES, before finalizing it. */
   retrieveInvoiceWithLines: (invoiceId: string) => Promise<Stripe.Invoice>;
+  /**
+   * One page of this Customer's DRAFT invoices, WITH their lines.
+   * invoices.list rather than Stripe Search: Search is eventually
+   * consistent, which is exactly wrong for finding a draft that may have
+   * been created moments ago.
+   */
+  listDraftInvoices: (
+    customerId: string,
+    page: { limit: number; startingAfter?: string }
+  ) => Promise<{ data: Stripe.Invoice[]; has_more: boolean }>;
   createInvoiceItem: (
     params: Stripe.InvoiceItemCreateParams,
     options: { idempotencyKey: string }
@@ -100,6 +116,106 @@ export type B2bInstalmentDeps = {
 };
 
 export const B2B_INSTALMENT_BATCH_LIMIT = 25;
+
+/**
+ * How far the orphan scan will look, and what happens at the edge.
+ *
+ * 100 invoices a page is Stripe's maximum, and five pages is 500 of a
+ * single business's invoices - far more than a supply contract can
+ * plausibly accumulate, since one agreement issues at most three later
+ * instalments a year.
+ *
+ * If the scan reaches the bound and Stripe still reports more, this
+ * FAILS CLOSED rather than creating another invoice. The alternative -
+ * assume the candidate was not in the first 500 and make a new draft -
+ * is the exact duplicate this whole mechanism exists to prevent.
+ */
+export const B2B_ORPHAN_SCAN_PAGE_SIZE = 100;
+export const B2B_ORPHAN_SCAN_MAX_PAGES = 5;
+
+export type B2bOrphanScan =
+  /** No draft for this instalment exists. Create one. */
+  | { kind: "none" }
+  /** Exactly one, and it may be adopted. */
+  | { kind: "adopt"; invoiceId: string; needsLine: boolean }
+  /** Something is wrong. Create nothing, finalize nothing. */
+  | { kind: "refuse"; reason: string };
+
+/**
+ * Looks for an orphan draft for this exact instalment and decides
+ * whether it may be adopted.
+ *
+ * ── THE DURABLE HALF OF CRASH-WINDOW A ──────────────────────
+ *
+ * The deterministic idempotency key handles a retry within the day.
+ * This handles the retry AFTER the key has been pruned, because the
+ * agreement id and instalment number on the invoice never expire.
+ *
+ * TWO matching drafts is a refusal, not a choice. Picking one would
+ * mean finalizing an invoice while an identical sibling sits beside it,
+ * and nothing here deletes the other: an unexpected Stripe object is
+ * for a person to resolve.
+ */
+export async function findB2bOrphanDraft(
+  deps: B2bInstalmentDeps,
+  input: {
+    agreementId: string;
+    instalmentNumber: number;
+    stripeCustomerId: string;
+    currency: string;
+    charge: B2bInstalmentCharge;
+    defaultPaymentMethodId: string;
+  }
+): Promise<B2bOrphanScan> {
+  const matches: Stripe.Invoice[] = [];
+  let startingAfter: string | undefined;
+
+  for (let page = 0; page < B2B_ORPHAN_SCAN_MAX_PAGES; page += 1) {
+    const result = await deps.listDraftInvoices(input.stripeCustomerId, {
+      limit: B2B_ORPHAN_SCAN_PAGE_SIZE,
+      startingAfter,
+    });
+    for (const invoice of result.data) {
+      if (matchesB2bInstalmentIdentity(invoice, input)) matches.push(invoice);
+    }
+    if (!result.has_more) {
+      return classifyOrphanMatches(matches, input);
+    }
+    const last = result.data[result.data.length - 1];
+    if (!last?.id) {
+      // has_more with nothing to page from. Refusing beats looping.
+      return { kind: "refuse", reason: "orphan scan cannot page further" };
+    }
+    startingAfter = last.id;
+  }
+
+  // The bound was reached and Stripe still has more. FAIL CLOSED: a
+  // candidate may exist beyond it, and creating another invoice on that
+  // assumption is the duplicate this mechanism prevents.
+  return {
+    kind: "refuse",
+    reason: `orphan scan exceeded ${B2B_ORPHAN_SCAN_MAX_PAGES} pages of draft invoices`,
+  };
+}
+
+function classifyOrphanMatches(
+  matches: Stripe.Invoice[],
+  input: Parameters<typeof verifyB2bAdoptedDraft>[1]
+): B2bOrphanScan {
+  if (matches.length === 0) return { kind: "none" };
+  if (matches.length > 1) {
+    return {
+      kind: "refuse",
+      reason: `${matches.length} draft invoices already exist for this instalment`,
+    };
+  }
+  const invoice = matches[0];
+  if (!invoice.id) return { kind: "refuse", reason: "matching draft has no id" };
+
+  const verdict = verifyB2bAdoptedDraft(invoice, input);
+  if (!verdict.ok) return { kind: "refuse", reason: verdict.reason };
+  return { kind: "adopt", invoiceId: invoice.id, needsLine: verdict.needsLine };
+}
 
 /**
  * Bring one instalment's Stripe invoice to the intended collecting state.
@@ -252,7 +368,7 @@ export async function runB2bInstalmentInvoicing(
   limit: number = B2B_INSTALMENT_BATCH_LIMIT
 ): Promise<B2bInstalmentSummary> {
   const summary: B2bInstalmentSummary = {
-    due: 0, invoiced: 0, alreadyInvoiced: 0, skipped: 0, failed: 0, outcomes: [],
+    due: 0, invoiced: 0, adopted: 0, alreadyInvoiced: 0, skipped: 0, failed: 0, outcomes: [],
   };
 
   const due = await deps.listDue(limit);
@@ -283,32 +399,56 @@ export async function runB2bInstalmentInvoicing(
         charge: context.charge,
       };
 
-      // 1. THE DRAFT, before any line exists.
-      const invoice = await deps.createInvoice(
-        buildB2bInstalmentInvoiceParams({
-          ...input,
-          defaultPaymentMethodId: context.defaultPaymentMethodId,
-        }),
-        { idempotencyKey: b2bInstalmentInvoiceIdempotencyKey(row.agreement_id, row.instalment_number) }
-      );
-      if (!invoice.id) {
-        outcome.detail = "stripe returned an invoice with no id";
+      // 0. AN ORPHAN FROM AN EARLIER CRASH? Adopt it rather than
+      //    duplicating it. This is what makes crash window A converge
+      //    even after Stripe has pruned the idempotency key.
+      const withPm = { ...input, defaultPaymentMethodId: context.defaultPaymentMethodId };
+      const orphan = await findB2bOrphanDraft(deps, withPm);
+      if (orphan.kind === "refuse") {
+        // CREATE NOTHING, FINALIZE NOTHING. The instalment stays
+        // uninvoiced, which is visible, and no second billing object
+        // exists for anybody to finalize by hand.
+        outcome.detail = orphan.reason;
         summary.failed += 1;
         summary.outcomes.push(outcome);
         continue;
       }
 
-      // 2. THE LINE, bound to that draft by id.
-      await deps.createInvoiceItem(
-        buildB2bInstalmentItemParams({ ...input, invoiceId: invoice.id }),
-        { idempotencyKey: b2bInstalmentItemIdempotencyKey(row.agreement_id, row.instalment_number) }
-      );
+      // 1. THE DRAFT: adopted, or created if there is none.
+      let invoiceId: string;
+      let lineAlreadyThere = false;
+      if (orphan.kind === "adopt") {
+        invoiceId = orphan.invoiceId;
+        lineAlreadyThere = !orphan.needsLine;
+        outcome.adopted = true;
+      } else {
+        const created = await deps.createInvoice(
+          buildB2bInstalmentInvoiceParams(withPm),
+          { idempotencyKey: b2bInstalmentInvoiceIdempotencyKey(row.agreement_id, row.instalment_number) }
+        );
+        if (!created.id) {
+          outcome.detail = "stripe returned an invoice with no id";
+          summary.failed += 1;
+          summary.outcomes.push(outcome);
+          continue;
+        }
+        invoiceId = created.id;
+      }
+
+      // 2. THE LINE, bound to that draft by id - unless the adopted
+      //    draft already carries exactly it.
+      if (!lineAlreadyThere) {
+        await deps.createInvoiceItem(
+          buildB2bInstalmentItemParams({ ...input, invoiceId }),
+          { idempotencyKey: b2bInstalmentItemIdempotencyKey(row.agreement_id, row.instalment_number) }
+        );
+      }
 
       // 3. THE CORRELATION, before anything can be collected.
       const recorded = await deps.recordInvoice({
         agreementId: row.agreement_id,
         instalmentNumber: row.instalment_number,
-        stripeInvoiceId: invoice.id,
+        stripeInvoiceId: invoiceId,
       });
 
       if (recorded.result !== "invoiced" && recorded.result !== "already_invoiced") {
@@ -323,7 +463,7 @@ export async function runB2bInstalmentInvoicing(
 
       // 4. VERIFY, then collect.
       const ensured = await ensureB2bInstalmentCollecting(deps, {
-        ...input, stripeInvoiceId: invoice.id,
+        ...input, stripeInvoiceId: invoiceId,
       });
       if (ensured.kind === "refused") {
         outcome.detail = ensured.detail;
@@ -333,6 +473,7 @@ export async function runB2bInstalmentInvoicing(
       }
 
       outcome.kind = recorded.result === "already_invoiced" ? "already_invoiced" : "invoiced";
+      if (outcome.adopted) summary.adopted += 1;
       if (outcome.kind === "already_invoiced") summary.alreadyInvoiced += 1;
       else summary.invoiced += 1;
       summary.outcomes.push(outcome);
@@ -578,7 +719,7 @@ export async function runB2bDeliveryResolution(
 }
 
 export const emptyB2bInstalmentSummary = (): B2bInstalmentSummary =>
-  ({ due: 0, invoiced: 0, alreadyInvoiced: 0, skipped: 0, failed: 0, outcomes: [] });
+  ({ due: 0, invoiced: 0, adopted: 0, alreadyInvoiced: 0, skipped: 0, failed: 0, outcomes: [] });
 
 export const emptyB2bResolutionSummary = (): B2bResolutionSummary =>
   ({ candidates: 0, resolved: 0, alreadyResolved: 0, refused: 0, failed: 0,

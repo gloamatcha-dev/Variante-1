@@ -380,3 +380,160 @@ export function resolveInstalmentPaymentMethod(
   }
   return { ok: true, paymentMethodId };
 }
+
+/* ══════════════════════════════════════════════════════════════
+   ORPHAN DRAFT RECOVERY
+   ══════════════════════════════════════════════════════════════
+
+   ── WHY A DETERMINISTIC IDEMPOTENCY KEY IS NOT ENOUGH ─────────
+
+   Stripe documents that an idempotency key may be pruned once it is at
+   least 24 hours old, and a request replayed with a pruned key EXECUTES
+   AGAIN. So this sequence is not durably convergent on its own:
+
+     invoices.create succeeds -> the process dies before the database
+     correlation -> the row is still 'scheduled' -> the cron does not run
+     for more than a day -> the key is pruned -> the retry creates a
+     SECOND draft for the same instalment.
+
+   Neither draft would auto-charge, because both are created with
+   auto_advance false. But two billing objects for one instalment is not
+   an acceptable resting state: somebody could finalize the wrong one by
+   hand, and the reconciliation pass would then find an invoice the
+   database has never heard of.
+
+   ── SO THE RECOVERY IDENTITY IS THE METADATA ──────────────────
+
+   The agreement id and the instalment number are already on every
+   invoice this package issues, and together they are unique: one
+   instalment of one agreement. That pair is a DURABLE identity with no
+   expiry, so an orphan draft can be found and ADOPTED rather than
+   duplicated.
+
+   It is used ONLY for this narrow pre-correlation window. The database
+   row stays the canonical internal state; once
+   b2b_payment_schedule.stripe_invoice_id is set, recovery goes through
+   b2b_annual_instalments_unfinalized instead and never lists anything.
+
+   ── AND NOT THROUGH STRIPE SEARCH ─────────────────────────────
+
+   Search is eventually consistent, which is precisely wrong for a
+   read-after-write recovery: the draft this code just created may not be
+   indexed yet. invoices.list for one Customer is strongly consistent, so
+   the filtering happens here instead. */
+
+/** The two metadata fields that identify one instalment's invoice. */
+export type B2bInstalmentIdentity = {
+  agreementId: string;
+  instalmentNumber: number;
+};
+
+/**
+ * Is this invoice THE invoice for this instalment?
+ *
+ * Both keys, exactly. The agreement id alone would match every
+ * instalment of the same contract, and the instalment number alone would
+ * match every contract's second instalment.
+ */
+export function matchesB2bInstalmentIdentity(
+  invoice: { metadata?: Record<string, string> | null },
+  identity: B2bInstalmentIdentity
+): boolean {
+  const meta = invoice.metadata ?? {};
+  return meta[B2B_INVOICE_AGREEMENT_METADATA_KEY] === identity.agreementId
+    && meta[B2B_INVOICE_INSTALMENT_METADATA_KEY] === String(identity.instalmentNumber);
+}
+
+export type B2bAdoptionVerdict =
+  /** Adoptable and already carrying its one canonical line. */
+  | { ok: true; needsLine: false }
+  /** Adoptable but empty - the caller adds the one line to THIS invoice. */
+  | { ok: true; needsLine: true }
+  | { ok: false; reason: string };
+
+/**
+ * May this orphan draft be adopted, and does it still need its line?
+ *
+ * Every field that decides what the customer is charged is checked, and
+ * ANY other shape is refused rather than repaired. Nothing here deletes
+ * or rewrites a Stripe object: an invoice that is not exactly right is
+ * left alone for a person to look at, and the instalment stays
+ * uninvoiced, which is visible and safe.
+ *
+ * The two allowed shapes are the two a crash can actually leave behind:
+ *
+ *   0 lines   the process died between invoices.create and
+ *             invoiceItems.create
+ *   1 line    it died after the item but before the correlation
+ *
+ * Two lines, a wrong amount, a wrong currency, an unrelated line, a
+ * foreign customer or a different PaymentMethod are all refusals.
+ */
+export function verifyB2bAdoptedDraft(
+  invoice: {
+    customer?: unknown;
+    status?: string | null;
+    currency?: string | null;
+    collection_method?: string | null;
+    default_payment_method?: unknown;
+    metadata?: Record<string, string> | null;
+    lines?: { data?: B2bInvoiceLine[] } | null;
+  },
+  input: {
+    agreementId: string;
+    instalmentNumber: number;
+    stripeCustomerId: string;
+    currency: string;
+    charge: B2bInstalmentCharge;
+    defaultPaymentMethodId: string;
+  }
+): B2bAdoptionVerdict {
+  const idOf = (value: unknown): string | null => {
+    if (typeof value === "string") return value.trim() || null;
+    if (value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string") {
+      return (value as { id: string }).id;
+    }
+    return null;
+  };
+
+  // ── IDENTITY ────────────────────────────────────────────────
+  if (idOf(invoice.customer) !== input.stripeCustomerId) {
+    return { ok: false, reason: "draft belongs to a different Stripe customer" };
+  }
+  if (invoice.status !== "draft") {
+    return { ok: false, reason: `draft is ${invoice.status ?? "unknown"}, not draft` };
+  }
+  if ((invoice.currency ?? "").toLowerCase() !== input.currency.toLowerCase()) {
+    return { ok: false, reason: `draft is in ${invoice.currency}, expected ${input.currency}` };
+  }
+  if (invoice.collection_method !== "charge_automatically") {
+    return { ok: false, reason: `draft collects by ${invoice.collection_method}` };
+  }
+  if (!matchesB2bInstalmentIdentity(invoice, input)) {
+    return { ok: false, reason: "draft metadata is not this instalment's" };
+  }
+  if (idOf(invoice.default_payment_method) !== input.defaultPaymentMethodId) {
+    // A draft naming another card would collect from the wrong place.
+    return { ok: false, reason: "draft names a different payment method" };
+  }
+
+  // ── LINES ───────────────────────────────────────────────────
+  const lines = invoice.lines?.data ?? [];
+  if (lines.length === 0) return { ok: true, needsLine: true };
+  if (lines.length > 1) {
+    return { ok: false, reason: `draft holds ${lines.length} lines, expected 0 or 1` };
+  }
+
+  const line = lines[0];
+  if (line.amount !== input.charge.grossCents) {
+    return { ok: false, reason: `draft line is ${line.amount} cents, expected ${input.charge.grossCents}` };
+  }
+  if ((line.currency ?? "").toLowerCase() !== input.currency.toLowerCase()) {
+    return { ok: false, reason: `draft line is in ${line.currency}` };
+  }
+  if (!matchesB2bInstalmentIdentity({ metadata: line.metadata ?? null }, input)) {
+    return { ok: false, reason: "draft line metadata is not this instalment's" };
+  }
+
+  return { ok: true, needsLine: false };
+}

@@ -433,6 +433,7 @@ export async function GET(request: Request): Promise<Response> {
         b2bInstalments: {
           due: b2bInstalments.due,
           invoiced: b2bInstalments.invoiced,
+          adopted: b2bInstalments.adopted,
           alreadyInvoiced: b2bInstalments.alreadyInvoiced,
           skipped: b2bInstalments.skipped,
           failed: b2bInstalments.failed,

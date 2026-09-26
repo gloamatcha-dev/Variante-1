@@ -283,6 +283,21 @@ function instalmentDeps(stripe: Stripe) {
     // the intended line actually reached the invoice.
     retrieveInvoiceWithLines: (invoiceId: string) =>
       stripe.invoices.retrieve(invoiceId, { expand: ["lines"] }),
+    // ONE CUSTOMER'S DRAFTS, strongly consistent. Deliberately
+    // invoices.list and not Stripe Search: Search is eventually
+    // consistent, so a draft created moments ago may be missing from it -
+    // which is the one case this scan exists to catch.
+    listDraftInvoices: async (customerId: string, page: { limit: number; startingAfter?: string }) => {
+      const result = await stripe.invoices.list({
+        customer: customerId,
+        status: "draft",
+        collection_method: "charge_automatically",
+        limit: page.limit,
+        ...(page.startingAfter ? { starting_after: page.startingAfter } : {}),
+        expand: ["data.lines"],
+      });
+      return { data: result.data, has_more: result.has_more };
+    },
     createInvoiceItem: (params: Stripe.InvoiceItemCreateParams, options: { idempotencyKey: string }) =>
       stripe.invoiceItems.create(params, options),
     createInvoice: (params: Stripe.InvoiceCreateParams, options: { idempotencyKey: string }) =>
