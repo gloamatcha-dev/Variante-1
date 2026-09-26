@@ -1730,5 +1730,14 @@ test("83: migration 063 is UNCHANGED by the orphan-draft recovery", () => {
   const touched = execFileSync("git",
     ["diff", "--name-only", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
-  assert.equal(touched, "", "a migration was edited for a runtime-only fix");
+  // 064 IS EXEMPT HERE TOO, and for a different reason from every other
+  // guard: this assertion is about THIS package - the orphan-draft
+  // recovery needed no migration - not about whether any migration may
+  // ever change. 064 belongs to Package 5G and is still pending, so
+  // forbidding edits to it here would freeze a migration nobody has
+  // applied.
+  assert.deepEqual(
+    (touched ? touched.split(NEWLINE) : [])
+      .filter(r => !r.endsWith("064_b2b_account_change_management.sql")),
+    [], "a migration was edited for a runtime-only fix");
 });

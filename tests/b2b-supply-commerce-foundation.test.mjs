@@ -1147,13 +1147,46 @@ test("43: the legacy anonymous status CHECK is completely untouched", () => {
 test("44: no migration up to 058 is modified in the working tree", () => {
   // 058 and everything before it are APPLIED TO PRODUCTION. Editing one
   // would make the file and the database disagree for good.
-  const changed = execFileSync("git", ["status", "--porcelain", "--", "supabase/migrations"],
+  //
+  // ── CONTENT, NOT REPRESENTATION ─────────────────────────────
+  //
+  // This used to read `git status --porcelain`, which on a Windows
+  // checkout of a repository with no .gitattributes reports every
+  // LF-stored migration as modified even when its bytes normalise to
+  // the committed blob exactly. That is a line-ending representation,
+  // not an edit, and it made this guard fire on a clean tree - the
+  // opposite of useful, because a guard that cries wolf gets muted.
+  //
+  // So a MODIFIED file now has to be modified according to `git diff`,
+  // which is the authority every other immutability guard in this
+  // repository already uses. Nothing is lost: an ADDED or DELETED
+  // migration is still caught below, from the status output, because
+  // neither of those is a representation question.
+  const diffed = execFileSync("git",
+    ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
-  for (const line of changed ? changed.split(/\r?\n/) : []) {
+  const statused = execFileSync("git", ["status", "--porcelain", "--", "supabase/migrations"],
+    { cwd: ROOT, encoding: "utf-8" }).trim();
+
+  const offenders = [];
+  for (const rel of diffed ? diffed.split(/\r?\n/) : []) {
+    offenders.push(["edited", rel]);
+  }
+  for (const line of statused ? statused.split(/\r?\n/) : []) {
+    const code = line.slice(0, 2);
     const file = line.slice(3).trim().replace(/^"|"$/g, "");
+    // ?? is a NEW migration and A is a staged one; both are real
+    // appearances. A bare ' M' is only interesting if git diff agreed,
+    // which the loop above has already recorded.
+    if (code.includes("?") || code.includes("A") || code.includes("D")) {
+      offenders.push(["appeared or was removed", file]);
+    }
+  }
+
+  for (const [what, file] of offenders) {
     const number = Number(path.basename(file).slice(0, 3));
     assert.ok(Number.isInteger(number) && number >= 59,
-      `an applied migration has an uncommitted edit: ${line}`);
+      `an applied migration ${what}: ${file}`);
   }
 });
 

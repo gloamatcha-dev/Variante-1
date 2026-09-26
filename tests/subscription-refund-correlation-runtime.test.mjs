@@ -642,16 +642,12 @@ test("54: migrations 019 and 022-037 are unmodified", () => {
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD"], { cwd: ROOT, encoding: "utf-8" })
     .trim();
   const touched = changed ? changed.split(NEWLINE) : [];
-  // 038 is still UNAPPLIED, so it may be edited in place until the owner
-  // applies it. Every migration below it is live and may not.
-  // 039, the annual plan foundation, is UNAPPLIED and may likewise be
-  // edited in place until the owner applies it.
+  // 038, 039 AND 040 ARE LIVE AND THEREFORE IMMUTABLE. Production is
+  // 001-063; the comments that used to exempt them here were written
+  // while they were genuinely unapplied and outlived that. 064 is the
+  // only pending migration and the only one still exempt below.
   const migrations = touched
-    .filter(rel => rel.startsWith("supabase/migrations/"))
-    .filter(rel => !rel.endsWith("038_one_time_refund_writer_concurrency.sql"))
-    .filter(rel => !rel.endsWith("039_b2c_annual_plan_foundation.sql"))
-    // 040 is NOT APPLIED yet, so it may still be edited in place.
-    .filter(rel => !rel.endsWith("040_annual_checkout_retry_fingerprints.sql"));
+    .filter(rel => rel.startsWith("supabase/migrations/"));
   // 064 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062+063,
   // so 064 is still the right place to fix 064 and may be edited in
   // place - the terms every pending migration has had. Everything

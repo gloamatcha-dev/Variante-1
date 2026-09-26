@@ -1000,21 +1000,50 @@ test("49: the focused suite is registered in the npm test script", () => {
 test("50: NO SUITE MAY CLAIM THAT AN APPLIED MIGRATION IS STILL PENDING", () => {
   // ── THE GUARD THAT STOPS THIS BUG COMING BACK ───────────────
   //
-  // 061, 062 and 063 are ALL applied to production. Every migration
-  // guard in this repository exempts a PENDING migration from
-  // exemption is correct exactly until the migration is applied - after
-  // which it is a hole over live schema. That transition has no natural
-  // trigger, so it is enforced here instead: a repository-wide scan for
-  // any suite still describing one of them as unapplied, or still
-  // listing it beside a genuinely pending migration.
+  // EVERY MIGRATION EXCEPT THE PENDING ONE IS APPLIED TO PRODUCTION.
+  // Each migration guard in this repository exempts a PENDING migration
+  // from immutability, and that exemption is correct exactly until the
+  // migration is applied - after which it is a hole over live schema.
+  // The transition has no natural trigger, so it is enforced here: a
+  // repository-wide scan for any suite still describing an applied
+  // migration as unapplied, or still exempting one in code.
+  //
+  // ── AND THE SET IS DERIVED, NOT LISTED ──────────────────────
+  //
+  // This used to name 061, 062 and 063 by hand, and that is precisely
+  // how stale exemptions for 036 through 040 survived for several
+  // packages: nobody had written those numbers into the list, so
+  // nothing ever looked at them. The applied set is now every
+  // migration on disk except the single highest one, which means a
+  // stale exemption for ANY migration fails this test and the list
+  // cannot fall behind production again.
   //
   // Modelled on the identical guard tests/launch-discount-migration.mjs
   // holds over 056, and assembled from pieces for the same reason: a
   // literal pattern would match this file's own source and fail forever.
   const NL = String.fromCharCode(10);
-  const APPLIED = ["061", "062", "063"];
+  // THE ONE MIGRATION THAT MAY BE EXEMPT is the highest on disk, and
+  // the assertion at the end of this test pins which file that is.
+  const onDisk = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
+  const appliedFiles = onDisk.slice(0, -1);
+  const APPLIED = appliedFiles.map(f => f.slice(0, 3));
+  // ── THE PROSE SCAN READS COMMENTS, THE CODE SCAN READS CODE ──
+  //
+  // A stale exemption is always JUSTIFIED IN A COMMENT, so that is what
+  // is searched for a claim of unappliedness. Runtime strings are
+  // deliberately excluded: several suites probe a live database and
+  // report "Migration 0xx not applied yet" when the database they are
+  // pointed at lacks it, and launch-send asserts on a blocker string of
+  // the same shape. Those are true statements about a connection, not
+  // claims about production, and scanning them would force a guard to
+  // be weakened to accommodate honest code.
+  const commentsOf = source => {
+    const blocks = source.match(new RegExp("\\/\\*[\\s\\S]*?\\*\\/", "g")) ?? [];
+    const lines = source.split(NL).filter(l => l.trim().startsWith("//"));
+    return blocks.concat(lines).join(NL);
+  };
   for (const rel of readdirSync(path.join(ROOT, "tests")).filter(f => f.endsWith(".test.mjs"))) {
-    const source = read(`tests/${rel}`);
+    const source = commentsOf(read(`tests/${rel}`));
     for (const n of APPLIED) {
       for (const claim of [
         new RegExp(n + "[^" + NL + "]{0,80}" + "NOT APP" + "LIED", "i"),
@@ -1034,11 +1063,9 @@ test("50: NO SUITE MAY CLAIM THAT AN APPLIED MIGRATION IS STILL PENDING", () => 
   // Plain substring checks, assembled from pieces so this file's own
   // source cannot match them. A regex here is a trap: "\(" inside a
   // JS STRING is just "(", which silently becomes a group opener.
-  const applied = [
-    "061" + "_b2b_pending_agreement_writer.sql",
-    "062" + "_b2b_checkout_settlement.sql",
-    "063" + "_b2b_instalment_delivery_failure_runtime.sql",
-  ];
+  // The SAME derived set, as whole file names: an exemption names the
+  // file, not the number.
+  const applied = appliedFiles;
   // The four shapes an exemption has ever taken in this repository.
   const exemptionShapes = name => [
     `!rel.endsWith("${name}")`,
@@ -1058,14 +1085,18 @@ test("50: NO SUITE MAY CLAIM THAT AN APPLIED MIGRATION IS STILL PENDING", () => 
     }
   }
 
-  // AND 063 IS THE HIGHEST LIVE MIGRATION. Production is
-  // 058+059+060+061+062+063, so every migration up to and including 063
-  // is immutable. 064 is Package 5G's account and change-management
-  // migration and is NOT applied anywhere, which is what makes its
-  // exemption legitimate. A migration above 064 asks for review here.
-  const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.at(-2), "063_b2b_instalment_delivery_failure_runtime.sql",
-    "063 is no longer the second-highest migration - re-check every exemption");
-  assert.equal(files.at(-1), "064_b2b_account_change_management.sql",
-    "a migration appeared above 064 - re-check every immutability exemption");
+  // AND 064 IS THE ONE PENDING MIGRATION. Production is 001-063, so
+  // every migration up to and including 063 is immutable and 064 is the
+  // only file any guard above may exempt. Naming it here is what gives
+  // the derivation its meaning: when 064 is applied, a 065 appears,
+  // this assertion fails, and the exemptions get re-read.
+  assert.equal(onDisk.at(-1), "064_b2b_account_change_management.sql",
+    "the pending migration changed - re-check every immutability exemption");
+  assert.equal(onDisk.at(-2), "063_b2b_instalment_delivery_failure_runtime.sql",
+    "063 is no longer the highest LIVE migration - re-check every exemption");
+  assert.equal(appliedFiles.length, onDisk.length - 1);
+  assert.ok(appliedFiles.includes("039_b2c_annual_plan_foundation.sql"),
+    "039 is not in the applied set, so nothing guards its immutability");
+  assert.ok(appliedFiles.includes("040_annual_checkout_retry_fingerprints.sql"),
+    "040 is not in the applied set, so nothing guards its immutability");
 });

@@ -616,13 +616,13 @@ test("27: 039 and 040 are untouched, 041 is the highest, and there is no 042", (
   assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 64), [],
     "a migration 065 or beyond appeared");
   assert.equal(migrations.length, 64);
-  // 039 is LIVE and therefore immutable. 040 is NOT APPLIED yet, so it
-  // may still be edited in place - that is the whole reason it is a file
-  // under review rather than a 041 - and it is the only one that may.
+  // 039 AND 040 ARE LIVE AND THEREFORE IMMUTABLE. Production is
+  // 001-063; the comments that used to exempt them here were written
+  // while they were genuinely unapplied and outlived that. 064 is the
+  // only pending migration and the only one still exempt below.
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
-  const live = (changed ? changed.split(NEWLINE) : [])
-    .filter(rel => !rel.endsWith("040_annual_checkout_retry_fingerprints.sql"));
+  const live = changed ? changed.split(NEWLINE) : [];
   // 064 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062+063,
   // so 064 is still the right place to fix 064 and may be edited in
   // place - the terms every pending migration has had. Everything

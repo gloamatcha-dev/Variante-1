@@ -47,7 +47,7 @@ import {
  *                                    and no "system" actor.
  *
  * SAFE: reads source and runs the pure leaf. No database, no network, no
- * server, and migration 052 is NOT applied by anything here.
+ * server: this suite never executes a migration, it only reads one.
  */
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");

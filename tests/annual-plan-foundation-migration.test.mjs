@@ -162,20 +162,21 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
 });
 
 test("2: no migration 044 or beyond", () => {
-  // 039 is not applied anywhere, so it is still the right place to fix
-  // 039. A hardening pass must not become a second migration.
+  // 064 is the highest migration. 039 is live and is not the place to
+  // fix anything any more.
   const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 64);
-  assert.deepEqual(beyond, [], "an unreviewed migration appeared after 039");
+  assert.deepEqual(beyond, [], "an unreviewed migration appeared after 064");
 });
 
 test("3: migrations 001 through 038 are unmodified", () => {
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
-  // 040 is NOT APPLIED yet, so it may still be edited in place; every
-  // migration below it is live and may not be.
-  const immutable = touched.filter(rel =>
-    !rel.endsWith(MIGRATION_039) && !rel.endsWith("040_annual_checkout_retry_fingerprints.sql"));
+  // 039 AND 040 ARE LIVE AND THEREFORE IMMUTABLE. Production is
+  // 001-063; the comments that used to exempt them here were written
+  // while they were genuinely unapplied and outlived that. 064 is the
+  // only pending migration and the only one still exempt below.
+  const immutable = touched;
   // 064 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062+063,
   // so 064 is still the right place to fix 064 and may be edited in
   // place - the terms every pending migration has had. Everything

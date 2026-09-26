@@ -248,17 +248,11 @@ test("3, 4, 5: migrations 019 and 022 through 037 are unmodified", () => {
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
-  // 038 itself may be edited while it is still unapplied - that is the
-  // whole reason it is not a 039. Everything BELOW it is live and
-  // immutable, and that is what this guard is for.
-  // Phase 4B1.1 note: 039 is the annual plan foundation and it has NOT
-  // been applied anywhere, so it is still the right place to fix 039 and
-  // it may be edited in place. Everything below it is live.
-  // 040 is NOT APPLIED yet, so it may still be edited in place; every
-  // migration below it is live and may not be.
-  const immutable = touched.filter(rel =>
-    !rel.endsWith(MIGRATION_038) && !rel.endsWith(MIGRATION_039)
-    && !rel.endsWith(MIGRATION_040));
+  // 038, 039 AND 040 ARE LIVE AND THEREFORE IMMUTABLE. Production is
+  // 001-063; the comments that used to exempt them here were written
+  // while they were genuinely unapplied and outlived that. 064 is the
+  // only pending migration and the only one still exempt below.
+  const immutable = touched;
   // 064 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062+063,
   // so 064 is still the right place to fix 064 and may be edited in
   // place - the terms every pending migration has had. Everything

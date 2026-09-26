@@ -2511,7 +2511,8 @@ test("106: a mark that fails after the provider accepted parks the row", async (
 });
 
 test("107: a missing migration 045 reports unavailable and sends nothing", async () => {
-  // 045 is not applied yet. Confirming must still work.
+  // THE STUB models a database whose 045 claim function is missing.
+  // Confirming must still work. 045 itself is live in production.
   const db = fakeWelcomeDb({ claimThrows: true });
   const mailer = okMailer();
   const outcome = await sendWelcomeEmail(db, mailer, "row-1", nextClaimId);

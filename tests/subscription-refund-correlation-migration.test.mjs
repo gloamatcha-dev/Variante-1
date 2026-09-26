@@ -174,21 +174,17 @@ test("3: every immutable migration is still present and unedited", () => {
   }).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
   for (const file of touched) {
-    // 038 is still UNAPPLIED, which is exactly why it is not a 039: it may
-    // be edited in place until the owner applies it. 037 and everything
-    // older may not.
-    // 039, the annual plan foundation, is UNAPPLIED and may likewise be
-    // edited in place until the owner applies it.
-    assert.ok(file.endsWith(MIGRATION_037)
-      || file.endsWith("038_one_time_refund_writer_concurrency.sql")
-      || file.endsWith("039_b2c_annual_plan_foundation.sql")
-      || file.endsWith("040_annual_checkout_retry_fingerprints.sql")
+    // 037, 038, 039 AND 040 ARE LIVE AND THEREFORE IMMUTABLE. Production is
+    // 001-063; the comments that used to exempt them here were written
+    // while they were genuinely unapplied and outlived that. 064 is the
+    // only pending migration and the only one still exempt below.
+    assert.ok(
       // 064 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062+063,
       // so 064 is still the right place to fix 064 and may be edited in
       // place - the terms every pending migration has had. Everything
       // BELOW it is live. Remove this the moment 064 is applied;
       // tests/b2b-pending-agreement-writer.test.mjs test 50 enforces that.
-      || file.endsWith("064_b2b_account_change_management.sql"),
+      file.endsWith("064_b2b_account_change_management.sql"),
       `an immutable migration was modified: ${file}`);
   }
 });
