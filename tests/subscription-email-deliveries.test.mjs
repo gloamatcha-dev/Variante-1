@@ -201,7 +201,14 @@ test("035 exists, is the only 035, and only 036 and 037 follow it", () => {
      // service_role; no table, no column, no policy and no table
      // privilege. No subscription, annual or order object is touched.
      // Reviewed in tests/b2b-checkout-settlement.test.mjs.
-     "062_b2b_checkout_settlement.sql"],
+     "062_b2b_checkout_settlement.sql",
+     // PACKAGES 5D/5E/5F ADDED MIGRATION 063: the instalment, delivery
+     // resolution and failure/hold runtime. SEVEN SECURITY DEFINER
+     // functions and their EXECUTE grants to service_role; no table, no
+     // column, no policy and no table privilege. No subscription,
+     // annual or order object is touched. Reviewed in
+     // tests/b2b-instalment-delivery-failure.test.mjs.
+     "063_b2b_instalment_delivery_failure_runtime.sql"],
     "an unreviewed migration above 035 appeared"
   );
   // And 039 leaves this table entirely alone. An annual plan's one

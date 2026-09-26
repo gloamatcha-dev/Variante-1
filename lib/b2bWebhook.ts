@@ -268,3 +268,180 @@ export function subscriptionIdOf(invoice: Stripe.Invoice): string | null {
   }
   return null;
 }
+
+/* ══════════════════════════════════════════════════════════════
+   PACKAGES 5D + 5F: ANNUAL INSTALMENT INVOICES AND FAILURES
+   ══════════════════════════════════════════════════════════════ */
+
+export type B2bAnnualInvoiceOutcome =
+  | { kind: "not_annual" }
+  | { kind: "settled"; agreementId: string; instalmentNumber: number }
+  | { kind: "already_settled"; agreementId: string }
+  | { kind: "failed_recorded"; agreementId: string; instalmentNumber: number }
+  | { kind: "already_failed"; agreementId: string }
+  | { kind: "refused"; agreementId: string | null; reason: string };
+
+export type B2bFailureDeps = {
+  settleAnnualInstalment: (input: {
+    agreementId: string;
+    stripeInvoiceId: string;
+    stripePaymentIntentId: string | null;
+  }) => Promise<{ result: string; instalmentNumber?: number }>;
+  recordAnnualFailure: (input: {
+    agreementId: string;
+    stripeInvoiceId: string;
+  }) => Promise<{ result: string; instalmentNumber?: number }>;
+  holdDeliveries: (agreementId: string) => Promise<{ result: string; held?: number }>;
+  releaseDeliveries: (agreementId: string) => Promise<{ result: string; released?: number }>;
+};
+
+/** The PaymentIntent behind an invoice, whether expanded or not. */
+export function invoicePaymentIntentId(invoice: Stripe.Invoice): string | null {
+  const direct = (invoice as unknown as { payment_intent?: unknown }).payment_intent;
+  if (typeof direct === "string") return direct.trim() || null;
+  if (direct && typeof direct === "object" && typeof (direct as { id?: unknown }).id === "string") {
+    return (direct as { id: string }).id;
+  }
+  // Newer API shapes carry it under the invoice's payments.
+  const payments = (invoice as unknown as {
+    payments?: { data?: Array<{ payment?: { payment_intent?: unknown } }> };
+  }).payments;
+  const nested = payments?.data?.[0]?.payment?.payment_intent;
+  if (typeof nested === "string") return nested.trim() || null;
+  if (nested && typeof nested === "object" && typeof (nested as { id?: unknown }).id === "string") {
+    return (nested as { id: string }).id;
+  }
+  return null;
+}
+
+/**
+ * Settles a PAID annual instalment invoice (Package 5D).
+ *
+ * IT CREATES NO DELIVERY. An annual agreement received all twelve slots
+ * at activation; a later instalment pays for deliveries that already
+ * exist. That is the single most important difference from the monthly
+ * settlement, and it is why 063 gave the two separate writers.
+ *
+ * A successful payment also RELEASES this package's own holds - and only
+ * its own. Migration 063 refuses to release while any instalment is
+ * still owed, so recovering one of two failed instalments correctly
+ * leaves the deliveries held.
+ */
+export async function settleB2bAnnualPaidInvoice(
+  invoiceId: string,
+  deps: B2bWebhookDeps & B2bFailureDeps,
+  route: (metadata: Stripe.Metadata | null | undefined) =>
+    { kind: "not_annual" } | { kind: "annual"; agreementId: string; instalmentNumber: number }
+    | { kind: "malformed"; reason: string }
+): Promise<B2bAnnualInvoiceOutcome> {
+  const invoice = await deps.retrieveInvoice(invoiceId);
+  const routed = route(invoice.metadata);
+
+  if (routed.kind === "not_annual") return { kind: "not_annual" };
+  if (routed.kind === "malformed") {
+    return { kind: "refused", agreementId: null, reason: routed.reason };
+  }
+
+  if (invoice.status !== "paid") {
+    return {
+      kind: "refused",
+      agreementId: routed.agreementId,
+      reason: `invoice ${invoiceId} is ${invoice.status}, not paid`,
+    };
+  }
+
+  const settlement = await deps.settleAnnualInstalment({
+    agreementId: routed.agreementId,
+    stripeInvoiceId: invoice.id ?? invoiceId,
+    stripePaymentIntentId: invoicePaymentIntentId(invoice),
+  });
+
+  if (settlement.result === "already_settled") {
+    return { kind: "already_settled", agreementId: routed.agreementId };
+  }
+  if (settlement.result !== "settled") {
+    return { kind: "refused", agreementId: routed.agreementId, reason: settlement.result };
+  }
+
+  // Recovery: release only what this package held, and only if nothing
+  // else is still owed. 063 decides both.
+  await deps.releaseDeliveries(routed.agreementId);
+
+  return {
+    kind: "settled",
+    agreementId: routed.agreementId,
+    instalmentNumber: settlement.instalmentNumber ?? routed.instalmentNumber,
+  };
+}
+
+/**
+ * Records a FAILED annual instalment invoice and holds supply
+ * (Package 5F).
+ *
+ * The contract is NOT ended: 063 writes no agreement status, Stripe
+ * keeps dunning, and 060's transition graph admits payment_failed ->
+ * paid so the recovery above needs no special case.
+ */
+export async function recordB2bAnnualInvoiceFailure(
+  invoiceId: string,
+  deps: B2bWebhookDeps & B2bFailureDeps,
+  route: (metadata: Stripe.Metadata | null | undefined) =>
+    { kind: "not_annual" } | { kind: "annual"; agreementId: string; instalmentNumber: number }
+    | { kind: "malformed"; reason: string }
+): Promise<B2bAnnualInvoiceOutcome> {
+  const invoice = await deps.retrieveInvoice(invoiceId);
+  const routed = route(invoice.metadata);
+
+  if (routed.kind === "not_annual") return { kind: "not_annual" };
+  if (routed.kind === "malformed") {
+    return { kind: "refused", agreementId: null, reason: routed.reason };
+  }
+
+  const recorded = await deps.recordAnnualFailure({
+    agreementId: routed.agreementId,
+    stripeInvoiceId: invoice.id ?? invoiceId,
+  });
+
+  if (recorded.result === "already_failed") {
+    // Still hold: a redelivery must not leave supply running because the
+    // first delivery already recorded the state.
+    await deps.holdDeliveries(routed.agreementId);
+    return { kind: "already_failed", agreementId: routed.agreementId };
+  }
+  if (recorded.result !== "failed") {
+    return { kind: "refused", agreementId: routed.agreementId, reason: recorded.result };
+  }
+
+  await deps.holdDeliveries(routed.agreementId);
+
+  return {
+    kind: "failed_recorded",
+    agreementId: routed.agreementId,
+    instalmentNumber: recorded.instalmentNumber ?? routed.instalmentNumber,
+  };
+}
+
+/**
+ * A MONTHLY B2B invoice failed (Package 5F).
+ *
+ * A monthly agreement has NO payment schedule row - 060's integrity
+ * assertion forbids one - so there is no payment state to write. The
+ * failure is expressed entirely as a HOLD on unresolved future
+ * deliveries, which is exactly what 060 introduced the held status for:
+ * "a payment failure pauses DELIVERIES and leaves the contract
+ * standing."
+ *
+ * Stripe dunning owns the retries. When a later invoice is paid, 062's
+ * monthly settlement runs and the caller releases the hold.
+ */
+export async function holdB2bMonthlyForFailure(
+  agreementId: string,
+  deps: B2bFailureDeps
+): Promise<{ kind: "held"; agreementId: string; held: number }
+  | { kind: "refused"; agreementId: string; reason: string }> {
+  const held = await deps.holdDeliveries(agreementId);
+  if (held.result !== "held") {
+    return { kind: "refused", agreementId, reason: held.result };
+  }
+  return { kind: "held", agreementId, held: held.held ?? 0 };
+}

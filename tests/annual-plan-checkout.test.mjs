@@ -908,7 +908,7 @@ test("32: the checkout phase's own migrations are untouched, and 041 is not its 
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 62);
+  assert.equal(migrations.length, 63);
   assert.equal(migrations[38], "039_b2c_annual_plan_foundation.sql");
   assert.equal(migrations[39], "040_annual_checkout_retry_fingerprints.sql");
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
@@ -917,8 +917,8 @@ test("32: the checkout phase's own migrations are untouched, and 041 is not its 
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 62), [],
-    "a migration 063 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 63), [],
+    "a migration 064 or beyond appeared");
   // 041 touches privileges only: it creates no table, no column and no
   // function, so it cannot have changed anything this suite proves.
   const m041 = read("supabase/migrations/041_annual_account_column_privileges.sql");
@@ -937,7 +937,12 @@ test("32: the checkout phase's own migrations are untouched, and 041 is not its 
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
-  assert.deepEqual(touched, [], "a live, immutable migration was edited");
+  // 063 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062,
+  // so 063 is still the right place to fix 063 and may be edited in
+  // place - the terms every pending migration has had. Everything
+  // BELOW it is live. Remove this the moment 063 is applied;
+  // tests/b2b-pending-agreement-writer.test.mjs test 50 enforces that.
+  assert.deepEqual(touched.filter(r => !r.endsWith("063_b2b_instalment_delivery_failure_runtime.sql")), [], "a live, immutable migration was edited");
 });
 
 /* ══════════════════════════════════════════════════════════════

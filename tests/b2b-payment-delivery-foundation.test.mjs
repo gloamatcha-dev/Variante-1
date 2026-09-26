@@ -138,10 +138,10 @@ test("1: 060 exists, is the highest migration, and 061 is NOT authored", () => {
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql"));
   assert.ok(files.includes(MIGRATION), "060 is missing");
   const numbers = files.map(f => Number(f.slice(0, 3))).filter(Number.isInteger);
-  assert.strictEqual(Math.max(...numbers), 62, "062 must be the newest migration");
+  assert.strictEqual(Math.max(...numbers), 63, "063 must be the newest migration");
   assert.strictEqual(files.filter(f => f.startsWith("060")).length, 1,
     "there must be exactly one 060");
-  assert.strictEqual(files.filter(f => f.startsWith("063")).length, 0,
+  assert.strictEqual(files.filter(f => f.startsWith("064")).length, 0,
     "061 must NOT be authored in this package");
 });
 
@@ -1222,9 +1222,9 @@ test("57: no migration up to 059 is modified in the working tree", () => {
   assert.equal(changed, "", `060 must add a file, not edit a live migration: ${changed}`);
   // And 059 is exactly where it was left.
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
-  assert.strictEqual(files[files.length - 4], "059_b2b_supply_commerce_foundation.sql");
-  assert.strictEqual(files[files.length - 3], MIGRATION);
-  assert.strictEqual(files.length, 62);
+  assert.strictEqual(files[files.length - 5], "059_b2b_supply_commerce_foundation.sql");
+  assert.strictEqual(files[files.length - 4], MIGRATION);
+  assert.strictEqual(files.length, 63);
 });
 
 test("58: 060 is registered in the npm test script", () => {

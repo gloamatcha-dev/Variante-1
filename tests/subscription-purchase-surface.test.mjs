@@ -1135,7 +1135,7 @@ test("8: no backend, migration, cadence, price or shipping rule changed", () => 
   // built, adds no table of its own, and touches no subscription,
   // annual or order object. Reviewed in
   // tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(migrations.at(-1), "062_b2b_checkout_settlement.sql",
+  assert.equal(migrations.at(-1), "063_b2b_instalment_delivery_failure_runtime.sql",
     "a migration was added by a UI package");
   assert.match(read("supabase/migrations/024_seed_b2c_subscription_plans.sql"),
     /'week',\s*4,\s*'week',\s*4,\s*true,/, "the seeded cadence changed");

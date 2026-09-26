@@ -590,7 +590,7 @@ test("endpoint: it answers with counts and no customer data", () => {
   // each added block checked field by field below.
   assert.match(
     routeCode,
-    /Response\.json\(\s*\{ \.\.\.summary, deferredCancellations, subscriptionEmails, annual, launchRetention \},/
+    /Response\.json\(\s*\{[\s\S]{0,200}\.\.\.summary, deferredCancellations, subscriptionEmails, annual, launchRetention,/
   );
   // The retention block is three integers and a flag. It is the only
   // job in this endpoint that deletes personal data, so what it reports

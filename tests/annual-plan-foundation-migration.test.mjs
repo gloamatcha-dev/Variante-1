@@ -155,8 +155,8 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(files[files.length - 24], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 25], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 25], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 26], MIGRATION_038, "038 must be the one before it");
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
@@ -164,7 +164,7 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
 test("2: no migration 044 or beyond", () => {
   // 039 is not applied anywhere, so it is still the right place to fix
   // 039. A hardening pass must not become a second migration.
-  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 62);
+  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 63);
   assert.deepEqual(beyond, [], "an unreviewed migration appeared after 039");
 });
 
@@ -176,7 +176,12 @@ test("3: migrations 001 through 038 are unmodified", () => {
   // migration below it is live and may not be.
   const immutable = touched.filter(rel =>
     !rel.endsWith(MIGRATION_039) && !rel.endsWith("040_annual_checkout_retry_fingerprints.sql"));
-  assert.deepEqual(immutable, [], "a live, immutable migration was edited");
+  // 063 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062,
+  // so 063 is still the right place to fix 063 and may be edited in
+  // place - the terms every pending migration has had. Everything
+  // BELOW it is live. Remove this the moment 063 is applied;
+  // tests/b2b-pending-agreement-writer.test.mjs test 50 enforces that.
+  assert.deepEqual(immutable.filter(r => !r.endsWith("063_b2b_instalment_delivery_failure_runtime.sql")), [], "a live, immutable migration was edited");
 });
 
 test("4: migrations 037 and 038 still hold their refund writers, untouched", () => {
@@ -1085,6 +1090,20 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // No B2C pricing, checkout, webhook or annual path imports any of it.
     "lib/checkoutAttempts.ts",
     "lib/b2bCheckoutRules.ts",
+    // PACKAGES 5D/5E/5F edit three B2B leaves, all additively:
+    //
+    //   b2bWebhook.ts      gains the annual instalment settlement, the
+    //                      annual failure recorder and the monthly hold.
+    //                      The 5C checkout and monthly-invoice paths are
+    //                      untouched.
+    //   b2bWebhookDeps.ts  gains the four RPC bindings those need. Every
+    //                      write is still an RPC; service_role still has
+    //                      no direct DML anywhere.
+    //
+    // No B2C pricing, checkout, webhook or annual module imports any of
+    // it. Reviewed in tests/b2b-instalment-delivery-failure.test.mjs.
+    "lib/b2bWebhook.ts",
+    "lib/b2bWebhookDeps.ts",
     "lib/annualPlanCheckout.ts",
     "lib/annualPlanCheckoutRules.ts",
     "lib/annualPlanCheckoutDeps.ts",
@@ -1394,6 +1413,11 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // one carrying gloa_b2b_agreement_id, so no existing session, invoice
     // or subscription changes branch.
     "app/api/stripe/webhook/route.ts",
+    // PACKAGES 5D/5E add the sixth and seventh jobs to the SAME daily
+    // cron - not a second schedule, which the Vercel Hobby plan could
+    // not run and which would re-register the deployed job. Each has its
+    // own error boundary and its own counters, and both are gated by the
+    // closed B2B flag.
     "app/api/cron/retry-order-notifications/route.ts",
     "app/GloaSite.tsx",
     "app/layout.tsx",

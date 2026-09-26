@@ -111,9 +111,9 @@ test("1: 038 exists, owns its number, and 039 is the only one above it", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(files[files.length - 24], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 25], MIGRATION_038, "038 must be the one before it");
-  assert.equal(files[files.length - 26], MIGRATION_037, "037 must be the one before that");
+  assert.equal(files[files.length - 25], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 26], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 27], MIGRATION_037, "037 must be the one before that");
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
@@ -217,7 +217,14 @@ test("2: no migration 044 or beyond", () => {
      // service_role; no table, no column, no policy and no table
      // privilege. No subscription, annual or order object is touched.
      // Reviewed in tests/b2b-checkout-settlement.test.mjs.
-     "062_b2b_checkout_settlement.sql"],
+     "062_b2b_checkout_settlement.sql",
+     // PACKAGES 5D/5E/5F ADDED MIGRATION 063: the instalment, delivery
+     // resolution and failure/hold runtime. SEVEN SECURITY DEFINER
+     // functions and their EXECUTE grants to service_role; no table, no
+     // column, no policy and no table privilege. No subscription,
+     // annual or order object is touched. Reviewed in
+     // tests/b2b-instalment-delivery-failure.test.mjs.
+     "063_b2b_instalment_delivery_failure_runtime.sql"],
     "an unreviewed migration appeared after 043");
   // And 039 kept its hands off this phase's writer entirely.
   for (const name of [MIGRATION_039, MIGRATION_040, MIGRATION_041, MIGRATION_042]) {
@@ -244,7 +251,12 @@ test("3, 4, 5: migrations 019 and 022 through 037 are unmodified", () => {
   const immutable = touched.filter(rel =>
     !rel.endsWith(MIGRATION_038) && !rel.endsWith(MIGRATION_039)
     && !rel.endsWith(MIGRATION_040));
-  assert.deepEqual(immutable, [], "a live, immutable migration was edited");
+  // 063 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062,
+  // so 063 is still the right place to fix 063 and may be edited in
+  // place - the terms every pending migration has had. Everything
+  // BELOW it is live. Remove this the moment 063 is applied;
+  // tests/b2b-pending-agreement-writer.test.mjs test 50 enforces that.
+  assert.deepEqual(immutable.filter(r => !r.endsWith("063_b2b_instalment_delivery_failure_runtime.sql")), [], "a live, immutable migration was edited");
   // And the two this phase reasons about still read the way they were applied.
   assert.ok(read(`supabase/migrations/${MIGRATION_019}`)
     .includes("create or replace function public.apply_order_refund_state("));

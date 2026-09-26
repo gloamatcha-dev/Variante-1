@@ -106,14 +106,18 @@ test("1: 061 owns its number, and only the reviewed 062 follows it", () => {
   // this guard protects is that 061 still occupies its own number and
   // that nothing UNREVIEWED appeared above it. Reviewed in
   // tests/b2b-checkout-settlement.test.mjs.
-  assert.equal(files[files.length - 2], MIGRATION, "061 must be the one before the newest");
-  assert.equal(files[files.length - 3], "060_b2b_payment_delivery_foundation.sql");
-  assert.equal(files[files.length - 4], "059_b2b_supply_commerce_foundation.sql");
-  assert.equal(files.length, 62);
+  assert.equal(files[files.length - 3], MIGRATION, "061 must be the one before the newest");
+  assert.equal(files[files.length - 4], "060_b2b_payment_delivery_foundation.sql");
+  assert.equal(files[files.length - 5], "059_b2b_supply_commerce_foundation.sql");
+  assert.equal(files.length, 63);
+  // PACKAGES 5D/5E/5F ADDED MIGRATION 063: the instalment, resolution
+  // and failure runtime. Re-pinned on the same terms as 062 above.
+  // Reviewed in tests/b2b-instalment-delivery-failure.test.mjs.
   assert.deepStrictEqual(files.filter(f => Number(f.slice(0, 3)) > 61).sort(),
-    ["062_b2b_checkout_settlement.sql"],
+    ["062_b2b_checkout_settlement.sql",
+     "063_b2b_instalment_delivery_failure_runtime.sql"],
     "a migration above 061 appeared that this suite has not been reviewed against");
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 62), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 63), [],
     "an unreviewed migration appeared after 062");
   // No number is used twice, which a copy-paste of a file name would do.
   const numbers = files.map(f => f.slice(0, 3));
@@ -136,7 +140,12 @@ test("2: migrations 001 through 062 are unmodified in the working tree", () => {
     ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
-  assert.deepEqual(touched, [], "a live, immutable migration was edited");
+  // 063 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062,
+  // so 063 is still the right place to fix 063 and may be edited in
+  // place - the terms every pending migration has had. Everything
+  // BELOW it is live. Remove this the moment 063 is applied;
+  // tests/b2b-pending-agreement-writer.test.mjs test 50 enforces that.
+  assert.deepEqual(touched.filter(r => !r.endsWith("063_b2b_instalment_delivery_failure_runtime.sql")), [], "a live, immutable migration was edited");
 });
 
 test("3: 061 is wrapped in one transaction", () => {
@@ -1045,6 +1054,6 @@ test("50: NO SUITE MAY CLAIM THAT AN APPLIED MIGRATION IS STILL PENDING", () => 
   // new migration appearing above it is the moment an exemption becomes
   // legitimate again - and the moment this assertion asks for review.
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files[files.length - 1], "062_b2b_checkout_settlement.sql",
+  assert.equal(files[files.length - 2], "062_b2b_checkout_settlement.sql",
     "a migration appeared above 062 - re-check every immutability exemption");
 });

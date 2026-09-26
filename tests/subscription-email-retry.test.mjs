@@ -653,8 +653,13 @@ test("52: the sweep has its own error boundary and reports errored", () => {
   // The earlier results still reach the response, alongside the annual
   // block Phase 4B6 merged into it and the launch waitlist's retention
   // sweep merged in after that.
+  // PACKAGES 5D/5E added two more blocks to the same response - counts
+  // and sanitised refusal reasons only. The assertion is re-pinned on
+  // the PREFIX rather than the whole literal, so the five earlier
+  // results are still proved to reach the response and a later package
+  // adding an eighth job does not have to edit this line again.
   assert.ok(
-    cronCode.includes("{ ...summary, deferredCancellations, subscriptionEmails, annual, launchRetention },")
+    cronCode.includes("...summary, deferredCancellations, subscriptionEmails, annual, launchRetention,")
   );
   // Per family isolation inside the sweep too.
   assert.equal((retryCode.match(/} catch \(err\) \{/g) ?? []).length, 2,
@@ -694,7 +699,7 @@ test("55-57: no migration was added, edited or required", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(files.length, 62);
+  assert.equal(files.length, 63);
   // Phase 4B1 added 039, the B2C prepaid annual plan foundation,
   // reviewed in tests/annual-plan-foundation-migration.test.mjs. The
   // guard is re-pinned, not deleted: it protects "no UNREVIEWED
@@ -712,17 +717,17 @@ test("55-57: no migration was added, edited or required", () => {
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(files[files.length - 17], "046_launch_signup_atomic.sql");
-  assert.equal(files[files.length - 18], "045_launch_welcome_email.sql");
-  assert.equal(files[files.length - 19], "044_launch_send.sql");
-  assert.equal(files[files.length - 20], "043_launch_waitlist.sql");
-  assert.equal(files[files.length - 21], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.equal(files[files.length - 22], "041_annual_account_column_privileges.sql");
-  assert.equal(files[files.length - 23], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(files[files.length - 24], "039_b2c_annual_plan_foundation.sql");
-  assert.equal(files[files.length - 25], "038_one_time_refund_writer_concurrency.sql");
+  assert.equal(files[files.length - 18], "046_launch_signup_atomic.sql");
+  assert.equal(files[files.length - 19], "045_launch_welcome_email.sql");
+  assert.equal(files[files.length - 20], "044_launch_send.sql");
+  assert.equal(files[files.length - 21], "043_launch_waitlist.sql");
+  assert.equal(files[files.length - 22], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(files[files.length - 23], "041_annual_account_column_privileges.sql");
+  assert.equal(files[files.length - 24], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 25], "039_b2c_annual_plan_foundation.sql");
+  assert.equal(files[files.length - 26], "038_one_time_refund_writer_concurrency.sql");
   assert.deepEqual(files.filter(f => f.startsWith("037")), ["037_subscription_refund_correlation.sql"]);
-  assert.ok(!files.some(f => f.startsWith("063")));
+  assert.ok(!files.some(f => f.startsWith("064")));
   const sql035 = withoutComments(read("supabase/migrations/035_subscription_email_deliveries.sql"));
   // The sweep needs exactly what 035 already grants: SELECT, and UPDATE
   // on status and sent_at.

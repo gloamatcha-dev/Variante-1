@@ -174,8 +174,8 @@ test("1e: no backend, auth, data or commercial logic changed", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("063")),
-    "a migration 063 or beyond appeared");
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("064")),
+    "a migration 064 or beyond appeared");
   // The presentation primitives stayed presentation.
   assert.ok(!/supabase|useAuth|customer_type/.test(ui), "AccountUI grew a data dependency");
 });

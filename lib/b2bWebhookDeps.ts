@@ -2,7 +2,7 @@ import type Stripe from "stripe";
 import { getSupabaseAdmin } from "./supabaseAdmin";
 import { evaluateStripeSessionPayment } from "./stripeFulfillment";
 import { linkStripeSession, markAttemptPaid } from "./checkoutAttempts";
-import type { B2bAttemptMoneyFacts, B2bWebhookDeps } from "./b2bWebhook";
+import type { B2bAttemptMoneyFacts, B2bFailureDeps, B2bWebhookDeps } from "./b2bWebhook";
 
 /**
  * The real wiring behind the B2B settlement (Package 5C).
@@ -115,7 +115,7 @@ async function settleMonthlyInvoice(input: {
   return { result: payload.result ?? "unknown", deliveryNumber: payload.delivery_number };
 }
 
-export function b2bWebhookDeps(stripe: Stripe): B2bWebhookDeps {
+export function b2bWebhookDeps(stripe: Stripe): B2bWebhookDeps & B2bFailureDeps {
   return {
     // EVERY FACT IS RE-READ. A webhook payload is a picture of the object
     // when the event was generated, and a redelivered or delayed event
@@ -129,5 +129,70 @@ export function b2bWebhookDeps(stripe: Stripe): B2bWebhookDeps {
     markAttemptPaid,
     activateAnnual,
     settleMonthlyInvoice,
+    settleAnnualInstalment,
+    recordAnnualFailure,
+    holdDeliveries,
+    releaseDeliveries,
   };
+}
+
+/* ── Packages 5D and 5F: instalment settlement, failure, holds ── */
+
+async function callRpc(fn: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return { result: "unavailable" };
+  const { data, error } = await admin.rpc(fn, args);
+  if (error) {
+    console.error(`B2B ${fn} RPC error:`, error.message);
+    return { result: "rpc_error" };
+  }
+  return (data ?? {}) as Record<string, unknown>;
+}
+
+async function settleAnnualInstalment(input: {
+  agreementId: string;
+  stripeInvoiceId: string;
+  stripePaymentIntentId: string | null;
+}): Promise<{ result: string; instalmentNumber?: number }> {
+  const payload = await callRpc("settle_b2b_annual_paid_instalment", {
+    p_agreement_id: input.agreementId,
+    p_stripe_invoice_id: input.stripeInvoiceId,
+    p_stripe_payment_intent_id: input.stripePaymentIntentId,
+  });
+  return {
+    result: (payload.result as string) ?? "unknown",
+    instalmentNumber: payload.instalment_number as number | undefined,
+  };
+}
+
+async function recordAnnualFailure(input: {
+  agreementId: string;
+  stripeInvoiceId: string;
+}): Promise<{ result: string; instalmentNumber?: number }> {
+  const payload = await callRpc("record_b2b_annual_instalment_failure", {
+    p_agreement_id: input.agreementId,
+    p_stripe_invoice_id: input.stripeInvoiceId,
+  });
+  return {
+    result: (payload.result as string) ?? "unknown",
+    instalmentNumber: payload.instalment_number as number | undefined,
+  };
+}
+
+async function holdDeliveries(agreementId: string): Promise<{ result: string; held?: number }> {
+  const payload = await callRpc("hold_b2b_deliveries_for_payment", { p_agreement_id: agreementId });
+  return { result: (payload.result as string) ?? "unknown", held: payload.held as number | undefined };
+}
+
+async function releaseDeliveries(agreementId: string): Promise<{ result: string; released?: number }> {
+  const payload = await callRpc("release_b2b_deliveries_after_payment", { p_agreement_id: agreementId });
+  return {
+    result: (payload.result as string) ?? "unknown",
+    released: payload.released as number | undefined,
+  };
+}
+
+/** The 5D/5F half of the deps, for the annual invoice handlers. */
+export function b2bFailureDeps(): B2bFailureDeps {
+  return { settleAnnualInstalment, recordAnnualFailure, holdDeliveries, releaseDeliveries };
 }

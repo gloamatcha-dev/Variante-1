@@ -652,7 +652,12 @@ test("54: migrations 019 and 022-037 are unmodified", () => {
     .filter(rel => !rel.endsWith("039_b2c_annual_plan_foundation.sql"))
     // 040 is NOT APPLIED yet, so it may still be edited in place.
     .filter(rel => !rel.endsWith("040_annual_checkout_retry_fingerprints.sql"));
-  assert.deepEqual(migrations, [], "a live, immutable migration was edited");
+  // 063 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062,
+  // so 063 is still the right place to fix 063 and may be edited in
+  // place - the terms every pending migration has had. Everything
+  // BELOW it is live. Remove this the moment 063 is applied;
+  // tests/b2b-pending-agreement-writer.test.mjs test 50 enforces that.
+  assert.deepEqual(migrations.filter(r => !r.endsWith("063_b2b_instalment_delivery_failure_runtime.sql")), [], "a live, immutable migration was edited");
   // And the two functions this phase depends on still read the way they
   // were applied to production.
   assert.ok(read("supabase/migrations/019_order_lifecycle_tracking.sql")
@@ -766,7 +771,14 @@ test("55: this phase added no migration, and the only ones after it are 038 and 
      // service_role; no table, no column, no policy and no table
      // privilege. No subscription, annual or order object is touched.
      // Reviewed in tests/b2b-checkout-settlement.test.mjs.
-     "062_b2b_checkout_settlement.sql"],
+     "062_b2b_checkout_settlement.sql",
+     // PACKAGES 5D/5E/5F ADDED MIGRATION 063: the instalment, delivery
+     // resolution and failure/hold runtime. SEVEN SECURITY DEFINER
+     // functions and their EXECUTE grants to service_role; no table, no
+     // column, no policy and no table privilege. No subscription,
+     // annual or order object is touched. Reviewed in
+     // tests/b2b-instalment-delivery-failure.test.mjs.
+     "063_b2b_instalment_delivery_failure_runtime.sql"],
     "an unreviewed migration appeared after 037");
   const sql039 = withoutComments(read("supabase/migrations/039_b2c_annual_plan_foundation.sql"));
   assert.ok(!sql039.includes("apply_order_refund_state_by_invoice"),

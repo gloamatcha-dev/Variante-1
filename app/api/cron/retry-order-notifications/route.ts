@@ -17,6 +17,16 @@ import {
   sweepExpiredPendingEntries,
   type RetentionClient,
 } from "../../../../lib/launchWaitlistRetention";
+// Packages 5D and 5E. Same cron, sixth and seventh jobs, each with its
+// own error boundary. NOT a second schedule: the Vercel Hobby plan
+// permits one invocation a day, and renaming or adding a path would
+// re-register the deployed cron for no gain.
+import {
+  emptyB2bInstalmentSummary,
+  emptyB2bResolutionSummary,
+} from "../../../../lib/b2bRuntime";
+import { runB2bInstalmentJob, runB2bResolutionJob } from "../../../../lib/b2bRuntimeDeps";
+import { isB2bSelfServiceEnabled } from "../../../../lib/b2bFeatureFlag";
 
 /**
  * Vercel Cron entry point for the transactional email safety net.
@@ -336,6 +346,52 @@ export async function GET(request: Request): Promise<Response> {
       launchRetention = emptyRetentionSummary(true);
     }
 
+    // ── PACKAGE 5D: DUE ANNUAL INSTALMENTS ────────────────────
+    //
+    // GATED BY THE SAME FLAG AS THE CHECKOUT. With B2B self-service
+    // closed there can be no agreement, so the job has nothing to find -
+    // but a closed flag must cost one boolean rather than a query, and
+    // it also means turning B2B off instantly stops the billing.
+    //
+    // Its own error boundary: a Stripe outage here must not stop the
+    // delivery resolution below or any of the five jobs above.
+    let b2bInstalments = emptyB2bInstalmentSummary();
+    let b2bDeliveries = emptyB2bResolutionSummary();
+    if (isB2bSelfServiceEnabled()) {
+      try {
+        // Resolved here rather than reused from the cancellation block
+        // above: that one is scoped to its own try, and this endpoint
+        // asserts the unconfigured branch per job rather than assuming
+        // it - the same shape the retention sweep uses.
+        const b2bStripe = getStripeClient();
+        b2bInstalments = b2bStripe
+          ? await runB2bInstalmentJob(b2bStripe)
+          : emptyB2bInstalmentSummary();
+      } catch (err) {
+        console.error(
+          "B2B instalments: sweep failed:",
+          err instanceof Error ? err.message : "unknown error"
+        );
+        b2bInstalments = emptyB2bInstalmentSummary();
+      }
+
+      // ── PACKAGE 5E: ROUTE UPCOMING DELIVERY SLOTS ───────────
+      //
+      // Routes Berlin and REFUSES everything else, which is the honest
+      // outcome while no packed measurement and no approved customer
+      // shipping charge exist. It dispatches nothing: a resolved
+      // delivery is routed, not sent.
+      try {
+        b2bDeliveries = await runB2bResolutionJob();
+      } catch (err) {
+        console.error(
+          "B2B delivery resolution: sweep failed:",
+          err instanceof Error ? err.message : "unknown error"
+        );
+        b2bDeliveries = emptyB2bResolutionSummary();
+      }
+    }
+
     // Counts only, exactly like the email families. No subscription id,
     // no Stripe id, no customer fact. The subscription block adds
     // delivery uuids for stale 'sending' rows, which are the one thing an
@@ -344,7 +400,27 @@ export async function GET(request: Request): Promise<Response> {
     // order id, recipient or amount at all. The retention block adds
     // three integers and a flag - never an address, an id or a name.
     return Response.json(
-      { ...summary, deferredCancellations, subscriptionEmails, annual, launchRetention },
+      {
+        ...summary, deferredCancellations, subscriptionEmails, annual, launchRetention,
+        // The B2B blocks add counts, agreement/delivery uuids and
+        // sanitised refusal reasons - never an address, an amount, a
+        // Stripe id, a company name or a recipient.
+        b2bInstalments: {
+          due: b2bInstalments.due,
+          invoiced: b2bInstalments.invoiced,
+          alreadyInvoiced: b2bInstalments.alreadyInvoiced,
+          skipped: b2bInstalments.skipped,
+          failed: b2bInstalments.failed,
+        },
+        b2bDeliveries: {
+          candidates: b2bDeliveries.candidates,
+          resolved: b2bDeliveries.resolved,
+          alreadyResolved: b2bDeliveries.alreadyResolved,
+          refused: b2bDeliveries.refused,
+          failed: b2bDeliveries.failed,
+          refusals: b2bDeliveries.refusals,
+        },
+      },
       { status: 200 }
     );
   } catch (err) {

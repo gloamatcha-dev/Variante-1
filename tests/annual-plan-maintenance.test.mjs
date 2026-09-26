@@ -1178,7 +1178,7 @@ test("31: ONE cron schedule, unchanged, and the annual job runs inside it", () =
   // permits one invocation a day. What matters here is that the annual
   // block is still in the response, not that it is the last block in it.
   assert.match(cronRoute, /runAnnualPlanMaintenanceJob\(\)/);
-  assert.match(cronRoute, /\{ \.\.\.summary, deferredCancellations, subscriptionEmails, annual[,}]/);
+  assert.match(cronRoute, /\.\.\.summary, deferredCancellations, subscriptionEmails, annual[,}]/);
 });
 
 test("32: the annual job is behind the SAME authentication, and takes no input", () => {
@@ -1242,7 +1242,7 @@ test("34: this phase adds no migration and edits none", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 62);
+  assert.equal(migrations.length, 63);
   // PHASE 4B8.2 ADDED MIGRATION 042: the ONE column privilege 041
   // was short of, so migration 039's delivery policy can still read
   // the parent's user_id while resolving ownership. Reviewed in
@@ -1251,19 +1251,26 @@ test("34: this phase adds no migration and edits none", () => {
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(migrations[migrations.length - 17], "046_launch_signup_atomic.sql");
-  assert.equal(migrations[migrations.length - 18], "045_launch_welcome_email.sql");
-  assert.equal(migrations[migrations.length - 19], "044_launch_send.sql");
-  assert.equal(migrations[migrations.length - 20], "043_launch_waitlist.sql");
+  assert.equal(migrations[migrations.length - 18], "046_launch_signup_atomic.sql");
+  assert.equal(migrations[migrations.length - 19], "045_launch_welcome_email.sql");
+  assert.equal(migrations[migrations.length - 20], "044_launch_send.sql");
+  assert.equal(migrations[migrations.length - 21], "043_launch_waitlist.sql");
   // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
   // commerce foundation - it evolves the two tables 006 built for a
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 62), [], "a migration 063 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 63), [], "a migration 064 or beyond appeared");
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
-  assert.equal(changed, "", "a live, immutable migration was edited");
+  // 063 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062,
+  // so 063 is still the right place to fix 063 and may be edited in
+  // place - the terms every pending migration has had. Everything
+  // BELOW it is live. Remove this the moment 063 is applied;
+  // tests/b2b-pending-agreement-writer.test.mjs test 50 enforces that.
+  assert.deepEqual(
+    (changed ? changed.split(/\r?\n/) : []).filter(r => !r.endsWith("063_b2b_instalment_delivery_failure_runtime.sql")),
+    [], "a live, immutable migration was edited");
 
   // The maintenance calls exactly the four installed functions it may,
   // and creates nothing itself.

@@ -840,10 +840,10 @@ test("29: a B2B payment FAILURE mutates nothing and never enters the B2C path", 
 
 test("30: 062 is the highest migration and 063 does not exist", () => {
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files[files.length - 1], MIGRATION);
-  assert.equal(files[files.length - 2], "061_b2b_pending_agreement_writer.sql");
-  assert.equal(files.length, 62);
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 62), []);
+  assert.equal(files[files.length - 2], MIGRATION);
+  assert.equal(files[files.length - 3], "061_b2b_pending_agreement_writer.sql");
+  assert.equal(files.length, 63);
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 63), []);
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length);
 });
@@ -855,7 +855,14 @@ test("31: migrations 001 through 062 are unmodified in the working tree", () => 
   const changed = execFileSync("git",
     ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
-  assert.equal(changed, "", "a live, immutable migration was edited");
+  // 063 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062,
+  // so 063 is still the right place to fix 063 and may be edited in
+  // place - the terms every pending migration has had. Everything
+  // BELOW it is live. Remove this the moment 063 is applied;
+  // tests/b2b-pending-agreement-writer.test.mjs test 50 enforces that.
+  assert.deepEqual(
+    (changed ? changed.split(/\r?\n/) : []).filter(r => !r.endsWith("063_b2b_instalment_delivery_failure_runtime.sql")),
+    [], "a live, immutable migration was edited");
 });
 
 test("32: 062 is additive only - no table, policy, RLS, DROP or privilege change", () => {
@@ -1175,9 +1182,14 @@ test("49: 059 through 062 are byte-identical, and no 063 was created", () => {
   // AND 062 IS APPLIED TOO, so there is no migration left that may be
   // edited at all: the exemption this assertion used to carry is gone.
   // A correction from here on needs a NEW migration, reviewed on its own.
-  assert.deepEqual(touched, [], "a live, immutable migration was edited");
+  // 063 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062,
+  // so 063 is still the right place to fix 063 and may be edited in
+  // place - the terms every pending migration has had. Everything
+  // BELOW it is live. Remove this the moment 063 is applied;
+  // tests/b2b-pending-agreement-writer.test.mjs test 50 enforces that.
+  assert.deepEqual(touched.filter(r => !r.endsWith("063_b2b_instalment_delivery_failure_runtime.sql")), [], "a live, immutable migration was edited");
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql"));
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 62), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 63), [],
     "an unreviewed migration appeared above 062");
 });
 

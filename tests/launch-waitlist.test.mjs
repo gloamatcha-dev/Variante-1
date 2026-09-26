@@ -1306,7 +1306,14 @@ test("61: the rate limit went into 043 rather than into a 044, and 043 is still 
      // service_role; no table, no column, no policy and no table
      // privilege. No subscription, annual or order object is touched.
      // Reviewed in tests/b2b-checkout-settlement.test.mjs.
-     "062_b2b_checkout_settlement.sql"],
+     "062_b2b_checkout_settlement.sql",
+     // PACKAGES 5D/5E/5F ADDED MIGRATION 063: the instalment, delivery
+     // resolution and failure/hold runtime. SEVEN SECURITY DEFINER
+     // functions and their EXECUTE grants to service_role; no table, no
+     // column, no policy and no table privilege. No subscription,
+     // annual or order object is touched. Reviewed in
+     // tests/b2b-instalment-delivery-failure.test.mjs.
+     "063_b2b_instalment_delivery_failure_runtime.sql"],
     "an unreviewed migration appeared after 043"
   );
 

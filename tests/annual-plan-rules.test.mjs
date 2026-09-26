@@ -603,19 +603,19 @@ test("27: 039 and 040 are untouched, 041 is the highest, and there is no 042", (
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations[migrations.length - 17], "046_launch_signup_atomic.sql");
-  assert.equal(migrations[migrations.length - 18], "045_launch_welcome_email.sql");
-  assert.equal(migrations[migrations.length - 19], "044_launch_send.sql");
-  assert.equal(migrations[migrations.length - 20], "043_launch_waitlist.sql");
-  assert.equal(migrations[migrations.length - 21], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(migrations[migrations.length - 18], "046_launch_signup_atomic.sql");
+  assert.equal(migrations[migrations.length - 19], "045_launch_welcome_email.sql");
+  assert.equal(migrations[migrations.length - 20], "044_launch_send.sql");
+  assert.equal(migrations[migrations.length - 21], "043_launch_waitlist.sql");
+  assert.equal(migrations[migrations.length - 22], "042_annual_delivery_rls_parent_user_privilege.sql");
   // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
   // commerce foundation - it evolves the two tables 006 built for a
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 62), [],
-    "a migration 063 or beyond appeared");
-  assert.equal(migrations.length, 62);
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 63), [],
+    "a migration 064 or beyond appeared");
+  assert.equal(migrations.length, 63);
   // 039 is LIVE and therefore immutable. 040 is NOT APPLIED yet, so it
   // may still be edited in place - that is the whole reason it is a file
   // under review rather than a 041 - and it is the only one that may.
@@ -623,5 +623,10 @@ test("27: 039 and 040 are untouched, 041 is the highest, and there is no 042", (
     { cwd: ROOT, encoding: "utf-8" }).trim();
   const live = (changed ? changed.split(NEWLINE) : [])
     .filter(rel => !rel.endsWith("040_annual_checkout_retry_fingerprints.sql"));
-  assert.deepEqual(live, [], "a live, immutable migration was edited");
+  // 063 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062,
+  // so 063 is still the right place to fix 063 and may be edited in
+  // place - the terms every pending migration has had. Everything
+  // BELOW it is live. Remove this the moment 063 is applied;
+  // tests/b2b-pending-agreement-writer.test.mjs test 50 enforces that.
+  assert.deepEqual(live.filter(r => !r.endsWith("063_b2b_instalment_delivery_failure_runtime.sql")), [], "a live, immutable migration was edited");
 });
