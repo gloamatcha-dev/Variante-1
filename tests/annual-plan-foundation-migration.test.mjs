@@ -1104,6 +1104,30 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // it. Reviewed in tests/b2b-instalment-delivery-failure.test.mjs.
     "lib/b2bWebhook.ts",
     "lib/b2bWebhookDeps.ts",
+    // THE 063 STRIPE COLLECTION HARDENING edits three 5D modules, all
+    // additively and all for correctness rather than scope:
+    //
+    //   b2bInstalmentRules.ts  the invoice item is now BOUND to its
+    //                          invoice by id, the invoice NAMES the
+    //                          first instalment's PaymentMethod, and a
+    //                          draft is verified before finalizing. An
+    //                          item with no invoice id is a PENDING item
+    //                          and a standalone invoice excludes pending
+    //                          items by default, so the previous order
+    //                          finalized an EMPTY invoice.
+    //   b2bRuntime.ts          the corrected object order, plus the
+    //                          recovery pass that finishes a correlated
+    //                          but unfinalized invoice.
+    //   b2bRuntimeDeps.ts      the reads those two need.
+    //
+    // No B2C module is involved, and the Stripe Customer is never
+    // mutated - which matters because ONE Customer serves every product
+    // a user buys. Reviewed in
+    // tests/b2b-instalment-delivery-failure.test.mjs.
+    "lib/b2bInstalmentRules.ts",
+    "lib/b2bRuntime.ts",
+    "lib/b2bRuntimeDeps.ts",
+    "lib/b2bDeliveryResolutionRules.ts",
     "lib/annualPlanCheckout.ts",
     "lib/annualPlanCheckoutRules.ts",
     "lib/annualPlanCheckoutDeps.ts",

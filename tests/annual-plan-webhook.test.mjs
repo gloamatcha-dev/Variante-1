@@ -1723,10 +1723,17 @@ test("61: 4B4.1's hardening is intact and this phase added no migration", () => 
   assert.equal(migrations.length, 63);
   assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 63), [], "a migration 064 or beyond appeared");
   // 001-062 are all applied to production and therefore immutable.
-  assert.equal(
-    execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
-      { cwd: ROOT, encoding: "utf-8" }).trim(),
-    "", "a live, immutable migration was edited");
+  // 063 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062, so
+  // 063 is still the right place to fix 063 and may be edited in place.
+  // Remove this the moment 063 is applied;
+  // tests/b2b-pending-agreement-writer.test.mjs test 50 enforces that.
+  const touchedMigrations2 = execFileSync(
+    "git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
+    { cwd: ROOT, encoding: "utf-8" }).trim();
+  assert.deepEqual(
+    (touchedMigrations2 ? touchedMigrations2.split(/\r?\n/) : [])
+      .filter(r => !r.endsWith("063_b2b_instalment_delivery_failure_runtime.sql")),
+    [], "a live, immutable migration was edited");
   // The two new decisions are PURE: the leaf still imports no value.
   const rulesImports = rulesCode.slice(0, rulesCode.indexOf("export"));
   assert.ok(rulesImports.includes("import type Stripe from"));

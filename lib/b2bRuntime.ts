@@ -5,6 +5,8 @@ import {
   b2bInstalmentItemIdempotencyKey,
   buildB2bInstalmentInvoiceParams,
   buildB2bInstalmentItemParams,
+  resolveInstalmentPaymentMethod,
+  verifyB2bInstalmentDraft,
 } from "./b2bInstalmentRules.ts";
 import {
   resolveB2bDeliveryRoute,
@@ -71,6 +73,15 @@ export type B2bInstalmentDeps = {
   chargeFor: (netCents: number) => B2bInstalmentCharge;
   /** How many instalments the contract has, for the invoice description. */
   instalmentCountFor: (agreementId: string) => Promise<number | null>;
+  /**
+   * The PaymentMethod that settled instalment 1, and the Customer it
+   * belongs to. Read from the authoritative PaymentIntent whose id
+   * migration 062 stored on instalment 1 at activation.
+   */
+  firstInstalmentPaymentIntent: (agreementId: string)
+    => Promise<{ customer?: unknown; payment_method?: unknown } | null>;
+  /** Read a draft back, WITH ITS LINES, before finalizing it. */
+  retrieveInvoiceWithLines: (invoiceId: string) => Promise<Stripe.Invoice>;
   createInvoiceItem: (
     params: Stripe.InvoiceItemCreateParams,
     options: { idempotencyKey: string }
@@ -91,26 +102,150 @@ export type B2bInstalmentDeps = {
 export const B2B_INSTALMENT_BATCH_LIMIT = 25;
 
 /**
+ * Bring one instalment's Stripe invoice to the intended collecting state.
+ *
+ * SHARED BY BOTH PASSES - the first-time invoicer below and the recovery
+ * pass after it - because "make sure this draft is right and then
+ * finalize it" is the same question whether the draft was created a
+ * second ago or a day ago. One implementation means the two cannot
+ * disagree.
+ *
+ * ── IT READS THE DRAFT BACK BEFORE IT CHARGES ANYBODY ─────────
+ *
+ * This is the step whose absence caused the original defect. A stubbed
+ * createInvoiceItem returning an id says nothing about whether the line
+ * reached the invoice; only the invoice itself does. So it is retrieved
+ * WITH ITS LINES and refused unless it holds exactly one line, for the
+ * exact gross, in the expected currency, carrying this instalment's
+ * metadata.
+ *
+ * ── AND EVERY NON-DRAFT STATE IS ANSWERED, NOT ASSUMED ────────
+ *
+ *   draft                 ensure the item, verify, finalize
+ *   open / paid           already collecting or collected. Nothing to do,
+ *                         and NEVER a second invoice.
+ *   void / uncollectible  FAIL CLOSED and report. Stripe has given up or
+ *                         somebody voided it, and neither is something a
+ *                         scheduled job should paper over by issuing a
+ *                         replacement charge.
+ */
+export async function ensureB2bInstalmentCollecting(
+  deps: B2bInstalmentDeps,
+  input: {
+    agreementId: string;
+    instalmentNumber: number;
+    instalmentCount: number;
+    stripeCustomerId: string;
+    currency: string;
+    charge: B2bInstalmentCharge;
+    stripeInvoiceId: string;
+  }
+): Promise<{ kind: "finalized" | "already_collecting" | "refused"; detail?: string }> {
+  const invoice = await deps.retrieveInvoiceWithLines(input.stripeInvoiceId);
+
+  if (invoice.status === "open" || invoice.status === "paid") {
+    return { kind: "already_collecting", detail: invoice.status };
+  }
+  if (invoice.status === "void" || invoice.status === "uncollectible") {
+    return { kind: "refused", detail: `invoice is ${invoice.status}` };
+  }
+  if (invoice.status !== "draft") {
+    return { kind: "refused", detail: `invoice is ${invoice.status ?? "unknown"}` };
+  }
+
+  // The line is created only if the draft does not already hold it. The
+  // deterministic idempotency key makes a repeat harmless, but skipping
+  // the call when the line is already there keeps a retry from depending
+  // on Stripe replaying a key that may have expired.
+  let verdict = verifyB2bInstalmentDraft(invoice, input);
+  if (!verdict.ok) {
+    const lines = invoice.lines?.data ?? [];
+    if (lines.length > 1) {
+      // Something else reached this invoice. Adding another line would
+      // make it worse, and finalizing would charge for both.
+      return { kind: "refused", detail: verdict.reason };
+    }
+    await deps.createInvoiceItem(
+      buildB2bInstalmentItemParams({ ...input, invoiceId: input.stripeInvoiceId }),
+      {
+        idempotencyKey: b2bInstalmentItemIdempotencyKey(
+          input.agreementId, input.instalmentNumber
+        ),
+      }
+    );
+    const reread = await deps.retrieveInvoiceWithLines(input.stripeInvoiceId);
+    verdict = verifyB2bInstalmentDraft(reread, input);
+    if (!verdict.ok) {
+      // NOT FINALIZED. Nobody is charged and the draft can be inspected.
+      return { kind: "refused", detail: verdict.reason };
+    }
+  }
+
+  await deps.finalizeInvoice(input.stripeInvoiceId);
+  return { kind: "finalized" };
+}
+
+/** The Stripe facts one instalment needs before it can be invoiced. */
+async function instalmentContext(
+  deps: B2bInstalmentDeps,
+  row: B2bDueInstalment
+): Promise<
+  | { ok: true; stripeCustomerId: string; instalmentCount: number;
+      defaultPaymentMethodId: string; charge: B2bInstalmentCharge }
+  | { ok: false; reason: string }
+> {
+  const stripeCustomerId = await deps.findStripeCustomerId(row.user_id);
+  if (!stripeCustomerId) {
+    // The canonical mapping has no row. Inventing a Customer here would
+    // be inventing a second identity for the same business.
+    return { ok: false, reason: "no canonical stripe customer" };
+  }
+
+  const instalmentCount = await deps.instalmentCountFor(row.agreement_id);
+  if (!instalmentCount) {
+    return { ok: false, reason: "agreement has no instalment count" };
+  }
+
+  // ── THE PAYMENT METHOD IS PROVED, NOT ASSUMED ───────────────
+  const intent = await deps.firstInstalmentPaymentIntent(row.agreement_id);
+  if (!intent) {
+    return { ok: false, reason: "instalment 1 has no recorded PaymentIntent" };
+  }
+  const pm = resolveInstalmentPaymentMethod(intent, stripeCustomerId);
+  if (!pm.ok) {
+    return { ok: false, reason: pm.reason };
+  }
+
+  return {
+    ok: true,
+    stripeCustomerId,
+    instalmentCount,
+    defaultPaymentMethodId: pm.paymentMethodId,
+    charge: deps.chargeFor(row.net_cents),
+  };
+}
+
+/**
  * Invoices every annual instalment that is due.
  *
- * ── THE ORDER IS THE CRASH-SAFETY ────────────────────────────
+ * ── THE ORDER, AND WHY IT IS THIS ONE ────────────────────────
  *
- *   1. item    (deterministic idempotency key)
- *   2. invoice (deterministic idempotency key, auto_advance false)
+ *   1. INVOICE first, as a draft   (deterministic idempotency key)
+ *   2. ITEM, bound to that invoice (deterministic idempotency key)
  *   3. RECORD the correlation in the database
- *   4. finalize, which is what starts Stripe collecting
+ *   4. READ THE DRAFT BACK, verify it, and finalize
  *
- * Step 3 before step 4 is the whole design. If the process dies between
- * 2 and 3 the invoice exists in Stripe but is still a DRAFT that has
- * charged nobody, and the next run replays the same idempotency keys and
- * gets the same invoice back. If it dies between 3 and 4 the row is
- * correctly marked invoiced and the draft is finalized on a later pass -
- * never a second invoice, and never a charge this system has not
- * recorded.
+ * The invoice comes FIRST because an InvoiceItem with no invoice id is a
+ * PENDING item on the Customer, and a standalone invoice does not pick
+ * pending items up - pending_invoice_items_behavior defaults to
+ * "exclude". The original order created the item first and produced an
+ * EMPTY invoice; binding the item to a named draft is the documented fix,
+ * and it also means no unrelated pending item can drift in.
  *
- * A row the database refuses (not due, already invoiced, wrong status)
- * is SKIPPED, not retried: 063 has already decided, and re-asking would
- * not change the answer.
+ * Nothing charges anybody until step 4, and step 4 refuses unless the
+ * draft is exactly right. So every crash window leaves either no invoice,
+ * or a draft that has collected nothing and can be completed by the
+ * recovery pass.
  */
 export async function runB2bInstalmentInvoicing(
   deps: B2bInstalmentDeps,
@@ -130,46 +265,32 @@ export async function runB2bInstalmentInvoicing(
       kind: "failed",
     };
     try {
-      const customerId = await deps.findStripeCustomerId(row.user_id);
-      if (!customerId) {
-        // The canonical mapping has no row. Inventing a Customer here
-        // would be inventing a second identity for the same business.
+      const context = await instalmentContext(deps, row);
+      if (!context.ok) {
         outcome.kind = "skipped";
-        outcome.detail = "no canonical stripe customer";
+        outcome.detail = context.reason;
         summary.skipped += 1;
         summary.outcomes.push(outcome);
         continue;
       }
 
-      const instalmentCount = await deps.instalmentCountFor(row.agreement_id);
-      if (!instalmentCount) {
-        outcome.kind = "skipped";
-        outcome.detail = "agreement has no instalment count";
-        summary.skipped += 1;
-        summary.outcomes.push(outcome);
-        continue;
-      }
-
-      const charge = deps.chargeFor(row.net_cents);
       const input = {
         agreementId: row.agreement_id,
         instalmentNumber: row.instalment_number,
-        instalmentCount,
-        stripeCustomerId: customerId,
+        instalmentCount: context.instalmentCount,
+        stripeCustomerId: context.stripeCustomerId,
         currency: row.currency,
-        charge,
+        charge: context.charge,
       };
 
-      await deps.createInvoiceItem(
-        buildB2bInstalmentItemParams(input),
-        { idempotencyKey: b2bInstalmentItemIdempotencyKey(row.agreement_id, row.instalment_number) }
-      );
-
+      // 1. THE DRAFT, before any line exists.
       const invoice = await deps.createInvoice(
-        buildB2bInstalmentInvoiceParams(input),
+        buildB2bInstalmentInvoiceParams({
+          ...input,
+          defaultPaymentMethodId: context.defaultPaymentMethodId,
+        }),
         { idempotencyKey: b2bInstalmentInvoiceIdempotencyKey(row.agreement_id, row.instalment_number) }
       );
-
       if (!invoice.id) {
         outcome.detail = "stripe returned an invoice with no id";
         summary.failed += 1;
@@ -177,25 +298,22 @@ export async function runB2bInstalmentInvoicing(
         continue;
       }
 
+      // 2. THE LINE, bound to that draft by id.
+      await deps.createInvoiceItem(
+        buildB2bInstalmentItemParams({ ...input, invoiceId: invoice.id }),
+        { idempotencyKey: b2bInstalmentItemIdempotencyKey(row.agreement_id, row.instalment_number) }
+      );
+
+      // 3. THE CORRELATION, before anything can be collected.
       const recorded = await deps.recordInvoice({
         agreementId: row.agreement_id,
         instalmentNumber: row.instalment_number,
         stripeInvoiceId: invoice.id,
       });
 
-      if (recorded.result === "already_invoiced") {
-        // A concurrent run won. The draft is the same object, so
-        // finalizing it is still correct and still idempotent.
-        await deps.finalizeInvoice(invoice.id);
-        outcome.kind = "already_invoiced";
-        summary.alreadyInvoiced += 1;
-        summary.outcomes.push(outcome);
-        continue;
-      }
-      if (recorded.result !== "invoiced") {
-        // NOT FINALIZED. The database refused, so nobody is charged: the
-        // draft stays a draft and can be voided by hand if it ever
-        // matters.
+      if (recorded.result !== "invoiced" && recorded.result !== "already_invoiced") {
+        // NOT FINALIZED. The database refused, so nobody is charged and
+        // the draft stays a draft.
         outcome.kind = "skipped";
         outcome.detail = recorded.result;
         summary.skipped += 1;
@@ -203,17 +321,122 @@ export async function runB2bInstalmentInvoicing(
         continue;
       }
 
-      // ONLY NOW does Stripe start collecting - and from here dunning is
-      // authoritative, which is the approved rule.
-      await deps.finalizeInvoice(invoice.id);
-      outcome.kind = "invoiced";
-      summary.invoiced += 1;
+      // 4. VERIFY, then collect.
+      const ensured = await ensureB2bInstalmentCollecting(deps, {
+        ...input, stripeInvoiceId: invoice.id,
+      });
+      if (ensured.kind === "refused") {
+        outcome.detail = ensured.detail;
+        summary.failed += 1;
+        summary.outcomes.push(outcome);
+        continue;
+      }
+
+      outcome.kind = recorded.result === "already_invoiced" ? "already_invoiced" : "invoiced";
+      if (outcome.kind === "already_invoiced") summary.alreadyInvoiced += 1;
+      else summary.invoiced += 1;
       summary.outcomes.push(outcome);
     } catch (err) {
       outcome.detail = err instanceof Error ? err.message : "stripe or database error";
       summary.failed += 1;
       summary.outcomes.push(outcome);
       // One instalment's failure never stops the rest of the batch.
+    }
+  }
+
+  return summary;
+}
+
+/* ── Package 5D: THE RECOVERY PASS ──────────────────────────── */
+
+export type B2bUnfinalizedInstalment = B2bDueInstalment & {
+  stripe_invoice_id: string;
+};
+
+export type B2bReconcileSummary = {
+  candidates: number;
+  finalized: number;
+  alreadyCollecting: number;
+  refused: number;
+  failed: number;
+  outcomes: Array<{
+    agreementId: string; instalmentNumber: number;
+    kind: "finalized" | "already_collecting" | "refused" | "failed"; detail?: string;
+  }>;
+};
+
+export type B2bReconcileDeps = B2bInstalmentDeps & {
+  listUnfinalized: (limit: number) => Promise<B2bUnfinalizedInstalment[]>;
+};
+
+/**
+ * Finishes instalments whose Stripe invoice was correlated but never
+ * reached collection.
+ *
+ * ── THE CRASH WINDOW THIS CLOSES ─────────────────────────────
+ *
+ * Once a row is `invoiced`, b2b_annual_instalments_due stops offering it
+ * - correctly, because re-offering it would risk a second invoice. But
+ * that meant a process dying between the database record and the finalize
+ * stranded a DRAFT nobody would ever collect: the money was owed, the row
+ * said invoiced, and no code path would look at it again.
+ *
+ * So 063 gained a SECOND read - b2b_annual_instalments_unfinalized - and
+ * this pass drives it. It never creates an invoice: it retrieves the one
+ * the row already names and brings it to the intended state through the
+ * same shared helper the first pass uses.
+ *
+ * The row is NOT moved back to `scheduled`. That would be the obvious fix
+ * and the wrong one: `scheduled` means "no Stripe object exists", so a
+ * row whose invoice id is set would become eligible for a SECOND invoice.
+ */
+export async function runB2bInstalmentReconciliation(
+  deps: B2bReconcileDeps,
+  limit: number = B2B_INSTALMENT_BATCH_LIMIT
+): Promise<B2bReconcileSummary> {
+  const summary: B2bReconcileSummary = {
+    candidates: 0, finalized: 0, alreadyCollecting: 0, refused: 0, failed: 0, outcomes: [],
+  };
+
+  const rows = await deps.listUnfinalized(limit);
+  summary.candidates = rows.length;
+
+  for (const row of rows) {
+    try {
+      const context = await instalmentContext(deps, row);
+      if (!context.ok) {
+        summary.refused += 1;
+        summary.outcomes.push({
+          agreementId: row.agreement_id, instalmentNumber: row.instalment_number,
+          kind: "refused", detail: context.reason,
+        });
+        continue;
+      }
+
+      const ensured = await ensureB2bInstalmentCollecting(deps, {
+        agreementId: row.agreement_id,
+        instalmentNumber: row.instalment_number,
+        instalmentCount: context.instalmentCount,
+        stripeCustomerId: context.stripeCustomerId,
+        currency: row.currency,
+        charge: context.charge,
+        stripeInvoiceId: row.stripe_invoice_id,
+      });
+
+      if (ensured.kind === "finalized") summary.finalized += 1;
+      else if (ensured.kind === "already_collecting") summary.alreadyCollecting += 1;
+      else summary.refused += 1;
+
+      summary.outcomes.push({
+        agreementId: row.agreement_id, instalmentNumber: row.instalment_number,
+        kind: ensured.kind, detail: ensured.detail,
+      });
+    } catch (err) {
+      summary.failed += 1;
+      summary.outcomes.push({
+        agreementId: row.agreement_id, instalmentNumber: row.instalment_number,
+        kind: "failed", detail: err instanceof Error ? err.message : "stripe or database error",
+      });
     }
   }
 
@@ -360,3 +583,6 @@ export const emptyB2bInstalmentSummary = (): B2bInstalmentSummary =>
 export const emptyB2bResolutionSummary = (): B2bResolutionSummary =>
   ({ candidates: 0, resolved: 0, alreadyResolved: 0, refused: 0, failed: 0,
      refusals: {}, outcomes: [] });
+
+export const emptyB2bReconcileSummary = (): B2bReconcileSummary =>
+  ({ candidates: 0, finalized: 0, alreadyCollecting: 0, refused: 0, failed: 0, outcomes: [] });

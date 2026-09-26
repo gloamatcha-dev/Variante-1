@@ -5,10 +5,13 @@ import type { B2bInstalmentCharge } from "./b2bInstalmentRules";
 import {
   runB2bDeliveryResolution,
   runB2bInstalmentInvoicing,
+  runB2bInstalmentReconciliation,
   type B2bDueInstalment,
   type B2bInstalmentSummary,
+  type B2bReconcileSummary,
   type B2bResolutionSummary,
   type B2bResolvableDelivery,
+  type B2bUnfinalizedInstalment,
 } from "./b2bRuntime";
 
 /**
@@ -207,22 +210,100 @@ async function resolveDelivery(input: {
   return { result: ((data ?? {}) as { result?: string }).result ?? "unknown" };
 }
 
-/* ── The two jobs, wired ────────────────────────────────────── */
 
-export function runB2bInstalmentJob(stripe: Stripe, limit?: number): Promise<B2bInstalmentSummary> {
-  return runB2bInstalmentInvoicing({
+/**
+ * Instalments whose Stripe invoice was correlated but never collected.
+ *
+ * Migration 063's second read, and the thing that closes the crash
+ * window between the database record and the finalize.
+ */
+async function listUnfinalized(limit: number): Promise<B2bUnfinalizedInstalment[]> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return [];
+
+  const { data, error } = await admin.rpc("b2b_annual_instalments_unfinalized", { p_limit: limit });
+  if (error) {
+    console.error("B2B instalment: unfinalized list error:", error.message);
+    return [];
+  }
+  return (data ?? []) as B2bUnfinalizedInstalment[];
+}
+
+/**
+ * The PaymentIntent that settled instalment 1 of this agreement.
+ *
+ * Migration 062 stored its id on instalment 1's payment row at
+ * activation, so the chain is row -> PaymentIntent -> PaymentMethod with
+ * no new column and no second copy of any identity. The PaymentIntent is
+ * RE-READ from Stripe rather than trusted: the customer on it is what
+ * proves the PaymentMethod may be used for this invoice.
+ */
+function firstInstalmentPaymentIntent(stripe: Stripe) {
+  return async (agreementId: string) => {
+    const admin = getSupabaseAdmin();
+    if (!admin) return null;
+
+    const { data, error } = await admin
+      .from("b2b_payment_schedule")
+      .select("stripe_payment_intent_id")
+      .eq("supply_agreement_id", agreementId)
+      .eq("instalment_number", 1)
+      .maybeSingle();
+
+    if (error) {
+      console.error("B2B instalment: first-instalment lookup error:", error.message);
+      return null;
+    }
+    const intentId = (data as { stripe_payment_intent_id?: string | null } | null)
+      ?.stripe_payment_intent_id;
+    if (!intentId) return null;
+
+    try {
+      return await stripe.paymentIntents.retrieve(intentId);
+    } catch (err) {
+      console.error(
+        "B2B instalment: could not read the first instalment PaymentIntent:",
+        err instanceof Error ? err.message : err
+      );
+      return null;
+    }
+  };
+}
+
+/** Everything the invoicer and the recovery pass share. */
+function instalmentDeps(stripe: Stripe) {
+  return {
     listDue,
+    listUnfinalized,
     findStripeCustomerId,
     chargeFor: b2bInstalmentCharge,
     instalmentCountFor,
-    createInvoiceItem: (params, options) => stripe.invoiceItems.create(params, options),
-    createInvoice: (params, options) => stripe.invoices.create(params, options),
+    firstInstalmentPaymentIntent: firstInstalmentPaymentIntent(stripe),
+    // WITH ITS LINES. The whole point of the read-back is to see whether
+    // the intended line actually reached the invoice.
+    retrieveInvoiceWithLines: (invoiceId: string) =>
+      stripe.invoices.retrieve(invoiceId, { expand: ["lines"] }),
+    createInvoiceItem: (params: Stripe.InvoiceItemCreateParams, options: { idempotencyKey: string }) =>
+      stripe.invoiceItems.create(params, options),
+    createInvoice: (params: Stripe.InvoiceCreateParams, options: { idempotencyKey: string }) =>
+      stripe.invoices.create(params, options),
     // auto_advance TRUE here and nowhere else: finalizing is the moment
-    // Stripe takes over collection and dunning, and it happens only
-    // after the correlation is safely recorded.
-    finalizeInvoice: invoiceId => stripe.invoices.finalizeInvoice(invoiceId, { auto_advance: true }),
+    // Stripe takes over collection and dunning, and it happens only after
+    // the correlation is recorded AND the draft has been verified.
+    finalizeInvoice: (invoiceId: string) =>
+      stripe.invoices.finalizeInvoice(invoiceId, { auto_advance: true }),
     recordInvoice,
-  }, limit);
+  };
+}
+
+export function runB2bReconcileJob(stripe: Stripe, limit?: number): Promise<B2bReconcileSummary> {
+  return runB2bInstalmentReconciliation(instalmentDeps(stripe), limit);
+}
+
+/* ── The jobs, wired ────────────────────────────────────────── */
+
+export function runB2bInstalmentJob(stripe: Stripe, limit?: number): Promise<B2bInstalmentSummary> {
+  return runB2bInstalmentInvoicing(instalmentDeps(stripe), limit);
 }
 
 export function runB2bResolutionJob(limit?: number, horizonDays?: number): Promise<B2bResolutionSummary> {

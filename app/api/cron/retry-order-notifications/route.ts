@@ -23,9 +23,14 @@ import {
 // re-register the deployed cron for no gain.
 import {
   emptyB2bInstalmentSummary,
+  emptyB2bReconcileSummary,
   emptyB2bResolutionSummary,
 } from "../../../../lib/b2bRuntime";
-import { runB2bInstalmentJob, runB2bResolutionJob } from "../../../../lib/b2bRuntimeDeps";
+import {
+  runB2bInstalmentJob,
+  runB2bReconcileJob,
+  runB2bResolutionJob,
+} from "../../../../lib/b2bRuntimeDeps";
 import { isB2bSelfServiceEnabled } from "../../../../lib/b2bFeatureFlag";
 
 /**
@@ -356,8 +361,28 @@ export async function GET(request: Request): Promise<Response> {
     // Its own error boundary: a Stripe outage here must not stop the
     // delivery resolution below or any of the five jobs above.
     let b2bInstalments = emptyB2bInstalmentSummary();
+    let b2bReconcile = emptyB2bReconcileSummary();
     let b2bDeliveries = emptyB2bResolutionSummary();
     if (isB2bSelfServiceEnabled()) {
+      // ── RECOVERY FIRST ──────────────────────────────────────
+      //
+      // An instalment whose invoice was correlated but never finalized is
+      // money owed that nothing else will ever look at again, so it is
+      // finished BEFORE new invoices are created. It creates no invoice:
+      // it retrieves the one the row already names.
+      try {
+        const reconcileStripe = getStripeClient();
+        b2bReconcile = reconcileStripe
+          ? await runB2bReconcileJob(reconcileStripe)
+          : emptyB2bReconcileSummary();
+      } catch (err) {
+        console.error(
+          "B2B instalment reconciliation: sweep failed:",
+          err instanceof Error ? err.message : "unknown error"
+        );
+        b2bReconcile = emptyB2bReconcileSummary();
+      }
+
       try {
         // Resolved here rather than reused from the cancellation block
         // above: that one is scoped to its own try, and this endpoint
@@ -411,6 +436,13 @@ export async function GET(request: Request): Promise<Response> {
           alreadyInvoiced: b2bInstalments.alreadyInvoiced,
           skipped: b2bInstalments.skipped,
           failed: b2bInstalments.failed,
+        },
+        b2bReconcile: {
+          candidates: b2bReconcile.candidates,
+          finalized: b2bReconcile.finalized,
+          alreadyCollecting: b2bReconcile.alreadyCollecting,
+          refused: b2bReconcile.refused,
+          failed: b2bReconcile.failed,
         },
         b2bDeliveries: {
           candidates: b2bDeliveries.candidates,

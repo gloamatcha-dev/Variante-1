@@ -143,10 +143,31 @@ export type B2bInstalmentInvoiceInput = {
  * migration 060 refuses to store.
  */
 export function buildB2bInstalmentItemParams(
-  input: B2bInstalmentInvoiceInput
+  input: B2bInstalmentInvoiceInput & { invoiceId: string }
 ): Stripe.InvoiceItemCreateParams {
   return {
     customer: input.stripeCustomerId,
+    // ── BOUND TO ONE INVOICE, EXPLICITLY ────────────────────────
+    //
+    // THIS IS THE FIX. An InvoiceItem created WITHOUT an invoice id is a
+    // PENDING item on the Customer, and the SDK is explicit about what
+    // happens to it: "For standalone invoices, the invoice item won't be
+    // automatically added unless you pass pending_invoice_item_behavior:
+    // 'include' when creating the invoice" - and
+    // pending_invoice_items_behavior "Defaults to exclude if the
+    // parameter is omitted".
+    //
+    // So the original order - item first, then an invoice created with
+    // 'exclude' - produced an EMPTY invoice. It would have finalized at
+    // zero and collected nothing, while the database recorded the
+    // instalment as invoiced.
+    //
+    // Binding the item to a named draft invoice fixes it and is strictly
+    // safer than the 'include' alternative, because 'include' sweeps in
+    // EVERY pending item the Customer happens to have - and this
+    // Customer is shared with B2C, so an unrelated pending item could
+    // legitimately exist.
+    invoice: input.invoiceId,
     currency: input.currency.toLowerCase(),
     amount: input.charge.grossCents,
     description:
@@ -180,14 +201,37 @@ export function buildB2bInstalmentItemParams(
  * to sit on the same customer.
  */
 export function buildB2bInstalmentInvoiceParams(
-  input: B2bInstalmentInvoiceInput
+  input: B2bInstalmentInvoiceInput & { defaultPaymentMethodId: string }
 ): Stripe.InvoiceCreateParams {
   return {
     customer: input.stripeCustomerId,
     currency: input.currency.toLowerCase(),
     collection_method: "charge_automatically",
     auto_advance: false,
-    pending_invoice_items_behavior: "exclude",
+    // ── THE PAYMENT METHOD IS NAMED, NOT LEFT TO STRIPE ─────────
+    //
+    // THIS IS THE SECOND FIX. setup_future_usage "off_session" on
+    // instalment 1 makes the PaymentMethod reusable and attaches it to
+    // the Customer. It does NOT set
+    // customer.invoice_settings.default_payment_method, and the SDK says
+    // an invoice without default_payment_method "defaults to the
+    // subscription's default payment method, if any, or to the default
+    // payment method in the customer's invoice settings" - neither of
+    // which this flow has established. Collection would then depend on
+    // whatever Stripe happened to find.
+    //
+    // So the PaymentMethod that paid instalment 1 is named HERE, on the
+    // invoice, and deliberately NOT on the Customer: public
+    // stripe_customers is keyed on user_id, so ONE Stripe Customer
+    // serves every GLOA product that user buys. Writing
+    // customer.invoice_settings.default_payment_method would change
+    // which card a B2C four-weekly subscription renews on, which is not
+    // this package's decision to make.
+    default_payment_method: input.defaultPaymentMethodId,
+    // pending_invoice_items_behavior is deliberately ABSENT. It defaults
+    // to 'exclude', which is what this invoice wants: its one line is
+    // bound to it explicitly by invoice id, so no pending item - B2B or
+    // B2C - can drift onto it.
     description:
       `GLOA Matcha B2B – Jahresvertrag, Rate ${input.instalmentNumber} von ${input.instalmentCount}`,
     metadata: b2bInvoiceMetadata(input.agreementId, input.instalmentNumber),
@@ -224,4 +268,115 @@ export function invoiceAmountMatches(
   if (typeof invoice.total !== "number") return false;
   if ((invoice.currency ?? "").toLowerCase() !== expectedCurrency.toLowerCase()) return false;
   return invoice.total === charge.grossCents;
+}
+
+/* ── Proving the draft is what it should be ─────────────────── */
+
+/** One line of a draft invoice, as much of it as this check needs. */
+export type B2bInvoiceLine = {
+  amount?: number | null;
+  currency?: string | null;
+  metadata?: Record<string, string> | null;
+  description?: string | null;
+};
+
+export type B2bDraftVerdict =
+  | { ok: true }
+  | { ok: false; reason: string };
+
+/**
+ * Does this draft invoice hold EXACTLY the intended instalment line?
+ *
+ * The check a mocked call order cannot make, and the reason it exists:
+ * the original flow created a pending item and an invoice that excluded
+ * it, so the draft was empty. An emptiness that a stubbed
+ * `createInvoiceItem` returning `{id}` happily reports as success.
+ *
+ * So the draft is READ BACK before it is finalized, and finalization is
+ * refused unless it carries one line, for the exact gross, in the
+ * expected currency, carrying this instalment's own metadata. A second
+ * line - an unrelated pending item that drifted in, a duplicate of this
+ * one - is a refusal, not a rounding error: finalizing it would charge
+ * the business for something nobody priced.
+ */
+export function verifyB2bInstalmentDraft(
+  invoice: { status?: string | null; total?: number | null; currency?: string | null;
+             lines?: { data?: B2bInvoiceLine[] } | null },
+  input: { agreementId: string; instalmentNumber: number; currency: string;
+           charge: B2bInstalmentCharge }
+): B2bDraftVerdict {
+  if (invoice.status !== "draft") {
+    return { ok: false, reason: `invoice is ${invoice.status ?? "unknown"}, not draft` };
+  }
+
+  const lines = invoice.lines?.data ?? [];
+  if (lines.length !== 1) {
+    return { ok: false, reason: `draft holds ${lines.length} line(s), expected exactly 1` };
+  }
+
+  const line = lines[0];
+  if (line.amount !== input.charge.grossCents) {
+    return { ok: false, reason: `line is ${line.amount} cents, expected ${input.charge.grossCents}` };
+  }
+  if ((line.currency ?? "").toLowerCase() !== input.currency.toLowerCase()) {
+    return { ok: false, reason: `line is in ${line.currency}, expected ${input.currency}` };
+  }
+
+  const meta = line.metadata ?? {};
+  if (meta[B2B_INVOICE_AGREEMENT_METADATA_KEY] !== input.agreementId) {
+    return { ok: false, reason: "line does not carry this agreement's id" };
+  }
+  if (meta[B2B_INVOICE_INSTALMENT_METADATA_KEY] !== String(input.instalmentNumber)) {
+    return { ok: false, reason: "line does not carry this instalment number" };
+  }
+
+  // The invoice total must be the line, and nothing else.
+  if (typeof invoice.total === "number" && invoice.total !== input.charge.grossCents) {
+    return { ok: false, reason: `draft total is ${invoice.total}, expected ${input.charge.grossCents}` };
+  }
+
+  return { ok: true };
+}
+
+/**
+ * The PaymentMethod that settled instalment 1, proved to belong to the
+ * same Stripe Customer.
+ *
+ * Read from the authoritative PaymentIntent rather than assumed: 060
+ * stored that intent's id on instalment 1's payment row at activation,
+ * so the chain is row -> PaymentIntent -> PaymentMethod, with the
+ * Customer checked at the last step.
+ *
+ * A PaymentMethod on a different Customer is REFUSED. Stripe would
+ * refuse it too - "It must belong to the customer associated with the
+ * invoice" - but failing here means the invoice is never created rather
+ * than created and then rejected.
+ */
+export function resolveInstalmentPaymentMethod(
+  paymentIntent: { customer?: unknown; payment_method?: unknown },
+  expectedCustomerId: string
+): { ok: true; paymentMethodId: string } | { ok: false; reason: string } {
+  const idOf = (value: unknown): string | null => {
+    if (typeof value === "string") return value.trim() || null;
+    if (value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string") {
+      return (value as { id: string }).id;
+    }
+    return null;
+  };
+
+  const paymentMethodId = idOf(paymentIntent.payment_method);
+  if (!paymentMethodId) {
+    return { ok: false, reason: "the first instalment's PaymentIntent carries no payment method" };
+  }
+  const customerId = idOf(paymentIntent.customer);
+  if (!customerId) {
+    return { ok: false, reason: "the first instalment's PaymentIntent carries no customer" };
+  }
+  if (customerId !== expectedCustomerId) {
+    return {
+      ok: false,
+      reason: "the first instalment's PaymentIntent belongs to a different Stripe customer",
+    };
+  }
+  return { ok: true, paymentMethodId };
 }

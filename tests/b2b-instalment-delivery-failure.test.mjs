@@ -16,7 +16,9 @@ import {
   buildB2bInstalmentInvoiceParams,
   buildB2bInstalmentItemParams,
   invoiceAmountMatches,
+  resolveInstalmentPaymentMethod,
   routeB2bAnnualInvoice,
+  verifyB2bInstalmentDraft,
 } from "../lib/b2bInstalmentRules.ts";
 import {
   B2B_NON_BERLIN_BLOCKERS,
@@ -26,6 +28,7 @@ import {
   B2B_RESOLUTION_HORIZON_DAYS,
   runB2bDeliveryResolution,
   runB2bInstalmentInvoicing,
+  runB2bInstalmentReconciliation,
 } from "../lib/b2bRuntime.ts";
 
 /**
@@ -95,48 +98,6 @@ const charge = net => {
   return { netCents: t.netCents, taxCents: t.taxCents, grossCents: t.grossCents, taxRatePercent: 7 };
 };
 
-function instalmentStubs(overrides = {}) {
-  const calls = [];
-  const state = { recorded: new Map(), invoiceSeq: 0, itemKeys: new Set(), invoiceKeys: new Set() };
-  const deps = {
-    calls, state,
-    listDue: async () => [{
-      agreement_id: AGREEMENT, payment_id: "p1", instalment_number: 2,
-      net_cents: 13387, due_at: "2026-12-25T00:00:00Z",
-      user_id: "11111111-1111-4111-8111-111111111111", currency: "EUR",
-    }],
-    findStripeCustomerId: async () => "cus_canonical",
-    chargeFor: charge,
-    instalmentCountFor: async () => 4,
-    createInvoiceItem: async (params, options) => {
-      calls.push({ name: "createInvoiceItem", params, options });
-      state.itemKeys.add(options.idempotencyKey);
-      return { id: "ii_1" };
-    },
-    createInvoice: async (params, options) => {
-      calls.push({ name: "createInvoice", params, options });
-      // A deterministic key replays the SAME invoice, as Stripe does.
-      if (state.invoiceKeys.has(options.idempotencyKey)) return { id: "in_1" };
-      state.invoiceKeys.add(options.idempotencyKey);
-      state.invoiceSeq += 1;
-      return { id: `in_${state.invoiceSeq}` };
-    },
-    finalizeInvoice: async invoiceId => {
-      calls.push({ name: "finalizeInvoice", invoiceId });
-      return { id: invoiceId, status: "open" };
-    },
-    recordInvoice: async input => {
-      calls.push({ name: "recordInvoice", input });
-      const key = `${input.agreementId}:${input.instalmentNumber}`;
-      if (state.recorded.has(key)) return { result: "already_invoiced" };
-      state.recorded.set(key, input.stripeInvoiceId);
-      return { result: "invoiced" };
-    },
-    ...overrides,
-  };
-  return deps;
-}
-
 test("1: the instalment charge is the frozen net plus canonical 7% VAT", () => {
   for (let packs = 1; packs <= 10; packs += 1) {
     for (const n of B2B_INSTALMENT_COUNTS) {
@@ -153,25 +114,31 @@ test("1: the instalment charge is the frozen net plus canonical 7% VAT", () => {
 });
 
 test("2: the Stripe parameters are exactly the approved shape", async () => {
-  const deps = instalmentStubs();
+  const deps = stripeWorld();
   await runB2bInstalmentInvoicing(deps);
 
-  const item = deps.calls.find(c => c.name === "createInvoiceItem").params;
-  assert.equal(item.customer, "cus_canonical");
+  const item = deps.world.calls.find(c => c.name === "createInvoiceItem").params;
+  assert.equal(item.customer, "cus_1");
   assert.equal(item.currency, "eur");
   assert.equal(item.amount, charge(13387).grossCents, "the item is not the instalment gross");
+  assert.ok(item.invoice, "the item is not bound to an invoice, so it stays pending");
   assert.deepEqual(item.metadata, {
     [B2B_INVOICE_AGREEMENT_METADATA_KEY]: AGREEMENT,
     [B2B_INVOICE_INSTALMENT_METADATA_KEY]: "2",
   });
 
-  const invoice = deps.calls.find(c => c.name === "createInvoice").params;
+  const invoice = deps.world.calls.find(c => c.name === "createInvoice").params;
   assert.equal(invoice.collection_method, "charge_automatically",
     "Stripe dunning is not authoritative");
   assert.equal(invoice.auto_advance, false, "the invoice starts collecting before it is recorded");
-  assert.equal(invoice.pending_invoice_items_behavior, "exclude",
-    "the invoice could sweep in an unrelated pending item");
-  assert.equal(invoice.customer, "cus_canonical");
+  assert.equal(invoice.default_payment_method, "pm_first",
+    "collection depends on whatever Stripe happens to choose");
+  // pending_invoice_items_behavior is deliberately ABSENT: its default is
+  // 'exclude', which is what a named-line invoice wants.
+  assert.ok(!("pending_invoice_items_behavior" in invoice)
+    || invoice.pending_invoice_items_behavior !== "include",
+    "the invoice sweeps in every pending item on a Customer shared with B2C");
+  assert.equal(invoice.customer, "cus_1");
   assert.equal(invoice.currency, "eur");
   assert.deepEqual(invoice.metadata, item.metadata);
 
@@ -182,40 +149,45 @@ test("2: the Stripe parameters are exactly the approved shape", async () => {
   }
 });
 
-test("3: RECORD BEFORE FINALIZE - the ordering that makes a crash safe", async () => {
-  const deps = instalmentStubs();
+test("3: INVOICE, ITEM, RECORD, then FINALIZE - the order that makes a crash safe", async () => {
+  const deps = stripeWorld();
   await runB2bInstalmentInvoicing(deps);
-  const order = deps.calls.map(c => c.name);
+  const order = deps.world.calls.map(c => c.name).filter(n => n !== "retrieve");
   assert.deepEqual(order,
-    ["createInvoiceItem", "createInvoice", "recordInvoice", "finalizeInvoice"],
-    "the invoice is finalized before the correlation is recorded");
+    ["createInvoice", "createInvoiceItem", "recordInvoice", "finalizeInvoice"],
+    "the object-creation order is not the one the Stripe semantics require");
+  // And the draft is READ BACK before it is finalized - the step whose
+  // absence let an empty invoice reach collection.
+  const names = deps.world.calls.map(c => c.name);
+  assert.ok(names.indexOf("retrieve") < names.indexOf("finalizeInvoice"),
+    "the draft is finalized without being read back");
 });
 
 test("4: a database refusal finalizes nothing - nobody is charged", async () => {
   for (const result of ["not_due_yet", "instalment_not_scheduled", "invoice_conflict",
                         "agreement_not_active_annual", "rpc_error"]) {
-    const deps = instalmentStubs({ recordInvoice: async () => ({ result }) });
+    const deps = stripeWorld({ overrides: { recordInvoice: async () => ({ result }) } });
     const summary = await runB2bInstalmentInvoicing(deps);
     assert.equal(summary.skipped, 1, result);
-    assert.equal(deps.calls.filter(c => c.name === "finalizeInvoice").length, 0,
+    assert.equal(deps.world.finalized.length, 0,
       `a ${result} answer still finalized the invoice`);
   }
 });
 
-test("5: two runs produce ONE invoice - the idempotency key replays it", async () => {
-  const deps = instalmentStubs();
+test("5: two runs produce ONE invoice and ONE line - the keys replay them", async () => {
+  const deps = stripeWorld();
   await runB2bInstalmentInvoicing(deps);
   await runB2bInstalmentInvoicing(deps);
 
-  assert.equal(deps.state.invoiceSeq, 1, "a second run minted a second Stripe invoice");
-  assert.equal(deps.state.invoiceKeys.size, 1);
-  assert.equal(deps.state.itemKeys.size, 1);
+  assert.equal(deps.world.invoices.size, 1, "a second run minted a second Stripe invoice");
+  assert.equal(deps.world.items.length, 1, "a second run added a second line");
+  assert.equal(deps.world.invoiceKeys.size, 1);
+  assert.equal(deps.world.itemKeys.size, 1);
   // The keys are derived, not random.
   assert.equal(b2bInstalmentInvoiceIdempotencyKey(AGREEMENT, 2),
     `gloa-b2b-invoice-${AGREEMENT}-2`);
   assert.equal(b2bInstalmentItemIdempotencyKey(AGREEMENT, 2),
     `gloa-b2b-invoice-item-${AGREEMENT}-2`);
-  // Different instalments get different keys; same instalment, same key.
   assert.notEqual(b2bInstalmentInvoiceIdempotencyKey(AGREEMENT, 2),
     b2bInstalmentInvoiceIdempotencyKey(AGREEMENT, 3));
   // No personal data in a key that Stripe echoes into its logs.
@@ -224,11 +196,31 @@ test("5: two runs produce ONE invoice - the idempotency key replays it", async (
   }
 });
 
+test("7: one instalment's failure does not stop the batch", async () => {
+  const deps = stripeWorld({
+    due: [
+      { agreement_id: AGREEMENT, payment_id: "p1", instalment_number: 2, net_cents: 13387,
+        due_at: "x", user_id: "u1", currency: "EUR" },
+      { agreement_id: AGREEMENT, payment_id: "p2", instalment_number: 3, net_cents: 13387,
+        due_at: "x", user_id: "u1", currency: "EUR" },
+    ],
+  });
+  const original = deps.createInvoice;
+  deps.createInvoice = async (params, opts) => {
+    if (opts.idempotencyKey.endsWith("-2")) throw new Error("stripe down");
+    return original(params, opts);
+  };
+  const summary = await runB2bInstalmentInvoicing(deps);
+  assert.equal(summary.failed, 1);
+  assert.equal(summary.invoiced, 1, "the second instalment was not attempted");
+});
+
 test("6: no canonical Stripe customer means SKIP, never create one", async () => {
-  const deps = instalmentStubs({ findStripeCustomerId: async () => null });
+  const deps = stripeWorld({ overrides: { findStripeCustomerId: async () => null } });
   const summary = await runB2bInstalmentInvoicing(deps);
   assert.equal(summary.skipped, 1);
-  assert.equal(deps.calls.filter(c => c.name === "createInvoice").length, 0);
+  assert.equal(deps.world.invoices.size, 0,
+    "an invoice was created for a business with no canonical Stripe customer");
   // And the wiring resolves it from the ONE canonical mapping, never a
   // fourth copy on the agreement.
   const deps_ = readCode("lib/b2bRuntimeDeps.ts");
@@ -237,24 +229,6 @@ test("6: no canonical Stripe customer means SKIP, never create one", async () =>
   assert.ok(!/customers\.create/.test(deps_), "a scheduled job can mint a Stripe customer");
   assert.ok(!/stripe_customer_id/.test(readCode("supabase/migrations/" + MIGRATION)),
     "063 added a customer id to the commerce schema");
-});
-
-test("7: one instalment's failure does not stop the batch", async () => {
-  const deps = instalmentStubs({
-    listDue: async () => [
-      { agreement_id: AGREEMENT, payment_id: "p1", instalment_number: 2, net_cents: 13387,
-        due_at: "x", user_id: "u1", currency: "EUR" },
-      { agreement_id: AGREEMENT, payment_id: "p2", instalment_number: 3, net_cents: 13387,
-        due_at: "x", user_id: "u1", currency: "EUR" },
-    ],
-    createInvoice: async (params, options) => {
-      if (options.idempotencyKey.endsWith("-2")) throw new Error("stripe down");
-      return { id: "in_3" };
-    },
-  });
-  const summary = await runB2bInstalmentInvoicing(deps);
-  assert.equal(summary.failed, 1);
-  assert.equal(summary.invoiced, 1, "the second instalment was not attempted");
 });
 
 test("8: the work list is bounded and never loops until empty", () => {
@@ -623,10 +597,13 @@ test("31: both jobs live in the EXISTING daily cron - no second schedule", () =>
 });
 
 test("32: each B2B job has its own error boundary and cannot starve the others", () => {
-  const b2bBlock = cronSource.slice(cronSource.indexOf("PACKAGE 5D: DUE ANNUAL INSTALMENTS"),
+  const b2bBlock = cronSource.slice(cronSource.indexOf("RECOVERY FIRST"),
                                     cronSource.indexOf("Counts only, exactly like the email families"));
-  assert.equal((b2bBlock.match(/try \{/g) ?? []).length, 2, "the two jobs share one try");
-  assert.equal((b2bBlock.match(/catch \(err\)/g) ?? []).length, 2);
+  // THREE jobs now: recovery, invoicing, resolution - each with its own
+  // boundary, so a Stripe outage in one cannot stop the others.
+  assert.equal((b2bBlock.match(/try \{/g) ?? []).length, 3, "the three jobs share a try");
+  assert.equal((b2bBlock.match(/catch \(err\)/g) ?? []).length, 3);
+  assert.ok(b2bBlock.includes("emptyB2bReconcileSummary()"));
   assert.ok(b2bBlock.includes("emptyB2bInstalmentSummary()"));
   assert.ok(b2bBlock.includes("emptyB2bResolutionSummary()"));
 });
@@ -699,10 +676,11 @@ test("37: 063 is additive only - no table, policy, RLS, DROP or privilege", () =
   assert.match(sql, /^\s*commit;\s*$/m);
 });
 
-test("38: seven writers, all definer, all with a pinned empty search_path", () => {
+test("38: eight writers, all definer, all with a pinned empty search_path", () => {
   const defined = [...sql.matchAll(/create\s+function\s+public\.([a-z0-9_]+)/gi)].map(m => m[1]);
   assert.deepEqual(defined.sort(), [
     "b2b_annual_instalments_due",
+    "b2b_annual_instalments_unfinalized",
     "hold_b2b_deliveries_for_payment",
     "record_b2b_annual_instalment_failure",
     "record_b2b_annual_instalment_invoice",
@@ -710,8 +688,8 @@ test("38: seven writers, all definer, all with a pinned empty search_path", () =
     "resolve_b2b_delivery",
     "settle_b2b_annual_paid_instalment",
   ]);
-  assert.equal((sql.match(/security\s+definer/gi) ?? []).length, 7);
-  assert.equal((sql.match(/set search_path = ''/g) ?? []).length, 7);
+  assert.equal((sql.match(/security\s+definer/gi) ?? []).length, 8);
+  assert.equal((sql.match(/set search_path = ''/g) ?? []).length, 8);
   for (const table of ["b2b_supply_agreements", "b2b_payment_schedule", "b2b_deliveries",
                        "checkout_attempts"]) {
     assert.ok(!new RegExp(`(from|into|join|update)\\s+${table}\\b`, "i").test(sql),
@@ -719,18 +697,18 @@ test("38: seven writers, all definer, all with a pinned empty search_path", () =
   }
 });
 
-test("39: service_role is the only grantee, and only EXECUTE, on all seven", () => {
+test("39: service_role is the only grantee, and only EXECUTE, on all eight", () => {
   const grants = [...flat.matchAll(/grant\s+([a-z ,]+?)\s+on\s+(function|table)\s+([a-z0-9_.]+)[^;]*?\s+to\s+([a-z0-9_]+);/gi)]
     .map(m => ({ privilege: m[1].trim(), kind: m[2], grantee: m[4] }));
-  assert.equal(grants.length, 7, `063 issues ${grants.length} grants, expected 7`);
+  assert.equal(grants.length, 8, `063 issues ${grants.length} grants, expected 8`);
   for (const g of grants) {
     assert.equal(g.privilege, "execute");
     assert.equal(g.kind, "function");
     assert.equal(g.grantee, "service_role");
   }
   for (const role of ["public", "anon", "authenticated"]) {
-    assert.equal((flat.match(new RegExp(`from ${role};`, "gi")) ?? []).length, 7,
-      `EXECUTE is not revoked from ${role} on all seven`);
+    assert.equal((flat.match(new RegExp(`from ${role};`, "gi")) ?? []).length, 8,
+      `EXECUTE is not revoked from ${role} on all eight`);
   }
   const iPublic = flat.search(/revoke all on function[^;]*from public;/i);
   const iGrant = flat.search(/grant execute on function/i);
@@ -779,6 +757,444 @@ test("42: every write goes through an RPC, never a direct table write", () => {
                      "resolve_b2b_delivery"]) {
     assert.ok(deps.includes(rpc), `${rpc} is never called`);
   }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   9. STRIPE COLLECTION HARDENING
+   ══════════════════════════════════════════════════════════════
+
+   Three defects this section exists to keep fixed, all of them invisible
+   to a mocked call-order check:
+
+     1. THE INVOICE WAS EMPTY. An InvoiceItem created with no invoice id
+        is a PENDING item on the Customer, and a standalone invoice does
+        not collect pending items - pending_invoice_items_behavior
+        "Defaults to exclude if the parameter is omitted", and the SDK
+        says an item "won't be automatically added unless you pass
+        pending_invoice_item_behavior: 'include'". The original order
+        therefore finalized an invoice with no line and collected nothing
+        while the database recorded the instalment as invoiced.
+
+     2. THE PAYMENT METHOD WAS WHATEVER STRIPE PICKED.
+        setup_future_usage "off_session" attaches a PaymentMethod to the
+        Customer; it does NOT set
+        customer.invoice_settings.default_payment_method, which is what
+        an invoice without default_payment_method falls back to.
+
+     3. A CORRELATED-BUT-UNFINALIZED ROW WAS STRANDED. Once a row is
+        invoiced the due list stops offering it, so a crash before
+        finalize left a draft nobody would ever collect. */
+
+const INV = { agreementId: AGREEMENT, instalmentNumber: 2, currency: "EUR", charge: charge(13387) };
+const lineOf = over => ({
+  amount: charge(13387).grossCents,
+  currency: "eur",
+  metadata: {
+    [B2B_INVOICE_AGREEMENT_METADATA_KEY]: AGREEMENT,
+    [B2B_INVOICE_INSTALMENT_METADATA_KEY]: "2",
+  },
+  ...over,
+});
+
+/**
+ * A stub Stripe that models the ONE semantic the old code got wrong: an
+ * item only lands on an invoice if it names that invoice.
+ */
+function stripeWorld(options = {}) {
+  const world = {
+    invoices: new Map(),
+    items: [],
+    pendingOnCustomer: options.pendingOnCustomer ?? [],
+    invoiceKeys: new Map(),
+    itemKeys: new Map(),
+    finalized: [],
+    seq: 0,
+    calls: [],
+  };
+
+  const deps = {
+    world,
+    listDue: async () => options.due ?? [{
+      agreement_id: AGREEMENT, payment_id: "p1", instalment_number: 2, net_cents: 13387,
+      due_at: "2026-12-25T00:00:00Z", user_id: "u1", currency: "EUR",
+    }],
+    listUnfinalized: async () => options.unfinalized ?? [],
+    findStripeCustomerId: async () => "cus_1",
+    chargeFor: charge,
+    instalmentCountFor: async () => 4,
+    firstInstalmentPaymentIntent: async () =>
+      // `in` rather than ??, so an explicit null really means "none".
+      ("paymentIntent" in options
+        ? options.paymentIntent
+        : { customer: "cus_1", payment_method: "pm_first" }),
+    retrieveInvoiceWithLines: async id => {
+      world.calls.push({ name: "retrieve", id });
+      const inv = world.invoices.get(id);
+      if (!inv) throw new Error(`no such invoice ${id}`);
+      const lines = world.items.filter(i => i.invoice === id)
+        .map(i => ({ amount: i.amount, currency: i.currency, metadata: i.metadata }));
+      return { ...inv, lines: { data: lines }, total: lines.reduce((a, l) => a + l.amount, 0) };
+    },
+    createInvoice: async (params, opts) => {
+      world.calls.push({ name: "createInvoice", params, opts });
+      if (world.invoiceKeys.has(opts.idempotencyKey)) {
+        return world.invoices.get(world.invoiceKeys.get(opts.idempotencyKey));
+      }
+      world.seq += 1;
+      const id = `in_${world.seq}`;
+      const inv = { id, status: "draft", currency: params.currency,
+                    default_payment_method: params.default_payment_method,
+                    metadata: params.metadata };
+      world.invoices.set(id, inv);
+      world.invoiceKeys.set(opts.idempotencyKey, id);
+      // 'exclude' is the default and is what this flow relies on: the
+      // Customer's pending items must NOT drift onto this invoice.
+      if (params.pending_invoice_items_behavior === "include") {
+        for (const p of world.pendingOnCustomer) world.items.push({ ...p, invoice: id });
+      }
+      return inv;
+    },
+    createInvoiceItem: async (params, opts) => {
+      world.calls.push({ name: "createInvoiceItem", params, opts });
+      if (world.itemKeys.has(opts.idempotencyKey)) return world.itemKeys.get(opts.idempotencyKey);
+      const item = { id: `ii_${world.items.length + 1}`, ...params };
+      // THE SEMANTIC THAT MATTERS: no invoice id means it stays pending.
+      if (params.invoice) world.items.push(item);
+      else world.pendingOnCustomer.push(item);
+      world.itemKeys.set(opts.idempotencyKey, item);
+      return item;
+    },
+    finalizeInvoice: async id => {
+      world.calls.push({ name: "finalizeInvoice", id });
+      const inv = world.invoices.get(id);
+      inv.status = "open";
+      world.finalized.push(id);
+      return inv;
+    },
+    recordInvoice: async input => {
+      world.calls.push({ name: "recordInvoice", input });
+      const key = `${input.agreementId}:${input.instalmentNumber}`;
+      if (world.recorded === undefined) world.recorded = new Map();
+      if (world.recorded.has(key)) return { result: "already_invoiced" };
+      world.recorded.set(key, input.stripeInvoiceId);
+      return { result: "invoiced" };
+    },
+    ...(options.overrides ?? {}),
+  };
+  return deps;
+}
+
+test("44: ISSUE 1 - the finalized invoice holds EXACTLY the intended line", async () => {
+  const deps = stripeWorld();
+  const summary = await runB2bInstalmentInvoicing(deps);
+  assert.equal(summary.invoiced, 1, JSON.stringify(summary.outcomes));
+
+  const invoiceId = deps.world.finalized[0];
+  assert.ok(invoiceId, "nothing was finalized");
+  const lines = deps.world.items.filter(i => i.invoice === invoiceId);
+  assert.equal(lines.length, 1, "the invoice does not hold exactly one line");
+  assert.equal(lines[0].amount, charge(13387).grossCents, "the line is not the instalment gross");
+  assert.equal(lines[0].currency, "eur");
+  assert.deepEqual(lines[0].metadata, {
+    [B2B_INVOICE_AGREEMENT_METADATA_KEY]: AGREEMENT,
+    [B2B_INVOICE_INSTALMENT_METADATA_KEY]: "2",
+  });
+  // NOTHING was left pending on the Customer.
+  assert.equal(deps.world.pendingOnCustomer.length, 0,
+    "an item was created as a pending Customer item instead of on the invoice");
+});
+
+test("45: ISSUE 1 - the ORDER is invoice, then item bound by id", async () => {
+  const deps = stripeWorld();
+  await runB2bInstalmentInvoicing(deps);
+  const names = deps.world.calls.map(c => c.name);
+  assert.ok(names.indexOf("createInvoice") < names.indexOf("createInvoiceItem"),
+    "the item is still created before the invoice, which leaves it pending");
+  const item = deps.world.calls.find(c => c.name === "createInvoiceItem").params;
+  assert.ok(item.invoice, "the item is not bound to an invoice");
+  assert.equal(item.invoice, deps.world.finalized[0]);
+  // And the invoice never asks for pending items, so no B2C pending item
+  // of the same shared Customer can drift in.
+  const inv = deps.world.calls.find(c => c.name === "createInvoice").params;
+  assert.notEqual(inv.pending_invoice_items_behavior, "include",
+    "the invoice sweeps in every pending item on a Customer shared with B2C");
+});
+
+test("46: ISSUE 1 - an unrelated pending item on the same Customer cannot leak in", async () => {
+  const deps = stripeWorld({
+    pendingOnCustomer: [{ id: "ii_b2c", amount: 9999, currency: "eur", metadata: {} }],
+  });
+  await runB2bInstalmentInvoicing(deps);
+  const invoiceId = deps.world.finalized[0];
+  const lines = deps.world.items.filter(i => i.invoice === invoiceId);
+  assert.equal(lines.length, 1, "an unrelated pending item reached the B2B invoice");
+  assert.equal(lines[0].amount, charge(13387).grossCents);
+  // The B2C pending item is still pending, untouched.
+  assert.equal(deps.world.pendingOnCustomer.length, 1);
+});
+
+test("47: ISSUE 1 - the REGRESSION: an empty draft is never finalized", async () => {
+  // The old bug, modelled directly: the item never reaches the invoice.
+  const deps = stripeWorld({
+    overrides: {
+      createInvoiceItem: async () => ({ id: "ii_lost" }), // goes nowhere
+    },
+  });
+  const summary = await runB2bInstalmentInvoicing(deps);
+  assert.equal(summary.invoiced, 0, "an empty invoice was reported as invoiced");
+  assert.equal(summary.failed, 1);
+  assert.equal(deps.world.finalized.length, 0,
+    "an EMPTY invoice was finalized - this is the defect this section exists for");
+  assert.match(summary.outcomes[0].detail ?? "", /0 line\(s\)|expected exactly 1/);
+});
+
+test("48: the draft verifier refuses every wrong shape", () => {
+  const good = { status: "draft", total: charge(13387).grossCents, lines: { data: [lineOf()] } };
+  assert.equal(verifyB2bInstalmentDraft(good, INV).ok, true);
+  const bad = [
+    [{ ...good, lines: { data: [] } }, /0 line/],
+    [{ ...good, lines: { data: [lineOf(), lineOf()] } }, /2 line/],
+    [{ ...good, lines: { data: [lineOf({ amount: 1 })] }, total: 1 }, /1 cents/],
+    [{ ...good, lines: { data: [lineOf({ currency: "usd" })] } }, /usd/],
+    [{ ...good, lines: { data: [lineOf({ metadata: {} })] } }, /agreement/],
+    [{ ...good, lines: { data: [lineOf({ metadata: { [B2B_INVOICE_AGREEMENT_METADATA_KEY]: AGREEMENT } })] } }, /instalment number/],
+    [{ ...good, status: "open" }, /not draft/],
+    [{ ...good, status: "void" }, /not draft/],
+    [{ ...good, total: 1 }, /total is 1/],
+  ];
+  for (const [invoice, re] of bad) {
+    const v = verifyB2bInstalmentDraft(invoice, INV);
+    assert.equal(v.ok, false, JSON.stringify(invoice));
+    assert.match(v.reason, re);
+  }
+});
+
+test("49: ISSUE 2 - the invoice names the first instalment's PaymentMethod", async () => {
+  const deps = stripeWorld();
+  await runB2bInstalmentInvoicing(deps);
+  const inv = deps.world.calls.find(c => c.name === "createInvoice").params;
+  assert.equal(inv.default_payment_method, "pm_first",
+    "collection depends on whatever Stripe happens to choose");
+  assert.equal(inv.collection_method, "charge_automatically");
+});
+
+test("50: ISSUE 2 - the PaymentMethod must belong to the SAME Stripe Customer", () => {
+  assert.deepEqual(
+    resolveInstalmentPaymentMethod({ customer: "cus_1", payment_method: "pm_x" }, "cus_1"),
+    { ok: true, paymentMethodId: "pm_x" });
+  // Expanded objects are accepted too.
+  assert.deepEqual(
+    resolveInstalmentPaymentMethod({ customer: { id: "cus_1" }, payment_method: { id: "pm_x" } }, "cus_1"),
+    { ok: true, paymentMethodId: "pm_x" });
+  for (const [pi, re] of [
+    [{ customer: "cus_OTHER", payment_method: "pm_x" }, /different Stripe customer/],
+    [{ customer: "cus_1" }, /no payment method/],
+    [{ payment_method: "pm_x" }, /no customer/],
+    [{}, /no payment method/],
+  ]) {
+    const r = resolveInstalmentPaymentMethod(pi, "cus_1");
+    assert.equal(r.ok, false, JSON.stringify(pi));
+    assert.match(r.reason, re);
+  }
+});
+
+test("51: ISSUE 2 - a foreign or missing PaymentMethod SKIPS, and creates nothing", async () => {
+  for (const paymentIntent of [
+    { customer: "cus_OTHER", payment_method: "pm_x" },
+    { customer: "cus_1" },
+    null,
+  ]) {
+    const deps = stripeWorld({ paymentIntent });
+    const summary = await runB2bInstalmentInvoicing(deps);
+    assert.equal(summary.skipped, 1, JSON.stringify(paymentIntent));
+    assert.equal(deps.world.invoices.size, 0, "an invoice was created without a proved payment method");
+  }
+});
+
+test("52: ISSUE 2 - the Customer-wide default is NEVER written", () => {
+  // public.stripe_customers is keyed on user_id, so ONE Stripe Customer
+  // serves every GLOA product that user buys - a B2C four-weekly
+  // subscription included. Writing
+  // customer.invoice_settings.default_payment_method would change which
+  // card that subscription renews on, which is not this package's call.
+  for (const f of ["lib/b2bInstalmentRules.ts", "lib/b2bRuntime.ts", "lib/b2bRuntimeDeps.ts"]) {
+    const code = readCode(f);
+    assert.ok(!/customers\.update/.test(code), `${f} mutates the Stripe Customer`);
+    assert.ok(!/invoice_settings/.test(code), `${f} writes the Customer-wide default`);
+  }
+  // And the mapping really is one Customer per user.
+  const m022 = read("supabase/migrations/022_recurring_subscription_foundation.sql");
+  assert.match(m022, /create table public\.stripe_customers \(\s*\n\s*user_id\s+uuid primary key/,
+    "stripe_customers is no longer one row per user");
+});
+
+/* ── ISSUE 3: the crash windows ─────────────────────────────── */
+
+test("53: ISSUE 3 - 063 offers a recovery list, and never reverts to scheduled", () => {
+  const defined = [...sql.matchAll(/create\s+function\s+public\.([a-z0-9_]+)/gi)].map(m => m[1]);
+  assert.ok(defined.includes("b2b_annual_instalments_unfinalized"),
+    "there is no recovery read, so a stranded draft is unreachable");
+  const recovery = sql.slice(sql.indexOf("create function public.b2b_annual_instalments_unfinalized"),
+                             sql.indexOf("create function public.record_b2b_annual_instalment_invoice"));
+  assert.match(recovery, /p\.status = 'invoiced'/);
+  assert.match(recovery, /p\.stripe_invoice_id is not null/);
+  assert.match(recovery, /limit least\(greatest\(p_limit, 1\), 200\)/, "the recovery list is unbounded");
+  // THE ROW IS NEVER MOVED BACK. 'scheduled' means no Stripe object
+  // exists, so a row with an invoice id would become eligible for a
+  // second invoice.
+  assert.ok(!/set\s+status\s*=\s*'scheduled'[\s\S]{0,200}b2b_payment_schedule/.test(sql));
+  assert.ok(!/status\s*=\s*'scheduled'\s*,\s*stripe_invoice_id\s*=\s*null/.test(sql),
+    "063 reverts an invoiced instalment to scheduled");
+});
+
+test("54: CRASH A - after invoice create, before DB correlation", async () => {
+  // The row is still 'scheduled', so the due list offers it again. The
+  // deterministic key returns the SAME invoice; the item key returns the
+  // SAME item. One invoice, one line.
+  const deps = stripeWorld({ overrides: { recordInvoice: async () => { throw new Error("crash"); } } });
+  await runB2bInstalmentInvoicing(deps);
+  assert.equal(deps.world.invoices.size, 1);
+  assert.equal(deps.world.finalized.length, 0, "a charge started before the correlation was recorded");
+
+  // The retry, with a working database.
+  const retry = stripeWorld();
+  retry.world.invoices = deps.world.invoices;
+  retry.world.invoiceKeys = deps.world.invoiceKeys;
+  retry.world.items = deps.world.items;
+  retry.world.itemKeys = deps.world.itemKeys;
+  const summary = await runB2bInstalmentInvoicing(retry);
+  assert.equal(summary.invoiced, 1);
+  assert.equal(retry.world.invoices.size, 1, "the retry minted a SECOND invoice");
+  assert.equal(retry.world.items.length, 1, "the retry added a second line");
+  assert.equal(retry.world.finalized.length, 1);
+});
+
+test("55: CRASH B - impossible by construction, and asserted so", async () => {
+  // The order is invoice -> item -> record -> finalize, so there is no
+  // window in which the correlation exists but the item does not. That is
+  // a property of the ordering rather than of a guard, so it is asserted
+  // against the ordering.
+  const deps = stripeWorld();
+  await runB2bInstalmentInvoicing(deps);
+  const names = deps.world.calls.map(c => c.name);
+  assert.ok(names.indexOf("createInvoiceItem") < names.indexOf("recordInvoice"),
+    "the correlation is recorded before the line exists, which reopens crash window B");
+  assert.ok(names.indexOf("recordInvoice") < names.indexOf("finalizeInvoice"),
+    "the invoice is finalized before the correlation is recorded");
+});
+
+test("56: CRASH C - after item create, before finalize: recovery finishes it", async () => {
+  const first = stripeWorld({ overrides: { finalizeInvoice: async () => { throw new Error("crash"); } } });
+  await runB2bInstalmentInvoicing(first);
+  assert.equal(first.world.finalized.length, 0);
+  const invoiceId = [...first.world.invoices.keys()][0];
+  assert.equal(first.world.invoices.get(invoiceId).status, "draft", "the draft was left in a bad state");
+
+  // The recovery pass, on the row the database now reports as invoiced.
+  const rec = stripeWorld({
+    unfinalized: [{
+      agreement_id: AGREEMENT, payment_id: "p1", instalment_number: 2, net_cents: 13387,
+      due_at: "x", user_id: "u1", currency: "EUR", stripe_invoice_id: invoiceId,
+    }],
+  });
+  rec.world.invoices = first.world.invoices;
+  rec.world.items = first.world.items;
+  rec.world.itemKeys = first.world.itemKeys;
+  const summary = await runB2bInstalmentReconciliation(rec);
+  assert.equal(summary.finalized, 1, JSON.stringify(summary.outcomes));
+  assert.equal(rec.world.invoices.size, 1, "recovery minted a second invoice");
+  assert.equal(rec.world.items.filter(i => i.invoice === invoiceId).length, 1,
+    "recovery added a duplicate line");
+  assert.equal(rec.world.finalized.length, 1);
+});
+
+test("57: CRASH C variant - recovery ADDS the missing line if the draft is empty", async () => {
+  // A crash between invoice create and item create leaves an empty draft
+  // whose row may already be correlated by a concurrent pass. Recovery
+  // must complete it rather than finalize nothing.
+  const rec = stripeWorld({
+    unfinalized: [{
+      agreement_id: AGREEMENT, payment_id: "p1", instalment_number: 2, net_cents: 13387,
+      due_at: "x", user_id: "u1", currency: "EUR", stripe_invoice_id: "in_empty",
+    }],
+  });
+  rec.world.invoices.set("in_empty", { id: "in_empty", status: "draft", currency: "eur" });
+  const summary = await runB2bInstalmentReconciliation(rec);
+  assert.equal(summary.finalized, 1, JSON.stringify(summary.outcomes));
+  const lines = rec.world.items.filter(i => i.invoice === "in_empty");
+  assert.equal(lines.length, 1, "recovery finalized an invoice without adding the line");
+  assert.equal(lines[0].amount, charge(13387).grossCents);
+});
+
+test("58: CRASH D - after finalize: recovery is a no-op, never a second charge", async () => {
+  for (const status of ["open", "paid"]) {
+    const rec = stripeWorld({
+      unfinalized: [{
+        agreement_id: AGREEMENT, payment_id: "p1", instalment_number: 2, net_cents: 13387,
+        due_at: "x", user_id: "u1", currency: "EUR", stripe_invoice_id: "in_done",
+      }],
+    });
+    rec.world.invoices.set("in_done", { id: "in_done", status, currency: "eur" });
+    const summary = await runB2bInstalmentReconciliation(rec);
+    assert.equal(summary.alreadyCollecting, 1, status);
+    assert.equal(summary.finalized, 0);
+    assert.equal(rec.world.invoices.size, 1, "recovery created another invoice");
+    assert.equal(rec.world.items.length, 0, "recovery added a line to a finalized invoice");
+    assert.equal(rec.world.finalized.length, 0, "recovery re-finalized a collecting invoice");
+  }
+});
+
+test("59: a void or uncollectible invoice FAILS CLOSED", async () => {
+  for (const status of ["void", "uncollectible"]) {
+    const rec = stripeWorld({
+      unfinalized: [{
+        agreement_id: AGREEMENT, payment_id: "p1", instalment_number: 2, net_cents: 13387,
+        due_at: "x", user_id: "u1", currency: "EUR", stripe_invoice_id: "in_dead",
+      }],
+    });
+    rec.world.invoices.set("in_dead", { id: "in_dead", status, currency: "eur" });
+    const summary = await runB2bInstalmentReconciliation(rec);
+    assert.equal(summary.refused, 1, status);
+    assert.match(summary.outcomes[0].detail ?? "", new RegExp(status));
+    // NO replacement charge is issued for an invoice somebody killed.
+    assert.equal(rec.world.invoices.size, 1);
+    assert.equal(rec.world.finalized.length, 0);
+  }
+});
+
+test("60: recovery runs BEFORE new invoicing in the cron, and is bounded", () => {
+  const body = cronSource.slice(cronSource.indexOf("export async function"));
+  const iRec = body.indexOf("runB2bReconcileJob(");
+  const iNew = body.indexOf("runB2bInstalmentJob(");
+  assert.ok(iRec >= 0, "the recovery pass is not scheduled");
+  assert.ok(iRec < iNew, "new invoices are created before stranded ones are finished");
+  // Its own error boundary, like every other job on this cron.
+  const block = body.slice(body.indexOf("RECOVERY FIRST"), iNew);
+  assert.ok(block.includes("} catch (err) {"));
+  assert.ok(block.includes("emptyB2bReconcileSummary()"));
+  // Still ONE Vercel schedule.
+  assert.equal(JSON.parse(read("vercel.json")).crons.length, 1);
+});
+
+test("61: 063 still grants EXECUTE to service_role only, on all eight", () => {
+  const defined = [...sql.matchAll(/create\s+function\s+public\.([a-z0-9_]+)/gi)].map(m => m[1]);
+  assert.equal(defined.length, 8, `063 defines ${defined.length} functions, expected 8`);
+  assert.equal((sql.match(/security\s+definer/gi) ?? []).length, 8);
+  assert.equal((sql.match(/set search_path = ''/g) ?? []).length, 8);
+  const grants = [...flat.matchAll(/grant\s+([a-z ,]+?)\s+on\s+(function|table)\s+([a-z0-9_.]+)[^;]*?\s+to\s+([a-z0-9_]+);/gi)]
+    .map(m => ({ privilege: m[1].trim(), kind: m[2], grantee: m[4] }));
+  assert.equal(grants.length, 8);
+  for (const g of grants) {
+    assert.equal(g.privilege, "execute");
+    assert.equal(g.kind, "function");
+    assert.equal(g.grantee, "service_role");
+  }
+  for (const role of ["public", "anon", "authenticated"]) {
+    assert.equal((flat.match(new RegExp(`from ${role};`, "gi")) ?? []).length, 8,
+      `EXECUTE is not revoked from ${role} on all eight`);
+  }
+  // And still no table privilege, in either direction.
+  assert.ok(!/\bon\s+table\b/i.test(sql));
 });
 
 test("43: the focused suite is registered in the npm test script", () => {

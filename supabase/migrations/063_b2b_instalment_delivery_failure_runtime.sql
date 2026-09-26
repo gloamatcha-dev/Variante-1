@@ -2,10 +2,11 @@
 -- 063 — B2B RUNTIME: LATER INSTALMENTS, DELIVERY RESOLUTION, HOLDS
 --
 -- 061 created the pending agreement and 062 activated it. 063 is the
--- rest of the runtime those two deferred, and it is SEVEN NARROW
+-- rest of the runtime those two deferred, and it is EIGHT NARROW
 -- WRITERS rather than one:
 --
 --   Package 5D  b2b_annual_instalments_due          the work list
+--               b2b_annual_instalments_unfinalized     the recovery list
 --               record_b2b_annual_instalment_invoice   scheduled -> invoiced
 --               settle_b2b_annual_paid_instalment      -> paid
 --               record_b2b_annual_instalment_failure   -> payment_failed
@@ -116,6 +117,70 @@ $$;
 
 comment on function public.b2b_annual_instalments_due(integer) is
   'Package 5D. The bounded work list of annual instalments 2..n that are due (due_at <= now()) and not yet invoiced. Read-only: it claims nothing and mutates nothing. Never returns instalment 1, which migration 062 settles at activation.';
+
+
+-- ══════════════════════════════════════════════════════════════
+-- 1b. THE RECOVERY LIST: CORRELATED BUT NOT YET COLLECTING
+-- ══════════════════════════════════════════════════════════════
+--
+-- ── THE CRASH WINDOW THIS EXISTS TO CLOSE ─────────────────────
+--
+-- Section 1 deliberately stops offering a row once it carries a Stripe
+-- invoice id, because re-offering it would risk a second invoice for one
+-- instalment. That is right, and on its own it left a hole: the server
+-- creates a DRAFT invoice, records the correlation, and dies before
+-- finalizing. The row now says 'invoiced', the money is owed, the draft
+-- has collected nothing - and no code path would ever look at it again.
+--
+-- So this is a SECOND read over exactly that population: status
+-- 'invoiced' with an invoice id. The caller retrieves that invoice from
+-- Stripe and brings it to the intended state; it never creates one.
+--
+-- ── AND THE ROW IS NEVER MOVED BACK TO 'scheduled' ────────────
+--
+-- That would be the obvious repair and the wrong one. 'scheduled' means
+-- "no Stripe object exists for this instalment", so a row whose
+-- stripe_invoice_id is set would become eligible for a SECOND invoice the
+-- moment section 1 saw it. The status stays where it is and the recovery
+-- reads it from here instead.
+--
+-- 'payment_failed' and 'action_required' are deliberately NOT included: a
+-- row in either state has a finalized invoice that Stripe is already
+-- dunning, so there is nothing to finalize and nothing for this pass to
+-- do. 'paid' and 'void' are terminal.
+
+create function public.b2b_annual_instalments_unfinalized(p_limit integer default 25)
+returns table (
+  agreement_id      uuid,
+  payment_id        uuid,
+  instalment_number smallint,
+  net_cents         integer,
+  due_at            timestamptz,
+  user_id           uuid,
+  currency          text,
+  stripe_invoice_id text
+)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select a.id, p.id, p.instalment_number, p.net_cents, p.due_at, a.user_id, a.currency,
+         p.stripe_invoice_id
+    from public.b2b_payment_schedule p
+    join public.b2b_supply_agreements a on a.id = p.supply_agreement_id
+   where a.plan_type = 'annual'
+     and a.status = 'active'
+     and p.status = 'invoiced'
+     and p.instalment_number > 1
+     and p.stripe_invoice_id is not null
+     and a.user_id is not null
+   order by p.due_at, p.instalment_number
+   limit least(greatest(p_limit, 1), 200);
+$$;
+
+comment on function public.b2b_annual_instalments_unfinalized(integer) is
+  'Package 5D. The bounded list of annual instalments whose Stripe invoice is correlated but may not have reached collection - status invoiced with an invoice id. Read-only. The caller retrieves that exact invoice and finalizes it; it never creates one, and the row is never returned to scheduled because that would make a second invoice possible.';
 
 
 -- ══════════════════════════════════════════════════════════════
@@ -688,6 +753,11 @@ revoke all on function public.b2b_annual_instalments_due(integer) from public;
 revoke all on function public.b2b_annual_instalments_due(integer) from anon;
 revoke all on function public.b2b_annual_instalments_due(integer) from authenticated;
 grant execute on function public.b2b_annual_instalments_due(integer) to service_role;
+
+revoke all on function public.b2b_annual_instalments_unfinalized(integer) from public;
+revoke all on function public.b2b_annual_instalments_unfinalized(integer) from anon;
+revoke all on function public.b2b_annual_instalments_unfinalized(integer) from authenticated;
+grant execute on function public.b2b_annual_instalments_unfinalized(integer) to service_role;
 
 revoke all on function public.record_b2b_annual_instalment_invoice(uuid, smallint, text) from public;
 revoke all on function public.record_b2b_annual_instalment_invoice(uuid, smallint, text) from anon;
