@@ -173,19 +173,12 @@ test("3: every immutable migration is still present and unedited", () => {
     encoding: "utf-8",
   }).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
+  // 001-064 ARE ALL LIVE AND THEREFORE IMMUTABLE. Production is
+  // 001-064: there is no pending migration, so a touched migration is
+  // an edit to live schema whatever its number and there is nothing
+  // left for this loop to allow.
   for (const file of touched) {
-    // 037, 038, 039 AND 040 ARE LIVE AND THEREFORE IMMUTABLE. Production is
-    // 001-063; the comments that used to exempt them here were written
-    // while they were genuinely unapplied and outlived that. 064 is the
-    // only pending migration and the only one still exempt below.
-    assert.ok(
-      // 064 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062+063,
-      // so 064 is still the right place to fix 064 and may be edited in
-      // place - the terms every pending migration has had. Everything
-      // BELOW it is live. Remove this the moment 064 is applied;
-      // tests/b2b-pending-agreement-writer.test.mjs test 50 enforces that.
-      file.endsWith("064_b2b_account_change_management.sql"),
-      `an immutable migration was modified: ${file}`);
+    assert.fail(`an immutable migration was modified: ${file}`);
   }
 });
 

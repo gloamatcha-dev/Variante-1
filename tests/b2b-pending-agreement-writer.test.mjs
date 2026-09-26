@@ -148,12 +148,9 @@ test("2: migrations 001 through 062 are unmodified in the working tree", () => {
     ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
-  // 064 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062+063,
-  // so 064 is still the right place to fix 064 and may be edited in
-  // place - the terms every pending migration has had. Everything
-  // BELOW it is live. Remove this the moment 064 is applied;
-  // tests/b2b-pending-agreement-writer.test.mjs test 50 enforces that.
-  assert.deepEqual(touched.filter(r => !r.endsWith("064_b2b_account_change_management.sql")), [], "a live, immutable migration was edited");
+  // 064 IS LIVE. Production is 001-064, so there is no pending
+  // migration and no file any immutability guard may exempt.
+  assert.deepEqual(touched, [], "a live, immutable migration was edited");
 });
 
 test("3: 061 is wrapped in one transaction", () => {
@@ -1008,24 +1005,26 @@ test("50: NO SUITE MAY CLAIM THAT AN APPLIED MIGRATION IS STILL PENDING", () => 
   // repository-wide scan for any suite still describing an applied
   // migration as unapplied, or still exempting one in code.
   //
-  // ── AND THE SET IS DERIVED, NOT LISTED ──────────────────────
+  // ── AND THE SET IS EVERY MIGRATION, DERIVED ─────────────────
   //
   // This used to name 061, 062 and 063 by hand, and that is precisely
   // how stale exemptions for 036 through 040 survived for several
   // packages: nobody had written those numbers into the list, so
-  // nothing ever looked at them. The applied set is now every
-  // migration on disk except the single highest one, which means a
-  // stale exemption for ANY migration fails this test and the list
-  // cannot fall behind production again.
+  // nothing ever looked at them. It then derived the set as everything
+  // but the pending migration.
+  //
+  // 064 IS NOW LIVE AND THERE IS NO PENDING MIGRATION, so the applied
+  // set is EVERY file on disk and nothing is carved out of the scan at
+  // all. A migration that appears above 064 is pending and legitimately
+  // exempt - and the assertion at the end of this test is what forces
+  // that case to be looked at rather than assumed.
   //
   // Modelled on the identical guard tests/launch-discount-migration.mjs
   // holds over 056, and assembled from pieces for the same reason: a
   // literal pattern would match this file's own source and fail forever.
   const NL = String.fromCharCode(10);
-  // THE ONE MIGRATION THAT MAY BE EXEMPT is the highest on disk, and
-  // the assertion at the end of this test pins which file that is.
   const onDisk = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
-  const appliedFiles = onDisk.slice(0, -1);
+  const appliedFiles = onDisk;
   const APPLIED = appliedFiles.map(f => f.slice(0, 3));
   // ── THE PROSE SCAN READS COMMENTS, THE CODE SCAN READS CODE ──
   //
@@ -1085,18 +1084,21 @@ test("50: NO SUITE MAY CLAIM THAT AN APPLIED MIGRATION IS STILL PENDING", () => 
     }
   }
 
-  // AND 064 IS THE ONE PENDING MIGRATION. Production is 001-063, so
-  // every migration up to and including 063 is immutable and 064 is the
-  // only file any guard above may exempt. Naming it here is what gives
-  // the derivation its meaning: when 064 is applied, a 065 appears,
-  // this assertion fails, and the exemptions get re-read.
+  // AND NOTHING IS PENDING. Production is 001-064, so every migration
+  // on disk is live and every one of them is in the scanned set above.
+  // 064 is named here for the same reason 063 used to be: the day a 065
+  // is authored this assertion fails, and whoever authors it has to
+  // decide deliberately that it is pending and may be exempt - rather
+  // than inheriting an exemption nobody re-read.
   assert.equal(onDisk.at(-1), "064_b2b_account_change_management.sql",
-    "the pending migration changed - re-check every immutability exemption");
-  assert.equal(onDisk.at(-2), "063_b2b_instalment_delivery_failure_runtime.sql",
-    "063 is no longer the highest LIVE migration - re-check every exemption");
-  assert.equal(appliedFiles.length, onDisk.length - 1);
-  assert.ok(appliedFiles.includes("039_b2c_annual_plan_foundation.sql"),
-    "039 is not in the applied set, so nothing guards its immutability");
-  assert.ok(appliedFiles.includes("040_annual_checkout_retry_fingerprints.sql"),
-    "040 is not in the applied set, so nothing guards its immutability");
+    "a migration appeared above 064 - decide whether it is pending, then re-check every exemption");
+  assert.equal(appliedFiles.length, onDisk.length,
+    "a migration is excluded from the applied set - nothing guards its immutability");
+  for (const live of ["039_b2c_annual_plan_foundation.sql",
+                     "040_annual_checkout_retry_fingerprints.sql",
+                     "063_b2b_instalment_delivery_failure_runtime.sql",
+                     "064_b2b_account_change_management.sql"]) {
+    assert.ok(appliedFiles.includes(live),
+      `${live.slice(0, 3)} is not in the applied set, so nothing guards its immutability`);
+  }
 });

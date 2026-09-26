@@ -837,13 +837,10 @@ test("33: this phase stays inside its boundaries", () => {
   // 001-062 ARE ALL LIVE NOW: no migration may be edited at all.
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
-  // 064 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062+063,
-  // so 064 is still the right place to fix 064 and may be edited in
-  // place - the terms every pending migration has had. Everything
-  // BELOW it is live. Remove this the moment 064 is applied;
-  // tests/b2b-pending-agreement-writer.test.mjs test 50 enforces that.
+  // 064 IS LIVE. Production is 001-064, so there is no pending
+  // migration and no file any immutability guard may exempt.
   assert.deepEqual(
-    (changed ? changed.split(/\r?\n/) : []).filter(r => !r.endsWith("064_b2b_account_change_management.sql")),
+    (changed ? changed.split(/\r?\n/) : []),
     [], "a live, immutable migration was edited");
 
   // Out of scope, and provably not called.
@@ -1723,16 +1720,13 @@ test("61: 4B4.1's hardening is intact and this phase added no migration", () => 
   assert.equal(migrations.length, 64);
   assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 64), [], "a migration 065 or beyond appeared");
   // 001-062 are all applied to production and therefore immutable.
-  // 064 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062+063, so
-  // 064 is still the right place to fix 064 and may be edited in place.
-  // Remove this the moment 064 is applied;
-  // tests/b2b-pending-agreement-writer.test.mjs test 50 enforces that.
+  // 064 IS LIVE. Production is 001-064, so there is no pending
+  // migration and no file any immutability guard may exempt.
   const touchedMigrations2 = execFileSync(
     "git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   assert.deepEqual(
-    (touchedMigrations2 ? touchedMigrations2.split(/\r?\n/) : [])
-      .filter(r => !r.endsWith("064_b2b_account_change_management.sql")),
+    (touchedMigrations2 ? touchedMigrations2.split(/\r?\n/) : []),
     [], "a live, immutable migration was edited");
   // The two new decisions are PURE: the leaf still imports no value.
   const rulesImports = rulesCode.slice(0, rulesCode.indexOf("export"));

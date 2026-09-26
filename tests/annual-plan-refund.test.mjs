@@ -795,13 +795,10 @@ test("25: no lifecycle, completion or cancellation semantics are invented", () =
   // The completion function is untouched by this phase.
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
-  // 064 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062+063,
-  // so 064 is still the right place to fix 064 and may be edited in
-  // place - the terms every pending migration has had. Everything
-  // BELOW it is live. Remove this the moment 064 is applied;
-  // tests/b2b-pending-agreement-writer.test.mjs test 50 enforces that.
+  // 064 IS LIVE. Production is 001-064, so there is no pending
+  // migration and no file any immutability guard may exempt.
   assert.deepEqual(
-    (changed ? changed.split(/\r?\n/) : []).filter(r => !r.endsWith("064_b2b_account_change_management.sql")),
+    (changed ? changed.split(/\r?\n/) : []),
     [], "a live, immutable migration was edited");
 });
 

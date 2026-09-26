@@ -1659,11 +1659,9 @@ test("86: 001 through 063 are unmodified - all are live", () => {
     ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   const touched = changed ? changed.split(NEWLINE) : [];
-  // 064 IS NOT APPLIED ANYWHERE. Production is 058+059+060+061+062+063,
-  // so 064 is still the right place to fix 064. Remove this the moment
-  // it is applied; tests/b2b-pending-agreement-writer.test.mjs test 50
-  // enforces that.
-  assert.deepEqual(touched.filter(rel => !rel.endsWith(MIGRATION)), [],
+  // 064 IS LIVE. Production is 001-064, so there is no pending
+  // migration and no file any immutability guard may exempt.
+  assert.deepEqual(touched, [],
     "a live, immutable migration was edited");
 });
 
