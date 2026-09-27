@@ -761,7 +761,7 @@ test("8g: commercial values, shipping, tax and the prelaunch flag are unchanged"
   assert.match(shipping, /germany: \{ shippingGrossCents: 590, freeShippingThresholdGrossCents: 4900 \}/);
   assert.match(shipping, /eu: \{ shippingGrossCents: 1290, freeShippingThresholdGrossCents: 7900 \}/);
   assert.match(read("lib/tax.ts"), /export const EU_B2C_TAX_MODE: EuB2cTaxMode = "german_origin";/);
-  assert.match(read("app/content.ts"), /export const SHOP_STATUS = "prelaunch" as const;/);
+  assert.match(read("app/content.ts"), /export const SHOP_STATUS = "live" as const;/);
   // The session still prices, ships and taxes exactly as before.
   for (const kept of ["validateQuoteItems(items)", "buildAuthoritativeQuote(validatedItems)",
                       "ALLOWED_SHIPPING_COUNTRIES.includes", "computeShippingGrossCents(",
@@ -832,6 +832,6 @@ test("9e: while the shop is prelaunch the field is not rendered at all", () => {
   // required field above a button that does not buy anything would both
   // confuse and collect for nothing. Gated on the SAME flag as the
   // legal note, so it returns with the checkout in one step.
-  assert.match(site, /\{SHOP_STATUS!=="prelaunch"&&<div className="cart-email">/);
-  assert.match(site, /SHOP_STATUS!=="prelaunch"&&<p className="cart-legal-note"/);
+  assert.match(site, /\{!SHOP_IS_PRELAUNCH&&<div className="cart-email">/);
+  assert.match(site, /!SHOP_IS_PRELAUNCH&&<p className="cart-legal-note"/);
 });

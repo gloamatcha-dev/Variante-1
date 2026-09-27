@@ -176,20 +176,33 @@ test("no second product list was introduced anywhere", () => {
    3. PRELAUNCH PUBLISHES NO OFFER AND NO PRICE
    ══════════════════════════════════════════════════════════════ */
 
-test("the product page publishes no Offer, price or availability in prelaunch", async () => {
-  assert.match(read("app/content.ts"), /export const SHOP_STATUS = "prelaunch" as const;/);
-  for (const route of ["/shop", `/shop/${REAL_SLUG}`, `/shop/${WITHHELD_SLUG}`]) {
-    const { html } = await server.getHtml(route);
-    for (const banned of [
-      '"@type":"Offer"', '"@type": "Offer"', '"@type":"ProductGroup"', '"@type":"AggregateOffer"',
-      '"priceCurrency"', '"availability"', '"price"', '"hasVariant"',
-      'property="product:price', 'itemprop="price"',
-    ]) {
-      assert.ok(!html.includes(banned), `${route} publishes ${banned} while the shop is closed`);
-    }
-    const money = [...html.matchAll(/\d{1,3},\d{2}\s*(€|Euro)/g)].map(m => m[0]);
-    assert.deepEqual(money, [], `${route} publishes a price: ${money.join(", ")}`);
+test("the live product page publishes an Offer; the withheld one does not", async () => {
+  assert.match(read("app/content.ts"), /export const SHOP_STATUS = "live" as const;/);
+
+  // THE REAL PRODUCT SELLS NOW, so its structured data may describe a
+  // purchasable Offer. The amount is rendered from the catalog on the
+  // server - there is no request-supplied price anywhere near it.
+  const real = await server.getHtml(`/shop/${REAL_SLUG}`);
+  assert.ok(real.html.includes('"@type":"Offer"')
+    || real.html.includes('"@type": "Offer"'),
+    "the live product page publishes no Offer");
+  assert.ok(real.html.includes('"priceCurrency"'),
+    "the live product page publishes no priceCurrency");
+
+  // THE WITHHELD PRODUCT IS UNAFFECTED BY THE LAUNCH. It is not for
+  // sale, so it still publishes no Offer and no amount.
+  const withheld = await server.getHtml(`/shop/${WITHHELD_SLUG}`);
+  for (const banned of [
+    '"@type":"Offer"', '"@type": "Offer"', '"@type":"AggregateOffer"',
+    '"priceCurrency"', '"availability"',
+    'property="product:price', 'itemprop="price"',
+  ]) {
+    assert.ok(!withheld.html.includes(banned),
+      `the withheld product publishes ${banned}`);
   }
+  const money = [...withheld.html.matchAll(new RegExp("\\d{1,3},\\d{2}\\s*(€|Euro)", "g"))].map(m => m[0]);
+  assert.deepEqual(money, [],
+    `the withheld product publishes a price: ${money.join(", ")}`);
 });
 
 test("the builder is the single gate, and it is wired to the one launch flag", () => {

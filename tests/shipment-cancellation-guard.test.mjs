@@ -724,7 +724,7 @@ test("regression: no new cron and no new secret", () => {
 });
 
 test("regression: SHOP_STATUS, the subscription flag, pricing and tax are unchanged", () => {
-  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "prelaunch" as const;'));
+  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "live" as const;'));
   assert.match(read(".env.example"), /^B2C_SUBSCRIPTIONS_ENABLED=$/m);
   for (const source of [routeCode, rulesCode, sql032]) {
     for (const forbidden of [

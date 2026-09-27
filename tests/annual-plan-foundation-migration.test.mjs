@@ -1771,7 +1771,7 @@ test("54b: the annual checkout did not disturb the two live attempt writers", ()
 });
 
 test("55: the feature flag and the shop status are unchanged and still closed", () => {
-  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "prelaunch" as const;'));
+  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "live" as const;'));
   assert.ok(read("lib/subscriptionCheckoutRules.ts")
     .includes('export const SUBSCRIPTION_FEATURE_FLAG = "B2C_SUBSCRIPTIONS_ENABLED";'));
   assert.ok(!flat.includes("b2c_annual_plan_enabled"),

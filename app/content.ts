@@ -8,7 +8,7 @@ export const BRAND = {
   address: null as string | null,
 };
 
-export const SHOP_STATUS = "prelaunch" as const; // "prelaunch" | "live"
+export const SHOP_STATUS = "live" as const; // "prelaunch" | "live"
 
 /**
  * PUBLIC PRODUCT PRICES ARE WITHHELD UNTIL THE SHOP IS LIVE.
@@ -31,7 +31,28 @@ export const SHOP_STATUS = "prelaunch" as const; // "prelaunch" | "live"
  * Typed `boolean` rather than left as a narrowed literal, so the true
  * branch is not compiled away and reads as live code.
  */
-export const PRICES_VISIBLE: boolean = SHOP_STATUS !== "prelaunch";
+/**
+ * SHOP_STATUS is declared `as const`, so TypeScript narrows it to the
+ * literal currently deployed and calls a comparison with the other one
+ * unreachable. The comparison is the point - this file has to keep
+ * working when the constant is flipped and redeployed, which is exactly
+ * how the shop is released - so the value is widened ONCE here and every
+ * derived flag below reads the widened form. The same widening the
+ * launch API routes already do at their own call sites.
+ */
+const SHOP_STATUS_VALUE: string = SHOP_STATUS;
+
+export const PRICES_VISIBLE: boolean = SHOP_STATUS_VALUE !== "prelaunch";
+
+/**
+ * THE ONE PRELAUNCH PREDICATE every presentation surface reads.
+ *
+ * Derived, never set by hand, and the exact complement of
+ * PRICES_VISIBLE - so a surface cannot show a price while still routing
+ * its buy button to /contact, which is the mismatch the two used to be
+ * able to disagree about when each site compared the constant itself.
+ */
+export const SHOP_IS_PRELAUNCH: boolean = SHOP_STATUS_VALUE === "prelaunch";
 
 /**
  * RECIPES ARE WITHHELD FOR THIS LAUNCH, NOT REMOVED.

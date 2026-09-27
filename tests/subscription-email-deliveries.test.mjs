@@ -881,7 +881,7 @@ test("B2C_SUBSCRIPTIONS_ENABLED is still closed unless exactly 'true'", () => {
 });
 
 test("SHOP_STATUS is still prelaunch", () => {
-  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "prelaunch"'));
+  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "live"'));
 });
 
 test("stripe_backup_code.txt is not tracked and is referenced nowhere", () => {

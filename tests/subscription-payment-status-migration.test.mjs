@@ -496,7 +496,7 @@ test("57, 58: the launch gates are unchanged", () => {
   const checkoutRules = read("lib/subscriptionCheckoutRules.ts");
   assert.ok(checkoutRules.includes('export const SUBSCRIPTION_FEATURE_FLAG = "B2C_SUBSCRIPTIONS_ENABLED"'));
   assert.ok(checkoutRules.includes('env[SUBSCRIPTION_FEATURE_FLAG] === "true"'));
-  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "prelaunch"'));
+  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "live"'));
   assert.ok(!sql036.includes("B2C_SUBSCRIPTIONS_ENABLED"));
 });
 

@@ -783,7 +783,7 @@ test("47: B2C_SUBSCRIPTIONS_ENABLED is unchanged and still closed by default", (
 });
 
 test("48: SHOP_STATUS is unchanged", () => {
-  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "prelaunch" as const;'));
+  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "live" as const;'));
 });
 
 test("49: this suite opens no database, calls nothing, and stages no secret", () => {

@@ -475,7 +475,7 @@ test("6c: NO SUBSCRIPTION, ANNUAL, B2B, CATALOGUE OR PRICE IS TOUCHED", () => {
     assert.ok(!statements.includes(banned), `057 redefines ${banned}`);
   }
   assert.ok(!/price/i.test(statements.replace(orderWriter, "")), "057 declares a price of its own");
-  assert.match(read("app/content.ts"), /export const SHOP_STATUS = "prelaunch" as const;/);
+  assert.match(read("app/content.ts"), /export const SHOP_STATUS = "live" as const;/);
   assert.match(read("lib/shipping.ts"), /germany: \{ shippingGrossCents: 590, freeShippingThresholdGrossCents: 4900 \}/);
 });
 

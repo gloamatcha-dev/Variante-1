@@ -2,7 +2,7 @@
 import { useEffect, useLayoutEffect, useState, useRef, useCallback, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { Header, Footer, MobileDock } from "./Chrome";
-import { BRAND, PRODUCT, SHOP_STATUS, RECIPES_VISIBLE, PRICES_VISIBLE } from "./content";
+import { BRAND, PRODUCT, SHOP_IS_PRELAUNCH, RECIPES_VISIBLE, PRICES_VISIBLE } from "./content";
 import { useCatalog, useCatalogList, fmtCents, per100gCents } from "./useCatalog";
 import { isProductWithheld } from "../lib/catalogAvailability";
 // The /shop/gloa-matcha alias used to be spelled out inline here. It is
@@ -325,7 +325,7 @@ return ref;
 
 function Home(){
 const heroRef=useHeroScrollProgress();
-return <main><section className="hero"><div className="hero-copy" ref={heroRef as React.RefObject<HTMLDivElement>}><p className="eyebrow">MATCHA AUS SHIZUOKA.</p><h1>Matcha.<br/><span className="hero-line-2">Is for everyone.</span></h1><p className="lead">Für Latte, pur, iced oder wie du willst.</p><div className="hero-actions"><Link className="cta berry" href="/about">GLOA entdecken</Link></div></div><div className="hero-art"><img src="/img/Startseite.webp" alt="Vier GLOA Matcha-Packungen in Blau, Beere, Creme und Aubergine" className="hero-img" width={1448} height={1086} fetchPriority="high"/></div></section><LaunchCountdown/><section className="prelaunch"><div className="prelaunch-inner"><p className="eyebrow prelaunch-eyebrow">PRELAUNCH</p><h2 className="prelaunch-headline"><span className="prelaunch-line-1">Zum Launch</span><i className="prelaunch-line-2">benachrichtigt</i><span className="prelaunch-line-3">werden.</span></h2><p className="prelaunch-date">{GLOA_LAUNCH_FULL_LABEL}</p><p className="prelaunch-body">Trag dich ein und wir schicken dir eine Nachricht,<br/>wenn GLOA online geht. Nur ein kurzes Update zum Launch.</p><Link className="cta prelaunch-cta" href="/launch" onClick={()=>track("notify_click")}>Zum Launch benachrichtigen</Link><a className="prelaunch-social" href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer"><svg className="prelaunch-social-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="currentColor" strokeWidth="1.6"/><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.6"/><circle cx="17.2" cy="6.8" r="1.1" fill="currentColor"/></svg><span>Oder folge uns einfach auf Instagram →</span></a></div></section><section className="daily"><div className="daily-inner home-rail"><div className="daily-copy"><p className="eyebrow daily-eyebrow">MATCHA FÜR JEDEN TAG</p><h2 className="daily-headline"><span className="daily-line">Morgens.</span><span className="daily-line daily-line-mark">Im Meeting.</span><i className="daily-line daily-line-accent">Nachmittags.</i></h2><p className="daily-lead">Matcha, wann immer du ihn brauchst.<br/>Morgens zum Start, nachmittags im Meeting oder einfach zwischendurch.</p><span className="daily-rule" aria-hidden="true"/><p className="daily-note">Reiner Genuss.<br/>Ganz nach deinem Geschmack.<br/>Für jeden Moment deines Tages.</p><Link className="daily-link" href="/our-matcha">Matcha entdecken <span aria-hidden="true">→</span></Link></div><div className="daily-grid">{dailyTiles.map(t=><figure className="daily-tile" key={t.label}><img src={t.src} alt={t.alt} loading="lazy" style={{objectPosition:t.focus}}/><figcaption>{t.label}</figcaption></figure>)}</div></div></section><AtAGlance/>{RECIPES_VISIBLE&&<RecipeCarousel/>}<section className="community"><div className="community-inner home-rail"><div className="community-copy"><p className="eyebrow community-eyebrow">#GLOAMATCHA</p><h2 className="community-headline"><span className="community-line">Zeig uns</span><i className="community-line community-line-accent">deinen Matcha.</i></h2><a className="community-cta" href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">{`@${BRAND.instagram} folgen`}</a></div><CommunityFeed/></div></section><BrandNote/></main>}
+return <main><section className="hero"><div className="hero-copy" ref={heroRef as React.RefObject<HTMLDivElement>}><p className="eyebrow">MATCHA AUS SHIZUOKA.</p><h1>Matcha.<br/><span className="hero-line-2">Is for everyone.</span></h1><p className="lead">Für Latte, pur, iced oder wie du willst.</p><div className="hero-actions"><Link className="cta berry" href="/about">GLOA entdecken</Link></div></div><div className="hero-art"><img src="/img/Startseite.webp" alt="Vier GLOA Matcha-Packungen in Blau, Beere, Creme und Aubergine" className="hero-img" width={1448} height={1086} fetchPriority="high"/></div></section>{SHOP_IS_PRELAUNCH&&<><LaunchCountdown/><section className="prelaunch"><div className="prelaunch-inner"><p className="eyebrow prelaunch-eyebrow">PRELAUNCH</p><h2 className="prelaunch-headline"><span className="prelaunch-line-1">Zum Launch</span><i className="prelaunch-line-2">benachrichtigt</i><span className="prelaunch-line-3">werden.</span></h2><p className="prelaunch-date">{GLOA_LAUNCH_FULL_LABEL}</p><p className="prelaunch-body">Trag dich ein und wir schicken dir eine Nachricht,<br/>wenn GLOA online geht. Nur ein kurzes Update zum Launch.</p><Link className="cta prelaunch-cta" href="/launch" onClick={()=>track("notify_click")}>Zum Launch benachrichtigen</Link><a className="prelaunch-social" href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer"><svg className="prelaunch-social-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="currentColor" strokeWidth="1.6"/><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.6"/><circle cx="17.2" cy="6.8" r="1.1" fill="currentColor"/></svg><span>Oder folge uns einfach auf Instagram →</span></a></div></section></>}<section className="daily"><div className="daily-inner home-rail"><div className="daily-copy"><p className="eyebrow daily-eyebrow">MATCHA FÜR JEDEN TAG</p><h2 className="daily-headline"><span className="daily-line">Morgens.</span><span className="daily-line daily-line-mark">Im Meeting.</span><i className="daily-line daily-line-accent">Nachmittags.</i></h2><p className="daily-lead">Matcha, wann immer du ihn brauchst.<br/>Morgens zum Start, nachmittags im Meeting oder einfach zwischendurch.</p><span className="daily-rule" aria-hidden="true"/><p className="daily-note">Reiner Genuss.<br/>Ganz nach deinem Geschmack.<br/>Für jeden Moment deines Tages.</p><Link className="daily-link" href="/our-matcha">Matcha entdecken <span aria-hidden="true">→</span></Link></div><div className="daily-grid">{dailyTiles.map(t=><figure className="daily-tile" key={t.label}><img src={t.src} alt={t.alt} loading="lazy" style={{objectPosition:t.focus}}/><figcaption>{t.label}</figcaption></figure>)}</div></div></section><AtAGlance/>{RECIPES_VISIBLE&&<RecipeCarousel/>}<section className="community"><div className="community-inner home-rail"><div className="community-copy"><p className="eyebrow community-eyebrow">#GLOAMATCHA</p><h2 className="community-headline"><span className="community-line">Zeig uns</span><i className="community-line community-line-accent">deinen Matcha.</i></h2><a className="community-cta" href={`https://instagram.com/${BRAND.instagram}`} target="_blank" rel="noopener noreferrer">{`@${BRAND.instagram} folgen`}</a></div><CommunityFeed/></div></section><BrandNote/></main>}
 
 // -- Catalog-driven shop --------------------------------------------
 //
@@ -689,7 +689,7 @@ return <div className="shop-product-row home-rail">
     shop free of a second checkout implementation.
 
     In prelaunch every mode routes where every other shop CTA routes. */}
-<button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":annualActive?()=>{track("shop_annual_start");window.location.href=annualPortalHref(v.sku)}:subscriptionActive?()=>{track("shop_subscription_start");window.location.href=subscriptionPortalHref(v.sku)}:handleAdd}>{SHOP_STATUS==="prelaunch"?"Fragen zum Launch":annualActive?"Jahresplan im Konto starten":subscriptionActive?"Abo im Konto starten":"In den Warenkorb"}</button>
+<button className="cta shop-cta" onClick={SHOP_IS_PRELAUNCH?()=>window.location.href="/contact":annualActive?()=>{track("shop_annual_start");window.location.href=annualPortalHref(v.sku)}:subscriptionActive?()=>{track("shop_subscription_start");window.location.href=subscriptionPortalHref(v.sku)}:handleAdd}>{SHOP_IS_PRELAUNCH?"Fragen zum Launch":annualActive?"Jahresplan im Konto starten":subscriptionActive?"Abo im Konto starten":"In den Warenkorb"}</button>
 </div></div>}
 
 /** Confirmed GLOA Matcha food information. Rendered only for the Matcha
@@ -870,12 +870,12 @@ const [annualRequest,setAnnualRequest]=useState(0);
 // already reads for its 404 check (lib/catalogProducts.ts). That is a
 // data-flow change through a client component boundary and is written
 // up in the audit rather than done here.
-const shell=(lead:React.ReactNode,price:React.ReactNode,reserve=false)=><main className="shop-page"><ShopHero lead={lead} price={price}/><ShopLaunchStrip/>{reserve&&<div className="shop-products-reserve" aria-hidden="true"/>}</main>;
+const shell=(lead:React.ReactNode,price:React.ReactNode,reserve=false)=><main className="shop-page"><ShopHero lead={lead} price={price}/>{SHOP_IS_PRELAUNCH&&<ShopLaunchStrip/>}{reserve&&<div className="shop-products-reserve" aria-hidden="true"/>}</main>;
 
 // With a seed the band is already in the HTML, link included; the
 // reserve still holds the space the accordions below it will take.
 if(loading)return seed?.length
- ?<main className="shop-page"><ShopHero lead={SHOP_HERO_LEAD} price={null}/><ShopLaunchStrip/><ShopSeedProducts seed={seed}/><div className="shop-products-reserve" aria-hidden="true"/></main>
+ ?<main className="shop-page"><ShopHero lead={SHOP_HERO_LEAD} price={null}/>{SHOP_IS_PRELAUNCH&&<ShopLaunchStrip/>}<ShopSeedProducts seed={seed}/><div className="shop-products-reserve" aria-hidden="true"/></main>
  :shell(SHOP_HERO_LEAD,<p className="shop-hero-price">Laden…</p>,true);
 if(error)return shell("Shop vorübergehend nicht verfügbar.",null);
 if(!visibleShopProducts(products).length)return shell("Aktuell keine Produkte verfügbar.",null);
@@ -891,7 +891,7 @@ const hasAnnual=shown.some(p=>p.variants.some(v=>annualPricingFor(v)!==null));
 
 return <main className="shop-page">
 <ShopHero lead={SHOP_HERO_LEAD} price={PRICES_VISIBLE?<p className="shop-hero-price">AB {fmtCents(lowestCents)} €</p>:null}/>
-<ShopLaunchStrip/>
+{SHOP_IS_PRELAUNCH&&<ShopLaunchStrip/>}
 
 <section id="product" className="shop-products">
 {shown.map(p=><article key={p.id} id={`product-${p.slug}`} className="shop-column">
@@ -927,7 +927,7 @@ return <main className="pdp">
 {PRICES_VISIBLE&&<p className="pdp-price">{fmtCents(v.price_gross_cents)} €</p>}
 {PRICES_VISIBLE&&per100!==null&&<p className="pdp-per100g">{fmtCents(per100)} € / 100 g</p>}
 
-<button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":handleAdd}>{SHOP_STATUS==="prelaunch"?"Fragen zum Launch":"In den Warenkorb"}</button>
+<button className="cta shop-cta" onClick={SHOP_IS_PRELAUNCH?()=>window.location.href="/contact":handleAdd}>{SHOP_IS_PRELAUNCH?"Fragen zum Launch":"In den Warenkorb"}</button>
 </div></section>
 
 <section className="pdp-facts"><div><p className="eyebrow">WHAT WE KNOW</p><h2>Clear facts.<br/>Nothing invented.</h2></div><dl><div><dt>LEBENSMITTELBEZEICHNUNG</dt><dd>Matcha (Grünteepulver)</dd></div><div><dt>ZUTAT</dt><dd>100 % Matcha-Grünteepulver, keine Zusätze</dd></div><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>VERWENDUNG</dt><dd>Latte · Iced · Pur</dd></div><div><dt>LAGERUNG</dt><dd>{PRODUCT.storage}</dd></div><div><dt>GRÖSSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div></dl><p className="product-operator-note">Lebensmittelunternehmer: Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin, Deutschland</p></section>
@@ -958,7 +958,7 @@ return <main className="pdp">
 {PRICES_VISIBLE&&<p className="pdp-price">{fmtCents(v.price_gross_cents)} €</p>}
 {presentation.matchaNotIncludedNotice&&<p className="product-not-included">{presentation.matchaNotIncludedNotice}</p>}
 
-<button className="cta shop-cta" onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":handleAdd}>{SHOP_STATUS==="prelaunch"?"Fragen zum Launch":"In den Warenkorb"}</button>
+<button className="cta shop-cta" onClick={SHOP_IS_PRELAUNCH?()=>window.location.href="/contact":handleAdd}>{SHOP_IS_PRELAUNCH?"Fragen zum Launch":"In den Warenkorb"}</button>
 </div></section>
 
 {product.description&&<section className="pdp-facts"><div><p className="eyebrow">PRODUKT</p><h2>{product.name}</h2></div><p className="pdp-description">{product.description}</p></section>}
@@ -2886,7 +2886,7 @@ setDiscountBusy(false);
 const removeDiscount=()=>{setPricedDiscount(null);setPricedError(null);setDiscountInput("")};
 
 const handleCheckout=async()=>{
-if(SHOP_STATUS==="prelaunch"){onClose();window.location.href="/contact";return}
+if(SHOP_IS_PRELAUNCH){onClose();window.location.href="/contact";return}
 // The same rule the server enforces, from the same module - so the
 // customer is told about a typo here instead of by a 400. It is a
 // courtesy check, not the check: validateCheckoutEmail runs again on
@@ -2923,7 +2923,7 @@ return <div className="cart-backdrop" onClick={onClose} onKeyDown={e=>e.key==="E
 </div>
 <button className="cart-item-remove" onClick={()=>cart.removeItem(item.productId,item.variantId)} aria-label="Artikel entfernen">Entfernen</button>
 </div>)}</div>
-{SHOP_STATUS!=="prelaunch"&&<div className="cart-email">
+{!SHOP_IS_PRELAUNCH&&<div className="cart-email">
 <label className="cart-email-label" htmlFor="cart-email">E-MAIL</label>
 <input
 id="cart-email"
@@ -2957,7 +2957,7 @@ aria-describedby={emailError?"cart-email-error":"cart-email-note"}
 {remainingForFreeShipping!==null&&remainingForFreeShipping>0&&<p className="cart-shipping-hint">Noch {fmtCents(remainingForFreeShipping)} € bis zum kostenlosen Versand</p>}
 {threshold!==null&&shippingCents===0&&<p className="cart-shipping-hint">Kostenloser Versand ab {fmtCents(threshold)} €</p>}
 </div>
-{SHOP_STATUS!=="prelaunch"&&<div className="cart-discount">
+{!SHOP_IS_PRELAUNCH&&<div className="cart-discount">
 <label className="cart-discount-label" htmlFor="cart-discount-code">RABATTCODE</label>
 <div className="cart-discount-row">
 <input
@@ -3003,8 +3003,8 @@ aria-describedby={discountError?"cart-discount-error":"cart-discount-note"}
 </>}
 <div className="cart-total"><span>SUMME</span><strong>{fmtCents(payableCents)} €</strong></div>
 {checkoutError&&<p className="cart-error">{checkoutError}</p>}
-<button className="cta cart-checkout-cta" onClick={handleCheckout} disabled={checkoutBusy}>{checkoutBusy?"WIRD GELADEN…":SHOP_STATUS==="prelaunch"?"FRAGEN ZUM LAUNCH":"ZUR KASSE"}</button>
-{SHOP_STATUS!=="prelaunch"&&<p className="cart-legal-note">Mit dem Bestellabschluss akzeptierst du unsere <Link href="/agb" onClick={onClose}>AGB</Link>. Es gilt unsere <Link href="/datenschutz" onClick={onClose}>Datenschutzerklärung</Link>. Informationen zu deinem <Link href="/widerruf" onClick={onClose}>Widerrufsrecht</Link>.</p>}
+<button className="cta cart-checkout-cta" onClick={handleCheckout} disabled={checkoutBusy}>{checkoutBusy?"WIRD GELADEN…":SHOP_IS_PRELAUNCH?"FRAGEN ZUM LAUNCH":"ZUR KASSE"}</button>
+{!SHOP_IS_PRELAUNCH&&<p className="cart-legal-note">Mit dem Bestellabschluss akzeptierst du unsere <Link href="/agb" onClick={onClose}>AGB</Link>. Es gilt unsere <Link href="/datenschutz" onClick={onClose}>Datenschutzerklärung</Link>. Informationen zu deinem <Link href="/widerruf" onClick={onClose}>Widerrufsrecht</Link>.</p>}
 </div>
 </>}
 </aside></div>
@@ -3127,7 +3127,7 @@ else if(route==="partnerships")page=<Partnerships/>;
 else if(["impressum","datenschutz","agb","widerruf","versand"].includes(route))page=<Legal route={route}/>;
 else page=<main className="not-found"><h1>404</h1><Link href="/">Zurück zu GLOA →</Link></main>;
 
-return <><Header onCart={openCart} cartCount={cart.totalCount} menuOpen={menuOpen} onMenuOpenChange={setMenuOpen}/>{page}<Footer/><MobileDock onCart={openCart} cartCount={cart.totalCount} cartOpen={cartOpen} menuOpen={menuOpen} onMenuOpenChange={setMenuOpen}/><CartDrawer open={cartOpen} onClose={closeCart}/><LaunchPopup route={route} menuOpen={menuOpen} cartOpen={cartOpen}/></>
+return <><Header onCart={openCart} cartCount={cart.totalCount} menuOpen={menuOpen} onMenuOpenChange={setMenuOpen}/>{page}<Footer/><MobileDock onCart={openCart} cartCount={cart.totalCount} cartOpen={cartOpen} menuOpen={menuOpen} onMenuOpenChange={setMenuOpen}/><CartDrawer open={cartOpen} onClose={closeCart}/>{SHOP_IS_PRELAUNCH&&<LaunchPopup route={route} menuOpen={menuOpen} cartOpen={cartOpen}/>}</>
 }
 
 /**

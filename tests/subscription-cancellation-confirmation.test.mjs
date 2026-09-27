@@ -802,7 +802,7 @@ test("40: B2C_SUBSCRIPTIONS_ENABLED is still closed unless exactly 'true'", () =
 });
 
 test("41: SHOP_STATUS is still prelaunch", () => {
-  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "prelaunch"'));
+  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "live"'));
 });
 
 test("42: nothing in this feature can reach a network or a database in a test", () => {

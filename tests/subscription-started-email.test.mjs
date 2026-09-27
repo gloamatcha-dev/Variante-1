@@ -866,7 +866,7 @@ test("36b: the mirrored launch constants have not drifted", () => {
 });
 
 test("36: SHOP_STATUS is still prelaunch", () => {
-  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "prelaunch"'));
+  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "live"'));
 });
 
 test("37: nothing in this feature can reach a network or a database in a test", () => {

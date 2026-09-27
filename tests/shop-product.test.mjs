@@ -117,7 +117,7 @@ test("3: variants, price and base price still come from the catalog", () => {
   // prelaunch test moved to the FRONT of the chain when the 4-week
   // option arrived - previously it sat between the annual branch and
   // handleAdd, which meant annual mode bypassed it entirely.
-  assert.match(block, /onClick=\{SHOP_STATUS==="prelaunch"\?\(\)=>window\.location\.href="\/contact":/);
+  assert.match(block, /onClick=\{SHOP_IS_PRELAUNCH\?\(\)=>window\.location\.href="\/contact":/);
   assert.match(block, /:handleAdd\}/, "the one-time path no longer ends at the cart");
   // Neither recurring branch reaches handleAdd - a plan is a dedicated
   // account-bound checkout, not a cart line. See
@@ -129,8 +129,8 @@ test("3: variants, price and base price still come from the catalog", () => {
   assert.match(block, /subscriptionActive\?\(\)=>\{track\("shop_subscription_start"\);window\.location\.href=subscriptionPortalHref\(v\.sku\)\}/);
   // Prelaunch says the same thing in EVERY purchase mode, because in
   // prelaunch none of them sells anything.
-  assert.match(block, /SHOP_STATUS==="prelaunch"\?"Fragen zum Launch":annualActive\?"Jahresplan im Konto starten":subscriptionActive\?"Abo im Konto starten":"In den Warenkorb"/);
-  assert.match(read("app/content.ts"), /export const SHOP_STATUS = "prelaunch"/);
+  assert.match(block, /SHOP_IS_PRELAUNCH\?"Fragen zum Launch":annualActive\?"Jahresplan im Konto starten":subscriptionActive\?"Abo im Konto starten":"In den Warenkorb"/);
+  assert.match(read("app/content.ts"), /export const SHOP_STATUS = "live"/);
   // The hero's anchor still lands on the section.
   assert.match(shop, /<section id="product" className="shop-products">/);
 });

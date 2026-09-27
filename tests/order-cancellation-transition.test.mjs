@@ -1238,7 +1238,7 @@ test("regression: the other order emails and their state columns are untouched",
 });
 
 test("regression: SHOP_STATUS and B2C_SUBSCRIPTIONS_ENABLED are unchanged", () => {
-  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "prelaunch" as const;'));
+  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "live" as const;'));
   const example = read(".env.example");
   assert.match(example, /^B2C_SUBSCRIPTIONS_ENABLED=$/m, "the subscription flag gained a value");
   for (const forbidden of ["B2C_SUBSCRIPTIONS_ENABLED", "SHOP_STATUS", "subscription"]) {

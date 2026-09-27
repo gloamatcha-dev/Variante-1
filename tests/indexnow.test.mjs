@@ -350,16 +350,26 @@ test("7: robots.txt, the sitemap and the entity markup are unchanged", async () 
   assert.ok(!/instagram\.com\/gloamatcha[^.]/.test(home), "the wrong Instagram handle appeared");
 });
 
-test("7b: prelaunch is untouched - no price, no offer, and the case stays withheld", async () => {
-  assert.match(read("app/content.ts"), /export const SHOP_STATUS = "prelaunch"/);
-  for (const route of ["/shop", "/shop/matcha", "/shop/metal-case"]) {
+test("7b: the live shop publishes prices, and the case stays withheld", async () => {
+  assert.match(read("app/content.ts"), /export const SHOP_STATUS = "live"/);
+
+  // THE SELLING ROUTES are open now. The one thing that stays true
+  // either way is that the internal catalog field never ships.
+  for (const route of ["/shop", "/shop/matcha"]) {
     const body = await (await fetch(`${BASE_URL}${route}`)).text();
-    assert.deepEqual(body.match(/\d+[.,]\d{2}\s*(?:&#x20AC;|€|EUR|Euro)/g) || [], [],
-      `${route} leaks an amount`);
-    assert.ok(!body.includes("price_gross_cents"), `${route} ships a catalog price field`);
-    assert.ok(!/"@type"\s*:\s*"Offer"|"priceCurrency"|"availability"/.test(body), `${route} publishes offer data`);
+    assert.ok(!body.includes("price_gross_cents"),
+      `${route} ships a catalog price field`);
   }
+
+  // AND THE METAL CASE IS STILL WITHHELD - noindex, no amount, no
+  // Offer. Going live released the SHOP, not a product nobody has
+  // approved for sale.
   const metalCase = await fetch(`${BASE_URL}/shop/metal-case`);
   assert.equal(metalCase.status, 200);
-  assert.match(await metalCase.text(), /<meta name="robots" content="noindex/);
+  const caseBody = await metalCase.text();
+  assert.match(caseBody, /<meta name="robots" content="noindex/);
+  assert.deepEqual(caseBody.match(new RegExp("\\d+[.,]\\d{2}\\s*(?:&#x20AC;|€|EUR|Euro)", "g")) || [], [],
+    "the withheld case leaks an amount");
+  assert.ok(!/"@type"\s*:\s*"Offer"|"priceCurrency"/.test(caseBody),
+    "the withheld case publishes offer data");
 });

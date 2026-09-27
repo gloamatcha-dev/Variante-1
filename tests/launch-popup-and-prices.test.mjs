@@ -213,10 +213,16 @@ test("1h: closed, it renders NOTHING - the page underneath is untouched", async 
   }
   // It is the LAST child of the shell, after the footer, the mobile
   // dock and the cart - so mounting it cannot move anything above it.
-  assert.match(site, /<Footer\/><MobileDock [^/]*\/><CartDrawer open=\{cartOpen\} onClose=\{closeCart\}\/><LaunchPopup route=\{route\} menuOpen=\{menuOpen\} cartOpen=\{cartOpen\}\/><\/>/);
+  // Gated on SHOP_IS_PRELAUNCH: a launch sign-up popup has nothing to
+  // offer once the shop is open, and the gate sits on the mount rather
+  // than inside the component so a live page never loads it at all.
+  assert.match(site, /<Footer\/><MobileDock [^/]*\/><CartDrawer open=\{cartOpen\} onClose=\{closeCart\}\/>\{SHOP_IS_PRELAUNCH&&<LaunchPopup route=\{route\} menuOpen=\{menuOpen\} cartOpen=\{cartOpen\}\/>\}<\/>/);
   // The homepage still renders exactly the sections it did.
+  // The homepage renders exactly the LIVE sections: no countdown and no
+  // launch sign-up, because SHOP_STATUS is live. Both come straight back
+  // if the constant is deliberately set back to prelaunch in source.
   assert.deepEqual([...home.matchAll(/<section class="([a-z-]+)"/g)].map(m => m[1]),
-    ["hero", "countdown", "prelaunch", "daily", "glance", "community", "brand-note"]);
+    ["hero", "daily", "glance", "community", "brand-note"]);
 });
 
 test("1i: every rule is scoped to the popup, so no finished page moved", () => {
@@ -237,9 +243,19 @@ test("1i: every rule is scoped to the popup, so no finished page moved", () => {
    ══════════════════════════════════════════════════════════════ */
 
 test("2: the flag is DERIVED from SHOP_STATUS, not a second switch", () => {
-  assert.match(content, /export const PRICES_VISIBLE: boolean = SHOP_STATUS !== "prelaunch";/);
+  // DERIVED, still from SHOP_STATUS and from nothing else. The value is
+  // widened to a string once in app/content.ts because `as const`
+  // narrows the constant to one literal, which makes a direct
+  // comparison a type error the moment the shop is flipped live.
+  assert.match(content, /const SHOP_STATUS_VALUE: string = SHOP_STATUS;/);
+  assert.match(content,
+    /export const PRICES_VISIBLE: boolean = SHOP_STATUS_VALUE !== "prelaunch";/);
+  // And the prelaunch predicate is its exact complement, so a surface
+  // cannot show a price while still routing its button to /contact.
+  assert.match(content,
+    /export const SHOP_IS_PRELAUNCH: boolean = SHOP_STATUS_VALUE === "prelaunch";/);
   // Flipping SHOP_STATUS is the only edit needed to bring prices back.
-  assert.match(content, /export const SHOP_STATUS = "prelaunch" as const;/);
+  assert.match(content, /export const SHOP_STATUS = "live" as const;/);
   // No parallel launch flag was invented for this.
   for (const invented of ["PRICES_HIDDEN", "HIDE_PRICES", "SHOW_PRICES", "PRELAUNCH_MODE"]) {
     assert.ok(!content.includes(invented) && !site.includes(invented),

@@ -785,7 +785,7 @@ test("3F: the checkout is offered, and the flag stays the server's business", ()
   assert.match(read(".env.example"), /^B2C_SUBSCRIPTIONS_ENABLED=$/m);
   assert.ok(!subscriptionsSection.includes("B2C_SUBSCRIPTIONS_ENABLED"),
     "the UI decides availability for itself");
-  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "prelaunch" as const;'));
+  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "live" as const;'));
 });
 
 test("3F: no fake subscription is ever rendered", () => {

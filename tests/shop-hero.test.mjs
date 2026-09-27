@@ -132,10 +132,22 @@ test("4: the launch band reuses the existing countdown and sits under the hero",
   // Three now, not two: the loading/error/empty shell, the server-seeded
   // first render, and the full page. Still one band per state and still
   // never two in one - which is what the next assertion proves.
-  assert.equal([...shop.matchAll(/<ShopLaunchStrip\/>/g)].length, 3, "the band count changed");
-  // Every band is immediately preceded by a hero, with nothing
-  // between them.
-  for (const m of shop.matchAll(/<ShopLaunchStrip\/>/g)) {
+  // ── AND IT IS PRELAUNCH-ONLY NOW ─────────────────────────────
+  //
+  // The band IS the countdown, so it belongs to the prelaunch shop and
+  // not to the live one: SHOP_STATUS is live, and a live shop must not
+  // tell a customer it is coming. Each mount is therefore wrapped in
+  // the same SHOP_IS_PRELAUNCH gate, and the component is untouched -
+  // setting the constant back to prelaunch in source brings all three
+  // bands straight back.
+  const gated = [...shop.matchAll(/\{SHOP_IS_PRELAUNCH&&<ShopLaunchStrip\/>\}/g)];
+  assert.equal(gated.length, 3, "the band count changed");
+  assert.equal([...shop.matchAll(/<ShopLaunchStrip\/>/g)].length, 3,
+    "a band appeared outside the prelaunch gate");
+
+  // Every band is still immediately preceded by a hero, with nothing
+  // between them but its own gate.
+  for (const m of gated) {
     const before = shop.slice(0, m.index).trimEnd();
     assert.ok(before.endsWith("/>") && before.lastIndexOf("<ShopHero ") > before.lastIndexOf("</section>"),
       "a band is not directly under its hero");

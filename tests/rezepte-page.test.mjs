@@ -572,7 +572,7 @@ test("8: the flag exists, is off, and is the single switch", () => {
     assert.ok(!read(rel).includes("RECIPES_VISIBLE"), `${rel} gates on the launch flag`);
   }
   // SHOP_STATUS, the flag it sits beside, is untouched.
-  assert.match(content, /export const SHOP_STATUS = "prelaunch" as const;/);
+  assert.match(content, /export const SHOP_STATUS = "live" as const;/);
 });
 
 test("8b: Rezepte is in neither navigation, and the link array is intact", () => {

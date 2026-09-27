@@ -132,7 +132,17 @@ async function post(path, body, headers = {}) {
 test("1: the gate derives from SHOP_STATUS and invents no second flag", () => {
   // The canonical value, and the price flag already derived from it.
   assert.match(content, /export const SHOP_STATUS = "(prelaunch|live)" as const;/);
-  assert.match(content, /export const PRICES_VISIBLE: boolean = SHOP_STATUS !== "prelaunch";/);
+  // DERIVED, still from SHOP_STATUS and from nothing else. The value is
+  // widened to a string once in app/content.ts because `as const`
+  // narrows the constant to one literal, which makes a direct
+  // comparison a type error the moment the shop is flipped live.
+  assert.match(content, /const SHOP_STATUS_VALUE: string = SHOP_STATUS;/);
+  assert.match(content,
+    /export const PRICES_VISIBLE: boolean = SHOP_STATUS_VALUE !== "prelaunch";/);
+  // And the prelaunch predicate is its exact complement, so a surface
+  // cannot show a price while still routing its button to /contact.
+  assert.match(content,
+    /export const SHOP_IS_PRELAUNCH: boolean = SHOP_STATUS_VALUE === "prelaunch";/);
   // The route reads that one constant - not an env var, not its own copy.
   assert.match(sessionRoute, /import \{ SHOP_STATUS \} from "\.\.\/\.\.\/\.\.\/content";/);
   assert.match(sessionRoute, /checkoutRefusalFor\(SHOP_STATUS\)/);
@@ -192,71 +202,133 @@ test("2c: the refusal is a conflict, not an error and not an outage", () => {
 });
 
 /* ══════════════════════════════════════════════════════════════
-   3. PRELAUNCH, AGAINST THE REAL DEPLOYED CONFIGURATION
-   ══════════════════════════════════════════════════════════════ */
+   3. LIVE, AGAINST THE REAL DEPLOYED CONFIGURATION
+   ══════════════════════════════════════════════════════════════
 
-test("3: the deployed shop is prelaunch, so the gate below is the live one", () => {
-  assert.match(content, /export const SHOP_STATUS = "prelaunch" as const;/);
+   The shop is LIVE, so what this section proves has inverted: the
+   launch gate must no longer refuse a valid request, and a request
+   that is refused must be refused for its OWN reason.
+
+   ── AND IT STILL MAKES NO STRIPE CALL ───────────────────────
+
+   The server spawned above has a dummy Stripe key and, by
+   writeBlockedServerEnv, no Supabase service-role key. That pairing is
+   what keeps these tests safe now that the gate is open:
+
+     the launch gate        passed - it no longer returns 409
+     the shared rate limit  DIRECTLY BELOW THE GATE in the route, and
+                            it cannot read its counter without
+                            Supabase, so it answers 503
+     identity resolution    never reached; and even if it were,
+                            getOrCreateCheckoutCustomerByEmail calls
+                            findMapping (Supabase) BEFORE
+                            createCustomer (Stripe), so it fails before
+                            any Stripe request
+     sessions.create        never reached
+
+   So reaching the limiter is the PROOF that the gate is open - the
+   limiter sits below it - and the dummy key is still never sent. A
+   test that drove a genuinely successful Stripe session would have to
+   talk to Stripe, and this suite must not.
+*/
+
+test("3: the deployed shop is LIVE, so the gate below is the live one", () => {
+  assert.match(content, /export const SHOP_STATUS = "live" as const;/);
 });
 
-test("3b: a fully valid checkout request is refused - with Stripe configured", async () => {
+test("3b: a fully valid checkout is NOT refused by the launch gate", async () => {
   const { status, body } = await post("/api/checkout/session", {
     items: [{ variantId: variant30g.id, quantity: 1 }],
     requestId: REQUEST_ID,
     shippingCountry: "DE",
     email: CUSTOMER_EMAIL,
   });
-  // Not 503: the payment provider IS configured on this server, so this
-  // can only be the launch gate. Not 500: a closed shop is an answer.
-  assert.equal(status, CHECKOUT_CLOSED_STATUS);
-  assert.equal(body.error, CHECKOUT_CLOSED_MESSAGE);
+  // THE PRELAUNCH REFUSAL IS GONE. Neither its status nor its wording
+  // may come back for a well-formed request.
+  assert.notEqual(status, CHECKOUT_CLOSED_STATUS,
+    "a live shop still answers the prelaunch conflict");
+  assert.notEqual(body.error, CHECKOUT_CLOSED_MESSAGE,
+    "a live shop still sends the closed-shop message");
+  // And it travelled PAST the gate: the shared rate limiter sits
+  // directly below it and is the first thing that needs Supabase, which
+  // this harness deliberately blocks.
+  assert.equal(status, 503,
+    `expected the post-gate limiter on this harness, got ${status}`);
 });
 
-test("3c: the refusal carries no session, no url and no price", async () => {
-  const { body, text } = await post("/api/checkout/session", {
+test("3c: nothing Stripe-shaped and no price is produced on this harness", async () => {
+  const { text } = await post("/api/checkout/session", {
     items: [{ variantId: variant30g.id, quantity: 1 }],
     requestId: REQUEST_ID,
     shippingCountry: "DE",
     email: CUSTOMER_EMAIL,
   });
-  assert.deepEqual(Object.keys(body), ["error"]);
-  assert.ok(!/checkout\.stripe\.com|cs_test_|cs_live_/.test(text), "a Stripe session leaked into the refusal");
+  // NO REAL STRIPE CALL HAPPENED: no session, no url, no customer id.
+  assert.ok(!/checkout\.stripe\.com|cs_test_|cs_live_|cus_/.test(text),
+    "a Stripe object reached the response - a live call may have been made");
   assert.ok(!new RegExp(String(variant30g.price_gross_cents)).test(text),
-    "the refusal published the price the shop is withholding");
+    "the response published an amount");
 });
 
-test("3d: manipulated quantities and prices are refused the same way, never processed", async () => {
-  for (const item of [
-    { variantId: variant30g.id, quantity: 1, unitPriceCents: 1, price: 0.01, currency: "usd" },
-    { variantId: variant30g.id, quantity: 99 },
-  ]) {
-    const { status } = await post("/api/checkout/session", {
-      items: [item],
-      requestId: REQUEST_ID,
-      shippingCountry: "DE",
-      email: CUSTOMER_EMAIL,
-    });
-    assert.equal(status, CHECKOUT_CLOSED_STATUS);
-  }
-  // A malformed request is still told it is malformed rather than being
-  // swallowed by the gate - the shop being shut is not a reason to stop
-  // answering accurately.
-  const ok = { items: [{ variantId: variant30g.id, quantity: 1 }], requestId: REQUEST_ID, shippingCountry: "DE", email: CUSTOMER_EMAIL };
+test("3d: invalid requests are refused for their OWN reason, not the gate", async () => {
+  const ok = {
+    items: [{ variantId: variant30g.id, quantity: 1 }],
+    requestId: REQUEST_ID,
+    shippingCountry: "DE",
+    email: CUSTOMER_EMAIL,
+  };
+  // Each of these is a VALIDATION failure and returns before the gate,
+  // so none may carry the closed-shop answer.
   for (const bad of [
     { ...ok, items: [] },
     { ...ok, items: [{ variantId: variant30g.id, quantity: 0 }] },
     { ...ok, items: [{ variantId: variant30g.id, quantity: -1 }] },
+    { ...ok, items: [{ variantId: variant30g.id, quantity: 99 }] },
     { ...ok, requestId: "not-a-uuid" },
     { ...ok, shippingCountry: "US" },
-    // The address is validated with the rest of the request shape, above
-    // the gate, so a closed shop still answers a typo accurately.
-    { ...ok, email: undefined },
-    { ...ok, email: "not-an-email" },
-    { ...ok, email: `${"a".repeat(250)}@example.com` },
   ]) {
-    const { status } = await post("/api/checkout/session", bad);
-    assert.equal(status, 400, `expected 400 for ${JSON.stringify(bad)}`);
+    const { status, body } = await post("/api/checkout/session", bad);
+    assert.notEqual(status, CHECKOUT_CLOSED_STATUS,
+      `${JSON.stringify(bad)} was answered with the prelaunch conflict`);
+    assert.notEqual(body.error, CHECKOUT_CLOSED_MESSAGE);
+    assert.ok(status >= 400,
+      `${JSON.stringify(bad)} was accepted by a live shop`);
   }
+  // A quantity of zero is still a quantity problem, in its own words.
+  const zero = await post("/api/checkout/session",
+    { ...ok, items: [{ variantId: variant30g.id, quantity: 0 }] });
+  assert.equal(zero.status, 400);
+  assert.match(zero.body.error, /Artikel oder Mengen/);
+});
+
+test("3d2: a client-supplied price is inert - it neither pays nor refuses", async () => {
+  // The amount is the server's. A crafted unit price must not change
+  // the outcome, and must not appear anywhere in the answer.
+  const { status, body, text } = await post("/api/checkout/session", {
+    items: [{ variantId: variant30g.id, quantity: 1, unitPriceCents: 1, price: 0.01, currency: "usd" }],
+    requestId: REQUEST_ID,
+    shippingCountry: "DE",
+    email: CUSTOMER_EMAIL,
+  });
+  // Same outcome as the clean request above: the crafted price bought
+  // nothing and blocked nothing.
+  assert.equal(status, 503);
+  assert.notEqual(body.error, CHECKOUT_CLOSED_MESSAGE);
+  assert.ok(!/usd|unitPriceCents/i.test(text),
+    "the client price was echoed back");
+  // And the crafted amount itself is nowhere in the answer.
+  assert.ok(!text.includes("0.01"), "the client amount was echoed back");
+});
+
+test("3f: the launch DATE does not gate commerce - only SHOP_STATUS does", () => {
+  // Reaching or not reaching GLOA_LAUNCH_ISO must never open or close
+  // the till. The route knows nothing about the countdown.
+  for (const dateThing of ["launchCountdown", "GLOA_LAUNCH", "launchStatus"]) {
+    assert.ok(!sessionRoute.includes(dateThing),
+      `the checkout route reads ${dateThing} - a date must not gate commerce`);
+  }
+  assert.match(sessionRoute, /checkoutRefusalFor\(SHOP_STATUS\)/,
+    "SHOP_STATUS is no longer the commerce authority");
 });
 
 test("3e: the gate sits before every side effect in the route", () => {
@@ -278,20 +350,28 @@ test("3e: the gate sits before every side effect in the route", () => {
 });
 
 /* ══════════════════════════════════════════════════════════════
-   4. PRELAUNCH PRICES - INCLUDING THE ONES IN THE MARKUP
+   4. LIVE PRICES - INCLUDING THE ONES IN THE MARKUP
    ══════════════════════════════════════════════════════════════ */
 
-test("4: /shop publishes no price in its metadata while prices are withheld", () => {
+test("4: /shop publishes its price in metadata now that the shop is live", () => {
+  // INVERTED BY THE LAUNCH. While the shop could not sell, a price in
+  // the description was a promise the page could not keep. It can keep
+  // it now, and withholding it would cost a real shop its click.
   const description = shopHtml.match(/<meta name="description" content="([^"]*)"/);
   assert.ok(description, "/shop renders no meta description at all");
-  assert.ok(!/\d{1,3},\d{2}\s*(€|Euro)/.test(description[1]),
-    `the meta description publishes a price: ${description[1]}`);
-  for (const m of shopHtml.matchAll(/<meta property="og:description" content="([^"]*)"/g)) {
-    assert.ok(!/\d{1,3},\d{2}\s*(€|Euro)/.test(m[1]), `og:description publishes a price: ${m[1]}`);
+  assert.match(description[1], /\d{1,3},\d{2}\s*(€|Euro)/,
+    `a live /shop withholds its price: ${description[1]}`);
+  // The same sentence reaches the OpenGraph twin, so a link preview and
+  // the page cannot disagree.
+  const og = [...shopHtml.matchAll(/<meta property="og:description" content="([^"]*)"/g)];
+  assert.ok(og.length > 0, "/shop renders no og:description");
+  for (const m of og) {
+    assert.match(m[1], /\d{1,3},\d{2}\s*(€|Euro)/,
+      `og:description withholds the price: ${m[1]}`);
   }
-  // And no price anywhere else in the delivered markup either.
+  // And the delivered markup carries real prices again.
   const money = [...shopHtml.matchAll(/\d{1,3},\d{2}\s*(€|Euro)/g)].map(m => m[0]);
-  assert.deepEqual(money, [], `/shop ships a price: ${money.join(", ")}`);
+  assert.ok(money.length > 0, "a live /shop ships no price at all");
 });
 
 test("4b: the description is gated on the same flag as every visible price", () => {

@@ -383,7 +383,7 @@ test("6c: it is mobile-safe, and it is only in the one-time cart", () => {
   // ONE FIELD, IN ONE PLACE. Not in the subscription checkout, not in
   // the annual plan, not in the B2B enquiry.
   assert.equal((site.match(/id="cart-discount-code"/g) || []).length, 1);
-  assert.match(site, /\{SHOP_STATUS!=="prelaunch"&&<div className="cart-discount">/);
+  assert.match(site, /\{!SHOP_IS_PRELAUNCH&&<div className="cart-discount">/);
   for (const rel of ["app/AccountPortal.tsx", "app/BusinessCalculator.tsx"]) {
     assert.ok(!read(rel).includes("discount-code"), `${rel} grew a discount field`);
   }
@@ -443,7 +443,7 @@ test("7c: prices, shipping and the prelaunch gate are exactly as they were", () 
   assert.match(shipping, /eu: \{ shippingGrossCents: 1290, freeShippingThresholdGrossCents: 7900 \}/);
   assert.match(shipping, /nonEuCore: \{ shippingGrossCents: 1790, freeShippingThresholdGrossCents: null \}/);
   assert.match(shipping, /restOfEurope: \{ shippingGrossCents: 1990, freeShippingThresholdGrossCents: null \}/);
-  assert.match(read("app/content.ts"), /export const SHOP_STATUS = "prelaunch" as const;/);
+  assert.match(read("app/content.ts"), /export const SHOP_STATUS = "live" as const;/);
 
   // THE GATE STILL SITS BEFORE EVERY SIDE EFFECT, and the discount is
   // decided below it - so a request to a closed shop creates no

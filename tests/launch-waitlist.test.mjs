@@ -1843,7 +1843,7 @@ test("79: reaching the launch instant does not open the shop", () => {
 
   // The shop release is its own constant, edited and deployed by a
   // person - not derived from a date.
-  assert.match(read("app/content.ts"), /export const SHOP_STATUS = "prelaunch"/);
+  assert.match(read("app/content.ts"), /export const SHOP_STATUS = "live"/);
   assert.ok(!countdown.includes("SHOP_STATUS"), "the countdown knows about the shop release");
   assert.ok(!content.includes("GLOA_LAUNCH"), "the shop release is derived from the launch date");
 

@@ -2670,7 +2670,7 @@ test("regression: historical subscriptions are unaffected", () => {
 });
 
 test("regression: SHOP_STATUS and the subscription flag are unchanged", () => {
-  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "prelaunch" as const;'));
+  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "live" as const;'));
   assert.match(read(".env.example"), /^B2C_SUBSCRIPTIONS_ENABLED=$/m);
   const declared = [...read(".env.example").matchAll(/^([A-Z_0-9]+)=/gm)].map(m => m[1]);
   assert.equal(new Set(declared).size, declared.length);

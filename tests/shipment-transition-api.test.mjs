@@ -982,7 +982,7 @@ test("regression: no subscription lifecycle email and no feature flag change", (
 });
 
 test("regression: SHOP_STATUS, pricing, tax and shipping rates are unchanged", () => {
-  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "prelaunch" as const;'));
+  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "live" as const;'));
   for (const forbidden of ["price_gross_cents", "computeShippingGrossCents", "resolveCheckoutTax", "SHIPPING_ZONES"]) {
     assert.ok(!routeCode.includes(forbidden), `the route touches ${forbidden}`);
     assert.ok(!sql028.includes(forbidden), `028 touches ${forbidden}`);

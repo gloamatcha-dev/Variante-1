@@ -116,10 +116,19 @@ test("1: the seed reaches the payload with its labels and without its prices", a
   assert.ok(body.includes("GLOA Matcha"), "the payload does not carry the product name");
 
   // And it crossed without money, in every spelling it could arrive as.
-  for (const forbidden of ["price_gross_cents", "priceCurrency", "unitPriceCents", "\"currency\""]) {
-    assert.ok(!body.includes(forbidden), `the payload carries ${forbidden}`);
+  // And the SEED crossed without money. The scan runs OUTSIDE the
+  // JSON-LD blocks on purpose: now that the shop is live the product
+  // page legitimately publishes priceCurrency in its structured data
+  // (tests/seo-discovery.test.mjs 6b asserts that directly), and that
+  // is a different thing from the hydration seed carrying a price.
+  //
+  // The property this protects is unchanged: toSeedProduct ships
+  // labels, not amounts, and test 1b proves it does so with a field
+  // allowlist rather than by deleting what it remembers.
+  const seedArea = body.replace(new RegExp("<script type=\"application\\/ld\\+json\">[\\s\\S]*?<\\/script>", "g"), "");
+  for (const forbidden of ["price_gross_cents", "unitPriceCents"]) {
+    assert.ok(!seedArea.includes(forbidden), `the payload carries ${forbidden}`);
   }
-  assert.deepEqual(body.match(/\d+[.,]\d{2}\s*(?:&#x20AC;|€|EUR|Euro)/g) || [], []);
 });
 
 test("1b: the stripping is a field list, not a delete-what-we-remember", () => {
@@ -222,25 +231,38 @@ test("3c: the link survives hydration, because the live band carries it too", ()
 });
 
 /* ══════════════════════════════════════════════════════════════
-   4. PRELAUNCH IS NOT WEAKENED BY ANY OF THIS
+   4. THE LIVE SHOP SELLS, AND ONLY THE WITHHELD STAYS WITHHELD
    ══════════════════════════════════════════════════════════════ */
 
-test("4: no price, no offer, no purchase reaches the source", async () => {
-  assert.match(content, /export const SHOP_STATUS = "prelaunch"/);
-  for (const route of ["/shop", "/shop/matcha", "/shop/metal-case", "/shop/gloa-matcha"]) {
+test("4: the live shop publishes prices; a withheld product still does not", async () => {
+  assert.match(content, /export const SHOP_STATUS = "live"/);
+
+  // THE SELLING ROUTES may publish an amount, an Offer and a buy
+  // button - the shop is open and all three are now true.
+  for (const route of ["/shop", "/shop/matcha", "/shop/gloa-matcha"]) {
     const { body } = await load(route);
-    // An amount in euros, in any spelling the page could produce.
-    const amounts = body.match(/\d+[.,]\d{2}\s*(?:&#x20AC;|€|EUR|Euro)/g) || [];
-    assert.deepEqual(amounts, [], `${route} leaks an amount`);
-    // The catalog's own field name, which is what a serialised price
-    // would arrive as.
-    assert.ok(!body.includes("price_gross_cents"), `${route} ships a catalog price field`);
-    // No Product/Offer structured data while the shop is closed.
-    assert.ok(!/"@type"\s*:\s*"Offer"/.test(body), `${route} publishes an Offer`);
-    assert.ok(!/"priceCurrency"|"availability"/.test(body), `${route} publishes offer data`);
-    // And no purchase control in the server-rendered markup.
-    assert.ok(!/In den Warenkorb/.test(body), `${route} ships a buy button`);
+    // The CATALOG FIELD NAME is still never shipped. That was never
+    // about price visibility - it is the internal row shape, and a
+    // live shop has no more reason to serialise it than a closed one.
+    assert.ok(!body.includes("price_gross_cents"),
+      `${route} ships a catalog price field`);
   }
+
+  // /shop is where the formatted amount is rendered.
+  const shop = await load("/shop");
+  const shopMoney = shop.body.match(new RegExp("\\d+[.,]\\d{2}\\s*(?:&#x20AC;|€|EUR|Euro)", "g")) || [];
+  assert.ok(shopMoney.length > 0, "a live /shop ships no amount");
+
+  // THE WITHHELD PRODUCT STAYS WITHHELD. This has nothing to do with
+  // the launch: metal-case is not for sale, and going live must not
+  // have quietly put it on the shelf.
+  const withheld = await load("/shop/metal-case");
+  assert.deepEqual(withheld.body.match(new RegExp("\\d+[.,]\\d{2}\\s*(?:&#x20AC;|€|EUR|Euro)", "g")) || [], [],
+    "the withheld product now ships an amount");
+  assert.ok(!/"@type"\s*:\s*"Offer"/.test(withheld.body),
+    "the withheld product now publishes an Offer");
+  assert.ok(!/In den Warenkorb/.test(withheld.body),
+    "the withheld product now ships a buy button");
 });
 
 test("4b: the seeded page renders no purchase column at all", () => {

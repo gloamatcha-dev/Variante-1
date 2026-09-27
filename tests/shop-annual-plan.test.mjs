@@ -315,7 +315,7 @@ test("5: the annual CTA never adds to the cart and never posts a checkout", () =
   */
   assert.ok(site.includes('annualActive?()=>{track("shop_annual_start");window.location.href=annualPortalHref(v.sku)}'),
     "the annual CTA changed its action");
-  assert.ok(site.includes('onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":annualActive?'),
+  assert.ok(site.includes('onClick={SHOP_IS_PRELAUNCH?()=>window.location.href="/contact":annualActive?'),
     "prelaunch no longer takes precedence over every mode");
   assert.ok(!annualOnly.includes("addItem"), "an annual component reaches the cart");
   assert.ok(!site.includes('purchaseType:"annual"'), "an annual plan was given a cart purchase type");

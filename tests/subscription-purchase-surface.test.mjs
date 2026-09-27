@@ -251,7 +251,7 @@ test("3d: the shop CTA hands over to the account and never posts a checkout", ()
   assert.ok(!shopSubscriptionCode.includes("addItem"), "a subscription reaches the cart");
   assert.ok(!site.includes('purchaseType:"subscription"'), "a subscription was given a cart purchase type");
   // Prelaunch still wins over every mode, like every other shop CTA.
-  assert.ok(site.includes('onClick={SHOP_STATUS==="prelaunch"?()=>window.location.href="/contact":annualActive?'),
+  assert.ok(site.includes('onClick={SHOP_IS_PRELAUNCH?()=>window.location.href="/contact":annualActive?'),
     "prelaunch no longer takes precedence");
 });
 

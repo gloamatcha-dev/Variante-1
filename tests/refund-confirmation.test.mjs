@@ -1201,7 +1201,7 @@ test("regression: the account UI is untouched and still renders refunds truthful
 });
 
 test("regression: SHOP_STATUS, the subscription flag, pricing and tax are unchanged", () => {
-  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "prelaunch" as const;'));
+  assert.ok(read("app/content.ts").includes('export const SHOP_STATUS = "live" as const;'));
   assert.match(read(".env.example"), /^B2C_SUBSCRIPTIONS_ENABLED=$/m);
   for (const source of [senderCode, templateCode, rulesCode, sql033]) {
     for (const forbidden of [

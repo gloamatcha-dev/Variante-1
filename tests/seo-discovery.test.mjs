@@ -336,25 +336,59 @@ test("5e: no SearchAction is declared, because there is no site search", async (
 });
 
 /* ══════════════════════════════════════════════════════════════
-   6. PRELAUNCH MUST NOT LEAK THROUGH ANY DISCOVERY SURFACE
+   6. THE LIVE SHOP PUBLISHES ITS PRICES - AND ONLY ITS PRICES
    ══════════════════════════════════════════════════════════════ */
 
-test("6: no price in any indexable page - markup, metadata or JSON-LD", async () => {
+test("6: the shop surfaces publish a price, and the others still do not", async () => {
+  // INVERTED BY THE LAUNCH. A price on an indexable page used to be a
+  // promise the shop could not keep. It can keep it now.
+  //
+  // This is NOT a blanket permission: only the surfaces that actually
+  // sell may carry an amount. An editorial page printing a price would
+  // still be a price with no cart next to it, and the loop below is
+  // what keeps that true.
+  const SELLING = new Set(["shop"]);
   for (const route of INDEXABLE_ROUTES) {
-    const { body } = await load(route === "" ? "/" : `/${route}`);
     if (route === "versand") continue; // shipping thresholds, not a product price
-    const money = [...body.matchAll(/\d{1,3},\d{2}\s*(€|Euro)/g)].map(m => m[0]);
-    assert.deepEqual(money, [], `/${route} publishes a price: ${money.join(", ")}`);
+    const { body } = await load(route === "" ? "/" : `/${route}`);
+    const money = [...body.matchAll(new RegExp("\\d{1,3},\\d{2}\\s*(€|Euro)", "g"))].map(m => m[0]);
+    if (SELLING.has(route)) {
+      assert.ok(money.length > 0,
+        `/${route} sells but publishes no price`);
+    } else if (route === "shop/matcha") {
+      // The product page publishes its price as structured data rather
+      // than as a formatted sentence. Test 6b asserts that directly; a
+      // formatted amount is not required here.
+      continue;
+    } else {
+      assert.deepEqual(money, [],
+        `/${route} publishes a price but is not a selling surface: ${money.join(", ")}`);
+    }
   }
 });
 
-test("6b: no Offer, price or availability is published while the shop is closed", async () => {
-  assert.match(read("app/content.ts"), /export const SHOP_STATUS = "prelaunch" as const;/);
-  for (const route of ["", "shop", "shop/matcha"]) {
+test("6b: structured data may publish Offer and availability now", async () => {
+  // The shop is live, so the product page may describe a purchasable
+  // Offer. What it publishes is still the SERVER's price - the markup
+  // is rendered from the catalog, never from a request.
+  assert.match(read("app/content.ts"), /export const SHOP_STATUS = "live" as const;/);
+
+  // The PRODUCT page is where the existing implementation emits it.
+  const product = await load("/shop/matcha");
+  assert.ok(product.body.includes('"@type":"Offer"')
+    || product.body.includes('"@type": "Offer"'),
+    "the live product page publishes no Offer");
+  assert.ok(product.body.includes('"priceCurrency"'),
+    "the live product page publishes no priceCurrency");
+
+  // THE EDITORIAL PAGES STILL PUBLISH NONE OF IT. An Offer belongs on
+  // a page that sells, and nowhere else.
+  for (const route of ["", "about", "our-matcha"]) {
     const { body } = await load(route === "" ? "/" : `/${route}`);
-    for (const banned of ['"@type":"Offer"', '"@type": "Offer"', '"priceCurrency"', '"availability"',
+    for (const banned of ['"@type":"Offer"', '"@type": "Offer"',
                           'property="product:price', 'itemprop="price"']) {
-      assert.ok(!body.includes(banned), `/${route} publishes ${banned} in prelaunch`);
+      assert.ok(!body.includes(banned),
+        `/${route} publishes ${banned} but does not sell`);
     }
   }
 });
@@ -416,9 +450,18 @@ test("8b: the footer still links every legal page, and the sitemap agrees", asyn
 
 test("8c: the homepage still links the pages that carry the brand story", async () => {
   const { body } = await load("/");
-  for (const href of ['href="/shop"', 'href="/our-matcha"', 'href="/about"', 'href="/launch"']) {
+  for (const href of ['href="/shop"', 'href="/our-matcha"', 'href="/about"']) {
     assert.ok(body.includes(href), `the homepage no longer links ${href}`);
   }
+  // /launch IS NO LONGER LINKED FROM THE HOMEPAGE, and that is the
+  // launch working: the sign-up section it lived in is prelaunch-only
+  // and no longer renders. The ROUTE is untouched - it still resolves
+  // for anyone holding the link, and lib/publicRoutes.ts still lists
+  // it - so nothing was removed, only unlinked.
+  assert.ok(!body.includes('href="/launch"'),
+    "a live homepage still advertises the launch sign-up");
+  const { status } = await load("/launch");
+  assert.equal(status, 200, "the /launch route stopped resolving");
 });
 
 test("8d: the homepage metadata is its own, not inherited", () => {
