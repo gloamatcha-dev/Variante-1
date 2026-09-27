@@ -1076,8 +1076,26 @@ test("session: mode is subscription and both lines are recurring Prices", () => 
 });
 
 test("session: the return URLs go to the account area and promise nothing", () => {
-  assert.match(flowCode, /success_url: `\$\{origin\}\/account\/subscriptions\?subscription=processing`/);
+  /*
+    THE SUCCESS URL NAMES THE SUBSCRIPTION IT JUST CREATED.
+
+    It did not, and that was half of a real bug: with no id the account
+    page could not tell a brand new subscription from one the customer
+    already had, so the "processing" banner had nothing to resolve against
+    and stayed up over a subscription that was already active.
+
+    It is a SELECTOR and not a grant - RLS decides what the page may read,
+    so a stranger's id resolves to "not among mine", which resolves to
+    pending. The parameter names are owned by
+    lib/subscriptionCheckoutReturn.ts and the resolution is proved in
+    tests/subscription-post-payment.test.mjs.
+  */
+  assert.match(flowCode,
+    /success_url: `\$\{origin\}\/account\/subscriptions\?subscription=processing&subscriptionId=\$\{encodeURIComponent\(subscriptionId\)\}`/);
   assert.match(flowCode, /cancel_url: `\$\{origin\}\/account\/subscriptions\?subscription=cancelled`/);
+  // The id is the LOCAL subscription id this flow claimed before Stripe
+  // existed, never a Stripe object and never something the browser sent.
+  assert.match(flowCode, /const subscriptionId = claimed\.subscriptionId;/);
   // The origin is the configured one, never a request header.
   assert.match(deps, /getOrigin: getSiteOrigin/);
   assert.ok(!/x-forwarded-host|request\.headers\.get\("host"\)|"origin"\)/i.test(flowCode + deps));

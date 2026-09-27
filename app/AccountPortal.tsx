@@ -8,6 +8,7 @@ import { supabase } from "../lib/supabase";
 import { PASSWORD_RESET_PATH, browserAuthRedirectUrl } from "../lib/authRedirect";
 import { useCatalog } from "./useCatalog";
 import {
+  AccountChevron,
   AccountEmptyState,
   AccountIcon,
   AccountQuickLinks,
@@ -68,6 +69,22 @@ import {
   readAccountReturnPath,
   withAccountReturn,
 } from "../lib/authReturnTarget";
+// WHAT A RETURN FROM THE SUBSCRIPTION CHECKOUT MEANS, decided from the
+// customer's own rows rather than from the URL that brought them here.
+// Also owns the two parameter names and the URL cleanup, so the writer in
+// lib/subscriptionCheckout.ts and this reader cannot drift apart.
+import {
+  SUBSCRIPTION_RETURN_ID_PARAM,
+  SUBSCRIPTION_RETURN_PARAM,
+  parseSubscriptionReturnMode,
+  resolveSubscriptionReturnState,
+  subscriptionReturnCleanUrl,
+  subscriptionReturnIsSettled,
+  subscriptionReturnUrlNeedsCleanup,
+  type SubscriptionReturnMode,
+  type SubscriptionReturnRow,
+  type SubscriptionReturnState,
+} from "../lib/subscriptionCheckoutReturn";
 import type { AddressSnapshot } from "../lib/orderAddressSnapshot";
 import { getCountryLabel, normalizeCountryCode, SHIPPING_COUNTRY_OPTIONS } from "../lib/shipping";
 import {
@@ -1948,24 +1965,49 @@ function CheckoutReturnBanner() {
   /*
     THE PARAMETERS ARE READ ONCE, IN A BROWSER.
 
-    Both return URLs are the routes' own and unchanged:
-      subscriptions  /account/subscriptions?subscription=processing|cancelled
+    Both return URLs are the routes' own:
+      subscriptions  /account/subscriptions?subscription=processing
+                     &subscriptionId=…  |  ?subscription=cancelled
       annual         /account?annual=…&annualPlanId=…  →  the account
                      landing forwards the query to /account/dashboard
     So this banner is mounted in the portal shell and appears on
     whichever page the customer actually lands on.
+
+    BOTH NOW CARRY AN ID, and for the same reason: a mode on its own says
+    the customer came back from a payment, and says nothing about whether
+    it worked. The id names the row to ask. Neither is a grant - RLS
+    decides what may be read - and neither is believed: the state below is
+    resolved from the row, never from the parameter.
   */
-  const [params] = useState<{ subscription: string | null; annual: string | null; annualPlanId: string | null }>(() => {
-    if (typeof window === "undefined") return { subscription: null, annual: null, annualPlanId: null };
+  const [params] = useState<{
+    subscription: SubscriptionReturnMode | null;
+    subscriptionId: string | null;
+    annual: string | null;
+    annualPlanId: string | null;
+  }>(() => {
+    if (typeof window === "undefined") {
+      return { subscription: null, subscriptionId: null, annual: null, annualPlanId: null };
+    }
     const p = new URLSearchParams(window.location.search);
     return {
-      subscription: p.get("subscription"),
+      // Narrowed here rather than compared as a raw string further down, so
+      // a hand-typed `?subscription=aktiv` cannot summon a banner.
+      subscription: parseSubscriptionReturnMode(p.get(SUBSCRIPTION_RETURN_PARAM)),
+      subscriptionId: p.get(SUBSCRIPTION_RETURN_ID_PARAM),
       annual: p.get("annual"),
       annualPlanId: p.get(ANNUAL_CHECKOUT_RETURN_PARAM),
     };
   });
 
   const [annualState, setAnnualState] = useState<AnnualCheckoutReturnState | null>(null);
+  /*
+    THE REAL STATE OF THE SUBSCRIPTION THIS RETURN IS ABOUT.
+
+    Null while the one read below is in flight, which is what keeps the
+    processing banner up for the moment before the rows arrive rather than
+    flashing it away and back.
+  */
+  const [subscriptionState, setSubscriptionState] = useState<SubscriptionReturnState | null>(null);
 
   useEffect(() => {
     if (!supabase || !params.annual || !params.annualPlanId) return;
@@ -1990,21 +2032,101 @@ function CheckoutReturnBanner() {
     return () => { stale = true; };
   }, [params.annual, params.annualPlanId]);
 
-  const subscriptionState: "processing" | "cancelled" | null =
-    params.subscription === "processing" ? "processing"
-      : params.subscription === "cancelled" ? "cancelled"
-        : null;
+  /*
+    ONE READ OF THE CUSTOMER'S OWN SUBSCRIPTIONS, AND THE LEAF DECIDES.
 
-  if (!annualState && !subscriptionState) return null;
+    The mirror image of the annual branch above, and for the same reason:
+    a return URL is a fact about how the customer ARRIVED, never a fact
+    about what they now own. Only the database can answer the second
+    question, so it is asked once - no interval, no timeout, no retry loop
+    and nothing asked of Stripe.
+
+    Gated on the mode parameter, so the banner is inert on every page the
+    customer simply navigated to. Scoped to the six columns
+    resolveSubscriptionReturnState is allowed to see; RLS restricts the
+    rows to the caller's own, which is what makes the id in the URL a
+    selector rather than an authority. A failed read passes an empty list,
+    which resolves to "pending" - the banner stays rather than inventing
+    an outcome.
+  */
+  useEffect(() => {
+    if (!supabase || !params.subscription) return;
+    let stale = false;
+    (async () => {
+      const read = await supabase
+        .from("subscriptions")
+        .select("id, status, current_period_end, next_delivery_at, cancellation_requested_at, cancellation_effective_at, cancelled_at");
+      if (stale) return;
+      setSubscriptionState(resolveSubscriptionReturnState({
+        targetSubscriptionId: params.subscriptionId,
+        subscriptions: read.error ? [] : (read.data ?? []) as unknown as SubscriptionReturnRow[],
+      }));
+    })();
+    return () => { stale = true; };
+  }, [params.subscription, params.subscriptionId]);
+
+  /*
+    THE STALE PARAMETERS LEAVE THE URL ONCE THEY MEAN NOTHING.
+
+    replaceState, not pushState: the entry is CORRECTED rather than a new
+    one added, so a refresh and a Back press both land on the cleaned URL
+    instead of resurrecting a banner the database has already contradicted.
+
+    Only after the state is settled, and only while the customer is still
+    looking at a URL that carries them - a page with nothing to strip does
+    not rewrite its own history entry. Everything that is not a return
+    parameter is copied through byte-for-byte by
+    stripSubscriptionReturnParams.
+
+    Deliberately NOT a navigation. Nothing is reloaded, no checkout is
+    re-entered and no component is remounted; the subscription list on the
+    page below is untouched.
+  */
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.history?.replaceState) return;
+    if (!subscriptionState || !subscriptionReturnIsSettled(subscriptionState)) return;
+    if (!subscriptionReturnUrlNeedsCleanup(window.location.search)) return;
+    window.history.replaceState(window.history.state, "", subscriptionReturnCleanUrl(window.location));
+  }, [subscriptionState]);
+
+  if (!annualState && !params.subscription) return null;
+
+  /*
+    THE PROCESSING BANNER IS NOW CONDITIONAL ON THE DATABASE.
+
+    `params.subscription === "processing"` says the customer came back from
+    a payment page. subscriptionState says what actually happened. Both
+    have to agree before the banner claims anything is in flight:
+
+      pending      still being set up, or not readable yet -> the banner,
+                   unchanged, including its "lade die Seite neu" hint.
+      confirmed    the list below already shows the real subscription with
+                   its status and its next delivery, so the banner has
+                   nothing left to add and gets out of the way. Showing
+                   both was the bug.
+      attention    the payment has not gone through. NO success wording and
+                   no processing wording either: the card carries "Zahlung
+                   ausstehend" and its own explanation, which is the
+                   failure handling that already existed.
+      ended        nothing is in flight.
+
+    Null - the read is still in flight - counts as pending, so the banner
+    does not flash away and back on a slow connection.
+
+    `cancelled` is untouched. It means the customer aborted at Stripe, no
+    row was ever paid, and there is nothing in the database to resolve it
+    against.
+  */
+  const subscriptionSettled = subscriptionState !== null && subscriptionReturnIsSettled(subscriptionState);
 
   const copy: { tone: string; title: string; body: string } | null =
-    subscriptionState === "processing"
+    params.subscription === "processing" && !subscriptionSettled
       ? {
         tone: "processing",
         title: "Deine Zahlung wird verarbeitet.",
         body: "Dein Abo erscheint hier, sobald Stripe die Zahlung bestätigt hat. Das dauert meist nur einen Moment – lade die Seite dann einfach neu.",
       }
-      : subscriptionState === "cancelled"
+      : params.subscription === "cancelled"
         ? {
           tone: "cancelled",
           title: "Du hast die Zahlung abgebrochen.",
@@ -2123,6 +2245,33 @@ function PortalSubscriptions() {
                   )}
                   <div><dt>Pro Lieferung</dt><dd>{fmtCents(s.total_gross_cents)} €</dd></div>
                 </dl>
+                {/*
+                  THE AFFORDANCE THIS CARD NEVER HAD.
+
+                  The whole row has been a link to the detail page - where
+                  the cancellation screen lives - since it shipped, and it
+                  said so nowhere: no label, no chevron, nothing but a
+                  hover tint a touch device never shows. A customer looking
+                  for "how do I cancel" saw four lines of plain text and
+                  concluded, correctly as far as the page was concerned,
+                  that there was no way.
+
+                  So the card ends in the portal's own navigable-row
+                  language: the quiet uppercase action and the same chevron
+                  AccountSummaryRow and every quick link use. A SPAN and
+                  not a nested link or button - the row is already the
+                  link, and a control inside it would be a second target
+                  for the same destination.
+
+                  KÜNDIGEN is deliberately not the word here. The list is
+                  not the place a contract ends; it is the way in to the
+                  page that can, which also shows the dates, the items and
+                  the addresses. "VERWALTEN" is the honest promise.
+                */}
+                <span className="sub-card-manage">
+                  <span className="portal-action">ABO VERWALTEN</span>
+                  <AccountChevron />
+                </span>
               </a>
             );
           })}

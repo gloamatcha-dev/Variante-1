@@ -40,6 +40,21 @@ export function AccountIcon({ name }: { name: AccountIconName }) {
   );
 }
 
+/**
+ * The same chevron every navigable row in the account ends with.
+ *
+ * EXPORTED because the subscription list needs it: a `sub-card` is a whole
+ * clickable row built by hand rather than through AccountSummaryRow, and
+ * it shipped with no affordance at all - the customer had no way to tell
+ * that the card was a link, which is how "there is no way to cancel" came
+ * to be a true statement about a page that had a cancellation screen one
+ * click away. It stays here rather than being redrawn there, so every
+ * chevron on the portal is the same 16px path on the same 24 grid.
+ */
+export function AccountChevron() {
+  return <Chevron />;
+}
+
 function Chevron() {
   return (
     <svg className="portal-chevron" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">

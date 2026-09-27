@@ -635,6 +635,14 @@ a.portal-summary-row:hover{color:var(--blue)}
 .sub-card-status{font:600 12px/1 var(--font-mono);letter-spacing:.1em;text-transform:uppercase;opacity:.7;white-space:nowrap}
 .sub-card-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px 24px;margin:14px 0 0}
 .sub-card-facts>div{min-width:0}
+/* THE MANAGE AFFORDANCE, closing the card. The row IS the link, so this is
+   type and a chevron rather than a control: the .portal-action inside it
+   carries the portal's own action type, and the chevron inherits
+   .portal-chevron. Hover lifts both to GLOA blue together, which is the
+   same response every other navigable row in the account gives. */
+.sub-card-manage{display:flex;align-items:center;gap:6px;margin:14px 0 0;transition:color .2s}
+.sub-card:hover .sub-card-manage{color:var(--blue)}
+.sub-card:hover .sub-card-manage .portal-chevron{opacity:.8}
 .sub-card-facts dt{font:12px/1.4 var(--font-mono);opacity:.5}
 .sub-card-facts dd{margin:2px 0 0;font:14px/1.4 var(--font-mono);overflow-wrap:anywhere}
 

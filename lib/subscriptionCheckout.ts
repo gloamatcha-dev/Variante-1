@@ -499,11 +499,27 @@ export async function handleSubscriptionCheckout(
           checkout_attempt_id: attempt.id,
           gloa_subscription_id: subscriptionId,
         },
-        // Back to the account area, where every state shown comes from
-        // the database. A return from Stripe is not payment proof and
-        // this URL grants nothing: "processing" is the honest word until
-        // a webhook says otherwise.
-        success_url: `${origin}/account/subscriptions?subscription=processing`,
+        /*
+          Back to the account area, where every state shown comes from
+          the database. A return from Stripe is not payment proof and
+          this URL grants nothing: "processing" is the honest word until
+          a webhook says otherwise.
+
+          THE SUBSCRIPTION ID TRAVELS WITH IT, and it is a SELECTOR, not
+          a grant. Without it the account page could not tell this brand
+          new subscription from one the customer already had, so the
+          "processing" banner had nothing to resolve against and stayed up
+          over a subscription that was already active - the bug fixed in
+          lib/subscriptionCheckoutReturn.ts. RLS decides what the page may
+          read, so an id in a URL buys nothing: a stranger's id resolves
+          to "not among mine", which resolves to pending.
+
+          It is the same shape the prepaid annual plan has always used
+          (/account?annual=…&annualPlanId=…), and the parameter names are
+          owned by one module each so the writer here and the reader there
+          cannot drift.
+        */
+        success_url: `${origin}/account/subscriptions?subscription=processing&subscriptionId=${encodeURIComponent(subscriptionId)}`,
         cancel_url: `${origin}/account/subscriptions?subscription=cancelled`,
       },
       { idempotencyKey: subscriptionCheckoutIdempotencyKey(attempt.id) }

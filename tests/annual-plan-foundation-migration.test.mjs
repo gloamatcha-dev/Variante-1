@@ -1464,6 +1464,22 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // homepage actions. app/analytics.ts dispatches a browser CustomEvent
     // and nothing else - no network, no storage, no personal data.
     "app/analytics.ts",
+    // POST-PAYMENT MANAGEMENT: a PRESENTATION-ONLY export.
+    //
+    // app/AccountUI.tsx is the account's shared design system - icons, an
+    // eyebrow, an empty state, a chevron - with no data fetching, no auth,
+    // no Supabase and no business rule in it. The edit exports the chevron
+    // the file already drew, so the subscription list can end its cards in
+    // the SAME affordance AccountSummaryRow and every quick link use
+    // instead of redrawing one.
+    //
+    // That card was a link to the subscription detail page - where the
+    // cancellation screen already lived - and said so nowhere, which made
+    // "there is no way to cancel" a true statement about a page that had a
+    // working cancellation one click away. Nothing about the icon set, the
+    // rows or the quick links changes; tests/subscription-post-payment
+    // .test.mjs asserts the export and its single new consumer.
+    "app/AccountUI.tsx",
     // B2B ORDERING MODELS: presentation only. The file also owns the B2B
     // lead form, so it is listed here rather than waved through - which is
     // exactly what this guard is for. The edit replaces the markup of ONE
