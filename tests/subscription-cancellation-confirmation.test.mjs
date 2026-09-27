@@ -10,7 +10,10 @@ import {
   canonicalEventInstant,
   cancellationConfirmationEventKey,
   evaluateCancellationConfirmationPreflight,
+  firstNameFromCustomerSnapshot,
   recipientFromCustomerSnapshot,
+  subscriptionCadenceWeeksFromPlanSnapshot,
+  subscriptionProductLabelFromPlanSnapshot,
 } from "../lib/subscriptionEmailDeliveryRules.ts";
 import {
   buildCancellationConfirmationEmail,
@@ -75,12 +78,25 @@ const REQUESTED_B = "2026-11-20T11:02:03.000Z";
 
 const KEY_A = `${REQUESTED_A}|${EFFECTIVE_A}`;
 
+/** The plan frozen at purchase, as create_pending_subscription wrote it. */
+const PLAN_SNAPSHOT = Object.freeze({
+  planId: "11111111-2222-3333-4444-555555555555",
+  slug: "matcha-30g-abo",
+  name: "GLOA Matcha 30 g Abo",
+  sku: "GLOA-MATCHA-30G",
+  billingIntervalUnit: "week",
+  billingIntervalCount: 4,
+  deliveryIntervalUnit: "week",
+  deliveryIntervalCount: 4,
+});
+
 /** A subscription with a live, current cancellation. */
 const subscription = (overrides = {}) => ({
   id: SUBSCRIPTION_ID,
   customer_type: "private",
   status: "active",
   customer_snapshot: { email: "kundin@example.com", name: "Mia" },
+  plan_snapshot: { ...PLAN_SNAPSHOT },
   cancellation_requested_at: REQUESTED_A,
   cancellation_effective_at: EFFECTIVE_A,
   ...overrides,
@@ -105,18 +121,27 @@ const built = (facts = {}) =>
     cancellation: {
       requestedAtIso: REQUESTED_A,
       effectiveAtIso: EFFECTIVE_A,
+      // Exactly what the preflight derives from the two frozen snapshots
+      // above, so the copy tests read the message a real cancellation of a
+      // real launch subscription produces.
+      firstName: "Mia",
+      packageName: "GLOA Matcha 30 g",
+      cadenceWeeks: 4,
       accountSubscriptionsUrl: "https://gloamatcha.com/account/subscriptions",
       ...facts,
     },
   });
 
-/** One top-level `export async function NAME` body from the service. */
-const serviceFn = name => {
-  const at = serviceCode.indexOf(`export async function ${name}(`);
+/** One top-level `export async function NAME` body from a module. */
+const topLevelFn = (source, name) => {
+  const at = source.indexOf(`export async function ${name}(`);
   assert.notEqual(at, -1, `${name} disappeared`);
-  const next = serviceCode.indexOf(`${NEWLINE}export `, at + 1);
-  return serviceCode.slice(at, next === -1 ? serviceCode.length : next);
+  const next = source.indexOf(`${NEWLINE}export `, at + 1);
+  return source.slice(at, next === -1 ? source.length : next);
 };
+
+const serviceFn = name => topLevelFn(serviceCode, name);
+const senderFn = name => topLevelFn(senderCode, name);
 
 /* ══════════════════════════════════════════════════════════════
    1-2. WHO MAY PRODUCE THIS MESSAGE
@@ -295,6 +320,91 @@ test("8: a duplicate POST does not duplicate the provider send", () => {
   assert.ok(!senderCode.includes('"already-sent"'));
 });
 
+test("8b: two identical cancellation requests yield one end date and one email", () => {
+  // THE WHOLE DOUBLE-POST SCENARIO, WALKED STEP BY STEP.
+  //
+  // Request one. 034 writes the pair and answers 'scheduled'; the sender
+  // re-reads the row and derives the event from what landed.
+  const afterFirst = subscription();
+  const first = evaluateCancellationConfirmationPreflight({
+    subscription: afterFirst,
+    expectedEventKey: null,
+  });
+  assert.equal(first.kind, "send");
+  const claimedKey = first.eventKey;
+
+  // Request two, byte-identical. 034 answers 'already_scheduled' AND
+  // WRITES NOTHING - which is why the row the sender re-reads the second
+  // time is the same row, not a refreshed one.
+  assert.ok(sql034.includes("'result', 'already_scheduled'"));
+  const afterSecond = subscription();
+  assert.deepEqual(afterSecond, afterFirst, "an idempotent repeat must not move the pair");
+  const second = evaluateCancellationConfirmationPreflight({
+    subscription: afterSecond,
+    expectedEventKey: null,
+  });
+  assert.equal(second.kind, "send");
+
+  // ONE EFFECTIVE CANCELLATION. Both requests describe the same end date.
+  assert.equal(first.content.effectiveAtIso, second.content.effectiveAtIso);
+  assert.equal(first.content.effectiveAtIso, EFFECTIVE_A);
+
+  // ONE EVENT KEY, so the second claim collides in the DATABASE rather
+  // than in any process's memory: migration 035's unique constraint is the
+  // guard, and the insert is ON CONFLICT DO NOTHING against exactly it.
+  assert.equal(second.eventKey, claimedKey);
+  assert.ok(sql035.includes("unique (subscription_id, family, event_key)"));
+  assert.ok(senderCode.includes('onConflict: "subscription_id,family,event_key",'));
+  assert.ok(senderCode.includes("ignoreDuplicates: true,"));
+  // Zero rows back is "taken", and "taken" never contacts the provider.
+  assert.ok(senderCode.includes('return claimed ? { kind: "claimed", deliveryId: claimed } : { kind: "taken" };'));
+  assert.ok(senderCode.includes('if (claim.kind === "taken") return "already-claimed";'));
+  assert.ok(!senderFn("sendCancellationConfirmationEmailIfNeeded").includes("resend.emails.send"),
+    "the entry point must not reach the provider before winning the claim");
+
+  // ONE EMAIL even if both attempts somehow reached Resend: the provider
+  // key is the same value, because it is built from the same event key.
+  assert.equal(
+    cancellationConfirmationIdempotencyKey(SUBSCRIPTION_ID, claimedKey),
+    cancellationConfirmationIdempotencyKey(SUBSCRIPTION_ID, second.eventKey)
+  );
+
+  // AND NO PROCESS-LOCAL SHORTCUT EXISTS. No module-scope cache decides
+  // whether this message was already sent.
+  for (const forbidden of ["new Set(", "new Map(", "let sent", "const sent ="]) {
+    assert.ok(!senderCode.includes(forbidden), `a process-memory guard appeared: ${forbidden}`);
+  }
+});
+
+test("8c: a failed cancellation sends nothing at all", () => {
+  // The sender is reached only from the two RPC results that mean the
+  // cancellation is durable. Every refusal returns before it.
+  const cancel = serviceFn("cancelSubscriptionForUser");
+  const sendAt = cancel.indexOf("sendCancellationConfirmationEmailIfNeeded(");
+  const gateAt = cancel.indexOf('if (result === "scheduled" || result === "already_scheduled")');
+  assert.ok(gateAt !== -1 && gateAt < sendAt, "the send is not gated on a durable result");
+  // Stripe refused, the RPC refused, the row was not found, the
+  // subscription was not eligible: each returns ok: false BEFORE the gate.
+  for (const refusal of [
+    'return { ok: false, result: "error" };',
+    'return { ok: false, result: "not_found" };',
+    'return { ok: false, result: "not_eligible" };',
+    "return { ok: false, result };",
+  ]) {
+    assert.ok(cancel.includes(refusal), `a refusal path disappeared: ${refusal}`);
+    assert.ok(cancel.indexOf(refusal) !== sendAt, "a refusal reaches the sender");
+  }
+  // And the refusal paths are all above the gate, so none can fall through.
+  assert.ok(cancel.lastIndexOf('return { ok: false, result: "error" };') < gateAt);
+  // Even called directly, a subscription with no persisted pair sends
+  // nothing and writes nothing - there is no row to record an attempt on.
+  const nothing = eligibility({
+    cancellation_requested_at: null,
+    cancellation_effective_at: null,
+  });
+  assert.equal(nothing.kind, "not-eligible");
+});
+
 test("9: another process representing the same fact also cannot duplicate it", () => {
   // The key is the persisted pair, not the caller and not a Stripe event,
   // so all three writers converge on one row for one fact.
@@ -459,7 +569,7 @@ test("20: the email carries the authoritative end date", () => {
   // 03.10.2026, formatted server-side in Europe/Berlin.
   assert.ok(html.includes("03.10.2026"), "the HTML must name the end date");
   assert.ok(text.includes("03.10.2026"), "the plain text must name the end date");
-  assert.ok(text.includes("Dein GLOA Abo endet am"));
+  assert.ok(text.includes("Dein Abo endet am:"));
   // A different event renders a different date - the content follows the
   // event rather than the clock.
   assert.ok(built({ effectiveAtIso: EFFECTIVE_B }).text.includes("31.10.2026"));
@@ -494,7 +604,10 @@ test("22: it does not say Abo beendet, and does not understate the cancellation"
   // It is a confirmation of a scheduled cancellation, not a pending request.
   assert.ok(!built().text.includes("Kündigung angefragt"));
   assert.ok(built().text.includes("Deine Kündigung ist bei uns eingegangen."));
-  assert.ok(built().text.includes("läuft dein Abo wie vorgesehen weiter"));
+  assert.ok(built().text.includes("wir bestätigen dir die Kündigung deines GLOA Abos."));
+  // The paid period is described as STILL RUNNING - see test 25c for the
+  // other half, that it is not described as refunded either.
+  assert.ok(built().text.includes("Bis dahin bleibt dein bereits bezahlter Zeitraum bestehen."));
 });
 
 test("22b: no early-versus-late claim is made, because none is retry-stable", () => {
@@ -530,6 +643,215 @@ test("24-25: the copy never says monatlich or monthly", () => {
     }
   }
   assert.ok(built().text.includes("alle 4 Wochen"));
+});
+
+/* ══════════════════════════════════════════════════════════════
+   20c-25d. THE SPECIFIED MESSAGE (cancellation confirmation copy)
+   ══════════════════════════════════════════════════════════════ */
+
+test("20c: the subject is the one the business specified", () => {
+  assert.equal(built().subject, "Deine GLOA Abo-Kündigung wurde bestätigt");
+  // And the template holds it as a constant rather than composing it per
+  // send, so every retry of one delivery carries the same subject.
+  assert.ok(templateCode.includes('const SUBJECT = "Deine GLOA Abo-Kündigung wurde bestätigt"'));
+  assert.ok(templateCode.includes("return { subject: SUBJECT,"));
+});
+
+test("21b: the greeting uses the frozen first name, and never invents one", () => {
+  assert.ok(built().text.includes("Hallo Mia,"), "the greeting must carry the first name");
+  assert.ok(built().html.includes("Hallo Mia,"));
+  // No name, no name. Not "Hallo null," and not a fabricated one.
+  for (const missing of [null, undefined, "", "   "]) {
+    const { html, text } = built({ firstName: missing });
+    assert.ok(text.includes("Hallo,"), `a missing first name broke the greeting: ${missing}`);
+    for (const surface of [html, text]) {
+      for (const forbidden of ["Hallo null", "Hallo undefined", "Hallo ,", "{firstName}"]) {
+        assert.ok(!surface.includes(forbidden), `the greeting invented a name: ${forbidden}`);
+      }
+    }
+  }
+  // The name is read from the subscription's OWN snapshot, by the rules
+  // module - the template has no lookup and the sender has no parameter.
+  assert.equal(firstNameFromCustomerSnapshot({ name: " Mia Sommer " }), "Mia");
+  assert.equal(firstNameFromCustomerSnapshot({ name: "Mia" }), "Mia");
+  for (const snapshot of [null, {}, { name: "" }, { name: "   " }, { name: 7 }]) {
+    assert.equal(firstNameFromCustomerSnapshot(snapshot), null);
+  }
+  // It is a greeting, not an identity: the surname is not printed.
+  assert.ok(!built({ firstName: firstNameFromCustomerSnapshot({ name: "Mia Sommer" }) })
+    .text.includes("Sommer"));
+});
+
+test("22c: the product line is the frozen SKU's size and the proven cadence", () => {
+  assert.ok(built().text.includes("GLOA Matcha 30 g · alle 4 Wochen"));
+  assert.ok(built().html.includes("GLOA Matcha 30 g · alle 4 Wochen"));
+  // The size is keyed on the SKU, the stable identity - not on plan copy.
+  assert.equal(
+    subscriptionProductLabelFromPlanSnapshot({ sku: "GLOA-MATCHA-30G", name: "irgendwas" }),
+    "GLOA Matcha 30 g"
+  );
+  assert.equal(subscriptionProductLabelFromPlanSnapshot({ sku: "GLOA-MATCHA-50G" }), "GLOA Matcha 50 g");
+  assert.equal(subscriptionProductLabelFromPlanSnapshot({ sku: "GLOA-MATCHA-100G" }), "GLOA Matcha 100 g");
+  // An unknown SKU falls back to the frozen plan name, and then to nothing.
+  assert.equal(subscriptionProductLabelFromPlanSnapshot({ sku: "X", name: "Sondergröße" }), "Sondergröße");
+  for (const snapshot of [null, {}, { sku: 7 }, { name: "" }]) {
+    assert.equal(subscriptionProductLabelFromPlanSnapshot(snapshot), null);
+  }
+  // The cadence is PROVEN off the frozen plan or it is not printed.
+  assert.equal(subscriptionCadenceWeeksFromPlanSnapshot(PLAN_SNAPSHOT), 4);
+  for (const wrong of [
+    { billingIntervalUnit: "month", billingIntervalCount: 1 },
+    { billingIntervalUnit: "week", billingIntervalCount: 2 },
+    { billingIntervalUnit: "week" },
+    {},
+    null,
+  ]) {
+    assert.equal(subscriptionCadenceWeeksFromPlanSnapshot(wrong), null,
+      "an unproven cadence must not resolve to 4");
+  }
+  // And a message with no provable product simply omits the line.
+  const bare = built({ packageName: null, cadenceWeeks: null });
+  assert.ok(!bare.text.includes("GLOA Matcha"), "an unprovable product was printed anyway");
+  assert.ok(!bare.text.includes("· alle"), "a rhythm was printed with no product");
+  assert.ok(bare.text.includes("Dein Abo endet am:"), "the end date must survive a bare plan");
+});
+
+test("23b: an unprovable name, product or cadence never withholds the confirmation", () => {
+  // THE CONFIRMATION IS OWED ON THE STRENGTH OF THE CANCELLATION ALONE.
+  // The three optional facts are read after the send decision is made, so
+  // none of them can turn a send into a refusal.
+  for (const overrides of [
+    { plan_snapshot: null },
+    { plan_snapshot: {} },
+    { plan_snapshot: { sku: "GLOA-MATCHA-30G", billingIntervalUnit: "month", billingIntervalCount: 1 } },
+    { customer_snapshot: { email: "kundin@example.com" } },
+    { customer_snapshot: { email: "kundin@example.com", name: "" } },
+  ]) {
+    assert.equal(eligibility(overrides).kind, "send", `withheld over ${JSON.stringify(overrides)}`);
+    assert.equal(claimed(overrides).kind, "send", `withheld over ${JSON.stringify(overrides)}`);
+  }
+  // A missing plan snapshot nulls the two plan facts and nothing else.
+  const content = eligibility({ plan_snapshot: null }).content;
+  assert.equal(content.packageName, null);
+  assert.equal(content.cadenceWeeks, null);
+  assert.equal(content.effectiveAtIso, EFFECTIVE_A, "the end date must be unaffected");
+  // The frozen name still arrives when the plan is unusable.
+  assert.equal(content.firstName, "Mia");
+});
+
+test("24c: the email says there is no further billing after the contract end", () => {
+  const { html, text } = built();
+  for (const surface of [html, text]) {
+    assert.ok(surface.includes("Es erfolgt keine weitere Abbuchung nach dem Vertragsende."),
+      "the message must state that billing stops at the contract end");
+  }
+  // It is unconditional copy, not a branch - a customer cannot receive a
+  // confirmation that leaves this out.
+  for (const facts of [
+    { firstName: null, packageName: null, cadenceWeeks: null, accountSubscriptionsUrl: null },
+    { effectiveAtIso: "nonsense" },
+  ]) {
+    assert.ok(built(facts).text.includes("keine weitere Abbuchung nach dem Vertragsende"),
+      `the billing statement was dropped for ${JSON.stringify(facts)}`);
+  }
+});
+
+test("25c: the paid period is described as running, never as refunded", () => {
+  const { html, text } = built();
+  for (const surface of [html, text]) {
+    assert.ok(surface.includes("Bereits erfolgte Zahlungen werden durch die Kündigung nicht automatisch erstattet."),
+      "the message must say a cancellation is not an automatic refund");
+  }
+  // NOT A REFUND CONFIRMATION. This flow creates no refund at all, so no
+  // wording may suggest money is on its way back.
+  for (const surface of [built().subject, html, text]) {
+    for (const forbidden of [
+      "wird erstattet", "wird zurückerstattet", "Rückerstattung", "Gutschrift",
+      "erhältst du zurück", "bekommst du zurück", "Betrag zurück", "Erstattung erfolgt",
+    ]) {
+      assert.ok(!surface.includes(forbidden), `the confirmation implies a refund: ${forbidden}`);
+    }
+  }
+  // And the cancellation service still genuinely creates none.
+  assert.ok(!/refunds?\s*\.\s*create/.test(serviceCode), "the cancellation service refunds");
+});
+
+test("25d: the copy is complete and in the specified order", () => {
+  const { text } = built();
+  const order = [
+    "Hallo Mia,",
+    "wir bestätigen dir die Kündigung deines GLOA Abos.",
+    "GLOA Matcha 30 g · alle 4 Wochen",
+    "Dein Abo endet am:",
+    "Bis dahin bleibt dein bereits bezahlter Zeitraum bestehen.",
+    "Es erfolgt keine weitere Abbuchung nach dem Vertragsende.",
+    "Bereits erfolgte Zahlungen werden durch die Kündigung nicht automatisch erstattet.",
+    "Liebe Grüße",
+    "GLOA",
+  ];
+  let at = -1;
+  for (const line of order) {
+    const found = text.indexOf(line, at + 1);
+    assert.ok(found > at, `the copy is out of order or missing: ${line}`);
+    at = found;
+  }
+  // The GLOA shell is still what carries it - no bespoke markup.
+  assert.ok(templateCode.includes("emailShell("));
+  assert.ok(templateCode.includes("emailFooter("));
+  assert.ok(templateCode.includes("legalLinks(params.origin)"));
+});
+
+test("25e: no line of this message is built from anything a browser sent", () => {
+  // The sender takes a subscription id and nothing else, and every fact in
+  // the message is read from durable columns by the rules module.
+  const entry = senderCode.slice(senderCode.indexOf("export async function sendCancellationConfirmationEmailIfNeeded"));
+  const signature = entry.slice(0, entry.indexOf("): Promise<"));
+  for (const f of ["name", "firstName", "plan", "size", "package", "cadence", "date"]) {
+    assert.ok(!signature.includes(f), `the entry point takes a customer fact: ${f}`);
+  }
+  // The three new facts come from the preflight, never from a parameter.
+  for (const field of ["firstName", "packageName", "cadenceWeeks"]) {
+    assert.ok(senderCode.includes(`${field}: preflight.content.${field},`),
+      `${field} is not taken from the preflight`);
+  }
+  // And the route still accepts one subscription id and refuses extras.
+  assert.ok(routeCode.includes("validateCancelRequest(parsed)"));
+  for (const forbidden of ["body.email", "body.name", "body.firstName", "body.effectiveCancelAt"]) {
+    assert.ok(!routeCode.includes(forbidden), `the route reads ${forbidden}`);
+  }
+});
+
+test("25f: a confirmation that cannot be sent is no longer silent", () => {
+  // THE DEFECT THIS PHASE CLOSES. Every writer of the cancellation pair
+  // calls the sender and deliberately discards its result, so a refusal
+  // before the claim used to leave no trace anywhere - in the logs or in
+  // the delivery table. It now names the subscription and the reason.
+  const entry = senderCode.slice(senderCode.indexOf("export async function sendCancellationConfirmationEmailIfNeeded"));
+  const branchAt = entry.indexOf('if (eligibility.kind !== "send")');
+  assert.notEqual(branchAt, -1, "the pre-claim refusal branch disappeared");
+  const returnAt = entry.indexOf("return eligibility.kind ===", branchAt);
+  assert.ok(returnAt > branchAt, "the refusal branch no longer returns");
+  const branch = entry.slice(branchAt, entry.indexOf(NEWLINE, returnAt));
+  assert.ok(branch.includes("console.error("), "a pre-claim refusal is still silent");
+  assert.ok(branch.includes("eligibility.reason"), "the refusal is logged without its reason");
+  // GLOA IDS AND RULE REASONS ONLY. No customer fact may reach a log line.
+  for (const forbidden of ["recipient", "customer_snapshot", "firstName", "packageName", "email"]) {
+    assert.ok(!branch.includes(forbidden), `a customer fact reached a log line: ${forbidden}`);
+  }
+  // Every reason the rules module produces is a fixed string, so the log
+  // vocabulary cannot become customer data by accident.
+  for (const overrides of [
+    { cancellation_requested_at: null, cancellation_effective_at: null },
+    { customer_type: "business" },
+    { customer_snapshot: {} },
+    { status: "cancelled" },
+  ]) {
+    const refusal = eligibility(overrides);
+    assert.notEqual(refusal.kind, "send");
+    assert.equal(typeof refusal.reason, "string");
+    assert.ok(refusal.reason.length > 0);
+    assert.ok(!refusal.reason.includes("@"), "a reason carries an address");
+  }
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -637,6 +959,63 @@ test("31: no identity or generated column is ever written", () => {
 /* ══════════════════════════════════════════════════════════════
    32-36. WHAT THIS PHASE DID NOT TOUCH
    ══════════════════════════════════════════════════════════════ */
+
+test("31b: the annual plan is untouched by this message", () => {
+  // A PREPAID YEAR IS A DIFFERENT CONTRACT. It has no four-week cadence, no
+  // cancellation pair and its own confirmation module, and none of the
+  // three files this phase edits is reachable from it.
+  const annual = withoutComments(read("lib/annualPurchaseConfirmationEmail.ts"));
+  for (const forbidden of [
+    "cancellationConfirmation", "cancellation_confirmation",
+    "cancellation_effective_at", "subscriptionProductLabelFromPlanSnapshot",
+    "subscriptionCadenceWeeksFromPlanSnapshot", "firstNameFromCustomerSnapshot",
+  ]) {
+    assert.ok(!annual.includes(forbidden), `the annual confirmation changed: ${forbidden}`);
+  }
+  // And this family never learned about annual_plans.
+  for (const source of [senderCode, templateCode]) {
+    for (const forbidden of ["annual_plans", "annualPlan", "annual_plan"]) {
+      assert.ok(!source.includes(forbidden), `the cancellation family reaches annual: ${forbidden}`);
+    }
+  }
+  // The rules module holds both families; the cancellation preflight must
+  // not have grown an annual branch.
+  const preflight = rulesCode.slice(
+    rulesCode.indexOf("export function evaluateCancellationConfirmationPreflight"),
+    rulesCode.indexOf("export function subscriptionEndedEventKey")
+  );
+  for (const forbidden of ["annual", "prepaid", "12 Monate"]) {
+    assert.ok(!preflight.includes(forbidden), `the preflight reaches annual: ${forbidden}`);
+  }
+});
+
+test("31c: checkout, payment and refund behaviour is untouched", () => {
+  // NOTHING THIS PHASE TOUCHES CAN PRICE, CHARGE OR REFUND. The three
+  // edited modules contain no Stripe import, no money and no write beyond
+  // the delivery row's own state columns.
+  for (const [label, source] of [["sender", senderCode], ["template", templateCode]]) {
+    for (const forbidden of [
+      "stripe", "Stripe", "refund", "Refund", "amount", "cents", "price", "Price",
+      "paymentIntent", "checkout",
+    ]) {
+      assert.ok(!source.includes(forbidden), `the ${label} reaches money: ${forbidden}`);
+    }
+  }
+  // The sender writes to exactly one table, and only its state columns.
+  const tables = [...senderCode.matchAll(/\.from\("([^"]+)"\)/g)].map(m => m[1]);
+  assert.deepEqual([...new Set(tables)].sort(), ["subscription_email_deliveries", "subscriptions"]);
+  for (const verb of [".insert(", ".delete(", ".rpc("]) {
+    assert.ok(!senderCode.includes(verb), `the sender gained a write verb: ${verb}`);
+  }
+  // Reading plan_snapshot is a SELECT and nothing more.
+  assert.ok(senderCode.includes("customer_snapshot, plan_snapshot, "));
+  assert.ok(!senderCode.includes("plan_snapshot:"), "the sender writes a plan snapshot");
+  // And the cancellation service still creates no refund and no order.
+  const cancel = serviceFn("cancelSubscriptionForUser");
+  for (const forbidden of ["refunds.create", "orders", "create_order", "invoiceItems"]) {
+    assert.ok(!cancel.includes(forbidden), `the cancellation gained a side effect: ${forbidden}`);
+  }
+});
 
 test("32: subscription_started is unchanged", () => {
   const started = withoutComments(read("lib/subscriptionStartedEmail.ts"));

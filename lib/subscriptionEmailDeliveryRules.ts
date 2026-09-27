@@ -206,6 +206,77 @@ function packageNameFromPlanSnapshot(snapshot: unknown): string | null {
 }
 
 /**
+ * The customer's first name, out of the frozen customer_snapshot.
+ *
+ * NOT AN IDENTIFIER AND NOT A LOOKUP KEY. It reaches one greeting line and
+ * nothing else, and it is read from the subscription's own snapshot at send
+ * time - there is no parameter through which a request body, a query string
+ * or a Stripe payload could supply a name.
+ *
+ * The first whitespace-separated token of the stored name. "Mia Sommer"
+ * greets Mia; a single-token name greets that token. Null rather than a
+ * guess when the snapshot carries nothing usable, and the template drops
+ * the name from the greeting instead of addressing an empty string.
+ *
+ * Deliberately no title-casing, no transliteration and no truncation: the
+ * customer typed this name at checkout and it is theirs to spell.
+ */
+export function firstNameFromCustomerSnapshot(snapshot: unknown): string | null {
+  const customer = (snapshot ?? {}) as { name?: unknown };
+  if (typeof customer.name !== "string") return null;
+  const first = customer.name.trim().split(/\s+/)[0] ?? "";
+  return first ? first : null;
+}
+
+/** The three launch sizes, keyed on the stable SKU rather than on copy. */
+const LAUNCH_SUBSCRIPTION_SIZES: Readonly<Record<string, string>> = Object.freeze({
+  "GLOA-MATCHA-30G": "30 g",
+  "GLOA-MATCHA-50G": "50 g",
+  "GLOA-MATCHA-100G": "100 g",
+});
+
+/**
+ * "GLOA Matcha 30 g" - the product one cancelled subscription delivers.
+ *
+ * KEYED ON THE FROZEN SKU, which lib/subscriptionPurchaseRules.ts already
+ * treats as the stable identity: a renamed plan must not be able to change
+ * what a past subscription was for. The plan's stored `name` is marketing
+ * copy and is used only as a fallback when the SKU is not one of the three
+ * launch products.
+ *
+ * Null when neither is usable. The caller omits the line rather than
+ * printing a product nobody can prove was ordered - and never refuses the
+ * confirmation over it.
+ */
+export function subscriptionProductLabelFromPlanSnapshot(snapshot: unknown): string | null {
+  const plan = (snapshot ?? {}) as { sku?: unknown };
+  if (typeof plan.sku === "string") {
+    const size = LAUNCH_SUBSCRIPTION_SIZES[plan.sku.trim()];
+    if (size) return `GLOA Matcha ${size}`;
+  }
+  return packageNameFromPlanSnapshot(snapshot);
+}
+
+/**
+ * 4, and only when the frozen plan actually says every 4 weeks.
+ *
+ * The same proof evaluateSubscriptionStartPreflight demands, with one
+ * difference in what a failure means: the start message refuses to be sent
+ * over an unproven cadence, whereas a cancellation confirmation is owed
+ * regardless and simply drops the cadence from its product line. A wrong
+ * rhythm must never be printed; an absent one is survivable.
+ */
+export function subscriptionCadenceWeeksFromPlanSnapshot(snapshot: unknown): number | null {
+  const plan = (snapshot ?? {}) as {
+    billingIntervalUnit?: unknown;
+    billingIntervalCount?: unknown;
+  };
+  if (plan.billingIntervalUnit !== SUBSCRIPTION_INTERVAL_UNIT) return null;
+  if (plan.billingIntervalCount !== SUBSCRIPTION_INTERVAL_COUNT) return null;
+  return SUBSCRIPTION_INTERVAL_COUNT;
+}
+
+/**
  * Proves, from the durable row alone, that "Dein Abo ist aktiv" is still
  * a true thing to say - and decides what happens when it is not.
  *
@@ -388,6 +459,12 @@ export type CancellationConfirmationFacts = {
   customer_type: string | null;
   status: string;
   customer_snapshot: unknown;
+  /**
+   * The plan frozen at purchase. Read for the product line and the
+   * cadence only, and never for the send decision - see
+   * subscriptionProductLabelFromPlanSnapshot below.
+   */
+  plan_snapshot: unknown;
   cancellation_requested_at: string | null;
   cancellation_effective_at: string | null;
 };
@@ -395,13 +472,32 @@ export type CancellationConfirmationFacts = {
 /**
  * The facts the message may state.
  *
- * Both are canonical instants taken from the row. The template turns them
- * into German dates; it is never handed a pre-formatted string, and never
- * a clock.
+ * The two instants are canonical and come from the row. The template turns
+ * them into German dates; it is never handed a pre-formatted string, and
+ * never a clock.
+ *
+ * ── WHY THE OTHER THREE ARE RETRY-STABLE ──────────────────────
+ *
+ * They come out of customer_snapshot and plan_snapshot, both of which are
+ * written once by create_pending_subscription and never updated by any
+ * later writer in this schema. So a retry days after the first attempt
+ * renders the same greeting and the same product line, which is the
+ * property that ruled the delivery COUNT out of this message - see the
+ * template header.
+ *
+ * All three are nullable, and null means the corresponding line is
+ * omitted rather than guessed. None of them can refuse the send: a
+ * cancellation confirmation is owed whatever the snapshots look like.
  */
 export type CancellationConfirmationContent = {
   requestedAtIso: string;
   effectiveAtIso: string;
+  /** For the greeting. Null when the snapshot carries no usable name. */
+  firstName: string | null;
+  /** "GLOA Matcha 30 g", off the frozen SKU. Null when unprovable. */
+  packageName: string | null;
+  /** 4, and only when the frozen plan proves it. Null otherwise. */
+  cadenceWeeks: number | null;
 };
 
 export type CancellationConfirmationPreflight =
@@ -518,7 +614,21 @@ export function evaluateCancellationConfirmationPreflight(input: {
     kind: "send",
     recipient,
     eventKey: currentKey,
-    content: { requestedAtIso, effectiveAtIso },
+    content: {
+      requestedAtIso,
+      effectiveAtIso,
+      // ── THE THREE OPTIONAL FACTS ──────────────────────────
+      //
+      // Read AFTER the decision to send is already made, and every one of
+      // them may be null. That ordering is the point: a missing name, an
+      // unrecognised SKU or a plan snapshot that cannot prove its cadence
+      // must never withhold a cancellation confirmation, which is the one
+      // message in this family the customer is entitled to on the strength
+      // of the cancellation alone.
+      firstName: firstNameFromCustomerSnapshot(subscription.customer_snapshot),
+      packageName: subscriptionProductLabelFromPlanSnapshot(subscription.plan_snapshot),
+      cadenceWeeks: subscriptionCadenceWeeksFromPlanSnapshot(subscription.plan_snapshot),
+    },
   };
 }
 

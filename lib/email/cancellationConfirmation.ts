@@ -11,7 +11,7 @@ import {
 } from "./brand.ts";
 
 /**
- * "Wir haben deine Kündigung erhalten" - the customer's subscription
+ * "Deine GLOA Abo-Kündigung wurde bestätigt" - the customer's subscription
  * cancellation confirmation (Phase 3H.3).
  *
  * The ninth message in the family and the second subscription lifecycle
@@ -81,12 +81,29 @@ export type BuiltCancellationConfirmationEmail = {
   text: string;
 };
 
-/** The facts the message may state. Both come from the delivery's event. */
+/** The facts the message may state. Both instants come from the event. */
 export type CancellationConfirmationFactsForEmail = {
   /** When the customer asked, as a canonical instant. */
   requestedAtIso: string;
   /** When the subscription ends, as a canonical instant. */
   effectiveAtIso: string;
+  /**
+   * The customer's first name, from the frozen customer_snapshot. Optional
+   * and nullable: the greeting drops the name rather than addressing an
+   * empty string or inventing one.
+   */
+  firstName?: string | null;
+  /**
+   * "GLOA Matcha 30 g", from the frozen SKU. Optional and nullable: the
+   * product line is omitted rather than naming a product this subscription
+   * cannot be proven to deliver.
+   */
+  packageName?: string | null;
+  /**
+   * 4, and only when the frozen plan proved it. Optional and nullable: a
+   * cadence is stated or it is not, and it is never assumed.
+   */
+  cadenceWeeks?: number | null;
   /** Where the customer manages the subscription, or null without SITE_URL. */
   accountSubscriptionsUrl: string | null;
 };
@@ -176,7 +193,7 @@ function fmtDate(value: string): string | null {
   });
 }
 
-const SUBJECT = "Wir haben deine Kündigung erhalten";
+const SUBJECT = "Deine GLOA Abo-Kündigung wurde bestätigt";
 const EYEBROW = "Kündigung bestätigt";
 const HEADLINE = "Deine Kündigung ist bei uns eingegangen.";
 
@@ -186,9 +203,70 @@ const HEADLINE = "Deine Kündigung ist bei uns eingegangen.";
  * lib/subscriptionEmailDeliveryRules.ts has already proven the
  * cancellation is persisted, still current, and not yet carried out.
  */
-const INTRO = "Wir haben deine Kündigung aufgenommen und alles Weitere veranlasst.";
-const CONTINUES = "Bis dahin läuft dein Abo wie vorgesehen weiter - alle 4 Wochen wie gewohnt.";
+const INTRO = "wir bestätigen dir die Kündigung deines GLOA Abos.";
+const END_LABEL = "Dein Abo endet am:";
+const CONTINUES = "Bis dahin bleibt dein bereits bezahlter Zeitraum bestehen.";
+
+/**
+ * ══════════════════════════════════════════════════════════════
+ * THE TWO MONEY SENTENCES, AND WHY BOTH ARE HERE.
+ * ══════════════════════════════════════════════════════════════
+ *
+ * NO FURTHER BILLING. This is the thing a customer who has just cancelled
+ * a recurring contract actually needs told, and the cancellation genuinely
+ * guarantees it: lib/subscriptionCancellation.ts sets an absolute cancel_at
+ * at Stripe with proration_behavior 'none', or defers exactly one already
+ * promised cycle and then sets it. After the end date there is no further
+ * charge, so saying so is a statement of what was scheduled and not a
+ * promise this template invents.
+ *
+ * NO AUTOMATIC REFUND. The other half, and the half a cancellation
+ * confirmation is tempted to leave out. This flow creates no refund at
+ * all - the module header of lib/subscriptionCancellation.ts says so and
+ * tests assert it - so a customer who reads "Kündigung bestätigt" and
+ * infers money coming back has been misled by omission. The paid period is
+ * described as STILL RUNNING rather than as refunded, which is what it is.
+ *
+ * Neither sentence names a sum, a card, an invoice or a date other than the
+ * contract end, because none of those is pinned by this delivery's event.
+ */
+const NO_FURTHER_BILLING = "Es erfolgt keine weitere Abbuchung nach dem Vertragsende.";
+const NO_AUTOMATIC_REFUND =
+  "Bereits erfolgte Zahlungen werden durch die Kündigung nicht automatisch erstattet.";
+
 const ACCOUNT_LINE = "Den aktuellen Stand deines Abos findest du jederzeit in deinem GLOA Konto.";
+const SIGN_OFF_LINE = "Liebe Grüße";
+const SIGN_OFF_NAME = "GLOA";
+
+/**
+ * "Hallo Mia," or "Hallo," - never "Hallo null," and never a fabricated
+ * name. The comma belongs to the greeting, so INTRO reads as its
+ * continuation in both cases.
+ */
+function greeting(firstName: string | null | undefined): string {
+  const name = typeof firstName === "string" ? firstName.trim() : "";
+  return name ? `Hallo ${name},` : "Hallo,";
+}
+
+/**
+ * "GLOA Matcha 30 g · alle 4 Wochen" - the one product line.
+ *
+ * Built from whichever halves were proven. Neither half is invented: no
+ * product means no line at all, and no proven cadence means the product
+ * without a rhythm rather than a rhythm nobody agreed to. And never the
+ * word for a twelve-times-a-year cycle, because this is thirteen.
+ */
+function productLine(
+  packageName: string | null | undefined,
+  cadenceWeeks: number | null | undefined
+): string | null {
+  const name = typeof packageName === "string" ? packageName.trim() : "";
+  if (!name) return null;
+  const weeks = typeof cadenceWeeks === "number" && Number.isInteger(cadenceWeeks) && cadenceWeeks > 0
+    ? cadenceWeeks
+    : null;
+  return weeks ? `${name} · alle ${weeks} Wochen` : name;
+}
 
 /**
  * Builds the customer's cancellation confirmation (subject, HTML, text).
@@ -213,12 +291,22 @@ export function buildCancellationConfirmationEmail(params: {
 
   const endsOn = fmtDate(cancellation.effectiveAtIso);
   const requestedOn = fmtDate(cancellation.requestedAtIso);
+  const hello = greeting(cancellation.firstName);
+  const product = productLine(cancellation.packageName, cancellation.cadenceWeeks);
+
+  const helloHtml = `<p style="font-size:14px;line-height:1.6;margin:0 0 16px;color:${BRAND.ink};">${escapeHtml(hello)}</p>`;
+
+  // What the ending subscription delivers, when the frozen plan proved it.
+  // Omitted rather than guessed - see productLine.
+  const productHtml = product
+    ? `<p style="font-size:14px;line-height:1.5;font-weight:600;margin:0 0 20px;color:${BRAND.plum};">${escapeHtml(product)}</p>`
+    : "";
 
   // The end date is the point of the message. Its absence cannot be
   // papered over, so the line is omitted rather than rendered empty, and
   // the neutral sentences below still stand on their own.
   const endLineHtml = endsOn
-    ? `<p style="font-size:14px;line-height:1.5;margin:0 0 6px;color:${BRAND.ink};">Dein GLOA Abo endet am</p>
+    ? `<p style="font-size:14px;line-height:1.5;margin:0 0 6px;color:${BRAND.ink};">${escapeHtml(END_LABEL)}</p>
 <p style="font-size:20px;line-height:1.3;font-weight:700;margin:0 0 16px;color:${BRAND.ink};">${escapeHtml(endsOn)}</p>`
     : "";
 
@@ -239,36 +327,56 @@ export function buildCancellationConfirmationEmail(params: {
 ${emailEyebrow(`${escapeHtml(EYEBROW)}`)}
 ${emailHeadline(`${escapeHtml(HEADLINE)}`)}
 <tr><td style="padding:16px 0 28px 0;font-size:15px;line-height:1.6;color:${GLOA_NEAR_BLACK};">
+${helloHtml}
 <p style="font-size:14px;line-height:1.6;margin:0 0 20px;color:${BRAND.ink};">${escapeHtml(INTRO)}</p>
+${productHtml}
 ${endLineHtml}
 ${requestedLineHtml}
-<p style="font-size:14px;line-height:1.6;margin:0 0 16px;color:${BRAND.ink};">${escapeHtml(CONTINUES)}</p>
+<p style="font-size:14px;line-height:1.6;margin:0 0 6px;color:${BRAND.ink};">${escapeHtml(CONTINUES)}</p>
+<p style="font-size:14px;line-height:1.6;margin:0 0 16px;color:${BRAND.ink};">${escapeHtml(NO_FURTHER_BILLING)}</p>
+<p style="font-size:14px;line-height:1.6;margin:0 0 20px;color:${BRAND.ink};">${escapeHtml(NO_AUTOMATIC_REFUND)}</p>
 <p style="font-size:14px;line-height:1.6;margin:0;color:${BRAND.ink};">${escapeHtml(ACCOUNT_LINE)}</p>
 ${accountLinkHtml}
+<p style="font-size:14px;line-height:1.6;margin:24px 0 0;color:${BRAND.ink};">${escapeHtml(SIGN_OFF_LINE)}<br/>${escapeHtml(SIGN_OFF_NAME)}</p>
 </td></tr>
 ${emailFooter(`Fragen zu deinem Abo? <a href="mailto:${SUPPORT_ADDRESS}" style="color:${GLOA_BERRY};">${SUPPORT_ADDRESS}</a>
 <br/><br/>
 ${legalLinks(params.origin)}`)}`);
 
-  const text = [
+  // null is AN OMITTED LINE, "" is a DELIBERATE BLANK. The previous version
+  // used "" for both and filtered it, which silently collapsed every
+  // paragraph break in the plain-text part along with the optional lines.
+  const text = ([
     `GLOA · ${EYEBROW}`,
     "",
     HEADLINE,
+    "",
+    hello,
+    "",
     INTRO,
     "",
-    endsOn ? `Dein GLOA Abo endet am: ${endsOn}` : "",
-    requestedOn ? `Eingegangen am: ${requestedOn}` : "",
+    product,
+    product ? "" : null,
+    endsOn ? `${END_LABEL} ${endsOn}` : null,
+    requestedOn ? `Eingegangen am: ${requestedOn}` : null,
     "",
     CONTINUES,
+    NO_FURTHER_BILLING,
+    "",
+    NO_AUTOMATIC_REFUND,
+    "",
     ACCOUNT_LINE,
     cancellation.accountSubscriptionsUrl
       ? `Abo in deinem Konto ansehen: ${cancellation.accountSubscriptionsUrl}`
-      : "",
+      : null,
+    "",
+    SIGN_OFF_LINE,
+    SIGN_OFF_NAME,
     "",
     `Fragen zu deinem Abo? ${SUPPORT_ADDRESS}`,
     legalLinksText(params.origin),
-  ]
-    .filter(line => line !== "")
+  ] as readonly (string | null)[])
+    .filter((line): line is string => line !== null)
     .join("\n");
 
   return { subject: SUBJECT, html, text };

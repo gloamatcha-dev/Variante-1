@@ -120,9 +120,20 @@ export type CancellationConfirmationEmailResult =
    */
   | "failed";
 
-/** The subscription columns one cancellation confirmation is rebuilt from. */
+/**
+ * The subscription columns one cancellation confirmation is rebuilt from.
+ *
+ * plan_snapshot joined the list for the product line and the cadence. It is
+ * written once, by create_pending_subscription, and updated by nothing in
+ * this schema - so reading it here cannot make the message depend on a
+ * moving column, which is the property the template header requires of
+ * everything it prints.
+ *
+ * Still no amount, no card, no Stripe id and no address: none of those is a
+ * fact this message states.
+ */
 const SUBSCRIPTION_COLUMNS =
-  "id, customer_type, status, customer_snapshot, " +
+  "id, customer_type, status, customer_snapshot, plan_snapshot, " +
   "cancellation_requested_at, cancellation_effective_at";
 
 type ClaimOutcome =
@@ -327,7 +338,30 @@ export async function sendCancellationConfirmationEmailIfNeeded(
   // Nothing owed: never cancelled, already unscheduled, already ended, or
   // nothing to send it to. No row is created, so a subscription that was
   // never cancelled leaves no trace in the delivery table at all.
+  //
+  // ══════════════════════════════════════════════════════════
+  // AND IT IS SAID OUT LOUD, WHICH IT PREVIOUSLY WAS NOT.
+  // ══════════════════════════════════════════════════════════
+  //
+  // This branch used to return in silence. That is defensible for the
+  // ordinary case - every writer of the cancellation pair calls this
+  // function unconditionally, so "this subscription has no cancellation"
+  // is the expected answer most of the time and is not an incident.
+  //
+  // But it is ALSO the branch a genuinely owed confirmation disappears
+  // down: a snapshot with no customer email, or a pair that did not land
+  // the way the caller assumed. Combined with the call sites deliberately
+  // discarding the result - correctly, so a mail provider cannot fail a
+  // cancellation - a customer could be left without the message and the
+  // logs would contain nothing at all to say so.
+  //
+  // So the reason is logged, at exactly the altitude the rest of this
+  // module logs at: the GLOA subscription uuid and the rule's own short
+  // reason. Never the recipient, never the name, never the plan.
   if (eligibility.kind !== "send") {
+    console.error(
+      `Cancellation confirmation: nothing sent for ${subscriptionId} (${CANCELLATION_CONFIRMATION_FAMILY}) - ${eligibility.reason}`
+    );
     return eligibility.kind === "failed" ? "failed" : "not-eligible";
   }
 
@@ -408,12 +442,20 @@ export async function deliverClaimedCancellationConfirmation(
     return "failed";
   }
 
-  const { subject, html, text } = buildCancellationConfirmationEmail({ origin: getSiteOrigin() ?? undefined,
+  const { subject, html, text } = buildCancellationConfirmationEmail({
+    origin: getSiteOrigin() ?? undefined,
     cancellation: {
       // Straight from the event this delivery represents, so a retry
       // renders the same two dates the first attempt would have.
       requestedAtIso: preflight.content.requestedAtIso,
       effectiveAtIso: preflight.content.effectiveAtIso,
+      // The three frozen-snapshot facts. Immutable for the life of the
+      // subscription, so a retry renders them identically too - and each
+      // one may be null, in which case its line is omitted rather than
+      // guessed. None of them decided whether to send.
+      firstName: preflight.content.firstName,
+      packageName: preflight.content.packageName,
+      cadenceWeeks: preflight.content.cadenceWeeks,
       accountSubscriptionsUrl: buildAccountSubscriptionsUrl(),
     },
   });

@@ -412,7 +412,13 @@ test("29-31: the customer copy of all three templates is unchanged", () => {
   const ended = read("lib/email/subscriptionEnded.ts");
   assert.ok(started.includes('const SUBJECT = "Dein GLOA Abo ist aktiv";'));
   assert.ok(started.includes("Dein Matcha Abo ist gestartet."));
-  assert.ok(confirmation.includes('const SUBJECT = "Wir haben deine Kündigung erhalten";'));
+  // RE-PINNED, NOT RELAXED. This test protects the copy against the
+  // provider-outcome hardening, which is a delivery-state concern and must
+  // never move a customer sentence. The cancellation subject changed for a
+  // COPY reason instead - the business asked for it, and
+  // tests/subscription-cancellation-confirmation.test.mjs asserts the whole
+  // message rather than one line of it. The headline is unchanged.
+  assert.ok(confirmation.includes('const SUBJECT = "Deine GLOA Abo-Kündigung wurde bestätigt";'));
   assert.ok(confirmation.includes("Deine Kündigung ist bei uns eingegangen."));
   assert.ok(ended.includes('const SUBJECT = "Dein GLOA Abo ist beendet";'));
   assert.ok(ended.includes("Dein GLOA Abo ist jetzt beendet."));

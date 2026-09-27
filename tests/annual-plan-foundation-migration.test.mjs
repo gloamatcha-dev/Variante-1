@@ -1422,6 +1422,46 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // tests/subscription-flow-return.test.mjs both assert the annual
     // figures directly rather than trusting this note.
     "lib/annualPlanRules.ts",
+    // SUBSCRIPTION CANCELLATION CONFIRMATION, THE MESSAGE ITSELF. Three
+    // files of ONE customer email, none of which can cancel, price, charge
+    // or refund anything - and none of which the annual plan reaches.
+    //
+    //   email/cancellationConfirmation.ts  the copy. A pure template: no
+    //                                      database, no Stripe, no Resend,
+    //                                      no environment read. It gained
+    //                                      the specified subject, a
+    //                                      greeting, the product line and
+    //                                      the two money sentences a
+    //                                      cancellation confirmation has
+    //                                      to carry - that billing stops
+    //                                      at the contract end, and that
+    //                                      the cancellation is not itself
+    //                                      a refund.
+    //   subscriptionEmailDeliveryRules.ts  three added snapshot readers and
+    //                                      three added content fields. The
+    //                                      cancellation preflight reads
+    //                                      them AFTER it has decided to
+    //                                      send, so none of them can
+    //                                      withhold a confirmation. Every
+    //                                      other family in the file, the
+    //                                      event keys, the statuses, the
+    //                                      retry vocabulary and the
+    //                                      provider classifier are
+    //                                      untouched.
+    //   cancellationConfirmationEmail.ts   one column added to the SELECT
+    //                                      it already ran, the three facts
+    //                                      passed through, and a pre-claim
+    //                                      refusal now logged instead of
+    //                                      returning in silence. No write
+    //                                      verb and no new table.
+    //
+    // The cancellation rules are NOT in this list and are not edited: the
+    // 14-day cutoff, the effective date, the Stripe cancel_at behaviour and
+    // migration 034 are all exactly where they were. Reviewed in
+    // tests/subscription-cancellation-confirmation.test.mjs.
+    "lib/email/cancellationConfirmation.ts",
+    "lib/subscriptionEmailDeliveryRules.ts",
+    "lib/cancellationConfirmationEmail.ts",
   ];
 
   // Phase 4B4 edits ONE application module: the single canonical Stripe
