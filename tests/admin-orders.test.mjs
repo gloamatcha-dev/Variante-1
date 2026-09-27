@@ -4,6 +4,12 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  cancellationRefundState,
+  maxRefundableCents,
+  orderOverviewNotices,
+  OVERVIEW_NOTICE_KEYS,
+} from "../lib/adminOrderActionRules.ts";
+import {
   DEFAULT_PAGE_SIZE,
   FULFILLMENT_STATUSES,
   FULFILLMENT_STATUS_LABEL,
@@ -955,4 +961,281 @@ test("10f: no stock, grant, RPC or pagination behaviour moved with it", () => {
   const code = codeOnly(listRoute);
   assert.ok(code.includes("ordersPageRange(query)"), "the orders page range changed");
   assert.ok(code.includes(".range(from, to)"), "the orders page no longer uses a range");
+});
+
+/* ══════════════════════════════════════════════════════════════
+   11. THE OVERVIEW SAYS WHAT A CANCELLATION ACTUALLY COST
+
+   The list used to announce a cancellation REQUEST and then go quiet
+   the moment an operator accepted it, so the state that owes a
+   customer money - cancelled, still paid, nothing refunded - was
+   readable only inside the drawer. Production order GLOA-2026-000459
+   sat exactly there: cancelled, payment_status 'paid', 0,00 € refunded,
+   20,89 € still outstanding.
+
+   Every assertion below runs the REAL rule out of
+   lib/adminOrderActionRules.ts. None of them re-implements the money
+   arithmetic, because a second copy of it in a test is a second truth.
+   ══════════════════════════════════════════════════════════════ */
+
+/** The order the production screen got wrong: 20,89 €, cancelled, paid. */
+const ORDER_459 = Object.freeze({
+  status: "cancelled",
+  payment_status: "paid",
+  fulfillment_status: "cancelled",
+  cancelled_at: "2026-09-20T10:15:00.000Z",
+  cancellation_requested_at: "2026-09-20T09:02:00.000Z",
+  cancellation_request_resolution: "approved",
+  total_gross_cents: 2089,
+  refunded_total_cents: 0,
+  currency: "EUR",
+});
+
+const keysOf = order => orderOverviewNotices(order).map(n => n.key);
+const noticeOf = (order, key) => orderOverviewNotices(order).find(n => n.key === key);
+
+test("11a: an open request is announced, and nothing else is", () => {
+  const open = {
+    status: "confirmed", payment_status: "paid", fulfillment_status: "unfulfilled",
+    cancelled_at: null,
+    cancellation_requested_at: "2026-09-27T08:00:00.000Z",
+    cancellation_request_resolution: null,
+    total_gross_cents: 2089, refunded_total_cents: 0,
+  };
+  assert.deepEqual(keysOf(open), ["cancellation_requested"]);
+  const badge = noticeOf(open, "cancellation_requested");
+  assert.equal(badge.label, "Storno angefragt");
+  assert.equal(badge.amountCents, null, "an unanswered request names no amount");
+  // It is a queue item, so it is emitted as one.
+  assert.equal(badge.tone, "action");
+  // The order itself has not moved, so the Status column stays untouched.
+  assert.equal(cancellationRefundState(open).cancelled, false);
+});
+
+test("11b: an accepted cancellation that still owes money says so, with the amount", () => {
+  assert.deepEqual(keysOf(ORDER_459), ["refund_outstanding"],
+    "the accepted request went quiet again");
+  const badge = noticeOf(ORDER_459, "refund_outstanding");
+  assert.equal(badge.label, "Erstattung offen");
+  assert.equal(badge.tone, "action", "money still owed is not a settled fact");
+  // 20,89 €, and read from the shared rule rather than restated here.
+  assert.equal(badge.amountCents, 2089);
+  assert.equal(badge.amountCents, maxRefundableCents(ORDER_459));
+  assert.equal(formatCents(badge.amountCents, "EUR"), "20,89 €");
+  // And the row's Status half is unambiguous.
+  assert.equal(cancellationRefundState(ORDER_459).cancelled, true);
+  assert.equal(ORDER_STATUS_LABEL.cancelled, "Storniert");
+});
+
+test("11c: the outstanding amount is the total minus what already went back", () => {
+  const partial = { ...ORDER_459, payment_status: "partially_refunded", refunded_total_cents: 500 };
+  assert.equal(noticeOf(partial, "refund_outstanding").amountCents, 1589);
+  assert.equal(noticeOf(partial, "refund_outstanding").amountCents, maxRefundableCents(partial));
+});
+
+test("11d: a partial refund reads as partial, and names what went back", () => {
+  const partial = {
+    status: "confirmed", payment_status: "partially_refunded", fulfillment_status: "unfulfilled",
+    cancelled_at: null, cancellation_requested_at: null, cancellation_request_resolution: null,
+    total_gross_cents: 3998, refunded_total_cents: 1000,
+  };
+  assert.deepEqual(keysOf(partial), ["refunded_partial"]);
+  const badge = noticeOf(partial, "refunded_partial");
+  assert.equal(badge.label, "Teilweise erstattet");
+  assert.equal(badge.amountCents, 1000, "the badge names the refunded amount, not the rest");
+  assert.equal(formatCents(badge.amountCents, "EUR"), "10,00 €");
+  assert.equal(badge.tone, "info");
+  // A cancelled partial refund shows BOTH halves, urgent one first.
+  const cancelledPartial = {
+    ...partial, status: "cancelled", fulfillment_status: "cancelled",
+    cancelled_at: "2026-09-20T10:15:00.000Z",
+  };
+  assert.deepEqual(keysOf(cancelledPartial), ["refund_outstanding", "refunded_partial"]);
+  assert.equal(noticeOf(cancelledPartial, "refund_outstanding").amountCents, 2998);
+});
+
+test("11e: a full refund reads as full and never as still open", () => {
+  const full = { ...ORDER_459, payment_status: "refunded", refunded_total_cents: 2089 };
+  assert.deepEqual(keysOf(full), ["refunded_full"]);
+  const badge = noticeOf(full, "refunded_full");
+  assert.equal(badge.label, "Erstattet");
+  assert.equal(badge.amountCents, 2089);
+  assert.equal(badge.tone, "info");
+  // Over-refunded rows clamp to zero outstanding rather than going negative.
+  assert.deepEqual(keysOf({ ...full, refunded_total_cents: 5000 }), ["refunded_full"]);
+});
+
+test("11f: nothing refundable is never reported as an open refund", () => {
+  // Cancelled before the customer ever paid: cancel_order writes no money
+  // column, so the arithmetic alone would happily claim the full total.
+  const unpaid = { ...ORDER_459, payment_status: "pending" };
+  assert.ok(maxRefundableCents(unpaid) > 0, "the arithmetic alone still sees a total");
+  assert.deepEqual(keysOf(unpaid), [], "an unpaid cancellation was accused of owing a refund");
+  for (const payment of ["failed", "refunded"]) {
+    assert.ok(!keysOf({ ...ORDER_459, payment_status: payment }).includes("refund_outstanding"),
+      `a ${payment} order reports an open refund`);
+  }
+  // A refund already in flight is not "open" - the Zahlung column says it
+  // is running, and a second refund would settle as a larger total.
+  assert.ok(!keysOf({ ...ORDER_459, payment_status: "refund_pending" }).includes("refund_outstanding"));
+  // Cancelled and fully settled: nothing left to do, nothing claimed.
+  const settled = { ...ORDER_459, payment_status: "refunded", refunded_total_cents: 2089 };
+  assert.ok(!keysOf(settled).includes("refund_outstanding"));
+});
+
+test("11g: an ordinary paid order and a shipped order are unchanged", () => {
+  const paid = {
+    status: "confirmed", payment_status: "paid", fulfillment_status: "unfulfilled",
+    cancelled_at: null, cancellation_requested_at: null, cancellation_request_resolution: null,
+    total_gross_cents: 2089, refunded_total_cents: 0, tracking_number: null,
+  };
+  assert.deepEqual(keysOf(paid), [], "a clean order grew a badge");
+  assert.equal(cancellationRefundState(paid).cancelled, false);
+
+  const shipped = {
+    ...paid, status: "shipped", fulfillment_status: "shipped",
+    tracking_number: "00340434161094042557",
+  };
+  assert.deepEqual(keysOf(shipped), ["tracking"], "the tracking badge changed meaning");
+  assert.equal(noticeOf(shipped, "tracking").tone, "info");
+  assert.equal(cancellationRefundState(shipped).cancelled, false);
+});
+
+test("11h: a declined request leaves the order alone and says so quietly", () => {
+  const declined = {
+    status: "confirmed", payment_status: "paid", fulfillment_status: "unfulfilled",
+    cancelled_at: null,
+    cancellation_requested_at: "2026-09-25T08:00:00.000Z",
+    cancellation_request_resolution: "declined",
+    total_gross_cents: 2089, refunded_total_cents: 0,
+  };
+  assert.deepEqual(keysOf(declined), ["cancellation_declined"]);
+  assert.equal(noticeOf(declined, "cancellation_declined").tone, "info",
+    "a decided request is not a queue item");
+  assert.equal(cancellationRefundState(declined).cancelled, false,
+    "a declined request cancelled the order");
+  // The word is the one the database stores, not one the screen invented.
+  const resolution = read("supabase/migrations/031_cancellation_request_resolution.sql");
+  assert.ok(resolution.includes("'declined'"), "the stored vocabulary moved");
+});
+
+test("11i: the urgent half of a row is emitted before every settled fact", () => {
+  const everything = {
+    ...ORDER_459,
+    payment_status: "partially_refunded",
+    refunded_total_cents: 500,
+    cancellation_request_resolution: "declined",
+    tracking_number: "00340434161094042557",
+  };
+  const all = orderOverviewNotices(everything);
+  const tones = all.map(n => n.tone);
+  assert.ok(tones.includes("action"), "an order that owes money emitted no action badge");
+  assert.equal(tones.lastIndexOf("action") < tones.indexOf("info"), true,
+    "a settled fact was printed above something to do");
+  // Every key the rule can emit is declared, and every declared key is real.
+  assert.deepEqual([...OVERVIEW_NOTICE_KEYS].sort(), [
+    "cancellation_declined", "cancellation_requested", "refund_outstanding",
+    "refunded_full", "refunded_partial", "tracking",
+  ]);
+  for (const n of all) {
+    assert.ok(OVERVIEW_NOTICE_KEYS.includes(n.key), `undeclared key ${n.key}`);
+  }
+});
+
+test("11j: the screen renders the rule and does not re-derive it", () => {
+  const code = codeOnly(ui);
+  assert.ok(code.includes("const notices = orderOverviewNotices(r)"),
+    "the Hinweis cell no longer reads the shared rule");
+  assert.ok(code.includes("const cancelState = cancellationRefundState(r)"),
+    "the Status cell no longer reads the shared rule");
+  // A cancelled order can never be printed as anything else.
+  assert.ok(code.includes('ops-ord-${cancelState.cancelled ? "cancelled" : r.status}'),
+    "the status class stopped following the cancelled flag");
+  assert.ok(code.includes("ORDER_STATUS_LABEL.cancelled"),
+    "the status label stopped following the cancelled flag");
+  // The old hand-rolled cell is gone: no badge is decided in the markup.
+  for (const gone of [
+    "r.cancellation_requested_at && !r.cancellation_request_resolution",
+    "{r.cancelled_at && <span",
+    "(r.refunded_total_cents ?? 0) > 0",
+  ]) {
+    assert.ok(!code.includes(gone), `the list still decides a badge itself: ${gone}`);
+  }
+  // Amounts are formatted by the one money formatter, in the order's currency.
+  assert.ok(code.includes("formatCents(notice.amountCents, currency)"),
+    "a badge amount is formatted somewhere other than formatCents");
+  // And the badges reuse the existing classes rather than inventing a look.
+  for (const cls of ["ops-flag", "ops-flag-refund", "ops-flag-cancel", "ops-flag-track"]) {
+    assert.ok(code.includes(cls), `the badge stopped using ${cls}`);
+  }
+  assert.match(css, /\.ops-flag-action\.ops-flag-refund\{[^}]*background:var\(--berry\)/);
+  assert.match(css, /\.ops-flag-action\.ops-flag-cancel\{[^}]*background:var\(--plum\)/);
+  // The cell is still labelled, so the mobile card still names it.
+  assert.ok(code.includes('data-label="Hinweis"'), "the Hinweis cell lost its mobile label");
+});
+
+test("11k: the overview counts the requests nobody has answered yet", () => {
+  const code = codeOnly(listRoute);
+  // The same two columns hasOpenCancellationRequest() reads, as a
+  // head:true count - no new table, no RPC, no extra round-trip wave.
+  assert.ok(code.includes('head().not("cancellation_requested_at", "is", null).is("cancellation_request_resolution", null)'),
+    "the open-request counter is not the two columns the rule reads");
+  assert.ok(code.includes("openCancellations"), "the counter never reaches the payload");
+  // It travels with the six that were already leaving together.
+  const counts = code.slice(code.indexOf("const countsPromise"), code.indexOf("const revenuePromise"));
+  assert.equal((counts.match(/countOf\(/g) ?? []).length, 7,
+    "the counter was not added to the existing Promise.all");
+  // The existing metrics survive, by name.
+  for (const kept of ["total", "today", "paid", "openFulfillment", "cancelled", "refunded"]) {
+    assert.ok(code.includes(kept), `the ${kept} metric disappeared`);
+  }
+  // And the route is still read-only.
+  for (const write of [".insert(", ".update(", ".upsert(", ".delete(", ".rpc("]) {
+    assert.ok(!code.includes(write), `the orders list route now calls ${write}`);
+  }
+  // The screen shows it, and keeps every tile it already had.
+  assert.ok(ui.includes('["Stornoanfragen offen", data.summary.openCancellations]'),
+    "the KPI tile does not read the new counter");
+  for (const kept of ["Bestellungen gesamt", "Bezahlt", "Zu versenden", "Storniert", "Mit Erstattung"]) {
+    assert.equal((ui.match(new RegExp(`\\["${kept}",`, "g")) ?? []).length, 1,
+      `the ${kept} tile is not present exactly once`);
+  }
+});
+
+test("11l: the cancellation and refund machinery itself was not touched", () => {
+  const rules = read("lib/adminOrderActionRules.ts");
+  for (const guard of [
+    "export function canShip(", "export function canCancel(",
+    "export function canRefund(", "export function canResolveRequest(",
+    "export function maxRefundableCents(", "export function resolveRefundAmount(",
+    "export function refundIdempotencyKey(", "export function hasOpenCancellationRequest(",
+    "export function cancellationRefundState(",
+  ]) {
+    assert.ok(rules.includes(guard), `a guard disappeared: ${guard}`);
+  }
+  // orderOverviewNotices reads, and decides nothing about an action.
+  const notices = rules.slice(rules.indexOf("export function orderOverviewNotices("));
+  for (const banned of ["fetch(", "await ", "Date.now(", "process.env", "allowed:"]) {
+    assert.ok(!notices.includes(banned), `the display rule reaches for ${banned}`);
+  }
+  // The refund and resolution paths are untouched by this package: the
+  // two routes, and the two libraries that actually move the money and
+  // answer the request.
+  const writePaths = {
+    "app/api/admin/orders/refund/route.ts": null,
+    "app/api/admin/orders/resolve-request/route.ts": null,
+    "lib/adminRefundFlow.ts": "resolveRefundAmount(rawAmount, maxCents)",
+    "lib/adminOrderActions.ts": "admin_resolve_order_cancellation_request",
+  };
+  for (const [rel, marker] of Object.entries(writePaths)) {
+    const src = read(rel);
+    assert.ok(!src.includes("orderOverviewNotices"), `${rel} imports the display rule`);
+    if (marker) assert.ok(src.includes(marker), `${rel} lost ${marker}`);
+  }
+  // The refund flow still refuses a second refund while one is in flight,
+  // and still keys every attempt idempotently.
+  const flow = read("lib/adminRefundFlow.ts");
+  assert.ok(flow.includes("canRefund(order)"), "the refund flow stopped asking the guard");
+  assert.ok(flow.includes("refundIdempotencyKey(order.id, alreadyRefunded, amount.amountCents)"),
+    "the refund idempotency key changed");
 });

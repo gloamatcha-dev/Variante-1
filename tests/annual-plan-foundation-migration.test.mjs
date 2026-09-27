@@ -1057,6 +1057,15 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     //
     // None of the three writes a table, reaches Stripe or decides a
     // transition. Reviewed in tests/admin-order-actions.test.mjs.
+    //
+    // ADMIN ORDER OVERVIEW adds ONE more reader to the rules leaf:
+    // orderOverviewNotices(), which turns the answers of
+    // cancellationRefundState / maxRefundableCents /
+    // hasOpenCancellationRequest into the badges of the list's Hinweis
+    // column. It computes no money of its own, it decides no action -
+    // every existing guard is asserted still present - and it is pure:
+    // no await, no clock, no env. Reviewed in
+    // tests/admin-orders.test.mjs section 11.
     "lib/adminOrderActionRules.ts",
     "lib/adminOrderActions.ts",
     // PAKET 4A.1B (FINAL SAFETY), FOUND AGAINST THE MIGRATED DATABASE:
@@ -1795,6 +1804,28 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // replacing two, and the sort/group the leaf resolves. No write verb
     // and no new capability - it keeps "read_sensitive".
     "app/api/admin/subscriptions/route.ts",
+    // ADMIN ORDER OVERVIEW: THE CANCELLATION STATE, IN THE LIST.
+    //
+    // Presentation only. The overview announced an OPEN cancellation
+    // request and then went silent the moment an operator accepted it,
+    // so "cancelled, still paid, nothing refunded" - production order
+    // GLOA-2026-000459, 20,89 EUR still owed - was readable only inside
+    // the drawer. The row now prints it, and the Status column can no
+    // longer show a cancelled order as anything but storniert.
+    //
+    // NO SECOND STATUS CALCULATION AND NO NEW MONEY ARITHMETIC. Every
+    // badge comes out of orderOverviewNotices(), which is itself only a
+    // renderer over cancellationRefundState / maxRefundableCents /
+    // hasOpenCancellationRequest - the three functions the drawer and
+    // the action guards already read. Reviewed in
+    // tests/admin-orders.test.mjs section 11.
+    "app/AdminOrders.tsx",
+    // Its route, same package: a SEVENTH head:true count in the
+    // Promise.all that was already leaving together - the requests
+    // nobody has answered yet, read from the same two columns
+    // hasOpenCancellationRequest() reads. No new table, no RPC, no new
+    // wave of round trips, and the route is still write-verb-free.
+    "app/api/admin/orders/route.ts",
   ];
   // NOTE. Both lists are about UNCOMMITTED edits to files that already
   // exist, so a file this package CREATES does not belong in either -

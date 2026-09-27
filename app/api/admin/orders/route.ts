@@ -159,6 +159,15 @@ export async function POST(request: Request): Promise<Response> {
     countOf(head().eq("fulfillment_status", "unfulfilled"), "open fulfillment"),
     countOf(head().eq("status", "cancelled"), "cancelled"),
     countOf(head().gt("refunded_total_cents", 0), "refunded"),
+    // THE ONE COUNTER THAT IS A QUEUE, and the same two columns
+    // hasOpenCancellationRequest() reads: a request exists and nobody
+    // has answered it. No new column, no new table, no RPC - the
+    // seventh head:true count alongside the six that were already
+    // leaving together.
+    countOf(
+      head().not("cancellation_requested_at", "is", null).is("cancellation_request_resolution", null),
+      "open cancellation requests"
+    ),
   ]);
 
   // Revenue today. Summed over the rows because PostgREST cannot sum and
@@ -222,7 +231,8 @@ export async function POST(request: Request): Promise<Response> {
   // the overview costs six tiny requests instead of 458 rows. They were
   // already issued above, alongside the page itself, and are collected
   // here.
-  const [total, today, paid, openFulfillment, cancelled, refunded] = await countsPromise;
+  const [total, today, paid, openFulfillment, cancelled, refunded, openCancellations] =
+    await countsPromise;
 
   const { data: todayRows, error: revenueError } = await revenuePromise;
 
@@ -251,7 +261,7 @@ export async function POST(request: Request): Promise<Response> {
       fulfillment: query.fulfillment,
       search: query.search,
       summary: {
-        total, today, paid, openFulfillment, cancelled, refunded,
+        total, today, paid, openFulfillment, cancelled, refunded, openCancellations,
         revenueTodayCents, revenueCapped,
         dayStartIso: dayStart,
       },

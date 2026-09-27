@@ -393,6 +393,125 @@ export function cancellationRefundState(order: ActionableOrder): {
   return { cancelled, refundedCents: refunded, outstandingCents: outstanding, label };
 }
 
+/* ═════════════════════════════════════════════════════════════
+   THE "HINWEIS" COLUMN OF THE ORDER LIST, AS DATA
+
+   The overview used to say "Storno angefragt" while a request was open
+   and then fell silent the moment an operator accepted it - so the one
+   state that costs a customer money, "cancelled, still paid, nothing
+   refunded yet", was visible only after opening the drawer. Production
+   order GLOA-2026-000459 sat exactly there: cancelled, payment_status
+   'paid', refunded 0,00 EUR, 20,89 EUR still owed.
+
+   NO SECOND STATUS CALCULATION. Every value below comes out of
+   cancellationRefundState / maxRefundableCents / hasOpenCancellation-
+   Request - the same three functions the drawer and the action guards
+   already read. This function only decides WHICH of their answers the
+   list prints, and in which order.
+   ═════════════════════════════════════════════════════════════ */
+
+/** Everything the list cell reads. The action columns plus the one
+ *  shipping field the cell already showed before this change. */
+export type NoticeableOrder = ActionableOrder & { tracking_number?: string | null };
+
+export const OVERVIEW_NOTICE_KEYS = [
+  "cancellation_requested",
+  "refund_outstanding",
+  "refunded_partial",
+  "refunded_full",
+  "cancellation_declined",
+  "tracking",
+] as const;
+export type OverviewNoticeKey = (typeof OVERVIEW_NOTICE_KEYS)[number];
+
+export type OverviewNotice = {
+  key: OverviewNoticeKey;
+  /** The word the badge shows. The stylesheet upper-cases it. */
+  label: string;
+  /** Integer cents the badge appends, or null when it names no money. */
+  amountCents: number | null;
+  /**
+   * "action" - a person still has to decide something or still has to
+   * send money back. "info" - a fact that is already settled.
+   */
+  tone: "action" | "info";
+};
+
+/**
+ * What the Hinweis cell says about one order, most urgent first.
+ *
+ * THE ORDER OF THIS ARRAY IS THE POINT. An operator scans the column,
+ * so the two states that cost something if they are missed - an
+ * unanswered request and an unpaid refund - are emitted before every
+ * settled fact, and both carry tone "action".
+ *
+ * WHY "Erstattung offen" NEEDS THE PAYMENT STATUS. maxRefundableCents
+ * is pure arithmetic over two money columns: it happily reports the
+ * full total as outstanding for an order that was never paid at all.
+ * cancel_order writes no money column (migration 029), so a cancelled
+ * 'pending' order would otherwise be accused of owing a refund that
+ * nobody ever received. The badge therefore appears only from the
+ * payment states a refund may actually be started from - the same
+ * REFUNDABLE_PAYMENT_STATUSES canRefund() gates on. 'refund_pending' is
+ * deliberately not among them: that money is already on its way, the
+ * Zahlung column says "Erstattung läuft", and calling it "offen" would
+ * invite a second refund.
+ *
+ * "Storniert" is NOT emitted here. The Status column carries it, and
+ * printing the same word twice in one row is how the important half of
+ * the row got lost in the first place.
+ */
+export function orderOverviewNotices(order: NoticeableOrder): OverviewNotice[] {
+  const { cancelled, refundedCents, outstandingCents } = cancellationRefundState(order);
+  const refundable = (REFUNDABLE_PAYMENT_STATUSES as readonly string[])
+    .includes(order.payment_status ?? "");
+  const notices: OverviewNotice[] = [];
+
+  if (hasOpenCancellationRequest(order)) {
+    notices.push({
+      key: "cancellation_requested", label: "Storno angefragt",
+      amountCents: null, tone: "action",
+    });
+  }
+
+  if (cancelled && refundable && outstandingCents > 0) {
+    notices.push({
+      key: "refund_outstanding", label: "Erstattung offen",
+      amountCents: outstandingCents, tone: "action",
+    });
+  }
+
+  if (refundedCents > 0) {
+    notices.push(outstandingCents > 0
+      ? {
+          key: "refunded_partial", label: "Teilweise erstattet",
+          amountCents: refundedCents, tone: "info",
+        }
+      : {
+          key: "refunded_full", label: "Erstattet",
+          amountCents: refundedCents, tone: "info",
+        });
+  }
+
+  // A declined request is durable state on the order, not history the
+  // screen invents: resolve_order_cancellation_request wrote the word.
+  // Quiet by design - the order itself did not move, so nothing about
+  // it needs doing.
+  if (order.cancellation_request_resolution === "declined") {
+    notices.push({
+      key: "cancellation_declined", label: "Storno abgelehnt",
+      amountCents: null, tone: "info",
+    });
+  }
+
+  const tracking = typeof order.tracking_number === "string" ? order.tracking_number.trim() : "";
+  if (tracking) {
+    notices.push({ key: "tracking", label: "Tracking", amountCents: null, tone: "info" });
+  }
+
+  return notices;
+}
+
 /**
  * A typed euro amount as integer cents, or null.
  *

@@ -8796,6 +8796,10 @@ header nav{gap:18px;font-size:12px}
   margin-bottom:clamp(16px,2vw,24px);
 }
 .ops-count{ background:var(--cream); padding:16px 18px; display:flex; flex-direction:column; gap:4px; }
+/* The counter that is a queue: when somebody is actually waiting for a
+   decision, the tile says so with a rule rather than a second colour. */
+.ops-count-open{ box-shadow:inset 3px 0 0 var(--berry); }
+.ops-count-open .ops-count-value{ color:var(--berry); }
 .ops-count-value{ font-size:clamp(22px,2.6vw,30px); font-weight:800; letter-spacing:-.03em; }
 .ops-count-label{ font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--plum); }
 
@@ -9861,7 +9865,9 @@ header nav{gap:18px;font-size:12px}
   color:rgba(17,17,17,.62);
   font-variant-numeric:tabular-nums;
 }
-.ops-order-flags .ops-flag{ margin:0 6px 0 0; }
+/* The Hinweis badges. They now carry amounts as well as words, so the
+   bottom margin is what keeps a wrapped second badge off the first. */
+.ops-order-flags .ops-flag{ margin:0 6px 3px 0; }
 .ops-order-flags .ops-flag:last-child{ margin-right:0; }
 .ops-flag{
   display:inline-block;
@@ -9875,6 +9881,17 @@ header nav{gap:18px;font-size:12px}
 .ops-flag-refund{ color:var(--berry); }
 .ops-flag-cancel{ color:var(--plum); }
 .ops-flag-track{ color:var(--blue); }
+/* An amount inside a badge is read as a number, not as a word. */
+.ops-flag-amount{ font-variant-numeric:tabular-nums; letter-spacing:.06em; }
+
+/* A BADGE SOMEBODY STILL HAS TO ACT ON IS FILLED, not outlined.
+   "Storno angefragt" and "Erstattung offen" are the two states in this
+   column that cost something if they are scrolled past, so they invert
+   instead of growing, shouting or gaining a colour the admin does not
+   already use. Same geometry, same type, same two palette values. */
+.ops-flag-action{ color:var(--cream); }
+.ops-flag-action.ops-flag-cancel{ background:var(--plum); border-color:var(--plum); }
+.ops-flag-action.ops-flag-refund{ background:var(--berry); border-color:var(--berry); }
 
 /* Status words, same idiom as the waitlist: weight and colour, no pill. */
 .ops-pay-paid,.ops-ord-confirmed,.ops-ful-shipped,.ops-ord-shipped{ color:var(--blue); }

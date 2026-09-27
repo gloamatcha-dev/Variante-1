@@ -19,6 +19,12 @@ import {
   type OrderStatus,
   type PaymentStatus,
 } from "../lib/adminOrdersQuery";
+import {
+  cancellationRefundState,
+  orderOverviewNotices,
+  type OverviewNotice,
+  type OverviewNoticeKey,
+} from "../lib/adminOrderActionRules";
 
 /**
  * THE ORDER SECTION OF THE OPERATIONS SCREEN.
@@ -119,6 +125,8 @@ export type OrdersSummary = {
   openFulfillment: number | null;
   cancelled: number | null;
   refunded: number | null;
+  /** Requests a customer made and nobody has answered yet. */
+  openCancellations: number | null;
   revenueTodayCents: number | null;
   revenueCapped: boolean;
   dayStartIso: string;
@@ -337,8 +345,17 @@ export function AdminOrders({ onSessionLost }: { onSessionLost: () => void }) {
           ["Zu versenden", data.summary.openFulfillment],
           ["Storniert", data.summary.cancelled],
           ["Mit Erstattung", data.summary.refunded],
+          // THE ONE COUNTER THAT IS A QUEUE. The six above describe what
+          // happened; this one names how many customers are waiting for
+          // an answer that only a person can give, so it is the number
+          // the team has to act on rather than read.
+          ["Stornoanfragen offen", data.summary.openCancellations],
         ] as [string, string | number | null][]).map(([label, value]) => (
-          <div className="ops-count" key={label}>
+          <div
+            className={label === "Stornoanfragen offen" && typeof value === "number" && value > 0
+              ? "ops-count ops-count-open" : "ops-count"}
+            key={label}
+          >
             <span className="ops-count-value">{value === null ? "—" : value}</span>
             <span className="ops-count-label">{label}</span>
           </div>
@@ -415,8 +432,19 @@ export function AdminOrders({ onSessionLost }: { onSessionLost: () => void }) {
             )}
             {data.rows.map(r => {
               const c = customerFromSnapshot(r.customer_snapshot);
-              const refunded = (r.refunded_total_cents ?? 0) > 0;
               const contents = data.itemSummaries?.[r.id];
+              // ONE READ OF THE SHARED RULE PER ROW, and the same rule the
+              // drawer and the action guards use. Nothing in this row
+              // recomputes what an order is worth or what it still owes.
+              //
+              // A CANCELLED ORDER SAYS SO IN THE STATUS COLUMN, ALWAYS.
+              // Migration 029 moves status and fulfillment_status together,
+              // but a row cancelled before it carries the word in only one
+              // of them - and "Bestaetigt" printed over an order that is
+              // cancelled and still owes money is the exact sentence this
+              // column must never say again.
+              const cancelState = cancellationRefundState(r);
+              const notices = orderOverviewNotices(r);
               return (
                 <tr key={r.id} className="ops-order-row" onClick={() => void openOrder(r.id)}>
                   <td data-label="Bestellung">
@@ -439,14 +467,15 @@ export function AdminOrders({ onSessionLost }: { onSessionLost: () => void }) {
                     <span className={`ops-status ops-ful-${r.fulfillment_status}`}>{FULFILLMENT_STATUS_LABEL[r.fulfillment_status] ?? r.fulfillment_status}</span>
                   </td>
                   <td data-label="Status">
-                    <span className={`ops-status ops-ord-${r.status}`}>{ORDER_STATUS_LABEL[r.status] ?? r.status}</span>
+                    <span className={`ops-status ops-ord-${cancelState.cancelled ? "cancelled" : r.status}`}>
+                      {cancelState.cancelled
+                        ? ORDER_STATUS_LABEL.cancelled
+                        : ORDER_STATUS_LABEL[r.status] ?? r.status}
+                    </span>
                   </td>
                   <td data-label="Hinweis" className="ops-order-flags">
-                    {refunded && <span className="ops-flag ops-flag-refund">Erstattung</span>}
-                    {r.cancellation_requested_at && !r.cancellation_request_resolution && <span className="ops-flag ops-flag-cancel">Storno angefragt</span>}
-                    {r.cancelled_at && <span className="ops-flag ops-flag-cancel">Storniert</span>}
-                    {r.tracking_number && <span className="ops-flag ops-flag-track">Tracking</span>}
-                    {!refunded && !r.cancellation_requested_at && !r.cancelled_at && !r.tracking_number && "—"}
+                    {notices.map(n => <NoticeBadge key={n.key} notice={n} currency={r.currency} />)}
+                    {notices.length === 0 && "—"}
                   </td>
                 </tr>
               );
@@ -480,6 +509,38 @@ export function AdminOrders({ onSessionLost }: { onSessionLost: () => void }) {
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * One badge of the Hinweis column.
+ *
+ * The colour says WHAT the badge is about and the fill says whether
+ * anybody has to do something - an outlined berry badge reports a
+ * refund that happened, a filled one reports money still owed. Both
+ * reuse .ops-flag, so the column keeps the geometry it already had.
+ */
+const NOTICE_CLASS: Readonly<Record<OverviewNoticeKey, string>> = Object.freeze({
+  cancellation_requested: "ops-flag-cancel",
+  refund_outstanding: "ops-flag-refund",
+  refunded_partial: "ops-flag-refund",
+  refunded_full: "ops-flag-refund",
+  cancellation_declined: "ops-flag-cancel",
+  tracking: "ops-flag-track",
+});
+
+function NoticeBadge({ notice, currency }: { notice: OverviewNotice; currency: string }) {
+  const className = [
+    "ops-flag",
+    NOTICE_CLASS[notice.key],
+    notice.tone === "action" ? "ops-flag-action" : "",
+    notice.amountCents !== null ? "ops-flag-amount" : "",
+  ].filter(Boolean).join(" ");
+  return (
+    <span className={className}>
+      {notice.label}
+      {notice.amountCents !== null && ` · ${formatCents(notice.amountCents, currency)}`}
+    </span>
   );
 }
 
