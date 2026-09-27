@@ -185,10 +185,18 @@ export function annualShippingPerDeliveryGrossCents(size: AnnualSize): number {
  * something this becomes 100 and the copy follows by itself. Null would
  * mean nothing ships free, and the surfaces then say nothing at all.
  *
- * The same shape lib/subscriptionPurchaseRules.ts uses for
- * SUBSCRIPTION_FREE_SHIPPING_FROM_GRAMS, and for the same reason. They
- * remain separate decisions about separate products: neither file
- * imports the other, and neither number is copied from the other.
+ * The same DERIVED shape lib/subscriptionPurchaseRules.ts uses for its
+ * own shipping wording, and for the same reason. They remain separate
+ * decisions about separate products: neither file imports the other, and
+ * neither number is copied from the other.
+ *
+ * And since 2026-09-27 they genuinely disagree. The monthly subscription
+ * dropped its free-shipping benefit entirely - every size pays 5,90 per
+ * delivery there, and its SUBSCRIPTION_FREE_SHIPPING_FROM_GRAMS is gone
+ * rather than null. The PREPAID ANNUAL PLAN is untouched: it is a
+ * different contract, paid once for thirteen deliveries, and 50 g upward
+ * still ships free in it. Being able to differ is the whole point of the
+ * two tables being separate authorities.
  */
 export const ANNUAL_FREE_SHIPPING_FROM_GRAMS: number | null = (() => {
   const free = ANNUAL_SIZES

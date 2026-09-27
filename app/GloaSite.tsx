@@ -32,11 +32,17 @@ import { ANNUAL_GERMANY_ONLY_NOTE, ANNUAL_LAUNCH_SIZE_BY_SKU, annualPortalHref }
 import { CADENCE_DAYS, SUBSCRIPTION_CADENCE_LABEL, SUBSCRIPTION_QUANTITY_LABEL } from "../lib/subscriptionCancellationRules";
 import {
   SUBSCRIPTION_ABROAD_SHIPPING_NOTE,
-  SUBSCRIPTION_FREE_SHIPPING_NOTE,
+  SUBSCRIPTION_DE_SHIPPING_NOTE,
   isSubscribableVariant,
   subscriptionDeShippingGrossCents,
   subscriptionPortalHref,
 } from "../lib/subscriptionPurchaseRules";
+// WHERE A SIGN-IN GOES. One authority, so the four auth handlers below
+// cannot each hardcode a different destination - and so a customer sent
+// here mid-subscription comes back to the subscription instead of to a
+// generic dashboard. See lib/authReturnTarget.ts for the open-redirect
+// rule every value passes through.
+import { readAccountReturnPath, resolveAccountDestination } from "../lib/authReturnTarget";
 import { getProductPresentation, showsUnitPricePer100g, showsFoodInformation, isWeighedProduct, getProductImage, getProductSubtitle, getProductEyebrow, MATCHA_NOT_INCLUDED_SHORT } from "../lib/productPresentation";
 import { BusinessCalculator } from "./BusinessCalculator";
 import { AccountPortal } from "./AccountPortal";
@@ -522,8 +528,12 @@ function SubscriptionPlanPanel({variant}:{variant:CatalogVariant}){
 // a signed-out visitor has not chosen one - so it states the German
 // figures and says so in the same breath, rather than showing a number
 // that would be wrong for an Austrian customer.
+//
+// EVERY SIZE PAYS. The table this reads charges 590 per delivery for
+// 30 g, 50 g and 100 g alike, so there is no "free" branch left to
+// render - and there is no threshold sentence either, because the
+// monthly subscription no longer has one.
 const deShippingCents=subscriptionDeShippingGrossCents(variant.sku);
-const shipsFreeInDe=deShippingCents===0;
 return <div className="sub-panel">
 <p className="eyebrow sub-panel-eyebrow">ABO</p>
 <p className="sub-panel-title">{SUBSCRIPTION_CADENCE_LABEL} Matcha.</p>
@@ -531,11 +541,12 @@ return <div className="sub-panel">
 <dl className="sub-panel-lines">
 {PRICES_VISIBLE&&<div><dt>Matcha je Lieferung</dt><dd>{fmtCents(variant.price_gross_cents)} €</dd></div>}
 {/* The delivery charge is a FACT of the plan, so it is a data row and
-    not a footnote - and it is shown even while prices are hidden when
-    it is free, because "kostenlos" is not a price. The country is IN
-    the value: this figure is the German one and nothing here knows
+    not a footnote. It is a PRICE now for every size, so it follows
+    PRICES_VISIBLE unconditionally - the old "kostenlos is not a price"
+    exemption described a waiver that no longer exists. The country is
+    IN the value: this figure is the German one and nothing here knows
     where the customer will actually have it delivered. */}
-{deShippingCents!==null&&<div><dt>Versand je Lieferung</dt><dd>{shipsFreeInDe?"Kostenloser Versand innerhalb Deutschlands":PRICES_VISIBLE?`${fmtCents(deShippingCents)} € Versand je Lieferung innerhalb Deutschlands`:"—"}</dd></div>}
+{deShippingCents!==null&&<div><dt>Versand je Lieferung</dt><dd>{PRICES_VISIBLE?`${fmtCents(deShippingCents)} € Versand je Lieferung innerhalb Deutschlands`:"—"}</dd></div>}
 <div><dt>Rhythmus</dt><dd>{SUBSCRIPTION_CADENCE_LABEL} ({CADENCE_DAYS} Tage)</dd></div>
 <div><dt>Menge je Lieferung</dt><dd>{SUBSCRIPTION_QUANTITY_LABEL}</dd></div>
 </dl>
@@ -549,7 +560,7 @@ Du zahlst den normalen Shop-Preis, {SUBSCRIPTION_QUANTITY_LABEL} alle {CADENCE_D
     cannot outlive the rule it describes - and never shown without the
     sentence that bounds it geographically. Half of this pair on its own
     would read as a promise to every country. */}
-{SUBSCRIPTION_FREE_SHIPPING_NOTE&&<p className="sub-panel-shipping">{SUBSCRIPTION_FREE_SHIPPING_NOTE} {SUBSCRIPTION_ABROAD_SHIPPING_NOTE}</p>}
+{SUBSCRIPTION_DE_SHIPPING_NOTE&&<p className="sub-panel-shipping">{SUBSCRIPTION_DE_SHIPPING_NOTE} {SUBSCRIPTION_ABROAD_SHIPPING_NOTE}</p>}
 <p className="sub-panel-note">
 Der Versand gilt je Lieferung und ist im Abo-Betrag enthalten; den genauen Betrag siehst du vor der Zahlung.
 {" "}Für Einzelbestellungen gelten weiterhin die normalen <Link href="/versand">Versandinformationen</Link>.
@@ -2423,7 +2434,7 @@ return <main className="legal-page legal-doc legal-agb">
 <p>Neben dem Einzelkauf kannst du GLOA Matcha als Abonnement beziehen. Das Abonnement ist ein Dauerschuldverhältnis: Du erhältst regelmäßig dieselbe Ware, und der Preis wird im selben Rhythmus abgebucht.</p>
 <p>Der Rhythmus beträgt vier Wochen, also genau 28 Tage. Er ist kein Kalendermonat. Je Lieferung erhältst du eine Packung in der von dir gewählten Größe.</p>
 <p>Es gilt der jeweils im Shop ausgewiesene Preis der gewählten Größe. Ein gesonderter Abonnementpreis und ein Abonnementrabatt bestehen nicht.</p>
-<p>Für das Abonnement gelten eigene Versandkosten je Lieferung. Bei Lieferadressen in Deutschland fallen für 30 g 5,90 EUR je Lieferung an; ab 50 g ist der Versand innerhalb Deutschlands kostenlos. Für Lieferadressen außerhalb Deutschlands gelten die für das jeweilige Zielland ausgewiesenen Versandkosten; der kostenlose Versand ab 50 g gilt dort nicht.</p>
+<p>Für das Abonnement gelten eigene Versandkosten je Lieferung. Bei Lieferadressen in Deutschland fallen für jede Größe 5,90 EUR je Lieferung an; eine versandkostenfreie Größe gibt es im Abonnement nicht. Für Lieferadressen außerhalb Deutschlands gelten die für das jeweilige Zielland ausgewiesenen Versandkosten.</p>
 <p>Diese Versandregelung betrifft ausschließlich das Abonnement. Für Einzelbestellungen gelten unverändert die unter <Link href="/versand">Versandinformationen</Link> ausgewiesenen Regeln. Den für dich geltenden Gesamtbetrag siehst du in jedem Fall vor Abschluss der Bestellung.</p>
 <p>Das Abonnement wird über dein GLOA-Kundenkonto abgeschlossen; dafür benötigen wir eine in deinem Konto hinterlegte Lieferadresse. Der Vertrag über das Abonnement kommt mit unserer Bestätigung nach der ersten erfolgreichen Zahlung zustande. Für jede Lieferung erhältst du eine Bestätigung per E-Mail.</p>
 <p>Das Abonnement läuft, bis es gekündigt wird. Eine Mindestlaufzeit besteht nicht. Du kündigst es jederzeit selbst in deinem <Link href="/account">Kundenkonto</Link>; eine Kündigungsgebühr fällt nicht an. Geht deine Kündigung mindestens vierzehn Tage vor der nächsten Abbuchung bei uns ein, entfällt der kommende Zeitraum. Geht sie später ein, wird der bereits angestoßene Zeitraum noch geliefert und abgerechnet, und das Abonnement endet danach. Welches Datum für dich gilt, zeigen wir dir vor dem Absenden der Kündigung an.</p>
@@ -2578,7 +2589,12 @@ return <form className="account-form legal-withdrawal" onSubmit={startReview}>
 
 function Account(){
 const { user, loading: authLoading } = useAuth();
-const [view,setView]=useState<"landing"|"login"|"choose"|"register"|"b2b-apply"|"forgot"|"confirm-pending">(()=>{if(typeof window!=="undefined"){const p=new URLSearchParams(window.location.search);if(p.get("type")==="business")return "b2b-apply";if(p.get("action")==="register")return "choose"}return "landing"});
+const [view,setView]=useState<"landing"|"login"|"choose"|"register"|"b2b-apply"|"forgot"|"confirm-pending">(()=>{if(typeof window!=="undefined"){const p=new URLSearchParams(window.location.search);if(p.get("type")==="business")return "b2b-apply";if(p.get("action")==="register")return "choose";if(readAccountReturnPath(window.location.search))return "login"}return "landing"});
+// THE PENDING DESTINATION, read once and only in a browser, for the same
+// reason the view above is: it cannot change while this component lives,
+// and reading it in an effect would render the login form once without
+// the sentence that explains why the customer is looking at it.
+const [returnTarget]=useState<string|null>(()=>typeof window==="undefined"?null:readAccountReturnPath(window.location.search));
 const [pwError,setPwError]=useState("");
 const [authError,setAuthError]=useState("");
 const [authBusy,setAuthBusy]=useState(false);
@@ -2586,14 +2602,24 @@ const [forgotSent,setForgotSent]=useState(false);
 
 const translateAuthErr=(msg:string)=>{if(msg==="Invalid login credentials")return "E-Mail oder Passwort falsch.";if(msg.includes("already registered"))return "Diese E-Mail ist bereits registriert.";if(msg.toLowerCase().includes("rate limit")||msg.includes("security purposes"))return "Zu viele Anfragen. Bitte warte einen Moment.";return msg};
 
-// Logged-in users → dashboard
-// THE QUERY STRING SURVIVES THE REDIRECT. Stripe returns an annual
-// purchase to /account?annual=processing&annualPlanId=..., and a signed-in
-// visitor is bounced straight to the dashboard - which used to DROP those
-// parameters, so the customer landed on a normal dashboard with no sign
-// that their payment had been submitted. Carrying the search through is
-// the whole fix; the portal reads it from there.
-useEffect(()=>{if(!authLoading&&user)window.location.href="/account/dashboard"+window.location.search},[user,authLoading]);
+// ALREADY SIGNED IN → WHEREVER THIS VISIT WAS ACTUALLY HEADED.
+//
+// resolveAccountDestination answers that, and it answers it once for all
+// four navigations out of this component. Two things depend on it:
+//
+//   THE QUERY STRING SURVIVES. Stripe returns an annual purchase to
+//   /account?annual=processing&annualPlanId=..., and this bounce used to
+//   DROP those parameters, so the customer landed on a normal dashboard
+//   with no sign that their payment had been submitted. The resolver
+//   carries everything except `next` through to the dashboard.
+//
+//   AND A PENDING FLOW IS NOT LOST. A validated `next` wins, so a
+//   customer sent here mid-subscription returns to the subscription with
+//   their size rather than to a generic dashboard.
+//
+// A target that is not provably an internal GLOA route is ignored, which
+// lands on /account/dashboard - exactly the old behaviour.
+useEffect(()=>{if(!authLoading&&user)window.location.href=resolveAccountDestination(window.location.search)},[user,authLoading]);
 
 const validatePw=(form:FormData)=>{
 const pw=String(form.get("password")||"");
@@ -2608,13 +2634,13 @@ setPwError("");return true};
 const confirmUrl=browserAuthRedirectUrl(AUTH_CONFIRM_PATH);
 const resetUrl=browserAuthRedirectUrl(PASSWORD_RESET_PATH);
 
-const handleLogin=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();if(!supabase)return;setAuthBusy(true);setAuthError("");const f=new FormData(e.currentTarget);const{error}=await supabase.auth.signInWithPassword({email:String(f.get("email")),password:String(f.get("password"))});setAuthBusy(false);if(error){setAuthError(translateAuthErr(error.message));return}window.location.href="/account/dashboard"};
+const handleLogin=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();if(!supabase)return;setAuthBusy(true);setAuthError("");const f=new FormData(e.currentTarget);const{error}=await supabase.auth.signInWithPassword({email:String(f.get("email")),password:String(f.get("password"))});setAuthBusy(false);if(error){setAuthError(translateAuthErr(error.message));return}window.location.href=resolveAccountDestination(window.location.search)};
 
 const handleForgot=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();if(!supabase)return;setAuthBusy(true);setAuthError("");const f=new FormData(e.currentTarget);const{error}=await supabase.auth.resetPasswordForEmail(String(f.get("email")),{redirectTo:resetUrl});setAuthBusy(false);if(error){setAuthError(translateAuthErr(error.message));return}setForgotSent(true)};
 
-const handlePrivate=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);if(!validatePw(f))return;if(!supabase)return;setAuthBusy(true);setAuthError("");const{data,error}=await supabase.auth.signUp({email:String(f.get("email")),password:String(f.get("password")),options:{emailRedirectTo:confirmUrl,data:{customer_type:"private",first_name:String(f.get("first_name")),last_name:String(f.get("last_name")),phone:String(f.get("phone")||""),street:String(f.get("street")),house_number:String(f.get("house_number")),zip:String(f.get("zip")),city:String(f.get("city")),country:String(f.get("country")),accept_terms:true,newsletter:false}}});setAuthBusy(false);if(error){setAuthError(translateAuthErr(error.message));return}if(data.session){window.location.href="/account/dashboard"}else{setView("confirm-pending")}};
+const handlePrivate=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);if(!validatePw(f))return;if(!supabase)return;setAuthBusy(true);setAuthError("");const{data,error}=await supabase.auth.signUp({email:String(f.get("email")),password:String(f.get("password")),options:{emailRedirectTo:confirmUrl,data:{customer_type:"private",first_name:String(f.get("first_name")),last_name:String(f.get("last_name")),phone:String(f.get("phone")||""),street:String(f.get("street")),house_number:String(f.get("house_number")),zip:String(f.get("zip")),city:String(f.get("city")),country:String(f.get("country")),accept_terms:true,newsletter:false}}});setAuthBusy(false);if(error){setAuthError(translateAuthErr(error.message));return}if(data.session){window.location.href=resolveAccountDestination(window.location.search)}else{setView("confirm-pending")}};
 
-const handleB2B=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);if(!validatePw(f))return;if(!supabase)return;setAuthBusy(true);setAuthError("");const{data,error}=await supabase.auth.signUp({email:String(f.get("email")),password:String(f.get("password")),options:{emailRedirectTo:confirmUrl,data:{customer_type:"business",first_name:String(f.get("contact_first_name")),last_name:String(f.get("contact_last_name")),contact_first_name:String(f.get("contact_first_name")),contact_last_name:String(f.get("contact_last_name")),phone:String(f.get("phone")||""),company_name:String(f.get("company_name")),legal_form:String(f.get("legal_form")||""),tax_number:String(f.get("tax_number")),vat_id:String(f.get("vat_id")||""),website:String(f.get("website")||""),street:String(f.get("street")),house_number:String(f.get("house_number")),zip:String(f.get("zip")),city:String(f.get("city")),country:String(f.get("country")),confirm_company_auth:!!f.get("confirm_company_auth"),accept_terms:true,newsletter:false}}});setAuthBusy(false);if(error){setAuthError(translateAuthErr(error.message));return}if(data.session){window.location.href="/account/dashboard"}else{setView("confirm-pending")}};
+const handleB2B=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);if(!validatePw(f))return;if(!supabase)return;setAuthBusy(true);setAuthError("");const{data,error}=await supabase.auth.signUp({email:String(f.get("email")),password:String(f.get("password")),options:{emailRedirectTo:confirmUrl,data:{customer_type:"business",first_name:String(f.get("contact_first_name")),last_name:String(f.get("contact_last_name")),contact_first_name:String(f.get("contact_first_name")),contact_last_name:String(f.get("contact_last_name")),phone:String(f.get("phone")||""),company_name:String(f.get("company_name")),legal_form:String(f.get("legal_form")||""),tax_number:String(f.get("tax_number")),vat_id:String(f.get("vat_id")||""),website:String(f.get("website")||""),street:String(f.get("street")),house_number:String(f.get("house_number")),zip:String(f.get("zip")),city:String(f.get("city")),country:String(f.get("country")),confirm_company_auth:!!f.get("confirm_company_auth"),accept_terms:true,newsletter:false}}});setAuthBusy(false);if(error){setAuthError(translateAuthErr(error.message));return}if(data.session){window.location.href=resolveAccountDestination(window.location.search)}else{setView("confirm-pending")}};
 
 if(view==="confirm-pending")return <main className="account-page"><section className="account-section">
 <p className="eyebrow">GLOA ACCOUNT</p>
@@ -2639,6 +2665,13 @@ if(view==="login")return <main className="account-page"><section className="acco
 <button className="account-back" onClick={()=>{setView("landing");setPwError("");setAuthError("")}}>&#8592; Zurück</button>
 <p className="eyebrow">GLOA ACCOUNT</p>
 <h1>Anmelden.</h1>
+{/* WHY THIS CUSTOMER IS HERE. A visitor who chose a size in the shop was
+    sent to the account by the portal guard, not by themselves - so the
+    page says that the flow continues afterwards rather than looking like
+    an unexplained detour. Shown only when a VALIDATED internal target is
+    actually pending, so it can never promise a return that will not
+    happen. */}
+{returnTarget&&<p className="account-confirm-hint">Melde dich an, wir bringen dich danach direkt dorthin zurück.</p>}
 <form className="account-form" onSubmit={handleLogin}>
 <label>E-Mail-Adresse<input required type="email" placeholder="deine@email.de" autoComplete="email" name="email"/></label>
 <label>Passwort<input required type="password" placeholder="Passwort" autoComplete="current-password" name="password"/></label>
@@ -2646,6 +2679,7 @@ if(view==="login")return <main className="account-page"><section className="acco
 <button className="cta account-cta" type="submit" disabled={authBusy}>{authBusy?"ANMELDEN…":"Anmelden"}</button>
 </form>
 <button className="account-forgot" onClick={()=>{setView("forgot");setAuthError("")}}>Passwort vergessen?</button>
+<p className="account-login-hint">Noch kein Konto? <button className="account-link-btn" onClick={()=>{setView("choose");setAuthError("")}}>Konto erstellen</button></p>
 </section></main>;
 
 if(view==="choose")return <main className="account-page"><section className="account-section account-choose">

@@ -191,9 +191,20 @@ test("subscriptions: the form posts to the EXISTING route and builds no second c
   // No second engine: no Stripe, no price construction, no plan
   // creation, and no write of any kind from the browser.
   for (const banned of ["stripe", "Stripe", "price_data", "unit_amount", "createCheckoutSession",
-                        ".insert(", ".update(", ".upsert(", ".delete(", ".rpc("]) {
+                        ".insert(", ".update(", ".upsert(", ".rpc("]) {
     assert.ok(!startMarkup.includes(banned), `the form reimplements checkout: ${banned}`);
   }
+  /*
+    A DATABASE delete, and not a URLSearchParams one.
+
+    The form keeps the selected size in the URL so a reload cannot
+    silently restore the size the shop sent, and dropping a parameter is
+    `searchParams.delete(...)` - a string edit, not a write. The ban is
+    therefore qualified rather than dropped: `supabase.from(...).delete()`
+    still trips it.
+  */
+  assert.ok(!/(?<!searchParams)\.delete\(/.test(startMarkup),
+    "the form reimplements checkout: .delete(");
   // The bearer token is the caller's own session, exactly as the
   // cancellation call already does it.
   assert.ok(startMarkup.includes("Authorization: `Bearer ${session.access_token}`"),
@@ -250,31 +261,27 @@ test("subscriptions: no subscription discount is promised, because none exists",
   const DISCLAIMER = "Für ein Abo ist kein gesonderter Preis und kein Rabatt hinterlegt.";
   assert.ok(flat.includes(DISCLAIMER), "the form must say no subscription price exists");
   /*
-    FREE SHIPPING IS NOW A REAL, APPROVED BENEFIT - so the words that
-    describe it are removed before the invented-benefit scan, exactly as
-    the discount disclaimer above already is.
+    THERE IS NO FREE-SHIPPING BENEFIT ANY MORE, SO NOTHING IS APPROVED.
 
-    It is NOT a loosening. Each allowed phrase carries its geographic
-    bound in the same string, so a bare "Kostenloser Versand" - a
-    promise this shop does not make outside Germany - still trips the
-    scan, and so does any other invented benefit. The German-only
-    wording itself is asserted in
-    tests/subscription-purchase-surface.test.mjs.
+    This block used to hold an APPROVED_SHIPPING allowlist: free shipping
+    from 50 g was a real benefit, so the words describing it were removed
+    before the invented-benefit scan. The monthly subscription charges
+    5,90 on every size now, so the allowlist is DELETED rather than
+    shortened - every free-shipping word is an invented benefit again,
+    which is exactly what the scan below is for.
   */
-  const APPROVED_SHIPPING = [
-    "Kostenloser Versand innerhalb Deutschlands",
-    "Kostenloser Versand",                       // the option row, for a German address
-    // The grams come from the constant, so the SOURCE carries the
-    // placeholder rather than "50" - matched as it is actually written.
-    "kostenlose Versand ab ${SUBSCRIPTION_FREE_SHIPPING_FROM_GRAMS} g gilt nur innerhalb Deutschlands",
-  ];
   let rest = flat.replace(DISCLAIMER, "");
-  for (const approved of APPROVED_SHIPPING) rest = rest.split(approved).join("");
-  for (const fake of ["Abo-Rabatt", "Rabatt", "gratis", "kostenlos", "spare", "Spare", "Vorteil"]) {
+  for (const fake of ["Abo-Rabatt", "Rabatt", "gratis", "kostenlos", "Kostenlos",
+                      "spare", "Spare", "Vorteil"]) {
     assert.ok(!rest.includes(fake), `an invented benefit appeared: ${fake}`);
   }
-  // And the approved wording really is what the form shows.
-  assert.ok(flat.includes("Kostenloser Versand"), "the free-shipping benefit disappeared");
+  // And the charge the form DOES state is the derived one, read from the
+  // canonical rule rather than typed. The euro figure itself is asserted
+  // in tests/subscription-flow-return.test.mjs.
+  assert.ok(flat.includes("SUBSCRIPTION_DE_SHIPPING_NOTE"),
+    "the form stopped stating the per-delivery shipping charge");
+  assert.ok(flat.includes("€ Versand je Lieferung"),
+    "the size cards stopped showing the delivery charge");
   assert.ok(!/\d\s*%/.test(startMarkup), "a percentage appeared on the subscriptions page");
   // The cadence and the quantity are READ from the rules module, so the
   // page cannot promise a rhythm the cutoff arithmetic does not use.

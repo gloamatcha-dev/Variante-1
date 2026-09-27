@@ -12,7 +12,7 @@ import { CADENCE_DAYS, CANCELLATION_CUTOFF_DAYS } from "../lib/subscriptionCance
 // AGB cannot state a delivery charge nobody is actually billed.
 import {
   SUBSCRIPTION_DE_SHIPPING_PER_DELIVERY_GROSS_CENTS,
-  SUBSCRIPTION_FREE_SHIPPING_FROM_GRAMS,
+  SUBSCRIPTION_HAS_FREE_SHIPPING_IN_GERMANY,
   SUBSCRIPTION_SHIPPING_BENEFIT_COUNTRY,
 } from "../lib/subscriptionPurchaseRules.ts";
 // The annual rules the AGB section describes, imported so the terms
@@ -772,36 +772,42 @@ test("AGB: the subscription is described, and only as the code performs it", () 
   assert.match(readSrc("supabase/migrations/024_seed_b2c_subscription_plans.sql"), /discount_percent/);
 
   /*
-    SHIPPING: THE SUBSCRIPTION'S OWN RULE, PER SIZE.
+    SHIPPING: THE SUBSCRIPTION'S OWN RULE, PER DELIVERY.
 
-    This used to assert that the terms described the ordinary shop rule,
-    which was true while the subscription had none of its own. It now has
-    one - 30 g pays 5,90 per delivery, 50 g and 100 g ship free - and the
-    terms must describe THAT, because a delivery charge is a contractual
-    term and the old sentence would now be false.
+    A DELIVERY CHARGE IS A CONTRACTUAL TERM, so this paragraph has to be
+    corrected whenever the rule moves - a sentence promising free shipping
+    the shop no longer gives is not a stale comment, it is a false term.
 
-    Every figure in the paragraph is checked against the one table the
-    server prices from, so the terms cannot state an amount nobody is
-    charged.
+    It has moved twice. It first said the ordinary shop rule applied,
+    which was true while the subscription had none of its own. It then
+    said "30 g pays 5,90; ab 50 g ist der Versand kostenlos", which was
+    true while 50 g and 100 g were waived. Since 2026-09-27 EVERY size
+    pays 5,90 per delivery and there is no waived size at all, so the
+    paragraph states one figure and explicitly denies the exception.
+
+    Every figure is checked against the one table the server prices from,
+    so the terms cannot state an amount nobody is charged.
   */
   assert.match(abo, /eigene Versandkosten je Lieferung/);
-  // GERMANY: the two figures, and both name the country.
-  assert.match(abo, /Bei Lieferadressen in Deutschland fallen für 30 g 5,90 EUR je Lieferung an/);
-  assert.match(abo, /ab 50 g ist der Versand innerhalb Deutschlands kostenlos/);
-  assert.equal(SUBSCRIPTION_DE_SHIPPING_PER_DELIVERY_GROSS_CENTS["GLOA-MATCHA-30G"], 590,
-    "the terms name 5,90 but the rule charges something else");
-  assert.equal(SUBSCRIPTION_DE_SHIPPING_PER_DELIVERY_GROSS_CENTS["GLOA-MATCHA-50G"], 0);
-  assert.equal(SUBSCRIPTION_DE_SHIPPING_PER_DELIVERY_GROSS_CENTS["GLOA-MATCHA-100G"], 0);
-  assert.equal(SUBSCRIPTION_FREE_SHIPPING_FROM_GRAMS, 50,
-    "the terms say 'ab 50 g' but the rule frees a different size");
+  // GERMANY: one figure, for every size, naming the country.
+  assert.match(abo, /Bei Lieferadressen in Deutschland fallen für jede Größe 5,90 EUR je Lieferung an/);
+  assert.match(abo, /eine versandkostenfreie Größe gibt es im Abonnement nicht/);
+  for (const sku of ["GLOA-MATCHA-30G", "GLOA-MATCHA-50G", "GLOA-MATCHA-100G"]) {
+    assert.equal(SUBSCRIPTION_DE_SHIPPING_PER_DELIVERY_GROSS_CENTS[sku], 590,
+      `the terms name 5,90 for every size but ${sku} is charged something else`);
+  }
+  assert.equal(SUBSCRIPTION_HAS_FREE_SHIPPING_IN_GERMANY, false,
+    "the terms deny a free size but the rule still waives one");
   assert.equal(SUBSCRIPTION_SHIPPING_BENEFIT_COUNTRY, "DE",
-    "the terms name Germany but the benefit applies somewhere else");
+    "the terms name Germany but the rule applies somewhere else");
+  // AND THE OLD PROMISE IS GONE FROM THE TERMS.
+  for (const stale of [/ab 50 g ist der Versand/, /kostenlose[rn]? Versand/, /kostenlos/]) {
+    assert.ok(!stale.test(abo), `the subscription terms still promise free shipping: ${stale}`);
+  }
 
-  // OUTSIDE GERMANY: the destination's own cost, and the benefit is
-  // explicitly excluded. Without this sentence the paragraph would read
-  // as a promise of free shipping everywhere from 50 g.
+  // OUTSIDE GERMANY: the destination's own cost. There is no benefit left
+  // to exclude, so the sentence that excluded it is gone with it.
   assert.match(abo, /Für Lieferadressen außerhalb Deutschlands gelten die für das jeweilige Zielland ausgewiesenen Versandkosten/);
-  assert.match(abo, /der kostenlose Versand ab 50 g gilt dort nicht/);
 
   // The server resolves exactly that way: the destination's normal
   // amount from lib/shipping.ts, with the German exception over it.

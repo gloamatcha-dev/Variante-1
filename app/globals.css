@@ -672,6 +672,15 @@ a.portal-summary-row:hover{color:var(--blue)}
    mirror image of .sub-start-shipping's spacing rather than the 14px
    top margin .portal-note carries for standalone prose. */
 .sub-start-free-shipping{margin:0 0 10px}
+/* THE "ADD ANOTHER ADDRESS" LINK, under the address selector. It is one
+   quiet action rather than prose, so it carries .portal-action's own type
+   and only needs the spacing .sub-start-shipping already establishes -
+   without .portal-note's 14px top margin, which would open a gap between
+   the select and its own action. */
+.sub-start-add-address{margin:10px 0 0}
+/* THE REASON THE CTA IS DISABLED, under the CTA. Kept tight to the button
+   it explains rather than reading as a new paragraph. */
+.sub-start-blocked{margin:10px 0 0}
 .sub-start-error{font:13px/1.4 var(--font-mono);color:var(--berry);margin:0 0 16px}
 .sub-start-cta{margin-top:4px}
 .sub-start-cta:disabled{cursor:not-allowed;opacity:.45}

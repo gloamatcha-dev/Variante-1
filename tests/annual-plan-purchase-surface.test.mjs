@@ -4,6 +4,9 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+// The account destination resolver, so "the annual return parameters still
+// arrive" is a value this suite checks rather than a string it matches.
+import { resolveAccountDestination } from "../lib/authReturnTarget.ts";
 import {
   ANNUAL_DELIVERY_COUNT,
   ANNUAL_DELIVERY_INTERVAL_DAYS,
@@ -347,9 +350,22 @@ test("4d: the account landing carries the return parameters through", () => {
   // The annual route returns to /account with its own parameters, and
   // /account bounces a signed-in customer to the dashboard. Dropping the
   // query there would have silently swallowed every annual return.
-  const account = site.slice(site.indexOf("function Account()"), site.indexOf("function Account()") + 1500);
+  const account = site.slice(site.indexOf("function Account()"), site.indexOf("function Account()") + 2600);
+  /*
+    THE BOUNCE NOW GOES THROUGH resolveAccountDestination.
+
+    It used to append window.location.search to a hardcoded
+    "/account/dashboard". The annual parameters still reach the dashboard -
+    which is what this test is about, and it is now asserted on the
+    resolver itself rather than on the shape of one string. The reason it
+    moved is that a hardcoded dashboard destination ALSO swallowed every
+    subscription intent; see tests/subscription-flow-return.test.mjs.
+  */
   assert.match(account,
-    /useEffect\(\(\)=>\{if\(!authLoading&&user\)window\.location\.href="\/account\/dashboard"\+window\.location\.search\}/);
+    /useEffect\(\(\)=>\{if\(!authLoading&&user\)window\.location\.href=resolveAccountDestination\(window\.location\.search\)\}/);
+  assert.equal(resolveAccountDestination("?annual=processing&annualPlanId=abc123"),
+    "/account/dashboard?annual=processing&annualPlanId=abc123",
+    "an annual return no longer reaches the dashboard with its parameters");
   assert.match(checkoutRoute, /\/account\?annual=/);
 });
 

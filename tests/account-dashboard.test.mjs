@@ -285,7 +285,19 @@ test("separation: the dashboard still branches on the account's own customer typ
 /* ── Guards and permissions are untouched ───────────────────── */
 
 test("guards: the auth and customer-type redirects are unchanged", () => {
-  assert.match(portal, /if \(!loading && !user\) \{\s*window\.location\.href = "\/account";/);
+  /*
+    THE SIGNED-OUT GUARD NOW CARRIES THE PAGE IT IS LEAVING.
+
+    It used to redirect to a bare "/account", which threw away the route
+    AND any `?sku=` the shop had sent - so a subscription intent did not
+    survive the sign-in. The destination is validated against
+    lib/publicRoutes.ts on the way out and again on the way back in; the
+    flow itself is proved in tests/subscription-flow-return.test.mjs.
+    What this test still pins is that the guard exists and fires on
+    exactly the same condition.
+  */
+  assert.match(portal,
+    /if \(!loading && !user\) \{\s+window\.location\.href = accountLoginHref\(currentAccountReturnPath\(\)\);/);
   assert.match(portal, /page === "business" \|\| page === "supply-detail"\) && customerType !== "business"/);
   assert.match(portal, /page === "subscriptions" \|\| page === "subscription-detail"\) && customerType === "business"/);
   // The nav still filters by customer type.

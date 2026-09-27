@@ -82,10 +82,9 @@ test("1b: both actions still invoke exactly the handlers they did", () => {
   assert.match(site, /if\(view==="choose"\)return <main className="account-page">/);
 });
 
-test("1c: no auth logic was touched", () => {
+test("1c: the auth MECHANISM is untouched; only the DESTINATION moved", () => {
   for (const kept of [
     'const { user, loading: authLoading } = useAuth();',
-    'useEffect(()=>{if(!authLoading&&user)window.location.href="/account/dashboard"+window.location.search},[user,authLoading]);',
     'supabase.auth.signInWithPassword',
     'supabase.auth.signUp',
     'supabase.auth.resetPasswordForEmail',
@@ -94,8 +93,33 @@ test("1c: no auth logic was touched", () => {
   ]) {
     assert.ok(site.includes(kept), `auth code changed: ${kept}`);
   }
-  // The view initialiser, including both deep links, is byte-identical.
-  assert.match(site, /const p=new URLSearchParams\(window\.location\.search\);if\(p\.get\("type"\)==="business"\)return "b2b-apply";if\(p\.get\("action"\)==="register"\)return "choose"/);
+  /*
+    THE ONE THING THAT DID CHANGE, AND WHY.
+
+    Every navigation out of this component used to be a hardcoded
+    "/account/dashboard". That is right for somebody who came to /account
+    to look at their account, and it silently destroyed every flow that
+    sent them here to finish something - /shop sends a customer who chose
+    30 g to /account/subscriptions?sku=..., and both the route and the
+    size were gone by the time they were signed in.
+
+    So the destination is resolved from the URL by one authority,
+    lib/authReturnTarget.ts, which validates it against
+    lib/publicRoutes.ts and falls back to exactly the old
+    "/account/dashboard" when there is nothing to return to. The flow and
+    the open-redirect rule are proved in
+    tests/subscription-flow-return.test.mjs; this file pins that the
+    resolver is what the handlers call.
+  */
+  assert.ok(site.includes('useEffect(()=>{if(!authLoading&&user)window.location.href=resolveAccountDestination(window.location.search)},[user,authLoading]);'),
+    "the signed-in bounce no longer resolves its destination");
+  assert.match(site, /import \{ readAccountReturnPath, resolveAccountDestination \} from "\.\.\/lib\/authReturnTarget";/);
+  assert.equal((site.match(/resolveAccountDestination\(window\.location\.search\)/g) || []).length, 4,
+    "the four auth destinations are no longer resolved by one authority");
+  // The view initialiser keeps BOTH deep links, and gained one more: a
+  // pending return target opens the login form directly rather than the
+  // landing page, because the customer did not come here to browse.
+  assert.match(site, /const p=new URLSearchParams\(window\.location\.search\);if\(p\.get\("type"\)==="business"\)return "b2b-apply";if\(p\.get\("action"\)==="register"\)return "choose";if\(readAccountReturnPath\(window\.location\.search\)\)return "login"/);
   // Nothing in this pass added a backend.
   assert.deepEqual(readdirSync(path.join(ROOT, "app/api")).sort(),
     // PHASE 5 ADDED "launch": the one-time launch notification list

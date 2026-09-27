@@ -47,15 +47,27 @@ import {
   isAnnualDeliveryCountry,
 } from "../lib/annualPlans";
 // The ONE subscription shipping rule, the same table the server prices
-// from. A zero-import leaf, so the browser can read it without a second
-// copy of 590/0/0 existing anywhere.
+// from: 590 per delivery for every size, with no waived size at all. A
+// zero-import leaf, so the browser can read it without a second copy of
+// that amount existing anywhere.
 import {
   SUBSCRIPTION_ABROAD_SHIPPING_NOTE,
-  SUBSCRIPTION_FREE_SHIPPING_FROM_GRAMS,
-  SUBSCRIPTION_FREE_SHIPPING_NOTE,
+  SUBSCRIPTION_DE_SHIPPING_NOTE,
+  SUBSCRIPTION_PORTAL_PATH,
   isSubscriptionBenefitCountry,
   subscriptionDeShippingGrossCents,
+  subscriptionPortalHref,
 } from "../lib/subscriptionPurchaseRules";
+// WHERE AN INTERRUPTED FLOW COMES BACK TO. The portal is what sends a
+// signed-out visitor to /account, and it is what sends a customer with no
+// saved address to /account/addresses - so it is also what has to carry
+// the destination. Every value goes through the one validator.
+import {
+  accountLoginHref,
+  currentAccountReturnPath,
+  readAccountReturnPath,
+  withAccountReturn,
+} from "../lib/authReturnTarget";
 import type { AddressSnapshot } from "../lib/orderAddressSnapshot";
 import { getCountryLabel, normalizeCountryCode, SHIPPING_COUNTRY_OPTIONS } from "../lib/shipping";
 import {
@@ -97,10 +109,24 @@ export function AccountPortal({ page, orderId, subscriptionId, supplyId }: { pag
   const { user, profile, loading, signOut } = useAuth();
   const customerType: CustomerType = profile?.customer_type ?? "private";
 
-  // Not logged in → redirect
+  /*
+    NOT LOGGED IN -> THE SIGN-IN PAGE, CARRYING THIS PAGE.
+
+    This redirect used to be a bare "/account", and that is where a
+    subscription intent went to die: /shop sends a customer who chose
+    30 g to /account/subscriptions?sku=GLOA-MATCHA-30G, this guard threw
+    both the route and the size away, and the sign-in page then had
+    nothing to return to but the dashboard. The customer had to find the
+    subscription page again by hand.
+
+    The destination is the page they are actually on - all six portal
+    pages and both detail routes come back to themselves - and it is
+    validated against lib/publicRoutes.ts on the way out AND on the way
+    back in, so nothing outside GLOA can be put in that parameter.
+  */
   useEffect(() => {
     if (!loading && !user) {
-      window.location.href = "/account";
+      window.location.href = accountLoginHref(currentAccountReturnPath());
     }
   }, [loading, user]);
 
@@ -1172,6 +1198,36 @@ function SubscriptionStartForm({ onStarted }: { onStarted?: () => void }) {
     return variant ? variant.price_gross_cents : null;
   };
 
+  /** The SKU of the size the customer is looking at, or null. */
+  const selectedSku = (() => {
+    const plan = plans.find(p => p.id === planId);
+    return plan ? variantFor(plan)?.sku ?? null : null;
+  })();
+
+  /*
+    THE SIZE GOES BACK INTO THE URL, AND THAT IS WHAT MAKES REFRESH SAFE.
+
+    The `?sku=` hint is read ONCE, so without this a customer who picked
+    100 g and then reloaded - or came back with the browser's Back button
+    - would silently land on whatever size the URL still named, which is
+    the one the shop sent them with. Replacing rather than pushing keeps
+    the Back button pointing at the page they arrived from instead of
+    stacking one history entry per size they considered.
+
+    It is a DISPLAY hint and nothing else, exactly as it was: the plan is
+    still identified by planId, the plans are re-read here, and the
+    server re-resolves the price from the plan's own variant whatever any
+    URL says.
+  */
+  const selectSize = (id: string, sku: string | null) => {
+    setPlanChoice(id);
+    if (typeof window === "undefined" || !window.history?.replaceState) return;
+    const url = new URL(window.location.href);
+    if (sku) url.searchParams.set("sku", sku);
+    else url.searchParams.delete("sku");
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  };
+
   /*
     SHIPPING, FOR THE ADDRESS THE CUSTOMER HAS ACTUALLY SELECTED.
 
@@ -1181,7 +1237,15 @@ function SubscriptionStartForm({ onStarted }: { onStarted?: () => void }) {
     ── GERMANY: the real figures ─────────────────────────────────
     Read per SKU out of lib/subscriptionPurchaseRules.ts, the very rule
     handleSubscriptionCheckout applies, so this cannot show an amount
-    the server would not charge.
+    the server would not charge. Every size pays 5,90 per delivery and
+    none of them is waived, so there is no "free" case left to render.
+
+    ── NO ADDRESS YET: still the German figures, and said so ──────
+    The size may now be chosen BEFORE an address exists, so for the
+    first time this screen has to state a delivery charge with no
+    destination. It shows the German amount and names the country in the
+    same breath, exactly as the shop does for a signed-out visitor - a
+    figure with no country would read as a promise to every destination.
 
     ── EVERY OTHER COUNTRY: the rule, not a number ───────────────
     Computing it would mean importing computeShippingGrossCents AND
@@ -1197,17 +1261,57 @@ function SubscriptionStartForm({ onStarted }: { onStarted?: () => void }) {
     addresses.find(a => a.id === addressId)?.country
   );
   const deliversToGermany = isSubscriptionBenefitCountry(selectedCountry);
+  /** No address chosen yet - a real third state now that the size comes first. */
+  const destinationUnknown = addressId === "";
 
   const shippingFor = (plan: SubscriptionPlanRow): number | null => {
-    if (!deliversToGermany) return null;
+    if (!deliversToGermany && !destinationUnknown) return null;
     const variant = variantFor(plan);
     return variant ? subscriptionDeShippingGrossCents(variant.sku) : null;
   };
 
+  /*
+    WHERE "LIEFERADRESSE HINZUFÜGEN" GOES, AND WHERE IT COMES BACK FROM.
+
+    The address page, carrying THIS page plus the size the customer has
+    selected right now - not the size the URL happened to be opened with.
+    Without the return target the customer was dropped on the addresses
+    page with no way back except the navigation, which is precisely the
+    account-driven dead end this flow had.
+  */
+  const addAddressHref = withAccountReturn(
+    "/account/addresses",
+    selectedSku ? subscriptionPortalHref(selectedSku) : SUBSCRIPTION_PORTAL_PATH
+  );
+
+  /**
+   * THE CHECKOUT ITSELF - AND THE ADDRESS GATE IN FRONT OF IT.
+   *
+   * A SIZE may now be chosen with no saved address at all, because
+   * choosing what to buy is not an account operation. Starting a PAYMENT
+   * may not: the route needs one of the customer's own saved addresses to
+   * resolve a destination, a shipping amount and a tax treatment, and
+   * without one it can only answer 404.
+   *
+   * So this FAILS CLOSED before it fetches anything. No payment object of
+   * any kind can exist yet - not a customer, not a price, not a session -
+   * because none of them is ever created in a browser: the server reaches
+   * the payment provider at step 12 of handleSubscriptionCheckout and
+   * resolves the address at step 5. The check here is the honest answer
+   * for a customer, never the enforcement.
+   *
+   * The id is checked against the addresses this account actually HAS,
+   * not merely for emptiness: an address the customer deleted in another
+   * tab is a stale selection, and sending it would produce the same 404
+   * from the far side of a network round trip.
+   */
   const start = async () => {
     if (!session?.access_token) { setError("Bitte melde dich an."); return; }
     if (!planId) { setError("Bitte wähle eine Größe."); return; }
-    if (!addressId) { setError("Bitte wähle eine Lieferadresse."); return; }
+    if (!addressId || !addresses.some(a => a.id === addressId)) {
+      setError("Bitte wähle eine Lieferadresse.");
+      return;
+    }
     const intentKey = `${planId}|${addressId}`;
     if (tokenRef.current?.key !== intentKey) {
       tokenRef.current = { key: intentKey, id: crypto.randomUUID() };
@@ -1251,6 +1355,28 @@ function SubscriptionStartForm({ onStarted }: { onStarted?: () => void }) {
 
   const loading = catalogLoading || plansLoading;
 
+  /*
+    THE SHIPPING SENTENCE FOR THE SELECTED DESTINATION.
+
+    Assembled from the leaf's own sentences rather than written out, so
+    the wording cannot state a rule the table has stopped holding -
+    SUBSCRIPTION_DE_SHIPPING_NOTE is derived from the very amounts the
+    cards above show and the server prices from. Null-filtered because
+    that constant is null by design when the sizes stop sharing one
+    amount, and a template would otherwise print "null".
+
+      Germany        the figure, per delivery.
+      abroad         the rule, because no number here would be right.
+      not chosen     both, because that is the honest answer before a
+                     destination exists.
+  */
+  const shippingSentence = (deliversToGermany
+    ? [SUBSCRIPTION_DE_SHIPPING_NOTE, "Der Versand gilt je Lieferung; den genauen Gesamtbetrag siehst du vor der Zahlung."]
+    : destinationUnknown
+      ? [SUBSCRIPTION_DE_SHIPPING_NOTE, SUBSCRIPTION_ABROAD_SHIPPING_NOTE, "Den genauen Gesamtbetrag siehst du vor der Zahlung."]
+      : [SUBSCRIPTION_ABROAD_SHIPPING_NOTE, "Den genauen Gesamtbetrag siehst du vor der Zahlung."]
+  ).filter(Boolean).join(" ");
+
   return (
     <section className="portal-section">
       <AccountSectionHeader label="ABO STARTEN" />
@@ -1268,16 +1394,26 @@ function SubscriptionStartForm({ onStarted }: { onStarted?: () => void }) {
         <AccountEmptyState action={<AccountAction href="/shop">ZUM SHOP</AccountAction>}>
           Aktuell ist keine Abo-Größe hinterlegt.
         </AccountEmptyState>
-      ) : addresses.length === 0 ? (
-        /*
-          NO ADDRESS, NO FORM. The route answers 404 for a missing or
-          incomplete address, and a submit button that can only produce
-          that is worse than the one action which genuinely helps.
-        */
-        <AccountEmptyState action={<AccountAction href="/account/addresses">ADRESSE HINTERLEGEN</AccountAction>}>
-          Für ein Abo brauchen wir eine Lieferadresse in deinem Konto.
-        </AccountEmptyState>
       ) : (
+        /*
+          THE SIZE COMES FIRST, AND AN EMPTY ADDRESS BOOK NO LONGER HIDES
+          THE FORM.
+
+          Until now `addresses.length === 0` replaced this entire form
+          with one "ADRESSE HINTERLEGEN" link, on the reasoning that a
+          submit button which can only produce a 404 is worse than the
+          one action that helps. The submit button part of that is still
+          true and is still enforced - below, and again on the server.
+          Hiding the SIZE SELECTOR was the mistake: it made choosing what
+          to buy an account operation, so a customer who arrived from the
+          shop having already picked 30 g was shown neither their choice
+          nor a price, only an errand.
+
+          So the shape is now: choose a size, see the price and the
+          delivery charge, THEN deal with the address. The address
+          fieldset carries the missing-address state itself, which keeps
+          it next to the thing that is actually missing.
+        */
         <div className="sub-start">
           <fieldset className="sub-start-field">
             <legend>Größe</legend>
@@ -1289,7 +1425,8 @@ function SubscriptionStartForm({ onStarted }: { onStarted?: () => void }) {
                   <label key={p.id} className={`sub-start-option${planId === p.id ? " active" : ""}`}>
                     <input
                       type="radio" name="sub-plan" className="sr-only" value={p.id}
-                      checked={planId === p.id} onChange={() => setPlanChoice(p.id)}
+                      checked={planId === p.id}
+                      onChange={() => selectSize(p.id, variantFor(p)?.sku ?? null)}
                     />
                     <span className="sub-start-option-label">{p.name}</span>
                     {/* The catalog price and the delivery charge, shown so
@@ -1297,12 +1434,16 @@ function SubscriptionStartForm({ onStarted }: { onStarted?: () => void }) {
                         prices the plan from its own variant and applies
                         the same shipping table this reads. */}
                     {cents !== null && <span className="sub-start-option-meta">{fmtCents(cents)} € je Lieferung</span>}
-                    {/* An exact figure only for a German address. For any
-                        other destination the row is absent and the note
-                        under the address field carries the rule. */}
+                    {/* THE DELIVERY CHARGE, ON EVERY SIZE. No size is
+                        waived any more, so there is no free-shipping
+                        branch - a size that showed one would be claiming
+                        a benefit the server would not honour. Absent
+                        only for a destination outside Germany, where the
+                        note under the address field carries the rule; the
+                        country is named while no address is selected. */}
                     {shipping !== null && (
                       <span className="sub-start-option-meta">
-                        {shipping === 0 ? "Kostenloser Versand" : `${fmtCents(shipping)} € Versand je Lieferung`}
+                        {fmtCents(shipping)} € Versand je Lieferung{destinationUnknown ? " innerhalb Deutschlands" : ""}
                       </span>
                     )}
                   </label>
@@ -1313,35 +1454,69 @@ function SubscriptionStartForm({ onStarted }: { onStarted?: () => void }) {
 
           <fieldset className="sub-start-field">
             <legend>Lieferadresse</legend>
-            <select
-              className="sub-start-select" value={addressId}
-              onChange={e => setAddressChoice(e.target.value)} aria-label="Lieferadresse wählen"
-            >
-              {addresses.map(a => (
-                <option key={a.id} value={a.id}>
-                  {[a.first_name, a.last_name].filter(Boolean).join(" ")}, {a.street} {a.house_number}, {a.zip} {a.city}
-                </option>
-              ))}
-            </select>
-            {/* The rule for the SELECTED destination. A German address
-                gets the benefit named; anywhere else is told plainly
-                that its own shipping cost applies, rather than being
-                shown a German figure that would not be charged. */}
-            <p className="portal-note sub-start-shipping">
-              {deliversToGermany
-                ? `${SUBSCRIPTION_FREE_SHIPPING_NOTE} Der Versand gilt je Lieferung; den genauen Gesamtbetrag siehst du vor der Zahlung.`
-                : `${SUBSCRIPTION_ABROAD_SHIPPING_NOTE} Der kostenlose Versand ab ${SUBSCRIPTION_FREE_SHIPPING_FROM_GRAMS} g gilt nur innerhalb Deutschlands. Den genauen Gesamtbetrag siehst du vor der Zahlung.`}
-            </p>
+            {addresses.length === 0 ? (
+              /*
+                NO ADDRESS: the one action that helps, RIGHT HERE and
+                carrying the way back.
+
+                Not a redirect and not a generic account landing page.
+                The link goes to the addresses page with this page and the
+                selected size as a validated return target, so saving an
+                address comes straight back to the subscription with the
+                same size chosen.
+              */
+              <AccountEmptyState action={<AccountAction href={addAddressHref}>LIEFERADRESSE HINZUFÜGEN</AccountAction>}>
+                Für die Zahlung brauchen wir eine Lieferadresse in deinem Konto.
+              </AccountEmptyState>
+            ) : (
+              <>
+                <select
+                  className="sub-start-select" value={addressId}
+                  onChange={e => setAddressChoice(e.target.value)} aria-label="Lieferadresse wählen"
+                >
+                  {addresses.map(a => (
+                    <option key={a.id} value={a.id}>
+                      {[a.first_name, a.last_name].filter(Boolean).join(" ")}, {a.street} {a.house_number}, {a.zip} {a.city}
+                    </option>
+                  ))}
+                </select>
+                {/* Another address, without losing the size. The selector
+                    above changes only addressChoice, so switching the
+                    destination re-prices the cards and touches nothing
+                    else; this link adds a fourth address the same way the
+                    empty state adds a first one. */}
+                <p className="portal-note sub-start-add-address">
+                  <AccountAction href={addAddressHref}>WEITERE ADRESSE HINZUFÜGEN</AccountAction>
+                </p>
+              </>
+            )}
+            {/* The rule for the SELECTED destination. Germany gets the
+                figure; anywhere else is told plainly that its own
+                shipping cost applies, rather than being shown a German
+                amount that would not be charged. With nothing selected
+                yet both halves are shown, because that is the honest
+                answer to "what will shipping cost" before a destination
+                exists. */}
+            <p className="portal-note sub-start-shipping">{shippingSentence}</p>
           </fieldset>
 
           {error && <p className="sub-start-error" role="alert">{error}</p>}
 
+          {/* DISABLED WITHOUT AN ADDRESS, and the reason is stated rather
+              than left to be discovered by pressing it. The size is
+              already chosen at this point, so the missing piece is named
+              exactly. */}
           <button
             type="button" className="cta sub-start-cta" onClick={() => void start()}
             disabled={busy || !planId || !addressId}
           >
             {busy ? "WIRD GEÖFFNET…" : "ZUR ZAHLUNG"}
           </button>
+          {!addressId && (
+            <p className="portal-note sub-start-blocked">
+              Zur Zahlung geht es, sobald eine Lieferadresse hinterlegt ist.
+            </p>
+          )}
         </div>
       )}
     </section>
@@ -2310,7 +2485,26 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
 
 function PortalAddresses() {
   const { user, addresses, refreshAddresses } = useAuth();
-  const [showForm, setShowForm] = useState(false);
+  /*
+    THE INTERRUPTED FLOW THAT SENT THE CUSTOMER HERE, IF THERE IS ONE.
+
+    A customer starting a subscription with no saved address is sent to
+    this page with a validated return target. Read ONCE in a lazy
+    initialiser, for the same reason every other hint on this page is:
+    it cannot change while the component lives, and reading it in an
+    effect would render the page once without the form open.
+
+    Null for anybody who simply navigated to their addresses, and the
+    page then behaves exactly as it always did.
+  */
+  const [returnTo] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : readAccountReturnPath(window.location.search)
+  );
+  // THE FORM OPENS BY ITSELF when adding an address IS the errand. A
+  // customer who was just told "wir brauchen eine Lieferadresse" should
+  // not have to find and press "ADRESSE HINZUFÜGEN" to be given the
+  // field they were sent for.
+  const [showForm, setShowForm] = useState(() => returnTo !== null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -2372,6 +2566,19 @@ function PortalAddresses() {
     if (err) { setError("Fehler beim Speichern."); return; }
     await refreshAddresses();
     setShowForm(false);
+    /*
+      BACK TO WHERE THE ADDRESS WAS NEEDED, AND ONLY ON SUCCESS.
+
+      The address now exists, so the flow that was blocked on it can
+      continue - with its selected size, because the target carries the
+      `?sku=` hint the subscription form put there. Deliberately AFTER
+      refreshAddresses: the destination reads the same addresses from
+      context, and navigating first would race the refresh.
+
+      Nothing happens for a customer who came here on their own: returnTo
+      is null and the page stays where it is, exactly as before.
+    */
+    if (returnTo) window.location.href = returnTo;
   };
 
   const handleDelete = async (id: string) => {
@@ -2391,6 +2598,14 @@ function PortalAddresses() {
       <section className="portal-page-head">
         <p className="eyebrow">ADRESSEN</p>
         <h1>Adressen.</h1>
+        {/* Why this page opened with a form. Shown only when a validated
+            internal destination is genuinely pending, so it can never
+            promise a return that will not happen. */}
+        {returnTo && (
+          <p className="portal-page-lead">
+            Sobald die Lieferadresse gespeichert ist, geht es direkt zurück zu deiner Auswahl.
+          </p>
+        )}
       </section>
 
       <div className="portal-addresses-grid">

@@ -434,16 +434,22 @@ test("shipping: the destination's own amount, with ONE German exception", () => 
   assert.match(flowCode, /if \(shippingGrossCents === null\)/);
 });
 
-test("shipping: GERMANY - 30 g pays, 50 g and 100 g are free", () => {
+test("shipping: GERMANY - every size pays 5,90 per delivery", () => {
+  /*
+    THE WAIVER IS GONE. This test used to read "30 g pays, 50 g and 100 g
+    are free". The monthly subscription has no free-shipping threshold any
+    more, so all three sizes charge; the exact totals that produces are
+    asserted in tests/subscription-flow-return.test.mjs.
+  */
   const de = (sku, destinationGrossCents = 590) =>
     subscriptionShippingGrossCents({ sku, country: "DE", destinationGrossCents });
   assert.equal(de("GLOA-MATCHA-30G"), 590);
-  assert.equal(de("GLOA-MATCHA-50G"), 0);
-  assert.equal(de("GLOA-MATCHA-100G"), 0);
+  assert.equal(de("GLOA-MATCHA-50G"), 590);
+  assert.equal(de("GLOA-MATCHA-100G"), 590);
   // The German answer does NOT depend on what the shop rule computed -
   // that is the whole point of the exception.
-  assert.equal(de("GLOA-MATCHA-50G", 590), 0);
-  assert.equal(de("GLOA-MATCHA-50G", 0), 0);
+  assert.equal(de("GLOA-MATCHA-50G", 1290), 590);
+  assert.equal(de("GLOA-MATCHA-50G", 0), 590);
   assert.equal(de("GLOA-MATCHA-30G", 0), 590);
   // Anything else has no rule, and null means the caller must refuse.
   for (const junk of ["GLOA-CASE-01", "", null, undefined, 30, "gloa-matcha-30g"]) {
@@ -451,9 +457,9 @@ test("shipping: GERMANY - 30 g pays, 50 g and 100 g are free", () => {
   }
 });
 
-test("shipping: OUTSIDE GERMANY the benefit does not travel", () => {
-  // The destination's own amount, unchanged, for every size - including
-  // the two that ship free at home.
+test("shipping: OUTSIDE GERMANY the German amount does not travel", () => {
+  // The destination's own amount, unchanged, for every size. The German
+  // 5,90 is never applied to a foreign address.
   const eu = computeShippingGrossCents("eu", 2299);
   assert.equal(eu, 1290, "the EU shipping price changed");
   for (const sku of ["GLOA-MATCHA-30G", "GLOA-MATCHA-50G", "GLOA-MATCHA-100G"]) {
@@ -462,11 +468,15 @@ test("shipping: OUTSIDE GERMANY the benefit does not travel", () => {
       1290,
       `${sku} was waived outside Germany`);
   }
-  // 50 g and 100 g are explicitly NOT free abroad.
-  for (const sku of ["GLOA-MATCHA-50G", "GLOA-MATCHA-100G"]) {
+  // No size is free abroad, and none of them is charged the German
+  // amount abroad either.
+  for (const sku of ["GLOA-MATCHA-30G", "GLOA-MATCHA-50G", "GLOA-MATCHA-100G"]) {
     assert.notEqual(
       subscriptionShippingGrossCents({ sku, country: "AT", destinationGrossCents: 1290 }), 0,
       `${sku} ships free outside Germany`);
+    assert.notEqual(
+      subscriptionShippingGrossCents({ sku, country: "AT", destinationGrossCents: 1290 }), 590,
+      `${sku} was charged the German amount abroad`);
   }
   // Zones with no threshold keep charging, and the rule passes it through.
   assert.equal(

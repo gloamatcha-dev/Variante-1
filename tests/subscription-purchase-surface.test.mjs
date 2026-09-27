@@ -12,8 +12,9 @@ import {
   subscriptionSkuFromHint,
   SUBSCRIPTION_DE_SHIPPING_PER_DELIVERY_GROSS_CENTS,
   SUBSCRIPTION_SHIPPING_BENEFIT_COUNTRY,
-  SUBSCRIPTION_FREE_SHIPPING_FROM_GRAMS,
-  SUBSCRIPTION_FREE_SHIPPING_NOTE,
+  SUBSCRIPTION_DE_SHIPPING_NOTE,
+  SUBSCRIPTION_DE_SHIPPING_UNIFORM_GROSS_CENTS,
+  SUBSCRIPTION_HAS_FREE_SHIPPING_IN_GERMANY,
   SUBSCRIPTION_ABROAD_SHIPPING_NOTE,
   isSubscriptionBenefitCountry,
   subscriptionShippingGrossCents,
@@ -282,17 +283,30 @@ test("3f: an ineligible size cannot leave a subscription panel standing", () => 
    3S. SHIPPING — PER SIZE, ONE DEFINITION, SERVER-AUTHORITATIVE
    ══════════════════════════════════════════════════════════════ */
 
-test("3s: GERMANY - 30 g pays 5,90 per delivery; 50 g and 100 g ship free", () => {
+test("3s: GERMANY - EVERY size pays 5,90 per delivery, on every delivery", () => {
+  /*
+    THE BENEFIT IS GONE. Until 2026-09-27 this test read "30 g pays 5,90;
+    50 g and 100 g ship free", because the table waived the two larger
+    sizes as a subscription benefit. The monthly subscription has no
+    free-shipping threshold at all any more - see
+    tests/subscription-flow-return.test.mjs for the totals this produces -
+    so all three sizes are asserted to charge, and the free case is
+    asserted to be absent rather than simply not mentioned.
+  */
   const de = (sku, destinationGrossCents = 590) =>
     subscriptionShippingGrossCents({ sku, country: "DE", destinationGrossCents });
   assert.equal(de("GLOA-MATCHA-30G"), 590);
-  assert.equal(de("GLOA-MATCHA-50G"), 0);
-  assert.equal(de("GLOA-MATCHA-100G"), 0);
-  assert.equal(subscriptionShipsFreeInGermany("GLOA-MATCHA-30G"), false);
-  assert.equal(subscriptionShipsFreeInGermany("GLOA-MATCHA-50G"), true);
-  assert.equal(subscriptionShipsFreeInGermany("GLOA-MATCHA-100G"), true);
+  assert.equal(de("GLOA-MATCHA-50G"), 590);
+  assert.equal(de("GLOA-MATCHA-100G"), 590);
+  for (const sku of [...SUBSCRIPTION_LAUNCH_SKUS]) {
+    assert.equal(subscriptionShipsFreeInGermany(sku), false, `${sku} still ships free`);
+  }
+  assert.equal(SUBSCRIPTION_HAS_FREE_SHIPPING_IN_GERMANY, false,
+    "a monthly size still ships free in Germany");
+  assert.equal(SUBSCRIPTION_DE_SHIPPING_UNIFORM_GROSS_CENTS, 590,
+    "the three sizes stopped sharing one per-delivery amount");
   // The German answer never depends on what the shop rule computed.
-  assert.equal(de("GLOA-MATCHA-50G", 1290), 0);
+  assert.equal(de("GLOA-MATCHA-50G", 1290), 590);
   assert.equal(de("GLOA-MATCHA-30G", 0), 590);
   // FAILS CLOSED. Null is a real answer the caller must refuse on:
   // defaulting to 0 would ship a product free by accident, defaulting to
@@ -310,9 +324,9 @@ test("3s: GERMANY - 30 g pays 5,90 per delivery; 50 g and 100 g ship free", () =
     "the shipping table and the allowlist describe different products");
 });
 
-test("3s1: OUTSIDE GERMANY the benefit does not travel", () => {
+test("3s1: OUTSIDE GERMANY the German amount does not travel", () => {
   // The destination's own amount, passed through unchanged, for EVERY
-  // size - including the two that ship free at home.
+  // size. The German 5,90 is never applied to a foreign address.
   const eu = computeShippingGrossCents("eu", 2299);
   assert.equal(eu, 1290, "the EU shipping price changed");
   for (const sku of [...SUBSCRIPTION_LAUNCH_SKUS]) {
@@ -322,8 +336,12 @@ test("3s1: OUTSIDE GERMANY the benefit does not travel", () => {
     assert.notEqual(
       subscriptionShippingGrossCents({ sku, country: "AT", destinationGrossCents: 1290 }), 0,
       `${sku} ships free outside Germany`);
+    // And not the German amount either: the destination's own price wins.
+    assert.notEqual(
+      subscriptionShippingGrossCents({ sku, country: "FR", destinationGrossCents: eu }), 590,
+      `${sku} was charged the German amount abroad`);
   }
-  // Only "DE" gets the benefit, and the check is case/space tolerant
+  // Only "DE" gets the German rule, and the check is case/space tolerant
   // because it compares a normalised code.
   assert.equal(SUBSCRIPTION_SHIPPING_BENEFIT_COUNTRY, "DE");
   assert.equal(isSubscriptionBenefitCountry("DE"), true);
@@ -366,12 +384,17 @@ test("3s2: ONE definition - the German exception here, every country price there
     assert.ok(!/\b4900\b/.test(src), `${name} reaches for the one-time free-shipping threshold`);
   }
   // The headline sentence is DERIVED, and it NAMES THE COUNTRY.
-  assert.equal(SUBSCRIPTION_FREE_SHIPPING_FROM_GRAMS, 50);
-  assert.equal(SUBSCRIPTION_FREE_SHIPPING_NOTE, "Ab 50 g kostenloser Versand innerhalb Deutschlands.");
+  assert.equal(SUBSCRIPTION_DE_SHIPPING_NOTE, "Versand: 5,90 € je Lieferung innerhalb Deutschlands.");
   assert.equal(SUBSCRIPTION_ABROAD_SHIPPING_NOTE,
     "Für Lieferadressen außerhalb Deutschlands gelten die jeweiligen Versandkosten.");
   assert.match(purchaseRules,
-    /`Ab \$\{SUBSCRIPTION_FREE_SHIPPING_FROM_GRAMS\} g kostenloser Versand innerhalb Deutschlands\.`/);
+    /`Versand: \$\{euroFromCents\(SUBSCRIPTION_DE_SHIPPING_UNIFORM_GROSS_CENTS\)\} € je Lieferung innerhalb Deutschlands\.`/);
+  // THE OLD SENTENCE AND THE CONSTANT BEHIND IT ARE DELETED, not left
+  // holding null - a caller reading "ab 0 g" would be worse than a
+  // caller that cannot compile.
+  for (const dead of ["SUBSCRIPTION_FREE_SHIPPING_FROM_GRAMS", "SUBSCRIPTION_FREE_SHIPPING_NOTE"]) {
+    assert.ok(!new RegExp(`export const ${dead}\b`).test(purchaseRules), `${dead} still exists`);
+  }
 });
 
 test("3s3: the SERVER is the monetary authority, and it fails closed", () => {
@@ -434,23 +457,30 @@ test("3s4: FREE SHIPPING CREATES NO STRIPE LINE AND NO CHARGE", () => {
 
 test("3s5: the shop copy states the GERMAN rule and says it is German", () => {
   // The shop has no delivery address, so every figure it prints is the
-  // German one and must say so. A bare "Kostenloser Versand" here would
-  // read as a promise to an Austrian customer.
+  // German one and must say so. A bare "5,90 € Versand" here would read
+  // as a promise to an Austrian customer.
   assert.ok(shopSubscription.includes("subscriptionDeShippingGrossCents(variant.sku)"),
     "the panel stopped reading the canonical German rule");
-  assert.ok(shopSubscription.includes("Kostenloser Versand innerhalb Deutschlands"),
-    "the free-shipping wording lost its country");
   assert.ok(shopSubscription.includes("€ Versand je Lieferung innerhalb Deutschlands"),
     "the paid-shipping wording lost its country");
-  // NO UNQUALIFIED PROMISE ANYWHERE IN THE PANEL.
-  // Every occurrence must carry its country, checked as a negative
-  // lookahead rather than by stripping the qualifier - stripping it
-  // would leave the bare phrase behind and always fail.
-  assert.ok(!/Kostenloser Versand(?! innerhalb Deutschlands)/.test(shopSubscriptionCode),
-    "an unqualified free-shipping promise survives in the shop panel");
-  // Both halves of the headline, and neither on its own.
-  assert.ok(shopSubscription.includes("{SUBSCRIPTION_FREE_SHIPPING_NOTE} {SUBSCRIPTION_ABROAD_SHIPPING_NOTE}"),
-    "the 'ab 50 g' headline is shown without its geographic bound");
+  /*
+    AND NO FREE-SHIPPING PROMISE AT ALL, QUALIFIED OR NOT.
+
+    This assertion used to be the opposite: the panel was REQUIRED to say
+    "Kostenloser Versand innerhalb Deutschlands", because 50 g and 100 g
+    genuinely shipped free. The monthly subscription has no waived size
+    any more, so the wording is not re-qualified - it is banned, together
+    with every synonym a well-meaning edit might reach for.
+  */
+  for (const banned of [/Kostenloser Versand/, /kostenloser Versand/, /kostenlos/, /gratis/,
+                        /Ab \d+ g/, /ab \d+ g/]) {
+    assert.ok(!banned.test(shopSubscriptionCode),
+      `a free-shipping promise survives in the shop panel: ${banned}`);
+  }
+  // Both halves of the headline, and neither on its own: the German
+  // figure, and the sentence that bounds it geographically.
+  assert.ok(shopSubscription.includes("{SUBSCRIPTION_DE_SHIPPING_NOTE} {SUBSCRIPTION_ABROAD_SHIPPING_NOTE}"),
+    "the shipping headline is shown without its geographic bound");
   // The two required statements survive untouched.
   assert.ok(shopSubscription.includes("Kein Abo-Rabatt"), "the no-discount statement is gone");
   assert.ok(shopSubscription.includes("{SUBSCRIPTION_CADENCE_LABEL}"), "the cadence label is gone");
@@ -467,23 +497,39 @@ test("3s6: the account copy follows the SELECTED address", () => {
   // the same normaliser lib/shipping.ts exposes.
   assert.match(form, /normalizeCountryCode\(\s*\n?\s*addresses\.find\(a => a\.id === addressId\)\?\.country\s*\n?\s*\)/);
   assert.match(form, /const deliversToGermany = isSubscriptionBenefitCountry\(selectedCountry\);/);
-  // Exact figures ONLY for Germany; every other destination gets the
-  // rule rather than a number, because computing one here would put the
-  // monetary logic in a browser.
-  assert.match(form, /if \(!deliversToGermany\) return null;/);
+  /*
+    THREE DESTINATION STATES NOW, NOT TWO.
+
+    The size may be chosen before any address exists, so "no destination
+    yet" is a real state rather than an impossible one. It shows the
+    GERMAN figure with the country named, exactly as the shop does for a
+    signed-out visitor - which is why the guard is no longer a bare
+    `if (!deliversToGermany) return null`.
+  */
+  assert.match(form, /const destinationUnknown = addressId === "";/);
+  assert.match(form, /if \(!deliversToGermany && !destinationUnknown\) return null;/);
   assert.match(form, /subscriptionDeShippingGrossCents\(variant\.sku\)/);
+  assert.match(form, /\{destinationUnknown \? " innerhalb Deutschlands" : ""\}/,
+    "an amount is shown with no destination and no country");
   // Comment-stripped: the form EXPLAINS that importing this would put
   // the monetary logic in a browser, and the prose naming what it
   // refuses to do must not trip the rule.
   assert.ok(!withoutComments(form).includes("computeShippingGrossCents"),
     "the account duplicates the destination shipping calculation");
-  // Both branches of the note exist and name the right thing.
-  assert.match(form, /deliversToGermany\s*\n?\s*\? `\$\{SUBSCRIPTION_FREE_SHIPPING_NOTE\}/);
-  assert.match(form, /: `\$\{SUBSCRIPTION_ABROAD_SHIPPING_NOTE\}/);
-  assert.ok(form.includes("gilt nur innerhalb Deutschlands"),
-    "the abroad branch does not say the benefit is German-only");
-  // Still no percentage and still no invented benefit.
+  // All three branches of the note exist, assembled from the leaf's own
+  // sentences rather than written out.
+  assert.match(form, /const shippingSentence = \(deliversToGermany/);
+  assert.match(form, /\? \[SUBSCRIPTION_DE_SHIPPING_NOTE, "Der Versand gilt je Lieferung;/);
+  assert.match(form, /\[SUBSCRIPTION_DE_SHIPPING_NOTE, SUBSCRIPTION_ABROAD_SHIPPING_NOTE,/);
+  assert.match(form, /\[SUBSCRIPTION_ABROAD_SHIPPING_NOTE, "Den genauen Gesamtbetrag/);
+  assert.match(form, /\)\.filter\(Boolean\)\.join\(" "\);/,
+    "a null sentence could be rendered as the word null");
+  // Still no percentage, no invented benefit and no free-shipping claim.
   assert.ok(!/\d\s*%/.test(withoutComments(form)), "a percentage appeared in the booking form");
+  for (const banned of [/Kostenloser Versand/, /kostenlos/, /gratis/, /Ab \d+ g/]) {
+    assert.ok(!banned.test(withoutComments(form)),
+      `a free-shipping promise survives in the booking form: ${banned}`);
+  }
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -535,9 +581,19 @@ test("5b: no second engine is built anywhere in the surface", () => {
   // The two PURCHASE surfaces may not touch Stripe at all.
   for (const source of [startCode, shopSubscriptionCode]) {
     for (const banned of ["stripe", "Stripe", "price_data", "unit_amount", "recurring:",
-                          "createCheckoutSession", ".rpc(", ".insert(", ".update(", ".upsert(", ".delete("]) {
+                          "createCheckoutSession", ".rpc(", ".insert(", ".update(", ".upsert("]) {
       assert.ok(!source.includes(banned), `a second engine appeared: ${banned}`);
     }
+    /*
+      A DATABASE delete, and not a URLSearchParams one.
+
+      The booking form keeps the selected size in the URL so a reload
+      cannot silently restore the size the shop sent, and dropping a
+      parameter is `searchParams.delete(...)`. That is a string edit, not
+      a write - so the ban is qualified rather than dropped, and
+      `supabase.from(...).delete()` still trips it.
+    */
+    assert.ok(!/(?<!searchParams)\.delete\(/.test(source), "a second engine appeared: .delete(");
   }
   // The ADMIN legitimately DISPLAYS a Stripe subscription id, so the
   // ban there is on calling Stripe rather than on naming it: no client,

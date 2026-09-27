@@ -161,12 +161,21 @@ test("recovery: a recovery session is never redirected away from the reset page"
   // The "logged in, go to the dashboard" effect belongs to /account and
   // must not apply here - a recovery session IS a session, and that
   // effect would bounce the customer off this page immediately.
-  const account = site.slice(site.indexOf("function Account()"), site.indexOf("function Account()") + 1500);
-  // The destination now carries the query string forward, so Stripe's
-  // annual return parameters survive the bounce to the dashboard. The
-  // effect itself - its condition and its target page - is unchanged,
-  // and it still belongs to /account alone.
-  assert.match(account, /useEffect\(\(\)=>\{if\(!authLoading&&user\)window\.location\.href="\/account\/dashboard"\+window\.location\.search\}/);
+  const account = site.slice(site.indexOf("function Account()"), site.indexOf("function Account()") + 2600);
+  /*
+    The destination is RESOLVED now rather than concatenated: /account
+    carries a validated `next` back to whatever page sent the customer to
+    sign in, and falls back to /account/dashboard plus the rest of the
+    query - which is how Stripe's annual return parameters still survive
+    the bounce. See lib/authReturnTarget.ts and
+    tests/subscription-flow-return.test.mjs.
+
+    What matters HERE is unchanged and is what the next line pins: that
+    effect belongs to /account alone. The reset page must not acquire one,
+    because a recovery session IS a session and it would bounce a customer
+    off this page before they could set a password.
+  */
+  assert.match(account, /useEffect\(\(\)=>\{if\(!authLoading&&user\)window\.location\.href=resolveAccountDestination\(window\.location\.search\)\}/);
   assert.ok(!/if\(!authLoading&&user\)window\.location\.href/.test(page), "the reset page redirects a recovery session away");
 });
 

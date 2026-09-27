@@ -1406,6 +1406,22 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // involved, and it is exercised directly by
     // tests/annual-plan-purchase-surface.test.mjs.
     "lib/annualPlans.ts",
+    // MONTHLY SUBSCRIPTION FLOW FIX: a COMMENT-ONLY edit.
+    //
+    // lib/annualPlanRules.ts explained ANNUAL_FREE_SHIPPING_FROM_GRAMS by
+    // pointing at lib/subscriptionPurchaseRules.ts's
+    // SUBSCRIPTION_FREE_SHIPPING_FROM_GRAMS, "the same shape, for the same
+    // reason". That constant no longer exists: the monthly subscription
+    // dropped its free-shipping benefit entirely and every size now pays
+    // 5,90 per delivery. So the prose names the surviving constant and
+    // states that the two tables are now allowed to - and do - disagree.
+    //
+    // NOT ONE VALUE CHANGES. The annual table is still 590/0/0,
+    // ANNUAL_FREE_SHIPPING_FROM_GRAMS is still 50, buildAnnualPricing is
+    // byte-identical, and tests/annual-plan-rules.test.mjs plus
+    // tests/subscription-flow-return.test.mjs both assert the annual
+    // figures directly rather than trusting this note.
+    "lib/annualPlanRules.ts",
   ];
 
   // Phase 4B4 edits ONE application module: the single canonical Stripe
