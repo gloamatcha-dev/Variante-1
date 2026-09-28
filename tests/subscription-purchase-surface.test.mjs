@@ -1196,7 +1196,11 @@ test("8: no backend, migration, cadence, price or shipping rule changed", () => 
   // built, adds no table of its own, and touches no subscription,
   // annual or order object. Reviewed in
   // tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(migrations.at(-1), "064_b2b_account_change_management.sql",
+  // GUEST ORDER MANAGEMENT ADDED MIGRATION 065, so 064 is no longer the
+  // newest file on disk. Re-pinned by one position rather than deleted -
+  // what this guard protects is that nothing UNREVIEWED appeared.
+  // Reviewed in tests/guest-order-management.test.mjs.
+  assert.equal(migrations.at(-1), "065_guest_order_management.sql",
     "a migration was added by a UI package");
   assert.match(read("supabase/migrations/024_seed_b2c_subscription_plans.sql"),
     /'week',\s*4,\s*'week',\s*4,\s*true,/, "the seeded cadence changed");

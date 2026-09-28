@@ -155,17 +155,23 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(files[files.length - 26], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 27], MIGRATION_038, "038 must be the one before it");
+  // GUEST ORDER MANAGEMENT ADDED MIGRATION 065: the secure order
+  // management link, its credential table and the extraction of 019's
+  // cancellation-request rule into one function two wrappers share.
+  // Re-pinned rather than deleted - what this guard protects is that
+  // nothing UNREVIEWED appeared. Reviewed in
+  // tests/guest-order-management.test.mjs.
+  assert.equal(files[files.length - 27], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 28], MIGRATION_038, "038 must be the one before it");
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
 
 test("2: no migration 044 or beyond", () => {
-  // 064 is the highest migration. 039 is live and is not the place to
+  // 065 is the highest migration. 039 is live and is not the place to
   // fix anything any more.
-  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 64);
-  assert.deepEqual(beyond, [], "an unreviewed migration appeared after 064");
+  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 65);
+  assert.deepEqual(beyond, [], "an unreviewed migration appeared after 065");
 });
 
 test("3: migrations 001 through 038 are unmodified", () => {
@@ -1471,6 +1477,35 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     "lib/email/cancellationConfirmation.ts",
     "lib/subscriptionEmailDeliveryRules.ts",
     "lib/cancellationConfirmationEmail.ts",
+    // GUEST ORDER MANAGEMENT: THE LINK A GUEST GETS, AND THE MAIL IT
+    // RIDES IN.
+    //
+    // Two edits, both already listed above and both additive:
+    //
+    //   orderConfirmationEmail.ts   resolves ONE more URL for the mail,
+    //                               after the claim and before the build.
+    //                               It derives the token, hands the
+    //                               DIGEST to migration 065's writer, and
+    //                               returns null on every failure - so a
+    //                               missing secret, a missing client or an
+    //                               RPC error omits the CTA and never
+    //                               withholds a paid customer's
+    //                               confirmation. The claim, the
+    //                               mark-sent, the mark-failed and the
+    //                               throw-on-send-failure are untouched.
+    //   email/orderConfirmation.ts  ONE optional CTA, rendered into the
+    //                               HTML and the plain text from one copy
+    //                               constant. The module still has no
+    //                               order id, no crypto and no relative
+    //                               import but ./brand.ts.
+    //
+    // Neither writes a table, reaches Stripe or decides a transition, and
+    // no money figure moved. publicRoutes.ts gains ONE static route so the
+    // page is not a 404; it is a list of URLs and holds no logic.
+    // Reviewed in tests/guest-order-management.test.mjs.
+    "lib/publicRoutes.ts",
+    "lib/orderConfirmationEmail.ts",
+    "lib/email/orderConfirmation.ts",
   ];
 
   // Phase 4B4 edits ONE application module: the single canonical Stripe
@@ -1826,6 +1861,24 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // hasOpenCancellationRequest() reads. No new table, no RPC, no new
     // wave of round trips, and the route is still write-verb-free.
     "app/api/admin/orders/route.ts",
+    // GUEST ORDER MANAGEMENT: TWO PRESENTATION EDITS, both already listed
+    // above.
+    //
+    //   GloaSite.tsx        ONE exact-route branch, after order/success,
+    //                       rendering the new page. No existing branch
+    //                       moved and no route changed hands.
+    //   [...slug]/page.tsx  ONE title pair and ONE referrer policy for
+    //                       that route. The page is already noindex
+    //                       through the `order/` rule that was there;
+    //                       no-referrer is the other half of keeping a
+    //                       URL that carries a credential private.
+    //
+    // Neither reads the token, mints one, or reaches the credential
+    // table - the page is a client component that POSTs the token it
+    // found in its own address bar. Reviewed in
+    // tests/guest-order-management.test.mjs.
+    "app/GloaSite.tsx",
+    "app/[...slug]/page.tsx",
   ];
   // NOTE. Both lists are about UNCOMMITTED edits to files that already
   // exist, so a file this package CREATES does not belong in either -

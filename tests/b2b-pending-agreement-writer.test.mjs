@@ -106,10 +106,10 @@ test("1: 061 owns its number, and only the reviewed 062 follows it", () => {
   // this guard protects is that 061 still occupies its own number and
   // that nothing UNREVIEWED appeared above it. Reviewed in
   // tests/b2b-checkout-settlement.test.mjs.
-  assert.equal(files[files.length - 4], MIGRATION, "061 must be the one before the newest");
-  assert.equal(files[files.length - 5], "060_b2b_payment_delivery_foundation.sql");
-  assert.equal(files[files.length - 6], "059_b2b_supply_commerce_foundation.sql");
-  assert.equal(files.length, 64);
+  assert.equal(files[files.length - 5], MIGRATION, "061 must be the one before the newest");
+  assert.equal(files[files.length - 6], "060_b2b_payment_delivery_foundation.sql");
+  assert.equal(files[files.length - 7], "059_b2b_supply_commerce_foundation.sql");
+  assert.equal(files.length, 65);
   // PACKAGES 5D/5E/5F ADDED MIGRATION 063: the instalment, resolution
   // and failure runtime. Re-pinned on the same terms as 062 above.
   // Reviewed in tests/b2b-instalment-delivery-failure.test.mjs.
@@ -123,9 +123,19 @@ test("1: 061 owns its number, and only the reviewed 062 follows it", () => {
      // policy, no RLS change, no index and no table privilege. No
      // subscription, annual or order object is touched. Reviewed in
      // tests/b2b-account-change.test.mjs.
-     "064_b2b_account_change_management.sql"],
+     "064_b2b_account_change_management.sql",
+     // GUEST ORDER MANAGEMENT ADDED MIGRATION 065: the secure order
+     // management link a guest gets in their order confirmation. ONE
+     // table, order_guest_access, holding a SHA-256 digest per order and
+     // granted to NO role - not anon, not authenticated, not
+     // service_role - reachable only through its SECURITY DEFINER
+     // functions. No column on public.orders, no policy, no RLS change
+     // on an existing table and no privilege anywhere else. No
+     // subscription, annual or B2B object is touched. Reviewed in
+     // tests/guest-order-management.test.mjs.
+     "065_guest_order_management.sql"],
     "a migration above 061 appeared that this suite has not been reviewed against");
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 64), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 65), [],
     "an unreviewed migration appeared after 062");
   // No number is used twice, which a copy-paste of a file name would do.
   const numbers = files.map(f => f.slice(0, 3));
@@ -1090,8 +1100,13 @@ test("50: NO SUITE MAY CLAIM THAT AN APPLIED MIGRATION IS STILL PENDING", () => 
   // is authored this assertion fails, and whoever authors it has to
   // decide deliberately that it is pending and may be exempt - rather
   // than inheriting an exemption nobody re-read.
-  assert.equal(onDisk.at(-1), "064_b2b_account_change_management.sql",
-    "a migration appeared above 064 - decide whether it is pending, then re-check every exemption");
+  // 065 IS THAT DAY. Guest order management authored it, it is not
+  // applied to production yet, and it is deliberately NOT exempted
+  // below: it is a NEW file, so no immutability guard has anything to
+  // exempt in it. Re-pinned to it, so the next author faces the same
+  // decision. Reviewed in tests/guest-order-management.test.mjs.
+  assert.equal(onDisk.at(-1), "065_guest_order_management.sql",
+    "a migration appeared above 065 - decide whether it is pending, then re-check every exemption");
   assert.equal(appliedFiles.length, onDisk.length,
     "a migration is excluded from the applied set - nothing guards its immutability");
   for (const live of ["039_b2c_annual_plan_foundation.sql",

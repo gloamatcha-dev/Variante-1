@@ -47,6 +47,19 @@ export const ROUTES: readonly string[] = Object.freeze([
   "widerruf",
   "versand",
   "order/success",
+  /**
+   * The guest order management page. Its credential travels as ?token=,
+   * exactly as the waitlist's confirmation and withdrawal links do, so
+   * the ROUTE is static and needs no DYNAMIC_PREFIXES entry - which also
+   * means it cannot collide with "order/success" above.
+   *
+   * Deliberately absent from INDEXABLE_ROUTES, and additionally noindex
+   * through generateMetadata's existing `order/` rule: a URL that opens
+   * one person's order must never be offered to a crawler. It also sends
+   * Referrer-Policy: no-referrer, so the token is not handed onward to
+   * anything the page links to.
+   */
+  "order/manage",
   "auth/confirm",
   "account",
   "account/dashboard",

@@ -797,14 +797,14 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 64);
+  assert.equal(migrations.length, 65);
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
   // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
   // commerce foundation - it evolves the two tables 006 built for a
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 64), [], "a migration 065 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 65), [], "a migration 066 or beyond appeared");
 
   // The API surface is unchanged: no account endpoint exists, because the
   // portal reads its own rows under RLS.
@@ -932,6 +932,18 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
     "/launch/confirm",
     "/launch/withdraw",
     "/orders/cancellation-request",
+    // GUEST ORDER MANAGEMENT. Two routes, and the guest half of the order
+    // detail page: a one-time order can be placed without an account, so
+    // the cancellation request above - which answers 401 without a
+    // verified bearer token - was unreachable for the person who placed
+    // it. Both are POST, both take an opaque token in the BODY and no
+    // order id at all, and neither writes a column of its own: the
+    // request reaches the SAME database rule the account route reaches
+    // (migration 065). No account endpoint was added and the portal still
+    // reads its own rows under RLS. Reviewed in
+    // tests/guest-order-management.test.mjs.
+    "/orders/guest",
+    "/orders/guest/cancellation-request",
     "/orders/success",
     // The public partnership request: one POST that validates a short
     // form and sends ONE internal email. No account, order, subscription

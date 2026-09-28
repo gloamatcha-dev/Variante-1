@@ -47,6 +47,7 @@ import { getProductPresentation, showsUnitPricePer100g, showsFoodInformation, is
 import { BusinessCalculator } from "./BusinessCalculator";
 import { AccountPortal } from "./AccountPortal";
 import { OrderSuccess } from "./OrderSuccess";
+import { GuestOrder } from "./GuestOrder";
 import { LaunchPage } from "./LaunchPage";
 // A pointer to /launch, mounted beside the cart drawer as the last child
 // of the shell. It renders null until it opens, so the page under it is
@@ -3148,6 +3149,10 @@ else if(route==="rezepte"||route==="journal")page=<Rezepte/>;
 else if(route.startsWith("rezepte/"))page=<RezeptDetail slug={route.split("/")[1]}/>;
 else if(route.startsWith("journal/"))page=<RezeptDetail slug={route.split("/")[1]}/>;
 else if(route==="order/success")page=<OrderSuccess/>;
+// The guest order management page. An EXACT route, ahead of nothing that
+// could also match it - the token rides in ?token=, never in the path, so
+// this cannot collide with order/success above and needs no segment count.
+else if(route==="order/manage")page=<GuestOrder/>;
 else if(route==="auth/confirm")page=<AuthConfirm/>;
 else if(route==="account/reset-password")page=<ResetPassword/>;
 else if(route.startsWith("account/orders/")&&route.split("/").length===3)page=<AccountPortal page="order-detail" orderId={route.split("/")[2]}/>;

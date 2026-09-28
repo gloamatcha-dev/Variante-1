@@ -111,9 +111,15 @@ test("1: 038 exists, owns its number, and 039 is the only one above it", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(files[files.length - 26], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 27], MIGRATION_038, "038 must be the one before it");
-  assert.equal(files[files.length - 28], MIGRATION_037, "037 must be the one before that");
+  // GUEST ORDER MANAGEMENT ADDED MIGRATION 065: the secure order
+  // management link, its credential table and the extraction of 019's
+  // cancellation-request rule into one function two wrappers share.
+  // Re-pinned rather than deleted - what this guard protects is that
+  // nothing UNREVIEWED appeared. Reviewed in
+  // tests/guest-order-management.test.mjs.
+  assert.equal(files[files.length - 27], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 28], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 29], MIGRATION_037, "037 must be the one before that");
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
@@ -232,7 +238,19 @@ test("2: no migration 044 or beyond", () => {
      // policy, no RLS change, no index and no table privilege. No
      // subscription, annual or order object is touched. Reviewed in
      // tests/b2b-account-change.test.mjs.
-     "064_b2b_account_change_management.sql"],
+     "064_b2b_account_change_management.sql",
+     // GUEST ORDER MANAGEMENT ADDED MIGRATION 065: the secure order
+     // management link a guest gets in their order confirmation. ONE
+     // table, order_guest_access, holding a SHA-256 digest per order and
+     // granted to no role at all - not anon, not authenticated, not
+     // service_role - reachable only through its SECURITY DEFINER
+     // functions. Five of those, all with EXECUTE to service_role except
+     // the unauthorized core, which is granted to nobody. No column on
+     // public.orders, no policy, no RLS change on an existing table and
+     // no table privilege anywhere else. No subscription, annual or B2B
+     // object is touched. Reviewed in
+     // tests/guest-order-management.test.mjs.
+     "065_guest_order_management.sql"],
     "an unreviewed migration appeared after 043");
   // And 039 kept its hands off this phase's writer entirely.
   for (const name of [MIGRATION_039, MIGRATION_040, MIGRATION_041, MIGRATION_042]) {

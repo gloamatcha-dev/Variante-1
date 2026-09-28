@@ -216,7 +216,17 @@ test("035 exists, is the only 035, and only 036 and 037 follow it", () => {
      // policy, no RLS change, no index and no table privilege. No
      // subscription, annual or order object is touched. Reviewed in
      // tests/b2b-account-change.test.mjs.
-     "064_b2b_account_change_management.sql"],
+     "064_b2b_account_change_management.sql",
+     // GUEST ORDER MANAGEMENT ADDED MIGRATION 065: the secure order
+     // management link a guest gets in their order confirmation. ONE
+     // table, order_guest_access, holding a SHA-256 digest per order and
+     // granted to NO role - not anon, not authenticated, not
+     // service_role - reachable only through its SECURITY DEFINER
+     // functions. No column on public.orders, no policy, no RLS change
+     // on an existing table and no privilege anywhere else. No
+     // subscription, annual or B2B object is touched. Reviewed in
+     // tests/guest-order-management.test.mjs.
+     "065_guest_order_management.sql"],
     "an unreviewed migration above 035 appeared"
   );
   // And 039 leaves this table entirely alone. An annual plan's one

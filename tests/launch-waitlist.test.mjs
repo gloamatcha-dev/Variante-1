@@ -1321,7 +1321,19 @@ test("61: the rate limit went into 043 rather than into a 044, and 043 is still 
      // policy, no RLS change, no index and no table privilege. No
      // subscription, annual or order object is touched. Reviewed in
      // tests/b2b-account-change.test.mjs.
-     "064_b2b_account_change_management.sql"],
+     "064_b2b_account_change_management.sql",
+     // GUEST ORDER MANAGEMENT ADDED MIGRATION 065: the secure order
+     // management link a guest gets in their order confirmation. ONE
+     // table, order_guest_access, holding a SHA-256 digest per order and
+     // granted to no role at all - not anon, not authenticated, not
+     // service_role - reachable only through its SECURITY DEFINER
+     // functions. Five of those, all with EXECUTE to service_role except
+     // the unauthorized core, which is granted to nobody. No column on
+     // public.orders, no policy, no RLS change on an existing table and
+     // no table privilege anywhere else. No subscription, annual or B2B
+     // object is touched. Reviewed in
+     // tests/guest-order-management.test.mjs.
+     "065_guest_order_management.sql"],
     "an unreviewed migration appeared after 043"
   );
 

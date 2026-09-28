@@ -1667,8 +1667,13 @@ test("86: 001 through 063 are unmodified - all are live", () => {
 
 test("87: and 064 is the highest migration", () => {
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.at(-1), MIGRATION);
-  assert.equal(files.at(-2), "063_b2b_instalment_delivery_failure_runtime.sql");
+  // GUEST ORDER MANAGEMENT ADDED MIGRATION 065, so 064 is no longer the
+  // newest file on disk. Re-pinned by one position rather than deleted -
+  // what this guard protects is that nothing UNREVIEWED appeared.
+  // Reviewed in tests/guest-order-management.test.mjs.
+  assert.equal(files.at(-1), "065_guest_order_management.sql");
+  assert.equal(files.at(-2), MIGRATION);
+  assert.equal(files.at(-3), "063_b2b_instalment_delivery_failure_runtime.sql");
   assert.equal(files.filter(f => f.startsWith("064")).length, 1);
 });
 

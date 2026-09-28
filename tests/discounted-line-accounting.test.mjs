@@ -81,9 +81,13 @@ test("058 still owns its number, and there is no 061", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  const last = files[files.length - 7];
+  // GUEST ORDER MANAGEMENT ADDED MIGRATION 065, so 058 sits one position
+  // further from the end. Re-pinned rather than deleted - what this guard
+  // protects is that nothing UNREVIEWED appeared. Reviewed in
+  // tests/guest-order-management.test.mjs.
+  const last = files[files.length - 8];
   assert.equal(last, "058_discounted_order_line_accounting.sql");
-  assert.equal(files.some(f => f.startsWith("065")), false, "a 064 exists");
+  assert.equal(files.some(f => f.startsWith("066")), false, "a 064 exists");
   assert.equal(files.filter(f => f.startsWith("058")).length, 1);
 });
 

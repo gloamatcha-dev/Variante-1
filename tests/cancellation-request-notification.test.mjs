@@ -905,11 +905,25 @@ test("security: only the one route can reach the sender", () => {
   // net: it re-attempts a delivery that already failed. What still must
   // not exist is a third caller, or any caller that can create the
   // business event - the retry only ever re-sends, and it holds no RPC.
+  // GUEST ORDER MANAGEMENT added a THIRD intended caller: the same
+  // request, authorized by the link in the confirmation mail instead of
+  // by a Supabase Auth session. It is a second DOOR, not a second event -
+  // both routes reach one database rule
+  // (apply_order_cancellation_request, migration 065), and the guest route
+  // holds no rule and no eligibility check of its own. Reviewed in
+  // tests/guest-order-management.test.mjs.
   assert.deepEqual(callers.sort(), [
     "app/api/orders/cancellation-request/route.ts",
+    "app/api/orders/guest/cancellation-request/route.ts",
     "lib/cancellationRequestNotificationEmail.ts",
     "lib/transactionalEmailRetry.ts",
   ]);
+  // And the guest door creates the request the same way: through a
+  // wrapper, never by writing the columns itself.
+  const guest = withoutComments(read("app/api/orders/guest/cancellation-request/route.ts"));
+  assert.ok(guest.includes('admin.rpc("request_order_cancellation_by_token"'));
+  assert.ok(!guest.includes("cancellation_requested_at"), "the guest route writes the request column itself");
+  assert.ok(!guest.includes(".update("), "the guest route writes a column of its own");
   const retry = withoutComments(read("lib/transactionalEmailRetry.ts"));
   assert.ok(!retry.includes("request_order_cancellation"), "the retry can create a cancellation request");
   assert.ok(!retry.includes(".rpc("), "the retry can create a business event");

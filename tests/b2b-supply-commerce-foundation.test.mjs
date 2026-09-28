@@ -112,7 +112,7 @@ test("1: 059 owns its number, and only the reviewed 060 follows it", () => {
   // UNREVIEWED appeared above it. Reviewed in
   // tests/b2b-payment-delivery-foundation.test.mjs.
   const numbers = files.map(f => Number(f.slice(0, 3))).filter(n => Number.isInteger(n));
-  assert.strictEqual(Math.max(...numbers), 64, "064 must be the newest migration");
+  assert.strictEqual(Math.max(...numbers), 65, "065 must be the newest migration");
   // PACKAGE 5A ADDED MIGRATION 061: the pending agreement writer - one
   // SECURITY DEFINER function and its EXECUTE grant to service_role. It
   // adds no table, no column, no policy and no table privilege, and it
@@ -141,9 +141,19 @@ test("1: 059 owns its number, and only the reviewed 060 follows it", () => {
      // policy, no RLS change, no index and no table privilege. No
      // subscription, annual or order object is touched. Reviewed in
      // tests/b2b-account-change.test.mjs.
-     "064_b2b_account_change_management.sql"],
+     "064_b2b_account_change_management.sql",
+     // GUEST ORDER MANAGEMENT ADDED MIGRATION 065: the secure order
+     // management link a guest gets in their order confirmation. ONE
+     // table, order_guest_access, holding a SHA-256 digest per order and
+     // granted to NO role - not anon, not authenticated, not
+     // service_role - reachable only through its SECURITY DEFINER
+     // functions. No column on public.orders, no policy, no RLS change
+     // on an existing table and no privilege anywhere else. No
+     // subscription, annual or B2B object is touched. Reviewed in
+     // tests/guest-order-management.test.mjs.
+     "065_guest_order_management.sql"],
     "a migration above 059 appeared that this suite has not been reviewed against");
-  assert.strictEqual(files.filter(f => f.startsWith("065")).length, 0,
+  assert.strictEqual(files.filter(f => f.startsWith("066")).length, 0,
     "061 must NOT be authored in this package");
   assert.strictEqual(files.filter(f => f.startsWith("059")).length, 1,
     "there must be exactly one 059");

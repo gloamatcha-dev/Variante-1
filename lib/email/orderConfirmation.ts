@@ -6,6 +6,7 @@ import {
   emailEyebrow,
   emailHeadline,
   emailFooter,
+  emailButton,
   GLOA_NEAR_BLACK,
   GLOA_BERRY,
 } from "./brand.ts";
@@ -59,6 +60,24 @@ export type OrderConfirmationOrder = {
   // caller - this module never has access to order.id or user_id, so
   // it cannot leak an internal id even by accident.
   accountOrderUrl: string | null;
+  /**
+   * Fully-built secure order management link, or null to omit the CTA.
+   *
+   * THE ONE LINK A GUEST HAS. A one-time order can be placed without an
+   * account, and the account link above is null for exactly those
+   * orders - so before this existed, a guest's confirmation mail was a
+   * dead end: no way to look at the order again, and no way to ask for a
+   * cancellation before it shipped.
+   *
+   * Resolved by the caller, same as the account link, and for the same
+   * reason: this module has no access to order.id and no way to derive a
+   * token, so it cannot leak an internal id or mint a credential even by
+   * accident. What it receives is an opaque URL and nothing else.
+   *
+   * Rendered for account customers too, when the caller supplies one.
+   * One CTA, one template, one thing to test.
+   */
+  guestManageUrl: string | null;
 };
 
 export type BuiltOrderConfirmationEmail = {
@@ -66,6 +85,20 @@ export type BuiltOrderConfirmationEmail = {
   html: string;
   text: string;
 };
+
+/**
+ * The one sentence that explains the management link, in HTML and in
+ * plain text alike. Written once so the two halves of the mail cannot
+ * say different things about what the link does.
+ *
+ * It states both halves of the truth deliberately: the order can be
+ * VIEWED at any time, and a cancellation can be REQUESTED only while it
+ * has not shipped. It does not promise a cancellation - nothing in this
+ * system can, because whether an order can still be stopped is a
+ * question a human answers afterwards.
+ */
+const MANAGE_COPY =
+  "Du kannst deine Bestellung über diesen sicheren Link ansehen und, solange sie noch nicht versendet wurde, eine Stornierung anfragen.";
 
 const BRAND = {
   blue: "#1746D1",
@@ -206,6 +239,30 @@ export function buildOrderConfirmationEmail(params: {
       </td></tr>`
     : "";
 
+  /*
+    THE ORDER MANAGEMENT CTA.
+
+    A guest order's mail used to end at the address block. The account
+    link below it is null for exactly those orders, so the person who had
+    just paid without registering was told "wir melden uns per E-Mail"
+    and given nothing to act on - not a way to look at the order again,
+    and not a way to ask for a cancellation while it was still stoppable.
+
+    Rendered as a button because it is the primary action of this mail
+    now, and through emailButton() so it is the same button the launch
+    and subscription mails use - degrading to a plain link wherever a
+    client strips the styling, which still leaves the reader able to act.
+
+    The URL is opaque and already built. This module cannot inspect it,
+    cannot derive one, and has no order id to put in one.
+  */
+  const manageHtml = order.guestManageUrl
+    ? `<tr><td style="padding-top:28px;">
+        ${emailButton(order.guestManageUrl, "BESTELLUNG VERWALTEN")}
+        <p style="font-size:13px;line-height:1.6;color:#6b6258;margin:14px 0 0;">${MANAGE_COPY}</p>
+      </td></tr>`
+    : "";
+
   const accountLinkHtml = order.accountOrderUrl
     ? `<p style="font-size:13px;margin:24px 0 0;"><a href="${order.accountOrderUrl}" style="color:${BRAND.blue};">Bestellung in deinem Konto ansehen →</a></p>`
     : "";
@@ -223,6 +280,7 @@ ${emailHeadline(`Danke für deine Bestellung.`)}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${itemRowsHtml}</table>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px;border-top:2px solid ${BRAND.plum};padding-top:6px;">${totalsRowsHtml}</table>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${addressHtml}</table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${manageHtml}</table>
 ${accountLinkHtml}
 </td></tr>
 ${emailFooter(`Fragen zu deiner Bestellung? <a href="mailto:support@gloamatcha.com" style="color:${GLOA_BERRY};">support@gloamatcha.com</a>
@@ -245,6 +303,14 @@ ${legalLinks(params.origin)}`)}`);
     ? `\nLieferadresse:\n${formatAddressLines(order.shippingAddress).join("\n")}\n`
     : "";
 
+  // Same CTA, same sentence, same position as the HTML. A link present in
+  // one half and missing from the other would be the same defect in half
+  // the inboxes - which is the reason the discount row above is computed
+  // once and rendered into both.
+  const manageText = order.guestManageUrl
+    ? `\nBESTELLUNG VERWALTEN\n${MANAGE_COPY}\n${order.guestManageUrl}\n`
+    : "";
+
   const accountLinkText = order.accountOrderUrl ? `\nBestellung in deinem Konto ansehen: ${order.accountOrderUrl}\n` : "";
 
   const text = [
@@ -257,6 +323,7 @@ ${legalLinks(params.origin)}`)}`);
     "",
     totalsLinesText,
     addressLinesText,
+    manageText,
     accountLinkText,
     "",
     "Fragen zu deiner Bestellung? support@gloamatcha.com",

@@ -840,10 +840,10 @@ test("29: a B2B payment FAILURE mutates nothing and never enters the B2C path", 
 
 test("30: 062 is the highest migration and 063 does not exist", () => {
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files[files.length - 3], MIGRATION);
-  assert.equal(files[files.length - 4], "061_b2b_pending_agreement_writer.sql");
-  assert.equal(files.length, 64);
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 64), []);
+  assert.equal(files[files.length - 4], MIGRATION);
+  assert.equal(files[files.length - 5], "061_b2b_pending_agreement_writer.sql");
+  assert.equal(files.length, 65);
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 65), []);
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length);
 });
@@ -1183,7 +1183,7 @@ test("49: 059 through 062 are byte-identical, and no 063 was created", () => {
   // migration and no file any immutability guard may exempt.
   assert.deepEqual(touched, [], "a live, immutable migration was edited");
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql"));
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 64), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 65), [],
     "an unreviewed migration appeared above 062");
 });
 

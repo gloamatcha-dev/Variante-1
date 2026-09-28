@@ -49,6 +49,7 @@ const seo:Record<string,[string,string]>={
  "partnerships":["Partnerschaften","Events, Brand Collaborations, Creators und Gifting mit GLOA. Erzähl uns von deinem Projekt."],
  "auth/confirm":["Verifizierung","Dein GLOA Konto wird verifiziert."],
  "order/success":["Bestellung bestätigt","Deine GLOA Bestellung wurde bestätigt."],
+ "order/manage":["Bestellung verwalten","Deine GLOA Bestellung ansehen und, solange sie noch nicht versendet wurde, eine Stornierung anfragen."],
  "account/reset-password":["Passwort zurücksetzen","Setze ein neues Passwort für dein GLOA Konto."],
  "account":["Dein Konto","GLOA Account. Bestellungen, Abos und alles rund um deinen Matcha."],
  "account/dashboard":["Dein GLOA","Dein GLOA Dashboard. Bestellungen, Abos und Lieferungen im Überblick."],
@@ -216,7 +217,16 @@ export async function generateMetadata({params}:{params:Promise<{slug:string[]}>
  const notListed=!INDEXABLE_ROUTES.includes(canonicalPathFor(path));
  const noIndex=withheldProduct||notListed||path.startsWith("account")||path.startsWith("auth/")||path.startsWith("order/");
  const canonical=`/${canonicalPathFor(path)}`;
- return{title,description:base[1],...(noIndex?{robots:{index:false,follow:false}}:{}),alternates:{canonical},openGraph:{type:"website",url:canonical,siteName:"GLOA",title,description:base[1],images:["/gloa-logo-slogan-link.png"]},twitter:{card:"summary_large_image",title,description:base[1],images:["/gloa-logo-slogan-link.png"]}}}
+ // THE ONE PAGE WHOSE URL IS A CREDENTIAL.
+ //
+ // /order/manage carries the guest order token as ?token=, so every
+ // outbound request the page makes - the GLOA logo, the Widerruf link a
+ // customer might follow, anything a browser extension triggers - would
+ // otherwise put that token in a Referer header. no-referrer stops it at
+ // the source. The page is already noindex through the `order/` rule
+ // above; this is the other half of keeping the link private.
+ const referrerPolicy=path==="order/manage"?{referrer:"no-referrer" as const}:{};
+ return{title,description:base[1],...(noIndex?{robots:{index:false,follow:false}}:{}),...referrerPolicy,alternates:{canonical},openGraph:{type:"website",url:canonical,siteName:"GLOA",title,description:base[1],images:["/gloa-logo-slogan-link.png"]},twitter:{card:"summary_large_image",title,description:base[1],images:["/gloa-logo-slogan-link.png"]}}}
 
 export default async function Page({params}:{params:Promise<{slug:string[]}>}){const{slug}=await params;const path=slug.join("/");
  // THE SOFT-404 ENDS HERE. Every unknown URL used to render the site's
