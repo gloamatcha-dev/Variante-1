@@ -91,6 +91,22 @@ export const DYNAMIC_PREFIXES: readonly { prefix: string; segments: number }[] =
   { prefix: "journal/", segments: 2 },
   { prefix: "account/orders/", segments: 3 },
   { prefix: "account/subscriptions/", segments: 3 },
+  /**
+   * ONE PREPAID ANNUAL PLAN, ON ITS OWN PAGE.
+   *
+   * The plan itself has existed since migration 039 and the account
+   * could read it - it simply had nowhere to go: the dashboard's card
+   * and the list on /account/subscriptions both promise a page, and
+   * without this entry that URL was a genuine 404.
+   *
+   * Three segments, exactly like the order and subscription details
+   * above, and the tail is a plan uuid. It exists; it is deliberately
+   * NOT in INDEXABLE_ROUTES, and generateMetadata's account/ rule
+   * already sends noindex for it. The prefix is
+   * ANNUAL_PLAN_DETAIL_ROUTE_PREFIX in lib/annualPlanAccount.ts, and
+   * the suite asserts the two spellings agree.
+   */
+  { prefix: "account/annual-plans/", segments: 3 },
   { prefix: "account/business/supply/", segments: 4 },
 ]);
 

@@ -7787,6 +7787,8 @@ header nav{gap:18px;font-size:12px}
 .portal .b2b-pricing-label strong,
 .portal .b2b-term-row>span+span,
 .portal .portal-address-display p:first-child{font-weight:600}
+/* ...except the prepaid note inside one, which is a sentence. */
+.portal .order-list-total .portal-prepaid-note{font-weight:400;opacity:1;color:rgba(17,17,17,.6)}
 /* The left half of a term row is the field, not the answer. */
 .portal .b2b-term-key{
   font-weight:400;
@@ -10268,6 +10270,33 @@ header nav{gap:18px;font-size:12px}
 /* An annual card is a subscription card without a link affordance. */
 .annual-card{cursor:default}
 .annual-card:hover{background:transparent}
+
+/* ── THE PLAN ON THE DASHBOARD ──
+   The same order/abo summary block the two sections above it use, so a
+   third contract does not arrive with a third visual language. */
+.portal-annual-summary+.portal-annual-summary{margin-top:28px;padding-top:28px;border-top:1px solid var(--line)}
+
+/* ── "IM JAHRESPLAN ENTHALTEN" ──
+   A quiet second line under an amount, never a badge: the figure beside
+   it is real accounting and stays the loud one. It only answers which
+   payment that figure belongs to, so it must read as a note and must
+   not inherit the amount's weight. */
+.portal-prepaid-note{display:block;margin-top:4px;font:12px/1.4 var(--font-mono);font-weight:400;opacity:.55;text-transform:none;letter-spacing:0}
+
+/* ── THE THIRTEEN DATED ROWS ──
+   A list, not a table: every cell carries its own meaning at every
+   width, the way .sub-card-facts does, so nothing loses its label when
+   the columns collapse. */
+.annual-schedule{display:block}
+/* Wrapping flex rather than a fixed grid with a breakpoint: every cell
+   carries its own meaning, so a narrow screen may reflow them onto two
+   lines without any of them losing it - and this block, which sits after
+   the admin stylesheet, adds no media query of its own. */
+.annual-schedule-row{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 18px;padding:12px 0;border-top:1px solid var(--line);font:14px/1.4 var(--font-mono)}
+.annual-schedule-number{font-weight:600}
+.annual-schedule-date{flex:1 1 120px}
+.annual-schedule-state{opacity:.6}
+.annual-schedule-cost{opacity:.55;font-size:12px}
 
 /* ── THE RETURN FROM STRIPE ──
    A status block, not a toast: it must survive a reload, because the

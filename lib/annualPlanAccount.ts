@@ -598,3 +598,132 @@ export function resolveAnnualCheckoutReturnState(input: {
   // Fail closed: it is not a contract this page may celebrate.
   return "processing";
 }
+
+/* ══════════════════════════════════════════════════════════════
+   WHERE ONE PLAN LIVES IN THE ACCOUNT
+   ══════════════════════════════════════════════════════════════ */
+
+/**
+ * The account route that shows ONE annual plan, as the catch-all sees
+ * it: no leading slash, three segments, the tail is the plan uuid.
+ *
+ * It lives here rather than being spelled out in the portal because two
+ * other files have to agree with it - lib/publicRoutes.ts, which decides
+ * that the URL exists at all, and the renderer that serves it - and a
+ * route written three times is a route that can drift twice. The focused
+ * suite asserts the prefix against DYNAMIC_PREFIXES.
+ *
+ * IT IS A LOCATION, NOT A PERMISSION. The uuid in that URL is a browser
+ * -editable selector and nothing more: the page reads the plan with the
+ * customer's own client, so RLS answers ZERO ROWS for a stranger's id -
+ * the same empty answer an id that never existed gets. Nothing about
+ * holding the link proves ownership, and nothing here checks any.
+ */
+export const ANNUAL_PLAN_DETAIL_ROUTE_PREFIX = "account/annual-plans/";
+
+/** The href of one plan's page. Blank for a blank id, never "/…/undefined". */
+export function annualPlanDetailHref(annualPlanId: string | null | undefined): string {
+  const id = typeof annualPlanId === "string" ? annualPlanId.trim() : "";
+  return id === "" ? "" : "/" + ANNUAL_PLAN_DETAIL_ROUTE_PREFIX + id;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   THE NEXT DELIVERY, ACROSS EVERYTHING THE CUSTOMER HOLDS
+   ══════════════════════════════════════════════════════════════ */
+
+/**
+ * Which contract a scheduled delivery belongs to.
+ *
+ * The dashboard's "Nächste Lieferung" used to ask the subscriptions
+ * table and nothing else, so a customer whose only running contract was
+ * a prepaid annual plan was told "Keine geplante Lieferung" while
+ * thirteen dated rows sat in annual_plan_deliveries. Two contracts ship
+ * Matcha; the question is about Matcha, so it has to be asked of both.
+ */
+export type UpcomingDeliverySource = "subscription" | "annual_plan";
+
+/**
+ * One candidate for "the next box", reduced to the three facts the
+ * comparison needs. Copy is NOT one of them - the caller names the
+ * contract in its own words - and neither is a price.
+ */
+export type UpcomingDelivery = {
+  source: UpcomingDeliverySource;
+  /** The subscription id or the annual plan id, so the caller can link. */
+  id: string;
+  /** The DURABLE date, exactly as the row carries it. Never derived. */
+  scheduledFor: string;
+};
+
+/**
+ * The earliest delivery still owed, whichever contract owes it.
+ *
+ * ── NO CLOCK HERE EITHER ──────────────────────────────────────
+ *
+ * The same discipline findNextAnnualDelivery follows, for the same
+ * reason: a date that has passed because a job was late is still the
+ * next delivery owed, and filtering it out with now() would hide work
+ * the system is going to do. Whoever assembles the candidates decides
+ * what "still owed" means for its own contract - this only picks.
+ *
+ * The comparison is lexical, which is exactly what the two sources
+ * allow: both values are timestamptz columns rendered by the same
+ * PostgREST instance, so they share one format and one zone, and
+ * findNextAnnualDelivery already orders the annual schedule this way.
+ *
+ * Ties keep the EARLIER CANDIDATE in the list the caller passed, so the
+ * answer is stable rather than depending on object order.
+ */
+export function pickEarliestUpcomingDelivery(
+  candidates: (UpcomingDelivery | null | undefined)[] | null | undefined
+): UpcomingDelivery | null {
+  const rows = Array.isArray(candidates) ? candidates : [];
+  let best: UpcomingDelivery | null = null;
+  for (const candidate of rows) {
+    if (!candidate || typeof candidate !== "object") continue;
+    if (typeof candidate.id !== "string" || candidate.id.trim() === "") continue;
+    if (typeof candidate.scheduledFor !== "string" || candidate.scheduledFor.trim() === "") continue;
+    if (candidate.source !== "subscription" && candidate.source !== "annual_plan") continue;
+    if (best === null || candidate.scheduledFor < best.scheduledFor) best = candidate;
+  }
+  return best;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   WHICH ORDERS WERE ALREADY PAID FOR
+   ══════════════════════════════════════════════════════════════ */
+
+/**
+ * The ids of the ordinary orders that are annual-plan deliveries.
+ *
+ * An annual delivery becomes a REAL ORDER - that is the whole point of
+ * migration 039 reusing create_order_from_paid_checkout rather than
+ * inventing a second representation of a box - and that order carries
+ * its own per-delivery amount: one unit plus one delivery's shipping.
+ * The money is correct and is not touched here.
+ *
+ * What it must not do is READ as a second charge. The account lists
+ * orders with an amount and a payment status, and beside a plan that was
+ * paid once for the whole year, "19,39 € · Bezahlt" invites exactly the
+ * wrong conclusion. So the surfaces that show an order ask this which of
+ * them are already covered, and say so in words.
+ *
+ * Built from the views the account already derived - no extra column, no
+ * extra select and no join. A delivery with no order_id has not become
+ * an order yet and contributes nothing.
+ */
+export function collectAnnualDeliveryOrderIds(
+  views: { deliveries?: { orderId?: string | null }[] | null }[] | null | undefined
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const view of Array.isArray(views) ? views : []) {
+    for (const delivery of Array.isArray(view?.deliveries) ? view.deliveries : []) {
+      const orderId = typeof delivery?.orderId === "string" ? delivery.orderId.trim() : "";
+      if (orderId === "" || seen.has(orderId)) continue;
+      seen.add(orderId);
+      out.push(orderId);
+    }
+  }
+  return out;
+}

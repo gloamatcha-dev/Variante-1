@@ -28,7 +28,10 @@ import {
   ANNUAL_CHECKOUT_RETURN_PARAM,
   ANNUAL_PLAN_ACCOUNT_SELECT,
   ANNUAL_PLAN_DELIVERY_ACCOUNT_SELECT,
+  annualPlanDetailHref,
   buildAnnualPlanAccountView,
+  collectAnnualDeliveryOrderIds,
+  pickEarliestUpcomingDelivery,
   resolveAnnualCheckoutReturnState,
   type AnnualCheckoutReturnState,
   type AnnualPlanAccountRow,
@@ -111,7 +114,7 @@ import {
   isCancellationScheduled,
 } from "../lib/subscriptionCancellationRules";
 
-type PortalPage = "dashboard" | "orders" | "subscriptions" | "addresses" | "profile" | "business" | "order-detail" | "subscription-detail" | "supply-detail";
+type PortalPage = "dashboard" | "orders" | "subscriptions" | "addresses" | "profile" | "business" | "order-detail" | "subscription-detail" | "annual-plan-detail" | "supply-detail";
 
 const NAV: { key: PortalPage; label: string; b2bOnly?: boolean; privateOnly?: boolean }[] = [
   { key: "dashboard", label: "Übersicht" },
@@ -122,7 +125,7 @@ const NAV: { key: PortalPage; label: string; b2bOnly?: boolean; privateOnly?: bo
   { key: "business", label: "B2B", b2bOnly: true },
 ];
 
-export function AccountPortal({ page, orderId, subscriptionId, supplyId }: { page: PortalPage; orderId?: string; subscriptionId?: string; supplyId?: string }) {
+export function AccountPortal({ page, orderId, subscriptionId, annualPlanId, supplyId }: { page: PortalPage; orderId?: string; subscriptionId?: string; annualPlanId?: string; supplyId?: string }) {
   const { user, profile, loading, signOut } = useAuth();
   const customerType: CustomerType = profile?.customer_type ?? "private";
 
@@ -157,6 +160,28 @@ export function AccountPortal({ page, orderId, subscriptionId, supplyId }: { pag
   // Private-only page guard (subscriptions are B2C only)
   useEffect(() => {
     if (!loading && (page === "subscriptions" || page === "subscription-detail") && customerType === "business") {
+      window.location.href = "/account/dashboard";
+    }
+  }, [loading, page, customerType]);
+
+  /*
+    THE PREPAID ANNUAL PLAN IS B2C TOO, and gets its OWN guard rather
+    than being folded into the one above.
+
+    annual_plans.user_id is a private customer's, the checkout that
+    creates one has no business path and a business account holds none -
+    so its page belongs on the same side of the portal as the recurring
+    subscription. Written as a second effect because the subscription
+    guard is an invariant three suites pin by its exact text: widening it
+    would have meant editing that pin in four places to say something it
+    already says, and a new rule is easier to read as a new rule.
+
+    THIS IS ROUTING, NOT AUTHORIZATION. Ownership is the database's: the
+    page reads the customer's own plans under RLS, and a business account
+    that somehow reached the URL would see nothing either way.
+  */
+  useEffect(() => {
+    if (!loading && page === "annual-plan-detail" && customerType === "business") {
       window.location.href = "/account/dashboard";
     }
   }, [loading, page, customerType]);
@@ -198,6 +223,7 @@ export function AccountPortal({ page, orderId, subscriptionId, supplyId }: { pag
         {page === "order-detail" && <OrderDetail orderId={orderId!} />}
         {page === "subscriptions" && <PortalSubscriptions />}
         {page === "subscription-detail" && <SubscriptionDetail subscriptionId={subscriptionId!} />}
+        {page === "annual-plan-detail" && <AnnualPlanDetail annualPlanId={annualPlanId!} />}
         {page === "addresses" && <PortalAddresses />}
         {page === "profile" && <PortalProfile />}
         {page === "business" && <PortalBusiness />}
@@ -420,6 +446,32 @@ const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("de-DE", { day
 const subPlanName = (sub: SubscriptionRow | null) =>
   (sub?.plan_snapshot as Record<string, string> | null)?.name || "Abo";
 
+/**
+ * THE ANNUAL CADENCE, SPELLED ONCE.
+ *
+ * Read from the same frozen rule the server schedules by, the way
+ * SUBSCRIPTION_CADENCE_LABEL is read from the monthly one, so the sentence
+ * on a card cannot claim a rhythm the schedule does not have. It says
+ * nothing about WHEN the next box goes - that is a durable row's job.
+ */
+const ANNUAL_CADENCE_LABEL = `alle ${ANNUAL_DELIVERY_INTERVAL_DAYS / 7} Wochen`;
+
+/**
+ * WHAT AN ANNUAL DELIVERY'S ORDER COSTS THE CUSTOMER: NOTHING MORE.
+ *
+ * A delivery becomes an ORDINARY order (migration 039, section 9) and
+ * that order carries its own per-delivery amount - one unit plus one
+ * delivery's shipping. The figure is correct and is stored exactly as the
+ * accounting needs it; no value is changed anywhere for this note.
+ *
+ * What was wrong was the READING. The order list, the dashboard and the
+ * order page all show an amount beside "Bezahlt", and next to a plan the
+ * customer paid for once, in full, a year in advance, that reads as a
+ * second charge. So every surface that shows one of these orders says
+ * what it is instead of leaving the customer to guess.
+ */
+const ANNUAL_PREPAID_ORDER_NOTE = "Im Jahresplan enthalten";
+
 // ── Dashboard ──────────────────────────────────────────────────────────
 
 /**
@@ -467,6 +519,19 @@ function PrivateDashboard() {
   const [subLoading, setSubLoading] = useState(() => !!supabase);
   const [nextDeliverySub, setNextDeliverySub] = useState<SubscriptionRow | null>(null);
   const [deliveryLoading, setDeliveryLoading] = useState(() => !!supabase);
+  /*
+    THE SECOND CONTRACT THIS PAGE NEVER ASKED ABOUT.
+
+    Two things ship Matcha to a private customer: the recurring
+    subscription and the prepaid annual plan. The dashboard asked the
+    subscriptions table three times and the annual tables not at all, so a
+    customer who had just paid a year in advance was shown a banner saying
+    the plan was running, "Keine geplante Lieferung" underneath it, and no
+    way at all to find the plan again afterwards.
+
+    One read, through the same leaf every other annual surface uses.
+  */
+  const { views: annualViews, loading: annualLoading } = useAnnualPlanViews();
 
   useEffect(() => {
     if (!supabase) return;
@@ -483,6 +548,44 @@ function PrivateDashboard() {
   // greeting instead of an invented one.
   const greetingName = resolveGreetingName(profile?.first_name);
 
+  /*
+    "NÄCHSTE LIEFERUNG" IS ONE QUESTION, ASKED OF EVERYTHING.
+
+    Each contract decides for itself what it still owes - the query above
+    for the subscription, findNextAnnualDelivery inside the read model for
+    the plan - and pickEarliestUpcomingDelivery only picks the earliest of
+    the answers. No date is computed here and none is compared against a
+    clock: a delivery whose date has passed because a job ran late is
+    still the next one owed, and hiding it would hide work that is going
+    to happen.
+  */
+  const subDeliveryAt = nextDeliverySub ? getNextDeliveryAt(nextDeliverySub) : null;
+  const nextDelivery = pickEarliestUpcomingDelivery([
+    nextDeliverySub && subDeliveryAt
+      ? { source: "subscription" as const, id: nextDeliverySub.id, scheduledFor: subDeliveryAt }
+      : null,
+    ...annualViews.map(v => v.nextDelivery
+      ? { source: "annual_plan" as const, id: v.id, scheduledFor: v.nextDelivery.scheduledFor }
+      : null),
+  ]);
+  const nextDeliveryPlan = nextDelivery?.source === "annual_plan"
+    ? annualViews.find(v => v.id === nextDelivery.id) ?? null
+    : null;
+
+  /*
+    THE PLANS WORTH A CARD: the ones that are actually running. A
+    completed, cancelled or fully refunded plan is history and belongs on
+    the plan's own page, not on the page that answers "what do I have".
+  */
+  const runningAnnualPlans = annualViews.filter(v => v.status === "active" && v.paymentStatus !== "refunded");
+
+  /*
+    WHICH OF THE CUSTOMER'S ORDERS WERE ALREADY PAID FOR, derived from the
+    same views - no extra read, no extra column.
+  */
+  const prepaidOrderIds = collectAnnualDeliveryOrderIds(annualViews);
+  const latestOrderIsPrepaid = !!latestOrder && prepaidOrderIds.includes(latestOrder.id);
+
   return (
     <>
       <section className="portal-greeting">
@@ -492,11 +595,17 @@ function PrivateDashboard() {
 
       <section className="portal-section">
         <AccountSectionHeader label="NÄCHSTE LIEFERUNG" />
-        {deliveryLoading ? (
+        {deliveryLoading || annualLoading ? (
           <AccountEmptyState>Laden…</AccountEmptyState>
-        ) : nextDeliverySub && getNextDeliveryAt(nextDeliverySub) ? (
+        ) : nextDelivery && nextDeliveryPlan ? (
           <div className="portal-line">
-            <strong>{fmtDate(getNextDeliveryAt(nextDeliverySub) as string)}</strong>
+            <strong>{fmtDate(nextDelivery.scheduledFor)}</strong>
+            <span>{nextDeliveryPlan.product?.name ?? "GLOA Matcha"} · Jahresplan</span>
+            <a href={annualPlanDetailHref(nextDeliveryPlan.id)} className="portal-action">JAHRESPLAN ANSEHEN</a>
+          </div>
+        ) : nextDelivery && nextDeliverySub ? (
+          <div className="portal-line">
+            <strong>{fmtDate(nextDelivery.scheduledFor)}</strong>
             <span>{subPlanName(nextDeliverySub)} · {SUBSCRIPTION_CADENCE_LABEL}</span>
             <a href={`/account/subscriptions/${nextDeliverySub.id}`} className="portal-action">ABO ANSEHEN</a>
           </div>
@@ -506,6 +615,46 @@ function PrivateDashboard() {
           </AccountEmptyState>
         )}
       </section>
+
+      {/*
+        THE ANNUAL PLAN, PERSISTENTLY AND UNDER ITS OWN NAME.
+
+        Not a post-checkout banner, which disappears with the URL that
+        carried it, and not a line inside the Abo card - the two contracts
+        are different in exactly the ways a customer cares about. Every
+        value below is the read model's; the card derives nothing.
+      */}
+      {!annualLoading && runningAnnualPlans.length > 0 && (
+        <section className="portal-section">
+          <AccountSectionHeader label="DEIN JAHRESPLAN" />
+          {runningAnnualPlans.map(v => (
+            <div key={v.id} className="portal-annual-summary">
+              <div className="portal-order">
+                <div className="portal-order-id">
+                  <strong>
+                    {v.product?.name ?? "GLOA Matcha"}{v.product?.variantLabel ? ` · ${v.product.variantLabel}` : ""}
+                  </strong>
+                  <span>{annualStatusLabel(v)}</span>
+                </div>
+                <div className="portal-order-meta">
+                  <span>{v.deliveryCount} Lieferungen · {ANNUAL_CADENCE_LABEL}</span>
+                  <strong>{v.fulfilledDeliveries} von {v.deliveryCount} Lieferungen</strong>
+                </div>
+              </div>
+              <dl className="sub-card-facts">
+                <div><dt>Einmalig bezahlt</dt><dd>{fmtCents(v.totalGrossCents)} €</dd></div>
+                {v.nextDelivery && (
+                  <div><dt>Nächste Lieferung</dt><dd>{fmtDate(v.nextDelivery.scheduledFor)}</dd></div>
+                )}
+                <div><dt>Laufzeit bis</dt><dd>{v.planEndAt ? fmtDate(v.planEndAt) : "—"}</dd></div>
+              </dl>
+              <div className="portal-actions">
+                <a href={annualPlanDetailHref(v.id)} className="portal-action">JAHRESPLAN ANSEHEN</a>
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
 
       <section className="portal-section">
         <AccountSectionHeader label="LETZTE BESTELLUNG" />
@@ -521,6 +670,10 @@ function PrivateDashboard() {
               <div className="portal-order-meta">
                 <span>{fmtDate(latestOrder.placed_at || latestOrder.created_at)}</span>
                 <strong>{orderAmount(latestOrder)}</strong>
+                {/* The amount is the order's own and is unchanged. This
+                    only says the money was already taken, once, by the
+                    annual plan - see ANNUAL_PREPAID_ORDER_NOTE. */}
+                {latestOrderIsPrepaid && <span className="portal-prepaid-note">{ANNUAL_PREPAID_ORDER_NOTE}</span>}
               </div>
             </div>
             <div className="portal-actions">
@@ -717,6 +870,17 @@ function PortalOrders() {
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(() => !!supabase);
   const [error, setError] = useState("");
+  /*
+    WHICH OF THESE ORDERS WERE ALREADY PAID FOR.
+
+    An annual delivery becomes an ordinary order and appears in this list
+    with its own per-delivery amount. The amount is right; the list simply
+    never said where the money came from, so a prepaid box looked like a
+    fresh charge. The ids come from the annual read model's own views - no
+    column and no select of this component's own.
+  */
+  const { views: annualViews } = useAnnualPlanViews();
+  const prepaidOrderIds = collectAnnualDeliveryOrderIds(annualViews);
 
   useEffect(() => {
     if (!supabase) return;
@@ -764,7 +928,12 @@ function PortalOrders() {
                     no real tracking data. */}
                 {getTrackingView(o) && <span className="order-list-tracking">Sendung</span>}
               </span>
-              <span className="order-list-total">{fmtCents(isBusiness ? o.total_net_cents ?? o.total_gross_cents : o.total_gross_cents)} €{isBusiness && o.total_net_cents !== null ? " netto" : ""}</span>
+              <span className="order-list-total">
+                {fmtCents(isBusiness ? o.total_net_cents ?? o.total_gross_cents : o.total_gross_cents)} €{isBusiness && o.total_net_cents !== null ? " netto" : ""}
+                {prepaidOrderIds.includes(o.id) && (
+                  <span className="portal-prepaid-note">{ANNUAL_PREPAID_ORDER_NOTE}</span>
+                )}
+              </span>
             </a>
           ))}
         </div>
@@ -777,6 +946,17 @@ function PortalOrders() {
 
 function OrderDetail({ orderId }: { orderId: string }) {
   const { session } = useAuth();
+  /*
+    IS THIS ORDER ONE OF THE ANNUAL PLAN'S DELIVERIES?
+
+    Answered from the customer's own annual views rather than from
+    anything on the order row, because the order genuinely has no annual
+    column - migration 039 deliberately reuses the ordinary order. A
+    stranger's order id is not reachable here at all: RLS decides which
+    order loads, and these ids are only ever the caller's own.
+  */
+  const { views: annualViews } = useAnnualPlanViews();
+  const isPrepaidAnnualDelivery = collectAnnualDeliveryOrderIds(annualViews).includes(orderId);
   const [order, setOrder] = useState<OrderRow | null>(null);
   const [items, setItems] = useState<OrderItemRow[]>([]);
   const [loading, setLoading] = useState(() => !!supabase);
@@ -899,6 +1079,11 @@ function OrderDetail({ orderId }: { orderId: string }) {
       <div className="order-detail-meta">
         <div className="portal-profile-row"><span>Datum</span><strong>{fmtDate(order.placed_at || order.created_at)}</strong></div>
         <div className="portal-profile-row"><span>Zahlung</span><strong>{getPaymentStatusLabel(order)}</strong></div>
+        {/* NOT A SECOND CHARGE. The stored amounts are untouched; this
+            row says which payment they belong to. */}
+        {isPrepaidAnnualDelivery && (
+          <div className="portal-profile-row"><span>Bezahlt über</span><strong>{ANNUAL_PREPAID_ORDER_NOTE}</strong></div>
+        )}
         {/* A refund amount is only ever shown when it was actually
             recorded. An order flagged refunded without a stored amount
             says so in words instead of printing an invented number. */}
@@ -1058,6 +1243,12 @@ function OrderDetail({ orderId }: { orderId: string }) {
             </div>
           )}
         </div>
+        {isPrepaidAnnualDelivery && (
+          <p className="portal-note">
+            Diese Lieferung gehört zu deinem Jahresplan. Der Betrag ist Teil der einmaligen
+            {" "}Zahlung für den gesamten Plan; es wurde dafür nichts erneut abgebucht.
+          </p>
+        )}
       </section>
     </>
   );
@@ -1835,51 +2026,8 @@ function AnnualPlanStartForm() {
  * ends. The copy never calls it an Abo and never offers a cancellation
  * cutoff, because neither applies.
  */
-function PortalAnnualPlans({ onCount }: { onCount?: (n: number) => void }) {
-  const [views, setViews] = useState<AnnualPlanAccountView[]>([]);
-  const [loading, setLoading] = useState(() => !!supabase);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (!supabase) return;
-    let stale = false;
-    (async () => {
-      /*
-        TWO READS, NOT ONE PER PLAN. The plans first, then every delivery
-        row belonging to them in ONE `.in(...)`. RLS confines both to the
-        caller's own rows, so the id list can only ever hold their own.
-      */
-      const planRead = await supabase
-        .from("annual_plans").select(ANNUAL_PLAN_ACCOUNT_SELECT).order("purchased_at", { ascending: false });
-      if (stale) return;
-      if (planRead.error) {
-        setError("Deine Jahrespläne konnten gerade nicht geladen werden.");
-        setLoading(false);
-        return;
-      }
-      const plans = (planRead.data ?? []) as unknown as AnnualPlanAccountRow[];
-      let deliveries: (AnnualPlanDeliveryAccountRow & { annual_plan_id: string })[] = [];
-      if (plans.length > 0) {
-        const deliveryRead = await supabase
-          .from("annual_plan_deliveries")
-          .select(ANNUAL_PLAN_DELIVERY_ACCOUNT_SELECT)
-          .in("annual_plan_id", plans.map(p => p.id))
-          .order("delivery_number", { ascending: true });
-        if (stale) return;
-        if (!deliveryRead.error) {
-          deliveries = (deliveryRead.data ?? []) as unknown as (AnnualPlanDeliveryAccountRow & { annual_plan_id: string })[];
-        }
-      }
-      const built = plans
-        .map(plan => buildAnnualPlanAccountView(plan, deliveries.filter(d => d.annual_plan_id === plan.id)))
-        .filter((v): v is AnnualPlanAccountView => v !== null);
-      setViews(built);
-      onCount?.(built.length);
-      setLoading(false);
-    })();
-    return () => { stale = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+function PortalAnnualPlans() {
+  const { views, loading, error } = useAnnualPlanViews();
 
   if (loading) return <p className="portal-loading">Laden…</p>;
   if (error) return <section className="portal-section"><AccountEmptyState>{error}</AccountEmptyState></section>;
@@ -1923,6 +2071,19 @@ function PortalAnnualPlans({ onCount }: { onCount?: (n: number) => void }) {
               Einmal bezahlt, keine automatische Verlängerung. Der Plan endet nach der letzten
               {" "}der {v.deliveryCount} Lieferungen; es folgt keine weitere Abbuchung.
             </p>
+            {/*
+              THE WAY IN TO THE PLAN'S OWN PAGE.
+
+              The card summarises; the page shows the whole schedule and
+              the order each delivery became. A link INSIDE the card
+              rather than the card itself, because the annual card is a
+              plain div in a list that also renders non-navigable states
+              and a whole-row link would have to appear and disappear
+              with them.
+            */}
+            <div className="portal-actions">
+              <a href={annualPlanDetailHref(v.id)} className="portal-action">JAHRESPLAN ANSEHEN</a>
+            </div>
           </div>
         ))}
       </div>
@@ -1930,13 +2091,6 @@ function PortalAnnualPlans({ onCount }: { onCount?: (n: number) => void }) {
   );
 }
 
-/**
- * The status word for a plan, derived from the view's own flags.
- *
- * A refunded plan is never reported as running, and a cancelled one is
- * never reported as active - the same discipline
- * resolveAnnualCheckoutReturnState applies on the return page.
- */
 function annualStatusLabel(v: AnnualPlanAccountView): string {
   if (v.cancelledAt || v.status === "cancelled") return "Beendet";
   if (v.paymentStatus === "refunded") return "Erstattet";
@@ -1944,6 +2098,250 @@ function annualStatusLabel(v: AnnualPlanAccountView): string {
   if (v.status === "active") return "Aktiv";
   if (!v.purchasedAt) return "Zahlung wird verarbeitet";
   return "Offen";
+}
+
+// ── Jahresplan: die eine Leseoperation ────────────────────────────────
+
+/**
+ * THE CUSTOMER'S ANNUAL PLANS, READ ONCE AND SHARED.
+ *
+ * Four surfaces need the same answer - the dashboard card, the dashboard's
+ * next delivery, the list on /account/subscriptions and the plan's own
+ * page - and before this existed only one of them had it. A second copy
+ * of these two reads would have been a second place for the column lists,
+ * the RLS assumptions and the "map through the leaf" rule to drift, so
+ * there is exactly one.
+ *
+ * ── TWO READS, NEVER ONE PER PLAN ─────────────────────────────
+ *
+ * The plans first, then every delivery row belonging to them in ONE
+ * `.in(...)`. RLS confines both to the caller's own rows, so the id list
+ * can only ever hold their own.
+ *
+ * ── AND IT NEVER FILTERS BY A PLAN ID ─────────────────────────
+ *
+ * Not even for the detail page. The set this returns is what the database
+ * proved belongs to the signed-in customer, and the detail page picks its
+ * plan out of that set by id - so a stranger's uuid, or a guessed one,
+ * matches nothing and renders the same neutral "nicht gefunden" an id
+ * that never existed gets. That is the same discipline
+ * resolveAnnualCheckoutReturnState applies to the return URL's id, and it
+ * is why no query here is ever built from an untrusted value.
+ */
+function useAnnualPlanViews(): { views: AnnualPlanAccountView[]; loading: boolean; error: string } {
+  const [views, setViews] = useState<AnnualPlanAccountView[]>([]);
+  const [loading, setLoading] = useState(() => !!supabase);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!supabase) return;
+    let stale = false;
+    (async () => {
+      const planRead = await supabase
+        .from("annual_plans").select(ANNUAL_PLAN_ACCOUNT_SELECT).order("purchased_at", { ascending: false });
+      if (stale) return;
+      if (planRead.error) {
+        setError("Deine Jahrespläne konnten gerade nicht geladen werden.");
+        setLoading(false);
+        return;
+      }
+      const plans = (planRead.data ?? []) as unknown as AnnualPlanAccountRow[];
+      let deliveries: (AnnualPlanDeliveryAccountRow & { annual_plan_id: string })[] = [];
+      if (plans.length > 0) {
+        const deliveryRead = await supabase
+          .from("annual_plan_deliveries")
+          .select(ANNUAL_PLAN_DELIVERY_ACCOUNT_SELECT)
+          .in("annual_plan_id", plans.map(p => p.id))
+          .order("delivery_number", { ascending: true });
+        if (stale) return;
+        if (!deliveryRead.error) {
+          deliveries = (deliveryRead.data ?? []) as unknown as (AnnualPlanDeliveryAccountRow & { annual_plan_id: string })[];
+        }
+      }
+      const built = plans
+        .map(plan => buildAnnualPlanAccountView(plan, deliveries.filter(d => d.annual_plan_id === plan.id)))
+        .filter((v): v is AnnualPlanAccountView => v !== null);
+      setViews(built);
+      setLoading(false);
+    })();
+    return () => { stale = true; };
+  }, []);
+
+  return { views, loading, error };
+}
+
+// ── Jahresplan: die eigene Seite ──────────────────────────────────────
+
+/**
+ * ONE DELIVERY'S DURABLE STATE, IN WORDS.
+ *
+ * Migration 039's four words, translated and nothing more. 'claimed' is
+ * a worker having taken responsibility for a box and NOT having shipped
+ * it, so it says "wird vorbereitet"; 'fulfilled' is the moment the
+ * ordinary order was created, which is what the order page then tracks.
+ * Neither is ever promoted to a delivery confirmation this page has no
+ * evidence for. An unknown word - impossible while the CHECK stands -
+ * fails closed rather than being guessed into one of the four.
+ */
+const ANNUAL_DELIVERY_STATE_LABEL: Record<string, string> = {
+  scheduled: "Geplant",
+  claimed: "Wird vorbereitet",
+  fulfilled: "Ausgelöst",
+  cancelled: "Storniert",
+};
+
+/**
+ * THE PREPAID ANNUAL PLAN, ON ITS OWN PAGE.
+ *
+ * Every figure is the view's, which is the leaf's, which is the frozen
+ * row's. Nothing is re-priced, no schedule is derived and no date is
+ * compared against a clock - see lib/annualPlanAccount.ts for why each
+ * of those is a rule rather than a preference.
+ *
+ * ── OWNERSHIP IS THE DATABASE'S ───────────────────────────────
+ *
+ * The uuid in the URL selects; it never authorizes. useAnnualPlanViews
+ * reads the signed-in customer's own plans under RLS and this page looks
+ * for the requested id in THAT set, so another customer's plan id
+ * produces the same "nicht gefunden" a typo produces. No id is sent to a
+ * server, nothing is fetched with it, and no payment identifier appears
+ * on this page at all - the read model does not select one.
+ */
+function AnnualPlanDetail({ annualPlanId }: { annualPlanId: string }) {
+  const { views, loading, error } = useAnnualPlanViews();
+  const plan = views.find(v => v.id === annualPlanId) ?? null;
+
+  if (loading) return <p className="portal-loading">Laden…</p>;
+
+  if (error) return (
+    <>
+      <section className="portal-page-head">
+        <p className="eyebrow">JAHRESPLAN</p>
+        <h1>Jahresplan.</h1>
+      </section>
+      <section className="portal-section"><AccountEmptyState>{error}</AccountEmptyState></section>
+      <Link href="/account/dashboard" className="portal-back-link">&larr; Zurück zur Übersicht</Link>
+    </>
+  );
+
+  if (!plan) return (
+    <>
+      <section className="portal-page-head">
+        <p className="eyebrow">JAHRESPLAN</p>
+        <h1>Jahresplan nicht gefunden.</h1>
+      </section>
+      <Link href="/account/dashboard" className="portal-back-link">&larr; Zurück zur Übersicht</Link>
+    </>
+  );
+
+  const productLine = plan.product?.variantLabel
+    ? `${plan.product.name} · ${plan.product.variantLabel}`
+    : (plan.product?.name ?? "GLOA Matcha");
+
+  return (
+    <>
+      <section className="portal-page-head">
+        <p className="eyebrow">JAHRESPLAN</p>
+        <h1>{productLine}</h1>
+        <p className="portal-page-lead">{annualStatusLabel(plan)}</p>
+      </section>
+
+      <section className="portal-section">
+        <AccountSectionHeader label="DEIN PLAN" />
+        <div className="portal-profile">
+          <div className="portal-profile-row"><span>Produkt</span><strong>{productLine}</strong></div>
+          <div className="portal-profile-row"><span>Status</span><strong>{annualStatusLabel(plan)}</strong></div>
+          <div className="portal-profile-row"><span>Gekauft am</span><strong>{plan.purchasedAt ? fmtDate(plan.purchasedAt) : "—"}</strong></div>
+          <div className="portal-profile-row">
+            <span>Lieferungen</span>
+            <strong>{plan.deliveryCount} · {ANNUAL_CADENCE_LABEL}</strong>
+          </div>
+          <div className="portal-profile-row">
+            <span>Bereits ausgelöst</span>
+            <strong>{plan.fulfilledDeliveries} von {plan.deliveryCount}</strong>
+          </div>
+          {plan.nextDelivery && (
+            <div className="portal-profile-row">
+              <span>Nächste Lieferung</span>
+              <strong>{fmtDate(plan.nextDelivery.scheduledFor)}</strong>
+            </div>
+          )}
+          <div className="portal-profile-row">
+            <span>Laufzeit bis</span>
+            <strong>{plan.planEndAt ? fmtDate(plan.planEndAt) : "—"}</strong>
+          </div>
+        </div>
+      </section>
+
+      <section className="portal-section">
+        <AccountSectionHeader label="ZAHLUNG" />
+        <div className="portal-profile">
+          <div className="portal-profile-row">
+            <span>Einmalig bezahlt</span>
+            <strong>{fmtCents(plan.totalGrossCents)} €</strong>
+          </div>
+          <div className="portal-profile-row">
+            <span>Matcha</span>
+            <strong>{fmtCents(plan.merchandiseTotalGrossCents)} €</strong>
+          </div>
+          <div className="portal-profile-row">
+            <span>Versand</span>
+            <strong>{plan.shippingTotalGrossCents === 0 ? "Kostenlos" : `${fmtCents(plan.shippingTotalGrossCents)} €`}</strong>
+          </div>
+          {plan.refundedTotalCents > 0 && (
+            <div className="portal-profile-row">
+              <span>Erstattet</span>
+              <strong>{fmtCents(plan.refundedTotalCents)} €</strong>
+            </div>
+          )}
+        </div>
+        <p className="portal-note">
+          Einmalig bezahlt, keine automatische Verlängerung. Der Plan endet nach der letzten
+          {" "}der {plan.deliveryCount} Lieferungen; es folgt keine weitere Abbuchung.
+        </p>
+      </section>
+
+      {/*
+        THE SCHEDULE, AS THE DATABASE WROTE IT.
+
+        Thirteen dated rows exist from activation onwards, so they are
+        shown rather than summarised - and each one that has already
+        become an order links to that order instead of this page
+        inventing a second view of the same box.
+
+        EVERY ROW SAYS "IM JAHRESPLAN ENTHALTEN". An annual delivery
+        becomes a real order carrying its own per-delivery amount, and
+        that amount is correct accounting - but the year was paid for
+        once, so nothing here may read as a second charge.
+      */}
+      {plan.deliveries.length > 0 && (
+        <section className="portal-section">
+          <AccountSectionHeader label="LIEFERUNGEN" />
+          <div className="annual-schedule">
+            {plan.deliveries.map(d => (
+              <div key={d.deliveryNumber} className="annual-schedule-row">
+                <span className="annual-schedule-number">{d.deliveryNumber} / {plan.deliveryCount}</span>
+                <span className="annual-schedule-date">{fmtDate(d.scheduledFor)}</span>
+                <span className="annual-schedule-state">{ANNUAL_DELIVERY_STATE_LABEL[d.state] ?? "Unbekannt"}</span>
+                <span className="annual-schedule-cost">{ANNUAL_PREPAID_ORDER_NOTE}</span>
+                {d.orderId && (
+                  <a href={`/account/orders/${d.orderId}`} className="portal-action">BESTELLUNG</a>
+                )}
+              </div>
+            ))}
+          </div>
+          {!plan.scheduleComplete && (
+            <p className="portal-note">
+              Wir konnten gerade nicht alle Termine dieses Plans laden. Die Anzahl der Lieferungen
+              {" "}und dein bezahlter Betrag bleiben davon unberührt.
+            </p>
+          )}
+        </section>
+      )}
+
+      <Link href="/account/dashboard" className="portal-back-link">&larr; Zurück zur Übersicht</Link>
+    </>
+  );
 }
 
 /**

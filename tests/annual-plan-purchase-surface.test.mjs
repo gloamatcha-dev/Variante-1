@@ -373,13 +373,31 @@ test("4d: the account landing carries the return parameters through", () => {
 
 test("5a: the plan list is built by the leaf, with no arithmetic of its own", () => {
   assert.match(annualPortalCode, /buildAnnualPlanAccountView\(plan, deliveries\.filter\(d => d\.annual_plan_id === plan\.id\)\)/);
-  // Two reads for any number of plans, not one per plan.
+  /*
+    Two reads for any number of plans, not one per plan.
+
+    The reads MOVED, and that is the point of the move: four surfaces now
+    need the customer's annual plans - the dashboard card, the dashboard's
+    next delivery, this list and the plan's own page - and a second copy
+    of these two queries would have been a second place for the column
+    lists and the RLS assumptions to drift. So the N+1 guard follows the
+    reads into useAnnualPlanViews, which is where they are now, and the
+    list below is asserted to hold no query of its own at all.
+  */
+  const reader = annualPortalCode.slice(
+    annualPortalCode.indexOf("function useAnnualPlanViews("),
+    annualPortalCode.indexOf("function AnnualPlanDetail("));
+  assert.ok(reader.length > 500, "the annual reader could not be located");
+  assert.equal([...reader.matchAll(/await supabase/g)].length, 2, "the plan list became an N+1");
+  assert.match(reader, /\.in\("annual_plan_id", plans\.map\(p => p\.id\)\)/);
+
   const list = annualPortalCode.slice(
     annualPortalCode.indexOf("function PortalAnnualPlans("),
     annualPortalCode.indexOf("function annualStatusLabel("));
   assert.ok(list.length > 500, "the plan list could not be located");
-  assert.equal([...list.matchAll(/await supabase/g)].length, 2, "the plan list became an N+1");
-  assert.match(list, /\.in\("annual_plan_id", plans\.map\(p => p\.id\)\)/);
+  assert.match(list, /const \{ views, loading, error \} = useAnnualPlanViews\(\);/,
+    "the plan list stopped reading through the shared reader");
+  assert.equal([...list.matchAll(/supabase\./g)].length, 0, "the plan list reads the database itself");
 });
 
 test("5b: the browser asks only for the columns the migration grants it", () => {

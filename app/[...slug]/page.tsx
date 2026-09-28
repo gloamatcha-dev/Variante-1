@@ -55,6 +55,11 @@ const seo:Record<string,[string,string]>={
  "account/dashboard":["Dein GLOA","Dein GLOA Dashboard. Bestellungen, Abos und Lieferungen im Überblick."],
  "account/orders":["Bestellungen","Deine GLOA Bestellungen."],
  "account/subscriptions":["Abos","Deine GLOA Abos und regelmäßige Lieferungen."],
+ // The prepaid annual plan's own page. It is not a ROUTE of its own -
+ // only /account/annual-plans/<id> exists - so this key is reached
+ // through the prefix branch in generateMetadata, exactly the way
+ // account/orders and account/subscriptions serve their detail pages.
+ "account/annual-plans":["Jahresplan","Dein GLOA Jahresplan und seine Lieferungen."],
  "account/addresses":["Adressen","Deine Lieferadressen bei GLOA."],
  "account/profile":["Kontodaten","Dein GLOA Profil und Kontodaten."],
  "account/business":["B2B bei GLOA","Preise, Konditionen, Belieferung und alles für deine Zusammenarbeit mit GLOA."],
@@ -171,7 +176,7 @@ export async function generateMetadata({params}:{params:Promise<{slug:string[]}>
  // The alias /shop/gloa-matcha gets the product's own title and
  // description, not the generic shop pair - it renders the product page
  // and its canonical already names it.
- const base=PRODUCT_SEO[canonicalPathFor(path)]||(path.startsWith("account/orders/")?seo["account/orders"]:path.startsWith("account/subscriptions/")?seo["account/subscriptions"]:path.startsWith("rezepte/")?seo.rezepte:path.startsWith("journal/")?seo.journal:path.startsWith("shop/")?seo.shop:seo[path]||["GLOA","Matcha aus Japan."]);
+ const base=PRODUCT_SEO[canonicalPathFor(path)]||(path.startsWith("account/orders/")?seo["account/orders"]:path.startsWith("account/subscriptions/")?seo["account/subscriptions"]:path.startsWith("account/annual-plans/")?seo["account/annual-plans"]:path.startsWith("rezepte/")?seo.rezepte:path.startsWith("journal/")?seo.journal:path.startsWith("shop/")?seo.shop:seo[path]||["GLOA","Matcha aus Japan."]);
  const title=withBrand(base[0]);
  // A product the shop withholds must not be indexed either. The page
  // still resolves and still says "nicht verfügbar" - it is simply not

@@ -825,10 +825,18 @@ test("3F: dates are German and never raw ISO", () => {
   ]) {
     assert.ok(subscriptionsSection.includes(`fmtDate(${value})`), `${value} is not formatted`);
   }
-  // The dashboard tile formats its date the same way, and runs the same
-  // early-cancellation check before promising a delivery at all.
-  assert.match(dashboardSection, /fmtDate\(getNextDeliveryAt\(nextDeliverySub\) as string\)/);
-  assert.match(dashboardSection, /nextDeliverySub && getNextDeliveryAt\(nextDeliverySub\) \?/);
+  // The dashboard tile formats its date the same way, and STILL runs the
+  // same early-cancellation check before promising a delivery at all.
+  //
+  // The check moved rather than changed: "Nächste Lieferung" now answers
+  // for both contracts a customer can hold, so the subscription's own
+  // answer - getNextDeliveryAt, which returns null for a cancellation
+  // that ends before the next box - becomes one CANDIDATE among the
+  // annual plan's, and a null one is never offered. A subscription that
+  // promises nothing therefore still promises nothing here.
+  assert.match(dashboardSection, /const subDeliveryAt = nextDeliverySub \? getNextDeliveryAt\(nextDeliverySub\) : null;/);
+  assert.match(dashboardSection, /nextDeliverySub && subDeliveryAt/);
+  assert.match(dashboardSection, /fmtDate\(nextDelivery\.scheduledFor\)/);
   // No raw column is printed straight into the markup.
   for (const raw of [
     "{sub.current_period_end}", "{sub.next_delivery_at}",
