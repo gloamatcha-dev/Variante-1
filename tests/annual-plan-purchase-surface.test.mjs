@@ -395,9 +395,20 @@ test("5a: the plan list is built by the leaf, with no arithmetic of its own", ()
     annualPortalCode.indexOf("function PortalAnnualPlans("),
     annualPortalCode.indexOf("function annualStatusLabel("));
   assert.ok(list.length > 500, "the plan list could not be located");
-  assert.match(list, /const \{ views, loading, error \} = useAnnualPlanViews\(\);/,
-    "the plan list stopped reading through the shared reader");
+  /*
+    The panel does not read at all any more: /account/subscriptions reads
+    the plans ONCE and hands them down, because three things on that page
+    need the same answer - this panel, the history list and the purchase
+    form's own refusal - and they were reading the tables twice between
+    them.
+  */
+  assert.match(list, /const live = views\.filter\(isLiveAnnualPlan\);/,
+    "the plan panel stopped filtering to the running plans");
   assert.equal([...list.matchAll(/supabase\./g)].length, 0, "the plan list reads the database itself");
+  assert.equal([...list.matchAll(/useAnnualPlanViews\(/g)].length, 0,
+    "the plan panel reads the plans a second time");
+  assert.match(annualPortalCode, /views: AnnualPlanAccountView\[\];/,
+    "the plan panel no longer takes the shared views");
 });
 
 test("5b: the browser asks only for the columns the migration grants it", () => {
@@ -424,7 +435,15 @@ test("5c: a prepaid plan is never described as an Abo", () => {
     assert.ok(!list.includes(wrong), `the annual card says ${wrong}`);
   }
   assert.match(list, /Einmal bezahlt, keine automatische Verlängerung\./);
-  assert.match(list, /DEIN JAHRESPLAN/);
+  // The panel is named after the PRODUCT now, beside the abo panel, so
+  // a customer can see at a glance which of the two they hold.
+  assert.match(list, /label="JAHRESPLAN"/);
+  // AND THAT SENTENCE IS ONLY EVER SHOWN FOR A RUNNING PLAN. It is a
+  // promise about the thirteenth delivery, and on a refunded plan it
+  // made twelve cancelled boxes sound imminent.
+  assert.ok(list.indexOf("const live = views.filter(isLiveAnnualPlan);")
+    < list.indexOf("Einmal bezahlt, keine automatische Verlängerung."),
+    "the running-plan copy is rendered before the plan is known to be running");
 });
 
 test("5d: a refunded or cancelled plan is not reported as running", () => {

@@ -488,7 +488,7 @@ test("9: the ANNUAL plan's rules and its own return state are untouched", () => 
   assert.match(withoutComments(banner), /setAnnualState\(resolveAnnualCheckoutReturnState\(\{/);
   // THE PREPAID PLAN HAS NO CANCELLATION AND STILL OFFERS NONE. It is paid
   // once for thirteen deliveries and ends; this package added nothing.
-  const annualForm = portal.slice(portal.indexOf("function AnnualPlanStartForm()"),
+  const annualForm = portal.slice(portal.indexOf("function AnnualPlanStartForm("),
     portal.indexOf("function PortalAnnualPlans("));
   const annualList = portal.slice(portal.indexOf("function PortalAnnualPlans("),
     portal.indexOf("function annualStatusLabel("));
@@ -545,5 +545,9 @@ test("11: the subscription list and detail keep every value they had", () => {
   assert.match(list, /\.select\(SUBSCRIPTION_SELECT\)\.order\("created_at", \{ ascending: false \}\)/);
   // The booking form is still a sibling of the list, so a customer with an
   // ended abo can start another without a detour through the shop.
-  assert.match(list, /\{!loading && !error && <SubscriptionStartForm subscriptions=\{subs\} \/>\}/);
+  // Still a sibling of the list rather than an empty state - a customer
+  // whose abo ended can start another without a detour through the shop -
+  // but revealed by its CTA rather than rendered under every visit.
+  assert.match(list, /openForm === "monthly" && \(/);
+  assert.match(list, /<SubscriptionStartForm subscriptions=\{subs\} onCancel=\{\(\) => setOpenForm\("none"\)\} \/>/);
 });

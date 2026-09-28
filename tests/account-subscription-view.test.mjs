@@ -808,8 +808,11 @@ test("3F: no fake subscription is ever rendered", () => {
   for (const banned of ["Beispiel-Abo", "Musterabo", "demoSub", "sampleSubscription", "FAKE", "TODO"]) {
     assert.ok(!subscriptionsSection.includes(banned), `the UI carries ${banned}`);
   }
-  // The list renders from state that only ever comes from Supabase.
-  assert.match(subscriptionsSection, /subs\.map\(s => \{/);
+  // The list renders from state that only ever comes from Supabase, and
+  // it renders the RUNNING ones: a finished abo belongs to VERGANGENE
+  // PLÄNE, which promises nothing.
+  assert.match(subscriptionsSection, /liveSubs\.map\(s => \{/);
+  assert.match(subscriptionsSection, /const liveSubs = subs\.filter\(sub => isLiveSubscription\(/);
   assert.match(subscriptionsSection, /const \[subs, setSubs\] = useState<SubscriptionRow\[\]>\(\[\]\)/);
   // An empty result renders the empty state, not an invented row.
   assert.match(subscriptionsSection, /const hasSubs = subs\.length > 0;/);
@@ -882,8 +885,22 @@ test("3F: the list is not a desktop table squeezed onto mobile", () => {
 test("3F: the controls are real buttons, focusable, and status is not colour-only", () => {
   // Real buttons with an explicit type, never a div with onClick.
   const buttons = [...subscriptionsSection.matchAll(/<button[\s\S]*?>/g)].map(m => m[0]);
-  // Four: the booking CTA, and the three the cancellation flow owns.
-  assert.equal(buttons.length, 4, "the subscription screens gained or lost a button");
+  /*
+    Seven, and every one of them is a real control:
+
+      ABO STARTEN / WEITERES ABO STARTEN   the two ways to open the
+                                           booking form, one per panel
+                                           state
+      ABBRECHEN                            closes it again - a form that
+                                           can be opened has to be
+                                           closable
+      ZUR ZAHLUNG                          the booking CTA
+      the three the cancellation flow owns
+
+    The count is pinned rather than the names so a control cannot be
+    added to this surface without being looked at.
+  */
+  assert.equal(buttons.length, 7, "the subscription screens gained or lost a button");
   for (const button of buttons) {
     assert.match(button, /type="button"/, `a button has no explicit type: ${button.slice(0, 60)}`);
   }
@@ -905,8 +922,12 @@ test("3F: the controls are real buttons, focusable, and status is not colour-onl
     "status is conveyed by colour");
 
   // Loading, empty and error states all exist and none is blank.
+  //
+  // The empty state moved into the product panel and became the two
+  // lines a customer can act on - what they have, and the offer - rather
+  // than a status card with a sentence under it.
   assert.match(subscriptionsSection, /Laden…/);
-  assert.match(subscriptionsSection, /Du hast aktuell kein Abonnement\./);
+  assert.match(subscriptionsSection, /Kein aktives Abo/);
   assert.match(subscriptionsSection, /Deine Abos konnten gerade nicht geladen werden\./);
 });
 

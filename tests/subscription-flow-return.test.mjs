@@ -599,7 +599,7 @@ test("12: ANNUAL shipping stays a SEPARATE authority and keeps its own waiver", 
   assert.ok(!annualRules.includes("SUBSCRIPTION_"), "the annual leaf reads a monthly constant");
   // The annual surface on /account/subscriptions still reads its OWN
   // constants and none of the monthly ones.
-  const annualForm = portal.slice(portal.indexOf("function AnnualPlanStartForm()"),
+  const annualForm = portal.slice(portal.indexOf("function AnnualPlanStartForm("),
     portal.indexOf("function PortalAnnualPlans("));
   assert.ok(annualForm.length > 2000, "the annual form was not found");
   assert.match(annualForm, /\{ANNUAL_FREE_SHIPPING_NOTE\}/);

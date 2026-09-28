@@ -174,11 +174,25 @@ test("subscriptions: the page offers the real way to start one", () => {
   */
   assert.ok(!subsMarkup.includes('<section className="portal-empty-state">'), "the bare empty-state card survives");
   assert.match(subsMarkup, /Dein Matcha, regelmäßig\./, "the page needs its own headline when empty");
-  // The rows go WITH it: the form marks a size whose abo is already
-  // running as unavailable, and it uses the list's own rows rather than
-  // reading the table a second time.
-  assert.match(subsMarkup, /<SubscriptionStartForm subscriptions=\{subs\} \/>/,
+  /*
+    THE FORM IS REVEALED, NOT RENDERED BY DEFAULT.
+
+    This page used to stack the subscription history, the whole monthly
+    checkout form, the annual history and the whole annual checkout form -
+    two complete purchases nobody had asked for, between a customer and
+    the state they came to check. Each product now states its current
+    state compactly and opens its form on request.
+
+    The rows still go WITH it: the form marks a size whose abo is already
+    running as unavailable, and it uses the list's own rows rather than
+    reading the table a second time.
+  */
+  assert.match(subsMarkup, /openForm === "monthly" && \(/,
+    "the booking form is not behind its CTA");
+  assert.match(subsMarkup, /<SubscriptionStartForm subscriptions=\{subs\} onCancel=\{\(\) => setOpenForm\("none"\)\} \/>/,
     "the page no longer renders the booking form");
+  assert.match(subsMarkup, /useState<"none" \| "monthly" \| "annual">\("none"\)/,
+    "the page opens with a form already expanded");
   // And the stale "not bookable yet" copy is gone from the page.
   assert.ok(!subsMarkup.includes("Buchbar sind Abos noch nicht"), "the page still says abos cannot be booked");
   assert.ok(!subsMarkup.includes("in Vorbereitung"), "the page still calls the product unfinished");
@@ -385,7 +399,7 @@ test("terminology: the private side keeps Abo", () => {
   // says Belieferung.
   const privateMarkup = withoutComments(privateDash);
   assert.match(privateMarkup, /ABO ANSEHEN/);
-  assert.match(privateMarkup, /MONATSABO STARTEN/);
+  assert.match(privateMarkup, /ABO STARTEN/);
   assert.match(privateMarkup, /kein Abonnement/);
   assert.match(subsMarkup, /ABOS/);
   assert.match(portal, /\{ key: "subscriptions", label: "Abos", privateOnly: true \}/);

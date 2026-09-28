@@ -467,8 +467,8 @@ test("5c: no migration, no new endpoint, no deleted history", () => {
    ══════════════════════════════════════════════════════════════ */
 
 const dashboard = between(portalCode, "function PrivateDashboard()", "function BusinessDashboard()");
-const startForm = between(portalCode, "function SubscriptionStartForm(", "function AnnualPlanStartForm()");
-const annualForm = between(portalCode, "function AnnualPlanStartForm()", "function PortalAnnualPlans(");
+const startForm = between(portalCode, "function SubscriptionStartForm(", "function AnnualPlanStartForm(");
+const annualForm = between(portalCode, "function AnnualPlanStartForm(", "function PortalAnnualPlans(");
 const subDetail = between(portalCode, "function SubscriptionDetail(", "function PortalAddresses()");
 const annualDetail = between(portalCode, "function AnnualPlanDetail(", "function CheckoutReturnBanner()");
 
@@ -499,7 +499,7 @@ test("6b: active and historical contracts are not shown as equally current", () 
 test("6c: the repurchase CTAs appear exactly when the server would accept", () => {
   // Ended monthly -> the offer comes back. Live monthly -> it does not.
   assert.match(dashboard, /\{liveSubs\.length === 0 && \(/);
-  assert.match(dashboard, /MONATSABO STARTEN/);
+  assert.match(dashboard, /ABO STARTEN/);
   assert.match(dashboard, /\{liveAnnualPlans\.length === 0 && \(/);
   assert.match(dashboard, /JAHRESPLAN WÄHLEN/);
   // A LIVE contract gets the view action instead, never a buy action.
@@ -520,7 +520,10 @@ test("6d: the booking form never offers a size that is already running", () => {
 });
 
 test("6e: the annual form steps aside for a running plan and returns after it", () => {
-  assert.match(annualForm, /const runningPlan = ownAnnualPlans\.find\(isLiveAnnualPlan\) \?\? null;/);
+  // The plans are passed in by the page that already read them, so the
+  // form does not open a second connection to answer a question the
+  // panel above it has already answered.
+  assert.match(annualForm, /const runningPlan = \(plans \?\? \[\]\)\.find\(isLiveAnnualPlan\) \?\? null;/);
   assert.match(annualForm, /\) : runningPlan \? \(/);
   assert.match(annualForm, /\{ANNUAL_PLAN_ALREADY_RUNNING\}/);
   // The way out is the plan itself, not a dead end.
@@ -537,7 +540,16 @@ test("6f: a terminal contract says so first, and says it in the agreed words", (
   assert.match(annualDetail, /const planIsLive = isLiveAnnualPlan\(plan\);/);
   assert.match(annualDetail, /\{!planIsLive && \(/);
   assert.match(annualDetail, /Erstattet: \{fmtCents\(/);
-  assert.match(annualDetail, /Plan beendet\./);
+  // The terminal sentence is the shared one, so the abo and the plan
+  // end on the same words rather than on two paraphrases.
+  assert.match(annualDetail, /\{NO_FURTHER_DELIVERIES\} Es folgt keine weitere Abbuchung\./);
+  assert.match(portalCode, /const NO_FURTHER_DELIVERIES = "Keine weiteren Lieferungen\.";/);
+  // A FINISHED PLAN PROMISES NOTHING. The three rows that are promises -
+  // the thirteen, the open count and the run-to date - are behind the
+  // live branch, and the schedule says what will not happen.
+  assert.match(annualDetail, /\{planIsLive && \(/);
+  assert.match(annualDetail, /annualHistorySummary\(plan\)/);
+  assert.match(annualDetail, /"Findet nicht statt"/);
   assert.match(annualDetail, /NEUEN JAHRESPLAN WÄHLEN/);
   // A finished plan's schedule is history, not a promise.
   assert.match(annualDetail, /label=\{planIsLive \? "LIEFERUNGEN" : "PLANVERLAUF"\}/);

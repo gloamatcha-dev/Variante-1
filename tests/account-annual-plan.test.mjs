@@ -335,7 +335,7 @@ test("2e2: with nothing running, the dashboard offers each product back", () => 
   // routes use - no LIVE contract of that kind. An ended abo and a
   // refunded plan block nothing, so both offers return by themselves.
   assert.match(dashboard, /liveSubs\.length === 0 && \(/);
-  assert.match(dashboard, /MONATSABO STARTEN/);
+  assert.match(dashboard, /ABO STARTEN/);
   assert.match(dashboard, /liveAnnualPlans\.length === 0 && \(/);
   assert.match(dashboard, /JAHRESPLAN WÄHLEN/);
   // And history is still reachable rather than hidden.

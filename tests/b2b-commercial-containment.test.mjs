@@ -296,7 +296,10 @@ test("4b: and renders no price, no per-kilo rate and no discount", () => {
     "the B2B surface fell outside the assertion");
   assert.ok(portalWithoutAnnual.includes("function PortalSubscriptions()"),
     "the recurring subscription fell outside the assertion");
-  assert.ok(!portalWithoutAnnual.includes("function AnnualPlanStartForm()"),
+  // Named WITHOUT the empty parameter list: the form takes props now,
+  // and a marker that still said "()" would be a search that can never
+  // match - a vacuous pass dressed as a guard.
+  assert.ok(!portalWithoutAnnual.includes("function AnnualPlanStartForm("),
     "the annual block is still inside the assertion");
 });
 

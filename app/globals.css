@@ -613,6 +613,32 @@ a.portal-summary-row:hover{color:var(--blue)}
 .portal-past-state{opacity:.6}
 .portal-past-date{opacity:.45}
 
+/* ── THE TWO PRODUCT PANELS ──
+   The state a customer came to check, above everything else and in two
+   lines: is there one, and can I get one. A panel is deliberately NOT a
+   card - no border, no tint - because the card language on this page
+   already means "an actual contract you can open". */
+.plan-panel-empty{display:grid;justify-items:start;gap:8px}
+.plan-panel-state{font:600 18px/1.3 var(--font-sans);letter-spacing:-.01em;margin:0}
+.plan-panel-note{font:14px/1.6 var(--font-mono);opacity:.6;margin:0;max-width:620px}
+.plan-panel-cta{margin-top:10px}
+/* The second size: real, reachable, and not competing with the card
+   above it for attention. */
+.plan-panel-secondary{align-self:start;margin-top:4px;font:600 12px/1 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;transition:color .2s}
+.plan-panel-secondary:hover{color:var(--berry)}
+
+/* ── A REVEALED PURCHASE FORM ──
+   It arrives because the customer asked for it, so it needs a way back:
+   the quiet counterpart of the CTA that opened it, never a second CTA. */
+.plan-form-close{display:block;margin-top:16px;font:600 12px/1 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;opacity:.55;transition:opacity .2s,color .2s}
+.plan-form-close:hover{opacity:1;color:var(--berry)}
+
+/* The product a past row belonged to, between its name and its state. */
+.portal-past-type{opacity:.5}
+
+/* What happened to a finished plan's thirteen, above the rows. */
+.annual-history-summary{margin-top:0;margin-bottom:14px}
+
 /* ── THE TERMINAL BANNER ──
    Ended, refunded, cancelled: the one fact that decides what the rest of
    the page means, so it sits directly under the heading rather than as
