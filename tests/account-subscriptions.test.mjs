@@ -401,7 +401,17 @@ test("terminology: the private side keeps Abo", () => {
   assert.match(privateMarkup, /ABO ANSEHEN/);
   assert.match(privateMarkup, /ABO STARTEN/);
   assert.match(privateMarkup, /kein Abonnement/);
-  assert.match(subsMarkup, /ABOS/);
+  /*
+    The page eyebrow is PLÄNE now, because the page holds both contracts:
+    the recurring abo AND the prepaid annual plan, each with its own
+    panel, history and purchase form. The WORD Abo is what this test is
+    about, and it still names the recurring product everywhere it
+    appears - which is what separates the private side from the B2B one,
+    where the same thing is called Belieferung.
+  */
+  assert.match(subsMarkup, /label="ABO"/);
+  assert.match(subsMarkup, /ABO VERWALTEN/);
+  assert.match(subsMarkup, /NEUES ABO STARTEN/);
   assert.match(portal, /\{ key: "subscriptions", label: "Abos", privateOnly: true \}/);
 });
 

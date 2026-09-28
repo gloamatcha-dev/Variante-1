@@ -7357,10 +7357,23 @@ header nav{gap:18px;font-size:12px}
   border-bottom:2px solid transparent;
   transition:color .2s ease,border-color .2s ease;
 }
-/* 20 + 13.2 + 20 + 2 = 55.2px: a rail, not a second header. */
-.portal-nav a{padding:20px 22px}
+/* 21 + 13.2 + 19 + 2 = 55.2px: a rail, not a second header.
+   THE SAME HEIGHT AS BEFORE, WITH THE LABEL ON THE CENTRE LINE.
+
+   It was 20 / 20, and the 2px active underline sits BELOW the bottom
+   padding rather than inside it - so the box was 20px of space above the
+   label and 22px below it. Measured against the real build and the real
+   Inter face at 1440 and at 390, the labels rendered 3.2px high in the
+   blue strip, which is what reads as a clipped or misaligned bar: the
+   type crowds the top edge and floats away from the underline.
+
+   The underline is therefore taken out of the bottom padding instead of
+   being added under it. 21 above and 19 + 2 below is symmetric, the
+   strip keeps its 55.2px exactly, and nothing about the active indicator
+   changes - it is still a 2px border on the tab, never a filled tab. */
+.portal-nav a{padding:21px 22px 19px}
 .portal-logout{
-  padding:20px 0 20px 22px;
+  padding:21px 0 19px 22px;
   border-top:0;
   border-left:0;
   border-right:0;
@@ -7376,8 +7389,14 @@ header nav{gap:18px;font-size:12px}
   color:var(--cream);
   border-bottom-color:var(--cream);
 }
-/* The global focus ring is blue, which is invisible on this strip. */
-.portal-nav :focus-visible{outline-color:var(--cream)}
+/* The global focus ring is blue, which is invisible on this strip.
+   IT IS ALSO DRAWN OUTSIDE THE TAB. `overflow-x:auto` makes this strip a
+   scroll container on BOTH axes - that is how CSS computes it - so
+   anything painted beyond the padding box is cut off, and a tab is
+   exactly as tall as the strip. A ring at the global +2px offset was
+   therefore clipped on all four sides the moment a keyboard user reached
+   the navigation. Drawn INSIDE instead, where nothing can cut it. */
+.portal-nav :focus-visible{outline-color:var(--cream);outline-offset:-3px}
 
 /* ══ THE CONTENT RAIL ══════════════════════════════════════ */
 /* The same gutter as the nav above it and as the rest of the site, so
@@ -7555,9 +7574,11 @@ header nav{gap:18px;font-size:12px}
 
 /* ══ RESPONSIVE ════════════════════════════════════════════ */
 @media (max-width:800px){
-  /* The strip keeps its scroll and its height; only the rhythm tightens. */
-  .portal-nav a{padding:18px 16px}
-  .portal-logout{padding:18px 0 18px 16px}
+  /* The strip keeps its scroll and its height; only the rhythm tightens.
+     19 + 13.2 + 17 + 2 = 51.2px, and the underline comes out of the
+     bottom padding here for the same reason it does above. */
+  .portal-nav a{padding:19px 16px 17px}
+  .portal-logout{padding:19px 0 17px 16px}
   /* Tracking does NOT drop here: the strip scrolls, so the tabs do
      not have to be squeezed to fit. One nav style at every width. */
   .portal-nav a,

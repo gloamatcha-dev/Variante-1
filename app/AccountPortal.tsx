@@ -3043,13 +3043,26 @@ function PortalSubscriptions() {
 
   return (
     <>
+      {/*
+        THE PAGE HOLDS BOTH CONTRACTS, SO IT IS NAMED AFTER BOTH.
+
+        "Deine Abos" was accurate when the recurring subscription was the
+        only thing here. It is not: the prepaid annual plan has its own
+        panel, its own history and its own purchase form on this page,
+        and a customer arriving to look at their Jahresplan was told the
+        page was about something else.
+
+        The word "Abo" still names the recurring product everywhere it
+        appears below, and it still never claims a calendar rhythm: that
+        contract ships every four weeks, thirteen times a year.
+      */}
       <section className="portal-page-head">
-        <p className="eyebrow">ABOS</p>
-        <h1>{hasAnything ? "Deine Abos." : "Dein Matcha, regelmäßig."}</h1>
+        <p className="eyebrow">PLÄNE</p>
+        <h1>{hasAnything ? "Deine Pläne." : "Dein Matcha, regelmäßig."}</h1>
         <p className="portal-page-lead">
           {hasAnything
-            ? "Hier findest du deine regelmäßigen Lieferungen."
-            : "Regelmäßige Lieferungen für deinen GLOA Matcha."}
+            ? "Hier verwaltest du deine regelmäßigen Lieferungen und deinen Jahresplan."
+            : "Regelmäßige Lieferungen und der Jahresplan für deinen GLOA Matcha."}
         </p>
       </section>
 

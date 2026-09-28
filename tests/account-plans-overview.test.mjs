@@ -173,6 +173,29 @@ test("1a: each product states its CURRENT state, at the top, compactly", () => {
   assert.match(annualPanel, /const live = views\.filter\(isLiveAnnualPlan\);/);
 });
 
+test("1a2: the page is named after BOTH contracts it holds", () => {
+  /*
+    It said "Deine Abos." and "Hier findest du deine regelmäßigen
+    Lieferungen." - accurate when the recurring subscription was the only
+    thing here, and wrong since the prepaid annual plan gained its own
+    panel, its own history and its own purchase form on this page. A
+    customer arriving to look at their Jahresplan was told the page was
+    about something else.
+  */
+  assert.match(page, /<p className="eyebrow">PLÄNE<\/p>/);
+  assert.match(page, /"Deine Pläne\."/);
+  assert.match(page, /"Hier verwaltest du deine regelmäßigen Lieferungen und deinen Jahresplan\."/);
+  assert.ok(!page.includes('"Deine Abos."'), "the page is still named after one of its two products");
+  // The empty page keeps its own headline and names both as well.
+  assert.match(page, /"Dein Matcha, regelmäßig\."/);
+  assert.match(page, /"Regelmäßige Lieferungen und der Jahresplan für deinen GLOA Matcha\."/);
+  // AND THE RECURRING PRODUCT IS STILL NOT CALLED MONTHLY. It ships every
+  // four weeks; tests/account-subscription-view.test.mjs bans the word on
+  // this surface, and the panel is labelled ABO for that reason.
+  const bare = between(portalMarkup, "function PortalSubscriptions()", "function PortalPastPlans(");
+  assert.ok(!/Monat/.test(bare), "the plans page calls the 4-week contract monthly");
+});
+
 test("1b: an ended abo gets the terminal state and the offer, not a form", () => {
   assert.match(page, /Kein aktives Abo/);
   assert.match(page, /Dein letztes Abo wurde am \$\{fmtDate\(getEffectiveEndAt\(lastEndedSub\) as string\)\} beendet\./);

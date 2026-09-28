@@ -176,12 +176,45 @@ test("2: blue strip, cream labels, cream underline on the active tab", () => {
   assert.match(rule(".portal-nav a:hover,"), /color:var\(--cream\)/);
   // Focus stays visible: the global ring is blue, invisible on blue.
   assert.match(rule(".portal-nav :focus-visible{"), /outline-color:var\(--cream\)/);
+  /*
+    AND IT IS DRAWN INSIDE THE TAB.
+
+    `overflow-x:auto` makes this strip a scroll container on BOTH axes -
+    that is how CSS computes it - so anything painted beyond the padding
+    box is cut off. A tab is exactly as tall as the strip, so the global
+    ring at a POSITIVE offset was clipped on all four sides the moment a
+    keyboard user reached the navigation. A negative offset cannot be.
+  */
+  const ring = rule(".portal-nav :focus-visible{");
+  const offset = /outline-offset:(-?\d+)px/.exec(ring);
+  assert.ok(offset, "the strip's focus ring has no explicit offset");
+  assert.ok(Number(offset[1]) < 0,
+    "the focus ring is drawn outside a scroll container and is clipped");
 });
 
 test("2b: the strip is a rail, not a second header", () => {
-  // 20 + (11 * 1.2) + 20 + 2 = 55.2px, inside the 54-58 the brief names.
-  assert.match(rule(".portal-nav a{"), /padding:20px 22px/);
-  const height = 20 + 11 * 1.2 + 20 + 2;
+  /*
+    21 + (11 * 1.2) + 19 + 2 = 55.2px, inside the 54-58 the brief names,
+    and the SAME 55.2px it has always been.
+
+    It was 20 / 20, and the 2px active underline sits below the bottom
+    padding rather than inside it - so the tab held 20px of space above
+    the label and 22px below it, and the type rendered 3.2px high in the
+    blue strip. Measured against the real build at 1440 and 390 before
+    the change; that is what read as a clipped or misaligned bar.
+
+    So the assertion is no longer "these are the paddings" but the
+    property those paddings exist for: SPACE ABOVE THE LABEL EQUALS SPACE
+    BELOW IT, underline included. A future change to either number has to
+    keep that true.
+  */
+  const pad = /padding:(\d+)px 22px (\d+)px/.exec(rule(".portal-nav a{"));
+  assert.ok(pad, "the tab padding is no longer stated in three values");
+  const [top, bottom] = [Number(pad[1]), Number(pad[2])];
+  const underline = 2;
+  assert.equal(top, bottom + underline,
+    `the label sits ${Math.abs(top - bottom - underline)}px off the strip's centre line`);
+  const height = top + 11 * 1.2 + bottom + underline;
   assert.ok(height >= 54 && height <= 58, `the strip is ${height}px tall`);
   // It keeps the horizontal scroll that makes all five reachable on a
   // phone - that behaviour predates this pass and was not removed.
@@ -359,7 +392,12 @@ test("5b: every rule is keyed on the portal", () => {
 
 test("6: one step down at 800, and the strip keeps its scroll", () => {
   const at800 = code.slice(code.indexOf("@media (max-width:800px)"));
-  assert.match(at800, /\.portal-nav a\{padding:18px 16px\}/);
+  // Same rebalance at the tighter rhythm: 19 above, 17 + the 2px
+  // underline below, so 51.2px and a centred label.
+  const padAt800 = /\.portal-nav a\{padding:(\d+)px 16px (\d+)px\}/.exec(at800);
+  assert.ok(padAt800, "the mobile tab padding is no longer stated in three values");
+  assert.equal(Number(padAt800[1]), Number(padAt800[2]) + 2,
+    "the mobile label is off the strip's centre line");
   assert.match(at800, /font-size:clamp\(34px,8\.6vw,44px\)/);
   // One title rule means one mobile step, listing the same three heads.
   assert.ok(at800.includes(".portal-greeting h1,") && at800.includes(".portal-page-head h1,")
