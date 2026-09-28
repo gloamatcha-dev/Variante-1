@@ -1,5 +1,8 @@
 import type Stripe from "stripe";
 import { getSupabaseAdmin } from "./supabaseAdmin";
+import { applyUpgradeTransition, type UpgradeTransitionSubscription } from "./subscriptionUpgrade";
+import { resolveSubscriptionPeriod } from "./subscriptionInvoiceRules";
+import { toStripeTimestamp } from "./subscriptionCancellationRules";
 // Phase 4B4.1. The two ATOMIC annual settlement writers, not
 // linkStripeSession and not markAttemptPaid. Those two write with the
 // predicate `id = $1` alone, which is right for the one-time and
@@ -64,7 +67,9 @@ async function findAnnualPlanByPaymentAttempt(
 
   const { data, error } = await admin
     .from("annual_plans")
-    .select("id, user_id, status")
+    // source_subscription_id (migration 066) decides whether this
+    // settlement is a handover. Read from the PLAN, never from metadata.
+    .select("id, user_id, status, source_subscription_id")
     .eq("payment_checkout_attempt_id", checkoutAttemptId)
     .maybeSingle();
 
@@ -94,6 +99,7 @@ async function activateAnnualPlan(input: {
   annualPlanId: string;
   stripeCheckoutSessionId: string;
   stripePaymentIntentId: string;
+  scheduleAnchorAt: string | null;
 }): Promise<unknown> {
   const admin = getSupabaseAdmin();
   if (!admin) {
@@ -105,6 +111,10 @@ async function activateAnnualPlan(input: {
     p_annual_plan_id: input.annualPlanId,
     p_stripe_checkout_session_id: input.stripeCheckoutSessionId,
     p_stripe_payment_intent_id: input.stripePaymentIntentId,
+    // MIGRATION 066. NULL is the ordinary purchase and keeps the
+    // schedule anchored on paid_at exactly as before; a value is only
+    // ever accepted for a plan that names a source subscription.
+    p_schedule_anchor_at: input.scheduleAnchorAt,
   });
 
   if (error) {
@@ -161,6 +171,85 @@ export const annualDeliveryWorkerDeps = {
 };
 
 /**
+ * The attempt's paid_at, re-read after settlement.
+ *
+ * Write-once, so this is the same instant on every redelivery and the
+ * handover date cannot drift between retries of one settlement.
+ */
+async function loadAnnualAttemptPaidAt(attemptId: string): Promise<string | null> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return null;
+
+  const { data, error } = await admin
+    .from("checkout_attempts")
+    .select("paid_at")
+    .eq("id", attemptId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("annual attempt paid_at lookup error:", error.message);
+    return null;
+  }
+  return (data?.paid_at as string | undefined) ?? null;
+}
+
+/** The source subscription, with the service role. Never from a payload. */
+async function loadUpgradeSubscription(
+  subscriptionId: string
+): Promise<UpgradeTransitionSubscription | null> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return null;
+
+  const { data, error } = await admin
+    .from("subscriptions")
+    .select("id, user_id, plan_id, customer_type, status, stripe_subscription_id, "
+      + "current_period_end, next_delivery_at, cancellation_requested_at, "
+      + "cancellation_effective_at, cancelled_at")
+    .eq("id", subscriptionId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("upgrade subscription lookup error:", error.message);
+    return null;
+  }
+  return (data as UpgradeTransitionSubscription | null) ?? null;
+}
+
+/**
+ * migration 034's cancellation writer, unchanged by this phase.
+ *
+ * The upgrade supplies the effective date instead of deriving one from
+ * the 14-day cutoff, which that function permits because it takes the
+ * date as an argument and enforces only that it is not earlier than the
+ * current period end.
+ */
+async function scheduleUpgradeCancellation(input: {
+  subscriptionId: string;
+  userId: string;
+  requestedAt: string;
+  effectiveAt: string;
+  cancelAt: string;
+}): Promise<{ result: string }> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return { result: "admin_client_missing" };
+
+  const { data, error } = await admin.rpc("schedule_subscription_cancellation", {
+    p_subscription_id: input.subscriptionId,
+    p_user_id: input.userId,
+    p_requested_at: input.requestedAt,
+    p_effective_at: input.effectiveAt,
+    p_cancel_at: input.cancelAt,
+  });
+
+  if (error) {
+    console.error("schedule_subscription_cancellation failed:", error.message);
+    return { result: "rpc_error" };
+  }
+  const result = (data as { result?: unknown } | null)?.result;
+  return { result: typeof result === "string" ? result : "unknown" };
+}
+
+/**
  * The wiring, with the Stripe client supplied by the webhook route.
  *
  * Taken as an argument rather than built here because the route has
@@ -176,6 +265,36 @@ export function annualWebhookDeps(stripe: Stripe): AnnualWebhookDeps {
     linkSessionAtomically: linkAnnualStripeSessionAtomically,
     settlePaidAtomically: settleAnnualAttemptPaidAtomically,
     activatePlan: activateAnnualPlan,
+    loadAttemptPaidAt: loadAnnualAttemptPaidAt,
+    /*
+      THE HANDOVER. Everything it needs is injected, so the ordering and
+      idempotency guarantees in lib/subscriptionUpgrade.ts can be driven
+      with stubs - no Stripe object, no database write.
+
+      resolvePeriodEnd is the EXISTING resolver the subscription
+      fulfilment path already uses, not a second reading of Stripe's
+      period shape.
+    */
+    applyTransition: async (input) => {
+      const { anchor } = await applyUpgradeTransition({
+        ...input,
+        deps: {
+          getStripe: () => stripe,
+          loadSubscription: loadUpgradeSubscription,
+          retrieveStripeSubscription: (client, id) => client.subscriptions.retrieve(id),
+          resolvePeriodEnd: subscription => resolveSubscriptionPeriod(subscription).currentPeriodEnd,
+          scheduleAtStripe: async ({ stripe: client, stripeSubscriptionId, cancelAtIso, idempotencyKey }) => {
+            await client.subscriptions.update(
+              stripeSubscriptionId,
+              { cancel_at: toStripeTimestamp(cancelAtIso) },
+              { idempotencyKey }
+            );
+          },
+          scheduleLocally: scheduleUpgradeCancellation,
+        },
+      });
+      return { anchorAt: anchor.at };
+    },
     worker: annualDeliveryWorkerDeps,
     // ONE ARGUMENT: the plan id. The recipient, the money, the pack size
     // and every date are read from the frozen row by the sender itself,

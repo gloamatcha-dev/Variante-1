@@ -223,6 +223,15 @@ export type AnnualWebhookPlan = {
   id: string;
   user_id: string;
   status: string;
+  /**
+   * Migration 066. The subscription this plan takes over from, or null
+   * for an ordinary annual purchase.
+   *
+   * It is read from the PLAN - a row the settlement resolved through the
+   * database relationship - and never from session metadata, so a
+   * payload cannot name a subscription to cancel.
+   */
+  source_subscription_id?: string | null;
 };
 
 /**
@@ -404,6 +413,20 @@ export function interpretAnnualActivationResult(data: unknown): AnnualActivation
 
   if (result === "terminal") {
     return { ok: false, terminal: true, reason: "terminal" };
+  }
+
+  /*
+    ONE SUBSCRIPTION ALREADY HAS ITS UPGRADE (migration 066).
+
+    Two upgrade checkouts for the same subscription both settled, and the
+    partial unique index let exactly one of them become the active plan.
+    That is the guarantee working, not a fault, and retrying can never
+    change it - so it is acknowledged the way a historical replay is,
+    with every write rolled back and the losing plan left 'pending' for
+    an operator rather than hammered at until Stripe gives up.
+  */
+  if (result === "transition_conflict") {
+    return { ok: false, terminal: true, reason: "transition_conflict" };
   }
 
   if (!ANNUAL_ACTIVATION_SUCCESS_RESULTS.includes(result)) {

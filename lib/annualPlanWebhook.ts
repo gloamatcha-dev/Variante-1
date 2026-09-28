@@ -121,12 +121,40 @@ export type AnnualWebhookDeps = {
     stripeCheckoutSessionId: string;
     stripePaymentIntentId: string;
   }) => Promise<AnnualPaidSettlementOutcome>;
-  /** public.activate_annual_plan_from_payment(uuid, text, text). */
+  /**
+   * public.activate_annual_plan_from_payment(uuid, text, text, timestamptz).
+   *
+   * scheduleAnchorAt is NULL for an ordinary purchase, which is every
+   * call that existed before the upgrade path, and migration 066 refuses
+   * an anchor on a plan with no source subscription. For an upgrade it
+   * is REQUIRED, and it is the date applyTransition just established.
+   */
   activatePlan: (input: {
     annualPlanId: string;
     stripeCheckoutSessionId: string;
     stripePaymentIntentId: string;
+    scheduleAnchorAt: string | null;
   }) => Promise<unknown>;
+  /**
+   * The attempt's own paid_at, re-read after settlement.
+   *
+   * Write-once by construction, so every redelivery of the same
+   * settlement reads the same instant and therefore computes the same
+   * handover date. A clock here would move the anchor between retries.
+   */
+  loadAttemptPaidAt: (attemptId: string) => Promise<string | null>;
+  /**
+   * Stops the source subscription and answers with the handover date.
+   *
+   * Called ONLY for an upgrade, only after the money is durable, and
+   * always before activation - see lib/subscriptionUpgrade.ts for why
+   * that order is the one invariant this feature has.
+   */
+  applyTransition: (input: {
+    sourceSubscriptionId: string;
+    annualPlanUserId: string;
+    paidAt: string;
+  }) => Promise<{ anchorAt: string }>;
   worker: AnnualDeliveryWorkerDeps;
   /**
    * The ONE purchase confirmation (Phase 4B5).
@@ -353,15 +381,53 @@ export async function settleAnnualCheckoutSession(
     throw new Error(`annual attempt ${attempt.id}: ${paid.reason}`);
   }
 
+  /*
+    7b. THE HANDOVER, IF THIS PURCHASE REPLACES A SUBSCRIPTION.
+
+    BEFORE ACTIVATION, AND THAT ORDER IS THE WHOLE SAFETY PROPERTY. The
+    one outcome that must never survive is a paid, active annual plan
+    beside a subscription that goes on renewing - so the plan is not
+    activated until the subscription has been stopped. Every failure
+    below throws, the plan stays 'pending', no delivery row exists, no
+    email is owed, and Stripe redelivers into the same path.
+
+    AFTER SETTLEMENT, AND THAT ORDER IS THE OTHER ONE. Nothing here runs
+    until the money is durable, so an abandoned, failed or expired
+    checkout cannot reach it and cannot touch the subscription.
+
+    NOTHING IS COMPUTED HERE. The anchor comes back from
+    applyTransition, which reads Stripe's own period and migration 034's
+    own writer; this file passes it to activation and nowhere else.
+  */
+  let scheduleAnchorAt: string | null = null;
+  if (plan.source_subscription_id) {
+    const paidAt = await deps.loadAttemptPaidAt(attempt.id);
+    if (!paidAt) {
+      // Unreachable while the compare-and-set above succeeded, and a
+      // retryable fault rather than a guess if it ever is: the handover
+      // date is floored against this instant.
+      throw new Error(`annual attempt ${attempt.id}: paid_at missing after settlement`);
+    }
+    const transition = await deps.applyTransition({
+      sourceSubscriptionId: plan.source_subscription_id,
+      annualPlanUserId: plan.user_id,
+      paidAt,
+    });
+    scheduleAnchorAt = transition.anchorAt;
+  }
+
   // 8. ACTIVATION. Migration 039 re-proves every one of the facts above
   //    under its own row lock and then owns everything this file must
   //    not compute: purchased_at from the attempt's paid_at, plan_end_at
-  //    at +8736 hours, and thirteen delivery rows at 672-hour steps.
+  //    at +8736 hours, and thirteen delivery rows at 672-hour steps -
+  //    from the handover date when there is one, and from paid_at when
+  //    there is not.
   const activation = interpretAnnualActivationResult(
     await deps.activatePlan({
       annualPlanId: plan.id,
       stripeCheckoutSessionId: session.id,
       stripePaymentIntentId: paymentIntentId,
+      scheduleAnchorAt,
     })
   );
 

@@ -210,7 +210,18 @@ test("3b: exactly three fields are sent, and not one of them is money", () => {
   // commercial - price, discount, shipping, tax, total, delivery count -
   // is resolved server-side from the catalog and the customer's own
   // address row, so none of it may travel from the browser.
-  assert.match(annualPortalCode, /body: JSON\.stringify\(\{ variantId, addressId, requestId \}\)/);
+  /*
+    A FOURTH FIELD, AND IT IS STILL NOT MONEY.
+
+    sourceSubscriptionId names the subscription an upgrade replaces, and
+    it is present only when the customer arrived through "auf Jahresplan
+    wechseln". It carries no price, no date and no entitlement: the route
+    re-reads that subscription as the customer, and the handover date is
+    re-derived from Stripe when the payment settles.
+  */
+  assert.match(annualPortalCode, /body: JSON\.stringify\(\{\s*variantId,\s*addressId,\s*requestId,/);
+  assert.match(annualPortalCode,
+    /\.\.\.\(sourceSubscription \? \{ sourceSubscriptionId: sourceSubscription\.id \} : \{\}\),/);
   const body = annualPortalCode.slice(
     annualPortalCode.indexOf('fetch("/api/annual-plan/checkout/session"'),
     annualPortalCode.indexOf("const body = await res.json()"));
@@ -230,7 +241,11 @@ test("3c: the same intent is not charged twice", () => {
   // The id is keyed on (variant, address), so a double press reuses it.
   // The UNIQUE constraint on payment_checkout_attempt_id is the real
   // guarantee; this is the part of it the browser is responsible for.
-  assert.match(annualPortalCode, /const intentKey = `\$\{variantId\}\|\$\{addressId\}`/);
+  // Keyed on the source too: swapping a subscription for a year is a
+  // different purchase from buying one outright, so one request id can
+  // never stand for both.
+  assert.match(annualPortalCode,
+    /const intentKey = `\$\{variantId\}\|\$\{addressId\}\|\$\{sourceSubscription\?\.id \?\? ""\}`/);
   assert.match(annualPortalCode, /if \(tokenRef\.current\?\.key !== intentKey\)/);
   // Minted in the handler, never during render: a render-time id is not
   // a pure value and would differ between the two renders of a double

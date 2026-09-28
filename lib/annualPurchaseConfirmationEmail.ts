@@ -278,6 +278,16 @@ export type AnnualPurchaseEmailPlanRow = {
   discount_percent_applied: number | string;
   customer_snapshot: unknown;
   delivery_items_snapshot: unknown;
+  /**
+   * Migration 066. Set together, and only on an upgrade.
+   *
+   * schedule_anchor_at is BOTH facts at once: the date the old
+   * subscription stops covering and the date this plan starts. There is
+   * one date because there is one handover, which is exactly what the
+   * message has to make obvious.
+   */
+  source_subscription_id?: string | null;
+  schedule_anchor_at?: string | null;
 };
 
 /** The annual_plan_deliveries columns the schedule facts are read from. */
@@ -307,6 +317,13 @@ export type AnnualPurchaseEmailContent = {
   planEndAt: string;
   nextScheduledFor: string | null;
   firstDeliveryStarted: boolean;
+  /**
+   * The handover, when this purchase replaced a running subscription.
+   *
+   * Null for an ordinary annual purchase, and then every word of the
+   * message is exactly what it has always been.
+   */
+  transitionAt: string | null;
 };
 
 export type AnnualPurchaseEmailPreflight =
@@ -509,6 +526,12 @@ export function evaluateAnnualPurchaseEmailPreflight(input: {
       // FULFILMENT, NOT SCHEDULE. 'claimed' is a worker holding the row,
       // not an order; only 'fulfilled' proves one exists.
       firstDeliveryStarted: first.state === "fulfilled",
+      // READ, never derived. Migration 066 wrote it at activation from
+      // the subscription's own period, and the thirteen delivery rows
+      // were generated from this same instant.
+      transitionAt: typeof plan.schedule_anchor_at === "string" && plan.schedule_anchor_at !== ""
+        ? plan.schedule_anchor_at
+        : null,
     },
   };
 }

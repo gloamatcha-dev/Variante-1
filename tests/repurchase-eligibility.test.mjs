@@ -574,16 +574,36 @@ test("6g: the labels are the agreed ones, and never a raw database word", () => 
   assert.ok(annualLabel.indexOf('v.paymentStatus === "refunded"') < annualLabel.indexOf('v.status === "active"'));
 });
 
-test("6h: no monthly-to-annual upgrade was invented", () => {
-  // The two products stay separate: buying one neither cancels nor
-  // migrates the other, and nothing crosses between the flows.
-  for (const [name, flow] of Object.entries({ subFlowCode, annualFlowCode })) {
-    for (const banned of ["upgrade", "migrate", "cancelExisting", "supersede", "replaceSubscription"]) {
-      assert.ok(!flow.includes(banned), `${name} invents an upgrade: ${banned}`);
-    }
+test("6h: the upgrade is an EXTRA path, and it crosses in one direction only", () => {
+  /*
+    DELIBERATELY INVERTED, BY THE PHASE THAT ADDED THE UPGRADE.
+
+    This test used to require that no handover existed at all, which was
+    right while none did. What matters now is the shape of the one that
+    does:
+
+      the SUBSCRIPTION checkout still knows nothing about annual plans -
+      buying an abo neither ends nor migrates a year
+      the ANNUAL checkout may be told which subscription it replaces,
+      and that is the only crossing there is
+      neither product's price, cadence or lifecycle is touched by it
+
+    Everything the ordinary paths did, they still do: see the tests
+    above, which are unchanged.
+  */
+  for (const banned of ["upgrade", "migrate", "cancelExisting", "supersede", "replaceSubscription"]) {
+    assert.ok(!subFlowCode.includes(banned), `the subscription checkout invents an upgrade: ${banned}`);
   }
   assert.ok(!subFlowCode.includes("annual_plans"), "the subscription checkout reads annual rows");
-  assert.ok(!annualFlowCode.includes('from("subscriptions")'), "the annual checkout reads subscription rows");
+  assert.ok(!subFlowCode.includes("sourceSubscriptionId"), "the subscription checkout learned about upgrades");
+  // The annual side crosses, and only through one named, validated id.
+  assert.match(annualFlowCode, /mayUpgradeToAnnualPlan\(\{ subscription: source, annualPlans: ownPlans\.rows \}\)/);
+  assert.match(annualFlowCode, /deps\.loadOwnSubscription\(\s*caller\.token, caller\.userId, sourceSubscriptionId\s*\)/);
+  // IT STILL WRITES NOTHING TO THE SUBSCRIPTION. Not a cancellation, not
+  // a flag, not a date - the checkout only reads it.
+  assert.ok(!annualFlowCode.includes("schedule_subscription_cancellation"),
+    "the checkout cancels a subscription before any money has moved");
+  assert.ok(!annualFlowCode.includes("cancel_at"), "the checkout touches Stripe's cancellation");
   // And the two refusals are the only thing either says about the other.
   assert.equal(typeof SUBSCRIPTION_ALREADY_RUNNING, "string");
   assert.equal(typeof ANNUAL_PLAN_ALREADY_RUNNING, "string");

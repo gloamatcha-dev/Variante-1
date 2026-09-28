@@ -112,7 +112,7 @@ test("1: 059 owns its number, and only the reviewed 060 follows it", () => {
   // UNREVIEWED appeared above it. Reviewed in
   // tests/b2b-payment-delivery-foundation.test.mjs.
   const numbers = files.map(f => Number(f.slice(0, 3))).filter(n => Number.isInteger(n));
-  assert.strictEqual(Math.max(...numbers), 65, "065 must be the newest migration");
+  assert.strictEqual(Math.max(...numbers), 66, "065 must be the newest migration");
   // PACKAGE 5A ADDED MIGRATION 061: the pending agreement writer - one
   // SECURITY DEFINER function and its EXECUTE grant to service_role. It
   // adds no table, no column, no policy and no table privilege, and it
@@ -151,9 +151,10 @@ test("1: 059 owns its number, and only the reviewed 060 follows it", () => {
      // on an existing table and no privilege anywhere else. No
      // subscription, annual or B2B object is touched. Reviewed in
      // tests/guest-order-management.test.mjs.
-     "065_guest_order_management.sql"],
+     "065_guest_order_management.sql",
+     "066_annual_plan_subscription_transition.sql"],
     "a migration above 059 appeared that this suite has not been reviewed against");
-  assert.strictEqual(files.filter(f => f.startsWith("066")).length, 0,
+  assert.strictEqual(files.filter(f => f.startsWith("067")).length, 0,
     "061 must NOT be authored in this package");
   assert.strictEqual(files.filter(f => f.startsWith("059")).length, 1,
     "there must be exactly one 059");

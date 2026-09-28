@@ -73,7 +73,44 @@ const grantColumns = table => {
     .filter(Boolean);
 };
 
+/*
+  THE GRANT IS TWO FILES NOW.
+
+  041 named the nineteen columns the account reads; migration 066 adds
+  the two the handover needs - which subscription a plan took over from,
+  and when it starts. The contract this suite protects is unchanged:
+  what the account SELECTS and what the database GRANTS must be the same
+  set, in both directions. It simply has to be read from both files.
+*/
+const grantColumnsFrom = (file, table) => {
+  const source = read(`supabase/migrations/${file}`)
+    .split(NEWLINE)
+    .filter(line => !line.trim().startsWith("--"))
+    .join(NEWLINE);
+  const marker = `) on table public.${table} to authenticated;`;
+  const at = source.indexOf(marker);
+  assert.notEqual(at, -1, `${file} grants no columns on ${table}`);
+  const open = source.lastIndexOf("grant select (", at);
+  assert.notEqual(open, -1, `${file} has no grant statement for ${table}`);
+  return source.slice(open + "grant select (".length, at)
+    .split(",").map(c => c.trim()).filter(Boolean);
+};
+
+/**
+ * 041's OWN list, unchanged. Tests 6 and 20 are about this file being
+ * immutable, so they must keep reading this file and nothing else.
+ */
 const PLAN_GRANTS = grantColumns("annual_plans");
+
+/**
+ * WHAT THE BROWSER MAY ACTUALLY READ TODAY: 041's columns plus the two
+ * migration 066 adds for the handover. This is the set the account's
+ * SELECT has to agree with, in both directions.
+ */
+const ACCOUNT_PLAN_GRANTS = [
+  ...PLAN_GRANTS,
+  ...grantColumnsFrom("066_annual_plan_subscription_transition.sql", "annual_plans"),
+];
 const DELIVERY_GRANTS = grantColumns("annual_plan_deliveries");
 
 const selectColumns = select => select.split(",").map(c => c.trim()).filter(Boolean);
@@ -90,7 +127,7 @@ test("1: 042 is the newest migration, and 001-041 are untouched", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 65);
+  assert.equal(migrations.length, 66);
   assert.equal(migrations[38], "039_b2c_annual_plan_foundation.sql");
   assert.equal(migrations[39], "040_annual_checkout_retry_fingerprints.sql");
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
@@ -100,7 +137,7 @@ test("1: 042 is the newest migration, and 001-041 are untouched", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 65), [], "a migration 066 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 66), [], "a migration 067 or beyond appeared");
 
   // No live migration was edited to make room for this one.
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
@@ -252,8 +289,8 @@ test("8: the delivery allowlist is exactly the reviewed set", () => {
 
 test("9: every column the account selects is granted by 041", () => {
   for (const column of selectColumns(ANNUAL_PLAN_ACCOUNT_SELECT)) {
-    assert.ok(PLAN_GRANTS.includes(column),
-      `the account selects annual_plans.${column}, which 041 does not grant`);
+    assert.ok(ACCOUNT_PLAN_GRANTS.includes(column),
+      `the account selects annual_plans.${column}, which no migration grants`);
   }
   for (const column of selectColumns(ANNUAL_PLAN_DELIVERY_ACCOUNT_SELECT)) {
     assert.ok(DELIVERY_GRANTS.includes(column),
@@ -264,7 +301,7 @@ test("9: every column the account selects is granted by 041", () => {
 test("10: and nothing is granted that the account does not select", () => {
   // Both directions, so the two contracts cannot drift apart in either
   // one: a granted column with no reader is read surface nobody audited.
-  assert.deepEqual([...PLAN_GRANTS].sort(), selectColumns(ANNUAL_PLAN_ACCOUNT_SELECT).sort());
+  assert.deepEqual([...ACCOUNT_PLAN_GRANTS].sort(), selectColumns(ANNUAL_PLAN_ACCOUNT_SELECT).sort());
   assert.deepEqual([...DELIVERY_GRANTS].sort(), selectColumns(ANNUAL_PLAN_DELIVERY_ACCOUNT_SELECT).sort());
 });
 

@@ -110,7 +110,10 @@ const PLAN_COLUMNS =
   "id, status, purchased_at, plan_end_at, currency, delivery_count, " +
   "annual_unit_gross_cents, shipping_per_delivery_gross_cents, " +
   "merchandise_total_gross_cents, shipping_total_gross_cents, total_gross_cents, " +
-  "discount_percent_applied, customer_snapshot, delivery_items_snapshot";
+  "discount_percent_applied, customer_snapshot, delivery_items_snapshot, " +
+  // Migration 066. Present only on an upgrade, and the message says
+  // something materially different when it is.
+  "source_subscription_id, schedule_anchor_at";
 
 async function loadAnnualPlanForPurchaseEmail(
   annualPlanId: string

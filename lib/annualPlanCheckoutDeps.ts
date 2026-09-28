@@ -8,6 +8,7 @@ import { getOrCreateAnnualCheckoutAttempt, linkStripeSession } from "./checkoutA
 import { isAnnualPlanCheckoutEnabled } from "./annualPlans";
 import type { SavedAddressRow } from "./subscriptionCheckoutRules";
 import type { AnnualCheckoutDeps, CreatePendingAnnualPlanInput } from "./annualPlanCheckout";
+import type { UpgradeSubscriptionRow } from "./subscriptionUpgradeRules";
 import { toAnnualEligibilityRow, type AnnualPlanEligibilityRow } from "./purchaseEligibility";
 
 /**
@@ -59,8 +60,42 @@ async function loadOwnAddress(token: string, userId: string, addressId: string):
 }
 
 /**
- * Calls the hardened pending-plan function - 039's, as migration 040
- * replaced it.
+ * Reads ONE of the caller's subscriptions, as the CUSTOMER.
+ *
+ * The exact shape loadOwnAddress above has, and for the same reason:
+ * ownership is enforced twice and neither check relies on the other. The
+ * session-scoped client is subject to migration 005's RLS policy
+ * (auth.uid() = user_id and not is_business_user()), and the explicit
+ * filter says the same thing again in the query.
+ *
+ * ONLY THE COLUMNS THE HANDOVER DECISION NEEDS. Not the snapshots, not
+ * the money, not the Stripe identity - the route decides whether this
+ * subscription can be swapped for a year, and none of those help.
+ */
+async function loadOwnSubscription(
+  token: string, userId: string, subscriptionId: string
+): Promise<UpgradeSubscriptionRow | null> {
+  const asUser = getSupabaseAsUser(token);
+  if (!asUser) return null;
+
+  const { data, error } = await asUser
+    .from("subscriptions")
+    .select("id, plan_id, customer_type, status, current_period_end, next_delivery_at, "
+      + "cancellation_requested_at, cancellation_effective_at, cancelled_at")
+    .eq("id", subscriptionId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Annual upgrade subscription lookup error:", error.message);
+    return null;
+  }
+  return (data as UpgradeSubscriptionRow | null) ?? null;
+}
+
+/**
+ * Calls the hardened pending-plan function - 039's, as migrations 040
+ * and 066 replaced it.
  *
  * A thin wrapper and nothing more: it passes the fifteen arguments and
  * returns whatever jsonb the function answered with, unexamined.
@@ -104,6 +139,10 @@ async function createPendingAnnualPlan(input: CreatePendingAnnualPlanInput): Pro
     p_delivery_tax_snapshot: input.deliveryTaxSnapshot,
     p_expected_annual_intent_fingerprint: input.expectedIntentFingerprint,
     p_expected_annual_request_fingerprint: input.expectedRequestFingerprint,
+    // MIGRATION 066. NULL for an ordinary purchase - which is every
+    // call that existed before the upgrade path - and validated
+    // against the caller's own rows inside the function either way.
+    p_source_subscription_id: input.sourceSubscriptionId,
   });
 
   if (error) {
@@ -172,6 +211,7 @@ export const defaultAnnualCheckoutDeps: AnnualCheckoutDeps = {
   getOrigin: getSiteOrigin,
   ensureAttempt: getOrCreateAnnualCheckoutAttempt,
   createPendingPlan: createPendingAnnualPlan,
+  loadOwnSubscription,
   listAnnualPlans: listOwnAnnualPlansForEligibility,
   linkSession: linkStripeSession,
 };

@@ -65,12 +65,26 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * decides), and nothing resembling a price.
  */
 export const ALLOWED_ANNUAL_REQUEST_FIELDS: readonly string[] =
-  Object.freeze(["variantId", "addressId", "requestId"]);
+  Object.freeze(["variantId", "addressId", "requestId", "sourceSubscriptionId"]);
 
 export type AnnualCheckoutRequest = {
   variantId: string;
   addressId: string;
   requestId: string;
+  /**
+   * THE SUBSCRIPTION THIS PURCHASE TAKES OVER FROM, or null.
+   *
+   * Null is the ordinary annual purchase and is the only shape that
+   * existed before the upgrade path; every value below behaves exactly
+   * as it always did for it.
+   *
+   * IT IS A SELECTOR, NOT A PERMISSION. It is a uuid a browser can edit,
+   * so the route re-reads that subscription as the authenticated
+   * customer and migration 066's writer proves ownership a second time
+   * under its own row lock. Nothing about the transition is taken from
+   * the request: not the end date, not the price, not the cadence.
+   */
+  sourceSubscriptionId: string | null;
 };
 
 export type AnnualBodyParseResult =
@@ -102,7 +116,7 @@ export function parseAnnualCheckoutBody(body: unknown): AnnualBodyParseResult {
     return { ok: false, error: "Ungültige Anfrage." };
   }
 
-  const { variantId, addressId, requestId } = body as Record<string, unknown>;
+  const { variantId, addressId, requestId, sourceSubscriptionId } = body as Record<string, unknown>;
 
   if (typeof requestId !== "string" || !UUID_RE.test(requestId)) {
     return { ok: false, error: "Ungültige Anfrage-ID." };
@@ -113,8 +127,19 @@ export function parseAnnualCheckoutBody(body: unknown): AnnualBodyParseResult {
   if (typeof addressId !== "string" || !UUID_RE.test(addressId)) {
     return { ok: false, error: "Ungültige Adresse." };
   }
+  // ABSENT AND NULL ARE THE SAME THING: an ordinary annual purchase.
+  // Anything else has to be a uuid, so a body carrying a number, an
+  // object or a Stripe id fails the request rather than reaching a
+  // database function that would then have to distrust it.
+  let source: string | null = null;
+  if (sourceSubscriptionId !== undefined && sourceSubscriptionId !== null) {
+    if (typeof sourceSubscriptionId !== "string" || !UUID_RE.test(sourceSubscriptionId)) {
+      return { ok: false, error: "Ungültiges Abo." };
+    }
+    source = sourceSubscriptionId;
+  }
 
-  return { ok: true, request: { variantId, addressId, requestId } };
+  return { ok: true, request: { variantId, addressId, requestId, sourceSubscriptionId: source } };
 }
 
 /* ── The destination ────────────────────────────────────────── */
@@ -609,7 +634,17 @@ export function buildAnnualSessionMetadata(input: {
  * contracts, they live in different columns, and a digest from one must
  * never be able to equal a digest from the other even by accident.
  */
-export const ANNUAL_FINGERPRINT_VERSION = "gloa-annual-fp-1";
+/**
+ * Bumped for the upgrade path.
+ *
+ * sourceSubscriptionId joins the identity half below, so every annual
+ * digest changes - including an ordinary purchase's, where the value is
+ * the empty string. That is the point of a version: a stored digest from
+ * before this change must not be silently comparable to one from after
+ * it, and an in-flight checkout gets a clean "this request id belongs to
+ * another operation" rather than a match that means something different.
+ */
+export const ANNUAL_FINGERPRINT_VERSION = "gloa-annual-fp-2";
 
 /**
  * A control character, so no field value can contain the separator and
@@ -646,6 +681,17 @@ export const ANNUAL_INTENT_FINGERPRINT_FIELDS = Object.freeze([
   "variantId",
   "addressId",
   "deliveryCount",
+  /**
+   * THE IDENTITY HALF, because an upgrade is a different purchase from
+   * an ordinary annual plan even when every price matches.
+   *
+   * It is here and not in the terms half deliberately: the terms half
+   * stops being compared once a plan exists, and "which subscription is
+   * being replaced" must be compared on EVERY retry. A request id reused
+   * against a different subscription is a different operation, and this
+   * is what refuses it.
+   */
+  "sourceSubscriptionId",
 ] as const);
 
 /**
@@ -715,6 +761,8 @@ export type AnnualRequestIntent = {
   variantId: string;
   addressId: string;
   deliveryCount: number;
+  /** The source subscription's id, or "" for an ordinary purchase. */
+  sourceSubscriptionId: string;
   /** From annualAddressDigest. Never the raw address. */
   addressDigest: string;
   sku: string;

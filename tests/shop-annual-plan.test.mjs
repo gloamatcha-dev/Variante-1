@@ -347,9 +347,12 @@ test("5b: the band's CTA selects, it does not buy", () => {
 });
 
 test("5c: the server keeps every commercial decision", () => {
-  // The endpoint accepts THREE fields and none of them is money.
+  // The endpoint accepts FOUR fields and none of them is money. The
+  // fourth names the subscription an upgrade replaces - a relation, not
+  // a price, a date or an entitlement.
   const rules = read("lib/annualPlanCheckoutRules.ts");
-  assert.match(rules, /const \{ variantId, addressId, requestId \} = body as Record<string, unknown>;/,
+  assert.match(rules,
+    /const \{ variantId, addressId, requestId, sourceSubscriptionId \} = body as Record<string, unknown>;/,
     "the annual checkout request shape changed");
   assert.match(rules, /rejected unexpected fields/, "the strict field allowlist went away");
   // One payment, never a Stripe Subscription.
@@ -409,8 +412,8 @@ test("5d: no backend, migration or commercial logic changed", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("066")),
-    "a migration 066 or beyond appeared");
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("067")),
+    "a migration 067 or beyond appeared");
   // 047 withdraws the metal case from the catalog, reviewed in
   // tests/catalog-availability.test.mjs. Re-pinned rather than removed:
   // the guard protects "no UNREVIEWED migration appeared".
@@ -426,7 +429,7 @@ test("5d: no backend, migration or commercial logic changed", () => {
   // foundation. It evolves the two b2b_supply_* tables 006 built, adds no
   // table, and touches nothing annual or B2C. Re-pinned rather than
   // deleted. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(readdirSync(path.join(ROOT, "supabase/migrations")).filter(f => f.endsWith(".sql")).length, 65,
+  assert.equal(readdirSync(path.join(ROOT, "supabase/migrations")).filter(f => f.endsWith(".sql")).length, 66,
     "the migration count changed");
   // The one-time path is untouched.
   assert.ok(site.includes('purchaseType:"once",unitPriceCents:v.price_gross_cents'),

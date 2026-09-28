@@ -226,7 +226,8 @@ test("035 exists, is the only 035, and only 036 and 037 follow it", () => {
      // on an existing table and no privilege anywhere else. No
      // subscription, annual or B2B object is touched. Reviewed in
      // tests/guest-order-management.test.mjs.
-     "065_guest_order_management.sql"],
+     "065_guest_order_management.sql",
+     "066_annual_plan_subscription_transition.sql"],
     "an unreviewed migration above 035 appeared"
   );
   // And 039 leaves this table entirely alone. An annual plan's one

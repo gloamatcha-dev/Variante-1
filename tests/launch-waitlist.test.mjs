@@ -1333,7 +1333,8 @@ test("61: the rate limit went into 043 rather than into a 044, and 043 is still 
      // no table privilege anywhere else. No subscription, annual or B2B
      // object is touched. Reviewed in
      // tests/guest-order-management.test.mjs.
-     "065_guest_order_management.sql"],
+     "065_guest_order_management.sql",
+     "066_annual_plan_subscription_transition.sql"],
     "an unreviewed migration appeared after 043"
   );
 

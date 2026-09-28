@@ -117,9 +117,9 @@ test("1: 038 exists, owns its number, and 039 is the only one above it", () => {
   // Re-pinned rather than deleted - what this guard protects is that
   // nothing UNREVIEWED appeared. Reviewed in
   // tests/guest-order-management.test.mjs.
-  assert.equal(files[files.length - 27], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 28], MIGRATION_038, "038 must be the one before it");
-  assert.equal(files[files.length - 29], MIGRATION_037, "037 must be the one before that");
+  assert.equal(files[files.length - 28], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 29], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 30], MIGRATION_037, "037 must be the one before that");
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
@@ -250,7 +250,8 @@ test("2: no migration 044 or beyond", () => {
      // no table privilege anywhere else. No subscription, annual or B2B
      // object is touched. Reviewed in
      // tests/guest-order-management.test.mjs.
-     "065_guest_order_management.sql"],
+     "065_guest_order_management.sql",
+     "066_annual_plan_subscription_transition.sql"],
     "an unreviewed migration appeared after 043");
   // And 039 kept its hands off this phase's writer entirely.
   for (const name of [MIGRATION_039, MIGRATION_040, MIGRATION_041, MIGRATION_042]) {

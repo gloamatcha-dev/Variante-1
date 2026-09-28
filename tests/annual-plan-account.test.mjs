@@ -447,8 +447,16 @@ test("16: the select lists name their columns and never star", () => {
     m039.indexOf("create table public.annual_plan_deliveries")
   );
   const deliveriesTable = m039.slice(m039.indexOf("create table public.annual_plan_deliveries"));
+  /*
+    MIGRATION 066 ADDS TWO. source_subscription_id and schedule_anchor_at
+    are created by an ALTER rather than by 039's CREATE TABLE, so the
+    census reads both files. They are the handover: which subscription a
+    plan took over from, and when it starts.
+  */
+  const m066 = read("supabase/migrations/066_annual_plan_subscription_transition.sql");
   for (const column of ANNUAL_PLAN_ACCOUNT_SELECT.split(",").map(c => c.trim())) {
-    assert.ok(plansTable.includes(column), `annual_plans has no column ${column}`);
+    assert.ok(plansTable.includes(column) || m066.includes(`add column ${column} `),
+      `annual_plans has no column ${column}`);
   }
   for (const column of ANNUAL_PLAN_DELIVERY_ACCOUNT_SELECT.split(",").map(c => c.trim())) {
     assert.ok(deliveriesTable.includes(column), `annual_plan_deliveries has no column ${column}`);
@@ -797,14 +805,14 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 65);
+  assert.equal(migrations.length, 66);
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
   // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
   // commerce foundation - it evolves the two tables 006 built for a
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 65), [], "a migration 066 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 66), [], "a migration 067 or beyond appeared");
 
   // The API surface is unchanged: no account endpoint exists, because the
   // portal reads its own rows under RLS.

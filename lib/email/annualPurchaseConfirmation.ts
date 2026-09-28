@@ -177,6 +177,37 @@ const EYEBROW = "Jahresabo bezahlt";
 const HEADLINE = "Dein Jahresabo ist bezahlt und läuft.";
 
 /**
+ * THE SAME MESSAGE, FOR A HANDOVER.
+ *
+ * One mail, not two: an upgrade IS the purchase confirmation, and
+ * migration 039 gives each plan exactly one such claim. What changes is
+ * everything that would otherwise be untrue - a plan that starts in
+ * three weeks does not "läuft", and a customer who still has a running
+ * subscription needs to be told what happens to it.
+ */
+const UPGRADE_SUBJECT = "Dein Wechsel zum GLOA Jahresplan ist bestätigt";
+const UPGRADE_EYEBROW = "Wechsel bestätigt";
+const UPGRADE_HEADLINE = "Dein Jahresplan ist bezahlt.";
+const UPGRADE_INTRO =
+  "Danke für deinen Wechsel. Deine Zahlung ist angekommen, und dein Jahresplan übernimmt, "
+  + "sobald dein aktueller Abo-Zeitraum endet.";
+/**
+ * The four sentences an upgrade owes, and each is a fact on the row
+ * rather than a reassurance:
+ *
+ *   the subscription runs to the end of what was already paid for
+ *   it does not renew after that
+ *   the annual plan starts exactly there
+ *   so nothing is delivered twice
+ */
+const UPGRADE_SUBSCRIPTION_RUNS_OUT =
+  "Dein bisheriges Abo läuft bis zum Ende des bereits bezahlten Zeitraums weiter.";
+const UPGRADE_NO_RENEWAL =
+  "Danach wird dein Abo nicht mehr verlängert und nicht mehr abgebucht.";
+const UPGRADE_NO_DOUBLE_DELIVERY =
+  "Dein Jahresplan beginnt genau dann. Es gibt keine doppelte Lieferung.";
+
+/**
  * The body copy, in one place so the HTML and the plain text can never say
  * different things.
  *
@@ -224,7 +255,7 @@ function cadenceLabel(cadenceWeeks: number): string {
  * formatted numbers and cannot carry markup.
  */
 export function buildAnnualPurchaseConfirmationEmail(params: {
-  plan: AnnualPurchaseConfirmationFacts;
+  plan: AnnualPurchaseConfirmationFacts & { transitionAt?: string | null };
   /**
    * Absolute site origin, for the logo in the mail header. Optional:
    * without it the mail is built without the mark rather than with a
@@ -233,6 +264,25 @@ export function buildAnnualPurchaseConfirmationEmail(params: {
   origin?: string;
 }): BuiltAnnualPurchaseConfirmationEmail {
   const { plan } = params;
+
+  /*
+    ONE ROW DECIDES WHICH MESSAGE THIS IS.
+
+    schedule_anchor_at exists only on a plan that took over from a
+    subscription - migration 066's CHECK makes that structural - so the
+    template does not have to be told which kind of purchase it is
+    building for, and cannot be told wrongly.
+  */
+  const handoverAt = typeof plan.transitionAt === "string" && plan.transitionAt !== ""
+    ? plan.transitionAt
+    : null;
+  const handoverDate = handoverAt ? fmtDate(handoverAt) : null;
+  const isUpgrade = handoverDate !== null;
+
+  const subject = isUpgrade ? UPGRADE_SUBJECT : SUBJECT;
+  const eyebrow = isUpgrade ? UPGRADE_EYEBROW : EYEBROW;
+  const headline = isUpgrade ? UPGRADE_HEADLINE : HEADLINE;
+  const intro = isUpgrade ? UPGRADE_INTRO : INTRO;
 
   const cadence = cadenceLabel(plan.cadenceWeeks);
   const productLine = [plan.productName, plan.variantLabel].filter(Boolean).join(" · ");
@@ -254,14 +304,30 @@ export function buildAnnualPurchaseConfirmationEmail(params: {
   factRows.push(["Jahresrabatt", fmtPercent(plan.discountPercentApplied)]);
   factRows.push(["Einmalig bezahlt", `${fmtCents(plan.totalGrossCents)} ${plan.currency}`]);
 
+  // THE HANDOVER, AS TWO ROWS, because it is two questions a customer
+  // has: when does the old thing stop, and when does the new one start.
+  // Both are the same stored instant, which is the point.
+  if (handoverDate) {
+    factRows.push(["Dein Abo läuft bis", handoverDate]);
+    factRows.push(["Jahresplan startet", handoverDate]);
+  }
+
   const nextDate = plan.nextScheduledFor ? fmtDate(plan.nextScheduledFor) : null;
-  if (nextDate) factRows.push(["Nächste geplante Lieferung", nextDate]);
+  if (nextDate) factRows.push([isUpgrade ? "Erste Jahresplan-Lieferung" : "Nächste geplante Lieferung", nextDate]);
 
   const endDate = fmtDate(plan.planEndAt);
   if (endDate) factRows.push(["Laufzeit bis", endDate]);
 
   const bodyLines = [
-    ...(plan.firstDeliveryStarted ? [FIRST_DELIVERY_STARTED] : []),
+    // "Deine erste Lieferung ist bereits angestoßen" is true only of a
+    // plan that starts now. An upgrade's first box is weeks away, and
+    // its own row proves it is not fulfilled, so the two can never
+    // collide - but the branch states the intent rather than relying on
+    // that.
+    ...(!isUpgrade && plan.firstDeliveryStarted ? [FIRST_DELIVERY_STARTED] : []),
+    ...(isUpgrade
+      ? [UPGRADE_SUBSCRIPTION_RUNS_OUT, UPGRADE_NO_RENEWAL, UPGRADE_NO_DOUBLE_DELIVERY]
+      : []),
     ONE_PAYMENT,
     NO_RENEWAL,
     ACCOUNT_LINE,
@@ -292,11 +358,11 @@ export function buildAnnualPurchaseConfirmationEmail(params: {
   // same rule the launch mails already follow.
   const header = params.origin ? emailHeader(params.origin) : "";
 
-  const html = emailShell(escapeHtml(SUBJECT), `${header}
-${emailEyebrow(`${escapeHtml(EYEBROW)}`)}
-${emailHeadline(`${escapeHtml(HEADLINE)}`)}
+  const html = emailShell(escapeHtml(subject), `${header}
+${emailEyebrow(`${escapeHtml(eyebrow)}`)}
+${emailHeadline(`${escapeHtml(headline)}`)}
 <tr><td style="padding:16px 0 28px 0;font-size:15px;line-height:1.6;color:${GLOA_NEAR_BLACK};">
-<p style="font-size:14px;line-height:1.6;margin:0 0 18px;color:${BRAND.ink};">${escapeHtml(INTRO)}</p>
+<p style="font-size:14px;line-height:1.6;margin:0 0 18px;color:${BRAND.ink};">${escapeHtml(intro)}</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:2px solid ${BRAND.plum};padding-top:6px;">${factRowsHtml}</table>
 ${bodyHtml}
 ${accountLinkHtml}
@@ -310,10 +376,10 @@ ${legalLinks(params.origin)}`)}`);
     : "";
 
   const text = [
-    `GLOA · ${EYEBROW}`,
+    `GLOA · ${eyebrow}`,
     "",
-    HEADLINE,
-    INTRO,
+    headline,
+    intro,
     "",
     ...factRows.map(([label, value]) => `${label}: ${value}`),
     "",
@@ -326,5 +392,5 @@ ${legalLinks(params.origin)}`)}`);
     .filter(line => line !== "")
     .join("\n");
 
-  return { subject: SUBJECT, html, text };
+  return { subject, html, text };
 }

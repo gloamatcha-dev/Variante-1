@@ -555,14 +555,29 @@ test("20: the webhook computes no date and no money", () => {
       assert.ok(!source.includes(banned), `the annual webhook layer contains ${banned}`);
     }
   }
-  // It passes three arguments and no date at all.
+  /*
+    FOUR ARGUMENTS NOW, AND STILL NO COMPUTED DATE.
+
+    p_schedule_anchor_at is migration 066's, and it is NULL for every
+    ordinary purchase - which keeps the schedule anchored on paid_at
+    exactly as before. For an upgrade it is the handover date, and the
+    webhook did not compute it either: applyUpgradeTransition read it
+    from Stripe's own period and from migration 034's own writer.
+
+    purchased_at and plan_end_at are still absent, because those remain
+    the database's to derive.
+  */
   const rpc = depsCode.slice(depsCode.indexOf('admin.rpc("activate_annual_plan_from_payment"'));
   const call = rpc.slice(0, rpc.indexOf("});"));
-  assert.equal((call.match(/p_[a-z_]+:/g) || []).length, 3, "activation is not called with exactly 3 arguments");
+  assert.equal((call.match(/p_[a-z_]+:/g) || []).length, 4, "activation is not called with exactly 4 arguments");
   assert.ok(call.includes("p_annual_plan_id:"));
   assert.ok(call.includes("p_stripe_checkout_session_id:"));
   assert.ok(call.includes("p_stripe_payment_intent_id:"));
+  assert.ok(call.includes("p_schedule_anchor_at:"));
   assert.ok(!call.includes("purchased_at") && !call.includes("plan_end"));
+  // The anchor is PASSED THROUGH from the transition, never built here.
+  assert.match(depsCode, /p_schedule_anchor_at: input\.scheduleAnchorAt/);
+  assert.match(flow, /scheduleAnchorAt = transition\.anchorAt;/);
 });
 
 test("21: 039 still owns the schedule, and this phase did not touch it", () => {
@@ -717,8 +732,18 @@ test("28: delivery 1 goes through the same claim and fulfill path", () => {
     // public.annual_plans may be READ - that is how the plan is resolved
     // from its payment attempt - but never written. Every annual write
     // goes through an RPC that holds a row lock.
+    /*
+      THE STRIPE SDK'S OWN update() IS NOT A TABLE WRITE.
+
+      The upgrade schedules the old subscription's end with
+      stripe.subscriptions.update(..., { cancel_at }), which is an API
+      call, not a row. It is removed before the scan so the guard keeps
+      meaning "no annual table is written outside an RPC" - which is the
+      property it exists for and which still holds.
+    */
+    const bare = source.replace(/client\.subscriptions\.update\([\s\S]*?\);/g, "");
     for (const write of [".update(", ".upsert(", ".insert(", ".delete("]) {
-      assert.ok(!source.includes(write), `the annual webhook layer writes a table: ${write}`);
+      assert.ok(!bare.includes(write), `the annual webhook layer writes a table: ${write}`);
     }
   }
 });
@@ -815,7 +840,7 @@ test("33: this phase stays inside its boundaries", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 65);
+  assert.equal(migrations.length, 66);
   // PHASE 4B8.2 ADDED MIGRATION 042: the ONE column privilege 041
   // was short of, so migration 039's delivery policy can still read
   // the parent's user_id while resolving ownership. Reviewed in
@@ -824,16 +849,16 @@ test("33: this phase stays inside its boundaries", () => {
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(migrations[migrations.length - 20], "046_launch_signup_atomic.sql");
-  assert.equal(migrations[migrations.length - 21], "045_launch_welcome_email.sql");
-  assert.equal(migrations[migrations.length - 22], "044_launch_send.sql");
-  assert.equal(migrations[migrations.length - 23], "043_launch_waitlist.sql");
+  assert.equal(migrations[migrations.length - 21], "046_launch_signup_atomic.sql");
+  assert.equal(migrations[migrations.length - 22], "045_launch_welcome_email.sql");
+  assert.equal(migrations[migrations.length - 23], "044_launch_send.sql");
+  assert.equal(migrations[migrations.length - 24], "043_launch_waitlist.sql");
   // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
   // commerce foundation - it evolves the two tables 006 built for a
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 65), [], "a migration 066 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 66), [], "a migration 067 or beyond appeared");
   // 001-062 ARE ALL LIVE NOW: no migration may be edited at all.
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
@@ -1717,8 +1742,8 @@ test("61: 4B4.1's hardening is intact and this phase added no migration", () => 
   // No migration, and no new database call anywhere in this phase.
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 65);
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 65), [], "a migration 066 or beyond appeared");
+  assert.equal(migrations.length, 66);
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 66), [], "a migration 067 or beyond appeared");
   // 001-062 are all applied to production and therefore immutable.
   // 064 IS LIVE. Production is 001-064, so there is no pending
   // migration and no file any immutability guard may exempt.

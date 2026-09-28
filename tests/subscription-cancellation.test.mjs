@@ -2110,7 +2110,8 @@ test("034: it is the next free number and 022-033 are untouched", () => {
      // on an existing table and no privilege anywhere else. No
      // subscription, annual or B2B object is touched. Reviewed in
      // tests/guest-order-management.test.mjs.
-     "065_guest_order_management.sql"],
+     "065_guest_order_management.sql",
+     "066_annual_plan_subscription_transition.sql"],
     "an unreviewed migration above 034 appeared"
   );
   // AND 039 REDEFINES NOTHING 034 OWNS. It is a prepaid plan with no

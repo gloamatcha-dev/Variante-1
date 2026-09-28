@@ -98,6 +98,15 @@ import {
   findBlockingAnnualPlan,
   type AnnualPlanEligibilityRow,
 } from "./purchaseEligibility";
+/*
+  THE HANDOVER RULE, shared with the account so the CTA and this route
+  agree about which subscriptions can be swapped for a year.
+*/
+import {
+  UPGRADE_NOT_AVAILABLE,
+  mayUpgradeToAnnualPlan,
+  type UpgradeSubscriptionRow,
+} from "./subscriptionUpgradeRules";
 
 export type AnnualCheckoutDeps = {
   isEnabled: () => boolean;
@@ -123,6 +132,16 @@ export type AnnualCheckoutDeps = {
    * portal's button and this refusal cannot disagree.
    */
   listAnnualPlans: (userId: string) => Promise<AnnualEligibilityResult>;
+  /**
+   * ONE of the caller's own subscriptions, for an upgrade checkout.
+   *
+   * Read as the CUSTOMER, with an explicit user_id filter on top, so a
+   * subscription id from a request body can only ever resolve to a row
+   * that belongs to the person holding the bearer token. Not called at
+   * all for an ordinary annual purchase.
+   */
+  loadOwnSubscription: (token: string, userId: string, subscriptionId: string)
+    => Promise<UpgradeSubscriptionRow | null>;
   linkSession: (attemptId: string, sessionId: string) => Promise<boolean>;
 };
 
@@ -143,6 +162,8 @@ export type CreatePendingAnnualPlanInput = {
   deliveryTaxSnapshot: CartTaxSnapshot;
   expectedIntentFingerprint: string;
   expectedRequestFingerprint: string;
+  /** The subscription this plan takes over from, or null. */
+  sourceSubscriptionId: string | null;
 };
 
 export type AnnualEligibilityResult =
@@ -187,7 +208,7 @@ export async function handleAnnualPlanCheckout(
 
   const parsed = parseAnnualCheckoutBody(body);
   if (!parsed.ok) return fail(400, parsed.error);
-  const { variantId, addressId, requestId } = parsed.request;
+  const { variantId, addressId, requestId, sourceSubscriptionId } = parsed.request;
 
   // 3. AUTHENTICATION. A prepaid annual plan belongs to a person for
   //    twelve months, so unlike the one-time flow there is no guest path.
@@ -318,6 +339,9 @@ export async function handleAnnualPlanCheckout(
     variantId: plan.variantId,
     addressId,
     deliveryCount: pricing.deliveryCount,
+    // "" FOR AN ORDINARY PURCHASE, so the digest is stable and an
+    // upgrade can never be mistaken for one - or the reverse.
+    sourceSubscriptionId: sourceSubscriptionId ?? "",
     addressDigest: annualAddressDigest(addressSnapshot),
     sku: plan.sku,
     currency: quote.currency,
@@ -414,6 +438,39 @@ export async function handleAnnualPlanCheckout(
     return fail(409, ANNUAL_PLAN_ALREADY_RUNNING);
   }
 
+  /*
+    9c. AND IF THIS IS AN UPGRADE, MAY THAT SUBSCRIPTION BE SWAPPED?
+
+    The id came from the browser and is treated as one: the subscription
+    is re-read AS THE CUSTOMER, with an explicit user_id filter, so a
+    stranger's id resolves to nothing and is refused exactly like an id
+    that never existed. Migration 066's writer then proves ownership a
+    SECOND time under its own row lock - this refusal is the cheap one,
+    not the guarantee.
+
+    mayUpgradeToAnnualPlan is the same predicate the account renders the
+    CTA from, over the same rows, so a visible button cannot lead to a
+    409 here. A standing cancellation does NOT fail it: that subscription
+    is still live and still the thing being replaced, and its existing
+    end date is preserved at settlement rather than recomputed.
+
+    NOTHING IS WRITTEN TO THE SUBSCRIPTION HERE. Not a cancellation, not
+    a flag, not a date. The customer has pressed a button and paid for
+    nothing yet; the subscription is touched only once the annual money
+    is durable, which is the whole of requirement D.
+  */
+  if (sourceSubscriptionId) {
+    const source = await deps.loadOwnSubscription(
+      caller.token, caller.userId, sourceSubscriptionId
+    );
+    if (!mayUpgradeToAnnualPlan({ subscription: source, annualPlans: ownPlans.rows })) {
+      console.error(
+        `Annual checkout: subscription ${sourceSubscriptionId} cannot be upgraded for ${caller.userId}`
+      );
+      return fail(409, UPGRADE_NOT_AVAILABLE);
+    }
+  }
+
   // 10. THE PENDING ANNUAL PLAN, BEFORE STRIPE, claimed atomically.
   //     ONE database call decides under a row lock whether this attempt
   //     already owns a plan and creates one only if it does not, so two
@@ -452,6 +509,9 @@ export async function handleAnnualPlanCheckout(
     // the race or lock a customer out of a contract they already hold.
     expectedIntentFingerprint: intentFingerprint,
     expectedRequestFingerprint: requestFingerprint,
+    // NULL for an ordinary purchase, which is every behaviour that
+    // existed before the upgrade path. Migration 066 validates it again.
+    sourceSubscriptionId: sourceSubscriptionId,
   });
 
   const pending = interpretPendingAnnualPlanResult(rpcResult);

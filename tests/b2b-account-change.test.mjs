@@ -1671,9 +1671,14 @@ test("87: and 064 is the highest migration", () => {
   // newest file on disk. Re-pinned by one position rather than deleted -
   // what this guard protects is that nothing UNREVIEWED appeared.
   // Reviewed in tests/guest-order-management.test.mjs.
-  assert.equal(files.at(-1), "065_guest_order_management.sql");
-  assert.equal(files.at(-2), MIGRATION);
-  assert.equal(files.at(-3), "063_b2b_instalment_delivery_failure_runtime.sql");
+  // THE 4-WEEK ABO -> ANNUAL UPGRADE ADDED MIGRATION 066, so 064 sits
+  // one position further from the end. Re-pinned rather than deleted -
+  // what this guard protects is that nothing UNREVIEWED appeared.
+  // Reviewed in tests/subscription-annual-upgrade.test.mjs.
+  assert.equal(files.at(-1), "066_annual_plan_subscription_transition.sql");
+  assert.equal(files.at(-2), "065_guest_order_management.sql");
+  assert.equal(files.at(-3), MIGRATION);
+  assert.equal(files.at(-4), "063_b2b_instalment_delivery_failure_runtime.sql");
   assert.equal(files.filter(f => f.startsWith("064")).length, 1);
 });
 

@@ -86,6 +86,8 @@ const at = needle => {
 const UUID = "11111111-2222-3333-4444-555555555555";
 const ADDRESS_ID = "22222222-3333-4444-5555-666666666666";
 const REQUEST_ID = "33333333-4444-5555-6666-777777777777";
+/** The subscription an upgrade would replace. */
+const SOURCE_SUB_ID = "44444444-5555-6666-7777-888888888888";
 const PLAN_ID = "44444444-5555-6666-7777-888888888888";
 const ATTEMPT_ID = "55555555-6666-7777-8888-999999999999";
 
@@ -246,11 +248,47 @@ test("3: the route is thin and injects the real wiring", () => {
    4-6. THE REQUEST BODY
    ══════════════════════════════════════════════════════════════ */
 
-test("4: exactly three safe fields are accepted", () => {
-  assert.deepEqual([...ALLOWED_ANNUAL_REQUEST_FIELDS], ["variantId", "addressId", "requestId"]);
+test("4: exactly four safe fields are accepted", () => {
+  /*
+    THE FOURTH IS A SELECTOR, NOT A VALUE.
+
+    sourceSubscriptionId names the subscription an upgrade replaces. It
+    carries no money, no date and no entitlement: the route re-reads that
+    subscription as the customer, migration 066's writer proves ownership
+    again under its own row lock, and the handover DATE is re-derived
+    from Stripe at settlement rather than accepted from a body.
+
+    Absent is still the ordinary purchase, and still parses to exactly
+    what it always did - plus an explicit null, so no call site has to
+    guess whether the field was omitted or refused.
+  */
+  assert.deepEqual([...ALLOWED_ANNUAL_REQUEST_FIELDS],
+    ["variantId", "addressId", "requestId", "sourceSubscriptionId"]);
   const ok = parseAnnualCheckoutBody({ variantId: UUID, addressId: ADDRESS_ID, requestId: REQUEST_ID });
   assert.equal(ok.ok, true);
-  assert.deepEqual(ok.request, { variantId: UUID, addressId: ADDRESS_ID, requestId: REQUEST_ID });
+  assert.deepEqual(ok.request, {
+    variantId: UUID, addressId: ADDRESS_ID, requestId: REQUEST_ID, sourceSubscriptionId: null,
+  });
+
+  // An upgrade carries it, and it has to be a uuid like every other id.
+  const upgrade = parseAnnualCheckoutBody({
+    variantId: UUID, addressId: ADDRESS_ID, requestId: REQUEST_ID, sourceSubscriptionId: SOURCE_SUB_ID,
+  });
+  assert.equal(upgrade.ok, true);
+  assert.equal(upgrade.request.sourceSubscriptionId, SOURCE_SUB_ID);
+  for (const bad of ["", "not-a-uuid", 7, {}, []]) {
+    const r = parseAnnualCheckoutBody({
+      variantId: UUID, addressId: ADDRESS_ID, requestId: REQUEST_ID, sourceSubscriptionId: bad,
+    });
+    assert.equal(r.ok, false, JSON.stringify(bad));
+    assert.equal(r.error, "Ungültiges Abo.");
+  }
+  // null is the ordinary purchase, spelled out.
+  const explicitNull = parseAnnualCheckoutBody({
+    variantId: UUID, addressId: ADDRESS_ID, requestId: REQUEST_ID, sourceSubscriptionId: null,
+  });
+  assert.equal(explicitNull.ok, true);
+  assert.equal(explicitNull.request.sourceSubscriptionId, null);
 });
 
 test("5: any commercial or identity field is REFUSED, not ignored", () => {
@@ -266,9 +304,11 @@ test("5: any commercial or identity field is REFUSED, not ignored", () => {
     assert.equal(r.ok, false, `${key} was accepted`);
     assert.equal(r.error, "Ungültige Anfrage.");
   }
-  // Not silently dropped either: the parser returns only the three.
+  // Not silently dropped either: the parser returns only the four, and
+  // the fourth is null unless an upgrade actually named a subscription.
   const accepted = parseAnnualCheckoutBody(base);
-  assert.deepEqual(Object.keys(accepted.request).sort(), ["addressId", "requestId", "variantId"]);
+  assert.deepEqual(Object.keys(accepted.request).sort(),
+    ["addressId", "requestId", "sourceSubscriptionId", "variantId"]);
 });
 
 test("6: every identifier must be a uuid, and the shape must be an object", () => {
@@ -609,7 +649,7 @@ test("20: attempt, THEN pending plan, THEN Stripe - in that order", () => {
   assert.ok(flow.indexOf("getStripe()") > rpc, "the Stripe client is fetched before the plan exists");
 });
 
-test("21: the RPC gets the thirteen reviewed arguments and no totals", () => {
+test("21: the RPC gets the sixteen reviewed arguments and no totals", () => {
   const rpcAt = depsCode.indexOf('admin.rpc("create_pending_annual_plan_for_attempt"');
   assert.ok(rpcAt > 0, "the RPC call was not found");
   const call = depsCode.slice(rpcAt, depsCode.indexOf("if (error) {", rpcAt));
@@ -620,9 +660,19 @@ test("21: the RPC gets the thirteen reviewed arguments and no totals", () => {
     "p_billing_address_snapshot", "p_tax_snapshot", "p_delivery_items_snapshot",
     "p_delivery_tax_snapshot",
     "p_expected_annual_intent_fingerprint", "p_expected_annual_request_fingerprint",
+    // MIGRATION 066. The subscription an upgrade replaces, or NULL for
+    // every ordinary purchase. A relation, never a date and never an
+    // amount - the handover date is re-derived from Stripe at
+    // settlement and is not in this call at all.
+    "p_source_subscription_id",
   ];
   for (const arg of expected) assert.ok(call.includes(`${arg}:`), `missing RPC argument ${arg}`);
-  assert.equal((call.match(/p_[a-z_]+:/g) || []).length, 15, "the RPC call does not pass exactly 15 arguments");
+  assert.equal((call.match(/p_[a-z_]+:/g) || []).length, 16, "the RPC call does not pass exactly 16 arguments");
+  // AND STILL NO DATE. The anchor belongs to activation, which gets it
+  // from Stripe's own period, not to the pre-payment writer.
+  for (const forbidden of ["p_schedule_anchor", "p_effective_at", "p_period_end"]) {
+    assert.ok(!call.includes(forbidden), `the pending-plan RPC passes ${forbidden}`);
+  }
   // 039 computes the totals itself; passing them would be a second place
   // for the money to be wrong.
   for (const forbidden of ["p_total", "p_merchandise", "p_shipping_total", "p_delivery_count"]) {
@@ -631,9 +681,16 @@ test("21: the RPC gets the thirteen reviewed arguments and no totals", () => {
   // The signature the migration actually installed.
   const m039 = read("supabase/migrations/039_b2c_annual_plan_foundation.sql");
   const m040 = read("supabase/migrations/040_annual_checkout_retry_fingerprints.sql");
+  const m066 = read("supabase/migrations/066_annual_plan_subscription_transition.sql");
   for (const arg of expected) {
-    assert.ok(m040.includes(arg), `040's hardened signature has no argument ${arg}`);
+    assert.ok(m040.includes(arg) || m066.includes(arg),
+      `no installed signature has argument ${arg}`);
   }
+  // 066 REPLACED THE FUNCTION rather than overloading it, which is what
+  // 040 did before it and the only safe way to change an argument list:
+  // a surviving overload would be ambiguous to resolve.
+  assert.match(m066, /drop function public\.create_pending_annual_plan_for_attempt\(/);
+  assert.match(m066, /p_source_subscription_id\s+uuid/);
   // The first thirteen are 039's, unchanged; the last two are 040's.
   for (const arg of expected.slice(0, 13)) {
     assert.ok(m039.includes(arg), `039 has no argument ${arg}`);
@@ -908,7 +965,7 @@ test("32: the checkout phase's own migrations are untouched, and 041 is not its 
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 65);
+  assert.equal(migrations.length, 66);
   assert.equal(migrations[38], "039_b2c_annual_plan_foundation.sql");
   assert.equal(migrations[39], "040_annual_checkout_retry_fingerprints.sql");
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
@@ -917,8 +974,8 @@ test("32: the checkout phase's own migrations are untouched, and 041 is not its 
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 65), [],
-    "a migration 066 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 66), [],
+    "a migration 067 or beyond appeared");
   // 041 touches privileges only: it creates no table, no column and no
   // function, so it cannot have changed anything this suite proves.
   const m041 = read("supabase/migrations/041_annual_account_column_privileges.sql");
@@ -1195,7 +1252,17 @@ test("38: 039's file is byte-identical and the other seven functions are untouch
    ══════════════════════════════════════════════════════════════ */
 
 test("39: the annual fingerprint domain is its own, and separated from the subscription one", () => {
-  assert.equal(ANNUAL_FINGERPRINT_VERSION, "gloa-annual-fp-1");
+  /*
+    BUMPED TO -fp-2 BY THE UPGRADE PATH.
+
+    sourceSubscriptionId joined the identity half, so every annual digest
+    changes - including an ordinary purchase's, where the value is the
+    empty string. That is what a version is for: a digest stored before
+    the change must not be silently comparable to one computed after it,
+    and an in-flight checkout gets a clean "this request id belongs to
+    another operation" instead of a match that means something else.
+  */
+  assert.equal(ANNUAL_FINGERPRINT_VERSION, "gloa-annual-fp-2");
   const subs = read("lib/subscriptionCheckoutRules.ts");
   assert.ok(subs.includes('export const FINGERPRINT_VERSION = "gloa-sub-fp-1";'),
     "the subscription fingerprint version changed");
@@ -1214,8 +1281,22 @@ test("39: the annual fingerprint domain is its own, and separated from the subsc
 });
 
 test("40: the field lists are the contract, and they bind what they must", () => {
+  /*
+    sourceSubscriptionId IS IN THE IDENTITY HALF, not the terms half.
+
+    The terms half stops being compared once a plan exists; "which
+    subscription is being replaced" must be compared on EVERY retry, or a
+    request id reused against a different subscription would resolve to
+    the plan the first one created.
+  */
   assert.deepEqual([...ANNUAL_INTENT_FINGERPRINT_FIELDS],
-    ["userId", "variantId", "addressId", "deliveryCount"]);
+    ["userId", "variantId", "addressId", "deliveryCount", "sourceSubscriptionId"]);
+  // And it genuinely moves the digest, so an upgrade and an ordinary
+  // purchase of the same size can never share one.
+  assert.notEqual(
+    annualIntentFingerprint({ ...intentFor("50g"), sourceSubscriptionId: "" }),
+    annualIntentFingerprint({ ...intentFor("50g"), sourceSubscriptionId: SOURCE_SUB_ID })
+  );
   assert.deepEqual([...ANNUAL_REQUEST_FINGERPRINT_FIELDS], [
     "userId", "variantId", "addressId", "deliveryCount", "addressDigest", "sku",
     "currency", "shippingCountry", "catalogUnitGrossCents", "discountPercentApplied",

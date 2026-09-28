@@ -24,6 +24,18 @@ import { B2B_PLAN_LABEL_DE } from "../lib/b2bChangeRules.ts";
 // annualPlanAccount.ts was written for exactly this account area and had
 // never been rendered; annualPlanRules.ts is the same money leaf the
 // server prices with, so no figure here is a second calculation.
+// THE HANDOVER FROM THE 4-WEEK ABO TO A YEAR. The same predicates and
+// the same copy the checkout route and the settlement path use, so the
+// button, the review and the refusal cannot disagree.
+import {
+  UPGRADE_CTA,
+  UPGRADE_DATE_IS_CONFIRMED_ON_PAYMENT,
+  UPGRADE_EXPLAINER,
+  UPGRADE_SCHEDULED_LABEL,
+  expectedTransitionAt,
+  mayUpgradeToAnnualPlan,
+  type UpgradeSubscriptionRow,
+} from "../lib/subscriptionUpgradeRules";
 import {
   ANNUAL_CHECKOUT_RETURN_PARAM,
   ANNUAL_PLAN_ACCOUNT_SELECT,
@@ -31,6 +43,7 @@ import {
   annualPlanDetailHref,
   buildAnnualPlanAccountView,
   collectAnnualDeliveryOrderIds,
+  findTransitionPlanFor,
   pickEarliestUpcomingDelivery,
   resolveAnnualCheckoutReturnState,
   type AnnualCheckoutReturnState,
@@ -1996,7 +2009,7 @@ function SubscriptionStartForm({ onStarted, onCancel, subscriptions }: {
  * once more, up front, so a customer does not choose a size, read a
  * total and only then discover the limit at the payment step.
  */
-function AnnualPlanStartForm({ plans, onCancel }: {
+function AnnualPlanStartForm({ plans, onCancel, sourceSubscription }: {
   /**
    * The customer's OWN annual plans, passed from the page that already
    * read them rather than read a second time.
@@ -2011,6 +2024,18 @@ function AnnualPlanStartForm({ plans, onCancel }: {
   plans?: AnnualPlanAccountView[];
   /** Collapses the form again. Presentation only - see the monthly twin. */
   onCancel?: () => void;
+  /**
+   * THE SUBSCRIPTION THIS PURCHASE WOULD REPLACE, when the customer
+   * arrived through "auf Jahresplan wechseln" rather than through the
+   * ordinary offer.
+   *
+   * Its only effects are the review copy below and one extra field in
+   * the POST body. Not one commercial value changes: the same leaf
+   * prices it, the same route answers it, the same thirteen deliveries
+   * and the same discount. An upgrade is the ordinary annual purchase
+   * with a handover attached.
+   */
+  sourceSubscription?: SubscriptionRow | null;
 }) {
   const { session, addresses } = useAuth();
   const { product, loading: catalogLoading } = useCatalog("matcha");
@@ -2069,7 +2094,10 @@ function AnnualPlanStartForm({ plans, onCancel }: {
     if (!session?.access_token) { setError("Bitte melde dich an."); return; }
     if (!variantId) { setError("Bitte wähle eine Größe."); return; }
     if (!addressId) { setError("Bitte wähle eine Lieferadresse in Deutschland."); return; }
-    const intentKey = `${variantId}|${addressId}`;
+    // Keyed on the source too: swapping a subscription for a year is a
+    // different purchase from buying one outright, and reusing one
+    // request id across both would be reusing a checkout.
+    const intentKey = `${variantId}|${addressId}|${sourceSubscription?.id ?? ""}`;
     if (tokenRef.current?.key !== intentKey) {
       tokenRef.current = { key: intentKey, id: crypto.randomUUID() };
     }
@@ -2083,7 +2111,19 @@ function AnnualPlanStartForm({ plans, onCancel }: {
         // EXACTLY the three fields the route allows. A fourth is refused
         // outright rather than ignored, which is the property that keeps
         // "the browser cannot submit a price" checked rather than agreed.
-        body: JSON.stringify({ variantId, addressId, requestId }),
+        /*
+          THE ONE EXTRA FIELD, and it is a selector rather than an
+          instruction: the route re-reads that subscription as the
+          customer, migration 066's writer proves ownership again under
+          its own row lock, and the handover DATE is never sent - it is
+          re-derived from Stripe when the payment settles.
+        */
+        body: JSON.stringify({
+          variantId,
+          addressId,
+          requestId,
+          ...(sourceSubscription ? { sourceSubscriptionId: sourceSubscription.id } : {}),
+        }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
@@ -2111,7 +2151,42 @@ function AnnualPlanStartForm({ plans, onCancel }: {
 
   return (
     <section className="portal-section plan-form">
-      <AccountSectionHeader label="JAHRESPLAN STARTEN" />
+      <AccountSectionHeader label={sourceSubscription ? "WECHSEL ZUM JAHRESPLAN" : "JAHRESPLAN STARTEN"} />
+      {/*
+        THE REVIEW, BEFORE STRIPE.
+
+        What the customer keeps, what stops, and what starts - stated
+        before any money moves. Every figure below the block comes from
+        the same leaf the server prices with; this block adds no
+        arithmetic of its own and computes no date: expectedTransitionAt
+        reads the subscription's own period, or the end it was already
+        promised.
+
+        AND IT SAYS WHEN THAT DATE IS FINAL. For a card the payment
+        settles in the same second and the expectation is the answer. For
+        SEPA and its relatives it can be days, so the copy names the
+        condition rather than printing a date that might move.
+      */}
+      {sourceSubscription && (
+        <div className="upgrade-review">
+          <dl className="sub-card-facts">
+            <div>
+              <dt>Aktuelles Abo</dt>
+              <dd>{subPlanName(sourceSubscription)} · {SUBSCRIPTION_CADENCE_LABEL}</dd>
+            </div>
+            {expectedTransitionAt(sourceSubscription as unknown as UpgradeSubscriptionRow) && (
+              <div>
+                <dt>Dein Abo läuft noch bis</dt>
+                <dd>{fmtDate(expectedTransitionAt(sourceSubscription as unknown as UpgradeSubscriptionRow) as string)}</dd>
+              </div>
+            )}
+            <div><dt>Danach</dt><dd>keine weitere Abo-Abbuchung</dd></div>
+            <div><dt>Jahresplan startet</dt><dd>nach Ende deines aktuellen Abo-Zeitraums</dd></div>
+          </dl>
+          <p className="portal-note">{UPGRADE_EXPLAINER}</p>
+          <p className="portal-note">{UPGRADE_DATE_IS_CONFIRMED_ON_PAYMENT}</p>
+        </div>
+      )}
       <p className="portal-note">
         {ANNUAL_DELIVERY_COUNT} Lieferungen im {ANNUAL_DELIVERY_INTERVAL_DAYS}-Tage-Rhythmus,
         {" "}{ANNUAL_DISCOUNT_PERCENT} % Rabatt auf den Matcha-Preis, einmal im Voraus bezahlt.
@@ -2237,7 +2312,7 @@ function AnnualPlanStartForm({ plans, onCancel }: {
             type="button" className="cta sub-start-cta" onClick={() => void start()}
             disabled={busy || !variantId || !addressId}
           >
-            {busy ? "WIRD GEÖFFNET…" : "ZUR ZAHLUNG"}
+            {busy ? "WIRD GEÖFFNET…" : sourceSubscription ? "JAHRESPLAN KAUFEN" : "ZUR ZAHLUNG"}
           </button>
           {onCancel && (
             <button type="button" className="plan-form-close" onClick={onCancel}>ABBRECHEN</button>
@@ -3278,6 +3353,21 @@ function PortalPastPlans({ subs, plans }: {
 
 function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
   const { session } = useAuth();
+  /*
+    THE CUSTOMER'S ANNUAL PLANS, for two questions this page has to
+    answer about THIS subscription:
+
+      may it be swapped for a year?      mayUpgradeToAnnualPlan, the same
+                                         predicate the checkout route
+                                         refuses with, so a visible
+                                         button cannot lead to a 409
+      is it already handing over?        a LIVE plan naming it as its
+                                         source. Then the page says so
+                                         instead of calling the end an
+                                         ordinary cancellation.
+  */
+  const { views: annualViews, loading: annualLoading } = useAnnualPlanViews();
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [sub, setSub] = useState<SubscriptionRow | null>(null);
   const [items, setItems] = useState<SubscriptionItemRow[]>([]);
   const [loading, setLoading] = useState(() => !!supabase);
@@ -3392,6 +3482,22 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
   const scheduled = isCancellationScheduled(sub);
   const ended = hasEnded(sub);
   const canCancel = canRequestSubscriptionCancellation(sub);
+  /*
+    THE HANDOVER, FROM THE PLAN'S OWN ROW.
+
+    A live annual plan that names this subscription as its source IS the
+    transition; nothing about the subscription row says so, and nothing
+    here infers it from a date. A refunded or completed upgrade is
+    filtered out first - it once replaced this subscription and no longer
+    does, which is history rather than something in progress.
+  */
+  const livePlans = annualViews.filter(isLiveAnnualPlan);
+  const transitionPlan = findTransitionPlanFor(sub.id, livePlans);
+  const mayUpgrade = !transitionPlan
+    && mayUpgradeToAnnualPlan({
+      subscription: sub as unknown as UpgradeSubscriptionRow,
+      annualPlans: annualViews,
+    });
   const now = new Date();
   const cutoffAt = getCancellationCutoffAt(sub, now);
   const preview = getCancellationPreview(sub, now);
@@ -3449,6 +3555,65 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
       </div>
 
       {statusNote && <p className="portal-note">{statusNote}</p>}
+
+      {/*
+        THE HANDOVER, WHILE IT IS IN PROGRESS.
+
+        Both contracts exist right now and only ONE of them delivers, so
+        the page says which and when rather than showing two things that
+        look simultaneously live. Every date is read: the subscription's
+        own effective end, and the plan's stored anchor - which are the
+        same instant, because there is one handover.
+      */}
+      {transitionPlan && (
+        <div className="portal-terminal">
+          <p className="portal-terminal-state">{UPGRADE_SCHEDULED_LABEL}</p>
+          {endsAt && <p className="portal-terminal-detail">Dein Abo läuft bis {fmtDate(endsAt)}.</p>}
+          {transitionPlan.scheduleAnchorAt && (
+            <p className="portal-terminal-detail">
+              Erste Jahresplan-Lieferung: {fmtDate(transitionPlan.scheduleAnchorAt)}
+            </p>
+          )}
+          <p className="portal-terminal-detail">
+            Danach wird dieses Abo nicht mehr verlängert und nicht mehr abgebucht.
+            {" "}Es gibt keine doppelte Lieferung.
+          </p>
+          <div className="portal-actions">
+            <a href={annualPlanDetailHref(transitionPlan.id)} className="portal-action">JAHRESPLAN ANSEHEN</a>
+          </div>
+        </div>
+      )}
+
+      {/*
+        THE WAY IN, WHEN THIS SUBSCRIPTION CAN STILL BE SWAPPED.
+
+        Pressing it opens the review; it sends nothing, writes nothing
+        and schedules nothing. The subscription is touched only once the
+        annual payment is durably settled, which is the whole point of
+        requirement D and of the ordering in lib/subscriptionUpgrade.ts.
+      */}
+      {!annualLoading && mayUpgrade && (
+        <section className="portal-section">
+          <AccountSectionHeader label="JAHRESPLAN" />
+          <p className="portal-note">{UPGRADE_EXPLAINER}</p>
+          <div className="portal-actions">
+            <button
+              type="button"
+              className="cta plan-panel-cta"
+              onClick={() => setUpgradeOpen(open => !open)}
+            >
+              {UPGRADE_CTA}
+            </button>
+          </div>
+        </section>
+      )}
+      {!annualLoading && mayUpgrade && upgradeOpen && (
+        <AnnualPlanStartForm
+          plans={annualViews}
+          sourceSubscription={sub}
+          onCancel={() => setUpgradeOpen(false)}
+        />
+      )}
 
       {/* ── Kündigung ── */}
       <section className="order-detail-section">

@@ -161,8 +161,8 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
   // Re-pinned rather than deleted - what this guard protects is that
   // nothing UNREVIEWED appeared. Reviewed in
   // tests/guest-order-management.test.mjs.
-  assert.equal(files[files.length - 27], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 28], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 28], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 29], MIGRATION_038, "038 must be the one before it");
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
@@ -170,7 +170,7 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
 test("2: no migration 044 or beyond", () => {
   // 065 is the highest migration. 039 is live and is not the place to
   // fix anything any more.
-  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 65);
+  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 66);
   assert.deepEqual(beyond, [], "an unreviewed migration appeared after 065");
 });
 
@@ -1186,6 +1186,30 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // tests/repurchase-eligibility.test.mjs.
     "lib/subscriptionCheckoutDeps.ts",
     "lib/subscriptions.ts",
+    // 4-WEEK SUBSCRIPTION -> ANNUAL PLAN UPGRADE (migration 066, written
+    // and NOT applied). Two edits to the confirmation mail, and both are
+    // additive:
+    //
+    //   annualPurchaseConfirmationEmailDeps.ts  two more columns on the
+    //                                           plan read - the handover
+    //                                           date and its source.
+    //   email/annualPurchaseConfirmation.ts     one branch. A plan with
+    //                                           a handover date says so,
+    //                                           names the date the abo
+    //                                           stops and the date the
+    //                                           year starts, and states
+    //                                           that nothing is
+    //                                           delivered twice. A plan
+    //                                           without one is byte-for-
+    //                                           byte the message it has
+    //                                           always been.
+    //
+    // ONE MAIL EITHER WAY: migration 039 gives each plan exactly one
+    // purchase-confirmation claim, and this reuses it rather than adding
+    // a second message a retry could duplicate. Reviewed in
+    // tests/subscription-annual-upgrade.test.mjs.
+    "lib/annualPurchaseConfirmationEmailDeps.ts",
+    "lib/email/annualPurchaseConfirmation.ts",
     // THE ONE-TIME QUOTE BUILDER, edited twice and both times to REFUSE
     // more than it used to - which is the direction this guard exists to
     // scrutinise, so the two changes are stated exactly.

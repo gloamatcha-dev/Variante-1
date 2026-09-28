@@ -107,7 +107,13 @@ export const ANNUAL_PLAN_ACCOUNT_SELECT =
   "catalog_unit_gross_cents, annual_unit_gross_cents, shipping_per_delivery_gross_cents, " +
   "merchandise_total_gross_cents, shipping_total_gross_cents, total_gross_cents, " +
   "refunded_total_cents, discount_percent_applied, delivery_items_snapshot, " +
-  "purchased_at, plan_end_at, completed_at, cancelled_at";
+  "purchased_at, plan_end_at, completed_at, cancelled_at, " +
+  // MIGRATION 066, AND GRANTED BY IT. The handover: which subscription
+  // this plan took over from, and when it starts. Both are things the
+  // customer is entitled to know about their own contract, and without
+  // them the account would show two contracts that look simultaneously
+  // live. Neither is a Stripe identity and neither is a snapshot.
+  "source_subscription_id, schedule_anchor_at";
 
 /**
  * Every delivery column the account is allowed to read.
@@ -178,6 +184,9 @@ export type AnnualPlanAccountRow = {
   plan_end_at: string | null;
   completed_at: string | null;
   cancelled_at: string | null;
+  /** Migration 066. Null on every ordinary annual purchase. */
+  source_subscription_id?: string | null;
+  schedule_anchor_at?: string | null;
 };
 
 export type AnnualPlanDeliveryAccountRow = {
@@ -241,6 +250,18 @@ export type AnnualPlanAccountView = {
   planEndAt: string | null;
   completedAt: string | null;
   cancelledAt: string | null;
+
+  /**
+   * THE HANDOVER, when this plan replaced a running subscription.
+   *
+   * Both null for an ordinary purchase. When they are set, the plan was
+   * bought as an upgrade and its thirteen dates start at
+   * scheduleAnchorAt rather than at the purchase - which is also the
+   * date the old subscription stops covering, because there is one
+   * handover and therefore one date.
+   */
+  sourceSubscriptionId: string | null;
+  scheduleAnchorAt: string | null;
 
   deliveryCount: number;
   fulfilledDeliveries: number;
@@ -468,6 +489,18 @@ export function buildAnnualPlanAccountView(
     completedAt: plan.completed_at ?? null,
     cancelledAt: plan.cancelled_at ?? null,
 
+    // PASSED THROUGH, never derived. Migration 066 writes the anchor at
+    // activation from the subscription's own period; nothing here may
+    // compute, adjust or default it.
+    sourceSubscriptionId: typeof plan.source_subscription_id === "string"
+      && plan.source_subscription_id.trim() !== ""
+      ? plan.source_subscription_id
+      : null,
+    scheduleAnchorAt: typeof plan.schedule_anchor_at === "string"
+      && plan.schedule_anchor_at.trim() !== ""
+      ? plan.schedule_anchor_at
+      : null,
+
     deliveryCount: plan.delivery_count,
     // COUNTED from durable rows, never derived from elapsed time.
     fulfilledDeliveries: sorted.filter(isFulfilledAnnualDelivery).length,
@@ -480,6 +513,29 @@ export function buildAnnualPlanAccountView(
     autoRenews: false,
     cadence: ANNUAL_ACCOUNT_CADENCE,
   };
+}
+
+/**
+ * The plan that is taking over from THIS subscription, or null.
+ *
+ * Read from the plans the database already returned for the signed-in
+ * customer, so it is ownership-scoped by construction and a subscription
+ * id cannot be used to look up anybody else's contract.
+ *
+ * LIVE PLANS ONLY is the caller's job, not this function's: a refunded
+ * upgrade still names the subscription it once replaced, and that is
+ * history rather than a handover in progress. The account filters first.
+ */
+export function findTransitionPlanFor<T extends { sourceSubscriptionId: string | null }>(
+  subscriptionId: string | null | undefined,
+  plans: T[] | null | undefined
+): T | null {
+  const wanted = typeof subscriptionId === "string" ? subscriptionId.trim() : "";
+  if (wanted === "") return null;
+  for (const plan of Array.isArray(plans) ? plans : []) {
+    if (plan?.sourceSubscriptionId === wanted) return plan;
+  }
+  return null;
 }
 
 /* ══════════════════════════════════════════════════════════════

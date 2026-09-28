@@ -106,10 +106,10 @@ test("1: 061 owns its number, and only the reviewed 062 follows it", () => {
   // this guard protects is that 061 still occupies its own number and
   // that nothing UNREVIEWED appeared above it. Reviewed in
   // tests/b2b-checkout-settlement.test.mjs.
-  assert.equal(files[files.length - 5], MIGRATION, "061 must be the one before the newest");
-  assert.equal(files[files.length - 6], "060_b2b_payment_delivery_foundation.sql");
-  assert.equal(files[files.length - 7], "059_b2b_supply_commerce_foundation.sql");
-  assert.equal(files.length, 65);
+  assert.equal(files[files.length - 6], MIGRATION, "061 must be the one before the newest");
+  assert.equal(files[files.length - 7], "060_b2b_payment_delivery_foundation.sql");
+  assert.equal(files[files.length - 8], "059_b2b_supply_commerce_foundation.sql");
+  assert.equal(files.length, 66);
   // PACKAGES 5D/5E/5F ADDED MIGRATION 063: the instalment, resolution
   // and failure runtime. Re-pinned on the same terms as 062 above.
   // Reviewed in tests/b2b-instalment-delivery-failure.test.mjs.
@@ -133,9 +133,10 @@ test("1: 061 owns its number, and only the reviewed 062 follows it", () => {
      // on an existing table and no privilege anywhere else. No
      // subscription, annual or B2B object is touched. Reviewed in
      // tests/guest-order-management.test.mjs.
-     "065_guest_order_management.sql"],
+     "065_guest_order_management.sql",
+     "066_annual_plan_subscription_transition.sql"],
     "a migration above 061 appeared that this suite has not been reviewed against");
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 65), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 66), [],
     "an unreviewed migration appeared after 062");
   // No number is used twice, which a copy-paste of a file name would do.
   const numbers = files.map(f => f.slice(0, 3));
@@ -1105,7 +1106,7 @@ test("50: NO SUITE MAY CLAIM THAT AN APPLIED MIGRATION IS STILL PENDING", () => 
   // below: it is a NEW file, so no immutability guard has anything to
   // exempt in it. Re-pinned to it, so the next author faces the same
   // decision. Reviewed in tests/guest-order-management.test.mjs.
-  assert.equal(onDisk.at(-1), "065_guest_order_management.sql",
+  assert.equal(onDisk.at(-1), "066_annual_plan_subscription_transition.sql",
     "a migration appeared above 065 - decide whether it is pending, then re-check every exemption");
   assert.equal(appliedFiles.length, onDisk.length,
     "a migration is excluded from the applied set - nothing guards its immutability");

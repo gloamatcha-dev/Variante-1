@@ -650,6 +650,14 @@ a.portal-summary-row:hover{color:var(--blue)}
 .portal-terminal-detail{font:14px/1.6 var(--font-mono);opacity:.6;margin:6px 0 0;max-width:620px}
 .portal-terminal .portal-actions{margin-top:16px}
 
+/* ── THE UPGRADE REVIEW ──
+   What the customer keeps, what stops and what starts, above the size
+   they are choosing. The portal's own fact-grid, so a review reads like
+   every other set of contract facts in the account rather than like a
+   second design. */
+.upgrade-review{padding-bottom:22px;margin-bottom:22px;border-bottom:1px solid var(--line)}
+.upgrade-review .sub-card-facts{margin-top:0}
+
 /* A size that is already running is shown, and shown to be unavailable:
    a missing option would leave the customer wondering where it went. */
 .sub-start-option.unavailable{opacity:.45;cursor:not-allowed}
