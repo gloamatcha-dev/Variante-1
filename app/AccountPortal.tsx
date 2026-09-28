@@ -38,6 +38,19 @@ import {
   type AnnualPlanAccountView,
   type AnnualPlanDeliveryAccountRow,
 } from "../lib/annualPlanAccount";
+// WHETHER A CONTRACT MAY BE BOUGHT AGAIN - the SAME functions the two
+// checkout routes refuse with, so a button on this page can never offer
+// a purchase the server would reject. Eligibility is read from current
+// contract state; a cancelled abo and a refunded plan block nothing.
+import {
+  ANNUAL_PLAN_ALREADY_RUNNING,
+  SUBSCRIPTION_ALREADY_RUNNING,
+  isLiveAnnualPlan,
+  isLiveSubscription,
+  mayStartSubscription,
+  subscriptionHasEndedForGood,
+  type SubscriptionEligibilityRow,
+} from "../lib/purchaseEligibility";
 import {
   ANNUAL_DELIVERY_COUNT,
   ANNUAL_DELIVERY_INTERVAL_DAYS,
@@ -296,6 +309,15 @@ type OrderItemRow = {
 type SubscriptionRow = {
   id: string;
   customer_type: string;
+  /**
+   * WHICH plan this is, so "a second EQUIVALENT subscription" can be
+   * decided at all. It is a catalog id the browser may already read from
+   * b2c_subscription_plans, it is never rendered, and it exists here for
+   * one reason: lib/purchaseEligibility.ts scopes the duplicate rule per
+   * plan, exactly as the checkout route does, so a 30 g abo does not
+   * hide the 100 g one behind a refusal.
+   */
+  plan_id: string | null;
   status: string;
   currency: string;
   customer_snapshot: Record<string, unknown>;
@@ -341,7 +363,7 @@ type SubscriptionRow = {
  * having sent it.
  */
 const SUBSCRIPTION_SELECT =
-  "id, customer_type, status, currency, customer_snapshot, shipping_address_snapshot, " +
+  "id, plan_id, customer_type, status, currency, customer_snapshot, shipping_address_snapshot, " +
   "billing_address_snapshot, plan_snapshot, subtotal_net_cents, subtotal_gross_cents, " +
   "discount_total_cents, shipping_net_cents, shipping_gross_cents, tax_total_cents, " +
   "total_net_cents, total_gross_cents, current_period_start, current_period_end, " +
@@ -515,18 +537,29 @@ function PrivateDashboard() {
   const { profile } = useAuth();
   const [latestOrder, setLatestOrder] = useState<OrderRow | null>(null);
   const [orderLoading, setOrderLoading] = useState(() => !!supabase);
-  const [activeSub, setActiveSub] = useState<SubscriptionRow | null>(null);
+  /*
+    ONE SUBSCRIPTION READ, NOT THREE.
+
+    The dashboard used to ask the same table three times - the newest
+    active one for the card, the soonest upcoming delivery for the tile -
+    and both queries filtered in SQL. That made the page unable to say
+    anything at all about a subscription that had ENDED, which is exactly
+    what a customer whose abo is over needs to see: the record of it, and
+    the way to start a new one.
+
+    So it reads the customer's subscriptions once and decides here, with
+    the same pure predicates the checkout route refuses with.
+  */
+  const [subs, setSubs] = useState<SubscriptionRow[]>([]);
   const [subLoading, setSubLoading] = useState(() => !!supabase);
-  const [nextDeliverySub, setNextDeliverySub] = useState<SubscriptionRow | null>(null);
-  const [deliveryLoading, setDeliveryLoading] = useState(() => !!supabase);
   /*
     THE SECOND CONTRACT THIS PAGE NEVER ASKED ABOUT.
 
     Two things ship Matcha to a private customer: the recurring
     subscription and the prepaid annual plan. The dashboard asked the
-    subscriptions table three times and the annual tables not at all, so a
-    customer who had just paid a year in advance was shown a banner saying
-    the plan was running, "Keine geplante Lieferung" underneath it, and no
+    subscriptions table and the annual tables not at all, so a customer
+    who had just paid a year in advance was shown a banner saying the
+    plan was running, "Keine geplante Lieferung" underneath it, and no
     way at all to find the plan again afterwards.
 
     One read, through the same leaf every other annual surface uses.
@@ -537,10 +570,8 @@ function PrivateDashboard() {
     if (!supabase) return;
     supabase.from("orders").select("*").order("created_at", { ascending: false }).limit(1)
       .then(({ data }) => { setLatestOrder(data?.[0] ?? null); setOrderLoading(false); });
-    supabase.from("subscriptions").select(SUBSCRIPTION_SELECT).eq("status", "active").order("created_at", { ascending: false }).limit(1)
-      .then(({ data }) => { setActiveSub((data?.[0] as unknown as SubscriptionRow) ?? null); setSubLoading(false); });
-    supabase.from("subscriptions").select(SUBSCRIPTION_SELECT).eq("status", "active").not("next_delivery_at", "is", null).gte("next_delivery_at", new Date().toISOString()).order("next_delivery_at", { ascending: true }).limit(1)
-      .then(({ data }) => { setNextDeliverySub((data?.[0] as unknown as SubscriptionRow) ?? null); setDeliveryLoading(false); });
+    supabase.from("subscriptions").select(SUBSCRIPTION_SELECT).order("created_at", { ascending: false })
+      .then(({ data }) => { setSubs((data ?? []) as unknown as SubscriptionRow[]); setSubLoading(false); });
   }, []);
 
   // Null rather than a placeholder: "Hallo, -." and "Hallo, GLOA." are
@@ -549,9 +580,44 @@ function PrivateDashboard() {
   const greetingName = resolveGreetingName(profile?.first_name);
 
   /*
+    WHAT IS RUNNING, AND WHAT IS OVER.
+
+    Both partitions come from lib/purchaseEligibility.ts, so "still
+    running" means here exactly what it means to the checkout route that
+    would refuse a duplicate of it. A subscription with a cancellation
+    already promised is LIVE - it still bills and still ships until its
+    effective end - and only becomes history once it has genuinely ended.
+
+    A 'pending' subscription appears in neither list, exactly as before:
+    it is written before Stripe is contacted, so an abandoned checkout
+    would otherwise sit on this page forever claiming to be a contract.
+    It stays visible in the full list on /account/subscriptions.
+  */
+  const liveSubs = subs.filter(s => isLiveSubscription(s as SubscriptionEligibilityRow));
+  const pastSubs = subs.filter(s => subscriptionHasEndedForGood(s as SubscriptionEligibilityRow));
+  const liveAnnualPlans = annualViews.filter(isLiveAnnualPlan);
+  const pastAnnualPlans = annualViews.filter(v => !isLiveAnnualPlan(v) && v.status !== "pending");
+
+  const contractsLoading = subLoading || annualLoading;
+  const hasPast = pastSubs.length > 0 || pastAnnualPlans.length > 0;
+
+  /*
+    THE SOONEST BOX A LIVE SUBSCRIPTION STILL OWES, decided from the rows
+    rather than from a `.gte(now)` filter. getNextDeliveryAt is what
+    answers null for an early cancellation, so a subscription that is
+    ending before its next cycle still promises nothing.
+  */
+  const nextDeliverySub = liveSubs.reduce<SubscriptionRow | null>((soonest, candidate) => {
+    const at = getNextDeliveryAt(candidate);
+    if (!at) return soonest;
+    const best = soonest ? getNextDeliveryAt(soonest) : null;
+    return best === null || at < best ? candidate : soonest;
+  }, null);
+
+  /*
     "NÄCHSTE LIEFERUNG" IS ONE QUESTION, ASKED OF EVERYTHING.
 
-    Each contract decides for itself what it still owes - the query above
+    Each contract decides for itself what it still owes - getNextDeliveryAt
     for the subscription, findNextAnnualDelivery inside the read model for
     the plan - and pickEarliestUpcomingDelivery only picks the earliest of
     the answers. No date is computed here and none is compared against a
@@ -564,20 +630,13 @@ function PrivateDashboard() {
     nextDeliverySub && subDeliveryAt
       ? { source: "subscription" as const, id: nextDeliverySub.id, scheduledFor: subDeliveryAt }
       : null,
-    ...annualViews.map(v => v.nextDelivery
+    ...liveAnnualPlans.map(v => v.nextDelivery
       ? { source: "annual_plan" as const, id: v.id, scheduledFor: v.nextDelivery.scheduledFor }
       : null),
   ]);
   const nextDeliveryPlan = nextDelivery?.source === "annual_plan"
-    ? annualViews.find(v => v.id === nextDelivery.id) ?? null
+    ? liveAnnualPlans.find(v => v.id === nextDelivery.id) ?? null
     : null;
-
-  /*
-    THE PLANS WORTH A CARD: the ones that are actually running. A
-    completed, cancelled or fully refunded plan is history and belongs on
-    the plan's own page, not on the page that answers "what do I have".
-  */
-  const runningAnnualPlans = annualViews.filter(v => v.status === "active" && v.paymentStatus !== "refunded");
 
   /*
     WHICH OF THE CUSTOMER'S ORDERS WERE ALREADY PAID FOR, derived from the
@@ -595,7 +654,7 @@ function PrivateDashboard() {
 
       <section className="portal-section">
         <AccountSectionHeader label="NÄCHSTE LIEFERUNG" />
-        {deliveryLoading || annualLoading ? (
+        {contractsLoading ? (
           <AccountEmptyState>Laden…</AccountEmptyState>
         ) : nextDelivery && nextDeliveryPlan ? (
           <div className="portal-line">
@@ -617,42 +676,118 @@ function PrivateDashboard() {
       </section>
 
       {/*
-        THE ANNUAL PLAN, PERSISTENTLY AND UNDER ITS OWN NAME.
+        AKTIV — WHAT THE CUSTOMER ACTUALLY HAS RIGHT NOW.
 
-        Not a post-checkout banner, which disappears with the URL that
-        carried it, and not a line inside the Abo card - the two contracts
-        are different in exactly the ways a customer cares about. Every
-        value below is the read model's; the card derives nothing.
+        The dashboard used to show one abo card and, since the annual
+        package, one plan card, side by side and with nothing saying which
+        of them was current. A contract that has ended and one that is
+        running are not the same kind of fact, so they are no longer
+        rendered as though they were: everything running is here, and
+        everything finished is in VERGANGEN below, quieter.
+
+        The two empty states are the repurchase CTAs, and they appear on
+        exactly the condition the checkout route uses - no live contract
+        of that kind - so neither can offer something the server refuses.
       */}
-      {!annualLoading && runningAnnualPlans.length > 0 && (
-        <section className="portal-section">
-          <AccountSectionHeader label="DEIN JAHRESPLAN" />
-          {runningAnnualPlans.map(v => (
-            <div key={v.id} className="portal-annual-summary">
-              <div className="portal-order">
-                <div className="portal-order-id">
-                  <strong>
-                    {v.product?.name ?? "GLOA Matcha"}{v.product?.variantLabel ? ` · ${v.product.variantLabel}` : ""}
-                  </strong>
-                  <span>{annualStatusLabel(v)}</span>
+      <section className="portal-section">
+        <AccountSectionHeader label="AKTIV" />
+        {contractsLoading ? (
+          <AccountEmptyState>Laden…</AccountEmptyState>
+        ) : (
+          <div className="portal-contract-list">
+            {liveSubs.map(sub => (
+              <div key={sub.id} className="portal-contract">
+                <div className="portal-order">
+                  <div className="portal-order-id">
+                    <strong>{subPlanName(sub)}</strong>
+                    <span>{getSubscriptionStatusLabel(sub)}</span>
+                  </div>
+                  <div className="portal-order-meta">
+                    <span>{SUBSCRIPTION_CADENCE_LABEL}</span>
+                    <strong>{fmtCents(sub.total_gross_cents)} €</strong>
+                  </div>
                 </div>
-                <div className="portal-order-meta">
-                  <span>{v.deliveryCount} Lieferungen · {ANNUAL_CADENCE_LABEL}</span>
-                  <strong>{v.fulfilledDeliveries} von {v.deliveryCount} Lieferungen</strong>
+                <div className="portal-actions">
+                  <a href={`/account/subscriptions/${sub.id}`} className="portal-action">ABO ANSEHEN</a>
                 </div>
               </div>
-              <dl className="sub-card-facts">
-                <div><dt>Einmalig bezahlt</dt><dd>{fmtCents(v.totalGrossCents)} €</dd></div>
-                {v.nextDelivery && (
-                  <div><dt>Nächste Lieferung</dt><dd>{fmtDate(v.nextDelivery.scheduledFor)}</dd></div>
-                )}
-                <div><dt>Laufzeit bis</dt><dd>{v.planEndAt ? fmtDate(v.planEndAt) : "—"}</dd></div>
-              </dl>
-              <div className="portal-actions">
-                <a href={annualPlanDetailHref(v.id)} className="portal-action">JAHRESPLAN ANSEHEN</a>
+            ))}
+
+            {liveAnnualPlans.map(v => (
+              <div key={v.id} className="portal-contract">
+                <div className="portal-order">
+                  <div className="portal-order-id">
+                    <strong>
+                      {v.product?.name ?? "GLOA Matcha"}{v.product?.variantLabel ? ` · ${v.product.variantLabel}` : ""}
+                    </strong>
+                    <span>{annualStatusLabel(v)}</span>
+                  </div>
+                  <div className="portal-order-meta">
+                    <span>{v.deliveryCount} Lieferungen · {ANNUAL_CADENCE_LABEL}</span>
+                    <strong>{v.fulfilledDeliveries} von {v.deliveryCount} Lieferungen</strong>
+                  </div>
+                </div>
+                <dl className="sub-card-facts">
+                  <div><dt>Einmalig bezahlt</dt><dd>{fmtCents(v.totalGrossCents)} €</dd></div>
+                  {v.nextDelivery && (
+                    <div><dt>Nächste Lieferung</dt><dd>{fmtDate(v.nextDelivery.scheduledFor)}</dd></div>
+                  )}
+                  <div><dt>Laufzeit bis</dt><dd>{v.planEndAt ? fmtDate(v.planEndAt) : "—"}</dd></div>
+                </dl>
+                <div className="portal-actions">
+                  <a href={annualPlanDetailHref(v.id)} className="portal-action">JAHRESPLAN ANSEHEN</a>
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+
+            {liveSubs.length === 0 && (
+              <AccountEmptyState action={<AccountAction href="/account/subscriptions">MONATSABO STARTEN</AccountAction>}>
+                Du hast aktuell kein Abonnement.
+              </AccountEmptyState>
+            )}
+            {liveAnnualPlans.length === 0 && (
+              <AccountEmptyState action={<AccountAction href="/account/subscriptions">JAHRESPLAN WÄHLEN</AccountAction>}>
+                Du hast aktuell keinen Jahresplan.
+              </AccountEmptyState>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/*
+        VERGANGEN — KEPT, AND KEPT QUIET.
+
+        History is never hidden and never rewritten: an ended abo says
+        "Beendet" and a refunded plan says "Erstattet", each linking to
+        its own page. It is one line per contract rather than a card,
+        because a finished contract is a reference, not something to act
+        on - the action for it is the CTA in AKTIV above.
+      */}
+      {!contractsLoading && hasPast && (
+        <section className="portal-section portal-section-past">
+          <AccountSectionHeader label="VERGANGEN" />
+          <div className="portal-past-list">
+            {pastSubs.map(sub => (
+              <a key={sub.id} href={`/account/subscriptions/${sub.id}`} className="portal-past-row">
+                <span className="portal-past-name">{subPlanName(sub)}</span>
+                <span className="portal-past-state">{getSubscriptionStatusLabel(sub)}</span>
+                <span className="portal-past-date">
+                  {getEffectiveEndAt(sub) ? fmtDate(getEffectiveEndAt(sub) as string) : ""}
+                </span>
+                <AccountChevron />
+              </a>
+            ))}
+            {pastAnnualPlans.map(v => (
+              <a key={v.id} href={annualPlanDetailHref(v.id)} className="portal-past-row">
+                <span className="portal-past-name">
+                  {v.product?.name ?? "GLOA Matcha"}{v.product?.variantLabel ? ` · ${v.product.variantLabel}` : ""} · Jahresplan
+                </span>
+                <span className="portal-past-state">{annualStatusLabel(v)}</span>
+                <span className="portal-past-date">{v.planEndAt ? fmtDate(v.planEndAt) : ""}</span>
+                <AccountChevron />
+              </a>
+            ))}
+          </div>
         </section>
       )}
 
@@ -684,33 +819,6 @@ function PrivateDashboard() {
         ) : (
           <AccountEmptyState action={<AccountAction href="/shop">ZUM SHOP</AccountAction>}>
             Du hast noch keine Bestellung.
-          </AccountEmptyState>
-        )}
-      </section>
-
-      <section className="portal-section">
-        <AccountSectionHeader label="DEIN ABO" />
-        {subLoading ? (
-          <AccountEmptyState>Laden…</AccountEmptyState>
-        ) : activeSub ? (
-          <>
-            <div className="portal-order">
-              <div className="portal-order-id">
-                <strong>{subPlanName(activeSub)}</strong>
-                <span>{getSubscriptionStatusLabel(activeSub)}</span>
-              </div>
-              <div className="portal-order-meta">
-                <span>{SUBSCRIPTION_CADENCE_LABEL}</span>
-                <strong>{fmtCents(activeSub.total_gross_cents)} €</strong>
-              </div>
-            </div>
-            <div className="portal-actions">
-              <a href={`/account/subscriptions/${activeSub.id}`} className="portal-action">ABO ANSEHEN</a>
-            </div>
-          </>
-        ) : (
-          <AccountEmptyState action={<AccountAction href="/account/subscriptions">ABOS ANSEHEN</AccountAction>}>
-            Du hast aktuell kein Abonnement.
           </AccountEmptyState>
         )}
       </section>
@@ -1310,7 +1418,20 @@ type SubscriptionPlanRow = {
  * intent and gets a different token, which is exactly the distinction
  * the route's own fingerprint comparison draws on the other side.
  */
-function SubscriptionStartForm({ onStarted }: { onStarted?: () => void }) {
+function SubscriptionStartForm({ onStarted, subscriptions }: {
+  onStarted?: () => void;
+  /**
+   * The customer's OWN subscriptions, passed from the list that already
+   * read them rather than read a second time.
+   *
+   * They exist here for one reason: a size whose abo is already running
+   * cannot be bought again, and the server says so with a 409. Offering
+   * it anyway would be a button that always fails, so the option is
+   * shown as unavailable instead - with the SAME predicate the route
+   * refuses with, so the two can never disagree.
+   */
+  subscriptions?: SubscriptionRow[];
+}) {
   const { session, addresses } = useAuth();
   const { product, loading: catalogLoading } = useCatalog("matcha");
   const [plans, setPlans] = useState<SubscriptionPlanRow[]>([]);
@@ -1513,9 +1634,25 @@ function SubscriptionStartForm({ onStarted }: { onStarted?: () => void }) {
    * tab is a stale selection, and sending it would produce the same 404
    * from the far side of a network round trip.
    */
+  /*
+    WHICH SIZES ARE ALREADY RUNNING.
+
+    mayStartSubscription is lib/purchaseEligibility.ts's, which is what
+    the checkout route calls before it claims anything - so a size marked
+    unavailable here is exactly a size the server would refuse, and a
+    size that is offered is one it would accept. A subscription that has
+    ENDED is not in the way of anything: it blocks nothing there and it
+    blocks nothing here, which is the whole point.
+  */
+  const ownSubs = (subscriptions ?? []) as unknown as SubscriptionEligibilityRow[];
+  const planIsAvailable = (candidatePlanId: string) => mayStartSubscription(ownSubs, candidatePlanId);
+
   const start = async () => {
     if (!session?.access_token) { setError("Bitte melde dich an."); return; }
     if (!planId) { setError("Bitte wähle eine Größe."); return; }
+    // The server refuses this with a 409 and the same reasoning. Saying
+    // it here saves a round trip; it does not replace that refusal.
+    if (!planIsAvailable(planId)) { setError(SUBSCRIPTION_ALREADY_RUNNING); return; }
     if (!addressId || !addresses.some(a => a.id === addressId)) {
       setError("Bitte wähle eine Lieferadresse.");
       return;
@@ -1629,14 +1766,21 @@ function SubscriptionStartForm({ onStarted }: { onStarted?: () => void }) {
               {plans.map(p => {
                 const cents = priceFor(p);
                 const shipping = shippingFor(p);
+                const available = planIsAvailable(p.id);
                 return (
-                  <label key={p.id} className={`sub-start-option${planId === p.id ? " active" : ""}`}>
+                  <label key={p.id} className={`sub-start-option${planId === p.id ? " active" : ""}${available ? "" : " unavailable"}`}>
                     <input
                       type="radio" name="sub-plan" className="sr-only" value={p.id}
                       checked={planId === p.id}
+                      disabled={!available}
                       onChange={() => selectSize(p.id, variantFor(p)?.sku ?? null)}
                     />
                     <span className="sub-start-option-label">{p.name}</span>
+                    {/* WHY IT CANNOT BE CHOSEN, stated rather than left
+                        as a dead control. A running abo of this size is
+                        the reason, and it is a reason the customer can
+                        act on from its own page. */}
+                    {!available && <span className="sub-start-option-meta">Läuft bereits</span>}
                     {/* The catalog price and the delivery charge, shown so
                         the choice is informed. Neither is sent: the server
                         prices the plan from its own variant and applies
@@ -1781,6 +1925,17 @@ function SubscriptionStartForm({ onStarted }: { onStarted?: () => void }) {
 function AnnualPlanStartForm() {
   const { session, addresses } = useAuth();
   const { product, loading: catalogLoading } = useCatalog("matcha");
+  /*
+    THE CUSTOMER'S OWN PLANS, so the form is not offered while one is
+    already running. isLiveAnnualPlan is lib/purchaseEligibility.ts's and
+    is exactly what the checkout route refuses with, so this panel and
+    that 409 can never disagree.
+
+    A COMPLETED, CANCELLED OR REFUNDED PLAN IS NOT IN THE WAY. That is
+    the point: the history stays in the account and the form comes back.
+  */
+  const { views: ownAnnualPlans, loading: ownPlansLoading } = useAnnualPlanViews();
+  const runningPlan = ownAnnualPlans.find(isLiveAnnualPlan) ?? null;
 
   const [variantChoice, setVariantChoice] = useState<string | null>(null);
   const [addressChoice, setAddressChoice] = useState<string | null>(null);
@@ -1872,7 +2027,7 @@ function AnnualPlanStartForm() {
     }
   };
 
-  const loading = catalogLoading;
+  const loading = catalogLoading || ownPlansLoading;
   const shipsFree = pricing?.shippingPerDeliveryGrossCents === 0;
 
   return (
@@ -1887,6 +2042,17 @@ function AnnualPlanStartForm() {
 
       {loading ? (
         <AccountEmptyState>Laden…</AccountEmptyState>
+      ) : runningPlan ? (
+        /*
+          ONE LIVE PLAN AT A TIME, and the form says so instead of
+          offering a purchase the route would refuse with a 409. The way
+          out is the plan itself, so the action leads there.
+        */
+        <AccountEmptyState
+          action={<AccountAction href={annualPlanDetailHref(runningPlan.id)}>JAHRESPLAN ANSEHEN</AccountAction>}
+        >
+          {ANNUAL_PLAN_ALREADY_RUNNING}
+        </AccountEmptyState>
       ) : eligible.length === 0 ? (
         <AccountEmptyState action={<AccountAction href="/shop">ZUM SHOP</AccountAction>}>
           Aktuell ist keine Größe als Jahresplan hinterlegt.
@@ -2238,6 +2404,20 @@ function AnnualPlanDetail({ annualPlanId }: { annualPlanId: string }) {
     ? `${plan.product.name} · ${plan.product.variantLabel}`
     : (plan.product?.name ?? "GLOA Matcha");
 
+  /*
+    IS THIS PLAN STILL RUNNING?
+
+    isLiveAnnualPlan is lib/purchaseEligibility.ts's, which is what the
+    checkout route refuses a duplicate with - so a plan this page calls
+    finished is exactly a plan that no longer stands in the way of buying
+    another, and the CTA below cannot promise something the server would
+    reject. A refunded plan is finished even though its thirteen delivery
+    rows still exist, which is precisely the case that used to make a
+    refunded plan look like a running one.
+  */
+  const planIsLive = isLiveAnnualPlan(plan);
+  const fullyRefunded = plan.paymentStatus === "refunded";
+
   return (
     <>
       <section className="portal-page-head">
@@ -2245,6 +2425,39 @@ function AnnualPlanDetail({ annualPlanId }: { annualPlanId: string }) {
         <h1>{productLine}</h1>
         <p className="portal-page-lead">{annualStatusLabel(plan)}</p>
       </section>
+
+      {/*
+        A FINISHED PLAN SAYS SO FIRST, AND SAYS WHAT HAPPENED TO THE
+        MONEY.
+
+        Thirteen dated rows survive a refund - they are the record of
+        what was scheduled - and rendering them the way a running plan
+        renders them made a refunded plan look live. So the state comes
+        first, the refunded amount with it, and the schedule moves below
+        under its own heading as history.
+      */}
+      {!planIsLive && (
+        <div className="portal-terminal">
+          <p className="portal-terminal-state">{annualStatusLabel(plan)}</p>
+          {fullyRefunded && (
+            <p className="portal-terminal-detail">
+              Erstattet: {fmtCents(plan.refundedTotalCents > 0 ? plan.refundedTotalCents : plan.totalGrossCents)} €
+            </p>
+          )}
+          <p className="portal-terminal-detail">
+            Plan beendet. Es folgen keine weiteren Lieferungen und keine weitere Abbuchung.
+          </p>
+          {/*
+            THE REPURCHASE CTA. A refunded, cancelled or completed plan
+            blocks nothing, so this leads back to the form that starts a
+            new one - a NEW plan with its own id, never a revival of this
+            row.
+          */}
+          <div className="portal-actions">
+            <Link href="/account/subscriptions" className="portal-action">NEUEN JAHRESPLAN WÄHLEN</Link>
+          </div>
+        </div>
+      )}
 
       <section className="portal-section">
         <AccountSectionHeader label="DEIN PLAN" />
@@ -2316,7 +2529,7 @@ function AnnualPlanDetail({ annualPlanId }: { annualPlanId: string }) {
       */}
       {plan.deliveries.length > 0 && (
         <section className="portal-section">
-          <AccountSectionHeader label="LIEFERUNGEN" />
+          <AccountSectionHeader label={planIsLive ? "LIEFERUNGEN" : "PLANVERLAUF"} />
           <div className="annual-schedule">
             {plan.deliveries.map(d => (
               <div key={d.deliveryNumber} className="annual-schedule-row">
@@ -2699,7 +2912,7 @@ function PortalSubscriptions() {
         the same POST /api/subscriptions/checkout/session that has existed
         since Task 29D-D, with the same three fields.
       */}
-      {!loading && !error && <SubscriptionStartForm />}
+      {!loading && !error && <SubscriptionStartForm subscriptions={subs} />}
 
       {/*
         THE PREPAID ANNUAL PLAN, ON THE SAME PAGE AND UNDER ITS OWN NAME.
@@ -2849,6 +3062,35 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
         <p className="eyebrow">ABO</p>
         <h1>{(plan.name as string) || "Dein Abo"}</h1>
       </section>
+
+      {/*
+        AN ENDED ABO SAYS SO FIRST.
+
+        The state used to be one row among eight, below a heading and
+        above a cancellation section - so a customer whose abo was over
+        read the dates before they read that fact. It is the fact that
+        decides what the rest of the page means, so it comes first, and
+        it carries the one action that is still available: starting a new
+        one. History is not rewritten to make room for it - every row
+        below is unchanged and the old contract keeps its own id.
+      */}
+      {ended && (
+        <div className="portal-terminal">
+          <p className="portal-terminal-state">{statusLabel}</p>
+          {endsAt && <p className="portal-terminal-detail">Beendet am {fmtDate(endsAt)}</p>}
+          <p className="portal-terminal-detail">Es gibt keine weiteren Lieferungen und keine weiteren Abbuchungen.</p>
+          {/*
+            THE REPURCHASE CTA, and it is honest by construction: an
+            ended abo blocks nothing in lib/purchaseEligibility.ts, so
+            the route this leads to will accept the size again. The form
+            it opens marks any size that IS still running as unavailable,
+            with the same predicate.
+          */}
+          <div className="portal-actions">
+            <Link href="/account/subscriptions" className="portal-action">NEUES ABO STARTEN</Link>
+          </div>
+        </div>
+      )}
 
       <div className="order-detail-meta">
         <div className="portal-profile-row"><span>Status</span><strong>{statusLabel}</strong></div>

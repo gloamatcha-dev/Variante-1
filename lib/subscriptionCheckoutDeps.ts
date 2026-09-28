@@ -4,7 +4,7 @@ import { verifyBearerUser } from "./verifyUser";
 import { getSupabaseAsUser, resolveLaunchPlanById } from "./subscriptionPlans";
 import { buildAuthoritativeQuote } from "./checkoutQuote";
 import { getOrCreateSubscriptionCheckoutAttempt, linkStripeSession } from "./checkoutAttempts";
-import { claimPendingSubscriptionForAttempt } from "./subscriptions";
+import { claimPendingSubscriptionForAttempt, listOwnSubscriptionsForEligibility } from "./subscriptions";
 import { getOrCreateStripeCustomer } from "./stripeCustomers";
 import { getOrCreateRecurringPrice } from "./stripeRecurringPrice";
 import {
@@ -70,5 +70,6 @@ export const defaultSubscriptionCheckoutDeps: SubscriptionCheckoutDeps = {
   ensureRecurringPrice: getOrCreateRecurringPrice,
   ensureAttempt: getOrCreateSubscriptionCheckoutAttempt,
   claimSubscription: claimPendingSubscriptionForAttempt,
+  listSubscriptions: listOwnSubscriptionsForEligibility,
   linkSession: linkStripeSession,
 };

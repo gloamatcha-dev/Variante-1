@@ -3,6 +3,7 @@ import type { AddressSnapshot } from "./orderAddressSnapshot";
 import type { CheckoutAttemptItemSnapshot } from "./checkoutAttemptSnapshot";
 import type { CartTaxSnapshot } from "./tax";
 import type { SubscriptionPlanRow } from "./subscriptionCheckoutRules";
+import type { SubscriptionEligibilityRow } from "./purchaseEligibility";
 
 /**
  * Creating the local pending subscription (Task 29D-D).
@@ -160,4 +161,62 @@ export async function claimPendingSubscriptionForAttempt(
 
   const subscriptionId = typeof data === "string" ? data : String(data);
   return { ok: true, subscriptionId };
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+   WHAT THE CUSTOMER ALREADY HOLDS
+   ══════════════════════════════════════════════════════════════ */
+
+/**
+ * Exactly the columns lib/purchaseEligibility.ts reads, named rather
+ * than starred.
+ *
+ * A star select would have handed the checkout route the Stripe
+ * identity, both address snapshots and every money column on a read
+ * whose only question is "is one of these still running". None of that
+ * is needed to answer it, and a value that is never fetched cannot be
+ * logged by accident.
+ */
+const SUBSCRIPTION_ELIGIBILITY_SELECT =
+  "id, plan_id, status, current_period_end, next_delivery_at, " +
+  "cancellation_requested_at, cancellation_effective_at, cancelled_at";
+
+/**
+ * Every subscription this customer has, terminal ones included.
+ *
+ * DELIBERATELY UNFILTERED. The temptation is `.eq("status", "active")`,
+ * and it is wrong twice: it would miss 'past_due' and 'unpaid', which
+ * are standing contracts, and it would put half the eligibility rule in
+ * SQL where no test can reach it. The rule lives in one pure function;
+ * this only fetches rows for it.
+ *
+ * Scoped to one user_id. The service role bypasses RLS, so the filter is
+ * the whole of the scoping and is written explicitly rather than being
+ * left to a policy that does not apply here.
+ *
+ * A read error is NOT an empty list. Answering "no rows" on a failure
+ * would turn a database blip into permission to create a duplicate
+ * contract, so the failure is reported as one and the caller refuses the
+ * checkout.
+ */
+export async function listOwnSubscriptionsForEligibility(
+  userId: string
+): Promise<{ ok: true; rows: SubscriptionEligibilityRow[] } | { ok: false }> {
+  const admin = getSupabaseAdmin();
+  if (!admin) {
+    console.error("subscription eligibility: supabase admin client is not configured");
+    return { ok: false };
+  }
+
+  const { data, error } = await admin
+    .from("subscriptions")
+    .select(SUBSCRIPTION_ELIGIBILITY_SELECT)
+    .eq("user_id", userId);
+
+  if (error) {
+    console.error("subscription eligibility read failed:", error.message);
+    return { ok: false };
+  }
+  return { ok: true, rows: (data ?? []) as unknown as SubscriptionEligibilityRow[] };
 }

@@ -1159,6 +1159,33 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // grants.
     "lib/annualPlanCheckout.ts",
     "lib/annualPlanAccount.ts",
+    // REPURCHASE AFTER A TERMINAL CONTRACT. Four edits, all of them the
+    // same shape: a new dependency that READS the caller's own rows, and
+    // one refusal built from a pure predicate.
+    //
+    //   subscriptionCheckout.ts     one step before the claim: refuse a
+    //   annualPlanCheckout.ts       second contract while one is still
+    //                               live. Both run AFTER the attempt
+    //                               exists and BEFORE anything is
+    //                               claimed, both exclude the contract
+    //                               this very checkout already created,
+    //                               and neither touches a fingerprint
+    //                               gate, the atomic claim or Stripe.
+    //   subscriptions.ts            listOwnSubscriptionsForEligibility:
+    //   annualPlanCheckoutDeps.ts   listOwnAnnualPlansForEligibility.
+    //                               One named-column SELECT each, scoped
+    //                               to one user_id, unfiltered by status
+    //                               on purpose, and failing CLOSED - a
+    //                               read error is never "no contracts".
+    //
+    // Nothing here writes, deletes or expires a row: a cancelled abo and
+    // a refunded plan stay exactly as they are and simply stop blocking.
+    // The decision itself lives in lib/purchaseEligibility.ts, a new
+    // leaf, and is shared verbatim with the account portal so a button
+    // cannot offer what a route would refuse. Reviewed in
+    // tests/repurchase-eligibility.test.mjs.
+    "lib/subscriptionCheckoutDeps.ts",
+    "lib/subscriptions.ts",
     // THE ONE-TIME QUOTE BUILDER, edited twice and both times to REFUSE
     // more than it used to - which is the direction this guard exists to
     // scrutinise, so the two changes are stated exactly.

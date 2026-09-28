@@ -108,6 +108,19 @@ export {
 };
 export type { SavedAddressRow };
 
+/*
+  THE ONE ELIGIBILITY PREDICATE, shared with the account portal.
+
+  The page that offers "Abo starten" and the route that answers it read
+  the SAME function over the SAME columns, so the button can never offer
+  a purchase this handler would refuse.
+*/
+import {
+  SUBSCRIPTION_ALREADY_RUNNING,
+  findBlockingSubscription,
+  type SubscriptionEligibilityRow,
+} from "./purchaseEligibility";
+
 /** A stable, customer-visible name for a zone's recurring shipping line. */
 export function shippingProductName(zone: ShippingZoneKey): string {
   const codes = SHIPPING_ZONES[zone].countryCodes;
@@ -137,8 +150,20 @@ export type SubscriptionCheckoutDeps = {
    * to race against.
    */
   claimSubscription: (input: CreatePendingSubscriptionInput) => Promise<CreatePendingSubscriptionResult>;
+  /**
+   * The caller's OWN subscriptions, for the duplicate decision below.
+   *
+   * Every row, not a filtered "active" query: the filtering is
+   * findBlockingSubscription's, so the rule lives in one testable place
+   * instead of being half a SQL predicate and half a TypeScript one.
+   */
+  listSubscriptions: (userId: string) => Promise<SubscriptionEligibilityResult>;
   linkSession: (attemptId: string, sessionId: string) => Promise<boolean>;
 };
+
+export type SubscriptionEligibilityResult =
+  | { ok: true; rows: SubscriptionEligibilityRow[] }
+  | { ok: false };
 
 type ErrorResponse = { error: string };
 
@@ -395,6 +420,39 @@ export async function handleSubscriptionCheckout(
     return fail(503, UNAVAILABLE);
   }
   const frozenItem = frozenItems[0];
+
+  /*
+    10b. IS THIS CONTRACT ALREADY RUNNING?
+
+    Asked of CURRENT STATE, never of existence. A cancelled subscription
+    is history the account keeps and it blocks nothing; a live one - a
+    subscription that is not ended, including one with a cancellation
+    already promised but not yet reached - blocks a second identical one,
+    because that would be two boxes and two charges for the same thing.
+    lib/purchaseEligibility.ts owns that definition and the account
+    portal renders its button from the very same function.
+
+    SCOPED TO THIS PLAN. Two sizes are two contracts, which this
+    repository has always allowed, so a 30 g abo does not stand in the
+    way of a 100 g one.
+
+    ASKED HERE, and not earlier: the attempt already exists, so the read
+    is as close to the claim below as it can be without being inside it.
+    The claim, not this, is what makes two simultaneous clicks one
+    subscription - they carry one request id and meet a row lock - and
+    nothing here is allowed to weaken that. Which is also why the
+    subscription this attempt ALREADY owns is excluded: a retry has to
+    reach the Stripe session for the contract it created, and refusing it
+    would strand a customer mid-checkout over their own first click.
+  */
+  const ownSubscriptions = await deps.listSubscriptions(caller.userId);
+  if (!ownSubscriptions.ok) {
+    console.error(`Subscription checkout: could not read own subscriptions for ${caller.userId}`);
+    return fail(503, UNAVAILABLE);
+  }
+  if (findBlockingSubscription(ownSubscriptions.rows, plan.id, attempt.subscription_id)) {
+    return fail(409, SUBSCRIPTION_ALREADY_RUNNING);
+  }
 
   // 11. THE LOCAL SUBSCRIPTION, before Stripe, claimed atomically. One
   //     database call decides under a row lock whether this attempt

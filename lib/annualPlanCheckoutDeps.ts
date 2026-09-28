@@ -8,6 +8,7 @@ import { getOrCreateAnnualCheckoutAttempt, linkStripeSession } from "./checkoutA
 import { isAnnualPlanCheckoutEnabled } from "./annualPlans";
 import type { SavedAddressRow } from "./subscriptionCheckoutRules";
 import type { AnnualCheckoutDeps, CreatePendingAnnualPlanInput } from "./annualPlanCheckout";
+import { toAnnualEligibilityRow, type AnnualPlanEligibilityRow } from "./purchaseEligibility";
 
 /**
  * The real wiring behind the annual plan checkout (Phase 4B3).
@@ -112,6 +113,56 @@ async function createPendingAnnualPlan(input: CreatePendingAnnualPlanInput): Pro
   return data;
 }
 
+/**
+ * Exactly the columns lib/purchaseEligibility.ts reads, named rather
+ * than starred.
+ *
+ * Four of them, on a read whose only question is "is one of these still
+ * running". A star select would have pulled the Stripe payment intent,
+ * the purchase-email claim token and four snapshots into a route that
+ * has no use for any of them.
+ *
+ * payment_checkout_attempt_id is here because it is how a RETRY
+ * recognises the plan it already created: migration 039 leaves
+ * checkout_attempts.annual_plan_id NULL on a payment attempt, so the
+ * link is only readable from the plan's side.
+ */
+const ANNUAL_ELIGIBILITY_SELECT = "id, status, payment_status, payment_checkout_attempt_id";
+
+/**
+ * Every annual plan this customer has, terminal ones included.
+ *
+ * DELIBERATELY UNFILTERED, for the reason the subscription twin gives:
+ * the eligibility rule belongs in one pure function, not half in a
+ * PostgREST filter. Refunded, cancelled and completed plans come back
+ * and are then found to block nothing.
+ *
+ * A read error is NOT an empty list: answering "no plans" on a failure
+ * would turn a blip into permission to buy a second live contract.
+ */
+async function listOwnAnnualPlansForEligibility(
+  userId: string
+): Promise<{ ok: true; rows: AnnualPlanEligibilityRow[] } | { ok: false }> {
+  const admin = getSupabaseAdmin();
+  if (!admin) {
+    console.error("annual eligibility: supabase admin client is not configured");
+    return { ok: false };
+  }
+
+  const { data, error } = await admin
+    .from("annual_plans")
+    .select(ANNUAL_ELIGIBILITY_SELECT)
+    .eq("user_id", userId);
+
+  if (error) {
+    console.error("annual eligibility read failed:", error.message);
+    return { ok: false };
+  }
+  // Through the shared mapper, so this route and the account portal
+  // hand the predicate identically shaped rows.
+  return { ok: true, rows: (data ?? []).map(row => toAnnualEligibilityRow(row as never)) };
+}
+
 export const defaultAnnualCheckoutDeps: AnnualCheckoutDeps = {
   isEnabled: () => isAnnualPlanCheckoutEnabled(),
   verifyCaller: verifyBearerUser,
@@ -121,5 +172,6 @@ export const defaultAnnualCheckoutDeps: AnnualCheckoutDeps = {
   getOrigin: getSiteOrigin,
   ensureAttempt: getOrCreateAnnualCheckoutAttempt,
   createPendingPlan: createPendingAnnualPlan,
+  listAnnualPlans: listOwnAnnualPlansForEligibility,
   linkSession: linkStripeSession,
 };

@@ -545,5 +545,5 @@ test("11: the subscription list and detail keep every value they had", () => {
   assert.match(list, /\.select\(SUBSCRIPTION_SELECT\)\.order\("created_at", \{ ascending: false \}\)/);
   // The booking form is still a sibling of the list, so a customer with an
   // ended abo can start another without a detour through the shop.
-  assert.match(list, /\{!loading && !error && <SubscriptionStartForm \/>\}/);
+  assert.match(list, /\{!loading && !error && <SubscriptionStartForm subscriptions=\{subs\} \/>\}/);
 });

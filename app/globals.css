@@ -597,6 +597,37 @@ a.portal-summary-row:hover{color:var(--blue)}
 .order-list-total{font-weight:600}
 /* ── Order Detail ── */
 .portal-back-link{display:inline-block;margin-bottom:20px;font:13px/1 var(--font-mono);text-transform:uppercase;letter-spacing:.08em;transition:color .2s}
+
+/* ── AKTIV vs VERGANGEN ──
+   A running contract is a card with actions; a finished one is a row you
+   can open. The two must not read as equally current, so the difference
+   is structural rather than a colour. */
+.portal-contract-list{display:grid;gap:26px}
+.portal-contract+.portal-contract{padding-top:26px;border-top:1px solid var(--line)}
+.portal-section-past .portal-section-head{opacity:.75}
+.portal-past-list{display:grid}
+.portal-past-row{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 16px;padding:12px 0;border-top:1px solid var(--line);font:14px/1.4 var(--font-mono);transition:color .2s}
+.portal-past-row:first-child{border-top:0}
+.portal-past-row:hover{color:var(--blue)}
+.portal-past-name{flex:1 1 200px;font-weight:600}
+.portal-past-state{opacity:.6}
+.portal-past-date{opacity:.45}
+
+/* ── THE TERMINAL BANNER ──
+   Ended, refunded, cancelled: the one fact that decides what the rest of
+   the page means, so it sits directly under the heading rather than as
+   one row among eight. A left rule, the language the checkout return
+   block already speaks - no badge, no colour that would read as an
+   error, because ending a contract is not a failure. */
+.portal-terminal{border-left:2px solid var(--line);padding:2px 0 2px 18px;margin:0 0 28px}
+.portal-terminal-state{font:600 18px/1.3 var(--font-sans);letter-spacing:-.01em;margin:0}
+.portal-terminal-detail{font:14px/1.6 var(--font-mono);opacity:.6;margin:6px 0 0;max-width:620px}
+.portal-terminal .portal-actions{margin-top:16px}
+
+/* A size that is already running is shown, and shown to be unavailable:
+   a missing option would leave the customer wondering where it went. */
+.sub-start-option.unavailable{opacity:.45;cursor:not-allowed}
+.sub-start-option.unavailable:hover{border-color:var(--line)}
 .portal-back-link:hover{color:var(--berry)}
 .order-detail-meta{max-width:620px;margin-bottom:40px}
 .order-detail-section{border-top:1px solid var(--line);padding:30px 0}

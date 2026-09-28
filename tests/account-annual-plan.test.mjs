@@ -88,8 +88,14 @@ const ordersList = between(portalCode, "function PortalOrders()", "function Orde
 const orderDetail = between(portalCode, "function OrderDetail(", "function SubscriptionStartForm(");
 const subsList = between(portalCode, "function PortalSubscriptions()", "function SubscriptionDetail(");
 const subDetail = between(portalCode, "function SubscriptionDetail(", "function PortalAddresses()");
-/** The annual card on the dashboard, between its header and the next. */
-const dashboardAnnualCard = between(dashboard, 'label="DEIN JAHRESPLAN"', 'label="LETZTE BESTELLUNG"');
+/**
+ * The annual card on the dashboard.
+ *
+ * It moved into the AKTIV section when the dashboard was grouped by
+ * whether a contract is running, so it is sliced by the map that renders
+ * it rather than by a heading of its own.
+ */
+const dashboardAnnualCard = between(dashboard, "liveAnnualPlans.map(v =>", "liveSubs.length === 0");
 
 const PORT = 8953;
 let server;
@@ -265,12 +271,21 @@ test("2a: the dashboard reads annual plans, through the one shared reader", () =
   assert.equal([...annualReader.matchAll(/await supabase/g)].length, 2, "the shared reader became an N+1");
 });
 
-test("2b: a running plan gets a persistent section of its own", () => {
-  assert.match(dashboard, /label="DEIN JAHRESPLAN"/, "the dashboard has no annual section");
-  assert.match(dashboard, /runningAnnualPlans\.length > 0/, "the section is not gated on a real plan");
-  assert.match(dashboard,
-    /const runningAnnualPlans = annualViews\.filter\(v => v\.status === "active" && v\.paymentStatus !== "refunded"\);/,
+test("2b: a running plan gets a persistent place of its own", () => {
+  // Under AKTIV, beside the running subscription and above the
+  // VERGANGEN list - not as a post-checkout banner, and not inside the
+  // Abo card.
+  assert.match(dashboard, /label="AKTIV"/, "the dashboard has no active section");
+  assert.match(dashboard, /label="VERGANGEN"/, "the dashboard has no history section");
+  assert.match(dashboard, /liveAnnualPlans\.map\(v =>/, "the annual card is not rendered from the live plans");
+  // WHICH plans count as running is lib/purchaseEligibility.ts's answer,
+  // the same one the checkout route refuses a duplicate with - never a
+  // status string written out here.
+  assert.match(dashboard, /const liveAnnualPlans = annualViews\.filter\(isLiveAnnualPlan\);/,
     "a plan that is over, cancelled or refunded could be shown as running");
+  assert.match(dashboard,
+    /const pastAnnualPlans = annualViews\.filter\(v => !isLiveAnnualPlan\(v\) && v\.status !== "pending"\);/,
+    "finished plans are not kept as history");
 });
 
 test("2c: the card survives a reload, because it is built from rows", () => {
@@ -315,6 +330,19 @@ test("2e: the card leads somewhere, and that somewhere is the plan's page", () =
   assert.match(dashboardAnnualCard, /<a href=\{annualPlanDetailHref\(v\.id\)\} className="portal-action">JAHRESPLAN ANSEHEN<\/a>/);
 });
 
+test("2e2: with nothing running, the dashboard offers each product back", () => {
+  // The two repurchase CTAs, on exactly the condition the checkout
+  // routes use - no LIVE contract of that kind. An ended abo and a
+  // refunded plan block nothing, so both offers return by themselves.
+  assert.match(dashboard, /liveSubs\.length === 0 && \(/);
+  assert.match(dashboard, /MONATSABO STARTEN/);
+  assert.match(dashboard, /liveAnnualPlans\.length === 0 && \(/);
+  assert.match(dashboard, /JAHRESPLAN WÄHLEN/);
+  // And history is still reachable rather than hidden.
+  assert.match(dashboard, /pastSubs\.map\(sub =>/);
+  assert.match(dashboard, /pastAnnualPlans\.map\(v =>/);
+});
+
 test("2f: \"Nächste Lieferung\" asks both contracts and prefers neither", () => {
   assert.match(dashboard, /const nextDelivery = pickEarliestUpcomingDelivery\(\[/);
   assert.match(dashboard, /source: "subscription" as const/);
@@ -323,7 +351,8 @@ test("2f: \"Nächste Lieferung\" asks both contracts and prefers neither", () =>
     "the annual candidate stopped using the durable schedule row");
   // It waits for BOTH answers before concluding that nothing is due, so
   // the empty state can no longer win a race against the annual read.
-  assert.match(dashboard, /\{deliveryLoading \|\| annualLoading \?/);
+  assert.match(dashboard, /const contractsLoading = subLoading \|\| annualLoading;/);
+  assert.match(dashboard, /\{contractsLoading \?/);
   // The empty state itself is unchanged and still reachable.
   assert.match(dashboard, /Keine geplante Lieferung\./);
 });
@@ -578,10 +607,12 @@ test("5b: no annual surface can cancel, end or refund anything", () => {
 });
 
 test("5c: the two contracts stay side by side, never merged", () => {
-  // The dashboard's Abo section still renders from the subscription row.
-  assert.match(dashboard, /label="DEIN ABO"/);
-  assert.match(dashboard, /subPlanName\(activeSub\)/);
-  assert.match(dashboard, /getSubscriptionStatusLabel\(activeSub\)/);
+  // The dashboard still renders the subscription from the subscription
+  // row and the plan from the plan view; grouping them by whether they
+  // are running did not merge them into one product.
+  assert.match(dashboard, /subPlanName\(sub\)/);
+  assert.match(dashboard, /getSubscriptionStatusLabel\(sub\)/);
+  assert.match(dashboard, /annualStatusLabel\(v\)/);
   // An annual plan is not in the Abo list, and an Abo is not in the
   // annual section: each list maps only its own rows.
   assert.ok(!subsList.includes("annualViews"), "an annual plan leaked into the Abo list");

@@ -193,10 +193,18 @@ test("private: the empty states are the real ones and invent nothing", () => {
   assert.match(privateDashboard, /Keine geplante Lieferung\./);
   assert.match(privateDashboard, /Du hast aktuell kein Abonnement\./);
   assert.match(privateDashboard, /Du hast noch keine Bestellung\./);
-  // The subscription block renders from the row, so an absent
+  // The subscription block renders from the ROWS, so an absent
   // subscription cannot be drawn as an active one.
-  assert.match(privateDashboard, /activeSub \?/);
-  assert.match(privateDashboard, /subPlanName\(activeSub\)/);
+  //
+  // It used to read one row - `.eq("status","active").limit(1)` - which
+  // is why the page could say nothing at all about a subscription that
+  // had ENDED. It now reads them all and partitions them with the same
+  // predicates the checkout route refuses duplicates with, so "aktiv"
+  // means the same thing on this page as it does at the till.
+  assert.match(privateDashboard, /const liveSubs = subs\.filter\(s => isLiveSubscription\(/);
+  assert.match(privateDashboard, /const pastSubs = subs\.filter\(s => subscriptionHasEndedForGood\(/);
+  assert.match(privateDashboard, /liveSubs\.map\(sub =>/);
+  assert.match(privateDashboard, /subPlanName\(sub\)/);
 });
 
 test("private: no fabricated customer facts anywhere on the dashboard", () => {

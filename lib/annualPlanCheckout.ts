@@ -88,6 +88,17 @@ import type { CartTaxSnapshot } from "./tax";
  * retry cannot change what the customer is charged.
  */
 
+/*
+  THE ONE ELIGIBILITY PREDICATE, shared with the account portal, so the
+  page that offers "Jahresplan starten" and the route that answers it
+  read the same function over the same columns.
+*/
+import {
+  ANNUAL_PLAN_ALREADY_RUNNING,
+  findBlockingAnnualPlan,
+  type AnnualPlanEligibilityRow,
+} from "./purchaseEligibility";
+
 export type AnnualCheckoutDeps = {
   isEnabled: () => boolean;
   verifyCaller: (request: Request) => Promise<AuthenticatedCaller | null>;
@@ -103,6 +114,15 @@ export type AnnualCheckoutDeps = {
    * against - migration 039 owns that decision.
    */
   createPendingPlan: (input: CreatePendingAnnualPlanInput) => Promise<unknown>;
+  /**
+   * The caller's OWN annual plans, for the duplicate decision below.
+   *
+   * Every row, not a filtered "active" query: the filtering belongs to
+   * findBlockingAnnualPlan, so the rule lives in one testable place
+   * rather than half in SQL and half in TypeScript - and so the account
+   * portal's button and this refusal cannot disagree.
+   */
+  listAnnualPlans: (userId: string) => Promise<AnnualEligibilityResult>;
   linkSession: (attemptId: string, sessionId: string) => Promise<boolean>;
 };
 
@@ -124,6 +144,10 @@ export type CreatePendingAnnualPlanInput = {
   expectedIntentFingerprint: string;
   expectedRequestFingerprint: string;
 };
+
+export type AnnualEligibilityResult =
+  | { ok: true; rows: AnnualPlanEligibilityRow[] }
+  | { ok: false };
 
 type ErrorResponse = { error: string };
 
@@ -356,6 +380,38 @@ export async function handleAnnualPlanCheckout(
   if (!frozen.ok) {
     console.error(`Annual checkout: request ${requestId} reused for a different checkout -`, frozen.reason);
     return fail(409, "Diese Anfrage-ID gehört zu einem anderen Vorgang.");
+  }
+
+  /*
+    9b. IS A PLAN ALREADY RUNNING?
+
+    Asked of CURRENT STATE, never of existence. A completed, cancelled or
+    fully REFUNDED plan is history the account keeps and it blocks
+    nothing - a customer who was given their 252,07 EUR back has not
+    spent their right to buy another year. Only a live plan refuses a
+    second one, because two prepaid twelve-month contracts at once are a
+    duplicate purchase rather than a choice.
+
+    lib/purchaseEligibility.ts owns that definition, and the account
+    portal renders its button from the very same function.
+
+    THE EXCEPTION IS THIS CHECKOUT'S OWN PLAN. Unlike the subscription
+    flow the link runs the other way - migration 039 keeps
+    checkout_attempts.annual_plan_id for the thirteen DELIVERY attempts
+    and leaves it NULL on the payment attempt - so the plan is recognised
+    by its payment_checkout_attempt_id, which is this attempt's id and
+    came from the database rather than from the request. A retry
+    therefore still reaches the Stripe session for the plan it created,
+    and idempotency is untouched: the claim below, under migration 040's
+    row lock, is still the only thing that decides how many plans exist.
+  */
+  const ownPlans = await deps.listAnnualPlans(caller.userId);
+  if (!ownPlans.ok) {
+    console.error(`Annual checkout: could not read own annual plans for ${caller.userId}`);
+    return fail(503, UNAVAILABLE);
+  }
+  if (findBlockingAnnualPlan(ownPlans.rows, attempt.id)) {
+    return fail(409, ANNUAL_PLAN_ALREADY_RUNNING);
   }
 
   // 10. THE PENDING ANNUAL PLAN, BEFORE STRIPE, claimed atomically.

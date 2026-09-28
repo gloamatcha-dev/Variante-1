@@ -755,13 +755,17 @@ test("3F: no pause, resume, change, skip or address control exists - not even di
   // Not as a disabled control either: the section has no disabled button
   // other than the two the cancellation flow owns while it is sending.
   //
-  // Two reasons a control may be disabled, and both are "this request is
-  // in flight or cannot be made yet" - never "this feature does not
-  // exist". The booking CTA waits for a plan and an address because the
-  // route needs both; the cancellation buttons wait for their own send.
+  // Three reasons a control may be disabled, and none of them is "this
+  // feature does not exist". The booking CTA waits for a plan and an
+  // address because the route needs both; the cancellation buttons wait
+  // for their own send; and a SIZE is disabled when the customer already
+  // has that abo running, which is precisely the case the checkout route
+  // answers with a 409 - so the control is refused here rather than
+  // offered and then rejected. A size whose abo has ENDED is never
+  // disabled: lib/purchaseEligibility.ts blocks nothing for it.
   const disabled = [...subscriptionsSection.matchAll(/disabled=\{([^}]*)\}/g)].map(m => m[1].trim());
   assert.deepEqual([...new Set(disabled)].sort(),
-    ["busy || !planId || !addressId", "cancelBusy"],
+    ["!available", "busy || !planId || !addressId", "cancelBusy"],
     "a control is disabled for another reason");
 });
 

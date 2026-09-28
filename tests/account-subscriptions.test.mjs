@@ -174,7 +174,11 @@ test("subscriptions: the page offers the real way to start one", () => {
   */
   assert.ok(!subsMarkup.includes('<section className="portal-empty-state">'), "the bare empty-state card survives");
   assert.match(subsMarkup, /Dein Matcha, regelmäßig\./, "the page needs its own headline when empty");
-  assert.match(subsMarkup, /<SubscriptionStartForm \/>/, "the page no longer renders the booking form");
+  // The rows go WITH it: the form marks a size whose abo is already
+  // running as unavailable, and it uses the list's own rows rather than
+  // reading the table a second time.
+  assert.match(subsMarkup, /<SubscriptionStartForm subscriptions=\{subs\} \/>/,
+    "the page no longer renders the booking form");
   // And the stale "not bookable yet" copy is gone from the page.
   assert.ok(!subsMarkup.includes("Buchbar sind Abos noch nicht"), "the page still says abos cannot be booked");
   assert.ok(!subsMarkup.includes("in Vorbereitung"), "the page still calls the product unfinished");
@@ -374,7 +378,15 @@ test("terminology: the business side never calls its supply an Abo", () => {
 });
 
 test("terminology: the private side keeps Abo", () => {
-  assert.match(withoutComments(privateDash), /DEIN ABO/);
+  // The dashboard's sections are now AKTIV and VERGANGEN rather than one
+  // "DEIN ABO" block, because a contract that is running and one that is
+  // over are not the same kind of fact. The WORD is what this test is
+  // about, and the private side still uses it everywhere the B2B side
+  // says Belieferung.
+  const privateMarkup = withoutComments(privateDash);
+  assert.match(privateMarkup, /ABO ANSEHEN/);
+  assert.match(privateMarkup, /MONATSABO STARTEN/);
+  assert.match(privateMarkup, /kein Abonnement/);
   assert.match(subsMarkup, /ABOS/);
   assert.match(portal, /\{ key: "subscriptions", label: "Abos", privateOnly: true \}/);
 });
