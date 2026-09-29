@@ -847,16 +847,38 @@ function PrivateDashboard() {
                 <AccountChevron />
               </a>
             ))}
-            {pastAnnualPlans.map(v => (
-              <a key={v.id} href={annualPlanDetailHref(v.id)} className="portal-past-row">
-                <span className="portal-past-name">
-                  {v.product?.name ?? "GLOA Matcha"}{v.product?.variantLabel ? ` · ${v.product.variantLabel}` : ""} · Jahresplan
-                </span>
-                <span className="portal-past-state">{annualStatusLabel(v)}</span>
-                <span className="portal-past-date">{v.planEndAt ? fmtDate(v.planEndAt) : ""}</span>
-                <AccountChevron />
-              </a>
-            ))}
+            {pastAnnualPlans.map(v => {
+              /*
+                THE AUTHORITATIVE END DATE OR NONE - never plan_end_at.
+
+                This row used to print plan_end_at, which is the date the
+                year WOULD have run to, frozen at activation. On a
+                refunded plan that is a FUTURE date, so the row read
+                "Erstattet" beside a date almost a year away - the money
+                came back, and the date implied the plan was still
+                running.
+
+                annualTerminalEndAt is the rule the plan's own page and
+                VERGANGENE PLÄNE on /account/subscriptions already use:
+                cancelled_at or completed_at, both of which migration 039
+                writes as events and pairs with their status by CHECK. A
+                fully refunded plan that was never cancelled has neither,
+                and so gets no date at all rather than a guessed one -
+                refund_updated_at exists on the table but migration 041
+                does not grant it to the browser.
+              */
+              const endedAt = annualTerminalEndAt(v);
+              return (
+                <a key={v.id} href={annualPlanDetailHref(v.id)} className="portal-past-row">
+                  <span className="portal-past-name">
+                    {v.product?.name ?? "GLOA Matcha"}{v.product?.variantLabel ? ` · ${v.product.variantLabel}` : ""} · Jahresplan
+                  </span>
+                  <span className="portal-past-state">{annualStatusLabel(v)}</span>
+                  <span className="portal-past-date">{endedAt ? fmtDate(endedAt) : ""}</span>
+                  <AccountChevron />
+                </a>
+              );
+            })}
           </div>
         </section>
       )}

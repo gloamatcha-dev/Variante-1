@@ -86,6 +86,16 @@ const annualDetail = between(portalCode, "function AnnualPlanDetail(", "function
 const subDetail = between(portalCode, "function SubscriptionDetail(", "function PortalAddresses()");
 const monthlyForm = between(portalCode, "function SubscriptionStartForm(", "function AnnualPlanStartForm(");
 const annualForm = between(portalCode, "function AnnualPlanStartForm(", "function PortalAnnualPlans(");
+/*
+  THE DASHBOARD'S OWN HISTORY LIST.
+
+  Extracted separately because it is a SECOND renderer of the same idea:
+  /account/dashboard has its own VERGANGEN block and does not reuse
+  PortalPastPlans. Section 5 below asserted only the subscriptions page,
+  so the dashboard was free to render a different date - and did.
+*/
+const dashboard = between(portalCode, "function PrivateDashboard()", "function BusinessDashboard()");
+const dashboardPast = between(dashboard, 'label="VERGANGEN"', "</section>");
 
 /* ── The production plan, before and after the refund ────────── */
 
@@ -489,5 +499,105 @@ test("7: this package changed presentation and nothing else", () => {
   for (const banned of ["672", "364", "* 28", "28 *", "setDate(", "Math.round"]) {
     const bare = between(portalMarkup, "function PortalSubscriptions()", "function SubscriptionDetail(");
     assert.ok(!bare.includes(banned), `the plans page computes: ${banned}`);
+  }
+});
+
+
+/* ══════════════════════════════════════════════════════════════
+   6. THE DASHBOARD'S VERGANGEN LIST AGREES WITH THE SUBSCRIPTIONS PAGE
+
+   THE REGRESSION THIS SECTION EXISTS FOR. Section 5 pinned the history
+   row on /account/subscriptions and nothing pinned the one on
+   /account/dashboard, so the dashboard went on printing plan_end_at. In
+   Production the refunded plan therefore read:
+
+       Erstattet 27.09.2027
+
+   - the money came back, beside a date eleven months in the future. Both
+   surfaces are asserted here against the SAME helper so they cannot
+   drift apart again.
+   ══════════════════════════════════════════════════════════════ */
+
+test("6a: the dashboard's refunded annual row shows NO date", () => {
+  assert.match(dashboardPast, /const endedAt = annualTerminalEndAt\(v\);/);
+  assert.match(dashboardPast, /\{endedAt \? fmtDate\(endedAt\) : ""\}/);
+  assert.ok(!dashboardPast.includes("planEndAt"),
+    "the dashboard history row shows the date the plan would have run to");
+  // Executed against the production row: refunded, never cancelled, so
+  // there is no authoritative date and the row renders an empty string.
+  const refunded = refundedPlan();
+  assert.equal(refunded.paymentStatus, "refunded");
+  assert.equal(refunded.cancelledAt, null);
+  assert.equal(refunded.completedAt, null);
+  assert.equal(refunded.cancelledAt ?? refunded.completedAt ?? null, null);
+  // And the value it used to print is exactly the misleading one.
+  assert.equal(refunded.planEndAt, PLAN_END_AT);
+  assert.match(PLAN_END_AT, /^2027-/);
+});
+
+test("6b: the dashboard's refunded annual row still says Erstattet", () => {
+  assert.match(dashboardPast, /\{annualStatusLabel\(v\)\}/);
+  const label = between(portalCode, "function annualStatusLabel(", NEWLINE + "}");
+  assert.match(label, /v\.paymentStatus === "refunded"\) return "Erstattet"/);
+  assert.match(dashboardPast, /className="portal-past-state"/);
+});
+
+test("6c: both surfaces derive the annual terminal date the same way", () => {
+  for (const surface of [dashboardPast, history]) {
+    assert.match(surface, /annualTerminalEndAt\(v\)/);
+    assert.ok(!surface.includes("planEndAt"));
+  }
+  // And both derive a SUBSCRIPTION's end the same way, which was already
+  // true and must stay true.
+  assert.match(dashboardPast, /getEffectiveEndAt\(sub\)/);
+  assert.match(history, /getEffectiveEndAt\(sub\)/);
+});
+
+test("6d: a completed or cancelled plan keeps its authoritative date", () => {
+  const ends = between(portalCode, "function annualTerminalEndAt(", NEWLINE + "}");
+  assert.match(ends, /return v\.cancelledAt \?\? v\.completedAt \?\? null;/);
+  // Executed: both terminal kinds still produce their own event date, so
+  // the fix removes an invented date and no real one.
+  const cancelled = buildAnnualPlanAccountView(
+    planRow({ status: "cancelled", cancelled_at: "2026-09-30T09:00:00+00:00" }), schedule());
+  assert.equal(cancelled.cancelledAt ?? cancelled.completedAt ?? null, "2026-09-30T09:00:00+00:00");
+  const completed = buildAnnualPlanAccountView(
+    planRow({ status: "completed", completed_at: "2027-09-27T18:12:00+00:00" }), schedule());
+  assert.equal(completed.cancelledAt ?? completed.completedAt ?? null, "2027-09-27T18:12:00+00:00");
+  // An ENDED SUBSCRIPTION is untouched by this change.
+  assert.equal(endedSub.cancelled_at, "2026-09-28T09:00:00+00:00");
+});
+
+test("6e: the ACTIVE annual card on the dashboard still promises its run-to date", () => {
+  // The fix is scoped to VERGANGEN. A running plan still states when it
+  // runs to, how many deliveries and which is next.
+  const live = between(dashboard, 'label="AKTIV"', 'label="VERGANGEN"');
+  assert.match(live, /Laufzeit bis/);
+  assert.match(live, /\{v\.planEndAt \? fmtDate\(v\.planEndAt\) : "—"\}/);
+  assert.match(live, /Nächste Lieferung/);
+  assert.match(live, /\{v\.fulfilledDeliveries\} von \{v\.deliveryCount\} Lieferungen/);
+  // Executed: the live production plan keeps every one of those values.
+  const active = buildAnnualPlanAccountView(planRow(), schedule());
+  assert.equal(active.status, "active");
+  assert.equal(active.planEndAt, PLAN_END_AT);
+  assert.equal(active.purchasedAt, PURCHASED_AT);
+  assert.equal(active.deliveryCount, ANNUAL_DELIVERY_COUNT);
+  assert.ok(isLiveAnnualPlan(active), "the active plan stopped counting as live");
+});
+
+test("6f: nothing about money, schedule or eligibility moved", () => {
+  // This is a rendering fix. The read model still reports the same
+  // figures for the same row, and the refund still shows as an AMOUNT.
+  const refunded = refundedPlan();
+  assert.equal(refunded.totalGrossCents, TOTAL_GROSS_CENTS);
+  assert.equal(refunded.refundedTotalCents, TOTAL_GROSS_CENTS);
+  assert.equal(refunded.deliveryCount, ANNUAL_DELIVERY_COUNT);
+  assert.equal(refunded.purchasedAt, PURCHASED_AT);
+  // A refunded plan is still not live, so it still cannot block a repurchase.
+  assert.equal(isLiveAnnualPlan(refunded), false);
+  // The dashboard history row invents no figure of its own either.
+  for (const promise of ["Offen", "Nächste Lieferung", "Laufzeit bis", "deliveryCount"]) {
+    assert.ok(!dashboardPast.includes(promise),
+      `the dashboard history row promises: ${promise}`);
   }
 });
