@@ -790,7 +790,18 @@ test("55: this phase added no migration, and the only ones after it are 038 and 
      // subscription, annual or B2B object is touched. Reviewed in
      // tests/guest-order-management.test.mjs.
      "065_guest_order_management.sql",
-     "066_annual_plan_subscription_transition.sql"],
+     "066_annual_plan_subscription_transition.sql",
+     // ANNUAL UPGRADE CLAIM ADDED MIGRATION 067: one nullable column,
+     // annual_plans.pending_expires_at, plus a CHECK confining it to a
+     // pending upgrade, one NON-unique partial index for the claim
+     // lookup, and the two annual writers again - the pending-plan one
+     // to take the source subscription's row lock and refuse a second
+     // live claim, the activation one to clear the claim. It grants
+     // NOTHING to any browser role, touches no policy, no RLS and no
+     // existing row, and weakens nothing 066 installed. No subscription,
+     // order or B2B object is touched. Reviewed in
+     // tests/annual-upgrade-pending-claim.test.mjs.
+     "067_annual_upgrade_pending_claim.sql"],
     "an unreviewed migration appeared after 037");
   const sql039 = withoutComments(read("supabase/migrations/039_b2c_annual_plan_foundation.sql"));
   assert.ok(!sql039.includes("apply_order_refund_state_by_invoice"),

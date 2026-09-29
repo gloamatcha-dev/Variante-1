@@ -10,6 +10,9 @@ import {
   ANNUAL_SHIPPING_ZONE,
   annualAddressDigest,
   annualCheckoutIdempotencyKey,
+  annualUpgradeClaimExpiry,
+  resolveUpgradeSessionExpiry,
+  ANNUAL_UPGRADE_CLAIM_CONFLICT,
   annualIntentFingerprint,
   annualRequestFingerprint,
   buildAnnualCheckoutLineItems,
@@ -103,6 +106,7 @@ import {
   agree about which subscriptions can be swapped for a year.
 */
 import {
+  UPGRADE_ALREADY_PENDING,
   UPGRADE_NOT_AVAILABLE,
   mayUpgradeToAnnualPlan,
   type UpgradeSubscriptionRow,
@@ -143,6 +147,15 @@ export type AnnualCheckoutDeps = {
   loadOwnSubscription: (token: string, userId: string, subscriptionId: string)
     => Promise<UpgradeSubscriptionRow | null>;
   linkSession: (attemptId: string, sessionId: string) => Promise<boolean>;
+  /**
+   * THE ONE CLOCK THIS ROUTE READS (migration 067).
+   *
+   * Injected so the claim window and the Stripe expiry derived from it
+   * can be driven to the millisecond in a test. It is read exactly once
+   * per request, below, and every later instant is computed from the
+   * value the DATABASE returned rather than from a second reading.
+   */
+  now?: () => Date;
 };
 
 /** The fifteen arguments migration 040's hardened RPC takes, and no more. */
@@ -164,6 +177,15 @@ export type CreatePendingAnnualPlanInput = {
   expectedRequestFingerprint: string;
   /** The subscription this plan takes over from, or null. */
   sourceSubscriptionId: string | null;
+  /**
+   * WHEN THIS UPGRADE CHECKOUT STOPS BEING PAYABLE, or null.
+   *
+   * Required exactly when sourceSubscriptionId is set and refused
+   * otherwise - migration 067 checks both directions under the source
+   * subscription's row lock. It is also the exact instant the Stripe
+   * Checkout Session is given as its own expires_at.
+   */
+  pendingExpiresAt: string | null;
 };
 
 export type AnnualEligibilityResult =
@@ -483,6 +505,16 @@ export async function handleAnnualPlanCheckout(
   //     attempt's expected total - which is where "the browser cannot
   //     choose the price" stops being this file's promise and becomes the
   //     database's.
+  /*
+    THE CLAIM WINDOW, READ FROM THE CLOCK EXACTLY ONCE.
+
+    Only an upgrade gets one: an ordinary annual purchase holds no claim,
+    names no subscription and blocks nobody, and migration 067 refuses
+    the pair outright if this were sent for one.
+  */
+  const nowMs = (deps.now ? deps.now() : new Date()).getTime();
+  const claimExpiry = annualUpgradeClaimExpiry(new Date(nowMs));
+
   const rpcResult = await deps.createPendingPlan({
     checkoutAttemptId: attempt.id,
     userId: caller.userId,
@@ -512,6 +544,13 @@ export async function handleAnnualPlanCheckout(
     // NULL for an ordinary purchase, which is every behaviour that
     // existed before the upgrade path. Migration 066 validates it again.
     sourceSubscriptionId: sourceSubscriptionId,
+    // ── THE CLAIM, MINTED HERE AND NOWHERE ELSE (migration 067) ──
+    //
+    // The proposal only. Migration 067 takes the source subscription's
+    // row lock, refuses if another upgrade checkout for it is still
+    // payable, and only then writes this value - so what comes back is
+    // the authority, and it is what Stripe is given below.
+    pendingExpiresAt: sourceSubscriptionId ? claimExpiry : null,
   });
 
   const pending = interpretPendingAnnualPlanResult(rpcResult);
@@ -524,6 +563,23 @@ export async function handleAnnualPlanCheckout(
     // is not this checkout, and retrying will never change that - the
     // customer needs a fresh one. The reason is LOGGED, never returned;
     // no digest and no stored value reaches the response.
+    /*
+      ONE UPGRADE CHECKOUT AT A TIME (migration 067).
+
+      The claim this customer already holds on this very subscription -
+      proved under its row lock, not guessed from a read - so the answer
+      is their own state rather than a fault, and it gets the sentence
+      that says what to do about it. NOTHING WAS CREATED and, crucially,
+      NOTHING BELOW RUNS: no Stripe session is minted, so a second
+      payable checkout for this subscription cannot come into existence.
+    */
+    if (pending.reason === ANNUAL_UPGRADE_CLAIM_CONFLICT) {
+      console.error(
+        `Annual checkout: an upgrade checkout is already open for subscription `
+        + `${sourceSubscriptionId} (attempt ${attempt.id}) - refused before Stripe.`
+      );
+      return fail(409, UPGRADE_ALREADY_PENDING);
+    }
     const status = annualPendingPlanFailureStatus(pending.reason);
     console.error(`Annual checkout: pending plan refused for attempt ${attempt.id} -`, pending.reason);
     return status === 409
@@ -555,6 +611,38 @@ export async function handleAnnualPlanCheckout(
     return fail(503, UNAVAILABLE);
   }
   const zone = SHIPPING_ZONES[ANNUAL_SHIPPING_ZONE];
+
+  /*
+    11b. THE SESSION MAY NOT OUTLIVE THE CLAIM THAT GUARDS IT.
+
+    Migration 067's stored value, never a fresh computation - the row is
+    the authority on both 'created' and 'existing', so a retry gives
+    Stripe the same instant the first call did and the two clocks cannot
+    drift apart.
+
+    A refusal here creates nothing and charges nothing. It means the
+    claim is too close to lapsing for Stripe to accept a session that
+    fits inside it, which is a wait of minutes rather than a fault; the
+    claim then expires on its own and the next attempt is clean. A
+    checkout whose session already exists is never refused - see
+    resolveUpgradeSessionExpiry for why that case is an idempotent
+    replay and cannot mint a second payable thing.
+  */
+  let upgradeExpiresAt: number | null = null;
+  if (sourceSubscriptionId) {
+    const expiry = resolveUpgradeSessionExpiry({
+      pendingExpiresAt: pending.pendingExpiresAt,
+      nowMs,
+      sessionAlreadyLinked: !!attempt.stripe_checkout_session_id,
+    });
+    if (!expiry.ok) {
+      console.error(
+        `Annual checkout: upgrade claim for attempt ${attempt.id} is unusable - ${expiry.reason}`
+      );
+      return fail(409, UPGRADE_ALREADY_PENDING);
+    }
+    upgradeExpiresAt = expiry.expiresAtUnix;
+  }
 
   try {
     const session = await stripe.checkout.sessions.create(
@@ -614,6 +702,15 @@ export async function handleAnnualPlanCheckout(
           checkoutAttemptId: attempt.id,
           annualPlanId,
         }),
+        // ── THE SAME INSTANT THE CLAIM HOLDS (migration 067) ──
+        //
+        // Spread rather than set to undefined, so an ORDINARY annual
+        // purchase sends no expires_at at all and keeps Stripe's own
+        // default exactly as it always had. Only an upgrade carries one,
+        // and it carries the database's value - which is what makes
+        // "the claim never outlives a payable session, and a payable
+        // session never outlives the claim" true in both directions.
+        ...(upgradeExpiresAt === null ? {} : { expires_at: upgradeExpiresAt }),
       },
       // DETERMINISTIC, from the durable attempt. Two concurrent requests
       // and every later retry send the same key, so Stripe replays one

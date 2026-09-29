@@ -255,6 +255,24 @@ export const UPGRADE_SCHEDULED_LABEL = "Wechsel zum Jahresplan vorgemerkt";
 export const UPGRADE_DATE_IS_CONFIRMED_ON_PAYMENT =
   "Das endgültige Startdatum bestätigen wir, sobald deine Zahlung eingegangen ist.";
 
+/**
+ * THE REFUSAL WHEN ONE UPGRADE CHECKOUT IS STILL PAYABLE (migration 067).
+ *
+ * Not "no" and not "already running": the customer has a Stripe Checkout
+ * Session open right now for this very subscription, and the honest
+ * answer names both ways out of it - finish that one, or wait for it to
+ * lapse. It lapses on its own, within half an hour, because the claim
+ * that produces this sentence expires at exactly the moment the session
+ * it guards stops being payable.
+ *
+ * It deliberately names no date, no plan and no amount. The account page
+ * renders the customer's own pending upgrade under their own session;
+ * a checkout refusal is not the place to restate it.
+ */
+export const UPGRADE_ALREADY_PENDING =
+  "Du hast bereits einen offenen Wechsel zum Jahresplan. "
+  + "Schließe den bestehenden Checkout ab oder versuche es später erneut.";
+
 /** The refusal, when a subscription cannot be handed over after all. */
 export const UPGRADE_NOT_AVAILABLE =
   "Dieser Wechsel ist gerade nicht möglich. Prüfe dein Abo und deinen Jahresplan im Konto.";

@@ -117,9 +117,9 @@ test("1: 038 exists, owns its number, and 039 is the only one above it", () => {
   // Re-pinned rather than deleted - what this guard protects is that
   // nothing UNREVIEWED appeared. Reviewed in
   // tests/guest-order-management.test.mjs.
-  assert.equal(files[files.length - 28], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 29], MIGRATION_038, "038 must be the one before it");
-  assert.equal(files[files.length - 30], MIGRATION_037, "037 must be the one before that");
+  assert.equal(files[files.length - 29], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 30], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 31], MIGRATION_037, "037 must be the one before that");
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
@@ -251,7 +251,18 @@ test("2: no migration 044 or beyond", () => {
      // object is touched. Reviewed in
      // tests/guest-order-management.test.mjs.
      "065_guest_order_management.sql",
-     "066_annual_plan_subscription_transition.sql"],
+     "066_annual_plan_subscription_transition.sql",
+     // ANNUAL UPGRADE CLAIM ADDED MIGRATION 067: one nullable column,
+     // annual_plans.pending_expires_at, plus a CHECK confining it to a
+     // pending upgrade, one NON-unique partial index for the claim
+     // lookup, and the two annual writers again - the pending-plan one
+     // to take the source subscription's row lock and refuse a second
+     // live claim, the activation one to clear the claim. It grants
+     // NOTHING to any browser role, touches no policy, no RLS and no
+     // existing row, and weakens nothing 066 installed. No subscription,
+     // order or B2B object is touched. Reviewed in
+     // tests/annual-upgrade-pending-claim.test.mjs.
+     "067_annual_upgrade_pending_claim.sql"],
     "an unreviewed migration appeared after 043");
   // And 039 kept its hands off this phase's writer entirely.
   for (const name of [MIGRATION_039, MIGRATION_040, MIGRATION_041, MIGRATION_042]) {

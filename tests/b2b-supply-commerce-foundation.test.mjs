@@ -112,7 +112,7 @@ test("1: 059 owns its number, and only the reviewed 060 follows it", () => {
   // UNREVIEWED appeared above it. Reviewed in
   // tests/b2b-payment-delivery-foundation.test.mjs.
   const numbers = files.map(f => Number(f.slice(0, 3))).filter(n => Number.isInteger(n));
-  assert.strictEqual(Math.max(...numbers), 66, "065 must be the newest migration");
+  assert.strictEqual(Math.max(...numbers), 67, "065 must be the newest migration");
   // PACKAGE 5A ADDED MIGRATION 061: the pending agreement writer - one
   // SECURITY DEFINER function and its EXECUTE grant to service_role. It
   // adds no table, no column, no policy and no table privilege, and it
@@ -152,9 +152,20 @@ test("1: 059 owns its number, and only the reviewed 060 follows it", () => {
      // subscription, annual or B2B object is touched. Reviewed in
      // tests/guest-order-management.test.mjs.
      "065_guest_order_management.sql",
-     "066_annual_plan_subscription_transition.sql"],
+     "066_annual_plan_subscription_transition.sql",
+     // ANNUAL UPGRADE CLAIM ADDED MIGRATION 067: one nullable column,
+     // annual_plans.pending_expires_at, plus a CHECK confining it to a
+     // pending upgrade, one NON-unique partial index for the claim
+     // lookup, and the two annual writers again - the pending-plan one
+     // to take the source subscription's row lock and refuse a second
+     // live claim, the activation one to clear the claim. It grants
+     // NOTHING to any browser role, touches no policy, no RLS and no
+     // existing row, and weakens nothing 066 installed. No subscription,
+     // order or B2B object is touched. Reviewed in
+     // tests/annual-upgrade-pending-claim.test.mjs.
+     "067_annual_upgrade_pending_claim.sql"],
     "a migration above 059 appeared that this suite has not been reviewed against");
-  assert.strictEqual(files.filter(f => f.startsWith("067")).length, 0,
+  assert.strictEqual(files.filter(f => f.startsWith("068")).length, 0,
     "061 must NOT be authored in this package");
   assert.strictEqual(files.filter(f => f.startsWith("059")).length, 1,
     "there must be exactly one 059");

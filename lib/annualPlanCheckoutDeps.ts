@@ -97,7 +97,7 @@ async function loadOwnSubscription(
  * Calls the hardened pending-plan function - 039's, as migrations 040
  * and 066 replaced it.
  *
- * A thin wrapper and nothing more: it passes the fifteen arguments and
+ * A thin wrapper and nothing more: it passes the seventeen arguments and
  * returns whatever jsonb the function answered with, unexamined.
  *
  * The last two are the expected fingerprints. They are compared against
@@ -143,6 +143,12 @@ async function createPendingAnnualPlan(input: CreatePendingAnnualPlanInput): Pro
     // call that existed before the upgrade path - and validated
     // against the caller's own rows inside the function either way.
     p_source_subscription_id: input.sourceSubscriptionId,
+    // MIGRATION 067. THE CLAIM, and it is required exactly when the
+    // source is. The function takes the subscription's row lock before
+    // it looks at this value, so two tabs cannot both be told they may
+    // proceed; it refuses the pair outright if one is present without
+    // the other. NULL for every ordinary purchase, as before.
+    p_pending_expires_at: input.pendingExpiresAt,
   });
 
   if (error) {

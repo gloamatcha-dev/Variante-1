@@ -665,11 +665,19 @@ test("21: the RPC gets the sixteen reviewed arguments and no totals", () => {
     // amount - the handover date is re-derived from Stripe at
     // settlement and is not in this call at all.
     "p_source_subscription_id",
+    // MIGRATION 067. The claim: when this upgrade checkout stops being
+    // payable, and therefore when it stops blocking another one. A
+    // DEADLINE, not a schedule - it is required exactly when the source
+    // is present and refused otherwise, and it is the same instant the
+    // Stripe Checkout Session is given as its own expires_at.
+    "p_pending_expires_at",
   ];
   for (const arg of expected) assert.ok(call.includes(`${arg}:`), `missing RPC argument ${arg}`);
-  assert.equal((call.match(/p_[a-z_]+:/g) || []).length, 16, "the RPC call does not pass exactly 16 arguments");
-  // AND STILL NO DATE. The anchor belongs to activation, which gets it
-  // from Stripe's own period, not to the pre-payment writer.
+  assert.equal((call.match(/p_[a-z_]+:/g) || []).length, 17, "the RPC call does not pass exactly 17 arguments");
+  // AND STILL NO SCHEDULE. 067's claim is a deadline for this checkout,
+  // which is a different kind of date entirely: the ANCHOR still belongs
+  // to activation, which gets it from Stripe's own period, and no
+  // subscription period reaches the pre-payment writer.
   for (const forbidden of ["p_schedule_anchor", "p_effective_at", "p_period_end"]) {
     assert.ok(!call.includes(forbidden), `the pending-plan RPC passes ${forbidden}`);
   }
@@ -682,10 +690,16 @@ test("21: the RPC gets the sixteen reviewed arguments and no totals", () => {
   const m039 = read("supabase/migrations/039_b2c_annual_plan_foundation.sql");
   const m040 = read("supabase/migrations/040_annual_checkout_retry_fingerprints.sql");
   const m066 = read("supabase/migrations/066_annual_plan_subscription_transition.sql");
+  const m067 = read("supabase/migrations/067_annual_upgrade_pending_claim.sql");
   for (const arg of expected) {
-    assert.ok(m040.includes(arg) || m066.includes(arg),
+    assert.ok(m040.includes(arg) || m066.includes(arg) || m067.includes(arg),
       `no installed signature has argument ${arg}`);
   }
+  // 067 REPLACED THE FUNCTION AGAIN, for the same reason 040 and 066
+  // did: an argument list cannot be changed by overloading it without
+  // leaving an ambiguous, still-unguarded older resolution behind.
+  assert.match(m067, /drop function public\.create_pending_annual_plan_for_attempt\(/);
+  assert.match(m067, /p_pending_expires_at\s+timestamptz/);
   // 066 REPLACED THE FUNCTION rather than overloading it, which is what
   // 040 did before it and the only safe way to change an argument list:
   // a surviving overload would be ambiguous to resolve.
@@ -965,7 +979,7 @@ test("32: the checkout phase's own migrations are untouched, and 041 is not its 
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 66);
+  assert.equal(migrations.length, 67);
   assert.equal(migrations[38], "039_b2c_annual_plan_foundation.sql");
   assert.equal(migrations[39], "040_annual_checkout_retry_fingerprints.sql");
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
@@ -974,8 +988,8 @@ test("32: the checkout phase's own migrations are untouched, and 041 is not its 
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 66), [],
-    "a migration 067 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 67), [],
+    "a migration 068 or beyond appeared");
   // 041 touches privileges only: it creates no table, no column and no
   // function, so it cannot have changed anything this suite proves.
   const m041 = read("supabase/migrations/041_annual_account_column_privileges.sql");
@@ -1438,6 +1452,11 @@ test("44: CASE B - no plan yet, same addressId, contents changed, refused", () =
   assert.deepEqual([...ANNUAL_PENDING_PLAN_CONFLICT_RESULTS], [
     "attempt_intent_mismatch", "attempt_request_mismatch", "attempt_not_owned",
     "attempt_not_pre_stripe", "total_mismatch",
+    // MIGRATION 067. A live claim on this subscription is a statement
+    // about the customer's own current state, not about the server, so
+    // it joins the 409 family: retrying the same second changes nothing
+    // and a 503 would invite exactly that.
+    "upgrade_already_pending",
   ]);
   for (const conflict of ANNUAL_PENDING_PLAN_CONFLICT_RESULTS) {
     assert.equal(annualPendingPlanFailureStatus(conflict), 409, conflict);

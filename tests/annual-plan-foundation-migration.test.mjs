@@ -161,8 +161,8 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
   // Re-pinned rather than deleted - what this guard protects is that
   // nothing UNREVIEWED appeared. Reviewed in
   // tests/guest-order-management.test.mjs.
-  assert.equal(files[files.length - 28], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 29], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 29], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 30], MIGRATION_038, "038 must be the one before it");
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
@@ -170,7 +170,7 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
 test("2: no migration 044 or beyond", () => {
   // 065 is the highest migration. 039 is live and is not the place to
   // fix anything any more.
-  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 66);
+  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 67);
   assert.deepEqual(beyond, [], "an unreviewed migration appeared after 065");
 });
 
@@ -1141,6 +1141,33 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     "lib/b2bRuntime.ts",
     "lib/b2bRuntimeDeps.ts",
     "lib/b2bDeliveryResolutionRules.ts",
+    // MIGRATION 067, THE EXPIRING UPGRADE CLAIM, edits four leaves and
+    // all four additively:
+    //
+    //   annualPlanCheckoutRules.ts  the claim TTL (thirty minutes, which
+    //                               is Stripe's own floor for a Checkout
+    //                               Session), the pure expiry resolver
+    //                               that refuses to mint a session
+    //                               outliving its claim, and
+    //                               pending_expires_at read out of the
+    //                               writer's jsonb.
+    //   annualPlanCheckoutDeps.ts   one more RPC argument. Still an RPC;
+    //                               service_role still has no direct DML.
+    //   annualPlanCheckout.ts       reads the clock once, passes the
+    //                               proposed expiry to migration 067's
+    //                               writer, gives Stripe the value the
+    //                               DATABASE returned, and refuses a
+    //                               second upgrade checkout BEFORE any
+    //                               session exists.
+    //   subscriptionUpgradeRules.ts one exported sentence, and nothing
+    //                               else. It remains a pure leaf with no
+    //                               imports, no env and no clock.
+    //
+    // No price, discount, delivery count, cadence, refund or
+    // cancellation rule is touched, and the ORDINARY annual purchase
+    // sends no expires_at and holds no claim - exactly as before.
+    // Reviewed in tests/annual-upgrade-pending-claim.test.mjs.
+    "lib/subscriptionUpgradeRules.ts",
     "lib/annualPlanCheckout.ts",
     "lib/annualPlanCheckoutRules.ts",
     "lib/annualPlanCheckoutDeps.ts",

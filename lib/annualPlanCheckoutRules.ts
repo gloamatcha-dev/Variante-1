@@ -472,8 +472,22 @@ export const PENDING_ANNUAL_PLAN_SUCCESS_RESULTS: readonly string[] =
   Object.freeze(["created", "existing"]);
 
 export type PendingAnnualPlanOutcome =
-  | { ok: true; annualPlanId: string; created: boolean }
-  | { ok: false; reason: string };
+  | {
+      ok: true;
+      annualPlanId: string;
+      created: boolean;
+      /**
+       * THE CLAIM, AS THE DATABASE HOLDS IT (migration 067).
+       *
+       * NULL for an ordinary annual purchase, which holds none. For an
+       * upgrade it is the authoritative moment this checkout stops being
+       * payable, and it is returned on 'existing' as well as 'created'
+       * precisely so a retry uses the STORED value rather than a freshly
+       * computed one - one clock, and it is the row's.
+       */
+      pendingExpiresAt: string | null;
+    }
+  | { ok: false; reason: string; pendingExpiresAt?: string | null };
 
 /**
  * Reads 039's jsonb answer, and FAILS CLOSED on anything it does not
@@ -490,8 +504,15 @@ export function interpretPendingAnnualPlanResult(data: unknown): PendingAnnualPl
   const payload = data as Record<string, unknown>;
   const result = typeof payload.result === "string" ? payload.result : "";
 
+  // A CLAIM REFUSAL CARRIES ONE EXTRA FACT, and only this refusal does.
+  // 'upgrade_already_pending' is the one word whose answer the route can
+  // turn into a sentence about time, so the expiry is read here and
+  // passed through unexamined. Every other failure keeps carrying its
+  // reason and nothing else.
+  const claimExpiry = readClaimExpiry(payload);
+
   if (!PENDING_ANNUAL_PLAN_SUCCESS_RESULTS.includes(result)) {
-    return { ok: false, reason: result || "unknown" };
+    return { ok: false, reason: result || "unknown", pendingExpiresAt: claimExpiry };
   }
 
   const annualPlanId = payload.annual_plan_id;
@@ -499,7 +520,25 @@ export function interpretPendingAnnualPlanResult(data: unknown): PendingAnnualPl
     return { ok: false, reason: "pending annual plan returned no id" };
   }
 
-  return { ok: true, annualPlanId, created: result === "created" };
+  return {
+    ok: true,
+    annualPlanId,
+    created: result === "created",
+    pendingExpiresAt: claimExpiry,
+  };
+}
+
+/**
+ * pending_expires_at out of the function's jsonb, or null.
+ *
+ * A timestamp that does not parse is NOT a timestamp: it becomes null
+ * rather than NaN, so every later comparison is against a real instant
+ * or against nothing at all.
+ */
+function readClaimExpiry(payload: Record<string, unknown>): string | null {
+  const raw = payload.pending_expires_at;
+  if (typeof raw !== "string" || raw === "") return null;
+  return Number.isFinite(Date.parse(raw)) ? raw : null;
 }
 
 /* ── Stripe ─────────────────────────────────────────────────── */
@@ -515,6 +554,94 @@ export function interpretPendingAnnualPlanResult(data: unknown): PendingAnnualPl
  */
 export function annualCheckoutIdempotencyKey(attemptId: string): string {
   return `gloa-annual-checkout-${attemptId}`;
+}
+
+/* ── The upgrade claim, and the one clock it shares with Stripe ── */
+
+/**
+ * HOW LONG AN UPGRADE CHECKOUT STAYS PAYABLE, AND THEREFORE HOW LONG IT
+ * BLOCKS ANOTHER ONE (migration 067).
+ *
+ * THIRTY MINUTES, and the number is not a preference. It is the SHORTEST
+ * lifetime Stripe will accept for a Checkout Session, so it is the
+ * shortest window in which a second payable session for the same
+ * subscription can be prevented. Anything shorter could not be given to
+ * Stripe; anything longer would make an abandoned tab block a real
+ * customer for longer than the abandoned checkout can actually be paid.
+ *
+ * ONE CONSTANT, TWO USES. annual_plans.pending_expires_at and the Stripe
+ * session's expires_at are the same instant, derived from this value
+ * once per checkout. Two independently computed clocks would drift, and
+ * a claim that expires while its session is still payable is exactly the
+ * hole this whole migration exists to close.
+ */
+export const ANNUAL_UPGRADE_CLAIM_TTL_MS = 30 * 60 * 1000;
+
+/**
+ * Stripe's own floor for `expires_at` on a Checkout Session.
+ *
+ * Equal to the TTL above by design, and named separately because they
+ * are different facts: one is our policy, the other is Stripe's API
+ * contract. If the policy is ever lengthened, this must not move with
+ * it.
+ */
+export const STRIPE_MIN_CHECKOUT_LIFETIME_MS = 30 * 60 * 1000;
+
+/**
+ * The instant an upgrade checkout started now would stop being payable.
+ *
+ * A pure function of the clock it is handed, so the route can be driven
+ * to the millisecond in a test and never reads a clock of its own.
+ */
+export function annualUpgradeClaimExpiry(now: Date): string {
+  return new Date(now.getTime() + ANNUAL_UPGRADE_CLAIM_TTL_MS).toISOString();
+}
+
+export type UpgradeSessionExpiry =
+  | { ok: true; expiresAtUnix: number }
+  | { ok: false; reason: "claim_missing" | "claim_too_short" };
+
+/**
+ * WHAT EXPIRES_AT TO GIVE STRIPE, from the claim the database holds.
+ *
+ * The value is the ROW'S, never a fresh computation: whatever
+ * create_pending_annual_plan_for_attempt returned, on 'created' and on
+ * 'existing' alike. That is what makes "one authoritative expiry" true
+ * across a retry rather than only on the first call.
+ *
+ * ── THE ONE REFUSAL, AND WHY IT IS NOT PARANOIA ───────────────
+ *
+ * Stripe will not accept an expires_at less than thirty minutes away. A
+ * retry that arrives late in the window and has NO session yet therefore
+ * cannot be given a session that fits inside its own claim - and issuing
+ * one that outlives the claim would reopen the duplicate-payment hole
+ * for the remainder of the session's life. So it refuses instead, the
+ * claim lapses on its own schedule, and the customer starts a clean one.
+ *
+ * A checkout that ALREADY has a linked session is never refused: its
+ * parameters are by construction the ones that created that session, so
+ * the call is an idempotent replay rather than a new session, and no
+ * second payable thing can come out of it however little time is left.
+ */
+export function resolveUpgradeSessionExpiry(input: {
+  pendingExpiresAt: string | null;
+  nowMs: number;
+  sessionAlreadyLinked: boolean;
+}): UpgradeSessionExpiry {
+  const { pendingExpiresAt, nowMs, sessionAlreadyLinked } = input;
+  if (typeof pendingExpiresAt !== "string" || pendingExpiresAt === "") {
+    return { ok: false, reason: "claim_missing" };
+  }
+  const expiresMs = Date.parse(pendingExpiresAt);
+  if (!Number.isFinite(expiresMs)) {
+    return { ok: false, reason: "claim_missing" };
+  }
+  if (!sessionAlreadyLinked && expiresMs - nowMs < STRIPE_MIN_CHECKOUT_LIFETIME_MS) {
+    return { ok: false, reason: "claim_too_short" };
+  }
+  // SECONDS, floored. Stripe takes a unix timestamp, and rounding UP
+  // could put the session one second past the claim that guards it.
+  return { ok: true, expiresAtUnix: Math.floor(expiresMs / 1000) };
 }
 
 /**
@@ -841,7 +968,20 @@ export const ANNUAL_PENDING_PLAN_CONFLICT_RESULTS: readonly string[] = Object.fr
   "attempt_not_owned",
   "attempt_not_pre_stripe",
   "total_mismatch",
+  // MIGRATION 067. A live claim on this subscription is a refusal about
+  // the CUSTOMER'S OWN current state, not an outage: retrying the same
+  // second changes nothing, and a 503 would invite exactly that.
+  "upgrade_already_pending",
 ]);
+
+/**
+ * The one refusal that is answered with its own sentence.
+ *
+ * Every other 409 above means "this request id is not this checkout",
+ * which is a developer-facing distinction the customer cannot act on.
+ * This one means "you already have a checkout open", which they can.
+ */
+export const ANNUAL_UPGRADE_CLAIM_CONFLICT = "upgrade_already_pending";
 
 export function annualPendingPlanFailureStatus(reason: string): 409 | 503 {
   return ANNUAL_PENDING_PLAN_CONFLICT_RESULTS.includes(reason) ? 409 : 503;
