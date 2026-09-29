@@ -979,7 +979,7 @@ test("32: the checkout phase's own migrations are untouched, and 041 is not its 
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 67);
+  assert.equal(migrations.length, 68);
   assert.equal(migrations[38], "039_b2c_annual_plan_foundation.sql");
   assert.equal(migrations[39], "040_annual_checkout_retry_fingerprints.sql");
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
@@ -988,8 +988,8 @@ test("32: the checkout phase's own migrations are untouched, and 041 is not its 
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 67), [],
-    "a migration 068 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 68), [],
+    "a migration 069 or beyond appeared");
   // 041 touches privileges only: it creates no table, no column and no
   // function, so it cannot have changed anything this suite proves.
   const m041 = read("supabase/migrations/041_annual_account_column_privileges.sql");
@@ -1457,6 +1457,11 @@ test("44: CASE B - no plan yet, same addressId, contents changed, refused", () =
     // it joins the 409 family: retrying the same second changes nothing
     // and a 503 would invite exactly that.
     "upgrade_already_pending",
+    // MIGRATION 068. The same reasoning one domain wider: an annual
+    // checkout this customer already has open, and an annual plan they
+    // already hold. Both are facts about them, not about the server.
+    "annual_checkout_already_pending",
+    "annual_plan_already_live",
   ]);
   for (const conflict of ANNUAL_PENDING_PLAN_CONFLICT_RESULTS) {
     assert.equal(annualPendingPlanFailureStatus(conflict), 409, conflict);

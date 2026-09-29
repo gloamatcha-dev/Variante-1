@@ -85,9 +85,9 @@ test("058 still owns its number, and there is no 061", () => {
   // further from the end. Re-pinned rather than deleted - what this guard
   // protects is that nothing UNREVIEWED appeared. Reviewed in
   // tests/guest-order-management.test.mjs.
-  const last = files[files.length - 10];
+  const last = files[files.length - 11];
   assert.equal(last, "058_discounted_order_line_accounting.sql");
-  assert.equal(files.some(f => f.startsWith("068")), false, "a 064 exists");
+  assert.equal(files.some(f => f.startsWith("069")), false, "a 064 exists");
   assert.equal(files.filter(f => f.startsWith("058")).length, 1);
 });
 

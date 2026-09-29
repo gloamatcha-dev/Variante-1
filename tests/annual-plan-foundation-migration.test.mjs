@@ -161,8 +161,8 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
   // Re-pinned rather than deleted - what this guard protects is that
   // nothing UNREVIEWED appeared. Reviewed in
   // tests/guest-order-management.test.mjs.
-  assert.equal(files[files.length - 29], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 30], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 30], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 31], MIGRATION_038, "038 must be the one before it");
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
@@ -170,7 +170,7 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
 test("2: no migration 044 or beyond", () => {
   // 065 is the highest migration. 039 is live and is not the place to
   // fix anything any more.
-  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 67);
+  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 68);
   assert.deepEqual(beyond, [], "an unreviewed migration appeared after 065");
 });
 
@@ -1167,6 +1167,31 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // cancellation rule is touched, and the ORDINARY annual purchase
     // sends no expires_at and holds no claim - exactly as before.
     // Reviewed in tests/annual-upgrade-pending-claim.test.mjs.
+    // MIGRATION 068, THE CUSTOMER-LEVEL CLAIM, edits four leaves:
+    //
+    //   purchaseEligibility.ts      ONE exported sentence, the refusal a
+    //                               customer sees when they already have
+    //                               an annual checkout open. No predicate
+    //                               changes: isLiveAnnualPlan,
+    //                               findBlockingAnnualPlan and
+    //                               annualPlanHasEndedForGood are
+    //                               untouched, and 068's index predicate
+    //                               is deliberately isLiveAnnualPlan's.
+    //   annualPlanCheckoutRules.ts  two new refusal words in the 409
+    //                               family, and the expiry resolver
+    //                               renamed from Upgrade to Annual
+    //                               because it now governs both paths.
+    //   annualPlanCheckout.ts       the claim is minted for EVERY annual
+    //                               checkout rather than only an upgrade,
+    //                               and the two new refusals return 409
+    //                               before Stripe is reached.
+    //   annualPlanCheckoutDeps.ts   unchanged in shape - still the same
+    //                               seventeen RPC arguments 067 sent.
+    //
+    // No price, discount, delivery count, cadence, refund or cancellation
+    // rule is touched. Reviewed in
+    // tests/annual-plan-customer-claim.test.mjs.
+    "lib/purchaseEligibility.ts",
     "lib/subscriptionUpgradeRules.ts",
     "lib/annualPlanCheckout.ts",
     "lib/annualPlanCheckoutRules.ts",

@@ -301,5 +301,25 @@ export function mayStartAnnualPlan(
 export const SUBSCRIPTION_ALREADY_RUNNING =
   "Dieses Abo läuft bereits. Du kannst es in deinem Konto ansehen oder kündigen.";
 
+/**
+ * THE REFUSAL WHEN ONE ANNUAL CHECKOUT IS STILL PAYABLE (migration 068).
+ *
+ * Not "you already have a plan" - they do not, yet - but "you already
+ * have a checkout open". The customer has a Stripe Checkout Session
+ * live right now for an annual plan, and the honest answer names both
+ * ways out: finish that one, or wait for it to lapse. It lapses on its
+ * own within half an hour, because the claim behind this sentence
+ * expires at exactly the moment the session it guards stops being
+ * payable.
+ *
+ * ONE SENTENCE FOR BOTH PATHS. An ordinary purchase and an upgrade are
+ * the same thing to a customer holding one open checkout, and saying
+ * which kind the OTHER tab was would leak a detail this refusal has no
+ * reason to carry. It names no date, no plan and no amount.
+ */
+export const ANNUAL_CHECKOUT_ALREADY_PENDING =
+  "Du hast bereits einen offenen Jahresplan-Checkout. "
+  + "Schließe den bestehenden Checkout ab oder versuche es später erneut.";
+
 export const ANNUAL_PLAN_ALREADY_RUNNING =
   "Du hast bereits einen laufenden Jahresplan. Einen neuen kannst du starten, sobald er beendet ist.";

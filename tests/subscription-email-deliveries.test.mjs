@@ -238,7 +238,20 @@ test("035 exists, is the only 035, and only 036 and 037 follow it", () => {
      // existing row, and weakens nothing 066 installed. No subscription,
      // order or B2B object is touched. Reviewed in
      // tests/annual-upgrade-pending-claim.test.mjs.
-     "067_annual_upgrade_pending_claim.sql"],
+     "067_annual_upgrade_pending_claim.sql",
+     // ANNUAL CUSTOMER CLAIM ADDED MIGRATION 068: the annual claim
+     // moves from the source subscription to the CUSTOMER, so both
+     // annual purchase paths share one exclusion domain. It widens
+     // 067's claim CHECK by one clause, adds a unique index for one
+     // LIVE annual plan per user (status active AND not refunded, so a
+     // refunded plan never blocks a repurchase), adds one non-unique
+     // partial index, and replaces the pending-plan writer IN PLACE to
+     // lock public.profiles before it asks what else the customer has.
+     // It grants NOTHING, drops no index, touches no existing row and
+     // does not redefine activation. No subscription, order or B2B
+     // object is touched. Reviewed in
+     // tests/annual-plan-customer-claim.test.mjs.
+     "068_annual_plan_customer_claim.sql"],
     "an unreviewed migration above 035 appeared"
   );
   // And 039 leaves this table entirely alone. An annual plan's one

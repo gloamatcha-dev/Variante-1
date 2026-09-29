@@ -597,12 +597,17 @@ export function annualUpgradeClaimExpiry(now: Date): string {
   return new Date(now.getTime() + ANNUAL_UPGRADE_CLAIM_TTL_MS).toISOString();
 }
 
-export type UpgradeSessionExpiry =
+export type AnnualSessionExpiry =
   | { ok: true; expiresAtUnix: number }
   | { ok: false; reason: "claim_missing" | "claim_too_short" };
 
 /**
  * WHAT EXPIRES_AT TO GIVE STRIPE, from the claim the database holds.
+ *
+ * MIGRATION 068 WIDENED THIS TO EVERY ANNUAL CHECKOUT. It was named for
+ * the upgrade because the upgrade was the only path that held a claim;
+ * now an ordinary purchase holds one too, and the session that guards
+ * it needs the same treatment for the same reason.
  *
  * The value is the ROW'S, never a fresh computation: whatever
  * create_pending_annual_plan_for_attempt returned, on 'created' and on
@@ -623,11 +628,11 @@ export type UpgradeSessionExpiry =
  * the call is an idempotent replay rather than a new session, and no
  * second payable thing can come out of it however little time is left.
  */
-export function resolveUpgradeSessionExpiry(input: {
+export function resolveAnnualSessionExpiry(input: {
   pendingExpiresAt: string | null;
   nowMs: number;
   sessionAlreadyLinked: boolean;
-}): UpgradeSessionExpiry {
+}): AnnualSessionExpiry {
   const { pendingExpiresAt, nowMs, sessionAlreadyLinked } = input;
   if (typeof pendingExpiresAt !== "string" || pendingExpiresAt === "") {
     return { ok: false, reason: "claim_missing" };
@@ -972,6 +977,12 @@ export const ANNUAL_PENDING_PLAN_CONFLICT_RESULTS: readonly string[] = Object.fr
   // the CUSTOMER'S OWN current state, not an outage: retrying the same
   // second changes nothing, and a 503 would invite exactly that.
   "upgrade_already_pending",
+  // MIGRATION 068. The same reasoning, one domain wider: an annual
+  // checkout this customer already has open, and an annual plan they
+  // already hold. Both are facts about them rather than about the
+  // server, so both are conflicts rather than outages.
+  "annual_checkout_already_pending",
+  "annual_plan_already_live",
 ]);
 
 /**
@@ -982,6 +993,21 @@ export const ANNUAL_PENDING_PLAN_CONFLICT_RESULTS: readonly string[] = Object.fr
  * This one means "you already have a checkout open", which they can.
  */
 export const ANNUAL_UPGRADE_CLAIM_CONFLICT = "upgrade_already_pending";
+
+/**
+ * MIGRATION 068's two customer-level refusals.
+ *
+ * ANNUAL_CUSTOMER_CLAIM_CONFLICT is the one that covers all four
+ * combinations - ordinary beside ordinary, upgrade beside ordinary,
+ * ordinary beside upgrade, upgrade beside upgrade - because the claim
+ * behind it is keyed on the only value all four share, the user.
+ *
+ * ANNUAL_PLAN_LIVE_CONFLICT is the same answer lib/purchaseEligibility.ts
+ * already gives from the route's own read, now proved a second time
+ * under the customer's row lock so the two cannot disagree.
+ */
+export const ANNUAL_CUSTOMER_CLAIM_CONFLICT = "annual_checkout_already_pending";
+export const ANNUAL_PLAN_LIVE_CONFLICT = "annual_plan_already_live";
 
 export function annualPendingPlanFailureStatus(reason: string): 409 | 503 {
   return ANNUAL_PENDING_PLAN_CONFLICT_RESULTS.includes(reason) ? 409 : 503;

@@ -11,8 +11,10 @@ import {
   annualAddressDigest,
   annualCheckoutIdempotencyKey,
   annualUpgradeClaimExpiry,
-  resolveUpgradeSessionExpiry,
+  resolveAnnualSessionExpiry,
   ANNUAL_UPGRADE_CLAIM_CONFLICT,
+  ANNUAL_CUSTOMER_CLAIM_CONFLICT,
+  ANNUAL_PLAN_LIVE_CONFLICT,
   annualIntentFingerprint,
   annualRequestFingerprint,
   buildAnnualCheckoutLineItems,
@@ -99,6 +101,7 @@ import type { CartTaxSnapshot } from "./tax";
 import {
   ANNUAL_PLAN_ALREADY_RUNNING,
   findBlockingAnnualPlan,
+  ANNUAL_CHECKOUT_ALREADY_PENDING,
   type AnnualPlanEligibilityRow,
 } from "./purchaseEligibility";
 /*
@@ -544,13 +547,15 @@ export async function handleAnnualPlanCheckout(
     // NULL for an ordinary purchase, which is every behaviour that
     // existed before the upgrade path. Migration 066 validates it again.
     sourceSubscriptionId: sourceSubscriptionId,
-    // ── THE CLAIM, MINTED HERE AND NOWHERE ELSE (migration 067) ──
+    // ── THE CLAIM, MINTED HERE AND NOWHERE ELSE ──────────────
     //
-    // The proposal only. Migration 067 takes the source subscription's
-    // row lock, refuses if another upgrade checkout for it is still
-    // payable, and only then writes this value - so what comes back is
-    // the authority, and it is what Stripe is given below.
-    pendingExpiresAt: sourceSubscriptionId ? claimExpiry : null,
+    // The proposal only, and now for EVERY annual checkout rather than
+    // only an upgrade. Migration 068 takes the CUSTOMER's row lock,
+    // refuses if any other annual checkout of theirs is still payable or
+    // any annual plan of theirs is still live, and only then writes this
+    // value - so what comes back is the authority, and it is what Stripe
+    // is given below.
+    pendingExpiresAt: claimExpiry,
   });
 
   const pending = interpretPendingAnnualPlanResult(rpcResult);
@@ -573,6 +578,35 @@ export async function handleAnnualPlanCheckout(
       NOTHING BELOW RUNS: no Stripe session is minted, so a second
       payable checkout for this subscription cannot come into existence.
     */
+    /*
+      ONE ANNUAL CHECKOUT AT A TIME, FOR THE WHOLE CUSTOMER (068).
+
+      The claim they already hold, proved under their own row lock
+      rather than guessed from a read, and it covers every combination
+      of the two purchase paths. NOTHING WAS CREATED and NOTHING BELOW
+      RUNS: no Stripe session is minted, so a second payable annual
+      checkout cannot come into existence.
+    */
+    if (pending.reason === ANNUAL_CUSTOMER_CLAIM_CONFLICT) {
+      console.error(
+        `Annual checkout: an annual checkout is already open for ${caller.userId} `
+        + `(attempt ${attempt.id}) - refused before Stripe.`
+      );
+      return fail(409, ANNUAL_CHECKOUT_ALREADY_PENDING);
+    }
+    /*
+      AND ONE LIVE PLAN AT A TIME. The same answer step 9b already gives
+      from the route's own read, re-proved under the lock so a race
+      between the two cannot produce a second live contract. The customer
+      sees the sentence they already saw.
+    */
+    if (pending.reason === ANNUAL_PLAN_LIVE_CONFLICT) {
+      console.error(
+        `Annual checkout: ${caller.userId} already holds a live annual plan `
+        + `(attempt ${attempt.id}) - refused before Stripe.`
+      );
+      return fail(409, ANNUAL_PLAN_ALREADY_RUNNING);
+    }
     if (pending.reason === ANNUAL_UPGRADE_CLAIM_CONFLICT) {
       console.error(
         `Annual checkout: an upgrade checkout is already open for subscription `
@@ -628,21 +662,24 @@ export async function handleAnnualPlanCheckout(
     resolveUpgradeSessionExpiry for why that case is an idempotent
     replay and cannot mint a second payable thing.
   */
-  let upgradeExpiresAt: number | null = null;
-  if (sourceSubscriptionId) {
-    const expiry = resolveUpgradeSessionExpiry({
-      pendingExpiresAt: pending.pendingExpiresAt,
-      nowMs,
-      sessionAlreadyLinked: !!attempt.stripe_checkout_session_id,
-    });
-    if (!expiry.ok) {
-      console.error(
-        `Annual checkout: upgrade claim for attempt ${attempt.id} is unusable - ${expiry.reason}`
-      );
-      return fail(409, UPGRADE_ALREADY_PENDING);
-    }
-    upgradeExpiresAt = expiry.expiresAtUnix;
+  //     MIGRATION 068 WIDENED THIS TO EVERY ANNUAL CHECKOUT. An
+  //     ordinary purchase now holds a claim too, so its session needs
+  //     the same bound - a session outliving its claim would reopen the
+  //     duplicate-payment hole for the remainder of that session's life.
+  //     It does mean an ordinary annual Checkout Session now expires in
+  //     thirty minutes rather than taking Stripe's 24-hour default.
+  const expiry = resolveAnnualSessionExpiry({
+    pendingExpiresAt: pending.pendingExpiresAt,
+    nowMs,
+    sessionAlreadyLinked: !!attempt.stripe_checkout_session_id,
+  });
+  if (!expiry.ok) {
+    console.error(
+      `Annual checkout: the claim for attempt ${attempt.id} is unusable - ${expiry.reason}`
+    );
+    return fail(409, ANNUAL_CHECKOUT_ALREADY_PENDING);
   }
+  const annualExpiresAt: number = expiry.expiresAtUnix;
 
   try {
     const session = await stripe.checkout.sessions.create(
@@ -710,7 +747,14 @@ export async function handleAnnualPlanCheckout(
         // and it carries the database's value - which is what makes
         // "the claim never outlives a payable session, and a payable
         // session never outlives the claim" true in both directions.
-        ...(upgradeExpiresAt === null ? {} : { expires_at: upgradeExpiresAt }),
+        // ── THE SAME INSTANT THE CLAIM HOLDS (066/067/068) ──
+        //
+        // Every annual Checkout Session carries it now, because every
+        // annual checkout holds a claim. It is the DATABASE's value, so
+        // "the claim never outlives a payable session, and a payable
+        // session never outlives the claim" holds in both directions and
+        // across a retry.
+        expires_at: annualExpiresAt,
       },
       // DETERMINISTIC, from the durable attempt. Two concurrent requests
       // and every later retry send the same key, so Stripe replays one

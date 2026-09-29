@@ -12,7 +12,7 @@ import {
   annualPendingPlanFailureStatus,
   annualUpgradeClaimExpiry,
   interpretPendingAnnualPlanResult,
-  resolveUpgradeSessionExpiry,
+  resolveAnnualSessionExpiry,
 } from "../lib/annualPlanCheckoutRules.ts";
 import { UPGRADE_ALREADY_PENDING } from "../lib/subscriptionUpgradeRules.ts";
 
@@ -47,7 +47,10 @@ test("1: the first upgrade checkout creates a pending claim, before Stripe", () 
   assert.match(WRITER, /pending_expires_at\n\s*\) values/);
   assert.match(WRITER, /'result', 'attempt_not_pre_stripe'/);
   // And the route passes it in the same object as the source.
-  assert.match(CHECKOUT, /pendingExpiresAt: sourceSubscriptionId \? claimExpiry : null,/);
+  // MIGRATION 068 widened this from "only an upgrade" to every annual
+  // checkout, so the conditional this used to assert is gone; the claim
+  // is now unconditional and the upgrade is one of its cases.
+  assert.match(CHECKOUT, /pendingExpiresAt: claimExpiry,/);
   assert.match(CHECKOUT_DEPS, /p_pending_expires_at: input\.pendingExpiresAt,/);
   // The RPC call precedes every Stripe line in the file.
   assert.ok(CHECKOUT.indexOf("deps.createPendingPlan(") < CHECKOUT.indexOf("deps.getStripe()"),
@@ -70,14 +73,15 @@ test("2: the claim window is thirty minutes - Stripe's own floor, not a taste", 
 });
 
 test("3: the Stripe session is given the SAME instant the claim holds", () => {
-  // ONE VALUE, and it is the row's: resolveUpgradeSessionExpiry is fed
+  // ONE VALUE, and it is the row's: resolveAnnualSessionExpiry is fed
   // pending.pendingExpiresAt, which is what the writer answered with.
   assert.match(CHECKOUT, /pendingExpiresAt: pending\.pendingExpiresAt,/);
-  assert.match(CHECKOUT, /\.\.\.\(upgradeExpiresAt === null \? \{\} : \{ expires_at: upgradeExpiresAt \}\),/);
+  // MIGRATION 068: every annual session carries it, not only an upgrade's.
+  assert.match(CHECKOUT, /expires_at: annualExpiresAt,/);
   // Floored to the second, so it can never round up past the claim.
   const full = annualUpgradeClaimExpiry(new Date(T0));
   assert.deepEqual(
-    resolveUpgradeSessionExpiry({ pendingExpiresAt: full, nowMs: T0, sessionAlreadyLinked: false }),
+    resolveAnnualSessionExpiry({ pendingExpiresAt: full, nowMs: T0, sessionAlreadyLinked: false }),
     { ok: true, expiresAtUnix: Math.floor(Date.parse(full) / 1000) });
   assert.equal(Math.floor(Date.parse(full) / 1000) * 1000 <= Date.parse(full), true);
   // The route reads a clock EXACTLY once per request; everything else is
@@ -249,17 +253,17 @@ test("10b: a claim too close to lapsing refuses rather than outliving itself", (
   // Stripe will not accept an expires_at under thirty minutes away, so
   // any session created here could only outlive its own claim.
   assert.deepEqual(
-    resolveUpgradeSessionExpiry({ pendingExpiresAt: nearly, nowMs: T0, sessionAlreadyLinked: false }),
+    resolveAnnualSessionExpiry({ pendingExpiresAt: nearly, nowMs: T0, sessionAlreadyLinked: false }),
     { ok: false, reason: "claim_too_short" });
   // Unless the session already exists: that call is an idempotent replay
   // and cannot mint a second payable thing however little time is left.
   assert.deepEqual(
-    resolveUpgradeSessionExpiry({ pendingExpiresAt: nearly, nowMs: T0, sessionAlreadyLinked: true }),
+    resolveAnnualSessionExpiry({ pendingExpiresAt: nearly, nowMs: T0, sessionAlreadyLinked: true }),
     { ok: true, expiresAtUnix: Math.floor(Date.parse(nearly) / 1000) });
   // A missing or unparseable claim is never guessed at.
   for (const bad of [null, "", "not-a-date", undefined]) {
     assert.deepEqual(
-      resolveUpgradeSessionExpiry({ pendingExpiresAt: bad, nowMs: T0, sessionAlreadyLinked: false }),
+      resolveAnnualSessionExpiry({ pendingExpiresAt: bad, nowMs: T0, sessionAlreadyLinked: false }),
       { ok: false, reason: "claim_missing" });
   }
   // The route checks the linked session rather than assuming.
@@ -352,17 +356,26 @@ test("14: migration 066's active-only backstop is neither weakened nor re-create
    15-19. NOTHING ELSE MOVED
    ══════════════════════════════════════════════════════════════ */
 
-test("15: the ordinary annual purchase holds no claim and sends no expires_at", () => {
-  // The claim is minted only for an upgrade, and the session carries
-  // expires_at only when there is one - so an ordinary purchase keeps
-  // Stripe's own default lifetime exactly as it always had.
-  assert.match(CHECKOUT, /pendingExpiresAt: sourceSubscriptionId \? claimExpiry : null,/);
-  assert.match(CHECKOUT, /let upgradeExpiresAt: number \| null = null;\s*\n\s*if \(sourceSubscriptionId\) \{/);
-  assert.match(CHECKOUT, /\.\.\.\(upgradeExpiresAt === null \? \{\} : \{ expires_at: upgradeExpiresAt \}\),/);
-  // The database refuses a claim on an ordinary purchase outright.
-  assert.match(WRITER, /if p_source_subscription_id is null then\s*\n\s*if p_pending_expires_at is not null then\s*\n\s*return pg_catalog\.jsonb_build_object\('result', 'claim_not_expected'\);/);
-  // And the CHECK forbids the row shape even if a writer tried.
-  assert.match(M067, /or \(status = 'pending' and source_subscription_id is not null\)/);
+test("15: 067's upgrade-specific claim semantics survive migration 068", () => {
+  // THIS TEST USED TO ASSERT THE OPPOSITE HALF. Until 068 an ordinary
+  // annual purchase held no claim and its Stripe session carried no
+  // expires_at, and 067's writer refused a claim on one outright. 068
+  // deliberately reversed all three - the duplicate-charge race on the
+  // ordinary path is exactly what it exists to close - so what is
+  // asserted here now is the part 067 owns and still owns.
+  //
+  // 067's FILE is unchanged and still says what it always said.
+  assert.match(WRITER, /'result', 'claim_not_expected'/);
+  assert.match(WRITER, /if p_source_subscription_id is null then/);
+  // And the upgrade's own narrower guarantee - one upgrade checkout per
+  // SUBSCRIPTION - is still enforced, by its own predicate, on top of
+  // the customer-level one 068 added.
+  assert.match(WRITER, /where source_subscription_id = p_source_subscription_id/);
+  assert.ok(ANNUAL_PENDING_PLAN_CONFLICT_RESULTS.includes("upgrade_already_pending"));
+  // The live 068 writer keeps that check rather than absorbing it.
+  const m068 = read("supabase/migrations/068_annual_plan_customer_claim.sql");
+  assert.match(m068, /'result', 'upgrade_already_pending'/);
+  assert.match(m068, /where source_subscription_id = p_source_subscription_id/);
 });
 
 test("16: the 4-week subscription purchase is untouched", () => {
@@ -448,9 +461,9 @@ test("20b: migration 067 is written, self-contained and NOT applied", () => {
   // It is the newest migration and owns its number alone.
   const files = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.at(-1), "067_annual_upgrade_pending_claim.sql");
+  assert.equal(files.at(-2), "067_annual_upgrade_pending_claim.sql");
   assert.equal(files.filter(f => f.startsWith("067")).length, 1);
-  assert.equal(files.filter(f => Number(f.slice(0, 3)) > 67).length, 0);
+  assert.equal(files.filter(f => Number(f.slice(0, 3)) > 68).length, 0);
 });
 
 test("20c: the rules leaf stays pure - no clock, no env, no Stripe import", () => {

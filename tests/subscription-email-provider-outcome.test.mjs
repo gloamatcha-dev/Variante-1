@@ -529,7 +529,7 @@ test("37-39: no migration was added, edited or required", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(files.length, 67);
+  assert.equal(files.length, 68);
   // Phase 4B1 added 039, the B2C prepaid annual plan foundation,
   // reviewed in tests/annual-plan-foundation-migration.test.mjs. The
   // guard is re-pinned, not deleted: it protects "no UNREVIEWED
@@ -547,17 +547,17 @@ test("37-39: no migration was added, edited or required", () => {
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(files[files.length - 22], "046_launch_signup_atomic.sql");
-  assert.equal(files[files.length - 23], "045_launch_welcome_email.sql");
-  assert.equal(files[files.length - 24], "044_launch_send.sql");
-  assert.equal(files[files.length - 25], "043_launch_waitlist.sql");
-  assert.equal(files[files.length - 26], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.equal(files[files.length - 27], "041_annual_account_column_privileges.sql");
-  assert.equal(files[files.length - 28], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(files[files.length - 29], "039_b2c_annual_plan_foundation.sql");
-  assert.equal(files[files.length - 30], "038_one_time_refund_writer_concurrency.sql");
+  assert.equal(files[files.length - 23], "046_launch_signup_atomic.sql");
+  assert.equal(files[files.length - 24], "045_launch_welcome_email.sql");
+  assert.equal(files[files.length - 25], "044_launch_send.sql");
+  assert.equal(files[files.length - 26], "043_launch_waitlist.sql");
+  assert.equal(files[files.length - 27], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(files[files.length - 28], "041_annual_account_column_privileges.sql");
+  assert.equal(files[files.length - 29], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 30], "039_b2c_annual_plan_foundation.sql");
+  assert.equal(files[files.length - 31], "038_one_time_refund_writer_concurrency.sql");
   assert.deepEqual(files.filter(f => f.startsWith("037")), ["037_subscription_refund_correlation.sql"]);
-  assert.ok(!files.some(f => f.startsWith("068")), "an unreviewed migration appeared");
+  assert.ok(!files.some(f => f.startsWith("069")), "an unreviewed migration appeared");
   const sql035 = withoutComments(read("supabase/migrations/035_subscription_email_deliveries.sql"));
   // The four statuses are unchanged: 'ambiguous' is an APPLICATION result,
   // never a database status.

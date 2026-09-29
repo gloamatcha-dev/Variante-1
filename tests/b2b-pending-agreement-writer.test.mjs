@@ -106,10 +106,10 @@ test("1: 061 owns its number, and only the reviewed 062 follows it", () => {
   // this guard protects is that 061 still occupies its own number and
   // that nothing UNREVIEWED appeared above it. Reviewed in
   // tests/b2b-checkout-settlement.test.mjs.
-  assert.equal(files[files.length - 7], MIGRATION, "061 must be the one before the newest");
-  assert.equal(files[files.length - 8], "060_b2b_payment_delivery_foundation.sql");
-  assert.equal(files[files.length - 9], "059_b2b_supply_commerce_foundation.sql");
-  assert.equal(files.length, 67);
+  assert.equal(files[files.length - 8], MIGRATION, "061 must be the one before the newest");
+  assert.equal(files[files.length - 9], "060_b2b_payment_delivery_foundation.sql");
+  assert.equal(files[files.length - 10], "059_b2b_supply_commerce_foundation.sql");
+  assert.equal(files.length, 68);
   // PACKAGES 5D/5E/5F ADDED MIGRATION 063: the instalment, resolution
   // and failure runtime. Re-pinned on the same terms as 062 above.
   // Reviewed in tests/b2b-instalment-delivery-failure.test.mjs.
@@ -145,9 +145,22 @@ test("1: 061 owns its number, and only the reviewed 062 follows it", () => {
      // existing row, and weakens nothing 066 installed. No subscription,
      // order or B2B object is touched. Reviewed in
      // tests/annual-upgrade-pending-claim.test.mjs.
-     "067_annual_upgrade_pending_claim.sql"],
+     "067_annual_upgrade_pending_claim.sql",
+     // ANNUAL CUSTOMER CLAIM ADDED MIGRATION 068: the annual claim
+     // moves from the source subscription to the CUSTOMER, so both
+     // annual purchase paths share one exclusion domain. It widens
+     // 067's claim CHECK by one clause, adds a unique index for one
+     // LIVE annual plan per user (status active AND not refunded, so a
+     // refunded plan never blocks a repurchase), adds one non-unique
+     // partial index, and replaces the pending-plan writer IN PLACE to
+     // lock public.profiles before it asks what else the customer has.
+     // It grants NOTHING, drops no index, touches no existing row and
+     // does not redefine activation. No subscription, order or B2B
+     // object is touched. Reviewed in
+     // tests/annual-plan-customer-claim.test.mjs.
+     "068_annual_plan_customer_claim.sql"],
     "a migration above 061 appeared that this suite has not been reviewed against");
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 67), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 68), [],
     "an unreviewed migration appeared after 062");
   // No number is used twice, which a copy-paste of a file name would do.
   const numbers = files.map(f => f.slice(0, 3));
@@ -1117,7 +1130,7 @@ test("50: NO SUITE MAY CLAIM THAT AN APPLIED MIGRATION IS STILL PENDING", () => 
   // below: it is a NEW file, so no immutability guard has anything to
   // exempt in it. Re-pinned to it, so the next author faces the same
   // decision. Reviewed in tests/guest-order-management.test.mjs.
-  assert.equal(onDisk.at(-1), "067_annual_upgrade_pending_claim.sql",
+  assert.equal(onDisk.at(-2), "067_annual_upgrade_pending_claim.sql",
     "a migration appeared above 065 - decide whether it is pending, then re-check every exemption");
   assert.equal(appliedFiles.length, onDisk.length,
     "a migration is excluded from the applied set - nothing guards its immutability");
