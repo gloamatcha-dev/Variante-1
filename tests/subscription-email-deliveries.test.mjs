@@ -265,7 +265,8 @@ test("035 exists, is the only 035, and only 036 and 037 follow it", () => {
      // NOTHING to any browser role and touches no subscription, order
      // or B2B object. Reviewed in
      // tests/annual-plan-monthly-schedule.test.mjs.
-     "069_annual_plan_monthly_schedule.sql"],
+     "069_annual_plan_monthly_schedule.sql",
+     "070_customer_rights_foundation.sql"],
     "an unreviewed migration above 035 appeared"
   );
   // And 039 leaves this table entirely alone. An annual plan's one

@@ -1101,11 +1101,23 @@ test("regression: no migration was added and 022-033 are untouched", () => {
     // ONE column, orders.discount_code, plus two CHECK constraints of
     // its own on it - reviewed in tests/launch-discount-migration.test.mjs.
     //
-    // All three may only ADD. A drop or an alter of an existing column is
+    // FOUR NAMED EXCEPTIONS.
+    //
+    // 070 is the customer-rights foundation. It adds the authoritative
+    // receipt columns - delivered_at and its source/audit pair - plus
+    // two shape CHECKs of its own on them, and it grants the four
+    // columns to service_role alone. It names none of the six email
+    // states, writes no fulfilment state, and touches no constraint
+    // that existed before it. Reviewed in
+    // tests/withdrawal-deadline.test.mjs and in this file's own
+    // additive rules below.
+    //
+    // All four may only ADD. A drop or an alter of an existing column is
     // still a failure, for them as for anything else.
     if (name === "049_direct_cancellation_and_refund_lock.sql"
         || name === "050_inventory_foundation.sql"
-        || name === "056_launch_discount.sql") {
+        || name === "056_launch_discount.sql"
+        || name === "070_customer_rights_foundation.sql") {
       assert.ok(!/drop column/i.test(later), `${name} drops a column`);
       assert.ok(!/alter column/i.test(later), `${name} alters an existing column`);
       // Scoped to public.orders: 050 creates four tables of its own and

@@ -868,13 +868,41 @@ test("6c2: LETZTER VERSAND, never LETZTE LIEFERUNG - the audit's finding, pinned
 
     So the column is named for the fact that exists. If a real delivery
     confirmation is ever recorded, this test is where the rename starts.
+
+    MIGRATION 070 IS THAT EVENT - HALF OF IT.
+
+    070 adds orders.delivered_at as an AUTHORITATIVE receipt, because
+    BGB 356 Abs. 2 dates the withdrawal period from receipt and nothing
+    else may stand in for it. So the database now does know, for an
+    order somebody actually recorded.
+
+    What has NOT changed, and is what this test still guards:
+
+      * only 070 may add it - no other migration may grow a second,
+        competing delivery date beside the canonical one
+      * 'delivered' in fulfillment_status is still never set
+        automatically; 070 touches no fulfilment state at all
+      * the ADMIN still says LETZTER VERSAND, because the column it
+        reads is still shipped_at. The heading may only become
+        LETZTE LIEFERUNG when the screen actually reads delivered_at.
   */
   const orders004 = read("supabase/migrations/004_orders.sql");
   assert.ok(!/delivered_at/.test(orders004), "orders gained a delivered_at column");
+  const DELIVERY_RECEIPT_MIGRATION = "070_customer_rights_foundation.sql";
   for (const migration of readdirSync(path.join(ROOT, "supabase/migrations"))) {
+    if (migration === DELIVERY_RECEIPT_MIGRATION) continue;
     assert.ok(!/add column[^;]*delivered_at/i.test(read(`supabase/migrations/${migration}`)),
-      `${migration} added a delivered_at column`);
+      `${migration} added a delivered_at column - only ${DELIVERY_RECEIPT_MIGRATION} may`);
   }
+  // And it really is there, so this guard cannot quietly pass because
+  // the column was renamed or dropped.
+  assert.match(read(`supabase/migrations/${DELIVERY_RECEIPT_MIGRATION}`),
+    /add column if not exists delivered_at timestamptz/,
+    "070 no longer adds the canonical receipt column");
+  // 070 records receipt. It must not also start writing fulfilment
+  // state, which is what 019's guarantee is about.
+  assert.ok(!/fulfillment_status/.test(read(`supabase/migrations/${DELIVERY_RECEIPT_MIGRATION}`)),
+    "070 started writing fulfilment state");
   assert.match(read("supabase/migrations/019_order_lifecycle_tracking.sql"),
     /'delivered' is deliberately never set automatically anywhere in this/,
     "the never-set-automatically guarantee changed");
@@ -1227,7 +1255,7 @@ test("8: no backend, migration, cadence, price or shipping rule changed", () => 
   // newest file on disk. Re-pinned by one position rather than deleted -
   // what this guard protects is that nothing UNREVIEWED appeared.
   // Reviewed in tests/guest-order-management.test.mjs.
-  assert.equal(migrations.at(-3), "067_annual_upgrade_pending_claim.sql",
+  assert.equal(migrations.at(-4), "067_annual_upgrade_pending_claim.sql",
     "a migration was added by a UI package");
   assert.match(read("supabase/migrations/024_seed_b2c_subscription_plans.sql"),
     /'week',\s*4,\s*'week',\s*4,\s*true,/, "the seeded cadence changed");

@@ -1372,7 +1372,8 @@ test("61: the rate limit went into 043 rather than into a 044, and 043 is still 
      // NOTHING to any browser role and touches no subscription, order
      // or B2B object. Reviewed in
      // tests/annual-plan-monthly-schedule.test.mjs.
-     "069_annual_plan_monthly_schedule.sql"],
+     "069_annual_plan_monthly_schedule.sql",
+     "070_customer_rights_foundation.sql"],
     "an unreviewed migration appeared after 043"
   );
 
