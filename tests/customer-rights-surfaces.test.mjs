@@ -581,3 +581,132 @@ test("the preflight verifies the money columns 070's writers read", () => {
   assert.ok(PREFLIGHT.includes("'total_gross_cents'"),
     "nothing checks the column the refund is derived from");
 });
+
+/* ══════════════════════════════════════════════════════════════
+   THE PRIVILEGE GAP THE PRODUCTION PREFLIGHT FOUND
+   ══════════════════════════════════════════════════════════════ */
+
+/** The four tables 070 leaves server-only. */
+const SERVER_ONLY_TABLES = [
+  "withdrawal_requests", "complaint_requests",
+  "termination_requests", "purchase_restrictions",
+];
+
+test("070 revokes the inherited Supabase defaults from BOTH browser roles", () => {
+  for (const t of SERVER_ONLY_TABLES) {
+    const re = new RegExp(
+      `revoke all privileges on table public\\.${t}\\s+from anon, authenticated, service_role;`);
+    assert.match(MIGRATION, re,
+      `${t} keeps whatever Supabase's ALTER DEFAULT PRIVILEGES handed anon and authenticated`);
+    assert.match(MIGRATION,
+      new RegExp(`revoke all privileges on table public\\.${t} from public;`),
+      `${t} keeps its PUBLIC grants`);
+  }
+});
+
+test("the revoke runs BEFORE every grant, so nothing is handed out then taken back", () => {
+  for (const t of SERVER_ONLY_TABLES) {
+    const revoke = MIGRATION.indexOf(`revoke all privileges on table public.${t}`);
+    assert.ok(revoke > -1, `${t} is never revoked`);
+    // Every grant naming this table must come after its revoke.
+    const grantRe = new RegExp(`grant [^;]*on (?:table )?public\\.${t} to service_role;`, "g");
+    const grants = [...MIGRATION.matchAll(grantRe)];
+    assert.ok(grants.length > 0, `${t} is revoked and never granted back`);
+    for (const g of grants) {
+      assert.ok(g.index > revoke,
+        `a grant on ${t} precedes its revoke and would be wiped`);
+    }
+  }
+});
+
+test("service_role gets only what the code actually uses - never ALL", () => {
+  // withdrawal_requests: SELECT + INSERT at table level, UPDATE column-scoped.
+  assert.match(MIGRATION,
+    /grant select, insert on table public\.withdrawal_requests to service_role;/);
+  assert.ok(!/grant all[^;]*on (?:table )?public\.withdrawal_requests/i.test(MIGRATION),
+    "withdrawal_requests was granted ALL to service_role");
+  // No DELETE anywhere on the four server-only tables: nothing in this
+  // application removes a statutory declaration or a case.
+  for (const t of SERVER_ONLY_TABLES) {
+    const grantRe = new RegExp(`grant ([^;]*?) on (?:table )?public\\.${t} to service_role;`, "g");
+    for (const [, privs] of MIGRATION.matchAll(grantRe)) {
+      assert.ok(!/\bdelete\b/i.test(privs), `${t} grants DELETE to service_role`);
+      assert.ok(!/\btruncate\b/i.test(privs), `${t} grants TRUNCATE to service_role`);
+      assert.ok(!/\breferences\b/i.test(privs), `${t} grants REFERENCES to service_role`);
+      assert.ok(!/\btrigger\b/i.test(privs), `${t} grants TRIGGER to service_role`);
+    }
+  }
+});
+
+test("the consumer's own declaration stays unwritable: UPDATE is column-scoped", () => {
+  // The MULTI-LINE case-column grant specifically - not migration 018's
+  // two-column confirmation grant restated just above it.
+  const start = MIGRATION.search(/grant update \(\r?\n/);
+  assert.ok(start > -1, "the case-column grant is gone");
+  const colGrant = MIGRATION.slice(
+    start, MIGRATION.indexOf(") on public.withdrawal_requests to service_role;", start));
+  for (const declared of ["customer_name", "order_reference", "contact_email",
+                          "scope", "scope_note", "customer_note", "submitted_at"]) {
+    assert.ok(!colGrant.includes(declared),
+      `the server can rewrite ${declared}, which is what the consumer actually declared`);
+  }
+});
+
+test("RLS stays on and NO browser policy is introduced", () => {
+  for (const t of ["complaint_requests", "termination_requests", "purchase_restrictions"]) {
+    assert.match(MIGRATION, new RegExp(`alter table public\\.${t} enable row level security;`),
+      `${t} does not enable RLS`);
+  }
+  assert.ok(!/create policy/i.test(MIGRATION),
+    "070 creates a policy - a browser role must not be let in by one");
+});
+
+test("no browser grant of any kind appears in 070", () => {
+  const grants = [...MIGRATION.matchAll(/^grant [^;]*;/gms)].map(m => m[0]);
+  for (const g of grants) {
+    assert.ok(!/\bto [^;]*\b(anon|authenticated|public)\b/.test(g),
+      `070 grants something to a browser role: ${g.slice(0, 120)}`);
+  }
+});
+
+test("no browser path reaches withdrawal_requests - every access is service_role", () => {
+  // The privilege model is only safe if the code genuinely does not
+  // depend on a browser-side read. Proven, not assumed.
+  const users = ["lib/withdrawalSubmissionDeps.ts", "app/api/admin/customer-rights/route.ts"];
+  for (const rel of users) {
+    const src = read(rel);
+    assert.ok(src.includes("getSupabaseAdmin"),
+      `${rel} touches the table without the service-role client`);
+  }
+  // And no client component or browser-side module names the table.
+  for (const rel of ["app/GloaSite.tsx", "app/AccountPortal.tsx", "app/AdminCustomerRights.tsx"]) {
+    assert.ok(!read(rel).includes("withdrawal_requests"),
+      `${rel} reads the table from the browser`);
+  }
+});
+
+test("/widerruf still works through server authority alone", () => {
+  // The public route holds no browser client and no table name: it
+  // parses, then hands off to the service-role deps module.
+  assert.ok(!WITHDRAWAL_ROUTE.includes("withdrawal_requests"));
+  assert.ok(!/anonKey|NEXT_PUBLIC_SUPABASE/.test(WITHDRAWAL_ROUTE));
+  assert.match(WITHDRAWAL_ROUTE, /getSupabaseAdmin\(\)/);
+  assert.match(read("lib/withdrawalSubmissionDeps.ts"), /getSupabaseAdmin/);
+});
+
+test("preflight check 50 stays a blocker on browser ROW access", () => {
+  const c50 = PREFLIGHT.slice(PREFLIGHT.indexOf("select 50, 'privs'"),
+                              PREFLIGHT.indexOf("select 51, 'privs'"));
+  assert.match(c50, /'SELECT', 'INSERT', 'UPDATE', 'DELETE'/);
+  assert.match(c50, /then 'PASS' else 'FAIL' end/);
+  assert.match(c50, /grantee in \('anon', 'authenticated'\)/);
+  // It must NOT have been softened into an INFO row.
+  assert.ok(!c50.includes("'INFO'"), "check 50 was downgraded to INFO");
+});
+
+test("the inherited privileges 070 revokes are reported, not hidden", () => {
+  const c51 = PREFLIGHT.slice(PREFLIGHT.indexOf("select 51, 'privs'"),
+                              PREFLIGHT.indexOf("select 52, 'privs'"));
+  assert.match(c51, /'INFO'/);
+  assert.match(c51, /section 6a/);
+});

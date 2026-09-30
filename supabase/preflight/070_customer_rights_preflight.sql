@@ -6,12 +6,12 @@
 --                     (i.e. zero rows with verdict = 'FAIL').
 -- Rows with verdict 'INFO' are context, never a blocker.
 --
--- EXPECTED HEALTHY RESULT:  0 FAIL / 26 PASS / 4 INFO
+-- EXPECTED HEALTHY RESULT:  0 FAIL / 26 PASS / 5 INFO
 --
 -- Twenty-six verdict-bearing checks (10-15, 20-22, 23-26, 30-36,
--- 40-41, 50-53) and four INFO rows (60-63), plus the SUMMARY row, which
--- counts only the thirty above it. The SUMMARY itself is always
--- computed from the actual rows - this line is the expectation to
+-- 40-41, 50, 52-54) and five INFO rows (51, 60-63), plus the SUMMARY
+-- row, which counts only the thirty-one above it. The SUMMARY itself is
+-- always computed from the actual rows - this line is the expectation to
 -- compare it against, never the source of it.
 -- ============================================================
 with
@@ -467,20 +467,67 @@ checks as (
               then 'PASS' else 'FAIL' end
 
   -- ── THE BROWSER MUST NOT ALREADY REACH ANY OF THIS ────────
+  --
+  -- WHY THIS CHECK CHANGED, AND WHY IT WAS NOT WEAKENED.
+  --
+  -- It used to demand that anon and authenticated hold NOTHING here.
+  -- Run against Production it FAILED, and it was right to: both roles
+  -- hold REFERENCES, TRIGGER and TRUNCATE, inherited from Supabase's
+  -- ALTER DEFAULT PRIVILEGES when migration 018 created the table and
+  -- never revoked. Migration 023 fixed the identical problem on three
+  -- other tables and did not reach this one.
+  --
+  -- But a PRE-migration preflight cannot demand the POST-migration
+  -- state: 070 section 6a is what removes those privileges, so the old
+  -- check could never pass before 070 ran, and could only ever be made
+  -- to pass by mutating Production by hand outside the reviewed
+  -- migration. That is the thing we are trying not to do.
+  --
+  -- So the blocker now asserts the property that must be true RIGHT
+  -- NOW and that no migration is required to establish: neither browser
+  -- role may READ OR WRITE ROWS. SELECT, INSERT, UPDATE or DELETE here
+  -- would mean consumers' withdrawal declarations are exposed or
+  -- writable today, which is an incident rather than a rollout
+  -- question. Check 50a below reports the non-row privileges 070 will
+  -- revoke, so they stay visible rather than being quietly tolerated.
   union all
   select 50, 'privs',
-         'anon and authenticated hold nothing on withdrawal_requests, and 070 adds nothing',
-         '0 privileges',
-         (select count(*)::text from information_schema.table_privileges
+         'anon and authenticated can neither read nor write a withdrawal declaration',
+         'no SELECT, INSERT, UPDATE or DELETE for either browser role',
+         (select coalesce(string_agg(distinct grantee::text || ':' || privilege_type::text, ', '), 'none')
+            from information_schema.table_privileges
             where table_schema = 'public' and table_name = 'withdrawal_requests'
-              and grantee in ('anon', 'authenticated')),
+              and grantee in ('anon', 'authenticated')
+              and privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')),
          case when (select count(*) from information_schema.table_privileges
                       where table_schema = 'public' and table_name = 'withdrawal_requests'
-                        and grantee in ('anon', 'authenticated')) = 0
+                        and grantee in ('anon', 'authenticated')
+                        and privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')) = 0
               then 'PASS' else 'FAIL' end
 
+  -- THE PRIVILEGES 070 IS ABOUT TO TAKE BACK.
+  --
+  -- INFO, deliberately. These are real and they matter - a role holding
+  -- TRUNCATE on this table can destroy the evidence that a consumer
+  -- ever exercised a statutory right - but they are what section 6a of
+  -- the migration exists to remove. Failing the rollout because the
+  -- problem the rollout fixes still exists would be circular.
+  --
+  -- Expect anon:REFERENCES, anon:TRIGGER, anon:TRUNCATE and the same
+  -- three for authenticated: six rows. After 070, none.
   union all
   select 51, 'privs',
+         'INFO: the inherited browser privileges migration 070 section 6a revokes',
+         'expect 6 rows now (REFERENCES/TRIGGER/TRUNCATE x anon/authenticated), and none after 070',
+         (select count(*)::text || ' rows: '
+               || coalesce(string_agg(distinct grantee::text || ':' || privilege_type::text, ', '), 'none')
+            from information_schema.table_privileges
+            where table_schema = 'public' and table_name = 'withdrawal_requests'
+              and grantee in ('anon', 'authenticated')),
+         'INFO'
+
+  union all
+  select 52, 'privs',
          'service_role can already read and write withdrawal_requests',
          'SELECT and INSERT present',
          (select coalesce(string_agg(distinct privilege_type::text, ', '), '<none>')
@@ -497,7 +544,7 @@ checks as (
               then 'PASS' else 'FAIL' end
 
   union all
-  select 52, 'privs',
+  select 53, 'privs',
          'the browser cannot write orders - 070 grants only service_role the receipt columns',
          'no INSERT/UPDATE for anon or authenticated',
          (select coalesce(string_agg(distinct grantee::text || ':' || privilege_type::text, ', '), 'none')
@@ -512,7 +559,7 @@ checks as (
               then 'PASS' else 'FAIL' end
 
   union all
-  select 53, 'privs',
+  select 54, 'privs',
          'admin_users is the actor table 070''s foreign keys point at',
          'user_id column present',
          (select coalesce(string_agg(column_name::text, ', '), '<none>')

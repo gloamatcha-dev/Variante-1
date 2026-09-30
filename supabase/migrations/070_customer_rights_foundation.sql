@@ -620,6 +620,87 @@ alter table public.purchase_restrictions enable row level security;
 -- RLS is on and carries no policy for anon or authenticated, so even
 -- if a grant were added by mistake later, there is still no policy to
 -- let a row through.
+--
+-- ── 6a. THE GAP MIGRATION 023 MISSED ─────────────────────────
+--
+-- A read-only preflight against Production found anon and authenticated
+-- each holding REFERENCES, TRIGGER and TRUNCATE on
+-- public.withdrawal_requests.
+--
+-- WHERE THEY CAME FROM. Supabase ships ALTER DEFAULT PRIVILEGES for the
+-- public schema, so a table arrives with privileges already handed to
+-- anon, authenticated and service_role before any migration grants
+-- anything. Migration 018 created this table and granted only what
+-- service_role needed; it never took the inherited ones back.
+--
+-- Migration 023 diagnosed exactly this - same three privileges, same
+-- cause - and hardened stripe_customers, checkout_attempts and
+-- stripe_webhook_events. It enumerated the tables from 009 and 022 and
+-- did not reach 018's, so withdrawal_requests kept them. This section
+-- closes that, four migrations' worth of the same lesson later.
+--
+-- WHY RLS DID NOT COVER IT, in 023's words: row-level security filters
+-- ROWS. TRUNCATE removes every row without producing any, REFERENCES
+-- lets another table point a foreign key at this one, and TRIGGER
+-- attaches code to it. None of those is a row read or a row write, so
+-- no policy - and no absence of policies - constrains them. On a table
+-- holding statutory withdrawal declarations, a browser role able to
+-- TRUNCATE is able to destroy the evidence that a consumer ever
+-- exercised the right.
+--
+-- THE ORDER MATTERS. The revoke runs BEFORE every grant below, so
+-- nothing this file hands out is taken back again.
+
+revoke all privileges on table public.withdrawal_requests
+  from anon, authenticated, service_role;
+
+revoke all privileges on table public.withdrawal_requests from public;
+
+-- And back, deriving the set from what the code actually does rather
+-- than from what is convenient:
+--
+--   SELECT  lib/withdrawalSubmissionDeps.ts reads by idempotency key,
+--           reads back the row it just inserted, and the admin desk
+--           lists cases and loads a case's contact details.
+--   INSERT  the declaration itself, once per submission.
+--
+-- NOT DELETE, and not TRUNCATE: nothing in this application removes a
+-- withdrawal declaration, and nothing should be able to.
+-- NOT REFERENCES, and not TRIGGER: no code needs either.
+--
+-- UPDATE stays COLUMN-SCOPED and is granted below - migration 018's two
+-- confirmation columns plus the case columns this migration adds - so
+-- the consumer's own declaration remains unwritable by anything.
+
+grant select, insert on table public.withdrawal_requests to service_role;
+
+grant update (confirmation_status, confirmed_at)
+  on public.withdrawal_requests to service_role;
+
+-- ── 6b. AND THE SAME DEFAULTS ON THE THREE NEW TABLES ────────
+--
+-- The three tables created above arrive with the identical inherited
+-- privileges - that is what 6a just finished cleaning up on an
+-- eight-migration-old table. Granting service_role what it needs
+-- without first taking back what Supabase handed out would create the
+-- exact bug this migration exists to close, three more times.
+--
+-- So each is emptied and then given precisely what the server uses:
+-- SELECT to list and read a case, INSERT to open one, UPDATE to
+-- advance it. No DELETE, no TRUNCATE, no REFERENCES, no TRIGGER, and
+-- nothing at all for anon or authenticated.
+
+revoke all privileges on table public.complaint_requests
+  from anon, authenticated, service_role;
+revoke all privileges on table public.complaint_requests from public;
+
+revoke all privileges on table public.termination_requests
+  from anon, authenticated, service_role;
+revoke all privileges on table public.termination_requests from public;
+
+revoke all privileges on table public.purchase_restrictions
+  from anon, authenticated, service_role;
+revoke all privileges on table public.purchase_restrictions from public;
 
 grant select, insert, update on public.complaint_requests to service_role;
 grant select, insert, update on public.termination_requests to service_role;
