@@ -426,7 +426,7 @@ checks as (
                         'admin_lift_purchase_restriction')) = 0
               then 'PASS' else 'FAIL' end
 
-  -- THE FIVE NAMED CONSTRAINTS 070 ADDS.
+  -- THE SIX NAMED CONSTRAINTS 070 ADDS.
   --
   -- These are the collisions that actually ABORT the migration: ALTER
   -- TABLE ... ADD CONSTRAINT has no IF NOT EXISTS, so a name already in
