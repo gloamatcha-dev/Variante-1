@@ -368,6 +368,11 @@ create index if not exists idx_withdrawal_requests_resolved_order
   on public.withdrawal_requests(resolved_order_id)
   where resolved_order_id is not null;
 
+-- The index the delivery queue's freeze predicate reads on every pass.
+create index if not exists idx_withdrawal_requests_frozen_plan
+  on public.withdrawal_requests(resolved_annual_plan_id)
+  where deliveries_frozen_at is not null;
+
 
 -- 3. REKLAMATION - A DIFFERENT RIGHT, A DIFFERENT TABLE ────────
 --
@@ -812,7 +817,183 @@ revoke all on function public.admin_mark_order_delivered(uuid, text, timestamptz
 grant execute on function public.admin_mark_order_delivered(uuid, text, timestamptz, text) to service_role;
 
 
--- 8. WHY THIS MAY BE APPLIED BEFORE ITS CODE ───────────────────
+-- 8. THE FREEZE ────────────────────────────────────────────────
+--
+-- A protected withdrawal stops the annual plan producing NEW
+-- deliveries. "Protected" is deliberately wider than "timely": a case
+-- we cannot safely reject - receipt never recorded, or a last day we
+-- could not decide - freezes exactly as a timely one does. Shipping
+-- box four while arguing about whether box one arrived in time is the
+-- one outcome nobody can undo.
+--
+-- WHERE THE GUARD LIVES, AND WHY IT IS THE QUEUE
+--
+-- It is a predicate on which deliveries are DUE, not an exception
+-- thrown while fulfilling one. That choice is what makes it safe:
+--
+--   idempotent      a frozen plan is simply never claimed. Running the
+--                   worker a hundred times changes nothing.
+--   duplicate-free  nothing is claimed, so there is nothing half-done
+--                   to reconcile, and no lease to expire.
+--   reversible      the delivery rows stay 'scheduled' with the
+--                   scheduled_for migration 039 froze at activation. When
+--                   the case closes they become due again and the worker
+--                   mints exactly what is owed - it does not replay a
+--                   backlog, because a delivery already minted has an
+--                   order_id and is excluded anyway.
+--   historical-safe it touches no delivery that already happened.
+--
+-- THE SOURCE OF TRUTH IS THE CASE ROW, not a flag copied onto the plan.
+-- A denormalised boolean would be one more thing to keep in step, and
+-- the failure mode of it drifting is shipping goods during a live
+-- withdrawal.
+--
+-- A CLOSED CASE NO LONGER FREEZES. refunded, rejected_late and closed
+-- are end states; anything before them is still open.
+
+create or replace function public.annual_plan_delivery_freeze_active(
+  p_annual_plan_id uuid
+)
+returns boolean
+language sql
+stable
+security definer set search_path = ''
+as $$
+  select exists (
+    select 1
+    from public.withdrawal_requests w
+    where w.resolved_annual_plan_id = p_annual_plan_id
+      and w.deliveries_frozen_at is not null
+      and w.case_state not in ('refunded', 'rejected_late', 'closed')
+  );
+$$;
+
+revoke all on function public.annual_plan_delivery_freeze_active(uuid) from public;
+revoke all on function public.annual_plan_delivery_freeze_active(uuid) from anon;
+revoke all on function public.annual_plan_delivery_freeze_active(uuid) from authenticated;
+grant execute on function public.annual_plan_delivery_freeze_active(uuid) to service_role;
+
+-- Migration 039's queue, re-stated with ONE added predicate.
+--
+-- Everything else is byte-for-byte what 039 wrote: the same active and
+-- not-refunded plan filter, the same order_id/fulfilled_at exclusions,
+-- the same six-hour lease, the same ordering, the same
+-- least(greatest(...)) clamp, and the same `for update of d skip
+-- locked` that keeps this function and 039's section 9 from deadlocking.
+-- Re-created rather than patched because a SQL function body cannot be
+-- altered in place.
+
+create or replace function public.claim_due_annual_plan_deliveries(
+  p_limit integer
+)
+returns table (
+  delivery_id     uuid,
+  annual_plan_id  uuid,
+  delivery_number integer,
+  scheduled_for   timestamptz,
+  reclaimed       boolean
+)
+language sql
+volatile
+security definer set search_path = ''
+as $$
+  with due as (
+    select d.id, (d.state = 'claimed') as was_claimed
+    from public.annual_plan_deliveries d
+    join public.annual_plans p on p.id = d.annual_plan_id
+    where p.status = 'active'
+      and p.payment_status <> 'refunded'
+      -- MIGRATION 070. A plan with a protected, unresolved withdrawal
+      -- is not due for anything.
+      and not public.annual_plan_delivery_freeze_active(p.id)
+      and d.order_id is null
+      and d.fulfilled_at is null
+      and (
+        (d.state = 'scheduled' and d.scheduled_for <= pg_catalog.now())
+        or
+        (d.state = 'claimed'
+         and d.claimed_at is not null
+         and d.claimed_at < pg_catalog.now() - interval '6 hours')
+      )
+    order by d.scheduled_for asc, d.delivery_number asc, d.id asc
+    limit least(greatest(coalesce(p_limit, 25), 1), 100)
+    for update of d skip locked
+  )
+  update public.annual_plan_deliveries t
+     set state      = 'claimed',
+         claimed_at = pg_catalog.now()
+    from due
+   where t.id = due.id
+  returning t.id, t.annual_plan_id, t.delivery_number, t.scheduled_for, due.was_claimed;
+$$;
+
+revoke all on function public.claim_due_annual_plan_deliveries(integer) from public;
+revoke all on function public.claim_due_annual_plan_deliveries(integer) from anon;
+revoke all on function public.claim_due_annual_plan_deliveries(integer) from authenticated;
+grant execute on function public.claim_due_annual_plan_deliveries(integer) to service_role;
+
+-- SETTING the freeze. Idempotent by returning 'unchanged' rather than
+-- re-stamping, so the instant stays the moment it first applied.
+
+create or replace function public.freeze_annual_deliveries_for_withdrawal(
+  p_withdrawal_id uuid
+)
+returns jsonb
+language plpgsql
+volatile
+security definer set search_path = ''
+as $$
+declare
+  v_case public.withdrawal_requests;
+begin
+  if p_withdrawal_id is null then
+    return pg_catalog.jsonb_build_object('result', 'invalid_input');
+  end if;
+
+  select * into v_case
+  from public.withdrawal_requests
+  where id = p_withdrawal_id
+  for update;
+
+  if not found then
+    return pg_catalog.jsonb_build_object('result', 'not_found');
+  end if;
+
+  if v_case.resolved_annual_plan_id is null then
+    return pg_catalog.jsonb_build_object('result', 'no_annual_plan');
+  end if;
+
+  -- Only a case we cannot safely reject may freeze. A clearly late one
+  -- has no claim on future deliveries.
+  if v_case.timeliness not in ('timely', 'receipt_unknown', 'deadline_uncertain') then
+    return pg_catalog.jsonb_build_object('result', 'not_protected',
+                                         'timeliness', v_case.timeliness);
+  end if;
+
+  if v_case.deliveries_frozen_at is not null then
+    return pg_catalog.jsonb_build_object('result', 'unchanged',
+                                         'frozen_at', v_case.deliveries_frozen_at);
+  end if;
+
+  update public.withdrawal_requests
+     set deliveries_frozen_at = pg_catalog.now(),
+         updated_at           = pg_catalog.now()
+   where id = v_case.id
+  returning * into v_case;
+
+  return pg_catalog.jsonb_build_object('result', 'frozen',
+                                       'frozen_at', v_case.deliveries_frozen_at,
+                                       'annual_plan_id', v_case.resolved_annual_plan_id);
+end;
+$$;
+
+revoke all on function public.freeze_annual_deliveries_for_withdrawal(uuid) from public;
+revoke all on function public.freeze_annual_deliveries_for_withdrawal(uuid) from anon;
+revoke all on function public.freeze_annual_deliveries_for_withdrawal(uuid) from authenticated;
+grant execute on function public.freeze_annual_deliveries_for_withdrawal(uuid) to service_role;
+
+
+-- 9. WHY THIS MAY BE APPLIED BEFORE ITS CODE ───────────────────
 --
 --   EVERY ADDED COLUMN IS NULLABLE OR DEFAULTED. The application
 --   running in Production writes none of them and continues to work
@@ -833,7 +1014,7 @@ commit;
 
 
 -- ============================================================
--- 9. VERIFY - READ ONLY, AFTER APPLYING. NOTHING BELOW RUNS.
+-- 10. VERIFY - READ ONLY, AFTER APPLYING. NOTHING BELOW RUNS.
 -- ============================================================
 --
 --   A. THE RECEIPT COLUMNS EXIST AND NOTHING WAS BACKFILLED.

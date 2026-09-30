@@ -6,6 +6,11 @@ import { buildAnnualPricing, type AnnualPricing } from "./annualPlanRules";
 // lib/annualPlanCheckoutDeps.ts.
 import { resolveAnnualLaunchPlan, type AnnualLaunchPlan } from "./annualPlans";
 import {
+  evaluatePurchaseRestrictions,
+  PURCHASE_RESTRICTED_MESSAGE,
+  type PurchaseRestrictionRow,
+} from "./purchaseRestrictions";
+import {
   ANNUAL_ALLOWED_COUNTRY,
   ANNUAL_SHIPPING_ZONE,
   annualAddressDigest,
@@ -149,6 +154,16 @@ export type AnnualCheckoutDeps = {
    */
   loadOwnSubscription: (token: string, userId: string, subscriptionId: string)
     => Promise<UpgradeSubscriptionRow | null>;
+  /**
+   * THE CALLER'S MANUAL PURCHASE RESTRICTIONS (migration 070).
+   *
+   * Every row for this customer, live or not: restrictionIsLive and
+   * scopeCovers decide, so the rule sits in one tested place rather
+   * than half in a SQL predicate. Optional, so a caller which has no
+   * restriction store - an older test port - stays valid and is simply
+   * unrestricted.
+   */
+  loadPurchaseRestrictions?: (userId: string) => Promise<PurchaseRestrictionRow[]>;
   linkSession: (attemptId: string, sessionId: string) => Promise<boolean>;
   /**
    * THE ONE CLOCK THIS ROUTE READS (migration 067).
@@ -243,6 +258,37 @@ export async function handleAnnualPlanCheckout(
   const caller = await deps.verifyCaller(request);
   if (!caller) {
     return fail(401, "Bitte melde dich an, um ein Jahresabo zu starten.");
+  }
+
+  // 3b. THE PURCHASE RESTRICTION (migration 070). Immediately after the
+  //     caller is known and before anything is read, written, priced or
+  //     sent to Stripe - a restricted purchase must cost us nothing and
+  //     must leave no attempt row behind.
+  //
+  //     SERVER-SIDE, because the account portal hiding its button is a
+  //     courtesy, not a control: this route is reachable directly.
+  //
+  //     The refusal carries the neutral sentence and nothing else. The
+  //     category is logged for us and never serialised to the customer.
+  if (deps.loadPurchaseRestrictions) {
+    let restrictions: PurchaseRestrictionRow[] = [];
+    try {
+      restrictions = await deps.loadPurchaseRestrictions(caller.userId);
+    } catch (err) {
+      // A restriction store we cannot read must not silently let a
+      // restricted purchase through.
+      console.error("Annual checkout: purchase restrictions unreadable -", err);
+      return fail(503, UNAVAILABLE);
+    }
+    const decision = evaluatePurchaseRestrictions(
+      restrictions, "annual_plan", deps.now ? deps.now() : new Date()
+    );
+    if (!decision.allowed) {
+      console.error(
+        `Annual checkout: refused for ${caller.userId} by a ${decision.blockedByCategory} restriction`
+      );
+      return fail(403, PURCHASE_RESTRICTED_MESSAGE);
+    }
   }
 
   // 4. THE CANONICAL PRODUCT. The browser named a variant id; everything
