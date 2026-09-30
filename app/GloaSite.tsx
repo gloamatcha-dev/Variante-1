@@ -1865,8 +1865,224 @@ return <main className="contact-main">
 </form>
 }
 </main>}
+/**
+ * THE § 312k CONFIRMATION FLOW.
+ *
+ * Two steps, because Abs. 2 Satz 4 asks for a Bestätigungsseite between
+ * the details and the declaration. The final button carries the
+ * statutory label; the entry heading on the page carries the other one.
+ *
+ * The idempotency key is minted ONCE per filled-in form, so a double
+ * click, a flaky connection and an impatient reload are one termination
+ * rather than three.
+ */
+function TerminationForm(){
+const[step,setStep]=useState<"form"|"review"|"success">("form");
+const[name,setName]=useState("");
+const[email,setEmail]=useState("");
+const[contractReference,setContractReference]=useState("");
+const[kind,setKind]=useState<"ordinary"|"extraordinary">("ordinary");
+const[requestedEndAt,setRequestedEndAt]=useState("");
+const[reason,setReason]=useState("");
+const[busy,setBusy]=useState(false);
+const[error,setError]=useState("");
+const[result,setResult]=useState<{submittedAt:string;confirmationEmailSent:boolean;message:string}|null>(null);
+const idemRef=useRef<string>("");
+
+const startReview=(e:React.FormEvent<HTMLFormElement>)=>{
+e.preventDefault();
+if(!name.trim()||!email.trim()||!contractReference.trim()){setError("Bitte fülle alle Pflichtfelder aus.");return}
+if(kind==="extraordinary"&&!reason.trim()){setError("Bitte gib den Grund für die außerordentliche Kündigung an.");return}
+if(!idemRef.current)idemRef.current=`kdg-${Date.now()}-${Math.random().toString(36).slice(2,10)}`;
+setError("");setStep("review");
+};
+
+const confirmTermination=async()=>{
+setBusy(true);setError("");
+try{
+const res=await fetch("/api/termination",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:name.trim(),email:email.trim(),contractReference:contractReference.trim(),terminationKind:kind,requestedEndAt:requestedEndAt||null,extraordinaryReason:kind==="extraordinary"?reason.trim():null,idempotencyKey:idemRef.current})});
+const body=await res.json().catch(()=>null);
+if(!res.ok){setError(body?.error||"Kündigung konnte nicht übermittelt werden.");setBusy(false);return}
+setResult({submittedAt:body.submittedAt,confirmationEmailSent:body.confirmationEmailSent,message:body.message});
+setStep("success");
+}catch{
+setError("Kündigung konnte nicht übermittelt werden. Bitte versuche es erneut oder schreib uns an hello@gloamatcha.com.");
+}
+setBusy(false);
+};
+
+if(step==="success"&&result){
+const submitted=new Date(result.submittedAt);
+return <div className="legal-withdrawal">
+<h3>Deine Kündigung ist eingegangen.</h3>
+<p>Eingegangen am {submitted.toLocaleDateString("de-DE")} um {submitted.toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"})} Uhr.</p>
+<p>{result.message}</p>
+{result.confirmationEmailSent
+?<p>Eine Bestätigung haben wir an {email.trim()} gesendet.</p>
+:<p>Wir konnten dir gerade keine automatische Bestätigung per E-Mail senden. Deine Kündigung ist trotzdem gespeichert - wir bestätigen dir den Eingang manuell.</p>}
+</div>;
+}
+
+if(step==="review")return <div className="legal-withdrawal">
+<h3>Angaben prüfen</h3>
+<p>Bitte prüfe deine Angaben. Mit Klick auf &bdquo;Jetzt kündigen&ldquo; erklärst du verbindlich die Kündigung dieses Vertrags.</p>
+<dl>
+<div><dt>Name</dt><dd>{name}</dd></div>
+<div><dt>E-Mail für Bestätigung</dt><dd>{email}</dd></div>
+<div><dt>Vertrag</dt><dd>{contractReference}</dd></div>
+<div><dt>Art der Kündigung</dt><dd>{kind==="ordinary"?"Ordentliche Kündigung":"Außerordentliche Kündigung"}</dd></div>
+<div><dt>Gewünschtes Vertragsende</dt><dd>{requestedEndAt||"Zum nächstmöglichen Zeitpunkt"}</dd></div>
+{kind==="extraordinary"&&<div><dt>Grund</dt><dd>{reason}</dd></div>}
+</dl>
+{error&&<p className="account-error">{error}</p>}
+<div className="portal-form-actions">
+<button type="button" className="portal-cancel-btn" onClick={()=>setStep("form")} disabled={busy}>Zurück</button>
+<button type="button" className="cta" onClick={confirmTermination} disabled={busy}>{busy?"WIRD ÜBERMITTELT…":"Jetzt kündigen"}</button>
+</div>
+</div>;
+
+return <form className="account-form legal-withdrawal" onSubmit={startReview}>
+<label>Name *<input required name="name" value={name} onChange={e=>setName(e.target.value)}/></label>
+<label>E-Mail für die Bestätigung *<input required type="email" name="email" value={email} onChange={e=>setEmail(e.target.value)}/></label>
+<label>Vertrag, Bestell- oder Abonummer *<input required name="contractReference" placeholder="z. B. GLOA-2026-000123" value={contractReference} onChange={e=>setContractReference(e.target.value)}/></label>
+<label>Art der Kündigung *<select name="terminationKind" value={kind} onChange={e=>setKind(e.target.value as "ordinary"|"extraordinary")}>
+<option value="ordinary">Ordentliche Kündigung</option>
+<option value="extraordinary">Außerordentliche Kündigung</option>
+</select></label>
+<label>Gewünschtes Vertragsende<input type="date" name="requestedEndAt" value={requestedEndAt} onChange={e=>setRequestedEndAt(e.target.value)}/><span className="legal-note">Ohne Angabe kündigen wir zum nächstmöglichen Zeitpunkt.</span></label>
+{kind==="extraordinary"&&<label>Grund der außerordentlichen Kündigung *<textarea required name="extraordinaryReason" rows={4} maxLength={2000} value={reason} onChange={e=>setReason(e.target.value)}/></label>}
+{error&&<p className="account-error">{error}</p>}
+<button className="cta" type="submit">Weiter zur Bestätigung</button>
+</form>;
+}
+
+/**
+ * THE REKLAMATION FORM.
+ *
+ * Same public defences as the withdrawal form and the same two-step
+ * shape, but a different vocabulary throughout: nothing here says
+ * Widerruf, and the return-cost sentence it shows is the BGB 439 Abs. 2
+ * one - we pay - rather than the withdrawal's.
+ */
+function ComplaintForm(){
+const REASONS:[string,string][]=[
+["arrived_damaged","Paket oder Produkt beschädigt angekommen"],
+["seal_already_broken_on_arrival","Siegel war bei Ankunft bereits beschädigt"],
+["wrong_size","Falsche Größe geliefert"],
+["wrong_item","Falscher Artikel geliefert"],
+["missing_goods","Ware fehlt"],
+["quality_defect","Qualitätsmangel"],
+["other","Sonstiges"],
+];
+const[name,setName]=useState("");
+const[email,setEmail]=useState("");
+const[orderReference,setOrderReference]=useState("");
+const[reason,setReason]=useState("arrived_damaged");
+const[note,setNote]=useState("");
+const[busy,setBusy]=useState(false);
+const[error,setError]=useState("");
+const[result,setResult]=useState<{submittedAt:string;confirmationEmailSent:boolean}|null>(null);
+const idemRef=useRef<string>("");
+
+const submit=async(e:React.FormEvent<HTMLFormElement>)=>{
+e.preventDefault();
+if(!name.trim()||!email.trim()||!orderReference.trim()){setError("Bitte fülle alle Pflichtfelder aus.");return}
+if(!idemRef.current)idemRef.current=`rkl-${Date.now()}-${Math.random().toString(36).slice(2,10)}`;
+setBusy(true);setError("");
+try{
+const res=await fetch("/api/complaint",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:name.trim(),email:email.trim(),orderReference:orderReference.trim(),reason,customerNote:note.trim()||null,idempotencyKey:idemRef.current})});
+const body=await res.json().catch(()=>null);
+if(!res.ok){setError(body?.error||"Reklamation konnte nicht übermittelt werden.");setBusy(false);return}
+setResult({submittedAt:body.submittedAt,confirmationEmailSent:body.confirmationEmailSent});
+}catch{
+setError("Reklamation konnte nicht übermittelt werden. Bitte versuche es erneut oder schreib uns an hello@gloamatcha.com.");
+}
+setBusy(false);
+};
+
+if(result){
+const submitted=new Date(result.submittedAt);
+return <div className="legal-withdrawal">
+<h3>Deine Reklamation ist eingegangen.</h3>
+<p>Eingegangen am {submitted.toLocaleDateString("de-DE")} um {submitted.toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"})} Uhr.</p>
+<p>Wir prüfen den Fall und melden uns mit einem Vorschlag zur Nacherfüllung. Wenn wir die Ware dafür zurückbenötigen, übernehmen wir die Kosten der Rücksendung.</p>
+{result.confirmationEmailSent
+?<p>Eine Eingangsbestätigung haben wir an {email.trim()} gesendet.</p>
+:<p>Wir konnten dir gerade keine automatische Bestätigung per E-Mail senden. Deine Reklamation ist trotzdem gespeichert.</p>}
+</div>;
+}
+
+return <form className="account-form legal-withdrawal" onSubmit={submit}>
+<label>Name *<input required name="name" value={name} onChange={e=>setName(e.target.value)}/></label>
+<label>E-Mail für die Eingangsbestätigung *<input required type="email" name="email" value={email} onChange={e=>setEmail(e.target.value)}/></label>
+<label>Bestellnummer *<input required name="orderReference" placeholder="z. B. GLOA-2026-000123" value={orderReference} onChange={e=>setOrderReference(e.target.value)}/></label>
+<label>Was stimmt nicht? *<select name="reason" value={reason} onChange={e=>setReason(e.target.value)}>
+{REASONS.map(([v,l])=><option key={v} value={v}>{l}</option>)}
+</select></label>
+<label>Beschreibung<textarea name="customerNote" rows={4} maxLength={2000} placeholder="Optional: Was genau ist passiert?" value={note} onChange={e=>setNote(e.target.value)}/></label>
+{error&&<p className="account-error">{error}</p>}
+<button className="cta" type="submit" disabled={busy}>{busy?"WIRD ÜBERMITTELT…":"Reklamation senden"}</button>
+</form>;
+}
+
 function Legal({route}:{route:string}){
-const title:Record<string,string>={impressum:"Impressum",datenschutz:"Datenschutz",agb:"Allgemeine Geschäftsbedingungen",widerruf:"Widerruf",versand:"Versandinformationen"};
+const title:Record<string,string>={impressum:"Impressum",datenschutz:"Datenschutz",agb:"Allgemeine Geschäftsbedingungen",widerruf:"Widerruf",versand:"Versandinformationen",reklamation:"Reklamation",kuendigung:"Kündigung"};
+/*
+  KÜNDIGUNG - the BGB 312k Kündigungsbutton.
+
+  PUBLIC, AND THAT IS THE POINT. § 312k Abs. 2 wants the entry point
+  "ständig verfügbar sowie unmittelbar und leicht erreichbar" - so it is
+  a page of its own, linked from the footer, reachable without an
+  account. Hiding it behind a login is exactly the arrangement the
+  section exists to forbid.
+
+  BGH 22.05.2025 - I ZR 161/24 puts the annual plan in scope too: a
+  single payment with a fixed term that ends by itself is still a
+  Dauerschuldverhältnis, because what counts is OUR continuing duty to
+  deliver. So this page serves both contracts.
+*/
+if(route==="kuendigung"){
+return <main className="legal-page legal-doc legal-kuendigung">
+<p className="legal-doc-eyebrow">GLOA · VERTRÄGE</p>
+<h1>Verträge hier kündigen.</h1>
+<p className="legal-doc-lead">Hier kannst du dein Abo oder deinen Jahresplan kündigen - ohne Konto, ohne Anmeldung und ohne Begründung. Die Kündigung wird mit Datum und Uhrzeit erfasst; die Bestätigung bekommst du per E-Mail.</p>
+<section className="legal-doc-section">
+<h2>Kündigung ist nicht Widerruf</h2>
+<p>Eine <strong>Kündigung</strong> beendet einen laufenden Vertrag für die Zukunft. Ein <Link href="/widerruf">Widerruf</Link> ist etwas anderes: Er löst den Vertrag rückwirkend auf und ist nur innerhalb der Widerrufsfrist möglich. Eine <Link href="/reklamation">Reklamation</Link> betrifft mangelhafte Ware. Eine Kündigung führt für sich genommen zu keiner Erstattung.</p>
+<p>Beim <strong>Jahresplan</strong> gilt: Er ist einmal bezahlt, läuft über eine feste Laufzeit und verlängert sich nicht automatisch. Eine ordentliche Kündigung beendet ihn deshalb zum ohnehin feststehenden Vertragsende - die bereits bezahlten Lieferungen erhältst du weiter.</p>
+<p>Das <strong>Abo im 4-Wochen-Rhythmus</strong> kannst du jederzeit ohne Mindestlaufzeit kündigen. Den genauen Endtermin bestätigen wir dir per E-Mail.</p>
+</section>
+<section className="legal-doc-section" id="kuendigen">
+<h2>Vertrag kündigen</h2>
+<TerminationForm/>
+</section>
+</main>;
+}
+/*
+  REKLAMATION - a defect claim under BGB 437/439, deliberately NOT the
+  withdrawal page.
+
+  The two are easy to confuse and expensive to confuse: on a justified
+  defect BGB 439 Abs. 2 puts the transport costs on US, and none of the
+  withdrawal's Wertersatz logic applies. Separate page, separate route,
+  separate table - and copy that says so in the first paragraph.
+*/
+if(route==="reklamation"){
+return <main className="legal-page legal-doc legal-reklamation">
+<p className="legal-doc-eyebrow">GLOA · BESTELLUNG</p>
+<h1>Bestellung reklamieren.</h1>
+<p className="legal-doc-lead">Etwas stimmt mit deiner Lieferung nicht? Sag uns kurz Bescheid. Wir prüfen den Fall und melden uns mit einem Vorschlag zur Nacherfüllung.</p>
+<section className="legal-doc-section">
+<h2>Reklamation ist nicht Widerruf</h2>
+<p>Eine <strong>Reklamation</strong> betrifft mangelhafte, beschädigte oder falsch gelieferte Ware. Wenn wir die Ware dafür zurückbenötigen, übernehmen wir die Kosten der Rücksendung.</p>
+<p>Ein <Link href="/widerruf">Widerruf</Link> ist etwas anderes: Er ist dein gesetzliches Lösungsrecht innerhalb von vierzehn Tagen, ganz ohne Grund - dort trägst du die unmittelbaren Kosten der Rücksendung. Eine <Link href="/kuendigung">Kündigung</Link> beendet ein laufendes Abo für die Zukunft. Dein Widerrufsrecht bleibt von einer Reklamation unberührt.</p>
+</section>
+<section className="legal-doc-section" id="reklamieren">
+<h2>Reklamation senden</h2>
+<ComplaintForm/>
+</section>
+</main>;
+}
 if(route==="versand"){
 /*
   THE SHIPPING PAGE, ON THE SHARED LEGAL-DOC HEAD.
@@ -3164,7 +3380,7 @@ else if(route==="account")page=<Account/>;
 else if(route==="launch")page=<LaunchPage/>;
 else if(route==="contact")page=<Contact/>;
 else if(route==="partnerships")page=<Partnerships/>;
-else if(["impressum","datenschutz","agb","widerruf","versand"].includes(route))page=<Legal route={route}/>;
+else if(["impressum","datenschutz","agb","widerruf","versand","reklamation","kuendigung"].includes(route))page=<Legal route={route}/>;
 else page=<main className="not-found"><h1>404</h1><Link href="/">Zurück zu GLOA →</Link></main>;
 
 return <><Header onCart={openCart} cartCount={cart.totalCount} menuOpen={menuOpen} onMenuOpenChange={setMenuOpen}/>{page}<Footer/><MobileDock onCart={openCart} cartCount={cart.totalCount} cartOpen={cartOpen} menuOpen={menuOpen} onMenuOpenChange={setMenuOpen}/><CartDrawer open={cartOpen} onClose={closeCart}/>{SHOP_IS_PRELAUNCH&&<LaunchPopup route={route} menuOpen={menuOpen} cartOpen={cartOpen}/>}</>

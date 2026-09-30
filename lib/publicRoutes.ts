@@ -45,6 +45,14 @@ export const ROUTES: readonly string[] = Object.freeze([
   "datenschutz",
   "agb",
   "widerruf",
+  // BGB 312k: the Kündigungsbutton must be "ständig verfügbar sowie
+  // unmittelbar und leicht erreichbar", so it is a page of its own and
+  // linked from the footer rather than hidden behind a login.
+  "kuendigung",
+  // Reklamation - the defect claim. A separate surface from
+  // /widerruf because BGB 439 Abs. 2 puts transport costs on the
+  // seller, which is the opposite of the withdrawal rule.
+  "reklamation",
   "versand",
   "order/success",
   /**
@@ -139,6 +147,14 @@ export const INDEXABLE_ROUTES: readonly string[] = Object.freeze([
   "datenschutz",
   "agb",
   "widerruf",
+  // BGB 312k: the Kündigungsbutton must be "ständig verfügbar sowie
+  // unmittelbar und leicht erreichbar", so it is a page of its own and
+  // linked from the footer rather than hidden behind a login.
+  "kuendigung",
+  // Reklamation - the defect claim. A separate surface from
+  // /widerruf because BGB 439 Abs. 2 puts transport costs on the
+  // seller, which is the opposite of the withdrawal rule.
+  "reklamation",
   "versand",
 ]);
 

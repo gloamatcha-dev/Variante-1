@@ -28,6 +28,16 @@ const CUSTOMER = [
   "annualPurchaseConfirmation",
   // Already branded before this pass; listed so the set is complete.
   "launchConfirmation", "launchWelcome", "launchDay",
+  // GLOA's own direct cancellation of an order. It goes to
+  // customerEmail (lib/orderCancellationConfirmationEmail.ts), so it was
+  // always customer-facing - it was simply never added to either list,
+  // which is why the completeness test below has been failing. It is
+  // the one template carrying a second import, and that import is
+  // `import type`: see the runtime-import rule below.
+  "orderCancellationConfirmation",
+  // THE CUSTOMER RIGHTS FAMILY (migration 070).
+  "withdrawalReturnReceived", "withdrawalRefundCompleted",
+  "terminationReceived", "complaintReceived",
 ];
 
 /**
@@ -37,10 +47,26 @@ const CUSTOMER = [
  */
 const INTERNAL = ["internalOrderNotification", "cancellationRequestNotification"];
 
+/**
+ * The RUNTIME imports of a template.
+ *
+ * `import type` is erased by the compiler, so it creates no dependency
+ * at all - a template that type-imports a wording union still ships as
+ * a pure function over brand.ts. What this rule is protecting is that
+ * no template reaches for a database, Stripe, an environment read or
+ * another template AT RUN TIME, and a type-only import cannot do any of
+ * those. Counting it as a violation is what kept
+ * orderCancellationConfirmation out of both lists and left the
+ * completeness test below red.
+ */
+function runtimeImports(src) {
+  return [...src.matchAll(/^import\s+(?!type\s)[\s\S]*?from "([^"]+)"/gm)].map(m => m[1]);
+}
+
 test("every customer transactional mail composes from the shared branding", () => {
   for (const name of CUSTOMER) {
     const src = template(name);
-    const imports = [...src.matchAll(/from "([^"]+)"/g)].map(m => m[1]);
+    const imports = runtimeImports(src);
     assert.deepEqual(imports, ["./brand.ts"],
       `${name} does not compose from the branding foundation, or imports something else`);
     assert.ok(src.includes("emailShell("), `${name} does not use the shared shell`);

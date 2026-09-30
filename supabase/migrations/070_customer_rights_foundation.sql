@@ -993,7 +993,546 @@ revoke all on function public.freeze_annual_deliveries_for_withdrawal(uuid) from
 grant execute on function public.freeze_annual_deliveries_for_withdrawal(uuid) to service_role;
 
 
--- 9. WHY THIS MAY BE APPLIED BEFORE ITS CODE ───────────────────
+-- 9. THE ADMIN WRITERS ─────────────────────────────────────────
+--
+-- Every authoritative decision on a case goes through a function here,
+-- in migration 052's shape: do the thing, then record WHO did it, and
+-- only when it actually happened.
+--
+-- WHY FUNCTIONS AND NOT UPDATES FROM A ROUTE. Three reasons, and the
+-- third is the one that matters:
+--
+--   * the rules live next to the columns, so every caller gets them
+--   * the audit entry cannot be forgotten, because it is in the same
+--     function as the change
+--   * A BROWSER CANNOT REACH THEM. Each is revoked from anon and
+--     authenticated and granted to service_role alone, so "the customer
+--     confirmed their own value loss" is not a bug that can be written.
+--
+-- The actor is always the FIRST argument and always comes from a
+-- verified admin session. record_admin_activity refuses an actor that is
+-- not an active admin_users row, so a deactivated administrator cannot
+-- be made to appear to have decided something.
+
+-- ── THE SEAL ──────────────────────────────────────────────────
+create or replace function public.admin_set_withdrawal_seal_state(
+  p_actor_user_id uuid,
+  p_withdrawal_id uuid,
+  p_seal_state    text
+)
+returns jsonb
+language plpgsql
+volatile
+security definer set search_path = ''
+as $$
+declare
+  v_case public.withdrawal_requests;
+begin
+  if p_seal_state not in ('sealed_unopened', 'opened_seal_broken') then
+    return pg_catalog.jsonb_build_object('result', 'seal_state_unknown');
+  end if;
+
+  update public.withdrawal_requests
+     set seal_state = p_seal_state,
+         case_state = case when p_seal_state = 'opened_seal_broken'
+                           then 'opened_item_review' else case_state end,
+         updated_at = pg_catalog.now()
+   where id = p_withdrawal_id
+  returning * into v_case;
+
+  if not found then
+    return pg_catalog.jsonb_build_object('result', 'not_found');
+  end if;
+
+  perform public.record_admin_activity(
+    p_actor_user_id, 'customer_rights', 'withdrawal.seal_state', 'withdrawal',
+    p_withdrawal_id::text, 'Zustand der Ware erfasst', gen_random_uuid(),
+    pg_catalog.jsonb_build_object('seal_state', p_seal_state)
+  );
+
+  return pg_catalog.jsonb_build_object('result', 'set', 'seal_state', v_case.seal_state);
+end;
+$$;
+
+-- ── WHETHER THE GOODS MUST COME BACK ──────────────────────────
+--
+-- A DECISION, never a consequence of the seal. A broken seal does not
+-- automatically demand a return: sometimes the cheapest and kindest
+-- answer is to let the customer keep an opened tin.
+create or replace function public.admin_set_withdrawal_return_requirement(
+  p_actor_user_id uuid,
+  p_withdrawal_id uuid,
+  p_requirement   text
+)
+returns jsonb
+language plpgsql
+volatile
+security definer set search_path = ''
+as $$
+declare
+  v_case public.withdrawal_requests;
+begin
+  if p_requirement not in ('return_requested', 'return_not_required') then
+    return pg_catalog.jsonb_build_object('result', 'requirement_unknown');
+  end if;
+
+  update public.withdrawal_requests
+     set return_requirement = p_requirement,
+         case_state = case when p_requirement = 'return_requested'
+                           then 'awaiting_return' else 'approved' end,
+         updated_at = pg_catalog.now()
+   where id = p_withdrawal_id
+  returning * into v_case;
+
+  if not found then
+    return pg_catalog.jsonb_build_object('result', 'not_found');
+  end if;
+
+  perform public.record_admin_activity(
+    p_actor_user_id, 'customer_rights', 'withdrawal.return_requirement', 'withdrawal',
+    p_withdrawal_id::text, 'Rücksendepflicht entschieden', gen_random_uuid(),
+    pg_catalog.jsonb_build_object('return_requirement', p_requirement)
+  );
+
+  return pg_catalog.jsonb_build_object('result', 'set', 'return_requirement', v_case.return_requirement);
+end;
+$$;
+
+-- ── THE RETURN ITSELF ─────────────────────────────────────────
+--
+-- Proof of dispatch and actual arrival are separate facts and separate
+-- calls, because BGB 357 Abs. 4 makes EITHER of them enough to end our
+-- right to withhold the money.
+create or replace function public.admin_record_withdrawal_return(
+  p_actor_user_id uuid,
+  p_withdrawal_id uuid,
+  p_event         text,
+  p_at            timestamptz default null
+)
+returns jsonb
+language plpgsql
+volatile
+security definer set search_path = ''
+as $$
+declare
+  v_case public.withdrawal_requests;
+  v_at   timestamptz := coalesce(p_at, pg_catalog.now());
+begin
+  if p_event not in ('dispatch_proof', 'received') then
+    return pg_catalog.jsonb_build_object('result', 'event_unknown');
+  end if;
+  if v_at > pg_catalog.now() then
+    return pg_catalog.jsonb_build_object('result', 'timestamp_in_future');
+  end if;
+
+  select * into v_case from public.withdrawal_requests where id = p_withdrawal_id for update;
+  if not found then
+    return pg_catalog.jsonb_build_object('result', 'not_found');
+  end if;
+
+  if p_event = 'dispatch_proof' then
+    if v_case.return_dispatch_proof_at is not null then
+      return pg_catalog.jsonb_build_object('result', 'unchanged');
+    end if;
+    update public.withdrawal_requests
+       set return_dispatch_proof_at = v_at,
+           case_state               = 'return_in_transit',
+           updated_at               = pg_catalog.now()
+     where id = p_withdrawal_id
+    returning * into v_case;
+  else
+    if v_case.return_received_at is not null then
+      return pg_catalog.jsonb_build_object('result', 'unchanged');
+    end if;
+    update public.withdrawal_requests
+       set return_received_at = v_at,
+           case_state         = 'return_received',
+           updated_at         = pg_catalog.now()
+     where id = p_withdrawal_id
+    returning * into v_case;
+  end if;
+
+  perform public.record_admin_activity(
+    p_actor_user_id, 'customer_rights', 'withdrawal.return_' || p_event, 'withdrawal',
+    p_withdrawal_id::text, 'Rücksendung erfasst', gen_random_uuid(),
+    pg_catalog.jsonb_build_object('event', p_event)
+  );
+
+  return pg_catalog.jsonb_build_object('result', 'recorded', 'case_state', v_case.case_state);
+end;
+$$;
+
+-- ── WERTERSATZ: THE DECISION, BOUNDED IN SQL ──────────────────
+--
+-- THE CEILING IS COMPUTED HERE, from the price the plan froze at
+-- purchase, and is not accepted from the caller. An administrator may
+-- confirm the proposal or reduce it; raising it above the goods' frozen
+-- retail value is refused by the database, so no route, no screen and no
+-- future script can do it either.
+--
+-- Sealed goods have a ceiling of zero, which is the same rule stated as
+-- arithmetic rather than as a special case.
+create or replace function public.admin_confirm_withdrawal_value_loss(
+  p_actor_user_id uuid,
+  p_withdrawal_id uuid,
+  p_confirmed_cents integer
+)
+returns jsonb
+language plpgsql
+volatile
+security definer set search_path = ''
+as $$
+declare
+  v_case      public.withdrawal_requests;
+  v_plan      public.annual_plans;
+  v_ceiling   integer;
+begin
+  if p_confirmed_cents is null or p_confirmed_cents < 0 then
+    return pg_catalog.jsonb_build_object('result', 'invalid_amount');
+  end if;
+
+  select * into v_case from public.withdrawal_requests where id = p_withdrawal_id for update;
+  if not found then
+    return pg_catalog.jsonb_build_object('result', 'not_found');
+  end if;
+
+  if v_case.seal_state is null then
+    return pg_catalog.jsonb_build_object('result', 'seal_state_unknown');
+  end if;
+
+  if v_case.seal_state = 'sealed_unopened' then
+    v_ceiling := 0;
+  else
+    if v_case.resolved_annual_plan_id is null then
+      return pg_catalog.jsonb_build_object('result', 'no_price_snapshot');
+    end if;
+    select * into v_plan from public.annual_plans where id = v_case.resolved_annual_plan_id;
+    if not found then
+      return pg_catalog.jsonb_build_object('result', 'no_price_snapshot');
+    end if;
+    -- THE FROZEN RETAIL PRICE OF ONE PACKAGE. Never a live catalogue
+    -- read, so a historical case is never re-priced by a later change.
+    v_ceiling := v_plan.catalog_unit_gross_cents;
+  end if;
+
+  if p_confirmed_cents > v_ceiling then
+    return pg_catalog.jsonb_build_object(
+      'result', 'above_ceiling',
+      'ceiling_cents', v_ceiling
+    );
+  end if;
+
+  update public.withdrawal_requests
+     set suggested_value_loss_cents = v_ceiling,
+         confirmed_value_loss_cents = p_confirmed_cents,
+         value_loss_confirmed_by    = p_actor_user_id,
+         value_loss_confirmed_at    = pg_catalog.now(),
+         updated_at                 = pg_catalog.now()
+   where id = p_withdrawal_id
+  returning * into v_case;
+
+  perform public.record_admin_activity(
+    p_actor_user_id, 'customer_rights', 'withdrawal.value_loss', 'withdrawal',
+    p_withdrawal_id::text, 'Wertersatz bestätigt', gen_random_uuid(),
+    pg_catalog.jsonb_build_object('confirmed_cents', p_confirmed_cents, 'ceiling_cents', v_ceiling)
+  );
+
+  return pg_catalog.jsonb_build_object(
+    'result', 'confirmed',
+    'confirmed_cents', v_case.confirmed_value_loss_cents,
+    'ceiling_cents', v_ceiling
+  );
+end;
+$$;
+
+-- ── THE REFUND, PREPARED BUT NOT PAID ─────────────────────────
+--
+-- IT COMPUTES THE AMOUNT. No caller supplies one, and there is no
+-- parameter for it - the figure is the plan's own total minus the
+-- confirmed value loss, floored at zero.
+--
+-- IT DOES NOT MOVE MONEY. This marks a case approved_for_payout and
+-- stamps one refund_operation_id; the Stripe call is a separate,
+-- explicit step outside the database. The unique index on
+-- refund_operation_id is what makes a second approval impossible, so a
+-- double-click cannot become a double refund.
+create or replace function public.admin_approve_withdrawal_refund(
+  p_actor_user_id uuid,
+  p_withdrawal_id uuid
+)
+returns jsonb
+language plpgsql
+volatile
+security definer set search_path = ''
+as $$
+declare
+  v_case   public.withdrawal_requests;
+  v_plan   public.annual_plans;
+  v_paid   integer;
+  v_loss   integer;
+  v_refund integer;
+begin
+  select * into v_case from public.withdrawal_requests where id = p_withdrawal_id for update;
+  if not found then
+    return pg_catalog.jsonb_build_object('result', 'not_found');
+  end if;
+
+  if v_case.refund_state in ('approved_for_payout', 'executed') then
+    return pg_catalog.jsonb_build_object(
+      'result', 'already_approved',
+      'refund_amount_cents', v_case.refund_amount_cents,
+      'refund_operation_id', v_case.refund_operation_id
+    );
+  end if;
+
+  -- A case that may still be refused is not ready to be paid.
+  if v_case.timeliness = 'late' then
+    return pg_catalog.jsonb_build_object('result', 'case_is_late');
+  end if;
+
+  -- BGB 357 Abs. 4: the goods, or proof they were sent - unless we never
+  -- asked for them back.
+  if v_case.return_requirement = 'return_requested'
+     and v_case.return_received_at is null
+     and v_case.return_dispatch_proof_at is null then
+    return pg_catalog.jsonb_build_object('result', 'return_outstanding');
+  end if;
+
+  if v_case.resolved_annual_plan_id is null then
+    return pg_catalog.jsonb_build_object('result', 'no_contract_resolved');
+  end if;
+
+  select * into v_plan from public.annual_plans where id = v_case.resolved_annual_plan_id;
+  if not found then
+    return pg_catalog.jsonb_build_object('result', 'no_contract_resolved');
+  end if;
+
+  -- EVERYTHING PAID, INCLUDING THE OUTBOUND SHIPPING. BGB 357 Abs. 1
+  -- repays the delivery costs too; there is no rule here that keeps them.
+  v_paid   := v_plan.total_gross_cents;
+  v_loss   := coalesce(v_case.confirmed_value_loss_cents, 0);
+  v_refund := greatest(0, v_paid - v_loss);
+
+  update public.withdrawal_requests
+     set refund_amount_cents = v_refund,
+         refund_state        = 'approved_for_payout',
+         refund_operation_id = coalesce(refund_operation_id, gen_random_uuid()),
+         case_state          = 'refund_pending',
+         updated_at          = pg_catalog.now()
+   where id = p_withdrawal_id
+  returning * into v_case;
+
+  perform public.record_admin_activity(
+    p_actor_user_id, 'customer_rights', 'withdrawal.refund_approved', 'withdrawal',
+    p_withdrawal_id::text, 'Erstattung freigegeben', v_case.refund_operation_id,
+    pg_catalog.jsonb_build_object(
+      'paid_cents', v_paid, 'value_loss_cents', v_loss, 'refund_cents', v_refund
+    )
+  );
+
+  return pg_catalog.jsonb_build_object(
+    'result', 'approved',
+    'paid_cents', v_paid,
+    'value_loss_cents', v_loss,
+    'refund_amount_cents', v_refund,
+    'refund_operation_id', v_case.refund_operation_id
+  );
+end;
+$$;
+
+-- ── COMPLAINTS AND TERMINATIONS ───────────────────────────────
+create or replace function public.admin_advance_complaint(
+  p_actor_user_id uuid,
+  p_complaint_id  uuid,
+  p_case_state    text,
+  p_internal_note text default null
+)
+returns jsonb
+language plpgsql
+volatile
+security definer set search_path = ''
+as $$
+declare
+  v_row public.complaint_requests;
+begin
+  if p_case_state not in ('under_review', 'evidence_requested', 'remedy_offered',
+                          'replacement_sent', 'refunded', 'rejected', 'closed') then
+    return pg_catalog.jsonb_build_object('result', 'state_unknown');
+  end if;
+
+  update public.complaint_requests
+     set case_state    = p_case_state,
+         internal_note = coalesce(p_internal_note, internal_note),
+         updated_at    = pg_catalog.now()
+   where id = p_complaint_id
+  returning * into v_row;
+
+  if not found then
+    return pg_catalog.jsonb_build_object('result', 'not_found');
+  end if;
+
+  perform public.record_admin_activity(
+    p_actor_user_id, 'customer_rights', 'complaint.advanced', 'complaint',
+    p_complaint_id::text, 'Reklamation bearbeitet', gen_random_uuid(),
+    pg_catalog.jsonb_build_object('case_state', p_case_state)
+  );
+
+  return pg_catalog.jsonb_build_object('result', 'advanced', 'case_state', v_row.case_state);
+end;
+$$;
+
+create or replace function public.admin_review_termination(
+  p_actor_user_id uuid,
+  p_termination_id uuid,
+  p_case_state    text,
+  p_internal_note text default null
+)
+returns jsonb
+language plpgsql
+volatile
+security definer set search_path = ''
+as $$
+declare
+  v_row public.termination_requests;
+begin
+  if p_case_state not in ('under_review', 'acknowledged_ends_automatically',
+                          'scheduled', 'effective', 'rejected', 'closed') then
+    return pg_catalog.jsonb_build_object('result', 'state_unknown');
+  end if;
+
+  update public.termination_requests
+     set case_state    = p_case_state,
+         internal_note = coalesce(p_internal_note, internal_note),
+         updated_at    = pg_catalog.now()
+   where id = p_termination_id
+  returning * into v_row;
+
+  if not found then
+    return pg_catalog.jsonb_build_object('result', 'not_found');
+  end if;
+
+  perform public.record_admin_activity(
+    p_actor_user_id, 'customer_rights', 'termination.reviewed', 'termination',
+    p_termination_id::text, 'Kündigung geprüft', gen_random_uuid(),
+    pg_catalog.jsonb_build_object('case_state', p_case_state)
+  );
+
+  return pg_catalog.jsonb_build_object('result', 'reviewed', 'case_state', v_row.case_state);
+end;
+$$;
+
+-- ── PURCHASE RESTRICTIONS ─────────────────────────────────────
+--
+-- Created by a named administrator or not at all. There is no trigger,
+-- no counter and no automatic path into this table anywhere in the
+-- migration - exercising a statutory right may not cost a customer
+-- their ability to shop.
+create or replace function public.admin_create_purchase_restriction(
+  p_actor_user_id  uuid,
+  p_user_id        uuid,
+  p_scope          text,
+  p_reason_category text,
+  p_internal_note  text default null,
+  p_expires_at     timestamptz default null
+)
+returns jsonb
+language plpgsql
+volatile
+security definer set search_path = ''
+as $$
+declare
+  v_row public.purchase_restrictions;
+begin
+  if p_scope not in ('annual_plan', 'recurring_subscription', 'all_new_plan_purchases') then
+    return pg_catalog.jsonb_build_object('result', 'scope_unknown');
+  end if;
+  if p_reason_category not in ('repeated_withdrawal_pattern', 'payment_abuse',
+                               'chargeback_history', 'manual_review', 'other') then
+    return pg_catalog.jsonb_build_object('result', 'reason_unknown');
+  end if;
+  if p_expires_at is not null and p_expires_at <= pg_catalog.now() then
+    return pg_catalog.jsonb_build_object('result', 'expiry_in_past');
+  end if;
+
+  begin
+    insert into public.purchase_restrictions
+      (user_id, scope, reason_category, internal_note, created_by, expires_at)
+    values
+      (p_user_id, p_scope, p_reason_category, p_internal_note, p_actor_user_id, p_expires_at)
+    returning * into v_row;
+  exception
+    when unique_violation then
+      return pg_catalog.jsonb_build_object('result', 'already_restricted');
+  end;
+
+  perform public.record_admin_activity(
+    p_actor_user_id, 'customer_rights', 'restriction.created', 'customer',
+    p_user_id::text, 'Kaufsperre gesetzt', gen_random_uuid(),
+    -- The CATEGORY, never the note: the note is prose about a person.
+    pg_catalog.jsonb_build_object('scope', p_scope, 'reason_category', p_reason_category)
+  );
+
+  return pg_catalog.jsonb_build_object('result', 'created', 'restriction_id', v_row.id);
+end;
+$$;
+
+create or replace function public.admin_lift_purchase_restriction(
+  p_actor_user_id  uuid,
+  p_restriction_id uuid
+)
+returns jsonb
+language plpgsql
+volatile
+security definer set search_path = ''
+as $$
+declare
+  v_row public.purchase_restrictions;
+begin
+  update public.purchase_restrictions
+     set active    = false,
+         lifted_at = pg_catalog.now(),
+         lifted_by = p_actor_user_id
+   where id = p_restriction_id and active = true
+  returning * into v_row;
+
+  if not found then
+    return pg_catalog.jsonb_build_object('result', 'not_found_or_already_lifted');
+  end if;
+
+  perform public.record_admin_activity(
+    p_actor_user_id, 'customer_rights', 'restriction.lifted', 'customer',
+    v_row.user_id::text, 'Kaufsperre aufgehoben', gen_random_uuid(),
+    pg_catalog.jsonb_build_object('scope', v_row.scope)
+  );
+
+  return pg_catalog.jsonb_build_object('result', 'lifted');
+end;
+$$;
+
+-- ── AND NONE OF THEM IS REACHABLE FROM A BROWSER ──────────────
+
+revoke all on function public.admin_set_withdrawal_seal_state(uuid, uuid, text) from public, anon, authenticated;
+revoke all on function public.admin_set_withdrawal_return_requirement(uuid, uuid, text) from public, anon, authenticated;
+revoke all on function public.admin_record_withdrawal_return(uuid, uuid, text, timestamptz) from public, anon, authenticated;
+revoke all on function public.admin_confirm_withdrawal_value_loss(uuid, uuid, integer) from public, anon, authenticated;
+revoke all on function public.admin_approve_withdrawal_refund(uuid, uuid) from public, anon, authenticated;
+revoke all on function public.admin_advance_complaint(uuid, uuid, text, text) from public, anon, authenticated;
+revoke all on function public.admin_review_termination(uuid, uuid, text, text) from public, anon, authenticated;
+revoke all on function public.admin_create_purchase_restriction(uuid, uuid, text, text, text, timestamptz) from public, anon, authenticated;
+revoke all on function public.admin_lift_purchase_restriction(uuid, uuid) from public, anon, authenticated;
+
+grant execute on function public.admin_set_withdrawal_seal_state(uuid, uuid, text) to service_role;
+grant execute on function public.admin_set_withdrawal_return_requirement(uuid, uuid, text) to service_role;
+grant execute on function public.admin_record_withdrawal_return(uuid, uuid, text, timestamptz) to service_role;
+grant execute on function public.admin_confirm_withdrawal_value_loss(uuid, uuid, integer) to service_role;
+grant execute on function public.admin_approve_withdrawal_refund(uuid, uuid) to service_role;
+grant execute on function public.admin_advance_complaint(uuid, uuid, text, text) to service_role;
+grant execute on function public.admin_review_termination(uuid, uuid, text, text) to service_role;
+grant execute on function public.admin_create_purchase_restriction(uuid, uuid, text, text, text, timestamptz) to service_role;
+grant execute on function public.admin_lift_purchase_restriction(uuid, uuid) to service_role;
+
+
+-- 10. WHY THIS MAY BE APPLIED BEFORE ITS CODE ──────────────────
 --
 --   EVERY ADDED COLUMN IS NULLABLE OR DEFAULTED. The application
 --   running in Production writes none of them and continues to work
@@ -1014,7 +1553,7 @@ commit;
 
 
 -- ============================================================
--- 10. VERIFY - READ ONLY, AFTER APPLYING. NOTHING BELOW RUNS.
+-- 11. VERIFY - READ ONLY, AFTER APPLYING. NOTHING BELOW RUNS.
 -- ============================================================
 --
 --   A. THE RECEIPT COLUMNS EXIST AND NOTHING WAS BACKFILLED.

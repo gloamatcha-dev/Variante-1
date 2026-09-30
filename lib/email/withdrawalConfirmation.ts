@@ -56,6 +56,40 @@ function fmtDateTime(iso: string): { date: string; time: string } {
  * access, directly unit-testable, matching the convention in
  * lib/email/orderConfirmation.ts.
  */
+/**
+ * WHERE THE GOODS GO BACK, AND WHO PAYS THE POSTAGE.
+ *
+ * The confirmation is the moment the consumer is actually deciding what
+ * to do next, so it carries the return address rather than making them
+ * hunt for it on the website.
+ *
+ * THE RETURN-COST SENTENCE IS THE EGBGB ANLAGE 1 WORDING, VERBATIM. It
+ * may only be used because the same information is given before the
+ * contract is concluded - it is on /widerruf and in the AGB - which is
+ * what BGB 357 Abs. 6 requires before the consumer can be asked to
+ * carry those costs at all.
+ *
+ * WHAT IS DELIBERATELY ABSENT: any suggestion that money has moved, or
+ * will move on a particular day. The repayment has its own message,
+ * sent when it has actually been arranged.
+ */
+const RETURN_ADDRESS_LINES = [
+  "Cara 2 GmbH",
+  "Hardenbergstr. 4",
+  "10623 Berlin",
+  "Deutschland",
+];
+
+const RETURN_COST_SENTENCE = "Sie tragen die unmittelbaren Kosten der Rücksendung der Waren.";
+
+const NEXT_STEPS_HTML = `<tr><td style="padding:0 0 28px 0;font-size:14px;line-height:1.7;color:${GLOA_NEAR_BLACK};">
+<p style="font-size:14px;line-height:1.6;margin:0 0 8px;font-weight:600;">So geht es weiter</p>
+<p style="font-size:14px;line-height:1.6;margin:0 0 12px;">Sende die Ware bitte unverzüglich, spätestens binnen vierzehn Tagen ab dieser Erklärung, an uns zurück:</p>
+<p style="font-size:14px;line-height:1.6;margin:0 0 12px;">${RETURN_ADDRESS_LINES.join("<br/>")}</p>
+<p style="font-size:14px;line-height:1.6;margin:0 0 12px;">${RETURN_COST_SENTENCE}</p>
+<p style="font-size:14px;line-height:1.6;margin:0;">Diese E-Mail bestätigt den Eingang deiner Widerrufserklärung. Sie ist noch keine Erstattung. Über die Rückzahlung informieren wir dich gesondert, sobald sie veranlasst ist.</p>
+</td></tr>`;
+
 export function buildWithdrawalConfirmationEmail(input: WithdrawalConfirmationInput): BuiltWithdrawalConfirmationEmail {
   const { customerName, orderReference, scope, scopeNote, customerNote, submittedAt } = input;
   const { date, time } = fmtDateTime(submittedAt);
@@ -86,6 +120,7 @@ ${scopeNoteHtml}
 ${customerNoteHtml}
 <p style="font-size:14px;line-height:1.5;margin:16px 0 0;">Eingegangen am ${escapeHtml(date)} um ${escapeHtml(time)} Uhr.</p>
 </td></tr>
+${NEXT_STEPS_HTML}
 ${emailFooter(`Fragen zu deinem Widerruf? <a href="mailto:hello@gloamatcha.com" style="color:${GLOA_BERRY};">hello@gloamatcha.com</a>
 <br/><br/>
 ${legalLinks(input.origin)}`)}`);
@@ -100,6 +135,17 @@ ${legalLinks(input.origin)}`)}`);
     scopeNote ? `Betroffener Teil: ${scopeNote}` : "",
     customerNote ? `Anmerkung: ${customerNote}` : "",
     `Eingegangen am ${date} um ${time} Uhr.`,
+    "",
+    "So geht es weiter",
+    "Sende die Ware bitte unverzüglich, spätestens binnen vierzehn Tagen ab dieser",
+    "Erklärung, an uns zurück:",
+    ...RETURN_ADDRESS_LINES,
+    "",
+    RETURN_COST_SENTENCE,
+    "",
+    "Diese E-Mail bestätigt den Eingang deiner Widerrufserklärung. Sie ist noch keine",
+    "Erstattung. Über die Rückzahlung informieren wir dich gesondert, sobald sie",
+    "veranlasst ist.",
     "",
     "Fragen zu deinem Widerruf? hello@gloamatcha.com",
     legalLinksText(input.origin),

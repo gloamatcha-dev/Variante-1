@@ -1,16 +1,32 @@
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
-import { getSiteOrigin } from "../../../lib/siteUrl";
-import { getResendClient } from "../../../lib/resend";
-import { buildWithdrawalConfirmationEmail } from "../../../lib/email/withdrawalConfirmation";
+import { buildWithdrawalSubmissionDeps } from "../../../lib/withdrawalSubmissionDeps";
+import { submitWithdrawal } from "../../../lib/withdrawalSubmission";
+import {
+  consumeRateLimit,
+  rateLimitKeyFromRequest,
+  type RateLimitState,
+} from "../../../lib/launchRateLimit";
 
-// § 356a BGB electronic withdrawal function. This endpoint records a
-// customer's withdrawal declaration durably and, best-effort, sends the
-// required § 356a Abs. 4 confirmation. It is deliberately NOT an order
-// lookup API: it never reads public.orders, never validates
-// order_reference against real order data, and never echoes back
-// anything beyond a neutral acknowledgement - the same response shape
-// regardless of whether order_reference happens to match a real order,
-// so this can never be used to enumerate or confirm order numbers.
+// § 356a BGB electronic withdrawal function.
+//
+// ── WHAT CHANGED, AND WHAT DID NOT (migration 070) ───────────
+//
+// This route used to do one bare INSERT of the declaration. It now runs
+// the whole case through lib/withdrawalSubmission.ts: the order is
+// resolved, the receipt is read, the deadline is computed by
+// lib/withdrawalDeadline.ts, and an annual plan's future deliveries are
+// frozen where the case cannot safely be refused.
+//
+// WHAT DID NOT CHANGE IS THE THING THAT MATTERS MOST HERE: the response.
+// It is byte-identical whether the reference matched a real order, a
+// real order belonging to somebody else, or nothing at all - so this
+// still cannot be used to enumerate or confirm order numbers. The
+// resolution happens entirely server-side and is written to columns no
+// browser can read.
+//
+// The route stays a parser: shapes, sizes and a rate limit. Every
+// decision that has a legal consequence is made in the module beside it,
+// where it can be tested without a network.
 
 const ALLOWED_SCOPE = ["whole_order", "partial"] as const;
 type Scope = (typeof ALLOWED_SCOPE)[number];
@@ -22,10 +38,15 @@ const MAX_EMAIL_LEN = 254;
 const MAX_ORDER_REFERENCE_LEN = 200;
 const MAX_SCOPE_NOTE_LEN = 500;
 const MAX_CUSTOMER_NOTE_LEN = 2000;
+const MAX_IDEMPOTENCY_KEY_LEN = 200;
+const MIN_IDEMPOTENCY_KEY_LEN = 8;
 
 // Generous ceiling on the raw request body, rejecting obviously
 // oversized payloads before they're even parsed as JSON.
 const MAX_BODY_BYTES = 20_000;
+
+/** In-process, per-caller. The same shape /api/launch uses. */
+const rateLimitState: RateLimitState = new Map();
 
 type ErrorResponse = { error: string };
 type SuccessResponse = { ok: true; submittedAt: string; confirmationEmailSent: boolean };
@@ -34,11 +55,23 @@ function isScope(value: unknown): value is Scope {
   return typeof value === "string" && (ALLOWED_SCOPE as readonly string[]).includes(value);
 }
 
+function tooManyRequests(retryAfterSeconds: number): Response {
+  return Response.json(
+    { error: "Zu viele Anfragen. Bitte versuche es später erneut." } as ErrorResponse,
+    { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } }
+  );
+}
+
 export async function POST(request: Request): Promise<Response> {
   const contentType = request.headers.get("content-type") || "";
   if (!contentType.toLowerCase().includes("application/json")) {
     return Response.json({ error: "Ungültige Anfrage." } as ErrorResponse, { status: 400 });
   }
+
+  // Before the body is read: counts every request that gets this far.
+  const bucket = rateLimitKeyFromRequest(request);
+  const limit = consumeRateLimit(rateLimitState, bucket, Date.now());
+  if (!limit.allowed) return tooManyRequests(limit.retryAfterSeconds);
 
   const contentLength = Number(request.headers.get("content-length") || "0");
   if (contentLength > MAX_BODY_BYTES) {
@@ -56,11 +89,16 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: "Ungültige Anfrage." } as ErrorResponse, { status: 400 });
   }
 
-  const { name, email, orderReference, scope, scopeNote, customerNote, website } = body as Record<string, unknown>;
+  const {
+    name, email, orderReference, scope, scopeNote, customerNote, website, idempotencyKey,
+  } = body as Record<string, unknown>;
 
   // Honeypot: same silent-discard pattern as /api/contact.
   if (typeof website === "string" && website.trim() !== "") {
-    return Response.json({ ok: true, submittedAt: new Date().toISOString(), confirmationEmailSent: false } as SuccessResponse, { status: 200 });
+    return Response.json(
+      { ok: true, submittedAt: new Date().toISOString(), confirmationEmailSent: false } as SuccessResponse,
+      { status: 200 }
+    );
   }
 
   if (typeof name !== "string" || name.trim().length === 0 || name.trim().length > MAX_NAME_LEN) {
@@ -101,76 +139,49 @@ export async function POST(request: Request): Promise<Response> {
     trimmedCustomerNote = customerNote.trim() || null;
   }
 
+  // The browser's own retry token. Out-of-range values are DROPPED
+  // rather than refused: a bad key must not cost somebody their
+  // declaration, it only costs them the duplicate protection.
+  let key: string | null = null;
+  if (typeof idempotencyKey === "string") {
+    const k = idempotencyKey.trim();
+    if (k.length >= MIN_IDEMPOTENCY_KEY_LEN && k.length <= MAX_IDEMPOTENCY_KEY_LEN) key = k;
+  }
+
   const admin = getSupabaseAdmin();
   if (!admin) {
     console.error("Withdrawal error: Supabase admin client is not configured.");
     return Response.json({ error: "Widerruf kann gerade nicht gespeichert werden. Schreib uns direkt an hello@gloamatcha.com." } as ErrorResponse, { status: 503 });
   }
 
-  const { data: inserted, error: insertError } = await admin
-    .from("withdrawal_requests")
-    .insert({
-      customer_name: trimmedName,
-      contact_email: trimmedEmail,
-      order_reference: trimmedOrderReference,
-      scope,
-      scope_note: trimmedScopeNote,
-      customer_note: trimmedCustomerNote,
-    })
-    .select("id, submitted_at")
-    .single();
-
-  if (insertError || !inserted) {
-    console.error("Withdrawal error: could not persist withdrawal request:", insertError?.message);
-    return Response.json({ error: "Widerruf kann gerade nicht gespeichert werden. Schreib uns direkt an hello@gloamatcha.com." } as ErrorResponse, { status: 503 });
-  }
-
-  // The durable record above is the legally required part and has
-  // already succeeded at this point. The confirmation email is
-  // best-effort: Resend production is currently paused (Task 25A), so
-  // this honestly reports whether it was actually sent rather than
-  // claiming delivery.
-  let confirmationEmailSent = false;
-  const resend = getResendClient();
-  const fromAddress = process.env.RESEND_CONTACT_FROM;
-  if (resend && fromAddress) {
-    const { subject, html, text } = buildWithdrawalConfirmationEmail({ origin: getSiteOrigin() ?? undefined,
+  try {
+    const result = await submitWithdrawal(buildWithdrawalSubmissionDeps(admin), {
       customerName: trimmedName,
+      contactEmail: trimmedEmail,
       orderReference: trimmedOrderReference,
       scope,
       scopeNote: trimmedScopeNote,
       customerNote: trimmedCustomerNote,
-      submittedAt: inserted.submitted_at,
+      idempotencyKey: key,
+      // No session is read here: § 356a must work logged out, and an
+      // authenticated caller gains nothing this route would expose.
+      sessionUserId: null,
     });
-    try {
-      const { error: sendError } = await resend.emails.send({
-        from: fromAddress,
-        to: trimmedEmail,
-        replyTo: "hello@gloamatcha.com",
-        subject,
-        html,
-        text,
-      });
-      confirmationEmailSent = !sendError;
-      if (sendError) console.error(`Withdrawal confirmation email: send failed for ${inserted.id}:`, sendError.message);
-    } catch (err) {
-      console.error(`Withdrawal confirmation email: send failed for ${inserted.id}:`, err instanceof Error ? err.message : err);
-    }
-  } else {
-    console.error("Withdrawal confirmation email: RESEND_API_KEY or RESEND_CONTACT_FROM is not configured.");
+
+    // THE SAME THREE FIELDS IN EVERY CASE. No case id, no timeliness, no
+    // deadline, no resolution, and no hint that a duplicate was
+    // recognised - a differing shape would be the leak.
+    return Response.json(
+      {
+        ok: true,
+        submittedAt: result.submittedAt,
+        confirmationEmailSent: result.confirmationEmailSent,
+      } as SuccessResponse,
+      { status: 200 }
+    );
+  } catch (err) {
+    console.error("Withdrawal error: could not persist withdrawal request:",
+      err instanceof Error ? err.message : err);
+    return Response.json({ error: "Widerruf kann gerade nicht gespeichert werden. Schreib uns direkt an hello@gloamatcha.com." } as ErrorResponse, { status: 503 });
   }
-
-  const { error: statusError } = await admin
-    .from("withdrawal_requests")
-    .update({
-      confirmation_status: confirmationEmailSent ? "sent" : "failed",
-      confirmed_at: confirmationEmailSent ? new Date().toISOString() : null,
-    })
-    .eq("id", inserted.id);
-  if (statusError) console.error(`Withdrawal error: could not update confirmation status for ${inserted.id}:`, statusError.message);
-
-  return Response.json(
-    { ok: true, submittedAt: inserted.submitted_at, confirmationEmailSent } as SuccessResponse,
-    { status: 200 }
-  );
 }
