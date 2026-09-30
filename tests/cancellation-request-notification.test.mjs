@@ -696,6 +696,7 @@ test("email: the template is a pure leaf, like its siblings", () => {
     "brand.ts",
     "cancellationConfirmation.ts", "cancellationOutcome.ts",
     "cancellationRequestNotification.ts",
+    "complaintReceived.ts",
     "internalOrderNotification.ts",
     // Phase 5 added launchConfirmation.ts, the double opt-in mail for
     // the one-time launch notification list. It is a customer message
@@ -727,7 +728,10 @@ test("email: the template is a pure leaf, like its siblings", () => {
         "orderCancellationConfirmation.ts", "orderConfirmation.ts", "paymentProblem.ts",
     "refundConfirmation.ts", "shipmentConfirmation.ts", "subscriptionEnded.ts",
     "subscriptionStarted.ts",
+    "terminationReceived.ts",
     "withdrawalConfirmation.ts",
+    "withdrawalRefundCompleted.ts",
+    "withdrawalReturnReceived.ts",
   ]);
 });
 
@@ -1158,10 +1162,10 @@ test("regression: THIS message stays internal-only, separate from the outcome em
   // no message, names no recipient and sends nothing, so it cannot be
   // the "second customer mail" this guard exists to catch - and the
   // count below still trips on a real fourteenth template.
-  assert.equal(templates.length, 17, "an unexpected template was added");
+  assert.equal(templates.length, 21, "an unexpected template was added");
   assert.equal(
     templates.filter(n => n !== "brand.ts").length,
-    16,
+    20,
     "an unexpected template was added"
   );
   assert.ok(templates.includes("cancellationRequestNotification.ts"));

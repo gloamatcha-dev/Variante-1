@@ -78,7 +78,7 @@ Diese Nachricht bestätigt den Eingang deiner Rücksendung. Sie ist noch keine E
 </td></tr>`;
 
   const html = emailShell(subject, `
-${emailPreheader(`Rücksendung zu ${input.orderReference} eingegangen.`)}
+${emailPreheader(`Rücksendung zu ${ref} eingegangen.`)}
 ${origin ? emailHeader(origin) : ""}
 ${emailEyebrow("Widerruf")}
 ${emailHeadline("Rücksendung<br/>angekommen.")}

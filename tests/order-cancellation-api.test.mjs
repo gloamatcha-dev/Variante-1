@@ -157,13 +157,23 @@ test("cancellation: the route never touches the withdrawal flow", () => {
 
 test("cancellation: the withdrawal route is unchanged by this feature", () => {
   const source = readFileSync(path.join(ROOT, "app/api/withdrawal/route.ts"), "utf-8");
-  // Still its own independent insert into its own table.
-  assert.ok(source.includes('.from("withdrawal_requests")'));
-  assert.ok(source.includes(".insert({"));
-  // And still knows nothing about cancellation requests or refunds.
-  assert.ok(!source.includes("cancellation_requested_at"));
-  assert.ok(!source.includes("request_order_cancellation"));
-  assert.ok(!source.includes("apply_order_refund_state"));
+  // MIGRATION 070 MOVED THE WRITE, NOT THE BOUNDARY. The route is now a
+  // parser and lib/withdrawalSubmissionDeps.ts owns the table access, so
+  // the independent insert is asserted there. What this guard is really
+  // about - that withdrawal and order cancellation never learn about
+  // each other - is unchanged and checked on both files below.
+  const deps = readFileSync(path.join(ROOT, "lib/withdrawalSubmissionDeps.ts"), "utf-8");
+  assert.ok(deps.includes('.from("withdrawal_requests")'),
+    "the withdrawal case no longer writes its own table");
+  assert.ok(deps.includes(".insert("),
+    "the withdrawal case no longer inserts its own row");
+
+  // And neither file knows anything about cancellation requests or refunds.
+  for (const [name, src] of Object.entries({ route: source, deps })) {
+    assert.ok(!src.includes("cancellation_requested_at"), `${name} learned about cancellation`);
+    assert.ok(!src.includes("request_order_cancellation"), `${name} learned about cancellation`);
+    assert.ok(!src.includes("apply_order_refund_state"), `${name} learned about refunds`);
+  }
 });
 
 test("cancellation: the database function is the ownership authority", () => {

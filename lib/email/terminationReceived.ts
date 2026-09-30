@@ -95,7 +95,7 @@ export function buildTerminationReceivedEmail(
     : "Art der Kündigung: ordentliche Kündigung";
 
   const html = emailShell(subject, `
-${emailPreheader(`Kündigung zu ${input.contractReference} eingegangen.`)}
+${emailPreheader(`Kündigung zu ${ref} eingegangen.`)}
 ${origin ? emailHeader(origin) : ""}
 ${emailEyebrow("Kündigung")}
 ${emailHeadline(extraordinary ? "Außerordentliche<br/>Kündigung." : "Kündigung<br/>eingegangen.")}

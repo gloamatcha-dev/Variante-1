@@ -1193,6 +1193,25 @@ test("Contact address: order mail prints the address a reply actually reaches", 
   }
   // The withdrawal confirmation is not order mail: it is a statutory
   // receipt, and its reply-to is the published contact address.
-  const withdrawal = readFileSync(new URL("../app/api/withdrawal/route.ts", import.meta.url), "utf-8");
-  assert.match(withdrawal, /replyTo: "hello@gloamatcha\.com"/);
+  //
+  // MIGRATION 070 MOVED THE SEND, NOT THE RULE. The route is now a
+  // parser and lib/withdrawalSubmissionDeps.ts owns everything that
+  // touches Resend, so that is where the reply-to lives. The claim this
+  // guard protects is unchanged, and it additionally checks that the
+  // route did not keep a second sender of its own.
+  const withdrawalSender = readFileSync(
+    new URL("../lib/withdrawalSubmissionDeps.ts", import.meta.url), "utf-8");
+  assert.match(withdrawalSender, /replyTo: "hello@gloamatcha\.com"/);
+  const withdrawalRoute = readFileSync(
+    new URL("../app/api/withdrawal/route.ts", import.meta.url), "utf-8");
+  assert.ok(!withdrawalRoute.includes("emails.send"),
+    "the withdrawal route sends mail directly again - there must be exactly one sender");
+
+  // The two new public rights surfaces reply to the same published
+  // address, for the same reason: they are statutory receipts.
+  for (const rel of ["../app/api/complaint/route.ts", "../app/api/termination/route.ts"]) {
+    const src = readFileSync(new URL(rel, import.meta.url), "utf-8");
+    assert.match(src, /replyTo: "hello@gloamatcha\.com"/,
+      `${rel} replies to an address other than the published contact one`);
+  }
 });

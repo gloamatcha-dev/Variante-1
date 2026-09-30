@@ -420,8 +420,8 @@ test("5d: no backend, migration or commercial logic changed", () => {
     // net-origin and gated by B2B_SELF_SERVICE_ENABLED, which is closed
     // by default. No B2C route is touched. Reviewed in
     // tests/b2b-checkout-settlement.test.mjs.
-["admin", "annual-plan", "b2b", "b2b-lead", "checkout", "contact", "cron", "internal", "launch",
-     "orders", "partnerships", "stripe", "subscriptions", "withdrawal"], "an API route changed");
+["admin", "annual-plan", "b2b", "b2b-lead", "checkout", "complaint", "contact", "cron", "internal", "launch",
+     "orders", "partnerships", "stripe", "subscriptions", "termination", "withdrawal"], "an API route changed");
   // 057 SIMPLIFIED THE LAUNCH DISCOUNT: the one-use claim architecture
   // 056 built is removed, because the code became reusable. Re-pinned
   // rather than deleted - what this guard protects is that nothing

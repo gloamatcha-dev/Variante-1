@@ -1165,6 +1165,7 @@ test("regression: the OPERATOR cancel route still sends nothing at all", () => {
     "brand.ts",
     "cancellationConfirmation.ts", "cancellationOutcome.ts",
     "cancellationRequestNotification.ts",
+    "complaintReceived.ts",
     "internalOrderNotification.ts",
     // Phase 5 added launchConfirmation.ts, the double opt-in mail for
     // the one-time launch notification list. It is a customer message
@@ -1196,7 +1197,10 @@ test("regression: the OPERATOR cancel route still sends nothing at all", () => {
         "orderCancellationConfirmation.ts", "orderConfirmation.ts", "paymentProblem.ts",
     "refundConfirmation.ts", "shipmentConfirmation.ts", "subscriptionEnded.ts",
     "subscriptionStarted.ts",
+    "terminationReceived.ts",
     "withdrawalConfirmation.ts",
+    "withdrawalRefundCompleted.ts",
+    "withdrawalReturnReceived.ts",
   ], "an unexpected email template was added");
   // Against stripped code: the template's header prose legitimately says
   // where the message goes, and a scan that read comments would call that

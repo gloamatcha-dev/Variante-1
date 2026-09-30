@@ -907,6 +907,7 @@ test("email: the template is a pure leaf, like the other six", () => {
     "brand.ts",
     "cancellationConfirmation.ts", "cancellationOutcome.ts",
     "cancellationRequestNotification.ts",
+    "complaintReceived.ts",
     "internalOrderNotification.ts",
     // Phase 5 added launchConfirmation.ts, the double opt-in mail for
     // the one-time launch notification list. It is a customer message
@@ -938,7 +939,10 @@ test("email: the template is a pure leaf, like the other six", () => {
         "orderCancellationConfirmation.ts", "orderConfirmation.ts", "paymentProblem.ts",
     "refundConfirmation.ts", "shipmentConfirmation.ts", "subscriptionEnded.ts",
     "subscriptionStarted.ts",
+    "terminationReceived.ts",
     "withdrawalConfirmation.ts",
+    "withdrawalRefundCompleted.ts",
+    "withdrawalReturnReceived.ts",
   ]);
 });
 

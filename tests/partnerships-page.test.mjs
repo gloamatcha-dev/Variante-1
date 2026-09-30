@@ -642,8 +642,8 @@ test("4c: one API route, no server action, no migration was added for this page"
     // the B2B self-service supply checkout. Gated by
     // B2B_SELF_SERVICE_ENABLED, closed by default, and touching no B2C
     // route. Reviewed in tests/b2b-checkout-settlement.test.mjs.
-["admin", "annual-plan", "b2b", "b2b-lead", "checkout", "contact", "cron", "internal", "launch",
-     "orders", "partnerships", "stripe", "subscriptions", "withdrawal"],
+["admin", "annual-plan", "b2b", "b2b-lead", "checkout", "complaint", "contact", "cron", "internal", "launch",
+     "orders", "partnerships", "stripe", "subscriptions", "termination", "withdrawal"],
     "an API route was added or removed");
   assert.ok(!page.includes('"use server"'), "a server action was added");
   // A partnership request is an email to a human. The route holds no

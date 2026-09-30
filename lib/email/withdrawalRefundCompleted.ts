@@ -94,7 +94,7 @@ Das ist der vollständige von dir gezahlte Betrag einschließlich der Lieferkost
 </td></tr>`;
 
   const html = emailShell(subject, `
-${emailPreheader(`Erstattung zu ${input.orderReference} veranlasst.`)}
+${emailPreheader(`Erstattung zu ${ref} veranlasst.`)}
 ${origin ? emailHeader(origin) : ""}
 ${emailEyebrow("Widerruf")}
 ${emailHeadline("Erstattung<br/>veranlasst.")}

@@ -256,8 +256,11 @@ test("the test-send harness mirrors production's From and Reply-To", () => {
   // Named after the preview file, so what was reviewed in the browser
   // and what --only asks for are the same string.
   assert.match(harness, /"03-widerrufseingang", "hello@gloamatcha\.com"/);
-  const route = read("app/api/withdrawal/route.ts");
-  assert.match(route, /replyTo: "hello@gloamatcha\.com"/);
+  // MIGRATION 070 MOVED THE SEND. The route is a parser now and
+  // lib/withdrawalSubmissionDeps.ts owns everything that touches Resend,
+  // so the reply-to this harness must mirror lives there.
+  const sender = read("lib/withdrawalSubmissionDeps.ts");
+  assert.match(sender, /replyTo: "hello@gloamatcha\.com"/);
 });
 
 test("the --only selector is validated before anything is sent", () => {

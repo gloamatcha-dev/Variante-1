@@ -94,7 +94,7 @@ export function buildComplaintReceivedEmail(
   const note = input.customerNote ? escapeHtml(input.customerNote) : null;
 
   const html = emailShell(subject, `
-${emailPreheader(`Reklamation zu ${input.orderReference} eingegangen.`)}
+${emailPreheader(`Reklamation zu ${ref} eingegangen.`)}
 ${origin ? emailHeader(origin) : ""}
 ${emailEyebrow("Reklamation")}
 ${emailHeadline("Reklamation<br/>eingegangen.")}

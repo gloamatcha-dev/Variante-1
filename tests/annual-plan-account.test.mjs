@@ -933,6 +933,10 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
     "/b2b/supply/checkout/session",
     "/checkout/quote",
     "/checkout/session",
+    // REKLAMATION: the public defect claim. Its own table, its own
+    // email, and no withdrawal logic - BGB 439 Abs. 2 puts transport
+    // costs on the seller.
+    "/complaint",
     "/contact",
     "/cron/retry-order-notifications",
     "/internal/orders/cancel",
@@ -969,6 +973,7 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
     "/stripe/webhook",
     "/subscriptions/cancel",
     "/subscriptions/checkout/session",
+    "/termination",
     "/withdrawal",
   ], "the API surface changed in a read-model phase");
 });

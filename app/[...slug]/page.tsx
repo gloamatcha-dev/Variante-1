@@ -71,6 +71,8 @@ const seo:Record<string,[string,string]>={
  "datenschutz":["Datenschutz","Informationen zum Umgang mit deinen Daten."],
  "agb":["AGB","Unsere Bedingungen für Bestellungen im GLOA Online-Shop."],
  "widerruf":["Widerruf","Informationen zu deinem gesetzlichen Widerrufsrecht."],
+ "kuendigung":["Kündigung","Verträge hier kündigen - ohne Konto, ohne Anmeldung und ohne Begründung."],
+ "reklamation":["Reklamation","Beschädigte, falsche oder mangelhafte Ware melden."],
  "versand":["Versandinformationen","Liefergebiete, Versandkosten und Lieferzeiten im Überblick."],
 };
 /**

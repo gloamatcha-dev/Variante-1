@@ -2665,11 +2665,11 @@ test("regression: the account reaches this feature ONLY through the endpoint", (
   // not a message: it renders no mail, names no recipient and sends
   // nothing. Counted here so a real fourteenth TEMPLATE still trips this
   // guard rather than hiding behind the new file.
-  assert.equal(templates.length, 17, "an unreviewed email template was added");
+  assert.equal(templates.length, 21, "an unreviewed email template was added");
   assert.ok(templates.includes("brand.ts"));
   assert.equal(
     templates.filter(n => n !== "brand.ts").length,
-    16,
+    20,
     "an unreviewed email template was added"
   );
   assert.deepEqual(
