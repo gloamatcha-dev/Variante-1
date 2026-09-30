@@ -1123,8 +1123,20 @@ test("regression: no migration was added and 022-033 are untouched", () => {
       // Scoped to public.orders: 050 creates four tables of its own and
       // whatever it does inside them is its own business. What neither
       // file may do is reach into the table the six states live on.
-      assert.ok(!/alter table public\.orders[\s\S]*?drop constraint/i.test(later),
-        `${name} drops a constraint from public.orders`);
+      // SCOPED TO ONE STATEMENT. This used to be
+      // /alter table public\.orders[\s\S]*?drop constraint/, whose lazy
+      // span reached from an `alter table public.orders` near the top of
+      // a file to a `drop constraint` on a DIFFERENT table hundreds of
+      // lines later - which is exactly how migration 070 tripped it
+      // while dropping a CHECK on admin_activity_log and nothing at all
+      // on orders. Each statement is now tested on its own.
+      const ordersStatements = later
+        .split(";")
+        .filter(s => /alter table public\.orders\b/i.test(s));
+      for (const statement of ordersStatements) {
+        assert.ok(!/drop constraint/i.test(statement),
+          `${name} drops a constraint from public.orders`);
+      }
       assert.ok(!/create policy[^;]*on public\.orders/i.test(later),
         `${name} creates a policy on public.orders`);
       assert.ok(!/grant[^;]*to (anon|authenticated)/i.test(later),
