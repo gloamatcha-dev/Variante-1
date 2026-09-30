@@ -260,6 +260,16 @@ export async function handleAnnualPlanCheckout(
     return fail(401, "Bitte melde dich an, um ein Jahresabo zu starten.");
   }
 
+  // THE ONE CLOCK THIS ROUTE READS (migration 067), hoisted.
+  //
+  // It used to be read where the claim expiry is computed. Migration
+  // 070's restriction gate needs the same instant EARLIER - a
+  // restriction expires on the wall clock - and reading it twice would
+  // let the gate and the claim disagree by however long the database
+  // round trips in between. So it is read once, here, and every later
+  // instant is derived from this value.
+  const requestAt = deps.now ? deps.now() : new Date();
+
   // 3b. THE PURCHASE RESTRICTION (migration 070). Immediately after the
   //     caller is known and before anything is read, written, priced or
   //     sent to Stripe - a restricted purchase must cost us nothing and
@@ -281,7 +291,7 @@ export async function handleAnnualPlanCheckout(
       return fail(503, UNAVAILABLE);
     }
     const decision = evaluatePurchaseRestrictions(
-      restrictions, "annual_plan", deps.now ? deps.now() : new Date()
+      restrictions, "annual_plan", requestAt
     );
     if (!decision.allowed) {
       console.error(
@@ -561,7 +571,7 @@ export async function handleAnnualPlanCheckout(
     names no subscription and blocks nobody, and migration 067 refuses
     the pair outright if this were sent for one.
   */
-  const nowMs = (deps.now ? deps.now() : new Date()).getTime();
+  const nowMs = requestAt.getTime();
   const claimExpiry = annualUpgradeClaimExpiry(new Date(nowMs));
 
   const rpcResult = await deps.createPendingPlan({
