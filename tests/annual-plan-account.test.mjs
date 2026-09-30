@@ -916,6 +916,20 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
     // tests/subscription-purchase-surface.test.mjs.
     "/admin/subscriptions",
     "/admin/waitlist",
+    // MIGRATION 070's REVIEW PASS: the withdrawal payout. The one route
+    // in the codebase that pays out a statutory refund, and deliberately
+    // NOT an action on the consumer rights desk - that desk decides
+    // cases and holds no Stripe import, which is what makes "the desk
+    // cannot move money" a fact about the file rather than a hope.
+    //
+    // It takes the write capability BEFORE it parses the body, accepts
+    // one action and one case id, re-reads the approved amount from the
+    // database, and sends the approval's own refund_operation_id as
+    // Stripe's idempotency key - so a double-click reaches the same
+    // refund rather than making a second one. It touches no account, no
+    // annual row and no annual function. Reviewed in
+    // tests/withdrawal-refund-execution.test.mjs.
+    "/admin/withdrawal-refund",
     "/annual-plan/checkout/session",
     // 4A.4a. The B2B enquiry from /for-cafes. That form was live and
     // discarding every submission; this route delivers it as one

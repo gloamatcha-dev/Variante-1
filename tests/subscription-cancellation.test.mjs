@@ -906,7 +906,14 @@ test("LATE: no Subscription Schedule is created, and the SDK says why", () => {
       if (!/\.(ts|tsx)$/.test(entry.name)) continue;
       const source = withoutComments(readFileSync(full, "utf-8"));
       for (const forbidden of ["subscriptionSchedules", "from_subscription", "end_behavior"]) {
-        if (source.includes(forbidden)) offenders.push(`${entry.name}: ${forbidden}`);
+        if (source.includes(forbidden)) {
+          // BY PATH, NOT BY BASENAME. Two files called route.ts are
+          // indistinguishable from each other, which would let an
+          // unreviewed route hide behind an allowlist entry written for
+          // a different one.
+          const rel = path.relative(ROOT, full).split(path.sep).join("/");
+          offenders.push(`${rel}: ${forbidden}`);
+        }
       }
     }
   };
@@ -2581,7 +2588,14 @@ test("regression: no Stripe write API for refunds appeared", () => {
       if (!/\.(ts|tsx)$/.test(entry.name)) continue;
       const source = withoutComments(readFileSync(full, "utf-8"));
       for (const forbidden of STRIPE_WRITES) {
-        if (source.includes(forbidden)) offenders.push(`${entry.name}: ${forbidden}`);
+        if (source.includes(forbidden)) {
+          // BY PATH, NOT BY BASENAME. Two files called route.ts are
+          // indistinguishable from each other, which would let an
+          // unreviewed route hide behind an allowlist entry written for
+          // a different one.
+          const rel = path.relative(ROOT, full).split(path.sep).join("/");
+          offenders.push(`${rel}: ${forbidden}`);
+        }
       }
     }
   };
@@ -2602,10 +2616,38 @@ test("regression: no Stripe write API for refunds appeared", () => {
   //
   // .cancel on a refund or a payment intent is still banned
   // everywhere, this file included.
-  const REFUND_WRITER = `adminOrderActions.ts: ${["refunds", ".create"].join("")}`;
-  assert.deepEqual(offenders.filter(o => o !== REFUND_WRITER), []);
-  assert.equal(offenders.filter(o => o.endsWith(["refunds", ".create"].join(""))).length, 1,
-    "a second refund writer appeared");
+  // TWO AUTHORISED REFUND WRITERS NOW, AND BOTH ARE NAMED.
+  //
+  // lib/adminOrderActions.ts, behind /api/admin/orders/refund, is the
+  // order desk's, and was the only one for as long as refunding a
+  // withdrawal was impossible.
+  //
+  // app/api/admin/withdrawal-refund/route.ts is the statutory one. A
+  // consumer who withdrew under BGB 355 has to be repaid, and before
+  // this route existed the database could approve a payout that nothing
+  // in the codebase could ever pay - an approval that sat there forever
+  // while the customer waited for their money.
+  //
+  // Both hold the same three properties, which is what makes the
+  // exception narrow rather than a loophole: the amount is re-read from
+  // the server's own row immediately before the call, no browser can
+  // supply one, and the idempotency key is an id the database minted
+  // under a unique index - so a retry reaches the SAME refund at Stripe
+  // instead of making a second one.
+  //
+  // .cancel on a refund or a payment intent is still banned everywhere.
+  // What was authorised is sending money BACK, never taking it back.
+  //
+  // Built from parts, like every other reference to this API in the
+  // suites: a suite containing the literal call would trip the
+  // self-scan asserting these tests make no real Stripe request.
+  const REFUND_WRITERS = [
+    `lib/adminOrderActions.ts: ${["refunds", ".create"].join("")}`,
+    `app/api/admin/withdrawal-refund/route.ts: ${["refunds", ".create"].join("")}`,
+  ];
+  assert.deepEqual(offenders.filter(o => !REFUND_WRITERS.includes(o)), []);
+  assert.equal(offenders.filter(o => o.endsWith(["refunds", ".create"].join(""))).length, 2,
+    "an unauthorised refund writer appeared");
 });
 
 test("regression: the account reaches this feature ONLY through the endpoint", () => {

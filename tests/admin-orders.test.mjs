@@ -543,8 +543,16 @@ test("7: /api/admin gained orders and nothing else", () => {
   // checkout, the payment webhook, the daily job, and the customer's
   // own quantity and cancellation routes. Reviewed in
   // tests/b2b-account-change.test.mjs.
+  // AND MIGRATION 070's REVIEW PASS ADDED "withdrawal-refund": the one
+  // route in the codebase that pays out a statutory withdrawal. It is
+  // deliberately NOT a "customer-rights" action - that desk decides
+  // cases and contains no Stripe import, so no amount of clicking
+  // around it can move money. This route accepts one action and one
+  // case id, re-reads the approved amount from the database, and sends
+  // the approval's own id as Stripe's idempotency key. Reviewed in
+  // tests/withdrawal-refund-execution.test.mjs.
   assert.deepEqual(dirs, ["activity", "annual-plans", "b2b", "customer-rights", "inventory", "launch",
-    "orders", "session", "subscriptions", "waitlist"]);
+    "orders", "session", "subscriptions", "waitlist", "withdrawal-refund"]);
   const orderDirs = readdirSync(path.join(ROOT, "app/api/admin/orders"), { withFileTypes: true })
     .filter(e => e.isDirectory()).map(e => e.name).sort();
   // PAKET 4A.1B added the four actions, one route each rather than one

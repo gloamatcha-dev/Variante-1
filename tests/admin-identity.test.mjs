@@ -352,6 +352,58 @@ test("4d: every WRITE route takes the write capability, every read says so", () 
     }
   }
 
+  /*
+    A FIFTH CLASS: THE ONE ROUTE THAT MOVES MONEY.
+
+    /api/admin/withdrawal-refund pays out a withdrawal refund the
+    database has already approved. It is not in WRITES because those
+    routes open through openAdminAction; this one calls
+    requireAdminIdentity directly, at the "write" capability, and it
+    does so BEFORE it parses the body - so a viewer is refused without
+    the request ever being read.
+
+    It is separate from the consumer rights desk on purpose. The desk
+    DECIDES cases and has no Stripe import at all, which is what makes
+    "no amount of clicking around the desk can move money" a fact about
+    the file rather than a hope. Paying is a different route, a
+    different request, and the only place in the codebase that calls
+    the refund API for a withdrawal.
+
+    What keeps it safe is that it has nothing to decide: it accepts one
+    action and one case id, re-reads the approved figure from the
+    database immediately before calling, and sends the approval's own
+    refund_operation_id - minted once under a unique index - as the
+    idempotency key. A double-click, a retried fetch and a replayed
+    request therefore all reach the SAME refund at Stripe.
+  */
+  const PAYOUT_WRITES = ["withdrawal-refund"];
+
+  for (const route of PAYOUT_WRITES) {
+    const code = codeOnly(read(`app/api/admin/${route}/route.ts`));
+    assert.match(code, /requireAdminIdentity\(request, "write"\)/,
+      `${route} moves money without taking the write capability`);
+    // THE GATE COMES FIRST. Not merely present - first.
+    assert.ok(code.indexOf('requireAdminIdentity(request, "write")')
+              < code.indexOf("await request.json()"),
+      `${route} parses a body before checking the session`);
+    // The actor is the session, never the request.
+    assert.match(code, /const actorUserId = gate\.session\.userId/,
+      `${route} does not take its actor from the verified session`);
+    // Every write leaves through migration 070's audited SQL writers.
+    for (const banned of [".insert(", ".update(", ".upsert(", ".delete("]) {
+      assert.ok(!code.includes(banned),
+        `${route} writes a table directly instead of through an audited RPC: ${banned}`);
+    }
+    // And it does not restate the role matrix for itself.
+    for (const banned of ["owner", "viewer", "canWrite", "canRead"]) {
+      assert.ok(!code.includes(banned), `${route} decides roles for itself: ${banned}`);
+    }
+    // It accepts no amount. The figure is the database's, always.
+    for (const banned of ["b.amount", "b.cents", "b.refundAmount", "Number(b."]) {
+      assert.ok(!code.includes(banned), `${route} reads an amount from the body: ${banned}`);
+    }
+  }
+
   for (const route of RESTRICTED_READS) {
     const code = codeOnly(read(`app/api/admin/${route}/route.ts`));
     assert.match(code, /requireAdminIdentity\(request, "read_sensitive"\)/,
@@ -383,7 +435,9 @@ test("4d: every WRITE route takes the write capability, every read says so", () 
   // And the three lists together are every session-gated admin route, so
   // a new one cannot be added without appearing in this test.
   const gated = adminRoutes().filter(r => !r.startsWith("launch/") && r !== "session");
-  assert.deepEqual(gated.sort(), [...WRITES, ...READS, ...RESTRICTED_READS, ...SENSITIVE_WRITES].sort(),
+  assert.deepEqual(gated.sort(),
+    [...WRITES, ...READS, ...RESTRICTED_READS,
+     ...SENSITIVE_WRITES, ...PAYOUT_WRITES].sort(),
     "an admin route exists that this test does not classify");
 });
 
