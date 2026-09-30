@@ -13,6 +13,18 @@
 -- row, which counts only the thirty-two above it. The SUMMARY itself is
 -- always computed from the actual rows - this line is the expectation to
 -- compare it against, never the source of it.
+--
+-- WHAT THE FINAL REVIEW PASS CHANGED, AND WHY THE COUNT DID NOT.
+--
+-- Migration 070 grew three columns, two functions, one constraint and
+-- one more queue predicate. Every one of those belongs to a check that
+-- ALREADY EXISTS and works by enumerating names, so each was added to
+-- its list rather than given a row of its own: check 31 now names ten
+-- columns, check 33 fifteen functions, check 34 six constraints, and
+-- check 26 refuses the one-in-flight predicate as well as the freeze.
+-- Twenty-seven and five are therefore still correct - and a preflight
+-- whose header count disagreed with its SUMMARY would be the first
+-- thing to distrust, which is why this note exists instead of a guess.
 -- ============================================================
 with
 fn as (
@@ -272,13 +284,14 @@ checks as (
   union all
   select 26, '070-dep',
          'its body still carries every semantic marker 070 preserves',
-         'skip locked, the refunded exclusion, the 6 hour lease, the limit clamp - and NO freeze predicate yet',
+         'skip locked, the refunded exclusion, the 6 hour lease, the limit clamp - and NEITHER 070 predicate yet',
          coalesce((select
              'skip_locked=' || (p.prosrc like '%skip locked%')::text
           || ' refunded=' || (p.prosrc like '%payment_status <> ''refunded''%')::text
           || ' lease=' || (p.prosrc like '%6 hours%')::text
           || ' clamp=' || (p.prosrc like '%least(greatest%')::text
           || ' already_frozen=' || (p.prosrc like '%annual_plan_delivery_freeze_active%')::text
+          || ' already_one_in_flight=' || (p.prosrc like '%e.state in (''scheduled'', ''claimed'')%')::text
              from pg_catalog.pg_proc p
              join pg_catalog.pg_namespace n on n.oid = p.pronamespace
              where n.nspname = 'public'
@@ -291,8 +304,13 @@ checks as (
                         and p.prosrc like '%payment_status <> ''refunded''%'
                         and p.prosrc like '%6 hours%'
                         and p.prosrc like '%least(greatest%'
-                        -- and 070 has NOT already been applied on top of it
-                        and p.prosrc not like '%annual_plan_delivery_freeze_active%') = 1
+                        -- and 070 has NOT already been applied on top of
+                        -- it. BOTH of its additions are checked: the
+                        -- freeze predicate, and the one-in-flight
+                        -- predicate that stops a held plan minting a
+                        -- backlog in one pass.
+                        and p.prosrc not like '%annual_plan_delivery_freeze_active%'
+                        and p.prosrc not like '%e.state in (''scheduled'', ''claimed'')%') = 1
               then 'PASS' else 'FAIL' end
 
   -- THE ONE CONSTRAINT 070 REPLACES RATHER THAN ADDS.
@@ -342,15 +360,23 @@ checks as (
               then 'PASS' else 'FAIL' end
 
   union all
+  -- Ten column names, not seven. The three added after the first
+  -- review - the permanent delivery stop, and the two that hold what
+  -- Stripe said - are checked here for the same reason as the rest: a
+  -- name already present would mean 070 is partially applied.
   select 31, '070-clean',
          'withdrawal_requests has none of the case columns yet', 'none',
          (select coalesce(string_agg(column_name, ', ' order by column_name), 'none')
             from wr_cols where column_name in
               ('case_state', 'timeliness', 'deadline_date', 'seal_state',
-               'refund_state', 'deliveries_frozen_at', 'idempotency_key')),
+               'refund_state', 'deliveries_frozen_at', 'idempotency_key',
+               'deliveries_permanently_stopped_at',
+               'refund_provider_reference', 'refund_failure_reason')),
          case when (select count(*) from wr_cols where column_name in
                      ('case_state', 'timeliness', 'deadline_date', 'seal_state',
-                      'refund_state', 'deliveries_frozen_at', 'idempotency_key')) = 0
+                      'refund_state', 'deliveries_frozen_at', 'idempotency_key',
+                      'deliveries_permanently_stopped_at',
+                      'refund_provider_reference', 'refund_failure_reason')) = 0
               then 'PASS' else 'FAIL' end
 
   union all
@@ -365,7 +391,7 @@ checks as (
 
   union all
   select 33, '070-clean',
-         'none of the function names 070 creates is already taken', 'none',
+         'none of the fifteen function names 070 creates is already taken', 'none',
          coalesce((select string_agg(proname::text, ', ' order by proname::text) from fn
                      where proname in (
                        'record_order_delivery', 'admin_mark_order_delivered',
@@ -376,6 +402,8 @@ checks as (
                        'admin_record_withdrawal_return',
                        'admin_confirm_withdrawal_value_loss',
                        'admin_approve_withdrawal_refund',
+                       'admin_record_withdrawal_refund_execution',
+                       'admin_record_withdrawal_refund_failure',
                        'admin_advance_complaint',
                        'admin_review_termination',
                        'admin_create_purchase_restriction',
@@ -390,6 +418,8 @@ checks as (
                         'admin_record_withdrawal_return',
                         'admin_confirm_withdrawal_value_loss',
                         'admin_approve_withdrawal_refund',
+                        'admin_record_withdrawal_refund_execution',
+                        'admin_record_withdrawal_refund_failure',
                         'admin_advance_complaint',
                         'admin_review_termination',
                         'admin_create_purchase_restriction',
@@ -405,18 +435,20 @@ checks as (
   -- table but 070 would fail on any table that already owns it.
   union all
   select 34, '070-clean',
-         'none of the five constraint names 070 adds is already taken', 'none',
+         'none of the six constraint names 070 adds is already taken', 'none',
          coalesce((select string_agg(conname::text, ', ' order by conname::text)
                      from pg_catalog.pg_constraint
                      where conname in ('orders_delivery_receipt_shape_check',
                                        'orders_delivery_admin_source_requires_actor_check',
                                        'withdrawal_requests_value_loss_decision_shape_check',
+                                       'withdrawal_requests_refund_execution_shape_check',
                                        'termination_requests_extraordinary_needs_reason_check',
                                        'purchase_restrictions_lift_shape_check')), 'none'),
          case when (select count(*) from pg_catalog.pg_constraint
                       where conname in ('orders_delivery_receipt_shape_check',
                                         'orders_delivery_admin_source_requires_actor_check',
                                         'withdrawal_requests_value_loss_decision_shape_check',
+                                        'withdrawal_requests_refund_execution_shape_check',
                                         'termination_requests_extraordinary_needs_reason_check',
                                         'purchase_restrictions_lift_shape_check')) = 0
               then 'PASS' else 'FAIL' end

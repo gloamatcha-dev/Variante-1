@@ -339,6 +339,54 @@ create unique index if not exists withdrawal_requests_refund_operation_key
   on public.withdrawal_requests(refund_operation_id)
   where refund_operation_id is not null;
 
+-- ── WHAT STRIPE SAID, AND WHEN ────────────────────────────────
+--
+-- The payout happens at Stripe, not here, so 'executed' is a claim
+-- about something that happened OUTSIDE this database. A claim with no
+-- evidence is worthless, so the state cannot be reached without the
+-- provider's own identifier for the refund.
+--
+-- refund_provider_reference is that identifier - re_... from Stripe. It
+-- is written by exactly one function, after the API call returned, and
+-- the CHECK below makes the state and the evidence inseparable: no row
+-- can say 'executed' without both a timestamp and a reference, and no
+-- row that never executed can carry either.
+--
+-- refund_failure_reason holds the provider's error when the call did
+-- not succeed, so a failed payout is a state an administrator can see
+-- and retry rather than a silence.
+
+alter table public.withdrawal_requests
+  add column if not exists refund_provider_reference text
+    check (refund_provider_reference is null
+           or char_length(btrim(refund_provider_reference)) > 0);
+
+alter table public.withdrawal_requests
+  add column if not exists refund_failure_reason text;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_catalog.pg_constraint
+    where conname = 'withdrawal_requests_refund_execution_shape_check'
+      and conrelid = 'public.withdrawal_requests'::regclass
+  ) then
+    alter table public.withdrawal_requests
+      add constraint withdrawal_requests_refund_execution_shape_check
+      check (
+        (refund_state = 'executed'
+         and refund_executed_at is not null
+         and refund_provider_reference is not null
+         and refund_amount_cents is not null)
+        or
+        (refund_state <> 'executed'
+         and refund_executed_at is null
+         and refund_provider_reference is null)
+      );
+  end if;
+end
+$$;
+
 -- ── THE FREEZE ────────────────────────────────────────────────
 --
 -- When a protected withdrawal is open, the annual plan stops producing
@@ -348,6 +396,26 @@ create unique index if not exists withdrawal_requests_refund_operation_key
 
 alter table public.withdrawal_requests
   add column if not exists deliveries_frozen_at timestamptz;
+
+-- ── AND THE STOP THAT DOES NOT LIFT ───────────────────────────
+--
+-- A FREEZE IS TEMPORARY. It holds while a case is open and lets go
+-- when the case ends - which is right for a case that turns out to be
+-- late, and catastrophic for one that turns out to be VALID. A
+-- customer whose withdrawal was accepted and refunded must not start
+-- receiving boxes again because the case reached a terminal state.
+--
+-- So a valid outcome writes a SECOND, separate instant. Nothing clears
+-- it: annual_plan_delivery_freeze_active treats it as stopping the
+-- plan regardless of case_state, so 'refunded' and 'closed' - the very
+-- states that end a freeze - cannot resume anything once this is set.
+--
+-- Two columns rather than one because they answer different questions.
+-- deliveries_frozen_at says "we are holding while we work this out".
+-- This says "the contract was undone; there is nothing left to send".
+
+alter table public.withdrawal_requests
+  add column if not exists deliveries_permanently_stopped_at timestamptz;
 
 -- ── IDEMPOTENCY ───────────────────────────────────────────────
 --
@@ -974,8 +1042,17 @@ as $$
     select 1
     from public.withdrawal_requests w
     where w.resolved_annual_plan_id = p_annual_plan_id
-      and w.deliveries_frozen_at is not null
-      and w.case_state not in ('refunded', 'rejected_late', 'closed')
+      and (
+        -- THE TEMPORARY HOLD, while the case is still being worked.
+        (w.deliveries_frozen_at is not null
+         and w.case_state not in ('refunded', 'rejected_late', 'closed'))
+        or
+        -- THE PERMANENT STOP, which no case_state lifts. A valid
+        -- withdrawal that has been refunded and closed still stops the
+        -- plan - those two states end the hold above, and this is what
+        -- keeps the boxes from resuming anyway.
+        w.deliveries_permanently_stopped_at is not null
+      )
   );
 $$;
 
@@ -984,7 +1061,7 @@ revoke all on function public.annual_plan_delivery_freeze_active(uuid) from anon
 revoke all on function public.annual_plan_delivery_freeze_active(uuid) from authenticated;
 grant execute on function public.annual_plan_delivery_freeze_active(uuid) to service_role;
 
--- Migration 039's queue, re-stated with ONE added predicate.
+-- Migration 039's queue, re-stated with TWO changes.
 --
 -- Everything else is byte-for-byte what 039 wrote: the same active and
 -- not-refunded plan filter, the same order_id/fulfilled_at exclusions,
@@ -993,6 +1070,54 @@ grant execute on function public.annual_plan_delivery_freeze_active(uuid) to ser
 -- locked` that keeps this function and 039's section 9 from deadlocking.
 -- Re-created rather than patched because a SQL function body cannot be
 -- altered in place.
+--
+-- (1) THE FREEZE PREDICATE, above.
+--
+-- (2) AT MOST ONE DELIVERY PER PLAN PER PASS - the no-catch-up rule.
+--
+-- 039's queue took every due row. That is correct on a healthy day,
+-- where a plan has at most one, but it becomes a BURST the moment a
+-- plan has been held: a withdrawal frozen across three monthly dates
+-- and then rejected as late would leave three rows with scheduled_for
+-- in the past, and the next worker pass would mint all three orders at
+-- once - three boxes and three charges arriving together.
+--
+-- The added `not exists` keeps only the EARLIEST UNFINISHED past-due
+-- row per plan: a row qualifies when no earlier row of the same plan is
+-- still open, under exactly the (scheduled_for, delivery_number, id)
+-- order 039 already used. So a plan contributes at most one row per
+-- pass, and the row it contributes is the one 039 would have taken
+-- first anyway.
+--
+-- "UNFINISHED" IS 'scheduled' OR 'claimed', AND THAT WORDING MATTERS.
+-- The obvious version of this predicate reuses the DUE condition above,
+-- and it is wrong: a row claimed one second ago is no longer due (its
+-- six-hour lease is live), so it would drop out of the comparison and
+-- let the NEXT row through. Two worker passes in a row would then mint
+-- two orders, which is the exact burst this rule exists to prevent. A
+-- real database demonstrated it. 'cancelled' and 'fulfilled' rows are
+-- finished and correctly do not block anything.
+--
+-- So the rule is really ONE DELIVERY IN FLIGHT PER PLAN: the next one
+-- is minted when its predecessor is fulfilled, or when a stuck claim's
+-- lease expires and that row becomes claimable again itself.
+--
+-- IT IS WRITTEN AS A PREDICATE AND NOT AS `distinct on` BECAUSE
+-- POSTGRES REFUSES THE LATTER HERE: "FOR UPDATE is not allowed with
+-- DISTINCT clause". The lease depends on `for update of d skip locked`,
+-- so the de-duplication had to go into the WHERE clause instead. A real
+-- database refused the first version of this; the note is here so
+-- nobody reintroduces it.
+--
+-- The customer is still owed the other rows and still gets them: the
+-- worker runs again, and the next pass takes the next one. The backlog
+-- drains at the worker's cadence instead of arriving in one delivery.
+--
+-- WHAT THIS DELIBERATELY DOES NOT DO: it does not cancel a delivery,
+-- does not move a scheduled_for, and does not re-anchor the calendar.
+-- Migration 069's monthly dates stay exactly where activation froze
+-- them, and a rejected-late customer keeps every box they paid for.
+-- The only thing that changes is how many can be minted in one pass.
 
 create or replace function public.claim_due_annual_plan_deliveries(
   p_limit integer
@@ -1014,8 +1139,9 @@ as $$
     join public.annual_plans p on p.id = d.annual_plan_id
     where p.status = 'active'
       and p.payment_status <> 'refunded'
-      -- MIGRATION 070. A plan with a protected, unresolved withdrawal
-      -- is not due for anything.
+      -- MIGRATION 070. A plan with a protected, unresolved withdrawal -
+      -- or one permanently stopped by a valid one - is not due for
+      -- anything.
       and not public.annual_plan_delivery_freeze_active(p.id)
       and d.order_id is null
       and d.fulfilled_at is null
@@ -1025,6 +1151,21 @@ as $$
         (d.state = 'claimed'
          and d.claimed_at is not null
          and d.claimed_at < pg_catalog.now() - interval '6 hours')
+      )
+      -- MIGRATION 070. ONE DELIVERY IN FLIGHT PER PLAN: no EARLIER row
+      -- of this plan is still unfinished. Note 'claimed' is included -
+      -- a live lease blocks the next row, or two passes in a row would
+      -- drain a backlog that took a freeze to create.
+      and not exists (
+        select 1
+        from public.annual_plan_deliveries e
+        where e.annual_plan_id = d.annual_plan_id
+          and e.state in ('scheduled', 'claimed')
+          and e.order_id is null
+          and e.fulfilled_at is null
+          and e.scheduled_for <= pg_catalog.now()
+          and (e.scheduled_for, e.delivery_number, e.id)
+            < (d.scheduled_for, d.delivery_number, d.id)
       )
     order by d.scheduled_for asc, d.delivery_number asc, d.id asc
     limit least(greatest(coalesce(p_limit, 25), 1), 100)
@@ -1306,16 +1447,42 @@ begin
 end;
 $$;
 
--- ── WERTERSATZ: THE DECISION, BOUNDED IN SQL ──────────────────
+-- ── WERTERSATZ: THE DECISION, BOUNDED IN SQL ──────────────
 --
--- THE CEILING IS COMPUTED HERE, from the price the plan froze at
--- purchase, and is not accepted from the caller. An administrator may
--- confirm the proposal or reduce it; raising it above the goods' frozen
--- retail value is refused by the database, so no route, no screen and no
--- future script can do it either.
+-- THE CEILING IS COMPUTED HERE, from a price this shop froze at the
+-- moment of purchase, and is not accepted from the caller. An
+-- administrator may confirm the proposal or reduce it; raising it above
+-- the goods' frozen retail value is refused by the database, so no
+-- route, no screen and no future script can do it either.
 --
 -- Sealed goods have a ceiling of zero, which is the same rule stated as
 -- arithmetic rather than as a special case.
+--
+-- THREE KINDS OF CASE REACH THIS FUNCTION, because three kinds of
+-- purchase exist and the public form accepts all of them:
+--
+--   AN ANNUAL PLAN. The plan carries catalog_unit_gross_cents - the
+--   retail price of ONE package, frozen at activation. The ceiling is
+--   that one package, not the twelve, because the withdrawal period
+--   runs from the FIRST goods (BGB 356 Abs. 2 Nr. 1 lit. d) and a
+--   timely case therefore concerns the first box. If later boxes were
+--   also received and opened, this understates the ceiling - which
+--   errs in the CUSTOMER'S favour, and is the only direction an
+--   automatic bound may err in.
+--
+--   A ONE-OFF ORDER, or an order a recurring subscription generated.
+--   Both are rows in public.orders with rows in public.order_items,
+--   and order_items.unit_price_gross_cents is the undiscounted retail
+--   price per unit AS CHARGED THEN. That is the figure used. Never a
+--   live catalogue read - a case from March must not be re-priced by
+--   an April price change. Never a browser-supplied amount.
+--
+--   AND A CASE THIS FUNCTION CANNOT PRICE. An order with several item
+--   lines does not tell the database WHICH package the customer opened,
+--   and an order with no lines tells it nothing at all. It does not
+--   guess, does not sum the order, and does not fall back to zero: it
+--   returns manual_review_required and writes NOTHING. A human then
+--   decides, with the order in front of them.
 create or replace function public.admin_confirm_withdrawal_value_loss(
   p_actor_user_id uuid,
   p_withdrawal_id uuid,
@@ -1329,7 +1496,11 @@ as $$
 declare
   v_case      public.withdrawal_requests;
   v_plan      public.annual_plans;
+  v_order     public.orders;
+  v_item      public.order_items;
+  v_lines     integer;
   v_ceiling   integer;
+  v_basis     text;
 begin
   if p_confirmed_cents is null or p_confirmed_cents < 0 then
     return pg_catalog.jsonb_build_object('result', 'invalid_amount');
@@ -1340,29 +1511,78 @@ begin
     return pg_catalog.jsonb_build_object('result', 'not_found');
   end if;
 
+  -- A decided case is not re-decided. Wertersatz set after the money
+  -- moved would change a figure the customer was already told.
+  if v_case.case_state in ('refunded', 'rejected_late', 'closed') then
+    return pg_catalog.jsonb_build_object('result', 'case_closed', 'case_state', v_case.case_state);
+  end if;
+
   if v_case.seal_state is null then
     return pg_catalog.jsonb_build_object('result', 'seal_state_unknown');
   end if;
 
   if v_case.seal_state = 'sealed_unopened' then
     v_ceiling := 0;
-  else
-    if v_case.resolved_annual_plan_id is null then
+    v_basis   := 'sealed_no_value_loss';
+
+  elsif v_case.resolved_annual_plan_id is not null then
+    select * into v_plan from public.annual_plans where id = v_case.resolved_annual_plan_id;
+    if not found or v_plan.catalog_unit_gross_cents is null
+       or v_plan.catalog_unit_gross_cents <= 0 then
       return pg_catalog.jsonb_build_object('result', 'no_price_snapshot');
     end if;
-    select * into v_plan from public.annual_plans where id = v_case.resolved_annual_plan_id;
+    v_ceiling := v_plan.catalog_unit_gross_cents;
+    v_basis   := 'annual_plan_catalog_unit';
+
+  elsif v_case.resolved_order_id is not null then
+    select * into v_order from public.orders where id = v_case.resolved_order_id;
     if not found then
       return pg_catalog.jsonb_build_object('result', 'no_price_snapshot');
     end if;
-    -- THE FROZEN RETAIL PRICE OF ONE PACKAGE. Never a live catalogue
-    -- read, so a historical case is never re-priced by a later change.
-    v_ceiling := v_plan.catalog_unit_gross_cents;
+
+    select pg_catalog.count(*) into v_lines
+      from public.order_items where order_id = v_order.id;
+
+    if v_lines is null or v_lines = 0 then
+      return pg_catalog.jsonb_build_object(
+        'result', 'manual_review_required',
+        'reason', 'order_has_no_items'
+      );
+    end if;
+
+    if v_lines > 1 then
+      -- WHICH of them was opened? The database does not know, and a
+      -- guess here becomes a charge against a real customer.
+      return pg_catalog.jsonb_build_object(
+        'result', 'manual_review_required',
+        'reason', 'order_has_multiple_items',
+        'item_line_count', v_lines
+      );
+    end if;
+
+    select * into v_item from public.order_items where order_id = v_order.id;
+    if not found or v_item.unit_price_gross_cents is null
+       or v_item.unit_price_gross_cents <= 0
+       or v_item.quantity is null or v_item.quantity <= 0 then
+      return pg_catalog.jsonb_build_object('result', 'no_price_snapshot');
+    end if;
+
+    -- THE HISTORICAL GROSS RETAIL PRICE, TIMES WHAT WAS SENT. Any
+    -- discount granted on top is deliberately NOT deducted here:
+    -- Wertersatz is measured against the goods' value, and keeping the
+    -- undiscounted figure keeps this an upper bound.
+    v_ceiling := v_item.unit_price_gross_cents * v_item.quantity;
+    v_basis   := 'order_item_historical_unit_price';
+
+  else
+    return pg_catalog.jsonb_build_object('result', 'no_contract_resolved');
   end if;
 
   if p_confirmed_cents > v_ceiling then
     return pg_catalog.jsonb_build_object(
       'result', 'above_ceiling',
-      'ceiling_cents', v_ceiling
+      'ceiling_cents', v_ceiling,
+      'ceiling_basis', v_basis
     );
   end if;
 
@@ -1377,29 +1597,67 @@ begin
 
   perform public.record_admin_activity(
     p_actor_user_id, 'customer_rights', 'withdrawal.value_loss', 'withdrawal',
-    p_withdrawal_id::text, 'Wertersatz bestätigt', gen_random_uuid(),
-    pg_catalog.jsonb_build_object('confirmed_cents', p_confirmed_cents, 'ceiling_cents', v_ceiling)
+    p_withdrawal_id::text, 'Wertersatz bestaetigt', gen_random_uuid(),
+    pg_catalog.jsonb_build_object(
+      'confirmed_cents', p_confirmed_cents,
+      'ceiling_cents', v_ceiling,
+      'ceiling_basis', v_basis
+    )
   );
 
   return pg_catalog.jsonb_build_object(
     'result', 'confirmed',
     'confirmed_cents', v_case.confirmed_value_loss_cents,
-    'ceiling_cents', v_ceiling
+    'ceiling_cents', v_ceiling,
+    'ceiling_basis', v_basis
   );
 end;
 $$;
 
--- ── THE REFUND, PREPARED BUT NOT PAID ─────────────────────────
+-- ── THE REFUND, PREPARED BUT NOT PAID ─────────────────────
 --
 -- IT COMPUTES THE AMOUNT. No caller supplies one, and there is no
--- parameter for it - the figure is the plan's own total minus the
--- confirmed value loss, floored at zero.
+-- parameter for it - the figure is what the customer actually paid,
+-- minus the confirmed value loss, floored at zero.
+--
+-- WHAT THEY PAID comes from the contract that was resolved: an annual
+-- plan's total_gross_cents, or an order's total_gross_cents. Both are
+-- stored gross totals that already include the outbound shipping, and
+-- BGB 357 Abs. 1 repays the delivery costs too, so nothing is withheld
+-- from them. If neither figure is available the function REFUSES; it
+-- never falls through to zero, because a silent zero is a refund of
+-- nothing dressed up as a completed case.
+--
+-- IT WILL NOT APPROVE A CASE THAT IS NOT ACTUALLY DECIDED. Seven
+-- questions must already have answers, and each missing one names
+-- itself in the result rather than being skipped:
+--
+--   is the case still open?                  case_closed
+--   was it in time?                          timeliness_unresolved
+--   do we know the seal?                     seal_state_unknown
+--   did we decide about the return?          return_requirement_undecided
+--   if we asked for it, is it back?          return_outstanding
+--   if it was opened, is Wertersatz set?     value_loss_undecided
+--   do we know what they paid?               no_payment_snapshot
+--
+-- timeliness must be exactly 'timely'. 'receipt_unknown' and
+-- 'deadline_uncertain' are the fail-open answers the deadline engine
+-- gives when it cannot be sure - they must never block a customer, and
+-- they must equally never be mistaken for a decision. A human resolves
+-- the receipt first; only then is there something to approve.
 --
 -- IT DOES NOT MOVE MONEY. This marks a case approved_for_payout and
 -- stamps one refund_operation_id; the Stripe call is a separate,
 -- explicit step outside the database. The unique index on
 -- refund_operation_id is what makes a second approval impossible, so a
 -- double-click cannot become a double refund.
+--
+-- AND IT STOPS THE DELIVERIES FOR GOOD. An approved withdrawal means
+-- the contract is undone, so deliveries_permanently_stopped_at is
+-- stamped in the SAME transaction that approves the money. Not at
+-- execution - between approval and Stripe returning there is a window,
+-- and a delivery worker running inside that window must not mint
+-- another box for a contract that no longer exists.
 create or replace function public.admin_approve_withdrawal_refund(
   p_actor_user_id uuid,
   p_withdrawal_id uuid
@@ -1412,7 +1670,9 @@ as $$
 declare
   v_case   public.withdrawal_requests;
   v_plan   public.annual_plans;
+  v_order  public.orders;
   v_paid   integer;
+  v_basis  text;
   v_loss   integer;
   v_refund integer;
 begin
@@ -1429,40 +1689,82 @@ begin
     );
   end if;
 
-  -- A case that may still be refused is not ready to be paid.
-  if v_case.timeliness = 'late' then
-    return pg_catalog.jsonb_build_object('result', 'case_is_late');
+  if v_case.case_state in ('rejected_late', 'closed') then
+    return pg_catalog.jsonb_build_object('result', 'case_closed', 'case_state', v_case.case_state);
   end if;
 
-  -- BGB 357 Abs. 4: the goods, or proof they were sent - unless we never
-  -- asked for them back.
+  -- IN TIME, AND KNOWN TO BE IN TIME.
+  if v_case.timeliness is distinct from 'timely' then
+    return pg_catalog.jsonb_build_object(
+      'result', 'timeliness_unresolved',
+      'timeliness', v_case.timeliness
+    );
+  end if;
+
+  if v_case.seal_state is null then
+    return pg_catalog.jsonb_build_object('result', 'seal_state_unknown');
+  end if;
+
+  -- BGB 357 Abs. 4 only lets us wait for goods we actually asked for,
+  -- so the decision has to have been MADE before it can be applied.
+  if v_case.return_requirement is null then
+    return pg_catalog.jsonb_build_object('result', 'return_requirement_undecided');
+  end if;
+
   if v_case.return_requirement = 'return_requested'
      and v_case.return_received_at is null
      and v_case.return_dispatch_proof_at is null then
     return pg_catalog.jsonb_build_object('result', 'return_outstanding');
   end if;
 
-  if v_case.resolved_annual_plan_id is null then
+  -- OPENED GOODS NEED A WERTERSATZ DECISION, even when that decision is
+  -- zero. The coalesce further down would otherwise turn "nobody has
+  -- looked at it yet" into "we waive it" - never in our favour, but
+  -- also without anyone having chosen it.
+  if v_case.seal_state = 'opened_seal_broken'
+     and v_case.confirmed_value_loss_cents is null then
+    return pg_catalog.jsonb_build_object('result', 'value_loss_undecided');
+  end if;
+
+  if v_case.resolved_annual_plan_id is not null then
+    select * into v_plan from public.annual_plans where id = v_case.resolved_annual_plan_id;
+    if not found then
+      return pg_catalog.jsonb_build_object('result', 'no_contract_resolved');
+    end if;
+    v_paid  := v_plan.total_gross_cents;
+    v_basis := 'annual_plan_total_gross';
+
+  elsif v_case.resolved_order_id is not null then
+    select * into v_order from public.orders where id = v_case.resolved_order_id;
+    if not found then
+      return pg_catalog.jsonb_build_object('result', 'no_contract_resolved');
+    end if;
+    -- EVERYTHING THE ORDER CHARGED, outbound shipping included.
+    v_paid  := v_order.total_gross_cents;
+    v_basis := 'order_total_gross';
+
+  else
     return pg_catalog.jsonb_build_object('result', 'no_contract_resolved');
   end if;
 
-  select * into v_plan from public.annual_plans where id = v_case.resolved_annual_plan_id;
-  if not found then
-    return pg_catalog.jsonb_build_object('result', 'no_contract_resolved');
+  if v_paid is null or v_paid <= 0 then
+    return pg_catalog.jsonb_build_object(
+      'result', 'no_payment_snapshot',
+      'payment_basis', v_basis
+    );
   end if;
 
-  -- EVERYTHING PAID, INCLUDING THE OUTBOUND SHIPPING. BGB 357 Abs. 1
-  -- repays the delivery costs too; there is no rule here that keeps them.
-  v_paid   := v_plan.total_gross_cents;
   v_loss   := coalesce(v_case.confirmed_value_loss_cents, 0);
   v_refund := greatest(0, v_paid - v_loss);
 
   update public.withdrawal_requests
-     set refund_amount_cents = v_refund,
-         refund_state        = 'approved_for_payout',
-         refund_operation_id = coalesce(refund_operation_id, gen_random_uuid()),
-         case_state          = 'refund_pending',
-         updated_at          = pg_catalog.now()
+     set refund_amount_cents               = v_refund,
+         refund_state                      = 'approved_for_payout',
+         refund_operation_id               = coalesce(refund_operation_id, gen_random_uuid()),
+         case_state                        = 'refund_pending',
+         deliveries_permanently_stopped_at = coalesce(deliveries_permanently_stopped_at,
+                                                      pg_catalog.now()),
+         updated_at                        = pg_catalog.now()
    where id = p_withdrawal_id
   returning * into v_case;
 
@@ -1470,15 +1772,205 @@ begin
     p_actor_user_id, 'customer_rights', 'withdrawal.refund_approved', 'withdrawal',
     p_withdrawal_id::text, 'Erstattung freigegeben', v_case.refund_operation_id,
     pg_catalog.jsonb_build_object(
-      'paid_cents', v_paid, 'value_loss_cents', v_loss, 'refund_cents', v_refund
+      'paid_cents', v_paid,
+      'payment_basis', v_basis,
+      'value_loss_cents', v_loss,
+      'refund_cents', v_refund,
+      'deliveries_permanently_stopped_at', v_case.deliveries_permanently_stopped_at
     )
   );
 
   return pg_catalog.jsonb_build_object(
     'result', 'approved',
     'paid_cents', v_paid,
+    'payment_basis', v_basis,
     'value_loss_cents', v_loss,
     'refund_amount_cents', v_refund,
+    'refund_operation_id', v_case.refund_operation_id,
+    'deliveries_permanently_stopped', true
+  );
+end;
+$$;
+
+-- ── AND ONLY THEN, WHAT STRIPE DID ────────────────────────
+--
+-- THE DATABASE STILL DOES NOT CALL STRIPE. It cannot, and that is the
+-- point: the network call belongs to the server, and this function is
+-- how the server REPORTS BACK what the provider said. Splitting it this
+-- way means the row can never claim a payout that no API call made.
+--
+-- IT RE-READS THE CASE AND RE-CHECKS THE AMOUNT. The caller passes the
+-- figure Stripe actually refunded, and if that is not exactly the
+-- amount this database approved, the execution is REFUSED and reported
+-- as a mismatch. A server bug, a stale screen or a hand-edited request
+-- cannot make the row agree with a payout it did not authorise.
+--
+-- IT REQUIRES AN APPROVED OR A FAILED CASE - the second because a
+-- declined card must be retryable. refund_operation_id was stamped at
+-- approval and is the idempotency basis for the Stripe call itself: the
+-- server sends it as the idempotency key, so a retry after a timeout
+-- reaches the same refund at Stripe rather than creating a second one.
+-- Here it is required to be present and returned for the audit trail.
+--
+-- AND IT IS IDEMPOTENT. Called twice with the same provider reference
+-- it reports the same success; called twice with a DIFFERENT reference
+-- it refuses, because that would mean two refunds for one case.
+create or replace function public.admin_record_withdrawal_refund_execution(
+  p_actor_user_id uuid,
+  p_withdrawal_id uuid,
+  p_provider_reference text,
+  p_provider_amount_cents integer
+)
+returns jsonb
+language plpgsql
+volatile
+security definer set search_path = ''
+as $$
+declare
+  v_case public.withdrawal_requests;
+  v_ref  text := btrim(coalesce(p_provider_reference, ''));
+begin
+  if char_length(v_ref) = 0 then
+    return pg_catalog.jsonb_build_object('result', 'missing_provider_reference');
+  end if;
+
+  select * into v_case from public.withdrawal_requests where id = p_withdrawal_id for update;
+  if not found then
+    return pg_catalog.jsonb_build_object('result', 'not_found');
+  end if;
+
+  -- THE SECOND CALL WITH THE SAME ANSWER IS THE SAME ANSWER.
+  if v_case.refund_state = 'executed' then
+    if v_case.refund_provider_reference = v_ref then
+      return pg_catalog.jsonb_build_object(
+        'result', 'already_executed',
+        'refund_amount_cents', v_case.refund_amount_cents,
+        'refund_provider_reference', v_case.refund_provider_reference,
+        'refund_executed_at', v_case.refund_executed_at
+      );
+    end if;
+    return pg_catalog.jsonb_build_object(
+      'result', 'conflicting_provider_reference',
+      'refund_provider_reference', v_case.refund_provider_reference
+    );
+  end if;
+
+  -- 'failed' IS ALSO EXECUTABLE, and has to be. A declined card or a
+  -- timed-out call leaves the case owed and its state 'failed'; if only
+  -- 'approved_for_payout' could be paid, the retry would be impossible
+  -- and the customer's money would be stuck behind a state machine.
+  -- The operation id is unchanged, so the retry is the SAME idempotent
+  -- Stripe call rather than a second refund.
+  if v_case.refund_state not in ('approved_for_payout', 'failed') then
+    return pg_catalog.jsonb_build_object(
+      'result', 'not_approved_for_payout',
+      'refund_state', v_case.refund_state
+    );
+  end if;
+
+  if v_case.refund_operation_id is null then
+    return pg_catalog.jsonb_build_object('result', 'missing_refund_operation');
+  end if;
+
+  if p_provider_amount_cents is null
+     or v_case.refund_amount_cents is null
+     or p_provider_amount_cents <> v_case.refund_amount_cents then
+    return pg_catalog.jsonb_build_object(
+      'result', 'amount_mismatch',
+      'approved_cents', v_case.refund_amount_cents,
+      'provider_cents', p_provider_amount_cents
+    );
+  end if;
+
+  update public.withdrawal_requests
+     set refund_state                      = 'executed',
+         refund_executed_at                = pg_catalog.now(),
+         refund_provider_reference         = v_ref,
+         refund_failure_reason             = null,
+         case_state                        = 'refunded',
+         deliveries_permanently_stopped_at = coalesce(deliveries_permanently_stopped_at,
+                                                      pg_catalog.now()),
+         updated_at                        = pg_catalog.now()
+   where id = p_withdrawal_id
+  returning * into v_case;
+
+  perform public.record_admin_activity(
+    p_actor_user_id, 'customer_rights', 'withdrawal.refund_executed', 'withdrawal',
+    p_withdrawal_id::text, 'Erstattung ausgefuehrt', v_case.refund_operation_id,
+    pg_catalog.jsonb_build_object(
+      'refund_cents', v_case.refund_amount_cents,
+      'provider_reference', v_ref
+    )
+  );
+
+  return pg_catalog.jsonb_build_object(
+    'result', 'executed',
+    'refund_amount_cents', v_case.refund_amount_cents,
+    'refund_provider_reference', v_case.refund_provider_reference,
+    'refund_executed_at', v_case.refund_executed_at,
+    'refund_operation_id', v_case.refund_operation_id
+  );
+end;
+$$;
+
+-- A FAILED PAYOUT IS A STATE, NOT A SILENCE.
+--
+-- If Stripe refuses, the case must not sit in 'approved_for_payout'
+-- forever with nobody knowing why. This records the failure and the
+-- provider's reason, keeps case_state at refund_pending because the
+-- customer is still owed the money, and leaves refund_operation_id in
+-- place so a retry is the SAME idempotent operation rather than a new
+-- one. deliveries_permanently_stopped_at is untouched: the withdrawal
+-- was still approved, so the boxes still stop.
+create or replace function public.admin_record_withdrawal_refund_failure(
+  p_actor_user_id uuid,
+  p_withdrawal_id uuid,
+  p_reason text
+)
+returns jsonb
+language plpgsql
+volatile
+security definer set search_path = ''
+as $$
+declare
+  v_case   public.withdrawal_requests;
+  v_reason text := pg_catalog.left(btrim(coalesce(p_reason, '')), 500);
+begin
+  select * into v_case from public.withdrawal_requests where id = p_withdrawal_id for update;
+  if not found then
+    return pg_catalog.jsonb_build_object('result', 'not_found');
+  end if;
+
+  if v_case.refund_state = 'executed' then
+    return pg_catalog.jsonb_build_object('result', 'already_executed');
+  end if;
+
+  if v_case.refund_state not in ('approved_for_payout', 'failed') then
+    return pg_catalog.jsonb_build_object(
+      'result', 'not_approved_for_payout',
+      'refund_state', v_case.refund_state
+    );
+  end if;
+
+  update public.withdrawal_requests
+     set refund_state          = 'failed',
+         refund_failure_reason = nullif(v_reason, ''),
+         updated_at            = pg_catalog.now()
+   where id = p_withdrawal_id
+  returning * into v_case;
+
+  perform public.record_admin_activity(
+    p_actor_user_id, 'customer_rights', 'withdrawal.refund_failed', 'withdrawal',
+    p_withdrawal_id::text, 'Erstattung fehlgeschlagen', gen_random_uuid(),
+    pg_catalog.jsonb_build_object(
+      'refund_cents', v_case.refund_amount_cents,
+      'reason', v_case.refund_failure_reason
+    )
+  );
+
+  return pg_catalog.jsonb_build_object(
+    'result', 'recorded_failure',
+    'refund_state', v_case.refund_state,
     'refund_operation_id', v_case.refund_operation_id
   );
 end;
@@ -1697,6 +2189,8 @@ revoke all on function public.admin_set_withdrawal_return_requirement(uuid, uuid
 revoke all on function public.admin_record_withdrawal_return(uuid, uuid, text, timestamptz) from public, anon, authenticated;
 revoke all on function public.admin_confirm_withdrawal_value_loss(uuid, uuid, integer) from public, anon, authenticated;
 revoke all on function public.admin_approve_withdrawal_refund(uuid, uuid) from public, anon, authenticated;
+revoke all on function public.admin_record_withdrawal_refund_execution(uuid, uuid, text, integer) from public, anon, authenticated;
+revoke all on function public.admin_record_withdrawal_refund_failure(uuid, uuid, text) from public, anon, authenticated;
 revoke all on function public.admin_advance_complaint(uuid, uuid, text, text) from public, anon, authenticated;
 revoke all on function public.admin_review_termination(uuid, uuid, text, text) from public, anon, authenticated;
 revoke all on function public.admin_create_purchase_restriction(uuid, uuid, text, text, text, timestamptz) from public, anon, authenticated;
@@ -1707,6 +2201,8 @@ grant execute on function public.admin_set_withdrawal_return_requirement(uuid, u
 grant execute on function public.admin_record_withdrawal_return(uuid, uuid, text, timestamptz) to service_role;
 grant execute on function public.admin_confirm_withdrawal_value_loss(uuid, uuid, integer) to service_role;
 grant execute on function public.admin_approve_withdrawal_refund(uuid, uuid) to service_role;
+grant execute on function public.admin_record_withdrawal_refund_execution(uuid, uuid, text, integer) to service_role;
+grant execute on function public.admin_record_withdrawal_refund_failure(uuid, uuid, text) to service_role;
 grant execute on function public.admin_advance_complaint(uuid, uuid, text, text) to service_role;
 grant execute on function public.admin_review_termination(uuid, uuid, text, text) to service_role;
 grant execute on function public.admin_create_purchase_restriction(uuid, uuid, text, text, text, timestamptz) to service_role;

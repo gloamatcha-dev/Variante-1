@@ -24,6 +24,15 @@ import { useCallback, useEffect, useState } from "react";
  * back - including a refusal like 'above_ceiling' or 'return_outstanding'.
  * That is why the value-loss field can be typed into freely: the
  * database is what says no.
+ *
+ * ── AND THE PAYOUT IS A SECOND ENDPOINT ────────────────────
+ *
+ * "Erstattung vorbereiten" goes to the desk and only DECIDES. "Erstattung
+ * auszahlen" goes to /api/admin/withdrawal-refund, the one route that
+ * reaches Stripe, and it sends nothing but the case id - the amount is
+ * re-read from the database there. Two buttons because they are two
+ * different acts, and the second one cannot be reached by accident from
+ * the first.
  */
 
 type Json = Record<string, unknown>;
@@ -35,10 +44,12 @@ type Payload = {
   restrictions: Json[];
   orders: Json[];
   plans: Json[];
+  orderItems: Json[];
 };
 
 const EMPTY: Payload = {
   withdrawals: [], complaints: [], terminations: [], restrictions: [], orders: [], plans: [],
+  orderItems: [],
 };
 
 const euro = (c: unknown): string =>
@@ -73,6 +84,21 @@ export function AdminCustomerRights({ onSessionLost }: { onSessionLost: () => vo
     if (res.status === 401) { onSessionLost(); return null; }
     const json = await res.json().catch(() => null);
     if (!res.ok) { setError((json?.error as string) || "Aktion fehlgeschlagen."); return null; }
+    return json as Json;
+  }, [onSessionLost]);
+
+  // THE PAYOUT POSTER. A separate function to a separate route, so
+  // that reaching Stripe from this screen requires naming it.
+  const postPayout = useCallback(async (withdrawalId: string): Promise<Json | null> => {
+    const res = await fetch("/api/admin/withdrawal-refund", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // NO AMOUNT. The server re-reads what it approved.
+      body: JSON.stringify({ action: "execute_refund", withdrawalId }),
+    });
+    if (res.status === 401) { onSessionLost(); return null; }
+    const json = await res.json().catch(() => null);
+    if (!res.ok) { setError((json?.error as string) || "Auszahlung fehlgeschlagen."); return null; }
     return json as Json;
   }, [onSessionLost]);
 
@@ -113,8 +139,25 @@ export function AdminCustomerRights({ onSessionLost }: { onSessionLost: () => vo
     setBusy(false);
   };
 
+  const payout = async (withdrawalId: string) => {
+    setBusy(true); setError(""); setNotice("");
+    const json = await postPayout(withdrawalId);
+    if (json) {
+      setNotice(`Auszahlung: ${String(json.result ?? "ok")}`);
+      await reload();
+    }
+    setBusy(false);
+  };
+
   const order = (id: unknown) => data.orders.find(o => o.id === id);
   const plan = (id: unknown) => data.plans.find(p => p.id === id);
+
+  // THE GOODS LINES OF A NORMAL ORDER, which is where a non-plan case's
+  // Wertersatz ceiling comes from. One line means the database can price
+  // it; several mean it returns manual_review_required, and the operator
+  // needs to see that before pressing anything.
+  const itemsOf = (orderId: unknown) =>
+    typeof orderId === "string" ? data.orderItems.filter(i => i.order_id === orderId) : [];
 
   return (
     <section className="ops-panel ops-customer-rights">
@@ -145,6 +188,7 @@ export function AdminCustomerRights({ onSessionLost }: { onSessionLost: () => vo
           {data.withdrawals.map(w => {
             const o = order(w.resolved_order_id) ?? {};
             const p = plan(w.resolved_annual_plan_id) ?? {};
+            const items = itemsOf(w.resolved_order_id);
             const id = String(w.id);
             return (
               <article key={id} className="ops-card">
@@ -165,6 +209,19 @@ export function AdminCustomerRights({ onSessionLost }: { onSessionLost: () => vo
                   <div><dt>Plan</dt><dd>{String(p.schedule_model ?? "–")} · {String(p.delivery_count ?? "–")} Lieferungen</dd></div>
                   <div><dt>Gezahlt</dt><dd>{euro(p.total_gross_cents)}</dd></div>
                   <div><dt>Regulärer Preis (Snapshot)</dt><dd>{euro(p.catalog_unit_gross_cents)}</dd></div>
+                  <div><dt>Bestellsumme</dt><dd>{euro(o.total_gross_cents)}</dd></div>
+                  <div><dt>Positionen</dt><dd>{
+                    items.length === 0
+                      ? "–"
+                      : items.length === 1
+                        ? `${String(items[0].product_name ?? "?")} × ${String(items[0].quantity ?? "?")}`
+                        : `${items.length} Positionen – Wertersatz nur manuell`
+                  }</dd></div>
+                  <div><dt>Warenwert (Snapshot)</dt><dd>{
+                    items.length === 1
+                      ? euro(Number(items[0].unit_price_gross_cents ?? 0) * Number(items[0].quantity ?? 0))
+                      : "–"
+                  }</dd></div>
                   <div><dt>Siegel</dt><dd>{String(w.seal_state ?? "–")}</dd></div>
                   <div><dt>Rücksendung</dt><dd>{String(w.return_requirement ?? "–")}</dd></div>
                   <div><dt>Versandnachweis</dt><dd>{dt(w.return_dispatch_proof_at)}</dd></div>
@@ -173,7 +230,11 @@ export function AdminCustomerRights({ onSessionLost }: { onSessionLost: () => vo
                   <div><dt>Wertersatz bestätigt</dt><dd>{euro(w.confirmed_value_loss_cents)}</dd></div>
                   <div><dt>Erstattung</dt><dd>{euro(w.refund_amount_cents)}</dd></div>
                   <div><dt>Erstattungsstatus</dt><dd>{String(w.refund_state)}</dd></div>
+                  <div><dt>Auszahlungsreferenz</dt><dd>{String(w.refund_provider_reference ?? "–")}</dd></div>
+                  <div><dt>Ausgezahlt am</dt><dd>{dt(w.refund_executed_at)}</dd></div>
+                  <div><dt>Auszahlungsfehler</dt><dd>{String(w.refund_failure_reason ?? "–")}</dd></div>
                   <div><dt>Lieferungen eingefroren</dt><dd>{dt(w.deliveries_frozen_at)}</dd></div>
+                  <div><dt>Lieferungen endgültig gestoppt</dt><dd>{dt(w.deliveries_permanently_stopped_at)}</dd></div>
                   <div><dt>Interne Notiz</dt><dd>{String(w.internal_note ?? "–")}</dd></div>
                 </dl>
 
@@ -218,10 +279,19 @@ export function AdminCustomerRights({ onSessionLost }: { onSessionLost: () => vo
                     onClick={() => void act({ action: "approve_refund", withdrawalId: id }, "Erstattung")}>
                     Erstattung vorbereiten
                   </button>
+                  {/* THE ONLY BUTTON ON THIS SCREEN THAT REACHES STRIPE. */}
+                  <button type="button" className="ops-danger"
+                    disabled={busy || w.refund_state !== "approved_for_payout" && w.refund_state !== "failed"}
+                    onClick={() => void payout(id)}>
+                    Erstattung auszahlen
+                  </button>
                 </div>
                 <p className="ops-note">
-                  „Erstattung vorbereiten“ berechnet den Betrag serverseitig und gibt ihn frei.
-                  Die Auszahlung bei Stripe ist ein getrennter, ausdrücklicher Schritt.
+                  „Erstattung vorbereiten“ berechnet den Betrag serverseitig, gibt ihn frei und
+                  stoppt die Lieferungen dieses Vertrags endgültig. „Erstattung auszahlen“ ist der
+                  getrennte Schritt, der das Geld bei Stripe bewegt – mit derselben
+                  Vorgangs-ID als Idempotenzschlüssel, sodass ein zweiter Klick keine zweite
+                  Erstattung auslöst.
                 </p>
               </article>
             );

@@ -307,6 +307,79 @@ export function withdrawalProtectsFutureDeliveries(
   return timeliness !== "late";
 }
 
+/**
+ * THE CASE STATES THAT END A TEMPORARY FREEZE.
+ *
+ * A freeze is a hold while a case is being worked, so it has to let go
+ * when the work is done. These are the three states where it does.
+ */
+export const WITHDRAWAL_TERMINAL_STATES = Object.freeze([
+  "refunded", "rejected_late", "closed",
+] as const);
+
+export type AnnualDeliveryHold = {
+  held: boolean;
+  kind: "none" | "temporary_freeze" | "permanent_stop";
+  reason: string;
+};
+
+/**
+ * Whether an annual plan may produce a new delivery, and why not.
+ *
+ * THE MIRROR OF MIGRATION 070's annual_plan_delivery_freeze_active. The
+ * database is the enforcement - this exists so the two halves of the
+ * rule can be read side by side, and so a test can state the rule
+ * without a database.
+ *
+ * ── TWO HOLDS, AND ONLY ONE OF THEM LIFTS ────────────────────
+ *
+ * A TEMPORARY FREEZE holds while the case is open and lets go when it
+ * reaches a terminal state. That is right for a case that turns out to
+ * be late: the customer keeps their plan and their remaining boxes.
+ *
+ * A PERMANENT STOP does not lift, and deliberately survives the very
+ * states that end a freeze. An accepted, refunded withdrawal undoes the
+ * contract; if the stop lifted at 'refunded' or 'closed', a refunded
+ * customer would start receiving boxes again. It is checked FIRST here
+ * for the same reason it is an independent column there.
+ */
+export function annualDeliveryHoldState(input: {
+  caseState: string;
+  deliveriesFrozenAt: string | null;
+  deliveriesPermanentlyStoppedAt: string | null;
+}): AnnualDeliveryHold {
+  if (input.deliveriesPermanentlyStoppedAt) {
+    return {
+      held: true,
+      kind: "permanent_stop",
+      reason: "the withdrawal was accepted - the contract is undone and nothing is owed",
+    };
+  }
+  const terminal = (WITHDRAWAL_TERMINAL_STATES as readonly string[]).includes(input.caseState);
+  if (input.deliveriesFrozenAt && !terminal) {
+    return {
+      held: true,
+      kind: "temporary_freeze",
+      reason: "an unresolved protected withdrawal is open on this plan",
+    };
+  }
+  return { held: false, kind: "none", reason: "nothing holds this plan" };
+}
+
+/**
+ * HOW MANY DELIVERIES A SINGLE WORKER PASS MAY MINT FOR ONE PLAN.
+ *
+ * One. Named as a constant because the number is the whole rule, and
+ * because a test asserts the SQL queue agrees with it.
+ *
+ * A plan that was frozen across three monthly dates and then rejected
+ * as late has three rows due at once. Taking them all would charge and
+ * ship three boxes together; taking the earliest drains the backlog at
+ * the worker's cadence instead. Nothing is cancelled and no date moves -
+ * the customer still receives every box they paid for.
+ */
+export const MAX_DELIVERIES_CLAIMED_PER_PLAN_PER_PASS = 1;
+
 /* ── The return-cost sentence ─────────────────────────────────── */
 
 /**

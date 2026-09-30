@@ -53,9 +53,12 @@ import {
  *
  * ── IT PREPARES A PAYOUT. IT DOES NOT PAY. ───────────────────
  *
- * There is no Stripe import in this file. Approving marks the case
- * approved_for_payout and stamps one refund_operation_id; moving the
- * money is a separate, explicit step that does not exist yet.
+ * There is no Stripe import in this file, and there must never be one.
+ * Approving marks the case approved_for_payout, stamps one
+ * refund_operation_id and stops the contract's deliveries for good.
+ * Moving the money is /api/admin/withdrawal-refund - a different route,
+ * a different request, and the only file in the codebase that calls
+ * stripe.refunds.create for a withdrawal.
  */
 
 type ErrorResponse = { error: string };
@@ -72,7 +75,8 @@ const WITHDRAWAL_COLUMNS =
   + "deadline_start_at, deadline_date, deadline_basis, seal_state, return_requirement, "
   + "return_dispatch_proof_at, return_received_at, suggested_value_loss_cents, "
   + "confirmed_value_loss_cents, value_loss_confirmed_at, refund_amount_cents, "
-  + "refund_state, refund_executed_at, deliveries_frozen_at, internal_note, updated_at";
+  + "refund_state, refund_executed_at, refund_provider_reference, refund_failure_reason, "
+  + "deliveries_frozen_at, deliveries_permanently_stopped_at, internal_note, updated_at";
 
 const COMPLAINT_COLUMNS =
   "id, customer_name, contact_email, order_reference, resolved_order_id, reason, "
@@ -152,6 +156,21 @@ export async function POST(request: Request): Promise<Response> {
       orders = data ?? [];
     }
 
+    // THE GOODS LINES, for cases that resolved to an ordinary order
+    // rather than to an annual plan. This is where migration 070 reads
+    // the Wertersatz ceiling from, so the desk shows the same figures
+    // the database will use - and shows an operator immediately when an
+    // order has several lines and can therefore only be priced by hand.
+    let orderItems: unknown[] = [];
+    if (orderIds.length > 0) {
+      const { data } = await admin
+        .from("order_items")
+        .select("id, order_id, product_name, variant_name, quantity, "
+              + "unit_price_gross_cents, discount_gross_cents, line_total_gross_cents")
+        .in("order_id", orderIds);
+      orderItems = data ?? [];
+    }
+
     // The frozen retail price behind each case's Wertersatz ceiling.
     const planIds = withdrawalRows
       .map(w => w.resolved_annual_plan_id).filter((v): v is string => typeof v === "string");
@@ -174,6 +193,7 @@ export async function POST(request: Request): Promise<Response> {
       restrictions: restrictions.data ?? [],
       orders,
       plans,
+      orderItems,
     }, 200);
   }
 

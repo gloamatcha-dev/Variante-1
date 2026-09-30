@@ -414,11 +414,24 @@ test("the refund amount is derived, and there is no parameter to supply one", ()
   assert.match(body, /'approved_for_payout'/);
 });
 
-test("a late case and an outstanding return both block the payout", () => {
+test("every one of the seven payout preconditions blocks by name", () => {
   const start = MIGRATION.indexOf("create or replace function public.admin_approve_withdrawal_refund(");
   const body = MIGRATION.slice(start, MIGRATION.indexOf("\n$$;", start));
-  assert.match(body, /'case_is_late'/);
-  assert.match(body, /'return_outstanding'/);
+  // THE WIDER GUARD SET. 'case_is_late' used to be the only timeliness
+  // refusal, which meant 'receipt_unknown' and 'deadline_uncertain' -
+  // the two fail-open answers the deadline engine gives when it cannot
+  // be sure - sailed straight through to a payout. Those are decisions
+  // nobody made, so they refuse under one honest name now instead.
+  for (const refusal of ["case_closed", "timeliness_unresolved", "seal_state_unknown",
+                         "return_requirement_undecided", "return_outstanding",
+                         "value_loss_undecided", "no_payment_snapshot"]) {
+    assert.ok(body.includes(`'${refusal}'`), `${refusal} is not a refusal`);
+  }
+  // And the timeliness test is EQUALITY against 'timely', not inequality
+  // against 'late' - which is the whole point of the change.
+  assert.ok(body.includes("v_case.timeliness is distinct from 'timely'"),
+    "timeliness is not tested for equality against 'timely'");
+  assert.ok(!body.includes("timeliness = 'late'"), "the old late-only test is back");
 });
 
 test("a second approval cannot become a second refund", () => {
