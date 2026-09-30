@@ -631,6 +631,21 @@ test("no route can mark an order shipped", () => {
     // guarantee: the assertion below proves it holds no write verb.
     "app/api/admin/annual-plans/route.ts",
   ];
+  /*
+    AND ONE ROUTE THAT READS THEM WHILE ALSO ACTING.
+
+    The consumer rights desk (migration 070) SELECTs shipped_at and
+    delivered_at to show an operator what a withdrawal deadline was
+    computed from. Unlike the four above it does write - a withdrawal
+    case is worked - so it cannot join READ_ONLY.
+
+    What keeps it harmless is narrower and checked below: it holds no
+    direct table write at all, and none of the RPCs it may call is the
+    shipment one. Marking an order shipped stays the single job of
+    app/api/internal/orders/ship/route.ts.
+  */
+  const READS_SHIPPING_AND_WRITES_ELSEWHERE = ["app/api/admin/customer-rights/route.ts"];
+
   for (const rel of READ_ONLY) {
     assert.ok(routes.includes(rel), `the read-only order route is missing: ${rel}`);
     const source = withoutComments(read(rel));
@@ -638,8 +653,22 @@ test("no route can mark an order shipped", () => {
       assert.ok(!source.includes(verb), `${rel} gained a write verb and may no longer read shipping columns`);
     }
   }
+  for (const rel of READS_SHIPPING_AND_WRITES_ELSEWHERE) {
+    assert.ok(routes.includes(rel), `the consumer rights route is missing: ${rel}`);
+    const source = withoutComments(read(rel));
+    for (const verb of [".update(", ".insert(", ".upsert(", ".delete("]) {
+      assert.ok(!source.includes(verb), `${rel} writes a table directly`);
+    }
+    // It may call RPCs, but never a shipping one, and it may not set any
+    // of the shipment columns it is allowed to read.
+    assert.ok(!source.includes("mark_order_shipped"), `${rel} can mark an order shipped`);
+    for (const write of ["fulfillment_status", "tracking_number", "tracking_url", "shipping_carrier"]) {
+      assert.ok(!source.includes(write), `${rel} touches ${write}`);
+    }
+  }
   for (const rel of routes) {
-    if (rel === AUTHORIZED || READ_ONLY.includes(rel)) continue;
+    if (rel === AUTHORIZED || READ_ONLY.includes(rel)
+        || READS_SHIPPING_AND_WRITES_ELSEWHERE.includes(rel)) continue;
     const source = withoutComments(read(rel));
     for (const write of [
       "fulfillment_status", "shipped_at", "tracking_number",

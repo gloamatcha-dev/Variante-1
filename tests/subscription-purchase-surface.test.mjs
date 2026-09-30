@@ -736,19 +736,19 @@ test("6a2: the UI does not offer the section to a VIEWER", () => {
   // PACKAGE 5G put B2B behind the SAME predicate rather than a weaker
   // one of its own - a supply contract is another company's open
   // liabilities, which is the read a viewer may not perform.
-  assert.match(adminOverview, /\(key === "subscriptions" \|\| key === "annual" \|\| key === "b2b"\) && !maySeeSubscriptions \? null :/);
+  assert.match(adminOverview, /\(key === "subscriptions" \|\| key === "annual" \|\| key === "b2b" \|\| key === "rights"\) && !maySeeSubscriptions \? null :/);
   // And the screen itself is not mounted, so no request is ever issued.
   assert.match(adminOverview, /view === "subscriptions" && maySeeSubscriptions && <AdminSubscriptions/);
   // The overview note does not point a viewer at a tab they lack.
   assert.match(adminOverview, /\{maySeeSubscriptions && <> Laufende Abos unter/);
   assert.match(adminOverview, /view === "annual" && maySeeSubscriptions && <AdminAnnualPlans/);
   // No OTHER tab became role-gated by this change.
-  // Six: the definition, the shared tab guard, the THREE mounts
-  // (Abos, Jahrespläne and Package 5G's B2B) and the overview note.
-  // Counted so the predicate cannot quietly start gating a tab that
-  // has nothing to do with the commercial screens.
-  // a tab that has nothing to do with the two subscription surfaces.
-  assert.equal([...adminOverview.matchAll(/maySeeSubscriptions/g)].length, 6,
+  // Seven: the definition, the shared tab guard, the FOUR mounts
+  // (Abos, Jahrespläne, Package 5G's B2B and migration 070's consumer
+  // rights desk) and the overview note. Counted so the predicate cannot
+  // quietly start gating a tab that has nothing to do with the
+  // commercial screens.
+  assert.equal([...adminOverview.matchAll(/maySeeSubscriptions/g)].length, 7,
     "the role predicate reaches more of the shell than the commercial sections");
 });
 

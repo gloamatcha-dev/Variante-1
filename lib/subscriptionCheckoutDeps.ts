@@ -12,6 +12,7 @@ import {
   type SavedAddressRow,
   type SubscriptionCheckoutDeps,
 } from "./subscriptionCheckout";
+import { loadPurchaseRestrictionsForUser } from "./purchaseRestrictionsStore";
 
 /**
  * The real wiring behind the subscription checkout (Task 29D-D).
@@ -72,4 +73,5 @@ export const defaultSubscriptionCheckoutDeps: SubscriptionCheckoutDeps = {
   claimSubscription: claimPendingSubscriptionForAttempt,
   listSubscriptions: listOwnSubscriptionsForEligibility,
   linkSession: linkStripeSession,
+  loadPurchaseRestrictions: loadPurchaseRestrictionsForUser,
 };

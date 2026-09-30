@@ -537,7 +537,7 @@ test("6b: a VIEWER may not open it, and is not shown the door", () => {
   // PACKAGE 5G put B2B behind the SAME predicate rather than a weaker
   // one of its own - a supply contract is another company's open
   // liabilities, which is the read a viewer may not perform.
-  assert.match(adminOverview, /\(key === "subscriptions" \|\| key === "annual" \|\| key === "b2b"\) && !maySeeSubscriptions \? null :/);
+  assert.match(adminOverview, /\(key === "subscriptions" \|\| key === "annual" \|\| key === "b2b" \|\| key === "rights"\) && !maySeeSubscriptions \? null :/);
   assert.match(adminOverview, /view === "annual" && maySeeSubscriptions && <AdminAnnualPlans/);
 });
 

@@ -1,5 +1,10 @@
 import type Stripe from "stripe";
 import {
+  evaluatePurchaseRestrictions,
+  PURCHASE_RESTRICTED_MESSAGE,
+  type PurchaseRestrictionRow,
+} from "./purchaseRestrictions";
+import {
   ALLOWED_REQUEST_FIELDS,
   LAUNCH_SUBSCRIPTION_SKUS,
   SUBSCRIPTION_FEATURE_FLAG,
@@ -142,6 +147,16 @@ export type SubscriptionCheckoutDeps = {
     stripe: Stripe,
     input: { kind: "sku" | "shipping"; identifier: string; unitAmountCents: number; productName: string }
   ) => Promise<RecurringPriceResult>;
+  /**
+   * THE CALLER'S MANUAL PURCHASE RESTRICTIONS (migration 070).
+   *
+   * The recurring surface needs the same gate the annual one has:
+   * scope 'recurring_subscription' and 'all_new_plan_purchases' both
+   * cover it, and a restriction that only stopped the annual plan would
+   * be trivially side-stepped by starting an abo instead. Optional, so
+   * an older test port stays valid and is simply unrestricted.
+   */
+  loadPurchaseRestrictions?: (userId: string) => Promise<PurchaseRestrictionRow[]>;
   ensureAttempt: (input: SubscriptionAttemptInput) => Promise<SubscriptionAttemptResult>;
   /**
    * One atomic database operation: returns the attempt's existing
@@ -207,6 +222,36 @@ export async function handleSubscriptionCheckout(
   const caller = await deps.verifyCaller(request);
   if (!caller) {
     return fail(401, "Bitte melde dich an, um ein Abo zu starten.");
+  }
+
+  // 2b. THE PURCHASE RESTRICTION (migration 070). Immediately after the
+  //     caller is known and before the plan is read, anything is written
+  //     or Stripe is contacted.
+  //
+  //     SERVER-SIDE, and on BOTH new-plan surfaces: a gate that only
+  //     covered the annual plan would be side-stepped by starting a
+  //     4-week abo instead, which is the same purchase this restriction
+  //     exists to stop.
+  //
+  //     The refusal carries the neutral sentence and nothing else; the
+  //     category is logged for us and never serialised to the customer.
+  if (deps.loadPurchaseRestrictions) {
+    let restrictions: PurchaseRestrictionRow[] = [];
+    try {
+      restrictions = await deps.loadPurchaseRestrictions(caller.userId);
+    } catch (err) {
+      console.error("Subscription checkout: purchase restrictions unreadable -", err);
+      return fail(503, UNAVAILABLE);
+    }
+    const decision = evaluatePurchaseRestrictions(
+      restrictions, "recurring_subscription", new Date()
+    );
+    if (!decision.allowed) {
+      console.error(
+        `Subscription checkout: refused for ${caller.userId} by a ${decision.blockedByCategory} restriction`
+      );
+      return fail(403, PURCHASE_RESTRICTED_MESSAGE);
+    }
   }
 
   // 3. THE PLAN, read and checked server-side.

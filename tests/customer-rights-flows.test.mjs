@@ -370,3 +370,83 @@ test("an unreadable restriction store fails CLOSED", () => {
   assert.match(block, /return fail\(503/,
     "a restriction store that throws must not let the purchase through");
 });
+
+
+/* ══════════════════════════════════════════════════════════════
+   BOTH NEW-PLAN SURFACES ARE GATED, NOT JUST THE ANNUAL ONE
+   ══════════════════════════════════════════════════════════════ */
+
+test("the recurring subscription checkout consults the same gate", () => {
+  const src = read("lib/subscriptionCheckout.ts");
+  assert.ok(src.includes("evaluatePurchaseRestrictions"),
+    "a restriction that only stopped the annual plan is side-stepped by starting an abo");
+  assert.ok(src.includes("PURCHASE_RESTRICTED_MESSAGE"));
+  assert.match(src, /evaluatePurchaseRestrictions\(\s*restrictions, "recurring_subscription"/);
+});
+
+test("the subscription gate runs after auth and before any write or Stripe call", () => {
+  const src = read("lib/subscriptionCheckout.ts");
+  const body = src.slice(src.indexOf("export async function handleSubscriptionCheckout"));
+  const auth = body.indexOf("deps.verifyCaller");
+  const gate = body.indexOf("evaluatePurchaseRestrictions");
+  const plan = body.indexOf("deps.resolvePlan");
+  const attempt = body.indexOf("deps.ensureAttempt");
+  const stripe = body.indexOf("deps.getStripe");
+  for (const [n, i] of Object.entries({ auth, gate, plan, attempt, stripe })) {
+    assert.ok(i > -1, `${n} not found in the subscription handler`);
+  }
+  assert.ok(auth < gate, "the gate runs before the caller is known");
+  assert.ok(gate < plan && gate < attempt && gate < stripe,
+    "a restricted abo purchase got as far as the plan, an attempt row or Stripe");
+});
+
+test("an unreadable restriction store fails CLOSED on the abo surface too", () => {
+  const src = read("lib/subscriptionCheckout.ts");
+  const body = src.slice(src.indexOf("export async function handleSubscriptionCheckout"));
+  const start = body.indexOf("loadPurchaseRestrictions(caller.userId)");
+  assert.ok(start > -1);
+  const block = body.slice(start, body.indexOf("evaluatePurchaseRestrictions", start));
+  assert.match(block, /return fail\(503/);
+});
+
+test("both real dependency wirings load restrictions from the database", () => {
+  for (const rel of ["lib/annualPlanCheckoutDeps.ts", "lib/subscriptionCheckoutDeps.ts"]) {
+    const src = read(rel);
+    assert.match(src, /loadPurchaseRestrictions: loadPurchaseRestrictionsForUser/,
+      `${rel} declares the gate but never wires it, so nothing is enforced in production`);
+  }
+  // And the store refuses to pretend an unreadable table means "no
+  // restrictions": it throws, and both call sites turn that into a 503.
+  const store = read("lib/purchaseRestrictionsStore.ts");
+  assert.match(store, /throw new Error/);
+  // EXECUTABLE lines only - the prose above legitimately explains that
+  // the CALL SITES catch this.
+  const storeCode = store.split(/\r?\n/)
+    .filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  assert.ok(!storeCode.includes("catch"),
+    "the store swallows an error and returns an empty list");
+});
+
+/* ══════════════════════════════════════════════════════════════
+   ONLY THE SERVER MAY ACT ON A CASE
+   ══════════════════════════════════════════════════════════════ */
+
+test("the admin action layer never computes a refund or a ceiling itself", () => {
+  const src = read("lib/customerRightsAdminActions.ts");
+  const code = src.replace(/\/\*\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  // Every decision is an RPC; nothing here does arithmetic on money.
+  for (const forbidden of ["computeRefund", "suggestedValueLossCents", "Math.max("]) {
+    assert.ok(!code.includes(forbidden),
+      `the admin layer computes ${forbidden} instead of asking the database`);
+  }
+  assert.ok(!/stripe/i.test(code), "the admin layer reaches for Stripe");
+});
+
+test("approving a refund sends no amount", () => {
+  const src = read("lib/customerRightsAdminActions.ts");
+  const fn = src.slice(src.indexOf("export async function approveWithdrawalRefund"),
+                       src.indexOf("export async function advanceComplaint"));
+  assert.match(fn, /p_withdrawal_id: input\.withdrawalId/);
+  assert.ok(!/p_amount|p_refund|amountCents/.test(fn),
+    "an amount is passed into the refund approval");
+});

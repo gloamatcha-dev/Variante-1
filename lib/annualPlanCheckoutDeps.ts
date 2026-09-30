@@ -10,6 +10,7 @@ import type { SavedAddressRow } from "./subscriptionCheckoutRules";
 import type { AnnualCheckoutDeps, CreatePendingAnnualPlanInput } from "./annualPlanCheckout";
 import type { UpgradeSubscriptionRow } from "./subscriptionUpgradeRules";
 import { toAnnualEligibilityRow, type AnnualPlanEligibilityRow } from "./purchaseEligibility";
+import { loadPurchaseRestrictionsForUser } from "./purchaseRestrictionsStore";
 
 /**
  * The real wiring behind the annual plan checkout (Phase 4B3).
@@ -220,4 +221,5 @@ export const defaultAnnualCheckoutDeps: AnnualCheckoutDeps = {
   loadOwnSubscription,
   listAnnualPlans: listOwnAnnualPlansForEligibility,
   linkSession: linkStripeSession,
+  loadPurchaseRestrictions: loadPurchaseRestrictionsForUser,
 };

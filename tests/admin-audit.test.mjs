@@ -984,6 +984,10 @@ test("8: AKTIVITÄT is a real entry in the navigation array, in its required pla
     // The prepaid plan, beside the recurring one and under the same role
     // gate. A different contract, so its own tab rather than a column.
     ["annual", "Jahrespläne"],
+    // MIGRATION 070: the consumer rights desk - Widerruf, Reklamation,
+    // Kuendigung and Kaufsperren, under the same role gate as the
+    // commercial lists. Reviewed in tests/customer-rights-surfaces.test.mjs.
+    ["rights", "Verbraucherrechte"],
     ["inventory", "Inventar"],
     ["activity", "Aktivität"],
     ["waitlist", "Launch List"],

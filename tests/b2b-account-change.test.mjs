@@ -1254,7 +1254,7 @@ test("66: it takes the read_sensitive capability - never a viewer", () => {
     "the gate runs after the database client is built");
   // The UI hides the tab behind the same predicate.
   const shell = read("app/AdminOverview.tsx");
-  assert.match(shell, /key === "b2b"\) && !maySeeSubscriptions \? null :/);
+  assert.match(shell, /key === "b2b" \|\| key === "rights"\) && !maySeeSubscriptions \? null :/);
   assert.match(shell, /view === "b2b" && maySeeSubscriptions && <AdminB2b/);
 });
 

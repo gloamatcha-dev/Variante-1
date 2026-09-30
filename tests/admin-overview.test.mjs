@@ -451,7 +451,7 @@ test("23: the admin API surface is exactly these five, all POST-gated", () => {
   // checkout, the payment webhook, the daily job, and the customer's
   // own quantity and cancellation routes. Reviewed in
   // tests/b2b-account-change.test.mjs.
-  assert.deepEqual(dirs, ["activity", "annual-plans", "b2b", "inventory", "launch",
+  assert.deepEqual(dirs, ["activity", "annual-plans", "b2b", "customer-rights", "inventory", "launch",
     "orders", "session", "subscriptions", "waitlist"]);
 
   // The session route is the only one that may write anything, and what

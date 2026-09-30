@@ -1,0 +1,376 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+
+/**
+ * THE CONSUMER RIGHTS DESK.
+ *
+ * Four sections that are deliberately NOT merged, because the four
+ * rights behind them are not the same thing and an operator who
+ * confuses them costs the customer money:
+ *
+ *   WIDERRUF      a statutory right of withdrawal, with a deadline, a
+ *                 possible Wertersatz and a refund
+ *   REKLAMATION   a defect claim - WE carry the transport, and no
+ *                 Wertersatz applies at all
+ *   KÜNDIGUNG     ends a contract going forward. No refund, ever.
+ *   KAUFSPERREN   manual, admin-created purchase restrictions
+ *
+ * ── EVERY BUTTON HERE IS A SERVER DECISION ───────────────────
+ *
+ * Nothing in this component computes a refund, a ceiling or a deadline.
+ * It sends an intent to /api/admin/customer-rights, which calls one of
+ * migration 070's audited SQL writers, and it renders whatever comes
+ * back - including a refusal like 'above_ceiling' or 'return_outstanding'.
+ * That is why the value-loss field can be typed into freely: the
+ * database is what says no.
+ */
+
+type Json = Record<string, unknown>;
+
+type Payload = {
+  withdrawals: Json[];
+  complaints: Json[];
+  terminations: Json[];
+  restrictions: Json[];
+  orders: Json[];
+  plans: Json[];
+};
+
+const EMPTY: Payload = {
+  withdrawals: [], complaints: [], terminations: [], restrictions: [], orders: [], plans: [],
+};
+
+const euro = (c: unknown): string =>
+  typeof c === "number" ? (c / 100).toLocaleString("de-DE", { style: "currency", currency: "EUR" }) : "–";
+
+const dt = (v: unknown): string => {
+  if (typeof v !== "string") return "–";
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? "–" : d.toLocaleString("de-DE", { timeZone: "Europe/Berlin" });
+};
+
+const TIMELINESS_LABEL: Record<string, string> = {
+  timely: "fristgerecht",
+  late: "verspätet",
+  receipt_unknown: "Zugang unbekannt",
+  deadline_uncertain: "Frist unklar",
+};
+
+export function AdminCustomerRights({ onSessionLost }: { onSessionLost: () => void }) {
+  const [data, setData] = useState<Payload>(EMPTY);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [section, setSection] = useState<"widerruf" | "reklamation" | "kuendigung" | "sperren">("widerruf");
+
+  const post = useCallback(async (body: Json): Promise<Json | null> => {
+    const res = await fetch("/api/admin/customer-rights", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (res.status === 401) { onSessionLost(); return null; }
+    const json = await res.json().catch(() => null);
+    if (!res.ok) { setError((json?.error as string) || "Aktion fehlgeschlagen."); return null; }
+    return json as Json;
+  }, [onSessionLost]);
+
+  const reload = useCallback(async () => {
+    setBusy(true); setError("");
+    const json = await post({ action: "list" });
+    if (json) setData({ ...EMPTY, ...(json as Partial<Payload>) });
+    setBusy(false);
+  }, [post]);
+
+  // THE FIRST LOAD DOES NOT GO THROUGH reload().
+  //
+  // reload() sets `busy` as its first statement, and doing that
+  // synchronously inside an effect is what triggers a cascading render.
+  // So the mount path starts already busy - which is true, it is about
+  // to fetch - and only touches state after the await.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const json = await post({ action: "list" });
+      if (cancelled) return;
+      if (json) setData({ ...EMPTY, ...(json as Partial<Payload>) });
+      setBusy(false);
+    })();
+    return () => { cancelled = true; };
+  }, [post]);
+
+  const act = async (body: Json, label: string) => {
+    setBusy(true); setError(""); setNotice("");
+    const json = await post(body);
+    if (json) {
+      const result = String(json.result ?? "ok");
+      // A refusal from the database is shown as it came back, not
+      // translated into a success the operator would have to guess at.
+      setNotice(`${label}: ${result}`);
+      await reload();
+    }
+    setBusy(false);
+  };
+
+  const order = (id: unknown) => data.orders.find(o => o.id === id);
+  const plan = (id: unknown) => data.plans.find(p => p.id === id);
+
+  return (
+    <section className="ops-panel ops-customer-rights">
+      <header className="ops-panel-head">
+        <h2>Verbraucherrechte</h2>
+        <button type="button" onClick={() => void reload()} disabled={busy}>
+          {busy ? "Lädt …" : "Neu laden"}
+        </button>
+      </header>
+
+      <nav className="ops-subnav" aria-label="Verbraucherrechte">
+        {([["widerruf", `Widerruf (${data.withdrawals.length})`],
+           ["reklamation", `Reklamation (${data.complaints.length})`],
+           ["kuendigung", `Kündigung (${data.terminations.length})`],
+           ["sperren", `Kaufsperren (${data.restrictions.length})`]] as const).map(([k, l]) => (
+          <button key={k} type="button" className={section === k ? "is-active" : ""}
+                  onClick={() => setSection(k)}>{l}</button>
+        ))}
+      </nav>
+
+      {error && <p className="ops-error">{error}</p>}
+      {notice && <p className="ops-notice">{notice}</p>}
+
+      {/* ── WIDERRUF ───────────────────────────────────────────── */}
+      {section === "widerruf" && (
+        <div className="ops-list">
+          {data.withdrawals.length === 0 && <p>Keine Widerrufsfälle.</p>}
+          {data.withdrawals.map(w => {
+            const o = order(w.resolved_order_id) ?? {};
+            const p = plan(w.resolved_annual_plan_id) ?? {};
+            const id = String(w.id);
+            return (
+              <article key={id} className="ops-card">
+                <h3>{String(w.customer_name)} · {String(w.order_reference)}</h3>
+                <dl className="ops-facts">
+                  <div><dt>E-Mail</dt><dd>{String(w.contact_email)}</dd></div>
+                  <div><dt>Eingegangen</dt><dd>{dt(w.submitted_at)}</dd></div>
+                  <div><dt>Zuordnung</dt><dd>{String(w.resolution_method ?? "unresolved")}</dd></div>
+                  <div><dt>Bestellung</dt><dd>{String(o.order_number ?? "–")}</dd></div>
+                  <div><dt>Versand</dt><dd>{dt(o.shipped_at)}</dd></div>
+                  <div><dt>Zustellung</dt><dd>{dt(o.delivered_at)}</dd></div>
+                  <div><dt>Zustellquelle</dt><dd>{String(o.delivery_receipt_source ?? "–")}</dd></div>
+                  <div><dt>Fristbeginn</dt><dd>{dt(w.deadline_start_at)}</dd></div>
+                  <div><dt>Frist bis</dt><dd>{String(w.deadline_date ?? "–")}</dd></div>
+                  <div><dt>Fristgrundlage</dt><dd>{String(w.deadline_basis ?? "–")}</dd></div>
+                  <div><dt>Status Frist</dt><dd>{TIMELINESS_LABEL[String(w.timeliness)] ?? String(w.timeliness)}</dd></div>
+                  <div><dt>Fallstatus</dt><dd>{String(w.case_state)}</dd></div>
+                  <div><dt>Plan</dt><dd>{String(p.schedule_model ?? "–")} · {String(p.delivery_count ?? "–")} Lieferungen</dd></div>
+                  <div><dt>Gezahlt</dt><dd>{euro(p.total_gross_cents)}</dd></div>
+                  <div><dt>Regulärer Preis (Snapshot)</dt><dd>{euro(p.catalog_unit_gross_cents)}</dd></div>
+                  <div><dt>Siegel</dt><dd>{String(w.seal_state ?? "–")}</dd></div>
+                  <div><dt>Rücksendung</dt><dd>{String(w.return_requirement ?? "–")}</dd></div>
+                  <div><dt>Versandnachweis</dt><dd>{dt(w.return_dispatch_proof_at)}</dd></div>
+                  <div><dt>Rücksendung erhalten</dt><dd>{dt(w.return_received_at)}</dd></div>
+                  <div><dt>Wertersatz Vorschlag</dt><dd>{euro(w.suggested_value_loss_cents)}</dd></div>
+                  <div><dt>Wertersatz bestätigt</dt><dd>{euro(w.confirmed_value_loss_cents)}</dd></div>
+                  <div><dt>Erstattung</dt><dd>{euro(w.refund_amount_cents)}</dd></div>
+                  <div><dt>Erstattungsstatus</dt><dd>{String(w.refund_state)}</dd></div>
+                  <div><dt>Lieferungen eingefroren</dt><dd>{dt(w.deliveries_frozen_at)}</dd></div>
+                  <div><dt>Interne Notiz</dt><dd>{String(w.internal_note ?? "–")}</dd></div>
+                </dl>
+
+                <div className="ops-actions">
+                  <button type="button" disabled={busy}
+                    onClick={() => void act({ action: "set_seal_state", withdrawalId: id, sealState: "sealed_unopened" }, "Siegel")}>
+                    Originalversiegelt / ungeöffnet
+                  </button>
+                  <button type="button" disabled={busy}
+                    onClick={() => void act({ action: "set_seal_state", withdrawalId: id, sealState: "opened_seal_broken" }, "Siegel")}>
+                    Geöffnet / Siegel gebrochen
+                  </button>
+                  <button type="button" disabled={busy}
+                    onClick={() => void act({ action: "set_return_requirement", withdrawalId: id, requirement: "return_requested" }, "Rücksendung")}>
+                    Rücksendung angefordert
+                  </button>
+                  <button type="button" disabled={busy}
+                    onClick={() => void act({ action: "set_return_requirement", withdrawalId: id, requirement: "return_not_required" }, "Rücksendung")}>
+                    Rücksendung nicht nötig
+                  </button>
+                  <button type="button" disabled={busy}
+                    onClick={() => void act({ action: "record_return", withdrawalId: id, event: "dispatch_proof" }, "Versandnachweis")}>
+                    Versandnachweis erhalten
+                  </button>
+                  <button type="button" disabled={busy}
+                    onClick={() => void act({ action: "record_return", withdrawalId: id, event: "received" }, "Rücksendung")}>
+                    Rücksendung erhalten
+                  </button>
+                  <label>Wertersatz (Cent)
+                    <input type="number" min={0} step={1} id={`vl-${id}`} defaultValue={0}/>
+                  </label>
+                  <button type="button" disabled={busy}
+                    onClick={() => {
+                      const el = document.getElementById(`vl-${id}`) as HTMLInputElement | null;
+                      void act({ action: "confirm_value_loss", withdrawalId: id,
+                                 confirmedCents: Number(el?.value ?? 0) }, "Wertersatz");
+                    }}>
+                    Wertersatz bestätigen
+                  </button>
+                  {/* NO AMOUNT IS SENT. The server derives it. */}
+                  <button type="button" disabled={busy}
+                    onClick={() => void act({ action: "approve_refund", withdrawalId: id }, "Erstattung")}>
+                    Erstattung vorbereiten
+                  </button>
+                </div>
+                <p className="ops-note">
+                  „Erstattung vorbereiten“ berechnet den Betrag serverseitig und gibt ihn frei.
+                  Die Auszahlung bei Stripe ist ein getrennter, ausdrücklicher Schritt.
+                </p>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── REKLAMATION ────────────────────────────────────────── */}
+      {section === "reklamation" && (
+        <div className="ops-list">
+          {data.complaints.length === 0 && <p>Keine Reklamationen.</p>}
+          {data.complaints.map(c => {
+            const id = String(c.id);
+            return (
+              <article key={id} className="ops-card">
+                <h3>{String(c.customer_name)} · {String(c.order_reference)}</h3>
+                <dl className="ops-facts">
+                  <div><dt>E-Mail</dt><dd>{String(c.contact_email)}</dd></div>
+                  <div><dt>Grund</dt><dd>{String(c.reason)}</dd></div>
+                  <div><dt>Beschreibung</dt><dd>{String(c.customer_note ?? "–")}</dd></div>
+                  <div><dt>Eingegangen</dt><dd>{dt(c.submitted_at)}</dd></div>
+                  <div><dt>Status</dt><dd>{String(c.case_state)}</dd></div>
+                  <div><dt>Rücksendekosten</dt>
+                       <dd>{c.seller_bears_transport_cost ? "GLOA trägt sie (§ 439 Abs. 2 BGB)" : "–"}</dd></div>
+                </dl>
+                <div className="ops-actions">
+                  {["under_review", "evidence_requested", "remedy_offered",
+                    "replacement_sent", "refunded", "rejected", "closed"].map(s => (
+                    <button key={s} type="button" disabled={busy}
+                      onClick={() => void act({ action: "advance_complaint", complaintId: id, caseState: s }, "Reklamation")}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+                <p className="ops-note">
+                  Eine Reklamation ist kein Widerruf: kein Wertersatz, und die Rücksendekosten trägt GLOA.
+                </p>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── KÜNDIGUNG ──────────────────────────────────────────── */}
+      {section === "kuendigung" && (
+        <div className="ops-list">
+          {data.terminations.length === 0 && <p>Keine Kündigungen.</p>}
+          {data.terminations.map(t => {
+            const id = String(t.id);
+            return (
+              <article key={id} className="ops-card">
+                <h3>{String(t.customer_name)} · {String(t.contract_reference)}</h3>
+                <dl className="ops-facts">
+                  <div><dt>E-Mail</dt><dd>{String(t.contact_email)}</dd></div>
+                  <div><dt>Art</dt><dd>{t.termination_kind === "extraordinary" ? "außerordentlich" : "ordentlich"}</dd></div>
+                  <div><dt>Vertragsart</dt><dd>{String(t.contract_kind ?? "–")}</dd></div>
+                  <div><dt>Gewünschtes Ende</dt><dd>{dt(t.requested_end_at)}</dd></div>
+                  <div><dt>Grund</dt><dd>{String(t.extraordinary_reason ?? "–")}</dd></div>
+                  <div><dt>Eingegangen</dt><dd>{dt(t.submitted_at)}</dd></div>
+                  <div><dt>Status</dt><dd>{String(t.case_state)}</dd></div>
+                </dl>
+                <div className="ops-actions">
+                  {["under_review", "acknowledged_ends_automatically",
+                    "scheduled", "effective", "rejected", "closed"].map(s => (
+                    <button key={s} type="button" disabled={busy}
+                      onClick={() => void act({ action: "review_termination", terminationId: id, caseState: s }, "Kündigung")}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+                <p className="ops-note">
+                  Eine Kündigung löst keine Erstattung aus. Ein 4-Wochen-Abo wird über die bestehende
+                  Abo-Kündigung beendet, nicht hier.
+                </p>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── KAUFSPERREN ────────────────────────────────────────── */}
+      {section === "sperren" && (
+        <div className="ops-list">
+          <form className="ops-card" onSubmit={e => {
+            e.preventDefault();
+            const f = new FormData(e.currentTarget as HTMLFormElement);
+            void act({
+              action: "create_restriction",
+              userId: String(f.get("userId") ?? ""),
+              scope: String(f.get("scope") ?? ""),
+              reasonCategory: String(f.get("reasonCategory") ?? ""),
+              internalNote: String(f.get("internalNote") ?? ""),
+              expiresAt: String(f.get("expiresAt") ?? ""),
+            }, "Kaufsperre");
+          }}>
+            <h3>Kaufsperre setzen</h3>
+            <label>Kunden-ID (user_id)<input required name="userId"/></label>
+            <label>Bereich
+              <select name="scope" defaultValue="annual_plan">
+                <option value="annual_plan">Jahresplan</option>
+                <option value="recurring_subscription">Abo (4 Wochen)</option>
+                <option value="all_new_plan_purchases">Alle neuen Pläne</option>
+              </select>
+            </label>
+            <label>Grundkategorie
+              <select name="reasonCategory" defaultValue="manual_review">
+                <option value="repeated_withdrawal_pattern">Wiederholtes Widerrufsmuster</option>
+                <option value="payment_abuse">Zahlungsmissbrauch</option>
+                <option value="chargeback_history">Chargeback-Historie</option>
+                <option value="manual_review">Manuelle Prüfung</option>
+                <option value="other">Sonstiges</option>
+              </select>
+            </label>
+            <label>Interne Notiz<textarea name="internalNote" rows={3} maxLength={4000}/></label>
+            <label>Läuft ab am (optional)<input type="datetime-local" name="expiresAt"/></label>
+            <button type="submit" disabled={busy}>Sperre setzen</button>
+            <p className="ops-note">
+              Sperren entstehen nur hier, von Hand. Ein Widerruf allein erzeugt nie eine Sperre.
+              Gesperrte Kundinnen und Kunden können sich weiterhin anmelden, alte Bestellungen sehen,
+              widerrufen, reklamieren, kündigen und Erstattungen erhalten.
+            </p>
+          </form>
+
+          {data.restrictions.map(r => {
+            const id = String(r.id);
+            return (
+              <article key={id} className="ops-card">
+                <h3>{String(r.user_id)}</h3>
+                <dl className="ops-facts">
+                  <div><dt>Bereich</dt><dd>{String(r.scope)}</dd></div>
+                  <div><dt>Grund</dt><dd>{String(r.reason_category)}</dd></div>
+                  <div><dt>Notiz</dt><dd>{String(r.internal_note ?? "–")}</dd></div>
+                  <div><dt>Gesetzt</dt><dd>{dt(r.created_at)}</dd></div>
+                  <div><dt>Läuft ab</dt><dd>{dt(r.expires_at)}</dd></div>
+                  <div><dt>Aktiv</dt><dd>{r.active ? "ja" : `nein (aufgehoben ${dt(r.lifted_at)})`}</dd></div>
+                </dl>
+                {Boolean(r.active) && (
+                  <div className="ops-actions">
+                    <button type="button" disabled={busy}
+                      onClick={() => void act({ action: "lift_restriction", restrictionId: id }, "Kaufsperre")}>
+                      Sperre aufheben
+                    </button>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}

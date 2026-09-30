@@ -318,6 +318,40 @@ test("4d: every WRITE route takes the write capability, every read says so", () 
     assert.match(code, /(openAdminAction|requireAdminIdentity)\(request, "read"\)/,
       `${route} is a read but does not say so`);
   }
+  /*
+    A FOURTH CLASS: A SENSITIVE READ THAT ALSO ACTS.
+
+    The consumer rights desk (migration 070) does not fit the three
+    above. It carries the same billing data the restricted reads do - so
+    its READ takes read_sensitive - but a withdrawal case is worked, not
+    merely looked at, so it also writes.
+
+    What makes that safe is not the capability alone. It is that every
+    write leaves through an RPC: the ceiling on a Wertersatz, the
+    preconditions for a payout and the audit entry all live in migration
+    070's SQL writers, where every caller gets them. A .insert, .update
+    or .delete here would be this route deciding for itself, so those
+    stay banned exactly as they are for a restricted read.
+  */
+  const SENSITIVE_WRITES = ["customer-rights"];
+
+  for (const route of SENSITIVE_WRITES) {
+    const code = codeOnly(read(`app/api/admin/${route}/route.ts`));
+    assert.match(code, /requireAdminIdentity\(request, "read_sensitive"\)/,
+      `${route} does not take the restricted read for its list`);
+    assert.match(code, /requireAdminIdentity\(request, "write"\)/,
+      `${route} does not re-gate its writes at the write capability`);
+    // Its writes go through the database's own writers, never directly.
+    for (const banned of [".insert(", ".update(", ".upsert(", ".delete("]) {
+      assert.ok(!code.includes(banned),
+        `${route} writes a table directly instead of through an audited RPC: ${banned}`);
+    }
+    // And it does not restate the role matrix for itself.
+    for (const banned of ["owner", "viewer", "canWrite", "canRead"]) {
+      assert.ok(!code.includes(banned), `${route} decides roles for itself: ${banned}`);
+    }
+  }
+
   for (const route of RESTRICTED_READS) {
     const code = codeOnly(read(`app/api/admin/${route}/route.ts`));
     assert.match(code, /requireAdminIdentity\(request, "read_sensitive"\)/,
@@ -349,7 +383,7 @@ test("4d: every WRITE route takes the write capability, every read says so", () 
   // And the three lists together are every session-gated admin route, so
   // a new one cannot be added without appearing in this test.
   const gated = adminRoutes().filter(r => !r.startsWith("launch/") && r !== "session");
-  assert.deepEqual(gated.sort(), [...WRITES, ...READS, ...RESTRICTED_READS].sort(),
+  assert.deepEqual(gated.sort(), [...WRITES, ...READS, ...RESTRICTED_READS, ...SENSITIVE_WRITES].sort(),
     "an admin route exists that this test does not classify");
 });
 

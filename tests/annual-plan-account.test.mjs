@@ -845,6 +845,10 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
     // read_sensitive, and with no write path at all. Reviewed in
     // tests/b2b-account-change.test.mjs.
     "/admin/b2b",
+    // MIGRATION 070: the consumer rights desk. Sensitive read for its
+    // list, write for each case action, and every write leaves through
+    // one of 070's audited SQL writers.
+    "/admin/customer-rights",
     // PAKET 4A.2. The manual inventory: two reads (a page of items, one
     // item with its history), four writes that change descriptive fields
     // or create an item, and two that book stock - both of the latter

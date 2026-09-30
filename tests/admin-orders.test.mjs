@@ -396,7 +396,7 @@ test("6: the navigation offers five real sections and fakes none", () => {
   // PACKAGE 5G added B2B, real from the day it appears: it opens the
   // read-only supply-contract list, not a placeholder - which is why
   // it also had to leave the "bald" list below.
-  assert.match(shell, /const \[view, setView\] = useState<"overview" \| "orders" \| "subscriptions" \| "annual" \| "inventory" \| "activity" \| "waitlist" \| "b2b">\("overview"\)/);
+  assert.match(shell, /const \[view, setView\] = useState<"overview" \| "orders" \| "subscriptions" \| "annual" \| "rights" \| "inventory" \| "activity" \| "waitlist" \| "b2b">\("overview"\)/);
   // The "bald" list must no longer name a section that exists.
   const soon = shell.slice(shell.indexOf("ops-nav-soon") - 400, shell.indexOf("ops-nav-soon"));
   assert.ok(!soon.includes("Inventar"),
@@ -421,6 +421,10 @@ test("6: the navigation offers five real sections and fakes none", () => {
     // screen, and it is real from the day it appears.
     ["subscriptions", "Abos"],
     ["annual", "Jahrespläne"],
+    // MIGRATION 070: the consumer rights desk - Widerruf, Reklamation,
+    // Kuendigung and Kaufsperren, under the same role gate as the
+    // commercial lists. Reviewed in tests/customer-rights-surfaces.test.mjs.
+    ["rights", "Verbraucherrechte"],
     ["inventory", "Inventar"],
     ["activity", "Aktivität"],
     ["waitlist", "Launch List"],
@@ -539,7 +543,7 @@ test("7: /api/admin gained orders and nothing else", () => {
   // checkout, the payment webhook, the daily job, and the customer's
   // own quantity and cancellation routes. Reviewed in
   // tests/b2b-account-change.test.mjs.
-  assert.deepEqual(dirs, ["activity", "annual-plans", "b2b", "inventory", "launch",
+  assert.deepEqual(dirs, ["activity", "annual-plans", "b2b", "customer-rights", "inventory", "launch",
     "orders", "session", "subscriptions", "waitlist"]);
   const orderDirs = readdirSync(path.join(ROOT, "app/api/admin/orders"), { withFileTypes: true })
     .filter(e => e.isDirectory()).map(e => e.name).sort();
