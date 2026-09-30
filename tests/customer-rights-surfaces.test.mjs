@@ -549,11 +549,20 @@ test("the search_path check is robust to how PostgreSQL renders an empty value",
   // would FAIL a correctly configured Production function.
   assert.ok(!PREFLIGHT.includes(`'search_path=' = any(`),
     "the preflight matches one literal spelling of an empty search_path");
-  assert.match(PREFLIGHT, /search_path=\(\.\*\)\$/);
-  assert.match(PREFLIGHT, /btrim\(/);
+  // It unquotes the value and compares it to the empty string.
+  assert.match(PREFLIGHT, /pg_catalog\.split_part\(cfg, '=', 2\)/);
+  assert.match(PREFLIGHT, /pg_catalog\.btrim\(/);
   // And it still genuinely requires EMPTY, not merely present.
   assert.match(PREFLIGHT, /\) = ''/);
   assert.match(PREFLIGHT, /p\.prosecdef/);
+  // The SQL-standard substring(x FROM pattern) form cannot be
+  // schema-qualified - pg_catalog.substring(cfg from '...') is a parse
+  // error, and it is how this line first failed in Production. It must
+  // not come back in the EXECUTABLE region; the prose may explain it.
+  const executable = PREFLIGHT.split(/\r?\n/)
+    .map(l => l.replace(/--.*$/, "")).join("\n");
+  assert.ok(!/substring/i.test(executable),
+    "the preflight uses substring() again, which cannot be pg_catalog-qualified");
 });
 
 test("the record_admin_activity check pins the signature, not just the name", () => {

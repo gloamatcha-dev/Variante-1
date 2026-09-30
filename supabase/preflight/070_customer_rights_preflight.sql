@@ -238,6 +238,21 @@ checks as (
          -- required to be EMPTY. That still refuses the thing this check
          -- exists to catch: a search_path that is set to something -
          -- 'public', '"$user", public' - rather than emptied.
+         --
+         -- split_part, NOT substring(... from ...). The SQL-standard
+         -- substring form takes its pattern through a FROM clause rather
+         -- than as an ordinary argument, and that spelling cannot be
+         -- schema-qualified: pg_catalog.substring(cfg from '...') is a
+         -- parse error, which is exactly how this line failed in the
+         -- Supabase SQL Editor. split_part is an ordinary function, so
+         -- it qualifies cleanly and keeps this statement safe against a
+         -- hostile search_path.
+         --
+         -- Same meaning for every value that matters here:
+         --   search_path=""        -> ""      -> btrim -> ''  PASS
+         --   search_path=          -> ''      -> btrim -> ''  PASS
+         --   search_path=public    -> public               -> FAIL
+         --   search_path="$user", public -> "$user", public -> FAIL
          case when (select count(*) from pg_catalog.pg_proc p
                       join pg_catalog.pg_namespace n on n.oid = p.pronamespace
                       where n.nspname = 'public'
@@ -248,7 +263,8 @@ checks as (
                               from unnest(coalesce(p.proconfig, array[]::text[])) as cfg
                               where cfg like 'search_path=%'
                                 and pg_catalog.btrim(
-                                      pg_catalog.substring(cfg from '^search_path=(.*)$'), '"'
+                                      pg_catalog.split_part(cfg, '=', 2),
+                                      '"'
                                     ) = ''
                             )) = 1
               then 'PASS' else 'FAIL' end
