@@ -3,12 +3,12 @@ import { requireAdminIdentity } from "../../../../lib/adminActionRoute.ts";
 import { getSiteOrigin } from "../../../../lib/siteUrl";
 import { getResendClient } from "../../../../lib/resend";
 import { buildWithdrawalReturnReceivedEmail } from "../../../../lib/email/withdrawalReturnReceived";
-import { buildWithdrawalRefundCompletedEmail } from "../../../../lib/email/withdrawalRefundCompleted";
 import {
   markOrderDelivered,
   setSealState,
   setReturnRequirement,
   recordReturn,
+  resolveWithdrawalItem,
   confirmValueLoss,
   approveWithdrawalRefund,
   advanceComplaint,
@@ -59,6 +59,14 @@ import {
  * Moving the money is /api/admin/withdrawal-refund - a different route,
  * a different request, and the only file in the codebase that calls
  * stripe.refunds.create for a withdrawal.
+ *
+ * ── AND IT DOES NOT TELL THE CUSTOMER THE MONEY WENT ─────────
+ *
+ * It used to: approving sent "Erstattung durchgeführt" from here, before
+ * any money had moved. That mail belongs to the moment the payment
+ * provider confirms, so it is sent from the payout route instead. The
+ * one customer mail still triggered here is "Rücksendung erhalten",
+ * which is a fact this desk genuinely establishes.
  */
 
 type ErrorResponse = { error: string };
@@ -76,6 +84,9 @@ const WITHDRAWAL_COLUMNS =
   + "return_dispatch_proof_at, return_received_at, suggested_value_loss_cents, "
   + "confirmed_value_loss_cents, value_loss_confirmed_at, refund_amount_cents, "
   + "refund_state, refund_executed_at, refund_provider_reference, refund_failure_reason, "
+  + "refund_completed_email_status, refund_completed_email_sent_at, "
+  + "resolved_order_item_id, resolved_item_quantity, partial_shipping_treatment, "
+  + "item_resolution_at, "
   + "deliveries_frozen_at, deliveries_permanently_stopped_at, internal_note, updated_at";
 
 const COMPLAINT_COLUMNS =
@@ -282,13 +293,33 @@ export async function POST(request: Request): Promise<Response> {
         }), 200);
       }
 
+      // WHICH GOODS, AND HOW MANY. The structured answer that replaces
+      // reading the consumer's own scope_note. Every bound - the line
+      // belonging to this order, the quantity not exceeding what was
+      // sold, the shipping decision being required for a partial case
+      // and forbidden for a whole-order one - is enforced in SQL.
+      case "resolve_item": {
+        const qty = Number(b.quantity);
+        if (!Number.isSafeInteger(qty) || qty < 1) {
+          return json({ error: "Ungültige Menge." } as ErrorResponse, 400);
+        }
+        const treatment = str("shippingTreatment");
+        return json(await resolveWithdrawalItem(deps, {
+          actorUserId, withdrawalId: str("withdrawalId"),
+          orderItemId: str("orderItemId"), quantity: qty,
+          shippingTreatment: treatment === "refund_outbound_shipping"
+                          || treatment === "retain_outbound_shipping" ? treatment : null,
+        }), 200);
+      }
+
       // NOTE: no amount parameter. The database derives it.
+      //
+      // AND NO MAIL. Approving is a decision, not the money arriving, so
+      // the customer hears nothing here - they hear once, after the
+      // payment provider confirms, from /api/admin/withdrawal-refund.
       case "approve_refund":
         return json(await approveWithdrawalRefund(deps, {
           actorUserId, withdrawalId: str("withdrawalId"),
-          buildRefundMail: args => buildWithdrawalRefundCompletedEmail({
-            origin: getSiteOrigin() ?? undefined, ...args,
-          }),
         }), 200);
 
       case "advance_complaint":

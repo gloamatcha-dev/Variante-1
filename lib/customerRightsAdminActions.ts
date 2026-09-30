@@ -7,19 +7,29 @@
  * index - so this layer cannot weaken them by forgetting one. What it
  * adds is the part SQL cannot do: telling the customer.
  *
- * ── TWO OF THE SIX MAILS ARE TRIGGERED FROM HERE ─────────────
+ * ── ONE OF THE SIX MAILS IS TRIGGERED FROM HERE ──────────────
  *
- * "Rücksendung erhalten" and "Erstattung durchgeführt" are consequences
- * of an ADMIN decision, not of a customer submission, so they are sent
- * where that decision is made. The other four hang off the public
- * routes.
+ * "Rücksendung erhalten" is the consequence of an ADMIN decision rather
+ * than of a customer submission, so it is sent where that decision is
+ * made. Three more hang off the public routes.
+ *
+ * ── AND "ERSTATTUNG DURCHGEFÜHRT" IS DELIBERATELY NOT HERE ───
+ *
+ * It used to be, sent by approveWithdrawalRefund, and that was wrong.
+ * Approving a payout is a decision; it is not the money arriving. A card
+ * can still decline afterwards, and a customer told their refund was
+ * carried out at the moment it was merely authorised has been told
+ * something untrue.
+ *
+ * That mail now belongs to lib/withdrawalRefundCompletionEmail.ts, which
+ * cannot send it before the payment provider has confirmed: its claim
+ * requires refund_state = 'executed', a state migration 070 will not
+ * write without the provider's own reference for the refund.
  *
  * ── AND THE MAIL NEVER DECIDES ANYTHING ──────────────────────
  *
- * The figures in the refund mail are the ones the database returned
- * from admin_approve_withdrawal_refund. Nothing here computes an
- * amount, and a send failure is reported rather than allowed to roll
- * back a decision that has already been recorded.
+ * Nothing here computes an amount, and a send failure is reported rather
+ * than allowed to roll back a decision that has already been recorded.
  *
  * ── THE STRIPE BOUNDARY ──────────────────────────────────────
  *
@@ -164,53 +174,60 @@ export async function confirmValueLoss(
 /* ── The refund ───────────────────────────────────────────────── */
 
 /**
- * PREPARE a payout. This does not pay.
+ * PREPARE a payout. This does not pay, and it does not mail.
  *
  * The amount comes back from the database, which derived it; this
- * function has no parameter for one and does not compute one. On
- * success the customer is told what was decided, including any
- * deduction, because a silent deduction is how a refund becomes a
- * complaint.
+ * function has no parameter for one and does not compute one.
+ *
+ * IT SENDS NOTHING, and that is the fix for a real defect. It used to
+ * send "Erstattung durchgeführt" here, at approval - before any money
+ * had moved and while a decline was still possible. The customer now
+ * hears once, after the payment provider confirms, from
+ * lib/withdrawalRefundCompletionEmail.ts.
+ *
+ * So there is no buildRefundMail parameter any more. Removing it rather
+ * than leaving it unused is deliberate: a parameter for a mail this
+ * function must not send is an invitation to send it.
  */
 export async function approveWithdrawalRefund(
   deps: CustomerRightsAdminDeps,
-  input: {
-    actorUserId: string; withdrawalId: string;
-    buildRefundMail: (args: {
-      customerName: string; orderReference: string;
-      paidGrossCents: number; confirmedValueLossCents: number; refundGrossCents: number;
-    }) => { subject: string; html: string; text: string };
-  }
-): Promise<WriterResult & { mailSent?: boolean; breakdown?: RefundBreakdown }> {
-  const result = await deps.rpc("admin_approve_withdrawal_refund", {
+  input: { actorUserId: string; withdrawalId: string }
+): Promise<WriterResult & { breakdown?: RefundBreakdown }> {
+  return deps.rpc("admin_approve_withdrawal_refund", {
     p_actor_user_id: input.actorUserId,
     p_withdrawal_id: input.withdrawalId,
   });
+}
 
-  if (result.result !== "approved") return result;
-
-  const paid = Number(result.paid_cents ?? 0);
-  const loss = Number(result.value_loss_cents ?? 0);
-  const refund = Number(result.refund_amount_cents ?? 0);
-
-  const contact = await deps.loadCaseContact(input.withdrawalId);
-  if (!contact) return { ...result, mailSent: false };
-
-  const mail = input.buildRefundMail({
-    customerName: contact.customerName,
-    orderReference: contact.orderReference,
-    paidGrossCents: paid,
-    confirmedValueLossCents: loss,
-    refundGrossCents: refund,
-  });
-  let mailSent = false;
-  try {
-    mailSent = await deps.sendMail(contact.contactEmail, mail);
-  } catch {
-    mailSent = false;
+/**
+ * Say WHICH goods a case is about, and how many of them.
+ *
+ * The consumer's own scope_note is a sentence they typed
+ * ("nur 1x Ceremonial 40g"), which is the right thing to ask a person
+ * and cannot be the basis of a refund. This records an administrator's
+ * structured answer instead: an order_items reference and a quantity.
+ *
+ * The database is what makes it safe. admin_resolve_withdrawal_item
+ * refuses a line belonging to a different order, refuses a quantity
+ * larger than what was sold, requires the outbound-shipping decision for
+ * a partial case and forbids it for a whole-order one. This wrapper adds
+ * nothing to those rules and cannot weaken them.
+ */
+export async function resolveWithdrawalItem(
+  deps: CustomerRightsAdminDeps,
+  input: {
+    actorUserId: string; withdrawalId: string;
+    orderItemId: string; quantity: number;
+    shippingTreatment?: "refund_outbound_shipping" | "retain_outbound_shipping" | null;
   }
-
-  return { ...result, mailSent };
+): Promise<WriterResult> {
+  return deps.rpc("admin_resolve_withdrawal_item", {
+    p_actor_user_id: input.actorUserId,
+    p_withdrawal_id: input.withdrawalId,
+    p_order_item_id: input.orderItemId,
+    p_quantity: input.quantity,
+    p_shipping_treatment: input.shippingTreatment ?? null,
+  });
 }
 
 /* ── The other two case families ──────────────────────────────── */
@@ -269,13 +286,28 @@ export async function liftPurchaseRestriction(
 }
 
 /**
- * THE TWO ADMIN-TRIGGERED MAILS, NAMED SO THE WIRING IS GREPPABLE.
+ * THE ADMIN-TRIGGERED MAIL THIS MODULE SENDS, NAMED SO THE WIRING IS
+ * GREPPABLE.
  *
- * The builders are passed in rather than imported so this module stays
- * testable without a template, but the real call sites use exactly
- * these two - and a test asserts both names appear here.
+ * One, not two. buildWithdrawalRefundCompletedEmail used to be here and
+ * is deliberately gone: that message follows the payment provider
+ * confirming, not an administrator deciding, so it is sent from
+ * lib/withdrawalRefundCompletionEmail.ts through
+ * /api/admin/withdrawal-refund. A test asserts it appears THERE and not
+ * here, which is what stops it drifting back to approval time.
+ *
+ * The builder is passed in rather than imported so this module stays
+ * testable without a template.
  */
 export const ADMIN_TRIGGERED_MAILS = Object.freeze([
   "buildWithdrawalReturnReceivedEmail",
+] as const);
+
+/**
+ * And the one sent from the payout route, named here for the same
+ * reason: so the pair is findable from one place even though they are
+ * triggered from two.
+ */
+export const PAYOUT_TRIGGERED_MAILS = Object.freeze([
   "buildWithdrawalRefundCompletedEmail",
 ] as const);

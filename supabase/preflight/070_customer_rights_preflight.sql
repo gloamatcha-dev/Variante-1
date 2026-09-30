@@ -14,14 +14,17 @@
 -- always computed from the actual rows - this line is the expectation to
 -- compare it against, never the source of it.
 --
--- WHAT THE FINAL REVIEW PASS CHANGED, AND WHY THE COUNT DID NOT.
+-- WHAT THE REVIEW PASSES CHANGED, AND WHY THE COUNT DID NOT.
 --
--- Migration 070 grew three columns, two functions, one constraint and
--- one more queue predicate. Every one of those belongs to a check that
--- ALREADY EXISTS and works by enumerating names, so each was added to
--- its list rather than given a row of its own: check 31 now names ten
--- columns, check 33 fifteen functions, check 34 six constraints, and
--- check 26 refuses the one-in-flight predicate as well as the freeze.
+-- Migration 070 grew across two review passes: ten then seventeen
+-- columns, fifteen then nineteen functions, six then nine constraints,
+-- and one more queue predicate. Every one of those belongs to a check
+-- that ALREADY EXISTS and works by enumerating names, so each was added
+-- to its list rather than given a row of its own: check 31 now names
+-- seventeen columns, check 33 nineteen functions, check 34 nine
+-- constraints, and check 26 refuses the one-in-flight predicate as well
+-- as the freeze.
+--
 -- Twenty-seven and five are therefore still correct - and a preflight
 -- whose header count disagreed with its SUMMARY would be the first
 -- thing to distrust, which is why this note exists instead of a guess.
@@ -360,10 +363,12 @@ checks as (
               then 'PASS' else 'FAIL' end
 
   union all
-  -- Ten column names, not seven. The three added after the first
-  -- review - the permanent delivery stop, and the two that hold what
-  -- Stripe said - are checked here for the same reason as the rest: a
-  -- name already present would mean 070 is partially applied.
+  -- Seventeen column names now. The ten from the earlier passes, plus
+  -- the seven the residual pass added: the five that record WHICH goods
+  -- and how many a case is about (with the partial outbound-shipping
+  -- decision), and the two that track the completion mail. All checked
+  -- for the same reason as the rest - a name already present would mean
+  -- 070 is partially applied.
   select 31, '070-clean',
          'withdrawal_requests has none of the case columns yet', 'none',
          (select coalesce(string_agg(column_name, ', ' order by column_name), 'none')
@@ -371,12 +376,20 @@ checks as (
               ('case_state', 'timeliness', 'deadline_date', 'seal_state',
                'refund_state', 'deliveries_frozen_at', 'idempotency_key',
                'deliveries_permanently_stopped_at',
-               'refund_provider_reference', 'refund_failure_reason')),
+               'refund_provider_reference', 'refund_failure_reason',
+               'resolved_order_item_id', 'resolved_item_quantity',
+               'partial_shipping_treatment', 'item_resolution_by',
+               'item_resolution_at', 'refund_completed_email_status',
+               'refund_completed_email_sent_at')),
          case when (select count(*) from wr_cols where column_name in
                      ('case_state', 'timeliness', 'deadline_date', 'seal_state',
                       'refund_state', 'deliveries_frozen_at', 'idempotency_key',
                       'deliveries_permanently_stopped_at',
-                      'refund_provider_reference', 'refund_failure_reason')) = 0
+                      'refund_provider_reference', 'refund_failure_reason',
+                      'resolved_order_item_id', 'resolved_item_quantity',
+                      'partial_shipping_treatment', 'item_resolution_by',
+                      'item_resolution_at', 'refund_completed_email_status',
+                      'refund_completed_email_sent_at')) = 0
               then 'PASS' else 'FAIL' end
 
   union all
@@ -391,7 +404,7 @@ checks as (
 
   union all
   select 33, '070-clean',
-         'none of the fifteen function names 070 creates is already taken', 'none',
+         'none of the nineteen function names 070 creates is already taken', 'none',
          coalesce((select string_agg(proname::text, ', ' order by proname::text) from fn
                      where proname in (
                        'record_order_delivery', 'admin_mark_order_delivered',
@@ -404,6 +417,10 @@ checks as (
                        'admin_approve_withdrawal_refund',
                        'admin_record_withdrawal_refund_execution',
                        'admin_record_withdrawal_refund_failure',
+                       'admin_resolve_withdrawal_item',
+                       'claim_withdrawal_refund_completed_email',
+                       'mark_withdrawal_refund_completed_email_sent',
+                       'mark_withdrawal_refund_completed_email_failed',
                        'admin_advance_complaint',
                        'admin_review_termination',
                        'admin_create_purchase_restriction',
@@ -420,13 +437,17 @@ checks as (
                         'admin_approve_withdrawal_refund',
                         'admin_record_withdrawal_refund_execution',
                         'admin_record_withdrawal_refund_failure',
+                        'admin_resolve_withdrawal_item',
+                        'claim_withdrawal_refund_completed_email',
+                        'mark_withdrawal_refund_completed_email_sent',
+                        'mark_withdrawal_refund_completed_email_failed',
                         'admin_advance_complaint',
                         'admin_review_termination',
                         'admin_create_purchase_restriction',
                         'admin_lift_purchase_restriction')) = 0
               then 'PASS' else 'FAIL' end
 
-  -- THE SIX NAMED CONSTRAINTS 070 ADDS.
+  -- THE NINE NAMED CONSTRAINTS 070 ADDS.
   --
   -- These are the collisions that actually ABORT the migration: ALTER
   -- TABLE ... ADD CONSTRAINT has no IF NOT EXISTS, so a name already in
@@ -435,13 +456,16 @@ checks as (
   -- table but 070 would fail on any table that already owns it.
   union all
   select 34, '070-clean',
-         'none of the six constraint names 070 adds is already taken', 'none',
+         'none of the nine constraint names 070 adds is already taken', 'none',
          coalesce((select string_agg(conname::text, ', ' order by conname::text)
                      from pg_catalog.pg_constraint
                      where conname in ('orders_delivery_receipt_shape_check',
                                        'orders_delivery_admin_source_requires_actor_check',
                                        'withdrawal_requests_value_loss_decision_shape_check',
                                        'withdrawal_requests_refund_execution_shape_check',
+                                       'withdrawal_requests_item_resolution_shape_check',
+                                       'withdrawal_requests_partial_shipping_scope_check',
+                                       'withdrawal_requests_refund_completed_email_shape_check',
                                        'termination_requests_extraordinary_needs_reason_check',
                                        'purchase_restrictions_lift_shape_check')), 'none'),
          case when (select count(*) from pg_catalog.pg_constraint
@@ -449,6 +473,9 @@ checks as (
                                         'orders_delivery_admin_source_requires_actor_check',
                                         'withdrawal_requests_value_loss_decision_shape_check',
                                         'withdrawal_requests_refund_execution_shape_check',
+                                        'withdrawal_requests_item_resolution_shape_check',
+                                        'withdrawal_requests_partial_shipping_scope_check',
+                                        'withdrawal_requests_refund_completed_email_shape_check',
                                         'termination_requests_extraordinary_needs_reason_check',
                                         'purchase_restrictions_lift_shape_check')) = 0
               then 'PASS' else 'FAIL' end

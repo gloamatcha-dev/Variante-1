@@ -43,7 +43,7 @@ fn as (
   join pg_catalog.pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public'
 ),
--- THE SIXTEEN FUNCTIONS 070 OWNS AFTER APPLYING: the fifteen it
+-- THE TWENTY FUNCTIONS 070 OWNS AFTER APPLYING: the nineteen it
 -- creates, plus claim_due_annual_plan_deliveries, which it re-creates
 -- in place. Every one of them must be SECURITY DEFINER with an empty
 -- search_path and executable by service_role alone.
@@ -63,7 +63,14 @@ owned_fn(name) as (
          ('admin_advance_complaint'),
          ('admin_review_termination'),
          ('admin_create_purchase_restriction'),
-         ('admin_lift_purchase_restriction')
+         ('admin_lift_purchase_restriction'),
+         -- The residual pass: the structured item resolution a partial
+         -- refund is derived from, and the three that make the
+         -- completion mail send exactly once.
+         ('admin_resolve_withdrawal_item'),
+         ('claim_withdrawal_refund_completed_email'),
+         ('mark_withdrawal_refund_completed_email_sent'),
+         ('mark_withdrawal_refund_completed_email_failed')
 ),
 tbl as (
   select table_name::text as table_name
@@ -99,24 +106,34 @@ checks as (
                       'delivery_recorded_at', 'delivery_recorded_by')) = 4
               then 'PASS' else 'FAIL' end as verdict
 
-  -- Ten, including the three the final review pass added: the permanent
-  -- delivery stop and the two that hold what the payment provider said.
+  -- Seventeen: the ten earlier passes established, plus the five that
+  -- record WHICH goods and how many a case is about (with the partial
+  -- outbound-shipping decision) and the two that track the completion
+  -- mail. A missing one means a half-applied migration.
   union all
   select 11, 'shape',
-         'all ten withdrawal case columns are present',
-         'case_state, timeliness, deadline_date, seal_state, return_requirement, refund_state, refund_provider_reference, refund_failure_reason, deliveries_frozen_at, deliveries_permanently_stopped_at',
-         (select count(*)::text || ' of 10: '
+         'all seventeen withdrawal case columns are present',
+         'the ten case/refund columns, the five item-resolution columns and the two completion-mail columns',
+         (select count(*)::text || ' of 17: '
                  || coalesce(string_agg(column_name, ', ' order by column_name), '<none>')
             from wr_cols where column_name in
               ('case_state', 'timeliness', 'deadline_date', 'seal_state',
                'return_requirement', 'refund_state', 'refund_provider_reference',
                'refund_failure_reason', 'deliveries_frozen_at',
-               'deliveries_permanently_stopped_at')),
+               'deliveries_permanently_stopped_at',
+               'resolved_order_item_id', 'resolved_item_quantity',
+               'partial_shipping_treatment', 'item_resolution_by',
+               'item_resolution_at', 'refund_completed_email_status',
+               'refund_completed_email_sent_at')),
          case when (select count(*) from wr_cols where column_name in
                      ('case_state', 'timeliness', 'deadline_date', 'seal_state',
                       'return_requirement', 'refund_state', 'refund_provider_reference',
                       'refund_failure_reason', 'deliveries_frozen_at',
-                      'deliveries_permanently_stopped_at')) = 10
+                      'deliveries_permanently_stopped_at',
+                      'resolved_order_item_id', 'resolved_item_quantity',
+                      'partial_shipping_treatment', 'item_resolution_by',
+                      'item_resolution_at', 'refund_completed_email_status',
+                      'refund_completed_email_sent_at')) = 17
               then 'PASS' else 'FAIL' end
 
   union all
@@ -133,18 +150,18 @@ checks as (
 
   union all
   select 13, 'shape',
-         'all sixteen functions 070 owns exist, exactly once each',
-         '16 names, each resolving to exactly one function',
-         (select count(*)::text || ' of 16 present'
+         'all twenty functions 070 owns exist, exactly once each',
+         '20 names, each resolving to exactly one function',
+         (select count(*)::text || ' of 20 present'
             from owned_fn o where exists (select 1 from fn where fn.proname = o.name)),
          case when (select count(*) from owned_fn o
-                      where (select count(*) from fn where fn.proname = o.name) = 1) = 16
+                      where (select count(*) from fn where fn.proname = o.name) = 1) = 20
               then 'PASS' else 'FAIL' end
 
   -- SECURITY DEFINER WITH AN EMPTY search_path, ON ALL SIXTEEN.
   --
   -- A SECURITY DEFINER function whose search_path is not emptied can be
-  -- redirected by whoever calls it, which for these sixteen means
+  -- redirected by whoever calls it, which for these twenty means
   -- redirecting a refund or a receipt. The empty value is rendered as
   -- search_path= or search_path="" depending on how it was written, so
   -- the value is extracted after the first '=', unquoted, and required
@@ -157,9 +174,9 @@ checks as (
   -- that must survive a hostile search_path.
   union all
   select 14, 'shape',
-         'every one of the sixteen is SECURITY DEFINER with an EMPTY search_path',
-         'all 16 with prosecdef true and search_path set to the empty string',
-         (select count(*)::text || ' of 16 correct - offenders: '
+         'every one of the twenty is SECURITY DEFINER with an EMPTY search_path',
+         'all 20 with prosecdef true and search_path set to the empty string',
+         (select count(*)::text || ' of 20 correct - offenders: '
                  || coalesce((select string_agg(distinct f2.proname, ', ' order by f2.proname)
                                 from fn f2
                                 join owned_fn o2 on o2.name = f2.proname
@@ -184,20 +201,23 @@ checks as (
                              where cfg like 'search_path=%'
                                and pg_catalog.btrim(pg_catalog.split_part(cfg, '=', 2), '"') = '')) = 0
                    and (select count(*) from fn f
-                          join owned_fn o on o.name = f.proname) = 16
+                          join owned_fn o on o.name = f.proname) = 20
               then 'PASS' else 'FAIL' end
 
   union all
   select 20, 'shape',
-         'all six constraints 070 adds exist',
-         'the receipt pairing, the admin-source actor rule, the value-loss triple, the refund-execution evidence rule, the extraordinary-reason rule, the lift-needs-actor rule',
-         (select count(*)::text || ' of 6: '
+         'all nine constraints 070 adds exist',
+         'the receipt pairing, the admin-source actor rule, the value-loss triple, the refund-execution evidence rule, the item-resolution quadruple, the partial-shipping scope rule, the completion-mail pairing, the extraordinary-reason rule, the lift-needs-actor rule',
+         (select count(*)::text || ' of 9: '
                  || coalesce(string_agg(conname::text, ', ' order by conname::text), '<none>')
             from pg_catalog.pg_constraint
             where conname in ('orders_delivery_receipt_shape_check',
                               'orders_delivery_admin_source_requires_actor_check',
                               'withdrawal_requests_value_loss_decision_shape_check',
                               'withdrawal_requests_refund_execution_shape_check',
+                              'withdrawal_requests_item_resolution_shape_check',
+                              'withdrawal_requests_partial_shipping_scope_check',
+                              'withdrawal_requests_refund_completed_email_shape_check',
                               'termination_requests_extraordinary_needs_reason_check',
                               'purchase_restrictions_lift_shape_check')),
          case when (select count(*) from pg_catalog.pg_constraint
@@ -205,8 +225,11 @@ checks as (
                                         'orders_delivery_admin_source_requires_actor_check',
                                         'withdrawal_requests_value_loss_decision_shape_check',
                                         'withdrawal_requests_refund_execution_shape_check',
+                                        'withdrawal_requests_item_resolution_shape_check',
+                                        'withdrawal_requests_partial_shipping_scope_check',
+                                        'withdrawal_requests_refund_completed_email_shape_check',
                                         'termination_requests_extraordinary_needs_reason_check',
-                                        'purchase_restrictions_lift_shape_check')) = 6
+                                        'purchase_restrictions_lift_shape_check')) = 9
               then 'PASS' else 'FAIL' end
 
   union all
@@ -376,8 +399,8 @@ checks as (
   -- PUBLIC, which is why 070 revokes from public, anon AND authenticated.
   union all
   select 32, 'privs',
-         'neither browser role can EXECUTE any of the sixteen functions',
-         'zero of 32 (16 functions x 2 roles)',
+         'neither browser role can EXECUTE any of the twenty functions',
+         'zero of 40 (20 functions x 2 roles)',
          (select count(*)::text || ' reachable: '
                  || coalesce((select string_agg(distinct f2.proname || ':' || r2.role, ', ')
                                 from fn f2
@@ -397,13 +420,13 @@ checks as (
 
   union all
   select 33, 'privs',
-         'service_role CAN execute all sixteen - the server is the only caller',
-         'all 16 executable by service_role',
-         (select count(*)::text || ' of 16'
+         'service_role CAN execute all twenty - the server is the only caller',
+         'all 20 executable by service_role',
+         (select count(*)::text || ' of 20'
             from fn f join owned_fn o on o.name = f.proname
            where pg_catalog.has_function_privilege('service_role', f.oid, 'EXECUTE')),
          case when (select count(*) from fn f join owned_fn o on o.name = f.proname
-                      where pg_catalog.has_function_privilege('service_role', f.oid, 'EXECUTE')) = 16
+                      where pg_catalog.has_function_privilege('service_role', f.oid, 'EXECUTE')) = 20
               then 'PASS' else 'FAIL' end
 
   -- ── AND NOTHING ELSE MOVED ────────────────────────────────
@@ -458,18 +481,26 @@ checks as (
 
   union all
   select 43, 'data',
-         'the three new tables are empty and no plan was stopped',
-         'zero complaints, zero terminations, zero restrictions, zero permanent delivery stops',
+         'the three new tables are empty, no plan stopped, nothing resolved, no mail sent',
+         'zero of everything - 070 creates no case, resolves no item and sends no message',
          (select (select count(*) from public.complaint_requests)::text || ' complaints, '
                  || (select count(*) from public.termination_requests)::text || ' terminations, '
                  || (select count(*) from public.purchase_restrictions)::text || ' restrictions, '
                  || (select count(*) from public.withdrawal_requests
-                      where deliveries_permanently_stopped_at is not null)::text || ' stops'),
+                      where deliveries_permanently_stopped_at is not null)::text || ' stops, '
+                 || (select count(*) from public.withdrawal_requests
+                      where resolved_order_item_id is not null)::text || ' resolved, '
+                 || (select count(*) from public.withdrawal_requests
+                      where refund_completed_email_status is not null)::text || ' mails'),
          case when (select count(*) from public.complaint_requests)
                  + (select count(*) from public.termination_requests)
                  + (select count(*) from public.purchase_restrictions)
                  + (select count(*) from public.withdrawal_requests
-                     where deliveries_permanently_stopped_at is not null) = 0
+                     where deliveries_permanently_stopped_at is not null)
+                 + (select count(*) from public.withdrawal_requests
+                     where resolved_order_item_id is not null)
+                 + (select count(*) from public.withdrawal_requests
+                     where refund_completed_email_status is not null) = 0
               then 'PASS' else 'FAIL' end
 
   -- ── CONTEXT ───────────────────────────────────────────────

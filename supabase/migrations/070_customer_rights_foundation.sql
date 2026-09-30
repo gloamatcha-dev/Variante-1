@@ -387,6 +387,197 @@ begin
 end
 $$;
 
+-- ── WHICH GOODS, AND HOW MANY OF THEM ─────────────────────────
+--
+-- MIGRATION 018 GAVE THE CONSUMER TWO SCOPES AND ONE FREE-TEXT BOX.
+-- scope is 'whole_order' or 'partial', and for a partial case the form
+-- requires scope_note - which the customer types by hand:
+--
+--   "z. B. 1x GLOA Matcha 50 g"
+--
+-- That is the right thing to ask a person and the wrong thing to base
+-- money on. It is a sentence, not a foreign key: it carries no order
+-- item id, no quantity a database can read, and no defence against
+-- "alles" or a typo. NOTHING IN THIS FILE PARSES IT. A refund derived
+-- from customer prose would be a refund the consumer computed.
+--
+-- So a partial case gets a SECOND, STRUCTURED statement, made by an
+-- administrator through admin_resolve_withdrawal_item and stored here:
+-- an authoritative order_items reference and a quantity. The writer
+-- proves the line actually belongs to the resolved order and that the
+-- quantity does not exceed what was sold, so even the administrator
+-- cannot point this at another customer's purchase or at more units
+-- than exist.
+--
+-- THE SAME COLUMNS SERVE THE WERTERSATZ CEILING. A line reading
+-- "30 g Matcha x 2" against a case-level seal_state of
+-- 'opened_seal_broken' does not say whether both units were opened or
+-- one - and multiplying a ceiling by two would charge the consumer for
+-- a sealed package. The resolution is how a human states which units
+-- the case is actually about.
+--
+-- on delete restrict, deliberately. order_items cascades from orders,
+-- so this reference is what stops a resolved case's evidence being
+-- deleted out from under it.
+
+alter table public.withdrawal_requests
+  add column if not exists resolved_order_item_id uuid
+    references public.order_items(id) on delete restrict;
+
+alter table public.withdrawal_requests
+  add column if not exists resolved_item_quantity integer
+    check (resolved_item_quantity is null or resolved_item_quantity > 0);
+
+-- THE ONE THING ABOUT A PARTIAL REFUND THAT IS NOT ARITHMETIC.
+--
+-- BGB 357 Abs. 1 repays the delivery costs. For a WHOLE-ORDER
+-- withdrawal that is settled and needs no decision: the order's own
+-- total_gross_cents already contains the outbound shipping, and the
+-- whole of it goes back.
+--
+-- A PARTIAL withdrawal is genuinely unsettled. The consumer keeps part
+-- of the order, that part would have been shipped anyway, and whether
+-- the outbound cost is still owed back is a question about THIS
+-- contract and THIS order - not something derivable from any column.
+--
+-- This migration therefore does not decide it and does not guess. It
+-- records a human's decision as one of exactly two values, and then
+-- derives the money from a purchase-time snapshot either way. Nobody
+-- types an amount; the choice is between refunding the historic
+-- orders.shipping_gross_cents and refunding none of it.
+--
+-- Only meaningful for a partial case, and the CHECK below says so.
+
+alter table public.withdrawal_requests
+  add column if not exists partial_shipping_treatment text
+    check (partial_shipping_treatment is null
+           or partial_shipping_treatment in ('refund_outbound_shipping',
+                                             'retain_outbound_shipping'));
+
+alter table public.withdrawal_requests
+  add column if not exists item_resolution_by uuid
+    references public.admin_users(user_id) on delete restrict;
+
+alter table public.withdrawal_requests
+  add column if not exists item_resolution_at timestamptz;
+
+-- THE RESOLUTION MOVES AS ONE FACT.
+--
+-- Same shape as the Wertersatz decision triple above: either nobody has
+-- resolved the goods, or somebody has and is named with the moment they
+-- did it. A half-written resolution would let a payout be derived from
+-- an item nobody signed for.
+do $$
+begin
+  if not exists (
+    select 1 from pg_catalog.pg_constraint
+    where conname = 'withdrawal_requests_item_resolution_shape_check'
+      and conrelid = 'public.withdrawal_requests'::regclass
+  ) then
+    alter table public.withdrawal_requests
+      add constraint withdrawal_requests_item_resolution_shape_check
+      check (
+        (resolved_order_item_id is null
+         and resolved_item_quantity is null
+         and item_resolution_by is null
+         and item_resolution_at is null)
+        or
+        (resolved_order_item_id is not null
+         and resolved_item_quantity is not null
+         and item_resolution_by is not null
+         and item_resolution_at is not null)
+      );
+  end if;
+end
+$$;
+
+-- AND THE SHIPPING DECISION EXISTS ONLY WHERE THERE IS ONE TO MAKE.
+--
+-- A whole-order case carrying a retention decision would be a
+-- contradiction: its refund is the order total, which already settles
+-- the shipping. Refusing the combination in the database means no route
+-- can create a row whose two halves disagree about what kind of case
+-- it is.
+do $$
+begin
+  if not exists (
+    select 1 from pg_catalog.pg_constraint
+    where conname = 'withdrawal_requests_partial_shipping_scope_check'
+      and conrelid = 'public.withdrawal_requests'::regclass
+  ) then
+    alter table public.withdrawal_requests
+      add constraint withdrawal_requests_partial_shipping_scope_check
+      check (partial_shipping_treatment is null or scope = 'partial');
+  end if;
+end
+$$;
+
+-- ── AND THE MAIL THAT SAYS THE MONEY ACTUALLY WENT ────────────
+--
+-- Six customer mails belong to this feature, and two of them are about
+-- the refund. They are not the same message and they are not sent at
+-- the same moment:
+--
+--   "Deine Erstattung ist veranlasst"  at APPROVAL. True then: a human
+--                                      decided, and the amount is fixed.
+--   "Deine Erstattung ist durchgeführt" after STRIPE CONFIRMED and this
+--                                      database persisted 'executed'.
+--
+-- The second one is a claim about the outside world, so it must not be
+-- sendable until the outside world has answered. What makes that
+-- structural rather than careful is the claim below: it can only be won
+-- from refund_state = 'executed', a state that itself cannot exist
+-- without a provider reference.
+--
+-- THE SHAPE IS THE ONE THIS REPOSITORY ALREADY USES for its six other
+-- transactional senders - a status column and a sent-at instant, claimed
+-- by conditional UPDATE, exactly as migrations 017, 026, 027, 030, 031
+-- and 033 do. No new email architecture, and deliberately NOT the
+-- consumer's own confirmation_status, which belongs to a different event
+-- (their declaration arriving) and would be destroyed by reuse.
+--
+-- 'sending' is a lease, 'sent' is terminal, 'failed' is retryable, and
+-- NULL means this case was never part of the flow - which is what keeps
+-- every historical row out of it.
+--
+-- ONE DIFFERENCE FROM MIGRATION 033, AND IT MATTERS. There, 'sent' is
+-- re-claimable because a refund TOTAL can grow and a second, larger
+-- refund is a new fact deserving a new message; a watermark column
+-- decides. Here a case has exactly one payout - the unique index on
+-- refund_operation_id guarantees it - so there is no second fact to
+-- announce, no watermark to compare, and 'sent' is final. Making it
+-- re-claimable would only ever produce a duplicate.
+
+alter table public.withdrawal_requests
+  add column if not exists refund_completed_email_status text
+    check (refund_completed_email_status is null
+           or refund_completed_email_status in ('sending', 'sent', 'failed'));
+
+alter table public.withdrawal_requests
+  add column if not exists refund_completed_email_sent_at timestamptz;
+
+-- A sent-at instant exists exactly when the mail was sent. 'sending'
+-- and 'failed' have not sent anything, so neither may carry one.
+do $$
+begin
+  if not exists (
+    select 1 from pg_catalog.pg_constraint
+    where conname = 'withdrawal_requests_refund_completed_email_shape_check'
+      and conrelid = 'public.withdrawal_requests'::regclass
+  ) then
+    alter table public.withdrawal_requests
+      add constraint withdrawal_requests_refund_completed_email_shape_check
+      check (
+        (refund_completed_email_status = 'sent'
+         and refund_completed_email_sent_at is not null)
+        or
+        (refund_completed_email_status is distinct from 'sent'
+         and refund_completed_email_sent_at is null)
+      );
+  end if;
+end
+$$;
+
 -- ── THE FREEZE ────────────────────────────────────────────────
 --
 -- When a protected withdrawal is open, the annual plan stops producing
@@ -834,11 +1025,41 @@ grant update (
   refund_state,
   refund_executed_at,
   refund_operation_id,
+  refund_provider_reference,
+  refund_failure_reason,
   deliveries_frozen_at,
+  deliveries_permanently_stopped_at,
+  resolved_order_item_id,
+  resolved_item_quantity,
+  partial_shipping_treatment,
+  item_resolution_by,
+  item_resolution_at,
+  refund_completed_email_status,
+  refund_completed_email_sent_at,
   idempotency_key,
   internal_note,
   updated_at
 ) on public.withdrawal_requests to service_role;
+
+-- WHAT THIS GRANT IS, AND WHAT IT IS NOT.
+--
+-- It is a CEILING, not the mechanism. Every write in this file goes
+-- through a SECURITY DEFINER function, which runs as the function's
+-- owner and would work whether or not service_role held these columns.
+-- The list exists so that the blast radius of a bug anywhere in the
+-- consumer-rights code is these columns and no others - and so that an
+-- operator reading it learns exactly which facts the server may touch.
+--
+-- Which is why it enumerates every column the case machinery advances,
+-- including the payout evidence and the completion-mail state. A list
+-- that silently omitted some of them would still be safe, and would
+-- stop being documentation.
+--
+-- The seven declaration columns from migration 018 are still absent, and
+-- that absence is load-bearing: customer_name, order_reference,
+-- contact_email, scope, scope_note, customer_note and submitted_at
+-- cannot be rewritten by any code path, so what the consumer actually
+-- declared stays what they declared.
 
 -- The receipt columns on orders. Narrow on purpose: this grant lets
 -- the server record a delivery and nothing else about an order.
@@ -1447,6 +1668,147 @@ begin
 end;
 $$;
 
+-- ── WHICH GOODS THIS CASE IS ACTUALLY ABOUT ───────────────────
+--
+-- The consumer's scope_note is a sentence. This is the structured
+-- statement that replaces reading it: an administrator names an
+-- order_items row and a quantity, and from then on both the Wertersatz
+-- ceiling and a partial refund are derived from purchase-time snapshots
+-- rather than from prose.
+--
+-- ══════════════════════════════════════════════════════════════
+-- WHAT THE ADMINISTRATOR CANNOT DO HERE
+-- ══════════════════════════════════════════════════════════════
+--
+-- POINT AT SOMEBODY ELSE'S PURCHASE. p_order_item_id is required to
+-- belong to the case's OWN resolved_order_id. An item id from another
+-- order - guessed, pasted or enumerated - returns item_not_in_order and
+-- writes nothing.
+--
+-- CLAIM MORE UNITS THAN WERE SOLD. p_quantity is bounded by the line's
+-- own quantity. Two units cannot be withdrawn from a line that sold one,
+-- which is what stops a ceiling or a refund being inflated by arithmetic
+-- rather than by a price.
+--
+-- SUPPLY AN AMOUNT. There is no money parameter. Every figure stays
+-- derived, here as everywhere else in this migration.
+--
+-- DECIDE THE SHIPPING FOR A WHOLE-ORDER CASE. That question is already
+-- settled by BGB 357 Abs. 1 and by the order total; offering a choice
+-- would invent a decision the law does not leave open.
+--
+-- RE-CUT A DECIDED CASE. Once the money is approved or paid, the goods
+-- this case was about are part of the record.
+--
+-- ── AND WHY IT IS ALLOWED TO BE RE-STATED BEFORE THEN ──────────
+--
+-- An operator who resolves the wrong line must be able to correct it, so
+-- this overwrites while the case is still open and re-stamps the actor
+-- and the moment. Each attempt is one audit entry, so the sequence of
+-- corrections stays visible rather than being flattened to the last one.
+create or replace function public.admin_resolve_withdrawal_item(
+  p_actor_user_id uuid,
+  p_withdrawal_id uuid,
+  p_order_item_id uuid,
+  p_quantity integer,
+  p_shipping_treatment text default null
+)
+returns jsonb
+language plpgsql
+volatile
+security definer set search_path = ''
+as $$
+declare
+  v_case public.withdrawal_requests;
+  v_item public.order_items;
+begin
+  select * into v_case from public.withdrawal_requests where id = p_withdrawal_id for update;
+  if not found then
+    return pg_catalog.jsonb_build_object('result', 'not_found');
+  end if;
+
+  if v_case.case_state in ('refund_pending', 'refunded', 'rejected_late', 'closed') then
+    return pg_catalog.jsonb_build_object('result', 'case_closed', 'case_state', v_case.case_state);
+  end if;
+  if v_case.refund_state in ('approved_for_payout', 'executed') then
+    return pg_catalog.jsonb_build_object('result', 'already_approved');
+  end if;
+
+  if v_case.resolved_order_id is null then
+    -- An annual plan resolves through its own frozen figures and has no
+    -- order items to point at; a case that resolved to nothing has
+    -- nothing to point at either.
+    return pg_catalog.jsonb_build_object('result', 'no_order_resolved');
+  end if;
+
+  -- THE LINE MUST BE THIS ORDER'S. Both predicates in one statement, so
+  -- there is no window in which the id is trusted before it is checked.
+  select * into v_item
+    from public.order_items
+   where id = p_order_item_id
+     and order_id = v_case.resolved_order_id;
+  if not found then
+    return pg_catalog.jsonb_build_object('result', 'item_not_in_order');
+  end if;
+
+  if p_quantity is null or p_quantity < 1 or p_quantity > v_item.quantity then
+    return pg_catalog.jsonb_build_object(
+      'result', 'quantity_out_of_range',
+      'line_quantity', v_item.quantity
+    );
+  end if;
+
+  -- THE SHIPPING DECISION BELONGS TO A PARTIAL CASE AND ONLY TO ONE.
+  if v_case.scope = 'partial' then
+    if p_shipping_treatment is null
+       or p_shipping_treatment not in ('refund_outbound_shipping', 'retain_outbound_shipping') then
+      return pg_catalog.jsonb_build_object('result', 'shipping_treatment_required');
+    end if;
+  else
+    if p_shipping_treatment is not null then
+      return pg_catalog.jsonb_build_object('result', 'shipping_treatment_not_applicable');
+    end if;
+  end if;
+
+  update public.withdrawal_requests
+     set resolved_order_item_id     = v_item.id,
+         resolved_item_quantity     = p_quantity,
+         partial_shipping_treatment = case when v_case.scope = 'partial'
+                                          then p_shipping_treatment else null end,
+         item_resolution_by         = p_actor_user_id,
+         item_resolution_at         = pg_catalog.now(),
+         updated_at                 = pg_catalog.now()
+   where id = p_withdrawal_id
+  returning * into v_case;
+
+  perform public.record_admin_activity(
+    p_actor_user_id, 'customer_rights', 'withdrawal.item_resolved', 'withdrawal',
+    p_withdrawal_id::text, 'Widerrufsgegenstand zugeordnet', gen_random_uuid(),
+    pg_catalog.jsonb_build_object(
+      'order_item_id', v_item.id,
+      'product_name', v_item.product_name,
+      'resolved_quantity', p_quantity,
+      'line_quantity', v_item.quantity,
+      'scope', v_case.scope,
+      'shipping_treatment', v_case.partial_shipping_treatment
+    )
+  );
+
+  return pg_catalog.jsonb_build_object(
+    'result', 'resolved',
+    'order_item_id', v_item.id,
+    'resolved_quantity', v_case.resolved_item_quantity,
+    'line_quantity', v_item.quantity,
+    'shipping_treatment', v_case.partial_shipping_treatment
+  );
+end;
+$$;
+
+revoke all on function public.admin_resolve_withdrawal_item(uuid, uuid, uuid, integer, text)
+  from public, anon, authenticated;
+grant execute on function public.admin_resolve_withdrawal_item(uuid, uuid, uuid, integer, text)
+  to service_role;
+
 -- ── WERTERSATZ: THE DECISION, BOUNDED IN SQL ──────────────
 --
 -- THE CEILING IS COMPUTED HERE, from a price this shop froze at the
@@ -1456,7 +1818,8 @@ $$;
 -- route, no screen and no future script can do it either.
 --
 -- Sealed goods have a ceiling of zero, which is the same rule stated as
--- arithmetic rather than as a special case.
+-- arithmetic rather than as a special case - and it holds for ANY
+-- quantity, because nothing that was never opened can have lost value.
 --
 -- THREE KINDS OF CASE REACH THIS FUNCTION, because three kinds of
 -- purchase exist and the public form accepts all of them:
@@ -1477,12 +1840,42 @@ $$;
 --   live catalogue read - a case from March must not be re-priced by
 --   an April price change. Never a browser-supplied amount.
 --
---   AND A CASE THIS FUNCTION CANNOT PRICE. An order with several item
---   lines does not tell the database WHICH package the customer opened,
---   and an order with no lines tells it nothing at all. It does not
---   guess, does not sum the order, and does not fall back to zero: it
---   returns manual_review_required and writes NOTHING. A human then
---   decides, with the order in front of them.
+--   AND A CASE THIS FUNCTION CANNOT PRICE, which it refuses to price.
+--   See below; it returns manual_review_required and writes NOTHING.
+--
+-- ══════════════════════════════════════════════════════════════
+-- ONE UNIT, OR NO AUTOMATIC DEDUCTION
+-- ══════════════════════════════════════════════════════════════
+--
+-- withdrawal_requests carries ONE seal_state for the whole case. That is
+-- the right granularity for the question a consumer can answer, and it
+-- is not enough to price a line that sold more than one package:
+--
+--   30 g Matcha, quantity 2, seal_state 'opened_seal_broken'
+--
+-- says at least one package was opened. It does not say both were. A
+-- ceiling of unit_price x 2 would therefore charge Wertersatz for a
+-- package that may still be sealed - a real deduction from a real
+-- person, derived from something nobody actually stated.
+--
+-- So an automatic ceiling on opened goods requires the case to concern
+-- EXACTLY ONE UNIT, established either by
+--
+--   an administrator's structured resolution (resolved_item_quantity),
+--   which is the honest way to say "this case is about one of the two",
+--
+-- or, where no resolution exists, by the order itself being
+-- unambiguous: exactly one item line, and that line having sold exactly
+-- one unit.
+--
+-- Anything else - several lines, several units, a quantity nobody has
+-- narrowed - returns manual_review_required with the reason named, and
+-- writes nothing. The consequence is deliberate and worth stating
+-- plainly: such a case CANNOT then be paid out automatically either,
+-- because an opened case with no confirmed Wertersatz is refused by
+-- admin_approve_withdrawal_refund. A human finishes it. That is the
+-- correct outcome for a case whose facts are genuinely unknown, and it
+-- is much better than a deduction the shop invented.
 create or replace function public.admin_confirm_withdrawal_value_loss(
   p_actor_user_id uuid,
   p_withdrawal_id uuid,
@@ -1499,6 +1892,7 @@ declare
   v_order     public.orders;
   v_item      public.order_items;
   v_lines     integer;
+  v_units     integer;
   v_ceiling   integer;
   v_basis     text;
 begin
@@ -1522,6 +1916,8 @@ begin
   end if;
 
   if v_case.seal_state = 'sealed_unopened' then
+    -- ANY quantity, any number of lines. Nothing was opened, so there is
+    -- no ambiguity to resolve and nothing to deduct.
     v_ceiling := 0;
     v_basis   := 'sealed_no_value_loss';
 
@@ -1540,39 +1936,68 @@ begin
       return pg_catalog.jsonb_build_object('result', 'no_price_snapshot');
     end if;
 
-    select pg_catalog.count(*) into v_lines
-      from public.order_items where order_id = v_order.id;
+    if v_case.resolved_order_item_id is not null then
+      -- AN ADMINISTRATOR HAS SAID WHICH LINE AND HOW MANY. Re-read with
+      -- the order predicate anyway: the resolution was validated when it
+      -- was made, and this function does not assume it still holds.
+      select * into v_item
+        from public.order_items
+       where id = v_case.resolved_order_item_id
+         and order_id = v_order.id;
+      if not found then
+        return pg_catalog.jsonb_build_object('result', 'no_price_snapshot');
+      end if;
+      v_units := v_case.resolved_item_quantity;
+      v_basis := 'order_item_resolved_unit';
+    else
+      select pg_catalog.count(*) into v_lines
+        from public.order_items where order_id = v_order.id;
 
-    if v_lines is null or v_lines = 0 then
-      return pg_catalog.jsonb_build_object(
-        'result', 'manual_review_required',
-        'reason', 'order_has_no_items'
-      );
+      if v_lines is null or v_lines = 0 then
+        return pg_catalog.jsonb_build_object(
+          'result', 'manual_review_required',
+          'reason', 'order_has_no_items'
+        );
+      end if;
+
+      if v_lines > 1 then
+        -- WHICH of them was opened? The database does not know, and a
+        -- guess here becomes a charge against a real customer.
+        return pg_catalog.jsonb_build_object(
+          'result', 'manual_review_required',
+          'reason', 'order_has_multiple_items',
+          'item_line_count', v_lines
+        );
+      end if;
+
+      select * into v_item from public.order_items where order_id = v_order.id;
+      if not found then
+        return pg_catalog.jsonb_build_object('result', 'no_price_snapshot');
+      end if;
+      v_units := v_item.quantity;
+      v_basis := 'order_item_single_unit';
     end if;
 
-    if v_lines > 1 then
-      -- WHICH of them was opened? The database does not know, and a
-      -- guess here becomes a charge against a real customer.
-      return pg_catalog.jsonb_build_object(
-        'result', 'manual_review_required',
-        'reason', 'order_has_multiple_items',
-        'item_line_count', v_lines
-      );
-    end if;
-
-    select * into v_item from public.order_items where order_id = v_order.id;
-    if not found or v_item.unit_price_gross_cents is null
-       or v_item.unit_price_gross_cents <= 0
-       or v_item.quantity is null or v_item.quantity <= 0 then
+    if v_item.unit_price_gross_cents is null or v_item.unit_price_gross_cents <= 0 then
       return pg_catalog.jsonb_build_object('result', 'no_price_snapshot');
     end if;
 
-    -- THE HISTORICAL GROSS RETAIL PRICE, TIMES WHAT WAS SENT. Any
-    -- discount granted on top is deliberately NOT deducted here:
-    -- Wertersatz is measured against the goods' value, and keeping the
-    -- undiscounted figure keeps this an upper bound.
-    v_ceiling := v_item.unit_price_gross_cents * v_item.quantity;
-    v_basis   := 'order_item_historical_unit_price';
+    -- THE ONE-UNIT RULE. See the header: a case-level seal_state cannot
+    -- describe two packages, so two packages get no automatic ceiling.
+    if v_units is null or v_units <> 1 then
+      return pg_catalog.jsonb_build_object(
+        'result', 'manual_review_required',
+        'reason', 'quantity_needs_unit_resolution',
+        'units_in_scope', v_units,
+        'line_quantity', v_item.quantity
+      );
+    end if;
+
+    -- THE HISTORICAL GROSS RETAIL PRICE OF THE ONE UNIT. Any discount
+    -- granted on top is deliberately NOT deducted here: Wertersatz is
+    -- measured against the goods' value, and keeping the undiscounted
+    -- figure keeps this an upper bound.
+    v_ceiling := v_item.unit_price_gross_cents;
 
   else
     return pg_catalog.jsonb_build_object('result', 'no_contract_resolved');
@@ -1617,18 +2042,64 @@ $$;
 -- ── THE REFUND, PREPARED BUT NOT PAID ─────────────────────
 --
 -- IT COMPUTES THE AMOUNT. No caller supplies one, and there is no
--- parameter for it - the figure is what the customer actually paid,
--- minus the confirmed value loss, floored at zero.
+-- parameter for it - the figure is what the customer actually paid for
+-- what they actually withdrew, minus the confirmed value loss, floored
+-- at zero.
 --
--- WHAT THEY PAID comes from the contract that was resolved: an annual
--- plan's total_gross_cents, or an order's total_gross_cents. Both are
--- stored gross totals that already include the outbound shipping, and
--- BGB 357 Abs. 1 repays the delivery costs too, so nothing is withheld
--- from them. If neither figure is available the function REFUSES; it
--- never falls through to zero, because a silent zero is a refund of
--- nothing dressed up as a completed case.
+-- ══════════════════════════════════════════════════════════════
+-- WHAT "WHAT THEY PAID" MEANS DEPENDS ON THE SCOPE
+-- ══════════════════════════════════════════════════════════════
 --
--- IT WILL NOT APPROVE A CASE THAT IS NOT ACTUALLY DECIDED. Seven
+-- AN ANNUAL PLAN: the plan's own total_gross_cents. Unchanged.
+--
+-- A WHOLE-ORDER WITHDRAWAL: the order's total_gross_cents. That column
+-- is the gross the customer was charged, outbound shipping included,
+-- and BGB 357 Abs. 1 repays the delivery costs too - so the whole of it
+-- goes back and nothing is withheld from it.
+--
+-- A PARTIAL WITHDRAWAL: NOT the order total. This is the correctness
+-- hole this section exists to close. scope = 'partial' means the
+-- consumer withdrew part of the order and is keeping the rest; refunding
+-- orders.total_gross_cents would hand back money for goods they still
+-- have. The order total is therefore not merely imprecise for a partial
+-- case, it is wrong, and it is never reached by one.
+--
+-- Instead a partial case is paid from its STRUCTURED RESOLUTION - an
+-- order_items row and a quantity an administrator named through
+-- admin_resolve_withdrawal_item - and from purchase-time snapshots only:
+--
+--   the line's EFFECTIVE gross, which migration 058 defines as
+--     line_total_gross_cents - discount_gross_cents
+--   ...apportioned to the withdrawn units, then
+--   plus the historic outbound shipping if, and only if, a human
+--     decided it goes back.
+--
+-- WITHOUT THAT RESOLUTION A PARTIAL CASE CANNOT BE PAID. It returns
+-- manual_review_required, because the only other thing the database has
+-- is scope_note - a sentence the customer typed - and deriving money
+-- from customer prose is not something this file will do.
+--
+-- ── THE APPORTIONMENT, AND WHICH WAY IT ROUNDS ────────────────
+--
+-- ceil, not floor, then capped at the line's effective gross.
+--
+-- Withdrawing 1 of 3 units of a line that cost 1000 cents net of
+-- discount is 333.33 cents. Rounding down would keep a cent of the
+-- consumer's money on a statutory refund, which is the one direction a
+-- rounding rule must not err in. Rounding up costs the shop at most one
+-- cent per case and is defensible to anybody. The cap makes the
+-- all-units case exact rather than one cent high.
+--
+-- ── AND THE OUTBOUND SHIPPING, WHICH IS NOT ARITHMETIC ────────
+--
+-- For a whole-order case the law settles it. For a partial one it does
+-- not: the consumer keeps goods that would have been shipped anyway.
+-- This function does not invent a retention rule and does not guess. It
+-- reads partial_shipping_treatment - a human's recorded decision between
+-- two values - and then takes the money from orders.shipping_gross_cents
+-- or takes none. Nobody types an amount either way.
+--
+-- IT WILL NOT APPROVE A CASE THAT IS NOT ACTUALLY DECIDED. Eight
 -- questions must already have answers, and each missing one names
 -- itself in the result rather than being skipped:
 --
@@ -1638,6 +2109,7 @@ $$;
 --   did we decide about the return?          return_requirement_undecided
 --   if we asked for it, is it back?          return_outstanding
 --   if it was opened, is Wertersatz set?     value_loss_undecided
+--   for a partial case, WHICH goods?         manual_review_required
 --   do we know what they paid?               no_payment_snapshot
 --
 -- timeliness must be exactly 'timely'. 'receipt_unknown' and
@@ -1668,13 +2140,17 @@ volatile
 security definer set search_path = ''
 as $$
 declare
-  v_case   public.withdrawal_requests;
-  v_plan   public.annual_plans;
-  v_order  public.orders;
-  v_paid   integer;
-  v_basis  text;
-  v_loss   integer;
-  v_refund integer;
+  v_case      public.withdrawal_requests;
+  v_plan      public.annual_plans;
+  v_order     public.orders;
+  v_item      public.order_items;
+  v_effective integer;
+  v_goods     integer;
+  v_shipping  integer;
+  v_paid      integer;
+  v_basis     text;
+  v_loss      integer;
+  v_refund    integer;
 begin
   select * into v_case from public.withdrawal_requests where id = p_withdrawal_id for update;
   if not found then
@@ -1739,9 +2215,79 @@ begin
     if not found then
       return pg_catalog.jsonb_build_object('result', 'no_contract_resolved');
     end if;
-    -- EVERYTHING THE ORDER CHARGED, outbound shipping included.
-    v_paid  := v_order.total_gross_cents;
-    v_basis := 'order_total_gross';
+
+    if v_case.scope = 'partial' then
+      -- ── A PARTIAL CASE NEVER REACHES THE ORDER TOTAL ──────────
+      if v_case.resolved_order_item_id is null
+         or v_case.resolved_item_quantity is null then
+        return pg_catalog.jsonb_build_object(
+          'result', 'manual_review_required',
+          'reason', 'partial_item_not_resolved',
+          'scope', v_case.scope
+        );
+      end if;
+      if v_case.partial_shipping_treatment is null then
+        return pg_catalog.jsonb_build_object(
+          'result', 'manual_review_required',
+          'reason', 'partial_shipping_treatment_undecided'
+        );
+      end if;
+
+      select * into v_item
+        from public.order_items
+       where id = v_case.resolved_order_item_id
+         and order_id = v_order.id;
+      if not found then
+        return pg_catalog.jsonb_build_object(
+          'result', 'manual_review_required',
+          'reason', 'resolved_item_no_longer_in_order'
+        );
+      end if;
+      if v_item.quantity is null or v_item.quantity < 1
+         or v_case.resolved_item_quantity > v_item.quantity then
+        return pg_catalog.jsonb_build_object(
+          'result', 'manual_review_required',
+          'reason', 'resolved_quantity_out_of_range',
+          'line_quantity', v_item.quantity
+        );
+      end if;
+
+      -- WHAT THIS LINE ACTUALLY COST, per migration 058.
+      v_effective := v_item.line_total_gross_cents
+                   - coalesce(v_item.discount_gross_cents, 0);
+      if v_effective is null or v_effective <= 0 then
+        return pg_catalog.jsonb_build_object(
+          'result', 'no_payment_snapshot',
+          'payment_basis', 'order_item_effective_gross'
+        );
+      end if;
+
+      -- Apportioned, rounded the consumer's way, capped at the line.
+      v_goods := least(
+        v_effective,
+        pg_catalog.ceil(
+          v_effective::numeric * v_case.resolved_item_quantity::numeric
+            / v_item.quantity::numeric
+        )::integer
+      );
+
+      v_shipping := case when v_case.partial_shipping_treatment = 'refund_outbound_shipping'
+                         then coalesce(v_order.shipping_gross_cents, 0)
+                         else 0 end;
+
+      v_paid  := v_goods + v_shipping;
+      v_basis := 'order_item_partial_' || v_case.partial_shipping_treatment;
+
+      -- A partial refund can never exceed what the whole order took.
+      if v_order.total_gross_cents is not null then
+        v_paid := least(v_paid, v_order.total_gross_cents);
+      end if;
+
+    else
+      -- EVERYTHING THE ORDER CHARGED, outbound shipping included.
+      v_paid  := v_order.total_gross_cents;
+      v_basis := 'order_total_gross';
+    end if;
 
   else
     return pg_catalog.jsonb_build_object('result', 'no_contract_resolved');
@@ -1774,6 +2320,9 @@ begin
     pg_catalog.jsonb_build_object(
       'paid_cents', v_paid,
       'payment_basis', v_basis,
+      'scope', v_case.scope,
+      'goods_cents', v_goods,
+      'shipping_cents', v_shipping,
       'value_loss_cents', v_loss,
       'refund_cents', v_refund,
       'deliveries_permanently_stopped_at', v_case.deliveries_permanently_stopped_at
@@ -1784,6 +2333,9 @@ begin
     'result', 'approved',
     'paid_cents', v_paid,
     'payment_basis', v_basis,
+    'scope', v_case.scope,
+    'goods_cents', v_goods,
+    'shipping_cents', v_shipping,
     'value_loss_cents', v_loss,
     'refund_amount_cents', v_refund,
     'refund_operation_id', v_case.refund_operation_id,
@@ -1975,6 +2527,173 @@ begin
   );
 end;
 $$;
+
+-- ── AND THE MAIL THAT SAYS THE MONEY WENT ─────────────────
+--
+-- Three functions, and between them they are the whole send-once
+-- guarantee for "Deine Erstattung ist durchgeführt".
+--
+-- They are NOT admin writers. Nobody decides anything here: sending a
+-- transactional mail is plumbing that follows from a fact already
+-- recorded, which is why there is no actor parameter and no audit entry -
+-- exactly as the six senders migrations 017, 026, 027, 030, 031 and 033
+-- already work. The audit trail for the payout itself is
+-- withdrawal.refund_executed, written when the money moved.
+--
+-- ══════════════════════════════════════════════════════════════
+-- WHY THE CLAIM IS A CONDITIONAL UPDATE AND NOT A READ
+-- ══════════════════════════════════════════════════════════════
+--
+-- Two requests arriving together would both READ 'nothing sent yet' and
+-- both send. One UPDATE ... WHERE cannot: PostgreSQL serialises the row,
+-- the first caller's predicate matches, and the second finds a status of
+-- 'sending' or 'sent' and matches nothing. The winner is whoever the
+-- database says it is, not whoever read first.
+--
+-- THE PREDICATE IS ALSO THE TRIGGER CONDITION. It requires
+-- refund_state = 'executed' AND a provider reference, which together
+-- cannot exist unless Stripe answered and this database persisted it.
+-- So the mail is structurally unsendable:
+--
+--   at approval            refund_state is 'approved_for_payout'  -> no claim
+--   when Stripe fails      refund_state is 'failed'               -> no claim
+--   on amount_mismatch     nothing was written at all             -> no claim
+--
+-- There is no ordering for a caller to get wrong, because getting it
+-- wrong is not expressible.
+
+create or replace function public.claim_withdrawal_refund_completed_email(
+  p_withdrawal_id uuid
+)
+returns jsonb
+language plpgsql
+volatile
+security definer set search_path = ''
+as $$
+declare
+  v_case public.withdrawal_requests;
+begin
+  update public.withdrawal_requests
+     set refund_completed_email_status = 'sending',
+         refund_completed_email_sent_at = null,
+         updated_at = pg_catalog.now()
+   where id = p_withdrawal_id
+     -- THE MONEY REALLY MOVED, and this database really recorded it.
+     and refund_state = 'executed'
+     and refund_provider_reference is not null
+     -- NOT ALREADY SENT, AND NOT CURRENTLY HELD. 'sent' is deliberately
+     -- NOT claimable, unlike migration 033's order refund mail: there,
+     -- a growing refund total is a new fact worth a second message and a
+     -- watermark column decides. A withdrawal case has exactly one
+     -- payout - the unique index on refund_operation_id guarantees it -
+     -- so there is no second fact, no watermark, and re-claiming 'sent'
+     -- could only ever produce a duplicate.
+     and (refund_completed_email_status is null
+          or refund_completed_email_status = 'failed')
+  returning * into v_case;
+
+  if not found then
+    -- Deliberately ONE answer for "already sent", "being sent" and "not
+    -- executed". The caller's only correct behaviour is the same in all
+    -- three - do not send - and a caller that could tell them apart
+    -- would eventually branch on it.
+    return pg_catalog.jsonb_build_object('result', 'not_claimable');
+  end if;
+
+  return pg_catalog.jsonb_build_object(
+    'result', 'claimed',
+    'contact_email', v_case.contact_email,
+    'customer_name', v_case.customer_name,
+    'order_reference', v_case.order_reference,
+    'refund_amount_cents', v_case.refund_amount_cents,
+    'value_loss_cents', coalesce(v_case.confirmed_value_loss_cents, 0),
+    'refund_provider_reference', v_case.refund_provider_reference,
+    'refund_executed_at', v_case.refund_executed_at
+  );
+end;
+$$;
+
+-- THE PROVIDER ACCEPTED THE MESSAGE.
+--
+-- Not conditional on the row still saying 'sending', and that asymmetry
+-- is the same one all six existing senders have: 'sent' records that
+-- Resend took it, which is true whatever the row says by now. Suppressing
+-- the write would leave a row that looks unsent and invite a duplicate
+-- rather than prevent one.
+create or replace function public.mark_withdrawal_refund_completed_email_sent(
+  p_withdrawal_id uuid
+)
+returns jsonb
+language plpgsql
+volatile
+security definer set search_path = ''
+as $$
+declare
+  v_case public.withdrawal_requests;
+begin
+  update public.withdrawal_requests
+     set refund_completed_email_status  = 'sent',
+         refund_completed_email_sent_at = pg_catalog.now(),
+         updated_at                     = pg_catalog.now()
+   where id = p_withdrawal_id
+  returning * into v_case;
+
+  if not found then
+    return pg_catalog.jsonb_build_object('result', 'not_found');
+  end if;
+  return pg_catalog.jsonb_build_object(
+    'result', 'sent',
+    'refund_completed_email_sent_at', v_case.refund_completed_email_sent_at
+  );
+end;
+$$;
+
+-- THE SEND DID NOT HAPPEN, AND THE REFUND STILL DID.
+--
+-- 'failed' is claimable again, which is the entire retry mechanism: a
+-- second attempt re-wins the claim and sends, WITHOUT going anywhere
+-- near Stripe - the money already moved and refund_state is untouched
+-- here. A failed message is a fact about a message; it is never a reason
+-- to restate what happened to the money.
+--
+-- Only from 'sending', so a late failure report cannot overwrite a
+-- success that a concurrent attempt already recorded.
+create or replace function public.mark_withdrawal_refund_completed_email_failed(
+  p_withdrawal_id uuid
+)
+returns jsonb
+language plpgsql
+volatile
+security definer set search_path = ''
+as $$
+declare
+  v_case public.withdrawal_requests;
+begin
+  update public.withdrawal_requests
+     set refund_completed_email_status  = 'failed',
+         refund_completed_email_sent_at = null,
+         updated_at                     = pg_catalog.now()
+   where id = p_withdrawal_id
+     and refund_completed_email_status = 'sending'
+  returning * into v_case;
+
+  if not found then
+    return pg_catalog.jsonb_build_object('result', 'not_sending');
+  end if;
+  return pg_catalog.jsonb_build_object('result', 'recorded_failure');
+end;
+$$;
+
+revoke all on function public.claim_withdrawal_refund_completed_email(uuid)
+  from public, anon, authenticated;
+revoke all on function public.mark_withdrawal_refund_completed_email_sent(uuid)
+  from public, anon, authenticated;
+revoke all on function public.mark_withdrawal_refund_completed_email_failed(uuid)
+  from public, anon, authenticated;
+
+grant execute on function public.claim_withdrawal_refund_completed_email(uuid) to service_role;
+grant execute on function public.mark_withdrawal_refund_completed_email_sent(uuid) to service_role;
+grant execute on function public.mark_withdrawal_refund_completed_email_failed(uuid) to service_role;
 
 -- ── COMPLAINTS AND TERMINATIONS ───────────────────────────────
 create or replace function public.admin_advance_complaint(

@@ -287,14 +287,27 @@ test("20: exactly one route calls stripe.refunds.create for a withdrawal", () =>
     "the admin action layer reaches for Stripe");
 });
 
-test("21: the payout route accepts one action and no amount", () => {
-  assert.match(PAYOUT_ROUTE, /b\.action !== "execute_refund"/);
+test("21: the payout route accepts exactly two actions and no amount", () => {
+  // execute_refund pays. retry_completion_email re-sends the mail and
+  // reaches no payment provider - which is what makes a failed mail
+  // fixable without risking a second refund.
+  assert.match(PAYOUT_ROUTE, /action !== "execute_refund" && action !== "retry_completion_email"/);
   const body = PAYOUT_ROUTE.slice(PAYOUT_ROUTE.indexOf("export async function POST"));
   for (const forbidden of ["b.amount", "b.cents", "b.refundAmount", "Number(b."]) {
     assert.ok(!body.includes(forbidden), `the payout route reads ${forbidden} from the body`);
   }
   // And the idempotency key it hands Stripe is the approval's own id.
   assert.match(PAYOUT_ROUTE, /idempotencyKey: snapshot\.refundOperationId|\{ idempotencyKey \}/);
+
+  // THE MAIL-ONLY BRANCH RETURNS BEFORE THE PAYOUT. Source order is the
+  // claim: everything between its `if` and its `return` must not mention
+  // the provider.
+  const branch = PAYOUT_ROUTE.slice(
+    PAYOUT_ROUTE.indexOf('if (action === "retry_completion_email")'),
+    PAYOUT_ROUTE.indexOf("executeWithdrawalRefund(deps,"));
+  assert.ok(branch.length > 0, "the retry branch is gone");
+  assert.ok(!/refunds\.create|createProviderRefund/.test(branch),
+    "the mail retry can reach the payment provider");
 });
 
 test("22: the payout route gates on write BEFORE it parses the body", () => {
@@ -319,11 +332,21 @@ test("23: and the desk UI reaches the payout through its own named poster", () =
    24-29. WERTERSATZ FOR A NORMAL ORDER  (finding 5)
    ══════════════════════════════════════════════════════════════ */
 
-test("24: the ceiling for an ordinary order is the historical unit price", () => {
-  assert.ok(VALUE_LOSS.includes("v_item.unit_price_gross_cents * v_item.quantity"),
-    "the ceiling is not the frozen unit price times what was sent");
-  assert.ok(VALUE_LOSS.includes("'order_item_historical_unit_price'"),
-    "the ceiling basis is not named in the result");
+test("24: the ceiling for an ordinary order is ONE historical unit price", () => {
+  // IT USED TO MULTIPLY BY THE LINE QUANTITY, and that was a defect. A
+  // case carries ONE seal_state, which cannot say whether both packages
+  // of a quantity-2 line were opened - so multiplying would charge
+  // Wertersatz for a package that may still be sealed.
+  assert.ok(!/unit_price_gross_cents \* v_item\.quantity/.test(VALUE_LOSS),
+    "the ceiling multiplies by the line quantity again");
+  assert.ok(VALUE_LOSS.includes("v_ceiling := v_item.unit_price_gross_cents;"),
+    "the ceiling is not exactly one frozen unit price");
+  // The one-unit rule, and both bases it can be established by.
+  assert.ok(VALUE_LOSS.includes("v_units is null or v_units <> 1"),
+    "nothing restricts the automatic ceiling to a single unit");
+  assert.ok(VALUE_LOSS.includes("'quantity_needs_unit_resolution'"));
+  assert.ok(VALUE_LOSS.includes("'order_item_resolved_unit'"));
+  assert.ok(VALUE_LOSS.includes("'order_item_single_unit'"));
 });
 
 test("25: and it is never a live catalogue read or a caller-supplied figure", () => {
@@ -391,15 +414,30 @@ test("31: and a missing payment figure refuses instead of refunding zero", () =>
   assert.ok(guard < arithmetic, "the amount is computed before the figure is validated");
 });
 
-test("32: the outbound shipping is refunded, not withheld", () => {
+test("32: a whole-order payout never withholds the outbound shipping", () => {
   // orders.total_gross_cents and annual_plans.total_gross_cents both
-  // already include it, and BGB 357 Abs. 1 repays delivery costs. What
-  // matters here is that nothing SUBTRACTS a shipping figure.
+  // already include it, and BGB 357 Abs. 1 repays delivery costs. So the
+  // whole-order branch must not touch a shipping figure at all.
+  const wholeOrder = APPROVE.slice(
+    APPROVE.indexOf("-- EVERYTHING THE ORDER CHARGED"),
+    APPROVE.indexOf("if v_paid is null or v_paid <= 0"));
   for (const forbidden of ["shipping_gross_cents", "shipping_total_gross_cents",
                            "shipping_per_delivery_gross_cents"]) {
-    assert.ok(!APPROVE.includes(forbidden),
-      `the payout subtracts or re-derives ${forbidden}`);
+    assert.ok(!wholeOrder.includes(forbidden),
+      `the whole-order payout re-derives ${forbidden}`);
   }
+  // The annual branch likewise.
+  const annual = APPROVE.slice(APPROVE.indexOf("v_paid  := v_plan.total_gross_cents"),
+                               APPROVE.indexOf("elsif v_case.resolved_order_id is not null"));
+  assert.ok(!/shipping/.test(annual), "the annual payout re-derives a shipping figure");
+
+  // A PARTIAL case is the one place shipping_gross_cents appears, and it
+  // is ADDED there, never subtracted - and only on a human's recorded
+  // decision. See test 41.
+  assert.ok(APPROVE.includes("coalesce(v_order.shipping_gross_cents, 0)"),
+    "a partial payout cannot include the outbound shipping at all");
+  assert.ok(!/- *coalesce\(v_order\.shipping_gross_cents/.test(APPROVE),
+    "a shipping figure is subtracted somewhere");
 });
 
 /* ══════════════════════════════════════════════════════════════

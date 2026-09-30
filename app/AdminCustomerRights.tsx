@@ -89,12 +89,15 @@ export function AdminCustomerRights({ onSessionLost }: { onSessionLost: () => vo
 
   // THE PAYOUT POSTER. A separate function to a separate route, so
   // that reaching Stripe from this screen requires naming it.
-  const postPayout = useCallback(async (withdrawalId: string): Promise<Json | null> => {
+  const postPayout = useCallback(async (
+    withdrawalId: string,
+    action: "execute_refund" | "retry_completion_email" = "execute_refund"
+  ): Promise<Json | null> => {
     const res = await fetch("/api/admin/withdrawal-refund", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // NO AMOUNT. The server re-reads what it approved.
-      body: JSON.stringify({ action: "execute_refund", withdrawalId }),
+      // NO AMOUNT, in either action. The server re-reads what it approved.
+      body: JSON.stringify({ action, withdrawalId }),
     });
     if (res.status === 401) { onSessionLost(); return null; }
     const json = await res.json().catch(() => null);
@@ -143,7 +146,22 @@ export function AdminCustomerRights({ onSessionLost }: { onSessionLost: () => vo
     setBusy(true); setError(""); setNotice("");
     const json = await postPayout(withdrawalId);
     if (json) {
-      setNotice(`Auszahlung: ${String(json.result ?? "ok")}`);
+      // The mail outcome is shown too. A refund that went through while
+      // its mail did not is exactly the state an operator has to see.
+      const mail = json.completion_email ? ` · Mail: ${String(json.completion_email)}` : "";
+      setNotice(`Auszahlung: ${String(json.result ?? "ok")}${mail}`);
+      await reload();
+    }
+    setBusy(false);
+  };
+
+  // RETRIES THE MAIL AND NOTHING ELSE. It reaches no payment provider,
+  // so pressing it twice cannot cost anything.
+  const retryMail = async (withdrawalId: string) => {
+    setBusy(true); setError(""); setNotice("");
+    const json = await postPayout(withdrawalId, "retry_completion_email");
+    if (json) {
+      setNotice(`Erstattungsmail: ${String(json.completion_email ?? "ok")}`);
       await reload();
     }
     setBusy(false);
@@ -189,6 +207,8 @@ export function AdminCustomerRights({ onSessionLost }: { onSessionLost: () => vo
             const o = order(w.resolved_order_id) ?? {};
             const p = plan(w.resolved_annual_plan_id) ?? {};
             const items = itemsOf(w.resolved_order_id);
+            const resolvedItem = items.find(i => i.id === w.resolved_order_item_id);
+            const isPartial = w.scope === "partial";
             const id = String(w.id);
             return (
               <article key={id} className="ops-card">
@@ -230,7 +250,18 @@ export function AdminCustomerRights({ onSessionLost }: { onSessionLost: () => vo
                   <div><dt>Wertersatz bestätigt</dt><dd>{euro(w.confirmed_value_loss_cents)}</dd></div>
                   <div><dt>Erstattung</dt><dd>{euro(w.refund_amount_cents)}</dd></div>
                   <div><dt>Erstattungsstatus</dt><dd>{String(w.refund_state)}</dd></div>
+                  <div><dt>Zugeordnete Position</dt><dd>{
+                    w.resolved_order_item_id
+                      ? `${String(resolvedItem?.product_name ?? "?")} × ${String(w.resolved_item_quantity ?? "?")}`
+                      : "– (nicht zugeordnet)"
+                  }</dd></div>
+                  <div><dt>Versandkosten (Teilwiderruf)</dt><dd>{
+                    String(w.partial_shipping_treatment ?? "–")
+                  }</dd></div>
+                  <div><dt>Zuordnung am</dt><dd>{dt(w.item_resolution_at)}</dd></div>
                   <div><dt>Auszahlungsreferenz</dt><dd>{String(w.refund_provider_reference ?? "–")}</dd></div>
+                  <div><dt>Erstattungsmail</dt><dd>{String(w.refund_completed_email_status ?? "–")}</dd></div>
+                  <div><dt>Erstattungsmail am</dt><dd>{dt(w.refund_completed_email_sent_at)}</dd></div>
                   <div><dt>Ausgezahlt am</dt><dd>{dt(w.refund_executed_at)}</dd></div>
                   <div><dt>Auszahlungsfehler</dt><dd>{String(w.refund_failure_reason ?? "–")}</dd></div>
                   <div><dt>Lieferungen eingefroren</dt><dd>{dt(w.deliveries_frozen_at)}</dd></div>
@@ -263,6 +294,44 @@ export function AdminCustomerRights({ onSessionLost }: { onSessionLost: () => vo
                     onClick={() => void act({ action: "record_return", withdrawalId: id, event: "received" }, "Rücksendung")}>
                     Rücksendung erhalten
                   </button>
+                  {/* WHICH GOODS. The only structured way to say it, and the
+                      only basis a partial refund is ever computed from. */}
+                  <label>Position
+                    <select id={`ri-${id}`} defaultValue={String(w.resolved_order_item_id ?? "")}>
+                      <option value="">– wählen –</option>
+                      {items.map(i => (
+                        <option key={String(i.id)} value={String(i.id)}>
+                          {String(i.product_name ?? "?")} (× {String(i.quantity ?? "?")})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>Menge
+                    <input type="number" min={1} step={1} id={`rq-${id}`}
+                           defaultValue={String(w.resolved_item_quantity ?? 1)}/>
+                  </label>
+                  {isPartial && (
+                    <label>Versandkosten
+                      <select id={`rs-${id}`}
+                              defaultValue={String(w.partial_shipping_treatment ?? "")}>
+                        <option value="">– wählen –</option>
+                        <option value="refund_outbound_shipping">Hinversand erstatten</option>
+                        <option value="retain_outbound_shipping">Hinversand behalten</option>
+                      </select>
+                    </label>
+                  )}
+                  <button type="button" disabled={busy}
+                    onClick={() => {
+                      const sel = document.getElementById(`ri-${id}`) as HTMLSelectElement | null;
+                      const qty = document.getElementById(`rq-${id}`) as HTMLInputElement | null;
+                      const shp = document.getElementById(`rs-${id}`) as HTMLSelectElement | null;
+                      void act({ action: "resolve_item", withdrawalId: id,
+                                 orderItemId: sel?.value ?? "",
+                                 quantity: Number(qty?.value ?? 1),
+                                 shippingTreatment: shp?.value ?? "" }, "Zuordnung");
+                    }}>
+                    Position zuordnen
+                  </button>
                   <label>Wertersatz (Cent)
                     <input type="number" min={0} step={1} id={`vl-${id}`} defaultValue={0}/>
                   </label>
@@ -285,13 +354,29 @@ export function AdminCustomerRights({ onSessionLost }: { onSessionLost: () => vo
                     onClick={() => void payout(id)}>
                     Erstattung auszahlen
                   </button>
+                  {/* MAIL ONLY. No payment provider is reached by this. */}
+                  <button type="button"
+                    disabled={busy || w.refund_state !== "executed"
+                              || w.refund_completed_email_status === "sent"}
+                    onClick={() => void retryMail(id)}>
+                    Erstattungsmail erneut senden
+                  </button>
                 </div>
                 <p className="ops-note">
+                  Bei einem <strong>Teilwiderruf</strong> muss zuerst die Position zugeordnet
+                  werden – sonst wird nichts freigegeben. Die Erstattung wird dann aus dem
+                  historischen Positionspreis berechnet, niemals aus der Bestellsumme.
+                  Bei <strong>Menge &gt; 1</strong> und geöffneter Ware bleibt der Wertersatz
+                  bewusst manuell: ein einziger Siegelstatus kann nicht zwei Packungen beschreiben.
+                </p>
+                <p className="ops-note">
                   „Erstattung vorbereiten“ berechnet den Betrag serverseitig, gibt ihn frei und
-                  stoppt die Lieferungen dieses Vertrags endgültig. „Erstattung auszahlen“ ist der
-                  getrennte Schritt, der das Geld bei Stripe bewegt – mit derselben
-                  Vorgangs-ID als Idempotenzschlüssel, sodass ein zweiter Klick keine zweite
-                  Erstattung auslöst.
+                  stoppt die Lieferungen dieses Vertrags endgültig – und verschickt keine Mail.
+                  „Erstattung auszahlen“ ist der getrennte Schritt, der das Geld bei Stripe bewegt –
+                  mit derselben Vorgangs-ID als Idempotenzschlüssel, sodass ein zweiter Klick keine
+                  zweite Erstattung auslöst – und erst danach geht „Erstattung durchgeführt“ an die
+                  Kundin oder den Kunden. Scheitert nur die Mail, bleibt die Erstattung bestehen
+                  und „Erstattungsmail erneut senden“ wiederholt ausschließlich die Mail.
                 </p>
               </article>
             );
