@@ -230,9 +230,32 @@ test("migration: 021 owns its number and no later migration undoes it", () => {
     // target, is banned exactly as before. Reviewed in
     // tests/b2b-payment-delivery-foundation.test.mjs.
     const OWNS_ITS_OWN_TAX_COLUMNS = name === "060_b2b_payment_delivery_foundation.sql";
+    // A FOREIGN KEY POINTING AT AN OWNED TABLE IS NOT A
+    // MODIFICATION OF IT.
+    //
+    // Migration 070 adds withdrawal_requests.resolved_order_item_id,
+    // which references public.order_items(id) so that a resolved
+    // withdrawal case cannot have its evidence deleted from under
+    // it. The statement's TARGET is withdrawal_requests; order_items
+    // gains no column, no constraint and no row, and the tax
+    // snapshot 021 writes into it is untouched.
+    //
+    // This is the same distinction the 060 waiver above already
+    // draws - a statement may NAME one table while MODIFYING
+    // another - applied in the other direction. So a
+    // `references public.<owned>(...)` clause is removed before the
+    // scan, and nothing else is. A statement whose target genuinely
+    // IS an owned object still matches: stripping the reference out
+    // of "alter table public.order_items add constraint ...
+    // references public.orders(id)" leaves the order_items target in
+    // place and the violation stands.
     for (const owned of banned) {
+      const withoutFkReference = statement =>
+        statement.replace(
+          new RegExp(`references\\s+(public\\.)?${owned}\\s*\\([^)]*\\)`, "gi"), "");
       const offending = later.split(";").filter(statement =>
-        new RegExp(`(alter|drop|create or replace)[^;]*${owned}`, "i").test(statement));
+        new RegExp(`(alter|drop|create or replace)[^;]*${owned}`, "i")
+          .test(withoutFkReference(statement)));
       for (const statement of offending) {
         // The statement's TARGET, not merely a table it mentions: an
         // "alter table public.orders ... references public.b2b_deliveries"
