@@ -6,11 +6,11 @@
 --                     (i.e. zero rows with verdict = 'FAIL').
 -- Rows with verdict 'INFO' are context, never a blocker.
 --
--- EXPECTED HEALTHY RESULT:  0 FAIL / 26 PASS / 5 INFO
+-- EXPECTED HEALTHY RESULT:  0 FAIL / 27 PASS / 5 INFO
 --
--- Twenty-six verdict-bearing checks (10-15, 20-22, 23-26, 30-36,
+-- Twenty-seven verdict-bearing checks (10-15, 20-22, 23-27, 30-36,
 -- 40-41, 50, 52-54) and five INFO rows (51, 60-63), plus the SUMMARY
--- row, which counts only the thirty-one above it. The SUMMARY itself is
+-- row, which counts only the thirty-two above it. The SUMMARY itself is
 -- always computed from the actual rows - this line is the expectation to
 -- compare it against, never the source of it.
 -- ============================================================
@@ -293,6 +293,39 @@ checks as (
                         and p.prosrc like '%least(greatest%'
                         -- and 070 has NOT already been applied on top of it
                         and p.prosrc not like '%annual_plan_delivery_freeze_active%') = 1
+              then 'PASS' else 'FAIL' end
+
+  -- THE ONE CONSTRAINT 070 REPLACES RATHER THAN ADDS.
+  --
+  -- Section 9 drops and re-adds admin_activity_log_module_check to
+  -- widen it by one value. Unlike every other name in check 34, this
+  -- one MUST already exist and must still be migration 052's six-value
+  -- version - if Production carried a different definition, the drop
+  -- would discard something this migration never reviewed.
+  --
+  -- Found by applying 070 to a real PostgreSQL: the nine admin writers
+  -- log under module 'customer_rights', which 052's CHECK rejects, so
+  -- without the widening every admin action would raise and roll back.
+  union all
+  select 27, '070-dep',
+         'the audit module CHECK is still migration 052''s six-value version',
+         'orders, inventory, b2b, finance, documents, fulfillment - and NOT yet customer_rights',
+         coalesce((select pg_catalog.pg_get_constraintdef(con.oid)
+                     from pg_catalog.pg_constraint con
+                     join pg_catalog.pg_class c on c.oid = con.conrelid
+                     join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+                     where n.nspname = 'public' and c.relname = 'admin_activity_log'
+                       and con.conname = 'admin_activity_log_module_check'), '<missing>'),
+         case when (select count(*) from pg_catalog.pg_constraint con
+                      join pg_catalog.pg_class c on c.oid = con.conrelid
+                      join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+                      where n.nspname = 'public' and c.relname = 'admin_activity_log'
+                        and con.conname = 'admin_activity_log_module_check'
+                        and pg_catalog.pg_get_constraintdef(con.oid) like '%orders%'
+                        and pg_catalog.pg_get_constraintdef(con.oid) like '%inventory%'
+                        and pg_catalog.pg_get_constraintdef(con.oid) like '%fulfillment%'
+                        -- and 070 has not already widened it
+                        and pg_catalog.pg_get_constraintdef(con.oid) not like '%customer_rights%') = 1
               then 'PASS' else 'FAIL' end
 
   -- ── 070 MUST NOT BE PARTIALLY APPLIED ─────────────────────

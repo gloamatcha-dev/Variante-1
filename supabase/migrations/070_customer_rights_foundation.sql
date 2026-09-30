@@ -88,16 +88,26 @@ alter table public.orders
   add column if not exists delivery_recorded_by uuid
     references public.admin_users(user_id) on delete set null;
 
--- THE THREE TRAVEL TOGETHER. A receipt instant with no source is an
+-- THE FOUR TRAVEL TOGETHER. A receipt instant with no source is an
 -- assertion with no author, and a source with no instant is an author
 -- with no assertion. Either alone would be a half-written fact that a
 -- deadline calculation might still read.
+--
+-- delivery_recorded_by IS PART OF THE "NO RECEIPT" SIDE. Without it an
+-- order could carry an administrator's id while holding no receipt at
+-- all - an orphan actor attached to nothing, which reads in the admin
+-- desk as "somebody recorded this" when nobody did.
+--
+-- On the receipt side it stays optional, because a carrier-sourced
+-- receipt genuinely has no human actor. The separate
+-- orders_delivery_admin_source_requires_actor_check below is what
+-- demands one for the two admin sources.
 
 alter table public.orders
   add constraint orders_delivery_receipt_shape_check
   check (
     (delivered_at is null and delivery_receipt_source is null
-       and delivery_recorded_at is null)
+       and delivery_recorded_at is null and delivery_recorded_by is null)
     or
     (delivered_at is not null and delivery_receipt_source is not null
        and delivery_recorded_at is not null)
@@ -515,11 +525,16 @@ create table if not exists public.termination_requests (
   internal_note     text check (internal_note is null or char_length(internal_note) <= 4000)
 );
 
+-- A REASON MUST BE A REASON. char_length > 0 accepted '   ', which
+-- satisfies BGB 312k Abs. 2 Satz 3 Nr. 2 on paper and tells an
+-- administrator nothing. btrim first, so whitespace is the same as
+-- nothing. An ORDINARY termination still needs no reason at all.
+
 alter table public.termination_requests
   add constraint termination_requests_extraordinary_needs_reason_check
   check (
     termination_kind <> 'extraordinary'
-    or char_length(coalesce(extraordinary_reason, '')) > 0
+    or char_length(btrim(coalesce(extraordinary_reason, ''))) > 0
   );
 
 create unique index if not exists termination_requests_idempotency_key
@@ -585,16 +600,31 @@ create table if not exists public.purchase_restrictions (
   lifted_by    uuid references public.admin_users(user_id) on delete set null
 );
 
+-- A LIFT HAS AN AUTHOR AND A MOMENT, BOTH. The writer always sets
+-- both, and the constraint used to allow lifted_at without lifted_by -
+-- a restriction that ended with nobody's name on it. Lifting is a
+-- decision about a customer, so it is signed like every other one.
+
 alter table public.purchase_restrictions
   add constraint purchase_restrictions_lift_shape_check
   check (
     (active = true and lifted_at is null and lifted_by is null)
     or
-    (active = false and lifted_at is not null)
+    (active = false and lifted_at is not null and lifted_by is not null)
   );
 
 -- One LIVE restriction per user per scope. A second one would make
 -- "is this customer restricted" a question with two answers.
+--
+-- THE PREDICATE IS active, NOT "active and unexpired", and it has to
+-- be: a partial index predicate must be IMMUTABLE, and now() is not.
+-- So an expired row keeps occupying this slot until somebody closes
+-- it. That does NOT block the customer - lib/purchaseRestrictions.ts
+-- treats an expired row as not live, so their purchases go through -
+-- but it would block an administrator from recording a NEW restriction
+-- for the same scope. admin_create_purchase_restriction closes an
+-- expired row explicitly, with an audit entry, rather than leaving the
+-- slot jammed. See section 9.
 create unique index if not exists purchase_restrictions_one_active_per_scope_key
   on public.purchase_restrictions(user_id, scope)
   where active = true;
@@ -1074,7 +1104,40 @@ revoke all on function public.freeze_annual_deliveries_for_withdrawal(uuid) from
 grant execute on function public.freeze_annual_deliveries_for_withdrawal(uuid) to service_role;
 
 
--- 9. THE ADMIN WRITERS ─────────────────────────────────────────
+-- 9. THE AUDIT MODULE THIS SUBSYSTEM WRITES UNDER ──────────────
+--
+-- Migration 052 constrains admin_activity_log.module to six values -
+-- orders, inventory, b2b, finance, documents, fulfillment - and its own
+-- comment says the unimplemented ones are listed "so a later package
+-- needs no migration to use them".
+--
+-- None of them means consumer rights. A withdrawal, a Reklamation, a
+-- Kuendigung and a Kaufsperre are not order operations: folding them
+-- into 'orders' would make the activity log say an operator did
+-- something to an order when they decided a statutory question about a
+-- contract. So the list gains a seventh value instead.
+--
+-- CAUGHT BY APPLYING THIS MIGRATION TO A REAL POSTGRES, not by reading
+-- it. Every one of the nine writers below calls record_admin_activity
+-- with 'customer_rights', so without this widening each of them would
+-- raise check_violation the first time an administrator used it - and
+-- because the audit call sits inside the same transaction as the
+-- change, the whole action would roll back. The migration would have
+-- applied perfectly and the desk would have been inert.
+--
+-- WIDENING ONLY. No existing value becomes illegal, so no row in the
+-- log can violate the new constraint.
+
+alter table public.admin_activity_log
+  drop constraint admin_activity_log_module_check;
+
+alter table public.admin_activity_log
+  add constraint admin_activity_log_module_check
+  check (module in ('orders', 'inventory', 'b2b', 'finance',
+                    'documents', 'fulfillment', 'customer_rights'));
+
+
+-- 10. THE ADMIN WRITERS ────────────────────────────────────────
 --
 -- Every authoritative decision on a case goes through a function here,
 -- in migration 052's shape: do the thing, then record WHO did it, and
@@ -1523,6 +1586,7 @@ security definer set search_path = ''
 as $$
 declare
   v_row public.purchase_restrictions;
+  v_expired public.purchase_restrictions;
 begin
   if p_scope not in ('annual_plan', 'recurring_subscription', 'all_new_plan_purchases') then
     return pg_catalog.jsonb_build_object('result', 'scope_unknown');
@@ -1533,6 +1597,42 @@ begin
   end if;
   if p_expires_at is not null and p_expires_at <= pg_catalog.now() then
     return pg_catalog.jsonb_build_object('result', 'expiry_in_past');
+  end if;
+
+  -- AN EXPIRED ROW STILL OCCUPIES THE SLOT.
+  --
+  -- purchase_restrictions_one_active_per_scope_key is partial on
+  -- active = true and cannot also test expiry, because a partial index
+  -- predicate must be IMMUTABLE and now() is not. So a restriction that
+  -- lapsed last month still holds the (user_id, scope) slot.
+  --
+  -- That never blocked the CUSTOMER - lib/purchaseRestrictions.ts reads
+  -- an expired row as not live, so their purchases go through - but it
+  -- would block an ADMINISTRATOR from recording a new restriction for
+  -- the same scope, for ever, with a row that no longer does anything.
+  --
+  -- So a lapsed row is closed out explicitly, with its own audit entry
+  -- and this administrator's name on it, and then the new one is
+  -- written. Nothing is deleted, nothing is silently reused, and the
+  -- history still shows both. A row that has NOT expired is left alone
+  -- and the caller is told it is already restricted.
+  update public.purchase_restrictions
+     set active    = false,
+         lifted_at = pg_catalog.now(),
+         lifted_by = p_actor_user_id
+   where user_id = p_user_id
+     and scope   = p_scope
+     and active  = true
+     and expires_at is not null
+     and expires_at <= pg_catalog.now()
+  returning * into v_expired;
+
+  if found then
+    perform public.record_admin_activity(
+      p_actor_user_id, 'customer_rights', 'restriction.expired_closed', 'customer',
+      p_user_id::text, 'Abgelaufene Kaufsperre geschlossen', gen_random_uuid(),
+      pg_catalog.jsonb_build_object('scope', p_scope, 'expired_at', v_expired.expires_at)
+    );
   end if;
 
   begin
@@ -1613,7 +1713,7 @@ grant execute on function public.admin_create_purchase_restriction(uuid, uuid, t
 grant execute on function public.admin_lift_purchase_restriction(uuid, uuid) to service_role;
 
 
--- 10. WHY THIS MAY BE APPLIED BEFORE ITS CODE ──────────────────
+-- 11. WHY THIS MAY BE APPLIED BEFORE ITS CODE ──────────────────
 --
 --   EVERY ADDED COLUMN IS NULLABLE OR DEFAULTED. The application
 --   running in Production writes none of them and continues to work
@@ -1634,7 +1734,7 @@ commit;
 
 
 -- ============================================================
--- 11. VERIFY - READ ONLY, AFTER APPLYING. NOTHING BELOW RUNS.
+-- 12. VERIFY - READ ONLY, AFTER APPLYING. NOTHING BELOW RUNS.
 -- ============================================================
 --
 --   A. THE RECEIPT COLUMNS EXIST AND NOTHING WAS BACKFILLED.

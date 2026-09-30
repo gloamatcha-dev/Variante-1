@@ -443,7 +443,11 @@ test("a restriction can only be created by a named admin, never by a rule", () =
 test("the audit entry carries the category but never the internal note", () => {
   const start = MIGRATION.indexOf("create or replace function public.admin_create_purchase_restriction(");
   const body = MIGRATION.slice(start, MIGRATION.indexOf("\n$$;", start));
-  const audit = body.slice(body.indexOf("record_admin_activity"));
+  // The restriction.created entry specifically - the function also logs
+  // restriction.expired_closed above it now.
+  const created = body.indexOf("'restriction.created'");
+  assert.ok(created > -1, "the created audit entry is gone");
+  const audit = body.slice(created, body.indexOf("end;", created));
   assert.ok(audit.includes("reason_category"));
   assert.ok(!audit.includes("p_internal_note"), "the audit entry leaks the internal note");
 });
