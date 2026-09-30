@@ -520,3 +520,64 @@ test("only a protected case may freeze", () => {
   // Idempotent: a second freeze is the same fact, not a new instant.
   assert.match(body, /'unchanged'/);
 });
+
+test("the preflight checks the index names 070 creates, in the index catalog", () => {
+  // This was the gap ChatGPT's review found: check 34 claimed to cover
+  // indexes while reading pg_constraint, which does not hold them.
+  assert.match(PREFLIGHT, /from pg_indexes/);
+  const indexNames = [...MIGRATION.matchAll(
+    /create\s+(?:unique\s+)?index\s+(?:if not exists\s+)?([a-z_]+)/g)].map(m => m[1]);
+  assert.ok(indexNames.length >= 12, `expected 070 to create 12+ indexes, saw ${indexNames.length}`);
+  for (const name of new Set(indexNames)) {
+    assert.ok(PREFLIGHT.includes(`'${name}'`),
+      `the preflight does not check the index name ${name} for a collision`);
+  }
+});
+
+test("the preflight checks every named constraint 070 adds", () => {
+  const names = [...MIGRATION.matchAll(/add constraint ([a-z_]+)/g)].map(m => m[1]);
+  assert.ok(names.length >= 5);
+  for (const name of new Set(names)) {
+    assert.ok(PREFLIGHT.includes(`'${name}'`),
+      `the preflight does not check the constraint name ${name} for a collision`);
+  }
+});
+
+test("the search_path check is robust to how PostgreSQL renders an empty value", () => {
+  // search_path= and search_path="" are both seen; this repository's own
+  // migrations document the quoted form, so a literal equality test
+  // would FAIL a correctly configured Production function.
+  assert.ok(!PREFLIGHT.includes(`'search_path=' = any(`),
+    "the preflight matches one literal spelling of an empty search_path");
+  assert.match(PREFLIGHT, /search_path=\(\.\*\)\$/);
+  assert.match(PREFLIGHT, /btrim\(/);
+  // And it still genuinely requires EMPTY, not merely present.
+  assert.match(PREFLIGHT, /\) = ''/);
+  assert.match(PREFLIGHT, /p\.prosecdef/);
+});
+
+test("the record_admin_activity check pins the signature, not just the name", () => {
+  assert.match(PREFLIGHT, /pronargs = 8/);
+  assert.match(PREFLIGHT, /p_actor_user_id uuid, p_module text, p_action text/);
+  assert.match(PREFLIGHT, /p_operation_id uuid, p_metadata jsonb/);
+});
+
+test("the stated expected count matches the checks the file actually contains", () => {
+  const passBearing = (PREFLIGHT.match(/then 'PASS' else 'FAIL' end/g) ?? []).length;
+  const info = (PREFLIGHT.match(/\n {9}'INFO'/g) ?? []).length;
+  const stated = /EXPECTED HEALTHY RESULT:\s+0 FAIL \/ (\d+) PASS \/ (\d+) INFO/.exec(PREFLIGHT);
+  assert.ok(stated, "the preflight no longer states an expected healthy result");
+  assert.equal(Number(stated[1]), passBearing,
+    "the stated PASS count does not match the verdict-bearing checks in the file");
+  assert.equal(Number(stated[2]), info,
+    "the stated INFO count does not match the INFO rows in the file");
+  // And the SUMMARY still computes its own numbers rather than quoting them.
+  assert.match(PREFLIGHT, /count\(\*\) filter \(where verdict = 'PASS'\)/);
+});
+
+test("the preflight verifies the money columns 070's writers read", () => {
+  assert.ok(PREFLIGHT.includes("'catalog_unit_gross_cents'"),
+    "nothing checks the column the Wertersatz ceiling is derived from");
+  assert.ok(PREFLIGHT.includes("'total_gross_cents'"),
+    "nothing checks the column the refund is derived from");
+});
