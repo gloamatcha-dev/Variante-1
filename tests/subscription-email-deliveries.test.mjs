@@ -251,7 +251,21 @@ test("035 exists, is the only 035, and only 036 and 037 follow it", () => {
      // does not redefine activation. No subscription, order or B2B
      // object is touched. Reviewed in
      // tests/annual-plan-customer-claim.test.mjs.
-     "068_annual_plan_customer_claim.sql"],
+     "068_annual_plan_customer_claim.sql",
+     // MONTHLY ANNUAL SCHEDULE ADDED MIGRATION 069: new annual plans
+     // become TWELVE calendar-monthly deliveries instead of thirteen
+     // 28-day ones. Two nullable-or-defaulted columns on
+     // annual_plans (schedule_model, defaulting every EXISTING row to
+     // v1_28d_13, and schedule_anchor_date), a widened delivery_count
+     // CHECK admitting 12 or 13, a model/count pairing CHECK, one
+     // IMMUTABLE calendar helper, and the two annual writers again -
+     // the pending-plan one gaining an eighteenth argument WITH A
+     // DEFAULT so the pre-069 application keeps selling v1 unchanged.
+     // It backfills nothing, re-schedules no existing delivery, grants
+     // NOTHING to any browser role and touches no subscription, order
+     // or B2B object. Reviewed in
+     // tests/annual-plan-monthly-schedule.test.mjs.
+     "069_annual_plan_monthly_schedule.sql"],
     "an unreviewed migration above 035 appeared"
   );
   // And 039 leaves this table entirely alone. An annual plan's one

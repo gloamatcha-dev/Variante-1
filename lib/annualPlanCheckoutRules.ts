@@ -706,13 +706,27 @@ export function buildAnnualShippingOptions(input: {
   currency: string;
   minBusinessDays: number;
   maxBusinessDays: number;
+  /**
+   * How many deliveries this shipping total covers.
+   *
+   * PASSED IN rather than imported, because this module is a leaf with no
+   * imports and must stay one. It comes from the frozen pricing, so the
+   * label can never disagree with the amount beside it - which is how
+   * "13 Lieferungen" survived a contract change once already.
+   */
+  deliveryCount: number;
 }): Stripe.Checkout.SessionCreateParams.ShippingOption[] {
   return [{
     shipping_rate_data: {
       type: "fixed_amount",
+      // DERIVED FROM THE CURRENT CONTRACT, never written as a number.
+      // This label goes on the Stripe session for a NEW purchase, so it
+      // must say what that purchase actually buys - twelve since
+      // migration 069. Hardcoding it is how "13" survived a contract
+      // change once already.
       display_name: input.shippingTotalGrossCents === 0
         ? "Kostenloser Versand"
-        : "Versand · 13 Lieferungen",
+        : `Versand · ${input.deliveryCount} Lieferungen`,
       fixed_amount: {
         amount: input.shippingTotalGrossCents,
         currency: input.currency.toLowerCase(),

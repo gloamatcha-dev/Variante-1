@@ -710,6 +710,9 @@ export async function handleAnnualPlanCheckout(
           currency: attempt.currency,
           minBusinessDays: zone.minBusinessDays,
           maxBusinessDays: zone.maxBusinessDays,
+          // FROM THE FROZEN ITEM, like the amount beside it, so the label
+          // and the money can never describe different contracts.
+          deliveryCount: frozenItem.quantity,
         }),
         // Back to the account area. A return from Stripe is NOT payment
         // proof and this URL grants nothing: no plan is activated, no

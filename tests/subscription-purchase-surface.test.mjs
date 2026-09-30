@@ -125,6 +125,23 @@ const shopSubscription = (() => {
 })();
 const shopSubscriptionCode = withoutComments(shopSubscription);
 
+/**
+ * The subscription block WITHOUT the annual mode's own lines.
+ *
+ * The slice above runs to the product block, so it also contains the
+ * shared purchase-mode selector and the blue band - and both of those
+ * legitimately describe the JAHRESPLAN, which since migration 069 is
+ * twelve calendar-monthly deliveries. Scanning the whole slice for
+ * "monatlich" would therefore fail on copy that is correct.
+ *
+ * Dropping the lines that name the annual plan leaves the subscription's
+ * OWN copy, which is what may never be called monthly.
+ */
+const shopSubscriptionOwnCode = shopSubscriptionCode
+  .split(NEWLINE)
+  .filter(line => !/ANNUAL_|Jahresplan|MONATLICH/.test(line))
+  .join(NEWLINE);
+
 /* ══════════════════════════════════════════════════════════════
    1. ELIGIBILITY — THE SAME THREE SKUS, AND NO FOURTH
    ══════════════════════════════════════════════════════════════ */
@@ -215,10 +232,20 @@ test("3b: every 4 weeks, one package, and NO discount - all three stated", () =>
   assert.equal(CADENCE_DAYS, 28);
   assert.equal(SUBSCRIPTION_QUANTITY_LABEL, "1 Packung");
   assert.equal(SUBSCRIPTION_QUANTITY, 1, "one package per cycle is no longer the contract");
-  // It is NEVER monthly, and no savings claim is invented.
+  // THE SUBSCRIPTION IS NEVER MONTHLY, and no savings claim is invented.
+  //
+  // Still the invariant, still important: this product bills every 28
+  // days, so "monatlich" would misstate both the rhythm and the number
+  // of charges per year. What changed with migration 069 is that the
+  // ANNUAL plan legitimately IS monthly, so the scan is pinned to the
+  // subscription's own block rather than the whole shop - a stray
+  // "monatlich" drifting into this block still fails here.
   for (const banned of [/monatlich/i, /monthly/i, /pro Monat/i, /%\s*(sparen|günstiger|Rabatt)/i]) {
-    assert.ok(!banned.test(shopSubscriptionCode), `misleading wording in the shop: ${banned}`);
+    assert.ok(!banned.test(shopSubscriptionOwnCode),
+      `misleading wording in the subscription block: ${banned}`);
   }
+  assert.ok(!/Kalendermonat/i.test(shopSubscriptionOwnCode),
+    "the subscription block borrowed the annual plan's calendar cadence");
 });
 
 test("3c: the price is the catalog's, and no total is computed in the browser", () => {
@@ -539,7 +566,7 @@ test("3s6: the account copy follows the SELECTED address", () => {
 test("4: the annual option, panel and discount are byte-identical in intent", () => {
   // The annual option's own label and meta line, unchanged.
   assert.ok(site.includes('<span className="purchase-mode-label">Jahresplan</span>'));
-  assert.ok(site.includes('<span className="purchase-mode-meta">{ANNUAL_DELIVERY_COUNT} Lieferungen · alle {ANNUAL_DELIVERY_INTERVAL_DAYS} Tage</span>'));
+  assert.ok(site.includes('<span className="purchase-mode-meta">{ANNUAL_DELIVERY_COUNT} Lieferungen · monatlich</span>'));
   // The panel's commercial copy, unchanged.
   for (const phrase of ["einmal bezahlen", "keine automatische Verlängerung",
                         "Du zahlst den Jahresgesamtbetrag einmalig.", "Jahresgesamtbetrag"]) {
@@ -1200,7 +1227,7 @@ test("8: no backend, migration, cadence, price or shipping rule changed", () => 
   // newest file on disk. Re-pinned by one position rather than deleted -
   // what this guard protects is that nothing UNREVIEWED appeared.
   // Reviewed in tests/guest-order-management.test.mjs.
-  assert.equal(migrations.at(-2), "067_annual_upgrade_pending_claim.sql",
+  assert.equal(migrations.at(-3), "067_annual_upgrade_pending_claim.sql",
     "a migration was added by a UI package");
   assert.match(read("supabase/migrations/024_seed_b2c_subscription_plans.sql"),
     /'week',\s*4,\s*'week',\s*4,\s*true,/, "the seeded cadence changed");

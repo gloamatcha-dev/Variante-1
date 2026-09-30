@@ -136,8 +136,8 @@ test("1e: no auth, guard, data or backend logic changed", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("069")),
-    "a migration 069 or beyond appeared");
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("070")),
+    "a migration 070 or beyond appeared");
 });
 
 /* ══════════════════════════════════════════════════════════════

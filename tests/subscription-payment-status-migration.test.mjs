@@ -113,17 +113,17 @@ test("1, 2: 036 exists, owns its number, and 037 is the only thing above it", ()
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(files[files.length - 23], "046_launch_signup_atomic.sql");
-  assert.equal(files[files.length - 24], "045_launch_welcome_email.sql");
-  assert.equal(files[files.length - 25], "044_launch_send.sql");
-  assert.equal(files[files.length - 26], "043_launch_waitlist.sql");
-  assert.equal(files[files.length - 27], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.equal(files[files.length - 28], "041_annual_account_column_privileges.sql");
-  assert.equal(files[files.length - 29], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(files[files.length - 33], MIGRATION_036, "036 must still be the one before 037");
+  assert.equal(files[files.length - 24], "046_launch_signup_atomic.sql");
+  assert.equal(files[files.length - 25], "045_launch_welcome_email.sql");
+  assert.equal(files[files.length - 26], "044_launch_send.sql");
+  assert.equal(files[files.length - 27], "043_launch_waitlist.sql");
+  assert.equal(files[files.length - 28], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(files[files.length - 29], "041_annual_account_column_privileges.sql");
+  assert.equal(files[files.length - 30], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 34], MIGRATION_036, "036 must still be the one before 037");
   assert.deepEqual(files.filter(f => f.startsWith("037")), ["037_subscription_refund_correlation.sql"]);
-  assert.ok(!files.some(f => f.startsWith("069")), "a migration 069 or beyond appeared");
-  assert.equal(files.length, 68);
+  assert.ok(!files.some(f => f.startsWith("070")), "a migration 070 or beyond appeared");
+  assert.equal(files.length, 69);
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length);

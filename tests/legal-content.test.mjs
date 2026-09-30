@@ -19,9 +19,7 @@ import {
 // cannot state a rhythm, a discount or a shipping charge nobody applies.
 import {
   ANNUAL_DELIVERY_COUNT,
-  ANNUAL_DELIVERY_INTERVAL_DAYS,
   ANNUAL_DISCOUNT_PERCENT,
-  ANNUAL_TERM_DAYS,
   ANNUAL_SHIPPING_PER_DELIVERY_GROSS_CENTS as ANNUAL_SHIPPING,
 } from "../lib/annualPlanRules.ts";
 import { ANNUAL_DELIVERY_COUNTRY as ANNUAL_ALLOWED_COUNTRY_MIRROR } from "../lib/annualPlans.ts";
@@ -872,12 +870,18 @@ test("AGB: the prepaid annual plan has its own section, and only as the code per
   assert.match(plan, /etwas anderes als das Abonnement/);
   assert.match(plan, /verlängert sich nicht automatisch/);
 
-  // 13 DELIVERIES, 28 DAYS, 364 DAYS - all three from the rules module.
-  assert.match(plan, /13 Lieferungen im Abstand von jeweils 28 Tagen/);
-  assert.match(plan, /364 Tage/);
-  assert.equal(ANNUAL_DELIVERY_COUNT, 13, "the terms name 13 deliveries but the schedule differs");
-  assert.equal(ANNUAL_DELIVERY_INTERVAL_DAYS, 28);
-  assert.equal(ANNUAL_TERM_DAYS, 364);
+  // 12 DELIVERIES, ONE PER CALENDAR MONTH, ONE YEAR - from the rules module.
+  assert.match(plan, /12 Lieferungen, eine pro Kalendermonat/);
+  // The clamping rule is stated, because a customer whose anchor is the
+  // 31st needs to know which day February delivers on.
+  assert.match(plan, /gilt der letzte Tag dieses Monats/);
+  // ONE YEAR from the purchase day, not a day count.
+  assert.match(plan, /läuft ein Jahr ab dem Kauftag/);
+  assert.equal(ANNUAL_DELIVERY_COUNT, 12, "the terms name 12 deliveries but the schedule differs");
+  // The terms must NOT name a fixed number of days any more: the cadence
+  // is the calendar, and 28 or 30 would both be wrong.
+  assert.ok(!/28 Tagen|30 Tagen|364 Tage/.test(plan),
+    "the annual terms still describe a fixed-day rhythm");
 
   // 10 %, ON THE MERCHANDISE ONLY.
   assert.match(plan, /Rabatt von 10 %/);
@@ -886,18 +890,22 @@ test("AGB: the prepaid annual plan has its own section, and only as the code per
 
   // GERMANY ONLY, and the shipping table as the code holds it.
   assert.match(plan, /nur für Lieferadressen in Deutschland verfügbar/);
-  assert.match(plan, /Bei 30 g fallen 5,90 EUR je Lieferung an, ab 50 g ist der Versand kostenlos/);
-  assert.match(plan, /Die Versandkosten für alle 13 Lieferungen sind im Gesamtbetrag bereits enthalten/);
+  // 5,90 EUR PER DELIVERY ON EVERY SIZE since migration 069.
+  assert.match(plan, /Je Lieferung fallen 5,90 EUR an, unabhängig von der gewählten Größe/);
+  assert.match(plan, /Die Versandkosten für alle 12 Lieferungen sind im Gesamtbetrag bereits enthalten/);
+  // And the terms no longer promise free shipping from 50 g.
+  assert.ok(!/ab 50 g ist der Versand kostenlos/.test(plan),
+    "the terms still advertise the withdrawn free-shipping benefit");
   assert.equal(ANNUAL_ALLOWED_COUNTRY_MIRROR, "DE");
   assert.deepEqual(
     Object.entries(ANNUAL_SHIPPING).map(([size, cents]) => `${size}:${cents}`),
-    ["30g:590", "50g:0", "100g:0"],
+    ["30g:590", "50g:590", "100g:590"],
     "the terms name a shipping charge the rules do not apply");
 
   // ONE PAYMENT, AND AN ENDING THAT NEEDS NO CANCELLATION.
   assert.match(plan, /Du zahlst den Gesamtbetrag einmalig/);
   assert.match(plan, /Danach erfolgt keine weitere Abbuchung/);
-  assert.match(plan, /endet nach der letzten der 13 Lieferungen, ohne dass es einer Kündigung bedarf/);
+  assert.match(plan, /endet nach der letzten der 12 Lieferungen, ohne dass es einer Kündigung bedarf/);
 
   // THE SUBSCRIPTION'S 14-DAY CUTOFF EXPLICITLY DOES NOT APPLY, and the
   // terms may only say that because nothing in the annual path reads it.

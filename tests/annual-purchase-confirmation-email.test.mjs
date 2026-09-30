@@ -18,7 +18,8 @@ import {
 } from "../lib/annualPurchaseConfirmationEmail.ts";
 import { buildAnnualPurchaseConfirmationEmail } from "../lib/email/annualPurchaseConfirmation.ts";
 import {
-  ANNUAL_DELIVERY_COUNT,
+  ANNUAL_LEGACY_DELIVERY_COUNT,
+  ANNUAL_SCHEDULE_MODELS,
   ANNUAL_DELIVERY_INTERVAL_DAYS,
 } from "../lib/annualPlanRules.ts";
 import { STALE_SENDING_AFTER_MS } from "../lib/transactionalEmailRetryRules.ts";
@@ -75,6 +76,7 @@ const flow = withoutComments(read("lib/annualPlanWebhook.ts"));
 const webhookDeps = withoutComments(read("lib/annualPlanWebhookDeps.ts"));
 const route = withoutComments(read("app/api/stripe/webhook/route.ts"));
 const sql039 = read(MIGRATION_039);
+const sql069 = read("supabase/migrations/069_annual_plan_monthly_schedule.sql");
 
 const PLAN_ID = "33333333-3333-3333-3333-333333333333";
 const OTHER_PLAN_ID = "77777777-7777-7777-7777-777777777777";
@@ -262,9 +264,29 @@ const quiet = async fn => {
    ══════════════════════════════════════════════════════════════ */
 
 test("the delivery count matches the shared annual contract and migration 039", () => {
-  assert.equal(ANNUAL_EMAIL_DELIVERY_COUNT, ANNUAL_DELIVERY_COUNT);
+  // ANNUAL_EMAIL_DELIVERY_COUNT is the LEGACY count. Migration 069 added
+  // a twelve-delivery model, and the email now picks the expected count
+  // from the plan's own schedule_model rather than from one constant.
+  assert.equal(ANNUAL_EMAIL_DELIVERY_COUNT, ANNUAL_LEGACY_DELIVERY_COUNT);
   assert.equal(ANNUAL_EMAIL_DELIVERY_COUNT, 13);
+  // 039's own text is untouched; 069 is what widened the CHECK.
   assert.match(sql039, /check \(delivery_count = 13\)/);
+  assert.match(sql069, /check \(delivery_count in \(12, 13\)\)/);
+});
+
+test("the email's restated model table agrees with the shared one", () => {
+  // The sender is a leaf with no imports, so it RESTATES the two
+  // contracts. That is only safe while the restatement is pinned to the
+  // shared registry - which is what this asserts, field by field.
+  for (const [model, terms] of Object.entries(ANNUAL_SCHEDULE_MODELS)) {
+    assert.ok(sender.includes(`${model}: Object.freeze({ deliveryCount: ${terms.deliveryCount}`),
+      `the email leaf disagrees with ${model}'s delivery count`);
+    assert.ok(sender.includes(`cadenceLabel: "${terms.cadenceLabel}"`),
+      `the email leaf disagrees with ${model}'s cadence label`);
+  }
+  // Both models are restated, not just the current one.
+  assert.ok(sender.includes("v1_28d_13:"));
+  assert.ok(sender.includes("v2_monthly_12:"));
 });
 
 test("the cadence is four weeks, which is the shared 28-day interval", () => {
@@ -843,13 +865,26 @@ test("nothing in the email path reads Stripe", () => {
   }
 });
 
-test("a plan that does not carry thirteen deliveries is refused, not rounded", () => {
-  const refused = evaluateAnnualPurchaseEmailPreflight({
-    plan: planRow({ delivery_count: 12 }),
+test("a plan whose count disagrees with its MODEL is refused, not rounded", () => {
+  // Until migration 069 there was one count, so "not thirteen" was the
+  // whole rule. There are now two contracts, and the rule is that the
+  // count must match the model the plan was SOLD under - a v1 plan with
+  // twelve deliveries is a contract nobody sold, and 069's pairing CHECK
+  // refuses it in the database too.
+  const v1WithTwelve = evaluateAnnualPurchaseEmailPreflight({
+    plan: planRow({ schedule_model: "v1_28d_13", delivery_count: 12 }),
     deliveries: schedule(),
   });
-  assert.equal(refused.kind, "failed");
-  assert.match(refused.reason, /12 deliveries/);
+  assert.equal(v1WithTwelve.kind, "failed");
+  assert.match(v1WithTwelve.reason, /12 deliveries, expected 13/);
+
+  // And the mirror: a v2 plan carrying thirteen.
+  const v2WithThirteen = evaluateAnnualPurchaseEmailPreflight({
+    plan: planRow({ schedule_model: "v2_monthly_12", delivery_count: 13 }),
+    deliveries: schedule(),
+  });
+  assert.equal(v2WithThirteen.kind, "failed");
+  assert.match(v2WithThirteen.reason, /13 deliveries, expected 12/);
 });
 
 test("an incomplete schedule read is refused rather than half-reported", () => {

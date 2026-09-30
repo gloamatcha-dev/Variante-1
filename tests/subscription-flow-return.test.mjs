@@ -31,6 +31,7 @@ import {
 // authorities" is a comparison and not a comment.
 import {
   ANNUAL_FREE_SHIPPING_FROM_GRAMS,
+  ANNUAL_FREE_SHIPPING_NOTE,
   ANNUAL_SHIPPING_PER_DELIVERY_GROSS_CENTS,
 } from "../lib/annualPlanRules.ts";
 // The ONE-TIME cart rule, for the same reason.
@@ -577,16 +578,41 @@ test("12: ANNUAL shipping stays a SEPARATE authority and keeps its own waiver", 
     the monthly decision could not have moved the annual one, and this
     test asserts the DISAGREEMENT rather than the old equality.
   */
+  // MIGRATION 069 set every annual size to 5,90 €. The two tables still
+  // do not have to agree, and this asserts the annual one on its own.
   assert.deepEqual({ ...ANNUAL_SHIPPING_PER_DELIVERY_GROSS_CENTS },
-    { "30g": 590, "50g": 0, "100g": 0 }, "the annual shipping table changed");
-  assert.equal(ANNUAL_FREE_SHIPPING_FROM_GRAMS, 50, "the annual free-shipping size moved");
-  // And the monthly table says something different, on purpose.
-  assert.notEqual(subscriptionDeShippingGrossCents("GLOA-MATCHA-50G"),
-    ANNUAL_SHIPPING_PER_DELIVERY_GROSS_CENTS["50g"],
-    "the two shipping authorities were collapsed back into one");
-  assert.notEqual(subscriptionDeShippingGrossCents("GLOA-MATCHA-100G"),
-    ANNUAL_SHIPPING_PER_DELIVERY_GROSS_CENTS["100g"],
-    "the two shipping authorities were collapsed back into one");
+    { "30g": 590, "50g": 590, "100g": 590 }, "the annual shipping table changed");
+  // THE ANNUAL WAIVER IS WITHDRAWN. Migration 069 charges 5,90 € on every
+  // size, so there is no size from which annual shipping is free - and
+  // the note is DERIVED from that table, so it is null rather than stale.
+  assert.equal(ANNUAL_FREE_SHIPPING_FROM_GRAMS, null,
+    "the annual plan still waives shipping from some size");
+  assert.equal(ANNUAL_FREE_SHIPPING_NOTE, null,
+    "the shop still advertises free annual shipping");
+
+  // ── THE TWO TABLES NOW COINCIDE, AND THAT IS NOT THE POINT ───
+  //
+  // They used to disagree on 50 g and 100 g, and this test asserted the
+  // DISAGREEMENT as evidence that neither authority had been collapsed
+  // into the other. Both are now 590 for all three sizes, so that
+  // evidence is gone - and a coincidence must never become the reason.
+  //
+  // What is asserted instead is the thing that actually matters and is
+  // not a coincidence: each leaf owns its own table, and neither reads
+  // the other's. The structural checks below are now carrying the whole
+  // invariant, so they must not be weakened.
+  for (const [sku, size] of [["GLOA-MATCHA-30G", "30g"], ["GLOA-MATCHA-50G", "50g"],
+                             ["GLOA-MATCHA-100G", "100g"]]) {
+    assert.equal(subscriptionDeShippingGrossCents(sku), 590, `${sku} monthly shipping moved`);
+    assert.equal(ANNUAL_SHIPPING_PER_DELIVERY_GROSS_CENTS[size], 590, `${size} annual shipping moved`);
+  }
+  // Two tables, two literals, in two files - not one shared constant.
+  assert.match(withoutComments(read("lib/annualPlanRules.ts")),
+    /ANNUAL_SHIPPING_PER_DELIVERY_GROSS_CENTS[\s\S]{0,200}"30g": 590/,
+    "the annual table stopped being a literal of its own");
+  assert.match(withoutComments(purchaseRules),
+    /SUBSCRIPTION_DE_SHIPPING_PER_DELIVERY_GROSS_CENTS[\s\S]{0,200}"GLOA-MATCHA-30G": 590/,
+    "the monthly table stopped being a literal of its own");
   // Neither leaf reads the other.
   // Comment-stripped on both sides: each file EXPLAINS that it does not
   // import the other, and naming the other module in prose must not read
@@ -602,6 +628,9 @@ test("12: ANNUAL shipping stays a SEPARATE authority and keeps its own waiver", 
   const annualForm = portal.slice(portal.indexOf("function AnnualPlanStartForm("),
     portal.indexOf("function PortalAnnualPlans("));
   assert.ok(annualForm.length > 2000, "the annual form was not found");
+  // The note is still READ from the shared constant - it simply renders
+  // nothing now that the constant is null, which is why the conditional
+  // must stay rather than the line being deleted.
   assert.match(annualForm, /\{ANNUAL_FREE_SHIPPING_NOTE\}/);
   for (const monthly of ["SUBSCRIPTION_DE_SHIPPING_NOTE", "subscriptionDeShippingGrossCents",
                          "SUBSCRIPTION_ABROAD_SHIPPING_NOTE"]) {

@@ -66,7 +66,9 @@ import {
 } from "../lib/purchaseEligibility";
 import {
   ANNUAL_DELIVERY_COUNT,
-  ANNUAL_DELIVERY_INTERVAL_DAYS,
+  ANNUAL_SCHEDULE_MODELS,
+  ANNUAL_SCHEDULE_MODEL_CURRENT,
+  annualCadenceLabelOf,
   ANNUAL_DISCOUNT_PERCENT,
   ANNUAL_FREE_SHIPPING_NOTE,
   buildAnnualPricing,
@@ -489,7 +491,24 @@ const subPlanName = (sub: SubscriptionRow | null) =>
  * on a card cannot claim a rhythm the schedule does not have. It says
  * nothing about WHEN the next box goes - that is a durable row's job.
  */
-const ANNUAL_CADENCE_LABEL = `alle ${ANNUAL_DELIVERY_INTERVAL_DAYS / 7} Wochen`;
+/**
+ * THE CADENCE OF ONE PLAN, never of "the annual plan".
+ *
+ * Migration 069 sells twelve calendar-monthly deliveries; every plan
+ * sold before it is thirteen on 28-day steps, and both are still
+ * running. A module-wide constant here would relabel a v1 plan with v2's
+ * rhythm - thirteen deliveries described as "monatlich" - which is the
+ * one error that rewrites a contract the customer already has.
+ *
+ * annualCadenceLabelOf reads the plan's OWN persisted schedule_model and
+ * falls back to v1 when a row predates the column.
+ */
+const ANNUAL_CADENCE_LABEL_CURRENT =
+  ANNUAL_SCHEDULE_MODELS[ANNUAL_SCHEDULE_MODEL_CURRENT].cadenceLabel;
+
+function annualCadenceLabel(v: { scheduleModel?: string | null; deliveryCount?: number | null }): string {
+  return annualCadenceLabelOf(v);
+}
 
 /**
  * WHAT AN ANNUAL DELIVERY'S ORDER COSTS THE CUSTOMER: NOTHING MORE.
@@ -793,7 +812,7 @@ function PrivateDashboard() {
                     <span>{annualStatusLabel(v)}</span>
                   </div>
                   <div className="portal-order-meta">
-                    <span>{v.deliveryCount} Lieferungen · {ANNUAL_CADENCE_LABEL}</span>
+                    <span>{v.deliveryCount} Lieferungen · {annualCadenceLabel(v)}</span>
                     <strong>{v.fulfilledDeliveries} von {v.deliveryCount} Lieferungen</strong>
                   </div>
                 </div>
@@ -2210,7 +2229,7 @@ function AnnualPlanStartForm({ plans, onCancel, sourceSubscription }: {
         </div>
       )}
       <p className="portal-note">
-        {ANNUAL_DELIVERY_COUNT} Lieferungen im {ANNUAL_DELIVERY_INTERVAL_DAYS}-Tage-Rhythmus,
+        {ANNUAL_DELIVERY_COUNT} Lieferungen, eine pro Kalendermonat,
         {" "}{ANNUAL_DISCOUNT_PERCENT} % Rabatt auf den Matcha-Preis, einmal im Voraus bezahlt.
         {" "}Keine automatische Verlängerung: der Plan endet nach der letzten Lieferung.
         {" "}{ANNUAL_GERMANY_ONLY_NOTE}
@@ -2305,7 +2324,7 @@ function AnnualPlanStartForm({ plans, onCancel, sourceSubscription }: {
               <div><dt>Matcha gesamt</dt><dd>{fmtCents(pricing.merchandiseTotalGrossCents)} €</dd></div>
               <div><dt>Versand je Lieferung</dt><dd>{shipsFree ? "kostenlos" : `${fmtCents(pricing.shippingPerDeliveryGrossCents)} €`}</dd></div>
               <div><dt>Versand gesamt</dt><dd>{shipsFree ? "kostenlos" : `${fmtCents(pricing.shippingTotalGrossCents)} €`}</dd></div>
-              <div><dt>Lieferungen</dt><dd>{pricing.deliveryCount} · alle {ANNUAL_DELIVERY_INTERVAL_DAYS} Tage</dd></div>
+              <div><dt>Lieferungen</dt><dd>{pricing.deliveryCount} · {ANNUAL_CADENCE_LABEL_CURRENT}</dd></div>
               <div className="annual-start-total"><dt>Gesamt, einmalig</dt><dd>{fmtCents(pricing.totalGrossCents)} €</dd></div>
             </dl>
           )}
@@ -2702,7 +2721,7 @@ function AnnualPlanDetail({ annualPlanId }: { annualPlanId: string }) {
             <>
               <div className="portal-profile-row">
                 <span>Lieferungen</span>
-                <strong>{plan.deliveryCount} · {ANNUAL_CADENCE_LABEL}</strong>
+                <strong>{plan.deliveryCount} · {annualCadenceLabel(plan)}</strong>
               </div>
               <div className="portal-profile-row">
                 <span>Bereits ausgelöst</span>

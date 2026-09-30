@@ -5,7 +5,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ANNUAL_DELIVERY_COUNT,
-  ANNUAL_DELIVERY_INTERVAL_DAYS,
   buildAnnualPricing,
 } from "../lib/annualPlanRules.ts";
 import { ANNUAL_LAUNCH_SIZE_BY_SKU } from "../lib/annualPlans.ts";
@@ -94,20 +93,28 @@ test("1: thirteen deliveries, 28 days, one payment, no renewal", () => {
   // The counts are READ from the rules, never typed into the page: the
   // page cannot say twelve while the server schedules thirteen.
   assert.ok(shopCode.includes("{ANNUAL_DELIVERY_COUNT}"), "the delivery count is hardcoded in the UI");
-  assert.ok(shopCode.includes("{ANNUAL_DELIVERY_INTERVAL_DAYS}"), "the cadence is hardcoded in the UI");
-  assert.equal(ANNUAL_DELIVERY_COUNT, 13);
-  assert.equal(ANNUAL_DELIVERY_INTERVAL_DAYS, 28);
+  // TWELVE, ONE PER CALENDAR MONTH since migration 069. The cadence is no
+  // longer a number of days at all, so the page states it in words and
+  // there is no interval constant left to read.
+  assert.equal(ANNUAL_DELIVERY_COUNT, 12);
+  assert.ok(!shopCode.includes("ANNUAL_DELIVERY_INTERVAL_DAYS"),
+    "the shop still describes the annual plan as a fixed number of days");
+  assert.ok(/monatlich|Kalendermonat|Jeden Monat/.test(shopCode),
+    "the shop does not state the monthly cadence");
   // The band states all four as facts, not as a tooltip.
   assert.ok(shopCode.includes("LIEFERUNGEN`"), "the band lost its delivery-count fact");
-  assert.ok(shopCode.includes("TAGE`"), "the band lost its cadence fact");
+  assert.ok(shopCode.includes('"MONATLICH"'), "the band lost its cadence fact");
   assert.ok(shopCode.includes('"EINMAL ZAHLEN"'), "the band lost its one-payment fact");
   assert.ok(shopCode.includes('"KEINE AUTOMATISCHE VERLÄNGERUNG"'), "the band lost its no-renewal fact");
 });
 
-test("1b: it is never described as monthly, and never as a subscription", () => {
-  // The cadence is 28 days. Thirteen 28-day steps are 364 days; twelve
-  // calendar months are 365 or 366, so "monatlich" would misstate the
-  // rhythm, the count AND the number of payments.
+test("1b: it is monthly by CALENDAR, and still never a subscription", () => {
+  // THIS GUARD USED TO BAN "monatlich" OUTRIGHT. Until migration 069 the
+  // cadence was 28 days, and calling that monthly would have misstated
+  // the rhythm, the count and the number of payments. The contract is now
+  // twelve CALENDAR months, so the word is correct - and what must still
+  // never be implied is that this is a SUBSCRIPTION with recurring
+  // charges. One payment, no renewal; that half of the guard stays.
   //
   // ── SCOPED TO THE ANNUAL COMPONENTS, DELIBERATELY ─────────────
   //
@@ -122,16 +129,23 @@ test("1b: it is never described as monthly, and never as a subscription", () => 
   // called an Abo or described as monthly. annualOnly is sliced at the
   // subscription marker, so a stray "Abo" drifting up into the annual
   // panel or the blue band still fails here.
-  for (const banned of [/monatlich/i, /monthly/i, /pro Monat/i, /jederzeit kündbar/i,
-                        /automatisch verlängert/i, /Abo\b/, /Abonnement/i]) {
+  // "monatlich" is NO LONGER BANNED here - it is the contract. What is
+  // still banned is anything implying a recurring CHARGE or a cancellable
+  // Abo, because the annual plan is paid once and simply ends.
+  for (const banned of [/pro Monat/i, /jederzeit kündbar/i,
+                        /automatisch verlängert/i, /Abo\b/, /Abonnement/i,
+                        /monatlich (?:ab|nur|zahlen|abgebucht)/i]) {
     assert.ok(!banned.test(annualOnly), `misleading wording in the annual plan: ${banned}`);
   }
-  // And the whole shop block still never says "monatlich" about anything:
-  // neither product is billed on a calendar month.
-  for (const banned of [/monatlich/i, /monthly/i, /pro Monat/i]) {
-    assert.ok(!banned.test(shopRendered), `a calendar month appeared in the shop: ${banned}`);
+  // And the annual panel DOES state the calendar cadence, positively.
+  assert.ok(/monatlich|Kalendermonat|Jeden Monat/.test(annualOnly),
+    "the annual panel does not state its monthly cadence");
+  // A MONTHLY PRICE is still never implied anywhere in the shop: one
+  // payment covers the whole year.
+  for (const banned of [/pro Monat/i, /monatlich zahlen/i, /je Monat/i]) {
+    assert.ok(!banned.test(shopRendered), `a monthly price appeared in the shop: ${banned}`);
   }
-  for (const banned of [/monatlich/i, /monthly/i, /subscription/i]) {
+  for (const banned of [/subscription/i]) {
     assert.ok(!banned.test(cssCode), `misleading wording in the styles: ${banned}`);
   }
   // No savings percentage was invented. The rules expose a discount, but
@@ -172,9 +186,9 @@ test("2b: the three launch sizes, and their commercial truth", () => {
   // The numbers the shop RENDERS, proven from the same function the page
   // calls. The catalog prices are the launch catalog's own.
   const expected = {
-    "30g": { catalog: 1999, unit: 1799, shipping: 590, merch: 23387, shipTotal: 7670, total: 31057 },
-    "50g": { catalog: 2999, unit: 2699, shipping: 0, merch: 35087, shipTotal: 0, total: 35087 },
-    "100g": { catalog: 5499, unit: 4949, shipping: 0, merch: 64337, shipTotal: 0, total: 64337 },
+    "30g": { catalog: 1999, unit: 1799, shipping: 590, merch: 21588, shipTotal: 7080, total: 28668 },
+    "50g": { catalog: 2999, unit: 2699, shipping: 590, merch: 32388, shipTotal: 7080, total: 39468 },
+    "100g": { catalog: 5499, unit: 4949, shipping: 590, merch: 59388, shipTotal: 7080, total: 66468 },
   };
   for (const [size, e] of Object.entries(expected)) {
     const r = buildAnnualPricing({ size, catalogUnitGrossCents: e.catalog });
@@ -182,32 +196,38 @@ test("2b: the three launch sizes, and their commercial truth", () => {
     const p = r.pricing;
     assert.equal(p.annualUnitGrossCents, e.unit, `${size} per-delivery value`);
     assert.equal(p.shippingPerDeliveryGrossCents, e.shipping, `${size} shipping per delivery`);
-    assert.equal(p.deliveryCount, 13, `${size} delivery count`);
+    assert.equal(p.deliveryCount, 12, `${size} delivery count`);
     assert.equal(p.merchandiseTotalGrossCents, e.merch, `${size} merchandise total`);
     assert.equal(p.shippingTotalGrossCents, e.shipTotal, `${size} shipping total`);
     assert.equal(p.totalGrossCents, e.total, `${size} annual total`);
-    // And the arithmetic really is total = 13 x (unit + shipping).
-    assert.equal(p.totalGrossCents, (p.annualUnitGrossCents + p.shippingPerDeliveryGrossCents) * 13);
+    // And the arithmetic really is total = 12 x (unit + shipping).
+    assert.equal(p.totalGrossCents,
+      (p.annualUnitGrossCents + p.shippingPerDeliveryGrossCents) * ANNUAL_DELIVERY_COUNT);
   }
   // German money, as the customer reads it.
-  assert.equal(eur(31057), "310,57");
-  assert.equal(eur(35087), "350,87");
-  assert.equal(eur(64337), "643,37");
+  assert.equal(eur(28668), "286,68");
+  assert.equal(eur(39468), "394,68");
+  assert.equal(eur(66468), "664,68");
   // The canonical suite that owns these figures is still there.
   const rules = read("tests/annual-plan-rules.test.mjs");
-  for (const cents of [31057, 35087, 64337, 23387, 7670]) {
+  for (const cents of [28668, 39468, 66468, 21588, 7080]) {
     assert.ok(rules.includes(String(cents)), `the rules suite stopped asserting ${cents}`);
   }
 });
 
 test("2c: annual shipping is the plan's own rule, not the shop threshold", () => {
-  // 30 g pays 5,90 per delivery thirteen times; 50 g and 100 g are free
-  // as an annual BENEFIT, not because a 49,00 threshold happened to be
-  // crossed. The shop reads the plan's answer and never the shop's.
+  // EVERY SIZE pays 5,90 per delivery twelve times since migration 069.
+  // The point of the test is unchanged and is now easier to see: the shop
+  // reads the PLAN's answer, never the shop's 49,00 threshold - and for
+  // 100 g the two now disagree outright, because the annual unit clears
+  // that threshold while the annual plan still charges for shipping.
   assert.ok(!shopRendered.includes("computeShippingGrossCents"), "the shop applied the normal shipping rule to a plan");
   assert.ok(!shopRendered.includes("4900"), "the free-shipping threshold leaked into the annual panel");
   const thirty = buildAnnualPricing({ size: "30g", catalogUnitGrossCents: 1999 });
-  assert.equal(thirty.pricing.shippingTotalGrossCents, 590 * 13);
+  assert.equal(thirty.pricing.shippingTotalGrossCents, 590 * 12);
+  const hundred = buildAnnualPricing({ size: "100g", catalogUnitGrossCents: 5499 });
+  assert.equal(hundred.pricing.shippingTotalGrossCents, 590 * 12,
+    "100 g stopped paying annual shipping because of the shop threshold");
   // Germany only, and the shop says so in the panel.
     // The note is now the shared constant, so the shop and the account say
   // the same sentence about the same limit.
@@ -412,8 +432,8 @@ test("5d: no backend, migration or commercial logic changed", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("069")),
-    "a migration 069 or beyond appeared");
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("070")),
+    "a migration 070 or beyond appeared");
   // 047 withdraws the metal case from the catalog, reviewed in
   // tests/catalog-availability.test.mjs. Re-pinned rather than removed:
   // the guard protects "no UNREVIEWED migration appeared".
@@ -429,7 +449,7 @@ test("5d: no backend, migration or commercial logic changed", () => {
   // foundation. It evolves the two b2b_supply_* tables 006 built, adds no
   // table, and touches nothing annual or B2C. Re-pinned rather than
   // deleted. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(readdirSync(path.join(ROOT, "supabase/migrations")).filter(f => f.endsWith(".sql")).length, 68,
+  assert.equal(readdirSync(path.join(ROOT, "supabase/migrations")).filter(f => f.endsWith(".sql")).length, 69,
     "the migration count changed");
   // The one-time path is untouched.
   assert.ok(site.includes('purchaseType:"once",unitPriceCents:v.price_gross_cents'),

@@ -22,7 +22,7 @@ import type { SeedCatalogProduct } from "../lib/catalogProducts";
 // prints is derived here from the catalog price the catalog already
 // sent, and no annual total is written down anywhere in this file. The
 // server still resolves the money independently - see AnnualPlanPanel.
-import { ANNUAL_DELIVERY_COUNT, ANNUAL_DELIVERY_INTERVAL_DAYS, ANNUAL_DISCOUNT_PERCENT, ANNUAL_FREE_SHIPPING_NOTE, buildAnnualPricing, type AnnualPricing } from "../lib/annualPlanRules";
+import { ANNUAL_DELIVERY_COUNT, ANNUAL_DISCOUNT_PERCENT, ANNUAL_FREE_SHIPPING_NOTE, buildAnnualPricing, type AnnualPricing } from "../lib/annualPlanRules";
 import { ANNUAL_GERMANY_ONLY_NOTE, ANNUAL_LAUNCH_SIZE_BY_SKU, annualPortalHref } from "../lib/annualPlans";
 // The 4-week product's two leaves, both zero-import for the same reason
 // the annual pair is: the browser has to run them. The cadence copy comes
@@ -438,7 +438,7 @@ function AnnualPlanPanel({variant,annual}:{variant:CatalogVariant;annual:AnnualP
 const shipsFree = annual.shippingPerDeliveryGrossCents === 0;
 return <div className="annual-panel">
 <p className="eyebrow annual-panel-eyebrow">JAHRESPLAN</p>
-<p className="annual-panel-title">Alle {ANNUAL_DELIVERY_INTERVAL_DAYS} Tage Matcha.</p>
+<p className="annual-panel-title">Jeden Monat Matcha.</p>
 <p className="annual-panel-sub">{variant.label} · {ANNUAL_DELIVERY_COUNT} Lieferungen · einmal bezahlen · keine automatische Verlängerung</p>
 {/* THE SHIPPING RULE, WHATEVER SIZE IS SELECTED AND WHATEVER
     PRICES_VISIBLE SAYS.
@@ -460,12 +460,12 @@ return <div className="annual-panel">
 <div><dt>Rabatt</dt><dd>{ANNUAL_DISCOUNT_PERCENT} % auf den Matcha-Preis</dd></div>
 {PRICES_VISIBLE&&<div><dt>Matcha je Lieferung</dt><dd>{fmtCents(annual.annualUnitGrossCents)} € <s className="annual-panel-was">{fmtCents(annual.catalogUnitGrossCents)} €</s></dd></div>}
 {PRICES_VISIBLE&&<div><dt>Versand je Lieferung</dt><dd>{shipsFree?"kostenlos":`${fmtCents(annual.shippingPerDeliveryGrossCents)} €`}</dd></div>}
-<div><dt>Lieferungen</dt><dd>{annual.deliveryCount} · alle {ANNUAL_DELIVERY_INTERVAL_DAYS} Tage</dd></div>
+<div><dt>Lieferungen</dt><dd>{annual.deliveryCount} · monatlich</dd></div>
 <div><dt>Zahlung</dt><dd>Einmal zahlen</dd></div>
 </dl>
 {PRICES_VISIBLE&&<p className="annual-panel-total"><span className="annual-panel-total-label">Jahresgesamtbetrag</span><b>{fmtCents(annual.totalGrossCents)} €</b><span className="annual-panel-total-note">einmalig</span></p>}
 <p className="annual-panel-terms">
-{annual.deliveryCount} Lieferungen im {ANNUAL_DELIVERY_INTERVAL_DAYS}-Tage-Rhythmus.
+{annual.deliveryCount} Lieferungen, eine pro Kalendermonat.
 {" "}{shipsFree||!PRICES_VISIBLE
 ?"Versand ist im Jahresgesamtbetrag enthalten."
 :`Der Versand von ${fmtCents(annual.shippingPerDeliveryGrossCents)} € je Lieferung ist für alle ${annual.deliveryCount} Lieferungen im Jahresgesamtbetrag bereits enthalten.`}
@@ -614,7 +614,7 @@ return <div className="purchase-mode" role="radiogroup" aria-label="Kaufoption w
 {showAnnual&&<label className={`purchase-mode-option${mode==="annual"?" active":""}`}>
 <input type="radio" name={name} className="sr-only" value="annual" checked={mode==="annual"} onChange={()=>onSelect("annual")}/>
 <span className="purchase-mode-label">Jahresplan</span>
-<span className="purchase-mode-meta">{ANNUAL_DELIVERY_COUNT} Lieferungen · alle {ANNUAL_DELIVERY_INTERVAL_DAYS} Tage</span>
+<span className="purchase-mode-meta">{ANNUAL_DELIVERY_COUNT} Lieferungen · monatlich</span>
 </label>}
 </div>}
 
@@ -809,7 +809,7 @@ return <section className="shop-strip" aria-label="GLOA Launch">
 function ShopAnnualPlan({onChoose}:{onChoose:()=>void}){
 const facts:[string,string][]=[
 ["01",`${ANNUAL_DELIVERY_COUNT} LIEFERUNGEN`],
-["02",`ALLE ${ANNUAL_DELIVERY_INTERVAL_DAYS} TAGE`],
+["02","MONATLICH"],
 ["03","EINMAL ZAHLEN"],
 ["04","KEINE AUTOMATISCHE VERLÄNGERUNG"],
 ];
@@ -821,7 +821,7 @@ return <section className="shop-annual" aria-labelledby="shop-annual-title">
 <span className="shop-annual-line">Matcha da.</span>
 <i className="shop-annual-line shop-annual-line-accent">Bevor er ausgeht.</i>
 </h2>
-<p className="shop-annual-body">{ANNUAL_DELIVERY_COUNT} Lieferungen im {ANNUAL_DELIVERY_INTERVAL_DAYS}-Tage-Rhythmus.<br/>Einmal bezahlen und ein Jahr lang planbar versorgt.<br/>Keine automatische Verlängerung.</p>
+<p className="shop-annual-body">{ANNUAL_DELIVERY_COUNT} Lieferungen, eine pro Kalendermonat.<br/>Einmal bezahlen und ein Jahr lang planbar versorgt.<br/>Keine automatische Verlängerung.</p>
 <button type="button" className="cta shop-annual-cta" onClick={onChoose}>JAHRESPLAN AUSWÄHLEN</button>
 </div>
 <ol className="shop-annual-facts">
@@ -2447,10 +2447,10 @@ return <main className="legal-page legal-doc legal-agb">
 <p className="legal-doc-num">06</p>
 <h2>Jahresplan</h2>
 <p>Der Jahresplan ist ein im Voraus bezahlter Liefervertrag und damit etwas anderes als das Abonnement nach Ziffer 5. Er verlängert sich nicht automatisch.</p>
-<p>Der Jahresplan umfasst 13 Lieferungen im Abstand von jeweils 28 Tagen. Die erste Lieferung erfolgt nach Zahlungseingang, die weiteren jeweils 28 Tage später; der Plan läuft insgesamt 364 Tage ab dem Kauf. Je Lieferung erhältst du eine Packung in der von dir gewählten Größe.</p>
+<p>Der Jahresplan umfasst 12 Lieferungen, eine pro Kalendermonat. Die erste Lieferung wird nach erfolgreicher Zahlung innerhalb von 1–2 Werktagen für den Versand vorbereitet; die weiteren folgen jeweils am selben Kalendertag der folgenden Monate. Existiert dieser Tag in einem Monat nicht, gilt der letzte Tag dieses Monats. Der Plan läuft ein Jahr ab dem Kauftag. Je Lieferung erhältst du eine Packung in der von dir gewählten Größe.</p>
 <p>Auf den Matcha-Preis erhältst du einen Rabatt von 10 % gegenüber dem jeweils im Shop ausgewiesenen Preis. Der Rabatt gilt für die Ware; Versandkosten sind davon nicht erfasst.</p>
-<p>Der Jahresplan ist derzeit nur für Lieferadressen in Deutschland verfügbar. Für den Versand gilt: Bei 30 g fallen 5,90 EUR je Lieferung an, ab 50 g ist der Versand kostenlos. Die Versandkosten für alle 13 Lieferungen sind im Gesamtbetrag bereits enthalten.</p>
-<p>Du zahlst den Gesamtbetrag einmalig bei Vertragsschluss. Danach erfolgt keine weitere Abbuchung. Der Vertrag endet nach der letzten der 13 Lieferungen, ohne dass es einer Kündigung bedarf.</p>
+<p>Der Jahresplan ist derzeit nur für Lieferadressen in Deutschland verfügbar. Für den Versand gilt: Je Lieferung fallen 5,90 EUR an, unabhängig von der gewählten Größe. Die Versandkosten für alle 12 Lieferungen sind im Gesamtbetrag bereits enthalten.</p>
+<p>Du zahlst den Gesamtbetrag einmalig bei Vertragsschluss. Danach erfolgt keine weitere Abbuchung. Der Vertrag endet nach der letzten der 12 Lieferungen, ohne dass es einer Kündigung bedarf.</p>
 <p>Die Kündigungsregelung für das Abonnement nach Ziffer 5, insbesondere die dortige Frist von vierzehn Tagen vor der nächsten Abbuchung, gilt für den Jahresplan nicht: Beim Jahresplan gibt es keine wiederkehrende Abbuchung, die entfallen könnte.</p>
 <p>Dein gesetzliches Widerrufsrecht bleibt unberührt; die Einzelheiten stehen in der <Link href="/widerruf">Widerrufsbelehrung</Link>. Erstattungen im Zusammenhang mit dem Jahresplan wickeln wir über den ursprünglichen Zahlungsweg ab.</p>
 </section>

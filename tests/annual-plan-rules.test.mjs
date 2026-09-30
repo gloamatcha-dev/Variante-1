@@ -6,6 +6,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ANNUAL_DELIVERY_COUNT,
+  ANNUAL_LEGACY_DELIVERY_COUNT,
+  ANNUAL_SCHEDULE_MODELS,
+  ANNUAL_SCHEDULE_MODEL_CURRENT,
+  annualCadenceLabelOf,
   ANNUAL_DELIVERY_INTERVAL_DAYS,
   ANNUAL_DELIVERY_INTERVAL_HOURS,
   ANNUAL_DELIVERY_INTERVAL_MS,
@@ -114,14 +118,35 @@ const DAY_MS = 24 * 60 * 60 * 1000;
    1-4. THE SHAPE OF THE CONTRACT
    ══════════════════════════════════════════════════════════════ */
 
-test("1: thirteen deliveries, 28 days apart, over a 364-day term", () => {
-  assert.equal(ANNUAL_DELIVERY_COUNT, 13);
+test("1: the LEGACY contract is still thirteen deliveries, 28 days apart, 364 days", () => {
+  // MIGRATION 069 DID NOT CHANGE THIS CONTRACT, it added a second one.
+  // Plans sold before 069 are still thirteen 28-day deliveries over 364
+  // days, still stored by migration 039 as 672 and 8736 hours, and this
+  // suite still pins every one of those numbers - now against the
+  // LEGACY constants, which is what they always described.
+  assert.equal(ANNUAL_LEGACY_DELIVERY_COUNT, 13);
   assert.equal(ANNUAL_DELIVERY_INTERVAL_DAYS, 28);
   assert.equal(ANNUAL_DELIVERY_INTERVAL_DAYS / 7, 4, "the cadence is not four weeks");
   assert.equal(ANNUAL_TERM_DAYS, 364);
-  // The term is thirteen whole cadences, not a 365-day year.
-  assert.equal(ANNUAL_TERM_DAYS, ANNUAL_DELIVERY_INTERVAL_DAYS * ANNUAL_DELIVERY_COUNT);
+  // The legacy term is thirteen whole cadences, not a 365-day year.
+  assert.equal(ANNUAL_TERM_DAYS, ANNUAL_DELIVERY_INTERVAL_DAYS * ANNUAL_LEGACY_DELIVERY_COUNT);
   assert.notEqual(ANNUAL_TERM_DAYS, 365);
+  // And the registry says the same thing about v1.
+  assert.equal(ANNUAL_SCHEDULE_MODELS.v1_28d_13.deliveryCount, 13);
+  assert.equal(ANNUAL_SCHEDULE_MODELS.v1_28d_13.intervalDays, 28);
+  assert.equal(ANNUAL_SCHEDULE_MODELS.v1_28d_13.cadenceLabel, "alle 4 Wochen");
+});
+
+test("1b: the CURRENT contract is twelve deliveries, one per calendar month", () => {
+  assert.equal(ANNUAL_DELIVERY_COUNT, 12);
+  assert.equal(ANNUAL_SCHEDULE_MODEL_CURRENT, "v2_monthly_12");
+  assert.equal(ANNUAL_SCHEDULE_MODELS.v2_monthly_12.deliveryCount, 12);
+  assert.equal(ANNUAL_SCHEDULE_MODELS.v2_monthly_12.cadenceLabel, "monatlich");
+  // A calendar cadence has NO interval in days, and saying it did is how
+  // "monthly" silently becomes 28 or 30 days somewhere downstream.
+  assert.equal(ANNUAL_SCHEDULE_MODELS.v2_monthly_12.intervalDays, null);
+  // The two counts are different, which is the whole reason both exist.
+  assert.notEqual(ANNUAL_DELIVERY_COUNT, ANNUAL_LEGACY_DELIVERY_COUNT);
 });
 
 test("2: the durations agree with migration 039's hours, to the millisecond", () => {
@@ -176,7 +201,8 @@ test("5: the catalog price is an INPUT, never a constant in the rules module", (
       `lib/annualPlanRules.ts hardcodes the catalog price ${cents}`);
   }
   // Nor are the derived totals or the savings stored anywhere.
-  for (const derived of [31057, 35087, 64337, 23387, 7670, 2600, 11570, 7150, 33657, 46657, 71487]) {
+  for (const derived of [28668, 39468, 66468, 21588, 32388, 59388, 7080,
+                         2400, 3600, 31068, 43068, 65988]) {
     assert.ok(!rulesCode.includes(String(derived)),
       `lib/annualPlanRules.ts hardcodes the derived figure ${derived}`);
   }
@@ -218,12 +244,16 @@ test("7: the rounding is character-for-character lib/tax.ts's, and is asserted s
   }
 });
 
-test("8: annual shipping is explicit per size, and 50 g and 100 g are free", () => {
+test("8: annual shipping is explicit per size, and every size pays 5,90 €", () => {
+  // MIGRATION 069'S COMMERCIAL DECISION. Until now 50 g and 100 g carried
+  // free annual shipping and the shop advertised "Kostenloser Versand ab
+  // 50 g."; every size now pays the same 5,90 € per delivery. The note is
+  // DERIVED from this table, so it disappears on its own - see test 8b.
   assert.equal(annualShippingPerDeliveryGrossCents("30g"), 590);
-  assert.equal(annualShippingPerDeliveryGrossCents("50g"), 0);
-  assert.equal(annualShippingPerDeliveryGrossCents("100g"), 0);
+  assert.equal(annualShippingPerDeliveryGrossCents("50g"), 590);
+  assert.equal(annualShippingPerDeliveryGrossCents("100g"), 590);
   assert.deepEqual({ ...ANNUAL_SHIPPING_PER_DELIVERY_GROSS_CENTS },
-    { "30g": 590, "50g": 0, "100g": 0 });
+    { "30g": 590, "50g": 590, "100g": 590 });
   for (const size of ANNUAL_SIZES) {
     assert.ok(Number.isInteger(ANNUAL_SHIPPING_PER_DELIVERY_GROSS_CENTS[size]));
   }
@@ -235,17 +265,26 @@ test("9: annual shipping does NOT depend on the shop's 4900 free-shipping thresh
     .includes("germany: { shippingGrossCents: 590, freeShippingThresholdGrossCents: 4900 }"),
     "the German shop rule changed, so this comparison is stale");
 
-  // ...and applying it to the ANNUAL unit prices would give a different
-  // answer for 50 g. That divergence is the whole point: free shipping on
-  // 50 g is an annual benefit, not a consequence of the threshold.
+  // ...and applying it to the ANNUAL unit prices still gives a DIFFERENT
+  // answer, which is the whole point: annual shipping is its own
+  // authority, not a consequence of the threshold. Migration 069 moved
+  // which size diverges without changing that.
+  //
+  // 50 g now AGREES by coincidence - the annual unit sits below 4900, so
+  // both rules say 5,90 € - and a coincidence must never become the
+  // reason, which is why the assertion below is on the annual table and
+  // not on the shop's answer.
   assert.equal(computeShippingGrossCents("germany", pricingFor("50g").annualUnitGrossCents), 590);
-  assert.equal(annualShippingPerDeliveryGrossCents("50g"), 0);
+  assert.equal(annualShippingPerDeliveryGrossCents("50g"), 590);
 
-  // For 100 g the shop rule happens to agree today - 4949 sits 49 cents
-  // above 4900 - and that coincidence must not become the reason.
+  // 100 g is where they now DIVERGE: the annual unit clears the shop's
+  // 4900 free-shipping threshold, so the shop rule would ship it free -
+  // and the annual plan still charges 5,90 € per delivery.
   assert.equal(computeShippingGrossCents("germany", pricingFor("100g").annualUnitGrossCents), 0);
-  assert.equal(annualShippingPerDeliveryGrossCents("100g"), 0);
-  assert.equal(4949 - 4900, 49, "the 100 g headroom above the threshold changed");
+  assert.equal(annualShippingPerDeliveryGrossCents("100g"), 590);
+  assert.notEqual(computeShippingGrossCents("germany", pricingFor("100g").annualUnitGrossCents),
+    annualShippingPerDeliveryGrossCents("100g"),
+    "annual shipping became a consequence of the shop threshold");
 
   // Structurally: the rules module never mentions the threshold, never
   // imports the shipping module, and does not recompute it.
@@ -269,33 +308,42 @@ test("10: every total is DERIVED from the per-delivery figures", () => {
     assert.equal(p.merchandiseTotalGrossCents, p.annualUnitGrossCents * ANNUAL_DELIVERY_COUNT);
     assert.equal(p.shippingTotalGrossCents, p.shippingPerDeliveryGrossCents * ANNUAL_DELIVERY_COUNT);
     assert.equal(p.totalGrossCents, p.merchandiseTotalGrossCents + p.shippingTotalGrossCents);
-    assert.equal(p.deliveryCount, 13);
+    // TWELVE since migration 069. buildAnnualPricing prices the CURRENT
+    // offer; a v1 plan's totals are frozen on its row and never recomputed.
+    assert.equal(p.deliveryCount, 12);
     assert.equal(p.discountPercentApplied, 10);
     assert.equal(p.catalogUnitGrossCents, CATALOG[size]);
   }
 });
 
 test("11: the current Germany totals are exactly the reviewed integers", () => {
+  // TWELVE of each line since migration 069, and 5,90 € shipping on every
+  // size. Against this suite's catalog fixture, not the live catalog.
   const thirty = pricingFor("30g");
   assert.equal(thirty.annualUnitGrossCents, 1799);
   assert.equal(thirty.shippingPerDeliveryGrossCents, 590);
-  assert.equal(thirty.merchandiseTotalGrossCents, 23387);
-  assert.equal(thirty.shippingTotalGrossCents, 7670);
-  assert.equal(thirty.totalGrossCents, 31057);
+  assert.equal(thirty.merchandiseTotalGrossCents, 21588);
+  assert.equal(thirty.shippingTotalGrossCents, 7080);
+  assert.equal(thirty.totalGrossCents, 28668);
 
   const fifty = pricingFor("50g");
   assert.equal(fifty.annualUnitGrossCents, 2699);
-  assert.equal(fifty.shippingPerDeliveryGrossCents, 0);
-  assert.equal(fifty.merchandiseTotalGrossCents, 35087);
-  assert.equal(fifty.shippingTotalGrossCents, 0);
-  assert.equal(fifty.totalGrossCents, 35087);
+  assert.equal(fifty.shippingPerDeliveryGrossCents, 590);
+  assert.equal(fifty.merchandiseTotalGrossCents, 32388);
+  assert.equal(fifty.shippingTotalGrossCents, 7080);
+  assert.equal(fifty.totalGrossCents, 39468);
 
   const hundred = pricingFor("100g");
   assert.equal(hundred.annualUnitGrossCents, 4949);
-  assert.equal(hundred.shippingPerDeliveryGrossCents, 0);
-  assert.equal(hundred.merchandiseTotalGrossCents, 64337);
-  assert.equal(hundred.shippingTotalGrossCents, 0);
-  assert.equal(hundred.totalGrossCents, 64337);
+  assert.equal(hundred.shippingPerDeliveryGrossCents, 590);
+  assert.equal(hundred.merchandiseTotalGrossCents, 59388);
+  assert.equal(hundred.shippingTotalGrossCents, 7080);
+  assert.equal(hundred.totalGrossCents, 66468);
+
+  // EVERY SIZE NOW PAYS THE SAME SHIPPING TOTAL, which is the one-line
+  // summary of 069's commercial change.
+  assert.equal(thirty.shippingTotalGrossCents, hundred.shippingTotalGrossCents);
+  assert.equal(thirty.shippingTotalGrossCents, 590 * ANNUAL_DELIVERY_COUNT);
 });
 
 test("12: every money value is an integer number of cents", () => {
@@ -340,10 +388,18 @@ test("13: an unsupported variant fails closed, with no default discount or shipp
    ══════════════════════════════════════════════════════════════ */
 
 test("14: savings are derived from the shop's own shipping rule, not stored", () => {
-  const EXPECTED = { "30g": 2600, "50g": 11570, "100g": 7150 };
-  const FLEXIBLE_TOTAL = { "30g": 33657, "50g": 46657, "100g": 71487 };
+  // TWELVE deliveries a side since migration 069, and the annual side now
+  // pays 5,90 € shipping on every size.
+  const EXPECTED = { "30g": 2400, "50g": 3600 };
+  const FLEXIBLE_TOTAL = { "30g": 31068, "50g": 43068 };
 
-  for (const size of ANNUAL_SIZES) {
+  // 100 g IS DELIBERATELY NOT IN THOSE TABLES. Against this suite's
+  // catalog fixture its annual unit clears the shop's 4900 free-shipping
+  // threshold, so the FLEXIBLE side ships free while the annual side now
+  // always charges 5,90 € - and the annual plan stops being the cheaper
+  // one. buildAnnualSavings refuses rather than advertising a negative
+  // saving, which is the behaviour test 14b pins.
+  for (const size of ["30g", "50g"]) {
     const pricing = pricingFor(size);
     // The flexible side pays the CATALOG price and the SHOP's shipping,
     // computed by lib/shipping.ts rather than restated here.
@@ -365,6 +421,43 @@ test("14: savings are derived from the shop's own shipping rule, not stored", ()
   }
 });
 
+test("14b: the savings line REFUSES rather than advertising a negative saving", () => {
+  // The guard that makes the 100 g case safe. At this fixture's catalog
+  // price the flexible route is cheaper, and a savings panel that showed
+  // "you save -4,80 €" would be worse than no panel at all.
+  const pricing = pricingFor("100g");
+  const flexibleShipping = computeShippingGrossCents("germany", pricing.catalogUnitGrossCents);
+  assert.equal(flexibleShipping, 0, "the 100 g catalog price no longer clears the threshold");
+  const r = buildAnnualSavings({ pricing, flexibleShippingPerDeliveryGrossCents: flexibleShipping });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /not cheaper/);
+  // The arithmetic behind the refusal, stated so the figure is reviewable.
+  assert.equal(pricing.totalGrossCents, 66468);
+  assert.equal((pricing.catalogUnitGrossCents + flexibleShipping) * ANNUAL_DELIVERY_COUNT, 65988);
+});
+
+test("14c: at the LIVE retail prices all three sizes still save money", () => {
+  // The fixture above is a fixture. These are the prices the shop
+  // actually charges, and the annual plan must remain the cheaper route
+  // for every size at them - otherwise 069's shipping change would have
+  // made the product worse than buying flexibly.
+  const LIVE = { "30g": 1499, "50g": 2299, "100g": 3999 };
+  const EXPECTED = { "30g": 1800, "50g": 2760, "100g": 4800 };
+  for (const size of ANNUAL_SIZES) {
+    const priced = buildAnnualPricing({ size, catalogUnitGrossCents: LIVE[size] });
+    assert.equal(priced.ok, true);
+    const flexibleShipping = computeShippingGrossCents("germany", LIVE[size]);
+    assert.equal(flexibleShipping, 590, `${size} live catalog crossed the shop threshold`);
+    const r = buildAnnualSavings({
+      pricing: priced.pricing,
+      flexibleShippingPerDeliveryGrossCents: flexibleShipping,
+    });
+    assert.equal(r.ok, true, `${size} no longer saves money`);
+    assert.equal(r.savings.savingsGrossCents, EXPECTED[size], `${size} live savings`);
+    assert.ok(r.savings.savingsGrossCents > 0);
+  }
+});
+
 test("15: the savings helper refuses bad input and never advertises a negative", () => {
   const pricing = pricingFor("50g");
   for (const bad of [-1, 1.5, NaN, "590", null, undefined, {}]) {
@@ -383,8 +476,11 @@ test("15: the savings helper refuses bad input and never advertises a negative",
    16-19. THE SCHEDULE
    ══════════════════════════════════════════════════════════════ */
 
-test("16: exactly thirteen deliveries, numbered 1 to 13, first one at the anchor", () => {
+test("16: the LEGACY builder still makes thirteen, numbered 1 to 13, from the anchor", () => {
+  // buildAnnualDeliverySchedule is the v1 engine and is unchanged by 069.
+  // The v2 calendar schedule is a different function with its own suite.
   const schedule = buildAnnualDeliverySchedule(new Date(ANCHOR));
+  assert.equal(schedule.length, ANNUAL_LEGACY_DELIVERY_COUNT);
   assert.equal(schedule.length, 13);
   assert.deepEqual(schedule.map(d => d.deliveryNumber), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
   assert.equal(schedule[0].scheduledFor.getTime(), ANCHOR, "delivery 1 is not the purchase moment");
@@ -394,7 +490,7 @@ test("16: exactly thirteen deliveries, numbered 1 to 13, first one at the anchor
 test("17: delivery 13 is exactly +336 days and every gap is exactly 28 days", () => {
   const schedule = buildAnnualDeliverySchedule(ANCHOR);
   assert.equal(schedule[12].scheduledFor.getTime() - ANCHOR, 336 * DAY_MS);
-  assert.equal(336, ANNUAL_DELIVERY_INTERVAL_DAYS * (ANNUAL_DELIVERY_COUNT - 1));
+  assert.equal(336, ANNUAL_DELIVERY_INTERVAL_DAYS * (ANNUAL_LEGACY_DELIVERY_COUNT - 1));
   for (let i = 1; i < schedule.length; i += 1) {
     const gap = schedule[i].scheduledFor.getTime() - schedule[i - 1].scheduledFor.getTime();
     assert.equal(gap, 28 * DAY_MS, `gap before delivery ${i + 1}`);
@@ -441,17 +537,41 @@ test("19: the schedule is elapsed time, never calendar arithmetic", () => {
   }
 });
 
-test("20: nothing in the annual rules is monthly", () => {
-  for (const banned of [
-    "setMonth", "getMonth", "setUTCMonth", "monthly", "Monthly", "monatlich", "Monatlich",
-    "addMonths", "365",
-  ]) {
-    assert.ok(!rulesCode.includes(banned), `lib/annualPlanRules.ts contains ${banned}`);
+test("20: the LEGACY cadence is never monthly, and the two models do not bleed", () => {
+  // THIS TEST USED TO BAN THE WORD ENTIRELY. Migration 069 made "monthly"
+  // the correct description of the CURRENT contract, so a blanket ban is
+  // no longer the invariant - it would forbid the feature. What must
+  // still hold is that the two models keep their own vocabulary:
+  //
+  //   v1  thirteen deliveries, a fixed 28-day step, "alle 4 Wochen"
+  //   v2  twelve deliveries, the calendar, "monatlich"
+  //
+  // A v1 plan described as monthly is a rewritten contract, which is
+  // exactly what annualCadenceLabelOf exists to prevent.
+  assert.equal(annualCadenceLabelOf({ scheduleModel: "v1_28d_13", deliveryCount: 13 }), "alle 4 Wochen");
+  assert.equal(annualCadenceLabelOf({ scheduleModel: "v2_monthly_12", deliveryCount: 12 }), "monatlich");
+  // A row written before the column existed has no model and 13 rows, and
+  // must still resolve to the legacy wording rather than today's default.
+  assert.equal(annualCadenceLabelOf({ scheduleModel: null, deliveryCount: 13 }), "alle 4 Wochen");
+  assert.equal(annualCadenceLabelOf({ deliveryCount: 13 }), "alle 4 Wochen");
+  // An unrecognised model falls back to LEGACY, never to the newest one.
+  assert.equal(annualCadenceLabelOf({ scheduleModel: "v9_whatever", deliveryCount: 13 }), "alle 4 Wochen");
+
+  // THE LEGACY CONSTANTS THEMSELVES stay pure elapsed time: no calendar
+  // arithmetic may reach the 28-day engine or the launch allowlist.
+  for (const banned of ["setMonth", "getMonth", "setUTCMonth", "365"]) {
     assert.ok(!plansCode.includes(banned), `lib/annualPlans.ts contains ${banned}`);
   }
-  // Not even the word, once the prose that explains its absence is gone.
-  assert.ok(!/month/i.test(rulesCode), "month arithmetic reached the annual rules");
   assert.ok(!/month/i.test(plansCode), "month arithmetic reached the annual plans module");
+  // And the v1 schedule builder is still elapsed-time only.
+  const builderAt = rulesCode.indexOf("export function buildAnnualDeliverySchedule(");
+  assert.ok(builderAt > -1, "the legacy schedule builder was renamed or removed");
+  const legacyBuilder = rulesCode.slice(
+    builderAt, rulesCode.indexOf(NEWLINE + "}", builderAt));
+  for (const banned of ["setMonth", "getMonth", "addCalendarMonths", "monatlich"]) {
+    assert.ok(!legacyBuilder.includes(banned),
+      `the legacy 28-day builder gained calendar arithmetic: ${banned}`);
+  }
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -488,7 +608,7 @@ test("22: a canonical variant resolves to a plan the rules can price", () => {
     catalogUnitGrossCents: r.plan.catalogUnitGrossCents,
   });
   assert.equal(pricing.ok, true);
-  assert.equal(pricing.pricing.totalGrossCents, 35087);
+  assert.equal(pricing.pricing.totalGrossCents, 39468);
 });
 
 test("23: resolution fails closed on every unsafe path", () => {
@@ -603,19 +723,19 @@ test("27: 039 and 040 are untouched, 041 is the highest, and there is no 042", (
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations[migrations.length - 23], "046_launch_signup_atomic.sql");
-  assert.equal(migrations[migrations.length - 24], "045_launch_welcome_email.sql");
-  assert.equal(migrations[migrations.length - 25], "044_launch_send.sql");
-  assert.equal(migrations[migrations.length - 26], "043_launch_waitlist.sql");
-  assert.equal(migrations[migrations.length - 27], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(migrations[migrations.length - 24], "046_launch_signup_atomic.sql");
+  assert.equal(migrations[migrations.length - 25], "045_launch_welcome_email.sql");
+  assert.equal(migrations[migrations.length - 26], "044_launch_send.sql");
+  assert.equal(migrations[migrations.length - 27], "043_launch_waitlist.sql");
+  assert.equal(migrations[migrations.length - 28], "042_annual_delivery_rls_parent_user_privilege.sql");
   // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
   // commerce foundation - it evolves the two tables 006 built for a
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 68), [],
-    "a migration 069 or beyond appeared");
-  assert.equal(migrations.length, 68);
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 69), [],
+    "a migration 070 or beyond appeared");
+  assert.equal(migrations.length, 69);
   // 039 AND 040 ARE LIVE AND THEREFORE IMMUTABLE. Production is
   // 001-063; the comments that used to exempt them here were written
   // while they were genuinely unapplied and outlived that. 064 is the

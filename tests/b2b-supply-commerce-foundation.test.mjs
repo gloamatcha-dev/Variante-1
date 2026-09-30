@@ -112,7 +112,7 @@ test("1: 059 owns its number, and only the reviewed 060 follows it", () => {
   // UNREVIEWED appeared above it. Reviewed in
   // tests/b2b-payment-delivery-foundation.test.mjs.
   const numbers = files.map(f => Number(f.slice(0, 3))).filter(n => Number.isInteger(n));
-  assert.strictEqual(Math.max(...numbers), 68, "065 must be the newest migration");
+  assert.strictEqual(Math.max(...numbers), 69, "065 must be the newest migration");
   // PACKAGE 5A ADDED MIGRATION 061: the pending agreement writer - one
   // SECURITY DEFINER function and its EXECUTE grant to service_role. It
   // adds no table, no column, no policy and no table privilege, and it
@@ -176,9 +176,23 @@ test("1: 059 owns its number, and only the reviewed 060 follows it", () => {
      // does not redefine activation. No subscription, order or B2B
      // object is touched. Reviewed in
      // tests/annual-plan-customer-claim.test.mjs.
-     "068_annual_plan_customer_claim.sql"],
+     "068_annual_plan_customer_claim.sql",
+     // MONTHLY ANNUAL SCHEDULE ADDED MIGRATION 069: new annual plans
+     // become TWELVE calendar-monthly deliveries instead of thirteen
+     // 28-day ones. Two nullable-or-defaulted columns on
+     // annual_plans (schedule_model, defaulting every EXISTING row to
+     // v1_28d_13, and schedule_anchor_date), a widened delivery_count
+     // CHECK admitting 12 or 13, a model/count pairing CHECK, one
+     // IMMUTABLE calendar helper, and the two annual writers again -
+     // the pending-plan one gaining an eighteenth argument WITH A
+     // DEFAULT so the pre-069 application keeps selling v1 unchanged.
+     // It backfills nothing, re-schedules no existing delivery, grants
+     // NOTHING to any browser role and touches no subscription, order
+     // or B2B object. Reviewed in
+     // tests/annual-plan-monthly-schedule.test.mjs.
+     "069_annual_plan_monthly_schedule.sql"],
     "a migration above 059 appeared that this suite has not been reviewed against");
-  assert.strictEqual(files.filter(f => f.startsWith("069")).length, 0,
+  assert.strictEqual(files.filter(f => f.startsWith("070")).length, 0,
     "061 must NOT be authored in this package");
   assert.strictEqual(files.filter(f => f.startsWith("059")).length, 1,
     "there must be exactly one 059");

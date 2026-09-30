@@ -17,7 +17,7 @@ import {
   isPurchasedAnnualPlanRow,
   resolveAnnualCheckoutReturnState,
 } from "../lib/annualPlanAccount.ts";
-import { ANNUAL_DELIVERY_COUNT, ANNUAL_DELIVERY_INTERVAL_DAYS } from "../lib/annualPlanRules.ts";
+import { ANNUAL_LEGACY_DELIVERY_COUNT, ANNUAL_DELIVERY_INTERVAL_DAYS } from "../lib/annualPlanRules.ts";
 
 /* ══════════════════════════════════════════════════════════════
    PHASE 4B8 - THE ANNUAL PLAN'S CUSTOMER READ MODEL
@@ -58,13 +58,20 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const PLAN_ID = "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb";
 const PURCHASED_AT = "2026-01-05T10:00:00.000Z";
 
-/** The frozen 30 g contract, exactly as activation leaves it. */
+/**
+ * The frozen 30 g contract, exactly as activation leaves it.
+ *
+ * A v1 PLAN - thirteen deliveries on 28-day steps - because that is the
+ * contract this suite describes and the one every plan sold before
+ * migration 069 has. The read model is asserted here over HISTORY, and
+ * it must go on rendering thirteen for a plan that bought thirteen.
+ */
 const planRow = (over = {}) => ({
   id: PLAN_ID,
   status: "active",
   payment_status: "paid",
   currency: "EUR",
-  delivery_count: ANNUAL_DELIVERY_COUNT,
+  delivery_count: ANNUAL_LEGACY_DELIVERY_COUNT,
   catalog_unit_gross_cents: 2499,
   annual_unit_gross_cents: 2249,
   shipping_per_delivery_gross_cents: 249,
@@ -96,7 +103,7 @@ const planRow = (over = {}) => ({
 
 /** Thirteen durable schedule rows, 28 days apart, as migration 039 wrote them. */
 const schedule = (over = {}) =>
-  Array.from({ length: ANNUAL_DELIVERY_COUNT }, (unused, i) => ({
+  Array.from({ length: ANNUAL_LEGACY_DELIVERY_COUNT }, (unused, i) => ({
     id: `d${i + 1}`,
     annual_plan_id: PLAN_ID,
     delivery_number: i + 1,
@@ -805,14 +812,14 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 68);
+  assert.equal(migrations.length, 69);
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
   // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
   // commerce foundation - it evolves the two tables 006 built for a
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 68), [], "a migration 069 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 69), [], "a migration 070 or beyond appeared");
 
   // The API surface is unchanged: no account endpoint exists, because the
   // portal reads its own rows under RLS.

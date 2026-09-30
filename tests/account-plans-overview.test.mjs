@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { buildAnnualPlanAccountView } from "../lib/annualPlanAccount.ts";
 import { isLiveAnnualPlan, isLiveSubscription } from "../lib/purchaseEligibility.ts";
 import { getSubscriptionStatusLabel } from "../lib/subscriptionCancellationRules.ts";
-import { ANNUAL_DELIVERY_COUNT } from "../lib/annualPlanRules.ts";
+import { ANNUAL_LEGACY_DELIVERY_COUNT } from "../lib/annualPlanRules.ts";
 
 /* ══════════════════════════════════════════════════════════════
    /account/subscriptions — TWO PRODUCTS, ONE STATE EACH
@@ -112,7 +112,7 @@ const planRow = (over = {}) => ({
   status: "active",
   payment_status: "paid",
   currency: "EUR",
-  delivery_count: ANNUAL_DELIVERY_COUNT,
+  delivery_count: ANNUAL_LEGACY_DELIVERY_COUNT,
   catalog_unit_gross_cents: 1499,
   annual_unit_gross_cents: 1349,
   shipping_per_delivery_gross_cents: 590,
@@ -137,7 +137,7 @@ function schedule() {
     { delivery_number: 1, scheduled_for: FIRST_AT, state: "fulfilled", fulfilled_at: FIRST_AT, order_id: ORDER_ID },
     { delivery_number: 2, scheduled_for: SECOND_AT, state: "scheduled", fulfilled_at: null, order_id: null },
   ];
-  for (let n = 3; n <= ANNUAL_DELIVERY_COUNT; n++) {
+  for (let n = 3; n <= ANNUAL_LEGACY_DELIVERY_COUNT; n++) {
     rows.push({
       delivery_number: n,
       scheduled_for: `2027-${String(n).padStart(2, "0")}-01T04:00:00+00:00`,
@@ -303,7 +303,7 @@ test("3a: the read model already refuses to name a next delivery", () => {
   const refunded = refundedPlan();
   assert.equal(refunded.nextDelivery, null, "a refunded plan still has a next delivery");
   assert.equal(refunded.fulfilledDeliveries, 1);
-  assert.equal(refunded.deliveryCount, ANNUAL_DELIVERY_COUNT);
+  assert.equal(refunded.deliveryCount, ANNUAL_LEGACY_DELIVERY_COUNT);
   assert.equal(refunded.refundedTotalCents, TOTAL_GROSS_CENTS);
   // Twelve rows survive as the record of what had been arranged. They
   // are history, not a queue - which is exactly what the UI has to say.
@@ -337,7 +337,9 @@ test("3c: the plan's own page moves every promise behind the live branch", () =>
   assert.match(annualDetail, /const planIsLive = isLiveAnnualPlan\(plan\);/);
   // The three promise rows are inside {planIsLive && (…)}.
   const liveOnly = between(annualDetail, "{planIsLive && (", "{!planIsLive && terminalEndAt");
-  for (const promise of ["Laufzeit bis", "Bereits ausgelöst", "Nächste Lieferung", "ANNUAL_CADENCE_LABEL"]) {
+  // annualCadenceLabel since 069: the rhythm is the plan's own, and it is
+  // still a promise, so it still belongs behind the live branch.
+  for (const promise of ["Laufzeit bis", "Bereits ausgelöst", "Nächste Lieferung", "annualCadenceLabel("]) {
     assert.ok(liveOnly.includes(promise), `"${promise}" left the running-plan branch`);
   }
   // And the sentence about the thirteenth delivery is a live-only branch
@@ -581,7 +583,7 @@ test("6e: the ACTIVE annual card on the dashboard still promises its run-to date
   assert.equal(active.status, "active");
   assert.equal(active.planEndAt, PLAN_END_AT);
   assert.equal(active.purchasedAt, PURCHASED_AT);
-  assert.equal(active.deliveryCount, ANNUAL_DELIVERY_COUNT);
+  assert.equal(active.deliveryCount, ANNUAL_LEGACY_DELIVERY_COUNT);
   assert.ok(isLiveAnnualPlan(active), "the active plan stopped counting as live");
 });
 
@@ -591,7 +593,7 @@ test("6f: nothing about money, schedule or eligibility moved", () => {
   const refunded = refundedPlan();
   assert.equal(refunded.totalGrossCents, TOTAL_GROSS_CENTS);
   assert.equal(refunded.refundedTotalCents, TOTAL_GROSS_CENTS);
-  assert.equal(refunded.deliveryCount, ANNUAL_DELIVERY_COUNT);
+  assert.equal(refunded.deliveryCount, ANNUAL_LEGACY_DELIVERY_COUNT);
   assert.equal(refunded.purchasedAt, PURCHASED_AT);
   // A refunded plan is still not live, so it still cannot block a repurchase.
   assert.equal(isLiveAnnualPlan(refunded), false);

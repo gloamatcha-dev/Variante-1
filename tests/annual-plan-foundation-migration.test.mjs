@@ -161,8 +161,8 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
   // Re-pinned rather than deleted - what this guard protects is that
   // nothing UNREVIEWED appeared. Reviewed in
   // tests/guest-order-management.test.mjs.
-  assert.equal(files[files.length - 30], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 31], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 31], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 32], MIGRATION_038, "038 must be the one before it");
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
@@ -170,7 +170,7 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
 test("2: no migration 044 or beyond", () => {
   // 065 is the highest migration. 039 is live and is not the place to
   // fix anything any more.
-  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 68);
+  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 69);
   assert.deepEqual(beyond, [], "an unreviewed migration appeared after 065");
 });
 
@@ -1191,6 +1191,40 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // No price, discount, delivery count, cadence, refund or cancellation
     // rule is touched. Reviewed in
     // tests/annual-plan-customer-claim.test.mjs.
+    // MIGRATION 069, THE 12-MONTH ANNUAL MODEL, edits these leaves:
+    //
+    //   annualPlanRules.ts          the two schedule models side by side
+    //                               (v1_28d_13 / v2_monthly_12), the
+    //                               calendar-month helper, and 5,90 €
+    //                               shipping on every size. The LEGACY
+    //                               28-day engine is re-pinned to
+    //                               ANNUAL_LEGACY_DELIVERY_COUNT so a v1
+    //                               plan still builds thirteen.
+    //   annualPlanCheckoutRules.ts  the Stripe shipping label takes the
+    //                               delivery count as an INPUT, so the
+    //                               leaf stays import-free and the label
+    //                               can never disagree with the amount.
+    //   annualPlanCheckout.ts       passes that count from the frozen item.
+    //   annualPurchaseConfirmationEmail.ts
+    //   annualPurchaseConfirmationEmailDeps.ts
+    //   email/annualPurchaseConfirmation.ts
+    //                               the confirmation validates the count
+    //                               against the plan's own model and
+    //                               describes its own cadence. Without
+    //                               this a v2 plan would never have got
+    //                               its durable-medium confirmation.
+    //   adminAnnualPlansQuery.ts    comment only: the delivery cap is
+    //                               documented as covering the LONGEST
+    //                               schedule (13), not the current one.
+    //   AccountPortal.tsx           cadence is resolved PER PLAN, so a
+    //                               v1 plan is never relabelled monthly.
+    //   GloaSite.tsx                shop and AGB copy state the current
+    //                               contract: 12 deliveries, monatlich,
+    //                               5,90 € per delivery on every size.
+    //
+    // No existing row is rewritten and no v1 schedule is re-generated.
+    // Reviewed in tests/annual-plan-monthly-schedule.test.mjs.
+    "lib/adminAnnualPlansQuery.ts",
     "lib/purchaseEligibility.ts",
     "lib/subscriptionUpgradeRules.ts",
     "lib/annualPlanCheckout.ts",

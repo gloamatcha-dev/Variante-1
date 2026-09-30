@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { resolveAccountDestination } from "../lib/authReturnTarget.ts";
 import {
   ANNUAL_DELIVERY_COUNT,
+  ANNUAL_LEGACY_DELIVERY_COUNT,
   ANNUAL_DELIVERY_INTERVAL_DAYS,
   ANNUAL_DISCOUNT_PERCENT,
   ANNUAL_SHIPPING_PER_DELIVERY_GROSS_CENTS,
@@ -114,13 +115,18 @@ test("1a: the plan the surface describes is the plan the engine performs", () =>
   // Not one of these is a new decision. They are asserted here so a
   // change to the engine breaks the SURFACE's tests too, rather than
   // leaving a shop panel quietly advertising a contract that moved.
-  assert.equal(ANNUAL_DELIVERY_COUNT, 13);
-  assert.equal(ANNUAL_DELIVERY_INTERVAL_DAYS, 28);
-  assert.equal(ANNUAL_TERM_DAYS, 364);
-  assert.equal(ANNUAL_TERM_DAYS, ANNUAL_DELIVERY_COUNT * ANNUAL_DELIVERY_INTERVAL_DAYS);
+  // THE CURRENT contract, which is what the surface advertises.
+  assert.equal(ANNUAL_DELIVERY_COUNT, 12);
   assert.equal(ANNUAL_DISCOUNT_PERCENT, 10);
   assert.deepEqual([...ANNUAL_SIZES], ["30g", "50g", "100g"]);
-  assert.deepEqual({ ...ANNUAL_SHIPPING_PER_DELIVERY_GROSS_CENTS }, { "30g": 590, "50g": 0, "100g": 0 });
+  // 5,90 € per delivery on EVERY size since migration 069.
+  assert.deepEqual({ ...ANNUAL_SHIPPING_PER_DELIVERY_GROSS_CENTS },
+    { "30g": 590, "50g": 590, "100g": 590 });
+  // And the LEGACY contract, which plans sold before 069 still perform.
+  assert.equal(ANNUAL_LEGACY_DELIVERY_COUNT, 13);
+  assert.equal(ANNUAL_DELIVERY_INTERVAL_DAYS, 28);
+  assert.equal(ANNUAL_TERM_DAYS, 364);
+  assert.equal(ANNUAL_TERM_DAYS, ANNUAL_LEGACY_DELIVERY_COUNT * ANNUAL_DELIVERY_INTERVAL_DAYS);
 });
 
 test("1b: the feature flag is untouched and still the gate", () => {
@@ -499,7 +505,8 @@ test("5e: the card's delivery counts are the leaf's, executed", () => {
   assert.ok(view, "the view could not be built");
   assert.equal(view.deliveryCount, ANNUAL_DELIVERY_COUNT);
   assert.equal(view.fulfilledDeliveries, 3);
-  assert.equal(Math.max(0, view.deliveryCount - view.fulfilledDeliveries), 10);
+  assert.equal(Math.max(0, view.deliveryCount - view.fulfilledDeliveries),
+    ANNUAL_DELIVERY_COUNT - 3);
   assert.equal(view.nextDelivery?.deliveryNumber, 4);
 });
 
@@ -544,7 +551,10 @@ test("6c: a page of many plans costs the same round trips as a page of one", () 
   assert.ok(!/\.map\([^)]*=>[^)]*await supabase/.test(route), "the route reads per row");
   assert.ok(!/for \([^)]*\) \{[^}]*await supabase\.from/s.test(route), "the route reads in a loop");
   // The cap is declared rather than silently applied.
-  assert.equal(DELIVERIES_PER_PLAN_CAP, ANNUAL_DELIVERY_COUNT);
+  // The cap must cover the LONGEST schedule that exists, which is the
+  // legacy thirteen - a v1 plan's last delivery must not fall off.
+  assert.equal(DELIVERIES_PER_PLAN_CAP, ANNUAL_LEGACY_DELIVERY_COUNT);
+  assert.ok(DELIVERIES_PER_PLAN_CAP >= ANNUAL_DELIVERY_COUNT);
   assert.match(adminUi, /Der Lieferplan wurde gekürzt/);
 });
 

@@ -283,10 +283,14 @@ export const ANNUAL_ORDER_COLUMNS = [
 /**
  * A ceiling on the delivery read, per plan on the page.
  *
- * Thirteen is the whole schedule and migration 039 pins delivery_count to
- * it, so 13 per plan is exact rather than generous. The route reports
- * when the cap is reached anyway, because a silently short schedule would
- * understate progress.
+ * THIRTEEN, WHICH IS THE LARGEST SCHEDULE THAT EXISTS - not the current
+ * one. Migration 039 pinned delivery_count to 13 and migration 069 added
+ * a twelve-delivery model beside it, so the cap must still cover the
+ * longest v1 plan or an old plan's last delivery would silently vanish
+ * from admin. It is exact for v1 and one row generous for v2.
+ *
+ * The route reports when the cap is reached anyway, because a silently
+ * short schedule would understate progress.
  */
 export const DELIVERIES_PER_PLAN_CAP = 13;
 

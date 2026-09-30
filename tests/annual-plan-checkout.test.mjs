@@ -413,7 +413,7 @@ test("10: the catalog is re-read server-side and no price is hardcoded in the fl
   // Exactly one variant. No cart, no client quantity.
   assert.ok(flow.includes("quote.items.length !== 1"));
   assert.ok(!flow.includes("quantity: quantity"));
-  for (const cents of [1999, 2999, 5499, 1799, 2699, 4949, 31057, 35087, 64337, 7670]) {
+  for (const cents of [1999, 2999, 5499, 1799, 2699, 4949, 28668, 39468, 66468, 7080]) {
     assert.ok(!flow.includes(String(cents)), `the flow hardcodes ${cents}`);
     assert.ok(!rulesCode.includes(String(cents)), `the rules hardcode ${cents}`);
   }
@@ -447,12 +447,13 @@ test("12: the money comes from Phase 4B2 and is never recomputed in the flow", (
     assert.ok(!flow.includes(b), `the flow does its own money arithmetic: ${b}`);
   }
   // The derived totals, for the record.
-  assert.equal(pricingFor("30g").totalGrossCents, 31057);
-  assert.equal(pricingFor("50g").totalGrossCents, 35087);
-  assert.equal(pricingFor("100g").totalGrossCents, 64337);
-  assert.equal(pricingFor("30g").shippingTotalGrossCents, 7670);
-  assert.equal(pricingFor("50g").shippingTotalGrossCents, 0);
-  assert.equal(pricingFor("100g").shippingTotalGrossCents, 0);
+  assert.equal(pricingFor("30g").totalGrossCents, 28668);
+  assert.equal(pricingFor("50g").totalGrossCents, 39468);
+  assert.equal(pricingFor("100g").totalGrossCents, 66468);
+  // 5,90 € x 12, and now the SAME total for every size.
+  assert.equal(pricingFor("30g").shippingTotalGrossCents, 7080);
+  assert.equal(pricingFor("50g").shippingTotalGrossCents, 7080);
+  assert.equal(pricingFor("100g").shippingTotalGrossCents, 7080);
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -465,7 +466,7 @@ test("13: the payment items snapshot is the WHOLE prepayment", () => {
     const pricing = pricingFor(size);
     const items = buildAnnualPaymentItemsSnapshot({ plan, pricing, catalog: CATALOG_FACTS });
     assert.equal(items.length, 1);
-    assert.equal(items[0].quantity, 13, `${size} payment quantity`);
+    assert.equal(items[0].quantity, 12, `${size} payment quantity`);
     assert.equal(items[0].unitGrossCents, pricing.annualUnitGrossCents);
     assert.equal(items[0].lineGrossCents, pricing.merchandiseTotalGrossCents);
     assert.equal(items[0].variantId, plan.variantId);
@@ -772,7 +773,7 @@ test("24: one product line of thirteen at the annual unit price, from the FROZEN
       pricing, productName: "GLOA Matcha", variantLabel: "50 g", currency: "EUR",
     });
     assert.equal(lines.length, 1);
-    assert.equal(lines[0].quantity, 13, size);
+    assert.equal(lines[0].quantity, 12, size);
     assert.equal(lines[0].price_data.unit_amount, pricing.annualUnitGrossCents, size);
     assert.equal(lines[0].price_data.currency, "eur");
     assert.ok(!("price" in lines[0]), "a Stripe Price object is referenced");
@@ -787,7 +788,12 @@ test("24: one product line of thirteen at the annual unit price, from the FROZEN
 });
 
 test("25: shipping is the annual TOTAL, and Germany is the only allowed country", () => {
-  const cases = [["30g", 7670, "Versand · 13 Lieferungen"], ["50g", 0, "Kostenloser Versand"], ["100g", 0, "Kostenloser Versand"]];
+  // SINCE MIGRATION 069 every size pays 5,90 € x 12, so the free case
+  // no longer occurs for any annual size. The builder keeps its free
+  // branch - it is still correct for a zero total - and test 25b pins it.
+  const cases = [["30g", 7080, "Versand · 12 Lieferungen"],
+                 ["50g", 7080, "Versand · 12 Lieferungen"],
+                 ["100g", 7080, "Versand · 12 Lieferungen"]];
   for (const [size, expected, label] of cases) {
     const pricing = pricingFor(size);
     assert.equal(pricing.shippingTotalGrossCents, expected, size);
@@ -796,6 +802,7 @@ test("25: shipping is the annual TOTAL, and Germany is the only allowed country"
       currency: "EUR",
       minBusinessDays: 2,
       maxBusinessDays: 4,
+      deliveryCount: pricing.deliveryCount,
     });
     assert.equal(options.length, 1);
     assert.equal(options[0].shipping_rate_data.fixed_amount.amount, expected, size);
@@ -803,8 +810,9 @@ test("25: shipping is the annual TOTAL, and Germany is the only allowed country"
     assert.equal(options[0].shipping_rate_data.display_name, label);
     assert.equal(options[0].shipping_rate_data.type, "fixed_amount");
   }
-  // 30 g: thirteen charges, not one.
-  assert.equal(7670, 590 * 13);
+  // Twelve charges, not one - and the label says so because it is
+  // derived from the contract rather than written as a number.
+  assert.equal(7080, 590 * 12);
   // Germany only at Stripe, so a customer cannot pay a German annual
   // contract and then pick another destination.
   assert.ok(flow.includes("shipping_address_collection: { allowed_countries: [ANNUAL_ALLOWED_COUNTRY] }"));
@@ -979,7 +987,7 @@ test("32: the checkout phase's own migrations are untouched, and 041 is not its 
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 68);
+  assert.equal(migrations.length, 69);
   assert.equal(migrations[38], "039_b2c_annual_plan_foundation.sql");
   assert.equal(migrations[39], "040_annual_checkout_retry_fingerprints.sql");
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
@@ -988,8 +996,8 @@ test("32: the checkout phase's own migrations are untouched, and 041 is not its 
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 68), [],
-    "a migration 069 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 69), [],
+    "a migration 070 or beyond appeared");
   // 041 touches privileges only: it creates no table, no column and no
   // function, so it cannot have changed anything this suite proves.
   const m041 = read("supabase/migrations/041_annual_account_column_privileges.sql");
@@ -1329,7 +1337,9 @@ test("40: the field lists are the contract, and they bind what they must", () =>
     ["userId", "99999999-8888-7777-6666-555555555555"],
     ["variantId", "88888888-7777-6666-5555-444444444444"],
     ["addressId", "77777777-6666-5555-4444-333333333333"],
-    ["deliveryCount", 12],
+    // 13, because the base intent is now TWELVE - a perturbation equal
+    // to the base proves nothing about the digest.
+    ["deliveryCount", 13],
     ["addressDigest", "deadbeef"],
     ["sku", "GLOA-MATCHA-30G"],
     ["currency", "CHF"],
@@ -1337,7 +1347,9 @@ test("40: the field lists are the contract, and they bind what they must", () =>
     ["catalogUnitGrossCents", 3099],
     ["discountPercentApplied", 15],
     ["annualUnitGrossCents", 2700],
-    ["shippingPerDeliveryGrossCents", 590],
+    // 0, because the 50 g base now PAYS 590 - the old free-shipping
+    // value is what differs from the base since migration 069.
+    ["shippingPerDeliveryGrossCents", 0],
     ["shippingTotalGrossCents", 7670],
     ["totalGrossCents", 35088],
     ["taxCalculationVersion", "de-2027.1"],

@@ -775,7 +775,25 @@ test("boundary: the account page promises exactly what the server does", () => {
   assert.equal((portalCode.match(/\/api\/subscriptions\/checkout/g) || []).length, 1,
     "a second subscription checkout call appeared");
   assert.match(portal, /SUBSCRIPTION_CADENCE_LABEL/, "the cadence is no longer read from the rules");
-  assert.ok(!/monatlich/i.test(portal.replace(/Monatlich",/g, "")), "the cadence must never be called monthly");
+  // THE SUBSCRIPTION'S cadence, which is four weeks and must never be
+  // called monthly. Since migration 069 the portal also renders the
+  // ANNUAL plan's cadence, which legitimately IS monthly - so the scan
+  // drops the lines that belong to the annual model rather than banning
+  // a word the page is now right to use.
+  // Comments stripped first: the portal EXPLAINS at length why a v1 plan
+  // must never be labelled monthly, and the prose defending the rule must
+  // not trip the rule. Block comments go before the line filter, because
+  // the line filter removes a block's delimiters and leaves its prose.
+  const portalWithoutAnnual = portal
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split(NEWLINE)
+    .filter(line => !line.trim().startsWith("//"))
+    .filter(line => !/ANNUAL_|annualCadenceLabel|Kalendermonat|Monatlich",/.test(line))
+    .join(NEWLINE);
+  assert.ok(!/monatlich/i.test(portalWithoutAnnual),
+    "the subscription cadence must never be called monthly");
+  // And the subscription's own label is still read from its rules leaf.
+  assert.match(portal, /SUBSCRIPTION_CADENCE_LABEL/);
   // The flag stays server-side, and the UI renders the server's own
   // refusal rather than deciding availability for itself.
   assert.ok(!portalCode.includes("B2C_SUBSCRIPTIONS_ENABLED"), "the portal reads the server flag");

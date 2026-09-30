@@ -30,7 +30,7 @@ import {
   buildInternalOrderNotificationEmail,
   internalOrderNotificationIdempotencyKey,
 } from "../lib/email/internalOrderNotification.ts";
-import { ANNUAL_DELIVERY_COUNT, ANNUAL_DELIVERY_INTERVAL_DAYS } from "../lib/annualPlanRules.ts";
+import { ANNUAL_LEGACY_DELIVERY_COUNT, ANNUAL_DELIVERY_INTERVAL_DAYS } from "../lib/annualPlanRules.ts";
 
 /* ══════════════════════════════════════════════════════════════
    PHASE 4B6 - THE ANNUAL PLAN'S DAILY MAINTENANCE
@@ -106,7 +106,7 @@ const quiet = async fn => {
    ══════════════════════════════════════════════════════════════ */
 
 const scheduleFor = (over = {}) =>
-  Array.from({ length: ANNUAL_DELIVERY_COUNT }, (unused, i) => ({
+  Array.from({ length: ANNUAL_LEGACY_DELIVERY_COUNT }, (unused, i) => ({
     id: `d${i + 1}`,
     annual_plan_id: PLAN_ID,
     delivery_number: i + 1,
@@ -144,7 +144,7 @@ const world = ({
     id: PLAN_ID,
     status: "active",
     payment_status: "paid",
-    delivery_count: ANNUAL_DELIVERY_COUNT,
+    delivery_count: ANNUAL_LEGACY_DELIVERY_COUNT,
     plan_end_at: PURCHASED_AT + 364 * DAY_MS,
     completed_at: null,
     customer_snapshot: { email: "kundin@example.com", name: "Kundin Beispiel" },
@@ -1004,7 +1004,7 @@ test("24: every sweep is bounded, and none loops until empty", () => {
 const completionWorld = (over, deliveryOver) =>
   world({ plan: over, deliveries: deliveryOver, now: NOW });
 
-const allFulfilled = (count = ANNUAL_DELIVERY_COUNT, missingOrder = false) => {
+const allFulfilled = (count = ANNUAL_LEGACY_DELIVERY_COUNT, missingOrder = false) => {
   const over = {};
   for (let n = 1; n <= count; n++) {
     over[n] = {
@@ -1242,7 +1242,7 @@ test("34: this phase adds no migration and edits none", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 68);
+  assert.equal(migrations.length, 69);
   // PHASE 4B8.2 ADDED MIGRATION 042: the ONE column privilege 041
   // was short of, so migration 039's delivery policy can still read
   // the parent's user_id while resolving ownership. Reviewed in
@@ -1251,16 +1251,16 @@ test("34: this phase adds no migration and edits none", () => {
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(migrations[migrations.length - 23], "046_launch_signup_atomic.sql");
-  assert.equal(migrations[migrations.length - 24], "045_launch_welcome_email.sql");
-  assert.equal(migrations[migrations.length - 25], "044_launch_send.sql");
-  assert.equal(migrations[migrations.length - 26], "043_launch_waitlist.sql");
+  assert.equal(migrations[migrations.length - 24], "046_launch_signup_atomic.sql");
+  assert.equal(migrations[migrations.length - 25], "045_launch_welcome_email.sql");
+  assert.equal(migrations[migrations.length - 26], "044_launch_send.sql");
+  assert.equal(migrations[migrations.length - 27], "043_launch_waitlist.sql");
   // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
   // commerce foundation - it evolves the two tables 006 built for a
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 68), [], "a migration 069 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 69), [], "a migration 070 or beyond appeared");
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
   // 064 IS LIVE. Production is 001-064, so there is no pending

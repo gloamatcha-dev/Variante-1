@@ -106,10 +106,10 @@ test("1: 061 owns its number, and only the reviewed 062 follows it", () => {
   // this guard protects is that 061 still occupies its own number and
   // that nothing UNREVIEWED appeared above it. Reviewed in
   // tests/b2b-checkout-settlement.test.mjs.
-  assert.equal(files[files.length - 8], MIGRATION, "061 must be the one before the newest");
-  assert.equal(files[files.length - 9], "060_b2b_payment_delivery_foundation.sql");
-  assert.equal(files[files.length - 10], "059_b2b_supply_commerce_foundation.sql");
-  assert.equal(files.length, 68);
+  assert.equal(files[files.length - 9], MIGRATION, "061 must be the one before the newest");
+  assert.equal(files[files.length - 10], "060_b2b_payment_delivery_foundation.sql");
+  assert.equal(files[files.length - 11], "059_b2b_supply_commerce_foundation.sql");
+  assert.equal(files.length, 69);
   // PACKAGES 5D/5E/5F ADDED MIGRATION 063: the instalment, resolution
   // and failure runtime. Re-pinned on the same terms as 062 above.
   // Reviewed in tests/b2b-instalment-delivery-failure.test.mjs.
@@ -158,9 +158,23 @@ test("1: 061 owns its number, and only the reviewed 062 follows it", () => {
      // does not redefine activation. No subscription, order or B2B
      // object is touched. Reviewed in
      // tests/annual-plan-customer-claim.test.mjs.
-     "068_annual_plan_customer_claim.sql"],
+     "068_annual_plan_customer_claim.sql",
+     // MONTHLY ANNUAL SCHEDULE ADDED MIGRATION 069: new annual plans
+     // become TWELVE calendar-monthly deliveries instead of thirteen
+     // 28-day ones. Two nullable-or-defaulted columns on
+     // annual_plans (schedule_model, defaulting every EXISTING row to
+     // v1_28d_13, and schedule_anchor_date), a widened delivery_count
+     // CHECK admitting 12 or 13, a model/count pairing CHECK, one
+     // IMMUTABLE calendar helper, and the two annual writers again -
+     // the pending-plan one gaining an eighteenth argument WITH A
+     // DEFAULT so the pre-069 application keeps selling v1 unchanged.
+     // It backfills nothing, re-schedules no existing delivery, grants
+     // NOTHING to any browser role and touches no subscription, order
+     // or B2B object. Reviewed in
+     // tests/annual-plan-monthly-schedule.test.mjs.
+     "069_annual_plan_monthly_schedule.sql"],
     "a migration above 061 appeared that this suite has not been reviewed against");
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 68), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 69), [],
     "an unreviewed migration appeared after 062");
   // No number is used twice, which a copy-paste of a file name would do.
   const numbers = files.map(f => f.slice(0, 3));
@@ -1130,7 +1144,7 @@ test("50: NO SUITE MAY CLAIM THAT AN APPLIED MIGRATION IS STILL PENDING", () => 
   // below: it is a NEW file, so no immutability guard has anything to
   // exempt in it. Re-pinned to it, so the next author faces the same
   // decision. Reviewed in tests/guest-order-management.test.mjs.
-  assert.equal(onDisk.at(-2), "067_annual_upgrade_pending_claim.sql",
+  assert.equal(onDisk.at(-3), "067_annual_upgrade_pending_claim.sql",
     "a migration appeared above 065 - decide whether it is pending, then re-check every exemption");
   assert.equal(appliedFiles.length, onDisk.length,
     "a migration is excluded from the applied set - nothing guards its immutability");

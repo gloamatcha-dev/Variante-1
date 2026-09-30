@@ -113,7 +113,10 @@ const PLAN_COLUMNS =
   "discount_percent_applied, customer_snapshot, delivery_items_snapshot, " +
   // Migration 066. Present only on an upgrade, and the message says
   // something materially different when it is.
-  "source_subscription_id, schedule_anchor_at";
+  "source_subscription_id, schedule_anchor_at, " +
+  // Migration 069. Which contract the plan is, so the message describes
+  // the cadence that was actually bought rather than today's default.
+  "schedule_model";
 
 async function loadAnnualPlanForPurchaseEmail(
   annualPlanId: string

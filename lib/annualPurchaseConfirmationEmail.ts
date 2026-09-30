@@ -121,6 +121,36 @@ export const ANNUAL_EMAIL_DELIVERY_COUNT = 13;
  */
 export const ANNUAL_CADENCE_WEEKS = 4;
 
+/**
+ * THE TWO CONTRACTS, RESTATED (migration 069).
+ *
+ * Restated rather than imported, exactly as ANNUAL_EMAIL_DELIVERY_COUNT
+ * and ANNUAL_CADENCE_WEEKS already are: this module is a leaf with no
+ * imports so the whole message can be built in a test without pulling
+ * the pricing graph in. The focused suite asserts this table agrees with
+ * ANNUAL_SCHEDULE_MODELS in lib/annualPlanRules.ts.
+ */
+const EMAIL_SCHEDULE_MODELS: Readonly<Record<string, { deliveryCount: number; cadenceLabel: string }>> =
+  Object.freeze({
+    v1_28d_13: Object.freeze({ deliveryCount: 13, cadenceLabel: "alle 4 Wochen" }),
+    v2_monthly_12: Object.freeze({ deliveryCount: 12, cadenceLabel: "monatlich" }),
+  });
+
+/**
+ * Which contract a stored plan was sold under.
+ *
+ * The column decides; a row written before 069 has none, so thirteen
+ * deliveries means v1. An unrecognised value falls back to v1 rather
+ * than to the newest model, because describing an old contract with
+ * today's terms is the one error that rewrites history.
+ */
+function emailScheduleModelOf(plan: { schedule_model?: string | null; delivery_count: number }): string {
+  if (plan.schedule_model === "v2_monthly_12") return "v2_monthly_12";
+  if (plan.schedule_model === "v1_28d_13") return "v1_28d_13";
+  return plan.delivery_count === 12 ? "v2_monthly_12" : "v1_28d_13";
+}
+
+
 /* ══════════════════════════════════════════════════════════════
    READING THE CLAIM RPC
    ══════════════════════════════════════════════════════════════ */
@@ -288,6 +318,8 @@ export type AnnualPurchaseEmailPlanRow = {
    */
   source_subscription_id?: string | null;
   schedule_anchor_at?: string | null;
+  /** Migration 069. Which contract this plan is. */
+  schedule_model?: string | null;
 };
 
 /** The annual_plan_deliveries columns the schedule facts are read from. */
@@ -306,7 +338,8 @@ export type AnnualPurchaseEmailContent = {
   productName: string | null;
   variantLabel: string | null;
   deliveryCount: number;
-  cadenceWeeks: number;
+  /** Migration 069: the plan's own rhythm as a sentence. */
+  cadenceLabel: string;
   currency: string;
   annualUnitGrossCents: number;
   shippingPerDeliveryGrossCents: number;
@@ -450,10 +483,19 @@ export function evaluateAnnualPurchaseEmailPreflight(input: {
   // THIRTEEN, PROVED OFF THE ROW rather than promised by this file. A plan
   // reporting anything else is not the contract this message describes,
   // and the template would print a count nobody agreed to.
-  if (plan.delivery_count !== ANNUAL_EMAIL_DELIVERY_COUNT) {
+  // THE COUNT THE PLAN'S OWN MODEL PROMISES (migration 069).
+  //
+  // Pinned per model rather than to one number: twelve is right for a v2
+  // plan and thirteen for a v1 one, and a row whose count disagrees with
+  // its model is a contract nobody sold - which 069's pairing CHECK also
+  // refuses, so this can only fire if that constraint were dropped.
+  const expectedDeliveries =
+    EMAIL_SCHEDULE_MODELS[emailScheduleModelOf(plan)].deliveryCount;
+
+  if (plan.delivery_count !== expectedDeliveries) {
     return {
       kind: "failed",
-      reason: `annual plan carries ${plan.delivery_count} deliveries, expected ${ANNUAL_EMAIL_DELIVERY_COUNT}`,
+      reason: `annual plan carries ${plan.delivery_count} deliveries, expected ${expectedDeliveries}`,
     };
   }
 
@@ -482,10 +524,10 @@ export function evaluateAnnualPurchaseEmailPreflight(input: {
   // is a read that went wrong rather than a plan with fewer deliveries -
   // and naming a "next" date out of an incomplete schedule could name the
   // wrong one.
-  if (deliveries.length !== ANNUAL_EMAIL_DELIVERY_COUNT) {
+  if (deliveries.length !== expectedDeliveries) {
     return {
       kind: "failed",
-      reason: `annual plan schedule has ${deliveries.length} rows, expected ${ANNUAL_EMAIL_DELIVERY_COUNT}`,
+      reason: `annual plan schedule has ${deliveries.length} rows, expected ${expectedDeliveries}`,
     };
   }
 
@@ -513,7 +555,7 @@ export function evaluateAnnualPurchaseEmailPreflight(input: {
       productName: item.productName,
       variantLabel: item.variantLabel,
       deliveryCount: plan.delivery_count,
-      cadenceWeeks: ANNUAL_CADENCE_WEEKS,
+      cadenceLabel: EMAIL_SCHEDULE_MODELS[emailScheduleModelOf(plan)].cadenceLabel,
       currency: plan.currency,
       annualUnitGrossCents: plan.annual_unit_gross_cents,
       shippingPerDeliveryGrossCents: plan.shipping_per_delivery_gross_cents,

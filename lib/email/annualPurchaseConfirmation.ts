@@ -82,8 +82,16 @@ export type AnnualPurchaseConfirmationFacts = {
   variantLabel: string | null;
   /** annual_plans.delivery_count. Thirteen, proved by the preflight. */
   deliveryCount: number;
-  /** Four. Proved against the shared contract constant by the suite. */
-  cadenceWeeks: number;
+  /**
+   * THE PLAN'S OWN RHYTHM, as a finished sentence.
+   *
+   * A LABEL rather than a week count since migration 069, because the two
+   * contracts do not share a unit: a v1 plan repeats every 4 weeks and a
+   * v2 plan repeats on the calendar, which is not a number of weeks at
+   * all. The caller derives it from the plan's persisted schedule_model,
+   * so a confirmation always describes the contract that was bought.
+   */
+  cadenceLabel: string;
   /** ISO 4217 from the plan row, never assumed. */
   currency: string;
   /** The frozen discounted price of ONE delivery's Matcha. */
@@ -238,11 +246,6 @@ const ACCOUNT_LINE = "Jede Lieferung erscheint als Bestellung in deinem GLOA Kon
 /** Stated ONLY when delivery 1's row proves it. Never inferred from a date. */
 const FIRST_DELIVERY_STARTED = "Deine erste Lieferung ist bereits angestoßen.";
 
-/** "alle 4 Wochen" - built from the proven cadence, never from a date. */
-function cadenceLabel(cadenceWeeks: number): string {
-  return `alle ${cadenceWeeks} Wochen`;
-}
-
 /**
  * Builds the annual purchase confirmation (subject + HTML + plain text).
  *
@@ -284,7 +287,7 @@ export function buildAnnualPurchaseConfirmationEmail(params: {
   const headline = isUpgrade ? UPGRADE_HEADLINE : HEADLINE;
   const intro = isUpgrade ? UPGRADE_INTRO : INTRO;
 
-  const cadence = cadenceLabel(plan.cadenceWeeks);
+  const cadence = plan.cadenceLabel;
   const productLine = [plan.productName, plan.variantLabel].filter(Boolean).join(" · ");
 
   // Only rows whose value actually exists. A missing product name or an

@@ -13,7 +13,7 @@ import {
   pickEarliestUpcomingDelivery,
 } from "../lib/annualPlanAccount.ts";
 import { DYNAMIC_PREFIXES, INDEXABLE_ROUTES, isKnownRoute } from "../lib/publicRoutes.ts";
-import { ANNUAL_DELIVERY_COUNT, ANNUAL_DELIVERY_INTERVAL_DAYS } from "../lib/annualPlanRules.ts";
+import { ANNUAL_LEGACY_DELIVERY_COUNT, ANNUAL_DELIVERY_INTERVAL_DAYS } from "../lib/annualPlanRules.ts";
 import { startRenderServer } from "./helpers/renderServer.mjs";
 
 /* ══════════════════════════════════════════════════════════════
@@ -134,7 +134,7 @@ const planRow = (over = {}) => ({
   status: "active",
   payment_status: "paid",
   currency: "EUR",
-  delivery_count: ANNUAL_DELIVERY_COUNT,
+  delivery_count: ANNUAL_LEGACY_DELIVERY_COUNT,
   catalog_unit_gross_cents: 1499,
   annual_unit_gross_cents: UNIT_GROSS_CENTS,
   shipping_per_delivery_gross_cents: SHIPPING_PER_DELIVERY_CENTS,
@@ -167,7 +167,7 @@ function productionSchedule() {
     { delivery_number: 1, scheduled_for: FIRST_DELIVERY_AT, state: "fulfilled", fulfilled_at: FIRST_DELIVERY_AT, order_id: FIRST_ORDER_ID },
     { delivery_number: 2, scheduled_for: SECOND_DELIVERY_AT, state: "scheduled", fulfilled_at: null, order_id: null },
   ];
-  for (let n = 3; n <= ANNUAL_DELIVERY_COUNT; n++) {
+  for (let n = 3; n <= ANNUAL_LEGACY_DELIVERY_COUNT; n++) {
     rows.push({
       delivery_number: n,
       // A stable, ordered, literal date per row. No arithmetic on the
@@ -320,10 +320,17 @@ test("2d: every figure on the card is the view's, and none is computed", () => {
   assert.ok(!/\d+[.,]\d{2}\s*€/.test(dashboardAnnualCard), "the card renders a hardcoded amount");
   assert.ok(!/\d{2}\.\d{2}\.\d{4}/.test(dashboardAnnualCard), "the card renders a hardcoded date");
   assert.ok(!/\b\d{1,3}\s?%/.test(dashboardAnnualCard), "the card renders a hardcoded percentage");
-  // And the cadence is the frozen rule's, not a sentence written twice.
-  assert.match(dashboardAnnualCard, /\{ANNUAL_CADENCE_LABEL\}/);
-  assert.match(portalCode, /const ANNUAL_CADENCE_LABEL = `alle \$\{ANNUAL_DELIVERY_INTERVAL_DAYS \/ 7\} Wochen`;/);
-  assert.equal(ANNUAL_DELIVERY_INTERVAL_DAYS / 7, 4, "the annual cadence is no longer four weeks");
+  // AND THE CADENCE IS THE PLAN'S OWN, not a module-wide sentence.
+  //
+  // Until migration 069 this was a constant, because there was one
+  // contract. There are now two, and a constant here would describe a
+  // v1 plan with v2's rhythm - thirteen deliveries labelled "monatlich".
+  // annualCadenceLabel reads the row's own schedule_model.
+  assert.match(dashboardAnnualCard, /\{annualCadenceLabel\(v\)\}/);
+  assert.match(portalCode, /function annualCadenceLabel\(v: \{[^}]*\}\): string \{/);
+  assert.match(portalCode, /return annualCadenceLabelOf\(v\);/);
+  // The legacy cadence itself is unchanged: four weeks, for v1 plans.
+  assert.equal(ANNUAL_DELIVERY_INTERVAL_DAYS / 7, 4, "the legacy annual cadence is no longer four weeks");
 });
 
 test("2e: the card leads somewhere, and that somewhere is the plan's page", () => {

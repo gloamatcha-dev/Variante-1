@@ -857,7 +857,7 @@ test("29: this phase adds no migration, no route and no customer action", () => 
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 68);
+  assert.equal(migrations.length, 69);
   // PHASE 4B8.2 ADDED MIGRATION 042: the ONE column privilege 041
   // was short of, so migration 039's delivery policy can still read
   // the parent's user_id while resolving ownership. Reviewed in
@@ -866,16 +866,16 @@ test("29: this phase adds no migration, no route and no customer action", () => 
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(migrations[migrations.length - 23], "046_launch_signup_atomic.sql");
-  assert.equal(migrations[migrations.length - 24], "045_launch_welcome_email.sql");
-  assert.equal(migrations[migrations.length - 25], "044_launch_send.sql");
-  assert.equal(migrations[migrations.length - 26], "043_launch_waitlist.sql");
+  assert.equal(migrations[migrations.length - 24], "046_launch_signup_atomic.sql");
+  assert.equal(migrations[migrations.length - 25], "045_launch_welcome_email.sql");
+  assert.equal(migrations[migrations.length - 26], "044_launch_send.sql");
+  assert.equal(migrations[migrations.length - 27], "043_launch_waitlist.sql");
   // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
   // commerce foundation - it evolves the two tables 006 built for a
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 68), [], "a migration 069 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 69), [], "a migration 070 or beyond appeared");
 
   // No annual refund endpoint, and no browser-triggered refund anywhere.
   const annualRoutes = readdirSync(path.join(ROOT, "app/api/annual-plan"), { withFileTypes: true })

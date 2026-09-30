@@ -302,7 +302,9 @@ test("2c: only the price is gated - the rest of a product block is not", () => {
   // The size chips keep their labels and lose only the amount.
   assert.match(site, /<span className="size-option-size">\{mv\.label\}<\/span>\{PRICES_VISIBLE&&<span className="size-option-price">/);
   // And the non-money row of the annual panel stays put.
-  assert.match(site, /<div><dt>Lieferungen<\/dt><dd>\{annual\.deliveryCount\} · alle \{ANNUAL_DELIVERY_INTERVAL_DAYS\} Tage<\/dd><\/div>/);
+  // MONATLICH since migration 069. The count is still read from the
+  // pricing leaf; only the cadence words changed.
+  assert.match(site, /<div><dt>Lieferungen<\/dt><dd>\{annual\.deliveryCount\} · monatlich<\/dd><\/div>/);
 });
 
 test("2d: NOTHING WAS DELETED - the prices are still in the source, unchanged", () => {

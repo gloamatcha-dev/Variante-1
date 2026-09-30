@@ -46,13 +46,200 @@
  * allowlist live in lib/annualPlans.ts.
  */
 
+/* ── The calendar, which is the v2 cadence ───────────────────── */
+
+/**
+ * THE ONE CALENDAR-MONTH RULE, and the whole reason it is a function.
+ *
+ * A v2 plan delivers once per calendar month on the day it was bought.
+ * That sounds trivial and is not, because not every month has every day.
+ *
+ * ── EVERY DATE IS ANCHOR + N MONTHS, NEVER PREVIOUS + 1 ───────
+ *
+ * Adding a month to the PREVIOUS occurrence drifts permanently the first
+ * time it passes a short month:
+ *
+ *     31 Jan -> 28 Feb -> 28 Mar -> 28 Apr ...   WRONG, drifted
+ *     31 Jan -> 28 Feb -> 31 Mar -> 30 Apr ...   RIGHT, clamped
+ *
+ * The second sequence is what this returns: the ORIGINAL anchor day is
+ * preserved and only clamped down when the target month is too short, so
+ * February never moves March.
+ *
+ * ── IT WORKS ON CALENDAR PARTS, NOT INSTANTS ─────────────────
+ *
+ * No Date arithmetic across a month boundary, no hours, no timezone and
+ * therefore no DST: a delivery is planned for a DAY, and adding months
+ * to a timestamp is what makes a 23:30 anchor land on the wrong day when
+ * the clocks change. migration 069 does the same thing in SQL against
+ * Europe/Berlin, and the focused suite asserts the two agree.
+ */
+export function addCalendarMonths(
+  isoDate: string,
+  months: number
+): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
+  if (!m) throw new Error("addCalendarMonths requires a YYYY-MM-DD date");
+  if (!Number.isSafeInteger(months)) throw new Error("addCalendarMonths requires an integer month count");
+
+  const year = Number(m[1]);
+  const month = Number(m[2]) - 1;
+  const day = Number(m[3]);
+
+  const absolute = year * 12 + month + months;
+  const targetYear = Math.floor(absolute / 12);
+  const targetMonth = absolute - targetYear * 12;
+
+  // Day 0 of the NEXT month is the last day of the target month, which is
+  // where the leap year is handled without a special case.
+  const daysInTargetMonth = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+  const targetDay = Math.min(day, daysInTargetMonth);
+
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${String(targetYear).padStart(4, "0")}-${pad(targetMonth + 1)}-${pad(targetDay)}`;
+}
+
+/**
+ * All twelve planned delivery dates for a v2 plan, from its anchor date.
+ *
+ * Delivery 1 is the anchor itself - the day the money settled - because
+ * the first box is prepared as soon as the payment is durable. The other
+ * eleven are the same calendar day in each following month, clamped.
+ */
+export function annualMonthlyScheduleDates(
+  anchorIsoDate: string,
+  deliveryCount: number = ANNUAL_DELIVERY_COUNT
+): string[] {
+  if (!Number.isSafeInteger(deliveryCount) || deliveryCount < 1 || deliveryCount > 24) {
+    throw new Error("annualMonthlyScheduleDates requires a sane delivery count");
+  }
+  const dates: string[] = [];
+  for (let n = 0; n < deliveryCount; n += 1) {
+    dates.push(addCalendarMonths(anchorIsoDate, n));
+  }
+  return dates;
+}
+
+/**
+ * When a v2 plan's term ends: ONE CALENDAR YEAR after the anchor.
+ *
+ * Not "after the last delivery" and not 364 days. An anchor of
+ * 29.09.2026 ends 29.09.2027, which is one clear month after the twelfth
+ * delivery on 29.08.2027 - so the term still covers every delivery it
+ * promised, which is what complete_due_annual_plans depends on.
+ */
+export function annualMonthlyPlanEndDate(anchorIsoDate: string): string {
+  return addCalendarMonths(anchorIsoDate, 12);
+}
+
 /* ── The shape of the contract ───────────────────────────────── */
 
-/** Thirteen deliveries. Pinned by a CHECK on annual_plans.delivery_count. */
-export const ANNUAL_DELIVERY_COUNT = 13;
+/* ── TWO SCHEDULE MODELS, AND WHY BOTH MUST SURVIVE ──────────
+ *
+ * The annual plan sold until migration 069 was THIRTEEN deliveries every
+ * 28 days. The plan sold after it is TWELVE deliveries, one per calendar
+ * month. Both are real contracts: plans bought under the first model are
+ * still running, still owe deliveries on 28-day steps, and a customer
+ * looking at one must be shown the terms THEY bought.
+ *
+ * So the model is a value on the row, not a constant in this file, and
+ * every surface that describes an EXISTING plan reads the row. The
+ * constants below describe only what a NEW purchase gets.
+ *
+ * Nothing here backfills or reinterprets a v1 plan. Migration 069's own
+ * default for existing rows is v1, and its CHECK admits both counts.
+ */
+export type AnnualScheduleModel = "v1_28d_13" | "v2_monthly_12";
 
-/** Every 4 weeks. Exactly 28 days, and never "monthly". */
-export const ANNUAL_DELIVERY_INTERVAL_DAYS = 28;
+/** Thirteen deliveries, every 28 days. Sold until migration 069. */
+export const ANNUAL_SCHEDULE_MODEL_V1: AnnualScheduleModel = "v1_28d_13";
+
+/** Twelve deliveries, one per calendar month. Sold from migration 069. */
+export const ANNUAL_SCHEDULE_MODEL_V2: AnnualScheduleModel = "v2_monthly_12";
+
+/** What a purchase made TODAY gets. The only model the checkout writes. */
+export const ANNUAL_SCHEDULE_MODEL_CURRENT: AnnualScheduleModel = ANNUAL_SCHEDULE_MODEL_V2;
+
+export type AnnualScheduleModelTerms = {
+  deliveryCount: number;
+  /** 28 for the fixed-step model, null when the cadence is the calendar. */
+  intervalDays: number | null;
+  /** What the customer is told the rhythm is. */
+  cadenceLabel: string;
+  /** How long the whole term runs, as the model expresses it. */
+  termLabel: string;
+};
+
+/**
+ * The two contracts, side by side, as the only place either is defined.
+ *
+ * A reader comparing a v1 card with a v2 card should be able to see from
+ * this table alone why they say different things.
+ */
+export const ANNUAL_SCHEDULE_MODELS: Readonly<Record<AnnualScheduleModel, AnnualScheduleModelTerms>> =
+  Object.freeze({
+    v1_28d_13: Object.freeze({
+      deliveryCount: 13,
+      intervalDays: 28,
+      cadenceLabel: "alle 4 Wochen",
+      termLabel: "13 Lieferungen im 28-Tage-Rhythmus",
+    }),
+    v2_monthly_12: Object.freeze({
+      deliveryCount: 12,
+      intervalDays: null,
+      cadenceLabel: "monatlich",
+      termLabel: "12 Lieferungen, eine pro Kalendermonat",
+    }),
+  });
+
+/**
+ * WHICH MODEL A STORED PLAN WAS SOLD UNDER.
+ *
+ * The column first, because it is the authority. A row written before
+ * migration 069 has no model recorded, so the COUNT decides - thirteen
+ * deliveries is v1 and is the only thing it can be. An unrecognised
+ * value falls back to v1 rather than to the current model: describing an
+ * old contract with today's terms is the one error that rewrites
+ * history, and guessing "current" is exactly how that happens.
+ */
+export function annualScheduleModelOf(plan: {
+  scheduleModel?: string | null;
+  deliveryCount?: number | null;
+}): AnnualScheduleModel {
+  if (plan?.scheduleModel === ANNUAL_SCHEDULE_MODEL_V2) return ANNUAL_SCHEDULE_MODEL_V2;
+  if (plan?.scheduleModel === ANNUAL_SCHEDULE_MODEL_V1) return ANNUAL_SCHEDULE_MODEL_V1;
+  if (plan?.deliveryCount === ANNUAL_SCHEDULE_MODELS.v2_monthly_12.deliveryCount) {
+    return ANNUAL_SCHEDULE_MODEL_V2;
+  }
+  return ANNUAL_SCHEDULE_MODEL_V1;
+}
+
+/** The rhythm sentence for ONE stored plan, never a module-wide default. */
+export function annualCadenceLabelOf(plan: {
+  scheduleModel?: string | null;
+  deliveryCount?: number | null;
+}): string {
+  return ANNUAL_SCHEDULE_MODELS[annualScheduleModelOf(plan)].cadenceLabel;
+}
+
+/** Twelve deliveries. What a NEW plan gets; admitted by 069's CHECK. */
+export const ANNUAL_DELIVERY_COUNT =
+  ANNUAL_SCHEDULE_MODELS.v2_monthly_12.deliveryCount;
+
+/** Thirteen. What plans sold before migration 069 have, and keep. */
+export const ANNUAL_LEGACY_DELIVERY_COUNT =
+  ANNUAL_SCHEDULE_MODELS.v1_28d_13.deliveryCount;
+
+/**
+ * 28 days - THE LEGACY CADENCE ONLY.
+ *
+ * Kept because v1 plans still ship on it and migrations 039/066/067
+ * store it as 672 hours, which the focused suites pin. A NEW plan has no
+ * fixed interval at all: its cadence is the calendar, which is what
+ * annualMonthlyScheduleDates computes.
+ */
+export const ANNUAL_DELIVERY_INTERVAL_DAYS =
+  ANNUAL_SCHEDULE_MODELS.v1_28d_13.intervalDays as number;
 
 /**
  * The same cadence in hours, which is the unit migration 039 stores it
@@ -62,8 +249,15 @@ export const ANNUAL_DELIVERY_INTERVAL_DAYS = 28;
  */
 export const ANNUAL_DELIVERY_INTERVAL_HOURS = ANNUAL_DELIVERY_INTERVAL_DAYS * 24;
 
-/** 364 days. Thirteen whole 28-day periods, not a 365-day year. */
-export const ANNUAL_TERM_DAYS = ANNUAL_DELIVERY_INTERVAL_DAYS * ANNUAL_DELIVERY_COUNT;
+/**
+ * 364 days - THE LEGACY TERM ONLY. Thirteen whole 28-day periods.
+ *
+ * Rebased on the LEGACY count deliberately: this value is what migration
+ * 039 froze as 8736 hours on plans that already exist, so it must not
+ * move when the current count does. A v2 plan's term is one calendar
+ * YEAR from its anchor instead - see annualMonthlyPlanEndDate.
+ */
+export const ANNUAL_TERM_DAYS = ANNUAL_DELIVERY_INTERVAL_DAYS * ANNUAL_LEGACY_DELIVERY_COUNT;
 
 /** 8736 hours, as migration 039 stores it. */
 export const ANNUAL_TERM_HOURS = ANNUAL_TERM_DAYS * 24;
@@ -164,8 +358,8 @@ export function annualSizeFromGrams(sizeGrams: number | null | undefined): Annua
  */
 export const ANNUAL_SHIPPING_PER_DELIVERY_GROSS_CENTS: Readonly<Record<AnnualSize, number>> = Object.freeze({
   "30g": 590,
-  "50g": 0,
-  "100g": 0,
+  "50g": 590,
+  "100g": 590,
 });
 
 /**
@@ -324,6 +518,9 @@ export function buildAnnualPricing(input: {
 
   const merchandiseTotal = unit * ANNUAL_DELIVERY_COUNT;
   const shippingTotal = shippingPerDelivery * ANNUAL_DELIVERY_COUNT;
+  // TWELVE of each, because ANNUAL_DELIVERY_COUNT is the CURRENT model's
+  // count. A v1 plan's totals are not recomputed here and never were -
+  // they are frozen on the row by migration 039.
   const total = merchandiseTotal + shippingTotal;
 
   if (!Number.isSafeInteger(merchandiseTotal) || !Number.isSafeInteger(total)) {
@@ -468,8 +665,9 @@ function anchorMillis(purchasedAt: Date | string | number): number {
  * suite asserts the two describe the same offsets.
  */
 export function annualDeliveryDueAt(purchasedAt: Date | string | number, deliveryNumber: number): Date {
-  if (!Number.isInteger(deliveryNumber) || deliveryNumber < 1 || deliveryNumber > ANNUAL_DELIVERY_COUNT) {
-    throw new Error(`delivery number must be 1..${ANNUAL_DELIVERY_COUNT}`);
+  if (!Number.isInteger(deliveryNumber) || deliveryNumber < 1
+      || deliveryNumber > ANNUAL_LEGACY_DELIVERY_COUNT) {
+    throw new Error(`delivery number must be 1..${ANNUAL_LEGACY_DELIVERY_COUNT}`);
   }
   return new Date(anchorMillis(purchasedAt) + (deliveryNumber - 1) * ANNUAL_DELIVERY_INTERVAL_MS);
 }
@@ -482,12 +680,23 @@ export function annualDeliveryDueAt(purchasedAt: Date | string | number, deliver
  * rest of the year out: 039 stores these once at activation and never
  * recomputes them.
  */
+/*
+  THE v1 ENGINE, AND ONLY v1.
+
+  Thirteen deliveries on fixed 28-day steps from the purchase instant.
+  Migration 069 did not change it and must not: plans sold under that
+  contract are still running on exactly these dates, and migration 039
+  froze them as 672-hour steps.
+
+  A v2 plan's dates come from annualMonthlyScheduleDates instead, which
+  is calendar arithmetic and shares nothing with this.
+*/
 export function buildAnnualDeliverySchedule(
   purchasedAt: Date | string | number
 ): AnnualScheduledDelivery[] {
   const anchor = anchorMillis(purchasedAt);
   const schedule: AnnualScheduledDelivery[] = [];
-  for (let deliveryNumber = 1; deliveryNumber <= ANNUAL_DELIVERY_COUNT; deliveryNumber += 1) {
+  for (let deliveryNumber = 1; deliveryNumber <= ANNUAL_LEGACY_DELIVERY_COUNT; deliveryNumber += 1) {
     schedule.push({
       deliveryNumber,
       scheduledFor: new Date(anchor + (deliveryNumber - 1) * ANNUAL_DELIVERY_INTERVAL_MS),
