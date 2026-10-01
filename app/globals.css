@@ -692,7 +692,11 @@ a.portal-summary-row:hover{color:var(--blue)}
 /* Cards, not a table. Every value carries its own label at every width,
    so nothing is hidden on mobile and no cell loses its meaning. */
 .sub-list{border-top:2px solid var(--ink)}
-.sub-card{display:block;padding:20px 0;border-bottom:1px solid var(--line);text-decoration:none;color:inherit;transition:background .15s}
+.sub-card{display:block;padding:20px 0;border-bottom:1px solid var(--line);text-decoration:none;color:inherit;transition:background .15s}/* A CARD AND ITS NAMED CANCELLATION ARE ONE ROW. The group takes over
+   the separating border so the action does not sit below a line that
+   looks like the end of the card, and the card inside it stops drawing
+   one. Everything else about .sub-card - the hover, the focus ring, the
+   chevron - is untouched. */.sub-card-group{border-bottom:1px solid var(--line)}.sub-card-group>.sub-card{border-bottom:0}.sub-card-group-actions{margin:0 0 20px}
 .sub-card:hover{background:rgba(23,70,209,.04)}
 .sub-card:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 .sub-card-head{display:flex;justify-content:space-between;align-items:baseline;gap:16px;flex-wrap:wrap}

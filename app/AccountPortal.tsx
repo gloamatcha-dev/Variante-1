@@ -18,6 +18,16 @@ import {
   type AccountQuickLink,
 } from "./AccountUI";
 import { resolveGreetingName } from "../lib/accountGreeting";
+// THE KUENDIGUNGSBUTTON'S OWN VOCABULARY, from the module the public
+// page and the route already share. The label is the statutory one and
+// the two sentences are the OUTCOMES the server will apply - computed
+// here by the same pure functions, so the consequence the customer
+// agrees to is the rule the backend applies rather than a copy of it.
+import {
+  TERMINATION_CONFIRM_LABEL,
+  terminateAnnualPlanOrdinary,
+  terminateExtraordinary,
+} from "../lib/terminationRequest";
 import { B2bSupplyDetail } from "./B2bSupplyDetail";
 import { B2B_PLAN_LABEL_DE } from "../lib/b2bChangeRules.ts";
 // THE PREPAID ANNUAL PLAN, all from pure leaves the browser can load.
@@ -2469,8 +2479,16 @@ function PortalAnnualPlans({ views, loading, error, lastFinished, onStart }: {
                 Einmal bezahlt, keine automatische Verlängerung. Der Plan endet nach der letzten
                 {" "}der {v.deliveryCount} Lieferungen; es folgt keine weitere Abbuchung.
               </p>
+              {/*
+                TWO ACTIONS, BOTH NAMED. The plan page is where both of
+                them lead; the second one says what it is for and lands
+                on the control instead of the top of the page. It is
+                offered only for a live plan - and every card in this
+                list is one, which is what `live` means above.
+              */}
               <div className="portal-actions">
                 <a href={annualPlanDetailHref(v.id)} className="portal-action">JAHRESPLAN ANSEHEN</a>
+                <a href={`${annualPlanDetailHref(v.id)}#kuendigung`} className="portal-action">JAHRESPLAN KÜNDIGEN</a>
               </div>
             </div>
           ))}
@@ -2596,6 +2614,234 @@ const ANNUAL_DELIVERY_STATE_LABEL: Record<string, string> = {
  * server, nothing is fetched with it, and no payment identifier appears
  * on this page at all - the read model does not select one.
  */
+/**
+ * JAHRESPLAN KUENDIGEN - the plan's own cancellation, on the plan's own page.
+ *
+ * ---- WHY THIS EXISTS BESIDE /kuendigung, NOT INSTEAD OF IT ----
+ *
+ * BGB 312k Abs. 2 wants the Kuendigungsbutton "staendig verfuegbar sowie
+ * unmittelbar und leicht erreichbar" - which means reachable WITHOUT a
+ * login. /kuendigung is that surface and stays exactly as it is. This
+ * panel is an ADDITIONAL contextual way in: a customer looking at one
+ * plan should not have to re-identify a contract the account already
+ * knows.
+ *
+ * ---- IT IS NOT A SECOND TERMINATION ENGINE -------------------
+ *
+ * It POSTs to the same /api/termination, which writes the same
+ * termination_requests row through the same resolveTerminationOutcome.
+ * Nothing about the case state, the deadlines or the confirmation mail is
+ * decided here. What the account adds is precision about WHICH contract,
+ * and the server re-proves that under a user_id filter before it writes.
+ *
+ * ---- WHAT AN ORDINARY ANNUAL TERMINATION DOES ----------------
+ *
+ * Nothing immediate. The plan was paid once, runs a fixed term and does
+ * not renew, so an ordinary termination is acknowledged AGAINST THE
+ * EXISTING END DATE: deliveries already paid for keep coming, no money
+ * moves and no Stripe object is touched. That is stated before the
+ * customer confirms, in the server's own words - terminateAnnualPlanOrdinary
+ * is the function the route will run, so the two cannot drift.
+ */
+function AnnualPlanTerminationPanel({ plan }: { plan: AnnualPlanAccountView }) {
+  const { session, profile } = useAuth();
+  const [step, setStep] = useState<"idle" | "confirm" | "done">("idle");
+  const [kind, setKind] = useState<"ordinary" | "extraordinary">("ordinary");
+  /*
+    null means "the customer has not typed yet", which is NOT the same as
+    an empty field: an empty string is a deliberate clearing and must not
+    be refilled from the profile behind their back.
+  */
+  const [typedName, setTypedName] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  /*
+    MINTED ONCE PER OPENED CONFIRMATION, exactly as the public form does
+    it, so a double click or an impatient reload is one termination rather
+    than three. The route's unique index on idempotency_key is what
+    actually enforces that; this is the key it enforces on.
+  */
+  const idemRef = useRef<string>("");
+
+  /*
+    THE NAME IS PREFILLED, NOT IMPOSED. It is the customer's own
+    declaration - what they are signing - so it stays an editable field
+    with the profile's value in it, and the server takes it as given.
+    The E-MAIL is deliberately NOT a field: the route reads it from the
+    verified token, so a confirmation cannot be sent anywhere else.
+
+    DERIVED RATHER THAN COPIED INTO STATE. There is nothing to keep in
+    sync: the field shows what was typed, or the profile's name until
+    something is. An effect that copied one into the other would render
+    twice to reach the same screen.
+  */
+  const profileName = [profile?.first_name, profile?.last_name]
+    .filter(Boolean).join(" ").trim();
+  const name = typedName ?? profileName;
+
+  /*
+    THE CONSEQUENCE, FROM THE SERVER'S OWN DECISION FUNCTIONS.
+
+    Not a sentence this component wrote. For an ordinary termination with
+    a known end date it is terminateAnnualPlanOrdinary's message, which is
+    what the route will return and what the mail will carry; for an
+    extraordinary one it is terminateExtraordinary's. When the plan has no
+    end date yet the route cannot promise one either, so neither does this.
+  */
+  const consequence = kind === "extraordinary"
+    ? terminateExtraordinary().message
+    : plan.planEndAt
+      ? terminateAnnualPlanOrdinary({ planEndAt: plan.planEndAt }).message
+      : terminateExtraordinary().message;
+
+  const submit = async () => {
+    if (!session?.access_token) { setError("Bitte melde dich an."); return; }
+    if (!name.trim()) { setError("Bitte gib deinen Namen an."); return; }
+    if (kind === "extraordinary" && !reason.trim()) {
+      setError("Bitte gib den Grund für die außerordentliche Kündigung an."); return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch("/api/termination", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        /*
+          THE PLAN ID IS THE WHOLE IDENTIFICATION, and the server treats
+          it as untrusted: it re-reads the plan by id AND user_id. No
+          e-mail, no order number and no contract reference is sent -
+          those are the server's to decide on this path.
+        */
+        body: JSON.stringify({
+          annualPlanId: plan.id,
+          name: name.trim(),
+          terminationKind: kind,
+          extraordinaryReason: kind === "extraordinary" ? reason.trim() : null,
+          idempotencyKey: idemRef.current,
+        }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(typeof body?.error === "string" ? body.error : "Das hat gerade nicht geklappt.");
+        return;
+      }
+      /*
+        THE PAGE NEVER INVENTS THE RESULT. What it shows is the message
+        the server returned, so a customer cannot be told a termination
+        was recorded in terms the database does not hold.
+      */
+      setMessage(typeof body?.message === "string" ? body.message : "");
+      setStep("done");
+    } catch {
+      setError("Das hat gerade nicht geklappt.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (step === "done") return (
+    <div className="sub-cancel">
+      <p className="sub-cancel-lead">Deine Kündigung ist eingegangen.</p>
+      {message && <p className="order-cancel-note">{message}</p>}
+    </div>
+  );
+
+  if (step === "idle") return (
+    <div className="sub-cancel">
+      <p className="order-cancel-note">
+        Einmal bezahlt, keine automatische Verlängerung.
+        {plan.planEndAt ? ` Er endet ohnehin am ${fmtDate(plan.planEndAt)}.` : ""}
+        {" "}Eine Kündigung beendet ihn zu diesem Termin - die bereits bezahlten
+        {" "}Lieferungen erhältst du weiter, und eine Erstattung ist damit nicht verbunden.
+      </p>
+      <button
+        type="button"
+        className="cta order-cancel-cta"
+        onClick={() => {
+          setError("");
+          if (!idemRef.current) {
+            idemRef.current = `kdg-plan-${plan.id}-${Date.now()}`;
+          }
+          setStep("confirm");
+        }}
+      >
+        Jahresplan kündigen
+      </button>
+      {error && <p className="order-cancel-error" role="alert">{error}</p>}
+    </div>
+  );
+
+  /*
+    THE CONFIRMATION STEP - BGB 312k Abs. 2 Satz 4's Bestaetigungsseite.
+    One stray click must not end a paid contract, and the fields it
+    collects are the ones Satz 3 names: the kind, the reason for an
+    extraordinary one, and who is declaring it. The contract itself is
+    already identified by the page the customer is standing on.
+  */
+  return (
+    <div className="sub-cancel sub-cancel-confirm" role="group" aria-labelledby="annual-cancel-title">
+      <p id="annual-cancel-title" className="sub-cancel-lead">Jahresplan wirklich kündigen?</p>
+
+      <div className="account-form">
+        <label>
+          Name
+          <input
+            value={name}
+            onChange={e => setTypedName(e.target.value)}
+            maxLength={200}
+            disabled={busy}
+          />
+        </label>
+        <label>
+          Art der Kündigung
+          <select
+            value={kind}
+            onChange={e => setKind(e.target.value === "extraordinary" ? "extraordinary" : "ordinary")}
+            disabled={busy}
+          >
+            <option value="ordinary">Ordentliche Kündigung</option>
+            <option value="extraordinary">Außerordentliche Kündigung</option>
+          </select>
+        </label>
+        {kind === "extraordinary" && (
+          <label>
+            Grund
+            <textarea
+              value={reason}
+              onChange={e => setReason(e.target.value)}
+              rows={3}
+              maxLength={2000}
+              disabled={busy}
+            />
+          </label>
+        )}
+      </div>
+
+      <p className="order-cancel-note">{consequence}</p>
+      {error && <p className="order-cancel-error" role="alert">{error}</p>}
+
+      <div className="sub-cancel-actions">
+        <button type="button" className="cta order-cancel-cta" onClick={submit} disabled={busy}>
+          {busy ? "Wird übermittelt…" : TERMINATION_CONFIRM_LABEL}
+        </button>
+        <button
+          type="button"
+          className="sub-cancel-back"
+          onClick={() => setStep("idle")}
+          disabled={busy}
+        >
+          Doch nicht
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function AnnualPlanDetail({ annualPlanId }: { annualPlanId: string }) {
   const { views, loading, error } = useAnnualPlanViews();
   const plan = views.find(v => v.id === annualPlanId) ?? null;
@@ -2853,6 +3099,34 @@ function AnnualPlanDetail({ annualPlanId }: { annualPlanId: string }) {
               {" "}und dein bezahlter Betrag bleiben davon unberührt.
             </p>
           )}
+        </section>
+      )}
+
+      {/*
+        KUENDIGUNG - offered only while there is something to end.
+
+        planIsLive is isLiveAnnualPlan's answer, the same predicate the
+        route refuses with, so a visible button cannot lead to a 409. A
+        finished plan gets no action at all: the terminal panel above
+        already says what happened to it.
+
+        The id is what the plan CARD links to, so "ABO KUENDIGEN" and
+        "JAHRESPLAN KUENDIGEN" in the lists land on the control itself
+        rather than at the top of the page.
+      */}
+      {planIsLive && (
+        <section className="portal-section" id="kuendigung">
+          <AccountSectionHeader label="KÜNDIGUNG" />
+          <AnnualPlanTerminationPanel plan={plan} />
+          {/*
+            THE STATUTORY SURFACE IS NAMED, NOT REPLACED. This panel is a
+            convenience for a signed-in customer; the public page is the
+            one the law requires, and it stays one click away for anyone
+            who would rather use it.
+          */}
+          <p className="portal-note">
+            Du kannst auch ohne Anmeldung über <Link href="/kuendigung">Verträge hier kündigen</Link> kündigen.
+          </p>
         </section>
       )}
 
@@ -3243,7 +3517,8 @@ function PortalSubscriptions() {
               const nextDelivery = getNextDeliveryAt(s);
               const endsAt = getEffectiveEndAt(s);
               return (
-                <a key={s.id} href={`/account/subscriptions/${s.id}`} className="sub-card">
+                <div key={s.id} className="sub-card-group">
+                <a href={`/account/subscriptions/${s.id}`} className="sub-card">
                   <div className="sub-card-head">
                     <span className="sub-card-name">{plan.name || "Abo"}</span>
                     <span className="sub-card-status">{getSubscriptionStatusLabel(s)}</span>
@@ -3270,6 +3545,24 @@ function PortalSubscriptions() {
                     <AccountChevron />
                   </span>
                 </a>
+                {/*
+                  THE CANCELLATION, NAMED, ON THE CARD OF THE ABO IT ENDS.
+
+                  It carries the subscription's own id, so it can only
+                  ever reach that contract, and it lands on #kuendigung -
+                  the cancellation section of that abo's detail page,
+                  where the existing engine already lives. Nothing is
+                  reimplemented here and no request is made from the
+                  list: this is a link to the control, not a second one.
+                */}
+                {canRequestSubscriptionCancellation(s) && (
+                  <div className="portal-actions sub-card-group-actions">
+                    <a href={`/account/subscriptions/${s.id}#kuendigung`} className="portal-action">
+                      ABO KÜNDIGEN
+                    </a>
+                  </div>
+                )}
+                </div>
               );
             })}
             {/*
@@ -3657,7 +3950,12 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
       )}
 
       {/* ── Kündigung ── */}
-      <section className="order-detail-section">
+      {/*
+        THE ID IS WHAT THE LIST LINKS TO. "ABO KÜNDIGEN" on the card is a
+        link to this section rather than a second cancellation control, so
+        there is still exactly one place a subscription can be ended.
+      */}
+      <section className="order-detail-section" id="kuendigung">
         <p className="eyebrow">KÜNDIGUNG</p>
         {/*
           ENDED IS TESTED FIRST, exactly as getSubscriptionStatusLabel

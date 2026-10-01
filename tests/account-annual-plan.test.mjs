@@ -82,7 +82,7 @@ function between(source, startMarker, endMarker) {
 }
 
 const dashboard = between(portalCode, "function PrivateDashboard()", "function BusinessDashboard()");
-const annualReader = between(portalCode, "function useAnnualPlanViews(", "function AnnualPlanDetail(");
+const annualReader = between(portalCode, "function useAnnualPlanViews(", "function AnnualPlanTerminationPanel(");
 const annualDetail = between(portalCode, "function AnnualPlanDetail(", "function CheckoutReturnBanner()");
 const ordersList = between(portalCode, "function PortalOrders()", "function OrderDetail(");
 const orderDetail = between(portalCode, "function OrderDetail(", "function SubscriptionStartForm(");
@@ -421,7 +421,10 @@ test("3b: only the three-segment shape exists", async () => {
 test("3c: the renderer serves the route the route list knows", () => {
   assert.match(site, /route\.startsWith\("account\/annual-plans\/"\)&&route\.split\("\/"\)\.length===3/);
   assert.match(site, /page="annual-plan-detail" annualPlanId=\{route\.split\("\/"\)\[2\]\}/);
-  assert.match(routes, /\{ prefix: "account\/annual-plans\/", segments: 3 \}/);
+  assert.match(routes, /\{ prefix: "account\/annual-plans\/", segments: 3, tail: "uuid" \}/);
+  // A non-uuid tail is a real 404 rather than a page that says "nicht
+  // gefunden" with a 200 - see tests/seo-discovery.test.mjs.
+  assert.equal(isKnownRoute("account/annual-plans/kuendigung"), false);
   assert.match(portalCode, /\{page === "annual-plan-detail" && <AnnualPlanDetail annualPlanId=\{annualPlanId!\} \/>\}/);
 });
 
@@ -461,12 +464,75 @@ test("3e: it is paid once and renews never, in the page's own words", () => {
   for (const surface of [annualDetail, dashboardAnnualCard]) {
     for (const wrong of [
       "verlängert sich", "automatisch verlängert", "Verlängerung des Plans",
-      "monatlich", "Kündigungsfrist", "kündigen", "Kündigung",
+      // "Kündigungsfrist" STAYS BANNED. A plan that ends on a fixed date
+      // has no notice period, and naming one would invent a deadline the
+      // customer does not have.
+      "monatlich", "Kündigungsfrist",
       "nächste Abbuchung", "wird erneut abgebucht",
     ]) {
       assert.ok(!surface.includes(wrong), `an annual surface says: ${wrong}`);
     }
   }
+});
+
+/*
+  AND THE WORDS "kündigen"/"Kündigung" ARE NO LONGER BANNED HERE.
+
+  They were, and the reason was sound while it lasted: an annual plan had
+  no cancellation, so any mention of one could only be a recurring-charge
+  reading of a contract that is paid once.
+
+  BGH 22.05.2025 - I ZR 161/24 settled that the Kündigungsbutton IS
+  required for exactly this shape of contract, so the plan page now offers
+  a termination. What has to be true is no longer "the word is absent" but
+  "the word does not promise the wrong thing": an ordinary termination of
+  a prepaid plan moves no money and stops no delivery, and the page has to
+  say so before anyone confirms.
+*/
+test("3e2: the termination the plan page offers promises nothing it cannot keep", () => {
+  // The section exists, and it is reachable by the id the lists link to.
+  assert.ok(annualDetail.includes('id="kuendigung"'),
+    "the plan page has no linkable cancellation section");
+  assert.ok(annualDetail.includes("<AnnualPlanTerminationPanel plan={plan} />"),
+    "the plan page does not mount the termination panel");
+  // Only for a plan that is genuinely still running.
+  assert.match(annualDetail, /\{planIsLive && \(\s*<section className="portal-section" id="kuendigung">/);
+  // AND THE STATUTORY SURFACE IS NAMED, NOT REPLACED: BGB 312k wants it
+  // reachable without a login, so the account points at it.
+  assert.ok(annualDetail.includes('href="/kuendigung"'),
+    "the plan page does not point at the public Kündigungsbutton");
+
+  // The panel itself: no money word anywhere near it.
+  const panel = between(portalCode, "function AnnualPlanTerminationPanel(", "function AnnualPlanDetail(");
+  /*
+    IT MAY NOT MOVE MONEY, AND IT MUST SAY SO.
+
+    Those are two different requirements and the first version of this
+    test confused them: it banned "Erstattung", which is the very word the
+    panel needs in order to tell the customer that ending a prepaid plan
+    does NOT give them their money back. So the ban is on the MECHANISMS -
+    a payment client, a refund endpoint, the abo's cancellation - and the
+    sentence is asserted below instead.
+  */
+  for (const banned of ["stripe", "Stripe", "refunds.create", "/api/admin/orders/refund",
+                        "/api/subscriptions/cancel"]) {
+    assert.ok(!panel.includes(banned),
+      `the annual termination panel reaches ${banned} - an ordinary termination reverses nothing`);
+  }
+  // AND THE DISCLOSURE ITSELF, before anything is confirmed: the paid
+  // deliveries keep coming and no money comes back.
+  assert.ok(/Lieferungen erhältst du weiter/.test(panel),
+    "the panel does not say the paid deliveries continue");
+  assert.ok(/Erstattung ist damit nicht verbunden/.test(panel),
+    "the panel does not say that no money comes back");
+  // It submits to the ONE existing route, with the plan id and a token.
+  assert.match(panel, /fetch\("\/api\/termination"/);
+  assert.match(panel, /Authorization: `Bearer \$\{session\.access_token\}`/);
+  assert.match(panel, /annualPlanId: plan\.id/);
+  // And the consequence it shows is the SERVER's own decision function,
+  // not a sentence the component wrote.
+  assert.match(panel, /terminateAnnualPlanOrdinary\(\{ planEndAt: plan\.planEndAt \}\)\.message/);
+  assert.match(panel, /terminateExtraordinary\(\)\.message/);
 });
 
 test("3f: the owner opens it; anybody else gets the same answer a typo gets", () => {

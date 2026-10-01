@@ -234,7 +234,13 @@ test("3b: and the paths it DOES accept are exactly serveable GLOA routes", () =>
   // itself after a session expires.
   assert.equal(safeAccountReturnPath("/account/orders/11111111-1111-1111-1111-111111111111"),
     "/account/orders/11111111-1111-1111-1111-111111111111");
-  assert.equal(safeAccountReturnPath("/account/subscriptions/abc-123"), "/account/subscriptions/abc-123");
+  // The resolver answers through isKnownRoute, and an account id tail is
+  // a uuid or it is not a route at all - so the detail page it comes back
+  // to is named with a real id rather than any three-segment string.
+  assert.equal(safeAccountReturnPath("/account/subscriptions/22222222-2222-2222-2222-222222222222"),
+    "/account/subscriptions/22222222-2222-2222-2222-222222222222");
+  assert.equal(safeAccountReturnPath("/account/subscriptions/abc-123"), null,
+    "a non-uuid id tail is still accepted as a return target");
   // A trailing slash normalises rather than being refused.
   assert.equal(safeAccountReturnPath("/account/subscriptions/"), "/account/subscriptions");
   // The fragment is dropped, not rejected.

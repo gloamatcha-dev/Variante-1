@@ -104,14 +104,31 @@ test("1b: the route list matches the branch chain in GloaSite", () => {
 });
 
 test("1c: unknown paths are unknown, and known ones are known", () => {
-  for (const known of ["", "home", "shop", "our-matcha", "impressum", "shop/matcha", "account/orders/abc"]) {
+  // AN ID TAIL IS A UUID OR IT IS NOT A ROUTE.
+  //
+  // "account/orders/abc" used to be known, which meant every invented
+  // three-segment account URL answered 200 and rendered a "nicht
+  // gefunden" heading - the soft 404 this whole module exists to end. The
+  // one that made it obvious was /account/subscriptions/kuendigung:
+  // /kuendigung is a real page, so the URL looked plausible and answered
+  // 200 with "Abo nicht gefunden."
+  //
+  // Whether that id EXISTS is still not asked here. Only whether it could
+  // be one.
+  const UUID = "11111111-1111-1111-1111-111111111111";
+  for (const known of ["", "home", "shop", "our-matcha", "impressum", "shop/matcha",
+                       `account/orders/${UUID}`, `account/subscriptions/${UUID}`,
+                       `account/annual-plans/${UUID}`]) {
     assert.equal(isKnownRoute(known), true, `should exist: ${known}`);
   }
   for (const unknown of ["robots.txt", "gibtsnicht", "SHOP", "wp-admin.php", "shop/matcha/extra",
-                         "account/orders", "account/orders/a/b", "shop/"]) {
-    if (unknown === "account/orders") continue; // that one is a real page
+                         "account/orders/a/b", "shop/",
+                         "account/orders/abc", "account/subscriptions/kuendigung",
+                         "account/annual-plans/kuendigung"]) {
     assert.equal(isKnownRoute(unknown), false, `should NOT exist: ${unknown}`);
   }
+  // A catalog slug is NOT an id, so it keeps taking any shape.
+  assert.equal(isKnownRoute("shop/some-new-product"), true);
 });
 
 /* ══════════════════════════════════════════════════════════════

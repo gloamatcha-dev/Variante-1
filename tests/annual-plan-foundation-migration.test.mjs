@@ -1748,6 +1748,19 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // which tests/shop-launch-gate.test.mjs asserts against the source
     // rather than leaving it to this diff.
     "app/api/checkout/session/route.ts",
+    // PLAN-CONTEXTUAL CANCELLATION: the BGB 312k route gains a SECOND way
+    // to identify the contract, and nothing else. When the body names an
+    // annual plan the route verifies a bearer token and re-reads that plan
+    // by id AND user_id before it resolves anything, so a browser cannot
+    // terminate a contract it does not own; the e-mail and the contract
+    // reference become the server's on that path rather than the body's.
+    //
+    // The public order-number path is byte-identical and still works
+    // without a login, which is what BGB 312k Abs. 2 requires. No Stripe
+    // import appeared, no refund concept exists in the file, and the
+    // outcome is still resolveTerminationOutcome's. Reviewed in
+    // tests/plan-contextual-cancellation.test.mjs.
+    "app/api/termination/route.ts",
     // SITE CHROME: one entry added to the `links` array, so /partnerships
     // is reachable from the main navigation between B2B and Rezepte
     // instead of by direct URL only. Presentation and routing only - no

@@ -337,15 +337,41 @@ test("5: every subscription card carries a visible manage action", () => {
 test("6: the manage action opens the EXISTING detail route", () => {
   // The whole card is the link, and its destination is the account's own
   // subscription detail route - not a new page and not a modal.
-  assert.match(list, /<a key=\{s\.id\} href=\{`\/account\/subscriptions\/\$\{s\.id\}`\} className="sub-card">/);
+  assert.match(list, /<a href=\{`\/account\/subscriptions\/\$\{s\.id\}`\} className="sub-card">/);
+  // The key moved to the group that wraps the card and its cancellation.
+  assert.match(list, /<div key=\{s\.id\} className="sub-card-group">/);
   // That route exists and is wired to the existing component.
   assert.match(read("app/GloaSite.tsx"),
     /route\.startsWith\("account\/subscriptions\/"\)&&route\.split\("\/"\)\.length===3\)page=<AccountPortal page="subscription-detail" subscriptionId=\{route\.split\("\/"\)\[2\]\}\/>/);
   assert.match(read("lib/publicRoutes.ts"),
-    /\{ prefix: "account\/subscriptions\/", segments: 3 \}/);
+    /\{ prefix: "account\/subscriptions\/", segments: 3, tail: "uuid" \}/);
   assert.match(portal, /\{page === "subscription-detail" && <SubscriptionDetail subscriptionId=\{subscriptionId!\} \/>\}/);
-  // Exactly one destination per card, so nothing competes with it.
-  assert.equal((list.match(/\/account\/subscriptions\/\$\{s\.id\}/g) || []).length, 1);
+  /*
+    TWO DESTINATIONS NOW, AND THE SECOND ONE IS THE POINT.
+
+    It used to be exactly one, deliberately: the list was the way in and
+    the detail page was where a contract ended. That held until the
+    requirement became that cancellation be discoverable FROM THE PLAN a
+    customer is looking at, by name.
+
+    So the card gained "ABO KÜNDIGEN". It is still not a second
+    cancellation: both hrefs are the same detail route and the second one
+    only carries #kuendigung, the id of the section the one existing
+    engine lives in. Nothing is submitted from this list.
+  */
+  const destinations = list.match(/\/account\/subscriptions\/\$\{s\.id\}/g) || [];
+  assert.equal(destinations.length, 2, "the card no longer has exactly its two named ways in");
+  assert.ok(list.includes("ABO KÜNDIGEN"), "the card does not name the cancellation");
+  assert.match(list, /href=\{`\/account\/subscriptions\/\$\{s\.id\}#kuendigung`\}/,
+    "the cancellation action does not land on the cancellation section");
+  // Offered only when the shared rule says the server would accept it.
+  assert.match(list, /\{canRequestSubscriptionCancellation\(s\) && \(/);
+  // And the list itself still submits nothing.
+  assert.ok(!list.includes("/api/subscriptions/cancel"),
+    "the list calls the cancellation endpoint instead of linking to it");
+  // The section it points at exists, and is the one that already worked.
+  assert.ok(detail.includes('<section className="order-detail-section" id="kuendigung">'),
+    "the detail page has no linkable cancellation section");
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -486,16 +512,38 @@ test("9: the ANNUAL plan's rules and its own return state are untouched", () => 
   // And the annual branch of the banner is byte-identical in intent.
   assert.match(withoutComments(banner), /\.from\("annual_plans"\)\.select\("id, status, payment_status, purchased_at"\)/);
   assert.match(withoutComments(banner), /setAnnualState\(resolveAnnualCheckoutReturnState\(\{/);
-  // THE PREPAID PLAN HAS NO CANCELLATION AND STILL OFFERS NONE. It is paid
-  // once for thirteen deliveries and ends; this package added nothing.
+  /*
+    THE PREPAID PLAN NOW OFFERS A TERMINATION - AND IT IS NOT THIS ONE.
+
+    It offered none for as long as it had none, and the guard below simply
+    banned the word. BGH 22.05.2025 - I ZR 161/24 held that the
+    Kündigungsbutton is required for exactly this contract shape, so the
+    plan has a termination and the annual card names it.
+
+    What must STILL be true is the thing this test is actually about: the
+    two contracts do not share an engine. An annual termination is
+    recorded against a fixed end date and moves no money; the abo's
+    cancellation schedules an end against a billing cycle. An annual
+    surface reaching /api/subscriptions/cancel would be the real
+    regression, and that is what stays asserted.
+  */
   const annualForm = portal.slice(portal.indexOf("function AnnualPlanStartForm("),
     portal.indexOf("function PortalAnnualPlans("));
   const annualList = portal.slice(portal.indexOf("function PortalAnnualPlans("),
     portal.indexOf("function annualStatusLabel("));
   for (const source of [annualForm, annualList]) {
-    assert.ok(!source.includes("/api/subscriptions/cancel"), "an annual surface reaches the abo cancellation");
-    assert.ok(!/kündigen/i.test(withoutComments(source)), "an annual surface offers a cancellation");
+    assert.ok(!source.includes("/api/subscriptions/cancel"),
+      "an annual surface reaches the abo cancellation");
+    // Nor the 14-day cutoff vocabulary, which belongs to the abo alone.
+    for (const banned of ["cutoffAt", "effectiveCancelAt", "canRequestSubscriptionCancellation"]) {
+      assert.ok(!withoutComments(source).includes(banned),
+        `an annual surface borrows the abo rule ${banned}`);
+    }
   }
+  // The annual card names its own termination, and only links to it.
+  assert.ok(/JAHRESPLAN KÜNDIGEN/.test(annualList), "the annual card lost its named termination");
+  assert.ok(annualList.includes("#kuendigung"), "the annual action does not point at the section");
+  assert.ok(!annualList.includes("fetch("), "the annual list submits a termination itself");
 });
 
 test("10: none of this refunds anything", () => {

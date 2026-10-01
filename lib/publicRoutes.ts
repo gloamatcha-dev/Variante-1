@@ -85,6 +85,20 @@ export const ROUTES: readonly string[] = Object.freeze([
  * `segments` is how many path segments the whole URL has, so
  * /account/orders/<id> (3) cannot be satisfied by /account/orders/a/b.
  *
+ * ---- AND FOR AN ID TAIL, THE SHAPE OF THE ID TOO ------------
+ *
+ * `tail: "uuid"` means the last segment has to look like one. Without it
+ * every three-segment URL under /account/subscriptions/ existed, so
+ * /account/subscriptions/kuendigung answered 200 and rendered "Abo nicht
+ * gefunden." - a soft 404 of exactly the kind this module was written to
+ * end, and a confusing one: the word in the URL is a real page elsewhere
+ * on the site.
+ *
+ * A uuid tail is checked rather than looked up. Whether THAT plan exists
+ * is a question for the account page under the customer's own session -
+ * this only refuses the ones that cannot be an id at all, which is what
+ * keeps a typo and a crawler's invention out of the 200s.
+ *
  * NOTE ON /shop/: this list answers the SHAPE of a product URL, not
  * whether the product exists. It cannot: the tail is a catalog slug,
  * and only the catalog knows. lib/catalogProducts.ts asks it, on the
@@ -93,12 +107,17 @@ export const ROUTES: readonly string[] = Object.freeze([
  * could not be reached still renders the page rather than de-listing a
  * real product over a blip.
  */
-export const DYNAMIC_PREFIXES: readonly { prefix: string; segments: number }[] = Object.freeze([
+export const DYNAMIC_PREFIXES: readonly {
+  prefix: string;
+  segments: number;
+  /** The tail is a row id, so a non-uuid tail is a genuine 404. */
+  tail?: "uuid";
+}[] = Object.freeze([
   { prefix: "shop/", segments: 2 },
   { prefix: "rezepte/", segments: 2 },
   { prefix: "journal/", segments: 2 },
-  { prefix: "account/orders/", segments: 3 },
-  { prefix: "account/subscriptions/", segments: 3 },
+  { prefix: "account/orders/", segments: 3, tail: "uuid" },
+  { prefix: "account/subscriptions/", segments: 3, tail: "uuid" },
   /**
    * ONE PREPAID ANNUAL PLAN, ON ITS OWN PAGE.
    *
@@ -114,9 +133,17 @@ export const DYNAMIC_PREFIXES: readonly { prefix: string; segments: number }[] =
    * ANNUAL_PLAN_DETAIL_ROUTE_PREFIX in lib/annualPlanAccount.ts, and
    * the suite asserts the two spellings agree.
    */
-  { prefix: "account/annual-plans/", segments: 3 },
-  { prefix: "account/business/supply/", segments: 4 },
+  { prefix: "account/annual-plans/", segments: 3, tail: "uuid" },
+  { prefix: "account/business/supply/", segments: 4, tail: "uuid" },
 ]);
+
+/**
+ * What a row id looks like. Every id tail above is a uuid primary key -
+ * orders, subscriptions, annual_plans and b2b_supply_agreements all
+ * declare `id uuid primary key default gen_random_uuid()` - so this is
+ * the shape, not a guess about it.
+ */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * The URLs a search engine may list, and the only ones the sitemap
@@ -173,9 +200,14 @@ export function isKnownRoute(path: string): boolean {
   if (path === "" || path === "home") return true;
   if (ROUTES.includes(path)) return true;
   const segments = path.split("/").length;
-  return DYNAMIC_PREFIXES.some(
-    rule => path.startsWith(rule.prefix) && segments === rule.segments && path.length > rule.prefix.length
-  );
+  return DYNAMIC_PREFIXES.some(rule => {
+    if (!path.startsWith(rule.prefix)) return false;
+    if (segments !== rule.segments) return false;
+    const tail = path.slice(rule.prefix.length);
+    if (tail === "") return false;
+    // A catalog slug is anything; a row id is a uuid or it is a 404.
+    return rule.tail === "uuid" ? UUID_RE.test(tail) : true;
+  });
 }
 
 /** Absolute URL for a route, for canonicals, sitemap entries and JSON-LD. */
