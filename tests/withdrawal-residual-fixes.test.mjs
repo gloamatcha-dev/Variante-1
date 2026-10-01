@@ -370,10 +370,13 @@ test("B6: the shipping decision is required for partial and refused otherwise", 
 });
 
 test("B7: a decided case cannot be re-cut", () => {
-  assert.ok(RESOLVE.includes("'already_approved'"));
+  // The payout refusal is 'refund_already_approved' in all five
+  // case-fact writers now, so the name says which lifecycle refused.
+  assert.ok(RESOLVE.includes("'refund_already_approved'"));
   assert.ok(RESOLVE.includes("'case_closed'"));
   const write = RESOLVE.indexOf("update public.withdrawal_requests");
-  assert.ok(RESOLVE.indexOf("'already_approved'") < write);
+  assert.ok(RESOLVE.indexOf("'refund_already_approved'") < write);
+  assert.ok(RESOLVE.indexOf("'case_closed'") < write);
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -606,4 +609,145 @@ test("W12: 070 is still one transaction with nothing executable after it", () =>
     if (t === "" || t.startsWith("--")) continue;
     assert.fail(`executable text after commit: ${t}`);
   }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   TERMINAL-CASE IMMUTABILITY
+
+   Five writers record ordinary case FACTS. Three of them shipped with
+   no state guard at all, so a late seal decision or a late return
+   event could move a refunded case back to 'opened_item_review' or
+   'return_in_transit' - reopening a finished statutory case after the
+   money had gone. A fourth could re-price the Wertersatz after the
+   payout amount was already fixed.
+
+   These assert the guard where it lives: in every one of the five, in
+   the same shape, before any write.
+   ══════════════════════════════════════════════════════════════ */
+
+/** The five writers that record ordinary case facts. */
+const CASE_FACT_WRITERS = [
+  "admin_set_withdrawal_seal_state",
+  "admin_set_withdrawal_return_requirement",
+  "admin_record_withdrawal_return",
+  "admin_resolve_withdrawal_item",
+  "admin_confirm_withdrawal_value_loss",
+];
+
+const TERMINAL_GUARD =
+  "case_state in ('refund_pending', 'refunded', 'rejected_late', 'closed')";
+const PAYOUT_GUARD =
+  "refund_state in ('approved_for_payout', 'executed', 'failed')";
+
+test("T1: every case-fact writer refuses a decided case, by the same test", () => {
+  for (const name of CASE_FACT_WRITERS) {
+    const body = fnBody(name);
+    assert.ok(body.includes(TERMINAL_GUARD),
+      `${name} does not refuse a terminal or payout-pending case`);
+    assert.ok(body.includes("'case_closed'"),
+      `${name} does not name its refusal`);
+  }
+});
+
+test("T2: and refuses one whose payout is already approved", () => {
+  for (const name of CASE_FACT_WRITERS) {
+    const body = fnBody(name);
+    assert.ok(body.includes(PAYOUT_GUARD),
+      `${name} does not refuse an approved, executed or failed payout`);
+    assert.ok(body.includes("'refund_already_approved'"),
+      `${name} does not name its payout refusal`);
+  }
+});
+
+test("T3: both guards run BEFORE the writer touches anything", () => {
+  for (const name of CASE_FACT_WRITERS) {
+    const body = fnBody(name);
+    const terminal = body.indexOf(TERMINAL_GUARD);
+    const payout = body.indexOf(PAYOUT_GUARD);
+    const write = body.indexOf("update public.withdrawal_requests");
+    assert.ok(write > -1, `${name} no longer writes`);
+    assert.ok(terminal < write, `${name} writes before the terminal guard`);
+    assert.ok(payout < write, `${name} writes before the payout guard`);
+    // And it reads the row under a lock first, so there is a state to test.
+    const read = body.indexOf("where id = p_withdrawal_id for update");
+    assert.ok(read > -1, `${name} does not lock the row before deciding`);
+    assert.ok(read < terminal, `${name} tests a state it has not read`);
+  }
+});
+
+test("T4: 'refund_pending' is in the list - the hole that let a payout be repriced", () => {
+  // admin_confirm_withdrawal_value_loss used to guard only refunded,
+  // rejected_late and closed. A case whose payout had just been approved
+  // is 'refund_pending', so the Wertersatz - the deduction the amount was
+  // computed from - could still be changed after the amount was fixed.
+  const vl = fnBody("admin_confirm_withdrawal_value_loss");
+  assert.ok(vl.includes("'refund_pending'"),
+    "the Wertersatz writer can still be used on an approved payout");
+  assert.ok(!/case_state in \('refunded', 'rejected_late', 'closed'\)/.test(vl),
+    "the old three-state guard is back");
+});
+
+test("T5: 'failed' is in the payout lock, and the retry still works", () => {
+  // A declined card does not un-approve a refund: the amount stands and
+  // refund_operation_id is still the retry's idempotency key.
+  for (const name of CASE_FACT_WRITERS) {
+    assert.ok(fnBody(name).includes("'failed'"),
+      `${name} lets the payout basis change while a retry is pending`);
+  }
+  // Approval is once per case, 'failed' included...
+  const approve = fnBody("admin_approve_withdrawal_refund");
+  assert.ok(approve.includes(PAYOUT_GUARD),
+    "a failed payout can be re-approved, re-deriving the amount under a live key");
+  // ...but the execution writer still accepts 'failed', which IS the retry.
+  const exec = fnBody("admin_record_withdrawal_refund_execution");
+  assert.ok(exec.includes("not in ('approved_for_payout', 'failed')"),
+    "a declined card can no longer be retried");
+});
+
+test("T6: the payout writers keep their own lifecycle guards, unweakened", () => {
+  const exec = fnBody("admin_record_withdrawal_refund_execution");
+  const fail = fnBody("admin_record_withdrawal_refund_failure");
+  for (const [name, body] of [["execution", exec], ["failure", fail]]) {
+    assert.ok(body.includes("'already_executed'"), `${name} may pay twice`);
+    assert.ok(body.includes("'not_approved_for_payout'"),
+      `${name} accepts a payout nobody approved`);
+  }
+  assert.ok(exec.includes("'amount_mismatch'"));
+  assert.ok(exec.includes("'conflicting_provider_reference'"));
+});
+
+test("T7: every writer still audits inside its own transaction", () => {
+  // The guard refuses BEFORE the audit call, so a refusal writes no
+  // audit row - and a success cannot avoid writing one, because the
+  // call is in the same function as the change.
+  for (const name of [...CASE_FACT_WRITERS,
+                      "admin_approve_withdrawal_refund",
+                      "admin_record_withdrawal_refund_execution",
+                      "admin_record_withdrawal_refund_failure"]) {
+    const body = fnBody(name);
+    assert.ok(body.includes("perform public.record_admin_activity("),
+      `${name} no longer audits`);
+    assert.ok(body.indexOf("update public.withdrawal_requests")
+              < body.indexOf("perform public.record_admin_activity("),
+      `${name} audits before it changes anything`);
+    // SECURITY DEFINER and the emptied search_path are untouched.
+    const start = MIGRATION.indexOf(`create or replace function public.${name}(`);
+    const head = MIGRATION.slice(start, MIGRATION.indexOf("as $$", start));
+    assert.match(head, /security definer set search_path = ''/, name);
+  }
+});
+
+test("T8: the postcheck verifies the guard where it lives - in the bodies", () => {
+  // Nothing about the SCHEMA differs between a guarded and an unguarded
+  // 070, so a name-only postcheck would pass against the broken version.
+  assert.ok(POSTCHECK.includes("case_fact_fn"),
+    "the postcheck does not enumerate the case-fact writers");
+  assert.ok(POSTCHECK.includes("refund_pending"),
+    "the postcheck does not look for the terminal guard");
+  for (const name of CASE_FACT_WRITERS) {
+    assert.ok(POSTCHECK.includes(`'${name}'`),
+      `the postcheck does not check ${name}`);
+  }
+  // And it checks the approval lock plus the surviving retry path.
+  assert.ok(POSTCHECK.includes("a failed payout is retried, never re-approved"));
 });

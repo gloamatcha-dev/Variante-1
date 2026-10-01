@@ -5,14 +5,21 @@
 --                         (i.e. zero rows with verdict = 'FAIL').
 -- Rows with verdict 'INFO' are context, never a blocker.
 --
--- EXPECTED HEALTHY RESULT:  0 FAIL / 19 PASS / 4 INFO
+-- EXPECTED HEALTHY RESULT:  0 FAIL / 21 PASS / 4 INFO
 --
--- Nineteen verdict-bearing checks - 10-14, 20-25, 30-33 and 40-43 - and
--- four INFO rows (50-53), plus the SUMMARY row, which counts only the
--- twenty-three above it. The SUMMARY is always computed from the actual
--- rows; this line is the expectation to compare it against, never the
--- source of it. Verified: a fresh apply of migrations 001-070 to a real
--- PostgreSQL 17 instance returns exactly 0 FAIL / 19 PASS / 4 INFO.
+-- Twenty-one verdict-bearing checks - 10-14, 20-27, 30-33 and 40-43 -
+-- and four INFO rows (50-53), plus the SUMMARY row, which counts only
+-- the twenty-five above it. The SUMMARY is always computed from the
+-- actual rows; this line is the expectation to compare it against,
+-- never the source of it. Verified: a fresh apply of migrations 001-070
+-- to a real PostgreSQL 17 instance returns exactly
+-- 0 FAIL / 21 PASS / 4 INFO.
+--
+-- 26 and 27 are the newest, and they check FUNCTION BODIES rather than
+-- names. Every other check in this file would pass against a 070 whose
+-- admin writers still let a refunded case be reopened, because nothing
+-- about the schema would differ - so the terminal-state guard is
+-- verified where it actually lives.
 --
 -- ══════════════════════════════════════════════════════════════
 -- WHY A POSTCHECK AND NOT JUST THE PREFLIGHT
@@ -84,6 +91,20 @@ ord_cols as (
 wr_cols as (
   select column_name::text as column_name from information_schema.columns
   where table_schema = 'public' and table_name = 'withdrawal_requests'
+),
+-- THE FIVE WRITERS THAT RECORD ORDINARY CASE FACTS.
+--
+-- Each must refuse a decided case and a case whose payout is already
+-- approved. Checked by body text because that is the only place the
+-- rule lives - and because a 070 that applied an older version of these
+-- bodies would otherwise pass every other check in this file while
+-- leaving terminal cases reopenable.
+case_fact_fn(name) as (
+  values ('admin_set_withdrawal_seal_state'),
+         ('admin_set_withdrawal_return_requirement'),
+         ('admin_record_withdrawal_return'),
+         ('admin_resolve_withdrawal_item'),
+         ('admin_confirm_withdrawal_value_loss')
 ),
 -- The four tables no browser role may touch at all after 070.
 rights_tbl(name) as (
@@ -343,6 +364,66 @@ checks as (
                         and ident = 'p_limit integer'
                         and pg_catalog.pg_get_function_result(oid) like '%delivery_id uuid%'
                         and pg_catalog.pg_get_function_result(oid) like '%reclaimed boolean%') = 1
+              then 'PASS' else 'FAIL' end
+
+  -- EVERY ORDINARY CASE-FACT WRITER REFUSES A DECIDED CASE.
+  --
+  -- The guard is two tests, in every one of the five: the terminal and
+  -- payout-pending case states, and the approved/executed/failed payout
+  -- states. Three of these writers shipped without either, which let a
+  -- late seal decision or a late return event move a refunded case back
+  -- to 'opened_item_review' or 'return_in_transit' - reopening a
+  -- finished statutory case after the money had gone.
+  --
+  -- Matched on the case_state list and on the refusal result, not on
+  -- whitespace, so reformatting the body cannot break this and removing
+  -- the guard cannot pass it.
+  union all
+  select 26, 'shape',
+         'all five case-fact writers refuse a decided or already-paid case',
+         'each of the five carries the terminal case_state guard AND the payout guard',
+         (select count(*)::text || ' of 5 guarded - unguarded: '
+                 || coalesce((select string_agg(c2.name, ', ' order by c2.name)
+                                from case_fact_fn c2
+                                join fn f2 on f2.proname = c2.name
+                               where f2.prosrc not like
+                                       '%case_state in (''refund_pending'', ''refunded'', ''rejected_late'', ''closed'')%'
+                                  or f2.prosrc not like '%refund_state in (''approved_for_payout'', ''executed'', ''failed'')%'),
+                             'none')
+            from case_fact_fn c
+            join fn f on f.proname = c.name
+           where f.prosrc like
+                   '%case_state in (''refund_pending'', ''refunded'', ''rejected_late'', ''closed'')%'
+             and f.prosrc like '%refund_state in (''approved_for_payout'', ''executed'', ''failed'')%'),
+         case when (select count(*) from case_fact_fn c
+                      join fn f on f.proname = c.name
+                     where f.prosrc like
+                             '%case_state in (''refund_pending'', ''refunded'', ''rejected_late'', ''closed'')%'
+                       and f.prosrc like '%refund_state in (''approved_for_payout'', ''executed'', ''failed'')%') = 5
+              then 'PASS' else 'FAIL' end
+
+  -- AND THE PAYOUT IS APPROVED EXACTLY ONCE.
+  --
+  -- 'failed' belongs in the approval guard: a declined card does not
+  -- un-approve a refund, and re-approving would re-derive the amount
+  -- under the refund_operation_id Stripe already holds as an idempotency
+  -- key. The retry path is the execution writer, which accepts 'failed'
+  -- on purpose.
+  union all
+  select 27, 'shape',
+         'a failed payout is retried, never re-approved',
+         'the approval guard names approved_for_payout, executed AND failed',
+         coalesce((select 'guard=' || (prosrc like
+                     '%refund_state in (''approved_for_payout'', ''executed'', ''failed'')%')::text
+                     from fn where proname = 'admin_approve_withdrawal_refund' limit 1), '<missing>'),
+         case when (select count(*) from fn
+                      where proname = 'admin_approve_withdrawal_refund'
+                        and prosrc like
+                              '%refund_state in (''approved_for_payout'', ''executed'', ''failed'')%') = 1
+                   -- and the retry really is still possible
+                   and (select count(*) from fn
+                          where proname = 'admin_record_withdrawal_refund_execution'
+                            and prosrc like '%not in (''approved_for_payout'', ''failed'')%') = 1
               then 'PASS' else 'FAIL' end
 
   -- ── AND THE BROWSER GAINED NOTHING ────────────────────────

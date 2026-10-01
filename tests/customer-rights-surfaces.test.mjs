@@ -410,7 +410,14 @@ test("the refund amount is derived, and there is no parameter to supply one", ()
   assert.match(body, /v_refund := greatest\(0, v_paid - v_loss\)/);
   assert.match(body, /v_paid\s*:= v_plan\.total_gross_cents/);
   // It prepares a payout; it does not make one.
-  assert.ok(!/stripe/i.test(body), "the approval reaches for Stripe");
+  //
+  // CODE ONLY. The body's own comments name Stripe in order to explain
+  // what this function must never do - the idempotency key it stamps is
+  // for a call somebody else makes - so scanning the prose would fail on
+  // the documentation rather than on a defect. SQL line comments are
+  // stripped first; a real stripe.* call would survive that.
+  const sqlCode = body.split("\n").map(l => l.replace(/--.*$/, "")).join("\n");
+  assert.ok(!/stripe/i.test(sqlCode), "the approval reaches for Stripe");
   assert.match(body, /'approved_for_payout'/);
 });
 

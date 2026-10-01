@@ -1519,6 +1519,72 @@ alter table public.admin_activity_log
 -- verified admin session. record_admin_activity refuses an actor that is
 -- not an active admin_users row, so a deactivated administrator cannot
 -- be made to appear to have decided something.
+--
+-- ══════════════════════════════════════════════════════════════
+-- WHICH STATES EACH WRITER MAY MUTATE, AND WHY
+-- ══════════════════════════════════════════════════════════════
+--
+-- A case has two lifecycles that must both be respected: the CASE
+-- lifecycle (case_state) and the PAYOUT lifecycle (refund_state). The
+-- five writers below record ordinary case FACTS - the seal, whether the
+-- goods must come back, that they came back, which goods the case is
+-- about, and the Wertersatz. Every one of them therefore obeys the same
+-- two guards, in the same order, before touching anything:
+--
+--   case_state in ('refund_pending', 'refunded',
+--                  'rejected_late', 'closed')      -> case_closed
+--   refund_state in ('approved_for_payout',
+--                    'executed', 'failed')         -> refund_already_approved
+--
+-- THE FIRST GUARD EXISTS BECAUSE A DECIDED CASE IS A RECORD, NOT A
+-- DRAFT. Without it, admin_set_withdrawal_seal_state could set
+-- case_state = 'opened_item_review' on a case that was refunded weeks
+-- ago; admin_set_withdrawal_return_requirement could move a closed case
+-- to 'awaiting_return'; and admin_record_withdrawal_return could push a
+-- refunded one back to 'return_in_transit'. Each of those reopens a
+-- finished statutory case by accident - the operator was recording a
+-- late fact, not trying to undo an outcome - and the case then sits in
+-- the desk looking live, with money already gone.
+--
+-- THE SECOND GUARD EXISTS BECAUSE THESE FACTS ARE THE PAYOUT BASIS.
+-- admin_approve_withdrawal_refund derives its figure from the seal, the
+-- return requirement, the resolved item and the confirmed Wertersatz.
+-- Once it has run, refund_amount_cents is fixed, refund_operation_id is
+-- stamped, and the customer has been told an amount. Changing any input
+-- afterwards would leave the row disagreeing with the money - and, once
+-- Stripe has the idempotency key, disagreeing with the payment provider
+-- too.
+--
+-- 'failed' IS INCLUDED IN THE PAYOUT LOCK, AND THAT IS DELIBERATE. A
+-- declined card does not un-approve a refund: the money is still owed,
+-- the amount still stands and the operation id is still the retry's
+-- idempotency key. Re-cutting the basis while a retry is pending is how
+-- the row and Stripe come to disagree about what was refunded. The
+-- retry itself is unaffected - admin_record_withdrawal_refund_execution
+-- accepts 'failed' precisely so a decline can be retried.
+--
+-- WHAT THE GUARDS DELIBERATELY DO NOT BLOCK. Everything an OPEN case
+-- legitimately needs:
+--
+--   * the seal may be decided, and re-decided, during review
+--   * the return requirement may be set and changed before payout
+--   * dispatch proof and arrival may be recorded while the case is
+--     awaiting a return, in transit, or overdue
+--   * the resolved item and quantity may be corrected as often as an
+--     operator needs, right up to approval
+--   * the Wertersatz may be confirmed and reduced before approval
+--
+-- ONE HONEST CONSEQUENCE. Goods that arrive AFTER an early payout - BGB
+-- 357 Abs. 4 permits paying on dispatch proof alone - can no longer be
+-- recorded through admin_record_withdrawal_return, because that would
+-- move a refund_pending case backwards. The arrival is a true fact and
+-- belongs in internal_note; what it must not do is make a paid case
+-- look unfinished.
+--
+-- THE PAYOUT WRITERS KEEP THEIR OWN GUARDS, which are about the payout
+-- lifecycle rather than the case facts, and are not changed into this
+-- shape: approval refuses an already-approved payout, and the execution
+-- and failure writers refuse anything that is not awaiting one.
 
 -- ── THE SEAL ──────────────────────────────────────────────────
 create or replace function public.admin_set_withdrawal_seal_state(
@@ -1538,6 +1604,22 @@ begin
     return pg_catalog.jsonb_build_object('result', 'seal_state_unknown');
   end if;
 
+  -- READ AND LOCK FIRST. This used to be a blind UPDATE ... RETURNING,
+  -- which cannot refuse a state it never looked at.
+  select * into v_case from public.withdrawal_requests where id = p_withdrawal_id for update;
+  if not found then
+    return pg_catalog.jsonb_build_object('result', 'not_found');
+  end if;
+
+  if v_case.case_state in ('refund_pending', 'refunded', 'rejected_late', 'closed') then
+    return pg_catalog.jsonb_build_object('result', 'case_closed',
+                                         'case_state', v_case.case_state);
+  end if;
+  if v_case.refund_state in ('approved_for_payout', 'executed', 'failed') then
+    return pg_catalog.jsonb_build_object('result', 'refund_already_approved',
+                                         'refund_state', v_case.refund_state);
+  end if;
+
   update public.withdrawal_requests
      set seal_state = p_seal_state,
          case_state = case when p_seal_state = 'opened_seal_broken'
@@ -1545,10 +1627,6 @@ begin
          updated_at = pg_catalog.now()
    where id = p_withdrawal_id
   returning * into v_case;
-
-  if not found then
-    return pg_catalog.jsonb_build_object('result', 'not_found');
-  end if;
 
   perform public.record_admin_activity(
     p_actor_user_id, 'customer_rights', 'withdrawal.seal_state', 'withdrawal',
@@ -1582,6 +1660,23 @@ begin
     return pg_catalog.jsonb_build_object('result', 'requirement_unknown');
   end if;
 
+  -- READ AND LOCK FIRST, for the same reason as the seal writer: this
+  -- sets case_state to 'awaiting_return' or 'approved', and doing that
+  -- to a refunded or closed case reopens it.
+  select * into v_case from public.withdrawal_requests where id = p_withdrawal_id for update;
+  if not found then
+    return pg_catalog.jsonb_build_object('result', 'not_found');
+  end if;
+
+  if v_case.case_state in ('refund_pending', 'refunded', 'rejected_late', 'closed') then
+    return pg_catalog.jsonb_build_object('result', 'case_closed',
+                                         'case_state', v_case.case_state);
+  end if;
+  if v_case.refund_state in ('approved_for_payout', 'executed', 'failed') then
+    return pg_catalog.jsonb_build_object('result', 'refund_already_approved',
+                                         'refund_state', v_case.refund_state);
+  end if;
+
   update public.withdrawal_requests
      set return_requirement = p_requirement,
          case_state = case when p_requirement = 'return_requested'
@@ -1589,10 +1684,6 @@ begin
          updated_at = pg_catalog.now()
    where id = p_withdrawal_id
   returning * into v_case;
-
-  if not found then
-    return pg_catalog.jsonb_build_object('result', 'not_found');
-  end if;
 
   perform public.record_admin_activity(
     p_actor_user_id, 'customer_rights', 'withdrawal.return_requirement', 'withdrawal',
@@ -1634,6 +1725,18 @@ begin
   select * into v_case from public.withdrawal_requests where id = p_withdrawal_id for update;
   if not found then
     return pg_catalog.jsonb_build_object('result', 'not_found');
+  end if;
+
+  -- A RETURN EVENT MOVES case_state to 'return_in_transit' or
+  -- 'return_received'. On a decided case that is a reopening, and on a
+  -- case whose payout is already approved it is a step backwards.
+  if v_case.case_state in ('refund_pending', 'refunded', 'rejected_late', 'closed') then
+    return pg_catalog.jsonb_build_object('result', 'case_closed',
+                                         'case_state', v_case.case_state);
+  end if;
+  if v_case.refund_state in ('approved_for_payout', 'executed', 'failed') then
+    return pg_catalog.jsonb_build_object('result', 'refund_already_approved',
+                                         'refund_state', v_case.refund_state);
   end if;
 
   if p_event = 'dispatch_proof' then
@@ -1730,8 +1833,12 @@ begin
   if v_case.case_state in ('refund_pending', 'refunded', 'rejected_late', 'closed') then
     return pg_catalog.jsonb_build_object('result', 'case_closed', 'case_state', v_case.case_state);
   end if;
-  if v_case.refund_state in ('approved_for_payout', 'executed') then
-    return pg_catalog.jsonb_build_object('result', 'already_approved');
+  -- 'failed' TOO: a declined card does not un-approve the refund, and
+  -- re-cutting the goods under a live idempotency key is how the row and
+  -- Stripe come to disagree about what was refunded.
+  if v_case.refund_state in ('approved_for_payout', 'executed', 'failed') then
+    return pg_catalog.jsonb_build_object('result', 'refund_already_approved',
+                                         'refund_state', v_case.refund_state);
   end if;
 
   if v_case.resolved_order_id is null then
@@ -1907,8 +2014,20 @@ begin
 
   -- A decided case is not re-decided. Wertersatz set after the money
   -- moved would change a figure the customer was already told.
-  if v_case.case_state in ('refunded', 'rejected_late', 'closed') then
+  --
+  -- 'refund_pending' IS IN THIS LIST NOW, and its absence was a real
+  -- hole: the payout is approved at that point and refund_amount_cents
+  -- is already fixed, so re-pricing the deduction here would leave the
+  -- row's arithmetic disagreeing with the amount that was released.
+  if v_case.case_state in ('refund_pending', 'refunded', 'rejected_late', 'closed') then
     return pg_catalog.jsonb_build_object('result', 'case_closed', 'case_state', v_case.case_state);
+  end if;
+
+  -- And the payout lock itself, which this writer previously had none
+  -- of. The Wertersatz IS the deduction the payout was computed from.
+  if v_case.refund_state in ('approved_for_payout', 'executed', 'failed') then
+    return pg_catalog.jsonb_build_object('result', 'refund_already_approved',
+                                         'refund_state', v_case.refund_state);
   end if;
 
   if v_case.seal_state is null then
@@ -2157,9 +2276,16 @@ begin
     return pg_catalog.jsonb_build_object('result', 'not_found');
   end if;
 
-  if v_case.refund_state in ('approved_for_payout', 'executed') then
+  -- ONE APPROVAL PER CASE, EVER - 'failed' included. A declined card is
+  -- retried through admin_record_withdrawal_refund_execution, which
+  -- accepts 'failed' for exactly that purpose. Re-approving instead
+  -- would re-derive the amount under the SAME refund_operation_id, so a
+  -- figure that had moved would be sent to Stripe under a key Stripe
+  -- already knows - and the row would then disagree with the payout.
+  if v_case.refund_state in ('approved_for_payout', 'executed', 'failed') then
     return pg_catalog.jsonb_build_object(
       'result', 'already_approved',
+      'refund_state', v_case.refund_state,
       'refund_amount_cents', v_case.refund_amount_cents,
       'refund_operation_id', v_case.refund_operation_id
     );
