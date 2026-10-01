@@ -736,7 +736,7 @@ test("6a2: the UI does not offer the section to a VIEWER", () => {
   // PACKAGE 5G put B2B behind the SAME predicate rather than a weaker
   // one of its own - a supply contract is another company's open
   // liabilities, which is the read a viewer may not perform.
-  assert.match(adminOverview, /\(key === "subscriptions" \|\| key === "annual" \|\| key === "b2b" \|\| key === "rights"\) && !maySeeSubscriptions \? null :/);
+  assert.match(adminOverview, /\(key === "subscriptions" \|\| key === "annual" \|\| key === "b2b" \|\| key === "rights" \|\| key === "costs"\) && !maySeeSubscriptions \? null :/);
   // And the screen itself is not mounted, so no request is ever issued.
   assert.match(adminOverview, /view === "subscriptions" && maySeeSubscriptions && <AdminSubscriptions/);
   // The overview note does not point a viewer at a tab they lack.
@@ -748,7 +748,13 @@ test("6a2: the UI does not offer the section to a VIEWER", () => {
   // rights desk) and the overview note. Counted so the predicate cannot
   // quietly start gating a tab that has nothing to do with the
   // commercial screens.
-  assert.equal([...adminOverview.matchAll(/maySeeSubscriptions/g)].length, 7,
+  // EIGHT NOW: the definition, the shared tab guard, the FIVE mounts
+  // (Abos, Jahrespläne, Package 5G's B2B, migration 070's consumer rights
+  // desk and migration 071's Kosten) and the overview note. Finance is
+  // behind the SAME predicate rather than a weaker one of its own, for
+  // the strongest version of the reason the others are: it is what the
+  // shop earned, spent and kept.
+  assert.equal([...adminOverview.matchAll(/maySeeSubscriptions/g)].length, 8,
     "the role predicate reaches more of the shell than the commercial sections");
 });
 
@@ -1255,7 +1261,7 @@ test("8: no backend, migration, cadence, price or shipping rule changed", () => 
   // newest file on disk. Re-pinned by one position rather than deleted -
   // what this guard protects is that nothing UNREVIEWED appeared.
   // Reviewed in tests/guest-order-management.test.mjs.
-  assert.equal(migrations.at(-4), "067_annual_upgrade_pending_claim.sql",
+  assert.equal(migrations.at(-5), "067_annual_upgrade_pending_claim.sql",
     "a migration was added by a UI package");
   assert.match(read("supabase/migrations/024_seed_b2c_subscription_plans.sql"),
     /'week',\s*4,\s*'week',\s*4,\s*true,/, "the seeded cadence changed");

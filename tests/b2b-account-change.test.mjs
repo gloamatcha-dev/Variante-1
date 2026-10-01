@@ -1254,7 +1254,7 @@ test("66: it takes the read_sensitive capability - never a viewer", () => {
     "the gate runs after the database client is built");
   // The UI hides the tab behind the same predicate.
   const shell = read("app/AdminOverview.tsx");
-  assert.match(shell, /key === "b2b" \|\| key === "rights"\) && !maySeeSubscriptions \? null :/);
+  assert.match(shell, /key === "b2b" \|\| key === "rights" \|\| key === "costs"\) && !maySeeSubscriptions \? null :/);
   assert.match(shell, /view === "b2b" && maySeeSubscriptions && <AdminB2b/);
 });
 
@@ -1675,10 +1675,10 @@ test("87: and 064 is the highest migration", () => {
   // one position further from the end. Re-pinned rather than deleted -
   // what this guard protects is that nothing UNREVIEWED appeared.
   // Reviewed in tests/subscription-annual-upgrade.test.mjs.
-  assert.equal(files.at(-4), "067_annual_upgrade_pending_claim.sql");
-  assert.equal(files.at(-6), "065_guest_order_management.sql");
-  assert.equal(files.at(-7), MIGRATION);
-  assert.equal(files.at(-8), "063_b2b_instalment_delivery_failure_runtime.sql");
+  assert.equal(files.at(-5), "067_annual_upgrade_pending_claim.sql");
+  assert.equal(files.at(-7), "065_guest_order_management.sql");
+  assert.equal(files.at(-8), MIGRATION);
+  assert.equal(files.at(-9), "063_b2b_instalment_delivery_failure_runtime.sql");
   assert.equal(files.filter(f => f.startsWith("064")).length, 1);
 });
 

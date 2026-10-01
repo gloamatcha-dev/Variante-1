@@ -4,6 +4,7 @@ import { AdminOrders } from "./AdminOrders";
 import { AdminSubscriptions } from "./AdminSubscriptions";
 import { AdminAnnualPlans } from "./AdminAnnualPlans";
 import { AdminCustomerRights } from "./AdminCustomerRights";
+import { AdminCosts } from "./AdminCosts";
 import { AdminB2b } from "./AdminB2b";
 import { AdminInventory } from "./AdminInventory";
 import { WAITLIST_FILTERS, type WaitlistFilter } from "../lib/adminWaitlistQuery";
@@ -175,16 +176,20 @@ function AdminDesktopOnly() {
 
 export function AdminOverview() {
   // WHICH SECTION IS OPEN. The waitlist screen this file has always
-  // been is now one of four, and it is unchanged - it simply renders
-  // under a tab instead of on its own. B2B and costs are still named in
-  // the navigation as coming and are not clickable, because a tab that
-  // opens nothing is worse than a tab that says it is not here yet.
-  // Inventory stopped being one of those in Paket 4A.2.
+  // been is now one of several, and it is unchanged - it simply renders
+  // under a tab instead of on its own.
+  //
+  // NOTHING IS "coming" ANY MORE. Inventory stopped being a placeholder
+  // in Paket 4A.2, B2B in Package 5G, and Kosten when migration 071 gave
+  // it a table to read. The "bald" list below is kept but empty: it is
+  // where the next unfinished section would be named, and the rule it
+  // encodes is unchanged - a tab that opens nothing is worse than a tab
+  // that says it is not here yet.
   // BEFORE ANY ADMIN STATE. Whether this viewport may operate the admin
   // decides whether the data below is ever asked for.
   const isDesktop = useIsAdminDesktop();
 
-  const [view, setView] = useState<"overview" | "orders" | "subscriptions" | "annual" | "rights" | "inventory" | "activity" | "waitlist" | "b2b">("overview");
+  const [view, setView] = useState<"overview" | "orders" | "subscriptions" | "annual" | "rights" | "inventory" | "costs" | "activity" | "waitlist" | "b2b">("overview");
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -364,7 +369,7 @@ export function AdminOverview() {
   if (data.launch.shopStatus !== "live") blockers.push(`Shop ist ${data.launch.shopStatus}`);
   if (data.counts.confirmed === 0) blockers.push("kein bestätigter Kontakt");
 
-  const TITLE = { overview: "Übersicht", orders: "Bestellungen", subscriptions: "Abos", annual: "Jahrespläne", rights: "Verbraucherrechte", inventory: "Inventar", activity: "Aktivität", waitlist: "Launch List", b2b: "B2B" } as const;
+  const TITLE = { overview: "Übersicht", orders: "Bestellungen", subscriptions: "Abos", annual: "Jahrespläne", rights: "Verbraucherrechte", inventory: "Inventar", costs: "Kosten", activity: "Aktivität", waitlist: "Launch List", b2b: "B2B" } as const;
 
   /*
     MAY THIS OPERATOR OPEN THE ABOS TAB?
@@ -409,12 +414,12 @@ export function AdminOverview() {
       </header>
 
       <nav className="ops-nav" aria-label="Bereiche">
-        {([["overview", "Übersicht"], ["orders", "Bestellungen"], ["subscriptions", "Abos"], ["annual", "Jahrespläne"], ["rights", "Verbraucherrechte"], ["inventory", "Inventar"], ["activity", "Aktivität"], ["waitlist", "Launch List"], ["b2b", "B2B"]] as const).map(([key, label]) => (
+        {([["overview", "Übersicht"], ["orders", "Bestellungen"], ["subscriptions", "Abos"], ["annual", "Jahrespläne"], ["rights", "Verbraucherrechte"], ["inventory", "Inventar"], ["costs", "Kosten"], ["activity", "Aktivität"], ["waitlist", "Launch List"], ["b2b", "B2B"]] as const).map(([key, label]) => (
           // The array stays the full list of sections that EXIST; this
           // decides which of them this operator is offered. A tab the
           // role may not open renders nothing at all - not a disabled
           // button, which would still announce the section.
-          (key === "subscriptions" || key === "annual" || key === "b2b" || key === "rights") && !maySeeSubscriptions ? null : (
+          (key === "subscriptions" || key === "annual" || key === "b2b" || key === "rights" || key === "costs") && !maySeeSubscriptions ? null : (
           <button
             key={key}
             type="button"
@@ -429,8 +434,10 @@ export function AdminOverview() {
         {/* Named, not faked. What is left here opens nothing and says so,
             because a tab that leads to an empty screen costs more trust
             than an honest "bald". B2B stopped being one of these in
-            Package 5G and is now a real section above. */}
-        {["Kosten"].map((label) => (
+            Package 5G and KOSTEN stopped being one when migration 071
+            gave it a table to read - so the list is empty, which is the
+            point: nothing is being promised that does not open. */}
+        {([] as string[]).map((label) => (
           <span className="ops-nav-soon" key={label}>{label}<i>bald</i></span>
         ))}
       </nav>
@@ -449,6 +456,18 @@ export function AdminOverview() {
           component is what issues the request, so the guard belongs on
           the mount as well as on the button. */}
       {view === "subscriptions" && maySeeSubscriptions && <AdminSubscriptions onSessionLost={() => setSignedIn(false)} />}
+
+      {/* KOSTEN / SPESEN / DECKUNGSBEITRAG. Mounted only when its tab is
+          open, like every screen here, and under the same role gate as
+          the commercial ones: finance is the most sensitive read in the
+          admin, so /api/admin/costs asks for "read_sensitive" and
+          answers 403 to a viewer whatever this screen renders.
+
+          It DOES offer actions - a cost is typed in, corrected and
+          removed - and every one of them goes through migration 071's
+          SECURITY DEFINER writers, which audit themselves in the same
+          transaction. */}
+      {view === "costs" && maySeeSubscriptions && <AdminCosts onSessionLost={() => setSignedIn(false)} />}
 
       {/* The prepaid plan, under the same role gate and mounted only
           when open. Read only - /api/admin/annual-plans has no write

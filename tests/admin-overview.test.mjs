@@ -459,8 +459,23 @@ test("23: the admin API surface is exactly these five, all POST-gated", () => {
   // case id, re-reads the approved amount from the database, and sends
   // the approval's own id as Stripe's idempotency key. Reviewed in
   // tests/withdrawal-refund-execution.test.mjs.
-  assert.deepEqual(dirs, ["activity", "annual-plans", "b2b", "customer-rights", "inventory", "launch",
-    "orders", "session", "subscriptions", "waitlist", "withdrawal-refund"]);
+  // MIGRATION 071 ADDED "costs": Kosten / Spesen / Deckungsbeitrag. It is
+  // the FIFTH class of admin route and the second of its kind - a
+  // read_sensitive LIST that also WRITES, exactly like customer-rights.
+  //
+  // What makes that safe is the same thing: every write leaves through an
+  // RPC. The three expense writers in migration 071 are SECURITY DEFINER
+  // and audit themselves under module 'finance' in the same transaction,
+  // and service_role holds no INSERT, UPDATE or DELETE on
+  // business_expenses at all - so there is no path through this route
+  // that could record a cost without recording who recorded it.
+  //
+  // It computes every figure server-side and accepts no total, margin or
+  // completeness flag from the browser. Reviewed in
+  // tests/business-expenses-migration.test.mjs.
+  assert.deepEqual(dirs, ["activity", "annual-plans", "b2b", "costs", "customer-rights",
+    "inventory", "launch", "orders", "session", "subscriptions", "waitlist",
+    "withdrawal-refund"]);
 
   // The session route is the only one that may write anything, and what
   // it writes is a cookie.

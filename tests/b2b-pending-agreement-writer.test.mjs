@@ -106,10 +106,10 @@ test("1: 061 owns its number, and only the reviewed 062 follows it", () => {
   // this guard protects is that 061 still occupies its own number and
   // that nothing UNREVIEWED appeared above it. Reviewed in
   // tests/b2b-checkout-settlement.test.mjs.
-  assert.equal(files[files.length - 10], MIGRATION, "061 must be the one before the newest");
-  assert.equal(files[files.length - 11], "060_b2b_payment_delivery_foundation.sql");
-  assert.equal(files[files.length - 12], "059_b2b_supply_commerce_foundation.sql");
-  assert.equal(files.length, 70);
+  assert.equal(files[files.length - 11], MIGRATION, "061 must be the one before the newest");
+  assert.equal(files[files.length - 12], "060_b2b_payment_delivery_foundation.sql");
+  assert.equal(files[files.length - 13], "059_b2b_supply_commerce_foundation.sql");
+  assert.equal(files.length, 71);
   // PACKAGES 5D/5E/5F ADDED MIGRATION 063: the instalment, resolution
   // and failure runtime. Re-pinned on the same terms as 062 above.
   // Reviewed in tests/b2b-instalment-delivery-failure.test.mjs.
@@ -173,9 +173,13 @@ test("1: 061 owns its number, and only the reviewed 062 follows it", () => {
      // or B2B object. Reviewed in
      // tests/annual-plan-monthly-schedule.test.mjs.
      "069_annual_plan_monthly_schedule.sql",
-     "070_customer_rights_foundation.sql"],
+     "070_customer_rights_foundation.sql",
+     // MIGRATION 071: the expense ledger - one table, three audited
+     // SECURITY DEFINER writers, and no change to any existing table
+     // or row. Reviewed in tests/business-expenses-migration.test.mjs.
+     "071_business_expenses.sql"],
     "a migration above 061 appeared that this suite has not been reviewed against");
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 70), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 71), [],
     "an unreviewed migration appeared after 062");
   // No number is used twice, which a copy-paste of a file name would do.
   const numbers = files.map(f => f.slice(0, 3));
@@ -1074,7 +1078,24 @@ test("50: NO SUITE MAY CLAIM THAT AN APPLIED MIGRATION IS STILL PENDING", () => 
   // literal pattern would match this file's own source and fail forever.
   const NL = String.fromCharCode(10);
   const onDisk = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
-  const appliedFiles = onDisk;
+  /*
+    THERE IS A PENDING MIGRATION AGAIN, AND IT IS 071.
+
+    This guard derived "applied" from "on disk", which was correct for as
+    long as every migration in the tree was live - and the comment above
+    says exactly that: "064 IS NOW LIVE AND THERE IS NO PENDING
+    MIGRATION". 071 is the first one since then that is written, reviewed
+    and NOT applied to Production.
+
+    So the distinction comes back rather than the guard being weakened.
+    What it protects is unchanged and still the thing that matters: no
+    suite may describe an APPLIED migration as pending, and no guard may
+    exempt one in code. 071 may be described as pending because it is -
+    and the moment it is applied, this constant is what has to move, which
+    is a one-line change in one place instead of a hunt.
+  */
+  const PENDING = "071_business_expenses.sql";
+  const appliedFiles = onDisk.filter(f => f !== PENDING);
   const APPLIED = appliedFiles.map(f => f.slice(0, 3));
   // ── THE PROSE SCAN READS COMMENTS, THE CODE SCAN READS CODE ──
   //
@@ -1145,10 +1166,30 @@ test("50: NO SUITE MAY CLAIM THAT AN APPLIED MIGRATION IS STILL PENDING", () => 
   // below: it is a NEW file, so no immutability guard has anything to
   // exempt in it. Re-pinned to it, so the next author faces the same
   // decision. Reviewed in tests/guest-order-management.test.mjs.
-  assert.equal(onDisk.at(-4), "067_annual_upgrade_pending_claim.sql",
+  assert.equal(onDisk.at(-5), "067_annual_upgrade_pending_claim.sql",
     "a migration appeared above 065 - decide whether it is pending, then re-check every exemption");
-  assert.equal(appliedFiles.length, onDisk.length,
-    "a migration is excluded from the applied set - nothing guards its immutability");
+  /*
+    EXACTLY ONE MIGRATION MAY BE OUTSIDE THE APPLIED SET, and it must be
+    the one declared PENDING above.
+
+    This used to demand that NOTHING was excluded, which was right while
+    nothing was pending: the immutability guards key off this set, so a
+    migration quietly dropped from it is a migration nobody is watching.
+    That danger is unchanged and still asserted - what is allowed now is
+    one named exception, not a smaller set.
+
+    AND IT HAS TO BE THE NEWEST. A pending migration in the MIDDLE of
+    applied history would mean Production ran 072 without 071, which is
+    not a state this repository can reach - so if PENDING is ever not
+    last, the declaration is stale rather than the history being strange.
+  */
+  assert.deepEqual(
+    onDisk.filter(f => !appliedFiles.includes(f)),
+    [PENDING],
+    "a migration other than the declared pending one is outside the applied set"
+      + " - nothing guards its immutability");
+  assert.equal(onDisk.at(-1), PENDING,
+    "the pending migration is not the newest one - the declaration is stale");
   for (const live of ["039_b2c_annual_plan_foundation.sql",
                      "040_annual_checkout_retry_fingerprints.sql",
                      "063_b2b_instalment_delivery_failure_runtime.sql",

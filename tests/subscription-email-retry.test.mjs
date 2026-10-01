@@ -699,7 +699,7 @@ test("55-57: no migration was added, edited or required", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(files.length, 70);
+  assert.equal(files.length, 71);
   // Phase 4B1 added 039, the B2C prepaid annual plan foundation,
   // reviewed in tests/annual-plan-foundation-migration.test.mjs. The
   // guard is re-pinned, not deleted: it protects "no UNREVIEWED
@@ -717,17 +717,25 @@ test("55-57: no migration was added, edited or required", () => {
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(files[files.length - 25], "046_launch_signup_atomic.sql");
-  assert.equal(files[files.length - 26], "045_launch_welcome_email.sql");
-  assert.equal(files[files.length - 27], "044_launch_send.sql");
-  assert.equal(files[files.length - 28], "043_launch_waitlist.sql");
-  assert.equal(files[files.length - 29], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.equal(files[files.length - 30], "041_annual_account_column_privileges.sql");
-  assert.equal(files[files.length - 31], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(files[files.length - 32], "039_b2c_annual_plan_foundation.sql");
-  assert.equal(files[files.length - 33], "038_one_time_refund_writer_concurrency.sql");
+  assert.equal(files[files.length - 26], "046_launch_signup_atomic.sql");
+  assert.equal(files[files.length - 27], "045_launch_welcome_email.sql");
+  assert.equal(files[files.length - 28], "044_launch_send.sql");
+  assert.equal(files[files.length - 29], "043_launch_waitlist.sql");
+  assert.equal(files[files.length - 30], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(files[files.length - 31], "041_annual_account_column_privileges.sql");
+  assert.equal(files[files.length - 32], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 33], "039_b2c_annual_plan_foundation.sql");
+  assert.equal(files[files.length - 34], "038_one_time_refund_writer_concurrency.sql");
   assert.deepEqual(files.filter(f => f.startsWith("037")), ["037_subscription_refund_correlation.sql"]);
-  assert.ok(!files.some(f => f.startsWith("071")));
+  // MIGRATION 071 ADDED THE EXPENSE LEDGER - one table,
+  // public.business_expenses, plus three SECURITY DEFINER writers that
+  // audit under module 'finance'. It alters no existing table, rewrites
+  // no existing row and backfills nothing; 'finance' was already in
+  // admin_activity_log's module CHECK, which 070 widened. Re-pinned
+  // rather than deleted - what this guard protects is that nothing
+  // UNREVIEWED appeared. Reviewed in
+  // tests/business-expenses-migration.test.mjs.
+  assert.ok(!files.some(f => f.startsWith("072")));
   const sql035 = withoutComments(read("supabase/migrations/035_subscription_email_deliveries.sql"));
   // The sweep needs exactly what 035 already grants: SELECT, and UPDATE
   // on status and sent_at.

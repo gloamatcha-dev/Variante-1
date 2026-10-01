@@ -812,14 +812,14 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 70);
+  assert.equal(migrations.length, 71);
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
   // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
   // commerce foundation - it evolves the two tables 006 built for a
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 70), [], "a migration 071 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 71), [], "a migration 072 or beyond appeared");
 
   // The API surface is unchanged: no account endpoint exists, because the
   // portal reads its own rows under RLS.
@@ -845,6 +845,13 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
     // read_sensitive, and with no write path at all. Reviewed in
     // tests/b2b-account-change.test.mjs.
     "/admin/b2b",
+    // MIGRATION 071: Kosten / Spesen / Deckungsbeitrag. Sensitive read
+    // for the period summary, write for each expense, and every write
+    // leaves through one of 071's three audited SQL writers -
+    // service_role holds SELECT on business_expenses and nothing else.
+    // It computes every figure server-side and accepts no total from the
+    // browser. Reviewed in tests/business-expenses-migration.test.mjs.
+    "/admin/costs",
     // MIGRATION 070: the consumer rights desk. Sensitive read for its
     // list, write for each case action, and every write leaves through
     // one of 070's audited SQL writers.

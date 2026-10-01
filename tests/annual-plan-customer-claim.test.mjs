@@ -405,8 +405,8 @@ test("25b: 068 is applicable BEFORE its code ships - the rollout property", () =
 test("25c: 068 is the newest migration and owns its number alone", () => {
   const files = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.at(-3), "068_annual_plan_customer_claim.sql");
+  assert.equal(files.at(-4), "068_annual_plan_customer_claim.sql");
   assert.equal(files.filter(f => f.startsWith("068")).length, 1);
-  assert.equal(files.filter(f => Number(f.slice(0, 3)) > 70).length, 0);
+  assert.equal(files.filter(f => Number(f.slice(0, 3)) > 71).length, 0);
   assert.match(M068, /NOT YET APPLIED/);
 });

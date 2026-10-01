@@ -333,7 +333,23 @@ test("4d: every WRITE route takes the write capability, every read says so", () 
     or .delete here would be this route deciding for itself, so those
     stay banned exactly as they are for a restricted read.
   */
-  const SENSITIVE_WRITES = ["customer-rights"];
+  /*
+    AND MIGRATION 071's FINANCE SCREEN IS THE SECOND OF THIS CLASS.
+
+    "costs" carries the most sensitive read in the admin - what the shop
+    earned, what it spent and what it kept - so its list takes
+    read_sensitive. And a cost is typed in, corrected and removed, so it
+    also writes.
+
+    It is safe for the same structural reason customer-rights is: the
+    writes leave through migration 071's three SECURITY DEFINER writers,
+    which audit themselves under module 'finance' in the same
+    transaction. service_role holds SELECT on business_expenses and
+    nothing else, so a .insert, .update or .delete here could not work
+    even if somebody wrote one - and they stay banned below regardless,
+    because the ban is what keeps the decision in the database.
+  */
+  const SENSITIVE_WRITES = ["customer-rights", "costs"];
 
   for (const route of SENSITIVE_WRITES) {
     const code = codeOnly(read(`app/api/admin/${route}/route.ts`));
@@ -595,7 +611,7 @@ test("7: no audit trail, no actor columns, no new real accounts", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 70), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 71), [],
     "a migration beyond 051 appeared");
 
   const sql = codeOnly(migration);
@@ -874,10 +890,13 @@ test("9g: the desktop admin is unchanged", () => {
                       '["inventory", "Inventar"]', '["waitlist", "Launch List"]',
                       // PACKAGE 5G made B2B a REAL section, so it left the
                       // "bald" list and gained a tab and a component of its
-                      // own. Kosten is still coming. Everything else the
+                      // own. MIGRATION 071 did the same for Kosten, which is
+                      // why '["Kosten"]' is no longer here: the "bald" list
+                      // is empty and Kosten is a tab. Everything else the
                       // operator sees at 1440 is unchanged.
                       '["b2b", "B2B"]',
-                      '["Kosten"]', "<AdminOrders", "<AdminInventory", "<AdminB2b"]) {
+                      '["costs", "Kosten"]',
+                      "<AdminOrders", "<AdminInventory", "<AdminB2b", "<AdminCosts"]) {
     assert.ok(code.includes(kept), `the desktop admin lost: ${kept}`);
   }
   // The blocker's styles are additive and touch no existing admin rule.
@@ -892,7 +911,7 @@ test("9g: the desktop admin is unchanged", () => {
 test("9h: this package changed nothing else", () => {
   // No migration, no audit trail, no public surface.
   const files = readdirSync(path.join(ROOT, "supabase/migrations"));
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 70), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 71), [],
     "a migration beyond 051 appeared");
   for (const forbidden of ["admin_activity_log", "record_admin_activity", "actor_user_id"]) {
     assert.ok(!shell.includes(forbidden) && !viewportLib.includes(forbidden),

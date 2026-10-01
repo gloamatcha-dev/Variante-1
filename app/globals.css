@@ -8924,7 +8924,16 @@ header nav{gap:18px;font-size:12px}
    mobile-only, and desktop is where the labels are longest. */
 .ops-facts div,.ops-facts dt,.ops-facts dd{ min-width:0; overflow-wrap:anywhere; }
 .ops-blockers{ margin:16px 0 0; padding-left:18px; font-size:13px; color:var(--berry); }
-.ops-note{ margin:14px 0 0; font-size:12px; color:var(--plum); }
+.ops-note{ margin:14px 0 0; font-size:12px; color:var(--plum); }/* KOSTEN / SPESEN. Six rules, and every one of them is about telling a
+   KNOWN figure apart from an UNKNOWN one - which is the whole job of
+   that screen. Everything else on it reuses the ops-* vocabulary the
+   admin already had: ops-counts, ops-count, ops-table, ops-filter-row. */
+.ops-costs-partial{ border-left:2px solid var(--berry); padding:10px 0 10px 14px; color:var(--ink); font-size:13px; }
+.ops-costs-unknown{ font-style:italic; opacity:.65; }
+.ops-costs-flag{ display:block; font-style:italic; font-size:11px; opacity:.65; letter-spacing:0; text-transform:none; }
+.ops-costs-form{ margin:16px 0 0; padding:16px 0 0; border-top:1px solid var(--line); }
+.ops-costs-vendor{ opacity:.6; }
+.ops-costs-ledger code{ font-size:11px; opacity:.75; }
 
 /* ── Controls ─────────────────────────────────────────────── */
 .ops-controls{

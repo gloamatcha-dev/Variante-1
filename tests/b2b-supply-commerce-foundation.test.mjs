@@ -112,7 +112,7 @@ test("1: 059 owns its number, and only the reviewed 060 follows it", () => {
   // UNREVIEWED appeared above it. Reviewed in
   // tests/b2b-payment-delivery-foundation.test.mjs.
   const numbers = files.map(f => Number(f.slice(0, 3))).filter(n => Number.isInteger(n));
-  assert.strictEqual(Math.max(...numbers), 70, "065 must be the newest migration");
+  assert.strictEqual(Math.max(...numbers), 71, "065 must be the newest migration");
   // PACKAGE 5A ADDED MIGRATION 061: the pending agreement writer - one
   // SECURITY DEFINER function and its EXECUTE grant to service_role. It
   // adds no table, no column, no policy and no table privilege, and it
@@ -191,9 +191,21 @@ test("1: 059 owns its number, and only the reviewed 060 follows it", () => {
      // or B2B object. Reviewed in
      // tests/annual-plan-monthly-schedule.test.mjs.
      "069_annual_plan_monthly_schedule.sql",
-     "070_customer_rights_foundation.sql"],
+     "070_customer_rights_foundation.sql",
+     // MIGRATION 071: the expense ledger - one table, three audited
+     // SECURITY DEFINER writers, and no change to any existing table
+     // or row. Reviewed in tests/business-expenses-migration.test.mjs.
+     "071_business_expenses.sql"],
     "a migration above 059 appeared that this suite has not been reviewed against");
-  assert.strictEqual(files.filter(f => f.startsWith("071")).length, 0,
+  // MIGRATION 071 ADDED THE EXPENSE LEDGER - one table,
+  // public.business_expenses, plus three SECURITY DEFINER writers that
+  // audit under module 'finance'. It alters no existing table, rewrites
+  // no existing row and backfills nothing; 'finance' was already in
+  // admin_activity_log's module CHECK, which 070 widened. Re-pinned
+  // rather than deleted - what this guard protects is that nothing
+  // UNREVIEWED appeared. Reviewed in
+  // tests/business-expenses-migration.test.mjs.
+  assert.strictEqual(files.filter(f => f.startsWith("072")).length, 0,
     "061 must NOT be authored in this package");
   assert.strictEqual(files.filter(f => f.startsWith("059")).length, 1,
     "there must be exactly one 059");

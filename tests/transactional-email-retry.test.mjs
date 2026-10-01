@@ -1152,6 +1152,10 @@ test("regression: no migration was added and 022-033 are untouched", () => {
     if (name === "049_direct_cancellation_and_refund_lock.sql"
         || name === "050_inventory_foundation.sql"
         || name === "056_launch_discount.sql"
+    // MIGRATION 071 IS DELIBERATELY NOT A FIFTH EXCEPTION. The expense
+    // ledger adds no column to public.orders - it adds a table of its
+    // own and references orders(id) - so it belongs on the strict path
+    // with everything else rather than in this list.
         || name === "070_customer_rights_foundation.sql") {
       assert.ok(!/drop column/i.test(later), `${name} drops a column`);
       assert.ok(!/alter column/i.test(later), `${name} alters an existing column`);

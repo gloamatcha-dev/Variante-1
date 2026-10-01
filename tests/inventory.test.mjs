@@ -908,10 +908,15 @@ test("8h: the list reads areas and last movement in ONE query each", () => {
 
 test("8i: the inventory tab is real and no longer advertised as coming", () => {
   assert.match(shell, /view === "inventory" && <AdminInventory/);
-  // PACKAGE 5G made B2B real, so the "bald" list is down to Kosten.
-  // What this line protects is unchanged: the list still exists and
-  // still does not name Inventar.
-  assert.match(shell, /\["Kosten"\]\.map/);
+  // PACKAGE 5G made B2B real and migration 071 made KOSTEN real, so the
+  // "bald" list is now EMPTY. What this line protects is unchanged: the
+  // list still exists - it is where the next unfinished section would be
+  // named - and it still does not name Inventar.
+  assert.match(shell, /\(\[\] as string\[\]\)\.map/);
+  assert.ok(!/\["Kosten"\]\.map/.test(shell),
+    "Kosten is still advertised as coming");
+  assert.match(shell, /view === "costs" && maySeeSubscriptions && <AdminCosts/,
+    "the Kosten tab does not open the real screen");
   const soon = shell.slice(shell.indexOf("ops-nav-soon") - 400, shell.indexOf("ops-nav-soon"));
   assert.ok(!soon.includes("Inventar"), "Inventar is still listed as coming");
 });

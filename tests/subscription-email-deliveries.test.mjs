@@ -266,7 +266,11 @@ test("035 exists, is the only 035, and only 036 and 037 follow it", () => {
      // or B2B object. Reviewed in
      // tests/annual-plan-monthly-schedule.test.mjs.
      "069_annual_plan_monthly_schedule.sql",
-     "070_customer_rights_foundation.sql"],
+     "070_customer_rights_foundation.sql",
+     // MIGRATION 071: the expense ledger - one table, three audited
+     // SECURITY DEFINER writers, and no change to any existing table
+     // or row. Reviewed in tests/business-expenses-migration.test.mjs.
+     "071_business_expenses.sql"],
     "an unreviewed migration above 035 appeared"
   );
   // And 039 leaves this table entirely alone. An annual plan's one

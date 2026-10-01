@@ -829,7 +829,11 @@ test("55: this phase added no migration, and the only ones after it are 038 and 
      // or B2B object. Reviewed in
      // tests/annual-plan-monthly-schedule.test.mjs.
      "069_annual_plan_monthly_schedule.sql",
-     "070_customer_rights_foundation.sql"],
+     "070_customer_rights_foundation.sql",
+     // MIGRATION 071: the expense ledger - one table, three audited
+     // SECURITY DEFINER writers, and no change to any existing table
+     // or row. Reviewed in tests/business-expenses-migration.test.mjs.
+     "071_business_expenses.sql"],
     "an unreviewed migration appeared after 037");
   const sql039 = withoutComments(read("supabase/migrations/039_b2c_annual_plan_foundation.sql"));
   assert.ok(!sql039.includes("apply_order_refund_state_by_invoice"),

@@ -138,10 +138,18 @@ test("1: 060 exists, is the highest migration, and 061 is NOT authored", () => {
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql"));
   assert.ok(files.includes(MIGRATION), "060 is missing");
   const numbers = files.map(f => Number(f.slice(0, 3))).filter(Number.isInteger);
-  assert.strictEqual(Math.max(...numbers), 70, "065 must be the newest migration");
+  assert.strictEqual(Math.max(...numbers), 71, "065 must be the newest migration");
   assert.strictEqual(files.filter(f => f.startsWith("060")).length, 1,
     "there must be exactly one 060");
-  assert.strictEqual(files.filter(f => f.startsWith("071")).length, 0,
+  // MIGRATION 071 ADDED THE EXPENSE LEDGER - one table,
+  // public.business_expenses, plus three SECURITY DEFINER writers that
+  // audit under module 'finance'. It alters no existing table, rewrites
+  // no existing row and backfills nothing; 'finance' was already in
+  // admin_activity_log's module CHECK, which 070 widened. Re-pinned
+  // rather than deleted - what this guard protects is that nothing
+  // UNREVIEWED appeared. Reviewed in
+  // tests/business-expenses-migration.test.mjs.
+  assert.strictEqual(files.filter(f => f.startsWith("072")).length, 0,
     "061 must NOT be authored in this package");
 });
 
@@ -1226,9 +1234,9 @@ test("57: no migration up to 059 is modified in the working tree", () => {
     [], `060 must add a file, not edit a live migration: ${changed}`);
   // And 059 is exactly where it was left.
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
-  assert.strictEqual(files[files.length - 12], "059_b2b_supply_commerce_foundation.sql");
-  assert.strictEqual(files[files.length - 11], MIGRATION);
-  assert.strictEqual(files.length, 70);
+  assert.strictEqual(files[files.length - 13], "059_b2b_supply_commerce_foundation.sql");
+  assert.strictEqual(files[files.length - 12], MIGRATION);
+  assert.strictEqual(files.length, 71);
 });
 
 test("58: 060 is registered in the npm test script", () => {

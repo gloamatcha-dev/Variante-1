@@ -396,13 +396,29 @@ test("6: the navigation offers five real sections and fakes none", () => {
   // PACKAGE 5G added B2B, real from the day it appears: it opens the
   // read-only supply-contract list, not a placeholder - which is why
   // it also had to leave the "bald" list below.
-  assert.match(shell, /const \[view, setView\] = useState<"overview" \| "orders" \| "subscriptions" \| "annual" \| "rights" \| "inventory" \| "activity" \| "waitlist" \| "b2b">\("overview"\)/);
+  // MIGRATION 071 made KOSTEN real, so it joined the union - between
+  // inventory and activity, where its tab sits. It is real from the day
+  // it appears: it opens the finance screen, not a placeholder, which is
+  // also why it had to leave the "bald" list below.
+  assert.match(shell, /const \[view, setView\] = useState<"overview" \| "orders" \| "subscriptions" \| "annual" \| "rights" \| "inventory" \| "costs" \| "activity" \| "waitlist" \| "b2b">\("overview"\)/);
   // The "bald" list must no longer name a section that exists.
   const soon = shell.slice(shell.indexOf("ops-nav-soon") - 400, shell.indexOf("ops-nav-soon"));
   assert.ok(!soon.includes("Inventar"),
     "Inventar is still listed as coming while its tab exists");
-  assert.ok(soon.includes("B2B") && soon.includes("Kosten"),
-    "the two sections that really are still coming stopped saying so");
+  /*
+    AND NOTHING IS STILL COMING.
+
+    This used to assert that B2B and Kosten still said "bald". B2B
+    stopped being one in Package 5G and Kosten stopped being one when
+    migration 071 gave it a table to read, so the honest assertion is the
+    opposite one: the list is EMPTY, and it still names no section that
+    exists. The list itself stays - it is where the next unfinished
+    section would be named - which is what the markup check below is for.
+  */
+  assert.ok(!soon.includes("Kosten"),
+    "Kosten is listed as coming while its tab exists");
+  assert.ok(shell.includes("([] as string[]).map"),
+    "the \"bald\" list was deleted rather than emptied");
   assert.ok(!soon.includes("Aktivität"),
     "Aktivität is listed as coming while its tab exists");
   // ── PARSED FROM THE NAV ARRAY, NOT FOUND ANYWHERE IN THE FILE ──
@@ -426,6 +442,11 @@ test("6: the navigation offers five real sections and fakes none", () => {
     // commercial lists. Reviewed in tests/customer-rights-surfaces.test.mjs.
     ["rights", "Verbraucherrechte"],
     ["inventory", "Inventar"],
+    // MIGRATION 071: Kosten / Spesen / Deckungsbeitrag, beside the stock
+    // ledger - inventory answers quantities, this answers money, and
+    // they are deliberately neighbours rather than one screen. Real from
+    // the day it appears, which is why it also left the "bald" list.
+    ["costs", "Kosten"],
     ["activity", "Aktivität"],
     ["waitlist", "Launch List"],
     // PACKAGE 5G: the B2B supply contracts, last because it is the
@@ -439,15 +460,29 @@ test("6: the navigation offers five real sections and fakes none", () => {
   assert.match(shell, /view === "subscriptions" && maySeeSubscriptions && <AdminSubscriptions/,
     "the subscription tab renders nothing, or lost its role guard");
   assert.ok(!soon.includes("Abos"), "Abos is listed as coming while its tab exists");
-  // Coming sections are still named but are not buttons and open
-  // nothing. Two of them now, because Inventar graduated.
-  // PACKAGE 5G made B2B real, so the "bald" list is down to Kosten.
-  // The property is unchanged: the list exists and names no section
-  // that already has a tab.
-  assert.match(shell, /\["Kosten"\]\.map/);
+  /*
+    NOTHING IS STILL COMING, AND THE LIST STAYS ANYWAY.
+
+    Inventar graduated in Paket 4A.2, B2B in Package 5G, and Kosten when
+    migration 071 gave it a table to read - so the "bald" list is empty.
+    The property this has always asserted is unchanged and is the one
+    that matters: the list exists, and it names no section that already
+    has a tab. An empty list names nothing, which satisfies that
+    trivially - so the markup is checked instead, because a DELETED list
+    and an EMPTY one are different futures.
+  */
+  assert.match(shell, /\(\[\] as string\[\]\)\.map/);
   assert.match(shell, /<span className="ops-nav-soon"/);
+  /*
+    AND KOSTEN IS WIRED LIKE EVERY OTHER REAL SECTION: through the nav
+    array's own onClick, not a hand-written setView. So there is no
+    literal setView("costs") in the file - which is also what keeps this
+    assertion meaningful rather than something the map happens to satisfy.
+  */
   assert.ok(!/setView\("b2b"\)|setView\("costs"\)/.test(shell),
-    "a coming section is wired to a view");
+    "a section is wired by hand instead of through the nav array");
+  assert.match(shell, /view === "costs" && maySeeSubscriptions && <AdminCosts/,
+    "the Kosten tab renders nothing, or lost its role guard");
   // And Inventar IS wired to one, which is the other half of the claim.
   assert.match(shell, /view === "inventory" && <AdminInventory/,
     "the inventory tab renders nothing");
@@ -551,8 +586,23 @@ test("7: /api/admin gained orders and nothing else", () => {
   // case id, re-reads the approved amount from the database, and sends
   // the approval's own id as Stripe's idempotency key. Reviewed in
   // tests/withdrawal-refund-execution.test.mjs.
-  assert.deepEqual(dirs, ["activity", "annual-plans", "b2b", "customer-rights", "inventory", "launch",
-    "orders", "session", "subscriptions", "waitlist", "withdrawal-refund"]);
+  // MIGRATION 071 ADDED "costs": Kosten / Spesen / Deckungsbeitrag. It is
+  // the FIFTH class of admin route and the second of its kind - a
+  // read_sensitive LIST that also WRITES, exactly like customer-rights.
+  //
+  // What makes that safe is the same thing: every write leaves through an
+  // RPC. The three expense writers in migration 071 are SECURITY DEFINER
+  // and audit themselves under module 'finance' in the same transaction,
+  // and service_role holds no INSERT, UPDATE or DELETE on
+  // business_expenses at all - so there is no path through this route
+  // that could record a cost without recording who recorded it.
+  //
+  // It computes every figure server-side and accepts no total, margin or
+  // completeness flag from the browser. Reviewed in
+  // tests/business-expenses-migration.test.mjs.
+  assert.deepEqual(dirs, ["activity", "annual-plans", "b2b", "costs", "customer-rights",
+    "inventory", "launch", "orders", "session", "subscriptions", "waitlist",
+    "withdrawal-refund"]);
   const orderDirs = readdirSync(path.join(ROOT, "app/api/admin/orders"), { withFileTypes: true })
     .filter(e => e.isDirectory()).map(e => e.name).sort();
   // PAKET 4A.1B added the four actions, one route each rather than one

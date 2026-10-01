@@ -535,8 +535,16 @@ test("7c: this pass added no backend of any kind", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("071")),
-    "a migration 071 or beyond appeared");
+  // MIGRATION 071 ADDED THE EXPENSE LEDGER - one table,
+  // public.business_expenses, plus three SECURITY DEFINER writers that
+  // audit under module 'finance'. It alters no existing table, rewrites
+  // no existing row and backfills nothing; 'finance' was already in
+  // admin_activity_log's module CHECK, which 070 widened. Re-pinned
+  // rather than deleted - what this guard protects is that nothing
+  // UNREVIEWED appeared. Reviewed in
+  // tests/business-expenses-migration.test.mjs.
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("072")),
+    "a migration 072 or beyond appeared");
   for (const banned of ['"use server"', "fetch(", "supabase", "resend",
                         "localStorage", "sessionStorage", "<form", "onSubmit"]) {
     assert.ok(!page.toLowerCase().includes(banned.toLowerCase()),

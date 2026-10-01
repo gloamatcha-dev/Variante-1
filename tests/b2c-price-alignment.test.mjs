@@ -167,11 +167,11 @@ test("2e: 054 is still the price migration, and adds no schema", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(files.length, 70);
-  assert.equal(files[files.length - 17], MIGRATION,
+  assert.equal(files.length, 71);
+  assert.equal(files[files.length - 18], MIGRATION,
     "054 is no longer where its own number puts it");
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 70), [],
-    "a migration 071 or beyond appeared");
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 71), [],
+    "a migration 072 or beyond appeared");
   for (const banned of ["create table", "create function", "create policy",
                         "grant ", "revoke ", "add column"]) {
     assert.ok(!sql.toLowerCase().includes(banned), `054 does ${banned} - it is a data correction`);

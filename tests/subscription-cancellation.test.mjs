@@ -2157,7 +2157,11 @@ test("034: it is the next free number and 022-033 are untouched", () => {
      // or B2B object. Reviewed in
      // tests/annual-plan-monthly-schedule.test.mjs.
      "069_annual_plan_monthly_schedule.sql",
-     "070_customer_rights_foundation.sql"],
+     "070_customer_rights_foundation.sql",
+     // MIGRATION 071: the expense ledger - one table, three audited
+     // SECURITY DEFINER writers, and no change to any existing table
+     // or row. Reviewed in tests/business-expenses-migration.test.mjs.
+     "071_business_expenses.sql"],
     "an unreviewed migration above 034 appeared"
   );
   // AND 039 REDEFINES NOTHING 034 OWNS. It is a prepaid plan with no
