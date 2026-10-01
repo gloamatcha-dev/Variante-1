@@ -556,8 +556,47 @@ alter table public.withdrawal_requests
 alter table public.withdrawal_requests
   add column if not exists refund_completed_email_sent_at timestamptz;
 
--- A sent-at instant exists exactly when the mail was sent. 'sending'
--- and 'failed' have not sent anything, so neither may carry one.
+-- ── AND THE INSTANT THAT MAKES 'sending' AN ACTUAL LEASE ──────
+--
+-- 'sending' WAS CALLED A LEASE AND WAS NOT ONE. The claim set it, and
+-- only the sending process itself ever cleared it - from its own catch
+-- block. If that process died in between (the container recycled, the
+-- request timed out, the instance was replaced), nothing reset the row:
+-- 'sending' was not in the claim's predicate, so it could never be
+-- re-won, and the shape CHECK forced sent_at to stay NULL, so there was
+-- no timestamp to expire on either.
+--
+-- The result was the worst failure this feature can have. The money has
+-- left - refund_state is 'executed' and Stripe holds the reference - and
+-- the customer is never told, permanently, with no mechanism that would
+-- ever notice.
+--
+-- So the lease gets the thing a lease needs: a claim instant, and an age
+-- after which the claim is forfeit. THE PATTERN IS MIGRATION 039'S, not
+-- a new one: claim_due_annual_plan_deliveries re-claims a delivery whose
+-- claimed_at is older than its six-hour lease, with exactly this shape.
+-- No queue table, no cron, no second architecture.
+--
+-- FIFTEEN MINUTES, not six hours. 039 leases order minting, where a
+-- duplicate costs a box and a charge, so it waits long enough to be sure
+-- the first worker is gone. Here a duplicate costs one extra email and
+-- the thing being protected is a customer waiting to hear that their
+-- refund happened - so the window is the smallest one that is still far
+-- longer than any honest Resend call, which takes seconds.
+
+alter table public.withdrawal_requests
+  add column if not exists refund_completed_email_claimed_at timestamptz;
+
+-- THE FOUR STATES, EACH WITH EXACTLY THE INSTANTS THAT BELONG TO IT.
+--
+--   NULL       never part of the flow      no instants
+--   'sending'  a live claim                claimed_at, no sent_at
+--   'sent'     terminal                    sent_at, claim released
+--   'failed'   retryable                   no instants
+--
+-- Stating it as one CHECK is what stops a half-written state existing:
+-- a 'sending' row with no claimed_at would be unexpirable again, which
+-- is precisely the bug this column exists to remove.
 do $$
 begin
   if not exists (
@@ -568,11 +607,21 @@ begin
     alter table public.withdrawal_requests
       add constraint withdrawal_requests_refund_completed_email_shape_check
       check (
-        (refund_completed_email_status = 'sent'
-         and refund_completed_email_sent_at is not null)
+        (refund_completed_email_status is null
+         and refund_completed_email_sent_at is null
+         and refund_completed_email_claimed_at is null)
         or
-        (refund_completed_email_status is distinct from 'sent'
-         and refund_completed_email_sent_at is null)
+        (refund_completed_email_status = 'sending'
+         and refund_completed_email_sent_at is null
+         and refund_completed_email_claimed_at is not null)
+        or
+        (refund_completed_email_status = 'sent'
+         and refund_completed_email_sent_at is not null
+         and refund_completed_email_claimed_at is null)
+        or
+        (refund_completed_email_status = 'failed'
+         and refund_completed_email_sent_at is null
+         and refund_completed_email_claimed_at is null)
       );
   end if;
 end
@@ -1036,6 +1085,7 @@ grant update (
   item_resolution_at,
   refund_completed_email_status,
   refund_completed_email_sent_at,
+  refund_completed_email_claimed_at,
   idempotency_key,
   internal_note,
   updated_at
@@ -1727,9 +1777,103 @@ begin
     return pg_catalog.jsonb_build_object('result', 'not_found');
   end if;
 
-  -- A RETURN EVENT MOVES case_state to 'return_in_transit' or
-  -- 'return_received'. On a decided case that is a reopening, and on a
-  -- case whose payout is already approved it is a step backwards.
+  -- ══════════════════════════════════════════════════════════
+  -- A RETURN EVENT USUALLY MOVES THE CASE. ONE OF THEM MUST NOT.
+  -- ══════════════════════════════════════════════════════════
+  --
+  -- Both events normally advance case_state - to 'return_in_transit' or
+  -- to 'return_received' - and doing that to a decided case reopens it.
+  -- So the guards below still apply, with ONE carefully bounded
+  -- exception, and the exception exists because of how BGB 357 Abs. 4
+  -- actually works.
+  --
+  -- THE SEQUENCE THAT MAKES IT NECESSARY. Dispatch proof alone is
+  -- enough to release the money, so this is a legitimate and ordinary
+  -- order of events:
+  --
+  --   1. return_requested
+  --   2. dispatch proof recorded        -> case may be paid
+  --   3. refund approved                -> case_state refund_pending
+  --   4. Stripe confirms                -> case_state refunded
+  --   5. THE PARCEL PHYSICALLY ARRIVES
+  --
+  -- Step 5 is a real fact about real goods now sitting in the shop, and
+  -- return_received_at exists to hold exactly it. Refusing to record it
+  -- would push a structured fact into internal_note - prose - which is
+  -- the same mistake this migration refuses to make with scope_note.
+  --
+  -- SO 'received' MAY BE APPENDED AS EVIDENCE AFTER A PAYOUT, and it
+  -- writes TWO columns: return_received_at and updated_at. Nothing
+  -- else. case_state is untouched, which is what keeps a paid case
+  -- looking paid - and refund_state, refund_amount_cents,
+  -- refund_operation_id, confirmed_value_loss_cents and
+  -- deliveries_permanently_stopped_at are all absent from the UPDATE,
+  -- so no payout fact can move.
+  --
+  -- IT IS BOUNDED BY FOUR CONDITIONS, every one of them necessary:
+  --
+  --   the event is 'received'          a late dispatch proof is NOT
+  --                                    appendable. Proof of posting is
+  --                                    what RELEASES money; recording
+  --                                    it after the money is gone
+  --                                    decides nothing and would only
+  --                                    be a state move.
+  --   we actually asked for the goods  return_requirement must be
+  --                                    'return_requested'. Nobody owes
+  --                                    us a parcel otherwise.
+  --   we have not recorded it already  else 'unchanged', so a repeated
+  --                                    call is the same fact.
+  --   dispatch proof already exists    the workflow context. A payout
+  --                                    on a return_requested case is
+  --                                    only possible with one of the
+  --                                    two timestamps, and the other
+  --                                    one is handled above - so this
+  --                                    is provably reachable and
+  --                                    provably the right precondition.
+  --
+  -- 'rejected_late' AND 'closed' STAY FULLY IMMUTABLE. Nothing in the
+  -- repository's semantics says goods arrive on a case we refused as
+  -- late or finished administratively, and widening the exception to
+  -- cover them would be inventing a workflow rather than serving one.
+
+  if p_event = 'received'
+     and v_case.case_state in ('refund_pending', 'refunded')
+     and v_case.return_requirement = 'return_requested'
+     and v_case.return_dispatch_proof_at is not null then
+
+    if v_case.return_received_at is not null then
+      return pg_catalog.jsonb_build_object('result', 'unchanged',
+                                           'case_state', v_case.case_state);
+    end if;
+
+    -- EVIDENCE ONLY. Two columns, and case_state is not one of them.
+    update public.withdrawal_requests
+       set return_received_at = v_at,
+           updated_at         = pg_catalog.now()
+     where id = p_withdrawal_id
+    returning * into v_case;
+
+    perform public.record_admin_activity(
+      p_actor_user_id, 'customer_rights', 'withdrawal.return_received_after_payout',
+      'withdrawal', p_withdrawal_id::text,
+      'Rücksendung nach Auszahlung eingegangen', gen_random_uuid(),
+      pg_catalog.jsonb_build_object(
+        'event', p_event,
+        'received_at', v_at,
+        'case_state_unchanged', v_case.case_state,
+        'refund_state_unchanged', v_case.refund_state
+      )
+    );
+
+    return pg_catalog.jsonb_build_object(
+      'result', 'received_evidence_recorded',
+      'case_state', v_case.case_state,
+      'refund_state', v_case.refund_state,
+      'return_received_at', v_case.return_received_at
+    );
+  end if;
+
+  -- EVERY OTHER EVENT ON A DECIDED CASE IS STILL REFUSED.
   if v_case.case_state in ('refund_pending', 'refunded', 'rejected_late', 'closed') then
     return pg_catalog.jsonb_build_object('result', 'case_closed',
                                          'case_state', v_case.case_state);
@@ -2700,9 +2844,10 @@ declare
   v_case public.withdrawal_requests;
 begin
   update public.withdrawal_requests
-     set refund_completed_email_status = 'sending',
-         refund_completed_email_sent_at = null,
-         updated_at = pg_catalog.now()
+     set refund_completed_email_status     = 'sending',
+         refund_completed_email_sent_at    = null,
+         refund_completed_email_claimed_at = pg_catalog.now(),
+         updated_at                        = pg_catalog.now()
    where id = p_withdrawal_id
      -- THE MONEY REALLY MOVED, and this database really recorded it.
      and refund_state = 'executed'
@@ -2714,8 +2859,22 @@ begin
      -- payout - the unique index on refund_operation_id guarantees it -
      -- so there is no second fact, no watermark, and re-claiming 'sent'
      -- could only ever produce a duplicate.
+     --
+     -- A FORFEIT LEASE IS CLAIMABLE, AND THAT IS THE WHOLE RECOVERY
+     -- MECHANISM. A 'sending' row whose claim is older than the lease
+     -- belongs to a process that is not coming back, so the next caller
+     -- takes it over. Without this branch a crash between the claim and
+     -- the send left the row stuck in 'sending' forever - money gone,
+     -- customer never told, nothing able to notice.
+     --
+     -- Same predicate shape as migration 039's delivery lease, so the
+     -- two read alike and neither needs a scheduler.
      and (refund_completed_email_status is null
-          or refund_completed_email_status = 'failed')
+          or refund_completed_email_status = 'failed'
+          or (refund_completed_email_status = 'sending'
+              and refund_completed_email_claimed_at is not null
+              and refund_completed_email_claimed_at
+                    < pg_catalog.now() - interval '15 minutes'))
   returning * into v_case;
 
   if not found then
@@ -2758,9 +2917,14 @@ declare
   v_case public.withdrawal_requests;
 begin
   update public.withdrawal_requests
-     set refund_completed_email_status  = 'sent',
-         refund_completed_email_sent_at = pg_catalog.now(),
-         updated_at                     = pg_catalog.now()
+     set refund_completed_email_status     = 'sent',
+         refund_completed_email_sent_at    = pg_catalog.now(),
+         -- THE LEASE IS RELEASED, not left dangling. 'sent' is terminal
+         -- and unclaimable, so a stale claimed_at on it could never do
+         -- harm - but it would be a lie about a claim nobody holds, and
+         -- the shape CHECK above refuses it.
+         refund_completed_email_claimed_at = null,
+         updated_at                        = pg_catalog.now()
    where id = p_withdrawal_id
   returning * into v_case;
 
@@ -2796,9 +2960,12 @@ declare
   v_case public.withdrawal_requests;
 begin
   update public.withdrawal_requests
-     set refund_completed_email_status  = 'failed',
-         refund_completed_email_sent_at = null,
-         updated_at                     = pg_catalog.now()
+     set refund_completed_email_status     = 'failed',
+         refund_completed_email_sent_at    = null,
+         -- Released immediately: 'failed' is claimable right away, so
+         -- the retry does not wait out the lease it just gave up.
+         refund_completed_email_claimed_at = null,
+         updated_at                        = pg_catalog.now()
    where id = p_withdrawal_id
      and refund_completed_email_status = 'sending'
   returning * into v_case;

@@ -5,21 +5,33 @@
 --                         (i.e. zero rows with verdict = 'FAIL').
 -- Rows with verdict 'INFO' are context, never a blocker.
 --
--- EXPECTED HEALTHY RESULT:  0 FAIL / 21 PASS / 4 INFO
+-- EXPECTED HEALTHY RESULT:  0 FAIL / 23 PASS / 4 INFO
 --
--- Twenty-one verdict-bearing checks - 10-14, 20-27, 30-33 and 40-43 -
+-- Twenty-three verdict-bearing checks - 10-14, 20-29, 30-33 and 40-43 -
 -- and four INFO rows (50-53), plus the SUMMARY row, which counts only
--- the twenty-five above it. The SUMMARY is always computed from the
+-- the twenty-seven above it. The SUMMARY is always computed from the
 -- actual rows; this line is the expectation to compare it against,
 -- never the source of it. Verified: a fresh apply of migrations 001-070
 -- to a real PostgreSQL 17 instance returns exactly
--- 0 FAIL / 21 PASS / 4 INFO.
+-- 0 FAIL / 23 PASS / 4 INFO.
 --
--- 26 and 27 are the newest, and they check FUNCTION BODIES rather than
--- names. Every other check in this file would pass against a 070 whose
--- admin writers still let a refunded case be reopened, because nothing
--- about the schema would differ - so the terminal-state guard is
--- verified where it actually lives.
+-- 26 THROUGH 29 CHECK FUNCTION BODIES rather than names, and they are
+-- the only checks here that could. Every other check in this file would
+-- pass against a 070 whose admin writers let a refunded case be
+-- reopened, or whose completion-mail lease could never be recovered,
+-- because nothing about the schema would differ. So each of those four
+-- rules is verified where it actually lives:
+--
+--   26  no case-fact writer may reopen a decided case
+--   27  a failed payout is retried, never re-approved
+--   28  but a late PHYSICAL RECEIPT is still appendable as evidence
+--   29  and a crashed completion-mail claim becomes reclaimable
+--
+-- 26 and 28 are deliberately a pair. The invariant is not "refuse
+-- everything after a payout" - it is "ordinary state transitions cannot
+-- reopen a decided case, while the arrival of goods may be recorded
+-- without moving it". Checking only 26 would pin the opposite of the
+-- intended design.
 --
 -- ══════════════════════════════════════════════════════════════
 -- WHY A POSTCHECK AND NOT JUST THE PREFLIGHT
@@ -127,15 +139,16 @@ checks as (
                       'delivery_recorded_at', 'delivery_recorded_by')) = 4
               then 'PASS' else 'FAIL' end as verdict
 
-  -- Seventeen: the ten earlier passes established, plus the five that
-  -- record WHICH goods and how many a case is about (with the partial
-  -- outbound-shipping decision) and the two that track the completion
-  -- mail. A missing one means a half-applied migration.
+  -- Eighteen: the ten earlier passes established, the five that record
+  -- WHICH goods and how many a case is about (with the partial
+  -- outbound-shipping decision), the two that track the completion mail,
+  -- and the lease instant that makes its 'sending' status recoverable.
+  -- A missing one means a half-applied migration.
   union all
   select 11, 'shape',
-         'all seventeen withdrawal case columns are present',
-         'the ten case/refund columns, the five item-resolution columns and the two completion-mail columns',
-         (select count(*)::text || ' of 17: '
+         'all eighteen withdrawal case columns are present',
+         'the ten case/refund columns, the five item-resolution columns and the three completion-mail columns',
+         (select count(*)::text || ' of 18: '
                  || coalesce(string_agg(column_name, ', ' order by column_name), '<none>')
             from wr_cols where column_name in
               ('case_state', 'timeliness', 'deadline_date', 'seal_state',
@@ -145,7 +158,8 @@ checks as (
                'resolved_order_item_id', 'resolved_item_quantity',
                'partial_shipping_treatment', 'item_resolution_by',
                'item_resolution_at', 'refund_completed_email_status',
-               'refund_completed_email_sent_at')),
+               'refund_completed_email_sent_at',
+               'refund_completed_email_claimed_at')),
          case when (select count(*) from wr_cols where column_name in
                      ('case_state', 'timeliness', 'deadline_date', 'seal_state',
                       'return_requirement', 'refund_state', 'refund_provider_reference',
@@ -154,7 +168,8 @@ checks as (
                       'resolved_order_item_id', 'resolved_item_quantity',
                       'partial_shipping_treatment', 'item_resolution_by',
                       'item_resolution_at', 'refund_completed_email_status',
-                      'refund_completed_email_sent_at')) = 17
+                      'refund_completed_email_sent_at',
+                      'refund_completed_email_claimed_at')) = 18
               then 'PASS' else 'FAIL' end
 
   union all
@@ -424,6 +439,84 @@ checks as (
                    and (select count(*) from fn
                           where proname = 'admin_record_withdrawal_refund_execution'
                             and prosrc like '%not in (''approved_for_payout'', ''failed'')%') = 1
+              then 'PASS' else 'FAIL' end
+
+  -- AND A LATE PHYSICAL RECEIPT IS STILL RECORDABLE.
+  --
+  -- THE INVARIANT IS NOT "the return writer refuses everything after a
+  -- payout". It is narrower and more useful: ordinary case-state
+  -- transitions cannot reopen a decided case, but the physical arrival
+  -- of goods may be APPENDED as evidence without moving the case.
+  --
+  -- BGB 357 Abs. 4 lets dispatch proof alone release the money, so
+  -- requested -> proof -> approved -> paid -> parcel arrives is an
+  -- ordinary sequence, and return_received_at exists to hold that last
+  -- fact. A postcheck that demanded blanket refusal would pin the
+  -- opposite of the intended design.
+  --
+  -- So this asserts the evidence branch EXISTS, that it writes only the
+  -- receipt instant and updated_at, and that it is bounded: received
+  -- only, return_requested only, prior dispatch proof required.
+  union all
+  select 28, 'shape',
+         'a late physical receipt is appendable without reopening the case',
+         'the evidence branch exists, writes only return_received_at and updated_at, and is bounded',
+         coalesce((select
+             'branch=' || (prosrc like '%received_evidence_recorded%')::text
+          || ' requires_requested=' || (prosrc like '%return_requirement = ''return_requested''%')::text
+          || ' requires_proof=' || (prosrc like '%return_dispatch_proof_at is not null%')::text
+             from fn where proname = 'admin_record_withdrawal_return' limit 1), '<missing>'),
+         case when (select count(*) from fn
+                      where proname = 'admin_record_withdrawal_return'
+                        -- the branch, and the result that names it
+                        and prosrc like '%received_evidence_recorded%'
+                        -- bounded to a case where goods were actually owed
+                        and prosrc like '%return_requirement = ''return_requested''%'
+                        and prosrc like '%return_dispatch_proof_at is not null%'
+                        -- and it still refuses everything else on a decided case
+                        and prosrc like
+                              '%case_state in (''refund_pending'', ''refunded'', ''rejected_late'', ''closed'')%'
+                        -- the evidence UPDATE must not carry a case_state
+                        -- assignment: that is the whole difference between
+                        -- appending a fact and reopening a case.
+                        and prosrc like '%set return_received_at = v_at,%'
+                        and prosrc like '%updated_at         = pg_catalog.now()%') = 1
+              then 'PASS' else 'FAIL' end
+
+  -- AND 'sending' IS AN ACTUAL LEASE.
+  --
+  -- It was called one and was not. The claim set 'sending' and only the
+  -- sending process cleared it, from its own catch block - so a process
+  -- that died in between left the row stuck forever: 'sending' was not
+  -- claimable, and the shape CHECK forced sent_at NULL, so there was no
+  -- instant to expire on. The money had left and the customer was never
+  -- told, permanently, with nothing able to notice.
+  --
+  -- The recovery is the same shape as migration 039's delivery lease: a
+  -- claim instant, and an age after which the claim is forfeit.
+  union all
+  select 29, 'shape',
+         'a crashed completion-mail claim becomes reclaimable',
+         'the claim stamps a lease instant and re-wins a sending claim older than the lease',
+         coalesce((select
+             'stamps=' || (prosrc like '%refund_completed_email_claimed_at = pg_catalog.now()%')::text
+          || ' expires=' || (prosrc like '%interval ''15 minutes''%')::text
+             from fn where proname = 'claim_withdrawal_refund_completed_email' limit 1), '<missing>'),
+         case when (select count(*) from fn
+                      where proname = 'claim_withdrawal_refund_completed_email'
+                        and prosrc like '%refund_completed_email_claimed_at = pg_catalog.now()%'
+                        and prosrc like '%refund_completed_email_status = ''sending''%'
+                        and prosrc like '%interval ''15 minutes''%'
+                        -- 'sent' is still terminal: it must NOT appear as a
+                        -- claimable status beside null and failed.
+                        and prosrc like '%refund_completed_email_status = ''failed''%') = 1
+                   -- and both marks release the lease
+                   and (select count(*) from fn
+                          where proname = 'mark_withdrawal_refund_completed_email_sent'
+                            and prosrc like '%refund_completed_email_claimed_at = null%') = 1
+                   and (select count(*) from fn
+                          where proname = 'mark_withdrawal_refund_completed_email_failed'
+                            and prosrc like '%refund_completed_email_claimed_at = null%') = 1
               then 'PASS' else 'FAIL' end
 
   -- ── AND THE BROWSER GAINED NOTHING ────────────────────────

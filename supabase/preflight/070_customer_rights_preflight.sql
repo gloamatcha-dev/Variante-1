@@ -16,14 +16,19 @@
 --
 -- WHAT THE REVIEW PASSES CHANGED, AND WHY THE COUNT DID NOT.
 --
--- Migration 070 grew across two review passes: ten then seventeen
--- columns, fifteen then nineteen functions, six then nine constraints,
--- and one more queue predicate. Every one of those belongs to a check
--- that ALREADY EXISTS and works by enumerating names, so each was added
--- to its list rather than given a row of its own: check 31 now names
--- seventeen columns, check 33 nineteen functions, check 34 nine
+-- Migration 070 grew across three review passes: ten, then seventeen,
+-- then eighteen columns; fifteen then nineteen functions; six then nine
+-- constraints; and one more queue predicate. Every one of those belongs
+-- to a check that ALREADY EXISTS and works by enumerating names, so each
+-- was added to its list rather than given a row of its own: check 31 now
+-- names eighteen columns, check 33 nineteen functions, check 34 nine
 -- constraints, and check 26 refuses the one-in-flight predicate as well
 -- as the freeze.
+--
+-- The LAST pass changed nothing else here, because its two fixes are
+-- guard logic inside function bodies plus one column. A preflight
+-- verifies that 070 has NOT been applied; function bodies that do not
+-- exist yet need no checking, which is why only the column list moved.
 --
 -- Twenty-seven and five are therefore still correct - and a preflight
 -- whose header count disagreed with its SUMMARY would be the first
@@ -363,12 +368,14 @@ checks as (
               then 'PASS' else 'FAIL' end
 
   union all
-  -- Seventeen column names now. The ten from the earlier passes, plus
-  -- the seven the residual pass added: the five that record WHICH goods
-  -- and how many a case is about (with the partial outbound-shipping
-  -- decision), and the two that track the completion mail. All checked
-  -- for the same reason as the rest - a name already present would mean
-  -- 070 is partially applied.
+  -- Eighteen column names now. The ten from the earlier passes, the
+  -- seven the residual pass added - the five that record WHICH goods and
+  -- how many a case is about, with the partial outbound-shipping
+  -- decision, plus the two that track the completion mail - and the one
+  -- the final pass added: the instant that makes the mail's 'sending'
+  -- status an actual lease rather than a state nothing can leave. All
+  -- checked for the same reason as the rest: a name already present
+  -- would mean 070 is partially applied.
   select 31, '070-clean',
          'withdrawal_requests has none of the case columns yet', 'none',
          (select coalesce(string_agg(column_name, ', ' order by column_name), 'none')
@@ -380,7 +387,8 @@ checks as (
                'resolved_order_item_id', 'resolved_item_quantity',
                'partial_shipping_treatment', 'item_resolution_by',
                'item_resolution_at', 'refund_completed_email_status',
-               'refund_completed_email_sent_at')),
+               'refund_completed_email_sent_at',
+               'refund_completed_email_claimed_at')),
          case when (select count(*) from wr_cols where column_name in
                      ('case_state', 'timeliness', 'deadline_date', 'seal_state',
                       'refund_state', 'deliveries_frozen_at', 'idempotency_key',
@@ -389,7 +397,8 @@ checks as (
                       'resolved_order_item_id', 'resolved_item_quantity',
                       'partial_shipping_treatment', 'item_resolution_by',
                       'item_resolution_at', 'refund_completed_email_status',
-                      'refund_completed_email_sent_at')) = 0
+                      'refund_completed_email_sent_at',
+                      'refund_completed_email_claimed_at')) = 0
               then 'PASS' else 'FAIL' end
 
   union all

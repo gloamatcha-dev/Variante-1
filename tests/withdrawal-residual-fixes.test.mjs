@@ -193,12 +193,31 @@ test("A10: the claim cannot be won before the money moved", () => {
   assert.ok(CLAIM.includes("returning * into v_case"));
 });
 
-test("A11: 'sent' is terminal - only null or failed may be claimed", () => {
-  assert.ok(CLAIM.includes("and (refund_completed_email_status is null")
-         && CLAIM.includes("or refund_completed_email_status = 'failed')"),
-    "the claimable statuses are not exactly null and failed");
-  assert.ok(!/refund_completed_email_status = 'sent'\s*\)/.test(CLAIM),
+test("A11: 'sent' is terminal - null, failed and a FORFEIT lease may be claimed", () => {
+  assert.ok(CLAIM.includes("and (refund_completed_email_status is null"),
+    "a fresh case is not claimable");
+  assert.ok(CLAIM.includes("or refund_completed_email_status = 'failed'"),
+    "a failed send is not retryable");
+  // THE THIRD BRANCH IS THE RECOVERY. A 'sending' row whose claim is
+  // older than the lease belongs to a process that is not coming back.
+  assert.ok(CLAIM.includes("or (refund_completed_email_status = 'sending'"),
+    "a crashed claim can never be taken over");
+  assert.ok(CLAIM.includes("refund_completed_email_claimed_at")
+         && CLAIM.includes("interval '15 minutes'"),
+    "the lease has no expiry to measure");
+  // And 'sent' is still never claimable - that is what stops a duplicate.
+  assert.ok(!/refund_completed_email_status = 'sent'/.test(CLAIM),
     "'sent' is claimable, which would duplicate the mail");
+});
+
+test("A11b: both marks release the lease, so no state holds a dead claim", () => {
+  assert.ok(MARK_SENT.includes("refund_completed_email_claimed_at = null"),
+    "a sent row keeps a claim nobody holds");
+  assert.ok(MARK_FAILED.includes("refund_completed_email_claimed_at = null"),
+    "a failed row keeps its lease, so the retry would wait it out");
+  // 'failed' is claimable immediately BECAUSE the lease is released.
+  assert.ok(MARK_FAILED.includes("and refund_completed_email_status = 'sending'"),
+    "a late failure report can overwrite a concurrent success");
 });
 
 test("A12: a failure is retryable and never touches the refund", () => {
@@ -456,15 +475,25 @@ test("W1: the five resolution columns move as one fact", () => {
   }
 });
 
-test("W2: the completion-mail pair cannot be half-written", () => {
+test("W2: the completion-mail triple cannot be half-written", () => {
   assert.match(MIGRATION, /withdrawal_requests_refund_completed_email_shape_check/);
   const shape = MIGRATION.slice(
     MIGRATION.indexOf("withdrawal_requests_refund_completed_email_shape_check"),
     MIGRATION.indexOf("end\n$$;",
       MIGRATION.indexOf("withdrawal_requests_refund_completed_email_shape_check")));
-  assert.ok(shape.includes("refund_completed_email_status = 'sent'"));
-  assert.ok(shape.includes("refund_completed_email_sent_at is not null"));
-  assert.ok(shape.includes("is distinct from 'sent'"));
+  // FOUR STATES, each with exactly the instants that belong to it. The
+  // load-bearing one is 'sending' REQUIRING a claim instant: a sending
+  // row without one would be unexpirable, which is the original bug.
+  assert.ok(shape.includes("refund_completed_email_status = 'sending'")
+         && shape.includes("refund_completed_email_claimed_at is not null"),
+    "a sending row may exist with no lease instant to expire on");
+  assert.ok(shape.includes("refund_completed_email_status = 'sent'")
+         && shape.includes("refund_completed_email_sent_at is not null"),
+    "a sent row may exist with no sent instant");
+  assert.ok(shape.includes("refund_completed_email_status = 'failed'"),
+    "the failed state is not described");
+  assert.ok(shape.includes("refund_completed_email_status is null"),
+    "the never-in-the-flow state is not described");
 });
 
 test("W3: the item reference cannot be deleted out from under a case", () => {
@@ -659,20 +688,92 @@ test("T2: and refuses one whose payout is already approved", () => {
   }
 });
 
-test("T3: both guards run BEFORE the writer touches anything", () => {
+test("T3: both guards run BEFORE any state-advancing write", () => {
   for (const name of CASE_FACT_WRITERS) {
     const body = fnBody(name);
     const terminal = body.indexOf(TERMINAL_GUARD);
     const payout = body.indexOf(PAYOUT_GUARD);
-    const write = body.indexOf("update public.withdrawal_requests");
-    assert.ok(write > -1, `${name} no longer writes`);
-    assert.ok(terminal < write, `${name} writes before the terminal guard`);
-    assert.ok(payout < write, `${name} writes before the payout guard`);
-    // And it reads the row under a lock first, so there is a state to test.
+    assert.ok(terminal > -1 && payout > -1, `${name} lost a guard`);
+
+    // It reads the row under a lock first, so there is a state to test.
     const read = body.indexOf("where id = p_withdrawal_id for update");
     assert.ok(read > -1, `${name} does not lock the row before deciding`);
     assert.ok(read < terminal, `${name} tests a state it has not read`);
+
+    // EVERY WRITE THAT ADVANCES case_state MUST FOLLOW THE GUARDS.
+    //
+    // Checking "the first UPDATE follows the guards" would be wrong for
+    // admin_record_withdrawal_return, which deliberately has an earlier
+    // UPDATE: the late-receipt evidence append, which sets no case_state
+    // and so cannot reopen anything. What matters is the assignment, not
+    // the statement count.
+    const advancing = [...body.matchAll(/case_state\s+=|case_state\s*=/g)]
+      .map(m => m.index)
+      // the guards themselves read case_state with `in (`, not `=`
+      .filter(i => !body.slice(i - 60, i).includes("case_state in ("));
+    for (const at of advancing) {
+      assert.ok(at > terminal, `${name} assigns case_state before the terminal guard`);
+      assert.ok(at > payout, `${name} assigns case_state before the payout guard`);
+    }
   }
+});
+
+test("T3b: the one write that precedes the guards cannot reopen a case", () => {
+  // admin_record_withdrawal_return appends a late physical receipt before
+  // the guards run. That is the intended design, and it is only safe
+  // because the UPDATE touches exactly two columns.
+  const body = fnBody("admin_record_withdrawal_return");
+  const terminal = body.indexOf(TERMINAL_GUARD);
+  const firstWrite = body.indexOf("update public.withdrawal_requests");
+  assert.ok(firstWrite < terminal,
+    "the evidence append no longer precedes the guards - did the branch go?");
+
+  const evidence = body.slice(firstWrite, body.indexOf("returning * into v_case", firstWrite));
+  assert.ok(evidence.includes("return_received_at = v_at"));
+  assert.ok(evidence.includes("updated_at         = pg_catalog.now()"));
+  // Nothing about the case or the payout may appear in it.
+  for (const forbidden of ["case_state", "refund_state", "refund_amount_cents",
+                           "refund_operation_id", "confirmed_value_loss_cents",
+                           "deliveries_permanently_stopped_at",
+                           "return_dispatch_proof_at"]) {
+    assert.ok(!evidence.includes(forbidden),
+      `the evidence append writes ${forbidden}`);
+  }
+  // And it is bounded to a case where goods were genuinely owed.
+  assert.ok(body.includes("v_case.return_requirement = 'return_requested'"));
+  assert.ok(body.includes("v_case.return_dispatch_proof_at is not null"));
+  assert.ok(body.includes("v_case.case_state in ('refund_pending', 'refunded')"),
+    "the evidence branch is not bounded to the two payout states");
+  // rejected_late and closed are NOT in that list, so they stay immutable.
+  assert.ok(!/case_state in \('refund_pending', 'refunded', 'rejected_late'/.test(
+    body.slice(0, firstWrite)),
+    "the evidence branch was widened to rejected_late or closed");
+});
+
+test("T3c: and only 'received' may be appended - never a late dispatch proof", () => {
+  const body = fnBody("admin_record_withdrawal_return");
+  const branch = body.indexOf("if p_event = 'received'");
+  assert.ok(branch > -1, "the evidence branch is not scoped to the received event");
+  assert.ok(branch < body.indexOf("update public.withdrawal_requests"),
+    "the evidence append is not inside the received-only branch");
+  // Proof of posting is what RELEASES money; recording it afterwards
+  // decides nothing and would only be a state move.
+  assert.ok(body.includes("'received_evidence_recorded'"));
+});
+
+test("T3d: the application sends the return-received mail for BOTH results", () => {
+  // The customer hears "wir haben deine Rücksendung" whether the receipt
+  // advanced the case or was appended after the payout - it means the
+  // same thing to them. 'unchanged' is in neither list, so a repeat call
+  // sends nothing.
+  assert.ok(ADMIN_ACTIONS.includes('"recorded", "received_evidence_recorded"'),
+    "a late receipt no longer triggers the return-received mail");
+  assert.ok(ADMIN_ACTIONS.includes("RETURN_ARRIVED_RESULTS.includes(result.result)"));
+  // And it still cannot resend the refund mail or reach Stripe.
+  assert.ok(!ADMIN_ACTIONS.includes("buildWithdrawalRefundCompletedEmail("),
+    "the admin layer can resend the refund-completed mail");
+  assert.ok(!/stripe/i.test(codeOnly(ADMIN_ACTIONS)),
+    "the admin layer reaches for Stripe");
 });
 
 test("T4: 'refund_pending' is in the list - the hole that let a payout be repriced", () => {

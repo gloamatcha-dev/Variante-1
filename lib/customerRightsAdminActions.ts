@@ -114,7 +114,26 @@ export async function setReturnRequirement(
  * ARRIVAL SENDS THE CUSTOMER A MAIL. Proof of dispatch does not: it is
  * a fact about their evidence, not about our goods, and telling them
  * "wir haben deinen Beleg" adds nothing they did not just do.
+ *
+ * ── AND AN ARRIVAL AFTER THE PAYOUT IS STILL AN ARRIVAL ──────
+ *
+ * BGB 357 Abs. 4 lets dispatch proof alone release the money, so goods
+ * can legitimately turn up after the refund has already been paid. The
+ * database records that as 'received_evidence_recorded' rather than
+ * 'recorded' - the difference being that it appends the receipt instant
+ * WITHOUT moving case_state, so a paid case keeps looking paid.
+ *
+ * Both results mean the same thing to the customer: we have their goods.
+ * So both send the mail, and the database's own idempotency decides that
+ * it goes exactly once - a second call returns 'unchanged', which is in
+ * neither list.
+ *
+ * What this must NOT do is resend the refund-completed mail or touch
+ * Stripe. It cannot: this module imports neither.
  */
+
+/** The two results that mean "their goods are here, tell them". */
+const RETURN_ARRIVED_RESULTS = ["recorded", "received_evidence_recorded"];
 export async function recordReturn(
   deps: CustomerRightsAdminDeps,
   input: {
@@ -132,7 +151,8 @@ export async function recordReturn(
     p_at: input.at ?? null,
   });
 
-  if (input.event !== "received" || result.result !== "recorded") return result;
+  if (input.event !== "received"
+      || !RETURN_ARRIVED_RESULTS.includes(result.result)) return result;
 
   const contact = await deps.loadCaseContact(input.withdrawalId);
   if (!contact) return { ...result, mailSent: false };
