@@ -8,6 +8,13 @@ import {
   DIRECT_EXPENSE_CATEGORIES,
   EXPENSE_CATEGORIES,
   EXPENSE_CATEGORY_LABEL,
+  EXPENSE_CHANNELS,
+  EXPENSE_CHANNEL_LABEL,
+  EXPENSE_PAYMENT_STATUSES,
+  EXPENSE_PAYMENT_STATUS_LABEL,
+  expenseNetCents,
+  isExpenseChannel,
+  isExpensePaymentStatus,
   berlinDateOf,
   buildFinanceSummary,
   expenseFallsInPeriod,
@@ -114,16 +121,129 @@ test("1b: it creates ONE table and alters no existing one", () => {
 });
 
 test("1c: money is integer cents, strictly positive, EUR only", () => {
-  assert.match(MIGRATION, /amount_cents\s+integer not null check \(amount_cents > 0\)/);
+  /*
+    THE AMOUNT IS NAMED GROSS, and the ambiguous name is gone.
+
+    An earlier draft called it amount_cents and said nothing about gross
+    or net. The margin subtracts it from GROSS revenue, so a net figure
+    typed into it would have overstated the margin by the VAT -
+    permanently, because what an entered number MEANT cannot be recovered.
+    That is why this is the one change that had to happen before 071 was
+    applied rather than in a later migration.
+  */
+  assert.match(MIGRATION, /gross_cents\s+integer not null check \(gross_cents > 0\)/);
+  assert.ok(!/amount_cents\s+integer/.test(MIGRATION),
+    "the ambiguous amount_cents column still exists");
   // Not >= 0: a zero cost was not incurred, and recording one only makes
   // the completeness count lie.
-  assert.ok(!/amount_cents >= 0/.test(MIGRATION), "a zero-cost row is allowed");
+  assert.ok(!/gross_cents >= 0/.test(MIGRATION), "a zero-cost row is allowed");
   assert.match(MIGRATION, /currency\s+text not null default 'EUR' check \(currency = 'EUR'\)/);
   // No floating point anywhere near a money column.
   for (const banned of ["numeric(", "real", "double precision", "float"]) {
     assert.ok(!codeOnly(MIGRATION).includes(banned),
       `071 stores money as ${banned}`);
   }
+});
+
+test("1c2: VAT is NULLABLE, bounded, and never derived from a rate", () => {
+  /*
+    THE NULL IS THE FEATURE. null means "not known"; 0 means "known, and
+    zero". A VAT overview built by reading null as zero would be a
+    confident report of a figure nobody has, so the column must stay
+    nullable and the bound must be the only arithmetic it gets.
+  */
+  assert.match(MIGRATION, /vat_cents\s+integer,/);
+  assert.ok(!/vat_cents\s+integer not null/.test(MIGRATION),
+    "vat_cents is NOT NULL - an unknown VAT cannot be expressed");
+  assert.match(MIGRATION, /business_expenses_vat_bounds_check/);
+  const bounds = MIGRATION.slice(MIGRATION.indexOf("add constraint business_expenses_vat_bounds_check"));
+  assert.match(bounds, /vat_cents is null/);
+  assert.match(bounds, /vat_cents >= 0 and vat_cents <= gross_cents/);
+
+  // NO RATE IS ASSUMED ANYWHERE. Not in the migration, not in the lib.
+  for (const [name, src] of Object.entries({ MIGRATION, LIB, ROUTE, UI })) {
+    const code = codeOnly(src);
+    for (const banned of ["1.19", "1.07", "0.19", "0.07", "* 19", "* 7 /", "/ 119", "/ 107"]) {
+      assert.ok(!code.includes(banned), `${name} infers VAT with ${banned}`);
+    }
+  }
+});
+
+test("1c3: net is DISPLAYED where VAT is known, and is never stored", () => {
+  // No net column exists at all: a persisted net would be a second
+  // source for a derivable number, and a wrong one on every row whose
+  // VAT nobody has entered.
+  /*
+    SCOPED TO THE TABLE DEFINITION. 071's closing notes legitimately
+    mention orders.total_net_cents - that is the REVENUE net, which stays
+    where it is. What must not exist is a net column on the expense table.
+  */
+  const table = MIGRATION.slice(
+    MIGRATION.indexOf("create table if not exists public.business_expenses"),
+    MIGRATION.indexOf("business_expenses_vat_bounds_check"));
+  assert.ok(!/net_cents/.test(table), "071 persists a net expense figure");
+  // The one place it is produced, and it returns null rather than
+  // falling back to the gross.
+  assert.equal(expenseNetCents({ grossCents: 1190, vatCents: 190 }), 1000);
+  assert.equal(expenseNetCents({ grossCents: 1190, vatCents: 0 }), 1190);
+  assert.equal(expenseNetCents({ grossCents: 1190, vatCents: null }), null);
+});
+
+test("1c4: the channel and payment-status vocabularies are closed and shared", () => {
+  // The channel is migration 050's four values, spelled the same way.
+  const m050 = read("supabase/migrations/050_inventory_foundation.sql");
+  assert.match(m050, /area\s+text not null check \(area in \('b2c', 'b2b', 'event', 'internal'\)\)/);
+  const channelCheck = MIGRATION.slice(MIGRATION.indexOf("channel       text not null check"));
+  for (const ch of EXPENSE_CHANNELS) {
+    assert.ok(channelCheck.includes(`'${ch}'`), `the channel CHECK does not accept ${ch}`);
+  }
+  assert.deepEqual([...EXPENSE_CHANNELS], ["b2c", "b2b", "event", "internal"]);
+  // NOT "general": that word already means an expense category here, and
+  // one word for two concepts is how a filter returns the wrong rows.
+  assert.ok(!channelCheck.slice(0, channelCheck.indexOf(")")).includes("'general'"),
+    "the channel vocabulary invented a synonym for internal");
+  assert.equal(isExpenseChannel("general"), false);
+  assert.equal(EXPENSE_CHANNEL_LABEL.internal, "Allgemein");
+
+  // Payment status is exactly open/paid, and no accounting beyond it.
+  assert.match(MIGRATION, /payment_status text not null check \(payment_status in \('open', 'paid'\)\)/);
+  assert.deepEqual([...EXPENSE_PAYMENT_STATUSES], ["open", "paid"]);
+  for (const invented of ["partial", "overdue", "cancelled", "refunded"]) {
+    assert.equal(isExpensePaymentStatus(invented), false);
+    assert.ok(!MIGRATION.includes(`'${invented}'`),
+      `071 invented the payment state ${invented}`);
+  }
+  assert.equal(EXPENSE_PAYMENT_STATUS_LABEL.open, "Offen");
+  assert.equal(EXPENSE_PAYMENT_STATUS_LABEL.paid, "Bezahlt");
+});
+
+test("1c5: the CHANNEL of an order-linked cost is DERIVED, in both writers", () => {
+  /*
+    The rule a caller could otherwise defeat. Both writing functions must
+    read orders.customer_type for a row carrying an order_id and derive
+    the channel, rather than inserting whatever arrived - otherwise a B2C
+    cost could be filed under B2B from a browser and every channel report
+    would be quietly wrong.
+  */
+  for (const fn of ["admin_record_business_expense", "admin_update_business_expense"]) {
+    const body = MIGRATION.slice(
+      MIGRATION.indexOf(`function public.${fn}(`),
+      MIGRATION.indexOf("$$;", MIGRATION.indexOf(`function public.${fn}(`)));
+    assert.match(body, /select o\.customer_type into v_customer_type/,
+      `${fn} does not read the order's customer type`);
+    assert.match(body, /when v_customer_type = 'business' then 'b2b' else 'b2c'/,
+      `${fn} does not map the customer type to a channel`);
+    assert.ok(body.includes("v_channel"), `${fn} does not use a derived channel`);
+    // And a direct cost naming an order that does not exist is refused
+    // HERE, before the channel is decided.
+    assert.match(body, /raise exception 'business_expense_order_missing'/,
+      `${fn} decides a channel for an order it never found`);
+  }
+  // The delete writer takes no channel at all - there is nothing to derive.
+  const del = MIGRATION.slice(
+    MIGRATION.indexOf("function public.admin_delete_business_expense("),
+    MIGRATION.indexOf("$$;", MIGRATION.indexOf("function public.admin_delete_business_expense(")));
+  assert.ok(!del.includes("p_channel"), "the delete writer takes a channel");
 });
 
 test("1d: a date, not a timestamp, decides which period a cost belongs to", () => {
@@ -331,7 +451,8 @@ test("3h: a deletion is hard, and the values survive in the audit", () => {
     MIGRATION.indexOf("$$;", MIGRATION.indexOf("function public.admin_delete_business_expense(")));
   assert.match(body, /delete from public\.business_expenses where id = p_expense_id/);
   // Every value goes into the audit BEFORE the row goes.
-  for (const kept of ["'amountCents'", "'description'", "'occurredOn'", "'recordedBy'"]) {
+  for (const kept of ["'grossCents'", "'vatCents'", "'channel'", "'paymentStatus'",
+                      "'description'", "'occurredOn'", "'recordedBy'"]) {
     assert.ok(body.includes(kept), `the deletion audit drops ${kept}`);
   }
   const del = body.indexOf("delete from public.business_expenses");
@@ -363,7 +484,15 @@ const expense = (over = {}) => ({
   occurredOn: "2026-09-15",
   category: "matcha_cogs",
   orderId: "o1",
-  amountCents: 900,
+  grossCents: 900,
+  /*
+    DEFAULT null, deliberately: "not known" is the honest starting state
+    for an input VAT, and a fixture that defaulted to 0 would make every
+    test here accidentally assert the complete-VAT path.
+  */
+  vatCents: null,
+  channel: "b2c",
+  paymentStatus: "paid",
   ...over,
 });
 
@@ -425,7 +554,7 @@ test("4d: CUSTOMER-PAID SHIPPING IS REVENUE AND IS NEVER A COST", () => {
   const withCarrier = buildFinanceSummary({
     period: PERIOD,
     orders: [order()],
-    expenses: [expense({ category: "shipping", amountCents: 420 })],
+    expenses: [expense({ category: "shipping", grossCents: 420 })],
   });
   assert.equal(withCarrier.directCostsByCategory.shipping, 420);
   assert.equal(withCarrier.revenue.customerPaidShippingCents, 595,
@@ -438,8 +567,8 @@ test("4e: a general expense belongs to the period and never to an order", () => 
     period: PERIOD,
     orders: [order()],
     expenses: [
-      expense({ id: "d", category: "packaging", amountCents: 120 }),
-      expense({ id: "g", category: "general", orderId: null, amountCents: 4900 }),
+      expense({ id: "d", category: "packaging", grossCents: 120 }),
+      expense({ id: "g", category: "general", orderId: null, grossCents: 4900 }),
     ],
   });
   assert.equal(s.generalExpensesCents, 4900);
@@ -475,7 +604,7 @@ test("5b: one missing COMPONENT is enough to keep it partial", () => {
   */
   const all = DIRECT_EXPENSE_CATEGORIES
     .filter(c => c !== "payment_fee")
-    .map((c, i) => expense({ id: `e${i}`, category: c, amountCents: 100 }));
+    .map((c, i) => expense({ id: `e${i}`, category: c, grossCents: 100 }));
   const s = buildFinanceSummary({ period: PERIOD, orders: [order()], expenses: all });
   assert.equal(s.completeness.ordersWithDirectCost, 1);
   assert.deepEqual(s.completeness.missingCategories, ["payment_fee"]);
@@ -485,7 +614,7 @@ test("5b: one missing COMPONENT is enough to keep it partial", () => {
 
 test("5c: and one uncovered ORDER is enough as well", () => {
   const complete = DIRECT_EXPENSE_CATEGORIES
-    .map((c, i) => expense({ id: `e${i}`, category: c, amountCents: 100 }));
+    .map((c, i) => expense({ id: `e${i}`, category: c, grossCents: 100 }));
   const s = buildFinanceSummary({
     period: PERIOD,
     orders: [order(), order({ id: "o2" })],
@@ -499,11 +628,11 @@ test("5c: and one uncovered ORDER is enough as well", () => {
 
 test("5d: only a genuinely complete period yields an operating result", () => {
   const complete = DIRECT_EXPENSE_CATEGORIES
-    .map((c, i) => expense({ id: `e${i}`, category: c, amountCents: 100 }));
+    .map((c, i) => expense({ id: `e${i}`, category: c, grossCents: 100 }));
   const s = buildFinanceSummary({
     period: PERIOD,
     orders: [order()],
-    expenses: [...complete, expense({ id: "g", category: "general", orderId: null, amountCents: 1000 })],
+    expenses: [...complete, expense({ id: "g", category: "general", orderId: null, grossCents: 1000 })],
   });
   assert.equal(s.completeness.directCostsComplete, true);
   assert.equal(s.isPartial, false);
@@ -633,22 +762,77 @@ test("7: the split uses the order's own customer_type and adds up", () => {
    8. THE ROUTE'S INPUT SURFACE
    ══════════════════════════════════════════════════════════════ */
 
-test("8: no total, margin or completeness flag is ever accepted from a browser", () => {
+test("8: no COMPUTED figure is ever accepted from a browser", () => {
+  /*
+    AN INPUT IS NOT A RESULT, and the distinction is the whole point.
+
+    body.grossCents and body.vatCents ARE read - they are what the
+    operator typed off a supplier document, and there is nowhere else they
+    could come from. What may never arrive from a browser is anything this
+    module DERIVES: a total, a margin, an operating result, a completeness
+    flag. Those are computed server-side from durable rows, so a screen
+    cannot post a Deckungsbeitrag of its own choosing.
+  */
   const code = codeOnly(ROUTE);
   for (const banned of ["body.contributionMargin", "body.summary", "body.total",
-                        "body.grossCents", "body.isPartial", "body.operatingResult",
-                        "body.directCostsTotal"]) {
-    assert.ok(!code.includes(banned), `the route reads ${banned} from the request`);
+                        "body.isPartial", "body.operatingResult",
+                        "body.directCostsTotal", "body.expenseVat", "body.byChannel",
+                        "body.netCents", "body.openExpenses"]) {
+    assert.ok(!code.includes(banned), `the route reads the derived ${banned}`);
   }
-  // The client's whole influence on a figure is the period.
+  // The figures it DOES take are the two off the document, and both are
+  // validated as integer cents before they reach a writer.
+  assert.match(code, /const amount = body\.grossCents;/);
+  assert.match(code, /body\.vatCents !== undefined && body\.vatCents !== null/);
+  // The client's whole influence on a derived figure is the period.
   assert.match(code, /validateFinancePeriod\(body\.from, body\.to\)/);
+  // And the summary is built here, from rows, not from the request.
+  assert.match(code, /buildFinanceSummary\(\{ period: period\.period, orders, expenses \}\)/);
+});
+
+test("8e: VAT validation keeps unknown and zero apart, and bounds the known", () => {
+  // Absent means unknown; a number means known, 0 included.
+  assert.match(ROUTE, /let vatCents: number \| null = null;/);
+  assert.match(ROUTE, /if \(vat > amount\)/);
+  assert.match(ROUTE, /!Number\.isInteger\(vat\) \|\| vat < 0/);
+  // The form asks whether it is known BEFORE asking how much, so the two
+  // are never one keystroke apart.
+  assert.match(UI, /value=\{fVatKnown \? "known" : "unknown"\}/);
+  assert.match(UI, /let vatCents: number \| null = null;/);
+  assert.ok(UI.includes("Vorsteuer unbekannt"),
+    "the screen has no words for an unknown VAT");
+});
+
+test("8f: the channel and payment status are validated, not invented", () => {
+  assert.match(ROUTE, /isExpenseChannel\(body\.channel\)/);
+  assert.match(ROUTE, /isExpensePaymentStatus\(body\.paymentStatus\)/);
+  /*
+    AND THE ROUTE DOES NOT DECIDE THE CHANNEL. For an order-linked cost
+    migration 071's writer derives it; this route only checks the shape.
+    A route that resolved it itself would be a second authority, and the
+    one inside the database is the one every caller gets.
+  */
+  /*
+    THE ROUTE DOES SELECT customer_type - it is how revenue is split B2C
+    from B2B, and that read is unrelated. What it must not do is MAP it to
+    a channel: no 'business' -> 'b2b' anywhere here, because that mapping
+    is the writer's and a second copy of it is a second authority.
+  */
+  const code = codeOnly(ROUTE);
+  assert.ok(!/["']business["']\s*(\?|:|===)/.test(code)
+            && !code.includes("b2b\"") && !code.includes("'b2b'"),
+    "the route maps a customer type to a channel instead of leaving it to the writer");
+  // The writer's own refusal for a missing order is mapped to a sentence.
+  assert.match(ROUTE, /business_expense_order_missing/);
 });
 
 test("8b: an amount must be a positive integer, and is bounded", () => {
   assert.match(ROUTE, /!Number\.isInteger\(amount\)/);
   assert.match(ROUTE, /amount <= 0/);
   assert.match(ROUTE, /amount > MAX_AMOUNT_CENTS/);
-  assert.ok(UI.includes("Betrag in ganzen Cent"), "the form does not ask for cents");
+  assert.ok(UI.includes("Bruttobetrag in Cent"),
+    "the form does not ask for a gross amount in cents");
+  assert.ok(!UI.includes("Nettobetrag"), "the form asks the operator to type net");
   // The form posts cents, so nothing parses a decimal on either side.
   assert.ok(!/parseFloat|toFixed\(2\)/.test(codeOnly(UI)),
     "the finance form parses a decimal amount");
@@ -671,6 +855,116 @@ test("8d: it reaches no payment provider and sends no mail", () => {
   for (const rpc of rpcs) {
     assert.ok(rpc.includes("business_expense"), `the route calls ${rpc}`);
   }
+});
+
+test("8g: the contribution margin subtracts the GROSS expense figure", () => {
+  // Gross revenue minus refunds minus gross direct costs. Nothing here
+  // nets anything down first, which is why the column had to be named.
+  const s = buildFinanceSummary({
+    period: PERIOD,
+    orders: [order({ refundedTotalCents: 500 })],
+    expenses: [expense({ grossCents: 1190, vatCents: 190 })],
+  });
+  assert.equal(s.directCostsTotalCents, 1190, "the margin used a net expense figure");
+  assert.equal(s.contributionMarginCents, 2975 - 500 - 1190);
+  // The known VAT is reported, and it is NOT subtracted anywhere.
+  assert.equal(s.expenseVat.knownCents, 190);
+  assert.equal(s.contributionMarginCents + 190, 2975 - 500 - 1000,
+    "the VAT was netted off the cost instead of being reported beside it");
+});
+
+test("8h: expense VAT is summed only where it is known, with its coverage", () => {
+  const s = buildFinanceSummary({
+    period: PERIOD,
+    orders: [order()],
+    expenses: [
+      expense({ id: "a", grossCents: 1190, vatCents: 190 }),
+      expense({ id: "b", grossCents: 1000, vatCents: 0, category: "packaging" }),
+      expense({ id: "c", grossCents: 5000, vatCents: null, category: "shipping" }),
+    ],
+  });
+  // 190 + 0, and the null contributes nothing.
+  assert.equal(s.expenseVat.knownCents, 190);
+  // A KNOWN ZERO COUNTS AS KNOWN - that is the whole reason the column is
+  // nullable rather than defaulting to 0.
+  assert.equal(s.expenseVat.rowsWithVat, 2);
+  assert.equal(s.expenseVat.rowsTotal, 3);
+  assert.equal(s.expenseVat.complete, false);
+  // All three gross figures are still in the cost total.
+  assert.equal(s.directCostsTotalCents, 1190 + 1000 + 5000);
+});
+
+test("8i: VAT coverage is complete only when every row carries a figure", () => {
+  const complete = buildFinanceSummary({
+    period: PERIOD, orders: [order()],
+    expenses: [expense({ vatCents: 0 }), expense({ id: "b", vatCents: 7, category: "packaging" })],
+  });
+  assert.equal(complete.expenseVat.complete, true);
+  // AN EMPTY PERIOD IS NOT COMPLETE. Nothing recorded is not a verified
+  // zero, and a screen that called it complete would claim one.
+  const empty = buildFinanceSummary({ period: PERIOD, orders: [order()], expenses: [] });
+  assert.equal(empty.expenseVat.complete, false);
+  assert.equal(empty.expenseVat.rowsTotal, 0);
+  assert.equal(empty.expenseVat.knownCents, 0);
+});
+
+test("8j: costs split by channel, and the split adds up", () => {
+  const s = buildFinanceSummary({
+    period: PERIOD,
+    orders: [order()],
+    expenses: [
+      expense({ id: "a", grossCents: 900, channel: "b2c" }),
+      expense({ id: "b", grossCents: 120, channel: "b2b", category: "packaging" }),
+      expense({ id: "c", grossCents: 700, channel: "event", category: "general", orderId: null }),
+      expense({ id: "d", grossCents: 4900, channel: "internal", category: "general", orderId: null }),
+    ],
+  });
+  assert.equal(s.byChannel.b2c.directCents, 900);
+  assert.equal(s.byChannel.b2b.directCents, 120);
+  assert.equal(s.byChannel.event.generalCents, 700);
+  assert.equal(s.byChannel.internal.generalCents, 4900);
+  // Direct and general stay apart inside a channel, and both land in its total.
+  assert.equal(s.byChannel.event.directCents, 0);
+  assert.equal(s.byChannel.internal.totalCents, 4900);
+  // Every channel appears, at zero where it has nothing.
+  for (const ch of EXPENSE_CHANNELS) assert.ok(s.byChannel[ch], `${ch} is missing`);
+  // And the four channels sum to the two period totals.
+  const summed = EXPENSE_CHANNELS.reduce((n, ch) => n + s.byChannel[ch].totalCents, 0);
+  assert.equal(summed, s.directCostsTotalCents + s.generalExpensesCents);
+});
+
+test("8k: an OPEN expense is reported but never excluded from a total", () => {
+  /*
+    This is a cost ledger, not cash-flow accounting. A margin that dropped
+    unpaid invoices would change whenever somebody got round to paying
+    one, which is the opposite of a frozen figure.
+  */
+  const paid = buildFinanceSummary({
+    period: PERIOD, orders: [order()],
+    expenses: [expense({ grossCents: 900, paymentStatus: "paid" })],
+  });
+  const open = buildFinanceSummary({
+    period: PERIOD, orders: [order()],
+    expenses: [expense({ grossCents: 900, paymentStatus: "open" })],
+  });
+  assert.equal(open.directCostsTotalCents, paid.directCostsTotalCents);
+  assert.equal(open.contributionMarginCents, paid.contributionMarginCents);
+  // Reported separately, so the screen can show what is outstanding.
+  assert.equal(open.openExpenses.cents, 900);
+  assert.equal(open.openExpenses.rows, 1);
+  assert.equal(paid.openExpenses.cents, 0);
+});
+
+test("8l: the screen filters the LEDGER and never the totals", () => {
+  // Two different Deckungsbeiträge depending on which dropdown is open
+  // would be worse than no filter at all.
+  assert.match(UI, /const visible = expenses\.filter\(e =>/);
+  assert.match(UI, /channelFilter === "all" \|\| e\.channel === channelFilter/);
+  assert.match(UI, /statusFilter === "all" \|\| e\.paymentStatus === statusFilter/);
+  // The totals come from the summary, which is computed for the PERIOD.
+  assert.ok(!/visible\.reduce|visible\.length \* /.test(UI),
+    "the screen computes a total from the filtered list");
+  assert.match(UI, /\{visible\.length\} von \{expenses\.length\} Positionen/);
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -702,6 +996,33 @@ test("9b: it offers a period filter and a cost breakdown", () => {
   assert.match(UI, /DIRECT_EXPENSE_CATEGORIES\.map/);
   // And it distinguishes a real zero from an unrecorded component.
   assert.ok(UI.includes("nicht erfasst"), "a missing component reads as zero");
+  // The channel table, from the shared constant.
+  assert.match(UI, /EXPENSE_CHANNELS\.map/);
+  assert.ok(UI.includes("Kosten nach Kanal"), "the screen has no channel breakdown");
+  /*
+    AND IT SAYS WHY THE CHANNEL TABLE IS COST-ONLY. orders.customer_type
+    knows only private and business, so Event has costs and no revenue
+    side - and claiming otherwise would be the dishonest half of a
+    channel P&L.
+  */
+  assert.ok(UI.includes("eine Bestellung kennt keinen"),
+    "the screen does not disclose that revenue has no Event channel");
+});
+
+test("9b2: the ledger shows gross, VAT, net and status - and never a fake zero", () => {
+  for (const header of ["Brutto", "Vorsteuer", "Netto", "Status", "Kanal"]) {
+    assert.ok(UI.includes(`<th>${header}</th>`), `the ledger has no ${header} column`);
+  }
+  // An unknown VAT is words in BOTH places it can appear.
+  assert.match(UI, /row\.vatCents === null\s*\?\s*<i className="ops-costs-unknown">\{VAT_UNKNOWN\}/);
+  assert.match(UI, /s\.expenseVat\.rowsWithVat === 0/);
+  // Net comes from the shared leaf, which returns null rather than guessing.
+  assert.match(UI, /const net = expenseNetCents\(row\);/);
+  assert.match(UI, /net === null/);
+  // The channel shown is the STORED one, not anything the form chose.
+  assert.match(UI, /EXPENSE_CHANNEL_LABEL\[row\.channel\]/);
+  // For a direct cost the form offers no channel at all.
+  assert.match(UI, /Kanal wird aus der Bestellung bestimmt/);
 });
 
 test("9c: the ledger offers create, change and remove, and says it is audited", () => {
@@ -734,13 +1055,13 @@ test("10: both check files are exactly one read-only statement", () => {
 });
 
 test("10b: each states the result it expects, and they differ", () => {
-  assert.match(PREFLIGHT, /EXPECTED HEALTHY RESULT:\s+0 FAIL \/ 9 PASS \/ 3 INFO/);
-  assert.match(POSTCHECK, /EXPECTED HEALTHY RESULT:\s+0 FAIL \/ 12 PASS \/ 3 INFO/);
+  assert.match(PREFLIGHT, /EXPECTED HEALTHY RESULT:\s+0 FAIL \/ 10 PASS \/ 3 INFO/);
+  assert.match(POSTCHECK, /EXPECTED HEALTHY RESULT:\s+0 FAIL \/ 17 PASS \/ 3 INFO/);
   assert.ok(PREFLIGHT.includes("SAFE TO APPLY"));
   assert.ok(POSTCHECK.includes("APPLIED CLEANLY"));
   // The preflight asks whether 071 is ABSENT; the postcheck assumes it.
   assert.match(PREFLIGHT, /the business_expenses table does not exist yet/);
-  assert.match(POSTCHECK, /all twelve business_expenses columns are present/);
+  assert.match(POSTCHECK, /all fifteen business_expenses columns are present/);
 });
 
 test("10c: the postcheck verifies the two things only a body can tell", () => {

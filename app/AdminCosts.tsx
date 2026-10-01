@@ -5,9 +5,16 @@ import {
   DIRECT_EXPENSE_CATEGORIES,
   EXPENSE_CATEGORIES,
   EXPENSE_CATEGORY_LABEL,
+  EXPENSE_CHANNELS,
+  EXPENSE_CHANNEL_LABEL,
+  EXPENSE_PAYMENT_STATUSES,
+  EXPENSE_PAYMENT_STATUS_LABEL,
+  expenseNetCents,
   monthPeriod,
   previousMonthPeriod,
   type ExpenseCategory,
+  type ExpenseChannel,
+  type ExpensePaymentStatus,
   type FinancePeriod,
   type FinanceSummary,
 } from "../lib/financeSummary";
@@ -27,15 +34,31 @@ import {
  *
  * So the screen leads with what it does NOT know:
  *
- *   - the Deckungsbeitrag is labelled UNVOLLSTÄNDIG whenever any direct
+ *   - the Deckungsbeitrag is labelled an upper bound whenever any direct
  *     cost is missing, and says how many orders carry none
  *   - a cost COMPONENT nobody has entered is named, not shown as 0
  *   - the Betriebsergebnis is "unbekannt" rather than a figure, until
  *     the direct costs are complete
+ *   - an expense whose input VAT nobody knows reads
+ *     "Vorsteuer unbekannt", never 0 €
  *
  * Every number comes from POST /api/admin/costs, which computes all of
  * them server-side from durable rows. This component performs no
- * arithmetic on money beyond rendering it.
+ * arithmetic on money except expenseNetCents, which is the shared leaf
+ * and returns null rather than guessing.
+ *
+ * ══════════════════════════════════════════════════════════════
+ * THE OPERATOR TYPES GROSS, AND NEVER NET
+ * ══════════════════════════════════════════════════════════════
+ *
+ * The amount field is the figure on the supplier document, in cents. Net
+ * is never typed and never stored - it is shown, and only where the VAT
+ * is known.
+ *
+ * VAT IS A TWO-STEP ANSWER on purpose: first whether it is known at all,
+ * then how much. A single field left empty would make "unknown" and
+ * "zero" one keystroke apart, and they are the two values that must never
+ * be confused.
  *
  * ══════════════════════════════════════════════════════════════
  * TWO KINDS OF COST, AND THE ONE THAT IS NOT A COST
@@ -49,6 +72,15 @@ import {
  * "Versand (Kunde)" is REVENUE - what the customer paid us - and sits in
  * the revenue block. The carrier's invoice is the cost, and it sits in
  * the cost block under the same word. They are deliberately far apart.
+ *
+ * ══════════════════════════════════════════════════════════════
+ * THE CHANNEL OF AN ORDER-LINKED COST IS THE SERVER'S
+ * ══════════════════════════════════════════════════════════════
+ *
+ * Migration 071's writers derive it from the order's own customer_type
+ * and discard whatever the browser sent. So for a direct cost this screen
+ * does not offer a channel at all - it says where the channel will come
+ * from, and the ledger shows the value the database actually stored.
  */
 
 type ExpenseRow = {
@@ -57,8 +89,11 @@ type ExpenseRow = {
   category: ExpenseCategory;
   orderId: string | null;
   description: string;
-  amountCents: number;
+  grossCents: number;
+  vatCents: number | null;
   currency: string;
+  channel: ExpenseChannel;
+  paymentStatus: ExpensePaymentStatus;
   vendor: string | null;
   note: string | null;
   createdAt: string;
@@ -66,6 +101,8 @@ type ExpenseRow = {
 };
 
 type PeriodChoice = "this_month" | "last_month" | "custom";
+type ChannelFilter = ExpenseChannel | "all";
+type StatusFilter = ExpensePaymentStatus | "all";
 
 /** Today as an ISO date in Berlin - the only clock this screen reads. */
 function todayInBerlin(): string {
@@ -81,6 +118,9 @@ function fmtDate(iso: string): string {
     : new Intl.DateTimeFormat("de-DE", { timeZone: "Europe/Berlin" }).format(d);
 }
 
+/** The one place an unknown VAT becomes words rather than a number. */
+const VAT_UNKNOWN = "Vorsteuer unbekannt";
+
 export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
   const [choice, setChoice] = useState<PeriodChoice>("this_month");
   const [custom, setCustom] = useState<FinancePeriod>(() => monthPeriod(todayInBerlin()));
@@ -89,12 +129,20 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
+  // ── the ledger filters ──
+  const [channelFilter, setChannelFilter] = useState<ChannelFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+
   // ── the form ──
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<ExpenseRow | null>(null);
   const [fDate, setFDate] = useState(todayInBerlin());
   const [fCategory, setFCategory] = useState<ExpenseCategory>("general");
-  const [fAmount, setFAmount] = useState("");
+  const [fGross, setFGross] = useState("");
+  const [fVatKnown, setFVatKnown] = useState(false);
+  const [fVat, setFVat] = useState("");
+  const [fChannel, setFChannel] = useState<ExpenseChannel>("internal");
+  const [fStatus, setFStatus] = useState<ExpensePaymentStatus>("paid");
   const [fDescription, setFDescription] = useState("");
   const [fOrderId, setFOrderId] = useState("");
   const [fVendor, setFVendor] = useState("");
@@ -108,26 +156,13 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
       ? previousMonthPeriod(todayInBerlin())
       : custom;
   /*
-    TWO PRIMITIVES, NOT THE OBJECT.
-
-    `period` is derived on every render, so a new object identity every
-    time - an effect depending on it would re-fetch forever. These two
-    strings are what actually changes, and they let the dependency list
-    say so truthfully instead of being silenced.
+    TWO PRIMITIVES, NOT THE OBJECT. `period` is derived on every render,
+    so an effect depending on it would re-fetch forever. These two strings
+    are what actually changes.
   */
   const periodFrom = period.from;
   const periodTo = period.to;
 
-  /*
-    NO STATE IS SET BEFORE THE FIRST AWAIT.
-
-    The same rule the waitlist shell follows, and for the same reason: a
-    setState run synchronously inside an effect schedules a second render
-    before the first has settled. So the spinner is the INITIAL state
-    rather than something this function switches on, and `cancelled`
-    stops an operator who changes the period mid-request from having the
-    previous period's answer written over the new one.
-  */
   const load = useCallback(async (
     from: string,
     to: string,
@@ -166,11 +201,10 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
 
   useEffect(() => {
     /*
-      THE CALL IS WRAPPED, which is the shape every other admin screen
+      The call is wrapped, which is the shape every other admin screen
       uses: the loader's state writes all sit after its first await, and
       an immediately-invoked async function is what makes that visible to
-      the effect - calling it bare reads as a synchronous setState inside
-      an effect, which is a cascading render waiting to happen.
+      the effect.
     */
     let cancelled = false;
     (async () => { await load(periodFrom, periodTo, () => cancelled); })();
@@ -181,7 +215,11 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
     setEditing(null);
     setFDate(todayInBerlin());
     setFCategory("general");
-    setFAmount("");
+    setFGross("");
+    setFVatKnown(false);
+    setFVat("");
+    setFChannel("internal");
+    setFStatus("paid");
     setFDescription("");
     setFOrderId("");
     setFVendor("");
@@ -193,7 +231,11 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
     setEditing(row);
     setFDate(row.occurredOn);
     setFCategory(row.category);
-    setFAmount(String(row.amountCents));
+    setFGross(String(row.grossCents));
+    setFVatKnown(row.vatCents !== null);
+    setFVat(row.vatCents === null ? "" : String(row.vatCents));
+    setFChannel(row.channel);
+    setFStatus(row.paymentStatus);
     setFDescription(row.description);
     setFOrderId(row.orderId ?? "");
     setFVendor(row.vendor ?? "");
@@ -209,10 +251,28 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
       cents go through untouched and the server refuses anything that is
       not a positive integer.
     */
-    const amountCents = Number(fAmount);
-    if (!Number.isInteger(amountCents) || amountCents <= 0) {
-      setFormError("Bitte gib den Betrag in ganzen Cent an.");
+    const grossCents = Number(fGross);
+    if (!Number.isInteger(grossCents) || grossCents <= 0) {
+      setFormError("Bitte gib den Bruttobetrag in ganzen Cent an.");
       return;
+    }
+    /*
+      UNKNOWN IS null, AND KNOWN-ZERO IS 0. The two are different
+      requests, which is why the form asks whether the VAT is known before
+      it asks how much.
+    */
+    let vatCents: number | null = null;
+    if (fVatKnown) {
+      const v = Number(fVat);
+      if (!Number.isInteger(v) || v < 0) {
+        setFormError("Bitte gib die Vorsteuer in ganzen Cent an (0 ist erlaubt).");
+        return;
+      }
+      if (v > grossCents) {
+        setFormError("Die Vorsteuer kann nicht größer als der Bruttobetrag sein.");
+        return;
+      }
+      vatCents = v;
     }
     setSaving(true);
     setFormError("");
@@ -225,7 +285,16 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
           expenseId: editing?.id,
           occurredOn: fDate,
           category: fCategory,
-          amountCents,
+          grossCents,
+          vatCents,
+          /*
+            FOR A DIRECT COST THIS IS A FORMALITY. The writer reads the
+            order's own customer_type and overrules it; it is sent because
+            the route validates the shape of every field, and a general
+            expense genuinely needs it.
+          */
+          channel: fCategory === "general" ? fChannel : "b2c",
+          paymentStatus: fStatus,
           description: fDescription,
           orderId: fCategory === "general" ? null : fOrderId,
           vendor: fVendor,
@@ -281,6 +350,17 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
   if (!summary) return <p className="ops-empty">Keine Daten für diesen Zeitraum.</p>;
 
   const s = summary;
+  /*
+    THE FILTERS NARROW THE LEDGER, NOT THE TOTALS.
+
+    Deliberate: the figures above are the PERIOD's, and a filter that
+    silently changed them would mean two different Deckungsbeiträge
+    depending on which dropdown was open. The list is what the operator
+    is searching; the totals are what the period is.
+  */
+  const visible = expenses.filter(e =>
+    (channelFilter === "all" || e.channel === channelFilter)
+    && (statusFilter === "all" || e.paymentStatus === statusFilter));
 
   return (
     <section className="ops-panel ops-costs">
@@ -329,7 +409,7 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
         </p>
       )}
 
-      {/* ── UMSATZ ── */}
+      {/* ── UMSATZ UND KOSTEN ── */}
       <div className="ops-counts">
         <div className="ops-count ops-count-revenue">
           <span className="ops-count-label">Umsatz (brutto)</span>
@@ -340,7 +420,7 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
           <span className="ops-count-value">{formatCents(s.revenue.refundedCents)}</span>
         </div>
         <div className="ops-count">
-          <span className="ops-count-label">Direkte Kosten</span>
+          <span className="ops-count-label">Direkte Kosten (brutto)</span>
           <span className="ops-count-value">
             {formatCents(s.directCostsTotalCents)}
             {s.isPartial && <i className="ops-costs-flag"> unvollständig</i>}
@@ -353,7 +433,7 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
           <span className="ops-count-value">{formatCents(s.contributionMarginCents)}</span>
         </div>
         <div className="ops-count">
-          <span className="ops-count-label">Allgemeine Kosten / Spesen</span>
+          <span className="ops-count-label">Allgemeine Kosten / Spesen (brutto)</span>
           <span className="ops-count-value">{formatCents(s.generalExpensesCents)}</span>
         </div>
         <div className="ops-count">
@@ -370,11 +450,40 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
               : formatCents(s.operatingResultCents)}
           </span>
         </div>
+        {/*
+          INPUT VAT, WITH ITS COVERAGE ATTACHED.
+
+          Never presented as "the period's Vorsteuer": it is the sum of
+          the rows that carry a figure, and the count says how many those
+          were. A full USt-Übersicht is not built here.
+        */}
+        <div className="ops-count">
+          <span className="ops-count-label">Vorsteuer (erfasst)</span>
+          <span className="ops-count-value">
+            {s.expenseVat.rowsWithVat === 0
+              ? <i className="ops-costs-unknown">{VAT_UNKNOWN}</i>
+              : <>
+                  {formatCents(s.expenseVat.knownCents)}
+                  {!s.expenseVat.complete && (
+                    <i className="ops-costs-flag">
+                      {` nur ${s.expenseVat.rowsWithVat} von ${s.expenseVat.rowsTotal} Positionen`}
+                    </i>
+                  )}
+                </>}
+          </span>
+        </div>
+        <div className="ops-count">
+          <span className="ops-count-label">Davon offen</span>
+          <span className="ops-count-value">
+            {formatCents(s.openExpenses.cents)}
+            <i className="ops-costs-flag">{` ${s.openExpenses.rows} Position(en)`}</i>
+          </span>
+        </div>
       </div>
 
       {/* ── AUFSCHLÜSSELUNG ── */}
       <table className="ops-table ops-costs-breakdown">
-        <caption className="ops-count-label">Aufschlüsselung</caption>
+        <caption className="ops-count-label">Aufschlüsselung (brutto)</caption>
         <thead>
           <tr><th>Posten</th><th>Betrag</th><th>Status</th></tr>
         </thead>
@@ -400,6 +509,34 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
           </tr>
         </tbody>
       </table>
+
+      {/* ── KANÄLE ── */}
+      <table className="ops-table ops-costs-channels">
+        <caption className="ops-count-label">Kosten nach Kanal (brutto)</caption>
+        <thead>
+          <tr><th>Kanal</th><th>Direkt</th><th>Allgemein</th><th>Summe</th></tr>
+        </thead>
+        <tbody>
+          {EXPENSE_CHANNELS.map(ch => (
+            <tr key={ch}>
+              <td data-label="Kanal">{EXPENSE_CHANNEL_LABEL[ch]}</td>
+              <td data-label="Direkt">{formatCents(s.byChannel[ch].directCents)}</td>
+              <td data-label="Allgemein">{formatCents(s.byChannel[ch].generalCents)}</td>
+              <td data-label="Summe">{formatCents(s.byChannel[ch].totalCents)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {/*
+        THE HONEST ASYMMETRY, SAID OUT LOUD. orders.customer_type knows
+        only private and business, so Event has costs and no revenue side
+        to pair them with. Pretending otherwise would be the dishonest
+        half of a channel P&L.
+      */}
+      <p className="ops-note">
+        Umsatz wird nur nach B2C und B2B unterschieden – eine Bestellung kennt keinen
+        {" "}Event-Kanal. Für Event und Allgemein zeigt diese Tabelle deshalb nur Kosten.
+      </p>
 
       {/* ── UMSATZDETAIL, inkl. der Zeile die KEIN Kostenposten ist ── */}
       <table className="ops-table ops-costs-revenue">
@@ -453,17 +590,61 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
                 ))}
               </select>
             </label>
-            <label>Betrag in Cent<input value={fAmount} inputMode="numeric"
-              onChange={e => setFAmount(e.target.value)} /></label>
+            <label>Bruttobetrag in Cent<input value={fGross} inputMode="numeric"
+              onChange={e => setFGross(e.target.value)} /></label>
           </div>
           <div className="ops-filter-row">
-            <label>Beschreibung<input value={fDescription} maxLength={300}
-              onChange={e => setFDescription(e.target.value)} /></label>
+            {/*
+              VAT IN TWO STEPS: is it known, and then how much. One field
+              left empty would put "unknown" and "zero" a keystroke apart.
+            */}
+            <label>
+              Vorsteuer
+              <select value={fVatKnown ? "known" : "unknown"}
+                onChange={e => setFVatKnown(e.target.value === "known")}>
+                <option value="unknown">unbekannt</option>
+                <option value="known">bekannt</option>
+              </select>
+            </label>
+            {fVatKnown && (
+              <label>Vorsteuer in Cent<input value={fVat} inputMode="numeric"
+                onChange={e => setFVat(e.target.value)} /></label>
+            )}
+            <label>
+              Zahlungsstatus
+              <select value={fStatus}
+                onChange={e => setFStatus(e.target.value as ExpensePaymentStatus)}>
+                {EXPENSE_PAYMENT_STATUSES.map(st => (
+                  <option key={st} value={st}>{EXPENSE_PAYMENT_STATUS_LABEL[st]}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="ops-filter-row">
+            {/*
+              THE CHANNEL IS ONLY ASKED FOR A GENERAL EXPENSE. For a direct
+              cost the writer derives it from the order, so offering a
+              dropdown would be offering a choice that gets discarded.
+            */}
+            {fCategory === "general" ? (
+              <label>
+                Kanal
+                <select value={fChannel}
+                  onChange={e => setFChannel(e.target.value as ExpenseChannel)}>
+                  {EXPENSE_CHANNELS.map(ch => (
+                    <option key={ch} value={ch}>{EXPENSE_CHANNEL_LABEL[ch]}</option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <span className="ops-note ops-costs-derived">
+                Kanal wird aus der Bestellung bestimmt (B2C oder B2B).
+              </span>
+            )}
             {/*
               THE ORDER FIELD APPEARS ONLY FOR A DIRECT COST, because
               migration 071's CHECK refuses a general expense that carries
-              one. The screen never offers a combination the database
-              would reject.
+              one.
             */}
             {fCategory !== "general" && (
               <label>Bestellung (ID)<input value={fOrderId} maxLength={36}
@@ -472,8 +653,12 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
             <label>Lieferant<input value={fVendor} maxLength={160}
               onChange={e => setFVendor(e.target.value)} /></label>
           </div>
-          <label>Notiz<input value={fNote} maxLength={2000}
-            onChange={e => setFNote(e.target.value)} /></label>
+          <div className="ops-filter-row">
+            <label>Beschreibung<input value={fDescription} maxLength={300}
+              onChange={e => setFDescription(e.target.value)} /></label>
+            <label>Notiz<input value={fNote} maxLength={2000}
+              onChange={e => setFNote(e.target.value)} /></label>
+          </div>
           {formError && <p className="ops-error" role="alert">{formError}</p>}
           <div className="ops-controls">
             <button type="button" className="ops-refresh" onClick={submit} disabled={saving}>
@@ -484,51 +669,101 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
       )}
 
       {/* ── DAS KOSTENBUCH ── */}
+      <div className="ops-filter-row">
+        <label>
+          Kanal
+          <select value={channelFilter}
+            onChange={e => setChannelFilter(e.target.value as ChannelFilter)}>
+            <option value="all">Alle Kanäle</option>
+            {EXPENSE_CHANNELS.map(ch => (
+              <option key={ch} value={ch}>{EXPENSE_CHANNEL_LABEL[ch]}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Zahlungsstatus
+          <select value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value as StatusFilter)}>
+            <option value="all">Alle</option>
+            {EXPENSE_PAYMENT_STATUSES.map(st => (
+              <option key={st} value={st}>{EXPENSE_PAYMENT_STATUS_LABEL[st]}</option>
+            ))}
+          </select>
+        </label>
+        <span className="ops-refresh-at">
+          {visible.length} von {expenses.length} Positionen
+        </span>
+      </div>
+
       <table className="ops-table ops-costs-ledger">
         <caption className="ops-count-label">Erfasste Kosten im Zeitraum</caption>
         <thead>
           <tr>
-            <th>Datum</th><th>Kategorie</th><th>Beschreibung</th>
-            <th>Bestellung</th><th>Betrag</th><th></th>
+            <th>Datum</th><th>Kategorie</th><th>Kanal</th><th>Beschreibung</th>
+            <th>Bestellung</th><th>Brutto</th><th>Vorsteuer</th><th>Netto</th>
+            <th>Status</th><th></th>
           </tr>
         </thead>
         <tbody>
-          {expenses.length === 0 ? (
-            <tr><td colSpan={6} className="ops-empty">
-              Für diesen Zeitraum ist noch keine Kostenposition erfasst.
+          {visible.length === 0 ? (
+            <tr><td colSpan={10} className="ops-empty">
+              {expenses.length === 0
+                ? "Für diesen Zeitraum ist noch keine Kostenposition erfasst."
+                : "Keine Position passt zu diesem Filter."}
             </td></tr>
-          ) : expenses.map(row => (
-            <tr key={row.id}>
-              <td data-label="Datum">{fmtDate(row.occurredOn)}</td>
-              <td data-label="Kategorie">{EXPENSE_CATEGORY_LABEL[row.category] ?? row.category}</td>
-              <td data-label="Beschreibung">
-                {row.description}
-                {row.vendor && <span className="ops-costs-vendor"> · {row.vendor}</span>}
-              </td>
-              {/*
-                THE ORDER IS SHOWN SHORTENED. The admin needs to recognise
-                which order a cost belongs to, not to read a uuid aloud -
-                and a full one in every row would push the amount off a
-                narrow screen.
-              */}
-              <td data-label="Bestellung">
-                {row.orderId ? <code>{row.orderId.slice(0, 8)}</code> : "—"}
-              </td>
-              <td data-label="Betrag">{formatCents(row.amountCents, row.currency)}</td>
-              <td data-label="">
-                <button type="button" className="ops-refresh"
-                  onClick={() => openEdit(row)} disabled={saving}>Ändern</button>
-                <button type="button" className="ops-refresh"
-                  onClick={() => void remove(row)} disabled={saving}>Entfernen</button>
-              </td>
-            </tr>
-          ))}
+          ) : visible.map(row => {
+            const net = expenseNetCents(row);
+            return (
+              <tr key={row.id}>
+                <td data-label="Datum">{fmtDate(row.occurredOn)}</td>
+                <td data-label="Kategorie">{EXPENSE_CATEGORY_LABEL[row.category] ?? row.category}</td>
+                {/*
+                  THE STORED CHANNEL, which for a direct cost is the one
+                  the server derived - not anything this screen chose.
+                */}
+                <td data-label="Kanal">{EXPENSE_CHANNEL_LABEL[row.channel] ?? row.channel}</td>
+                <td data-label="Beschreibung">
+                  {row.description}
+                  {row.vendor && <span className="ops-costs-vendor"> · {row.vendor}</span>}
+                </td>
+                {/*
+                  THE ORDER IS SHOWN SHORTENED. The admin needs to recognise
+                  which order a cost belongs to, not to read a uuid aloud.
+                */}
+                <td data-label="Bestellung">
+                  {row.orderId ? <code>{row.orderId.slice(0, 8)}</code> : "—"}
+                </td>
+                <td data-label="Brutto">{formatCents(row.grossCents, row.currency)}</td>
+                {/* NEVER 0 € FOR AN UNKNOWN. */}
+                <td data-label="Vorsteuer">
+                  {row.vatCents === null
+                    ? <i className="ops-costs-unknown">{VAT_UNKNOWN}</i>
+                    : formatCents(row.vatCents, row.currency)}
+                </td>
+                <td data-label="Netto">
+                  {net === null
+                    ? <i className="ops-costs-unknown">—</i>
+                    : formatCents(net, row.currency)}
+                </td>
+                <td data-label="Status">
+                  {EXPENSE_PAYMENT_STATUS_LABEL[row.paymentStatus] ?? row.paymentStatus}
+                </td>
+                <td data-label="">
+                  <button type="button" className="ops-refresh"
+                    onClick={() => openEdit(row)} disabled={saving}>Ändern</button>
+                  <button type="button" className="ops-refresh"
+                    onClick={() => void remove(row)} disabled={saving}>Entfernen</button>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
 
       <p className="ops-note">
-        Jede Änderung an einer Kostenposition wird im Aktivitätsprotokoll festgehalten
-        {" "}– wer sie erfasst, korrigiert oder entfernt hat, mit Betrag und Datum.
+        Beträge sind Bruttobeträge vom Belegdokument. Netto wird nur angezeigt, wenn die
+        {" "}Vorsteuer erfasst ist – nie berechnet. Jede Änderung an einer Kostenposition wird
+        {" "}im Aktivitätsprotokoll festgehalten: wer sie erfasst, korrigiert oder entfernt hat.
       </p>
     </section>
   );

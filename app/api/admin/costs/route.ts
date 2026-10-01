@@ -4,6 +4,8 @@ import {
   buildFinanceSummary,
   validateFinancePeriod,
   isExpenseCategory,
+  isExpenseChannel,
+  isExpensePaymentStatus,
   isIsoDate,
   type FinanceExpenseRow,
   type FinanceOrderRow,
@@ -46,6 +48,30 @@ import {
  * writers, each of which audits itself in the same transaction - and
  * service_role has no INSERT, UPDATE or DELETE on the table, so there is
  * no path here that could write an expense without an audit row.
+ *
+ * ══════════════════════════════════════════════════════════════
+ * THE CHANNEL OF AN ORDER-LINKED COST IS NOT THIS ROUTE'S EITHER
+ * ══════════════════════════════════════════════════════════════
+ *
+ * This route VALIDATES the shape of a channel; it does not decide one.
+ * For an expense carrying an order_id, migration 071's writers read
+ * public.orders.customer_type and derive the channel themselves,
+ * discarding whatever arrived. So a request claiming that a cost against
+ * a private customer's order is B2B is not refused - it is simply
+ * overruled, and the row that lands says b2c.
+ *
+ * The decision lives there rather than here for the usual reason: the
+ * writers are the only mutation path, so a rule inside them applies to
+ * every caller, including a future one nobody has written yet.
+ *
+ * ══════════════════════════════════════════════════════════════
+ * GROSS IN, AND VAT ONLY IF IT IS KNOWN
+ * ══════════════════════════════════════════════════════════════
+ *
+ * grossCents is required and must be a positive integer. vatCents is
+ * OPTIONAL and may be explicitly null - the two are different requests:
+ * omitting it says "not known", and sending 0 says "known, and zero".
+ * The route never infers one from the other and never applies a rate.
  */
 
 type ErrorResponse = { error: string };
@@ -69,8 +95,8 @@ const ORDER_COLUMNS =
   + "tax_total_cents, discount_total_cents, shipping_gross_cents, refunded_total_cents";
 
 const EXPENSE_COLUMNS =
-  "id, occurred_on, category, order_id, description, amount_cents, "
-  + "currency, vendor, note, created_by, created_at, updated_at";
+  "id, occurred_on, category, order_id, description, gross_cents, vat_cents, "
+  + "currency, channel, payment_status, vendor, note, created_by, created_at, updated_at";
 
 type ExpenseRecord = {
   id: string;
@@ -78,8 +104,11 @@ type ExpenseRecord = {
   category: string;
   order_id: string | null;
   description: string;
-  amount_cents: number;
+  gross_cents: number;
+  vat_cents: number | null;
   currency: string;
+  channel: string;
+  payment_status: string;
   vendor: string | null;
   note: string | null;
   created_at: string;
@@ -118,7 +147,10 @@ function readExpenseInput(body: Record<string, unknown>):
       ok: true;
       occurredOn: string;
       category: string;
-      amountCents: number;
+      grossCents: number;
+      vatCents: number | null;
+      channel: string;
+      paymentStatus: string;
       description: string;
       orderId: string | null;
       vendor: string | null;
@@ -136,10 +168,34 @@ function readExpenseInput(body: Record<string, unknown>):
     nobody could reconcile against an invoice, so a non-integer is a
     refusal rather than something this route rounds on the caller's behalf.
   */
-  const amount = body.amountCents;
+  const amount = body.grossCents;
   if (typeof amount !== "number" || !Number.isInteger(amount)
       || amount <= 0 || amount > MAX_AMOUNT_CENTS) {
-    return { ok: false, reason: "Bitte gib einen Betrag in ganzen Cent an." };
+    return { ok: false, reason: "Bitte gib den Bruttobetrag in ganzen Cent an." };
+  }
+  /*
+    VAT: ABSENT AND ZERO ARE DIFFERENT REQUESTS.
+
+    undefined or null means "not known" and is stored as null. A number
+    means known, 0 included. Nothing here derives it from a rate, and
+    nothing derives it from the gross.
+  */
+  let vatCents: number | null = null;
+  if (body.vatCents !== undefined && body.vatCents !== null && body.vatCents !== "") {
+    const vat = body.vatCents;
+    if (typeof vat !== "number" || !Number.isInteger(vat) || vat < 0) {
+      return { ok: false, reason: "Die Vorsteuer muss in ganzen Cent angegeben werden." };
+    }
+    if (vat > amount) {
+      return { ok: false, reason: "Die Vorsteuer kann nicht größer als der Bruttobetrag sein." };
+    }
+    vatCents = vat;
+  }
+  if (!isExpenseChannel(body.channel)) {
+    return { ok: false, reason: "Bitte wähle einen gültigen Kanal." };
+  }
+  if (!isExpensePaymentStatus(body.paymentStatus)) {
+    return { ok: false, reason: "Bitte wähle Offen oder Bezahlt." };
   }
   const description = typeof body.description === "string" ? body.description.trim() : "";
   if (!description || description.length > MAX_DESCRIPTION_LEN) {
@@ -188,7 +244,15 @@ function readExpenseInput(body: Record<string, unknown>):
     ok: true,
     occurredOn: body.occurredOn,
     category: body.category,
-    amountCents: amount,
+    grossCents: amount,
+    vatCents,
+    /*
+      PASSED ON, NOT TRUSTED. For an order-linked expense the writer
+      overrules this from the order's own customer_type; for a general one
+      it is the operator's answer and the CHECK is the backstop.
+    */
+    channel: body.channel,
+    paymentStatus: body.paymentStatus,
     description,
     orderId,
     vendor,
@@ -291,12 +355,24 @@ export async function POST(request: Request): Promise<Response> {
     const expenseRecords = (expenseRes.data ?? []) as unknown as ExpenseRecord[];
     const expenses: FinanceExpenseRow[] = expenseRecords
       .filter(e => isExpenseCategory(e.category))
+      /*
+        ROWS WITH AN UNRECOGNISED CHANNEL OR STATUS ARE DROPPED, not
+        coerced. The CHECKs make them impossible, so one appearing would
+        mean the vocabulary moved - and summing it under a guessed bucket
+        would hide that rather than surface it.
+      */
+      .filter(e => isExpenseChannel(e.channel) && isExpensePaymentStatus(e.payment_status))
       .map(e => ({
         id: e.id,
         occurredOn: e.occurred_on,
         category: e.category as FinanceExpenseRow["category"],
         orderId: e.order_id,
-        amountCents: e.amount_cents,
+        grossCents: e.gross_cents,
+        // null survives as null: "not known" is not zero.
+        vatCents: e.vat_cents === null || e.vat_cents === undefined
+          ? null : Number(e.vat_cents),
+        channel: e.channel as FinanceExpenseRow["channel"],
+        paymentStatus: e.payment_status as FinanceExpenseRow["paymentStatus"],
       }));
 
     const summary = buildFinanceSummary({ period: period.period, orders, expenses });
@@ -317,8 +393,12 @@ export async function POST(request: Request): Promise<Response> {
         category: e.category,
         orderId: e.order_id,
         description: e.description,
-        amountCents: e.amount_cents,
+        grossCents: e.gross_cents,
+        vatCents: e.vat_cents === null || e.vat_cents === undefined
+          ? null : Number(e.vat_cents),
         currency: e.currency,
+        channel: e.channel,
+        paymentStatus: e.payment_status,
         vendor: e.vendor,
         note: e.note,
         createdAt: e.created_at,
@@ -360,8 +440,11 @@ export async function POST(request: Request): Promise<Response> {
           p_expense_id: expenseId,
           p_occurred_on: input.occurredOn,
           p_category: input.category,
-          p_amount_cents: input.amountCents,
+          p_gross_cents: input.grossCents,
           p_description: input.description,
+          p_channel: input.channel,
+          p_payment_status: input.paymentStatus,
+          p_vat_cents: input.vatCents,
           p_order_id: input.orderId,
           p_vendor: input.vendor,
           p_note: input.note,
@@ -371,8 +454,11 @@ export async function POST(request: Request): Promise<Response> {
           p_actor_user_id: gate.session.userId,
           p_occurred_on: input.occurredOn,
           p_category: input.category,
-          p_amount_cents: input.amountCents,
+          p_gross_cents: input.grossCents,
           p_description: input.description,
+          p_channel: input.channel,
+          p_payment_status: input.paymentStatus,
+          p_vat_cents: input.vatCents,
           p_order_id: input.orderId,
           p_vendor: input.vendor,
           p_note: input.note,
@@ -392,8 +478,26 @@ export async function POST(request: Request): Promise<Response> {
         operator gets a sentence; the raw message never leaves the server.
       */
       console.error("Costs error: the expense writer refused:", error.message);
-      if (/business_expenses_order_id_fkey/.test(error.message)) {
+      /*
+        THE WRITER CHECKS THE ORDER BEFORE IT DECIDES THE CHANNEL, so a
+        missing order arrives as its own refusal rather than as a
+        foreign-key violation. Both are mapped: the FK is still the
+        authority if anything ever reaches the insert without the lookup.
+      */
+      if (/business_expense_order_missing/.test(error.message)
+          || /business_expenses_order_id_fkey/.test(error.message)) {
         return json({ error: "Diese Bestellung gibt es nicht." } as ErrorResponse, 404);
+      }
+      if (/vat_bounds_check/.test(error.message)) {
+        return json({
+          error: "Die Vorsteuer kann nicht größer als der Bruttobetrag sein.",
+        } as ErrorResponse, 400);
+      }
+      if (/channel_check/.test(error.message) || /needs a channel/.test(error.message)) {
+        return json({ error: "Bitte wähle einen gültigen Kanal." } as ErrorResponse, 400);
+      }
+      if (/payment_status_check/.test(error.message)) {
+        return json({ error: "Bitte wähle Offen oder Bezahlt." } as ErrorResponse, 400);
       }
       if (/order_scope_check/.test(error.message)) {
         return json({

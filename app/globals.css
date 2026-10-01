@@ -8932,7 +8932,10 @@ header nav{gap:18px;font-size:12px}
 .ops-costs-unknown{ font-style:italic; opacity:.65; }
 .ops-costs-flag{ display:block; font-style:italic; font-size:11px; opacity:.65; letter-spacing:0; text-transform:none; }
 .ops-costs-form{ margin:16px 0 0; padding:16px 0 0; border-top:1px solid var(--line); }
-.ops-costs-vendor{ opacity:.6; }
+.ops-costs-vendor{ opacity:.6; }/* The note that replaces the channel dropdown for a direct cost: the
+   channel is the server's there, so the form states where it comes
+   from instead of offering a choice that gets discarded. */
+.ops-costs-derived{ align-self:center; margin:0; font-style:italic; }
 .ops-costs-ledger code{ font-size:11px; opacity:.75; }
 
 /* ── Controls ─────────────────────────────────────────────── */

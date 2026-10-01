@@ -42,13 +42,52 @@
  * is why they have different names, different sources and this paragraph.
  *
  * ══════════════════════════════════════════════════════════════
+ * AN EXPENSE AMOUNT IS GROSS, AND ITS VAT MAY BE UNKNOWN
+ * ══════════════════════════════════════════════════════════════
+ *
+ * grossCents is what the supplier document said was payable. It is the
+ * figure the margin subtracts, and it is named gross because the revenue
+ * it is subtracted from is gross too.
+ *
+ * vatCents is `number | null`, and the null is load-bearing:
+ *
+ *   null   nobody knows the input VAT yet
+ *   0      known, and genuinely zero
+ *   > 0    known
+ *
+ * NO RATE IS EVER INFERRED. There is no 19, no 7, no /1.19 and no /1.07
+ * in this module. A net figure is only ever DISPLAYED, as
+ * grossCents - vatCents, and only where vatCents is known.
+ *
+ * The VAT total therefore sums ONLY the rows that carry a figure, and it
+ * is reported together with how many rows those were - so a screen can
+ * say "input VAT across 4 of 11 expenses" instead of presenting a number
+ * that looks like the period's whole input VAT.
+ *
+ * ══════════════════════════════════════════════════════════════
+ * CHANNEL AND PAYMENT STATUS
+ * ══════════════════════════════════════════════════════════════
+ *
+ * The channel vocabulary is migration 050's - b2c, b2b, event, internal -
+ * because those are GLOA's sales channels and a second spelling of the
+ * same four things would mean two answers to one question. 'internal' is
+ * what the screen labels Allgemein.
+ *
+ * PAYMENT STATUS CHANGES NO TOTAL. An open expense counts against the
+ * period exactly like a paid one: this is a cost ledger, not cash-flow
+ * accounting, and excluding unpaid invoices from a margin would make the
+ * margin depend on when somebody got round to paying. It is reported
+ * separately so the screen can show what is still outstanding.
+ *
+ * ══════════════════════════════════════════════════════════════
  * WHAT IT DELIBERATELY DOES NOT DO
  * ══════════════════════════════════════════════════════════════
  *
- * No tax accounting: VAT is reported as the figure the order froze, and
- * never used to derive a net result. No allocation of general expenses
- * across orders. No per-unit cost, no fee percentage, no estimate of any
- * kind. An unknown stays unknown.
+ * No tax accounting: VAT is reported as the figure the order froze or the
+ * operator entered, and never used to derive a net result or a VAT
+ * return. No allocation of general expenses across orders. No per-unit
+ * cost, no fee percentage, no estimate of any kind. An unknown stays
+ * unknown.
  *
  * Zero imports, integer cents throughout, and no clock: `period` is a
  * parameter, so the same inputs always produce the same output and a
@@ -97,6 +136,75 @@ export function isDirectExpenseCategory(value: unknown): value is DirectExpenseC
     && (DIRECT_EXPENSE_CATEGORIES as readonly string[]).includes(value);
 }
 
+/**
+ * THE CHANNELS, AND THEY ARE MIGRATION 050's.
+ *
+ * 050 declared `area text not null check (area in ('b2c','b2b','event',
+ * 'internal'))` for inventory and said why: "Four fixed values, because
+ * these are GLOA's sales channels and not a taxonomy the operator
+ * maintains." This is the same four, deliberately spelled the same way.
+ *
+ * 'internal' is Allgemein on screen. It is NOT called "general" here,
+ * because `general` already means something else in this module - the
+ * expense category that belongs to no order - and one word for two
+ * concepts is how a filter quietly returns the wrong rows.
+ */
+export const EXPENSE_CHANNELS = Object.freeze([
+  "b2c",
+  "b2b",
+  "event",
+  "internal",
+] as const);
+
+export type ExpenseChannel = (typeof EXPENSE_CHANNELS)[number];
+
+export const EXPENSE_CHANNEL_LABEL: Readonly<Record<ExpenseChannel, string>> =
+  Object.freeze({
+    b2c: "B2C",
+    b2b: "B2B",
+    event: "Event",
+    internal: "Allgemein",
+  });
+
+export function isExpenseChannel(value: unknown): value is ExpenseChannel {
+  return typeof value === "string"
+    && (EXPENSE_CHANNELS as readonly string[]).includes(value);
+}
+
+/**
+ * Two values, and no accounting beyond them.
+ *
+ * No partial payment, no overdue, no cancelled: there is no fact in this
+ * schema that could support any of those, and a status nobody can derive
+ * goes stale without anybody noticing.
+ */
+export const EXPENSE_PAYMENT_STATUSES = Object.freeze(["open", "paid"] as const);
+
+export type ExpensePaymentStatus = (typeof EXPENSE_PAYMENT_STATUSES)[number];
+
+export const EXPENSE_PAYMENT_STATUS_LABEL: Readonly<Record<ExpensePaymentStatus, string>> =
+  Object.freeze({ open: "Offen", paid: "Bezahlt" });
+
+export function isExpensePaymentStatus(value: unknown): value is ExpensePaymentStatus {
+  return typeof value === "string"
+    && (EXPENSE_PAYMENT_STATUSES as readonly string[]).includes(value);
+}
+
+/**
+ * The net an expense implies, or null when its VAT is unknown.
+ *
+ * The ONLY place a net expense figure is ever produced, and it is
+ * produced rather than stored: a persisted net would be a second source
+ * for a derivable number, and a wrong one on every row whose VAT nobody
+ * has entered. Null in, null out - never a silent fallback to the gross.
+ */
+export function expenseNetCents(expense: {
+  grossCents: number;
+  vatCents: number | null;
+}): number | null {
+  return expense.vatCents === null ? null : expense.grossCents - expense.vatCents;
+}
+
 /* ── WHAT GOES IN ──────────────────────────────────────────────── */
 
 /** A period, as two inclusive calendar dates: YYYY-MM-DD. */
@@ -130,7 +238,12 @@ export type FinanceExpenseRow = {
   occurredOn: string;
   category: ExpenseCategory;
   orderId: string | null;
-  amountCents: number;
+  /** GROSS - what the document said was payable. */
+  grossCents: number;
+  /** Input VAT, or null for "not known". Never silently zero. */
+  vatCents: number | null;
+  channel: ExpenseChannel;
+  paymentStatus: ExpensePaymentStatus;
 };
 
 /* ── WHAT COMES OUT ────────────────────────────────────────────── */
@@ -182,6 +295,48 @@ export type FinanceSummary = {
    */
   operatingResultCents: number | null;
   completeness: FinanceCompleteness;
+  /**
+   * INPUT VAT, AND HOW MUCH OF IT IS ACTUALLY KNOWN.
+   *
+   * knownCents sums ONLY the rows that carry a figure. Rows whose VAT is
+   * null contribute nothing and are counted instead - so a screen can say
+   * "across 4 of 11 expenses" rather than presenting a number that reads
+   * like the period's entire input VAT.
+   *
+   * `complete` is true only when every expense in the period carries a
+   * VAT figure. An empty period is NOT complete: nothing recorded is not
+   * the same as nothing owed.
+   */
+  expenseVat: {
+    knownCents: number;
+    rowsWithVat: number;
+    rowsTotal: number;
+    complete: boolean;
+  };
+  /**
+   * What each channel cost, for the four values migration 050 fixed.
+   *
+   * Direct and general are kept apart inside each channel, because they
+   * answer different questions: one belongs to orders, the other to the
+   * period. Revenue is NOT split this way - orders.customer_type knows
+   * only private and business, so an Event has no revenue side to pair
+   * with its costs, and inventing one would be the dishonest half of a
+   * channel P&L.
+   */
+  byChannel: Readonly<Record<ExpenseChannel, {
+    directCents: number;
+    generalCents: number;
+    totalCents: number;
+  }>>;
+  /**
+   * What is recorded but not yet paid.
+   *
+   * REPORTED, NEVER SUBTRACTED. An open expense is already inside every
+   * total above: this is a cost ledger, not cash-flow accounting, and a
+   * margin that excluded unpaid invoices would change whenever somebody
+   * got round to paying one.
+   */
+  openExpenses: { cents: number; rows: number };
   /** True when anything about the cost side is unknown. */
   isPartial: boolean;
   /** The same figures, split the way finance actually asks for them. */
@@ -314,11 +469,43 @@ export function buildFinanceSummary(input: {
   const directCostsByCategory = {} as Record<DirectExpenseCategory, number>;
   for (const category of DIRECT_EXPENSE_CATEGORIES) directCostsByCategory[category] = 0;
 
+  const byChannel = {} as Record<ExpenseChannel, {
+    directCents: number; generalCents: number; totalCents: number;
+  }>;
+  for (const channel of EXPENSE_CHANNELS) {
+    byChannel[channel] = { directCents: 0, generalCents: 0, totalCents: 0 };
+  }
+
   const ordersWithDirectCost = new Set<string>();
   const categoriesSeen = new Set<DirectExpenseCategory>();
   let generalExpensesCents = 0;
+  let vatKnownCents = 0;
+  let rowsWithVat = 0;
+  let openCents = 0;
+  let openRows = 0;
 
   for (const expense of expenses) {
+    /*
+      VAT IS SUMMED ONLY WHERE IT IS KNOWN.
+
+      A null contributes nothing and is not counted as a zero - that is
+      the whole point of the nullable column. `=== null` rather than a
+      falsy test, because 0 is a KNOWN zero and has to be counted as
+      known.
+    */
+    if (expense.vatCents !== null) {
+      vatKnownCents += expense.vatCents;
+      rowsWithVat += 1;
+    }
+
+    // Reported, never subtracted - see the type.
+    if (expense.paymentStatus === "open") {
+      openCents += expense.grossCents;
+      openRows += 1;
+    }
+
+    const bucket = byChannel[expense.channel];
+
     if (expense.category === "general") {
       /*
         A GENERAL EXPENSE BELONGS TO THE PERIOD, NOT AN ORDER. Migration
@@ -327,13 +514,21 @@ export function buildFinanceSummary(input: {
         direct one - which is the double-count this shape exists to make
         impossible.
       */
-      generalExpensesCents += expense.amountCents;
+      generalExpensesCents += expense.grossCents;
+      if (bucket) {
+        bucket.generalCents += expense.grossCents;
+        bucket.totalCents += expense.grossCents;
+      }
       continue;
     }
     if (!isDirectExpenseCategory(expense.category)) continue;
-    directCostsByCategory[expense.category] += expense.amountCents;
+    directCostsByCategory[expense.category] += expense.grossCents;
     categoriesSeen.add(expense.category);
     if (expense.orderId) ordersWithDirectCost.add(expense.orderId);
+    if (bucket) {
+      bucket.directCents += expense.grossCents;
+      bucket.totalCents += expense.grossCents;
+    }
   }
 
   const directCostsTotalCents = DIRECT_EXPENSE_CATEGORIES
@@ -385,6 +580,19 @@ export function buildFinanceSummary(input: {
       ? contributionMarginCents - generalExpensesCents
       : null,
     completeness,
+    expenseVat: {
+      knownCents: vatKnownCents,
+      rowsWithVat,
+      rowsTotal: expenses.length,
+      /*
+        NOT COMPLETE WHEN THERE IS NOTHING. An empty period has no missing
+        VAT, but it has no known VAT either - and a screen that called
+        that "complete" would be claiming a verified zero.
+      */
+      complete: expenses.length > 0 && rowsWithVat === expenses.length,
+    },
+    byChannel: Object.freeze(byChannel),
+    openExpenses: { cents: openCents, rows: openRows },
     isPartial: !directCostsComplete,
     b2c,
     b2b,

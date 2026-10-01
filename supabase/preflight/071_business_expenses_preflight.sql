@@ -18,24 +18,34 @@
 --
 --   10  the name business_expenses is already taken
 --   11  one of the three function names is already taken
---   12  one of the three index names is already taken
---   13  the constraint name is already taken
+--   12  one of the four index names is already taken
+--   13  one of the two constraint names is already taken
 --   20  public.orders is missing (the FK target)
 --   21  auth.users is missing (the created_by target)
 --   22  record_admin_activity is missing (the writers call it)
 --   23  admin_activity_log does not accept module 'finance'
 --   24  the three roles 071 grants to do not all exist
+--   25  orders.customer_type is missing (the channel is derived from it)
 --
 -- Anything else that 071 needs, it creates itself.
 --
--- EXPECTED HEALTHY RESULT:  0 FAIL / 9 PASS / 3 INFO — SAFE TO APPLY
+-- ── IT ALSO TELLS AN OLD DRAFT FROM A FINISHED ONE ────────────
 --
--- Nine verdict-bearing checks (10-13, 20-24) and three INFO rows
--- (50-52), plus the SUMMARY row, which counts only the twelve above it.
--- The SUMMARY is always computed from the actual rows; this line is the
--- expectation to compare it against, never the source of it. Verified: a
--- database carrying 001..070 and not 071 returns exactly
--- 0 FAIL / 9 PASS / 3 INFO.
+-- Check 10 does not merely count the table - it REPORTS ITS SHAPE when
+-- one exists. An earlier draft of 071 called the amount column
+-- amount_cents and declared no channel, no VAT and no payment status;
+-- that draft was never applied anywhere, and this is what makes "never"
+-- checkable rather than remembered. A database carrying it is a FAIL
+-- that says WHY, instead of a FAIL that looks like "already applied".
+--
+-- EXPECTED HEALTHY RESULT:  0 FAIL / 10 PASS / 3 INFO — SAFE TO APPLY
+--
+-- Ten verdict-bearing checks (10-13, 20-25) and three INFO rows
+-- (50-52), plus the SUMMARY row, which counts only the thirteen above
+-- it. The SUMMARY is always computed from the actual rows; this line is
+-- the expectation to compare it against, never the source of it.
+-- Verified: a database carrying 001..070 and not 071 returns exactly
+-- 0 FAIL / 10 PASS / 3 INFO.
 
 select *
   from (
@@ -49,8 +59,21 @@ select *
 
   select 10 as check_id, 'collision' as area,
          'the business_expenses table does not exist yet' as question,
-         'expected: absent' as expectation,
-         (select count(*)::text || ' table(s) named business_expenses'
+         'expected: absent (and if present, which draft)' as expectation,
+         (select case
+                   when count(*) = 0 then '0 table(s) named business_expenses'
+                   when exists (select 1 from information_schema.columns
+                                 where table_schema = 'public'
+                                   and table_name = 'business_expenses'
+                                   and column_name = 'amount_cents')
+                     then 'PRESENT, and it is the OLD DRAFT (amount_cents)'
+                   when exists (select 1 from information_schema.columns
+                                 where table_schema = 'public'
+                                   and table_name = 'business_expenses'
+                                   and column_name = 'gross_cents')
+                     then 'PRESENT, and it is the FINAL shape (gross_cents)'
+                   else 'PRESENT, and the shape is unrecognised'
+                 end
             from information_schema.tables
            where table_schema = 'public' and table_name = 'business_expenses') as found,
          case when (select count(*) from information_schema.tables
@@ -80,31 +103,34 @@ select *
 
   union all
   select 12, 'collision',
-         'none of the three index names is taken',
-         'expected: 0 of idx_business_expenses_occurred_on/order/category',
+         'none of the four index names is taken',
+         'expected: 0 of idx_business_expenses_occurred_on/order/category/channel',
          coalesce((select string_agg(indexname, ', ' order by indexname)
                      from pg_indexes
                     where schemaname = 'public'
                       and indexname in ('idx_business_expenses_occurred_on',
                                         'idx_business_expenses_order',
-                                        'idx_business_expenses_category')),
+                                        'idx_business_expenses_category',
+                                        'idx_business_expenses_channel')),
                   'none'),
          case when (select count(*) from pg_indexes
                      where schemaname = 'public'
                        and indexname in ('idx_business_expenses_occurred_on',
                                          'idx_business_expenses_order',
-                                         'idx_business_expenses_category')) = 0
+                                         'idx_business_expenses_category',
+                                         'idx_business_expenses_channel')) = 0
               then 'PASS' else 'FAIL' end
 
   union all
   select 13, 'collision',
-         'the order-scope constraint name is free',
-         'expected: absent',
-         coalesce((select conname from pg_constraint
-                    where conname = 'business_expenses_order_scope_check'
-                    limit 1), 'none'),
+         'both named constraint names are free',
+         'expected: 0 of order_scope_check / vat_bounds_check',
+         coalesce((select string_agg(conname, ', ' order by conname) from pg_constraint
+                    where conname in ('business_expenses_order_scope_check',
+                                      'business_expenses_vat_bounds_check')), 'none'),
          case when (select count(*) from pg_constraint
-                     where conname = 'business_expenses_order_scope_check') = 0
+                     where conname in ('business_expenses_order_scope_check',
+                                       'business_expenses_vat_bounds_check')) = 0
               then 'PASS' else 'FAIL' end
 
   -- ── 20-24. WHAT 071 DEPENDS ON AND DOES NOT CREATE ──────────
@@ -187,6 +213,36 @@ select *
                      where rolname in ('anon', 'authenticated', 'service_role')) = 3
               then 'PASS' else 'FAIL' end
 
+  union all
+  -- THE CHANNEL IS DERIVED, NOT ACCEPTED, so the column it is derived
+  -- FROM is a dependency 071 does not create. orders.customer_type is
+  -- migration 004's, and its two values are what 'b2b' and 'b2c' mean
+  -- here: 'business' is b2b, anything else is b2c. If it were ever
+  -- widened, the derivation would need re-deciding rather than silently
+  -- filing a third kind of customer under b2c.
+  select 25, 'dependency',
+         'orders.customer_type exists, and still holds private/business',
+         'expected: 1 column, CHECK naming private and business',
+         coalesce((select 'column present; ' ||
+                     coalesce((select pg_get_constraintdef(c.oid)
+                                 from pg_constraint c
+                                where c.conrelid = 'public.orders'::regclass
+                                  and pg_get_constraintdef(c.oid) like '%customer_type%'
+                                limit 1), 'no CHECK found')
+                     from information_schema.columns
+                    where table_schema = 'public' and table_name = 'orders'
+                      and column_name = 'customer_type'
+                    limit 1), '<missing>'),
+         case when (select count(*) from information_schema.columns
+                     where table_schema = 'public' and table_name = 'orders'
+                       and column_name = 'customer_type') = 1
+                   and (select count(*) from pg_constraint
+                         where conrelid = 'public.orders'::regclass
+                           and pg_get_constraintdef(oid) like '%customer_type%'
+                           and pg_get_constraintdef(oid) like '%private%'
+                           and pg_get_constraintdef(oid) like '%business%') >= 1
+              then 'PASS' else 'FAIL' end
+
   -- ── 50-52. INFO. Context for the operator, never a verdict. ──
   --
   -- 071 reads none of these and changes none of them. They are here so
@@ -225,7 +281,7 @@ select *
   union all
   select 999, 'SUMMARY',
          'migration 071 may be applied',
-         'expected: 0 FAIL / 9 PASS / 3 INFO',
+         'expected: 0 FAIL / 10 PASS / 3 INFO',
          (select count(*) filter (where v.verdict = 'FAIL')::text || ' FAIL / '
               || count(*) filter (where v.verdict = 'PASS')::text || ' PASS / '
               || count(*) filter (where v.verdict = 'INFO')::text || ' INFO'
@@ -251,7 +307,8 @@ select *
                           then 'PASS' else 'FAIL' end
               union all
               select case when (select count(*) from pg_constraint
-                                 where conname = 'business_expenses_order_scope_check') = 0
+                                 where conname in ('business_expenses_order_scope_check',
+                                                   'business_expenses_vat_bounds_check')) = 0
                           then 'PASS' else 'FAIL' end
               union all
               select case when (select count(*) from information_schema.columns
@@ -279,6 +336,16 @@ select *
               select case when (select count(*) from pg_roles
                                  where rolname in ('anon', 'authenticated', 'service_role')) = 3
                           then 'PASS' else 'FAIL' end
+              union all
+              select case when (select count(*) from information_schema.columns
+                                 where table_schema = 'public' and table_name = 'orders'
+                                   and column_name = 'customer_type') = 1
+                               and (select count(*) from pg_constraint
+                                     where conrelid = 'public.orders'::regclass
+                                       and pg_get_constraintdef(oid) like '%customer_type%'
+                                       and pg_get_constraintdef(oid) like '%private%'
+                                       and pg_get_constraintdef(oid) like '%business%') >= 1
+                          then 'PASS' else 'FAIL' end
               union all select 'INFO' union all select 'INFO' union all select 'INFO'
             ) as v),
          case when (select count(*) from information_schema.tables
@@ -293,9 +360,11 @@ select *
                          where schemaname = 'public'
                            and indexname in ('idx_business_expenses_occurred_on',
                                              'idx_business_expenses_order',
-                                             'idx_business_expenses_category')) = 0
+                                             'idx_business_expenses_category',
+                                             'idx_business_expenses_channel')) = 0
                    and (select count(*) from pg_constraint
-                         where conname = 'business_expenses_order_scope_check') = 0
+                         where conname in ('business_expenses_order_scope_check',
+                                           'business_expenses_vat_bounds_check')) = 0
                    and (select count(*) from information_schema.columns
                          where table_schema = 'public' and table_name = 'orders'
                            and column_name = 'id') = 1
@@ -312,6 +381,14 @@ select *
                            and pg_get_constraintdef(oid) like '%''finance''%') = 1
                    and (select count(*) from pg_roles
                          where rolname in ('anon', 'authenticated', 'service_role')) = 3
+                   and (select count(*) from information_schema.columns
+                         where table_schema = 'public' and table_name = 'orders'
+                           and column_name = 'customer_type') = 1
+                   and (select count(*) from pg_constraint
+                         where conrelid = 'public.orders'::regclass
+                           and pg_get_constraintdef(oid) like '%customer_type%'
+                           and pg_get_constraintdef(oid) like '%private%'
+                           and pg_get_constraintdef(oid) like '%business%') >= 1
               then 'SAFE TO APPLY' else 'DO NOT APPLY' end
 
   ) as checks

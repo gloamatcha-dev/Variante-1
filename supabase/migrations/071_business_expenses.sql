@@ -60,10 +60,66 @@
 --
 -- ── WHAT IS FROZEN AND WHAT IS NOT ────────────────────────────
 --
--- amount_cents is the amount on the invoice, recorded once, in integer
+-- gross_cents is the amount on the invoice, recorded once, in integer
 -- cents, and never recomputed. This is the whole reason a direct cost is
 -- a ROW against an order rather than a lookup through a product: last
 -- year's margin must not change because this year's matcha is dearer.
+--
+-- ── GROSS, AND VAT ONLY WHERE IT IS KNOWN ─────────────────────
+--
+-- The amount is GROSS - what the document says was payable - and it is
+-- named gross_cents so that nobody has to guess. An earlier draft called
+-- it amount_cents and said nothing, which was the one defect here that
+-- could not have been repaired later: the contribution margin subtracts
+-- it from GROSS revenue, so a net figure typed into it would have
+-- overstated the margin by the VAT, permanently and invisibly.
+--
+-- vat_cents is the input VAT, and it is NULLABLE on purpose:
+--
+--   NULL   nobody knows yet. A supplier statement that has not arrived,
+--          a receipt with no VAT line. This is the honest default and it
+--          must stay distinguishable from zero forever.
+--   0      known, and genuinely zero - a reverse-charge invoice, a
+--          private sale, a small-business supplier.
+--   > 0    known.
+--
+-- NO VAT RATE IS EVER ASSUMED. There is no 19, no 7, no /1.19 and no
+-- /1.07 anywhere in this migration or in lib/financeSummary.ts. A net
+-- figure is DISPLAYED as gross_cents - vat_cents only where vat_cents is
+-- known, and it is never stored - a persisted net would be a second
+-- source for a number that is already derivable, and a wrong one on
+-- every row whose VAT is unknown.
+--
+-- ── CHANNEL: THE SAME FOUR VALUES MIGRATION 050 ESTABLISHED ───
+--
+-- 050 settled this vocabulary for inventory areas and said why: "Four
+-- fixed values, because these are GLOA's sales channels and not a
+-- taxonomy the operator maintains." This table reuses it exactly -
+-- 'b2c', 'b2b', 'event', 'internal' - rather than inventing a second
+-- spelling of the same four things. 'internal' is what the finance
+-- screen labels Allgemein.
+--
+-- FOR AN ORDER-LINKED COST THE CHANNEL IS THE ORDER'S, and the writers
+-- derive it rather than accepting it: public.orders.customer_type is
+-- 'private' or 'business', so a direct cost is b2c or b2b and can be
+-- neither event nor internal. A caller that sends a conflicting channel
+-- is overruled, not obeyed.
+--
+-- And where the order cannot represent Event, this does not pretend it
+-- can: an event expense has no order, which is exactly the shape the
+-- scope CHECK already requires of a general expense.
+--
+-- ── PAYMENT STATUS: TWO VALUES, AND NO ACCOUNTING ─────────────
+--
+-- 'open' or 'paid', and nothing else. No partial payment, no overdue, no
+-- cancelled, no refund state - there is no fact in this schema that
+-- could support any of them, and a status nobody can derive is a status
+-- that goes stale silently.
+--
+-- IT CHANGES NO TOTAL. An open expense counts against the period exactly
+-- like a paid one: this is a cost ledger, not cash-flow accounting, and
+-- quietly excluding unpaid invoices from a margin would make the margin
+-- depend on when somebody got round to paying.
 --
 -- ── NOTHING IS REACHABLE WITHOUT THE ADMIN SESSION ────────────
 --
@@ -123,7 +179,11 @@ create table if not exists public.business_expenses (
   description   text not null check (char_length(btrim(description)) between 1 and 300),
 
   /*
-    THE AMOUNT, IN INTEGER CENTS, AND STRICTLY POSITIVE.
+    THE GROSS AMOUNT, IN INTEGER CENTS, AND STRICTLY POSITIVE.
+
+    GROSS means what the supplier document says was payable, including
+    VAT. The name carries that, because the margin subtracts this figure
+    from gross revenue and a net number here would overstate it.
 
     A cost is a magnitude; the fact that it is subtracted is the reader's
     job, not the sign's. Allowing a negative here would mean a "cost" that
@@ -134,9 +194,44 @@ create table if not exists public.business_expenses (
     Zero is excluded too: a cost of nothing is a cost that was not
     incurred, and recording it only makes the completeness count lie.
   */
-  amount_cents  integer not null check (amount_cents > 0),
+  gross_cents   integer not null check (gross_cents > 0),
+
+  /*
+    THE INPUT VAT, OR NOTHING AT ALL.
+
+    Nullable, and the null is load-bearing: it means "not known", which is
+    a different statement from "zero" and must stay different forever. A
+    VAT overview built by treating null as zero would be a confident
+    report of a figure nobody has.
+
+    No rate is assumed anywhere. The bounds are the only arithmetic:
+    between zero and the gross amount, because input VAT cannot exceed
+    what was payable.
+  */
+  vat_cents     integer,
 
   currency      text not null default 'EUR' check (currency = 'EUR'),
+
+  /*
+    WHICH CHANNEL THE COST BELONGS TO.
+
+    Migration 050's exact four values, for 050's exact reason. 'internal'
+    is Allgemein on the finance screen. For an order-linked cost the
+    writers DERIVE this from the order and ignore what the caller sent -
+    see section 2.
+  */
+  channel       text not null check (channel in (
+                  'b2c',        -- B2C
+                  'b2b',        -- B2B
+                  'event',      -- Event
+                  'internal'    -- Allgemein
+                )),
+
+  /*
+    WHETHER IT HAS BEEN PAID. Descriptive state, two values, and it
+    changes no total: see the header.
+  */
+  payment_status text not null check (payment_status in ('open', 'paid')),
 
   vendor        text check (vendor is null
                   or char_length(btrim(vendor)) between 1 and 160),
@@ -169,6 +264,25 @@ create table if not exists public.business_expenses (
   Declared as a named table-level constraint so the preflight, the
   postcheck and the suite can all refer to it by a name this file chose.
 */
+/*
+  THE VAT BOUNDS, AS A NAMED CONSTRAINT.
+
+  Declared here rather than inline so the verify block, the preflight and
+  the postcheck can all refer to it by a name this file chose instead of
+  one Postgres derived. The rule is the only arithmetic VAT gets: it is
+  unknown, or it is between nothing and the gross amount. Input VAT cannot
+  exceed what was payable, and no rate is assumed to reach that bound.
+*/
+alter table public.business_expenses
+  drop constraint if exists business_expenses_vat_bounds_check;
+
+alter table public.business_expenses
+  add constraint business_expenses_vat_bounds_check
+  check (
+    vat_cents is null
+    or (vat_cents >= 0 and vat_cents <= gross_cents)
+  );
+
 alter table public.business_expenses
   drop constraint if exists business_expenses_order_scope_check;
 
@@ -179,8 +293,9 @@ alter table public.business_expenses
     or (order_id is not null and category <> 'general')
   );
 
--- The three questions this table is ever asked: what did a period cost,
--- what did one order cost, and how does a period split by kind.
+-- The four questions this table is ever asked: what did a period cost,
+-- what did one order cost, and how does a period split by kind and by
+-- channel.
 create index if not exists idx_business_expenses_occurred_on
   on public.business_expenses (occurred_on);
 create index if not exists idx_business_expenses_order
@@ -188,6 +303,9 @@ create index if not exists idx_business_expenses_order
   where order_id is not null;
 create index if not exists idx_business_expenses_category
   on public.business_expenses (category, occurred_on);
+-- The fourth question: what one channel cost in a period.
+create index if not exists idx_business_expenses_channel
+  on public.business_expenses (channel, occurred_on);
 
 -- ── 2. THE WRITERS ────────────────────────────────────────────
 --
@@ -218,12 +336,39 @@ create index if not exists idx_business_expenses_category
   Found by calling these functions against a real PostgreSQL - nothing
   that reads this file could have known that column's nullability.
 */
+/*
+  -- THE CHANNEL OF AN ORDER-LINKED COST IS NOT THE CALLER'S ---
+
+  Both writing functions resolve it the same way, and the rule is worth
+  stating once:
+
+    order_id IS NOT NULL   the channel is DERIVED from
+                           public.orders.customer_type. 'business' is
+                           b2b, anything else is b2c. Whatever the caller
+                           sent is discarded - that is what makes it
+                           impossible to file a B2C cost under B2B, from
+                           a browser or from anywhere else.
+
+    order_id IS NULL       the channel is the caller's, and the CHECK is
+                           what keeps it to the four values. A general
+                           expense is the only shape that can be 'event'
+                           or 'internal', because an order can represent
+                           neither.
+
+  The lookup also means a direct cost naming an order that does not exist
+  fails HERE, with a message the route can turn into a sentence, instead
+  of arriving as a foreign-key violation after the channel has already
+  been decided.
+*/
 create or replace function public.admin_record_business_expense(
   p_actor_user_id uuid,
   p_occurred_on   date,
   p_category      text,
-  p_amount_cents  integer,
+  p_gross_cents   integer,
   p_description   text,
+  p_channel       text,
+  p_payment_status text,
+  p_vat_cents     integer default null,
   p_order_id      uuid default null,
   p_vendor        text default null,
   p_note          text default null,
@@ -234,29 +379,53 @@ language plpgsql
 security definer set search_path = ''
 as $$
 declare
-  v_row public.business_expenses;
+  v_row           public.business_expenses;
+  v_customer_type text;
+  v_channel       text;
 begin
   if p_actor_user_id is null then
     raise exception 'an expense needs an author';
   end if;
 
+  -- The channel, decided here and never taken on trust. See the note
+  -- above this function.
+  if p_order_id is not null then
+    select o.customer_type into v_customer_type
+      from public.orders o
+     where o.id = p_order_id;
+    if v_customer_type is null then
+      raise exception 'business_expense_order_missing';
+    end if;
+    v_channel := case when v_customer_type = 'business' then 'b2b' else 'b2c' end;
+  else
+    if p_channel is null then
+      raise exception 'a general expense needs a channel';
+    end if;
+    v_channel := p_channel;
+  end if;
+
   /*
     THE ROW IS WRITTEN FIRST AND THE AUDIT SECOND, which is the order
     migration 052 established: every CHECK on the table has to have passed
-    before anything claims the mutation happened. A bad amount, a bad
-    category or a general expense carrying an order raises here, the
-    transaction goes, and no audit row survives to say otherwise.
+    before anything claims the mutation happened. A bad amount, a VAT
+    figure larger than the gross, an unknown channel or payment status, a
+    bad category or a general expense carrying an order all raise here,
+    the transaction goes, and no audit row survives to say otherwise.
   */
   insert into public.business_expenses (
     occurred_on, category, order_id, description,
-    amount_cents, vendor, note, created_by
+    gross_cents, vat_cents, channel, payment_status,
+    vendor, note, created_by
   )
   values (
     p_occurred_on,
     p_category,
     p_order_id,
     pg_catalog.btrim(p_description),
-    p_amount_cents,
+    p_gross_cents,
+    p_vat_cents,
+    v_channel,
+    p_payment_status,
     case when p_vendor is null or pg_catalog.btrim(p_vendor) = ''
          then null else pg_catalog.btrim(p_vendor) end,
     case when p_note is null or pg_catalog.btrim(p_note) = ''
@@ -271,12 +440,21 @@ begin
     'expense_recorded',
     'business_expense',
     v_row.id::text,
-    'Kosten erfasst: ' || v_row.category || ' ' || v_row.amount_cents::text || ' Cent',
+    'Kosten erfasst: ' || v_row.category || ' ' || v_row.gross_cents::text || ' Cent brutto',
     coalesce(p_operation_id, pg_catalog.gen_random_uuid()),
+    /*
+      vatCents GOES IN AS IT IS, null included. jsonb_build_object keeps a
+      SQL null as a JSON null rather than dropping the key, so "unknown"
+      survives into the audit trail as a stated unknown instead of an
+      absent field somebody later reads as zero.
+    */
     pg_catalog.jsonb_build_object(
       'occurredOn', v_row.occurred_on,
       'category', v_row.category,
-      'amountCents', v_row.amount_cents,
+      'grossCents', v_row.gross_cents,
+      'vatCents', v_row.vat_cents,
+      'channel', v_row.channel,
+      'paymentStatus', v_row.payment_status,
       'orderId', v_row.order_id,
       'vendor', v_row.vendor
     )
@@ -291,8 +469,11 @@ create or replace function public.admin_update_business_expense(
   p_expense_id    uuid,
   p_occurred_on   date,
   p_category      text,
-  p_amount_cents  integer,
+  p_gross_cents   integer,
   p_description   text,
+  p_channel       text,
+  p_payment_status text,
+  p_vat_cents     integer default null,
   p_order_id      uuid default null,
   p_vendor        text default null,
   p_note          text default null,
@@ -303,11 +484,32 @@ language plpgsql
 security definer set search_path = ''
 as $$
 declare
-  v_before public.business_expenses;
-  v_row    public.business_expenses;
+  v_before        public.business_expenses;
+  v_row           public.business_expenses;
+  v_customer_type text;
+  v_channel       text;
 begin
   if p_actor_user_id is null then
     raise exception 'an expense needs an author';
+  end if;
+
+  -- The SAME derivation as the create writer, for the same reason: a
+  -- correction must not be a way round it. Re-resolved from the order the
+  -- correction names, so moving a cost to another order moves its channel
+  -- with it.
+  if p_order_id is not null then
+    select o.customer_type into v_customer_type
+      from public.orders o
+     where o.id = p_order_id;
+    if v_customer_type is null then
+      raise exception 'business_expense_order_missing';
+    end if;
+    v_channel := case when v_customer_type = 'business' then 'b2b' else 'b2c' end;
+  else
+    if p_channel is null then
+      raise exception 'a general expense needs a channel';
+    end if;
+    v_channel := p_channel;
   end if;
 
   /*
@@ -327,16 +529,25 @@ begin
   end if;
 
   update public.business_expenses
-     set occurred_on  = p_occurred_on,
-         category     = p_category,
-         order_id     = p_order_id,
-         description  = pg_catalog.btrim(p_description),
-         amount_cents = p_amount_cents,
-         vendor       = case when p_vendor is null or pg_catalog.btrim(p_vendor) = ''
-                             then null else pg_catalog.btrim(p_vendor) end,
-         note         = case when p_note is null or pg_catalog.btrim(p_note) = ''
-                             then null else pg_catalog.btrim(p_note) end,
-         updated_at   = pg_catalog.now()
+     set occurred_on    = p_occurred_on,
+         category       = p_category,
+         order_id       = p_order_id,
+         description    = pg_catalog.btrim(p_description),
+         gross_cents    = p_gross_cents,
+         /*
+           vat_cents IS SET, NOT MERGED. A correction that omits it is a
+           correction saying the VAT is not known - which is a real thing
+           to say, and coalescing to the old value would make "I no longer
+           know this" impossible to express.
+         */
+         vat_cents      = p_vat_cents,
+         channel        = v_channel,
+         payment_status = p_payment_status,
+         vendor         = case when p_vendor is null or pg_catalog.btrim(p_vendor) = ''
+                               then null else pg_catalog.btrim(p_vendor) end,
+         note           = case when p_note is null or pg_catalog.btrim(p_note) = ''
+                               then null else pg_catalog.btrim(p_note) end,
+         updated_at     = pg_catalog.now()
    where id = p_expense_id
   returning * into v_row;
 
@@ -350,19 +561,31 @@ begin
     'expense_updated',
     'business_expense',
     v_row.id::text,
-    'Kosten korrigiert: ' || v_row.category || ' ' || v_row.amount_cents::text || ' Cent',
+    'Kosten korrigiert: ' || v_row.category || ' ' || v_row.gross_cents::text || ' Cent brutto',
     coalesce(p_operation_id, pg_catalog.gen_random_uuid()),
+    /*
+      BOTH SIDES CARRY EVERY FIELD THAT CAN CHANGE. A correction IS the
+      pair, so an audit entry that held only the new values could not
+      answer "what was it before" - which is the one question a corrected
+      financial figure always provokes.
+    */
     pg_catalog.jsonb_build_object(
       'before', pg_catalog.jsonb_build_object(
         'occurredOn', v_before.occurred_on,
         'category', v_before.category,
-        'amountCents', v_before.amount_cents,
+        'grossCents', v_before.gross_cents,
+        'vatCents', v_before.vat_cents,
+        'channel', v_before.channel,
+        'paymentStatus', v_before.payment_status,
         'orderId', v_before.order_id
       ),
       'after', pg_catalog.jsonb_build_object(
         'occurredOn', v_row.occurred_on,
         'category', v_row.category,
-        'amountCents', v_row.amount_cents,
+        'grossCents', v_row.gross_cents,
+        'vatCents', v_row.vat_cents,
+        'channel', v_row.channel,
+        'paymentStatus', v_row.payment_status,
         'orderId', v_row.order_id
       )
     )
@@ -414,12 +637,22 @@ begin
     'expense_deleted',
     'business_expense',
     v_before.id::text,
-    'Kosten gelöscht: ' || v_before.category || ' ' || v_before.amount_cents::text || ' Cent',
+    'Kosten gelöscht: ' || v_before.category || ' ' || v_before.gross_cents::text || ' Cent brutto',
     coalesce(p_operation_id, pg_catalog.gen_random_uuid()),
+    /*
+      EVERY FINAL VALUE, because the row is about to stop existing. This
+      object is the only remaining record that the expense was ever there,
+      so it carries what it was, what it cost, what VAT was known about
+      it, which channel it belonged to, whether it had been paid and who
+      recorded it.
+    */
     pg_catalog.jsonb_build_object(
       'occurredOn', v_before.occurred_on,
       'category', v_before.category,
-      'amountCents', v_before.amount_cents,
+      'grossCents', v_before.gross_cents,
+      'vatCents', v_before.vat_cents,
+      'channel', v_before.channel,
+      'paymentStatus', v_before.payment_status,
       'orderId', v_before.order_id,
       'description', v_before.description,
       'vendor', v_before.vendor,
@@ -453,14 +686,14 @@ revoke all privileges on table public.business_expenses from public;
 */
 grant select on table public.business_expenses to service_role;
 
-revoke all on function public.admin_record_business_expense(uuid, date, text, integer, text, uuid, text, text, uuid)
+revoke all on function public.admin_record_business_expense(uuid, date, text, integer, text, text, text, integer, uuid, text, text, uuid)
   from public, anon, authenticated;
-grant execute on function public.admin_record_business_expense(uuid, date, text, integer, text, uuid, text, text, uuid)
+grant execute on function public.admin_record_business_expense(uuid, date, text, integer, text, text, text, integer, uuid, text, text, uuid)
   to service_role;
 
-revoke all on function public.admin_update_business_expense(uuid, uuid, date, text, integer, text, uuid, text, text, uuid)
+revoke all on function public.admin_update_business_expense(uuid, uuid, date, text, integer, text, text, text, integer, uuid, text, text, uuid)
   from public, anon, authenticated;
-grant execute on function public.admin_update_business_expense(uuid, uuid, date, text, integer, text, uuid, text, text, uuid)
+grant execute on function public.admin_update_business_expense(uuid, uuid, date, text, integer, text, text, text, integer, uuid, text, text, uuid)
   to service_role;
 
 revoke all on function public.admin_delete_business_expense(uuid, uuid, uuid)
@@ -493,7 +726,8 @@ begin
     into v_missing
     from (values
       ('id'), ('occurred_on'), ('category'), ('order_id'), ('description'),
-      ('amount_cents'), ('currency'), ('vendor'), ('note'),
+      ('gross_cents'), ('vat_cents'), ('currency'), ('channel'),
+      ('payment_status'), ('vendor'), ('note'),
       ('created_by'), ('created_at'), ('updated_at')
     ) as c(name)
    where not exists (
@@ -506,13 +740,72 @@ begin
     raise exception '071: business_expenses is missing columns: %', v_missing;
   end if;
 
-  -- the constraint that keeps the two kinds of cost apart
-  select pg_catalog.count(*) into v_count
-    from pg_catalog.pg_constraint
-   where conname = 'business_expenses_order_scope_check'
-     and conrelid = 'public.business_expenses'::pg_catalog.regclass;
-  if v_count <> 1 then
-    raise exception '071: business_expenses_order_scope_check is missing';
+  -- AND THE AMBIGUOUS COLUMN MUST NOT EXIST. An earlier draft of this
+  -- migration called the amount column amount_cents and said nothing
+  -- about gross or net. If both ever existed at once, every reader would
+  -- have to guess which one the margin used.
+  if exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public'
+       and table_name = 'business_expenses'
+       and column_name = 'amount_cents'
+  ) then
+    raise exception '071: the ambiguous amount_cents column exists alongside gross_cents';
+  end if;
+
+  -- vat_cents is NULLABLE, and that is load-bearing: null means "not
+  -- known" and must stay distinguishable from a known zero.
+  if (select is_nullable from information_schema.columns
+       where table_schema = 'public' and table_name = 'business_expenses'
+         and column_name = 'vat_cents') <> 'YES' then
+    raise exception '071: vat_cents is NOT NULL - an unknown VAT cannot be expressed';
+  end if;
+
+  -- channel and payment_status are both NOT NULL: an expense with no
+  -- channel could not be reported on, and one with no payment status
+  -- would be a third state nobody declared.
+  if (select pg_catalog.count(*) from information_schema.columns
+       where table_schema = 'public' and table_name = 'business_expenses'
+         and column_name in ('channel', 'payment_status')
+         and is_nullable = 'NO') <> 2 then
+    raise exception '071: channel or payment_status is nullable';
+  end if;
+
+  -- the constraints: the two kinds of cost, the VAT bounds, and the two
+  -- closed vocabularies
+  select pg_catalog.string_agg(c.name, ', ')
+    into v_missing
+    from (values
+      ('business_expenses_order_scope_check'),
+      ('business_expenses_vat_bounds_check')
+    ) as c(name)
+   where not exists (
+     select 1 from pg_catalog.pg_constraint
+      where conname = c.name
+        and conrelid = 'public.business_expenses'::pg_catalog.regclass
+   );
+  if v_missing is not null then
+    raise exception '071: constraints missing: %', v_missing;
+  end if;
+
+  -- the channel vocabulary is migration 050's four values, exactly
+  if (select pg_catalog.count(*) from pg_catalog.pg_constraint
+       where conrelid = 'public.business_expenses'::pg_catalog.regclass
+         and pg_catalog.pg_get_constraintdef(oid) like '%channel%'
+         and pg_catalog.pg_get_constraintdef(oid) like '%b2c%'
+         and pg_catalog.pg_get_constraintdef(oid) like '%b2b%'
+         and pg_catalog.pg_get_constraintdef(oid) like '%event%'
+         and pg_catalog.pg_get_constraintdef(oid) like '%internal%') < 1 then
+    raise exception '071: the channel CHECK does not name all four of 050s channels';
+  end if;
+
+  -- and payment_status is exactly open/paid
+  if (select pg_catalog.count(*) from pg_catalog.pg_constraint
+       where conrelid = 'public.business_expenses'::pg_catalog.regclass
+         and pg_catalog.pg_get_constraintdef(oid) like '%payment_status%'
+         and pg_catalog.pg_get_constraintdef(oid) like '%open%'
+         and pg_catalog.pg_get_constraintdef(oid) like '%paid%') < 1 then
+    raise exception '071: the payment_status CHECK is not open/paid';
   end if;
 
   -- the three writers, each one SECURITY DEFINER

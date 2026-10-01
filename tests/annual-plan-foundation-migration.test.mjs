@@ -1650,6 +1650,15 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // two literals to match and touches no guard, no field list, no
     // state and no deadline. Reviewed in
     // tests/customer-rights-flows.test.mjs.
+    // FINANCE FOUNDATION (migration 071, pending). lib/financeSummary.ts
+    // is a ZERO-IMPORT, clock-free, integer-cents leaf: it sums rows and
+    // reports what is unknown. It writes nothing, reads nothing and
+    // decides no transition. The edit renames the expense amount to
+    // grossCents, adds nullable VAT, channel and payment status, and adds
+    // the VAT-coverage report - all of which moved with 071 while it is
+    // still unapplied. Reviewed in
+    // tests/business-expenses-migration.test.mjs.
+    "lib/financeSummary.ts",
     "lib/terminationRequest.ts",
   ];
 
@@ -1760,6 +1769,21 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // import appeared, no refund concept exists in the file, and the
     // outcome is still resolveTerminationOutcome's. Reviewed in
     // tests/plan-contextual-cancellation.test.mjs.
+    // FINANCE FOUNDATION (migration 071, pending). Three files, and all
+    // three are presentation or validation over a table that is not live
+    // yet: app/AdminCosts.tsx renders the Kosten screen,
+    // app/api/admin/costs/route.ts gates it on read_sensitive/write and
+    // computes every figure server-side, and neither touches an order, a
+    // plan, a case, a payment provider or an e-mail. Every write leaves
+    // through 071's audited SECURITY DEFINER writers; service_role holds
+    // SELECT on business_expenses and nothing else.
+    //
+    // Listed because 071 is PENDING and these moved with it: the gross/VAT
+    // rename, the channel and the payment status all had to reach the
+    // application in the same pass. Reviewed in
+    // tests/business-expenses-migration.test.mjs.
+    "app/AdminCosts.tsx",
+    "app/api/admin/costs/route.ts",
     "app/api/termination/route.ts",
     // SITE CHROME: one entry added to the `links` array, so /partnerships
     // is reachable from the main navigation between B2B and Rezepte
