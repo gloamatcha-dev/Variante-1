@@ -153,15 +153,15 @@ test("both new pages exist as real routes and are indexable", () => {
 });
 
 test("§ 312k: the entry label is published and reachable from the footer", () => {
-  assert.ok(SITE.includes("Verträge hier kündigen"), "the statutory entry label is missing");
-  assert.ok(CHROME.includes("Verträge hier kündigen"),
+  assert.ok(SITE.includes("VERTRÄGE HIER KÜNDIGEN"), "the statutory entry label is missing");
+  assert.ok(CHROME.includes("VERTRÄGE HIER KÜNDIGEN"),
     "the Kündigungsbutton is not permanently reachable from the footer");
-  assert.equal(TERMINATION_ENTRY_LABEL, "Verträge hier kündigen");
+  assert.equal(TERMINATION_ENTRY_LABEL, "VERTRÄGE HIER KÜNDIGEN");
 });
 
 test("§ 312k: the final button carries the statutory label", () => {
-  assert.ok(SITE.includes("Jetzt kündigen"), "the confirmation button label is missing");
-  assert.equal(TERMINATION_CONFIRM_LABEL, "Jetzt kündigen");
+  assert.ok(SITE.includes("JETZT KÜNDIGEN"), "the confirmation button label is missing");
+  assert.equal(TERMINATION_CONFIRM_LABEL, "JETZT KÜNDIGEN");
 });
 
 test("the withdrawal page still confirms with its own label", () => {

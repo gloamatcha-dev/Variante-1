@@ -1925,7 +1925,7 @@ return <div className="legal-withdrawal">
 
 if(step==="review")return <div className="legal-withdrawal">
 <h3>Angaben prüfen</h3>
-<p>Bitte prüfe deine Angaben. Mit Klick auf &bdquo;Jetzt kündigen&ldquo; erklärst du verbindlich die Kündigung dieses Vertrags.</p>
+<p>Bitte prüfe deine Angaben. Mit Klick auf &bdquo;JETZT KÜNDIGEN&ldquo; erklärst du verbindlich die Kündigung dieses Vertrags.</p>
 <dl>
 <div><dt>Name</dt><dd>{name}</dd></div>
 <div><dt>E-Mail für Bestätigung</dt><dd>{email}</dd></div>
@@ -1937,7 +1937,7 @@ if(step==="review")return <div className="legal-withdrawal">
 {error&&<p className="account-error">{error}</p>}
 <div className="portal-form-actions">
 <button type="button" className="portal-cancel-btn" onClick={()=>setStep("form")} disabled={busy}>Zurück</button>
-<button type="button" className="cta" onClick={confirmTermination} disabled={busy}>{busy?"WIRD ÜBERMITTELT…":"Jetzt kündigen"}</button>
+<button type="button" className="cta" onClick={confirmTermination} disabled={busy}>{busy?"WIRD ÜBERMITTELT…":"JETZT KÜNDIGEN"}</button>
 </div>
 </div>;
 
@@ -2044,7 +2044,7 @@ const title:Record<string,string>={impressum:"Impressum",datenschutz:"Datenschut
 if(route==="kuendigung"){
 return <main className="legal-page legal-doc legal-kuendigung">
 <p className="legal-doc-eyebrow">GLOA · VERTRÄGE</p>
-<h1>Verträge hier kündigen.</h1>
+<h1>VERTRÄGE HIER KÜNDIGEN</h1>
 <p className="legal-doc-lead">Hier kannst du dein Abo oder deinen Jahresplan kündigen - ohne Konto, ohne Anmeldung und ohne Begründung. Die Kündigung wird mit Datum und Uhrzeit erfasst; die Bestätigung bekommst du per E-Mail.</p>
 <section className="legal-doc-section">
 <h2>Kündigung ist nicht Widerruf</h2>

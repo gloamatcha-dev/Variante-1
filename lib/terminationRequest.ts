@@ -28,10 +28,10 @@
  */
 
 /** BGB 312k Abs. 2 Satz 1 - the entry point, in the required words. */
-export const TERMINATION_ENTRY_LABEL = "Verträge hier kündigen";
+export const TERMINATION_ENTRY_LABEL = "VERTRÄGE HIER KÜNDIGEN";
 
 /** BGB 312k Abs. 2 Satz 4 - the confirmation button, in the required words. */
-export const TERMINATION_CONFIRM_LABEL = "Jetzt kündigen";
+export const TERMINATION_CONFIRM_LABEL = "JETZT KÜNDIGEN";
 
 export type TerminationKind = "ordinary" | "extraordinary";
 

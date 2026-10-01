@@ -43,8 +43,8 @@ const read = rel => readFileSync(path.join(ROOT, rel), "utf8");
    ══════════════════════════════════════════════════════════════ */
 
 test("the two statutory button labels are exact", () => {
-  assert.equal(TERMINATION_ENTRY_LABEL, "Verträge hier kündigen");
-  assert.equal(TERMINATION_CONFIRM_LABEL, "Jetzt kündigen");
+  assert.equal(TERMINATION_ENTRY_LABEL, "VERTRÄGE HIER KÜNDIGEN");
+  assert.equal(TERMINATION_CONFIRM_LABEL, "JETZT KÜNDIGEN");
 });
 
 test("the confirmation page collects every field BGB 312k Abs. 2 Satz 3 names", () => {

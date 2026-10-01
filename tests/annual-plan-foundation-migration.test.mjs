@@ -1643,6 +1643,14 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     "lib/publicRoutes.ts",
     "lib/orderConfirmationEmail.ts",
     "lib/email/orderConfirmation.ts",
+    // EXACT COPY COMPLIANCE: two string constants, nothing else. The
+    // file holds the BGB 312k labels as data so the page, the footer and
+    // the tests cannot drift apart - and the approved specification
+    // writes both statutory labels in capitals. The edit rewrites those
+    // two literals to match and touches no guard, no field list, no
+    // state and no deadline. Reviewed in
+    // tests/customer-rights-flows.test.mjs.
+    "lib/terminationRequest.ts",
   ];
 
   // Phase 4B4 edits ONE application module: the single canonical Stripe
