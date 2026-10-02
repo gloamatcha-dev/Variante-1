@@ -14,17 +14,28 @@
 -- the two named constraints, the four indexes, the grants, RLS, and the
 -- three closed vocabularies. A schema comparison would find those.
 --
--- 30-33 READ THE FUNCTION BODIES, and they are the only checks here that
+-- 30-34 READ THE FUNCTION BODIES, and they are the only checks here that
 -- could tell a correct 071 from a broken one that looks identical:
 --
 --   30  the writers audit under module 'finance', each with its own
 --       action
 --
---   31  the writers COALESCE the operation id. Not hypothetical:
---       admin_activity_log.operation_id is NOT NULL, the first version of
---       071 passed the parameter through unguarded, and every writer
---       raised the moment it was called without one. The table, the
---       columns, the indexes and the grants were all perfect.
+--   31  THE MUTATION IS IDEMPOTENT, not merely the audit row. This is
+--       the check that replaces the weakest one this file ever had.
+--
+--       An earlier 071 passed p_operation_id to record_admin_activity and
+--       called that idempotency. It was not: admin_activity_log is unique
+--       on (module, action, operation_id), so a retry produced ONE audit
+--       event - and nothing stopped it producing a SECOND expense row.
+--       For a cost ledger that is the worst failure available, because
+--       the duplicate is invisible in the trail and counts twice in every
+--       margin.
+--
+--       So this verifies the real guard: each writer resolves the
+--       operation id once, takes a TRANSACTION-SCOPED ADVISORY LOCK on
+--       it, and only then looks for a prior event in admin_activity_log -
+--       the lock before the lookup, because two concurrent retries that
+--       both look first would both find nothing.
 --
 --   32  THE CHANNEL OF AN ORDER-LINKED COST IS DERIVED FROM THE ORDER,
 --       in both writing functions. This is the one rule that a caller
@@ -37,6 +48,12 @@
 --   33  the audit payloads carry the new fields on both sides, so a
 --       corrected or deleted figure can still be reconstructed.
 --
+--   34  AND THE REGISTRY SURVIVES A DELETION. The create writer's replay
+--       path reads admin_activity_log, not a key on the expense row -
+--       which is what stops a replayed create from resurrecting a cost
+--       somebody deliberately removed. Migration 050 could put the key on
+--       the row because a stock movement is never deleted; an expense is.
+--
 -- 14 is the gross/VAT semantics, and it is the check that exists because
 -- of the one defect in 071 that could not have been repaired after the
 -- fact: an amount column that does not say whether it is gross or net.
@@ -45,14 +62,14 @@
 -- rewritten NO existing row. It is additive, it backfills nothing, and a
 -- fresh apply therefore leaves business_expenses empty.
 --
--- EXPECTED HEALTHY RESULT:  0 FAIL / 17 PASS / 3 INFO — APPLIED CLEANLY
+-- EXPECTED HEALTHY RESULT:  0 FAIL / 18 PASS / 3 INFO — APPLIED CLEANLY
 --
--- Seventeen verdict-bearing checks (10-14, 20-26, 30-33, 40) and three
--- INFO rows (50-52), plus the SUMMARY row, which counts only the twenty
--- above it. The SUMMARY is always computed from the actual rows; this
--- line is the expectation to compare it against, never the source of it.
--- Verified: a fresh apply of 001..071 to a real PostgreSQL 17 instance
--- returns exactly 0 FAIL / 17 PASS / 3 INFO.
+-- Eighteen verdict-bearing checks (10-14, 20-26, 30-34, 40) and three
+-- INFO rows (50-52), plus the SUMMARY row, which counts only the
+-- twenty-one above it. The SUMMARY is always computed from the actual
+-- rows; this line is the expectation to compare it against, never the
+-- source of it. Verified: a fresh apply of 001..071 to a real PostgreSQL
+-- 17 instance returns exactly 0 FAIL / 18 PASS / 3 INFO.
 --
 -- ── RUN IT AFTER 071, NOT BEFORE ──────────────────────────────
 --
@@ -325,21 +342,46 @@ verdicts(check_id, area, question, expectation, found, verdict) as (
               then 'PASS' else 'FAIL' end
 
   union all
-  -- THE BUG THIS CHECK EXISTS FOR. admin_activity_log.operation_id is NOT
-  -- NULL; the first version of 071 passed the parameter through unguarded
-  -- and every writer raised when it was omitted, while the table, the
-  -- columns, the indexes, the grants and RLS were all exactly right.
+  /*
+    THE MUTATION IS IDEMPOTENT, NOT JUST THE AUDIT ROW.
+
+    Four facts per writer, and the fourth is the one a naive version gets
+    wrong:
+
+      1. the operation id is resolved ONCE into a local, so the lock and
+         the lookup cannot disagree (and an omitted id still works)
+      2. a transaction-scoped ADVISORY LOCK is taken on it
+      3. a prior event is looked up in admin_activity_log by an EXACT
+         (module, action, operation_id) match - the hash is only the lock
+         key, so a collision can serialise unrelated work but can never
+         make two operations equivalent
+      4. the LOCK comes BEFORE the LOOKUP. Two concurrent retries that
+         both looked first would both find nothing and both mutate.
+  */
   select 31, 'behaviour',
-         'a writer called without an operation id still audits',
-         'expected: all three coalesce p_operation_id to a fresh uuid',
+         'the MUTATION is idempotent per operation id, not just the audit row',
+         'expected: all three resolve, lock, then look up a prior event - in that order',
          coalesce((select string_agg(
-                     case when f.prosrc like '%coalesce(p_operation_id%'
-                          then f.proname || '=guarded'
-                          else f.proname || '=UNGUARDED' end, '; ' order by f.proname)
+                     f.proname || '='
+                     || case when f.prosrc like '%v_operation_id := coalesce(p_operation_id%'
+                                  and f.prosrc like '%pg_advisory_xact_lock%'
+                                  and f.prosrc like '%admin_activity_log%'
+                                  and pg_catalog.strpos(f.prosrc, 'pg_advisory_xact_lock')
+                                      < pg_catalog.strpos(f.prosrc, 'from public.admin_activity_log')
+                             then 'guarded'
+                             else 'UNGUARDED' end, '; ' order by f.proname)
                      from fn f), '<missing>'),
          case when (select count(*) from fn f
-                     where f.prosrc like '%coalesce(p_operation_id%'
-                       and f.prosrc like '%gen_random_uuid()%') = 3
+                     where f.prosrc like '%v_operation_id := coalesce(p_operation_id%'
+                       and f.prosrc like '%gen_random_uuid()%'
+                       and f.prosrc like '%pg_catalog.pg_advisory_xact_lock%'
+                       and f.prosrc like '%pg_catalog.hashtextextended%'
+                       and f.prosrc like '%from public.admin_activity_log%'
+                       and f.prosrc like '%l.operation_id = v_operation_id%'
+                       and f.prosrc like '%l.module = ''finance''%'
+                       -- the lock precedes the lookup
+                       and pg_catalog.strpos(f.prosrc, 'pg_advisory_xact_lock')
+                           < pg_catalog.strpos(f.prosrc, 'from public.admin_activity_log')) = 3
               then 'PASS' else 'FAIL' end
 
   union all
@@ -380,29 +422,96 @@ verdicts(check_id, area, question, expectation, found, verdict) as (
   -- update writer carries every changeable field on BOTH sides; the
   -- delete writer carries every final value, because the row is about to
   -- stop existing and that object becomes the only record it was there.
+  /*
+    AND THE PAYLOADS ARE COMPLETE, not merely present.
+
+    An earlier version checked four keys and the migration's own comment
+    claimed "BOTH SIDES CARRY EVERY FIELD THAT CAN CHANGE" while
+    description, vendor and note were missing - so a correction to any of
+    those three produced an audit row asserting nothing had changed. The
+    delete payload said "EVERY FINAL VALUE" and omitted note, currency and
+    both timestamps.
+
+    So every writer is checked against the fields it actually has to
+    carry: the create and both halves of the update against every field
+    the operator can enter, and the delete against everything needed to
+    RECONSTRUCT the row it is about to destroy.
+  */
   select 33, 'behaviour',
-         'the audit payloads carry gross, VAT, channel and payment status',
-         'expected: update has before+after; delete has the final values',
+         'the audit payloads are complete enough to reconstruct the record',
+         'expected: create 11 fields; update before+after 10 each; delete 14',
          coalesce((select string_agg(
-                     case when f.prosrc like '%''grossCents''%'
-                           and f.prosrc like '%''vatCents''%'
-                           and f.prosrc like '%''channel''%'
-                           and f.prosrc like '%''paymentStatus''%'
+                     case when f.prosrc like '%''description''%'
+                           and f.prosrc like '%''note''%'
                           then f.proname || '=complete'
                           else f.proname || '=INCOMPLETE' end, '; ' order by f.proname)
                      from fn f), '<missing>'),
          case when (select count(*) from fn f
-                     where f.prosrc like '%''grossCents''%'
+                     -- every writer names the fields that were missing
+                     where f.prosrc like '%''description''%'
+                       and f.prosrc like '%''note''%'
+                       and f.prosrc like '%''grossCents''%'
                        and f.prosrc like '%''vatCents''%'
                        and f.prosrc like '%''channel''%'
-                       and f.prosrc like '%''paymentStatus''%') = 3
+                       and f.prosrc like '%''paymentStatus''%'
+                       and f.prosrc like '%''occurredOn''%'
+                       and f.prosrc like '%''category''%'
+                       and f.prosrc like '%''orderId''%'
+                       and f.prosrc like '%''vendor''%') = 3
+                   -- the create records who entered it
+                   and (select count(*) from fn f
+                         where f.proname = 'admin_record_business_expense'
+                           and f.prosrc like '%''recordedBy''%') = 1
+                   -- the correction carries both sides
                    and (select count(*) from fn f
                          where f.proname = 'admin_update_business_expense'
                            and f.prosrc like '%''before''%'
                            and f.prosrc like '%''after''%') = 1
+                   -- and the deletion carries what the row cannot say any more
                    and (select count(*) from fn f
                          where f.proname = 'admin_delete_business_expense'
-                           and f.prosrc like '%''recordedBy''%') = 1
+                           and f.prosrc like '%''recordedBy''%'
+                           and f.prosrc like '%''currency''%'
+                           and f.prosrc like '%''createdAt''%'
+                           and f.prosrc like '%''updatedAt''%') = 1
+              then 'PASS' else 'FAIL' end
+
+  union all
+  /*
+    A REPLAYED CREATE CANNOT RESURRECT A DELETED EXPENSE.
+
+    The edge case that decided where the registry lives. If the operation
+    id were a UNIQUE column on business_expenses - migration 050's shape -
+    it would vanish with the row, and replaying the original create would
+    silently re-enter a cost somebody had removed on purpose.
+
+    So the create writer's replay path reads admin_activity_log (which has
+    no delete path at all) for the prior event, then looks the expense up
+    by the entity id that event recorded. If the row is gone it returns
+    null and writes nothing, which is the honest answer: the operation
+    already happened, and its result was later deleted.
+  */
+  select 34, 'behaviour',
+         'a replayed create reads the audit log, so it cannot resurrect a deleted expense',
+         'expected: the create writer resolves a prior event to an entity id and returns it',
+         coalesce((select case when f.prosrc like '%l.entity_id into v_prior_entity%'
+                                and f.prosrc like '%v_prior_entity::uuid%'
+                               then 'reads the append-only log'
+                               else 'DOES NOT' end
+                     from fn f where f.proname = 'admin_record_business_expense'), '<missing>'),
+         case when (select count(*) from fn f
+                     where f.proname = 'admin_record_business_expense'
+                       and f.prosrc like '%l.entity_id into v_prior_entity%'
+                       and f.prosrc like '%where id = v_prior_entity::uuid%'
+                       -- and it returns BEFORE the insert
+                       and pg_catalog.strpos(f.prosrc, 'v_prior_entity is not null')
+                           < pg_catalog.strpos(f.prosrc, 'insert into public.business_expenses')) = 1
+                   -- the operation id is NOT a column on the expense row:
+                   -- a row-level key would die with the row.
+                   and (select count(*) from information_schema.columns
+                         where table_schema = 'public'
+                           and table_name = 'business_expenses'
+                           and column_name in ('operation_id', 'idempotency_key')) = 0
               then 'PASS' else 'FAIL' end
 
   /* ── 40. 071 REWROTE NOTHING ────────────────────────────── */
@@ -458,13 +567,13 @@ select * from (
   union all
   select 999, 'SUMMARY',
          'migration 071 applied cleanly',
-         'expected: 0 FAIL / 17 PASS / 3 INFO',
+         'expected: 0 FAIL / 18 PASS / 3 INFO',
          (select count(*) filter (where v.verdict = 'FAIL')::text || ' FAIL / '
               || count(*) filter (where v.verdict = 'PASS')::text || ' PASS / '
               || (select count(*) from infos)::text || ' INFO'
             from verdicts v),
          case when (select count(*) filter (where v.verdict = 'FAIL') from verdicts v) = 0
-                   and (select count(*) from verdicts) = 17
+                   and (select count(*) from verdicts) = 18
               then 'APPLIED CLEANLY' else 'INCOMPLETE' end
 ) as checks
  order by check_id;

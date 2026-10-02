@@ -26,6 +26,7 @@
 --   23  admin_activity_log does not accept module 'finance'
 --   24  the three roles 071 grants to do not all exist
 --   25  orders.customer_type is missing (the channel is derived from it)
+--   26  admin_activity_log cannot serve as the operation registry
 --
 -- Anything else that 071 needs, it creates itself.
 --
@@ -38,14 +39,14 @@
 -- checkable rather than remembered. A database carrying it is a FAIL
 -- that says WHY, instead of a FAIL that looks like "already applied".
 --
--- EXPECTED HEALTHY RESULT:  0 FAIL / 10 PASS / 3 INFO — SAFE TO APPLY
+-- EXPECTED HEALTHY RESULT:  0 FAIL / 11 PASS / 3 INFO — SAFE TO APPLY
 --
--- Ten verdict-bearing checks (10-13, 20-25) and three INFO rows
--- (50-52), plus the SUMMARY row, which counts only the thirteen above
+-- Eleven verdict-bearing checks (10-13, 20-26) and three INFO rows
+-- (50-52), plus the SUMMARY row, which counts only the fourteen above
 -- it. The SUMMARY is always computed from the actual rows; this line is
 -- the expectation to compare it against, never the source of it.
 -- Verified: a database carrying 001..070 and not 071 returns exactly
--- 0 FAIL / 10 PASS / 3 INFO.
+-- 0 FAIL / 11 PASS / 3 INFO.
 
 select *
   from (
@@ -243,6 +244,50 @@ select *
                            and pg_get_constraintdef(oid) like '%business%') >= 1
               then 'PASS' else 'FAIL' end
 
+  union all
+  /*
+    THE OPERATION REGISTRY, which 071 depends on and does not create.
+
+    071's writers make the MUTATION idempotent, not just the audit row,
+    and they do it by looking for a prior event in admin_activity_log
+    before they write. That turns the log from something 071 appends to
+    into something it READS - a real dependency, on four specific columns
+    plus the uniqueness that makes (module, action, operation_id) identify
+    one operation.
+
+    The log is also the only registry that works here: it has no delete
+    path, so an operation's identity survives the deletion of the expense
+    it created. A key on the expense row would vanish with the row and let
+    a replayed create resurrect a cost somebody removed - which is why
+    migration 050's row-level operation_id, correct for stock movements
+    that are never deleted, is deliberately NOT the pattern used.
+  */
+  select 26, 'dependency',
+         'admin_activity_log can serve as the operation registry',
+         'expected: module/action/operation_id/entity_id + the event uniqueness',
+         (select coalesce(string_agg(c.column_name, ', ' order by c.column_name), 'none')
+            from information_schema.columns c
+           where c.table_schema = 'public' and c.table_name = 'admin_activity_log'
+             and c.column_name in ('module', 'action', 'operation_id', 'entity_id'))
+           || ' | unique='
+           || coalesce((select con.conname from pg_constraint con
+                         where con.conrelid = 'public.admin_activity_log'::regclass
+                           and con.contype = 'u'
+                           and pg_get_constraintdef(con.oid) like '%module%'
+                           and pg_get_constraintdef(con.oid) like '%action%'
+                           and pg_get_constraintdef(con.oid) like '%operation_id%'
+                         limit 1), 'MISSING'),
+         case when (select count(*) from information_schema.columns c
+                     where c.table_schema = 'public' and c.table_name = 'admin_activity_log'
+                       and c.column_name in ('module', 'action', 'operation_id', 'entity_id')) = 4
+                   and (select count(*) from pg_constraint con
+                         where con.conrelid = 'public.admin_activity_log'::regclass
+                           and con.contype = 'u'
+                           and pg_get_constraintdef(con.oid) like '%module%'
+                           and pg_get_constraintdef(con.oid) like '%action%'
+                           and pg_get_constraintdef(con.oid) like '%operation_id%') >= 1
+              then 'PASS' else 'FAIL' end
+
   -- ── 50-52. INFO. Context for the operator, never a verdict. ──
   --
   -- 071 reads none of these and changes none of them. They are here so
@@ -281,7 +326,7 @@ select *
   union all
   select 999, 'SUMMARY',
          'migration 071 may be applied',
-         'expected: 0 FAIL / 10 PASS / 3 INFO',
+         'expected: 0 FAIL / 11 PASS / 3 INFO',
          (select count(*) filter (where v.verdict = 'FAIL')::text || ' FAIL / '
               || count(*) filter (where v.verdict = 'PASS')::text || ' PASS / '
               || count(*) filter (where v.verdict = 'INFO')::text || ' INFO'
@@ -346,6 +391,19 @@ select *
                                        and pg_get_constraintdef(oid) like '%private%'
                                        and pg_get_constraintdef(oid) like '%business%') >= 1
                           then 'PASS' else 'FAIL' end
+              union all
+              select case when (select count(*) from information_schema.columns c
+                                 where c.table_schema = 'public'
+                                   and c.table_name = 'admin_activity_log'
+                                   and c.column_name in ('module', 'action',
+                                                         'operation_id', 'entity_id')) = 4
+                               and (select count(*) from pg_constraint con
+                                     where con.conrelid = 'public.admin_activity_log'::regclass
+                                       and con.contype = 'u'
+                                       and pg_get_constraintdef(con.oid) like '%module%'
+                                       and pg_get_constraintdef(con.oid) like '%action%'
+                                       and pg_get_constraintdef(con.oid) like '%operation_id%') >= 1
+                          then 'PASS' else 'FAIL' end
               union all select 'INFO' union all select 'INFO' union all select 'INFO'
             ) as v),
          case when (select count(*) from information_schema.tables
@@ -389,6 +447,17 @@ select *
                            and pg_get_constraintdef(oid) like '%customer_type%'
                            and pg_get_constraintdef(oid) like '%private%'
                            and pg_get_constraintdef(oid) like '%business%') >= 1
+                   and (select count(*) from information_schema.columns c
+                         where c.table_schema = 'public'
+                           and c.table_name = 'admin_activity_log'
+                           and c.column_name in ('module', 'action',
+                                                 'operation_id', 'entity_id')) = 4
+                   and (select count(*) from pg_constraint con
+                         where con.conrelid = 'public.admin_activity_log'::regclass
+                           and con.contype = 'u'
+                           and pg_get_constraintdef(con.oid) like '%module%'
+                           and pg_get_constraintdef(con.oid) like '%action%'
+                           and pg_get_constraintdef(con.oid) like '%operation_id%') >= 1
               then 'SAFE TO APPLY' else 'DO NOT APPLY' end
 
   ) as checks

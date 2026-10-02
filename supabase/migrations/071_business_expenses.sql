@@ -76,12 +76,16 @@
 --
 -- vat_cents is the input VAT, and it is NULLABLE on purpose:
 --
---   NULL   nobody knows yet. A supplier statement that has not arrived,
---          a receipt with no VAT line. This is the honest default and it
---          must stay distinguishable from zero forever.
---   0      known, and genuinely zero - a reverse-charge invoice, a
---          private sale, a small-business supplier.
---   > 0    known.
+--   NULL   the VAT amount is not known. A supplier statement that has
+--          not arrived, a receipt with no VAT line. This is the honest
+--          default and it must stay distinguishable from zero forever.
+--   0      the VAT amount is KNOWN, from the source document or the
+--          applicable treatment, to be exactly zero.
+--   > 0    the VAT amount is known.
+--
+-- No tax treatment is named or implied here. This column records what a
+-- document says; deciding WHY a document shows no VAT is an accounting
+-- question this system cannot answer and does not try to.
 --
 -- NO VAT RATE IS EVER ASSUMED. There is no 19, no 7, no /1.19 and no
 -- /1.07 anywhere in this migration or in lib/financeSummary.ts. A net
@@ -188,8 +192,19 @@ create table if not exists public.business_expenses (
     A cost is a magnitude; the fact that it is subtracted is the reader's
     job, not the sign's. Allowing a negative here would mean a "cost" that
     silently increases a margin, which is how a credit note gets booked as
-    income. A supplier credit is recorded as what it is - its own row,
-    with its own date - and never as a negative cost.
+    income.
+
+    SUPPLIER CREDITS ARE NOT SUPPORTED BY THIS FOUNDATION, and must not be
+    worked around. Every row here is a POSITIVE cost, so entering a credit
+    note as an expense would INCREASE costs rather than reduce them -
+    exactly backwards. An earlier version of this comment suggested
+    recording one "as its own row", which would have been that mistake.
+
+    A credit or an adjustment needs an explicit model of its own - a signed
+    adjustment, or a credit table with its own rules about which period it
+    belongs to - and this migration deliberately does not pretend to
+    account for one. Until that exists, a supplier credit belongs outside
+    this ledger.
 
     Zero is excluded too: a cost of nothing is a cost that was not
     incurred, and recording it only makes the completeness count lie.
@@ -199,10 +214,14 @@ create table if not exists public.business_expenses (
   /*
     THE INPUT VAT, OR NOTHING AT ALL.
 
-    Nullable, and the null is load-bearing: it means "not known", which is
-    a different statement from "zero" and must stay different forever. A
-    VAT overview built by treating null as zero would be a confident
-    report of a figure nobody has.
+    Nullable, and the null is load-bearing: it means "the amount is not
+    known", which is a different statement from "the amount is zero" and
+    must stay different forever. A VAT overview built by treating null as
+    zero would be a confident report of a figure nobody has.
+
+    A known zero is just that - the document, or the treatment that
+    applies to it, puts the VAT at nothing. This column makes no claim
+    about which treatment that was.
 
     No rate is assumed anywhere. The bounds are the only arithmetic:
     between zero and the gross amount, because input VAT cannot exceed
@@ -253,18 +272,6 @@ create table if not exists public.business_expenses (
 );
 
 /*
-  THE TWO KINDS STAY APART.
-
-  'general' means "belongs to a period, not an order", so a general
-  expense with an order is a contradiction - and a direct cost without one
-  is the more dangerous half: it would be counted as a direct cost of the
-  period while belonging to no order, so the per-order breakdown and the
-  total would disagree and neither would be wrong on its own terms.
-
-  Declared as a named table-level constraint so the preflight, the
-  postcheck and the suite can all refer to it by a name this file chose.
-*/
-/*
   THE VAT BOUNDS, AS A NAMED CONSTRAINT.
 
   Declared here rather than inline so the verify block, the preflight and
@@ -283,6 +290,18 @@ alter table public.business_expenses
     or (vat_cents >= 0 and vat_cents <= gross_cents)
   );
 
+/*
+  THE TWO KINDS STAY APART.
+
+  'general' means "belongs to a period, not an order", so a general
+  expense with an order is a contradiction - and a direct cost without one
+  is the more dangerous half: it would be counted as a direct cost of the
+  period while belonging to no order, so the per-order breakdown and the
+  total would disagree and neither would be wrong on its own terms.
+
+  Declared as a named table-level constraint so the preflight, the
+  postcheck and the suite can all refer to it by a name this file chose.
+*/
 alter table public.business_expenses
   drop constraint if exists business_expenses_order_scope_check;
 
@@ -318,21 +337,55 @@ create index if not exists idx_business_expenses_channel
 -- no second path that skips the audit.
 
 /*
-  -- THE AUDIT'S IDEMPOTENCY KEY, ON ALL THREE WRITERS ---------
+  -- ONE OPERATION ID IS ONE LOGICAL MUTATION -----------------
 
-  admin_activity_log is unique on (module, action, operation_id) and
-  inserts ON CONFLICT DO NOTHING, so a caller that passes a STABLE
-  p_operation_id audits ONE event however many times its request is
-  retried. That is why the parameter exists and why the route supplies it.
+  p_operation_id is the caller's idempotency key, and all three writers
+  honour it for the MUTATION and not merely for the audit row.
 
-  It coalesces to a fresh uuid rather than defaulting to NULL because
-  admin_activity_log.operation_id is NOT NULL: passing the parameter
+  THE DEFECT THIS REPLACES. An earlier version passed p_operation_id
+  straight to record_admin_activity and called that idempotency. It was
+  not: admin_activity_log is unique on (module, action, operation_id) and
+  inserts ON CONFLICT DO NOTHING, so a retry produced ONE audit event -
+  and nothing stopped it producing a SECOND business_expenses row. For a
+  cost ledger that is the worst possible failure, because the duplicate is
+  invisible in the audit trail and counts twice in every margin.
+
+  -- WHY THE REGISTRY IS THE AUDIT LOG, NOT THE EXPENSE ROW ---
+
+  Migration 050 solved the same problem for stock with a UNIQUE
+  operation_id on inventory_movements, and that is correct THERE because
+  nothing ever deletes a movement. An expense IS deletable, so a key
+  living on the row would vanish with it - and replaying the old create
+  would silently resurrect a cost somebody had deliberately removed.
+
+  admin_activity_log has no delete path at all. It is append-only, so it
+  is the one place an operation's identity survives the deletion of what
+  it created. The lookup below is therefore against the log, not the row.
+
+  -- HOW IT IS MADE CONCURRENCY-SAFE -------------------------
+
+  A bare "look, then insert" is not enough: two simultaneous retries can
+  both observe absence and both proceed. So each writer takes a
+  TRANSACTION-SCOPED ADVISORY LOCK keyed on its own module/action plus the
+  operation id, before it looks.
+
+  The hash is ONLY the lock key. The decision is an exact comparison on
+  (module, action, operation_id), so a hash collision can at worst make
+  two unrelated operations queue behind each other - it can never make
+  them count as the same operation.
+
+  -- WHEN NO OPERATION ID IS SUPPLIED -----------------------
+
+  It coalesces to a fresh uuid, which preserves the convenience of calling
+  a writer without one: a fresh id matches nothing, so the mutation
+  proceeds exactly as before. coalesce is deliberately BARE rather than
+  pg_catalog-qualified, because it is a SQL construct and not a function -
+  pg_catalog.coalesce() does not exist, and under search_path = '' the bare
+  spelling is the correct one. Migration 070 spells it the same way.
+
+  Separately, and this is the fact that first forced the coalesce:
+  admin_activity_log.operation_id is NOT NULL, so passing the parameter
   through unguarded made every writer raise the moment it was omitted.
-
-  coalesce is deliberately BARE and not pg_catalog-qualified. It is a SQL
-  construct rather than a function, so pg_catalog.coalesce() does not
-  exist - under search_path = '' the bare spelling is the correct one, and
-  it is what migration 070 uses for the same reason.
   Found by calling these functions against a real PostgreSQL - nothing
   that reads this file could have known that column's nullability.
 */
@@ -382,9 +435,48 @@ declare
   v_row           public.business_expenses;
   v_customer_type text;
   v_channel       text;
+  v_operation_id  uuid;
+  v_prior_entity  text;
 begin
   if p_actor_user_id is null then
     raise exception 'an expense needs an author';
+  end if;
+
+  /*
+    THE OPERATION, RESOLVED THEN SERIALISED THEN CHECKED.
+
+    In that order, and the order is the whole guarantee. Resolving first
+    means the lock and the lookup both see the same id; locking before
+    looking means two concurrent retries cannot both find nothing.
+  */
+  v_operation_id := coalesce(p_operation_id, pg_catalog.gen_random_uuid());
+
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(
+      'finance:expense_recorded:' || v_operation_id::pg_catalog.text, 0));
+
+  select l.entity_id into v_prior_entity
+    from public.admin_activity_log l
+   where l.module = 'finance'
+     and l.action = 'expense_recorded'
+     and l.operation_id = v_operation_id
+   limit 1;
+
+  if v_prior_entity is not null then
+    /*
+      THIS OPERATION ALREADY HAPPENED. Return what it produced and write
+      NOTHING - no second expense, no second audit row.
+
+      If that expense has since been deleted the select finds nothing and
+      this returns null, which is the deliberate answer: a replay of an
+      old create must never resurrect a cost somebody removed. The audit
+      log still holds both the creation and the deletion, so the history
+      is intact even though the row is gone.
+    */
+    select * into v_row
+      from public.business_expenses
+     where id = v_prior_entity::uuid;
+    return v_row;
   end if;
 
   -- The channel, decided here and never taken on trust. See the note
@@ -441,22 +533,33 @@ begin
     'business_expense',
     v_row.id::text,
     'Kosten erfasst: ' || v_row.category || ' ' || v_row.gross_cents::text || ' Cent brutto',
-    coalesce(p_operation_id, pg_catalog.gen_random_uuid()),
+    v_operation_id,
     /*
-      vatCents GOES IN AS IT IS, null included. jsonb_build_object keeps a
-      SQL null as a JSON null rather than dropping the key, so "unknown"
-      survives into the audit trail as a stated unknown instead of an
-      absent field somebody later reads as zero.
+      EVERY MATERIAL FIELD THE OPERATOR TYPED, so the audit row describes
+      the whole record rather than a summary of it. description and note
+      were missing before, which made "what was recorded" unanswerable
+      from the log alone.
+
+      NULL GOES IN AS NULL. jsonb_build_object keeps a SQL null as a JSON
+      null rather than dropping the key, so an unknown VAT, an absent
+      vendor and an empty note all survive as STATED unknowns instead of
+      absent fields somebody later reads as zero or as "".
+
+      The expense's own uuid is the audit row's entity_id and is not
+      duplicated in here.
     */
     pg_catalog.jsonb_build_object(
       'occurredOn', v_row.occurred_on,
       'category', v_row.category,
+      'description', v_row.description,
       'grossCents', v_row.gross_cents,
       'vatCents', v_row.vat_cents,
       'channel', v_row.channel,
       'paymentStatus', v_row.payment_status,
       'orderId', v_row.order_id,
-      'vendor', v_row.vendor
+      'vendor', v_row.vendor,
+      'note', v_row.note,
+      'recordedBy', v_row.created_by
     )
   );
 
@@ -488,9 +591,42 @@ declare
   v_row           public.business_expenses;
   v_customer_type text;
   v_channel       text;
+  v_operation_id  uuid;
+  v_prior_entity  text;
 begin
   if p_actor_user_id is null then
     raise exception 'an expense needs an author';
+  end if;
+
+  -- The same resolve/serialise/check as the create writer.
+  v_operation_id := coalesce(p_operation_id, pg_catalog.gen_random_uuid());
+
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(
+      'finance:expense_updated:' || v_operation_id::pg_catalog.text, 0));
+
+  select l.entity_id into v_prior_entity
+    from public.admin_activity_log l
+   where l.module = 'finance'
+     and l.action = 'expense_updated'
+     and l.operation_id = v_operation_id
+   limit 1;
+
+  if v_prior_entity is not null then
+    /*
+      THIS CORRECTION ALREADY HAPPENED.
+
+      Returning the row as it stands now, without touching it: no second
+      UPDATE, so updated_at does not advance, and no second audit event.
+      A retried request is the same correction, not another one.
+    */
+    if v_prior_entity <> p_expense_id::pg_catalog.text then
+      raise exception 'business_expense_operation_reused';
+    end if;
+    select * into v_row
+      from public.business_expenses
+     where id = p_expense_id;
+    return v_row;
   end if;
 
   -- The SAME derivation as the create writer, for the same reason: a
@@ -562,31 +698,45 @@ begin
     'business_expense',
     v_row.id::text,
     'Kosten korrigiert: ' || v_row.category || ' ' || v_row.gross_cents::text || ' Cent brutto',
-    coalesce(p_operation_id, pg_catalog.gen_random_uuid()),
+    v_operation_id,
     /*
-      BOTH SIDES CARRY EVERY FIELD THAT CAN CHANGE. A correction IS the
-      pair, so an audit entry that held only the new values could not
-      answer "what was it before" - which is the one question a corrected
-      financial figure always provokes.
+      BOTH SIDES CARRY EVERY FIELD THAT CAN CHANGE, and now that is
+      literally true: the UPDATE above writes occurred_on, category,
+      order_id, description, gross_cents, vat_cents, channel,
+      payment_status, vendor and note, so all ten appear on each side.
+
+      An earlier version said this sentence while omitting description,
+      vendor and note - so a correction to any of those three left an
+      audit row claiming nothing had changed. A correction IS the pair;
+      half a pair cannot answer "what was it before".
+
+      created_by and created_at are deliberately absent: they are not
+      mutable, so they belong to the creation's own audit row.
     */
     pg_catalog.jsonb_build_object(
       'before', pg_catalog.jsonb_build_object(
         'occurredOn', v_before.occurred_on,
         'category', v_before.category,
+        'description', v_before.description,
         'grossCents', v_before.gross_cents,
         'vatCents', v_before.vat_cents,
         'channel', v_before.channel,
         'paymentStatus', v_before.payment_status,
-        'orderId', v_before.order_id
+        'orderId', v_before.order_id,
+        'vendor', v_before.vendor,
+        'note', v_before.note
       ),
       'after', pg_catalog.jsonb_build_object(
         'occurredOn', v_row.occurred_on,
         'category', v_row.category,
+        'description', v_row.description,
         'grossCents', v_row.gross_cents,
         'vatCents', v_row.vat_cents,
         'channel', v_row.channel,
         'paymentStatus', v_row.payment_status,
-        'orderId', v_row.order_id
+        'orderId', v_row.order_id,
+        'vendor', v_row.vendor,
+        'note', v_row.note
       )
     )
   );
@@ -605,10 +755,38 @@ language plpgsql
 security definer set search_path = ''
 as $$
 declare
-  v_before public.business_expenses;
+  v_before       public.business_expenses;
+  v_operation_id uuid;
+  v_prior_entity text;
 begin
   if p_actor_user_id is null then
     raise exception 'a deletion needs an author';
+  end if;
+
+  -- The same resolve/serialise/check as the other two writers.
+  v_operation_id := coalesce(p_operation_id, pg_catalog.gen_random_uuid());
+
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(
+      'finance:expense_deleted:' || v_operation_id::pg_catalog.text, 0));
+
+  select l.entity_id into v_prior_entity
+    from public.admin_activity_log l
+   where l.module = 'finance'
+     and l.action = 'expense_deleted'
+     and l.operation_id = v_operation_id
+   limit 1;
+
+  if v_prior_entity is not null then
+    /*
+      THIS DELETION ALREADY HAPPENED. true, deterministically, with no
+      second delete and no second audit event - the row is already gone,
+      which is exactly what the caller asked for.
+    */
+    if v_prior_entity <> p_expense_id::pg_catalog.text then
+      raise exception 'business_expense_operation_reused';
+    end if;
+    return true;
   end if;
 
   select * into v_before
@@ -638,25 +816,36 @@ begin
     'business_expense',
     v_before.id::text,
     'Kosten gelöscht: ' || v_before.category || ' ' || v_before.gross_cents::text || ' Cent brutto',
-    coalesce(p_operation_id, pg_catalog.gen_random_uuid()),
+    v_operation_id,
     /*
-      EVERY FINAL VALUE, because the row is about to stop existing. This
-      object is the only remaining record that the expense was ever there,
-      so it carries what it was, what it cost, what VAT was known about
-      it, which channel it belonged to, whether it had been paid and who
-      recorded it.
+      EVERY FINAL VALUE, because the row is about to stop existing - and
+      this object then becomes the only record that the expense was ever
+      there, so it has to be enough to RECONSTRUCT it.
+
+      All fourteen: when it happened, what kind it was, what it said, what
+      it cost gross, what VAT was known, its currency, its channel,
+      whether it had been paid, which order it belonged to, its vendor,
+      its note, who recorded it, and both timestamps. note, currency,
+      created_at and updated_at were missing before, which left a deleted
+      expense only partly recoverable.
+
+      The expense's own uuid is the audit row's entity_id.
     */
     pg_catalog.jsonb_build_object(
       'occurredOn', v_before.occurred_on,
       'category', v_before.category,
+      'description', v_before.description,
       'grossCents', v_before.gross_cents,
       'vatCents', v_before.vat_cents,
+      'currency', v_before.currency,
       'channel', v_before.channel,
       'paymentStatus', v_before.payment_status,
       'orderId', v_before.order_id,
-      'description', v_before.description,
       'vendor', v_before.vendor,
-      'recordedBy', v_before.created_by
+      'note', v_before.note,
+      'recordedBy', v_before.created_by,
+      'createdAt', v_before.created_at,
+      'updatedAt', v_before.updated_at
     )
   );
 
@@ -706,7 +895,8 @@ grant execute on function public.admin_delete_business_expense(uuid, uuid, uuid)
 -- It writes NO existing row. No order is touched, no inventory item, no
 -- plan, no case. 070's tables are not read and not altered, and
 -- admin_activity_log_module_check already allows 'finance' - 070 widened
--- it to seven modules and this needed none of them added.
+-- it, and this migration needed nothing added to it. The preflight
+-- verifies that dependency rather than this comment asserting it.
 --
 -- It also adds no revenue column. Revenue is already authoritative in
 -- public.orders and must stay there: total_gross_cents, total_net_cents,
@@ -771,8 +961,9 @@ begin
     raise exception '071: channel or payment_status is nullable';
   end if;
 
-  -- the constraints: the two kinds of cost, the VAT bounds, and the two
-  -- closed vocabularies
+  -- THE TWO NAMED CONSTRAINTS, by name. The two closed vocabularies are
+  -- CHECKs Postgres named itself, so they are verified separately below
+  -- by their contents rather than listed here.
   select pg_catalog.string_agg(c.name, ', ')
     into v_missing
     from (values

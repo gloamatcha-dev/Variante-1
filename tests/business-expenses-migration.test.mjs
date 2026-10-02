@@ -432,6 +432,47 @@ test("3f: every mutation is audited under module finance, in the same transactio
     "071 no longer explains why it needs no CHECK widening");
 });
 
+test("3f2: the audit payloads are complete, as their comments claim", () => {
+  /*
+    The comments said "BOTH SIDES CARRY EVERY FIELD THAT CAN CHANGE" and
+    "EVERY FINAL VALUE" while description, vendor, note, currency and both
+    timestamps were missing. A correction to any of the first three
+    produced an audit row asserting nothing had changed.
+  */
+  const create = MIGRATION.slice(
+    MIGRATION.indexOf("function public.admin_record_business_expense("),
+    MIGRATION.indexOf("$$;", MIGRATION.indexOf("function public.admin_record_business_expense(")));
+  for (const field of ["occurredOn", "category", "description", "grossCents", "vatCents",
+                       "channel", "paymentStatus", "orderId", "vendor", "note", "recordedBy"]) {
+    assert.ok(create.includes(`'${field}'`), `the create audit omits ${field}`);
+  }
+
+  const upd = MIGRATION.slice(
+    MIGRATION.indexOf("function public.admin_update_business_expense("),
+    MIGRATION.indexOf("$$;", MIGRATION.indexOf("function public.admin_update_business_expense(")));
+  // EVERY column the UPDATE statement writes has to appear on both sides.
+  const MUTABLE = ["occurredOn", "category", "description", "grossCents", "vatCents",
+                   "channel", "paymentStatus", "orderId", "vendor", "note"];
+  const before = upd.slice(upd.indexOf("'before'"), upd.indexOf("'after'"));
+  const after = upd.slice(upd.indexOf("'after'"));
+  for (const field of MUTABLE) {
+    assert.ok(before.includes(`'${field}'`), `the update audit's BEFORE omits ${field}`);
+    assert.ok(after.includes(`'${field}'`), `the update audit's AFTER omits ${field}`);
+  }
+  // created_by and created_at are not mutable, so they are not here.
+  assert.ok(!before.includes("'recordedBy'"), "the correction audit claims the author changed");
+
+  const del = MIGRATION.slice(
+    MIGRATION.indexOf("function public.admin_delete_business_expense("),
+    MIGRATION.indexOf("$$;", MIGRATION.indexOf("function public.admin_delete_business_expense(")));
+  for (const field of [...MUTABLE, "currency", "recordedBy", "createdAt", "updatedAt"]) {
+    assert.ok(del.includes(`'${field}'`), `the delete audit omits ${field}`);
+  }
+  // The uuid is the audit row's entity_id and is not duplicated inside.
+  assert.ok(!/'expenseId'|'id', v_/.test(create + upd + del),
+    "an audit payload duplicates the entity id");
+});
+
 test("3g: a correction keeps the author and records BOTH amounts", () => {
   const body = MIGRATION.slice(
     MIGRATION.indexOf("function public.admin_update_business_expense("),
@@ -458,6 +499,153 @@ test("3h: a deletion is hard, and the values survive in the audit", () => {
   const del = body.indexOf("delete from public.business_expenses");
   const audit = body.indexOf("record_admin_activity");
   assert.ok(del < audit, "the audit runs before the delete, so a failure loses the trail");
+});
+
+/* ══════════════════════════════════════════════════════════════
+   3x. IDEMPOTENCY: ONE OPERATION ID IS ONE LOGICAL MUTATION
+   ══════════════════════════════════════════════════════════════ */
+
+test("3i: every writer guards the MUTATION, not merely the audit row", () => {
+  /*
+    THE DEFECT THIS REPLACES. An earlier 071 passed p_operation_id to
+    record_admin_activity and called that idempotency. It was not:
+    admin_activity_log is unique on (module, action, operation_id), so a
+    retry produced ONE audit event - and nothing stopped it producing a
+    SECOND business_expenses row. In a cost ledger the duplicate is
+    invisible in the trail and counts twice in every margin.
+  */
+  for (const [fn, action] of [
+    ["admin_record_business_expense", "expense_recorded"],
+    ["admin_update_business_expense", "expense_updated"],
+    ["admin_delete_business_expense", "expense_deleted"],
+  ]) {
+    const body = MIGRATION.slice(
+      MIGRATION.indexOf(`function public.${fn}(`),
+      MIGRATION.indexOf("$$;", MIGRATION.indexOf(`function public.${fn}(`)));
+
+    // 1. resolved ONCE, so the lock and the lookup cannot disagree
+    assert.match(body, /v_operation_id := coalesce\(p_operation_id, pg_catalog\.gen_random_uuid\(\)\);/,
+      `${fn} does not resolve the operation id into a local`);
+    // 2. serialised
+    assert.match(body, /pg_catalog\.pg_advisory_xact_lock\(/,
+      `${fn} takes no lock, so two concurrent retries both proceed`);
+    // 3. decided by an EXACT match, with the hash only as the lock key
+    assert.ok(body.includes(`'finance:${action}:' || v_operation_id`),
+      `${fn} does not scope its lock to its own module and action`);
+    assert.match(body, /from public\.admin_activity_log l/, `${fn} consults no registry`);
+    assert.match(body, /l\.operation_id = v_operation_id/,
+      `${fn} does not compare the operation id exactly`);
+    assert.ok(body.includes("l.module = 'finance'") && body.includes(`l.action = '${action}'`),
+      `${fn} would match another module's or action's operation`);
+    // 4. THE LOCK COMES BEFORE THE LOOKUP.
+    assert.ok(body.indexOf("pg_advisory_xact_lock") < body.indexOf("from public.admin_activity_log l"),
+      `${fn} looks before it locks, so a race can pass both callers`);
+    /*
+      AND THE AUDIT USES THE RESOLVED LOCAL, not a second coalesce. If it
+      coalesced again it could mint a DIFFERENT uuid from the one the lock
+      and the lookup used, which would defeat both.
+    */
+    assert.ok(body.includes("    v_operation_id,"),
+      `${fn} does not pass the resolved operation id to the audit`);
+    assert.equal((body.match(/coalesce\(p_operation_id/g) || []).length, 1,
+      `${fn} resolves the operation id more than once`);
+  }
+});
+
+test("3j: the registry is the append-only audit log, never a key on the row", () => {
+  /*
+    THE EDGE CASE THAT DECIDED THIS. Migration 050 puts a UNIQUE
+    operation_id on inventory_movements, which is correct there because a
+    stock movement is never deleted. An expense IS deletable, so a key on
+    the row would vanish with it - and replaying the original create would
+    silently resurrect a cost somebody removed on purpose.
+  */
+  assert.ok(!/operation_id/.test(
+    MIGRATION.slice(MIGRATION.indexOf("create table if not exists public.business_expenses"),
+                    MIGRATION.indexOf("business_expenses_vat_bounds_check"))),
+    "071 puts an operation id on the expense row, which dies with the row");
+  assert.ok(!/idempotency_key/.test(MIGRATION), "071 adds a row-level idempotency key");
+
+  // The create writer resolves the prior event to an entity id and
+  // returns whatever that entity is NOW - null if it was deleted.
+  const create = MIGRATION.slice(
+    MIGRATION.indexOf("function public.admin_record_business_expense("),
+    MIGRATION.indexOf("$$;", MIGRATION.indexOf("function public.admin_record_business_expense(")));
+  assert.match(create, /select l\.entity_id into v_prior_entity/);
+  assert.match(create, /where id = v_prior_entity::uuid/);
+  assert.ok(create.indexOf("v_prior_entity is not null")
+            < create.indexOf("insert into public.business_expenses"),
+    "the replay check runs after the insert, so a replay would duplicate");
+
+  // 050's row-level pattern is still intact where it belongs.
+  const m050 = read("supabase/migrations/050_inventory_foundation.sql");
+  assert.match(m050, /create unique index if not exists idx_inventory_movements_operation/);
+  // And nothing deletes a movement, which is why that works there.
+  assert.ok(!/delete from public\.inventory_movements/.test(m050));
+});
+
+test("3k: a replay performs no second mutation", () => {
+  // The update writer returns the row as it stands, without an UPDATE, so
+  // updated_at does not advance and no second audit event is written.
+  const upd = MIGRATION.slice(
+    MIGRATION.indexOf("function public.admin_update_business_expense("),
+    MIGRATION.indexOf("$$;", MIGRATION.indexOf("function public.admin_update_business_expense(")));
+  assert.ok(upd.indexOf("v_prior_entity is not null") < upd.indexOf("update public.business_expenses"),
+    "the update writer mutates before it checks for a replay");
+  // The delete writer answers true without a second delete.
+  const del = MIGRATION.slice(
+    MIGRATION.indexOf("function public.admin_delete_business_expense("),
+    MIGRATION.indexOf("$$;", MIGRATION.indexOf("function public.admin_delete_business_expense(")));
+  assert.ok(del.indexOf("v_prior_entity is not null")
+            < del.indexOf("delete from public.business_expenses"),
+    "the delete writer deletes before it checks for a replay");
+  // Reusing one operation id for a DIFFERENT expense is a misuse, not a
+  // silent no-op: both row-scoped writers refuse it.
+  for (const body of [upd, del]) {
+    assert.match(body, /raise exception 'business_expense_operation_reused'/);
+  }
+});
+
+test("3l: one user action gets one stable operation id, reused across retries", () => {
+  /*
+    THE UI HALF OF THE SAME GUARD. The first version called
+    crypto.randomUUID() inside submit(), so a retry after a dropped
+    response was a DIFFERENT operation - and the database would correctly
+    have treated it as a second expense. The id has to be as stable as the
+    intent is.
+  */
+  assert.match(UI, /const submitOpRef = useRef<string>\(""\);/);
+  assert.match(UI, /const deleteOpRef = useRef<Record<string, string>>\(\{\}\);/);
+  assert.match(UI, /if \(!submitOpRef\.current\) submitOpRef\.current = crypto\.randomUUID\(\);/);
+  assert.match(UI, /operationId: submitOpRef\.current,/);
+  assert.match(UI, /operationId: deleteOpRef\.current\[row\.id\],/);
+  // Cleared when the intent changes or completes, kept on failure.
+  assert.match(UI, /submitOpRef\.current = "";\s*\n\s*setEditing\(null\);/);
+  assert.match(UI, /submitOpRef\.current = "";\s*\n\s*setEditing\(row\);/);
+  assert.match(UI, /delete deleteOpRef\.current\[row\.id\];/);
+  // No id is minted at call time any more.
+  assert.ok(!/operationId: crypto\.randomUUID\(\)/.test(UI),
+    "the screen still mints a fresh operation id per request");
+  // And a double press cannot start a second request.
+  assert.match(UI, /onClick=\{submit\} disabled=\{saving\}/);
+});
+
+test("3m: no heuristic duplicate detection anywhere", () => {
+  /*
+    Two real expenses may legitimately be identical - the same carrier
+    charging the same amount on the same day for two parcels. Only the
+    operation id may decide sameness.
+  */
+  for (const [name, src] of Object.entries({ ROUTE, UI, LIB })) {
+    const code = codeOnly(src);
+    for (const banned of ["isDuplicate", "looksLikeDuplicate", "sameAmount",
+                          "alreadyExists", "findSimilar"]) {
+      assert.ok(!code.includes(banned), `${name} guesses at duplicates with ${banned}`);
+    }
+  }
+  // The route passes the id through and validates only its shape.
+  assert.match(ROUTE, /UUID_RE\.test\(body\.operationId\.trim\(\)\)/);
+  assert.match(ROUTE, /p_operation_id: operationId,/);
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -1055,8 +1243,8 @@ test("10: both check files are exactly one read-only statement", () => {
 });
 
 test("10b: each states the result it expects, and they differ", () => {
-  assert.match(PREFLIGHT, /EXPECTED HEALTHY RESULT:\s+0 FAIL \/ 10 PASS \/ 3 INFO/);
-  assert.match(POSTCHECK, /EXPECTED HEALTHY RESULT:\s+0 FAIL \/ 17 PASS \/ 3 INFO/);
+  assert.match(PREFLIGHT, /EXPECTED HEALTHY RESULT:\s+0 FAIL \/ 11 PASS \/ 3 INFO/);
+  assert.match(POSTCHECK, /EXPECTED HEALTHY RESULT:\s+0 FAIL \/ 18 PASS \/ 3 INFO/);
   assert.ok(PREFLIGHT.includes("SAFE TO APPLY"));
   assert.ok(POSTCHECK.includes("APPLIED CLEANLY"));
   // The preflight asks whether 071 is ABSENT; the postcheck assumes it.
@@ -1064,12 +1252,25 @@ test("10b: each states the result it expects, and they differ", () => {
   assert.match(POSTCHECK, /all fifteen business_expenses columns are present/);
 });
 
-test("10c: the postcheck verifies the two things only a body can tell", () => {
-  // The operation-id guard, and the audit module. Every other check in
-  // that file would pass against a 071 whose writers raise.
-  assert.match(POSTCHECK, /a writer called without an operation id still audits/);
-  assert.match(POSTCHECK, /coalesce\(p_operation_id/);
+test("10c: the postcheck verifies the things only a function body can tell", () => {
+  /*
+    Every other check in that file would pass against a 071 whose writers
+    raise, duplicate on retry, trust a caller's channel or audit half a
+    record. These four are the ones that read prosrc.
+  */
+  // THE MUTATION guard, not merely an audited one.
+  assert.match(POSTCHECK, /the MUTATION is idempotent per operation id, not just the audit row/);
+  assert.match(POSTCHECK, /pg_advisory_xact_lock/);
+  assert.match(POSTCHECK, /l\.operation_id = v_operation_id/);
+  // the lock before the lookup, asserted positionally
+  assert.match(POSTCHECK, /pg_catalog\.strpos\(f\.prosrc, 'pg_advisory_xact_lock'\)/);
+  // the registry survives a deletion
+  assert.match(POSTCHECK, /cannot resurrect a deleted expense/);
+  assert.match(POSTCHECK, /column_name in \('operation_id', 'idempotency_key'\)\) = 0/);
+  // the channel is derived, and the audit is complete
   assert.match(POSTCHECK, /every writer audits under module finance/);
+  assert.match(POSTCHECK, /DERIVE the channel of an order-linked cost/);
+  assert.match(POSTCHECK, /complete enough to reconstruct the record/);
   // And that 071 wrote no row of its own.
   assert.match(POSTCHECK, /071 inserted no expense of its own/);
 });

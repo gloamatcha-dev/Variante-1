@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { formatCents } from "../lib/adminOrdersQuery";
 import {
   DIRECT_EXPENSE_CATEGORIES,
@@ -150,6 +150,25 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
 
+  /*
+    ONE USER ACTION, ONE OPERATION ID - AND IT SURVIVES A RETRY.
+
+    Minted once per intent and kept in a ref rather than regenerated at
+    each call, which is what the first version did: a fresh uuid inside
+    submit() meant a retry after a dropped response was a DIFFERENT
+    operation, and migration 071's writers would correctly have treated it
+    as a second expense. The id is the whole point of the guard, so it has
+    to be stable for as long as the intent is.
+
+    Cleared on success, so the next expense is its own operation. Kept on
+    failure, so pressing the button again is the SAME one.
+
+    Deletions are keyed by row: "remove this expense" is one intent per
+    row, and two rows deleted in sequence are two operations.
+  */
+  const submitOpRef = useRef<string>("");
+  const deleteOpRef = useRef<Record<string, string>>({});
+
   const period: FinancePeriod = choice === "this_month"
     ? monthPeriod(todayInBerlin())
     : choice === "last_month"
@@ -212,6 +231,8 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
   }, [load, periodFrom, periodTo]);
 
   const resetForm = () => {
+    // A new blank form is a new intent, so it gets its own operation id.
+    submitOpRef.current = "";
     setEditing(null);
     setFDate(todayInBerlin());
     setFCategory("general");
@@ -228,6 +249,8 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
   };
 
   const openEdit = (row: ExpenseRow) => {
+    // Correcting a different expense is a different intent.
+    submitOpRef.current = "";
     setEditing(row);
     setFDate(row.occurredOn);
     setFCategory(row.category);
@@ -274,6 +297,12 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
       }
       vatCents = v;
     }
+    /*
+      MINTED HERE ONLY IF THIS INTENT HAS NO ID YET. A second press after
+      a failure reuses it, so the server sees one operation twice rather
+      than two operations once each.
+    */
+    if (!submitOpRef.current) submitOpRef.current = crypto.randomUUID();
     setSaving(true);
     setFormError("");
     try {
@@ -299,16 +328,19 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
           orderId: fCategory === "general" ? null : fOrderId,
           vendor: fVendor,
           note: fNote,
-          operationId: crypto.randomUUID(),
+          operationId: submitOpRef.current,
         }),
       });
       if (res.status === 401) { onSessionLost(); return; }
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) {
+        // The id is deliberately NOT cleared: pressing again retries the
+        // SAME operation rather than starting a second one.
         setFormError(typeof body?.error === "string" ? body.error : "Konnte nicht gespeichert werden.");
         return;
       }
       setFormOpen(false);
+      // resetForm clears the operation id, so the next expense is its own.
       resetForm();
       await load(periodFrom, periodTo);
     } catch {
@@ -319,6 +351,10 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
   };
 
   const remove = async (row: ExpenseRow) => {
+    // One intent per row, reused across retries of that same removal.
+    if (!deleteOpRef.current[row.id]) {
+      deleteOpRef.current[row.id] = crypto.randomUUID();
+    }
     setSaving(true);
     setFormError("");
     try {
@@ -328,15 +364,17 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
         body: JSON.stringify({
           action: "delete_expense",
           expenseId: row.id,
-          operationId: crypto.randomUUID(),
+          operationId: deleteOpRef.current[row.id],
         }),
       });
       if (res.status === 401) { onSessionLost(); return; }
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) {
+        // Kept, so a second press is the same deletion.
         setFormError(typeof body?.error === "string" ? body.error : "Konnte nicht gelöscht werden.");
         return;
       }
+      delete deleteOpRef.current[row.id];
       await load(periodFrom, periodTo);
     } catch {
       setFormError("Konnte nicht gelöscht werden.");
