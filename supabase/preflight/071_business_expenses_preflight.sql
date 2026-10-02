@@ -11,10 +11,10 @@
 --
 -- ── WHAT A FAIL MEANS ─────────────────────────────────────────
 --
--- 071 is additive: one table, one constraint, three indexes, three
--- SECURITY DEFINER functions, and a handful of grants. It alters no
--- existing table and rewrites no existing row. So the things that could
--- stop it are narrow and specific:
+-- 071 is additive: one table, two named constraints, four indexes, three
+-- SECURITY DEFINER writer functions, and the grants and RLS that keep
+-- them admin-only. It alters no existing table and rewrites no existing
+-- row. So the things that could stop it are narrow and specific:
 --
 --   10  the name business_expenses is already taken
 --   11  one of the three function names is already taken
@@ -344,11 +344,16 @@ select *
                                                      'admin_delete_business_expense')) = 0
                           then 'PASS' else 'FAIL' end
               union all
+              -- ALL FOUR, exactly as check 12 and the gate below list
+              -- them. This branch omitted the channel index, so a
+              -- database carrying only that one would have made the
+              -- tally disagree with check 12's own verdict by one.
               select case when (select count(*) from pg_indexes
                                  where schemaname = 'public'
                                    and indexname in ('idx_business_expenses_occurred_on',
                                                      'idx_business_expenses_order',
-                                                     'idx_business_expenses_category')) = 0
+                                                     'idx_business_expenses_category',
+                                                     'idx_business_expenses_channel')) = 0
                           then 'PASS' else 'FAIL' end
               union all
               select case when (select count(*) from pg_constraint
