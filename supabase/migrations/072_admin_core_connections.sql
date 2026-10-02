@@ -777,7 +777,10 @@ begin
 
   perform pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended(
-      'finance:b2b_settlement:' || v_operation_id::pg_catalog.text, 0));
+      -- Different webhook/reconciliation operations can settle the same
+      -- installment concurrently. Serialize the subject before checking
+      -- its existing event, rather than only serializing each operation.
+      'finance:b2b_settlement:' || p_schedule_id::pg_catalog.text, 0));
 
   select * into v_existing
     from public.financial_events
@@ -3556,6 +3559,10 @@ begin
       'revoke all privileges on table public.%I from anon, authenticated', v_name);
     execute pg_catalog.format(
       'revoke all privileges on table public.%I from public', v_name);
+    -- Remove privileges inherited from the schema's default ACL before
+    -- granting this migration's narrower service-role access below.
+    execute pg_catalog.format(
+      'revoke all privileges on table public.%I from service_role', v_name);
   end loop;
 
   foreach v_name in array v_money loop
