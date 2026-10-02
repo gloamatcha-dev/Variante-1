@@ -291,6 +291,9 @@ test("4d: every WRITE route takes the write capability, every read says so", () 
     // no WRITES list because the table grants service_role SELECT alone -
     // there is no write path to classify.
     "activity",
+    // 072: efficient server-side counts for the admin dashboard.
+    // Pure read, no write verb in the file.
+    "dashboard-summary",
   ];
   /*
     A THIRD CLASS: READS THAT A VIEWER MAY NOT PERFORM.
@@ -304,7 +307,11 @@ test("4d: every WRITE route takes the write capability, every read says so", () 
     same set as canWrite: owner and admin, never viewer. That set is
     DERIVED from canWrite rather than re-listed, so the two cannot drift.
   */
-  const RESTRICTED_READS = ["subscriptions", "annual-plans", "b2b"];
+  // 072 ADDED "finance": the financial events ledger. Read-only,
+  // read_sensitive, and no write verb in the file — every event enters
+  // through a SECURITY DEFINER function called from the webhook or
+  // refund flow. Reviewed in tests/072-block1-behaviour.test.mjs.
+  const RESTRICTED_READS = ["subscriptions", "annual-plans", "b2b", "finance"];
 
   for (const route of WRITES) {
     const code = codeOnly(read(`app/api/admin/${route}/route.ts`));
@@ -448,12 +455,41 @@ test("4d: every WRITE route takes the write capability, every read says so", () 
       `the restricted read drifted from the write set for ${role}`);
   }
 
-  // And the three lists together are every session-gated admin route, so
+  /*
+    A SIXTH CLASS: CATALOGUE DESKS THAT READ AND WRITE.
+
+    072 added three routes that OPEN with "read" for their listing and
+    RE-GATE with "write" for mutations. They write CATALOGUE tables
+    directly (.insert, .update, .upsert) — NOT money tables — so they
+    are structurally different from SENSITIVE_WRITES (where every write
+    leaves through an audited RPC).
+
+    What keeps them safe is that the MONEY tables (order_attributions,
+    creator_commissions, financial_events) are written only by SECURITY
+    DEFINER functions called from the webhook, never from these routes.
+    The catalogue writes here manage creators, links, codes, documents
+    and operations config — none of which can move money.
+  */
+  const CATALOGUE_WRITES = ["creators", "documents", "shipping"];
+
+  for (const route of CATALOGUE_WRITES) {
+    const code = codeOnly(read(`app/api/admin/${route}/route.ts`));
+    assert.match(code, /requireAdminIdentity\(request, "read"\)/,
+      `${route} does not take the read capability for its list`);
+    assert.match(code, /requireAdminIdentity\(request, "write"\)/,
+      `${route} does not re-gate its writes at the write capability`);
+    // And it does not restate the role matrix for itself.
+    for (const banned of ["owner", "viewer", "canWrite", "canRead"]) {
+      assert.ok(!code.includes(banned), `${route} decides roles for itself: ${banned}`);
+    }
+  }
+
+  // And the six lists together are every session-gated admin route, so
   // a new one cannot be added without appearing in this test.
   const gated = adminRoutes().filter(r => !r.startsWith("launch/") && r !== "session");
   assert.deepEqual(gated.sort(),
     [...WRITES, ...READS, ...RESTRICTED_READS,
-     ...SENSITIVE_WRITES, ...PAYOUT_WRITES].sort(),
+     ...SENSITIVE_WRITES, ...PAYOUT_WRITES, ...CATALOGUE_WRITES].sort(),
     "an admin route exists that this test does not classify");
 });
 
@@ -611,7 +647,7 @@ test("7: no audit trail, no actor columns, no new real accounts", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 71), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 72), [],
     "a migration beyond 051 appeared");
 
   const sql = codeOnly(migration);
@@ -911,7 +947,7 @@ test("9g: the desktop admin is unchanged", () => {
 test("9h: this package changed nothing else", () => {
   // No migration, no audit trail, no public surface.
   const files = readdirSync(path.join(ROOT, "supabase/migrations"));
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 71), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 72), [],
     "a migration beyond 051 appeared");
   for (const forbidden of ["admin_activity_log", "record_admin_activity", "actor_user_id"]) {
     assert.ok(!shell.includes(forbidden) && !viewportLib.includes(forbidden),

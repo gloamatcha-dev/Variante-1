@@ -812,14 +812,14 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 71);
+  assert.equal(migrations.length, 72);
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
   // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
   // commerce foundation - it evolves the two tables 006 built for a
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 71), [], "a migration 072 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 72), [], "a migration 072 or beyond appeared");
 
   // The API surface is unchanged: no account endpoint exists, because the
   // portal reads its own rows under RLS.
@@ -852,10 +852,25 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
     // It computes every figure server-side and accepts no total from the
     // browser. Reviewed in tests/business-expenses-migration.test.mjs.
     "/admin/costs",
+    // 072: the creator/affiliate desk. Mixed read+write: listing opens
+    // with "read", mutations re-gate with "write". Catalogue tables
+    // only — money tables (order_attributions, creator_commissions) are
+    // written by SECURITY DEFINER functions from the webhook, not here.
+    "/admin/creators",
     // MIGRATION 070: the consumer rights desk. Sensitive read for its
     // list, write for each case action, and every write leaves through
     // one of 070's audited SQL writers.
     "/admin/customer-rights",
+    // 072: efficient server-side counts for the admin dashboard. Pure
+    // read, no write verb, returns counts not rows.
+    "/admin/dashboard-summary",
+    // 072: document foundation. Mixed read+write for documents and
+    // document links. Catalogue tables only.
+    "/admin/documents",
+    // 072: financial events ledger. Read-only, read_sensitive gate. No
+    // write verb — every event enters through a SECURITY DEFINER
+    // function.
+    "/admin/finance",
     // PAKET 4A.2. The manual inventory: two reads (a page of items, one
     // item with its history), four writes that change descriptive fields
     // or create an item, and two that book stock - both of the latter
@@ -915,6 +930,10 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
     "/admin/orders/resolve-request",
     "/admin/orders/ship",
     "/admin/session",
+    // 072: shipping due status and operations_config management. Mixed
+    // read+write: listing opens with "read", set_config re-gates with
+    // "write".
+    "/admin/shipping",
     // THE B2C SUBSCRIPTION LAUNCH SURFACE. The read-only subscription
     // list: POST-gated like every other admin read, open to the roles
     // lib/adminRoles.ts says may read, and with no write verb in the
@@ -937,6 +956,11 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
     // annual row and no annual function. Reviewed in
     // tests/withdrawal-refund-execution.test.mjs.
     "/admin/withdrawal-refund",
+    // 072: the public affiliate resolution route. Unauthenticated, two
+    // actions (resolve_link, resolve_code), and the browser learns only
+    // active status and customer discount code — never the creator id
+    // or commission amount.
+    "/affiliate",
     "/annual-plan/checkout/session",
     // 4A.4a. The B2B enquiry from /for-cafes. That form was live and
     // discarding every submission; this route delivers it as one

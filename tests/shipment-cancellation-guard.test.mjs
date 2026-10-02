@@ -542,6 +542,7 @@ test("email: no new template and no new Resend namespace", () => {
     "cancellationConfirmation.ts", "cancellationOutcome.ts",
     "cancellationRequestNotification.ts",
     "complaintReceived.ts",
+    "internalAnnualPurchaseNotification.ts",
     "internalOrderNotification.ts",
     // Phase 5 added launchConfirmation.ts, the double opt-in mail for
     // the one-time launch notification list. It is a customer message
@@ -594,6 +595,7 @@ test("email: no new template and no new Resend namespace", () => {
     // this assertion protects is that THIS task still added nothing of
     // its own - which it did not.
     "cancellation-confirmation", "cancellation-outcome", "cancellation-request",
+    "internal-annual-purchase",
     "internal-order",
     "order-cancellation-confirmation",
     "payment-problem", "refund", "shipment",

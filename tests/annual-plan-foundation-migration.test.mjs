@@ -161,8 +161,8 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
   // Re-pinned rather than deleted - what this guard protects is that
   // nothing UNREVIEWED appeared. Reviewed in
   // tests/guest-order-management.test.mjs.
-  assert.equal(files[files.length - 33], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 34], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 34], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 35], MIGRATION_038, "038 must be the one before it");
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
@@ -170,7 +170,7 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
 test("2: no migration 044 or beyond", () => {
   // 065 is the highest migration. 039 is live and is not the place to
   // fix anything any more.
-  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 71);
+  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 72);
   assert.deepEqual(beyond, [], "an unreviewed migration appeared after 065");
 });
 
@@ -1784,6 +1784,12 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
     // tests/business-expenses-migration.test.mjs.
     "app/AdminCosts.tsx",
     "app/api/admin/costs/route.ts",
+    // 072: the consumer rights desk gained two new switch cases for
+    // annual termination decisions and subscription termination
+    // execution. Both delegate to lib/terminationAdmin.ts, which calls
+    // SECURITY DEFINER RPCs from migration 072. No existing case
+    // changed; the Stripe import stays absent.
+    "app/api/admin/customer-rights/route.ts",
     "app/api/termination/route.ts",
     // SITE CHROME: one entry added to the `links` array, so /partnerships
     // is reachable from the main navigation between B2B and Rezepte

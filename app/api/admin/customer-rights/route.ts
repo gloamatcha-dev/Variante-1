@@ -17,6 +17,11 @@ import {
   liftPurchaseRestriction,
   type CustomerRightsAdminDeps,
 } from "../../../../lib/customerRightsAdminActions";
+import {
+  decideAnnualTermination,
+  executeSubscriptionTermination,
+  type TerminationDecision,
+} from "../../../../lib/terminationAdmin";
 
 /**
  * THE CONSUMER RIGHTS DESK, FOR THE OPERATOR AND NOBODY ELSE.
@@ -333,6 +338,29 @@ export async function POST(request: Request): Promise<Response> {
           actorUserId, terminationId: str("terminationId"),
           caseState: str("caseState"), internalNote: str("internalNote") || null,
         }), 200);
+
+      // 072. THE CONTRACT EFFECT. review_termination above moves a case
+      // state; these two write the actual plan/subscription changes.
+      case "decide_annual_termination": {
+        const decision = str("decision") as TerminationDecision;
+        const valid = ["note_ordinary", "accept_extraordinary", "reject_extraordinary", "close"];
+        if (!valid.includes(decision)) {
+          return json({ error: "Ungültige Entscheidung." } as ErrorResponse, 400);
+        }
+        const result = await decideAnnualTermination({
+          actorUserId, terminationId: str("terminationId"),
+          decision, internalNote: str("internalNote") || undefined,
+        });
+        return json({ ok: true, ...result }, 200);
+      }
+
+      case "execute_subscription_termination": {
+        const result = await executeSubscriptionTermination({
+          actorUserId, terminationId: str("terminationId"),
+          internalNote: str("internalNote") || undefined,
+        });
+        return json({ ok: true, ...result }, 200);
+      }
 
       case "create_restriction":
         return json(await createPurchaseRestriction(deps, {

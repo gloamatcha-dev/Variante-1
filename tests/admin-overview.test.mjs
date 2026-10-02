@@ -473,8 +473,16 @@ test("23: the admin API surface is exactly these five, all POST-gated", () => {
   // It computes every figure server-side and accepts no total, margin or
   // completeness flag from the browser. Reviewed in
   // tests/business-expenses-migration.test.mjs.
-  assert.deepEqual(dirs, ["activity", "annual-plans", "b2b", "costs", "customer-rights",
-    "inventory", "launch", "orders", "session", "subscriptions", "waitlist",
+  // 072 ADDED FIVE: "creators" (the creator/affiliate desk, mixed
+  // read+write), "dashboard-summary" (efficient server-side counts,
+  // read-only), "documents" (document foundation, mixed read+write),
+  // "finance" (the financial events ledger, read-only read_sensitive),
+  // "shipping" (shipping due status + operations_config, mixed
+  // read+write). All five are POST-only and gated by the shared admin
+  // identity check. Reviewed in tests/072-block1-behaviour.test.mjs.
+  assert.deepEqual(dirs, ["activity", "annual-plans", "b2b", "costs", "creators",
+    "customer-rights", "dashboard-summary", "documents", "finance",
+    "inventory", "launch", "orders", "session", "shipping", "subscriptions", "waitlist",
     "withdrawal-refund"]);
 
   // The session route is the only one that may write anything, and what

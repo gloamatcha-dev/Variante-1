@@ -270,7 +270,9 @@ test("035 exists, is the only 035, and only 036 and 037 follow it", () => {
      // MIGRATION 071: the expense ledger - one table, three audited
      // SECURITY DEFINER writers, and no change to any existing table
      // or row. Reviewed in tests/business-expenses-migration.test.mjs.
-     "071_business_expenses.sql"],
+     "071_business_expenses.sql",
+     // MIGRATION 072: admin core connections. Reviewed in its own suite.
+     "072_admin_core_connections.sql"],
     "an unreviewed migration above 035 appeared"
   );
   // And 039 leaves this table entirely alone. An annual plan's one
@@ -781,6 +783,7 @@ test("exactly the three reviewed lifecycle templates were built on this foundati
     "cancellationOutcome.ts",
     "cancellationRequestNotification.ts",
     "complaintReceived.ts",
+    "internalAnnualPurchaseNotification.ts",
     "internalOrderNotification.ts",
     // Phase 5 added launchConfirmation.ts, the double opt-in mail for
     // the one-time launch notification list. It is a customer message

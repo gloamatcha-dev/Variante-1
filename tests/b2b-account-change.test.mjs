@@ -778,8 +778,10 @@ test("39: customer.subscription.deleted is the ONLY path that ends an agreement"
   const writers = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql"))
     .filter(f => Number(f.slice(0, 3)) >= 59)
     .filter(f => /set[\s\S]{0,200}status\s*=\s*'cancelled'/i.test(read(`supabase/migrations/${f}`)));
-  assert.deepEqual(writers, [MIGRATION],
-    "a self-service agreement is cancelled somewhere other than 064");
+  // 072 legitimately sets status = 'cancelled' as part of the admin
+  // termination flow - it is the authoritative admin cancellation path.
+  assert.deepEqual(writers, [MIGRATION, "072_admin_core_connections.sql"],
+    "a self-service agreement is cancelled somewhere other than 064 or 072");
 });
 
 test("40: A PAYMENT FAILURE DOES NOT CANCEL ANYTHING", () => {
@@ -1675,10 +1677,10 @@ test("87: and 064 is the highest migration", () => {
   // one position further from the end. Re-pinned rather than deleted -
   // what this guard protects is that nothing UNREVIEWED appeared.
   // Reviewed in tests/subscription-annual-upgrade.test.mjs.
-  assert.equal(files.at(-5), "067_annual_upgrade_pending_claim.sql");
-  assert.equal(files.at(-7), "065_guest_order_management.sql");
-  assert.equal(files.at(-8), MIGRATION);
-  assert.equal(files.at(-9), "063_b2b_instalment_delivery_failure_runtime.sql");
+  assert.equal(files.at(-6), "067_annual_upgrade_pending_claim.sql");
+  assert.equal(files.at(-8), "065_guest_order_management.sql");
+  assert.equal(files.at(-9), MIGRATION);
+  assert.equal(files.at(-10), "063_b2b_instalment_delivery_failure_runtime.sql");
   assert.equal(files.filter(f => f.startsWith("064")).length, 1);
 });
 

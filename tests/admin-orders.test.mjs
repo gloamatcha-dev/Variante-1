@@ -600,9 +600,10 @@ test("7: /api/admin gained orders and nothing else", () => {
   // It computes every figure server-side and accepts no total, margin or
   // completeness flag from the browser. Reviewed in
   // tests/business-expenses-migration.test.mjs.
-  assert.deepEqual(dirs, ["activity", "annual-plans", "b2b", "costs", "customer-rights",
-    "inventory", "launch", "orders", "session", "subscriptions", "waitlist",
-    "withdrawal-refund"]);
+  assert.deepEqual(dirs, ["activity", "annual-plans", "b2b", "costs", "creators",
+    "customer-rights", "dashboard-summary", "documents", "finance",
+    "inventory", "launch", "orders", "session", "shipping", "subscriptions",
+    "waitlist", "withdrawal-refund"]);
   const orderDirs = readdirSync(path.join(ROOT, "app/api/admin/orders"), { withFileTypes: true })
     .filter(e => e.isDirectory()).map(e => e.name).sort();
   // PAKET 4A.1B added the four actions, one route each rather than one

@@ -113,14 +113,14 @@ test("1, 2: 036 exists, owns its number, and 037 is the only thing above it", ()
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(files[files.length - 26], "046_launch_signup_atomic.sql");
-  assert.equal(files[files.length - 27], "045_launch_welcome_email.sql");
-  assert.equal(files[files.length - 28], "044_launch_send.sql");
-  assert.equal(files[files.length - 29], "043_launch_waitlist.sql");
-  assert.equal(files[files.length - 30], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.equal(files[files.length - 31], "041_annual_account_column_privileges.sql");
-  assert.equal(files[files.length - 32], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(files[files.length - 36], MIGRATION_036, "036 must still be the one before 037");
+  assert.equal(files[files.length - 27], "046_launch_signup_atomic.sql");
+  assert.equal(files[files.length - 28], "045_launch_welcome_email.sql");
+  assert.equal(files[files.length - 29], "044_launch_send.sql");
+  assert.equal(files[files.length - 30], "043_launch_waitlist.sql");
+  assert.equal(files[files.length - 31], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(files[files.length - 32], "041_annual_account_column_privileges.sql");
+  assert.equal(files[files.length - 33], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 37], MIGRATION_036, "036 must still be the one before 037");
   assert.deepEqual(files.filter(f => f.startsWith("037")), ["037_subscription_refund_correlation.sql"]);
   // MIGRATION 071 ADDED THE EXPENSE LEDGER - one table,
   // public.business_expenses, plus three SECURITY DEFINER writers that
@@ -130,8 +130,8 @@ test("1, 2: 036 exists, owns its number, and 037 is the only thing above it", ()
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/business-expenses-migration.test.mjs.
-  assert.ok(!files.some(f => f.startsWith("072")), "a migration 072 or beyond appeared");
-  assert.equal(files.length, 71);
+  assert.ok(!files.some(f => f.startsWith("073")), "a migration 072 or beyond appeared");
+  assert.equal(files.length, 72);
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length);

@@ -1377,7 +1377,9 @@ test("61: the rate limit went into 043 rather than into a 044, and 043 is still 
      // MIGRATION 071: the expense ledger - one table, three audited
      // SECURITY DEFINER writers, and no change to any existing table
      // or row. Reviewed in tests/business-expenses-migration.test.mjs.
-     "071_business_expenses.sql"],
+     "071_business_expenses.sql",
+     // MIGRATION 072: admin core connections. Reviewed in its own suite.
+     "072_admin_core_connections.sql"],
     "an unreviewed migration appeared after 043"
   );
 

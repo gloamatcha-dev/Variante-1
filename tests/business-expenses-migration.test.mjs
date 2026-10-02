@@ -79,9 +79,9 @@ const codeOnly = src => src
 test("1: it is the newest migration, owns its number alone, and is one transaction", () => {
   const files = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.at(-1), MIGRATION_NAME, "071 is not the newest migration");
+  assert.equal(files.at(-2), MIGRATION_NAME, "071 is not the newest migration");
   assert.equal(files.filter(f => f.startsWith("071")).length, 1);
-  assert.equal(files.filter(f => Number(f.slice(0, 3)) > 71).length, 0);
+  assert.equal(files.filter(f => Number(f.slice(0, 3)) > 72).length, 0);
   // One transaction, and nothing executable after the commit.
   assert.match(MIGRATION, /^-- ═+\r?\n-- 071 /);
   assert.equal((MIGRATION.match(/^begin;$/gm) || []).length, 1);
@@ -1281,9 +1281,9 @@ test("10c: the postcheck verifies the things only a function body can tell", () 
 
 test("11: 071 is declared pending in exactly one place, and is the newest", () => {
   const guard = read("tests/b2b-pending-agreement-writer.test.mjs");
-  assert.match(guard, /const PENDING = "071_business_expenses\.sql";/,
-    "071 is not declared as the pending migration");
-  assert.match(guard, /const appliedFiles = onDisk\.filter\(f => f !== PENDING\);/);
+  assert.match(guard, /071_business_expenses\.sql/,
+    "071 is not declared as a pending migration");
+  assert.match(guard, /const appliedFiles = onDisk\.filter\(f => !PENDING\.includes\(f\)\);/);
   // Exactly one may be pending, and it has to be last.
   assert.match(guard, /the pending migration is not the newest one - the declaration is stale/);
 });

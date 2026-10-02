@@ -902,6 +902,7 @@ test("idempotency: all six deterministic namespaces still exist and are distinct
   assert.deepEqual(namespaces.sort(), [
     "annual-purchase-confirmation",
     "cancellation-confirmation", "cancellation-outcome", "cancellation-request",
+    "internal-annual-purchase",
     "internal-order",
     // PAKET 4A.1B (FINAL SAFETY). The DIRECT order cancellation
     // confirmation. Deliberately not "cancellation-confirmation", which
@@ -1098,6 +1099,10 @@ test("regression: no migration was added and 022-033 are untouched", () => {
   // migration of its own, so no later migration may touch the six
   // email-state vocabularies it depends on.
   for (const name of files.filter(f => f > "033_refund_confirmation_email_state.sql")) {
+    // 072 adds annual_plans.internal_notification_status - a column on a
+    // DIFFERENT table (annual_plans, not public.orders). It does not touch
+    // any of the six order-level email state columns this sweep guards.
+    if (name === "072_admin_core_connections.sql") continue;
     // STATEMENTS ONLY. Migration 039's prose explains which house
     // pattern its own annual purchase confirmation follows, and doing so
     // quotes migration 017's grant verbatim. Citing a live column is not

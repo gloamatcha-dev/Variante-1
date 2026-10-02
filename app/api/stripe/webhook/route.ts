@@ -74,6 +74,12 @@ import {
 // subscription and carries none. That is what separates them.
 import { routeB2bAnnualInvoice } from "../../../../lib/b2bInstalmentRules";
 import { b2bWebhookDeps } from "../../../../lib/b2bWebhookDeps";
+import {
+  recordOrderPaymentEvent,
+  recordOrderRefundEvent,
+  recordAnnualPlanRefundEvent,
+} from "../../../../lib/financeRecording";
+import { attributeOrderToCreator, reverseCreatorCommissionForRefund } from "../../../../lib/creatorAffiliate";
 
 type ErrorResponse = {
   error: string;
@@ -692,6 +698,11 @@ async function handleRefundEvent(stripe: Stripe, event: Stripe.Event): Promise<v
   // lookup, having issued no Stripe request, and falls through.
   const annual = await syncAnnualPlanRefundStateFromStripe(stripe, paymentIntentId);
   if (annual.kind === "annual") {
+    // FINANCE LEDGER (072). Record the annual plan refund event after
+    // the refund state is durable. Idempotent by arithmetic.
+    if (annual.annualPlanId && annual.refundedTotalCents != null && annual.refundedTotalCents > 0) {
+      await recordAnnualPlanRefundEvent(annual.annualPlanId, annual.refundedTotalCents, paymentIntentId);
+    }
     // Counts and words only: the plan id and the writer's answer. No
     // amount, no customer, no address and no Stripe secret.
     console.error(
@@ -702,6 +713,16 @@ async function handleRefundEvent(stripe: Stripe, event: Stripe.Event): Promise<v
 
   const outcome = await syncOrderRefundStateFromStripe(stripe, paymentIntentId);
   console.error(`Stripe webhook: refund event ${event.id} (${event.type}) -> ${outcome.result}`);
+
+  // FINANCE LEDGER (072). Record the order refund event and reverse
+  // any creator commission proportionally. Both are idempotent.
+  if (isNewSettledRefundFact(outcome.result) && outcome.orderId && outcome.refundedTotalCents != null && outcome.refundedTotalCents > 0) {
+    await recordOrderRefundEvent(outcome.orderId, outcome.refundedTotalCents, paymentIntentId);
+    await reverseCreatorCommissionForRefund({
+      orderId: outcome.orderId,
+      refundedTotalCents: outcome.refundedTotalCents,
+    });
+  }
 
   // ── CUSTOMER REFUND CONFIRMATION (Phase 2E-A) ───────────────
   //
@@ -867,6 +888,23 @@ async function handleCheckoutSessionCompleted(stripe: Stripe, eventSession: Stri
     buildBillingAddressSnapshot(session),
     frozenShippingGrossCents
   );
+
+  // FINANCE RECORDING (072). Best-effort, idempotent, and strictly after
+  // the order is durable. A failure here never prevents order creation,
+  // email sending or fulfilment — Stripe retries will eventually land it.
+  await recordOrderPaymentEvent(order.id);
+
+  // AFFILIATE ATTRIBUTION (072). If the checkout session carries an
+  // affiliate slug or code in its metadata, attribute the order to the
+  // creator. The server resolves everything; no creator id, commission
+  // amount or rule comes from the browser.
+  const affiliateSlug = session.metadata?.affiliate_slug;
+  const affiliateCode = session.metadata?.affiliate_code;
+  if (affiliateSlug) {
+    await attributeOrderToCreator({ orderId: order.id, source: "affiliate_link", reference: affiliateSlug });
+  } else if (affiliateCode) {
+    await attributeOrderToCreator({ orderId: order.id, source: "affiliate_code", reference: affiliateCode });
+  }
 
   // Confirmation email is sent only now that a real, persisted, paid
   // order genuinely exists. sendOrderConfirmationEmailIfNeeded() is its
@@ -1180,6 +1218,9 @@ async function handleInvoicePaid(stripe: Stripe, event: Stripe.Event): Promise<v
   console.error(
     `Stripe webhook: invoice ${eventInvoice.id} fulfilled as order ${result.orderNumber}`
   );
+
+  // FINANCE RECORDING (072). Same pattern as the one-time path.
+  await recordOrderPaymentEvent(result.orderId);
 
   // ONLY the internal notification. A subscription cycle gets no generic
   // "Danke für deine Bestellung" - the dedicated customer lifecycle mails

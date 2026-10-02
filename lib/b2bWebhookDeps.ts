@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from "./supabaseAdmin";
 import { evaluateStripeSessionPayment } from "./stripeFulfillment";
 import { linkStripeSession, markAttemptPaid } from "./checkoutAttempts";
 import type { B2bAttemptMoneyFacts, B2bFailureDeps, B2bWebhookDeps } from "./b2bWebhook";
+import { recordB2bSettlementByInvoice } from "./financeRecording";
 
 /**
  * The real wiring behind the B2B settlement (Package 5C).
@@ -112,6 +113,14 @@ async function settleMonthlyInvoice(input: {
     return { result: "rpc_error" };
   }
   const payload = (data ?? {}) as { result?: string; delivery_number?: number };
+
+  // FINANCE RECORDING (072). Best-effort: the lookup and the RPC both
+  // live in lib/financeRecording.ts so b2bWebhookDeps stays free of
+  // direct table access to the four commerce tables.
+  if (payload.result === "settled" || payload.result === "activated") {
+    await recordB2bSettlementByInvoice(input.agreementId, input.stripeInvoiceId);
+  }
+
   return { result: payload.result ?? "unknown", deliveryNumber: payload.delivery_number };
 }
 

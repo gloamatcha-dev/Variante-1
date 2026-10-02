@@ -106,10 +106,10 @@ test("1: 061 owns its number, and only the reviewed 062 follows it", () => {
   // this guard protects is that 061 still occupies its own number and
   // that nothing UNREVIEWED appeared above it. Reviewed in
   // tests/b2b-checkout-settlement.test.mjs.
-  assert.equal(files[files.length - 11], MIGRATION, "061 must be the one before the newest");
-  assert.equal(files[files.length - 12], "060_b2b_payment_delivery_foundation.sql");
-  assert.equal(files[files.length - 13], "059_b2b_supply_commerce_foundation.sql");
-  assert.equal(files.length, 71);
+  assert.equal(files[files.length - 12], MIGRATION, "061 must be the one before the newest");
+  assert.equal(files[files.length - 13], "060_b2b_payment_delivery_foundation.sql");
+  assert.equal(files[files.length - 14], "059_b2b_supply_commerce_foundation.sql");
+  assert.equal(files.length, 72);
   // PACKAGES 5D/5E/5F ADDED MIGRATION 063: the instalment, resolution
   // and failure runtime. Re-pinned on the same terms as 062 above.
   // Reviewed in tests/b2b-instalment-delivery-failure.test.mjs.
@@ -177,9 +177,13 @@ test("1: 061 owns its number, and only the reviewed 062 follows it", () => {
      // MIGRATION 071: the expense ledger - one table, three audited
      // SECURITY DEFINER writers, and no change to any existing table
      // or row. Reviewed in tests/business-expenses-migration.test.mjs.
-     "071_business_expenses.sql"],
+     "071_business_expenses.sql",
+     // MIGRATION 072: admin core connections - finance events, termination,
+     // shipping, notifications, creator/affiliate and document foundations.
+     // No B2B agreement column, no policy, no RLS change on 061's tables.
+     "072_admin_core_connections.sql"],
     "a migration above 061 appeared that this suite has not been reviewed against");
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 71), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 72), [],
     "an unreviewed migration appeared after 062");
   // No number is used twice, which a copy-paste of a file name would do.
   const numbers = files.map(f => f.slice(0, 3));
@@ -1094,8 +1098,8 @@ test("50: NO SUITE MAY CLAIM THAT AN APPLIED MIGRATION IS STILL PENDING", () => 
     and the moment it is applied, this constant is what has to move, which
     is a one-line change in one place instead of a hunt.
   */
-  const PENDING = "071_business_expenses.sql";
-  const appliedFiles = onDisk.filter(f => f !== PENDING);
+  const PENDING = ["071_business_expenses.sql", "072_admin_core_connections.sql"];
+  const appliedFiles = onDisk.filter(f => !PENDING.includes(f));
   const APPLIED = appliedFiles.map(f => f.slice(0, 3));
   // ── THE PROSE SCAN READS COMMENTS, THE CODE SCAN READS CODE ──
   //
@@ -1166,7 +1170,7 @@ test("50: NO SUITE MAY CLAIM THAT AN APPLIED MIGRATION IS STILL PENDING", () => 
   // below: it is a NEW file, so no immutability guard has anything to
   // exempt in it. Re-pinned to it, so the next author faces the same
   // decision. Reviewed in tests/guest-order-management.test.mjs.
-  assert.equal(onDisk.at(-5), "067_annual_upgrade_pending_claim.sql",
+  assert.equal(onDisk.at(-6), "067_annual_upgrade_pending_claim.sql",
     "a migration appeared above 065 - decide whether it is pending, then re-check every exemption");
   /*
     EXACTLY ONE MIGRATION MAY BE OUTSIDE THE APPLIED SET, and it must be
@@ -1185,10 +1189,10 @@ test("50: NO SUITE MAY CLAIM THAT AN APPLIED MIGRATION IS STILL PENDING", () => 
   */
   assert.deepEqual(
     onDisk.filter(f => !appliedFiles.includes(f)),
-    [PENDING],
-    "a migration other than the declared pending one is outside the applied set"
+    PENDING,
+    "a migration other than the declared pending ones is outside the applied set"
       + " - nothing guards its immutability");
-  assert.equal(onDisk.at(-1), PENDING,
+  assert.equal(onDisk.at(-1), PENDING.at(-1),
     "the pending migration is not the newest one - the declaration is stale");
   for (const live of ["039_b2c_annual_plan_foundation.sql",
                      "040_annual_checkout_retry_fingerprints.sql",

@@ -112,7 +112,7 @@ test("1: 059 owns its number, and only the reviewed 060 follows it", () => {
   // UNREVIEWED appeared above it. Reviewed in
   // tests/b2b-payment-delivery-foundation.test.mjs.
   const numbers = files.map(f => Number(f.slice(0, 3))).filter(n => Number.isInteger(n));
-  assert.strictEqual(Math.max(...numbers), 71, "065 must be the newest migration");
+  assert.strictEqual(Math.max(...numbers), 72, "065 must be the newest migration");
   // PACKAGE 5A ADDED MIGRATION 061: the pending agreement writer - one
   // SECURITY DEFINER function and its EXECUTE grant to service_role. It
   // adds no table, no column, no policy and no table privilege, and it
@@ -195,7 +195,11 @@ test("1: 059 owns its number, and only the reviewed 060 follows it", () => {
      // MIGRATION 071: the expense ledger - one table, three audited
      // SECURITY DEFINER writers, and no change to any existing table
      // or row. Reviewed in tests/business-expenses-migration.test.mjs.
-     "071_business_expenses.sql"],
+     "071_business_expenses.sql",
+     // MIGRATION 072: admin core connections - fifteen new tables,
+     // twenty-one SECURITY DEFINER functions. No existing B2B supply
+     // object touched. Reviewed in its own suite.
+     "072_admin_core_connections.sql"],
     "a migration above 059 appeared that this suite has not been reviewed against");
   // MIGRATION 071 ADDED THE EXPENSE LEDGER - one table,
   // public.business_expenses, plus three SECURITY DEFINER writers that
@@ -205,7 +209,7 @@ test("1: 059 owns its number, and only the reviewed 060 follows it", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/business-expenses-migration.test.mjs.
-  assert.strictEqual(files.filter(f => f.startsWith("072")).length, 0,
+  assert.strictEqual(files.filter(f => f.startsWith("073")).length, 0,
     "061 must NOT be authored in this package");
   assert.strictEqual(files.filter(f => f.startsWith("059")).length, 1,
     "there must be exactly one 059");

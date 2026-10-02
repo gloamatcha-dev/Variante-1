@@ -522,7 +522,9 @@ test("7c: this pass added no backend of any kind", () => {
     // the B2B self-service supply checkout. Gated by
     // B2B_SELF_SERVICE_ENABLED, closed by default, and touching no B2C
     // route. Reviewed in tests/b2b-checkout-settlement.test.mjs.
-["admin", "annual-plan", "b2b", "b2b-lead", "checkout", "complaint", "contact", "cron", "internal", "launch",
+    // 072 ADDED "affiliate": the public affiliate resolution route.
+    // Reviewed in tests/072-block1-behaviour.test.mjs.
+["admin", "affiliate", "annual-plan", "b2b", "b2b-lead", "checkout", "complaint", "contact", "cron", "internal", "launch",
      "orders", "partnerships", "stripe", "subscriptions", "termination", "withdrawal"],
     "an API route was added or removed");
   // 057 SIMPLIFIED THE LAUNCH DISCOUNT: the one-use claim architecture
@@ -543,7 +545,7 @@ test("7c: this pass added no backend of any kind", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/business-expenses-migration.test.mjs.
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("072")),
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("073")),
     "a migration 072 or beyond appeared");
   for (const banned of ['"use server"', "fetch(", "supabase", "resend",
                         "localStorage", "sessionStorage", "<form", "onSubmit"]) {

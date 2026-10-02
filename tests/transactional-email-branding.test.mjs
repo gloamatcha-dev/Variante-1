@@ -45,7 +45,7 @@ const CUSTOMER = [
  * company reads them, so they are deliberately left plain - a marketing
  * header on an operational alert is noise for the person on shift.
  */
-const INTERNAL = ["internalOrderNotification", "cancellationRequestNotification"];
+const INTERNAL = ["internalOrderNotification", "cancellationRequestNotification", "internalAnnualPurchaseNotification"];
 
 /**
  * The RUNTIME imports of a template.
@@ -130,7 +130,7 @@ test("the internal notifications are excluded on purpose, and still reach only o
     const src = template(name);
     assert.ok(!src.includes("emailShell("), `${name} was branded - it is an operational alert`);
   }
-  for (const sender of ["lib/internalOrderNotificationEmail.ts", "lib/cancellationRequestNotificationEmail.ts"]) {
+  for (const sender of ["lib/internalOrderNotificationEmail.ts", "lib/cancellationRequestNotificationEmail.ts", "lib/annualPurchaseNotification.ts"]) {
     assert.match(read(sender), /to: GLOA_INTERNAL_ORDERS/,
       `${sender} no longer sends to the internal inbox - it may need branding after all`);
   }

@@ -642,7 +642,9 @@ test("4c: one API route, no server action, no migration was added for this page"
     // the B2B self-service supply checkout. Gated by
     // B2B_SELF_SERVICE_ENABLED, closed by default, and touching no B2C
     // route. Reviewed in tests/b2b-checkout-settlement.test.mjs.
-["admin", "annual-plan", "b2b", "b2b-lead", "checkout", "complaint", "contact", "cron", "internal", "launch",
+    // 072 ADDED "affiliate": the public affiliate resolution route.
+    // Reviewed in tests/072-block1-behaviour.test.mjs.
+["admin", "affiliate", "annual-plan", "b2b", "b2b-lead", "checkout", "complaint", "contact", "cron", "internal", "launch",
      "orders", "partnerships", "stripe", "subscriptions", "termination", "withdrawal"],
     "an API route was added or removed");
   assert.ok(!page.includes('"use server"'), "a server action was added");
@@ -674,7 +676,7 @@ test("4c: one API route, no server action, no migration was added for this page"
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/business-expenses-migration.test.mjs.
-  assert.ok(!migrations.some(f => f.startsWith("072")), "a migration 072 or beyond appeared");
+  assert.ok(!migrations.some(f => f.startsWith("073")), "a migration 072 or beyond appeared");
 });
 
 /* ══════════════════════════════════════════════════════════════

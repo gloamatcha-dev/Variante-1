@@ -630,6 +630,10 @@ test("no route can mark an order shipped", () => {
     // anything last ship", for the same reason and with the same
     // guarantee: the assertion below proves it holds no write verb.
     "app/api/admin/annual-plans/route.ts",
+    // 072: the dashboard summary counts unshipped orders by filtering on
+    // shipped_at IS NULL. A head:true count, no row data returned, and
+    // no write verb in the file at all.
+    "app/api/admin/dashboard-summary/route.ts",
   ];
   /*
     AND ONE ROUTE THAT READS THEM WHILE ALSO ACTING.

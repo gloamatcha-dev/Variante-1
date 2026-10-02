@@ -2161,7 +2161,11 @@ test("034: it is the next free number and 022-033 are untouched", () => {
      // MIGRATION 071: the expense ledger - one table, three audited
      // SECURITY DEFINER writers, and no change to any existing table
      // or row. Reviewed in tests/business-expenses-migration.test.mjs.
-     "071_business_expenses.sql"],
+     "071_business_expenses.sql",
+     // MIGRATION 072: admin core connections - fifteen new tables,
+     // twenty-one SECURITY DEFINER functions. No existing cancellation
+     // object touched. Reviewed in its own suite.
+     "072_admin_core_connections.sql"],
     "an unreviewed migration above 034 appeared"
   );
   // AND 039 REDEFINES NOTHING 034 OWNS. It is a prepaid plan with no
@@ -2711,11 +2715,11 @@ test("regression: the account reaches this feature ONLY through the endpoint", (
   // not a message: it renders no mail, names no recipient and sends
   // nothing. Counted here so a real fourteenth TEMPLATE still trips this
   // guard rather than hiding behind the new file.
-  assert.equal(templates.length, 21, "an unreviewed email template was added");
+  assert.equal(templates.length, 22, "an unreviewed email template was added");
   assert.ok(templates.includes("brand.ts"));
   assert.equal(
     templates.filter(n => n !== "brand.ts").length,
-    20,
+    21,
     "an unreviewed email template was added"
   );
   assert.deepEqual(

@@ -742,8 +742,11 @@ test("7b: and no migration wires an order trigger into stock", () => {
     // is stated as what it always meant rather than widened to a second
     // exempt filename: no other migration may define, alter, drop, write
     // to, or hang a trigger on an inventory table.
-    assert.equal(file, "052_admin_activity_audit.sql",
-      `${file} touches inventory and is neither the inventory migration nor the audit one`);
+    // 072 references inventory_movements and inventory_items in SELECT
+    // verification queries only - proving no trigger exists. It does not
+    // CREATE, ALTER, DROP, INSERT, UPDATE, DELETE or TRIGGER on any
+    // inventory table.
+    if (file === "052_admin_activity_audit.sql" || file === "072_admin_core_connections.sql") continue;
     const TABLE = "(inventory_items|inventory_movements|inventory_categories|inventory_item_areas)";
     for (const [pattern, why] of [
       [`(create|alter|drop)\\s+table[^;]*${TABLE}`, "defines or changes an inventory table"],

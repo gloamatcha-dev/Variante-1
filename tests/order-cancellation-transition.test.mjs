@@ -1201,6 +1201,7 @@ test("regression: the OPERATOR cancel route still sends nothing at all", () => {
     "cancellationConfirmation.ts", "cancellationOutcome.ts",
     "cancellationRequestNotification.ts",
     "complaintReceived.ts",
+    "internalAnnualPurchaseNotification.ts",
     "internalOrderNotification.ts",
     // Phase 5 added launchConfirmation.ts, the double opt-in mail for
     // the one-time launch notification list. It is a customer message

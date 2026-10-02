@@ -97,7 +97,7 @@ const build = (origin) => ({
     origin,
     plan: {
       productName: "GLOA Matcha", variantLabel: "50 g",
-      deliveryCount: 13, cadenceWeeks: 4, currency: "EUR",
+      deliveryCount: 13, cadenceWeeks: 4, cadenceLabel: "alle 4 Wochen", currency: "EUR",
       annualUnitGrossCents: 2610, shippingPerDeliveryGrossCents: 590,
       merchandiseTotalGrossCents: 33930, shippingTotalGrossCents: 7670,
       totalGrossCents: 41600, discountPercentApplied: 10,

@@ -718,6 +718,10 @@ test("migrations: the retry still adds none, and 022-026 are untouched", () => {
   // 026's columns to prove they are unchanged, and reading them is the
   // opposite of reaching into them.
   for (const name of files.filter(n => n > "026_internal_order_notification_state.sql")) {
+    // 072 adds annual_plans.internal_notification_status - a column on a
+    // DIFFERENT table (annual_plans, not orders). It does not touch the
+    // orders notification state this test guards.
+    if (name === "072_admin_core_connections.sql") continue;
     const later = withoutComments(read(`supabase/migrations/${name}`));
     assert.ok(!later.includes("internal_notification"), `${name} writes the internal notification state`);
   }

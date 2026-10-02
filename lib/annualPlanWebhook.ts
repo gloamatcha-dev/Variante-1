@@ -14,6 +14,8 @@ import {
 } from "./annualPlanWebhookRules";
 import { runAnnualDeliveryWorker, type AnnualDeliveryWorkerSummary } from "./annualDeliveryWorker";
 import type { AnnualPurchaseEmailResult } from "./annualPurchaseConfirmationEmail";
+import { recordAnnualPrepaymentEvent } from "./financeRecording";
+import { sendInternalAnnualPurchaseNotificationIfNeeded } from "./annualPurchaseNotification";
 import type {
   AnnualPaidSettlementOutcome,
   AnnualSessionLinkOutcome,
@@ -463,6 +465,11 @@ export async function settleAnnualCheckoutSession(
     throw new Error(`annual plan ${plan.id} activation refused: ${activation.reason}`);
   }
 
+  // FINANCE RECORDING (072). The plan's total_gross_cents is recognised
+  // once, here, on the day it was paid. Idempotent: the database dedupes
+  // on the plan itself. Best-effort — a failure does not block activation.
+  await recordAnnualPrepaymentEvent(plan.id);
+
   // 9. DELIVERY 1, THROUGH THE SHARED QUEUE. Migration 039 scheduled it
   //    at paid_at, so it is due now. It is claimed and fulfilled by the
   //    same worker the cron will use for deliveries 2 to 13 - there is no
@@ -505,6 +512,15 @@ export async function settleAnnualCheckoutSession(
   //     deserves its confirmation - the same reasoning that keeps the
   //     flag out of the settlement path above.
   const purchaseEmail = await deps.sendPurchaseEmail(plan.id);
+
+  // INTERNAL NOTIFICATION (072). The annual plan PURCHASE is the one gap
+  // in the existing notification system — at this moment no order exists,
+  // so there is no row to carry notification state. These columns on
+  // annual_plans fill that gap, using migration 026's claim pattern.
+  //
+  // claim → load plan → build email → send via Resend → mark sent.
+  // Throws on failure so the webhook returns 500 and Stripe redelivers.
+  await sendInternalAnnualPurchaseNotificationIfNeeded(plan.id);
 
   // ── WHICH OUTCOMES MAKE THE WEBHOOK RETRY ───────────────────
   //
