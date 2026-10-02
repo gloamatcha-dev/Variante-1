@@ -57,14 +57,14 @@
 --       adds two creator columns to it.
 --   31  auth.users exists; eight new columns reference it.
 --
--- EXPECTED HEALTHY RESULT:  0 FAIL / 16 PASS / 3 INFO — SAFE TO APPLY
+-- EXPECTED HEALTHY RESULT:  0 FAIL / 17 PASS / 4 INFO — SAFE TO APPLY
 --
--- Sixteen verdict-bearing checks (10-13, 20-31) and three INFO rows
--- (50-52), plus the SUMMARY row, which counts only the nineteen above
+-- Seventeen verdict-bearing checks (10-13, 20-32) and four INFO rows
+-- (50-53), plus the SUMMARY row, which counts only the twenty-one above
 -- it. The SUMMARY is always computed from the actual rows; this line is
 -- the expectation to compare it against, never the source of it.
 -- Verified: a database carrying 001..071 and not 072 returns exactly
--- 0 FAIL / 16 PASS / 3 INFO.
+-- 0 FAIL / 17 PASS / 4 INFO.
 --
 -- ── IT REFUSES AFTER 072 IS APPLIED ───────────────────────────
 --
@@ -446,6 +446,32 @@ verdicts(check_id, area, question, expectation, found, verdict) as (
                             where table_schema = 'auth' and table_name = 'users')
               then 'PASS' else 'FAIL' end
 
+  union all
+  select 32, 'security', '071 remediation dependencies and unrelated ACL collisions',
+         'expected: RLS, three service-only audited writers; no other or column ACLs',
+         'known service_role table grants are permitted and remediated by 072',
+         case when exists (select 1 from pg_class where oid=to_regclass('public.business_expenses') and relrowsecurity)
+           and (select count(*) from pg_proc p join (values ('admin_record_business_expense(uuid,date,text,integer,text,text,text,integer,uuid,text,text,uuid)'),
+             ('admin_update_business_expense(uuid,uuid,date,text,integer,text,text,text,integer,uuid,text,text,uuid)'),
+             ('admin_delete_business_expense(uuid,uuid,uuid)')) signatures(sig)
+                  on p.oid=to_regprocedure(signatures.sig)
+                where p.prosecdef and 'search_path=' = any(select left(c,12) from unnest(p.proconfig) c)
+                  and has_function_privilege('service_role',p.oid,'EXECUTE')
+                  and not has_function_privilege('anon',p.oid,'EXECUTE')
+                  and not has_function_privilege('authenticated',p.oid,'EXECUTE')
+                  and not exists (select 1 from aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
+                                   where a.grantee not in (p.proowner,(select oid from pg_roles where rolname='service_role'))))=3 and not exists (select 1 from pg_class c cross join lateral aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a
+                             where c.oid=to_regclass('public.business_expenses')
+                               and a.grantee not in (c.relowner,(select oid from pg_roles where rolname='service_role')))
+           and not exists (select 1 from pg_attribute where attrelid=to_regclass('public.business_expenses')
+                             and attacl is not null and cardinality(attacl)>0) then 'PASS' else 'FAIL' end
+
+  union all
+  select 53, 'info', 'pre-072 business_expenses service_role direct writes',
+         'INFO - known excess is explicitly revoked by 072',
+         coalesce(has_table_privilege('service_role',to_regclass('public.business_expenses'),'INSERT,UPDATE,DELETE'),false)::text,
+         'INFO'
+
   /* ── 50-52. INFO. Context, never a verdict. ─────────────── */
 
   union all
@@ -490,14 +516,14 @@ select * from (
   union all
   select 999, 'SUMMARY',
          'migration 072 may be applied',
-         'expected: 0 FAIL / 16 PASS / 3 INFO',
+         'expected: 0 FAIL / 17 PASS / 4 INFO',
          (select count(*) filter (where v.verdict = 'FAIL')::text || ' FAIL / '
               || count(*) filter (where v.verdict = 'PASS')::text || ' PASS / '
               || count(*) filter (where v.verdict = 'INFO')::text || ' INFO'
             from verdicts v),
          -- COMPUTED FROM THE ROWS, so it cannot disagree with them.
          case when (select count(*) filter (where v.verdict = 'FAIL') from verdicts v) = 0
-                   and (select count(*) filter (where v.verdict = 'PASS') from verdicts v) = 16
+                   and (select count(*) filter (where v.verdict = 'PASS') from verdicts v) = 17
               then 'SAFE TO APPLY' else 'DO NOT APPLY' end
 ) as checks
  order by check_id;

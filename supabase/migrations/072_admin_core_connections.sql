@@ -3577,6 +3577,12 @@ begin
 end
 $$;
 
+-- Remediate the already-deployed 071 table here, never in historical 071.
+-- Direct reads remain available; audited SECURITY DEFINER writers own mutations.
+revoke all privileges on table public.business_expenses
+  from public, anon, authenticated, service_role;
+grant select on table public.business_expenses to service_role;
+
 /*
   THE FUNCTIONS: service_role ONLY, and the browser roles are revoked
   explicitly rather than left to the default.

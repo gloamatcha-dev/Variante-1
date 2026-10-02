@@ -10,7 +10,7 @@
 --
 -- ── WHAT IT CHECKS THAT A SCHEMA DIFF WOULD NOT ───────────────
 --
--- 10-14 and 20-26 are shape, grants, RLS and vocabulary. A schema
+-- 10-14 and 20-28 are shape, grants, RLS and vocabulary. A schema
 -- comparison would find those.
 --
 -- 30-38 READ THE FUNCTION BODIES, and they are the only checks here that
@@ -61,14 +61,14 @@
 -- 40-41 are what matters for a Production apply: 072 must have written
 -- NO business row and seeded NO business parameter.
 --
--- EXPECTED HEALTHY RESULT:  0 FAIL / 23 PASS / 3 INFO — APPLIED CLEANLY
+-- EXPECTED HEALTHY RESULT:  0 FAIL / 25 PASS / 3 INFO — APPLIED CLEANLY
 --
--- Twenty-three verdict-bearing checks (10-14, 20-26, 30-38, 40-41) and
+-- Twenty-five verdict-bearing checks (10-14, 20-28, 30-38, 40-41) and
 -- three INFO rows (50-52), plus the SUMMARY row, which counts only the
--- twenty-six above it. The SUMMARY is always computed from the actual
+-- twenty-eight above it. The SUMMARY is always computed from the actual
 -- rows; this line is the expectation to compare it against, never the
 -- source of it. Verified: a fresh apply of 001..072 to a real PostgreSQL
--- 17 instance returns exactly 0 FAIL / 23 PASS / 3 INFO.
+-- 17 instance returns exactly 0 FAIL / 25 PASS / 3 INFO.
 --
 -- ── RUN IT AFTER 072, NOT BEFORE ──────────────────────────────
 --
@@ -231,7 +231,7 @@ verdicts(check_id, area, question, expectation, found, verdict) as (
                                       and indexname = i.name)) = 5
               then 'PASS' else 'FAIL' end
 
-  /* ── 20-26. SECURITY AND VOCABULARY ─────────────────────── */
+  /* ── 20-28. SECURITY AND VOCABULARY ─────────────────────── */
 
   union all
   /*
@@ -387,6 +387,37 @@ verdicts(check_id, area, question, expectation, found, verdict) as (
                        and pg_get_constraintdef(oid) like '%documents%'
                        and pg_get_constraintdef(oid) like '%fulfillment%') = 1
               then 'PASS' else 'FAIL' end
+
+  union all
+  select 27, 'security', 'business_expenses direct privileges after remediation',
+         'expected: service_role SELECT only; no browser or unrelated grants',
+         'checks INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN and column ACLs',
+         case when not exists (select 1 from pg_class c cross join lateral aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a
+                             where c.oid=to_regclass('public.business_expenses')
+                               and a.grantee not in (c.relowner,(select oid from pg_roles where rolname='service_role')))
+           and not exists (select 1 from pg_attribute where attrelid=to_regclass('public.business_expenses')
+                             and attacl is not null and cardinality(attacl)>0)
+           and has_table_privilege('service_role',to_regclass('public.business_expenses'),'SELECT')
+           and not has_table_privilege('service_role',to_regclass('public.business_expenses'),'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN')
+           and not has_table_privilege('anon',to_regclass('public.business_expenses'),'INSERT,UPDATE,DELETE')
+           and not has_table_privilege('authenticated',to_regclass('public.business_expenses'),'INSERT,UPDATE,DELETE')
+           then 'PASS' else 'FAIL' end
+
+  union all
+  select 28, 'security', 'business_expenses audited writer architecture remains intact',
+         'expected: table exists with RLS; all three definer writers service-only',
+         'checks signatures, SECURITY DEFINER, empty search_path and EXECUTE ACLs',
+         case when exists (select 1 from pg_class where oid=to_regclass('public.business_expenses') and relrowsecurity)
+           and (select count(*) from pg_proc p join (values ('admin_record_business_expense(uuid,date,text,integer,text,text,text,integer,uuid,text,text,uuid)'),
+             ('admin_update_business_expense(uuid,uuid,date,text,integer,text,text,text,integer,uuid,text,text,uuid)'),
+             ('admin_delete_business_expense(uuid,uuid,uuid)')) signatures(sig)
+                  on p.oid=to_regprocedure(signatures.sig)
+                where p.prosecdef and 'search_path=' = any(select left(c,12) from unnest(p.proconfig) c)
+                  and has_function_privilege('service_role',p.oid,'EXECUTE')
+                  and not has_function_privilege('anon',p.oid,'EXECUTE')
+                  and not has_function_privilege('authenticated',p.oid,'EXECUTE')
+                  and not exists (select 1 from aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
+                                   where a.grantee not in (p.proowner,(select oid from pg_roles where rolname='service_role'))))=3 then 'PASS' else 'FAIL' end
 
   /* ── 30-38. THE FUNCTION BODIES ─────────────────────────── */
 
@@ -740,13 +771,13 @@ select * from (
   union all
   select 999, 'SUMMARY',
          'migration 072 applied cleanly',
-         'expected: 0 FAIL / 23 PASS / 3 INFO',
+         'expected: 0 FAIL / 25 PASS / 3 INFO',
          (select count(*) filter (where v.verdict = 'FAIL')::text || ' FAIL / '
               || count(*) filter (where v.verdict = 'PASS')::text || ' PASS / '
               || (select count(*) from infos)::text || ' INFO'
             from verdicts v),
          case when (select count(*) filter (where v.verdict = 'FAIL') from verdicts v) = 0
-                   and (select count(*) from verdicts) = 23
+                   and (select count(*) from verdicts) = 25
               then 'APPLIED CLEANLY' else 'INCOMPLETE' end
 ) as checks
  order by check_id;

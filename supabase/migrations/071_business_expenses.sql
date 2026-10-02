@@ -864,7 +864,6 @@ alter table public.business_expenses enable row level security;
 
 revoke all privileges on table public.business_expenses from anon, authenticated;
 revoke all privileges on table public.business_expenses from public;
-revoke all privileges on table public.business_expenses from service_role;
 
 /*
   SELECT ONLY, plus the three functions.
