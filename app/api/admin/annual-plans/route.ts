@@ -1,3 +1,4 @@
+import {readPortalPages} from "../../../../lib/adminPortalRead.ts";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { requireAdminIdentity } from "../../../../lib/adminActionRoute.ts";
 import {
@@ -117,9 +118,15 @@ export async function POST(request: Request): Promise<Response> {
   const sort = ANNUAL_SORT_COLUMN[query.sort];
 
   // ── WAVE 1 ─────────────────────────────────────────────────────────
-  let rows = supabase.from("annual_plans").select(ANNUAL_LIST_COLUMNS, { count: "exact" });
+  let rows = supabase.from("annual_plans").select(ANNUAL_LIST_COLUMNS + ",schedule_model,termination_effect,termination_request_id,terminated_at,internal_notification_status", { count: "exact" });
   rows = applyGroup(rows, annualGroupFilter(query.group));
-  if (query.search) {
+  if((body as Record<string,unknown>)?.portalFocus==='upcoming'){
+    const until=new Date(Date.now()+7*86400000).toISOString();
+    try{const deliveries=await readPortalPages(supabase,'annual_plan_deliveries',q=>q.eq('state','scheduled').lte('scheduled_for',until));rows=rows.in('id',deliveries.length?[...new Set(deliveries.map(r=>r.annual_plan_id))]:['00000000-0000-0000-0000-000000000000']);}
+    catch{return Response.json({error:'Lieferdaten nicht verfügbar.'},{status:503});}
+  }
+  if (query.search && /^[0-9a-f-]{36}$/i.test(query.search)) rows = rows.eq("id", query.search);
+  else if (query.search) {
     // Name, email and the PaymentIntent an operator is staring at in
     // Stripe. The snapshot is what the plan was sold with and does not
     // move when the customer later edits their profile.

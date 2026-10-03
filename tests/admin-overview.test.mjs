@@ -482,7 +482,7 @@ test("23: the admin API surface is exactly these five, all POST-gated", () => {
   // identity check. Reviewed in tests/072-block1-behaviour.test.mjs.
   assert.deepEqual(dirs, ["activity", "annual-plans", "b2b", "costs", "creators",
     "customer-rights", "dashboard-summary", "documents", "finance",
-    "inventory", "launch", "orders", "session", "shipping", "subscriptions", "waitlist",
+    "inventory", "launch", "orders", "portal", "session", "shipping", "subscriptions", "waitlist",
     "withdrawal-refund"]);
 
   // The session route is the only one that may write anything, and what

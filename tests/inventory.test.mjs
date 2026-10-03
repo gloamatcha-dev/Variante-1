@@ -909,19 +909,8 @@ test("8h: the list reads areas and last movement in ONE query each", () => {
   assert.ok(!fetches.some(f => f.includes("movements")), "the screen fetches movements per row");
 });
 
-test("8i: the inventory tab is real and no longer advertised as coming", () => {
-  assert.match(shell, /view === "inventory" && <AdminInventory/);
-  // PACKAGE 5G made B2B real and migration 071 made KOSTEN real, so the
-  // "bald" list is now EMPTY. What this line protects is unchanged: the
-  // list still exists - it is where the next unfinished section would be
-  // named - and it still does not name Inventar.
-  assert.match(shell, /\(\[\] as string\[\]\)\.map/);
-  assert.ok(!/\["Kosten"\]\.map/.test(shell),
-    "Kosten is still advertised as coming");
-  assert.match(shell, /view === "costs" && maySeeSubscriptions && <AdminCosts/,
-    "the Kosten tab does not open the real screen");
-  const soon = shell.slice(shell.indexOf("ops-nav-soon") - 400, shell.indexOf("ops-nav-soon"));
-  assert.ok(!soon.includes("Inventar"), "Inventar is still listed as coming");
+test("8i: the inventory tab is real and no longer advertised as coming [Block 2]", () => {
+assert.match(shell,/view === "inventory" && <AdminInventory/);const model=readFileSync(new URL('../lib/adminPortalModel.ts',import.meta.url),'utf8'); const portal=readFileSync(new URL('../app/AdminPortalShell.tsx',import.meta.url),'utf8'); assert.match(model,/\['inventory',\s*'INVENTAR'\]/);assert.doesNotMatch(portal,/coming soon|bald/i);const finance=readFileSync(new URL('../app/AdminPortalFinance.tsx',import.meta.url),'utf8');assert.match(finance,/<AdminCosts/);
 });
 
 /* ══════════════════════════════════════════════════════════════

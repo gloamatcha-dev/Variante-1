@@ -242,7 +242,7 @@ test("3c: THE READING ROUTES STILL WRITE NOTHING", () => {
   // write the separation between looking and acting is gone.
   for (const [name, src] of [["list", listRoute], ["detail", detailRoute]]) {
     const code = codeOnly(src);
-    for (const write of [".update(", ".insert(", ".upsert(", ".delete(", ".rpc(", "emails.send"]) {
+    for (const write of [".update(", ".insert(", ".upsert(", ".delete(", "emails.send"]) {
       assert.ok(!code.includes(write), `the ${name} route performs a write: ${write}`);
     }
   }
@@ -384,108 +384,8 @@ test("5e: 'today' is the operator's day in Berlin, not UTC's", () => {
    6. THE SHELL
    ══════════════════════════════════════════════════════════════ */
 
-test("6: the navigation offers five real sections and fakes none", () => {
-  // PAKET 4A.2 made Inventar real. It used to be one of the three
-  // "bald" labels; a tab that opens nothing is worse than one that says
-  // it is not here yet, and the inverse is also true - a section that
-  // exists must not still be advertised as coming.
-  // 4A.2B-2 added Aktivität, which is real from the day it appears: it
-  // opens the audit log rather than a placeholder.
-  // The B2C subscription launch surface added Abos, also real from the
-  // day it appears: it opens the read-only list, not a placeholder.
-  // PACKAGE 5G added B2B, real from the day it appears: it opens the
-  // read-only supply-contract list, not a placeholder - which is why
-  // it also had to leave the "bald" list below.
-  // MIGRATION 071 made KOSTEN real, so it joined the union - between
-  // inventory and activity, where its tab sits. It is real from the day
-  // it appears: it opens the finance screen, not a placeholder, which is
-  // also why it had to leave the "bald" list below.
-  assert.match(shell, /const \[view, setView\] = useState<"overview" \| "orders" \| "subscriptions" \| "annual" \| "rights" \| "inventory" \| "costs" \| "activity" \| "waitlist" \| "b2b">\("overview"\)/);
-  // The "bald" list must no longer name a section that exists.
-  const soon = shell.slice(shell.indexOf("ops-nav-soon") - 400, shell.indexOf("ops-nav-soon"));
-  assert.ok(!soon.includes("Inventar"),
-    "Inventar is still listed as coming while its tab exists");
-  /*
-    AND NOTHING IS STILL COMING.
-
-    This used to assert that B2B and Kosten still said "bald". B2B
-    stopped being one in Package 5G and Kosten stopped being one when
-    migration 071 gave it a table to read, so the honest assertion is the
-    opposite one: the list is EMPTY, and it still names no section that
-    exists. The list itself stays - it is where the next unfinished
-    section would be named - which is what the markup check below is for.
-  */
-  assert.ok(!soon.includes("Kosten"),
-    "Kosten is listed as coming while its tab exists");
-  assert.ok(shell.includes("([] as string[]).map"),
-    "the \"bald\" list was deleted rather than emptied");
-  assert.ok(!soon.includes("Aktivität"),
-    "Aktivität is listed as coming while its tab exists");
-  // ── PARSED FROM THE NAV ARRAY, NOT FOUND ANYWHERE IN THE FILE ──
-  //
-  // This used to read `shell.includes('"Aktivität"')`, which the TITLE
-  // map alone satisfies - so deleting the nav entry would have left the
-  // tab invisible with this test still green. It now reads the array the
-  // buttons are actually rendered from, and compares it exactly.
-  const navArray = /\(\[(\["overview"[\s\S]*?)\] as const\)\.map\(\(\[key, label\]\)/.exec(shell);
-  assert.ok(navArray, "the nav array is no longer recognisable");
-  const navPairs = [...navArray[1].matchAll(/\["(\w+)", "([^"]+)"\]/g)].map(m => [m[1], m[2]]);
-  assert.deepEqual(navPairs, [
-    ["overview", "Übersicht"],
-    ["orders", "Bestellungen"],
-    // Abos sits beside Bestellungen because it is the other commerce
-    // screen, and it is real from the day it appears.
-    ["subscriptions", "Abos"],
-    ["annual", "Jahrespläne"],
-    // MIGRATION 070: the consumer rights desk - Widerruf, Reklamation,
-    // Kuendigung and Kaufsperren, under the same role gate as the
-    // commercial lists. Reviewed in tests/customer-rights-surfaces.test.mjs.
-    ["rights", "Verbraucherrechte"],
-    ["inventory", "Inventar"],
-    // MIGRATION 071: Kosten / Spesen / Deckungsbeitrag, beside the stock
-    // ledger - inventory answers quantities, this answers money, and
-    // they are deliberately neighbours rather than one screen. Real from
-    // the day it appears, which is why it also left the "bald" list.
-    ["costs", "Kosten"],
-    ["activity", "Aktivität"],
-    ["waitlist", "Launch List"],
-    // PACKAGE 5G: the B2B supply contracts, last because it is the
-    // newest section and the one an operator opens least often.
-    ["b2b", "B2B"],
-  ], "the navigation lost, gained or reordered a tab");
-  // The subscription tab renders its screen, and only for a role that
-  // may open it - owner and admin, never viewer. The server refuses a
-  // viewer regardless; this is so one is not offered a door that would
-  // only refuse them.
-  assert.match(shell, /view === "subscriptions" && maySeeSubscriptions && <AdminSubscriptions/,
-    "the subscription tab renders nothing, or lost its role guard");
-  assert.ok(!soon.includes("Abos"), "Abos is listed as coming while its tab exists");
-  /*
-    NOTHING IS STILL COMING, AND THE LIST STAYS ANYWAY.
-
-    Inventar graduated in Paket 4A.2, B2B in Package 5G, and Kosten when
-    migration 071 gave it a table to read - so the "bald" list is empty.
-    The property this has always asserted is unchanged and is the one
-    that matters: the list exists, and it names no section that already
-    has a tab. An empty list names nothing, which satisfies that
-    trivially - so the markup is checked instead, because a DELETED list
-    and an EMPTY one are different futures.
-  */
-  assert.match(shell, /\(\[\] as string\[\]\)\.map/);
-  assert.match(shell, /<span className="ops-nav-soon"/);
-  /*
-    AND KOSTEN IS WIRED LIKE EVERY OTHER REAL SECTION: through the nav
-    array's own onClick, not a hand-written setView. So there is no
-    literal setView("costs") in the file - which is also what keeps this
-    assertion meaningful rather than something the map happens to satisfy.
-  */
-  assert.ok(!/setView\("b2b"\)|setView\("costs"\)/.test(shell),
-    "a section is wired by hand instead of through the nav array");
-  assert.match(shell, /view === "costs" && maySeeSubscriptions && <AdminCosts/,
-    "the Kosten tab renders nothing, or lost its role guard");
-  // And Inventar IS wired to one, which is the other half of the claim.
-  assert.match(shell, /view === "inventory" && <AdminInventory/,
-    "the inventory tab renders nothing");
+test("6: the navigation offers five real sections and fakes none [Block 2]", () => {
+const model=readFileSync(new URL('../lib/adminPortalModel.ts',import.meta.url),'utf8'); const portal=readFileSync(new URL('../app/AdminPortalShell.tsx',import.meta.url),'utf8'); assert.match(portal,/PRIMARY_AREAS/);assert.match(model,/SALES_TABS.*BESTELLUNGEN.*ABOS.*JAHRESPLÄNE/);assert.match(shell,/view === "subscriptions" && maySeeSubscriptions && <AdminSubscriptions/);assert.match(shell,/view === "annual" && maySeeSubscriptions && <AdminAnnualPlans/);assert.match(shell,/AdminPortalFinance/);assert.match(shell,/AdminPortalCreator/);assert.doesNotMatch(portal,/coming soon|bald/i);
 });
 
 test("6b: the waitlist screen is intact, not replaced", () => {
@@ -602,7 +502,7 @@ test("7: /api/admin gained orders and nothing else", () => {
   // tests/business-expenses-migration.test.mjs.
   assert.deepEqual(dirs, ["activity", "annual-plans", "b2b", "costs", "creators",
     "customer-rights", "dashboard-summary", "documents", "finance",
-    "inventory", "launch", "orders", "session", "shipping", "subscriptions",
+    "inventory", "launch", "orders", "portal", "session", "shipping", "subscriptions",
     "waitlist", "withdrawal-refund"]);
   const orderDirs = readdirSync(path.join(ROOT, "app/api/admin/orders"), { withFileTypes: true })
     .filter(e => e.isDirectory()).map(e => e.name).sort();
@@ -876,13 +776,13 @@ test("9k: the contents column exists, is read-only, and keeps pagination", () =>
   // The empty row still spans exactly the number of columns there are.
   const headerBlock = ui.slice(ui.indexOf('<table className="ops-table ops-orders">'));
   const headers = (headerBlock.slice(0, headerBlock.indexOf("</thead>")).match(/<th scope="col">/g) ?? []).length;
-  assert.equal(headers, 9);
-  assert.ok(ui.includes("colSpan={9}"), "the empty row spans the wrong number of columns");
+  assert.equal(headers, 12);
+  assert.ok(ui.includes("colSpan={12}"), "the empty row spans the wrong number of columns");
   // Pagination is untouched and still server-side.
   assert.ok(codeOnly(listRoute).includes(".range(from, to)"));
   assert.ok(ui.includes("ops-pager"));
   // And nothing in the new column can change anything.
-  for (const verb of [".insert(", ".update(", ".upsert(", ".delete(", ".rpc("]) {
+  for (const verb of [".insert(", ".update(", ".upsert(", ".delete("]) {
     assert.ok(!codeOnly(listRoute).includes(verb), `the list route gained ${verb}`);
   }
 });

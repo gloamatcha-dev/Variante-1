@@ -1,3 +1,4 @@
+import { readPortalPages } from "../../../../lib/adminPortalRead.ts";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { requireAdminIdentity } from "../../../../lib/adminActionRoute.ts";
 import { getCreatorCommissionBalance } from "../../../../lib/creatorAffiliate";
@@ -42,31 +43,17 @@ export async function POST(request: Request): Promise<Response> {
   const action = b.action;
 
   if (action === "list" || action === undefined) {
-    const [creators, applications, rules, links, codes, ugc] = await Promise.all([
-      admin.from("creators").select("*").order("created_at", { ascending: false }).limit(PAGE_CAP),
-      admin.from("creator_applications").select("*").order("submitted_at", { ascending: false }).limit(PAGE_CAP),
-      admin.from("creator_commission_rules").select("*").order("created_at", { ascending: false }).limit(PAGE_CAP),
-      admin.from("affiliate_links").select("*").order("created_at", { ascending: false }).limit(PAGE_CAP),
-      admin.from("affiliate_codes").select("*").order("created_at", { ascending: false }).limit(PAGE_CAP),
-      admin.from("ugc_assignments").select("*").order("created_at", { ascending: false }).limit(PAGE_CAP),
-    ]);
-
-    for (const r of [creators, applications, rules, links, codes, ugc]) {
-      if (r.error) {
-        console.error("Creators: list failed -", r.error.message);
-        return json({ error: "Nicht verfügbar." } as ErrorResponse, 503);
-      }
-    }
-
-    return json({
-      ok: true,
-      creators: creators.data ?? [],
-      applications: applications.data ?? [],
-      rules: rules.data ?? [],
-      links: links.data ?? [],
-      codes: codes.data ?? [],
-      ugcAssignments: ugc.data ?? [],
-    }, 200);
+    try {
+      const [creators,applications,rules,links,codes,ugc,roles,commissions,payouts,attributions] = await Promise.all([
+        ...["creators","creator_applications","creator_commission_rules","affiliate_links","affiliate_codes","ugc_assignments"].map(t=>readPortalPages(admin,t)),
+        readPortalPages(admin,"creator_roles",q=>q,"creator_id"),
+        readPortalPages(admin,"creator_commissions"),readPortalPages(admin,"creator_payouts"),readPortalPages(admin,"order_attributions"),
+      ]);
+      // Commission balance comes from the existing authoritative function.
+      const balances = [];
+      for(let offset=0;offset<creators.length;offset+=10)balances.push(...await Promise.all(creators.slice(offset,offset+10).map(async creator=>({creatorId:creator.id,balance:await getCreatorCommissionBalance(String(creator.id))}))));
+      return json({ok:true,creators,applications,rules,links,codes,ugcAssignments:ugc,roles,commissions,payouts,attributions,balances},200);
+    }catch{return json({error:"Creator-Daten konnten nicht geladen werden."},503);}
   }
 
   if (action === "commission_balance") {
@@ -84,7 +71,7 @@ export async function POST(request: Request): Promise<Response> {
   if (action === "attributions") {
     const { data, error } = await admin
       .from("order_attributions")
-      .select("*, creator_commissions(*)")
+      .select("*")
       .order("attributed_at", { ascending: false })
       .limit(PAGE_CAP);
 
@@ -92,13 +79,33 @@ export async function POST(request: Request): Promise<Response> {
       console.error("Creators: attributions failed -", error.message);
       return json({ error: "Nicht verfügbar." } as ErrorResponse, 503);
     }
-    return json({ ok: true, attributions: data ?? [] }, 200);
+    const rows = data ?? [];
+    const orderIds = rows.map(row => row.order_id);
+    const history = orderIds.length ? await admin.from("creator_commissions").select("*").in("order_id", orderIds) : {data: [], error: null};
+    if (history.error) return json({error: "Nicht verfügbar."}, 503);
+    return json({ok:true,attributions:rows.map(row=>({...row,creator_commissions:(history.data ?? []).filter(event=>event.order_id===row.order_id)}))},200);
   }
 
   // ── WRITES ─────────────────────────────────────────────────
   const writeGate = await requireAdminIdentity(request, "write");
   if (!writeGate.ok) return writeGate.response;
   const actorUserId = writeGate.session.userId;
+  if (action === "add_role") {
+    if(!["influencer","ugc_creator","affiliate"].includes(String(b.role)))return json({error:"Ungültige Rolle."},400);
+    const {error}=await admin.from("creator_roles").upsert({creator_id:b.creatorId,role:b.role},{onConflict:"creator_id,role"});
+    return error?json({error:"Rolle konnte nicht gespeichert werden."},503):json({ok:true},200);
+  }
+  if (action === "update_affiliate") {
+    if(!["active","paused"].includes(String(b.status)))return json({error:"Ungültiger Status."},400);
+    const table=b.type==="code"?"affiliate_codes":"affiliate_links";
+    const {error}=await admin.from(table).update({active:b.status==="active"}).eq("id",b.id);
+    return error?json({error:"Status konnte nicht gespeichert werden."},503):json({ok:true},200);
+  }
+  if (action === "update_ugc") {
+    if(!["briefed","in_progress","submitted","approved","rejected","cancelled"].includes(String(b.status)))return json({error:"Ungültiger Status."},400);
+    const {error}=await admin.from("ugc_assignments").update({status:b.status,content_url:b.contentUrl||null,usage_rights_note:b.usageRightsNote||null}).eq("id",b.assignmentId);
+    return error?json({error:"Content konnte nicht gespeichert werden."},503):json({ok:true},200);
+  }
 
   const str = (k: string): string => (typeof b[k] === "string" ? (b[k] as string) : "");
 
@@ -226,10 +233,12 @@ export async function POST(request: Request): Promise<Response> {
     const { data, error } = await admin.from("ugc_assignments").insert({
       creator_id: str("creatorId"),
       title: str("title"),
-      brief: str("brief") || null,
-      fee_cents: typeof b.feeCents === "number" ? b.feeCents : null,
+      deliverable_type: str("deliverableType") || "other",
+      campaign: str("campaign") || null,
+      usage_rights_note: str("usageRightsNote") || null,
+      agreed_fee_cents: typeof b.feeCents === "number" ? b.feeCents : null,
       currency: str("currency") || "EUR",
-      deadline_at: str("deadlineAt") || null,
+      due_date: str("dueDate") || null,
       created_by: actorUserId,
     }).select("id").single();
 

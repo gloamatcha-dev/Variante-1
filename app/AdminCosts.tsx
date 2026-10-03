@@ -121,7 +121,7 @@ function fmtDate(iso: string): string {
 /** The one place an unknown VAT becomes words rather than a number. */
 const VAT_UNKNOWN = "Vorsteuer unbekannt";
 
-export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
+export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter="" }: { onSessionLost: () => void; expensesOnly?:boolean;initialFilter?:string }) {
   const [choice, setChoice] = useState<PeriodChoice>("this_month");
   const [custom, setCustom] = useState<FinancePeriod>(() => monthPeriod(todayInBerlin()));
   const [summary, setSummary] = useState<FinanceSummary | null>(null);
@@ -131,7 +131,7 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
 
   // ── the ledger filters ──
   const [channelFilter, setChannelFilter] = useState<ChannelFilter>("all");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialFilter==='open'?'open':'all');
 
   // ── the form ──
   const [formOpen, setFormOpen] = useState(false);
@@ -449,32 +449,32 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
 
       {/* ── UMSATZ UND KOSTEN ── */}
       <div className="ops-counts">
-        <div className="ops-count ops-count-revenue">
+        {!expensesOnly&&<div className="ops-count ops-count-revenue">
           <span className="ops-count-label">Umsatz (brutto)</span>
           <span className="ops-count-value">{formatCents(s.revenue.grossCents)}</span>
-        </div>
-        <div className="ops-count">
+        </div>}
+        {!expensesOnly&&<div className="ops-count">
           <span className="ops-count-label">Rückerstattungen</span>
           <span className="ops-count-value">{formatCents(s.revenue.refundedCents)}</span>
-        </div>
+        </div>}
         <div className="ops-count">
           <span className="ops-count-label">Direkte Kosten (brutto)</span>
           <span className="ops-count-value">
-            {formatCents(s.directCostsTotalCents)}
+            {s.completeness.missingCategories.length===DIRECT_EXPENSE_CATEGORIES.length ? "nicht erfasst" : formatCents(s.directCostsTotalCents)}
             {s.isPartial && <i className="ops-costs-flag"> unvollständig</i>}
           </span>
         </div>
-        <div className="ops-count">
+        {!expensesOnly&&<div className="ops-count">
           <span className="ops-count-label">
             Deckungsbeitrag{s.isPartial ? " (Obergrenze)" : ""}
           </span>
           <span className="ops-count-value">{formatCents(s.contributionMarginCents)}</span>
-        </div>
+        </div>}
         <div className="ops-count">
           <span className="ops-count-label">Allgemeine Kosten / Spesen (brutto)</span>
-          <span className="ops-count-value">{formatCents(s.generalExpensesCents)}</span>
+          <span className="ops-count-value">{s.generalExpensesCents===0 ? "nicht erfasst" : formatCents(s.generalExpensesCents)}</span>
         </div>
-        <div className="ops-count">
+        {!expensesOnly&&<div className="ops-count">
           <span className="ops-count-label">Betriebsergebnis</span>
           {/*
             NULL IS RENDERED AS A WORD, NOT AS A ZERO. The server returns
@@ -487,7 +487,7 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
               ? <i className="ops-costs-unknown">unbekannt</i>
               : formatCents(s.operatingResultCents)}
           </span>
-        </div>
+        </div>}
         {/*
           INPUT VAT, WITH ITS COVERAGE ATTACHED.
 
@@ -531,7 +531,7 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
             return (
               <tr key={c}>
                 <td data-label="Posten">{EXPENSE_CATEGORY_LABEL[c]}</td>
-                <td data-label="Betrag">{formatCents(s.directCostsByCategory[c])}</td>
+                <td data-label="Betrag">{missing ? "nicht erfasst" : formatCents(s.directCostsByCategory[c])}</td>
                 <td data-label="Status">
                   {missing ? <i className="ops-costs-unknown">nicht erfasst</i> : "erfasst"}
                 </td>
@@ -571,13 +571,13 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
         to pair them with. Pretending otherwise would be the dishonest
         half of a channel P&L.
       */}
-      <p className="ops-note">
+      {!expensesOnly&&<p className="ops-note">
         Umsatz wird nur nach B2C und B2B unterschieden – eine Bestellung kennt keinen
         {" "}Event-Kanal. Für Event und Allgemein zeigt diese Tabelle deshalb nur Kosten.
-      </p>
+      </p>}
 
       {/* ── UMSATZDETAIL, inkl. der Zeile die KEIN Kostenposten ist ── */}
-      <table className="ops-table ops-costs-revenue">
+      {!expensesOnly&&<table className="ops-table ops-costs-revenue">
         <caption className="ops-count-label">Umsatz im Detail</caption>
         <tbody>
           <tr><td data-label="Posten">Bezahlte Bestellungen</td>
@@ -600,7 +600,7 @@ export function AdminCosts({ onSessionLost }: { onSessionLost: () => void }) {
           <tr><td data-label="Posten">B2B Umsatz brutto</td>
               <td data-label="Wert">{formatCents(s.b2b.grossCents)} ({s.b2b.orderCount})</td></tr>
         </tbody>
-      </table>
+      </table>}
 
       {/* ── KOSTEN ERFASSEN ── */}
       <div className="ops-controls">

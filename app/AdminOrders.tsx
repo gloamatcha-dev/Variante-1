@@ -1,4 +1,6 @@
 "use client";
+import {Chip,BusinessContext} from './AdminPortalShared';
+import {date as portalDate} from '../lib/adminPortalModel.ts';
 import { useCallback, useEffect, useState } from "react";
 import { OrderActions } from "./AdminOrderActions";
 import {
@@ -133,6 +135,8 @@ export type OrdersSummary = {
 };
 
 type OrdersPayload = {
+  shippingDue?: Record<string,{state?:string;due_date?:string}>;
+  orderTypes?: Record<string,string>;
   rows: OrderRow[];
   /** Compact contents per order id - one server request for the page. */
   itemSummaries: Record<string, OrderItemSummary>;
@@ -176,17 +180,20 @@ function shortId(id: string | null | undefined): string {
   return id.length <= 24 ? id : `${id.slice(0, 14)}…${id.slice(-6)}`;
 }
 
-export function AdminOrders({ onSessionLost }: { onSessionLost: () => void }) {
+export function AdminOrders({ onSessionLost, initialSearch = "" }: { onSessionLost: () => void; initialSearch?: string }) {
   const [data, setData] = useState<OrdersPayload | null>(null);
   const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState(false);
 
   const [status, setStatus] = useState<OrderStatus | "all">("all");
   const [payment, setPayment] = useState<PaymentStatus | "all">("all");
-  const [fulfillment, setFulfillment] = useState<FulfillmentStatus | "all">("all");
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
+  const [fulfillment, setFulfillment] = useState<FulfillmentStatus | "all">(initialSearch==="attention"?"unfulfilled":"all");
+  const [searchInput, setSearchInput] = useState(['attention','due_today','overdue','upcoming','open','refund'].includes(initialSearch)?'':initialSearch);
+  const [search, setSearch] = useState(initialSearch);
   const [page, setPage] = useState(1);
+  const [portalDue,setPortalDue]=useState(['due_today','overdue','upcoming','no_dispatch_target_configured'].includes(initialSearch)?initialSearch:'');
+  const [channel,setChannel]=useState('all');const [orderType,setOrderType]=useState('all');const [refund,setRefund]=useState('all');
+  const [dateFrom,setDateFrom]=useState('');const [dateTo,setDateTo]=useState('');
 
   const [openId, setOpenId] = useState<string | null>(null);
   const [detail, setDetail] = useState<{ order: OrderDetail; items: OrderItem[] } | null>(null);
@@ -204,7 +211,7 @@ export function AdminOrders({ onSessionLost }: { onSessionLost: () => void }) {
       const res = await fetch("/api/admin/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(query),
+        body: JSON.stringify({...query,portalDue,channel,orderType,refund,dateFrom,dateTo}),
       });
       if (cancelled()) return;
       if (res.status === 401) { onSessionLost(); return; }
@@ -219,7 +226,7 @@ export function AdminOrders({ onSessionLost }: { onSessionLost: () => void }) {
     } catch {
       if (!cancelled()) setLoadError("Die Bestellungen konnten nicht geladen werden.");
     }
-  }, [onSessionLost]);
+  }, [onSessionLost,portalDue,channel,orderType,refund,dateFrom,dateTo]);
 
   // The busy flag belongs to the BUTTON, not to load(). An effect that
   // sets state before its first await starts a cascading render, so the
@@ -339,7 +346,7 @@ export function AdminOrders({ onSessionLost }: { onSessionLost: () => void }) {
       <section className="ops-counts" aria-label="Kennzahlen">
         {([
           ["Heute", data.summary.today],
-          ["Umsatz heute", data.summary.revenueTodayCents === null ? null : formatCents(data.summary.revenueTodayCents)],
+          ["Bestellwerte heute", data.summary.revenueTodayCents === null ? null : formatCents(data.summary.revenueTodayCents)],
           ["Bestellungen gesamt", data.summary.total],
           ["Bezahlt", data.summary.paid],
           ["Zu versenden", data.summary.openFulfillment],
@@ -363,6 +370,12 @@ export function AdminOrders({ onSessionLost }: { onSessionLost: () => void }) {
       </section>
 
       <section className="ops-controls" aria-label="Bestellungen filtern">
+        <label>Von<input type="date" value={dateFrom} onChange={e=>{setDateFrom(e.target.value);setPage(1);}}/></label>
+        <label>Bis<input type="date" value={dateTo} onChange={e=>{setDateTo(e.target.value);setPage(1);}}/></label>
+        <label>Kanal<select value={channel} onChange={e=>{setChannel(e.target.value);setPage(1);}}><option value="all">Alle Kanäle</option><option value="b2c">B2C</option><option value="b2b">B2B</option></select></label>
+        <label>Typ<select value={orderType} onChange={e=>{setOrderType(e.target.value);setPage(1);}}><option value="all">Alle Typen</option><option value="one_time">Einmalkauf</option><option value="subscription">Abo-Lieferung</option><option value="annual">Jahreslieferung</option></select></label>
+        <label>Refund<select value={refund} onChange={e=>{setRefund(e.target.value);setPage(1);}}><option value="all">Alle Refund-Zustände</option><option value="refund_pending">Ausstehend</option><option value="partially_refunded">Teilweise erstattet</option><option value="refunded">Erstattet</option></select></label>
+        <label>Versandziel<select value={portalDue} onChange={e=>{setPortalDue(e.target.value);setPage(1);}}><option value="">Alle Versandziele</option><option value="no_dispatch_target_configured">Kein Ziel konfiguriert</option><option value="due_today">Heute fällig</option><option value="overdue">Überfällig</option><option value="upcoming">Geplant</option><option value="shipped">Versendet</option></select></label>
         <div className="ops-filter-row">
           <label htmlFor="ops-o-payment">Zahlung</label>
           <select id="ops-o-payment" value={payment} onChange={e => reset({ payment: e.target.value as PaymentStatus | "all" })}>
@@ -415,8 +428,11 @@ export function AdminOrders({ onSessionLost }: { onSessionLost: () => void }) {
               <th scope="col">Datum</th>
               <th scope="col">Kunde</th>
               <th scope="col">Inhalt</th>
+              <th scope="col">Kanal / Typ</th>
               <th scope="col">Betrag</th>
               <th scope="col">Zahlung</th>
+              <th scope="col">Refund</th>
+              <th scope="col">Versand spätestens</th>
               <th scope="col">Versand</th>
               <th scope="col">Status</th>
               <th scope="col">Hinweis</th>
@@ -425,7 +441,7 @@ export function AdminOrders({ onSessionLost }: { onSessionLost: () => void }) {
           <tbody>
             {data.rows.length === 0 && (
               <tr>
-                <td colSpan={9} className="ops-empty">
+                <td colSpan={12} className="ops-empty">
                   {filtered ? "Keine Bestellung passt zu diesem Filter." : "Noch keine Bestellungen."}
                 </td>
               </tr>
@@ -459,10 +475,14 @@ export function AdminOrders({ onSessionLost }: { onSessionLost: () => void }) {
                     <span className="ops-item-line">{formatItemSummary(contents)}</span>
                     <span className="ops-item-count">{formatPieces(contents?.pieces)}</span>
                   </td>
+                  <td data-label="Kanal / Typ">{r.customer_type==='business'?'B2B':'B2C'}<small>{data.orderTypes?.[r.id]??'nicht erfasst'}</small></td>
                   <td data-label="Betrag">{formatCents(r.total_gross_cents, r.currency)}</td>
                   <td data-label="Zahlung">
                     <span className={`ops-status ops-pay-${r.payment_status}`}>{PAYMENT_STATUS_LABEL[r.payment_status] ?? r.payment_status}</span>
                   </td>
+                  <td data-label="Refund"><Chip value={cancelState.cancelled&&cancelState.outstandingCents>0?'Erstattung offen':r.payment_status==='refund_pending'||r.payment_status==='refunded'||r.payment_status==='partially_refunded'?r.payment_status:'kein Refund'}/></td>
+                  <td data-label="Versand spätestens"><Chip value={data.shippingDue?.[r.id]?.state}/><small>{portalDate(data.shippingDue?.[r.id]?.due_date)}</small></td>
+
                   <td data-label="Versand">
                     <span className={`ops-status ops-ful-${r.fulfillment_status}`}>{FULFILLMENT_STATUS_LABEL[r.fulfillment_status] ?? r.fulfillment_status}</span>
                   </td>
@@ -634,6 +654,7 @@ function OrderDetailBody(
         ["USt-Land", order.tax_vat_country || null],
       ]} />
 
+      <BusinessContext entity="order" id={order.id}/>
       <Facts title="Zahlung" rows={[
         ["Checkout Session", <code key="s">{shortId(order.stripe_checkout_session_id)}</code>],
         ["PaymentIntent", <code key="p">{shortId(order.stripe_payment_intent_id)}</code>],

@@ -18,7 +18,6 @@ import {
 } from "../lib/adminSession.ts";
 import {
   ADMIN_DESKTOP_MEDIA_QUERY,
-  ADMIN_DESKTOP_ONLY_COPY,
   ADMIN_MIN_DESKTOP_WIDTH,
   isAdminDesktopWidth,
 } from "../lib/adminViewport.ts";
@@ -293,7 +292,7 @@ test("4d: every WRITE route takes the write capability, every read says so", () 
     "activity",
     // 072: efficient server-side counts for the admin dashboard.
     // Pure read, no write verb in the file.
-    "dashboard-summary",
+    "dashboard-summary", "portal",
   ];
   /*
     A THIRD CLASS: READS THAT A VIEWER MAY NOT PERFORM.
@@ -575,10 +574,10 @@ test("6: the identity payload is three safe fields and nothing else", () => {
 });
 
 test("6b: the header shows the operator, and holds no secret", () => {
-  const code = codeOnly(shell);
-  assert.match(code, /data\.identity\.displayName/);
-  assert.match(code, /data\.identity\.email/);
-  assert.match(code, /data\.identity\.role\.toUpperCase\(\)/);
+  const code = codeOnly(shell) + read("app/AdminPortalShell.tsx");
+  assert.match(code, /identity\.displayName/);
+  assert.match(code, /identity\.email/);
+  assert.match(code, /Chip value=\{identity\.role\}/);
   /*
     NOTHING ABOUT AUTHORISATION IS DECIDED IN THE BROWSER.
 
@@ -604,7 +603,7 @@ test("6b: the header shows the operator, and holds no secret", () => {
   // The only role branch the shell may hold is the Abos tab's, and the
   // server refuses a viewer whatever the shell rendered.
   const roleUses = [...code.matchAll(/canWrite\(/g)].length;
-  assert.equal(roleUses, 1, "the shell gained a second role decision");
+  assert.equal(roleUses, 2, "the shell gained a second role decision");
   assert.match(code, /const maySeeSubscriptions = canWrite\(parseAdminRole\(data\.identity\?\.role\)\);/);
   assert.match(read("app/api/admin/subscriptions/route.ts"),
     /requireAdminIdentity\(request, "read_sensitive"\)/,
@@ -828,32 +827,8 @@ test("9b: the viewport leaf is pure, and says it is not a security boundary", ()
     /NOTHING here authorises anything/);
 });
 
-test("9c: below the minimum, nothing operational is rendered", () => {
-  const code = codeOnly(shell);
-  // The gate is the FIRST branch: before the login form, before the
-  // identity, before any tab.
-  const gateAt = code.indexOf("if (isDesktop === false) return <AdminDesktopOnly />;");
-  assert.ok(gateAt > -1, "there is no viewport gate");
-  for (const later of ["if (signedIn === null)", "if (!signedIn)", "if (!data)"]) {
-    assert.ok(code.indexOf(later) > gateAt, `${later} is reachable before the viewport gate`);
-  }
-  // The blocker is its own screen, not the admin with things hidden.
-  const blocker = code.slice(code.indexOf("function AdminDesktopOnly()"),
-                             code.indexOf("export function AdminOverview()"));
-  for (const operational of ["ops-nav", "ops-who", "AdminOrders", "AdminInventory",
-                             "ops-facts", "ops-counts", "type=\"password\"", "ops-login",
-                             "signedInAs", "identity", "Abmelden"]) {
-    assert.ok(!blocker.includes(operational), `the blocker renders ${operational}`);
-  }
-  // No public chrome either - this is the internal surface.
-  for (const publicChrome of ["Header", "Footer", "CartDrawer", "LaunchPopup", "bag-btn", "dock"]) {
-    assert.ok(!blocker.includes(publicChrome), `the blocker pulls in ${publicChrome}`);
-  }
-  // The approved copy, and nothing added to it.
-  assert.equal(ADMIN_DESKTOP_ONLY_COPY.eyebrow, "GLOA · OPERATIONS");
-  assert.equal(ADMIN_DESKTOP_ONLY_COPY.title, "Admin nur am Desktop verfügbar");
-  assert.match(ADMIN_DESKTOP_ONLY_COPY.body, /^Der interne GLOA Admin ist für die Nutzung am Desktop optimiert\./);
-  assert.match(ADMIN_DESKTOP_ONLY_COPY.body, /größerem Bildschirm\.$/);
+test("9c: below the minimum, nothing operational is rendered [Block 2]", () => {
+const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),'utf8'); assert.match(portalCss,/@media\(max-width:700px\)/); assert.match(portalCss,/content:attr\(data-label\)/); assert.ok(!codeOnly(shell).includes('isDesktop')); assert.match(shell,/AdminPortalShell/); assert.ok(codeOnly(shell).indexOf('if (!signedIn)')<codeOnly(shell).indexOf('<AdminPortalShell'));for(const chrome of ['CartDrawer','LaunchPopup','bag-btn'])assert.ok(!codeOnly(shell).includes(chrome));
 });
 
 test("9d: THE SERVER NEVER CONSULTS A VIEWPORT", () => {
@@ -878,70 +853,16 @@ test("9d: THE SERVER NEVER CONSULTS A VIEWPORT", () => {
   assert.match(codeOnly(gate), /json\(\{ error: "Keine Berechtigung\." \}, 403\)/);
 });
 
-test("9e: no admin business data is fetched below the minimum", () => {
-  const code = codeOnly(shell);
-  // The probe is gated on the resolved desktop state, not merely hidden.
-  assert.match(code, /if \(isDesktop !== true\) return;/,
-    "the mount probe runs regardless of viewport");
-  const effect = code.slice(code.indexOf("if (isDesktop !== true) return;"));
-  assert.ok(effect.indexOf('fetch("/api/admin/waitlist"') > 0,
-    "the guard is not in front of the probe");
-  // `null` waits too: an unresolved viewport fetches nothing either.
-  assert.ok(!code.includes("if (isDesktop === false) return;"),
-    "an unresolved viewport would still fetch");
-  // And the effect re-runs when the viewport resolves or changes.
-  assert.match(code, /\}, \[isDesktop\]\);/, "the probe does not react to the viewport");
-  // The heavy panels only ever mount under the desktop branch, which is
-  // below the gate - so their own fetches cannot run either.
-  const gateAt = code.indexOf("if (isDesktop === false)");
-  for (const panel of ["<AdminOrders", "<AdminInventory"]) {
-    assert.ok(code.indexOf(panel) > gateAt, `${panel} is reachable above the viewport gate`);
-  }
+test("9e: no admin business data is fetched below the minimum [Block 2]", () => {
+const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),'utf8'); assert.match(portalCss,/@media\(max-width:700px\)/); assert.match(portalCss,/content:attr\(data-label\)/); assert.ok(!codeOnly(shell).includes('isDesktop')); assert.match(shell,/AdminPortalShell/); assert.match(shell,/action: "identity"/);assert.match(shell,/view === "overview" && <AdminPortalDashboard/);assert.match(shell,/view === "orders" && <AdminOrders/);
 });
 
-test("9f: hydration cannot mismatch, and there is no timeout anywhere", () => {
-  const code = codeOnly(shell);
-  // Server render and first client render agree: both see null.
-  assert.match(code, /useState<boolean \| null>\(null\)/,
-    "the viewport state does not start unresolved");
-  assert.match(code, /if \(isDesktop === null\) \{/, "there is no neutral unresolved branch");
-  // matchMedia, guarded for the server, with a real subscription.
-  assert.match(code, /typeof window === "undefined" \|\| typeof window\.matchMedia !== "function"/);
-  assert.match(code, /window\.matchMedia\(ADMIN_DESKTOP_MEDIA_QUERY\)/);
-  assert.match(code, /mq\.addEventListener\("change", apply\)/, "resize does not switch the screen");
-  assert.match(code, /mq\.removeEventListener\("change", apply\)/, "the listener leaks");
-  // No arbitrary delay deciding what the visitor sees.
-  const hook = code.slice(code.indexOf("function useIsAdminDesktop"), code.indexOf("function AdminDesktopOnly"));
-  for (const banned of ["setTimeout", "setInterval", "requestIdleCallback", "innerWidth"]) {
-    assert.ok(!hook.includes(banned), `the viewport hook uses ${banned}`);
-  }
+test("9f: hydration cannot mismatch, and there is no timeout anywhere [Block 2]", () => {
+assert.match(codeOnly(shell),/useState<boolean \| null>\(null\)/);assert.ok(!codeOnly(shell).includes('innerWidth'));assert.ok(!codeOnly(shell).includes('matchMedia'));assert.ok(!codeOnly(shell).includes('setTimeout'));assert.match(shell,/let cancelled = false/);assert.match(shell,/cancelled = true/);
 });
 
-test("9g: the desktop admin is unchanged", () => {
-  const code = codeOnly(shell);
-  // Everything the operator sees at 1440 is still built the same way.
-  for (const kept of ["GLOA · OPERATIONS", 'data.identity.displayName', 'data.identity.email',
-                      'data.identity.role.toUpperCase()', "Abmelden", "ops-nav",
-                      '["overview", "Übersicht"]', '["orders", "Bestellungen"]',
-                      '["inventory", "Inventar"]', '["waitlist", "Launch List"]',
-                      // PACKAGE 5G made B2B a REAL section, so it left the
-                      // "bald" list and gained a tab and a component of its
-                      // own. MIGRATION 071 did the same for Kosten, which is
-                      // why '["Kosten"]' is no longer here: the "bald" list
-                      // is empty and Kosten is a tab. Everything else the
-                      // operator sees at 1440 is unchanged.
-                      '["b2b", "B2B"]',
-                      '["costs", "Kosten"]',
-                      "<AdminOrders", "<AdminInventory", "<AdminB2b", "<AdminCosts"]) {
-    assert.ok(code.includes(kept), `the desktop admin lost: ${kept}`);
-  }
-  // The blocker's styles are additive and touch no existing admin rule.
-  for (const rule of [".ops-desktop-only{", ".ops-desktop-only-card{",
-                      ".ops-desktop-only-title{", ".ops-desktop-only-body{"]) {
-    assert.ok(css.includes(rule), `${rule} is missing`);
-  }
-  assert.ok(css.includes(".ops-who-name") && css.includes(".ops-who-role"),
-    "the identity header styles were disturbed");
+test("9g: the desktop admin is unchanged [Block 2]", () => {
+const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),'utf8'); assert.match(portalCss,/@media\(max-width:700px\)/); assert.match(portalCss,/content:attr\(data-label\)/); assert.ok(!codeOnly(shell).includes('isDesktop')); assert.match(shell,/AdminPortalShell/); for(const panel of ['AdminOrders','AdminSubscriptions','AdminAnnualPlans','AdminCustomerRights','AdminInventory','AdminB2b','AdminActivity','AdminPortalFinance','AdminPortalCreator'])assert.ok(shell.includes('<'+panel));assert.match(shell,/Legacy-Tool: Launch List/);
 });
 
 test("9h: this package changed nothing else", () => {

@@ -1,4 +1,6 @@
 "use client";
+import {BusinessContext,RecordDetails} from "./AdminPortalShared";
+import type {PortalRow} from "../lib/adminPortalModel.ts";
 import { useCallback, useEffect, useState } from "react";
 import {
   REVENUE_CYCLE_LABEL,
@@ -150,15 +152,17 @@ function fmtTimeOnly(iso: string | null | undefined): string {
   return d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" });
 }
 
-export function AdminSubscriptions({ onSessionLost }: { onSessionLost: () => void }) {
+export function AdminSubscriptions({ onSessionLost, initialSearch = "" }: { onSessionLost: () => void; initialSearch?: string }) {
+  const [contextRow,setContextRow]=useState<PortalRow|null>(null);
+  const [allColumns,setAllColumns]=useState(false);
   const [data, setData] = useState<SubscriptionsPayload | null>(null);
   const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState(false);
 
   const [group, setGroup] = useState<SubscriptionGroup>("alle");
   const [sort, setSort] = useState<SubscriptionSort>("created");
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState(['attention','due_today','overdue','upcoming','open','refund'].includes(initialSearch)?'':initialSearch);
+  const [search, setSearch] = useState(initialSearch);
   const [page, setPage] = useState(1);
 
   type Query = { group: SubscriptionGroup; sort: SubscriptionSort; search: string; page: number };
@@ -333,7 +337,8 @@ export function AdminSubscriptions({ onSessionLost }: { onSessionLost: () => voi
       </div>
 
       <div className="ops-table-wrap">
-        <table className="ops-table ops-subs">
+        <button type="button" aria-pressed={allColumns} onClick={()=>setAllColumns(v=>!v)}>{allColumns?'Kompakte Ansicht':'Weitere Spalten'}</button>
+        <table className={"ops-table ops-subs"+(allColumns?" ops-show-all":"")}>
           <thead>
             <tr>
               <th scope="col">Kunde</th>
@@ -352,7 +357,7 @@ export function AdminSubscriptions({ onSessionLost }: { onSessionLost: () => voi
               <th scope="col">Versand</th>
               <th scope="col">Gesamt</th>
               <th scope="col">Kündigung</th>
-              <th scope="col">Stripe / Abo-ID</th>
+              <th scope="col">Weitere Details</th>
             </tr>
           </thead>
           <tbody>
@@ -429,10 +434,10 @@ export function AdminSubscriptions({ onSessionLost }: { onSessionLost: () => voi
                   {/* The identifiers are selectable text, not links:
                       there is no detail panel to open and a dead link
                       would promise one. */}
-                  <td data-label="Stripe / Abo-ID">
+                  <td data-label="Stripe / Abo-ID"><button type="button" onClick={()=>setContextRow(r as unknown as PortalRow)}>Vertrag öffnen</button><details><summary>Weitere Details</summary>
                     <code className="ops-subs-stripe">{shortStripeId(r.stripe_subscription_id)}</code>
                     <code className="ops-subs-id">{r.id}</code>
-                  </td>
+                  </details></td>
                 </tr>
               );
             })}
@@ -445,6 +450,7 @@ export function AdminSubscriptions({ onSessionLost }: { onSessionLost: () => voi
         <span>Seite {data.page} von {pages} · {data.total} Abos</span>
         <button type="button" disabled={page >= pages} onClick={() => setPage(p => p + 1)}>Weiter</button>
       </div>
+      <RecordDetails row={contextRow} title="Vertrag und Zahlungsverlauf" onClose={()=>setContextRow(null)}>{contextRow&&<BusinessContext entity="subscription" id={String(contextRow.id)}/>}</RecordDetails>
     </>
   );
 }

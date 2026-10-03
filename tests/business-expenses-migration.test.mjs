@@ -385,14 +385,8 @@ test("3d: the admin route is the only door, and it declares its capabilities", (
   assert.deepEqual(handlers, ["POST"]);
 });
 
-test("3e: no credential, and no finance read for a viewer", () => {
-  for (const secret of ["SUPABASE_SERVICE_ROLE_KEY", "service_role", "STRIPE_SECRET"]) {
-    assert.ok(!UI.includes(secret), `the finance screen names ${secret}`);
-  }
-  // The screen is mounted only behind the same predicate as the other
-  // commercial sections, which resolves to owner and admin.
-  assert.match(SHELL, /view === "costs" && maySeeSubscriptions && <AdminCosts/);
-  assert.match(SHELL, /key === "costs"\) && !maySeeSubscriptions \? null :/);
+test("3e: no credential, and no finance read for a viewer [Block 2]", () => {
+for(const secret of ['SUPABASE_SERVICE_ROLE_KEY','service_role','STRIPE_SECRET'])assert.ok(!UI.includes(secret));assert.match(SHELL,/view==='finance'&&maySeeSubscriptions&&<AdminPortalFinance/);const portal=readFileSync(new URL('../app/AdminPortalShell.tsx',import.meta.url),'utf8');assert.match(portal,/sensitive\|\|!\['finance','rights','b2b'\].includes\(key\)/); const finance=readFileSync(new URL('../app/AdminPortalFinance.tsx',import.meta.url),'utf8');assert.match(finance,/<AdminCosts onSessionLost=\{onSessionLost\} expensesOnly/);
 });
 
 test("3f: every mutation is audited under module finance, in the same transaction", () => {
@@ -1159,13 +1153,8 @@ test("8l: the screen filters the LEDGER and never the totals", () => {
    9. THE SCREEN IS REAL
    ══════════════════════════════════════════════════════════════ */
 
-test("9: the Kosten tab opens the finance screen and is no longer 'bald'", () => {
-  assert.match(SHELL, /\["costs", "Kosten"\]/);
-  assert.match(SHELL, /import \{ AdminCosts \} from "\.\/AdminCosts"/);
-  assert.match(SHELL, /costs: "Kosten"/);
-  // The "bald" list is empty rather than deleted.
-  assert.match(SHELL, /\(\[\] as string\[\]\)\.map/);
-  assert.ok(!/\["Kosten"\]\.map/.test(SHELL), "Kosten is still advertised as coming");
+test("9: the Kosten tab opens the finance screen and is no longer 'bald' [Block 2]", () => {
+const model=readFileSync(new URL('../lib/adminPortalModel.ts',import.meta.url),'utf8'); const portal=readFileSync(new URL('../app/AdminPortalShell.tsx',import.meta.url),'utf8'); const finance=readFileSync(new URL('../app/AdminPortalFinance.tsx',import.meta.url),'utf8');assert.match(model,/FINANCE_TABS.*AUSGABEN/);assert.match(finance,/<AdminCosts/);assert.doesNotMatch(portal,/coming soon|bald/i);
 });
 
 test("9b: it offers a period filter and a cost breakdown", () => {

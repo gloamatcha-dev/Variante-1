@@ -1,3 +1,5 @@
+import {readPortalPages} from '../../../../lib/adminPortalRead.ts';
+import {getOrderShippingDue} from '../../../../lib/shippingDue';
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { requireAdminIdentity } from "../../../../lib/adminActionRoute.ts";
 import {
@@ -81,6 +83,8 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: "Ungültige Anfrage." }, { status: 400 });
   }
 
+  const rawPortal=(body??{}) as Record<string,unknown>;
+  const portalDue=['due_today','overdue','upcoming','no_dispatch_target_configured','shipped'].includes(String(rawPortal.portalDue))?String(rawPortal.portalDue):'';
   const query = resolveOrdersQuery(body);
   const { from, to } = ordersPageRange(query);
 
@@ -89,7 +93,8 @@ export async function POST(request: Request): Promise<Response> {
   if (query.status !== "all") rows = rows.eq("status", query.status);
   if (query.payment !== "all") rows = rows.eq("payment_status", query.payment);
   if (query.fulfillment !== "all") rows = rows.eq("fulfillment_status", query.fulfillment);
-  if (query.search) {
+  if (query.search && /^[0-9a-f-]{36}$/i.test(query.search)) rows = rows.eq("id", query.search);
+  else if (query.search) {
     // The three fields the operator actually searches by: order number,
     // customer name and email.
     //
@@ -108,6 +113,27 @@ export async function POST(request: Request): Promise<Response> {
       `customer_snapshot->>email.ilike.%${query.search}%,` +
       `customer_snapshot->>name.ilike.%${query.search}%`
     );
+  }
+
+  if(rawPortal.channel==='b2b') rows=rows.eq('customer_type','business');
+  if(rawPortal.channel==='b2c') rows=rows.eq('customer_type','private');
+  if(typeof rawPortal.dateFrom==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(rawPortal.dateFrom))rows=rows.gte('created_at',rawPortal.dateFrom+'T00:00:00Z');
+  if(typeof rawPortal.dateTo==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(rawPortal.dateTo))rows=rows.lte('created_at',rawPortal.dateTo+'T23:59:59Z');
+  if(['refund_pending','partially_refunded','refunded'].includes(String(rawPortal.refund)))rows=rows.eq('payment_status',rawPortal.refund);
+  let matchingDueIds:string[]|null=null;
+  if(portalDue){
+    const candidates=await readPortalPages(supabase,'orders',q=>portalDue==='shipped'?q.not('shipped_at','is',null):q.is('shipped_at',null).neq('status','cancelled'));
+    matchingDueIds=[];
+    for(let i=0;i<candidates.length;i+=10){
+      const results=await Promise.all(candidates.slice(i,i+10).map(async candidate=>({id:String(candidate.id),due:await getOrderShippingDue(String(candidate.id))})));
+      if(results.some(result=>!result.due))return Response.json({error:'Versandstatus konnte nicht vollständig geprüft werden.'},{status:503});
+      matchingDueIds.push(...results.filter(result=>result.due?.state===portalDue).map(result=>result.id));
+    }
+    rows=rows.in('id',matchingDueIds.length?matchingDueIds:['00000000-0000-0000-0000-000000000000']);
+  }
+  if(['annual','subscription','one_time'].includes(String(rawPortal.orderType))){
+    const attempts=await readPortalPages(supabase,'checkout_attempts',q=>rawPortal.orderType==='annual'?q.not('annual_plan_id','is',null):rawPortal.orderType==='subscription'?q.not('subscription_id','is',null):q.is('annual_plan_id',null).is('subscription_id',null));
+    rows=rows.in('checkout_attempt_id',attempts.length?attempts.map(attempt=>attempt.id):['00000000-0000-0000-0000-000000000000']);
   }
 
   // ── THE INDEPENDENT READS ALL LEAVE AT ONCE ────────────────────────
@@ -248,8 +274,24 @@ export async function POST(request: Request): Promise<Response> {
       .reduce((sum, r) => sum + (typeof r.total_gross_cents === "number" ? r.total_gross_cents : 0), 0);
   }
 
+  const orderTypes:Record<string,string>={};
+  const ids=pageRows.map(row=>row.id).filter((id):id is string=>typeof id==='string');
+  if(ids.length){
+    const context=await supabase.from('orders').select('id,checkout_attempts(annual_plan_id,subscription_id)').in('id',ids);
+    if(!context.error)for(const value of (context.data??[]) as unknown as {id:string;checkout_attempts:{annual_plan_id?:string;subscription_id?:string}|null}[]){
+      const attempt=value.checkout_attempts;
+      orderTypes[value.id]=attempt?(attempt.annual_plan_id?'Jahreslieferung':attempt.subscription_id?'Abo-Lieferung':'Einmalkauf'):'nicht erfasst';
+    }
+  }
+  const shippingDue:Record<string,unknown>={};
+  await Promise.all(pageRows.map(async row=>{
+    if(typeof row.id==='string'){
+      try{shippingDue[row.id]=await getOrderShippingDue(row.id);}catch{shippingDue[row.id]=null;}
+    }
+  }));
   return Response.json(
     {
+      shippingDue, orderTypes,
       rows: pageRows as unknown[],
       itemSummaries,
       itemsCapped,

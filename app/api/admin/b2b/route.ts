@@ -125,7 +125,7 @@ export async function POST(request: Request): Promise<Response> {
     .not("plan_type", "is", null);
   rows = applyGroup(rows, b2bGroupFilter(query.group));
 
-  if (query.search) {
+  if (/^[0-9a-f-]{36}$/i.test(query.search)) {rows=rows.eq("id",query.search);} else if (query.search) {
     // The company the contract was signed with. Every character
     // PostgREST's or= grammar would read as syntax is already gone
     // (normaliseB2bSearch), so this interpolation can only carry a

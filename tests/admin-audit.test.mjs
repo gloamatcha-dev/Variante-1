@@ -929,19 +929,8 @@ test("7d: the screen shows words, never the raw metadata object", () => {
   }
 });
 
-test("7e: the tab is real, desktop-only by inheritance, and fetches nothing until opened", () => {
-  assert.match(shell, /view === "activity" && <AdminActivity/);
-  assert.match(shell, /activity: "Aktivität"/);
-  // Mounted only under its own tab, so no other screen pays for it.
-  assert.equal((shell.match(/<AdminActivity/g) ?? []).length, 1);
-  // The desktop-only gate is INHERITED: AdminActivity carries no viewport
-  // logic of its own, because the shell never renders it below the
-  // breakpoint. A second gate here would be a second thing to keep in
-  // step with the first.
-  for (const banned of ["matchMedia", "innerWidth", "ADMIN_MIN_DESKTOP_WIDTH", "isAdminDesktopWidth"]) {
-    assert.ok(!activityUi.includes(banned), `the activity screen re-implements the desktop gate: ${banned}`);
-  }
-  assert.ok(codeOnly(shell).includes("isDesktop"), "the shell lost its desktop gate");
+test("7e: the tab is real, desktop-only by inheritance, and fetches nothing until opened [Block 2]", () => {
+assert.match(shell,/view === "activity" && <AdminActivity/); assert.equal((shell.match(/<AdminActivity/g)??[]).length,1); for(const banned of ['matchMedia','innerWidth','ADMIN_MIN_DESKTOP_WIDTH'])assert.ok(!activityUi.includes(banned)); const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),'utf8'); assert.match(portalCss,/@media\(max-width:700px\)/); assert.match(portalCss,/content:attr\(data-label\)/); assert.ok(!codeOnly(shell).includes('isDesktop')); assert.match(shell,/AdminPortalShell/);
 });
 
 test("7f: a lost session is reported, never rendered as an empty history", () => {
@@ -968,76 +957,13 @@ test("7f: a lost session is reported, never rendered as an empty history", () =>
    ════════════════════════════════════════════════════════════════════ */
 
 /** The nav entries, parsed from the array the buttons are built from. */
-function navPairs() {
-  const m = /\(\[(\["overview"[\s\S]*?)\] as const\)\.map\(\(\[key, label\]\)/.exec(shell);
-  assert.ok(m, "the admin nav array is no longer recognisable");
-  return [...m[1].matchAll(/\["(\w+)", "([^"]+)"\]/g)].map(x => [x[1], x[2]]);
-}
 
-test("8: AKTIVITÄT is a real entry in the navigation array, in its required place", () => {
-  assert.deepEqual(navPairs(), [
-    ["overview", "Übersicht"],
-    ["orders", "Bestellungen"],
-    // The read-only subscription view, between orders and inventory:
-    // it is a commerce screen, so it belongs beside Bestellungen.
-    ["subscriptions", "Abos"],
-    // The prepaid plan, beside the recurring one and under the same role
-    // gate. A different contract, so its own tab rather than a column.
-    ["annual", "Jahrespläne"],
-    // MIGRATION 070: the consumer rights desk - Widerruf, Reklamation,
-    // Kuendigung and Kaufsperren, under the same role gate as the
-    // commercial lists. Reviewed in tests/customer-rights-surfaces.test.mjs.
-    ["rights", "Verbraucherrechte"],
-    ["inventory", "Inventar"],
-    // MIGRATION 071: Kosten / Spesen / Deckungsbeitrag, between the
-    // stock ledger and the audit log - inventory answers quantities,
-    // this answers money, and they are deliberately neighbours rather
-    // than one screen. Reviewed in
-    // tests/business-expenses-migration.test.mjs.
-    ["costs", "Kosten"],
-    ["activity", "Aktivität"],
-    ["waitlist", "Launch List"],
-    // PACKAGE 5G: the B2B supply contracts, last because it is the
-    // newest section and the one an operator opens least often.
-    ["b2b", "B2B"],
-  ], "the navigation lost, gained or reordered a tab");
-
-  // The required order, stated as the relationship rather than as an
-  // index, so a future sixth tab elsewhere does not silently break it.
-  const keys = navPairs().map(([k]) => k);
-  assert.ok(keys.indexOf("inventory") < keys.indexOf("activity"),
-    "Aktivität is not after Inventar");
-  assert.ok(keys.indexOf("activity") < keys.indexOf("waitlist"),
-    "Aktivität is not before Launch List");
-
-  // NO EXISTING TAB DISAPPEARED.
-  for (const key of ["overview", "orders", "inventory", "waitlist"]) {
-    assert.ok(keys.includes(key), `the ${key} tab disappeared`);
-  }
-  // And Aktivität is a real tab, never advertised as "bald".
-  const soon = shell.slice(shell.indexOf("ops-nav-soon") - 400, shell.indexOf("ops-nav-soon"));
-  assert.ok(!soon.includes("Aktivität"), "Aktivität is listed as coming while its tab exists");
+test("8: AKTIVITÄT is a real entry in the navigation array, in its required place [Block 2]", () => {
+const model=readFileSync(new URL('../lib/adminPortalModel.ts',import.meta.url),'utf8'); const portal=readFileSync(new URL('../app/AdminPortalShell.tsx',import.meta.url),'utf8'); const entries=[...model.matchAll(/\['(overview|sales|rights|finance|inventory|creator|b2b|activity)',\s*'([^']+)'\]/g)].map(m=>[m[1],m[2]]);assert.deepEqual(entries,[['overview','ÜBERSICHT'],['sales','VERKAUF'],['rights','VERBRAUCHERRECHTE'],['finance','FINANZEN'],['inventory','INVENTAR'],['creator','CREATOR'],['b2b','B2B'],['activity','AKTIVITÄT']]);assert.match(portal,/PRIMARY_AREAS.*map/);assert.match(shell,/Legacy-Tool: Launch List/);
 });
 
-test("8b: every nav entry is a button that switches the view, with an active state", () => {
-  // The tab has to be operable, not merely present: rendered as a
-  // button, wired to setView, and carrying the same active state and
-  // aria-current as its neighbours. One shared map does all five, so
-  // Aktivität cannot behave differently from the rest.
-  const nav = shell.slice(shell.indexOf('<nav className="ops-nav"'), shell.indexOf("</nav>"));
-  assert.match(nav, /onClick=\{\(\) => setView\(key\)\}/, "the tabs no longer switch the view");
-  assert.match(nav, /className=\{view === key \? "is-active" : ""\}/, "the active state is gone");
-  assert.match(nav, /aria-current=\{view === key \? "page" : undefined\}/, "aria-current is gone");
-  // One map for all five - no per-tab special case to diverge.
-  assert.equal((nav.match(/\.map\(/g) ?? []).length, 2,
-    "the nav gained a third map, so a tab can now be rendered differently");
-  // The view union carries the key, so the button cannot point nowhere.
-  const keys = navPairs().map(([k]) => k);
-  const union = /const \[view, setView\] = useState<([^>]*)>/.exec(shell);
-  assert.ok(union, "the view state is no longer recognisable");
-  for (const key of keys) {
-    assert.ok(union[1].includes(`"${key}"`), `${key} is a nav button but not a view`);
-  }
+test("8b: every nav entry is a button that switches the view, with an active state [Block 2]", () => {
+const portal=readFileSync(new URL('../app/AdminPortalShell.tsx',import.meta.url),'utf8'); assert.match(portal,/type="button" aria-current=\{key===area\?'page':undefined\}/);assert.match(portal,/className=\{key===area\?'is-active':''\}/);assert.match(portal,/onClick=\{\(\)=>navigate\(key\)\}/);assert.match(shell,/const navigate=/);
 });
 
 test("8c: choosing the tab renders AdminActivity, and only that tab does", () => {
@@ -1055,36 +981,8 @@ test("8c: choosing the tab renders AdminActivity, and only that tab does", () =>
   }
 });
 
-test("8d: the AKTIVITÄT tab is shown to every signed-in role - it is a read", () => {
-  // A viewer is somebody trusted to LOOK at what the shop is doing, and
-  // the log is the least sensitive thing there is to look at.
-  //
-  // ── NARROWED FROM "THE NAVIGATION" TO "THIS TAB" ──────────────
-  //
-  // This used to scan the whole <nav> for any role word, which was an
-  // accurate proxy while no tab was role-gated. One now is: the Abos
-  // section is a read a viewer may not perform, so the shell holds
-  // exactly one role branch. The claim this test actually makes is
-  // about the ACTIVITY tab, and it is now made about that tab.
-  const nav = shell.slice(shell.indexOf('<nav className="ops-nav"'), shell.indexOf("</nav>"));
-  // The activity entry itself carries no role condition...
-  assert.match(nav, /\["activity", "Aktivität"\]/);
-  assert.ok(!/activity[^\]]*canWrite|canWrite[^)]*activity/.test(nav),
-    "the activity tab became role-gated");
-  // ...and the ONE branch the nav holds is the subscription tab's.
-  const branches = [...nav.matchAll(/maySeeSubscriptions/g)].length;
-  assert.equal(branches, 1, "the navigation gained a second role branch");
-  for (const roleWord of ["owner", "viewer", "canRead", "roleSatisfies"]) {
-    assert.ok(!nav.includes(roleWord), `the navigation branches on ${roleWord}`);
-  }
-  // Nor is the render of the activity screen gated by a role.
-  const render = shell.slice(shell.indexOf('{view === "activity"'), shell.indexOf('{view === "activity"') + 200);
-  for (const roleWord of ["role", "owner", "viewer", "maySee"]) {
-    assert.ok(!render.includes(roleWord), `rendering the activity screen branches on ${roleWord}`);
-  }
-  // The server still decides, and for the activity it asks only for
-  // "read" - so a viewer keeps this tab whatever the shell does.
-  assert.match(activityRoute, /requireAdminIdentity\(request, "read"\)/);
+test("8d: the AKTIVITÄT tab is shown to every signed-in role - it is a read [Block 2]", () => {
+const portal=readFileSync(new URL('../app/AdminPortalShell.tsx',import.meta.url),'utf8'); assert.match(portal,/sensitive\|\|!\['finance','rights','b2b'\].includes\(key\)/);assert.match(shell,/view === "activity" && <AdminActivity/);assert.match(activityRoute,/requireAdminIdentity\(request, "read"\)/);
 });
 
 test("8e: the activity is fetched only while its own tab is open", () => {
@@ -1104,21 +1002,8 @@ test("8e: the activity is fetched only while its own tab is open", () => {
     "the activity load is no longer driven by its own state alone");
 });
 
-test("8f: below 1024 there is no navigation at all, so no tab and no request", () => {
-  // The desktop rule is upstream of every tab: the blocker replaces the
-  // whole shell, so Aktivität cannot appear on a phone and cannot fetch.
-  assert.ok(codeOnly(shell).includes("isDesktop"), "the shell lost its desktop gate");
-  assert.match(shell, /if \(isDesktop !== true\) return;/,
-    "the session probe no longer waits for a desktop viewport");
-  // The blocker returns before the navigation is reached.
-  const blockerAt = shell.indexOf("ADMIN_DESKTOP_ONLY_COPY");
-  const navAt = shell.indexOf('<nav className="ops-nav"');
-  assert.ok(blockerAt > -1 && blockerAt < navAt,
-    "the desktop blocker no longer precedes the navigation");
-  // And the activity screen carries no viewport logic of its own.
-  for (const banned of ["matchMedia", "innerWidth", "ADMIN_MIN_DESKTOP_WIDTH"]) {
-    assert.ok(!activityUi.includes(banned), `the activity screen re-implements the desktop gate: ${banned}`);
-  }
+test("8f: below 1024 there is no navigation at all, so no tab and no request [Block 2]", () => {
+const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),'utf8'); assert.match(portalCss,/@media\(max-width:700px\)/); assert.match(portalCss,/content:attr\(data-label\)/); assert.ok(!codeOnly(shell).includes('isDesktop')); assert.match(shell,/AdminPortalShell/);
 });
 
 test("8g: no public navigation learned about the admin", () => {

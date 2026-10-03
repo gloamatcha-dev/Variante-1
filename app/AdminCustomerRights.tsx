@@ -1,4 +1,5 @@
 "use client";
+import {BusinessContext,Chip} from './AdminPortalShared';
 
 import { useCallback, useEffect, useState } from "react";
 
@@ -68,12 +69,14 @@ const TIMELINESS_LABEL: Record<string, string> = {
   deadline_uncertain: "Frist unklar",
 };
 
-export function AdminCustomerRights({ onSessionLost }: { onSessionLost: () => void }) {
+export function AdminCustomerRights({ onSessionLost, initialSection, initialFocus = "" }: { onSessionLost: () => void; initialSection?: "widerruf" | "reklamation" | "kuendigung" | "sperren"; initialFocus?:string }) {
   const [data, setData] = useState<Payload>(EMPTY);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
+  const [loaded,setLoaded]=useState(false);
+  const [contextId,setContextId]=useState<string|null>(null);
   const [notice, setNotice] = useState("");
-  const [section, setSection] = useState<"widerruf" | "reklamation" | "kuendigung" | "sperren">("widerruf");
+  const [section, setSection] = useState<"widerruf" | "reklamation" | "kuendigung" | "sperren">(initialSection ?? "widerruf");
 
   const post = useCallback(async (body: Json): Promise<Json | null> => {
     const res = await fetch("/api/admin/customer-rights", {
@@ -108,7 +111,7 @@ export function AdminCustomerRights({ onSessionLost }: { onSessionLost: () => vo
   const reload = useCallback(async () => {
     setBusy(true); setError("");
     const json = await post({ action: "list" });
-    if (json) setData({ ...EMPTY, ...(json as Partial<Payload>) });
+    if (json) {setData({ ...EMPTY, ...(json as Partial<Payload>) });setLoaded(true);}
     setBusy(false);
   }, [post]);
 
@@ -123,7 +126,7 @@ export function AdminCustomerRights({ onSessionLost }: { onSessionLost: () => vo
     void (async () => {
       const json = await post({ action: "list" });
       if (cancelled) return;
-      if (json) setData({ ...EMPTY, ...(json as Partial<Payload>) });
+      if (json) {setData({ ...EMPTY, ...(json as Partial<Payload>) });setLoaded(true);}
       setBusy(false);
     })();
     return () => { cancelled = true; };
@@ -177,6 +180,8 @@ export function AdminCustomerRights({ onSessionLost }: { onSessionLost: () => vo
   const itemsOf = (orderId: unknown) =>
     typeof orderId === "string" ? data.orderItems.filter(i => i.order_id === orderId) : [];
 
+  const visibleCase=(row:Json)=>/^[0-9a-f-]{36}$/i.test(initialFocus)?row.id===initialFocus:initialFocus==='extraordinary'?row.termination_kind==='extraordinary'&&['submitted','under_review'].includes(String(row.case_state)):initialFocus==='refund'?['approved_for_payout','failed'].includes(String(row.refund_state)):initialFocus==='open'?!['closed','refunded','resolved'].includes(String(row.case_state)):true;
+  if(!loaded)return <section className="ops-panel" aria-busy={busy}>{error?<><p className="ops-error" role="alert">{error}</p><button type="button" onClick={()=>void reload()}>Erneut versuchen</button></>:<p role="status">Fälle werden geladen …</p>}</section>;
   return (
     <section className="ops-panel ops-customer-rights">
       <header className="ops-panel-head">
@@ -203,7 +208,7 @@ export function AdminCustomerRights({ onSessionLost }: { onSessionLost: () => vo
       {section === "widerruf" && (
         <div className="ops-list">
           {data.withdrawals.length === 0 && <p>Keine Widerrufsfälle.</p>}
-          {data.withdrawals.map(w => {
+          {data.withdrawals.filter(visibleCase).map(w => {
             const o = order(w.resolved_order_id) ?? {};
             const p = plan(w.resolved_annual_plan_id) ?? {};
             const items = itemsOf(w.resolved_order_id);
@@ -388,7 +393,7 @@ export function AdminCustomerRights({ onSessionLost }: { onSessionLost: () => vo
       {section === "reklamation" && (
         <div className="ops-list">
           {data.complaints.length === 0 && <p>Keine Reklamationen.</p>}
-          {data.complaints.map(c => {
+          {data.complaints.filter(visibleCase).map(c => {
             const id = String(c.id);
             return (
               <article key={id} className="ops-card">
@@ -424,11 +429,11 @@ export function AdminCustomerRights({ onSessionLost }: { onSessionLost: () => vo
       {section === "kuendigung" && (
         <div className="ops-list">
           {data.terminations.length === 0 && <p>Keine Kündigungen.</p>}
-          {data.terminations.map(t => {
+          {data.terminations.filter(visibleCase).map(t => {
             const id = String(t.id);
             return (
               <article key={id} className="ops-card">
-                <h3>{String(t.customer_name)} · {String(t.contract_reference)}</h3>
+                <h3>{String(t.customer_name)} · {String(t.contract_reference)}</h3><p className="portal-note">{t.resolved_annual_plan_id?(t.termination_kind==='extraordinary'?'Außerordentliche Jahresplan-Kündigung':'Ordentliche Jahresplan-Kündigung'):t.resolved_subscription_id?'Öffentliche Vertragskündigung eines 4-Wochen-Abos':'Öffentliche Vertragskündigung: Zuordnung offen'}</p>
                 <dl className="ops-facts">
                   <div><dt>E-Mail</dt><dd>{String(t.contact_email)}</dd></div>
                   <div><dt>Art</dt><dd>{t.termination_kind === "extraordinary" ? "außerordentlich" : "ordentlich"}</dd></div>
@@ -436,20 +441,25 @@ export function AdminCustomerRights({ onSessionLost }: { onSessionLost: () => vo
                   <div><dt>Gewünschtes Ende</dt><dd>{dt(t.requested_end_at)}</dd></div>
                   <div><dt>Grund</dt><dd>{String(t.extraordinary_reason ?? "–")}</dd></div>
                   <div><dt>Eingegangen</dt><dd>{dt(t.submitted_at)}</dd></div>
-                  <div><dt>Status</dt><dd>{String(t.case_state)}</dd></div>
+                  <div><dt>Entscheidungsstatus</dt><dd><Chip value={t.case_state}/></dd></div><div><dt>Refund</dt><dd>Separate Entscheidung, keine automatische Erstattung</dd></div><div><dt>Interne Notiz</dt><dd>{String(t.internal_note??"nicht erfasst")}</dd></div>
                 </dl>
+                {(typeof t.resolved_annual_plan_id==='string'||typeof t.resolved_subscription_id==='string')&&<><button type="button" onClick={()=>setContextId(contextId===id?null:id)}>Vertrag und Aktivität öffnen</button>{contextId===id&&<BusinessContext entity={t.resolved_annual_plan_id?'annual_plan':'subscription'} id={String(t.resolved_annual_plan_id??t.resolved_subscription_id)}/>}</>}
                 <div className="ops-actions">
-                  {["under_review", "acknowledged_ends_automatically",
-                    "scheduled", "effective", "rejected", "closed"].map(s => (
-                    <button key={s} type="button" disabled={busy}
-                      onClick={() => void act({ action: "review_termination", terminationId: id, caseState: s }, "Kündigung")}>
-                      {s}
-                    </button>
-                  ))}
+                  {t.resolved_annual_plan_id ? (t.termination_kind === "extraordinary" ? [
+                    ["accept_extraordinary", "Außerordentlich annehmen"], ["reject_extraordinary", "Ablehnen"], ["close", "Fall schließen"]
+                  ] : [["note_ordinary", "Kündigung vormerken"], ["close", "Fall schließen"]]).map(([decision,title]) => (
+                    <button key={decision} type="button" disabled={busy} onClick={() => {
+                      if(window.confirm(decision==='accept_extraordinary'?'Plan beenden und zukünftige offene Lieferungen stoppen? Es wird keine Erstattung ausgelöst.':'Entscheidung verbindlich speichern?'))
+                        void act({action:"decide_annual_termination",terminationId:id,decision},"Kündigung");
+                    }}>{title}</button>
+                  )) : t.resolved_subscription_id ? <button type="button" disabled={busy} onClick={() => {
+                    if(window.confirm('Öffentliche Vertragskündigung verbindlich ausführen? Der Server bestimmt das wirksame Ende.'))
+                      void act({action:"execute_subscription_termination",terminationId:id},"Vertragskündigung");
+                  }}>Vertragskündigung ausführen</button> : <p className="ops-note">Vertrag noch nicht eindeutig zugeordnet. Keine Vertragswirkung ausführbar.</p>}
+
                 </div>
                 <p className="ops-note">
-                  Eine Kündigung löst keine Erstattung aus. Ein 4-Wochen-Abo wird über die bestehende
-                  Abo-Kündigung beendet, nicht hier.
+                  Kündigung und Erstattung sind getrennte Entscheidungen. Bei ordentlicher Jahreskündigung laufen bezahlte Lieferungen bis zum regulären Vertragsende weiter. Die öffentliche Vertragskündigung ist vom normalen Kündigungsweg im Kundenkonto getrennt.
                 </p>
               </article>
             );

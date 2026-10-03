@@ -162,7 +162,8 @@ export async function POST(request: Request): Promise<Response> {
   // ── WAVE 1: the page, the four counts, and the revenue ─────────────
   let rows = supabase.from("subscriptions").select(SUBSCRIPTION_LIST_COLUMNS, { count: "exact" });
   rows = applyGroup(rows, subscriptionGroupFilter(query.group));
-  if (query.search) {
+  if (query.search && /^[0-9a-f-]{36}$/i.test(query.search)) rows = rows.eq("id", query.search);
+  else if (query.search) {
     // The three things an operator searches a subscription by: the
     // customer's address, their name, and the Stripe subscription id
     // they are staring at in the Stripe dashboard.

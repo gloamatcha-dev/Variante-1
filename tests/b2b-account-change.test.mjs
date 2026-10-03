@@ -1256,7 +1256,7 @@ test("66: it takes the read_sensitive capability - never a viewer", () => {
     "the gate runs after the database client is built");
   // The UI hides the tab behind the same predicate.
   const shell = read("app/AdminOverview.tsx");
-  assert.match(shell, /key === "b2b" \|\| key === "rights" \|\| key === "costs"\) && !maySeeSubscriptions \? null :/);
+  const portal=readFileSync(new URL('../app/AdminPortalShell.tsx',import.meta.url),'utf8');assert.match(portal,/sensitive\|\|!\['finance','rights','b2b'\].includes\(key\)/);
   assert.match(shell, /view === "b2b" && maySeeSubscriptions && <AdminB2b/);
 });
 

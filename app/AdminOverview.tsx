@@ -1,18 +1,23 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import './admin-portal.css';
+import {AdminPortalShell} from './AdminPortalShell';
+import {AdminPortalDashboard} from './AdminPortalDashboard';
+import {AdminPortalFinance} from './AdminPortalFinance';
+import {AdminPortalCreator} from './AdminPortalCreator';
+import {AdminPortalInventoryWarnings} from './AdminPortalInventoryWarnings';
+import {Tabs} from './AdminPortalShared';
+import {SALES_TABS,type PortalArea,type PortalRow} from '../lib/adminPortalModel.ts';
 import { AdminOrders } from "./AdminOrders";
 import { AdminSubscriptions } from "./AdminSubscriptions";
 import { AdminAnnualPlans } from "./AdminAnnualPlans";
 import { AdminCustomerRights } from "./AdminCustomerRights";
-import { AdminCosts } from "./AdminCosts";
+
 import { AdminB2b } from "./AdminB2b";
 import { AdminInventory } from "./AdminInventory";
 import { WAITLIST_FILTERS, type WaitlistFilter } from "../lib/adminWaitlistQuery";
 import { AdminActivity } from "./AdminActivity";
-import {
-  ADMIN_DESKTOP_MEDIA_QUERY,
-  ADMIN_DESKTOP_ONLY_COPY,
-} from "../lib/adminViewport.ts";
+
 // The SAME predicate the subscription route gates on, from the same
 // zero-import leaf. The screen must not decide for itself who may look:
 // a second rule here would be a second answer, and the two would drift.
@@ -119,61 +124,6 @@ function consentShort(version: string): string {
   return version.slice(-6);
 }
 
-/**
- * IS THIS A DESKTOP? null UNTIL THE CLIENT HAS ACTUALLY LOOKED.
- *
- * Three states, and the third is the one that matters:
- *
- *   null   nobody has measured yet - the server render and the FIRST
- *          client render. Both produce the same markup, so there is no
- *          hydration mismatch, and nothing is fetched or flashed.
- *   false  a small viewport. The blocker, and no admin data.
- *   true   the operations screen, exactly as before.
- *
- * matchMedia rather than window.innerWidth: the browser evaluates the
- * same query the stylesheet would, it reports changes without a resize
- * listener of our own, and there is no timeout anywhere - the value is
- * either known or honestly unknown.
- */
-function useIsAdminDesktop(): boolean | null {
-  const [isDesktop, setIsDesktop] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    // Guarded because this file also renders on the server, where
-    // matchMedia does not exist.
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-    const mq = window.matchMedia(ADMIN_DESKTOP_MEDIA_QUERY);
-    const apply = () => setIsDesktop(mq.matches);
-    apply();
-    // Resizing across the boundary switches the screen immediately -
-    // no refresh, in either direction.
-    mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
-  }, []);
-
-  return isDesktop;
-}
-
-/**
- * What a viewport below the minimum gets INSTEAD of the admin.
- *
- * Its own screen rather than the admin with things hidden: nothing
- * operational is rendered, so there is nothing to reveal with a
- * stylesheet. No public header, no footer, no cart, no launch popup -
- * this is the internal surface, not the shop.
- */
-function AdminDesktopOnly() {
-  return (
-    <main className="ops ops-desktop-only">
-      <div className="ops-desktop-only-card">
-        <p className="ops-eyebrow">{ADMIN_DESKTOP_ONLY_COPY.eyebrow}</p>
-        <h1 className="ops-desktop-only-title">{ADMIN_DESKTOP_ONLY_COPY.title}</h1>
-        <p className="ops-desktop-only-body">{ADMIN_DESKTOP_ONLY_COPY.body}</p>
-      </div>
-    </main>
-  );
-}
-
 export function AdminOverview() {
   // WHICH SECTION IS OPEN. The waitlist screen this file has always
   // been is now one of several, and it is unchanged - it simply renders
@@ -187,9 +137,21 @@ export function AdminOverview() {
   // that says it is not here yet.
   // BEFORE ANY ADMIN STATE. Whether this viewport may operate the admin
   // decides whether the data below is ever asked for.
-  const isDesktop = useIsAdminDesktop();
 
-  const [view, setView] = useState<"overview" | "orders" | "subscriptions" | "annual" | "rights" | "inventory" | "costs" | "activity" | "waitlist" | "b2b">("overview");
+
+  const [view, setView] = useState<"overview" | "orders" | "subscriptions" | "annual" | "rights" | "inventory" | "costs" | "activity" | "waitlist" | "b2b" | "finance" | "creator">("overview");
+  const [salesTab,setSalesTab]=useState('BESTELLUNGEN');
+  const [financeTab,setFinanceTab]=useState('ÜBERSICHT');
+  const [creatorTab,setCreatorTab]=useState('ÜBERSICHT');
+  const [target,setTarget]=useState('');
+  const [rightsSection,setRightsSection]=useState<"widerruf"|"reklamation"|"kuendigung"|"sperren">("widerruf");
+  const navigate=(area:PortalArea,tab?:string,filter?:string)=>{
+    setTarget(filter??'');
+    if(area==='sales'){const next=tab??'BESTELLUNGEN';setSalesTab(next);setView(next==='ABOS'?'subscriptions':next==='JAHRESPLÄNE'?'annual':'orders');}
+    else if(area==='finance'){setFinanceTab(tab??'ÜBERSICHT');setView('finance');}
+    else if(area==='creator'){setCreatorTab(tab??'ÜBERSICHT');setView('creator');}
+    else {if(area==='rights'&&['widerruf','reklamation','kuendigung','sperren'].includes(tab??''))setRightsSection(tab as 'widerruf'|'reklamation'|'kuendigung'|'sperren');setView(area);}
+  };
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -197,6 +159,7 @@ export function AdminOverview() {
   const [busy, setBusy] = useState(false);
 
   const [data, setData] = useState<Payload | null>(null);
+  useEffect(()=>{const lost=()=>{setSignedIn(false);setData(null);};window.addEventListener('gloa-admin-session-lost',lost);return()=>window.removeEventListener('gloa-admin-session-lost',lost);},[]);
   const [filter, setFilter] = useState<WaitlistFilter>("all");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -207,6 +170,7 @@ export function AdminOverview() {
     // this, and a synchronous setState inside an effect starts a
     // cascading render - so the previous error is cleared on the way out
     // of each branch instead.
+    try {
     const res = await fetch("/api/admin/waitlist", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -219,11 +183,13 @@ export function AdminOverview() {
     }
     if (!res.ok) {
       setLoadError("Die Daten konnten nicht geladen werden.");
-      return;
+      return false;
     }
     setData((await res.json()) as Payload);
     setSignedIn(true);
     setLoadError("");
+    return true;
+    } catch {setLoadError("Die Launch List konnte nicht geladen werden.");return false;}
   }, []);
 
   // One probe on mount decides which screen to show. A 401 is the normal
@@ -234,20 +200,13 @@ export function AdminOverview() {
   // visitor who navigates away mid-request does not have state written
   // into an unmounted component.
   useEffect(() => {
-    // NOT A REQUEST UNTIL THIS VIEWPORT MAY OPERATE THE ADMIN.
-    //
-    // The blocker is not a stylesheet over loaded content: below the
-    // minimum width the probe never runs, so no admin business data is
-    // requested and none is in the page to be revealed. `null` waits
-    // too - an unresolved viewport fetches nothing either.
-    if (isDesktop !== true) return;
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/admin/waitlist", {
+        const res = await fetch("/api/admin/portal", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ filter: "all", search: "", page: 1 }),
+          body: JSON.stringify({ action: "identity" }),
         });
         if (cancelled) return;
         if (res.status === 401) {
@@ -268,7 +227,7 @@ export function AdminOverview() {
       }
     })();
     return () => { cancelled = true; };
-  }, [isDesktop]);
+  }, []);
 
   const submitLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -291,7 +250,9 @@ export function AdminOverview() {
       }
       // The password never stays in memory longer than the request.
       setPassword("");
-      await load({ filter: "all", search: "", page: 1 });
+      const probe=await fetch("/api/admin/portal",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"identity"})});
+      if(!probe.ok)throw new Error("Identität konnte nicht geladen werden");
+      setData(await probe.json());setSignedIn(true);
     } catch {
       setLoginError("Anmeldung fehlgeschlagen.");
     } finally {
@@ -323,22 +284,13 @@ export function AdminOverview() {
   // reached: not the login form (there is nothing to sign in TO here),
   // not the identity, not a tab, not a count. An existing session makes
   // no difference - a valid cookie on a phone still gets this screen.
-  if (isDesktop === false) return <AdminDesktopOnly />;
-
-  // Viewport not measured yet: the server render and the first client
-  // render both land here, identical, so hydration matches. Neutral and
-  // minimal rather than a flash of Orders.
-  if (isDesktop === null) {
-    return <main className="ops" aria-busy="true" />;
-  }
-
   if (signedIn === null) {
     return <main className="ops"><p className="ops-loading">Wird geladen…</p></main>;
   }
 
   if (!signedIn) {
     return (
-      <main className="ops ops-login">
+      <main className="ops portal portal-login">
         <form className="ops-login-card" onSubmit={submitLogin}>
           <p className="ops-eyebrow">GLOA</p>
           <h1 className="ops-login-title">Interner Bereich</h1>
@@ -360,16 +312,16 @@ export function AdminOverview() {
   }
 
   if (!data) {
-    return <main className="ops"><p className="ops-loading">{loadError || "Wird geladen…"}</p></main>;
+    return <main className="ops portal portal-login"><div role="alert"><p>{loadError || "Wird geladen…"}</p><button type="button" onClick={()=>window.location.reload()}>Erneut versuchen</button></div></main>;
   }
 
-  const pages = Math.max(1, Math.ceil(data.total / data.pageSize));
+  const pages = Math.max(1, Math.ceil((data.total??0) / (data.pageSize??25)));
   const blockers: string[] = [];
-  if (!data.launch.migrationsApplied) blockers.push("Migration 045/046 nicht angewendet");
-  if (data.launch.shopStatus !== "live") blockers.push(`Shop ist ${data.launch.shopStatus}`);
-  if (data.counts.confirmed === 0) blockers.push("kein bestätigter Kontakt");
+  if (data.launch && !data.launch.migrationsApplied) blockers.push("Migration 045/046 nicht angewendet");
+  if (data.launch && data.launch.shopStatus !== "live") blockers.push(`Shop ist ${data.launch.shopStatus}`);
+  if (data.counts?.confirmed === 0) blockers.push("kein bestätigter Kontakt");
 
-  const TITLE = { overview: "Übersicht", orders: "Bestellungen", subscriptions: "Abos", annual: "Jahrespläne", rights: "Verbraucherrechte", inventory: "Inventar", costs: "Kosten", activity: "Aktivität", waitlist: "Launch List", b2b: "B2B" } as const;
+
 
   /*
     MAY THIS OPERATOR OPEN THE ABOS TAB?
@@ -389,60 +341,13 @@ export function AdminOverview() {
   const maySeeSubscriptions = canWrite(parseAdminRole(data.identity?.role));
 
   return (
-    <main className="ops">
-      <header className="ops-head">
-        <div>
-          <p className="ops-eyebrow">GLOA · OPERATIONS</p>
-          <h1 className="ops-title">{TITLE[view]}</h1>
-        </div>
-        <div className="ops-head-right">
-          {/* WHO IS SIGNED IN. The name the admin_users row carries, the
-              address under it, and the role as a quiet badge. Falls back
-              to the address alone if identity is ever absent, so the
-              header can never render empty. */}
-          <span className="ops-who">
-            {data.identity ? (
-              <>
-                <strong className="ops-who-name">{data.identity.displayName}</strong>
-                <span className="ops-who-mail">{data.identity.email}</span>
-                <span className="ops-who-role">{data.identity.role.toUpperCase()}</span>
-              </>
-            ) : data.signedInAs}
-          </span>
-          <button type="button" className="ops-signout" onClick={signOut}>Abmelden</button>
-        </div>
-      </header>
-
-      <nav className="ops-nav" aria-label="Bereiche">
-        {([["overview", "Übersicht"], ["orders", "Bestellungen"], ["subscriptions", "Abos"], ["annual", "Jahrespläne"], ["rights", "Verbraucherrechte"], ["inventory", "Inventar"], ["costs", "Kosten"], ["activity", "Aktivität"], ["waitlist", "Launch List"], ["b2b", "B2B"]] as const).map(([key, label]) => (
-          // The array stays the full list of sections that EXIST; this
-          // decides which of them this operator is offered. A tab the
-          // role may not open renders nothing at all - not a disabled
-          // button, which would still announce the section.
-          (key === "subscriptions" || key === "annual" || key === "b2b" || key === "rights" || key === "costs") && !maySeeSubscriptions ? null : (
-          <button
-            key={key}
-            type="button"
-            className={view === key ? "is-active" : ""}
-            aria-current={view === key ? "page" : undefined}
-            onClick={() => setView(key)}
-          >
-            {label}
-          </button>
-          )
-        ))}
-        {/* Named, not faked. What is left here opens nothing and says so,
-            because a tab that leads to an empty screen costs more trust
-            than an honest "bald". B2B stopped being one of these in
-            Package 5G and KOSTEN stopped being one when migration 071
-            gave it a table to read - so the list is empty, which is the
-            point: nothing is being promised that does not open. */}
-        {([] as string[]).map((label) => (
-          <span className="ops-nav-soon" key={label}>{label}<i>bald</i></span>
-        ))}
-      </nav>
-
-      {view === "orders" && <AdminOrders onSessionLost={() => setSignedIn(false)} />}
+    <main className="ops portal">
+      <AdminPortalShell area={view==='orders'||view==='subscriptions'||view==='annual'?'sales':view==='costs'?'finance':view==='waitlist'?'overview':view} identity={(data.identity??{email:data.signedInAs}) as unknown as PortalRow} navigate={navigate} signOut={()=>void signOut()}>
+      {loadError&&view!=='waitlist'&&<p role="alert" className="portal-error">{loadError}</p>}
+      {(view==='orders'||view==='subscriptions'||view==='annual')&&<><Tabs items={maySeeSubscriptions?SALES_TABS:['BESTELLUNGEN']} value={salesTab} onChange={tab=>navigate('sales',tab)}/><p className="portal-note">Abos laufen alle 4 Wochen. Jahrespläne sind vorausbezahlte Verträge mit eigenem Lieferplan.</p></>}
+      {view==='finance'&&maySeeSubscriptions&&<AdminPortalFinance key={target} initialFilter={target} tab={financeTab} onTab={setFinanceTab} onSessionLost={()=>setSignedIn(false)} onCreator={()=>navigate("creator","AUSZAHLUNGEN")}/>}
+      {view==='creator'&&<AdminPortalCreator key={target} tab={creatorTab} onTab={setCreatorTab} initialFocus={target}/>}
+      {view === "orders" && <AdminOrders onSessionLost={() => setSignedIn(false)} key={target} initialSearch={target} />}
 
       {/* MOUNTED ONLY WHEN ITS TAB IS OPEN, like the activity log below
           and for the same reason: the overview and the orders screen
@@ -455,7 +360,7 @@ export function AdminOverview() {
           tab is the only caller of setView("subscriptions") - but the
           component is what issues the request, so the guard belongs on
           the mount as well as on the button. */}
-      {view === "subscriptions" && maySeeSubscriptions && <AdminSubscriptions onSessionLost={() => setSignedIn(false)} />}
+      {view === "subscriptions" && maySeeSubscriptions && <AdminSubscriptions onSessionLost={() => setSignedIn(false)} key={target} initialSearch={target} />}
 
       {/* KOSTEN / SPESEN / DECKUNGSBEITRAG. Mounted only when its tab is
           open, like every screen here, and under the same role gate as
@@ -467,52 +372,37 @@ export function AdminOverview() {
           removed - and every one of them goes through migration 071's
           SECURITY DEFINER writers, which audit themselves in the same
           transaction. */}
-      {view === "costs" && maySeeSubscriptions && <AdminCosts onSessionLost={() => setSignedIn(false)} />}
+
 
       {/* The prepaid plan, under the same role gate and mounted only
           when open. Read only - /api/admin/annual-plans has no write
           verb to offer an action with. */}
-      {view === "annual" && maySeeSubscriptions && <AdminAnnualPlans onSessionLost={() => setSignedIn(false)} />}
+      {view === "annual" && maySeeSubscriptions && <AdminAnnualPlans onSessionLost={() => setSignedIn(false)} key={target} initialSearch={target} onTermination={id=>navigate("rights","kuendigung",id)} />}
 
       {/* THE CONSUMER RIGHTS DESK. Under the same role gate as the two
           commercial lists and mounted only when open. Unlike them it DOES
           offer actions - a withdrawal case is worked, not just read - but
           every one of them goes through migration 070's audited SQL
           writers, never through a write in the route. */}
-      {view === "rights" && maySeeSubscriptions && <AdminCustomerRights onSessionLost={() => setSignedIn(false)} />}
+      {view === "rights" && maySeeSubscriptions && <AdminCustomerRights onSessionLost={() => setSignedIn(false)} key={target} initialSection={rightsSection} initialFocus={target} />}
 
       {/* PACKAGE 5G: the B2B supply contracts, under the SAME role gate
           as the two commercial lists above and mounted only when open.
           Read only - /api/admin/b2b has no write verb to offer an
           action with, and every B2B write keeps its single existing
           home. */}
-      {view === "b2b" && maySeeSubscriptions && <AdminB2b onSessionLost={() => setSignedIn(false)} />}
+      {view === "b2b" && maySeeSubscriptions && <AdminB2b onSessionLost={() => setSignedIn(false)} key={target} initialSearch={target} />}
 
       {view === "inventory" && <AdminInventory onSessionLost={() => setSignedIn(false)} />}
+      {view === "inventory"&&target==='warnings'&&<AdminPortalInventoryWarnings/>}
 
       {/* MOUNTED ONLY WHEN ITS TAB IS OPEN, so the overview, the orders
           screen and the inventory never pay for a query nobody asked
           for. Closing the tab unmounts it; nothing keeps polling. */}
       {view === "activity" && <AdminActivity onSessionLost={() => setSignedIn(false)} />}
 
-      {view === "overview" && (
-        <section className="ops-panel" aria-label="Operations">
-          <p className="ops-note">
-            Bestellungen, Umsatz und Versandstatus stehen unter <strong>Bestellungen</strong>.
-            {/* Named only for the roles that have the tab, so a viewer is
-                not pointed at a section they cannot open. */}
-            {maySeeSubscriptions && <> Laufende Abos unter <strong>Abos</strong> – nur zur Ansicht.</>}
-            {" "}Warenbestand und Bewegungen unter <strong>Inventar</strong>.
-            Die Launch List liegt unter <strong>Launch List</strong>.
-          </p>
-          <dl className="ops-facts">
-            <div><dt>Shop</dt><dd>{data.launch.shopStatus}</dd></div>
-            <div><dt>Launch geplant</dt><dd>{fmtDate(data.launch.plannedIso)}</dd></div>
-            <div><dt>Launch List bestätigt</dt><dd>{data.counts.confirmed}</dd></div>
-            <div><dt>Versandfreigabe</dt><dd>{blockers.length === 0 ? "bereit" : "gesperrt"}</dd></div>
-          </dl>
-        </section>
-      )}
+      {view === "overview" && <AdminPortalDashboard navigate={navigate}/>}
+      <div className="portal-legacy"><button type="button" onClick={()=>{if(view==='waitlist')setView('overview');else void load({filter:'all',search:'',page:1}).then(ok=>{if(ok)setView('waitlist');});}}>{view==='waitlist'?'Zur Operations-Übersicht':'Legacy-Tool: Launch List'}</button></div>
 
       {view === "waitlist" && <>
 
@@ -627,6 +517,7 @@ export function AdminOverview() {
         </button>
       </nav>
       </>}
+      </AdminPortalShell>
     </main>
   );
 }

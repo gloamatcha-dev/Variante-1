@@ -1,4 +1,6 @@
 "use client";
+import {BusinessContext,RecordDetails} from "./AdminPortalShared";
+import type {PortalRow} from "../lib/adminPortalModel.ts";
 import { useCallback, useEffect, useState } from "react";
 import {
   ANNUAL_GROUPS,
@@ -50,6 +52,10 @@ import {
  */
 
 type AnnualRow = {
+  schedule_model?:string;
+  termination_effect?:string|null;
+  termination_request_id?:string|null;
+  internal_notification_status?:string|null;
   id: string;
   user_id: string | null;
   variant_id: string | null;
@@ -139,15 +145,17 @@ function paymentLabel(raw: string): string {
   return parsed ? ANNUAL_PAYMENT_STATUS_LABEL[parsed] : raw;
 }
 
-export function AdminAnnualPlans({ onSessionLost }: { onSessionLost: () => void }) {
+export function AdminAnnualPlans({ onSessionLost, initialSearch = "", onTermination }: { onSessionLost: () => void; initialSearch?: string;onTermination?:(id:string)=>void }) {
+  const [contextRow,setContextRow]=useState<PortalRow|null>(null);
+  const [allColumns,setAllColumns]=useState(false);
   const [data, setData] = useState<AnnualPayload | null>(null);
   const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState(false);
 
   const [group, setGroup] = useState<AnnualGroup>("alle");
   const [sort, setSort] = useState<AnnualSort>("purchased");
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState(['attention','due_today','overdue','upcoming','open','refund'].includes(initialSearch)?'':initialSearch);
+  const [search, setSearch] = useState(initialSearch==='upcoming'?'':initialSearch);
   const [page, setPage] = useState(1);
 
   type Query = { group: AnnualGroup; sort: AnnualSort; search: string; page: number };
@@ -160,7 +168,7 @@ export function AdminAnnualPlans({ onSessionLost }: { onSessionLost: () => void 
       const res = await fetch("/api/admin/annual-plans", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(query),
+        body: JSON.stringify({...query,portalFocus:initialSearch==='upcoming'?'upcoming':''}),
       });
       if (cancelled()) return;
       if (res.status === 401) { onSessionLost(); return; }
@@ -176,7 +184,7 @@ export function AdminAnnualPlans({ onSessionLost }: { onSessionLost: () => void 
     } catch {
       if (!cancelled()) setLoadError("Die Jahrespläne konnten nicht geladen werden.");
     }
-  }, [onSessionLost]);
+  }, [onSessionLost,initialSearch]);
 
   const refresh = useCallback(async (query: Query) => {
     setBusy(true);
@@ -299,7 +307,8 @@ export function AdminAnnualPlans({ onSessionLost }: { onSessionLost: () => void 
       </div>
 
       <div className="ops-table-wrap">
-        <table className="ops-table ops-subs ops-annual">
+        <button type="button" aria-pressed={allColumns} onClick={()=>setAllColumns(v=>!v)}>{allColumns?'Kompakte Ansicht':'Weitere Spalten'}</button>
+        <table className={"ops-table ops-subs ops-annual"+(allColumns?" ops-show-all":"")}>
           <thead>
             <tr>
               <th scope="col">Kunde</th>
@@ -317,7 +326,7 @@ export function AdminAnnualPlans({ onSessionLost }: { onSessionLost: () => void 
               <th scope="col">Versand</th>
               <th scope="col">Erstattet</th>
               <th scope="col">Planende</th>
-              <th scope="col">Stripe / Plan-ID</th>
+              <th scope="col">Vertrag / Details</th>
             </tr>
           </thead>
           <tbody>
@@ -346,7 +355,7 @@ export function AdminAnnualPlans({ onSessionLost }: { onSessionLost: () => void 
                   </td>
                   <td data-label="Status">
                     <span className={ended ? "ops-subs-ended" : r.status === "completed" ? "ops-subs-scheduled" : ""}>
-                      {statusLabel(r.status)}
+                      {statusLabel(r.status)}<small>{r.schedule_model==='v2_monthly_12'?'v2, 12 Lieferungen':r.schedule_model==='v1_28d_13'?'v1, 13 Lieferungen':'Modell nicht erfasst'}</small>
                     </span>
                   </td>
                   <td data-label="Zahlung">
@@ -377,11 +386,11 @@ export function AdminAnnualPlans({ onSessionLost }: { onSessionLost: () => void 
                       <span className="ops-subs-ended">{formatCents(r.refunded_total_cents, r.currency)}</span>
                     ) : "—"}
                   </td>
-                  <td data-label="Planende">{fmtDate(r.plan_end_at)}</td>
-                  <td data-label="Stripe / Plan-ID">
+                  <td data-label="Planende">{fmtDate(r.plan_end_at)}{r.termination_effect==='noted_ends_automatically'&&<small>Kündigung vorgemerkt</small>}{r.termination_effect==='ended_extraordinary'&&<small>Außerordentlich beendet</small>}</td>
+                  <td data-label="Stripe / Plan-ID"><button type="button" onClick={()=>setContextRow(r as unknown as PortalRow)}>Vertrag öffnen</button><details><summary>Weitere Details</summary>
                     <code className="ops-subs-stripe">{shortStripeId(r.stripe_payment_intent_id)}</code>
                     <code className="ops-subs-id">{r.id}</code>
-                  </td>
+                  </details></td>
                 </tr>
               );
             })}
@@ -394,6 +403,7 @@ export function AdminAnnualPlans({ onSessionLost }: { onSessionLost: () => void 
         <span>Seite {data.page} von {pages} · {data.total} Jahrespläne</span>
         <button type="button" disabled={page >= pages} onClick={() => setPage(p => p + 1)}>Weiter</button>
       </div>
+      <RecordDetails row={contextRow} title="Vertrag und Zahlungsverlauf" onClose={()=>setContextRow(null)}>{contextRow&&<><BusinessContext entity="annual_plan" id={String(contextRow.id)}/>{contextRow.termination_request_id&&onTermination?<button type="button" onClick={()=>onTermination(String(contextRow.termination_request_id))}>Kündigung prüfen</button>:null}</>}</RecordDetails>
     </>
   );
 }

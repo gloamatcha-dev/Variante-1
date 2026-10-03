@@ -1,3 +1,4 @@
+import {readPortalPages} from "../../../../lib/adminPortalRead.ts";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { requireAdminIdentity } from "../../../../lib/adminActionRoute.ts";
 
@@ -7,7 +8,7 @@ function json(body: unknown, status: number): Response {
   return Response.json(body, { status });
 }
 
-const PAGE_CAP = 100;
+
 
 /**
  * THE DOCUMENT DESK.
@@ -39,23 +40,18 @@ export async function POST(request: Request): Promise<Response> {
   const action = b.action;
 
   if (action === "list" || action === undefined) {
+    try {
     const [documents, links] = await Promise.all([
-      admin.from("documents").select("*").order("created_at", { ascending: false }).limit(PAGE_CAP),
-      admin.from("document_links").select("*").order("created_at", { ascending: false }).limit(PAGE_CAP),
+      readPortalPages(admin,"documents"),
+      readPortalPages(admin,"document_links",q=>q,"document_id"),
     ]);
-
-    for (const r of [documents, links]) {
-      if (r.error) {
-        console.error("Documents: list failed -", r.error.message);
-        return json({ error: "Nicht verfügbar." } as ErrorResponse, 503);
-      }
-    }
 
     return json({
       ok: true,
-      documents: documents.data ?? [],
-      links: links.data ?? [],
+      documents,
+      links,
     }, 200);
+    } catch { return json({error:"Dokumente konnten nicht geladen werden."},503); }
   }
 
   // ── WRITES ─────────────────────────────────────────────────
@@ -69,9 +65,9 @@ export async function POST(request: Request): Promise<Response> {
       title: str("title"),
       kind: str("kind"),
       storage_path: str("storagePath") || null,
-      storage_bucket: str("storageBucket") || null,
+      external_reference: str("externalReference") || null,
       mime_type: str("mimeType") || null,
-      size_bytes: typeof b.sizeBytes === "number" ? b.sizeBytes : null,
+      byte_size: typeof b.sizeBytes === "number" ? b.sizeBytes : null,
       note: str("note") || null,
       created_by: actorUserId,
     }).select("id").single();
@@ -84,19 +80,18 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   if (action === "link_document") {
-    const { data, error } = await admin.from("document_links").insert({
+    const { data, error } = await admin.from("document_links").upsert({
       document_id: str("documentId"),
-      entity_type: str("entityType"),
-      entity_id: str("entityId"),
-      relation: str("relation") || "attachment",
-      created_by: actorUserId,
-    }).select("id").single();
+      subject_type: str("entityType"),
+      subject_id: str("entityId"),
+
+    },{onConflict:"document_id,subject_type,subject_id"}).select("document_id").single();
 
     if (error) {
       console.error("Link document failed:", error.message);
       return json({ error: "Verknüpfung fehlgeschlagen." } as ErrorResponse, 503);
     }
-    return json({ ok: true, linkId: data.id }, 200);
+    return json({ ok: true, documentId: data.document_id }, 200);
   }
 
   return json({ error: "Unbekannte Aktion." } as ErrorResponse, 400);

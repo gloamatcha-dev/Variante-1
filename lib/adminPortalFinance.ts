@@ -1,0 +1,43 @@
+import type { PortalRow } from './adminPortalModel.ts';
+/** Server read aggregation of stored events. No order-derived duplicate revenue. */
+export function summarizeLedger(events: PortalRow[], expenses: PortalRow[]) {
+  const amount=(rows:PortalRow[],field:string):number|null => rows.every(r=>typeof r[field]==='number')
+    ? rows.reduce((sum,r)=>sum+(r[field] as number),0):null;
+  const income=events.filter(r=>r.direction==='inflow');
+  const refunds=events.filter(r=>r.kind==='refund');
+  const fees=events.filter(r=>r.kind==='payment_fee');
+  const direct=expenses.filter(r=>r.category!=='general');
+  const general=expenses.filter(r=>r.category==='general');
+  const channels=[...new Set(events.map(r=>String(r.channel)))].map(channel=>({
+    channel, incomeCents:amount(income.filter(r=>r.channel===channel),'gross_cents'),
+    refundCents:amount(refunds.filter(r=>r.channel===channel),'gross_cents'),
+    knownCostCents:expenses.some(r=>r.channel===channel)?amount(expenses.filter(r=>r.channel===channel),'gross_cents'):null,
+  }));
+  return {
+    incomeCents:amount(income,'gross_cents'), refundCents:amount(refunds,'gross_cents'),
+    directCostCents:direct.length?amount(direct,'gross_cents'):null,
+    generalCostCents:general.length?amount(general,'gross_cents'):null,
+    providerFeeCents:fees.length?amount(fees,'gross_cents'):null,
+    storedIncomeTaxCents:income.length?amount(income,'tax_cents'):null,
+    storedRefundTaxCents:refunds.length?amount(refunds,'tax_cents'):null,
+    storedInputTaxCents:expenses.length?amount(expenses,'vat_cents'):null,
+    resultCents:null, completeness:'Kosten und Providergebühren sind nicht nachweislich vollständig erfasst.',
+    eventCount:events.length, expenseCount:expenses.length, channels,
+  };
+}
+export function portalPeriod(raw:Record<string,unknown>,today=new Date()) {
+  const berlin=new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Berlin'}).format(today);
+  const year=Number(berlin.slice(0,4)),month=Number(berlin.slice(5,7))-1;
+  const iso=(date:Date)=>date.toISOString().slice(0,10);
+  if(raw.period==='year')return {from:`${year}-01-01`,to:`${year+1}-01-01`};
+  if(raw.period==='last_month')return {from:iso(new Date(Date.UTC(year,month-1,1))),to:iso(new Date(Date.UTC(year,month,1)))};
+  if(raw.period==='custom' && typeof raw.from==='string' && typeof raw.to==='string'
+    && /^\d{4}-\d{2}-\d{2}$/.test(raw.from) && /^\d{4}-\d{2}-\d{2}$/.test(raw.to)
+    && !Number.isNaN(Date.parse(raw.from)) && !Number.isNaN(Date.parse(raw.to))
+    && iso(new Date(raw.from))===raw.from && iso(new Date(raw.to))===raw.to && raw.from<=raw.to){
+    const end=new Date(raw.to+'T12:00:00Z');end.setUTCDate(end.getUTCDate()+1);
+    return {from:raw.from,to:iso(end)};
+  }
+  if(raw.period==='custom')throw new Error('Bitte einen gültigen Zeitraum mit Anfangs- und Enddatum wählen.');
+  return {from:iso(new Date(Date.UTC(year,month,1))),to:iso(new Date(Date.UTC(year,month+1,1)))};
+}

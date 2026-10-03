@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import {BusinessContext} from "./AdminPortalShared";
 import {
   B2B_GROUPS,
   B2B_SORT_COLUMN,
@@ -101,13 +102,13 @@ const fmtDate = (iso: string | null) =>
     day: "2-digit", month: "2-digit", year: "numeric",
   }) : "—";
 
-export function AdminB2b({ onSessionLost }: { onSessionLost: () => void }) {
+export function AdminB2b({ onSessionLost, initialSearch="" }: { onSessionLost: () => void; initialSearch?:string }) {
   const [data, setData] = useState<Payload | null>(null);
   const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [group, setGroup] = useState<B2bGroup>("all");
+  const [group, setGroup] = useState<B2bGroup>(initialSearch==="attention"?"attention":"all");
   const [sort, setSort] = useState<string>("newest");
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialSearch==="attention"?"":initialSearch);
   const [page, setPage] = useState(1);
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -276,7 +277,7 @@ export function AdminB2b({ onSessionLost }: { onSessionLost: () => void }) {
 
       {open && (
         <section className="ops-detail" aria-label="Vertragsdetail">
-          <h3>{open.company ?? "Vertrag"}</h3>
+          <h3>{open.company ?? "Vertrag"}</h3><BusinessContext entity="b2b_agreement" id={open.id}/>
           <div className="ops-facts">
             <div><span>Modell</span><strong>{open.planType === "annual" ? "Jahresvertrag" : "Monatlich"}</strong></div>
             <div><span>Status</span><strong>{STATUS_LABEL[open.status] ?? open.status}</strong></div>

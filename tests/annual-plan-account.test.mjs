@@ -929,6 +929,7 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
     "/admin/orders/refund",
     "/admin/orders/resolve-request",
     "/admin/orders/ship",
+    "/admin/portal",
     "/admin/session",
     // 072: shipping due status and operations_config management. Mixed
     // read+write: listing opens with "read", set_config re-gates with

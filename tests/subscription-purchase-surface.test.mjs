@@ -736,11 +736,11 @@ test("6a2: the UI does not offer the section to a VIEWER", () => {
   // PACKAGE 5G put B2B behind the SAME predicate rather than a weaker
   // one of its own - a supply contract is another company's open
   // liabilities, which is the read a viewer may not perform.
-  assert.match(adminOverview, /\(key === "subscriptions" \|\| key === "annual" \|\| key === "b2b" \|\| key === "rights" \|\| key === "costs"\) && !maySeeSubscriptions \? null :/);
+  const portal=readFileSync(new URL('../app/AdminPortalShell.tsx',import.meta.url),'utf8');assert.match(portal,/sensitive\|\|!\['finance','rights','b2b'\].includes\(key\)/);
   // And the screen itself is not mounted, so no request is ever issued.
   assert.match(adminOverview, /view === "subscriptions" && maySeeSubscriptions && <AdminSubscriptions/);
   // The overview note does not point a viewer at a tab they lack.
-  assert.match(adminOverview, /\{maySeeSubscriptions && <> Laufende Abos unter/);
+  assert.match(adminOverview, /items=\{maySeeSubscriptions\?SALES_TABS:\['BESTELLUNGEN'\]\}/);
   assert.match(adminOverview, /view === "annual" && maySeeSubscriptions && <AdminAnnualPlans/);
   // No OTHER tab became role-gated by this change.
   // Seven: the definition, the shared tab guard, the FOUR mounts
@@ -754,7 +754,7 @@ test("6a2: the UI does not offer the section to a VIEWER", () => {
   // behind the SAME predicate rather than a weaker one of its own, for
   // the strongest version of the reason the others are: it is what the
   // shop earned, spent and kept.
-  assert.equal([...adminOverview.matchAll(/maySeeSubscriptions/g)].length, 8,
+  assert.equal([...adminOverview.matchAll(/maySeeSubscriptions/g)].length, 7,
     "the role predicate reaches more of the shell than the commercial sections");
 });
 
@@ -845,7 +845,7 @@ test("6c: it shows every field the operator was promised", () => {
   for (const header of ["Kunde", "Produkt", "Status", "Angelegt", "Zyklen",
                         "Letzte Zahlung", "Letzte Bestellung", "Letzter Versand",
                         "Nächste Abbuchung", "Nächste Lieferung", "Matcha", "Versand",
-                        "Gesamt", "Kündigung", "Stripe / Abo-ID"]) {
+                        "Gesamt", "Kündigung", "Weitere Details"]) {
     assert.ok(adminUi.includes(`>${header}</th>`), `the table lost the ${header} column`);
   }
   // AND NOT ONE PERSONAL FIELD MORE than name and email, on any of the
@@ -993,8 +993,8 @@ test("6d: the admin tab is mounted only when open, and named honestly", () => {
   assert.match(adminOverview, /\{view === "subscriptions" && maySeeSubscriptions && <AdminSubscriptions onSessionLost/);
   // The nav array still lists every section that EXISTS; which of them
   // an operator is offered is decided beside it, not by editing the list.
-  assert.match(adminOverview, /\["subscriptions", "Abos"\]/);
-  assert.match(adminOverview, /subscriptions: "Abos"/);
+  assert.match(read("lib/adminPortalModel.ts"), /SALES_TABS.*ABOS/);
+  assert.match(adminOverview, /Tabs items=/);
 });
 
 /* ══════════════════════════════════════════════════════════════

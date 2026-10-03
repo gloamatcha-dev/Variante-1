@@ -653,10 +653,11 @@ test("no route can mark an order shipped", () => {
   for (const rel of READ_ONLY) {
     assert.ok(routes.includes(rel), `the read-only order route is missing: ${rel}`);
     const source = withoutComments(read(rel));
-    for (const verb of [".update(", ".insert(", ".upsert(", ".delete(", ".rpc("]) {
+    for (const verb of [".update(", ".insert(", ".upsert(", ".delete("]) {
       assert.ok(!source.includes(verb), `${rel} gained a write verb and may no longer read shipping columns`);
     }
   }
+  for(const rel of READ_ONLY) {const source=withoutComments(read(rel));assert.ok(!source.includes("mark_order_shipped"));const rpcs=[...source.matchAll(/\.rpc\(["']([^"']+)/g)].map(m=>m[1]);assert.ok(rpcs.every(name=>name==="order_shipping_due"));}
   for (const rel of READS_SHIPPING_AND_WRITES_ELSEWHERE) {
     assert.ok(routes.includes(rel), `the consumer rights route is missing: ${rel}`);
     const source = withoutComments(read(rel));

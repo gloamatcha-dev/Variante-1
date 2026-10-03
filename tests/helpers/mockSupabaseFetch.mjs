@@ -58,7 +58,9 @@ globalThis.fetch = async function mockedFetch(input, init) {
     return realFetch(input, init);
   }
 
-  if (!SUPABASE_HOST_RE.test(url.hostname)) {
+  const localCatalog = ['127.0.0.1','localhost'].includes(url.hostname)
+    && url.pathname.startsWith('/rest/v1/');
+  if (!SUPABASE_HOST_RE.test(url.hostname) && !localCatalog) {
     return realFetch(input, init);
   }
 

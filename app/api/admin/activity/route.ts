@@ -69,6 +69,12 @@ export async function POST(request: Request): Promise<Response> {
     .from("admin_activity_log")
     .select(AUDIT_LOG_COLUMNS, { count: "exact" });
   if (filter !== "all") query = query.eq("module", filter);
+  if(["orders","inventory","b2b","finance","documents","fulfillment","customer_rights","creator"].includes(String(raw.module)))query=query.eq("module",raw.module);
+  const search=typeof raw.search==='string'?raw.search.slice(0,100).replace(/[(),.*%_\\]/g,'').trim():'';
+  if(search)query=query.ilike('summary','%'+search+'%');
+  if(typeof raw.action==='string'&&/^[a-z_]{1,100}$/.test(raw.action))query=query.eq('action',raw.action);
+  if(typeof raw.dateFrom==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(raw.dateFrom))query=query.gte('created_at',raw.dateFrom+'T00:00:00Z');
+  if(typeof raw.dateTo==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(raw.dateTo))query=query.lte('created_at',raw.dateTo+'T23:59:59Z');
 
   // Newest first, with the id as the tiebreaker so two events in the
   // same millisecond cannot swap places between pages.
