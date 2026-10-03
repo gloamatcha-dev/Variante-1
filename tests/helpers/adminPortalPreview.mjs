@@ -22,7 +22,7 @@ const fixtures={
  '/api/admin/creators':creators,
  '/api/admin/documents':{...base,documents:[{id,title:'Test-Providerbeleg',kind:'stripe_receipt',external_reference:'test-reference',created_at:now}],links:[]},
  '/api/admin/costs':{...base,expenses:[],summary:buildFinanceSummary({period:monthPeriod(today),orders:[],expenses:[]})},
- '/api/admin/inventory/items':{...base,items:[],categories:[],areas:{},summary:{total:0,low:0,out:0,negative:0}},
+ '/api/admin/inventory/items':{...base,rows:[],categories:[],areasByItem:{},lastMovementByItem:{},summary:{total:0,low:0,out:0,negative:0}},
  '/api/admin/inventory/categories':{...base,categories:[]},
  '/api/admin/b2b':{...base,agreements:[],payments:[],deliveries:[]},
  '/api/admin/activity':{...base,rows:[]},

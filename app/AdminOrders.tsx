@@ -377,23 +377,29 @@ export function AdminOrders({ onSessionLost, initialSearch = "" }: { onSessionLo
         <label>Refund<select value={refund} onChange={e=>{setRefund(e.target.value);setPage(1);}}><option value="all">Alle Refund-Zustände</option><option value="refund_pending">Ausstehend</option><option value="partially_refunded">Teilweise erstattet</option><option value="refunded">Erstattet</option></select></label>
         <label>Versandziel<select value={portalDue} onChange={e=>{setPortalDue(e.target.value);setPage(1);}}><option value="">Alle Versandziele</option><option value="no_dispatch_target_configured">Kein Ziel konfiguriert</option><option value="due_today">Heute fällig</option><option value="overdue">Überfällig</option><option value="upcoming">Geplant</option><option value="shipped">Versendet</option></select></label>
         <div className="ops-filter-row">
-          <label htmlFor="ops-o-payment">Zahlung</label>
+          <div className="portal-field">
+<label htmlFor="ops-o-payment">Zahlung</label>
           <select id="ops-o-payment" value={payment} onChange={e => reset({ payment: e.target.value as PaymentStatus | "all" })}>
             <option value="all">Alle</option>
             {PAYMENT_STATUSES.map(s => <option key={s} value={s}>{PAYMENT_STATUS_LABEL[s]}</option>)}
           </select>
+</div>
 
-          <label htmlFor="ops-o-fulfil">Versand</label>
+          <div className="portal-field">
+<label htmlFor="ops-o-fulfil">Versand</label>
           <select id="ops-o-fulfil" value={fulfillment} onChange={e => reset({ fulfillment: e.target.value as FulfillmentStatus | "all" })}>
             <option value="all">Alle</option>
             {FULFILLMENT_STATUSES.map(s => <option key={s} value={s}>{FULFILLMENT_STATUS_LABEL[s]}</option>)}
           </select>
+</div>
 
-          <label htmlFor="ops-o-status">Bestellung</label>
+          <div className="portal-field">
+<label htmlFor="ops-o-status">Bestellung</label>
           <select id="ops-o-status" value={status} onChange={e => reset({ status: e.target.value as OrderStatus | "all" })}>
             <option value="all">Alle</option>
             {ORDER_STATUSES.map(s => <option key={s} value={s}>{ORDER_STATUS_LABEL[s]}</option>)}
           </select>
+</div>
         </div>
 
         <form className="ops-search" onSubmit={e => { e.preventDefault(); reset({ search: searchInput }); }}>

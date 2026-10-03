@@ -291,19 +291,23 @@ export function AdminSubscriptions({ onSessionLost, initialSearch = "" }: { onSe
 
       <section className="ops-controls" aria-label="Abos filtern">
         <div className="ops-filter-row">
-          <label htmlFor="ops-s-group">Status</label>
+          <div className="portal-field">
+<label htmlFor="ops-s-group">Status</label>
           <select id="ops-s-group" value={group} onChange={e => reset({ group: e.target.value as SubscriptionGroup })}>
             {SUBSCRIPTION_GROUPS.map(g => (
               <option key={g} value={g}>{SUBSCRIPTION_GROUP_LABEL[g]}</option>
             ))}
           </select>
+</div>
 
-          <label htmlFor="ops-s-sort">Sortierung</label>
+          <div className="portal-field">
+<label htmlFor="ops-s-sort">Sortierung</label>
           <select id="ops-s-sort" value={sort} onChange={e => reset({ sort: e.target.value as SubscriptionSort })}>
             {SUBSCRIPTION_SORTS.map(o => (
               <option key={o} value={o}>{SUBSCRIPTION_SORT_LABEL[o]}</option>
             ))}
           </select>
+</div>
         </div>
 
         <form className="ops-search" onSubmit={e => { e.preventDefault(); reset({ search: searchInput }); }}>

@@ -160,7 +160,8 @@ export function AdminActivity({ onSessionLost }: { onSessionLost: () => void }) 
       <label>Modul<select value={moduleFilter} onChange={e=>{setModuleFilter(e.target.value);setPage(1);setFilter("all");}}><option value="all">Alle Module</option>{[["orders","Verkauf"],["inventory","Inventar"],["b2b","B2B"],["finance","Finanzen"],["documents","Dokumente"],["fulfillment","Versand"],["customer_rights","Verbraucherrechte"],["creator","Creator"]].map(([key,name])=><option key={key} value={key}>{name}</option>)}</select></label>
       {loadError&&<p role="alert" className="portal-error">{loadError} Die angezeigten Daten stammen vom vorherigen erfolgreichen Laden.</p>}
       <div className="ops-filter-row"><label>Vorgang suchen<input type="search" value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}}/></label><label>Aktion<input value={action} onChange={e=>{setAction(e.target.value);setPage(1);}} placeholder="z. B. expense_recorded"/></label><label>Von<input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)}/></label><label>Bis<input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)}/></label>
-        <label htmlFor="act-filter">Bereich</label>
+        <div className="portal-field">
+<label htmlFor="act-filter">Bereich</label>
         <select
           id="act-filter"
           value={filter}
@@ -168,6 +169,7 @@ export function AdminActivity({ onSessionLost }: { onSessionLost: () => void }) 
         >
           {FILTERS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
+</div>
         <button
           type="button" className="ops-refresh" disabled={busy}
           onClick={() => { setBusy(true); void load({ filter, page }).finally(() => setBusy(false)); }}

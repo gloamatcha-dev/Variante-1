@@ -271,15 +271,19 @@ export function AdminAnnualPlans({ onSessionLost, initialSearch = "", onTerminat
 
       <section className="ops-controls" aria-label="Jahrespläne filtern">
         <div className="ops-filter-row">
-          <label htmlFor="ops-a-group">Status</label>
+          <div className="portal-field">
+<label htmlFor="ops-a-group">Status</label>
           <select id="ops-a-group" value={group} onChange={e => reset({ group: e.target.value as AnnualGroup })}>
             {ANNUAL_GROUPS.map(g => <option key={g} value={g}>{ANNUAL_GROUP_LABEL[g]}</option>)}
           </select>
+</div>
 
-          <label htmlFor="ops-a-sort">Sortierung</label>
+          <div className="portal-field">
+<label htmlFor="ops-a-sort">Sortierung</label>
           <select id="ops-a-sort" value={sort} onChange={e => reset({ sort: e.target.value as AnnualSort })}>
             {ANNUAL_SORTS.map(o => <option key={o} value={o}>{ANNUAL_SORT_LABEL[o]}</option>)}
           </select>
+</div>
         </div>
 
         <form className="ops-search" onSubmit={e => { e.preventDefault(); reset({ search: searchInput }); }}>

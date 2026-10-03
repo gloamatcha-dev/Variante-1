@@ -103,8 +103,12 @@ test('finance renders annual prepayment, B2B and each refund as their own author
  assert.match(html,/Jahresvorauszahlung/);assert.match(html,/B2B-Zahlung/);assert.match(html,/Erstattung/);assert.match(html,/130,00/);assert.match(html,/15,00/);assert.doesNotMatch(html,/Jahreslieferung.*Eingang/);
 });
 test('creator applications, combined roles, affiliate active flag, UGC and payout history render',()=>{
- const fixture={creators:[{id:'c',display_name:'Test Creator',email:'c@example.invalid',status:'active'}],applications:[{id:'a',display_name:'Bewerber',status:'submitted',requested_roles:['influencer','ugc_creator']}],roles:[{creator_id:'c',role:'influencer'},{creator_id:'c',role:'affiliate'}],links:[{id:'l',creator_id:'c',slug:'test-creator',active:false}],codes:[],ugcAssignments:[{id:'u',title:'Test Reel',status:'briefed'}],commissions:[{id:'earned',creator_id:'c',kind:'earned',payout_state:'held',amount_cents:125},{id:'reversed',creator_id:'c',kind:'reversal',payout_state:'reversed',amount_cents:25}],balances:[],payouts:[]};
+ const fixture={creators:[{id:'c',display_name:'Test Creator',email:'c@example.invalid',status:'active'}],applications:[{id:'a',display_name:'Bewerber',status:'submitted',requested_roles:['influencer','ugc_creator']}],roles:[{creator_id:'c',role:'influencer'},{creator_id:'c',role:'affiliate'}],links:[{id:'l',creator_id:'c',slug:'test-creator',active:false}],codes:[],ugcAssignments:[{id:'u',title:'Test Reel',status:'briefed'}],commissions:[{id:'earned',creator_id:'c',kind:'earned',payout_state:'held',amount_cents:125},{id:'reversed',creator_id:'c',kind:'reversal',payout_state:'reversed',amount_cents:25}],balances:[{creatorId:'c',balance:{pending_cents:10000,eligible_cents:0,held_cents:125,paid_cents:null}}],payouts:[]};
  for(const tab of CREATOR_TABS){const html=renderPortal('app/AdminPortalCreator.tsx',{tab,onTab:()=>{}},fixture);assert.match(html,new RegExp(tab));if(tab==='BEWERBUNGEN')assert.match(html,/Bewerber/);if(tab==='CREATOR')assert.match(html,/Influencer, Affiliate/);if(tab==='AFFILIATE'){assert.match(html,/gloamatcha.com\/r\/test-creator/);assert.match(html,/Pausiert/);}if(tab==='CONTENT')assert.match(html,/Test Reel/);if(tab==='AUSZAHLUNGEN'){assert.match(html,/Zurückgehalten/);assert.match(html,/Angepasst/);}}
+});
+test('payout summary displays server balances without deriving totals from commission rows',()=>{
+ const html=renderPortal('app/AdminPortalCreator.tsx',{tab:'AUSZAHLUNGEN',onTab:()=>{}},{creators:[{id:'c',display_name:'Test Creator'}],balances:[{creatorId:'c',balance:{pending_cents:12345,eligible_cents:0,held_cents:125,paid_cents:null}}],commissions:[{id:'event',creator_id:'c',kind:'earned',amount_cents:999,payout_state:'held'}]});
+ assert.match(html,/Provisionsstände/);assert.match(html,/Ausstehend/);assert.match(html,/Auszahlbar/);assert.match(html,/Ausgezahlt/);assert.match(html,/123,45/);assert.match(html,/1,25/);assert.match(html,/data-label="Ausgezahlt"[^>]*>unbekannt/);
 });
 function routeWithGate(file,role){
  const compiled={exports:{}};let reads=0,writes=0;const capabilities=[];
@@ -135,4 +139,29 @@ test('missing-cost worklist deduplicates payments and excludes orders with recor
  assert.equal(response.status,200);const data=await response.json();assert.deepEqual(data.orders,[events[0]]);
  assert.match(source('app/AdminCosts.tsx'),/ExpenseOrderSearch value=\{fOrderId\}/);
  assert.match(source('app/AdminCosts.tsx'),/initialFilter==='missing'&&<MissingExpenseOrders/);
+});
+
+function previewInventoryPayload(){
+ const fixture=source('tests/helpers/adminPortalPreview.mjs').match(/'\/api\/admin\/inventory\/items':(\{[^\r\n]*\}),/);
+ assert.ok(fixture,'The preview must provide its existing inventory read fixture');
+ return vm.runInNewContext('('+fixture[1]+')',{base:{ok:true,total:0,page:1,pageSize:25,fetchedAt:'2026-10-03T12:00:00Z'}});
+}
+function renderInventoryRead(payload){
+ const compiled={exports:{}};let hook=0;
+ const js=ts.transpileModule(source('app/AdminInventory.tsx'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ vm.runInNewContext(js,{module:compiled,exports:compiled.exports,require:name=>name==='react'?{...React,useState:value=>React.useState(hook++===0?payload:value)}:name.includes('inventoryRules')?require('../lib/inventoryRules.ts'):require(name),fetch:()=>{throw Error('Inventory render must not write or fetch');},console,Date,Intl});
+ return renderToStaticMarkup(React.createElement(compiled.exports.AdminInventory,{onSessionLost:()=>{}}));
+}
+test('synthetic inventory read contract renders the actual inventory empty state without crashing',()=>{
+ const payload=previewInventoryPayload();
+ const html=renderInventoryRead(payload);
+ assert.match(html,/Dein Inventar ist noch leer/);
+ assert.ok(Array.isArray(payload.rows));assert.ok(payload.areasByItem);assert.ok(payload.lastMovementByItem);
+});
+test('inventory renderer accepts populated read rows and association maps without changing quantities',()=>{
+ const payload=previewInventoryPayload();
+ const item={id:'test-item',name:'Synthetic matcha stock',sku:'LOCAL-TEST',category_id:'test-category',unit:'g',current_quantity:5,low_stock_threshold:10,supplier:null,notes:null,is_active:true,updated_at:'2026-10-03T12:00:00Z'};
+ payload.rows=[item];payload.categories=[{id:'test-category',name:'Test category',is_active:true}];payload.areasByItem={'test-item':['b2c']};payload.lastMovementByItem={'test-item':'2026-10-03T12:00:00Z'};payload.total=1;payload.summary={total:1,low:1,out:0,negative:0};
+ const before=JSON.stringify(payload);const html=renderInventoryRead(payload);
+ assert.match(html,/Synthetic matcha stock/);assert.match(html,/Test category/);assert.equal(JSON.stringify(payload),before);
 });
