@@ -124,3 +124,15 @@ test('composite-key reads use real schema keys and deterministic paging',async()
  const columns=[];const client={from:()=>({select(){return this;},order(column){columns.push(column);return this;},range(){return Promise.resolve({data:[],count:0,error:null});}})};
  await readPortalPages(client,'order_attributions');assert.deepEqual(columns.splice(0),['order_id']);await readPortalPages(client,'creator_roles',q=>q,'creator_id');assert.deepEqual(columns.splice(0),['creator_id','role']);await readPortalPages(client,'document_links',q=>q,'document_id');assert.deepEqual(columns,['document_id','subject_type','subject_id']);
 });
+
+test('missing-cost worklist deduplicates payments and excludes orders with recorded expenses',async()=>{
+ const compiled={exports:{}};
+ const js=ts.transpileModule(source('app/api/admin/finance/route.ts'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ const events=[{order_id:'missing',orders:{order_number:'GLOA-TEST-1'}},{order_id:'missing',orders:{order_number:'GLOA-TEST-1'}},{order_id:'recorded'}];
+ const localRequire=name=>name.includes('adminActionRoute')?{requireAdminIdentity:async(_request,capability)=>{assert.equal(capability,'read_sensitive');return {ok:true};}}:name.includes('supabaseAdmin')?{getSupabaseAdmin:()=>({})}:name.includes('adminPortalRead')?{readPortalPages:async(_client,table)=>table==='financial_events'?events:[{order_id:'recorded'}]}:name.includes('adminPortalFinance')?{portalPeriod,summarizeLedger}:require(name);
+ vm.runInNewContext(js,{module:compiled,exports:compiled.exports,require:localRequire,Response,Request,console,Date});
+ const response=await compiled.exports.POST(new Request('http://localhost/',{method:'POST',body:JSON.stringify({action:'missing_costs'})}));
+ assert.equal(response.status,200);const data=await response.json();assert.deepEqual(data.orders,[events[0]]);
+ assert.match(source('app/AdminCosts.tsx'),/ExpenseOrderSearch value=\{fOrderId\}/);
+ assert.match(source('app/AdminCosts.tsx'),/initialFilter==='missing'&&<MissingExpenseOrders/);
+});

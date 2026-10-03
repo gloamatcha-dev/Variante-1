@@ -42,6 +42,15 @@ export async function POST(request: Request): Promise<Response> {
   let period: ReturnType<typeof portalPeriod>;
   try { period = portalPeriod(raw); } catch { return json({error:"Bitte einen gültigen Zeitraum wählen."},400); }
   try {
+    if(action === "missing_costs") {
+      const [events,expenses]=await Promise.all([
+        readPortalPages(admin,"financial_events",q=>q.eq("kind","order_payment").gte("occurred_on",period.from).lt("occurred_on",period.to),"id","*,orders(order_number,customer_snapshot)"),
+        readPortalPages(admin,"business_expenses",q=>q.not("order_id","is",null)),
+      ]);
+      const recorded=new Set(expenses.map(row=>row.order_id));
+      const seen=new Set();
+      return json({ok:true,orders:events.filter(row=>row.order_id&&!recorded.has(row.order_id)&&!seen.has(row.order_id)&&seen.add(row.order_id)),period},200);
+    }
     if (action === "summary" || action === "export") {
       const [events, expenses] = await Promise.all([
         readPortalPages(admin, "financial_events", q => q.gte("occurred_on",period.from).lt("occurred_on",period.to)),

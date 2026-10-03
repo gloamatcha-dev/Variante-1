@@ -73,6 +73,7 @@ export function AdminCustomerRights({ onSessionLost, initialSection, initialFocu
   const [data, setData] = useState<Payload>(EMPTY);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
+  const [terminationNotes,setTerminationNotes]=useState<Record<string,string>>({});
   const [loaded,setLoaded]=useState(false);
   const [contextId,setContextId]=useState<string|null>(null);
   const [notice, setNotice] = useState("");
@@ -444,13 +445,14 @@ export function AdminCustomerRights({ onSessionLost, initialSection, initialFocu
                   <div><dt>Entscheidungsstatus</dt><dd><Chip value={t.case_state}/></dd></div><div><dt>Refund</dt><dd>Separate Entscheidung, keine automatische Erstattung</dd></div><div><dt>Interne Notiz</dt><dd>{String(t.internal_note??"nicht erfasst")}</dd></div>
                 </dl>
                 {(typeof t.resolved_annual_plan_id==='string'||typeof t.resolved_subscription_id==='string')&&<><button type="button" onClick={()=>setContextId(contextId===id?null:id)}>Vertrag und Aktivität öffnen</button>{contextId===id&&<BusinessContext entity={t.resolved_annual_plan_id?'annual_plan':'subscription'} id={String(t.resolved_annual_plan_id??t.resolved_subscription_id)}/>}</>}
+                <label>Interne Entscheidungsnotiz<textarea rows={2} maxLength={4000} value={terminationNotes[id]??String(t.internal_note??'')} onChange={e=>setTerminationNotes(current=>({...current,[id]:e.target.value}))}/></label>
                 <div className="ops-actions">
                   {t.resolved_annual_plan_id ? (t.termination_kind === "extraordinary" ? [
                     ["accept_extraordinary", "Außerordentlich annehmen"], ["reject_extraordinary", "Ablehnen"], ["close", "Fall schließen"]
                   ] : [["note_ordinary", "Kündigung vormerken"], ["close", "Fall schließen"]]).map(([decision,title]) => (
                     <button key={decision} type="button" disabled={busy} onClick={() => {
                       if(window.confirm(decision==='accept_extraordinary'?'Plan beenden und zukünftige offene Lieferungen stoppen? Es wird keine Erstattung ausgelöst.':'Entscheidung verbindlich speichern?'))
-                        void act({action:"decide_annual_termination",terminationId:id,decision},"Kündigung");
+                        void act({action:"decide_annual_termination",terminationId:id,decision,internalNote:terminationNotes[id]},"Kündigung");
                     }}>{title}</button>
                   )) : t.resolved_subscription_id ? <button type="button" disabled={busy} onClick={() => {
                     if(window.confirm('Öffentliche Vertragskündigung verbindlich ausführen? Der Server bestimmt das wirksame Ende.'))

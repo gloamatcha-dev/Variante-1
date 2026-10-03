@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import {ExpenseOrderSearch,MissingExpenseOrders} from "./AdminPortalExpenseOrder";
 import { formatCents } from "../lib/adminOrdersQuery";
 import {
   DIRECT_EXPENSE_CATEGORIES,
@@ -549,6 +550,7 @@ export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter=""
       </table>
 
       {/* ── KANÄLE ── */}
+      {initialFilter==='missing'&&<MissingExpenseOrders onSelect={id=>{resetForm();setFCategory('matcha_cogs');setFOrderId(id);setFormOpen(true);}}/>}
       <table className="ops-table ops-costs-channels">
         <caption className="ops-count-label">Kosten nach Kanal (brutto)</caption>
         <thead>
@@ -558,9 +560,9 @@ export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter=""
           {EXPENSE_CHANNELS.map(ch => (
             <tr key={ch}>
               <td data-label="Kanal">{EXPENSE_CHANNEL_LABEL[ch]}</td>
-              <td data-label="Direkt">{formatCents(s.byChannel[ch].directCents)}</td>
-              <td data-label="Allgemein">{formatCents(s.byChannel[ch].generalCents)}</td>
-              <td data-label="Summe">{formatCents(s.byChannel[ch].totalCents)}</td>
+              <td data-label="Direkt">{expenses.some(e=>e.channel===ch&&e.category!=='general')?formatCents(s.byChannel[ch].directCents):'nicht erfasst'}</td>
+              <td data-label="Allgemein">{expenses.some(e=>e.channel===ch&&e.category==='general')?formatCents(s.byChannel[ch].generalCents):'nicht erfasst'}</td>
+              <td data-label="Summe">{expenses.some(e=>e.channel===ch)?formatCents(s.byChannel[ch].totalCents):'nicht erfasst'}</td>
             </tr>
           ))}
         </tbody>
@@ -685,8 +687,7 @@ export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter=""
               one.
             */}
             {fCategory !== "general" && (
-              <label>Bestellung (ID)<input value={fOrderId} maxLength={36}
-                onChange={e => setFOrderId(e.target.value)} /></label>
+              <ExpenseOrderSearch value={fOrderId} onChange={setFOrderId}/>
             )}
             <label>Lieferant<input value={fVendor} maxLength={160}
               onChange={e => setFVendor(e.target.value)} /></label>

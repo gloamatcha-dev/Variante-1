@@ -28,7 +28,7 @@ const fixtures={
  '/api/admin/activity':{...base,rows:[]},
  '/api/admin/waitlist':{...base,rows:[],counts:{pending:0,confirmed:0,withdrawn:0,notified:0},consent:{v1:0,v2:0,other:0},launch:{plannedIso:now,plannedReached:true,shopStatus:'live',migrationsApplied:true},identity,signedInAs:identity.email},
 };
-const readActions=new Set(['list','summary','export','search','context','identity','inventory_warnings']);
+const readActions=new Set(['list','summary','export','search','context','identity','inventory_warnings','missing_costs']);
 const upstream=spawn(process.execPath,['--import','./tests/helpers/localOnlyFetch.mjs','.output/server/index.mjs'],{windowsHide:true,env:{...process.env,HOST:'127.0.0.1',PORT:'4001',SUPABASE_SECRET_KEY:'',STRIPE_SECRET_KEY:'',RESEND_API_KEY:'',LAUNCH_ADMIN_SECRET:'',ADMIN_SESSION_SECRET:''}});
 upstream.stdout.pipe(createWriteStream('outputs/block2-preview-server.log'));upstream.stderr.pipe(createWriteStream('outputs/block2-preview-server-error.log'));
 const server=createServer(async(req,res)=>{
@@ -40,7 +40,7 @@ const server=createServer(async(req,res)=>{
   if(body.previewError===true){res.writeHead(503);res.end(JSON.stringify({error:'Simulierter lokaler Ausfall'}));return;}
   let payload=fixtures[req.url];
   if(req.url==='/api/admin/portal')payload=body.action==='identity'?{ok:true,identity,signedInAs:identity.email}:body.action==='search'?{ok:true,results:[{...order,entity:'orders',area:'sales',tab:'BESTELLUNGEN'}]}:body.action==='inventory_warnings'?{ok:true,items:[]}:{ok:true,events,documents:[],activity:[],attributions:[]};
-  if(req.url==='/api/admin/finance')payload=body.action==='list'?{...base,total:events.length,events,pageSize:200}:{ok:true,summary:business,events,expenses:[],undatedEvents:0,creatorObligations:1};
+  if(req.url==='/api/admin/finance')payload=body.action==='missing_costs'?{ok:true,orders:[{order_id:id,orders:order}]}:body.action==='list'?{...base,total:events.length,events,pageSize:200}:{ok:true,summary:business,events,expenses:[],undatedEvents:0,creatorObligations:1};
   res.writeHead(payload?200:404);res.end(JSON.stringify(payload??{error:'Keine lokale Lesefixture für diese Route.'}));return;
  }
  if(!['GET','HEAD'].includes(req.method)){res.writeHead(405);res.end();return;}
