@@ -828,7 +828,7 @@ test("9b: the viewport leaf is pure, and says it is not a security boundary", ()
 });
 
 test("9c: below the minimum, nothing operational is rendered [Block 2]", () => {
-const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),'utf8'); assert.match(portalCss,/@media\(max-width:700px\)/); assert.match(portalCss,/content:attr\(data-label\)/); assert.ok(!codeOnly(shell).includes('isDesktop')); assert.match(shell,/AdminPortalShell/); assert.ok(codeOnly(shell).indexOf('if (!signedIn)')<codeOnly(shell).indexOf('<AdminPortalShell'));for(const chrome of ['CartDrawer','LaunchPopup','bag-btn'])assert.ok(!codeOnly(shell).includes(chrome));
+const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),'utf8'); assert.match(portalCss,/@media\(max-width:700px\)/); assert.match(portalCss,/content:attr\(data-label\)/); assert.match(codeOnly(shell),/if \(isDesktop === false\) return <AdminDesktopOnly/); assert.match(codeOnly(shell),/if \(isDesktop !== true\) return/); assert.match(shell,/AdminPortalShell/); assert.ok(codeOnly(shell).indexOf('if (!signedIn)')<codeOnly(shell).indexOf('<AdminPortalShell'));for(const chrome of ['CartDrawer','LaunchPopup','bag-btn'])assert.ok(!codeOnly(shell).includes(chrome));
 });
 
 test("9d: THE SERVER NEVER CONSULTS A VIEWPORT", () => {
@@ -854,15 +854,15 @@ test("9d: THE SERVER NEVER CONSULTS A VIEWPORT", () => {
 });
 
 test("9e: no admin business data is fetched below the minimum [Block 2]", () => {
-const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),'utf8'); assert.match(portalCss,/@media\(max-width:700px\)/); assert.match(portalCss,/content:attr\(data-label\)/); assert.ok(!codeOnly(shell).includes('isDesktop')); assert.match(shell,/AdminPortalShell/); assert.match(shell,/action: "identity"/);assert.match(shell,/view === "overview" && <AdminPortalDashboard/);assert.match(shell,/view === "orders" && <AdminOrders/);
+const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),'utf8'); assert.match(portalCss,/@media\(max-width:700px\)/); assert.match(portalCss,/content:attr\(data-label\)/); assert.match(codeOnly(shell),/if \(isDesktop === false\) return <AdminDesktopOnly/); assert.match(codeOnly(shell),/if \(isDesktop !== true\) return/); assert.match(shell,/AdminPortalShell/); assert.match(shell,/action: "identity"/);assert.match(shell,/view === "overview" && <AdminPortalDashboard/);assert.match(shell,/view === "orders" && <AdminOrders/);
 });
 
 test("9f: hydration cannot mismatch, and there is no timeout anywhere [Block 2]", () => {
-assert.match(codeOnly(shell),/useState<boolean \| null>\(null\)/);assert.ok(!codeOnly(shell).includes('innerWidth'));assert.ok(!codeOnly(shell).includes('matchMedia'));assert.ok(!codeOnly(shell).includes('setTimeout'));assert.match(shell,/let cancelled = false/);assert.match(shell,/cancelled = true/);
+assert.match(codeOnly(shell),/useState<boolean \| null>\(null\)/);assert.ok(!codeOnly(shell).includes('innerWidth'));assert.match(codeOnly(shell),/matchMedia\(ADMIN_DESKTOP_MEDIA_QUERY\)/);assert.match(codeOnly(shell),/if \(isDesktop === null\) return <main className="ops" aria-busy="true"/);assert.ok(!codeOnly(shell).includes('setTimeout'));assert.match(shell,/let cancelled = false/);assert.match(shell,/cancelled = true/);
 });
 
 test("9g: the desktop admin is unchanged [Block 2]", () => {
-const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),'utf8'); assert.match(portalCss,/@media\(max-width:700px\)/); assert.match(portalCss,/content:attr\(data-label\)/); assert.ok(!codeOnly(shell).includes('isDesktop')); assert.match(shell,/AdminPortalShell/); for(const panel of ['AdminOrders','AdminSubscriptions','AdminAnnualPlans','AdminCustomerRights','AdminInventory','AdminB2b','AdminActivity','AdminPortalFinance','AdminPortalCreator'])assert.ok(shell.includes('<'+panel));assert.match(shell,/Legacy-Tool: Launch List/);
+const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),'utf8'); assert.match(portalCss,/@media\(max-width:700px\)/); assert.match(portalCss,/content:attr\(data-label\)/); assert.match(codeOnly(shell),/if \(isDesktop === false\) return <AdminDesktopOnly/); assert.match(codeOnly(shell),/if \(isDesktop !== true\) return/); assert.match(shell,/AdminPortalShell/); for(const panel of ['AdminOrders','AdminSubscriptions','AdminAnnualPlans','AdminCustomerRights','AdminInventory','AdminB2b','AdminActivity','AdminPortalFinance','AdminPortalCreator'])assert.ok(shell.includes('<'+panel));assert.match(shell,/Legacy-Tool: Launch List/);
 });
 
 test("9h: this package changed nothing else", () => {

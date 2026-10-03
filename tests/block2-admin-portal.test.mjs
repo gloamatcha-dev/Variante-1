@@ -79,9 +79,10 @@ test('new reads remain server-authorized and no credentials or automatic stock m
  assert.match(source('app/api/admin/portal/route.ts'),/canWrite\(gate\.identity\.role\)/);
  assert.match(source('app/AdminOverview.tsx'),/action: "identity"/);
 });
-test('all viewport layouts are scoped to the admin and mobile navigation is a usable grid',()=>{
+test('admin layout remains scoped and preserves the authoritative desktop-only guard',()=>{
  const css=source('app/admin-portal.css');assert.match(css,/@media\(max-width:1100px\)/);assert.match(css,/@media\(max-width:700px\)/);assert.match(css,/\.portal-sidebar nav\{display:grid/);assert.match(css,/content:attr\(data-label\)/);
- assert.doesNotMatch(source('app/AdminOverview.tsx'),/if \(isDesktop === false\)/);
+ assert.match(source('app/AdminOverview.tsx'),/if \(isDesktop === false\) return <AdminDesktopOnly/);
+ assert.match(source('app/AdminOverview.tsx'),/if \(isDesktop !== true\) return/);
 });
 
 function renderPortal(file,props,readData,readError=''){
@@ -96,6 +97,25 @@ test('dashboard renders backend action counts and partial source failures stay u
  const html=renderPortal('app/AdminPortalDashboard.tsx',{navigate:()=>{}},{summary:{shippingToday:3,shippingOverdue:null,refundsAttention:2},business:summarizeLedger([],[]),recentPaidOrders:null,upcomingShipments:null,upcomingAnnual:[],recentActivity:[],warnings:['orders']});
  assert.match(html,/Versand heute<\/span><strong>3/);assert.match(html,/Versand überfällig<\/span><strong>unbekannt/);assert.match(html,/Bezahlte Bestellungen unbekannt/);assert.match(html,/Versanddaten unbekannt/);
  const error=renderPortal('app/AdminPortalDashboard.tsx',{navigate:()=>{}},null,'Ausfall');assert.match(error,/role="alert"/);assert.doesNotMatch(error,/0,00|Keine Einträge/);
+});
+
+test('unsupported and unresolved viewports mount no operational UI and make no identity request',()=>{
+ const js=ts.transpileModule(source('app/AdminOverview.tsx'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ for(const viewport of [false,null]){
+  const compiled={exports:{}};let hook=0,requests=0;const effects=[];
+  vm.runInNewContext(js,{module:compiled,exports:compiled.exports,require:name=>{
+   if(name==='react')return {...React,useState:value=>React.useState(hook++===0?viewport:value),useEffect:fn=>effects.push(fn)};
+   if(name==='react/jsx-runtime')return require(name);
+   if(name.includes('adminViewport'))return require('../lib/adminViewport.ts');
+   if(name.endsWith('.css'))return {};
+   return new Proxy({},{get:()=>()=>{throw Error('Operational component must not mount');}});
+  },fetch:()=>{requests++;throw Error('No identity request below desktop width');},console,Date,Intl});
+  const html=renderToStaticMarkup(React.createElement(compiled.exports.AdminOverview));
+  for(const effect of effects)if(effect.toString().includes('/api/admin/portal'))effect();
+  assert.equal(requests,0);assert.doesNotMatch(html,/portal-sidebar|portal-workspace|<form|<table/);
+  if(viewport===false)assert.match(html,/Admin nur am Desktop verfügbar/);
+  else assert.match(html,/aria-busy="true"/);
+ }
 });
 test('finance renders annual prepayment, B2B and each refund as their own authoritative rows',()=>{
  const events=[{id:'prepaid',kind:'annual_prepayment',gross_cents:13000,direction:'inflow',annual_plan_id:'plan',channel:'b2c'},{id:'b2b',kind:'b2b_settlement',gross_cents:5000,direction:'inflow',b2b_agreement_id:'agreement',channel:'b2b'},{id:'refund',kind:'refund',gross_cents:1500,direction:'outflow',channel:'b2c'}];

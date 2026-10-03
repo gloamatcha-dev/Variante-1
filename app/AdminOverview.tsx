@@ -18,6 +18,8 @@ import { AdminInventory } from "./AdminInventory";
 import { WAITLIST_FILTERS, type WaitlistFilter } from "../lib/adminWaitlistQuery";
 import { AdminActivity } from "./AdminActivity";
 
+import { ADMIN_DESKTOP_MEDIA_QUERY, ADMIN_DESKTOP_ONLY_COPY } from "../lib/adminViewport.ts";
+
 // The SAME predicate the subscription route gates on, from the same
 // zero-import leaf. The screen must not decide for itself who may look:
 // a second rule here would be a second answer, and the two would drift.
@@ -124,7 +126,47 @@ function consentShort(version: string): string {
   return version.slice(-6);
 }
 
+function useIsAdminDesktop(): boolean | null {
+  const [isDesktop, setIsDesktop] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    // Guarded because this file also renders on the server, where
+    // matchMedia does not exist.
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia(ADMIN_DESKTOP_MEDIA_QUERY);
+    const apply = () => setIsDesktop(mq.matches);
+    apply();
+    // Resizing across the boundary switches the screen immediately -
+    // no refresh, in either direction.
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+
+  return isDesktop;
+}
+
+/**
+ * What a viewport below the minimum gets INSTEAD of the admin.
+ *
+ * Its own screen rather than the admin with things hidden: nothing
+ * operational is rendered, so there is nothing to reveal with a
+ * stylesheet. No public header, no footer, no cart, no launch popup -
+ * this is the internal surface, not the shop.
+ */
+function AdminDesktopOnly() {
+  return (
+    <main className="ops ops-desktop-only">
+      <div className="ops-desktop-only-card">
+        <p className="ops-eyebrow">{ADMIN_DESKTOP_ONLY_COPY.eyebrow}</p>
+        <h1 className="ops-desktop-only-title">{ADMIN_DESKTOP_ONLY_COPY.title}</h1>
+        <p className="ops-desktop-only-body">{ADMIN_DESKTOP_ONLY_COPY.body}</p>
+      </div>
+    </main>
+  );
+}
+
 export function AdminOverview() {
+  const isDesktop = useIsAdminDesktop();
   // WHICH SECTION IS OPEN. The waitlist screen this file has always
   // been is now one of several, and it is unchanged - it simply renders
   // under a tab instead of on its own.
@@ -200,6 +242,7 @@ export function AdminOverview() {
   // visitor who navigates away mid-request does not have state written
   // into an unmounted component.
   useEffect(() => {
+    if (isDesktop !== true) return;
     let cancelled = false;
     (async () => {
       try {
@@ -227,7 +270,7 @@ export function AdminOverview() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [isDesktop]);
 
   const submitLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -284,6 +327,9 @@ export function AdminOverview() {
   // reached: not the login form (there is nothing to sign in TO here),
   // not the identity, not a tab, not a count. An existing session makes
   // no difference - a valid cookie on a phone still gets this screen.
+  if (isDesktop === false) return <AdminDesktopOnly />;
+  if (isDesktop === null) return <main className="ops" aria-busy="true" />;
+
   if (signedIn === null) {
     return <main className="ops"><p className="ops-loading">Wird geladen…</p></main>;
   }
