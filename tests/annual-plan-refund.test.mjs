@@ -857,7 +857,7 @@ test("29: this phase adds no migration, no route and no customer action", () => 
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 72);
+  assert.equal(migrations.length, 73);
   // PHASE 4B8.2 ADDED MIGRATION 042: the ONE column privilege 041
   // was short of, so migration 039's delivery policy can still read
   // the parent's user_id while resolving ownership. Reviewed in
@@ -866,16 +866,16 @@ test("29: this phase adds no migration, no route and no customer action", () => 
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(migrations[migrations.length - 27], "046_launch_signup_atomic.sql");
-  assert.equal(migrations[migrations.length - 28], "045_launch_welcome_email.sql");
-  assert.equal(migrations[migrations.length - 29], "044_launch_send.sql");
-  assert.equal(migrations[migrations.length - 30], "043_launch_waitlist.sql");
+  assert.equal(migrations[migrations.length - 28], "046_launch_signup_atomic.sql");
+  assert.equal(migrations[migrations.length - 29], "045_launch_welcome_email.sql");
+  assert.equal(migrations[migrations.length - 30], "044_launch_send.sql");
+  assert.equal(migrations[migrations.length - 31], "043_launch_waitlist.sql");
   // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
   // commerce foundation - it evolves the two tables 006 built for a
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 72), [], "a migration 072 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 73), [], "a migration 072 or beyond appeared");
 
   // No annual refund endpoint, and no browser-triggered refund anywhere.
   const annualRoutes = readdirSync(path.join(ROOT, "app/api/annual-plan"), { withFileTypes: true })
@@ -899,3 +899,6 @@ test("29: this phase adds no migration, no route and no customer action", () => 
   assert.equal(vercel.crons.length, 1);
   assert.equal(vercel.crons[0].schedule, "20 5 * * *");
 });
+
+// Migration-stack guard repinned for the explicitly added 073 RPC only.
+// Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.

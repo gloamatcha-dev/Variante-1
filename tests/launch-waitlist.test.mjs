@@ -1379,7 +1379,7 @@ test("61: the rate limit went into 043 rather than into a 044, and 043 is still 
      // or row. Reviewed in tests/business-expenses-migration.test.mjs.
      "071_business_expenses.sql",
      // MIGRATION 072: admin core connections. Reviewed in its own suite.
-     "072_admin_core_connections.sql"],
+     "072_admin_core_connections.sql", "073_affiliate_atomic_configuration.sql"],
     "an unreviewed migration appeared after 043"
   );
 
@@ -3165,3 +3165,6 @@ test("130: the neutral confirmation promises no mail, and the code one names the
   const css = read("app/globals.css");
   assert.match(css, /\.launch-hero-hint\{[\s\S]*?color:var\(--cream\)/);
 });
+
+// Migration-stack guard repinned for the explicitly added 073 RPC only.
+// Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.

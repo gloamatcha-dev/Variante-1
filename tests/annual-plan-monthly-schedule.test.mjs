@@ -334,9 +334,9 @@ test("18: migration 069 rewrites no existing row and no existing schedule", () =
 test("18b: 069 is the newest migration, owns its number, and is NOT applied", () => {
   const files = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.at(-4), "069_annual_plan_monthly_schedule.sql");
+  assert.equal(files.at(-5), "069_annual_plan_monthly_schedule.sql");
   assert.equal(files.filter(f => f.startsWith("069")).length, 1);
-  assert.equal(files.filter(f => Number(f.slice(0, 3)) > 72).length, 0);
+  assert.equal(files.filter(f => Number(f.slice(0, 3)) > 73).length, 0);
   assert.match(M069, /NOT YET APPLIED/);
   // 066, 067 and 068 are not touched by it.
   for (const kept of ["annual_plans_active_upgrade_per_subscription_key",
@@ -349,3 +349,6 @@ test("18b: 069 is the newest migration, owns its number, and is NOT applied", ()
   // eighteenth argument WITH A DEFAULT, so migration-first is safe.
   assert.match(M069, /p_schedule_model\s+text default 'v1_28d_13'/);
 });
+
+// Migration-stack guard repinned for the explicitly added 073 RPC only.
+// Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.

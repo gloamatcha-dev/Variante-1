@@ -2,6 +2,7 @@
 import {createServer,request} from 'node:http';
 import {spawn} from 'node:child_process';
 import {createWriteStream} from 'node:fs';
+import {snapshotPreviewBuild} from './adminPortalPreviewBuild.mjs';
 import {summarizeLedger} from '../../lib/adminPortalFinance.ts';
 import {buildFinanceSummary,monthPeriod} from '../../lib/financeSummary.ts';
 
@@ -29,7 +30,8 @@ const fixtures={
  '/api/admin/waitlist':{...base,rows:[],counts:{pending:0,confirmed:0,withdrawn:0,notified:0},consent:{v1:0,v2:0,other:0},launch:{plannedIso:now,plannedReached:true,shopStatus:'live',migrationsApplied:true},identity,signedInAs:identity.email},
 };
 const readActions=new Set(['list','summary','export','search','context','identity','inventory_warnings','missing_costs']);
-const upstream=spawn(process.execPath,['--import','./tests/helpers/localOnlyFetch.mjs','.output/server/index.mjs'],{windowsHide:true,env:{...process.env,HOST:'127.0.0.1',PORT:'4001',SUPABASE_SECRET_KEY:'',STRIPE_SECRET_KEY:'',RESEND_API_KEY:'',LAUNCH_ADMIN_SECRET:'',ADMIN_SESSION_SECRET:''}});
+const previewEntry=snapshotPreviewBuild('.output','outputs/admin-portal-preview');
+const upstream=spawn(process.execPath,['--import','./tests/helpers/localOnlyFetch.mjs',previewEntry],{windowsHide:true,env:{...process.env,HOST:'127.0.0.1',PORT:'4001',SUPABASE_SECRET_KEY:'',STRIPE_SECRET_KEY:'',RESEND_API_KEY:'',LAUNCH_ADMIN_SECRET:'',ADMIN_SESSION_SECRET:''}});
 upstream.stdout.pipe(createWriteStream('outputs/block2-preview-server.log'));upstream.stderr.pipe(createWriteStream('outputs/block2-preview-server-error.log'));
 const server=createServer(async(req,res)=>{
  if(req.url.startsWith('/api/')){

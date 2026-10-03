@@ -182,7 +182,7 @@ test("1e: no backend, auth, data or commercial logic changed", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/business-expenses-migration.test.mjs.
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("073")),
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("074")),
     "a migration 072 or beyond appeared");
   // The presentation primitives stayed presentation.
   assert.ok(!/supabase|useAuth|customer_type/.test(ui), "AccountUI grew a data dependency");
@@ -438,3 +438,6 @@ test("5b: a stacked summary row gives its copy the column, not the action", () =
   assert.ok(!/font-family|font-weight|letter-spacing|text-transform/.test(at800),
     "mobile changes more than size and wrapping");
 });
+
+// Migration-stack guard repinned for the explicitly added 073 RPC only.
+// Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.

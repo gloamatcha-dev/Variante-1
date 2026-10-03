@@ -88,7 +88,7 @@ test('admin layout remains scoped and preserves the authoritative desktop-only g
 function renderPortal(file,props,readData,readError=''){
  const shared=sharedComponents();const compiled={exports:{}};
  const js=ts.transpileModule(source(file),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
- const localRequire=name=>name.includes('adminPortalModel')?model:name.includes('AdminPortalShared')?{...shared,usePortalRead:()=>({data:readData,error:readError,refresh:()=>{}})}:name.includes('AdminCosts')?{AdminCosts:()=>React.createElement('p',null,'Existing expense editor')}:name.includes('AdminPortalDocuments')?{AdminPortalDocuments:()=>React.createElement('p',null,'Private documents')}:require(name);
+ const localRequire=name=>name.includes('AdminCommissionRuleFields')?ruleFields():name.includes('commissionRuleConfiguration')?require('../lib/commissionRuleConfiguration.ts'):name.includes('AdminPortalAffiliate')?affiliateComponents(shared):name.includes('adminPortalModel')?model:name.includes('AdminPortalShared')?{...shared,usePortalRead:()=>({data:readData,error:readError,refresh:()=>{}})}:name.includes('AdminCosts')?{AdminCosts:()=>React.createElement('p',null,'Existing expense editor')}:name.includes('AdminPortalDocuments')?{AdminPortalDocuments:()=>React.createElement('p',null,'Private documents')}:require(name);
  vm.runInNewContext(js,{module:compiled,exports:compiled.exports,require:localRequire,console,Intl,Date});
  const component=compiled.exports[Object.keys(compiled.exports).find(key=>key.startsWith('AdminPortal'))];
  return renderToStaticMarkup(React.createElement(component,props));
@@ -135,7 +135,7 @@ function routeWithGate(file,role){
  const client={from:()=>({upsert:()=>{writes++;throw Error('Unauthorized write');},update:()=>{writes++;throw Error('Unauthorized write');}})};
  const gate=async(_request,capability)=>{capabilities.push(capability);if(role===null)return {ok:false,response:Response.json({error:'Unauthorized'},{status:401})};if(role==='viewer'&&capability!=='read')return {ok:false,response:Response.json({error:'Forbidden'},{status:403})};return {ok:true,identity:{role},session:{userId:'operator',email:'operator@example.invalid'}};};
  const js=ts.transpileModule(source(file),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
- vm.runInNewContext(js,{module:compiled,exports:compiled.exports,require:name=>name.includes('adminActionRoute')?{requireAdminIdentity:gate}:name.includes('supabaseAdmin')?{getSupabaseAdmin:()=>{reads++;return client;}}:name.includes('adminPortalModel')?model:name.includes('adminRoles')?{canWrite:role=>['owner','admin'].includes(role)}:name.includes('adminPortalRead')?{readPortalPages:()=>{throw Error('Unexpected database read');}}:name.includes('adminPortalFinance')?{portalPeriod,summarizeLedger}:name.includes('inventoryRules')?{stockStatus:()=> 'ok'}:name.includes('creatorAffiliate')?{getCreatorCommissionBalance:()=>{throw Error('Unexpected balance read');}}:require(name),Response,Request,console,Date,Intl});
+ vm.runInNewContext(js,{module:compiled,exports:compiled.exports,require:name=>name.includes('commissionRuleConfiguration')?require('../lib/commissionRuleConfiguration.ts'):name.includes('adminAffiliateConfiguration')?require('../lib/adminAffiliateConfiguration.ts'):name.includes('adminActionRoute')?{requireAdminIdentity:gate}:name.includes('supabaseAdmin')?{getSupabaseAdmin:()=>{reads++;return client;}}:name.includes('adminPortalModel')?model:name.includes('adminRoles')?{canWrite:role=>['owner','admin'].includes(role)}:name.includes('adminPortalRead')?{readPortalPages:()=>{throw Error('Unexpected database read');}}:name.includes('adminPortalFinance')?{portalPeriod,summarizeLedger}:name.includes('inventoryRules')?{stockStatus:()=> 'ok'}:name.includes('creatorAffiliate')?{getCreatorCommissionBalance:()=>{throw Error('Unexpected balance read');}}:require(name),Response,Request,console,Date,Intl});
  return {POST:compiled.exports.POST,counts:()=>({reads,writes,capabilities})};
 }
 test('every new read refuses unauthenticated callers before client or body access',async()=>{
@@ -184,4 +184,167 @@ test('inventory renderer accepts populated read rows and association maps withou
  payload.rows=[item];payload.categories=[{id:'test-category',name:'Test category',is_active:true}];payload.areasByItem={'test-item':['b2c']};payload.lastMovementByItem={'test-item':'2026-10-03T12:00:00Z'};payload.total=1;payload.summary={total:1,low:1,out:0,negative:0};
  const before=JSON.stringify(payload);const html=renderInventoryRead(payload);
  assert.match(html,/Synthetic matcha stock/);assert.match(html,/Test category/);assert.equal(JSON.stringify(payload),before);
+});
+
+function affiliateComponents(shared,seeds=[]){
+ const compiled={exports:{}};let hook=0;
+ const js=ts.transpileModule(source('app/AdminPortalAffiliate.tsx'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ vm.runInNewContext(js,{module:compiled,exports:compiled.exports,require:name=>name==='react'?{...React,useState:value=>{const index=hook++;return React.useState(index in seeds?seeds[index]:value);}}:name.includes('commissionRuleConfiguration')?require('../lib/commissionRuleConfiguration.ts'):name.includes('adminPortalModel')?model:name.includes('AdminPortalShared')?shared:require(name),Date,Intl,console});
+ return compiled.exports;
+}
+
+test('actual preview Creator fixture renders Affiliate list and both inline commission forms',()=>{
+ const helper=source('tests/helpers/adminPortalPreview.mjs');
+ const definition=helper.slice(helper.indexOf('const creator='),helper.indexOf('const fixtures='));
+ const fixture=vm.runInNewContext(definition+'creators',{base:{ok:true},id:'00000000-0000-0000-0000-000000000001',now:'2026-10-03T12:00:00Z',today:'2026-10-03'});
+ for(const type of [null,'percentage','fixed']){
+  const seeds=type?[null,true,'link',fixture.creators[0].id,'test-creator',false,'','inline',type,'']:[];
+  const {AdminPortalAffiliate}=affiliateComponents(sharedComponents(),seeds);
+  const html=renderToStaticMarkup(React.createElement(AdminPortalAffiliate,{data:fixture,error:'',refresh:()=>{},onCreator:()=>{}}));
+  assert.match(html,/Test Creator/);assert.match(html,/AFFILIATE ANLEGEN/);
+  if(type){assert.match(html,/Berechnungsart/);assert.match(html,type==='percentage'?/Provision in %/:/Provision pro bezahlter Bestellung/);}
+  else assert.match(html,/gloamatcha.com\/r\/test-creator/);
+ }
+});
+test('affiliate empty state provides creation and direct Creator prerequisite',()=>{
+ const {AdminPortalAffiliate}=affiliateComponents(sharedComponents());
+ const html=renderToStaticMarkup(React.createElement(AdminPortalAffiliate,{data:{creators:[],links:[],codes:[]},error:'',refresh:()=>{},onCreator:()=>{}}));
+ assert.match(html,/Noch keine Affiliate-Beziehungen/);assert.match(html,/AFFILIATE ANLEGEN/);assert.match(html,/Lege zuerst einen Creator an/);
+});
+test('affiliate URL, slug suggestion and server configuration validation',()=>{
+ const {affiliateUrl,suggestedAffiliateSlug}=affiliateComponents(sharedComponents());
+ assert.equal(affiliateUrl('lena-matcha'),'https://gloamatcha.com/r/lena-matcha');assert.equal(suggestedAffiliateSlug('Léna Matcha'),'lena-matcha');
+ const {affiliateConfiguration}=require('../lib/adminAffiliateConfiguration.ts');
+ for(const slug of ['', 'a', '-lena','Lena','lena/a','lena-'])assert.throws(()=>affiliateConfiguration({slug}));
+ assert.equal(affiliateConfiguration({slug:'lena',status:'paused'}).active,false);
+ assert.equal(affiliateConfiguration({slug:'lena',status:'active'}).active,true);
+ assert.throws(()=>affiliateConfiguration({slug:'lena',startsAt:'2026-10-05',endsAt:'2026-10-04'}));
+ assert.equal('amount_cents' in affiliateConfiguration({slug:'lena',amount_cents:999999}),false);
+});
+async function affiliateAdminRequest(body,{creator=true,rule=true,duplicate=false,relationshipFailure=false}={}){
+ const writes=[],rpcCalls=[],capabilities=[];const compiled={exports:{}};
+ const client={rpc:async(name,values)=>{
+  rpcCalls.push({name,values});
+  const error=!creator||(values.p_commission_rule_id&&!rule)?{code:'22023'}:duplicate||relationshipFailure==='duplicate'?{code:'23505'}:relationshipFailure?{code:'XX000'}:null;
+  return {data:error?null:{id:'created',commission_rule_id:values.p_commission_rule_id??'created-rule'},error};
+ },from:table=>{
+  let lookup='',pending=null;const query={select:()=>query,eq:column=>{lookup=column;return query;},is:()=>query,limit:()=>query,ilike:column=>{lookup=column;return query;},neq:()=>query,
+   maybeSingle:async()=>({data:table.startsWith('affiliate_')?(lookup==='id'?{id:'existing',creator_id:'creator'}:duplicate?{id:'duplicate'}:null):(table==='creators'?creator:rule)?{id:'validated',creator_id:'creator',display_name:'Test Creator'}:null,error:null}),
+   insert:values=>{pending={table,values};writes.push(pending);return query;},update:values=>{pending={table,values};writes.push(pending);return query;},
+   single:async()=>({data:{id:'created'},error:null})};return query;
+ }};
+ const js=ts.transpileModule(source('app/api/admin/creators/route.ts'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ vm.runInNewContext(js,{module:compiled,exports:compiled.exports,require:name=>name.includes('commissionRuleConfiguration')?require('../lib/commissionRuleConfiguration.ts'):name.includes('adminActionRoute')?{requireAdminIdentity:async(_request,capability)=>{capabilities.push(capability);return {ok:true,session:{userId:'operator'}};}}:name.includes('supabaseAdmin')?{getSupabaseAdmin:()=>client}:name.includes('adminAffiliateConfiguration')?require('../lib/adminAffiliateConfiguration.ts'):name.includes('creatorAffiliate')?{}:name.includes('adminPortalRead')?{}:require(name),Response,Request,Date,console});
+ const response=await compiled.exports.POST(new Request('http://localhost/api/admin/creators',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}));
+ return {response,writes,rpcCalls,capabilities};
+}
+
+test('inline success uses one transactional RPC without REST catalogue/commission writes',async()=>{
+ const result=await affiliateAdminRequest({action:'create_affiliate_link',creatorId:'creator',slug:'lena',commissionMode:'inline',calculationType:'fixed',commissionValue:'5,00',base:'merchandise_net'},{rule:false});
+ assert.equal(result.response.status,200);assert.equal(result.writes.length,0);assert.equal(result.rpcCalls.length,1);assert.equal(result.rpcCalls[0].name,'admin_save_affiliate_configuration');
+});
+test('relationship failures surface the atomic RPC error without any two-write fallback',async()=>{
+ for(const failure of [true,'duplicate']){
+  const result=await affiliateAdminRequest({action:'create_affiliate_link',creatorId:'creator',slug:'lena',commissionMode:'inline',calculationType:'percentage',commissionValue:'12,5',base:'merchandise_net'},{rule:false,relationshipFailure:failure});
+  assert.equal(result.response.status,failure==='duplicate'?409:503);
+  assert.equal(result.writes.length,0);assert.equal(result.rpcCalls.length,1);
+ }
+});
+test('failed relationship write never changes or deletes a reused rule or commission history',async()=>{
+ const result=await affiliateAdminRequest({action:'edit_affiliate',type:'code',id:'existing',code:'LENA10',commissionMode:'inline',calculationType:'fixed',commissionValue:'5,00',base:'merchandise_net'},{relationshipFailure:true});
+ assert.equal(result.response.status,503);assert.equal(result.writes.length,0);assert.equal(result.rpcCalls.length,1);
+});
+test('072 forbids the DELETE needed for compensation and has no combined affiliate writer',()=>{
+ const migration=source('supabase/migrations/072_admin_core_connections.sql');
+ const catalogue=migration.slice(migration.indexOf('v_catalogue text[]'),migration.indexOf('-- Remediate the already-deployed 071'));
+ assert.match(catalogue,/'creator_commission_rules'/);assert.match(catalogue,/revoke all privileges on table public\.%I from service_role/);assert.match(catalogue,/grant select, insert, update on table public\.%I to service_role/);
+ assert.match(migration,/DELETE IS GRANTED NOWHERE/);assert.match(migration,/raise exception '072: DELETE is granted on:/);
+ const functions=[...migration.matchAll(/create or replace function public\.([a-z_]+)/g)].map(m=>m[1]);
+ assert.deepEqual(functions.filter(name=>/affiliate/.test(name)),['resolve_affiliate_link','resolve_affiliate_code','record_affiliate_click']);
+});
+test('affiliate creation requires a server-validated creator and commission rule',async()=>{
+ const valid={action:'create_affiliate_link',creatorId:'creator',slug:'lena',commissionRuleId:'rule'};
+ for(const [body,options] of [[{...valid,creatorId:''},{}],[valid,{creator:false}],[valid,{rule:false}],[{...valid,slug:'../x'},{}]]){
+  const result=await affiliateAdminRequest(body,options);assert.equal(result.response.status,400);assert.equal(result.writes.length,0);
+ }
+ const result=await affiliateAdminRequest({...valid,commissionCents:999999,creator_id:'forged',status:'paused'});
+ assert.equal(result.response.status,200);assert.ok(result.capabilities.includes('write'));assert.equal(result.writes.length,0);assert.equal(result.rpcCalls[0].values.p_creator_id,'creator');assert.equal(result.rpcCalls[0].values.p_commission_rule_id,'rule');assert.equal(result.rpcCalls[0].values.p_active,false);assert.equal(result.rpcCalls[0].values.commissionCents,undefined);
+});
+
+test('affiliate creation contains editable inline commission fields by default',()=>{
+ const fixture={creators:[{id:'creator',display_name:'Test Creator'}],rules:[],links:[],codes:[]};
+ for(const [type,value] of [['percentage','12,5'],['fixed','5,00']]){
+  const {AdminPortalAffiliate}=affiliateComponents(sharedComponents(),[null,true,'link','creator','lena',false,'','inline',type,value]);
+  const html=renderToStaticMarkup(React.createElement(AdminPortalAffiliate,{data:fixture,error:'',refresh:()=>{},onCreator:()=>{}}));
+  assert.match(html,/value="inline" selected=""/);assert.match(html,/Berechnungsart/);assert.match(html,new RegExp('value="'+value+'"'));assert.match(html,/Regelname \(optional\)/);
+  assert.doesNotMatch(html,/name="commissionRuleId"/);
+  if(type==='percentage'){assert.match(html,/Provision in %/);assert.doesNotMatch(html,/Provision pro bezahlter Bestellung<\/label>/);assert.match(html,/<span>%<\/span>/);}
+  else {assert.match(html,/Provision pro bezahlter Bestellung/);assert.doesNotMatch(html,/Provision in %/);assert.match(html,/<span>€<\/span>/);}
+ }
+});
+test('inline save converts requested decimals on the server and associates a new rule',async()=>{
+ for(const [type,value,expected] of [['percentage','12,5',1250],['percentage','7,25',725],['fixed','5,00',500],['fixed','0,29',29]]){
+  const result=await affiliateAdminRequest({action:'create_affiliate_link',creatorId:'creator',slug:'lena',commissionMode:'inline',calculationType:type,commissionValue:value,base:'merchandise_net',commissionCents:999999},{rule:false});
+  assert.equal(result.response.status,200);assert.equal(result.writes.length,0);assert.equal(result.rpcCalls.length,1);
+  assert.equal(result.rpcCalls[0].values[type==='percentage'?'p_percent_basis_points':'p_fixed_cents'],expected);
+  assert.equal(result.rpcCalls[0].values.p_rule_label,null);assert.equal(result.rpcCalls[0].values.p_commission_rule_id,null);assert.equal(result.rpcCalls[0].values.commissionCents,undefined);
+ }
+});
+test('invalid inline values and duplicate relationships create no rules or commissions',async()=>{
+ const base={action:'create_affiliate_link',creatorId:'creator',slug:'lena',commissionMode:'inline',base:'merchandise_net'};
+ for(const [type,value] of [['percentage','100.01'],['percentage','0'],['fixed','0'],['fixed','-1']]){
+  const result=await affiliateAdminRequest({...base,calculationType:type,commissionValue:value},{rule:false});assert.equal(result.response.status,400);assert.equal(result.writes.length,0);
+ }
+ const duplicate=await affiliateAdminRequest({...base,calculationType:'fixed',commissionValue:'5,00'},{rule:false,duplicate:true});assert.equal(duplicate.response.status,409);assert.equal(duplicate.writes.length,0);
+});
+test('future inline edits reuse or create rules without modifying commission history',async()=>{
+ const body={action:'edit_affiliate',type:'code',id:'existing',code:'LENA10',commissionMode:'inline',calculationType:'percentage',commissionValue:'10',base:'merchandise_net'};
+ const changed=await affiliateAdminRequest(body,{rule:false});assert.equal(changed.response.status,200);assert.equal(changed.writes.length,0);assert.equal(changed.rpcCalls[0].values.p_relationship_type,'code');
+ const reused=await affiliateAdminRequest(body);assert.equal(reused.response.status,200);assert.equal(reused.writes.length,0);assert.equal(reused.rpcCalls[0].values.p_rule_mode,'inline');
+ const {commissionRuleInputValue}=require('../lib/commissionRuleConfiguration.ts');assert.equal(commissionRuleInputValue({percent_basis_points:1000}),'10,00');assert.equal(commissionRuleInputValue({fixed_cents:29}),'0,29');
+});
+test('database uniqueness rejects duplicate affiliate slugs with a clear conflict',async()=>{
+ const result=await affiliateAdminRequest({action:'create_affiliate_link',creatorId:'creator',slug:'lena'},{duplicate:true});assert.equal(result.response.status,409);assert.match((await result.response.json()).error,/bereits vergeben/);
+});
+test('editing future affiliate configuration never changes creator or commission history',async()=>{
+ const result=await affiliateAdminRequest({action:'edit_affiliate',type:'code',id:'existing',creatorId:'forged',code:'LENA10',commissionRuleId:'rule',startsAt:'2026-10-01',endsAt:'2027-01-01',status:'active'});
+ assert.equal(result.response.status,200);assert.equal(result.writes.length,0);assert.equal(result.rpcCalls[0].values.p_creator_id,null);assert.equal(result.rpcCalls[0].values.p_reference,'LENA10');assert.equal(result.rpcCalls[0].values.p_commission_rule_id,'rule');assert.equal(result.rpcCalls[0].values.p_relationship_id,'existing');
+});
+
+function ruleFields(type='',value=''){
+ const compiled={exports:{}};let hook=0;
+ const js=ts.transpileModule(source('app/AdminCommissionRuleFields.tsx'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ vm.runInNewContext(js,{module:compiled,exports:compiled.exports,require:name=>name==='react'?{...React,useState:()=>React.useState(hook++===0?type:value)}:name.includes('commissionRuleConfiguration')?require('../lib/commissionRuleConfiguration.ts'):require(name),Date,Intl,console});
+ return compiled.exports;
+}
+test('calculation choice renders only the corresponding human value field and preview',()=>{
+ for(const [type,value] of [['',''],['percentage','12,5'],['fixed','5,00']]){
+  const {AdminCommissionRuleFields}=ruleFields(type,value);const html=renderToStaticMarkup(React.createElement(AdminCommissionRuleFields));
+  assert.match(html,/Berechnungsart/);assert.match(html,/Prozentual/);assert.match(html,/Fester Betrag pro bezahlter Bestellung/);
+  if(type==='percentage'){assert.match(html,/Provision in %/);assert.doesNotMatch(html,/Provision pro bezahlter Bestellung \(EUR\)/);assert.match(html,/12,5 % pro bezahlter Bestellung/);}
+  if(type==='fixed'){assert.match(html,/Provision pro bezahlter Bestellung \(EUR\)/);assert.doesNotMatch(html,/Provision in %/);assert.match(html,/5,00.*pro bezahlter Bestellung/);}
+  if(!type)assert.doesNotMatch(html,/name="commissionValue"/);
+ }
+});
+test('decimal rule configuration is exact, positive, bounded and integer-only',()=>{
+ const {commissionValueConfiguration,validateCommissionRule,commissionRuleSummary}=require('../lib/commissionRuleConfiguration.ts');
+ assert.deepEqual(commissionValueConfiguration('percentage','12,5'),{percentBasisPoints:1250,fixedCents:null});
+ assert.deepEqual(commissionValueConfiguration('fixed','5,00'),{percentBasisPoints:null,fixedCents:500});
+ assert.equal(commissionValueConfiguration('fixed','0.29').fixedCents,29);
+ assert.equal(commissionValueConfiguration('percentage','100').percentBasisPoints,10000);
+ for(const type of ['percentage','fixed'])for(const raw of ['0','-1','1.001','1e2','NaN','Infinity',''])assert.throws(()=>commissionValueConfiguration(type,raw));
+ assert.throws(()=>commissionValueConfiguration('percentage','100.01'));assert.throws(()=>commissionValueConfiguration('fixed','21474836.48'));
+ const base={label:'Anna',base:'merchandise_net'};
+ for(const values of [{},{percentBasisPoints:0},{percentBasisPoints:10001},{percentBasisPoints:12.5},{fixedCents:0},{fixedCents:1.5},{fixedCents:500,percentBasisPoints:1250}])assert.throws(()=>validateCommissionRule({...base,...values}));
+ assert.equal(commissionRuleSummary({percent_basis_points:1250}),'12,5 % pro bezahlter Bestellung');
+ assert.match(commissionRuleSummary({fixed_cents:500}),/^5,00.*pro bezahlter Bestellung$/);
+});
+test('rule creation validates configuration server-side and never writes commission history',async()=>{
+ const base={action:'create_commission_rule',label:'Anna',base:'merchandise_net'};
+ for(const configuration of [{percentBasisPoints:1250,fixedCents:null},{percentBasisPoints:null,fixedCents:500}]){
+  const result=await affiliateAdminRequest({...base,...configuration,orderId:'forged-order',commissionCents:999999});
+  assert.equal(result.response.status,200);assert.deepEqual(result.writes.map(w=>w.table),['creator_commission_rules']);
+  assert.equal(result.writes[0].values.commissionCents,undefined);assert.equal(result.writes[0].values.orderId,undefined);
+ }
+ const rejected=await affiliateAdminRequest({...base,percentBasisPoints:1250,fixedCents:500});assert.equal(rejected.response.status,400);assert.equal(rejected.writes.length,0);
 });

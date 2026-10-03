@@ -167,10 +167,10 @@ test("2e: 054 is still the price migration, and adds no schema", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(files.length, 72);
-  assert.equal(files[files.length - 19], MIGRATION,
+  assert.equal(files.length, 73);
+  assert.equal(files[files.length - 20], MIGRATION,
     "054 is no longer where its own number puts it");
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 72), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 73), [],
     "a migration 072 or beyond appeared");
   for (const banned of ["create table", "create function", "create policy",
                         "grant ", "revoke ", "add column"]) {
@@ -303,3 +303,6 @@ test("4c: zones without a threshold never ship free, whatever the cart costs", (
   assert.equal(computeShippingGrossCents(eu, 7899), 1290);
   assert.equal(computeShippingGrossCents(eu, 7900), 0);
 });
+
+// Migration-stack guard repinned for the explicitly added 073 RPC only.
+// Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.

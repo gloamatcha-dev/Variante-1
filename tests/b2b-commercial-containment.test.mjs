@@ -352,13 +352,13 @@ test("5: 053 owns its number, and 001-052 are untouched by it", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(files.length, 72);
+  assert.equal(files.length, 73);
   // 054 (the B2C price alignment) now sits above it, so 053 is no longer
   // the newest. What this guard is about is that 053 occupies its own
   // number and nothing was slipped in beside it.
   assert.deepEqual(files.filter(f => f.startsWith("053")), [MIGRATION],
     "there must be exactly one migration 053");
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 72), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 73), [],
     "a migration 072 or beyond appeared");
   // It names none of them as something to change.
   for (const f of files.slice(0, -1)) {
@@ -376,3 +376,6 @@ test("5b: it carries its own read-only verification", () => {
   assert.match(migration, /select slug, discount_pct from public\.b2b_offer_models/);
   assert.match(migration, /select count\(\*\) from public\.b2b_product_sizes;\s*-> 2/);
 });
+
+// Migration-stack guard repinned for the explicitly added 073 RPC only.
+// Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.

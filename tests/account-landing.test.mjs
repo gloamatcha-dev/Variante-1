@@ -168,7 +168,7 @@ test("1c: the auth MECHANISM is untouched; only the DESTINATION moved", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/business-expenses-migration.test.mjs.
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("073")),
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("074")),
     "a migration 072 or beyond appeared");
 });
 
@@ -393,3 +393,6 @@ test("6: one step down at 900, full-width actions at 520", () => {
       `"Dein GLOA." (${Math.round(size * 0.52 * 10)}px) overflows ${w - 2 * gutter}px at ${w}px`);
   }
 });
+
+// Migration-stack guard repinned for the explicitly added 073 RPC only.
+// Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.

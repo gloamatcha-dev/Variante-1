@@ -1,0 +1,183 @@
+-- 073 PREFLIGHT: one read-only SELECT, valid with existing Production business data.
+-- Exact prerequisite definitions below are from unchanged 001..072 on PostgreSQL 17.
+with
+expected_columns(tbl,col,typ,required,default_expr) as (values
+  ('admin_activity_log', 'id', 'uuid', true, 'gen_random_uuid()'),
+  ('admin_activity_log', 'actor_user_id', 'uuid', true, null),
+  ('admin_activity_log', 'actor_email_snapshot', 'text', true, null),
+  ('admin_activity_log', 'actor_name_snapshot', 'text', true, null),
+  ('admin_activity_log', 'actor_role_snapshot', 'text', true, null),
+  ('admin_activity_log', 'module', 'text', true, null),
+  ('admin_activity_log', 'action', 'text', true, null),
+  ('admin_activity_log', 'entity_type', 'text', true, null),
+  ('admin_activity_log', 'entity_id', 'text', true, null),
+  ('admin_activity_log', 'summary', 'text', true, null),
+  ('admin_activity_log', 'metadata', 'jsonb', true, '''{}''::jsonb'),
+  ('admin_activity_log', 'operation_id', 'uuid', true, null),
+  ('admin_activity_log', 'created_at', 'timestamp with time zone', true, 'now()'),
+  ('admin_users', 'user_id', 'uuid', true, null),
+  ('admin_users', 'email', 'text', true, null),
+  ('admin_users', 'display_name', 'text', true, null),
+  ('admin_users', 'role', 'text', true, null),
+  ('admin_users', 'is_active', 'boolean', true, 'true'),
+  ('admin_users', 'created_at', 'timestamp with time zone', true, 'now()'),
+  ('admin_users', 'updated_at', 'timestamp with time zone', true, 'now()'),
+  ('affiliate_codes', 'id', 'uuid', true, 'gen_random_uuid()'),
+  ('affiliate_codes', 'creator_id', 'uuid', true, null),
+  ('affiliate_codes', 'code', 'text', true, null),
+  ('affiliate_codes', 'active', 'boolean', true, 'true'),
+  ('affiliate_codes', 'starts_at', 'timestamp with time zone', true, 'now()'),
+  ('affiliate_codes', 'ends_at', 'timestamp with time zone', false, null),
+  ('affiliate_codes', 'commission_rule_id', 'uuid', false, null),
+  ('affiliate_codes', 'discount_code', 'text', false, null),
+  ('affiliate_codes', 'note', 'text', false, null),
+  ('affiliate_codes', 'created_by', 'uuid', false, null),
+  ('affiliate_codes', 'created_at', 'timestamp with time zone', true, 'now()'),
+  ('affiliate_codes', 'updated_at', 'timestamp with time zone', false, null),
+  ('affiliate_links', 'id', 'uuid', true, 'gen_random_uuid()'),
+  ('affiliate_links', 'creator_id', 'uuid', true, null),
+  ('affiliate_links', 'slug', 'text', true, null),
+  ('affiliate_links', 'active', 'boolean', true, 'true'),
+  ('affiliate_links', 'starts_at', 'timestamp with time zone', true, 'now()'),
+  ('affiliate_links', 'ends_at', 'timestamp with time zone', false, null),
+  ('affiliate_links', 'commission_rule_id', 'uuid', false, null),
+  ('affiliate_links', 'customer_discount_code', 'text', false, null),
+  ('affiliate_links', 'note', 'text', false, null),
+  ('affiliate_links', 'created_by', 'uuid', false, null),
+  ('affiliate_links', 'created_at', 'timestamp with time zone', true, 'now()'),
+  ('affiliate_links', 'updated_at', 'timestamp with time zone', false, null),
+  ('creator_commission_rules', 'id', 'uuid', true, 'gen_random_uuid()'),
+  ('creator_commission_rules', 'label', 'text', true, null),
+  ('creator_commission_rules', 'percent_basis_points', 'integer', false, null),
+  ('creator_commission_rules', 'fixed_cents', 'integer', false, null),
+  ('creator_commission_rules', 'base', 'text', true, null),
+  ('creator_commission_rules', 'reverse_on_refund', 'boolean', true, 'true'),
+  ('creator_commission_rules', 'note', 'text', false, null),
+  ('creator_commission_rules', 'created_by', 'uuid', false, null),
+  ('creator_commission_rules', 'created_at', 'timestamp with time zone', true, 'now()'),
+  ('creator_roles', 'creator_id', 'uuid', true, null),
+  ('creator_roles', 'role', 'text', true, null),
+  ('creator_roles', 'created_at', 'timestamp with time zone', true, 'now()'),
+  ('creators', 'id', 'uuid', true, 'gen_random_uuid()'),
+  ('creators', 'display_name', 'text', true, null),
+  ('creators', 'email', 'text', true, null),
+  ('creators', 'instagram', 'text', false, null),
+  ('creators', 'tiktok', 'text', false, null),
+  ('creators', 'portfolio_url', 'text', false, null),
+  ('creators', 'country', 'text', false, null),
+  ('creators', 'status', 'text', true, '''prospect''::text'),
+  ('creators', 'notes', 'text', false, null),
+  ('creators', 'created_by', 'uuid', false, null),
+  ('creators', 'created_at', 'timestamp with time zone', true, 'now()'),
+  ('creators', 'updated_at', 'timestamp with time zone', false, null)
+),
+expected_constraints(tbl,name,definition) as (values
+  ('admin_users', 'admin_users_display_name_check', 'CHECK (((length(btrim(display_name)) >= 1) AND (length(btrim(display_name)) <= 120)))'),
+  ('admin_users', 'admin_users_email_check', 'CHECK ((((length(btrim(email)) >= 3) AND (length(btrim(email)) <= 200)) AND (POSITION((''@''::text) IN (email)) > 1) AND (email = lower(btrim(email)))))'),
+  ('admin_users', 'admin_users_pkey', 'PRIMARY KEY (user_id)'),
+  ('admin_users', 'admin_users_require_owner', 'TRIGGER DEFERRABLE INITIALLY DEFERRED'),
+  ('admin_users', 'admin_users_role_check', 'CHECK ((role = ANY (ARRAY[''owner''::text, ''admin''::text, ''viewer''::text])))'),
+  ('admin_users', 'admin_users_user_id_fkey', 'FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE RESTRICT'),
+  ('admin_activity_log', 'admin_activity_log_action_check', 'CHECK (((length(btrim(action)) >= 1) AND (length(btrim(action)) <= 80)))'),
+  ('admin_activity_log', 'admin_activity_log_actor_email_snapshot_check', 'CHECK (((length(btrim(actor_email_snapshot)) >= 3) AND (length(btrim(actor_email_snapshot)) <= 200)))'),
+  ('admin_activity_log', 'admin_activity_log_actor_name_snapshot_check', 'CHECK (((length(btrim(actor_name_snapshot)) >= 1) AND (length(btrim(actor_name_snapshot)) <= 120)))'),
+  ('admin_activity_log', 'admin_activity_log_actor_role_snapshot_check', 'CHECK ((actor_role_snapshot = ANY (ARRAY[''owner''::text, ''admin''::text, ''viewer''::text])))'),
+  ('admin_activity_log', 'admin_activity_log_actor_user_id_fkey', 'FOREIGN KEY (actor_user_id) REFERENCES admin_users(user_id) ON DELETE RESTRICT'),
+  ('admin_activity_log', 'admin_activity_log_entity_id_check', 'CHECK (((length(btrim(entity_id)) >= 1) AND (length(btrim(entity_id)) <= 120)))'),
+  ('admin_activity_log', 'admin_activity_log_entity_type_check', 'CHECK (((length(btrim(entity_type)) >= 1) AND (length(btrim(entity_type)) <= 40)))'),
+  ('admin_activity_log', 'admin_activity_log_event_key', 'UNIQUE (module, action, operation_id)'),
+  ('admin_activity_log', 'admin_activity_log_metadata_check', 'CHECK (((jsonb_typeof(metadata) = ''object''::text) AND (length((metadata)::text) <= 1024)))'),
+  ('admin_activity_log', 'admin_activity_log_module_check', 'CHECK ((module = ANY (ARRAY[''orders''::text, ''inventory''::text, ''b2b''::text, ''finance''::text, ''documents''::text, ''fulfillment''::text, ''customer_rights''::text, ''creator''::text])))'),
+  ('admin_activity_log', 'admin_activity_log_pkey', 'PRIMARY KEY (id)'),
+  ('admin_activity_log', 'admin_activity_log_summary_check', 'CHECK (((length(btrim(summary)) >= 1) AND (length(btrim(summary)) <= 300)))'),
+  ('creators', 'creators_country_check', 'CHECK (((country IS NULL) OR ((char_length(btrim(country)) >= 2) AND (char_length(btrim(country)) <= 2))))'),
+  ('creators', 'creators_created_by_fkey', 'FOREIGN KEY (created_by) REFERENCES auth.users(id)'),
+  ('creators', 'creators_display_name_check', 'CHECK (((char_length(btrim(display_name)) >= 1) AND (char_length(btrim(display_name)) <= 120)))'),
+  ('creators', 'creators_email_check', 'CHECK (((char_length(btrim(email)) >= 3) AND (char_length(btrim(email)) <= 255)))'),
+  ('creators', 'creators_instagram_check', 'CHECK (((instagram IS NULL) OR ((char_length(btrim(instagram)) >= 1) AND (char_length(btrim(instagram)) <= 120))))'),
+  ('creators', 'creators_notes_check', 'CHECK (((notes IS NULL) OR (char_length(notes) <= 4000)))'),
+  ('creators', 'creators_pkey', 'PRIMARY KEY (id)'),
+  ('creators', 'creators_portfolio_url_check', 'CHECK (((portfolio_url IS NULL) OR ((char_length(btrim(portfolio_url)) >= 1) AND (char_length(btrim(portfolio_url)) <= 500))))'),
+  ('creators', 'creators_status_check', 'CHECK ((status = ANY (ARRAY[''prospect''::text, ''active''::text, ''paused''::text, ''ended''::text, ''rejected''::text])))'),
+  ('creators', 'creators_tiktok_check', 'CHECK (((tiktok IS NULL) OR ((char_length(btrim(tiktok)) >= 1) AND (char_length(btrim(tiktok)) <= 120))))'),
+  ('creator_roles', 'creator_roles_creator_id_fkey', 'FOREIGN KEY (creator_id) REFERENCES creators(id) ON DELETE CASCADE'),
+  ('creator_roles', 'creator_roles_pkey', 'PRIMARY KEY (creator_id, role)'),
+  ('creator_roles', 'creator_roles_role_check', 'CHECK ((role = ANY (ARRAY[''influencer''::text, ''ugc_creator''::text, ''affiliate''::text])))'),
+  ('creator_commission_rules', 'creator_commission_rules_base_check', 'CHECK ((base = ANY (ARRAY[''merchandise_net''::text, ''merchandise_gross''::text, ''order_gross''::text])))'),
+  ('creator_commission_rules', 'creator_commission_rules_created_by_fkey', 'FOREIGN KEY (created_by) REFERENCES auth.users(id)'),
+  ('creator_commission_rules', 'creator_commission_rules_fixed_cents_check', 'CHECK (((fixed_cents IS NULL) OR (fixed_cents > 0)))'),
+  ('creator_commission_rules', 'creator_commission_rules_label_check', 'CHECK (((char_length(btrim(label)) >= 1) AND (char_length(btrim(label)) <= 120)))'),
+  ('creator_commission_rules', 'creator_commission_rules_note_check', 'CHECK (((note IS NULL) OR (char_length(note) <= 1000)))'),
+  ('creator_commission_rules', 'creator_commission_rules_one_shape_check', 'CHECK (((percent_basis_points IS NULL) <> (fixed_cents IS NULL)))'),
+  ('creator_commission_rules', 'creator_commission_rules_percent_basis_points_check', 'CHECK (((percent_basis_points IS NULL) OR ((percent_basis_points > 0) AND (percent_basis_points <= 10000))))'),
+  ('creator_commission_rules', 'creator_commission_rules_pkey', 'PRIMARY KEY (id)'),
+  ('affiliate_links', 'affiliate_links_commission_rule_id_fkey', 'FOREIGN KEY (commission_rule_id) REFERENCES creator_commission_rules(id) ON DELETE RESTRICT'),
+  ('affiliate_links', 'affiliate_links_created_by_fkey', 'FOREIGN KEY (created_by) REFERENCES auth.users(id)'),
+  ('affiliate_links', 'affiliate_links_creator_id_fkey', 'FOREIGN KEY (creator_id) REFERENCES creators(id) ON DELETE RESTRICT'),
+  ('affiliate_links', 'affiliate_links_customer_discount_code_check', 'CHECK (((customer_discount_code IS NULL) OR ((char_length(btrim(customer_discount_code)) >= 2) AND (char_length(btrim(customer_discount_code)) <= 60))))'),
+  ('affiliate_links', 'affiliate_links_note_check', 'CHECK (((note IS NULL) OR (char_length(note) <= 1000)))'),
+  ('affiliate_links', 'affiliate_links_pkey', 'PRIMARY KEY (id)'),
+  ('affiliate_links', 'affiliate_links_slug_check', 'CHECK ((slug ~ ''^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$''::text))'),
+  ('affiliate_links', 'affiliate_links_window_check', 'CHECK (((ends_at IS NULL) OR (ends_at > starts_at)))'),
+  ('affiliate_codes', 'affiliate_codes_code_check', 'CHECK ((code ~ ''^[A-Za-z0-9][A-Za-z0-9_-]{1,38}[A-Za-z0-9]$''::text))'),
+  ('affiliate_codes', 'affiliate_codes_commission_rule_id_fkey', 'FOREIGN KEY (commission_rule_id) REFERENCES creator_commission_rules(id) ON DELETE RESTRICT'),
+  ('affiliate_codes', 'affiliate_codes_created_by_fkey', 'FOREIGN KEY (created_by) REFERENCES auth.users(id)'),
+  ('affiliate_codes', 'affiliate_codes_creator_id_fkey', 'FOREIGN KEY (creator_id) REFERENCES creators(id) ON DELETE RESTRICT'),
+  ('affiliate_codes', 'affiliate_codes_discount_code_check', 'CHECK (((discount_code IS NULL) OR ((char_length(btrim(discount_code)) >= 2) AND (char_length(btrim(discount_code)) <= 60))))'),
+  ('affiliate_codes', 'affiliate_codes_note_check', 'CHECK (((note IS NULL) OR (char_length(note) <= 1000)))'),
+  ('affiliate_codes', 'affiliate_codes_pkey', 'PRIMARY KEY (id)'),
+  ('affiliate_codes', 'affiliate_codes_window_check', 'CHECK (((ends_at IS NULL) OR (ends_at > starts_at)))')
+),
+expected_indexes(name,definition) as (values
+  ('idx_affiliate_codes_code', 'CREATE UNIQUE INDEX idx_affiliate_codes_code ON public.affiliate_codes USING btree (upper(btrim(code)))'),
+  ('idx_affiliate_links_slug', 'CREATE UNIQUE INDEX idx_affiliate_links_slug ON public.affiliate_links USING btree (slug)'),
+  ('idx_creators_email', 'CREATE UNIQUE INDEX idx_creators_email ON public.creators USING btree (lower(btrim(email)))')
+),
+protected_tables(name,tier) as (values
+  ('creators', 'catalogue'),
+  ('creator_roles', 'catalogue'),
+  ('creator_applications', 'catalogue'),
+  ('creator_commission_rules', 'catalogue'),
+  ('affiliate_links', 'catalogue'),
+  ('affiliate_codes', 'catalogue'),
+  ('affiliate_link_clicks', 'catalogue'),
+  ('creator_payouts', 'catalogue'),
+  ('ugc_assignments', 'catalogue'),
+  ('documents', 'catalogue'),
+  ('document_links', 'catalogue'),
+  ('operations_config', 'catalogue'),
+  ('financial_events', 'money'),
+  ('order_attributions', 'money'),
+  ('creator_commissions', 'money'),
+  ('business_expenses', 'money'),
+  ('admin_users', 'audit'),
+  ('admin_activity_log', 'audit')
+),
+tables as (select t.*,c.oid,c.relrowsecurity from protected_tables t left join pg_namespace n on n.nspname='public' left join pg_class c on c.relnamespace=n.oid and c.relname=t.name and c.relkind='r'),
+roles as (select count(*)=3 as ok from pg_roles where rolname in ('anon','authenticated','service_role')),
+writer as (select p.*,pg_get_functiondef(p.oid) as definition from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='admin_save_affiliate_configuration'),
+checks(ord,name,ok,detail) as (
+  select 10,'Required roles',(select ok from roles),'anon, authenticated, service_role'
+  union all select 11,'Required 072 tables',not exists(select 1 from tables where oid is null),'Existing catalogue, money and audit tables'
+  union all select 12,'Required columns/types/nullability',not exists(select 1 from expected_columns e where not exists(select 1 from pg_attribute a join pg_class c on c.oid=a.attrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname=e.tbl and a.attname=e.col and not a.attisdropped and format_type(a.atttypid,a.atttypmod)=e.typ and a.attnotnull=e.required and (select pg_get_expr(d.adbin,d.adrelid) from pg_attrdef d where d.adrelid=c.oid and d.adnum=a.attnum) is not distinct from e.default_expr)),'Exact 072 configuration/audit shape'
+  union all select 13,'Constraints and foreign keys',not exists(select 1 from expected_constraints e where not exists(select 1 from pg_constraint k where k.conrelid=to_regclass('public.'||e.tbl) and k.conname=e.name and k.convalidated and replace(pg_get_constraintdef(k.oid),'public.','')=e.definition)),'Includes one commission shape, bounds, validity windows, actor FK, roles, audit creator vocabulary and event uniqueness'
+  union all select 14,'Unique slug/code/creator indexes',not exists(select 1 from expected_indexes e where not exists(select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace join pg_index i on i.indexrelid=c.oid where n.nspname='public' and c.relname=e.name and i.indisunique and i.indisvalid and i.indisready and pg_get_indexdef(c.oid)=e.definition)),'Case-insensitive code index is unchanged'
+  union all select 15,'072 RLS and policy posture',not exists(select 1 from tables t where not coalesce(relrowsecurity,false) or exists(select 1 from pg_policy p where p.polrelid=t.oid)),'Protected tables have RLS and no browser policies'
+  union all select 16,'Browser roles have no protected table/column writes',case when (select ok from roles) then not exists(select 1 from tables t cross join (values ('anon'),('authenticated')) r(name) where t.oid is null or has_table_privilege(r.name,t.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') or has_any_column_privilege(r.name,t.oid,'SELECT,INSERT,UPDATE,REFERENCES')) else false end,'Includes catalogue, historical money and audit tables'
+  union all select 17,'Catalogue service-role ACL',case when (select ok from roles) then not exists(select 1 from tables t where tier='catalogue' and (t.oid is null or not has_table_privilege('service_role',t.oid,'SELECT') or not has_table_privilege('service_role',t.oid,'INSERT') or not has_table_privilege('service_role',t.oid,'UPDATE') or has_table_privilege('service_role',t.oid,'DELETE,TRUNCATE,REFERENCES,TRIGGER'))) else false end,'SELECT/INSERT/UPDATE only; no DELETE grant added'
+  union all select 18,'History/Finance/expenses remain read-only',case when (select ok from roles) then not exists(select 1 from tables t where tier='money' and (t.oid is null or not has_table_privilege('service_role',t.oid,'SELECT') or has_table_privilege('service_role',t.oid,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') or has_any_column_privilege('service_role',t.oid,'INSERT,UPDATE,REFERENCES'))) else false end,'072 business_expenses remediation and append-only money grants'
+  union all select 19,'Audit writer dependency',exists(select 1 from pg_proc p where p.oid=to_regprocedure('public.record_admin_activity(uuid,text,text,text,text,text,uuid,jsonb)') and p.prosecdef and 'search_path=""'=any(p.proconfig) and has_function_privilege('service_role',p.oid,'EXECUTE') and not has_function_privilege('anon',p.oid,'EXECUTE') and not has_function_privilege('authenticated',p.oid,'EXECUTE')),'Existing privileged transactional audit writer'
+  union all select 20,'No unexpected catalogue triggers',not exists(select 1 from pg_trigger t where not t.tgisinternal and t.tgrelid in (to_regclass('public.creator_commission_rules'),to_regclass('public.affiliate_links'),to_regclass('public.affiliate_codes'))),'No extra trigger may introduce unrelated writes'
+  union all select 21,'073 not installed / no RPC collision',not exists(select 1 from writer),'Any existing overload means already applied or conflicting RPC: DO NOT APPLY'
+  union all select 22,'Applying role can create privileged writer',has_schema_privilege(current_user,'public','CREATE') and not exists(select 1 from tables t where t.name in ('creator_commission_rules','affiliate_links','affiliate_codes') and (t.oid is null or not has_table_privilege(current_user,t.oid,'SELECT') or not has_table_privilege(current_user,t.oid,'INSERT') or not has_table_privilege(current_user,t.oid,'UPDATE'))),'Apply as the existing trusted migration authority'
+), results as (
+ select ord,name,case when ok is true then 'PASS' else 'FAIL' end as verdict,detail from checks
+ union all select 90,'Scope','INFO','073 adds one RPC only. No table/index/policy/seed statements; existing creator roles and resolver eligibility are preserved.'
+ union all select 91,'Baseline evidence','INFO','No-seed/unrelated-schema/grant immutability requires a before/after comparison. The local verification runner records it; this read-only check does not infer historical row counts.'
+ union all select 92,'Historical authority','INFO','Existing attribution/commission snapshots remain authoritative; no order amount is a configuration parameter.'
+), final as (
+ select * from results
+ union all select 100,'SUMMARY',case when count(*) filter(where verdict='FAIL')=0 then 'SAFE TO APPLY' else 'DO NOT APPLY' end,
+   count(*) filter(where verdict='FAIL')||' FAIL / '||count(*) filter(where verdict='PASS')||' PASS / '||count(*) filter(where verdict='INFO')||' INFO' from results
+)
+select name,verdict,detail from final order by ord;

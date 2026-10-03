@@ -646,7 +646,7 @@ test("7: no audit trail, no actor columns, no new real accounts", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 72), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 73), [],
     "a migration beyond 051 appeared");
 
   const sql = codeOnly(migration);
@@ -868,7 +868,7 @@ const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),
 test("9h: this package changed nothing else", () => {
   // No migration, no audit trail, no public surface.
   const files = readdirSync(path.join(ROOT, "supabase/migrations"));
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 72), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 73), [],
     "a migration beyond 051 appeared");
   for (const forbidden of ["admin_activity_log", "record_admin_activity", "actor_user_id"]) {
     assert.ok(!shell.includes(forbidden) && !viewportLib.includes(forbidden),
@@ -885,3 +885,6 @@ test("9h: this package changed nothing else", () => {
   assert.ok(!added.includes("display:none"),
     "the blocker hides admin content with CSS instead of not rendering it");
 });
+
+// Migration-stack guard repinned for the explicitly added 073 RPC only.
+// Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.

@@ -545,7 +545,7 @@ test("7c: this pass added no backend of any kind", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/business-expenses-migration.test.mjs.
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("073")),
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("074")),
     "a migration 072 or beyond appeared");
   for (const banned of ['"use server"', "fetch(", "supabase", "resend",
                         "localStorage", "sessionStorage", "<form", "onSubmit"]) {
@@ -687,3 +687,6 @@ test("8g: NOTHING WAS DELETED - data, components and styles are all still here",
     assert.ok(css.includes(sel), `${sel} was removed from the stylesheet`);
   }
 });
+
+// Migration-stack guard repinned for the explicitly added 073 RPC only.
+// Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.

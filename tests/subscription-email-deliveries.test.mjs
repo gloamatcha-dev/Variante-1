@@ -272,7 +272,7 @@ test("035 exists, is the only 035, and only 036 and 037 follow it", () => {
      // or row. Reviewed in tests/business-expenses-migration.test.mjs.
      "071_business_expenses.sql",
      // MIGRATION 072: admin core connections. Reviewed in its own suite.
-     "072_admin_core_connections.sql"],
+     "072_admin_core_connections.sql", "073_affiliate_atomic_configuration.sql"],
     "an unreviewed migration above 035 appeared"
   );
   // And 039 leaves this table entirely alone. An annual plan's one
@@ -953,3 +953,6 @@ test("stripe_backup_code.txt is not tracked and is referenced nowhere", () => {
   assert.equal(tracked, "", "stripe_backup_code.txt must never be tracked or staged");
   assert.ok(!migration035.includes("stripe_backup_code"));
 });
+
+// Migration-stack guard repinned for the explicitly added 073 RPC only.
+// Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.

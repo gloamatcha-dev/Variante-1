@@ -146,7 +146,7 @@ test("1e: no auth, guard, data or backend logic changed", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/business-expenses-migration.test.mjs.
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("073")),
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("074")),
     "a migration 072 or beyond appeared");
 });
 
@@ -418,3 +418,6 @@ test("6: one step down at 800, and the strip keeps its scroll", () => {
   assert.match(css, /\.portal-fact strong\{font-weight:600;text-align:right;overflow-wrap:anywhere\}/,
     "the long-value guard changed");
 });
+
+// Migration-stack guard repinned for the explicitly added 073 RPC only.
+// Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.

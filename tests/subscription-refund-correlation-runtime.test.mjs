@@ -835,7 +835,7 @@ test("55: this phase added no migration, and the only ones after it are 038 and 
      // or row. Reviewed in tests/business-expenses-migration.test.mjs.
      "071_business_expenses.sql",
      // MIGRATION 072: admin core connections. Reviewed in its own suite.
-     "072_admin_core_connections.sql"],
+     "072_admin_core_connections.sql", "073_affiliate_atomic_configuration.sql"],
     "an unreviewed migration appeared after 037");
   const sql039 = withoutComments(read("supabase/migrations/039_b2c_annual_plan_foundation.sql"));
   assert.ok(!sql039.includes("apply_order_refund_state_by_invoice"),
@@ -910,3 +910,6 @@ test("this suite opens no database, calls nothing, and stages no secret", () => 
   }).trim();
   assert.equal(tracked, "", "stripe_backup_code.txt is tracked");
 });
+
+// Migration-stack guard repinned for the explicitly added 073 RPC only.
+// Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.

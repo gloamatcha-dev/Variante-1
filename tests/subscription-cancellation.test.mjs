@@ -2165,7 +2165,7 @@ test("034: it is the next free number and 022-033 are untouched", () => {
      // MIGRATION 072: admin core connections - fifteen new tables,
      // twenty-one SECURITY DEFINER functions. No existing cancellation
      // object touched. Reviewed in its own suite.
-     "072_admin_core_connections.sql"],
+     "072_admin_core_connections.sql", "073_affiliate_atomic_configuration.sql"],
     "an unreviewed migration above 034 appeared"
   );
   // AND 039 REDEFINES NOTHING 034 OWNS. It is a prepaid plan with no
@@ -2910,3 +2910,6 @@ test("no real Stripe request, no Resend request and no production Supabase in th
   assert.equal(spawns.length, 1, "a server is spawned outside the guarded helper");
   assert.ok(spawns[0][0].includes("serverEnv("));
 });
+
+// Migration-stack guard repinned for the explicitly added 073 RPC only.
+// Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.

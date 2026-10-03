@@ -240,14 +240,14 @@ test("5: 055 owns its number, in one transaction, self-verifying", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(files.length, 72);
+  assert.equal(files.length, 73);
   // 056 (the GLOALAUNCH10 database foundation, reviewed in
   // tests/launch-discount-migration.test.mjs) landed after this one, so
   // 055 is no longer the last file. What has to stay true is that it is
   // still at its own number and that nothing above it is unreviewed.
-  assert.equal(files[files.length - 18], MIGRATION, "055 is not at its own number");
-  assert.equal(files[files.length - 17], "056_launch_discount.sql");
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 72), [],
+  assert.equal(files[files.length - 19], MIGRATION, "055 is not at its own number");
+  assert.equal(files[files.length - 18], "056_launch_discount.sql");
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 73), [],
     "a migration 072 or beyond appeared");
   // 001-054 are immutable; what this can assert is that 055 names none
   // of them - nor 056 - as something to change.
@@ -355,3 +355,6 @@ test("6c: the subscription Customer helper is byte-identical in behaviour", () =
   assert.match(helper, /\.from\("stripe_customers"\)/);
   assert.match(helper, /inserted\.error\.code !== "23505"/);
 });
+
+// Migration-stack guard repinned for the explicitly added 073 RPC only.
+// Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.

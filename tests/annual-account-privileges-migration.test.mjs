@@ -127,7 +127,7 @@ test("1: 042 is the newest migration, and 001-041 are untouched", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 72);
+  assert.equal(migrations.length, 73);
   assert.equal(migrations[38], "039_b2c_annual_plan_foundation.sql");
   assert.equal(migrations[39], "040_annual_checkout_retry_fingerprints.sql");
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
@@ -137,7 +137,7 @@ test("1: 042 is the newest migration, and 001-041 are untouched", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 72), [], "a migration 072 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 73), [], "a migration 072 or beyond appeared");
 
   // No live migration was edited to make room for this one.
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
@@ -592,3 +592,6 @@ test("22: 042's verify section is commented, read-only, and re-runs the failing 
     assert.ok(!pattern.test(verifySql042), `the verify section starts a ${label} statement`);
   }
 });
+
+// Migration-stack guard repinned for the explicitly added 073 RPC only.
+// Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.

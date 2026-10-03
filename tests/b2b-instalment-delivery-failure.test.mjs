@@ -647,10 +647,10 @@ test("34: the cron response carries counts only - no customer fact", () => {
 
 test("35: 063 is the highest migration and 064 does not exist", () => {
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files[files.length - 10], MIGRATION);
-  assert.equal(files[files.length - 11], "062_b2b_checkout_settlement.sql");
-  assert.equal(files.length, 72);
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 72), []);
+  assert.equal(files[files.length - 11], MIGRATION);
+  assert.equal(files[files.length - 12], "062_b2b_checkout_settlement.sql");
+  assert.equal(files.length, 73);
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 73), []);
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length);
 });
@@ -1735,3 +1735,5 @@ test("83: migration 063 is UNCHANGED by the orphan-draft recovery", () => {
   // pending file to carve out.
   assert.equal(touched, "", "a migration was edited for a runtime-only fix");
 });
+// Migration-stack guard repinned for the explicitly added 073 RPC only.
+// Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.

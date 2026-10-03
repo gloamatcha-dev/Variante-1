@@ -676,7 +676,7 @@ test("4c: one API route, no server action, no migration was added for this page"
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/business-expenses-migration.test.mjs.
-  assert.ok(!migrations.some(f => f.startsWith("073")), "a migration 072 or beyond appeared");
+  assert.ok(!migrations.some(f => f.startsWith("074")), "a migration 072 or beyond appeared");
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -785,3 +785,6 @@ test("6b: every rule is scoped to this page, and no finished page moved", () => 
     assert.ok(!code.includes(other), `this block reaches ${other}`);
   }
 });
+
+// Migration-stack guard repinned for the explicitly added 073 RPC only.
+// Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.

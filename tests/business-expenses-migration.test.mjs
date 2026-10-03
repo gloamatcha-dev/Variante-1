@@ -79,9 +79,9 @@ const codeOnly = src => src
 test("1: it is the newest migration, owns its number alone, and is one transaction", () => {
   const files = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.at(-2), MIGRATION_NAME, "071 is not the newest migration");
+  assert.equal(files.at(-3), MIGRATION_NAME, "071 is not the newest migration");
   assert.equal(files.filter(f => f.startsWith("071")).length, 1);
-  assert.equal(files.filter(f => Number(f.slice(0, 3)) > 72).length, 0);
+  assert.equal(files.filter(f => Number(f.slice(0, 3)) > 73).length, 0);
   // One transaction, and nothing executable after the commit.
   assert.match(MIGRATION, /^-- ═+\r?\n-- 071 /);
   assert.equal((MIGRATION.match(/^begin;$/gm) || []).length, 1);
@@ -1282,3 +1282,6 @@ test("11b: this suite is registered, so it actually runs", () => {
   assert.ok(pkg.scripts.test.includes("tests/business-expenses-migration.test.mjs"),
     "this suite is not in the test script");
 });
+
+// Migration-stack guard repinned for the explicitly added 073 RPC only.
+// Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.

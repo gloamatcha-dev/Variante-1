@@ -1677,10 +1677,10 @@ test("87: and 064 is the highest migration", () => {
   // one position further from the end. Re-pinned rather than deleted -
   // what this guard protects is that nothing UNREVIEWED appeared.
   // Reviewed in tests/subscription-annual-upgrade.test.mjs.
-  assert.equal(files.at(-6), "067_annual_upgrade_pending_claim.sql");
-  assert.equal(files.at(-8), "065_guest_order_management.sql");
-  assert.equal(files.at(-9), MIGRATION);
-  assert.equal(files.at(-10), "063_b2b_instalment_delivery_failure_runtime.sql");
+  assert.equal(files.at(-7), "067_annual_upgrade_pending_claim.sql");
+  assert.equal(files.at(-9), "065_guest_order_management.sql");
+  assert.equal(files.at(-10), MIGRATION);
+  assert.equal(files.at(-11), "063_b2b_instalment_delivery_failure_runtime.sql");
   assert.equal(files.filter(f => f.startsWith("064")).length, 1);
 });
 
@@ -1699,3 +1699,5 @@ test("89: cancel_at is compared in SECONDS, the resolution Stripe stores", () =>
   assert.equal(b2bCancelAtMatches(undefined, at), false);
   assert.equal(unixSeconds(at), 1800000000);
 });
+
+// Migration-stack guard repinned for explicitly added 073, covered by affiliate-atomic-configuration.test.mjs.

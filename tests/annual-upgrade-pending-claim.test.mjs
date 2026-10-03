@@ -461,9 +461,9 @@ test("20b: migration 067 is written, self-contained and NOT applied", () => {
   // It is the newest migration and owns its number alone.
   const files = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.at(-6), "067_annual_upgrade_pending_claim.sql");
+  assert.equal(files.at(-7), "067_annual_upgrade_pending_claim.sql");
   assert.equal(files.filter(f => f.startsWith("067")).length, 1);
-  assert.equal(files.filter(f => Number(f.slice(0, 3)) > 72).length, 0);
+  assert.equal(files.filter(f => Number(f.slice(0, 3)) > 73).length, 0);
 });
 
 test("20c: the rules leaf stays pure - no clock, no env, no Stripe import", () => {
@@ -478,3 +478,6 @@ test("20c: the rules leaf stays pure - no clock, no env, no Stripe import", () =
   // The clock is injected, so the whole window is testable to the ms.
   assert.match(CHECKOUT, /now\?: \(\) => Date;/);
 });
+
+// Migration-stack guard repinned for the explicitly added 073 RPC only.
+// Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.

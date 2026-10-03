@@ -469,7 +469,7 @@ test("3F: only the owner's own private subscriptions are readable", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 72, "an unreviewed migration was added");
+  assert.equal(migrations.length, 73, "an unreviewed migration was added");
   assert.deepEqual(
     migrations.filter(f => f > "034_subscription_cancellation.sql").sort(),
     ["035_subscription_email_deliveries.sql", "036_subscription_payment_status.sql",
@@ -658,7 +658,7 @@ test("3F: only the owner's own private subscriptions are readable", () => {
      // shipping, notifications, creator/affiliate and document
      // foundations. RLS on, no browser grant, no existing policy
      // changed. Reviewed in its own suite.
-     "072_admin_core_connections.sql"],
+     "072_admin_core_connections.sql", "073_affiliate_atomic_configuration.sql"],
     "a migration above 034 appeared that this suite has not been reviewed against"
   );
   // 038 is Phase 3K.B's one-time refund writer concurrency fix. Like 035
@@ -998,18 +998,18 @@ test("3F: migrations 022 through 034 are untouched and only 035, 036 and 037 fol
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(files.length, 72);
+  assert.equal(files.length, 73);
   // 034 remains the last of the cancellation work. 035 is Phase 3H.1's
   // delivery table, 036 is Phase 3I.B1's payment foundation, 037 is
   // Phase 3J.B1's invoice-keyed refund-state writer and 038 is Phase
   // 3K.B's one-time refund writer concurrency fix; those four are the
   // ONLY migrations allowed above it until a later phase is reviewed
   // here.
-  assert.equal(files[files.length - 36], "037_subscription_refund_correlation.sql");
-  assert.equal(files[files.length - 35], "038_one_time_refund_writer_concurrency.sql");
-  assert.equal(files[files.length - 34], "039_b2c_annual_plan_foundation.sql");
-  assert.equal(files[files.length - 33], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(files[files.length - 32], "041_annual_account_column_privileges.sql");
+  assert.equal(files[files.length - 37], "037_subscription_refund_correlation.sql");
+  assert.equal(files[files.length - 36], "038_one_time_refund_writer_concurrency.sql");
+  assert.equal(files[files.length - 35], "039_b2c_annual_plan_foundation.sql");
+  assert.equal(files[files.length - 34], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 33], "041_annual_account_column_privileges.sql");
   // 039 is Phase 4B1's annual plan foundation, reviewed in its own suite.
   // PHASE 4B8.1 ADDED MIGRATION 041 (column-level privileges that
   // narrow the annual account read surface), reviewed in
@@ -1024,11 +1024,11 @@ test("3F: migrations 022 through 034 are untouched and only 035, 036 and 037 fol
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(files[files.length - 27], "046_launch_signup_atomic.sql");
-  assert.equal(files[files.length - 28], "045_launch_welcome_email.sql");
-  assert.equal(files[files.length - 29], "044_launch_send.sql");
-  assert.equal(files[files.length - 30], "043_launch_waitlist.sql");
-  assert.equal(files[files.length - 31], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(files[files.length - 28], "046_launch_signup_atomic.sql");
+  assert.equal(files[files.length - 29], "045_launch_welcome_email.sql");
+  assert.equal(files[files.length - 30], "044_launch_send.sql");
+  assert.equal(files[files.length - 31], "043_launch_waitlist.sql");
+  assert.equal(files[files.length - 32], "042_annual_delivery_rls_parent_user_privilege.sql");
   // This phase writes no SQL at all: nothing in it references a
   // migration, a policy or a grant.
   for (const source of [viewCode, portalCode]) {
@@ -1049,3 +1049,6 @@ test("3F: the B2B side is untouched by the B2C cadence work", () => {
   assert.ok(!supplySection.includes("SUBSCRIPTION_CADENCE_LABEL"),
     "a supply agreement is described with the B2C cadence");
 });
+
+// Migration-stack guard repinned for the explicitly added 073 RPC only.
+// Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.

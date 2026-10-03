@@ -161,8 +161,8 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
   // Re-pinned rather than deleted - what this guard protects is that
   // nothing UNREVIEWED appeared. Reviewed in
   // tests/guest-order-management.test.mjs.
-  assert.equal(files[files.length - 34], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 35], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 35], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 36], MIGRATION_038, "038 must be the one before it");
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
@@ -170,7 +170,7 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
 test("2: no migration 044 or beyond", () => {
   // 065 is the highest migration. 039 is live and is not the place to
   // fix anything any more.
-  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 72);
+  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 73);
   assert.deepEqual(beyond, [], "an unreviewed migration appeared after 065");
 });
 
@@ -2611,3 +2611,6 @@ test("80: no comment still claims 039 never writes 'completed'", () => {
   assert.ok(!migration039.includes("Section 5's rule is that refund state is not lifecycle"),
     "the refund contract still cites the wrong section");
 });
+
+// Migration-stack guard repinned for the explicitly added 073 RPC only.
+// Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.

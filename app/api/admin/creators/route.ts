@@ -1,4 +1,6 @@
 import { readPortalPages } from "../../../../lib/adminPortalRead.ts";
+import { affiliateConfiguration } from "../../../../lib/adminAffiliateConfiguration.ts";
+import { commissionValueConfiguration, validateCommissionRule } from "../../../../lib/commissionRuleConfiguration.ts";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { requireAdminIdentity } from "../../../../lib/adminActionRoute.ts";
 import { getCreatorCommissionBalance } from "../../../../lib/creatorAffiliate";
@@ -90,6 +92,47 @@ export async function POST(request: Request): Promise<Response> {
   const writeGate = await requireAdminIdentity(request, "write");
   if (!writeGate.ok) return writeGate.response;
   const actorUserId = writeGate.session.userId;
+  if (['create_affiliate_link', 'create_affiliate_code', 'edit_affiliate'].includes(String(action))) {
+    if (action === 'edit_affiliate' && !['link', 'code'].includes(String(b.type))) return json({error:'Ungültiger Beziehungstyp.'},400);
+    let configuration;
+    try { configuration = affiliateConfiguration(b); }
+    catch (error) { return json({error:error instanceof Error ? error.message : 'Ungültige Konfiguration.'},400); }
+    const creatorId = typeof b.creatorId === 'string' && b.creatorId ? b.creatorId : null;
+    const relationshipId = action === 'edit_affiliate' && typeof b.id === 'string' && b.id ? b.id : null;
+    if (action === 'edit_affiliate' && !relationshipId) return json({error:'Beziehung fehlt.'},400);
+    if (action !== 'edit_affiliate' && !creatorId) return json({error:'Bitte einen Creator auswählen.'},400);
+    const ruleId = typeof b.commissionRuleId === 'string' && b.commissionRuleId ? b.commissionRuleId : null;
+    if (b.commissionMode !== undefined && !['inline','existing'].includes(String(b.commissionMode))) return json({error:'Ungültige Provisionskonfiguration.'},400);
+    let percentBasisPoints: number | null = null, fixedCents: number | null = null;
+    let base: string | null = null, label: string | null = null;
+    if (b.commissionMode === 'inline') {
+      try {
+        const amounts = commissionValueConfiguration(b.calculationType,b.commissionValue);
+        const customLabel = typeof b.ruleName === 'string' && b.ruleName.trim() ? b.ruleName.trim() : null;
+        const validated = validateCommissionRule({...amounts,label:customLabel ?? 'Inline',base:b.base});
+        percentBasisPoints = validated.percent_basis_points; fixedCents = validated.fixed_cents;
+        base = validated.base; label = customLabel;
+      } catch(error) { return json({error:error instanceof Error ? error.message : 'Ungültige Provision.'},400); }
+    }
+    // One RPC owns validation, rule reuse/create, relationship write and audit.
+    // Never fall back to two REST writes if 073 is unavailable.
+    const {data,error} = await admin.rpc('admin_save_affiliate_configuration',{
+      p_actor_user_id: actorUserId, p_rule_mode: b.commissionMode === 'inline' ? 'inline' : 'existing',
+      p_relationship_type: configuration.type, p_relationship_id: relationshipId, p_creator_id: relationshipId ? null : creatorId,
+      p_reference: configuration.reference, p_active: configuration.active,
+      p_starts_at: b.startsAt ? configuration.starts_at : null, p_ends_at: configuration.ends_at,
+      p_commission_rule_id: b.commissionMode === 'inline' ? null : ruleId,
+      p_percent_basis_points: percentBasisPoints, p_fixed_cents: fixedCents, p_base: base, p_rule_label: label,
+      p_discount_code: typeof b[configuration.type === 'link' ? 'customerDiscountCode' : 'discountCode'] === 'string'
+        ? b[configuration.type === 'link' ? 'customerDiscountCode' : 'discountCode'] : null,
+    });
+    if (error) {
+      const status = error.code === '23505' ? 409 : error.code === 'P0002' ? 404 : error.code === '42501' ? 403
+        : ['22023','22P02','22003','22007','23514','23503'].includes(error.code) ? 400 : 503;
+      return json({error:status === 409 ? 'Dieser Slug oder Code ist bereits vergeben.' : status === 400 ? 'Ungültiger Creator oder ungültige Provisionskonfiguration.' : 'Beziehung konnte nicht gespeichert werden.'},status);
+    }
+    return json({ok:true,id:data.id},200);
+  }
   if (action === "add_role") {
     if(!["influencer","ugc_creator","affiliate"].includes(String(b.role)))return json({error:"Ungültige Rolle."},400);
     const {error}=await admin.from("creator_roles").upsert({creator_id:b.creatorId,role:b.role},{onConflict:"creator_id,role"});
@@ -148,14 +191,12 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   if (action === "create_commission_rule") {
-    const basisPoints = typeof b.percentBasisPoints === "number" ? b.percentBasisPoints : null;
-    const fixedCents = typeof b.fixedCents === "number" ? b.fixedCents : null;
+    let configuration;
+    try { configuration = validateCommissionRule(b); }
+    catch (error) { return json({error:error instanceof Error ? error.message : 'Ungültige Regel.'},400); }
 
     const { data, error } = await admin.from("creator_commission_rules").insert({
-      label: str("label"),
-      percent_basis_points: basisPoints,
-      fixed_cents: fixedCents,
-      base: str("base"),
+      ...configuration,
       reverse_on_refund: b.reverseOnRefund !== false,
       note: str("note") || null,
       created_by: actorUserId,
@@ -166,42 +207,6 @@ export async function POST(request: Request): Promise<Response> {
       return json({ error: "Erstellen fehlgeschlagen." } as ErrorResponse, 503);
     }
     return json({ ok: true, ruleId: data.id }, 200);
-  }
-
-  if (action === "create_affiliate_link") {
-    const { data, error } = await admin.from("affiliate_links").insert({
-      creator_id: str("creatorId"),
-      slug: str("slug"),
-      commission_rule_id: str("commissionRuleId") || null,
-      customer_discount_code: str("customerDiscountCode") || null,
-      starts_at: str("startsAt") || new Date().toISOString(),
-      ends_at: str("endsAt") || null,
-      created_by: actorUserId,
-    }).select("id").single();
-
-    if (error) {
-      console.error("Create affiliate link failed:", error.message);
-      return json({ error: "Erstellen fehlgeschlagen." } as ErrorResponse, 503);
-    }
-    return json({ ok: true, linkId: data.id }, 200);
-  }
-
-  if (action === "create_affiliate_code") {
-    const { data, error } = await admin.from("affiliate_codes").insert({
-      creator_id: str("creatorId"),
-      code: str("code"),
-      commission_rule_id: str("commissionRuleId") || null,
-      discount_code: str("discountCode") || null,
-      starts_at: str("startsAt") || new Date().toISOString(),
-      ends_at: str("endsAt") || null,
-      created_by: actorUserId,
-    }).select("id").single();
-
-    if (error) {
-      console.error("Create affiliate code failed:", error.message);
-      return json({ error: "Erstellen fehlgeschlagen." } as ErrorResponse, 503);
-    }
-    return json({ ok: true, codeId: data.id }, 200);
   }
 
   if (action === "review_application") {

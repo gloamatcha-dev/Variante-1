@@ -85,7 +85,7 @@ test("058 still owns its number, and there is no 061", () => {
   // further from the end. Re-pinned rather than deleted - what this guard
   // protects is that nothing UNREVIEWED appeared. Reviewed in
   // tests/guest-order-management.test.mjs.
-  const last = files[files.length - 15];
+  const last = files[files.length - 16];
   assert.equal(last, "058_discounted_order_line_accounting.sql");
   // MIGRATION 071 ADDED THE EXPENSE LEDGER - one table,
   // public.business_expenses, plus three SECURITY DEFINER writers that
@@ -95,7 +95,7 @@ test("058 still owns its number, and there is no 061", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/business-expenses-migration.test.mjs.
-  assert.equal(files.some(f => f.startsWith("073")), false, "a 064 exists");
+  assert.equal(files.some(f => f.startsWith("074")), false, "a 064 exists");
   assert.equal(files.filter(f => f.startsWith("058")).length, 1);
 });
 
@@ -942,3 +942,6 @@ test("the function 058 checks really does declare an empty search_path", () => {
   // Never a named schema - that is what the proconfig check is for.
   assert.equal(/set search_path = '[^']/.test(writer), false);
 });
+
+// Migration-stack guard repinned for the explicitly added 073 RPC only.
+// Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.
