@@ -2165,7 +2165,7 @@ test("034: it is the next free number and 022-033 are untouched", () => {
      // MIGRATION 072: admin core connections - fifteen new tables,
      // twenty-one SECURITY DEFINER functions. No existing cancellation
      // object touched. Reviewed in its own suite.
-     "072_admin_core_connections.sql", "073_affiliate_atomic_configuration.sql"],
+     "072_admin_core_connections.sql", "073_affiliate_atomic_configuration.sql", "074_creator_ugc_transactional_writers.sql"],
     "an unreviewed migration above 034 appeared"
   );
   // AND 039 REDEFINES NOTHING 034 OWNS. It is a prepaid plan with no

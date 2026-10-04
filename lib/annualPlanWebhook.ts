@@ -15,6 +15,7 @@ import {
 import { runAnnualDeliveryWorker, type AnnualDeliveryWorkerSummary } from "./annualDeliveryWorker";
 import type { AnnualPurchaseEmailResult } from "./annualPurchaseConfirmationEmail";
 import { recordAnnualPrepaymentEvent } from "./financeRecording";
+import { requireBusinessEffect, FINANCE_EFFECT_RESULTS } from './requiredBusinessEffect';
 import { sendInternalAnnualPurchaseNotificationIfNeeded } from "./annualPurchaseNotification";
 import type {
   AnnualPaidSettlementOutcome,
@@ -468,7 +469,7 @@ export async function settleAnnualCheckoutSession(
   // FINANCE RECORDING (072). The plan's total_gross_cents is recognised
   // once, here, on the day it was paid. Idempotent: the database dedupes
   // on the plan itself. Best-effort — a failure does not block activation.
-  await recordAnnualPrepaymentEvent(plan.id);
+  requireBusinessEffect('annual prepayment', await recordAnnualPrepaymentEvent(plan.id), FINANCE_EFFECT_RESULTS);
 
   // 9. DELIVERY 1, THROUGH THE SHARED QUEUE. Migration 039 scheduled it
   //    at paid_at, so it is due now. It is claimed and fulfilled by the

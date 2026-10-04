@@ -30,7 +30,7 @@ export function schemaSnapshot(db){
   return JSON.parse(sql(`select json_build_object(
     'relations',(select json_agg(row_to_json(x) order by x.relname) from (
       select c.relname,c.relkind,c.relrowsecurity,c.relforcerowsecurity,c.relacl::text,
-        (select json_agg(row_to_json(a) order by a.attnum) from (select attnum,attname,atttypid::regtype::text,attnotnull,pg_get_expr(d.adbin,d.adrelid) as default_value from pg_attribute a left join pg_attrdef d on d.adrelid=a.attrelid and d.adnum=a.attnum where a.attrelid=c.oid and a.attnum>0 and not a.attisdropped) a) as columns,
+        (select json_agg(row_to_json(a) order by a.attnum) from (select attnum,attname,attacl::text,atttypid::regtype::text,attnotnull,pg_get_expr(d.adbin,d.adrelid) as default_value from pg_attribute a left join pg_attrdef d on d.adrelid=a.attrelid and d.adnum=a.attnum where a.attrelid=c.oid and a.attnum>0 and not a.attisdropped) a) as columns,
         (select json_agg(pg_get_constraintdef(k.oid) order by k.conname) from pg_constraint k where k.conrelid=c.oid) as constraints,
         (select json_agg(pg_get_indexdef(i.indexrelid) order by i.indexrelid::regclass::text) from pg_index i where i.indrelid=c.oid) as indexes
       from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind in ('r','v','S')
@@ -56,9 +56,12 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
   for(const file of migrations){
     // Local Supabase default-ACL scaffold: historical 071 self-check requires
     // no service-role default write grant. Its file is applied byte-for-byte.
+    // Inventory 050 owns its selective table/column grants, not the generic local ALL scaffold.
+    if(file.startsWith('050'))sql('alter default privileges in schema public revoke all on tables from service_role',db);
     if(file.startsWith('071'))sql('alter default privileges in schema public revoke all on tables from service_role',db);
     if(file.startsWith('072'))sql('alter default privileges in schema public grant all on tables to service_role; grant all on table public.business_expenses to service_role',db);
     runFile('supabase/migrations/'+file);
+    if(file.startsWith('050'))sql('alter default privileges in schema public grant all on tables to service_role',db);
   }
   console.log('001 through 072: 72/72 applied unchanged');
   const before=snapshot(db),schemaBefore=schemaSnapshot(db);

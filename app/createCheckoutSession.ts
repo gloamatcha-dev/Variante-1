@@ -1,5 +1,6 @@
 "use client";
 import type { CartItem } from "./cart";
+import { readAffiliateReference } from './affiliateReference';
 
 export type CheckoutSession = {
   sessionId: string;
@@ -47,6 +48,7 @@ export async function createCheckoutSession(
   discountCode?: string | null
 ): Promise<CheckoutSession> {
   const payload = {
+    ...readAffiliateReference(),
     items: cartItems.map(item => ({
       variantId: item.variantId,
       quantity: item.quantity,

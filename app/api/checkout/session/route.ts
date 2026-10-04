@@ -1,4 +1,5 @@
 import type Stripe from "stripe";
+import { affiliateCheckoutMetadata } from '../../../../lib/affiliateCheckout';
 import { getStripeClient } from "../../../../lib/stripe";
 import { validateQuoteItems, buildAuthoritativeQuote } from "../../../../lib/checkoutQuote";
 import { getSiteOrigin } from "../../../../lib/siteUrl";
@@ -114,6 +115,7 @@ export async function POST(request: Request): Promise<Response> {
   // no discountCents, no percent, no eligibility flag and no line
   // allocation in this shape: a browser that could send any of those
   // could nominate its own price.
+  const {affiliateSlug,affiliateCode}=body as {affiliateSlug?:unknown;affiliateCode?:unknown};
   const { items, requestId, shippingCountry, email, discountCode } = body as {
     items?: unknown;
     requestId?: unknown;
@@ -657,6 +659,7 @@ export async function POST(request: Request): Promise<Response> {
           // the address: Stripe metadata is not where this shop keeps
           // money or identities.
           ...(attempt.discount_code ? { discount_code: attempt.discount_code } : {}),
+          ...await affiliateCheckoutMetadata(affiliateSlug, affiliateCode),
         },
       },
       { idempotencyKey: `gloa-checkout-${requestId}` }

@@ -96,10 +96,11 @@ const ORDER_COLUMNS =
 
 const EXPENSE_COLUMNS =
   "id, occurred_on, category, order_id, description, gross_cents, vat_cents, "
-  + "currency, channel, payment_status, vendor, note, created_by, created_at, updated_at";
+  + "currency, channel, payment_status, vendor, note, created_by, created_at, updated_at, ugc_assignment_id";
 
 type ExpenseRecord = {
   id: string;
+  ugc_assignment_id: string | null;
   occurred_on: string;
   category: string;
   order_id: string | null;
@@ -393,6 +394,7 @@ export async function POST(request: Request): Promise<Response> {
         category: e.category,
         orderId: e.order_id,
         description: e.description,
+        ugcAssignmentId: e.ugc_assignment_id,
         grossCents: e.gross_cents,
         vatCents: e.vat_cents === null || e.vat_cents === undefined
           ? null : Number(e.vat_cents),
@@ -414,6 +416,8 @@ export async function POST(request: Request): Promise<Response> {
     if (!input.ok) return json({ error: input.reason } as ErrorResponse, 400);
 
     const isUpdate = action === "update_expense";
+    const hasUgcAssociation = Object.prototype.hasOwnProperty.call(body,'ugcAssignmentId');
+    if(hasUgcAssociation&&body.ugcAssignmentId!==null&&(typeof body.ugcAssignmentId!=='string'||!UUID_RE.test(body.ugcAssignmentId)))return json({error:'Ungültiger Content-Auftrag.'},400);
     let expenseId: string | null = null;
     if (isUpdate) {
       if (typeof body.expenseId !== "string" || !UUID_RE.test(body.expenseId.trim())) {
@@ -465,10 +469,9 @@ export async function POST(request: Request): Promise<Response> {
           p_operation_id: operationId,
         };
 
-    const { data, error } = await admin.rpc(
-      isUpdate ? "admin_update_business_expense" : "admin_record_business_expense",
-      args
-    );
+    const { data, error } = hasUgcAssociation
+      ? await admin.rpc('admin_save_ugc_business_expense', {...args,p_expense_id:expenseId,p_ugc_assignment_id:body.ugcAssignmentId})
+      : await admin.rpc(isUpdate ? "admin_update_business_expense" : "admin_record_business_expense",args);
 
     if (error) {
       /*
@@ -478,6 +481,10 @@ export async function POST(request: Request): Promise<Response> {
         operator gets a sentence; the raw message never leaves the server.
       */
       console.error("Costs error: the expense writer refused:", error.message);
+      if(error.code==='P0002')return json({error:'Diesen Content-Auftrag gibt es nicht.'},404);
+      if(error.code==='23505')return json({error:'Dieser Creator-Kostenposten oder diese Operation ist bereits erfasst.'},409);
+      if(error.code==='42501')return json({error:'Keine Schreibberechtigung.'},403);
+      if(error.code==='22023')return json({error:'Ungültige UGC-Zuordnung.'},400);
       /*
         THE WRITER CHECKS THE ORDER BEFORE IT DECIDES THE CHANNEL, so a
         missing order arrives as its own refusal rather than as a
@@ -507,11 +514,12 @@ export async function POST(request: Request): Promise<Response> {
       return json({ error: "Die Kosten konnten nicht gespeichert werden." } as ErrorResponse, 503);
     }
 
-    if (isUpdate && !data) {
+    // PostgREST may serialize a missing composite result as all-null fields.
+    if ((isUpdate || hasUgcAssociation) && !data?.id) {
       return json({ error: "Diesen Kostenposten gibt es nicht." } as ErrorResponse, 404);
     }
 
-    return json({ ok: true }, 200);
+    return json({ ok: true, expenseId:data?.id??null, ugcAssignmentId:data?.ugc_assignment_id??null }, 200);
   }
 
   if (action === "delete_expense") {

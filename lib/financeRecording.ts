@@ -14,9 +14,8 @@ export type FinanceResult = {
  * function deduplicates on the order and on the operation_id, so a
  * webhook redelivery writes nothing and returns 'already_recorded'.
  *
- * A failure here never prevents the order from being created or the
- * confirmation email from being sent — finance recording is a
- * best-effort side-effect that Stripe retries will eventually land.
+ * The order is already durable. A null result must be treated as a
+ * mandatory-effect failure by the webhook, before marking its event processed.
  */
 export async function recordOrderPaymentEvent(
   orderId: string,

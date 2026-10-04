@@ -4,6 +4,7 @@ import { evaluateStripeSessionPayment } from "./stripeFulfillment";
 import { linkStripeSession, markAttemptPaid } from "./checkoutAttempts";
 import type { B2bAttemptMoneyFacts, B2bFailureDeps, B2bWebhookDeps } from "./b2bWebhook";
 import { recordB2bSettlementByInvoice } from "./financeRecording";
+import { requireBusinessEffect, FINANCE_EFFECT_RESULTS } from './requiredBusinessEffect';
 
 /**
  * The real wiring behind the B2B settlement (Package 5C).
@@ -117,8 +118,8 @@ async function settleMonthlyInvoice(input: {
   // FINANCE RECORDING (072). Best-effort: the lookup and the RPC both
   // live in lib/financeRecording.ts so b2bWebhookDeps stays free of
   // direct table access to the four commerce tables.
-  if (payload.result === "settled" || payload.result === "activated") {
-    await recordB2bSettlementByInvoice(input.agreementId, input.stripeInvoiceId);
+  if (payload.result === "settled" || payload.result === "activated" || payload.result === 'already_settled') {
+    requireBusinessEffect('B2B settlement', await recordB2bSettlementByInvoice(input.agreementId, input.stripeInvoiceId), FINANCE_EFFECT_RESULTS);
   }
 
   return { result: payload.result ?? "unknown", deliveryNumber: payload.delivery_number };
@@ -168,6 +169,9 @@ async function settleAnnualInstalment(input: {
     p_stripe_invoice_id: input.stripeInvoiceId,
     p_stripe_payment_intent_id: input.stripePaymentIntentId,
   });
+  if(payload.result==='settled'||payload.result==='already_settled'){
+    requireBusinessEffect('B2B annual settlement',await recordB2bSettlementByInvoice(input.agreementId,input.stripeInvoiceId),FINANCE_EFFECT_RESULTS);
+  }
   return {
     result: (payload.result as string) ?? "unknown",
     instalmentNumber: payload.instalment_number as number | undefined,

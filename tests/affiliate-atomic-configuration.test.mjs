@@ -4,11 +4,11 @@ import {readFileSync,readdirSync} from 'node:fs';
 const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8');
 const migration=read('supabase/migrations/073_affiliate_atomic_configuration.sql');
 const body=migration.split('as $$')[1].split('$$;')[0];
-test('approved migration stack has exactly 001..073, unique numbers, and the exact new filename',()=>{
+test('approved migration stack has exactly 001..074, unique numbers, and the exact new filename',()=>{
  const files=readdirSync(new URL('../supabase/migrations/',import.meta.url)).filter(f=>f.endsWith('.sql')).sort();
- assert.equal(files.length,73);
- assert.deepEqual(files.map(f=>f.slice(0,3)),Array.from({length:73},(_,i)=>String(i+1).padStart(3,'0')));
- assert.equal(files.at(-1),'073_affiliate_atomic_configuration.sql');
+ assert.equal(files.length,74);
+ assert.deepEqual(files.map(f=>f.slice(0,3)),Array.from({length:74},(_,i)=>String(i+1).padStart(3,'0')));
+ assert.equal(files.at(-1),'074_creator_ugc_transactional_writers.sql');
 });
 test('073 is additive: one new RPC, no tables/indexes/policies or business seed statements',()=>{
  assert.equal([...migration.matchAll(/create function /gi)].length,1);
@@ -51,7 +51,7 @@ test('073 preflight/postcheck are standalone read-only SELECTs with computed ver
 });
 test('normal affiliate save has one RPC and no direct rule/relationship REST fallback',()=>{
  const route=read('app/api/admin/creators/route.ts');
- const section=route.slice(route.indexOf("if (['create_affiliate_link'"),route.indexOf('if (action === "add_role")'));
+ const section=route.slice(route.indexOf("if (['create_affiliate_link'"),route.indexOf('if (action === "add_role"'));
  assert.equal([...section.matchAll(/admin\.rpc\(/g)].length,1);assert.match(section,/'admin_save_affiliate_configuration'/);
  assert.doesNotMatch(section,/\.insert\(|\.update\(|\.from\(/);
  assert.match(section,/p_actor_user_id: actorUserId/);assert.match(section,/p_creator_id: relationshipId \? null : creatorId/);

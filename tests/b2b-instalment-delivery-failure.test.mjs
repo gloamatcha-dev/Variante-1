@@ -647,10 +647,10 @@ test("34: the cron response carries counts only - no customer fact", () => {
 
 test("35: 063 is the highest migration and 064 does not exist", () => {
   const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files[files.length - 11], MIGRATION);
-  assert.equal(files[files.length - 12], "062_b2b_checkout_settlement.sql");
-  assert.equal(files.length, 73);
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 73), []);
+  assert.equal(files[files.length - 12], MIGRATION);
+  assert.equal(files[files.length - 13], "062_b2b_checkout_settlement.sql");
+  assert.equal(files.length, 74);
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 74), []);
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length);
 });

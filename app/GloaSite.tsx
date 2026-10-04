@@ -68,6 +68,7 @@ import { SHIPPING_ZONES, SHIPPING_PRICING, getShippingZone, getCountryLabel, com
 // can render is always a value POST /api/partnerships accepts.
 import { PARTNERSHIP_TYPE_OPTIONS } from "../lib/partnershipRequest";
 import { createCheckoutSession } from "./createCheckoutSession";
+import { captureAffiliateReference } from './affiliateReference';
 import { requestCheckoutQuote } from "./checkoutQuote";
 // The checkout's identity rule, shared with the server rather than
 // restated here - a second copy of "what counts as a valid address"
@@ -3348,6 +3349,7 @@ return <main className="account-page"><section className="account-section"><p cl
 }
 
 function GloaSiteInner({route,productSeed,shopSeed}:{route:string;productSeed?:SeedCatalogProduct|null;shopSeed?:SeedCatalogProduct[]|null}){
+useEffect(()=>{captureAffiliateReference();},[route]);
 const cart=useCart();
 const [cartOpen,setCartOpen]=useState(false);
 const [menuOpen,setMenuOpen]=useState(false);

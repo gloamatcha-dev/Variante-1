@@ -461,9 +461,9 @@ test("20b: migration 067 is written, self-contained and NOT applied", () => {
   // It is the newest migration and owns its number alone.
   const files = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.at(-7), "067_annual_upgrade_pending_claim.sql");
+  assert.equal(files.at(-8), "067_annual_upgrade_pending_claim.sql");
   assert.equal(files.filter(f => f.startsWith("067")).length, 1);
-  assert.equal(files.filter(f => Number(f.slice(0, 3)) > 73).length, 0);
+  assert.equal(files.filter(f => Number(f.slice(0, 3)) > 74).length, 0);
 });
 
 test("20c: the rules leaf stays pure - no clock, no env, no Stripe import", () => {

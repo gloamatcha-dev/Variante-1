@@ -1379,7 +1379,7 @@ test("61: the rate limit went into 043 rather than into a 044, and 043 is still 
      // or row. Reviewed in tests/business-expenses-migration.test.mjs.
      "071_business_expenses.sql",
      // MIGRATION 072: admin core connections. Reviewed in its own suite.
-     "072_admin_core_connections.sql", "073_affiliate_atomic_configuration.sql"],
+     "072_admin_core_connections.sql", "073_affiliate_atomic_configuration.sql", "074_creator_ugc_transactional_writers.sql"],
     "an unreviewed migration appeared after 043"
   );
 

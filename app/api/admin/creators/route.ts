@@ -6,6 +6,12 @@ import { requireAdminIdentity } from "../../../../lib/adminActionRoute.ts";
 import { getCreatorCommissionBalance } from "../../../../lib/creatorAffiliate";
 
 type ErrorResponse = { error: string };
+const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CREATOR_STATUSES=['prospect','active','paused','ended','rejected'];
+function creatorError(code:string):Response {
+  const status=code==='23505'?409:code==='P0002'?404:code==='42501'?403:['22023','23514','22P02','23502','23503'].includes(code)?400:503;
+  return json({error:status===409?'E-Mail oder Operation bereits vergeben.':status===404?'Diesen Creator gibt es nicht.':status===403?'Keine Schreibberechtigung.':status===400?'Ungültige Creator-Daten.':'Creator konnte nicht gespeichert werden.'},status);
+}
 
 function json(body: unknown, status: number): Response {
   return Response.json(body, { status });
@@ -133,10 +139,16 @@ export async function POST(request: Request): Promise<Response> {
     }
     return json({ok:true,id:data.id},200);
   }
-  if (action === "add_role") {
+  if (action === "add_role" || action === "set_roles") {
+    if(!UUID_RE.test(String(b.creatorId)))return json({error:'Ungültiger Creator.'},400);
+    if(action==='set_roles'&&(!Array.isArray(b.roles)||b.roles.some(r=>!["influencer","ugc_creator","affiliate"].includes(String(r)))))return json({error:'Ungültige Rollen.'},400);
+    if(action==='add_role'){
     if(!["influencer","ugc_creator","affiliate"].includes(String(b.role)))return json({error:"Ungültige Rolle."},400);
-    const {error}=await admin.from("creator_roles").upsert({creator_id:b.creatorId,role:b.role},{onConflict:"creator_id,role"});
-    return error?json({error:"Rolle konnte nicht gespeichert werden."},503):json({ok:true},200);
+    }
+    if(b.operationId!==undefined&&(typeof b.operationId!=='string'||!UUID_RE.test(b.operationId)))return json({error:'Ungültige Operation.'},400);
+    const {error}=await admin.rpc('admin_mutate_creator',{p_actor_user_id:actorUserId,p_action:action,
+      p_creator_id:b.creatorId,p_profile:{},p_roles:action==='add_role'?[b.role]:b.roles,p_operation_id:b.operationId??null});
+    return error?creatorError(error.code):json({ok:true},200);
   }
   if (action === "update_affiliate") {
     if(!["active","paused"].includes(String(b.status)))return json({error:"Ungültiger Status."},400);
@@ -153,39 +165,45 @@ export async function POST(request: Request): Promise<Response> {
   const str = (k: string): string => (typeof b[k] === "string" ? (b[k] as string) : "");
 
   if (action === "create_creator") {
-    const { data, error } = await admin.from("creators").insert({
-      display_name: str("displayName"),
-      email: str("email"),
+    if(!str('displayName').trim() || str('displayName').trim().length>120 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str('email').trim()) || (b.status!==undefined&&!CREATOR_STATUSES.includes(str('status'))))return json({error:'Bitte einen gültigen Namen, eine E-Mail und einen Status angeben.'},400);
+    if(b.operationId!==undefined&&(typeof b.operationId!=='string'||!UUID_RE.test(b.operationId)))return json({error:'Ungültige Operation.'},400);
+    if(b.roles!==undefined&&(!Array.isArray(b.roles)||b.roles.some(r=>!["influencer","ugc_creator","affiliate"].includes(String(r)))))return json({error:'Ungültige Rollen.'},400);
+    const { data, error } = await admin.rpc('admin_mutate_creator',{p_actor_user_id:actorUserId,
+      p_action:'create',p_creator_id:null,p_roles:b.roles??[],p_operation_id:b.operationId??null,p_profile:{
+      display_name: str("displayName").trim(),
+      email: str("email").trim(),
       instagram: str("instagram") || null,
       tiktok: str("tiktok") || null,
       portfolio_url: str("portfolioUrl") || null,
       country: str("country") || null,
       status: str("status") || "prospect",
       notes: str("notes") || null,
-      created_by: actorUserId,
-    }).select("id").single();
+    }});
 
     if (error) {
       console.error("Create creator failed:", error.message);
-      return json({ error: "Erstellen fehlgeschlagen." } as ErrorResponse, 503);
+      return creatorError(error.code);
     }
-    return json({ ok: true, creatorId: data.id }, 200);
+    return json({ ok: true, creatorId: data.creator.id }, 200);
   }
 
   if (action === "update_creator") {
     const creatorId = str("creatorId");
-    if (!creatorId) return json({ error: "creatorId fehlt." } as ErrorResponse, 400);
+    if (!UUID_RE.test(creatorId)) return json({ error: "Ungültiger Creator." } as ErrorResponse, 400);
+    if((b.displayName!==undefined&&(!str('displayName').trim()||str('displayName').trim().length>120)) || (b.email!==undefined&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str('email').trim())) || (b.status!==undefined&&!CREATOR_STATUSES.includes(str('status'))))return json({error:'Ungültige Creator-Daten.'},400);
 
-    const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    const updates: Record<string, unknown> = {};
     for (const field of ["display_name", "email", "instagram", "tiktok", "portfolio_url", "country", "status", "notes"]) {
       const camel = field.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
       if (b[camel] !== undefined) updates[field] = b[camel] || null;
     }
 
-    const { error } = await admin.from("creators").update(updates).eq("id", creatorId);
+    if(b.operationId!==undefined&&(typeof b.operationId!=='string'||!UUID_RE.test(b.operationId)))return json({error:'Ungültige Operation.'},400);
+    const { error } = await admin.rpc('admin_mutate_creator',{p_actor_user_id:actorUserId,
+      p_action:'update',p_creator_id:creatorId,p_profile:updates,p_roles:null,p_operation_id:b.operationId??null});
     if (error) {
       console.error("Update creator failed:", error.message);
-      return json({ error: "Aktualisieren fehlgeschlagen." } as ErrorResponse, 503);
+      return creatorError(error.code);
     }
     return json({ ok: true }, 200);
   }
