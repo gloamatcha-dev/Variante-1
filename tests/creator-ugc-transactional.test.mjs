@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import {readFileSync,readdirSync} from 'node:fs';
 const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8');
 const migration=read('supabase/migrations/074_creator_ugc_transactional_writers.sql');
-test('074 is the only explicitly authorized additive migration after unchanged 073',()=>{
+test('074 writers remain unchanged with explicitly authorized additive 075/076',()=>{
  const files=readdirSync(new URL('../supabase/migrations/',import.meta.url)).filter(f=>f.endsWith('.sql')).sort();
- assert.equal(files.length,74);assert.deepEqual(files.map(f=>f.slice(0,3)),Array.from({length:74},(_,i)=>String(i+1).padStart(3,'0')));
- assert.equal(files.at(-1),'074_creator_ugc_transactional_writers.sql');
+ assert.equal(files.length,76);assert.deepEqual(files.map(f=>f.slice(0,3)),Array.from({length:76},(_,i)=>String(i+1).padStart(3,'0')));
+ assert.equal(files.at(-1),'076_b2b_monthly_finance_writer.sql');
  const top=migration.replace(/\$\$[\s\S]*?\$\$/g,'').replace(/--[^\n]*/g,'');
  assert.equal([...migration.matchAll(/create function public\./g)].length,2);
  assert.doesNotMatch(top,/\b(alter table|create table|create index|create policy|insert|update|delete)\b/i);

@@ -1,0 +1,22 @@
+import fs from 'node:fs';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';import {spawn} from 'node:child_process';import {addTaxToNet} from '../../lib/tax.ts';import {sql} from '../helpers/affiliateAtomicDatabase.mjs';
+const db=process.env.GLOA_ATOMIC_LOCAL_DATABASE,out='outputs/final-verification/monthly-finance-db';fs.mkdirSync(out,{recursive:true});
+const source=JSON.parse(sql("select to_jsonb(a) from b2b_supply_agreements a where plan_type='monthly' and status='active' order by created_at desc limit 1",db));
+const expectedGross=addTaxToNet(source.pack_net_cents,7).grossCents;
+const quote=x=>"'"+String(typeof x==='object'?JSON.stringify(x):x).replaceAll("'","''")+"'";
+function fixture(){const user=randomUUID(),attempt=randomUUID();sql(`insert into auth.users(id,email,raw_user_meta_data) values('${user}','075-${user}@example.invalid','{"customer_type":"business"}');update profiles set customer_type='business' where user_id='${user}';insert into checkout_attempts(id,request_id,user_id,expected_total_gross_cents,items_snapshot) values('${attempt}','${randomUUID()}','${user}',${expectedGross},'[]');`,db);const claim=JSON.parse(sql(`set role service_role;select public.create_pending_b2b_agreement_for_attempt('${attempt}','${user}','monthly',1,null,${quote(source.pricing_snapshot)}::jsonb,${quote(source.business_snapshot)}::jsonb,${quote(source.customer_snapshot)}::jsonb,${quote(source.shipping_address_snapshot)}::jsonb,${quote(source.billing_address_snapshot)}::jsonb);`,db).split('\n').at(-1));assert.ok(claim.agreement_id,JSON.stringify(claim));return claim.agreement_id;}
+const agreement=fixture(),wrong=fixture(),invoice='in_075_'+randomUUID().replaceAll('-','');
+const call=(id,inv)=>JSON.parse(sql(`set role service_role;select public.record_b2b_monthly_invoice_event('${id}',${quote(inv)});`,db).split('\n').at(-1));
+assert.equal(call(agreement,invoice).result,'agreement_not_settled');
+assert.equal(JSON.parse(sql(`set role service_role;select public.settle_b2b_monthly_paid_invoice('${agreement}','sub_075_${randomUUID().replaceAll('-','')}','${invoice}')`,db).split('\n').at(-1)).result,'activated');
+assert.equal(call(agreement,'in_unknown').result,'invoice_not_settled');
+const wrongInvoice='in_075_other_'+randomUUID().replaceAll('-','');sql(`select public.settle_b2b_monthly_paid_invoice('${wrong}','sub_075_other','${wrongInvoice}')`,db);
+assert.equal(call(wrong,invoice).result,'invoice_agreement_mismatch');
+const runConcurrent=()=>new Promise((resolve,reject)=>{const env=Object.fromEntries(Object.entries(process.env).filter(([k])=>!/^PG/i.test(k)));const p=spawn('C:/Program Files/PostgreSQL/17/bin/psql.exe',['-X','-h','127.0.0.1','-p','55472','-U','postgres','-d',db,'-At','-v','ON_ERROR_STOP=1'],{env,windowsHide:true});let output='',error='';p.stdout.on('data',b=>output+=b);p.stderr.on('data',b=>error+=b);p.on('exit',c=>c?reject(Error(error)):resolve(output));p.stdin.end(`set role service_role;select public.record_b2b_monthly_invoice_event('${agreement}','${invoice}');`);});
+const concurrency=await Promise.all(Array.from({length:8},runConcurrent));assert.equal(concurrency.filter(r=>r.includes('"result": "recorded"')).length,1);assert.equal(concurrency.filter(r=>r.includes('already_recorded')).length,7);
+assert.equal(call(agreement,invoice).result,'already_recorded');
+const events=JSON.parse(sql(`select jsonb_agg(to_jsonb(e)) from financial_events e where b2b_agreement_id='${agreement}'`,db));assert.equal(events.length,1);assert.equal(events[0].gross_cents,expectedGross);assert.equal(events[0].net_cents,source.pack_net_cents);assert.equal(events[0].tax_cents,events[0].gross_cents-events[0].net_cents);
+assert.equal(sql(`select count(*) from b2b_payment_schedule where supply_agreement_id='${agreement}'`,db),'0');
+assert.throws(()=>sql(`set role anon;select public.record_b2b_monthly_invoice_event('${agreement}','${invoice}')`,db),/permission denied/);
+assert.throws(()=>sql(`set role authenticated;select public.record_b2b_monthly_invoice_event('${agreement}','${invoice}')`,db),/permission denied/);
+fs.writeFileSync(`${out}/database.json`,JSON.stringify({database:db,agreement,invoice,events,concurrency,identifiersOnly:true},null,2));
+console.log('076 functional proof: identifiers only, paid settlement, unknown/unpaid/mismatch denied, concurrency 1 recorded / 7 already_recorded, browser denied');

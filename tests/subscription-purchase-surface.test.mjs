@@ -1261,7 +1261,7 @@ test("8: no backend, migration, cadence, price or shipping rule changed", () => 
   // newest file on disk. Re-pinned by one position rather than deleted -
   // what this guard protects is that nothing UNREVIEWED appeared.
   // Reviewed in tests/guest-order-management.test.mjs.
-  assert.equal(migrations.at(-8), "067_annual_upgrade_pending_claim.sql",
+  assert.equal(migrations.at(-10), "067_annual_upgrade_pending_claim.sql",
     "a migration was added by a UI package");
   assert.match(read("supabase/migrations/024_seed_b2c_subscription_plans.sql"),
     /'week',\s*4,\s*'week',\s*4,\s*true,/, "the seeded cadence changed");

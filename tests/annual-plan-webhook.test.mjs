@@ -840,7 +840,7 @@ test("33: this phase stays inside its boundaries", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 74);
+  assert.equal(migrations.length, 76);
   // PHASE 4B8.2 ADDED MIGRATION 042: the ONE column privilege 041
   // was short of, so migration 039's delivery policy can still read
   // the parent's user_id while resolving ownership. Reviewed in
@@ -849,16 +849,16 @@ test("33: this phase stays inside its boundaries", () => {
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(migrations[migrations.length - 29], "046_launch_signup_atomic.sql");
-  assert.equal(migrations[migrations.length - 30], "045_launch_welcome_email.sql");
-  assert.equal(migrations[migrations.length - 31], "044_launch_send.sql");
-  assert.equal(migrations[migrations.length - 32], "043_launch_waitlist.sql");
+  assert.equal(migrations[migrations.length - 31], "046_launch_signup_atomic.sql");
+  assert.equal(migrations[migrations.length - 32], "045_launch_welcome_email.sql");
+  assert.equal(migrations[migrations.length - 33], "044_launch_send.sql");
+  assert.equal(migrations[migrations.length - 34], "043_launch_waitlist.sql");
   // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
   // commerce foundation - it evolves the two tables 006 built for a
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 74), [], "a migration 072 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 76), [], "a migration 072 or beyond appeared");
   // 001-062 ARE ALL LIVE NOW: no migration may be edited at all.
   const changed = execFileSync("git", ["diff", "--name-only", "--diff-filter=MD", "HEAD", "--", "supabase/migrations/"],
     { cwd: ROOT, encoding: "utf-8" }).trim();
@@ -1742,8 +1742,8 @@ test("61: 4B4.1's hardening is intact and this phase added no migration", () => 
   // No migration, and no new database call anywhere in this phase.
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(migrations.length, 74);
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 74), [], "a migration 072 or beyond appeared");
+  assert.equal(migrations.length, 76);
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 76), [], "a migration 072 or beyond appeared");
   // 001-062 are all applied to production and therefore immutable.
   // 064 IS LIVE. Production is 001-064, so there is no pending
   // migration and no file any immutability guard may exempt.
@@ -1753,11 +1753,22 @@ test("61: 4B4.1's hardening is intact and this phase added no migration", () => 
   assert.deepEqual(
     (touchedMigrations2 ? touchedMigrations2.split(/\r?\n/) : []),
     [], "a live, immutable migration was edited");
-  // The two new decisions are PURE: the leaf still imports no value.
+  // Pure decisions share only the authoritative, dependency-free model terms.
   const rulesImports = rulesCode.slice(0, rulesCode.indexOf("export"));
   assert.ok(rulesImports.includes("import type Stripe from"));
-  assert.equal((rulesImports.match(/^import (?!type)/gm) ?? []).length, 0,
-    "the rules leaf gained a value import");
+  assert.equal((rulesImports.match(/^import (?!type)/gm) ?? []).length, 1);
+  assert.match(rulesImports, /from "\.\/annualPlanRules\.ts"/);
+  assert.equal((readFileSync(path.join(ROOT, "lib/annualPlanRules.ts"), "utf8").match(/^import /gm) ?? []).length, 0);
+});
+
+test("activation validates stored v1/v2 model and fails closed on unknown or inconsistent count", () => {
+  for (const result of ["activated", "already_active"]) {
+    assert.equal(interpretAnnualActivationResult({result, annual_plan_id: PLAN_ID, deliveries: 12}, "v2_monthly_12").ok, true);
+    assert.equal(interpretAnnualActivationResult({result, annual_plan_id: PLAN_ID, deliveries: 13}, "v1_28d_13").ok, true);
+    assert.equal(interpretAnnualActivationResult({result, annual_plan_id: PLAN_ID, deliveries: 13}, "v2_monthly_12").ok, false);
+    assert.equal(interpretAnnualActivationResult({result, annual_plan_id: PLAN_ID, deliveries: 12}, "v1_28d_13").ok, false);
+    assert.equal(interpretAnnualActivationResult({result, annual_plan_id: PLAN_ID, deliveries: 12}, "unknown").ok, false);
+  }
 });
 
 // Migration-stack guard repinned for the explicitly added 073 RPC only.

@@ -55,7 +55,7 @@ import { notifyAnnualDeliveryOrder } from "./annualOrderNotification";
  * returns, and resolving by it would let a session naming somebody else's
  * plan reach an activation call for that plan.
  *
- * Three columns and no more. The webhook needs to know which plan, whose
+ * Only correlation, lifecycle, transition and schedule-model columns. The webhook needs to know which plan, whose
  * it is and whether it is terminal; it has no business reading the
  * customer's frozen address or the money out of here.
  */
@@ -69,7 +69,7 @@ async function findAnnualPlanByPaymentAttempt(
     .from("annual_plans")
     // source_subscription_id (migration 066) decides whether this
     // settlement is a handover. Read from the PLAN, never from metadata.
-    .select("id, user_id, status, source_subscription_id")
+    .select("id, user_id, status, source_subscription_id, schedule_model")
     .eq("payment_checkout_attempt_id", checkoutAttemptId)
     .maybeSingle();
 
@@ -86,7 +86,7 @@ async function findAnnualPlanByPaymentAttempt(
  * A thin wrapper: three arguments, and whatever jsonb it answers with,
  * unexamined. Interpreting the answer is a pure decision and lives in the
  * rules module - including that only 'activated' and 'already_active'
- * are successes, that both must report thirteen deliveries, and that
+ * are successes, that both must match the stored model's delivery count, and that
  * anything unrecognised fails closed.
  *
  * NO DATE IS PASSED. purchased_at comes from the attempt's paid_at inside

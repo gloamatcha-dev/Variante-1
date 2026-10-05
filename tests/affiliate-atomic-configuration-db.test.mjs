@@ -16,9 +16,9 @@ const statement=changes=>`select public.admin_save_affiliate_configuration(${Obj
 const save=changes=>JSON.parse(sql('set role service_role; '+statement(changes)).split('\n').at(-1));
 const read=table=>sql(`select coalesce(jsonb_agg(to_jsonb(t) order by to_jsonb(t)::text),'[]') from public.${table} t`);
 
-sql(`insert into auth.users(id,email) values (${quote(viewer)},'viewer-atomic@example.invalid');
-  insert into admin_users(user_id,email,display_name,role,is_active) values (${quote(viewer)},'viewer-atomic@example.invalid','Viewer','viewer',true);
-  insert into creators(id,display_name,email,status) values (${quote(creator)},'Atomic Creator','atomic@example.invalid','active'),(${quote(other)},'Other Creator','other-atomic@example.invalid','active');
+sql(`insert into auth.users(id,email) values (${quote(viewer)},'viewer-${viewer}@example.invalid');
+  insert into admin_users(user_id,email,display_name,role,is_active) values (${quote(viewer)},'viewer-${viewer}@example.invalid','Viewer','viewer',true);
+  insert into creators(id,display_name,email,status) values (${quote(creator)},'Atomic Creator','${creator}@example.invalid','active'),(${quote(other)},'Other Creator','${other}@example.invalid','active');
   insert into creator_roles(creator_id,role) values (${quote(creator)},'affiliate'),(${quote(creator)},'ugc_creator');
   insert into creator_commission_rules(id,label,base,percent_basis_points) values (${quote(rule)},'Existing frozen rule','order_gross',1000);
   insert into inventory_items(name,category_id,unit,current_quantity) select 'Atomic sentinel',id,'g',123.456 from inventory_categories limit 1;

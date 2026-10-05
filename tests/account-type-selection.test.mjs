@@ -153,7 +153,7 @@ test("1c: no backend, auth or database was touched", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/business-expenses-migration.test.mjs.
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("075")),
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("077")),
     "a migration 072 or beyond appeared");
 });
 

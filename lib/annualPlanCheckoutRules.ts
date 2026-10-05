@@ -986,7 +986,6 @@ export const ANNUAL_PENDING_PLAN_CONFLICT_RESULTS: readonly string[] = Object.fr
   "attempt_request_mismatch",
   "attempt_not_owned",
   "attempt_not_pre_stripe",
-  "total_mismatch",
   // MIGRATION 067. A live claim on this subscription is a refusal about
   // the CUSTOMER'S OWN current state, not an outage: retrying the same
   // second changes nothing, and a 503 would invite exactly that.

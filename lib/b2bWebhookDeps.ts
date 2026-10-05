@@ -3,7 +3,7 @@ import { getSupabaseAdmin } from "./supabaseAdmin";
 import { evaluateStripeSessionPayment } from "./stripeFulfillment";
 import { linkStripeSession, markAttemptPaid } from "./checkoutAttempts";
 import type { B2bAttemptMoneyFacts, B2bFailureDeps, B2bWebhookDeps } from "./b2bWebhook";
-import { recordB2bSettlementByInvoice } from "./financeRecording";
+import { recordB2bInitialSettlement, recordB2bMonthlyInvoiceEvent, recordB2bSettlementByInvoice } from "./financeRecording";
 import { requireBusinessEffect, FINANCE_EFFECT_RESULTS } from './requiredBusinessEffect';
 
 /**
@@ -92,6 +92,11 @@ async function activateAnnual(input: {
     return { result: "rpc_error", detail: error.message };
   }
   const payload = (data ?? {}) as { result?: string };
+  // Activation is durable before Finance. Replay must repair the missing
+  // effect even when the activation RPC returns its idempotent answer.
+  if (payload.result === "activated" || payload.result === "already_active") {
+    requireBusinessEffect('B2B initial settlement', await recordB2bInitialSettlement(input.agreementId), FINANCE_EFFECT_RESULTS);
+  }
   return { result: payload.result ?? "unknown" };
 }
 
@@ -99,7 +104,7 @@ async function settleMonthlyInvoice(input: {
   agreementId: string;
   stripeSubscriptionId: string;
   stripeInvoiceId: string;
-}): Promise<{ result: string; deliveryNumber?: number }> {
+}, stripe: Stripe): Promise<{ result: string; deliveryNumber?: number }> {
   const admin = getSupabaseAdmin();
   if (!admin) return { result: "unavailable" };
 
@@ -115,14 +120,41 @@ async function settleMonthlyInvoice(input: {
   }
   const payload = (data ?? {}) as { result?: string; delivery_number?: number };
 
-  // FINANCE RECORDING (072). Best-effort: the lookup and the RPC both
+  // FINANCE RECORDING (076). Required: the monthly invoice RPC
   // live in lib/financeRecording.ts so b2bWebhookDeps stays free of
   // direct table access to the four commerce tables.
   if (payload.result === "settled" || payload.result === "activated" || payload.result === 'already_settled') {
-    requireBusinessEffect('B2B settlement', await recordB2bSettlementByInvoice(input.agreementId, input.stripeInvoiceId), FINANCE_EFFECT_RESULTS);
+    requireBusinessEffect('B2B monthly settlement', await recordB2bMonthlyInvoiceEvent(input.agreementId, input.stripeInvoiceId), FINANCE_EFFECT_RESULTS);
+    // Monthly holds have agreement scope, not an invoice/period column.
+    // Never clear them while another provider invoice is still owed.
+    if (await monthlyInvoicesStillOwed(stripe, input.stripeSubscriptionId)) {
+      requireBusinessEffect('B2B monthly delivery hold', await holdDeliveries(input.agreementId), ['held']);
+    } else {
+      requireBusinessEffect('B2B monthly delivery release', await releaseDeliveries(input.agreementId), ['released']);
+    }
   }
 
   return { result: payload.result ?? "unknown", deliveryNumber: payload.delivery_number };
+}
+
+async function monthlyInvoicesStillOwed(stripe: Stripe, subscriptionId: string): Promise<boolean> {
+  for (const status of ['open', 'uncollectible'] as const) {
+    let after: string | undefined;
+    do {
+      const page = await stripe.invoices.list({ subscription: subscriptionId, status, limit: 100, ...(after ? { starting_after: after } : {}) });
+      for (const invoice of page.data) {
+        if (!Number.isSafeInteger(invoice.amount_remaining) || invoice.amount_remaining < 0) {
+          throw new Error('Required B2B monthly outstanding invoice facts unavailable');
+        }
+        if (invoice.amount_remaining > 0) return true;
+      }
+      if (!page.has_more) break;
+      const next = page.data.at(-1)?.id;
+      if (!next || next === after) throw new Error('Required B2B monthly invoice pagination incomplete');
+      after = next;
+    } while (after);
+  }
+  return false;
 }
 
 export function b2bWebhookDeps(stripe: Stripe): B2bWebhookDeps & B2bFailureDeps {
@@ -138,7 +170,7 @@ export function b2bWebhookDeps(stripe: Stripe): B2bWebhookDeps & B2bFailureDeps 
     linkSession: linkStripeSession,
     markAttemptPaid,
     activateAnnual,
-    settleMonthlyInvoice,
+    settleMonthlyInvoice: input => settleMonthlyInvoice(input, stripe),
     settleAnnualInstalment,
     recordAnnualFailure,
     holdDeliveries,

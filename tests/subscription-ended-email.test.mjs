@@ -756,7 +756,7 @@ test("46-47: 022 through 035 are all present and there is no 036", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(files.length, 74, "a migration was added or removed");
+  assert.equal(files.length, 76, "a migration was added or removed");
   // Phase 4B1 added 039, the B2C prepaid annual plan foundation,
   // reviewed in tests/annual-plan-foundation-migration.test.mjs. The
   // guard is re-pinned, not deleted: it protects "no UNREVIEWED
@@ -774,16 +774,16 @@ test("46-47: 022 through 035 are all present and there is no 036", () => {
   // launch notification list. It creates one new table with RLS on and
   // no anon/authenticated grant, and touches no existing object.
   // Reviewed in tests/launch-waitlist.test.mjs.
-  assert.equal(files[files.length - 29], "046_launch_signup_atomic.sql");
-  assert.equal(files[files.length - 30], "045_launch_welcome_email.sql");
-  assert.equal(files[files.length - 31], "044_launch_send.sql");
-  assert.equal(files[files.length - 32], "043_launch_waitlist.sql");
-  assert.equal(files[files.length - 33], "042_annual_delivery_rls_parent_user_privilege.sql");
-  assert.equal(files[files.length - 34], "041_annual_account_column_privileges.sql",
+  assert.equal(files[files.length - 31], "046_launch_signup_atomic.sql");
+  assert.equal(files[files.length - 32], "045_launch_welcome_email.sql");
+  assert.equal(files[files.length - 33], "044_launch_send.sql");
+  assert.equal(files[files.length - 34], "043_launch_waitlist.sql");
+  assert.equal(files[files.length - 35], "042_annual_delivery_rls_parent_user_privilege.sql");
+  assert.equal(files[files.length - 36], "041_annual_account_column_privileges.sql",
     "038 must be the highest, and 037 the one before it");
-  assert.equal(files[files.length - 35], "040_annual_checkout_retry_fingerprints.sql");
-  assert.equal(files[files.length - 36], "039_b2c_annual_plan_foundation.sql");
-  assert.equal(files[files.length - 40], MIGRATION_035);
+  assert.equal(files[files.length - 37], "040_annual_checkout_retry_fingerprints.sql");
+  assert.equal(files[files.length - 38], "039_b2c_annual_plan_foundation.sql");
+  assert.equal(files[files.length - 42], MIGRATION_035);
   assert.deepEqual(files.filter(f => f.startsWith("037")), ["037_subscription_refund_correlation.sql"]);
   // MIGRATION 071 ADDED THE EXPENSE LEDGER - one table,
   // public.business_expenses, plus three SECURITY DEFINER writers that
@@ -793,7 +793,7 @@ test("46-47: 022 through 035 are all present and there is no 036", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/business-expenses-migration.test.mjs.
-  assert.ok(!files.some(f => f.startsWith("075")), "an unreviewed migration appeared");
+  assert.ok(!files.some(f => f.startsWith("077")), "an unreviewed migration appeared");
   for (let n = 22; n <= 35; n += 1) {
     const prefix = String(n).padStart(3, "0");
     assert.ok(files.some(f => f.startsWith(prefix)), `migration ${prefix} is missing`);

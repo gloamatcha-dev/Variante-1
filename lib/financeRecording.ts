@@ -130,6 +130,41 @@ export async function recordB2bSettlementByInvoice(
   return recordB2bSettlementEvent(scheduleRow.id, operationId);
 }
 
+/** Initial annual checkout has no invoice; instalment 1 is its durable settlement key. */
+export async function recordB2bInitialSettlement(
+  agreementId: string,
+): Promise<FinanceResult | null> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return null;
+  const { data, error } = await admin
+    .from("b2b_payment_schedule")
+    .select("id")
+    .eq("supply_agreement_id", agreementId)
+    .eq("instalment_number", 1)
+    .eq("status", "paid")
+    .maybeSingle();
+  if (error || !data?.id) return null;
+  return recordB2bSettlementEvent(data.id);
+}
+
+/** Monthly paid invoices settle deliveries, never annual payment-schedule rows. */
+export async function recordB2bMonthlyInvoiceEvent(
+  agreementId: string,
+  stripeInvoiceId: string,
+): Promise<FinanceResult | null> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return null;
+  const { data, error } = await admin.rpc("record_b2b_monthly_invoice_event", {
+    p_agreement_id: agreementId,
+    p_stripe_invoice_id: stripeInvoiceId,
+  });
+  if (error) {
+    console.error(`recordB2bMonthlyInvoiceEvent failed for invoice ${stripeInvoiceId}:`, error.message);
+    return null;
+  }
+  return (data ?? null) as FinanceResult | null;
+}
+
 /**
  * Records a refund event for a one-time order.
  *

@@ -1,11 +1,12 @@
 import type Stripe from "stripe";
+import { ANNUAL_SCHEDULE_MODELS, ANNUAL_SCHEDULE_MODEL_V1, type AnnualScheduleModel } from "./annualPlanRules.ts";
 
 /**
  * Every decision the annual payment webhook makes, and none of the side
  * effects (Phase 4B4).
  *
  * A leaf, like lib/annualPlanCheckoutRules.ts and for the same reason:
- * type-only imports, no relative value import, no database, no network,
+ * shared pure model terms, no database, no network,
  * no Stripe client, no clock. The flow itself lives in
  * lib/annualPlanWebhook.ts and value-imports its neighbours, so it cannot
  * be loaded by the test runner - which is why everything worth executing
@@ -220,6 +221,7 @@ export function verifyAnnualPaymentAttempt(input: {
 
 /** The plan facts the webhook cross-checks. Read by payment attempt. */
 export type AnnualWebhookPlan = {
+  schedule_model?: string;
   id: string;
   user_id: string;
   status: string;
@@ -371,8 +373,8 @@ export function decidePaidState(input: {
 
 /* ── The activation result ──────────────────────────────────── */
 
-/** The thirteen deliveries migration 039 creates. Restated, never computed. */
-export const ANNUAL_EXPECTED_DELIVERY_COUNT = 13;
+/** Historical v1 count retained for callers validating historical results. */
+export const ANNUAL_EXPECTED_DELIVERY_COUNT = ANNUAL_SCHEDULE_MODELS[ANNUAL_SCHEDULE_MODEL_V1].deliveryCount;
 
 export const ANNUAL_ACTIVATION_SUCCESS_RESULTS: readonly string[] =
   Object.freeze(["activated", "already_active"]);
@@ -398,13 +400,17 @@ export type AnnualActivationOutcome =
  *
  * ── THE DELIVERY COUNT IS PART OF SUCCESS ─────────────────────
  *
- * 'already_active' reports how many delivery rows the plan has. Thirteen
- * is the only correct answer; anything else means the schedule is
+ * 'already_active' reports how many delivery rows the plan has. The stored
+ * model defines the correct count; anything else means the schedule is
  * incomplete, which is corruption rather than idempotency, and it is
  * surfaced as a failure so it is retried and noticed instead of quietly
  * accepted.
  */
-export function interpretAnnualActivationResult(data: unknown): AnnualActivationOutcome {
+export function interpretAnnualActivationResult(data: unknown, scheduleModel: string = ANNUAL_SCHEDULE_MODEL_V1): AnnualActivationOutcome {
+  if (!Object.prototype.hasOwnProperty.call(ANNUAL_SCHEDULE_MODELS, scheduleModel)) {
+    return { ok: false, terminal: false, reason: "unknown annual schedule model" };
+  }
+  const expectedDeliveries = ANNUAL_SCHEDULE_MODELS[scheduleModel as AnnualScheduleModel].deliveryCount;
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     return { ok: false, terminal: false, reason: "activation returned no result" };
   }
@@ -439,16 +445,16 @@ export function interpretAnnualActivationResult(data: unknown): AnnualActivation
   }
 
   // 'activated' does report a count; 'already_active' always does. Both
-  // must be thirteen.
+  // must match the model read from the authoritative plan.
   const deliveries = typeof payload.deliveries === "number" ? payload.deliveries : null;
   if (deliveries === null) {
     return { ok: false, terminal: false, reason: "activation reported no delivery count" };
   }
-  if (deliveries !== ANNUAL_EXPECTED_DELIVERY_COUNT) {
+  if (deliveries !== expectedDeliveries) {
     return {
       ok: false,
       terminal: false,
-      reason: `activation reported ${deliveries} deliveries, expected ${ANNUAL_EXPECTED_DELIVERY_COUNT}`,
+      reason: `activation reported ${deliveries} deliveries, expected ${expectedDeliveries}`,
     };
   }
 

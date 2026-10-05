@@ -650,7 +650,7 @@ test("20: attempt, THEN pending plan, THEN Stripe - in that order", () => {
   assert.ok(flow.indexOf("getStripe()") > rpc, "the Stripe client is fetched before the plan exists");
 });
 
-test("21: the RPC gets the sixteen reviewed arguments and no totals", () => {
+test("21: the RPC gets the eighteen reviewed arguments and no totals", () => {
   const rpcAt = depsCode.indexOf('admin.rpc("create_pending_annual_plan_for_attempt"');
   assert.ok(rpcAt > 0, "the RPC call was not found");
   const call = depsCode.slice(rpcAt, depsCode.indexOf("if (error) {", rpcAt));
@@ -672,9 +672,10 @@ test("21: the RPC gets the sixteen reviewed arguments and no totals", () => {
     // is present and refused otherwise, and it is the same instant the
     // Stripe Checkout Session is given as its own expires_at.
     "p_pending_expires_at",
+    "p_schedule_model",
   ];
   for (const arg of expected) assert.ok(call.includes(`${arg}:`), `missing RPC argument ${arg}`);
-  assert.equal((call.match(/p_[a-z_]+:/g) || []).length, 17, "the RPC call does not pass exactly 17 arguments");
+  assert.equal((call.match(/p_[a-z_]+:/g) || []).length, 18, "the RPC call does not pass exactly 18 arguments");
   // AND STILL NO SCHEDULE. 067's claim is a deadline for this checkout,
   // which is a different kind of date entirely: the ANCHOR still belongs
   // to activation, which gets it from Stripe's own period, and no
@@ -692,8 +693,9 @@ test("21: the RPC gets the sixteen reviewed arguments and no totals", () => {
   const m040 = read("supabase/migrations/040_annual_checkout_retry_fingerprints.sql");
   const m066 = read("supabase/migrations/066_annual_plan_subscription_transition.sql");
   const m067 = read("supabase/migrations/067_annual_upgrade_pending_claim.sql");
+  const m069 = read("supabase/migrations/069_annual_plan_monthly_schedule.sql");
   for (const arg of expected) {
-    assert.ok(m040.includes(arg) || m066.includes(arg) || m067.includes(arg),
+    assert.ok(m040.includes(arg) || m066.includes(arg) || m067.includes(arg) || m069.includes(arg),
       `no installed signature has argument ${arg}`);
   }
   // 067 REPLACED THE FUNCTION AGAIN, for the same reason 040 and 066
@@ -987,7 +989,7 @@ test("32: the checkout phase's own migrations are untouched, and 041 is not its 
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 74);
+  assert.equal(migrations.length, 76);
   assert.equal(migrations[38], "039_b2c_annual_plan_foundation.sql");
   assert.equal(migrations[39], "040_annual_checkout_retry_fingerprints.sql");
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
@@ -996,7 +998,7 @@ test("32: the checkout phase's own migrations are untouched, and 041 is not its 
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 74), [],
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 76), [],
     "a migration 072 or beyond appeared");
   // 041 touches privileges only: it creates no table, no column and no
   // function, so it cannot have changed anything this suite proves.
@@ -1463,7 +1465,7 @@ test("44: CASE B - no plan yet, same addressId, contents changed, refused", () =
   // REQUEST rather than about the server.
   assert.deepEqual([...ANNUAL_PENDING_PLAN_CONFLICT_RESULTS], [
     "attempt_intent_mismatch", "attempt_request_mismatch", "attempt_not_owned",
-    "attempt_not_pre_stripe", "total_mismatch",
+    "attempt_not_pre_stripe",
     // MIGRATION 067. A live claim on this subscription is a statement
     // about the customer's own current state, not about the server, so
     // it joins the 409 family: retrying the same second changes nothing
@@ -1479,7 +1481,7 @@ test("44: CASE B - no plan yet, same addressId, contents changed, refused", () =
     assert.equal(annualPendingPlanFailureStatus(conflict), 409, conflict);
   }
   // Anything else, including a word nobody has seen, stays retryable.
-  for (const retryable of ["attempt_not_found", "invalid_input", "unknown", ""]) {
+  for (const retryable of ["attempt_not_found", "invalid_input", "total_mismatch", "unknown", ""]) {
     assert.equal(annualPendingPlanFailureStatus(retryable), 503, retryable);
   }
   assert.equal(annualPendingPlanFailureStatus("attempt_request_mismatch"), 409);
@@ -1602,3 +1604,21 @@ test("49: this phase still activates nothing and touches no other runtime", () =
 
 // Migration-stack guard repinned for the explicitly added 073 RPC only.
 // Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.
+
+
+test('new annual checkout adapter explicitly supplies current v2 model; database totals mismatch is not request-ID reuse',async()=>{
+  const {createRequire}=await import('node:module');const {default:vm}=await import('node:vm');
+  const require=createRequire(import.meta.url),ts=require('typescript');
+  const models=await import('../lib/annualPlanRules.ts');
+  assert.equal(models.ANNUAL_SCHEDULE_MODEL_V1,'v1_28d_13');
+  assert.equal(models.ANNUAL_SCHEDULE_MODEL_CURRENT,'v2_monthly_12');
+  let submitted;
+  const compiled={exports:{}};
+  const js=ts.transpileModule(read('lib/annualPlanCheckoutDeps.ts'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+  vm.runInNewContext(js,{module:compiled,exports:compiled.exports,console,require:name=>
+    name==='./annualPlanRules'?models:name==='./supabaseAdmin'?{getSupabaseAdmin:()=>({rpc:async(name,args)=>{assert.equal(name,'create_pending_annual_plan_for_attempt');submitted=args;return {data:{result:'created'},error:null};}})}:{}});
+  await compiled.exports.defaultAnnualCheckoutDeps.createPendingPlan({});
+  assert.equal(submitted.p_schedule_model,models.ANNUAL_SCHEDULE_MODEL_V2);
+  assert.equal(annualPendingPlanFailureStatus('total_mismatch'),503);
+  assert.equal(annualPendingPlanFailureStatus('attempt_request_mismatch'),409);
+});

@@ -334,9 +334,9 @@ test("18: migration 069 rewrites no existing row and no existing schedule", () =
 test("18b: 069 is the newest migration, owns its number, and is NOT applied", () => {
   const files = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.at(-6), "069_annual_plan_monthly_schedule.sql");
+  assert.equal(files.at(-8), "069_annual_plan_monthly_schedule.sql");
   assert.equal(files.filter(f => f.startsWith("069")).length, 1);
-  assert.equal(files.filter(f => Number(f.slice(0, 3)) > 74).length, 0);
+  assert.equal(files.filter(f => Number(f.slice(0, 3)) > 76).length, 0);
   assert.match(M069, /NOT YET APPLIED/);
   // 066, 067 and 068 are not touched by it.
   for (const kept of ["annual_plans_active_upgrade_per_subscription_key",

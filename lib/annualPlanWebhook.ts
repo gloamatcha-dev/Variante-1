@@ -422,7 +422,7 @@ export async function settleAnnualCheckoutSession(
   // 8. ACTIVATION. Migration 039 re-proves every one of the facts above
   //    under its own row lock and then owns everything this file must
   //    not compute: purchased_at from the attempt's paid_at, plan_end_at
-  //    at +8736 hours, and thirteen delivery rows at 672-hour steps -
+  //    and the delivery rows according to the stored v1/v2 schedule model -
   //    from the handover date when there is one, and from paid_at when
   //    there is not.
   const activation = interpretAnnualActivationResult(
@@ -431,7 +431,8 @@ export async function settleAnnualCheckoutSession(
       stripeCheckoutSessionId: session.id,
       stripePaymentIntentId: paymentIntentId,
       scheduleAnchorAt,
-    })
+    }),
+    plan.schedule_model ?? ""
   );
 
   if (!activation.ok) {

@@ -6,6 +6,7 @@ import { getSupabaseAdmin } from "./supabaseAdmin";
 import { buildAuthoritativeQuote } from "./checkoutQuote";
 import { getOrCreateAnnualCheckoutAttempt, linkStripeSession } from "./checkoutAttempts";
 import { isAnnualPlanCheckoutEnabled } from "./annualPlans";
+import { ANNUAL_SCHEDULE_MODEL_CURRENT } from "./annualPlanRules";
 import type { SavedAddressRow } from "./subscriptionCheckoutRules";
 import type { AnnualCheckoutDeps, CreatePendingAnnualPlanInput } from "./annualPlanCheckout";
 import type { UpgradeSubscriptionRow } from "./subscriptionUpgradeRules";
@@ -150,6 +151,9 @@ async function createPendingAnnualPlan(input: CreatePendingAnnualPlanInput): Pro
     // proceed; it refuses the pair outright if one is present without
     // the other. NULL for every ordinary purchase, as before.
     p_pending_expires_at: input.pendingExpiresAt,
+    // New purchases use the same model as pricing; omitted RPC arguments
+    // retain the historical v1 default for historical callers.
+    p_schedule_model: ANNUAL_SCHEDULE_MODEL_CURRENT,
   });
 
   if (error) {

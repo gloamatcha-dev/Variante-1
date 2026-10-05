@@ -1182,6 +1182,10 @@ async function handleB2bInvoiceFailed(
   const routed = routeB2bSubscriptionInvoice(subscription.metadata, subscription.id);
   if (routed.kind !== "b2b") return { handled: false };
 
+  // A delayed failure notification must not re-hold a recovered paid period.
+  const currentInvoice = await stripe.invoices.retrieve(eventInvoice.id);
+  if (currentInvoice.status === "paid") return { handled: true };
+
   const held = await holdB2bMonthlyForFailure(routed.agreementId, b2bWebhookDeps(stripe));
   if (held.kind === "refused") {
     throw new Error(

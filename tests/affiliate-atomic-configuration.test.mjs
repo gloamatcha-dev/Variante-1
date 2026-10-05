@@ -4,11 +4,11 @@ import {readFileSync,readdirSync} from 'node:fs';
 const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8');
 const migration=read('supabase/migrations/073_affiliate_atomic_configuration.sql');
 const body=migration.split('as $$')[1].split('$$;')[0];
-test('approved migration stack has exactly 001..074, unique numbers, and the exact new filename',()=>{
+test('approved migration stack has exactly 001..075, unique numbers, and the exact new filename',()=>{
  const files=readdirSync(new URL('../supabase/migrations/',import.meta.url)).filter(f=>f.endsWith('.sql')).sort();
- assert.equal(files.length,74);
- assert.deepEqual(files.map(f=>f.slice(0,3)),Array.from({length:74},(_,i)=>String(i+1).padStart(3,'0')));
- assert.equal(files.at(-1),'074_creator_ugc_transactional_writers.sql');
+ assert.equal(files.length,76);
+ assert.deepEqual(files.map(f=>f.slice(0,3)),Array.from({length:76},(_,i)=>String(i+1).padStart(3,'0')));
+ assert.equal(files.at(-1),'076_b2b_monthly_finance_writer.sql');
 });
 test('073 is additive: one new RPC, no tables/indexes/policies or business seed statements',()=>{
  assert.equal([...migration.matchAll(/create function /gi)].length,1);

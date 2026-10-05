@@ -161,8 +161,8 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
   // Re-pinned rather than deleted - what this guard protects is that
   // nothing UNREVIEWED appeared. Reviewed in
   // tests/guest-order-management.test.mjs.
-  assert.equal(files[files.length - 36], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 37], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 38], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 39], MIGRATION_038, "038 must be the one before it");
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
@@ -170,7 +170,7 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
 test("2: no migration 044 or beyond", () => {
   // 065 is the highest migration. 039 is live and is not the place to
   // fix anything any more.
-  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 74);
+  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 76);
   assert.deepEqual(beyond, [], "an unreviewed migration appeared after 065");
 });
 
