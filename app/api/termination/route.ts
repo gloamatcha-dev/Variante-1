@@ -8,6 +8,7 @@ import {
   validateTerminationInput,
   resolveTerminationOutcome,
   formatGermanDate,
+  PUBLIC_TERMINATION_RECEIPT_MESSAGE,
   type TerminationKind,
   type TerminationContractKind,
 } from "../../../lib/terminationRequest";
@@ -87,6 +88,8 @@ type SuccessResponse = {
   confirmationEmailSent: boolean;
   /** The substance of what happens next - the same text the mail carries. */
   message: string;
+  contractReference?: string;
+  requestedEndAt?: string | null;
 };
 
 function tooManyRequests(retryAfterSeconds: number): Response {
@@ -123,7 +126,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const {
     name, email, contractReference, terminationKind, requestedEndAt,
-    extraordinaryReason, website, idempotencyKey, annualPlanId,
+    extraordinaryReason, website, idempotencyKey, annualPlanId, contractType,
   } = body as Record<string, unknown>;
 
   if (typeof website === "string" && website.trim() !== "") {
@@ -270,7 +273,10 @@ export async function POST(request: Request): Promise<Response> {
     the reference are the server's on the authenticated path.
   */
   const effectiveEmail = accountPlan ? accountPlan.email : trimmedEmail;
-  const effectiveRef = accountPlan ? accountPlan.reference : trimmedRef;
+  // A declared type helps a human identify an unknown number; it never grants authority.
+  const declaredContract = contractType === 'subscription_4w' ? '4-Wochen-Abo' : contractType === 'annual_plan' ? 'Jahresplan' : 'Vertrag';
+  const effectiveRef = accountPlan ? accountPlan.reference : trimmedRef || `${declaredContract} (Nummer nicht bekannt)`;
+  const receiptMessage = accountPlan ? null : PUBLIC_TERMINATION_RECEIPT_MESSAGE;
 
   const validated = validateTerminationInput({
     terminationKind: kind as TerminationKind,
@@ -293,15 +299,21 @@ export async function POST(request: Request): Promise<Response> {
   if (key) {
     const { data: existing } = await admin
       .from("termination_requests")
-      .select("id, submitted_at, case_state")
+      .select("id, submitted_at, contact_email, contract_reference, termination_kind, requested_end_at, confirmation_status")
       .eq("idempotency_key", key)
       .maybeSingle();
     if (existing) {
+      if (existing.contact_email.toLowerCase() !== effectiveEmail.toLowerCase() || existing.contract_reference !== effectiveRef || existing.termination_kind !== kind
+          || (existing.requested_end_at ? new Date(existing.requested_end_at).toISOString() : null) !== (requestedEndAt ? new Date(String(requestedEndAt)).toISOString() : null)) {
+        return Response.json({ error: 'Diese Anfrage konnte nicht bestätigt werden. Bitte übermittle deine Kündigung erneut.' }, { status: 409 });
+      }
       return Response.json(
         {
           ok: true, submittedAt: existing.submitted_at as string,
-          confirmationEmailSent: false,
-          message: "Deine Kündigung ist bei uns eingegangen.",
+          confirmationEmailSent: existing.confirmation_status === 'sent',
+          message: receiptMessage ?? "Deine Kündigung ist bei uns eingegangen.",
+          contractReference: effectiveRef,
+          requestedEndAt: typeof requestedEndAt === 'string' ? requestedEndAt : null,
         } as SuccessResponse,
         { status: 200 }
       );
@@ -365,17 +377,23 @@ export async function POST(request: Request): Promise<Response> {
       }
     }
 
-    // No annual plan resolved: try the customer's live 4-week subscription.
+    // Resolve only the subscription actually paid by this order. A one-time
+    // order must never select some other active contract belonging to its owner.
     if (contractKind === "unresolved" && resolvedUserId) {
+      const { data: subscriptionId, error: correlationError } = await admin.rpc('order_subscription_id', { p_order_id: order!.id });
+      if (correlationError) throw new Error('Subscription correlation unavailable');
+      if (subscriptionId) {
       const { data: sub } = await admin
         .from("subscriptions")
         .select("id")
+        .eq("id", subscriptionId)
         .eq("user_id", resolvedUserId)
         .eq("status", "active")
         .maybeSingle();
       if (sub) {
         contractKind = "subscription_4w";
         resolvedSubscriptionId = sub.id as string;
+      }
       }
     }
   } catch {
@@ -413,7 +431,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   // THE 4-WEEK SUBSCRIPTION IS CANCELLED BY THE EXISTING LOGIC, not
-  // here. The case is recorded as 'scheduled' and an administrator
+  // here. The case remains 'under_review' until an administrator
   // drives lib/subscriptionCancellation.ts from the Consumer Rights
   // screen, which keeps the 14-day cutoff rules in exactly one place.
 
@@ -428,6 +446,7 @@ export async function POST(request: Request): Promise<Response> {
       terminationKind: kind as TerminationKind,
       submittedAt: inserted.submitted_at as string,
       outcomeMessage: outcome.message,
+      requestedEndAt: typeof requestedEndAt === 'string' ? requestedEndAt : null,
     });
     try {
       const { error: sendError } = await resend.emails.send({
@@ -456,7 +475,9 @@ export async function POST(request: Request): Promise<Response> {
       ok: true,
       submittedAt: inserted.submitted_at as string,
       confirmationEmailSent,
-      message: outcome.message,
+      message: receiptMessage ?? outcome.message,
+      contractReference: effectiveRef,
+      requestedEndAt: typeof requestedEndAt === 'string' ? requestedEndAt : null,
     } as SuccessResponse,
     { status: 200 }
   );

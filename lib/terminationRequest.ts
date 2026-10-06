@@ -33,6 +33,9 @@ export const TERMINATION_ENTRY_LABEL = "VERTRÄGE HIER KÜNDIGEN";
 /** BGB 312k Abs. 2 Satz 4 - the confirmation button, in the required words. */
 export const TERMINATION_CONFIRM_LABEL = "JETZT KÜNDIGEN";
 
+/** Same public receipt whether or not the declaration resolves to a contract. */
+export const PUBLIC_TERMINATION_RECEIPT_MESSAGE = "Deine Kündigung ist eingegangen. Wir prüfen die Zuordnung und bestätigen dir den wirksamen Endtermin gesondert. Die Ausführung ist noch nicht bestätigt. Eine Kündigung löst keine automatische Erstattung aus.";
+
 export type TerminationKind = "ordinary" | "extraordinary";
 
 export type TerminationContractKind = "subscription_4w" | "annual_plan" | "unresolved";
@@ -200,7 +203,7 @@ export function terminateExtraordinary(): TerminationOutcome {
  */
 export function terminateSubscriptionOrdinary(): TerminationOutcome {
   return {
-    caseState: "scheduled",
+    caseState: "under_review",
     appliedImmediately: false,
     routeToSubscriptionCancellation: true,
     message:

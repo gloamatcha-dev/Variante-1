@@ -69,6 +69,7 @@ import { SHIPPING_ZONES, SHIPPING_PRICING, getShippingZone, getCountryLabel, com
 import { PARTNERSHIP_TYPE_OPTIONS } from "../lib/partnershipRequest";
 import { createCheckoutSession } from "./createCheckoutSession";
 import { captureAffiliateReference } from './affiliateReference';
+import { formatGermanDate } from '../lib/terminationRequest';
 import { requestCheckoutQuote } from "./checkoutQuote";
 // The checkout's identity rule, shared with the server rather than
 // restated here - a second copy of "what counts as a valid address"
@@ -1882,17 +1883,18 @@ const[step,setStep]=useState<"form"|"review"|"success">("form");
 const[name,setName]=useState("");
 const[email,setEmail]=useState("");
 const[contractReference,setContractReference]=useState("");
+const[contractType,setContractType]=useState("subscription_4w");
 const[kind,setKind]=useState<"ordinary"|"extraordinary">("ordinary");
 const[requestedEndAt,setRequestedEndAt]=useState("");
 const[reason,setReason]=useState("");
 const[busy,setBusy]=useState(false);
 const[error,setError]=useState("");
-const[result,setResult]=useState<{submittedAt:string;confirmationEmailSent:boolean;message:string}|null>(null);
+const[result,setResult]=useState<{submittedAt:string;confirmationEmailSent:boolean;message:string;contractReference?:string;requestedEndAt?:string|null}|null>(null);
 const idemRef=useRef<string>("");
 
 const startReview=(e:React.FormEvent<HTMLFormElement>)=>{
 e.preventDefault();
-if(!name.trim()||!email.trim()||!contractReference.trim()){setError("Bitte fülle alle Pflichtfelder aus.");return}
+if(!name.trim()||!email.trim()){setError("Bitte fülle alle Pflichtfelder aus.");return}
 if(kind==="extraordinary"&&!reason.trim()){setError("Bitte gib den Grund für die außerordentliche Kündigung an.");return}
 if(!idemRef.current)idemRef.current=`kdg-${Date.now()}-${Math.random().toString(36).slice(2,10)}`;
 setError("");setStep("review");
@@ -1901,10 +1903,10 @@ setError("");setStep("review");
 const confirmTermination=async()=>{
 setBusy(true);setError("");
 try{
-const res=await fetch("/api/termination",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:name.trim(),email:email.trim(),contractReference:contractReference.trim(),terminationKind:kind,requestedEndAt:requestedEndAt||null,extraordinaryReason:kind==="extraordinary"?reason.trim():null,idempotencyKey:idemRef.current})});
+const res=await fetch("/api/termination",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:name.trim(),email:email.trim(),contractReference:contractReference.trim(),contractType,terminationKind:kind,requestedEndAt:requestedEndAt||null,extraordinaryReason:kind==="extraordinary"?reason.trim():null,idempotencyKey:idemRef.current})});
 const body=await res.json().catch(()=>null);
 if(!res.ok){setError(body?.error||"Kündigung konnte nicht übermittelt werden.");setBusy(false);return}
-setResult({submittedAt:body.submittedAt,confirmationEmailSent:body.confirmationEmailSent,message:body.message});
+setResult({submittedAt:body.submittedAt,confirmationEmailSent:body.confirmationEmailSent,message:body.message,contractReference:body.contractReference,requestedEndAt:body.requestedEndAt});
 setStep("success");
 }catch{
 setError("Kündigung konnte nicht übermittelt werden. Bitte versuche es erneut oder schreib uns an hello@gloamatcha.com.");
@@ -1916,7 +1918,9 @@ if(step==="success"&&result){
 const submitted=new Date(result.submittedAt);
 return <div className="legal-withdrawal">
 <h3>Deine Kündigung ist eingegangen.</h3>
-<p>Eingegangen am {submitted.toLocaleDateString("de-DE")} um {submitted.toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"})} Uhr.</p>
+<p>Eingegangen am {submitted.toLocaleDateString("de-DE",{timeZone:"Europe/Berlin"})} um {submitted.toLocaleTimeString("de-DE",{timeZone:"Europe/Berlin",hour:"2-digit",minute:"2-digit"})} Uhr (Berlin).</p>
+<p>Vertrag: {result.contractReference||contractReference||"Nummer nicht bekannt"}</p>
+<p>Gewünschtes Vertragsende: {result.requestedEndAt?formatGermanDate(result.requestedEndAt):"Zum nächstmöglichen Zeitpunkt"}</p>
 <p>{result.message}</p>
 {result.confirmationEmailSent
 ?<p>Eine Bestätigung haben wir an {email.trim()} gesendet.</p>
@@ -1930,7 +1934,7 @@ if(step==="review")return <div className="legal-withdrawal">
 <dl>
 <div><dt>Name</dt><dd>{name}</dd></div>
 <div><dt>E-Mail für Bestätigung</dt><dd>{email}</dd></div>
-<div><dt>Vertrag</dt><dd>{contractReference}</dd></div>
+<div><dt>Vertrag</dt><dd>{contractReference||(contractType==="subscription_4w"?"4-Wochen-Abo":contractType==="annual_plan"?"Jahresplan":"Vertrag")+" (Nummer nicht bekannt)"}</dd></div>
 <div><dt>Art der Kündigung</dt><dd>{kind==="ordinary"?"Ordentliche Kündigung":"Außerordentliche Kündigung"}</dd></div>
 <div><dt>Gewünschtes Vertragsende</dt><dd>{requestedEndAt||"Zum nächstmöglichen Zeitpunkt"}</dd></div>
 {kind==="extraordinary"&&<div><dt>Grund</dt><dd>{reason}</dd></div>}
@@ -1945,12 +1949,13 @@ if(step==="review")return <div className="legal-withdrawal">
 return <form className="account-form legal-withdrawal" onSubmit={startReview}>
 <label>Name *<input required name="name" value={name} onChange={e=>setName(e.target.value)}/></label>
 <label>E-Mail für die Bestätigung *<input required type="email" name="email" value={email} onChange={e=>setEmail(e.target.value)}/></label>
-<label>Vertrag, Bestell- oder Abonummer *<input required name="contractReference" placeholder="z. B. GLOA-2026-000123" value={contractReference} onChange={e=>setContractReference(e.target.value)}/></label>
+<label>Vertragsart<select name="contractType" value={contractType} onChange={e=>setContractType(e.target.value)}><option value="subscription_4w">Abo – alle 4 Wochen / 28 Tage</option><option value="annual_plan">Vorausbezahlter Jahresplan</option><option value="unresolved">Nicht sicher</option></select></label>
+<label>Vertrags-, Bestell- oder Abonummer, falls bekannt<input name="contractReference" maxLength={200} placeholder="z. B. GLOA-2026-000123" value={contractReference} onChange={e=>setContractReference(e.target.value)}/><span className="legal-note">Ohne Nummer nehmen wir deine Kündigung ebenfalls entgegen und klären die Zuordnung mit dir.</span></label>
 <label>Art der Kündigung *<select name="terminationKind" value={kind} onChange={e=>setKind(e.target.value as "ordinary"|"extraordinary")}>
 <option value="ordinary">Ordentliche Kündigung</option>
 <option value="extraordinary">Außerordentliche Kündigung</option>
 </select></label>
-<label>Gewünschtes Vertragsende<input type="date" name="requestedEndAt" value={requestedEndAt} onChange={e=>setRequestedEndAt(e.target.value)}/><span className="legal-note">Ohne Angabe kündigen wir zum nächstmöglichen Zeitpunkt.</span></label>
+<label>Gewünschtes Vertragsende<input type="date" name="requestedEndAt" value={requestedEndAt} onChange={e=>setRequestedEndAt(e.target.value)}/><span className="legal-note">Ohne Angabe kündigen wir zum nächstmöglichen Zeitpunkt. Ein Wunschdatum prüfen wir nach den Vertragsbedingungen; es ist noch kein bestätigter Endtermin.</span></label>
 {kind==="extraordinary"&&<label>Grund der außerordentlichen Kündigung *<textarea required name="extraordinaryReason" rows={4} maxLength={2000} value={reason} onChange={e=>setReason(e.target.value)}/></label>}
 {error&&<p className="account-error">{error}</p>}
 <button className="cta" type="submit">Weiter zur Bestätigung</button>

@@ -56,6 +56,7 @@ export type TerminationReceivedInput = {
    * and the admin all say the same thing.
    */
   outcomeMessage: string;
+  requestedEndAt?: string | null;
   origin?: string;
 };
 
@@ -89,6 +90,7 @@ export function buildTerminationReceivedEmail(
   const { date, time } = fmtDateTime(input.submittedAt);
   const origin = input.origin;
   const outcome = escapeHtml(input.outcomeMessage);
+  const requestedEnd = input.requestedEndAt ? new Date(input.requestedEndAt).toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin' }) : 'Zum nächstmöglichen Zeitpunkt';
 
   const kindLine = extraordinary
     ? "Art der Kündigung: außerordentliche Kündigung"
@@ -106,6 +108,7 @@ wir bestätigen den Eingang deiner Kündigung.
 <tr><td style="padding:0 0 20px 0;font-size:15px;line-height:1.8;color:${GLOA_NEAR_BLACK};">
 Vertrag: <strong>${ref}</strong><br/>
 ${kindLine}<br/>
+Gewünschtes Vertragsende: ${escapeHtml(requestedEnd)}<br/>
 Eingegangen am ${date} um ${time} Uhr
 </td></tr>
 <tr><td style="padding:0 0 20px 0;font-size:15px;line-height:1.7;color:${GLOA_NEAR_BLACK};">
@@ -124,6 +127,7 @@ ${emailFooter(legalLinks(origin))}
     "",
     `Vertrag: ${input.contractReference}`,
     kindLine,
+    `Gewünschtes Vertragsende: ${requestedEnd}`,
     `Eingegangen am ${date} um ${time} Uhr`,
     "",
     input.outcomeMessage,

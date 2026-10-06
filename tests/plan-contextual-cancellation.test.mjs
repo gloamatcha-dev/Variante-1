@@ -347,7 +347,7 @@ test("5c: the e-mail and the reference are the server's on that path", () => {
   // Taken from the verified token, never from the body.
   assert.match(TERMINATION_ROUTE, /email: caller\.email,/);
   assert.match(TERMINATION_ROUTE, /const effectiveEmail = accountPlan \? accountPlan\.email : trimmedEmail;/);
-  assert.match(TERMINATION_ROUTE, /const effectiveRef = accountPlan \? accountPlan\.reference : trimmedRef;/);
+  assert.match(TERMINATION_ROUTE, /const effectiveRef = accountPlan \? accountPlan\.reference : trimmedRef \|\|/);
   // Built here, from the plan, rather than accepted from the browser.
   assert.match(TERMINATION_ROUTE, /reference: endAt/);
   assert.match(TERMINATION_ROUTE, /"Jahresplan, Ende " \+ formatGermanDate\(endAt\)/);

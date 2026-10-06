@@ -1,6 +1,7 @@
 import { getSupabaseAdmin } from "./supabaseAdmin";
 import {getStripeClient} from './stripe';
 import {applyDeferredCancellationFromRenewal} from './subscriptionCancellation';
+import {resolveCancellationSchedule} from './subscriptionCancellationRules';
 
 export type TerminationDecision =
   | "note_ordinary"
@@ -101,7 +102,11 @@ export async function executeSubscriptionTermination(input: {
       const cleared=await admin.rpc('sync_subscription_from_stripe',{p_stripe_subscription_id:subscription.stripe_subscription_id,p_current_period_start:null,p_current_period_end:null,p_cancel_at:null});
       if(cleared.error)throw new Error('Cancellation reconciliation failed');
     }
-    const effective=subscription.cancellation_effective_at??subscription.current_period_end;
+    const schedule=resolveCancellationSchedule({requestAt:termination.submitted_at,currentPeriodEnd:subscription.current_period_end});
+    if(!schedule.ok)throw new Error('Cancellation schedule unavailable');
+    // Preserve PostgreSQL's sub-millisecond precision at the current boundary.
+    // Rounding an early end down makes the authoritative writer reject it as stale.
+    const effective=subscription.cancellation_effective_at??(schedule.schedule.timing==='early'?subscription.current_period_end:schedule.schedule.effectiveCancelAt);
     const pending=await admin.rpc('schedule_subscription_cancellation',{p_subscription_id:subscription.id,p_user_id:subscription.user_id,p_requested_at:subscription.cancellation_requested_at??termination.submitted_at,p_effective_at:effective,p_cancel_at:null});
     if(pending.error||!['scheduled','already_scheduled'].includes(pending.data?.result))throw new Error('Cancellation intent could not be recorded');
     const reviewing=await admin.from('termination_requests').update({case_state:'under_review'}).eq('id',termination.id);

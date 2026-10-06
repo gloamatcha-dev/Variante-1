@@ -140,7 +140,7 @@ export function AdminCustomerRights({ onSessionLost, initialSection, initialFocu
       const result = String(json.result ?? "ok");
       // A refusal from the database is shown as it came back, not
       // translated into a success the operator would have to guess at.
-      setNotice(`${label}: ${result}`);
+      setNotice(`${label}: ${result}${json.effective_at ? ` · Vertragsende: ${dt(json.effective_at)}` : ''}`);
       await reload();
     }
     setBusy(false);
@@ -456,7 +456,7 @@ export function AdminCustomerRights({ onSessionLost, initialSection, initialFocu
                     }}>{title}</button>
                   )) : t.resolved_subscription_id ? <button type="button" disabled={busy} onClick={() => {
                     if(window.confirm('Öffentliche Vertragskündigung verbindlich ausführen? Der Server bestimmt das wirksame Ende.'))
-                      void act({action:"execute_subscription_termination",terminationId:id},"Vertragskündigung");
+                      void act({action:"execute_subscription_termination",terminationId:id,internalNote:terminationNotes[id]},"Vertragskündigung");
                   }}>Vertragskündigung ausführen</button> : <p className="ops-note">Vertrag noch nicht eindeutig zugeordnet. Keine Vertragswirkung ausführbar.</p>}
 
                 </div>
