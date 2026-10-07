@@ -1,5 +1,6 @@
 "use client";
 import {useState} from 'react';
+import AdminWithdrawalAssignment from './AdminWithdrawalAssignment';
 import {WITHDRAWAL_GOODS_STATUS, WITHDRAWAL_RETURN_STATUS, withdrawalDecisionCents} from '../lib/withdrawalReview';
 
 type Row = Record<string, unknown>;
@@ -17,8 +18,9 @@ export default function AdminWithdrawalReview({withdrawal:w,busy,onAction,onPayo
   const [final,setFinal]=useState((Number(w.refund_amount_cents??b.suggested_refund_cents??0)/100).toFixed(2));
   const [confirm,setConfirm]=useState(false);
   const id=String(w.id);
-  const locked=['approved_for_payout','failed','executed'].includes(String(w.refund_state));
+  const locked=b.result!=='ready'||['approved_for_payout','failed','executed'].includes(String(w.refund_state));
   const assessed=withdrawalDecisionCents(loss),approved=withdrawalDecisionCents(final);
+  if(w.resolution_method==='unresolved'||(!w.resolved_order_id&&!w.resolved_annual_plan_id))return <AdminWithdrawalAssignment id={id} busy={busy} onAction={onAction}/>;
   return <section aria-label="Widerruf prüfen">
     <h4>ZAHLUNG</h4>
     <dl className="ops-facts">
@@ -36,6 +38,7 @@ export default function AdminWithdrawalReview({withdrawal:w,busy,onAction,onPayo
       <div><dt>Nächste geplante Lieferung</dt><dd>{at(d.next_scheduled_at)}</dd></div>
     </dl>
     {b.result!=='ready'&&<p role="alert">Berechnung nicht verfügbar: {String(b.result??'Daten fehlen')}. Keine Auszahlung freigeben.</p>}
+    {w.resolution_method==='admin_manual'&&w.timeliness==='deadline_uncertain'&&!w.deadline_date&&b.result==='ready'&&<button type="button" disabled={busy||locked} onClick={()=>void onAction({action:'assign_withdrawal_contract',withdrawalId:id,contractKind:b.contract_type,contractId:b.contract_type==='annual_plan'?w.resolved_annual_plan_id:b.contract_type==='subscription_4w'?b.subscription_id:w.resolved_order_id},'Fristprüfung')}>Fristprüfung nach Zuordnung erneut durchführen</button>}
     <h4>WARE</h4>
     <div className="ops-actions">
       <label>Warenstatus<select value={goods} disabled={busy||locked} onChange={e=>setGoods(e.target.value)}><option value="">Bitte prüfen</option>{Object.entries(WITHDRAWAL_GOODS_STATUS).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label>

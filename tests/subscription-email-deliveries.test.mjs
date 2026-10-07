@@ -272,7 +272,7 @@ test("035 exists, is the only 035, and only 036 and 037 follow it", () => {
      // or row. Reviewed in tests/business-expenses-migration.test.mjs.
      "071_business_expenses.sql",
      // MIGRATION 072: admin core connections. Reviewed in its own suite.
-     "072_admin_core_connections.sql", "073_affiliate_atomic_configuration.sql", "074_creator_ugc_transactional_writers.sql", "075_b2b_supply_agreement_acl_hardening.sql", "076_b2b_monthly_finance_writer.sql", "077_withdrawal_refund_review.sql"],
+     "072_admin_core_connections.sql", "073_affiliate_atomic_configuration.sql", "074_creator_ugc_transactional_writers.sql", "075_b2b_supply_agreement_acl_hardening.sql", "076_b2b_monthly_finance_writer.sql", "077_withdrawal_refund_review.sql", "078_withdrawal_contract_assignment.sql"],
     "an unreviewed migration above 035 appeared"
   );
   // And 039 leaves this table entirely alone. An annual plan's one

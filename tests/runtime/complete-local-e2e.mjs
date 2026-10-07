@@ -1,4 +1,4 @@
-/** Reproducible verification against a clone of an already-installed local 077 baseline.
+/** Reproducible verification against a clone of an already-installed local 078 baseline.
  * No migration is executed. No Production configuration, provider or email is used.
  */
 import fs from 'node:fs';
@@ -12,6 +12,7 @@ assert.match(template??'',/^gloa_073_[a-f0-9]+$/,'Provide an already-installed d
 assert.match(sql('show server_version','postgres'),/^17\./);
 assert.equal(sql("select to_regprocedure('public.record_b2b_monthly_invoice_event(uuid,text)') is not null",template),'t');
 assert.equal(sql("select to_regprocedure('public.admin_approve_withdrawal_refund_v1(uuid,uuid,integer)') is not null",template),'t','077 test baseline required');
+assert.equal(sql("select to_regprocedure('public.admin_assign_withdrawal_contract_v1(uuid,uuid,text,uuid)') is not null",template),'t','078 assignment test baseline required');
 const db='gloa_073_'+randomBytes(6).toString('hex');
 sql(`create database ${db} template ${template}`,'postgres');
 // Clear synthetic customer history only in the newly-created disposable clone.

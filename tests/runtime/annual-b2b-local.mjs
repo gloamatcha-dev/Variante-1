@@ -18,8 +18,10 @@ function load(file){file=path.resolve(file);if(cache.has(file))return cache.get(
 fs.writeFileSync(path.join(out,'postgrest.conf'),`db-uri = "postgres://postgres@127.0.0.1:55472/${baseline.database}"\ndb-schemas = "public"\ndb-anon-role = "anon"\njwt-secret = "${jwtSecret}"\nserver-host = "127.0.0.1"\nserver-port = 55479\n`);
 // Windows may supply PATH and Path simultaneously; Node uses only the first.
 const env=Object.fromEntries(Object.entries(process.env).filter(([k])=>!/^path$/i.test(k)&&!/^PG/i.test(k)));
+// Explicit loopback transport avoids inherited/native SSL/GSS negotiation.
+env.PGSSLMODE='disable';env.PGGSSENCMODE='disable';env.PGCONNECT_TIMEOUT='5';
 env.Path='C:/Program Files/PostgreSQL/17/bin;'+(process.env.Path??process.env.PATH??'');
-const pg=spawn(path.resolve(process.env.GLOA_POSTGREST_BINARY ?? 'outputs/postgrest-v14.18/postgrest.exe'),[path.join(out,'postgrest.conf'),'+RTS','-N2','-RTS'],{windowsHide:true,env});pg.stdout.on('data',c=>fs.appendFileSync(path.join(out,'postgrest.log'),c));pg.stderr.on('data',c=>fs.appendFileSync(path.join(out,'postgrest.log'),c));
+const pg=spawn(path.resolve(process.env.GLOA_POSTGREST_BINARY ?? 'outputs/postgrest-v14.18/postgrest.exe'),[path.join(out,'postgrest.conf'),'+RTS','-N1','-RTS'],{windowsHide:true,env});pg.stdout.on('data',c=>fs.appendFileSync(path.join(out,'postgrest.log'),c));pg.stderr.on('data',c=>fs.appendFileSync(path.join(out,'postgrest.log'),c));
 const proxy=createServer((req,res)=>{if(req.url.startsWith('/auth/v1/user')){try{const token=(req.headers.authorization??'').replace('Bearer ','');const [a,b,c]=token.split('.');if(createHmac('sha256',jwtSecret).update(a+'.'+b).digest('base64url')!==c)throw Error('Invalid token');const claims=JSON.parse(Buffer.from(b,'base64url'));const user=JSON.parse(sql("select json_build_object('id',id,'email',email) from auth.users where id='"+claims.sub+"'"));if(!user)throw Error('Unknown user');res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(user));}catch{res.writeHead(401);res.end('{}');}return;}if(!req.url.startsWith('/rest/v1/')){res.writeHead(404);res.end();return;}const next=httpRequest({host:'127.0.0.1',port:55479,path:req.url.slice('/rest/v1'.length),method:req.method,headers:req.headers},reply=>{res.writeHead(reply.statusCode,reply.headers);reply.pipe(res);});next.on('error',e=>{res.writeHead(503);res.end(String(e));});req.pipe(next);});
 const api=createServer(async(req,res)=>{try{const bytes=[];for await(const chunk of req)bytes.push(chunk);const route=req.url;if(!/^\/api\/[a-z0-9/-]+$/.test(route)){res.writeHead(404);res.end();return;}const body=Buffer.concat(bytes).toString();const r=await load('app'+route+'/route.ts').POST(new Request('http://127.0.0.1:55480'+route,{method:req.method,headers:req.headers,body:body||undefined}));res.writeHead(r.status,Object.fromEntries(r.headers));res.end(await r.text());}catch(error){httpErrors.push(String(error));res.writeHead(500);res.end(JSON.stringify({error:String(error)}));}});
 const listen=(server,port)=>new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});
@@ -194,9 +196,18 @@ try{
   const onceOrder=JSON.parse(sql(`select to_jsonb(o) from orders o where id='${paid.order}'`));
   const observed=[];
   for(const order of [onceOrder,subOrder]){
-   const key=randomUUID();const body={name:'Synthetic Buyer',email:order.customer_snapshot.email,orderReference:order.order_number,scope:'whole_order',idempotencyKey:key,goodsStatus:'fully_consumed',valueLossCents:999999,finalRefundCents:999999,paymentIntentId:'pi_unrelated'};
+   const key=randomUUID();const body={name:'Synthetic Buyer',email:order.customer_snapshot.email,orderReference:'Unklare Vertragsangabe',scope:'whole_order',idempotencyKey:key,goodsStatus:'fully_consumed',valueLossCents:999999,finalRefundCents:999999,paymentIntentId:'pi_unrelated'};
    const declaration=await call('withdrawal',body,'none');assert.equal(declaration.status,200,JSON.stringify(declaration));
-   const w=JSON.parse(sql(`select to_jsonb(w) from withdrawal_requests w where idempotency_key='${key}'`));assert.equal(w.resolved_order_id,order.id);assert.equal(w.refund_state,'not_started');assert.equal(w.goods_status,null);assert.equal(w.confirmed_value_loss_cents,null);assert.equal(w.refund_amount_cents,null);
+   const w=JSON.parse(sql(`select to_jsonb(w) from withdrawal_requests w where idempotency_key='${key}'`));assert.equal(w.resolved_order_id,null);assert.equal(w.refund_state,'not_started');assert.equal(w.goods_status,null);assert.equal(w.confirmed_value_loss_cents,null);assert.equal(w.refund_amount_cents,null);
+   const candidates=await direct('admin/customer-rights',{action:'withdrawal_contract_candidates',withdrawalId:w.id,email:'unrelated@example.invalid'});assert.equal(candidates.status,200,JSON.stringify(candidates));
+   const kind=order.id===subOrder.id?'subscription_4w':'one_time',contractId=kind==='subscription_4w'?subscriptionId:order.id;
+   assert.ok(candidates.data.candidates.some(c=>c.kind===kind&&c.id===contractId),JSON.stringify(candidates));assert.doesNotMatch(JSON.stringify(candidates.data),/stripe_payment_intent_id|stripe_subscription_id|stripe_customer_id/);
+   assert.equal((await call('admin/customer-rights',{action:'assign_withdrawal_contract',withdrawalId:w.id,contractKind:kind,contractId},'none')).status,401);
+   const assigned=await direct('admin/customer-rights',{action:'assign_withdrawal_contract',withdrawalId:w.id,contractKind:kind,contractId});assert.equal(assigned.data.result,'assigned',JSON.stringify(assigned));
+   assert.equal((await direct('admin/customer-rights',{action:'assign_withdrawal_contract',withdrawalId:w.id,contractKind:kind,contractId})).data.result,'already_assigned');
+   assert.equal(sql(`select resolved_order_id from withdrawal_requests where id='${w.id}'`),order.id);
+   assert.equal(sql(`select order_reference from withdrawal_requests where id='${w.id}'`),'Unklare Vertragsangabe');
+   assert.equal(count('admin_activity_log',`action='withdrawal.contract_resolved' and entity_id='${w.id}'`),1);
    const review=await direct('admin/customer-rights',{action:'review_withdrawal',withdrawalId:w.id,goodsStatus:'fully_consumed',returnStatus:'not_required',valueLossCents:0,valueLossReason:'No deduction assessed',internalNote:'Local fixture'});assert.equal(review.data.result,'reviewed',JSON.stringify(review));
    const list=await direct('admin/customer-rights',{action:'list'});assert.equal(list.status,200,JSON.stringify(list));const stored=list.data.withdrawals.find(r=>r.id===w.id);assert.equal(stored.calculation.paid_cents,order.total_gross_cents);assert.equal(stored.calculation.stripe_customer_id,undefined);
    assert.equal((await direct('admin/customer-rights',{action:'approve_refund',withdrawalId:w.id,finalRefundCents:order.total_gross_cents+1})).data.result,'above_remaining_refund');
@@ -220,6 +231,12 @@ try{
   }
   // Annual uses its prepaid parent, never a delivery order as a fake payment mapping.
   const plan=JSON.parse(sql(`select to_jsonb(p) from annual_plans p where id='${annualId}'`)),caseId=randomUUID();
+  const unresolvedKey=randomUUID();const annualDeclaration=await call('withdrawal',{name:'Synthetic Annual',email:plan.customer_snapshot.email,orderReference:'Jahresabo',scope:'whole_order',idempotencyKey:unresolvedKey},'none');assert.equal(annualDeclaration.status,200);
+  const unresolvedId=sql(`select id from withdrawal_requests where idempotency_key='${unresolvedKey}'`);
+  const annualCandidates=await direct('admin/customer-rights',{action:'withdrawal_contract_candidates',withdrawalId:unresolvedId});assert.equal(annualCandidates.status,200,JSON.stringify(annualCandidates));assert.ok(annualCandidates.data.candidates.some(c=>c.kind==='annual_plan'&&c.id===annualId&&c.paidCents===plan.total_gross_cents&&c.deliveryCount===plan.delivery_count));
+  const annualAssigned=await direct('admin/customer-rights',{action:'assign_withdrawal_contract',withdrawalId:unresolvedId,contractKind:'annual_plan',contractId:annualId});assert.equal(annualAssigned.data.result,'assigned',JSON.stringify(annualAssigned));assert.ok(['frozen','unchanged'].includes(annualAssigned.data.freeze.result));
+  assert.equal(sql(`select resolved_order_id is null and resolved_annual_plan_id='${annualId}' from withdrawal_requests where id='${unresolvedId}'`),'t');
+  assert.equal(sql(`select withdrawal_refund_review_basis_v1('${unresolvedId}')->>'result'`),'ready');
   sql(`insert into withdrawal_requests(id,customer_name,order_reference,contact_email,scope,resolved_annual_plan_id,timeliness) values('${caseId}','Synthetic Annual','Annual review','annual@example.invalid','whole_order','${annualId}','timely');`);
   assert.equal((await direct('admin/customer-rights',{action:'review_withdrawal',withdrawalId:caseId,goodsStatus:'not_dispatched',returnStatus:'not_required',valueLossCents:0})).data.result,'reviewed');
   assert.equal((await direct('admin/customer-rights',{action:'approve_refund',withdrawalId:caseId,finalRefundCents:plan.total_gross_cents})).data.result,'approved');

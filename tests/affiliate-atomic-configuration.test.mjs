@@ -6,9 +6,9 @@ const migration=read('supabase/migrations/073_affiliate_atomic_configuration.sql
 const body=migration.split('as $$')[1].split('$$;')[0];
 test('approved migration stack has exactly 001..075, unique numbers, and the exact new filename',()=>{
  const files=readdirSync(new URL('../supabase/migrations/',import.meta.url)).filter(f=>f.endsWith('.sql')).sort();
- assert.equal(files.length,77);
- assert.deepEqual(files.map(f=>f.slice(0,3)),Array.from({length:77},(_,i)=>String(i+1).padStart(3,'0')));
- assert.equal(files.at(-1),'077_withdrawal_refund_review.sql');
+ assert.equal(files.length,78);
+ assert.deepEqual(files.map(f=>f.slice(0,3)),Array.from({length:78},(_,i)=>String(i+1).padStart(3,'0')));
+ assert.equal(files.at(-1),'078_withdrawal_contract_assignment.sql');
 });
 test('073 is additive: one new RPC, no tables/indexes/policies or business seed statements',()=>{
  assert.equal([...migration.matchAll(/create function /gi)].length,1);

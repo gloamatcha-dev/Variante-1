@@ -144,6 +144,7 @@ export function AdminCustomerRights({ onSessionLost, initialSection, initialFocu
       setNotice(`${label}: ${result}${json.effective_at ? ` · Vertragsende: ${dt(json.effective_at)}` : ''}`);
       await reload();
     }
+    else if(body.action==='assign_withdrawal_contract')await reload();
     setBusy(false);
   };
 
@@ -277,7 +278,7 @@ export function AdminCustomerRights({ onSessionLost, initialSection, initialFocu
                 </dl>
 
                 <AdminWithdrawalReview key={`${id}:${String(w.updated_at)}`} withdrawal={w} busy={busy} onAction={act} onPayout={payout}/>
-                <div className="ops-actions">
+                <fieldset className="ops-actions" disabled={busy||w.resolution_method==='unresolved'||(!w.resolved_order_id&&!w.resolved_annual_plan_id)}>
                   <button type="button" disabled={busy}
                     onClick={() => void act({ action: "record_return", withdrawalId: id, event: "dispatch_proof" }, "Versandnachweis")}>
                     Versandnachweis erhalten
@@ -331,7 +332,7 @@ export function AdminCustomerRights({ onSessionLost, initialSection, initialFocu
                     onClick={() => void retryMail(id)}>
                     Erstattungsmail erneut senden
                   </button>
-                </div>
+                </fieldset>
                 <p className="ops-note">
                   Bei einem <strong>Teilwiderruf</strong> muss zuerst die Position zugeordnet
                   werden – sonst wird nichts freigegeben. Die Erstattung wird dann aus dem

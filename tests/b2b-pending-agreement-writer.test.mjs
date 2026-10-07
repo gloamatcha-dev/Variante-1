@@ -106,10 +106,10 @@ test("1: 061 owns its number, and only the reviewed 062 follows it", () => {
   // this guard protects is that 061 still occupies its own number and
   // that nothing UNREVIEWED appeared above it. Reviewed in
   // tests/b2b-checkout-settlement.test.mjs.
-  assert.equal(files[files.length - 17], MIGRATION, "061 must be the one before the newest");
-  assert.equal(files[files.length - 18], "060_b2b_payment_delivery_foundation.sql");
-  assert.equal(files[files.length - 19], "059_b2b_supply_commerce_foundation.sql");
-  assert.equal(files.length, 77);
+  assert.equal(files[files.length - 18], MIGRATION, "061 must be the one before the newest");
+  assert.equal(files[files.length - 19], "060_b2b_payment_delivery_foundation.sql");
+  assert.equal(files[files.length - 20], "059_b2b_supply_commerce_foundation.sql");
+  assert.equal(files.length, 78);
   // PACKAGES 5D/5E/5F ADDED MIGRATION 063: the instalment, resolution
   // and failure runtime. Re-pinned on the same terms as 062 above.
   // Reviewed in tests/b2b-instalment-delivery-failure.test.mjs.
@@ -181,9 +181,9 @@ test("1: 061 owns its number, and only the reviewed 062 follows it", () => {
      // MIGRATION 072: admin core connections - finance events, termination,
      // shipping, notifications, creator/affiliate and document foundations.
      // No B2B agreement column, no policy, no RLS change on 061's tables.
-     "072_admin_core_connections.sql", "073_affiliate_atomic_configuration.sql", "074_creator_ugc_transactional_writers.sql", "075_b2b_supply_agreement_acl_hardening.sql", "076_b2b_monthly_finance_writer.sql", "077_withdrawal_refund_review.sql"],
+     "072_admin_core_connections.sql", "073_affiliate_atomic_configuration.sql", "074_creator_ugc_transactional_writers.sql", "075_b2b_supply_agreement_acl_hardening.sql", "076_b2b_monthly_finance_writer.sql", "077_withdrawal_refund_review.sql", "078_withdrawal_contract_assignment.sql"],
     "a migration above 061 appeared that this suite has not been reviewed against");
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 77), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 78), [],
     "an unreviewed migration appeared after 062");
   // No number is used twice, which a copy-paste of a file name would do.
   const numbers = files.map(f => f.slice(0, 3));
@@ -1098,7 +1098,7 @@ test("50: NO SUITE MAY CLAIM THAT AN APPLIED MIGRATION IS STILL PENDING", () => 
     and the moment it is applied, this constant is what has to move, which
     is a one-line change in one place instead of a hunt.
   */
-  const PENDING = ["071_business_expenses.sql", "072_admin_core_connections.sql", "073_affiliate_atomic_configuration.sql", "074_creator_ugc_transactional_writers.sql", "075_b2b_supply_agreement_acl_hardening.sql", "076_b2b_monthly_finance_writer.sql", "077_withdrawal_refund_review.sql"];
+  const PENDING = ["071_business_expenses.sql", "072_admin_core_connections.sql", "073_affiliate_atomic_configuration.sql", "074_creator_ugc_transactional_writers.sql", "075_b2b_supply_agreement_acl_hardening.sql", "076_b2b_monthly_finance_writer.sql", "077_withdrawal_refund_review.sql", "078_withdrawal_contract_assignment.sql"];
   const appliedFiles = onDisk.filter(f => !PENDING.includes(f));
   const APPLIED = appliedFiles.map(f => f.slice(0, 3));
   // ── THE PROSE SCAN READS COMMENTS, THE CODE SCAN READS CODE ──
@@ -1170,7 +1170,7 @@ test("50: NO SUITE MAY CLAIM THAT AN APPLIED MIGRATION IS STILL PENDING", () => 
   // below: it is a NEW file, so no immutability guard has anything to
   // exempt in it. Re-pinned to it, so the next author faces the same
   // decision. Reviewed in tests/guest-order-management.test.mjs.
-  assert.equal(onDisk.at(-11), "067_annual_upgrade_pending_claim.sql",
+  assert.equal(onDisk.at(-12), "067_annual_upgrade_pending_claim.sql",
     "a migration appeared above 065 - decide whether it is pending, then re-check every exemption");
   /*
     EXACTLY ONE MIGRATION MAY BE OUTSIDE THE APPLIED SET, and it must be

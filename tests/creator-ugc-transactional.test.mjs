@@ -5,8 +5,8 @@ const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8');
 const migration=read('supabase/migrations/074_creator_ugc_transactional_writers.sql');
 test('074 writers remain unchanged with explicitly authorized additive 075/076',()=>{
  const files=readdirSync(new URL('../supabase/migrations/',import.meta.url)).filter(f=>f.endsWith('.sql')).sort();
- assert.equal(files.length,77);assert.deepEqual(files.map(f=>f.slice(0,3)),Array.from({length:77},(_,i)=>String(i+1).padStart(3,'0')));
- assert.equal(files.at(-1),'077_withdrawal_refund_review.sql');
+ assert.equal(files.length,78);assert.deepEqual(files.map(f=>f.slice(0,3)),Array.from({length:78},(_,i)=>String(i+1).padStart(3,'0')));
+ assert.equal(files.at(-1),'078_withdrawal_contract_assignment.sql');
  const top=migration.replace(/\$\$[\s\S]*?\$\$/g,'').replace(/--[^\n]*/g,'');
  assert.equal([...migration.matchAll(/create function public\./g)].length,2);
  assert.doesNotMatch(top,/\b(alter table|create table|create index|create policy|insert|update|delete)\b/i);

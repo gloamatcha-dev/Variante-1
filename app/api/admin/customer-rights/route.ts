@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
+import {assignWithdrawalContract,withdrawalContractCandidates} from '../../../../lib/withdrawalContractAssignment';
 import { requireAdminIdentity } from "../../../../lib/adminActionRoute.ts";
 import { getSiteOrigin } from "../../../../lib/siteUrl";
 import { getResendClient } from "../../../../lib/resend";
@@ -224,6 +225,16 @@ export async function POST(request: Request): Promise<Response> {
   const writeGate = await requireAdminIdentity(request, "write");
   if (!writeGate.ok) return writeGate.response;
   const actorUserId = writeGate.session.userId;
+
+  if(action==='withdrawal_contract_candidates') {
+    try { return json({candidates:await withdrawalContractCandidates(admin,String((body as Record<string,unknown>).withdrawalId??''))},200); }
+    catch { return json({error:'Vertragsvorschläge konnten nicht sicher geladen werden.'},503); }
+  }
+  if(action==='assign_withdrawal_contract') {
+    const input=body as Record<string,unknown>;
+    try { return json(await assignWithdrawalContract(admin,actorUserId,String(input.withdrawalId??''),String(input.contractKind??''),String(input.contractId??'')),200); }
+    catch { return json({error:'Zuordnung oder Fristprüfung fehlgeschlagen. Dieselbe Zuordnung erneut prüfen.'},503); }
+  }
 
   const deps: CustomerRightsAdminDeps = {
     rpc: async (fn, args) => {
