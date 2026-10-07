@@ -1,4 +1,5 @@
-import Stripe from "stripe";
+import {getStripeClient} from '../../../../lib/stripe';
+import {prepareWithdrawalPayout} from '../../../../lib/withdrawalPayoutPreparation';
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { requireAdminIdentity } from "../../../../lib/adminActionRoute.ts";
 import { getSiteOrigin } from "../../../../lib/siteUrl";
@@ -112,14 +113,14 @@ export async function POST(request: Request): Promise<Response> {
     console.error("Withdrawal refund: Supabase admin client is not configured.");
     return json({ error: "Nicht verfügbar." } as ErrorResponse, 503);
   }
-  const secret = process.env.STRIPE_SECRET_KEY;
-  if (!secret) {
+  const stripe = getStripeClient();
+  if (!stripe) {
     console.error("Withdrawal refund: STRIPE_SECRET_KEY is not configured.");
     return json({ error: "Nicht verfügbar." } as ErrorResponse, 503);
   }
-  const stripe = new Stripe(secret);
 
   const deps: WithdrawalRefundExecutionDeps = {
+    preparePayout: snapshot => prepareWithdrawalPayout(admin,stripe,actorUserId,snapshot),
     async loadApprovedRefund(id) {
       const { data, error } = await admin
         .from("withdrawal_requests")
@@ -169,12 +170,21 @@ export async function POST(request: Request): Promise<Response> {
     async createProviderRefund({ paymentIntentId, amountCents, idempotencyKey }) {
       try {
         const refund = await stripe.refunds.create(
-          { payment_intent: paymentIntentId, amount: amountCents },
+          { payment_intent: paymentIntentId, amount: amountCents, metadata: {gloa_withdrawal_operation:idempotencyKey,gloa_withdrawal_case:withdrawalId} },
           { idempotencyKey }
         );
         // A refund Stripe itself calls failed is not evidence of a payout.
-        if (refund.status === "failed" || refund.status === "canceled") {
+        if (refund.status !== "succeeded") {
           return { ok: false, reason: `stripe_refund_${refund.status}` };
+        }
+        // Persist fresh cumulative settled authority before releasing this reservation.
+        // A failure here is repaired from provider operation metadata on the next attempt.
+        const confirmed=await prepareWithdrawalPayout(admin,stripe,actorUserId,{
+          withdrawalId,refundState:'approved_for_payout',refundAmountCents:amountCents,
+          refundOperationId:idempotencyKey,paymentIntentId,paymentBasis:'unresolved',
+        });
+        if(confirmed.result!=='ready'||confirmed.recoveredRefund?.reference!==refund.id){
+          return {ok:false,reason:'Settled refund authority remains retryable'};
         }
         return {
           ok: true,
@@ -231,6 +241,11 @@ export async function POST(request: Request): Promise<Response> {
         .eq("id", id)
         .maybeSingle();
       const scope = scopeRow?.scope === "partial" ? "partial" : "whole_order";
+      const {data:authority,error:authorityError}=await admin.rpc('withdrawal_refund_review_basis_v1',{p_withdrawal_id:id});
+      if(authorityError||authority?.result!=='ready'||!Number.isSafeInteger(authority.paid_cents)){
+        await admin.rpc('mark_withdrawal_refund_completed_email_failed',{p_withdrawal_id:id});
+        throw new Error('Authoritative payment breakdown unavailable');
+      }
 
       return {
         contactEmail: String(row.contact_email ?? ""),
@@ -238,6 +253,7 @@ export async function POST(request: Request): Promise<Response> {
         orderReference: String(row.order_reference ?? ""),
         refundAmountCents: Number(row.refund_amount_cents ?? 0),
         valueLossCents: Number(row.value_loss_cents ?? 0),
+        paidGrossCents: Number(authority.paid_cents),
         refundProviderReference: String(row.refund_provider_reference ?? ""),
         refundExecutedAt: typeof row.refund_executed_at === "string"
           ? row.refund_executed_at : null,

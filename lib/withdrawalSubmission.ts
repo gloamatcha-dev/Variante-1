@@ -67,6 +67,8 @@ export interface WithdrawalSubmissionDeps {
   insertCase: (row: WithdrawalCaseRow) => Promise<{ id: string; submittedAt: string }>;
   /** public.freeze_annual_deliveries_for_withdrawal(id). */
   freezeDeliveries: (caseId: string) => Promise<void>;
+  /** Retry the existing authority after a partially completed submission. */
+  repairFreezeOnReplay?: (caseId: string) => Promise<void>;
   /** Best-effort BGB 356a Abs. 4 confirmation. Returns whether it went. */
   sendConfirmation: (input: ConfirmationInput) => Promise<boolean>;
   /** Records whether the confirmation went out. */
@@ -223,6 +225,8 @@ export async function submitWithdrawal(
   if (input.idempotencyKey) {
     const existing = await deps.findByIdempotencyKey(input.idempotencyKey);
     if (existing) {
+      try { await deps.repairFreezeOnReplay?.(existing.id); }
+      catch { console.error('Withdrawal replay: delivery freeze repair remains pending'); }
       return {
         ok: true,
         submittedAt: existing.submittedAt,
@@ -303,6 +307,7 @@ export async function submitWithdrawal(
     try {
       await deps.freezeDeliveries(inserted.id);
     } catch {
+      console.error('Withdrawal received: Annual delivery freeze failed; Admin repair required');
       // A failed freeze must not lose the declaration either. The case
       // is recorded and an administrator sees an unfrozen protected
       // case, which the admin view surfaces.

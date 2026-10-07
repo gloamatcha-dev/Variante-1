@@ -79,9 +79,9 @@ const codeOnly = src => src
 test("1: it is the newest migration, owns its number alone, and is one transaction", () => {
   const files = readdirSync(path.join(ROOT, "supabase/migrations"))
     .filter(f => f.endsWith(".sql")).sort();
-  assert.equal(files.at(-6), MIGRATION_NAME, "071 is not the newest migration");
+  assert.equal(files.at(-7), MIGRATION_NAME, "071 is not the newest migration");
   assert.equal(files.filter(f => f.startsWith("071")).length, 1);
-  assert.equal(files.filter(f => Number(f.slice(0, 3)) > 76).length, 0);
+  assert.equal(files.filter(f => Number(f.slice(0, 3)) > 77).length, 0);
   // One transaction, and nothing executable after the commit.
   assert.match(MIGRATION, /^-- ═+\r?\n-- 071 /);
   assert.equal((MIGRATION.match(/^begin;$/gm) || []).length, 1);

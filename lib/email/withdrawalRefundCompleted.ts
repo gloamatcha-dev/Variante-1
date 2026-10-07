@@ -117,7 +117,9 @@ export function buildWithdrawalRefundCompletedEmail(
     ? (input.shippingIncluded === true
         ? "Das ist der Betrag für die widerrufenen Artikel einschließlich der Lieferkosten."
         : "Das ist der Betrag für die widerrufenen Artikel.")
-    : "Das ist der vollständige von dir gezahlte Betrag einschließlich der Lieferkosten.";
+    : input.refundGrossCents===input.paidGrossCents
+      ? "Das ist der vollständige von dir gezahlte Betrag einschließlich der Lieferkosten."
+      : "Das ist der nach Prüfung freigegebene Erstattungsbetrag für deinen Widerruf.";
 
   const breakdown = deducted
     ? `

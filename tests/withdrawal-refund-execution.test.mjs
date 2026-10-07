@@ -281,7 +281,7 @@ test("20: exactly one route calls stripe.refunds.create for a withdrawal", () =>
   const code = src => src.replace(/\/\*\*[\s\S]*?\*\//g, "")
                          .replace(/\/\*[\s\S]*?\*\//g, "")
                          .replace(/^\s*\/\/.*$/gm, "");
-  assert.ok(!/stripe/i.test(code(DESK_ROUTE)),
+  assert.ok(!/stripe/i.test(code(DESK_ROUTE).replace(/'stripe_subscription_id'|'stripe_customer_id'/g, '')),
     "the consumer rights desk reaches for Stripe");
   assert.ok(!/stripe/i.test(code(ADMIN_ACTIONS)),
     "the admin action layer reaches for Stripe");
@@ -325,7 +325,9 @@ test("23: and the desk UI reaches the payout through its own named poster", () =
   assert.match(DESK_UI, /\/api\/admin\/withdrawal-refund/);
   assert.match(DESK_UI, /action: "execute_refund"/);
   // The payout button is inert unless the database already approved.
-  assert.match(DESK_UI, /w\.refund_state !== "approved_for_payout"/);
+  const reviewUi=read('app/AdminWithdrawalReview.tsx');
+  assert.match(reviewUi, /disabled=\{busy\|\|!\['approved_for_payout','failed'\]\.includes\(String\(w\.refund_state\)\)/);
+  assert.match(reviewUi,/role="alertdialog"/);
 });
 
 /* ══════════════════════════════════════════════════════════════

@@ -1,4 +1,4 @@
-/** Reproducible verification against a clone of an already-installed local 076 baseline.
+/** Reproducible verification against a clone of an already-installed local 077 baseline.
  * No migration is executed. No Production configuration, provider or email is used.
  */
 import fs from 'node:fs';
@@ -8,9 +8,10 @@ import assert from 'node:assert/strict';
 import {sql,snapshot,schemaSnapshot} from '../helpers/affiliateAtomicDatabase.mjs';
 
 const template=process.env.GLOA_VERIFY_TEMPLATE_DATABASE;
-assert.match(template??'',/^gloa_073_[a-f0-9]+$/,'Provide an already-installed disposable local 076 template');
+assert.match(template??'',/^gloa_073_[a-f0-9]+$/,'Provide an already-installed disposable local 077 template');
 assert.match(sql('show server_version','postgres'),/^17\./);
 assert.equal(sql("select to_regprocedure('public.record_b2b_monthly_invoice_event(uuid,text)') is not null",template),'t');
+assert.equal(sql("select to_regprocedure('public.admin_approve_withdrawal_refund_v1(uuid,uuid,integer)') is not null",template),'t','077 test baseline required');
 const db='gloa_073_'+randomBytes(6).toString('hex');
 sql(`create database ${db} template ${template}`,'postgres');
 // Clear synthetic customer history only in the newly-created disposable clone.
@@ -29,6 +30,8 @@ for(const file of ['075_b2b_supply_agreement_acl_hardening','076_b2b_monthly_fin
  assert.match(check,/APPLIED CLEANLY/);fs.writeFileSync(`${out}/${file}-postcheck.log`,check);
 }
 const cases=[
+ 'tests/runtime/withdrawal-rpc-semantic-db-local.mjs',
+ 'tests/runtime/refund-semantic-db-local.mjs',
  'tests/affiliate-atomic-configuration-db.test.mjs','tests/creator-ugc-transactional-db.test.mjs',
  'tests/runtime/annual-b2b-local.mjs','tests/runtime/monthly-finance-db-local.mjs',
  'tests/runtime/b2b-security-local.mjs','tests/runtime/d1-d6-local.mjs',

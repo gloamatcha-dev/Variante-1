@@ -109,6 +109,10 @@ async function annualPlanDeliveries(
 export function buildWithdrawalSubmissionDeps(admin: Admin): WithdrawalSubmissionDeps {
   return {
     findContractByReference: reference => findContractByReference(admin, reference),
+    repairFreezeOnReplay: async caseId => {
+      const { error } = await admin.rpc('freeze_annual_deliveries_for_withdrawal', { p_withdrawal_id: caseId });
+      if(error)throw new Error('Withdrawal delivery freeze repair failed');
+    },
 
     annualPlanDeliveries: planId => annualPlanDeliveries(admin, planId),
 

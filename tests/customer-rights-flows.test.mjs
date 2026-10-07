@@ -442,11 +442,12 @@ test("the admin action layer never computes a refund or a ceiling itself", () =>
   assert.ok(!/stripe/i.test(code), "the admin layer reaches for Stripe");
 });
 
-test("approving a refund sends no amount", () => {
+test("approval sends only the final Admin decision; monetary authority stays in SQL", () => {
   const src = read("lib/customerRightsAdminActions.ts");
   const fn = src.slice(src.indexOf("export async function approveWithdrawalRefund"),
                        src.indexOf("export async function advanceComplaint"));
   assert.match(fn, /p_withdrawal_id: input\.withdrawalId/);
-  assert.ok(!/p_amount|p_refund|amountCents/.test(fn),
-    "an amount is passed into the refund approval");
+  assert.match(fn,/admin_approve_withdrawal_refund_v1/);
+  assert.match(fn,/p_final_refund_cents: input\.finalRefundCents/);
+  assert.doesNotMatch(fn,/p_paid|p_original|p_already_refunded|p_remaining|p_gross/);
 });

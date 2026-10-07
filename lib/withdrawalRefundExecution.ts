@@ -69,6 +69,10 @@ export type ProviderRefundOutcome =
   | { ok: false; reason: string };
 
 export type WithdrawalRefundExecutionDeps = {
+  /** Installed 077 authority and fresh provider evidence, required by the real route. */
+  preparePayout?: (snapshot: ApprovedRefundSnapshot) => Promise<{
+    result: string; paymentIntentId?: string; recoveredRefund?: {reference:string;amountCents:number};
+  }>;
   /**
    * RE-READS the case and its payment reference. Called once per
    * execution, immediately before the provider call.
@@ -139,6 +143,9 @@ export async function executeWithdrawalRefund(
   if (!snapshot.refundOperationId) {
     return { result: "missing_refund_operation" };
   }
+  const prepared = await deps.preparePayout?.(snapshot);
+  if(prepared && prepared.result!=='ready')return {result:prepared.result};
+  if(prepared?.paymentIntentId)snapshot.paymentIntentId=prepared.paymentIntentId;
 
   const amountCents = snapshot.refundAmountCents;
   if (typeof amountCents !== "number" || !Number.isSafeInteger(amountCents) || amountCents < 0) {
@@ -155,7 +162,7 @@ export async function executeWithdrawalRefund(
   // RULE 3 and RULE 5. One injected call, keyed by the approval.
   let outcome: ProviderRefundOutcome;
   try {
-    outcome = await deps.createProviderRefund({
+    outcome = prepared?.recoveredRefund ? {ok:true,...prepared.recoveredRefund} : await deps.createProviderRefund({
       paymentIntentId: snapshot.paymentIntentId,
       amountCents,
       idempotencyKey: snapshot.refundOperationId,

@@ -144,7 +144,7 @@ export async function recordReturn(
     }) => { subject: string; html: string; text: string };
   }
 ): Promise<WriterResult & { mailSent?: boolean }> {
-  const result = await deps.rpc("admin_record_withdrawal_return", {
+  const result = await deps.rpc("admin_record_withdrawal_return_v1", {
     p_actor_user_id: input.actorUserId,
     p_withdrawal_id: input.withdrawalId,
     p_event: input.event,
@@ -196,8 +196,7 @@ export async function confirmValueLoss(
 /**
  * PREPARE a payout. This does not pay, and it does not mail.
  *
- * The amount comes back from the database, which derived it; this
- * function has no parameter for one and does not compute one.
+ * The Admin supplies a final decision; SQL derives and validates its maximum.
  *
  * IT SENDS NOTHING, and that is the fix for a real defect. It used to
  * send "Erstattung durchgeführt" here, at approval - before any money
@@ -211,11 +210,12 @@ export async function confirmValueLoss(
  */
 export async function approveWithdrawalRefund(
   deps: CustomerRightsAdminDeps,
-  input: { actorUserId: string; withdrawalId: string }
+  input: { actorUserId: string; withdrawalId: string; finalRefundCents: number }
 ): Promise<WriterResult & { breakdown?: RefundBreakdown }> {
-  return deps.rpc("admin_approve_withdrawal_refund", {
+  return deps.rpc("admin_approve_withdrawal_refund_v1", {
     p_actor_user_id: input.actorUserId,
     p_withdrawal_id: input.withdrawalId,
+    p_final_refund_cents: input.finalRefundCents,
   });
 }
 

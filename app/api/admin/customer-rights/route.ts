@@ -8,9 +8,8 @@ import {
   setSealState,
   setReturnRequirement,
   recordReturn,
-  resolveWithdrawalItem,
-  confirmValueLoss,
   approveWithdrawalRefund,
+  resolveWithdrawalItem,
   advanceComplaint,
   reviewTermination,
   createPurchaseRestriction,
@@ -92,6 +91,7 @@ const WITHDRAWAL_COLUMNS =
   + "refund_completed_email_status, refund_completed_email_sent_at, "
   + "resolved_order_item_id, resolved_item_quantity, partial_shipping_treatment, "
   + "item_resolution_at, "
+  + "goods_status, return_status, return_reference, value_loss_reason, "
   + "deliveries_frozen_at, deliveries_permanently_stopped_at, internal_note, updated_at";
 
 const COMPLAINT_COLUMNS =
@@ -201,9 +201,16 @@ export async function POST(request: Request): Promise<Response> {
       plans = data ?? [];
     }
 
+    const reviewedWithdrawals = await Promise.all(withdrawalRows.map(async row => {
+      const { data: calculation, error } = await admin.rpc('withdrawal_refund_review_basis_v1', { p_withdrawal_id: row.id });
+      const safe = { ...(calculation as Record<string, unknown>) };
+      for(const key of ['payment_intent_id','invoice_id','stripe_subscription_id','stripe_customer_id'])delete safe[key];
+      return { ...row, calculation: safe, calculationUnavailable: Boolean(error) };
+    }));
+    if(reviewedWithdrawals.some(row=>row.calculationUnavailable))return json({error:'Widerrufsberechnung nicht verfügbar.'},503);
     return json({
       ok: true,
-      withdrawals: withdrawals.data ?? [],
+      withdrawals: reviewedWithdrawals,
       complaints: complaints.data ?? [],
       terminations: terminations.data ?? [],
       restrictions: restrictions.data ?? [],
@@ -289,13 +296,7 @@ export async function POST(request: Request): Promise<Response> {
         }), 200);
 
       case "confirm_value_loss": {
-        const cents = Number(b.confirmedCents);
-        if (!Number.isSafeInteger(cents) || cents < 0) {
-          return json({ error: "Ungültiger Betrag." } as ErrorResponse, 400);
-        }
-        return json(await confirmValueLoss(deps, {
-          actorUserId, withdrawalId: str("withdrawalId"), confirmedCents: cents,
-        }), 200);
+        return json({error:'Bitte die strukturierte Widerrufsbewertung verwenden.'} as ErrorResponse, 400);
       }
 
       // WHICH GOODS, AND HOW MANY. The structured answer that replaces
@@ -317,15 +318,29 @@ export async function POST(request: Request): Promise<Response> {
         }), 200);
       }
 
-      // NOTE: no amount parameter. The database derives it.
+      // Admin decision only; paid/refunded/reserved authority stays in SQL.
       //
       // AND NO MAIL. Approving is a decision, not the money arriving, so
       // the customer hears nothing here - they hear once, after the
       // payment provider confirms, from /api/admin/withdrawal-refund.
-      case "approve_refund":
+      case "approve_refund": {
+        if(typeof b.finalRefundCents!=='number'||!Number.isSafeInteger(b.finalRefundCents)||b.finalRefundCents<0||b.finalRefundCents>2147483647) return json({error:'Ungültiger Betrag.'} as ErrorResponse,400);
         return json(await approveWithdrawalRefund(deps, {
-          actorUserId, withdrawalId: str("withdrawalId"),
+          actorUserId, withdrawalId: str('withdrawalId'), finalRefundCents: b.finalRefundCents,
         }), 200);
+      }
+      case "review_withdrawal": {
+        if(typeof b.valueLossCents!=='number'||!Number.isSafeInteger(b.valueLossCents)||b.valueLossCents<0||b.valueLossCents>2147483647) return json({error:'Ungültiger Betrag.'} as ErrorResponse,400);
+        return json(await deps.rpc('admin_review_withdrawal_v1', {
+          p_actor_user_id: actorUserId, p_withdrawal_id: str('withdrawalId'),
+          p_goods_status: str('goodsStatus'), p_return_status: str('returnStatus'),
+          p_return_reference: str('returnReference') || null,
+          p_value_loss_cents: Number((body as Record<string, unknown>).valueLossCents),
+          p_value_loss_reason: str('valueLossReason') || null, p_internal_note: str('internalNote') || null,
+        }), 200);
+      }
+      case "repair_withdrawal_freeze":
+        return json(await deps.rpc('freeze_annual_deliveries_for_withdrawal', { p_withdrawal_id: str('withdrawalId') }), 200);
 
       case "advance_complaint":
         return json(await advanceComplaint(deps, {

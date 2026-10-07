@@ -1,4 +1,5 @@
 "use client";
+import AdminWithdrawalReview from './AdminWithdrawalReview';
 import {BusinessContext,Chip} from './AdminPortalShared';
 
 import { useCallback, useEffect, useState } from "react";
@@ -275,23 +276,8 @@ export function AdminCustomerRights({ onSessionLost, initialSection, initialFocu
                   <div><dt>Interne Notiz</dt><dd>{String(w.internal_note ?? "–")}</dd></div>
                 </dl>
 
+                <AdminWithdrawalReview key={`${id}:${String(w.updated_at)}`} withdrawal={w} busy={busy} onAction={act} onPayout={payout}/>
                 <div className="ops-actions">
-                  <button type="button" disabled={busy}
-                    onClick={() => void act({ action: "set_seal_state", withdrawalId: id, sealState: "sealed_unopened" }, "Siegel")}>
-                    Originalversiegelt / ungeöffnet
-                  </button>
-                  <button type="button" disabled={busy}
-                    onClick={() => void act({ action: "set_seal_state", withdrawalId: id, sealState: "opened_seal_broken" }, "Siegel")}>
-                    Geöffnet / Siegel gebrochen
-                  </button>
-                  <button type="button" disabled={busy}
-                    onClick={() => void act({ action: "set_return_requirement", withdrawalId: id, requirement: "return_requested" }, "Rücksendung")}>
-                    Rücksendung angefordert
-                  </button>
-                  <button type="button" disabled={busy}
-                    onClick={() => void act({ action: "set_return_requirement", withdrawalId: id, requirement: "return_not_required" }, "Rücksendung")}>
-                    Rücksendung nicht nötig
-                  </button>
                   <button type="button" disabled={busy}
                     onClick={() => void act({ action: "record_return", withdrawalId: id, event: "dispatch_proof" }, "Versandnachweis")}>
                     Versandnachweis erhalten
@@ -337,28 +323,6 @@ export function AdminCustomerRights({ onSessionLost, initialSection, initialFocu
                                  shippingTreatment: shp?.value ?? "" }, "Zuordnung");
                     }}>
                     Position zuordnen
-                  </button>
-                  <label>Wertersatz (Cent)
-                    <input type="number" min={0} step={1} id={`vl-${id}`} defaultValue={0}/>
-                  </label>
-                  <button type="button" disabled={busy}
-                    onClick={() => {
-                      const el = document.getElementById(`vl-${id}`) as HTMLInputElement | null;
-                      void act({ action: "confirm_value_loss", withdrawalId: id,
-                                 confirmedCents: Number(el?.value ?? 0) }, "Wertersatz");
-                    }}>
-                    Wertersatz bestätigen
-                  </button>
-                  {/* NO AMOUNT IS SENT. The server derives it. */}
-                  <button type="button" disabled={busy}
-                    onClick={() => void act({ action: "approve_refund", withdrawalId: id }, "Erstattung")}>
-                    Erstattung vorbereiten
-                  </button>
-                  {/* THE ONLY BUTTON ON THIS SCREEN THAT REACHES STRIPE. */}
-                  <button type="button" className="ops-danger"
-                    disabled={busy || w.refund_state !== "approved_for_payout" && w.refund_state !== "failed"}
-                    onClick={() => void payout(id)}>
-                    Erstattung auszahlen
                   </button>
                   {/* MAIL ONLY. No payment provider is reached by this. */}
                   <button type="button"

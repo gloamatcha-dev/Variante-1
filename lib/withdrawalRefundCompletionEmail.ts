@@ -62,6 +62,8 @@ export type ClaimedRefundCompletion = {
   orderReference: string;
   refundAmountCents: number;
   valueLossCents: number;
+  /** Original server-owned payment, including prior-refund/custom approval cases. */
+  paidGrossCents?: number;
   /** Stripe's own id for the refund. Proof the money moved. */
   refundProviderReference: string;
   refundExecutedAt: string | null;
@@ -148,7 +150,7 @@ export async function sendWithdrawalRefundCompletedIfNeeded(
       orderReference: claimed.orderReference,
       // WHAT THEY PAID, RECONSTRUCTED FROM THE TWO FIGURES THE DATABASE
       // RETURNED, so the breakdown in the mail always adds up.
-      paidGrossCents: refund + loss,
+      paidGrossCents: claimed.paidGrossCents ?? refund + loss,
       confirmedValueLossCents: loss,
       refundGrossCents: refund,
       refundScope: claimed.refundScope,

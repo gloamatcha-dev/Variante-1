@@ -85,7 +85,7 @@ test("058 still owns its number, and there is no 061", () => {
   // further from the end. Re-pinned rather than deleted - what this guard
   // protects is that nothing UNREVIEWED appeared. Reviewed in
   // tests/guest-order-management.test.mjs.
-  const last = files[files.length - 19];
+  const last = files[files.length - 20];
   assert.equal(last, "058_discounted_order_line_accounting.sql");
   // MIGRATION 071 ADDED THE EXPENSE LEDGER - one table,
   // public.business_expenses, plus three SECURITY DEFINER writers that
@@ -95,7 +95,7 @@ test("058 still owns its number, and there is no 061", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/business-expenses-migration.test.mjs.
-  assert.equal(files.some(f => f.startsWith("077")), false, "a 064 exists");
+  assert.equal(files.some(f => f.startsWith("078")), false, "a 064 exists");
   assert.equal(files.filter(f => f.startsWith("058")).length, 1);
 });
 

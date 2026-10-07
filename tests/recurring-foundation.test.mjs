@@ -604,7 +604,12 @@ test("hardening: 023 owns its number and the live migrations are not edited", ()
   for (const name of files.filter(n => n > "023_harden_stripe_customers_grants.sql")) {
     const later = withoutComments(readFileSync(path.join(MIGRATIONS, name), "utf-8"));
     for (const owned of ["stripe_customers", "stripe_webhook_events"]) {
-      assert.ok(!new RegExp(owned).test(later), `${name} touches ${owned}`);
+      if(name==='077_withdrawal_refund_review.sql'&&owned==='stripe_customers') {
+        // 077 reads the installed customer binding for exact withdrawal invoice correlation.
+        // Its authority must never redefine, write or change grants on that binding.
+        assert.doesNotMatch(later,/\b(?:insert\s+into|update|delete\s+from|alter\s+table|drop\s+table|create\s+table)\s+public\.stripe_customers\b/i);
+        for(const statement of later.match(/^\s*(?:grant|revoke)[^;]*;/gim)??[])assert.doesNotMatch(statement,/stripe_customers/i);
+      }else assert.ok(!new RegExp(owned).test(later), `${name} touches ${owned}`);
     }
     // stripe_subscription_id is READ by migration 034, which resolves a
     // subscription by it in order to reconcile a cancellation.
