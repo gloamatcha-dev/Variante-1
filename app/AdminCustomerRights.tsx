@@ -56,7 +56,7 @@ const EMPTY: Payload = {
 };
 
 const euro = (c: unknown): string =>
-  typeof c === "number" ? (c / 100).toLocaleString("de-DE", { style: "currency", currency: "EUR" }) : "–";
+  typeof c === "number" ? (c === 0 ? 0 : c / 100).toLocaleString("de-DE", { style: "currency", currency: "EUR" }) : "–";
 
 const dt = (v: unknown): string => {
   if (typeof v !== "string") return "–";

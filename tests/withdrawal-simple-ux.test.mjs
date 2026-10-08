@@ -20,7 +20,7 @@ function fixture({suggested=21919,review='reviewed',evidence='recorded'}={}){
 function component(hooks=React){
  const m={exports:{}};
  const js=ts.transpileModule(fs.readFileSync('app/AdminWithdrawalReview.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
- vm.runInNewContext(js,{module:m,exports:m.exports,require:name=>name==='react'?hooks:name==='react/jsx-runtime'?jsx:name.includes('AdminWithdrawalAssignment')?{default:()=>React.createElement('div',null,'VERTRAG ZUORDNEN')}:name.includes('withdrawalReview')?{SIMPLE_WITHDRAWAL_GOODS,simpleWithdrawalChoice,withdrawalReviewCanApprove,withdrawalDecisionCents:v=>/^\d+([.,]\d{1,2})?$/.test(v)?Math.round(Number(v.replace(',','.'))*100):null}:null,Intl,Number,String,Object});
+ vm.runInNewContext(js,{module:m,exports:m.exports,require:name=>name==='react'?hooks:name==='react/jsx-runtime'?jsx:name.includes('AdminWithdrawalAssignment')?{default:()=>React.createElement('div',null,'VERTRAG ZUORDNEN')}:name.includes('withdrawalReview')?{SIMPLE_WITHDRAWAL_GOODS,simpleWithdrawalChoice,withdrawalReviewCanApprove,withdrawalDecisionCents:v=>/^\d+([.,]\d{1,2})?$/.test(v)?Math.round(Number(v.replace(',','.'))*100):null}:null,Intl,Date,Number,String,Object});
  return m.exports.default;
 }
 test('Resolved normal Annual displays authoritative payout and no manual final amount; unresolved has assignment only',()=>{
@@ -30,6 +30,18 @@ test('Resolved normal Annual displays authoritative payout and no manual final a
  assert.doesNotMatch(html,/Finaler Refund|finalRefundCents|POSITION AUSWÄHLEN/);
  assert.match(html,/<details><summary>ERWEITERTE OPTIONEN/);assert.doesNotMatch(html,/<details[^>]*open/);
  const unresolved=renderToStaticMarkup(React.createElement(C,{...props,withdrawal:{id,resolution_method:'unresolved'}}));assert.match(unresolved,/VERTRAG ZUORDNEN/);assert.doesNotMatch(unresolved,/ERSTATTUNG FREIGEBEN|AUSZUZAHLEN/);
+});
+test('Currency presentation removes negative zero and shows only actual nonzero loss as a deduction',()=>{
+ const render=w=>renderToStaticMarkup(React.createElement(component(),{withdrawal:w,busy:false,onAction:async()=>{},onPayout:async()=>{}}));
+ for(const zero of [0,-0]){const w=ready();w.calculation.value_loss_cents=zero;w.calculation.settled_refunds_cents=zero;const html=render(w);assert.match(html,/<dt>Wertersatz<\/dt><dd>0,00/);assert.doesNotMatch(html,/[-−]0,00/);}
+ const w=ready();w.calculation.value_loss_cents=1349;assert.match(render(w),/<dt>Wertersatz<\/dt><dd>-13,49/);
+});
+test('Approved and failed states hide goods editing; completed state shows persisted amount/time and Annual history',()=>{
+ const render=w=>renderToStaticMarkup(React.createElement(component(),{withdrawal:w,busy:false,onAction:async()=>{},onPayout:async()=>{}}));
+ const approved={...ready(),case_state:'refund_pending',refund_state:'approved_for_payout',refund_amount_cents:18268};
+ const html=render(approved);assert.match(html,/ERSTATTUNG FREIGEGEBEN/);assert.match(html,/ERSTATTUNG AUSZAHLEN/);assert.match(html,/182,68/);assert.doesNotMatch(html,/WAS IST MIT DER WARE|Wertersatz speichern|ERSTATTET/);
+ const failed=render({...approved,refund_state:'failed'});assert.match(failed,/AUSZAHLUNG FEHLGESCHLAGEN/);assert.match(failed,/ERNEUT VERSUCHEN/);assert.doesNotMatch(failed,/ERSTATTET|WAS IST MIT/);
+ const done=render({...approved,refund_state:'executed',refund_executed_at:'2026-10-08T10:00:00Z',deliveries_permanently_stopped_at:'2026-10-08T09:00:00Z',refund_completed_email_status:'failed'});assert.match(done,/ERSTATTET/);assert.match(done,/Erstattet:.*182,68/);assert.match(done,/Ausgezahlt am:.*12:00/);assert.match(done,/endgültig gestoppt/);assert.match(done,/ursprüngliche Zahlung bleiben erhalten/);assert.match(done,/separates Finance/);assert.match(done,/E-Mail muss noch/);assert.doesNotMatch(done,/button|input|ERSTATTUNG AUSZAHLEN/);
 });
 test('All simple choices map facts; unopened/unshipped force zero; consumption never automatically rejects/deducts',async()=>{
  for(const choice of Object.keys(SIMPLE_WITHDRAWAL_GOODS)){
@@ -67,7 +79,8 @@ test('Approval and payout each require their own confirmation; review input and 
  const nodes=(e)=>!e||typeof e!=='object'?[]:[e,...React.Children.toArray(e.props?.children).flatMap(nodes)];
  const button=(tree,label)=>nodes(tree).find(n=>n.type==='button'&&React.Children.toArray(n.props.children).join('')===label);
  let tree=render();button(tree,'ERSTATTUNG FREIGEBEN').props.onClick();assert.equal(actions.length,0);tree=render();const dialog=nodes(tree).find(n=>n.props?.role==='alertdialog');assert.ok(dialog);button(dialog,'ERSTATTUNG FREIGEBEN').props.onClick();assert.equal(actions[0].action,'approve_calculated_refund');assert.equal(payouts.length,0);
- w={...w,refund_state:'approved_for_payout',refund_amount_cents:23268};tree=render();button(tree,'ERSTATTUNG AUSZAHLEN').props.onClick();assert.equal(payouts.length,0);tree=render();const second=nodes(tree).find(n=>n.props?.role==='alertdialog');nodes(second).filter(n=>n.type==='button').at(-1).props.onClick();assert.deepEqual(payouts,[id]);
+ w={...w,refund_state:'approved_for_payout',refund_amount_cents:18268};tree=render();button(tree,'ERSTATTUNG AUSZAHLEN').props.onClick();assert.equal(payouts.length,0);tree=render();const second=nodes(tree).find(n=>n.props?.role==='alertdialog');assert.match(renderToStaticMarkup(second),/ERSTATTUNG AUSZAHLEN\?/);assert.match(renderToStaticMarkup(second),/182,68/);assert.match(renderToStaticMarkup(second),/<button[^>]*>182,68[^<]* AUSZAHLEN<\/button>/);nodes(second).filter(n=>n.type==='button').at(-1).props.onClick();assert.deepEqual(payouts,[id]);
+ w={...w,refund_state:'failed'};tree=render();button(tree,'ERNEUT VERSUCHEN').props.onClick();tree=render();const retry=nodes(tree).find(n=>n.props?.role==='alertdialog');nodes(retry).filter(n=>n.type==='button').at(-1).props.onClick();assert.deepEqual(payouts,[id,id]);assert.equal(actions.length,1,'Retry never creates another approval/operation');
 });
 test('Technical facts are collapsed and item controls are conditional on partial scope; protected applied migrations unchanged',()=>{
  const desk=fs.readFileSync('app/AdminCustomerRights.tsx','utf8');assert.match(desk,/!unresolved&&isPartial&&<fieldset/);assert.match(desk,/<details><summary>TECHNISCHE DETAILS ANZEIGEN/);assert.doesNotMatch(desk,/<details[^>]*open/);
