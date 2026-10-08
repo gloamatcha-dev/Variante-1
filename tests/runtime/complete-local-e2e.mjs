@@ -38,6 +38,7 @@ const cases=[
  'tests/runtime/b2b-security-local.mjs','tests/runtime/d1-d6-local.mjs',
  'tests/runtime/reality-local.mjs','tests/runtime/refund-shipping-local.mjs',
  'tests/runtime/annual-db-local.mjs','tests/runtime/commission-db-local.mjs','tests/runtime/annual-edge-local.mjs',
+ 'tests/runtime/withdrawal-simple-db-local.mjs',
 ];
 const results=[];
 for(const file of cases){

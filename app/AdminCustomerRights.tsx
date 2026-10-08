@@ -1,5 +1,6 @@
 "use client";
 import AdminWithdrawalReview from './AdminWithdrawalReview';
+import {withdrawalActionMessage} from '../lib/withdrawalReview';
 import {BusinessContext,Chip} from './AdminPortalShared';
 
 import { useCallback, useEffect, useState } from "react";
@@ -141,10 +142,10 @@ export function AdminCustomerRights({ onSessionLost, initialSection, initialFocu
       const result = String(json.result ?? "ok");
       // A refusal from the database is shown as it came back, not
       // translated into a success the operator would have to guess at.
-      setNotice(`${label}: ${result}${json.effective_at ? ` · Vertragsende: ${dt(json.effective_at)}` : ''}`);
+      setNotice(`${label}: ${body.action==='review_withdrawal_simple'||body.action==='approve_calculated_refund'?withdrawalActionMessage(result):result}${json.effective_at ? ` · Vertragsende: ${dt(json.effective_at)}` : ''}`);
       await reload();
     }
-    else if(body.action==='assign_withdrawal_contract')await reload();
+    else if(['assign_withdrawal_contract','review_withdrawal_simple','approve_calculated_refund'].includes(String(body.action)))await reload();
     setBusy(false);
   };
 
@@ -154,8 +155,7 @@ export function AdminCustomerRights({ onSessionLost, initialSection, initialFocu
     if (json) {
       // The mail outcome is shown too. A refund that went through while
       // its mail did not is exactly the state an operator has to see.
-      const mail = json.completion_email ? ` · Mail: ${String(json.completion_email)}` : "";
-      setNotice(`Auszahlung: ${String(json.result ?? "ok")}${mail}`);
+      setNotice(['executed','already_executed'].includes(String(json.result))?'Erstattung abgeschlossen.':'Auszahlung noch nicht abgeschlossen. Bitte den aktualisierten Fall prüfen; bei einer Störung kann sie sicher erneut versucht werden.');
       await reload();
     }
     setBusy(false);
@@ -217,10 +217,55 @@ export function AdminCustomerRights({ onSessionLost, initialSection, initialFocu
             const items = itemsOf(w.resolved_order_id);
             const resolvedItem = items.find(i => i.id === w.resolved_order_item_id);
             const isPartial = w.scope === "partial";
+            const unresolved=w.resolution_method==='unresolved'||(!w.resolved_order_id&&!w.resolved_annual_plan_id);
+            const calculation=(w.calculation??{}) as Json;
+            const contractLabel=w.resolved_annual_plan_id?'Jahresplan'+(p.size_label?' '+String(p.size_label)+' g':''):calculation.contract_type==='subscription_4w'?'4-Wochen-Abo / 28 Tage':'Bestellung '+String(o.order_number??w.order_reference);
             const id = String(w.id);
             return (
               <article key={id} className="ops-card">
-                <h3>{String(w.customer_name)} · {String(w.order_reference)}</h3>
+                <h3>WIDERRUF</h3>
+                <p>{String(w.customer_name)} · {String(w.order_reference)} · Eingang: {dt(w.submitted_at)}</p>
+                {!unresolved&&isPartial&&<fieldset className="ops-actions" disabled={busy||w.refund_state==='executed'||['approved_for_payout','failed'].includes(String(w.refund_state))}>
+                  <h4>POSITION AUSWÄHLEN</h4>
+                  <label>Position
+                    <select id={`ri-${id}`} defaultValue={String(w.resolved_order_item_id ?? "")}>
+                      <option value="">– wählen –</option>
+                      {items.map(i => (
+                        <option key={String(i.id)} value={String(i.id)}>
+                          {String(i.product_name ?? "?")} (× {String(i.quantity ?? "?")})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>Menge
+                    <input type="number" min={1} step={1} id={`rq-${id}`}
+                           defaultValue={String(w.resolved_item_quantity ?? 1)}/>
+                  </label>
+                  {isPartial && (
+                    <label>Versandkosten
+                      <select id={`rs-${id}`}
+                              defaultValue={String(w.partial_shipping_treatment ?? "")}>
+                        <option value="">– wählen –</option>
+                        <option value="refund_outbound_shipping">Hinversand erstatten</option>
+                        <option value="retain_outbound_shipping">Hinversand behalten</option>
+                      </select>
+                    </label>
+                  )}
+                  <button type="button" disabled={busy}
+                    onClick={() => {
+                      const sel = document.getElementById(`ri-${id}`) as HTMLSelectElement | null;
+                      const qty = document.getElementById(`rq-${id}`) as HTMLInputElement | null;
+                      const shp = document.getElementById(`rs-${id}`) as HTMLSelectElement | null;
+                      void act({ action: "resolve_item", withdrawalId: id,
+                                 orderItemId: sel?.value ?? "",
+                                 quantity: Number(qty?.value ?? 1),
+                                 shippingTreatment: shp?.value ?? "" }, "Zuordnung");
+                    }}>
+                    Position zuordnen
+                  </button>
+                </fieldset>}
+                <AdminWithdrawalReview key={`${id}:${String(w.updated_at)}`} withdrawal={w} busy={busy} onAction={act} onPayout={payout} contractLabel={contractLabel}/>
+                {!unresolved&&<details><summary>TECHNISCHE DETAILS ANZEIGEN</summary>
                 <dl className="ops-facts">
                   <div><dt>E-Mail</dt><dd>{String(w.contact_email)}</dd></div>
                   <div><dt>Eingegangen</dt><dd>{dt(w.submitted_at)}</dd></div>
@@ -277,7 +322,6 @@ export function AdminCustomerRights({ onSessionLost, initialSection, initialFocu
                   <div><dt>Interne Notiz</dt><dd>{String(w.internal_note ?? "–")}</dd></div>
                 </dl>
 
-                <AdminWithdrawalReview key={`${id}:${String(w.updated_at)}`} withdrawal={w} busy={busy} onAction={act} onPayout={payout}/>
                 <fieldset className="ops-actions" disabled={busy||w.resolution_method==='unresolved'||(!w.resolved_order_id&&!w.resolved_annual_plan_id)}>
                   <button type="button" disabled={busy}
                     onClick={() => void act({ action: "record_return", withdrawalId: id, event: "dispatch_proof" }, "Versandnachweis")}>
@@ -289,42 +333,6 @@ export function AdminCustomerRights({ onSessionLost, initialSection, initialFocu
                   </button>
                   {/* WHICH GOODS. The only structured way to say it, and the
                       only basis a partial refund is ever computed from. */}
-                  <label>Position
-                    <select id={`ri-${id}`} defaultValue={String(w.resolved_order_item_id ?? "")}>
-                      <option value="">– wählen –</option>
-                      {items.map(i => (
-                        <option key={String(i.id)} value={String(i.id)}>
-                          {String(i.product_name ?? "?")} (× {String(i.quantity ?? "?")})
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>Menge
-                    <input type="number" min={1} step={1} id={`rq-${id}`}
-                           defaultValue={String(w.resolved_item_quantity ?? 1)}/>
-                  </label>
-                  {isPartial && (
-                    <label>Versandkosten
-                      <select id={`rs-${id}`}
-                              defaultValue={String(w.partial_shipping_treatment ?? "")}>
-                        <option value="">– wählen –</option>
-                        <option value="refund_outbound_shipping">Hinversand erstatten</option>
-                        <option value="retain_outbound_shipping">Hinversand behalten</option>
-                      </select>
-                    </label>
-                  )}
-                  <button type="button" disabled={busy}
-                    onClick={() => {
-                      const sel = document.getElementById(`ri-${id}`) as HTMLSelectElement | null;
-                      const qty = document.getElementById(`rq-${id}`) as HTMLInputElement | null;
-                      const shp = document.getElementById(`rs-${id}`) as HTMLSelectElement | null;
-                      void act({ action: "resolve_item", withdrawalId: id,
-                                 orderItemId: sel?.value ?? "",
-                                 quantity: Number(qty?.value ?? 1),
-                                 shippingTreatment: shp?.value ?? "" }, "Zuordnung");
-                    }}>
-                    Position zuordnen
-                  </button>
                   {/* MAIL ONLY. No payment provider is reached by this. */}
                   <button type="button"
                     disabled={busy || w.refund_state !== "executed"
@@ -349,6 +357,7 @@ export function AdminCustomerRights({ onSessionLost, initialSection, initialFocu
                   Kundin oder den Kunden. Scheitert nur die Mail, bleibt die Erstattung bestehen
                   und „Erstattungsmail erneut senden“ wiederholt ausschließlich die Mail.
                 </p>
+                </details>}
               </article>
             );
           })}

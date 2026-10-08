@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import {assignWithdrawalContract,withdrawalContractCandidates} from '../../../../lib/withdrawalContractAssignment';
+import {approveCalculatedWithdrawalRefund,saveSimpleWithdrawalReview} from '../../../../lib/withdrawalSimpleReview';
 import { requireAdminIdentity } from "../../../../lib/adminActionRoute.ts";
 import { getSiteOrigin } from "../../../../lib/siteUrl";
 import { getResendClient } from "../../../../lib/resend";
@@ -197,9 +198,16 @@ export async function POST(request: Request): Promise<Response> {
         .from("annual_plans")
         .select("id, catalog_unit_gross_cents, annual_unit_gross_cents, "
               + "shipping_per_delivery_gross_cents, total_gross_cents, delivery_count, "
-              + "schedule_model, status, payment_status")
+              + "schedule_model, status, payment_status, variant_id")
         .in("id", planIds);
       plans = data ?? [];
+      const planRows=(data??[]) as unknown as Array<Record<string,unknown>>;
+      const variantIds=planRows.map(p=>p.variant_id).filter((v):v is string=>typeof v==='string');
+      if(variantIds.length){
+        const {data:variants,error}=await admin.from('product_variants').select('id,sku').in('id',variantIds);
+        if(error)return json({error:'Vertragsdaten nicht verfügbar.'} as ErrorResponse,503);
+        plans=planRows.map(p=>({...p,size_label:(variants??[]).find(v=>v.id===p.variant_id)?.sku?.match(/MATCHA-(\d+)G/)?.[1]??null}));
+      }
     }
 
     const reviewedWithdrawals = await Promise.all(withdrawalRows.map(async row => {
@@ -340,6 +348,10 @@ export async function POST(request: Request): Promise<Response> {
           actorUserId, withdrawalId: str('withdrawalId'), finalRefundCents: b.finalRefundCents,
         }), 200);
       }
+      case 'review_withdrawal_simple':
+        return json(await saveSimpleWithdrawalReview(admin,actorUserId,b),200);
+      case 'approve_calculated_refund':
+        return json(await approveCalculatedWithdrawalRefund(admin,actorUserId,b),200);
       case "review_withdrawal": {
         if(typeof b.valueLossCents!=='number'||!Number.isSafeInteger(b.valueLossCents)||b.valueLossCents<0||b.valueLossCents>2147483647) return json({error:'Ungültiger Betrag.'} as ErrorResponse,400);
         return json(await deps.rpc('admin_review_withdrawal_v1', {
