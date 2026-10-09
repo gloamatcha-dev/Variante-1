@@ -168,7 +168,7 @@ test("1c: the auth MECHANISM is untouched; only the DESTINATION moved", () => {
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/business-expenses-migration.test.mjs.
-  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("080")),
+  assert.ok(!readdirSync(path.join(ROOT, "supabase/migrations")).some(f => f.startsWith("081")),
     "a migration 072 or beyond appeared");
 });
 

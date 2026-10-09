@@ -1,5 +1,5 @@
 /** Reproducible verification against a clone of an already-installed local 079 baseline.
- * No migration is executed. No Production configuration, provider or email is used.
+ * 080 is installed only in the disposable clone. No Production configuration, provider or email is used.
  */
 import fs from 'node:fs';
 import {randomBytes} from 'node:crypto';
@@ -16,6 +16,8 @@ assert.equal(sql("select to_regprocedure('public.admin_assign_withdrawal_contrac
 assert.equal(sql("select to_regclass('public.provider_fee_evidence') is not null",template),'t','079 evidence test baseline required');
 const db='gloa_073_'+randomBytes(6).toString('hex');
 sql(`create database ${db} template ${template}`,'postgres');
+if(sql("select to_regprocedure('public.record_annual_prepayment_event_v2(uuid,uuid)') is null",db)==='t')
+ sql(fs.readFileSync('supabase/migrations/080_annual_finance_tax_connection.sql','utf8'),db);
 // Clear synthetic customer history only in the newly-created disposable clone.
 // Catalog/pricing seeds remain; restore the fixed owner used by the DB regressions.
 sql(`truncate auth.users cascade;

@@ -56,7 +56,7 @@ export async function recordAnnualPrepaymentEvent(
     return null;
   }
 
-  const { data, error } = await admin.rpc("record_annual_prepayment_event", {
+  const { data, error } = await admin.rpc("record_annual_prepayment_event_v2", {
     p_annual_plan_id: annualPlanId,
     p_operation_id: operationId ?? null,
   });

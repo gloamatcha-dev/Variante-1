@@ -37,7 +37,7 @@ const shippingCode = withoutComments(shippingSrc);
 test("finance: all six RPC wrappers call the correct SECURITY DEFINER function", () => {
   const expected = [
     ["recordOrderPaymentEvent", "record_order_payment_event"],
-    ["recordAnnualPrepaymentEvent", "record_annual_prepayment_event"],
+    ["recordAnnualPrepaymentEvent", "record_annual_prepayment_event_v2"],
     ["recordB2bSettlementEvent", "record_b2b_settlement_event"],
     ["recordOrderRefundEvent", "record_order_refund_event"],
     ["recordAnnualPlanRefundEvent", "record_annual_plan_refund_event"],

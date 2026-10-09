@@ -352,13 +352,13 @@ test("5: 053 owns its number, and 001-052 are untouched by it", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(files.length, 79);
+  assert.equal(files.length, 80);
   // 054 (the B2C price alignment) now sits above it, so 053 is no longer
   // the newest. What this guard is about is that 053 occupies its own
   // number and nothing was slipped in beside it.
   assert.deepEqual(files.filter(f => f.startsWith("053")), [MIGRATION],
     "there must be exactly one migration 053");
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 79), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 80), [],
     "a migration 072 or beyond appeared");
   // It names none of them as something to change.
   for (const f of files.slice(0, -1)) {

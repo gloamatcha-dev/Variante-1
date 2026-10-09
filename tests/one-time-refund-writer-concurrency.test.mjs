@@ -117,9 +117,9 @@ test("1: 038 exists, owns its number, and 039 is the only one above it", () => {
   // Re-pinned rather than deleted - what this guard protects is that
   // nothing UNREVIEWED appeared. Reviewed in
   // tests/guest-order-management.test.mjs.
-  assert.equal(files[files.length - 41], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 42], MIGRATION_038, "038 must be the one before it");
-  assert.equal(files[files.length - 43], MIGRATION_037, "037 must be the one before that");
+  assert.equal(files[files.length - 42], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 43], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 44], MIGRATION_037, "037 must be the one before that");
   // No number is used twice.
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
@@ -296,7 +296,7 @@ test("2: no migration 044 or beyond", () => {
      // or row. Reviewed in tests/business-expenses-migration.test.mjs.
      "071_business_expenses.sql",
      // MIGRATION 072: admin core connections. Reviewed in its own suite.
-     "072_admin_core_connections.sql", "073_affiliate_atomic_configuration.sql", "074_creator_ugc_transactional_writers.sql", "075_b2b_supply_agreement_acl_hardening.sql", "076_b2b_monthly_finance_writer.sql", "077_withdrawal_refund_review.sql", "078_withdrawal_contract_assignment.sql", "079_provider_fee_evidence.sql"],
+     "072_admin_core_connections.sql", "073_affiliate_atomic_configuration.sql", "074_creator_ugc_transactional_writers.sql", "075_b2b_supply_agreement_acl_hardening.sql", "076_b2b_monthly_finance_writer.sql", "077_withdrawal_refund_review.sql", "078_withdrawal_contract_assignment.sql", "079_provider_fee_evidence.sql", "080_annual_finance_tax_connection.sql"],
     "an unreviewed migration appeared after 043");
   // And 039 kept its hands off this phase's writer entirely.
   for (const name of [MIGRATION_039, MIGRATION_040, MIGRATION_041, MIGRATION_042]) {
