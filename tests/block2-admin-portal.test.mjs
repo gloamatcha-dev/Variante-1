@@ -20,7 +20,7 @@ function sharedComponents(){
 test('primary areas are exactly the requested operational navigation',()=>{
  assert.deepEqual(PRIMARY_AREAS.map(([,label])=>label),['ÜBERSICHT','VERKAUF','VERBRAUCHERRECHTE','FINANZEN','INVENTAR','CREATOR','B2B','AKTIVITÄT']);
  assert.deepEqual(SALES_TABS,['BESTELLUNGEN','ABOS','JAHRESPLÄNE']);
- assert.deepEqual(FINANCE_TABS,['ÜBERSICHT','EINNAHMEN','AUSGABEN','DOKUMENTE','AUSWERTUNGEN']);
+ assert.deepEqual(FINANCE_TABS,['ÜBERSICHT','BUCHUNGEN','AUSGABEN','DOKUMENTE','AUSWERTUNGEN']);
  assert.deepEqual(CREATOR_TABS,['ÜBERSICHT','BEWERBUNGEN','CREATOR','AFFILIATE','CONTENT','AUSZAHLUNGEN']);
 });
 test('actual tab markup distinguishes active and inactive sections',()=>{
@@ -85,10 +85,11 @@ test('admin layout remains scoped and preserves the authoritative desktop-only g
  assert.match(source('app/AdminOverview.tsx'),/if \(isDesktop !== true\) return/);
 });
 
-function renderPortal(file,props,readData,readError=''){
+function renderPortal(file,props,readData,readError='',selectedFinance=null){
  const shared=sharedComponents();const compiled={exports:{}};
  const js=ts.transpileModule(source(file),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
- const localRequire=name=>name.includes('AdminCommissionRuleFields')?ruleFields():name.includes('commissionRuleConfiguration')?require('../lib/commissionRuleConfiguration.ts'):name.includes('AdminPortalAffiliate')?affiliateComponents(shared):name.includes('adminPortalModel')?model:name.includes('AdminPortalShared')?{...shared,usePortalRead:()=>({data:readData,error:readError,refresh:()=>{}})}:name.includes('AdminCosts')?{AdminCosts:()=>React.createElement('p',null,'Existing expense editor')}:name.includes('AdminPortalDocuments')?{AdminPortalDocuments:()=>React.createElement('p',null,'Private documents')}:require(name);
+ let state=0;
+ const localRequire=name=>name==='react'&&selectedFinance?{...React,useState:initial=>React.useState(state++===5?selectedFinance:initial)}:name.includes('AdminCommissionRuleFields')?ruleFields():name.includes('commissionRuleConfiguration')?require('../lib/commissionRuleConfiguration.ts'):name.includes('AdminPortalAffiliate')?affiliateComponents(shared):name.includes('adminPortalModel')?model:name.includes('AdminPortalShared')?{...shared,usePortalRead:()=>({data:readData,error:readError,refresh:()=>{}})}:name.includes('AdminCosts')?{AdminCosts:()=>React.createElement('p',null,'Existing expense editor')}:name.includes('AdminPortalDocuments')?{AdminPortalDocuments:()=>React.createElement('p',null,'Private documents')}:require(name);
  vm.runInNewContext(js,{module:compiled,exports:compiled.exports,require:localRequire,console,Intl,Date});
  const component=compiled.exports[Object.keys(compiled.exports).find(key=>key.startsWith('AdminPortal'))];
  return renderToStaticMarkup(React.createElement(component,props));
@@ -119,8 +120,31 @@ test('unsupported and unresolved viewports mount no operational UI and make no i
 });
 test('finance renders annual prepayment, B2B and each refund as their own authoritative rows',()=>{
  const events=[{id:'prepaid',kind:'annual_prepayment',gross_cents:13000,direction:'inflow',annual_plan_id:'plan',channel:'b2c'},{id:'b2b',kind:'b2b_settlement',gross_cents:5000,direction:'inflow',b2b_agreement_id:'agreement',channel:'b2b'},{id:'refund',kind:'refund',gross_cents:1500,direction:'outflow',channel:'b2c'}];
- const html=renderPortal('app/AdminPortalFinance.tsx',{tab:'EINNAHMEN',onTab:()=>{},onSessionLost:()=>{}},{events,total:3,pageSize:200});
+ const html=renderPortal('app/AdminPortalFinance.tsx',{tab:'BUCHUNGEN',onTab:()=>{},onSessionLost:()=>{}},{events,total:3,pageSize:200});
  assert.match(html,/Jahresvorauszahlung/);assert.match(html,/B2B-Zahlung/);assert.match(html,/Erstattung/);assert.match(html,/130,00/);assert.match(html,/15,00/);assert.doesNotMatch(html,/Jahreslieferung.*Eingang/);
+});
+test('October fixture preserves 29535 income/refunds and separate Annual history without pretending live readback',()=>{
+ // The remaining 6267 is an aggregate fixture, not an invented amount for live order 000465.
+ const events=[{id:'annual-paid',kind:'annual_prepayment',direction:'inflow',gross_cents:23268,annual_plan_id:'plan',annual_size_label:'30',occurred_on:'2026-10-06',occurred_on_basis:'plan_purchased_at',channel:'b2c',tax_cents:null},{id:'annual-refund',kind:'refund',direction:'outflow',gross_cents:23268,annual_plan_id:'plan',annual_size_label:'30',occurred_on:'2026-10-08',occurred_on_basis:'event_date',workflow_completed_at:'2026-10-09T10:00:00Z',channel:'b2c',tax_cents:null},...['inflow','outflow'].map(direction=>({id:direction,kind:direction==='inflow'?'order_payment':'refund',direction,gross_cents:6267,channel:'b2c',orders:{order_number:'Weitere Testzahlungen (Fixture)'}}))];
+ const before=JSON.stringify(events),summary=summarizeLedger(events,[]);assert.equal(summary.incomeCents,29535);assert.equal(summary.refundCents,29535);assert.equal(summary.eventCount,4);assert.equal(summary.storedIncomeTaxCents,null);assert.equal(summary.storedRefundTaxCents,null);assert.equal(summary.providerFeeCents,null);assert.equal(summary.resultCents,null);assert.equal(JSON.stringify(events),before);
+ const html=renderPortal('app/AdminPortalFinance.tsx',{tab:'BUCHUNGEN',onTab:()=>{},onSessionLost:()=>{}},{events,total:4,pageSize:200});assert.match(html,/Jahresplan 30 g/);assert.equal(model.financeReference({orders:{order_number:'GLOA-2026-000465'}}),'GLOA-2026-000465');assert.match(html,/\+232,68/);assert.match(html,/-232,68/);assert.match(html,/EINGANG/);assert.match(html,/AUSGANG \/ ERSTATTUNG/);assert.doesNotMatch(html,/event_date|plan_purchased_at|Datum laut/);
+});
+test('Finance date provenance is German and workflow completion never replaces event date',()=>{
+ for(const [raw,expected]of [['event_date','Ereignisdatum'],['order_placed_at','Bestelldatum'],['plan_purchased_at','Kaufdatum des Jahresplans'],['instalment_paid_at','Zahlungsdatum der Rate'],['refund_last_update','Letzter bekannter Refund-Stand'],['unknown','Datumsquelle unbekannt']])assert.equal(model.financeDateBasis(raw),expected);
+ const ui=source('app/AdminPortalFinance.tsx');assert.match(ui,/Refund-Ereignis \(Ledger\)/);assert.match(ui,/Vorgang in GLOA abgeschlossen/);assert.match(ui,/date\(selected\.occurred_on\)/);assert.match(ui,/date\(selected\.workflow_completed_at,true\)/);assert.match(ui,/<details><summary>Technische Details/);
+ const route=source('app/api/admin/finance/route.ts');assert.match(route,/refund_provider_reference===row.external_reference/);assert.match(route,/matches.length===1/);assert.match(route,/resolved_annual_plan_id===row.annual_plan_id/);assert.doesNotMatch(route,/\.update\(|\.insert\(|\.rpc\(/);assert.doesNotMatch(route,/row\.occurred_on\s*=/);
+ const row={id:'refund',kind:'refund',direction:'outflow',gross_cents:23268,occurred_on:'2026-10-08',occurred_on_basis:'event_date',workflow_completed_at:'2026-10-09T10:00:00Z'};
+ const html=renderPortal('app/AdminPortalFinance.tsx',{tab:'BUCHUNGEN',onTab:()=>{},onSessionLost:()=>{}},{events:[row],total:1,pageSize:200},'',row);assert.match(html,/Refund-Ereignis \(Ledger\)/);assert.match(html,/08\.10\.2026/);assert.match(html,/Vorgang in GLOA abgeschlossen/);assert.match(html,/09\.10\.2026/);assert.match(html,/Ereignisdatum/);assert.doesNotMatch(html,/event_date|occurred_on_basis/);
+});
+test('Cost explanations distinguish absent period records from proof of completeness',()=>{
+ const events=[{direction:'inflow',gross_cents:10000,channel:'b2c',tax_cents:0}];
+ const empty=summarizeLedger(events,[]);assert.deepEqual(empty.missingCostCategories,['Wareneinsatz','Verpackung','Carrier-Versand','Sonstige direkte Kosten','Zahlungsgebühren']);assert.equal(empty.providerFeeCents,null);
+ const recorded=summarizeLedger(events,[{category:'packaging',gross_cents:200,vat_cents:null}]);assert.ok(!recorded.missingCostCategories.includes('Verpackung'));assert.equal(recorded.storedInputTaxCents,null);assert.equal(recorded.resultCents,null);assert.equal(recorded.storedIncomeTaxCents,0);
+ const route=source('app/api/admin/finance/route.ts');assert.match(route,/read_sensitive/);assert.doesNotMatch(route,/inventory_items|inventory_movements|record_payment_fee_event/);
+});
+test('Documents explicitly register metadata without claiming private file transfer',()=>{
+ const ui=source('app/AdminPortalDocuments.tsx');assert.match(ui,/nur Metadaten und Belegreferenzen/);assert.match(ui,/keinen Upload, Download/);assert.match(ui,/Datei nicht geprüft/);assert.doesNotMatch(ui,/type="file"|createSignedUrl|\.upload\(/);
+ const route=source('app/api/admin/documents/route.ts');assert.match(route,/from\("documents"\)\.insert/);assert.doesNotMatch(route,/createSignedUrl|\.download\(|\.upload\(/);
 });
 test('creator applications, combined roles, affiliate active flag, UGC and payout history render',()=>{
  const fixture={creators:[{id:'c',display_name:'Test Creator',email:'c@example.invalid',status:'active'}],applications:[{id:'a',display_name:'Bewerber',status:'submitted',requested_roles:['influencer','ugc_creator']}],roles:[{creator_id:'c',role:'influencer'},{creator_id:'c',role:'affiliate'}],links:[{id:'l',creator_id:'c',slug:'test-creator',active:false}],codes:[],ugcAssignments:[{id:'u',title:'Test Reel',status:'briefed'}],commissions:[{id:'earned',creator_id:'c',kind:'earned',payout_state:'held',amount_cents:125},{id:'reversed',creator_id:'c',kind:'reversal',payout_state:'reversed',amount_cents:25}],balances:[{creatorId:'c',balance:{pending_cents:10000,eligible_cents:0,held_cents:125,paid_cents:null}}],payouts:[]};

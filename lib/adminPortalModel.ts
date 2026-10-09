@@ -7,7 +7,16 @@ export const PRIMARY_AREAS = [
 ] as const;
 export type PortalArea = typeof PRIMARY_AREAS[number][0];
 export const SALES_TABS = ['BESTELLUNGEN', 'ABOS', 'JAHRESPLÄNE'] as const;
-export const FINANCE_TABS = ['ÜBERSICHT', 'EINNAHMEN', 'AUSGABEN', 'DOKUMENTE', 'AUSWERTUNGEN'] as const;
+export const FINANCE_TABS = ['ÜBERSICHT', 'BUCHUNGEN', 'AUSGABEN', 'DOKUMENTE', 'AUSWERTUNGEN'] as const;
+export const financeDateBasis = (v: unknown): string => ({event_date:'Ereignisdatum',order_placed_at:'Bestelldatum',plan_purchased_at:'Kaufdatum des Jahresplans',instalment_paid_at:'Zahlungsdatum der Rate',refund_last_update:'Letzter bekannter Refund-Stand'} as Record<string,string>)[String(v)]??'Datumsquelle unbekannt';
+export function financeReference(r:PortalRow):string {
+  if(r.annual_plan_id)return typeof r.annual_size_label==='string'?'Jahresplan '+r.annual_size_label+' g':'Jahresplan';
+  const order=(r.orders??{}) as PortalRow;
+  if(order.order_number)return String(order.order_number)+(r.subscription_id?' · 4-Wochen-Abo':'');
+  return r.b2b_agreement_id?'B2B-Vertrag':'Geschäftsbezug nicht erfasst';
+}
+export const financeDirection=(r:PortalRow)=>r.direction==='inflow'?'EINGANG':r.kind==='refund'?'AUSGANG / ERSTATTUNG':'AUSGANG';
+export const financeAmount=(r:PortalRow)=>typeof r.gross_cents==='number'?(r.direction==='inflow'?'+':'-')+money(r.gross_cents):'unbekannt';
 export const CREATOR_TABS = ['ÜBERSICHT', 'BEWERBUNGEN', 'CREATOR', 'AFFILIATE', 'CONTENT', 'AUSZAHLUNGEN'] as const;
 export const PORTAL_LABELS: Record<string, string> = {
   active:'Aktiv', pending:'Ausstehend', paid:'Bezahlt', failed:'Fehlgeschlagen',

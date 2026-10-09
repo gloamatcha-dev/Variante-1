@@ -21,7 +21,11 @@ export function summarizeLedger(events: PortalRow[], expenses: PortalRow[]) {
     storedIncomeTaxCents:income.length?amount(income,'tax_cents'):null,
     storedRefundTaxCents:refunds.length?amount(refunds,'tax_cents'):null,
     storedInputTaxCents:expenses.length?amount(expenses,'vat_cents'):null,
-    resultCents:null, completeness:'Kosten und Providergebühren sind nicht nachweislich vollständig erfasst.',
+    resultCents:null, completeness:'Ergebnis noch nicht berechenbar: Kosten sind nicht nachweislich vollständig erfasst. Vorhandene Buchungen beweisen noch keine vollständige Kostenabdeckung.',
+    missingCostCategories:income.length?[
+      ...[['matcha_cogs','Wareneinsatz'],['packaging','Verpackung'],['shipping','Carrier-Versand'],['other_direct','Sonstige direkte Kosten']].filter(([key])=>!direct.some(r=>r.category===key)).map(([,name])=>name),
+      ...(!fees.length&&!direct.some(r=>r.category==='payment_fee')?['Zahlungsgebühren']:[]),
+    ]:[],
     eventCount:events.length, expenseCount:expenses.length, channels,
   };
 }
