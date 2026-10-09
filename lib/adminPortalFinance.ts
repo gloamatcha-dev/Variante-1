@@ -1,11 +1,22 @@
 import type { PortalRow } from './adminPortalModel.ts';
 /** Server read aggregation of stored events. No order-derived duplicate revenue. */
-export function summarizeLedger(events: PortalRow[], expenses: PortalRow[]) {
+export function summarizeLedger(events: PortalRow[], expenses: PortalRow[], evidence: PortalRow[] = []) {
   const amount=(rows:PortalRow[],field:string):number|null => rows.every(r=>typeof r[field]==='number')
     ? rows.reduce((sum,r)=>sum+(r[field] as number),0):null;
   const income=events.filter(r=>r.direction==='inflow');
   const refunds=events.filter(r=>r.kind==='refund');
   const fees=events.filter(r=>r.kind==='payment_fee');
+  const coverage = { checkedPositive: 0, checkedZero: 0, notApplicable: 0, pending: 0, missing: 0, complete: false };
+  for (const payment of income) {
+    const matches = evidence.filter(r=>r.income_event_id===payment.id);
+    const row = matches.length === 1 ? matches[0] : null;
+    if (!row) coverage.missing++;
+    else if (row.capture_status==='checked' && row.fee_cents===0) coverage.checkedZero++;
+    else if (row.capture_status==='checked' && typeof row.fee_cents==='number' && row.fee_cents>0 && row.fee_event_id) coverage.checkedPositive++;
+    else if (row.capture_status==='not_applicable') coverage.notApplicable++;
+    else coverage.pending++;
+  }
+  coverage.complete = income.length>0 && coverage.pending===0 && coverage.missing===0;
   const direct=expenses.filter(r=>r.category!=='general');
   const general=expenses.filter(r=>r.category==='general');
   const channels=[...new Set(events.map(r=>String(r.channel)))].map(channel=>({
@@ -17,7 +28,9 @@ export function summarizeLedger(events: PortalRow[], expenses: PortalRow[]) {
     incomeCents:amount(income,'gross_cents'), refundCents:amount(refunds,'gross_cents'),
     directCostCents:direct.length?amount(direct,'gross_cents'):null,
     generalCostCents:general.length?amount(general,'gross_cents'):null,
-    providerFeeCents:fees.length?amount(fees,'gross_cents'):null,
+    providerFeeCents:fees.length?amount(fees,'gross_cents'):coverage.complete && coverage.checkedPositive===0 ? 0 : null,
+    providerFeeCoverage:coverage,
+    providerFeeCoverageLabel:coverage.complete?'Providergebühren vollständig geprüft':coverage.checkedPositive+coverage.checkedZero+coverage.notApplicable>0?'Providergebühren teilweise erfasst':'Providergebühren noch unvollständig',
     storedIncomeTaxCents:income.length?amount(income,'tax_cents'):null,
     storedRefundTaxCents:refunds.length?amount(refunds,'tax_cents'):null,
     storedInputTaxCents:expenses.length?amount(expenses,'vat_cents'):null,

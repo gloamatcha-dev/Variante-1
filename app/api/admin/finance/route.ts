@@ -58,7 +58,14 @@ export async function POST(request: Request): Promise<Response> {
       ]);
       const undated=await admin.from("financial_events").select("id",{count:"exact",head:true}).is("occurred_on",null);
       const obligations=await admin.from("creator_commissions").select("id",{count:"exact",head:true}).eq("kind","earned").in("payout_state",["pending","eligible","held"]);
-      return json({ok:true,period,summary:summarizeLedger(events,expenses),creatorObligations:obligations.error?null:obligations.count,undatedEvents:undated.error?null:undated.count,...(action==="export"?{events,expenses}:{})},200);
+      const incomeIds=events.filter(r=>r.direction==='inflow').map(r=>r.id);
+      const evidence=[];
+      for(let offset=0;offset<incomeIds.length;offset+=100){
+        const read=await admin.from('provider_fee_evidence').select('income_event_id,capture_status,fee_cents,fee_event_id').in('income_event_id',incomeIds.slice(offset,offset+100));
+        if(read.error)throw new Error('Fee coverage read failed');
+        evidence.push(...(read.data??[]));
+      }
+      return json({ok:true,period,summary:summarizeLedger(events,expenses,evidence),creatorObligations:obligations.error?null:obligations.count,undatedEvents:undated.error?null:undated.count,...(action==="export"?{events,expenses}:{})},200);
     }
     if(action === "list" || action === undefined) {
       const page = typeof raw.page === "number" && Number.isSafeInteger(raw.page) ? Math.max(1,raw.page) : 1;

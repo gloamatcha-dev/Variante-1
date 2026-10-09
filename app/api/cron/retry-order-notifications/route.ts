@@ -2,6 +2,7 @@ import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { isBearerSecretAuthorized } from "../../../../lib/serverSecretAuth";
 import { runTransactionalEmailRetryCron } from "../../../../lib/transactionalEmailRetry";
 import { getStripeClient } from "../../../../lib/stripe";
+import { runProviderFeeSweep } from '../../../../lib/providerFeeCaptureDeps';
 import { sweepDueDeferredCancellations } from "../../../../lib/subscriptionCancellation";
 // Phase 3H.5B2. Same cron, third job, its own error boundary.
 import {
@@ -453,9 +454,11 @@ export async function GET(request: Request): Promise<Response> {
     // block adds counts and sanitised failure reasons, and no plan id,
     // order id, recipient or amount at all. The retention block adds
     // three integers and a flag - never an address, an id or a name.
+    const feeStripe = getStripeClient();
+    const providerFees = feeStripe ? await runProviderFeeSweep(feeStripe) : { unavailable: true };
     return Response.json(
       {
-        ...summary, deferredCancellations, subscriptionEmails, annual, launchRetention,
+        ...summary, deferredCancellations, subscriptionEmails, annual, launchRetention, providerFees,
         // The B2B blocks add counts, agreement/delivery uuids and
         // sanitised refusal reasons - never an address, an amount, a
         // Stripe id, a company name or a recipient.

@@ -1,4 +1,5 @@
 import type Stripe from "stripe";
+import { runProviderFeeSweep } from '../../../../lib/providerFeeCaptureDeps';
 import { requireBusinessEffect, FINANCE_EFFECT_RESULTS, ATTRIBUTION_EFFECT_RESULTS, REVERSAL_EFFECT_RESULTS } from '../../../../lib/requiredBusinessEffect';
 import { getStripeClient } from "../../../../lib/stripe";
 import {
@@ -406,6 +407,11 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
+  // Secondary finance effect: outage never reverses payment success. Existing
+  // daily cron discovers missed forward income and drains durable pending evidence.
+  if (['checkout.session.completed','checkout.session.async_payment_succeeded','invoice.paid'].includes(event.type)) {
+    await runProviderFeeSweep(stripe, 10);
+  }
   const recorded = await recordStripeWebhookEvent(event.id, event.type, checkoutSessionId);
   if (!recorded.ok) {
     // Processing already succeeded above; a failure to record it only

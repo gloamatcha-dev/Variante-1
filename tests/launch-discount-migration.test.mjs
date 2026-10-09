@@ -82,10 +82,10 @@ test("1: 057 is the newest migration, there is no 058, and it is one transaction
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(files.length, 78);
-  assert.equal(files[files.length - 22], MIGRATION, "057 is not the newest migration");
+  assert.equal(files.length, 79);
+  assert.equal(files[files.length - 23], MIGRATION, "057 is not the newest migration");
   assert.equal(files[55], "056_launch_discount.sql", "056 moved");
-  assert.deepEqual(files.filter((f) => Number(f.slice(0, 3)) > 78), [],
+  assert.deepEqual(files.filter((f) => Number(f.slice(0, 3)) > 79), [],
     "a migration 072 or beyond appeared");
 
   // Migration numbers are unique, so two people cannot both own 057.
