@@ -1,4 +1,5 @@
 import type Stripe from "stripe";
+import { withdrawalTaxScope } from '../../../../lib/refundTaxScope';
 import { runProviderFeeSweep } from '../../../../lib/providerFeeCaptureDeps';
 import { requireBusinessEffect, FINANCE_EFFECT_RESULTS, ATTRIBUTION_EFFECT_RESULTS, REVERSAL_EFFECT_RESULTS } from '../../../../lib/requiredBusinessEffect';
 import { getStripeClient } from "../../../../lib/stripe";
@@ -689,6 +690,7 @@ async function handleSubscriptionDeleted(event: Stripe.Event): Promise<void> {
  * is a commercial decision this phase does not make.
  */
 async function handleRefundEvent(stripe: Stripe, event: Stripe.Event): Promise<void> {
+  const taxScope = withdrawalTaxScope(event.data.object);
   const paymentIntentId = paymentIntentIdFromRefundEvent(event.data.object);
 
   if (!paymentIntentId) {
@@ -708,7 +710,7 @@ async function handleRefundEvent(stripe: Stripe, event: Stripe.Event): Promise<v
     // FINANCE LEDGER (072). Record the annual plan refund event after
     // the refund state is durable. Idempotent by arithmetic.
     if (annual.annualPlanId && annual.refundedTotalCents != null && annual.refundedTotalCents > 0) {
-      requireBusinessEffect('annual refund', await recordAnnualPlanRefundEvent(annual.annualPlanId, annual.refundedTotalCents, paymentIntentId), FINANCE_EFFECT_RESULTS);
+      requireBusinessEffect('annual refund', await recordAnnualPlanRefundEvent(annual.annualPlanId, annual.refundedTotalCents, paymentIntentId, taxScope?.operationId, taxScope?.withdrawalId), FINANCE_EFFECT_RESULTS);
     }
     // Counts and words only: the plan id and the writer's answer. No
     // amount, no customer, no address and no Stripe secret.
@@ -724,7 +726,7 @@ async function handleRefundEvent(stripe: Stripe, event: Stripe.Event): Promise<v
   // FINANCE LEDGER (072). Record the order refund event and reverse
   // any creator commission proportionally. Both are idempotent.
   if ((isNewSettledRefundFact(outcome.result) || outcome.result === 'unchanged') && outcome.orderId && outcome.refundedTotalCents != null && outcome.refundedTotalCents > 0) {
-    requireBusinessEffect('order refund', await recordOrderRefundEvent(outcome.orderId, outcome.refundedTotalCents, paymentIntentId), FINANCE_EFFECT_RESULTS);
+    requireBusinessEffect('order refund', await recordOrderRefundEvent(outcome.orderId, outcome.refundedTotalCents, paymentIntentId, taxScope?.operationId, taxScope?.withdrawalId), FINANCE_EFFECT_RESULTS);
     requireBusinessEffect('commission reversal', await reverseCreatorCommissionForRefund({
       orderId: outcome.orderId,
       refundedTotalCents: outcome.refundedTotalCents,

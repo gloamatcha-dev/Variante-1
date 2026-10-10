@@ -177,7 +177,8 @@ export async function recordOrderRefundEvent(
   orderId: string,
   refundedTotalCents: number,
   externalReference?: string | null,
-  operationId?: string
+  operationId?: string,
+  withdrawalId?: string | null
 ): Promise<FinanceResult | null> {
   const admin = getSupabaseAdmin();
   if (!admin) {
@@ -185,11 +186,13 @@ export async function recordOrderRefundEvent(
     return null;
   }
 
-  const { data, error } = await admin.rpc("record_order_refund_event", {
+  const { data, error } = await admin.rpc("record_order_refund_event_v2", {
     p_order_id: orderId,
     p_refunded_total_cents: refundedTotalCents,
     p_external_reference: externalReference ?? null,
     p_operation_id: operationId ?? null,
+    p_scope: withdrawalId ? "withdrawal" : "manual",
+    p_withdrawal_id: withdrawalId ?? null,
   });
 
   if (error) {
@@ -209,7 +212,8 @@ export async function recordAnnualPlanRefundEvent(
   annualPlanId: string,
   refundedTotalCents: number,
   externalReference?: string | null,
-  operationId?: string
+  operationId?: string,
+  withdrawalId?: string | null
 ): Promise<FinanceResult | null> {
   const admin = getSupabaseAdmin();
   if (!admin) {
@@ -217,11 +221,13 @@ export async function recordAnnualPlanRefundEvent(
     return null;
   }
 
-  const { data, error } = await admin.rpc("record_annual_plan_refund_event", {
+  const { data, error } = await admin.rpc("record_annual_plan_refund_event_v2", {
     p_annual_plan_id: annualPlanId,
     p_refunded_total_cents: refundedTotalCents,
     p_external_reference: externalReference ?? null,
     p_operation_id: operationId ?? null,
+    p_scope: withdrawalId ? "withdrawal" : "manual",
+    p_withdrawal_id: withdrawalId ?? null,
   });
 
   if (error) {

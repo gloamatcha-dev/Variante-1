@@ -18,6 +18,8 @@ const db='gloa_073_'+randomBytes(6).toString('hex');
 sql(`create database ${db} template ${template}`,'postgres');
 if(sql("select to_regprocedure('public.record_annual_prepayment_event_v2(uuid,uuid)') is null",db)==='t')
  sql(fs.readFileSync('supabase/migrations/080_annual_finance_tax_connection.sql','utf8'),db);
+if(sql("select to_regprocedure('public.record_order_refund_event_v2(uuid,integer,text,uuid,text,uuid)') is null",db)==='t')
+ sql(fs.readFileSync('supabase/migrations/081_refund_tax_evidence.sql','utf8'),db);
 // Clear synthetic customer history only in the newly-created disposable clone.
 // Catalog/pricing seeds remain; restore the fixed owner used by the DB regressions.
 sql(`truncate auth.users cascade;
@@ -48,7 +50,16 @@ const results=[];
 for(const file of cases){
  if(file==='tests/runtime/annual-b2b-local.mjs')before=snapshot(db);
  const args=file.endsWith('.test.mjs')?['--test',file]:[file];
- const r=spawnSync(process.execPath,args,{encoding:'utf8',windowsHide:true,env:{...process.env,GLOA_ATOMIC_LOCAL_DATABASE:db}});
+ let r;
+ // Windows PostgREST can fail to establish its initial loopback connection.
+ // Retry only startup failures before any business check; never retry a failed assertion.
+ for(let attempt=1;attempt<=3;attempt++){
+  r=spawnSync(process.execPath,args,{encoding:'utf8',windowsHide:true,env:{...process.env,GLOA_ATOMIC_LOCAL_DATABASE:db}});
+  const transcript=r.stdout+'\n'+r.stderr;
+  if(r.status===0 || !/PostgREST (?:must be ready|readiness)/.test(transcript) || /^PASS /m.test(transcript) || attempt===3)break;
+  fs.writeFileSync(`${out}/${file.split('/').at(-1)}.startup-${attempt}.log`,transcript);
+  console.log(file,'retrying local PostgREST startup',attempt);
+ }
  fs.writeFileSync(`${out}/${file.split('/').at(-1)}.log`,r.stdout+'\n'+r.stderr);
  results.push({file,exitCode:r.status});
  console.log(file,r.status===0?'PASS':'FAIL');

@@ -39,8 +39,8 @@ test("finance: all six RPC wrappers call the correct SECURITY DEFINER function",
     ["recordOrderPaymentEvent", "record_order_payment_event"],
     ["recordAnnualPrepaymentEvent", "record_annual_prepayment_event_v2"],
     ["recordB2bSettlementEvent", "record_b2b_settlement_event"],
-    ["recordOrderRefundEvent", "record_order_refund_event"],
-    ["recordAnnualPlanRefundEvent", "record_annual_plan_refund_event"],
+    ["recordOrderRefundEvent", "record_order_refund_event_v2"],
+    ["recordAnnualPlanRefundEvent", "record_annual_plan_refund_event_v2"],
     ["recordPaymentFeeEvent", "record_payment_fee_event"],
   ];
   for (const [fn, rpc] of expected) {
