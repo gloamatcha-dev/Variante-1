@@ -20,6 +20,8 @@ if(sql("select to_regprocedure('public.record_annual_prepayment_event_v2(uuid,uu
  sql(fs.readFileSync('supabase/migrations/080_annual_finance_tax_connection.sql','utf8'),db);
 if(sql("select to_regprocedure('public.record_order_refund_event_v2(uuid,integer,text,uuid,text,uuid)') is null",db)==='t')
  sql(fs.readFileSync('supabase/migrations/081_refund_tax_evidence.sql','utf8'),db);
+if(sql("select to_regprocedure('public.read_cost_finance_basis_v1(date,date)') is null",db)==='t')
+ sql(fs.readFileSync('supabase/migrations/082_direct_cost_coverage.sql','utf8'),db);
 // Clear synthetic customer history only in the newly-created disposable clone.
 // Catalog/pricing seeds remain; restore the fixed owner used by the DB regressions.
 sql(`truncate auth.users cascade;

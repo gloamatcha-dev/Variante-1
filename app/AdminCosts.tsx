@@ -122,7 +122,7 @@ function fmtDate(iso: string): string {
 /** The one place an unknown VAT becomes words rather than a number. */
 const VAT_UNKNOWN = "Vorsteuer unbekannt";
 
-export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter="" }: { onSessionLost: () => void; expensesOnly?:boolean;initialFilter?:string }) {
+export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter="", onExpensesChanged }: { onSessionLost: () => void; expensesOnly?:boolean;initialFilter?:string;onExpensesChanged?:()=>void }) {
   const [choice, setChoice] = useState<PeriodChoice>("this_month");
   const [custom, setCustom] = useState<FinancePeriod>(() => monthPeriod(todayInBerlin()));
   const [summary, setSummary] = useState<FinanceSummary | null>(null);
@@ -344,6 +344,7 @@ export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter=""
       // resetForm clears the operation id, so the next expense is its own.
       resetForm();
       await load(periodFrom, periodTo);
+      onExpensesChanged?.();
     } catch {
       setFormError("Konnte nicht gespeichert werden.");
     } finally {
@@ -377,6 +378,7 @@ export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter=""
       }
       delete deleteOpRef.current[row.id];
       await load(periodFrom, periodTo);
+      onExpensesChanged?.();
     } catch {
       setFormError("Konnte nicht gelöscht werden.");
     } finally {
@@ -625,7 +627,7 @@ export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter=""
               Kategorie
               <select value={fCategory}
                 onChange={e => setFCategory(e.target.value as ExpenseCategory)}>
-                {EXPENSE_CATEGORIES.map(c => (
+                {EXPENSE_CATEGORIES.filter(c => editing?.category === 'payment_fee' || c !== "payment_fee").map(c => (
                   <option key={c} value={c}>{EXPENSE_CATEGORY_LABEL[c]}</option>
                 ))}
               </select>

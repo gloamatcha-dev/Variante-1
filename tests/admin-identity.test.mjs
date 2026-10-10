@@ -355,7 +355,7 @@ test("4d: every WRITE route takes the write capability, every read says so", () 
     even if somebody wrote one - and they stay banned below regardless,
     because the ban is what keeps the decision in the database.
   */
-  const SENSITIVE_WRITES = ["customer-rights", "costs"];
+  const SENSITIVE_WRITES = ["customer-rights", "costs", "cost-coverage"];
 
   for (const route of SENSITIVE_WRITES) {
     const code = codeOnly(read(`app/api/admin/${route}/route.ts`));
@@ -431,8 +431,10 @@ test("4d: every WRITE route takes the write capability, every read says so", () 
     assert.match(code, /requireAdminIdentity\(request, "read_sensitive"\)/,
       `${route} is a restricted read but does not say so`);
     // It really is a read: no write verb anywhere in the file.
+    const inspected=route==='finance'?code.replace(/\.rpc\('read_cost_finance_basis_v1',/g,'readBasis('):code;
+    if(route==='finance')assert.deepEqual([...code.matchAll(/\.rpc\('([^']+)'/g)].map(m=>m[1]),['read_cost_finance_basis_v1']);
     for (const banned of [".insert(", ".update(", ".upsert(", ".delete(", ".rpc("]) {
-      assert.ok(!code.includes(banned), `${route} claims to be a read but contains ${banned}`);
+      assert.ok(!inspected.includes(banned), `${route} claims to be a read but contains ${banned}`);
     }
     // And it does not restate the role matrix for itself.
     for (const banned of ["owner", "viewer", "canWrite", "canRead"]) {
@@ -646,7 +648,7 @@ test("7: no audit trail, no actor columns, no new real accounts", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 81), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 82), [],
     "a migration beyond 051 appeared");
 
   const sql = codeOnly(migration);
@@ -868,7 +870,7 @@ const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),
 test("9h: this package changed nothing else", () => {
   // No migration, no audit trail, no public surface.
   const files = readdirSync(path.join(ROOT, "supabase/migrations"));
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 81), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 82), [],
     "a migration beyond 051 appeared");
   for (const forbidden of ["admin_activity_log", "record_admin_activity", "actor_user_id"]) {
     assert.ok(!shell.includes(forbidden) && !viewportLib.includes(forbidden),

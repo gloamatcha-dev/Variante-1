@@ -480,7 +480,7 @@ test("23: the admin API surface is exactly these five, all POST-gated", () => {
   // "shipping" (shipping due status + operations_config, mixed
   // read+write). All five are POST-only and gated by the shared admin
   // identity check. Reviewed in tests/072-block1-behaviour.test.mjs.
-  assert.deepEqual(dirs, ["activity", "annual-plans", "b2b", "costs", "creators",
+  assert.deepEqual(dirs, ["activity", "annual-plans", "b2b", "cost-coverage", "costs", "creators",
     "customer-rights", "dashboard-summary", "documents", "finance",
     "inventory", "launch", "orders", "portal", "session", "shipping", "subscriptions", "waitlist",
     "withdrawal-refund"]);

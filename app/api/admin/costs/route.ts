@@ -416,6 +416,11 @@ export async function POST(request: Request): Promise<Response> {
     if (!input.ok) return json({ error: input.reason } as ErrorResponse, 400);
 
     const isUpdate = action === "update_expense";
+    if (!isUpdate && input.category === "payment_fee") return json({error:"Zahlungsgebühren werden automatisch über den Zahlungsanbieter erfasst."},400);
+    if (isUpdate && input.category === 'payment_fee') {
+      const existing=await admin.from('business_expenses').select('category').eq('id',String(body.expenseId)).single();
+      if(existing.error||existing.data?.category!=='payment_fee')return json({error:"Zahlungsgebühren werden automatisch über den Zahlungsanbieter erfasst."},400);
+    }
     const hasUgcAssociation = Object.prototype.hasOwnProperty.call(body,'ugcAssignmentId');
     if(hasUgcAssociation&&body.ugcAssignmentId!==null&&(typeof body.ugcAssignmentId!=='string'||!UUID_RE.test(body.ugcAssignmentId)))return json({error:'Ungültiger Content-Auftrag.'},400);
     let expenseId: string | null = null;

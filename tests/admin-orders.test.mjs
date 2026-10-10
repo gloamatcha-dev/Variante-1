@@ -500,7 +500,7 @@ test("7: /api/admin gained orders and nothing else", () => {
   // It computes every figure server-side and accepts no total, margin or
   // completeness flag from the browser. Reviewed in
   // tests/business-expenses-migration.test.mjs.
-  assert.deepEqual(dirs, ["activity", "annual-plans", "b2b", "costs", "creators",
+  assert.deepEqual(dirs, ["activity", "annual-plans", "b2b", "cost-coverage", "costs", "creators",
     "customer-rights", "dashboard-summary", "documents", "finance",
     "inventory", "launch", "orders", "portal", "session", "shipping", "subscriptions",
     "waitlist", "withdrawal-refund"]);

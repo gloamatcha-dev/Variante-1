@@ -1,4 +1,3 @@
-import { readPortalPages } from "../../../../lib/adminPortalRead.ts";
 import { summarizeLedger, portalPeriod } from "../../../../lib/adminPortalFinance.ts";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { requireAdminIdentity } from "../../../../lib/adminActionRoute.ts";
@@ -42,30 +41,16 @@ export async function POST(request: Request): Promise<Response> {
   let period: ReturnType<typeof portalPeriod>;
   try { period = portalPeriod(raw); } catch { return json({error:"Bitte einen gültigen Zeitraum wählen."},400); }
   try {
-    if(action === "missing_costs") {
-      const [events,expenses]=await Promise.all([
-        readPortalPages(admin,"financial_events",q=>q.eq("kind","order_payment").gte("occurred_on",period.from).lt("occurred_on",period.to),"id","*,orders(order_number,customer_snapshot)"),
-        readPortalPages(admin,"business_expenses",q=>q.not("order_id","is",null)),
-      ]);
-      const recorded=new Set(expenses.map(row=>row.order_id));
-      const seen=new Set();
-      return json({ok:true,orders:events.filter(row=>row.order_id&&!recorded.has(row.order_id)&&!seen.has(row.order_id)&&seen.add(row.order_id)),period},200);
-    }
-    if (action === "summary" || action === "export") {
-      const [events, expenses] = await Promise.all([
-        readPortalPages(admin, "financial_events", q => q.gte("occurred_on",period.from).lt("occurred_on",period.to)),
-        readPortalPages(admin, "business_expenses", q => q.gte("occurred_on",period.from).lt("occurred_on",period.to)),
-      ]);
-      const undated=await admin.from("financial_events").select("id",{count:"exact",head:true}).is("occurred_on",null);
-      const obligations=await admin.from("creator_commissions").select("id",{count:"exact",head:true}).eq("kind","earned").in("payout_state",["pending","eligible","held"]);
-      const incomeIds=events.filter(r=>r.direction==='inflow').map(r=>r.id);
-      const evidence=[];
-      for(let offset=0;offset<incomeIds.length;offset+=100){
-        const read=await admin.from('provider_fee_evidence').select('income_event_id,capture_status,fee_cents,fee_event_id').in('income_event_id',incomeIds.slice(offset,offset+100));
-        if(read.error)throw new Error('Fee coverage read failed');
-        evidence.push(...(read.data??[]));
+    if (action === "summary" || action === "export" || action === "missing_costs") {
+      const {data:basis,error:basisError}=await admin.rpc('read_cost_finance_basis_v1',{p_from:period.from,p_to:period.to});
+      if(basisError||!basis)throw new Error('Cost basis unavailable');
+      const {events,expenses,providerEvidence:evidence}=basis;
+      if(action==='missing_costs'){
+        const missing=basis.subjects.filter((s:Record<string,unknown>)=>['matcha_cogs','packaging','shipping'].some(c=>!basis.coverage.some((r:Record<string,unknown>)=>r.cost_class===c&&(s.kind==='order'?r.order_id===s.id:r.b2b_delivery_id===s.id))));
+        return json({ok:true,orders:missing.filter((s:Record<string,unknown>)=>s.kind==='order').map((s:Record<string,unknown>)=>({order_id:s.id,orders:{order_number:s.reference}})),fulfilments:missing,period},200);
       }
-      return json({ok:true,period,summary:summarizeLedger(events,expenses,evidence),creatorObligations:obligations.error?null:obligations.count,undatedEvents:undated.error?null:undated.count,...(action==="export"?{events,expenses}:{})},200);
+      const obligations=await admin.from("creator_commissions").select("id",{count:"exact",head:true}).eq("kind","earned").in("payout_state",["pending","eligible","held"]);
+      return json({ok:true,period,summary:summarizeLedger(events,expenses,evidence,basis),creatorObligations:obligations.error?null:obligations.count,undatedEvents:basis.undatedEvents,...(action==="export"?{events,expenses}:{})},200);
     }
     if(action === "list" || action === undefined) {
       const page = typeof raw.page === "number" && Number.isSafeInteger(raw.page) ? Math.max(1,raw.page) : 1;
