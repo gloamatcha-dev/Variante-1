@@ -1,4 +1,5 @@
-import { summarizeLedger, portalPeriod } from "../../../../lib/adminPortalFinance.ts";
+import { portalPeriod } from "../../../../lib/adminPortalFinance.ts";
+import { readFinanceSummary } from "../../../../lib/adminPortalFinanceRead.ts";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { requireAdminIdentity } from "../../../../lib/adminActionRoute.ts";
 
@@ -42,15 +43,13 @@ export async function POST(request: Request): Promise<Response> {
   try { period = portalPeriod(raw); } catch { return json({error:"Bitte einen gültigen Zeitraum wählen."},400); }
   try {
     if (action === "summary" || action === "export" || action === "missing_costs") {
-      const {data:basis,error:basisError}=await admin.rpc('read_cost_finance_basis_v1',{p_from:period.from,p_to:period.to});
-      if(basisError||!basis)throw new Error('Cost basis unavailable');
-      const {events,expenses,providerEvidence:evidence}=basis;
+      const {basis,summary,missingFulfilments:missing}=await readFinanceSummary(admin,period);
+      const {events,expenses}=basis;
       if(action==='missing_costs'){
-        const missing=basis.subjects.filter((s:Record<string,unknown>)=>['matcha_cogs','packaging','shipping'].some(c=>!basis.coverage.some((r:Record<string,unknown>)=>r.cost_class===c&&(s.kind==='order'?r.order_id===s.id:r.b2b_delivery_id===s.id))));
         return json({ok:true,orders:missing.filter((s:Record<string,unknown>)=>s.kind==='order').map((s:Record<string,unknown>)=>({order_id:s.id,orders:{order_number:s.reference}})),fulfilments:missing,period},200);
       }
       const obligations=await admin.from("creator_commissions").select("id",{count:"exact",head:true}).eq("kind","earned").in("payout_state",["pending","eligible","held"]);
-      return json({ok:true,period,summary:summarizeLedger(events,expenses,evidence,basis),creatorObligations:obligations.error?null:obligations.count,undatedEvents:basis.undatedEvents,...(action==="export"?{events,expenses}:{})},200);
+      return json({ok:true,period,summary,creatorObligations:obligations.error?null:obligations.count,undatedEvents:basis.undatedEvents,...(action==="export"?{events,expenses}:{})},200);
     }
     if(action === "list" || action === undefined) {
       const page = typeof raw.page === "number" && Number.isSafeInteger(raw.page) ? Math.max(1,raw.page) : 1;

@@ -2,7 +2,8 @@ import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin';
 import { requireAdminIdentity } from '../../../../lib/adminActionRoute.ts';
 import { canWrite } from '../../../../lib/adminRoles';
 import { readPortalPages } from '../../../../lib/adminPortalRead.ts';
-import { portalPeriod, summarizeLedger } from '../../../../lib/adminPortalFinance.ts';
+import { portalPeriod } from '../../../../lib/adminPortalFinance.ts';
+import { readFinanceSummary } from '../../../../lib/adminPortalFinanceRead.ts';
 import type { PortalRow } from '../../../../lib/adminPortalModel.ts';
 import {stockStatus} from '../../../../lib/inventoryRules.ts';
 
@@ -19,7 +20,7 @@ export async function POST(request:Request):Promise<Response>{
  };
  const today=new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Berlin'}).format(new Date());
  const until=new Date(Date.parse(today+'T12:00:00Z')+7*86400000).toISOString().slice(0,10);
- const [orders,annual,withdrawals,complaints,terminations,inventory,b2b,applications,commissions,activity,events,expenses,heldB2b]=await Promise.all([
+ const [orders,annual,withdrawals,complaints,terminations,inventory,b2b,applications,commissions,activity,finance,heldB2b]=await Promise.all([
   source('orders',q=>q.not('placed_at','is',null).is('shipped_at',null).neq('status','cancelled')),
   sensitive?source('annual_plan_deliveries',q=>q.eq('state','scheduled').lte('scheduled_for',until)):null,
   sensitive?source('withdrawal_requests',q=>q.not('case_state','in','(closed,refunded)')):null,
@@ -30,8 +31,7 @@ export async function POST(request:Request):Promise<Response>{
   source('creator_applications',q=>q.in('status',['submitted','in_review'])),
   source('creator_commissions',q=>q.eq('kind','earned').in('payout_state',['pending','eligible','held'])),
   admin.from('admin_activity_log').select('id,created_at,module,action,summary').order('created_at',{ascending:false}).limit(8),
-  sensitive?source('financial_events',q=>q.gte('occurred_on',period.from).lt('occurred_on',period.to)):null,
-  sensitive?source('business_expenses',q=>q.gte('occurred_on',period.from).lt('occurred_on',period.to)):null,
+  sensitive?readFinanceSummary(admin,period).catch(()=>{warnings.push('Finanzdaten');return null;}):null,
   sensitive?source('b2b_deliveries',q=>q.eq('status','held')):null,
  ]);
  const shipping:PortalRow[]=[];
@@ -56,11 +56,11 @@ export async function POST(request:Request):Promise<Response>{
   rightsOpen:withdrawals&&complaints&&terminations?withdrawals.length+complaints.length+terminations.length:null,
   extraordinaryPending:terminations?terminations.filter(r=>r.termination_kind==='extraordinary').length:null,
   refundsAttention:withdrawals?withdrawals.filter(r=>['approved_for_payout','failed'].includes(String(r.refund_state))).length:null,
-  missingCosts:events&&expenses?new Set(events.filter(r=>r.kind==='order_payment'&&r.order_id&&!expenses.some(e=>e.order_id===r.order_id)).map(r=>r.order_id)).size:null,
-  openExpenses:expenses?expenses.filter(r=>r.payment_status==='open').length:null,
+  missingCosts:finance?finance.missingFulfilments.length:null,
+  openExpenses:finance?finance.basis.expenses.filter(r=>r.payment_status==='open').length:null,
   inventoryLow:inventory?inventory.filter(r=>stockStatus(r)!=='ok').length:null,b2bAttention:b2b&&heldB2b?new Set([...b2b,...heldB2b].map(r=>r.supply_agreement_id)).size:null,
   creatorApplicationsPending:applications?.length??null,creatorPayoutAttention:commissions?.length??null,
- },business:events&&expenses?summarizeLedger(events,expenses):null,
+ },business:finance?.summary??null,
  recentActivity:activity.error?null:activity.data,recentPaidOrders:paidOrders.error?null:paidOrders.data,
  upcomingShipments:orders===null?null:shipping.slice(0,8),upcomingAnnual:annual?.slice(0,8)??null,annualPlans:upcomingPlans.error?null:upcomingPlans.data,
  shippingSampleLimit:100,shippingComplete,identity:gate.identity}, {headers:{'Cache-Control':'no-store'}});

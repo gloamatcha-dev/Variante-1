@@ -7,6 +7,8 @@ import * as model from '../lib/adminPortalModel.ts';
 import {PRIMARY_AREAS,SALES_TABS,FINANCE_TABS,CREATOR_TABS,money,label,csvCell} from '../lib/adminPortalModel.ts';
 import {summarizeLedger,portalPeriod} from '../lib/adminPortalFinance.ts';
 import {readPortalPages} from '../lib/adminPortalRead.ts';
+import {readFinanceSummary} from '../lib/adminPortalFinanceRead.ts';
+import {compareFinanceRoutes,emptyDashboardQuery} from './helpers/dashboardFinanceRoutes.mjs';
 
 const require=createRequire(import.meta.url);
 const React=require('react'),{renderToStaticMarkup}=require('react-dom/server'),ts=require('typescript');
@@ -135,7 +137,7 @@ test('October fixture preserves 29535 income/refunds and separate Annual history
 test('Finance date provenance is German and workflow completion never replaces event date',()=>{
  for(const [raw,expected]of [['event_date','Ereignisdatum'],['order_placed_at','Bestelldatum'],['plan_purchased_at','Kaufdatum des Jahresplans'],['instalment_paid_at','Zahlungsdatum der Rate'],['refund_last_update','Letzter bekannter Refund-Stand'],['unknown','Datumsquelle unbekannt']])assert.equal(model.financeDateBasis(raw),expected);
  const ui=source('app/AdminPortalFinance.tsx');assert.match(ui,/Refund-Ereignis \(Ledger\)/);assert.match(ui,/Vorgang in GLOA abgeschlossen/);assert.match(ui,/date\(selected\.occurred_on\)/);assert.match(ui,/date\(selected\.workflow_completed_at,true\)/);assert.match(ui,/<details><summary>Technische Details/);
- const route=source('app/api/admin/finance/route.ts');assert.match(route,/refund_provider_reference===row.external_reference/);assert.match(route,/matches.length===1/);assert.match(route,/resolved_annual_plan_id===row.annual_plan_id/);assert.doesNotMatch(route,/\.update\(|\.insert\(|\.delete\(/);assert.deepEqual([...route.matchAll(/\.rpc\('([^']+)'/g)].map(m=>m[1]),['read_cost_finance_basis_v1']);const readBody=source('supabase/migrations/082_direct_cost_coverage.sql').split('create function public.read_cost_finance_basis_v1')[1].split('$;')[0];assert.match(readBody,/language sql stable security definer/);assert.doesNotMatch(readBody,/\b(insert|update|delete)\b/i);assert.doesNotMatch(route,/row\.occurred_on\s*=/);
+ const route=source('app/api/admin/finance/route.ts');assert.match(route,/refund_provider_reference===row.external_reference/);assert.match(route,/matches.length===1/);assert.match(route,/resolved_annual_plan_id===row.annual_plan_id/);assert.doesNotMatch(route,/\.update\(|\.insert\(|\.delete\(/);assert.deepEqual([...source('lib/adminPortalFinanceRead.ts').matchAll(/\.rpc\('([^']+)'/g)].map(m=>m[1]),['read_cost_finance_basis_v1']);const readBody=source('supabase/migrations/082_direct_cost_coverage.sql').split('create function public.read_cost_finance_basis_v1')[1].split('$;')[0];assert.match(readBody,/language sql stable security definer/);assert.doesNotMatch(readBody,/\b(insert|update|delete)\b/i);assert.doesNotMatch(route,/row\.occurred_on\s*=/);
  const row={id:'refund',kind:'refund',direction:'outflow',gross_cents:23268,occurred_on:'2026-10-08',occurred_on_basis:'event_date',workflow_completed_at:'2026-10-09T10:00:00Z'};
  const html=renderPortal('app/AdminPortalFinance.tsx',{tab:'BUCHUNGEN',onTab:()=>{},onSessionLost:()=>{}},{events:[row],total:1,pageSize:200},'',row);assert.match(html,/Refund-Ereignis \(Ledger\)/);assert.match(html,/08\.10\.2026/);assert.match(html,/Vorgang in GLOA abgeschlossen/);assert.match(html,/09\.10\.2026/);assert.match(html,/Ereignisdatum/);assert.doesNotMatch(html,/event_date|occurred_on_basis/);
 });
@@ -162,7 +164,7 @@ function routeWithGate(file,role){
  const client={from:()=>({upsert:()=>{writes++;throw Error('Unauthorized write');},update:()=>{writes++;throw Error('Unauthorized write');}})};
  const gate=async(_request,capability)=>{capabilities.push(capability);if(role===null)return {ok:false,response:Response.json({error:'Unauthorized'},{status:401})};if(role==='viewer'&&capability!=='read')return {ok:false,response:Response.json({error:'Forbidden'},{status:403})};return {ok:true,identity:{role},session:{userId:'operator',email:'operator@example.invalid'}};};
  const js=ts.transpileModule(source(file),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
- vm.runInNewContext(js,{module:compiled,exports:compiled.exports,require:name=>name.includes('commissionRuleConfiguration')?require('../lib/commissionRuleConfiguration.ts'):name.includes('adminAffiliateConfiguration')?require('../lib/adminAffiliateConfiguration.ts'):name.includes('adminActionRoute')?{requireAdminIdentity:gate}:name.includes('supabaseAdmin')?{getSupabaseAdmin:()=>{reads++;return client;}}:name.includes('adminPortalModel')?model:name.includes('adminRoles')?{canWrite:role=>['owner','admin'].includes(role)}:name.includes('adminPortalRead')?{readPortalPages:()=>{throw Error('Unexpected database read');}}:name.includes('adminPortalFinance')?{portalPeriod,summarizeLedger}:name.includes('inventoryRules')?{stockStatus:()=> 'ok'}:name.includes('creatorAffiliate')?{getCreatorCommissionBalance:()=>{throw Error('Unexpected balance read');}}:require(name),Response,Request,console,Date,Intl});
+ vm.runInNewContext(js,{module:compiled,exports:compiled.exports,require:name=>name.includes('commissionRuleConfiguration')?require('../lib/commissionRuleConfiguration.ts'):name.includes('adminAffiliateConfiguration')?require('../lib/adminAffiliateConfiguration.ts'):name.includes('adminActionRoute')?{requireAdminIdentity:gate}:name.includes('supabaseAdmin')?{getSupabaseAdmin:()=>{reads++;return client;}}:name.includes('adminPortalModel')?model:name.includes('adminRoles')?{canWrite:role=>['owner','admin'].includes(role)}:name.includes('adminPortalRead')?{readPortalPages:()=>{throw Error('Unexpected database read');}}:name.includes('adminPortalFinanceRead')?{readFinanceSummary}:name.includes('adminPortalFinance')?{portalPeriod,summarizeLedger}:name.includes('inventoryRules')?{stockStatus:()=> 'ok'}:name.includes('creatorAffiliate')?{getCreatorCommissionBalance:()=>{throw Error('Unexpected balance read');}}:require(name),Response,Request,console,Date,Intl});
  return {POST:compiled.exports.POST,counts:()=>({reads,writes,capabilities})};
 }
 test('every new read refuses unauthenticated callers before client or body access',async()=>{
@@ -179,8 +181,8 @@ test('composite-key reads use real schema keys and deterministic paging',async()
 test('missing-cost worklist requires all base classes; one recorded expense is insufficient',async()=>{
  const compiled={exports:{}};
  const js=ts.transpileModule(source('app/api/admin/finance/route.ts'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
- const basis={subjects:[{kind:'order',id:'missing',reference:'GLOA-TEST-1'},{kind:'order',id:'one-expense',reference:'GLOA-TEST-2'},{kind:'order',id:'complete',reference:'GLOA-TEST-3'}],coverage:[{order_id:'one-expense',cost_class:'packaging',coverage_status:'captured'},...['matcha_cogs','packaging','shipping'].map(cost_class=>({order_id:'complete',cost_class,coverage_status:'confirmed_zero'}))],events:[],expenses:[{order_id:'one-expense',category:'packaging',gross_cents:100}],providerEvidence:[]};
- const localRequire=name=>name.includes('adminActionRoute')?{requireAdminIdentity:async(_request,capability)=>{assert.equal(capability,'read_sensitive');return {ok:true};}}:name.includes('supabaseAdmin')?{getSupabaseAdmin:()=>({rpc:async(name,args)=>{assert.equal(name,'read_cost_finance_basis_v1');assert.ok(args.p_from&&args.p_to);return {data:basis,error:null};}})}:name.includes('adminPortalRead')?{readPortalPages:async()=>{throw Error('One consistent basis required');}}:name.includes('adminPortalFinance')?{portalPeriod,summarizeLedger}:require(name);
+ const basis={subjects:[{kind:'order',id:'missing',reference:'GLOA-TEST-1'},{kind:'order',id:'one-expense',reference:'GLOA-TEST-2'},{kind:'order',id:'complete',reference:'GLOA-TEST-3'}],coverage:[{order_id:'one-expense',cost_class:'packaging',coverage_status:'captured'},...['matcha_cogs','packaging','shipping'].map(cost_class=>({order_id:'complete',cost_class,coverage_status:'confirmed_zero'}))],events:[],expenses:[{order_id:'one-expense',category:'packaging',gross_cents:100}],providerEvidence:[],months:[],generalCoverage:[],undatedEvents:0,undatedFulfilments:0};
+ const localRequire=name=>name.includes('adminActionRoute')?{requireAdminIdentity:async(_request,capability)=>{assert.equal(capability,'read_sensitive');return {ok:true};}}:name.includes('supabaseAdmin')?{getSupabaseAdmin:()=>({rpc:async(name,args)=>{assert.equal(name,'read_cost_finance_basis_v1');assert.ok(args.p_from&&args.p_to);return {data:basis,error:null};}})}:name.includes('adminPortalRead')?{readPortalPages:async()=>{throw Error('One consistent basis required');}}:name.includes('adminPortalFinanceRead')?{readFinanceSummary}:name.includes('adminPortalFinance')?{portalPeriod,summarizeLedger}:require(name);
  vm.runInNewContext(js,{module:compiled,exports:compiled.exports,require:localRequire,Response,Request,console,Date});
  const response=await compiled.exports.POST(new Request('http://localhost/',{method:'POST',body:JSON.stringify({action:'missing_costs'})}));
  assert.equal(response.status,200);const data=await response.json();assert.deepEqual(data.orders.map(r=>r.order_id),['missing','one-expense']);assert.ok(!data.orders.some(r=>r.order_id==='complete'));
@@ -374,4 +376,42 @@ test('rule creation validates configuration server-side and never writes commiss
   assert.equal(result.writes[0].values.commissionCents,undefined);assert.equal(result.writes[0].values.orderId,undefined);
  }
  const rejected=await affiliateAdminRequest({...base,percentBasisPoints:1250,fixedCents:500});assert.equal(rejected.response.status,400);assert.equal(rejected.writes.length,0);
+});
+
+function dashboardRegressionBasis() {
+ return {events:[{id:'income',kind:'order_payment',direction:'inflow',gross_cents:244816},{id:'refund',kind:'refund',direction:'outflow',gross_cents:60713},{id:'fee',kind:'payment_fee',direction:'outflow',gross_cents:411}],expenses:[{category:'matcha_cogs',order_id:'order',gross_cents:777},{category:'general',gross_cents:1234}],providerEvidence:[{income_event_id:'income',capture_status:'checked',fee_cents:411,fee_event_id:'fee'}],subjects:[{kind:'order',id:'order'}],coverage:['matcha_cogs','packaging','shipping'].map(cost_class=>({order_id:'order',cost_class,coverage_status:'confirmed_zero'})),months:['2026-10-01'],generalCoverage:[{period_start:'2026-10-01',coverage_status:'confirmed_complete'}],undatedEvents:0,undatedFulfilments:0};
+}
+for(const scenario of ['complete','matcha_cogs','packaging','shipping','provider','manual-fee','general-month','undated-event','undated-fulfilment'])test('Dashboard/Finance exact API regression: '+scenario,async()=>{
+ const basis=dashboardRegressionBasis();
+ if(['matcha_cogs','packaging','shipping'].includes(scenario))basis.coverage=basis.coverage.filter(r=>r.cost_class!==scenario);
+ if(scenario==='provider')basis.providerEvidence=[];
+ if(scenario==='manual-fee')basis.expenses.push({category:'payment_fee',gross_cents:411});
+ if(scenario==='general-month')basis.generalCoverage=[];
+ if(scenario==='undated-event')basis.undatedEvents=1;
+ if(scenario==='undated-fulfilment')basis.undatedFulfilments=1;
+ let calls=0;
+ const admin={from:()=>emptyDashboardQuery(),rpc:async(name,args)=>{assert.equal(name,'read_cost_finance_basis_v1');assert.deepEqual(args,{p_from:'2026-10-01',p_to:'2026-11-01'});calls++;return {data:basis,error:null};}};
+ const {finance,dashboard,statuses}=await compareFinanceRoutes(admin);
+ assert.deepEqual(statuses,[200,200]);assert.equal(calls,2);assert.deepEqual(dashboard.business,finance.summary);
+ assert.equal(dashboard.summary.missingCosts,['matcha_cogs','packaging','shipping'].includes(scenario)?1:0);
+ if(scenario==='complete'){assert.equal(finance.summary.contributionMarginCents,182915);assert.equal(finance.summary.resultCents,181681);assert.equal(finance.summary.contributionComplete,true);assert.equal(finance.summary.resultComplete,true);}
+ else if(scenario==='general-month'){assert.equal(finance.summary.contributionMarginCents,182915);assert.equal(finance.summary.resultCents,null);assert.deepEqual(finance.summary.openGeneralMonths,['2026-10-01']);}
+ else {assert.equal(finance.summary.contributionMarginCents,null);assert.equal(finance.summary.resultCents,null);assert.ok(finance.summary.costBlockers.length>0);}
+});
+test('Dashboard basis failure remains unknown, never stale or zero',async()=>{
+ const admin={from:()=>emptyDashboardQuery(),rpc:async()=>({data:null,error:Error('Unavailable')})};
+ const {finance,dashboard,statuses}=await compareFinanceRoutes(admin);
+ assert.deepEqual(statuses,[503,200]);assert.ok(finance.error);assert.equal(dashboard.business,null);assert.equal(dashboard.summary.missingCosts,null);assert.ok(dashboard.warnings.includes('Finanzdaten'));
+});
+
+test('Dashboard cards display authoritative amounts and genuine blockers',()=>{
+ const basis=dashboardRegressionBasis();
+ const summary=summarizeLedger(basis.events,basis.expenses,basis.providerEvidence,basis);
+ const data={summary:{missingCosts:0},business:summary,recentPaidOrders:[],upcomingShipments:[],upcomingAnnual:[],recentActivity:[]};
+ const complete=renderPortal('app/AdminPortalDashboard.tsx',{navigate:()=>{}},data);
+ assert.match(complete,/1\.829,15/);assert.match(complete,/1\.816,81/);
+ const incomplete=summarizeLedger(basis.events,basis.expenses,[],basis);
+ const html=renderPortal('app/AdminPortalDashboard.tsx',{navigate:()=>{}},{...data,business:incomplete});
+ assert.match(html,/Providergebühr bei 1 Zahlungen/);assert.match(html,/unbekannt/);
+ assert.doesNotMatch(html,/1\.829,15|1\.816,81/);
 });

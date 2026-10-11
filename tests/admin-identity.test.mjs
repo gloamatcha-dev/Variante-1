@@ -431,8 +431,9 @@ test("4d: every WRITE route takes the write capability, every read says so", () 
     assert.match(code, /requireAdminIdentity\(request, "read_sensitive"\)/,
       `${route} is a restricted read but does not say so`);
     // It really is a read: no write verb anywhere in the file.
-    const inspected=route==='finance'?code.replace(/\.rpc\('read_cost_finance_basis_v1',/g,'readBasis('):code;
-    if(route==='finance')assert.deepEqual([...code.matchAll(/\.rpc\('([^']+)'/g)].map(m=>m[1]),['read_cost_finance_basis_v1']);
+    const financeRead=route==='finance'?codeOnly(read('lib/adminPortalFinanceRead.ts')):'';
+    const inspected=(code+financeRead).replace(/\.rpc\('read_cost_finance_basis_v1',/g,'readBasis(');
+    if(route==='finance')assert.deepEqual([...financeRead.matchAll(/\.rpc\('([^']+)'/g)].map(m=>m[1]),['read_cost_finance_basis_v1']);
     for (const banned of [".insert(", ".update(", ".upsert(", ".delete(", ".rpc("]) {
       assert.ok(!inspected.includes(banned), `${route} claims to be a read but contains ${banned}`);
     }
