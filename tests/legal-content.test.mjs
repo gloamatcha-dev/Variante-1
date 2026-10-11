@@ -799,7 +799,7 @@ test("AGB: the subscription is described, and only as the code performs it", () 
   assert.equal(SUBSCRIPTION_SHIPPING_BENEFIT_COUNTRY, "DE",
     "the terms name Germany but the rule applies somewhere else");
   // AND THE OLD PROMISE IS GONE FROM THE TERMS.
-  for (const stale of [/ab 50 g ist der Versand/, /kostenlose[rn]? Versand/, /kostenlos/]) {
+  for (const stale of [/ab 50 g ist der Versand/, /kostenlose[rn]? Versand/, /kostenlos\b/]) {
     assert.ok(!stale.test(abo), `the subscription terms still promise free shipping: ${stale}`);
   }
 

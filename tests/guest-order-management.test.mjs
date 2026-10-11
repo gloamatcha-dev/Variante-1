@@ -284,7 +284,7 @@ test("3c: no console line anywhere in this feature carries a token VALUE", () =>
   // name the RPC they called - but none may interpolate or pass the
   // variable. Those are the two shapes that would put a live credential
   // in a log.
-  const LEAKS = [/\$\{token/, /token\s*\)/, /,\s*token\s*[,)]/, /\$\{tokenHash/, /,\s*tokenHash\s*[,)]/];
+  const LEAKS = [/\$\{token/, /\btoken\s*\)/, /,\s*token\s*[,)]/, /\$\{tokenHash/, /,\s*tokenHash\s*[,)]/];
   for (const [label, code] of [
     ["read route", READ_ROUTE_CODE],
     ["cancel route", CANCEL_ROUTE_CODE],

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { getCountryLabel } from "../lib/shipping";
 import type { AddressSnapshot } from "../lib/orderAddressSnapshot";
@@ -83,6 +83,12 @@ const MAX_NOTE_LEN = 2000;
 /** The shape check the server repeats. Saves a round trip on a mangled link. */
 const TOKEN_RE = /^[0-9a-f]{64}$/;
 
+// Preserve the server/loading snapshot while deriving the missing-token view
+// after hydration, without an effect that synchronously updates state.
+const subscribeToClient = () => () => {};
+const clientSnapshot = () => true;
+const serverSnapshot = () => false;
+
 /**
  * THE ACCOUNT PORTAL'S OWN SHELL, WITHOUT THE ACCOUNT NAV.
  *
@@ -110,7 +116,9 @@ export function GuestOrder() {
     return raw && TOKEN_RE.test(raw) ? raw : null;
   });
 
-  const [state, setState] = useState<LoadState>("loading");
+  const isClient = useSyncExternalStore(subscribeToClient, clientSnapshot, serverSnapshot);
+  const [loadState, setState] = useState<LoadState>("loading");
+  const state = isClient && token === null ? "no-token" : loadState;
   const [order, setOrder] = useState<GuestOrderView | null>(null);
 
   const [cancelNote, setCancelNote] = useState("");
@@ -120,7 +128,7 @@ export function GuestOrder() {
 
   useEffect(() => {
     if (token === undefined) return; // still server-rendering
-    if (!token) { setState("no-token"); return; }
+    if (!token) return;
 
     let cancelled = false;
     (async () => {

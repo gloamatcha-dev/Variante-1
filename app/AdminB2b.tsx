@@ -118,12 +118,11 @@ export function AdminB2b({ onSessionLost, initialSearch="" }: { onSessionLost: (
   // an effect starts a cascading render, and the mount effect calls this
   // directly. The query travels as an argument.
   const load = useCallback(async (query: Query, cancelled: () => boolean = () => false) => {
-    try {
-      const res = await fetch("/api/admin/b2b", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(query),
-      });
+    return fetch("/api/admin/b2b", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(query),
+    }).then(async res => {
       if (cancelled()) return;
       if (res.status === 401) { onSessionLost(); return; }
       if (res.status === 403) {
@@ -135,9 +134,9 @@ export function AdminB2b({ onSessionLost, initialSearch="" }: { onSessionLost: (
       if (cancelled()) return;
       setData(payload);
       setLoadError("");
-    } catch {
+    }).catch(() => {
       if (!cancelled()) setLoadError("Die B2B-Verträge konnten nicht geladen werden.");
-    }
+    });
   }, [onSessionLost]);
 
   const refresh = useCallback(async (query: Query) => {

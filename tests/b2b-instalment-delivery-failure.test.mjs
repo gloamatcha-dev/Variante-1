@@ -13,8 +13,6 @@ import {
   B2B_INVOICE_INSTALMENT_METADATA_KEY,
   b2bInstalmentInvoiceIdempotencyKey,
   b2bInstalmentItemIdempotencyKey,
-  buildB2bInstalmentInvoiceParams,
-  buildB2bInstalmentItemParams,
   matchesB2bInstalmentIdentity,
   invoiceAmountMatches,
   resolveInstalmentPaymentMethod,
@@ -29,7 +27,6 @@ import {
 import {
   B2B_ORPHAN_SCAN_MAX_PAGES,
   B2B_ORPHAN_SCAN_PAGE_SIZE,
-  findB2bOrphanDraft,
   B2B_RESOLUTION_HORIZON_DAYS,
   runB2bDeliveryResolution,
   runB2bInstalmentInvoicing,

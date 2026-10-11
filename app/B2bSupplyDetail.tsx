@@ -139,7 +139,7 @@ export function B2bSupplyDetail({ supplyId }: { supplyId: string }) {
 
   const load = async () => {
     if (!supabase) return;
-    const [a, p, d] = await Promise.all([
+    return Promise.all([
       supabase.from("b2b_supply_agreements").select(AGREEMENT_COLUMNS).eq("id", supplyId).maybeSingle(),
       supabase.from("b2b_payment_schedule")
         .select("id, instalment_number, due_at, status, net_cents, gross_cents, paid_at, failed_at, action_required_at")
@@ -148,14 +148,15 @@ export function B2bSupplyDetail({ supplyId }: { supplyId: string }) {
         .select("id, delivery_number, scheduled_for, quantity_packs, status, hold_reason, "
           + "delivery_address_snapshot, tracking_number, dispatched_at, delivered_at")
         .eq("supply_agreement_id", supplyId).order("delivery_number"),
-    ]);
-    if (!a.data) { setNotFound(true); setLoading(false); return; }
-    const row = a.data as unknown as Agreement;
-    setAgreement(row);
-    setPacks(row.pending_quantity_packs ?? row.quantity_packs ?? 1);
-    setPayments((p.data ?? []) as unknown as PaymentRow[]);
-    setDeliveries((d.data ?? []) as unknown as DeliveryRow[]);
-    setLoading(false);
+    ]).then(([a, p, d]) => {
+      if (!a.data) { setNotFound(true); setLoading(false); return; }
+      const row = a.data as unknown as Agreement;
+      setAgreement(row);
+      setPacks(row.pending_quantity_packs ?? row.quantity_packs ?? 1);
+      setPayments((p.data ?? []) as unknown as PaymentRow[]);
+      setDeliveries((d.data ?? []) as unknown as DeliveryRow[]);
+      setLoading(false);
+    });
   };
 
   useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [supplyId]);

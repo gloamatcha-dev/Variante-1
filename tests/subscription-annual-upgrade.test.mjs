@@ -93,7 +93,6 @@ const STRIPE_SUB = "sub_live_1";
 const PLAN_ID = "33333333-3333-4333-8333-333333333333";
 
 /** The brief's own example: 27.09 → 25.10, upgrade on 10.10. */
-const PERIOD_START = "2026-09-27T10:00:00.000Z";
 const PERIOD_END = "2026-10-25T10:00:00.000Z";
 const UPGRADE_EARLY = "2026-10-10T12:00:00.000Z";
 const UPGRADE_LATE = "2026-10-20T12:00:00.000Z";

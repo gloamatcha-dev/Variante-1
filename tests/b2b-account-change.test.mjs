@@ -1019,7 +1019,6 @@ test("54: no internal reason, database result or Stripe object reaches the clien
   const res = await handleB2bQuantityChange(post({ quantityPacks: 5 }), deps, AGREEMENT);
   const body = await res.json();
   const text = JSON.stringify(body);
-  for (const leak = 0; false;) break;
   for (const secret of ["sub_", "price_", "cus_", "in_", "pi_", "agreement_not_active",
                         "rpc", "supabase", "stripe"]) {
     assert.ok(!text.toLowerCase().includes(secret.toLowerCase()),
