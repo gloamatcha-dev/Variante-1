@@ -306,7 +306,7 @@ test("shop: the approved responsive grid still withholds the Metal Case", () => 
   const grid = css.slice(css.indexOf('/* Premium catalogue grid:'));
   assert.match(grid, /\.shop-page \.shop-products\{display:grid/);
   for (const columns of [2,3,4]) assert.ok(grid.includes(`grid-template-columns:repeat(${columns},minmax(0,1fr))`));
-  assert.match(grid, /\.shop-products\[data-count="1"\][^}]*justify-content:center/);
+  assert.match(grid, /\.shop-products\[data-count="1"\]\{display:block;max-width:1600px/);
   assert.ok(!css.includes(".shop-products::before"), "the centre divider came back");
   assert.match(grid, /\.shop-product-row\{[^}]*flex-direction:column/);
   assert.match(grid, /aspect-ratio:4\/5/);
@@ -340,8 +340,8 @@ test("shop: the collapsed food disclosures belong only to Matcha below the grid"
   // Task 28A renamed the summary so the LMIV mandatory particulars are
   // "clearly identified" (Art. 14(1)(a)) rather than merely implied.
   assert.match(site, /<summary><span>Produktdetails &amp; Pflichtangaben<\/span>/);
-  assert.match(site, /shown\.filter\(p=>p\.slug===MATCHA_SLUG\)\.map\(p=><div id="shop-matcha-disclosures" key=\{p.id\}><MatchaShopDetails product=\{p\}\/>/);
-  assert.match(site, /product\.slug===MATCHA_SLUG&&<a[^>]*href="#shop-matcha-disclosures">Zutaten & Pflichtangaben/);
+  assert.ok(!site.includes('id="shop-matcha-disclosures"'));
+  assert.match(site, /product\.slug===MATCHA_SLUG\?<MatchaShopDetails product=\{product\}/);
 });
 
 test("shop: no newsletter component or anchor survives in the site source", () => {

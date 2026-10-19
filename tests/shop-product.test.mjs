@@ -1,3 +1,4 @@
+import {disclosureKeyEvents,prepareDisclosureTarget} from './helpers/shopDisclosureBrowser.mjs';
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync, existsSync, statSync } from "node:fs";
@@ -5,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { shopGridInteraction, shopGridFixture } from './helpers/shopGridInteraction.mjs';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { inspectShopGrid } from './helpers/shopGridBrowserReady.mjs';
+import { inspectShopGrid, isSingleProductLayout } from './helpers/shopGridBrowserReady.mjs';
 
 /**
  * THE /shop MATCHA PRODUCT SECTION, as a source contract.
@@ -151,14 +152,22 @@ test('Grid cards keep storage images, detail routes, disclosures, single variant
  assert.ok(html.includes(product.primary_image_path));assert.ok(html.includes('/shop/'+product.slug));assert.equal(ui.find(n=>n.type==='button').props.disabled,false);
  const image=ui.find(n=>n.type==='img');assert.equal(image.props.loading,'lazy');assert.equal(image.props.alt,product.name);
  product.variants[0].availability='sold_out';assert.equal(ui.find(n=>n.type==='button').props.disabled,true);ui.find(n=>n.type==='button').props.onClick();assert.equal(ui.items.length,0);assert.match(renderToStaticMarkup(ui.render()),/AUSVERKAUFT/);
- assert.ok(renderToStaticMarkup(shopGridInteraction(shopGridFixture(1)[0]).render()).includes('#shop-matcha-disclosures'));
+ assert.ok(renderToStaticMarkup(shopGridInteraction(shopGridFixture(1)[0]).render()).includes('100 % Matcha'));
 });
-test('Grid has balanced 1/2/3 item layouts, 4 desktop columns and separate food/Annual sections',()=>{
+test('Single product has a broad editorial layout; every multi-product catalogue uses the same responsive tracks',()=>{
  for(const columns of [2,3,4])assert.ok(css.includes(`grid-template-columns:repeat(${columns},minmax(0,1fr))`));
- for(const count of [1,2,3])assert.ok(css.includes(`[data-count="${count}"]`));
+ assert.ok(!css.includes('[data-count="2"]'));assert.ok(!css.includes('[data-count="3"]'));
+ assert.match(css,/\.shop-page \.shop-products\[data-count="1"\]\{display:block;max-width:1600px/);
+ assert.match(css,/@media\(min-width:900px\)\{\.shop-page \.shop-products\[data-count="1"\] \.shop-product-row\{display:grid;grid-template-columns:minmax\(0,1fr\) minmax\(0,1fr\);align-items:start/);
+ assert.match(css,/\.shop-products\[data-count="1"\] \.shop-product-visual\{height:clamp\(420px,38vw,560px\)/);
+ assert.ok(!css.includes('grid-template-columns:minmax(0,440px)'),'single product must not use a narrow centred card');
  assert.match(css,/aspect-ratio:4\/5/);assert.match(css,/\.shop-page \.shop-product-visual img\{[^}]*object-fit:contain/);
- assert.ok(shop.indexOf('shop-matcha-disclosures')>shop.indexOf('</section>'));
+ assert.ok(!shop.includes('MatchaShopDetails'));
+ assert.match(block,/product\.slug===MATCHA_SLUG\?<MatchaShopDetails product=\{product\}/);
  assert.ok(shop.indexOf('{hasAnnual&&<ShopAnnualPlan')>shop.indexOf('</section>'));
+ for(const [breakpoint,columns] of [[560,2],[1080,3],[1440,4]])assert.ok(css.includes('@media(min-width:'+breakpoint+'px){.shop-page .shop-products{grid-template-columns:repeat('+columns+',minmax(0,1fr))'));
+ assert.match(css,/\.shop-products\[data-count="1"\]\{padding-bottom:32px/);
+ assert.match(css,/\.shop-products\[data-count="1"\] \.shop-product-visual\{aspect-ratio:auto;background:var\(--cream\)/);
  for(const count of [1,2,3,4,8])assert.equal(shopGridFixture(count).map(p=>renderToStaticMarkup(shopGridInteraction(p).render())).filter(html=>html.includes('shop-product-visual')).length,count);
 });
 test('Grid recurring choices keep account checkout separate from cart',()=>{
@@ -184,7 +193,7 @@ function browserReadinessFixture(broken=false,stalled=false){
   scrollIntoView(){calls.push('scroll-'+i);this.inView=true;},getAttribute:()=>'/fixture-'+i+'.webp',
   decode(){assert.equal(this.inView,true,'decode must follow scroll');if(stalled)return new Promise(()=>{});if(broken)return Promise.reject(new Error('broken raster'));this.complete=true;this.naturalWidth=400;return Promise.resolve();}}));
  const grid={children:images},doc={fonts:{ready:Promise.resolve()},images,documentElement:{dataset:{},scrollWidth:800},querySelector:s=>s==='.shop-products'?grid:{getBoundingClientRect:()=>({width:400,height:500})}};
- const view={requestAnimationFrame:fn=>queueMicrotask(fn),scrollTo:()=>calls.push('top'),getComputedStyle:()=>({gridTemplateColumns:'400px 400px'}),innerWidth:800};
+ const view={requestAnimationFrame:fn=>queueMicrotask(fn),scrollTo:()=>calls.push('top'),getComputedStyle:()=>({display:'grid',gridTemplateColumns:'400px 400px'}),innerWidth:800};
  return {doc,view,calls};
 }
 test('Visual runner scrolls lazy images into view before decoding and restores the screenshot position',async()=>{
@@ -257,4 +266,81 @@ test("5: premium grid typography stays below hero scale and uses the shared GLOA
  assert.match(grid,/:focus-visible\{outline:2px solid var\(--blue\)/);
  assert.ok(!grid.includes('box-shadow:'),'grid cards must remain calm and shadow-free');
  assert.match(details,/<div className="shop-accordion-inner home-rail">/);
+});
+
+
+test('Product-owned disclosures follow purchase controls without duplicates or accessory food claims',()=>{
+ for(const count of [1,2,4]){
+  const products=shopGridFixture(count);
+  products.forEach((product,index)=>{
+   product.description=index?'Validated accessory description':'';
+   const html=renderToStaticMarkup(shopGridInteraction(product).render());
+   const info=html.indexOf('class="shop-product-info"'),buy=html.indexOf('class="cta shop-cta"'),disclosure=html.indexOf('class="shop-accordion"');
+   assert.ok(info<buy&&buy<disclosure,'disclosures must follow controls in the information column');
+   assert.ok(html.endsWith('</section></div></div>'),'disclosure section must be nested inside information column');
+   assert.equal([...html.matchAll(/class="shop-accordion"/g)].length,1);
+   assert.equal([...html.matchAll(/<details /g)].length,index?2:4);
+   assert.equal([...html.matchAll(/<summary>/g)].length,index?2:4);
+   assert.ok(!html.includes('<details open'),'native disclosures start collapsed');
+   assert.ok(!html.includes('shop-matcha-disclosures'));
+   if(index){assert.ok(html.includes(product.description));for(const food of ['100 % Matcha','Zutaten','Zubereitung','Lebensmittelunternehmer'])assert.ok(!html.includes(food));}
+   else {for(const food of ['100 % Matcha','Zutaten','Zubereitung','Lebensmittelunternehmer'])assert.ok(html.includes(food));}
+  });
+  const html=products.map(p=>renderToStaticMarkup(shopGridInteraction(p).render())).join('');
+  const ids=[...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]);assert.equal(new Set(ids).size,ids.length,'ids must be unique across cards');
+ }
+});
+
+
+test('Block editorial layout never counts dormant grid-template tokens as tracks',async()=>{
+ const f=browserReadinessFixture();
+ f.view.getComputedStyle=()=>({display:'block',gridTemplateColumns:'minmax(0px, 1fr)'});
+ const result=await inspectShopGrid(f.doc,f.view,1000);
+ assert.equal(result.columns,null);assert.equal(result.gridDisplay,'block');assert.equal(result.gridTemplateColumns,'minmax(0px, 1fr)');
+});
+
+test('Editorial bounds validate mobile/tablet stacking and desktop columns and reject real regressions',()=>{
+ for(const width of [390,768]){
+  const s={display:'block',width:width-48,left:24,right:width-24,imageWidth:width-48,imageLeft:24,imageTop:50,imageRight:width-24,imageBottom:510.25,infoWidth:width-48,infoLeft:24,infoRight:width-24,infoTop:534.25};
+  assert.equal(isSingleProductLayout(s,width),true);
+  for(const broken of [{infoTop:490},{infoLeft:80},{infoWidth:100},{right:width+20},{imageWidth:NaN},{display:'grid'}])assert.equal(isSingleProductLayout({...s,...broken},width),false);
+ }
+ for(const width of [900,1200,1600]){
+  const s={display:'block',width:width-48,left:24,right:width-24,imageWidth:(width-80)/2,imageLeft:24,imageTop:50,imageRight:24+(width-80)/2,imageBottom:610,infoWidth:(width-80)/2,infoLeft:56+(width-80)/2,infoRight:width-24,infoTop:50};
+  assert.equal(isSingleProductLayout(s,width),true);
+  for(const broken of [{infoTop:534},{infoLeft:24},{imageWidth:100},{infoWidth:0}])assert.equal(isSingleProductLayout({...s,...broken},width),false);
+ }
+ assert.equal(isSingleProductLayout(null,390),false);
+});
+
+
+test('Disclosure CDP activation carries native Enter/Space text and releases the key',()=>{
+ for(const [key,text,code] of [['Enter','\r',13],['Space',' ',32]]){
+  const [down,up]=disclosureKeyEvents(key);
+  assert.equal(down.type,'keyDown');assert.equal(down.text,text);assert.equal(down.unmodifiedText,text);assert.equal(down.windowsVirtualKeyCode,code);
+  assert.equal(up.type,'keyUp');assert.equal(up.key,down.key);assert.equal(up.code,down.code);assert.ok(!('text' in up));
+ }
+ assert.throws(()=>disclosureKeyEvents('unsupported'));
+});
+
+
+function disclosureTargetFixture({overlay=false,moving=false,outside=false}={}){
+ let frames=0;const options=[];const view={innerWidth:390,innerHeight:800,scrollX:0,scrollY:0,requestAnimationFrame:fn=>setTimeout(()=>{frames++;view.scrollY=moving&&frames<3?frames*100:900;fn();},0)};
+ const summary={tagName:'SUMMARY',parentElement:{open:false},scrollIntoView:option=>options.push(option),focus:option=>{assert.equal(option.preventScroll,true);doc.activeElement=summary;},contains:node=>node===child,getBoundingClientRect:()=>{const top=outside?900:moving&&frames<3?1000-frames*100:300;return {left:24,top,right:366,bottom:top+50,width:342,height:50};}};
+ const child={tagName:'SPAN'},blocker={tagName:'DIV',id:'overlay',className:'fixed-overlay'};
+ const doc={activeElement:null,querySelectorAll:()=>Array.from({length:5},()=>({firstElementChild:summary})),elementFromPoint:(x,y)=>{assert.equal(x,195);return overlay?blocker:y>800?null:child;},elementsFromPoint:()=>overlay?[blocker,summary]:[child,summary]};
+ return {doc,view,options,frames:()=>frames};
+}
+
+test('Disclosure mouse target cancels inherited smooth scrolling and waits beyond two frames for stable current coordinates',async()=>{
+ const f=disclosureTargetFixture({moving:true});const target=await prepareDisclosureTarget(4,f.doc,f.view,1000);
+ assert.deepEqual(f.options,[{block:'center',inline:'nearest',behavior:'instant'}]);
+ assert.ok(f.frames()>=6);assert.equal(target.index,4);assert.equal(target.x,195);assert.equal(target.y,325);assert.equal(target.scroll.y,900);assert.equal(target.focused,true);assert.equal(target.visible,true);assert.equal(target.hitTarget,true);assert.equal(target.hit.tag,'SPAN');assert.equal(target.stableFrames,3);
+});
+
+test('Disclosure mouse target fails on an intercepting overlay or an out-of-viewport summary',async()=>{
+ for(const options of [{overlay:true},{outside:true}]){
+  const f=disclosureTargetFixture(options);
+  await assert.rejects(prepareDisclosureTarget(4,f.doc,f.view,40),error=>{assert.match(error.message,/not stable, visible or hittable/);assert.match(error.message,/"index":4/);if(options.overlay)assert.match(error.message,/fixed-overlay/);else assert.match(error.message,/"visible":false/);return true;});
+ }
 });

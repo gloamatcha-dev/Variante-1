@@ -4,6 +4,8 @@ import path from 'node:path';
 import http from 'node:http';
 import {spawn} from 'node:child_process';
 import {renderToStaticMarkup} from 'react-dom/server';
+import {exerciseShopDisclosures} from '../helpers/shopDisclosureBrowser.mjs';
+import {isSingleProductLayout} from '../helpers/shopGridBrowserReady.mjs';
 import {shopGridFixture,shopGridInteraction} from '../helpers/shopGridInteraction.mjs';
 const root='outputs/shop-grid';fs.mkdirSync(root,{recursive:true});
 const server=http.createServer((req,res)=>{
@@ -32,7 +34,7 @@ try{
  await call('Page.enable',{},sessionId);await call('Runtime.enable',{},sessionId);
  await call('Page.setLifecycleEventsEnabled',{enabled:true},sessionId);await call('Page.bringToFront',{},sessionId);
  const checks=[];
- for(const [width,count,columns]of [[390,8,1],[768,8,2],[1200,8,3],[1600,8,4],[1600,1,1],[1600,2,2],[1600,3,3]]){
+ for(const [width,count,columns]of [...[390,768,1200,1600].flatMap(width=>[1,2,3,4,8].map(count=>[width,count,count===1?1:width>=1440?4:width>=1080?3:width>=560?2:1])),[900,1,1]]){
   await call('Emulation.setDeviceMetricsOverride',{width,height:1000,deviceScaleFactor:1,mobile:width<560},sessionId);
   const navigation=await call('Page.navigate',{url:'http://127.0.0.1:'+server.address().port+'/?count='+count},sessionId);
   if(navigation.errorText)throw new Error('Navigation failed: '+navigation.errorText);
@@ -40,8 +42,24 @@ try{
   while(!lifecycle.some(event=>event.loaderId===navigation.loaderId&&event.name==='DOMContentLoaded')){if(Date.now()>until)throw new Error('DOMContentLoaded timeout');await new Promise(r=>setTimeout(r,50));}
   const result=await call('Runtime.evaluate',{awaitPromise:true,returnByValue:true,expression:`import('/grid-ready.js').then(module=>module.inspectShopGrid())`},sessionId);
   if(result.exceptionDetails)throw new Error(JSON.stringify(result.exceptionDetails));
-  const value=result.result.value;if(!value||value.columns!==columns||value.cards!==count||value.overflow||Math.abs(value.ratio-.8)>.01||!value.images||!value.lazy)throw new Error(JSON.stringify({width,count,expectedColumns:columns,actual:value}));
-  checks.push({width,count,...value});
+  const value=result.result.value;
+  if(!value||(count>=2&&value.columns!==columns)||value.cards!==count||value.overflow||(count>=2&&Math.abs(value.ratio-.8)>.01)||!value.images||!value.lazy)throw new Error(JSON.stringify({width,count,expectedColumns:columns,actual:value}));
+  if(count===1){
+   const compact=value.compact,limit=560;
+   if(!compact||compact.heights.some(height=>height<=0||height>limit+1)||Math.max(...compact.heights)-Math.min(...compact.heights)>1||!compact.contain||compact.backgrounds.some(color=>color!==compact.cream)||compact.disclosureGap!==32)throw new Error('Unbalanced compact image layout: '+JSON.stringify({width,count,actual:value}));
+  }
+  if(count===1&&!isSingleProductLayout(value.single,width))throw new Error('Single-product bounding-box layout failed: '+JSON.stringify({width,actual:value}));
+  if(count>=2){
+   const tracks=await call('Runtime.evaluate',{returnByValue:true,expression:`(()=>{const grid=document.querySelector('.shop-products'),style=getComputedStyle(grid),widths=style.gridTemplateColumns.split(' ').map(parseFloat),cards=[...grid.children];return widths.length===${columns}&&Math.max(...widths)-Math.min(...widths)<1&&cards.every(card=>Math.abs(card.getBoundingClientRect().width-widths[0])<1)&&cards.every((card,i)=>Math.abs(card.getBoundingClientRect().left-cards[i%widths.length].getBoundingClientRect().left)<1)&&[...grid.querySelectorAll('.shop-product-visual')].every(frame=>Math.abs(frame.getBoundingClientRect().width/frame.getBoundingClientRect().height-.8)<.01)})()`},sessionId);
+   if(tracks.result.value!==true)throw new Error('Multi-product tracks stretch, misalign or distort images');
+  }
+  const disclosures=await call('Runtime.evaluate',{returnByValue:true,expression:`(()=>{const rows=[...document.querySelectorAll('.shop-column')];return rows.every(row=>{const info=row.querySelector('.shop-product-info'),section=info.querySelector('.shop-accordion'),button=info.querySelector('.shop-cta');return section&&button.getBoundingClientRect().bottom<=section.getBoundingClientRect().top&&row.querySelectorAll('.shop-accordion').length===1})&&document.querySelectorAll('.shop-accordion').length===rows.length&&new Set([...document.querySelectorAll('[id]')].map(x=>x.id)).size===document.querySelectorAll('[id]').length})()`},sessionId);
+  if(disclosures.result.value!==true)throw new Error('Product disclosure ownership or placement failed');
+  let disclosureChecks;
+  try{disclosureChecks=await exerciseShopDisclosures((method,params)=>call(method,params,sessionId));}
+  catch(error){throw new Error('Disclosure interaction failed at '+JSON.stringify({width,count})+': '+error.message);}
+  await call('Runtime.evaluate',{expression:'window.scrollTo(0,0)'},sessionId);
+  checks.push({width,count,...value,disclosureChecks});
   if([390,1600].includes(width)){const png=await call('Page.captureScreenshot',{format:'png',captureBeyondViewport:false},sessionId);fs.writeFileSync(root+'/grid-'+width+'-'+count+'.png',Buffer.from(png.data,'base64'));}
  }
  fs.writeFileSync(root+'/browser-results.json',JSON.stringify(checks,null,2));console.log(checks.length+' local visual layout checks passed');

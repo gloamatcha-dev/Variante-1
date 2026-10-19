@@ -97,8 +97,8 @@ test("3: the hero is type only, and nothing was deleted to make it so", () => {
   // The block still receives the product and the cart callback; the third
   // prop is the annual-plan selection request from the band below it.
   assert.match(shop, /<ShopProductBlock product=\{p\} onAdd=\{onAdd\} annualRequest=\{annualRequest\}\/>/);
-  assert.match(shop, /shown\.filter\(p=>p\.slug===MATCHA_SLUG\)\.map\(p=><div id="shop-matcha-disclosures" key=\{p.id\}><MatchaShopDetails product=\{p\}\/>/);
-  assert.ok(shop.indexOf('id="shop-matcha-disclosures"') > shop.indexOf('</section>'), "food disclosures must follow the grid");
+  assert.ok(!shop.includes('MatchaShopDetails'), 'disclosures must belong to the product card');
+  assert.match(site, /product\.slug===MATCHA_SLUG\?<MatchaShopDetails product=\{product\}/);
   // The anti-newsletter band is deliberately NOT part of the shop
   // composition any more - tests/shop-render.test.mjs owns that contract
   // and proves the component and its other two pages are untouched.

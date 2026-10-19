@@ -10439,6 +10439,21 @@ header nav{gap:18px;font-size:12px}
 @media(min-width:560px){.shop-page .shop-products{grid-template-columns:repeat(2,minmax(0,1fr));gap:56px 28px}}
 @media(min-width:1080px){.shop-page .shop-products{grid-template-columns:repeat(3,minmax(0,1fr));gap:64px 32px}}
 @media(min-width:1440px){.shop-page .shop-products{grid-template-columns:repeat(4,minmax(0,1fr))}}
-@media(min-width:560px){.shop-page .shop-products[data-count="1"]{grid-template-columns:minmax(0,440px);justify-content:center}}
-@media(min-width:1080px){.shop-page .shop-products[data-count="2"]{grid-template-columns:repeat(2,minmax(0,440px));justify-content:center}}
-@media(min-width:1440px){.shop-page .shop-products[data-count="3"]{grid-template-columns:repeat(3,minmax(0,440px));justify-content:center}}
+/* One product is an editorial feature, never a small centred grid card. */
+.shop-page .shop-products[data-count="1"]{display:block;max-width:1600px;padding-top:clamp(32px,4vw,64px)}
+.shop-page .shop-products[data-count="1"]{padding-bottom:32px}
+.shop-page .shop-products[data-count="1"] .shop-product-row{gap:clamp(24px,3vw,48px)}
+.shop-page .shop-products[data-count="1"] .shop-product-visual{aspect-ratio:auto;background:var(--cream)}
+.shop-page .shop-products[data-count="1"] .shop-product-visual{height:clamp(260px,65vw,460px)}
+.shop-page .shop-products[data-count="1"] .shop-product-info{gap:14px;max-width:none;justify-self:start}
+.shop-page .shop-products[data-count="1"] .shop-product-title{font-size:clamp(32px,3.5vw,56px);line-height:1.05}
+.shop-page .shop-products[data-count="1"] .shop-product-sub{font-size:16px;max-width:42ch}
+.shop-page .shop-products[data-count="1"] .shop-product-price{font-size:28px}
+.shop-page .shop-products[data-count="1"] .shop-product-row .shop-cta{max-width:440px}
+@media(min-width:900px){.shop-page .shop-products[data-count="1"] .shop-product-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start}.shop-page .shop-products[data-count="1"] .shop-product-visual{height:clamp(420px,38vw,560px)}.shop-page .shop-products[data-count="1"] .shop-product-info{max-width:560px}}
+
+/* Disclosures belong to their product information column. */
+.shop-page .shop-product-info .shop-accordion{width:100%;padding:0;margin-top:8px}
+.shop-page .shop-product-info .shop-accordion-inner{width:100%;max-width:none;padding:0;margin:0}
+.shop-page .shop-product-info .shop-accordion .product-accordion summary{font-size:14px;padding-block:16px}
+.shop-page .shop-product-info .shop-accordion .product-accordion-body{overflow-wrap:anywhere;padding-bottom:20px}

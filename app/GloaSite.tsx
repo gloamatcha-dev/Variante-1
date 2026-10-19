@@ -708,16 +708,19 @@ return <div className="shop-product-row home-rail">
 
     In prelaunch every mode routes where every other shop CTA routes. */}
 <p className="shop-grid-availability" role="status">{selected?(v.availability==="sold_out"?"AUSVERKAUFT":"Verfügbar"):product.variants.every(variant=>variant.availability==="sold_out")?"AUSVERKAUFT":"Varianten verfügbar"}</p>
-{product.slug===MATCHA_SLUG&&<a className="shop-grid-details" href="#shop-matcha-disclosures">Zutaten & Pflichtangaben</a>}
 <p className="shop-grid-tax">{PRICES_VISIBLE?"Inkl. MwSt., zzgl.":"Informationen zu"} <Link href="/versand">Versand</Link></p>
 <button type="button" className="cta shop-cta" disabled={!selected||v.availability==="sold_out"} onClick={SHOP_IS_PRELAUNCH?()=>window.location.href="/contact":annualActive?()=>{track("shop_annual_start");window.location.href=annualPortalHref(v.sku)}:subscriptionActive?()=>{track("shop_subscription_start");window.location.href=subscriptionPortalHref(v.sku)}:handleAdd}>{SHOP_IS_PRELAUNCH?"Fragen zum Launch":annualActive?"Jahresplan im Konto starten":subscriptionActive?"Abo im Konto starten":"In den Warenkorb"}</button>
 <Link className="shop-grid-details" href={`/shop/${product.slug}`}>Produkt entdecken <span aria-hidden="true">→</span></Link>
+{product.slug===MATCHA_SLUG?<MatchaShopDetails product={product}/>:<section className="shop-accordion" aria-label={`${product.name}: Produktinformationen`}><div className="shop-accordion-inner home-rail">
+{product.description&&<details className="product-accordion"><summary><span>Produktdetails</span><span className="product-accordion-icon" aria-hidden="true"/></summary><div className="product-accordion-body"><p>{product.description}</p></div></details>}
+<details className="product-accordion"><summary><span>Versand &amp; Lieferung</span><span className="product-accordion-icon" aria-hidden="true"/></summary><div className="product-accordion-body"><Link href="/versand">Versandinformationen und Lieferzeiten</Link></div></details>
+</div></section>}
 </div></div>}
 
 /** Confirmed GLOA Matcha food information. Rendered only for the Matcha
  *  product itself - an accessory must never inherit any of this. */
 function MatchaShopDetails({product}:{product:CatalogProduct}){
-return <section className="shop-accordion"><div className="shop-accordion-inner home-rail">
+return <section className="shop-accordion" aria-label={`${product.name}: Produktinformationen`}><div className="shop-accordion-inner home-rail">
 <details className="product-accordion">
 <summary><span>Produktdetails &amp; Pflichtangaben</span><span className="product-accordion-icon" aria-hidden="true"/></summary>
 <div className="product-accordion-body">
@@ -920,7 +923,6 @@ return <main className="shop-page">
 <ShopProductBlock product={p} onAdd={onAdd} annualRequest={annualRequest}/>
 </article>)}
 </section>
-{shown.filter(p=>p.slug===MATCHA_SLUG).map(p=><div id="shop-matcha-disclosures" key={p.id}><MatchaShopDetails product={p}/></div>)}
 
 {hasAnnual&&<ShopAnnualPlan onChoose={()=>{setAnnualRequest(n=>n+1);document.getElementById("product")?.scrollIntoView({behavior:"smooth",block:"start"});track("shop_annual_select")}}/>}
 </main>}

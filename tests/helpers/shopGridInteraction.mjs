@@ -10,12 +10,13 @@ const {isSubscribableVariant,subscriptionPortalHref}=require('../../lib/subscrip
 export function shopGridInteraction(product,options={}){
  const state=[],items=[];let cursor=0;const navigation={location:{href:''}};
  const source=fs.readFileSync('app/GloaSite.tsx','utf8');
- const start=source.indexOf('function ShopProductBlock('),end=source.indexOf('/** Confirmed GLOA Matcha food information.',start);
+ const start=source.indexOf('function ShopProductBlock('),end=source.indexOf('/** Replaces the newsletter signup',start);
  const image=source.slice(source.indexOf('const SHOP_SECTION_IMAGE:'),source.indexOf('/**',source.indexOf('const SHOP_SECTION_IMAGE:')));
  const loadedModule={exports:{}};
  const code=ts.transpileModule(image+'\nexport '+source.slice(start,end),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
  vm.runInNewContext(code,{module:loadedModule,exports:loadedModule.exports,require,MATCHA_SLUG:'matcha',...presentation,
   useState:initial=>{const i=cursor++;if(!(i in state))state[i]=typeof initial==='function'?initial():initial;return [state[i],value=>{state[i]=typeof value==='function'?value(state[i]):value;}];},
+  PRODUCT:{storage:JSON.parse(fs.readFileSync('app/content.ts','utf8').match(/storage:\s*("(?:[^"\\]|\\.)*")/)[1])},
   useCart:()=>({addItem:item=>items.push(item)}),track:()=>{},window:navigation,
   fmtCents:c=>(c/100).toFixed(2).replace('.',','),per100gCents:(c,g)=>Math.round(c/g*100),
   PRICES_VISIBLE:!options.prelaunch,SHOP_IS_PRELAUNCH:!!options.prelaunch,isSubscribableVariant,subscriptionPortalHref,annualPortalHref,
