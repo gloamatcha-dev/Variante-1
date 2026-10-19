@@ -625,15 +625,18 @@ return <div className="purchase-mode" role="radiogroup" aria-label="Kaufoption w
  *  state, so several products on one page never share a selection. */
 function ShopProductBlock({product,onAdd,annualRequest=0}:{product:CatalogProduct;onAdd:()=>void;annualRequest?:number}){
 const {addItem}=useCart();
-const [idx,setIdx]=useState(0);
-const safe=Math.min(idx,product.variants.length-1);
+const [idx,setIdx]=useState(-1);
+const safe=Math.max(0,Math.min(idx,product.variants.length-1));
+const selected=product.variants.length===1||idx>=0;
+const prices=product.variants.map(variant=>variant.price_gross_cents);
+const lowest=Math.min(...prices),highest=Math.max(...prices);
 const v=product.variants[safe];
 const presentation=getProductPresentation(product.slug,v);
 const per100=showsUnitPricePer100g(v)?per100gCents(v.price_gross_cents,v.size_grams as number):null;
 const own=SHOP_SECTION_IMAGE[product.slug];
 const img=own??(getProductImage(product)?{src:getProductImage(product) as string,alt:product.name}:null);
 const sub=getProductSubtitle(product);
-const handleAdd=()=>{if(v.availability==="sold_out")return;addItem({productId:product.id,productName:product.name,productSlug:product.slug,variantId:v.id,label:v.label,grams:v.size_grams,purchaseType:"once",unitPriceCents:v.price_gross_cents});track("add_to_cart");onAdd()};
+const handleAdd=()=>{if(!selected||v.availability==="sold_out")return;addItem({productId:product.id,productName:product.name,productSlug:product.slug,variantId:v.id,label:v.label,grams:v.size_grams,purchaseType:"once",unitPriceCents:v.price_gross_cents});track("add_to_cart");onAdd()};
 
 // ONE-TIME IS THE DEFAULT, ALWAYS. A twelve-month prepaid commitment is
 // never something a customer arrives already opted into.
@@ -660,7 +663,7 @@ const subscriptionActive=mode==="subscription"&&subscribable;
 const [seenRequest,setSeenRequest]=useState(annualRequest);
 if(annualRequest!==seenRequest){
   setSeenRequest(annualRequest);
-  if(annual)setMode("annual");
+  if(annual){setIdx(safe);setMode("annual");}
 }
 // A mode whose product stopped offering it falls back rather than
 // rendering nothing. Derived during render for the same reason as
@@ -672,21 +675,21 @@ if((mode==="subscription"&&!subscribable)||(mode==="annual"&&!annual)){
 }
 
 return <div className="shop-product-row home-rail">
-{img&&<div className="shop-product-visual"><img src={img.src} alt={img.alt} width={img.width} height={img.height} loading="lazy"/></div>}
+<Link href={`/shop/${product.slug}`} className="shop-product-visual" aria-label={`${product.name} ansehen`}>{img?<img src={img.src} alt={img.alt} width={img.width??800} height={img.height??1000} sizes="(min-width: 1440px) 23vw, (min-width: 1080px) 30vw, (min-width: 560px) 46vw, 92vw" loading="lazy" decoding="async"/>:<span className="shop-image-placeholder">{product.name}</span>}</Link>
 <div className="shop-product-info"><p className="eyebrow shop-product-eyebrow">{getProductEyebrow(product)}</p><h2 className="shop-product-title"><Link href={`/shop/${product.slug}`} className="shop-product-link">{product.name.toUpperCase()}</Link></h2>
 {sub&&<p className="shop-product-sub">{sub}</p>}
 
-<VariantSelector product={product} selected={safe} onSelect={setIdx} name={`variant-${product.slug}`}/>
+<label className="shop-grid-variant" htmlFor={`variant-${product.id}`}>Variante<select id={`variant-${product.id}`} value={selected?v.id:""} onChange={event=>{const next=product.variants.findIndex(variant=>variant.id===event.target.value);if(next>=0)setIdx(next);}}><option value="" disabled>Variante auswählen</option>{product.variants.map(variant=><option key={variant.id} value={variant.id}>{variant.label}{variant.availability==="sold_out"?" · Ausverkauft":""}</option>)}</select></label>
 
-{(annual||subscribable)&&<PurchaseModeSelector mode={mode} onSelect={setMode} name={`mode-${product.slug}`} oncePriceCents={v.price_gross_cents} showSubscription={subscribable} showAnnual={annual!==null}/>}
+{selected&&(annual||subscribable)&&<PurchaseModeSelector mode={mode} onSelect={setMode} name={`mode-${product.slug}`} oncePriceCents={v.price_gross_cents} showSubscription={subscribable} showAnnual={annual!==null}/>}
 
 {annualActive&&annual
 ?<AnnualPlanPanel variant={v} annual={annual}/>
 :subscriptionActive
 ?<SubscriptionPlanPanel variant={v}/>
 :<>
-{PRICES_VISIBLE&&<p className="shop-product-price">{fmtCents(v.price_gross_cents)} €</p>}
-{PRICES_VISIBLE&&per100!==null&&<p className="shop-product-per100g">{fmtCents(per100)} € / 100 g</p>}
+{PRICES_VISIBLE&&<p className="shop-product-price" aria-live="polite">{selected?fmtCents(v.price_gross_cents):lowest===highest?fmtCents(lowest):`${fmtCents(lowest)} – ${fmtCents(highest)}`} €</p>}
+{PRICES_VISIBLE&&selected&&per100!==null&&<p className="shop-product-per100g">{fmtCents(per100)} € / 100 g</p>}
 {presentation.matchaNotIncludedNotice&&<p className="product-not-included">{presentation.matchaNotIncludedNotice}</p>}
 </>}
 
@@ -704,7 +707,11 @@ return <div className="shop-product-row home-rail">
     shop free of a second checkout implementation.
 
     In prelaunch every mode routes where every other shop CTA routes. */}
-{v.availability==="sold_out"&&<p role="status">AUSVERKAUFT</p>}<button className="cta shop-cta" disabled={v.availability==="sold_out"} onClick={SHOP_IS_PRELAUNCH?()=>window.location.href="/contact":annualActive?()=>{track("shop_annual_start");window.location.href=annualPortalHref(v.sku)}:subscriptionActive?()=>{track("shop_subscription_start");window.location.href=subscriptionPortalHref(v.sku)}:handleAdd}>{SHOP_IS_PRELAUNCH?"Fragen zum Launch":annualActive?"Jahresplan im Konto starten":subscriptionActive?"Abo im Konto starten":"In den Warenkorb"}</button>
+<p className="shop-grid-availability" role="status">{selected?(v.availability==="sold_out"?"AUSVERKAUFT":"Verfügbar"):product.variants.every(variant=>variant.availability==="sold_out")?"AUSVERKAUFT":"Varianten verfügbar"}</p>
+{product.slug===MATCHA_SLUG&&<a className="shop-grid-details" href="#shop-matcha-disclosures">Zutaten & Pflichtangaben</a>}
+<p className="shop-grid-tax">{PRICES_VISIBLE?"Inkl. MwSt., zzgl.":"Informationen zu"} <Link href="/versand">Versand</Link></p>
+<button type="button" className="cta shop-cta" disabled={!selected||v.availability==="sold_out"} onClick={SHOP_IS_PRELAUNCH?()=>window.location.href="/contact":annualActive?()=>{track("shop_annual_start");window.location.href=annualPortalHref(v.sku)}:subscriptionActive?()=>{track("shop_subscription_start");window.location.href=subscriptionPortalHref(v.sku)}:handleAdd}>{SHOP_IS_PRELAUNCH?"Fragen zum Launch":annualActive?"Jahresplan im Konto starten":subscriptionActive?"Abo im Konto starten":"In den Warenkorb"}</button>
+<Link className="shop-grid-details" href={`/shop/${product.slug}`}>Produkt entdecken <span aria-hidden="true">→</span></Link>
 </div></div>}
 
 /** Confirmed GLOA Matcha food information. Rendered only for the Matcha
@@ -908,12 +915,12 @@ return <main className="shop-page">
 <ShopHero lead={SHOP_HERO_LEAD} price={PRICES_VISIBLE?<p className="shop-hero-price">AB {fmtCents(lowestCents)} €</p>:null}/>
 {SHOP_IS_PRELAUNCH&&<ShopLaunchStrip/>}
 
-<section id="product" className="shop-products">
+<section id="product" className="shop-products" data-count={shown.length} aria-label="Produkte">
 {shown.map(p=><article key={p.id} id={`product-${p.slug}`} className="shop-column">
 <ShopProductBlock product={p} onAdd={onAdd} annualRequest={annualRequest}/>
-{p.slug===MATCHA_SLUG&&<MatchaShopDetails product={p}/>}
 </article>)}
 </section>
+{shown.filter(p=>p.slug===MATCHA_SLUG).map(p=><div id="shop-matcha-disclosures" key={p.id}><MatchaShopDetails product={p}/></div>)}
 
 {hasAnnual&&<ShopAnnualPlan onChoose={()=>{setAnnualRequest(n=>n+1);document.getElementById("product")?.scrollIntoView({behavior:"smooth",block:"start"});track("shop_annual_select")}}/>}
 </main>}
@@ -974,14 +981,14 @@ return <GenericProductPage product={product} addItem={addItem} onAdd={onAdd} pri
  * belong to ShopProductBlock, which takes over on hydration.
  */
 function ShopSeedProducts({seed}:{seed:SeedCatalogProduct[]}){
-return <section id="product" className="shop-products">{seed.map(p=>{
+return <section id="product" className="shop-products" data-count={seed.length} aria-label="Produkte">{seed.map(p=>{
 const own=SHOP_SECTION_IMAGE[p.slug];
 const img=own??(getProductImage(p)?{src:getProductImage(p) as string,alt:p.name}:null);
 const sub=getProductSubtitle(p);
 const sizes=p.variants.map(v=>v.label).join(" · ");
 return <article key={p.id} id={`product-${p.slug}`} className="shop-column">
 <div className="shop-product-row home-rail">
-{img&&<div className="shop-product-visual"><img src={img.src} alt={img.alt} width={img.width} height={img.height} loading="lazy"/></div>}
+<Link href={`/shop/${p.slug}`} className="shop-product-visual" aria-label={`${p.name} ansehen`}>{img?<img src={img.src} alt={img.alt} width={img.width??800} height={img.height??1000} sizes="(min-width: 1440px) 23vw, (min-width: 1080px) 30vw, (min-width: 560px) 46vw, 92vw" loading="lazy" decoding="async"/>:<span className="shop-image-placeholder">{p.name}</span>}</Link>
 <div className="shop-product-info">
 <p className="eyebrow shop-product-eyebrow">{getProductEyebrow(p)}</p>
 <h2 className="shop-product-title"><Link href={`/shop/${p.slug}`} className="shop-product-link">{p.name.toUpperCase()}</Link></h2>

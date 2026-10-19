@@ -82,7 +82,7 @@ test("shop: the anti-newsletter band is a homepage statement, not a shop one", a
   // element is now the annual-plan band - a purchase section rather than
   // a marketing sign-up, see tests/shop-annual-plan.test.mjs - and
   // </main> follows it directly.
-  assert.match(fn("Shop"), /<\/article>\)\}\n<\/section>\n\n\{hasAnnual&&<ShopAnnualPlan[\s\S]*?\/>\}\n<\/main>\}/);
+  assert.match(fn("Shop"), /<\/article>\)\}\n<\/section>\n\{shown\.filter\(p=>p\.slug===MATCHA_SLUG\)\.map\(p=><div id="shop-matcha-disclosures" key=\{p.id\}><MatchaShopDetails product=\{p\}\/><\/div>\)\}\n\n\{hasAnnual&&<ShopAnnualPlan[\s\S]*?\/>\}\n<\/main>\}/);
   assert.equal([...fn("Shop").matchAll(/<section/g)].length, 1,
     "the shop composition grew another inline section");
 });

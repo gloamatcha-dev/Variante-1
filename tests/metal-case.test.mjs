@@ -297,19 +297,19 @@ test("checkout: no fabricated size_grams metadata reaches Stripe", () => {
 
 /* -- Shop composition (Task 27E) ----------------------------- */
 
-test("shop: the section lists one product per row, and the case is only hidden", () => {
+test("shop: the approved responsive grid still withholds the Metal Case", () => {
   const site = readFileSync(path.join(ROOT, "app/GloaSite.tsx"), "utf-8");
   const css = readFileSync(path.join(ROOT, "app/globals.css"), "utf-8");
-  // WAS: a 1fr 1fr grid putting the two products side by side. With the
-  // case withheld one half was simply empty, so the section is block
-  // flow now - one <article> per listed product, each its own row.
+  // One article per publicly listed product; no permanently empty case column.
   assert.match(site, /className="shop-products"/);
   assert.match(site, /className="shop-column"/);
-  assert.match(css, /\.shop-products\{[\s\S]*?display:block/);
-  assert.ok(!/\.shop-products\{[^}]*grid-template-columns/.test(css), "the split panel came back");
+  const grid = css.slice(css.indexOf('/* Premium catalogue grid:'));
+  assert.match(grid, /\.shop-page \.shop-products\{display:grid/);
+  for (const columns of [2,3,4]) assert.ok(grid.includes(`grid-template-columns:repeat(${columns},minmax(0,1fr))`));
+  assert.match(grid, /\.shop-products\[data-count="1"\][^}]*justify-content:center/);
   assert.ok(!css.includes(".shop-products::before"), "the centre divider came back");
-  // Inside a row: a contained image beside the purchase column.
-  assert.match(css, /\.shop-product-row\{[\s\S]*?grid-template-columns:minmax\(280px,\.85fr\) minmax\(0,1\.15fr\)/);
+  assert.match(grid, /\.shop-product-row\{[^}]*flex-direction:column/);
+  assert.match(grid, /aspect-ratio:4\/5/);
 
   // ── THE CASE IS HIDDEN, NOT DELETED ──────────────────────────
   // The list moved out of this component into lib/catalogAvailability.ts
@@ -331,7 +331,7 @@ test("shop: the section lists one product per row, and the case is only hidden",
   assert.match(css, /\.shop-column\[id\$="metal-case"\]/, "the case's own presentation rule was removed");
 });
 
-test("shop: the Matcha details accordion belongs to the Matcha column and starts collapsed", () => {
+test("shop: the collapsed food disclosures belong only to Matcha below the grid", () => {
   const site = readFileSync(path.join(ROOT, "app/GloaSite.tsx"), "utf-8");
   // Native details/summary: keyboard accessible, and the content stays in
   // the DOM rather than being hidden behind JS.
@@ -340,8 +340,8 @@ test("shop: the Matcha details accordion belongs to the Matcha column and starts
   // Task 28A renamed the summary so the LMIV mandatory particulars are
   // "clearly identified" (Art. 14(1)(a)) rather than merely implied.
   assert.match(site, /<summary><span>Produktdetails &amp; Pflichtangaben<\/span>/);
-  // Rendered inside the product loop, next to its own product.
-  assert.match(site, /p\.slug===MATCHA_SLUG&&<MatchaShopDetails product=\{p\}\/>/);
+  assert.match(site, /shown\.filter\(p=>p\.slug===MATCHA_SLUG\)\.map\(p=><div id="shop-matcha-disclosures" key=\{p.id\}><MatchaShopDetails product=\{p\}\/>/);
+  assert.match(site, /product\.slug===MATCHA_SLUG&&<a[^>]*href="#shop-matcha-disclosures">Zutaten & Pflichtangaben/);
 });
 
 test("shop: no newsletter component or anchor survives in the site source", () => {

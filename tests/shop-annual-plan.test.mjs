@@ -272,7 +272,7 @@ test("4: one-time is the default and all three modes exist", () => {
   assert.ok(shopCode.includes(">Jahresplan<"), "the annual option label changed");
   // The selector appears where EITHER plan exists, and each option is
   // gated on its own eligibility rather than on the other's.
-  assert.ok(site.includes("{(annual||subscribable)&&<PurchaseModeSelector"),
+  assert.ok(site.includes("{selected&&(annual||subscribable)&&<PurchaseModeSelector"),
     "the selector no longer tracks both plans");
   assert.ok(site.includes("showSubscription={subscribable}"), "the 4-week option lost its own gate");
   assert.ok(site.includes("showAnnual={annual!==null}"), "the annual option lost its own gate");
@@ -306,7 +306,7 @@ test("4c: switching size or mode leaves nothing stale", () => {
   // object, so a subscription panel can never stand in for an annual one.
   assert.ok(site.includes("{annualActive&&annual\n?<AnnualPlanPanel"), "the mode no longer switches the panel");
   assert.ok(site.includes(":subscriptionActive\n?<SubscriptionPlanPanel"), "the 4-week panel lost its branch");
-  assert.ok(site.includes('<p className="shop-product-price">{fmtCents(v.price_gross_cents)} €</p>'),
+  assert.ok(site.includes('selected?fmtCents(v.price_gross_cents)'),
     "the ordinary one-time price display changed");
   // No effect-driven state, so no cascading render on mode change.
   assert.ok(!/useEffect\(\(\)=>\{if\(mode/.test(site), "the mode is synchronised in an effect");

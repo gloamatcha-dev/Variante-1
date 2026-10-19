@@ -75,7 +75,7 @@ test("2: the price comes from the catalog, and the CTA still scrolls to the prod
   assert.ok(!/AB 9,99|9\.99|999/.test(hero + shop), "a price was hard-coded");
   // The existing anchor and the existing analytics event, unchanged.
   assert.match(hero, /<Link className="cta shop-hero-cta" href="#product" onClick=\{\(\)=>track\("shop_scroll_product"\)\}>/);
-  assert.match(shop, /<section id="product" className="shop-products">/);
+  assert.match(shop, /<section id="product" className="shop-products" data-count=\{shown.length\} aria-label="Produkte">/);
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -97,7 +97,8 @@ test("3: the hero is type only, and nothing was deleted to make it so", () => {
   // The block still receives the product and the cart callback; the third
   // prop is the annual-plan selection request from the band below it.
   assert.match(shop, /<ShopProductBlock product=\{p\} onAdd=\{onAdd\} annualRequest=\{annualRequest\}\/>/);
-  assert.match(shop, /\{p\.slug===MATCHA_SLUG&&<MatchaShopDetails product=\{p\}\/>\}/);
+  assert.match(shop, /shown\.filter\(p=>p\.slug===MATCHA_SLUG\)\.map\(p=><div id="shop-matcha-disclosures" key=\{p.id\}><MatchaShopDetails product=\{p\}\/>/);
+  assert.ok(shop.indexOf('id="shop-matcha-disclosures"') > shop.indexOf('</section>'), "food disclosures must follow the grid");
   // The anti-newsletter band is deliberately NOT part of the shop
   // composition any more - tests/shop-render.test.mjs owns that contract
   // and proves the component and its other two pages are untouched.

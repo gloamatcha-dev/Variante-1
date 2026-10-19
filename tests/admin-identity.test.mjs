@@ -885,7 +885,10 @@ test("9h: this package changed nothing else", () => {
   // before this package; what matters is that THIS package added none and
   // that its own rules are additive. Asserted as "the admin blocker owns
   // no media query" rather than as a global ban that was never true.
-  const added = css.slice(css.indexOf("THE ADMIN IS A DESKTOP TOOL"));
+  const start = css.indexOf("THE ADMIN IS A DESKTOP TOOL");
+  const end = css.indexOf("THE ACTIVITY VIEW", start);
+  assert.ok(start >= 0 && end > start, "desktop-only CSS section boundaries missing");
+  const added = css.slice(start, end);
   assert.ok(!added.includes("@media"),
     "the desktop-only block introduced a media query instead of rendering a screen");
   // The gate is the COMPONENT's decision, not CSS hiding loaded markup.

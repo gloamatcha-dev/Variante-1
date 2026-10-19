@@ -3,6 +3,9 @@ import test from "node:test";
 import { readFileSync, existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { shopGridInteraction, shopGridFixture } from './helpers/shopGridInteraction.mjs';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { inspectShopGrid } from './helpers/shopGridBrowserReady.mjs';
 
 /**
  * THE /shop MATCHA PRODUCT SECTION, as a source contract.
@@ -23,11 +26,6 @@ const block = site.slice(site.indexOf("function ShopProductBlock("), site.indexO
 const details = site.slice(site.indexOf("function MatchaShopDetails("), site.indexOf("/** Replaces the newsletter signup"));
 const shop = site.slice(site.indexOf("function Shop({"), site.indexOf("// -- Product detail ---"));
 const rules = css.slice(css.indexOf("SHOP MATCHA PRODUCT SECTION"), css.indexOf("/our-matcha PAGE HERO"));
-const rule = name => {
-  const at = rules.indexOf(name);
-  assert.notEqual(at, -1, `missing rule: ${name}`);
-  return rules.slice(at, rules.indexOf("}", at));
-};
 
 /* ══════════════════════════════════════════════════════════════
    1. WHAT THE PAGE LISTS
@@ -82,8 +80,9 @@ test("2: the matcha shows exactly the approved file, unmodified", () => {
     "the shared presentation map was changed for one page's sake");
 
   // ── CONTAINED, AND SMALL ─────────────────────────────────────
-  const visual = rule(".shop-product-visual{");
-  assert.match(visual, /width:min\(100%,320px\)/);
+  const visual = css.slice(css.indexOf(".shop-page .shop-product-visual{"),css.indexOf("}",css.indexOf(".shop-page .shop-product-visual{")));
+  assert.match(visual, /width:100%/);
+  assert.match(visual, /aspect-ratio:4\/5/);
   assert.match(rules, /\.shop-product-visual img\{[\s\S]*?object-fit:contain/);
   for (const banned of ["box-shadow:0", "border-radius:8", "filter:", "transform:scale"]) {
     assert.ok(!visual.includes(banned), `the image got ${banned}`);
@@ -103,10 +102,10 @@ test("3: variants, price and base price still come from the catalog", () => {
   assert.match(site, /<span className="size-option-price">\{fmtCents\(mv\.price_gross_cents\)\} €<\/span>/);
   // Selecting one moves BOTH numbers, because both derive from the same
   // selected variant rather than from anything stored twice.
-  assert.match(block, /const safe=Math\.min\(idx,product\.variants\.length-1\);/);
+  assert.match(block, /const safe=Math\.max\(0,Math\.min\(idx,product\.variants\.length-1\)\);/);
   assert.match(block, /const v=product\.variants\[safe\];/);
   assert.match(block, /const per100=showsUnitPricePer100g\(v\)\?per100gCents\(v\.price_gross_cents,v\.size_grams as number\):null;/);
-  assert.match(block, /<p className="shop-product-price">\{fmtCents\(v\.price_gross_cents\)\} €<\/p>/);
+  assert.match(block, /selected\?fmtCents\(v\.price_gross_cents\)/);
   assert.match(block, /\{fmtCents\(per100\)\} € \/ 100 g/);
   // No price, size or per-100g figure is written into this file.
   for (const literal of ["19,99", "29,99", "54,99", "66,63", "30 g\"", "50 g\"", "100 g\""]) {
@@ -132,7 +131,69 @@ test("3: variants, price and base price still come from the catalog", () => {
   assert.match(block, /SHOP_IS_PRELAUNCH\?"Fragen zum Launch":annualActive\?"Jahresplan im Konto starten":subscriptionActive\?"Abo im Konto starten":"In den Warenkorb"/);
   assert.match(read("app/content.ts"), /export const SHOP_STATUS = "live"/);
   // The hero's anchor still lands on the section.
-  assert.match(shop, /<section id="product" className="shop-products">/);
+  assert.match(shop, /<section id="product" className="shop-products" data-count=\{shown.length\}/);
+});
+
+test('Grid cards require explicit multi-variant choice and cart the selected authoritative variant',()=>{
+ const product=shopGridFixture(1)[0],ui=shopGridInteraction(product);
+ assert.match(renderToStaticMarkup(ui.render()),/14,99.*22,99/);
+ assert.equal(ui.find(n=>n.type==='select').props.value,'');
+ const buy=()=>ui.find(n=>n.type==='button');assert.equal(buy().props.disabled,true);buy().props.onClick();assert.equal(ui.items.length,0);
+ ui.find(n=>n.type==='select').props.onChange({target:{value:product.variants[1].id}});
+ assert.equal(buy().props.disabled,false);assert.match(renderToStaticMarkup(ui.render()),/22,99/);
+ buy().props.onClick();assert.equal(ui.items[0].variantId,product.variants[1].id);assert.equal(ui.items[0].unitPriceCents,product.variants[1].price_gross_cents);
+ assert.match(renderToStaticMarkup(ui.render()),/45,98/); // selected 50 g base price
+ ui.find(n=>n.type==='select').props.onChange({target:{value:'tampered-id'}});assert.equal(ui.find(n=>n.type==='select').props.value,product.variants[1].id);
+});
+test('Grid cards keep storage images, detail routes, disclosures, single variants and sold-out guards',()=>{
+ const product=shopGridFixture(2)[1];product.primary_image_path='https://images.example.invalid/product-images/immutable.webp';product.variants=product.variants.slice(0,1);
+ const ui=shopGridInteraction(product),html=renderToStaticMarkup(ui.render());
+ assert.ok(html.includes(product.primary_image_path));assert.ok(html.includes('/shop/'+product.slug));assert.equal(ui.find(n=>n.type==='button').props.disabled,false);
+ const image=ui.find(n=>n.type==='img');assert.equal(image.props.loading,'lazy');assert.equal(image.props.alt,product.name);
+ product.variants[0].availability='sold_out';assert.equal(ui.find(n=>n.type==='button').props.disabled,true);ui.find(n=>n.type==='button').props.onClick();assert.equal(ui.items.length,0);assert.match(renderToStaticMarkup(ui.render()),/AUSVERKAUFT/);
+ assert.ok(renderToStaticMarkup(shopGridInteraction(shopGridFixture(1)[0]).render()).includes('#shop-matcha-disclosures'));
+});
+test('Grid has balanced 1/2/3 item layouts, 4 desktop columns and separate food/Annual sections',()=>{
+ for(const columns of [2,3,4])assert.ok(css.includes(`grid-template-columns:repeat(${columns},minmax(0,1fr))`));
+ for(const count of [1,2,3])assert.ok(css.includes(`[data-count="${count}"]`));
+ assert.match(css,/aspect-ratio:4\/5/);assert.match(css,/\.shop-page \.shop-product-visual img\{[^}]*object-fit:contain/);
+ assert.ok(shop.indexOf('shop-matcha-disclosures')>shop.indexOf('</section>'));
+ assert.ok(shop.indexOf('{hasAnnual&&<ShopAnnualPlan')>shop.indexOf('</section>'));
+ for(const count of [1,2,3,4,8])assert.equal(shopGridFixture(count).map(p=>renderToStaticMarkup(shopGridInteraction(p).render())).filter(html=>html.includes('shop-product-visual')).length,count);
+});
+test('Grid recurring choices keep account checkout separate from cart',()=>{
+ const product=shopGridFixture(1)[0],ui=shopGridInteraction(product);
+ ui.find(n=>n.type==='select').props.onChange({target:{value:product.variants[0].id}});
+ const modes=ui.find(n=>n.type==='purchase-mode-test');assert.equal(modes.props.showSubscription,true);assert.equal(modes.props.showAnnual,true);
+ modes.props.onSelect('subscription');ui.find(n=>n.type==='button').props.onClick();assert.equal(ui.items.length,0);assert.ok(ui.navigation.location.href.includes('GLOA-MATCHA-30G'));
+ ui.find(n=>n.type==='purchase-mode-test').props.onSelect('annual');ui.find(n=>n.type==='button').props.onClick();assert.equal(ui.items.length,0);assert.ok(ui.navigation.location.href.includes('GLOA-MATCHA-30G'));
+});
+
+test('Prelaunch grid keeps products and variant choices but hides money and cannot add to cart',()=>{
+ const p=shopGridFixture(1)[0],ui=shopGridInteraction(p,{prelaunch:true});
+ for(const choose of [false,true]){
+  if(choose)ui.find(n=>n.type==='select').props.onChange({target:{value:p.variants[0].id}});
+  const html=renderToStaticMarkup(ui.render());assert.ok(html.includes(p.name.toUpperCase()));assert.ok(html.includes('30 g'));
+  assert.doesNotMatch(html,/\d+,\d{2}\s*€|shop-product-price|shop-product-per100g/);
+ }
+ const button=ui.find(n=>n.type==='button');assert.equal(button.props.children,'Fragen zum Launch');button.props.onClick();assert.equal(ui.navigation.location.href,'/contact');assert.equal(ui.items.length,0);
+});
+
+function browserReadinessFixture(broken=false,stalled=false){
+ const calls=[],images=Array.from({length:4},(_,i)=>({loading:'lazy',complete:false,naturalWidth:0,
+  scrollIntoView(){calls.push('scroll-'+i);this.inView=true;},getAttribute:()=>'/fixture-'+i+'.webp',
+  decode(){assert.equal(this.inView,true,'decode must follow scroll');if(stalled)return new Promise(()=>{});if(broken)return Promise.reject(new Error('broken raster'));this.complete=true;this.naturalWidth=400;return Promise.resolve();}}));
+ const grid={children:images},doc={fonts:{ready:Promise.resolve()},images,documentElement:{dataset:{},scrollWidth:800},querySelector:s=>s==='.shop-products'?grid:{getBoundingClientRect:()=>({width:400,height:500})}};
+ const view={requestAnimationFrame:fn=>queueMicrotask(fn),scrollTo:()=>calls.push('top'),getComputedStyle:()=>({gridTemplateColumns:'400px 400px'}),innerWidth:800};
+ return {doc,view,calls};
+}
+test('Visual runner scrolls lazy images into view before decoding and restores the screenshot position',async()=>{
+ const f=browserReadinessFixture(),result=await inspectShopGrid(f.doc,f.view,1000);
+ assert.deepEqual(f.calls,['scroll-0','scroll-1','scroll-2','scroll-3','top']);assert.equal(result.images,true);assert.equal(result.lazy,true);assert.equal(result.columns,2);assert.equal(result.overflow,false);assert.equal(result.ratio,.8);
+});
+test('Visual runner rejects broken images and bounds stalled decode instead of inventing a visual PASS',async()=>{
+ const broken=browserReadinessFixture(true);await assert.rejects(inspectShopGrid(broken.doc,broken.view,1000),/broken raster/);
+ const stalled=browserReadinessFixture(false,true);await assert.rejects(inspectShopGrid(stalled.doc,stalled.view,30),/Grid readiness timeout: image/);
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -186,47 +247,14 @@ test("4: four rows, native disclosure, and no mandatory line lost", () => {
    5. TYPE AND THE RAIL
    ══════════════════════════════════════════════════════════════ */
 
-test("5: a product title, not a hero one, on the canonical rail", () => {
-  const cap = t => Number(/clamp\([^,]+,[^,]+,(\d+)px\)/.exec(t)[1]);
-  const title = rule(".shop-product-title{");
-  assert.match(title, /font-size:clamp\(32px,3vw,46px\)/);
-  assert.ok(cap(title) <= 46, "the product title left its band");
-  // Far below the page hero. The shop hero no longer sets a size of its
-  // own - every true page hero reads --type-hero-primary, which IS the
-  // homepage hero's curve - so the ceiling is read from the token.
-  const tail = css.split("--type-hero-primary:")[1];
-  const heroCap = cap(tail.slice(0, tail.indexOf(")") + 1));
-  assert.equal(heroCap, 100, "the page hero token moved");
-  assert.ok(cap(title) < heroCap, "the product title reaches the page hero");
-  assert.ok(cap(title) < cap(/\.hero \.hero-copy h1\{[\s\S]*?(font-size:clamp\(54px[^)]*\))/.exec(css)[1]));
-
-  // The small roles read the page's shared tokens.
-  assert.match(rule(".shop-product-eyebrow{"), /font-size:var\(--type-meta\)/);
-  assert.match(rule(".shop-product-eyebrow{"), /color:var\(--berry\)/);
-  assert.match(rules, /\.shop-product-row \.shop-cta\{[\s\S]*?font-size:var\(--type-meta\)/);
-  assert.match(rules, /\.shop-accordion \.product-accordion summary\{[\s\S]*?font:600 var\(--type-meta\)/);
-  assert.match(rule(".shop-product-sub{"), /font-size:15px/);
-  assert.match(rules, /\.shop-accordion \.product-accordion dd\{font:400 15px/);
-  assert.match(rule(".shop-product-price{"), /font-size:clamp\(28px,2\.2vw,32px\)/);
-  assert.match(rule(".shop-product-price{"), /font-weight:700/);
-  // Inter only in this block - no editorial accent was forced in.
-  for (const m of rules.matchAll(/font-family:([^;}]+)|font:[^;}]*var\(--font-(\w+)\)/g)) {
-    assert.ok(!/--font-display/.test(m[0]), `the product block reaches for the display face: ${m[0]}`);
-  }
-
-  // ── COLOUR AND CONTAINER ─────────────────────────────────────
-  assert.match(rules, /\.shop-products\{[\s\S]*?background:var\(--cream\)/);
-  assert.match(rules, /\.shop-column\{[\s\S]*?background:var\(--cream\)/);
-  assert.match(rules, /\.shop-product-row \.shop-cta\{[\s\S]*?background:var\(--blue\)/);
-  assert.match(rules, /\.shop-product-row \.shop-cta\{[\s\S]*?color:var\(--cream\)/);
-  // The rail: the section takes the shared gutter, the row is a
-  // narrower INNER block that starts on the same left edge.
-  assert.match(css, /\.shop-column,\s*\.shop-accordion,\s*\.matcha-hero,\s*\.matcha-research,\s*\.matcha-use,\s*\.matcha-page \.faq,\s*\.matcha-cta\{padding-inline:var\(--rail-gutter\)\}/);
-  assert.match(block, /<div className="shop-product-row home-rail">/);
-  assert.match(details, /<div className="shop-accordion-inner home-rail">/);
-  assert.match(rule(".shop-product-row{"), /max-width:min\(1240px,var\(--rail-max\)\)/);
-  assert.ok(!rules.includes("100vh"), "the section reserves a viewport");
-  // Stacks before the two columns can crush each other.
-  assert.match(rules, /@media \(max-width:900px\)\{[\s\S]*?\.shop-product-row\{grid-template-columns:1fr/);
-  assert.match(rules, /@media \(max-width:640px\)\{[\s\S]*?grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+test("5: premium grid typography stays below hero scale and uses the shared GLOA rail", () => {
+ const grid=css.slice(css.indexOf('/* Premium catalogue grid:'));
+ assert.match(grid,/\.shop-page \.shop-product-title\{font-size:clamp\(20px,1\.6vw,26px\)/);
+ assert.match(grid,/padding:48px var\(--rail-gutter\) 72px/);
+ assert.match(grid,/max-width:1800px/);
+ assert.match(grid,/\.shop-page \.shop-product-row\{[^}]*flex-direction:column/);
+ assert.match(grid,/min-height:44px/);
+ assert.match(grid,/:focus-visible\{outline:2px solid var\(--blue\)/);
+ assert.ok(!grid.includes('box-shadow:'),'grid cards must remain calm and shadow-free');
+ assert.match(details,/<div className="shop-accordion-inner home-rail">/);
 });

@@ -295,7 +295,7 @@ test("2c: only the price is gated - the rest of a product block is not", () => {
   const card = site.slice(site.indexOf("function ShopProductBlock("),
                           site.indexOf("function MatchaShopDetails("));
   for (const kept of ['className="shop-product-title"', 'className="eyebrow shop-product-eyebrow"',
-                      'className="shop-product-sub"', "<VariantSelector product={product}",
+                      'className="shop-product-sub"', 'className="shop-grid-variant"', '<select id={`variant-${product.id}`}',
                       "Fragen zum Launch"]) {
     assert.ok(card.includes(kept), `the gate swallowed more than the price: ${kept}`);
   }
