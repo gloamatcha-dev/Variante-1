@@ -4,11 +4,19 @@ import { getStripeClient } from '../../../../lib/stripe';
 import { isProductUuid, validateProductDraft } from '../../../../lib/productManagerRules';
 import { synchronizeProduct, type SyncProduct } from '../../../../lib/productStripeSync';
 import { canWrite } from '../../../../lib/adminRoles';
+import { uploadProductImage } from '../../../../lib/productImageUpload';
 
 export async function POST(request: Request): Promise<Response> {
   // Auth before reading a bounded form payload. Viewer reads are explicitly supported.
   const gate = await requireAdminIdentity(request, "read");
   if (!gate.ok) return gate.response;
+  if (new URL(request.url).searchParams.get('action') === 'upload-image') {
+    const uploadGate = await requireAdminIdentity(request, "write");
+    if (!uploadGate.ok) return uploadGate.response;
+    const storageAdmin = getSupabaseAdmin();
+    if (!storageAdmin) return Response.json({ error: 'Bild-Upload nicht verfügbar.' }, { status: 503 });
+    return uploadProductImage(request, storageAdmin, uploadGate.session.userId);
+  }
   const admin = getSupabaseAdmin();
   if (!admin) return Response.json({ error: 'Katalog nicht verfügbar.' }, { status: 503 });
   try {

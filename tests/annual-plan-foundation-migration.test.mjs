@@ -1683,6 +1683,8 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
   // unchanged. They are listed so an edit to them is reviewed rather than
   // silent, exactly like the two API routes above.
   const ALLOWED_APP_EDITS = [
+    // Reviewed Product Manager UX: image upload and explicit variant price/tax inputs.
+    'app/AdminProducts.tsx', 'app/api/admin/products/route.ts',
     'app/AdminPortalShell.tsx', 'app/admin-portal.css', 'app/useCatalog.ts', 'app/api/checkout/session/route.ts',
     // PACKAGE 5C edits it again, additively: a B2B branch ahead of the
     // three existing ones in each checkout.session.* arm, and a B2B

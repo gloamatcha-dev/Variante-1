@@ -24,12 +24,21 @@ mock.adapter.checkout={sessions:{create:async(body,options)=>{
  if(sessions.has(options.idempotencyKey))return sessions.get(options.idempotencyKey);
  const session={id:'cs_local'+namespace+sessions.size,url:'https://checkout.example.invalid/local',body};sessions.set(options.idempotencyKey,session);return session;
 },retrieve:async id=>[...sessions.values()].find(s=>s.id===id)}};
-const harness=await productLocalHarness(db,mock.adapter,Object.values(actors).map(a=>a.email)),results=[];
+const imageObjects=new Map(),privateImages=new Map();
+const storage={getBucket:async name=>({data:{public:name==='product-images',file_size_limit:50*1024*1024,allowed_mime_types:['image/jpeg','image/png','image/webp']}}),from:()=>({
+ createSignedUploadUrl:async path=>({data:{signedUrl:'https://storage.example.invalid/'+path}}),
+ download:async path=>({data:privateImages.has(path)?new Blob([privateImages.get(path)],{type:'image/png'}):null}),
+ remove:async paths=>{paths.forEach(p=>privateImages.delete(p));return {error:null};},
+ upload:async(path,bytes,options)=>{assert.equal(options.upsert,false);assert.ok(!imageObjects.has(path));imageObjects.set(path,bytes);return {error:null};},
+ getPublicUrl:path=>({data:{publicUrl:'https://images.example.invalid/product-images/'+path}}),
+})};
+const harness=await productLocalHarness(db,mock.adapter,Object.values(actors).map(a=>a.email),storage),results=[];
+let uploadedImage;
 const session=harness.load('lib/adminSession.ts');
 const cookies=Object.fromEntries(Object.entries(actors).map(([role,a])=>[role,session.ADMIN_SESSION_COOKIE+'='+session.issueAdminSession(a.id,a.email,Date.now(),harness.sessionSecret)]));
 const api=createServer(async(req,res)=>{try{const bytes=[];for await(const chunk of req)bytes.push(chunk);const routes={'/api/admin/products':'app/api/admin/products/route.ts','/api/checkout/session':'app/api/checkout/session/route.ts'};if(!routes[req.url]){res.writeHead(404);res.end();return;}const r=await harness.load(routes[req.url]).POST(new Request('http://127.0.0.1:18185'+req.url,{method:req.method,headers:req.headers,body:Buffer.concat(bytes).toString()}));res.writeHead(r.status,Object.fromEntries(r.headers));res.end(await r.text());}catch(error){res.writeHead(500);res.end(JSON.stringify({error:String(error)}));}});
 await new Promise(r=>api.listen(18185,'127.0.0.1',r));
-const call=async(route,body,role='owner')=>{const r=await harness.fetch('http://127.0.0.1:18185/api/'+route,{method:'POST',headers:{'Content-Type':'application/json',...(cookies[role]?{cookie:cookies[role]}:{})},body:JSON.stringify(body)});return {status:r.status,data:await r.json()};};
+const call=async(route,body,role='owner')=>{const r=await harness.fetch('http://127.0.0.1:18185/api/'+route,{method:'POST',headers:{'Content-Type':'application/json','Connection':'close',...(cookies[role]?{cookie:cookies[role]}:{})},body:JSON.stringify(body)});return {status:r.status,data:await r.json()};};
 const action=(kind,p,extra={})=>call('admin/products',{action:kind,id:p.id,revision:p.stripe_sync_revision??0,operationId:randomUUID(),...extra});
 const get=id=>JSON.parse(sql(`select to_jsonb(p)||jsonb_build_object('product_variants',(select jsonb_agg(to_jsonb(v) order by sort_order) from product_variants v where v.product_id=p.id)) from products p where id='${id}'`));
 const catalogue=()=>harness.load('lib/catalogProducts.ts').lookupCatalogSeed();
@@ -42,6 +51,20 @@ function document(type,label){return {name:label,slug:'local-'+randomUUID().slic
  variants:(type==='MERCH'?['White / S','White / M','White / L','Blue / S','Blue / M','Blue / L']:[label]).map((label,n)=>({id:randomUUID(),sku:'LOCAL-'+randomUUID().slice(0,8).toUpperCase(),label,size_grams:null,price_gross_cents:2999+n,currency:'EUR',tax_category:'general_goods_de',availability:'available',inventory_item_id:type==='MERCH'&&n===0?inventoryId:null,is_active:true,sort_order:n}))};}
 const checkout=(p,extra={})=>call('checkout/session',{requestId:randomUUID(),items:[{variantId:p.product_variants[0].id,quantity:1}],shippingCountry:'DE',email:'buyer-'+randomUUID()+'@example.invalid',...extra},'anonymous');
 try{
+ await check('Admin-only raster upload, replacement, signature/size denial and no catalogue or Stripe changes',async()=>{
+  const before=snapshot(db),products=mock.products.size,prices=mock.prices.size;
+  const png=fs.readFileSync('public/gloa-logo-blue-600.png');
+  const control=(body,role='owner')=>harness.load('app/api/admin/products/route.ts').POST(new Request('http://127.0.0.1:18185/api/admin/products?action=upload-image',{method:'POST',headers:{'Content-Type':'application/json','Connection':'close',...(cookies[role]?{cookie:cookies[role]}:{})},body:JSON.stringify({phase:'prepare',mime:'image/png',size:png.length,...body})}));
+  assert.equal((await control({},'anonymous')).status,401);assert.equal((await control({},'viewer')).status,403);
+  assert.equal((await control({mime:'image/svg+xml'})).status,415);
+  assert.equal((await control({size:5*1024*1024+1})).status,413);
+  const upload=async(bytes,role='owner')=>{const prepared=await control({},role);assert.equal(prepared.status,200);const {path}=await prepared.json();privateImages.set(path,bytes);return control({phase:'complete',path},role);};
+  assert.equal((await upload(Buffer.from('<svg/>'))).status,400);
+  let r=await upload(png);assert.equal(r.status,200);const old=(await r.json()).url;
+  r=await upload(png,'admin');assert.equal(r.status,200);uploadedImage=(await r.json()).url;
+  assert.notEqual(uploadedImage,old);assert.equal(imageObjects.size,2);
+  assert.equal(mock.products.size,products);assert.equal(mock.prices.size,prices);assert.deepEqual(snapshot(db),before);
+ });
  await check('Anonymous denied; Viewer reads only; Owner/Admin write gates',async()=>{
   assert.equal((await call('admin/products',{action:'list'},'anonymous')).status,401);
   const read=await call('admin/products',{action:'list'},'viewer');assert.equal(read.status,200);assert.equal(read.data.canWrite,false);
@@ -73,6 +96,7 @@ try{
  for(const [type,name] of [['MERCH','T-Shirt'],['ACCESSORY','Whisk'],['BUNDLE','Gift Set']]){
   await check(type+' draft → mock sync → publish → automatic Shop/PDP → Checkout → frozen order',async()=>{
    const id=randomUUID(),d=document(type,name);
+   if(type==='MERCH')d.primary_image_path=uploadedImage;
    let r=await action('save',{id},{document:d});assert.equal(r.status,200,JSON.stringify(r));let p=get(id);assert.equal(await publicHas(id),false);
    assert.notEqual((await checkout(p)).status,200);
    r=await action('sync',p);assert.equal(r.status,200,JSON.stringify(r));p=get(id);assert.equal(p.is_active,false);assert.equal(p.stripe_sync_status,'synced');
@@ -82,7 +106,7 @@ try{
    const require=createRequire(import.meta.url),React=require('react'),{renderToStaticMarkup}=require('react-dom/server');
    const html=renderToStaticMarkup(React.createElement(harness.load('app/GenericProductPage.tsx').GenericProductPage,{product:lookup.product,addItem:()=>{},onAdd:()=>{},pricesVisible:true,prelaunch:false}));
    assert.ok(html.includes(name));assert.ok(html.includes('In den Warenkorb'));assert.ok(!html.includes('Matcha-Grünteepulver'));
-   if(type==='MERCH')assert.equal((html.match(/<option/g)??[]).length,6);
+   if(type==='MERCH'){assert.equal((html.match(/<option/g)??[]).length,6);assert.equal(p.primary_image_path,uploadedImage);assert.ok(html.includes(uploadedImage));}
    const cart=productCartInteraction(lookup.product);assert.equal(cart.disabled,false);assert.equal(cart.items[0].variantId,p.product_variants[0].id);assert.equal(cart.items[0].quantity,1);assert.ok(cart.persisted);
    const requestId=randomUUID();r=await checkout(p,{requestId,items:cart.items.map(i=>({variantId:i.variantId,quantity:i.quantity}))});assert.equal(r.status,200,JSON.stringify(r));
    const attempt=JSON.parse(sql(`select to_jsonb(a) from checkout_attempts a where request_id='${requestId}'`));

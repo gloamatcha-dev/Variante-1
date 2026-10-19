@@ -9,7 +9,7 @@ import {spawn} from 'node:child_process';
 import {createServer,request as httpRequest} from 'node:http';
 import {createHmac} from 'node:crypto';
 const require=createRequire(import.meta.url),ts=require('typescript');
-export async function productLocalHarness(database,stripe,emails=[]){
+export async function productLocalHarness(database,stripe,emails=[],storage=null){
  if(!/^gloa_073_[a-f0-9]+$/.test(database))throw Error('Disposable database required');
  const out='outputs/product-083';fs.mkdirSync(out,{recursive:true});
  const secret='product-manager-local-only-jwt-secret-083',sessionSecret='product-manager-local-only-session-secret-083';
@@ -35,6 +35,10 @@ export async function productLocalHarness(database,stripe,emails=[]){
    return require(name);
   };
   vm.runInNewContext(js,{module:loadedModule,exports:loadedModule.exports,require:localRequire,Response,Request,Headers,console,URL,Date,Intl,Buffer,process:{env:localEnvironment},__localBuild:build,fetch:localFetch,setTimeout,clearTimeout,AbortController,AbortSignal,TextEncoder,TextDecoder},{filename:file});
+  if(storage && file===path.resolve('lib/supabaseAdmin.ts')){
+   const original=loadedModule.exports.getSupabaseAdmin;
+   loadedModule.exports.getSupabaseAdmin=()=>{const client=original();return client?new Proxy(client,{get:(target,key)=>key==='storage'?storage:Reflect.get(target,key)}):null;};
+  }
   if(file===path.resolve('app/content.ts'))loadedModule.exports.SHOP_STATUS='live';
   return loadedModule.exports;
  }

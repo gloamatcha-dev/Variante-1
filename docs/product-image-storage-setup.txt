@@ -1,0 +1,84 @@
+PRODUCT IMAGE STORAGE AND BROWSER OPTIMIZATION — LOCAL RELEASE
+
+User-confirmed Production configuration, project yphubqploumfeabytotc:
+  product-images: public, 52428800 bytes (50 MiB)
+  product-image-uploads: private, 52428800 bytes (50 MiB)
+  Both allow exactly image/jpeg, image/png, image/webp.
+  No additional storage.objects policies. No configuration changes were executed.
+No new database migration is required. Migrations 001–083 remain unchanged.
+
+The application checks both bucket settings before issuing a signed upload URL.
+Bucket capacity is 50 MiB; the independent application limit for an uploaded,
+optimized image remains 5242880 bytes (5 MiB). Browser originals up to 50 MiB
+are accepted only for local processing. They are never sent to the application
+API or Storage. The browser always re-encodes decoded pixels, even small files.
+
+Browser flow:
+  Validate source MIME/size/magic; decode with createImageBitmap and explicit
+  imageOrientation=from-image. Apply EXIF orientation before measuring dimensions.
+  Preserve aspect ratio, never upscale, maximum longest edge 2560 pixels.
+  JPEG sources encode as JPEG; PNG/WebP sources encode as WebP with alpha.
+  PNG is the lossless fallback if the browser cannot encode WebP.
+  Start at quality 0.92, try 0.88/0.84 and smaller dimensions if necessary.
+  Accept only a nonempty newly encoded image at most 5 MiB. Reject images above
+  100 million decoded pixels. Decode/encode failure never falls back to uploading
+  the original. An understandable error leaves the saved image unchanged.
+  Show the optimized local preview, upload stage and XHR progress when measurable.
+  Revoke preview object URLs and release canvas/bitmap resources.
+
+POST /api/admin/products?action=upload-image accepts only bounded 4 KiB JSON
+control messages. Existing fresh owner/admin authorization is required for prepare
+and complete. Prepare validates optimized MIME/size and issues a single unique,
+actor-scoped private Storage object URL with upsert=false. XHR transfers only the
+optimized File directly to that signed URL; no image body crosses a Vercel Function.
+No service-role secret reaches the browser. Complete validates actor/path ownership,
+downloaded size/MIME, raster signature and complete container boundaries. Invalid,
+truncated or appended payloads fail closed. Only validated bytes are promoted to
+the public bucket, again without overwriting. Private temporary cleanup is best effort.
+Server validation remains authoritative even if browser optimization is bypassed.
+
+No browser INSERT/UPDATE/DELETE policies are required. Private ordinary SELECT/list
+must remain denied. Broad inherited/global policies must not grant browser writes
+to either bucket. Only server credentials and scoped signed-upload tokens authorize
+writes. Real CORS, signed upload, public delivery and policy enforcement remain
+release smoke checks: this task does not authorize a Production upload.
+
+The public URL is assigned only to the current editor. Saving remains an unpublished
+draft through the existing RPC; uploading never saves, publishes or synchronizes a
+product. The existing Shop/PDP reads primary_image_path without a new data model.
+Replacement creates a new immutable object. Old images/references are never deleted
+or overwritten. Existing Matcha imagery, prices/tax, orders, Stripe and Inventory
+remain unchanged. Abandoned uploads may leave an unreferenced public/private object;
+automatic cleanup is outside this scope. Public URLs are public even before product
+publication; upload only non-sensitive product imagery.
+
+Local verification: real Chromium canvas/decoder tests, actual editor interaction,
+server validation tests and disposable local database/API E2E with Storage/Stripe
+adapters. No Production SQL, image upload, Stripe call or deployment is performed.
+
+Release verification confirmed by the user:
+  npm test: 5285 PASS, 0 FAIL, 2 SKIP
+  Real Chromium image tests: 17/17 PASS
+  Local Product Manager E2E: 17/17 PASS
+  TypeScript: PASS; ESLint: 0 new errors; git diff --check: PASS
+Earlier Codex sandbox failures (CDP navigation and Nitro readlink EPERM) were
+environment limitations; the successful local results above supersede those runs.
+The permanent real-codec suite can be repeated in a normal local Windows session:
+  node tests/runtime/product-image-browser-local.mjs
+It checks an exact 50 MiB valid WebP source, JPEG/PNG/WebP decode/encode, transparent
+pixels, aspect ratio, EXIF rotation and pixel colors, dimensions and upload progress.
+Repeat the isolated full gate with the existing disposable local database available:
+  node tests/runtime/product-manager-quality-local.mjs
+This launcher supplies only loopback catalogue configuration and blocks external
+fetch; it does not authorize Production access. Do not change Windows permissions,
+disable browser security or weaken the build configuration to work around sandbox
+limitations. Production upload/CORS/policy smoke checks remain separately authorized
+release actions; successful local tests do not claim a Production upload was tested.
+
+References:
+https://developer.mozilla.org/en-US/docs/Web/API/Window/createImageBitmap
+https://developer.mozilla.org/en-US/docs/Web/API/HTMLCanvasElement/toBlob
+https://developer.mozilla.org/en-US/docs/Web/API/XMLHttpRequest/upload
+https://supabase.com/docs/guides/storage/security/access-control
+https://supabase.com/docs/reference/javascript/storage-from-createsigneduploadurl
+https://vercel.com/docs/functions/limitations
