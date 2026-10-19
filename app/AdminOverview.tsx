@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import './admin-portal.css';
 import {AdminPortalShell} from './AdminPortalShell';
+import {AdminProducts} from './AdminProducts';
 import {AdminPortalDashboard} from './AdminPortalDashboard';
 import {AdminPortalFinance} from './AdminPortalFinance';
 import {AdminPortalCreator} from './AdminPortalCreator';
@@ -181,7 +182,7 @@ export function AdminOverview() {
   // decides whether the data below is ever asked for.
 
 
-  const [view, setView] = useState<"overview" | "orders" | "subscriptions" | "annual" | "rights" | "inventory" | "costs" | "activity" | "waitlist" | "b2b" | "finance" | "creator">("overview");
+  const [view, setView] = useState<"overview" | "orders" | "subscriptions" | "annual" | "rights" | "inventory" | "costs" | "activity" | "waitlist" | "b2b" | "finance" | "creator" | "products">("overview");
   const [salesTab,setSalesTab]=useState('BESTELLUNGEN');
   const [financeTab,setFinanceTab]=useState('ÜBERSICHT');
   const [creatorTab,setCreatorTab]=useState('ÜBERSICHT');
@@ -440,6 +441,7 @@ export function AdminOverview() {
       {view === "b2b" && maySeeSubscriptions && <AdminB2b onSessionLost={() => setSignedIn(false)} key={target} initialSearch={target} />}
 
       {view === "inventory" && <AdminInventory onSessionLost={() => setSignedIn(false)} />}
+      {view === "products" && <AdminProducts />}
       {view === "inventory"&&target==='warnings'&&<AdminPortalInventoryWarnings/>}
 
       {/* MOUNTED ONLY WHEN ITS TAB IS OPEN, so the overview, the orders

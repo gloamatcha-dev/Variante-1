@@ -297,7 +297,8 @@ test("7c: no non-hero heading was pulled into the hero scale", () => {
                        "<h1>Impressum.</h1>", "<h1>Datenschutz.</h1>",
                        "<h1>Allgemeine Geschäftsbedingungen.</h1>",
                        "<h1>Anmelden.</h1>", "<h1>404</h1>"]) {
-    assert.ok(site.includes(plain), `a non-hero heading changed: ${plain}`);
+    const generic = readFileSync(path.join(ROOT, 'app/GenericProductPage.tsx'), 'utf8');
+    assert.ok(site.includes(plain) || generic.includes(plain), `a non-hero heading changed: ${plain}`);
   }
   // Stronger than the literals above, and the reason they are safe to
   // change: a legal heading may never acquire a class. Their size comes

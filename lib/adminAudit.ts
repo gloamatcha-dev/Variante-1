@@ -22,12 +22,12 @@
 
 /** Modules that may appear. The last four are reserved, not implemented. */
 export const AUDIT_MODULES = [
-  "orders", "inventory", "b2b", "finance", "documents", "fulfillment",
+  "products", "orders", "inventory", "b2b", "finance", "documents", "fulfillment",
 ] as const;
 export type AuditModule = (typeof AUDIT_MODULES)[number];
 
 /** The modules anything actually writes today. */
-export const AUDIT_ACTIVE_MODULES = ["orders", "inventory"] as const;
+export const AUDIT_ACTIVE_MODULES = ["products", "orders", "inventory"] as const;
 
 /**
  * Every action this build can record.
@@ -37,6 +37,8 @@ export const AUDIT_ACTIVE_MODULES = ["orders", "inventory"] as const;
  * EXISTS - none was invented for something not implemented.
  */
 export const AUDIT_ACTIONS = {
+  productCreated: "product.created", productUpdated: "product.updated", productPriceChanged: "product.price_changed",
+  productPublished: "product.published", productArchived: "product.archived", productAvailabilityChanged: "product.availability_changed", productSyncResult: "product.sync_result",
   orderShipped: "order.shipped",
   orderRefunded: "order.refunded",
   orderCancelled: "order.cancelled",
@@ -52,6 +54,8 @@ export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];
 
 /** The German label the screen shows for each action. */
 export const AUDIT_ACTION_LABEL: Readonly<Record<AuditAction, string>> = Object.freeze({
+  "product.created": "Produkt angelegt", "product.updated": "Produkt bearbeitet", "product.price_changed": "Preis geändert",
+  "product.published": "Veröffentlicht", "product.archived": "Archiviert", "product.availability_changed": "Verfügbarkeit geändert", "product.sync_result": "Stripe-Abgleich",
   "order.shipped": "Versendet",
   "order.refunded": "Erstattet",
   "order.cancelled": "Storniert",
@@ -65,6 +69,7 @@ export const AUDIT_ACTION_LABEL: Readonly<Record<AuditAction, string>> = Object.
 });
 
 export const AUDIT_MODULE_LABEL: Readonly<Record<AuditModule, string>> = Object.freeze({
+  products: "Produkte",
   orders: "Bestellungen",
   inventory: "Inventar",
   b2b: "B2B",

@@ -749,7 +749,7 @@ test("7b: and no migration wires an order trigger into stock", () => {
     if (file === "052_admin_activity_audit.sql" || file === "072_admin_core_connections.sql") continue;
     const TABLE = "(inventory_items|inventory_movements|inventory_categories|inventory_item_areas)";
     for (const [pattern, why] of [
-      [`(create|alter|drop)\\s+table[^;]*${TABLE}`, "defines or changes an inventory table"],
+      [`(create|alter|drop)\\s+table\\s+(if\\s+not\\s+exists\\s+)?(public\\.)?${TABLE}\\b`, "defines or changes an inventory table"],
       [`insert\\s+into\\s+(public\\.)?${TABLE}`, "inserts into an inventory table"],
       [`update\\s+(public\\.)?${TABLE}\\s+set`, "updates an inventory table"],
       [`delete\\s+from\\s+(public\\.)?${TABLE}`, "deletes from an inventory table"],

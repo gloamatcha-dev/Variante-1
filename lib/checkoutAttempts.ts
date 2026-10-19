@@ -24,6 +24,7 @@ export type CheckoutAttemptShipping = {
 };
 
 export type CheckoutAttempt = {
+  stripe_line_bindings?: import('./productStripePrices').ProductCheckoutBinding[] | null;
   id: string;
   request_id: string;
   status: CheckoutAttemptStatus;
@@ -80,7 +81,7 @@ export type CheckoutAttempt = {
 };
 
 const ATTEMPT_COLUMNS =
-  "id, request_id, status, currency, expected_total_gross_cents, items_snapshot, shipping_country, shipping_zone, shipping_gross_cents, tax_snapshot, stripe_checkout_session_id, stripe_payment_intent_id, customer_email, stripe_customer_id, discount_code, discount_gross_cents, discount_line_allocation";
+  "id, request_id, status, currency, expected_total_gross_cents, items_snapshot, shipping_country, shipping_zone, shipping_gross_cents, tax_snapshot, stripe_checkout_session_id, stripe_payment_intent_id, customer_email, stripe_customer_id, discount_code, discount_gross_cents, discount_line_allocation" + ", stripe_line_bindings";
 
 /**
  * The identity a one-time attempt freezes: the normalized email the
@@ -216,7 +217,7 @@ export async function getOrCreateCheckoutAttempt(
     return { ok: false, error: "Checkout-Speicherung vorübergehend nicht verfügbar." };
   }
 
-  return { ok: true, attempt: data as CheckoutAttempt };
+  return { ok: true, attempt: data as unknown as CheckoutAttempt };
 }
 
 /**

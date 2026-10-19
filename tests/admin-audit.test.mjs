@@ -92,16 +92,16 @@ const WRAPPED = [
 
 test("1: the modules and the actions are closed lists, and every action is real", () => {
   assert.deepEqual([...AUDIT_MODULES],
-    ["orders", "inventory", "b2b", "finance", "documents", "fulfillment"]);
+    ["products", "orders", "inventory", "b2b", "finance", "documents", "fulfillment"]);
   // Only two modules write anything today. The other four are names the
   // database will accept later - offering them as a filter now would be
   // a filter that always returns nothing.
-  assert.deepEqual([...AUDIT_ACTIVE_MODULES], ["orders", "inventory"]);
+  assert.deepEqual([...AUDIT_ACTIVE_MODULES], ["products", "orders", "inventory"]);
 
   const actions = Object.values(AUDIT_ACTIONS);
   assert.equal(new Set(actions).size, actions.length, "an action name is duplicated");
   for (const action of actions) {
-    assert.match(action, /^(order|inventory)\.[a-z_]+$/, `${action} is not module.verb`);
+    assert.match(action, /^(product|order|inventory)\.[a-z_]+$/, `${action} is not module.verb`);
     assert.ok(AUDIT_ACTION_LABEL[action], `${action} has no German label`);
   }
   for (const name of AUDIT_MODULES) {
@@ -112,6 +112,8 @@ test("1: the modules and the actions are closed lists, and every action is real"
   // describes features the build does not have is how a log starts
   // lying: a reader assumes an absent entry means nothing happened.
   const FLOWS = {
+    ...Object.fromEntries(['created','updated','price_changed','published','archived','availability_changed','sync_result'].map(action =>
+      ['product.'+action, () => read('supabase/migrations/083_admin_product_manager.sql').includes(action === 'published' || action === 'archived' ? "'"+action+"'" : 'product.'+action)])),
     "order.shipped": () => orderActions.includes("adminShipOrder"),
     "order.refunded": () => orderActions.includes("adminRefundOrder"),
     "order.cancelled": () => orderActions.includes("adminCancelOrder"),
@@ -134,7 +136,7 @@ test("1b: the module CHECK in the database is the same closed list", () => {
   const check = /module\s+text not null\s*check \(module in\s*\(([^)]*)\)/.exec(sql);
   assert.ok(check, "the module column lost its CHECK constraint");
   const inSql = [...check[1].matchAll(/'(\w+)'/g)].map(m => m[1]);
-  assert.deepEqual(inSql, [...AUDIT_MODULES],
+  assert.deepEqual(inSql, [...AUDIT_MODULES].filter(m => m !== 'products'),
     "the database and lib/adminAudit.ts disagree about which modules exist");
 });
 
@@ -786,15 +788,15 @@ test("6c: 052 is additive, and edits none of the 51 before it", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.equal(files.length, 82);
+  assert.equal(files.length, 83);
   // 4A.4b added 053, so 052 is no longer the newest - it is the one
   // before it. What this guard is actually about is that 052 sits at its
   // own number and nothing was slipped in between.
-  assert.equal(files[files.length - 29], "054_b2c_price_alignment.sql",
+  assert.equal(files[files.length - 30], "054_b2c_price_alignment.sql",
     "054 is no longer the migration directly below the newest");
-  assert.equal(files[files.length - 31], "052_admin_activity_audit.sql",
+  assert.equal(files[files.length - 32], "052_admin_activity_audit.sql",
     "052 is no longer the migration before the newest");
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 82), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 83), [],
     "a migration 072 or beyond appeared");
   // 001-051 are immutable, which git - not a regex - is the authority on.
   // What this can assert is that 052 names none of them as something to
@@ -888,7 +890,7 @@ test("7a2: THE ACTOR'S ADDRESS IS STORED AND NOT SENT", () => {
 
 test("7b: the filter and the page are allowlisted and bounded", () => {
   // Anything unrecognised becomes "all" rather than reaching PostgREST.
-  assert.deepEqual([...AUDIT_FILTERS], ["all", "orders", "inventory"]);
+  assert.deepEqual([...AUDIT_FILTERS], ["all", "products", "orders", "inventory"]);
   for (const hostile of ["orders,inventory", "'; drop table --", "finance", "", null, 7, {}]) {
     assert.equal(parseAuditFilter(hostile), "all", `${JSON.stringify(hostile)} reached the query`);
   }
@@ -1020,7 +1022,7 @@ test("8h: exposing the tab is a UI concern - it touched no migration", () => {
   // a database-looking bug. The audit schema is already in production
   // and nothing about it moved.
   const files = readdirSync(path.join(ROOT, "supabase/migrations")).filter(f => f.endsWith(".sql"));
-  assert.equal(files.length, 82, "a migration was added or removed by a navigation fix");
+  assert.equal(files.length, 83, "a migration was added or removed by a navigation fix");
   assert.ok(!files.includes("053_admin_activity_nav.sql"), "a migration was invented for a UI fix");
   // And no migration knows what a tab is.
   for (const f of files) {

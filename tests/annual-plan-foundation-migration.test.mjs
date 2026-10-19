@@ -161,8 +161,8 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
   // Re-pinned rather than deleted - what this guard protects is that
   // nothing UNREVIEWED appeared. Reviewed in
   // tests/guest-order-management.test.mjs.
-  assert.equal(files[files.length - 44], MIGRATION_039, "039 must be the highest");
-  assert.equal(files[files.length - 45], MIGRATION_038, "038 must be the one before it");
+  assert.equal(files[files.length - 45], MIGRATION_039, "039 must be the highest");
+  assert.equal(files[files.length - 46], MIGRATION_038, "038 must be the one before it");
   const numbers = files.map(f => f.slice(0, 3));
   assert.equal(new Set(numbers).size, numbers.length, "a migration number is used twice");
 });
@@ -170,7 +170,7 @@ test("1: exactly one 039 exists and it is the highest migration", () => {
 test("2: no migration 044 or beyond", () => {
   // 065 is the highest migration. 039 is live and is not the place to
   // fix anything any more.
-  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 82);
+  const beyond = readdirSync(MIGRATIONS_DIR).filter(f => Number(f.slice(0, 3)) > 83);
   assert.deepEqual(beyond, [], "an unreviewed migration appeared after 065");
 });
 
@@ -1022,6 +1022,8 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
   // and subscription paths keep their existing labels, which
   // tests/annual-plan-maintenance.test.mjs asserts directly.
   const ALLOWED_LIB_EDITS = [
+    'lib/adminPortalModel.ts', 'lib/adminAudit.ts', 'lib/catalogProducts.ts', 'lib/checkoutAttemptSnapshot.ts',
+    'lib/checkoutAttempts.ts', 'lib/checkoutQuote.ts', 'lib/productStructuredData.ts', 'lib/tax.ts',
     // ADMIN ORDER OVERVIEW, COMPLETION FIX (Paket 4A.1). The zero-import
     // leaf behind the admin order list gained the item-summary helpers
     // the new contents column needs: grouping, quantity aggregation and
@@ -1681,6 +1683,7 @@ test("54: no UNCOMMITTED edit to a live application module is in the working tre
   // unchanged. They are listed so an edit to them is reviewed rather than
   // silent, exactly like the two API routes above.
   const ALLOWED_APP_EDITS = [
+    'app/AdminPortalShell.tsx', 'app/admin-portal.css', 'app/useCatalog.ts', 'app/api/checkout/session/route.ts',
     // PACKAGE 5C edits it again, additively: a B2B branch ahead of the
     // three existing ones in each checkout.session.* arm, and a B2B
     // classification ahead of the two invoice handlers. Every B2C call

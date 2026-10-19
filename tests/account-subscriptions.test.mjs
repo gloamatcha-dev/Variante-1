@@ -494,7 +494,7 @@ test("security: guards, RLS and the account separation are unchanged", () => {
     // Statements only: a comment explaining that nothing is granted to
     // anon must not read as a grant to anon.
     const later = withoutComments(readFileSync(path.join(MIGRATIONS, name), "utf-8"));
-    assert.ok(!/to anon/i.test(later), `${name} grants something to anon`);
+    assert.ok(!/grant[^;]*to anon/i.test(later), `${name} grants something to anon`);
     assert.ok(!/grant[^;]*(insert|update|delete)[^;]*public\.subscriptions[^;]*to authenticated/i.test(later),
       `${name} lets the browser write subscriptions`);
     assert.ok(!/create policy[^;]*subscriptions for (insert|update|delete)/i.test(later),

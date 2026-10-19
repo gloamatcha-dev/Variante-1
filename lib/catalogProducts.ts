@@ -60,6 +60,7 @@ import { resolveProductSlug } from "./productSlugs";
 /** One purchasable variant, as the public catalog exposes it. */
 export type ServerCatalogVariant = {
   id: string;
+  availability?: "available" | "sold_out";
   sku: string;
   label: string;
   /** Net weight in grams, or null for something not sold by weight. */
@@ -119,6 +120,7 @@ function isPurchasable(v: { price_gross_cents: number | null; size_grams: number
 
 type DbVariantRow = {
   id: string;
+  availability?: "available" | "sold_out";
   sku: string;
   label: string;
   size_grams: number | null;
@@ -174,7 +176,7 @@ export const lookupProductBySlug = cache(async function lookupProductBySlug(
     .from("products")
     .select(
       "id, slug, name, short_description, description, primary_image_path, " +
-        "product_variants(id, sku, label, size_grams, price_gross_cents, currency, sort_order)",
+        "product_variants(id, sku, availability, label, size_grams, price_gross_cents, currency, sort_order)",
     )
     .eq("slug", slug)
     .limit(1);
@@ -203,6 +205,7 @@ export const lookupProductBySlug = cache(async function lookupProductBySlug(
         .map(v => ({
           id: v.id,
           sku: v.sku,
+          ...(v.availability !== undefined ? { availability: v.availability } : {}),
           label: v.label,
           size_grams: v.size_grams,
           price_gross_cents: v.price_gross_cents as number,
@@ -253,6 +256,7 @@ export const lookupProductBySlug = cache(async function lookupProductBySlug(
 /** One variant, as it may appear in HTML. Note what is absent. */
 export type SeedCatalogVariant = {
   id: string;
+  availability?: "available" | "sold_out";
   sku: string;
   label: string;
   size_grams: number | null;
@@ -289,6 +293,7 @@ export function toSeedProduct(product: ServerCatalogProduct): SeedCatalogProduct
     variants: product.variants.map(v => ({
       id: v.id,
       sku: v.sku,
+          ...(v.availability !== undefined ? { availability: v.availability } : {}),
       label: v.label,
       size_grams: v.size_grams,
       sort_order: v.sort_order,
@@ -322,7 +327,7 @@ export const lookupCatalogSeed = cache(async function lookupCatalogSeed(): Promi
     .from("products")
     .select(
       "id, slug, name, short_description, description, primary_image_path, sort_order, " +
-        "product_variants(id, sku, label, size_grams, price_gross_cents, sort_order)",
+        "product_variants(id, sku, availability, label, size_grams, price_gross_cents, sort_order)",
     )
     .order("sort_order", { ascending: true });
 
@@ -346,6 +351,7 @@ export const lookupCatalogSeed = cache(async function lookupCatalogSeed(): Promi
         .map(v => ({
           id: v.id,
           sku: v.sku,
+          ...(v.availability !== undefined ? { availability: v.availability } : {}),
           label: v.label,
           size_grams: v.size_grams,
           sort_order: v.sort_order,

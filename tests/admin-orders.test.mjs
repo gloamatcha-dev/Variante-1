@@ -502,7 +502,7 @@ test("7: /api/admin gained orders and nothing else", () => {
   // tests/business-expenses-migration.test.mjs.
   assert.deepEqual(dirs, ["activity", "annual-plans", "b2b", "cost-coverage", "costs", "creators",
     "customer-rights", "dashboard-summary", "documents", "finance",
-    "inventory", "launch", "orders", "portal", "session", "shipping", "subscriptions",
+    "inventory", "launch", "orders", "portal", "products", "session", "shipping", "subscriptions",
     "waitlist", "withdrawal-refund"]);
   const orderDirs = readdirSync(path.join(ROOT, "app/api/admin/orders"), { withFileTypes: true })
     .filter(e => e.isDirectory()).map(e => e.name).sort();

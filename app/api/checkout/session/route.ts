@@ -1,4 +1,5 @@
 import type Stripe from "stripe";
+import { resolveProductCheckoutBindings } from '../../../../lib/productStripePrices';
 import { affiliateCheckoutMetadata } from '../../../../lib/affiliateCheckout';
 import { getStripeClient } from "../../../../lib/stripe";
 import { validateQuoteItems, buildAuthoritativeQuote } from "../../../../lib/checkoutQuote";
@@ -617,6 +618,24 @@ export async function POST(request: Request): Promise<Response> {
   });
 
   try {
+    const managed = attempt.items_snapshot.some(item => item.stripeProductId);
+    if (managed) {
+      // Mixed rollout carts retain legacy inline lines only for the exact legacy
+      // Matcha variants. Managed lines always use frozen authoritative Price IDs.
+      const managedLines = stripeLines.filter(line => attempt.items_snapshot[line.sourceIndex].stripeProductId);
+      const resolved = attempt.stripe_line_bindings ?? await resolveProductCheckoutBindings(stripe, attempt.items_snapshot, managedLines);
+      const admin = getSupabaseAdmin();
+      if (!admin) throw new Error('Catalogue binding storage unavailable');
+      const persisted = await admin.rpc('bind_product_checkout_prices_v1', { p_attempt: attempt.id, p_bindings: resolved });
+      if (persisted.error) throw new Error('Catalogue binding persistence failed');
+      let bindingIndex = 0;
+      stripeLines.forEach((line, index) => {
+        if (attempt.items_snapshot[line.sourceIndex].stripeProductId) {
+          const bound = resolved[bindingIndex++];
+          lineItems[index] = { price: bound.priceId, quantity: bound.quantity };
+        }
+      });
+    }
     const session = await stripe.checkout.sessions.create(
       {
         mode: "payment",

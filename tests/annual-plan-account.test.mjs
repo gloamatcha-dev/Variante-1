@@ -812,14 +812,14 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
   // rather than deleted - what this guard protects is that nothing
   // UNREVIEWED appeared. Reviewed in
   // tests/launch-discount-migration.test.mjs.
-  assert.equal(migrations.length, 82);
+  assert.equal(migrations.length, 83);
   assert.equal(migrations[40], "041_annual_account_column_privileges.sql");
   // PACKAGE 4A ADDED MIGRATION 059: the B2B self-service supply
   // commerce foundation - it evolves the two tables 006 built for a
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 82), [], "a migration 072 or beyond appeared");
+  assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 83), [], "a migration 072 or beyond appeared");
 
   // The API surface is unchanged: no account endpoint exists, because the
   // portal reads its own rows under RLS.
@@ -931,6 +931,7 @@ test("30: the account architecture stays as it is: no endpoint, no portal redesi
     "/admin/orders/resolve-request",
     "/admin/orders/ship",
     "/admin/portal",
+    "/admin/products",
     "/admin/session",
     // 072: shipping due status and operations_config management. Mixed
     // read+write: listing opens with "read", set_config re-gates with

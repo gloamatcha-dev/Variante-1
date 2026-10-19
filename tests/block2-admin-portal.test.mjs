@@ -20,7 +20,7 @@ function sharedComponents(){
  return compiled.exports;
 }
 test('primary areas are exactly the requested operational navigation',()=>{
- assert.deepEqual(PRIMARY_AREAS.map(([,label])=>label),['ÜBERSICHT','VERKAUF','VERBRAUCHERRECHTE','FINANZEN','INVENTAR','CREATOR','B2B','AKTIVITÄT']);
+ assert.deepEqual(PRIMARY_AREAS.map(([,label])=>label),['PRODUKTE','ÜBERSICHT','VERKAUF','VERBRAUCHERRECHTE','FINANZEN','INVENTAR','CREATOR','B2B','AKTIVITÄT']);
  assert.deepEqual(SALES_TABS,['BESTELLUNGEN','ABOS','JAHRESPLÄNE']);
  assert.deepEqual(FINANCE_TABS,['ÜBERSICHT','BUCHUNGEN','AUSGABEN','DOKUMENTE','AUSWERTUNGEN']);
  assert.deepEqual(CREATOR_TABS,['ÜBERSICHT','BEWERBUNGEN','CREATOR','AFFILIATE','CONTENT','AUSZAHLUNGEN']);

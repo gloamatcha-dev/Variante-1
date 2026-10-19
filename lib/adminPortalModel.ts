@@ -1,6 +1,7 @@
 /** Presentation vocabulary only. Money and workflow decisions stay on the server. */
 export type PortalRow = Record<string, unknown>;
 export const PRIMARY_AREAS = [
+  ['products', 'PRODUKTE'],
   ['overview', 'ÜBERSICHT'], ['sales', 'VERKAUF'], ['rights', 'VERBRAUCHERRECHTE'],
   ['finance', 'FINANZEN'], ['inventory', 'INVENTAR'], ['creator', 'CREATOR'],
   ['b2b', 'B2B'], ['activity', 'AKTIVITÄT'],

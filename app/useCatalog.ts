@@ -5,6 +5,7 @@ import { supabase } from "../lib/supabase";
 // Raw database variant with nullable fields
 type DbCatalogVariant = {
   id: string;
+  availability?: "available" | "sold_out";
   sku: string;
   label: string;
   size_grams: number | null;
@@ -17,6 +18,7 @@ type DbCatalogVariant = {
 // standalone Metal Case is sold as a unit rather than by weight.
 export type CatalogVariant = {
   id: string;
+  availability?: "available" | "sold_out";
   sku: string;
   label: string;
   size_grams: number | null;
@@ -81,7 +83,7 @@ export function useCatalog(slug: string): CatalogState {
 
       const { data: variants, error: vErr } = await supabase
         .from("product_variants")
-        .select("id, sku, label, size_grams, price_gross_cents, sort_order")
+        .select("id, sku, availability, label, size_grams, price_gross_cents, sort_order")
         .eq("product_id", p.id)
         .order("sort_order", { ascending: true });
 
@@ -157,7 +159,7 @@ export function useCatalogList(): CatalogListState {
         .from("products")
         .select(
           "id, slug, name, short_description, description, primary_image_path, sort_order, " +
-            "product_variants(id, sku, label, size_grams, price_gross_cents, sort_order)"
+            "product_variants(id, sku, availability, label, size_grams, price_gross_cents, sort_order)"
         )
         .order("sort_order", { ascending: true });
 

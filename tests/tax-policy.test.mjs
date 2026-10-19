@@ -147,7 +147,8 @@ test("boundary: no EU distance-sales threshold machinery is left in the applicat
 test("boundary: checkout never queries accumulated turnover or reserves headroom", () => {
   for (const [name, source] of [["session", sessionRoute], ["quote", quoteRoute]]) {
     const code = withoutComments(source).toLowerCase();
-    assert.ok(!code.includes(".rpc("), `${name} route calls an RPC`);
+    const rpcs = [...code.matchAll(/\.rpc\(['"]([^'"]+)/g)].map(m => m[1]);
+    assert.deepEqual(rpcs, name === 'session' ? ['bind_product_checkout_prices_v1'] : [], `${name} gained a turnover RPC`);
     for (const term of ["threshold", "turnover", "allowance", "distance_sale", "distancesale", "calendaryear"]) {
       assert.ok(!code.includes(term), `${name} route still knows about ${term}`);
     }

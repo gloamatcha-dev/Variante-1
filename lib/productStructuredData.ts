@@ -61,6 +61,7 @@
  * a zero-import leaf.
  */
 export type SchemaVariant = {
+  availability?: 'available' | 'sold_out';
   sku: string;
   label: string;
   /** Net weight in grams, or null for something not sold by weight. */
@@ -162,7 +163,7 @@ function offerNode(v: SchemaVariant, ctx: ProductSchemaContext) {
     // Only ever emitted while the shop is open - that is the single
     // condition this whole builder is gated on. GLOA tracks no per
     // variant stock level, so no inventoryLevel is claimed.
-    availability: "https://schema.org/InStock",
+    availability: v.availability === 'sold_out' ? 'https://schema.org/OutOfStock' : 'https://schema.org/InStock',
     itemCondition: "https://schema.org/NewCondition",
     seller: { "@id": `${ctx.origin}/#organization` },
   };

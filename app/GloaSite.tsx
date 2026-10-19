@@ -1,4 +1,5 @@
 "use client";
+import {GenericProductPage} from "./GenericProductPage";
 import { useEffect, useLayoutEffect, useState, useRef, useCallback, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { Header, Footer, MobileDock } from "./Chrome";
@@ -632,7 +633,7 @@ const per100=showsUnitPricePer100g(v)?per100gCents(v.price_gross_cents,v.size_gr
 const own=SHOP_SECTION_IMAGE[product.slug];
 const img=own??(getProductImage(product)?{src:getProductImage(product) as string,alt:product.name}:null);
 const sub=getProductSubtitle(product);
-const handleAdd=()=>{addItem({productId:product.id,productName:product.name,productSlug:product.slug,variantId:v.id,label:v.label,grams:v.size_grams,purchaseType:"once",unitPriceCents:v.price_gross_cents});track("add_to_cart");onAdd()};
+const handleAdd=()=>{if(v.availability==="sold_out")return;addItem({productId:product.id,productName:product.name,productSlug:product.slug,variantId:v.id,label:v.label,grams:v.size_grams,purchaseType:"once",unitPriceCents:v.price_gross_cents});track("add_to_cart");onAdd()};
 
 // ONE-TIME IS THE DEFAULT, ALWAYS. A twelve-month prepaid commitment is
 // never something a customer arrives already opted into.
@@ -703,7 +704,7 @@ return <div className="shop-product-row home-rail">
     shop free of a second checkout implementation.
 
     In prelaunch every mode routes where every other shop CTA routes. */}
-<button className="cta shop-cta" onClick={SHOP_IS_PRELAUNCH?()=>window.location.href="/contact":annualActive?()=>{track("shop_annual_start");window.location.href=annualPortalHref(v.sku)}:subscriptionActive?()=>{track("shop_subscription_start");window.location.href=subscriptionPortalHref(v.sku)}:handleAdd}>{SHOP_IS_PRELAUNCH?"Fragen zum Launch":annualActive?"Jahresplan im Konto starten":subscriptionActive?"Abo im Konto starten":"In den Warenkorb"}</button>
+{v.availability==="sold_out"&&<p role="status">AUSVERKAUFT</p>}<button className="cta shop-cta" disabled={v.availability==="sold_out"} onClick={SHOP_IS_PRELAUNCH?()=>window.location.href="/contact":annualActive?()=>{track("shop_annual_start");window.location.href=annualPortalHref(v.sku)}:subscriptionActive?()=>{track("shop_subscription_start");window.location.href=subscriptionPortalHref(v.sku)}:handleAdd}>{SHOP_IS_PRELAUNCH?"Fragen zum Launch":annualActive?"Jahresplan im Konto starten":subscriptionActive?"Abo im Konto starten":"In den Warenkorb"}</button>
 </div></div>}
 
 /** Confirmed GLOA Matcha food information. Rendered only for the Matcha
@@ -931,7 +932,7 @@ const [sizeIdx,setSizeIdx]=useState(0);
 const safe=Math.min(sizeIdx,product.variants.length-1);
 const v=product.variants[safe];
 const per100=showsUnitPricePer100g(v)?per100gCents(v.price_gross_cents,v.size_grams as number):null;
-const handleAdd=()=>{addItem({productId:product.id,productName:product.name,productSlug:product.slug,variantId:v.id,label:v.label,grams:v.size_grams,purchaseType:"once",unitPriceCents:v.price_gross_cents});track("add_to_cart");onAdd()};
+const handleAdd=()=>{if(v.availability==="sold_out")return;addItem({productId:product.id,productName:product.name,productSlug:product.slug,variantId:v.id,label:v.label,grams:v.size_grams,purchaseType:"once",unitPriceCents:v.price_gross_cents});track("add_to_cart");onAdd()};
 
 return <main className="pdp">
 <section className="pdp-hero"><div className="pdp-hero-image"><img src="/img/gloa-hero-packaging.jpg" alt="GLOA Matcha Verpackung"/></div><div className="pdp-hero-info"><p className="eyebrow">MATCHA · SHIZUOKA</p><h1>{PRODUCT.name}</h1><p>Für Latte, iced und pure Zubereitung.</p>
@@ -941,7 +942,7 @@ return <main className="pdp">
 {PRICES_VISIBLE&&<p className="pdp-price">{fmtCents(v.price_gross_cents)} €</p>}
 {PRICES_VISIBLE&&per100!==null&&<p className="pdp-per100g">{fmtCents(per100)} € / 100 g</p>}
 
-<button className="cta shop-cta" onClick={SHOP_IS_PRELAUNCH?()=>window.location.href="/contact":handleAdd}>{SHOP_IS_PRELAUNCH?"Fragen zum Launch":"In den Warenkorb"}</button>
+{v.availability==="sold_out"&&<p role="status">AUSVERKAUFT</p>}<button className="cta shop-cta" disabled={v.availability==="sold_out"} onClick={SHOP_IS_PRELAUNCH?()=>window.location.href="/contact":handleAdd}>{SHOP_IS_PRELAUNCH?"Fragen zum Launch":"In den Warenkorb"}</button>
 </div></section>
 
 <section className="pdp-facts"><div><p className="eyebrow">WHAT WE KNOW</p><h2>Clear facts.<br/>Nothing invented.</h2></div><dl><div><dt>LEBENSMITTELBEZEICHNUNG</dt><dd>Matcha (Grünteepulver)</dd></div><div><dt>ZUTAT</dt><dd>100 % Matcha-Grünteepulver, keine Zusätze</dd></div><div><dt>HERKUNFT</dt><dd>Shizuoka, Japan</dd></div><div><dt>VERWENDUNG</dt><dd>Latte · Iced · Pur</dd></div><div><dt>LAGERUNG</dt><dd>{PRODUCT.storage}</dd></div><div><dt>GRÖSSEN</dt><dd>{product.variants.map(x=>x.label).join(" · ")}</dd></div></dl><p className="product-operator-note">Lebensmittelunternehmer: Cara 2 GmbH, Hardenbergstr. 4, 10623 Berlin, Deutschland</p></section>
@@ -954,29 +955,8 @@ return <main className="pdp">
  *  appears anywhere. */
 function AccessoryProductPage({product,onAdd}:{product:CatalogProduct;onAdd:()=>void}){
 const {addItem}=useCart();
-const [idx,setIdx]=useState(0);
-const safe=Math.min(idx,product.variants.length-1);
-const v=product.variants[safe];
-const presentation=getProductPresentation(product.slug,v);
-const img=getProductImage(product);
-const handleAdd=()=>{addItem({productId:product.id,productName:product.name,productSlug:product.slug,variantId:v.id,label:v.label,grams:v.size_grams,purchaseType:"once",unitPriceCents:v.price_gross_cents});track("add_to_cart");onAdd()};
-
-return <main className="pdp">
-<section className="pdp-hero">
-{img&&<div className="pdp-hero-image"><img src={img} alt={product.name}/></div>}
-<div className="pdp-hero-info"><p className="eyebrow">{getProductEyebrow(product)}</p><h1>{product.name}</h1>
-{product.short_description&&<p>{product.short_description}</p>}
-
-<VariantSelector product={product} selected={safe} onSelect={setIdx} name={`pdp-variant-${product.slug}`}/>
-
-{PRICES_VISIBLE&&<p className="pdp-price">{fmtCents(v.price_gross_cents)} €</p>}
-{presentation.matchaNotIncludedNotice&&<p className="product-not-included">{presentation.matchaNotIncludedNotice}</p>}
-
-<button className="cta shop-cta" onClick={SHOP_IS_PRELAUNCH?()=>window.location.href="/contact":handleAdd}>{SHOP_IS_PRELAUNCH?"Fragen zum Launch":"In den Warenkorb"}</button>
-</div></section>
-
-{product.description&&<section className="pdp-facts"><div><p className="eyebrow">PRODUKT</p><h2>{product.name}</h2></div><p className="pdp-description">{product.description}</p></section>}
-</main>}
+return <GenericProductPage product={product} addItem={addItem} onAdd={onAdd} pricesVisible={PRICES_VISIBLE} prelaunch={SHOP_IS_PRELAUNCH}/>;
+}
 
 /**
  * /shop's first HTML, from the server's own catalog read.

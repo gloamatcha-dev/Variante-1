@@ -157,6 +157,7 @@ test("disclosure: it renders next to the price in every accessory view", () => {
   // Source of one component: from its declaration to the next top-level
   // function declaration.
   const body = name => {
+    if (name === 'AccessoryProductPage') return readFileSync(path.join(ROOT, 'app/GenericProductPage.tsx'), 'utf8');
     const start = site.indexOf(`function ${name}(`);
     assert.ok(start > -1, `${name} not found`);
     const rest = site.slice(start + 1);

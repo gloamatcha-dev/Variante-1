@@ -64,7 +64,13 @@ select pg_temp.check_cost('browser RPC denial',not has_function_privilege('authe
 select pg_temp.check_cost('service no table mutation',not has_table_privilege('service_role','general_cost_period_coverage','INSERT,UPDATE,DELETE'));
 select pg_temp.check_cost('single query returns basis',jsonb_typeof(read_cost_finance_basis_v1('2040-10-01','2040-11-01')->'subjects')='array');
 -- Exact B2B physical delivery without any fabricated Order.
-update cost_ids set id=(select id from b2b_deliveries where order_id is null limit 1) where tag='b2b';
+-- Self-contained on a fresh disposable baseline; never depend on prior suite data.
+with agreement as (
+ insert into b2b_supply_agreements(business_snapshot,customer_snapshot,shipping_address_snapshot,billing_address_snapshot)
+ values('{"test082":"delivery_fixture"}','{}','{}','{}') returning id
+)
+insert into b2b_deliveries(id,supply_agreement_id,delivery_number,scheduled_for,quantity_packs)
+select pg_temp.cid('b2b'),id,1,'2040-10-10',1 from agreement;
 select pg_temp.check_cost('B2B null Order exists',pg_temp.cid('b2b') is not null);
 select admin_record_b2b_delivery_expense_v1(pg_temp.actor(),pg_temp.cid('b2b'),'2040-10-10','matcha_cogs',2500,0,'Actual B2B COGS','Fixture supplier','Invoice reference',pg_temp.cid('expense'));
 select pg_temp.check_cost('B2B expense replay',admin_record_b2b_delivery_expense_v1(pg_temp.actor(),pg_temp.cid('b2b'),'2040-10-10','matcha_cogs',2500,0,'Actual B2B COGS','Fixture supplier','Invoice reference',pg_temp.cid('expense'))->>'result'='already_recorded');

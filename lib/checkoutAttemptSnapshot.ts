@@ -1,6 +1,9 @@
 import type { CheckoutQuote } from "./checkoutQuote";
 
 export type CheckoutAttemptItemSnapshot = {
+  stripeProductId?: string;
+  stripePriceId?: string;
+  stripeSyncRevision?: number;
   variantId: string;
   sku: string;
   productName: string;
@@ -27,6 +30,7 @@ export type CheckoutAttemptItemSnapshot = {
  */
 export function buildItemsSnapshot(quote: CheckoutQuote): CheckoutAttemptItemSnapshot[] {
   return quote.items.map(item => ({
+    ...(item.stripeProductId ? { stripeProductId: item.stripeProductId, stripePriceId: item.stripePriceId, stripeSyncRevision: item.stripeSyncRevision } : {}),
     variantId: item.variantId,
     sku: item.sku,
     productName: item.productName,

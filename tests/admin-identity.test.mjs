@@ -473,6 +473,10 @@ test("4d: every WRITE route takes the write capability, every read says so", () 
     and operations config — none of which can move money.
   */
   const CATALOGUE_WRITES = ["creators", "documents", "shipping"];
+  const productRoute = codeOnly(read('app/api/admin/products/route.ts'));
+  assert.match(productRoute, /requireAdminIdentity\(request, "read"\)/);
+  assert.match(productRoute, /requireAdminIdentity\(request, "write"\)/);
+  for (const banned of ['.insert(', '.update(', '.upsert(', '.delete(']) assert.ok(!productRoute.includes(banned));
 
   for (const route of CATALOGUE_WRITES) {
     const code = codeOnly(read(`app/api/admin/${route}/route.ts`));
@@ -491,7 +495,7 @@ test("4d: every WRITE route takes the write capability, every read says so", () 
   const gated = adminRoutes().filter(r => !r.startsWith("launch/") && r !== "session");
   assert.deepEqual(gated.sort(),
     [...WRITES, ...READS, ...RESTRICTED_READS,
-     ...SENSITIVE_WRITES, ...PAYOUT_WRITES, ...CATALOGUE_WRITES].sort(),
+     ...SENSITIVE_WRITES, ...PAYOUT_WRITES, ...CATALOGUE_WRITES, 'products'].sort(),
     "an admin route exists that this test does not classify");
 });
 
@@ -649,7 +653,7 @@ test("7: no audit trail, no actor columns, no new real accounts", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 82), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 83), [],
     "a migration beyond 051 appeared");
 
   const sql = codeOnly(migration);
@@ -871,7 +875,7 @@ const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),
 test("9h: this package changed nothing else", () => {
   // No migration, no audit trail, no public surface.
   const files = readdirSync(path.join(ROOT, "supabase/migrations"));
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 82), [],
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 83), [],
     "a migration beyond 051 appeared");
   for (const forbidden of ["admin_activity_log", "record_admin_activity", "actor_user_id"]) {
     assert.ok(!shell.includes(forbidden) && !viewportLib.includes(forbidden),

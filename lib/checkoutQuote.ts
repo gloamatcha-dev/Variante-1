@@ -9,6 +9,10 @@ export type QuoteRequestItem = {
 };
 
 export type QuoteResponseItem = {
+  taxCategory?: string | null;
+  stripeProductId?: string;
+  stripePriceId?: string;
+  stripeSyncRevision?: number;
   productId: string;
   /**
    * The product's own name, straight from the catalog. Carried here so
@@ -121,7 +125,7 @@ export async function buildAuthoritativeQuote(items: QuoteRequestItem[]): Promis
   const variantIds = items.map(item => item.variantId);
   const { data: variants, error: dbError } = await supabase
     .from("product_variants")
-    .select("id, product_id, sku, label, size_grams, price_gross_cents, currency, is_active, products!inner(is_active, name, slug)")
+    .select("id, product_id, sku, label, size_grams, price_gross_cents, currency, is_active, tax_category, availability, stripe_price_id, products!inner(is_active, name, slug, archived_at, stripe_product_id, stripe_sync_revision, stripe_sync_status)")
     .in("id", variantIds);
 
   if (dbError) {
@@ -153,6 +157,15 @@ export async function buildAuthoritativeQuote(items: QuoteRequestItem[]): Promis
 
     if (!variant.is_active) {
       return fail(409, "Ein oder mehrere Produkte sind nicht mehr verfügbar.");
+    }
+
+    const parent = variant.products as unknown as { is_active: boolean; slug: string; archived_at?: string | null; stripe_product_id?: string; stripe_sync_revision?: number; stripe_sync_status?: string };
+    const legacy = (parent.stripe_sync_revision === 0 || parent.stripe_sync_revision === undefined) && parent.slug === 'matcha' &&
+      ['GLOA-MATCHA-30G','GLOA-MATCHA-50G','GLOA-MATCHA-100G'].includes(variant.sku);
+    if (parent.archived_at || variant.availability === 'sold_out' || (!legacy &&
+      (parent.stripe_sync_status !== 'synced' || !parent.stripe_product_id || !variant.stripe_price_id)) ||
+      (!legacy && !['matcha_reduced_de','general_goods_de'].includes(variant.tax_category))) {
+      return fail(409, 'Produkt nicht verfügbar.');
     }
 
     // @ts-expect-error - Supabase join structure
@@ -224,6 +237,10 @@ export async function buildAuthoritativeQuote(items: QuoteRequestItem[]): Promis
     }
 
     quoteItems.push({
+      ...(variant.tax_category !== undefined ? { taxCategory: variant.tax_category } : {}),
+      ...(parent.stripe_sync_status === 'synced' && parent.stripe_product_id && variant.stripe_price_id ? {
+        stripeProductId: parent.stripe_product_id, stripePriceId: variant.stripe_price_id, stripeSyncRevision: parent.stripe_sync_revision,
+      } : {}),
       productId: variant.product_id,
       productName,
       productSlug,

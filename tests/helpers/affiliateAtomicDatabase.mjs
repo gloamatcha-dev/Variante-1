@@ -14,6 +14,13 @@ export function sql(query,db=database){
   if(db!=='postgres'&&!/^gloa_073_[a-f0-9]+$/.test(db??''))throw Error('Explicit disposable gloa_073_* database required');
   const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>!/^PG/i.test(key)));
   env.PGCLIENTENCODING='UTF8';
+  // Optional session-only memory for the large protected SQL fingerprint checks.
+  // Still hardcoded loopback/disposable databases; never changes cluster settings.
+  if (process.env.GLOA_LOCAL_VERIFICATION_WORK_MEM_MB) {
+    const megabytes = Number(process.env.GLOA_LOCAL_VERIFICATION_WORK_MEM_MB);
+    if (!Number.isInteger(megabytes) || megabytes < 16 || megabytes > 512) throw Error('Invalid local verification work_mem');
+    env.PGOPTIONS = '-c work_mem=' + megabytes + 'MB';
+  }
   const run=spawnSync(bin+'psql'+(process.platform==='win32'?'.exe':''),['-X','-h','127.0.0.1','-p','55472','-U','postgres','-d',db,'-v','ON_ERROR_STOP=1','-A','-t'],{
     input:query,encoding:'utf8',cwd:root,env,windowsHide:true,
   });

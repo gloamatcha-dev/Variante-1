@@ -91,7 +91,12 @@ const PRODUCT_SLUG_TAX_CATEGORY: Readonly<Record<string, TaxCategory>> = Object.
  * guessing 19 % on an unclassified food item would under-charge the
  * customer and mis-declare the supply.
  */
-export function resolveTaxCategory(item: { sku?: string | null; productSlug?: string | null }): TaxCategory | null {
+export function resolveTaxCategory(item: { sku?: string | null; productSlug?: string | null; catalogTaxCategory?: string | null }): TaxCategory | null {
+  // Explicit catalogue values are authoritative, including an explicit unknown/null.
+  // Identity fallback remains only for legacy frozen/purchase-program callers.
+  if (item.catalogTaxCategory !== undefined) {
+    return item.catalogTaxCategory === 'matcha_reduced_de' || item.catalogTaxCategory === 'general_goods_de' ? item.catalogTaxCategory : null;
+  }
   const sku = typeof item.sku === "string" ? item.sku.trim().toUpperCase() : "";
   if (sku && SKU_TAX_CATEGORY[sku]) return SKU_TAX_CATEGORY[sku];
 
@@ -390,6 +395,7 @@ export function resolveTaxTreatment(
 /* ── Cart calculation ───────────────────────────────────────── */
 
 export type TaxableCartItem = {
+  catalogTaxCategory?: string | null;
   variantId: string;
   sku: string;
   productSlug: string;
@@ -689,6 +695,7 @@ export const TAX_DESTINATION_UNAVAILABLE_MESSAGE =
  */
 export function toTaxableCartItems(quote: CheckoutQuote): TaxableCartItem[] {
   return quote.items.map(item => ({
+    ...(item.taxCategory !== undefined ? { catalogTaxCategory: item.taxCategory } : {}),
     variantId: item.variantId,
     sku: item.sku,
     productSlug: item.productSlug,
