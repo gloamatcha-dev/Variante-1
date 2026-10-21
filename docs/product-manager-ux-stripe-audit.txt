@@ -1,0 +1,126 @@
+GLOA PRODUCT MANAGER — UX & STRIPE AUDIT
+2026-10-19 — repository audit; no production mutations or Stripe API access.
+
+Recommendation: C — additional safety work before automatic synchronization.
+Keep the existing manual sequence for now. No automatic synchronization implemented.
+
+Verified workflow (code, not a live deployment assertion)
+1. Save: AdminProducts.save -> editorDocument -> validateProductDraft ->
+   admin_save_product_v1. Saves product and variants atomically, increments revision,
+   sets is_active=false, sync=pending, clears prior sync error. No Stripe calls.
+   Editing a published product therefore removes it from new public purchases until
+   the administrator synchronizes and publishes again. Old IDs can remain stored
+   while pending; status gates prevent their use for new standard purchases.
+2. Publish: separate action, no Stripe calls. admin_product_state_v1 requires synced,
+   Product ID, at least one active variant, and valid local price/currency/tax and
+   Price ID for every active variant. metal-case cannot publish.
+3. Product creation in Stripe: manual sync only, if stripe_product_id is absent.
+   Sends name plus local product/revision metadata. Existing remote Product names
+   are intentionally not updated. Descriptions, images and tax classifications are
+   not mirrored. A Stripe Product is shared by all variants.
+4. Price creation: each active variant resolves a base EUR per-unit one-time Price.
+   Lookup key hashes Product ID, variant ID, revision, amount and purpose. Existing
+   lookup winners must match product, amount, currency, active, nonrecurring and
+   per-unit billing. Missing lookup creates a Price with the same idempotency key.
+5. Synchronization is explicitly manual, followed by separate publication.
+6. New products cannot pass the implemented publication/catalogue/checkout gates
+   before local mappings are complete. This is not a live Stripe health guarantee:
+   publication checks local status/IDs, not current remote object state.
+7. Changing a price saves a new draft revision. Sync creates new Prices and never
+   edits/deactivates old ones. Even unchanged amounts receive new Prices on a new
+   revision. Historical checkout bindings/snapshots remain frozen.
+8. Same-revision immediate retries use Product idempotency and Price lookup keys.
+   Price creation reconciles an accepted-but-lost response by lookup. However,
+   Product ID is persisted only after ALL active Prices succeed. An intervening save
+   changes the Product creation key; an incomplete initial sync can therefore leave
+   an orphan Product and create another on retry. The same risk exists after Stripe
+   idempotency retention expires; there is no Product lookup/reconciliation path.
+9. Provider errors become a generic persisted error and table message plus retry
+   button. If result persistence fails, API returns 409; the database may still show
+   pending rather than error. Missing Stripe configuration returns 400 without a
+   persisted sync error. No progress state, per-variant results or remote IDs are
+   displayed. The browser generates a fresh operationId for each action attempt.
+10. Publication and raw pending/synced/error are separate table columns; saving as
+    draft is explicit. New contextual help explains the sequence. There is no
+    explicit saved confirmation, ID inspection or per-variant sync state.
+
+Evidence locations
+- app/AdminProducts.tsx: act, save, editor fields and action visibility.
+- app/api/admin/products/route.ts: validation, RPC calls, provider errors and 409s.
+- supabase/migrations/083_admin_product_manager.sql: lines 35-46 public RLS;
+  admin_save_product_v1 (48), sync_result (127), state (154), binding (177).
+  This migration was READ ONLY during this task; deployed application not verified.
+- lib/productStripeSync.ts: synchronizeProduct.
+- lib/productStripePrices.ts: resolveProductPrice, resolveProductCheckoutBindings.
+- lib/checkoutQuote.ts: authoritative catalogue read and rejection around 128-170;
+  mapped identity in quote around 241; checkoutAttemptSnapshot.ts freezes identity.
+
+Variants, tax, images and checkout
+- Name/slug/type and 1-100 variants validated both in API and SQL. Price must be
+  positive EUR cents. Variant UUID and SKU are stable; persisted variants must be
+  retained and deactivated instead of removed. SKU uniqueness is database-backed.
+- New variants have blank price and tax category. Gross amount includes tax;
+  classification is selected separately from existing tax configuration. Protected
+  Matcha SKUs cannot change gram size or tax classification. No tax defaults added.
+- Image is optional. Browser accepts raster source <=50 MiB, optimizes to <=5 MiB;
+  signed upload/complete validation checks actual raster content. Upload occurs
+  separately from save and can leave unused assets. No old image deletion.
+- CheckoutQuote rejects inactive, archived, unsynced, unmapped or unavailable new
+  variants. Finite legacy Matcha identities have a revision-zero compatibility path.
+  Discounted checkout can create additional derived Prices with stable lookup keys.
+  Base checkout bindings reuse stored Price IDs without fetching their remote state.
+  Remote archival/deactivation after sync can therefore fail at Stripe checkout.
+- New products use one-time purchases; subscription and annual flows are separate.
+  Availability and inventory link do not automatically book stock.
+
+Verified risks and proposed follow-up work (not implemented)
+- High: durable first-Product recovery, independent of draft revision and provider
+  retention. Persist/reconcile partial provider success before retry; model concurrent
+  saves/syncs explicitly. Add tests for accepted Product + later Price failure,
+  revision change, stale result persistence and expired idempotency retention.
+- Medium: synced means local completed mapping, not ongoing remote validation.
+  Add guarded remote binding verification and operational recovery before any
+  publish-and-sync automation. Do not mutate historical Prices/snapshots.
+- Medium: every saved edit unpublishes immediately and churns Prices even for copy
+  changes. Consider staged revisions and amount-based reuse as separately reviewed
+  work; preserve historical checkout behavior.
+- Medium: generic errors hide partial provider success. Add safe correlation IDs,
+  per-variant completion and read-only mapping visibility; redact provider details.
+- Low: Stripe names stay at first creation; images and classifications are local.
+  Document this contract or separately review safe metadata synchronization.
+
+Can a new product safely be published and purchased?
+Conditionally yes through save -> successful manual sync -> publish, with an active,
+available variant, valid tax/price, configured checkout and healthy Stripe mappings.
+The code blocks incomplete local mappings. This audit does not certify live data,
+deployed migration state or a real purchase. Do not activate automatic sync yet.
+
+UX change
+15 field disclosures plus a workflow disclosure. Native details/summary supports
+click, touch and keyboard Enter/Space; explicit accessible names and visible focus.
+Help is outside labels, has bounded width/height and introduces no modal.
+Existing form controls and validation are retained. Only admin-scoped CSS changed.
+Browser/screen-reader/mobile visual verification remains a release-review check.
+
+Provider retention reference
+https://docs.stripe.com/api/idempotent_requests : API v1 keys may be removed after
+at least 24 hours; reuse after removal makes a new request. This supplements the
+repository evidence for the long-delay retry risk.
+
+Validation record
+- Product Manager suite: 26/26 passed, Stripe adapters mocked only, including the
+  newly added revision-change duplicate-Product risk reproduction.
+- Help/editor suite: 2/2 passed, including separate publication-button/action checks.
+- git diff --check passed (only working-copy line-ending notices).
+- Production build passed, with chunk-size, dynamic-import and plugin-timing warnings.
+- Initial and final TypeScript checks passed (npx tsc --noEmit).
+- Targeted ESLint passed for AdminProducts.tsx and both Product Manager test files.
+  Repository-wide npm run lint was stopped after prolonged scanning of existing
+  generated preview bundles in outputs/admin-portal-preview; no full-lint pass claimed.
+- Additional catalogue/checkout suite: 17 passed, 2 skipped, 19 setup failures because
+  the configured Supabase catalogue fetch failed. No checkout assertions in those
+  19 tests ran; these are not evidence of checkout correctness or regression.
+  The catalogue helper attempts remote read access; it did not mutate production.
+- No live database state tests, real Stripe requests, browser keyboard automation,
+  screen-reader inspection or mobile visual QA were performed.
+- No commit, push, deployment, migration changes or automatic sync activation.

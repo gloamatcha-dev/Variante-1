@@ -1,0 +1,186 @@
+GLOA PRODUCT MANAGER — RELEASE SAFETY
+2026-10-19/20. Repository changes only. No release, real Stripe calls or production
+database access performed during this hardening task. All Stripe interactions
+were in-memory doubles. Database E2E used disposable loopback PostgreSQL clones.
+
+1. Exact root cause
+The original synchronizeProduct used a random Stripe-assigned Product ID and
+gloa-product-<local UUID>-r<draft revision>-create as its idempotency key. Its result
+was persisted by admin_product_sync_result_v1 only after all active variant Prices
+completed. A successful Product creation followed by a Price failure, lost response
+or rejected local result could leave no local Product ID. Saving advanced the
+revision and therefore the creation key. The next sync could create another Product.
+Stripe idempotency retention is also finite; retrying one revision was insufficient
+as a permanent uniqueness strategy. The original regression now asserts reuse.
+
+2. Implemented without a migration
+Stripe supports caller-supplied Product IDs unique within the account. The new
+permanent ID is prod_gloa plus the lowercase local product UUID without hyphens.
+It passes the existing 083 Product-ID constraint. The creation key is now
+gloa-product-<UUID>-identity-v2, independent of draft revision. No database columns,
+functions, grants, policies or historical migration files were changed.
+
+Resolution, in lib/productStripeIdentity.ts:
+- If a local mapping exists, retrieve exactly that ID and require an active,
+  nondeleted Product whose gloa_product_id metadata matches the local UUID.
+  Missing, inactive or foreign mappings do not fall back to creation.
+- If no mapping exists, list Products with full pagination, including inactive
+  objects, and match exact gloa_product_id metadata or the permanent Product ID.
+  Do not use a name/slug/SKU guess or Stripe Search with delayed indexing.
+- A single verified old random Product is reused, without renaming/updating it.
+  Two matching Products, foreign ownership at the permanent ID, inactive matches,
+  malformed pages, repeated pages and incomplete enumeration fail closed.
+- At most 100 pages of 100 Products are examined. Hitting this bound refuses sync
+  and requires operational review; it never authorizes creation based on absence.
+- With no match, create only the permanent ID. Stripe enforces its uniqueness.
+  Lost responses, expired idempotency keys and concurrent creation conflicts are
+  reconciled by retrieving and verifying that exact ID. Failure to retrieve it
+  remains an error. No random-ID fallback, Product update or delete exists.
+- The creation display name is the first successful revision's name. A concurrent
+  different name can cause an idempotency parameter conflict, then resolve through
+  the verified permanent ID. No rename is attempted.
+- Product identity is recoverable even when the final database RPC fails or an
+  intervening save makes its revision stale. Existing revision checks still prevent
+  stale Prices or success status being committed to the current draft.
+
+Price history remains immutable. Existing lookup keys and amounts are unchanged.
+Price lookup winners now additionally require matching lookup key, variant,
+revision and purpose metadata; ambiguous winners fail. There is no Price update,
+archive or delete. A new draft revision still intentionally produces new base
+Prices, including unchanged amounts, as V1 already did. Parallel attempts for the
+same binding converge through the existing lookup-key/idempotency mechanism.
+
+3. Publication and UX
+- Publication remains a separate explicit action. Its API now retrieves the mapped
+  Product and every active variant Price and checks ownership, active state,
+  amount, EUR currency, one-time/per-unit billing and variant/purpose metadata.
+  This preflight performs reads only. Failure returns 409 before the state RPC.
+  The original transactional publication checks and expected revision remain intact.
+- A repeated sync request on an already-synced revision also checks remote mappings.
+- Ambiguous Product reconciliation is stored/displayed as requiring review before
+  another attempt; it is not presented as a successful or automatic repair.
+- Editing a published product shows an immediate German warning and a required
+  acknowledgement checkbox before save. The handler also enforces acknowledgement.
+  Warning: save immediately changes the product to draft and blocks new purchases;
+  the administrator must manually sync and publish again. No automatic sync exists.
+- All 15 contextual field help texts are preserved. Native summary controls have
+  accessible names, focus outlines and 32px targets. Icons sit beside label rows.
+  Help paragraphs now occupy normal layout flow below their fields, so opening
+  help moves later fields/errors instead of covering them. No modal is introduced.
+- Separate German Stripe labels distinguish pending/error/success from publication.
+  Save and Stripe action labels remain distinct.
+
+4. Checkout setup failures investigated without production data
+tests/checkout-api.test.mjs originally fetched three Matcha variants in a before
+hook through tests/helpers/catalog.mjs, which defaults to configured app Supabase
+settings. A failed catalogue fetch made all 19 assertions fail in setup.
+This is infrastructure dependency failure, not 19 verified application regressions.
+
+New test:checkout-offline runs those SAME 19 assertions with a synthetic catalogue.
+Its preload intercepts catalogue reads and blocks every other external request;
+only the loopback application server port is forwarded. No production data or
+credentials are necessary. Stripe, admin DB and email keys are blank. The preload
+is inherited by the spawned production-build server because its catalogue URL is
+compiled into the bundle; changing runtime VITE variables alone is insufficient.
+The normal live/read-only test mode is not silently replaced.
+
+5. Browser access and exact Windows review command
+Browser inventory returned no browsers; creating an in-app browser returned
+"Browser is not available: iab". No real-browser, touch or screen-reader result
+is claimed. Native keyboard behavior and CSS layout were reviewed in code; actual
+editor validation/action behavior is tested with an isolated React interaction port.
+
+In Windows PowerShell:
+  Set-Location -LiteralPath 'C:\Users\hajze\Documents\Codex\2026-08-12\GLOA'
+  npm.cmd run preview:product-manager-help
+
+Open manually in Chrome or Edge:
+  http://127.0.0.1:18923/?mode=published
+  http://127.0.0.1:18923/?mode=new
+  http://127.0.0.1:18923/?mode=errors
+
+The preview renders the actual AdminProducts component with synthetic data and
+actual admin CSS. It exposes no API and blocks form submission and external assets.
+Only native disclosures and browser validation are interactive in this static
+preview; React save/sync behavior is exercised by automated tests separately.
+Use Ctrl+C to stop the preview server.
+
+Manual acceptance steps:
+- At desktop width and at 390px and 320px responsive widths, check every info icon
+  beside the label and all German characters, long labels and wrapping.
+- Tab to every help control. Enter and Space must open/close it, focus must remain
+  visible, and form controls must retain their accessible names.
+- Open multiple helps, including price and tax. No input, button or error may be
+  covered; confirm no horizontal clipping and readable text at 200% zoom.
+- In responsive touch mode, tap info controls open/closed without hover.
+- On the errors page, open price/tax help and confirm both validation errors remain
+  visible. Native required/min/pattern checks must still work.
+- On the published page, check warning and required acknowledgement before submit.
+  The preview does not persist or execute sync/publication.
+- Use Windows Narrator to verify German field names and expanded/collapsed state.
+Visual, actual keyboard/touch and screen-reader acceptance remains a release blocker.
+
+Test results
+- Product Manager suites: 43/43 passed (including validation, interrupted writes,
+  changed-revision retries, concurrency, legacy reconciliation, remote mapping
+  checks, API publication failures, checkout eligibility and editor warning).
+- Shipping, tax and launch-discount protective suites: 75/75 passed.
+- Existing local Product Manager E2E: 17/17 checks passed with actual PostgreSQL,
+  RLS, application handlers and provider doubles. Disposable loopback clones only.
+- Existing checkout API suite in offline mode: 19/19 passed again against the final
+  generated production server. All setup/assertions completed without remote access.
+- TypeScript passed. Targeted ESLint passed for changed TS/TSX/MJS files.
+- git diff --check passed. Protected migrations 001–083 remain unchanged.
+- Production build first passed; final rerun hit sandbox EPERM in Nitro external
+  dependency readlink tracing. The explicitly approved local retry outside the
+  sandbox completed all compiler/Nitro stages and generated .output/nitro.json.
+  Its PowerShell *> redirection wrapper returned exit 1 after representing native
+  stderr plugin warnings as NativeCommandError; no "Build failed", "error during
+  build" or EPERM appears in that retry log. The final generated server passes the
+  19 offline checkout tests. Distinguish successful generated artifacts from this
+  nonzero shell-wrapper exit; a clean release-environment build exit is still required.
+  Log: outputs/product-manager-release-build.log. No deployment was part of the command.
+
+6. Release procedure — proposal only, requires approval
+1) Finish the isolated visual/keyboard/touch review above and review this diff.
+2) In an approved separate test environment, verify account ownership, read/list
+   permissions and mappings. Old pre-V1/untagged mappings are deliberately blocked;
+   never guess ownership or automatically rewrite their metadata. Resolve ambiguous
+   legacy objects by a separately reviewed recovery plan. No live inspection ran here.
+3) During an approved rollout, stop manual Product Manager saves/syncs/publications,
+   drain all old requests and ensure old deployments cannot receive sync traffic.
+   An old writer still creating random IDs cannot be protected by new code. Do not
+   run the two creation protocols concurrently or roll back to the unsafe writer.
+4) Deploy reviewed code only after separate explicit approval. No migration needed.
+   No automatic resync, backfill, publication or Stripe mutation job should run.
+5) Re-enable the deliberate manual flow. An unmapped legacy product triggers bounded
+   read-only reconciliation before any create. Errors/ambiguous matches stay blocked.
+6) Publish only through the checked action, then verify catalogue and checkout in
+   the approved environment. Existing remote objects must not be modified as a test.
+
+Residual limits: remote state can change after a publication preflight; no cross-
+system atomic transaction or continuous Stripe-health monitor is claimed. Checkout
+still refuses incomplete local mappings and uses frozen historical bindings. Out-of-
+band changes to remote ownership metadata and concurrent external/manual creation
+are outside the app's uniqueness protocol and require operational review.
+
+Changed files for review (including retained work from the UX audit)
+app/AdminProducts.tsx; app/admin-portal.css; app/api/admin/products/route.ts;
+lib/productStripeIdentity.ts (new); lib/productStripeSync.ts;
+lib/productStripePrices.ts; package.json;
+tests/product-manager.test.mjs; tests/product-manager-help.test.mjs;
+tests/product-manager-safety.test.mjs (new); tests/product-manager-publication.test.mjs (new);
+tests/helpers/productStripeMock.mjs; tests/helpers/productSafetyRoute.mjs (new);
+tests/helpers/checkoutOfflineFetch.mjs (new);
+tests/runtime/checkout-api-offline.mjs (new);
+tests/runtime/product-manager-help-preview.mjs (new); this report.
+The original docs/product-manager-ux-stripe-audit.txt remains the historical audit.
+Unrelated pre-existing workspace assets were not changed.
+
+References checked (documentation only)
+https://docs.stripe.com/api/products/create — caller-supplied unique Product IDs.
+https://docs.stripe.com/api/idempotent_requests — finite idempotency retention.
+Installed stripe 22.5.0 ProductCreateParams.id and products.retrieve/list signatures.
+
+Status: STOPPED FOR REVIEW. No commit, push, deployment, production database change,
+real Stripe call, automatic syncing or migration 084 authorized/performed.

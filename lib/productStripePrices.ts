@@ -9,10 +9,16 @@ export async function resolveProductPrice(stripe: Stripe, input: {
   const key = 'gloa-pm-' + createHash('sha256').update(JSON.stringify(input)).digest('hex');
   const verify = (p: Stripe.Price): string => {
     if (p.product !== input.productId || p.unit_amount !== input.amount || p.currency !== 'eur' ||
-      p.recurring || p.billing_scheme !== 'per_unit' || !p.active) throw new Error('Stripe binding mismatch');
+      p.recurring || p.billing_scheme !== 'per_unit' || !p.active || p.lookup_key !== key ||
+      p.metadata?.gloa_variant_id !== input.variantId || p.metadata?.gloa_revision !== String(input.revision) ||
+      p.metadata?.gloa_purpose !== input.purpose) throw new Error('Stripe binding mismatch');
     return p.id;
   };
-  const find = async () => (await stripe.prices.list({ lookup_keys: [key], limit: 1 })).data[0];
+  const find = async () => {
+    const page = await stripe.prices.list({ lookup_keys: [key], limit: 2 });
+    if (page.has_more || page.data.length > 1) throw new Error('Ambiguous Stripe Price binding');
+    return page.data[0];
+  };
   const existing = await find();
   if (existing) return verify(existing);
   try {

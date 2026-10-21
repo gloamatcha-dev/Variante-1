@@ -2,9 +2,10 @@ import { requireAdminIdentity } from '../../../../lib/adminActionRoute';
 import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin';
 import { getStripeClient } from '../../../../lib/stripe';
 import { isProductUuid, validateProductDraft } from '../../../../lib/productManagerRules';
-import { synchronizeProduct, type SyncProduct } from '../../../../lib/productStripeSync';
+import { synchronizeProduct, verifyProductStripeMapping, type SyncProduct } from '../../../../lib/productStripeSync';
 import { canWrite } from '../../../../lib/adminRoles';
 import { uploadProductImage } from '../../../../lib/productImageUpload';
+import { ProductStripeReviewRequired } from '../../../../lib/productStripeIdentity';
 
 export async function POST(request: Request): Promise<Response> {
   // Auth before reading a bounded form payload. Viewer reads are explicitly supported.
@@ -51,21 +52,36 @@ export async function POST(request: Request): Promise<Response> {
     if (body.action === 'sync') {
       const { data, error } = await admin.from('products').select('*, product_variants(*)').eq('id', body.id).single();
       if (error || !data || data.stripe_sync_revision !== body.revision || data.archived_at) throw new Error('Veraltete Revision. Neu laden.');
-      if (data.stripe_sync_status === 'synced') return Response.json({ ok: true, revision: body.revision });
       const stripe = getStripeClient();
       if (!stripe) throw new Error('Stripe nicht konfiguriert.');
+      if (data.stripe_sync_status === 'synced') {
+        await verifyProductStripeMapping(stripe, data as SyncProduct);
+        return Response.json({ ok: true, revision: body.revision });
+      }
       let result;
       try { result = await synchronizeProduct(stripe, data as SyncProduct); }
-      catch {
-        const failed = await admin.rpc('admin_product_sync_result_v1', { ...common, p_stripe_product_id: null, p_prices: [], p_error: 'Stripe-Abgleich fehlgeschlagen. Erneut versuchen.' });
+      catch (error) {
+        const message = error instanceof ProductStripeReviewRequired
+          ? 'Stripe-Zuordnung unklar oder nicht verfügbar. Abgleich gestoppt; Zuordnung vor einem neuen Versuch prüfen.'
+          : 'Stripe-Abgleich fehlgeschlagen. Erneut versuchen.';
+        const failed = await admin.rpc('admin_product_sync_result_v1', { ...common, p_stripe_product_id: null, p_prices: [], p_error: message });
         if (failed.error) return Response.json({ error: 'Revision geändert. Neu laden.' }, { status: 409 });
-        return Response.json({ error: 'Stripe-Abgleich fehlgeschlagen. Entwurf bleibt unveröffentlicht.' }, { status: 502 });
+        return Response.json({ error: message + ' Entwurf bleibt unveröffentlicht.' }, { status: 502 });
       }
       const saved = await admin.rpc('admin_product_sync_result_v1', { ...common, p_stripe_product_id: result.productId, p_prices: result.prices, p_error: null });
       if (saved.error) return Response.json({ error: 'Abgleich nicht gespeichert. Neu laden und erneut versuchen.' }, { status: 409 });
       return Response.json({ ok: true, ...saved.data });
     }
     if (body.action === 'publish' || body.action === 'archive') {
+      if (body.action === 'publish') {
+        const { data, error } = await admin.from('products').select('*, product_variants(*)').eq('id', body.id).single();
+        const stripe = getStripeClient();
+        if (error || !data || data.stripe_sync_revision !== body.revision || !stripe) {
+          return Response.json({ error: 'Veröffentlichung gesperrt. Revision und Stripe-Konfiguration prüfen.' }, { status: 409 });
+        }
+        try { await verifyProductStripeMapping(stripe, data as SyncProduct); }
+        catch { return Response.json({ error: 'Veröffentlichung gesperrt. Stripe-Zuordnungen konnten nicht bestätigt werden.' }, { status: 409 }); }
+      }
       const result = await admin.rpc('admin_product_state_v1', { ...common, p_action: body.action === 'publish' ? 'published' : 'archived' });
       if (result.error) return Response.json({ error: 'Status nicht geändert. Revision und Stripe-Abgleich prüfen.' }, { status: 409 });
       // New sessions are blocked atomically by archive. Existing payable Sessions are

@@ -17,7 +17,8 @@ const euros = (c: number) => (c / 100).toLocaleString('de-DE', { style: 'currenc
 export function AdminProducts() {
   const [products, setProducts] = useState<Product[]>([]), [inventory, setInventory] = useState<Inventory[]>([]);
   const [writable, setWritable] = useState(false), [error, setError] = useState(''), [busy, setBusy] = useState(false);
-  const [editor, setEditor] = useState<{ id: string; revision: number; document: EditorProduct; persisted: string[] } | null>(null);
+  const [editor, setEditor] = useState<{ id: string; revision: number; document: EditorProduct; persisted: string[]; wasPublished?: boolean } | null>(null);
+  const [unpublishAcknowledged, setUnpublishAcknowledged] = useState(false);
   const [submitted, setSubmitted] = useState(false), [imageError, setImageError] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [imageStatus, setImageStatus] = useState(''), [imageProgress, setImageProgress] = useState<number | null>(null);
@@ -43,7 +44,8 @@ export function AdminProducts() {
   }
   function edit(p: Product) {
     setSubmitted(false); setImageError('');
-    setEditor({ id: p.id, revision: p.stripe_sync_revision, persisted: p.product_variants.map(v => v.id), document: {
+    setUnpublishAcknowledged(false);
+    setEditor({ id: p.id, revision: p.stripe_sync_revision, wasPublished: p.is_active, persisted: p.product_variants.map(v => v.id), document: {
       name: p.name, slug: p.slug, product_type: p.product_type, short_description: p.short_description ?? '', description: p.description ?? '',
       primary_image_path: p.primary_image_path ?? '', sort_order: p.sort_order, variants: p.product_variants.map(editVariant) } });
   }
@@ -86,6 +88,10 @@ export function AdminProducts() {
   function save() {
     if (!editor || busy) return;
     setSubmitted(true); setError('');
+    if (editor.wasPublished && !unpublishAcknowledged) {
+      setError('Bitte bestätigen: Speichern nimmt das Produkt bis zum erneuten Stripe-Abgleich und Veröffentlichen aus dem Verkauf.');
+      return;
+    }
     try { const document = editorDocument(editor.document); void act('save', { id: editor.id, stripe_sync_revision: editor.revision }, document); }
     catch (e) { setError(e instanceof Error ? e.message : 'Bitte die Produktfelder prüfen.'); }
   }
@@ -98,41 +104,44 @@ export function AdminProducts() {
     {!loaded && !error && <p role="status">Katalog wird geladen …</p>}
     {editor && d && <form onSubmit={e => { e.preventDefault(); save(); }} onInvalid={() => setSubmitted(true)} className="product-editor">
       <h3>Produkt bearbeiten</h3>
-      <label>Name<input required maxLength={120} value={d.name} onChange={e => field('name', e.target.value)} /></label>
-      <label>Slug<input required maxLength={64} pattern="[a-z0-9]+(-[a-z0-9]+)*" value={d.slug} onChange={e => field('slug', e.target.value)} /></label>
-      <label>Typ<select value={d.product_type} onChange={e => field('product_type', e.target.value as ProductDraft['product_type'])}>{PRODUCT_TYPES.map(t => <option key={t}>{t}</option>)}</select></label>
-      <label>Kurzbeschreibung<textarea maxLength={500} value={d.short_description} onChange={e => field('short_description', e.target.value)} /></label>
-      <label>Beschreibung<textarea maxLength={10000} rows={5} value={d.description} onChange={e => field('description', e.target.value)} /></label>
-      <label>Produktbild auswählen oder austauschen<input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} aria-describedby="product-image-help product-image-error" onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void upload(file); }} /></label>
+      {editor.wasPublished && <p role="note" className="product-publish-warning">Dieses Produkt ist veröffentlicht. Speichern setzt es sofort auf Entwurf und sperrt neue Käufe. Anschließend sind ein manueller Stripe-Abgleich und eine erneute Veröffentlichung erforderlich.</p>}
+      <div className="product-field-help"><label>Name<input required maxLength={120} value={d.name} onChange={e => field('name', e.target.value)} /></label><details><summary aria-label="Hilfe: Name">ⓘ</summary><p>Pflichtfeld. Produktname im Shop, maximal 120 Zeichen, z. B. GLOA Bambusbesen.</p></details></div>
+      <div className="product-field-help"><label>Slug<input required maxLength={64} pattern="[a-z0-9]+(-[a-z0-9]+)*" value={d.slug} onChange={e => field('slug', e.target.value)} /></label><details><summary aria-label="Hilfe: Slug">ⓘ</summary><p>Pflichtfeld. Eindeutiger Teil der Produktadresse, z. B. bambusbesen. Nur Kleinbuchstaben, Zahlen und Bindestriche, maximal 64 Zeichen. Änderungen verändern die Produktadresse.</p></details></div>
+      <div className="product-field-help"><label>Typ<select value={d.product_type} onChange={e => field('product_type', e.target.value as ProductDraft['product_type'])}>{PRODUCT_TYPES.map(t => <option key={t}>{t}</option>)}</select></label><details><summary aria-label="Hilfe: Typ">ⓘ</summary><p>Pflichtauswahl. MATCHA, MERCH, ACCESSORY (Zubehör) oder BUNDLE (Set) wählen. Der Typ ersetzt keine Steuerklassifikation und legt kein Abo an.</p></details></div>
+      <div className="product-field-help"><label>Kurzbeschreibung<textarea maxLength={500} value={d.short_description} onChange={e => field('short_description', e.target.value)} /></label><details><summary aria-label="Hilfe: Kurzbeschreibung">ⓘ</summary><p>Optional. Kurzer Produkttext, maximal 500 Zeichen, z. B. Bambusbesen zum Aufschlagen von Matcha.</p></details></div>
+      <div className="product-field-help"><label>Beschreibung<textarea maxLength={10000} rows={5} value={d.description} onChange={e => field('description', e.target.value)} /></label><details><summary aria-label="Hilfe: Beschreibung">ⓘ</summary><p>Optional. Ausführlicher Produkttext, maximal 10.000 Zeichen, z. B. Material, Verwendung und Pflegehinweise.</p></details></div>
+      <div className="product-field-help"><label>Produktbild auswählen oder austauschen<input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} aria-describedby="product-image-help product-image-error" onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void upload(file); }} /></label><details><summary aria-label="Hilfe: Produktbild auswählen oder austauschen">ⓘ</summary><p>Optional. JPG, PNG oder WebP auswählen. Nach dem Upload das Produkt als Entwurf speichern. Bilder werden nicht an Stripe übertragen.</p></details></div>
       <p id="product-image-help">JPG, PNG oder WebP, maximal 50 MiB. Das Bild wird vor dem Upload auf höchstens 5 MiB optimiert. Das bisherige Bild bleibt bis zu einem erfolgreichen Austausch erhalten.</p>
       <p id="product-image-error" role={imageError ? 'alert' : undefined}>{imageError}</p>
       {imageStatus && <p role="status">{imageStatus}{imageProgress !== null && ` ${imageProgress} %`}</p>}
       {imageStatus && <progress max={100} value={imageProgress ?? undefined} aria-label="Bild-Upload" />}
       {(imagePreview || (d.primary_image_path && validProductImage(d.primary_image_path))) && <Image unoptimized width={180} height={180} className="product-preview" src={imagePreview || d.primary_image_path} alt="Produktvorschau" referrerPolicy="no-referrer" />}
-      <label>Sortierung<input type="number" value={d.sort_order} onChange={e => field('sort_order', Number(e.target.value))} /></label>
+      <div className="product-field-help"><label>Sortierung<input type="number" value={d.sort_order} onChange={e => field('sort_order', Number(e.target.value))} /></label><details><summary aria-label="Hilfe: Sortierung">ⓘ</summary><p>Ganzzahl für die Katalogreihenfolge. Kleinere Werte stehen weiter vorn; gleiche Werte sind möglich.</p></details></div>
       {d.variants.map(v => { const linked = inventory.find(i => i.id === v.inventory_item_id); return <fieldset key={v.id}><legend>{v.label || 'Neue Variante'}</legend>
-        <label>SKU<input required maxLength={60} pattern="[A-Z0-9][A-Z0-9_-]*" readOnly={editor.persisted.includes(v.id)} value={v.sku} onChange={e => variant(v.id, { sku: e.target.value })} /></label>
-        <label>Bezeichnung<input required maxLength={120} value={v.label} onChange={e => variant(v.id, { label: e.target.value })} /></label>
-        <label>Nettoinhalt g (optional)<input type="number" min={1} value={v.size_grams ?? ''} onChange={e => variant(v.id, { size_grams: e.target.value ? Number(e.target.value) : null })} /></label>
-        <label>Bruttopreis EUR<input required type="text" inputMode="decimal" placeholder="0,00 €" value={v.price_input} aria-invalid={(submitted || !!v.price_input) && parseProductPrice(v.price_input) === null} aria-describedby={`price-${v.id}`} onChange={e => variant(v.id, { price_input: e.target.value })} /></label>
+        <div className="product-field-help"><label>SKU<input required maxLength={60} pattern="[A-Z0-9][A-Z0-9_-]*" readOnly={editor.persisted.includes(v.id)} value={v.sku} onChange={e => variant(v.id, { sku: e.target.value })} /></label><details><summary aria-label="Hilfe: SKU">ⓘ</summary><p>Pflichtfeld. Eindeutige Artikelnummer je Variante, z. B. GLOA-BESEN-01. Maximal 60 Zeichen: Großbuchstaben, Zahlen, Bindestriche oder Unterstriche; erstes Zeichen Buchstabe oder Zahl. Nach dem Speichern unveränderlich.</p></details></div>
+        <div className="product-field-help"><label>Bezeichnung<input required maxLength={120} value={v.label} onChange={e => variant(v.id, { label: e.target.value })} /></label><details><summary aria-label="Hilfe: Bezeichnung">ⓘ</summary><p>Pflichtfeld. Name dieser kaufbaren Ausführung, maximal 120 Zeichen, z. B. Natur oder 30 g. Weitere Ausführungen als eigene Varianten anlegen.</p></details></div>
+        <div className="product-field-help"><label>Nettoinhalt g (optional)<input type="number" min={1} value={v.size_grams ?? ''} onChange={e => variant(v.id, { size_grams: e.target.value ? Number(e.target.value) : null })} /></label><details><summary aria-label="Hilfe: Nettoinhalt g (optional)">ⓘ</summary><p>Optional. Tatsächlicher Nettoinhalt in ganzen Gramm, z. B. 30 für 30 g Matcha. Kein Versandgewicht und keine Bestellmenge; bei Zubehör ohne Grammangabe leer lassen.</p></details></div>
+        <div className="product-field-help"><label>Bruttopreis EUR<input required type="text" inputMode="decimal" placeholder="0,00 €" value={v.price_input} aria-invalid={(submitted || !!v.price_input) && parseProductPrice(v.price_input) === null} aria-describedby={`price-${v.id}`} onChange={e => variant(v.id, { price_input: e.target.value })} /></label><details><summary aria-label="Hilfe: Bruttopreis EUR">ⓘ</summary><p>Pflichtfeld. Preis für eine Einheit einschließlich Umsatzsteuer in Euro, z. B. 14,99. Größer als 0, höchstens zwei Nachkommastellen. Die Steuerkategorie separat fachlich korrekt auswählen; sie ersetzt den Preis nicht.</p></details></div>
         {(submitted || !!v.price_input) && parseProductPrice(v.price_input) === null && <p id={`price-${v.id}`} role="alert">Bitte einen Preis größer als 0 mit höchstens zwei Nachkommastellen eingeben, zum Beispiel 14,99.</p>}
-        <label>Steuerkategorie<select required value={v.tax_category} aria-invalid={submitted && !v.tax_category} aria-describedby={`tax-${v.id}`} onChange={e => variant(v.id, { tax_category: e.target.value as EditorVariant['tax_category'] })}><option value="" disabled>Steuerkategorie auswählen</option>{Object.entries(PRODUCT_TAX_CATEGORIES).map(([key, rate]) => <option key={key} value={key}>{TAX_CATEGORY_LABELS[key as keyof typeof TAX_CATEGORY_LABELS]} · {rate} %</option>)}</select></label>
+        <div className="product-field-help"><label>Steuerkategorie<select required value={v.tax_category} aria-invalid={submitted && !v.tax_category} aria-describedby={`tax-${v.id}`} onChange={e => variant(v.id, { tax_category: e.target.value as EditorVariant['tax_category'] })}><option value="" disabled>Steuerkategorie auswählen</option>{Object.entries(PRODUCT_TAX_CATEGORIES).map(([key, rate]) => <option key={key} value={key}>{TAX_CATEGORY_LABELS[key as keyof typeof TAX_CATEGORY_LABELS]} · {rate} %</option>)}</select></label><details><summary aria-label="Hilfe: Steuerkategorie">ⓘ</summary><p>Pflichtauswahl ohne Vorauswahl bei neuen Varianten. Fachlich bestätigte Einordnung wählen. Der angezeigte Satz stammt aus der bestehenden Steuerkonfiguration und bestimmt den Steueranteil im Bruttopreis. Bundles benötigen eine einheitliche, bestätigte Einordnung.</p></details></div>
         {submitted && !v.tax_category && <p id={`tax-${v.id}`} role="alert">Bitte eine Steuerkategorie auswählen.</p>}
-        <label>Verfügbarkeit<select value={v.availability} onChange={e => variant(v.id, { availability: e.target.value as ProductVariantDraft['availability'] })}><option value="available">Verfügbar</option><option value="sold_out">AUSVERKAUFT</option></select></label>
-        <label>Inventar (optional)<select value={v.inventory_item_id ?? ''} onChange={e => variant(v.id, { inventory_item_id: e.target.value || null })}><option value="">Nicht verknüpft</option>{inventory.map(i => <option key={i.id} value={i.id}>{i.name}{i.is_active ? '' : ' · INAKTIV'}</option>)}</select></label>
+        <div className="product-field-help"><label>Verfügbarkeit<select value={v.availability} onChange={e => variant(v.id, { availability: e.target.value as ProductVariantDraft['availability'] })}><option value="available">Verfügbar</option><option value="sold_out">AUSVERKAUFT</option></select></label><details><summary aria-label="Hilfe: Verfügbarkeit">ⓘ</summary><p>Verfügbar erlaubt den Kauf einer aktiven Variante eines veröffentlichten, abgeglichenen Produkts. AUSVERKAUFT sperrt neue Käufe. Diese Auswahl bucht keinen Bestand.</p></details></div>
+        <div className="product-field-help"><label>Inventar (optional)<select value={v.inventory_item_id ?? ''} onChange={e => variant(v.id, { inventory_item_id: e.target.value || null })}><option value="">Nicht verknüpft</option>{inventory.map(i => <option key={i.id} value={i.id}>{i.name}{i.is_active ? '' : ' · INAKTIV'}</option>)}</select></label><details><summary aria-label="Hilfe: Inventar (optional)">ⓘ</summary><p>Optional. Vorhandenen Inventarartikel zuordnen. Der Bestand dient zur Information; es erfolgt keine automatische Bestandsbewegung.</p></details></div>
         {linked && <p>Bestand: {linked.current_quantity} {linked.unit}{!linked.is_active && ' · WARNUNG: Inventarartikel inaktiv'}. Keine automatische Bewegung.</p>}
-        <label><input type="checkbox" checked={v.is_active} onChange={e => variant(v.id, { is_active: e.target.checked })} />Variante aktiv</label>
+        <div className="product-field-help"><label><input type="checkbox" checked={v.is_active} onChange={e => variant(v.id, { is_active: e.target.checked })} />Variante aktiv</label><details><summary aria-label="Hilfe: Variante aktiv">ⓘ</summary><p>Aktiv nimmt die Variante in den Stripe-Abgleich auf. Kaufen erfordert zusätzlich Verfügbarkeit und Veröffentlichung. Bestehende Varianten zum Ausblenden deaktivieren; ihre Identität bleibt erhalten.</p></details></div>
         {!editor.persisted.includes(v.id) && <button type="button" onClick={() => field('variants', d.variants.filter(x => x.id !== v.id))}>Ungespeicherte Variante entfernen</button>}
       </fieldset>; })}
       <p>Bestehende Matcha-Abos und Jahrespläne bleiben geschützt. Neue Produkte sind nur einmalig kaufbar. Bundles benötigen eine einzige fachlich bestätigte Steuerklassifikation.</p>
       <button type="button" disabled={busy} onClick={() => field('variants', [...d.variants, newEditorVariant()])}>VARIANTE HINZUFÜGEN</button>
+      {editor.wasPublished && <label className="product-publish-confirm"><input type="checkbox" required checked={unpublishAcknowledged} onChange={e => setUnpublishAcknowledged(e.target.checked)} />Ich bestätige: Mit dem Speichern wird dieses Produkt zum Entwurf und vorübergehend nicht kaufbar.</label>}
       <button type="submit" disabled={busy || !d.variants.length}>{busy ? 'Bitte warten …' : 'ALS ENTWURF SPEICHERN'}</button>
       <button type="button" disabled={busy} onClick={() => setEditor(null)}>Schließen</button>
     </form>}
+    <details className="product-workflow-help"><summary>ⓘ Speichern, Stripe-Abgleich und Veröffentlichung</summary><p>Speichern setzt auch veröffentlichte Produkte auf Entwurf. Danach separat Stripe synchronisieren und veröffentlichen. Der Abgleich legt ein Stripe-Produkt und Preise für aktive Varianten an oder verwendet vorhandene Zuordnungen. Ein erfolgreicher Abgleich allein veröffentlicht nichts. Preisänderungen erhalten neue Stripe-Preise; bisherige Preise bleiben bestehen. Bei Fehlern die Stripe-Spalte prüfen und den Abgleich erneut versuchen.</p></details>
     <div className="portal-table-wrap"><table className="portal-table"><thead><tr>{['Produkt', 'Typ', 'Varianten / Preis', 'Status', 'Stripe', 'Verfügbarkeit', 'Inventar', 'Aktualisiert', 'Aktionen'].map(h => <th key={h}>{h}</th>)}</tr></thead>
       <tbody>{products.map(p => { const amounts = p.product_variants.map(v => v.price_gross_cents).filter(n => typeof n === 'number'); return <tr key={p.id}>
         <td>{p.name}<br /><small>{p.slug}</small></td><td>{p.product_type}</td><td>{p.product_variants.length} · {amounts.length ? `${euros(Math.min(...amounts))} – ${euros(Math.max(...amounts))}` : 'Kein Preis'}</td>
-        <td>{state(p)}</td><td>{p.stripe_sync_status}{p.stripe_sync_revision === 0 && ' · Legacy-Übergang'}{p.stripe_sync_error && <p>{p.stripe_sync_error}</p>}</td>
+        <td>{state(p)}</td><td>{({ pending: 'Abgleich ausstehend', synced: 'Stripe-Abgleich erfolgreich', error: 'Abgleich fehlgeschlagen' } as Record<string, string>)[p.stripe_sync_status] ?? p.stripe_sync_status}{p.stripe_sync_revision === 0 && ' · Legacy-Übergang'}{p.stripe_sync_error && <p>{p.stripe_sync_error}</p>}</td>
         <td>{p.product_variants.some(v => v.is_active && v.availability === 'available') ? 'Verfügbar' : 'AUSVERKAUFT'}</td>
         <td>{p.product_variants.filter(v => v.inventory_item_id).length} verknüpft</td><td>{new Date(p.updated_at).toLocaleString('de-DE')}</td>
         <td>{!p.archived_at && <><button type="button" disabled={busy || !writable} onClick={() => edit(p)}>Bearbeiten</button>

@@ -143,3 +143,16 @@
 .withdrawal-simple{max-width:760px;padding-block:12px}.withdrawal-simple h4{margin:24px 0 12px}.withdrawal-contract{font-size:20px;font-weight:650}.withdrawal-choices{display:flex;flex-wrap:wrap;gap:12px}.withdrawal-choices button{flex:1 1 220px;min-height:64px;padding:16px;text-align:left;border:1px solid var(--line)}.withdrawal-choices button[aria-pressed=true]{border:2px solid var(--plum);background:var(--cream)}.withdrawal-calculation{margin-block:24px;padding:20px;background:var(--cream);border:1px solid var(--line)}.withdrawal-calculation dl{margin:0}.withdrawal-calculation dl>div{display:flex;justify-content:space-between;gap:20px;padding:8px 0}.withdrawal-calculation dd{margin:0;font-variant-numeric:tabular-nums}.withdrawal-total{margin-top:10px;border-top:1px solid var(--line);font-size:22px;font-weight:700}.withdrawal-primary{min-height:52px;padding:14px 24px}.withdrawal-loss label{display:block;margin:12px 0}.withdrawal-confirmation{margin:20px 0;padding:24px;border:2px solid var(--plum)}.withdrawal-simple details,.ops-customer-rights details{margin-block:20px}.ops-customer-rights summary{cursor:pointer;padding:12px 0;font-weight:600}
 
 .admin-products .product-editor{display:grid;gap:16px;max-width:900px;margin:24px 0}.product-editor label{display:grid;gap:6px}.product-editor fieldset{display:grid;gap:12px;padding:20px;border:1px solid #ddd}.product-editor input,.product-editor textarea,.product-editor select{padding:10px;max-width:100%}.product-preview{width:180px;height:180px;object-fit:contain}.admin-products td{vertical-align:top}.admin-products td button{display:block;margin:6px 0}
+/* Native disclosures: touch, mouse and keyboard; scoped to the Product Manager. */
+.admin-products .product-field-help{position:relative;min-width:0;padding-top:0}
+.admin-products .product-field-help>label{padding-top:6px}
+.admin-products .product-field-help>details{position:static}
+.admin-products .product-field-help summary{position:absolute;right:0;top:0;cursor:pointer;list-style:none;min-width:32px;min-height:32px;text-align:center;background:#fff;border-radius:4px}
+.admin-products .product-field-help summary::-webkit-details-marker{display:none}
+.admin-products .product-field-help summary:focus-visible,.admin-products .product-workflow-help summary:focus-visible{outline:2px solid currentColor;outline-offset:3px}
+.admin-products .product-field-help details>p{position:static;box-sizing:border-box;max-width:480px;padding:10px;margin:8px 0 0;background:#fff;color:#222;border:1px solid #bbb;border-radius:6px;font-size:14px;line-height:1.5;overflow-wrap:anywhere}
+.admin-products .product-field-help>label{padding-right:40px}
+.admin-products .product-publish-warning{padding:12px;border-left:3px solid #916b16;background:#fff8e6;color:#493600}
+.admin-products .product-publish-confirm{display:flex;align-items:flex-start;gap:8px}
+.admin-products .product-workflow-help{max-width:650px;margin:16px 0;font-size:14px}
+.admin-products .product-workflow-help summary{cursor:pointer}

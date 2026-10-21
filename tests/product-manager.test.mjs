@@ -160,8 +160,18 @@ for (const [type, labels] of [['MERCH', ['White / S', 'White / M', 'White / L', 
 }
 test('Timeout after Product creation reconciles on retry without duplicate objects', async () => {
   const mock = productStripeMock(), p = syncRow(draft()); mock.timeoutProduct();
-  await assert.rejects(synchronizeProduct(mock.adapter, p));
+  await synchronizeProduct(mock.adapter, p);
   await synchronizeProduct(mock.adapter, p); assert.equal(mock.products.size, 1); assert.equal(mock.prices.size, 3);
+});
+
+test('Saving a new revision after an unpersisted Product reuses its permanent remote identity', async () => {
+  const mock = productStripeMock(), p = syncRow(draft()); mock.timeoutProduct();
+  const original = await synchronizeProduct(mock.adapter, p);
+  mock.expireIdempotency();
+  const next = { ...p, stripe_sync_revision: p.stripe_sync_revision + 1 };
+  const retry = await synchronizeProduct(mock.adapter, next);
+  assert.equal(retry.productId, original.productId);
+  assert.equal(mock.products.size, 1);
 });
 test('Timeout after Price creation and parallel retries reuse verified lookup winners', async () => {
   const mock = productStripeMock(), p = syncRow(draft()); mock.timeoutPrice();
