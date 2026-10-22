@@ -42,18 +42,75 @@ test('Published edit warns before saving and requires deliberate acknowledgement
   assert.equal(ui.find(n => n.type === 'input' && n.props.type === 'checkbox' && n.props.required).props.checked, false);
 });
 
-test('Draft publication remains separate and only offered after synchronization', async () => {
+test('One-click publication is explicitly offered for drafts in every sync state', async () => {
   const base = { id: 'product', name: 'Besen', slug: 'besen', product_type: 'ACCESSORY',
     product_variants: [{ id: 'variant', is_active: true, price_gross_cents: 1499 }],
     stripe_sync_revision: 1, is_active: false, archived_at: null, updated_at: '2026-10-19' };
   for (const status of ['pending', 'error', 'synced']) {
     const ui = await productEditorInteraction([{ ...base, stripe_sync_status: status }]);
-    const publish = ui.find(n => n.type === 'button' && n.props.children === 'VERÖFFENTLICHEN');
-    assert.equal(!!publish, status === 'synced');
+    const publish = ui.find(n => n.type === 'button' && n.props.children === 'PRÜFEN & VERÖFFENTLICHEN');
+    assert.equal(!!publish, true);
     assert.equal(ui.requests.length, 0);
     if (publish) {
       publish.props.onClick(); await ui.flush();
-      assert.deepEqual(ui.requests.map(r => r.action), ['publish']);
+      assert.deepEqual(ui.requests.map(r => r.action ?? JSON.parse(r.options.body).action), ['review-publish', 'publication-status']);
     }
+  }
+});
+
+test('Publication waits for final confirmation and never shows success for partial or failed streams', async () => {
+  const product = {id:'product',name:'Besen',slug:'besen',product_type:'ACCESSORY',product_variants:[],stripe_sync_revision:1,
+    stripe_sync_status:'pending',is_active:false,archived_at:null,updated_at:'2026-10-19'};
+  for (const events of [
+    [{stage:'Stripe wird synchronisiert'}],
+    [{stage:'Veröffentlichung abgeschlossen'},{error:'Stripe-Zuordnung nicht bestätigt.'}],
+    [{stage:'Prüfung läuft'},{ok:true,published:true}],
+  ]) {
+    const ui=await productEditorInteraction([product], {publishResponse:()=>new Response(events.map(e=>JSON.stringify(e)+'\n').join('')),
+      publicationStatus:({id})=>({id,status:events.at(-1).published===true?'published':'draft',revision:1})});
+    ui.find(n=>n.type==='button'&&n.props.children==='PRÜFEN & VERÖFFENTLICHEN').props.onClick();await ui.flush();
+    const status=ui.find(n=>n.props?.role==='status'&&n.props.children==='Veröffentlichung abgeschlossen');
+    assert.equal(!!status,events.at(-1).published===true);
+    if(!status)assert.ok(ui.find(n=>n.props?.role==='alert'));
+  }
+});
+
+test('Lost publication responses reconcile to authoritative published, draft or unknown without another commercial request', async () => {
+  const product={id:'product',name:'Besen',slug:'besen',product_type:'ACCESSORY',product_variants:[],stripe_sync_revision:1,
+    stripe_sync_status:'pending',is_active:false,archived_at:null,updated_at:'2026-10-19'};
+  for(const status of ['published','draft','unknown'])for(const mode of ['lost','partial','http-error']) {
+    let authoritative=status;
+    const ui=await productEditorInteraction([product],{
+      publishResponse:()=>{if(mode==='lost')throw Error('Verbindung unterbrochen.');return mode==='http-error'
+        ?Response.json({error:'Veröffentlichung nicht bestätigt.'},{status:502})
+        :new Response('{"stage":"Stripe-Zuordnung wird geprüft"}\n');},
+      publicationStatus:({id})=>({id,status:authoritative,revision:1,stripeSyncStatus:'synced',archivedAt:null}),
+    });
+    ui.find(n=>n.type==='button'&&n.props.children==='PRÜFEN & VERÖFFENTLICHEN').props.onClick();await ui.flush();
+    const expected=status==='published'?'Veröffentlicht':status==='draft'?'Entwurf':'Status unklar — bitte aktualisieren';
+    assert.ok(ui.find(n=>n.props?.role==='status'&&n.props.children===expected),status+mode);
+    assert.equal(ui.requests.filter(r=>r.options?.headers?.Accept==='application/x-ndjson').length,1);
+    assert.equal(ui.requests.filter(r=>r.action==='publication-status').length,1);
+    assert.ok(!ui.find(n=>n.props?.role==='status'&&n.props.children==='Veröffentlichung abgeschlossen'));
+    if(status==='unknown'){
+      assert.ok(ui.find(n=>n.type==='td'&&n.props.children==='Status unklar — bitte aktualisieren'));
+      assert.equal(ui.find(n=>n.type==='button'&&n.props.children==='PRÜFEN & VERÖFFENTLICHEN').props.disabled,true);
+      authoritative='published';
+      ui.find(n=>n.type==='button'&&n.props.children==='Neu laden').props.onClick();await ui.flush();
+      assert.ok(ui.find(n=>n.props?.role==='status'&&n.props.children==='Veröffentlicht'));
+      assert.equal(ui.requests.filter(r=>r.options?.headers?.Accept==='application/x-ndjson').length,1);
+    }
+  }
+});
+
+test('A success stream alone cannot override unavailable or draft authoritative status', async () => {
+  const product={id:'product',name:'Besen',slug:'besen',product_type:'ACCESSORY',product_variants:[],stripe_sync_revision:1,
+    stripe_sync_status:'pending',is_active:false,archived_at:null,updated_at:'2026-10-19'};
+  for(const status of ['draft','unknown','network-error']){
+    const ui=await productEditorInteraction([product],{publicationStatus:({id})=>{if(status==='network-error')throw Error('Read unavailable');return {id,status,revision:1};}});
+    ui.find(n=>n.type==='button'&&n.props.children==='PRÜFEN & VERÖFFENTLICHEN').props.onClick();await ui.flush();
+    assert.ok(ui.find(n=>n.props?.role==='status'&&n.props.children===(status==='draft'?'Entwurf':'Status unklar — bitte aktualisieren')));
+    assert.ok(!ui.find(n=>n.props?.role==='status'&&n.props.children==='Veröffentlichung abgeschlossen'));
+    assert.equal(ui.requests.filter(r=>r.options?.headers?.Accept==='application/x-ndjson').length,1);
   }
 });

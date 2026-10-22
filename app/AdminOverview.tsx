@@ -85,7 +85,7 @@ type Payload = {
   };
   signedInAs: string;
   /** The operator's own admin_users row: a name, an address, a role. */
-  identity?: { displayName: string; email: string; role: string };
+  identity?: { displayName: string; email: string; role: string; canManageProducts?: boolean };
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -228,7 +228,10 @@ export function AdminOverview() {
       setLoadError("Die Daten konnten nicht geladen werden.");
       return false;
     }
-    setData((await res.json()) as Payload);
+    const payload = (await res.json()) as Payload;
+    setData(previous => ({ ...payload, identity: payload.identity ? { ...payload.identity,
+      canManageProducts: previous?.identity?.canManageProducts === true && payload.identity.email === previous.identity.email && payload.identity.role === 'owner',
+    } : undefined }));
     setSignedIn(true);
     setLoadError("");
     return true;
@@ -441,7 +444,7 @@ export function AdminOverview() {
       {view === "b2b" && maySeeSubscriptions && <AdminB2b onSessionLost={() => setSignedIn(false)} key={target} initialSearch={target} />}
 
       {view === "inventory" && <AdminInventory onSessionLost={() => setSignedIn(false)} />}
-      {view === "products" && <AdminProducts />}
+      {view === "products" && (data.identity?.canManageProducts === true ? <AdminProducts /> : <p role="alert">Keine Berechtigung für die Produktverwaltung.</p>)}
       {view === "inventory"&&target==='warnings'&&<AdminPortalInventoryWarnings/>}
 
       {/* MOUNTED ONLY WHEN ITS TAB IS OPEN, so the overview, the orders

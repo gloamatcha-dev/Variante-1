@@ -1,3 +1,4 @@
+import { canAccessProductManager } from '../../../../lib/productOwnerAccess';
 import { requireAdminIdentity } from '../../../../lib/adminActionRoute.ts';
 import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin';
 import { canWrite } from '../../../../lib/adminRoles';
@@ -11,7 +12,7 @@ export async function POST(request:Request):Promise<Response>{
   if(!gate.ok)return gate.response;
   let body:Record<string,unknown>;
   try{body=await request.json();if(!body||typeof body!=='object')throw new Error();}catch{return Response.json({error:'Ungültige Anfrage.'},{status:400});}
-  if(body.action==='identity')return Response.json({ok:true,identity:gate.identity,signedInAs:gate.session.email},{headers:{'Cache-Control':'no-store'}});
+  if(body.action==='identity')return Response.json({ok:true,identity:{...gate.identity,canManageProducts:await canAccessProductManager(gate.identity)},signedInAs:gate.session.email},{headers:{'Cache-Control':'no-store'}});
   const admin=getSupabaseAdmin();if(!admin)return Response.json({error:'Nicht verfügbar.'},{status:503});
   try{
     if(body.action==='inventory_warnings'){

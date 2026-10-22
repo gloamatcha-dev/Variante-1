@@ -1,0 +1,130 @@
+GLOA Product Manager: owner authorization and one-click publication
+Historical implementation review. The final ambiguity correction, current test
+results and release blockers are in product-owner-publishing-release-gate.txt.
+Review baseline: 810ad80ad17606f5dadc88078fdc782a6ab1f497
+Local work only. No commit, push, deployment, migrations, production database
+mutation, or real Stripe mutation was performed.
+
+CONFIRMED OWNER
+The operator explicitly selected:
+  valmira.hajzeri@gloamatcha.com
+  75f838b9-f393-4e52-b8b0-70c118df8ed1
+Read-only SQL joined public.admin_users with auth.users in Supabase project
+yphubqploumfeabytotc. The selected row is active, has role owner, both stored
+emails match exactly, and Auth email_confirmed_at is populated.
+The second active owner (gloa.matcha@gmail.com) is intentionally excluded from
+Product Manager. No admin_users or Auth account was changed.
+No account information is missing.
+
+AUTHORIZATION
+lib/productOwner.ts pins the complete, confirmed ID/email pair on the server.
+lib/productOwnerAccess.ts first invokes the existing signed-session and fresh
+admin_users gate. It then checks the exact pair and owner role and reads the
+current Auth user server-side. Missing/unconfirmed/changed/deleted/banned Auth
+identities and lookup errors deny access.
+All /api/admin/products POST actions use this gate before body processing:
+list, save, sync, publish, review-publish, archive, and unknown actions.
+?action=upload-image is gated for both prepare and complete phases.
+Authenticated administrators outside this identity receive 403; missing or
+invalid admin sessions retain the existing 401 behavior.
+The existing HttpOnly/Secure/SameSite=Strict HMAC-signed cookie, expiry,
+ADMIN_EMAILS allowlist and other modules' role permissions remain in place.
+The actor always comes from the verified session.
+No service key, Stripe secret or Auth admin client is imported by the browser.
+
+/api/admin/portal identity adds only canManageProducts, a computed boolean.
+AdminPortalShell hides Products when it is false; AdminOverview refuses to mount
+the manager without that boolean. The legacy waitlist refresh preserves this
+capability only for the same displayed owner identity. These are UI affordances;
+the product API independently authorizes every request.
+
+PUBLICATION
+ENTWURF SPEICHERN still calls only the existing draft-save RPC. It never invokes
+Stripe. Published edits retain their explicit acknowledgement before saving
+takes the product out of sale. All 15 field-help disclosure texts remain intact.
+CSS, public shop components, checkout, tax and snapshot code were not changed.
+
+The table offers PRUEFEN & VEROEFFENTLICHEN (rendered with German umlauts),
+including pending/error drafts. It is disabled while an editor is open to avoid
+publishing saved values when the owner is looking at unsaved edits.
+The manual Stripe-sync button was removed.
+
+One click calls action review-publish. lib/productPublish.ts:
+  1. Reads the exact saved revision and rejects archived/stale products.
+  2. Validates product fields, integer gross cents, tax classifications and
+     variants with validateProductDraft; requires at least one active variant.
+     The existing Metal Case sales restriction remains in force.
+  3. Uses synchronizeProduct only if the saved revision is not already synced.
+     Existing canonical Product IDs, verified metadata, Price lookup keys,
+     provider idempotency keys and accepted-but-lost recovery are reused.
+  4. Persists bindings using admin_product_sync_result_v1. A revision-zero
+     compatibility product follows the returned revision-one transition.
+  5. Re-reads the revision and verifies remote Product/Prices read-only using
+     verifyProductStripeMapping, including active state, amount, currency,
+     Product ownership, variant metadata and one-time price configuration.
+  6. Rechecks owner authorization, invokes admin_product_state_v1, and reads
+     the saved revision/status back before returning published:true.
+The existing transactional RPCs serialize/check revisions. No new migration is
+needed for this implementation. No Price is deleted, archived or repriced.
+Legacy sync and publish API actions remain owner-gated for compatibility;
+legacy publish retains its existing read-only remote-mapping preflight.
+
+NDJSON progress reports actual server phases:
+  Pruefung laeuft
+  Stripe wird synchronisiert
+  Stripe-Zuordnung wird geprueft
+  Veroeffentlichung abgeschlossen
+The UI renders the German umlauts, waits for the final published:true result
+and a catalog reload, and does not treat an intermediate completion message,
+HTTP 200 stream envelope, partial response or disconnected stream as success.
+Failures before the publication transaction leave the saved product as draft.
+Stripe sync failure is recorded as an error; accepted remote objects remain
+recoverable on retry. A stale revision cannot publish a different saved draft.
+
+IMPORTANT RELEASE LIMITATIONS / BLOCKERS FOR REVIEW
+1. The literal requirement that EVERY failure returns a product to draft is not
+   fully guaranteed across a committed publication and a lost response or
+   failed subsequent read/reload. In that situation publication may already be
+   committed. The UI reports no success and requests a reload. It does not
+   blindly undo a potentially successful concurrent publication. Retrying the
+   same saved revision reconciles the existing mappings without duplication.
+   This ambiguity must be accepted or the failure requirement revised before
+   release. No migration was added to disguise that distributed-systems limit.
+2. .env.local has no ADMIN_EMAILS setting. Verify that the existing deployment
+   allowlist includes the confirmed full owner email, and perform an owner
+   login/access smoke test in a controlled environment before deployment.
+   Do not remove the other administrators from the global login allowlist:
+   they must retain their other modules. No login configuration was changed.
+3. Route tests execute actual TypeScript handlers with mocked infrastructure.
+   Publication concurrency checks use a revision-checking in-memory database
+   port, not a new real-Postgres stress test. No live owner password/login or
+   real Stripe write was used. Hosted streaming/browser behavior remains a
+   controlled pre-release smoke check; no deployment was authorized.
+
+VALIDATION
+58 Product Manager tests passed (npm run test:product-manager), including
+authorization across actions/upload phases, changed Auth identity, draft-only
+save, streamed one-click publication, failed creation, partial recovery,
+concurrent retry, changed revision, missing/inactive Price, owner revocation,
+revision-zero compatibility, actual navigation and no premature UI success.
+244 relevant admin/fulfillment/tax/price/snapshot regression tests passed.
+19 offline checkout API tests passed, with network/provider writes blocked.
+Catalog availability: 8 passed, 2 skipped because the withheld Metal Case has
+no publicly readable live variant. This suite used public read-only catalog
+queries and a write-blocked local server; it made no Stripe writes.
+TypeScript --noEmit passed. Targeted ESLint passed. git diff --check passed.
+Production build passed with native exit code 0 and generated the Nitro output.
+Vite emitted its existing plugin-timing/dynamic-import warnings. The sandboxed
+repeat hit EPERM in Nitro file tracing; the approved unsandboxed build succeeded.
+The final browser-bundle credential scan passed after the successful build.
+The initial general regression attempt overlapped a build and could not start
+the catalog server; it also exposed static gate expectations and a VM mock
+import that were updated for the new owner gate. The isolated regressions pass.
+Final total for these suites: 329 passed, 2 skipped, 0 failed.
+
+Logs are in outputs/owner-publish-products.log,
+outputs/owner-publish-regressions.log, outputs/owner-publish-checkout.log,
+outputs/owner-publish-eslint.log and outputs/owner-publish-build.log.
+Unrelated existing/untracked assets were left untouched.
+
+STOPPED FOR REVIEW. No commit or push.

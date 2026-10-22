@@ -267,7 +267,10 @@ test("4c: EVERY admin route is gated, and no route invents its own check", () =>
         "the login does not check admin_users");
       continue;
     }
-    if (!/openAdminAction\(request|requireAdminIdentity\(request/.test(code)) ungated.push(route);
+    if (route === 'products') {
+      assert.match(code, /requireProductOwner\(request\)/);
+      assert.match(codeOnly(read('lib/productOwnerAccess.ts')), /requireAdminIdentity\(request, 'read'\)/);
+    } else if (!/openAdminAction\(request|requireAdminIdentity\(request/.test(code)) ungated.push(route);
     // Nobody rolls their own session check any more.
     assert.ok(!code.includes("verifyAdminRequest("),
       `${route} calls verifyAdminRequest directly instead of the shared gate`);
@@ -474,8 +477,8 @@ test("4d: every WRITE route takes the write capability, every read says so", () 
   */
   const CATALOGUE_WRITES = ["creators", "documents", "shipping"];
   const productRoute = codeOnly(read('app/api/admin/products/route.ts'));
-  assert.match(productRoute, /requireAdminIdentity\(request, "read"\)/);
-  assert.match(productRoute, /requireAdminIdentity\(request, "write"\)/);
+  assert.match(productRoute, /requireProductOwner\(request\)/);
+  assert.match(codeOnly(read('lib/productOwnerAccess.ts')), /canAccessProductManager\(gate.identity\)/);
   for (const banned of ['.insert(', '.update(', '.upsert(', '.delete(']) assert.ok(!productRoute.includes(banned));
 
   for (const route of CATALOGUE_WRITES) {

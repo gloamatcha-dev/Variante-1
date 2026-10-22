@@ -8,11 +8,12 @@ const require = createRequire(import.meta.url), ts = require('typescript');
 export function productSafetyRoute(product, stripe, options = {}) {
   const calls = [], cache = new Map();
   const admin = {
+    auth: { admin: { getUserById: async id => options.authResult ?? ({ data: { user: { id, email: 'valmira.hajzeri@gloamatcha.com', email_confirmed_at: '2026-09-17' } }, error: null }) } },
     from() {
-      const query = { select() { return query; }, eq() { return query; }, single: async () => ({ data: product, error: null }) };
+      const query = { select() { return query; }, eq() { return query; }, single: async () => options.read ? options.read(product) : ({ data: product, error: null }) };
       return query;
     },
-    rpc: async (name, args) => { calls.push({ name, args }); return options.rpc ? options.rpc(name, args) : { data: { ok: true }, error: null }; },
+    rpc: async (name, args) => { calls.push({ name, args }); if(options.rpc)return options.rpc(name,args);if(name==='admin_product_state_v1'&&args.p_action==='published')product.is_active=true;return { data: { ok: true }, error: null }; },
   };
   function load(file) {
     file = path.resolve(file);
@@ -22,21 +23,21 @@ export function productSafetyRoute(product, stripe, options = {}) {
       module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
     } }).outputText;
     const localRequire = name => {
-      if (name.endsWith('/adminActionRoute')) return { requireAdminIdentity: async () => ({ ok: true, session: { userId: 'mock-owner' }, identity: { role: 'owner' } }) };
+      if (/\/adminActionRoute(?:\.ts)?$/.test(name)) return { requireAdminIdentity: async () => options.gate ?? ({ ok: true, session: { userId: '75f838b9-f393-4e52-b8b0-70c118df8ed1' }, identity: { userId: '75f838b9-f393-4e52-b8b0-70c118df8ed1', email: 'valmira.hajzeri@gloamatcha.com', role: 'owner' } }) };
       if (name.endsWith('/supabaseAdmin')) return { getSupabaseAdmin: () => admin };
       if (name.endsWith('/stripe')) return { getStripeClient: () => stripe };
-      if (name.endsWith('/productImageUpload')) return { uploadProductImage: () => { throw Error('Upload outside test scope'); } };
+      if (name.endsWith('/productImageUpload')) return { uploadProductImage: () => { calls.push({ name: 'upload' }); return Response.json({ok:true}); } };
       if (name.endsWith('/supabase')) return { supabase: options.catalogue ?? null };
       if (name.startsWith('.')) { let target = path.resolve(path.dirname(file), name); if (!path.extname(target)) target += '.ts'; return load(target); }
       return require(name);
     };
     vm.runInNewContext(code, { module: loaded, exports: loaded.exports, require: localRequire,
-      Request, Response, URL, Buffer, console, process: { env: {} },
+      Request, Response, URL, Buffer, Error, ReadableStream, TextEncoder, console, process: { env: {} },
       fetch: () => { throw Error('Network forbidden'); },
     }, { filename: file });
     return loaded.exports;
   }
-  return { calls, load, post: body => load('app/api/admin/products/route.ts').POST(new Request('http://127.0.0.1/api/admin/products', {
-    method: 'POST', body: JSON.stringify(body),
+  return { calls, load, post: (body, suffix = '', headers = {}) => load('app/api/admin/products/route.ts').POST(new Request('http://127.0.0.1/api/admin/products'+suffix, {
+    method: 'POST', headers, body: JSON.stringify(body),
   })) };
 }

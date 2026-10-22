@@ -46,7 +46,7 @@ test('Database rejection of publication is surfaced as failure even after a heal
   const { p, stripe } = await setup();
   const app = productSafetyRoute(p, stripe.adapter, { rpc: async () => ({ error: { message: 'Stale revision' } }) });
   const result = await app.post(request(p));
-  assert.equal(result.status, 409); assert.match((await result.json()).error, /Status nicht geändert/);
+  assert.equal(result.status, 409); assert.match((await result.json()).error, /Aktueller Status: Entwurf/);
 });
 
 test('Lost local sync persistence does not lose remote identity on the next revision', async () => {

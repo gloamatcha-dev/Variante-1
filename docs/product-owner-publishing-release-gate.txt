@@ -1,0 +1,192 @@
+GLOA FINAL OWNER-ONLY AUTO-PUBLISH RELEASE GATE
+Date: 2026-10-22
+Baseline and unchanged HEAD: 810ad80ad17606f5dadc88078fdc782a6ab1f497
+Disposition: local implementation gates passed; production configuration gate
+remains open. STOPPED FOR RELEASE REVIEW. No commit, push or deployment.
+
+1. EXACT CHANGED FILES
+
+Complete release file set relative to the baseline, including the previously
+implemented owner-only feature and the final gate corrections (19 files):
+  app/AdminOverview.tsx
+  app/AdminPortalShell.tsx
+  app/AdminProducts.tsx
+  app/api/admin/portal/route.ts
+  app/api/admin/products/route.ts
+  lib/productOwner.ts
+  lib/productOwnerAccess.ts
+  lib/productPublish.ts
+  lib/productPublicationStatus.ts
+  package.json
+  tests/admin-identity.test.mjs
+  tests/block2-admin-portal.test.mjs
+  tests/helpers/productEditorInteraction.mjs
+  tests/helpers/productSafetyRoute.mjs
+  tests/product-manager-help.test.mjs
+  tests/product-manager-publication.test.mjs
+  tests/product-owner-publish.test.mjs
+  docs/product-owner-publishing-review.txt
+  docs/product-owner-publishing-release-gate.txt
+
+This final gate changed only these 11 files from the preceding local work:
+  app/AdminProducts.tsx
+  app/api/admin/products/route.ts
+  lib/productPublish.ts
+  lib/productPublicationStatus.ts (new)
+  tests/helpers/productEditorInteraction.mjs
+  tests/helpers/productSafetyRoute.mjs
+  tests/product-manager-help.test.mjs
+  tests/product-manager-publication.test.mjs
+  tests/product-owner-publish.test.mjs
+  docs/product-owner-publishing-review.txt
+  docs/product-owner-publishing-release-gate.txt (new)
+
+Ignored audit scripts/logs under outputs are local evidence, not release files.
+Unrelated pre-existing untracked assets, examples and .claude were left alone.
+The Git index is empty; no related or unrelated file was staged.
+
+2. VALIDATION RESULTS
+
+PASS: npm run test:product-manager: 65 passed, 0 failed, 0 skipped.
+  Includes owner authorization for every action and both upload phases; Stripe
+  synchronization/publication mocks; partial creation and recovery; revision
+  changes, concurrent publication and idempotency; missing/inactive Prices;
+  committed-but-lost responses, error responses after commit, unknown status,
+  read-only recovery, legacy publication recovery, browser response loss,
+  misleading success streams, manual refresh without write retry, field help,
+  navigation, checkout eligibility, frozen prices and browser credential scan.
+
+PASS: relevant admin and commerce regression group: 244 passed, 0 failed.
+  node --test tests/admin-identity.test.mjs tests/admin-overview.test.mjs
+  tests/block2-admin-portal.test.mjs tests/stripe-fulfillment.test.mjs
+  tests/order-address-snapshot.test.mjs tests/discounted-line-accounting.test.mjs
+  tests/tax.test.mjs tests/tax-policy.test.mjs tests/b2c-price-alignment.test.mjs
+
+PASS: node tests/runtime/checkout-api-offline.mjs: 19 passed, 0 failed.
+PASS: npx tsc --noEmit.
+PASS: targeted ESLint on all changed TS/TSX/MJS release code/test files.
+PASS: npm run build: native exit code 0; Nitro production output generated.
+  The local build used previously approved permissions for Nitro file tracing.
+  Vite emitted nonfatal plugin timing and dynamic-import warnings.
+PASS: git diff --check.
+Total executed test cases for this gate: 328 passed, 0 failed, 0 skipped.
+Product tests and their built-browser credential scan ran again after build.
+
+Logs:
+  outputs/final-owner-products.log
+  outputs/final-owner-admin-regressions.log
+  outputs/final-owner-checkout.log
+  outputs/final-owner-typescript.log
+  outputs/final-owner-eslint.log
+  outputs/final-owner-audit.json (file hashes, migrations, help/layout/index)
+Build exit code 0 was observed directly from npm, not inferred from log text.
+
+All Stripe writes in tests went to in-memory mocks. Offline checkout blocks
+provider writes and uses synthetic catalog data. No actual Stripe write was
+performed. The only production database request during this gate was SELECT
+of the confirmed owner's admin/Auth identity. No production database mutation,
+migration execution, login setting change or environment mutation occurred.
+
+The migration audit compares every tracked baseline migration byte-for-byte
+with the working tree. Migrations 001-083 remain unchanged; no migration 084
+exists. Public shop/layout code and styling remain unchanged. All 15 field-help
+disclosures and their exact help texts match the baseline.
+
+3. PUBLICATION OUTCOME SAFETY
+
+lib/productPublicationStatus.ts performs an authoritative, read-only product
+lookup and classifies published, draft, archived or unknown. Missing rows,
+malformed results, failed reads and thrown requests produce unknown. It does
+not infer draft from an error, Stripe state, cached UI state or old revision.
+
+/api/admin/products action publication-status is owner-gated before body access,
+validates the product ID, and returns only current publication/revision/sync
+fields with Cache-Control: no-store. It does not initialize Stripe or call an
+RPC. No operation ID or write attempt is required to check status.
+
+After the final publication RPC, both review-publish and legacy publish read
+the current authoritative state even if the write response reports an error
+or throws. A confirmed published row is reported published. A confirmed draft
+or archived row is reported as that state. Unavailable status produces:
+  Status unklar — bitte aktualisieren
+The confirmation read intentionally does not insist on the attempted revision:
+it reports the current state after a concurrent edit, archive or publication.
+There is exactly one publication write attempt in this recovery path. No
+automatic publication retry or compensating unpublish/save/archive occurs.
+The installed PostgREST client retries idempotent read methods only, not RPC
+POST writes; the existing SDK behavior and revision/idempotency guards remain.
+
+The browser independently re-reads publication-status after success streams,
+partial streams, non-200 responses, lost responses and network errors. It shows
+Veröffentlicht when a lost response is resolved to published, Entwurf when the
+read confirms draft, and the exact unknown text when it cannot establish state.
+Normal completion appears only after the final result and a confirming read.
+A success stream alone never overrides draft/unknown authoritative state.
+For unknown results, the cached table row also shows unknown rather than its
+old draft/published label. The publish button is disabled for that product.
+Neu laden performs reads only and resolves the state without retrying a write.
+The owner may explicitly publish again only after a known draft is established.
+Existing deterministic Stripe identity/lookup keys and concurrency protections
+remain in place; no Product or Price deletion/repricing was added.
+
+Readback is a point-in-time observation, not a guarantee against a later
+independent edit. Unknown outcomes are retained as unknown until a read succeeds.
+There is no new migration and no Product Manager redesign or feature expansion.
+
+4. OWNER ACCESS VERIFICATION
+
+Confirmed owner Auth ID: 75f838b9-f393-4e52-b8b0-70c118df8ed1
+Confirmed exact email: valmira.hajzeri@gloamatcha.com
+Read-only production SELECT joined admin_users with auth.users and verified:
+  admin email = Auth email = confirmed exact email
+  role = owner; is_active = true
+  email_confirmed_at = 2026-09-17 22:22:30.812915+00
+  banned_until = null; deleted_at = null
+No owner account information is missing.
+
+The existing gate verifies the signed, unexpired admin session and global
+allowlist, resolves the current active admin_users identity, enforces the exact
+owner tuple/role, and checks the current Auth user server-side. All product
+actions, including list, status, save, sync, publish, review-publish, archive,
+image preparation and image completion use this gate. Other authenticated
+administrators, including a different owner, are denied with 403. Missing or
+invalid admin authentication remains 401.
+Only the server-derived canManageProducts capability exposes navigation and
+mounts the manager. Tests verify other authorized operational modules remain
+available. No global role or login behavior was changed. No service credentials
+reach client modules or built browser assets.
+
+5. PRODUCTION ADMIN_EMAILS
+
+ADMIN_EMAILS PRODUCTION VERIFICATION REQUIRED
+
+Repository release artifacts identify goal10/variante-1 as the Vercel target.
+The authorized connector lists only a different team/project. A read-only
+request for goal10/variante-1 returned HTTP 403, insufficient scope for goal10.
+No global Vercel CLI was available for a read-only fallback. No secrets or
+environment values were printed, and no login settings were changed.
+Neither local configuration nor access to an unrelated team establishes the
+production allowlist. Inclusion of the confirmed account remains unverified.
+
+6. GITHUB / VERCEL RELEASE BLOCKERS
+
+Local implementation/test gates pass. The ambiguity blocker in the historical
+review is resolved through explicit read-only reconciliation, not rollback.
+Production ADMIN_EMAILS verification is still required before release.
+Controlled owner/non-owner login and hosted streaming smoke checks are still
+pre-release checks; they were not simulated as successful live checks.
+GitHub HEAD is still the supplied baseline. The release is uncommitted and
+unstaged. GitHub write permissions were not exercised. Nothing was pushed.
+No Vercel deployment was created, promoted, changed or inspected as a new release.
+The remote is https://github.com/gloamatcha-dev/Variante-1.git.
+
+7. EXACT NEXT SAFE RELEASE ACTION
+
+Using read access authorized for the goal10 Vercel scope, verify that the active
+production ADMIN_EMAILS contains valmira.hajzeri@gloamatcha.com. Report only the
+membership result; do not print values or modify the allowlist. Then review the
+19-file manifest and explicitly authorize staging/commit of only those files.
+Push/deployment remains a separate authorized release step; do not trigger an
+automatic Vercel deployment through an unapproved GitHub push.
+
+STOPPED FOR RELEASE REVIEW. No commit. No push. No deploy.

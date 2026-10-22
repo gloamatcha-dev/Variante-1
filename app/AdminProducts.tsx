@@ -21,6 +21,8 @@ export function AdminProducts() {
   const [unpublishAcknowledged, setUnpublishAcknowledged] = useState(false);
   const [submitted, setSubmitted] = useState(false), [imageError, setImageError] = useState('');
   const [loaded, setLoaded] = useState(false);
+  const [publicationStatus, setPublicationStatus] = useState('');
+  const [unresolvedProduct, setUnresolvedProduct] = useState<string | null>(null);
   const [imageStatus, setImageStatus] = useState(''), [imageProgress, setImageProgress] = useState<number | null>(null);
   const [imagePreview, setImagePreview] = useState('');
   useEffect(() => () => { if (imagePreview) URL.revokeObjectURL(imagePreview); }, [imagePreview]);
@@ -35,11 +37,57 @@ export function AdminProducts() {
     return () => { active = false; };
   }, []);
   async function act(action: string, p: { id: string; stripe_sync_revision: number }, document?: ProductDraft) {
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setPublicationStatus('');
     try {
       await portalRequest('/api/admin/products', { action, id: p.id, revision: p.stripe_sync_revision, operationId: crypto.randomUUID(), ...(document ? { document } : {}) });
       setEditor(null); await reload();
     } catch (e) { setError(e instanceof Error ? e.message : 'Aktion fehlgeschlagen.'); await reload().catch(() => {}); }
+    finally { setBusy(false); }
+  }
+  async function reconcilePublication(id: string, completed = false, failure = '') {
+    // The recovery path consists only of reads, including after a disconnected stream.
+    await reload().catch(() => {});
+    try {
+      const result = await portalRequest('/api/admin/products', { action: 'publication-status', id });
+      if (result.id !== id || !['published', 'draft', 'archived'].includes(String(result.status))) throw Error('Unconfirmed status');
+      setProducts(current => current.map(product => product.id === id ? { ...product,
+        is_active: result.status === 'published', archived_at: result.status === 'archived' ? String(result.archivedAt) : null,
+        stripe_sync_revision: typeof result.revision === 'number' ? result.revision : product.stripe_sync_revision,
+        stripe_sync_status: typeof result.stripeSyncStatus === 'string' ? result.stripeSyncStatus : product.stripe_sync_status,
+      } : product));
+      setUnresolvedProduct(null);
+      setPublicationStatus(result.status === 'published' ? (completed ? 'Veröffentlichung abgeschlossen' : 'Veröffentlicht')
+        : result.status === 'draft' ? 'Entwurf' : 'Archiviert');
+      setError(result.status === 'draft' ? failure : '');
+    } catch {
+      setUnresolvedProduct(id); setError(''); setPublicationStatus('Status unklar — bitte aktualisieren');
+    }
+  }
+  async function publish(p: { id: string; stripe_sync_revision: number }) {
+    if (busy || unresolvedProduct === p.id) return;
+    setUnresolvedProduct(p.id);
+    setBusy(true); setError(''); setPublicationStatus('Prüfung läuft');
+    try {
+      const response = await fetch('/api/admin/products', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
+        body: JSON.stringify({ action: 'review-publish', id: p.id, revision: p.stripe_sync_revision, operationId: crypto.randomUUID() }) });
+      if (!response.ok) { const failed = await response.json(); throw Error(failed.error || 'Veröffentlichung fehlgeschlagen.'); }
+      const reader = response.body?.getReader();
+      if (!reader) throw Error('Veröffentlichung nicht bestätigt. Bitte neu laden.');
+      const decoder = new TextDecoder(); let buffer = '', confirmed = false;
+      try { while (true) {
+        const { done, value } = await reader.read(); buffer += decoder.decode(value, { stream: !done });
+        let end;
+        while ((end = buffer.indexOf('\n')) >= 0) {
+          const event = JSON.parse(buffer.slice(0, end)); buffer = buffer.slice(end + 1);
+          if (event.error) throw Error(event.error);
+          if (event.stage && event.stage !== 'Veröffentlichung abgeschlossen') setPublicationStatus(event.stage);
+          if (event.ok === true && event.published === true) confirmed = true;
+        }
+        if (done) break;
+      } } finally { reader.releaseLock(); }
+      if (!confirmed || buffer.trim()) throw Error('Veröffentlichung nicht bestätigt. Bitte neu laden und erneut prüfen.');
+      await reconcilePublication(p.id, true);
+    } catch (e) { await reconcilePublication(p.id, false, e instanceof Error ? e.message : 'Veröffentlichung nicht bestätigt.'); }
     finally { setBusy(false); }
   }
   function edit(p: Product) {
@@ -98,13 +146,14 @@ export function AdminProducts() {
   const d = editor?.document;
   return <section className="admin-products"><div className="portal-section-head"><h2>PRODUKTE</h2>
     {writable && <button type="button" disabled={busy} onClick={() => { setSubmitted(false); setImageError(''); setError(''); setEditor({ id: crypto.randomUUID(), revision: 0, document: blank(), persisted: [] }); }}>NEUES PRODUKT</button>}
-    <button type="button" disabled={busy} onClick={() => void reload().catch(e => setError(e.message))}>Neu laden</button></div>
+    <button type="button" disabled={busy} onClick={() => void (unresolvedProduct ? reconcilePublication(unresolvedProduct) : reload()).catch(e => setError(e.message))}>Neu laden</button></div>
     <p>Physische Standardversand-Produkte, einmaliger Kauf. Bestand wird ausschließlich manuell gebucht. Speichern setzt das Produkt auf Entwurf.</p>
     {error && <p role="alert" className="portal-error">{error}</p>}
+    {publicationStatus && <p role="status" aria-live="polite">{publicationStatus}</p>}
     {!loaded && !error && <p role="status">Katalog wird geladen …</p>}
     {editor && d && <form onSubmit={e => { e.preventDefault(); save(); }} onInvalid={() => setSubmitted(true)} className="product-editor">
       <h3>Produkt bearbeiten</h3>
-      {editor.wasPublished && <p role="note" className="product-publish-warning">Dieses Produkt ist veröffentlicht. Speichern setzt es sofort auf Entwurf und sperrt neue Käufe. Anschließend sind ein manueller Stripe-Abgleich und eine erneute Veröffentlichung erforderlich.</p>}
+      {editor.wasPublished && <p role="note" className="product-publish-warning">Dieses Produkt ist veröffentlicht. Speichern setzt es sofort auf Entwurf und sperrt neue Käufe. Anschließend bitte erneut prüfen und veröffentlichen.</p>}
       <div className="product-field-help"><label>Name<input required maxLength={120} value={d.name} onChange={e => field('name', e.target.value)} /></label><details><summary aria-label="Hilfe: Name">ⓘ</summary><p>Pflichtfeld. Produktname im Shop, maximal 120 Zeichen, z. B. GLOA Bambusbesen.</p></details></div>
       <div className="product-field-help"><label>Slug<input required maxLength={64} pattern="[a-z0-9]+(-[a-z0-9]+)*" value={d.slug} onChange={e => field('slug', e.target.value)} /></label><details><summary aria-label="Hilfe: Slug">ⓘ</summary><p>Pflichtfeld. Eindeutiger Teil der Produktadresse, z. B. bambusbesen. Nur Kleinbuchstaben, Zahlen und Bindestriche, maximal 64 Zeichen. Änderungen verändern die Produktadresse.</p></details></div>
       <div className="product-field-help"><label>Typ<select value={d.product_type} onChange={e => field('product_type', e.target.value as ProductDraft['product_type'])}>{PRODUCT_TYPES.map(t => <option key={t}>{t}</option>)}</select></label><details><summary aria-label="Hilfe: Typ">ⓘ</summary><p>Pflichtauswahl. MATCHA, MERCH, ACCESSORY (Zubehör) oder BUNDLE (Set) wählen. Der Typ ersetzt keine Steuerklassifikation und legt kein Abo an.</p></details></div>
@@ -134,19 +183,18 @@ export function AdminProducts() {
       <p>Bestehende Matcha-Abos und Jahrespläne bleiben geschützt. Neue Produkte sind nur einmalig kaufbar. Bundles benötigen eine einzige fachlich bestätigte Steuerklassifikation.</p>
       <button type="button" disabled={busy} onClick={() => field('variants', [...d.variants, newEditorVariant()])}>VARIANTE HINZUFÜGEN</button>
       {editor.wasPublished && <label className="product-publish-confirm"><input type="checkbox" required checked={unpublishAcknowledged} onChange={e => setUnpublishAcknowledged(e.target.checked)} />Ich bestätige: Mit dem Speichern wird dieses Produkt zum Entwurf und vorübergehend nicht kaufbar.</label>}
-      <button type="submit" disabled={busy || !d.variants.length}>{busy ? 'Bitte warten …' : 'ALS ENTWURF SPEICHERN'}</button>
+      <button type="submit" disabled={busy || !d.variants.length}>{busy ? 'Bitte warten …' : 'ENTWURF SPEICHERN'}</button>
       <button type="button" disabled={busy} onClick={() => setEditor(null)}>Schließen</button>
     </form>}
-    <details className="product-workflow-help"><summary>ⓘ Speichern, Stripe-Abgleich und Veröffentlichung</summary><p>Speichern setzt auch veröffentlichte Produkte auf Entwurf. Danach separat Stripe synchronisieren und veröffentlichen. Der Abgleich legt ein Stripe-Produkt und Preise für aktive Varianten an oder verwendet vorhandene Zuordnungen. Ein erfolgreicher Abgleich allein veröffentlicht nichts. Preisänderungen erhalten neue Stripe-Preise; bisherige Preise bleiben bestehen. Bei Fehlern die Stripe-Spalte prüfen und den Abgleich erneut versuchen.</p></details>
+    <details className="product-workflow-help"><summary>ⓘ Speichern, Stripe-Abgleich und Veröffentlichung</summary><p>Speichern setzt auch veröffentlichte Produkte auf Entwurf. Danach mit PRÜFEN & VERÖFFENTLICHEN den Abgleich, die Prüfung und die Veröffentlichung starten. Der Abgleich legt ein Stripe-Produkt und Preise für aktive Varianten an oder verwendet vorhandene Zuordnungen. Ein erfolgreicher Abgleich allein veröffentlicht nichts. Preisänderungen erhalten neue Stripe-Preise; bisherige Preise bleiben bestehen. Bei Fehlern die Stripe-Spalte prüfen und den Abgleich erneut versuchen.</p></details>
     <div className="portal-table-wrap"><table className="portal-table"><thead><tr>{['Produkt', 'Typ', 'Varianten / Preis', 'Status', 'Stripe', 'Verfügbarkeit', 'Inventar', 'Aktualisiert', 'Aktionen'].map(h => <th key={h}>{h}</th>)}</tr></thead>
       <tbody>{products.map(p => { const amounts = p.product_variants.map(v => v.price_gross_cents).filter(n => typeof n === 'number'); return <tr key={p.id}>
         <td>{p.name}<br /><small>{p.slug}</small></td><td>{p.product_type}</td><td>{p.product_variants.length} · {amounts.length ? `${euros(Math.min(...amounts))} – ${euros(Math.max(...amounts))}` : 'Kein Preis'}</td>
-        <td>{state(p)}</td><td>{({ pending: 'Abgleich ausstehend', synced: 'Stripe-Abgleich erfolgreich', error: 'Abgleich fehlgeschlagen' } as Record<string, string>)[p.stripe_sync_status] ?? p.stripe_sync_status}{p.stripe_sync_revision === 0 && ' · Legacy-Übergang'}{p.stripe_sync_error && <p>{p.stripe_sync_error}</p>}</td>
+        <td>{unresolvedProduct === p.id ? 'Status unklar — bitte aktualisieren' : state(p)}</td><td>{({ pending: 'Abgleich ausstehend', synced: 'Stripe-Abgleich erfolgreich', error: 'Abgleich fehlgeschlagen' } as Record<string, string>)[p.stripe_sync_status] ?? p.stripe_sync_status}{p.stripe_sync_revision === 0 && ' · Legacy-Übergang'}{p.stripe_sync_error && <p>{p.stripe_sync_error}</p>}</td>
         <td>{p.product_variants.some(v => v.is_active && v.availability === 'available') ? 'Verfügbar' : 'AUSVERKAUFT'}</td>
         <td>{p.product_variants.filter(v => v.inventory_item_id).length} verknüpft</td><td>{new Date(p.updated_at).toLocaleString('de-DE')}</td>
         <td>{!p.archived_at && <><button type="button" disabled={busy || !writable} onClick={() => edit(p)}>Bearbeiten</button>
-          {writable && p.stripe_sync_status !== 'synced' && <button type="button" disabled={busy} onClick={() => void act('sync', p)}>{p.stripe_sync_status === 'error' ? 'STRIPE ERNEUT VERSUCHEN' : 'STRIPE SYNCHRONISIEREN'}</button>}
-          {writable && !p.is_active && p.stripe_sync_status === 'synced' && p.product_variants.some(v => v.is_active) && p.slug !== 'metal-case' && <button type="button" disabled={busy} onClick={() => void act('publish', p)}>VERÖFFENTLICHEN</button>}
+          {writable && !p.is_active && p.slug !== 'metal-case' && <button type="button" disabled={busy || editor !== null || unresolvedProduct === p.id} onClick={() => void publish(p)}>PRÜFEN &amp; VERÖFFENTLICHEN</button>}
           {writable && <button type="button" disabled={busy} onClick={() => void act('archive', p)}>ARCHIVIEREN</button>}</>}</td></tr>; })}</tbody></table></div>
   </section>;
 }
