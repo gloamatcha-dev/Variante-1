@@ -1,0 +1,27 @@
+{
+  "passed": [
+    "Original 079 constraint rejects real py-shaped charge IDs",
+    "Minimal proposed constraint accepts py and preserves ch",
+    "Unrelated ID prefixes remain rejected",
+    "Browser roles gain no read privilege",
+    "Original real 079 RPC also rejects py, independently of table constraint",
+    "Minimally patched real 079 RPC records exact py-linked fee",
+    "Real fee RPC retry creates no duplicate fee event",
+    "Patched fee RPC rejects a conflicting provider identity",
+    "CREATE OR REPLACE preserves restricted real RPC execution grants",
+    "Repeated source key creates exactly one ledger effect",
+    "Failure between ledger and bridge rolls back completely",
+    "Retry after rollback succeeds",
+    "Conflicting repeated amount fails",
+    "Concurrent sessions create exactly one effect for same source"
+  ],
+  "host": "127.0.0.1",
+  "port": 51878,
+  "database": "finance_f7b87aee90b4a64a",
+  "migration084Executed": false,
+  "status": "PASS",
+  "stopped": true,
+  "dataRemoved": true,
+  "scope": "Actual 079 fee table/fee RPC with minimal synthetic referenced tables, plus synthetic atomic ledger/source-bridge contract; not full production historical tax/period writer validation",
+  "runnerSha256": "6ed898d54eeec717d6d7aca77503d421d0bdd6ebe08a19b73ba49cbc4377408f"
+}

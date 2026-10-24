@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "kind": "order-number-execute-restriction",
+  "reviewer": "GLOA local security validation; final release approval pending",
+  "callerReview": "No app direct helper RPC; service checkout and annual postgres-definer/default chain; authenticated policy helpers unchanged",
+  "signature": "public.generate_order_number()",
+  "sqlSha256": "178f6b5f88ef4fcbc4ebf624d3facd5a9f61b3f630b14fd504f49ad8d818a04f"
+}

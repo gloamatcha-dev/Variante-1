@@ -1,0 +1,203 @@
+{
+  "checkedAt": "2026-10-24T15:25:50.462Z",
+  "project": "yphubqploumfeabytotc",
+  "mode": "READ_ONLY",
+  "metadata": [
+    {
+      "json_build_object": {
+        "project_database": "postgres",
+        "tables": 59,
+        "rls_disabled": 0,
+        "migration_trackers": [
+          {
+            "schema": "auth",
+            "name": "schema_migrations"
+          },
+          {
+            "schema": "storage",
+            "name": "migrations"
+          },
+          {
+            "schema": "realtime",
+            "name": "schema_migrations"
+          }
+        ],
+        "supabase_migrations_schema": false,
+        "finance_sync_tables": [],
+        "functions": [
+          {
+            "signature": "generate_order_number()",
+            "owner": "postgres",
+            "security_definer": true,
+            "search_path": [
+              "search_path=\"\""
+            ],
+            "raw_md5": "fcb7626b2ceb260c081d3f0660a487b8",
+            "trimmed_md5": "6a55eb074eab4591d70b18697672326b",
+            "anon": true,
+            "authenticated": true,
+            "service_role": true
+          },
+          {
+            "signature": "create_order_from_paid_checkout(uuid,jsonb,text,jsonb,jsonb,integer)",
+            "owner": "postgres",
+            "security_definer": true,
+            "search_path": [
+              "search_path=\"\""
+            ],
+            "raw_md5": "a55d1c5f40097c3a542aa550a1a9d132",
+            "trimmed_md5": "0a97f7a2c7aec35b3da19c0697e64d63",
+            "anon": false,
+            "authenticated": false,
+            "service_role": true
+          },
+          {
+            "signature": "record_order_payment_event(uuid,uuid)",
+            "owner": "postgres",
+            "security_definer": true,
+            "search_path": [
+              "search_path=\"\""
+            ],
+            "raw_md5": "f14e0c942c2e142478aa3b47145b209f",
+            "trimmed_md5": "0f7507614db9c297cf3af3680ec04fbc",
+            "anon": false,
+            "authenticated": false,
+            "service_role": true
+          },
+          {
+            "signature": "record_provider_fee_result_v1(uuid,text,text,text,text,integer,text,timestamp with time zone,text)",
+            "owner": "postgres",
+            "security_definer": true,
+            "search_path": [
+              "search_path=\"\""
+            ],
+            "raw_md5": "14b398d06297e4d1f4341505e7a2de40",
+            "trimmed_md5": "253d214c47712644555bf052042ae428",
+            "anon": false,
+            "authenticated": false,
+            "service_role": true
+          },
+          {
+            "signature": "record_annual_prepayment_event_v2(uuid,uuid)",
+            "owner": "postgres",
+            "security_definer": true,
+            "search_path": [
+              "search_path=\"\""
+            ],
+            "raw_md5": "f154a6742b94485df9a5a1129c337be8",
+            "trimmed_md5": "d6d3ec0471d1950ceed926b1f49aca97",
+            "anon": false,
+            "authenticated": false,
+            "service_role": true
+          },
+          {
+            "signature": "refund_tax_record_v1(uuid,uuid,integer,text,uuid,text,uuid)",
+            "owner": "postgres",
+            "security_definer": true,
+            "search_path": [
+              "search_path=\"\""
+            ],
+            "raw_md5": "ca09dcd7e0c93225d77926ed9d1fb5d2",
+            "trimmed_md5": "14698bad52633de531e091ff8fc66dbb",
+            "anon": false,
+            "authenticated": false,
+            "service_role": false
+          }
+        ],
+        "fee_constraint": "CHECK ((((payment_intent_id IS NULL) OR (payment_intent_id ~ '^pi_[A-Za-z0-9_]{1,240}$'::text)) AND ((invoice_id IS NULL) OR (invoice_id ~ '^in_[A-Za-z0-9_]{1,240}$'::text)) AND ((charge_id IS NULL) OR (charge_id ~ '^ch_[A-Za-z0-9_]{1,240}$'::text)) AND ((balance_transaction_id IS NULL) OR (balance_transaction_id ~ '^txn_[A-Za-z0-9_]{1,240}$'::text))))",
+        "ledger_append_only": true,
+        "confirmed_owner": true
+      }
+    }
+  ],
+  "preflight084": [
+    {
+      "name": "Exact reviewed functions and owners",
+      "verdict": "PASS"
+    },
+    {
+      "name": "Helper is text-returning SQL volatile zero-arg function",
+      "verdict": "PASS"
+    },
+    {
+      "name": "No unreviewed overloads",
+      "verdict": "PASS"
+    },
+    {
+      "name": "Existing order default depends on helper",
+      "verdict": "PASS"
+    },
+    {
+      "name": "Number sequence exists and belongs to postgres",
+      "verdict": "PASS"
+    },
+    {
+      "name": "Outer paid-checkout writer stays service-only",
+      "verdict": "PASS"
+    },
+    {
+      "name": "Helper owner retains execution",
+      "verdict": "PASS"
+    },
+    {
+      "name": "SUMMARY",
+      "verdict": "SAFE TO APPLY"
+    }
+  ],
+  "preflight085": [
+    {
+      "name": "roles",
+      "result": "PASS"
+    },
+    {
+      "name": "new_tables_absent",
+      "result": "PASS"
+    },
+    {
+      "name": "ledger_rls",
+      "result": "PASS"
+    },
+    {
+      "name": "ledger_append_only",
+      "result": "PASS"
+    },
+    {
+      "name": "original_record_order_payment_event",
+      "result": "PASS"
+    },
+    {
+      "name": "original_record_annual_prepayment_event_v2",
+      "result": "PASS"
+    },
+    {
+      "name": "original_refund_tax_record_v1",
+      "result": "PASS"
+    },
+    {
+      "name": "original_record_provider_fee_result_v1",
+      "result": "PASS"
+    },
+    {
+      "name": "SUMMARY",
+      "result": "SAFE TO PREPARE 085"
+    }
+  ],
+  "github": {
+    "account": "gloamatcha-dev",
+    "repository": "gloamatcha-dev/Variante-1",
+    "defaultBranch": "main",
+    "adminReadVerified": true,
+    "webhooks": [],
+    "actionsWorkflows": []
+  },
+  "vercel": {
+    "team": "goal10",
+    "project": "variante-1",
+    "projectReadStatus": 403,
+    "teamReadStatus": 403,
+    "actualPlan": "UNVERIFIED",
+    "productionEnvironment": "UNVERIFIED",
+    "domain": "UNVERIFIED",
+    "deployHooks": "UNVERIFIED"
+  }
+}

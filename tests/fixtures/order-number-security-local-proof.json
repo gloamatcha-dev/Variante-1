@@ -1,0 +1,124 @@
+{
+  "passed": [
+    "59 public base tables reconstructed",
+    "all public tables retain RLS",
+    "helper and checkout writer retain postgres definer context",
+    "all API roles inherit original public helper execution",
+    "anon vulnerability reproduced",
+    "authenticated vulnerability reproduced",
+    "service_role vulnerability reproduced",
+    "before valid order number",
+    "before idempotent one order",
+    "before frozen totals",
+    "before invoice activation replay",
+    "before one numbered subscription order",
+    "before annual fulfillment/replay",
+    "before one numbered annual order",
+    "084 read-only preflight passes",
+    "sequence state unchanged by patch",
+    "only helper ACL changed",
+    "PUBLIC and API direct helper rights removed; owner preserved",
+    "084 read-only postcheck passes",
+    "anon direct helper denied",
+    "authenticated direct helper denied",
+    "service_role direct helper denied",
+    "after valid order number",
+    "after idempotent one order",
+    "after frozen totals",
+    "after invoice activation replay",
+    "after one numbered subscription order",
+    "after annual fulfillment/replay",
+    "after one numbered annual order",
+    "historical orders byte-identical",
+    "unrelated grants/policies/functions still identical after settlements",
+    "patch reapplication idempotent",
+    "sequence definition unchanged",
+    "owner authority still works",
+    "own-user customer order reads preserved",
+    "other customer context cannot read synthetic owner orders",
+    "anonymous customer data denied"
+  ],
+  "before": {
+    "PUBLIC": true,
+    "anon": true,
+    "authenticated": true,
+    "service_role": true,
+    "owner": true
+  },
+  "after": {
+    "PUBLIC": false,
+    "anon": false,
+    "authenticated": false,
+    "service_role": false,
+    "owner": true
+  },
+  "historicalOrderId": "8e17b5eb-44d0-4a95-8f6c-ac4c38832edd",
+  "providers": "none invoked; synthetic paid records and identifiers only",
+  "baseline": "6db7c37b693991617a392b26c5937114879a8f75",
+  "postgres": {
+    "database": "gloa_security_b44b1781d9cec456",
+    "host": "127.0.0.1",
+    "port": 62304,
+    "directory": "C:/Users/hajze/Documents/Codex/2026-08-12/GLOA/outputs/security-local-b44b1781d9cec456/data",
+    "version": "17.11",
+    "user": "postgres"
+  },
+  "completedMigrations": 83,
+  "fixture": {
+    "id": "5f945ab0-91c3-4c93-b167-28a78e7eb25b",
+    "email": "gloa.matcha@gmail.com",
+    "fields": [
+      "id",
+      "email"
+    ],
+    "credentials": "none; minimal local auth table has no password column"
+  },
+  "acl075": {
+    "before": [
+      {
+        "role": "anon",
+        "select": false,
+        "truncate": true,
+        "references": true,
+        "trigger": true,
+        "writes": false
+      },
+      {
+        "role": "authenticated",
+        "select": true,
+        "truncate": true,
+        "references": true,
+        "trigger": true,
+        "writes": false
+      },
+      {
+        "role": "service_role",
+        "select": true,
+        "truncate": true,
+        "references": true,
+        "trigger": true,
+        "writes": false
+      }
+    ],
+    "after": [
+      {
+        "role": "anon",
+        "select": false,
+        "excess": false
+      },
+      {
+        "role": "authenticated",
+        "select": true,
+        "excess": false
+      },
+      {
+        "role": "service_role",
+        "select": true,
+        "excess": false
+      }
+    ]
+  },
+  "clusterStopped": true,
+  "clusterDataRemoved": true,
+  "migrationSha256": "178f6b5f88ef4fcbc4ebf624d3facd5a9f61b3f630b14fd504f49ad8d818a04f"
+}

@@ -983,7 +983,7 @@ test("32: the checkout phase's own migrations are untouched, and 041 is not its 
   // to checkout. What this guard protects is unchanged: the checkout
   // phase's own migrations are live and immutable.
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
-    .filter(f => f.endsWith(".sql")).sort();
+    .filter(f => f.endsWith(".sql") && !["084_restrict_order_number_execute.sql", "085_automatic_finance_reconciliation.sql"].includes(f)).sort();
   // 057 SIMPLIFIED THE LAUNCH DISCOUNT: the one-use claim architecture
   // 056 built is removed, because the code became reusable. Re-pinned
   // rather than deleted - what this guard protects is that nothing

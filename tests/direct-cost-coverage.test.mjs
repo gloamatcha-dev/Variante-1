@@ -5,7 +5,7 @@ import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url);
 const {summarizeLedger}=require('../lib/adminPortalFinance.ts');
 const {accountingMonths,costCompleteness,expenseNet}=require('../lib/directCostCoverage.ts');
-const period={subjects:[{kind:'order',id:'o'}],coverage:['matcha_cogs','packaging','shipping'].map(cost_class=>({order_id:'o',cost_class,coverage_status:'confirmed_zero'})),months:['2026-10-01'],generalCoverage:[{period_start:'2026-10-01',coverage_status:'confirmed_zero'}],undatedEvents:0,undatedFulfilments:0};
+const period={subjects:[{kind:'order',id:'o'}],coverage:['matcha_cogs','packaging','shipping'].map(cost_class=>({order_id:'o',cost_class,coverage_status:'confirmed_zero'})),months:['2026-10-01'],generalCoverage:[{period_start:'2026-10-01',coverage_status:'confirmed_zero'}],undatedEvents:0,undatedFulfilments:0,sourceCoverage:{status:'checked',complete:true,missingPayments:0,missingRefunds:0,conflicts:0}};
 const income={id:'income',direction:'inflow',kind:'order_payment',gross_cents:10000,tax_cents:0};
 const evidence=[{income_event_id:'income',capture_status:'checked',fee_cents:0}];
 const summarize=(expenses=[],basis=period,events=[income],fees=evidence)=>summarizeLedger(events,expenses,fees,basis);

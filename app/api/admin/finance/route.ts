@@ -42,6 +42,11 @@ export async function POST(request: Request): Promise<Response> {
   let period: ReturnType<typeof portalPeriod>;
   try { period = portalPeriod(raw); } catch { return json({error:"Bitte einen gültigen Zeitraum wählen."},400); }
   try {
+    if(action==='sync_details'){
+      const result=await admin.rpc('finance_sync_details_v1');
+      if(result.error||!result.data)return json({error:'Syncdetails vorübergehend nicht verfügbar.'},503);
+      return json({ok:true,...result.data},200);
+    }
     if (action === "summary" || action === "export" || action === "missing_costs") {
       const {basis,summary,missingFulfilments:missing}=await readFinanceSummary(admin,period);
       const {events,expenses}=basis;

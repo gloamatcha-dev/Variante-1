@@ -851,7 +851,8 @@ test("28: the rules module is a leaf, and the wiring is where the effects are", 
 
 test("29: this phase adds no migration, no route and no customer action", () => {
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
-    .filter(f => f.endsWith(".sql")).sort();
+    // Reviewed 084/085 have independent exact-hash PostgreSQL/ACL gates; retain the historical annual boundary.
+    .filter(f => f.endsWith(".sql") && !["084_restrict_order_number_execute.sql", "085_automatic_finance_reconciliation.sql"].includes(f)).sort();
   // 057 SIMPLIFIED THE LAUNCH DISCOUNT: the one-use claim architecture
   // 056 built is removed, because the code became reusable. Re-pinned
   // rather than deleted - what this guard protects is that nothing
@@ -896,7 +897,8 @@ test("29: this phase adds no migration, no route and no customer action", () => 
     assert.ok(!cron.includes(banned), `the cron gained refund work: ${banned}`);
   }
   const vercel = JSON.parse(read("vercel.json"));
-  assert.equal(vercel.crons.length, 1);
+  assert.equal(vercel.crons.length, 2);
+  assert.deepEqual(vercel.crons[1], {path:"/api/cron/finance-reconciliation",schedule:"40 5 * * *"});
   assert.equal(vercel.crons[0].schedule, "20 5 * * *");
 });
 

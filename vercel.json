@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/retry-order-notifications",
       "schedule": "20 5 * * *"
+    },
+    {
+      "path": "/api/cron/finance-reconciliation",
+      "schedule": "40 5 * * *"
     }
   ]
 }

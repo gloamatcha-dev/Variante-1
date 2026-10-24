@@ -1,7 +1,8 @@
 import type { PortalRow } from './adminPortalModel.ts';
 import {costCompleteness,COST_LABELS} from './directCostCoverage.ts';
+import type { FinanceSourceCoverage } from './financeSourceCoverage.ts';
 /** Server read aggregation of stored events. No order-derived duplicate revenue. */
-export function summarizeLedger(events: PortalRow[], expenses: PortalRow[], evidence: PortalRow[] = [], costBasis?: {subjects:PortalRow[];coverage:PortalRow[];months:string[];generalCoverage:PortalRow[];undatedEvents:number;undatedFulfilments:number;providerFeeEvents?:PortalRow[]}) {
+export function summarizeLedger(events: PortalRow[], expenses: PortalRow[], evidence: PortalRow[] = [], costBasis?: {subjects:PortalRow[];coverage:PortalRow[];months:string[];generalCoverage:PortalRow[];undatedEvents:number;undatedFulfilments:number;providerFeeEvents?:PortalRow[];sourceCoverage?:FinanceSourceCoverage}) {
   const amount=(rows:PortalRow[],field:string):number|null => rows.every(r=>typeof r[field]==='number')
     ? rows.reduce((sum,r)=>sum+(r[field] as number),0):null;
   const income=events.filter(r=>r.direction==='inflow');
@@ -18,6 +19,8 @@ export function summarizeLedger(events: PortalRow[], expenses: PortalRow[], evid
     else coverage.pending++;
   }
   coverage.complete = coverage.pending===0 && coverage.missing===0;
+  const sourceComplete = costBasis?.sourceCoverage?.status === 'checked' && costBasis.sourceCoverage.complete;
+  if (costBasis?.sourceCoverage && !sourceComplete) coverage.complete = false;
   const direct=expenses.filter(r=>r.category!=='general'&&r.category!=='payment_fee');
   const general=expenses.filter(r=>r.category==='general');
   const costs=costBasis?costCompleteness(costBasis.subjects,costBasis.coverage,costBasis.months,costBasis.generalCoverage):null;
@@ -25,10 +28,13 @@ export function summarizeLedger(events: PortalRow[], expenses: PortalRow[], evid
   const feeMoney=amount(fees,'gross_cents');
   const positiveEvidence=evidence.filter(r=>r.capture_status==='checked'&&typeof r.fee_cents==='number'&&r.fee_cents>0);
   const feeIntegrity=positiveEvidence.every(r=>(costBasis?.providerFeeEvents??fees).some(f=>f.id===r.fee_event_id&&f.gross_cents===r.fee_cents))&&fees.every(f=>positiveEvidence.some(r=>r.fee_event_id===f.id));
-  const contributionComplete=!!costs&&costs.directComplete&&coverage.complete&&feeIntegrity&&manualPaymentFeeCount===0&&costBasis?.undatedEvents===0&&costBasis?.undatedFulfilments===0;
+  const contributionComplete=!!costs&&sourceComplete&&costs.directComplete&&coverage.complete&&feeIntegrity&&manualPaymentFeeCount===0&&costBasis?.undatedEvents===0&&costBasis?.undatedFulfilments===0;
   const contributionMarginCents=contributionComplete?amount(income,'gross_cents')!-amount(refunds,'gross_cents')!-amount(direct,'gross_cents')!-feeMoney!:null;
   const resultCents=contributionMarginCents!==null&&costs?.generalComplete?contributionMarginCents-amount(general,'gross_cents')!:null;
   const costBlockers=costs?Object.entries(costs.missing).filter(([,n])=>n>0).map(([key,n])=>`${COST_LABELS[key]} bei ${n} Lieferungen`):['Kostenabdeckung nicht geprüft'];
+  if (!sourceComplete) costBlockers.push(costBasis?.sourceCoverage?.status === 'checked'
+    ? `Ledger-Abgleich unvollständig: ${costBasis.sourceCoverage.missingPayments} Zahlungen, ${costBasis.sourceCoverage.missingRefunds} Erstattungen fehlen oder weichen ab; ${costBasis.sourceCoverage.conflicts} Konflikte. Angezeigte Einnahmen und Refunds sind nur erfasste Teilbeträge.`
+    : 'Vollständigkeit der Zahlungen und Erstattungen nicht geprüft.');
   if(coverage.pending+coverage.missing>0)costBlockers.push(`Providergebühr bei ${coverage.pending+coverage.missing} Zahlungen`);
   if(!feeIntegrity)costBlockers.push('Providergebühren-Ereignisse nicht vollständig zugeordnet');
   if(manualPaymentFeeCount)costBlockers.push('Manuelle Zahlungsgebühren müssen abgegrenzt werden.');
@@ -50,7 +56,8 @@ export function summarizeLedger(events: PortalRow[], expenses: PortalRow[], evid
     storedInputTaxCents:expenses.length?amount(expenses,'vat_cents'):null,
     resultCents,contributionMarginCents,contributionComplete,resultComplete:resultCents!==null,
     manualPaymentFeeAmbiguity:manualPaymentFeeCount>0,manualPaymentFeeCount,costBlockers,openGeneralMonths:costs?.openMonths??[],
-    completeness:'Internes Ergebnis aus vollständig erfassten Einnahmen, Erstattungen, Providergebühren und Kosten im ausgewählten Zeitraum.',
+    sourceCoverage: costBasis?.sourceCoverage ?? null,
+    completeness:sourceComplete?'Interner Ledger mit Zahlungsquellen abgeglichen; Ergebnis nur bei vollständigen Gebühren und Kosten.':'Einnahmen und Refunds zeigen ausschließlich erfasste Ledger-Beträge. Zahlungsabgleich unvollständig oder unbekannt; fehlende Buchungen werden nicht als null Euro bestätigt.',
     missingCostCategories:income.length?[
       ...[['matcha_cogs','Wareneinsatz'],['packaging','Verpackung'],['shipping','Carrier-Versand'],['other_direct','Sonstige direkte Kosten']].filter(([key])=>!direct.some(r=>r.category===key)).map(([,name])=>name),
       ...(!fees.length&&!direct.some(r=>r.category==='payment_fee')?['Zahlungsgebühren']:[]),

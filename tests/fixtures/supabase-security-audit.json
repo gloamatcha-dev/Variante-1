@@ -1,0 +1,347 @@
+{
+  "source": "Read-only audit snapshot; not a fresh production query",
+  "capturedAt": "2026-10-22T19:33:47.159654+00:00",
+  "functions": [
+    {
+      "name": "create_order_from_paid_checkout",
+      "args": "p_checkout_attempt_id uuid, p_customer_snapshot jsonb, p_stripe_payment_intent_id text, p_shipping_address_snapshot jsonb, p_billing_address_snapshot jsonb, p_shipping_gross_cents integer",
+      "owner": "postgres",
+      "security_definer": true,
+      "proconfig": [
+        "search_path=\"\""
+      ],
+      "acl": "{postgres=X/postgres,service_role=X/postgres}",
+      "execute": {
+        "anon": false,
+        "service_role": true,
+        "authenticated": false
+      },
+      "returns": "orders"
+    },
+    {
+      "name": "generate_order_number",
+      "args": "",
+      "owner": "postgres",
+      "security_definer": true,
+      "proconfig": [
+        "search_path=\"\""
+      ],
+      "acl": null,
+      "execute": {
+        "anon": true,
+        "service_role": true,
+        "authenticated": true
+      },
+      "returns": "text"
+    },
+    {
+      "name": "handle_default_address",
+      "args": "",
+      "owner": "postgres",
+      "security_definer": false,
+      "proconfig": null,
+      "acl": null,
+      "execute": {
+        "anon": true,
+        "service_role": true,
+        "authenticated": true
+      },
+      "returns": "trigger"
+    },
+    {
+      "name": "handle_new_user",
+      "args": "",
+      "owner": "postgres",
+      "security_definer": true,
+      "proconfig": [
+        "search_path=\"\""
+      ],
+      "acl": null,
+      "execute": {
+        "anon": true,
+        "service_role": true,
+        "authenticated": true
+      },
+      "returns": "trigger"
+    },
+    {
+      "name": "is_business_user",
+      "args": "",
+      "owner": "postgres",
+      "security_definer": true,
+      "proconfig": [
+        "search_path=\"\""
+      ],
+      "acl": null,
+      "execute": {
+        "anon": true,
+        "service_role": true,
+        "authenticated": true
+      },
+      "returns": "boolean"
+    },
+    {
+      "name": "launch_consent_history_is_append_only",
+      "args": "",
+      "owner": "postgres",
+      "security_definer": false,
+      "proconfig": null,
+      "acl": null,
+      "execute": {
+        "anon": true,
+        "service_role": true,
+        "authenticated": true
+      },
+      "returns": "trigger"
+    },
+    {
+      "name": "prevent_customer_type_change",
+      "args": "",
+      "owner": "postgres",
+      "security_definer": false,
+      "proconfig": null,
+      "acl": null,
+      "execute": {
+        "anon": true,
+        "service_role": true,
+        "authenticated": true
+      },
+      "returns": "trigger"
+    },
+    {
+      "name": "rls_auto_enable",
+      "args": "",
+      "owner": "postgres",
+      "security_definer": true,
+      "proconfig": [
+        "search_path=pg_catalog"
+      ],
+      "acl": null,
+      "execute": {
+        "anon": true,
+        "service_role": true,
+        "authenticated": true
+      },
+      "returns": "event_trigger"
+    },
+    {
+      "name": "set_updated_at",
+      "args": "",
+      "owner": "postgres",
+      "security_definer": false,
+      "proconfig": null,
+      "acl": null,
+      "execute": {
+        "anon": true,
+        "service_role": true,
+        "authenticated": true
+      },
+      "returns": "trigger"
+    }
+  ],
+  "dependencies": [
+    {
+      "type": "n",
+      "object": "policy Private users read own subscriptions on table subscriptions",
+      "depends_on": "function is_business_user()"
+    },
+    {
+      "type": "n",
+      "object": "policy Business users read own supply agreements on table b2b_supply_agreements",
+      "depends_on": "function is_business_user()"
+    },
+    {
+      "type": "n",
+      "object": "policy Business users read own supply items on table b2b_supply_items",
+      "depends_on": "function is_business_user()"
+    },
+    {
+      "type": "n",
+      "object": "policy Business users read own payment schedule on table b2b_payment_schedule",
+      "depends_on": "function is_business_user()"
+    },
+    {
+      "type": "n",
+      "object": "policy Business users read own deliveries on table b2b_deliveries",
+      "depends_on": "function is_business_user()"
+    },
+    {
+      "type": "n",
+      "object": "default value for column order_number of table orders",
+      "depends_on": "function generate_order_number()"
+    },
+    {
+      "type": "n",
+      "object": "event trigger ensure_rls",
+      "depends_on": "function rls_auto_enable()"
+    },
+    {
+      "type": "n",
+      "object": "trigger on_auth_user_created on table auth.users",
+      "depends_on": "function handle_new_user()"
+    }
+  ],
+  "triggers": [
+    {
+      "name": "on_auth_user_created",
+      "table": "users",
+      "schema": "auth",
+      "function": "handle_new_user()",
+      "definition": "CREATE TRIGGER on_auth_user_created AFTER INSERT ON auth.users FOR EACH ROW EXECUTE FUNCTION handle_new_user()"
+    },
+    {
+      "name": "before_address_upsert",
+      "table": "addresses",
+      "schema": "public",
+      "function": "handle_default_address()",
+      "definition": "CREATE TRIGGER before_address_upsert BEFORE INSERT OR UPDATE ON addresses FOR EACH ROW EXECUTE FUNCTION handle_default_address()"
+    },
+    {
+      "name": "set_addresses_updated_at",
+      "table": "addresses",
+      "schema": "public",
+      "function": "set_updated_at()",
+      "definition": "CREATE TRIGGER set_addresses_updated_at BEFORE UPDATE ON addresses FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+    },
+    {
+      "name": "protect_customer_type",
+      "table": "profiles",
+      "schema": "public",
+      "function": "prevent_customer_type_change()",
+      "definition": "CREATE TRIGGER protect_customer_type BEFORE UPDATE ON profiles FOR EACH ROW EXECUTE FUNCTION prevent_customer_type_change()"
+    },
+    {
+      "name": "set_profiles_updated_at",
+      "table": "profiles",
+      "schema": "public",
+      "function": "set_updated_at()",
+      "definition": "CREATE TRIGGER set_profiles_updated_at BEFORE UPDATE ON profiles FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+    },
+    {
+      "name": "set_business_profiles_updated_at",
+      "table": "business_profiles",
+      "schema": "public",
+      "function": "set_updated_at()",
+      "definition": "CREATE TRIGGER set_business_profiles_updated_at BEFORE UPDATE ON business_profiles FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+    },
+    {
+      "name": "set_b2c_plans_updated_at",
+      "table": "b2c_subscription_plans",
+      "schema": "public",
+      "function": "set_updated_at()",
+      "definition": "CREATE TRIGGER set_b2c_plans_updated_at BEFORE UPDATE ON b2c_subscription_plans FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+    },
+    {
+      "name": "set_subscriptions_updated_at",
+      "table": "subscriptions",
+      "schema": "public",
+      "function": "set_updated_at()",
+      "definition": "CREATE TRIGGER set_subscriptions_updated_at BEFORE UPDATE ON subscriptions FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+    },
+    {
+      "name": "set_subscription_email_deliveries_updated_at",
+      "table": "subscription_email_deliveries",
+      "schema": "public",
+      "function": "set_updated_at()",
+      "definition": "CREATE TRIGGER set_subscription_email_deliveries_updated_at BEFORE UPDATE ON subscription_email_deliveries FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+    },
+    {
+      "name": "set_launch_waitlist_updated_at",
+      "table": "launch_waitlist",
+      "schema": "public",
+      "function": "set_updated_at()",
+      "definition": "CREATE TRIGGER set_launch_waitlist_updated_at BEFORE UPDATE ON launch_waitlist FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+    },
+    {
+      "name": "trg_launch_consent_history_append_only",
+      "table": "launch_consent_history",
+      "schema": "public",
+      "function": "launch_consent_history_is_append_only()",
+      "definition": "CREATE TRIGGER trg_launch_consent_history_append_only BEFORE UPDATE ON launch_consent_history FOR EACH ROW EXECUTE FUNCTION launch_consent_history_is_append_only()"
+    },
+    {
+      "name": "set_orders_updated_at",
+      "table": "orders",
+      "schema": "public",
+      "function": "set_updated_at()",
+      "definition": "CREATE TRIGGER set_orders_updated_at BEFORE UPDATE ON orders FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+    },
+    {
+      "name": "set_inventory_categories_updated_at",
+      "table": "inventory_categories",
+      "schema": "public",
+      "function": "set_updated_at()",
+      "definition": "CREATE TRIGGER set_inventory_categories_updated_at BEFORE UPDATE ON inventory_categories FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+    },
+    {
+      "name": "set_inventory_items_updated_at",
+      "table": "inventory_items",
+      "schema": "public",
+      "function": "set_updated_at()",
+      "definition": "CREATE TRIGGER set_inventory_items_updated_at BEFORE UPDATE ON inventory_items FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+    },
+    {
+      "name": "set_checkout_attempts_updated_at",
+      "table": "checkout_attempts",
+      "schema": "public",
+      "function": "set_updated_at()",
+      "definition": "CREATE TRIGGER set_checkout_attempts_updated_at BEFORE UPDATE ON checkout_attempts FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+    },
+    {
+      "name": "set_admin_users_updated_at",
+      "table": "admin_users",
+      "schema": "public",
+      "function": "set_updated_at()",
+      "definition": "CREATE TRIGGER set_admin_users_updated_at BEFORE UPDATE ON admin_users FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+    },
+    {
+      "name": "set_b2b_supply_updated_at",
+      "table": "b2b_supply_agreements",
+      "schema": "public",
+      "function": "set_updated_at()",
+      "definition": "CREATE TRIGGER set_b2b_supply_updated_at BEFORE UPDATE ON b2b_supply_agreements FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+    },
+    {
+      "name": "set_b2b_supply_items_updated_at",
+      "table": "b2b_supply_items",
+      "schema": "public",
+      "function": "set_updated_at()",
+      "definition": "CREATE TRIGGER set_b2b_supply_items_updated_at BEFORE UPDATE ON b2b_supply_items FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+    },
+    {
+      "name": "set_annual_plans_updated_at",
+      "table": "annual_plans",
+      "schema": "public",
+      "function": "set_updated_at()",
+      "definition": "CREATE TRIGGER set_annual_plans_updated_at BEFORE UPDATE ON annual_plans FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+    },
+    {
+      "name": "set_b2b_payment_schedule_updated_at",
+      "table": "b2b_payment_schedule",
+      "schema": "public",
+      "function": "set_updated_at()",
+      "definition": "CREATE TRIGGER set_b2b_payment_schedule_updated_at BEFORE UPDATE ON b2b_payment_schedule FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+    },
+    {
+      "name": "set_b2b_deliveries_updated_at",
+      "table": "b2b_deliveries",
+      "schema": "public",
+      "function": "set_updated_at()",
+      "definition": "CREATE TRIGGER set_b2b_deliveries_updated_at BEFORE UPDATE ON b2b_deliveries FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+    },
+    {
+      "name": "set_products_updated_at",
+      "table": "products",
+      "schema": "public",
+      "function": "set_updated_at()",
+      "definition": "CREATE TRIGGER set_products_updated_at BEFORE UPDATE ON products FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+    },
+    {
+      "name": "set_variants_updated_at",
+      "table": "product_variants",
+      "schema": "public",
+      "function": "set_updated_at()",
+      "definition": "CREATE TRIGGER set_variants_updated_at BEFORE UPDATE ON product_variants FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+    }
+  ]
+}

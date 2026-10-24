@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "kind": "automatic-finance-sync",
+  "reviewer": "GLOA local release review; not Production approval",
+  "callerReview": "Authenticated server cron and existing admin authorization only; service RPC fencing; no browser table access or approval capability. Real PostgreSQL evidence linked by exact SQL SHA.",
+  "sqlSha256": "8fc5da7be846857434ffc7b5843e7c6a04120e9b89cdf38346fdd62cc7b134ff",
+  "databaseProofSha256": "e3e6f69ab8065c04583413d7ce4e8befe5d4d7a40416ab2ead7176903c924d0b"
+}

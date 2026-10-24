@@ -49,9 +49,13 @@ export async function retrieveProviderFee(stripe: Stripe, evidence: FeeEvidence)
  const transactionId = id(charge.balance_transaction);
  if (!transactionId) throw new FeeUnavailable('provider_unavailable');
  const transaction = await stripe.balanceTransactions.retrieve(transactionId);
- if (transaction.id !== transactionId || id(transaction.source) !== chargeId || transaction.type !== 'charge') throw new FeeUnavailable('correlation_conflict');
+ if (transaction.id !== transactionId || id(transaction.source) !== chargeId
+   || !(transaction.type === 'charge' || (transaction.type === 'payment' && transaction.reporting_category === 'charge'))) throw new FeeUnavailable('correlation_conflict');
  if (transaction.currency.toUpperCase() !== evidence.currency) throw new FeeUnavailable('currency_mismatch');
  if (!Number.isSafeInteger(transaction.fee) || transaction.fee < 0 || !Number.isSafeInteger(transaction.created) || transaction.created <= 0) throw new FeeUnavailable('correlation_conflict');
+ if (!Number.isSafeInteger(intent.amount_received) || intent.amount_received <= 0
+   || charge.amount !== intent.amount_received || transaction.amount !== charge.amount
+   || !Number.isSafeInteger(transaction.net) || transaction.net !== transaction.amount - transaction.fee) throw new FeeUnavailable('correlation_conflict');
  return { status: 'checked', paymentIntentId: intentId, chargeId, balanceTransactionId: transactionId, feeCents: transaction.fee, currency: evidence.currency, transactionAt: new Date(transaction.created * 1000).toISOString() };
 }
 

@@ -1162,16 +1162,16 @@ test("30: business guards are counted, infrastructure failures are surfaced", as
    31-34. THE CRON, THE FLAG AND THE PHASE BOUNDARY
    ══════════════════════════════════════════════════════════════ */
 
-test("31: ONE cron schedule, unchanged, and the annual job runs inside it", () => {
+test("31: original annual cron remains unchanged beside the independent finance cron", () => {
   const vercel = JSON.parse(read("vercel.json"));
-  assert.equal(vercel.crons.length, 1, "a second Vercel cron schedule appeared");
+  assert.deepEqual(vercel.crons, [{path:"/api/cron/retry-order-notifications",schedule:"20 5 * * *"},{path:"/api/cron/finance-reconciliation",schedule:"40 5 * * *"}]);
   assert.equal(vercel.crons[0].path, "/api/cron/retry-order-notifications");
   assert.equal(vercel.crons[0].schedule, "20 5 * * *");
-  // Exactly one cron route exists in the app.
+  // Only the independently tested finance route is added; annual work remains in the original route.
   const cronRoutes = readdirSync(path.join(ROOT, "app/api/cron"), { withFileTypes: true })
     .filter(entry => entry.isDirectory())
     .map(entry => entry.name);
-  assert.deepEqual(cronRoutes, ["retry-order-notifications"]);
+  assert.deepEqual(cronRoutes.sort(), ["finance-reconciliation", "retry-order-notifications"]);
   // And the annual maintenance is reached from it. A fifth job (the
   // launch waitlist's retention sweep) has since been merged into the
   // same answer, for the same reason this one was: the Hobby plan
@@ -1236,7 +1236,8 @@ test("33: B2C_ANNUAL_PLAN_ENABLED cannot stop an existing contract", () => {
 
 test("34: this phase adds no migration and edits none", () => {
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
-    .filter(f => f.endsWith(".sql")).sort();
+    // Reviewed 084/085 have independent exact-hash PostgreSQL/ACL gates; retain the historical annual boundary.
+    .filter(f => f.endsWith(".sql") && !["084_restrict_order_number_execute.sql", "085_automatic_finance_reconciliation.sql"].includes(f)).sort();
   // 057 SIMPLIFIED THE LAUNCH DISCOUNT: the one-use claim architecture
   // 056 built is removed, because the code became reusable. Re-pinned
   // rather than deleted - what this guard protects is that nothing

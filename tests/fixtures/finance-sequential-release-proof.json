@@ -1,0 +1,732 @@
+{
+  "version": 1,
+  "postgres": "17.11",
+  "mode": "DISPOSABLE_LOCAL_ONLY",
+  "migrations": [
+    {
+      "name": "001_customer_accounts.sql",
+      "sha256": "1c0c82cbf5842d8259da3a9c1c8c9c6d5a10d10710f9bf599309bfa5333a75f8"
+    },
+    {
+      "name": "002_grants.sql",
+      "sha256": "b88b28b66aa1ec7a1c616f8230028aa85df3b6e72ccbd38e22dc706524724a43"
+    },
+    {
+      "name": "003_b2b_pricing.sql",
+      "sha256": "a1883e77f84d5e5bd302ab9c70daf0b3eb7b83412f7aebad6408d0d2edf0213c"
+    },
+    {
+      "name": "004_orders.sql",
+      "sha256": "1ca4d2fc39ac03ad6dfee02e11337ce25b777d756f81ed7c4fe980c8c16ced56"
+    },
+    {
+      "name": "005_b2c_subscriptions.sql",
+      "sha256": "4ab5a11800cc7e705317e5ae99247d5e2d0124d5c971ad7de8af7c65fc761899"
+    },
+    {
+      "name": "006_b2b_supply.sql",
+      "sha256": "736bb3c201eb1f9d3d8521d55b3bfdc9a5549c1e264f4af9333cede084aff760"
+    },
+    {
+      "name": "007_product_catalog.sql",
+      "sha256": "1d9aa21da2a1c46c88c0ec3145c8e6298ac6273b3ceb8f8e53ca91a6b58d1474"
+    },
+    {
+      "name": "008_b2c_launch_products.sql",
+      "sha256": "4994fb20f14f8d37211895dfdbab32556420fb4780a7d514a067fe75b0e99a57"
+    },
+    {
+      "name": "009_stripe_checkout_attempts.sql",
+      "sha256": "8ea35928b28625705a8d279c8be600957bb2133856df2f1f98e97b20ac4c56a3"
+    },
+    {
+      "name": "010_stripe_checkout_attempts_grants.sql",
+      "sha256": "537fb35a311aec42087d1d95581548a71e1fec998de4d227ca5290ebc3f2fb2d"
+    },
+    {
+      "name": "011_orders_from_paid_checkout.sql",
+      "sha256": "5778d9acbe466e9b53002d976457992fa291385911b104804b1583813dd3edac"
+    },
+    {
+      "name": "012_fix_order_net_fields_default.sql",
+      "sha256": "1e097873271cddc197e1cc41b3f2fceb74ee24f5375abe407667a8d36c41937d"
+    },
+    {
+      "name": "013_order_shipping_billing_snapshots.sql",
+      "sha256": "8fc4de00e5e3b22a109b74a77b543e91a8b0c94f3f5569efca3146d47600ccbd"
+    },
+    {
+      "name": "014_fix_order_net_fields_default_again.sql",
+      "sha256": "9db8ad1ec7e07e3173e4d5a54a72912cc2acb654787ac151fba19bcb662f74f0"
+    },
+    {
+      "name": "015_checkout_attempt_shipping_snapshot.sql",
+      "sha256": "7e76cf5f2a83f4347135c0cd0e737ab5cddd27e7d84cefeb5ac4f26c5cd0e101"
+    },
+    {
+      "name": "016_order_shipping_gross_cents.sql",
+      "sha256": "7298554437f864dc2660ce1bdb9557b08bb07234442744f7818cd9644e85c90c"
+    },
+    {
+      "name": "017_order_confirmation_email_state.sql",
+      "sha256": "5413e487400b1cc875d428a8199b4808087c90e32ae496b2366b982a0a5956b7"
+    },
+    {
+      "name": "018_customer_withdrawal_requests.sql",
+      "sha256": "8e00f2a10e6cd5bcd463b76627aa5eb928e271e7525bdaaea82d3810184e2700"
+    },
+    {
+      "name": "019_order_lifecycle_tracking.sql",
+      "sha256": "4f1a4f255995f8293770dd6832207a92048aa1b6c11d80306cd3ea76899ea171"
+    },
+    {
+      "name": "020_standalone_metal_case.sql",
+      "sha256": "89ccee5cade2d45da56a8b30ef3cd906e6731f10f08248ecc305a8ccd75d353a"
+    },
+    {
+      "name": "021_tax_snapshot.sql",
+      "sha256": "e95b1211c4590c410de672366fa7056077202cfa23cbc76029995ff49a0edb2d"
+    },
+    {
+      "name": "022_recurring_subscription_foundation.sql",
+      "sha256": "3b8e14bd97323104b87f31e815320ec55a2a3d6090f08154c51ae4dd9fd70b22"
+    },
+    {
+      "name": "023_harden_stripe_customers_grants.sql",
+      "sha256": "3f5f73fd88818d7769fc4017a852a18b026bfca2a6d809d6ad679fc3a8f224ce"
+    },
+    {
+      "name": "024_seed_b2c_subscription_plans.sql",
+      "sha256": "c75cb99ee0c46e811b3bd098be35451a705011519e1ab1a059ff83beb25912c0"
+    },
+    {
+      "name": "025_grant_subscription_plans_service_role.sql",
+      "sha256": "9aac0915c17d6d1461724f80c0cffd898a55053737efbcd831a4cc0b4038c619"
+    },
+    {
+      "name": "026_internal_order_notification_state.sql",
+      "sha256": "0d1d5cab6d6c1ac36c4f5ea81215aff1d95171dc72cc2edc61875092a90902c0"
+    },
+    {
+      "name": "027_shipment_confirmation_email_state.sql",
+      "sha256": "dde30cf140047da115eb09235c168dfc399c3856c7e528bf86823cf54fef640d"
+    },
+    {
+      "name": "028_authorized_shipment_transition.sql",
+      "sha256": "c76c9a1210bb44c3d8cf9c18d09319163549dc749cf14ebb7a0e8ddd8f81276b"
+    },
+    {
+      "name": "029_authorized_order_cancellation.sql",
+      "sha256": "0a0fd501a29a9f91a695b4fcbaab65bd847b3d4b510eeea8bfea7001c7364c90"
+    },
+    {
+      "name": "030_cancellation_request_notification_state.sql",
+      "sha256": "9ace582d9387939d5cceb619b06c875ae781269e9c812b325f250c44f0f9cae1"
+    },
+    {
+      "name": "031_cancellation_request_resolution.sql",
+      "sha256": "1031fd65bb0c5e0cf4ed2790cd900fee94a7d9323e3befa2b09d60de2ca07597"
+    },
+    {
+      "name": "032_open_cancellation_request_shipment_guard.sql",
+      "sha256": "e768950c9d12b72879825d9b1e89717adb2d6129cba80dcfc8e0e6135aa3810c"
+    },
+    {
+      "name": "033_refund_confirmation_email_state.sql",
+      "sha256": "e792ddc80f38db1735aaa0edbceaae218764ab3521cd6091e508dc1b3f431c7f"
+    },
+    {
+      "name": "034_subscription_cancellation.sql",
+      "sha256": "62d59e46cd93ec35b37939e7086d62b1899b0a7d4afed00a989b558e530c65be"
+    },
+    {
+      "name": "035_subscription_email_deliveries.sql",
+      "sha256": "b9dba0b6432c5cfa4dc96a1bfbe927b3afed35b1f657af71af1d5c325ef5f117"
+    },
+    {
+      "name": "036_subscription_payment_status.sql",
+      "sha256": "2d70e20069f0722f38c27b192765cf94f2176a3af1edfb7134215eecb387fc45"
+    },
+    {
+      "name": "037_subscription_refund_correlation.sql",
+      "sha256": "94c48e46438179796876ccbaf7691c1d07fc865fa7cbdbaf042dbb5646ec4882"
+    },
+    {
+      "name": "038_one_time_refund_writer_concurrency.sql",
+      "sha256": "03c5fd4ad66a5be09ff45c68bc3c1b5ec11557bb8088f0325f5d2b3ffc3aeb35"
+    },
+    {
+      "name": "039_b2c_annual_plan_foundation.sql",
+      "sha256": "113f2467f134f005ce38253ee9200dc0a10ac6f826d38c13aebad5ab81211367"
+    },
+    {
+      "name": "040_annual_checkout_retry_fingerprints.sql",
+      "sha256": "0ece0cda01eff500d992b916dd75f3aaea291a225ac0493e67fd321ac1d7a931"
+    },
+    {
+      "name": "041_annual_account_column_privileges.sql",
+      "sha256": "f770a4c3eb5c7b4b20eacedd01e8f73e95f0d236bb220ad974f137fbcc9a5edb"
+    },
+    {
+      "name": "042_annual_delivery_rls_parent_user_privilege.sql",
+      "sha256": "0acfd574ad03ffec581b25d4b3d23ef8d2f64dc79f6f00bafd62f036e519dd12"
+    },
+    {
+      "name": "043_launch_waitlist.sql",
+      "sha256": "4281ac2934f8493136a22894486a67f9053f45ae3d3171892b51968404682bde"
+    },
+    {
+      "name": "044_launch_send.sql",
+      "sha256": "97f78ddaa1908648d35af2586d3956bc3c1aa3cb17ec09696f20176f3c709bad"
+    },
+    {
+      "name": "045_launch_welcome_email.sql",
+      "sha256": "f500d93f189a2547b0209e97f7fd4920662f9a9ac1e234e7ab988d9586ecbf29"
+    },
+    {
+      "name": "046_launch_signup_atomic.sql",
+      "sha256": "663f6f391a69b5c322715f6dc65b210ddba30090c3f0cfda216c8f681356dc14"
+    },
+    {
+      "name": "047_withhold_metal_case.sql",
+      "sha256": "9921256c359b9b71d15f8e94974ff5f82f3f104440dc9cc393a4b5462e55cac3"
+    },
+    {
+      "name": "048_service_role_read_grants.sql",
+      "sha256": "f9efa06d1f0b8aa95fa7642df388474abe2d495706212725fd6b5d905cf6bcb4"
+    },
+    {
+      "name": "049_direct_cancellation_and_refund_lock.sql",
+      "sha256": "cc0d0797b2b13b29b549d2ba0cc2aadeceed5bbb23c232eebc30d3160a2ccbe8"
+    },
+    {
+      "name": "050_inventory_foundation.sql",
+      "sha256": "dc6b724e6f57d96f6639fa2af46c4b0139e5feba3145103d319893b55989d729"
+    },
+    {
+      "name": "051_admin_identity_foundation.sql",
+      "sha256": "591eda23d5debe8a8fbb85970f47b3b11fbc4321ec22511061ab0f3ab926908e"
+    },
+    {
+      "name": "052_admin_activity_audit.sql",
+      "sha256": "1f54007917176a4d0f0e54ebed8399ccb743d58ec9161516ef4219abcfca201d"
+    },
+    {
+      "name": "053_b2b_commercial_containment.sql",
+      "sha256": "600f2e745044f7b0f6d4359a8e3e5b861dc461acb524496f4d27d673c7ab8f5d"
+    },
+    {
+      "name": "054_b2c_price_alignment.sql",
+      "sha256": "d46905a52355988565c5294d634c4413586ca5dd735bbb6f51baf54d55ee1f95"
+    },
+    {
+      "name": "055_checkout_email_identity.sql",
+      "sha256": "89d80321c1968fc37ce9cc4a39aa8b21c7d4d82f8cb9ae3332393837bbfe5697"
+    },
+    {
+      "name": "056_launch_discount.sql",
+      "sha256": "f13d74da22e433e8f5fe8423d0e4459b9b87afa335d9669e1e57d739a74d35ae"
+    },
+    {
+      "name": "057_simplify_launch_discount.sql",
+      "sha256": "a796073bfa44d112a87dc84ce3187f7acd3b110e5485a13886ace9c00273f414"
+    },
+    {
+      "name": "058_discounted_order_line_accounting.sql",
+      "sha256": "449ee8408c556df469c15c555eff4496f062cfce558e036fa67dce5fd0e03fa6"
+    },
+    {
+      "name": "059_b2b_supply_commerce_foundation.sql",
+      "sha256": "9fe1e01102214680963632bebbb1f4e49b16ea1f3c2982dbe5b8652418e29a92"
+    },
+    {
+      "name": "060_b2b_payment_delivery_foundation.sql",
+      "sha256": "0419f762e288dbeff4e9a8eaaea85d70d21c41419ada52351d392406bc555bf0"
+    },
+    {
+      "name": "061_b2b_pending_agreement_writer.sql",
+      "sha256": "f1b7ae1edef14472cf22df2663e9c1c1717c0e38c553ec195583c560f63f09a6"
+    },
+    {
+      "name": "062_b2b_checkout_settlement.sql",
+      "sha256": "8b145fc196e498d778d3bf25268efc5b69e59104033bbeaca3ab4484552d14e4"
+    },
+    {
+      "name": "063_b2b_instalment_delivery_failure_runtime.sql",
+      "sha256": "6c2cae96535a9b18a3a1d11f20632cc727836ceed29ed81f32aa29728a4f05d2"
+    },
+    {
+      "name": "064_b2b_account_change_management.sql",
+      "sha256": "49915a39af6cc992c481a6b632eb3aa120e852215a6fb4b84773e1632ccf57ae"
+    },
+    {
+      "name": "065_guest_order_management.sql",
+      "sha256": "67aa275d18a3c40675f9ffd6ea21d6496b42e88d7a689ac875caf5c9363813ad"
+    },
+    {
+      "name": "066_annual_plan_subscription_transition.sql",
+      "sha256": "7f2e955eabdb52c64d2d32d89142cce125b75cc1e4e0501f55224a84d138a3e8"
+    },
+    {
+      "name": "067_annual_upgrade_pending_claim.sql",
+      "sha256": "47667e3b02ebd9ff8d92d2468acb27db4f92a828f653f7f48e829e41ae604852"
+    },
+    {
+      "name": "068_annual_plan_customer_claim.sql",
+      "sha256": "55a6d0381723f4be3aebd2c07f579bc8daf9ca7cc3c7ea46d226bae9a3f1a667"
+    },
+    {
+      "name": "069_annual_plan_monthly_schedule.sql",
+      "sha256": "95dfe3a7074189926cf258d3d2456f09dd2da238c28b237176e40d1019fa0ba8"
+    },
+    {
+      "name": "070_customer_rights_foundation.sql",
+      "sha256": "897b7a58ca855dda10f8febc0a77d44a310708d5fc62b9820539c8a41555fbdd"
+    },
+    {
+      "name": "071_business_expenses.sql",
+      "sha256": "0b8a6a86430729d771ec68561215febdc70fee836f2b7e0727e7aaa933445d0b"
+    },
+    {
+      "name": "072_admin_core_connections.sql",
+      "sha256": "19a3a22a3876680a42e41bff522f5d1c2f63675ecc177f3710118920d6698404"
+    },
+    {
+      "name": "073_affiliate_atomic_configuration.sql",
+      "sha256": "11602cf31ab7851a71243cca8d13c754e54794105e280d6b4b85160d5837026f"
+    },
+    {
+      "name": "074_creator_ugc_transactional_writers.sql",
+      "sha256": "e84906a5fc6df81207a9d6afdc09ebb15432f0a70d1645a295d5cb838c29046e"
+    },
+    {
+      "name": "075_b2b_supply_agreement_acl_hardening.sql",
+      "sha256": "fe3c8b75bfcc154ab9a92430115d331c77b3bc26b9461f81fd3450eaa3755866"
+    },
+    {
+      "name": "076_b2b_monthly_finance_writer.sql",
+      "sha256": "cf23fbea576ed73844ca5bd763c7615ca06108b341eb8ea6666902330c5c4fb0"
+    },
+    {
+      "name": "077_withdrawal_refund_review.sql",
+      "sha256": "a9b7d869c9a68107e70353e162e6cd0fc8592abd8c63efd9f5de7e5b4a6f6b3f"
+    },
+    {
+      "name": "078_withdrawal_contract_assignment.sql",
+      "sha256": "dd2f081d282593ffebcc73cd1d07f613c10f239da3f80ae0bb1f0fa596ba2a87"
+    },
+    {
+      "name": "079_provider_fee_evidence.sql",
+      "sha256": "e5e1fda235cffd2dd3eca8f2a19f827596a6d58d3d54f52b540ca07104b33ca4"
+    },
+    {
+      "name": "080_annual_finance_tax_connection.sql",
+      "sha256": "2131fed9ae448f533b007891b420ab6639e1f35fb8170c47ddd059ef2d0d2dc2"
+    },
+    {
+      "name": "081_refund_tax_evidence.sql",
+      "sha256": "209469a249b3b27e7dea0bdf143d9bc015b6b8c341ee34d5a285eb756a876757"
+    },
+    {
+      "name": "082_direct_cost_coverage.sql",
+      "sha256": "5f59da05b13d655b17d29194ac23cef5dcc83a0a7bccf55f193a0088715fd9c8"
+    },
+    {
+      "name": "083_admin_product_manager.sql",
+      "sha256": "61bcc13f80340bf3948a07c8e77b4934af45fd08d25fa6f435559cf7a7e12388"
+    },
+    {
+      "name": "084_restrict_order_number_execute.sql",
+      "sha256": "178f6b5f88ef4fcbc4ebf624d3facd5a9f61b3f630b14fd504f49ad8d818a04f"
+    },
+    {
+      "name": "085_automatic_finance_reconciliation.sql",
+      "sha256": "8fc5da7be846857434ffc7b5843e7c6a04120e9b89cdf38346fdd62cc7b134ff"
+    }
+  ],
+  "securityChecks": [
+    "59 public base tables reconstructed",
+    "all public tables retain RLS",
+    "helper and checkout writer retain postgres definer context",
+    "all API roles inherit original public helper execution",
+    "anon vulnerability reproduced",
+    "authenticated vulnerability reproduced",
+    "service_role vulnerability reproduced",
+    "before valid order number",
+    "before idempotent one order",
+    "before frozen totals",
+    "before invoice activation replay",
+    "before one numbered subscription order",
+    "before annual fulfillment/replay",
+    "before one numbered annual order",
+    "084 read-only preflight passes",
+    "sequence state unchanged by patch",
+    "only helper ACL changed",
+    "PUBLIC and API direct helper rights removed; owner preserved",
+    "084 read-only postcheck passes",
+    "anon direct helper denied",
+    "authenticated direct helper denied",
+    "service_role direct helper denied",
+    "after valid order number",
+    "after idempotent one order",
+    "after frozen totals",
+    "after invoice activation replay",
+    "after one numbered subscription order",
+    "after annual fulfillment/replay",
+    "after one numbered annual order",
+    "historical orders byte-identical",
+    "unrelated grants/policies/functions still identical after settlements",
+    "patch reapplication idempotent",
+    "sequence definition unchanged",
+    "owner authority still works",
+    "own-user customer order reads preserved",
+    "other customer context cannot read synthetic owner orders",
+    "anonymous customer data denied"
+  ],
+  "financeChecks": [
+    "missing payment webhook effect recorded",
+    "frozen original net/tax retained",
+    "double delivery idempotent",
+    "py fee recorded exactly once with original BT instant",
+    "missed refund preserves protected commission reversal exactly once",
+    "missing refund creates one cross-month refund",
+    "manual tax never invented",
+    "protected order refund state repaired",
+    "processed webhook with existing ledger is adopted",
+    "ch fee remains supported",
+    "duplicate source conflict rejected",
+    "interrupted transaction rolls back ledger and source bridge",
+    "crash retry succeeds once",
+    "historical import requires explicit approval",
+    "approved historical source recorded on original date",
+    "closed period queues a correction without rewriting history",
+    "authorized correction keeps original and posting dates separate",
+    "expired lease resumes same durable job with new fencing token",
+    "stale worker cannot write",
+    "overlapping scheduler receives busy",
+    "parallel workers do not duplicate an existing source",
+    "parallel new source produces exactly one money record",
+    "annual income uses original full snapshot tax",
+    "verified zero fee is evidence without a zero-money event",
+    "annual lifecycle retained while refund protection is restored",
+    "refunded annual plan cannot fulfill delivery",
+    "invoice-linked subscription refund and income preserve NULL PI snapshot",
+    "subscription money recorded once",
+    "usage fee recorded once with unknown VAT",
+    "automatically reconciled expense cannot be overwritten",
+    "failed payout cannot enter writer queue",
+    "incomplete checkpoint cannot claim success",
+    "intentional non-Stripe income is not mislabeled as a missing Stripe bridge",
+    "complete checkpoint is confirmed only after all money has a bridge",
+    "cash view separates original evidence from approved later posting",
+    "ambiguous manual fee is held for review instead of duplicated",
+    "automatic month opening never reopens a closed period",
+    "anon cannot read reconciliation metadata",
+    "anon cannot execute writer",
+    "authenticated cannot read reconciliation metadata",
+    "authenticated cannot execute writer",
+    "service role cannot approve historical backfill",
+    "historical ledger byte-equivalent after retry",
+    "API/DB retry recovers durable checkpoint",
+    "all new tables have RLS",
+    "every new function denies public browser execution"
+  ],
+  "privileges084": {
+    "before": {
+      "PUBLIC": true,
+      "anon": true,
+      "authenticated": true,
+      "service_role": true,
+      "owner": true
+    },
+    "after": {
+      "PUBLIC": false,
+      "anon": false,
+      "authenticated": false,
+      "service_role": false,
+      "owner": true
+    }
+  },
+  "catalog085": {
+    "tables": [
+      {
+        "rls": true,
+        "anon": false,
+        "name": "finance_sync_alerts",
+        "serviceWrite": false,
+        "authenticated": false,
+        "serviceSelect": true
+      },
+      {
+        "rls": true,
+        "anon": false,
+        "name": "finance_sync_approvals",
+        "serviceWrite": false,
+        "authenticated": false,
+        "serviceSelect": false
+      },
+      {
+        "rls": true,
+        "anon": false,
+        "name": "finance_sync_config",
+        "serviceWrite": false,
+        "authenticated": false,
+        "serviceSelect": true
+      },
+      {
+        "rls": true,
+        "anon": false,
+        "name": "finance_sync_discrepancies",
+        "serviceWrite": false,
+        "authenticated": false,
+        "serviceSelect": true
+      },
+      {
+        "rls": true,
+        "anon": false,
+        "name": "finance_sync_jobs",
+        "serviceWrite": false,
+        "authenticated": false,
+        "serviceSelect": true
+      },
+      {
+        "rls": true,
+        "anon": false,
+        "name": "finance_sync_periods",
+        "serviceWrite": false,
+        "authenticated": false,
+        "serviceSelect": true
+      },
+      {
+        "rls": true,
+        "anon": false,
+        "name": "finance_sync_sources",
+        "serviceWrite": false,
+        "authenticated": false,
+        "serviceSelect": true
+      }
+    ],
+    "functions": [
+      {
+        "anon": false,
+        "name": "finance_sync_alert_v1",
+        "PUBLIC": false,
+        "definer": true,
+        "service": true,
+        "searchPath": [
+          "search_path=\"\""
+        ],
+        "authenticated": false
+      },
+      {
+        "anon": false,
+        "name": "finance_sync_annual_payment_v1",
+        "PUBLIC": false,
+        "definer": true,
+        "service": false,
+        "searchPath": [
+          "search_path=\"\""
+        ],
+        "authenticated": false
+      },
+      {
+        "anon": false,
+        "name": "finance_sync_basis_v1",
+        "PUBLIC": false,
+        "definer": true,
+        "service": true,
+        "searchPath": [
+          "search_path=\"\""
+        ],
+        "authenticated": false
+      },
+      {
+        "anon": false,
+        "name": "finance_sync_checkpoint_v1",
+        "PUBLIC": false,
+        "definer": true,
+        "service": true,
+        "searchPath": [
+          "search_path=\"\""
+        ],
+        "authenticated": false
+      },
+      {
+        "anon": false,
+        "name": "finance_sync_claim_v1",
+        "PUBLIC": false,
+        "definer": true,
+        "service": true,
+        "searchPath": [
+          "search_path=\"\""
+        ],
+        "authenticated": false
+      },
+      {
+        "anon": false,
+        "name": "finance_sync_details_v1",
+        "PUBLIC": false,
+        "definer": true,
+        "service": true,
+        "searchPath": [
+          "search_path=\"\""
+        ],
+        "authenticated": false
+      },
+      {
+        "anon": false,
+        "name": "finance_sync_discrepancy_v1",
+        "PUBLIC": false,
+        "definer": true,
+        "service": true,
+        "searchPath": [
+          "search_path=\"\""
+        ],
+        "authenticated": false
+      },
+      {
+        "anon": false,
+        "name": "finance_sync_expense_guard_v1",
+        "PUBLIC": false,
+        "definer": true,
+        "service": false,
+        "searchPath": [
+          "search_path=\"\""
+        ],
+        "authenticated": false
+      },
+      {
+        "anon": false,
+        "name": "finance_sync_failure_v1",
+        "PUBLIC": false,
+        "definer": true,
+        "service": true,
+        "searchPath": [
+          "search_path=\"\""
+        ],
+        "authenticated": false
+      },
+      {
+        "anon": false,
+        "name": "finance_sync_finish_v1",
+        "PUBLIC": false,
+        "definer": true,
+        "service": true,
+        "searchPath": [
+          "search_path=\"\""
+        ],
+        "authenticated": false
+      },
+      {
+        "anon": false,
+        "name": "finance_sync_order_payment_v1",
+        "PUBLIC": false,
+        "definer": true,
+        "service": false,
+        "searchPath": [
+          "search_path=\"\""
+        ],
+        "authenticated": false
+      },
+      {
+        "anon": false,
+        "name": "finance_sync_period_v1",
+        "PUBLIC": false,
+        "definer": true,
+        "service": true,
+        "searchPath": [
+          "search_path=\"\""
+        ],
+        "authenticated": false
+      },
+      {
+        "anon": false,
+        "name": "finance_sync_provider_fee_v1",
+        "PUBLIC": false,
+        "definer": true,
+        "service": false,
+        "searchPath": [
+          "search_path=\"\""
+        ],
+        "authenticated": false
+      },
+      {
+        "anon": false,
+        "name": "finance_sync_record_v1",
+        "PUBLIC": false,
+        "definer": true,
+        "service": true,
+        "searchPath": [
+          "search_path=\"\""
+        ],
+        "authenticated": false
+      },
+      {
+        "anon": false,
+        "name": "finance_sync_refund_tax_v1",
+        "PUBLIC": false,
+        "definer": true,
+        "service": false,
+        "searchPath": [
+          "search_path=\"\""
+        ],
+        "authenticated": false
+      },
+      {
+        "anon": false,
+        "name": "finance_sync_retry_ids_v1",
+        "PUBLIC": false,
+        "definer": true,
+        "service": true,
+        "searchPath": [
+          "search_path=\"\""
+        ],
+        "authenticated": false
+      },
+      {
+        "anon": false,
+        "name": "finance_sync_source_read_v1",
+        "PUBLIC": false,
+        "definer": true,
+        "service": true,
+        "searchPath": [
+          "search_path=\"\""
+        ],
+        "authenticated": false
+      },
+      {
+        "anon": false,
+        "name": "finance_sync_stage_v1",
+        "PUBLIC": false,
+        "definer": true,
+        "service": true,
+        "searchPath": [
+          "search_path=\"\""
+        ],
+        "authenticated": false
+      },
+      {
+        "anon": false,
+        "name": "finance_sync_status_v1",
+        "PUBLIC": false,
+        "definer": true,
+        "service": true,
+        "searchPath": [
+          "search_path=\"\""
+        ],
+        "authenticated": false
+      }
+    ]
+  },
+  "security084PreservedBy085": true,
+  "noHistoricalBackfillOnInstallation": true,
+  "installation085Disabled": true,
+  "preflight084": "PASS",
+  "postcheck084": "PASS",
+  "preflight085": "PASS",
+  "postcheck085": "PASS",
+  "clusterStopped": true,
+  "clusterDataRemoved": true,
+  "fixtureIsolation": "Historical owner for 051; ordinary synthetic customer with no email, credentials or admin membership for independent order-number tests. No unique constraint or lifecycle rule bypassed.",
+  "logs": "outputs/finance-sync-local-bd0e5644d75ba867/"
+}

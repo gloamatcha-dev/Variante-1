@@ -1,0 +1,130 @@
+{
+  "checkedAt": "2026-10-24T16:13:55.720Z",
+  "status": "BLOCKED_WITH_EXACT_REASONS",
+  "ownerConfirmed": {
+    "team": "goal10",
+    "project": "variante-1",
+    "branch": "main",
+    "domain": "gloamatcha.com",
+    "plan": "Hobby",
+    "productionReadKeyAdded": true,
+    "ownerTriggeredRedeployment": true
+  },
+  "independentVercelVerification": {
+    "projectStatus": 403,
+    "deploymentsStatus": 403,
+    "deploymentStatus": 403,
+    "localCli": "NOT_AVAILABLE_NO_INSTALL_PERFORMED",
+    "ready": "UNVERIFIED",
+    "deployedCommit": "UNVERIFIED",
+    "environmentNames": "UNVERIFIED_NO_VALUES_REQUESTED",
+    "cronRegistration": "UNVERIFIED",
+    "buildIntegration": "UNVERIFIED"
+  },
+  "database": {
+    "project": "yphubqploumfeabytotc",
+    "projectStatus": "ACTIVE_HEALTHY",
+    "pre084": [
+      {
+        "name": "Exact reviewed functions and owners",
+        "verdict": "PASS"
+      },
+      {
+        "name": "Helper is text-returning SQL volatile zero-arg function",
+        "verdict": "PASS"
+      },
+      {
+        "name": "No unreviewed overloads",
+        "verdict": "PASS"
+      },
+      {
+        "name": "Existing order default depends on helper",
+        "verdict": "PASS"
+      },
+      {
+        "name": "Number sequence exists and belongs to postgres",
+        "verdict": "PASS"
+      },
+      {
+        "name": "Outer paid-checkout writer stays service-only",
+        "verdict": "PASS"
+      },
+      {
+        "name": "Helper owner retains execution",
+        "verdict": "PASS"
+      },
+      {
+        "name": "SUMMARY",
+        "verdict": "SAFE TO APPLY"
+      }
+    ],
+    "pre085": [
+      {
+        "name": "roles",
+        "result": "PASS"
+      },
+      {
+        "name": "new_tables_absent",
+        "result": "PASS"
+      },
+      {
+        "name": "ledger_rls",
+        "result": "PASS"
+      },
+      {
+        "name": "ledger_append_only",
+        "result": "PASS"
+      },
+      {
+        "name": "original_record_order_payment_event",
+        "result": "PASS"
+      },
+      {
+        "name": "original_record_annual_prepayment_event_v2",
+        "result": "PASS"
+      },
+      {
+        "name": "original_refund_tax_record_v1",
+        "result": "PASS"
+      },
+      {
+        "name": "original_record_provider_fee_result_v1",
+        "result": "PASS"
+      },
+      {
+        "name": "SUMMARY",
+        "result": "SAFE TO PREPARE 085"
+      }
+    ],
+    "backupRecovery": "UNVERIFIED",
+    "applicationMigrationTracker": "NOT_ESTABLISHED_NO_SUPABASE_MIGRATIONS",
+    "execution": "SEPARATE_APPROVED_EXACT_TRANSACTIONS_NO_DB_PUSH_RESET_REPAIR"
+  },
+  "source": {
+    "head": "6db7c37b693991617a392b26c5937114879a8f75",
+    "remoteMain": "6db7c37b693991617a392b26c5937114879a8f75",
+    "repositoryWebhooks": 0,
+    "actionsWorkflows": 0,
+    "localCommitPerformed": false,
+    "pushPerformed": false,
+    "deploymentPerformed": false
+  },
+  "watchdog": {
+    "proposal": "Healthchecks.io",
+    "configured": false,
+    "heartbeatImplemented": false,
+    "ownerDeliveryTest": false,
+    "requiresSeparateApproval": true
+  },
+  "verifiedEvidenceReused": {
+    "sequentialMigrations": "001-083 -> 084 -> 085",
+    "securityChecks": 37,
+    "financeChecks": 46,
+    "sourceMockTests": 484,
+    "offlineCheckoutTests": 19,
+    "current85MigrationHashesMatch": true
+  },
+  "productionWrites": 0,
+  "stripeWrites": 0,
+  "secretsRetrieved": 0
+}

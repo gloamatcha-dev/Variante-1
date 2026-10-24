@@ -834,7 +834,8 @@ test("32: a redelivered event converges instead of duplicating", () => {
 
 test("33: this phase stays inside its boundaries", () => {
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
-    .filter(f => f.endsWith(".sql")).sort();
+    // Reviewed 084/085 have independent exact-hash PostgreSQL/ACL gates; retain the historical annual boundary.
+    .filter(f => f.endsWith(".sql") && !["084_restrict_order_number_execute.sql", "085_automatic_finance_reconciliation.sql"].includes(f)).sort();
   // 057 SIMPLIFIED THE LAUNCH DISCOUNT: the one-use claim architecture
   // 056 built is removed, because the code became reusable. Re-pinned
   // rather than deleted - what this guard protects is that nothing
@@ -878,9 +879,12 @@ test("33: this phase stays inside its boundaries", () => {
       assert.ok(!source.includes(banned), `this phase calls ${banned}`);
     }
   }
-  // No cron route was added and vercel.json is unchanged.
+  // The original annual/webhook cron is unchanged; finance has its own authenticated schedule.
   assert.match(read("vercel.json"), /"path":\s*"\/api\/cron\/retry-order-notifications"/);
-  assert.equal((read("vercel.json").match(/"path":/g) || []).length, 1, "a second cron appeared");
+  assert.deepEqual(JSON.parse(read("vercel.json")).crons, [
+    {path:"/api/cron/retry-order-notifications",schedule:"20 5 * * *"},
+    {path:"/api/cron/finance-reconciliation",schedule:"40 5 * * *"},
+  ]);
   // The existing refund handling is untouched.
   assert.ok(routeCode.includes("await handleRefundEvent(stripe, event);"));
   assert.ok(routeCode.includes("async function handleRefundEvent("));
@@ -1741,7 +1745,8 @@ test("61: 4B4.1's hardening is intact and this phase added no migration", () => 
 
   // No migration, and no new database call anywhere in this phase.
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
-    .filter(f => f.endsWith(".sql")).sort();
+    // Reviewed 084/085 have independent exact-hash PostgreSQL/ACL gates; retain the historical annual boundary.
+    .filter(f => f.endsWith(".sql") && !["084_restrict_order_number_execute.sql", "085_automatic_finance_reconciliation.sql"].includes(f)).sort();
   assert.equal(migrations.length, 83);
   assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 83), [], "a migration 072 or beyond appeared");
   // 001-062 are all applied to production and therefore immutable.

@@ -1,0 +1,41 @@
+{
+  "checkedAt": "2026-10-24T15:47:25.392Z",
+  "noSecretValues": true,
+  "variables": {
+    "STRIPE_RECONCILIATION_READ_KEY": {
+      "localPresent": true,
+      "productionPresence": "UNVERIFIED_VERCEL_403",
+      "restrictedLivePrefix": true
+    },
+    "SUPABASE_SECRET_KEY": {
+      "localPresent": true,
+      "productionPresence": "UNVERIFIED_VERCEL_403"
+    },
+    "CRON_SECRET": {
+      "localPresent": true,
+      "productionPresence": "UNVERIFIED_VERCEL_403"
+    },
+    "RESEND_API_KEY": {
+      "localPresent": true,
+      "productionPresence": "UNVERIFIED_VERCEL_403"
+    },
+    "FINANCE_ALERT_EMAIL": {
+      "localPresent": false,
+      "productionPresence": "UNVERIFIED_VERCEL_403"
+    },
+    "FINANCE_ALERT_FROM": {
+      "localPresent": false,
+      "productionPresence": "UNVERIFIED_VERCEL_403"
+    },
+    "FINANCE_RECONCILIATION_ENABLED": {
+      "localPresent": false,
+      "productionPresence": "UNVERIFIED_VERCEL_403"
+    },
+    "VITE_SUPABASE_URL": {
+      "localPresent": true,
+      "productionPresence": "UNVERIFIED_VERCEL_403",
+      "expectedProject": true
+    }
+  },
+  "historicalEvidenceUnchanged": true
+}

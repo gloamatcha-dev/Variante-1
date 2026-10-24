@@ -9,6 +9,12 @@ export default defineConfig({
     tailwindcss(),
     vinext(),
     sites(),
-    nitro(),
+    nitro({
+      vercel: {
+        functionRules: {
+          "/api/cron/finance-reconciliation": { maxDuration: 60 },
+        },
+      },
+    }),
   ],
 });

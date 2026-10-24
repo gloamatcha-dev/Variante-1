@@ -1,0 +1,327 @@
+{
+  "version": 1,
+  "provenance": "PostgreSQL 17.11 disposable cluster; unchanged migrations 001-083 + 085; role catalog and real synthetic money regressions; 084 NOT executed",
+  "sqlSha256": "8fc5da7be846857434ffc7b5843e7c6a04120e9b89cdf38346fdd62cc7b134ff",
+  "migrations001To083Unchanged": true,
+  "tables": [
+    {
+      "rls": true,
+      "anon": false,
+      "name": "finance_sync_alerts",
+      "serviceWrite": false,
+      "authenticated": false,
+      "serviceSelect": true
+    },
+    {
+      "rls": true,
+      "anon": false,
+      "name": "finance_sync_config",
+      "serviceWrite": false,
+      "authenticated": false,
+      "serviceSelect": true
+    },
+    {
+      "rls": true,
+      "anon": false,
+      "name": "finance_sync_periods",
+      "serviceWrite": false,
+      "authenticated": false,
+      "serviceSelect": true
+    },
+    {
+      "rls": true,
+      "anon": false,
+      "name": "finance_sync_jobs",
+      "serviceWrite": false,
+      "authenticated": false,
+      "serviceSelect": true
+    },
+    {
+      "rls": true,
+      "anon": false,
+      "name": "finance_sync_sources",
+      "serviceWrite": false,
+      "authenticated": false,
+      "serviceSelect": true
+    },
+    {
+      "rls": true,
+      "anon": false,
+      "name": "finance_sync_approvals",
+      "serviceWrite": false,
+      "authenticated": false,
+      "serviceSelect": false
+    },
+    {
+      "rls": true,
+      "anon": false,
+      "name": "finance_sync_discrepancies",
+      "serviceWrite": false,
+      "authenticated": false,
+      "serviceSelect": true
+    }
+  ],
+  "functions": [
+    {
+      "anon": false,
+      "name": "finance_sync_alert_v1",
+      "PUBLIC": false,
+      "definer": true,
+      "service": true,
+      "searchPath": [
+        "search_path=\"\""
+      ],
+      "authenticated": false
+    },
+    {
+      "anon": false,
+      "name": "finance_sync_annual_payment_v1",
+      "PUBLIC": false,
+      "definer": true,
+      "service": false,
+      "searchPath": [
+        "search_path=\"\""
+      ],
+      "authenticated": false
+    },
+    {
+      "anon": false,
+      "name": "finance_sync_basis_v1",
+      "PUBLIC": false,
+      "definer": true,
+      "service": true,
+      "searchPath": [
+        "search_path=\"\""
+      ],
+      "authenticated": false
+    },
+    {
+      "anon": false,
+      "name": "finance_sync_checkpoint_v1",
+      "PUBLIC": false,
+      "definer": true,
+      "service": true,
+      "searchPath": [
+        "search_path=\"\""
+      ],
+      "authenticated": false
+    },
+    {
+      "anon": false,
+      "name": "finance_sync_claim_v1",
+      "PUBLIC": false,
+      "definer": true,
+      "service": true,
+      "searchPath": [
+        "search_path=\"\""
+      ],
+      "authenticated": false
+    },
+    {
+      "anon": false,
+      "name": "finance_sync_details_v1",
+      "PUBLIC": false,
+      "definer": true,
+      "service": true,
+      "searchPath": [
+        "search_path=\"\""
+      ],
+      "authenticated": false
+    },
+    {
+      "anon": false,
+      "name": "finance_sync_discrepancy_v1",
+      "PUBLIC": false,
+      "definer": true,
+      "service": true,
+      "searchPath": [
+        "search_path=\"\""
+      ],
+      "authenticated": false
+    },
+    {
+      "anon": false,
+      "name": "finance_sync_expense_guard_v1",
+      "PUBLIC": false,
+      "definer": true,
+      "service": false,
+      "searchPath": [
+        "search_path=\"\""
+      ],
+      "authenticated": false
+    },
+    {
+      "anon": false,
+      "name": "finance_sync_failure_v1",
+      "PUBLIC": false,
+      "definer": true,
+      "service": true,
+      "searchPath": [
+        "search_path=\"\""
+      ],
+      "authenticated": false
+    },
+    {
+      "anon": false,
+      "name": "finance_sync_finish_v1",
+      "PUBLIC": false,
+      "definer": true,
+      "service": true,
+      "searchPath": [
+        "search_path=\"\""
+      ],
+      "authenticated": false
+    },
+    {
+      "anon": false,
+      "name": "finance_sync_order_payment_v1",
+      "PUBLIC": false,
+      "definer": true,
+      "service": false,
+      "searchPath": [
+        "search_path=\"\""
+      ],
+      "authenticated": false
+    },
+    {
+      "anon": false,
+      "name": "finance_sync_period_v1",
+      "PUBLIC": false,
+      "definer": true,
+      "service": true,
+      "searchPath": [
+        "search_path=\"\""
+      ],
+      "authenticated": false
+    },
+    {
+      "anon": false,
+      "name": "finance_sync_provider_fee_v1",
+      "PUBLIC": false,
+      "definer": true,
+      "service": false,
+      "searchPath": [
+        "search_path=\"\""
+      ],
+      "authenticated": false
+    },
+    {
+      "anon": false,
+      "name": "finance_sync_record_v1",
+      "PUBLIC": false,
+      "definer": true,
+      "service": true,
+      "searchPath": [
+        "search_path=\"\""
+      ],
+      "authenticated": false
+    },
+    {
+      "anon": false,
+      "name": "finance_sync_refund_tax_v1",
+      "PUBLIC": false,
+      "definer": true,
+      "service": false,
+      "searchPath": [
+        "search_path=\"\""
+      ],
+      "authenticated": false
+    },
+    {
+      "anon": false,
+      "name": "finance_sync_retry_ids_v1",
+      "PUBLIC": false,
+      "definer": true,
+      "service": true,
+      "searchPath": [
+        "search_path=\"\""
+      ],
+      "authenticated": false
+    },
+    {
+      "anon": false,
+      "name": "finance_sync_source_read_v1",
+      "PUBLIC": false,
+      "definer": true,
+      "service": true,
+      "searchPath": [
+        "search_path=\"\""
+      ],
+      "authenticated": false
+    },
+    {
+      "anon": false,
+      "name": "finance_sync_stage_v1",
+      "PUBLIC": false,
+      "definer": true,
+      "service": true,
+      "searchPath": [
+        "search_path=\"\""
+      ],
+      "authenticated": false
+    },
+    {
+      "anon": false,
+      "name": "finance_sync_status_v1",
+      "PUBLIC": false,
+      "definer": true,
+      "service": true,
+      "searchPath": [
+        "search_path=\"\""
+      ],
+      "authenticated": false
+    }
+  ],
+  "realPostgresEvidence": {
+    "sqlSha256": "8fc5da7be846857434ffc7b5843e7c6a04120e9b89cdf38346fdd62cc7b134ff",
+    "migration084Executed": false,
+    "passed": [
+      "missing payment webhook effect recorded",
+      "frozen original net/tax retained",
+      "double delivery idempotent",
+      "py fee recorded exactly once with original BT instant",
+      "missed refund preserves protected commission reversal exactly once",
+      "missing refund creates one cross-month refund",
+      "manual tax never invented",
+      "protected order refund state repaired",
+      "processed webhook with existing ledger is adopted",
+      "ch fee remains supported",
+      "duplicate source conflict rejected",
+      "interrupted transaction rolls back ledger and source bridge",
+      "crash retry succeeds once",
+      "historical import requires explicit approval",
+      "approved historical source recorded on original date",
+      "closed period queues a correction without rewriting history",
+      "authorized correction keeps original and posting dates separate",
+      "expired lease resumes same durable job with new fencing token",
+      "stale worker cannot write",
+      "overlapping scheduler receives busy",
+      "parallel workers do not duplicate an existing source",
+      "parallel new source produces exactly one money record",
+      "annual income uses original full snapshot tax",
+      "verified zero fee is evidence without a zero-money event",
+      "annual lifecycle retained while refund protection is restored",
+      "refunded annual plan cannot fulfill delivery",
+      "invoice-linked subscription refund and income preserve NULL PI snapshot",
+      "subscription money recorded once",
+      "usage fee recorded once with unknown VAT",
+      "automatically reconciled expense cannot be overwritten",
+      "failed payout cannot enter writer queue",
+      "incomplete checkpoint cannot claim success",
+      "intentional non-Stripe income is not mislabeled as a missing Stripe bridge",
+      "complete checkpoint is confirmed only after all money has a bridge",
+      "cash view separates original evidence from approved later posting",
+      "ambiguous manual fee is held for review instead of duplicated",
+      "automatic month opening never reopens a closed period",
+      "anon cannot read reconciliation metadata",
+      "anon cannot execute writer",
+      "authenticated cannot read reconciliation metadata",
+      "authenticated cannot execute writer",
+      "service role cannot approve historical backfill",
+      "historical ledger byte-equivalent after retry",
+      "API/DB retry recovers durable checkpoint",
+      "all new tables have RLS",
+      "every new function denies public browser execution"
+    ]
+  }
+}

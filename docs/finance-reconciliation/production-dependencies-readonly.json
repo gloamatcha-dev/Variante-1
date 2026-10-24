@@ -1,0 +1,89 @@
+{
+  "checkedAt": "2026-10-24T15:50:11.285Z",
+  "mode": "READ_ONLY",
+  "project": "yphubqploumfeabytotc",
+  "evidence": [
+    {
+      "json_build_object": {
+        "anon_select_tables": [
+          "product_variants",
+          "products"
+        ],
+        "dependencies": [
+          {
+            "signature": "reverse_creator_commission_for_refund(uuid,integer,uuid)",
+            "owner": "postgres",
+            "definer": true,
+            "search_path": [
+              "search_path=\"\""
+            ],
+            "source_md5": "1d85392c04a4e793b0f94f25689ab117",
+            "anon_execute": false,
+            "authenticated_execute": false,
+            "service_execute": true
+          },
+          {
+            "signature": "initialize_provider_fee_evidence_v1(uuid)",
+            "owner": "postgres",
+            "definer": true,
+            "search_path": [
+              "search_path=\"\""
+            ],
+            "source_md5": "4f61321dbb40e64f23012bcd0d21f880",
+            "anon_execute": false,
+            "authenticated_execute": false,
+            "service_execute": true
+          },
+          {
+            "signature": "apply_order_refund_state_by_invoice(text,integer,boolean)",
+            "owner": "postgres",
+            "definer": true,
+            "search_path": [
+              "search_path=\"\""
+            ],
+            "source_md5": "6439d27e67783e0f3c4da332f5b8e501",
+            "anon_execute": false,
+            "authenticated_execute": false,
+            "service_execute": true
+          },
+          {
+            "signature": "apply_order_refund_state(text,integer,boolean)",
+            "owner": "postgres",
+            "definer": true,
+            "search_path": [
+              "search_path=\"\""
+            ],
+            "source_md5": "33260ebe09f9ca308973d853221b1b89",
+            "anon_execute": false,
+            "authenticated_execute": false,
+            "service_execute": true
+          },
+          {
+            "signature": "apply_annual_plan_refund_state(text,integer)",
+            "owner": "postgres",
+            "definer": true,
+            "search_path": [
+              "search_path=\"\""
+            ],
+            "source_md5": "fdd712af1568f008a4fea3cf63464a9b",
+            "anon_execute": false,
+            "authenticated_execute": false,
+            "service_execute": true
+          },
+          {
+            "signature": "admin_record_business_expense(uuid,date,text,integer,text,text,text,integer,uuid,text,text,uuid)",
+            "owner": "postgres",
+            "definer": true,
+            "search_path": [
+              "search_path=\"\""
+            ],
+            "source_md5": "b449093481e3f4cf7fd9b5d5252f8e57",
+            "anon_execute": false,
+            "authenticated_execute": false,
+            "service_execute": true
+          }
+        ]
+      }
+    }
+  ]
+}
