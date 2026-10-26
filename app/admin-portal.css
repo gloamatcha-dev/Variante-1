@@ -156,3 +156,43 @@
 .admin-products .product-publish-confirm{display:flex;align-items:flex-start;gap:8px}
 .admin-products .product-workflow-help{max-width:650px;margin:16px 0;font-size:14px}
 .admin-products .product-workflow-help summary{cursor:pointer}
+
+
+/* Isolate Admin from the public sticky, fixed-height header. */
+.ops.portal .portal-header{position:static;inset:auto;height:auto;min-height:0;width:auto;z-index:auto;transform:none;box-shadow:none;background:transparent;display:flex;flex-wrap:wrap}
+/* Desktop sync status and disclosure stay in document flow. */
+.ops.portal .portal-global-sync{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px 20px;width:100%;min-width:0;margin:0 0 20px;padding:12px 16px;border:1px solid var(--line);border-radius:3px;font-size:12px;line-height:1.5;background:#fff;overflow-wrap:anywhere}
+.ops.portal .portal-global-sync.has-warning{border-left:2px solid #a47b31}
+.ops.portal .portal-global-sync p{margin:6px 0;font-size:12px}
+.ops.portal .portal-global-sync dl{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 20px;margin:8px 0 0}
+.ops.portal .portal-global-sync dt{font-size:11px;color:var(--portal-muted)}
+.ops.portal .portal-global-sync dd{margin:2px 0 0;font-variant-numeric:tabular-nums}
+.ops.portal .portal-sync-actions{grid-column:2;grid-row:1;max-width:220px}
+.ops.portal .portal-sync-actions button{max-width:100%;white-space:normal;margin:0}
+.ops.portal .portal-sync-details{grid-column:1/-1;position:static;margin:0;border-top:1px solid var(--line);padding-top:8px}
+.ops.portal .portal-sync-details summary{cursor:pointer;color:var(--portal-muted);font-size:11px;width:fit-content}
+@media(min-width:1024px) and (max-width:1279px){.ops.portal .portal-global-sync{grid-template-columns:minmax(0,1fr)}.ops.portal .portal-sync-actions{grid-column:1;grid-row:2;max-width:none}.ops.portal .portal-sync-actions button{font-size:11px;padding:6px 10px}}
+
+/* Desktop Admin CTA hierarchy; interaction styling only. */
+.ops.portal button:is(.portal-cta-primary,.portal-cta-secondary,.portal-cta-refresh){border:1px solid var(--cta-border);border-radius:4px;background:var(--cta-bg);color:var(--cta-text);font-weight:600;transition:background .12s,border-color .12s,box-shadow .12s}
+.ops.portal button.portal-cta-primary{--cta-bg:#1746D1;--cta-border:#1746D1;--cta-text:#fff;--cta-hover:#123AAF;--cta-active:#103197;--cta-focus:#1746D1}
+.ops.portal button.portal-cta-secondary{--cta-bg:#B31962;--cta-border:#B31962;--cta-text:#fff;--cta-hover:#991553;--cta-active:#801146;--cta-focus:#B31962}
+.ops.portal button.portal-cta-refresh{--cta-bg:#EDF2FF;--cta-border:#B4C5F4;--cta-text:#1746D1;--cta-hover:#DFE8FF;--cta-active:#CEDCFF;--cta-focus:#1746D1}
+.ops.portal button:is(.portal-cta-primary,.portal-cta-secondary,.portal-cta-refresh):hover:not(:disabled){background:var(--cta-hover);border-color:var(--cta-focus)}
+.ops.portal button:is(.portal-cta-primary,.portal-cta-secondary,.portal-cta-refresh):active:not(:disabled){background:var(--cta-active);border-color:var(--cta-focus);box-shadow:inset 0 1px 2px rgb(0 0 0 / .16)}
+.ops.portal button:is(.portal-cta-primary,.portal-cta-secondary,.portal-cta-refresh):focus-visible{outline:2px solid var(--cta-focus);outline-offset:3px;box-shadow:0 0 0 2px #fff}
+.ops.portal button:is(.portal-cta-primary,.portal-cta-secondary,.portal-cta-refresh):disabled{background:#F1F3F7;border-color:#D6DAE3;color:#717887;opacity:1;cursor:not-allowed;box-shadow:none}
+
+/* Brand treatment for the existing desktop sidebar; navigation stays unchanged. */
+@media(min-width:1024px){
+ .ops.portal .portal-sidebar{background:#1746D1;color:#fff;border-right-color:#1746D1}
+ .ops.portal .portal-sidebar .portal-brand,.ops.portal .portal-sidebar .portal-brand span{color:#fff}
+ .ops.portal .portal-sidebar nav button{background:transparent;color:#fff;border-left-color:transparent;border-radius:4px}
+ .ops.portal .portal-sidebar nav button:hover:not(.is-active){background:#315DDA;border-color:transparent}
+ .ops.portal .portal-sidebar nav button.is-active,.ops.portal .portal-sidebar nav button.is-active:hover{background:#B31962;color:#fff;border-left-color:transparent;font-weight:600}
+ .ops.portal .portal-sidebar .portal-operator{color:#E7EDFF;border-top-color:rgb(255 255 255 / .3)}
+ .ops.portal .portal-sidebar .portal-operator button{color:#fff;background:transparent}
+ .ops.portal .portal-sidebar .portal-operator button:hover{background:#315DDA;color:#fff}
+ .ops.portal .portal-sidebar .portal-chip{color:#fff;background:rgb(255 255 255 / .12);border-color:rgb(255 255 255 / .35)}
+ .ops.portal .portal-sidebar button:focus-visible{outline:2px solid #fff;outline-offset:3px;box-shadow:0 0 0 1px #1746D1}
+}

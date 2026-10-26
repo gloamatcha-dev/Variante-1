@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "kind": "085-postcheck-function-security-repair",
+  "status": "READY FOR OWNER APPROVAL; not Production authorization",
+  "postcheckSha256": "7bca178d90bfc4271f8801ea671c2de5cbd01bb167d6c53205bd590b5bb4281a",
+  "previousPostcheckSha256": "2593b3c3a1998cb1a1fd8f67955c48563c738b78288af5968093d872af34be3b",
+  "databaseProofSha256": "e6ea69a338ba3c2959692c5453e9652248a5a121e73a26221ced3aad665ef0f6",
+  "runnerSha256": "7120b9250c89f15ad0150d5a4ec7a0d60a043650e39e941983b029e2de0eff8e",
+  "migration084Sha256": "178f6b5f88ef4fcbc4ebf624d3facd5a9f61b3f630b14fd504f49ad8d818a04f",
+  "migration085Sha256": "8fc5da7be846857434ffc7b5843e7c6a04120e9b89cdf38346fdd62cc7b134ff",
+  "expectedFunctions": 19,
+  "originalChecks": 7,
+  "diagnosticFunctionRows": 19,
+  "requiredPassRows": 26,
+  "focusedCases": 90,
+  "scope": "Real 19-function pg_proc/ACL metadata stubs; six unrelated postcheck conditions supplied as TRUE; actual function checks, diagnostics and summary executed",
+  "unchangedChecks": "Six original predicates and seven-check fail-closed summary; separate supplemental Production catalog comparisons remain required",
+  "review": "Exact required signatures checked individually via LEFT JOIN; exactly one overload per expected name; complete predicate IS TRUE before aggregation; missing/NULL configurations fail; original PUBLIC/anon/authenticated denial and owner/definer predicates retained. No migration body changed."
+}

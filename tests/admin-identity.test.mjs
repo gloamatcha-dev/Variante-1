@@ -435,8 +435,9 @@ test("4d: every WRITE route takes the write capability, every read says so", () 
       `${route} is a restricted read but does not say so`);
     // It really is a read: no write verb anywhere in the file.
     const financeRead=route==='finance'?codeOnly(read('lib/adminPortalFinanceRead.ts')):'';
-    const inspected=(code+financeRead).replace(/\.rpc\('read_cost_finance_basis_v1',/g,'readBasis(');
-    if(route==='finance')assert.deepEqual([...financeRead.matchAll(/\.rpc\('([^']+)'/g)].map(m=>m[1]),['read_cost_finance_basis_v1']);
+    const inspected=(code+financeRead).replace(/\.rpc\('(read_cost_finance_basis_v1|finance_sync_global_status_v1|finance_sync_period_v1|finance_sync_details_v1)'(?=[,)])/g,'readBasis(');
+    if(route==='finance')assert.deepEqual([...code.matchAll(/\.rpc\('([^']+)'/g)].map(m=>m[1]),['finance_sync_details_v1']);
+    if(route==='finance')assert.deepEqual([...financeRead.matchAll(/\.rpc\('([^']+)'/g)].map(m=>m[1]),['read_cost_finance_basis_v1','finance_sync_global_status_v1','finance_sync_period_v1']);
     for (const banned of [".insert(", ".update(", ".upsert(", ".delete(", ".rpc("]) {
       assert.ok(!inspected.includes(banned), `${route} claims to be a read but contains ${banned}`);
     }
@@ -477,6 +478,11 @@ test("4d: every WRITE route takes the write capability, every read says so", () 
   */
   const CATALOGUE_WRITES = ["creators", "documents", "shipping"];
   const productRoute = codeOnly(read('app/api/admin/products/route.ts'));
+  const stripeRoute = codeOnly(read('app/api/admin/stripe-sync/route.ts'));
+  assert.match(stripeRoute, /requireAdminIdentity\(request,'read'\)/);
+  assert.match(stripeRoute, /canAccessProductManager\(gate.identity\)/);
+  assert.match(stripeRoute, /action==='run'&&!owner/);
+  for(const banned of ['.insert(','.update(','.upsert(','.delete('])assert.ok(!stripeRoute.includes(banned));
   assert.match(productRoute, /requireProductOwner\(request\)/);
   assert.match(codeOnly(read('lib/productOwnerAccess.ts')), /canAccessProductManager\(gate.identity\)/);
   for (const banned of ['.insert(', '.update(', '.upsert(', '.delete(']) assert.ok(!productRoute.includes(banned));
@@ -498,7 +504,7 @@ test("4d: every WRITE route takes the write capability, every read says so", () 
   const gated = adminRoutes().filter(r => !r.startsWith("launch/") && r !== "session");
   assert.deepEqual(gated.sort(),
     [...WRITES, ...READS, ...RESTRICTED_READS,
-     ...SENSITIVE_WRITES, ...PAYOUT_WRITES, ...CATALOGUE_WRITES, 'products'].sort(),
+     ...SENSITIVE_WRITES, ...PAYOUT_WRITES, ...CATALOGUE_WRITES, 'products', 'stripe-sync'].sort(),
     "an admin route exists that this test does not classify");
 });
 
@@ -656,8 +662,8 @@ test("7: no audit trail, no actor columns, no new real accounts", () => {
   // negotiated agreement and adds no table of its own. Re-pinned rather
   // than deleted - what this guard protects is that nothing UNREVIEWED
   // appeared. Reviewed in tests/b2b-supply-commerce-foundation.test.mjs.
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 83), [],
-    "a migration beyond 051 appeared");
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 83).sort(), ['084_restrict_order_number_execute.sql','085_automatic_finance_reconciliation.sql','20261024192649_global_finance_sync_monitoring.sql'].sort(),
+    "unexpected migration beyond the reviewed 084/085/monitoring inventory");
 
   const sql = codeOnly(migration);
   for (const account of ["valmira.hajzeri@gloamatcha.com", "polina.korop@gloamatcha.com"]) {
@@ -878,8 +884,8 @@ const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),
 test("9h: this package changed nothing else", () => {
   // No migration, no audit trail, no public surface.
   const files = readdirSync(path.join(ROOT, "supabase/migrations"));
-  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 83), [],
-    "a migration beyond 051 appeared");
+  assert.deepEqual(files.filter(f => Number(f.slice(0, 3)) > 83).sort(), ['084_restrict_order_number_execute.sql','085_automatic_finance_reconciliation.sql','20261024192649_global_finance_sync_monitoring.sql'].sort(),
+    "unexpected migration beyond the reviewed 084/085/monitoring inventory");
   for (const forbidden of ["admin_activity_log", "record_admin_activity", "actor_user_id"]) {
     assert.ok(!shell.includes(forbidden) && !viewportLib.includes(forbidden),
       `4A.2B-2 work appeared: ${forbidden}`);

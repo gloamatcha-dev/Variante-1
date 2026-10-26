@@ -5,12 +5,15 @@ import { AdminCosts } from './AdminCosts';
 import { AdminCostCoverage } from './AdminCostCoverage';
 import { expenseNet } from '../lib/directCostCoverage.ts';
 import { AdminPortalDocuments } from './AdminPortalDocuments';
+import {AdminFinanceSyncStatus} from './AdminFinanceSyncStatus';
+import {useGlobalStripeSync} from './AdminGlobalStripeSync';
 import { BusinessContext, BusinessTable, Chip, Info, MoneySummary, Period, ReadState, RecordDetails, Tabs, portalRequest, usePortalRead } from './AdminPortalShared';
 
 export function AdminPortalFinance({tab,onTab,onSessionLost,onCreator,initialFilter=""}:{tab:string;onTab:(tab:string)=>void;onSessionLost:()=>void;onCreator?:()=>void;initialFilter?:string}){
   const [period,setPeriod]=useState<PortalRow>({period:'month'});
   const [costVersion,setCostVersion]=useState(0);
-  return <><Tabs items={FINANCE_TABS} value={tab} onChange={onTab}/>{tab==='AUSGABEN'?<><AdminCosts onSessionLost={onSessionLost} expensesOnly initialFilter={initialFilter} onExpensesChanged={()=>setCostVersion(v=>v+1)}/><Period value={period} onChange={setPeriod}/><AdminCostCoverage key={costVersion} period={period}/></>:tab==='DOKUMENTE'?<AdminPortalDocuments/>:<><Period value={period} onChange={setPeriod}/>{(tab==='BUCHUNGEN'||tab==='EINNAHMEN')?<Ledger key={JSON.stringify(period)} period={period}/>:<FinanceSummary period={period} reports={tab==='AUSWERTUNGEN'} onCreator={onCreator}/>}</>}</>;
+  const sync=useGlobalStripeSync();
+  return <><AdminFinanceSyncStatus status={sync?.status??undefined} statusError={sync?.error} loadDetails={()=>portalRequest('/api/admin/finance',{action:'sync_details'})}/><Tabs items={FINANCE_TABS} value={tab} onChange={onTab}/>{tab==='AUSGABEN'?<><AdminCosts onSessionLost={onSessionLost} expensesOnly initialFilter={initialFilter} onExpensesChanged={()=>setCostVersion(v=>v+1)}/><Period value={period} onChange={setPeriod}/><AdminCostCoverage key={costVersion} period={period}/></>:tab==='DOKUMENTE'?<AdminPortalDocuments/>:<><Period value={period} onChange={setPeriod}/>{(tab==='BUCHUNGEN'||tab==='EINNAHMEN')?<Ledger key={JSON.stringify(period)} period={period}/>:<FinanceSummary period={period} reports={tab==='AUSWERTUNGEN'} onCreator={onCreator}/>}</>}</>;
 }
 export function FinanceSummary({period,reports=false,onCreator}:{period:PortalRow;reports?:boolean;onCreator?:()=>void}){
   const {data,error,refresh}=usePortalRead('/api/admin/finance',{action:'summary',...period});

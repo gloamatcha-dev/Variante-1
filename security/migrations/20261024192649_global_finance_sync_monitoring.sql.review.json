@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "kind": "global-finance-sync-monitoring",
+  "reviewer": "GLOA local metadata review; NOT Production authorization",
+  "callerReview": "Shared admin status read after active admin authorization; verified exact owner/Auth identity and configured owner match for manual worker. Existing fencing/idempotency/period approvals unchanged. Trigger is API-inaccessible. No provider writes.",
+  "sqlSha256": "04cb71d3e442b04184465d193738f612b66af756724f7ffde4ac5fdd3eb06363",
+  "databaseProofSha256": "429382ae70e777fb094870f95206a061fb152d9bbd900f79c1bee7ef47bdc077"
+}

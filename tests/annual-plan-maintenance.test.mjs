@@ -1236,8 +1236,8 @@ test("33: B2C_ANNUAL_PLAN_ENABLED cannot stop an existing contract", () => {
 
 test("34: this phase adds no migration and edits none", () => {
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
-    // Reviewed 084/085 have independent exact-hash PostgreSQL/ACL gates; retain the historical annual boundary.
-    .filter(f => f.endsWith(".sql") && !["084_restrict_order_number_execute.sql", "085_automatic_finance_reconciliation.sql"].includes(f)).sort();
+    // Reviewed 084/085 and the global monitoring extension have independent exact-hash PostgreSQL/ACL gates; retain the historical annual boundary.
+    .filter(f => f.endsWith(".sql") && !["084_restrict_order_number_execute.sql", "085_automatic_finance_reconciliation.sql", "20261024192649_global_finance_sync_monitoring.sql"].includes(f)).sort();
   // 057 SIMPLIFIED THE LAUNCH DISCOUNT: the one-use claim architecture
   // 056 built is removed, because the code became reusable. Re-pinned
   // rather than deleted - what this guard protects is that nothing

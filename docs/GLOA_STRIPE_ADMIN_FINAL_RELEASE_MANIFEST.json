@@ -1,0 +1,879 @@
+{
+  "version": 1,
+  "status": "BLOCKED_NO_COMMIT",
+  "branch": "main",
+  "head": "5f9565e0e72c2c79f75380ca9708c98ad0aa6be5",
+  "cachedOriginMain": "6db7c37b693991617a392b26c5937114879a8f75",
+  "remoteMainVerified": false,
+  "localReleaseCommit": null,
+  "committedFiles": [],
+  "designApproval": "Owner visually approved; no redesign",
+  "manifestFile": "docs/GLOA_STRIPE_ADMIN_FINAL_RELEASE_MANIFEST.json",
+  "manifestSelfHash": "Stored out-of-band under outputs/final-stripe-release/manifest.sha256 to avoid recursive self-hashing",
+  "additionalCommitFiles": [
+    "app/AdminFinanceSyncStatus.tsx",
+    "app/AdminGlobalStripeSync.tsx",
+    "app/AdminPortalDashboard.tsx",
+    "app/AdminPortalFinance.tsx",
+    "app/AdminPortalShared.tsx",
+    "app/AdminPortalShell.tsx",
+    "app/admin-portal.css",
+    "app/api/admin/stripe-sync/route.ts",
+    "docs/GLOA_DESKTOP_STRIPE_LAYOUT_REVIEW.txt",
+    "docs/GLOA_GLOBAL_STRIPE_MONITORING_PRODUCTION_EXECUTION.md",
+    "docs/GLOA_GLOBAL_STRIPE_MONITORING_PRODUCTION_READINESS.md",
+    "docs/GLOA_GLOBAL_STRIPE_SYNC_REVIEW.md",
+    "docs/GLOA_MIGRATION_084_FINAL_PRODUCTION_PREFLIGHT.md",
+    "docs/GLOA_MIGRATION_084_PRODUCTION_EXECUTION.md",
+    "docs/GLOA_MIGRATION_085_GATE10_DEPLOYED_SOURCE_REVIEW.md",
+    "docs/GLOA_MIGRATION_085_POSTCHECK_REPAIR.md",
+    "docs/GLOA_MIGRATION_085_PRODUCTION_EXECUTION.md",
+    "docs/GLOA_MIGRATION_085_PRODUCTION_READINESS.md",
+    "docs/GLOA_STRIPE_ADMIN_ENV_BROWSER_QA.md",
+    "docs/GLOA_STRIPE_ADMIN_FINAL_RELEASE_CHECKLIST.txt",
+    "docs/GLOA_STRIPE_ADMIN_FINAL_RELEASE_MANIFEST.json",
+    "docs/GLOA_STRIPE_ADMIN_RELEASE_FILES.json",
+    "docs/GLOA_STRIPE_ADMIN_RELEASE_READINESS.md",
+    "lib/adminPortalFinanceRead.ts",
+    "lib/globalFinanceSync.ts",
+    "package.json",
+    "scripts/migration-security-check.mjs",
+    "security/migrations/20261024192649_global_finance_sync_monitoring.sql.metadata.json",
+    "security/migrations/20261024192649_global_finance_sync_monitoring.sql.review.json",
+    "security/postchecks/085_automatic_finance_reconciliation_postcheck.review.json",
+    "supabase/migrations/20261024192649_global_finance_sync_monitoring.sql",
+    "supabase/postcheck/085_automatic_finance_reconciliation_postcheck.sql",
+    "supabase/postcheck/global_finance_sync_monitoring_postcheck.sql",
+    "supabase/preflight/global_finance_sync_monitoring_preflight.sql",
+    "tests/admin-identity.test.mjs",
+    "tests/annual-plan-maintenance.test.mjs",
+    "tests/annual-plan-refund.test.mjs",
+    "tests/annual-plan-webhook.test.mjs",
+    "tests/automatic-finance-sync.test.mjs",
+    "tests/block2-admin-portal.test.mjs",
+    "tests/fixtures/global-finance-monitoring-proof.json",
+    "tests/fixtures/global-stripe-integrated-release-proof.json",
+    "tests/fixtures/migration-085-postcheck-before.sql",
+    "tests/fixtures/migration-085-postcheck-local-proof.json",
+    "tests/global-stripe-auth-integration.test.mjs",
+    "tests/helpers/stripeAdminPreview.mjs",
+    "tests/migration-085-postcheck-review.test.mjs",
+    "tests/preview/stripe-admin/index.html",
+    "tests/preview/stripe-admin/main.jsx",
+    "tests/runtime/finance-sync-database-local.mjs",
+    "tests/runtime/global-finance-monitoring-local.mjs",
+    "tests/runtime/migration-085-postcheck-local.mjs",
+    "tests/runtime/stripe-admin-preview.mjs",
+    "tests/runtime/stripe-desktop-layout.mjs",
+    "tests/stripe-admin-preview.test.mjs",
+    "vite.config.ts"
+  ],
+  "files": [
+    {
+      "file": "app/AdminFinanceSyncStatus.tsx",
+      "sha256": "4a52c542c07f0125e2074c97594649af770ffd33c559d9c2b366c6ad69a1730b",
+      "expectedGitBlob": "d8e4fb7da47635432c7afe8ee6ff8eaecb51b7c9"
+    },
+    {
+      "file": "app/AdminGlobalStripeSync.tsx",
+      "sha256": "b3a24a06abce7e3de970cc2f49fa2a451061128ee4a493a72d659713a299d186",
+      "expectedGitBlob": "a57adc8db434f6bb98b96e6735f89f35e38ab990"
+    },
+    {
+      "file": "app/AdminPortalDashboard.tsx",
+      "sha256": "81df35fcf6a20e106677cec893c5843634a40922ba0054ebe6a41dffdaf036f1",
+      "expectedGitBlob": "bd9d88318a40e679f40b31a5a56fa3d4b21ae4b9"
+    },
+    {
+      "file": "app/AdminPortalFinance.tsx",
+      "sha256": "a7443cbb7c36a7f428a452c6ef554e1922ad62ae7fb6ec127843955bed867df6",
+      "expectedGitBlob": "97cc1f708e06a8fd2c6fb5a5c388f73f58dd0f26"
+    },
+    {
+      "file": "app/AdminPortalShared.tsx",
+      "sha256": "4dc288937cd41105d9acf552d2a516d1fa7db3b0eb734cc4855f41b6c4ef377c",
+      "expectedGitBlob": "9b67e8ce5beedab39ead9ff1e9ca12e9f03a3894"
+    },
+    {
+      "file": "app/AdminPortalShell.tsx",
+      "sha256": "2a5ce675f56e7ad0b5ddd66abf9cbe20c11f95d443b9c61a851fbc7385aaaef0",
+      "expectedGitBlob": "1bc783751785b72de0c0a281a4dbf54bd2012ec3"
+    },
+    {
+      "file": "app/admin-portal.css",
+      "sha256": "304d245afc3972874a76ad1a5096703b86ead5972f6fd95b4d89b7079e0bd0b0",
+      "expectedGitBlob": "099c335276b045084af000d1473f1cb2fbe7b686"
+    },
+    {
+      "file": "app/api/admin/stripe-sync/route.ts",
+      "sha256": "62f64c0cc39f80681900a3453a0dde0a59b0cf66e244dbeb27306214951adcb8",
+      "expectedGitBlob": "86dfed59eb68205df8bf992ce899e1d38d471a83"
+    },
+    {
+      "file": "docs/GLOA_DESKTOP_STRIPE_LAYOUT_REVIEW.txt",
+      "sha256": "f0b66d15b529a96dbfcf0175a5cca69670727ffe5661961ce9d1a8567791ac70",
+      "expectedGitBlob": "e55cac79c8f2f7b9b2a5d4cd713aa992f0c9d46e"
+    },
+    {
+      "file": "docs/GLOA_GLOBAL_STRIPE_MONITORING_PRODUCTION_EXECUTION.md",
+      "sha256": "554b6e5d0b8d98281ad8797d9d2a77bc3a69d6ff641d86e8db18e879e35c1e14",
+      "expectedGitBlob": "de2d6e4bf132147959d27c5d8bfe4a30be409d78"
+    },
+    {
+      "file": "docs/GLOA_GLOBAL_STRIPE_MONITORING_PRODUCTION_READINESS.md",
+      "sha256": "cef47087c48ddc5b8d9aa429fccfd336a8cecdf3b5a0d47577d80f037a19f90d",
+      "expectedGitBlob": "ad3a3d891cf7fb07c2639ebacedb89074b7cd5fb"
+    },
+    {
+      "file": "docs/GLOA_GLOBAL_STRIPE_SYNC_REVIEW.md",
+      "sha256": "f53639a450fa1fa366a3a6f9819493fd2fe6bf67adb8826102a4bca58d9a0a41",
+      "expectedGitBlob": "7bba5041f778b9886177accfc7f6f29bf3a5cd2d"
+    },
+    {
+      "file": "docs/GLOA_MIGRATION_084_FINAL_PRODUCTION_PREFLIGHT.md",
+      "sha256": "134839eabbf437b02f6f3c80e3787c7f1404e35bef97e1f58bed562686352c5b",
+      "expectedGitBlob": "c38c851bc5bbd663ae246acac3eceaabefbf75cd"
+    },
+    {
+      "file": "docs/GLOA_MIGRATION_084_PRODUCTION_EXECUTION.md",
+      "sha256": "a2af3424e1d1d4f65a13fb6c7e8a5f18e8b565fdb8c79192c7972ad12888d5c0",
+      "expectedGitBlob": "527a64eb92faf10e9a54a3e4c3db88f0e82577e1"
+    },
+    {
+      "file": "docs/GLOA_MIGRATION_085_GATE10_DEPLOYED_SOURCE_REVIEW.md",
+      "sha256": "548fa14c2b008b459efbf8b0f76bccc9b09c7a3473dde000122040fabcf0b12a",
+      "expectedGitBlob": "6402e7e3b3825115bee4a5ea5aabfdf8d7b18848"
+    },
+    {
+      "file": "docs/GLOA_MIGRATION_085_POSTCHECK_REPAIR.md",
+      "sha256": "ceb4f4139b86e38c23920d5f5e30e54ea1326f0d5087b94702450a55f65ed240",
+      "expectedGitBlob": "53bc52f687002b6e1cbd0906100a31b4672e7340"
+    },
+    {
+      "file": "docs/GLOA_MIGRATION_085_PRODUCTION_EXECUTION.md",
+      "sha256": "939c7d6a47a9b4b0daab2ef6462d14ff08c5ac7e31b51c3b31e28cf3100ed082",
+      "expectedGitBlob": "bcacaa8f7de2b6eac143d37d24f8fe9e510b929f"
+    },
+    {
+      "file": "docs/GLOA_MIGRATION_085_PRODUCTION_READINESS.md",
+      "sha256": "a9683eb4ee945b4e70fcf90027a127e8b1908e40347ede60b5ee8c247444e86f",
+      "expectedGitBlob": "e2cb2c5098a4017349ea9ff2550d6c52baf5e862"
+    },
+    {
+      "file": "docs/GLOA_STRIPE_ADMIN_ENV_BROWSER_QA.md",
+      "sha256": "60a0ee087bd4e105b94b9860975103b4ab0a5d1ed1100291f2e2d214555bd7e3",
+      "expectedGitBlob": "f2dbbfb6b7ea253f016aacfe62bea2a3076f03bf"
+    },
+    {
+      "file": "docs/GLOA_STRIPE_ADMIN_FINAL_RELEASE_CHECKLIST.txt",
+      "sha256": "813381adb0de95d62465d385c59513f6e5edeb44d041bfb43ee37156c8a0412b",
+      "expectedGitBlob": "47d70f659f0a5721d91bf4db25ff4d2f6594c497"
+    },
+    {
+      "file": "docs/GLOA_STRIPE_ADMIN_RELEASE_FILES.json",
+      "sha256": "0ef4b03baa930e96162f03aa49ed8de3f57a88909c253fb41d1faec0dd56ca82",
+      "expectedGitBlob": "c9488cc478bf29378a20825adbe8bf748d5b9f9c"
+    },
+    {
+      "file": "docs/GLOA_STRIPE_ADMIN_RELEASE_READINESS.md",
+      "sha256": "e679a620379e994485bbcc7c68ab262326d51561d34b3840aef75d975f40e43d",
+      "expectedGitBlob": "9c6fea49f61b0af397fd455b1eaaed5478dd87f2"
+    },
+    {
+      "file": "lib/adminPortalFinanceRead.ts",
+      "sha256": "a8ee97e87bb0cd456c7fb63483679903ac0cf41ab14c661c526ffa5c8b5207e0",
+      "expectedGitBlob": "2787a596f41a6c6eb020d36b177d5a824575eb97"
+    },
+    {
+      "file": "lib/globalFinanceSync.ts",
+      "sha256": "852f71e6490db6e51a6f2b2cdfcc1f1ddf138227492bf81f9663d146be0543cf",
+      "expectedGitBlob": "bfd13328037d5e98f336af2ca04501281ea154a4"
+    },
+    {
+      "file": "package.json",
+      "sha256": "4fde03b2f97717d67ceadef2733694b0aca0755ca9a57928dd838b4db91a6c75",
+      "expectedGitBlob": "18d45b1e6eed1883eaebbcd5f2a7d19a5803a492"
+    },
+    {
+      "file": "scripts/migration-security-check.mjs",
+      "sha256": "4134abe179a9483bc424db08d92474fcb580390655dfa45d1dceacb11fc7f365",
+      "expectedGitBlob": "29884f8fe626c9f0bbc9960807e904216181485d"
+    },
+    {
+      "file": "security/migrations/20261024192649_global_finance_sync_monitoring.sql.metadata.json",
+      "sha256": "b5c48379d35d78a0055852f272962fb8af59ae2e7bc086f62e2c0b3f3a85e62e",
+      "expectedGitBlob": "4a69600dd6c12ba30a8de0a7de8ceccb1228bfab"
+    },
+    {
+      "file": "security/migrations/20261024192649_global_finance_sync_monitoring.sql.review.json",
+      "sha256": "cd575ea19e2098ea81a78495b8a591628b308bbbd067a56aa3260cad5be5da8f",
+      "expectedGitBlob": "62ed46016e75acdab799cfab510bbaeaefe4f92a"
+    },
+    {
+      "file": "security/postchecks/085_automatic_finance_reconciliation_postcheck.review.json",
+      "sha256": "3323a44c54a86568104c1805946b91cf614ea04a6b647d85e014572427ff6470",
+      "expectedGitBlob": "1768c00521e94e57fa0a7e240ab6c26ee8fe964e"
+    },
+    {
+      "file": "supabase/migrations/20261024192649_global_finance_sync_monitoring.sql",
+      "sha256": "04cb71d3e442b04184465d193738f612b66af756724f7ffde4ac5fdd3eb06363",
+      "expectedGitBlob": "7b81157718937e534942e6e4c526a2e9d74bc8e0"
+    },
+    {
+      "file": "supabase/postcheck/085_automatic_finance_reconciliation_postcheck.sql",
+      "sha256": "7bca178d90bfc4271f8801ea671c2de5cbd01bb167d6c53205bd590b5bb4281a",
+      "expectedGitBlob": "e9f887dec9f2f69ee8ca591c910dbeddee332dfa"
+    },
+    {
+      "file": "supabase/postcheck/global_finance_sync_monitoring_postcheck.sql",
+      "sha256": "d9740462cfcd632864840e16ab272c84f9c623241ebf279954ca0aa6049892f6",
+      "expectedGitBlob": "bd372c0569c5112cff76e1990dc04d18c674f6c3"
+    },
+    {
+      "file": "supabase/preflight/global_finance_sync_monitoring_preflight.sql",
+      "sha256": "aaaa79c61c79fbd944f59de6c63e1c4acaef862cde31e7fa8c0848db281171a5",
+      "expectedGitBlob": "4a2b4bdddd5d9204be4f345383174a05e9b133b1"
+    },
+    {
+      "file": "tests/admin-identity.test.mjs",
+      "sha256": "aa07b82246b963d1d8b8a1cb1d4bf7668867cbf4c8cceccece22dc7c152cee66",
+      "expectedGitBlob": "b5674dd86fb96791b191baf01ca8e40e88044af0"
+    },
+    {
+      "file": "tests/annual-plan-maintenance.test.mjs",
+      "sha256": "2aa7cc375b26ad37c63feacc59caf19250ec0e7fe207954d4080dbb2e224622d",
+      "expectedGitBlob": "4da6a78b3321eb74c7fb97185b580784b9b0c2a5"
+    },
+    {
+      "file": "tests/annual-plan-refund.test.mjs",
+      "sha256": "7a27d23a12294aa8d5d1e0befa482eed42c730ad4b308cc7c47dad3894d33508",
+      "expectedGitBlob": "3054f4ed3f31ec4024f8ab2166d242cd65f612cb"
+    },
+    {
+      "file": "tests/annual-plan-webhook.test.mjs",
+      "sha256": "4158f9dde6e2642a141e3be2e4d32d678e07e3eb69dafb9690edf519f2500ee9",
+      "expectedGitBlob": "a78a7559e64a0c7fd668d6478a65cf351dc9d083"
+    },
+    {
+      "file": "tests/automatic-finance-sync.test.mjs",
+      "sha256": "6c8210ee11512b18e24b0661b17d28fa71e8bc34fe587fd2f49af2a684ae19cf",
+      "expectedGitBlob": "ad95f49829aacff26168905c99ec8a24172901af"
+    },
+    {
+      "file": "tests/block2-admin-portal.test.mjs",
+      "sha256": "0d3a09f078e12ed413c32bde6df085461129207204792a191cc0bd25adcb3546",
+      "expectedGitBlob": "d3d824707047cb67378eacdbb32624aa7ed71da7"
+    },
+    {
+      "file": "tests/fixtures/global-finance-monitoring-proof.json",
+      "sha256": "429382ae70e777fb094870f95206a061fb152d9bbd900f79c1bee7ef47bdc077",
+      "expectedGitBlob": "6da39595f57334f819aeae82f268459bec803673"
+    },
+    {
+      "file": "tests/fixtures/global-stripe-integrated-release-proof.json",
+      "sha256": "b3d85bd62f4ce1e739997888e51957f094106c380846284c893b650f0835cc30",
+      "expectedGitBlob": "1f1aeae22a880deb2b31b3a7725830ef3de1fc9a"
+    },
+    {
+      "file": "tests/fixtures/migration-085-postcheck-before.sql",
+      "sha256": "2593b3c3a1998cb1a1fd8f67955c48563c738b78288af5968093d872af34be3b",
+      "expectedGitBlob": "3f3dbd52cd39e74b369ba2e7abcc59bb5a9ff3f9"
+    },
+    {
+      "file": "tests/fixtures/migration-085-postcheck-local-proof.json",
+      "sha256": "e6ea69a338ba3c2959692c5453e9652248a5a121e73a26221ced3aad665ef0f6",
+      "expectedGitBlob": "6d9f1e29270edf4ae95c8ac84c049bd5288aeee3"
+    },
+    {
+      "file": "tests/global-stripe-auth-integration.test.mjs",
+      "sha256": "0de5dba28c2d73af96826f260510e6da9650f7741d1f826b2466db42d2673208",
+      "expectedGitBlob": "630feadca44590f8496993a1846243f4f33d3b71"
+    },
+    {
+      "file": "tests/helpers/stripeAdminPreview.mjs",
+      "sha256": "fd145b32b7aeda55e1d9d67d19019813fa3548a778b320b700a16a33dd877c47",
+      "expectedGitBlob": "a4c2c748235069607a9010865b0146a7910c0f58"
+    },
+    {
+      "file": "tests/migration-085-postcheck-review.test.mjs",
+      "sha256": "def8c33e8fc2ac99e766d2f68e5a342ca1837df86feca66bf2a882b41bebdc12",
+      "expectedGitBlob": "e7c3ed0985bffa46a4cd2eeedc6ee4b81df9b600"
+    },
+    {
+      "file": "tests/preview/stripe-admin/index.html",
+      "sha256": "e798ae88bf540d6105d61af2490a13abdbe0e2d4dfa71b34cfbcdda04f645736",
+      "expectedGitBlob": "55f715d647831cb84cec263fab1feef572d1bdf4"
+    },
+    {
+      "file": "tests/preview/stripe-admin/main.jsx",
+      "sha256": "82df762c06790b3507b0b4965bf0f4d4c3bd2fbc852862571dfb9652e92ef431",
+      "expectedGitBlob": "be42fac5f6a644b8bf0c2aaa1198d37608f28801"
+    },
+    {
+      "file": "tests/runtime/finance-sync-database-local.mjs",
+      "sha256": "bab5f43899b2a704f8adeeaa270a4574a6649e3c7ef3db223543049d28e960a8",
+      "expectedGitBlob": "76a3a2efb8abfeadee3cde282f7d9e98233bdfb2"
+    },
+    {
+      "file": "tests/runtime/global-finance-monitoring-local.mjs",
+      "sha256": "3bad4e2e264c98cd5cc27cef89ffc2308f14599d3bfc158f79db93bf93daef6d",
+      "expectedGitBlob": "0002ea6969dc2f158bce4c89926e4e43b10342bb"
+    },
+    {
+      "file": "tests/runtime/migration-085-postcheck-local.mjs",
+      "sha256": "7120b9250c89f15ad0150d5a4ec7a0d60a043650e39e941983b029e2de0eff8e",
+      "expectedGitBlob": "d2dd1880ece17cdc5f1fd8ff26ce52fea0a22125"
+    },
+    {
+      "file": "tests/runtime/stripe-admin-preview.mjs",
+      "sha256": "5c02580b24267983eda173c12803aa84b17e3279f8712c43926455f53595e9df",
+      "expectedGitBlob": "dc781175daf982e80c020ace5903dd481c967315"
+    },
+    {
+      "file": "tests/runtime/stripe-desktop-layout.mjs",
+      "sha256": "42a09577989825e03065d8624345e33efa749faea7936473aacfb1024ea6e9bb",
+      "expectedGitBlob": "a1da21154b1bbcad274792b4e216a45220d153e6"
+    },
+    {
+      "file": "tests/stripe-admin-preview.test.mjs",
+      "sha256": "2d7d9c9ab4bc8ac6d593a500ac5ccf1d9ad87232dee46f2dbc5602508739c685",
+      "expectedGitBlob": "e6bc6696c8ba303b1cef3bc1ff31a98d9a4f6015"
+    },
+    {
+      "file": "vite.config.ts",
+      "sha256": "fdc2112bf39448f645fa6432c7379ddce8e84c46d62b461024a11c144bb43204",
+      "expectedGitBlob": "d9d811bf829672e362c81309fd0ceb9f9a97fd74"
+    }
+  ],
+  "candidatePayloadSha256": "546a33643f2ff3f92bc0b46e07b52a732de92c32b65af8ede991c35820e5d48d",
+  "parentCommitDeltaFiles": [
+    {
+      "file": "app/AdminFinanceSyncStatus.tsx",
+      "headGitBlob": "21d6617d0d9f44a054743f05a8108db54fb066a7",
+      "candidateSha256": "4a52c542c07f0125e2074c97594649af770ffd33c559d9c2b366c6ad69a1730b"
+    },
+    {
+      "file": "app/AdminPortalShared.tsx",
+      "headGitBlob": "85c8dff99906bd784d0941a7c5120b2b712be569",
+      "candidateSha256": "4dc288937cd41105d9acf552d2a516d1fa7db3b0eb734cc4855f41b6c4ef377c"
+    },
+    {
+      "file": "app/api/admin/finance/route.ts",
+      "headGitBlob": "d91b230891a5934b06d8284d273f1fcdb81c61b0",
+      "candidateSha256": "d2f523be783f3409cd7c6f7d7fb05a1d9b48806051f01038dd7cb2883585026f"
+    },
+    {
+      "file": "app/api/cron/finance-reconciliation/route.ts",
+      "headGitBlob": "dee5e12e6ffec0e5e804a87bc8304192791fdb09",
+      "candidateSha256": "0e91ffaa0810659260ed10e3f6d6eefaf1ed1310c57e9e8a607da0c7e2b7e603"
+    },
+    {
+      "file": "docs/GLOA_AUTOMATIC_FINANCE_FINAL_RELEASE_GATE.md",
+      "headGitBlob": "638af72972f05f27342a79e2a59818aec6b507d6",
+      "candidateSha256": "f6d1a872dff951bf5be731177da3cb09a5ff2751be3ef91c4871908682294497"
+    },
+    {
+      "file": "docs/GLOA_AUTOMATIC_FINANCE_SYNC_RELEASE_REVIEW.md",
+      "headGitBlob": "6634e7413192b58e98fa390db76b51d0965b732a",
+      "candidateSha256": "86fceb93a1a18d1de997ba765c6a653056a9ba8b1cb57bfedc720e6a88370d51"
+    },
+    {
+      "file": "docs/GLOA_FINANCE_RECONCILIATION_PATCH_PROPOSAL.md",
+      "headGitBlob": "a926c80151e08eeeb791e9ea5b348cd91575eac1",
+      "candidateSha256": "50477cd8a4a7b6801518f1b8a9e90931b559d93d26d7f2ba0b12dc05fa8817f8"
+    },
+    {
+      "file": "docs/GLOA_MIGRATION_084_FINAL_GATE.md",
+      "headGitBlob": "50787d566e86b6b7ec6bed71bfe6ec9e7c3774bc",
+      "candidateSha256": "d85d9d6dd9211103dbb4dae9eb974af2f67acc6e5de7cebe35b13f05591e5f86"
+    },
+    {
+      "file": "docs/GLOA_PRODUCTION_ACTIVATION_READINESS.md",
+      "headGitBlob": "7857c2a3ef790b9a9a6ed76968ddaeb9d1ba3006",
+      "candidateSha256": "044d935e28b0ddf38a38225212d0c36e3ac5013c6a3cefc2530258e21fa12b70"
+    },
+    {
+      "file": "docs/GLOA_STRIPE_READ_PERMISSION_CORRECTION.md",
+      "headGitBlob": "9718b373e3f7356824eb1985ab115ad0b9cb3321",
+      "candidateSha256": "7506e63651d16f6e4882233969ec3d007bb419f05520fbe8326fb30b012759fe"
+    },
+    {
+      "file": "docs/GLOA_SUPABASE_SECURITY_DATABASE_VERIFIED.md",
+      "headGitBlob": "1c2ac8651e1e04f9db99676fce26badd0f508ac1",
+      "candidateSha256": "1d5804ddc986df9841bf1d27d2dc040e54868e8ddef3029d5546198f9057d95a"
+    },
+    {
+      "file": "docs/GLOA_SUPABASE_SECURITY_PATCH_PROPOSAL.md",
+      "headGitBlob": "a371d644bd7c1c0ab7582a79415f842e17c41f9c",
+      "candidateSha256": "38db21b5eec4c3c4378d71ac8ff093a570a7d6b7acf2d4f3139e3a4f059ab970"
+    },
+    {
+      "file": "docs/finance-reconciliation/controlled-release-files.json",
+      "headGitBlob": "d396a7ee1fc7cba72dffef33a584466f647ec1e5",
+      "candidateSha256": "97cd39c05af6f412b60381dc5a8b92a79c48a74874e2494912d2b81430597bcb"
+    },
+    {
+      "file": "docs/finance-reconciliation/environment-release-check.json",
+      "headGitBlob": "eb1f2112b6154907203499f7c0ed55aceb25585f",
+      "candidateSha256": "1049318a244d75710b058047d11f83344f0145f5df435b8b5160f8381a7b5681"
+    },
+    {
+      "file": "docs/finance-reconciliation/historical-2026-09-10.json",
+      "headGitBlob": "c4e990a15fd0a57fba7a854aa71ef60feb57e8a3",
+      "candidateSha256": "755e3a31914e4645355a64e345fe9a1af9c1408ac5f73d4c2c68626dda37c27c"
+    },
+    {
+      "file": "docs/finance-reconciliation/production-activation-readiness.json",
+      "headGitBlob": "a914517f5c91fd3bce4814456b8945f83a34fba0",
+      "candidateSha256": "791c7f559e2cacc780c0f9e8479bdfbe92d3e7ae4cd6e53ce8b0144990210366"
+    },
+    {
+      "file": "docs/finance-reconciliation/production-dependencies-readonly.json",
+      "headGitBlob": "331cd51b219a228fc25c2af152310dba381c6107",
+      "candidateSha256": "409704f1d88408cd7e964126690776f68ef2e4d80d8de9babcdbc90490b70a83"
+    },
+    {
+      "file": "docs/finance-reconciliation/production-release-readonly.json",
+      "headGitBlob": "1481a13cf0b4c01a3636fca942514da2d0e7e80a",
+      "candidateSha256": "85b11aa728c732ab4090e33c88c552d4cf2d705af65125368d4738cf12c1e2bb"
+    },
+    {
+      "file": "lib/adminPortalFinance.ts",
+      "headGitBlob": "41f561078365fc89265be3d9026ee8f04c70a9a9",
+      "candidateSha256": "671f58db5c3baed89547fb0c20b860e82bc83890eb2f6c57b9a99cc25d05dd77"
+    },
+    {
+      "file": "lib/adminPortalFinanceRead.ts",
+      "headGitBlob": "d32d6fa60071f91e33603e06d7013cbb331b848e",
+      "candidateSha256": "a8ee97e87bb0cd456c7fb63483679903ac0cf41ab14c661c526ffa5c8b5207e0"
+    },
+    {
+      "file": "lib/automaticFinanceSync.ts",
+      "headGitBlob": "ecc9121340c33abd52e2268a5e8d4ab4fddedcc3",
+      "candidateSha256": "348d348302ffb0299fe60153a8e41e8a7ae7f391f23ca05dd577968429f78ce1"
+    },
+    {
+      "file": "lib/financeEvidenceSynchronization.ts",
+      "headGitBlob": "f0aa53e8cc6c40dd0a341d17177038d9b7c6be2f",
+      "candidateSha256": "9996ee61c261d600020e845593eea2a006aa61cdde792f8b6af3b1b66bf44f3d"
+    },
+    {
+      "file": "lib/financeReconciliation.ts",
+      "headGitBlob": "86efd092f8433482f33d26a73b4a15b6b62258be",
+      "candidateSha256": "6337990e36250e552a5c5d657470f6c1df58dc7ed0774fbfada2ef8d6f5042a6"
+    },
+    {
+      "file": "lib/financeReconciliationEvidence.ts",
+      "headGitBlob": "b1a46a4db7e89f9d88a954410a00d35dc4a3e384",
+      "candidateSha256": "a3862e75a527e482bd8232fe9848cdde88c80a147e622b80b751917d7faa2fd2"
+    },
+    {
+      "file": "lib/financeReconciliationWorker.ts",
+      "headGitBlob": "8aae03e3ef00c97946d8582c0fbb4dc05b99f360",
+      "candidateSha256": "6314347ab6730be4ca979f399d1a8050d03bda98a6c95453ac51f1319fe0ab21"
+    },
+    {
+      "file": "lib/financeSourceCoverage.ts",
+      "headGitBlob": "f79d26f3bfb355cd68cce7e094ff7fff3cd96e3d",
+      "candidateSha256": "23d312f42178306227c339e81d8f12c61affb5f95fe2e1e0cb93dce24a173bb7"
+    },
+    {
+      "file": "lib/financeSyncMonitoring.ts",
+      "headGitBlob": "6633c46c6c52ed8d864ccab0929da6f4325443ac",
+      "candidateSha256": "bd4747f420b05561a252e3462a880e742a11320221a16c7a526c3ab9bb66d4b7"
+    },
+    {
+      "file": "lib/financeSyncServer.ts",
+      "headGitBlob": "91723e640c7df8be3469dd7a6dcfbf4765cd331a",
+      "candidateSha256": "2d0010e9859d315d9eb1bafafbd7cfdb01571ee485e334499b4a23c80d734204"
+    },
+    {
+      "file": "lib/providerFeeCapture.ts",
+      "headGitBlob": "e8af9521f1e46c1f57aefbfeb5fbbee2471c8bfc",
+      "candidateSha256": "3d60e3047e80c9aa5d2d7a0df719826df249512a86301325ea164a17a53e8436"
+    },
+    {
+      "file": "lib/stripeReconciliationClient.ts",
+      "headGitBlob": "a1387e41e29d3d697f9d13c7e75b4c922820f88e",
+      "candidateSha256": "365ad2806a5abdd63c5cc150e37a95849354ea724a04efc3e0fc734e9b7e821f"
+    },
+    {
+      "file": "lib/stripeReconciliationRead.ts",
+      "headGitBlob": "b347475119cb111aa5de7e4de24ef4f73c5656cc",
+      "candidateSha256": "4696de1064c8d5baf1d599be387b47c1b7f8a7561b56d24d0cd2906b32fc0916"
+    },
+    {
+      "file": "scripts/finance-reconciliation-plan.mjs",
+      "headGitBlob": "24ab21daff30b611d115a0f98bf6c4a428787990",
+      "candidateSha256": "2e1a688fd1ab7be1cc3057c376bf73c6db52aa6a9f4bc0c6d89802d6dd3f7ce7"
+    },
+    {
+      "file": "scripts/migration-security-check.mjs",
+      "headGitBlob": "9f6b746b02e0e3fe191dc51c26098c14345cea67",
+      "candidateSha256": "4134abe179a9483bc424db08d92474fcb580390655dfa45d1dceacb11fc7f365"
+    },
+    {
+      "file": "security/migrations/084_restrict_order_number_execute.sql.metadata.json",
+      "headGitBlob": "233f7caf732fb77a410cb23f579c4e6d15fa2204",
+      "candidateSha256": "d9a2b6f7d0f58dd41069aabd0e91b7310f14672778c71be87d71d81623982be6"
+    },
+    {
+      "file": "security/migrations/084_restrict_order_number_execute.sql.review.json",
+      "headGitBlob": "9282f4a2c1d2ae419b0dc589f4b967f53b06ee98",
+      "candidateSha256": "7792484858399c3027c5d2ea7551a4736c5090d728f7ede135dac100498a4c76"
+    },
+    {
+      "file": "security/migrations/085_automatic_finance_reconciliation.sql.metadata.json",
+      "headGitBlob": "ea9e59cc2335ffdc9456314a24504ce672ddff27",
+      "candidateSha256": "347c2bad9daeab11ee3ae6fc7fbef294bd579b88e9214aba40c16924dd958563"
+    },
+    {
+      "file": "security/migrations/085_automatic_finance_reconciliation.sql.review.json",
+      "headGitBlob": "29945bbb144743b227fb3b0804c3af97fb24e69b",
+      "candidateSha256": "0cebc44e561820d311bc6f36127bd0b17dbc43441c9468a5ac0ce9ec04fb12c4"
+    },
+    {
+      "file": "supabase/migrations/084_restrict_order_number_execute.sql",
+      "headGitBlob": "0b9b59d9fbfeb9654bb5fca84bbd3d7bab537c38",
+      "candidateSha256": "178f6b5f88ef4fcbc4ebf624d3facd5a9f61b3f630b14fd504f49ad8d818a04f"
+    },
+    {
+      "file": "supabase/migrations/085_automatic_finance_reconciliation.sql",
+      "headGitBlob": "6fd4a48c9b7eee9d1f80ab6ab77c3983c8a443bb",
+      "candidateSha256": "8fc5da7be846857434ffc7b5843e7c6a04120e9b89cdf38346fdd62cc7b134ff"
+    },
+    {
+      "file": "supabase/postcheck/084_restrict_order_number_execute_postcheck.sql",
+      "headGitBlob": "41925a4800680bb7f903a05fbc6022fe0148ba2b",
+      "candidateSha256": "d1eae0f0eff1cc16347bb4e2ed98a917429033f6c0a83416520900233dd0eb78"
+    },
+    {
+      "file": "supabase/postcheck/085_automatic_finance_reconciliation_postcheck.sql",
+      "headGitBlob": "3f3dbd52cd39e74b369ba2e7abcc59bb5a9ff3f9",
+      "candidateSha256": "7bca178d90bfc4271f8801ea671c2de5cbd01bb167d6c53205bd590b5bb4281a"
+    },
+    {
+      "file": "supabase/preflight/084_restrict_order_number_execute_preflight.sql",
+      "headGitBlob": "9284e59d24e50d74d75dfeb2adb7b302c88b56ef",
+      "candidateSha256": "f7e44d612207411cdc153ccac3ae522523a385823a41fc4b739162cc1a876981"
+    },
+    {
+      "file": "supabase/preflight/085_automatic_finance_reconciliation_preflight.sql",
+      "headGitBlob": "479c524767001239a4e385f824d067bd209ed0c0",
+      "candidateSha256": "cfab019b60ad59fac55aa95201b4c4ff6dc195fa5d8fcf6deafd88bde8209436"
+    },
+    {
+      "file": "tests/annual-plan-checkout.test.mjs",
+      "headGitBlob": "f13b266800122e11c6a33420d42b449d941d277c",
+      "candidateSha256": "0143d71c1b1de9310babed98382f66cc82b1354548b609bf128e5e2c5fcccc6d"
+    },
+    {
+      "file": "tests/annual-plan-maintenance.test.mjs",
+      "headGitBlob": "3d51bf9bbff6f8d888977b9af44928f6b685e575",
+      "candidateSha256": "2aa7cc375b26ad37c63feacc59caf19250ec0e7fe207954d4080dbb2e224622d"
+    },
+    {
+      "file": "tests/annual-plan-refund.test.mjs",
+      "headGitBlob": "8483e93a71215b7a68a57215c9dd102d621a9a2c",
+      "candidateSha256": "7a27d23a12294aa8d5d1e0befa482eed42c730ad4b308cc7c47dad3894d33508"
+    },
+    {
+      "file": "tests/annual-plan-webhook.test.mjs",
+      "headGitBlob": "dce7740700802ad9fe80e7027ee294101a23a2a7",
+      "candidateSha256": "4158f9dde6e2642a141e3be2e4d32d678e07e3eb69dafb9690edf519f2500ee9"
+    },
+    {
+      "file": "tests/automatic-finance-sync.test.mjs",
+      "headGitBlob": "331f7f30d071e94d4abdd8dcfdea85afe33d3371",
+      "candidateSha256": "6c8210ee11512b18e24b0661b17d28fa71e8bc34fe587fd2f49af2a684ae19cf"
+    },
+    {
+      "file": "tests/block2-admin-portal.test.mjs",
+      "headGitBlob": "4fa1a81bbc268961f397889b5c6fa8f3000c3fe4",
+      "candidateSha256": "0d3a09f078e12ed413c32bde6df085461129207204792a191cc0bd25adcb3546"
+    },
+    {
+      "file": "tests/direct-cost-coverage.test.mjs",
+      "headGitBlob": "2062bbaf1cecb2b5161a56e386f0b432d4cd0690",
+      "candidateSha256": "7c3517d916ddde570d7825ff264e0b7a424db2739f656d26fb036fe2bb751a31"
+    },
+    {
+      "file": "tests/finance-evidence-synchronization.test.mjs",
+      "headGitBlob": "e5f3818fbc00c56cd7dba6cf0899891ee3840c04",
+      "candidateSha256": "7b5b699e66656ee3ddae00b9367bc37741f9b5c182122b12ddf4e0b612009770"
+    },
+    {
+      "file": "tests/finance-reconciliation-patch.test.mjs",
+      "headGitBlob": "5d5dd3c4801473c3d0b812690055b69a75bd1c4a",
+      "candidateSha256": "18f1f72c158889b907193a64b1412271c9eac51d5e3684dbd43da5e926c5cef1"
+    },
+    {
+      "file": "tests/finance-reconciliation-review.test.mjs",
+      "headGitBlob": "7b9de7523cde2d4c5e63b64fcb4c409be55910aa",
+      "candidateSha256": "3fa4ee02adb6c25a2dece54ea827a86bd9e213b421527ce2177a81953afbac43"
+    },
+    {
+      "file": "tests/finance-sequential-release.test.mjs",
+      "headGitBlob": "614f8be769152b97f4e780be856c24aa6e5706c8",
+      "candidateSha256": "18e9917c288da4b489f5796f59b416c7116913c27509f0e3b1498a8b105f3d01"
+    },
+    {
+      "file": "tests/fixtures/finance-reconciliation-local-proof.json",
+      "headGitBlob": "7bfe16bae30536b7a5c0f09039a370b369795075",
+      "candidateSha256": "c30d402335452d2867be2a65f38328bb98e02072f8533f49ffd1cfcd43ef9b5f"
+    },
+    {
+      "file": "tests/fixtures/finance-sequential-release-proof.json",
+      "headGitBlob": "276e076fc9334435b2e73b1a8a2c48719de84fc3",
+      "candidateSha256": "9b73cc129ac39c5daa758b10d42092eea8a6a4f6f691c46d8e2a61daf07ea7d0"
+    },
+    {
+      "file": "tests/fixtures/finance-sync-database-proof.json",
+      "headGitBlob": "f23b7ab8ff3456421e0b56fc88cd1473f0bd7322",
+      "candidateSha256": "e3e6f69ab8065c04583413d7ce4e8befe5d4d7a40416ab2ead7176903c924d0b"
+    },
+    {
+      "file": "tests/fixtures/migration-084-gates-local-proof.json",
+      "headGitBlob": "370e38152e59dcbee43577a192e5df45139d2fdd",
+      "candidateSha256": "a93201e168ae696b3503ead308bbd19628ba6bf0db786f763b5abe1f6344d8f8"
+    },
+    {
+      "file": "tests/fixtures/order-number-security-local-proof.json",
+      "headGitBlob": "915097b66ceae6334f8a1e80bb833c02e81420ac",
+      "candidateSha256": "c37b26d576899ea798c3766682ef7a331e533bf381156af4d5a67154b5ddc38a"
+    },
+    {
+      "file": "tests/fixtures/supabase-security-audit.json",
+      "headGitBlob": "2a605031e1c5263df4188379146ec1b0af5275fb",
+      "candidateSha256": "cd793e3a0e58e15c368e63a9024e64e048c41b456df146873f82d3f929678f57"
+    },
+    {
+      "file": "tests/helpers/financeSyncDatabase.mjs",
+      "headGitBlob": "0050ff9f15e0ad3521da842a171b7f876f84dd52",
+      "candidateSha256": "cc4b4c5e012653b2e5b3db709e4bf31fb174879963e02a476cb122eb6c32aefb"
+    },
+    {
+      "file": "tests/helpers/orderNumberSecurityDatabase.mjs",
+      "headGitBlob": "e84560461c925e39b489c8a704993fc69e4a363c",
+      "candidateSha256": "8f6504fc42a14d56ef9b8aee5736c7e63ef81a57dfb74765eca986940dd5c98b"
+    },
+    {
+      "file": "tests/migration-security.test.mjs",
+      "headGitBlob": "f756b1d430fb49065c5e57b3000adb956cad1814",
+      "candidateSha256": "d22e5ba88966d72859615bc821ca3956ada5b3862ea0de7e2789f4236c04d179"
+    },
+    {
+      "file": "tests/provider-fee-evidence.test.mjs",
+      "headGitBlob": "e6ac94057ee74563712033dcd0cea166b134206d",
+      "candidateSha256": "8caca9828662f45998dfd4c5ab316d222e7c216da7514bda13998230e9e8daab"
+    },
+    {
+      "file": "tests/runtime/finance-reconciliation-local.mjs",
+      "headGitBlob": "6988687a6355c701ee756a13ed2a23b7f3bb362b",
+      "candidateSha256": "6ed898d54eeec717d6d7aca77503d421d0bdd6ebe08a19b73ba49cbc4377408f"
+    },
+    {
+      "file": "tests/runtime/finance-sync-database-local.mjs",
+      "headGitBlob": "8346e41c529e3bec31adb0cdf1a9ca064feaefb4",
+      "candidateSha256": "bab5f43899b2a704f8adeeaa270a4574a6649e3c7ef3db223543049d28e960a8"
+    },
+    {
+      "file": "tests/runtime/migration-084-gates-local.mjs",
+      "headGitBlob": "75ead1c41ac36aa629eb56c1e96dc6097fd358fb",
+      "candidateSha256": "7cd47a345db93146a3604566f79905c2178b39d08017191b63330042698ccdb2"
+    },
+    {
+      "file": "tests/supabase-function-permissions.test.mjs",
+      "headGitBlob": "53fb05cd899752c31089ed3b0596e4a99bc353ff",
+      "candidateSha256": "5d89b389c5a39cac850516ebe183a077f4b2cac27cf3a78f42e2daa6bbbd6ee0"
+    },
+    {
+      "file": "vercel.json",
+      "headGitBlob": "17f36704a8d1353bd872e101321a2c34b5419045",
+      "candidateSha256": "149de872c1873828776196771e8c42661a4a94bf063c46547e139cad6eff24ac"
+    },
+    {
+      "file": "vite.config.ts",
+      "headGitBlob": "cad18c0fa98b1cd2de2894d8cb50ca5fdedead3c",
+      "candidateSha256": "fdc2112bf39448f645fa6432c7379ddce8e84c46d62b461024a11c144bb43204"
+    }
+  ],
+  "cumulativeReleaseFiles": [
+    "app/AdminFinanceSyncStatus.tsx",
+    "app/AdminGlobalStripeSync.tsx",
+    "app/AdminPortalDashboard.tsx",
+    "app/AdminPortalFinance.tsx",
+    "app/AdminPortalShared.tsx",
+    "app/AdminPortalShell.tsx",
+    "app/admin-portal.css",
+    "app/api/admin/finance/route.ts",
+    "app/api/admin/stripe-sync/route.ts",
+    "app/api/cron/finance-reconciliation/route.ts",
+    "docs/GLOA_AUTOMATIC_FINANCE_FINAL_RELEASE_GATE.md",
+    "docs/GLOA_AUTOMATIC_FINANCE_SYNC_RELEASE_REVIEW.md",
+    "docs/GLOA_DESKTOP_STRIPE_LAYOUT_REVIEW.txt",
+    "docs/GLOA_FINANCE_RECONCILIATION_PATCH_PROPOSAL.md",
+    "docs/GLOA_GLOBAL_STRIPE_MONITORING_PRODUCTION_EXECUTION.md",
+    "docs/GLOA_GLOBAL_STRIPE_MONITORING_PRODUCTION_READINESS.md",
+    "docs/GLOA_GLOBAL_STRIPE_SYNC_REVIEW.md",
+    "docs/GLOA_MIGRATION_084_FINAL_GATE.md",
+    "docs/GLOA_MIGRATION_084_FINAL_PRODUCTION_PREFLIGHT.md",
+    "docs/GLOA_MIGRATION_084_PRODUCTION_EXECUTION.md",
+    "docs/GLOA_MIGRATION_085_GATE10_DEPLOYED_SOURCE_REVIEW.md",
+    "docs/GLOA_MIGRATION_085_POSTCHECK_REPAIR.md",
+    "docs/GLOA_MIGRATION_085_PRODUCTION_EXECUTION.md",
+    "docs/GLOA_MIGRATION_085_PRODUCTION_READINESS.md",
+    "docs/GLOA_PRODUCTION_ACTIVATION_READINESS.md",
+    "docs/GLOA_STRIPE_ADMIN_ENV_BROWSER_QA.md",
+    "docs/GLOA_STRIPE_ADMIN_FINAL_RELEASE_CHECKLIST.txt",
+    "docs/GLOA_STRIPE_ADMIN_FINAL_RELEASE_MANIFEST.json",
+    "docs/GLOA_STRIPE_ADMIN_RELEASE_FILES.json",
+    "docs/GLOA_STRIPE_ADMIN_RELEASE_READINESS.md",
+    "docs/GLOA_STRIPE_READ_PERMISSION_CORRECTION.md",
+    "docs/GLOA_SUPABASE_SECURITY_DATABASE_VERIFIED.md",
+    "docs/GLOA_SUPABASE_SECURITY_PATCH_PROPOSAL.md",
+    "docs/finance-reconciliation/controlled-release-files.json",
+    "docs/finance-reconciliation/environment-release-check.json",
+    "docs/finance-reconciliation/historical-2026-09-10.json",
+    "docs/finance-reconciliation/production-activation-readiness.json",
+    "docs/finance-reconciliation/production-dependencies-readonly.json",
+    "docs/finance-reconciliation/production-release-readonly.json",
+    "lib/adminPortalFinance.ts",
+    "lib/adminPortalFinanceRead.ts",
+    "lib/automaticFinanceSync.ts",
+    "lib/financeEvidenceSynchronization.ts",
+    "lib/financeReconciliation.ts",
+    "lib/financeReconciliationEvidence.ts",
+    "lib/financeReconciliationWorker.ts",
+    "lib/financeSourceCoverage.ts",
+    "lib/financeSyncMonitoring.ts",
+    "lib/financeSyncServer.ts",
+    "lib/globalFinanceSync.ts",
+    "lib/providerFeeCapture.ts",
+    "lib/stripeReconciliationClient.ts",
+    "lib/stripeReconciliationRead.ts",
+    "package.json",
+    "scripts/finance-reconciliation-plan.mjs",
+    "scripts/migration-security-check.mjs",
+    "security/migrations/084_restrict_order_number_execute.sql.metadata.json",
+    "security/migrations/084_restrict_order_number_execute.sql.review.json",
+    "security/migrations/085_automatic_finance_reconciliation.sql.metadata.json",
+    "security/migrations/085_automatic_finance_reconciliation.sql.review.json",
+    "security/migrations/20261024192649_global_finance_sync_monitoring.sql.metadata.json",
+    "security/migrations/20261024192649_global_finance_sync_monitoring.sql.review.json",
+    "security/postchecks/085_automatic_finance_reconciliation_postcheck.review.json",
+    "supabase/migrations/084_restrict_order_number_execute.sql",
+    "supabase/migrations/085_automatic_finance_reconciliation.sql",
+    "supabase/migrations/20261024192649_global_finance_sync_monitoring.sql",
+    "supabase/postcheck/084_restrict_order_number_execute_postcheck.sql",
+    "supabase/postcheck/085_automatic_finance_reconciliation_postcheck.sql",
+    "supabase/postcheck/global_finance_sync_monitoring_postcheck.sql",
+    "supabase/preflight/084_restrict_order_number_execute_preflight.sql",
+    "supabase/preflight/085_automatic_finance_reconciliation_preflight.sql",
+    "supabase/preflight/global_finance_sync_monitoring_preflight.sql",
+    "tests/admin-identity.test.mjs",
+    "tests/annual-plan-checkout.test.mjs",
+    "tests/annual-plan-maintenance.test.mjs",
+    "tests/annual-plan-refund.test.mjs",
+    "tests/annual-plan-webhook.test.mjs",
+    "tests/automatic-finance-sync.test.mjs",
+    "tests/block2-admin-portal.test.mjs",
+    "tests/direct-cost-coverage.test.mjs",
+    "tests/finance-evidence-synchronization.test.mjs",
+    "tests/finance-reconciliation-patch.test.mjs",
+    "tests/finance-reconciliation-review.test.mjs",
+    "tests/finance-sequential-release.test.mjs",
+    "tests/fixtures/finance-reconciliation-local-proof.json",
+    "tests/fixtures/finance-sequential-release-proof.json",
+    "tests/fixtures/finance-sync-database-proof.json",
+    "tests/fixtures/global-finance-monitoring-proof.json",
+    "tests/fixtures/global-stripe-integrated-release-proof.json",
+    "tests/fixtures/migration-084-gates-local-proof.json",
+    "tests/fixtures/migration-085-postcheck-before.sql",
+    "tests/fixtures/migration-085-postcheck-local-proof.json",
+    "tests/fixtures/order-number-security-local-proof.json",
+    "tests/fixtures/supabase-security-audit.json",
+    "tests/global-stripe-auth-integration.test.mjs",
+    "tests/helpers/financeSyncDatabase.mjs",
+    "tests/helpers/orderNumberSecurityDatabase.mjs",
+    "tests/helpers/stripeAdminPreview.mjs",
+    "tests/migration-085-postcheck-review.test.mjs",
+    "tests/migration-security.test.mjs",
+    "tests/preview/stripe-admin/index.html",
+    "tests/preview/stripe-admin/main.jsx",
+    "tests/provider-fee-evidence.test.mjs",
+    "tests/runtime/finance-reconciliation-local.mjs",
+    "tests/runtime/finance-sync-database-local.mjs",
+    "tests/runtime/global-finance-monitoring-local.mjs",
+    "tests/runtime/migration-084-gates-local.mjs",
+    "tests/runtime/migration-085-postcheck-local.mjs",
+    "tests/runtime/stripe-admin-preview.mjs",
+    "tests/runtime/stripe-desktop-layout.mjs",
+    "tests/stripe-admin-preview.test.mjs",
+    "tests/supabase-function-permissions.test.mjs",
+    "vercel.json",
+    "vite.config.ts"
+  ],
+  "chromiumEvidence": {
+    "reuse": "UI sources unchanged since successful approved Chromium runs and throughout this review",
+    "desktop": {
+      "file": "outputs/stripe-desktop/results.json",
+      "sha256": "55ebb8cfd7d910ad820cbb54105a5e8065d546adf15f47cdc57ae84e190280d5",
+      "cases": 59
+    },
+    "sidebar": {
+      "file": "outputs/blue-sidebar/results.json",
+      "sha256": "ef59afc59fa118f2679b5ae91d3b074ea69ae914235702f0ba8bb7ef26b86c86",
+      "cases": 36
+    },
+    "buttons": {
+      "file": "outputs/stripe-button-review/results.json",
+      "sha256": "bb76dbe2ee0fb29d548eac9166a8457e666b0c70de76cc95cb064e775032e945",
+      "cases": 15
+    }
+  },
+  "production": {
+    "project": "yphubqploumfeabytotc",
+    "readOnly": true,
+    "prerequisitePostchecks": "084 PASS; 085 PASS; monitoring PASS",
+    "configs": 0,
+    "enabledConfigs": 0,
+    "jobs": 0,
+    "sources": 0,
+    "approvals": 0,
+    "monitoringVersion": 1,
+    "lastSuccess": null,
+    "runtimeFlags": "UNVERIFIED - Vercel 403",
+    "databaseActivation": "disabled/unconfigured",
+    "reconciliationInvoked": false
+  },
+  "checks": {
+    "focusedTests": 438,
+    "typeScript": "PASS",
+    "eslint": "PASS - 0 errors, 14 existing warnings",
+    "diff": "PASS",
+    "migrationSecurity": "PASS",
+    "isolatedCandidateBuild": "PASS - Nitro node-server, not Vercel-target validation",
+    "workspaceBuild": "FAIL - EPERM readlink parent home during Nitro tracing",
+    "sourceIntegrityUnchanged": true,
+    "credentialPatternMatches": [],
+    "publicJsScanned": 13,
+    "serverSecretIdentifierMatches": []
+  },
+  "blockers": [
+    "Current GitHub main unreachable from runner; cached origin/main only",
+    "Vercel goal10 read access 403; authorization recovery 404",
+    "Runtime flags/scopes, deployed source, Git deployment settings, build hooks and target runtime cannot be verified"
+  ],
+  "exclusions": [
+    "unrelated images/public assets",
+    "examples/",
+    ".claude/",
+    "outputs/",
+    "local database artifacts",
+    ".env files and credentials",
+    "protected backup and recovery material",
+    "unrelated unfinished audits and changes"
+  ],
+  "authority": "Owner authorizes one local commit only after all gates pass; those gates have not all passed. No staging/commit/push/deployment authorized by this manifest."
+}

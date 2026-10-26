@@ -62,6 +62,15 @@ export function checkReview(sql, contract, metadata) {
   if (!contract.reviewer || !contract.callerReview || !metadata.provenance) fail('Missing reviewer, caller review or metadata provenance');
   let masked;
   try { masked = maskSQL(sql); } catch (e) { return [...errors, e.message]; }
+  if(contract.kind==='global-finance-sync-monitoring'){
+    // Narrow hash-pinned metadata-only extension, independently tested on PostgreSQL.
+    // This does not authorize its production application or widen 085's writer review.
+    if(sha256(sql)!=='04cb71d3e442b04184465d193738f612b66af756724f7ffde4ac5fdd3eb06363')fail('Unreviewed global monitoring SQL');
+    const proof=metadata.realPostgresEvidence;
+    if(!proof||proof.sqlSha256!==sha256(sql)||proof.productionAccess!==false||proof.fullReplay!==false||proof.stopped!==true||proof.error)fail('Missing isolated monitoring proof');
+    for(const required of ['old attempts not fabricated during migration','retry advances attempt timestamp without clearing failure','successful completion retains last failure history','authoritative wrapper preserves base status and last success','only service can read status, no direct writes or trigger execution'])if(!proof?.passed?.includes(required))fail('Missing monitoring regression: '+required);
+    return errors;
+  }
   if(contract.kind==='automatic-finance-sync'){
     const tables=['finance_sync_config','finance_sync_periods','finance_sync_jobs','finance_sync_sources','finance_sync_approvals','finance_sync_alerts','finance_sync_discrepancies'];
     const functions=['claim','checkpoint','stage','discrepancy','basis','status','source_read','retry_ids','record','failure','finish','alert','details','period'].map(n=>'finance_sync_'+n+'_v1');
@@ -172,6 +181,10 @@ export function checkRepository(root) {
       const proof=fs.readFileSync(path.join(root,'tests/fixtures/finance-sync-database-proof.json'));
       const actual=JSON.parse(proof);
       if(sha256(proof)!==contract.databaseProofSha256||actual.sqlSha256!==contract.sqlSha256||!same(actual.catalog?.tables,metadata.tables)||!same(actual.catalog?.functions,metadata.functions))errors.push('Finance database proof file mismatch');
+    }
+    if(contract.kind==='global-finance-sync-monitoring'){
+      const proof=fs.readFileSync(path.join(root,'tests/fixtures/global-finance-monitoring-proof.json'));
+      if(sha256(proof)!==contract.databaseProofSha256||!same(JSON.parse(proof),metadata.realPostgresEvidence))errors.push('Monitoring database proof mismatch');
     }
     if (errors.length) throw new Error(`${file}:\n${errors.join('\n')}`);
   }

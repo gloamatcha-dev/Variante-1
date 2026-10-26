@@ -8,9 +8,11 @@ import { spawnSync } from 'node:child_process';
 import { verifyFinanceSyncDatabase } from '../helpers/financeSyncDatabase.mjs';
 import { verifyOrderNumberPatch } from '../helpers/orderNumberSecurityDatabase.mjs';
 import { checkRepository } from '../../scripts/migration-security-check.mjs';
+import {runAutomaticFinanceSync} from '../../lib/automaticFinanceSync.ts';
 
 const root = process.cwd();
 const sequential = process.argv.includes('--sequential');
+const monitoring = process.argv.includes('--monitoring');
 if(sequential)console.log(checkRepository(root));
 
 const bin = 'C:/Program Files/PostgreSQL/17/bin';
@@ -148,8 +150,45 @@ try {
       if(security!=='t')throw Error('085 regressed 084 helper restriction');
       result.security084PreservedBy085=true;
     }
+    if(monitoring){
+      const file='supabase/migrations/20261024192649_global_finance_sync_monitoring.sql';
+      const source=fs.readFileSync(file,'utf8');
+      if(createHash('sha256').update(source).digest('hex')!=='04cb71d3e442b04184465d193738f612b66af756724f7ffde4ac5fdd3eb06363')throw Error('Monitoring source fingerprint mismatch');
+      for(const [phase,expected] of [['preflight','READY FOR SEPARATE APPROVAL'],['postcheck','MONITORING INSTALLED']]){
+        if(phase==='postcheck')requireOK(write(source));
+        const output=requireOK(write('begin read only;'+fs.readFileSync(`supabase/${phase}/global_finance_sync_monitoring_${phase}.sql`,'utf8')+'rollback;'));
+        fs.writeFileSync(path.join(directory,`monitoring-${phase}.log`),output);
+        if(!output.includes(expected)||output.includes('|FAIL'))throw Error('Monitoring '+phase+' failed');
+      }
+      result.monitoringInstalled=true;
+    }
     result.migration084Executed=sequential;
     result.tests=await verifyFinanceSyncDatabase({query,write,requireOK,directory,ownerId:result.fixture.id,bin,env,port,database,verifyTarget,migrationSha256,migration084Executed:sequential});
+    if(monitoring){
+      const status=JSON.parse(requireOK(query('select public.finance_sync_global_status_v1();')));
+      if(status.monitoring_version!==1||!status.last_attempt_at||!status.last_failure_at||status.last_failure_code!=='api_unavailable')throw Error('Real finance RPCs did not persist monitoring evidence');
+      result.integratedMonitoring={passed:true,status};
+      // Exercise the real TypeScript worker against real 085 RPCs and monitoring
+      // triggers. Only Stripe reads are synthetic; all effects stay in this cluster.
+      const literal=value=>value===null?'null':typeof value==='object'?"'"+JSON.stringify(value).replaceAll("'","''")+"'::jsonb":"'"+String(value).replaceAll("'","''")+"'";
+      const rpc=async(name,args)=>{
+        if(!/^finance_sync_[a-z_]+_v1$/.test(name)||!Object.keys(args).every(k=>/^p_[a-z_]+$/.test(k)))throw Error('Unexpected local RPC');
+        return JSON.parse(requireOK(write(`select public.${name}(${Object.entries(args).map(([k,v])=>k+'=>'+literal(v)).join(',')});`)));
+      };
+      requireOK(write("update public.finance_sync_jobs set lease_until=clock_timestamp()-interval '1 second' where state='running';"));
+      const ledgerBefore=requireOK(query('select md5(coalesce(jsonb_agg(to_jsonb(e) order by id)::text,\'[]\')) from public.financial_events e;'));
+      const config={account_id:'acct_synthetic_finance',known_payment_intent:'pi_known',known_amount_cents:1070};
+      const failed=await runAutomaticFinanceSync({rpc,config,read:async()=>{throw Error('synthetic_api_outage');}});
+      if(failed.state!=='retry_required')throw Error('Worker outage not retryable');
+      const failure=JSON.parse(requireOK(query('select public.finance_sync_global_status_v1();')));
+      if(failure.last_failure_code!=='sync_failed'||!failure.last_failure_at)throw Error('Worker failure not durable');
+      const yielded=await runAutomaticFinanceSync({rpc,config,budgetMs:0,read:async()=>{throw Error('Read after budget exhausted');}});
+      const afterYield=JSON.parse(requireOK(query('select public.finance_sync_global_status_v1();')));
+      if(yielded.state!=='continuation_required'||afterYield.last_failure_at!==failure.last_failure_at)throw Error('Budget yield fabricated or erased failure');
+      const ledgerAfter=requireOK(query('select md5(coalesce(jsonb_agg(to_jsonb(e) order by id)::text,\'[]\')) from public.financial_events e;'));
+      if(ledgerBefore!==ledgerAfter)throw Error('Outage/yield changed financial ledger');
+      result.integratedWorker={failed,yielded,ledgerUnchanged:true,failureDurable:true};
+    }
     if(createHash('sha256').update(fs.readFileSync('supabase/migrations/085_automatic_finance_reconciliation.sql')).digest('hex')!==migrationSha256)throw Error('Migration changed during validation');
     console.log(sequential?'001-083 -> 084 -> 085 sequential replay and all regressions passed (LOCAL ONLY).':'001-083 + 085 replayed; finance database regressions passed; 084 NEVER executed.');
   }

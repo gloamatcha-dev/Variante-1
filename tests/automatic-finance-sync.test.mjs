@@ -1,9 +1,72 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {runAutomaticFinanceSync} from '../lib/automaticFinanceSync.ts';
 import {financeSyncCoverage} from '../lib/financeSyncMonitoring.ts';
+import {globalFinanceSyncStatus,berlinSyncTime,guardGlobalFinanceSummary} from '../lib/globalFinanceSync.ts';
 import fs from 'node:fs';import vm from 'node:vm';import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url),ts=require('typescript');
 const epoch=s=>Date.parse(s)/1000;
+
+test('global schedule is nominal UTC daily, uses Berlin DST and never certifies stale or disabled data',()=>{
+ const raw={configured:true,monitoring_version:1,state:'complete',last_success_at:'2026-10-24T05:45:00Z',verified_to:'2026-10-24T05:40:00Z',last_scan_at:'2026-10-24T05:45:00Z',missing_payments:0,missing_refunds:0,missing_fees:0,unresolved:0,persistent_failures:0,unbridged_events:0};
+ const s=globalFinanceSyncStatus(raw,true,Date.parse('2026-10-24T12:00:00Z'));assert.equal(s.verified,true);assert.equal(s.schedule,'40 5 * * *');assert.equal(s.next_scheduled_at,'2026-10-25T05:40:00.000Z');
+ assert.match(berlinSyncTime('2026-10-24T05:40:00Z'),/07:40/);assert.match(berlinSyncTime('2026-10-25T05:40:00Z'),/06:40/);
+ assert.equal(berlinSyncTime('invalid'),'noch nicht bestätigt');
+ assert.equal(globalFinanceSyncStatus({...raw,unbridged_events:1},true,Date.parse('2026-10-24T12:00:00Z')).state,'attention');
+ assert.equal(globalFinanceSyncStatus({...raw,verified_to:'2026-09-30T00:00:00Z'},true,Date.parse('2026-10-24T12:00:00Z')).state,'attention');
+ const crons=JSON.parse(fs.readFileSync('vercel.json','utf8')).crons;assert.equal(crons.find(c=>c.path==='/api/cron/finance-reconciliation').schedule,s.schedule);assert.equal(crons.find(c=>c.path==='/api/cron/retry-order-notifications').schedule,'20 5 * * *');
+ const buildConfig=fs.readFileSync('vite.config.ts','utf8');for(const route of ['/api/cron/finance-reconciliation','/api/admin/stripe-sync'])assert.ok(buildConfig.includes('"'+route+'": { maxDuration: 60 }'),'Both worker entry points need the 60-second function budget');
+ for(const [r,enabled]of [[null,true],[raw,false],[{...raw,unresolved:1},true],[{...raw,state:'retry'},true],[{...raw,last_success_at:'2026-10-20T00:00:00Z'},true]])assert.equal(globalFinanceSyncStatus(r,enabled,Date.parse('2026-10-24T12:00:00Z')).verified,false);
+ const overdue=globalFinanceSyncStatus({...raw,last_scan_at:'2026-10-23T05:45:00Z'},true,Date.parse('2026-10-24T12:00:00Z'));assert.equal(overdue.overdue,true);assert.equal(overdue.last_success_at,raw.last_success_at);
+});
+test('global outage or discrepancy invalidates an older complete finance result without changing ledger totals',()=>{
+ const cached={contributionComplete:true,resultComplete:true,resultCents:900,contributionMarginCents:1000,incomeCents:1200,costBlockers:[]};
+ const guarded=guardGlobalFinanceSummary(cached,false);assert.equal(guarded.resultCents,null);assert.equal(guarded.resultComplete,false);assert.equal(guarded.incomeCents,1200);assert.equal(cached.resultCents,900);
+ assert.equal(guardGlobalFinanceSummary(cached,true),cached);
+ assert.equal(guardGlobalFinanceSummary({...cached,resultComplete:false,resultCents:null},true).resultComplete,false);
+});
+
+function syncRouteHarness(){
+ const state={role:'owner',authorized:true,verified:true,ownerId:'owner',identityId:'owner',calls:0,statusCalls:0,runState:'verified',schema:true};
+ const env={FINANCE_RECONCILIATION_ENABLED:'true',FINANCE_SYNC_MANUAL_ENABLED:'true'};
+ const admin={rpc:async()=>{state.statusCalls++;return state.schema?{data:{monitoring_version:1,configured:true,state:'complete'},error:null}:{error:{},data:null};},from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:{owner_id:state.ownerId},error:null})})})})};
+ const code=ts.transpileModule(fs.readFileSync('app/api/admin/stripe-sync/route.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,compiled={exports:{}};
+ vm.runInNewContext(code,{module:compiled,exports:compiled.exports,Response,URL,process:{env},require:name=>name.includes('adminActionRoute')?{requireAdminIdentity:async()=>state.authorized?{ok:true,identity:{role:state.role,userId:state.identityId}}:{ok:false,response:Response.json({error:'denied'},{status:401})}}:name.includes('productOwnerAccess')?{canAccessProductManager:async()=>state.verified}:name.includes('supabaseAdmin')?{getSupabaseAdmin:()=>admin}:name.includes('financeSyncServer')?{runFinanceSyncServer:async()=>{state.calls++;return {state:state.runState};}}:name.includes('globalFinanceSync')?{globalFinanceSyncStatus}:require(name)});
+ const call=(action='run',origin='http://localhost')=>compiled.exports.POST(new Request('http://localhost/api/admin/stripe-sync',{method:'POST',headers:{origin,'Content-Type':'application/json'},body:JSON.stringify({action,role:'owner',owner_id:'owner'})}));
+ return {state,env,call};
+}
+test('global manual route verifies owner/Auth/config server-side and never bypasses release flags',async()=>{
+ for(const change of [{authorized:false},{role:'admin'},{role:'viewer'},{verified:false},{ownerId:'someone-else'}]){
+  const h=syncRouteHarness();Object.assign(h.state,change);assert.ok([401,403].includes((await h.call()).status));assert.equal(h.state.calls,0);
+ }
+ for(const key of ['FINANCE_RECONCILIATION_ENABLED','FINANCE_SYNC_MANUAL_ENABLED']){const h=syncRouteHarness();delete h.env[key];assert.equal((await h.call()).status,409);assert.equal(h.state.calls,0);}
+ const h=syncRouteHarness();assert.equal((await h.call('run','https://foreign.invalid')).status,403);assert.equal(h.state.calls,0);
+ h.state.schema=false;assert.equal((await h.call()).status,503);assert.equal(h.state.calls,0);
+});
+test('authorized manual sync reuses worker, exposes busy/retry and authorized viewers get status only',async()=>{
+ const h=syncRouteHarness();for(const state of ['verified','busy','continuation_required','retry_required']){h.state.runState=state;const r=await h.call();assert.equal(r.status,state==='retry_required'?503:200);assert.equal((await r.json()).run.state,state);}assert.equal(h.state.calls,4);
+ h.state.role='viewer';const response=await h.call('status');assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');assert.equal((await response.json()).canSync,false);assert.equal(h.state.calls,4);
+});
+
+function globalSyncUI(){
+ let cursor=0;const slots=[],effects=[];let timer,context;const requests=[];let failure=false,hold=false,release;
+ const react={createContext:()=>({Provider:'provider'}),useContext:()=>context,useCallback:fn=>{cursor++;return fn;},useState:initial=>{const i=cursor++;if(!(i in slots))slots[i]=initial;return [slots[i],value=>{slots[i]=typeof value==='function'?value(slots[i]):value;}];},useRef:initial=>{const i=cursor++;if(!(i in slots))slots[i]={current:initial};return slots[i];},useEffect:fn=>{cursor++;if(!effects.length)effects.push(fn);}};
+ const jsx=(type,props)=>({type,props});const compiled={exports:{}};
+ const code=ts.transpileModule(fs.readFileSync('app/AdminGlobalStripeSync.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
+ vm.runInNewContext(code,{module:compiled,exports:compiled.exports,Error,Date,Event,window:{setInterval:fn=>{timer=fn;return 1;},clearInterval:()=>{},addEventListener:()=>{},removeEventListener:()=>{},dispatchEvent:()=>{}},fetch:async(url,options)=>{const action=JSON.parse(options.body).action;requests.push({url,action});if(action==='run'&&hold)await new Promise(r=>release=r);if(failure)throw Error('network unavailable');return {ok:true,status:200,json:async()=>action==='run'?{ok:true,run:{state:'busy'}}:{ok:true,canSync:true,status:{state:'attention',last_success_at:'2026-10-24T05:45:00Z',unresolved:2,enabled:true,next_scheduled_at:'2026-10-25T05:40:00Z'}}};},require:name=>name==='react'?react:name==='react/jsx-runtime'?{jsx,jsxs:jsx}:name.includes('globalFinanceSync')?{berlinSyncTime}:require(name)});
+ const render=()=>{cursor=0;const tree=compiled.exports.AdminStripeSyncProvider({children:'module'});context=tree.props.value;return tree;};
+ const nodes=value=>value&&typeof value==='object'?[value,...nodes(value.props?.children)]:Array.isArray(value)?value.flatMap(nodes):[];
+ const all=value=>Array.isArray(value)?value.flatMap(all):value&&typeof value==='object'?[value,...all(value.props?.children)]:[];
+ return {render,mount:()=>effects[0](),tick:()=>timer(),requests,header:()=>context.header,button:()=>all(context.header).find(n=>n.type==='button'&&String(n.props.children).includes('JETZT')),fail:()=>failure=true,hold:()=>hold=true,release:()=>release(),nodes};
+}
+test('one global header action polls authoritative state, blocks duplicate clicks and preserves last success on outage',async()=>{
+ const ui=globalSyncUI();ui.render();const cleanup=ui.mount();await new Promise(r=>setImmediate(r));ui.render();
+ assert.ok(ui.button());assert.equal(ui.requests[0].url,'/api/admin/stripe-sync');
+ ui.hold();const button=ui.button();const run=button.props.onClick();button.props.onClick();await new Promise(r=>setImmediate(r));assert.equal(ui.requests.filter(r=>r.action==='run').length,1);ui.release();await run;await new Promise(r=>setImmediate(r));ui.render();
+ ui.fail();ui.tick();await new Promise(r=>setImmediate(r));ui.render();const header=JSON.stringify(ui.header());assert.match(header,/network unavailable/);assert.match(header,/07:45/);assert.match(header,/Ungeklärte Abweichungen/);assert.equal(ui.button(),undefined);cleanup();
+ assert.match(fs.readFileSync('app/AdminPortalShell.tsx','utf8'),/<AdminGlobalStripeSync\/><header className="portal-header">/);
+ assert.match(fs.readFileSync('app/AdminPortalFinance.tsx','utf8'),/status=\{sync\?\.status/);
+ assert.doesNotMatch(fs.readFileSync('app/AdminPortalShared.tsx','utf8'),/<AdminFinanceSyncStatus/);
+});
 function setup(){
  const paid=epoch('2026-09-29T12:00:00Z'),refunded=epoch('2026-10-02T12:00:00Z');
  const config={account_id:'acct_test',known_payment_intent:'pi_known',known_amount_cents:1070};

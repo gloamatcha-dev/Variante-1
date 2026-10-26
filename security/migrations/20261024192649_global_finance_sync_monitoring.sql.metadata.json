@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "provenance": "Narrow isolated PostgreSQL 17 monitoring fixture; not a full 085 replay or Production proof",
+  "sqlSha256": "04cb71d3e442b04184465d193738f612b66af756724f7ffde4ac5fdd3eb06363",
+  "realPostgresEvidence": {
+    "migration": "20261024192649_global_finance_sync_monitoring.sql",
+    "sqlSha256": "04cb71d3e442b04184465d193738f612b66af756724f7ffde4ac5fdd3eb06363",
+    "host": "127.0.0.1",
+    "port": 60818,
+    "database": "global_sync_4ae290ff48de",
+    "dataDirectory": "C:\\Users\\hajze\\Documents\\Codex\\2026-08-12\\GLOA\\outputs\\global-sync-4ae290ff48de\\data",
+    "passed": [
+      "separate preflight passes before extension",
+      "separate postcheck passes after extension",
+      "old attempts not fabricated during migration",
+      "new attempt timestamp persisted",
+      "failure timestamp and code persisted",
+      "retry advances attempt timestamp without clearing failure",
+      "successful completion retains last failure history",
+      "authoritative wrapper preserves base status and last success",
+      "anon cannot execute global status",
+      "authenticated cannot execute global status",
+      "only service can read status, no direct writes or trigger execution",
+      "all monitoring functions pin empty search path"
+    ],
+    "fullReplay": false,
+    "productionAccess": false,
+    "stopped": true
+  }
+}

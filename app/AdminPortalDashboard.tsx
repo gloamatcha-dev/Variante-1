@@ -22,7 +22,7 @@ export function AdminPortalDashboard({navigate}:{navigate:(area:PortalArea,tab?:
     ['Offene Creator-Bewerbungen','creatorApplicationsPending','creator','BEWERBUNGEN','open'],
     ['Provisionen und Auszahlungen','creatorPayoutAttention','creator','AUSZAHLUNGEN','attention'],
   ];
-  return <><div className="portal-section-head"><div><p className="portal-eyebrow">DEIN BETRIEB AUF EINEN BLICK</p><h2>Heute zu erledigen</h2></div><button type="button" onClick={refresh}>Aktualisieren</button></div><ReadState data={data} error={error} retry={refresh}>
+  return <><div className="portal-section-head"><div><p className="portal-eyebrow">DEIN BETRIEB AUF EINEN BLICK</p><h2>Heute zu erledigen</h2></div><button type="button" className="portal-cta-refresh" onClick={refresh}>Aktualisieren</button></div><ReadState data={data} error={error} retry={refresh}>
     <div className="portal-tasks">{tasks.map(([name,key,area,tab,filter])=><button type="button" key={key} className={summary?.[key]===0?'is-quiet':typeof summary?.[key]==='number'&&Number(summary[key])>0?'has-work':''} onClick={()=>navigate(area,tab,filter)}><span>{name}</span><strong>{typeof summary?.[key]==='number'?String(summary[key]):'unbekannt'}</strong><span aria-hidden="true">↗</span></button>)}</div>
     {data?.shippingComplete===false&&<p className="portal-note">Versand-Fälligkeitszahlen sind für diese umfangreiche Warteschlange unbekannt. Die Bestellansicht zeigt den verbindlichen Status je Bestellung.</p>}
     {(data?.warnings as string[]|undefined)?.length?<p role="status" className="portal-warning">Einige Daten sind nicht verfügbar. <button type="button" onClick={refresh}>Erneut laden</button></p>:null}

@@ -1,0 +1,32 @@
+DESKTOP STRIPE LAYOUT - PASS
+
+Scope: local desktop layout review only. Stop for owner visual review.
+Preview: http://127.0.0.1:18925/?state=disabled
+Owner-button preview: http://127.0.0.1:18925/?state=retry
+Run preview: node tests/runtime/stripe-admin-preview.mjs
+Run Chromium assertions: node tests/runtime/stripe-desktop-layout.mjs
+
+Confirmed cause
+The global stylesheet applies position:sticky, top:0, z-index:40 and height:86px to every header element. The shared Admin header contained the full Stripe section alongside the title and global search. Its fixed height did not grow with its children. This is a real shared component/CSS conflict, also present in the isolated preview, rather than a preview-only positioning artifact.
+A controlled Chromium reproduction restores the old nesting and inherited 86px height: Stripe bottom 438.875px, header bottom 234px, dashboard content top 252px. The panel overflows the header and overlaps dashboard content. See outputs/stripe-desktop/cause-reproduction.json.
+
+Changes
+Moved the shared Stripe bar directly above the Admin header in the workspace. Explicitly isolated the Admin header from public sticky positioning and fixed height. The status bar immediately shows sync state, last fully successful sync, approximate next schedule, unresolved discrepancies, and the existing server-authorized owner action when permitted. Technical timestamps, coverage, schedule, progress and warnings live in a keyboard-accessible native details/summary disclosure. Errors and status reload remain visible. Expansion grows normal document flow.
+Preserved all module rendering/navigation, colors and existing typography rules, polling, duplicate-run guard, authorization, release flags and busy/running disabling. No backend or synchronization implementation changed.
+Removed the preview matchMedia override and mobile-harness links. The original Admin restriction below 1024px remains in force even if the old mobileHarness query parameter is supplied.
+Preview still uses only synthetic transport, blocks backend API access and external connections, and reads no app environment configuration.
+
+Validation
+PASS: 56 real Chromium desktop cases: 1024, 1280, 1440, 1680px x disabled, complete, running, retry, overdue, incomplete, outage x collapsed/expanded.
+Bounding-rectangle assertions cover panel/header/content separation, heading/search separation, metrics/action-area separation from Stripe, visible status descendant containment, heading/search control containment, and horizontal document overflow. Expanded details must move dashboard content down. Immediate fields, owner action availability in synthetic scenarios and running disabled state are also checked.
+PASS: 3 real Chromium restriction cases at 390, 768 and 1023px, including the obsolete bypass query.
+PASS: 20 synchronization, signed-session authorization, disabled-release-flag and preview-safety tests.
+PASS: TypeScript --noEmit, focused ESLint for both changed TSX components, git diff --check.
+16 Chromium screenshots saved: disabled/retry x compact/expanded x all four desktop widths. Compact and expanded screenshots visually inspected at 1280px and 1024px respectively.
+Machine-readable layout results: outputs/stripe-desktop/results.json.
+Screenshots: outputs/stripe-desktop/*.png.
+
+Limits
+This validates real Admin components with synthetic local data, not a deployed or authenticated Production session. No Production database changes, Stripe LIVE actions, sync activation, Git push or Vercel deployment performed. Existing unrelated working-tree changes preserved.
+
+STOPPED FOR VISUAL REVIEW.

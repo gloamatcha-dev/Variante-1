@@ -4,17 +4,19 @@ import { costCompleteness } from './directCostCoverage.ts';
 import { readPortalPages } from './adminPortalRead.ts';
 import { financeSourceCoverage } from './financeSourceCoverage.ts';
 import {financeSyncCoverage} from './financeSyncMonitoring.ts';
+import {globalFinanceSyncStatus} from './globalFinanceSync.ts';
 
 /** Shared authoritative, read-only Finance basis for Finance and Dashboard. */
 export async function readFinanceSummary(admin: SupabaseClient, period: ReturnType<typeof portalPeriod>) {
   const [baseRead,statusRead,periodRead]=await Promise.allSettled([
     admin.rpc('read_cost_finance_basis_v1',{p_from:period.from,p_to:period.to}),
-    admin.rpc('finance_sync_status_v1'),
+    admin.rpc('finance_sync_global_status_v1'),
     admin.rpc('finance_sync_period_v1',{p_from:period.from,p_to:period.to}),
   ]);
   if(baseRead.status!=='fulfilled')throw new Error('Cost basis unavailable');
   const {data,error}=baseRead.value;
-  const syncStatus=statusRead.status==='fulfilled'&&!statusRead.value.error?statusRead.value.data as Record<string,unknown>|null:null;
+  const rawStatus=statusRead.status==='fulfilled'&&!statusRead.value.error?statusRead.value.data as Record<string,unknown>|null:null;
+  const syncStatus=globalFinanceSyncStatus(rawStatus,process.env.FINANCE_RECONCILIATION_ENABLED==='true');
   const cash=periodRead.status==='fulfilled'&&!periodRead.value.error?periodRead.value.data as Record<string,unknown>|null:null;
   if (error || !data) throw new Error('Cost basis unavailable');
   const basis = data as NonNullable<Parameters<typeof summarizeLedger>[3]> & {

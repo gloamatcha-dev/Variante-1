@@ -1,0 +1,54 @@
+GLOA STRIPE ADMIN RELEASE - BLOCKED
+
+This report supersedes earlier release-readiness blockers only where verified below. Owner approval of the desktop design is accepted. No redesign is proposed. Earlier manifests remain historical review records.
+
+Git
+Branch: main
+Existing vetted local finance commit / unchanged HEAD: 5f9565e0e72c2c79f75380ca9708c98ad0aa6be5
+Cached origin/main: 6db7c37b693991617a392b26c5937114879a8f75
+One existing local commit ahead of cached remote. git ls-remote could not connect to GitHub:443. Current remote main is NOT verified. No fetch, reset, squash, staging, new commit, push or deployment performed. No resulting release SHA exists. Exact committed file list for this operation: empty.
+The proposed additional commit would have parent 5f9565e, retaining the vetted finance server commit. The cumulative release would therefore contain that existing commit plus one new Admin/monitoring commit. The manifest records all 70 existing baseline-delta files and all 56 proposed additional files, including this checklist and the manifest itself.
+
+Blocking gates
+1. Reach and verify current gloamatcha-dev/Variante-1 main. Do not assume the cached ref is current.
+2. Vercel goal10/variante-1 project and environment reads return 403. Recovery authorize_team_access for team_UfeL9v2951qoy0fdBu7nssLo returns 404 Team not found. No usable consent URL was returned. Restore scoped read access or obtain independently reviewable owner evidence.
+3. Consequently the actual deployed source, Production/Preview flag values, runtime preset/function budgets, Git deployment settings and any remote build/deploy hooks cannot be verified. Presence of environment names in older owner evidence does not prove current values or scopes. A local commit is conditional on all required gates, so it is withheld.
+
+Verified local release content
+Approved compact Stripe status with normal-flow native disclosure; owner-only manual UI and route; original role and fresh Auth authorization; both environment gates; disabled/running button behavior; approved blue sidebar and raspberry selected state; colored CTA states; unchanged minimum desktop width of 1024px.
+Vetted finance server/worker code already exists in parent 5f9565e. The candidate includes its complete tracked tree plus only the explicit manifest additions. Temporary outputs, credentials/env files, images/examples, local database artifacts, unrelated audits and protected backup are excluded. Existing unrelated work is not reset or discarded.
+
+Production read-only checks on yphubqploumfeabytotc
+All executed inside BEGIN READ ONLY / ROLLBACK; no financial/worker/sequence RPC invoked.
+084: 5 checks PASS, APPLIED CLEANLY.
+085: 7 aggregate checks plus all 19 expected function checks PASS, 085 INSTALLED DISABLED.
+Monitoring: 5 checks PASS, MONITORING INSTALLED.
+At 2026-10-26T20:05:28.035864Z: configs=0, enabled configs=0, automatic-period configs=0, jobs=0, sources=0, approvals=0. Monitoring version=1, configured=false, state=unknown, all attempt/scan/success/coverage timestamps null.
+Eight pre-existing unbridged ledger events and four refunds with unknown tax remain. These are not release authorization to correct history and are not proof of financial completeness.
+Database gates are disabled. Runtime environment flags remain UNVERIFIED because Vercel access failed. Even if flags were true, the current empty configuration makes the server return disabled without starting a job; this does not substitute for checking and keeping both runtime flags false.
+No migrations need applying. Installed 084, 085 and monitoring source hashes remain unchanged. No migration replay/history repair belongs to this application release.
+
+No activation / backfill on deployment
+The worker is called only through authorized request handlers, never at import/build time. Cron requires CRON_SECRET authentication, then FINANCE_RECONCILIATION_ENABLED exactly true. Manual requires fresh verified owner, same-origin request, FINANCE_RECONCILIATION_ENABLED and FINANCE_SYNC_MANUAL_ENABLED exactly true, monitoring version 1 and matching enabled owner configuration. An absent enabled database config returns disabled. Historical/closed-period import still requires explicit source approvals; manual exposes no approval/backfill override. Stripe reconciliation adapter is restricted GET-only with no payment-key fallback. No worker or live Stripe request was invoked in this review.
+Local package scripts and build plugin do not apply Supabase migrations or invoke reconciliation. Remote Vercel hooks are not verified.
+Cron source retains /api/cron/retry-order-notifications at 20 5 * * * and adds /api/cron/finance-reconciliation at 40 5 * * *. Both route function budgets are 60 seconds; worker budget is 45 seconds. Actual Vercel settings and generated Vercel runtime remain an external gate; the successful local Nitro preset is node-server.
+
+Validation
+438 focused regression/security tests PASS (23 test files, no failures/skips).
+TypeScript --noEmit PASS.
+Source ESLint PASS: zero errors, 14 existing warnings; generated output/examples excluded as in prior review.
+git diff --check PASS.
+Migration-security gate PASS: 83 original migrations unchanged, 3 reviewed later migration sources checked. Its wording future migrations is an offline baseline comparison, not a claim that Production lacks the already-installed migrations.
+Isolated candidate npm run build PASS. The ordinary workspace build failed on Nitro tracing EPERM/readlink C:\Users\hajze; the controlled tracked-HEAD-plus-allowlist snapshot builds successfully without app changes, env files or unrelated public assets. No successful Vercel-target build is claimed.
+112 unique cumulative release-related files scanned for credential patterns: no matches. 13 generated public JS files scanned for SUPABASE_SECRET_KEY, STRIPE_RECONCILIATION_READ_KEY and ADMIN_SESSION_SECRET identifiers: no matches. This is a bounded static check, not proof about inaccessible remote secrets.
+Reused unchanged-source Chromium evidence: 59 Stripe layout/restriction cases, 36 sidebar module/width cases, 15 button-state cases. UI sources did not change during this review. Four desktop widths are 1024/1280/1440/1680px. Evidence hashes are in the manifest; screenshots and receipts stay under ignored outputs.
+Local logs: outputs/final-stripe-release-tests.log, outputs/final-stripe-release-tsc.log, outputs/final-stripe-release-eslint.log, outputs/final-stripe-release-build.log, outputs/final-stripe-release-candidate-build.log. No prior database fixture is represented as a newly rerun local cluster.
+
+Exact next release steps - NOT executed
+1. Restore GitHub connectivity and scoped Vercel read access. Run git fetch origin main, verify origin URL, remote main SHA and its ancestry against the manifest. If main moved or an unsafe dependency/conflict appears, STOP and review before proceeding.
+2. Confirm goal10/variante-1 Git linkage, deployed commit/alias, build command/hooks, Vercel runtime, preserved notification cron, 60-second route budgets and absence of automatic SQL/backfill hooks. Confirm both FINANCE_RECONCILIATION_ENABLED=false and FINANCE_SYNC_MANUAL_ENABLED=false for Production and any preview target that will build the release. Leave database configuration empty/disabled. Never record secret values in Git.
+3. Recheck manifest hashes, immutable SQL, unchanged unrelated files and empty real Git index. Copy the release review documents into the isolated candidate if validating documentation too. All executable source is already build-checked. Stage only the exact additional-commit file list using explicit paths (never git add .). Review staged names, normalized blobs, diff and credential scan. Create ONE local commit with parent 5f9565e and message: feat(admin): release Stripe sync monitoring and approved desktop UI. Verify commit parent, exact file list, hashes and remaining untracked files. STOP for review with the resulting SHA. No existing finance commit rewrite/squash is required.
+4. Only after separate push/release approval: push that reviewed HEAD to a release branch, e.g. git push origin HEAD:refs/heads/release/stripe-admin-disabled, and open a PR into main. Confirm whether this triggers a Vercel preview before pushing. The PR contains the existing vetted finance commit plus the one new release commit. Do not push main or merge until disabled-environment deployment gates are confirmed.
+5. Only after separate Production release approval: merge the reviewed PR through the configured GitHub workflow, allowing the existing Vercel Git integration to build the exact reviewed source for goal10/variante-1. Verify resulting SHA/source, deployment, notification cron, flags off, no enabled config/jobs, Auth denial paths and UI. Do not also run an ad hoc CLI deployment. No SQL/migration, reconciliation activation or historical correction belongs to this release.
+
+STOP FOR REVIEW. No local release commit created because external gates remain blocked.

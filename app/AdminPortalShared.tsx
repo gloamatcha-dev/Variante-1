@@ -1,5 +1,7 @@
 "use client";
-import {AdminFinanceSyncStatus} from './AdminFinanceSyncStatus';
+import {AdminStripePeriodEvidence} from './AdminFinanceSyncStatus';
+import {useGlobalStripeSync} from './AdminGlobalStripeSync';
+import {guardGlobalFinanceSummary} from '../lib/globalFinanceSync.ts';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { date, label, money, text, type PortalRow } from '../lib/adminPortalModel.ts';
 
@@ -12,6 +14,8 @@ export async function portalRequest(endpoint:string,body:PortalRow,signal?:Abort
   return data;
 }
 export function usePortalRead(endpoint:string,body:PortalRow){
+  const sync=useGlobalStripeSync();
+  const syncVersion=JSON.stringify([sync?.status?.state,sync?.status?.last_success_at,sync?.status?.last_attempt_at,sync?.status?.unresolved]);
   const key=JSON.stringify(body);
   const [state,setState]=useState<{key:string;data:PortalRow|null;error:string}>({key:'',data:null,error:''});
   const [revision,setRevision]=useState(0);
@@ -22,7 +26,7 @@ export function usePortalRead(endpoint:string,body:PortalRow){
       if(!controller.signal.aborted)setState({key,data:null,error:error instanceof Error?error.message:'Laden fehlgeschlagen.'});
     });
     return()=>controller.abort();
-  },[endpoint,key,revision]);
+  },[endpoint,key,revision,syncVersion]);
   return {...(state.key===key?state:{data:null,error:''}),refresh};
 }
 export function ReadState({data,error,retry,children}:{data:PortalRow|null;error:string;retry:()=>void;children:ReactNode}){
@@ -38,9 +42,11 @@ export function Tabs({items,value,onChange}:{items:readonly string[];value:strin
 export function Period({value,onChange}:{value:PortalRow;onChange:(value:PortalRow)=>void}){
   return <div className="portal-period"><label>Zeitraum<select value={String(value.period)} onChange={e=>onChange({...value,period:e.target.value})}><option value="month">Aktueller Monat</option><option value="last_month">Letzter Monat</option><option value="year">Dieses Jahr</option><option value="custom">Eigener Zeitraum</option></select></label>{value.period==='custom' && <><label>Von<input type="date" value={String(value.from??'')} onChange={e=>onChange({...value,from:e.target.value})}/></label><label>Bis<input type="date" value={String(value.to??'')} onChange={e=>onChange({...value,to:e.target.value})}/></label></>}</div>;
 }
-export function MoneySummary({summary}:{summary:PortalRow|null}){
+export function MoneySummary({summary:storedSummary}:{summary:PortalRow|null}){
+  const sync=useGlobalStripeSync();
+  const summary=guardGlobalFinanceSummary(storedSummary,!sync||(!sync.error&&sync.status?.verified===true));
   if(!summary)return <p className="portal-state">Finanzübersicht unbekannt oder nicht zugänglich.</p>;
-  return <><AdminFinanceSyncStatus status={summary.stripeSync as PortalRow|undefined} loadDetails={()=>portalRequest('/api/admin/finance',{action:'sync_details'})}/><dl className="portal-metrics">{[['Einnahmen','incomeCents'],['Refunds','refundCents'],['Direkte Kosten, bekannt','directCostCents'],['Allgemeine Kosten','generalCostCents'],['Providergebühren, erfasst','providerFeeCents'],['Deckungsbeitrag','contributionMarginCents'],['Ergebnis','resultCents']].map(([name,key])=><div key={key}><dt>{name}{key==='resultCents'&&<Info>Ein Ergebnis wird nur bei nachweislich vollständigen Kosten angezeigt.</Info>}</dt><dd>{money(summary[key])}</dd></div>)}</dl><p className="portal-note">{text(summary.completeness)} Kundenseitig bezahlter Versand ist Einnahme, Carrier-Versand ist eine Ausgabe. Stripe-Auszahlungen sind keine Einnahmen.</p>{summary.contributionComplete!==true&&<><h3>DECKUNGSBEITRAG NOCH NICHT BERECHENBAR</h3><ul>{((summary.costBlockers??[]) as string[]).map(reason=><li key={reason}>{reason}</li>)}</ul></>}{summary.resultComplete!==true&&<><h3>ERGEBNIS NOCH NICHT BERECHENBAR</h3>{((summary.openGeneralMonths??[]) as string[]).length>0&&<><p>Allgemeine Kosten nicht bestätigt:</p><ul>{((summary.openGeneralMonths??[]) as string[]).map(month=><li key={month}>{new Intl.DateTimeFormat("de-DE",{month:"long",year:"numeric"}).format(new Date(month+"T12:00:00Z"))}</li>)}</ul></>}</>}</>;
+  return <><AdminStripePeriodEvidence status={summary.stripeSync as PortalRow|undefined}/><dl className="portal-metrics">{[['Einnahmen','incomeCents'],['Refunds','refundCents'],['Direkte Kosten, bekannt','directCostCents'],['Allgemeine Kosten','generalCostCents'],['Providergebühren, erfasst','providerFeeCents'],['Deckungsbeitrag','contributionMarginCents'],['Ergebnis','resultCents']].map(([name,key])=><div key={key}><dt>{name}{key==='resultCents'&&<Info>Ein Ergebnis wird nur bei nachweislich vollständigen Kosten angezeigt.</Info>}</dt><dd>{money(summary[key])}</dd></div>)}</dl><p className="portal-note">{text(summary.completeness)} Kundenseitig bezahlter Versand ist Einnahme, Carrier-Versand ist eine Ausgabe. Stripe-Auszahlungen sind keine Einnahmen.</p>{summary.contributionComplete!==true&&<><h3>DECKUNGSBEITRAG NOCH NICHT BERECHENBAR</h3><ul>{((summary.costBlockers??[]) as string[]).map(reason=><li key={reason}>{reason}</li>)}</ul></>}{summary.resultComplete!==true&&<><h3>ERGEBNIS NOCH NICHT BERECHENBAR</h3>{((summary.openGeneralMonths??[]) as string[]).length>0&&<><p>Allgemeine Kosten nicht bestätigt:</p><ul>{((summary.openGeneralMonths??[]) as string[]).map(month=><li key={month}>{new Intl.DateTimeFormat("de-DE",{month:"long",year:"numeric"}).format(new Date(month+"T12:00:00Z"))}</li>)}</ul></>}</>}</>;
 }
 export type PortalColumn={key:string;title:string;render?:(row:PortalRow)=>ReactNode};
 export function BusinessTable({rows,columns,onOpen,empty='Keine Einträge für diese Auswahl.'}:{rows:PortalRow[];columns:PortalColumn[];onOpen?:(row:PortalRow)=>void;empty?:string}){

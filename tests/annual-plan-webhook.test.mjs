@@ -834,8 +834,8 @@ test("32: a redelivered event converges instead of duplicating", () => {
 
 test("33: this phase stays inside its boundaries", () => {
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
-    // Reviewed 084/085 have independent exact-hash PostgreSQL/ACL gates; retain the historical annual boundary.
-    .filter(f => f.endsWith(".sql") && !["084_restrict_order_number_execute.sql", "085_automatic_finance_reconciliation.sql"].includes(f)).sort();
+    // Reviewed 084/085 and the global monitoring extension have independent exact-hash PostgreSQL/ACL gates; retain the historical annual boundary.
+    .filter(f => f.endsWith(".sql") && !["084_restrict_order_number_execute.sql", "085_automatic_finance_reconciliation.sql", "20261024192649_global_finance_sync_monitoring.sql"].includes(f)).sort();
   // 057 SIMPLIFIED THE LAUNCH DISCOUNT: the one-use claim architecture
   // 056 built is removed, because the code became reusable. Re-pinned
   // rather than deleted - what this guard protects is that nothing
@@ -1745,8 +1745,8 @@ test("61: 4B4.1's hardening is intact and this phase added no migration", () => 
 
   // No migration, and no new database call anywhere in this phase.
   const migrations = readdirSync(path.join(ROOT, "supabase/migrations"))
-    // Reviewed 084/085 have independent exact-hash PostgreSQL/ACL gates; retain the historical annual boundary.
-    .filter(f => f.endsWith(".sql") && !["084_restrict_order_number_execute.sql", "085_automatic_finance_reconciliation.sql"].includes(f)).sort();
+    // Reviewed 084/085 and the global monitoring extension have independent exact-hash PostgreSQL/ACL gates; retain the historical annual boundary.
+    .filter(f => f.endsWith(".sql") && !["084_restrict_order_number_execute.sql", "085_automatic_finance_reconciliation.sql", "20261024192649_global_finance_sync_monitoring.sql"].includes(f)).sort();
   assert.equal(migrations.length, 83);
   assert.deepEqual(migrations.filter(f => Number(f.slice(0, 3)) > 83), [], "a migration 072 or beyond appeared");
   // 001-062 are all applied to production and therefore immutable.

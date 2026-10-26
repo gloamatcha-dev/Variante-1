@@ -1,0 +1,344 @@
+{
+  "baseline": "5f9565e0e72c2c79f75380ca9708c98ad0aa6be5",
+  "deployedBaseline": "6db7c37b693991617a392b26c5937114879a8f75",
+  "scope": "Additional files on vetted baseline; no commit, push, deployment or SQL application authorized",
+  "files": [
+    {
+      "file": "app/AdminFinanceSyncStatus.tsx",
+      "sha256": "4a52c542c07f0125e2074c97594649af770ffd33c559d9c2b366c6ad69a1730b",
+      "kind": "application"
+    },
+    {
+      "file": "app/AdminGlobalStripeSync.tsx",
+      "sha256": "5c429a42a1d722a9e8694ff3f741ba2009ae968752ad333dac22f169e0c7c5d4",
+      "kind": "application"
+    },
+    {
+      "file": "app/AdminPortalFinance.tsx",
+      "sha256": "a7443cbb7c36a7f428a452c6ef554e1922ad62ae7fb6ec127843955bed867df6",
+      "kind": "application"
+    },
+    {
+      "file": "app/AdminPortalShared.tsx",
+      "sha256": "4dc288937cd41105d9acf552d2a516d1fa7db3b0eb734cc4855f41b6c4ef377c",
+      "kind": "application"
+    },
+    {
+      "file": "app/AdminPortalShell.tsx",
+      "sha256": "78476633e9d9affb5fa85964674f1a068e6cf91151b11d0d2c1b66378ba515c6",
+      "kind": "application"
+    },
+    {
+      "file": "app/admin-portal.css",
+      "sha256": "53934511d46cfc9880e17f36c911a52add87fb67139c4aa7cad4475fb2dd79e4",
+      "kind": "application"
+    },
+    {
+      "file": "app/api/admin/stripe-sync/route.ts",
+      "sha256": "62f64c0cc39f80681900a3453a0dde0a59b0cf66e244dbeb27306214951adcb8",
+      "kind": "application"
+    },
+    {
+      "file": "docs/GLOA_GLOBAL_STRIPE_MONITORING_PRODUCTION_EXECUTION.md",
+      "sha256": "554b6e5d0b8d98281ad8797d9d2a77bc3a69d6ff641d86e8db18e879e35c1e14",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "docs/GLOA_GLOBAL_STRIPE_MONITORING_PRODUCTION_READINESS.md",
+      "sha256": "cef47087c48ddc5b8d9aa429fccfd336a8cecdf3b5a0d47577d80f037a19f90d",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "docs/GLOA_GLOBAL_STRIPE_SYNC_REVIEW.md",
+      "sha256": "f53639a450fa1fa366a3a6f9819493fd2fe6bf67adb8826102a4bca58d9a0a41",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "docs/GLOA_MIGRATION_084_FINAL_PRODUCTION_PREFLIGHT.md",
+      "sha256": "134839eabbf437b02f6f3c80e3787c7f1404e35bef97e1f58bed562686352c5b",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "docs/GLOA_MIGRATION_084_PRODUCTION_EXECUTION.md",
+      "sha256": "a2af3424e1d1d4f65a13fb6c7e8a5f18e8b565fdb8c79192c7972ad12888d5c0",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "docs/GLOA_MIGRATION_085_GATE10_DEPLOYED_SOURCE_REVIEW.md",
+      "sha256": "548fa14c2b008b459efbf8b0f76bccc9b09c7a3473dde000122040fabcf0b12a",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "docs/GLOA_MIGRATION_085_POSTCHECK_REPAIR.md",
+      "sha256": "ceb4f4139b86e38c23920d5f5e30e54ea1326f0d5087b94702450a55f65ed240",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "docs/GLOA_MIGRATION_085_PRODUCTION_EXECUTION.md",
+      "sha256": "939c7d6a47a9b4b0daab2ef6462d14ff08c5ac7e31b51c3b31e28cf3100ed082",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "docs/GLOA_MIGRATION_085_PRODUCTION_READINESS.md",
+      "sha256": "a9683eb4ee945b4e70fcf90027a127e8b1908e40347ede60b5ee8c247444e86f",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "docs/GLOA_STRIPE_ADMIN_ENV_BROWSER_QA.md",
+      "sha256": "60a0ee087bd4e105b94b9860975103b4ab0a5d1ed1100291f2e2d214555bd7e3",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "docs/GLOA_STRIPE_ADMIN_RELEASE_READINESS.md",
+      "sha256": "e679a620379e994485bbcc7c68ab262326d51561d34b3840aef75d975f40e43d",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "lib/adminPortalFinanceRead.ts",
+      "sha256": "a8ee97e87bb0cd456c7fb63483679903ac0cf41ab14c661c526ffa5c8b5207e0",
+      "kind": "application"
+    },
+    {
+      "file": "lib/globalFinanceSync.ts",
+      "sha256": "852f71e6490db6e51a6f2b2cdfcc1f1ddf138227492bf81f9663d146be0543cf",
+      "kind": "application"
+    },
+    {
+      "file": "package.json",
+      "sha256": "4fde03b2f97717d67ceadef2733694b0aca0755ca9a57928dd838b4db91a6c75",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "scripts/migration-security-check.mjs",
+      "sha256": "4134abe179a9483bc424db08d92474fcb580390655dfa45d1dceacb11fc7f365",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "security/migrations/20261024192649_global_finance_sync_monitoring.sql.metadata.json",
+      "sha256": "b5c48379d35d78a0055852f272962fb8af59ae2e7bc086f62e2c0b3f3a85e62e",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "security/migrations/20261024192649_global_finance_sync_monitoring.sql.review.json",
+      "sha256": "cd575ea19e2098ea81a78495b8a591628b308bbbd067a56aa3260cad5be5da8f",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "security/postchecks/085_automatic_finance_reconciliation_postcheck.review.json",
+      "sha256": "3323a44c54a86568104c1805946b91cf614ea04a6b647d85e014572427ff6470",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "supabase/migrations/20261024192649_global_finance_sync_monitoring.sql",
+      "sha256": "04cb71d3e442b04184465d193738f612b66af756724f7ffde4ac5fdd3eb06363",
+      "kind": "installed-schema-source-and-read-only-checks"
+    },
+    {
+      "file": "supabase/postcheck/085_automatic_finance_reconciliation_postcheck.sql",
+      "sha256": "7bca178d90bfc4271f8801ea671c2de5cbd01bb167d6c53205bd590b5bb4281a",
+      "kind": "installed-schema-source-and-read-only-checks"
+    },
+    {
+      "file": "supabase/postcheck/global_finance_sync_monitoring_postcheck.sql",
+      "sha256": "d9740462cfcd632864840e16ab272c84f9c623241ebf279954ca0aa6049892f6",
+      "kind": "installed-schema-source-and-read-only-checks"
+    },
+    {
+      "file": "supabase/preflight/global_finance_sync_monitoring_preflight.sql",
+      "sha256": "aaaa79c61c79fbd944f59de6c63e1c4acaef862cde31e7fa8c0848db281171a5",
+      "kind": "installed-schema-source-and-read-only-checks"
+    },
+    {
+      "file": "tests/admin-identity.test.mjs",
+      "sha256": "aa07b82246b963d1d8b8a1cb1d4bf7668867cbf4c8cceccece22dc7c152cee66",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "tests/annual-plan-maintenance.test.mjs",
+      "sha256": "2aa7cc375b26ad37c63feacc59caf19250ec0e7fe207954d4080dbb2e224622d",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "tests/annual-plan-refund.test.mjs",
+      "sha256": "7a27d23a12294aa8d5d1e0befa482eed42c730ad4b308cc7c47dad3894d33508",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "tests/annual-plan-webhook.test.mjs",
+      "sha256": "4158f9dde6e2642a141e3be2e4d32d678e07e3eb69dafb9690edf519f2500ee9",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "tests/automatic-finance-sync.test.mjs",
+      "sha256": "9a311f272792c966aa6e191abd0ae79b820b587f0dbbda97ecdda64ce054b2f7",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "tests/block2-admin-portal.test.mjs",
+      "sha256": "0d3a09f078e12ed413c32bde6df085461129207204792a191cc0bd25adcb3546",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "tests/fixtures/global-finance-monitoring-proof.json",
+      "sha256": "429382ae70e777fb094870f95206a061fb152d9bbd900f79c1bee7ef47bdc077",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "tests/fixtures/global-stripe-integrated-release-proof.json",
+      "sha256": "b3d85bd62f4ce1e739997888e51957f094106c380846284c893b650f0835cc30",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "tests/fixtures/migration-085-postcheck-before.sql",
+      "sha256": "2593b3c3a1998cb1a1fd8f67955c48563c738b78288af5968093d872af34be3b",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "tests/fixtures/migration-085-postcheck-local-proof.json",
+      "sha256": "e6ea69a338ba3c2959692c5453e9652248a5a121e73a26221ced3aad665ef0f6",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "tests/global-stripe-auth-integration.test.mjs",
+      "sha256": "0de5dba28c2d73af96826f260510e6da9650f7741d1f826b2466db42d2673208",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "tests/migration-085-postcheck-review.test.mjs",
+      "sha256": "def8c33e8fc2ac99e766d2f68e5a342ca1837df86feca66bf2a882b41bebdc12",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "tests/runtime/finance-sync-database-local.mjs",
+      "sha256": "bab5f43899b2a704f8adeeaa270a4574a6649e3c7ef3db223543049d28e960a8",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "tests/runtime/global-finance-monitoring-local.mjs",
+      "sha256": "3bad4e2e264c98cd5cc27cef89ffc2308f14599d3bfc158f79db93bf93daef6d",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "tests/runtime/migration-085-postcheck-local.mjs",
+      "sha256": "7120b9250c89f15ad0150d5a4ec7a0d60a043650e39e941983b029e2de0eff8e",
+      "kind": "validation-and-review"
+    },
+    {
+      "file": "vite.config.ts",
+      "sha256": "fdc2112bf39448f645fa6432c7379ddce8e84c46d62b461024a11c144bb43204",
+      "kind": "validation-and-review"
+    }
+  ],
+  "manifestFile": "docs/GLOA_STRIPE_ADMIN_RELEASE_FILES.json",
+  "excludedUntracked": [
+    ".claude/settings.local.json",
+    "docs/GLOA_FINANCE_RECONCILIATION_REVIEW.md",
+    "docs/GLOA_MIGRATION_084_SOURCE_RELEASE_REVIEW.md",
+    "docs/GLOA_STRIPE_LIVE_DISCREPANCY_FINAL_REPORT.md",
+    "docs/GLOA_STRIPE_LIVE_RECONCILIATION_VERIFIED.md",
+    "docs/GLOA_SUPABASE_OCT30_READONLY_AUDIT.md",
+    "docs/GLOA_SUPABASE_SECURITY_BOOTSTRAP_VALIDATION.md",
+    "docs/GLOA_SUPABASE_SECURITY_LOCAL_VALIDATION.md",
+    "examples/d1/app/api/notes/route.ts",
+    "examples/d1/db/schema.ts",
+    "public/Hinweise.txt",
+    "public/gloa-logo-schwarz-1200.png",
+    "public/gloa-logo-schwarz-1200.webp",
+    "public/gloa-logo-schwarz-2400.png",
+    "public/gloa-logo-schwarz-2400.webp",
+    "public/gloa-logo-schwarz-600.png",
+    "public/gloa-logo-schwarz-600.webp",
+    "public/img/ChatGPT Image 13. Aug. 2026, 01_24_50 (1).png",
+    "public/img/ChatGPT Image 13. Aug. 2026, 01_24_50 (2).png",
+    "public/img/ChatGPT Image 13. Aug. 2026, 01_24_51 (3).png",
+    "public/img/ChatGPT Image 13. Aug. 2026, 01_24_51 (4).png",
+    "tests/helpers/stripeAdminPreview.mjs",
+    "tests/preview/stripe-admin/index.html",
+    "tests/preview/stripe-admin/main.jsx",
+    "tests/runtime/stripe-admin-preview.mjs",
+    "tests/runtime/supabase-security-local.mjs",
+    "tests/stripe-admin-preview.test.mjs"
+  ],
+  "baselineChangesSinceDeployed": [
+    "app/AdminFinanceSyncStatus.tsx",
+    "app/AdminPortalShared.tsx",
+    "app/api/admin/finance/route.ts",
+    "app/api/cron/finance-reconciliation/route.ts",
+    "docs/GLOA_AUTOMATIC_FINANCE_FINAL_RELEASE_GATE.md",
+    "docs/GLOA_AUTOMATIC_FINANCE_SYNC_RELEASE_REVIEW.md",
+    "docs/GLOA_FINANCE_RECONCILIATION_PATCH_PROPOSAL.md",
+    "docs/GLOA_MIGRATION_084_FINAL_GATE.md",
+    "docs/GLOA_PRODUCTION_ACTIVATION_READINESS.md",
+    "docs/GLOA_STRIPE_READ_PERMISSION_CORRECTION.md",
+    "docs/GLOA_SUPABASE_SECURITY_DATABASE_VERIFIED.md",
+    "docs/GLOA_SUPABASE_SECURITY_PATCH_PROPOSAL.md",
+    "docs/finance-reconciliation/controlled-release-files.json",
+    "docs/finance-reconciliation/environment-release-check.json",
+    "docs/finance-reconciliation/historical-2026-09-10.json",
+    "docs/finance-reconciliation/production-activation-readiness.json",
+    "docs/finance-reconciliation/production-dependencies-readonly.json",
+    "docs/finance-reconciliation/production-release-readonly.json",
+    "lib/adminPortalFinance.ts",
+    "lib/adminPortalFinanceRead.ts",
+    "lib/automaticFinanceSync.ts",
+    "lib/financeEvidenceSynchronization.ts",
+    "lib/financeReconciliation.ts",
+    "lib/financeReconciliationEvidence.ts",
+    "lib/financeReconciliationWorker.ts",
+    "lib/financeSourceCoverage.ts",
+    "lib/financeSyncMonitoring.ts",
+    "lib/financeSyncServer.ts",
+    "lib/providerFeeCapture.ts",
+    "lib/stripeReconciliationClient.ts",
+    "lib/stripeReconciliationRead.ts",
+    "scripts/finance-reconciliation-plan.mjs",
+    "scripts/migration-security-check.mjs",
+    "security/migrations/084_restrict_order_number_execute.sql.metadata.json",
+    "security/migrations/084_restrict_order_number_execute.sql.review.json",
+    "security/migrations/085_automatic_finance_reconciliation.sql.metadata.json",
+    "security/migrations/085_automatic_finance_reconciliation.sql.review.json",
+    "supabase/migrations/084_restrict_order_number_execute.sql",
+    "supabase/migrations/085_automatic_finance_reconciliation.sql",
+    "supabase/postcheck/084_restrict_order_number_execute_postcheck.sql",
+    "supabase/postcheck/085_automatic_finance_reconciliation_postcheck.sql",
+    "supabase/preflight/084_restrict_order_number_execute_preflight.sql",
+    "supabase/preflight/085_automatic_finance_reconciliation_preflight.sql",
+    "tests/annual-plan-checkout.test.mjs",
+    "tests/annual-plan-maintenance.test.mjs",
+    "tests/annual-plan-refund.test.mjs",
+    "tests/annual-plan-webhook.test.mjs",
+    "tests/automatic-finance-sync.test.mjs",
+    "tests/block2-admin-portal.test.mjs",
+    "tests/direct-cost-coverage.test.mjs",
+    "tests/finance-evidence-synchronization.test.mjs",
+    "tests/finance-reconciliation-patch.test.mjs",
+    "tests/finance-reconciliation-review.test.mjs",
+    "tests/finance-sequential-release.test.mjs",
+    "tests/fixtures/finance-reconciliation-local-proof.json",
+    "tests/fixtures/finance-sequential-release-proof.json",
+    "tests/fixtures/finance-sync-database-proof.json",
+    "tests/fixtures/migration-084-gates-local-proof.json",
+    "tests/fixtures/order-number-security-local-proof.json",
+    "tests/fixtures/supabase-security-audit.json",
+    "tests/helpers/financeSyncDatabase.mjs",
+    "tests/helpers/orderNumberSecurityDatabase.mjs",
+    "tests/migration-security.test.mjs",
+    "tests/provider-fee-evidence.test.mjs",
+    "tests/runtime/finance-reconciliation-local.mjs",
+    "tests/runtime/finance-sync-database-local.mjs",
+    "tests/runtime/migration-084-gates-local.mjs",
+    "tests/supabase-function-permissions.test.mjs",
+    "vercel.json",
+    "vite.config.ts"
+  ],
+  "forbiddenReleaseInputs": [
+    "outputs/**",
+    ".env* (except existing .env.example)",
+    ".vercel/**",
+    ".claude/**",
+    "examples/**",
+    "SQL dumps",
+    "protected backup",
+    "unrelated public image assets"
+  ]
+}
