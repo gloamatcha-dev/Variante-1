@@ -5,6 +5,8 @@ import { readPortalPages } from './adminPortalRead.ts';
 import { financeSourceCoverage } from './financeSourceCoverage.ts';
 import {financeSyncCoverage} from './financeSyncMonitoring.ts';
 import {globalFinanceSyncStatus} from './globalFinanceSync.ts';
+import {financeRefundEvidence} from './financeRefundEvidence.ts';
+import type {PortalRow} from './adminPortalModel.ts';
 
 /** Shared authoritative, read-only Finance basis for Finance and Dashboard. */
 export async function readFinanceSummary(admin: SupabaseClient, period: ReturnType<typeof portalPeriod>) {
@@ -27,17 +29,21 @@ export async function readFinanceSummary(admin: SupabaseClient, period: ReturnTy
   // Independent source reads catch legacy payments omitted from financial_events.
   // Failure must not turn an empty ledger into a certified zero month.
   try {
-    const [orders, plans, attempts, ledger] = await Promise.all([
-      readPortalPages(admin, 'orders', q => q.in('payment_status', ['paid','partially_refunded','refunded']), 'id', 'id,checkout_attempt_id,placed_at,total_gross_cents,refunded_total_cents,refund_updated_at'),
-      readPortalPages(admin, 'annual_plans', q => q.in('payment_status', ['paid','partially_refunded','refunded']), 'id', 'id,purchased_at,total_gross_cents,refunded_total_cents,refund_updated_at'),
+    const [orders, plans, attempts, ledger, sourceEvidence] = await Promise.all([
+      readPortalPages(admin, 'orders', q => q.in('payment_status', ['paid','partially_refunded','refunded']), 'id', 'id,checkout_attempt_id,placed_at,payment_status,total_gross_cents,refunded_total_cents,refund_updated_at'),
+      readPortalPages(admin, 'annual_plans', q => q.in('payment_status', ['paid','partially_refunded','refunded']), 'id', 'id,purchased_at,payment_status,total_gross_cents,refunded_total_cents,refund_updated_at'),
       readPortalPages(admin, 'checkout_attempts', q => q.not('annual_plan_id','is',null), 'id', 'id,annual_plan_id'),
       readPortalPages(admin, 'financial_events', q => q.in('kind',['order_payment','annual_prepayment','refund']), 'id', 'id,kind,order_id,annual_plan_id,gross_cents,occurred_on'),
+      readPortalPages(admin, 'finance_sync_sources', q => q, 'source_key','account_id,source_key,payload,context'),
     ]);
     const deliveries = new Set(attempts.map(a => a.id));
     const reconciledIds=new Set(Array.isArray(cash?.bridges)?cash.bridges.map((r:Record<string,unknown>)=>r.event_id):[]);
+    const refundFacts=financeRefundEvidence(sourceEvidence);
+    const withRefundFacts=(row:PortalRow,kind:string)=>{const fact=refundFacts.get(kind+':'+row.id);return {...row,source_kind:kind,
+      ...(fact?{verified_refund_total_cents:fact.total,verified_refund_updated_at:fact.at}:{})};};
     basis.sourceCoverage = financeSourceCoverage([
-      ...orders.filter(o => !deliveries.has(o.checkout_attempt_id)).map(o => ({...o,source_kind:'order'})),
-      ...plans.map(p => ({...p,source_kind:'annual'})),
+      ...orders.filter(o => !deliveries.has(o.checkout_attempt_id)).map(o => withRefundFacts(o,'order')),
+      ...plans.map(p => withRefundFacts(p,'annual')),
     ], ledger.map(e=>({...e,reconciled_source:reconciledIds.has(e.id)})), period);
   } catch {
     basis.sourceCoverage = {status:'unavailable',complete:false,missingPayments:0,missingRefunds:0,conflicts:0};
