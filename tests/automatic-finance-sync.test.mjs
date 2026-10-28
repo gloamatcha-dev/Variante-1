@@ -25,6 +25,17 @@ test('global outage or discrepancy invalidates an older complete finance result 
  assert.equal(guardGlobalFinanceSummary({...cached,resultComplete:false,resultCents:null},true).resultComplete,false);
 });
 
+test('valid early Hobby invocation in the scheduled UTC hour is not falsely overdue across Berlin DST',()=>{
+ for(const date of ['2026-10-24','2026-10-25','2026-10-28'])for(const time of ['05:00:01','05:10:00','05:39:59','05:59:59']){
+  const stamp=date+'T'+time+'Z';const raw={configured:true,monitoring_version:1,state:'complete',last_success_at:stamp,last_scan_at:stamp,verified_to:stamp,missing_payments:0,missing_refunds:0,missing_fees:0,unresolved:0,persistent_failures:0,unbridged_events:0};
+  const result=globalFinanceSyncStatus(raw,true,Date.parse(date+'T12:00:00Z'));assert.equal(result.overdue,false);assert.equal(result.verified,true);assert.equal(result.schedule,'40 5 * * *');
+ }
+});
+test('a scan before the scheduled hour or on the previous day cannot satisfy the daily window',()=>{
+ const raw={configured:true,monitoring_version:1,state:'complete',last_success_at:'2026-10-28T04:59:59Z',verified_to:'2026-10-28T04:59:59Z',missing_payments:0,missing_refunds:0,missing_fees:0,unresolved:0,persistent_failures:0,unbridged_events:0};
+ for(const completed of ['2026-10-28T04:59:59Z','2026-10-27T23:59:59Z',null]){const result=globalFinanceSyncStatus({...raw,last_scan_at:completed},true,Date.parse('2026-10-28T12:00:00Z'));assert.equal(result.overdue,true);assert.equal(result.verified,false);}
+});
+
 function syncRouteHarness(){
  const state={role:'owner',authorized:true,verified:true,ownerId:'owner',identityId:'owner',calls:0,statusCalls:0,runState:'verified',schema:true};
  const env={FINANCE_RECONCILIATION_ENABLED:'true',FINANCE_SYNC_MANUAL_ENABLED:'true'};

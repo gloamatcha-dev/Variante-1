@@ -17,9 +17,11 @@ export function globalFinanceSyncStatus(raw:Row|null,enabled:boolean,now=Date.no
  const coverage=typeof raw?.verified_to==='string'?Date.parse(raw.verified_to):NaN;
  const stale=!Number.isFinite(last)||last>now||now-last>36*3600000||!Number.isFinite(coverage)||coverage>now+300000||now-coverage>36*3600000;
  const scheduled=new Date(now);scheduled.setUTCHours(5,40,0,0);if(scheduled.getTime()>now)scheduled.setUTCDate(scheduled.getUTCDate()-1);
+ const earliestScheduled=new Date(scheduled);earliestScheduled.setUTCMinutes(0);
  const completed=typeof raw?.last_scan_at==='string'?Date.parse(raw.last_scan_at):NaN;
  // Allow scheduler imprecision plus the worker's execution budget.
- const overdue=now-scheduled.getTime()>2*3600000&&(!Number.isFinite(completed)||completed<scheduled.getTime());
+ // Hobby may invoke anywhere in the configured hour, including before minute 40.
+ const overdue=now-scheduled.getTime()>2*3600000&&(!Number.isFinite(completed)||completed<earliestScheduled.getTime());
  const active=enabled&&raw?.configured===true&&raw?.monitoring_version===1;
  const checksClear=['missing_payments','missing_refunds','missing_fees','unresolved','persistent_failures','unbridged_events'].every(k=>raw?.[k]===0);
  const verified=active&&raw?.state==='complete'&&!stale&&!overdue&&checksClear;
