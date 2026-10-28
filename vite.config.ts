@@ -13,6 +13,7 @@ export default defineConfig({
       vercel: {
         functionRules: {
           "/api/cron/finance-reconciliation": { maxDuration: 60 },
+          "/api/cron/finance-reconciliation-verify": { maxDuration: 60 },
           "/api/admin/stripe-sync": { maxDuration: 60 },
         },
       },

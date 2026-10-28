@@ -10,10 +10,11 @@ const stamp=(v:unknown)=>new Date(Number(v)*1000).toISOString();
 
 /** Durable, independent financial reconciliation. Stripe is exclusively READ.
  * Every effect is delegated to the lease-fenced atomic database RPC in 085. */
-export async function runAutomaticFinanceSync(deps:{rpc:FinanceSyncRpc;read:StripeRead;config:FinanceSyncConfig;now?:()=>number;budgetMs?:number}):Promise<{state:string;caughtUp?:boolean}> {
+export async function runAutomaticFinanceSync(deps:{rpc:FinanceSyncRpc;read:StripeRead;config:FinanceSyncConfig;now?:()=>number;budgetMs?:number;discovery?:typeof readStripeReconciliation;verification?:boolean}):Promise<{state:string;caughtUp?:boolean}> {
  const now=deps.now??Date.now,deadline=now()+(deps.budgetMs??45000);
  const job=await deps.rpc('finance_sync_claim_v1',{p_account:deps.config.account_id}) as Row;
  if(job.status==='busy')return {state:'busy'};
+ if(job.status==='already_completed')return {state:'already_completed'};
  const cp=(job.checkpoint??{}) as Row;
  const auth={p_job:job.id,p_token:job.lease_token};
  const checkpoint=async(state='running',error:string|null=null)=>deps.rpc('finance_sync_checkpoint_v1',{...auth,p_checkpoint:cp,p_state:state,p_error:error});
@@ -23,7 +24,7 @@ export async function runAutomaticFinanceSync(deps:{rpc:FinanceSyncRpc;read:Stri
  try {
   cp.resources??={};
   const resources=cp.resources as Record<string,StripeReadCheckpoint>;
-  const provider=await readStripeReconciliation(get,Math.floor(Date.parse(String(job.scan_from))/1000),Math.floor(Date.parse(String(job.scan_to))/1000),
+  const provider=await (deps.discovery??readStripeReconciliation)(get,Math.floor(Date.parse(String(job.scan_from))/1000),Math.floor(Date.parse(String(job.scan_to))/1000),
    {accountId:deps.config.account_id,paymentIntentId:deps.config.known_payment_intent,amountCents:deps.config.known_amount_cents},
    {load:name=>resources[name],save:async(name,state)=>{resources[name]=state;await checkpoint();}});
   if(!provider.complete)throw Error('stripe_read_incomplete');
@@ -60,6 +61,7 @@ export async function runAutomaticFinanceSync(deps:{rpc:FinanceSyncRpc;read:Stri
   if(!Number.isSafeInteger(Number(cp.paymentIndex))||Number(cp.paymentIndex)<0||Number(cp.paymentIndex)>ids.length)throw Error('checkpoint_invalid');
   const processReceipt=async(receipt:Receipt & Row)=>{
    gate();
+   if(deps.verification){const result=await deps.rpc('finance_sync_verify_receipt_v2',{...auth,p_receipt:receipt}) as Row;return result.result;}
    const key=await deps.rpc('finance_sync_stage_v1',{...auth,p_receipt:receipt});
    try {
     const result=await deps.rpc('finance_sync_record_v1',{...auth,p_key:key}) as Row;
@@ -111,13 +113,16 @@ export async function runAutomaticFinanceSync(deps:{rpc:FinanceSyncRpc;read:Stri
     const total=refunds.filter(r=>r.status==='succeeded').reduce((n,r)=>n+Number(r.amount),0);
     let review=false,refundKey:string|null=null;
     for(const receipt of normalized.input.receipts){
+     // A mutable charge may now include a refund newer than the frozen audit
+     // cutoff. It belongs to the next cycle, not a missing historical booking.
+     if(deps.verification&&Date.parse(receipt.occurredAt)>=Date.parse(String(job.cutoff??job.scan_to)))continue;
      const enriched={...receipt,invoiceId:source.invoiceId??undefined,invoicePaymentId:relations[0]?.invoicePaymentId,
       verifiedPaymentCents:source.amountCents,verifiedRefundTotalCents:total,verifiedRefundCount:refunds.length,
       verifiedFeeCents:Number(transactions[0].fee),verifiedFeeAt:stamp(transactions[0].created)};
      if(await processReceipt(enriched)==='review_required')review=true;
      if(receipt.kind==='refund')refundKey=`${receipt.accountId}:live:refund:${receipt.sourceId}`;
     }
-    if(!review&&refundKey){const state=await deps.rpc('finance_sync_source_read_v1',{p_account:deps.config.account_id,p_key:refundKey}) as Row|null;if(state?.parentVerified!==true)throw Error('parent_state_not_confirmed');}
+    if(!deps.verification&&!review&&refundKey){const state=await deps.rpc('finance_sync_source_read_v1',{p_account:deps.config.account_id,p_key:refundKey}) as Row|null;if(state?.parentVerified!==true)throw Error('parent_state_not_confirmed');}
     await issue(id,null);
    }catch(error){if(error instanceof Error&&error.message==='finance_sync_yield')throw error;await issue(id,error instanceof Error&&/^[a-z_]{1,100}$/.test(error.message)?error.message:'payment_reconciliation_failed');}
    cp.paymentIndex=i+1;await checkpoint();
@@ -139,7 +144,7 @@ export async function runAutomaticFinanceSync(deps:{rpc:FinanceSyncRpc;read:Stri
   for(const t of provider.objects.balance_transactions)if(!['charge','payment','refund','payment_refund','stripe_fee','payout','payout_failure'].includes(String(t.type))
     ||(['charge','payment'].includes(String(t.type))&&t.reporting_category!=='charge')||(['refund','payment_refund'].includes(String(t.type))&&t.reporting_category!=='refund'))await issue(String(t.id),'unsupported_balance_movement');
   const result=await deps.rpc('finance_sync_finish_v1',{...auth,p_checkpoint:cp}) as Row;
-  return {state:String(result.state),caughtUp:Date.parse(String(job.scan_to))>=now()-60000};
+  return {state:String(result.state),caughtUp:deps.verification?result.caughtUp===true:Date.parse(String(job.scan_to))>=now()-60000};
  } catch(error) {
   const yielded=error instanceof Error&&error.message==='finance_sync_yield';
   await checkpoint('retry',yielded?null:'sync_failed');

@@ -68,7 +68,8 @@ export function normalizeFinanceEvidence(provider:Provider,sources:LocalPaymentS
   for(const event of ledger) {
    if(typeof event.id!=='string'||!event.id)throw Error('legacy_event_identity_missing');
    const kind=event.kind==='order_payment'||event.kind==='annual_prepayment'?'payment':event.kind==='refund'?'refund':event.kind==='payment_fee'?'payment_fee':null;
-   const candidates=receipts.filter(r=>r.kind===kind&&r.localSubjectId===event[r.localSubjectKind==='annual'?'annual_plan_id':'order_id']);
+   let candidates=receipts.filter(r=>r.kind===kind&&r.localSubjectId===event[r.localSubjectKind==='annual'?'annual_plan_id':'order_id']);
+   if(candidates.length>1&&typeof event.external_reference==='string')candidates=candidates.filter(r=>event.external_reference===r.sourceId);
    if(candidates.length!==1)throw Error('legacy_source_bridge_ambiguous');
    const r=candidates[0],expectedDate=day(r.occurredAt);
    if(event.gross_cents!==r.amountCents||event.occurred_on!==expectedDate

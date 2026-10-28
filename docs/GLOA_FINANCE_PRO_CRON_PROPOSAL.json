@@ -1,0 +1,16 @@
+{
+  "requires": "Vercel Pro or separately approved external scheduler; NOT the active vercel.json",
+  "crons": [
+    {"path":"/api/cron/retry-order-notifications","schedule":"20 5 * * *"},
+    {"path":"/api/cron/finance-reconciliation","schedule":"*/15 * * * *"},
+    {"path":"/api/cron/finance-reconciliation-verify","schedule":"40 5 * * *"}
+  ],
+  "watchdogs": [
+    {"variable":"FINANCE_HEALTHCHECK_SCAN_URL","schedule":"*/15 * * * *","timezone":"UTC","graceSeconds":300},
+    {"variable":"FINANCE_HEALTHCHECK_RECONCILED_URL","schedule":"*/15 * * * *","timezone":"UTC","graceSeconds":300},
+    {"variable":"FINANCE_HEALTHCHECK_DAILY_SCAN_URL","schedule":"40 5 * * *","timezone":"UTC","graceSeconds":7200},
+    {"variable":"FINANCE_HEALTHCHECK_DAILY_RECONCILED_URL","schedule":"40 5 * * *","timezone":"UTC","graceSeconds":7200}
+  ],
+  "initialState":"PAUSED_IGNORE_PINGS",
+  "featureGate":"FINANCE_SCAN_MODES_ENABLED=true only after forward migration and explicit approval"
+}

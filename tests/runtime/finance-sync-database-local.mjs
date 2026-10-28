@@ -3,12 +3,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { spawnSync,spawn } from 'node:child_process';
 
 import { verifyFinanceSyncDatabase } from '../helpers/financeSyncDatabase.mjs';
 import { verifyOrderNumberPatch } from '../helpers/orderNumberSecurityDatabase.mjs';
 import { checkRepository } from '../../scripts/migration-security-check.mjs';
 import {runAutomaticFinanceSync} from '../../lib/automaticFinanceSync.ts';
+import {verifyFinanceScanModesDatabase} from '../helpers/financeScanModesDatabase.mjs';
 
 const root = process.cwd();
 const sequential = process.argv.includes('--sequential');
@@ -51,7 +52,21 @@ function write(sql, db = database) { verifyTarget(db); return query(sql, db); }
 try {
   fs.writeFileSync(path.join(directory, 'initdb.log'), requireOK(run('initdb', ['-D', data, '-U', 'postgres', '--auth-local=trust', '--auth-host=trust', '--encoding=UTF8', '--no-locale'])));
   // A detached Windows postgres inherits piped handles; do not wait for their EOF.
-  requireOK(spawnSync(path.join(bin, 'pg_ctl.exe'), ['-D', data, '-l', path.join(directory, 'postgres.log'), '-o', `-h 127.0.0.1 -p ${port}`, '-w', 'start'], { env, windowsHide: true, stdio: 'ignore', timeout: 30000 }));
+  const launch=spawnSync(path.join(bin, 'pg_ctl.exe'), ['-D', data, '-l', path.join(directory, 'postgres.log'), '-o', `-h 127.0.0.1 -p ${port}`, '-w', 'start'], { env, windowsHide: true, stdio: 'ignore', timeout: 30000 });
+  if(launch.status!==0){
+    // Some Windows sandboxes deny pg_ctl's restricted-token child launcher.
+    // Start the exact new local cluster directly; verifyTarget below still pins it.
+    const fd=fs.openSync(path.join(directory,'postgres-direct.log'),'a');
+    const child=spawn(path.join(bin,'postgres.exe'),['-D',data,'-h','127.0.0.1','-p',String(port)],{env,windowsHide:true,stdio:['ignore',fd,fd]});
+    let error;child.on('error',e=>{error=e;});
+    for(let attempt=0;attempt<40;attempt++){
+      await new Promise(r=>setTimeout(r,250));
+      if(error)throw error;
+      if(query('select 1','postgres').status===0)break;
+      if(child.exitCode!==null)throw Error(fs.readFileSync(path.join(directory,'postgres-direct.log'),'utf8'));
+    }
+    fs.closeSync(fd);
+  }
   started = true;
   result.initialTarget = verifyTarget('postgres');
   console.log('Verified brand-new cluster:', JSON.stringify(result.initialTarget));
@@ -189,6 +204,7 @@ try {
       if(ledgerBefore!==ledgerAfter)throw Error('Outage/yield changed financial ledger');
       result.integratedWorker={failed,yielded,ledgerUnchanged:true,failureDurable:true};
     }
+    if(process.argv.includes('--scan-modes'))result.scanModes=verifyFinanceScanModesDatabase({query,write,requireOK,directory});
     if(createHash('sha256').update(fs.readFileSync('supabase/migrations/085_automatic_finance_reconciliation.sql')).digest('hex')!==migrationSha256)throw Error('Migration changed during validation');
     console.log(sequential?'001-083 -> 084 -> 085 sequential replay and all regressions passed (LOCAL ONLY).':'001-083 + 085 replayed; finance database regressions passed; 084 NEVER executed.');
   }

@@ -44,7 +44,8 @@ function serverHarness({enabled=true,rejectMail=false,throwMail=false,missingMai
  const calls=[],sent=[];const e=enabled?{FINANCE_RECONCILIATION_ENABLED:'true',STRIPE_RECONCILIATION_READ_KEY:'rk_live_synthetic',FINANCE_ALERT_EMAIL:'owner@example.invalid',FINANCE_ALERT_FROM:'GLOA <alerts@example.invalid>',RESEND_API_KEY:'synthetic'}:{};
  const rpc=async(name,args)=>{calls.push({name,args});if(name==='finance_sync_alert_v1')return args.p_id?{}:{id:'synthetic-alert',lease_token:'synthetic-lease'};if(name==='finance_sync_global_status_v1'&&failStatus)throw Error('synthetic status outage');if(name==='finance_sync_status_v1')return {unresolved:1};return {};};
  const admin={rpc:async(name,args)=>({data:await rpc(name,args)}),from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:{account_id:'synthetic'}})})})})};
- const code=ts.transpileModule(fs.readFileSync('lib/financeSyncServer.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,m={exports:{}};
+ const server=fs.readFileSync('lib/financeSyncServer.ts','utf8').replace(/^import.*deliverFinanceSyncAlerts.*$/m,'');
+ const code=ts.transpileModule(server+'\n'+fs.readFileSync('lib/financeSyncAlerts.server.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,m={exports:{}};
  vm.runInNewContext(code,{module:m,exports:m.exports,Date,Error,process:{env:e},require:name=>{
  if(name.includes('supabaseAdmin'))return {getSupabaseAdmin:()=>{calls.push({name:'database'});return admin;}};
  if(name.includes('stripeReconciliationClient'))return {createStripeReconciliationRead:()=>{}};

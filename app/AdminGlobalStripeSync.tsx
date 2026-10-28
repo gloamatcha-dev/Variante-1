@@ -29,6 +29,7 @@ export function AdminStripeSyncProvider({children}:{children:ReactNode}) {
  }
  const labels:Record<string,string>={running:'Abgleich läuft',retry:'Wiederholung ausstehend',attention:'Prüfung oder Freigabe erforderlich',complete:'Letzter Abgleich abgeschlossen',unknown:'Abgleich unbekannt',disabled:'Nicht aktiviert – Freigabe erforderlich'};
  const progress=status?.progress as PortalRow|undefined;
+ const modes=status?.scan_modes as PortalRow|undefined;
  const warning=!!error||status?.stale===true||status?.overdue===true||['retry','attention','disabled'].includes(String(status?.state));
  const header=<section className={`portal-global-sync ${warning?'has-warning':''}`} aria-label="Globaler Stripe-Finanzabgleich">
   <div aria-live="polite" aria-atomic="true"><strong>Stripe-Finanzabgleich · {error?'Status nicht aktuell bestätigt':labels[String(status?.state)]??'Status wird geladen'}</strong>
@@ -37,7 +38,8 @@ export function AdminStripeSyncProvider({children}:{children:ReactNode}) {
   <details className="portal-sync-details"><summary>Technische Details zum Stripe-Abgleich</summary>
    <p>Nur Stripe-Finanzdaten; Lager und andere Module werden hier nicht mit Stripe synchronisiert.</p>
    <dl><div><dt>Letzter Versuch</dt><dd>{berlinSyncTime(status?.last_attempt_at)}</dd></div><div><dt>Letzter abgeschlossener Scan</dt><dd>{berlinSyncTime(status?.last_scan_at)}</dd></div><div><dt>Stripe-Abdeckung geprüft bis</dt><dd>{berlinSyncTime(status?.verified_to)}</dd></div></dl>
-   <p>Täglich 05:40 UTC · {String(status?.schedule??'40 5 * * *')} · Europe/Berlin. Hobby: täglicher Lauf, Ausführungszeit nicht garantiert.</p>
+   {modes?.version===2?<><p>Inkrementell alle 15 Minuten (UTC); tägliche Vollprüfung separat um 05:40 UTC. Ausführungszeiten nicht garantiert.</p>
+    <dl><div><dt>Tägliche Vollprüfung abgeschlossen</dt><dd>{berlinSyncTime(modes.daily_last_scan)}</dd></div><div><dt>Tägliche Vollprüfung bestätigt</dt><dd>{status?.daily_verified===true?berlinSyncTime(modes.daily_last_verified):'nicht aktuell bestätigt'}</dd></div><div><dt>Vollständig geprüfter Cutoff</dt><dd>{berlinSyncTime(modes.daily_cutoff)}</dd></div><div><dt>Offene Vollprüfungs-Abweichungen</dt><dd>{typeof modes.daily_unresolved==='number'?String(modes.daily_unresolved):'unbekannt'}</dd></div></dl></>:<p>Täglich 05:40 UTC · {String(status?.schedule??'40 5 * * *')} · Europe/Berlin. Hobby: täglicher Lauf, Ausführungszeit nicht garantiert.</p>}
    {status?.overdue===true&&<p>Geplanter Abgleich nicht rechtzeitig abgeschlossen.</p>}
    {status?.stale===true&&<p>Kein frischer vollständig erfolgreicher Abgleich bestätigt.</p>}
    {typeof status?.last_failure_at==='string'&&<p>Letzter Fehler: {berlinSyncTime(status.last_failure_at)} · Details in Finanzen.</p>}

@@ -1,7 +1,7 @@
 import {getSupabaseAdmin} from './supabaseAdmin';
 import {createStripeReconciliationRead} from './stripeReconciliationClient.ts';
 import {runAutomaticFinanceSync,type FinanceSyncRpc,type FinanceSyncConfig} from './automaticFinanceSync.ts';
-import {Resend} from 'resend';
+import {deliverFinanceSyncAlerts} from './financeSyncAlerts.server.ts';
 import {globalFinanceSyncStatus} from './globalFinanceSync';
 import {withFinanceHeartbeat} from './financeHeartbeat.server';
 
@@ -9,6 +9,17 @@ import {withFinanceHeartbeat} from './financeHeartbeat.server';
  * substituted with the application's payment-capable Stripe secret. */
 export async function runFinanceSyncServer(options:{invocation?:'scheduled'|'manual'}={}) {
  if(process.env.FINANCE_RECONCILIATION_ENABLED!=='true')return {state:'disabled'};
+ if(process.env.FINANCE_SCAN_MODES_ENABLED==='true'){
+  const {runFinanceScanMode}=await import('./financeScanModes.server.ts');
+  const started=Date.now(),manual=options.invocation==='manual';
+  const result=await runFinanceScanMode('incremental',manual);
+  if(!manual&&result.caughtUp===true&&Date.now()-started<35000){
+   // Only resume the audit that the daily trigger already started. A frequent
+   // tick cannot disguise a missing daily invocation by starting a new audit.
+   try{await runFinanceScanMode('daily',false,Math.max(1,40000-(Date.now()-started)),true);}catch{/* Daily heartbeat records its own failure. */}
+  }
+  return result;
+ }
  // Owner activity must not hide an absent daily scheduler heartbeat.
  return options.invocation==='manual'?runEnabledFinanceSync():withFinanceHeartbeat(runEnabledFinanceSync,{deferStart:true});
 }
@@ -38,19 +49,7 @@ async function runEnabledFinanceSync(onClaim?:()=>Promise<void>) {
  }catch(error){workFailed=true;workError=error;}
  // Durable daily-deduplicated notification, independently retryable. Merely
  // implementing this sender does not send emails during local/mock validation.
- let alertState='not_configured';
- const recipient=process.env.FINANCE_ALERT_EMAIL,mailKey=process.env.RESEND_API_KEY,from=process.env.FINANCE_ALERT_FROM;
- if(recipient&&mailKey&&from){
-  const alert=await rpc('finance_sync_alert_v1',{}) as {id:string;lease_token:string;code:string}|null;
-  if(alert){
-   try {
-    const status=await rpc('finance_sync_status_v1',{}) as Record<string,unknown>;
-    const sent=await new Resend(mailKey).emails.send({from,to:recipient,subject:'GLOA: Finanzabgleich benötigt Aufmerksamkeit',text:`Der automatische Stripe-Abgleich meldet offene Vorgänge. Zahlungen: ${status.missing_payments??'unbekannt'}, Refunds: ${status.missing_refunds??'unbekannt'}, Gebühren: ${status.missing_fees??'unbekannt'}, Abweichungen: ${status.unresolved??'unbekannt'}. Bitte in GLOA Admin > Finanzen den Syncstatus und die Freigaben prüfen. Keine manuelle Stripe-/Dashboard-Gegenrechnung erforderlich.`},{idempotencyKey:'gloa-finance-sync-alert/'+alert.id});
-    if(sent.error||typeof sent.data?.id!=='string'||!sent.data.id)throw Error('finance_alert_not_confirmed');
-    await rpc('finance_sync_alert_v1',{p_id:alert.id,p_token:alert.lease_token,p_sent:true});alertState='sent';
-   }catch{await rpc('finance_sync_alert_v1',{p_id:alert.id,p_token:alert.lease_token,p_sent:false});alertState='retry_required';}
-  }else alertState='none_pending';
- }
+ const alertState=await deliverFinanceSyncAlerts(rpc);
  if(workFailed)throw workError;
  let reconciliationVerified=false;
  if(result.caughtUp===true&&result.state==='verified'){

@@ -34,6 +34,10 @@ export async function POST(request:Request) {
   }
   const result=await admin.rpc('finance_sync_global_status_v1');
   if(result.error||!result.data||result.data.monitoring_version!==1)return json({error:'Syncstatus nicht verfügbar. Datenbankfreigabe und Monitoring prüfen.'},503);
+  if(action==='status'&&process.env.FINANCE_SCAN_MODES_ENABLED==='true'){
+   const modes=await admin.rpc('finance_sync_modes_status_v2');if(modes.error)throw Error('scan_modes_unavailable');
+   result.data.scan_modes=modes.data;
+  }
   let configuredOwner=false;
   if(owner){const config=await admin.from('finance_sync_config').select('owner_id').eq('enabled',true).maybeSingle();
    if(config.error)throw Error('configuration_unavailable');configuredOwner=config.data?.owner_id===gate.identity.userId;}
