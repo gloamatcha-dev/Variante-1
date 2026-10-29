@@ -8,11 +8,21 @@ const json=(body:unknown,status=200)=>Response.json(body,{status,headers:{'Cache
 export async function POST(request:Request) {
  const gate=await requireAdminIdentity(request,'read');if(!gate.ok)return gate.response;
  let payload:Record<string,unknown>,action:unknown;try{payload=await request.json();action=payload?.action;}catch{return json({error:'Ungültige Anfrage.'},400);}
- if(action!=='status'&&action!=='run'&&action!=='preflight'&&action!=='test_alert')return json({error:'Unbekannte Aktion.'},400);
+ if(action!=='status'&&action!=='run'&&action!=='preflight'&&action!=='test_alert'&&action!=='runtime_flags')return json({error:'Unbekannte Aktion.'},400);
  if(action!=='status'&&request.headers.get('origin')!==new URL(request.url).origin)return json({error:'Ungültiger Anfrageursprung.'},403);
  // Fresh active owner row + confirmed, unbanned Auth identity, never browser role claims.
  const owner=gate.identity.role==='owner'&&await canAccessProductManager(gate.identity);
  if(action!=='status'&&!owner)return json({error:'Nur der verifizierte Owner darf synchronisieren oder die Verbindung prüfen.'},403);
+ // Read only the activation allowlist. Auth/owner verification above remains
+ // mandatory; no finance query, provider probe, worker or delivery is invoked.
+ if(action==='runtime_flags'){
+  const state=(value:string|undefined)=>value===undefined?'absent':value==='true';
+  return json({
+   FINANCE_SCAN_MODES_ENABLED:state(process.env.FINANCE_SCAN_MODES_ENABLED),
+   FINANCE_RECONCILIATION_ENABLED:state(process.env.FINANCE_RECONCILIATION_ENABLED),
+   FINANCE_SYNC_MANUAL_ENABLED:state(process.env.FINANCE_SYNC_MANUAL_ENABLED),
+  });
+ }
  const enabled=process.env.FINANCE_RECONCILIATION_ENABLED==='true';
  const manualEnabled=enabled&&process.env.FINANCE_SYNC_MANUAL_ENABLED==='true';
  if(action==='run'&&!manualEnabled)return json({error:'Synchronisierung ist bis zur Datenbankfreigabe deaktiviert.'},409);
