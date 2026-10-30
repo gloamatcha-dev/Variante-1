@@ -7,13 +7,14 @@ import {withFinanceHeartbeat} from './financeHeartbeat.server';
 
 /** No work at module import or build time. The dedicated READ key is never
  * substituted with the application's payment-capable Stripe secret. */
-export async function runFinanceSyncServer(options:{invocation?:'scheduled'|'manual'}={}) {
+export async function runFinanceSyncServer(options:{invocation?:'scheduled'|'manual';firstScanOnly?:boolean}={}) {
  if(process.env.FINANCE_RECONCILIATION_ENABLED!=='true')return {state:'disabled'};
+ if(options.firstScanOnly&&(!process.env.FINANCE_FIRST_SCAN_SCOPE||process.env.FINANCE_SCAN_MODES_ENABLED!=='true'))throw Error('first_scan_scope_required');
  if(process.env.FINANCE_SCAN_MODES_ENABLED==='true'){
   const {runFinanceScanMode}=await import('./financeScanModes.server.ts');
   const started=Date.now(),manual=options.invocation==='manual';
   const result=await runFinanceScanMode('incremental',manual);
-  if(!manual&&result.caughtUp===true&&Date.now()-started<35000){
+  if(!process.env.FINANCE_FIRST_SCAN_SCOPE&&!manual&&result.caughtUp===true&&Date.now()-started<35000){
    // Only resume the audit that the daily trigger already started. A frequent
    // tick cannot disguise a missing daily invocation by starting a new audit.
    try{await runFinanceScanMode('daily',false,Math.max(1,40000-(Date.now()-started)),true);}catch{/* Daily heartbeat records its own failure. */}

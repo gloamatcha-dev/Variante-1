@@ -6,6 +6,7 @@ import {incrementalFinanceDiscovery} from './financeIncrementalDiscovery.ts';
 import {withFinanceHeartbeat} from './financeHeartbeat.server.ts';
 import {deliverFinanceSyncAlerts} from './financeSyncAlerts.server.ts';
 import {globalFinanceSyncStatus} from './globalFinanceSync.ts';
+import {parseFirstScanScope,assertFirstScanJob,firstScanReceiptVerifier} from './financeFirstScanScope.ts';
 
 export type FinanceScanMode='incremental'|'daily';
 type ScanOutcome={state:string;caughtUp?:boolean;alertState?:string;reason?:string;reconciliationVerified?:boolean;metrics?:{requests:number;maxReads:number;elapsedMs:number;jobReads?:Record<string,number>}};
@@ -13,17 +14,27 @@ type ScanOutcome={state:string;caughtUp?:boolean;alertState?:string;reason?:stri
 export async function runFinanceScanMode(mode:FinanceScanMode,manual=false,budgetMs=40000,resumeOnly=false):Promise<ScanOutcome> {
  if(process.env.FINANCE_RECONCILIATION_ENABLED!=='true'||process.env.FINANCE_SCAN_MODES_ENABLED!=='true')return {state:'disabled'};
  if(manual&&process.env.FINANCE_SYNC_MANUAL_ENABLED!=='true')return {state:'disabled'};
+ const first=parseFirstScanScope(process.env.FINANCE_FIRST_SCAN_SCOPE);
+ if(first&&(mode!=='incremental'||manual))return {state:'disabled'};
  const work=async(onClaim:()=>Promise<void>)=>{
   const admin=getSupabaseAdmin();if(!admin)throw Error('finance_database_unavailable');
   const rpc:FinanceSyncRpc=async(name,args)=>{const r=await admin.rpc(name,args);if(r.error)throw Error('finance_database_operation_failed');return r.data;};
-  const config=await admin.from('finance_sync_config').select('account_id,known_payment_intent,known_amount_cents').eq('enabled',true).maybeSingle();
+  const config=await admin.from('finance_sync_config').select('account_id,known_payment_intent,known_amount_cents,auto_open_current_period').eq('enabled',true).maybeSingle();
   if(config.error)throw Error('finance_configuration_unavailable');if(!config.data)return {state:'disabled'};
   const identity=config.data;
+  if(first){
+   if(identity.account_id!==first.accountId||config.data.auto_open_current_period!==false)throw Error('first_scan_scope_mismatch');
+   const pending=await admin.from('finance_sync_jobs').select('id,account_id,scan_from,scan_to,state').eq('id',first.jobId).maybeSingle();
+   if(pending.error||!pending.data)throw Error('first_scan_scope_mismatch');
+   assertFirstScanJob(first,pending.data);
+   if(pending.data.state==='completed')return {state:'already_completed'};
+  }
   const key=process.env.STRIPE_RECONCILIATION_READ_KEY;if(!key?.startsWith('rk_live_'))throw Error('read_key_missing');
-  const reservation=await rpc('finance_sync_read_reserve_v2',{p_account:config.data.account_id,p_requested:80}) as {id:string;granted:number};
+  const reservation=await rpc('finance_sync_read_reserve_v2',{p_account:config.data.account_id,p_requested:first?.maxReads??80}) as {id:string;granted:number};
+  if(first&&(!reservation||typeof reservation.id!=='string'||!reservation.id||!Number.isSafeInteger(reservation.granted)||reservation.granted<0||reservation.granted>first.maxReads))throw Error('invalid_first_scan_reservation');
   let activeJob='';const jobReads:Record<string,number>={};
   const read=createStripeReconciliationRead(key,fetch,()=>budget.remainingMs());
-  const budget=financeScanBudget(read,{budgetMs,maxReads:reservation.granted});
+  const budget=financeScanBudget(read,{budgetMs:first?Math.max(0,Math.min(40000,budgetMs,Date.parse(first.expiresAt)-Date.now())):budgetMs,maxReads:reservation.granted});
   if(reservation.granted===0){
    await rpc('finance_sync_read_measure_v2',{p_id:reservation.id,p_actual:0,p_mode:mode});
    await rpc('finance_sync_modes_alert_v2',{p_account:identity.account_id,p_code:'read_budget_exhausted'});
@@ -31,10 +42,12 @@ export async function runFinanceScanMode(mode:FinanceScanMode,manual=false,budge
    return {state:'retry_required',reason:'read_budget_exhausted',alertState,metrics:budget.metrics()};
   }
   const mapped:FinanceSyncRpc=async(name,args)=>{
+   if(first&&!['finance_sync_claim_v1','finance_sync_checkpoint_v1','finance_sync_discrepancy_v1','finance_sync_finish_v1','finance_sync_basis_v1','finance_sync_retry_ids_v1','finance_sync_source_read_v1','finance_sync_known_balances_v2'].includes(name))throw Error('first_scan_money_write_forbidden');
    const daily:Record<string,string>={finance_sync_claim_v1:'finance_sync_audit_claim_v2',finance_sync_checkpoint_v1:'finance_sync_audit_checkpoint_v2',finance_sync_discrepancy_v1:'finance_sync_audit_issue_v2',finance_sync_finish_v1:'finance_sync_audit_finish_v2'};
    if(mode==='daily'&&['finance_sync_stage_v1','finance_sync_record_v1','finance_sync_failure_v1'].includes(name))throw Error('audit_money_write_forbidden');
    const result=await rpc(mode==='daily'?(daily[name]??name):name,mode==='daily'&&name==='finance_sync_claim_v1'?{...args,p_resume_only:resumeOnly}:args);
    if(name==='finance_sync_claim_v1'&&(result as {status:string})?.status==='claimed'){
+    if(first)assertFirstScanJob(first,result as Record<string,unknown>);
     activeJob=String((result as {id:string}).id);jobReads[activeJob]??=0;
     // A continuation must not extend the daily watchdog's original deadline.
     if(!(mode==='daily'&&resumeOnly))await onClaim();
@@ -43,9 +56,10 @@ export async function runFinanceScanMode(mode:FinanceScanMode,manual=false,budge
   };
   try{
    let result:Awaited<ReturnType<typeof runAutomaticFinanceSync>>={state:'continuation_required'};
-   for(let i=0;i<16&&budget.remainingMs()>1000;i++){
+   for(let i=0;i<(first?1:16)&&budget.remainingMs()>1000;i++){
     result=await runAutomaticFinanceSync({rpc:mapped,read:async(path,params)=>{const before=budget.metrics().requests;try{return await budget.read(path,params);}finally{if(activeJob)jobReads[activeJob]+=budget.metrics().requests-before;}},config:config.data,budgetMs:budget.remainingMs(),verification:mode==='daily',
-     discovery:mode==='incremental'?incrementalFinanceDiscovery(async ids=>await rpc('finance_sync_known_balances_v2',{p_account:identity.account_id,p_ids:ids}) as string[]):undefined});
+     discovery:mode==='incremental'?incrementalFinanceDiscovery(async ids=>await rpc('finance_sync_known_balances_v2',{p_account:identity.account_id,p_ids:ids}) as string[]):undefined,
+     receiptVerifier:first?firstScanReceiptVerifier(first,rpc):undefined});
     if(result.caughtUp||!['verified','attention','continuation_required'].includes(result.state)||budget.metrics().requests>=reservation.granted)break;
    }
    // A daily result verifies its own frozen range; it cannot certify incremental freshness.

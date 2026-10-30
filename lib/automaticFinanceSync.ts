@@ -10,7 +10,7 @@ const stamp=(v:unknown)=>new Date(Number(v)*1000).toISOString();
 
 /** Durable, independent financial reconciliation. Stripe is exclusively READ.
  * Every effect is delegated to the lease-fenced atomic database RPC in 085. */
-export async function runAutomaticFinanceSync(deps:{rpc:FinanceSyncRpc;read:StripeRead;config:FinanceSyncConfig;now?:()=>number;budgetMs?:number;discovery?:typeof readStripeReconciliation;verification?:boolean}):Promise<{state:string;caughtUp?:boolean}> {
+export async function runAutomaticFinanceSync(deps:{rpc:FinanceSyncRpc;read:StripeRead;config:FinanceSyncConfig;now?:()=>number;budgetMs?:number;discovery?:typeof readStripeReconciliation;verification?:boolean;receiptVerifier?:(receipt:Row)=>Promise<string>}):Promise<{state:string;caughtUp?:boolean}> {
  const now=deps.now??Date.now,deadline=now()+(deps.budgetMs??45000);
  const job=await deps.rpc('finance_sync_claim_v1',{p_account:deps.config.account_id}) as Row;
  if(job.status==='busy')return {state:'busy'};
@@ -61,6 +61,10 @@ export async function runAutomaticFinanceSync(deps:{rpc:FinanceSyncRpc;read:Stri
   if(!Number.isSafeInteger(Number(cp.paymentIndex))||Number(cp.paymentIndex)<0||Number(cp.paymentIndex)>ids.length)throw Error('checkpoint_invalid');
   const processReceipt=async(receipt:Receipt & Row)=>{
    gate();
+   if(deps.receiptVerifier){
+    try{return await deps.receiptVerifier(receipt);}
+    catch(error){await issue(`${receipt.accountId}:live:${receipt.kind}:${receipt.sourceId}`,'first_scan_existing_source_required');throw error;}
+   }
    if(deps.verification){const result=await deps.rpc('finance_sync_verify_receipt_v2',{...auth,p_receipt:receipt}) as Row;return result.result;}
    const key=await deps.rpc('finance_sync_stage_v1',{...auth,p_receipt:receipt});
    try {

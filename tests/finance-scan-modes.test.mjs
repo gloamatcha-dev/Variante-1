@@ -7,6 +7,7 @@ import {globalFinanceSyncStatus} from '../lib/globalFinanceSync.ts';
 import {setup} from './helpers/financeScanModeFixture.mjs';
 import {normalizeFinanceEvidence} from '../lib/financeReconciliationEvidence.ts';
 import {readStripeReconciliation} from '../lib/stripeReconciliationRead.ts';
+import * as firstScanScope from '../lib/financeFirstScanScope.ts';
 import vm from 'node:vm';import {createRequire} from 'node:module';
 const run=h=>runAutomaticFinanceSync({rpc:h.rpc,read:h.read,config:h.config,now:()=>h.state.now,discovery:incrementalFinanceDiscovery(async()=>[])});
 test('empty balance feed uses two reads, checks binding and persists all required checkpoints',async()=>{
@@ -85,6 +86,7 @@ function modesHarness(){
  const ts=createRequire(import.meta.url)('typescript'),calls=[],e={FINANCE_RECONCILIATION_ENABLED:'true',FINANCE_SCAN_MODES_ENABLED:'true',STRIPE_RECONCILIATION_READ_KEY:'rk_live_synthetic'};
  const admin={from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:{account_id:'acct_test',known_payment_intent:'pi_known',known_amount_cents:1070}})})})}),rpc:async(name,args)=>{calls.push({name,args});return {data:name==='finance_sync_read_reserve_v2'?{id:'reservation',granted:5}:name.includes('claim')?{status:'claimed',id:'job',lease_token:'token'}:{}};}};
  const m={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync('lib/financeScanModes.server.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{module:m,exports:m.exports,process:{env:e},Date,fetch:()=>{throw Error('real network forbidden');},require:name=>{
+  if(name.includes('financeFirstScanScope'))return firstScanScope;
   if(name.includes('supabaseAdmin'))return {getSupabaseAdmin:()=>admin};if(name.includes('stripeReconciliationClient'))return {createStripeReconciliationRead:()=>async()=>({})};
   if(name.includes('automaticFinanceSync'))return {runAutomaticFinanceSync:async d=>{await d.rpc('finance_sync_claim_v1',{p_account:'acct_test'});await d.read('/v1/balance_transactions',{});if(d.verification)await d.rpc('finance_sync_verify_receipt_v2',{p_job:'job'});return {state:'attention',caughtUp:true};}};
   if(name.includes('financeScanBudget'))return {financeScanBudget};if(name.includes('financeIncrementalDiscovery'))return {incrementalFinanceDiscovery};if(name.includes('financeHeartbeat'))return {withFinanceHeartbeat:async fn=>fn(async()=>{calls.push({name:'heartbeat_start'});})};if(name.includes('financeSyncAlerts'))return {deliverFinanceSyncAlerts:async()=>'none_pending'};if(name.includes('globalFinanceSync'))return {globalFinanceSyncStatus};throw Error(name);
