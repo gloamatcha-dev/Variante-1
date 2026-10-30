@@ -8,7 +8,7 @@ const json=(body:unknown,status=200)=>Response.json(body,{status,headers:{'Cache
 export async function POST(request:Request) {
  const gate=await requireAdminIdentity(request,'read');if(!gate.ok)return gate.response;
  let payload:Record<string,unknown>,action:unknown;try{payload=await request.json();action=payload?.action;}catch{return json({error:'Ungültige Anfrage.'},400);}
- if(action!=='status'&&action!=='run'&&action!=='preflight'&&action!=='test_alert'&&action!=='runtime_flags')return json({error:'Unbekannte Aktion.'},400);
+ if(action!=='status'&&action!=='run'&&action!=='preflight'&&action!=='test_alert'&&action!=='runtime_flags'&&action!=='monitoring_test')return json({error:'Unbekannte Aktion.'},400);
  if(action!=='status'&&request.headers.get('origin')!==new URL(request.url).origin)return json({error:'Ungültiger Anfrageursprung.'},403);
  // Fresh active owner row + confirmed, unbanned Auth identity, never browser role claims.
  const owner=gate.identity.role==='owner'&&await canAccessProductManager(gate.identity);
@@ -29,16 +29,22 @@ export async function POST(request:Request) {
   });
  }
  const enabled=process.env.FINANCE_RECONCILIATION_ENABLED==='true';
+ if(action==='monitoring_test'&&(payload.confirm!=='SEND_FAILURE_ONLY_HEALTHCHECK_TEST'||payload.stickyPauseConfirmed!==true))return json({error:'Explicit sticky-pause verification required.'},400);
  const manualEnabled=enabled&&process.env.FINANCE_SYNC_MANUAL_ENABLED==='true';
  if(action==='run'&&!manualEnabled)return json({error:'Synchronisierung ist bis zur Datenbankfreigabe deaktiviert.'},409);
  if(action==='test_alert'&&(enabled||process.env.FINANCE_SYNC_MANUAL_ENABLED==='true'))return json({error:'Für den Mailtest muss der Finanzabgleich deaktiviert bleiben.'},409);
  if(action==='test_alert'&&(payload.confirm!=='SEND_ONE_FINANCE_ALERT_TEST'||typeof payload.probeId!=='string'))return json({error:'Explizite Mailtest-Bestätigung und Test-ID erforderlich.'},400);
  const admin=getSupabaseAdmin();if(!admin)return json({error:'Syncstatus nicht verfügbar.'},503);
  try {
-  if(action==='preflight'||action==='test_alert'){
+  if(action==='preflight'||action==='test_alert'||action==='monitoring_test'){
    const config=await admin.from('finance_sync_config').select('account_id,owner_id,known_payment_intent,known_amount_cents,enabled,auto_open_current_period').maybeSingle();
    if(config.error)throw Error('configuration_unavailable');
    if(!config.data||config.data.owner_id!==gate.identity.userId)return json({error:'Keine bestätigte Owner-Konfiguration.'},403);
+   if(action==='monitoring_test'){
+    const {financeMonitoringProbe}=await import('../../../../lib/financeMonitoringProbe.ts');
+    const monitoringTest=await financeMonitoringProbe({databaseEnabled:config.data.enabled,autoOpen:config.data.auto_open_current_period,probeId:payload.probeId,stickyPauseConfirmed:payload.stickyPauseConfirmed});
+    return json({monitoringTest},monitoringTest.state==='blocked'?409:200);
+   }
    if(action==='preflight'){
     const {financeSyncPreflight}=await import('../../../../lib/financeSyncPreflight.ts');
     return json({ok:true,preflight:await financeSyncPreflight(config.data)});
