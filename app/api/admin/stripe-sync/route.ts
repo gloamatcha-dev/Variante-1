@@ -17,10 +17,15 @@ export async function POST(request:Request) {
  // mandatory; no finance query, provider probe, worker or delivery is invoked.
  if(action==='runtime_flags'){
   const state=(value:string|undefined)=>value===undefined?'absent':value==='true';
+  const monitoringNames=['FINANCE_HEALTHCHECK_SCAN_URL','FINANCE_HEALTHCHECK_RECONCILED_URL','FINANCE_HEALTHCHECK_DAILY_SCAN_URL','FINANCE_HEALTHCHECK_DAILY_RECONCILED_URL'] as const;
+  const monitoringValues=monitoringNames.map(name=>process.env[name]?.trim()??'');
   return json({
    FINANCE_SCAN_MODES_ENABLED:state(process.env.FINANCE_SCAN_MODES_ENABLED),
    FINANCE_RECONCILIATION_ENABLED:state(process.env.FINANCE_RECONCILIATION_ENABLED),
    FINANCE_SYNC_MANUAL_ENABLED:state(process.env.FINANCE_SYNC_MANUAL_ENABLED),
+   ...Object.fromEntries(monitoringNames.map((name,index)=>[name,monitoringValues[index]!== ''])),
+   allDistinct:monitoringValues.every(value=>value!=='')&&new Set(monitoringValues).size===4,
+   firstScanScopeAbsent:process.env.FINANCE_FIRST_SCAN_SCOPE===undefined,
   });
  }
  const enabled=process.env.FINANCE_RECONCILIATION_ENABLED==='true';
