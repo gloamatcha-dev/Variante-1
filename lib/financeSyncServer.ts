@@ -9,6 +9,8 @@ import {withFinanceHeartbeat} from './financeHeartbeat.server';
  * substituted with the application's payment-capable Stripe secret. */
 export async function runFinanceSyncServer(options:{invocation?:'scheduled'|'manual';firstScanOnly?:boolean}={}) {
  if(process.env.FINANCE_RECONCILIATION_ENABLED!=='true')return {state:'disabled'};
+ // While a temporary scope exists, ordinary cron/manual calls must not claim it.
+ if(process.env.FINANCE_FIRST_SCAN_SCOPE!==undefined&&!options.firstScanOnly)throw Error('first_scan_explicit_request_required');
  if(options.firstScanOnly&&(!process.env.FINANCE_FIRST_SCAN_SCOPE||process.env.FINANCE_SCAN_MODES_ENABLED!=='true'))throw Error('first_scan_scope_required');
  if(process.env.FINANCE_SCAN_MODES_ENABLED==='true'){
   const {runFinanceScanMode}=await import('./financeScanModes.server.ts');

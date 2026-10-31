@@ -37,8 +37,8 @@ export async function runFinanceScanMode(mode:FinanceScanMode,manual=false,budge
   const budget=financeScanBudget(read,{budgetMs:first?Math.max(0,Math.min(40000,budgetMs,Date.parse(first.expiresAt)-Date.now())):budgetMs,maxReads:reservation.granted});
   if(reservation.granted===0){
    await rpc('finance_sync_read_measure_v2',{p_id:reservation.id,p_actual:0,p_mode:mode});
-   await rpc('finance_sync_modes_alert_v2',{p_account:identity.account_id,p_code:'read_budget_exhausted'});
-   const alertState=await deliverFinanceSyncAlerts(rpc);
+   if(!first)await rpc('finance_sync_modes_alert_v2',{p_account:identity.account_id,p_code:'read_budget_exhausted'});
+   const alertState=first?'suppressed_first_scan':await deliverFinanceSyncAlerts(rpc);
    return {state:'retry_required',reason:'read_budget_exhausted',alertState,metrics:budget.metrics()};
   }
   const mapped:FinanceSyncRpc=async(name,args)=>{
@@ -63,9 +63,9 @@ export async function runFinanceScanMode(mode:FinanceScanMode,manual=false,budge
     if(result.caughtUp||!['verified','attention','continuation_required'].includes(result.state)||budget.metrics().requests>=reservation.granted)break;
    }
    // A daily result verifies its own frozen range; it cannot certify incremental freshness.
-   if(['retry_required','attention'].includes(result.state))await rpc('finance_sync_modes_alert_v2',{p_account:config.data.account_id,p_code:mode+'_'+result.state});
-   const alertState=await deliverFinanceSyncAlerts(rpc);
-   let reconciliationVerified=result.caughtUp===true&&result.state==='verified';
+   if(!first&&['retry_required','attention'].includes(result.state))await rpc('finance_sync_modes_alert_v2',{p_account:config.data.account_id,p_code:mode+'_'+result.state});
+   const alertState=first?'suppressed_first_scan':await deliverFinanceSyncAlerts(rpc);
+   let reconciliationVerified=!first&&result.caughtUp===true&&result.state==='verified';
    if(reconciliationVerified&&mode==='incremental')try{
     const raw=await rpc('finance_sync_global_status_v1',{}) as Record<string,unknown>;
     raw.scan_modes=await rpc('finance_sync_modes_status_v2',{});
@@ -74,7 +74,8 @@ export async function runFinanceScanMode(mode:FinanceScanMode,manual=false,budge
    return {...result,alertState,reconciliationVerified,metrics:{...budget.metrics(),jobReads}};
   }finally{await rpc('finance_sync_read_measure_v2',{p_id:reservation.id,p_actual:budget.metrics().requests,p_mode:mode,p_jobs:jobReads});}
  };
- const result=manual?await work(async()=>{}):await withFinanceHeartbeat(work,{mode,deferStart:true});
+ // Bounded discovery owns no scheduled monitor and can never deliver alerts.
+ const result=first||manual?await work(async()=>{}):await withFinanceHeartbeat(work,{mode,deferStart:true});
  // Resume a pending daily window after incremental work, bounded by its OWN
  // invocation budget. Scheduling it is deliberate; failures remain daily-only.
  return result;
