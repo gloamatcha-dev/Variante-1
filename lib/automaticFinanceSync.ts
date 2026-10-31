@@ -47,7 +47,7 @@ export async function runAutomaticFinanceSync(deps:{rpc:FinanceSyncRpc;read:Stri
       const refund=provider.objects.refunds.find(r=>r.id===source)??await get('/v1/refunds/'+source,{});
       const intent=ref(refund.payment_intent);if(!/^pi_/.test(intent))throw Error('balance_refund_link_missing');dependencies.push(intent);await issue(String(transaction.id),null);
      }
-    }catch(error){if(error instanceof Error&&error.message==='finance_sync_yield')throw error;await issue(String(transaction.id),'balance_dependency_unavailable');}
+    }catch(error){if(error instanceof Error&&error.message==='finance_sync_yield')throw error;await issue(String(transaction.id),'balance_dependency_unavailable');if(deps.receiptVerifier)throw error;}
    }
    cp.paymentIds=[...new Set([
     ...provider.objects.payment_intents.map(p=>String(p.id)),
@@ -128,7 +128,7 @@ export async function runAutomaticFinanceSync(deps:{rpc:FinanceSyncRpc;read:Stri
     }
     if(!deps.verification&&!review&&refundKey){const state=await deps.rpc('finance_sync_source_read_v1',{p_account:deps.config.account_id,p_key:refundKey}) as Row|null;if(state?.parentVerified!==true)throw Error('parent_state_not_confirmed');}
     await issue(id,null);
-   }catch(error){if(error instanceof Error&&error.message==='finance_sync_yield')throw error;await issue(id,error instanceof Error&&/^[a-z_]{1,100}$/.test(error.message)?error.message:'payment_reconciliation_failed');}
+   }catch(error){if(error instanceof Error&&error.message==='finance_sync_yield')throw error;await issue(id,error instanceof Error&&/^[a-z_]{1,100}$/.test(error.message)?error.message:'payment_reconciliation_failed');if(deps.receiptVerifier)throw error;}
    cp.paymentIndex=i+1;await checkpoint();
   }
   cp.usageIds??=[...new Set([...provider.objects.balance_transactions.filter(t=>t.type==='stripe_fee').map(t=>String(t.id)),...rows(retry.fees).map(t=>String(t.id))])];
@@ -142,7 +142,7 @@ export async function runAutomaticFinanceSync(deps:{rpc:FinanceSyncRpc;read:Stri
     if(!normalized.input)throw Error('usage_evidence_invalid');
     for(const receipt of normalized.input.receipts)await processReceipt(receipt);
     await issue(fee,null);
-   }catch(error){if(error instanceof Error&&error.message==='finance_sync_yield')throw error;await issue(fee,'usage_reconciliation_failed');}
+   }catch(error){if(error instanceof Error&&error.message==='finance_sync_yield')throw error;await issue(fee,'usage_reconciliation_failed');if(deps.receiptVerifier)throw error;}
    cp.usageIndex=i+1;await checkpoint();
   }
   for(const t of provider.objects.balance_transactions)if(!['charge','payment','refund','payment_refund','stripe_fee','payout','payout_failure'].includes(String(t.type))

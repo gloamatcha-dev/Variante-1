@@ -34,6 +34,31 @@ test('real worker read-only receipt hook never stages/records money, including u
  await run(async()=> 'already_recorded');assert.equal(h.state.writes,0);assert.equal(h.state.records.size,0);assert.ok(!h.state.rpcCalls.some(n=>['finance_sync_stage_v1','finance_sync_record_v1','finance_sync_failure_v1'].includes(n)));
  const rejected=await run(async()=>{throw Error('first_scan_existing_source_required');});assert.notEqual(rejected.state,'verified');assert.equal(h.state.writes,0);assert.ok([...h.state.issues.keys()].some(key=>key.startsWith('acct_test:live:')));
 });
+test('first-scan unknown payment or usage source aborts without advancing its cursor or finishing',async()=>{
+ for(const usageOnly of [false,true]){
+  const h=setup();if(usageOnly)h.state.checkpoint={paymentIds:[],paymentIndex:0};
+  let verified=0;
+  const result=await runAutomaticFinanceSync({rpc:h.rpc,read:h.read,config:h.config,now:()=>h.state.now,
+   discovery:incrementalFinanceDiscovery(async()=>[]),receiptVerifier:async()=>{verified++;throw Error('first_scan_existing_source_required');}});
+  assert.equal(result.state,'retry_required');assert.equal(verified,1);
+  assert.equal(h.state.completed,false);assert.equal(h.state.active,false);assert.equal(h.state.writes,0);
+  assert.equal(h.state.checkpoint[usageOnly?'usageIndex':'paymentIndex']??0,0);
+  assert.ok(!h.state.rpcCalls.includes('finance_sync_finish_v1'));
+  assert.ok([...h.state.issues.keys()].some(key=>key.startsWith('acct_test:live:')));
+ }
+});
+
+test('first-scan missing balance dependency aborts before further dependency reads',async()=>{
+ const h=setup();let failures=0;
+ const read=async(path,params)=>{if(path==='/v1/charges/py_test'){failures++;throw Error('missing_dependency');}return h.read(path,params);};
+ const result=await runAutomaticFinanceSync({rpc:h.rpc,read,config:h.config,now:()=>h.state.now,
+  discovery:incrementalFinanceDiscovery(async()=>[]),receiptVerifier:async()=> 'already_recorded'});
+ assert.equal(result.state,'retry_required');assert.equal(failures,1);
+ assert.equal(h.state.completed,false);assert.equal(h.state.writes,0);
+ assert.ok(!h.state.rpcCalls.includes('finance_sync_finish_v1'));
+ assert.ok(!h.state.readCalls.some(call=>call.path==='/v1/refunds/pyr_test'));
+});
+
 function serverHarness(scope,completed=false,options={}){
  const ts=createRequire(import.meta.url)('typescript'),p=scope,calls=[],env={FINANCE_RECONCILIATION_ENABLED:'true',FINANCE_SCAN_MODES_ENABLED:'true',FINANCE_FIRST_SCAN_SCOPE:JSON.stringify(p),STRIPE_RECONCILIATION_READ_KEY:'rk_live_synthetic'};
  const job={id:p.jobId,account_id:p.accountId,scan_from:p.scanFrom,scan_to:p.scanTo,state:completed?'completed':'retry',...options.job};

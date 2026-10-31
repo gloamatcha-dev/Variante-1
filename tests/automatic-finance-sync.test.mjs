@@ -160,7 +160,7 @@ test('dashboard refuses stale, missing, partial or historical-only scan coverage
 test('cron authenticates server-side before enable flag, READ key or database work',async()=>{
  const code=ts.transpileModule(fs.readFileSync('app/api/cron/finance-reconciliation/route.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  const env={},compiled={exports:{}};let calls=0;
- vm.runInNewContext(code,{module:compiled,exports:compiled.exports,process:{env},Response,console,require:name=>name.includes('serverSecretAuth')?{isBearerSecretAuthorized:(req,key)=>req.headers.get('authorization')==='Bearer '+key}:name.includes('financeSyncServer')?{runFinanceSyncServer:async()=>{calls++;return {state:'verified'};}}:require(name)});
+ vm.runInNewContext(code,{module:compiled,exports:compiled.exports,process:{env},Response,URL,console,require:name=>name.includes('serverSecretAuth')?{isBearerSecretAuthorized:(req,key)=>req.headers.get('authorization')==='Bearer '+key}:name.includes('financeSyncServer')?{runFinanceSyncServer:async()=>{calls++;return {state:'verified'};}}:require(name)});
  const call=key=>compiled.exports.GET(new Request('http://127.0.0.1/api/cron/finance-reconciliation',{headers:key?{authorization:'Bearer '+key}:{}}));
  assert.equal((await call()).status,503);env.CRON_SECRET='synthetic-cron';assert.equal((await call()).status,401);assert.equal(calls,0);assert.equal((await (await call('synthetic-cron')).json()).state,'disabled');env.FINANCE_RECONCILIATION_ENABLED='true';assert.equal((await call('synthetic-cron')).status,200);assert.equal(calls,1);
 });
