@@ -84,7 +84,7 @@ test('late-discovery query preserves inclusive lookback and exclusive frozen cut
 });
 function modesHarness(){
  const ts=createRequire(import.meta.url)('typescript'),calls=[],e={FINANCE_RECONCILIATION_ENABLED:'true',FINANCE_SCAN_MODES_ENABLED:'true',STRIPE_RECONCILIATION_READ_KEY:'rk_live_synthetic'};
- const admin={from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:{account_id:'acct_test',known_payment_intent:'pi_known',known_amount_cents:1070}})})})}),rpc:async(name,args)=>{calls.push({name,args});return {data:name==='finance_sync_read_reserve_v2'?{id:'reservation',granted:5}:name.includes('claim')?{status:'claimed',id:'job',lease_token:'token'}:{}};}};
+ const admin={from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:{account_id:'acct_test',known_payment_intent:'pi_known',known_amount_cents:1070}})})})}),rpc:async(name,args)=>{if(name==='finance_first_scan_isolated_v3')return {data:false};calls.push({name,args});return {data:name==='finance_sync_read_reserve_v2'?{id:'reservation',granted:5}:name.includes('claim')?{status:'claimed',id:'job',lease_token:'token'}:{}};}};
  const m={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync('lib/financeScanModes.server.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{module:m,exports:m.exports,process:{env:e},Date,fetch:()=>{throw Error('real network forbidden');},require:name=>{
   if(name.includes('financeFirstScanScope'))return firstScanScope;
   if(name.includes('supabaseAdmin'))return {getSupabaseAdmin:()=>admin};if(name.includes('stripeReconciliationClient'))return {createStripeReconciliationRead:()=>async()=>({})};

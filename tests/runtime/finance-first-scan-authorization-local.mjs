@@ -1,0 +1,61 @@
+/** Brand-new loopback PostgreSQL only; no environment credentials inherited. */
+import fs from 'node:fs';import path from 'node:path';import net from 'node:net';import {spawn,spawnSync} from 'node:child_process';import assert from 'node:assert/strict';import {createHash} from 'node:crypto';
+const dir=path.resolve('outputs','first-auth-local-'+Date.now()),data=path.join(dir,'data'),bin='C:/Program Files/PostgreSQL/17/bin';fs.mkdirSync(dir);
+const env={SystemRoot:process.env.SystemRoot,PATH:process.env.PATH,TEMP:process.env.TEMP,TMP:process.env.TMP};
+const server=net.createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));const port=server.address().port;await new Promise(r=>server.close(r));
+const run=(exe,args,input)=>spawnSync(path.join(bin,exe+'.exe'),args,{env,input,windowsHide:true,encoding:'utf8',timeout:30000});
+const sql=q=>run('psql',['-X','-w','-h','127.0.0.1','-p',String(port),'-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1','-A','-t'],q);
+const ok=r=>{assert.equal(r.status,0,r.stderr||r.error?.message);return r.stdout.trim();};
+const lit=s=>"'"+String(s).replaceAll("'","''")+"'";
+const migrationPath='supabase/migrations/20261031171848_first_scan_single_use_authorization.sql',migration=fs.readFileSync(migrationPath,'utf8');
+let child,fd,started=false;const checks=[];
+try{
+ ok(run('initdb',['-D',data,'-U','postgres','--auth-local=trust','--auth-host=trust','--encoding=UTF8','--no-locale']));
+ fd=fs.openSync(path.join(dir,'postgres.log'),'a');child=spawn(path.join(bin,'postgres.exe'),['-D',data,'-h','127.0.0.1','-p',String(port)],{env,windowsHide:true,stdio:['ignore',fd,fd]});let launchError;child.on('error',e=>{launchError=e;});
+ for(let i=0;i<60;i++){if(launchError)throw launchError;if(sql('select 1').status===0){started=true;break;}await new Promise(r=>setTimeout(r,200));}assert.ok(started);
+ const target=JSON.parse(ok(sql("select json_build_object('host',host(inet_server_addr()),'port',inet_server_port(),'directory',current_setting('data_directory'))")));assert.equal(target.host,'127.0.0.1');assert.equal(target.port,port);assert.equal(path.resolve(target.directory).toLowerCase(),data.toLowerCase());
+ ok(sql(`create role anon;create role authenticated;create role service_role;
+ create table finance_sync_config(account_id text primary key,enabled boolean,auto_open_current_period boolean,owner_id uuid,known_payment_intent text,known_amount_cents int,scan_read_monthly_limit int);
+ create table admin_users(user_id uuid,role text,is_active boolean);
+ create table finance_sync_jobs(id uuid primary key,account_id text,state text,attempts int,checkpoint jsonb,scan_from timestamptz,scan_to timestamptz,lease_token uuid,lease_until timestamptz);
+ create table finance_sync_audits(account_id text,state text,lease_until timestamptz);
+ create table finance_sync_read_usage(id uuid primary key default gen_random_uuid(),account_id text,month date,reserved int,actual int,created_at timestamptz default clock_timestamp());
+ create table protected_money(amount int);insert into protected_money values(54592);
+ create function finance_sync_claim_v1(p_account text) returns jsonb language sql as $$ select '{}'::jsonb $$;
+ create function finance_sync_audit_claim_v2(p_account text,p_resume_only boolean default false) returns jsonb language sql as $$ select '{}'::jsonb $$;
+ create function finance_sync_stage_v1(p_job uuid,p_token uuid,p_receipt jsonb) returns text language sql as $$ select 'stage' $$;
+ create function finance_sync_record_v1(p_job uuid,p_token uuid,p_key text) returns jsonb language sql as $$ select '{}'::jsonb $$;
+ create function finance_sync_failure_v1(p_job uuid,p_token uuid,p_key text) returns void language plpgsql as $$ begin null;end $$;
+ insert into finance_sync_config values('acct_1U6B3ODI76FH9qsq',false,false,'75f838b9-f393-4e52-b8b0-70c118df8ed1','pi_3UNcyODI76FH9qsq15ToRfXY',23268,8000);
+ insert into admin_users values('75f838b9-f393-4e52-b8b0-70c118df8ed1','owner',true);
+ insert into finance_sync_jobs values('25ccfe4a-9b70-488f-844b-ac91bbf11ba4','acct_1U6B3ODI76FH9qsq','retry',1,'{}','2026-08-31T22:00:00Z','2026-09-07T22:00:00Z',gen_random_uuid(),clock_timestamp()-interval '1 minute');`));
+ ok(sql(migration));checks.push('exact migration compiles against minimal dependency interfaces; blocked by default');
+ const account='acct_1U6B3ODI76FH9qsq',job='25ccfe4a-9b70-488f-844b-ac91bbf11ba4';
+ const consume=()=>`select finance_first_scan_consume_v3('${account}','${job}','2026-08-31T22:00:00Z','2026-09-07T22:00:00Z',2,(select expires_at from finance_first_scan_authorization))`;
+ assert.notEqual(sql(consume()).status,0);checks.push('unarmed authorization denied');
+ for(const role of ['anon','authenticated'])assert.equal(ok(sql(`select has_function_privilege('${role}','finance_first_scan_consume_v3(text,uuid,timestamptz,timestamptz,integer,timestamptz)','execute')`)),'f');
+ assert.equal(ok(sql("select has_table_privilege('service_role','finance_first_scan_authorization','UPDATE')")),'f');assert.equal(ok(sql("select has_function_privilege('service_role','finance_sync_claim_before_first_v3(text)','execute')")),'f');checks.push('RLS/table ACL and private original functions protected');
+ ok(sql("update finance_first_scan_authorization set expires_at=clock_timestamp()-interval '1 second',max_reads=2"));assert.notEqual(sql(consume()).status,0);checks.push('expired authorization denied');
+ ok(sql("update finance_first_scan_authorization set expires_at=clock_timestamp()+interval '10 minutes'"));
+ ok(sql("update finance_sync_config set enabled=true"));assert.notEqual(sql(consume()).status,0);ok(sql("update finance_sync_config set enabled=false"));checks.push('enabled DB fails closed; consume never enables configuration');
+ ok(sql("insert into finance_sync_audits values('acct_1U6B3ODI76FH9qsq','running',clock_timestamp()+interval '1 minute')"));assert.notEqual(sql(consume()).status,0);ok(sql('delete from finance_sync_audits'));checks.push('existing audit lease blocks consumption without burning authorization');
+ assert.equal(ok(sql('select consumed_at is null from finance_first_scan_authorization')),'t');
+ const expiredDuringRun=sql(`BEGIN;update finance_first_scan_authorization set expires_at=clock_timestamp()+interval '500 milliseconds';${consume()};select pg_sleep(0.7);select finance_first_scan_read_v3('${job}',(select lease_token from finance_first_scan_authorization));COMMIT;`);
+ assert.notEqual(expiredDuringRun.status,0);assert.match(expiredDuringRun.stderr,/first_scan_read_denied/);assert.equal(ok(sql('select consumed_at is null from finance_first_scan_authorization')),'t');checks.push('server clock expiry denies subsequent processing; failed transaction rolls back consume/job/reservation');
+ ok(sql("update finance_sync_jobs set checkpoint='{\"changed\":true}'"));assert.notEqual(sql(consume()).status,0);ok(sql("update finance_sync_jobs set checkpoint='{}'"));checks.push('changed job checkpoint rejected atomically');
+ // Two independently connected sessions race to consume under account + row lock.
+ const asyncSql=q=>new Promise(resolve=>{const p=spawn(path.join(bin,'psql.exe'),['-X','-w','-h','127.0.0.1','-p',String(port),'-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1','-A','-t'],{env,windowsHide:true,stdio:['pipe','pipe','pipe']});let stdout='';p.stdout.on('data',d=>stdout+=d);p.stderr.resume();p.on('close',status=>resolve({status,stdout}));p.stdin.end(q);});
+ const race=await Promise.all([asyncSql(consume()),asyncSql(consume())]);assert.equal(race.filter(x=>x.status===0).length,1);const receipt=JSON.parse(race.find(x=>x.status===0).stdout.trim());assert.equal(receipt.job.attempts,2);assert.equal(ok(sql('select enabled from finance_sync_config')),'f');assert.equal(ok(sql('select count(*) from finance_sync_read_usage')),'1');checks.push('concurrent consume: one winner, one reservation, DB remains disabled');
+ assert.notEqual(sql(consume()).status,0);assert.notEqual(sql('update finance_first_scan_authorization set consumed_at=null').status,0);assert.notEqual(sql('delete from finance_first_scan_authorization').status,0);checks.push('lost response replay and rearm/delete rejected');
+ const read=`select finance_first_scan_read_v3('${job}',${lit(receipt.job.lease_token)})`;
+ const revoke=sql(`BEGIN;update finance_first_scan_authorization set revoked_at=clock_timestamp();${read};COMMIT;`);assert.notEqual(revoke.status,0);assert.match(revoke.stderr,/first_scan_read_denied/);checks.push('explicit revocation blocks further reads independently of app flags');
+ ok(sql(`select finance_first_scan_issue_v3('${job}',${lit(receipt.job.lease_token)},'pi_unknown','first_scan_existing_source_required')`));assert.equal(ok(sql("select findings->'pi_unknown'->>'code' from finance_first_scan_authorization")),'first_scan_existing_source_required');checks.push('isolated findings recorded without global discrepancy or alert tables');
+ ok(sql(read));ok(sql(read));assert.notEqual(sql(read).status,0);checks.push('durable read-attempt cap enforced');
+ // Expiry via clock progression, not altering a consumed authorization.
+ ok(sql("update finance_sync_config set enabled=true"));
+ for(const call of [`select finance_sync_claim_v1('${account}')`,`select finance_sync_audit_claim_v2('${account}')`,`select finance_sync_stage_v1('${job}',${lit(receipt.job.lease_token)},'{}')`,`select finance_sync_record_v1('${job}',${lit(receipt.job.lease_token)},'key')`,`select finance_sync_failure_v1('${job}',${lit(receipt.job.lease_token)},'key')`])assert.notEqual(sql(call).status,0);
+ assert.equal(ok(sql('select amount from protected_money')),'54592');checks.push('ordinary/manual/daily claims and all three monetary paths blocked even with enabled=true');
+ ok(sql('update finance_sync_config set enabled=false'));checks.push('disabled recovery independent of consumed guard');
+ ok(sql('update finance_first_scan_authorization set revoked_at=clock_timestamp()'));assert.notEqual(sql('update finance_first_scan_authorization set revoked_at=null').status,0);checks.push('revocation cannot be undone to replay authorization');
+ fs.writeFileSync(path.join(dir,'result.json'),JSON.stringify({pass:true,migrationPath,sha256:createHash('sha256').update(migration).digest('hex'),checks,productionWrites:0,minimalFixture:true},null,2));console.log(JSON.stringify({pass:true,checks:checks.length,evidence:dir}));
+}finally{if(started)run('pg_ctl',['-D',data,'-m','immediate','-w','stop']);if(child&&child.exitCode===null)child.kill();if(fd!==undefined)fs.closeSync(fd);}

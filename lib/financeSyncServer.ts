@@ -8,10 +8,16 @@ import {withFinanceHeartbeat} from './financeHeartbeat.server';
 /** No work at module import or build time. The dedicated READ key is never
  * substituted with the application's payment-capable Stripe secret. */
 export async function runFinanceSyncServer(options:{invocation?:'scheduled'|'manual';firstScanOnly?:boolean}={}) {
+ if(options.firstScanOnly){
+  const {runFirstScanDiscovery}=await import('./financeFirstScanServer.ts');
+  return runFirstScanDiscovery();
+ }
  if(process.env.FINANCE_RECONCILIATION_ENABLED!=='true')return {state:'disabled'};
+ const isolated=await getSupabaseAdmin()?.rpc('finance_first_scan_isolated_v3');
+ if(!isolated||isolated.error||typeof isolated.data!=='boolean')throw Error('first_scan_isolation_unverified');
+ if(isolated.data===true)return {state:'disabled'};
  // While a temporary scope exists, ordinary cron/manual calls must not claim it.
  if(process.env.FINANCE_FIRST_SCAN_SCOPE!==undefined&&!options.firstScanOnly)throw Error('first_scan_explicit_request_required');
- if(options.firstScanOnly&&(!process.env.FINANCE_FIRST_SCAN_SCOPE||process.env.FINANCE_SCAN_MODES_ENABLED!=='true'))throw Error('first_scan_scope_required');
  if(process.env.FINANCE_SCAN_MODES_ENABLED==='true'){
   const {runFinanceScanMode}=await import('./financeScanModes.server.ts');
   const started=Date.now(),manual=options.invocation==='manual';

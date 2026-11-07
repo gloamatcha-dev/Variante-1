@@ -14,6 +14,9 @@ type ScanOutcome={state:string;caughtUp?:boolean;alertState?:string;reason?:stri
 export async function runFinanceScanMode(mode:FinanceScanMode,manual=false,budgetMs=40000,resumeOnly=false):Promise<ScanOutcome> {
  if(process.env.FINANCE_RECONCILIATION_ENABLED!=='true'||process.env.FINANCE_SCAN_MODES_ENABLED!=='true')return {state:'disabled'};
  if(manual&&process.env.FINANCE_SYNC_MANUAL_ENABLED!=='true')return {state:'disabled'};
+ const isolated=await getSupabaseAdmin()?.rpc('finance_first_scan_isolated_v3');
+ if(!isolated||isolated.error||typeof isolated.data!=='boolean')throw Error('first_scan_isolation_unverified');
+ if(isolated.data===true||process.env.FINANCE_FIRST_SCAN_SCOPE!==undefined)return {state:'disabled'};
  const first=parseFirstScanScope(process.env.FINANCE_FIRST_SCAN_SCOPE);
  if(first&&(mode!=='incremental'||manual))return {state:'disabled'};
  const work=async(onClaim:()=>Promise<void>)=>{
