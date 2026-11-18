@@ -3,12 +3,13 @@ import {canAccessProductManager} from '../../../../lib/productOwnerAccess';
 import {getSupabaseAdmin} from '../../../../lib/supabaseAdmin';
 import {runFinanceSyncServer} from '../../../../lib/financeSyncServer';
 import {globalFinanceSyncStatus} from '../../../../lib/globalFinanceSync.ts';
+import {verifyProductionKeyBinding} from '../../../../lib/financeProductionKeyBinding.ts';
 export const maxDuration=60;
 const json=(body:unknown,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store'}});
 export async function POST(request:Request) {
  const gate=await requireAdminIdentity(request,'read');if(!gate.ok)return gate.response;
  let payload:Record<string,unknown>,action:unknown;try{payload=await request.json();action=payload?.action;}catch{return json({error:'Ungültige Anfrage.'},400);}
- if(action!=='status'&&action!=='run'&&action!=='preflight'&&action!=='test_alert'&&action!=='runtime_flags'&&action!=='monitoring_test')return json({error:'Unbekannte Aktion.'},400);
+ if(action!=='status'&&action!=='run'&&action!=='preflight'&&action!=='test_alert'&&action!=='runtime_flags'&&action!=='monitoring_test'&&action!=='verify_production_key_binding')return json({error:'Unbekannte Aktion.'},400);
  if(action!=='status'&&request.headers.get('origin')!==new URL(request.url).origin)return json({error:'Ungültiger Anfrageursprung.'},403);
  // Fresh active owner row + confirmed, unbanned Auth identity, never browser role claims.
  const owner=gate.identity.role==='owner'&&await canAccessProductManager(gate.identity);
@@ -27,6 +28,23 @@ export async function POST(request:Request) {
    allDistinct:monitoringValues.every(value=>value!=='')&&new Set(monitoringValues).size===4,
    firstScanScopeAbsent:process.env.FINANCE_FIRST_SCAN_SCOPE===undefined,
   });
+ }
+ if(action==='verify_production_key_binding'){
+  if(new URL(request.url).origin!=='https://gloamatcha.com')return json({status:'NICHT NACHGEWIESEN'});
+  const admin=getSupabaseAdmin();
+  const verified=admin&&await verifyProductionKeyBinding({
+   ownerId:gate.identity.userId,
+   confirm:payload.confirm,
+   async loadConfig(){
+    const result=await admin.from('finance_sync_config').select('account_id,owner_id,known_payment_intent,known_amount_cents').maybeSingle();
+    return result.error?null:result.data;
+   },
+   async consume(args){
+    const result=await admin.rpc('record_admin_activity',args);
+    return !result.error&&typeof result.data==='string'&&result.data.length>0;
+   },
+  });
+  return json({status:verified?'BESTÄTIGT':'NICHT NACHGEWIESEN'});
  }
  const enabled=process.env.FINANCE_RECONCILIATION_ENABLED==='true';
  if(action==='monitoring_test'&&(payload.confirm!=='SEND_FAILURE_ONLY_HEALTHCHECK_TEST'||payload.stickyPauseConfirmed!==true))return json({error:'Explicit sticky-pause verification required.'},400);
