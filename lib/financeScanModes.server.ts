@@ -33,11 +33,15 @@ export async function runFinanceScanMode(mode:FinanceScanMode,manual=false,budge
    if(pending.data.state==='completed')return {state:'already_completed'};
   }
   const key=process.env.STRIPE_RECONCILIATION_READ_KEY;if(!key?.startsWith('rk_live_'))throw Error('read_key_missing');
-  const reservation=await rpc('finance_sync_read_reserve_v2',{p_account:config.data.account_id,p_requested:first?.maxReads??80}) as {id:string;granted:number};
-  if(first&&(!reservation||typeof reservation.id!=='string'||!reservation.id||!Number.isSafeInteger(reservation.granted)||reservation.granted<0||reservation.granted>first.maxReads))throw Error('invalid_first_scan_reservation');
+  const requestedAt=performance.now();
+  const reservation=await rpc('finance_sync_cycle_reserve_v1',{p_account:config.data.account_id,p_mode:mode,p_resume:resumeOnly}) as {state:string;id:string;granted:number;remainingMs?:number};
+  if(reservation?.state==='closed')return {state:'disabled'};
+  if(reservation?.state!=='admitted'||typeof reservation.id!=='string'||!reservation.id||!Number.isSafeInteger(reservation.granted)||reservation.granted<0||reservation.granted>80||
+     (reservation.remainingMs!==undefined&&(!Number.isSafeInteger(reservation.remainingMs)||reservation.remainingMs<0)))throw Error('invalid_finance_reservation');
   let activeJob='';const jobReads:Record<string,number>={};
   const read=createStripeReconciliationRead(key,fetch,()=>budget.remainingMs());
-  const budget=financeScanBudget(read,{budgetMs:first?Math.max(0,Math.min(40000,budgetMs,Date.parse(first.expiresAt)-Date.now())):budgetMs,maxReads:reservation.granted});
+  const cycleTime=reservation.remainingMs===undefined?budgetMs:Math.max(0,reservation.remainingMs-(performance.now()-requestedAt));
+  const budget=financeScanBudget(read,{now:()=>performance.now(),budgetMs:Math.min(budgetMs,cycleTime),maxReads:reservation.granted});
   if(reservation.granted===0){
    await rpc('finance_sync_read_measure_v2',{p_id:reservation.id,p_actual:0,p_mode:mode});
    if(!first)await rpc('finance_sync_modes_alert_v2',{p_account:identity.account_id,p_code:'read_budget_exhausted'});

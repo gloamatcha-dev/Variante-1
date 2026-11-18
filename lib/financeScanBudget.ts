@@ -9,7 +9,7 @@ export function financeScanBudget(read:StripeRead,options:{now?:()=>number;budge
   const delay=Math.max(0,(options.minReadIntervalMs??100)-(now()-last));
   if(now()+delay>=deadline)throw new FinanceScanYield();
   if(delay)await new Promise(r=>setTimeout(r,delay));
-  if(now()>=deadline)throw new FinanceScanYield();
+  if(now()>=deadline||requests>=max)throw new FinanceScanYield();
   requests++;last=now();return read(path,params);
  };
  return {read:get,remainingMs:()=>Math.max(0,deadline-now()),metrics:()=>({requests,maxReads:max,elapsedMs:now()-start})};

@@ -29,6 +29,8 @@ export async function runFinanceSyncServer(options:{invocation?:'scheduled'|'man
   }
   return result;
  }
+ const gate=await getSupabaseAdmin()?.from('finance_sync_config').select('first_cycle_sync').eq('enabled',true).maybeSingle();
+ if(!gate||gate.error||gate.data?.first_cycle_sync!=null)return {state:'disabled'};
  // Owner activity must not hide an absent daily scheduler heartbeat.
  return options.invocation==='manual'?runEnabledFinanceSync():withFinanceHeartbeat(runEnabledFinanceSync,{deferStart:true});
 }
