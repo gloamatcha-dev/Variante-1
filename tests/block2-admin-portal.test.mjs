@@ -13,14 +13,28 @@ import {compareFinanceRoutes,emptyDashboardQuery} from './helpers/dashboardFinan
 const require=createRequire(import.meta.url);
 const React=require('react'),{renderToStaticMarkup}=require('react-dom/server'),ts=require('typescript');
 const source=path=>readFileSync(new URL('../'+path,import.meta.url),'utf8');
-function sharedComponents(){
+function sharedComponents(fetch=()=>{throw Error('No network in render tests');}){
  const sync={exports:{}};const syncJs=ts.transpileModule(source('app/AdminFinanceSyncStatus.tsx'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  vm.runInNewContext(syncJs,{module:sync,exports:sync.exports,require,Intl,Date});
  const js=ts.transpileModule(source('app/AdminPortalShared.tsx'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  const compiled={exports:{}};
- vm.runInNewContext(js,{module:compiled,exports:compiled.exports,require:(name)=>name.includes('AdminGlobalStripeSync')?{useGlobalStripeSync:()=>({status:{verified:true},error:''})}:name.includes('globalFinanceSync')?require('../lib/globalFinanceSync.ts'):name.includes('AdminFinanceSyncStatus')?sync.exports:name.includes('adminPortalModel')?{money,label,text:(v,f='nicht erfasst')=>typeof v==='string'?v:f,date:v=>v??'nicht erfasst'}:require(name),fetch:()=>{throw Error('No network in render tests');},AbortController,console});
+ vm.runInNewContext(js,{module:compiled,exports:compiled.exports,require:(name)=>name.includes('AdminGlobalStripeSync')?{useGlobalStripeSync:()=>({status:{verified:true},error:''})}:name.includes('globalFinanceSync')?require('../lib/globalFinanceSync.ts'):name.includes('AdminFinanceSyncStatus')?sync.exports:name.includes('adminPortalModel')?{money,label,text:(v,f='nicht erfasst')=>typeof v==='string'?v:f,date:v=>v??'nicht erfasst'}:require(name),fetch,AbortController,console});
  return {...compiled.exports,...sync.exports};
 }
+test('broken admin API responses show a usable localized error',async()=>{
+ for(const response of [new Response('<html>502</html>',{status:502}),Response.json(null)]){
+  const {portalRequest}=sharedComponents(async()=>response);
+  await assert.rejects(portalRequest('/api/admin/finance',{action:'summary'}),/Die Daten konnten nicht geladen werden/);
+ }
+});
+test('incremental Stripe warnings use the actual freshness window and separate payouts',()=>{
+ const {AdminFinanceSyncStatus}=sharedComponents();
+ const warning=renderToStaticMarkup(React.createElement(AdminFinanceSyncStatus,{status:{state:'attention',stale:true,schedule:'*/15 * * * *'}}));
+ assert.match(warning,/20 Minuten/);
+ assert.doesNotMatch(warning,/36 Stunden/);
+ const healthy=renderToStaticMarkup(React.createElement(AdminFinanceSyncStatus,{status:{verified:true}}));
+ assert.match(healthy,/Auszahlungen haben eine eigene Transferprüfung/);
+});
 test('primary areas are exactly the requested operational navigation',()=>{
  assert.deepEqual(PRIMARY_AREAS.map(([,label])=>label),['PRODUKTE','ÜBERSICHT','VERKAUF','VERBRAUCHERRECHTE','FINANZEN','INVENTAR','CREATOR','B2B','AKTIVITÄT']);
  assert.deepEqual(SALES_TABS,['BESTELLUNGEN','ABOS','JAHRESPLÄNE']);

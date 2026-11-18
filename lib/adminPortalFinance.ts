@@ -3,8 +3,19 @@ import {costCompleteness,COST_LABELS} from './directCostCoverage.ts';
 import type { FinanceSourceCoverage } from './financeSourceCoverage.ts';
 /** Server read aggregation of stored events. No order-derived duplicate revenue. */
 export function summarizeLedger(events: PortalRow[], expenses: PortalRow[], evidence: PortalRow[] = [], costBasis?: {subjects:PortalRow[];coverage:PortalRow[];months:string[];generalCoverage:PortalRow[];undatedEvents:number;undatedFulfilments:number;providerFeeEvents?:PortalRow[];sourceCoverage?:FinanceSourceCoverage}) {
-  const amount=(rows:PortalRow[],field:string):number|null => rows.every(r=>typeof r[field]==='number')
-    ? rows.reduce((sum,r)=>sum+(r[field] as number),0):null;
+  const safeNumber=(value:bigint):number|null => {
+    const result=Number(value);
+    return Number.isSafeInteger(result)?result:null;
+  };
+  const amount=(rows:PortalRow[],field:string):number|null => {
+    let sum=BigInt(0);
+    for(const row of rows){
+      const cents=row[field];
+      if(typeof cents!=='number'||!Number.isSafeInteger(cents))return null;
+      sum+=BigInt(cents);
+    }
+    return safeNumber(sum);
+  };
   const income=events.filter(r=>r.direction==='inflow');
   const refunds=events.filter(r=>r.kind==='refund');
   const fees=events.filter(r=>r.kind==='payment_fee');
@@ -25,12 +36,18 @@ export function summarizeLedger(events: PortalRow[], expenses: PortalRow[], evid
   const general=expenses.filter(r=>r.category==='general');
   const costs=costBasis?costCompleteness(costBasis.subjects,costBasis.coverage,costBasis.months,costBasis.generalCoverage):null;
   const manualPaymentFeeCount=expenses.filter(r=>r.category==='payment_fee').length;
+  const incomeMoney=amount(income,'gross_cents');
+  const refundMoney=amount(refunds,'gross_cents');
+  const directMoney=amount(direct,'gross_cents');
+  const generalMoney=amount(general,'gross_cents');
   const feeMoney=amount(fees,'gross_cents');
   const positiveEvidence=evidence.filter(r=>r.capture_status==='checked'&&typeof r.fee_cents==='number'&&r.fee_cents>0);
   const feeIntegrity=positiveEvidence.every(r=>(costBasis?.providerFeeEvents??fees).some(f=>f.id===r.fee_event_id&&f.gross_cents===r.fee_cents))&&fees.every(f=>positiveEvidence.some(r=>r.fee_event_id===f.id));
-  const contributionComplete=!!costs&&sourceComplete&&costs.directComplete&&coverage.complete&&feeIntegrity&&manualPaymentFeeCount===0&&costBasis?.undatedEvents===0&&costBasis?.undatedFulfilments===0;
-  const contributionMarginCents=contributionComplete?amount(income,'gross_cents')!-amount(refunds,'gross_cents')!-amount(direct,'gross_cents')!-feeMoney!:null;
-  const resultCents=contributionMarginCents!==null&&costs?.generalComplete?contributionMarginCents-amount(general,'gross_cents')!:null;
+  const contributionCovered=!!costs&&sourceComplete&&costs.directComplete&&coverage.complete&&feeIntegrity&&manualPaymentFeeCount===0&&costBasis?.undatedEvents===0&&costBasis?.undatedFulfilments===0;
+  const contributionMarginCents=contributionCovered&&incomeMoney!==null&&refundMoney!==null&&directMoney!==null&&feeMoney!==null
+    ?safeNumber(BigInt(incomeMoney)-BigInt(refundMoney)-BigInt(directMoney)-BigInt(feeMoney)):null;
+  const resultCents=contributionMarginCents!==null&&costs?.generalComplete&&generalMoney!==null
+    ?safeNumber(BigInt(contributionMarginCents)-BigInt(generalMoney)):null;
   const costBlockers=costs?Object.entries(costs.missing).filter(([,n])=>n>0).map(([key,n])=>`${COST_LABELS[key]} bei ${n} Lieferungen`):['Kostenabdeckung nicht geprüft'];
   if (!sourceComplete) costBlockers.push(costBasis?.sourceCoverage?.status === 'checked'
     ? `Ledger-Abgleich unvollständig: ${costBasis.sourceCoverage.missingPayments} Zahlungen, ${costBasis.sourceCoverage.missingRefunds} Erstattungen fehlen oder weichen ab; ${costBasis.sourceCoverage.conflicts} Widersprüche in lokalen Buchungsbelegen. Angezeigte Einnahmen und Refunds sind nur erfasste Teilbeträge.`
@@ -40,22 +57,24 @@ export function summarizeLedger(events: PortalRow[], expenses: PortalRow[], evid
   if(!feeIntegrity)costBlockers.push('Providergebühren-Ereignisse nicht vollständig zugeordnet');
   if(manualPaymentFeeCount)costBlockers.push('Manuelle Zahlungsgebühren müssen abgegrenzt werden.');
   if(costBasis&&(costBasis.undatedEvents||costBasis.undatedFulfilments))costBlockers.push('Ereignisse oder Lieferungen ohne gesichertes Datum');
+  if(contributionCovered&&contributionMarginCents===null)costBlockers.push('Ein Betrag für den Deckungsbeitrag fehlt oder ist nicht als exakter Centbetrag darstellbar.');
+  if(contributionMarginCents!==null&&costs?.generalComplete&&resultCents===null)costBlockers.push('Das Ergebnis ist wegen fehlender oder nicht exakt darstellbarer Centbeträge unbekannt.');
   const channels=[...new Set(events.map(r=>String(r.channel)))].map(channel=>({
     channel, incomeCents:amount(income.filter(r=>r.channel===channel),'gross_cents'),
     refundCents:amount(refunds.filter(r=>r.channel===channel),'gross_cents'),
     knownCostCents:expenses.some(r=>r.channel===channel)?amount(expenses.filter(r=>r.channel===channel),'gross_cents'):null,
   }));
   return {
-    incomeCents:amount(income,'gross_cents'), refundCents:amount(refunds,'gross_cents'),
-    directCostCents:direct.length?amount(direct,'gross_cents'):costs?.directComplete?0:null,
-    generalCostCents:general.length?amount(general,'gross_cents'):costs?.generalComplete?0:null,
-    providerFeeCents:fees.length?amount(fees,'gross_cents'):coverage.complete && coverage.checkedPositive===0 ? 0 : null,
+    incomeCents:incomeMoney, refundCents:refundMoney,
+    directCostCents:direct.length?directMoney:costs?.directComplete?0:null,
+    generalCostCents:general.length?generalMoney:costs?.generalComplete?0:null,
+    providerFeeCents:fees.length?feeMoney:coverage.complete && coverage.checkedPositive===0 ? 0 : null,
     providerFeeCoverage:coverage,
     providerFeeCoverageLabel:coverage.complete?'Providergebühren vollständig geprüft':coverage.checkedPositive+coverage.checkedZero+coverage.notApplicable>0?'Providergebühren teilweise erfasst':'Providergebühren noch unvollständig',
     storedIncomeTaxCents:income.length?amount(income,'tax_cents'):null,
     storedRefundTaxCents:refunds.length?amount(refunds,'tax_cents'):null,
     storedInputTaxCents:expenses.length?amount(expenses,'vat_cents'):null,
-    resultCents,contributionMarginCents,contributionComplete,resultComplete:resultCents!==null,
+    resultCents,contributionMarginCents,contributionComplete:contributionMarginCents!==null,resultComplete:resultCents!==null,
     manualPaymentFeeAmbiguity:manualPaymentFeeCount>0,manualPaymentFeeCount,costBlockers,openGeneralMonths:costs?.openMonths??[],
     sourceCoverage: costBasis?.sourceCoverage ?? null,
     completeness:sourceComplete?'Interner Ledger mit Zahlungsquellen abgeglichen; Ergebnis nur bei vollständigen Gebühren und Kosten.':'Einnahmen und Refunds zeigen ausschließlich erfasste Ledger-Beträge. Zahlungsabgleich unvollständig oder unbekannt; fehlende Buchungen werden nicht als null Euro bestätigt.',

@@ -9,24 +9,29 @@ export async function portalRequest(endpoint:string,body:PortalRow,signal?:Abort
   const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal});
   if(response.status===401){if(typeof window!=='undefined')window.dispatchEvent(new Event('gloa-admin-session-lost'));throw new Error('Sitzung abgelaufen. Bitte erneut anmelden.');}
   if(response.status===403)throw new Error('Für diesen Bereich fehlt die Berechtigung.');
-  const data=await response.json();
-  if(!response.ok || data.ok===false)throw new Error(typeof data.error==='string'?data.error:'Die Daten konnten nicht geladen werden.');
-  return data;
+  const data:unknown=await response.json().catch(()=>null);
+  if(!data||typeof data!=='object'||Array.isArray(data))throw new Error('Die Daten konnten nicht geladen werden.');
+  const result=data as PortalRow;
+  if(!response.ok || result.ok===false)throw new Error(typeof result.error==='string'?result.error:'Die Daten konnten nicht geladen werden.');
+  return result;
 }
 export function usePortalRead(endpoint:string,body:PortalRow){
   const sync=useGlobalStripeSync();
   const syncVersion=JSON.stringify([sync?.status?.state,sync?.status?.last_success_at,sync?.status?.last_attempt_at,sync?.status?.unresolved]);
-  const key=JSON.stringify(body);
+  const bodyJson=JSON.stringify(body);
+  const key=JSON.stringify([endpoint,bodyJson]);
   const [state,setState]=useState<{key:string;data:PortalRow|null;error:string}>({key:'',data:null,error:''});
   const [revision,setRevision]=useState(0);
   const refresh=useCallback(()=>setRevision(r=>r+1),[]);
   useEffect(()=>{
     const controller=new AbortController();
-    portalRequest(endpoint,JSON.parse(key),controller.signal).then(data=>setState({key,data,error:''})).catch(error=>{
+    portalRequest(endpoint,JSON.parse(bodyJson),controller.signal).then(data=>{
+      if(!controller.signal.aborted)setState({key,data,error:''});
+    }).catch(error=>{
       if(!controller.signal.aborted)setState({key,data:null,error:error instanceof Error?error.message:'Laden fehlgeschlagen.'});
     });
     return()=>controller.abort();
-  },[endpoint,key,revision,syncVersion]);
+  },[endpoint,key,bodyJson,revision,syncVersion]);
   return {...(state.key===key?state:{data:null,error:''}),refresh};
 }
 export function ReadState({data,error,retry,children}:{data:PortalRow|null;error:string;retry:()=>void;children:ReactNode}){

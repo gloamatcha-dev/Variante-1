@@ -10,14 +10,20 @@ import type {PortalRow} from './adminPortalModel.ts';
 
 /** Shared authoritative, read-only Finance basis for Finance and Dashboard. */
 export async function readFinanceSummary(admin: SupabaseClient, period: ReturnType<typeof portalPeriod>) {
-  const [baseRead,statusRead,periodRead]=await Promise.allSettled([
+  const scanModesEnabled=process.env.FINANCE_SCAN_MODES_ENABLED==='true';
+  const [baseRead,statusRead,periodRead,modesRead]=await Promise.allSettled([
     admin.rpc('read_cost_finance_basis_v1',{p_from:period.from,p_to:period.to}),
     admin.rpc('finance_sync_global_status_v1'),
     admin.rpc('finance_sync_period_v1',{p_from:period.from,p_to:period.to}),
+    scanModesEnabled?admin.rpc('finance_sync_modes_status_v2'):null,
   ]);
   if(baseRead.status!=='fulfilled')throw new Error('Cost basis unavailable');
   const {data,error}=baseRead.value;
-  const rawStatus=statusRead.status==='fulfilled'&&!statusRead.value.error?statusRead.value.data as Record<string,unknown>|null:null;
+  let rawStatus=statusRead.status==='fulfilled'&&!statusRead.value.error?statusRead.value.data as Record<string,unknown>|null:null;
+  if(scanModesEnabled){
+    const modes=modesRead.status==='fulfilled'&&!modesRead.value?.error?modesRead.value?.data:null;
+    rawStatus=rawStatus&&modes?.version===2?{...rawStatus,scan_modes:modes}:null;
+  }
   const syncStatus=globalFinanceSyncStatus(rawStatus,process.env.FINANCE_RECONCILIATION_ENABLED==='true');
   const cash=periodRead.status==='fulfilled'&&!periodRead.value.error?periodRead.value.data as Record<string,unknown>|null:null;
   if (error || !data) throw new Error('Cost basis unavailable');

@@ -6,15 +6,22 @@ export async function readPortalPages(client:SupabaseClient,table:string,
   order='id',columns='*'):Promise<PortalRow[]> {
   if(table==='order_attributions'&&order==='id')order='order_id';
   const rows:PortalRow[]=[];
-  for(let page=0;;page++){
+  let expectedCount:number|null=null;
+  for(;;){
     let query=filter(client.from(table).select(columns,{count:'exact'})).order(order);
     if(table==='creator_roles')query=query.order('role');
     if(table==='document_links')query=query.order('subject_type').order('subject_id');
-    const {data,error,count}=await query.range(page*500,page*500+499);
-    if(error)throw new Error(`Read ${table} failed`);
-    const next=(data??[]) as unknown as PortalRow[];
+    const {data,error,count}=await query.range(rows.length,rows.length+499);
+    if(error||!Array.isArray(data))throw new Error(`Read ${table} failed`);
+    if(typeof count==='number'){
+      if(expectedCount!==null&&count!==expectedCount)throw new Error(`Read ${table} changed during pagination`);
+      expectedCount=count;
+    }
+    const next=data as unknown as PortalRow[];
     rows.push(...next);
-    if(next.length===0 || (typeof count==='number' && rows.length>=count))break;
+    if(expectedCount!==null&&rows.length===expectedCount)break;
+    if(expectedCount!==null&&(rows.length>expectedCount||next.length===0))throw new Error(`Read ${table} incomplete`);
+    if(next.length===0)break;
   }
   return rows;
 }
