@@ -6,11 +6,19 @@
     },
     {
       "path": "/api/cron/finance-reconciliation",
-      "schedule": "40 5 * * *"
+      "schedule": "0 11 * * *"
+    },
+    {
+      "path": "/api/cron/finance-reconciliation?slot=12",
+      "schedule": "0 12 * * *"
     },
     {
       "path": "/api/cron/finance-reconciliation-verify",
-      "schedule": "40 6 * * *"
+      "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/cron/finance-reconciliation-verify?slot=13",
+      "schedule": "0 13 * * *"
     }
   ]
 }
