@@ -73,6 +73,7 @@ export function summarizeLedger(events: PortalRow[], expenses: PortalRow[], evid
     providerFeeCoverage:coverage,
     providerFeeCoverageLabel:coverage.complete?'Providergebühren vollständig geprüft':coverage.checkedPositive+coverage.checkedZero+coverage.notApplicable>0?'Providergebühren teilweise erfasst':'Providergebühren noch unvollständig',
     storedIncomeTaxCents:income.length?amount(income,'tax_cents'):null,
+    storedRefundNetCents:refunds.length?amount(refunds,'net_cents'):null,
     storedRefundTaxCents:refunds.length?amount(refunds,'tax_cents'):null,
     storedInputTaxCents:expenses.length?amount(expenses,'vat_cents'):null,
     resultCents,contributionMarginCents,contributionComplete:contributionMarginCents!==null,resultComplete:resultCents!==null,

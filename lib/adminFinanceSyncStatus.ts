@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { berlinInstant } from './b2bCancellationRules.ts';
 import { readPortalPages } from './adminPortalRead.ts';
 import { globalFinanceSyncStatus } from './globalFinanceSync.ts';
+import { readHistoricalRefundTaxEvidence } from './historicalRefundTaxEvidence.ts';
 
 type Row = Record<string, unknown>;
 const berlinDate = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Berlin' });
@@ -72,7 +73,11 @@ export function adminFinanceSyncStatus(raw: Row, enabled: boolean, scope: string
   };
 }
 
-export async function readAdminFinanceSyncStatus(admin: SupabaseClient, raw: Row | null, enabled: boolean) {
+export async function readAdminFinanceSyncStatus(admin: SupabaseClient, raw: Row | null, enabled: boolean, historicalEvidence?: Row[]) {
+  if (typeof raw?.unknown_refund_tax === 'number') {
+    const evidence=historicalEvidence??await readHistoricalRefundTaxEvidence(admin);
+    raw={...raw,unknown_refund_tax:Math.max(0,raw.unknown_refund_tax-evidence.length)};
+  }
   if (!enabled || raw?.configured !== true || (raw.scan_modes as Row | undefined)?.version !== 2) {
     return globalFinanceSyncStatus(raw, enabled);
   }

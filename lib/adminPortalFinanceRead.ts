@@ -6,11 +6,13 @@ import { financeSourceCoverage } from './financeSourceCoverage.ts';
 import {financeSyncCoverage} from './financeSyncMonitoring.ts';
 import {readAdminFinanceSyncStatus} from './adminFinanceSyncStatus.ts';
 import {financeRefundEvidence} from './financeRefundEvidence.ts';
+import {readHistoricalRefundTaxEvidence,withHistoricalRefundTaxEvidence} from './historicalRefundTaxEvidence.ts';
 import type {PortalRow} from './adminPortalModel.ts';
 
 /** Shared authoritative, read-only Finance basis for Finance and Dashboard. */
 export async function readFinanceSummary(admin: SupabaseClient, period: ReturnType<typeof portalPeriod>) {
   const scanModesEnabled=process.env.FINANCE_SCAN_MODES_ENABLED==='true';
+  const evidenceRead=readHistoricalRefundTaxEvidence(admin);
   const [baseRead,statusRead,periodRead,modesRead]=await Promise.allSettled([
     admin.rpc('read_cost_finance_basis_v1',{p_from:period.from,p_to:period.to}),
     admin.rpc('finance_sync_global_status_v1'),
@@ -24,7 +26,8 @@ export async function readFinanceSummary(admin: SupabaseClient, period: ReturnTy
     const modes=modesRead.status==='fulfilled'&&!modesRead.value?.error?modesRead.value?.data:null;
     rawStatus=rawStatus&&modes?.version===2?{...rawStatus,scan_modes:modes}:null;
   }
-  const syncStatus=await readAdminFinanceSyncStatus(admin,rawStatus,process.env.FINANCE_RECONCILIATION_ENABLED==='true')
+  const historicalEvidence=await evidenceRead;
+  const syncStatus=await readAdminFinanceSyncStatus(admin,rawStatus,process.env.FINANCE_RECONCILIATION_ENABLED==='true',historicalEvidence)
     .catch(()=>null);
   const cash=periodRead.status==='fulfilled'&&!periodRead.value.error?periodRead.value.data as Record<string,unknown>|null:null;
   if (error || !data) throw new Error('Cost basis unavailable');
@@ -55,7 +58,8 @@ export async function readFinanceSummary(admin: SupabaseClient, period: ReturnTy
   } catch {
     basis.sourceCoverage = {status:'unavailable',complete:false,missingPayments:0,missingRefunds:0,conflicts:0};
   }
-  const summary = summarizeLedger(basis.events, basis.expenses, basis.providerEvidence, basis);
+  const events=withHistoricalRefundTaxEvidence(basis.events,historicalEvidence);
+  const summary = summarizeLedger(events, basis.expenses, basis.providerEvidence, basis);
   const sync=financeSyncCoverage(syncStatus,period);
   const cashCoverage=financeSyncCoverage(cash?{...sync.status,state:cash.unresolved===0?'complete':'attention',last_success_at:cash.last_scan_at,verified_from:cash.cash_from,verified_to:cash.cash_to,missing_payments:0,missing_refunds:0,missing_fees:0,persistent_failures:0,unbridged_events:0}:null,period);
   const cashVerified=sync.verified&&cashCoverage.verified&&Date.parse(String(cash?.cash_to))<=Date.parse(String(sync.asOf));
