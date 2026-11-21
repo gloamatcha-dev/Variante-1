@@ -163,9 +163,10 @@ test('Cost explanations distinguish absent period records from proof of complete
  const recorded=summarizeLedger(events,[{category:'packaging',gross_cents:200,vat_cents:null}]);assert.ok(!recorded.missingCostCategories.includes('Verpackung'));assert.equal(recorded.storedInputTaxCents,null);assert.equal(recorded.resultCents,null);assert.equal(recorded.storedIncomeTaxCents,0);
  const route=source('app/api/admin/finance/route.ts');assert.match(route,/read_sensitive/);assert.doesNotMatch(route,/inventory_items|inventory_movements|record_payment_fee_event/);
 });
-test('Documents explicitly register metadata without claiming private file transfer',()=>{
- const ui=source('app/AdminPortalDocuments.tsx');assert.match(ui,/nur Metadaten und Belegreferenzen/);assert.match(ui,/keinen Upload, Download/);assert.match(ui,/Datei nicht geprüft/);assert.doesNotMatch(ui,/type="file"|createSignedUrl|\.upload\(/);
- const route=source('app/api/admin/documents/route.ts');assert.match(route,/from\("documents"\)\.insert/);assert.doesNotMatch(route,/createSignedUrl|\.download\(|\.upload\(/);
+test('Documents accept private originals and keep metadata-only references explicit',()=>{
+ const ui=source('app/AdminPortalDocuments.tsx');assert.match(ui,/type="file"/);assert.match(ui,/Referenzbeleg ohne gespeicherte Originaldatei/);
+ const route=source('app/api/admin/documents/route.ts');assert.match(route,/read_sensitive/);assert.match(route,/\.download\(/);
+ assert.match(route,/admin_accounting_document_v1/);assert.doesNotMatch(route,/getPublicUrl|createSignedUrl/);
 });
 test('creator applications, combined roles, affiliate active flag, UGC and payout history render',()=>{
  const fixture={creators:[{id:'c',display_name:'Test Creator',email:'c@example.invalid',status:'active'}],applications:[{id:'a',display_name:'Bewerber',status:'submitted',requested_roles:['influencer','ugc_creator']}],roles:[{creator_id:'c',role:'influencer'},{creator_id:'c',role:'affiliate'}],links:[{id:'l',creator_id:'c',slug:'test-creator',active:false}],codes:[],ugcAssignments:[{id:'u',title:'Test Reel',status:'briefed'}],commissions:[{id:'earned',creator_id:'c',kind:'earned',payout_state:'held',amount_cents:125},{id:'reversed',creator_id:'c',kind:'reversal',payout_state:'reversed',amount_cents:25}],balances:[{creatorId:'c',balance:{pending_cents:10000,eligible_cents:0,held_cents:125,paid_cents:null}}],payouts:[]};

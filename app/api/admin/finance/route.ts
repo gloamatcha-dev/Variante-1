@@ -60,11 +60,18 @@ export async function POST(request: Request): Promise<Response> {
       const page = typeof raw.page === "number" && Number.isSafeInteger(raw.page) ? Math.max(1,raw.page) : 1;
       let query = admin.from("financial_events").select("*, orders(order_number,customer_snapshot)",{count:"exact"});
       query=raw.undated===true?query.is("occurred_on",null):query.gte("occurred_on",period.from).lt("occurred_on",period.to);
-      if(["order_payment","annual_prepayment","b2b_settlement","refund","payment_fee"].includes(String(raw.kind)))query=query.eq("kind",raw.kind);
+      if(["order_payment","annual_prepayment","b2b_settlement","refund","payment_fee","manual_income"].includes(String(raw.kind)))query=query.eq("kind",raw.kind);
       if(["b2c","b2b","event","internal"].includes(String(raw.channel)))query=query.eq("channel",raw.channel);
       const {data,error,count}=await query.order("occurred_on",{ascending:false}).order("id").range((page-1)*PAGE_CAP,page*PAGE_CAP-1);
       if(error)throw new Error("Ledger read failed");
       const events=(data??[]) as Record<string,unknown>[];
+      const manualIds=events.filter(event=>event.kind==='manual_income').map(event=>event.id);
+      if(manualIds.length){
+        const replaced=await admin.rpc('admin_manual_income_replaced_v1',{ids:manualIds});
+        if(replaced.error||!Array.isArray(replaced.data))throw Error('Manual income correction status unavailable');
+        const replacedIds=new Set(replaced.data);
+        for(const event of events)if(event.kind==='manual_income')event.superseded=replacedIds.has(event.id);
+      }
       const planIds=[...new Set(events.map(r=>r.annual_plan_id).filter((v):v is string=>typeof v==='string'))];
       if(planIds.length){
         const plans=await admin.from('annual_plans').select('id,variant_id').in('id',planIds);

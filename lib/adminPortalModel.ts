@@ -34,6 +34,7 @@ export const PORTAL_LABELS: Record<string, string> = {
   due_today:'Heute fällig', overdue:'Überfällig', upcoming:'Geplant',
   negative:'Negativ',out:'Nicht verfügbar',low:'Niedrig',ok:'Ausreichend',
   no_dispatch_target_configured:'Kein Versandziel konfiguriert', order_missing:'Bestellung nicht gefunden',
+  financial_event:'Ledger-Buchung', manual_income:'Manuelle Einnahme (außerhalb Stripe)',
   order_payment:'Bestellzahlung', annual_prepayment:'Jahresvorauszahlung', b2b_settlement:'B2B-Zahlung',
   refund:'Erstattung', payment_fee:'Zahlungsgebühr', earned:'Verdiente Provision', reversal:'Provisionskorrektur',
   influencer:'Influencer', ugc_creator:'UGC Creator', affiliate:'Affiliate',
