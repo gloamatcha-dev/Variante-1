@@ -26,11 +26,18 @@ export function AdminPortalDocuments(){
   const {data,error,refresh}=usePortalRead('/api/admin/documents',{action:'list'});
   const [selectedId,setSelectedId]=useState<string|null>(null),[form,setForm]=useState(false);
   const [notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
+  const [confirmCleanup,setConfirmCleanup]=useState(false);
   const docs=(data?.documents??[]) as PortalRow[];
   const links=(data?.links??[]) as PortalRow[];
   const selected=docs.find(row=>row.id===selectedId)??null;
   const selectedLinks=links.filter(row=>row.document_id===selectedId);
   const ledgerLinks=selectedLinks.filter(row=>row.subject_type==='financial_event');
+  const cleanupPending=Boolean(selected?.cleanup_operation_id);
+  const canCleanup=data?.canCleanup===true&&selected?.kind==='other'&&selectedLinks.length===0&&
+    typeof selected.file_sha256==='string'&&
+    ['pdf','jpg','png'].some(ext=>selected.storage_path===`${selected.id}/original.${ext}`)&&
+    ['external_reference','issued_on','issuer','invoice_number','gross_cents','net_cents','tax_cents','currency','payment_status','note']
+      .every(field=>selected[field]==null);
   const endpoint='/api/admin/documents';
 
   async function perform(action:()=>Promise<void>){
@@ -81,7 +88,7 @@ export function AdminPortalDocuments(){
       <button disabled={busy}>Dokument speichern</button>
     </form>}
     <ReadState data={data} error={error} retry={refresh}>
-      <BusinessTable rows={docs} onOpen={row=>setSelectedId(String(row.id))} columns={[
+      <BusinessTable rows={docs} onOpen={row=>{setConfirmCleanup(false);setSelectedId(String(row.id));}} columns={[
         {key:'title',title:'Dokument'},{key:'kind',title:'Art',render:r=>label(r.kind)},
         {key:'issued_on',title:'Rechnungsdatum',render:r=>date(r.issued_on)},{key:'issuer',title:'Aussteller'},
         {key:'invoice_number',title:'Rechnungsnummer'},
@@ -89,6 +96,30 @@ export function AdminPortalDocuments(){
     </ReadState>
     <RecordDetails row={selected} title={text(selected?.title)} onClose={()=>setSelectedId(null)}>
       {selected&&<>
+        {cleanupPending&&<p>Löschung offen. Zuordnung und Bearbeitung sind gesperrt.</p>}
+        {canCleanup&&<button type="button" disabled={busy} onClick={()=>setConfirmCleanup(true)}>
+          {cleanupPending?'Löschung fortsetzen':'Dokument entfernen'}
+        </button>}
+        {canCleanup&&confirmCleanup&&<dialog open aria-label="Dokument endgültig entfernen">
+          <form onSubmit={event=>{
+            event.preventDefault();
+            const fields=new FormData(event.currentTarget);
+            void perform(async()=>{
+              try{
+                await portalRequest(endpoint,{action:'cleanup_document',id:selectedId,confirmed:true,review:fields.get('review')});
+                setSelectedId(null);setNotice('Datei und Metadaten entfernt.');
+              }finally{setConfirmCleanup(false);refresh();}
+            });
+          }}>
+            <p>Datei und Metadaten werden endgültig entfernt.</p>
+            {!cleanupPending&&<label>Nachweis, dass keine Aufbewahrungspflicht besteht
+              <textarea name="review" required minLength={15} maxLength={500}/>
+            </label>}
+            <button disabled={busy}>Löschung bestätigen</button>
+            <button type="button" disabled={busy} onClick={()=>setConfirmCleanup(false)}>Abbrechen</button>
+          </form>
+        </dialog>}
+        {!cleanupPending&&<>
         {typeof selected.file_sha256==='string'
           ? <button type="button" disabled={busy} onClick={()=>void download()}>Originalbeleg herunterladen</button>
           : <p>Referenzbeleg ohne gespeicherte Originaldatei.</p>}
@@ -116,6 +147,7 @@ export function AdminPortalDocuments(){
               <button disabled={busy}>Einnahme speichern</button>
             </form>
           </details>
+        </>}
         </>}
       </>}
     </RecordDetails>

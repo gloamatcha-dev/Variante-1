@@ -14,6 +14,7 @@ const postgres=process.env.GLOA_ACCOUNTING_TEST_POSTGRES;
 const cluster=process.env.GLOA_ACCOUNTING_TEST_CLUSTER;
 const load=path=>readFileSync(new URL(path,import.meta.url),'utf8');
 const migration=load('../supabase/migrations/20261121222948_accounting_document_completion.sql');
+const cleanupMigration=load('../supabase/migrations/20261121230235_accounting_document_cleanup.sql');
 const url='http://local.invalid/api/admin/documents';
 const actor='10000000-0000-4000-8000-000000000001';
 const expense='10000000-0000-4000-8000-000000000002';
@@ -32,7 +33,8 @@ test('private receipt to historical expenses and effective manual income with is
   };
   const query=expression=>{
     const result=sql("select encode(convert_to(coalesce(("+expression+")::text,'null'),'UTF8'),'hex') as payload;");
-    if(result.stderr.includes('ERROR'))return {error:{code:result.stderr.includes('duplicate key')?'23505':'22023',message:result.stderr}};
+    if(result.stderr.includes('ERROR'))return {error:{code:result.stderr.includes('duplicate key')?'23505':
+      result.stderr.includes('document_cleanup_forbidden')?'42501':'22023',message:result.stderr}};
     const hex=result.stdout.match(/payload = "([a-f0-9]+)"/)?.[1];
     assert.ok(hex,result.stdout);
     return {data:JSON.parse(Buffer.from(hex,'hex').toString('utf8')),error:null};
@@ -42,7 +44,7 @@ test('private receipt to historical expenses and effective manual income with is
     create role anon; create role authenticated; create role service_role;
     create schema storage; create schema auth;
     create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);
-    create table storage.objects(id uuid primary key,bucket_id text);
+    create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text,name text);
     alter table storage.objects enable row level security;
     create table auth.users(id uuid primary key);
     create table public.admin_users(user_id uuid primary key,role text,is_active boolean);
@@ -82,19 +84,32 @@ test('private receipt to historical expenses and effective manual income with is
         'undatedEvents',0,'undatedFulfilments',0)
     $basis$;
   `;
-  assert.doesNotMatch(sql(fixture,migration).stderr,/ERROR/);
+  assert.doesNotMatch(sql(fixture,migration,cleanupMigration).stderr,/ERROR/);
   assert.deepEqual(read("select to_jsonb(b) from storage.buckets b where id='gloa-finance-documents'").public,false);
   assert.equal(read("select to_jsonb(count(*)) from pg_policy where polname='gloa_finance_documents_server_only' and not polpermissive"),1);
 
   let role='owner';
+  let storageFailure=false,finishFailure=false,beforeRemove;
   const storage=new Map();
   const db={
     storage:{from(name){
       assert.equal(name,'gloa-finance-documents');
       return {
-        upload:async(path,data)=>{assert.ok(!storage.has(path));storage.set(path,Buffer.from(data));return {error:null};},
+        upload:async(path,data)=>{
+          assert.ok(!storage.has(path));storage.set(path,Buffer.from(data));
+          assert.doesNotMatch(sql(`insert into storage.objects(bucket_id,name) values('${name}',${literal(path)});`).stderr,/ERROR/);
+          return {error:null};
+        },
         download:async path=>({data:storage.has(path)?new Blob([storage.get(path)]):null,error:null}),
-        remove:async paths=>{paths.forEach(path=>storage.delete(path));return {error:null};},
+        remove:async paths=>{
+          if(beforeRemove)await beforeRemove();
+          if(storageFailure)return {error:{message:'Storage unavailable'}};
+          for(const path of paths){
+            storage.delete(path);
+            assert.doesNotMatch(sql(`delete from storage.objects where name=${literal(path)};`).stderr,/ERROR/);
+          }
+          return {error:null};
+        },
       };
     }},
     from(table){
@@ -102,6 +117,11 @@ test('private receipt to historical expenses and effective manual income with is
       return {select:()=>({eq:(_key,id)=>({maybeSingle:async()=>query(`select to_jsonb(d) from documents d where id=${literal(id)}::uuid`)})})};
     },
     async rpc(name,args){
+      if(name==='admin_document_cleanup_v1'){
+        if(args.step==='finish'&&finishFailure)return {error:{code:'08000'}};
+        const values=[args.actor,args.target,args.step,args.review,args.operation].map(v=>v==null?'null':literal(v));
+        return query(`select public.admin_document_cleanup_v1(${values.join(',')})`);
+      }
       assert.equal(name,'admin_accounting_document_v1');
       return query(`select to_jsonb(public.admin_accounting_document_v1(${literal(args.p_actor)}::uuid,
         ${literal(args.p_action)},${literal(JSON.stringify(args.p))}::jsonb))`);
@@ -173,4 +193,39 @@ test('private receipt to historical expenses and effective manual income with is
   assert.equal(year.summary.incomeCents,3500);
   assert.equal(year.summary.resultCents,null);
   assert.equal(summarizeLedger(year.basis.events,[]).storedIncomeTaxCents,null);
+
+  const finances=()=>read("select jsonb_build_array((select jsonb_agg(to_jsonb(e) order by id) from financial_events e),(select jsonb_agg(to_jsonb(e) order by id) from business_expenses e))");
+  const before=finances();
+  const createTestDocument=async suffix=>{
+    const response=await post(form(Buffer.concat([pdf,Buffer.from(suffix)]),{
+      kind:'other',title:'Synthetic storage fixture',issuedOn:'',issuer:'',invoiceNumber:'',grossCents:'',currency:'',
+    }));
+    assert.equal(response.status,200);
+    return (await response.json()).documentId;
+  };
+  const cleanup=(id,review='Synthetic PDF, no accounting or retention obligation')=>({action:'cleanup_document',id,confirmed:true,review});
+  const id=await createTestDocument(' cleanup');
+  const linked=await createTestDocument(' linked');
+  assert.equal((await post({...link,documentId:linked,entityId:expense})).status,200);
+  role='viewer';assert.equal((await post(cleanup(id))).status,403);role='owner';
+  assert.equal(query(`select public.admin_document_cleanup_v1('${missing}','${id}','start','not authorized to remove',null)`).error.code,'42501');
+  assert.equal((await post(cleanup(id,''))).status,409);
+  for(const protectedId of [linked,documentId,incomeId])assert.equal((await post(cleanup(protectedId))).status,409);
+  beforeRemove=async()=>{
+    assert.equal((await post({...link,documentId:id,entityId:expense})).status,400);
+    assert.equal((await post({action:'update_document',id,title:'Changed during deletion'})).status,400);
+  };
+  storageFailure=true;
+  assert.equal((await post(cleanup(id))).status,503);
+  assert.ok(storage.has(id+'/original.pdf'));
+  storageFailure=false;finishFailure=true;
+  assert.equal((await post(cleanup(id,''))).status,503);
+  assert.ok(!storage.has(id+'/original.pdf'));
+  assert.ok(read(`select to_jsonb(cleanup_operation_id) from documents where id='${id}'`));
+  finishFailure=false;
+  assert.equal((await post(cleanup(id,''))).status,200);
+  assert.equal(read(`select to_jsonb(d) from documents d where id='${id}'`),null);
+  assert.equal(read("select to_jsonb(count(*)) from admin_activity_log where action='document_cleanup_completed'"),1);
+  assert.equal(read("select to_jsonb(count(*)) from admin_activity_log where action='document_cleanup_failed'"),2);
+  assert.deepEqual(finances(),before);
 });

@@ -73,7 +73,7 @@ export async function POST(request:Request) {
   try{
     if(action==='list'&&!multipart){
       const [documents,links]=await Promise.all([readPortalPages(admin,'documents'),readPortalPages(admin,'document_links',q=>q,'document_id')]);
-      return json({ok:true,documents,links});
+      return json({ok:true,documents,links,canCleanup:gate.identity.role==='owner'});
     }
     if(action==='download'&&!multipart){
       if(!uuid(input.id))return json({error:'Ungültiger Beleg.'},400);
@@ -93,6 +93,42 @@ export async function POST(request:Request) {
     if(!write.ok)return write.response;
     if(request.headers.get('origin')!==new URL(request.url).origin)return json({error:'Ungültiger Anfrageursprung.'},403);
     const actor=write.session.userId;
+    if(action==='cleanup_document'&&!multipart){
+      if(!uuid(input.id)||input.confirmed!==true)return json({error:'Löschung ausdrücklich bestätigen.'},400);
+      const review=typeof input.review==='string'?input.review.trim():null;
+      if(review&&review.length>500)return json({error:'Begründung zu lang.'},400);
+      let operation:string|null=null;
+      const cleanup=(step:string)=>admin.rpc('admin_document_cleanup_v1',{
+        actor,target:input.id,step,review,operation,
+      });
+      const pending=()=>json({error:'Löschung nicht bestätigt. Bitte denselben Beleg erneut auswählen und die Löschung fortsetzen.'},503);
+      try{
+        const started=await cleanup('start');
+        if(started.error){
+          if(started.error.code==='42501')return json({error:'Nur der Owner darf Dokumente löschen.'},403);
+          if(['55000','22023','P0002'].includes(started.error.code))return json({error:'Dokument ist nicht zur Löschung freigegeben.'},409);
+          return pending();
+        }
+        const path=started.data?.path;
+        if(!uuid(started.data?.operation)||typeof path!=='string'||
+          !new RegExp('^'+String(input.id)+'/original[.](pdf|jpg|png)$').test(path))return pending();
+        operation=started.data.operation;
+        if(started.data.object_present!==false){
+          const removed=await admin.storage.from(bucket).remove([path]);
+          if(removed.error){
+            await cleanup('failed');
+            return pending();
+          }
+        }
+        const finished=await cleanup('finish');
+        if(finished.error)await cleanup('failed');
+        if(finished.error||finished.data?.completed!==true)return pending();
+        return json({ok:true});
+      }catch{
+        if(operation)await Promise.resolve().then(()=>cleanup('failed')).catch(()=>{});
+        return pending();
+      }
+    }
     if(action==='create_document'){
       if(!kinds.includes(String(input.kind)))return json({error:'Ungültige Belegart.'},400);
       const fields=metadata(input);
