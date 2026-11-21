@@ -4,7 +4,7 @@ import { costCompleteness } from './directCostCoverage.ts';
 import { readPortalPages } from './adminPortalRead.ts';
 import { financeSourceCoverage } from './financeSourceCoverage.ts';
 import {financeSyncCoverage} from './financeSyncMonitoring.ts';
-import {globalFinanceSyncStatus} from './globalFinanceSync.ts';
+import {readAdminFinanceSyncStatus} from './adminFinanceSyncStatus.ts';
 import {financeRefundEvidence} from './financeRefundEvidence.ts';
 import type {PortalRow} from './adminPortalModel.ts';
 
@@ -24,7 +24,8 @@ export async function readFinanceSummary(admin: SupabaseClient, period: ReturnTy
     const modes=modesRead.status==='fulfilled'&&!modesRead.value?.error?modesRead.value?.data:null;
     rawStatus=rawStatus&&modes?.version===2?{...rawStatus,scan_modes:modes}:null;
   }
-  const syncStatus=globalFinanceSyncStatus(rawStatus,process.env.FINANCE_RECONCILIATION_ENABLED==='true');
+  const syncStatus=await readAdminFinanceSyncStatus(admin,rawStatus,process.env.FINANCE_RECONCILIATION_ENABLED==='true')
+    .catch(()=>null);
   const cash=periodRead.status==='fulfilled'&&!periodRead.value.error?periodRead.value.data as Record<string,unknown>|null:null;
   if (error || !data) throw new Error('Cost basis unavailable');
   const basis = data as NonNullable<Parameters<typeof summarizeLedger>[3]> & {

@@ -3,6 +3,12 @@ import {createContext,useCallback,useContext,useEffect,useRef,useState,type Reac
 import type {PortalRow} from '../lib/adminPortalModel.ts';
 import {berlinSyncTime} from '../lib/globalFinanceSync.ts';
 
+function berlinWindowLabel(start: unknown, hours: string) {
+ return typeof start==='string'&&Number.isFinite(Date.parse(start))
+  ? new Intl.DateTimeFormat('de-DE',{dateStyle:'short',timeZone:'Europe/Berlin'}).format(new Date(start))+' · '+hours+' Uhr Berlin'
+  : 'noch nicht bestätigt';
+}
+
 const SyncContext=createContext<{status:PortalRow|null;error:string;refresh:()=>Promise<void>;header:ReactNode}|null>(null);
 export const useGlobalStripeSync=()=>useContext(SyncContext);
 export function AdminGlobalStripeSync(){return useGlobalStripeSync()?.header??null;}
@@ -33,12 +39,14 @@ export function AdminStripeSyncProvider({children}:{children:ReactNode}) {
  const warning=!!error||status?.stale===true||status?.overdue===true||['retry','attention','disabled'].includes(String(status?.state));
  const header=<section className={`portal-global-sync ${warning?'has-warning':''}`} aria-label="Globaler Stripe-Finanzabgleich">
   <div aria-live="polite" aria-atomic="true"><strong>Stripe-Finanzabgleich · {error?'Status nicht aktuell bestätigt':labels[String(status?.state)]??'Status wird geladen'}</strong>
-   <dl className="portal-sync-facts"><div><dt>Vollständig erfolgreich</dt><dd>{berlinSyncTime(status?.last_success_at)}</dd></div><div><dt>Nächster geplanter Termin (ungefähr)</dt><dd>{status?.enabled===true?berlinSyncTime(status?.next_scheduled_at):'nicht aktiviert'}</dd></div><div><dt>Ungeklärte Abweichungen</dt><dd>{typeof status?.unresolved==='number'?String(status.unresolved):'unbekannt'}</dd></div></dl>
+   <dl className="portal-sync-facts"><div><dt>Letzter erfolgreicher Sync</dt><dd>{berlinSyncTime(status?.last_success_at)}</dd></div>
+    {status?.berlin_daily_schedule===true?<><div><dt>Geplantes Sync-Fenster</dt><dd>{berlinWindowLabel(status.next_sync_window,'13:00–14:00')}</dd></div><div><dt>Geplantes Verifikationsfenster</dt><dd>{berlinWindowLabel(status.next_verify_window,'14:00–15:00')}</dd></div></>:<div><dt>Nächster geplanter Termin (ungefähr)</dt><dd>{status?.enabled===true?berlinSyncTime(status?.next_scheduled_at):'nicht aktiviert'}</dd></div>}
+    <div><dt>Ungeklärte Abweichungen</dt><dd>{typeof status?.unresolved==='number'?String(status.unresolved):'unbekannt'}</dd></div></dl>
   </div>
   <details className="portal-sync-details"><summary>Technische Details zum Stripe-Abgleich</summary>
    <p>Nur Stripe-Finanzdaten; Lager und andere Module werden hier nicht mit Stripe synchronisiert.</p>
-   <dl><div><dt>Letzter Versuch</dt><dd>{berlinSyncTime(status?.last_attempt_at)}</dd></div><div><dt>Letzter abgeschlossener Scan</dt><dd>{berlinSyncTime(status?.last_scan_at)}</dd></div><div><dt>Stripe-Abdeckung geprüft bis</dt><dd>{berlinSyncTime(status?.verified_to)}</dd></div></dl>
-   {modes?.version===2?<><p>Inkrementell alle 15 Minuten (UTC); tägliche Vollprüfung separat um 05:40 UTC. Ausführungszeiten nicht garantiert.</p>
+   <dl><div><dt>Letzter Versuch</dt><dd>{berlinSyncTime(status?.last_attempt_at)}</dd></div><div><dt>Letzter abgeschlossener Scan</dt><dd>{berlinSyncTime(status?.last_scan_at)}</dd></div><div><dt>Geprüfter Stripe-Zeitraum</dt><dd>{berlinSyncTime(status?.verified_from)} bis {berlinSyncTime(status?.verified_to)}</dd></div></dl>
+   {modes?.version===2?<><p>Ausführung innerhalb des jeweiligen Fensters ohne feste Minute.</p>
     <dl><div><dt>Tägliche Vollprüfung abgeschlossen</dt><dd>{berlinSyncTime(modes.daily_last_scan)}</dd></div><div><dt>Tägliche Vollprüfung bestätigt</dt><dd>{status?.daily_verified===true?berlinSyncTime(modes.daily_last_verified):'nicht aktuell bestätigt'}</dd></div><div><dt>Vollständig geprüfter Cutoff</dt><dd>{berlinSyncTime(modes.daily_cutoff)}</dd></div><div><dt>Offene Vollprüfungs-Abweichungen</dt><dd>{typeof modes.daily_unresolved==='number'?String(modes.daily_unresolved):'unbekannt'}</dd></div></dl></>:<p>Täglich 05:40 UTC · {String(status?.schedule??'40 5 * * *')} · Europe/Berlin. Hobby: täglicher Lauf, Ausführungszeit nicht garantiert.</p>}
    {status?.overdue===true&&<p>Geplanter Abgleich nicht rechtzeitig abgeschlossen.</p>}
    {status?.stale===true&&<p>Kein frischer vollständig erfolgreicher Abgleich bestätigt.</p>}

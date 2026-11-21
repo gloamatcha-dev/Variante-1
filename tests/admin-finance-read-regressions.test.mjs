@@ -7,6 +7,7 @@ import { summarizeLedger } from '../lib/adminPortalFinance.ts';
 import { readFinanceSummary } from '../lib/adminPortalFinanceRead.ts';
 import { readPortalPages } from '../lib/adminPortalRead.ts';
 import { financeSyncCoverage } from '../lib/financeSyncMonitoring.ts';
+import { adminFinanceSyncStatus } from '../lib/adminFinanceSyncStatus.ts';
 import { globalFinanceSyncStatus } from '../lib/globalFinanceSync.ts';
 import { emptyDashboardQuery } from './helpers/dashboardFinanceRoutes.mjs';
 
@@ -39,6 +40,41 @@ const coverage = {
   configured: true, state: 'complete', missing_payments: 0, missing_refunds: 0,
   missing_fees: 0, unresolved: 0, persistent_failures: 0, unbridged_events: 0,
 };
+
+test('dashboard uses Berlin windows, excludes historical retries and reports only continuous coverage', () => {
+  const scope = '2026-11-12T23:00:00Z';
+  const raw = { ...coverage, state: 'retry', monitoring_version: 1, unknown_refund_tax: 8,
+    scan_modes: { version: 2, daily_latest_verified: true, daily_cutoff: '2026-11-21T13:56:00Z' } };
+  const jobs = [
+    { scan_from: '2026-08-31T22:00:00Z', state: 'retry', attempts: 2 },
+    { scan_from: scope, scan_to: '2026-11-21T12:59:00Z', completed_at: '2026-11-21T12:59:20Z',
+      state: 'completed', attempts: 1, checkpoint: { verified: true } },
+    { scan_from: '2026-11-21T19:00:00Z', scan_to: '2026-11-21T19:24:00Z', completed_at: '2026-11-21T19:24:20Z',
+      state: 'completed', attempts: 1, checkpoint: { verified: true } },
+  ];
+  const status = adminFinanceSyncStatus(raw, true, scope, jobs, Date.parse('2026-11-21T20:25:00Z'));
+  assert.equal(status.next_sync_window, '2026-11-22T12:00:00.000Z');
+  assert.equal(status.next_verify_window, '2026-11-22T13:00:00.000Z');
+  assert.equal(status.verified, true);
+  assert.equal(status.daily_verified, true);
+  assert.equal(status.retry_attempts, 0);
+  assert.equal(status.historical_retry_jobs, 1);
+  assert.equal(status.historical_retry_attempts, 1);
+  assert.equal(status.unknown_refund_tax, 8);
+  assert.equal(status.verified_to, '2026-11-21T12:59:00.000Z');
+  const retry = adminFinanceSyncStatus(raw, true, scope, [
+    ...jobs, { scan_from: scope, state: 'retry', attempts: 3 },
+  ], Date.parse('2026-11-21T20:25:00Z'));
+  assert.equal(retry.state, 'retry');
+  assert.equal(retry.retry_attempts, 2);
+  assert.equal(retry.verified, false);
+  assert.equal(financeSyncCoverage(status,{from:'2026-11-01',to:'2026-12-01'},Date.parse('2026-11-21T20:25:00Z')).verified,false);
+  assert.equal(adminFinanceSyncStatus(raw,true,scope,jobs,Date.parse('2026-11-22T12:59:59Z')).stale,false);
+  assert.equal(adminFinanceSyncStatus(raw,true,scope,jobs,Date.parse('2026-11-22T13:00:00Z')).stale,true);
+  const summer = adminFinanceSyncStatus(raw,true,scope,[],Date.parse('2027-03-27T20:00:00Z'));
+  assert.equal(summer.next_sync_window,'2027-03-28T11:00:00.000Z');
+  assert.equal(summer.next_verify_window,'2027-03-28T12:00:00.000Z');
+});
 
 test('Berlin coverage respects both midnight boundaries across the DST change', () => {
   const now = Date.parse('2026-10-26T03:00:00Z');
@@ -86,7 +122,14 @@ test('incremental finance mode never falls back to a daily completeness claim on
     const status = { ...coverage, monitoring_version: 1, last_scan_at: now, last_success_at: now,
       verified_from: '2020-01-01T00:00:00Z', verified_to: now };
     let modeResult = { data: null, error: { message: 'unavailable' } };
-    const admin = { from: emptyDashboardQuery, async rpc(name) {
+    const admin = { from(table) {
+      if (table === 'finance_sync_config') return { select: () => ({ eq: () => ({
+        maybeSingle: async () => ({ data: { account_id: 'acct_test', scan_from: status.verified_from } }),
+      }) }) };
+      const query = emptyDashboardQuery();
+      query.eq = () => query;
+      return query;
+    }, async rpc(name) {
       calls.push(name);
       if (name === 'finance_sync_global_status_v1') return { data: status, error: null };
       if (name === 'finance_sync_modes_status_v2') return modeResult;
@@ -100,7 +143,7 @@ test('incremental finance mode never falls back to a daily completeness claim on
     assert.equal(summary.resultCents, null);
     modeResult = { data: { version: 2, incremental_last_scan: now }, error: null };
     const usable = await readFinanceSummary(admin, period);
-    assert.equal(usable.summary.stripeSync.schedule, '*/15 * * * *');
+    assert.equal(usable.summary.stripeSync.berlin_daily_schedule, true);
   } finally {
     if (oldModes === undefined) delete process.env.FINANCE_SCAN_MODES_ENABLED;
     else process.env.FINANCE_SCAN_MODES_ENABLED = oldModes;
@@ -123,6 +166,7 @@ test('global status route reports unavailable when the configured incremental co
     '../../../../lib/supabaseAdmin': { getSupabaseAdmin: () => admin },
     '../../../../lib/financeSyncServer': { runFinanceSyncServer: () => assert.fail('unexpected worker') },
     '../../../../lib/globalFinanceSync.ts': { globalFinanceSyncStatus },
+    '../../../../lib/financeProductionKeyBinding.ts': { verifyProductionKeyBinding: () => assert.fail('unexpected binding check') },
   };
   const code = ts.transpileModule(fs.readFileSync('app/api/admin/stripe-sync/route.ts', 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },

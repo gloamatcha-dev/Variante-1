@@ -88,6 +88,9 @@ export async function POST(request:Request) {
    const scanCompleted='caughtUp' in run&&run.caughtUp===true&&['verified','attention'].includes(run.state);
    return json({ok:true,run,scanCompleted,reconciliationVerified:scanCompleted&&run.state==='verified'&&'reconciliationVerified' in run&&run.reconciliationVerified===true},run.state==='retry_required'?503:200);
   }
-  return json({ok:true,status:globalFinanceSyncStatus(result.data,enabled),canSync:owner&&configuredOwner&&manualEnabled});
+  const status=result.data.scan_modes?.version===2
+   ?await (await import('../../../../lib/adminFinanceSyncStatus.ts')).readAdminFinanceSyncStatus(admin,result.data,enabled)
+   :globalFinanceSyncStatus(result.data,enabled);
+  return json({ok:true,status,canSync:owner&&configuredOwner&&manualEnabled});
  }catch{return json({error:'Stripe-Abgleich nicht bestätigt. Letzten Status und Wiederholungsversuch prüfen.'},503);}
 }
