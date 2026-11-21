@@ -41,6 +41,19 @@ const coverage = {
   missing_fees: 0, unresolved: 0, persistent_failures: 0, unbridged_events: 0,
 };
 
+test('November report exposes the partial verified Stripe interval without certifying the month', () => {
+  const now=Date.parse('2026-11-21T19:30:00Z');
+  const status={...coverage,last_success_at:'2026-11-21T19:24:30Z',
+    verified_from:'2026-11-12T23:00:00Z',verified_to:'2026-11-21T19:24:29Z'};
+  const november=financeSyncCoverage(status,{from:'2026-11-01',to:'2026-12-01'},now);
+  assert.equal(november.verified,false);
+  assert.equal(november.coveredFrom,'2026-11-12T23:00:00.000Z');
+  assert.equal(november.coveredTo,'2026-11-21T19:24:29.000Z');
+  const october=financeSyncCoverage(status,{from:'2026-10-01',to:'2026-11-01'},now);
+  assert.equal(october.coveredFrom,null);
+  assert.equal(october.coveredTo,null);
+});
+
 test('dashboard uses Berlin windows, excludes historical retries and reports only continuous coverage', () => {
   const scope = '2026-11-12T23:00:00Z';
   const raw = { ...coverage, state: 'retry', monitoring_version: 1, unknown_refund_tax: 8,

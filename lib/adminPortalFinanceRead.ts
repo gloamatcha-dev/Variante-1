@@ -58,9 +58,11 @@ export async function readFinanceSummary(admin: SupabaseClient, period: ReturnTy
   const summary = summarizeLedger(basis.events, basis.expenses, basis.providerEvidence, basis);
   const sync=financeSyncCoverage(syncStatus,period);
   const cashCoverage=financeSyncCoverage(cash?{...sync.status,state:cash.unresolved===0?'complete':'attention',last_success_at:cash.last_scan_at,verified_from:cash.cash_from,verified_to:cash.cash_to,missing_payments:0,missing_refunds:0,missing_fees:0,persistent_failures:0,unbridged_events:0}:null,period);
-  const monitoredSummary={...summary,stripeSync:{...sync.status,verified:sync.verified,stale:sync.stale,asOf:sync.asOf,
-    cashVerified:cashCoverage.verified,cashAsOf:cash?.cash_to??null,cashIncomeCents:cashCoverage.verified?cash?.income_cents:null,cashRefundCents:cashCoverage.verified?cash?.refund_cents:null,
-    cashFeeCents:cashCoverage.verified?cash?.fee_cents:null,cashUsageCents:cashCoverage.verified?cash?.usage_cents:null,approvedCorrections:cash?.corrections??null,
+  const cashVerified=sync.verified&&cashCoverage.verified&&Date.parse(String(cash?.cash_to))<=Date.parse(String(sync.asOf));
+  const monitoredSummary={...summary,ledgerPeriod:period,stripeSync:{...sync.status,verified:sync.verified,stale:sync.stale,asOf:sync.asOf,
+    coveredFrom:sync.coveredFrom,coveredTo:sync.coveredTo,cashVerified,cashFrom:cashCoverage.coveredFrom,cashAsOf:cashCoverage.coveredTo,
+    cashIncomeCents:cashVerified?cash?.income_cents:null,cashRefundCents:cashVerified?cash?.refund_cents:null,
+    cashFeeCents:cashVerified?cash?.fee_cents:null,cashUsageCents:cashVerified?cash?.usage_cents:null,approvedCorrections:cash?.corrections??null,
     ledgerIncomeCents:summary.incomeCents,ledgerRefundCents:summary.refundCents}};
   if(!sync.verified){
     monitoredSummary.contributionComplete=false;monitoredSummary.contributionMarginCents=null;monitoredSummary.resultCents=null;monitoredSummary.resultComplete=false;

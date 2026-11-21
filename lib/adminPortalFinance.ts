@@ -52,7 +52,8 @@ export function summarizeLedger(events: PortalRow[], expenses: PortalRow[], evid
   if (!sourceComplete) costBlockers.push(costBasis?.sourceCoverage?.status === 'checked'
     ? `Ledger-Abgleich unvollständig: ${costBasis.sourceCoverage.missingPayments} Zahlungen, ${costBasis.sourceCoverage.missingRefunds} Erstattungen fehlen oder weichen ab; ${costBasis.sourceCoverage.conflicts} Widersprüche in lokalen Buchungsbelegen. Angezeigte Einnahmen und Refunds sind nur erfasste Teilbeträge.`
     : 'Vollständigkeit der Zahlungen und Erstattungen nicht geprüft.');
-  if(costBasis?.sourceCoverage?.localDataWarnings)costBlockers.push(`Lokale Datenvollständigkeit (zeitraumübergreifend): ${costBasis.sourceCoverage.localDataWarnings} unvollständige oder abweichende Erstattungssnapshots, davon ${costBasis.sourceCoverage.noRefundIndication??0} ohne lokalen Erstattungshinweis. Dies ist nicht die Zahl der Stripe-Abweichungen; unbekannte Beträge bleiben unbekannt.`);
+  const localWarnings=(costBasis?.sourceCoverage?.localDataWarnings??0)-(costBasis?.sourceCoverage?.historicalNoRefundIndication??0);
+  if(localWarnings>0)costBlockers.push(`Lokale Datenvollständigkeit: ${localWarnings} unvollständige oder abweichende Erstattungssnapshots mit möglicher Relevanz für diesen Bericht. Unbekannte Beträge bleiben unbekannt.`);
   if(coverage.pending+coverage.missing>0)costBlockers.push(`Providergebühr bei ${coverage.pending+coverage.missing} Zahlungen`);
   if(!feeIntegrity)costBlockers.push('Providergebühren-Ereignisse nicht vollständig zugeordnet');
   if(manualPaymentFeeCount)costBlockers.push('Manuelle Zahlungsgebühren müssen abgegrenzt werden.');

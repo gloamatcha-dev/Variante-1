@@ -4,6 +4,7 @@ export type FinanceSourceCoverage = {
   status: 'checked' | 'unavailable'; complete: boolean;
   missingPayments: number; missingRefunds: number; conflicts: number;
   localDataWarnings?: number; noRefundIndication?: number; unknownRefundStates?: number;
+  historicalNoRefundIndication?: number; historicalSnapshotFrom?: string; historicalSnapshotTo?: string;
 };
 const day = (value: unknown) => typeof value === 'string' && Number.isFinite(Date.parse(value))
   ? new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Berlin' }).format(new Date(value)) : null;
@@ -11,7 +12,7 @@ const day = (value: unknown) => typeof value === 'string' && Number.isFinite(Dat
 /** Local snapshots detect gaps; they never manufacture provider dates or ledger money. */
 export function financeSourceCoverage(sources: PortalRow[], events: PortalRow[], period: {from:string;to:string}): FinanceSourceCoverage {
   const result: FinanceSourceCoverage = { status: 'checked', complete: true, missingPayments: 0, missingRefunds: 0, conflicts: 0,
-    localDataWarnings:0,noRefundIndication:0,unknownRefundStates:0 };
+    localDataWarnings:0,noRefundIndication:0,unknownRefundStates:0,historicalNoRefundIndication:0 };
   const within = (date: string | null) => date === null || (date >= period.from && date < period.to);
   for (const source of sources) {
     const annual = source.source_kind === 'annual';
@@ -38,13 +39,21 @@ export function financeSourceCoverage(sources: PortalRow[], events: PortalRow[],
       // A missing cumulative snapshot is not a proven provider mismatch. Preserve
       // uncertainty separately; neither a paid status nor NULL proves zero refunds.
       result.localDataWarnings!++;
-      if(source.payment_status==='paid' && !source.refund_updated_at && refunds.length===0) result.noRefundIndication!++;
+      if(source.payment_status==='paid' && !source.refund_updated_at && !source.verified_refund_updated_at && refunds.length===0) {
+        result.noRefundIndication!++;
+        if (paid && paid < period.from) {
+          result.historicalNoRefundIndication!++;
+          if (!result.historicalSnapshotFrom || paid < result.historicalSnapshotFrom) result.historicalSnapshotFrom = paid;
+          if (!result.historicalSnapshotTo || paid > result.historicalSnapshotTo) result.historicalSnapshotTo = paid;
+        }
+      }
       else result.unknownRefundStates!++;
     }
     else if (money(refunds) > Number(total)) result.conflicts++;
     else if (money(refunds) !== total && within(refunded)) result.missingRefunds++;
     if(verifiedKnown && localKnown && Number(verifiedTotal)!==Number(localTotal)) result.localDataWarnings!++;
   }
-  result.complete = result.missingPayments + result.missingRefunds + result.conflicts + (result.localDataWarnings??0) === 0;
+  result.complete = result.missingPayments + result.missingRefunds + result.conflicts
+    + (result.localDataWarnings??0) - (result.historicalNoRefundIndication??0) === 0;
   return result;
 }

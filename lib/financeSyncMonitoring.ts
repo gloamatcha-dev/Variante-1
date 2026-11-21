@@ -19,5 +19,9 @@ export function financeSyncCoverage(status:Row|null,period:{from:string;to:strin
  const covered=!!status&&status.configured===true&&status.state==='complete'&&fresh&&start<end&&start<=now
   &&Number.isFinite(from)&&from<=start&&to>start&&to>from&&(end>now||to>=end)
   &&['missing_payments','missing_refunds','missing_fees','unresolved','persistent_failures','unbridged_events'].every(k=>status[k]===0);
- return {verified:covered,stale:!fresh,status:status??{state:'unknown'},asOf:status?.verified_to??null};
+ const overlapStart=Math.max(start,from),overlapEnd=Math.min(end,to,now);
+ const hasOverlap=overlapEnd>overlapStart;
+ return {verified:covered,stale:!fresh,status:status??{state:'unknown'},asOf:status?.verified_to??null,
+  coveredFrom:hasOverlap?new Date(overlapStart).toISOString():null,
+  coveredTo:hasOverlap?new Date(overlapEnd).toISOString():null};
 }

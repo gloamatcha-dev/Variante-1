@@ -39,7 +39,11 @@ export function AdminStripePeriodEvidence({status}:{status?:PortalRow}){return <
   {typeof status?.cashRefundCents==='number'&&typeof status?.ledgerRefundCents==='number'&&status.cashRefundCents!==status.ledgerRefundCents&&<p role="alert" className="portal-warning">Stripe bestätigt {money(status.cashRefundCents)} Refunds; im Buchungszeitraum sind {money(status.ledgerRefundCents)} erfasst. Offene Vorgänge und genehmigte Periodenkorrekturen beachten.</p>}
   {typeof status?.approvedCorrections==='number'&&status.approvedCorrections>0&&<p className="portal-notice">{String(status.approvedCorrections)} genehmigte Korrekturen wurden später gebucht. Die erfassten Ledgerbeträge folgen dem Buchungsdatum; die Stripe-Befunde zeigen das Originaldatum.</p>}
   <details><summary>Stripe-Zahlungen, Refunds und Gebühren zum letzten Prüfstand</summary>
-   {status?.cashVerified===true&&<p>Stripe-Belege für den gewählten Zeitraum geprüft bis {berlinSyncTime(status.cashAsOf)}.</p>}
+   {status?.cashVerified===true
+    ? <p>Stripe-Belege für diesen Bericht: {berlinSyncTime(status.cashFrom)} bis {berlinSyncTime(status.cashAsOf)}.</p>
+    : typeof status?.coveredFrom==='string'&&typeof status?.coveredTo==='string'
+     ? <p>Belegter Stripe-Teilzeitraum: {berlinSyncTime(status.coveredFrom)} bis {berlinSyncTime(status.coveredTo)}. Die Stripe-Summen für den Bericht bleiben unbestätigt.</p>
+     : <p>Für den gewählten Berichtszeitraum ist keine Stripe-Abdeckung belegt.</p>}
    <p>Originaldatum laut verifiziertem Stripe-Beleg. Diese Beträge sind keine zusätzlichen Ledgerbuchungen und fließen nicht doppelt ins Ergebnis ein.</p>
    <dl className="portal-metrics">{[['Stripe-Zahlungen','cashIncomeCents'],['Stripe-Refunds','cashRefundCents'],['Stripe-Zahlungsgebühren','cashFeeCents'],['Stripe-Kontogebühren','cashUsageCents']].map(([label,key])=><div key={key}><dt>{label}</dt><dd>{money(status?.[key])}</dd></div>)}</dl>
    {typeof status?.approvedCorrections==='number'&&status.approvedCorrections>0&&<p>{String(status.approvedCorrections)} genehmigte Korrekturen wurden in einer anderen offenen Buchungsperiode erfasst. Originaldatum und Buchungsdatum bleiben getrennt.</p>}

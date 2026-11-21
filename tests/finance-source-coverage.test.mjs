@@ -50,5 +50,23 @@ test('durable refund facts require LIVE EUR identity and valid complete cumulati
 });
 test('Dashboard summary labels snapshot uncertainty separately from local monetary contradictions',()=>{
  const coverage=cover(source({refunded_total_cents:null}));const s=summarizeLedger([],[],[],{subjects:[],coverage:[],months:[],generalCoverage:[],undatedEvents:0,undatedFulfilments:0,sourceCoverage:coverage});
- assert.match(s.costBlockers.join(' '),/Lokale Datenvollständigkeit/);assert.match(s.costBlockers.join(' '),/nicht die Zahl der Stripe-Abweichungen/);assert.equal(s.resultCents,null);assert.equal(s.providerFeeCents,null);
+ assert.match(s.costBlockers.join(' '),/Lokale Datenvollständigkeit/);assert.match(s.costBlockers.join(' '),/Relevanz für diesen Bericht/);assert.equal(s.resultCents,null);assert.equal(s.providerFeeCents,null);
+});
+
+test('450 older snapshots without refund signals remain visible without blocking the selected period',()=>{
+ const older=Array.from({length:450},(_,index)=>source({id:'old-'+index,placed_at:index===0?'2026-08-20T12:00:00Z':'2026-08-25T12:00:00Z',refunded_total_cents:null}));
+ const coverage=financeSourceCoverage(older,[],period);
+ assert.equal(coverage.complete,true);
+ assert.equal(coverage.localDataWarnings,450);
+ assert.equal(coverage.historicalNoRefundIndication,450);
+ assert.equal(coverage.historicalSnapshotFrom,'2026-08-20');
+ assert.equal(coverage.historicalSnapshotTo,'2026-08-25');
+ const summary=summarizeLedger([],[],[],{subjects:[],coverage:[],months:['2026-10-01'],generalCoverage:[],undatedEvents:0,undatedFulfilments:0,sourceCoverage:coverage});
+ assert.doesNotMatch(summary.costBlockers.join(' '),/450|Ledger-Abgleich unvollständig/);
+ assert.equal(summary.sourceCoverage.historicalNoRefundIndication,450);
+ assert.equal(summary.generalCostCents,null);
+ assert.equal(summary.resultCents,null);
+ const laterRefund={...older[0],refund_updated_at:'2026-10-03T12:00:00Z'};
+ assert.equal(financeSourceCoverage([laterRefund],[],period).complete,false);
+ assert.equal(financeSourceCoverage([older[0]],[],{from:'2026-08-01',to:'2026-09-01'}).complete,false);
 });
