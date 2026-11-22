@@ -98,7 +98,7 @@ export function AdminPortalDocuments(){
       {selected&&<>
         {cleanupPending&&<p>Löschung offen. Zuordnung und Bearbeitung sind gesperrt.</p>}
         {canCleanup&&<button type="button" disabled={busy} onClick={()=>setConfirmCleanup(true)}>
-          {cleanupPending?'Löschung fortsetzen':'Dokument entfernen'}
+          {cleanupPending?'Löschung fortsetzen':'Endgültig löschen'}
         </button>}
         {canCleanup&&confirmCleanup&&<dialog open aria-label="Dokument endgültig entfernen">
           <form onSubmit={event=>{
@@ -115,7 +115,7 @@ export function AdminPortalDocuments(){
             {!cleanupPending&&<label>Nachweis, dass keine Aufbewahrungspflicht besteht
               <textarea name="review" required minLength={15} maxLength={500}/>
             </label>}
-            <button disabled={busy}>Löschung bestätigen</button>
+            <button disabled={busy}>Endgültig löschen</button>
             <button type="button" disabled={busy} onClick={()=>setConfirmCleanup(false)}>Abbrechen</button>
           </form>
         </dialog>}

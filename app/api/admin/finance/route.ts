@@ -2,6 +2,7 @@ import { portalPeriod } from "../../../../lib/adminPortalFinance.ts";
 import { readFinanceSummary } from "../../../../lib/adminPortalFinanceRead.ts";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { requireAdminIdentity } from "../../../../lib/adminActionRoute.ts";
+import { uuid } from "../../../../lib/adminPortalModel.ts";
 
 type ErrorResponse = { error: string };
 
@@ -11,13 +12,6 @@ function json(body: unknown, status: number): Response {
 
 const PAGE_CAP = 200;
 
-/**
- * THE FINANCIAL EVENTS LEDGER, READ-ONLY.
- *
- * POST only, behind the admin-identity gate. No writes — every event
- * enters through a SECURITY DEFINER function called from the webhook
- * or refund flow, never from this route.
- */
 export async function POST(request: Request): Promise<Response> {
   const gate = await requireAdminIdentity(request, "read_sensitive");
   if (!gate.ok) return gate.response;
@@ -39,6 +33,18 @@ export async function POST(request: Request): Promise<Response> {
 
   const raw = body as Record<string, unknown>;
   const { action } = raw;
+  if(action==='cancel_manual_income'){
+    const write=await requireAdminIdentity(request,'write');
+    if(!write.ok)return write.response;
+    if(request.headers.get('origin')!==new URL(request.url).origin)return json({error:'Ungültiger Anfrageursprung.'},403);
+    const reason=typeof raw.reason==='string'?raw.reason.trim():'';
+    if(!uuid(raw.id)||reason.length<3||reason.length>500)return json({error:'Buchung und Stornogrund prüfen.'},400);
+    const result=await admin.rpc('admin_cancel_manual_position_v1',{
+      actor:write.session.userId,subject:'financial_event',target:raw.id,reason,
+    });
+    if(result.error||result.data!==true)return json({error:'Diese Einnahme konnte nicht storniert werden.'},result.error?.code==='42501'?403:409);
+    return json({ok:true},200);
+  }
   let period: ReturnType<typeof portalPeriod>;
   try { period = portalPeriod(raw); } catch { return json({error:"Bitte einen gültigen Zeitraum wählen."},400); }
   try {
@@ -67,10 +73,18 @@ export async function POST(request: Request): Promise<Response> {
       const events=(data??[]) as Record<string,unknown>[];
       const manualIds=events.filter(event=>event.kind==='manual_income').map(event=>event.id);
       if(manualIds.length){
-        const replaced=await admin.rpc('admin_manual_income_replaced_v1',{ids:manualIds});
-        if(replaced.error||!Array.isArray(replaced.data))throw Error('Manual income correction status unavailable');
+        const [replaced,cancelled]=await Promise.all([
+          admin.rpc('admin_manual_income_replaced_v1',{ids:manualIds}),
+          admin.rpc('admin_manual_cancellation_status_v1',{subject:'financial_event',ids:manualIds}),
+        ]);
+        if(replaced.error||!Array.isArray(replaced.data)||cancelled.error||!Array.isArray(cancelled.data))
+          throw Error('Manual income correction status unavailable');
         const replacedIds=new Set(replaced.data);
-        for(const event of events)if(event.kind==='manual_income')event.superseded=replacedIds.has(event.id);
+        const cancelledIds=new Set(cancelled.data);
+        for(const event of events)if(event.kind==='manual_income'){
+          event.superseded=replacedIds.has(event.id);
+          event.cancelled=cancelledIds.has(event.id);
+        }
       }
       const planIds=[...new Set(events.map(r=>r.annual_plan_id).filter((v):v is string=>typeof v==='string'))];
       if(planIds.length){

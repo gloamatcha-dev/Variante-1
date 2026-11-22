@@ -354,7 +354,13 @@ export async function POST(request: Request): Promise<Response> {
     });
 
     const expenseRecords = (expenseRes.data ?? []) as unknown as ExpenseRecord[];
+    const cancelled = await admin.rpc('admin_manual_cancellation_status_v1', {
+      subject:'business_expense',ids:expenseRecords.map(expense=>expense.id),
+    });
+    if(cancelled.error||!Array.isArray(cancelled.data))return json({error:'Stornostatus nicht verfügbar.'},503);
+    const cancelledIds=new Set(cancelled.data);
     const expenses: FinanceExpenseRow[] = expenseRecords
+      .filter(e=>!cancelledIds.has(e.id))
       .filter(e => isExpenseCategory(e.category))
       /*
         ROWS WITH AN UNRECOGNISED CHANNEL OR STATUS ARE DROPPED, not
@@ -390,6 +396,7 @@ export async function POST(request: Request): Promise<Response> {
       summary,
       expenses: expenseRecords.map(e => ({
         id: e.id,
+        cancelled:cancelledIds.has(e.id),
         occurredOn: e.occurred_on,
         category: e.category,
         orderId: e.order_id,
@@ -527,24 +534,19 @@ export async function POST(request: Request): Promise<Response> {
     return json({ ok: true, expenseId:data?.id??null, ugcAssignmentId:data?.ugc_assignment_id??null }, 200);
   }
 
-  if (action === "delete_expense") {
+  if (action === "cancel_expense") {
+    if(request.headers.get('origin')!==new URL(request.url).origin)return json({error:'Ungültiger Anfrageursprung.'},403);
     if (typeof body.expenseId !== "string" || !UUID_RE.test(body.expenseId.trim())) {
       return json({ error: "Ungültige Anfrage." } as ErrorResponse, 400);
     }
-    const operationId = typeof body.operationId === "string"
-      && UUID_RE.test(body.operationId.trim())
-      ? body.operationId.trim()
-      : null;
-
-    const { data, error } = await admin.rpc("admin_delete_business_expense", {
-      p_actor_user_id: gate.session.userId,
-      p_expense_id: body.expenseId.trim(),
-      p_operation_id: operationId,
+    const reason=typeof body.reason==='string'?body.reason.trim():'';
+    if(reason.length<3||reason.length>500)return json({error:'Bitte einen Stornogrund angeben.'},400);
+    const { data, error } = await admin.rpc("admin_cancel_manual_position_v1", {
+      actor:gate.session.userId,subject:'business_expense',target:body.expenseId.trim(),reason,
     });
 
     if (error) {
-      console.error("Costs error: the deletion refused:", error.message);
-      return json({ error: "Der Kostenposten konnte nicht gelöscht werden." } as ErrorResponse, 503);
+      return json({error:'Dieser Kostenposten konnte nicht storniert werden.'},error.code==='42501'?403:409);
     }
     if (data !== true) {
       return json({ error: "Diesen Kostenposten gibt es nicht." } as ErrorResponse, 404);

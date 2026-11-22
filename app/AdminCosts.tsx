@@ -99,6 +99,7 @@ type ExpenseRow = {
   note: string | null;
   createdAt: string;
   updatedAt: string | null;
+  cancelled?: boolean;
 };
 
 type PeriodChoice = "this_month" | "last_month" | "custom";
@@ -168,7 +169,6 @@ export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter=""
     row, and two rows deleted in sequence are two operations.
   */
   const submitOpRef = useRef<string>("");
-  const deleteOpRef = useRef<Record<string, string>>({});
 
   const period: FinancePeriod = choice === "this_month"
     ? monthPeriod(todayInBerlin())
@@ -352,11 +352,9 @@ export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter=""
     }
   };
 
-  const remove = async (row: ExpenseRow) => {
-    // One intent per row, reused across retries of that same removal.
-    if (!deleteOpRef.current[row.id]) {
-      deleteOpRef.current[row.id] = crypto.randomUUID();
-    }
+  const cancelExpense = async (row: ExpenseRow) => {
+    const reason=window.prompt("Warum wird diese Ausgabe storniert?")?.trim();
+    if(!reason||!window.confirm("Ausgabe stornieren? Der Originaleintrag bleibt erhalten."))return;
     setSaving(true);
     setFormError("");
     try {
@@ -364,23 +362,21 @@ export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter=""
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "delete_expense",
+          action: "cancel_expense",
           expenseId: row.id,
-          operationId: deleteOpRef.current[row.id],
+          reason,
         }),
       });
       if (res.status === 401) { onSessionLost(); return; }
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) {
-        // Kept, so a second press is the same deletion.
-        setFormError(typeof body?.error === "string" ? body.error : "Konnte nicht gelöscht werden.");
+        setFormError(typeof body?.error === "string" ? body.error : "Konnte nicht storniert werden.");
         return;
       }
-      delete deleteOpRef.current[row.id];
       await load(periodFrom, periodTo);
       onExpensesChanged?.();
     } catch {
-      setFormError("Konnte nicht gelöscht werden.");
+      setFormError("Konnte nicht storniert werden.");
     } finally {
       setSaving(false);
     }
@@ -562,9 +558,9 @@ export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter=""
           {EXPENSE_CHANNELS.map(ch => (
             <tr key={ch}>
               <td data-label="Kanal">{EXPENSE_CHANNEL_LABEL[ch]}</td>
-              <td data-label="Direkt">{expenses.some(e=>e.channel===ch&&e.category!=='general')?formatCents(s.byChannel[ch].directCents):'nicht erfasst'}</td>
-              <td data-label="Allgemein">{expenses.some(e=>e.channel===ch&&e.category==='general')?formatCents(s.byChannel[ch].generalCents):'nicht erfasst'}</td>
-              <td data-label="Summe">{expenses.some(e=>e.channel===ch)?formatCents(s.byChannel[ch].totalCents):'nicht erfasst'}</td>
+              <td data-label="Direkt">{expenses.some(e=>!e.cancelled&&e.channel===ch&&e.category!=='general')?formatCents(s.byChannel[ch].directCents):'nicht erfasst'}</td>
+              <td data-label="Allgemein">{expenses.some(e=>!e.cancelled&&e.channel===ch&&e.category==='general')?formatCents(s.byChannel[ch].generalCents):'nicht erfasst'}</td>
+              <td data-label="Summe">{expenses.some(e=>!e.cancelled&&e.channel===ch)?formatCents(s.byChannel[ch].totalCents):'nicht erfasst'}</td>
             </tr>
           ))}
         </tbody>
@@ -618,6 +614,7 @@ export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter=""
         </button>
       </div>
 
+      {!formOpen&&formError&&<p className="ops-error" role="alert">{formError}</p>}
       {formOpen && (
         <div className="ops-costs-form">
           <div className="ops-filter-row">
@@ -791,9 +788,9 @@ export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter=""
                 </td>
                 <td data-label="">
                   <button type="button" className="ops-refresh"
-                    onClick={() => openEdit(row)} disabled={saving}>Ändern</button>
+                    onClick={() => openEdit(row)} disabled={saving||row.cancelled}>Ändern</button>
                   <button type="button" className="ops-refresh"
-                    onClick={() => void remove(row)} disabled={saving}>Entfernen</button>
+                    onClick={() => void cancelExpense(row)} disabled={saving||row.cancelled||row.category==="payment_fee"}>{row.cancelled?"Storniert":"Stornieren"}</button>
                 </td>
               </tr>
             );
