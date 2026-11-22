@@ -86,6 +86,7 @@ export const MOVEMENTS_SCANNED_PER_ITEM = 4;
 
 export type ItemsPayload = {
   rows: ItemRow[];
+  plannedMatcha?: {sku:string;annual_units:number;next_subscription_units:number;b2b_units:number}[] | null;
   /** item id -> the areas it serves, from one grouped query. */
   areasByItem: Record<string, InventoryArea[]>;
   /** item id -> when it last moved, from one grouped query. */
@@ -251,8 +252,19 @@ export async function listInventoryItems(query: ItemsQuery): Promise<ItemsPayloa
   const { data: categories, error: catError } = await categoriesPromise;
   if (catError) console.error("Inventory: category read failed:", catError.message);
 
+  const matchaRows = pageRows.filter(row =>
+    ["GLOA-MATCHA-30G", "GLOA-MATCHA-50G", "GLOA-MATCHA-100G", "GLOA-MATCHA-B2B-500G"].includes(String(row.sku)));
+  if (matchaRows.length) {
+    const stock = await admin.rpc("read_matcha_checkout_stock_v1", { ids: matchaRows.map(row => row.id) });
+    const balances = new Map((Array.isArray(stock.data) ? stock.data : [])
+      .map(row => [row.item_id, row]));
+    for (const row of matchaRows) row.checkout_stock = stock.error ? null : balances.get(row.id) ?? null;
+  }
+
+  const planned = await admin.rpc("read_matcha_delivery_demand_v1");
   return {
     rows: pageRows,
+    plannedMatcha: !planned.error && Array.isArray(planned.data) ? planned.data : null,
     areasByItem,
     lastMovementByItem,
     categories: (categories ?? []) as unknown as Record<string, unknown>[],

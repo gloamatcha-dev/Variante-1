@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AREA_LABEL,
   INVENTORY_AREAS,
@@ -58,6 +58,7 @@ import {
  */
 
 type Item = {
+  checkout_stock?: { physical: number; reserved: number; available: number | null } | null;
   id: string;
   name: string;
   sku: string | null;
@@ -91,6 +92,7 @@ type Movement = {
 
 type ItemsPayload = {
   rows: Item[];
+  plannedMatcha?: {sku:string;annual_units:number;next_subscription_units:number;b2b_units:number}[] | null;
   areasByItem: Record<string, InventoryArea[]>;
   lastMovementByItem: Record<string, string>;
   categories: Category[];
@@ -287,6 +289,15 @@ export function AdminInventory({ onSessionLost }: { onSessionLost: () => void })
         {loadError && <span className="ops-error" role="alert">{loadError}</span>}
       </div>
 
+      <MatchaPackaging onRecorded={() => refresh(query)} />
+      <ReconcileCheckoutStock onRecorded={() => refresh(query)} />
+      <details>
+        <summary>Geplanter Matcha-Lieferbedarf</summary>
+        <p>Offene Jahresplan- und B2B-Lieferungen sowie die jeweils nächste geplante Abo-Lieferung. Diese Mengen sind eine Planung.</p>
+        {data.plannedMatcha ? <ul>{data.plannedMatcha.map(row=><li key={row.sku}>
+          {row.sku}: Jahrespläne {row.annual_units} · nächste Abo-Lieferungen {row.next_subscription_units} · B2B {row.b2b_units}
+        </li>)}</ul> : <p>Geplanter Bedarf nicht verfügbar.</p>}
+      </details>
       <section className="ops-filter-row" aria-label="Filter">
         <div>
           <label htmlFor="inv-area">Bereich</label>
@@ -379,7 +390,10 @@ export function AdminInventory({ onSessionLost }: { onSessionLost: () => void })
                       {areas.length ? areas.map(a => AREA_LABEL[a]).join(" · ") : "—"}
                     </td>
                     <td data-label="Bestand">
-                      <span className="ops-order-name">{formatQuantity(item.current_quantity)} {item.unit}</span>
+                      <span className="ops-order-name">{formatQuantity(item.checkout_stock?.physical ?? item.current_quantity)} {item.unit}</span>
+                      {item.checkout_stock !== undefined && <small className="ops-mail">
+                        Reserviert: {formatQuantity(item.checkout_stock?.reserved ?? null)} · Verfügbar: {formatQuantity(item.checkout_stock?.available ?? null)}
+                      </small>}
                     </td>
                     <td data-label="Mindestbestand">
                       {item.low_stock_threshold === null ? "—" : `${formatQuantity(item.low_stock_threshold)} ${item.unit}`}
@@ -434,6 +448,83 @@ export function AdminInventory({ onSessionLost }: { onSessionLost: () => void })
 /* ══════════════════════════════════════════════════════════════
    THE DETAIL
    ══════════════════════════════════════════════════════════════ */
+
+function ReconcileCheckoutStock({onRecorded}:{onRecorded:()=>Promise<void>}) {
+  const [busy,setBusy]=useState(false);
+  const [notice,setNotice]=useState("");
+  async function submit(fields:FormData){
+    setBusy(true);
+    setNotice("");
+    try{
+      const response=await post("/api/admin/inventory/movement",{
+        action:"reconcile_matcha_checkout",requestId:fields.get("requestId"),sessionId:fields.get("sessionId"),
+      });
+      if(response.status!==200||response.data.ok!==true){
+        setNotice(typeof response.data.error==="string"?response.data.error:"Freigabe nicht bestätigt.");
+        return;
+      }
+      setNotice("Ablauf ohne Zahlung bestätigt. Reservierung freigegeben.");
+      await onRecorded();
+    }catch{setNotice("Freigabe nicht bestätigt. Bitte denselben Vorgang erneut prüfen.");}
+    finally{setBusy(false);}
+  }
+  return <details>
+    <summary>Unklare Checkout-Reservierung klären (Owner)</summary>
+    <p>Die ursprüngliche Anfrage und ihre Stripe-Session zuordnen. Ohne eindeutigen Ablauf ohne Zahlung bleibt der Bestand reserviert.</p>
+    <form className="ops-filter-row" onSubmit={event=>{event.preventDefault();void submit(new FormData(event.currentTarget));}}>
+      <label>Checkout-Anfrage-ID <input name="requestId" required maxLength={36}/></label>
+      <label>Stripe-Session-ID <input name="sessionId" required maxLength={203}/></label>
+      <button type="submit" disabled={busy}>Ablauf prüfen</button>
+    </form>
+    {notice&&<p role="status">{notice}</p>}
+  </details>;
+}
+
+function MatchaPackaging({onRecorded}:{onRecorded:()=>Promise<void>}) {
+  const pending = useRef<{operationId:string; variantSku:string; units:number}|null>(null);
+  const inFlight = useRef(false);
+  const [busy,setBusy] = useState(false);
+  const [notice,setNotice] = useState("");
+  async function submit(form:HTMLFormElement) {
+    if(inFlight.current)return;
+    const fields=new FormData(form);
+    const variantSku=String(fields.get("variant"));
+    const units=Number(fields.get("units"));
+    if(!pending.current)pending.current={operationId:crypto.randomUUID(),variantSku,units};
+    if(pending.current.variantSku!==variantSku||pending.current.units!==units){
+      setNotice("Bitte die offene Buchung zuerst mit unveränderter Größe und Menge erneut prüfen.");
+      return;
+    }
+    inFlight.current=true;
+    setBusy(true);
+    setNotice("");
+    try{
+      const result=await post("/api/admin/inventory/movement",{action:"pack_matcha",...pending.current});
+      if(result.status!==200||result.data.ok!==true){
+        if(result.status===400||result.status===403||result.status===409)pending.current=null;
+        setNotice(typeof result.data.error==="string"?result.data.error:"Buchung nicht bestätigt. Bitte mit denselben Angaben erneut absenden.");
+        return;
+      }
+      pending.current=null;
+      form.reset();
+      setNotice("Rohvorrat und fertige Beutel wurden gebucht.");
+      await onRecorded();
+    }catch{setNotice("Buchung nicht bestätigt. Bitte mit denselben Angaben erneut absenden.");}
+    finally{inFlight.current=false;setBusy(false);}
+  }
+  return <details>
+    <summary>Matcha abpacken</summary>
+    <form className="ops-filter-row" onSubmit={event=>{event.preventDefault();void submit(event.currentTarget);}}>
+      <label>Beutelgröße <select name="variant">
+        {[30,50,100].map(grams=><option key={grams} value={`GLOA-MATCHA-${grams}G`}>{grams} g</option>)}
+        <option value="GLOA-MATCHA-B2B-500G">500 g · B2B</option>
+      </select></label>
+      <label>Fertige Beutel <input name="units" type="number" min="1" max="1000000" step="1" required/></label>
+      <button type="submit" disabled={busy}>Abpackung buchen</button>
+    </form>
+    {notice&&<p role="status">{notice}</p>}
+  </details>;
+}
 
 type Mode = null | "receipt" | "withdrawal" | "correction" | "stocktake" | "edit";
 

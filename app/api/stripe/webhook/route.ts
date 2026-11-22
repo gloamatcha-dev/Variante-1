@@ -16,6 +16,7 @@ import {
 import { evaluateStripeSessionPayment } from "../../../../lib/stripeFulfillment";
 import { verifyPaidSessionIdentity } from "../../../../lib/checkoutIdentity";
 import { isRefundEventType, paymentIntentIdFromRefundEvent } from "../../../../lib/stripeRefunds";
+import { hasMatchaB2bInvoiceHint, verifyMatchaB2bRefund } from "../../../../lib/matchaB2bRefund";
 import { syncOrderRefundStateFromStripe } from "../../../../lib/orderRefunds";
 // Phase 4B7. The annual parent's own refund correlation, tried before the
 // ordinary order flow and resolving by the plan's PaymentIntent alone.
@@ -291,6 +292,8 @@ export async function POST(request: Request): Promise<Response> {
         // and both order emails keep their own claims.
         await handleCheckoutSessionCompleted(stripe, session);
       }
+    } else if (event.type === "checkout.session.expired") {
+      await releaseTerminalMatchaCheckout(event.data.object as Stripe.Checkout.Session,"expired");
     } else if (event.type === "checkout.session.async_payment_failed") {
       // Phase 4B4.2. The money did not arrive. This creates NOTHING: it
       // calls a pure function that has no writer to call, so it cannot
@@ -323,6 +326,8 @@ export async function POST(request: Request): Promise<Response> {
         );
       } else if (annual.kind === "annual") {
         console.error(acknowledgeAnnualPaymentFailure(annual.metadata, session.id).message);
+      } else {
+        await releaseTerminalMatchaCheckout(session,"failed");
       }
     } else if (event.type === "invoice.paid") {
       // ── PACKAGE 5C: B2B FIRST, ON THE SUBSCRIPTION'S METADATA ──
@@ -723,6 +728,30 @@ async function handleRefundEvent(stripe: Stripe, event: Stripe.Event): Promise<v
   const outcome = await syncOrderRefundStateFromStripe(stripe, paymentIntentId);
   console.error(`Stripe webhook: refund event ${event.id} (${event.type}) -> ${outcome.result}`);
 
+  if (outcome.result === "order_not_found" && !outcome.orderId) {
+    const proof = await verifyMatchaB2bRefund(stripe, paymentIntentId, event.livemode);
+    if (proof.status === "unverified") {
+      throw new Error("B2B refund: payment evidence incomplete; inventory unchanged");
+    }
+    if (proof.status === "full") {
+      const admin = getSupabaseAdmin();
+      if (!admin) throw new Error("B2B refund: database unavailable");
+      const { data, error } = await admin.rpc("record_matcha_b2b_full_refund_v1", {
+        payment_intent: paymentIntentId,
+        invoice: proof.invoiceId,
+        captured_cents: proof.capturedCents,
+      });
+      if (!error && data === "not_found" && (proof.b2bHint ||
+          (proof.invoiceId && await hasMatchaB2bInvoiceHint(stripe, proof.invoiceId)))) {
+        throw new Error("B2B refund: local settlement missing; awaiting retry");
+      }
+      if (error || !["applied", "unchanged", "not_found"].includes(data)) {
+        throw new Error("B2B refund: correlation unresolved (" + (error?.code ?? data) + ")");
+      }
+    }
+    return;
+  }
+
   // FINANCE LEDGER (072). Record the order refund event and reverse
   // any creator commission proportionally. Both are idempotent.
   if ((isNewSettledRefundFact(outcome.result) || outcome.result === 'unchanged') && outcome.orderId && outcome.refundedTotalCents != null && outcome.refundedTotalCents > 0) {
@@ -776,6 +805,18 @@ async function handleRefundEvent(stripe: Stripe, event: Stripe.Event): Promise<v
  * trusts the webhook payload's embedded session object for payment
  * facts - re-fetches the session directly from Stripe.
  */
+async function releaseTerminalMatchaCheckout(session: Stripe.Checkout.Session, state:"expired"|"failed"): Promise<void> {
+  const metadata = session.metadata;
+  if (session.mode !== "payment" || session.payment_status !== "unpaid" || metadata?.checkout_version !== "1"
+      || !metadata.checkout_attempt_id || !metadata.request_id) return;
+  const admin = getSupabaseAdmin();
+  if (!admin) throw new Error("Inventory reservation storage unavailable");
+  const result = await admin.rpc("release_failed_matcha_checkout_v1", {
+    target: metadata.checkout_attempt_id, request_key: metadata.request_id, session_key: session.id, terminal_state:state,
+  });
+  if (result.error) throw new Error("Terminal checkout inventory release failed");
+}
+
 async function handleCheckoutSessionCompleted(stripe: Stripe, eventSession: Stripe.Checkout.Session): Promise<void> {
   const session = await stripe.checkout.sessions.retrieve(eventSession.id);
 

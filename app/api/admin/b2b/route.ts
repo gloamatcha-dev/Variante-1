@@ -110,6 +110,21 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: "Ungültige Anfrage." }, { status: 400 });
   }
 
+  const command = body as {action?:unknown;deliveryId?:unknown;confirmed?:unknown}|null;
+  if(command?.action==="reserve_stock"||command?.action==="confirm_dispatch"){
+    const write=await requireAdminIdentity(request,"write");
+    if(!write.ok)return write.response;
+    if(request.headers.get("origin")!==new URL(request.url).origin)return Response.json({error:"Ungültiger Anfrageursprung."},{status:403});
+    if(typeof command.deliveryId!=="string"||!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(command.deliveryId)
+      ||(command.action==="confirm_dispatch"&&command.confirmed!==true))
+      return Response.json({error:"Lieferung und Bestätigung prüfen."},{status:400});
+    const result=await supabase.rpc("admin_matcha_b2b_delivery_v1",{
+      actor:write.session.userId,target:command.deliveryId,action:command.action==="reserve_stock"?"reserve":"dispatch",
+    });
+    if(result.error)return Response.json({error:"B2B-Lieferung gesperrt. Zahlung, Freigabe, Termin und Bestand prüfen."},
+      {status:result.error.code==="42501"?403:409});
+    return Response.json({ok:true,result:result.data});
+  }
   const query = resolveB2bAdminQuery(body);
   const { from, to } = b2bPageRange(query);
   const sort = B2B_SORT_COLUMN[query.sort];
@@ -183,6 +198,9 @@ export async function POST(request: Request): Promise<Response> {
     }
   }
 
+  const stock=deliveries.length?await supabase.rpc("read_matcha_b2b_delivery_stock_v1",{ids:deliveries.map(d=>d.id)}):null;
+  const deliveryStock=stock&&!stock.error&&Array.isArray(stock.data)
+    ? Object.fromEntries(stock.data.map(row=>[row.delivery_id,row])) : {};
   const summaries = agreements
     .map(a => b2bAgreementSummary(a, payments, deliveries))
     // "attention" is the one group the database cannot express: it
@@ -197,6 +215,7 @@ export async function POST(request: Request): Promise<Response> {
     // without a second round trip. Already capped above.
     payments,
     deliveries,
+    deliveryStock,
     page: query.page,
     pageSize: B2B_PAGE_SIZE,
     group: query.group,

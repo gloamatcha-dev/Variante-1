@@ -39,6 +39,7 @@ import {
   CHECKOUT_RATE_LIMITED_MESSAGE,
 } from "../../../../lib/checkoutRateLimit";
 import { SHOP_STATUS } from "../../../content";
+import { recoverMatchaCheckout } from "../../../../lib/matchaCheckoutRecovery.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -635,6 +636,31 @@ export async function POST(request: Request): Promise<Response> {
           lineItems[index] = { price: bound.priceId, quantity: bound.quantity };
         }
       });
+    }
+    const inventory = getSupabaseAdmin();
+    if (!inventory) throw new Error("Inventory reservation storage unavailable");
+    const recovery = existingAttempt || attempt.stripe_checkout_session_id
+      ? await recoverMatchaCheckout(stripe.checkout.sessions, {
+        id: attempt.id, requestId, customerId: frozenStripeCustomerId,
+        linkedSession: attempt.stripe_checkout_session_id,
+      }) : { state: "not_found" as const };
+    if (recovery.state === "expired") {
+      const released = await inventory.rpc("release_failed_matcha_checkout_v1", {
+        target: attempt.id, request_key: requestId, session_key: recovery.sessionId, terminal_state: "expired",
+      });
+      if (released.error) throw new Error("Expired checkout inventory release failed");
+      return Response.json({ error: "Diese Zahlungssitzung ist abgelaufen. Bitte starte den Checkout neu." }, { status: 409 });
+    }
+    if (recovery.state === "pending_or_paid") {
+      return Response.json({ error: "Die vorhandene Zahlung wird bereits verarbeitet." }, { status: 409 });
+    }
+    const reservation = await inventory.rpc("reserve_matcha_checkout_v1", { target: attempt.id });
+    if (reservation.error) throw new Error("Inventory reservation unavailable");
+    if (reservation.data !== true) {
+      return Response.json({ error: "Die gewünschte Menge ist nicht verfügbar. Bitte starte den Checkout neu." }, { status: 409 });
+    }
+    if (recovery.state === "open") {
+      return Response.json({ sessionId: recovery.sessionId, url: recovery.url } as SessionResponse);
     }
     const session = await stripe.checkout.sessions.create(
       {

@@ -46,6 +46,7 @@ type Payload = {
   agreements: B2bAgreementSummary[];
   payments: B2bPaymentRow[];
   deliveries: B2bDeliveryRow[];
+  deliveryStock?: Record<string,{payment_verified:boolean;reservation_state:string|null}>;
   page: number;
   pageSize: number;
   group: B2bGroup;
@@ -111,6 +112,8 @@ export function AdminB2b({ onSessionLost, initialSearch="" }: { onSessionLost: (
   const [search, setSearch] = useState(initialSearch==="attention"?"":initialSearch);
   const [page, setPage] = useState(1);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [deliveryAction,setDeliveryAction]=useState(false);
+  const [deliveryNotice,setDeliveryNotice]=useState("");
 
   type Query = { group: B2bGroup; sort: string; search: string; page: number };
 
@@ -143,6 +146,23 @@ export function AdminB2b({ onSessionLost, initialSearch="" }: { onSessionLost: (
     setBusy(true);
     try { await load(query); } finally { setBusy(false); }
   }, [load]);
+
+  async function changeDeliveryStock(deliveryId:string,action:"reserve_stock"|"confirm_dispatch"){
+    if(action==="confirm_dispatch"&&!window.confirm("Tatsächlich erfolgten Versand bestätigen und die reservierte Ware abbuchen?"))return;
+    setDeliveryAction(true);setDeliveryNotice("");
+    try{
+      const response=await fetch("/api/admin/b2b",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action,deliveryId,confirmed:action==="confirm_dispatch"})});
+      if(response.status===401){onSessionLost();return;}
+      const result=await response.json();
+      if(!response.ok||result.ok!==true){
+        setDeliveryNotice(result.error??"Lieferaktion nicht bestätigt.");return;
+      }
+      setDeliveryNotice(action==="reserve_stock"?"500-g-Einheiten reserviert.":"Versand und Lagerabgang bestätigt.");
+      await load({group,sort,search,page});
+    }catch{setDeliveryNotice("Lieferaktion nicht bestätigt. Bitte denselben Vorgang erneut prüfen.");}
+    finally{setDeliveryAction(false);}
+  }
 
   useEffect(() => {
     let dead = false;
@@ -336,6 +356,7 @@ export function AdminB2b({ onSessionLost, initialSearch="" }: { onSessionLost: (
           )}
 
           <h4>Lieferungen</h4>
+          {deliveryNotice&&<p role="status">{deliveryNotice}</p>}
           {openDeliveries.length === 0 ? (
             <p className="ops-note">Noch keine Lieferung.</p>
           ) : (
@@ -355,6 +376,12 @@ export function AdminB2b({ onSessionLost, initialSearch="" }: { onSessionLost: (
                     <td>
                       {DELIVERY_LABEL[d.status] ?? d.status}
                       {d.hold_reason && <span className="ops-sub">{d.hold_reason}</span>}
+                      {data?.deliveryStock?.[d.id]?.reservation_state==="held"&&<span className="ops-sub">500-g-Einheiten reserviert</span>}
+                      {d.status==="scheduled"&&d.resolved_at&&data?.deliveryStock?.[d.id]?.payment_verified===true
+                      && Date.parse(d.scheduled_for)<=Date.now()&&
+                        (data.deliveryStock[d.id].reservation_state==="held"
+                          ? <button type="button" disabled={deliveryAction} onClick={()=>void changeDeliveryStock(d.id,"confirm_dispatch")}>Tatsächlichen Versand bestätigen</button>
+                          : <button type="button" disabled={deliveryAction} onClick={()=>void changeDeliveryStock(d.id,"reserve_stock")}>500-g-Einheiten reservieren</button>)}
                     </td>
                     <td>{d.resolved_at ? (d.shipping_class ?? "disponiert") : "offen"}</td>
                     <td>{d.tracking_number ?? "—"}</td>
@@ -365,9 +392,7 @@ export function AdminB2b({ onSessionLost, initialSearch="" }: { onSessionLost: (
           )}
 
           <p className="ops-note">
-            Nur Ansicht. Mengen, Kündigungen, Lieferstopps und Rechnungen haben jeweils
-            genau einen Schreibweg – Checkout, Webhook, Tagesjob oder die
-            Selbstbedienung der Kundin – und keiner davon führt über diesen Bildschirm.
+            Mengen, Kündigungen, Lieferstopps und Rechnungen werden über die bestehenden Vertragsabläufe verwaltet.
           </p>
         </section>
       )}
