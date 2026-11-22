@@ -108,6 +108,7 @@ export type ActionableOrder = {
   refunded_total_cents?: number | null;
   stripe_payment_intent_id?: string | null;
   stripe_checkout_session_id?: string | null;
+  historical_payment_unverified?: boolean;
   currency?: string | null;
 };
 
@@ -130,6 +131,9 @@ export function hasOpenCancellationRequest(order: ActionableOrder): boolean {
  * open-request guard migration 032 added.
  */
 export function canShip(order: ActionableOrder): ActionVerdict {
+  if (order.historical_payment_unverified) {
+    return no("Historischer Zahlungsnachweis ungeklärt. Versand gesperrt.");
+  }
   if (order.status === "delivered" || order.fulfillment_status === "delivered") {
     return no("Diese Bestellung ist bereits als geliefert erfasst.");
   }

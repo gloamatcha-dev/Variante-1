@@ -54,6 +54,7 @@ import {
 type OrderRow = {
   id: string;
   order_number: string;
+  historical_payment_unverified?: boolean;
   created_at: string;
   placed_at: string | null;
   status: OrderStatus;
@@ -484,7 +485,9 @@ export function AdminOrders({ onSessionLost, initialSearch = "" }: { onSessionLo
                   <td data-label="Kanal / Typ">{r.customer_type==='business'?'B2B':'B2C'}<small>{data.orderTypes?.[r.id]??'nicht erfasst'}</small></td>
                   <td data-label="Betrag">{formatCents(r.total_gross_cents, r.currency)}</td>
                   <td data-label="Zahlung">
-                    <span className={`ops-status ops-pay-${r.payment_status}`}>{PAYMENT_STATUS_LABEL[r.payment_status] ?? r.payment_status}</span>
+                    {r.historical_payment_unverified
+                      ? <span className="ops-status">Historischer Zahlungsnachweis ungeklärt</span>
+                      : <span className={`ops-status ops-pay-${r.payment_status}`}>{PAYMENT_STATUS_LABEL[r.payment_status] ?? r.payment_status}</span>}
                   </td>
                   <td data-label="Refund"><Chip value={cancelState.cancelled&&cancelState.outstandingCents>0?'Erstattung offen':r.payment_status==='refund_pending'||r.payment_status==='refunded'||r.payment_status==='partially_refunded'?r.payment_status:'kein Refund'}/></td>
                   <td data-label="Versand spätestens"><Chip value={data.shippingDue?.[r.id]?.state}/><small>{portalDate(data.shippingDue?.[r.id]?.due_date)}</small></td>
@@ -599,7 +602,9 @@ function OrderDetailBody(
         ["Bestellnummer", order.order_number],
         ["Eingegangen", fmtDateTime(order.placed_at || order.created_at)],
         ["Status", ORDER_STATUS_LABEL[order.status] ?? order.status],
-        ["Zahlung", PAYMENT_STATUS_LABEL[order.payment_status] ?? order.payment_status],
+        ["Zahlung", order.historical_payment_unverified
+          ? "Historischer Zahlungsnachweis ungeklärt · Versand gesperrt"
+          : PAYMENT_STATUS_LABEL[order.payment_status] ?? order.payment_status],
         ["Versandstatus", FULFILLMENT_STATUS_LABEL[order.fulfillment_status] ?? order.fulfillment_status],
         ["Kundentyp", order.customer_type === "business" ? "Geschäftskunde" : "Privat"],
       ]} />

@@ -93,6 +93,7 @@ export async function POST(request: Request): Promise<Response> {
   if (query.status !== "all") rows = rows.eq("status", query.status);
   if (query.payment !== "all") rows = rows.eq("payment_status", query.payment);
   if (query.fulfillment !== "all") rows = rows.eq("fulfillment_status", query.fulfillment);
+  if (query.fulfillment === "unfulfilled" && !query.search) rows = rows.eq("historical_payment_unverified", false);
   if (query.search && /^[0-9a-f-]{36}$/i.test(query.search)) rows = rows.eq("id", query.search);
   else if (query.search) {
     // The three fields the operator actually searches by: order number,
@@ -122,7 +123,7 @@ export async function POST(request: Request): Promise<Response> {
   if(['refund_pending','partially_refunded','refunded'].includes(String(rawPortal.refund)))rows=rows.eq('payment_status',rawPortal.refund);
   let matchingDueIds:string[]|null=null;
   if(portalDue){
-    const candidates=await readPortalPages(supabase,'orders',q=>portalDue==='shipped'?q.not('shipped_at','is',null):q.is('shipped_at',null).neq('status','cancelled'));
+    const candidates=await readPortalPages(supabase,'orders',q=>portalDue==='shipped'?q.not('shipped_at','is',null):q.is('shipped_at',null).neq('status','cancelled').eq('historical_payment_unverified',false));
     matchingDueIds=[];
     for(let i=0;i<candidates.length;i+=10){
       const results=await Promise.all(candidates.slice(i,i+10).map(async candidate=>({id:String(candidate.id),due:await getOrderShippingDue(String(candidate.id))})));
@@ -181,8 +182,8 @@ export async function POST(request: Request): Promise<Response> {
   const countsPromise = Promise.all([
     countOf(head(), "total"),
     countOf(head().gte("created_at", dayStart), "today"),
-    countOf(head().eq("payment_status", "paid"), "paid"),
-    countOf(head().eq("fulfillment_status", "unfulfilled"), "open fulfillment"),
+    countOf(head().eq("payment_status", "paid").eq("historical_payment_unverified",false), "paid"),
+    countOf(head().eq("fulfillment_status", "unfulfilled").eq("historical_payment_unverified",false), "open fulfillment"),
     countOf(head().eq("status", "cancelled"), "cancelled"),
     countOf(head().gt("refunded_total_cents", 0), "refunded"),
     // THE ONE COUNTER THAT IS A QUEUE, and the same two columns
@@ -204,6 +205,7 @@ export async function POST(request: Request): Promise<Response> {
     supabase
       .from("orders")
       .select("total_gross_cents,payment_status")
+      .eq("historical_payment_unverified",false)
       .gte("created_at", dayStart)
       .limit(REVENUE_ROW_CAP)
   );

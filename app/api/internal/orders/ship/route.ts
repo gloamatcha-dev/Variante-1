@@ -213,6 +213,9 @@ export async function POST(request: Request): Promise<Response> {
   });
 
   if (error) {
+    if (error.code === "23514" && error.message === "historical_order_payment_unverified") {
+      return Response.json({error:"Historischer Zahlungsnachweis ungeklärt. Versand gesperrt."}, {status:409});
+    }
     // The order number, never the tracking data and never the raw body.
     console.error(`Shipment transition: RPC failed for ${orderNumber}:`, error.message);
     return Response.json({ error: "Interner Fehler." } as ErrorResponse, { status: 500 });

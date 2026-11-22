@@ -393,6 +393,7 @@ export const ORDER_LIST_COLUMNS = [
   "currency", "total_gross_cents", "refunded_total_cents",
   "cancelled_at", "cancellation_requested_at", "cancellation_request_resolution",
   "shipping_carrier", "tracking_number",
+  "historical_payment_unverified",
   "customer_snapshot",
 ].join(",");
 

@@ -21,7 +21,7 @@ export async function POST(request:Request):Promise<Response>{
  const today=new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Berlin'}).format(new Date());
  const until=new Date(Date.parse(today+'T12:00:00Z')+7*86400000).toISOString().slice(0,10);
  const [orders,annual,withdrawals,complaints,terminations,inventory,b2b,applications,commissions,activity,finance,heldB2b]=await Promise.all([
-  source('orders',q=>q.not('placed_at','is',null).is('shipped_at',null).neq('status','cancelled')),
+  source('orders',q=>q.not('placed_at','is',null).is('shipped_at',null).neq('status','cancelled').eq('historical_payment_unverified',false)),
   sensitive?source('annual_plan_deliveries',q=>q.eq('state','scheduled').lte('scheduled_for',until)):null,
   sensitive?source('withdrawal_requests',q=>q.not('case_state','in','(closed,refunded)')):null,
   sensitive?source('complaint_requests',q=>q.not('case_state','in','(closed,resolved)')):null,
@@ -46,7 +46,7 @@ export async function POST(request:Request):Promise<Response>{
  const shippingComplete=orders!==null && orders.length<=100 && !warnings.includes('Versandstatus');
  const shippingCount=(state:string)=>shippingComplete?shipping.filter(r=>(r.shippingDue as PortalRow|null)?.state===state).length:null;
  const [paidOrders,upcomingPlans]=await Promise.all([
-  admin.from('orders').select('id,order_number,customer_snapshot,total_gross_cents,placed_at').eq('payment_status','paid').order('placed_at',{ascending:false}).limit(6),
+  admin.from('orders').select('id,order_number,customer_snapshot,total_gross_cents,placed_at').eq('payment_status','paid').eq('historical_payment_unverified',false).order('placed_at',{ascending:false}).limit(6),
   sensitive&&annual?.length?admin.from('annual_plans').select('id,customer_snapshot,status').in('id',[...new Set(annual.slice(0,8).map(r=>r.annual_plan_id))]):Promise.resolve({data:[],error:null}),
  ]);
  if(activity.error)warnings.push('Aktivität');if(paidOrders.error)warnings.push('Bezahlte Bestellungen');
