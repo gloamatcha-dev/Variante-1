@@ -3,10 +3,15 @@ import {readFileSync} from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
 import ts from 'typescript';
-import {SHOP_STATUS} from '../app/content.ts';
+import {PRICES_VISIBLE,SHOP_IS_PRELAUNCH,SHOP_STATUS} from '../app/content.ts';
 import * as shopAvailability from '../lib/shopAvailability.ts';
 
 const read=rel=>readFileSync(new URL(rel,import.meta.url),'utf8');
+test('paused checkout retains the regular storefront presentation',()=>{
+  assert.equal(SHOP_STATUS,'prelaunch');
+  assert.equal(SHOP_IS_PRELAUNCH,false);
+  assert.equal(PRICES_VISIBLE,true);
+});
 const variantId='3025ec22-9dd9-4218-b2f4-c1c9174660fd';
 const body={
   items:[{variantId,quantity:1}],

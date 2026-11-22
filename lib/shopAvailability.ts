@@ -1,39 +1,7 @@
 /**
- * MAY THE SHOP TAKE MONEY RIGHT NOW?
- *
- * One question, one answer, derived from ONE value: SHOP_STATUS in
- * app/content.ts. This module holds no status of its own, reads no
- * environment variable and imports nothing - the caller passes the
- * status in, which is what makes both states testable without a
- * rebuild and what keeps this from becoming a second launch flag.
- *
- * ── WHY THE SERVER NEEDS THIS AT ALL ──────────────────────────
- *
- * The prelaunch shop already routes every buy button to /contact and
- * withholds every public price (PRICES_VISIBLE, same single source).
- * That is presentation. It is defeated by anyone who keeps a cart in
- * localStorage from a live build, replays a saved request, or simply
- * POSTs to /api/checkout/session by hand - none of which involve a
- * button. The checkout session endpoint is the only thing in this
- * repository that can hand a customer a payable Stripe page, so it is
- * where "the shop is closed" has to be enforced rather than displayed.
- *
- * ── FAIL CLOSED ───────────────────────────────────────────────
- *
- * Selling requires the exact string "live". "prelaunch", "LIVE",
- * " live ", an empty string, a typo introduced while editing
- * app/content.ts on launch day - every one of them means the shop does
- * not sell. The dangerous direction here is selling when nobody meant
- * to, so the permissive branch is the narrow one.
- *
- * ── WHAT THIS DELIBERATELY DOES NOT DECIDE ────────────────────
- *
- * Not whether a price may be RENDERED (PRICES_VISIBLE, app/content.ts).
- * Not whether subscriptions or the annual plan may be booked - those
- * have their own closed-by-default environment flags and are out of
- * this launch. Not whether a paid order may be fulfilled: an order that
- * was legitimately paid for must still be processed, emailed and
- * shipped no matter what SHOP_STATUS says afterwards.
+ * Server-side checkout policy for new purchases. Only the exact "live"
+ * status permits checkout. Presentation and already-paid orders use
+ * their own existing paths.
  */
 
 /** The exact status in which this shop may charge a customer. */
@@ -48,14 +16,9 @@ export const SHOP_STATUS_LIVE = "live";
  */
 export const CHECKOUT_CLOSED_STATUS = 409;
 
-/**
- * Customer-facing and deliberately plain. It says what is true (no
- * orders yet), points at the one thing that IS open, and promises no
- * date - the launch date lives in lib/launchCountdown.ts and is not
- * repeated here where it could drift.
- */
+/** Customer-facing refusal shared by all checkout routes. */
 export const CHECKOUT_CLOSED_MESSAGE =
-  "Der Shop ist noch nicht eröffnet. Bestellungen sind erst zum Launch möglich - trag dich solange in die Launch List ein.";
+  "Bestellungen sind vorübergehend nicht möglich.";
 
 /** Whether the shop may complete a purchase at this status. */
 export function shopSellsNow(shopStatus: string): boolean {

@@ -10,49 +10,10 @@ export const BRAND = {
 
 export const SHOP_STATUS = "prelaunch" as const; // "prelaunch" | "live"
 
-/**
- * PUBLIC PRODUCT PRICES ARE WITHHELD UNTIL THE SHOP IS LIVE.
- *
- * DERIVED FROM SHOP_STATUS, never set by hand. There is no second flag
- * to remember: flipping SHOP_STATUS to "live" brings every price back in
- * one step, everywhere, automatically.
- *
- * WHAT THIS IS NOT. No price is deleted, zeroed or rewritten. The
- * catalog, the Stripe price ids, the cart arithmetic, the checkout, the
- * tax rules and the database are untouched - v.price_gross_cents is the
- * same number it always was, and the cart drawer still adds up what a
- * customer put in it. This decides one thing only: whether a public
- * PRODUCT surface prints a selling price while the shop cannot sell.
- *
- * It is also why the prelaunch shop already routes every buy button to
- * /contact rather than to the cart - showing a price next to a button
- * that cannot take the money is the mismatch this closes.
- *
- * Typed `boolean` rather than left as a narrowed literal, so the true
- * branch is not compiled away and reads as live code.
- */
-/**
- * SHOP_STATUS is declared `as const`, so TypeScript narrows it to the
- * literal currently deployed and calls a comparison with the other one
- * unreachable. The comparison is the point - this file has to keep
- * working when the constant is flipped and redeployed, which is exactly
- * how the shop is released - so the value is widened ONCE here and every
- * derived flag below reads the widened form. The same widening the
- * launch API routes already do at their own call sites.
- */
-const SHOP_STATUS_VALUE: string = SHOP_STATUS;
-
-export const PRICES_VISIBLE: boolean = SHOP_STATUS_VALUE !== "prelaunch";
-
-/**
- * THE ONE PRELAUNCH PREDICATE every presentation surface reads.
- *
- * Derived, never set by hand, and the exact complement of
- * PRICES_VISIBLE - so a surface cannot show a price while still routing
- * its buy button to /contact, which is the mismatch the two used to be
- * able to disagree about when each site compared the constant itself.
- */
-export const SHOP_IS_PRELAUNCH: boolean = SHOP_STATUS_VALUE === "prelaunch";
+// Keep the public storefront visible while the server pauses new purchases.
+const PUBLIC_SHOP_PRESENTATION: string = "live";
+export const PRICES_VISIBLE: boolean = PUBLIC_SHOP_PRESENTATION !== "prelaunch";
+export const SHOP_IS_PRELAUNCH: boolean = PUBLIC_SHOP_PRESENTATION === "prelaunch";
 
 /**
  * RECIPES ARE WITHHELD FOR THIS LAUNCH, NOT REMOVED.

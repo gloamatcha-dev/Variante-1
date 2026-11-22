@@ -53,6 +53,7 @@ const availability = read("lib/shopAvailability.ts");
 const sessionRoute = read("app/api/checkout/session/route.ts");
 const content = read("app/content.ts");
 const prelaunch = content.includes('export const SHOP_STATUS = "prelaunch" as const;');
+const prelaunchPresentation = content.includes('const PUBLIC_SHOP_PRESENTATION: string = "prelaunch";');
 const slugPage = read("app/[...slug]/page.tsx");
 
 const PORT = 8961;
@@ -130,20 +131,13 @@ async function post(path, body, headers = {}) {
    1. ONE SOURCE OF TRUTH
    ══════════════════════════════════════════════════════════════ */
 
-test("1: the gate derives from SHOP_STATUS and invents no second flag", () => {
-  // The canonical value, and the price flag already derived from it.
+test("1: checkout and presentation use separate decisions", () => {
   assert.match(content, /export const SHOP_STATUS = "(prelaunch|live)" as const;/);
-  // DERIVED, still from SHOP_STATUS and from nothing else. The value is
-  // widened to a string once in app/content.ts because `as const`
-  // narrows the constant to one literal, which makes a direct
-  // comparison a type error the moment the shop is flipped live.
-  assert.match(content, /const SHOP_STATUS_VALUE: string = SHOP_STATUS;/);
+  assert.match(content, /const PUBLIC_SHOP_PRESENTATION: string = "(prelaunch|live)";/);
   assert.match(content,
-    /export const PRICES_VISIBLE: boolean = SHOP_STATUS_VALUE !== "prelaunch";/);
-  // And the prelaunch predicate is its exact complement, so a surface
-  // cannot show a price while still routing its button to /contact.
+    /export const PRICES_VISIBLE: boolean = PUBLIC_SHOP_PRESENTATION !== "prelaunch";/);
   assert.match(content,
-    /export const SHOP_IS_PRELAUNCH: boolean = SHOP_STATUS_VALUE === "prelaunch";/);
+    /export const SHOP_IS_PRELAUNCH: boolean = PUBLIC_SHOP_PRESENTATION === "prelaunch";/);
   // The route reads that one constant - not an env var, not its own copy.
   assert.match(sessionRoute, /import \{ SHOP_STATUS \} from "\.\.\/\.\.\/\.\.\/content";/);
   assert.match(sessionRoute, /checkoutRefusalFor\(SHOP_STATUS\)/);
@@ -197,7 +191,7 @@ test("2c: the refusal is a conflict, not an error and not an outage", () => {
   assert.equal(CHECKOUT_CLOSED_STATUS, 409);
   assert.ok(CHECKOUT_CLOSED_STATUS < 500, "a closed shop is reported as a server fault");
   // Customer-facing German, and it promises no date it cannot keep.
-  assert.match(CHECKOUT_CLOSED_MESSAGE, /Launch/);
+  assert.match(CHECKOUT_CLOSED_MESSAGE, /Bestellungen.*nicht möglich/);
   assert.ok(!/\d{1,2}\.\s*(Oktober|10\.)/.test(CHECKOUT_CLOSED_MESSAGE),
     "the refusal repeats a launch date that lives in lib/launchCountdown.ts");
 });
@@ -342,7 +336,7 @@ test("3e: the gate sits before every side effect in the route", () => {
    ══════════════════════════════════════════════════════════════ */
 
 test("4: /shop price metadata follows the launch state", () => {
-  if (prelaunch) {
+  if (prelaunchPresentation) {
     assert.doesNotMatch(shopHtml, /\d{1,3},\d{2}\s*(€|Euro)/);
     return;
   }
@@ -390,7 +384,7 @@ test("4c: the written-out price still matches the cheapest active variant", asyn
     `/shop's description says ${written[1]} but the cheapest active variant is ${(lowest / 100).toFixed(2)}`);
 });
 
-test("4d: no purchasable Offer is published while the shop cannot sell", () => {
+test("4d: the prelaunch presentation suppresses price metadata", {skip:!prelaunchPresentation}, () => {
   for (const banned of ['"@type":"Offer"', '"@type":"Product"', '"@type": "Offer"', '"@type": "Product"']) {
     assert.ok(!shopHtml.includes(banned), `/shop publishes ${banned}`);
   }

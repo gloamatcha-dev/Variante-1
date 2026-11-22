@@ -3,7 +3,8 @@ import {GenericProductPage} from "./GenericProductPage";
 import { useEffect, useLayoutEffect, useState, useRef, useCallback, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { Header, Footer, MobileDock } from "./Chrome";
-import { BRAND, PRODUCT, SHOP_IS_PRELAUNCH, RECIPES_VISIBLE, PRICES_VISIBLE } from "./content";
+import { BRAND, PRODUCT, SHOP_IS_PRELAUNCH, RECIPES_VISIBLE, PRICES_VISIBLE, SHOP_STATUS } from "./content";
+import { CHECKOUT_CLOSED_MESSAGE, shopSellsNow } from "../lib/shopAvailability";
 import { useCatalog, useCatalogList, fmtCents, per100gCents } from "./useCatalog";
 import { isProductWithheld } from "../lib/catalogAvailability";
 // The /shop/gloa-matcha alias used to be spelled out inline here. It is
@@ -272,7 +273,7 @@ return <section className="countdown" aria-labelledby="countdown-title">
 <p className="countdown-date">{GLOA_LAUNCH_FULL_LABEL}</p>
 </div>
 {state?.launched
-?<p className="countdown-live">Der Shop ist offen.</p>
+?<p className="countdown-live">{shopSellsNow(SHOP_STATUS)?"Der Shop ist offen.":CHECKOUT_CLOSED_MESSAGE}</p>
 :<div className="countdown-units" aria-hidden="true">
 {([["Days",state?.days],["Hours",state?.hours],["Min",state?.minutes],["Sec",state?.seconds]] as const).map(([label,value])=>
 <div className="countdown-unit" key={label}>
@@ -793,7 +794,7 @@ return <section className="shop-strip" aria-label="GLOA Launch">
 <div className="shop-strip-inner home-rail">
 <p className="shop-strip-title">{state?.launched?"GLOA is here":"GLOA is coming"}</p>
 {state?.launched
-?<p className="shop-strip-live">Der Shop ist offen.</p>
+?<p className="shop-strip-live">{shopSellsNow(SHOP_STATUS)?"Der Shop ist offen.":CHECKOUT_CLOSED_MESSAGE}</p>
 :<div className="shop-strip-units" aria-hidden="true">
 {([["Tage",state?.days],["Stunden",state?.hours],["Minuten",state?.minutes],["Sekunden",state?.seconds]] as const).map(([label,value])=>
 <span className="shop-strip-unit" key={label}>
