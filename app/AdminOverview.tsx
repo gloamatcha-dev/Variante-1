@@ -19,7 +19,7 @@ import { AdminInventory } from "./AdminInventory";
 import { WAITLIST_FILTERS, type WaitlistFilter } from "../lib/adminWaitlistQuery";
 import { AdminActivity } from "./AdminActivity";
 
-import { ADMIN_DESKTOP_MEDIA_QUERY, ADMIN_DESKTOP_ONLY_COPY } from "../lib/adminViewport.ts";
+import { ADMIN_DESKTOP_MEDIA_QUERY } from "../lib/adminViewport.ts";
 
 // The SAME predicate the subscription route gates on, from the same
 // zero-import leaf. The screen must not decide for itself who may look:
@@ -146,26 +146,6 @@ function useIsAdminDesktop(): boolean | null {
   return isDesktop;
 }
 
-/**
- * What a viewport below the minimum gets INSTEAD of the admin.
- *
- * Its own screen rather than the admin with things hidden: nothing
- * operational is rendered, so there is nothing to reveal with a
- * stylesheet. No public header, no footer, no cart, no launch popup -
- * this is the internal surface, not the shop.
- */
-function AdminDesktopOnly() {
-  return (
-    <main className="ops ops-desktop-only">
-      <div className="ops-desktop-only-card">
-        <p className="ops-eyebrow">{ADMIN_DESKTOP_ONLY_COPY.eyebrow}</p>
-        <h1 className="ops-desktop-only-title">{ADMIN_DESKTOP_ONLY_COPY.title}</h1>
-        <p className="ops-desktop-only-body">{ADMIN_DESKTOP_ONLY_COPY.body}</p>
-      </div>
-    </main>
-  );
-}
-
 export function AdminOverview() {
   const isDesktop = useIsAdminDesktop();
   // WHICH SECTION IS OPEN. The waitlist screen this file has always
@@ -178,8 +158,7 @@ export function AdminOverview() {
   // where the next unfinished section would be named, and the rule it
   // encodes is unchanged - a tab that opens nothing is worse than a tab
   // that says it is not here yet.
-  // BEFORE ANY ADMIN STATE. Whether this viewport may operate the admin
-  // decides whether the data below is ever asked for.
+  // Compact viewports use the inventory-only surface below.
 
 
   const [view, setView] = useState<"overview" | "orders" | "subscriptions" | "annual" | "rights" | "inventory" | "costs" | "activity" | "waitlist" | "b2b" | "finance" | "creator" | "products">("overview");
@@ -246,7 +225,7 @@ export function AdminOverview() {
   // visitor who navigates away mid-request does not have state written
   // into an unmounted component.
   useEffect(() => {
-    if (isDesktop !== true) return;
+    if (isDesktop === null) return;
     let cancelled = false;
     (async () => {
       try {
@@ -325,13 +304,6 @@ export function AdminOverview() {
     void load(merged);
   };
 
-  // ── THE VIEWPORT GATE, BEFORE EVERY OTHER BRANCH ────────────
-  //
-  // Ordered first on purpose. Below the minimum nothing operational is
-  // reached: not the login form (there is nothing to sign in TO here),
-  // not the identity, not a tab, not a count. An existing session makes
-  // no difference - a valid cookie on a phone still gets this screen.
-  if (isDesktop === false) return <AdminDesktopOnly />;
   if (isDesktop === null) return <main className="ops" aria-busy="true" />;
 
   if (signedIn === null) {
@@ -363,6 +335,18 @@ export function AdminOverview() {
 
   if (!data) {
     return <main className="ops portal portal-login"><div role="alert"><p>{loadError || "Wird geladen…"}</p><button type="button" onClick={()=>window.location.reload()}>Erneut versuchen</button></div></main>;
+  }
+
+  if (isDesktop === false) {
+    return (
+      <main className="ops inventory-compact">
+        <div className="inventory-compact-bar">
+          <strong>GLOA</strong>
+          <button type="button" className="ops-btn" onClick={() => void signOut()}>Abmelden</button>
+        </div>
+        <AdminInventory showHeading isOwner={data.identity?.role === "owner"} onSessionLost={() => setSignedIn(false)} />
+      </main>
+    );
   }
 
   const pages = Math.max(1, Math.ceil((data.total??0) / (data.pageSize??25)));
@@ -443,7 +427,7 @@ export function AdminOverview() {
           home. */}
       {view === "b2b" && maySeeSubscriptions && <AdminB2b onSessionLost={() => setSignedIn(false)} key={target} initialSearch={target} />}
 
-      {view === "inventory" && <AdminInventory onSessionLost={() => setSignedIn(false)} />}
+      {view === "inventory" && <AdminInventory isOwner={data.identity?.role === "owner"} onSessionLost={() => setSignedIn(false)} />}
       {view === "products" && (data.identity?.canManageProducts === true ? <AdminProducts /> : <p role="alert">Keine Berechtigung für die Produktverwaltung.</p>)}
       {view === "inventory"&&target==='warnings'&&<AdminPortalInventoryWarnings/>}
 

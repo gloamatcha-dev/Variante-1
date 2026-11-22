@@ -97,10 +97,14 @@ test('new reads remain server-authorized and no credentials or automatic stock m
  assert.match(source('app/api/admin/portal/route.ts'),/canWrite\(gate\.identity\.role\)/);
  assert.match(source('app/AdminOverview.tsx'),/action: "identity"/);
 });
-test('admin layout remains scoped and preserves the authoritative desktop-only guard',()=>{
+test('admin layout remains scoped and provides a compact inventory before mounting the desktop shell',()=>{
  const css=source('app/admin-portal.css');assert.match(css,/@media\(max-width:1100px\)/);assert.match(css,/@media\(max-width:700px\)/);assert.match(css,/\.portal-sidebar nav\{display:grid/);assert.match(css,/content:attr\(data-label\)/);
- assert.match(source('app/AdminOverview.tsx'),/if \(isDesktop === false\) return <AdminDesktopOnly/);
- assert.match(source('app/AdminOverview.tsx'),/if \(isDesktop !== true\) return/);
+ const overview = source('app/AdminOverview.tsx');
+ const compact = overview.match(/if \(isDesktop === false\) \{([\s\S]*?)\n  \}/);
+ assert.ok(compact);
+ assert.match(compact[1], /<AdminInventory showHeading/);
+ assert.doesNotMatch(compact[1], /<AdminPortalShell|<AdminActivity|<AdminOrders/);
+ assert.ok(compact.index < overview.indexOf('<AdminPortalShell'));
 });
 
 function renderPortal(file,props,readData,readError='',selectedFinance=null){

@@ -932,7 +932,7 @@ test("7d: the screen shows words, never the raw metadata object", () => {
 });
 
 test("7e: the tab is real, desktop-only by inheritance, and fetches nothing until opened [Block 2]", () => {
-assert.match(shell,/view === "activity" && <AdminActivity/); assert.equal((shell.match(/<AdminActivity/g)??[]).length,1); for(const banned of ['matchMedia','innerWidth','ADMIN_MIN_DESKTOP_WIDTH'])assert.ok(!activityUi.includes(banned)); const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),'utf8'); assert.match(portalCss,/@media\(max-width:700px\)/); assert.match(portalCss,/content:attr\(data-label\)/); assert.match(codeOnly(shell),/if \(isDesktop === false\) return <AdminDesktopOnly/); assert.match(codeOnly(shell),/if \(isDesktop !== true\) return/); assert.match(shell,/AdminPortalShell/);
+assert.match(shell,/view === "activity" && <AdminActivity/); assert.equal((shell.match(/<AdminActivity/g)??[]).length,1); for(const banned of ['matchMedia','innerWidth','ADMIN_MIN_DESKTOP_WIDTH'])assert.ok(!activityUi.includes(banned)); const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),'utf8'); assert.match(portalCss,/@media\(max-width:700px\)/); assert.match(portalCss,/content:attr\(data-label\)/); assert.match(codeOnly(shell),/if \(isDesktop === false\) \{[\s\S]*?className="ops inventory-compact"[\s\S]*?<AdminInventory showHeading[\s\S]*?<\/main>[\s\S]*?\n  \}/); assert.match(shell,/AdminPortalShell/);
 });
 
 test("7f: a lost session is reported, never rendered as an empty history", () => {
@@ -1004,8 +1004,8 @@ test("8e: the activity is fetched only while its own tab is open", () => {
     "the activity load is no longer driven by its own state alone");
 });
 
-test("8f: below 1024 there is no navigation at all, so no tab and no request [Block 2]", () => {
-const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),'utf8'); assert.match(portalCss,/@media\(max-width:700px\)/); assert.match(portalCss,/content:attr\(data-label\)/); assert.match(codeOnly(shell),/if \(isDesktop === false\) return <AdminDesktopOnly/); assert.match(codeOnly(shell),/if \(isDesktop !== true\) return/); assert.match(shell,/AdminPortalShell/);
+test("8f: below 1024 the inventory is the only mounted admin module [Block 2]", () => {
+const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),'utf8'); assert.match(portalCss,/@media\(max-width:700px\)/); assert.match(portalCss,/content:attr\(data-label\)/); assert.match(codeOnly(shell),/if \(isDesktop === false\) \{[\s\S]*?className="ops inventory-compact"[\s\S]*?<AdminInventory showHeading[\s\S]*?<\/main>[\s\S]*?\n  \}/); assert.match(shell,/AdminPortalShell/);
 });
 
 test("8g: no public navigation learned about the admin", () => {

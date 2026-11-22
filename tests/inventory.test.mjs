@@ -799,7 +799,7 @@ test("8b: a booking needs a second, separate confirmation", () => {
   assert.match(movementForm, /Bestand vorher/);
   assert.match(movementForm, /Bestand danach/);
   assert.match(movementForm, /kann nicht gelöscht werden/);
-  assert.ok(movementForm.includes("if (busy || !valid) return;"), "a double click is not refused");
+  assert.ok(movementForm.includes("if (saving.current || busy || !valid) return;") && movementForm.includes("saving.current = true;"), "a double click is not refused");
 });
 
 test("8c: negative stock warns, and cannot be booked without ticking it", () => {
@@ -932,8 +932,9 @@ test("9: the inventory tables become cards on a phone, and nothing scrolls sidew
     "the inventory tables keep the desktop minimum width on a phone");
   // Every cell carries the label its header would have given it.
   const labels = [...ui.matchAll(/data-label="([^"]+)"/g)].map(m => m[1]);
-  for (const header of ["Artikel", "Kategorie", "Bereich", "Bestand", "Mindestbestand", "Status",
-                        "Letzte Bewegung", "Datum", "Typ", "Grund", "Änderung", "Bestand danach"]) {
+  for (const header of ["Artikel", "SKU", "Beschreibung / Verwendung", "Kategorie", "Bereich", "Physischer Bestand",
+                        "Reserviert / Verfügbar", "Mindestbestand", "Status", "Letzte Bewegung", "Aktionen",
+                        "Datum", "Typ", "Grund", "Änderung", "Bestand vorher", "Bestand danach"]) {
     assert.ok(labels.includes(header), `no data-label for ${header}`);
   }
 });

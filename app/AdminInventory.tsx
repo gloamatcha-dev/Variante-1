@@ -1,4 +1,5 @@
 "use client";
+import "./admin-inventory.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AREA_LABEL,
@@ -152,10 +153,14 @@ const MATCHA_DESCRIPTIONS = new Map([
   ["GLOA-MATCHA-B2B-500G", "Fertige 500-g-Beutel ausschließlich für B2B. Bestand in Stück."],
 ]);
 
+function itemDescription(item: Item) {
+  return item.notes?.trim() || MATCHA_DESCRIPTIONS.get(item.sku ?? "") || "—";
+}
+
 function InventoryHelp() {
   return (
-    <details className="ops-action-block">
-      <summary>So funktioniert das GLOA-Lager</summary>
+    <details className="inventory-card inventory-guide" open>
+      <summary><span className="inventory-icon" aria-hidden="true">ⓘ</span>So funktioniert das GLOA-Lager</summary>
       <ul>
         <li><strong>Rohvorrat und Fertigware.</strong> Losen Matcha in Gramm erfassen (1 kg = 1.000 g). Fertige Beutel in Stück zählen: 30, 50 und 100 g für B2C, 500 g ausschließlich für B2B.</li>
         <li><strong>Anfangsbestand und Wareneingang.</strong> Beim Anlegen einmalig die tatsächlich vorhandene Menge eingeben. Spätere Zugänge als Wareneingang in der Einheit des Artikels buchen.</li>
@@ -163,14 +168,19 @@ function InventoryHelp() {
         <li><strong>Reservierung.</strong> Beim B2C-Einmalkauf wird vor Erstellung der Zahlungssitzung reserviert. Bei Abos und Jahresplänen gilt die einzelne fällige Lieferung. Bei B2B wird die bezahlte, freigegebene Lieferung im Adminportal reserviert.</li>
         <li><strong>Versand und Storno.</strong> Beim Versand wird der reservierte Bestand abgebucht. Eine wirksame Stornierung vor Versand gibt die Reservierung frei. Bereits versendete Ware wird dadurch nicht wieder eingelagert.</li>
         <li><strong>Bestandsanzeige.</strong> Verfügbarer Bestand ist der physische Bestand abzüglich der Reservierungen. Rohvorrat zählt erst nach dem Abpacken als Fertigware. Geplanter Bedarf ist eine Vorschau. Die Anzeige bestätigt keine Shopfreigabe.</li>
-        <li><strong>Inventur, Korrektur und Mindestbestand.</strong> Bei der Inventur den gesamten gezählten Bestand erfassen. Bei einer Korrektur die bekannte Differenz mit Vorzeichen und Grund buchen. Der Mindestbestand ist eine Warnschwelle in der Artikeleinheit.</li>
+        <li><strong>Inventur und Korrekturen.</strong> Bei der Inventur den gesamten gezählten Bestand erfassen. Bei einer Korrektur die bekannte Differenz mit Vorzeichen und Grund buchen.</li>
+        <li><strong>Mindestbestand und Warnungen.</strong> Den Mindestbestand als Warnschwelle in der Artikeleinheit erfassen.</li>
         <li><strong>Doppelbuchungen vermeiden.</strong> Abpacken und Versandabgänge aus Reservierungen nicht zusätzlich manuell buchen. Bei einer unklaren Rückmeldung zuerst den Bewegungsverlauf prüfen.</li>
       </ul>
     </details>
   );
 }
 
-export function AdminInventory({ onSessionLost }: { onSessionLost: () => void }) {
+export function AdminInventory({ onSessionLost, isOwner = false, showHeading = false }: {
+  onSessionLost: () => void;
+  isOwner?: boolean;
+  showHeading?: boolean;
+}) {
   const [data, setData] = useState<ItemsPayload | null>(null);
   const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -280,52 +290,64 @@ export function AdminInventory({ onSessionLost }: { onSessionLost: () => void })
     setPage(1);
   };
 
-  if (loadError && !data) {
+  if (!data) {
     return (
-      <section className="ops-panel">
-        <p className="ops-error" role="alert">{loadError}</p>
-        <button type="button" className="ops-refresh" onClick={() => void refresh(query)}>Erneut versuchen</button>
+      <section className="inventory-dashboard" aria-busy={!loadError}>
+        {showHeading && <h1>Inventar</h1>}
+        {loadError ? <>
+          <p className="ops-error" role="alert">{loadError}</p>
+          <button type="button" className="ops-refresh" onClick={() => void refresh(query)} disabled={busy}>Erneut versuchen</button>
+        </> : <p className="ops-loading" role="status">Inventar wird geladen…</p>}
       </section>
     );
   }
-  if (!data) return <p className="ops-loading">Wird geladen…</p>;
 
   const categories = data.categories.filter(c => c.is_active || c.id === categoryId);
   const filtered = area !== "all" || status !== "all" || categoryId !== "all" || archived !== "active" || search !== "";
   const totalPages = Math.max(1, Math.ceil(data.total / data.pageSize));
 
   return (
-    <>
-      <section className="ops-summary">
-        <div><dt>Artikel</dt><dd>{data.summary.total ?? "—"}</dd></div>
-        <div><dt>Niedriger Bestand</dt><dd>{data.summary.low ?? "—"}</dd></div>
-        <div><dt>Nicht verfügbar</dt><dd>{data.summary.out ?? "—"}</dd></div>
-        <div><dt>Negativ</dt><dd className={(data.summary.negative ?? 0) > 0 ? "ops-open-refund" : undefined}>
-          {data.summary.negative ?? "—"}</dd></div>
-      </section>
+    <section className="inventory-dashboard" aria-label="Inventar">
+      <div className="inventory-layout">
+        <div className="inventory-top">
+          <div className="inventory-main">
+            <header className="inventory-header">
+              {showHeading && <div><h1>Inventar</h1><p>Bestände und Lagerbewegungen</p></div>}
+              <div className="inventory-toolbar">
+                <button type="button" className="ops-btn ops-btn-primary" onClick={() => setCreating(true)}>Artikel hinzufügen</button>
+                <button type="button" className="ops-btn" onClick={() => void refresh(query)} disabled={busy}>
+                  {busy ? "Wird aktualisiert…" : "Aktualisieren"}
+                </button>
+                <span className="ops-refresh-at">Zuletzt aktualisiert {fmtDateTime(data.fetchedAt)}</span>
+              </div>
+            </header>
+            {loadError && <p className="ops-error" role="alert">{loadError}</p>}
+            <dl className="inventory-metrics">
+              <div><dt><span aria-hidden="true">▣</span> Artikel</dt><dd>{data.summary.total ?? "—"}</dd></div>
+              <div><dt><span aria-hidden="true">△</span> Niedriger Bestand</dt><dd>{data.summary.low ?? "—"}</dd></div>
+              <div><dt><span aria-hidden="true">×</span> Nicht verfügbar</dt><dd>{data.summary.out ?? "—"}</dd></div>
+              <div><dt><span aria-hidden="true">−</span> Negativer Bestand</dt><dd>{data.summary.negative ?? "—"}</dd></div>
+            </dl>
 
-      <div className="ops-refresh-bar">
-        <button type="button" className="ops-btn ops-btn-primary" onClick={() => setCreating(true)}>
-          Artikel hinzufügen
-        </button>
-        <button type="button" className="ops-refresh" onClick={() => void refresh(query)} disabled={busy}>
-          {busy ? "Wird aktualisiert…" : "Aktualisieren"}
-        </button>
-        <span className="ops-refresh-at">Zuletzt aktualisiert {fmtDateTime(data.fetchedAt)}</span>
-        {loadError && <span className="ops-error" role="alert">{loadError}</span>}
+            <div className="inventory-modules">
+              <MatchaPackaging raw={data.rows.find(item => item.sku === "GLOA-MATCHA-RAW" && item.is_active && item.unit === "g")}
+                onRecorded={() => refresh(query)} />
+              {isOwner && <ReconcileCheckoutStock onRecorded={() => refresh(query)} />}
+              <DeliveryDemand rows={data.plannedMatcha} />
+            </div>
+          </div>
+          <InventoryHelp />
+        </div>
       </div>
 
-      <InventoryHelp />
-      <MatchaPackaging onRecorded={() => refresh(query)} />
-      <ReconcileCheckoutStock onRecorded={() => refresh(query)} />
-      <details>
-        <summary>Geplanter Matcha-Lieferbedarf</summary>
-        <p>Offene Jahresplan- und B2B-Lieferungen sowie die jeweils nächste geplante Abo-Lieferung. Diese Mengen sind eine Planung.</p>
-        {data.plannedMatcha ? <ul>{data.plannedMatcha.map(row=><li key={row.sku}>
-          {row.sku}: Jahrespläne {row.annual_units} · nächste Abo-Lieferungen {row.next_subscription_units} · B2B {row.b2b_units}
-        </li>)}</ul> : <p>Geplanter Bedarf nicht verfügbar.</p>}
-      </details>
-      <section className="ops-filter-row" aria-label="Filter">
+      <section className="ops-filter-row inventory-filters" aria-label="Filter">
+        <form className="ops-search" onSubmit={e => { e.preventDefault(); reset({ search: searchInput }); }}>
+          <label htmlFor="inv-search">Suche</label>
+          <input id="inv-search" type="search" placeholder="Artikel, SKU oder Lieferant"
+            value={searchInput} onChange={e => setSearchInput(e.target.value)} />
+          <button type="submit">Suchen</button>
+        </form>
+
         <div>
           <label htmlFor="inv-area">Bereich</label>
           <select id="inv-area" value={area} onChange={e => reset({ area: e.target.value as InventoryArea | "all" })}>
@@ -356,12 +378,10 @@ export function AdminInventory({ onSessionLost }: { onSessionLost: () => void })
             <option value="all">Alle</option>
           </select>
         </div>
-        <form className="ops-search" onSubmit={e => { e.preventDefault(); reset({ search: searchInput }); }}>
-          <label htmlFor="inv-search">Suche</label>
-          <input id="inv-search" type="search" placeholder="Artikel, SKU oder Lieferant"
-            value={searchInput} onChange={e => setSearchInput(e.target.value)} />
-          <button type="submit">Suchen</button>
-        </form>
+        {filtered && <button type="button" className="ops-btn inventory-reset" onClick={() => {
+          setSearchInput("");
+          reset({ area: "all", status: "all", categoryId: "all", archived: "active", search: "" });
+        }}>Filter zurücksetzen</button>}
       </section>
 
       {data.rows.length === 0 ? (
@@ -386,18 +406,21 @@ export function AdminInventory({ onSessionLost }: { onSessionLost: () => void })
           )}
         </section>
       ) : (
-        <div className="ops-table-wrap">
+        <div className="ops-table-wrap inventory-list" role="region" aria-label="Lagerartikel" tabIndex={0}>
           <table className="ops-table ops-inventory">
             <thead>
               <tr>
                 <th scope="col">Artikel</th>
+                <th scope="col">SKU</th>
                 <th scope="col">Beschreibung / Verwendung</th>
                 <th scope="col">Kategorie</th>
                 <th scope="col">Bereich</th>
-                <th scope="col">Bestand</th>
+                <th scope="col">Physischer Bestand</th>
+                <th scope="col">Reserviert / Verfügbar</th>
                 <th scope="col">Mindestbestand</th>
                 <th scope="col">Status</th>
                 <th scope="col">Letzte Bewegung</th>
+                <th scope="col">Aktionen</th>
               </tr>
             </thead>
             <tbody>
@@ -410,21 +433,23 @@ export function AdminInventory({ onSessionLost }: { onSessionLost: () => void })
                     <td data-label="Artikel">
                       <button type="button" className="ops-order-open"
                         onClick={e => { e.stopPropagation(); void openItem(item.id); }}>{item.name}</button>
-                      {item.sku && <span className="ops-mail">{item.sku}</span>}
                       {!item.is_active && <span className="ops-flag ops-flag-cancel">Archiviert</span>}
                     </td>
-                    <td data-label="Beschreibung / Verwendung" style={{ overflowWrap: "anywhere" }}>
-                      {item.notes?.trim() || MATCHA_DESCRIPTIONS.get(item.sku ?? "") || "—"}
-                    </td>
-                    <td data-label="Kategorie">{category?.name ?? "—"}</td>
+                    <td data-label="SKU">{item.sku ?? "—"}</td>
+                    <td data-label="Beschreibung / Verwendung">{itemDescription(item)}</td>
+                    <td data-label="Kategorie"><span className="inventory-category">{category?.name ?? "—"}</span></td>
                     <td data-label="Bereich">
                       {areas.length ? areas.map(a => AREA_LABEL[a]).join(" · ") : "—"}
                     </td>
-                    <td data-label="Bestand">
-                      <span className="ops-order-name">{formatQuantity(item.checkout_stock?.physical ?? item.current_quantity)} {item.unit}</span>
-                      {item.checkout_stock !== undefined && <small className="ops-mail">
-                        Reserviert: {formatQuantity(item.checkout_stock?.reserved ?? null)} · Verfügbar: {formatQuantity(item.checkout_stock?.available ?? null)}
-                      </small>}
+                    <td data-label="Physischer Bestand">
+                      <strong>{formatQuantity(item.checkout_stock?.physical ?? item.current_quantity)} {item.unit}</strong>
+                    </td>
+                    <td data-label="Reserviert / Verfügbar">
+                      {item.checkout_stock ? <span>
+                        {formatQuantity(item.checkout_stock.reserved)} {item.unit} / {item.checkout_stock.available === null
+                          ? "—"
+                          : `${formatQuantity(item.checkout_stock.available)} ${item.unit}`}
+                      </span> : "—"}
                     </td>
                     <td data-label="Mindestbestand">
                       {item.low_stock_threshold === null ? "—" : `${formatQuantity(item.low_stock_threshold)} ${item.unit}`}
@@ -433,6 +458,9 @@ export function AdminInventory({ onSessionLost }: { onSessionLost: () => void })
                       <span className={`ops-status ops-stock-${s}`}>{STOCK_STATUS_LABEL[s]}</span>
                     </td>
                     <td data-label="Letzte Bewegung">{fmtDate(data.lastMovementByItem[item.id])}</td>
+                    <td data-label="Aktionen"><button type="button" className="ops-btn"
+                      aria-label={`Details für ${item.name}`}
+                      onClick={e => { e.stopPropagation(); void openItem(item.id); }}>Details</button></td>
                   </tr>
                 );
               })}
@@ -463,7 +491,7 @@ export function AdminInventory({ onSessionLost }: { onSessionLost: () => void })
           <button type="button" className="ops-drawer-scrim" onClick={closeDetail} aria-label="Artikel schließen" />
           <aside className="ops-drawer" role="dialog" aria-modal="true" aria-label="Artikeldetails">
             <header className="ops-drawer-head">
-              <h2>{detail?.item.name ?? "Artikel"}</h2>
+              <div><h2>{detail?.item.name ?? "Artikel"}</h2>{detail?.item.sku && <p>{detail.item.sku}</p>}</div>
               <button type="button" className="ops-drawer-close" onClick={closeDetail} aria-label="Schließen">×</button>
             </header>
             {detailError && <p className="ops-error" role="alert">{detailError}</p>}
@@ -472,7 +500,7 @@ export function AdminInventory({ onSessionLost }: { onSessionLost: () => void })
           </aside>
         </div>
       )}
-    </>
+    </section>
   );
 }
 
@@ -480,10 +508,39 @@ export function AdminInventory({ onSessionLost }: { onSessionLost: () => void })
    THE DETAIL
    ══════════════════════════════════════════════════════════════ */
 
+function DeliveryDemand({ rows }: { rows: ItemsPayload["plannedMatcha"] }) {
+  const b2c = [30, 50, 100].flatMap(grams => {
+    const row = rows?.find(entry => entry.sku === `GLOA-MATCHA-${grams}G`);
+    return row ? [{ grams, ...row }] : [];
+  });
+  const b2b = rows?.find(row => row.sku === "GLOA-MATCHA-B2B-500G");
+  const hasDemand = b2c.some(row => row.annual_units > 0 || row.next_subscription_units > 0) || (b2b?.b2b_units ?? 0) > 0;
+  return (
+    <details className="inventory-card inventory-demand">
+      <summary><span className="inventory-icon" aria-hidden="true">▤</span>Geplanter Matcha-Lieferbedarf</summary>
+      <p>Lieferplanung in Beuteln. Der physische Lagerbestand steht in der Artikeltabelle.</p>
+      {!rows ? <p>Geplanter Bedarf ist derzeit nicht verfügbar.</p> : !hasDemand ? <p>Aktuell keine geplanten Lieferungen.</p> : <>
+        <h3>B2C · 30 g, 50 g und 100 g</h3>
+        <dl>
+          {b2c.map(row => <div key={row.sku}>
+            <dt>{row.grams} g</dt>
+            <dd>Jahresplan {formatQuantity(row.annual_units)} · Nächste Abo-Lieferung {formatQuantity(row.next_subscription_units)}</dd>
+          </div>)}
+        </dl>
+        <h3>B2B · 500 g</h3>
+        <p>B2B-Lieferbedarf {formatQuantity(b2b?.b2b_units ?? null)} Beutel</p>
+      </>}
+    </details>
+  );
+}
+
 function ReconcileCheckoutStock({onRecorded}:{onRecorded:()=>Promise<void>}) {
+  const inFlight = useRef(false);
   const [busy,setBusy]=useState(false);
   const [notice,setNotice]=useState("");
   async function submit(fields:FormData){
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setNotice("");
     try{
@@ -497,30 +554,50 @@ function ReconcileCheckoutStock({onRecorded}:{onRecorded:()=>Promise<void>}) {
       setNotice("Ablauf ohne Zahlung bestätigt. Reservierung freigegeben.");
       await onRecorded();
     }catch{setNotice("Freigabe nicht bestätigt. Bitte denselben Vorgang erneut prüfen.");}
-    finally{setBusy(false);}
+    finally{inFlight.current=false;setBusy(false);}
   }
-  return <details>
-    <summary>Unklare Checkout-Reservierung klären (Owner)</summary>
+  return <section className="inventory-card">
+    <h2><span className="inventory-icon" aria-hidden="true">◇</span>Unklare Checkout-Reservierung klären</h2>
     <p>Die ursprüngliche Anfrage und ihre Stripe-Session zuordnen. Ohne eindeutigen Ablauf ohne Zahlung bleibt der Bestand reserviert.</p>
-    <form className="ops-filter-row" onSubmit={event=>{event.preventDefault();void submit(new FormData(event.currentTarget));}}>
-      <label>Checkout-Anfrage-ID <input name="requestId" required maxLength={36}/></label>
-      <label>Stripe-Session-ID <input name="sessionId" required maxLength={203}/></label>
-      <button type="submit" disabled={busy}>Ablauf prüfen</button>
+    <form className="inventory-card-form" onSubmit={event=>{event.preventDefault();void submit(new FormData(event.currentTarget));}}>
+      <label>Checkout-Anfrage-ID (Pflichtfeld)<input name="requestId" required maxLength={36} disabled={busy}/></label>
+      <label>Stripe-Session-ID (Pflichtfeld)<input name="sessionId" required maxLength={203} disabled={busy}/></label>
+      <button className="ops-btn ops-btn-primary" type="submit" disabled={busy}>{busy ? "Prüfung läuft…" : "Ablauf prüfen"}</button>
     </form>
     {notice&&<p role="status">{notice}</p>}
-  </details>;
+  </section>;
 }
 
-function MatchaPackaging({onRecorded}:{onRecorded:()=>Promise<void>}) {
+const PACK_SIZES = [
+  { sku: "GLOA-MATCHA-30G", grams: 30, area: "B2C" },
+  { sku: "GLOA-MATCHA-50G", grams: 50, area: "B2C" },
+  { sku: "GLOA-MATCHA-100G", grams: 100, area: "B2C" },
+  { sku: "GLOA-MATCHA-B2B-500G", grams: 500, area: "B2B" },
+];
+
+function MatchaPackaging({ raw, onRecorded }: { raw?: Item; onRecorded: () => Promise<void> }) {
   const pending = useRef<{operationId:string; variantSku:string; units:number}|null>(null);
   const inFlight = useRef(false);
   const [busy,setBusy] = useState(false);
   const [notice,setNotice] = useState("");
+  const [variant, setVariant] = useState(PACK_SIZES[0].sku);
+  const [unitInput, setUnitInput] = useState("");
+  const units = Number(unitInput);
+  const validUnits = Number.isSafeInteger(units) && units >= 1 && units <= 1000000;
+  const grams = PACK_SIZES.find(size => size.sku === variant)?.grams;
+  const required = validUnits && grams ? units * grams : null;
+  const rawQuantity = raw?.current_quantity ?? null;
+  const insufficient = required !== null && rawQuantity !== null && required > Number(rawQuantity);
+
   async function submit(form:HTMLFormElement) {
     if(inFlight.current)return;
     const fields=new FormData(form);
     const variantSku=String(fields.get("variant"));
     const units=Number(fields.get("units"));
+    if (!Number.isSafeInteger(units) || units < 1 || units > 1000000) {
+      setNotice("Gib eine ganze Beutelanzahl zwischen 1 und 1.000.000 ein.");
+      return;
+    }
     if(!pending.current)pending.current={operationId:crypto.randomUUID(),variantSku,units};
     if(pending.current.variantSku!==variantSku||pending.current.units!==units){
       setNotice("Bitte die offene Buchung zuerst mit unveränderter Größe und Menge erneut prüfen.");
@@ -537,25 +614,33 @@ function MatchaPackaging({onRecorded}:{onRecorded:()=>Promise<void>}) {
         return;
       }
       pending.current=null;
-      form.reset();
+      setVariant(PACK_SIZES[0].sku);
+      setUnitInput("");
       setNotice("Rohvorrat und fertige Beutel wurden gebucht.");
       await onRecorded();
     }catch{setNotice("Buchung nicht bestätigt. Bitte mit denselben Angaben erneut absenden.");}
     finally{inFlight.current=false;setBusy(false);}
   }
-  return <details>
-    <summary>Matcha abpacken</summary>
-    <p className="ops-note" id="inventory-pack-help">Erst nach dem Abpacken buchen. Beutelgröße wählen und fertige Beutel als ganze Stückzahl eingeben. Die Buchung zieht die passende Grammmenge vom Rohvorrat ab und erhöht den Fertigbestand.</p>
-    <form className="ops-filter-row" onSubmit={event=>{event.preventDefault();void submit(event.currentTarget);}}>
-      <label>Beutelgröße <select name="variant">
-        {[30,50,100].map(grams=><option key={grams} value={`GLOA-MATCHA-${grams}G`}>{grams} g</option>)}
-        <option value="GLOA-MATCHA-B2B-500G">500 g · B2B</option>
-      </select></label>
-      <label>Fertige Beutel <input name="units" aria-describedby="inventory-pack-help" type="number" min="1" max="1000000" step="1" required/></label>
-      <button type="submit" disabled={busy}>Abpackung buchen</button>
+  return <section className="inventory-card">
+    <h2><span className="inventory-icon" aria-hidden="true">▱</span>Matcha abpacken</h2>
+    <p className="ops-note" id="inventory-pack-help">Erst nach dem Abpacken buchen. Größe wählen und fertige Beutel als ganze Stückzahl eingeben. Die Buchung reduziert den Rohvorrat und erhöht den Fertigbestand automatisch. Buche beides nur hier.</p>
+    <form className="inventory-card-form" onSubmit={event=>{event.preventDefault();void submit(event.currentTarget);}}>
+      <div className="inventory-pack-fields">
+        <label>Beutelgröße<select name="variant" value={variant} onChange={event => setVariant(event.target.value)} disabled={busy}>
+          {PACK_SIZES.map(size => <option key={size.sku} value={size.sku}>{size.grams} g · {size.area}</option>)}
+        </select></label>
+        <label>Fertige Beutel (Pflichtfeld)<input name="units" aria-describedby="inventory-pack-help" type="number"
+          min="1" max="1000000" step="1" required value={unitInput} onChange={event => setUnitInput(event.target.value)} disabled={busy}/></label>
+      </div>
+      <dl className="inventory-pack-totals" aria-live="polite">
+        <div><dt>Benötigte Rohmenge</dt><dd>{required === null ? "—" : `${formatQuantity(required)} g`}</dd></div>
+        <div><dt>Rohvorrat laut Inventarliste</dt><dd>{rawQuantity === null ? "In dieser Ansicht nicht verfügbar" : `${formatQuantity(rawQuantity)} g`}</dd></div>
+      </dl>
+      {insufficient && <p className="ops-error" role="status">Der angezeigte Rohvorrat reicht für diese Menge nicht aus. Der aktuelle Bestand wird bei der Buchung geprüft.</p>}
+      <button className="ops-btn ops-btn-primary" type="submit" disabled={busy}>{busy ? "Buchung läuft…" : "Abpackung buchen"}</button>
     </form>
     {notice&&<p role="status">{notice}</p>}
-  </details>;
+  </section>;
 }
 
 type Mode = null | "receipt" | "withdrawal" | "correction" | "stocktake" | "edit";
@@ -564,6 +649,8 @@ function ItemDetail({
   detail, onDone, onSessionLost,
 }: { detail: Detail; onDone: () => Promise<void>; onSessionLost: () => void }) {
   const [mode, setMode] = useState<Mode>(null);
+  const [confirmArchive, setConfirmArchive] = useState(false);
+  const archiveInFlight = useRef(false);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -573,7 +660,8 @@ function ItemDetail({
   const category = detail.categories.find(c => c.id === item.category_id);
 
   async function archive(next: boolean) {
-    if (busy) return;
+    if (archiveInFlight.current) return;
+    archiveInFlight.current = true;
     setBusy(true); setError(null); setResult(null);
     try {
       const { status, data } = await post("/api/admin/inventory/items/archive",
@@ -584,8 +672,12 @@ function ItemDetail({
         return;
       }
       setResult(next ? "Der Artikel ist wieder aktiv." : "Der Artikel ist archiviert. Die Historie bleibt erhalten.");
+      setConfirmArchive(false);
       await onDone();
+    } catch {
+      setError("Die Aktion konnte nicht bestätigt werden. Bitte aktualisiere die Ansicht vor einem neuen Versuch.");
     } finally {
+      archiveInFlight.current = false;
       setBusy(false);
     }
   }
@@ -604,7 +696,11 @@ function ItemDetail({
       ]} />
 
       <Facts title="Bestand" rows={[
-        ["Aktuell", <strong key="q">{formatQuantity(item.current_quantity)} {item.unit}</strong>],
+        ["Physischer Bestand", <strong key="q">{formatQuantity(item.checkout_stock?.physical ?? item.current_quantity)} {item.unit}</strong>],
+        ...(item.checkout_stock ? [
+          ["Reserviert", `${formatQuantity(item.checkout_stock.reserved)} ${item.unit}`],
+          ["Verfügbar", item.checkout_stock.available === null ? "—" : `${formatQuantity(item.checkout_stock.available)} ${item.unit}`],
+        ] as [string, string][] : []),
         ["Mindestbestand", item.low_stock_threshold === null
           ? "—" : `${formatQuantity(item.low_stock_threshold)} ${item.unit}`],
         ["Status", <span key="s" className={`ops-status ops-stock-${s}`}>{STOCK_STATUS_LABEL[s]}</span>],
@@ -618,6 +714,7 @@ function ItemDetail({
           cost: that is accounting's, and a price shown here would invite
           somebody to treat this screen as a spend report. */}
       <Facts title="Beschaffung" rows={[
+        ["Beschreibung / Verwendung", itemDescription(item)],
         ["Lieferant", item.supplier || "—"],
         ["Notiz", item.notes || "—"],
       ]} />
@@ -639,10 +736,17 @@ function ItemDetail({
               <button type="button" className="ops-btn" disabled={busy}
                 onClick={() => { setMode("edit"); setResult(null); setError(null); }}>Artikel bearbeiten</button>
               <button type="button" className="ops-btn" disabled={busy}
-                onClick={() => void archive(!item.is_active)}>
+                onClick={() => item.is_active ? setConfirmArchive(true) : void archive(true)}>
                 {item.is_active ? "Archivieren" : "Wieder aktivieren"}
               </button>
             </div>
+            {confirmArchive && <div className="ops-confirm" role="group" aria-label="Archivierung bestätigen">
+              <p>Der Artikel wird archiviert. Bestand und Bewegungsverlauf bleiben erhalten.</p>
+              <div className="ops-confirm-buttons">
+                <button type="button" className="ops-btn" disabled={busy} onClick={() => setConfirmArchive(false)}>Abbrechen</button>
+                <button type="button" className="ops-btn ops-btn-primary" disabled={busy} onClick={() => void archive(false)}>Artikel archivieren</button>
+              </div>
+            </div>}
             {item.is_active && Number(item.current_quantity) !== 0 && (
               <p className="ops-action-note">
                 Dieser Artikel hat noch Bestand ({formatQuantity(item.current_quantity)} {item.unit}).
@@ -686,13 +790,14 @@ function ItemDetail({
                 <th scope="col">Typ</th>
                 <th scope="col">Grund</th>
                 <th scope="col">Änderung</th>
+                <th scope="col">Bestand vorher</th>
                 <th scope="col">Bestand danach</th>
               </tr>
             </thead>
             <tbody>
               {detail.movements.map(m => (
                 <tr key={m.id}>
-                  <td data-label="Datum">{fmtDate(m.occurred_at)}</td>
+                  <td data-label="Datum">{fmtDateTime(m.occurred_at)}</td>
                   <td data-label="Typ">{MOVEMENT_TYPE_LABEL[m.movement_type as keyof typeof MOVEMENT_TYPE_LABEL] ?? m.movement_type}</td>
                   <td data-label="Grund">
                     {MOVEMENT_REASON_LABEL[m.reason as MovementReason] ?? m.reason}
@@ -703,6 +808,7 @@ function ItemDetail({
                   <td data-label="Änderung" className={Number(m.quantity_delta) < 0 ? "ops-open-refund" : undefined}>
                     {formatDelta(m.quantity_delta)} {item.unit}
                   </td>
+                  <td data-label="Bestand vorher">{formatQuantity(Number(m.balance_after) - Number(m.quantity_delta))} {item.unit}</td>
                   <td data-label="Bestand danach">{formatQuantity(m.balance_after)} {item.unit}</td>
                 </tr>
               ))}
@@ -768,6 +874,7 @@ function MovementForm({
   // the database's unique index turns it into a no-op - which is the
   // guarantee a disabled button cannot give.
   const [operationId, setOperationId] = useState(newOperationId);
+  const saving = useRef(false);
 
   const parsed = parseQuantity(quantity);
   const current = Number(item.current_quantity) || 0;
@@ -784,7 +891,8 @@ function MovementForm({
     (isStocktake ? parsed >= 0 : mode === "correction" ? parsed !== 0 : parsed > 0);
 
   async function submit() {
-    if (busy || !valid) return;
+    if (saving.current || busy || !valid) return;
+    saving.current = true;
     setBusy(true); setError(null);
     try {
       const path = isStocktake ? "/api/admin/inventory/stocktake" : "/api/admin/inventory/movement";
@@ -823,6 +931,7 @@ function MovementForm({
       setError("Die Buchung ist fehlgeschlagen. Bitte erneut versuchen.");
       setConfirming(false);
     } finally {
+      saving.current = false;
       setBusy(false);
     }
   }
@@ -995,6 +1104,7 @@ function ItemForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [operationId] = useState(newOperationId);
+  const saving = useRef(false);
 
   const toggleArea = (a: InventoryArea) =>
     setSelectedAreas(prev => (prev.includes(a) ? prev.filter(x => x !== a) : [...prev, a]));
@@ -1023,7 +1133,8 @@ function ItemForm({
   }
 
   async function save() {
-    if (busy || !valid) return;
+    if (saving.current || busy || !valid) return;
+    saving.current = true;
     setBusy(true); setError(null);
     try {
       const shared = {
@@ -1045,6 +1156,7 @@ function ItemForm({
     } catch {
       setError("Der Artikel konnte nicht gespeichert werden.");
     } finally {
+      saving.current = false;
       setBusy(false);
     }
   }
@@ -1052,17 +1164,20 @@ function ItemForm({
   return (
     <div className="ops-action-block">
       <h4>{item ? "Artikel bearbeiten" : "Neuer Artikel"}</h4>
+      <p className="ops-action-note">{item
+        ? "Hier änderst du die Artikeldaten. Bestand änderst du über eine separate Lagerbuchung."
+        : "Felder mit * sind Pflichtfelder. Ein eingetragener Anfangsbestand wird beim Anlegen gebucht."}</p>
       {error && <p className="ops-error" role="alert">{error}</p>}
 
       <div className="ops-action-fields">
         <label>
           <span>Artikelname *</span>
-          <input type="text" value={name} maxLength={120} disabled={busy}
+          <input type="text" value={name} required maxLength={120} disabled={busy}
             onChange={e => setName(e.target.value)} placeholder="z. B. Matcha Rohware" />
         </label>
         <label>
           <span>Einheit *</span>
-          <input type="text" value={unit} maxLength={20} disabled={busy || Boolean(item)}
+          <input type="text" value={unit} required maxLength={20} disabled={busy || Boolean(item)}
             onChange={e => setUnit(e.target.value)} placeholder="g, Stück, Rollen …" />
         </label>
         <label>
