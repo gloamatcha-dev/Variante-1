@@ -1,3 +1,5 @@
+import { checkoutRefusalFor } from "../../../../../lib/shopAvailability";
+import { SHOP_STATUS } from "../../../../content";
 import { handleSubscriptionCheckout } from "../../../../../lib/subscriptionCheckout";
 import { defaultSubscriptionCheckoutDeps } from "../../../../../lib/subscriptionCheckoutDeps";
 
@@ -32,5 +34,7 @@ import { defaultSubscriptionCheckoutDeps } from "../../../../../lib/subscription
  * placeholder for missing machinery.
  */
 export async function POST(request: Request): Promise<Response> {
+  const closed = checkoutRefusalFor(SHOP_STATUS);
+  if (closed) return Response.json({ error: closed.error }, { status: closed.status });
   return handleSubscriptionCheckout(request, defaultSubscriptionCheckoutDeps);
 }

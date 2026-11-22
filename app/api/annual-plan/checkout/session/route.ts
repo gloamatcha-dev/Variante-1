@@ -1,3 +1,5 @@
+import { checkoutRefusalFor } from "../../../../../lib/shopAvailability";
+import { SHOP_STATUS } from "../../../../content";
 import { handleAnnualPlanCheckout } from "../../../../../lib/annualPlanCheckout";
 import { defaultAnnualCheckoutDeps } from "../../../../../lib/annualPlanCheckoutDeps";
 
@@ -30,5 +32,7 @@ import { defaultAnnualCheckoutDeps } from "../../../../../lib/annualPlanCheckout
  * is sent - those belong to the webhook phase.
  */
 export async function POST(request: Request): Promise<Response> {
+  const closed = checkoutRefusalFor(SHOP_STATUS);
+  if (closed) return Response.json({ error: closed.error }, { status: closed.status });
   return handleAnnualPlanCheckout(request, defaultAnnualCheckoutDeps);
 }

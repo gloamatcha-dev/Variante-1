@@ -1,3 +1,5 @@
+import { checkoutRefusalFor } from "../../../../../../lib/shopAvailability";
+import { SHOP_STATUS } from "../../../../../content";
 import { handleB2bCheckout } from "../../../../../../lib/b2bCheckout";
 import { defaultB2bCheckoutDeps } from "../../../../../../lib/b2bCheckoutDeps";
 
@@ -32,5 +34,7 @@ import { defaultB2bCheckoutDeps } from "../../../../../../lib/b2bCheckoutDeps";
  * and no order exists - those belong to the webhook and to migration 062.
  */
 export async function POST(request: Request): Promise<Response> {
+  const closed = checkoutRefusalFor(SHOP_STATUS);
+  if (closed) return Response.json({ error: closed.error }, { status: closed.status });
   return handleB2bCheckout(request, defaultB2bCheckoutDeps);
 }

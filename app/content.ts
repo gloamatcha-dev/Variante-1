@@ -8,7 +8,7 @@ export const BRAND = {
   address: null as string | null,
 };
 
-export const SHOP_STATUS = "live" as const; // "prelaunch" | "live"
+export const SHOP_STATUS = "prelaunch" as const; // "prelaunch" | "live"
 
 /**
  * PUBLIC PRODUCT PRICES ARE WITHHELD UNTIL THE SHOP IS LIVE.

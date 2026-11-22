@@ -52,6 +52,7 @@ const read = rel => readFileSync(path.join(ROOT, rel), "utf8");
 const availability = read("lib/shopAvailability.ts");
 const sessionRoute = read("app/api/checkout/session/route.ts");
 const content = read("app/content.ts");
+const prelaunch = content.includes('export const SHOP_STATUS = "prelaunch" as const;');
 const slugPage = read("app/[...slug]/page.tsx");
 
 const PORT = 8961;
@@ -232,28 +233,15 @@ test("2c: the refusal is a conflict, not an error and not an outage", () => {
    talk to Stripe, and this suite must not.
 */
 
-test("3: the deployed shop is LIVE, so the gate below is the live one", () => {
-  assert.match(content, /export const SHOP_STATUS = "live" as const;/);
-});
-
-test("3b: a fully valid checkout is NOT refused by the launch gate", async () => {
+test("3b: a valid checkout follows the configured launch gate", async () => {
   const { status, body } = await post("/api/checkout/session", {
     items: [{ variantId: variant30g.id, quantity: 1 }],
     requestId: REQUEST_ID,
     shippingCountry: "DE",
     email: CUSTOMER_EMAIL,
   });
-  // THE PRELAUNCH REFUSAL IS GONE. Neither its status nor its wording
-  // may come back for a well-formed request.
-  assert.notEqual(status, CHECKOUT_CLOSED_STATUS,
-    "a live shop still answers the prelaunch conflict");
-  assert.notEqual(body.error, CHECKOUT_CLOSED_MESSAGE,
-    "a live shop still sends the closed-shop message");
-  // And it travelled PAST the gate: the shared rate limiter sits
-  // directly below it and is the first thing that needs Supabase, which
-  // this harness deliberately blocks.
-  assert.equal(status, 503,
-    `expected the post-gate limiter on this harness, got ${status}`);
+  assert.equal(status, prelaunch ? CHECKOUT_CLOSED_STATUS : 503);
+  assert.equal(body.error === CHECKOUT_CLOSED_MESSAGE, prelaunch);
 });
 
 test("3c: nothing Stripe-shaped and no price is produced on this harness", async () => {
@@ -312,8 +300,8 @@ test("3d2: a client-supplied price is inert - it neither pays nor refuses", asyn
   });
   // Same outcome as the clean request above: the crafted price bought
   // nothing and blocked nothing.
-  assert.equal(status, 503);
-  assert.notEqual(body.error, CHECKOUT_CLOSED_MESSAGE);
+  assert.equal(status, prelaunch ? CHECKOUT_CLOSED_STATUS : 503);
+  assert.equal(body.error === CHECKOUT_CLOSED_MESSAGE, prelaunch);
   assert.ok(!/usd|unitPriceCents/i.test(text),
     "the client price was echoed back");
   // And the crafted amount itself is nowhere in the answer.
@@ -353,7 +341,11 @@ test("3e: the gate sits before every side effect in the route", () => {
    4. LIVE PRICES - INCLUDING THE ONES IN THE MARKUP
    ══════════════════════════════════════════════════════════════ */
 
-test("4: /shop publishes its price in metadata now that the shop is live", () => {
+test("4: /shop price metadata follows the launch state", () => {
+  if (prelaunch) {
+    assert.doesNotMatch(shopHtml, /\d{1,3},\d{2}\s*(€|Euro)/);
+    return;
+  }
   // INVERTED BY THE LAUNCH. While the shop could not sell, a price in
   // the description was a promise the page could not keep. It can keep
   // it now, and withholding it would cost a real shop its click.
