@@ -144,6 +144,32 @@ async function post(path: string, body: unknown): Promise<{ status: number; data
   return { status: res.status, data };
 }
 
+const MATCHA_DESCRIPTIONS = new Map([
+  ["GLOA-MATCHA-RAW", "Loser Matcha zum Abpacken. Bestand in Gramm."],
+  ["GLOA-MATCHA-30G", "Fertige 30-g-Beutel für B2C. Bestand in Stück."],
+  ["GLOA-MATCHA-50G", "Fertige 50-g-Beutel für B2C. Bestand in Stück."],
+  ["GLOA-MATCHA-100G", "Fertige 100-g-Beutel für B2C. Bestand in Stück."],
+  ["GLOA-MATCHA-B2B-500G", "Fertige 500-g-Beutel ausschließlich für B2B. Bestand in Stück."],
+]);
+
+function InventoryHelp() {
+  return (
+    <details className="ops-action-block">
+      <summary>So funktioniert das GLOA-Lager</summary>
+      <ul>
+        <li><strong>Rohvorrat und Fertigware.</strong> Losen Matcha in Gramm erfassen (1 kg = 1.000 g). Fertige Beutel in Stück zählen: 30, 50 und 100 g für B2C, 500 g ausschließlich für B2B.</li>
+        <li><strong>Anfangsbestand und Wareneingang.</strong> Beim Anlegen einmalig die tatsächlich vorhandene Menge eingeben. Spätere Zugänge als Wareneingang in der Einheit des Artikels buchen.</li>
+        <li><strong>Abpackung.</strong> Nach dem Abpacken Größe und Stückzahl buchen. Vier 50-g-Beutel ziehen 200 g Rohvorrat ab und erhöhen den Fertigbestand um vier Stück. Für B2B wird ein eigener 500-g-Beutel gebucht.</li>
+        <li><strong>Reservierung.</strong> Beim B2C-Einmalkauf wird vor Erstellung der Zahlungssitzung reserviert. Bei Abos und Jahresplänen gilt die einzelne fällige Lieferung. Bei B2B wird die bezahlte, freigegebene Lieferung im Adminportal reserviert.</li>
+        <li><strong>Versand und Storno.</strong> Beim Versand wird der reservierte Bestand abgebucht. Eine wirksame Stornierung vor Versand gibt die Reservierung frei. Bereits versendete Ware wird dadurch nicht wieder eingelagert.</li>
+        <li><strong>Bestandsanzeige.</strong> Verfügbarer Bestand ist der physische Bestand abzüglich der Reservierungen. Rohvorrat zählt erst nach dem Abpacken als Fertigware. Geplanter Bedarf ist eine Vorschau. Die Anzeige bestätigt keine Shopfreigabe.</li>
+        <li><strong>Inventur, Korrektur und Mindestbestand.</strong> Bei der Inventur den gesamten gezählten Bestand erfassen. Bei einer Korrektur die bekannte Differenz mit Vorzeichen und Grund buchen. Der Mindestbestand ist eine Warnschwelle in der Artikeleinheit.</li>
+        <li><strong>Doppelbuchungen vermeiden.</strong> Abpacken und Versandabgänge aus Reservierungen nicht zusätzlich manuell buchen. Bei einer unklaren Rückmeldung zuerst den Bewegungsverlauf prüfen.</li>
+      </ul>
+    </details>
+  );
+}
+
 export function AdminInventory({ onSessionLost }: { onSessionLost: () => void }) {
   const [data, setData] = useState<ItemsPayload | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -289,6 +315,7 @@ export function AdminInventory({ onSessionLost }: { onSessionLost: () => void })
         {loadError && <span className="ops-error" role="alert">{loadError}</span>}
       </div>
 
+      <InventoryHelp />
       <MatchaPackaging onRecorded={() => refresh(query)} />
       <ReconcileCheckoutStock onRecorded={() => refresh(query)} />
       <details>
@@ -364,6 +391,7 @@ export function AdminInventory({ onSessionLost }: { onSessionLost: () => void })
             <thead>
               <tr>
                 <th scope="col">Artikel</th>
+                <th scope="col">Beschreibung / Verwendung</th>
                 <th scope="col">Kategorie</th>
                 <th scope="col">Bereich</th>
                 <th scope="col">Bestand</th>
@@ -384,6 +412,9 @@ export function AdminInventory({ onSessionLost }: { onSessionLost: () => void })
                         onClick={e => { e.stopPropagation(); void openItem(item.id); }}>{item.name}</button>
                       {item.sku && <span className="ops-mail">{item.sku}</span>}
                       {!item.is_active && <span className="ops-flag ops-flag-cancel">Archiviert</span>}
+                    </td>
+                    <td data-label="Beschreibung / Verwendung" style={{ overflowWrap: "anywhere" }}>
+                      {item.notes?.trim() || MATCHA_DESCRIPTIONS.get(item.sku ?? "") || "—"}
                     </td>
                     <td data-label="Kategorie">{category?.name ?? "—"}</td>
                     <td data-label="Bereich">
@@ -514,12 +545,13 @@ function MatchaPackaging({onRecorded}:{onRecorded:()=>Promise<void>}) {
   }
   return <details>
     <summary>Matcha abpacken</summary>
+    <p className="ops-note" id="inventory-pack-help">Erst nach dem Abpacken buchen. Beutelgröße wählen und fertige Beutel als ganze Stückzahl eingeben. Die Buchung zieht die passende Grammmenge vom Rohvorrat ab und erhöht den Fertigbestand.</p>
     <form className="ops-filter-row" onSubmit={event=>{event.preventDefault();void submit(event.currentTarget);}}>
       <label>Beutelgröße <select name="variant">
         {[30,50,100].map(grams=><option key={grams} value={`GLOA-MATCHA-${grams}G`}>{grams} g</option>)}
         <option value="GLOA-MATCHA-B2B-500G">500 g · B2B</option>
       </select></label>
-      <label>Fertige Beutel <input name="units" type="number" min="1" max="1000000" step="1" required/></label>
+      <label>Fertige Beutel <input name="units" aria-describedby="inventory-pack-help" type="number" min="1" max="1000000" step="1" required/></label>
       <button type="submit" disabled={busy}>Abpackung buchen</button>
     </form>
     {notice&&<p role="status">{notice}</p>}
@@ -594,6 +626,7 @@ function ItemDetail({
         {mode === null && (
           <div className="ops-action-block">
             <h4>Aktionen</h4>
+            <p className="ops-action-note">Zugänge als Wareneingang buchen, tatsächliche manuelle Abgänge als Entnahme. Für einen gezählten Gesamtbestand Inventur wählen, für eine bekannte Differenz Korrektur.</p>
             <div className="ops-action-buttons">
               <button type="button" className="ops-btn ops-btn-primary" disabled={busy}
                 onClick={() => { setMode("receipt"); setResult(null); setError(null); }}>Wareneingang</button>
@@ -797,12 +830,19 @@ function MovementForm({
   return (
     <div className="ops-action-block">
       <h4>{MODE_TITLE[mode]}</h4>
+      <p className="ops-action-note" id="inventory-movement-help">
+        {mode === "receipt" && "Tatsächlich eingegangene Menge in " + item.unit + " eintragen. Die Menge wird zum Bestand addiert."}
+        {mode === "withdrawal" && "Tatsächlich entnommene Menge in " + item.unit + " als positive Zahl eingeben. Sie wird abgezogen. Automatisch gebuchte Versandabgänge hier nicht wiederholen."}
+        {mode === "stocktake" && "Gesamten gezählten Bestand in " + item.unit + " eingeben. Gebucht wird die Differenz zum bisherigen Bestand."}
+        {mode === "correction" && "Nur die Abweichung in " + item.unit + " eingeben: plus für mehr, minus für weniger. Die Differenz wird gebucht. Den Anlass unter Notiz festhalten."}
+      </p>
       {error && <p className="ops-error" role="alert">{error}</p>}
 
       <div className="ops-action-fields">
         <label>
           <span>{isStocktake ? `Gezählt (${item.unit})` : `Menge (${item.unit})`}</span>
           <input type="text" inputMode="decimal" value={quantity} disabled={busy || confirming}
+            aria-describedby="inventory-movement-help"
             onChange={e => setQuantity(e.target.value)}
             placeholder={isStocktake ? formatQuantity(item.current_quantity) : "z. B. 10000"} />
         </label>
@@ -1044,6 +1084,7 @@ function ItemForm({
         </label>
         <label>
           <span>Mindestbestand</span>
+          <small>Warnschwelle in der gewählten Einheit. Das Feld bucht keinen Bestand.</small>
           <input type="text" inputMode="decimal" value={threshold} disabled={busy}
             onChange={e => setThreshold(e.target.value)} placeholder="optional" />
         </label>
@@ -1054,6 +1095,7 @@ function ItemForm({
         </label>
         <label>
           <span>Notiz</span>
+          <small>Verwendung beschreiben. Die Notiz erscheint in der Artikeltabelle.</small>
           <input type="text" value={notes} maxLength={2000} disabled={busy}
             onChange={e => setNotes(e.target.value)} placeholder="optional" />
         </label>
@@ -1081,6 +1123,7 @@ function ItemForm({
         <div className="ops-action-fields">
           <label>
             <span>Anfangsbestand</span>
+            <small>Einmalige Menge, die jetzt bereits vorhanden ist. Rohmatcha in Gramm, fertige Beutel in Stück.</small>
             <input type="text" inputMode="decimal" value={initial} disabled={busy}
               onChange={e => setInitial(e.target.value)} placeholder="optional" />
           </label>
