@@ -117,7 +117,12 @@ function renderPortal(file,props,readData,readError='',selectedFinance=null){
  const costModule={exports:{}};
  const costJs=ts.transpileModule(source('app/AdminCostCoverage.tsx'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  vm.runInNewContext(costJs,{module:costModule,exports:costModule.exports,console,Intl,Date,require:name=>name.includes('AdminPortalShared')?{...shared,usePortalRead:()=>({data:readData,error:readError,refresh:()=>{}})}:name.includes('adminPortalModel')?model:require(name)});
- const localRequire=name=>name.includes('AdminGlobalStripeSync')?{useGlobalStripeSync:()=>({status:readData?.summary?.stripeSync??{verified:false,state:'unknown'},error:''})}:name.includes('AdminFinanceSyncStatus')?shared:name.includes('AdminCostCoverage')?costModule.exports:name==='react'&&selectedFinance?{...React,useState:initial=>React.useState(state++===6?selectedFinance:initial)}:name.includes('AdminCommissionRuleFields')?ruleFields():name.includes('commissionRuleConfiguration')?require('../lib/commissionRuleConfiguration.ts'):name.includes('AdminPortalAffiliate')?affiliateComponents(shared):name.includes('adminPortalModel')?model:name.includes('AdminPortalShared')?{...shared,usePortalRead:()=>({data:readData,error:readError,refresh:()=>{}})}:name.includes('AdminCosts')?{AdminCosts:()=>React.createElement('p',null,'Existing expense editor')}:name.includes('AdminPortalDocuments')?{AdminPortalDocuments:()=>React.createElement('p',null,'Private documents')}:require(name);
+ const payoutModule={exports:{}};
+ if(file.endsWith('AdminPortalCreator.tsx')){
+  const payoutJs=ts.transpileModule(source('app/AdminCreatorPayouts.tsx'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+  vm.runInNewContext(payoutJs,{module:payoutModule,exports:payoutModule.exports,require:name=>name.includes('adminPortalModel')?model:name.includes('AdminPortalShared')?shared:require(name)});
+ }
+ const localRequire=name=>name.includes('AdminCreatorPayouts')?payoutModule.exports:name.includes('AdminGlobalStripeSync')?{useGlobalStripeSync:()=>({status:readData?.summary?.stripeSync??{verified:false,state:'unknown'},error:''})}:name.includes('AdminFinanceSyncStatus')?shared:name.includes('AdminCostCoverage')?costModule.exports:name==='react'&&selectedFinance?{...React,useState:initial=>React.useState(state++===6?selectedFinance:initial)}:name.includes('AdminCommissionRuleFields')?ruleFields():name.includes('commissionRuleConfiguration')?require('../lib/commissionRuleConfiguration.ts'):name.includes('AdminPortalAffiliate')?affiliateComponents(shared):name.includes('adminPortalModel')?model:name.includes('AdminPortalShared')?{...shared,usePortalRead:()=>({data:readData,error:readError,refresh:()=>{}})}:name.includes('AdminCosts')?{AdminCosts:()=>React.createElement('p',null,'Existing expense editor')}:name.includes('AdminPortalDocuments')?{AdminPortalDocuments:()=>React.createElement('p',null,'Private documents')}:require(name);
  vm.runInNewContext(js,{module:compiled,exports:compiled.exports,require:localRequire,console,Intl,Date});
  const component=compiled.exports[Object.keys(compiled.exports).find(key=>key.startsWith('AdminPortal'))];
  return renderToStaticMarkup(React.createElement(component,props));
@@ -169,6 +174,15 @@ test('Documents accept private originals and keep metadata-only references expli
  const ui=source('app/AdminPortalDocuments.tsx');assert.match(ui,/type="file"/);assert.match(ui,/Referenzbeleg ohne gespeicherte Originaldatei/);
  const route=source('app/api/admin/documents/route.ts');assert.match(route,/read_sensitive/);assert.match(route,/\.download\(/);
  assert.match(route,/admin_accounting_document_v1/);assert.doesNotMatch(route,/getPublicUrl|createSignedUrl/);
+});
+test('creator monthly payout controls render only for owners',()=>{
+ const fixture={creators:[{id:'c',display_name:'Test Creator'}]};
+ const props={tab:'AUSZAHLUNGEN',onTab:()=>{}};
+ const owner=renderPortal('app/AdminPortalCreator.tsx',{...props,isOwner:true},fixture);
+ const employee=renderPortal('app/AdminPortalCreator.tsx',props,fixture);
+ assert.match(owner,/Monatsabrechnung/);
+ assert.match(owner,/Test Creator/);
+ assert.doesNotMatch(employee,/Monatsabrechnung/);
 });
 test('creator applications, combined roles, affiliate active flag, UGC and payout history render',()=>{
  const fixture={creators:[{id:'c',display_name:'Test Creator',email:'c@example.invalid',status:'active'}],applications:[{id:'a',display_name:'Bewerber',status:'submitted',requested_roles:['influencer','ugc_creator']}],roles:[{creator_id:'c',role:'influencer'},{creator_id:'c',role:'affiliate'}],links:[{id:'l',creator_id:'c',slug:'test-creator',active:false}],codes:[],ugcAssignments:[{id:'u',title:'Test Reel',status:'briefed'}],commissions:[{id:'earned',creator_id:'c',kind:'earned',payout_state:'held',amount_cents:125},{id:'reversed',creator_id:'c',kind:'reversal',payout_state:'reversed',amount_cents:25}],balances:[{creatorId:'c',balance:{pending_cents:10000,eligible_cents:0,held_cents:125,paid_cents:null}}],payouts:[]};

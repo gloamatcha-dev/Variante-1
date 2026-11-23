@@ -343,7 +343,7 @@ export function AdminOverview() {
       {loadError&&view!=='waitlist'&&<p role="alert" className="portal-error">{loadError}</p>}
       {(view==='orders'||view==='subscriptions'||view==='annual')&&<><Tabs items={maySeeSubscriptions?SALES_TABS:['BESTELLUNGEN']} value={salesTab} onChange={tab=>navigate('sales',tab)}/><p className="portal-note">Abos laufen alle 4 Wochen. Jahrespläne sind vorausbezahlte Verträge mit eigenem Lieferplan.</p></>}
       {view==='finance'&&maySeeSubscriptions&&<AdminPortalFinance key={target} initialFilter={target} tab={financeTab} onTab={setFinanceTab} onSessionLost={()=>setSignedIn(false)} onCreator={()=>navigate("creator","AUSZAHLUNGEN")}/>}
-      {view==='creator'&&<AdminPortalCreator key={target} tab={creatorTab} onTab={setCreatorTab} initialFocus={target}/>}
+      {view==='creator'&&<AdminPortalCreator key={target} tab={creatorTab} onTab={setCreatorTab} initialFocus={target} isOwner={data.identity?.role === 'owner'}/>}
       {view === "orders" && <AdminOrders onSessionLost={() => setSignedIn(false)} key={target} initialSearch={target} />}
 
       {/* MOUNTED ONLY WHEN ITS TAB IS OPEN, like the activity log below
