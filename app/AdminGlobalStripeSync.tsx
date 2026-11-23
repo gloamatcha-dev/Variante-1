@@ -19,6 +19,7 @@ async function request(action:'status'|'run') {
 }
 export function AdminStripeSyncProvider({children}:{children:ReactNode}) {
  const [status,setStatus]=useState<PortalRow|null>(null),[error,setError]=useState(''),[canSync,setCanSync]=useState(false),[busy,setBusy]=useState(false);
+ const [runMessage,setRunMessage]=useState('');
  const mounted=useRef(false),reading=useRef(false),running=useRef(false);
  const refresh=useCallback(async()=>{
   if(!mounted.current||reading.current)return;reading.current=true;
@@ -29,9 +30,22 @@ export function AdminStripeSyncProvider({children}:{children:ReactNode}) {
  useEffect(()=>{mounted.current=true;void Promise.resolve().then(()=>refresh());const timer=window.setInterval(()=>void refresh(),15000);
   const focus=()=>void refresh();window.addEventListener('focus',focus);
   return()=>{mounted.current=false;window.clearInterval(timer);window.removeEventListener('focus',focus);};},[refresh]);
- async function run(){if(running.current)return;running.current=true;setBusy(true);setError('');
-  let failure='';try{await request('run');}catch(e){failure=e instanceof Error?e.message:'Abgleich nicht bestätigt.';}
-  finally{running.current=false;if(mounted.current){setBusy(false);await refresh();if(failure)setError(failure);}}
+ async function run(){
+  if(running.current)return;
+  running.current=true;setBusy(true);setRunMessage('');
+  try{
+   const result=await request('run');
+   if(mounted.current)setRunMessage(result.scanCompleted===true&&result.reconciliationVerified===true
+    ?'Manueller Abgleich abgeschlossen und verifiziert.'
+    :result.scanCompleted===true
+     ?'Manueller Scan abgeschlossen. Der Abgleich ist noch nicht verifiziert.'
+     :'Abschluss des manuellen Abgleichs nicht bestätigt.');
+  }catch(e){
+   if(mounted.current)setRunMessage(e instanceof Error?e.message:'Manueller Abgleich nicht bestätigt.');
+  }finally{
+   if(mounted.current){await refresh();if(mounted.current)setBusy(false);}
+   running.current=false;
+  }
  }
  const labels:Record<string,string>={running:'Abgleich läuft',retry:'Wiederholung ausstehend',attention:'Prüfung oder Freigabe erforderlich',complete:'Letzter Abgleich abgeschlossen',unknown:'Abgleich unbekannt',disabled:'Nicht aktiviert – Freigabe erforderlich'};
  const progress=status?.progress as PortalRow|undefined;
@@ -54,6 +68,7 @@ export function AdminStripeSyncProvider({children}:{children:ReactNode}) {
    {progress&&<p>Fortschritt: {String(progress.payments_processed??'unbekannt')} Zahlungsquellen, {String(progress.fees_processed??'unbekannt')} Gebührenquellen bearbeitet · Versuch {String(progress.attempts??'unbekannt')}. Keine Vollständigkeitsbestätigung.</p>}
   </details>
   <div className="portal-sync-actions">{canSync&&<button type="button" className="portal-cta-primary" disabled={busy||status?.state==='running'} onClick={()=>void run()}>{busy?'Synchronisierung angefordert …':'JETZT MIT STRIPE SYNCHRONISIEREN'}</button>}
+   {runMessage&&<p role="status">{runMessage}</p>}
    {error&&<p role="alert">{error} Gespeicherte Zeitstempel bleiben der letzte bekannte Stand.</p>}
    {error&&<button type="button" className="portal-cta-secondary" onClick={()=>void refresh()}>Status erneut laden</button>}</div>
  </section>;

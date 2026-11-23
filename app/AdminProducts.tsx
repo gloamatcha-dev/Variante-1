@@ -238,6 +238,10 @@ export function AdminProducts() {
         <td data-label={PRODUCT_COLUMNS[6]}>{p.product_variants.filter(v => v.inventory_item_id).length} verknüpft</td><td data-label={PRODUCT_COLUMNS[7]}>{new Date(p.updated_at).toLocaleString('de-DE')}</td>
         <td data-label={PRODUCT_COLUMNS[8]}>{!p.archived_at && <><button type="button" disabled={busy || !writable} onClick={() => edit(p)}>Bearbeiten</button>
           {writable && !p.is_active && p.slug !== 'metal-case' && <button type="button" disabled={busy || editor !== null || unresolvedProduct === p.id} onClick={() => void publish(p)}>PRÜFEN &amp; VERÖFFENTLICHEN</button>}
-          {writable && <button type="button" disabled={busy} onClick={() => void act('archive', p)}>ARCHIVIEREN</button>}</>}</td></tr>; })}</tbody></table></div>}
+          {writable && <button type="button" disabled={busy} onClick={() => {
+            if (window.confirm('Produkt für neue Checkouts sperren? Bereits ausgestellte Stripe-Sessions können weiterhin zahlbar sein. Bestehende Reservierungen werden durch die Archivierung nicht freigegeben.')) {
+              void act('archive', p);
+            }
+          }}>ARCHIVIEREN</button>}</>}</td></tr>; })}</tbody></table></div>}
   </section>;
 }
