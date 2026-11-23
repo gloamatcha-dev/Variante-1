@@ -3711,6 +3711,35 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
   const [confirming, setConfirming] = useState(false);
   const [cancelBusy, setCancelBusy] = useState(false);
   const [cancelError, setCancelError] = useState("");
+  const [billingCheck, setBillingCheck] = useState<{
+    subscriptionId: string;
+    busy: boolean;
+    state: "active" | "paused" | "unconfirmed";
+    nextCycleAt: string | null;
+  } | null>(null);
+
+  async function checkBillingStatus() {
+    if (!session?.access_token || billingCheck?.busy) return;
+    const pending = { subscriptionId, busy: true, state: "unconfirmed" as const, nextCycleAt: null };
+    setBillingCheck(pending);
+    let result: typeof billingCheck = { ...pending, busy: false };
+    try {
+      const response = await fetch("/api/subscriptions/pause-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ subscriptionId }),
+      });
+      const body = await response.json();
+      if (response.ok && body?.state === "paused") result = { ...pending, busy: false, state: "paused" };
+      if (response.ok && body?.state === "active" && typeof body.nextCycleAt === "string" &&
+          Number.isFinite(Date.parse(body.nextCycleAt))) {
+        result = { ...pending, busy: false, state: "active", nextCycleAt: body.nextCycleAt };
+      }
+    } catch {
+      // A failed read cannot confirm the next cycle or a pause.
+    }
+    setBillingCheck(current => current === pending ? result : current);
+  }
 
   /*
     AUTHORIZATION IS THE SERVER'S, NOT THIS QUERY'S. The id in the URL is
@@ -3810,7 +3839,8 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
   */
   const statusLabel = getSubscriptionStatusLabel(sub);
   const statusNote = getSubscriptionStatusNote(sub);
-  const nextBilling = getNextBillingAt(sub);
+  const observedBilling = billingCheck?.subscriptionId === subscriptionId ? billingCheck : null;
+  const nextBilling = observedBilling ? observedBilling.nextCycleAt : getNextBillingAt(sub);
   const nextDelivery = getNextDeliveryAt(sub);
   const endsAt = getEffectiveEndAt(sub);
   const scheduled = isCancellationScheduled(sub);
@@ -3875,7 +3905,8 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
       )}
 
       <div className="order-detail-meta">
-        <div className="portal-profile-row"><span>Status</span><strong>{statusLabel}</strong></div>
+        <div className="portal-profile-row"><span>Status</span><strong>{!ended && observedBilling?.state === "paused"
+          ? "Stripe-Abrechnung pausiert" : statusLabel}</strong></div>
         <div className="portal-profile-row"><span>Rhythmus</span><strong>{SUBSCRIPTION_CADENCE_LABEL}</strong></div>
         <div className="portal-profile-row"><span>Menge</span><strong>{SUBSCRIPTION_QUANTITY_LABEL}</strong></div>
         {nextBilling && <div className="portal-profile-row"><span>Nächste Abrechnung</span><strong>{fmtDate(nextBilling)}</strong></div>}
@@ -3889,6 +3920,20 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
       </div>
 
       {statusNote && <p className="portal-note">{statusNote}</p>}
+      {!ended && ["active", "paused", "past_due"].includes(sub.status) && (
+        <section className="portal-note" aria-label="Abo-Pause und Abrechnung">
+          <p>Die Selbstbedienung für Pause und Wiederaufnahme ist derzeit nicht verfügbar.</p>
+          <button type="button" className="portal-action" onClick={() => void checkBillingStatus()}
+            disabled={observedBilling?.busy || !session?.access_token}>Abrechnungsstatus prüfen</button>
+          <div role="status">
+            {observedBilling?.busy && <p>Abrechnungsstatus wird geprüft …</p>}
+            {observedBilling && !observedBilling.busy && observedBilling.state === "unconfirmed" &&
+              <p>Abrechnungsstatus und nächster Zyklus nicht bestätigt.</p>}
+            {observedBilling?.state === "paused" &&
+              <p>Stripe meldet eine pausierte Abrechnung. Pausenbeginn und nächster Zyklus sind nicht bestätigt. Bereits bezahlte Lieferungen bleiben bestehen.</p>}
+          </div>
+        </section>
+      )}
 
       {/*
         THE HANDOVER, WHILE IT IS IN PROGRESS.
