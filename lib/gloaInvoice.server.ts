@@ -1,3 +1,5 @@
+import { buildGuestOrderManageUrl, deriveGuestOrderToken, getGuestOrderTokenSecret, hashGuestOrderToken } from "./guestOrderAccess";
+import { annualPlanDetailHref } from "./annualPlanAccount";
 import { createHash } from "node:crypto";
 import { getSupabaseAdmin } from "./supabaseAdmin";
 import { renderInvoicePdf } from "./invoicePdf";
@@ -11,7 +13,7 @@ export const invoiceBucket = "gloa-finance-documents";
 export const invoicePath = (id: string) => "invoice-register/" + id + ".pdf";
 type Admin = NonNullable<ReturnType<typeof getSupabaseAdmin>>;
 type Register = {
-  id: string; number: string; order_id: string; snapshot: InvoiceSnapshot;
+  id: string; number: string; order_id: string | null; annual_plan_id?: string | null; snapshot: InvoiceSnapshot;
   document_id: string | null; issuer_version: number;
 };
 type TaxLine = InvoiceSnapshot["lines"][number];
@@ -55,16 +57,32 @@ async function invoiceLines(admin: Admin, order: Record<string, unknown>, eventI
   });
 }
 
-async function sendInvoice(admin: Admin, row: Register, userId: string) {
+async function sendInvoice(admin: Admin, row: Register, userId: string | null) {
   if (process.env.GLOA_INVOICE_EMAIL_ENABLED !== "true") return;
   const resend = getResendClient();
   const origin = getSiteOrigin();
   if (!resend || !origin) return;
-  const url = new URL("/account/orders/" + row.order_id, origin);
+  let url = new URL(row.annual_plan_id ? annualPlanDetailHref(row.annual_plan_id) : "/account/orders/" + row.order_id, origin);
   if (url.protocol !== "https:") return;
-  const user = await admin.auth.admin.getUserById(userId);
-  const email = user.data?.user?.email;
-  if (!email || !user.data.user?.email_confirmed_at) return;
+  let email: string | null | undefined;
+  if (userId) {
+    const user = await admin.auth.admin.getUserById(userId);
+    if (!user.data?.user?.email_confirmed_at) return;
+    email = user.data.user.email;
+  } else {
+    if (!row.order_id) return;
+    const secret = getGuestOrderTokenSecret();
+    const token = secret && deriveGuestOrderToken(row.order_id, secret);
+    if (!token) return;
+    const access = await admin.rpc("guest_order_id_for_token", { p_token_hash: hashGuestOrderToken(token) });
+    if (access.error || access.data !== row.order_id) return;
+    const order = await admin.from("orders").select("customer_snapshot").eq("id", row.order_id).is("user_id", null).maybeSingle();
+    const guestUrl = buildGuestOrderManageUrl(origin, token);
+    if (order.error || !guestUrl) return;
+    email = order.data?.customer_snapshot?.email;
+    url = new URL(guestUrl);
+  }
+  if (!email) return;
   const claim = await admin.from("gloa_invoice_register").update({ delivery_status: "sending" })
     .eq("id", row.id).eq("delivery_status", "pending").not("document_id", "is", null).select("id").maybeSingle();
   if (claim.error || !claim.data) return;
@@ -78,7 +96,7 @@ async function sendInvoice(admin: Admin, row: Register, userId: string) {
     .eq("id", row.id).eq("delivery_status", "sending");
 }
 
-export async function completeGloaInvoice(admin: Admin, row: Register, userId: string) {
+export async function completeGloaInvoice(admin: Admin, row: Register, userId: string | null) {
   if (!invoiceConfig()) throw new Error("invoice_issuance_disabled");
   if (!row.document_id) {
     const bytes = renderInvoicePdf({ ...row.snapshot, number: row.number });
@@ -100,17 +118,20 @@ export async function completeGloaInvoice(admin: Admin, row: Register, userId: s
   await sendInvoice(admin, row, userId);
 }
 
-async function issueEvent(admin: Admin, order: Record<string, unknown>, event: Record<string, unknown>, config: NonNullable<ReturnType<typeof invoiceConfig>>) {
+async function issueEvent(
+  admin: Admin, order: Record<string, unknown>, event: Record<string, unknown>,
+  config: NonNullable<ReturnType<typeof invoiceConfig>>, subject: "order_id" | "annual_plan_id" = "order_id",
+) {
   const eventId = String(event.id);
   const existing = await admin.from("gloa_invoice_register").select("*").eq("financial_event_id", eventId).maybeSingle();
   if (existing.error) throw new Error("invoice_register_unavailable");
-  if (existing.data) return completeGloaInvoice(admin, existing.data as Register, String(order.user_id));
+  if (existing.data) return completeGloaInvoice(admin, existing.data as Register, typeof order.user_id === "string" ? order.user_id : null);
 
   const correction = event.kind === "refund";
   let original: Register | null = null;
   if (correction) {
     const result = await admin.from("gloa_invoice_register").select("*")
-      .eq("order_id", order.id).is("original_id", null).not("document_id", "is", null).maybeSingle();
+      .eq(subject, order.id).is("original_id", null).not("document_id", "is", null).maybeSingle();
     if (result.error || !result.data) throw new Error("invoice_original_missing");
     original = result.data as Register;
   }
@@ -129,11 +150,13 @@ async function issueEvent(admin: Admin, order: Record<string, unknown>, event: R
     supplyOn: String(event.occurred_on),
     dateLabel: correction ? "Erstattungsdatum" : "Zahlungseingang",
     originalNumber: original?.number,
-    lines: await invoiceLines(admin, order, eventId, correction),
+    lines: subject === "annual_plan_id"
+      ? await annualInvoiceLines(admin, order, event, original)
+      : await invoiceLines(admin, order, eventId, correction),
     totals: { netCents: event.net_cents as number, taxCents: event.tax_cents as number, grossCents: event.gross_cents as number },
   };
   renderInvoicePdf({ ...snapshot, number: "GLOA-validation" });
-  const result = await admin.rpc("claim_gloa_invoice_v1", {
+  const result = await admin.rpc(subject === "annual_plan_id" ? "claim_gloa_annual_invoice_v1" : "claim_gloa_invoice_v1", {
     p_event: eventId, p_issuer: snapshot.issuer?.version, p_snapshot: snapshot, p_cutoff: config.cutoff,
   }).single();
   if (result.error || !result.data) throw new Error("invoice_claim_failed");
@@ -148,7 +171,7 @@ export async function issueVerifiedOrderInvoices(orderId: string, kind: "order_p
     if (!admin) return;
     const order = await admin.from("orders").select("id,user_id,placed_at,customer_type,billing_address_snapshot,shipping_address_snapshot,tax_treatment,shipping_tax_allocation")
       .eq("id", orderId).maybeSingle();
-    if (order.error || !order.data || !order.data.user_id || order.data.customer_type !== "private" ||
+    if (order.error || !order.data || order.data.customer_type !== "private" ||
         order.data.tax_treatment !== "de_domestic" || Date.parse(order.data.placed_at) < Date.parse(config.cutoff) ||
         order.data.billing_address_snapshot?.country !== "DE" || order.data.shipping_address_snapshot?.country !== "DE") return;
     const events = await admin.from("financial_events").select("id,kind,net_cents,gross_cents,tax_cents,occurred_on")
@@ -158,5 +181,78 @@ export async function issueVerifiedOrderInvoices(orderId: string, kind: "order_p
     for (const event of events.data ?? []) await issueEvent(admin, order.data, event, config);
   } catch {
     console.error("GLOA invoice flow requires review for order " + orderId);
+  }
+}
+
+async function annualInvoiceLines(admin: Admin, plan: Record<string, unknown>, event: Record<string, unknown>, original: Register | null) {
+  if (original) {
+    const { data, error } = await admin.from("refund_tax_allocation_evidence")
+      .select("net_cents,tax_cents,gross_cents").eq("financial_event_id", event.id)
+      .eq("annual_plan_id", plan.id).eq("component", "annual_total").maybeSingle();
+    const rates = new Set(original.snapshot.lines.map(line => line.taxRateBasisPoints));
+    const rate = original.snapshot.lines[0]?.taxRateBasisPoints;
+    if (error || !data || rates.size !== 1 || !rate) throw new Error("invoice_annual_refund_unallocated");
+    const line = invoiceLine("Erstattung der Jahresplan-Vorauszahlung", 1, rate / 100, data.net_cents, data.gross_cents);
+    if (line.taxCents !== data.tax_cents) throw new Error("invoice_annual_refund_tax_unconfirmed");
+    return [line];
+  }
+
+  const tax = plan.tax_snapshot as {
+    items?: { sku: string; quantity: number; taxRatePercent: number; lineNetCents: number; lineGrossCents: number }[];
+    shipping?: { allocations?: { taxRatePercent: number; netCents: number; grossCents: number }[] };
+  } | null;
+  const { data: attempt, error } = await admin.from("checkout_attempts").select("items_snapshot")
+    .eq("id", plan.payment_checkout_attempt_id).maybeSingle();
+  const items = attempt?.items_snapshot;
+  if (error || !Array.isArray(items) || !tax?.items?.length) throw new Error("invoice_annual_items_unconfirmed");
+  return [
+    ...tax.items.map(line => {
+      const item = items.find(item => item.sku === line.sku);
+      if (!item || item.quantity !== line.quantity || item.lineGrossCents !== line.lineGrossCents ||
+          typeof item.productName !== "string") throw new Error("invoice_annual_item_mismatch");
+      return invoiceLine([item.productName, item.variantLabel].filter(Boolean).join(" - "), line.quantity,
+        line.taxRatePercent, line.lineNetCents, line.lineGrossCents);
+    }),
+    ...(tax.shipping?.allocations ?? []).map(line => invoiceLine("Versand Jahresplan", 1,
+      line.taxRatePercent, line.netCents, line.grossCents)),
+  ];
+}
+
+export async function issueVerifiedAnnualInvoices(planId: string, kind: "annual_prepayment" | "refund", stripeCreated: number) {
+  const config = invoiceConfig();
+  if (!config || !Number.isSafeInteger(stripeCreated) || stripeCreated * 1000 < Date.parse(config.cutoff)) return;
+  try {
+    const admin = getSupabaseAdmin();
+    if (!admin) return;
+    const plan = await admin.from("annual_plans")
+      .select("id,user_id,purchased_at,stripe_payment_intent_id,payment_checkout_attempt_id,billing_address_snapshot,shipping_address_snapshot,tax_snapshot")
+      .eq("id", planId).maybeSingle();
+    if (plan.error || !plan.data?.stripe_payment_intent_id || !plan.data.purchased_at ||
+        Date.parse(plan.data.purchased_at) < Date.parse(config.cutoff) || plan.data.tax_snapshot?.treatment !== "de_domestic" ||
+        plan.data.billing_address_snapshot?.country !== "DE" || plan.data.shipping_address_snapshot?.country !== "DE") return;
+    const events = await admin.from("financial_events").select("id,kind,net_cents,gross_cents,tax_cents,occurred_on")
+      .eq("annual_plan_id", planId).eq("kind", kind).eq("channel", "b2c").gte("created_at", config.cutoff)
+      .not("net_cents", "is", null).not("tax_cents", "is", null).order("created_at").order("id");
+    if (events.error) throw new Error("invoice_financial_evidence_unavailable");
+    for (const event of events.data ?? []) await issueEvent(admin, plan.data, event, config, "annual_plan_id");
+  } catch {
+    console.error("GLOA invoice flow requires review for annual plan " + planId);
+  }
+}
+
+export async function inspectVerifiedB2bInvoice(
+  agreementId: string, payment: { model: "monthly" | "annual"; invoiceId: string } | { model: "annual"; initial: true },
+  stripeCreated: number,
+) {
+  const config = invoiceConfig();
+  if (!config || !Number.isSafeInteger(stripeCreated) || stripeCreated * 1000 < Date.parse(config.cutoff)) return;
+  try {
+    const admin = getSupabaseAdmin();
+    if (!admin) return;
+    const { checkB2bInvoiceReadiness } = await import("./gloaB2bInvoiceEvidence.server");
+    const reason = await checkB2bInvoiceReadiness(admin, { agreementId, payment }, config.cutoff);
+    console.error("GLOA B2B invoice issuance blocked for " + agreementId + " (" + reason + ")");
+  } catch {
+    console.error("GLOA B2B invoice evidence unavailable for " + agreementId);
   }
 }

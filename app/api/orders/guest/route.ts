@@ -1,3 +1,5 @@
+import { serveIssuedInvoices } from "../../../../lib/gloaInvoiceAccess.server";
+import { uuid } from "../../../../lib/adminPortalModel";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import type { RateLimitState } from "../../../../lib/launchRateLimit";
 import {
@@ -131,11 +133,13 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: "Ungültige Anfrage." } as ErrorResponse, { status: 400 });
   }
 
-  // THE BODY MAY CARRY EXACTLY ONE KEY. An order id, an email or an
-  // order number sent alongside the token is not ignored, it is refused -
-  // so no future edit of this file can start reading one by accident.
+  // The credential is the only source of the order id. An optional
+  // invoice id filters documents only within that verified order.
   const keys = Object.keys(body as Record<string, unknown>);
-  if (keys.length !== 1 || keys[0] !== "token") {
+  const input = body as { token?: unknown; invoiceId?: unknown };
+  const invoiceRequest = Object.hasOwn(input, "invoiceId");
+  if (keys.some(key => key !== "token" && key !== "invoiceId") || !Object.hasOwn(input, "token") ||
+      (invoiceRequest && input.invoiceId !== null && !uuid(input.invoiceId))) {
     return Response.json({ error: "Ungültige Anfrage." } as ErrorResponse, { status: 400 });
   }
 
@@ -188,6 +192,8 @@ export async function POST(request: Request): Promise<Response> {
   // The token resolved an id and the order is gone. Same answer as a
   // token that never resolved anything.
   if (!order) return notFound();
+
+  if (invoiceRequest) return serveIssuedInvoices(admin, { key: "order_id", id: orderId }, input.invoiceId as string | null);
 
   const { data: items, error: itemsError } = await admin
     .from("order_items")

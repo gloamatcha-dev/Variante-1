@@ -1,4 +1,5 @@
 "use client";
+import { InvoiceDocuments } from "./InvoiceDocuments";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import type { CustomerType } from "./content";
@@ -1173,53 +1174,6 @@ function PortalOrders() {
 
 // ── Bestelldetail ─────────────────────────────────────────────────────
 
-function OrderInvoices({ orderId, token }: { orderId: string; token: string }) {
-  const [rows, setRows] = useState<{ id: string; number: string; original_id: string | null }[]>([]);
-  const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  async function load(id?: string, number?: string) {
-    if (busy) return;
-    setBusy(true);
-    setMessage("");
-    try {
-      const params = new URLSearchParams({ orderId });
-      if (id) params.set("id", id);
-      const response = await fetch("/api/orders/invoices?" + params, {
-        headers: { Authorization: "Bearer " + token },
-      });
-      if (!response.ok) throw new Error("invoice_unavailable");
-      if (!id) {
-        const data = await response.json();
-        setRows(data.invoices);
-        if (!data.invoices.length) setMessage("Noch keine Rechnungsdokumente verfügbar.");
-        return;
-      }
-      const url = URL.createObjectURL(await response.blob());
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = number + ".pdf";
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch {
-      setMessage("Rechnungsdokumente konnten nicht geladen werden.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return <section className="portal-note">
-    <h2>Rechnungsdokumente</h2>
-    <button type="button" className="portal-action" disabled={busy} onClick={() => void load()}>Dokumente laden</button>
-    {message && <p role="status">{message}</p>}
-    <ul>{rows.map(row => <li key={row.id}>
-      <button type="button" disabled={busy} onClick={() => void load(row.id, row.number)}>
-        {row.original_id ? "Rechnungskorrektur " : "Rechnung "}{row.number} herunterladen
-      </button>
-    </li>)}</ul>
-  </section>;
-}
-
 function OrderDetail({ orderId }: { orderId: string }) {
   const { session } = useAuth();
   /*
@@ -1331,7 +1285,7 @@ function OrderDetail({ orderId }: { orderId: string }) {
     <>
       <Link href="/account/orders" className="portal-back-link">&larr; Bestellungen</Link>
 
-      {session?.access_token && <OrderInvoices key={order.id} orderId={order.id} token={session.access_token} />}
+      {session?.access_token && <InvoiceDocuments key={order.id} access={{ orderId: order.id, token: session.access_token }} />}
       <section className="portal-page-head">
         <p className="eyebrow">BESTELLUNG {order.order_number}</p>
         <h1>{order.order_number}</h1>
@@ -2891,6 +2845,7 @@ function AnnualPlanTerminationPanel({ plan }: { plan: AnnualPlanAccountView }) {
 }
 
 function AnnualPlanDetail({ annualPlanId }: { annualPlanId: string }) {
+  const { session } = useAuth();
   const { views, loading, error } = useAnnualPlanViews();
   const plan = views.find(v => v.id === annualPlanId) ?? null;
 
@@ -2943,6 +2898,7 @@ function AnnualPlanDetail({ annualPlanId }: { annualPlanId: string }) {
         <h1>{productLine}</h1>
         <p className="portal-page-lead">{annualStatusLabel(plan)}</p>
       </section>
+      {session?.access_token && <InvoiceDocuments key={annualPlanId} access={{ annualPlanId, token: session.access_token }} />}
 
       {/*
         A FINISHED PLAN SAYS SO FIRST, AND SAYS WHAT HAPPENED TO THE

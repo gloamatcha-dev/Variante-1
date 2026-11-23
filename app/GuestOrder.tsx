@@ -1,4 +1,5 @@
 "use client";
+import { InvoiceDocuments } from "./InvoiceDocuments";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { getCountryLabel } from "../lib/shipping";
@@ -243,6 +244,7 @@ export function GuestOrder() {
         <p className="eyebrow">BESTELLUNG {order.orderNumber}</p>
         <h1>{order.orderNumber}</h1>
       </section>
+      {token && <InvoiceDocuments access={{ guestToken: token }} />}
 
       {/* ── Status ── */}
       <section className="order-status">

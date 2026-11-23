@@ -1,4 +1,4 @@
-import { issueVerifiedOrderInvoices } from "../../../../lib/gloaInvoice.server";
+import { inspectVerifiedB2bInvoice, issueVerifiedAnnualInvoices, issueVerifiedOrderInvoices } from "../../../../lib/gloaInvoice.server";
 import { sandboxPauseKey } from "../../../../lib/subscriptionPauseActions.server";
 import { releaseTerminalFirstMatchaCheckout } from "../../../../lib/matchaFirstCheckout";
 import type Stripe from "stripe";
@@ -199,8 +199,14 @@ export async function POST(request: Request): Promise<Response> {
           `Stripe webhook: b2b session ${session.id} -> ${outcome.kind} `
           + `(agreement ${b2b.metadata.agreementId})`
         );
+        if (event.livemode && (outcome.kind === "activated" || outcome.kind === "already_active")) {
+          await inspectVerifiedB2bInvoice(outcome.agreementId, { model: "annual", initial: true }, event.created);
+        }
       } else if (annual.kind === "annual") {
-        await settleAnnualCheckoutSession(session.id, annual.metadata, annualWebhookDeps(stripe));
+        const settled = await settleAnnualCheckoutSession(session.id, annual.metadata, annualWebhookDeps(stripe));
+        if (event.livemode && settled.outcome !== "payment_pending") {
+          await issueVerifiedAnnualInvoices(settled.annualPlanId, "annual_prepayment", event.created);
+        }
       } else if (session.mode === "subscription") {
         await handleSubscriptionSessionCompleted(stripe, session);
       } else {
@@ -247,14 +253,20 @@ export async function POST(request: Request): Promise<Response> {
           `Stripe webhook: b2b async payment ${session.id} -> ${outcome.kind} `
           + `(agreement ${b2b.metadata.agreementId})`
         );
+        if (event.livemode && (outcome.kind === "activated" || outcome.kind === "already_active")) {
+          await inspectVerifiedB2bInvoice(outcome.agreementId, { model: "annual", initial: true }, event.created);
+        }
       } else if (annual.kind === "annual") {
         // THE SAME settlement path, not a second one. It re-retrieves the
         // Session, re-proves the correlation, checks the frozen total and
         // settles through the same compare-and-set writers, so a replay
         // of either event converges on one plan.
-        await settleAnnualCheckoutSession(
+        const settled = await settleAnnualCheckoutSession(
           session.id, annual.metadata, annualWebhookDeps(stripe), "async_payment_succeeded"
         );
+        if (event.livemode && settled.outcome !== "payment_pending") {
+          await issueVerifiedAnnualInvoices(settled.annualPlanId, "annual_prepayment", event.created);
+        }
       } else if (session.mode === "subscription") {
         // UNCHANGED, and deliberately. invoice.paid is the canonical
         // fulfillment event for a subscription and the only one that
@@ -726,6 +738,7 @@ async function handleRefundEvent(stripe: Stripe, event: Stripe.Event): Promise<v
     // the refund state is durable. Idempotent by arithmetic.
     if (annual.annualPlanId && annual.refundedTotalCents != null && annual.refundedTotalCents > 0) {
       requireBusinessEffect('annual refund', await recordAnnualPlanRefundEvent(annual.annualPlanId, annual.refundedTotalCents, paymentIntentId, taxScope?.operationId, taxScope?.withdrawalId), FINANCE_EFFECT_RESULTS);
+      if (event.livemode) await issueVerifiedAnnualInvoices(annual.annualPlanId, 'refund', event.created);
     }
     // Counts and words only: the plan id and the writer's answer. No
     // amount, no customer, no address and no Stripe secret.
@@ -954,7 +967,6 @@ async function handleCheckoutSessionCompleted(stripe: Stripe, eventSession: Stri
   // the order is durable. A failure here never prevents order creation,
   // email sending or fulfilment — Stripe retries will eventually land it.
   requireBusinessEffect('order income', await recordOrderPaymentEvent(order.id), FINANCE_EFFECT_RESULTS);
-  await issueVerifiedOrderInvoices(order.id, 'order_payment', invoiceEventCreated);
 
   // AFFILIATE ATTRIBUTION (072). If the checkout session carries an
   // affiliate slug or code in its metadata, attribute the order to the
@@ -992,6 +1004,7 @@ async function handleCheckoutSessionCompleted(stripe: Stripe, eventSession: Stri
   }));
 
   await sendOrderConfirmationEmailIfNeeded({ order, items: emailItems, customerEmail });
+  await issueVerifiedOrderInvoices(order.id, 'order_payment', invoiceEventCreated);
 
   await sendInternalOrderNotificationIfNeeded({
     order,
@@ -1063,6 +1076,8 @@ async function handleB2bAnnualInvoicePaid(
     `Stripe webhook: b2b annual invoice ${eventInvoice.id} -> ${outcome.kind} `
     + `(agreement ${outcome.agreementId})`
   );
+  if (event.livemode) await inspectVerifiedB2bInvoice(outcome.agreementId,
+    { model: "annual", invoiceId: eventInvoice.id }, event.created);
   return { handled: true };
 }
 
@@ -1172,6 +1187,8 @@ async function handleB2bInvoicePaid(
     `Stripe webhook: b2b invoice ${eventInvoice.id} -> ${outcome.kind} `
     + `(agreement ${outcome.agreementId})`
   );
+  if (event.livemode) await inspectVerifiedB2bInvoice(outcome.agreementId,
+    { model: "monthly", invoiceId: eventInvoice.id }, event.created);
   return { handled: true };
 }
 
