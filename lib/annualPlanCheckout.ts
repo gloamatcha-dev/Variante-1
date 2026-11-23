@@ -121,6 +121,7 @@ import {
 } from "./subscriptionUpgradeRules";
 
 export type AnnualCheckoutDeps = {
+  reserveFirstDelivery: (attemptId: string) => Promise<"held" | "unavailable" | "out_of_stock">;
   isEnabled: () => boolean;
   verifyCaller: (request: Request) => Promise<AuthenticatedCaller | null>;
   buildQuote: (items: QuoteRequestItem[]) => Promise<QuoteResult>;
@@ -737,6 +738,10 @@ export async function handleAnnualPlanCheckout(
   }
   const annualExpiresAt: number = expiry.expiresAtUnix;
 
+  const hold = await deps.reserveFirstDelivery(attempt.id);
+  if (hold === "out_of_stock") return fail(409, "Für die erste Lieferung ist die gewünschte Menge nicht verfügbar.");
+  if (hold !== "held") return fail(503, UNAVAILABLE);
+
   try {
     const session = await stripe.checkout.sessions.create(
       {
@@ -793,11 +798,11 @@ export async function handleAnnualPlanCheckout(
         // the one place in this flow a customer can freely edit.
         success_url: `${origin}/account?annual=processing&annualPlanId=${encodeURIComponent(annualPlanId)}`,
         cancel_url: `${origin}/account?annual=cancelled&annualPlanId=${encodeURIComponent(annualPlanId)}`,
-        metadata: buildAnnualSessionMetadata({
+        metadata: { ...buildAnnualSessionMetadata({
           requestId,
           checkoutAttemptId: attempt.id,
           annualPlanId,
-        }),
+        }), gloa_first_matcha: "annual" },
         // ── THE SAME INSTANT THE CLAIM HOLDS (migration 067) ──
         //
         // Spread rather than set to undefined, so an ORDINARY annual

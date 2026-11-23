@@ -1,3 +1,4 @@
+import { reserveFirstMatchaCheckout } from "./matchaFirstCheckout";
 import { getStripeClient } from "./stripe";
 import { getSiteOrigin } from "./siteUrl";
 import { verifyBearerUser } from "./verifyUser";
@@ -197,5 +198,6 @@ export const defaultB2bCheckoutDeps: B2bCheckoutDeps = {
   ensureAttempt,
   claimAgreement,
   ensureMonthlyPrice: getOrCreateB2bMonthlyPrice,
+  reserveFirstDelivery: attemptId => reserveFirstMatchaCheckout(attemptId, "b2b"),
   linkSession: linkStripeSession,
 };

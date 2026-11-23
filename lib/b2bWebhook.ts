@@ -57,6 +57,7 @@ export type B2bWebhookDeps = {
     checkoutAttemptId: string;
     stripePaymentIntentId: string | null;
   }) => Promise<{ result: string; detail?: string }>;
+  bindFirstInvoice?: (agreementId: string, invoiceId: string) => Promise<void>;
   settleMonthlyInvoice: (input: {
     agreementId: string;
     stripeSubscriptionId: string;
@@ -224,6 +225,9 @@ export async function settleB2bPaidInvoice(
     };
   }
 
+  if (invoice.billing_reason === "subscription_create") {
+    await deps.bindFirstInvoice?.(routed.agreementId, invoice.id ?? invoiceId);
+  }
   const settlement = await deps.settleMonthlyInvoice({
     agreementId: routed.agreementId,
     stripeSubscriptionId: routed.stripeSubscriptionId,

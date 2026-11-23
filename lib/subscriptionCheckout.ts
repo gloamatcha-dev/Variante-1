@@ -135,6 +135,7 @@ export function shippingProductName(zone: ShippingZoneKey): string {
 /* ── Orchestration ──────────────────────────────────────────── */
 
 export type SubscriptionCheckoutDeps = {
+  reserveFirstDelivery: (attemptId: string) => Promise<"held" | "unavailable" | "out_of_stock">;
   isEnabled: () => boolean;
   verifyCaller: (request: Request) => Promise<AuthenticatedCaller | null>;
   resolvePlan: (planId: string) => Promise<PlanResolution>;
@@ -577,6 +578,10 @@ export async function handleSubscriptionCheckout(
     shippingPriceId = shippingPrice.priceId;
   }
 
+  const hold = await deps.reserveFirstDelivery(attempt.id);
+  if (hold === "out_of_stock") return fail(409, "Für die erste Lieferung ist die gewünschte Menge nicht verfügbar.");
+  if (hold !== "held") return fail(503, UNAVAILABLE);
+
   try {
     const session = await stripe.checkout.sessions.create(
       {
@@ -598,6 +603,7 @@ export async function handleSubscriptionCheckout(
         // checkout.session.completed path in Task 29D-E.
         metadata: {
           checkout_version: "1",
+          gloa_first_matcha: "subscription",
           request_id: requestId,
           checkout_attempt_id: attempt.id,
           gloa_subscription_id: subscriptionId,

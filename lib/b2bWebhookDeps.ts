@@ -1,3 +1,4 @@
+import { bindFirstMatchaInvoice } from "./matchaFirstCheckout";
 import type Stripe from "stripe";
 import { getSupabaseAdmin } from "./supabaseAdmin";
 import { evaluateStripeSessionPayment } from "./stripeFulfillment";
@@ -170,6 +171,7 @@ export function b2bWebhookDeps(stripe: Stripe): B2bWebhookDeps & B2bFailureDeps 
     linkSession: linkStripeSession,
     markAttemptPaid,
     activateAnnual,
+    bindFirstInvoice: (agreementId, invoiceId) => bindFirstMatchaInvoice("b2b", agreementId, invoiceId),
     settleMonthlyInvoice: input => settleMonthlyInvoice(input, stripe),
     settleAnnualInstalment,
     recordAnnualFailure,

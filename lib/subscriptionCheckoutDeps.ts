@@ -1,3 +1,4 @@
+import { reserveFirstMatchaCheckout } from "./matchaFirstCheckout";
 import { getStripeClient } from "./stripe";
 import { getSiteOrigin } from "./siteUrl";
 import { verifyBearerUser } from "./verifyUser";
@@ -72,6 +73,7 @@ export const defaultSubscriptionCheckoutDeps: SubscriptionCheckoutDeps = {
   ensureAttempt: getOrCreateSubscriptionCheckoutAttempt,
   claimSubscription: claimPendingSubscriptionForAttempt,
   listSubscriptions: listOwnSubscriptionsForEligibility,
+  reserveFirstDelivery: attemptId => reserveFirstMatchaCheckout(attemptId, "subscription"),
   linkSession: linkStripeSession,
   loadPurchaseRestrictions: loadPurchaseRestrictionsForUser,
 };

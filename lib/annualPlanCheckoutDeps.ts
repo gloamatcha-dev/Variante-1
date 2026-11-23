@@ -1,3 +1,4 @@
+import { reserveFirstMatchaCheckout } from "./matchaFirstCheckout";
 import { getStripeClient } from "./stripe";
 import { getSiteOrigin } from "./siteUrl";
 import { verifyBearerUser } from "./verifyUser";
@@ -224,6 +225,7 @@ export const defaultAnnualCheckoutDeps: AnnualCheckoutDeps = {
   createPendingPlan: createPendingAnnualPlan,
   loadOwnSubscription,
   listAnnualPlans: listOwnAnnualPlansForEligibility,
+  reserveFirstDelivery: attemptId => reserveFirstMatchaCheckout(attemptId, "annual"),
   linkSession: linkStripeSession,
   loadPurchaseRestrictions: loadPurchaseRestrictionsForUser,
 };

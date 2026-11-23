@@ -1,3 +1,4 @@
+import { bindFirstMatchaInvoice } from "./matchaFirstCheckout";
 import type Stripe from "stripe";
 import { getSupabaseAdmin } from "./supabaseAdmin";
 import { createOrderFromPaidCheckoutAttempt, type CreatedOrder } from "./orderFulfillment";
@@ -137,6 +138,7 @@ export type InvoiceFulfillmentResult =
   | { kind: "failed"; reason: string };
 
 export type SubscriptionInvoiceDeps = {
+  bindFirstInvoice?: (subscriptionId: string, invoiceId: string) => Promise<void>;
   /** Re-read from Stripe, never the webhook payload's embedded copy. */
   retrieveInvoice: (invoiceId: string) => Promise<Stripe.Invoice>;
   retrieveSubscription: (subscriptionId: string) => Promise<Stripe.Subscription>;
@@ -360,6 +362,7 @@ export const defaultSubscriptionInvoiceDeps: SubscriptionInvoiceDeps = {
 export function subscriptionInvoiceDeps(stripe: Stripe): SubscriptionInvoiceDeps {
   return {
     ...defaultSubscriptionInvoiceDeps,
+    bindFirstInvoice: (subscriptionId, invoiceId) => bindFirstMatchaInvoice("subscription", subscriptionId, invoiceId),
     retrieveInvoice: id => stripe.invoices.retrieve(id),
     retrieveSubscription: id => stripe.subscriptions.retrieve(id),
   };
@@ -463,6 +466,9 @@ export async function fulfillPaidSubscriptionInvoice(
   // and returns the existing order if there is one, so this is safe to
   // reach again on every retry - which is what makes the two-step shape
   // safe despite being two transactions.
+  if (invoice.billing_reason === "subscription_create") {
+    await deps.bindFirstInvoice?.(subscription.id, invoice.id as string);
+  }
   const order = await deps.createOrder({ checkoutAttemptId, subscription });
   const frozenItems = await deps.loadAttemptItems(checkoutAttemptId);
 

@@ -115,6 +115,7 @@ export type B2bAgreementClaimResult =
   | { ok: false; result: string; reason: string };
 
 export type B2bCheckoutDeps = {
+  reserveFirstDelivery: (attemptId: string) => Promise<"held" | "unavailable" | "out_of_stock">;
   isEnabled: () => boolean;
   verifyCaller: (request: Request) => Promise<AuthenticatedCaller | null>;
   isBusinessAccount: (token: string, userId: string) => Promise<boolean>;
@@ -359,34 +360,42 @@ export async function handleB2bCheckout(
   }
 
   // ── 14. THE SESSION ─────────────────────────────────────────
-  const metadata = buildB2bSessionMetadata({
+  const metadata = { ...buildB2bSessionMetadata({
     requestId,
     checkoutAttemptId: attempt.id,
     agreementId,
-  });
+  }), gloa_first_matcha: "b2b" };
   const productName = `GLOA Matcha B2B – ${quote.packs} × 500 g`;
+
+  let monthlyPriceId: string | undefined;
+  if (quote.planType === "monthly") {
+    const price = await deps.ensureMonthlyPrice(stripe, {
+      packs: quote.packs,
+      // THE GROSS. B2B pricing is net-origin, so the VAT is already
+      // inside this number and Stripe is not asked to compute any.
+      unitAmountCents: charge.grossCents,
+      productName,
+      currency: attempt.currency,
+    });
+    if (!price.ok) {
+      console.error(`B2B checkout: monthly price - ${price.reason}`);
+      return fail(503, UNAVAILABLE);
+    }
+    monthlyPriceId = price.priceId;
+  }
+
+  const hold = await deps.reserveFirstDelivery(attempt.id);
+  if (hold === "out_of_stock") return fail(409, "Für die erste Lieferung ist die gewünschte Menge nicht verfügbar.");
+  if (hold !== "held") return fail(503, UNAVAILABLE);
 
   let session: Stripe.Checkout.Session;
   try {
     if (quote.planType === "monthly") {
-      const price = await deps.ensureMonthlyPrice(stripe, {
-        packs: quote.packs,
-        // THE GROSS. B2B pricing is net-origin, so the VAT is already
-        // inside this number and Stripe is not asked to compute any.
-        unitAmountCents: charge.grossCents,
-        productName,
-        currency: attempt.currency,
-      });
-      if (!price.ok) {
-        console.error(`B2B checkout: monthly price - ${price.reason}`);
-        return fail(503, UNAVAILABLE);
-      }
-
       session = await stripe.checkout.sessions.create(
         {
           mode: "subscription",
           customer: customer.stripeCustomerId,
-          line_items: [{ price: price.priceId, quantity: 1 }],
+          line_items: [{ price: monthlyPriceId, quantity: 1 }],
           subscription_data: {
             // MANDATORY. invoice.paid can be delivered BEFORE
             // checkout.session.completed, and at that moment the

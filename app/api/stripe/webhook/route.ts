@@ -1,3 +1,4 @@
+import { releaseTerminalFirstMatchaCheckout } from "../../../../lib/matchaFirstCheckout";
 import type Stripe from "stripe";
 import { withdrawalTaxScope } from '../../../../lib/refundTaxScope';
 import { runProviderFeeSweep } from '../../../../lib/providerFeeCaptureDeps';
@@ -293,7 +294,9 @@ export async function POST(request: Request): Promise<Response> {
         await handleCheckoutSessionCompleted(stripe, session);
       }
     } else if (event.type === "checkout.session.expired") {
-      await releaseTerminalMatchaCheckout(event.data.object as Stripe.Checkout.Session,"expired");
+      const session = event.data.object as Stripe.Checkout.Session;
+      if (session.metadata?.gloa_first_matcha) await releaseTerminalFirstMatchaCheckout(stripe, session);
+      else await releaseTerminalMatchaCheckout(session,"expired");
     } else if (event.type === "checkout.session.async_payment_failed") {
       // Phase 4B4.2. The money did not arrive. This creates NOTHING: it
       // calls a pure function that has no writer to call, so it cannot
@@ -316,6 +319,7 @@ export async function POST(request: Request): Promise<Response> {
           `annual async failure for session ${session.id} has unusable metadata: ${annual.reason}`
         );
       }
+      if (session.metadata?.gloa_first_matcha) await releaseTerminalFirstMatchaCheckout(stripe, session);
       if (b2b.kind === "b2b") {
         // Package 5C. It creates NOTHING and mutates NOTHING: the pending
         // agreement and the checkout attempt both survive as evidence,
@@ -326,7 +330,7 @@ export async function POST(request: Request): Promise<Response> {
         );
       } else if (annual.kind === "annual") {
         console.error(acknowledgeAnnualPaymentFailure(annual.metadata, session.id).message);
-      } else {
+      } else if (!session.metadata?.gloa_first_matcha) {
         await releaseTerminalMatchaCheckout(session,"failed");
       }
     } else if (event.type === "invoice.paid") {

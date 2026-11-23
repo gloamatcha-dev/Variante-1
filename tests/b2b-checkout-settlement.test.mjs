@@ -161,6 +161,7 @@ function stubDeps(overrides = {}) {
     ensureMonthlyPrice: record("ensureMonthlyPrice", async () => ({
       ok: true, priceId: "price_1", lookupKey: "lk", created: false,
     })),
+    reserveFirstDelivery: record("reserveFirstDelivery", async () => "held"),
     linkSession: record("linkSession", async () => true),
   };
   return { ...deps, ...overrides, calls };
@@ -442,15 +443,27 @@ test("10: the agreement is created BEFORE the Stripe session", async () => {
     "the agreement was claimed before the attempt existed");
   assert.ok(names.indexOf("claimAgreement") < names.indexOf("sessions.create"),
     "the Stripe session was created before the agreement id existed");
+  assert.ok(names.indexOf("reserveFirstDelivery") < names.indexOf("sessions.create"));
   assert.ok(names.indexOf("sessions.create") < names.indexOf("linkSession"));
 });
 
-test("11: the session metadata is exactly the four correlation keys", async () => {
+test("B2B refuses either contract model before Stripe Session creation when stock is unavailable", async () => {
+  for (const planType of ["monthly", "annual"]) {
+    const deps = stubDeps({ reserveFirstDelivery: async () => "out_of_stock" });
+    const response = await handleB2bCheckout(req({ planType, instalmentCount: planType === "annual" ? 1 : undefined }), deps);
+    assert.equal(response.status, 409);
+    assert.match((await response.json()).error, /erste Lieferung/);
+    assert.equal(sessionParams(deps), undefined);
+  }
+});
+
+test("11: the session metadata contains only correlation keys and the stock hold marker", async () => {
   const deps = stubDeps();
   await handleB2bCheckout(req(), deps);
   const meta = sessionParams(deps).metadata;
   assert.deepEqual(Object.keys(meta).sort(),
-    ["checkout_attempt_id", "checkout_version", "gloa_b2b_agreement_id", "request_id"]);
+    ["checkout_attempt_id", "checkout_version", "gloa_b2b_agreement_id", "gloa_first_matcha", "request_id"]);
+  assert.equal(meta.gloa_first_matcha, "b2b");
   assert.equal(meta.gloa_b2b_agreement_id, UUID_AGREEMENT);
   assert.equal(meta.checkout_version, B2B_SESSION_CHECKOUT_VERSION);
   // No money, no identity, no product.
