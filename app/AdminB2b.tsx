@@ -236,7 +236,7 @@ export function AdminB2b({ onSessionLost, initialSearch="" }: { onSessionLost: (
       {!data ? (
         <p className="ops-note">Laden…</p>
       ) : data.agreements.length === 0 ? (
-        <p className="ops-note">Keine Verträge in dieser Gruppe.</p>
+        <div className="portal-state" role="status"><strong>Keine Verträge in dieser Gruppe.</strong><p>Wähle eine andere Gruppe oder passe die Firmensuche an.</p></div>
       ) : (
         <div className="ops-table-wrap admin-data-scroll" role="region" aria-label="B2B-Verträge" tabIndex={0}>
 <table className="ops-table">

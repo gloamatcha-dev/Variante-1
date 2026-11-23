@@ -14,7 +14,14 @@
 .admin-module-heading .inventory-icon { flex: 0 0 42px; height: 42px; font-size: 22px; }
 .admin-workspace .admin-module-heading h1 { margin: 0; line-height: 1.15; }
 .admin-module-heading p { color: var(--admin-muted); }
-.admin-module-layout, .admin-module-body { display: grid; min-width: 0; gap: 14px; align-items: start; }
+.admin-module-layout, .admin-module-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  width: 100%;
+  gap: 14px;
+  align-items: start;
+}
 .admin-module-guide { --inventory-blue: var(--admin-blue); --inventory-muted: var(--admin-muted); --inventory-line: var(--admin-line); }
 .admin-module-body :is(.ops-controls,.ops-panel,.portal-detail,.product-editor,.portal-form,.portal-state,.portal-tasks,.portal-search-results,.ops-detail,.ops-card),
 .admin-module-body .portal-grid > section,
@@ -33,9 +40,25 @@
   gap: 10px;
 }
 .admin-module-body :is(.ops-controls,.portal-filters,.ops-filter-row) > * { min-width: 0; max-width: 100%; }
-.admin-module-body :is(.ops-counts,.portal-metrics,.inventory-metrics) {
-  grid-template-columns: repeat(auto-fit,minmax(min(100%,150px),1fr));
+.admin-workspace .admin-module-body :is(.ops-counts,.portal-metrics,.inventory-metrics) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 184px), 1fr));
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  border: 0;
   gap: 10px;
+}
+.admin-workspace .admin-module-body :is(.ops-count-value,.portal-metrics dd,.inventory-metrics dd) {
+  font-size: clamp(19px, 1.75vw, 26px);
+  line-height: 1.2;
+  overflow-wrap: normal;
+  font-variant-numeric: tabular-nums;
+}
+.admin-workspace .admin-module-body :is(.ops-count-label,.portal-metrics dt,.inventory-metrics dt) {
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: normal;
 }
 .admin-module-body :is(.ops-count,.portal-metrics > div) {
   padding: 12px;
@@ -52,8 +75,36 @@
 .admin-product-state { display: inline-block; border-radius: 6px; padding: 3px 7px; background: #fff0d8; color: #714607; }
 .admin-product-state[data-published="true"] { background: #e1f3e4; color: #195833; }
 .admin-module-body .inventory-metrics { --inventory-blue: var(--admin-blue); --inventory-line: var(--admin-line); }
-.admin-module-body .portal-tasks { grid-template-columns: repeat(auto-fit,minmax(min(100%,190px),1fr)); }
-.admin-module-body .portal-tasks button { border: 1px solid var(--admin-line); border-radius: 8px; }
+.admin-workspace .admin-module-body .portal-tasks {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  padding: 0;
+  gap: 8px;
+  border: 0;
+  box-shadow: none;
+}
+.admin-workspace .admin-module-body .portal-tasks button {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "label arrow" "value arrow";
+  align-content: center;
+  min-height: 0;
+  padding: 10px 12px;
+  gap: 4px 10px;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  overflow-wrap: normal;
+}
+.admin-workspace .portal-tasks button > span:first-child { grid-area: label; }
+.admin-workspace .portal-tasks button > span:last-child { grid-area: arrow; }
+.admin-workspace .portal-tasks strong { grid-area: value; font-size: 22px; line-height: 1.2; }
+.admin-workspace .portal-tasks button[data-value-known="false"] strong { font-size: 14px; font-weight: 600; }
+.admin-workspace .admin-module-body .portal-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 325px), 1fr));
+  align-items: start;
+  gap: 14px;
+  margin-top: 0;
+}
+.admin-workspace .admin-module-body .admin-data-card > :first-child:is(h2,h3),
+.admin-workspace .admin-module-body .portal-grid > section > h2 { margin: 0 0 10px; }
 .admin-module-body .portal-tasks .has-work { background: #fff5e6; }
 .admin-module-body :is(.portal-table-wrap,.ops-table-wrap) {
   overflow-x: auto;
@@ -95,8 +146,94 @@
 .product-list-filters label { flex: 1 1 130px; }
 .admin-quick-links { display: flex; flex-wrap: wrap; gap: 8px; }
 .admin-module-body .admin-quick-links button { border: 1px solid var(--admin-line); padding: 8px 12px; color: var(--admin-blue); background: #fff; border-radius: 7px; }
+/* Keep the order table in its own scroll region at every width. */
+.admin-workspace .admin-order-list {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
+.admin-workspace .admin-order-list > .ops-orders {
+  display: table;
+  width: 100%;
+  min-width: 1410px;
+  table-layout: auto;
+}
+.admin-workspace .admin-order-list .ops-orders thead {
+  display: table-header-group;
+  position: static;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+}
+.admin-workspace .admin-order-list .ops-orders tbody { display: table-row-group; }
+.admin-workspace .admin-order-list .ops-orders tr { display: table-row; }
+.admin-workspace .admin-order-list .ops-orders :is(td,th) {
+  display: table-cell;
+  width: auto;
+  min-width: 94px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--admin-line);
+  text-align: left;
+  vertical-align: top;
+}
+.admin-workspace .admin-order-list .ops-orders td::before { content: none; }
+.admin-workspace .admin-order-list .ops-orders td[data-label="Bestellung"] { min-width: 145px; }
+.admin-workspace .admin-order-list .ops-orders td[data-label="Kunde"] { min-width: 175px; }
+.admin-workspace .admin-order-list .ops-orders td[data-label="Inhalt"] { min-width: 185px; max-width: 280px; }
+.admin-workspace .admin-order-list .ops-orders td[data-label="Betrag"] { white-space: nowrap; }
+.admin-workspace .admin-order-list .ops-orders :is(.ops-order-open,.portal-chip,.ops-status,.ops-item-line) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+.admin-workspace .admin-order-list .ops-orders .ops-item-line {
+  display: block;
+  overflow: visible;
+  text-overflow: clip;
+  -webkit-line-clamp: unset;
+  max-height: none;
+}
+.admin-workspace .admin-order-list :is(.ops-mail,td small) { display: block; }
+
+/* Keep each case, finance section and contract independent in height. */
+.admin-workspace [data-admin-area="rights"] :is(.ops-customer-rights,.ops-list),
+.admin-workspace [data-admin-area="b2b"] :is(.ops-panel,.ops-detail) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  align-content: start;
+  min-height: 0;
+  gap: 10px;
+}
+.admin-workspace [data-admin-area="rights"] .ops-list .ops-card {
+  margin: 0;
+  min-height: 0;
+  padding: 14px;
+}
+.admin-workspace [data-admin-area="rights"] .ops-card :is(h3,h4) { margin: 0 0 8px; }
+.admin-workspace [data-admin-area="rights"] .ops-card fieldset { margin: 8px 0; }
+.admin-workspace .admin-finance-tabs .portal-tabs { margin: 0; }
+.admin-workspace .admin-finance-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+}
+.admin-workspace .admin-finance-section > :is(p,.portal-period) { margin: 0; }
+.admin-workspace [data-admin-area="creator"] .portal-payout-summary {
+  min-width: 0;
+  margin: 8px 0;
+  padding: 14px;
+  border: 1px solid var(--admin-line);
+  border-radius: 12px;
+  background: var(--admin-card);
+}
+.admin-workspace [data-admin-area="creator"] .portal-payout-summary h3 { margin: 0 0 10px; }
 @media (min-width: 1510px) {
-  .admin-module-layout { grid-template-columns: minmax(0,1fr) minmax(245px,0.27fr); }
+  .admin-module-layout { grid-template-columns: minmax(0, 1fr) clamp(245px, 19vw, 320px); }
 }
 @media (max-width: 1023px) {
   .ops.admin-workspace { grid-template-columns: minmax(0,1fr); }
@@ -120,7 +257,6 @@
   .admin-module-body .admin-data-scroll > table td::before { content: none; }
 }
 @media (max-width: 480px) {
-  .admin-module-body :is(.ops-counts,.portal-metrics,.inventory-metrics,.portal-grid) { grid-template-columns: minmax(0,1fr); }
   .admin-workspace .portal-header form > div { flex-wrap: wrap; }
   .admin-workspace .portal-header form button { min-height: 40px; }
 }

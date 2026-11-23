@@ -78,7 +78,7 @@ export function AdminModuleContent({ area, children }: { area: PortalArea; child
   const guide = guides[area];
 
   return (
-    <div className="admin-module-layout">
+    <div className="admin-module-layout" data-admin-area={area}>
       <div className="admin-module-body">{children}</div>
       <details className="inventory-card inventory-guide admin-module-guide">
         <summary><span className="inventory-icon" aria-hidden="true">ⓘ</span>{guide.title}</summary>
