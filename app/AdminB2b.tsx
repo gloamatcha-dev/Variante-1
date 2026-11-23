@@ -181,6 +181,10 @@ export function AdminB2b({ onSessionLost, initialSearch="" }: { onSessionLost: (
 
   return (
     <section className="ops-panel" aria-label="B2B">
+      {data && <dl className="inventory-metrics" aria-label="Vertragsübersicht">
+        <div><dt>Verträge in der Auswahl</dt><dd>{data.total ?? "—"}</dd></div>
+        <div><dt>Verträge auf dieser Seite</dt><dd>{data.agreements.length}</dd></div>
+      </dl>}
       <div className="ops-toolbar">
         <div className="ops-tabs" role="group" aria-label="Gruppe">
           {B2B_GROUPS.map(g => (
@@ -188,6 +192,7 @@ export function AdminB2b({ onSessionLost, initialSearch="" }: { onSessionLost: (
               key={g}
               type="button"
               className={group === g ? "is-active" : ""}
+              aria-pressed={group === g}
               onClick={() => { setGroup(g); setPage(1); setOpenId(null); }}
             >
               {GROUP_LABEL[g]}
@@ -233,7 +238,8 @@ export function AdminB2b({ onSessionLost, initialSearch="" }: { onSessionLost: (
       ) : data.agreements.length === 0 ? (
         <p className="ops-note">Keine Verträge in dieser Gruppe.</p>
       ) : (
-        <table className="ops-table">
+        <div className="ops-table-wrap admin-data-scroll" role="region" aria-label="B2B-Verträge" tabIndex={0}>
+<table className="ops-table">
           <thead>
             <tr>
               <th>Firma</th>
@@ -292,6 +298,7 @@ export function AdminB2b({ onSessionLost, initialSearch="" }: { onSessionLost: (
             ))}
           </tbody>
         </table>
+</div>
       )}
 
       {open && (
@@ -332,7 +339,8 @@ export function AdminB2b({ onSessionLost, initialSearch="" }: { onSessionLost: (
           {openPayments.length > 0 && (
             <>
               <h4>Zahlungsplan</h4>
-              <table className="ops-table">
+              <div className="ops-table-wrap admin-data-scroll" role="region" aria-label="Zahlungen" tabIndex={0}>
+<table className="ops-table">
                 <thead>
                   <tr><th>Rate</th><th>Fällig</th><th>Status</th><th>Netto</th><th>Brutto</th></tr>
                 </thead>
@@ -352,6 +360,7 @@ export function AdminB2b({ onSessionLost, initialSearch="" }: { onSessionLost: (
                   ))}
                 </tbody>
               </table>
+</div>
             </>
           )}
 
@@ -360,7 +369,8 @@ export function AdminB2b({ onSessionLost, initialSearch="" }: { onSessionLost: (
           {openDeliveries.length === 0 ? (
             <p className="ops-note">Noch keine Lieferung.</p>
           ) : (
-            <table className="ops-table">
+            <div className="ops-table-wrap admin-data-scroll" role="region" aria-label="Lieferungen" tabIndex={0}>
+<table className="ops-table">
               <thead>
                 <tr>
                   <th>Nr.</th><th>Termin</th><th>Menge</th><th>Status</th>
@@ -389,6 +399,7 @@ export function AdminB2b({ onSessionLost, initialSearch="" }: { onSessionLost: (
                 ))}
               </tbody>
             </table>
+</div>
           )}
 
           <p className="ops-note">

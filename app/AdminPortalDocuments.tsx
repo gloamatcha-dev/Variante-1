@@ -80,7 +80,7 @@ export function AdminPortalDocuments(){
       <button type="button" onClick={()=>setForm(v=>!v)}>{form?'Abbrechen':'Dokument erfassen'}</button>
     </div>
     {notice&&<p role="status">{notice}</p>}
-    {form&&<form className="portal-form" onSubmit={e=>void submit(e,'create_document')}>
+    {form&&<form className="portal-form admin-data-card" aria-label="Rechnung oder Dokument hochladen" onSubmit={e=>void submit(e,'create_document')}>
       <MetadataFields/>
       <label>Art<select name="kind">{['expense_receipt','gloa_invoice','stripe_receipt','b2b_document','other'].map(v=><option key={v} value={v}>{label(v)}</option>)}</select></label>
       <label>Originalbeleg (PDF, JPG oder PNG, bis 3 MB)<input name="file" type="file" accept="application/pdf,image/jpeg,image/png"/></label>

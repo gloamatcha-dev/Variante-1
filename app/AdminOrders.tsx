@@ -427,7 +427,7 @@ export function AdminOrders({ onSessionLost, initialSearch = "" }: { onSessionLo
         )}
       </div>
 
-      <div className="ops-table-wrap">
+      <div className="ops-table-wrap" role="region" aria-label="Bestellliste" tabIndex={0}>
         <table className="ops-table ops-orders">
           <thead>
             <tr>

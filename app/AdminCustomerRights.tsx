@@ -194,12 +194,19 @@ export function AdminCustomerRights({ onSessionLost, initialSection, initialFocu
         </button>
       </header>
 
+      <dl className="inventory-metrics" aria-label="Fälle in der Übersicht">
+        <div><dt>Widerrufe</dt><dd>{data.withdrawals.length}</dd></div>
+        <div><dt>Reklamationen</dt><dd>{data.complaints.length}</dd></div>
+        <div><dt>Kündigungen</dt><dd>{data.terminations.length}</dd></div>
+        <div><dt>Kaufsperren</dt><dd>{data.restrictions.length}</dd></div>
+      </dl>
       <nav className="ops-subnav" aria-label="Verbraucherrechte">
         {([["widerruf", `Widerruf (${data.withdrawals.length})`],
            ["reklamation", `Reklamation (${data.complaints.length})`],
            ["kuendigung", `Kündigung (${data.terminations.length})`],
            ["sperren", `Kaufsperren (${data.restrictions.length})`]] as const).map(([k, l]) => (
           <button key={k} type="button" className={section === k ? "is-active" : ""}
+                  aria-current={section === k ? "page" : undefined}
                   onClick={() => setSection(k)}>{l}</button>
         ))}
       </nav>

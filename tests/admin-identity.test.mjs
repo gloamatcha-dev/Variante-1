@@ -843,8 +843,8 @@ test("9b: the viewport leaf is pure, and says it is not a security boundary", ()
     /NOTHING here authorises anything/);
 });
 
-test("9c: below the minimum, sign-in precedes the compact inventory [Block 2]", () => {
-const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),'utf8'); assert.match(portalCss,/@media\(max-width:700px\)/); assert.match(portalCss,/content:attr\(data-label\)/); assert.match(codeOnly(shell),/if \(isDesktop === false\) \{[\s\S]*?className="ops inventory-compact"[\s\S]*?<AdminInventory showHeading[\s\S]*?<\/main>[\s\S]*?\n  \}/); assert.match(shell,/AdminPortalShell/); assert.ok(codeOnly(shell).indexOf('if (!signedIn)')<codeOnly(shell).indexOf('<AdminPortalShell'));for(const chrome of ['CartDrawer','LaunchPopup','bag-btn'])assert.ok(!codeOnly(shell).includes(chrome));
+test("9c: sign-in precedes the responsive admin workspace [Block 2]", () => {
+const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),'utf8'); assert.match(portalCss,/@media\(max-width:700px\)/); assert.match(portalCss,/content:attr\(data-label\)/); assert.match(codeOnly(shell),/className="ops portal admin-workspace"/); assert.match(shell,/AdminPortalShell/); assert.ok(codeOnly(shell).indexOf('if (!signedIn)')<codeOnly(shell).indexOf('<AdminPortalShell'));for(const chrome of ['CartDrawer','LaunchPopup','bag-btn'])assert.ok(!codeOnly(shell).includes(chrome));
 });
 
 test("9d: THE SERVER NEVER CONSULTS A VIEWPORT", () => {
@@ -869,16 +869,16 @@ test("9d: THE SERVER NEVER CONSULTS A VIEWPORT", () => {
   assert.match(codeOnly(gate), /json\(\{ error: "Keine Berechtigung\." \}, 403\)/);
 });
 
-test("9e: other admin modules do not mount below the minimum [Block 2]", () => {
-const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),'utf8'); assert.match(portalCss,/@media\(max-width:700px\)/); assert.match(portalCss,/content:attr\(data-label\)/); assert.match(codeOnly(shell),/if \(isDesktop === false\) \{[\s\S]*?className="ops inventory-compact"[\s\S]*?<AdminInventory showHeading[\s\S]*?<\/main>[\s\S]*?\n  \}/); assert.match(shell,/AdminPortalShell/); assert.match(shell,/action: "identity"/);assert.match(shell,/view === "overview" && <AdminPortalDashboard/);assert.match(shell,/view === "orders" && <AdminOrders/);
+test("9e: the responsive workspace uses the existing identity request [Block 2]", () => {
+const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),'utf8'); assert.match(portalCss,/@media\(max-width:700px\)/); assert.match(portalCss,/content:attr\(data-label\)/); assert.match(codeOnly(shell),/className="ops portal admin-workspace"/); assert.match(shell,/AdminPortalShell/); assert.match(shell,/action: "identity"/);assert.match(shell,/view === "overview" && <AdminPortalDashboard/);assert.match(shell,/view === "orders" && <AdminOrders/);
 });
 
 test("9f: hydration cannot mismatch, and there is no timeout anywhere [Block 2]", () => {
-assert.match(codeOnly(shell),/useState<boolean \| null>\(null\)/);assert.ok(!codeOnly(shell).includes('innerWidth'));assert.match(codeOnly(shell),/matchMedia\(ADMIN_DESKTOP_MEDIA_QUERY\)/);assert.match(codeOnly(shell),/if \(isDesktop === null\) return <main className="ops" aria-busy="true"/);assert.ok(!codeOnly(shell).includes('setTimeout'));assert.match(shell,/let cancelled = false/);assert.match(shell,/cancelled = true/);
+assert.match(codeOnly(shell),/useState<boolean \| null>\(null\)/);assert.ok(!codeOnly(shell).includes('innerWidth'));assert.doesNotMatch(codeOnly(shell), /matchMedia|isDesktop/);assert.ok(!codeOnly(shell).includes('setTimeout'));assert.match(shell,/let cancelled = false/);assert.match(shell,/cancelled = true/);
 });
 
 test("9g: the desktop admin is unchanged [Block 2]", () => {
-const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),'utf8'); assert.match(portalCss,/@media\(max-width:700px\)/); assert.match(portalCss,/content:attr\(data-label\)/); assert.match(codeOnly(shell),/if \(isDesktop === false\) \{[\s\S]*?className="ops inventory-compact"[\s\S]*?<AdminInventory showHeading[\s\S]*?<\/main>[\s\S]*?\n  \}/); assert.match(shell,/AdminPortalShell/); for(const panel of ['AdminOrders','AdminSubscriptions','AdminAnnualPlans','AdminCustomerRights','AdminInventory','AdminB2b','AdminActivity','AdminPortalFinance','AdminPortalCreator'])assert.ok(shell.includes('<'+panel));assert.match(shell,/Legacy-Tool: Launch List/);
+const portalCss=readFileSync(new URL('../app/admin-portal.css',import.meta.url),'utf8'); assert.match(portalCss,/@media\(max-width:700px\)/); assert.match(portalCss,/content:attr\(data-label\)/); assert.match(codeOnly(shell),/className="ops portal admin-workspace"/); assert.match(shell,/AdminPortalShell/); for(const panel of ['AdminOrders','AdminSubscriptions','AdminAnnualPlans','AdminCustomerRights','AdminInventory','AdminB2b','AdminActivity','AdminPortalFinance','AdminPortalCreator'])assert.ok(shell.includes('<'+panel));assert.match(shell,/Legacy-Tool: Launch List/);
 });
 
 test("9h: this package changed nothing else", () => {

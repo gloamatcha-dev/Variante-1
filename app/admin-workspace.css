@@ -1,0 +1,126 @@
+﻿.ops.admin-workspace {
+  --admin-surface: #f5f7fc;
+  --admin-card: #fff;
+  --admin-line: #dce3ef;
+  --admin-ink: #15213a;
+  --admin-muted: #455269;
+  --admin-blue: #1746d1;
+  --admin-magenta: #a61758;
+  background: var(--admin-surface);
+  color: var(--admin-ink);
+}
+.admin-workspace .portal-header { flex-wrap: wrap; align-items: center; }
+.admin-workspace .admin-module-heading { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.admin-module-heading .inventory-icon { flex: 0 0 42px; height: 42px; font-size: 22px; }
+.admin-workspace .admin-module-heading h1 { margin: 0; line-height: 1.15; }
+.admin-module-heading p { color: var(--admin-muted); }
+.admin-module-layout, .admin-module-body { display: grid; min-width: 0; gap: 14px; align-items: start; }
+.admin-module-guide { --inventory-blue: var(--admin-blue); --inventory-muted: var(--admin-muted); --inventory-line: var(--admin-line); }
+.admin-module-body :is(.ops-controls,.ops-panel,.portal-detail,.product-editor,.portal-form,.portal-state,.portal-tasks,.portal-search-results,.ops-detail,.ops-card),
+.admin-module-body .portal-grid > section,
+.admin-module-body .admin-data-card {
+  min-width: 0;
+  border: 1px solid var(--admin-line);
+  border-radius: 12px;
+  padding: 14px;
+  background: var(--admin-card);
+  box-shadow: 0 2px 6px #15213a0c;
+  overflow-wrap: anywhere;
+}
+.admin-module-body :is(.ops-controls,.portal-section-head,.portal-period,.portal-filters,.ops-filter-row,.portal-tabs,.ops-toolbar,.ops-subnav,.ops-tabs) {
+  flex-wrap: wrap;
+  min-width: 0;
+  gap: 10px;
+}
+.admin-module-body :is(.ops-controls,.portal-filters,.ops-filter-row) > * { min-width: 0; max-width: 100%; }
+.admin-module-body :is(.ops-counts,.portal-metrics,.inventory-metrics) {
+  grid-template-columns: repeat(auto-fit,minmax(min(100%,150px),1fr));
+  gap: 10px;
+}
+.admin-module-body :is(.ops-count,.portal-metrics > div) {
+  padding: 12px;
+  min-width: 0;
+  color: var(--admin-ink);
+  background: #eaf0fe;
+  border: 1px solid var(--admin-line);
+  border-radius: 10px;
+}
+.admin-module-body :is(.ops-count,.portal-metrics > div,.inventory-metrics > div):nth-child(4n+2) { background: #edf7ed; }
+.admin-module-body :is(.ops-count,.portal-metrics > div,.inventory-metrics > div):nth-child(4n+3) { background: #fff5e6; }
+.admin-module-body :is(.ops-count,.portal-metrics > div,.inventory-metrics > div):nth-child(4n+4) { background: #fcebf3; }
+.admin-module-body .inventory-metrics .admin-as-of { font-size: 17px; }
+.admin-product-state { display: inline-block; border-radius: 6px; padding: 3px 7px; background: #fff0d8; color: #714607; }
+.admin-product-state[data-published="true"] { background: #e1f3e4; color: #195833; }
+.admin-module-body .inventory-metrics { --inventory-blue: var(--admin-blue); --inventory-line: var(--admin-line); }
+.admin-module-body .portal-tasks { grid-template-columns: repeat(auto-fit,minmax(min(100%,190px),1fr)); }
+.admin-module-body .portal-tasks button { border: 1px solid var(--admin-line); border-radius: 8px; }
+.admin-module-body .portal-tasks .has-work { background: #fff5e6; }
+.admin-module-body :is(.portal-table-wrap,.ops-table-wrap) {
+  overflow-x: auto;
+  max-width: 100%;
+  border: 1px solid var(--admin-line);
+  border-radius: 10px;
+  background: var(--admin-card);
+}
+.admin-module-body :is(.portal-table,.ops-table,.ops-items) :is(th,td) {
+  padding: 9px 10px;
+  border-color: var(--admin-line);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.admin-module-body :is(.portal-table,.ops-table,.ops-items) th { background: #eef3fb; color: var(--admin-ink); }
+.admin-module-body :is(.portal-table,.ops-table,.ops-items) td { font-size: 13px; }
+.admin-module-body :is(.portal-chip,.ops-status) { border-radius: 6px; }
+.admin-module-body :is(.portal-form,.product-editor,fieldset) { min-width: 0; }
+.admin-module-body :is(label,fieldset) { overflow-wrap: anywhere; }
+.admin-module-body :is(input:not([type=checkbox],[type=radio]),select,textarea) {
+  min-width: 0;
+  max-width: 100%;
+  min-height: 40px;
+  border: 1px solid #b8c5db;
+  border-radius: 7px;
+  background: #fff;
+  font-size: 14px;
+}
+.admin-module-body :is(.ops-btn,.portal-form button,.product-editor button,.portal-table button,.ops-refresh) { border-radius: 7px; }
+.admin-module-body :is(.ops-btn-primary,.portal-cta-refresh,button[type=submit]) {
+  background: var(--admin-blue);
+  color: #fff;
+  border-color: var(--admin-blue);
+}
+.admin-module-body button { white-space: normal; }
+.admin-module-body :focus-visible { outline: 2px solid var(--admin-blue); outline-offset: 2px; }
+.product-list-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin: 14px 0; }
+.product-list-filters label:first-child { flex: 1 1 200px; }
+.product-list-filters label { flex: 1 1 130px; }
+.admin-quick-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.admin-module-body .admin-quick-links button { border: 1px solid var(--admin-line); padding: 8px 12px; color: var(--admin-blue); background: #fff; border-radius: 7px; }
+@media (min-width: 1510px) {
+  .admin-module-layout { grid-template-columns: minmax(0,1fr) minmax(245px,0.27fr); }
+}
+@media (max-width: 1023px) {
+  .ops.admin-workspace { grid-template-columns: minmax(0,1fr); }
+  .ops.admin-workspace .portal-sidebar { position: static; height: auto; padding: 12px; gap: 10px; }
+  .ops.admin-workspace .portal-sidebar nav { display: flex; flex-direction: row; flex-wrap: wrap; gap: 4px; }
+  .ops.admin-workspace .portal-sidebar { background: var(--admin-blue); color: #fff; }
+  .ops.admin-workspace .portal-sidebar :is(.portal-brand,.portal-operator button,nav button) { color: #fff; }
+  .ops.admin-workspace .portal-sidebar nav button { padding: 8px; border: 0; border-radius: 6px; }
+  .ops.admin-workspace .portal-sidebar nav button:hover { background: #315dda; }
+  .ops.admin-workspace .portal-sidebar nav button.is-active { background: var(--admin-magenta); }
+  .ops.admin-workspace .portal-operator { flex-direction: row; flex-wrap: wrap; align-items: center; margin-top: 0; }
+  .ops.admin-workspace .portal-workspace { padding: 14px; }
+}
+@media (max-width: 760px) {
+  .admin-module-body .admin-data-scroll { overflow-x: auto; max-width: 100%; }
+  .admin-module-body .admin-data-scroll > table { display: table; width: 100%; min-width: 620px; }
+  .admin-module-body .admin-data-scroll > table thead { display: table-header-group; }
+  .admin-module-body .admin-data-scroll > table tbody { display: table-row-group; }
+  .admin-module-body .admin-data-scroll > table tr { display: table-row; }
+  .admin-module-body .admin-data-scroll > table td { display: table-cell; width: auto; }
+  .admin-module-body .admin-data-scroll > table td::before { content: none; }
+}
+@media (max-width: 480px) {
+  .admin-module-body :is(.ops-counts,.portal-metrics,.inventory-metrics,.portal-grid) { grid-template-columns: minmax(0,1fr); }
+  .admin-workspace .portal-header form > div { flex-wrap: wrap; }
+  .admin-workspace .portal-header form button { min-height: 40px; }
+}

@@ -3,7 +3,11 @@ import {useState} from 'react';
 import {date,money,text,type PortalArea,type PortalRow} from '../lib/adminPortalModel.ts';
 import {usePortalRead,ReadState,MoneySummary,Period,BusinessTable,Info,Chip} from './AdminPortalShared';
 
-export function AdminPortalDashboard({navigate}:{navigate:(area:PortalArea,tab?:string,filter?:string)=>void}){
+export function AdminPortalDashboard({navigate, canWrite = false, canManageProducts = false}:{
+  navigate:(area:PortalArea,tab?:string,filter?:string)=>void;
+  canWrite?: boolean;
+  canManageProducts?: boolean;
+}){
   const [period,setPeriod]=useState<PortalRow>({period:'month'});
   const {data,error,refresh}=usePortalRead('/api/admin/dashboard-summary',period);
   const summary=data?.summary as PortalRow|undefined;
@@ -23,7 +27,22 @@ export function AdminPortalDashboard({navigate}:{navigate:(area:PortalArea,tab?:
     ['Provisionen und Auszahlungen','creatorPayoutAttention','creator','AUSZAHLUNGEN','attention'],
   ];
   return <><div className="portal-section-head"><div><p className="portal-eyebrow">DEIN BETRIEB AUF EINEN BLICK</p><h2>Heute zu erledigen</h2></div><button type="button" className="portal-cta-refresh" onClick={refresh}>Aktualisieren</button></div><ReadState data={data} error={error} retry={refresh}>
-    <div className="portal-tasks">{tasks.map(([name,key,area,tab,filter])=><button type="button" key={key} className={summary?.[key]===0?'is-quiet':typeof summary?.[key]==='number'&&Number(summary[key])>0?'has-work':''} onClick={()=>navigate(area,tab,filter)}><span>{name}</span><strong>{typeof summary?.[key]==='number'?String(summary[key]):'unbekannt'}</strong><span aria-hidden="true">↗</span></button>)}</div>
+    <dl className="inventory-metrics" aria-label="Betriebskennzahlen">
+      {tasks.filter(([, key]) => ['ordersUnshipped','shippingOverdue','inventoryLow','rightsOpen'].includes(key))
+        .filter(([, , area]) => area !== 'rights' || canWrite)
+        .map(([label, key]) => <div key={key}><dt>{label}</dt><dd>{typeof summary?.[key] === 'number' ? String(summary[key]) : '—'}</dd></div>)}
+    </dl>
+    <section className="admin-data-card">
+      <h2>Schnellzugriffe</h2>
+      <div className="admin-quick-links">
+        <button type="button" onClick={()=>navigate('sales')}>Bestellungen</button>
+        <button type="button" onClick={()=>navigate('inventory')}>Lagerbestand</button>
+        <button type="button" onClick={()=>navigate('activity')}>Aktivitätsprotokoll</button>
+        {canManageProducts && <button type="button" onClick={()=>navigate('products')}>Katalog</button>}
+        {canWrite && <button type="button" onClick={()=>navigate('b2b')}>B2B-Verträge</button>}
+      </div>
+    </section>
+    <div className="portal-tasks">{tasks.filter(([, , area]) => canWrite || !['rights', 'finance', 'b2b'].includes(area)).map(([name,key,area,tab,filter])=><button type="button" key={key} className={summary?.[key]===0?'is-quiet':typeof summary?.[key]==='number'&&Number(summary[key])>0?'has-work':''} onClick={()=>navigate(area,tab,filter)}><span>{name}</span><strong>{typeof summary?.[key]==='number'?String(summary[key]):'unbekannt'}</strong><span aria-hidden="true">↗</span></button>)}</div>
     {data?.shippingComplete===false&&<p className="portal-note">Versand-Fälligkeitszahlen sind für diese umfangreiche Warteschlange unbekannt. Die Bestellansicht zeigt den verbindlichen Status je Bestellung.</p>}
     {(data?.warnings as string[]|undefined)?.length?<p role="status" className="portal-warning">Einige Daten sind nicht verfügbar. <button type="button" onClick={refresh}>Erneut laden</button></p>:null}
     <div className="portal-section-head"><h2>Geschäft im Zeitraum <Info>Finanzereignisse werden serverseitig über alle Seiten gelesen. Jahreslieferungen erzeugen keine zweite Einnahme.</Info></h2><Period value={period} onChange={setPeriod}/></div>

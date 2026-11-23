@@ -97,14 +97,17 @@ test('new reads remain server-authorized and no credentials or automatic stock m
  assert.match(source('app/api/admin/portal/route.ts'),/canWrite\(gate\.identity\.role\)/);
  assert.match(source('app/AdminOverview.tsx'),/action: "identity"/);
 });
-test('admin layout remains scoped and provides a compact inventory before mounting the desktop shell',()=>{
- const css=source('app/admin-portal.css');assert.match(css,/@media\(max-width:1100px\)/);assert.match(css,/@media\(max-width:700px\)/);assert.match(css,/\.portal-sidebar nav\{display:grid/);assert.match(css,/content:attr\(data-label\)/);
- const overview = source('app/AdminOverview.tsx');
- const compact = overview.match(/if \(isDesktop === false\) \{([\s\S]*?)\n  \}/);
- assert.ok(compact);
- assert.match(compact[1], /<AdminInventory showHeading/);
- assert.doesNotMatch(compact[1], /<AdminPortalShell|<AdminActivity|<AdminOrders/);
- assert.ok(compact.index < overview.indexOf('<AdminPortalShell'));
+test('admin layout is responsive and remains scoped to the authenticated workspace',()=>{
+ const overview=source('app/AdminOverview.tsx');
+ const css=source('app/admin-workspace.css');
+ const layout=source('app/AdminModuleContent.tsx');
+ assert.match(css, /\.ops\.admin-workspace/);
+ assert.match(css, /@media \(max-width: 1023px\)/);
+ assert.ok(overview.indexOf('if (!signedIn)') < overview.indexOf('<AdminPortalShell'));
+ assert.match(layout, /area === "inventory"/);
+ for (const area of PRIMARY_AREAS.map(([key])=>key).filter(key=>key!=='inventory')) {
+  assert.match(layout,new RegExp('\\n  '+area+': \\{'));
+ }
 });
 
 function renderPortal(file,props,readData,readError='',selectedFinance=null){
@@ -125,23 +128,18 @@ test('dashboard renders backend action counts and partial source failures stay u
  const error=renderPortal('app/AdminPortalDashboard.tsx',{navigate:()=>{}},null,'Ausfall');assert.match(error,/role="alert"/);assert.doesNotMatch(error,/0,00|Keine Einträge/);
 });
 
-test('unsupported and unresolved viewports mount no operational UI and make no identity request',()=>{
+test('before the identity response, no operational admin UI is mounted',()=>{
  const js=ts.transpileModule(source('app/AdminOverview.tsx'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
- for(const viewport of [false,null]){
-  const compiled={exports:{}};let hook=0,requests=0;const effects=[];
-  vm.runInNewContext(js,{module:compiled,exports:compiled.exports,require:name=>{
-   if(name==='react')return {...React,useState:value=>React.useState(hook++===0?viewport:value),useEffect:fn=>effects.push(fn)};
-   if(name==='react/jsx-runtime')return require(name);
-   if(name.includes('adminViewport'))return require('../lib/adminViewport.ts');
-   if(name.endsWith('.css'))return {};
-   return new Proxy({},{get:()=>()=>{throw Error('Operational component must not mount');}});
-  },fetch:()=>{requests++;throw Error('No identity request below desktop width');},console,Date,Intl});
-  const html=renderToStaticMarkup(React.createElement(compiled.exports.AdminOverview));
-  for(const effect of effects)if(effect.toString().includes('/api/admin/portal'))effect();
-  assert.equal(requests,0);assert.doesNotMatch(html,/portal-sidebar|portal-workspace|<form|<table/);
-  if(viewport===false)assert.match(html,/Admin nur am Desktop verfügbar/);
-  else assert.match(html,/aria-busy="true"/);
- }
+ const compiled={exports:{}};
+ vm.runInNewContext(js,{module:compiled,exports:compiled.exports,require:name=>{
+  if(name==='react')return React;
+  if(name==='react/jsx-runtime')return require(name);
+  if(name.endsWith('.css'))return {};
+  return new Proxy({},{get:()=>()=>{throw Error('Operational component must not mount');}});
+ },console,Date,Intl});
+ const html=renderToStaticMarkup(React.createElement(compiled.exports.AdminOverview));
+ assert.match(html,/Wird geladen/);
+ assert.doesNotMatch(html,/portal-sidebar|portal-workspace|<form|<table/);
 });
 test('finance renders annual prepayment, B2B and each refund as their own authoritative rows',()=>{
  const events=[{id:'prepaid',kind:'annual_prepayment',gross_cents:13000,direction:'inflow',annual_plan_id:'plan',channel:'b2c'},{id:'b2b',kind:'b2b_settlement',gross_cents:5000,direction:'inflow',b2b_agreement_id:'agreement',channel:'b2b'},{id:'refund',kind:'refund',gross_cents:1500,direction:'outflow',channel:'b2c'}];

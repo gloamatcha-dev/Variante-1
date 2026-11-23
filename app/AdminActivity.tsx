@@ -157,9 +157,13 @@ export function AdminActivity({ onSessionLost }: { onSessionLost: () => void }) 
 
   return (
     <>
+      <dl className="inventory-metrics" aria-label="Protokollübersicht">
+        <div><dt>Einträge in der Auswahl</dt><dd>{data.total}</dd></div>
+        <div><dt>Stand der Anzeige</dt><dd className="admin-as-of">{fmtWhen(data.fetchedAt)}</dd></div>
+      </dl>
+      <div className="ops-filter-row admin-data-card" role="group" aria-label="Aktivität filtern">
       <label>Modul<select value={moduleFilter} onChange={e=>{setModuleFilter(e.target.value);setPage(1);setFilter("all");}}><option value="all">Alle Module</option>{[["orders","Verkauf"],["inventory","Inventar"],["b2b","B2B"],["finance","Finanzen"],["documents","Dokumente"],["fulfillment","Versand"],["customer_rights","Verbraucherrechte"],["creator","Creator"]].map(([key,name])=><option key={key} value={key}>{name}</option>)}</select></label>
-      {loadError&&<p role="alert" className="portal-error">{loadError} Die angezeigten Daten stammen vom vorherigen erfolgreichen Laden.</p>}
-      <div className="ops-filter-row"><label>Vorgang suchen<input type="search" value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}}/></label><label>Aktion<input value={action} onChange={e=>{setAction(e.target.value);setPage(1);}} placeholder="z. B. expense_recorded"/></label><label>Von<input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)}/></label><label>Bis<input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)}/></label>
+      <label>Vorgang suchen<input type="search" value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}}/></label><label>Aktion<input value={action} onChange={e=>{setAction(e.target.value);setPage(1);}} placeholder="z. B. expense_recorded"/></label><label>Von<input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)}/></label><label>Bis<input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)}/></label>
         <div className="portal-field">
 <label htmlFor="act-filter">Bereich</label>
         <select
@@ -178,6 +182,7 @@ export function AdminActivity({ onSessionLost }: { onSessionLost: () => void }) 
         </button>
       </div>
 
+      {loadError&&<p role="alert" className="portal-error">{loadError} Die angezeigten Daten stammen vom vorherigen erfolgreichen Laden.</p>}
       <section className="ops-panel" aria-label="Aktivität">
         {data.rows.length === 0 ? (
           // HONEST ABOUT WHY IT IS EMPTY. The log starts when it was
@@ -188,6 +193,7 @@ export function AdminActivity({ onSessionLost }: { onSessionLost: () => void }) 
             dieser Funktion – frühere Vorgänge wurden nicht protokolliert.
           </p>
         ) : (
+          <div className="ops-table-wrap" role="region" aria-label="Protokolleinträge" tabIndex={0}>
           <table className="ops-items">
             <thead>
               <tr>
@@ -195,7 +201,7 @@ export function AdminActivity({ onSessionLost }: { onSessionLost: () => void }) 
                 <th scope="col">Wer</th>
                 <th scope="col">Bereich</th>
                 <th scope="col">Vorgang</th>
-                <th scope="col">Bezug</th>
+                <th scope="col">Aktion</th>
               </tr>
             </thead>
             <tbody>
@@ -215,7 +221,7 @@ export function AdminActivity({ onSessionLost }: { onSessionLost: () => void }) 
                       <span className="ops-act-summary">{row.summary}</span>
                       {facts.length > 0 && <span className="ops-act-facts">{facts.join(" · ")}</span>}
                     </td>
-                    <td data-label="Bezug">
+                    <td data-label="Aktion">
                       {AUDIT_ACTION_LABEL[row.action as keyof typeof AUDIT_ACTION_LABEL] ?? row.action}
                     </td>
                   </tr>
@@ -223,6 +229,7 @@ export function AdminActivity({ onSessionLost }: { onSessionLost: () => void }) 
               })}
             </tbody>
           </table>
+          </div>
         )}
       </section>
 

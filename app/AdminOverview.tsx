@@ -19,7 +19,6 @@ import { AdminInventory } from "./AdminInventory";
 import { WAITLIST_FILTERS, type WaitlistFilter } from "../lib/adminWaitlistQuery";
 import { AdminActivity } from "./AdminActivity";
 
-import { ADMIN_DESKTOP_MEDIA_QUERY } from "../lib/adminViewport.ts";
 
 // The SAME predicate the subscription route gates on, from the same
 // zero-import leaf. The screen must not decide for itself who may look:
@@ -127,27 +126,7 @@ function consentShort(version: string): string {
   return version.slice(-6);
 }
 
-function useIsAdminDesktop(): boolean | null {
-  const [isDesktop, setIsDesktop] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    // Guarded because this file also renders on the server, where
-    // matchMedia does not exist.
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-    const mq = window.matchMedia(ADMIN_DESKTOP_MEDIA_QUERY);
-    const apply = () => setIsDesktop(mq.matches);
-    apply();
-    // Resizing across the boundary switches the screen immediately -
-    // no refresh, in either direction.
-    mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
-  }, []);
-
-  return isDesktop;
-}
-
 export function AdminOverview() {
-  const isDesktop = useIsAdminDesktop();
   // WHICH SECTION IS OPEN. The waitlist screen this file has always
   // been is now one of several, and it is unchanged - it simply renders
   // under a tab instead of on its own.
@@ -158,7 +137,6 @@ export function AdminOverview() {
   // where the next unfinished section would be named, and the rule it
   // encodes is unchanged - a tab that opens nothing is worse than a tab
   // that says it is not here yet.
-  // Compact viewports use the inventory-only surface below.
 
 
   const [view, setView] = useState<"overview" | "orders" | "subscriptions" | "annual" | "rights" | "inventory" | "costs" | "activity" | "waitlist" | "b2b" | "finance" | "creator" | "products">("overview");
@@ -225,7 +203,6 @@ export function AdminOverview() {
   // visitor who navigates away mid-request does not have state written
   // into an unmounted component.
   useEffect(() => {
-    if (isDesktop === null) return;
     let cancelled = false;
     (async () => {
       try {
@@ -253,7 +230,7 @@ export function AdminOverview() {
       }
     })();
     return () => { cancelled = true; };
-  }, [isDesktop]);
+  }, []);
 
   const submitLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -304,8 +281,6 @@ export function AdminOverview() {
     void load(merged);
   };
 
-  if (isDesktop === null) return <main className="ops" aria-busy="true" />;
-
   if (signedIn === null) {
     return <main className="ops"><p className="ops-loading">Wird geladen…</p></main>;
   }
@@ -337,18 +312,6 @@ export function AdminOverview() {
     return <main className="ops portal portal-login"><div role="alert"><p>{loadError || "Wird geladen…"}</p><button type="button" onClick={()=>window.location.reload()}>Erneut versuchen</button></div></main>;
   }
 
-  if (isDesktop === false) {
-    return (
-      <main className="ops inventory-compact">
-        <div className="inventory-compact-bar">
-          <strong>GLOA</strong>
-          <button type="button" className="ops-btn" onClick={() => void signOut()}>Abmelden</button>
-        </div>
-        <AdminInventory showHeading isOwner={data.identity?.role === "owner"} onSessionLost={() => setSignedIn(false)} />
-      </main>
-    );
-  }
-
   const pages = Math.max(1, Math.ceil((data.total??0) / (data.pageSize??25)));
   const blockers: string[] = [];
   if (data.launch && !data.launch.migrationsApplied) blockers.push("Migration 045/046 nicht angewendet");
@@ -375,7 +338,7 @@ export function AdminOverview() {
   const maySeeSubscriptions = canWrite(parseAdminRole(data.identity?.role));
 
   return (
-    <main className="ops portal">
+    <main className="ops portal admin-workspace">
       <AdminPortalShell area={view==='orders'||view==='subscriptions'||view==='annual'?'sales':view==='costs'?'finance':view==='waitlist'?'overview':view} identity={(data.identity??{email:data.signedInAs}) as unknown as PortalRow} navigate={navigate} signOut={()=>void signOut()}>
       {loadError&&view!=='waitlist'&&<p role="alert" className="portal-error">{loadError}</p>}
       {(view==='orders'||view==='subscriptions'||view==='annual')&&<><Tabs items={maySeeSubscriptions?SALES_TABS:['BESTELLUNGEN']} value={salesTab} onChange={tab=>navigate('sales',tab)}/><p className="portal-note">Abos laufen alle 4 Wochen. Jahrespläne sind vorausbezahlte Verträge mit eigenem Lieferplan.</p></>}
@@ -436,7 +399,7 @@ export function AdminOverview() {
           for. Closing the tab unmounts it; nothing keeps polling. */}
       {view === "activity" && <AdminActivity onSessionLost={() => setSignedIn(false)} />}
 
-      {view === "overview" && <AdminPortalDashboard navigate={navigate}/>}
+      {view === "overview" && <AdminPortalDashboard navigate={navigate} canWrite={maySeeSubscriptions} canManageProducts={data.identity?.canManageProducts === true}/>}
       <div className="portal-legacy"><button type="button" onClick={()=>{if(view==='waitlist')setView('overview');else void load({filter:'all',search:'',page:1}).then(ok=>{if(ok)setView('waitlist');});}}>{view==='waitlist'?'Zur Operations-Übersicht':'Legacy-Tool: Launch List'}</button></div>
 
       {view === "waitlist" && <>

@@ -10,6 +10,7 @@ import { optimizeProductImage, transferProductImage } from '../lib/productImageB
 type Inventory = { id: string; name: string; unit: string; current_quantity: number; is_active: boolean };
 type Product = Omit<ProductDraft, 'variants'> & { id: string; product_variants: ProductVariantDraft[];
   stripe_sync_revision: number; stripe_sync_status: string; stripe_sync_error: string | null; is_active: boolean; archived_at: string | null; updated_at: string };
+const PRODUCT_COLUMNS = ['Produkt', 'Typ', 'Varianten / Preis', 'Status', 'Stripe', 'Verfügbarkeit', 'Inventar', 'Aktualisiert', 'Aktionen'];
 const blank = (): EditorProduct => ({ name: '', slug: '', product_type: 'ACCESSORY', short_description: '', description: '', primary_image_path: '', sort_order: 0, variants: [newEditorVariant()] });
 const state = (p: Product) => p.archived_at ? 'Archiviert' : p.is_active ? 'Veröffentlicht' : 'Entwurf';
 const euros = (c: number) => (c / 100).toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
@@ -25,6 +26,10 @@ export function AdminProducts() {
   const [unresolvedProduct, setUnresolvedProduct] = useState<string | null>(null);
   const [imageStatus, setImageStatus] = useState(''), [imageProgress, setImageProgress] = useState<number | null>(null);
   const [imagePreview, setImagePreview] = useState('');
+  const [catalogSearch, setCatalogSearch] = useState('');
+  const [catalogStatus, setCatalogStatus] = useState('all');
+  const [catalogType, setCatalogType] = useState('all');
+  const [catalogStripe, setCatalogStripe] = useState('all');
   useEffect(() => () => { if (imagePreview) URL.revokeObjectURL(imagePreview); }, [imagePreview]);
   async function reload() {
     const data = await portalRequest('/api/admin/products', { action: 'list' });
@@ -144,7 +149,18 @@ export function AdminProducts() {
     catch (e) { setError(e instanceof Error ? e.message : 'Bitte die Produktfelder prüfen.'); }
   }
   const d = editor?.document;
-  return <section className="admin-products"><div className="portal-section-head"><h2>PRODUKTE</h2>
+  const search = catalogSearch.trim().toLocaleLowerCase('de-DE');
+  const publishedCount = products.filter(p => !p.archived_at && p.is_active && p.id !== unresolvedProduct).length;
+  const draftCount = products.filter(p => !p.archived_at && !p.is_active && p.id !== unresolvedProduct).length;
+  const linkedCount = products.filter(p => !p.archived_at && p.product_variants.some(v => v.inventory_item_id)).length;
+  const visible = products.filter(p =>
+    (catalogStatus === 'all' || (p.id !== unresolvedProduct && state(p) === catalogStatus)) &&
+    (catalogType === 'all' || p.product_type === catalogType) &&
+    (catalogStripe === 'all' || p.stripe_sync_status === catalogStripe) &&
+    (!search || [p.name, p.slug, ...p.product_variants.map(v => v.sku)]
+      .some(value => value.toLocaleLowerCase('de-DE').includes(search)))
+  );
+  return <section className="admin-products"><div className="portal-section-head"><h2>Katalog</h2>
     {writable && <button type="button" disabled={busy} onClick={() => { setSubmitted(false); setImageError(''); setError(''); setEditor({ id: crypto.randomUUID(), revision: 0, document: blank(), persisted: [] }); }}>NEUES PRODUKT</button>}
     <button type="button" disabled={busy} onClick={() => void (unresolvedProduct ? reconcilePublication(unresolvedProduct) : reload()).catch(e => setError(e.message))}>Neu laden</button></div>
     <p>Physische Standardversand-Produkte, einmaliger Kauf. Bestand wird ausschließlich manuell gebucht. Speichern setzt das Produkt auf Entwurf.</p>
@@ -152,7 +168,7 @@ export function AdminProducts() {
     {publicationStatus && <p role="status" aria-live="polite">{publicationStatus}</p>}
     {!loaded && !error && <p role="status">Katalog wird geladen …</p>}
     {editor && d && <form onSubmit={e => { e.preventDefault(); save(); }} onInvalid={() => setSubmitted(true)} className="product-editor">
-      <h3>Produkt bearbeiten</h3>
+      <h3>{editor.persisted.length ? 'Produkt bearbeiten' : 'Produkt erfassen'}</h3>
       {editor.wasPublished && <p role="note" className="product-publish-warning">Dieses Produkt ist veröffentlicht. Speichern setzt es sofort auf Entwurf und sperrt neue Käufe. Anschließend bitte erneut prüfen und veröffentlichen.</p>}
       <div className="product-field-help"><label>Name<input required maxLength={120} value={d.name} onChange={e => field('name', e.target.value)} /></label><details><summary aria-label="Hilfe: Name">ⓘ</summary><p>Pflichtfeld. Produktname im Shop, maximal 120 Zeichen, z. B. GLOA Bambusbesen.</p></details></div>
       <div className="product-field-help"><label>Slug<input required maxLength={64} pattern="[a-z0-9]+(-[a-z0-9]+)*" value={d.slug} onChange={e => field('slug', e.target.value)} /></label><details><summary aria-label="Hilfe: Slug">ⓘ</summary><p>Pflichtfeld. Eindeutiger Teil der Produktadresse, z. B. bambusbesen. Nur Kleinbuchstaben, Zahlen und Bindestriche, maximal 64 Zeichen. Änderungen verändern die Produktadresse.</p></details></div>
@@ -187,14 +203,41 @@ export function AdminProducts() {
       <button type="button" disabled={busy} onClick={() => setEditor(null)}>Schließen</button>
     </form>}
     <details className="product-workflow-help"><summary>ⓘ Speichern, Stripe-Abgleich und Veröffentlichung</summary><p>Speichern setzt auch veröffentlichte Produkte auf Entwurf. Danach mit PRÜFEN & VERÖFFENTLICHEN den Abgleich, die Prüfung und die Veröffentlichung starten. Der Abgleich legt ein Stripe-Produkt und Preise für aktive Varianten an oder verwendet vorhandene Zuordnungen. Ein erfolgreicher Abgleich allein veröffentlicht nichts. Preisänderungen erhalten neue Stripe-Preise; bisherige Preise bleiben bestehen. Bei Fehlern die Stripe-Spalte prüfen und den Abgleich erneut versuchen.</p></details>
-    <div className="portal-table-wrap"><table className="portal-table"><thead><tr>{['Produkt', 'Typ', 'Varianten / Preis', 'Status', 'Stripe', 'Verfügbarkeit', 'Inventar', 'Aktualisiert', 'Aktionen'].map(h => <th key={h}>{h}</th>)}</tr></thead>
-      <tbody>{products.map(p => { const amounts = p.product_variants.map(v => v.price_gross_cents).filter(n => typeof n === 'number'); return <tr key={p.id}>
-        <td>{p.name}<br /><small>{p.slug}</small></td><td>{p.product_type}</td><td>{p.product_variants.length} · {amounts.length ? `${euros(Math.min(...amounts))} – ${euros(Math.max(...amounts))}` : 'Kein Preis'}</td>
-        <td>{unresolvedProduct === p.id ? 'Status unklar — bitte aktualisieren' : state(p)}</td><td>{({ pending: 'Abgleich ausstehend', synced: 'Stripe-Abgleich erfolgreich', error: 'Abgleich fehlgeschlagen' } as Record<string, string>)[p.stripe_sync_status] ?? p.stripe_sync_status}{p.stripe_sync_revision === 0 && ' · Legacy-Übergang'}{p.stripe_sync_error && <p>{p.stripe_sync_error}</p>}</td>
-        <td>{p.product_variants.some(v => v.is_active && v.availability === 'available') ? 'Verfügbar' : 'AUSVERKAUFT'}</td>
-        <td>{p.product_variants.filter(v => v.inventory_item_id).length} verknüpft</td><td>{new Date(p.updated_at).toLocaleString('de-DE')}</td>
-        <td>{!p.archived_at && <><button type="button" disabled={busy || !writable} onClick={() => edit(p)}>Bearbeiten</button>
+    {loaded && <>
+      <dl className="inventory-metrics" aria-label="Katalogkennzahlen">
+        <div><dt>Produkte im Katalog</dt><dd>{products.length}</dd></div>
+        <div><dt>Veröffentlicht</dt><dd>{publishedCount}</dd></div>
+        <div><dt>Entwürfe</dt><dd>{draftCount}</dd></div>
+        <div><dt>Mit Lagerverknüpfung</dt><dd>{linkedCount}</dd></div>
+      </dl>
+      <div className="product-list-filters admin-data-card" role="group" aria-label="Produkte filtern">
+        <label>Suche<input type="search" value={catalogSearch} onChange={e => setCatalogSearch(e.target.value)} placeholder="Produkt, Slug oder SKU" /></label>
+        <label>Typ<select value={catalogType} onChange={e => setCatalogType(e.target.value)}>
+          <option value="all">Alle Typen</option>{PRODUCT_TYPES.map(type => <option key={type}>{type}</option>)}
+        </select></label>
+        <label>Status<select value={catalogStatus} onChange={e => setCatalogStatus(e.target.value)}>
+          <option value="all">Alle Status</option>{['Veröffentlicht', 'Entwurf', 'Archiviert'].map(status => <option key={status}>{status}</option>)}
+        </select></label>
+        <label>Stripe-Abgleich<select value={catalogStripe} onChange={e => setCatalogStripe(e.target.value)}>
+          <option value="all">Alle Abgleichstände</option>
+          <option value="synced">Erfolgreich</option>
+          <option value="pending">Ausstehend</option>
+          <option value="error">Fehlgeschlagen</option>
+        </select></label>
+      </div>
+    </>}
+    {loaded && !visible.length && <p className="portal-state" role="status">{products.length ? 'Keine Produkte passen zu den Filtern.' : 'Der Katalog enthält keine Produkte.'}</p>}
+    {visible.length > 0 && <div className="portal-table-wrap"><table className="portal-table"><thead><tr>{PRODUCT_COLUMNS.map(h => <th key={h} scope="col">{h}</th>)}</tr></thead>
+      <tbody>{visible.map(p => { const amounts = p.product_variants.map(v => v.price_gross_cents).filter(n => typeof n === 'number'); return <tr key={p.id}>
+        <td data-label={PRODUCT_COLUMNS[0]}>{p.name}<br /><small>{p.slug}</small></td><td data-label={PRODUCT_COLUMNS[1]}>{p.product_type}</td><td data-label={PRODUCT_COLUMNS[2]}>{p.product_variants.length} · {amounts.length ? `${euros(Math.min(...amounts))} – ${euros(Math.max(...amounts))}` : 'Kein Preis'}</td>
+        <td data-label={PRODUCT_COLUMNS[3]}>
+          {unresolvedProduct === p.id ? 'Status unklar — bitte aktualisieren' :
+            <span className="admin-product-state" data-published={!p.archived_at && p.is_active}>{state(p)}</span>}
+        </td><td data-label={PRODUCT_COLUMNS[4]}>{({ pending: 'Abgleich ausstehend', synced: 'Stripe-Abgleich erfolgreich', error: 'Abgleich fehlgeschlagen' } as Record<string, string>)[p.stripe_sync_status] ?? p.stripe_sync_status}{p.stripe_sync_revision === 0 && ' · Legacy-Übergang'}{p.stripe_sync_error && <p>{p.stripe_sync_error}</p>}</td>
+        <td data-label={PRODUCT_COLUMNS[5]}>{p.product_variants.some(v => v.is_active && v.availability === 'available') ? 'Verfügbar' : 'AUSVERKAUFT'}</td>
+        <td data-label={PRODUCT_COLUMNS[6]}>{p.product_variants.filter(v => v.inventory_item_id).length} verknüpft</td><td data-label={PRODUCT_COLUMNS[7]}>{new Date(p.updated_at).toLocaleString('de-DE')}</td>
+        <td data-label={PRODUCT_COLUMNS[8]}>{!p.archived_at && <><button type="button" disabled={busy || !writable} onClick={() => edit(p)}>Bearbeiten</button>
           {writable && !p.is_active && p.slug !== 'metal-case' && <button type="button" disabled={busy || editor !== null || unresolvedProduct === p.id} onClick={() => void publish(p)}>PRÜFEN &amp; VERÖFFENTLICHEN</button>}
-          {writable && <button type="button" disabled={busy} onClick={() => void act('archive', p)}>ARCHIVIEREN</button>}</>}</td></tr>; })}</tbody></table></div>
+          {writable && <button type="button" disabled={busy} onClick={() => void act('archive', p)}>ARCHIVIEREN</button>}</>}</td></tr>; })}</tbody></table></div>}
   </section>;
 }
