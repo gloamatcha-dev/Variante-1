@@ -8,7 +8,7 @@ export const BRAND = {
   address: null as string | null,
 };
 
-export const SHOP_STATUS = "prelaunch" as const; // "prelaunch" | "live"
+export const SHOP_STATUS = "live" as const; // "prelaunch" | "live"
 
 // Keep the public storefront visible while the server pauses new purchases.
 const PUBLIC_SHOP_PRESENTATION: string = "live";
