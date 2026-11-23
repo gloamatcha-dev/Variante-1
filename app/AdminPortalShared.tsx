@@ -12,7 +12,10 @@ export async function portalRequest(endpoint:string,body:PortalRow,signal?:Abort
   const data:unknown=await response.json().catch(()=>null);
   if(!data||typeof data!=='object'||Array.isArray(data))throw new Error('Die Daten konnten nicht geladen werden.');
   const result=data as PortalRow;
-  if(!response.ok || result.ok===false)throw new Error(typeof result.error==='string'?result.error:'Die Daten konnten nicht geladen werden.');
+  if(!response.ok || result.ok===false)throw Object.assign(
+    new Error(typeof result.error==='string'?result.error:'Die Daten konnten nicht geladen werden.'),
+    {status:response.status}
+  );
   return result;
 }
 export function usePortalRead(endpoint:string,body:PortalRow){

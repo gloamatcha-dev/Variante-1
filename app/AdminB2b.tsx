@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import {BusinessContext} from "./AdminPortalShared";
+import {AdminB2bOfferDrafts} from "./AdminB2bOfferDrafts";
 import {
   B2B_GROUPS,
   B2B_SORT_COLUMN,
@@ -181,6 +182,7 @@ export function AdminB2b({ onSessionLost, initialSearch="" }: { onSessionLost: (
 
   return (
     <section className="ops-panel" aria-label="B2B">
+      <AdminB2bOfferDrafts />
       {data && <dl className="inventory-metrics" aria-label="Vertragsübersicht">
         <div><dt>Verträge in der Auswahl</dt><dd>{data.total ?? "—"}</dd></div>
         <div><dt>Verträge auf dieser Seite</dt><dd>{data.agreements.length}</dd></div>

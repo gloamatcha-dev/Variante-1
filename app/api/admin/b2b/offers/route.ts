@@ -1,0 +1,42 @@
+import { openAdminAction } from '../../../../../lib/adminActionRoute.ts';
+import { parseB2bOfferDraft } from '../../../../../lib/b2bOfferDraft.ts';
+import { getSupabaseAdmin } from '../../../../../lib/supabaseAdmin';
+
+const columns = 'id,customer_id,inquiry_reference,destination_country,pack_count,net_unit_cents,valid_days,created_at';
+const json = (body: unknown, status = 200) =>
+  Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
+
+export async function POST(request: Request) {
+  const gate = await openAdminAction(request);
+  if (!gate.ok) return gate.response;
+  if (request.headers.get('origin') !== new URL(request.url).origin) {
+    return json({ error: 'Ungültiger Anfrageursprung.' }, 403);
+  }
+  const admin = getSupabaseAdmin();
+  if (!admin) return json({ error: 'Angebotsentwürfe sind nicht verfügbar.' }, 503);
+
+  const body = gate.context.body as { action?: unknown } | null;
+  if (body?.action === 'list') {
+    const { data, error } = await admin.from('b2b_offer_drafts').select(columns)
+      .order('created_at', { ascending: false }).order('id').limit(30);
+    return error ? json({ error: 'Entwürfe konnten nicht geladen werden.' }, 503) : json({ drafts: data });
+  }
+  const draft = body?.action === 'create' && parseB2bOfferDraft(body);
+  if (!draft) return json({ error: 'Ungültiger Angebotsentwurf.' }, 400);
+
+  const actor = gate.context.identity.userId;
+  const inserted = await admin.from('b2b_offer_drafts').insert({ ...draft, created_by: actor })
+    .select(columns).single();
+  if (!inserted.error) return json({ draft: inserted.data }, 201);
+  if (inserted.error.code === '23503') return json({ error: 'Geschäftskunde nicht gefunden.' }, 409);
+  if (inserted.error.code !== '23505') return json({ error: 'Speicherung nicht bestätigt.' }, 503);
+
+  const existing = await admin.from('b2b_offer_drafts').select(columns).eq('id', draft.id)
+    .eq('created_by', actor).maybeSingle();
+  if (existing.error) return json({ error: 'Speicherung nicht bestätigt.' }, 503);
+  const stored = existing.data as Record<string, unknown> | null;
+  if (stored && Object.entries(draft).every(([key, value]) => stored[key] === value)) {
+    return json({ draft: stored });
+  }
+  return json({ error: 'Entwurfskennung gehört zu einer anderen Anfrage.' }, 409);
+}
