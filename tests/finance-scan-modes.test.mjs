@@ -4,6 +4,7 @@ import {financeScanBudget} from '../lib/financeScanBudget.ts';
 import {runAutomaticFinanceSync} from '../lib/automaticFinanceSync.ts';
 import {withFinanceHeartbeat} from '../lib/financeHeartbeat.server.ts';
 import {globalFinanceSyncStatus} from '../lib/globalFinanceSync.ts';
+import {readOperationalFinanceSyncStatus} from '../lib/adminFinanceSyncStatus.ts';
 import {setup} from './helpers/financeScanModeFixture.mjs';
 import {normalizeFinanceEvidence} from '../lib/financeReconciliationEvidence.ts';
 import {readStripeReconciliation} from '../lib/stripeReconciliationRead.ts';
@@ -82,16 +83,64 @@ test('late-discovery query preserves inclusive lookback and exclusive frozen cut
  const h=setup();let bounds;const get=async(path,p)=>{if(path==='/v1/balance_transactions'){bounds=p;return {data:[{id:'txn_same'},{id:'txn_same'}],has_more:false};}return h.read(path,p);};
  await assert.rejects(incrementalFinanceDiscovery(async()=>[])(get,100,200,{accountId:'acct_test',paymentIntentId:'pi_known',amountCents:1070}),/duplicate/);assert.equal(bounds['created[gte]'],'100');assert.equal(bounds['created[lt]'],'200');
 });
-function modesHarness(){
+function modesHarness({workerState='attention',jobs=[],scanTo='2026-11-22T12:30:00Z',account='acct_test',unavailable=false}={}){
  const ts=createRequire(import.meta.url)('typescript'),calls=[],e={FINANCE_RECONCILIATION_ENABLED:'true',FINANCE_SCAN_MODES_ENABLED:'true',STRIPE_RECONCILIATION_READ_KEY:'rk_live_synthetic'};
- const admin={from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:{account_id:'acct_test',known_payment_intent:'pi_known',known_amount_cents:1070}})})})}),rpc:async(name,args)=>{if(name==='finance_first_scan_isolated_v3')return {data:false};calls.push({name,args});return {data:name==='finance_sync_read_reserve_v2'?{id:'reservation',granted:5}:name.includes('claim')?{status:'claimed',id:'job',lease_token:'token'}:{}};}};
- const m={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync('lib/financeScanModes.server.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{module:m,exports:m.exports,process:{env:e},Date,fetch:()=>{throw Error('real network forbidden');},require:name=>{
+ const scope='2026-11-12T23:00:00Z';
+ const rows=[
+  {scan_from:'2026-08-31T22:00:00Z',state:'retry',attempts:3,last_error:'snapshot guard'},
+  {scan_from:scope,scan_to:scanTo,completed_at:scanTo,state:'completed',attempts:1,verified:true},
+  ...jobs.map(job=>({...job,scan_from:scope})),
+ ];
+ const admin={
+  from:table=>({select:columns=>({eq:()=>({
+   maybeSingle:async()=>({data:columns==='account_id,scan_from'?{account_id:account,scan_from:scope}:
+    {account_id:'acct_test',known_payment_intent:'pi_known',known_amount_cents:1070}}),
+   order:()=>({range:async()=>{assert.equal(table,'finance_sync_jobs');return unavailable?{error:{}}:{data:rows,count:rows.length};}}),
+  })})}),
+  rpc:async(name,args)=>{
+   if(name==='finance_first_scan_isolated_v3')return {data:false};
+   calls.push({name,args});
+   if(name==='finance_sync_cycle_reserve_v1')return {data:{state:'admitted',id:'reservation',granted:5}};
+   if(name.includes('claim'))return {data:{status:'claimed',id:'job',lease_token:'token'}};
+   if(name==='finance_sync_global_status_v1')return {data:{
+    configured:true,state:'retry',monitoring_version:1,missing_payments:0,missing_refunds:0,
+    missing_fees:0,unresolved:0,persistent_failures:1,unbridged_events:0,
+   }};
+   if(name==='finance_sync_modes_status_v2')return {data:{version:2}};
+   return {data:{}};
+  },
+ };
+ const m={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync('lib/financeScanModes.server.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{module:m,exports:m.exports,process:{env:e},Date,performance,fetch:()=>{throw Error('real network forbidden');},require:name=>{
   if(name.includes('financeFirstScanScope'))return firstScanScope;
   if(name.includes('supabaseAdmin'))return {getSupabaseAdmin:()=>admin};if(name.includes('stripeReconciliationClient'))return {createStripeReconciliationRead:()=>async()=>({})};
-  if(name.includes('automaticFinanceSync'))return {runAutomaticFinanceSync:async d=>{await d.rpc('finance_sync_claim_v1',{p_account:'acct_test'});await d.read('/v1/balance_transactions',{});if(d.verification)await d.rpc('finance_sync_verify_receipt_v2',{p_job:'job'});return {state:'attention',caughtUp:true};}};
-  if(name.includes('financeScanBudget'))return {financeScanBudget};if(name.includes('financeIncrementalDiscovery'))return {incrementalFinanceDiscovery};if(name.includes('financeHeartbeat'))return {withFinanceHeartbeat:async fn=>fn(async()=>{calls.push({name:'heartbeat_start'});})};if(name.includes('financeSyncAlerts'))return {deliverFinanceSyncAlerts:async()=>'none_pending'};if(name.includes('globalFinanceSync'))return {globalFinanceSyncStatus};throw Error(name);
+  if(name.includes('automaticFinanceSync'))return {runAutomaticFinanceSync:async d=>{await d.rpc('finance_sync_claim_v1',{p_account:'acct_test'});await d.read('/v1/balance_transactions',{});if(d.verification)await d.rpc('finance_sync_verify_receipt_v2',{p_job:'job'});return {state:workerState,caughtUp:true};}};
+  if(name.includes('financeScanBudget'))return {financeScanBudget};if(name.includes('financeIncrementalDiscovery'))return {incrementalFinanceDiscovery};if(name.includes('financeHeartbeat'))return {withFinanceHeartbeat:async fn=>fn(async()=>{calls.push({name:'heartbeat_start'});})};if(name.includes('financeSyncAlerts'))return {deliverFinanceSyncAlerts:async()=>'none_pending'};if(name.includes('adminFinanceSyncStatus'))return {readOperationalFinanceSyncStatus};throw Error(name);
  }});return {run:m.exports.runFinanceScanMode,calls,e};
 }
+test('incremental monitoring verifies Berlin coverage despite a blocked historical retry',async t=>{
+ t.mock.method(Date,'now',()=>Date.parse('2026-11-22T20:25:00Z'));
+ const h=modesHarness({workerState:'verified'});
+ assert.equal((await h.run('incremental')).reconciliationVerified,true);
+});
+test('incremental monitoring withholds success for failures, stale coverage or unconfirmed scope',async t=>{
+ t.mock.method(Date,'now',()=>Date.parse('2026-11-22T20:25:00Z'));
+ for(const [reason, options] of Object.entries({
+  'current retry':{jobs:[{state:'retry'}]},
+  'stale coverage':{scanTo:'2026-11-22T11:59:59Z'},
+  'changed account':{account:'acct_other'},
+  'unavailable coverage':{unavailable:true},
+ })){
+  const h=modesHarness({workerState:'verified',...options});
+  assert.equal((await h.run('incremental')).reconciliationVerified,false,reason);
+ }
+ const failure=modesHarness();
+ assert.equal((await failure.run('incremental')).reconciliationVerified,false);
+ assert.ok(failure.calls.some(x=>x.name==='finance_sync_modes_alert_v2'));
+ assert.ok(!failure.calls.some(x=>x.name==='finance_sync_global_status_v1'));
+ const daily=modesHarness({workerState:'verified',unavailable:true});
+ assert.equal((await daily.run('daily')).reconciliationVerified,true);
+ assert.ok(!daily.calls.some(x=>x.name==='finance_sync_global_status_v1'));
+});
 test('server daily dispatch uses only audit authority and persists actual per-job request counts',async()=>{
  const h=modesHarness();const r=await h.run('daily');assert.equal(r.metrics.requests,1);assert.equal(r.metrics.jobReads.job,1);assert.ok(h.calls.some(x=>x.name==='finance_sync_audit_claim_v2'));assert.ok(!h.calls.some(x=>['finance_sync_record_v1','finance_sync_stage_v1'].includes(x.name)));const measured=h.calls.find(x=>x.name==='finance_sync_read_measure_v2');assert.equal(measured.args.p_actual,1);assert.equal(measured.args.p_mode,'daily');
 });

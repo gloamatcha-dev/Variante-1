@@ -5,7 +5,7 @@ import {financeScanBudget} from './financeScanBudget.ts';
 import {incrementalFinanceDiscovery} from './financeIncrementalDiscovery.ts';
 import {withFinanceHeartbeat} from './financeHeartbeat.server.ts';
 import {deliverFinanceSyncAlerts} from './financeSyncAlerts.server.ts';
-import {globalFinanceSyncStatus} from './globalFinanceSync.ts';
+import {readOperationalFinanceSyncStatus} from './adminFinanceSyncStatus.ts';
 import {parseFirstScanScope,assertFirstScanJob,firstScanReceiptVerifier} from './financeFirstScanScope.ts';
 
 export type FinanceScanMode='incremental'|'daily';
@@ -76,7 +76,7 @@ export async function runFinanceScanMode(mode:FinanceScanMode,manual=false,budge
    if(reconciliationVerified&&mode==='incremental')try{
     const raw=await rpc('finance_sync_global_status_v1',{}) as Record<string,unknown>;
     raw.scan_modes=await rpc('finance_sync_modes_status_v2',{});
-    reconciliationVerified=globalFinanceSyncStatus(raw,true).verified;
+    reconciliationVerified=(await readOperationalFinanceSyncStatus(admin,raw,identity.account_id)).verified;
    }catch{reconciliationVerified=false;}
    return {...result,alertState,reconciliationVerified,metrics:{...budget.metrics(),jobReads}};
   }finally{await rpc('finance_sync_read_measure_v2',{p_id:reservation.id,p_actual:budget.metrics().requests,p_mode:mode,p_jobs:jobReads});}

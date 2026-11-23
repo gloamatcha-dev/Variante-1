@@ -81,11 +81,21 @@ export async function readAdminFinanceSyncStatus(admin: SupabaseClient, raw: Row
   if (!enabled || raw?.configured !== true || (raw.scan_modes as Row | undefined)?.version !== 2) {
     return globalFinanceSyncStatus(raw, enabled);
   }
+  return readOperationalFinanceSyncStatus(admin, raw);
+}
+
+export async function readOperationalFinanceSyncStatus(admin: SupabaseClient, raw: Row, expectedAccountId?: string) {
+  if (raw?.configured !== true || (raw.scan_modes as Row | undefined)?.version !== 2) {
+    throw new Error('Operational finance status unavailable');
+  }
   const { data, error } = await admin.from('finance_sync_config').select('account_id,scan_from').eq('enabled', true).maybeSingle();
-  if (error || !data || !Number.isFinite(time(data.scan_from))) throw new Error('Finance status scope unavailable');
+  if (error || !data || typeof data.account_id !== 'string' || !data.account_id ||
+      !Number.isFinite(time(data.scan_from)) || (expectedAccountId !== undefined && data.account_id !== expectedAccountId)) {
+    throw new Error('Finance status scope unavailable');
+  }
   const jobs = await readPortalPages(admin, 'finance_sync_jobs', q => q.eq('account_id', data.account_id), 'id',
     'scan_from,scan_to,state,lease_until,attempts,completed_at,last_attempt_at,last_failure_at,last_failure_code,last_error,checkpoint->verified,checkpoint->paymentIndex,checkpoint->usageIndex');
-  return adminFinanceSyncStatus(raw, enabled, data.scan_from, jobs.map(job => ({
+  return adminFinanceSyncStatus(raw, true, data.scan_from, jobs.map(job => ({
     ...job, checkpoint: { verified: job.verified, paymentIndex: job.paymentIndex, usageIndex: job.usageIndex },
   })));
 }
