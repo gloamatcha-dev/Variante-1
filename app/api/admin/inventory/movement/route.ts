@@ -56,18 +56,29 @@ export async function POST(request: Request): Promise<Response> {
   if (body?.action === "pack_matcha") {
     if (!uuid(body.operationId) || typeof body.variantSku !== "string" ||
         typeof body.units !== "number" || !Number.isSafeInteger(body.units) ||
-        body.units < 1 || body.units > 1000000) {
+        body.units < 1 || body.units > 1000000 || !Array.isArray(body.rawLots) ||
+        body.rawLots.length < 1 || body.rawLots.length > 20) {
       return Response.json({ error: "Ungültige Abpackung." }, { status: 400 });
+    }
+    const rawQuantities: Record<string, string> = {};
+    for (const lot of body.rawLots) {
+      if (!uuid(lot?.receiptId) || typeof lot.grams !== "string" || !/^[0-9]{1,9}(\.[0-9]{1,3})?$/.test(lot.grams) ||
+          Number(lot.grams) <= 0 || Object.hasOwn(rawQuantities, lot.receiptId.toLowerCase())) {
+        return Response.json({ error: "Rohchargen und Gramm prüfen." }, { status: 400 });
+      }
+      rawQuantities[lot.receiptId.toLowerCase()] = lot.grams;
     }
     const admin = getSupabaseAdmin();
     if (!admin) return Response.json({ error: "Inventar nicht verfügbar." }, { status: 503 });
-    const result = await admin.rpc("admin_pack_matcha_inventory_v1", {
-      actor: gate.context.identity.userId, operation: body.operationId,
-      variant_sku: body.variantSku, units: body.units,
+    const result = await admin.rpc("admin_pack_traced_matcha_v1", {
+      p_actor: gate.context.identity.userId, p_operation: body.operationId,
+      p_sku: body.variantSku, p_units: body.units, p_quantities: rawQuantities,
     });
     if (result.error || !["recorded", "already_recorded"].includes(result.data?.result)) {
       const rejected = ["inventory_pack_mapping_missing", "inventory_pack_mapping_invalid",
-        "inventory_pack_raw_unavailable", "inventory_pack_operation_conflict", "inventory_pack_invalid"]
+        "inventory_pack_raw_unavailable", "inventory_pack_operation_conflict", "inventory_pack_invalid",
+        "inventory_lot_stock_unavailable", "inventory_lot_packing_source_missing",
+        "inventory_lot_pick_invalid", "inventory_lot_pick_required"]
         .includes(result.error?.message ?? "");
       const status = result.error?.code === "42501" ? 403 : rejected ? 409 : 503;
       return Response.json({ error: status === 503

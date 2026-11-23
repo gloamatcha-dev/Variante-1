@@ -213,6 +213,9 @@ export async function POST(request: Request): Promise<Response> {
   });
 
   if (error) {
+    if (["inventory_lot_pick_required", "inventory_lot_stock_unavailable", "inventory_lot_shipment_unverified"].includes(error.message)) {
+      return Response.json({ error: "Versand gesperrt. Reservierung und bestätigte Chargenkommissionierung prüfen." }, { status: 409 });
+    }
     if (error.code === "23514" && error.message === "historical_order_payment_unverified") {
       return Response.json({error:"Historischer Zahlungsnachweis ungeklärt. Versand gesperrt."}, {status:409});
     }

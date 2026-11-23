@@ -1,4 +1,5 @@
 "use client";
+import { AdminInventoryLots } from "./AdminInventoryLots";
 import "./admin-inventory.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -310,6 +311,7 @@ export function AdminInventory({ onSessionLost, isOwner = false, showHeading = f
     <section className="inventory-dashboard" aria-label="Inventar">
       <div className="inventory-main">
         <InventoryHelp />
+        <AdminInventoryLots />
         <header className="inventory-header">
           {showHeading && <div><h1>Inventar</h1><p>Bestände und Lagerbewegungen</p></div>}
           <div className="inventory-toolbar">
@@ -572,7 +574,7 @@ const PACK_SIZES = [
 ];
 
 function MatchaPackaging({ raw, onRecorded }: { raw?: Item; onRecorded: () => Promise<void> }) {
-  const pending = useRef<{operationId:string; variantSku:string; units:number}|null>(null);
+  const pending = useRef<{operationId:string; variantSku:string; units:number; rawLots:{receiptId:string;grams:string}[]}|null>(null);
   const inFlight = useRef(false);
   const [busy,setBusy] = useState(false);
   const [notice,setNotice] = useState("");
@@ -590,12 +592,17 @@ function MatchaPackaging({ raw, onRecorded }: { raw?: Item; onRecorded: () => Pr
     const fields=new FormData(form);
     const variantSku=String(fields.get("variant"));
     const units=Number(fields.get("units"));
+    const rawLots=String(fields.get("rawLots") ?? "").trim().split(/\r?\n/).map(line => {
+      const [receiptId, grams, extra] = line.trim().split(/\s+/);
+      return { receiptId, grams: extra === undefined ? (grams ?? "").replace(",", ".") : "" };
+    });
     if (!Number.isSafeInteger(units) || units < 1 || units > 1000000) {
       setNotice("Gib eine ganze Beutelanzahl zwischen 1 und 1.000.000 ein.");
       return;
     }
-    if(!pending.current)pending.current={operationId:crypto.randomUUID(),variantSku,units};
-    if(pending.current.variantSku!==variantSku||pending.current.units!==units){
+    if(!pending.current)pending.current={operationId:crypto.randomUUID(),variantSku,units,rawLots};
+    if(pending.current.variantSku!==variantSku||pending.current.units!==units||
+       JSON.stringify(pending.current.rawLots)!==JSON.stringify(rawLots)){
       setNotice("Bitte die offene Buchung zuerst mit unveränderter Größe und Menge erneut prüfen.");
       return;
     }
@@ -609,10 +616,12 @@ function MatchaPackaging({ raw, onRecorded }: { raw?: Item; onRecorded: () => Pr
         setNotice(typeof result.data.error==="string"?result.data.error:"Buchung nicht bestätigt. Bitte mit denselben Angaben erneut absenden.");
         return;
       }
+      const lotCode = pending.current.operationId;
       pending.current=null;
       setVariant(PACK_SIZES[0].sku);
       setUnitInput("");
-      setNotice("Rohvorrat und fertige Beutel wurden gebucht.");
+      form.reset();
+      setNotice("Rohvorrat und fertige Beutel wurden gebucht. Abpack-ID: " + lotCode);
       await onRecorded();
     }catch{setNotice("Buchung nicht bestätigt. Bitte mit denselben Angaben erneut absenden.");}
     finally{inFlight.current=false;setBusy(false);}
@@ -628,6 +637,10 @@ function MatchaPackaging({ raw, onRecorded }: { raw?: Item; onRecorded: () => Pr
         <label>Fertige Beutel (Pflichtfeld)<input name="units" aria-describedby="inventory-pack-help" type="number"
           min="1" max="1000000" step="1" required value={unitInput} onChange={event => setUnitInput(event.target.value)} disabled={busy}/></label>
       </div>
+      <label>Verwendete Rohchargen (Beleg-ID und Gramm je Zeile)
+        <textarea name="rawLots" required maxLength={950} disabled={busy}
+          placeholder="Beleg-ID und Gramm durch ein Leerzeichen trennen" />
+      </label>
       <dl className="inventory-pack-totals" aria-live="polite">
         <div><dt>Benötigte Rohmenge</dt><dd>{required === null ? "—" : `${formatQuantity(required)} g`}</dd></div>
         <div><dt>Rohvorrat laut Inventarliste</dt><dd>{rawQuantity === null ? "In dieser Ansicht nicht verfügbar" : `${formatQuantity(rawQuantity)} g`}</dd></div>

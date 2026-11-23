@@ -121,7 +121,9 @@ export async function POST(request: Request): Promise<Response> {
     const result=await supabase.rpc("admin_matcha_b2b_delivery_v1",{
       actor:write.session.userId,target:command.deliveryId,action:command.action==="reserve_stock"?"reserve":"dispatch",
     });
-    if(result.error)return Response.json({error:"B2B-Lieferung gesperrt. Zahlung, Freigabe, Termin und Bestand prüfen."},
+    if(result.error)return Response.json({error:["inventory_lot_pick_required","inventory_lot_stock_unavailable"].includes(result.error.message)
+      ? "B2B-Versand gesperrt. Bestätigte Chargenkommissionierung und verfügbare Chargenmengen prüfen."
+      : "B2B-Lieferung gesperrt. Zahlung, Freigabe, Termin und Bestand prüfen."},
       {status:result.error.code==="42501"?403:409});
     return Response.json({ok:true,result:result.data});
   }

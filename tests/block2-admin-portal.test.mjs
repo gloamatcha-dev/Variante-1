@@ -216,8 +216,14 @@ function previewInventoryPayload(){
 }
 function renderInventoryRead(payload){
  const compiled={exports:{}};let hook=0;
- const js=ts.transpileModule(source('app/AdminInventory.tsx'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
- vm.runInNewContext(js,{module:compiled,exports:compiled.exports,require:name=>name==='react'?{...React,useState:value=>React.useState(hook++===0?payload:value)}:name.includes('inventoryRules')?require('../lib/inventoryRules.ts'):require(name),fetch:()=>{throw Error('Inventory render must not write or fetch');},console,Date,Intl});
+ const compilerOptions={jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022};
+ const lots={exports:{}};
+ vm.runInNewContext(ts.transpileModule(source('app/AdminInventoryLots.tsx'),{compilerOptions}).outputText,{
+  module:lots,exports:lots.exports,require:name=>name.includes('AdminPortalShared')
+    ?{portalRequest:()=>{throw Error('Lot render must not fetch');}}:require(name),
+ });
+ const js=ts.transpileModule(source('app/AdminInventory.tsx'),{compilerOptions}).outputText;
+ vm.runInNewContext(js,{module:compiled,exports:compiled.exports,require:name=>name==='react'?{...React,useState:value=>React.useState(hook++===0?payload:value)}:name.includes('inventoryRules')?require('../lib/inventoryRules.ts'):name.includes('AdminInventoryLots')?lots.exports:name==='./admin-inventory.css'?{}:require(name),fetch:()=>{throw Error('Inventory render must not write or fetch');},console,Date,Intl});
  return renderToStaticMarkup(React.createElement(compiled.exports.AdminInventory,{onSessionLost:()=>{}}));
 }
 test('synthetic inventory read contract renders the actual inventory empty state without crashing',()=>{
@@ -232,6 +238,8 @@ test('inventory renderer accepts populated read rows and association maps withou
  payload.rows=[item];payload.categories=[{id:'test-category',name:'Test category',is_active:true}];payload.areasByItem={'test-item':['b2c']};payload.lastMovementByItem={'test-item':'2026-10-03T12:00:00Z'};payload.total=1;payload.summary={total:1,low:1,out:0,negative:0};
  const before=JSON.stringify(payload);const html=renderInventoryRead(payload);
  assert.match(html,/Synthetic matcha stock/);assert.match(html,/Test category/);assert.equal(JSON.stringify(payload),before);
+ assert.match(html,/Chargenverfolgung und Rückruf/);
+ assert.match(html,/Kommissionierung bestätigen/);
 });
 
 function affiliateComponents(shared,seeds=[]){

@@ -421,6 +421,15 @@ export async function recordMovement(request: MovementRequest, actorUserId: stri
 
   if (error) {
     console.error(`Inventory: movement failed for item ${request.itemId}:`, error.message);
+    if (error.message === "inventory_lot_receipt_metadata_required") {
+      return { ok: false as const, status: 409, error: "Für Matcha-Wareneingang Lieferant, Chargenkennung und MHD eintragen." };
+    }
+    if (error.message === "inventory_lot_positive_movement_unverified") {
+      return { ok: false as const, status: 409, error: "Matcha-Zugang als belegten Rohwareneingang oder belegte Abpackung buchen." };
+    }
+    if (error.message === "inventory_lot_correction_requires_assignment") {
+      return { ok: false as const, status: 409, error: "Die Korrektur betrifft belegte Chargenmengen und braucht eine Chargenzuordnung." };
+    }
     return internal();
   }
   return interpretMovementResult(data);
@@ -443,6 +452,9 @@ export async function recordStocktake(request: StocktakeRequest, actorUserId: st
 
   if (error) {
     console.error(`Inventory: stocktake failed for item ${request.itemId}:`, error.message);
+    if (["inventory_lot_correction_requires_assignment", "inventory_lot_positive_movement_unverified"].includes(error.message)) {
+      return { ok: false as const, status: 409, error: "Die Inventurdifferenz betrifft belegte Chargenmengen und braucht eine Chargenzuordnung." };
+    }
     return internal();
   }
   return interpretMovementResult(data);
