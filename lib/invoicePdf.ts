@@ -18,6 +18,7 @@ export type InvoicePdfInput = {
   number: string;
   issuedOn: string;
   supplyOn: string;
+  dateLabel?: "Zahlungseingang" | "Erstattungsdatum";
   originalNumber?: string;
   lines: InvoiceLine[];
   totals: Amounts;
@@ -87,7 +88,7 @@ export function renderInvoicePdf(input: InvoicePdfInput): Buffer {
     ...(input.originalNumber === undefined ? [] : ['Bezug: ' + printable(input.originalNumber, 45)]),
     ...address(issuer), 'Steuerkennung: ' + printable(issuer.taxIdentifier, 45), '',
     ...address(input.customer), '',
-    'Ausgestellt: ' + date(input.issuedOn) + ' | Leistungsdatum: ' + date(input.supplyOn), '',
+    'Ausgestellt: ' + date(input.issuedOn) + ' | ' + (input.dateLabel ?? 'Leistungsdatum') + ': ' + date(input.supplyOn), '',
     ...lineText, '',
     'Netto: ' + euro(totals.netCents) + ' | USt: ' + euro(totals.taxCents) + ' | Gesamt: ' + euro(totals.grossCents),
   ];

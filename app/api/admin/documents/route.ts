@@ -79,8 +79,9 @@ export async function POST(request:Request) {
       if(!uuid(input.id))return json({error:'Ungültiger Beleg.'},400);
       const result=await admin.from('documents').select('storage_path,file_sha256').eq('id',input.id).maybeSingle();
       const path=result.data?.storage_path;
+      const isOwnerInvoice=gate.identity.role==='owner'&&path==='invoice-register/'+input.id+'.pdf';
       if(result.error||!result.data?.file_sha256||typeof path!=='string'||
-        !new RegExp('^'+String(input.id)+'/original\\.(pdf|jpg|png)$').test(path))return json({error:'Originaldatei nicht verfügbar.'},404);
+        !isOwnerInvoice&&!new RegExp('^'+String(input.id)+'/original\\.(pdf|jpg|png)$').test(path))return json({error:'Originaldatei nicht verfügbar.'},404);
       const {data,error}=await admin.storage.from(bucket).download(path);
       if(error||!data||data.size>fileLimit)return json({error:'Originaldatei nicht verfügbar.'},404);
       const bytes=Buffer.from(await data.arrayBuffer());

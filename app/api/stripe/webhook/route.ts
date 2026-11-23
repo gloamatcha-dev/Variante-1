@@ -1,3 +1,4 @@
+import { issueVerifiedOrderInvoices } from "../../../../lib/gloaInvoice.server";
 import { sandboxPauseKey } from "../../../../lib/subscriptionPauseActions.server";
 import { releaseTerminalFirstMatchaCheckout } from "../../../../lib/matchaFirstCheckout";
 import type Stripe from "stripe";
@@ -203,7 +204,7 @@ export async function POST(request: Request): Promise<Response> {
       } else if (session.mode === "subscription") {
         await handleSubscriptionSessionCompleted(stripe, session);
       } else {
-        await handleCheckoutSessionCompleted(stripe, session);
+        await handleCheckoutSessionCompleted(stripe, session, event.livemode ? event.created : 0);
       }
     } else if (event.type === "checkout.session.async_payment_succeeded") {
       // Phase 4B4.2. DELAYED PAYMENT METHODS. SEPA Direct Debit and the
@@ -292,7 +293,7 @@ export async function POST(request: Request): Promise<Response> {
         // attempt. So completed-then-async, async-then-completed and any
         // number of redeliveries of either converge on exactly one order,
         // and both order emails keep their own claims.
-        await handleCheckoutSessionCompleted(stripe, session);
+        await handleCheckoutSessionCompleted(stripe, session, event.livemode ? event.created : 0);
       }
     } else if (event.type === "checkout.session.expired") {
       const session = event.data.object as Stripe.Checkout.Session;
@@ -765,6 +766,7 @@ async function handleRefundEvent(stripe: Stripe, event: Stripe.Event): Promise<v
   // any creator commission proportionally. Both are idempotent.
   if ((isNewSettledRefundFact(outcome.result) || outcome.result === 'unchanged') && outcome.orderId && outcome.refundedTotalCents != null && outcome.refundedTotalCents > 0) {
     requireBusinessEffect('order refund', await recordOrderRefundEvent(outcome.orderId, outcome.refundedTotalCents, paymentIntentId, taxScope?.operationId, taxScope?.withdrawalId), FINANCE_EFFECT_RESULTS);
+    if (event.livemode) await issueVerifiedOrderInvoices(outcome.orderId, 'refund', event.created);
     requireBusinessEffect('commission reversal', await reverseCreatorCommissionForRefund({
       orderId: outcome.orderId,
       refundedTotalCents: outcome.refundedTotalCents,
@@ -826,7 +828,7 @@ async function releaseTerminalMatchaCheckout(session: Stripe.Checkout.Session, s
   if (result.error) throw new Error("Terminal checkout inventory release failed");
 }
 
-async function handleCheckoutSessionCompleted(stripe: Stripe, eventSession: Stripe.Checkout.Session): Promise<void> {
+async function handleCheckoutSessionCompleted(stripe: Stripe, eventSession: Stripe.Checkout.Session, invoiceEventCreated: number): Promise<void> {
   const session = await stripe.checkout.sessions.retrieve(eventSession.id);
 
   let attempt = await findAttemptByStripeSessionId(session.id);
@@ -952,6 +954,7 @@ async function handleCheckoutSessionCompleted(stripe: Stripe, eventSession: Stri
   // the order is durable. A failure here never prevents order creation,
   // email sending or fulfilment — Stripe retries will eventually land it.
   requireBusinessEffect('order income', await recordOrderPaymentEvent(order.id), FINANCE_EFFECT_RESULTS);
+  await issueVerifiedOrderInvoices(order.id, 'order_payment', invoiceEventCreated);
 
   // AFFILIATE ATTRIBUTION (072). If the checkout session carries an
   // affiliate slug or code in its metadata, attribute the order to the
@@ -1284,6 +1287,7 @@ async function handleInvoicePaid(stripe: Stripe, event: Stripe.Event): Promise<v
 
   // FINANCE RECORDING (072). Same pattern as the one-time path.
   requireBusinessEffect('subscription income', await recordOrderPaymentEvent(result.orderId), FINANCE_EFFECT_RESULTS);
+  if (event.livemode) await issueVerifiedOrderInvoices(result.orderId, 'order_payment', event.created);
 
   // ONLY the internal notification. A subscription cycle gets no generic
   // "Danke für deine Bestellung" - the dedicated customer lifecycle mails
