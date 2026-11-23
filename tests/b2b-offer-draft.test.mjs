@@ -1,8 +1,9 @@
-﻿import assert from 'node:assert/strict';
+import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
 import ts from 'typescript';
+import { buildB2bOfferContract } from '../lib/b2bOfferContract.ts';
 import { parseB2bOfferDraft, parseB2bOfferId } from '../lib/b2bOfferDraft.ts';
 
 const input = {
@@ -45,6 +46,8 @@ test('protected draft endpoint accepts the same concurrent retry and refuses cha
         ? { ok: true, context: { identity: { userId: 'operator' }, body: await request.json() } }
         : { ok: false, response: new Response(null, { status: 403 }) } };
       if (name.endsWith('b2bOfferDraft.ts')) return { parseB2bOfferDraft };
+      if (name.endsWith('b2bOfferContract')) return { buildB2bOfferContract };
+      if (name.endsWith('b2bOfferNotification.server')) return { notifyB2bOffer: async () => 'pending' };
       if (name.endsWith('supabaseAdmin')) return { getSupabaseAdmin: () => admin };
       throw Error(name);
     },
@@ -73,7 +76,13 @@ test('publication delegates the reviewed version and refuses missing evidence an
       if (name.endsWith('adminActionRoute.ts')) return { openAdminAction: async request =>
         ({ ok: true, context: { identity: { userId: 'owner-fixture' }, body: await request.json() } }) };
       if (name.endsWith('b2bOfferDraft.ts')) return { parseB2bOfferId };
-      if (name.endsWith('supabaseAdmin')) return { getSupabaseAdmin: () => ({ rpc: async (rpc, args) => {
+      if (name.endsWith('b2bOfferContract')) return { buildB2bOfferContract };
+      if (name.endsWith('b2bOfferNotification.server')) return { notifyB2bOffer: async () => 'pending' };
+      if (name.endsWith('supabaseAdmin')) return { getSupabaseAdmin: () => ({
+        from: () => ({ select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: async () => ({
+          data: { pack_count: 3, net_unit_cents: 5250, destination_country: 'DE' },
+        }) }) }) }) }),
+        rpc: async (rpc, args) => {
         calls.push([rpc, { ...args }]);
         return { data: '2026-12-08T12:00:00Z', error };
       } }) };
@@ -82,7 +91,7 @@ test('publication delegates the reviewed version and refuses missing evidence an
   });
   const publish = (evidence, origin = 'https://local.invalid') =>
     module.exports.POST(new Request('https://local.invalid/api/admin/b2b/offers', {
-      method: 'POST', headers: { origin }, body: JSON.stringify({ action: 'publish', id: input.id, version: 2, evidence }),
+      method: 'POST', headers: { origin }, body: JSON.stringify({ action: 'publish', id: input.id, version: 2, evidence, planType: 'monthly', postcode: '10115' }),
     }));
   assert.equal((await publish('')).status, 400);
   assert.equal((await publish('proof', 'https://foreign.invalid')).status, 403);
@@ -90,11 +99,65 @@ test('publication delegates the reviewed version and refuses missing evidence an
   const success = await publish('proof');
   assert.equal(success.status, 200);
   assert.equal((await success.json()).expiresAt, '2026-12-08T12:00:00Z');
-  assert.deepEqual(calls[0], ['b2b_offer_publish_v1', {
+  const { p_terms, ...args } = calls[0][1];
+  assert.equal(p_terms.planType, 'monthly');
+  assert.equal(p_terms.packs, 3);
+  assert.deepEqual([calls[0][0], args], ['b2b_offer_publish_with_terms_v1', {
     p_draft: input.id, p_version: 2, p_actor: 'owner-fixture', p_evidence: 'proof',
   }]);
   error = { message: 'offer_tax_review_required' };
   assert.equal((await publish('proof')).status, 409);
   error = { code: '42501' };
   assert.equal((await publish('proof')).status, 403);
+});
+
+test('offer contract uses the existing monthly and annual quote and rejects unsupported terms', () => {
+  const offer = { pack_count: 3, net_unit_cents: 5250, destination_country: 'DE' };
+  const monthly = buildB2bOfferContract(offer, { planType: 'monthly', postcode: '10115' });
+  assert.equal(monthly.ok, true);
+  assert.equal(monthly.terms.charges[0].netCents, 15750);
+  assert.equal(monthly.terms.shippingGrossCents, 0);
+  const annual = buildB2bOfferContract(offer, { planType: 'annual', instalmentCount: 4, postcode: '10115' });
+  assert.equal(annual.ok, true);
+  assert.equal(annual.terms.charges.length, 4);
+  assert.equal(annual.terms.deliveryCount, 12);
+  assert.equal(buildB2bOfferContract(offer, { planType: 'annual', postcode: '10115' }).ok, false);
+  assert.equal(buildB2bOfferContract({ ...offer, net_unit_cents: 5249 },
+    { planType: 'monthly', postcode: '10115' }).reason, 'price_not_supported');
+  assert.equal(buildB2bOfferContract({ ...offer, destination_country: 'CH' },
+    { planType: 'monthly', postcode: '8001' }).ok, false);
+});
+
+test('offer notification uses a confirmed account and one provider send for parallel attempts', async () => {
+  const source = readFileSync(new URL('../lib/b2bOfferNotification.server.ts', import.meta.url), 'utf8');
+  const module = { exports: {} };
+  const delivered = [];
+  const env = {};
+  vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS,
+    target: ts.ScriptTarget.ES2022 } }).outputText, {
+    module, exports: module.exports, URL, process: { env },
+    require(name) {
+      if (name === './resend') return { getResendClient: () => ({ emails: {
+        send: async (...args) => { delivered.push(args); return {}; },
+      } }) };
+      if (name === './siteUrl') return { getSiteOrigin: () => 'https://local.invalid' };
+      if (name === './emailSenders') return { GLOA_FROM_HELLO: 'sender@example.invalid', GLOA_REPLY_TO_SUPPORT: 'reply@example.invalid' };
+      throw Error(name);
+    },
+  });
+  let claimed = false;
+  const admin = {
+    rpc: async () => { if (claimed) return { data: null }; claimed = true; return { data: input.customerId }; },
+    auth: { admin: { getUserById: async () => ({ data: { user: { email: 'buyer@example.invalid', email_confirmed_at: 'confirmed' } } }) } },
+    from: () => ({ update: () => ({ eq() { return this; }, then(resolve) { resolve({}); } }) }),
+  };
+  const send = () => module.exports.notifyB2bOffer(admin, input.id, 2);
+  assert.equal(await send(), 'pending');
+  assert.equal(claimed, false);
+  env.B2B_OFFER_EMAIL_ENABLED = 'true';
+  assert.deepEqual((await Promise.all([send(), send()])).sort(), ['already_claimed', 'sent']);
+  assert.equal(delivered.length, 1);
+  assert.equal(delivered[0][0].to, 'buyer@example.invalid');
+  assert.equal(delivered[0][1].idempotencyKey, 'gloa-b2b-offer/' + input.id + '/2');
+  assert.match(delivered[0][0].text, /https:\/\/local\.invalid\/account\/business/);
 });

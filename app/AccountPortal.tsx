@@ -4477,6 +4477,14 @@ function PortalProfile() {
 
 
 type CustomerOffer = {
+  contract_terms: {
+    planType: "monthly" | "annual";
+    deliveryIntervalMonths: number;
+    deliveryCount: number | null;
+    postcode: string;
+    shippingGrossCents: number;
+    charges: { netCents: number; taxCents: number; grossCents: number }[];
+  } | null;
   draft_id: string;
   version: number;
   pack_count: number;
@@ -4540,7 +4548,18 @@ function BusinessOffers() {
       <h3>Matcha 500 g, Version {offer.version}</h3>
       <p>{offer.pack_count} Beutel zu je {euros.format(offer.net_unit_cents / 100)} netto. Lieferland {offer.destination_country}.</p>
       <p>{states[offer.state] ?? offer.state}. Gültig bis {new Date(offer.expires_at).toLocaleString("de-DE")}.</p>
-      {offer.state === "published" && !decision && <>
+      {offer.contract_terms ? <>
+        <p>{offer.contract_terms.planType === "monthly" ? "Monatlicher Vertrag" : "Jahresvertrag"}.
+          Lieferung jeden Monat an die PLZ {offer.contract_terms.postcode}.
+          Versand je Lieferung {euros.format(offer.contract_terms.shippingGrossCents / 100)}.</p>
+        {offer.contract_terms.deliveryCount && <p>{offer.contract_terms.deliveryCount} Lieferungen.</p>}
+        <ul>{offer.contract_terms.charges.map((charge, index) => <li key={index}>
+          {offer.contract_terms?.planType === "monthly" ? "Monatsbetrag" : "Zahlung " + (index + 1)}
+          {": " + euros.format(charge.grossCents / 100)} brutto
+          {" (" + euros.format(charge.netCents / 100)} netto, {euros.format(charge.taxCents / 100)} Steuer)
+        </li>)}</ul>
+      </> : <p>Vertragskonditionen fehlen. GLOA muss eine vollständige Version veröffentlichen.</p>}
+      {offer.state === "published" && offer.contract_terms && !decision && <>
         <button type="button" disabled={busy} onClick={() => setDecision({ offer, action: "accepted" })}>Annehmen</button>
         <button type="button" disabled={busy} onClick={() => setDecision({ offer, action: "declined" })}>Ablehnen</button>
       </>}

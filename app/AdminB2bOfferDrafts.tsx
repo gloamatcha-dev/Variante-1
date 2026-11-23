@@ -82,17 +82,20 @@ export function AdminB2bOfferDrafts() {
     if (running.current) return;
     const fields = new FormData(event.currentTarget);
     const evidence = String(fields.get("evidence") ?? "");
-    const payload = evidence ? { action: "publish", version: latest?.version, evidence } : {
+    const payload = evidence ? { action: "publish", version: latest?.version, evidence,
+      planType: fields.get("planType"), postcode: String(fields.get("postcode") ?? "").trim(),
+      instalmentCount: fields.get("instalmentCount") ? Number(fields.get("instalmentCount")) : null } : {
       action: "revise", expectedVersion: latest?.version ?? 0, packCount: Number(fields.get("quantity")),
       netUnitCents: Number(fields.get("price")),
     };
     running.current = true;
     setBusy(true);
     try {
-      await portalRequest(endpoint, { id: draft.id, ...payload });
+      const update = await portalRequest(endpoint, { id: draft.id, ...payload });
       const result = await portalRequest(endpoint, { action: "list" });
       setDrafts(result.drafts as Draft[]);
-      setFeedback(evidence ? "Im Kundenkonto veröffentlicht." : "Neue Version gespeichert.");
+      setFeedback(evidence ? update.notification === "sent" ? "Angebot veröffentlicht und Benachrichtigung gesendet."
+        : "Angebot veröffentlicht. Benachrichtigung nicht als zugestellt bestätigt." : "Neue Version gespeichert.");
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : "Aktion nicht bestätigt.");
     } finally {
@@ -133,7 +136,17 @@ export function AdminB2bOfferDrafts() {
           </form>}
         {latest?.state === "draft" && draft.destination_country === "DE" &&
           <form onSubmit={event => void updateOffer(event, draft, latest)}>
-            <label>Referenz des gepr?ften Steuernachweises <input name="evidence" required maxLength={200} /></label>
+            <label>Referenz des geprüften Steuernachweises <input name="evidence" required maxLength={200} /></label>
+            <label>Liefer-PLZ <input name="postcode" required pattern="[0-9]{5}" maxLength={5} /></label>
+            <label>Vertragsmodell <select name="planType" required defaultValue="">
+              <option value="" disabled>Bitte auswählen</option>
+              <option value="monthly">Monatlich</option>
+              <option value="annual">Jahresvertrag</option>
+            </select></label>
+            <label>Zahlungen beim Jahresvertrag <select name="instalmentCount" defaultValue="">
+              <option value="">Keine Raten (monatlicher Vertrag)</option>
+              <option value="1">1 Zahlung</option><option value="2">2 Zahlungen</option><option value="4">4 Zahlungen</option>
+            </select></label>
             <button disabled={busy}>Im Kundenkonto ver?ffentlichen</button>
           </form>}
         {draft.destination_country !== "DE" && <p>Internationale Steuerfreigabe ausstehend.</p>}

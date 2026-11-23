@@ -1,3 +1,5 @@
+import { buildB2bOfferContract } from "../../../../../lib/b2bOfferContract";
+import { notifyB2bOffer } from "../../../../../lib/b2bOfferNotification.server";
 import { openAdminAction } from '../../../../../lib/adminActionRoute.ts';
 import { parseB2bOfferDraft, parseB2bOfferId, parseB2bOfferTerms } from '../../../../../lib/b2bOfferDraft.ts';
 import { getSupabaseAdmin } from '../../../../../lib/supabaseAdmin';
@@ -42,10 +44,31 @@ export async function POST(request: Request) {
         !input.evidence.trim() || input.evidence.trim().length > 200) {
       return json({ error: 'Angebotsversion und Nachweisreferenz erforderlich.' }, 400);
     }
-    const { data, error } = await admin.rpc('b2b_offer_publish_v1', {
-      p_draft: id, p_version: input.version, p_actor: gate.context.identity.userId, p_evidence: input.evidence,
+    const offer = await admin.from('b2b_offer_versions')
+      .select('pack_count,net_unit_cents,destination_country').eq('draft_id', id).eq('version', input.version).maybeSingle();
+    if (offer.error) return json({ error: 'Angebotskonditionen nicht verfügbar.' }, 503);
+    if (!offer.data) return json({ error: 'Angebotsversion nicht verfügbar.' }, 409);
+    const contract = buildB2bOfferContract(offer.data, input);
+    if (!contract.ok) {
+      const reasons: Record<string, string> = {
+        plan_type_unsupported: 'Vertragsmodell auswählen.',
+        quantity_not_self_service: 'Menge liegt außerhalb des vorhandenen Checkout-Modells.',
+        monthly_takes_no_instalments: 'Monatliche Verträge haben keine Raten.',
+        instalment_count_unsupported: 'Für den Jahresvertrag 1, 2 oder 4 Zahlungen auswählen.',
+        country_not_supported: 'Internationale Steuer- und Lieferfreigabe fehlt.',
+        postcode_malformed: 'Gültige Liefer-PLZ erforderlich.',
+        shipping_unavailable: 'Für diese PLZ fehlt ein freigegebenes Versandmodell.',
+        price_not_supported: 'Stückpreis stimmt nicht mit dem freigegebenen Checkout-Preis überein.',
+      };
+      return json({ error: reasons[contract.reason] ?? 'Vertragskonditionen nicht bestätigt.' }, 409);
+    }
+    const { data, error } = await admin.rpc('b2b_offer_publish_with_terms_v1', {
+      p_draft: id, p_version: input.version, p_actor: gate.context.identity.userId, p_evidence: input.evidence, p_terms: contract.terms,
     });
-    if (!error) return json({ expiresAt: data });
+    if (!error) {
+      const notification = await notifyB2bOffer(admin, id, input.version);
+      return json({ expiresAt: data, notification });
+    }
     if (error.code === '42501') return json({ error: 'Nur der Owner darf Angebote freigeben.' }, 403);
     if (error.message === 'offer_tax_review_required') {
       return json({ error: 'Steuerliche Freigabe fehlt.' }, 409);
