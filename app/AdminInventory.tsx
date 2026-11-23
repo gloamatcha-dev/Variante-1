@@ -159,7 +159,7 @@ function itemDescription(item: Item) {
 
 function InventoryHelp() {
   return (
-    <details className="inventory-card inventory-guide" open>
+    <details className="inventory-card inventory-guide">
       <summary><span className="inventory-icon" aria-hidden="true">ⓘ</span>So funktioniert das GLOA-Lager</summary>
       <ul>
         <li><strong>Rohvorrat und Fertigware.</strong> Losen Matcha in Gramm erfassen (1 kg = 1.000 g). Fertige Beutel in Stück zählen: 30, 50 und 100 g für B2C, 500 g ausschließlich für B2B.</li>
@@ -308,35 +308,31 @@ export function AdminInventory({ onSessionLost, isOwner = false, showHeading = f
 
   return (
     <section className="inventory-dashboard" aria-label="Inventar">
-      <div className="inventory-layout">
-        <div className="inventory-top">
-          <div className="inventory-main">
-            <header className="inventory-header">
-              {showHeading && <div><h1>Inventar</h1><p>Bestände und Lagerbewegungen</p></div>}
-              <div className="inventory-toolbar">
-                <button type="button" className="ops-btn ops-btn-primary" onClick={() => setCreating(true)}>Artikel hinzufügen</button>
-                <button type="button" className="ops-btn" onClick={() => void refresh(query)} disabled={busy}>
-                  {busy ? "Wird aktualisiert…" : "Aktualisieren"}
-                </button>
-                <span className="ops-refresh-at">Zuletzt aktualisiert {fmtDateTime(data.fetchedAt)}</span>
-              </div>
-            </header>
-            {loadError && <p className="ops-error" role="alert">{loadError}</p>}
-            <dl className="inventory-metrics">
-              <div><dt><span aria-hidden="true">▣</span> Artikel</dt><dd>{data.summary.total ?? "—"}</dd></div>
-              <div><dt><span aria-hidden="true">△</span> Niedriger Bestand</dt><dd>{data.summary.low ?? "—"}</dd></div>
-              <div><dt><span aria-hidden="true">×</span> Nicht verfügbar</dt><dd>{data.summary.out ?? "—"}</dd></div>
-              <div><dt><span aria-hidden="true">−</span> Negativer Bestand</dt><dd>{data.summary.negative ?? "—"}</dd></div>
-            </dl>
-
-            <div className="inventory-modules">
-              <MatchaPackaging raw={data.rows.find(item => item.sku === "GLOA-MATCHA-RAW" && item.is_active && item.unit === "g")}
-                onRecorded={() => refresh(query)} />
-              {isOwner && <ReconcileCheckoutStock onRecorded={() => refresh(query)} />}
-              <DeliveryDemand rows={data.plannedMatcha} />
-            </div>
+      <div className="inventory-main">
+        <InventoryHelp />
+        <header className="inventory-header">
+          {showHeading && <div><h1>Inventar</h1><p>Bestände und Lagerbewegungen</p></div>}
+          <div className="inventory-toolbar">
+            <button type="button" className="ops-btn ops-btn-primary" onClick={() => setCreating(true)}>Artikel hinzufügen</button>
+            <button type="button" className="ops-btn" onClick={() => void refresh(query)} disabled={busy}>
+              {busy ? "Wird aktualisiert…" : "Aktualisieren"}
+            </button>
+            <span className="ops-refresh-at">Zuletzt aktualisiert {fmtDateTime(data.fetchedAt)}</span>
           </div>
-          <InventoryHelp />
+        </header>
+        {loadError && <p className="ops-error" role="alert">{loadError}</p>}
+        <dl className="inventory-metrics">
+          <div><dt><span aria-hidden="true">▣</span> Artikel</dt><dd>{data.summary.total ?? "—"}</dd></div>
+          <div><dt><span aria-hidden="true">△</span> Niedriger Bestand</dt><dd>{data.summary.low ?? "—"}</dd></div>
+          <div><dt><span aria-hidden="true">×</span> Nicht verfügbar</dt><dd>{data.summary.out ?? "—"}</dd></div>
+          <div><dt><span aria-hidden="true">−</span> Negativer Bestand</dt><dd>{data.summary.negative ?? "—"}</dd></div>
+        </dl>
+
+        <div className="inventory-modules">
+          <MatchaPackaging raw={data.rows.find(item => item.sku === "GLOA-MATCHA-RAW" && item.is_active && item.unit === "g")}
+            onRecorded={() => refresh(query)} />
+          {isOwner && <ReconcileCheckoutStock onRecorded={() => refresh(query)} />}
+          <DeliveryDemand rows={data.plannedMatcha} />
         </div>
       </div>
 

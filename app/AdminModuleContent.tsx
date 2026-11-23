@@ -79,11 +79,11 @@ export function AdminModuleContent({ area, children }: { area: PortalArea; child
 
   return (
     <div className="admin-module-layout" data-admin-area={area}>
-      <div className="admin-module-body">{children}</div>
-      <details className="inventory-card inventory-guide admin-module-guide">
+      <details key={area} className="inventory-card inventory-guide admin-module-guide">
         <summary><span className="inventory-icon" aria-hidden="true">ⓘ</span>{guide.title}</summary>
         <ul>{guide.steps.map(([title, text]) => <li key={title}><strong>{title}</strong>{text}</li>)}</ul>
       </details>
+      <div className="admin-module-body">{children}</div>
     </div>
   );
 }

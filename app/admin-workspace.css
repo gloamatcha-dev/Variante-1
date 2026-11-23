@@ -108,6 +108,8 @@
 .admin-module-body .portal-tasks .has-work { background: #fff5e6; }
 .admin-module-body :is(.portal-table-wrap,.ops-table-wrap) {
   overflow-x: auto;
+  width: 100%;
+  min-width: 0;
   max-width: 100%;
   border: 1px solid var(--admin-line);
   border-radius: 10px;
@@ -123,6 +125,8 @@
 .admin-module-body :is(.portal-table,.ops-table,.ops-items) td { font-size: 13px; }
 .admin-module-body :is(.portal-chip,.ops-status) { border-radius: 6px; }
 .admin-module-body :is(.portal-form,.product-editor,fieldset) { min-width: 0; }
+.admin-workspace .admin-module-body .admin-products .product-editor,
+.admin-workspace .admin-module-body .withdrawal-simple { max-width: none; }
 .admin-module-body :is(label,fieldset) { overflow-wrap: anywhere; }
 .admin-module-body :is(input:not([type=checkbox],[type=radio]),select,textarea) {
   min-width: 0;
@@ -156,7 +160,6 @@
 .admin-workspace .admin-order-list > .ops-orders {
   display: table;
   width: 100%;
-  min-width: 1410px;
   table-layout: auto;
 }
 .admin-workspace .admin-order-list .ops-orders thead {
@@ -173,7 +176,7 @@
 .admin-workspace .admin-order-list .ops-orders :is(td,th) {
   display: table-cell;
   width: auto;
-  min-width: 94px;
+  min-width: 88px;
   padding: 9px 10px;
   border-bottom: 1px solid var(--admin-line);
   text-align: left;
@@ -183,7 +186,7 @@
 .admin-workspace .admin-order-list .ops-orders td[data-label="Bestellung"] { min-width: 145px; }
 .admin-workspace .admin-order-list .ops-orders td[data-label="Kunde"] { min-width: 175px; }
 .admin-workspace .admin-order-list .ops-orders td[data-label="Inhalt"] { min-width: 185px; max-width: 280px; }
-.admin-workspace .admin-order-list .ops-orders td[data-label="Betrag"] { white-space: nowrap; }
+.admin-workspace .admin-order-list .ops-orders td[data-label="Betrag"] { min-width: 104px; white-space: nowrap; }
 .admin-workspace .admin-order-list .ops-orders :is(.ops-order-open,.portal-chip,.ops-status,.ops-item-line) {
   white-space: normal;
   overflow-wrap: anywhere;
@@ -232,9 +235,6 @@
   background: var(--admin-card);
 }
 .admin-workspace [data-admin-area="creator"] .portal-payout-summary h3 { margin: 0 0 10px; }
-@media (min-width: 1510px) {
-  .admin-module-layout { grid-template-columns: minmax(0, 1fr) clamp(245px, 19vw, 320px); }
-}
 @media (max-width: 1023px) {
   .ops.admin-workspace { grid-template-columns: minmax(0,1fr); }
   .ops.admin-workspace .portal-sidebar { position: static; height: auto; padding: 12px; gap: 10px; }
