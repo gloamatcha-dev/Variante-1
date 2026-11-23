@@ -4476,6 +4476,82 @@ function PortalProfile() {
 // by accident.
 
 
+type CustomerOffer = {
+  draft_id: string;
+  version: number;
+  pack_count: number;
+  net_unit_cents: number;
+  destination_country: string;
+  state: string;
+  expires_at: string;
+};
+
+function BusinessOffers() {
+  const [offers, setOffers] = useState<CustomerOffer[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [decision, setDecision] = useState<{ offer: CustomerOffer; action: "accepted" | "declined" } | null>(null);
+  const running = useRef(false);
+
+  async function refresh() {
+    if (!supabase) return;
+    const { data, error } = await supabase.rpc("b2b_offer_customer_list_v1");
+    if (error) throw error;
+    setOffers((data ?? []) as CustomerOffer[]);
+  }
+
+  async function run(action?: NonNullable<typeof decision>) {
+    if (!supabase || running.current) return;
+    running.current = true;
+    setBusy(true);
+    setMessage("");
+    try {
+      if (action) {
+        const { error } = await supabase.rpc("b2b_offer_decide_v1", {
+          p_draft: action.offer.draft_id, p_version: action.offer.version, p_action: action.action,
+        });
+        setDecision(null);
+        if (error) {
+          await refresh();
+          setMessage("Entscheidung nicht bestätigt. Bitte prüfe den aktuellen Angebotsstand.");
+          return;
+        }
+      }
+      await refresh();
+      if (action) setMessage(action.action === "accepted" ? "Annahme zur Vertragsprüfung erfasst." : "Ablehnung erfasst.");
+    } catch {
+      setMessage("Angebotsstand konnte nicht bestätigt werden. Bitte erneut laden.");
+    } finally {
+      running.current = false;
+      setBusy(false);
+    }
+  }
+
+  const states: Record<string, string> = {
+    published: "Offen", accepted: "Annahme erfasst", declined: "Abgelehnt", expired: "Abgelaufen",
+  };
+  const euros = new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR" });
+  return <section className="b2b-section">
+    <h2>Deine Angebote</h2>
+    <p>Deine Annahme geht zur Vertragsprüfung an GLOA. Im Kundenkonto wird dabei keine Zahlung ausgelöst.</p>
+    <button type="button" className="portal-action" disabled={busy} onClick={() => void run()}>Angebote laden</button>
+    {message && <p role="status">{message}</p>}
+    {offers.map(offer => <article key={offer.draft_id + ":" + offer.version} className="portal-note">
+      <h3>Matcha 500 g, Version {offer.version}</h3>
+      <p>{offer.pack_count} Beutel zu je {euros.format(offer.net_unit_cents / 100)} netto. Lieferland {offer.destination_country}.</p>
+      <p>{states[offer.state] ?? offer.state}. Gültig bis {new Date(offer.expires_at).toLocaleString("de-DE")}.</p>
+      {offer.state === "published" && !decision && <>
+        <button type="button" disabled={busy} onClick={() => setDecision({ offer, action: "accepted" })}>Annehmen</button>
+        <button type="button" disabled={busy} onClick={() => setDecision({ offer, action: "declined" })}>Ablehnen</button>
+      </>}
+      {decision?.offer.draft_id === offer.draft_id && decision.offer.version === offer.version && <>
+        <button type="button" disabled={busy} onClick={() => void run(decision)}>Entscheidung bestätigen</button>
+        <button type="button" disabled={busy} onClick={() => setDecision(null)}>Abbrechen</button>
+      </>}
+    </article>)}
+  </section>;
+}
+
 function PortalBusiness() {
   const { businessProfile } = useAuth();
   const [agreements, setAgreements] = useState<SupplyAgreementRow[]>([]);
@@ -4523,6 +4599,7 @@ function PortalBusiness() {
       </section>
 
       {/* ── Supply Agreements ── */}
+      <BusinessOffers />
       <section className="b2b-section">
         <p className="eyebrow">REGELMÄSSIGE BELIEFERUNG</p>
         {supplyLoading ? (

@@ -1,9 +1,9 @@
-import assert from 'node:assert/strict';
+﻿import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
 import ts from 'typescript';
-import { parseB2bOfferDraft } from '../lib/b2bOfferDraft.ts';
+import { parseB2bOfferDraft, parseB2bOfferId } from '../lib/b2bOfferDraft.ts';
 
 const input = {
   action: 'create', id: '8312771b-2929-4ff0-8ba4-05ea58a8e366',
@@ -59,4 +59,42 @@ test('protected draft endpoint accepts the same concurrent retry and refuses cha
   assert.deepEqual(results.map(result => result.status).sort(), [200, 201]);
   assert.equal(rows.size, 1);
   assert.equal((await call({ ...input, netUnitCents: 900 })).status, 409);
+});
+
+test('publication delegates the reviewed version and refuses missing evidence and unapproved tax', async () => {
+  const calls = [];
+  let error;
+  const source = readFileSync(new URL('../app/api/admin/b2b/offers/route.ts', import.meta.url), 'utf8');
+  const module = { exports: {} };
+  vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS,
+    target: ts.ScriptTarget.ES2022 } }).outputText, {
+    module, exports: module.exports, Response, URL,
+    require(name) {
+      if (name.endsWith('adminActionRoute.ts')) return { openAdminAction: async request =>
+        ({ ok: true, context: { identity: { userId: 'owner-fixture' }, body: await request.json() } }) };
+      if (name.endsWith('b2bOfferDraft.ts')) return { parseB2bOfferId };
+      if (name.endsWith('supabaseAdmin')) return { getSupabaseAdmin: () => ({ rpc: async (rpc, args) => {
+        calls.push([rpc, { ...args }]);
+        return { data: '2026-12-08T12:00:00Z', error };
+      } }) };
+      throw Error(name);
+    },
+  });
+  const publish = (evidence, origin = 'https://local.invalid') =>
+    module.exports.POST(new Request('https://local.invalid/api/admin/b2b/offers', {
+      method: 'POST', headers: { origin }, body: JSON.stringify({ action: 'publish', id: input.id, version: 2, evidence }),
+    }));
+  assert.equal((await publish('')).status, 400);
+  assert.equal((await publish('proof', 'https://foreign.invalid')).status, 403);
+  assert.equal(calls.length, 0);
+  const success = await publish('proof');
+  assert.equal(success.status, 200);
+  assert.equal((await success.json()).expiresAt, '2026-12-08T12:00:00Z');
+  assert.deepEqual(calls[0], ['b2b_offer_publish_v1', {
+    p_draft: input.id, p_version: 2, p_actor: 'owner-fixture', p_evidence: 'proof',
+  }]);
+  error = { message: 'offer_tax_review_required' };
+  assert.equal((await publish('proof')).status, 409);
+  error = { code: '42501' };
+  assert.equal((await publish('proof')).status, 403);
 });

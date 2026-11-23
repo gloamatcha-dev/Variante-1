@@ -1,5 +1,9 @@
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+export function parseB2bOfferId(value: unknown) {
+  return typeof value === "string" && uuid.test(value) ? value.toLowerCase() : null;
+}
+
 export function parseB2bOfferTerms(id: unknown, packCount: unknown, netUnitCents: unknown) {
   if (typeof id !== 'string' || !uuid.test(id) ||
       typeof packCount !== 'number' || !Number.isInteger(packCount) || packCount < 1 || packCount > 100000 ||

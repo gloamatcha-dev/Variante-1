@@ -1,5 +1,5 @@
 import { openAdminAction } from '../../../../../lib/adminActionRoute.ts';
-import { parseB2bOfferDraft, parseB2bOfferTerms } from '../../../../../lib/b2bOfferDraft.ts';
+import { parseB2bOfferDraft, parseB2bOfferId, parseB2bOfferTerms } from '../../../../../lib/b2bOfferDraft.ts';
 import { getSupabaseAdmin } from '../../../../../lib/supabaseAdmin';
 
 const columns = 'id,customer_id,inquiry_reference,destination_country,pack_count,net_unit_cents,valid_days,created_at';
@@ -34,8 +34,27 @@ export async function POST(request: Request) {
     }
     return json({ version: result.data }, 201);
   }
+  if (body?.action === 'publish') {
+    const input = body as Record<string, unknown>;
+    const id = parseB2bOfferId(input.id);
+    if (!id || typeof input.version !== 'number' || !Number.isInteger(input.version) ||
+        input.version < 1 || input.version > 2147483647 || typeof input.evidence !== 'string' ||
+        !input.evidence.trim() || input.evidence.trim().length > 200) {
+      return json({ error: 'Angebotsversion und Nachweisreferenz erforderlich.' }, 400);
+    }
+    const { data, error } = await admin.rpc('b2b_offer_publish_v1', {
+      p_draft: id, p_version: input.version, p_actor: gate.context.identity.userId, p_evidence: input.evidence,
+    });
+    if (!error) return json({ expiresAt: data });
+    if (error.code === '42501') return json({ error: 'Nur der Owner darf Angebote freigeben.' }, 403);
+    if (error.message === 'offer_tax_review_required') {
+      return json({ error: 'Steuerliche Freigabe fehlt.' }, 409);
+    }
+    if (error.message === 'offer_not_available') return json({ error: 'Angebotsstand hat sich geändert.' }, 409);
+    return json({ error: 'Veröffentlichung nicht bestätigt.' }, 503);
+  }
   if (body?.action === 'list') {
-    const { data, error } = await admin.from('b2b_offer_drafts').select(columns)
+    const { data, error } = await admin.from('b2b_offer_drafts').select(columns + ',versions:b2b_offer_versions(version,state,pack_count,net_unit_cents,expires_at)')
       .order('created_at', { ascending: false }).order('id').limit(30);
     return error ? json({ error: 'Entwürfe konnten nicht geladen werden.' }, 503) : json({ drafts: data });
   }

@@ -4,8 +4,10 @@ import { useRef, useState, type FormEvent } from "react";
 import { portalRequest } from "./AdminPortalShared";
 
 const endpoint = "/api/admin/b2b/offers";
+type Version = { version: number; state: string; pack_count: number; net_unit_cents: number; expires_at: string | null };
 type Draft = {
   id: string;
+  versions?: Version[];
   inquiry_reference: string;
   destination_country: string;
   pack_count: number;
@@ -75,6 +77,30 @@ export function AdminB2bOfferDrafts() {
     }
   }
 
+  async function updateOffer(event: FormEvent<HTMLFormElement>, draft: Draft, latest?: Version) {
+    event.preventDefault();
+    if (running.current) return;
+    const fields = new FormData(event.currentTarget);
+    const evidence = String(fields.get("evidence") ?? "");
+    const payload = evidence ? { action: "publish", version: latest?.version, evidence } : {
+      action: "revise", expectedVersion: latest?.version ?? 0, packCount: Number(fields.get("quantity")),
+      netUnitCents: Number(fields.get("price")),
+    };
+    running.current = true;
+    setBusy(true);
+    try {
+      await portalRequest(endpoint, { id: draft.id, ...payload });
+      const result = await portalRequest(endpoint, { action: "list" });
+      setDrafts(result.drafts as Draft[]);
+      setFeedback(evidence ? "Im Kundenkonto veröffentlicht." : "Neue Version gespeichert.");
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "Aktion nicht bestätigt.");
+    } finally {
+      running.current = false;
+      setBusy(false);
+    }
+  }
+
   return <details className="admin-data-card">
     <summary>B2B-Angebotsentwürfe</summary>
     <p>Interne Vorbereitung für 500-g-Fertigware. Vorgesehene Angebotsgültigkeit: 14 Tage. Vor Versand ist eine Steuerprüfung erforderlich.</p>
@@ -90,8 +116,28 @@ export function AdminB2bOfferDrafts() {
     </form>
     <button type="button" disabled={busy} onClick={() => void loadDrafts()}>Letzte 30 Entwürfe laden</button>
     {feedback && <p role="status">{feedback}</p>}
-    {drafts.length > 0 && <ul>{drafts.map(draft => <li key={draft.id}>
-      {draft.inquiry_reference} · {draft.destination_country} · {draft.pack_count} × 500 g · {draft.net_unit_cents} Cent netto je Beutel
-    </li>)}</ul>}
+    {drafts.length > 0 && <ul>{drafts.map(draft => {
+      const latest = draft.versions?.reduce<Version | undefined>((current, row) =>
+        !current || row.version > current.version ? row : current, undefined);
+      return <li key={draft.id}>
+        <p>{draft.inquiry_reference} · {draft.destination_country} · {latest?.state ?? "Entwurf"}
+          {latest && " · Version " + latest.version}</p>
+        {latest?.expires_at && <p>Gültig bis {new Date(latest.expires_at).toLocaleString("de-DE")}</p>}
+        {latest?.state === "accepted" ? <p>Annahme liegt zur Vertragsprüfung vor.</p> :
+          <form onSubmit={event => void updateOffer(event, draft, latest)} key={latest?.version ?? 0}>
+            <label>Anzahl 500-g-Beutel <input name="quantity" type="number" min={1} max={100000}
+              defaultValue={latest?.pack_count ?? draft.pack_count} required /></label>
+            <label>Nettopreis je Beutel (Cent) <input name="price" type="number" min={1} max={10000000}
+              defaultValue={latest?.net_unit_cents ?? draft.net_unit_cents} required /></label>
+            <button disabled={busy}>Version speichern</button>
+          </form>}
+        {latest?.state === "draft" && draft.destination_country === "DE" &&
+          <form onSubmit={event => void updateOffer(event, draft, latest)}>
+            <label>Referenz des gepr?ften Steuernachweises <input name="evidence" required maxLength={200} /></label>
+            <button disabled={busy}>Im Kundenkonto ver?ffentlichen</button>
+          </form>}
+        {draft.destination_country !== "DE" && <p>Internationale Steuerfreigabe ausstehend.</p>}
+      </li>;
+    })}</ul>}
   </details>;
 }
