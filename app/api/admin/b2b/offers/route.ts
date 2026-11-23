@@ -1,5 +1,5 @@
 import { openAdminAction } from '../../../../../lib/adminActionRoute.ts';
-import { parseB2bOfferDraft } from '../../../../../lib/b2bOfferDraft.ts';
+import { parseB2bOfferDraft, parseB2bOfferTerms } from '../../../../../lib/b2bOfferDraft.ts';
 import { getSupabaseAdmin } from '../../../../../lib/supabaseAdmin';
 
 const columns = 'id,customer_id,inquiry_reference,destination_country,pack_count,net_unit_cents,valid_days,created_at';
@@ -16,6 +16,24 @@ export async function POST(request: Request) {
   if (!admin) return json({ error: 'Angebotsentwürfe sind nicht verfügbar.' }, 503);
 
   const body = gate.context.body as { action?: unknown } | null;
+  if (body?.action === 'revise') {
+    const input = body as Record<string, unknown>;
+    const terms = parseB2bOfferTerms(input.id, input.packCount, input.netUnitCents);
+    if (!terms || typeof input.expectedVersion !== 'number' ||
+        !Number.isSafeInteger(input.expectedVersion) || input.expectedVersion < 0 ||
+        input.expectedVersion >= 2147483647) {
+      return json({ error: 'Ungültige Angebotsversion.' }, 400);
+    }
+    const result = await admin.rpc('b2b_offer_revise_v1', {
+      p_draft: terms.id, p_expected: input.expectedVersion, p_actor: gate.context.identity.userId,
+      p_quantity: terms.pack_count, p_net: terms.net_unit_cents,
+    });
+    if (result.error) {
+      const conflict = ['offer_revision_conflict', 'offer_already_accepted', 'offer_not_found'].includes(result.error.message);
+      return json({ error: conflict ? 'Angebotsstand hat sich geändert.' : 'Revision nicht bestätigt.' }, conflict ? 409 : 503);
+    }
+    return json({ version: result.data }, 201);
+  }
   if (body?.action === 'list') {
     const { data, error } = await admin.from('b2b_offer_drafts').select(columns)
       .order('created_at', { ascending: false }).order('id').limit(30);
