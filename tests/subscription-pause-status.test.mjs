@@ -1,4 +1,4 @@
-import assert from 'node:assert/strict';
+﻿import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
@@ -42,7 +42,7 @@ test('fails closed for collection pause, open or missing invoices, schedules, st
   assert.equal(readSubscriptionPauseStatus(subscription, identity, nextEnd * 1000).state, 'unconfirmed');
 });
 
-test('status route requires the owner of the subscription, refuses actions and only reads from Stripe', async () => {
+test('status route requires the owner and permits actions only with isolated sandbox configuration', async () => {
   const source = readFileSync(new URL('../app/api/subscriptions/pause-status/route.ts', import.meta.url), 'utf8');
   const compiled = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -51,6 +51,8 @@ test('status route requires the owner of the subscription, refuses actions and o
   const reads = [];
   let userId = null;
   let timeout = false;
+  let sandboxKey = null;
+  const actions = [];
   vm.runInNewContext(compiled, {
     module, exports: module.exports, Response, TextDecoder, Uint8Array,
     require(name) {
@@ -65,6 +67,13 @@ test('status route requires the owner of the subscription, refuses actions and o
           },
         }) }) }) }),
       }) };
+      if (name.endsWith('/subscriptionPauseActions.server')) return {
+        sandboxPauseKey: () => sandboxKey,
+        changeSandboxSubscriptionPause: async (_admin, target, action) => {
+          actions.push([target.localId, target.stripeId, action]);
+          return { state: 'scheduled', pauseAt: 1900000000 };
+        },
+      };
       if (name.endsWith('/stripe')) return { getStripeClient: () => ({ subscriptions: {
         retrieve: async (id, options) => {
           assert.equal(id, stripeId);
@@ -85,7 +94,15 @@ test('status route requires the owner of the subscription, refuses actions and o
   userId = 'other';
   assert.equal((await call({ subscriptionId: localId })).status, 404);
   userId = 'customer';
-  assert.equal((await call({ subscriptionId: localId, action: 'resume' })).status, 400);
+
+  assert.equal((await call({ subscriptionId: localId, action: 'resume' })).status, 409);
+  assert.equal((await call({ subscriptionId: localId, action: 'cancel' })).status, 400);
+  sandboxKey = 'sandbox fixture';
+  userId = 'other';
+  assert.equal((await call({ subscriptionId: localId, action: 'pause' })).status, 404);
+  userId = 'customer';
+  assert.equal((await call({ subscriptionId: localId, action: 'pause' })).status, 202);
+  assert.deepEqual(actions, [[localId, stripeId, 'pause']]);
   assert.equal((await call({ subscriptionId: 'x'.repeat(260) })).status, 413);
   assert.equal(reads.length, 0);
   const results = await Promise.all([call({ subscriptionId: localId }), call({ subscriptionId: localId })]);
@@ -95,4 +112,23 @@ test('status route requires the owner of the subscription, refuses actions and o
   }
   timeout = true;
   assert.equal((await call({ subscriptionId: localId })).status, 503);
+});
+
+test('sandbox writes stay disabled in Production even with a test key and loopback configuration', () => {
+  const source = readFileSync(new URL('../lib/subscriptionPauseActions.server.ts', import.meta.url), 'utf8')
+    .replace('import.meta.env.VITE_SUPABASE_URL', 'fixtureUrl');
+  const compiled = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const module = { exports: {} };
+  const env = { VERCEL_ENV: 'production', GLOA_SANDBOX_PAUSE_ACTIONS: 'true', STRIPE_SECRET_KEY: 'sk_test_fixture' };
+  vm.runInNewContext(compiled, {
+    module, exports: module.exports, require: () => ({}), URL,
+    fixtureUrl: 'http://127.0.0.1:54321', process: { env },
+  });
+  assert.equal(module.exports.sandboxPauseKey(), null);
+  env.VERCEL_ENV = 'development';
+  assert.equal(module.exports.sandboxPauseKey(), 'sk_test_fixture');
+  env.STRIPE_SECRET_KEY = 'sk_live_fixture';
+  assert.equal(module.exports.sandboxPauseKey(), null);
 });

@@ -98,3 +98,22 @@ test("parallel requests and a lost write response cannot cause an automatic resu
   assert.equal((await h.adapter.change({ ...target, operationId: target.localId }, "pause")).reason, "inspection_required");
   assert.equal(h.writes.length, 1);
 });
+
+test("resume proof uses current sandbox state and a completed matching schedule", async () => {
+  const subscription = { ...sub, schedule: scheduleId };
+  const resumedSchedule = { ...schedule,
+    pause_schedules: [{ ...entry, resume: { status: { type: "succeeded" } } }] };
+  const current = harness({ subscription, oldSchedule: resumedSchedule });
+  assert.equal(await current.adapter.confirmedResume(target, scheduleId), true);
+  for (const options of [
+    { subscription: { ...subscription, status: "paused" }, oldSchedule: resumedSchedule },
+    { subscription: { ...subscription, livemode: true }, oldSchedule: resumedSchedule },
+    { subscription, oldSchedule: { ...resumedSchedule, subscription: "sub_other" } },
+    { subscription, oldSchedule: schedule },
+  ]) {
+    const h = harness(options);
+    assert.equal(await h.adapter.confirmedResume(target, scheduleId), false);
+    assert.equal(h.writes.length, 0);
+  }
+  assert.equal(current.writes.length, 0);
+});

@@ -1,3 +1,4 @@
+import { sandboxPauseKey } from "../../../../lib/subscriptionPauseActions.server";
 import { releaseTerminalFirstMatchaCheckout } from "../../../../lib/matchaFirstCheckout";
 import type Stripe from "stripe";
 import { withdrawalTaxScope } from '../../../../lib/refundTaxScope';
@@ -388,6 +389,10 @@ export async function POST(request: Request): Promise<Response> {
       // reached Stripe but not the database converges. It writes no
       // status and never clears a promise - see reconcileB2bCancelAt.
       await handleB2bSubscriptionUpdated(event);
+    } else if ((event.type === "customer.subscription.paused" || event.type === "customer.subscription.resumed") &&
+        event.livemode === false && sandboxPauseKey()) {
+      // Lifecycle events refresh provider facts. Only invoice.paid can grant a delivery.
+      await handleSubscriptionUpdated(stripe, event);
     } else if (event.type === "customer.subscription.deleted") {
       // Phase 3C. The ONLY path that writes status = 'cancelled'.
       await handleSubscriptionDeleted(event);

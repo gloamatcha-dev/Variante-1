@@ -1,3 +1,4 @@
+import { changeSandboxSubscriptionPause, sandboxPauseKey } from "../../../../lib/subscriptionPauseActions.server";
 import { verifyBearerUser } from "../../../../lib/verifyUser";
 import { getStripeClient } from "../../../../lib/stripe";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
@@ -18,6 +19,7 @@ export async function POST(request: Request) {
   const bytes = new Uint8Array(256);
   let used = 0;
   let id: string;
+  let action: "pause" | "resume" | undefined;
   try {
     for (;;) {
       const { value, done } = await reader.read();
@@ -30,11 +32,13 @@ export async function POST(request: Request) {
       used += value.byteLength;
     }
     const body = JSON.parse(new TextDecoder().decode(bytes.subarray(0, used)));
-    if (!body || Object.keys(body).length !== 1 || typeof body.subscriptionId !== "string" ||
+    if (!body || Object.keys(body).some(key => key !== "subscriptionId" && key !== "action") ||
+        (body.action !== undefined && body.action !== "pause" && body.action !== "resume") || typeof body.subscriptionId !== "string" ||
         !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(body.subscriptionId)) {
       return response({ error: "Ungültige Anfrage." }, 400);
     }
     id = body.subscriptionId;
+    action = body.action;
   } catch {
     return response({ error: "Ungültige Anfrage." }, 400);
   } finally { reader.releaseLock(); }
@@ -46,12 +50,21 @@ export async function POST(request: Request) {
       .eq("id", id).eq("user_id", caller.userId).maybeSingle();
     if (error) return response({ error: "Abrechnungsstatus nicht bestätigt." }, 503);
     if (!data) return response({ error: "Abo nicht gefunden." }, 404);
+    const sandboxKey = sandboxPauseKey();
+    if (action) {
+      if (!sandboxKey || !data.stripe_subscription_id ||
+          (action === "pause" ? data.status !== "active" : !["active", "paused"].includes(data.status))) {
+        return response({ state: "blocked" }, 409);
+      }
+      const result = await changeSandboxSubscriptionPause(admin, { localId: data.id, stripeId: data.stripe_subscription_id }, action, sandboxKey);
+      return response(result, result.state === "blocked" ? 409 : result.state === "unconfirmed" ? 503 : 202);
+    }
     const stripe = getStripeClient();
     if (!stripe || !data.stripe_subscription_id || !["active", "paused", "past_due"].includes(data.status)) {
       return response({ error: "Abrechnungsstatus nicht bestätigt." }, 409);
     }
     const subscription = await stripe.subscriptions.retrieve(data.stripe_subscription_id, { expand: ["latest_invoice"] });
-    return response(readSubscriptionPauseStatus(subscription, { localId: data.id, stripeId: data.stripe_subscription_id }));
+    return response({ ...readSubscriptionPauseStatus(subscription, { localId: data.id, stripeId: data.stripe_subscription_id }), sandboxActions: Boolean(sandboxKey && subscription.livemode === false) });
   } catch {
     return response({ error: "Abrechnungsstatus nicht bestätigt. Bitte später erneut prüfen." }, 503);
   }

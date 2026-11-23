@@ -159,5 +159,19 @@ export function createStripePauseScheduleSandbox(
     }
   }
 
-  return { change };
+  async function confirmedResume(target: { localId: string; stripeId: string }, scheduleId: string) {
+    const subscription = await call<StripeSubscription>("subscriptions/" + target.stripeId);
+    if (subscription.id !== target.stripeId || subscription.livemode !== false ||
+        subscription.metadata?.gloa_subscription_id !== target.localId ||
+        subscription.billing_mode?.type !== "flexible" || subscription.status !== "active" ||
+        subscription.schedule !== scheduleId) return false;
+    const schedule = await call<StripeSchedule>("subscription_schedules/" + scheduleId);
+    const entry = schedule.pause_schedules?.[0];
+    return schedule.id === scheduleId && schedule.subscription === target.stripeId &&
+      schedule.livemode === false && schedule.billing_mode?.type === "flexible" &&
+      schedule.pause_schedules?.length === 1 && entry?.pause?.status?.type === "succeeded" &&
+      entry.resume?.status?.type === "succeeded";
+  }
+
+  return { change, confirmedResume };
 }

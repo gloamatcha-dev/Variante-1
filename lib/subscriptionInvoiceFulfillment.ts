@@ -1,3 +1,5 @@
+import { sandboxPauseKey } from "./subscriptionPauseActions.server";
+import { createStripePauseScheduleSandbox } from "./stripePauseScheduleSandbox.server";
 import { bindFirstMatchaInvoice } from "./matchaFirstCheckout";
 import type Stripe from "stripe";
 import { getSupabaseAdmin } from "./supabaseAdmin";
@@ -137,7 +139,10 @@ export type InvoiceFulfillmentResult =
    */
   | { kind: "failed"; reason: string };
 
+type SandboxCycle = { paidStart: string; paidEnd: string; scheduleId: string | null; resumedAt: string | null };
+
 export type SubscriptionInvoiceDeps = {
+  prepareSandboxCycle?: (subscription: Stripe.Subscription, localId: string, paid: { start: string; end: string }) => Promise<SandboxCycle>;
   bindFirstInvoice?: (subscriptionId: string, invoiceId: string) => Promise<void>;
   /** Re-read from Stripe, never the webhook payload's embedded copy. */
   retrieveInvoice: (invoiceId: string) => Promise<Stripe.Invoice>;
@@ -152,6 +157,7 @@ export type SubscriptionInvoiceDeps = {
     currentPeriodStart: string | null;
     currentPeriodEnd: string | null;
     nextDeliveryAt: string | null;
+    sandboxCycle?: SandboxCycle;
   }) => Promise<string>;
   createOrder: (input: {
     checkoutAttemptId: string;
@@ -232,17 +238,20 @@ async function activateFromInvoice(input: {
   currentPeriodStart: string | null;
   currentPeriodEnd: string | null;
   nextDeliveryAt: string | null;
+  sandboxCycle?: SandboxCycle;
 }): Promise<string> {
   const admin = getSupabaseAdmin();
   if (!admin) throw new Error("supabase admin client is not configured");
 
-  const { data, error } = await admin.rpc("activate_subscription_from_invoice", {
+  const { data, error } = await admin.rpc(input.sandboxCycle ? "activate_sandbox_subscription_cycle" : "activate_subscription_from_invoice", {
     p_subscription_id: input.subscriptionId,
     p_stripe_subscription_id: input.stripeSubscriptionId,
     p_stripe_invoice_id: input.stripeInvoiceId,
     p_current_period_start: input.currentPeriodStart,
     p_current_period_end: input.currentPeriodEnd,
     p_next_delivery_at: input.nextDeliveryAt,
+    ...(input.sandboxCycle && { p_paid_start: input.sandboxCycle.paidStart, p_paid_end: input.sandboxCycle.paidEnd,
+      p_schedule_id: input.sandboxCycle.scheduleId, p_resumed_at: input.sandboxCycle.resumedAt }),
   });
 
   if (error || !data) {
@@ -360,7 +369,21 @@ export const defaultSubscriptionInvoiceDeps: SubscriptionInvoiceDeps = {
 
 /** Binds the Stripe-client-dependent halves for a real request. */
 export function subscriptionInvoiceDeps(stripe: Stripe): SubscriptionInvoiceDeps {
+  const key = sandboxPauseKey();
   return {
+    prepareSandboxCycle: key ? async (subscription, localId, paid) => {
+      if (subscription.livemode !== false) throw new Error("Sandbox subscription required");
+      const scheduleId = idOf(subscription.schedule);
+      const anchor = subscription.billing_cycle_anchor;
+      const anchorIsValid = Number.isSafeInteger(anchor) && anchor > 0 && anchor <= 253402300799;
+      // The adapter sets billing_cycle_anchor=resume_at. Unlike the current
+      // period start, the anchor still identifies the restart on late delivery.
+      const resumedAt = scheduleId && subscription.status === "active" && anchorIsValid &&
+        anchor * 1000 <= Date.parse(paid.start) &&
+        await createStripePauseScheduleSandbox(key).confirmedResume({ localId, stripeId: subscription.id }, scheduleId)
+        ? new Date(anchor * 1000).toISOString() : null;
+      return { paidStart: paid.start, paidEnd: paid.end, scheduleId, resumedAt };
+    } : undefined,
     ...defaultSubscriptionInvoiceDeps,
     bindFirstInvoice: (subscriptionId, invoiceId) => bindFirstMatchaInvoice("subscription", subscriptionId, invoiceId),
     retrieveInvoice: id => stripe.invoices.retrieve(id),
@@ -453,6 +476,13 @@ export async function fulfillPaidSubscriptionInvoice(
   // 022 does both under a row lock on the subscription and is idempotent
   // on stripe_invoice_id, so a redelivery returns the same attempt.
   const period = resolveSubscriptionPeriod(stripeSubscription);
+  const paidPeriod = resolvePaidInvoiceSubscriptionPeriod(invoice, stripeSubscriptionId);
+  const sandboxCycle = deps.prepareSandboxCycle && paidPeriod.ok
+    ? await deps.prepareSandboxCycle(stripeSubscription, subscription.id, paidPeriod)
+    : undefined;
+  if (deps.prepareSandboxCycle && !sandboxCycle) {
+    return { kind: "failed", reason: "sandbox invoice period unconfirmed" };
+  }
   const checkoutAttemptId = await deps.activateFromInvoice({
     subscriptionId: subscription.id,
     stripeSubscriptionId,
@@ -460,6 +490,7 @@ export async function fulfillPaidSubscriptionInvoice(
     currentPeriodStart: period.currentPeriodStart,
     currentPeriodEnd: period.currentPeriodEnd,
     nextDeliveryAt: period.nextDeliveryAt,
+    ...(sandboxCycle && { sandboxCycle }),
   });
 
   // STEP 2. One order for that attempt. Migration 021 locks the attempt
@@ -507,7 +538,7 @@ export async function fulfillPaidSubscriptionInvoice(
   // so Stripe can redeliver. The order for this cycle already exists, so
   // the customer still gets their package; what a refusal withholds is
   // only the evidence that would end their subscription.
-  const paidPeriod = resolvePaidInvoiceSubscriptionPeriod(invoice, stripeSubscriptionId);
+
   if (!paidPeriod.ok) {
     return { kind: "failed", reason: `invoice ${invoice.id}: ${paidPeriod.reason}` };
   }

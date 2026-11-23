@@ -3716,9 +3716,11 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
     busy: boolean;
     state: "active" | "paused" | "unconfirmed";
     nextCycleAt: string | null;
+    sandboxActions?: boolean;
+    message?: string;
   } | null>(null);
 
-  async function checkBillingStatus() {
+  async function checkBillingStatus(action?: "pause" | "resume") {
     if (!session?.access_token || billingCheck?.busy) return;
     const pending = { subscriptionId, busy: true, state: "unconfirmed" as const, nextCycleAt: null };
     setBillingCheck(pending);
@@ -3727,13 +3729,20 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
       const response = await fetch("/api/subscriptions/pause-status", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ subscriptionId }),
+        body: JSON.stringify({ subscriptionId, action }),
       });
       const body = await response.json();
-      if (response.ok && body?.state === "paused") result = { ...pending, busy: false, state: "paused" };
+      if (action) {
+        result.message = response.ok
+          ? body.state === "scheduled"
+            ? "Pause geplant ab " + new Date(body.pauseAt * 1000).toLocaleString("de-DE", { timeZone: "Europe/Berlin" })
+            : "Wiederaufnahme angefragt. Der neue Zyklus ist noch nicht bestätigt."
+          : "Aktion nicht bestätigt. Bitte zuerst den Abrechnungsstatus prüfen.";
+      }
+      if (response.ok && body?.state === "paused") result = { ...pending, busy: false, state: "paused", sandboxActions: body.sandboxActions === true };
       if (response.ok && body?.state === "active" && typeof body.nextCycleAt === "string" &&
           Number.isFinite(Date.parse(body.nextCycleAt))) {
-        result = { ...pending, busy: false, state: "active", nextCycleAt: body.nextCycleAt };
+        result = { ...pending, busy: false, state: "active", nextCycleAt: body.nextCycleAt, sandboxActions: body.sandboxActions === true };
       }
     } catch {
       // A failed read cannot confirm the next cycle or a pause.
@@ -3922,10 +3931,16 @@ function SubscriptionDetail({ subscriptionId }: { subscriptionId: string }) {
       {statusNote && <p className="portal-note">{statusNote}</p>}
       {!ended && ["active", "paused", "past_due"].includes(sub.status) && (
         <section className="portal-note" aria-label="Abo-Pause und Abrechnung">
-          <p>Die Selbstbedienung für Pause und Wiederaufnahme ist derzeit nicht verfügbar.</p>
+          {observedBilling?.sandboxActions && observedBilling.state !== "unconfirmed" && (
+            <button type="button" className="portal-action" disabled={observedBilling.busy}
+              onClick={() => void checkBillingStatus(observedBilling.state === "paused" ? "resume" : "pause")}>
+              {observedBilling.state === "paused" ? "Abo wieder aufnehmen" : "Abo zum Zyklusende pausieren"}
+            </button>
+          )}
           <button type="button" className="portal-action" onClick={() => void checkBillingStatus()}
             disabled={observedBilling?.busy || !session?.access_token}>Abrechnungsstatus prüfen</button>
           <div role="status">
+            {observedBilling?.message && <p>{observedBilling.message}</p>}
             {observedBilling?.busy && <p>Abrechnungsstatus wird geprüft …</p>}
             {observedBilling && !observedBilling.busy && observedBilling.state === "unconfirmed" &&
               <p>Abrechnungsstatus und nächster Zyklus nicht bestätigt.</p>}
