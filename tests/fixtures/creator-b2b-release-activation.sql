@@ -141,6 +141,29 @@ values ('2020-01-01','Synthetic Issuer','Synthetic Street','00000','Synthetic Ci
 select pg_temp.expect_refusal(
   $$update public.invoice_issuer_versions set legal_name='changed'$$,'P0001','invoice_issuer_version_immutable');
 
+insert into public.financial_events values ('30000000-0000-4000-8000-000000000010');
+create function pg_temp.approve_b2b_invoice(actor uuid) returns void language sql as $$
+  insert into public.gloa_b2b_invoice_evidence(
+    financial_event_id,issuer_version,approved_by,tax_decision,payment_reference,delivery_evidence_reference,tax_evidence_reference,snapshot
+  ) select '30000000-0000-4000-8000-000000000010',version,actor,
+    'domestic_taxable_completed_supply_invoice_required','synthetic-payment','synthetic-delivery','synthetic-tax','{}'::jsonb
+  from public.invoice_issuer_versions
+$$;
+select pg_temp.expect_refusal(
+  $$select pg_temp.approve_b2b_invoice('10000000-0000-4000-8000-000000000001')$$,'55000','release_writes_disabled');
+update public.operations_config set int_value=1 where key='invoice_release_writes_enabled';
+set local role service_role;
+select pg_temp.expect_refusal(
+  $$select pg_temp.approve_b2b_invoice('10000000-0000-4000-8000-000000000001')$$,'42501',
+  'permission denied for table gloa_b2b_invoice_evidence');
+reset role;
+select pg_temp.expect_refusal(
+  $$select pg_temp.approve_b2b_invoice('10000000-0000-4000-8000-000000000099')$$,'P0001','xrechnung_evidence_owner_unconfirmed');
+select pg_temp.approve_b2b_invoice('10000000-0000-4000-8000-000000000001');
+select pg_temp.expect_refusal(
+  $$update public.gloa_b2b_invoice_evidence set payment_reference='changed'$$,'P0001','xrechnung_evidence_immutable');
+update public.operations_config set int_value=0 where key='invoice_release_writes_enabled';
+
 update public.operations_config set int_value=1 where key='matcha_lot_release_writes_enabled';
 insert into public.inventory_movements(id,inventory_item_id,quantity_delta,movement_type,reason,supplier,batch_number,best_before_date)
 values ('30000000-0000-4000-8000-000000000006','30000000-0000-4000-8000-000000000001',10,'receipt','goods_receipt','synthetic','synthetic-lot',current_date+20);

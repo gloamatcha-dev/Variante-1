@@ -11,6 +11,36 @@ alter table public.gloa_invoice_register
 update storage.buckets set allowed_mime_types=array_append(allowed_mime_types,'application/xml')
 where id='gloa-finance-documents' and not public and not ('application/xml'=any(allowed_mime_types));
 
+-- Only the DB owner may approve documentary evidence for a completed,
+-- taxable domestic B2B supply. Service callers may read it but cannot approve it.
+create table public.gloa_b2b_invoice_evidence (
+  financial_event_id uuid primary key references public.financial_events(id),
+  issuer_version bigint not null references public.invoice_issuer_versions(version),
+  approved_by uuid not null,
+  approved_at timestamptz not null default now(),
+  tax_decision text not null check(tax_decision='domestic_taxable_completed_supply_invoice_required'),
+  payment_reference text not null check(length(btrim(payment_reference))>0),
+  delivery_evidence_reference text not null check(length(btrim(delivery_evidence_reference))>0),
+  tax_evidence_reference text not null check(length(btrim(tax_evidence_reference))>0),
+  snapshot jsonb not null check(jsonb_typeof(snapshot)='object' and not (snapshot ?| array['number','issuedOn']))
+);
+alter table public.gloa_b2b_invoice_evidence enable row level security;
+revoke all on public.gloa_b2b_invoice_evidence from public,anon,authenticated,service_role;
+grant select on public.gloa_b2b_invoice_evidence to service_role;
+
+create function public.guard_gloa_b2b_invoice_evidence_v1() returns trigger
+language plpgsql security definer set search_path='' as $$
+begin
+  if tg_op <> 'INSERT' then raise exception 'xrechnung_evidence_immutable'; end if;
+  perform public.require_release_writes_v1('invoice_release_writes_enabled');
+  if not exists(select 1 from public.admin_users where user_id=new.approved_by and role='owner' and is_active)
+     or new.approved_at > now() then raise exception 'xrechnung_evidence_owner_unconfirmed'; end if;
+  return new;
+end $$;
+revoke all on function public.guard_gloa_b2b_invoice_evidence_v1() from public,anon,authenticated,service_role;
+create trigger gloa_b2b_invoice_evidence_guard before insert or update or delete on public.gloa_b2b_invoice_evidence
+for each row execute function public.guard_gloa_b2b_invoice_evidence_v1();
+
 create function public.claim_gloa_xrechnung_v1(p_event uuid,p_issuer bigint,p_snapshot jsonb,p_cutoff timestamptz)
 returns public.gloa_invoice_register language plpgsql security definer set search_path='' as $$
 declare e public.financial_events; a public.b2b_supply_agreements; issued public.gloa_invoice_register;
@@ -41,6 +71,15 @@ begin
     end if;
     return issued;
   end if;
+  if e.kind='b2b_settlement' and (
+    p_issuer is distinct from (select version from public.invoice_issuer_versions where effective_from<=now()
+      order by effective_from desc limit 1) or
+    not exists(select 1 from public.gloa_b2b_invoice_evidence approved
+      where approved.financial_event_id=e.id and approved.issuer_version=p_issuer
+        and approved.tax_decision='domestic_taxable_completed_supply_invoice_required'
+        and approved.payment_reference=e.external_reference and approved.approved_at<=now()
+        and approved.snapshot = p_snapshot - 'issuedOn')
+  ) then raise exception 'xrechnung_approved_evidence_required'; end if;
   select * into issuer from public.invoice_issuer_versions where version=p_issuer and effective_from<=now();
   if not found or issuer.country_code<>'DE' or
       (p_snapshot#>>'{seller,vatId}') is distinct from issuer.vat_id or

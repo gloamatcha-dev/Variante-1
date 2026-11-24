@@ -1,6 +1,7 @@
 import type { getSupabaseAdmin } from "./supabaseAdmin";
 import { invoiceBucket, invoicePath } from "./gloaInvoice.server";
 import { persistInvoicePdf } from "./gloaInvoiceRules";
+import { berlinCivilDate } from "./withdrawalDeadline";
 import { renderXRechnung, type XRechnungInput } from "./xrechnung.server";
 import { validateXRechnung } from "./xrechnungValidation.server";
 
@@ -17,6 +18,27 @@ function config() {
       !jar || !configurationZip || !cutoff || !Number.isFinite(Date.parse(cutoff)) ||
       !Number.isSafeInteger(issuer) || issuer < 1) throw new Error("xrechnung_issuance_disabled");
   return { jar, configurationZip, cutoff: new Date(cutoff).toISOString(), issuer };
+}
+
+/** Process an Owner-approved settlement. Unapproved events allocate no number. */
+export async function issueApprovedB2bSettlement(admin: Admin, financialEventId: string, paymentReference?: string) {
+  const assets = config();
+  const existing = await admin.from("gloa_invoice_register").select("id, number, document_id, snapshot, format")
+    .eq("financial_event_id", financialEventId).maybeSingle();
+  if (existing.error) throw new Error("xrechnung_register_unavailable");
+  if (existing.data) {
+    if (existing.data.format !== "xrechnung") throw new Error("xrechnung_format_conflict");
+    return completeB2bXRechnung(admin, existing.data);
+  }
+  const approval = await admin.from("gloa_b2b_invoice_evidence").select("issuer_version, payment_reference, snapshot")
+    .eq("financial_event_id", financialEventId).maybeSingle();
+  if (approval.error) throw new Error("xrechnung_approval_unavailable");
+  const approved = approval.data;
+  if (!approved || approved.issuer_version !== assets.issuer ||
+      (paymentReference !== undefined && approved.payment_reference !== paymentReference)) return null;
+  const issuedOn = berlinCivilDate(new Date());
+  if (!issuedOn) throw new Error("xrechnung_issue_date_unconfirmed");
+  return issueB2bXRechnung(admin, financialEventId, { ...approved.snapshot, issuedOn });
 }
 
 /** Only a trusted server flow may supply the approved, frozen billing snapshot. */

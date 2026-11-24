@@ -43,21 +43,3 @@ export async function loadB2bInvoiceEvidence(admin: Admin, { agreementId, paymen
     grossCents: gross_cents as number, currency: "EUR" as const,
     buyer: agreement.data.business_snapshot, billingAddress: billing };
 }
-
-export type B2bInvoiceEvidence = NonNullable<Awaited<ReturnType<typeof loadB2bInvoiceEvidence>>>;
-
-// A production adapter must prove both EN 16931/XRechnung conformance and
-// business-data equivalence. No implementation is configured in this release.
-export type B2bStructuredInvoiceAdapter = {
-  renderAndValidate(input: {
-    evidence: B2bInvoiceEvidence;
-    snapshot: import("./gloaInvoiceRules").InvoiceSnapshot;
-    invoiceNumber: string;
-  }): Promise<{ status: "validated"; profile: "XRechnung"; xml: Uint8Array; validationReportSha256: string }
-    | { status: "blocked"; reason: string }>;
-};
-
-export async function checkB2bInvoiceReadiness(admin: Admin, settlement: B2bSettlement, cutoff: string) {
-  const evidence = await loadB2bInvoiceEvidence(admin, settlement, cutoff);
-  return evidence ? "structured_invoice_snapshot_or_validation_unconfirmed" : "billing_or_tax_evidence_unconfirmed";
-}

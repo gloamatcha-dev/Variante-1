@@ -256,9 +256,14 @@ export async function inspectVerifiedB2bInvoice(
   try {
     const admin = getSupabaseAdmin();
     if (!admin) return;
-    const { checkB2bInvoiceReadiness } = await import("./gloaB2bInvoiceEvidence.server");
-    const reason = await checkB2bInvoiceReadiness(admin, { agreementId, payment }, config.cutoff);
-    console.error("GLOA B2B invoice issuance blocked for " + agreementId + " (" + reason + ")");
+    if (process.env.GLOA_XRECHNUNG_ENABLED !== "true") return;
+    const { loadB2bInvoiceEvidence } = await import("./gloaB2bInvoiceEvidence.server");
+    const evidence = await loadB2bInvoiceEvidence(admin, { agreementId, payment }, config.cutoff);
+    if (!evidence) return;
+    const { issueApprovedB2bSettlement } = await import("./gloaXRechnung.server");
+    if (!await issueApprovedB2bSettlement(admin, evidence.eventId, evidence.paymentReference)) {
+      console.error("GLOA B2B invoice approval missing for agreement " + agreementId);
+    }
   } catch {
     console.error("GLOA B2B invoice evidence unavailable for " + agreementId);
   }

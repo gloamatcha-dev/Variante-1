@@ -1,4 +1,4 @@
-import { completeB2bXRechnung } from "../../../../lib/gloaXRechnung.server";
+import { completeB2bXRechnung, issueApprovedB2bSettlement } from "../../../../lib/gloaXRechnung.server";
 import { privateInvoiceHeaders, serveIssuedInvoices } from "../../../../lib/gloaInvoiceAccess.server";
 import { verifyBearerUser } from "../../../../lib/verifyUser";
 import { requireAdminIdentity } from "../../../../lib/adminActionRoute";
@@ -34,7 +34,20 @@ export async function POST(request: Request) {
   const access = await requireAdminIdentity(request, "write");
   if (!access.ok || access.identity.role !== "owner" ||
       request.headers.get("origin") !== new URL(request.url).origin) return json({}, 403);
-  const id = new URL(request.url).searchParams.get("id");
+  const params = new URL(request.url).searchParams;
+  const id = params.get("id");
+  const eventId = params.get("eventId");
+  if (eventId !== null) {
+    if (id !== null || !uuid(eventId)) return json({}, 400);
+    const admin = getSupabaseAdmin();
+    if (!admin) return json({}, 503);
+    try {
+      const issued = await issueApprovedB2bSettlement(admin, eventId);
+      return issued ? json({ processed: true }) : json({ processed: false }, 409);
+    } catch {
+      return json({}, 503);
+    }
+  }
   if (!uuid(id)) return json({}, 400);
   const admin = getSupabaseAdmin();
   if (!admin) return json({}, 503);

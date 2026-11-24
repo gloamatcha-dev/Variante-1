@@ -48,4 +48,6 @@ Das vorige Deployment erst wieder zuweisen, wenn es die verbleibenden Geschäfts
 
 Vor einem Wechsel der Ausstellerversion die Ausstellung sperren und die konfigurierte Version mit der zuletzt wirksam gewordenen Version abgleichen. Wiederholungen behalten den gespeicherten Snapshot. Korrekturen behalten die Ausstellerversion des Originals.
 
-Die B2B-Zahlungswebhooks korrelieren Abrechnungsnachweise. Vor der automatischen XRechnung fehlen der belegte Snapshot mit Adressat, Ausstellerkontakt, Leistungs- und Zahlungsdaten sowie die Anbindung an die Ausstellung. Das validierte Profil weiterhin unveraendert verwenden.
+Die Migration 20261124170000 legt den geschuetzten Nachweis zur B2B-Rechnung an. Der DB-Owner darf bei offener Rechnungssperre in gloa_b2b_invoice_evidence genau eine unveraenderliche Freigabe pro Finanzereignis hinterlegen. Nur eine nachweislich abgeschlossene steuerpflichtige Inlandslieferung mit bestaetigter Rechnungspflicht ist im automatischen Pfad abgedeckt. Zahlungs-, Liefer- und Steuernachweis, Kundenreferenz, Ausstellerkontakt und Rechnungspositionen vor Freigabe abgleichen. Vorauszahlungen, Sondersteuerfaelle und unklare Faelle gesondert bearbeiten.
+
+Wenn der Zahlungswebhook bereits verarbeitet wurde oder vor der fachlichen Freigabe eintraf, kann ein Owner die Ausstellung im vorhandenen Rechnungs-Endpunkt per POST mit eventId nachholen. Wiederholungen setzen beim bereits gespeicherten Registereintrag an. Zum Rueckfall die Rechnungssperre schliessen und vorhandene Nachweise, Registereintraege und Nummern erhalten.

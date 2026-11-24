@@ -300,7 +300,7 @@ test('guest invoice lookup stays inside the order selected by the existing crede
 });
 
 test('B2B evidence distinguishes monthly invoices, annual instalments and unapproved destinations', async () => {
-  const { loadB2bInvoiceEvidence, checkB2bInvoiceReadiness } = moduleFixture('../lib/gloaB2bInvoiceEvidence.server.ts', {});
+  const { loadB2bInvoiceEvidence } = moduleFixture('../lib/gloaB2bInvoiceEvidence.server.ts', {});
   const monthly = { id: 'm', plan_type: 'monthly' };
   const annual = { id: 'a', plan_type: 'annual' };
   const tables = {
@@ -335,7 +335,7 @@ test('B2B evidence distinguishes monthly invoices, annual instalments and unappr
     const evidence = await loadB2bInvoiceEvidence(admin, request, cutoff);
     assert.equal(evidence.paymentReference, reference);
     assert.equal(evidence.grossCents, 1070);
-    assert.equal(await checkB2bInvoiceReadiness(admin, request, cutoff), 'structured_invoice_snapshot_or_validation_unconfirmed');
+
   }
   assert.equal(await loadB2bInvoiceEvidence(admin, { agreementId: 'a',
     payment: { model: 'annual', invoiceId: 'in_unpaid' } }, cutoff), null);
@@ -352,6 +352,7 @@ test('XRechnung storage is unreachable on failed validation or disabled issuance
     './supabaseAdmin': {},
     './gloaInvoice.server': { invoiceBucket: 'private', invoicePath: id => 'invoice-register/' + id + '.xml' },
     './gloaInvoiceRules': { persistInvoicePdf },
+    './withdrawalDeadline': { berlinCivilDate: () => '2026-11-24' },
     './xrechnung.server': { renderXRechnung: () => Buffer.from('<Invoice/>') },
     './xrechnungValidation.server': { validateXRechnung: async () => {
       validations++;
@@ -389,4 +390,56 @@ test('XRechnung storage is unreachable on failed validation or disabled issuance
   await app.completeB2bXRechnung(admin, { ...row, document_id: row.id });
   assert.equal(uploads, 1);
   assert.equal(finalized, 1);
+});
+
+test('B2B settlement needs matching approval before claim and retries frozen storage work once', async () => {
+  let approval, row, claims = 0, uploads = 0;
+  const env = { GLOA_INVOICE_ENABLED: 'true', GLOA_XRECHNUNG_ENABLED: 'true',
+    GLOA_INVOICE_ISSUER_VERSION: '2', GLOA_INVOICE_CUTOFF: '2026-11-22T00:00:00Z',
+    GLOA_KOSIT_JAR: 'synthetic-jar', GLOA_KOSIT_CONFIGURATION_ZIP: 'synthetic-rules' };
+  const app = moduleFixture('../lib/gloaXRechnung.server.ts', {
+    './gloaInvoice.server': { invoiceBucket: 'private', invoicePath: id => id + '.xml' },
+    './gloaInvoiceRules': { persistInvoicePdf },
+    './withdrawalDeadline': { berlinCivilDate: () => '2026-11-24' },
+    './xrechnung.server': { renderXRechnung: input => Buffer.from(input.number + ' ' + input.issuedOn) },
+    './xrechnungValidation.server': { validateXRechnung: async () => ({ xmlSha256: 'a'.repeat(64), reportSha256: 'b'.repeat(64) }) },
+  }, { process: { env } });
+  const admin = {
+    from(table) {
+      return { select() { return this; }, eq(key, id) {
+        assert.equal(key, 'financial_event_id');
+        assert.equal(id, 'event');
+        return this;
+      }, async maybeSingle() {
+        return { data: table === 'gloa_invoice_register' ? row : approval };
+      } };
+    },
+    storage: { from: () => ({
+      async upload() { return { error: ++uploads === 1 ? Error('upload failed') : null }; },
+      async download() { return { data: null }; },
+    }) },
+    rpc(name, args) {
+      if (name === 'claim_gloa_xrechnung_v1') {
+        claims++;
+        assert.equal(args.p_event, 'event');
+        assert.equal(args.p_issuer, 2);
+        assert.equal(args.p_snapshot.issuedOn, '2026-11-24');
+        row = { id: 'registered', number: 'XR-1', format: 'xrechnung', snapshot: args.p_snapshot };
+        return { single: () => ({ overrideTypes: async () => ({ data: row }) }) };
+      }
+      assert.equal(name, 'finish_gloa_xrechnung_v1');
+      row.document_id = row.id;
+      return {};
+    },
+  };
+  assert.equal(await app.issueApprovedB2bSettlement(admin, 'event', 'paid-ref'), null);
+  approval = { issuer_version: 2, payment_reference: 'different', snapshot: {} };
+  assert.equal(await app.issueApprovedB2bSettlement(admin, 'event', 'paid-ref'), null);
+  assert.equal(claims, 0);
+  approval.payment_reference = 'paid-ref';
+  await assert.rejects(app.issueApprovedB2bSettlement(admin, 'event', 'paid-ref'), /storage_unconfirmed/);
+  assert.equal(await app.issueApprovedB2bSettlement(admin, 'event', 'paid-ref'), 'registered');
+  assert.equal(await app.issueApprovedB2bSettlement(admin, 'event', 'paid-ref'), 'registered');
+  assert.equal(claims, 1);
+  assert.equal(uploads, 2);
 });

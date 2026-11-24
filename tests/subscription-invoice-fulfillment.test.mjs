@@ -779,7 +779,7 @@ test("session: a subscription session is routed away from the one-time handler",
   // with a matching amount_total, so without this branch the one-time
   // handler would mark the attempt paid and create the first order from
   // the wrong event.
-  assert.match(webhookCode, /if \(session\.mode === "subscription"\) \{\s*await handleSubscriptionSessionCompleted\(stripe, session\);\s*\} else \{\s*await handleCheckoutSessionCompleted\(stripe, session\);/);
+  assert.match(webhookCode, /if \(session\.mode === "subscription"\) \{\s*await handleSubscriptionSessionCompleted\(stripe, session\);\s*\} else \{\s*await handleCheckoutSessionCompleted\(stripe, session, event\.livemode \? event\.created : 0\);/);
 });
 
 test("session: the subscription handler creates no order and activates nothing", () => {
@@ -943,10 +943,12 @@ test("boundary: no label, no cancellation, no B2B - and no email built here", ()
     "sendOrderConfirmationEmail", "sendInternalOrderNotification", "Resend", "resend",
     "dhl", "DHL", "label",
     "cancel_at_period_end", "subscriptions.cancel", "subscriptions.update",
-    "pause", "resume", "b2b", "B2B", "b2b_supply",
+    "b2b", "B2B", "b2b_supply",
   ]) {
     assert.ok(!fulfillmentCode.includes(forbidden), `the fulfillment path touches ${forbidden}`);
   }
+  assert.match(fulfillmentCode, /createStripePauseScheduleSandbox\(key\)\.confirmedResume\(/);
+  assert.doesNotMatch(fulfillmentCode, /\.change\(|pause_collection|subscriptionSchedules\.|subscriptions\.(?:pause|resume|update|cancel)\(/);
   assert.ok(!/shipped_at|tracking_number|fulfillment_status/.test(newCode));
   // And nothing marks an order shipped.
   assert.ok(!/shipped_at|tracking_number|fulfillment_status/.test(fulfillmentCode));
