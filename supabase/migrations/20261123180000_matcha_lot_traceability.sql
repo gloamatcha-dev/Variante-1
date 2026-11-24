@@ -232,20 +232,25 @@ grant execute on function public.admin_correct_matcha_lot_v1(uuid,uuid,uuid,nume
 
 create function public.guard_matcha_lot_shipment_v1() returns trigger
 language plpgsql security definer set search_path='' as $$
+declare missing_hold boolean; invalid_quantity boolean;
 begin
   if old.shipped_at is null and old.fulfillment_status not in ('shipped','delivered')
-    and (new.shipped_at is not null or new.fulfillment_status in ('shipped','delivered'))
-    and exists (
-      select 1 from public.order_items oi
+    and (new.shipped_at is not null or new.fulfillment_status in ('shipped','delivered')) then
+    select coalesce(bool_or(hold.units is null),false), coalesce(bool_or(item.units is distinct from hold.units),false)
+      into missing_hold, invalid_quantity
+    from (
+      select oi.sku,sum(oi.quantity) units from public.order_items oi
       where oi.order_id=old.id and oi.sku in ('GLOA-MATCHA-30G','GLOA-MATCHA-50G','GLOA-MATCHA-100G')
       group by oi.sku
-      having sum(oi.quantity) is distinct from (
-        select sum(r.units) from public.matcha_checkout_reservations r
-        join public.inventory_items i on i.id=r.item_id
-        where r.attempt_id=old.checkout_attempt_id and i.sku=oi.sku and r.state='held'
-      )
-    )
-  then raise exception 'inventory_lot_shipment_unverified'; end if;
+    ) item
+    cross join lateral (
+      select sum(r.units) units from public.matcha_checkout_reservations r
+      join public.inventory_items i on i.id=r.item_id
+      where r.attempt_id=old.checkout_attempt_id and i.sku=item.sku and r.state='held'
+    ) hold;
+    if missing_hold then raise exception 'inventory_lot_shipment_reservation_missing'; end if;
+    if invalid_quantity then raise exception 'inventory_lot_shipment_unverified'; end if;
+  end if;
   return new;
 end $$;
 revoke all on function public.guard_matcha_lot_shipment_v1() from public,anon,authenticated,service_role;

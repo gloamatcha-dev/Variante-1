@@ -225,6 +225,9 @@ export async function adminShipOrder(input: unknown, actorUserId: string): Promi
 
   if (error) {
     console.error(`Admin ship: RPC failed for ${orderNumber}:`, error.message);
+    if (error.message === "inventory_lot_shipment_reservation_missing") {
+      return { ok: false, status: 409, error: "Versand gesperrt: Keine aktive Lagerreservierung nachgewiesen. Bestellung zur manuellen Klärung vorlegen." };
+    }
     if (["inventory_lot_pick_required", "inventory_lot_stock_unavailable", "inventory_lot_shipment_unverified"].includes(error.message)) {
       return { ok: false, status: 409, error: "Versand gesperrt. Reservierung und bestätigte Chargenkommissionierung prüfen." };
     }
