@@ -10,19 +10,24 @@ export async function notifyB2bOffer(admin: Admin, id: string, version: number) 
   const resend = getResendClient();
   const origin = getSiteOrigin();
   if (!resend || !origin) return "pending";
-  const accountUrl = new URL("/account/business", origin);
-  if (accountUrl.protocol !== "https:") return "pending";
-
-  const { data: customerId, error: claimError } = await admin.rpc("claim_b2b_offer_notification_v1", {
-    p_draft: id, p_version: version,
-  });
-  if (claimError) return "unconfirmed";
-  if (typeof customerId !== "string") return "already_claimed";
-
   try {
-    const { data, error } = await admin.auth.admin.getUserById(customerId);
+    const accountUrl = new URL("/account/business", origin);
+    if (accountUrl.protocol !== "https:") return "pending";
+    const draft = await admin.from("b2b_offer_drafts").select("customer_id").eq("id", id).maybeSingle();
+    if (draft.error) return "pending";
+    const recipientId = draft.data?.customer_id;
+    if (typeof recipientId !== "string") return "pending";
+    const { data, error } = await admin.auth.admin.getUserById(recipientId);
     const user = data?.user;
-    if (error || !user?.email || !user.email_confirmed_at) return "unconfirmed";
+    if (error || !user?.email || !user.email_confirmed_at) return "pending";
+
+    const { data: customerId, error: claimError } = await admin.rpc("claim_b2b_offer_notification_v1", {
+      p_draft: id, p_version: version,
+    });
+    if (claimError) return "unconfirmed";
+    if (typeof customerId !== "string") return "already_claimed";
+    if (customerId !== recipientId) return "unconfirmed";
+
     const response = await resend.emails.send({
       from: GLOA_FROM_HELLO, replyTo: GLOA_REPLY_TO_SUPPORT, to: user.email,
       subject: "Dein GLOA-Angebot ist im Kundenkonto verfuegbar",

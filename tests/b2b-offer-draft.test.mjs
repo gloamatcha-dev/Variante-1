@@ -146,15 +146,22 @@ test('offer notification uses a confirmed account and one provider send for para
     },
   });
   let claimed = false;
+  let confirmed = false;
   const admin = {
     rpc: async () => { if (claimed) return { data: null }; claimed = true; return { data: input.customerId }; },
-    auth: { admin: { getUserById: async () => ({ data: { user: { email: 'buyer@example.invalid', email_confirmed_at: 'confirmed' } } }) } },
-    from: () => ({ update: () => ({ eq() { return this; }, then(resolve) { resolve({}); } }) }),
+    auth: { admin: { getUserById: async () => ({ data: { user: { email: 'buyer@example.invalid', email_confirmed_at: confirmed ? 'confirmed' : null } } }) } },
+    from: table => table === 'b2b_offer_drafts'
+      ? { select() { return this; }, eq() { return this; }, async maybeSingle() { return { data: { customer_id: input.customerId } }; } }
+      : { update: () => ({ eq() { return this; }, then(resolve) { resolve({}); } }) },
   };
   const send = () => module.exports.notifyB2bOffer(admin, input.id, 2);
   assert.equal(await send(), 'pending');
   assert.equal(claimed, false);
   env.B2B_OFFER_EMAIL_ENABLED = 'true';
+  assert.equal(await send(), 'pending');
+  assert.equal(claimed, false);
+  assert.equal(delivered.length, 0);
+  confirmed = true;
   assert.deepEqual((await Promise.all([send(), send()])).sort(), ['already_claimed', 'sent']);
   assert.equal(delivered.length, 1);
   assert.equal(delivered[0][0].to, 'buyer@example.invalid');
