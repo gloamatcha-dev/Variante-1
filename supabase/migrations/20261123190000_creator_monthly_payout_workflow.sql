@@ -35,6 +35,21 @@ alter table public.creator_payout_events enable row level security;
 revoke all on public.creator_payout_months,public.creator_payout_positions,public.creator_payout_events
   from public,anon,authenticated,service_role;
 
+-- Existing payout rows remain writable through their original paths. Only rows
+-- linked to this release's monthly workflow require the activation key.
+create function public.guard_creator_monthly_payout_release_v1() returns trigger
+language plpgsql security definer set search_path='' as $$
+begin
+  if exists(select 1 from public.creator_payout_months where payout_id=old.id) then
+    perform public.require_creator_b2b_release_writes_v1();
+  end if;
+  if tg_op='DELETE' then return old; end if;
+  return new;
+end $$;
+revoke all on function public.guard_creator_monthly_payout_release_v1() from public,anon,authenticated,service_role;
+create trigger creator_monthly_payout_release_required before update or delete on public.creator_payouts
+  for each row execute function public.guard_creator_monthly_payout_release_v1();
+
 create function public.guard_creator_payment_document_v1() returns trigger
 language plpgsql security definer set search_path='' as $$
 begin
@@ -135,6 +150,7 @@ begin
     then raise exception 'creator_payout_invalid' using errcode='22023'; end if;
 
   if p_action not in ('read','export') then
+    perform public.require_creator_b2b_release_writes_v1();
     if p_operation is null or (p_action in ('reject','paid') and
        (v_evidence is null or length(v_evidence)>255)) or
        (p_action not in ('reject','paid') and v_evidence is not null) or

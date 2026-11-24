@@ -22,6 +22,7 @@ begin
   if not exists (select 1 from public.admin_users where user_id=p_actor and is_active and role='owner') then
     raise exception 'offer_forbidden' using errcode='42501';
   end if;
+  perform public.require_creator_b2b_release_writes_v1();
   perform 1 from public.b2b_offer_drafts where id=p_draft for update;
   select * into v_offer from public.b2b_offer_versions where draft_id=p_draft and version=p_version;
   if not found then raise exception 'offer_not_available'; end if;

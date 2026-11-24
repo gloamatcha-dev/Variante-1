@@ -35,6 +35,7 @@ begin
                  where user_id=p_actor and is_active and role in ('admin','owner')) then
     raise exception 'offer_forbidden' using errcode='42501';
   end if;
+  perform public.require_creator_b2b_release_writes_v1();
   select * into v_draft from public.b2b_offer_drafts where id=p_draft for update;
   if not found then raise exception 'offer_not_found'; end if;
   select coalesce(max(version),0) into v_latest from public.b2b_offer_versions where draft_id=p_draft;
@@ -59,6 +60,7 @@ begin
   if p_action is null or p_action not in ('accepted','declined') then
     raise exception 'offer_invalid_decision' using errcode='22023';
   end if;
+  perform public.require_creator_b2b_release_writes_v1();
   select customer_id into v_customer from public.b2b_offer_drafts
     where id=p_draft and customer_id=auth.uid() for update;
   if not found then raise exception 'offer_forbidden' using errcode='42501'; end if;

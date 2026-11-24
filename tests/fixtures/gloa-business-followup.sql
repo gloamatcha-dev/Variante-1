@@ -13,6 +13,7 @@ create table public.creator_commissions (
 \ir ../../supabase/migrations/20261123170100_gloa_creator_monthly_preview.sql
 
 begin;
+update public.operations_config set int_value=1 where key='creator_b2b_release_writes_enabled';
 insert into public.admin_users values ('10000000-0000-0000-0000-000000000001','owner',true);
 insert into public.business_profiles values ('20000000-0000-0000-0000-000000000001');
 insert into public.b2b_offer_drafts(id, customer_id, created_by, inquiry_reference, destination_country, pack_count, net_unit_cents)

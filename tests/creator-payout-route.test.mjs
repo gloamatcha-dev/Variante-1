@@ -14,6 +14,7 @@ test("creator payout actions and internal export are owner-only and require real
   const module = { exports: {} };
   const calls = [];
   let role = "admin";
+  let writesEnabled = true;
   vm.runInNewContext(code, {
     module, exports: module.exports, Response, URL,
     require(name) {
@@ -24,6 +25,7 @@ test("creator payout actions and internal export are owner-only and require real
       if (name.includes("supabaseAdmin")) return { getSupabaseAdmin: () => ({
         rpc: async (name, args) => {
           calls.push({ name, args });
+          if (!writesEnabled) return { error: { code: "55000", message: "release_writes_disabled" } };
           return { data: { taxDocumentAvailable: false, positions: [{ cents: 250 }] } };
         },
       }) };
@@ -51,4 +53,8 @@ test("creator payout actions and internal export are owner-only and require real
   const payload = await exported.json();
   assert.equal(payload.documentType, "internal_creator_payout_record");
   assert.equal(payload.taxDocumentAvailable, false);
+  writesEnabled = false;
+  const disabled = await call({ action: "approve", operationId });
+  assert.equal(disabled.status, 503);
+  assert.equal((await disabled.json()).error, "Auszahlungsaktionen sind noch nicht freigegeben.");
 });

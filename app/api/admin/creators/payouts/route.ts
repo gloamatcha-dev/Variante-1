@@ -44,6 +44,7 @@ export async function POST(request: Request) {
     p_document: body.action === "paid" ? body.documentId : null,
   });
   if (result.error) {
+    if (result.error.message === "release_writes_disabled") return json({ error: "Auszahlungsaktionen sind noch nicht freigegeben." }, 503);
     if (result.error.code === "42501") return json({ error: "Nur für den Owner." }, 403);
     if (result.error.code === "23505") return json({ error: "Vorgang oder Zahlungsbeleg ist bereits erfasst." }, 409);
     const message = refusals[result.error.message];

@@ -1,5 +1,6 @@
 \set ON_ERROR_STOP on
 begin;
+update public.operations_config set int_value=1 where key='creator_b2b_release_writes_enabled';
 do $$
 declare
   actor uuid; creator uuid; old_order uuid; new_order uuid; old_earning uuid; proof uuid:=gen_random_uuid();

@@ -8,9 +8,11 @@ create function auth.uid() returns uuid language sql stable as
   'select nullif(current_setting(''test.user_id'',true),'''')::uuid';
 create table public.business_profiles(user_id uuid primary key);
 create table public.admin_users(user_id uuid primary key,role text,is_active boolean);
+create table public.operations_config(key text primary key,int_value integer);
 \ir ../../supabase/migrations/20261123160000_gloa_offer_drafts_and_invoice_issuers.sql
 \ir ../../supabase/migrations/20261123170000_gloa_b2b_offer_versions.sql
 \ir ../../supabase/migrations/20261124130000_b2b_offer_publication_and_handoff.sql
+update public.operations_config set int_value=1 where key='creator_b2b_release_writes_enabled';
 do $$
 declare
   owner_id constant uuid := '10000000-0000-0000-0000-000000000001';

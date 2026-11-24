@@ -18,6 +18,7 @@ create function public.b2b_offer_checkout_context_v1(p_draft uuid,p_version inte
 returns jsonb language plpgsql security definer set search_path='' as $$
 declare terms jsonb; link public.b2b_offer_checkout_links;
 begin
+  if p_address is not null then perform public.require_creator_b2b_release_writes_v1(); end if;
   perform 1 from public.b2b_offer_drafts where id=p_draft and customer_id=p_customer for update;
   if not found then return null; end if;
   select h.contract_terms into terms from public.b2b_offer_contract_handoffs h

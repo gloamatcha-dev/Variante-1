@@ -18,6 +18,7 @@ export async function POST(request: Request) {
   if (!admin) return json({ error: 'Angebotsentwürfe sind nicht verfügbar.' }, 503);
 
   const body = gate.context.body as { action?: unknown } | null;
+  const inactive = () => json({ error: 'Angebotsaktionen sind noch nicht freigegeben.' }, 503);
   if (body?.action === 'revise') {
     const input = body as Record<string, unknown>;
     const terms = parseB2bOfferTerms(input.id, input.packCount, input.netUnitCents);
@@ -31,6 +32,7 @@ export async function POST(request: Request) {
       p_quantity: terms.pack_count, p_net: terms.net_unit_cents,
     });
     if (result.error) {
+      if (result.error.message === 'release_writes_disabled') return inactive();
       const conflict = ['offer_revision_conflict', 'offer_already_accepted', 'offer_not_found'].includes(result.error.message);
       return json({ error: conflict ? 'Angebotsstand hat sich geändert.' : 'Revision nicht bestätigt.' }, conflict ? 409 : 503);
     }
@@ -69,6 +71,7 @@ export async function POST(request: Request) {
       const notification = await notifyB2bOffer(admin, id, input.version);
       return json({ expiresAt: data, notification });
     }
+    if (error.message === 'release_writes_disabled') return inactive();
     if (error.code === '42501') return json({ error: 'Nur der Owner darf Angebote freigeben.' }, 403);
     if (error.message === 'offer_tax_review_required') {
       return json({ error: 'Steuerliche Freigabe fehlt.' }, 409);
@@ -107,6 +110,7 @@ export async function POST(request: Request) {
   const inserted = await admin.from('b2b_offer_drafts').insert({ ...draft, created_by: actor })
     .select(columns).single();
   if (!inserted.error) return json({ draft: inserted.data }, 201);
+  if (inserted.error.message === 'release_writes_disabled') return inactive();
   if (inserted.error.code === '23503') return json({ error: 'Geschäftskunde nicht gefunden.' }, 409);
   if (inserted.error.code !== '23505') return json({ error: 'Speicherung nicht bestätigt.' }, 503);
 

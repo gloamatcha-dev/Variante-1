@@ -25,8 +25,10 @@ test('draft uses integer 500 g quantities and stores no caller tax decision', ()
 test('protected draft endpoint accepts the same concurrent retry and refuses changed terms', async () => {
   const rows = new Map();
   let allowed = false;
+  let writesEnabled = false;
   const admin = { from: () => ({
     insert: row => ({ select: () => ({ async single() {
+      if (!writesEnabled) return { error: { code: '55000', message: 'release_writes_disabled' } };
       if (rows.has(row.id)) return { error: { code: '23505' } };
       rows.set(row.id, row);
       return { data: row };
@@ -58,6 +60,9 @@ test('protected draft endpoint accepts the same concurrent retry and refuses cha
   assert.equal((await call(input)).status, 403);
   allowed = true;
   assert.equal((await call(input, 'https://other.invalid')).status, 403);
+  assert.equal((await call(input)).status, 503);
+  assert.equal(rows.size, 0);
+  writesEnabled = true;
   const results = await Promise.all([call(input), call(input)]);
   assert.deepEqual(results.map(result => result.status).sort(), [200, 201]);
   assert.equal(rows.size, 1);
@@ -105,6 +110,8 @@ test('publication delegates the reviewed version and refuses missing evidence an
   assert.deepEqual([calls[0][0], args], ['b2b_offer_publish_with_terms_v1', {
     p_draft: input.id, p_version: 2, p_actor: 'owner-fixture', p_evidence: 'proof',
   }]);
+  error = { code: '55000', message: 'release_writes_disabled' };
+  assert.equal((await publish('proof')).status, 503);
   error = { message: 'offer_tax_review_required' };
   assert.equal((await publish('proof')).status, 409);
   error = { code: '42501' };

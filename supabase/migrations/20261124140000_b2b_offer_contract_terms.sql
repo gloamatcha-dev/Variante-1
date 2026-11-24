@@ -21,12 +21,15 @@ create table public.b2b_offer_notifications (
 alter table public.b2b_offer_notifications enable row level security;
 revoke all on public.b2b_offer_notifications from public,anon,authenticated,service_role;
 grant select,update(status) on public.b2b_offer_notifications to service_role;
+create trigger b2b_offer_notification_release_required before update of status on public.b2b_offer_notifications
+  for each row execute function public.guard_creator_b2b_release_write_v1();
 
 create function public.b2b_offer_publish_with_terms_v1(
   p_draft uuid,p_version integer,p_actor uuid,p_evidence text,p_terms jsonb
 ) returns timestamptz language plpgsql security definer set search_path='' as $$
 declare v_offer public.b2b_offer_versions; v_expiry timestamptz; v_terms jsonb;
 begin
+  perform public.require_creator_b2b_release_writes_v1();
   perform 1 from public.b2b_offer_drafts where id=p_draft for update;
   select * into v_offer from public.b2b_offer_versions where draft_id=p_draft and version=p_version;
   if not found then raise exception 'offer_not_available'; end if;
@@ -94,6 +97,7 @@ create function public.claim_b2b_offer_notification_v1(p_draft uuid,p_version in
 returns uuid language plpgsql security definer set search_path='' as $$
 declare v_customer uuid;
 begin
+  perform public.require_creator_b2b_release_writes_v1();
   select customer_id into v_customer from public.b2b_offer_drafts where id=p_draft for update;
   if not exists (select 1 from public.b2b_offer_versions where draft_id=p_draft and version=p_version
       and state='published' and expires_at>clock_timestamp()) then return null; end if;
