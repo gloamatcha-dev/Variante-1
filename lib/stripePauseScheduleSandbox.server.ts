@@ -1,5 +1,5 @@
 // Documented Stripe contract used to qualify GLOA pause/resume in a sandbox.
-// The application Stripe client, webhooks and customer route do not use this adapter.
+// The sandbox customer action and paid-invoice reconciliation share this adapter.
 export const PAUSE_SCHEDULE_API_VERSION = "2026-09-30.endive";
 
 type StripeSubscription = {
@@ -12,6 +12,7 @@ type StripeSubscription = {
   schedule: string | null;
   pause_collection: unknown;
   pending_update: unknown;
+  test_clock?: string | null;
   cancel_at: number | null;
   cancel_at_period_end: boolean;
   items: { has_more: boolean; data: {
@@ -115,7 +116,18 @@ export function createStripePauseScheduleSandbox(
           return blocked("unresolved_invoice");
         }
       }
-      if (action === "pause" && (!Number.isSafeInteger(pauseAt) || pauseAt <= now() / 1000)) {
+      let stripeTime = now() / 1000;
+      if (sub.test_clock != null) {
+        if (!checkId(sub.test_clock, /^clock_[a-zA-Z0-9_]+$/)) return blocked("unverified_test_clock");
+        const clock = await call<{ id: string; object: string; livemode: boolean; status: string; frozen_time: number }>(
+          "test_helpers/test_clocks/" + sub.test_clock,
+        );
+        if (clock.id !== sub.test_clock || clock.object !== "test_helpers.test_clock" ||
+            clock.livemode !== false || clock.status !== "ready" ||
+            !Number.isSafeInteger(clock.frozen_time) || clock.frozen_time <= 0) return blocked("unverified_test_clock");
+        stripeTime = clock.frozen_time;
+      }
+      if (action === "pause" && (!Number.isSafeInteger(pauseAt) || pauseAt <= stripeTime)) {
         return blocked("cycle_boundary_passed");
       }
       const body = new URLSearchParams();

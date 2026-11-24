@@ -135,6 +135,8 @@ test('verified payment and allocated refunds use one frozen PDF each and link co
   };
   events.push({ ...events[0], id: 'annual-payment', kind: 'annual_prepayment', order_id: null, annual_plan_id: annual.id });
   const carrier = {};
+  let guestChecks = 0;
+  const review = [];
   const documents = new Map();
   const registered = [];
   const tables = {
@@ -143,17 +145,23 @@ test('verified payment and allocated refunds use one frozen PDF each and link co
       { sku: 'MATCHA', productName: 'Matcha', quantity: 2, lineGrossCents: 1070 },
     ] }], financial_events: events, order_items: items.map(item => ({ ...item, order_id: orderId })),
     refund_tax_allocation_evidence: evidence, gloa_invoice_register: registered,
-    invoice_issuer_versions: [{ version: 1, country_code: 'DE', approved_by: 'owner', legal_name: 'Synthetic issuer',
+    invoice_issuer_versions: [{ version: 1, effective_from: '2020-01-01T00:00:00Z', country_code: 'DE', approved_by: 'owner', legal_name: 'Synthetic issuer',
       street_address: 'Testweg 2', postal_code: '00000', city: 'Teststadt', tax_number: 'TEST-ONLY' }],
   };
   const admin = {
     from(table) {
       const filters = [];
-      const rows = () => tables[table].filter(row => filters.every(filter => filter(row)));
+      let sorting;
+      const rows = () => {
+        const matches = tables[table].filter(row => filters.every(filter => filter(row)));
+        return sorting ? matches.sort((a, b) => String(b[sorting]).localeCompare(String(a[sorting]))) : matches;
+      };
       return {
         select() { return this; }, eq(name, value) { filters.push(row => row[name] === value); return this; },
         is(name, value) { return this.eq(name, value); }, not(name) { filters.push(row => row[name] != null); return this; },
-        order() { return this; }, gte() { return this; },
+        order(field, options) { if (options?.ascending === false) sorting = field; return this; },
+        gte() { return this; }, limit() { return this; },
+        lte(name, value) { filters.push(row => row[name] <= value); return this; },
         then(resolve) { resolve({ data: rows() }); }, async maybeSingle() { return { data: rows()[0] ?? null }; },
       };
     },
@@ -183,19 +191,32 @@ test('verified payment and allocated refunds use one frozen PDF each and link co
   const app = moduleFixture('../lib/gloaInvoice.server.ts', {
     'node:crypto': { createHash }, './supabaseAdmin': { getSupabaseAdmin: () => admin },
     './invoicePdf': { renderInvoicePdf }, './gloaInvoiceRules': rules,
-    './withdrawalDeadline': { berlinCivilDate: () => '2026-11-24' }, './guestOrderAccess': {}, './annualPlanAccount': {},
-    './resend': carrier, './siteUrl': carrier, './emailSenders': carrier,
-  }, { process: { env }, console: { error: message => assert.fail(message) } });
+    './withdrawalDeadline': { berlinCivilDate: () => '2026-11-24' }, './annualPlanAccount': {},
+    './guestOrderAccess': { getGuestOrderTokenSecret: () => { guestChecks++; return null; } },
+    './resend': { getResendClient: () => carrier }, './siteUrl': { getSiteOrigin: () => 'https://local.invalid' }, './emailSenders': carrier,
+  }, { process: { env }, console: { error: message => review.push(message) } });
   const time = Date.parse('2026-11-23T00:00:00Z') / 1000;
+  order.user_id = null;
+  env.GLOA_INVOICE_EMAIL_ENABLED = 'true';
   await app.issueVerifiedOrderInvoices(orderId, 'order_payment', time);
+  assert.equal(guestChecks, 1);
+  delete env.GLOA_INVOICE_EMAIL_ENABLED;
   await app.issueVerifiedOrderInvoices(orderId, 'order_payment', time);
   await app.issueVerifiedOrderInvoices(orderId, 'refund', time);
   await app.issueVerifiedOrderInvoices(orderId, 'refund', time);
+  const issuer = tables.invoice_issuer_versions[0];
+  tables.invoice_issuer_versions.push({ ...issuer, version: 3, effective_from: '9999-01-01T00:00:00Z' });
+  tables.invoice_issuer_versions.push({ ...issuer, version: 2, effective_from: '2021-01-01T00:00:00Z' });
+  await app.issueVerifiedAnnualInvoices(annual.id, 'annual_prepayment', time);
+  assert.equal(registered.length, 3);
+  assert.equal(review.length, 1);
+  env.GLOA_INVOICE_ISSUER_VERSION = '2';
   await app.issueVerifiedAnnualInvoices(annual.id, 'annual_prepayment', time);
   await app.issueVerifiedAnnualInvoices(annual.id, 'annual_prepayment', time);
   assert.equal(registered.length, 4);
   assert.equal(documents.size, 4);
   assert.equal(registered[3].annual_plan_id, annual.id);
+  assert.equal(registered[3].snapshot.issuer.version, 2);
   assert.equal(registered[3].order_id, null);
   for (const id of [2, 3]) {
     assert.match(documents.get('invoice-register/' + id + '.pdf').toString('latin1'), /Bezug: GLOA-AUTO-1/);

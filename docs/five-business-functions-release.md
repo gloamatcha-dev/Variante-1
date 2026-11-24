@@ -43,3 +43,9 @@ Zuerst betroffene Starts anhalten und den passenden Schlüssel als postgres auf 
 - **Abo.** Neue Sandbox-Aktionen anhalten. Offene Stripe-Zustände und Webhook-Verarbeitung im identischen isolierten Konto abgleichen. Bezahlte Lieferansprüche, Pause-Fenster und Konkurrenzsperren erhalten. Bei ungeklärtem Ausgang den zuständigen Webhook-Pfad weiter betreiben und keine veraltete Version mit laufender Verarbeitung betrauen.
 
 Das vorige Deployment erst wieder zuweisen, wenn es die verbleibenden Geschäftsvorgänge korrekt verarbeiten kann. Bei Teilausführung die tatsächliche Registry und Objektlage nutzen. Der gemeinsame Plan setzt keinen vollständigen Supabase-Restore voraus.
+
+## Rechnungsfreigabe
+
+Vor einem Wechsel der Ausstellerversion die Ausstellung sperren und die konfigurierte Version mit der zuletzt wirksam gewordenen Version abgleichen. Wiederholungen behalten den gespeicherten Snapshot. Korrekturen behalten die Ausstellerversion des Originals.
+
+Die B2B-Zahlungswebhooks korrelieren Abrechnungsnachweise. Vor der automatischen XRechnung fehlen der belegte Snapshot mit Adressat, Ausstellerkontakt, Leistungs- und Zahlungsdaten sowie die Anbindung an die Ausstellung. Das validierte Profil weiterhin unveraendert verwenden.

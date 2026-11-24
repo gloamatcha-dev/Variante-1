@@ -21,7 +21,7 @@ const sub = {
 const schedule = { id: scheduleId, subscription: sub.id, livemode: false, status: "active",
   billing_mode: { type: "flexible" }, pause_schedules: [entry] };
 
-function harness({ subscription = sub, openStatus, beforeWrite, oldSchedule = schedule, result = schedule } = {}) {
+function harness({ subscription = sub, openStatus, beforeWrite, oldSchedule = schedule, result = schedule, clock, wallTime = boundary * 1000 - 100000 } = {}) {
   const writes = [];
   const adapter = createStripePauseScheduleSandbox("sk_test_synthetic", async (url, options) => {
     assert.equal(new URL(url).origin, "https://api.stripe.com");
@@ -33,13 +33,14 @@ function harness({ subscription = sub, openStatus, beforeWrite, oldSchedule = sc
       await beforeWrite?.();
       return Response.json(result);
     }
+    if (pathname === "/v1/test_helpers/test_clocks/clock_synthetic") return Response.json(clock);
     if (pathname.includes("/invoices")) {
       assert.equal(searchParams.get("subscription"), target.stripeId);
       return Response.json({ has_more: false, data: searchParams.get("status") === openStatus ? [{}] : [] });
     }
     if (pathname.includes("/subscription_schedules/")) return Response.json(oldSchedule);
     return Response.json(subscription);
-  }, () => boundary * 1000 - 100000);
+  }, () => wallTime);
   return { adapter, writes };
 }
 
@@ -116,4 +117,25 @@ test("resume proof uses current sandbox state and a completed matching schedule"
     assert.equal(h.writes.length, 0);
   }
   assert.equal(current.writes.length, 0);
+});
+
+test("a Test Clock supplies billing time and must be ready before a Stripe write", async () => {
+  const clock = { id: "clock_synthetic", object: "test_helpers.test_clock", livemode: false,
+    status: "ready", frozen_time: boundary - 60 };
+  const options = {
+    subscription: { ...sub, test_clock: clock.id },
+    result: { ...schedule, pause_schedules: [{ ...entry, pause: pause("scheduled") }] },
+    wallTime: (boundary + 60) * 1000,
+  };
+  assert.equal((await harness({ ...options, clock }).adapter.change(target, "pause")).state, "scheduled");
+  for (const [state, reason] of [
+    [{ status: "advancing" }, "unverified_test_clock"],
+    [{ id: "clock_foreign" }, "unverified_test_clock"],
+    [{ livemode: true }, "unverified_test_clock"],
+    [{ frozen_time: boundary }, "cycle_boundary_passed"],
+  ]) {
+    const h = harness({ ...options, clock: { ...clock, ...state } });
+    assert.equal((await h.adapter.change(target, "pause")).reason, reason);
+    assert.equal(h.writes.length, 0);
+  }
 });

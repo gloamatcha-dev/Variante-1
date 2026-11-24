@@ -124,9 +124,10 @@ async function issueEvent(
   config: NonNullable<ReturnType<typeof invoiceConfig>>, subject: "order_id" | "annual_plan_id" = "order_id",
 ) {
   const eventId = String(event.id);
+  const userId = typeof order.user_id === "string" ? order.user_id : null;
   const existing = await admin.from("gloa_invoice_register").select("*").eq("financial_event_id", eventId).maybeSingle();
   if (existing.error) throw new Error("invoice_register_unavailable");
-  if (existing.data) return completeGloaInvoice(admin, existing.data as Register, typeof order.user_id === "string" ? order.user_id : null);
+  if (existing.data) return completeGloaInvoice(admin, existing.data as Register, userId);
 
   const correction = event.kind === "refund";
   let original: Register | null = null;
@@ -136,16 +137,21 @@ async function issueEvent(
     if (result.error || !result.data) throw new Error("invoice_original_missing");
     original = result.data as Register;
   }
-  const issuer = await admin.from("invoice_issuer_versions").select("*").eq("version", config.version).maybeSingle();
-  if (issuer.error || !issuer.data || issuer.data.country_code !== "DE" || !issuer.data.approved_by) {
+  const issuer = original ? null : await admin.from("invoice_issuer_versions").select("*")
+    .lte("effective_from", new Date().toISOString()).order("effective_from", { ascending: false }).limit(1).maybeSingle();
+  const issuerData = issuer?.data;
+  if (!original && (issuer?.error || !issuerData || issuerData.version !== config.version ||
+      issuerData.country_code !== "DE" || !issuerData.approved_by)) {
     throw new Error("invoice_issuer_unconfirmed");
   }
+  const issuerSnapshot = original?.snapshot.issuer ?? (issuerData && {
+    version: config.version, legalName: issuerData.legal_name, address: issuerData.street_address,
+    postalCode: issuerData.postal_code, city: issuerData.city, country: issuerData.country_code,
+    taxIdentifier: issuerData.vat_id || issuerData.tax_number,
+  });
+  if (!issuerSnapshot) throw new Error("invoice_issuer_unconfirmed");
   const snapshot: InvoiceSnapshot = {
-    issuer: original?.snapshot.issuer ?? {
-      version: config.version, legalName: issuer.data.legal_name, address: issuer.data.street_address,
-      postalCode: issuer.data.postal_code, city: issuer.data.city, country: issuer.data.country_code,
-      taxIdentifier: issuer.data.vat_id || issuer.data.tax_number,
-    },
+    issuer: issuerSnapshot,
     customer: original?.snapshot.customer ?? invoiceParty(order.billing_address_snapshot as Record<string, unknown>),
     issuedOn: berlinCivilDate(new Date()) ?? "",
     supplyOn: String(event.occurred_on),
@@ -161,7 +167,7 @@ async function issueEvent(
     p_event: eventId, p_issuer: snapshot.issuer?.version, p_snapshot: snapshot, p_cutoff: config.cutoff,
   }).single();
   if (result.error || !result.data) throw new Error("invoice_claim_failed");
-  await completeGloaInvoice(admin, result.data as Register, String(order.user_id));
+  await completeGloaInvoice(admin, result.data as Register, userId);
 }
 
 export async function issueVerifiedOrderInvoices(orderId: string, kind: "order_payment" | "refund", stripeCreated: number) {
