@@ -865,6 +865,7 @@ function MovementForm({
   onSessionLost: () => void;
 }) {
   const isStocktake = mode === "stocktake";
+  const isRawReceipt = mode === "receipt" && item.sku === "GLOA-MATCHA-RAW";
   const [quantity, setQuantity] = useState("");
   const [reason, setReason] = useState<MovementReason>(
     mode === "receipt" ? "goods_receipt" : mode === "withdrawal" ? "b2c" : "correction"
@@ -897,6 +898,7 @@ function MovementForm({
   const goesNegative = balanceAfter !== null && balanceAfter < 0;
 
   const valid = parsed !== null &&
+    (!isRawReceipt || Boolean(supplier.trim() && batchNumber.trim() && bestBefore)) &&
     (isStocktake ? parsed >= 0 : mode === "correction" ? parsed !== 0 : parsed > 0);
 
   async function submit() {
@@ -954,6 +956,11 @@ function MovementForm({
         {mode === "stocktake" && "Gesamten gezählten Bestand in " + item.unit + " eingeben. Gebucht wird die Differenz zum bisherigen Bestand."}
         {mode === "correction" && "Nur die Abweichung in " + item.unit + " eingeben: plus für mehr, minus für weniger. Die Differenz wird gebucht. Den Anlass unter Notiz festhalten."}
       </p>
+      {isRawReceipt && <p className="ops-action-note" id="raw-receipt-help">
+        Lieferant, Chargennummer und MHD sind Pflicht. Angaben mit Lieferschein, Etikett und Ware
+        abgleichen. Lieferscheinnummer unter Referenz erfassen. Erst die bestätigte Buchung erzeugt
+        den Chargennachweis und erhöht den Rohbestand.
+      </p>}
       {error && <p className="ops-error" role="alert">{error}</p>}
 
       <div className="ops-action-fields">
@@ -970,7 +977,7 @@ function MovementForm({
             <span>Grund</span>
             <select value={reason} disabled={busy || confirming}
               onChange={e => setReason(e.target.value as MovementReason)}>
-              {(REASONS_FOR_TYPE[mode as RequestableMovementType] ?? MOVEMENT_REASONS).map(r => (
+              {(isRawReceipt ? (["goods_receipt"] as const) : REASONS_FOR_TYPE[mode as RequestableMovementType] ?? MOVEMENT_REASONS).map(r => (
                 <option key={r} value={r}>{MOVEMENT_REASON_LABEL[r]}</option>
               ))}
             </select>
@@ -991,19 +998,19 @@ function MovementForm({
         {mode === "receipt" && (
           <>
             <label>
-              <span>Lieferant</span>
+              <span>Lieferant{isRawReceipt ? " (Pflichtfeld)" : ""}</span>
               <input type="text" value={supplier} maxLength={120} disabled={busy || confirming}
-                onChange={e => setSupplier(e.target.value)} placeholder="optional" />
+                onChange={e => setSupplier(e.target.value)} required={isRawReceipt} placeholder={isRawReceipt ? undefined : "optional"} />
             </label>
             <label>
-              <span>Chargennummer</span>
+              <span>Chargennummer{isRawReceipt ? " (Pflichtfeld)" : ""}</span>
               <input type="text" value={batchNumber} maxLength={80} disabled={busy || confirming}
-                onChange={e => setBatchNumber(e.target.value)} placeholder="optional" />
+                onChange={e => setBatchNumber(e.target.value)} required={isRawReceipt} placeholder={isRawReceipt ? undefined : "optional"} />
             </label>
             <label>
-              <span>Mindestens haltbar bis</span>
+              <span>Mindestens haltbar bis{isRawReceipt ? " (Pflichtfeld)" : ""}</span>
               <input type="date" value={bestBefore} disabled={busy || confirming}
-                onChange={e => setBestBefore(e.target.value)} />
+                onChange={e => setBestBefore(e.target.value)} required={isRawReceipt} />
             </label>
           </>
         )}
@@ -1011,7 +1018,7 @@ function MovementForm({
         <label>
           <span>Referenz</span>
           <input type="text" value={reference} maxLength={120} disabled={busy || confirming}
-            onChange={e => setReference(e.target.value)} placeholder="z. B. Abfüllung 16.09." />
+            onChange={e => setReference(e.target.value)} placeholder={isRawReceipt ? "Lieferscheinnummer" : "Buchungsbeleg"} />
         </label>
         <label>
           <span>Notiz</span>

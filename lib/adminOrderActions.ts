@@ -228,8 +228,14 @@ export async function adminShipOrder(input: unknown, actorUserId: string): Promi
     if (error.message === "inventory_lot_shipment_reservation_missing") {
       return { ok: false, status: 409, error: "Versand gesperrt: Keine aktive Lagerreservierung nachgewiesen. Bestellung zur manuellen Klärung vorlegen." };
     }
-    if (["inventory_lot_pick_required", "inventory_lot_stock_unavailable", "inventory_lot_shipment_unverified"].includes(error.message)) {
-      return { ok: false, status: 409, error: "Versand gesperrt. Reservierung und bestätigte Chargenkommissionierung prüfen." };
+    if (error.message === "inventory_lot_pick_required") {
+      return { ok: false, status: 409, error: "Versand gesperrt. Die tatsächlich gepackten Chargen und Stückzahlen zuerst unter Chargenverfolgung speichern." };
+    }
+    if (error.message === "inventory_lot_stock_unavailable") {
+      return { ok: false, status: 409, error: "Versand gesperrt. Die zugeordnete Charge ist gesperrt, ungeeignet oder reicht nicht aus. Paketinhalt und Chargenbestand prüfen." };
+    }
+    if (error.message === "inventory_lot_shipment_unverified") {
+      return { ok: false, status: 409, error: "Versand gesperrt. Bestellmenge und aktive Reservierung je SKU stimmen nicht überein. Bestellung zur manuellen Klärung vorlegen." };
     }
     return internal();
   }
