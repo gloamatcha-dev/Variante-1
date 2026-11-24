@@ -1,3 +1,4 @@
+begin;
 create table public.subscription_pause_windows (
   subscription_id uuid not null references public.subscriptions(id) on delete restrict,
   schedule_id text primary key,
@@ -21,12 +22,12 @@ revoke all on table public.sandbox_subscription_paid_cycles from public, anon, a
 -- Serialize the reservation of a Stripe mutation with the guarded invoice claim.
 create function public.lock_subscription_for_pause_fence() returns trigger
 language plpgsql security definer set search_path = ''
-as $
+as $$
 begin
   perform 1 from public.subscriptions where id = new.subscription_id for update;
   return new;
 end;
-$;
+$$;
 revoke all on function public.lock_subscription_for_pause_fence() from public, anon, authenticated;
 create trigger lock_subscription_for_pause_fence
 before insert on public.subscription_pause_write_fences
@@ -102,3 +103,5 @@ revoke all on function public.require_guarded_subscription_cycle() from public, 
 create trigger require_guarded_subscription_cycle
 before insert on public.checkout_attempts
 for each row execute function public.require_guarded_subscription_cycle();
+
+commit;
