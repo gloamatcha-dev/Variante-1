@@ -4,7 +4,7 @@ import { useRef, useState, type FormEvent } from "react";
 import { portalRequest } from "./AdminPortalShared";
 
 const endpoint = "/api/admin/b2b/offers";
-type Version = { version: number; state: string; pack_count: number; net_unit_cents: number; expires_at: string | null };
+type Version = { version: number; state: string; pack_count: number; net_unit_cents: number; expires_at: string | null; checkout_status?: string };
 type Draft = {
   id: string;
   versions?: Version[];
@@ -126,7 +126,13 @@ export function AdminB2bOfferDrafts() {
         <p>{draft.inquiry_reference} · {draft.destination_country} · {latest?.state ?? "Entwurf"}
           {latest && " · Version " + latest.version}</p>
         {latest?.expires_at && <p>Gültig bis {new Date(latest.expires_at).toLocaleString("de-DE")}</p>}
-        {latest?.state === "accepted" ? <p>Annahme liegt zur Vertragsprüfung vor.</p> :
+        {latest?.state === "accepted" ? <p>{latest.checkout_status === "terms_missing" ? "Checkout gesperrt. Der angenommenen Version fehlen gespeicherte Vertragskonditionen."
+          : latest.checkout_status === "paid" ? "Zahlung zum Checkout erfasst."
+          : latest.checkout_status === "stripe_session_created" ? "Checkout angelegt. Zahlung noch nicht bestätigt."
+          : latest.checkout_status === "address_bound" || latest.checkout_status === "created"
+            ? "Checkout vorbereitet. Zahlung noch nicht bestätigt."
+            : latest.checkout_status ? "Checkout-Status bitte prüfen."
+              : "Vertragsentwurf angenommen. Der Kunde kann den Checkout mit einer passenden Lieferadresse starten."}</p> :
           <form onSubmit={event => void updateOffer(event, draft, latest)} key={latest?.version ?? 0}>
             <label>Anzahl 500-g-Beutel <input name="quantity" type="number" min={1} max={100000}
               defaultValue={latest?.pack_count ?? draft.pack_count} required /></label>

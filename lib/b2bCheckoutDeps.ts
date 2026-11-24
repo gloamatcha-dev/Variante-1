@@ -110,6 +110,13 @@ async function loadBusinessProfile(
 }
 
 async function ensureAttempt(input: B2bAttemptInput): Promise<B2bAttemptResult> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return { ok: false, error: "Checkout nicht verfügbar." };
+  const binding = await admin.from("b2b_offer_checkout_links").select("request_id")
+    .eq("request_id", input.requestId).maybeSingle();
+  if (binding.error || Boolean(binding.data) !== Boolean(input.offerBound)) {
+    return { ok: false, error: "Checkout-Kennung konnte nicht zugeordnet werden." };
+  }
   const result = await getOrCreateB2bCheckoutAttempt({
     requestId: input.requestId,
     userId: input.userId,
@@ -136,11 +143,14 @@ async function ensureAttempt(input: B2bAttemptInput): Promise<B2bAttemptResult> 
   });
 
   if (!result.ok) return { ok: false, error: result.error };
+  if (result.attempt.user_id !== input.userId) return { ok: false, error: "Checkout nicht verfügbar." };
   return {
     ok: true,
     attempt: {
       id: result.attempt.id,
       currency: result.attempt.currency,
+      status: result.attempt.status,
+      stripe_checkout_session_id: result.attempt.stripe_checkout_session_id,
       expected_total_gross_cents: result.attempt.expected_total_gross_cents,
     },
   };
@@ -187,6 +197,28 @@ async function claimAgreement(input: B2bAgreementClaimInput): Promise<B2bAgreeme
 }
 
 export const defaultB2bCheckoutDeps: B2bCheckoutDeps = {
+  async loadOfferContext(draftId, version, userId, addressId) {
+    const admin = getSupabaseAdmin();
+    if (!admin) throw new Error("offer context unavailable");
+    const result = await admin.rpc("b2b_offer_checkout_context_v1", {
+      p_draft: draftId, p_version: version, p_customer: userId, p_address: addressId,
+    });
+    if (result.error) throw new Error("offer context unavailable");
+    return result.data;
+  },
+  async linkOfferSession(attemptId, sessionId) {
+    const admin = getSupabaseAdmin();
+    if (!admin) return false;
+    const update = await admin.from("checkout_attempts").update({
+      stripe_checkout_session_id: sessionId, status: "stripe_session_created",
+    }).eq("id", attemptId).is("stripe_checkout_session_id", null).is("paid_at", null)
+      .in("status", ["created", "stripe_session_created"]).select("id");
+    if (update.error) return false;
+    if (update.data?.length) return true;
+    const existing = await admin.from("checkout_attempts").select("stripe_checkout_session_id")
+      .eq("id", attemptId).maybeSingle();
+    return !existing.error && existing.data?.stripe_checkout_session_id === sessionId;
+  },
   isEnabled: isB2bSelfServiceEnabled,
   verifyCaller: verifyBearerUser,
   isBusinessAccount,

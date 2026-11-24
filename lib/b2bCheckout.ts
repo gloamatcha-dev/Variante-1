@@ -1,3 +1,4 @@
+import { acceptedB2bOfferTerms } from "./b2bOfferCheckout.ts";
 import type Stripe from "stripe";
 import type { AuthenticatedCaller } from "./verifyUser";
 import type { StripeCustomerResult } from "./stripeCustomers";
@@ -54,6 +55,8 @@ import {
 
 export type B2bCheckoutRequestBody = {
   requestId?: unknown;
+  offerDraftId?: unknown;
+  offerVersion?: unknown;
   planType?: unknown;
   packs?: unknown;
   instalmentCount?: unknown;
@@ -82,6 +85,7 @@ export type B2bBusinessProfileRow = {
 };
 
 export type B2bAttemptInput = {
+  offerBound?: boolean;
   requestId: string;
   userId: string;
   planType: "monthly" | "annual";
@@ -94,7 +98,7 @@ export type B2bAttemptInput = {
 };
 
 export type B2bAttemptResult =
-  | { ok: true; attempt: { id: string; currency: string; expected_total_gross_cents: number } }
+  | { ok: true; attempt: { id: string; currency: string; expected_total_gross_cents: number; stripe_checkout_session_id?: string | null; status?: string } }
   | { ok: false; error: string };
 
 export type B2bAgreementClaimInput = {
@@ -115,6 +119,9 @@ export type B2bAgreementClaimResult =
   | { ok: false; result: string; reason: string };
 
 export type B2bCheckoutDeps = {
+  loadOfferContext?: (draftId: string, version: number, userId: string, addressId: string | null) =>
+    Promise<{ terms?: unknown; requestId?: string; createdAt?: string; addressConflict?: boolean } | null>;
+  linkOfferSession?: (attemptId: string, sessionId: string) => Promise<boolean>;
   reserveFirstDelivery: (attemptId: string) => Promise<"held" | "unavailable" | "out_of_stock">;
   isEnabled: () => boolean;
   verifyCaller: (request: Request) => Promise<AuthenticatedCaller | null>;
@@ -204,8 +211,15 @@ export async function handleB2bCheckout(
     return fail(400, "Ungültige Anfrage.");
   }
 
-  const requestId = typeof body.requestId === "string" ? body.requestId.trim() : "";
-  if (!UUID_RE.test(requestId)) {
+  if (!body || typeof body !== "object") return fail(400, "Ungültige Anfrage.");
+  const offerRequested = body.offerDraftId !== undefined || body.offerVersion !== undefined;
+  const offerDraftId = typeof body.offerDraftId === "string" ? body.offerDraftId.trim() : "";
+  const version = body.offerVersion;
+  if (offerRequested && (!UUID_RE.test(offerDraftId) || typeof version !== "number" || !Number.isInteger(version) ||
+      version < 1 || version > 2147483647 || body.requestId !== undefined || body.planType !== undefined ||
+      body.packs !== undefined || body.instalmentCount !== undefined)) return fail(400, "Ungültige Angebotsanfrage.");
+  let requestId = typeof body.requestId === "string" ? body.requestId.trim() : "";
+  if (!offerRequested && !UUID_RE.test(requestId)) {
     return fail(400, "Ungültige Anfrage.");
   }
   const addressId = typeof body.addressId === "string" ? body.addressId.trim() : "";
@@ -226,10 +240,34 @@ export async function handleB2bCheckout(
   // country and the postcode are all decided by the rules leaf, using
   // the canonical Berlin resolver - so this route derives no commercial
   // rule of its own and cannot disagree with the delivery rows later.
+  if (offerRequested && ![address.street, address.house_number, address.zip, address.city].every(value => value?.trim())) {
+    return fail(409, "Bitte vervollständige zuerst die Lieferadresse.");
+  }
+  let pinnedAt: number | null = null;
+  let offerTerms: ReturnType<typeof acceptedB2bOfferTerms> = null;
+  if (offerRequested) {
+    if (!deps.loadOfferContext || !deps.linkOfferSession) return fail(503, UNAVAILABLE);
+    try {
+      const offer = await deps.loadOfferContext(offerDraftId, version as number, caller.userId, null);
+      if (!offer) return fail(404, "Angenommenes Angebot nicht verfügbar.");
+      offerTerms = acceptedB2bOfferTerms(offer.terms, address);
+      if (!offerTerms) return fail(409, "Angebotskonditionen oder Lieferadresse stimmen nicht mit dem gültigen Checkout überein.");
+      const linked = await deps.loadOfferContext(offerDraftId, version as number, caller.userId, address.id);
+      if (linked?.addressConflict) return fail(409, "Für dieses Angebot wurde bereits eine andere Lieferadresse hinterlegt.");
+      if (!linked?.requestId || !UUID_RE.test(linked.requestId) || !linked.createdAt ||
+          !Number.isFinite(Date.parse(linked.createdAt)) || !acceptedB2bOfferTerms(linked.terms, address)) {
+        return fail(409, "Angebotsübergabe nicht bestätigt.");
+      }
+      requestId = linked.requestId;
+      pinnedAt = Date.parse(linked.createdAt);
+    } catch {
+      return fail(503, UNAVAILABLE);
+    }
+  }
   const validation = validateB2bCheckoutRequest({
-    planType: body.planType,
-    packs: body.packs,
-    instalmentCount: body.instalmentCount,
+    planType: offerTerms ? offerTerms.planType : body.planType,
+    packs: offerTerms ? offerTerms.packs : body.packs,
+    instalmentCount: offerTerms ? offerTerms.instalmentCount : body.instalmentCount,
     deliveryAddress: { country: address.country, postcode: address.zip },
   });
   if (!validation.ok) {
@@ -264,6 +302,7 @@ export async function handleB2bCheckout(
 
   // ── 11. THE ATTEMPT ─────────────────────────────────────────
   const attemptResult = await deps.ensureAttempt({
+    ...(offerRequested && { offerBound: true }),
     requestId,
     userId: caller.userId,
     planType: quote.planType,
@@ -299,7 +338,15 @@ export async function handleB2bCheckout(
   // the session metadata as gloa_b2b_agreement_id, which is what lets
   // the webhook resolve the contract against trusted local data instead
   // of anything the payload claims.
+  if (offerRequested && attempt.status === "paid") return fail(409, "Dieser Checkout wurde bereits bezahlt.");
+  if (offerRequested && !attempt.stripe_checkout_session_id && pinnedAt !== null &&
+      Date.now() - pinnedAt >= 23 * 60 * 60 * 1000) {
+    return fail(409, "Der Checkout-Status muss von GLOA geprüft werden.");
+  }
   const business = await deps.loadBusinessProfile(caller.token, caller.userId);
+  if (offerRequested && !business?.company_name?.trim()) {
+    return fail(409, "Bitte ergänze zuerst den Firmennamen im Geschäftskonto.");
+  }
   const claim = await deps.claimAgreement({
     checkoutAttemptId: attempt.id,
     expectedUserId: caller.userId,
@@ -351,6 +398,20 @@ export async function handleB2bCheckout(
     return fail(503, UNAVAILABLE);
   }
   const agreementId = claim.agreementId;
+  if (offerRequested && attempt.stripe_checkout_session_id) {
+    try {
+      const session = await stripe.checkout.sessions.retrieve(attempt.stripe_checkout_session_id);
+      if (session.id !== attempt.stripe_checkout_session_id || session.status !== "open" || !session.url ||
+          session.metadata?.gloa_b2b_agreement_id !== agreementId || session.metadata?.checkout_attempt_id !== attempt.id ||
+          session.metadata?.request_id !== requestId || session.amount_total !== charge.grossCents ||
+          session.currency?.toUpperCase() !== attempt.currency) {
+        return fail(409, "Der bestehende Checkout ist nicht mehr offen. Bitte GLOA kontaktieren.");
+      }
+      return Response.json({ sessionId: session.id, url: session.url, agreementId });
+    } catch {
+      return fail(503, UNAVAILABLE);
+    }
+  }
 
   // ── 13. THE STRIPE CUSTOMER ─────────────────────────────────
   const customer = await deps.ensureStripeCustomer(stripe, caller.userId);
@@ -483,7 +544,11 @@ export async function handleB2bCheckout(
   // The customer must still be able to pay if this fails: the session
   // already carries the agreement id in its metadata, so a missing link
   // cannot strand the payment - the webhook re-links it.
-  await deps.linkSession(attempt.id, session.id);
+  if (offerRequested) {
+    if (!await deps.linkOfferSession!(attempt.id, session.id)) return fail(503, UNAVAILABLE);
+  } else {
+    await deps.linkSession(attempt.id, session.id);
+  }
 
   return Response.json(
     { sessionId: session.id, url: session.url, agreementId },

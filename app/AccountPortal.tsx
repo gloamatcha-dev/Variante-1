@@ -4499,6 +4499,7 @@ type CustomerOffer = {
 };
 
 function BusinessOffers() {
+  const { session, addresses } = useAuth();
   const [offers, setOffers] = useState<CustomerOffer[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -4539,6 +4540,33 @@ function BusinessOffers() {
     }
   }
 
+  async function openCheckout(event: React.FormEvent<HTMLFormElement>, offer: CustomerOffer) {
+    event.preventDefault();
+    if (!session?.access_token || running.current) return;
+    const addressId = String(new FormData(event.currentTarget).get("addressId") ?? "");
+    running.current = true;
+    setBusy(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/b2b/supply/checkout/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token },
+        body: JSON.stringify({ offerDraftId: offer.draft_id, offerVersion: offer.version, addressId }),
+      });
+      const reply = await response.json();
+      if (!response.ok || typeof reply.url !== "string" || new URL(reply.url).protocol !== "https:") {
+        setMessage(reply.error ?? "Checkout nicht bestätigt.");
+        return;
+      }
+      window.location.assign(reply.url);
+    } catch {
+      setMessage("Checkout nicht bestätigt. Bitte GLOA kontaktieren oder denselben Vorgang erneut versuchen.");
+    } finally {
+      running.current = false;
+      setBusy(false);
+    }
+  }
+
   const states: Record<string, string> = {
     published: "Offen", accepted: "Annahme erfasst", declined: "Abgelehnt", expired: "Abgelaufen",
   };
@@ -4563,6 +4591,19 @@ function BusinessOffers() {
           {" (" + euros.format(charge.netCents / 100)} netto, {euros.format(charge.taxCents / 100)} Steuer)
         </li>)}</ul>
       </> : <p>Vertragskonditionen fehlen. GLOA muss eine vollständige Version veröffentlichen.</p>}
+      {offer.state === "accepted" && offer.contract_terms && (
+        <form onSubmit={event => void openCheckout(event, offer)}>
+          <label>Lieferadresse für den vereinbarten Checkout
+            <select name="addressId" required defaultValue="" disabled={busy}>
+              <option value="" disabled>Adresse auswählen</option>
+              {addresses.filter(address => address.zip === offer.contract_terms?.postcode &&
+                address.country?.trim().toUpperCase() === offer.destination_country).map(address =>
+                <option key={address.id} value={address.id}>{address.street} {address.house_number}, {address.zip} {address.city}</option>)}
+            </select>
+          </label>
+          <button type="submit" disabled={busy || !session?.access_token}>Zum gesicherten Checkout</button>
+        </form>
+      )}
       {offer.state === "published" && offer.contract_terms && !decision && <>
         <button type="button" disabled={busy} onClick={() => setDecision({ offer, action: "accepted" })}>Annehmen</button>
         <button type="button" disabled={busy} onClick={() => setDecision({ offer, action: "declined" })}>Ablehnen</button>

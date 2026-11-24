@@ -1214,3 +1214,79 @@ test("41: every new suite is registered in the npm test script", () => {
 
 // Migration-stack guard repinned for the explicitly added 073 RPC only.
 // Historical SQL remains immutable; 073 is covered by affiliate-atomic-configuration.test.mjs.
+
+test("accepted offer uses server terms, one retry key and the existing first-delivery guard", async () => {
+  const { buildB2bOfferContract } = await import("../lib/b2bOfferContract.ts");
+  const built = buildB2bOfferContract({ pack_count: 3, net_unit_cents: 5250, destination_country: "DE" },
+    { planType: "annual", instalmentCount: 2, postcode: "10115" });
+  assert.equal(built.ok, true);
+  const requestId = "88888888-8888-4888-8888-888888888888";
+  const offerDraftId = "99999999-9999-4999-8999-999999999999";
+  const command = overrides => new Request("https://gloa.test/api/b2b/supply/checkout/session", {
+    method: "POST", body: JSON.stringify({ offerDraftId, offerVersion: 2, addressId: UUID_ADDRESS, ...overrides }),
+  });
+  let allowed = true;
+  let terms = built.terms;
+  let pinned = new Date().toISOString();
+  let hold = "held";
+  let linkedSession = null;
+  let sessionStatus = "open";
+  let stripeRequests = 0;
+  const providerSessions = new Map();
+  const deps = stubDeps({
+    async loadOfferContext(draft, version, user, address) {
+      assert.deepEqual([draft, version, user], [offerDraftId, 2, UUID_A]);
+      return !allowed ? null : address ? { terms, requestId, createdAt: pinned } : { terms };
+    },
+    async ensureAttempt(input) {
+      assert.equal(input.requestId, requestId);
+      assert.equal(input.offerBound, true);
+      assert.equal(input.packs, 3);
+      assert.equal(input.instalmentCount, 2);
+      return { ok: true, attempt: { id: UUID_ATTEMPT, currency: "EUR",
+        expected_total_gross_cents: built.terms.charges[0].grossCents,
+        stripe_checkout_session_id: linkedSession } };
+    },
+    async linkOfferSession(_attempt, id) { linkedSession = id; return true; },
+    async reserveFirstDelivery() { return hold; },
+    getStripe: () => ({
+      checkout: { sessions: {
+        async create(params, { idempotencyKey }) {
+          stripeRequests++;
+          assert.equal(params.mode, "payment");
+          assert.equal(params.line_items[0].price_data.unit_amount, built.terms.charges[0].grossCents);
+          assert.equal(idempotencyKey, "gloa-b2b-session-" + UUID_ATTEMPT);
+          if (!providerSessions.has(idempotencyKey)) providerSessions.set(idempotencyKey,
+            { id: "cs_test_offer", url: "https://stripe.test/offer", metadata: params.metadata,
+              amount_total: built.terms.charges[0].grossCents, currency: "eur" });
+          return providerSessions.get(idempotencyKey);
+        },
+        async retrieve() { return { ...[...providerSessions.values()][0], status: sessionStatus }; },
+      } },
+    }),
+  });
+  assert.equal((await handleB2bCheckout(command({ packs: 1 }), deps)).status, 400);
+  allowed = false;
+  assert.equal((await handleB2bCheckout(command(), deps)).status, 404);
+  allowed = true;
+  terms = { ...built.terms, charges: [] };
+  assert.equal((await handleB2bCheckout(command(), deps)).status, 409);
+  terms = built.terms;
+  hold = "out_of_stock";
+  assert.equal((await handleB2bCheckout(command(), deps)).status, 409);
+  hold = "held";
+  const now = pinned;
+  pinned = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  assert.equal((await handleB2bCheckout(command(), deps)).status, 409);
+  pinned = now;
+  assert.equal(stripeRequests, 0);
+  const responses = await Promise.all([handleB2bCheckout(command(), deps), handleB2bCheckout(command(), deps)]);
+  assert.deepEqual(responses.map(res => res.status), [200, 200]);
+  assert.equal(providerSessions.size, 1);
+  assert.equal((await responses[0].json()).sessionId, (await responses[1].json()).sessionId);
+  const calls = stripeRequests;
+  assert.equal((await handleB2bCheckout(command(), deps)).status, 200);
+  sessionStatus = "expired";
+  assert.equal((await handleB2bCheckout(command(), deps)).status, 409);
+  assert.equal(stripeRequests, calls);
+});

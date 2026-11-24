@@ -77,9 +77,28 @@ export async function POST(request: Request) {
     return json({ error: 'Veröffentlichung nicht bestätigt.' }, 503);
   }
   if (body?.action === 'list') {
-    const { data, error } = await admin.from('b2b_offer_drafts').select(columns + ',versions:b2b_offer_versions(version,state,pack_count,net_unit_cents,expires_at)')
+    const { data, error } = await admin.from('b2b_offer_drafts').select(`${columns},versions:b2b_offer_versions(version,state,pack_count,net_unit_cents,expires_at)`)
       .order('created_at', { ascending: false }).order('id').limit(30);
-    return error ? json({ error: 'Entwürfe konnten nicht geladen werden.' }, 503) : json({ drafts: data });
+    if (error) return json({ error: 'Entwürfe konnten nicht geladen werden.' }, 503);
+    const acceptedIds = (data ?? []).filter(row => row.versions.some(v => v.state === 'accepted')).map(row => row.id);
+    if (!acceptedIds.length) return json({ drafts: data });
+    const [linkResult, handoffResult] = await Promise.all([
+      admin.from('b2b_offer_checkout_links').select('draft_id,version,request_id').in('draft_id', acceptedIds),
+      admin.from('b2b_offer_contract_handoffs').select('draft_id,version,contract_terms').in('draft_id', acceptedIds),
+    ]);
+    if (linkResult.error || handoffResult.error) return json({ error: 'Checkout-Status konnte nicht geladen werden.' }, 503);
+    const links = linkResult.data ?? [];
+    const attemptResult = links.length ? await admin.from('checkout_attempts')
+      .select('request_id,status').in('request_id', links.map(link => link.request_id)) : null;
+    if (attemptResult?.error) return json({ error: 'Checkout-Status konnte nicht geladen werden.' }, 503);
+    return json({ drafts: (data ?? []).map(row => ({ ...row, versions: row.versions.map(version => {
+      if (version.state !== 'accepted') return version;
+      const terms = handoffResult.data?.find(entry => entry.draft_id === row.id && entry.version === version.version)?.contract_terms;
+      if (!terms) return { ...version, checkout_status: 'terms_missing' };
+      const link = links.find(entry => entry.draft_id === row.id && entry.version === version.version);
+      return link ? { ...version, checkout_status: attemptResult?.data?.find(attempt => attempt.request_id === link.request_id)?.status
+        ?? 'address_bound' } : version;
+    }) })) });
   }
   const draft = body?.action === 'create' && parseB2bOfferDraft(body);
   if (!draft) return json({ error: 'Ungültiger Angebotsentwurf.' }, 400);
