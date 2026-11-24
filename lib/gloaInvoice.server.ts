@@ -10,7 +10,8 @@ import { getSiteOrigin } from "./siteUrl";
 import { GLOA_FROM_HELLO, GLOA_REPLY_TO_SUPPORT } from "./emailSenders";
 
 export const invoiceBucket = "gloa-finance-documents";
-export const invoicePath = (id: string) => "invoice-register/" + id + ".pdf";
+export const invoicePath = (id: string, format: "pdf" | "xrechnung" = "pdf") =>
+  "invoice-register/" + id + (format === "xrechnung" ? ".xml" : ".pdf");
 type Admin = NonNullable<ReturnType<typeof getSupabaseAdmin>>;
 type Register = {
   id: string; number: string; order_id: string | null; annual_plan_id?: string | null; snapshot: InvoiceSnapshot;

@@ -3,13 +3,13 @@
 import { useState } from "react";
 
 export function InvoiceDocuments({ access }: {
-  access: { token: string; orderId: string } | { token: string; annualPlanId: string } | { guestToken: string };
+  access: { token: string; orderId: string } | { token: string; annualPlanId: string } | { token: string; agreementId: string } | { guestToken: string };
 }) {
-  const [rows, setRows] = useState<{ id: string; number: string; original_id: string | null }[]>([]);
+  const [rows, setRows] = useState<{ id: string; number: string; original_id: string | null; format?: string }[]>([]);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
-  async function load(id?: string, number?: string) {
+  async function load(id?: string, number?: string, format?: string) {
     if (busy) return;
     setBusy(true);
     setMessage("");
@@ -22,7 +22,7 @@ export function InvoiceDocuments({ access }: {
         });
       } else {
         const params = new URLSearchParams("orderId" in access
-          ? { orderId: access.orderId } : { annualPlanId: access.annualPlanId });
+          ? { orderId: access.orderId } : "annualPlanId" in access ? { annualPlanId: access.annualPlanId } : { agreementId: access.agreementId });
         if (id) params.set("id", id);
         response = await fetch("/api/orders/invoices?" + params, {
           headers: { Authorization: "Bearer " + access.token },
@@ -38,7 +38,7 @@ export function InvoiceDocuments({ access }: {
       const url = URL.createObjectURL(await response.blob());
       const link = document.createElement("a");
       link.href = url;
-      link.download = number + ".pdf";
+      link.download = number + (format === "xrechnung" ? ".xml" : ".pdf");
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch {
@@ -53,7 +53,7 @@ export function InvoiceDocuments({ access }: {
     <button type="button" className="portal-action" disabled={busy} onClick={() => void load()}>Dokumente laden</button>
     {message && <p role="status">{message}</p>}
     <ul>{rows.map(row => <li key={row.id}>
-      <button type="button" disabled={busy} onClick={() => void load(row.id, row.number)}>
+      <button type="button" disabled={busy} onClick={() => void load(row.id, row.number, row.format)}>
         {row.original_id ? "Rechnungskorrektur " : "Rechnung "}{row.number} herunterladen
       </button>
     </li>)}</ul>

@@ -54,6 +54,7 @@ test('signed-in customer can download only the PDF linked to their order', async
   });
   const route = moduleFixture('../app/api/orders/invoices/route.ts', {
     '../../../../lib/gloaInvoiceAccess.server': invoiceAccess,
+    '../../../../lib/gloaXRechnung.server': {},
     'node:crypto': { createHash },
     '../../../../lib/verifyUser': { verifyBearerUser: async () => ({ userId }) },
     '../../../../lib/adminActionRoute': {},
@@ -313,10 +314,58 @@ test('B2B evidence distinguishes monthly invoices, annual instalments and unappr
     const evidence = await loadB2bInvoiceEvidence(admin, request, cutoff);
     assert.equal(evidence.paymentReference, reference);
     assert.equal(evidence.grossCents, 1070);
-    assert.equal(await checkB2bInvoiceReadiness(admin, request, cutoff), 'structured_invoice_adapter_missing');
+    assert.equal(await checkB2bInvoiceReadiness(admin, request, cutoff), 'structured_invoice_snapshot_or_validation_unconfirmed');
   }
   assert.equal(await loadB2bInvoiceEvidence(admin, { agreementId: 'a',
     payment: { model: 'annual', invoiceId: 'in_unpaid' } }, cutoff), null);
   tables.b2b_supply_agreements[0].billing_address_snapshot.country = 'CH';
   assert.equal(await loadB2bInvoiceEvidence(admin, requests[0][0], cutoff), null);
+});
+
+test('XRechnung storage is unreachable on failed validation or disabled issuance', async () => {
+  let validations = 0;
+  let uploads = 0;
+  let finalized = 0;
+  const env = {};
+  const app = moduleFixture('../lib/gloaXRechnung.server.ts', {
+    './supabaseAdmin': {},
+    './gloaInvoice.server': { invoiceBucket: 'private', invoicePath: id => 'invoice-register/' + id + '.xml' },
+    './gloaInvoiceRules': { persistInvoicePdf },
+    './xrechnung.server': { renderXRechnung: () => Buffer.from('<Invoice/>') },
+    './xrechnungValidation.server': { validateXRechnung: async () => {
+      validations++;
+      if (validations === 1) throw new Error('synthetic validation failure');
+      return { xmlSha256: 'a'.repeat(64), reportSha256: 'b'.repeat(64) };
+    } },
+  }, { process: { env } });
+  const admin = {
+    storage: { from: name => {
+      assert.equal(name, 'private');
+      return { async upload(path, _bytes, options) {
+        assert.equal(path, 'invoice-register/id.xml');
+        assert.equal(options.upsert, false);
+        assert.equal(options.contentType, 'application/xml');
+        uploads++;
+        return {};
+      } };
+    } },
+    async rpc(name, params) {
+      assert.equal(name, 'finish_gloa_xrechnung_v1');
+      assert.equal(params.p_report_sha, 'b'.repeat(64));
+      finalized++;
+      return {};
+    },
+  };
+  const row = { id: 'id', number: 'GLOA-AUTO-1', document_id: null, snapshot: {} };
+  await assert.rejects(app.completeB2bXRechnung(admin, row), /issuance_disabled/);
+  Object.assign(env, { GLOA_INVOICE_ENABLED: 'true', GLOA_XRECHNUNG_ENABLED: 'true',
+    GLOA_INVOICE_ISSUER_VERSION: '1', GLOA_INVOICE_CUTOFF: '2026-11-22T00:00:00Z',
+    GLOA_KOSIT_JAR: 'synthetic-jar', GLOA_KOSIT_CONFIGURATION_ZIP: 'synthetic-rules' });
+  await assert.rejects(app.completeB2bXRechnung(admin, row), /validation failure/);
+  assert.equal(uploads, 0);
+  assert.equal(finalized, 0);
+  await app.completeB2bXRechnung(admin, row);
+  await app.completeB2bXRechnung(admin, { ...row, document_id: row.id });
+  assert.equal(uploads, 1);
+  assert.equal(finalized, 1);
 });

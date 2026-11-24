@@ -9,9 +9,9 @@ export const privateInvoiceHeaders = {
   "X-Content-Type-Options": "nosniff",
 };
 
-export async function serveIssuedInvoices(admin: Admin, subject: { key: "order_id" | "annual_plan_id"; id: string }, id: string | null) {
+export async function serveIssuedInvoices(admin: Admin, subject: { key: "order_id" | "annual_plan_id" | "b2b_agreement_id"; id: string }, id: string | null) {
   const json = (body: unknown, status = 200) => Response.json(body, { status, headers: privateInvoiceHeaders });
-  const invoices = admin.from("gloa_invoice_register").select("id,number,original_id,document_id")
+  const invoices = admin.from("gloa_invoice_register").select("id,number,original_id,document_id,format,validation_report_sha256")
     .eq(subject.key, subject.id).not("document_id", "is", null);
   if (!id) {
     const result = await invoices.order("created_at").limit(100);
@@ -20,15 +20,18 @@ export async function serveIssuedInvoices(admin: Admin, subject: { key: "order_i
   const row = await invoices.eq("id", id).maybeSingle();
   if (row.error) return json({}, 503);
   if (!row.data || !/^GLOA-AUTO-[0-9]+$/.test(row.data.number)) return json({}, 404);
+  const structured = row.data.format === "xrechnung";
+  if (structured && !/^[0-9a-f]{64}$/.test(row.data.validation_report_sha256 ?? "")) return json({}, 503);
+  const path = invoicePath(id, structured ? "xrechnung" : "pdf");
   const doc = await admin.from("documents").select("file_sha256,storage_path")
     .eq("id", row.data.document_id).maybeSingle();
-  if (doc.error || doc.data?.storage_path !== invoicePath(id)) return json({}, 503);
-  const stored = await admin.storage.from(invoiceBucket).download(invoicePath(id));
+  if (doc.error || doc.data?.storage_path !== path) return json({}, 503);
+  const stored = await admin.storage.from(invoiceBucket).download(path);
   if (stored.error || !stored.data) return json({}, 503);
   const buffer = await stored.data.arrayBuffer();
   if (createHash("sha256").update(Buffer.from(buffer)).digest("hex") !== doc.data.file_sha256) return json({}, 503);
   return new Response(buffer, { headers: {
-    ...privateInvoiceHeaders, "Content-Type": "application/pdf",
-    "Content-Disposition": 'attachment; filename="' + row.data.number + '.pdf"',
+    ...privateInvoiceHeaders, "Content-Type": structured ? "application/xml" : "application/pdf",
+    "Content-Disposition": 'attachment; filename="' + row.data.number + (structured ? '.xml"' : '.pdf"'),
   } });
 }

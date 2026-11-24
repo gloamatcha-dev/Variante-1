@@ -4765,6 +4765,7 @@ function PortalBusiness() {
  * negotiated agreement ever reaches.
  */
 function SupplyDetail({ supplyId }: { supplyId: string }) {
+  const { session } = useAuth();
   const [kind, setKind] = useState<"loading" | "self_service" | "legacy">(
     () => (supabase ? "loading" : "legacy")
   );
@@ -4779,8 +4780,10 @@ function SupplyDetail({ supplyId }: { supplyId: string }) {
   }, [supplyId]);
 
   if (kind === "loading") return <p className="portal-loading">Laden…</p>;
-  if (kind === "self_service") return <B2bSupplyDetail supplyId={supplyId} />;
-  return <LegacySupplyDetail supplyId={supplyId} />;
+  return <>
+    {kind === "self_service" ? <B2bSupplyDetail supplyId={supplyId} /> : <LegacySupplyDetail supplyId={supplyId} />}
+    {session?.access_token && <InvoiceDocuments key={supplyId} access={{ agreementId: supplyId, token: session.access_token }} />}
+  </>;
 }
 
 function LegacySupplyDetail({ supplyId }: { supplyId: string }) {

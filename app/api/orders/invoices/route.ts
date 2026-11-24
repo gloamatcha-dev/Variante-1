@@ -1,3 +1,4 @@
+import { completeB2bXRechnung } from "../../../../lib/gloaXRechnung.server";
 import { privateInvoiceHeaders, serveIssuedInvoices } from "../../../../lib/gloaInvoiceAccess.server";
 import { verifyBearerUser } from "../../../../lib/verifyUser";
 import { requireAdminIdentity } from "../../../../lib/adminActionRoute";
@@ -16,15 +17,17 @@ export async function GET(request: Request) {
   const orderId = params.get("orderId");
   const id = params.get("id");
   const annualPlanId = params.get("annualPlanId");
-  if (Boolean(orderId) === Boolean(annualPlanId) || !uuid(orderId ?? annualPlanId) || (id !== null && !uuid(id))) return json({}, 400);
+  const agreementId = params.get("agreementId");
+  const subjects = [orderId, annualPlanId, agreementId].filter(value => value !== null);
+  if (subjects.length !== 1 || !uuid(subjects[0]) || (id !== null && !uuid(id))) return json({}, 400);
   const admin = getSupabaseAdmin();
   if (!admin) return json({}, 503);
 
-  const subjectId = (orderId ?? annualPlanId)!;
-  const order = await admin.from(orderId ? "orders" : "annual_plans").select("user_id").eq("id", subjectId).maybeSingle();
+  const subjectId = subjects[0];
+  const order = await admin.from(orderId ? "orders" : annualPlanId ? "annual_plans" : "b2b_supply_agreements").select("user_id").eq("id", subjectId).maybeSingle();
   if (order.error) return json({}, 503);
   if (!order.data || (caller && order.data.user_id !== caller.userId)) return json({}, 404);
-  return serveIssuedInvoices(admin, { key: orderId ? "order_id" : "annual_plan_id", id: subjectId }, id);
+  return serveIssuedInvoices(admin, { key: orderId ? "order_id" : annualPlanId ? "annual_plan_id" : "b2b_agreement_id", id: subjectId }, id);
 }
 
 export async function POST(request: Request) {
@@ -38,6 +41,14 @@ export async function POST(request: Request) {
   const row = await admin.from("gloa_invoice_register").select("*").eq("id", id).maybeSingle();
   if (row.error) return json({}, 503);
   if (!row.data) return json({}, 404);
+  if (row.data.format === "xrechnung") {
+    try {
+      await completeB2bXRechnung(admin, row.data);
+      return json({ processed: true });
+    } catch {
+      return json({}, 503);
+    }
+  }
   const order = await admin.from(row.data.annual_plan_id ? "annual_plans" : "orders").select("user_id")
     .eq("id", row.data.annual_plan_id ?? row.data.order_id).maybeSingle();
   if (order.error || !order.data) return json({}, 503);

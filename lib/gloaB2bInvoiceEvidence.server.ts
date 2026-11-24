@@ -59,5 +59,5 @@ export type B2bStructuredInvoiceAdapter = {
 
 export async function checkB2bInvoiceReadiness(admin: Admin, settlement: B2bSettlement, cutoff: string) {
   const evidence = await loadB2bInvoiceEvidence(admin, settlement, cutoff);
-  return evidence ? "structured_invoice_adapter_missing" : "billing_or_tax_evidence_unconfirmed";
+  return evidence ? "structured_invoice_snapshot_or_validation_unconfirmed" : "billing_or_tax_evidence_unconfirmed";
 }
