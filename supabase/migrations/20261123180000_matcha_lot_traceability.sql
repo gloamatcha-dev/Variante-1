@@ -73,6 +73,15 @@ begin
   if v_sku is null or v_sku not in ('GLOA-MATCHA-RAW','GLOA-MATCHA-30G','GLOA-MATCHA-50G',
     'GLOA-MATCHA-100G','GLOA-MATCHA-B2B-500G') then return null; end if;
 
+  if not public.release_writes_enabled_v1('matcha_lot_release_writes_enabled') then
+    -- Before activation leave legacy inventory alone. After traced intake,
+    -- freeze tracked movements so a rollback cannot make the lot ledger diverge.
+    if exists(select 1 from public.matcha_lots) then
+      raise exception 'inventory_lot_traceability_paused' using errcode='55000';
+    end if;
+    return null;
+  end if;
+
   -- Existing movement writers hold this item lock before they change stock.
   perform 1 from public.inventory_items where id=new.inventory_item_id for update;
   perform pg_advisory_xact_lock(hashtextextended('matcha:lot:eligibility',0));
@@ -166,6 +175,7 @@ create function public.admin_pack_traced_matcha_v1(
 ) returns jsonb language plpgsql security definer set search_path='' as $$
 declare v_withdrawal uuid; v_saved jsonb; v_grams integer;
 begin
+  perform public.require_release_writes_v1('matcha_lot_release_writes_enabled');
   if not exists(select 1 from public.admin_users where user_id=p_actor and is_active
     and role in ('owner','admin')) then raise exception 'inventory_lot_forbidden' using errcode='42501'; end if;
   v_grams := case p_sku when 'GLOA-MATCHA-30G' then 30 when 'GLOA-MATCHA-50G' then 50
@@ -200,6 +210,7 @@ create function public.admin_correct_matcha_lot_v1(
 ) returns jsonb language plpgsql security definer set search_path='' as $$
 declare v_item uuid; v_pick jsonb; v_saved public.matcha_lot_picks; v_prior public.inventory_movements; v_result jsonb;
 begin
+  perform public.require_release_writes_v1('matcha_lot_release_writes_enabled');
   if not exists(select 1 from public.admin_users where user_id=p_actor and is_active
     and role in ('owner','admin')) then raise exception 'inventory_lot_forbidden' using errcode='42501'; end if;
   select inventory_item_id into v_item from public.matcha_lot_balances
@@ -262,6 +273,7 @@ create function public.admin_set_matcha_lot_pick_v1(
 ) returns boolean language plpgsql security definer set search_path='' as $$
 declare v_operation uuid; v_units integer; v_item uuid; v_total numeric; v_candidates integer;
 begin
+  perform public.require_release_writes_v1('matcha_lot_release_writes_enabled');
   if not exists(select 1 from public.admin_users where user_id=p_actor and is_active
     and role in ('owner','admin')) then raise exception 'inventory_lot_forbidden' using errcode='42501'; end if;
   if p_sku='GLOA-MATCHA-B2B-500G' then
@@ -309,6 +321,7 @@ create function public.admin_set_matcha_lot_status_v1(
 language plpgsql security definer set search_path='' as $$
 declare v_prior public.matcha_lot_status_events;
 begin
+  perform public.require_release_writes_v1('matcha_lot_release_writes_enabled');
   if not exists(select 1 from public.admin_users where user_id=p_actor and is_active
     and role in ('owner','admin')) then raise exception 'inventory_lot_forbidden' using errcode='42501'; end if;
   perform pg_advisory_xact_lock(hashtextextended('matcha:lot:eligibility',0));

@@ -10,3 +10,5 @@ create table public.subscription_pause_write_fences (
 alter table public.subscription_pause_write_fences enable row level security;
 revoke all on table public.subscription_pause_write_fences from public, anon, authenticated, service_role;
 grant select, insert, delete on table public.subscription_pause_write_fences to service_role;
+create trigger sandbox_pause_fence_release_required before insert on public.subscription_pause_write_fences
+  for each row execute function public.guard_release_table_write_v1('sandbox_pause_release_writes_enabled');

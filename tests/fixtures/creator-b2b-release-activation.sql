@@ -36,12 +36,39 @@ create table public.creator_commissions(
 );
 create table public.documents(id uuid primary key,cleanup_operation_id uuid,storage_path text,file_sha256 text);
 
+-- Only the columns needed to verify the new release gates. Auth and Storage
+-- HTTP clients and Stripe are not part of this SQL fixture.
+alter table public.orders add column shipped_at timestamptz, add column fulfillment_status text default 'pending';
+create table public.inventory_items(id uuid primary key, sku text, unit text);
+create table public.inventory_movements(
+  id uuid primary key,inventory_item_id uuid references public.inventory_items, supplier text, occurred_at timestamptz,
+  quantity_delta numeric,movement_type text,reason text,batch_number text,best_before_date date,operation_id uuid,reference text
+);
+alter table public.orders add column checkout_attempt_id uuid;
+create table public.order_items(order_id uuid,sku text,quantity integer);
+create table public.matcha_checkout_reservations(item_id uuid,attempt_id uuid,units integer,state text);
+create table public.b2b_deliveries(id uuid primary key);
+create table public.b2b_supply_agreements(id uuid primary key);
+create table public.subscriptions(id uuid primary key);
+create table public.checkout_attempts(id uuid primary key,subscription_id uuid,stripe_invoice_id text);
+create table public.financial_events(id uuid primary key);
+create table public.annual_plans(id uuid primary key);
+create schema storage;
+create table storage.buckets(id text primary key, public boolean, allowed_mime_types text[]);
+insert into storage.buckets values ('gloa-finance-documents',false,array['application/pdf']);
+
 \ir ../../supabase/migrations/20261123160000_gloa_offer_drafts_and_invoice_issuers.sql
 \ir ../../supabase/migrations/20261123170000_gloa_b2b_offer_versions.sql
 \ir ../../supabase/migrations/20261123170100_gloa_creator_monthly_preview.sql
+\ir ../../supabase/migrations/20261123180000_matcha_lot_traceability.sql
 \ir ../../supabase/migrations/20261123190000_creator_monthly_payout_workflow.sql
+\ir ../../supabase/migrations/20261124120000_subscription_pause_write_fences.sql
+\ir ../../supabase/migrations/20261124121000_subscription_pause_windows.sql
 \ir ../../supabase/migrations/20261124130000_b2b_offer_publication_and_handoff.sql
 \ir ../../supabase/migrations/20261124140000_b2b_offer_contract_terms.sql
+\ir ../../supabase/migrations/20261124150000_gloa_invoice_register.sql
+\ir ../../supabase/migrations/20261124160000_gloa_invoice_sale_subjects.sql
+\ir ../../supabase/migrations/20261124170000_gloa_xrechnung_register.sql
 \ir ../../supabase/migrations/20261124180000_b2b_offer_checkout_link.sql
 
 begin;
@@ -65,6 +92,63 @@ begin
     if sqlstate <> state or sqlerrm <> message then raise; end if;
   end;
 end $$;
+
+insert into public.order_items values ('10000000-0000-4000-8000-000000000005','GLOA-MATCHA-30G',1);
+select pg_temp.expect_refusal(
+  $$update public.orders set shipped_at=now() where id='10000000-0000-4000-8000-000000000005'$$,
+  'P0001','inventory_lot_shipment_reservation_missing');
+
+insert into public.inventory_items values ('30000000-0000-4000-8000-000000000001','GLOA-MATCHA-RAW','g');
+insert into public.subscriptions values ('30000000-0000-4000-8000-000000000002');
+insert into public.checkout_attempts values (
+  '30000000-0000-4000-8000-000000000003','30000000-0000-4000-8000-000000000002','existing-cycle'
+);
+insert into public.inventory_movements(id,inventory_item_id,quantity_delta,movement_type,reason)
+values ('30000000-0000-4000-8000-000000000004','30000000-0000-4000-8000-000000000001',10,'receipt','goods_receipt');
+
+set local role service_role;
+select pg_temp.expect_refusal(
+  $$update public.operations_config set int_value=1 where key='invoice_release_writes_enabled'$$,'42501','release_config_reserved');
+select pg_temp.expect_refusal(
+  $$select public.claim_gloa_invoice_v1(null,null,null,null)$$,'55000','release_writes_disabled');
+select pg_temp.expect_refusal(
+  $$select public.claim_gloa_annual_invoice_v1(null,null,null,null)$$,'55000','release_writes_disabled');
+select pg_temp.expect_refusal(
+  $$select public.claim_gloa_xrechnung_v1(null,null,null,null)$$,'55000','release_writes_disabled');
+select pg_temp.expect_refusal(
+  $$select public.finish_gloa_invoice_v1(null,null,null)$$,'55000','release_writes_disabled');
+select pg_temp.expect_refusal(
+  $$select public.finish_gloa_xrechnung_v1(null,null,null,null)$$,'55000','release_writes_disabled');
+select pg_temp.expect_refusal(
+  $$insert into public.subscription_pause_write_fences(subscription_id,operation_id,action)
+  values ('30000000-0000-4000-8000-000000000002','30000000-0000-4000-8000-000000000005','pause')$$,
+    '55000','release_writes_disabled');
+select pg_temp.expect_refusal(
+  $$insert into public.subscription_pause_windows(subscription_id,schedule_id,pause_at)
+  values ('30000000-0000-4000-8000-000000000002','synthetic',now())$$,
+    '55000','release_writes_disabled');
+select pg_temp.expect_refusal(
+  $$select public.activate_sandbox_subscription_cycle(null,null,null,null,null,null,null,null,null,null)$$,
+    '55000','release_writes_disabled');
+select pg_temp.expect_refusal(
+  $$select public.admin_pack_traced_matcha_v1('10000000-0000-4000-8000-000000000001',null,null,null,null)$$,
+    '55000','release_writes_disabled');
+reset role;
+
+-- Confirm legal-identity versioning without using any real issuer data.
+insert into public.invoice_issuer_versions(effective_from,legal_name,street_address,postal_code,city,country_code,tax_number,approved_by)
+values ('2020-01-01','Synthetic Issuer','Synthetic Street','00000','Synthetic City','DE','synthetic-tax','10000000-0000-4000-8000-000000000001');
+select pg_temp.expect_refusal(
+  $$update public.invoice_issuer_versions set legal_name='changed'$$,'P0001','invoice_issuer_version_immutable');
+
+update public.operations_config set int_value=1 where key='matcha_lot_release_writes_enabled';
+insert into public.inventory_movements(id,inventory_item_id,quantity_delta,movement_type,reason,supplier,batch_number,best_before_date)
+values ('30000000-0000-4000-8000-000000000006','30000000-0000-4000-8000-000000000001',10,'receipt','goods_receipt','synthetic','synthetic-lot',current_date+20);
+update public.operations_config set int_value=0 where key='matcha_lot_release_writes_enabled';
+select pg_temp.expect_refusal(
+  $$insert into public.inventory_movements(id,inventory_item_id,quantity_delta,movement_type,reason)
+  values ('30000000-0000-4000-8000-000000000007','30000000-0000-4000-8000-000000000001',10,'receipt','goods_receipt')$$,
+    '55000','inventory_lot_traceability_paused');
 
 set local role service_role;
 select pg_temp.expect_refusal(

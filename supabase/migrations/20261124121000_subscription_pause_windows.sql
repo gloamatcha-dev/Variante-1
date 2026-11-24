@@ -9,6 +9,8 @@ create table public.subscription_pause_windows (
 alter table public.subscription_pause_windows enable row level security;
 revoke all on table public.subscription_pause_windows from public, anon, authenticated, service_role;
 grant select, insert on table public.subscription_pause_windows to service_role;
+create trigger sandbox_pause_window_release_required before insert or update on public.subscription_pause_windows
+  for each row execute function public.guard_release_table_write_v1('sandbox_pause_release_writes_enabled');
 
 create table public.sandbox_subscription_paid_cycles (
   subscription_id uuid not null references public.subscriptions(id) on delete restrict,
@@ -44,6 +46,7 @@ as $$
 declare
   v_attempt uuid;
 begin
+  perform public.require_release_writes_v1('sandbox_pause_release_writes_enabled');
   perform 1 from public.subscriptions where id = p_subscription_id for update;
   if not found then raise exception 'subscription not found'; end if;
 

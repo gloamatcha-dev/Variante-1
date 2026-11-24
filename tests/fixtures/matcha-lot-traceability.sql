@@ -1,6 +1,7 @@
 -- Run with psql against a disposable database containing the complete migration chain.
 \set ON_ERROR_STOP on
 begin;
+update public.operations_config set int_value=1 where key='matcha_lot_release_writes_enabled';
 do $$
 declare
   actor uuid; category uuid; raw uuid; packed uuid; variant uuid;

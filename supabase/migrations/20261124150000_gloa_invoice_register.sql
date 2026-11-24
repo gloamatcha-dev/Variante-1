@@ -16,6 +16,8 @@ create unique index gloa_invoice_one_per_order on public.gloa_invoice_register(o
 alter table public.gloa_invoice_register enable row level security;
 revoke all on public.gloa_invoice_register from public,anon,authenticated,service_role;
 grant select,update(delivery_status) on public.gloa_invoice_register to service_role;
+create trigger invoice_delivery_release_required before update of delivery_status on public.gloa_invoice_register
+  for each row execute function public.guard_release_table_write_v1('invoice_release_writes_enabled');
 revoke all on sequence public.gloa_invoice_number_seq from public,anon,authenticated,service_role;
 
 create function public.claim_gloa_invoice_v1(p_event uuid,p_issuer bigint,p_snapshot jsonb,p_cutoff timestamptz)
@@ -23,6 +25,7 @@ returns public.gloa_invoice_register language plpgsql security definer set searc
 declare e public.financial_events; o public.orders; result public.gloa_invoice_register;
         original public.gloa_invoice_register;
 begin
+  perform public.require_release_writes_v1('invoice_release_writes_enabled');
   select * into e from public.financial_events where id=p_event;
   if not found or e.order_id is null or e.channel<>'b2c' or e.kind not in ('order_payment','refund') or
       p_cutoff is null or e.created_at < p_cutoff or e.occurred_on is null or
@@ -59,6 +62,7 @@ create function public.finish_gloa_invoice_v1(p_id uuid,p_sha text,p_bytes integ
 returns void language plpgsql security definer set search_path='' as $$
 declare invoice public.gloa_invoice_register;
 begin
+  perform public.require_release_writes_v1('invoice_release_writes_enabled');
   select * into invoice from public.gloa_invoice_register where id=p_id for update;
   if not found then raise exception 'invoice_not_found'; end if;
   if invoice.document_id is not null then return; end if;

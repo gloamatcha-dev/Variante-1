@@ -11,6 +11,7 @@ returns public.gloa_invoice_register language plpgsql security definer set searc
 declare e public.financial_events; o public.orders; result public.gloa_invoice_register;
         original public.gloa_invoice_register;
 begin
+  perform public.require_release_writes_v1('invoice_release_writes_enabled');
   select * into e from public.financial_events where id=p_event;
   if not found or e.order_id is null or e.channel<>'b2c' or e.kind not in ('order_payment','refund') or
       p_cutoff is null or e.created_at < p_cutoff or e.occurred_on is null or
@@ -48,6 +49,7 @@ returns public.gloa_invoice_register language plpgsql security definer set searc
 declare e public.financial_events; plan public.annual_plans; result public.gloa_invoice_register;
         original public.gloa_invoice_register;
 begin
+  perform public.require_release_writes_v1('invoice_release_writes_enabled');
   select * into e from public.financial_events where id=p_event;
   if not found or e.order_id is not null or e.annual_plan_id is null or e.channel<>'b2c' or
       e.kind not in ('annual_prepayment','refund') or p_cutoff is null or e.created_at < p_cutoff or

@@ -16,6 +16,7 @@ returns public.gloa_invoice_register language plpgsql security definer set searc
 declare e public.financial_events; a public.b2b_supply_agreements; issued public.gloa_invoice_register;
         original public.gloa_invoice_register; issuer public.invoice_issuer_versions;
 begin
+  perform public.require_release_writes_v1('invoice_release_writes_enabled');
   select * into e from public.financial_events where id=p_event;
   if not found or e.b2b_agreement_id is null or e.channel<>'b2b' or e.currency<>'EUR' or
       e.kind not in ('b2b_settlement','refund') or e.external_reference is null or
@@ -80,6 +81,7 @@ create function public.finish_gloa_xrechnung_v1(p_id uuid,p_sha text,p_bytes int
 returns void language plpgsql security definer set search_path='' as $$
 declare r public.gloa_invoice_register;
 begin
+  perform public.require_release_writes_v1('invoice_release_writes_enabled');
   select * into r from public.gloa_invoice_register where id=p_id and format='xrechnung' for update;
   if not found then raise exception 'xrechnung_not_found'; end if;
   if r.document_id is not null then return; end if;
