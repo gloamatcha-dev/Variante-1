@@ -94,5 +94,5 @@ begin
   return result;
 end $$;
 revoke all on function public.claim_gloa_annual_invoice_v1(uuid,bigint,jsonb,timestamptz) from public,anon,authenticated,service_role;
-grant execute on function public.claim_gloa_annual_invoice_v1(uuid,bigint,jsonb,timestamptz) to service_role;
+-- Stripe owns issuance for annual plans as well.
 commit;

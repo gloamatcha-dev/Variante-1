@@ -21,7 +21,7 @@ const sub = {
 const schedule = { id: scheduleId, subscription: sub.id, livemode: false, status: "active",
   billing_mode: { type: "flexible" }, pause_schedules: [entry] };
 
-function harness({ subscription = sub, openStatus, beforeWrite, oldSchedule = schedule, result = schedule, clock, wallTime = boundary * 1000 - 100000 } = {}) {
+function harness({ subscription = sub, openStatus, beforeWrite, oldSchedule = schedule, result = schedule, clock, account = { id: "acct_1U6B3cDASU5R3UGE", object: "account" }, wallTime = boundary * 1000 - 100000 } = {}) {
   const writes = [];
   const adapter = createStripePauseScheduleSandbox("sk_test_synthetic", async (url, options) => {
     assert.equal(new URL(url).origin, "https://api.stripe.com");
@@ -33,6 +33,7 @@ function harness({ subscription = sub, openStatus, beforeWrite, oldSchedule = sc
       await beforeWrite?.();
       return Response.json(result);
     }
+    if (pathname === "/v1/account") return Response.json(account);
     if (pathname === "/v1/test_helpers/test_clocks/clock_synthetic") return Response.json(clock);
     if (pathname.includes("/invoices")) {
       assert.equal(searchParams.get("subscription"), target.stripeId);
@@ -138,4 +139,11 @@ test("a Test Clock supplies billing time and must be ready before a Stripe write
     assert.equal((await h.adapter.change(target, "pause")).reason, reason);
     assert.equal(h.writes.length, 0);
   }
+});
+
+test("a different Stripe test account cannot schedule a pause or confirm a resume", async () => {
+  const h = harness({ account: { object: "account", id: "acct_foreign" } });
+  assert.equal((await h.adapter.change(target, "pause")).reason, "unverified_sandbox_account");
+  assert.equal(await h.adapter.confirmedResume(target, scheduleId), false);
+  assert.equal(h.writes.length, 0);
 });

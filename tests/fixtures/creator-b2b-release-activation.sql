@@ -110,15 +110,15 @@ set local role service_role;
 select pg_temp.expect_refusal(
   $$update public.operations_config set int_value=1 where key='invoice_release_writes_enabled'$$,'42501','release_config_reserved');
 select pg_temp.expect_refusal(
-  $$select public.claim_gloa_invoice_v1(null,null,null,null)$$,'55000','release_writes_disabled');
+  $$select public.claim_gloa_invoice_v1(null,null,null,null)$$,'42501','permission denied for function claim_gloa_invoice_v1');
 select pg_temp.expect_refusal(
-  $$select public.claim_gloa_annual_invoice_v1(null,null,null,null)$$,'55000','release_writes_disabled');
+  $$select public.claim_gloa_annual_invoice_v1(null,null,null,null)$$,'42501','permission denied for function claim_gloa_annual_invoice_v1');
 select pg_temp.expect_refusal(
-  $$select public.claim_gloa_xrechnung_v1(null,null,null,null)$$,'55000','release_writes_disabled');
+  $$select public.claim_gloa_xrechnung_v1(null,null,null,null)$$,'42501','permission denied for function claim_gloa_xrechnung_v1');
 select pg_temp.expect_refusal(
-  $$select public.finish_gloa_invoice_v1(null,null,null)$$,'55000','release_writes_disabled');
+  $$select public.finish_gloa_invoice_v1(null,null,null)$$,'42501','permission denied for function finish_gloa_invoice_v1');
 select pg_temp.expect_refusal(
-  $$select public.finish_gloa_xrechnung_v1(null,null,null,null)$$,'55000','release_writes_disabled');
+  $$select public.finish_gloa_xrechnung_v1(null,null,null,null)$$,'42501','permission denied for function finish_gloa_xrechnung_v1');
 select pg_temp.expect_refusal(
   $$insert into public.subscription_pause_write_fences(subscription_id,operation_id,action)
   values ('30000000-0000-4000-8000-000000000002','30000000-0000-4000-8000-000000000005','pause')$$,
@@ -153,6 +153,10 @@ select pg_temp.expect_refusal(
   $$select pg_temp.approve_b2b_invoice('10000000-0000-4000-8000-000000000001')$$,'55000','release_writes_disabled');
 update public.operations_config set int_value=1 where key='invoice_release_writes_enabled';
 set local role service_role;
+select pg_temp.expect_refusal(
+  'select public.claim_gloa_xrechnung_v1(null,null,null,null)', '42501', 'permission denied for function claim_gloa_xrechnung_v1');
+select pg_temp.expect_refusal(
+  'update public.gloa_invoice_register set delivery_status=''sending''', '42501', 'permission denied for table gloa_invoice_register');
 select pg_temp.expect_refusal(
   $$select pg_temp.approve_b2b_invoice('10000000-0000-4000-8000-000000000001')$$,'42501',
   'permission denied for table gloa_b2b_invoice_evidence');

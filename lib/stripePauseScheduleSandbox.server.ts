@@ -1,5 +1,7 @@
 // Documented Stripe contract used to qualify GLOA pause/resume in a sandbox.
 // The sandbox customer action and paid-invoice reconciliation share this adapter.
+const gloaSandboxAccountId = "acct_1U6B3cDASU5R3UGE";
+
 export const PAUSE_SCHEDULE_API_VERSION = "2026-09-30.endive";
 
 type StripeSubscription = {
@@ -69,6 +71,11 @@ export function createStripePauseScheduleSandbox(
     return await result.json() as T;
   }
 
+  async function verifiedSandboxAccount() {
+    const account = await call<{ id: string; object: string }>("account");
+    return account.object === "account" && account.id === gloaSandboxAccountId;
+  }
+
   async function change(target: Target, action: "pause" | "resume"): Promise<Result> {
     if (!checkId(target.stripeId, /^sub_[a-zA-Z0-9_]+$/) || !checkId(target.localId, uuid) ||
         !checkId(target.operationId, uuid)) return blocked("invalid_target");
@@ -77,6 +84,7 @@ export function createStripePauseScheduleSandbox(
     if (submitted.has(writeKey) || requiresInspection.has(target.stripeId)) return blocked("inspection_required");
     inFlight.add(target.stripeId);
     try {
+      if (!await verifiedSandboxAccount()) return blocked("unverified_sandbox_account");
       const sub = await call<StripeSubscription>("subscriptions/" + target.stripeId);
       if (sub.id !== target.stripeId || sub.livemode !== false ||
           sub.metadata?.gloa_subscription_id !== target.localId) return blocked("unverified_subscription");
@@ -172,6 +180,8 @@ export function createStripePauseScheduleSandbox(
   }
 
   async function confirmedResume(target: { localId: string; stripeId: string }, scheduleId: string) {
+    if (!checkId(target.stripeId, /^sub_[a-zA-Z0-9_]+$/) || !checkId(target.localId, uuid) ||
+        !checkId(scheduleId, /^sub_sched_[a-zA-Z0-9_]+$/) || !await verifiedSandboxAccount()) return false;
     const subscription = await call<StripeSubscription>("subscriptions/" + target.stripeId);
     if (subscription.id !== target.stripeId || subscription.livemode !== false ||
         subscription.metadata?.gloa_subscription_id !== target.localId ||

@@ -51,3 +51,9 @@ Vor einem Wechsel der Ausstellerversion die Ausstellung sperren und die konfigur
 Die Migration 20261124170000 legt den geschuetzten Nachweis zur B2B-Rechnung an. Der DB-Owner darf bei offener Rechnungssperre in gloa_b2b_invoice_evidence genau eine unveraenderliche Freigabe pro Finanzereignis hinterlegen. Nur eine nachweislich abgeschlossene steuerpflichtige Inlandslieferung mit bestaetigter Rechnungspflicht ist im automatischen Pfad abgedeckt. Zahlungs-, Liefer- und Steuernachweis, Kundenreferenz, Ausstellerkontakt und Rechnungspositionen vor Freigabe abgleichen. Vorauszahlungen, Sondersteuerfaelle und unklare Faelle gesondert bearbeiten.
 
 Wenn der Zahlungswebhook bereits verarbeitet wurde oder vor der fachlichen Freigabe eintraf, kann ein Owner die Ausstellung im vorhandenen Rechnungs-Endpunkt per POST mit eventId nachholen. Wiederholungen setzen beim bereits gespeicherten Registereintrag an. Zum Rueckfall die Rechnungssperre schliessen und vorhandene Nachweise, Registereintraege und Nummern erhalten.
+
+### Stripe-Rechnungen
+
+Stripe bleibt der einzige Aussteller im freigegebenen Zahlungspfad. Die App-Rollen haben in diesem Kandidaten nur Lesezugriff auf das GLOA-Rechnungsregister und keine Berechtigung zur Nummernvergabe, Fertigstellung oder Zustellung neuer Dokumente. Das gilt auch bei geoeffnetem Rechnungsschalter. Bestehende private Dokumente bleiben lesbar.
+
+Die Aktivierungshinweise zur GLOA-Ausstellung gelten erst nach einem gesondert nachgewiesenen XRechnung-Abgleich. Ein XML-Zusatz muss auf die bereits ausgestellte Stripe-Rechnung und deren Originalnummer verweisen und dieselbe Forderung belegen. Die vorhandene XRechnung-Engine bleibt erhalten. Bis zu dieser Zuordnung bleibt ihre Ausstellung geschlossen.

@@ -15,7 +15,7 @@ create table public.gloa_invoice_register (
 create unique index gloa_invoice_one_per_order on public.gloa_invoice_register(order_id) where original_id is null;
 alter table public.gloa_invoice_register enable row level security;
 revoke all on public.gloa_invoice_register from public,anon,authenticated,service_role;
-grant select,update(delivery_status) on public.gloa_invoice_register to service_role;
+grant select on public.gloa_invoice_register to service_role;
 create trigger invoice_delivery_release_required before update of delivery_status on public.gloa_invoice_register
   for each row execute function public.guard_release_table_write_v1('invoice_release_writes_enabled');
 revoke all on sequence public.gloa_invoice_number_seq from public,anon,authenticated,service_role;
@@ -96,6 +96,5 @@ for each row execute function public.protect_gloa_invoice_document();
 revoke all on function public.claim_gloa_invoice_v1(uuid,bigint,jsonb,timestamptz),
  public.finish_gloa_invoice_v1(uuid,text,integer),public.protect_gloa_invoice_document()
  from public,anon,authenticated,service_role;
-grant execute on function public.claim_gloa_invoice_v1(uuid,bigint,jsonb,timestamptz),
- public.finish_gloa_invoice_v1(uuid,text,integer) to service_role;
+-- Stripe owns issuance. Keep the register readable, with no app-issued parallel invoice.
 commit;

@@ -142,6 +142,6 @@ end $$;
 
 revoke all on function public.claim_gloa_xrechnung_v1(uuid,bigint,jsonb,timestamptz),
  public.finish_gloa_xrechnung_v1(uuid,text,integer,text) from public,anon,authenticated,service_role;
-grant execute on function public.claim_gloa_xrechnung_v1(uuid,bigint,jsonb,timestamptz),
- public.finish_gloa_xrechnung_v1(uuid,text,integer,text) to service_role;
+-- An XML supplement needs a verified Stripe invoice identity and its original number.
+-- Until that mapping is proven, the app may read the register but cannot issue or finalize XML.
 commit;
