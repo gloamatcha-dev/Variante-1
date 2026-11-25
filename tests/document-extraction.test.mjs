@@ -6,6 +6,7 @@ import { createCanvas } from '@napi-rs/canvas';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { createWorker } from 'tesseract.js';
 import { documentOcrFields } from '../lib/documentOcrFields.ts';
+import { fillDocumentOcrPreview } from '../lib/documentOcrPreview.ts';
 import { documentPdfText } from '../lib/documentPdfText.ts';
 
 const lines=['Invoice number: GLOA-1024','Issuer: GLOA Test GmbH',
@@ -49,6 +50,44 @@ test('real text PDF preserves text lines and extracts verified invoice fields',a
     const doc=await task.promise;
     expectFields(documentOcrFields(await documentPdfText(await doc.getPage(1))));
   } finally { await task.destroy(); }
+});
+
+test('English layout from real PDF text fills the existing preview in cents',async()=>{
+  const invoiceLines=['Invoice','Anthropic, PBC','Invoice number','ANT/2026#0042',
+    'Date of issue','January 26, 2026','Date due','February 23, 2026',
+    'Bill to','Example Recipient, Inc.','Total','€168.08','Total due: €50.00'];
+  const contents='BT /F 12 Tf 35 425 Td 24 TL '+invoiceLines.map(line=>{
+    const encoded=Buffer.from([...line].map(char=>char==='€'?128:char.charCodeAt(0))).toString('hex');
+    return '<'+encoded+'> Tj T*';
+  }).join(' ')+' ET';
+  const data=pdf('<< /Font << /F 5 0 R >> >>',contents,
+    ['<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>']);
+  const task=getDocument({data,useSystemFonts:true});
+  try {
+    const doc=await task.promise;
+    const fields=documentOcrFields(await documentPdfText(await doc.getPage(1)));
+    const inputs=Object.fromEntries(['invoiceNumber','issuer','issuedOn','serviceOn','currency','grossCents',
+      'netCents','taxCents','paymentStatus'].map(key=>[key,{tagName:'INPUT',value:''}]));
+    const form={elements:{namedItem:key=>inputs[key]??null}};
+    const {applied,unresolved}=fillDocumentOcrPreview(form,fields);
+    assert.deepEqual(applied,{issuer:'Anthropic, PBC',invoiceNumber:'ANT/2026#0042',
+      issuedOn:'2026-01-26',currency:'EUR',grossCents:'16808'});
+    assert.equal(inputs.issuedOn.value,'2026-01-26');
+    for(const name of ['serviceOn','netCents','taxCents','paymentStatus'])assert.equal(inputs[name].value,'');
+    assert.ok(unresolved.some(reason=>reason.includes('rechnerisch stimmige Aufteilung')));
+    inputs.grossCents.value='17000';
+    fillDocumentOcrPreview(form,fields);
+    assert.equal(inputs.grossCents.value,'17000');
+  } finally { await task.destroy(); }
+});
+
+test('Unicode invoice numbers remain verbatim and amount due alone does not become gross',()=>{
+  const id='RE‑Ａ№-17';
+  assert.deepEqual(documentOcrFields('Invoice # '+id+'\nDate due January 26, 2026\nAmount due €168.08'),
+    {invoiceNumber:id,currency:'EUR'});
+  assert.deepEqual(documentOcrFields('Invoice number: A\nInvoice number: B\nBill to\nRecipient, Inc.'),
+    {});
+  assert.equal(documentOcrFields('Rechnungsdatum: 26. Januar 2026').issuedOn,'2026-01-26');
 });
 
 test('German date and grouped currency validate; ambiguous totals and multiple VAT rates stay unresolved',()=>{

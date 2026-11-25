@@ -1,5 +1,6 @@
 "use client";
 import {useRef,useState,type FormEvent} from 'react';
+import {fillDocumentOcrPreview} from '../lib/documentOcrPreview';
 import {AdminDocumentFacts, AdminDocumentAccountingContext} from './AdminDocumentFacts';
 import {AdminPortalDocumentAssociation} from './AdminPortalDocumentAssociation';
 import {date,label,text,type PortalRow} from '../lib/adminPortalModel.ts';
@@ -76,17 +77,9 @@ export function AdminPortalDocuments(){
       const {readDocumentInBrowser}=await import('../lib/documentOcr.browser');
       const {fields,source}=await readDocumentInBrowser(file);
       setOcrSource(source);
-      const labels:Record<string,string>={issuer:'Aussteller',invoiceNumber:'Rechnungsnummer',issuedOn:'Rechnungsdatum',
-        serviceOn:'Leistungsdatum',currency:'Währung',grossCents:'Brutto',netCents:'Netto',taxCents:'Umsatzsteuer',taxRate:'Steuersatz',paymentHint:'Zahlungsangabe'};
-      for(const name of [...Object.keys(labels),'reference']) {
-        const control=form.elements.namedItem(name==='reference'?'externalReference':name);
-        if (control instanceof HTMLInputElement&&!control.value&&fields[name]!=null) {
-          control.value=String(fields[name]);
-          extractedFields.current[control.name]=control.value;
-        }
-      }
-      const missing=Object.entries(labels).filter(([name])=>fields[name]==null).map(([,title])=>title);
-      setExtractionNotice('Erkannte Angaben sind Vorschläge. '+(missing.length?'Nicht sicher erkannt: '+missing.join(', ')+'. ':'')+'Alle Werte am Original prüfen.');
+      const {applied,unresolved}=fillDocumentOcrPreview(form,fields);
+      Object.assign(extractedFields.current,applied);
+      setExtractionNotice('Alle Werte am Original prüfen. '+(unresolved.length?'Offen: '+unresolved.join('; ')+'.':'Erkannte Angaben wurden als Vorschläge eingesetzt.'));
     });
   }
   async function download(){
