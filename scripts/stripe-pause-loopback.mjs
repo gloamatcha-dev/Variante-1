@@ -140,6 +140,12 @@ export function pauseActions({ key, localId, subscriptionId, transport, checkEnd
         },
       };
       if (table === "subscription_pause_windows") return {
+        select() { return this; },
+        eq(column, value) { assert.equal(column, "subscription_id"); assert.equal(value, localId); return this; },
+        is(column, value) { assert.equal(column, "resumed_at"); assert.equal(value, null); return this; },
+        async maybeSingle() {
+          return windows.size > 1 ? { error: true } : { data: windows.values().next().value ?? null };
+        },
         async insert(row) {
           assert.equal(row.subscription_id, localId);
           if (windows.has(row.schedule_id)) return { error: { code: "23505" } };

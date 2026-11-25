@@ -14,6 +14,8 @@ type StripeSubscription = {
   schedule: string | null;
   pause_collection: unknown;
   pending_update: unknown;
+  latest_invoice?: string | null;
+  status_details?: { paused?: { type?: string; transitioned_at?: number; subscription?: { type?: string } } };
   test_clock?: string | null;
   cancel_at: number | null;
   cancel_at_period_end: boolean;
@@ -27,6 +29,9 @@ type StripeSchedule = {
   id: string;
   livemode: boolean;
   subscription: string | null;
+  released_subscription?: string | null;
+  released_at?: number | null;
+  end_behavior?: string;
   status: string;
   billing_mode?: { type?: string };
   pause_schedules?: {
@@ -36,9 +41,10 @@ type StripeSchedule = {
   }[];
 };
 
-type Target = { localId: string; stripeId: string; operationId: string };
+export type LocalPauseProof = { scheduleId: string; pauseAt: number };
+type Target = { localId: string; stripeId: string; operationId: string; pauseProof?: LocalPauseProof };
 type Result = { state: "blocked" | "unconfirmed" | "scheduled" | "resume_requested"; reason?: string;
-  scheduleId?: string; pauseAt?: number };
+  scheduleId?: string; pauseAt?: number; holdFence?: true };
 
 function checkId(value: string, pattern: RegExp) {
   return typeof value === "string" && pattern.test(value);
@@ -105,7 +111,26 @@ export function createStripePauseScheduleSandbox(
       }
       const pauseAt = items[0].current_period_end;
       let existing: StripeSchedule | undefined;
-      if (action === "resume") {
+      const detached = action === "resume" && sub.schedule === null;
+      if (detached) {
+        const proof = target.pauseProof;
+        const paused = sub.status_details?.paused;
+        if (!proof || !checkId(proof.scheduleId, /^sub_sched_[a-zA-Z0-9_]+$/) ||
+            !Number.isSafeInteger(proof.pauseAt) || proof.pauseAt <= 0 || paused?.type !== "subscription" ||
+            paused.subscription?.type !== "pause_requested" || paused.transitioned_at !== proof.pauseAt) {
+          return blocked("unverified_pause_origin");
+        }
+        const released = await call<StripeSchedule>("subscription_schedules/" + proof.scheduleId);
+        const entry = released.pause_schedules?.[0];
+        if (released.id !== proof.scheduleId || released.livemode !== false || released.status !== "released" ||
+            released.subscription !== null || released.released_subscription !== sub.id ||
+            released.end_behavior !== "release" || released.released_at !== proof.pauseAt ||
+            released.billing_mode?.type !== "flexible" || released.pause_schedules?.length !== 1 ||
+            !checkId(entry?.key ?? "", /^pause_schedule_[a-zA-Z0-9_]+$/) ||
+            entry?.pause?.pause_at !== proof.pauseAt || entry.pause.status?.type !== "succeeded" || entry.resume != null) {
+          return blocked("unverified_released_schedule");
+        }
+      } else if (action === "resume") {
         if (!sub.schedule || !checkId(sub.schedule, /^sub_sched_[a-zA-Z0-9_]+$/)) {
           return blocked("missing_pause_schedule");
         }
@@ -144,6 +169,12 @@ export function createStripePauseScheduleSandbox(
         body.set("from_subscription", sub.id);
         body.set("pause_schedules[0][pause][pause_at][type]", "timestamp");
         body.set("pause_schedules[0][pause][pause_at][timestamp]", String(pauseAt));
+      } else if (detached) {
+        if (stripeTime <= target.pauseProof!.pauseAt) return blocked("resume_boundary_not_advanced");
+        path = "subscriptions/" + sub.id + "/resume";
+        body.set("billing_cycle_anchor[type]", "now");
+        body.set("proration_behavior", "none");
+        body.set("payment_behavior", "resume_on_payment_success");
       } else {
         path += "/" + existing!.id;
         body.set("pause_schedules[0][key]", existing!.pause_schedules![0].key);
@@ -153,6 +184,19 @@ export function createStripePauseScheduleSandbox(
       }
       submitted.add(writeKey);
       requiresInspection.add(target.stripeId);
+      if (detached) {
+        const resumed = await call<StripeSubscription>(path, body, writeKey);
+        const pendingInvoice = checkId(resumed.latest_invoice ?? "", /^in_[a-zA-Z0-9_]+$/) &&
+          resumed.latest_invoice !== sub.latest_invoice;
+        if (resumed.id !== sub.id || resumed.livemode !== false || resumed.schedule !== null ||
+            resumed.metadata?.gloa_subscription_id !== target.localId || resumed.billing_mode?.type !== "flexible" ||
+            (resumed.status !== "active" && !(resumed.status === "paused" && pendingInvoice))) {
+          return { state: "unconfirmed" };
+        }
+        // The direct resume invoice has not yet been qualified by the fulfillment path.
+        // Keep the durable fence for both an active response and an outstanding payment.
+        return { state: "resume_requested", scheduleId: target.pauseProof!.scheduleId, holdFence: true };
+      }
       const schedule = await call<StripeSchedule>(path, body, writeKey);
       const entry = schedule.pause_schedules?.[0];
       if (schedule.livemode !== false || schedule.subscription !== sub.id ||

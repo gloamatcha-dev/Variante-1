@@ -147,3 +147,61 @@ test("a different Stripe test account cannot schedule a pause or confirm a resum
   assert.equal(await h.adapter.confirmedResume(target, scheduleId), false);
   assert.equal(h.writes.length, 0);
 });
+
+const pausedAfterRelease = {
+  ...sub, status: "paused", latest_invoice: "in_original",
+  status_details: { paused: { type: "subscription", transitioned_at: boundary, subscription: { type: "pause_requested" } } },
+};
+const releasedSchedule = {
+  ...schedule, status: "released", subscription: null, released_subscription: sub.id,
+  released_at: boundary, end_behavior: "release",
+  pause_schedules: [{ ...entry, key: "pause_schedule_synthetic" }],
+};
+const withPauseProof = { ...target, pauseProof: { scheduleId, pauseAt: boundary } };
+
+test("a proven released schedule uses direct resume with an explicit billing policy and retains the delivery fence", async () => {
+  for (const result of [
+    { ...pausedAfterRelease, status: "active" },
+    { ...pausedAfterRelease, latest_invoice: "in_resume" },
+  ]) {
+    const h = harness({ subscription: pausedAfterRelease, oldSchedule: releasedSchedule,
+      wallTime: (boundary + 60) * 1000, result });
+    assert.deepEqual(await h.adapter.change(withPauseProof, "resume"), { state: "resume_requested", scheduleId, holdFence: true });
+    assert.deepEqual(h.writes[0], {
+      pathname: "/v1/subscriptions/sub_synthetic/resume",
+      params: { "billing_cycle_anchor[type]": "now", proration_behavior: "none", payment_behavior: "resume_on_payment_success" },
+      key: "gloa-pause-sandbox:resume:" + target.operationId,
+    });
+    assert.equal((await h.adapter.change({ ...withPauseProof, operationId: target.localId }, "resume")).reason, "inspection_required");
+    assert.equal(h.writes.length, 1);
+  }
+});
+
+test("direct resume refuses unknown, foreign or contradictory pause evidence before any write", async () => {
+  const valid = { subscription: pausedAfterRelease, oldSchedule: releasedSchedule, wallTime: (boundary + 60) * 1000 };
+  for (const [candidate, options, reason] of [
+    [target, {}, "unverified_pause_origin"],
+    [{ ...withPauseProof, pauseProof: { scheduleId, pauseAt: boundary - 1 } }, {}, "unverified_pause_origin"],
+    [withPauseProof, { subscription: { ...pausedAfterRelease, status_details: {} } }, "unverified_pause_origin"],
+    [withPauseProof, { subscription: { ...pausedAfterRelease, id: "sub_foreign" } }, "unverified_subscription"],
+    [withPauseProof, { oldSchedule: { ...releasedSchedule, status: "active" } }, "unverified_released_schedule"],
+    [withPauseProof, { oldSchedule: { ...releasedSchedule, released_at: boundary + 1 } }, "unverified_released_schedule"],
+    [withPauseProof, { oldSchedule: { ...releasedSchedule, released_subscription: "sub_foreign" } }, "unverified_released_schedule"],
+    [withPauseProof, { oldSchedule: { ...releasedSchedule, pause_schedules: [{ ...releasedSchedule.pause_schedules[0],
+      resume: { status: { type: "pending" } } }] } }, "unverified_released_schedule"],
+    [withPauseProof, { wallTime: boundary * 1000 }, "resume_boundary_not_advanced"],
+    [withPauseProof, { openStatus: "open" }, "unresolved_invoice"],
+  ]) {
+    const h = harness({ ...valid, ...options });
+    assert.equal((await h.adapter.change(candidate, "resume")).reason, reason);
+    assert.equal(h.writes.length, 0);
+  }
+});
+
+test("direct resume with an unconfirmed response remains unresolved and cannot be replayed", async () => {
+  const h = harness({ subscription: pausedAfterRelease, oldSchedule: releasedSchedule,
+    wallTime: (boundary + 60) * 1000, result: pausedAfterRelease });
+  assert.deepEqual(await h.adapter.change(withPauseProof, "resume"), { state: "unconfirmed" });
+  assert.equal((await h.adapter.change(withPauseProof, "resume")).reason, "inspection_required");
+  assert.equal(h.writes.length, 1);
+});

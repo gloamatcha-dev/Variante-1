@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { getSupabaseAdmin } from "./supabaseAdmin";
-import { createStripePauseScheduleSandbox } from "./stripePauseScheduleSandbox.server";
+import { createStripePauseScheduleSandbox, type LocalPauseProof } from "./stripePauseScheduleSandbox.server";
 
 type Action = "pause" | "resume";
 
@@ -32,7 +32,14 @@ export async function changeSandboxSubscriptionPause(
   });
   if (error) return { state: "blocked" as const, reason: error.code === "23505" ? "inspection_required" : "fence_unavailable" };
 
-  const result = await createStripePauseScheduleSandbox(key).change({ ...target, operationId }, action);
+  let pauseProof: LocalPauseProof | undefined;
+  if (action === "resume") {
+    const window = await admin.from("subscription_pause_windows").select("schedule_id,pause_at")
+      .eq("subscription_id", target.localId).is("resumed_at", null).maybeSingle();
+    if (window.error) return { state: "unconfirmed" as const };
+    if (window.data) pauseProof = { scheduleId: window.data.schedule_id, pauseAt: Date.parse(window.data.pause_at) / 1000 };
+  }
+  const result = await createStripePauseScheduleSandbox(key).change({ ...target, operationId, pauseProof }, action);
   if (result.state === "scheduled") {
     if (!result.scheduleId || !result.pauseAt) return { state: "unconfirmed" as const };
     const { error: windowError } = await admin.from("subscription_pause_windows").insert({
@@ -42,7 +49,7 @@ export async function changeSandboxSubscriptionPause(
     });
     if (windowError) return { state: "unconfirmed" as const };
   }
-  if (result.state !== "unconfirmed") {
+  if (result.state !== "unconfirmed" && !result.holdFence) {
     const { error: releaseError } = await admin.from("subscription_pause_write_fences").delete()
       .eq("subscription_id", target.localId).eq("operation_id", operationId);
     if (releaseError) return { state: "unconfirmed" as const };
