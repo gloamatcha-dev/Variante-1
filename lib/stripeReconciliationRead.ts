@@ -9,14 +9,18 @@ const fields: Record<string,string[]> = {
 };
 /** Read-only port. Full pagination; whitelist removes customer/credential fields. */
 export type StripeReadCheckpoint={rows:Row[];cursor:string;done:boolean};
-export async function readStripeReconciliation(get: StripeRead, from: number, to: number, identity: {accountId:string;paymentIntentId:string;amountCents:number},progress?:{load:(resource:string)=>StripeReadCheckpoint|undefined;save:(resource:string,state:StripeReadCheckpoint)=>Promise<void>}) {
- if (!Number.isSafeInteger(from)||!Number.isSafeInteger(to)||from>=to) throw Error('invalid_period');
+type ReconciliationIdentity = {accountId:string;paymentIntentId:string;amountCents:number};
+export async function verifyStripeReconciliationIdentity(get: StripeRead, identity: ReconciliationIdentity) {
  // Account/known-object binding is trusted server/operator configuration, never
  // supplied by a browser. The same restricted key must retrieve that LIVE object;
  // no Connect context or /account permission is necessary for this check.
  if(!/^acct_[A-Za-z0-9_]+$/.test(identity.accountId)||!/^pi_[A-Za-z0-9_]+$/.test(identity.paymentIntentId)||!Number.isSafeInteger(identity.amountCents)||identity.amountCents<=0)throw Error('invalid_identity');
  const known=await get('/v1/payment_intents/'+identity.paymentIntentId,{});
  if(known.id!==identity.paymentIntentId||known.livemode!==true||known.amount_received!==identity.amountCents||known.status!=='succeeded'||known.currency!=='eur')throw Error('live_identity_unverified');
+}
+export async function readStripeReconciliation(get: StripeRead, from: number, to: number, identity: ReconciliationIdentity,progress?:{load:(resource:string)=>StripeReadCheckpoint|undefined;save:(resource:string,state:StripeReadCheckpoint)=>Promise<void>}) {
+ if (!Number.isSafeInteger(from)||!Number.isSafeInteger(to)||from>=to) throw Error('invalid_period');
+ await verifyStripeReconciliationIdentity(get, identity);
  const failures:string[]=[];
  const accountId=identity.accountId;
  const objects: Record<string,Row[]> = {};

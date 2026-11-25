@@ -8,7 +8,7 @@ export class StripeReconciliationReadError extends Error {
 export function createStripeReconciliationRead(key:string,request:typeof fetch=fetch,remainingMs:()=>number=()=>20000):StripeRead {
  if(!key.startsWith('rk_live_'))throw Error('Restricted LIVE read credential required');
  return async(resource,params)=>{
-  if(!/^\/v1\/(payment_intents(?:\/pi_[A-Za-z0-9_]+)?|charges(?:\/(?:ch|py)_[A-Za-z0-9_]+)?|refunds(?:\/(?:re|pyr)_[A-Za-z0-9_]+)?|balance_transactions(?:\/txn_[A-Za-z0-9_]+)?|payouts|invoice_payments)$/.test(resource))throw Error('Unsupported reconciliation read resource');
+  if(!/^\/v1\/(payment_intents(?:\/pi_[A-Za-z0-9_]+)?|charges(?:\/(?:ch|py)_[A-Za-z0-9_]+)?|refunds(?:\/(?:re|pyr)_[A-Za-z0-9_]+)?|balance_transactions(?:\/txn_[A-Za-z0-9_]+)?|payouts|balance|invoices|invoice_payments)$/.test(resource))throw Error('Unsupported reconciliation read resource');
   const url=new URL('https://api.stripe.com'+resource);
   for(const [name,value]of Object.entries(params)) {
    if(!['limit','created[gte]','created[lt]','starting_after','invoice','status','payment_intent'].includes(name))throw Error('Unsupported reconciliation read parameter');

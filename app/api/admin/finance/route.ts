@@ -2,6 +2,7 @@ import { portalPeriod } from "../../../../lib/adminPortalFinance.ts";
 import { readFinanceSummary } from "../../../../lib/adminPortalFinanceRead.ts";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { requireAdminIdentity } from "../../../../lib/adminActionRoute.ts";
+import { financeTreasuryRead, readAdminStripeTreasury } from '../../../../lib/adminStripeTreasury.ts';
 import { uuid } from "../../../../lib/adminPortalModel.ts";
 
 type ErrorResponse = { error: string };
@@ -48,6 +49,24 @@ export async function POST(request: Request): Promise<Response> {
   let period: ReturnType<typeof portalPeriod>;
   try { period = portalPeriod(raw); } catch { return json({error:"Bitte einen gültigen Zeitraum wählen."},400); }
   try {
+    if (action === 'stripe_treasury') {
+      const [config, b2b] = await Promise.all([
+        admin.from('finance_sync_config').select('account_id,known_payment_intent,known_amount_cents').eq('enabled', true).maybeSingle(),
+        admin.from('b2b_payment_schedule').select('id', { count: 'exact', head: true })
+          .in('status', ['payment_failed', 'action_required']),
+      ]);
+      const key = process.env.STRIPE_RECONCILIATION_READ_KEY;
+      const treasury = config.error || config.data?.account_id !== 'acct_1U6B3ODI76FH9qsq' || !key?.startsWith('rk_live_')
+        ? { payouts: null, available: null, invoices: null }
+        : await readAdminStripeTreasury(financeTreasuryRead(key), {
+          accountId: config.data.account_id,
+          paymentIntentId: config.data.known_payment_intent,
+          amountCents: config.data.known_amount_cents,
+        }, period);
+      return Response.json({ ok: true, treasury, b2bPaymentIssues: b2b.error ? null : b2b.count }, {
+        headers: { 'Cache-Control': 'no-store' },
+      });
+    }
     if(action==='sync_details'){
       const result=await admin.rpc('finance_sync_details_v1');
       if(result.error||!result.data)return json({error:'Syncdetails vorübergehend nicht verfügbar.'},503);
