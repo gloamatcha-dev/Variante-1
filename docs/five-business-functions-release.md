@@ -57,3 +57,13 @@ Wenn der Zahlungswebhook bereits verarbeitet wurde oder vor der fachlichen Freig
 Stripe bleibt der einzige Aussteller im freigegebenen Zahlungspfad. Die App-Rollen haben in diesem Kandidaten nur Lesezugriff auf das GLOA-Rechnungsregister und keine Berechtigung zur Nummernvergabe, Fertigstellung oder Zustellung neuer Dokumente. Das gilt auch bei geoeffnetem Rechnungsschalter. Bestehende private Dokumente bleiben lesbar.
 
 Die Aktivierungshinweise zur GLOA-Ausstellung gelten erst nach einem gesondert nachgewiesenen XRechnung-Abgleich. Ein XML-Zusatz muss auf die bereits ausgestellte Stripe-Rechnung und deren Originalnummer verweisen und dieselbe Forderung belegen. Die vorhandene XRechnung-Engine bleibt erhalten. Bis zu dieser Zuordnung bleibt ihre Ausstellung geschlossen.
+
+## Abnahme der Abo-Pause und Grenzen des LIVE-Kandidaten
+
+Owner-Nachweis fuer GLOA Matcha Sandbox: Pause, direkter Resume nach released-Zeitplan, Stripe-Abrechnungsvorschau, signierte Abo- und Zahlungsereignisse, bezahlter neuer Vier-Wochen-Zyklus und Wiederherstellung des Sandbox-Webhooks bestanden. Der Loopback-Nachweis belegt die Stripe-Zuordnung. Die Datenbank-Freigabe des ersten Lieferzyklus ist separat lokal geprueft. Der einmalige Sandbox-Test wird nicht wiederholt.
+
+Der Production-Webhook prueft weiterhin den unveraenderten Body mit seinem konfigurierten Secret. Signierte Testereignisse werden in Vercel Production jetzt vor Deduplizierung, Finanz- und Lieferverarbeitung abgewiesen. Vor Deployment bestaetigen, dass das bestehende Production-Secret zum LIVE-Endpunkt gehoert. Eine Sandbox-Zustellung an den Production-Alias ist kein Abnahmeweg.
+
+LIVE-Pause und -Resume bleiben geschlossen. Die getestete Aktion braucht Testschluessel, GLOA-Sandbox-Konto und Loopback-Datenbank. Der bewaehrte Kuendigungspfad, Jahresplaene und Einmalkauf bleiben separat. Fuer die LIVE-Aktivierung fehlen der kontospezifische Nachweis der verifizierten API-Version und des Flexible-Billing-Modus der betroffenen Vier-Wochen-Abos, die bestaetigte LIVE-Signatur-/Kontobindung sowie eine darauf begrenzte LIVE-Anbindung an die bestehenden Pausenfenster und den atomaren Rechnung-zu-Lieferzyklus-Claim. Ein zahlungsfreier Kompatibilitaetsnachweis darf keine echte Wiederaufnahme ausloesen.
+
+Bis dahin bleibt der Zahlungsverarbeitungsweg des bisherigen Releases massgeblich. Beim Rollback laufende Stripe-Pausenfenster, Resume-Rechnungen und Schreibsperren erhalten und abgleichen. Keine automatische Ruecknahme einer Pause oder einer Zahlung. Die 13 Migrationen und die vier geschlossenen DB-Schalter bleiben unveraendert. Fuer den Umfang mit deaktivierter XRechnung bleibt Stripe der einzige Rechnungsaussteller.

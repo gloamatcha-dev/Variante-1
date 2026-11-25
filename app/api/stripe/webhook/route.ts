@@ -126,6 +126,11 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
+  // A valid signature alone does not make sandbox events production data.
+  if (process.env.VERCEL_ENV === "production" && event.livemode !== true) {
+    return Response.json({ error: "Stripe-Modus nicht erlaubt." }, { status: 403 });
+  }
+
   const alreadyProcessed = await hasStripeWebhookEventBeenProcessed(event.id);
   if (alreadyProcessed === null) {
     return Response.json(
