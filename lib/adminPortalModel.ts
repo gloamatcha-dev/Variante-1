@@ -7,7 +7,7 @@ export const PRIMARY_AREAS = [
   ['b2b', 'B2B'], ['activity', 'AKTIVITÄT'],
 ] as const;
 export type PortalArea = typeof PRIMARY_AREAS[number][0];
-export const SALES_TABS = ['BESTELLUNGEN', 'ABOS', 'JAHRESPLÄNE'] as const;
+export const SALES_TABS = ['BESTELLUNGEN', 'ABOS', 'JAHRESPLÄNE', 'KUNDEN'] as const;
 export const FINANCE_TABS = ['ÜBERSICHT', 'BUCHUNGEN', 'AUSGABEN', 'DOKUMENTE', 'AUSWERTUNGEN'] as const;
 export const financeDateBasis = (v: unknown): string => ({event_date:'Ereignisdatum',order_placed_at:'Bestelldatum',plan_purchased_at:'Kaufdatum des Jahresplans',instalment_paid_at:'Zahlungsdatum der Rate',refund_last_update:'Letzter bekannter Refund-Stand'} as Record<string,string>)[String(v)]??'Datumsquelle unbekannt';
 export function financeReference(r:PortalRow):string {

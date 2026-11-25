@@ -1,6 +1,7 @@
 ﻿"use client";
 import type { AdminStripeTreasury as Treasury } from '../lib/adminStripeTreasury.ts';
 import type { PortalRow } from '../lib/adminPortalModel.ts';
+import { AdminStripeReference, stripeLiveDashboardUrl, type FinanceNavigate } from './AdminStripeReference';
 import { BusinessTable, ReadState, usePortalRead } from './AdminPortalShared';
 
 const berlin = new Intl.DateTimeFormat('de-DE', { timeZone: 'Europe/Berlin' });
@@ -16,7 +17,7 @@ function amount({ amount, currency }: { amount: number; currency: string }) {
   return format.format(amount / 10 ** digits);
 }
 
-export function AdminStripeTreasury({ period }: { period: PortalRow }) {
+export function AdminStripeTreasury({ period, navigate }: { period: PortalRow; navigate?: FinanceNavigate }) {
   const { data, error, refresh } = usePortalRead('/api/admin/finance', { ...period, action: 'stripe_treasury' });
   const treasury = data?.treasury as Treasury | undefined;
   const payouts = treasury?.payouts;
@@ -38,14 +39,17 @@ export function AdminStripeTreasury({ period }: { period: PortalRow }) {
         status: payoutStatus[row.status],
       }))} columns={[
         { key: 'created', title: 'Erstellt' }, { key: 'arrival', title: 'Ankunft laut Stripe' },
-        { key: 'amount', title: 'Betrag' }, { key: 'status', title: 'Status' }, { key: 'id', title: 'Referenz' },
+        { key: 'amount', title: 'Betrag' }, { key: 'status', title: 'Status' }, { key: 'id', title: 'Referenz', render: row => {
+          const url = stripeLiveDashboardUrl(row.id);
+          return url ? <a href={url} target="_blank" rel="noopener noreferrer">{String(row.id)}</a> : String(row.id);
+        } },
       ]}/> : <p>{payouts ? 'Keine Stripe-Auszahlungen im Zeitraum.' : 'Stripe-Auszahlungen unbekannt.'}</p>}
       <h3>Offene Stripe-Rechnungen</h3>
       <p className="portal-note">Aktuelle Restbeträge über alle Zeiträume. Forderungen außerhalb der offenen Stripe-Rechnungen sind hier nicht vollständig nachgewiesen.</p>
       {invoices?.length ? <BusinessTable rows={invoices.map(row => ({
         id: row.id, due: row.due ? utc.format(row.due * 1000) : 'Keine Fälligkeit angegeben', amount: amount(row),
       }))} columns={[
-        { key: 'id', title: 'Rechnungsreferenz' }, { key: 'due', title: 'Fällig am' }, { key: 'amount', title: 'Offener Restbetrag' },
+        { key: 'id', title: 'Rechnungsreferenz', render: row => <AdminStripeReference reference={row.id} navigate={navigate} liveVerified/> }, { key: 'due', title: 'Fällig am' }, { key: 'amount', title: 'Offener Restbetrag' },
       ]}/> : <p>{invoices ? 'Keine offenen Stripe-Rechnungen mit Restbetrag.' : 'Offene Stripe-Rechnungen unbekannt.'}</p>}
       <p className="portal-note">B2B-Zahlungsvorgänge mit Handlungsbedarf im Zahlungsplan: {typeof data?.b2bPaymentIssues === 'number' ? data.b2bPaymentIssues : 'unbekannt'}. Diese Vorgänge können dieselben Rechnungen betreffen und werden beim Forderungsbetrag nicht erneut gezählt.</p>
     </ReadState>

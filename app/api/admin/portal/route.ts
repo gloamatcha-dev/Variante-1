@@ -19,6 +19,37 @@ export async function POST(request:Request):Promise<Response>{
       const items=await readPortalPages(admin,'inventory_items',q=>q.eq('is_active',true));
       return Response.json({ok:true,items:items.filter(r=>stockStatus(r)!=='ok').map(r=>({...r,stockState:stockStatus(r)}))});
     }
+    if (body.action === 'customer_context') {
+      if (!canWrite(gate.identity.role)) return Response.json({error:'Keine Berechtigung.'},{status:403});
+      const reference = typeof body.reference === 'string' ? body.reference.trim() : '';
+      const sources = ['orders','subscriptions','annual_plans','b2b_supply_agreements'] as const;
+      const kind = sources.find(source => source === body.kind) ?? 'orders';
+      if (kind === 'orders' ? !/^[a-z0-9-]{1,80}$/i.test(reference) : !uuid(reference)) {
+        return Response.json({error:'Geschäftsreferenz prüfen.'},{status:400});
+      }
+      const anchor = await admin.from(kind).select('id,status,user_id')
+        .eq(kind === 'orders' ? 'order_number' : 'id', reference).limit(2);
+      if (anchor.error) throw new Error('Customer anchor unavailable');
+      const [order] = anchor.data ?? [];
+      const headers = {'Cache-Control':'no-store'};
+      if (!order || anchor.data?.length !== 1) {
+        return Response.json({ok:true,state:'unresolved',groups:[]},{headers});
+      }
+      const anchorRow = {id:order.id, reference, status:order.status};
+      if (!order.user_id) return Response.json({ok:true,state:'guest',groups:[
+        {kind,rows:[anchorRow],truncated:false},
+      ]},{headers});
+      const groups = await Promise.all(sources.map(async kind => {
+        const result = await admin.from(kind).select(kind==='orders'?'id,status,order_number':'id,status')
+          .eq('user_id',order.user_id).order('id').limit(51);
+        if (result.error) return {kind,rows:null,truncated:false};
+        const rows = (result.data ?? []) as unknown as PortalRow[];
+        return {kind,truncated:rows.length>50,rows:rows.slice(0,50).map(row=>({
+          id:row.id,status:row.status,reference:row.order_number??row.id,
+        }))};
+      }));
+      return Response.json({ok:true,state:'linked',groups},{headers});
+    }
     if(body.action==='search'){
       const term=String(body.search??'').slice(0,100).replace(/[(),.*%_\\]/g,' ').trim();
       if(term.length<2)return Response.json({ok:true,results:[]});

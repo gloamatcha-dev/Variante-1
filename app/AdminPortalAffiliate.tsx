@@ -8,7 +8,7 @@ const rows=(data:PortalRow|null,key:string):PortalRow[]=>Array.isArray(data?.[ke
 export const affiliateUrl=(slug:unknown)=>`https://gloamatcha.com/r/${text(slug,'')}`;
 export const suggestedAffiliateSlug=(name:string)=>name.normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,50).replace(/-$/,'');
 
-export function AdminPortalAffiliate({data,error,refresh,onCreator,onRule,initialFocus=''}:{data:PortalRow|null;error:string;refresh:()=>void;onCreator:()=>void;onRule?:()=>void;initialFocus?:string}){
+export function AdminPortalAffiliate({data,error,refresh,onCreator,onRule,initialFocus='',editable=true}:{data:PortalRow|null;error:string;refresh:()=>void;onCreator:()=>void;onRule?:()=>void;initialFocus?:string;editable?:boolean}){
  const [editing,setEditing]=useState<PortalRow|null>(null),[creating,setCreating]=useState(false),[type,setType]=useState('link'),[creatorId,setCreatorId]=useState(''),[slug,setSlug]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState('');
  const [commissionMode,setCommissionMode]=useState('inline'),[calculationType,setCalculationType]=useState('percentage'),[commissionValue,setCommissionValue]=useState('');
  const creators=rows(data,'creators'),rules=rows(data,'rules');
@@ -17,6 +17,7 @@ export function AdminPortalAffiliate({data,error,refresh,onCreator,onRule,initia
  const attributed=(r:PortalRow)=>rows(data,'attributions').filter(a=>a[r.type==='link'?'affiliate_link_id':'affiliate_code_id']===r.id);
  const events=(r:PortalRow,kind:string)=>rows(data,'commissions').filter(c=>c.kind===kind&&attributed(r).some(a=>a.order_id===c.order_id));
  async function save(body:PortalRow){
+  if(!editable)return;
   setBusy(true);setNotice('');
   try{await portalRequest('/api/admin/creators',body);setCreating(false);setEditing(null);setNotice('Affiliate-Beziehung gespeichert.');refresh();}
   catch(e){setNotice(e instanceof Error?e.message:'Speichern fehlgeschlagen.');}finally{setBusy(false);}
@@ -43,10 +44,10 @@ export function AdminPortalAffiliate({data,error,refresh,onCreator,onRule,initia
   <label>Status<select name="status" defaultValue={editing?.active===false?'paused':'active'}><option value="active">Aktiv</option><option value="paused">Pausiert</option></select></label>
   <p className="portal-note">Eine neue Regel gilt für künftige Zuordnungen. Bestehende Provisionsbuchungen bleiben unverändert. Persönliche Codes sind separate Beziehungen zum selben Creator und kein automatisch erzeugter Rabatt.</p></>;
  const form=<form className="portal-form" onSubmit={submit}><h3>{editing?'Affiliate bearbeiten':'Affiliate anlegen'}</h3>{fields}<div className="portal-actions"><button type="submit" disabled={busy||!creatorId}>Speichern</button><button type="button" disabled={busy} onClick={()=>{setCreating(false);setEditing(null);}}>Abbrechen</button></div></form>;
- return <><div className="portal-section-head"><h2>Affiliate-Beziehungen</h2><div className="portal-actions"><button type="button" onClick={refresh}>Aktualisieren</button><button type="button" disabled={!data||!creators.length||busy} onClick={()=>open(null)}>AFFILIATE ANLEGEN</button><button type="button" disabled={!data||!creators.length||busy} onClick={()=>{open(null);setType('code');}}>Persönlichen Code anlegen</button>{onRule&&<button type="button" onClick={onRule}>Regel erfassen</button>}</div></div>{notice&&<p role="status">{notice}</p>}<ReadState data={data} error={error} retry={refresh}>
+ return <><div className="portal-section-head"><h2>Affiliate-Beziehungen</h2><div className="portal-actions"><button type="button" onClick={refresh}>Aktualisieren</button>{editable&&<><button type="button" disabled={!data||!creators.length||busy} onClick={()=>open(null)}>AFFILIATE ANLEGEN</button><button type="button" disabled={!data||!creators.length||busy} onClick={()=>{open(null);setType('code');}}>Persönlichen Code anlegen</button>{onRule&&<button type="button" onClick={onRule}>Regel erfassen</button>}</>}</div></div>{notice&&<p role="status">{notice}</p>}<ReadState data={data} error={error} retry={refresh}>
   <p className="portal-note">Aktiv bezeichnet die Konfiguration. Beginn, Ende und Creator-Status bestimmen zusätzlich, ob eine Zuordnung zulässig ist. Beträge zeigen einzelne gespeicherte Buchungen, keine neu berechnete Provision.</p>
-  {!relationships.length&&<p className="portal-state">Noch keine Affiliate-Beziehungen</p>}{!creators.length&&<p>Lege zuerst einen Creator an. <button type="button" onClick={onCreator}>Creator anlegen</button></p>}
-  {!!relationships.length&&<BusinessTable rows={/^[0-9a-f-]{36}$/i.test(initialFocus)?relationships.filter(r=>r.id===initialFocus):relationships} onOpen={open} columns={[
+  {!relationships.length&&<p className="portal-state">Noch keine Affiliate-Beziehungen</p>}{editable&&!creators.length&&<p>Lege zuerst einen Creator an. <button type="button" onClick={onCreator}>Creator anlegen</button></p>}
+  {!!relationships.length&&<BusinessTable rows={/^[0-9a-f-]{36}$/i.test(initialFocus)?relationships.filter(r=>r.id===initialFocus):relationships} onOpen={editable?open:undefined} columns={[
    {key:'creator_id',title:'Creator',render:r=>name(r.creator_id)},
    {key:'slug',title:'Link / Slug',render:r=>r.type==='link'?text(r.slug):'Kein Link'},
    {key:'url',title:'Public URL',render:r=>r.type==='link'?<span>{affiliateUrl(r.slug)} <button type="button" onClick={()=>void copy(r)}>Link kopieren</button></span>:'Nicht erfasst'},
@@ -57,7 +58,7 @@ export function AdminPortalAffiliate({data,error,refresh,onCreator,onRule,initia
    {key:'orders',title:'Zugeordnete Bestellungen',render:r=>String(attributed(r).length)},
    {key:'earned',title:'Verdiente Buchungen',render:r=>events(r,'earned').map(c=>money(c.amount_cents)).join(', ')||'Keine Buchungen'},
    {key:'reversal',title:'Korrekturbuchungen',render:r=>events(r,'reversal').map(c=>money(c.amount_cents)).join(', ')||'Keine Buchungen'},
-   {key:'actions',title:'Aktionen',render:r=><button type="button" disabled={busy} onClick={()=>void save({action:'update_affiliate',id:r.id,type:r.type,status:r.active?'paused':'active'})}>{r.active?'Pausieren':'Aktivieren'}</button>}
-  ]}/>}</ReadState>{creating&&form}<RecordDetails row={editing} title="Affiliate-Beziehung" onClose={()=>setEditing(null)}>{form}{editing&&<><h3>Gespeicherte Provisionshistorie</h3><BusinessTable rows={[...events(editing,'earned'),...events(editing,'reversal')]} columns={[{key:'kind',title:'Buchung',render:r=><Chip value={r.kind}/>},{key:'amount_cents',title:'Provision',render:r=>money(r.amount_cents)},{key:'payout_state',title:'Status',render:r=><Chip value={r.payout_state}/>}]}/></>}</RecordDetails></>;
+   ...editable?[{key:'actions',title:'Aktionen',render:(r:PortalRow)=><button type="button" disabled={busy} onClick={()=>void save({action:'update_affiliate',id:r.id,type:r.type,status:r.active?'paused':'active'})}>{r.active?'Pausieren':'Aktivieren'}</button>}]:[]
+  ]}/>}</ReadState>{editable&&creating&&form}<RecordDetails row={editable?editing:null} title="Affiliate-Beziehung" onClose={()=>setEditing(null)}>{form}{editing&&<><h3>Gespeicherte Provisionshistorie</h3><BusinessTable rows={[...events(editing,'earned'),...events(editing,'reversal')]} columns={[{key:'kind',title:'Buchung',render:r=><Chip value={r.kind}/>},{key:'amount_cents',title:'Provision',render:r=>money(r.amount_cents)},{key:'payout_state',title:'Status',render:r=><Chip value={r.payout_state}/>}]}/></>}</RecordDetails></>;
 }
 function localDate(value:unknown){if(typeof value!=='string')return '';const d=new Date(value);if(!Number.isFinite(d.getTime()))return '';return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16);}

@@ -8,6 +8,7 @@ import {AdminPortalFinance} from './AdminPortalFinance';
 import {AdminPortalCreator} from './AdminPortalCreator';
 import {AdminPortalInventoryWarnings} from './AdminPortalInventoryWarnings';
 import {Tabs} from './AdminPortalShared';
+import {AdminCustomerOverview} from './AdminCustomerOverview';
 import {SALES_TABS,type PortalArea,type PortalRow} from '../lib/adminPortalModel.ts';
 import { AdminOrders } from "./AdminOrders";
 import { AdminSubscriptions } from "./AdminSubscriptions";
@@ -342,9 +343,9 @@ export function AdminOverview() {
       <AdminPortalShell area={view==='orders'||view==='subscriptions'||view==='annual'?'sales':view==='costs'?'finance':view==='waitlist'?'overview':view} identity={(data.identity??{email:data.signedInAs}) as unknown as PortalRow} navigate={navigate} signOut={()=>void signOut()}>
       {loadError&&view!=='waitlist'&&<p role="alert" className="portal-error">{loadError}</p>}
       {(view==='orders'||view==='subscriptions'||view==='annual')&&<><Tabs items={maySeeSubscriptions?SALES_TABS:['BESTELLUNGEN']} value={salesTab} onChange={tab=>navigate('sales',tab)}/><p className="portal-note">Abos laufen alle 4 Wochen. Jahrespläne sind vorausbezahlte Verträge mit eigenem Lieferplan.</p></>}
-      {view==='finance'&&maySeeSubscriptions&&<AdminPortalFinance key={target} initialFilter={target} tab={financeTab} onTab={setFinanceTab} onSessionLost={()=>setSignedIn(false)} onCreator={()=>navigate("creator","AUSZAHLUNGEN")}/>}
-      {view==='creator'&&<AdminPortalCreator key={target} tab={creatorTab} onTab={setCreatorTab} initialFocus={target} isOwner={data.identity?.role === 'owner'}/>}
-      {view === "orders" && <AdminOrders onSessionLost={() => setSignedIn(false)} key={target} initialSearch={target} />}
+      {view==='finance'&&maySeeSubscriptions&&<AdminPortalFinance navigate={navigate} key={target} initialFilter={target} tab={financeTab} onTab={setFinanceTab} onSessionLost={()=>setSignedIn(false)} onCreator={()=>navigate("creator","AUSZAHLUNGEN")}/>}
+      {view==='creator'&&<AdminPortalCreator editable={maySeeSubscriptions} key={target} tab={creatorTab} onTab={setCreatorTab} initialFocus={target} isOwner={data.identity?.role === 'owner'}/>}
+      {view === 'orders' && (salesTab==='KUNDEN'&&maySeeSubscriptions ? <AdminCustomerOverview navigate={navigate}/> : <AdminOrders onSessionLost={() => setSignedIn(false)} key={target} initialSearch={target}/>)}
 
       {/* MOUNTED ONLY WHEN ITS TAB IS OPEN, like the activity log below
           and for the same reason: the overview and the orders screen

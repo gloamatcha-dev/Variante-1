@@ -49,6 +49,26 @@ export async function POST(request: Request): Promise<Response> {
   let period: ReturnType<typeof portalPeriod>;
   try { period = portalPeriod(raw); } catch { return json({error:"Bitte einen gültigen Zeitraum wählen."},400); }
   try {
+    if (action === 'stripe_reference') {
+      const ref = typeof raw.reference === 'string' ? raw.reference : '';
+      if (!/^(pi|in)_[A-Za-z0-9]{1,100}$/.test(ref)) return json({error:'Ungültige Stripe-Referenz.'},400);
+      const field = ref.startsWith('pi_') ? 'stripe_payment_intent_id' : 'stripe_invoice_id';
+      const [orders, b2b, annual] = await Promise.all([
+        admin.from('orders').select('id').eq(field, ref).limit(2),
+        admin.from('b2b_payment_schedule').select('supply_agreement_id').eq(field, ref).limit(2),
+        field === 'stripe_payment_intent_id'
+          ? admin.from('annual_plans').select('id').eq(field, ref).limit(2)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+      if (orders.error || b2b.error || annual.error) throw new Error('Stripe reference lookup unavailable');
+      const matches = [
+        ...(orders.data ?? []).map(row => ({kind:'order',id:row.id})),
+        ...(b2b.data ?? []).map(row => ({kind:'b2b',id:row.supply_agreement_id})),
+        ...(annual.data ?? []).map(row => ({kind:'annual',id:row.id})),
+      ];
+      return Response.json({ok:true,state:matches.length===1?'linked':matches.length?'ambiguous':'unresolved',
+        target:matches.length===1?matches[0]:null},{headers:{'Cache-Control':'no-store'}});
+    }
     if (action === 'stripe_treasury') {
       const [config, b2b] = await Promise.all([
         admin.from('finance_sync_config').select('account_id,known_payment_intent,known_amount_cents').eq('enabled', true).maybeSingle(),
