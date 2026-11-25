@@ -1,4 +1,4 @@
-import { changeSandboxSubscriptionPause, sandboxPauseKey } from "../../../../lib/subscriptionPauseActions.server";
+import { changeLiveSubscriptionPause, changeSandboxSubscriptionPause, livePauseActionsKey, sandboxPauseKey } from "../../../../lib/subscriptionPauseActions.server";
 import { verifyBearerUser } from "../../../../lib/verifyUser";
 import { getStripeClient } from "../../../../lib/stripe";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
@@ -51,12 +51,15 @@ export async function POST(request: Request) {
     if (error) return response({ error: "Abrechnungsstatus nicht bestätigt." }, 503);
     if (!data) return response({ error: "Abo nicht gefunden." }, 404);
     const sandboxKey = sandboxPauseKey();
+    const liveKey = data.stripe_subscription_id ? livePauseActionsKey(data.stripe_subscription_id) : null;
     if (action) {
-      if (!sandboxKey || !data.stripe_subscription_id ||
+      if ((!sandboxKey && !liveKey) || !data.stripe_subscription_id ||
           (action === "pause" ? data.status !== "active" : !["active", "paused"].includes(data.status))) {
         return response({ state: "blocked" }, 409);
       }
-      const result = await changeSandboxSubscriptionPause(admin, { localId: data.id, stripeId: data.stripe_subscription_id }, action, sandboxKey);
+      const target = { localId: data.id, stripeId: data.stripe_subscription_id };
+      const result = liveKey ? await changeLiveSubscriptionPause(admin, target, action, caller.userId)
+        : await changeSandboxSubscriptionPause(admin, target, action, sandboxKey!);
       return response(result, result.state === "blocked" ? 409 : result.state === "unconfirmed" ? 503 : 202);
     }
     const stripe = getStripeClient();
@@ -64,7 +67,7 @@ export async function POST(request: Request) {
       return response({ error: "Abrechnungsstatus nicht bestätigt." }, 409);
     }
     const subscription = await stripe.subscriptions.retrieve(data.stripe_subscription_id, { expand: ["latest_invoice"] });
-    return response({ ...readSubscriptionPauseStatus(subscription, { localId: data.id, stripeId: data.stripe_subscription_id }), sandboxActions: Boolean(sandboxKey && subscription.livemode === false) });
+    return response({ ...readSubscriptionPauseStatus(subscription, { localId: data.id, stripeId: data.stripe_subscription_id }), sandboxActions: Boolean(sandboxKey && subscription.livemode === false || liveKey && subscription.livemode === true) });
   } catch {
     return response({ error: "Abrechnungsstatus nicht bestätigt. Bitte später erneut prüfen." }, 503);
   }

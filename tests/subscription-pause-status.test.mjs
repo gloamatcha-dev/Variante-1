@@ -69,6 +69,7 @@ test('status route requires the owner and permits actions only with isolated san
       }) };
       if (name.endsWith('/subscriptionPauseActions.server')) return {
         sandboxPauseKey: () => sandboxKey,
+        livePauseActionsKey: () => null,
         changeSandboxSubscriptionPause: async (_admin, target, action) => {
           actions.push([target.localId, target.stripeId, action]);
           return { state: 'scheduled', pauseAt: 1900000000 };

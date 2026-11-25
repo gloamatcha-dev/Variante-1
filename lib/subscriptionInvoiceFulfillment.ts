@@ -1,5 +1,5 @@
-import { sandboxPauseKey } from "./subscriptionPauseActions.server";
-import { createStripePauseScheduleSandbox } from "./stripePauseScheduleSandbox.server";
+import { livePauseKey, livePauseTargetAllowed, sandboxPauseKey } from "./subscriptionPauseActions.server";
+import { createStripePauseScheduleLive, createStripePauseScheduleSandbox } from "./stripePauseScheduleSandbox.server";
 import { bindFirstMatchaInvoice } from "./matchaFirstCheckout";
 import type Stripe from "stripe";
 import { getSupabaseAdmin } from "./supabaseAdmin";
@@ -142,7 +142,8 @@ export type InvoiceFulfillmentResult =
 type SandboxCycle = { paidStart: string; paidEnd: string; scheduleId: string | null; resumedAt: string | null };
 
 export type SubscriptionInvoiceDeps = {
-  prepareSandboxCycle?: (subscription: Stripe.Subscription, localId: string, paid: { start: string; end: string }) => Promise<SandboxCycle>;
+  pauseCycleApplies?: (subscriptionId: string) => boolean;
+  prepareSandboxCycle?: (subscription: Stripe.Subscription, localId: string, paid: { start: string; end: string }) => Promise<SandboxCycle | undefined>;
   bindFirstInvoice?: (subscriptionId: string, invoiceId: string) => Promise<void>;
   /** Re-read from Stripe, never the webhook payload's embedded copy. */
   retrieveInvoice: (invoiceId: string) => Promise<Stripe.Invoice>;
@@ -368,19 +369,23 @@ export const defaultSubscriptionInvoiceDeps: SubscriptionInvoiceDeps = {
 };
 
 /** Binds the Stripe-client-dependent halves for a real request. */
-export function subscriptionInvoiceDeps(stripe: Stripe): SubscriptionInvoiceDeps {
-  const key = sandboxPauseKey();
+export function subscriptionInvoiceDeps(stripe: Stripe, livemode = false): SubscriptionInvoiceDeps {
+  const key = livemode ? livePauseKey() : sandboxPauseKey();
   return {
+    pauseCycleApplies: livemode ? livePauseTargetAllowed : undefined,
     prepareSandboxCycle: key ? async (subscription, localId, paid) => {
-      if (subscription.livemode !== false) throw new Error("Sandbox subscription required");
+      if (subscription.livemode !== livemode) throw new Error("Stripe subscription mode mismatch");
+      if (livemode && !livePauseTargetAllowed(subscription.id)) return undefined;
+      const adapter = livemode ? createStripePauseScheduleLive(key) : createStripePauseScheduleSandbox(key);
+      if (livemode && !await adapter.verifyContext()) throw new Error("LIVE pause context unconfirmed");
       const scheduleId = idOf(subscription.schedule);
       const anchor = subscription.billing_cycle_anchor;
       const anchorIsValid = Number.isSafeInteger(anchor) && anchor > 0 && anchor <= 253402300799;
       // The adapter sets billing_cycle_anchor=resume_at. Unlike the current
       // period start, the anchor still identifies the restart on late delivery.
-      const resumedAt = scheduleId && subscription.status === "active" && anchorIsValid &&
+      const resumedAt = !livemode && scheduleId && subscription.status === "active" && anchorIsValid &&
         anchor * 1000 <= Date.parse(paid.start) &&
-        await createStripePauseScheduleSandbox(key).confirmedResume({ localId, stripeId: subscription.id }, scheduleId)
+        await adapter.confirmedResume({ localId, stripeId: subscription.id }, scheduleId)
         ? new Date(anchor * 1000).toISOString() : null;
       // SQL binds a detached resume to the exact invoice recorded by the adapter.
       const detachedAnchor = subscription.schedule === null && subscription.status === "active" &&
@@ -480,10 +485,11 @@ export async function fulfillPaidSubscriptionInvoice(
   // on stripe_invoice_id, so a redelivery returns the same attempt.
   const period = resolveSubscriptionPeriod(stripeSubscription);
   const paidPeriod = resolvePaidInvoiceSubscriptionPeriod(invoice, stripeSubscriptionId);
-  const sandboxCycle = deps.prepareSandboxCycle && paidPeriod.ok
-    ? await deps.prepareSandboxCycle(stripeSubscription, subscription.id, paidPeriod)
+  const prepareCycle = !deps.pauseCycleApplies || deps.pauseCycleApplies(stripeSubscriptionId) ? deps.prepareSandboxCycle : undefined;
+  const sandboxCycle = prepareCycle && paidPeriod.ok
+    ? await prepareCycle(stripeSubscription, subscription.id, paidPeriod)
     : undefined;
-  if (deps.prepareSandboxCycle && !sandboxCycle) {
+  if (prepareCycle && !sandboxCycle) {
     return { kind: "failed", reason: "sandbox invoice period unconfirmed" };
   }
   const checkoutAttemptId = await deps.activateFromInvoice({

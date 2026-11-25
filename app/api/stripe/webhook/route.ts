@@ -1,5 +1,6 @@
 import { inspectVerifiedB2bInvoice, issueVerifiedAnnualInvoices, issueVerifiedOrderInvoices } from "../../../../lib/gloaInvoice.server";
-import { sandboxPauseKey } from "../../../../lib/subscriptionPauseActions.server";
+import { livePauseKey, livePauseTargetAllowed, sandboxPauseKey } from "../../../../lib/subscriptionPauseActions.server";
+import { createStripePauseScheduleLive, GLOA_LIVE_PAUSE_ACCOUNT } from "../../../../lib/stripePauseScheduleSandbox.server";
 import { releaseTerminalFirstMatchaCheckout } from "../../../../lib/matchaFirstCheckout";
 import type Stripe from "stripe";
 import { withdrawalTaxScope } from '../../../../lib/refundTaxScope';
@@ -129,6 +130,24 @@ export async function POST(request: Request): Promise<Response> {
   // A valid signature alone does not make sandbox events production data.
   if (process.env.VERCEL_ENV === "production" && event.livemode !== true) {
     return Response.json({ error: "Stripe-Modus nicht erlaubt." }, { status: 403 });
+  }
+
+  const pauseLifecycle = event.type === "customer.subscription.paused" || event.type === "customer.subscription.resumed";
+  if (event.livemode && event.account && event.account !== GLOA_LIVE_PAUSE_ACCOUNT &&
+      (pauseLifecycle || (event.type === "invoice.paid" && process.env.GLOA_LIVE_PAUSE_SIGNING_ENDPOINT))) {
+    return Response.json({ error: "Stripe-Konto passt nicht." }, { status: 403 });
+  }
+  if (event.livemode && pauseLifecycle) {
+    const key = livePauseKey();
+    if (!key) return Response.json({ error: "LIVE-Pausenstatus nicht freigegeben." }, { status: 503 });
+    const subscription = event.data.object as Stripe.Subscription;
+    if (subscription.livemode !== true) return Response.json({ error: "Stripe-Modus passt nicht." }, { status: 403 });
+    if (!livePauseTargetAllowed(subscription.id)) return Response.json({ received: true });
+    try {
+      if (!await createStripePauseScheduleLive(key).verifyContext()) throw new Error("LIVE context");
+    } catch {
+      return Response.json({ error: "LIVE-Pausenkontext nicht belegt." }, { status: 503 });
+    }
   }
 
   const alreadyProcessed = await hasStripeWebhookEventBeenProcessed(event.id);
@@ -407,10 +426,9 @@ export async function POST(request: Request): Promise<Response> {
       // reached Stripe but not the database converges. It writes no
       // status and never clears a promise - see reconcileB2bCancelAt.
       await handleB2bSubscriptionUpdated(event);
-    } else if ((event.type === "customer.subscription.paused" || event.type === "customer.subscription.resumed") &&
-        event.livemode === false && sandboxPauseKey()) {
+    } else if (pauseLifecycle && (event.livemode === true || (event.livemode === false && sandboxPauseKey()))) {
       // Lifecycle events refresh provider facts. Only invoice.paid can grant a delivery.
-      await handleSubscriptionUpdated(stripe, event);
+      await handleSubscriptionUpdated(stripe, event, event.livemode === true);
     } else if (event.type === "customer.subscription.deleted") {
       // Phase 3C. The ONLY path that writes status = 'cancelled'.
       await handleSubscriptionDeleted(event);
@@ -605,7 +623,7 @@ async function handleInvoicePaymentFailed(stripe: Stripe, event: Stripe.Event): 
   }
 }
 
-async function handleSubscriptionUpdated(stripe: Stripe, event: Stripe.Event): Promise<void> {
+async function handleSubscriptionUpdated(stripe: Stripe, event: Stripe.Event, strict = false): Promise<void> {
   const subscriptionId = (event.data.object as Stripe.Subscription)?.id;
   if (!subscriptionId) {
     console.error(`Stripe webhook: subscription updated event ${event.id} has no subscription id.`);
@@ -614,7 +632,9 @@ async function handleSubscriptionUpdated(stripe: Stripe, event: Stripe.Event): P
 
   const subscription = await stripe.subscriptions.retrieve(subscriptionId);
 
+  if (strict && (subscription.id !== subscriptionId || subscription.livemode !== true)) throw new Error("LIVE subscription unconfirmed");
   const result = await syncSubscriptionFromStripe(subscription);
+  if (strict && result === "error") throw new Error("LIVE subscription sync failed");
   console.error(`Stripe webhook: subscription ${subscriptionId} updated -> ${result}`);
 
   // ── LOCAL PAYMENT STATUS (Phase 3I.B2) ──────────────────────
@@ -635,6 +655,7 @@ async function handleSubscriptionUpdated(stripe: Stripe, event: Stripe.Event): P
   // termination. 'pending_no_payment_proof' and 'terminal' are those
   // guards working, not errors, and none of these results throws.
   const paymentStatus = await reconcileSubscriptionPaymentStatus(subscription);
+  if (strict && ["error", "unknown", "invalid_input"].includes(paymentStatus)) throw new Error("LIVE payment status unconfirmed");
   if (paymentStatus !== "unchanged" && paymentStatus !== "ignored_status") {
     // Stripe subscription id and a result word. No customer fact.
     console.error(
@@ -1290,7 +1311,7 @@ async function handleInvoicePaid(stripe: Stripe, event: Stripe.Event): Promise<v
     return;
   }
 
-  const result = await fulfillPaidSubscriptionInvoice(eventInvoice.id, subscriptionInvoiceDeps(stripe));
+  const result = await fulfillPaidSubscriptionInvoice(eventInvoice.id, subscriptionInvoiceDeps(stripe, event.livemode));
 
   if (result.kind === "failed") {
     // Sanitized: Stripe ids and GLOA uuids only. No address, name, email

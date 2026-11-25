@@ -947,7 +947,7 @@ test("boundary: no label, no cancellation, no B2B - and no email built here", ()
   ]) {
     assert.ok(!fulfillmentCode.includes(forbidden), `the fulfillment path touches ${forbidden}`);
   }
-  assert.match(fulfillmentCode, /createStripePauseScheduleSandbox\(key\)\.confirmedResume\(/);
+  assert.match(fulfillmentCode, /adapter\.confirmedResume\(/);
   assert.doesNotMatch(fulfillmentCode, /\.change\(|pause_collection|subscriptionSchedules\.|subscriptions\.(?:pause|resume|update|cancel)\(/);
   assert.ok(!/shipped_at|tracking_number|fulfillment_status/.test(newCode));
   // And nothing marks an order shipped.

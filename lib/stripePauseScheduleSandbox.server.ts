@@ -2,6 +2,10 @@
 // The sandbox customer action and paid-invoice reconciliation share this adapter.
 const gloaSandboxAccountId = "acct_1U6B3cDASU5R3UGE";
 
+export const GLOA_LIVE_PAUSE_ACCOUNT = "acct_1U6B3ODI76FH9qsq";
+export const GLOA_LIVE_PAUSE_ENDPOINT = "we_1UHt57DI76FH9qsqbVplt42G";
+const liveEvents = ["customer.subscription.paused", "customer.subscription.resumed", "invoice.paid"];
+
 export const PAUSE_SCHEDULE_API_VERSION = "2026-09-30.endive";
 
 type StripeSubscription = {
@@ -9,6 +13,7 @@ type StripeSubscription = {
   livemode: boolean;
   status: string;
   collection_method: string;
+  customer?: string;
   billing_mode?: { type?: string };
   metadata?: { gloa_subscription_id?: string };
   schedule: string | null;
@@ -21,7 +26,8 @@ type StripeSubscription = {
   cancel_at_period_end: boolean;
   items: { has_more: boolean; data: {
     current_period_end: number;
-    price: { recurring?: { interval: string; interval_count: number; usage_type: string } };
+    quantity?: number;
+    price: { id?: string; currency?: string; unit_amount?: number; recurring?: { interval: string; interval_count: number; usage_type: string } };
   }[] };
 };
 
@@ -42,7 +48,7 @@ type StripeSchedule = {
 };
 
 export type LocalPauseProof = { scheduleId: string; pauseAt: number };
-type Target = { localId: string; stripeId: string; operationId: string; pauseProof?: LocalPauseProof };
+type Target = { localId: string; stripeId: string; operationId: string; stripeCustomerId?: string; pauseProof?: LocalPauseProof };
 type Result = { state: "blocked" | "unconfirmed" | "scheduled" | "resume_requested"; reason?: string;
   scheduleId?: string; pauseAt?: number; holdFence?: true; resumeInvoiceId?: string };
 
@@ -59,6 +65,15 @@ export function createStripePauseScheduleSandbox(
   now: () => number = Date.now,
 ) {
   if (!/^(sk|rk)_test_[a-zA-Z0-9_]+$/.test(secret)) throw new Error("stripe_pause_test_key_required");
+  return createStripePauseSchedule(secret, false, request, now);
+}
+
+export function createStripePauseScheduleLive(secret: string, request: typeof fetch = fetch, now: () => number = Date.now) {
+  if (!/^(sk|rk)_live_[a-zA-Z0-9_]+$/.test(secret)) throw new Error("stripe_pause_live_key_required");
+  return createStripePauseSchedule(secret, true, request, now);
+}
+
+function createStripePauseSchedule(secret: string, live: boolean, request: typeof fetch, now: () => number) {
   const inFlight = new Set<string>();
   const submitted = new Set<string>();
   const requiresInspection = new Set<string>();
@@ -77,23 +92,62 @@ export function createStripePauseScheduleSandbox(
     return await result.json() as T;
   }
 
-  async function verifiedSandboxAccount() {
+  async function verifyContext() {
     const account = await call<{ id: string; object: string }>("account");
-    return account.object === "account" && account.id === gloaSandboxAccountId;
+    if (account.object !== "account" || account.id !== (live ? GLOA_LIVE_PAUSE_ACCOUNT : gloaSandboxAccountId)) return false;
+    if (!live) return true;
+    const endpoint = await call<{ id: string; livemode: boolean; status: string; url: string; enabled_events: string[] }>(
+      "webhook_endpoints/" + GLOA_LIVE_PAUSE_ENDPOINT,
+    );
+    return endpoint.id === GLOA_LIVE_PAUSE_ENDPOINT && endpoint.livemode === true && endpoint.status === "enabled" &&
+      endpoint.url === "https://gloamatcha.com/api/stripe/webhook" && Array.isArray(endpoint.enabled_events) &&
+      liveEvents.every(event => endpoint.enabled_events.includes(event));
+  }
+
+  async function verifyResumePreview(sub: StripeSubscription) {
+    const preview = await call<{
+      livemode: boolean; currency: string; customer: string; total: number; subtotal: number; amount_due: number;
+      starting_balance: number; ending_balance: number | null;
+      parent?: { subscription_details?: { subscription?: string } };
+      lines?: { has_more: boolean; data: {
+        amount: number; quantity: number; period?: { start: number; end: number };
+        pricing?: { price_details?: { price?: string } };
+        parent?: { subscription_item_details?: { subscription?: string; proration?: boolean } };
+      }[] };
+    }>("invoices/create_preview", new URLSearchParams({
+      subscription: sub.id, "subscription_details[resume_at]": "now",
+      "subscription_details[billing_cycle_anchor][type]": "now", "subscription_details[proration_behavior]": "none",
+    }));
+    const lines = preview.lines?.data;
+    const anchor = lines?.[0]?.period?.start;
+    return preview.livemode === true && preview.customer === sub.customer &&
+      preview.parent?.subscription_details?.subscription === sub.id && preview.currency === "eur" &&
+      preview.subtotal === 2589 && preview.total === 2589 && preview.amount_due === 2589 &&
+      preview.starting_balance === 0 && (preview.ending_balance == null || preview.ending_balance === 0) &&
+      preview.lines?.has_more === false && lines?.length === sub.items.data.length && typeof anchor === "number" &&
+      Number.isSafeInteger(anchor) && Math.abs(Math.floor(now() / 1000) - anchor) <= 30 &&
+      sub.items.data.every(item => lines.filter(line => line.pricing?.price_details?.price === item.price.id &&
+        line.parent?.subscription_item_details?.subscription === sub.id &&
+        line.parent.subscription_item_details.proration === false && line.quantity === 1 &&
+        line.amount === item.price.unit_amount && line.period?.start === anchor &&
+        line.period.end === anchor + 28 * 86400).length === 1);
   }
 
   async function change(target: Target, action: "pause" | "resume"): Promise<Result> {
     if (!checkId(target.stripeId, /^sub_[a-zA-Z0-9_]+$/) || !checkId(target.localId, uuid) ||
         !checkId(target.operationId, uuid)) return blocked("invalid_target");
     if (inFlight.has(target.stripeId)) return blocked("operation_in_progress");
-    const writeKey = "gloa-pause-sandbox:" + action + ":" + target.operationId.toLowerCase();
+    const writeKey = (live ? "gloa-pause-live:" : "gloa-pause-sandbox:") + action + ":" + target.operationId.toLowerCase();
     if (submitted.has(writeKey) || requiresInspection.has(target.stripeId)) return blocked("inspection_required");
     inFlight.add(target.stripeId);
     try {
-      if (!await verifiedSandboxAccount()) return blocked("unverified_sandbox_account");
+      if (!await verifyContext()) return blocked(live ? "unverified_live_context" : "unverified_sandbox_account");
       const sub = await call<StripeSubscription>("subscriptions/" + target.stripeId);
-      if (sub.id !== target.stripeId || sub.livemode !== false ||
-          sub.metadata?.gloa_subscription_id !== target.localId) return blocked("unverified_subscription");
+      if (sub.id !== target.stripeId || sub.livemode !== live ||
+          sub.metadata?.gloa_subscription_id !== target.localId ||
+          (live && (!checkId(target.stripeCustomerId ?? "", /^cus_[a-zA-Z0-9_]+$/) || sub.customer !== target.stripeCustomerId))) {
+        return blocked("unverified_subscription");
+      }
       if (sub.billing_mode?.type !== "flexible" || sub.collection_method !== "charge_automatically") {
         return blocked("unsupported_billing_mode");
       }
@@ -109,6 +163,11 @@ export function createStripePauseScheduleSandbox(
         item.price.recurring.usage_type !== "licensed" || item.current_period_end !== items[0].current_period_end)) {
         return blocked("unsupported_billing_cycle");
       }
+      if (live && (sub.test_clock != null || items.length !== 2 ||
+          items.some(item => item.quantity !== 1 || item.price.currency !== "eur" || !item.price.id) ||
+          !items.some(item => item.price.unit_amount === 1999) || !items.some(item => item.price.unit_amount === 590))) {
+        return blocked("unverified_live_plan");
+      }
       const pauseAt = items[0].current_period_end;
       let existing: StripeSchedule | undefined;
       const detached = action === "resume" && sub.schedule === null;
@@ -122,7 +181,7 @@ export function createStripePauseScheduleSandbox(
         }
         const released = await call<StripeSchedule>("subscription_schedules/" + proof.scheduleId);
         const entry = released.pause_schedules?.[0];
-        if (released.id !== proof.scheduleId || released.livemode !== false || released.status !== "released" ||
+        if (released.id !== proof.scheduleId || released.livemode !== live || released.status !== "released" ||
             released.subscription !== null || released.released_subscription !== sub.id ||
             released.end_behavior !== "release" || released.released_at !== proof.pauseAt ||
             released.billing_mode?.type !== "flexible" || released.pause_schedules?.length !== 1 ||
@@ -131,12 +190,13 @@ export function createStripePauseScheduleSandbox(
           return blocked("unverified_released_schedule");
         }
       } else if (action === "resume") {
+        if (live) return blocked("live_attached_resume_unqualified");
         if (!sub.schedule || !checkId(sub.schedule, /^sub_sched_[a-zA-Z0-9_]+$/)) {
           return blocked("missing_pause_schedule");
         }
         existing = await call<StripeSchedule>("subscription_schedules/" + sub.schedule);
         const entry = existing.pause_schedules?.[0];
-        if (existing.id !== sub.schedule || existing.subscription !== sub.id || existing.livemode !== false ||
+        if (existing.id !== sub.schedule || existing.subscription !== sub.id || existing.livemode !== live ||
             existing.status !== "active" || existing.billing_mode?.type !== "flexible" ||
             existing.pause_schedules?.length !== 1 || entry?.pause?.status?.type !== "succeeded" ||
             typeof entry.key !== "string" || !entry.key || entry.resume != null) return blocked("unverified_pause_schedule");
@@ -156,7 +216,7 @@ export function createStripePauseScheduleSandbox(
           "test_helpers/test_clocks/" + sub.test_clock,
         );
         if (clock.id !== sub.test_clock || clock.object !== "test_helpers.test_clock" ||
-            clock.livemode !== false || clock.status !== "ready" ||
+            clock.livemode !== live || clock.status !== "ready" ||
             !Number.isSafeInteger(clock.frozen_time) || clock.frozen_time <= 0) return blocked("unverified_test_clock");
         stripeTime = clock.frozen_time;
       }
@@ -182,14 +242,17 @@ export function createStripePauseScheduleSandbox(
         body.set("pause_schedules[0][resume][settings][billing_cycle_anchor]", "resume_at");
         body.set("pause_schedules[0][resume][settings][payment_behavior]", "resume_on_payment_success");
       }
+      if (live && detached && !await verifyResumePreview(sub)) return blocked("unverified_resume_preview");
+      if (live && action === "pause" && pauseAt <= now() / 1000 + 60) return blocked("cycle_boundary_too_close");
       submitted.add(writeKey);
       requiresInspection.add(target.stripeId);
       if (detached) {
         const resumed = await call<StripeSubscription>(path, body, writeKey);
         const pendingInvoice = checkId(resumed.latest_invoice ?? "", /^in_[a-zA-Z0-9_]+$/) &&
           resumed.latest_invoice !== sub.latest_invoice;
-        if (resumed.id !== sub.id || resumed.livemode !== false || resumed.schedule !== null ||
+        if (resumed.id !== sub.id || resumed.livemode !== live || resumed.schedule !== null ||
             resumed.metadata?.gloa_subscription_id !== target.localId || resumed.billing_mode?.type !== "flexible" ||
+            (live && resumed.customer !== sub.customer) ||
             !pendingInvoice || (resumed.status !== "active" && resumed.status !== "paused")) {
           return { state: "unconfirmed" };
         }
@@ -200,7 +263,7 @@ export function createStripePauseScheduleSandbox(
       }
       const schedule = await call<StripeSchedule>(path, body, writeKey);
       const entry = schedule.pause_schedules?.[0];
-      if (schedule.livemode !== false || schedule.subscription !== sub.id ||
+      if (schedule.livemode !== live || schedule.subscription !== sub.id ||
           !checkId(schedule.id, /^sub_sched_[a-zA-Z0-9_]+$/) || schedule.status !== "active" ||
           schedule.billing_mode?.type !== "flexible" || schedule.pause_schedules?.length !== 1 || !entry?.key) {
         return { state: "unconfirmed" };
@@ -226,19 +289,19 @@ export function createStripePauseScheduleSandbox(
 
   async function confirmedResume(target: { localId: string; stripeId: string }, scheduleId: string) {
     if (!checkId(target.stripeId, /^sub_[a-zA-Z0-9_]+$/) || !checkId(target.localId, uuid) ||
-        !checkId(scheduleId, /^sub_sched_[a-zA-Z0-9_]+$/) || !await verifiedSandboxAccount()) return false;
+        !checkId(scheduleId, /^sub_sched_[a-zA-Z0-9_]+$/) || !await verifyContext()) return false;
     const subscription = await call<StripeSubscription>("subscriptions/" + target.stripeId);
-    if (subscription.id !== target.stripeId || subscription.livemode !== false ||
+    if (subscription.id !== target.stripeId || subscription.livemode !== live ||
         subscription.metadata?.gloa_subscription_id !== target.localId ||
         subscription.billing_mode?.type !== "flexible" || subscription.status !== "active" ||
         subscription.schedule !== scheduleId) return false;
     const schedule = await call<StripeSchedule>("subscription_schedules/" + scheduleId);
     const entry = schedule.pause_schedules?.[0];
     return schedule.id === scheduleId && schedule.subscription === target.stripeId &&
-      schedule.livemode === false && schedule.billing_mode?.type === "flexible" &&
+      schedule.livemode === live && schedule.billing_mode?.type === "flexible" &&
       schedule.pause_schedules?.length === 1 && entry?.pause?.status?.type === "succeeded" &&
       entry.resume?.status?.type === "succeeded";
   }
 
-  return { change, confirmedResume };
+  return { change, confirmedResume, verifyContext };
 }

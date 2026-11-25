@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { getSupabaseAdmin } from "./supabaseAdmin";
-import { createStripePauseScheduleSandbox, type LocalPauseProof } from "./stripePauseScheduleSandbox.server";
+import { createStripePauseScheduleLive, createStripePauseScheduleSandbox, GLOA_LIVE_PAUSE_ENDPOINT, type LocalPauseProof } from "./stripePauseScheduleSandbox.server";
 
 type Action = "pause" | "resume";
 
@@ -18,11 +18,54 @@ export function sandboxPauseKey() {
   }
 }
 
+export function livePauseTargetAllowed(stripeId: string, env = process.env): boolean {
+  const ids = env.GLOA_LIVE_PAUSE_SUBSCRIPTIONS?.split(",") ?? [];
+  return ids.length > 0 && ids.every(id => /^sub_[a-zA-Z0-9_]+$/.test(id)) && ids.includes(stripeId);
+}
+
+// The pin is recorded by the Owner after verifying the signing secret in Stripe.
+export function livePauseKey(env = process.env): string | null {
+  const { STRIPE_SECRET_KEY: key, STRIPE_WEBHOOK_SECRET: signing } = env;
+  if (env.VERCEL_ENV !== "production" || env.GLOA_LIVE_PAUSE_SIGNING_ENDPOINT !== GLOA_LIVE_PAUSE_ENDPOINT ||
+      !key || !/^(sk|rk)_live_[a-zA-Z0-9_]+$/.test(key) || !signing || !/^whsec_[a-zA-Z0-9_]+$/.test(signing) ||
+      createHash("sha256").update(signing).digest("hex") !== env.GLOA_LIVE_PAUSE_SIGNING_SHA256) return null;
+  return key;
+}
+
+export function livePauseActionsKey(stripeId: string): string | null {
+  return process.env.GLOA_LIVE_PAUSE_ACTIONS === "true" && livePauseTargetAllowed(stripeId) ? livePauseKey() : null;
+}
+
 export async function changeSandboxSubscriptionPause(
   admin: NonNullable<ReturnType<typeof getSupabaseAdmin>>,
   target: { localId: string; stripeId: string },
   action: Action,
   key: string,
+) {
+  return changeSubscriptionPause(admin, target, action, createStripePauseScheduleSandbox(key));
+}
+
+export async function changeLiveSubscriptionPause(
+  admin: NonNullable<ReturnType<typeof getSupabaseAdmin>>,
+  target: { localId: string; stripeId: string },
+  action: Action,
+  callerId: string,
+) {
+  const key = livePauseActionsKey(target.stripeId);
+  if (!key) return { state: "blocked" as const, reason: "live_pause_disabled" };
+  const { data, error } = await admin.from("stripe_customers").select("stripe_customer_id")
+    .eq("user_id", callerId).maybeSingle();
+  if (error || !data?.stripe_customer_id) return { state: "blocked" as const, reason: "customer_mapping_unconfirmed" };
+  const adapter = createStripePauseScheduleLive(key);
+  if (!await adapter.verifyContext()) return { state: "blocked" as const, reason: "unverified_live_context" };
+  return changeSubscriptionPause(admin, { ...target, stripeCustomerId: data.stripe_customer_id }, action, adapter);
+}
+
+async function changeSubscriptionPause(
+  admin: NonNullable<ReturnType<typeof getSupabaseAdmin>>,
+  target: { localId: string; stripeId: string; stripeCustomerId?: string },
+  action: Action,
+  adapter: ReturnType<typeof createStripePauseScheduleSandbox>,
 ) {
   const operationId = randomUUID();
   const { error } = await admin.from("subscription_pause_write_fences").insert({
@@ -39,7 +82,7 @@ export async function changeSandboxSubscriptionPause(
     if (window.error) return { state: "unconfirmed" as const };
     if (window.data) pauseProof = { scheduleId: window.data.schedule_id, pauseAt: Date.parse(window.data.pause_at) / 1000 };
   }
-  const result = await createStripePauseScheduleSandbox(key).change({ ...target, operationId, pauseProof }, action);
+  const result = await adapter.change({ ...target, operationId, pauseProof }, action);
   if (result.state === "scheduled") {
     if (!result.scheduleId || !result.pauseAt) return { state: "unconfirmed" as const };
     const { error: windowError } = await admin.from("subscription_pause_windows").insert({
