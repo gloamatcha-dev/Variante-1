@@ -15,7 +15,7 @@ const lifecycle = new Set([
   "customer.subscription.updated", "customer.subscription.paused", "customer.subscription.resumed",
 ]);
 
-function load(relativePath, deps, env = {}, errors = () => {}) {
+export function load(relativePath, deps, env = {}, errors = () => {}) {
   const module = { exports: {} };
   const source = readFileSync(new URL(relativePath, import.meta.url), "utf8");
   vm.runInNewContext(ts.transpileModule(source.replaceAll("import.meta.env", "localBuildEnv"), {
@@ -28,7 +28,7 @@ function load(relativePath, deps, env = {}, errors = () => {}) {
   return module.exports;
 }
 
-export function receiver({ stripe, secret, subscriptionId, getSubscriptionId = () => subscriptionId, retrieve }) {
+export function receiver({ stripe, secret, subscriptionId, getSubscriptionId = () => subscriptionId, retrieve, onPaidInvoice }) {
   const errors = [];
   const events = new Set();
   const verifiedTypes = new Set();
@@ -82,6 +82,14 @@ export function receiver({ stripe, secret, subscriptionId, getSubscriptionId = (
       let event;
       try { event = stripe.webhooks.constructEvent(raw, signature, secret); }
       catch { return response.writeHead(400).end(); }
+      if (event.type === "invoice.paid" && onPaidInvoice) {
+        const invoice = event.data.object;
+        if (event.livemode !== false || invoice.livemode !== false || (event.account && event.account !== accountId) ||
+            invoice.parent?.subscription_details?.subscription !== getSubscriptionId() ||
+            typeof invoice.id !== "string" || !/^in_[a-zA-Z0-9_]+$/.test(invoice.id)) return response.writeHead(403).end();
+        await onPaidInvoice(invoice.id);
+        return response.writeHead(200).end();
+      }
       if (event.livemode !== false || event.data.object.livemode !== false ||
           !getSubscriptionId() || event.data.object.id !== getSubscriptionId() || (event.account && event.account !== accountId)) {
         return response.writeHead(403).end();
@@ -100,11 +108,11 @@ export function receiver({ stripe, secret, subscriptionId, getSubscriptionId = (
 }
 
 
-export function pauseActions({ key, localId, subscriptionId, transport, checkEndpoint, retrieve }) {
+export function pauseActions({ key, localId, subscriptionId, transport, checkEndpoint, retrieve, recoveredPause }) {
   const ownerToken = randomUUID();
   const ownerId = randomUUID();
   const subscription = { id: localId, user_id: ownerId, stripe_subscription_id: subscriptionId, status: "active" };
-  const windows = new Map();
+  const windows = new Map(recoveredPause ? [[recoveredPause.schedule_id, recoveredPause]] : []);
   let fence;
   const admin = {
     from(table) {
@@ -124,6 +132,18 @@ export function pauseActions({ key, localId, subscriptionId, transport, checkEnd
           if (fence) return { error: { code: "23505" } };
           fence = row;
           return {};
+        },
+        update(fields) {
+          const filters = {};
+          return {
+            eq(column, value) { filters[column] = value; return this; },
+            select() { return this; },
+            async maybeSingle() {
+              if (!fence || fence.resume_invoice_id || !Object.entries(filters).every(([k, v]) => fence[k] === v)) return { data: null };
+              Object.assign(fence, fields);
+              return { data: { operation_id: fence.operation_id } };
+            },
+          };
         },
         delete() {
           const filters = {};
@@ -173,6 +193,7 @@ export function pauseActions({ key, localId, subscriptionId, transport, checkEnd
   });
   return {
     windows,
+    get resumeInvoiceId() { return fence?.resume_invoice_id; },
     async request(action, id = localId, authorized = true) {
       if (action !== "pause" && action !== "resume") throw new Error("Unsupported action");
       if (authorized && id === localId) {
