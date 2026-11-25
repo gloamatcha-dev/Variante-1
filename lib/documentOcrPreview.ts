@@ -1,6 +1,6 @@
 ﻿import { documentAmountFields, formatDocumentAmountInput } from './documentAmountInput.ts';
 
-const fieldsForReview = {
+export const fieldsForReview = {
   issuer: ['Aussteller','kein eindeutiger Aussteller im Rechnungskopf'],
   invoiceNumber: ['Rechnungsnummer','keine eindeutige Nummer mit lesbarem Format'],
   issuedOn: ['Rechnungsdatum','kein eindeutiges Ausstellungsdatum; Fälligkeitsdaten werden getrennt behandelt'],
@@ -14,7 +14,7 @@ const fieldsForReview = {
 };
 
 export function fillDocumentOcrPreview(
-  form: Pick<HTMLFormElement,'elements'>, fields: Record<string,string|number>,
+  form: Pick<HTMLFormElement,'elements'>, fields: Record<string,string|number>, receipt = false,
 ) {
   const applied: Record<string,string> = {};
   const unresolved: string[] = [];
@@ -25,6 +25,7 @@ export function fillDocumentOcrPreview(
     if (input.value) continue;
     const value=fields[name];
     if(value===undefined) {
+      if(receipt&&name==='invoiceNumber')continue;
       unresolved.push(label+' – '+reason);
       continue;
     }

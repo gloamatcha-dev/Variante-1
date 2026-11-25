@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { createCanvas } from '@napi-rs/canvas';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { createWorker } from 'tesseract.js';
-import { documentOcrFields } from '../lib/documentOcrFields.ts';
+import { analyzeDocumentOcr, documentOcrFields } from '../lib/documentOcrFields.ts';
 import { documentAmountsToCents } from '../lib/documentAmountInput.ts';
 import { fillDocumentOcrPreview } from '../lib/documentOcrPreview.ts';
 import { documentPdfText } from '../lib/documentPdfText.ts';
@@ -119,8 +119,74 @@ test('German date and grouped currency validate; ambiguous totals and multiple V
   const uncertain=documentOcrFields('Invoice date: 03/04/2026\nVAT 7 %: 7.00 EUR\nVAT 19 %: 19.00 EUR\nGross total: 126.00 EUR\nGross total: 140.00 EUR');
   assert.deepEqual(uncertain,{currency:'EUR'});
   const multipleVat=documentOcrFields('Subtotal: 200.00 EUR\nVAT 7 %: 7.00 EUR\nVAT 19 %: 19.00 EUR\nGross total: 226.00 EUR');
-  assert.deepEqual(multipleVat,{currency:'EUR',grossCents:22600});
+  assert.deepEqual(multipleVat,{currency:'EUR',grossCents:22600,netCents:20000,taxCents:2600});
   assert.deepEqual(documentOcrFields('unreadable ???'),{});
+});
+
+test('document layouts retain separate invoice, tax, payment and discount evidence',()=>{
+  const cases=[
+    {title:'German 19%',lines:['Rechnung','Rechnungsnummer: DE-19','Netto: 1.000,00 EUR','MwSt 19 %: 190,00 EUR','Rechnungsbetrag: 1.190,00 EUR'],
+      expected:{invoiceNumber:'DE-19',currency:'EUR',netCents:100000,taxCents:19000,grossCents:119000,taxRate:'19'}},
+    {title:'German 7%',lines:['Rechnung','Rechnungsnummer: DE-7','Netto: EUR 10,00','Umsatzsteuer 7 %: EUR 0,70','Endbetrag: EUR 10,70'],
+      expected:{invoiceNumber:'DE-7',currency:'EUR',netCents:1000,taxCents:70,grossCents:1070,taxRate:'7'}},
+    {title:'Split labels, foreign currency, negative item and discount',lines:['Invoice','Invoice','number','ＩＮ‑20','Issuer: Example Ltd.',
+      'Subtotal: USD 80.00','Return credit -10.00 USD','Discount: (10.00 USD)','Sales tax 5 %: USD 4.00','Grand total: USD 84.00'],
+      expected:{invoiceNumber:'ＩＮ‑20',issuer:'Example Ltd.',currency:'USD',netCents:8000,taxCents:400,grossCents:8400,taxRate:'5'},
+      context:['Negativer Posten laut Beleg','Rabatt laut Beleg']},
+    {title:'Partial settlement without tax',lines:['Invoice','Invoice no. INV-13','Bill to: Customer Ltd.','Due date: 2026-12-10',
+      'Invoice total: GBP 200.00','Amount paid: GBP 75.00','Balance due: GBP 125.00','Payment status: Partially paid',
+      'Payment reference: RF12321','IBAN: DE89370400440532013000'],
+      expected:{invoiceNumber:'INV-13',currency:'GBP',grossCents:20000},
+      context:['Empfänger','Fällig am','Zahlungsreferenz','Zahlungsstatus laut Beleg','IBAN laut Beleg','Bereits gezahlt laut Beleg','Offener Restbetrag laut Beleg']},
+    {title:'Receipt without invoice number',lines:['Kassenbon','Aussteller: Laden','Belegdatum: 25.11.2026','Summe: 19,80 EUR','Zahlungsart: Bar'],
+      expected:{issuer:'Laden',issuedOn:'2026-11-25',currency:'EUR',grossCents:1980,paymentHint:'Bar'},kind:'Kassenbon / Quittung'},
+    {title:'Negative credit note is informational',lines:['Credit note','Credit note number: CN-1','Invoice total: -16.50 EUR'],
+      expected:{invoiceNumber:'CN-1',currency:'EUR'},kind:'Gutschrift',context:['Negativer Rechnungsendbetrag laut Beleg']},
+    {title:'Conflicting totals and unsupported precision',lines:['Invoice total: JPY 168','Total: JPY 169'],
+      expected:{currency:'JPY'}},
+  ];
+  for(const item of cases){
+    const review=analyzeDocumentOcr(item.lines.join('\n'));
+    assert.deepEqual(review.fields,item.expected,item.title);
+    for(const key of Object.keys(item.expected))assert.ok(review.evidence[key],key+' needs evidence');
+    if(item.kind)assert.equal(review.kind,item.kind);
+    for(const label of item.context??[])assert.ok(review.context.some(fact=>fact.label===label),label);
+    assert.equal(review.fields.paymentStatus,undefined);
+  }
+});
+
+test('contradictory settlements remain visible as evidence only',()=>{
+  const review=analyzeDocumentOcr('Invoice total: EUR 12.00\nAmount paid: EUR 2.00\nBalance due: EUR 3.00');
+  assert.equal(review.fields.grossCents,1200);
+  assert.equal(review.fields.paymentStatus,undefined);
+  assert.equal(review.context.length,2);
+  assert.ok(review.context.every(fact=>fact.unresolved));
+  assert.match(review.issues.join(' '),/Restbetrag/);
+});
+
+test('positioned PDF aligns reordered rows and columns without using item totals as gross',async()=>{
+  const objects=[
+    [410,35,'Invoice'],[380,35,'Example Trading Ltd.'],[350,35,'Invoice number'],[350,310,'Date of issue'],
+    [328,35,'GB-401'],[328,310,'October 26, 2026'],[290,35,'Item'],[290,310,'Line amount'],
+    [268,35,'Goods'],[268,310,'EUR 100.00'],[248,35,'Returns'],[248,310,'-10.00 EUR'],
+    [208,35,'Subtotal'],[208,310,'EUR 90.00'],[188,35,'VAT 7 %'],[188,310,'EUR 6.30'],
+    [165,35,'Invoice total'],[165,310,'EUR 96.30'],
+  ];
+  const content=objects.reverse().map(([y,x,str])=>'BT /F 12 Tf '+x+' '+y+' Td ('+str+') Tj ET').join(' ');
+  const task=getDocument({data:pdf('<< /Font << /F 5 0 R >> >>',content,
+    ['<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>']),useSystemFonts:true});
+  try{
+    const doc=await task.promise;
+    const text=await documentPdfText(await doc.getPage(1));
+    const review=analyzeDocumentOcr(text);
+    assert.deepEqual(review.fields,{invoiceNumber:'GB-401',issuer:'Example Trading Ltd.',issuedOn:'2026-10-26',
+      currency:'EUR',taxRate:'7',grossCents:9630,netCents:9000,taxCents:630});
+    const input={tagName:'INPUT',value:''};
+    const form={elements:{namedItem:key=>key==='grossCents'?input:null}};
+    fillDocumentOcrPreview(form,review.fields);
+    assert.equal(input.value,'96,30');
+    assert.match(review.evidence.grossCents,/Invoice total/);
+  }finally{await task.destroy();}
 });
 
 const langPath=fileURLToPath(new URL('../public/ocr/tessdata-4.1.0/',import.meta.url));

@@ -1,7 +1,8 @@
 "use client";
 import {useRef,useState,type FormEvent} from 'react';
 import {documentAmountFields,documentAmountsToCents,formatDocumentAmountInput} from '../lib/documentAmountInput';
-import {fillDocumentOcrPreview} from '../lib/documentOcrPreview';
+import type {analyzeDocumentOcr} from '../lib/documentOcrFields';
+import {fieldsForReview,fillDocumentOcrPreview} from '../lib/documentOcrPreview';
 import {AdminDocumentFacts, AdminDocumentAccountingContext} from './AdminDocumentFacts';
 import {AdminPortalDocumentAssociation} from './AdminPortalDocumentAssociation';
 import {date,label,text,type PortalRow} from '../lib/adminPortalModel.ts';
@@ -32,7 +33,8 @@ export function AdminPortalDocuments(){
   const [selectedId,setSelectedId]=useState<string|null>(null),[form,setForm]=useState(false);
   const [notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
   const extractedFields=useRef<Record<string,string>>({});
-  const [ocrSource,setOcrSource]=useState('');
+  const [ocrReview,setOcrReview]=useState<(ReturnType<typeof analyzeDocumentOcr>&{source:string})|null>(null);
+  const [ocrContext,setOcrContext]=useState('');
   const [extractionNotice,setExtractionNotice]=useState('');
   const [confirmCleanup,setConfirmCleanup]=useState(false);
   const docs=(data?.documents??[]) as PortalRow[];
@@ -79,9 +81,10 @@ export function AdminPortalDocuments(){
       const file=new FormData(form).get('file');
       if (!(file instanceof File)||!file.size) throw Error('Zuerst einen Originalbeleg auswählen.');
       const {readDocumentInBrowser}=await import('../lib/documentOcr.browser');
-      const {fields,source}=await readDocumentInBrowser(file);
-      setOcrSource(source);
-      const {applied,unresolved}=fillDocumentOcrPreview(form,fields);
+      const review=await readDocumentInBrowser(file);
+      setOcrReview(review);
+      setOcrContext(review.context.filter(fact=>!fact.unresolved).map(fact=>fact.label+': '+fact.value).join('\n'));
+      const {applied,unresolved}=fillDocumentOcrPreview(form,review.fields,review.kind==='Kassenbon / Quittung');
       Object.assign(extractedFields.current,applied);
       const currencyInput=form.elements.namedItem('currency');
       if(applied.currency && currencyInput instanceof HTMLInputElement) {
@@ -104,7 +107,7 @@ export function AdminPortalDocuments(){
   return <>
     <div className="portal-section-head"><h2>Private Geschäftsdokumente</h2>
       <button type="button" onClick={refresh}>Aktualisieren</button>
-      <button type="button" disabled={busy} onClick={()=>{extractedFields.current={};setOcrSource('');setExtractionNotice('');setForm(v=>!v);}}>{form?'Abbrechen':'Dokument erfassen'}</button>
+      <button type="button" disabled={busy} onClick={()=>{extractedFields.current={};setOcrReview(null);setOcrContext('');setExtractionNotice('');setForm(v=>!v);}}>{form?'Abbrechen':'Dokument erfassen'}</button>
     </div>
     {notice&&<p role="status">{notice}</p>}
     {form&&<form className="portal-form admin-data-card" aria-label="Rechnung oder Dokument hochladen" onSubmit={e=>void submit(e,'create_document')}>
@@ -120,7 +123,7 @@ export function AdminPortalDocuments(){
           }
         }
         extractedFields.current={};
-        setOcrSource('');
+        setOcrReview(null);setOcrContext('');
         setExtractionNotice('');
         const confirmed=fields?.namedItem('confirmed');
         if(confirmed instanceof HTMLInputElement)confirmed.checked=false;
@@ -128,7 +131,30 @@ export function AdminPortalDocuments(){
       }}/></label>
       <button type="button" disabled={busy} onClick={e=>{if(e.currentTarget.form)void preview(e.currentTarget.form);}}>Belegdaten auslesen</button>
       {extractionNotice&&<p role="status">{extractionNotice}</p>}
-      {ocrSource&&<details><summary>Erkannten Belegtext prüfen</summary><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{ocrSource}</pre></details>}
+      {ocrReview&&<>
+        <p>Erkannte Belegart: {ocrReview.kind}.</p>
+        {ocrReview.issues.length>0&&<ul>{ocrReview.issues.map(issue=><li key={issue}>{issue}</li>)}</ul>}
+        {Object.keys(ocrReview.evidence).length>0&&<details><summary>Quellen der Feldvorschläge</summary>
+          <dl>{Object.entries(ocrReview.evidence).map(([key,source])=><div key={key}>
+            <dt>{fieldsForReview[key as keyof typeof fieldsForReview]?.[0]??key}</dt>
+            <dd style={{whiteSpace:'pre-wrap'}}>{source}</dd>
+          </div>)}</dl>
+        </details>}
+        {ocrReview.context.length>0&&<details><summary>Weitere Belegangaben prüfen</summary>
+          <dl>{ocrReview.context.map(fact=><div key={fact.label+fact.source}><dt>{fact.label}{fact.unresolved?' – ungeklärt':''}</dt><dd>{fact.source}</dd></div>)}</dl>
+          <label>Zusatzangaben für die Belegnotiz, ohne Zahlungsbestätigung
+            <textarea value={ocrContext} maxLength={1500} onChange={event=>setOcrContext(event.target.value)}/>
+          </label>
+          <button type="button" disabled={!ocrContext.trim()||busy} onClick={event=>{
+            const note=event.currentTarget.form?.elements.namedItem('note');
+            if(!(note instanceof HTMLTextAreaElement))return;
+            const next=[note.value,ocrContext.trim()].filter(Boolean).join('\n');
+            if(next.length>4000){setNotice('Die Belegnotiz ist zu lang. Bitte kürzen.');return;}
+            note.value=next;setOcrContext('');
+          }}>In Belegnotiz übernehmen</button>
+        </details>}
+        {ocrReview.source&&<details><summary>Erkannten Belegtext prüfen</summary><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{ocrReview.source}</pre></details>}
+      </>}
       <label>Steuersatz laut Beleg (%)<input name="taxRate" inputMode="decimal" maxLength={5}/></label>
       <label>Leistungsdatum, falls belegt<input name="serviceOn" type="date"/></label>
       <label>Zahlungsangabe am Beleg<input name="paymentHint" maxLength={200}/></label>

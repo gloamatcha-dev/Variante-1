@@ -1,5 +1,5 @@
 ﻿/// <reference types="vite/client" />
-import { documentOcrFields } from './documentOcrFields.ts';
+import { analyzeDocumentOcr } from './documentOcrFields.ts';
 import { documentPdfText } from './documentPdfText.ts';
 
 const MAX_BYTES = 3*1024*1024;
@@ -113,7 +113,7 @@ export async function readDocumentInBrowser(file:File) {
       } finally { bitmap.close(); canvas.width=canvas.height=0; }
     }
     source=source.slice(0,40000).trim();
-    return {fields:documentOcrFields(source),source};
+    return {...analyzeDocumentOcr(source),source};
   } finally {
     try {
       await Promise.allSettled([worker?.terminate(),task?.destroy()]);
