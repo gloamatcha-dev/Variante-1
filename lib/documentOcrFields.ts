@@ -43,7 +43,7 @@ function date(value: string): string | undefined {
 }
 
 const currencyTokens = /\b(EUR|USD|GBP|CHF|CAD|AUD|JPY|CNY|SEK|DKK|NOK|PLN|KRW|CLP|VND|KWD|BHD|OMR|JOD|TND|HUF|CZK|RON|INR|NZD|SGD|HKD|MXN|BRL|ZAR)\b|[€£$¥]/g;
-const issuerLabel = /^(?:Aussteller|Lieferant|Supplier|Issuer|Vendor|Billed by|Sold by|From)(?=\s|:|$)\s*:?\s*/i;
+const issuerLabel = /^(?:Rechnungssteller|Aussteller|Lieferant|Supplier|Issuer|Vendor|Billed by|Sold by|From)(?=\s|:|$)\s*:?\s*/i;
 const legalHeading = /^(?=.{4,200}$)[\p{L}\p{N}][\p{L}\p{M}\p{N}.,’'&() -]+\s+(?:P\.?B\.?C\.?|L\.?L\.?C\.?|Inc\.?|Ltd\.?|Limited|GmbH|UG(?: \(haftungsbeschränkt\))?|AG|KG|Corp\.?|Corporation|B\.?V\.?)(?:\s+\([\p{L}\p{M}\p{N} -]{1,40}\))?$/iu;
 
 function storedAmount(value:string) {
@@ -55,6 +55,7 @@ const rx = {
   issuedOn:/^(?:Rechnungs[- ]?datum|Ausstellungsdatum|Datum der Rechnung|Belegdatum|Invoice date|Receipt date|Date of issue|Issue date|Date issued)(?=\s|:|$)\s*:?\s*/i,
   serviceOn:/^(?:Leistungsdatum|Lieferdatum|Service date|Delivery date)(?=\s|:|$)\s*:?\s*/i,
   dueOn:/^(?:Fälligkeitsdatum|Fällig am|Zahlbar bis|Payment due date|Due date|Date due)(?=\s|:|$)\s*:?\s*/i,
+  currency:/^(?:W\u00e4hrung|Currency)(?=\s|:|$)\s*:?\s*/i,
   recipient:/^(?:Bill(?:ed)? to|Invoice to|Rechnungsempfänger|Customer)(?=\s|:|$)\s*:?\s*/i,
   paymentHint:/^(?:Zahlungsart|Zahlungsbedingungen|Payment method|Payment terms)(?=\s|:|$)\s*:?\s*/i,
   paymentReference:/^(?:Zahlungsreferenz|Verwendungszweck|Payment reference)(?=\s|:|$)\s*:?\s*/i,
@@ -95,6 +96,12 @@ function layoutLines(source:string):string[] {
       continue;
     }
     const cells=rows[i].split(/\t+/).map(s=>s.trim()).filter(Boolean);
+    // A parenthetical qualifier on a party heading is not its value.
+    if(cells.length>1) for(let column=0;column<cells.length;column++){
+      const cell=cells[column];
+      const heading=issuerLabel.exec(cell)??rx.recipient.exec(cell);
+      if(heading && /^\([^()]+\)\s*:?$/.test(cell.slice(heading[0].length))) cells[column]=heading[0].trim();
+    }
     // A standalone legal name to the left of a labeled column is its own cell.
     if(cells.length>1&&legalHeading.test(cells[0])&&isLabel(cells[1])) lines.push(cells.shift()!);
     const following=rows[i+1]?.split(/\t+/).map(s=>s.trim()).filter(Boolean);
@@ -107,7 +114,12 @@ function layoutLines(source:string):string[] {
     }
     // A visible spacing break before another recognized field starts a new fact.
     let line='';
-    for(const cell of cells){
+    for(const [column,cell] of cells.entries()){
+      // Keep a trailing bare net heading with the item table header.
+      if(column===cells.length-1&&column>0&&rx.net.exec(cell)?.[0]===cell&&!cells.slice(0,column).some(isLabel)){
+        line+=' '+cell;
+        continue;
+      }
       if(line&&isLabel(cell)){lines.push(line);line='';}
       line+=(line?' ':'')+cell;
     }

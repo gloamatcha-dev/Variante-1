@@ -1,5 +1,5 @@
 ﻿import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { createCanvas } from '@napi-rs/canvas';
@@ -341,4 +341,26 @@ test('PDF column headings keep the supplier separate and map the stated gross, n
         [issuer,'2026-11-15','80,00','15,20','95,20','']);
     }finally{await task.destroy();}
   }
+});
+
+const originalPdf=process.env.GLOA_OCR_ORIGINAL_PDF;
+test('original German invoice fills all eight editable fields', {skip:!originalPdf}, async()=>{
+  const task=getDocument({data:new Uint8Array(readFileSync(originalPdf)),useSystemFonts:true});
+  try{
+    const doc=await task.promise;
+    const pages=[];
+    for(let page=1;page<=doc.numPages;page++) pages.push(await documentPdfText(await doc.getPage(page)));
+    const fields=analyzeDocumentOcr(pages.join('\n')).fields;
+    const expected={issuer:'Muster Office Supplies GmbH (Test)',invoiceNumber:'TEST-RE-2026-0048',
+      issuedOn:'2026-11-15',serviceOn:'2026-11-14',netCents:'80,00',taxCents:'15,20',grossCents:'95,20',taxRate:'19'};
+    const inputs=Object.fromEntries([...Object.keys(expected),'currency','paymentStatus'].map(key=>[key,{tagName:'INPUT',value:''}]));
+    fillDocumentOcrPreview({elements:{namedItem:key=>inputs[key]??null}},fields);
+    for(const [key,value] of Object.entries(expected)) assert.equal(inputs[key].value,value,key);
+    assert.equal(inputs.currency.value,'EUR');
+    assert.equal(inputs.paymentStatus.value,'');
+    const form=new FormData();
+    for(const [key,input] of Object.entries(inputs)) form.set(key,input.value);
+    documentAmountsToCents(form);
+    assert.deepEqual(['netCents','taxCents','grossCents'].map(key=>form.get(key)),['8000','1520','9520']);
+  }finally{await task.destroy();}
 });
