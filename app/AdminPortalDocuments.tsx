@@ -1,6 +1,6 @@
 "use client";
 import {useRef,useState,type FormEvent} from 'react';
-import {documentAmountFields,documentAmountsToCents,formatDocumentAmountInput} from '../lib/documentAmountInput';
+import {documentAmountFields,documentAmountsToCents,formatDocumentAmountInput,isDocumentCentCurrency} from '../lib/documentAmountInput';
 import type {analyzeDocumentOcr} from '../lib/documentOcrFields';
 import {fieldsForReview,fillDocumentOcrPreview} from '../lib/documentOcrPreview';
 import {AdminDocumentFacts, AdminDocumentAccountingContext} from './AdminDocumentFacts';
@@ -13,7 +13,7 @@ const centsFields=[['grossCents','Brutto (Cent)','gross_cents'],['netCents','Net
 function MetadataFields({row}:{row?:PortalRow}) {
   const string=(name:string)=>row?.[name]==null?'':String(row[name]);
   const [currency,setCurrency]=useState(string('currency'));
-  const unit=currency==='EUR'?'€':/^[A-Z]{3}$/.test(currency)?currency:'in Belegwährung';
+  const unit=currency==='EUR'?'€':isDocumentCentCurrency(currency)?currency:'in Belegwährung';
   return <>
     <label>Titel<input name="title" required maxLength={200} defaultValue={string('title')}/></label>
     <label>Rechnungsdatum<input name="issuedOn" type="date" defaultValue={string('issued_on')}/></label>
@@ -21,6 +21,8 @@ function MetadataFields({row}:{row?:PortalRow}) {
     <label>Rechnungsnummer<input name="invoiceNumber" maxLength={120} defaultValue={string('invoice_number')}/></label>
     {Object.entries(documentAmountFields).map(([name,[label,key]])=><label key={name}>{label}<span style={{display:'flex',gap:'0.5rem',alignItems:'center'}}><input name={name} inputMode="decimal" maxLength={11} placeholder="0,00" defaultValue={formatDocumentAmountInput(row?.[key])}/><span>{unit}</span></span></label>)}
     <label>Währung<input name="currency" pattern="[A-Z]{3}" maxLength={3} defaultValue={string('currency')} onInput={event=>setCurrency(event.currentTarget.value)}/></label>
+    {currency&&/^[A-Z]{3}$/.test(currency)&&!isDocumentCentCurrency(currency)&&
+      <p>Diese Währung kann im bestehenden Cent-Belegmodell nicht mit strukturierten Beträgen gespeichert werden. Originalbeträge bitte in der Belegnotiz dokumentieren.</p>}
     <label>Zahlungsstatus<select name="paymentStatus" defaultValue={string('payment_status')}>
       <option value="">Unbekannt</option><option value="paid">Bezahlt</option><option value="unpaid">Offen</option><option value="partial">Teilbezahlt</option>
     </select></label>

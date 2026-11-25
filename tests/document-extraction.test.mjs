@@ -18,12 +18,14 @@ const expected={invoiceNumber:'GLOA-1024',issuer:'GLOA Test GmbH',issuedOn:'2026
   taxRate:'19',paymentHint:'bank transfer'};
 
 function pdf(resources, contents, extra = []) {
-  const parts=[
+  return pdfObjects([
     '<< /Type /Catalog /Pages 2 0 R >>',
     '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
     '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 460] /Resources '+resources+' /Contents 4 0 R >>',
     stream('',Buffer.from(contents)),...extra,
-  ];
+  ]);
+}
+function pdfObjects(parts) {
   let bytes=Buffer.from('%PDF-1.4\n');
   const offsets=[];
   parts.forEach((part,i)=>{
@@ -108,6 +110,62 @@ test('decimal inputs preserve zero, accept comma or point, and reject ambiguous 
     const invalid=new FormData();
     invalid.set('grossCents',rejected);
     assert.throws(()=>documentAmountsToCents(invalid));
+  }
+});
+
+test('multi-page reference invoice reads net excluding tax and tax on a stated base',async()=>{
+  const text=(lines)=>Buffer.from('BT /F 12 Tf 35 425 Td 24 TL '+lines.map(line=>{
+    const encoded=Buffer.from([...line].map(char=>char==='€'?128:char==='−'?150:char.charCodeAt(0))).toString('hex');
+    return '<'+encoded+'> Tj T*';
+  }).join(' ')+' ET');
+  const pages=[
+    ['Invoice','Anthropic, PBC','Invoice number','MILBLCIX-0004','Date of issue','January 26, 2026',
+      'Date due','January 26, 2026','Bill to','Example Recipient, Inc.','Service EUR 180.00','Credit -38.76 EUR'],
+    ['Subtotal €141.24','Total excluding tax €141.24','Tax (19% on €141.24) €26.84','Total €168.08','Amount due €168.08'],
+  ];
+  const resources='/MediaBox [0 0 600 460] /Resources << /Font << /F 7 0 R >> >>';
+  const task=getDocument({useSystemFonts:true,data:pdfObjects([
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>',
+    '<< /Type /Page /Parent 2 0 R '+resources+' /Contents 5 0 R >>',
+    '<< /Type /Page /Parent 2 0 R '+resources+' /Contents 6 0 R >>',
+    stream('',text(pages[0])),stream('',text(pages[1])),
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
+  ])});
+  try {
+    const doc=await task.promise;
+    assert.equal(doc.numPages,2);
+    const source=[];
+    for(let i=1;i<=doc.numPages;i++) source.push(await documentPdfText(await doc.getPage(i)));
+    const review=analyzeDocumentOcr(source.join('\n'));
+    assert.deepEqual(review.fields,{invoiceNumber:'MILBLCIX-0004',issuer:'Anthropic, PBC',
+      issuedOn:'2026-01-26',currency:'EUR',taxRate:'19',grossCents:16808,netCents:14124,taxCents:2684});
+    const inputs=Object.fromEntries([...Object.keys(review.fields),'paymentStatus'].map(name=>[name,{tagName:'INPUT',value:''}]));
+    fillDocumentOcrPreview({elements:{namedItem:key=>inputs[key]??null}},review.fields);
+    assert.deepEqual([inputs.netCents.value,inputs.taxCents.value,inputs.grossCents.value,inputs.paymentStatus.value],
+      ['141,24','26,84','168,08','']);
+    assert.ok(review.context.some(fact=>fact.label==='Offener Restbetrag laut Beleg'));
+  }finally{await task.destroy();}
+});
+
+test('rounding retains the stated total, incompatible currencies and invalid tax bases fail closed',()=>{
+  const rounding=analyzeDocumentOcr('Subtotal EUR 10.00\nTax (19% on EUR 10.00) EUR 1.90\nTotal EUR 11.91');
+  assert.equal(rounding.fields.grossCents,1191);
+  assert.equal(rounding.fields.netCents,undefined);
+  assert.equal(rounding.fields.taxCents,undefined);
+  assert.match(rounding.issues.join(' '),/Rundungsdifferenz/);
+  const conflict=analyzeDocumentOcr('Subtotal EUR 10.00\nTax (19% on EUR 10.00) EUR 2.20\nTotal EUR 12.20');
+  assert.equal(conflict.fields.taxCents,undefined);
+  assert.match(conflict.issues.join(' '),/Bemessungsgrundlage/);
+  const discount=analyzeDocumentOcr('Subtotal EUR 10.00\nDiscount EUR 1.00\nTotal excluding tax EUR 9.00\nTax (19% on EUR 9.00) EUR 1.71\nTotal EUR 10.71');
+  assert.equal(discount.fields.netCents,900);
+  assert.equal(discount.fields.grossCents,1071);
+  for(const currency of ['JPY','KWD']){
+    assert.deepEqual(documentOcrFields('Total '+currency+' 100'),{currency});
+    const values=new FormData();
+    values.set('currency',currency);
+    values.set('grossCents','100');
+    assert.throws(()=>documentAmountsToCents(values),/Währung/);
   }
 });
 

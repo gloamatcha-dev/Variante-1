@@ -1,4 +1,6 @@
-﻿function unique<T>(values: T[]): T | undefined {
+﻿import {isDocumentCentCurrency} from './documentAmountInput.ts';
+
+function unique<T>(values: T[]): T | undefined {
   const distinct = [...new Set(values)];
   return distinct.length === 1 ? distinct[0] : undefined;
 }
@@ -40,7 +42,7 @@ function date(value: string): string | undefined {
   if (candidate && Number.isFinite(Date.parse(candidate)) && new Date(candidate).toISOString().slice(0,10)===candidate) return candidate;
 }
 
-const currencyTokens = /\b(EUR|USD|GBP|CHF|CAD|AUD|JPY|CNY|SEK|DKK|NOK|PLN)\b|[€£$¥]/g;
+const currencyTokens = /\b(EUR|USD|GBP|CHF|CAD|AUD|JPY|CNY|SEK|DKK|NOK|PLN|KRW|CLP|VND|KWD|BHD|OMR|JOD|TND|HUF|CZK|RON|INR|NZD|SGD|HKD|MXN|BRL|ZAR)\b|[€£$¥]/g;
 const issuerLabel = /^(?:Aussteller|Lieferant|Supplier|Issuer|Vendor|Billed by|Sold by|From)(?=\s|:|$)\s*:?\s*/i;
 const legalHeading = /^(?=.{4,200}$)[\p{L}\p{N}][\p{L}\p{M}\p{N}.,’'&() -]+\s+(?:P\.?B\.?C\.?|L\.?L\.?C\.?|Inc\.?|Ltd\.?|Limited|GmbH|UG(?: \(haftungsbeschränkt\))?|AG|KG|Corp\.?|Corporation|B\.?V\.?)$/iu;
 
@@ -60,8 +62,10 @@ const rx = {
   statedPayment:/^(?:Zahlungsstatus|Payment status)(?=\s|:|$)\s*:?\s*/i,
   gross:/^(?:Gesamtbetrag|Brutto(?:betrag)?|Rechnungsbetrag|Endbetrag|Grand total|Invoice total|Gross total|Total amount(?!\s+(?:due|paid)\b)|Total incl\.? (?:VAT|tax))(?=\s|:|$)\s*:?\s*/i,
   simpleTotal:/^(?:Total|Summe)(?!\s+(?:due|paid|tax|VAT|discount|excl\.?|incl\.?)\b)(?=\s|:|$)\s*:?\s*(?=(?:[€$£¥]|[A-Z]{3}\s|\d|$))/i,
-  net:/^(?:Netto(?:betrag|summe)?|Zwischensumme|Subtotal|Net total|Total excl\.? (?:VAT|tax))(?=\s|:|$)\s*:?\s*/i,
+  net:/^(?:Netto(?:betrag|summe)?|Net total|(?:Total (?:excl\.?|excluding|before) (?:VAT|tax)))(?=\s|:|$)\s*:?\s*/i,
+  subtotal:/^(?:Zwischensumme|Subtotal|Sub-total)(?=\s|:|$)\s*:?\s*/i,
   tax:/^(?:Umsatzsteuer(?: gesamt)?|MwSt\.?(?: gesamt)?|VAT total|Total VAT|Total tax|Tax total|VAT|Sales tax)(?=\s|:|$)\s*:?\s*/i,
+  taxWithBase:/^(?:Tax|VAT|Sales tax|Umsatzsteuer|MwSt\.?)\s*\((\d{1,2}(?:[.,]\d{1,2})?)\s*%\s*(?:on|auf)\s+([^()]+)\)\s*:?\s*/i,
   rate:/^(?:Umsatzsteuer|MwSt\.?|VAT|Sales tax)\s+(\d{1,2}(?:[.,]\d{1,2})?)\s*%(?=\s|:|$)\s*:?\s*/i,
   open:/^(?:Offene[rn]? (?:Rest)?betrag|Restbetrag|Noch zu zahlen|Fälliger Betrag|Amount due|Balance due|Total (?:amount )?due|Outstanding balance)(?=\s|:|$)\s*:?\s*/i,
   paid:/^(?:Bereits bezahlt|Gezahlter Betrag|Teilzahlung|Amount paid|Total paid|Payments received|Amount received)(?=\s|:|$)\s*:?\s*/i,
@@ -157,7 +161,7 @@ export function analyzeDocumentOcr(source:string) {
     .map(match=>match[1]??({'€':'EUR','£':'GBP'} as Record<string,string>)[match[0]]??match[0]);
   const currency=unique(currencies.filter(value=>value!=='$'||!currencies.some(other=>/^(USD|CAD|AUD)$/.test(other))));
   if(currency&&/^[A-Z]{3}$/.test(currency))set('currency',currency,lines.find(line=>line.includes(currency)||line.includes(currency==='EUR'?'€':currency==='GBP'?'£':'\0')));
-  const canSuggestAmounts=Boolean(fields.currency)&&currency!=='JPY';
+  const canSuggestAmounts=isDocumentCentCurrency(fields.currency);
   const money=(label:string,value:number|undefined,origin?:string)=>{
     if(value===undefined||!origin||!canSuggestAmounts)return;
     context.push({label,value:new Intl.NumberFormat('de-DE',{style:'currency',currency}).format(value/100),source:origin});
@@ -179,14 +183,22 @@ export function analyzeDocumentOcr(source:string) {
 
   const explicitGross=read(rx.gross,signed);
   const genericGross=read(rx.simpleTotal,signed);
-  const net=read(rx.net,signed);
-  const rateRows=lines.flatMap(line=>{
-    const match=rx.rate.exec(line);
-    return match?[{rate:match[1].replace(',','.'),value:storedAmount(line.slice(match[0].length)),source:line}]:[];
+  const subtotal=read(rx.subtotal,signed);
+  const net=candidates(rx.net).length?read(rx.net,signed):subtotal;
+  if(net!==subtotal)money('Zwischensumme laut Beleg',subtotal.value,subtotal.source);
+  const rateRows=[...candidates(rx.taxWithBase),...candidates(rx.rate)].flatMap(row=>{
+    const match=rx.taxWithBase.exec(row.source)??rx.rate.exec(row.source);
+    if(!match)return [];
+    const rate=match[1].replace(',','.');
+    const value=storedAmount(row.value);
+    const base=match[2]===undefined?undefined:storedAmount(match[2]);
+    const calculated=base===undefined?undefined:Math.round(base*Math.round(Number(rate)*100)/10000);
+    const invalid=match[2]!==undefined&&(calculated===undefined||value===undefined||Math.abs(value-calculated)>1);
+    return [{rate,value:invalid?undefined:value,source:row.source,invalid}];
   });
   const rates=[...new Set(rateRows.map(row=>row.rate))];
   for(const row of rateRows)money('Steuer laut Beleg ('+row.rate.replace('.',',')+' %)',row.value,row.source);
-  const taxCandidates=candidates(rx.tax).filter(row=>!rx.rate.test(row.source));
+  const taxCandidates=candidates(rx.tax).filter(row=>!rx.rate.test(row.source)&&!rx.taxWithBase.test(row.source));
   const parsedTax=taxCandidates.map(row=>signed(row.value));
   const ratesTax=rates.map(rate=>{
     const values=rateRows.filter(row=>row.rate===rate).map(row=>row.value);
@@ -196,12 +208,16 @@ export function analyzeDocumentOcr(source:string) {
     ? (parsedTax.includes(undefined)?undefined:unique(parsedTax))
     : ratesTax.length&&ratesTax.every(v=>v!==undefined)?ratesTax.reduce((a,b)=>a+b,0):undefined;
   const taxOrigin=taxCandidates[0]?.source??rateRows.map(row=>row.source).join('\n');
-  if(rates.length===1)set('taxRate',rates[0],rateRows[0].source);
+  const taxBaseConflict=rateRows.some(row=>row.invalid);
+  if(rates.length===1&&!taxBaseConflict)set('taxRate',rates[0],rateRows[0].source);
   const grossConflict=explicitGross.value!==undefined&&genericGross.value!==undefined&&explicitGross.value!==genericGross.value;
   const gross=candidates(rx.gross).length?explicitGross:genericGross;
   const taxConflict=Boolean(parsedTax.length&&ratesTax.length&&ratesTax.every(v=>v!==undefined)&&tax!==ratesTax.reduce((a,b)=>a+b,0));
-  const mismatch=net.value!==undefined&&tax!==undefined&&gross.value!==undefined&&net.value+tax!==gross.value;
+  const difference=net.value!==undefined&&tax!==undefined&&gross.value!==undefined?gross.value-net.value-tax:0;
+  const mismatch=Math.abs(difference)>1;
   if(!canSuggestAmounts&&gross.value!==undefined)issues.push('Keine eindeutige Währung oder keine Cent-kompatible Währung.');
+  if(taxBaseConflict)issues.push('Ausgewiesener Steuerbetrag passt nicht zur Bemessungsgrundlage und zum Steuersatz.');
+  if(Math.abs(difference)===1)issues.push('Rundungsdifferenz von einem Cent. Brutto bleibt belegt; Netto und Steuer bitte am Original prüfen.');
   if(grossConflict||mismatch||taxConflict)issues.push('Rechnungssumme oder Steueraufteilung widersprechen sich.');
   if(gross.value!==undefined&&gross.value<0){
     money('Negativer Rechnungsendbetrag laut Beleg',gross.value,gross.source);
@@ -209,7 +225,7 @@ export function analyzeDocumentOcr(source:string) {
   }
   if(canSuggestAmounts&&gross.value!==undefined&&gross.value>=0&&!grossConflict&&!mismatch&&!taxConflict){
     keep('grossCents',gross);
-    if(net.value!==undefined&&net.value>=0&&tax!==undefined&&tax>=0) {
+    if(net.value!==undefined&&net.value>=0&&tax!==undefined&&tax>=0&&difference===0&&!taxBaseConflict) {
       keep('netCents',net);set('taxCents',tax,taxOrigin);
     }
   }
