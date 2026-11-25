@@ -1,35 +1,97 @@
-﻿import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { extractDocument, normalizeDocumentExtraction } from '../lib/documentExtraction.server.ts';
+﻿import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { test } from 'node:test';
+import { createCanvas } from '@napi-rs/canvas';
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { createWorker } from 'tesseract.js';
+import { documentOcrFields } from '../lib/documentOcrFields.ts';
+import { documentPdfText } from '../lib/documentPdfText.ts';
 
-const file = new File(['synthetic'], 'invoice.pdf', {type:'application/pdf'});
-const enabled = {
-  GLOA_DOCUMENT_EXTRACTION_ENABLED:'true',
-  GLOA_DOCUMENT_EXTRACTION_URL:'https://ocr.example.invalid/extract',
-  GLOA_DOCUMENT_EXTRACTION_TOKEN:'synthetic',
-};
+const lines=['Invoice number: GLOA-1024','Issuer: GLOA Test GmbH',
+  'Invoice date: 2026-11-25','Service date: 2026-11-24','Subtotal: EUR 1,000.00',
+  'VAT 19 %: EUR 190.00','Grand total: EUR 1,190.00','Payment terms: bank transfer'];
+const expected={invoiceNumber:'GLOA-1024',issuer:'GLOA Test GmbH',issuedOn:'2026-11-25',
+  serviceOn:'2026-11-24',currency:'EUR',grossCents:119000,netCents:100000,taxCents:19000,
+  taxRate:'19',paymentHint:'bank transfer'};
 
-test('disabled or incomplete extraction sends no original', async () => {
-  const request=()=>assert.fail('unexpected network call');
-  assert.equal(await extractDocument(file,{},request),null);
-  assert.equal(await extractDocument(file,{...enabled,GLOA_DOCUMENT_EXTRACTION_TOKEN:''},request),null);
-  await assert.rejects(extractDocument(file,{...enabled,GLOA_DOCUMENT_EXTRACTION_URL:'http://ocr.example.invalid'},request));
-});
-
-test('authenticated adapter returns suggestions only, preserving zero and withholding contradictory tax', async () => {
-  const result=await extractDocument(file,enabled,async (url,init)=>{
-    assert.equal(url.hostname,'ocr.example.invalid');
-    assert.equal(init.redirect,'error');
-    assert.equal(init.body,file);
-    return Response.json({currency:'EUR',grossCents:1190,netCents:1000,taxCents:200,
-      issuedOn:'2026-02-30',serviceOn:'2026-02-28',paymentStatus:'paid',paymentHint:'Debit noted'});
+function pdf(resources, contents, extra = []) {
+  const parts=[
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 460] /Resources '+resources+' /Contents 4 0 R >>',
+    stream('',Buffer.from(contents)),...extra,
+  ];
+  let bytes=Buffer.from('%PDF-1.4\n');
+  const offsets=[];
+  parts.forEach((part,i)=>{
+    offsets.push(bytes.length);
+    bytes=Buffer.concat([bytes,Buffer.from((i+1)+' 0 obj\n'),Buffer.from(part),Buffer.from('\nendobj\n')]);
   });
-  assert.deepEqual(result,{currency:'EUR',grossCents:1190,serviceOn:'2026-02-28',paymentHint:'Debit noted'});
-  assert.deepEqual(normalizeDocumentExtraction({currency:'EUR',grossCents:0,netCents:0,taxCents:0}),
-    {currency:'EUR',grossCents:0,netCents:0,taxCents:0});
+  const start=bytes.length;
+  const xref=offsets.map(x=>String(x).padStart(10,'0')+' 00000 n \n').join('');
+  return new Uint8Array(Buffer.concat([bytes,Buffer.from(
+    'xref\n0 '+(parts.length+1)+'\n0000000000 65535 f \n'+xref+
+    'trailer\n<< /Root 1 0 R /Size '+(parts.length+1)+' >>\nstartxref\n'+start+'\n%%EOF\n')]));
+}
+function stream(dict,bytes) {
+  return Buffer.concat([Buffer.from('<< '+dict+' /Length '+bytes.length+' >>\nstream\n'),bytes,Buffer.from('\nendstream')]);
+}
+function expectFields(actual) {
+  for (const [key,value] of Object.entries(expected)) assert.equal(actual[key],value,key);
+}
+
+test('real text PDF preserves text lines and extracts verified invoice fields',async()=>{
+  const contents='BT /F 18 Tf 35 410 Td 35 TL '+lines.map(x=>'('+x+') Tj T*').join(' ')+' ET';
+  const data=pdf('<< /Font << /F 5 0 R >> >>',contents,['<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>']);
+  const task=getDocument({data,useSystemFonts:true});
+  try {
+    const doc=await task.promise;
+    expectFields(documentOcrFields(await documentPdfText(await doc.getPage(1))));
+  } finally { await task.destroy(); }
 });
 
-test('provider error and oversized response fail closed',async()=>{
-  await assert.rejects(extractDocument(file,enabled,async()=>new Response(null,{status:503})));
-  await assert.rejects(extractDocument(file,enabled,async()=>new Response('x'.repeat(17000))));
+test('German date and grouped currency validate; ambiguous totals and multiple VAT rates stay unresolved',()=>{
+  const fields=documentOcrFields('Rechnungsnummer: A-89\nRechnungsdatum: 25.11.2026\nNetto: 1.000,00 EUR\nMwSt 19 %: 190,00 EUR\nBrutto: 1.190,00 EUR');
+  assert.equal(fields.issuedOn,'2026-11-25');
+  assert.equal(fields.grossCents,119000);
+  assert.equal(fields.taxCents,19000);
+  const uncertain=documentOcrFields('Invoice date: 03/04/2026\nVAT 7 %: 7.00 EUR\nVAT 19 %: 19.00 EUR\nGross total: 126.00 EUR\nGross total: 140.00 EUR');
+  assert.deepEqual(uncertain,{currency:'EUR'});
+  const multipleVat=documentOcrFields('Subtotal: 200.00 EUR\nVAT 7 %: 7.00 EUR\nVAT 19 %: 19.00 EUR\nGross total: 226.00 EUR');
+  assert.deepEqual(multipleVat,{currency:'EUR',grossCents:22600});
+  assert.deepEqual(documentOcrFields('unreadable ???'),{});
+});
+
+const langPath=fileURLToPath(new URL('../public/ocr/tessdata-4.1.0/',import.meta.url));
+const haveModels=['deu','eng'].every(lang=>existsSync(langPath+'/'+lang+'.traineddata'));
+test('real Tesseract reads scan PDF, JPG and PNG', {skip:!haveModels?'Pinned language assets required':false,timeout:90000}, async t=>{
+  const image=createCanvas(1200,920);
+  const ctx=image.getContext('2d');
+  ctx.fillStyle='white';ctx.fillRect(0,0,1200,920);ctx.fillStyle='black';ctx.font='38px Arial';
+  lines.forEach((line,i)=>ctx.fillText(line,70,115+i*75));
+  const jpg=image.toBuffer('image/jpeg');
+  const worker=await createWorker(['deu','eng'],1,{langPath,gzip:false,cacheMethod:'none'});
+  async function check(input) {
+    const result=await worker.recognize(input);
+    expectFields(documentOcrFields(result.data.text));
+  }
+  try {
+    await t.test('JPG',()=>check(jpg));
+    await t.test('PNG',()=>check(image.toBuffer('image/png')));
+    await t.test('scan PDF',async()=>{
+      const data=pdf('<< /XObject << /Im 5 0 R >> >>','q 600 0 0 460 0 0 cm /Im Do Q',[
+        stream('/Type /XObject /Subtype /Image /Width 1200 /Height 920 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode',jpg),
+      ]);
+      const task=getDocument({data,useSystemFonts:true});
+      try {
+        const doc=await task.promise,page=await doc.getPage(1);
+        assert.equal(await documentPdfText(page),'');
+        const viewport=page.getViewport({scale:2});
+        const canvas=createCanvas(viewport.width,viewport.height);
+        await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
+        await check(canvas.toBuffer('image/png'));
+      } finally {await task.destroy();}
+    });
+  } finally {await worker.terminate();}
 });

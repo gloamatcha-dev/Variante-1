@@ -28,6 +28,7 @@ export function AdminPortalDocuments(){
   const [selectedId,setSelectedId]=useState<string|null>(null),[form,setForm]=useState(false);
   const [notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
   const extractedFields=useRef<Record<string,string>>({});
+  const [ocrSource,setOcrSource]=useState('');
   const [extractionNotice,setExtractionNotice]=useState('');
   const [confirmCleanup,setConfirmCleanup]=useState(false);
   const docs=(data?.documents??[]) as PortalRow[];
@@ -72,19 +73,11 @@ export function AdminPortalDocuments(){
     await perform(async()=>{
       const file=new FormData(form).get('file');
       if (!(file instanceof File)||!file.size) throw Error('Zuerst einen Originalbeleg auswählen.');
-      const body=new FormData();
-      body.set('file',file);
-      body.set('action','extract_document');
-      const response=await fetch(endpoint,{method:'POST',body});
-      const data=await response.json();
-      if (!response.ok) throw Error(data.error??'Erkennung derzeit nicht verfügbar.');
-      if (data.state==='unavailable') {
-        setExtractionNotice('Automatische Erkennung ist nicht eingerichtet. Belegdaten anhand des Originals manuell erfassen.');
-        return;
-      }
-      const fields=data.fields as Record<string,string|number>;
+      const {readDocumentInBrowser}=await import('../lib/documentOcr.browser');
+      const {fields,source}=await readDocumentInBrowser(file);
+      setOcrSource(source);
       const labels:Record<string,string>={issuer:'Aussteller',invoiceNumber:'Rechnungsnummer',issuedOn:'Rechnungsdatum',
-        serviceOn:'Leistungsdatum',currency:'Währung',grossCents:'Brutto',netCents:'Netto',taxCents:'Umsatzsteuer',paymentHint:'Zahlungsangabe'};
+        serviceOn:'Leistungsdatum',currency:'Währung',grossCents:'Brutto',netCents:'Netto',taxCents:'Umsatzsteuer',taxRate:'Steuersatz',paymentHint:'Zahlungsangabe'};
       for(const name of [...Object.keys(labels),'reference']) {
         const control=form.elements.namedItem(name==='reference'?'externalReference':name);
         if (control instanceof HTMLInputElement&&!control.value&&fields[name]!=null) {
@@ -110,7 +103,7 @@ export function AdminPortalDocuments(){
   return <>
     <div className="portal-section-head"><h2>Private Geschäftsdokumente</h2>
       <button type="button" onClick={refresh}>Aktualisieren</button>
-      <button type="button" onClick={()=>{extractedFields.current={};setExtractionNotice('');setForm(v=>!v);}}>{form?'Abbrechen':'Dokument erfassen'}</button>
+      <button type="button" disabled={busy} onClick={()=>{extractedFields.current={};setOcrSource('');setExtractionNotice('');setForm(v=>!v);}}>{form?'Abbrechen':'Dokument erfassen'}</button>
     </div>
     {notice&&<p role="status">{notice}</p>}
     {form&&<form className="portal-form admin-data-card" aria-label="Rechnung oder Dokument hochladen" onSubmit={e=>void submit(e,'create_document')}>
@@ -123,12 +116,16 @@ export function AdminPortalDocuments(){
           if(control instanceof HTMLInputElement&&control.value===value) control.value='';
         }
         extractedFields.current={};
+        setOcrSource('');
         setExtractionNotice('');
         const confirmed=fields?.namedItem('confirmed');
         if(confirmed instanceof HTMLInputElement)confirmed.checked=false;
+        if(event.currentTarget.files?.length&&event.currentTarget.form) void preview(event.currentTarget.form);
       }}/></label>
       <button type="button" disabled={busy} onClick={e=>{if(e.currentTarget.form)void preview(e.currentTarget.form);}}>Belegdaten auslesen</button>
       {extractionNotice&&<p role="status">{extractionNotice}</p>}
+      {ocrSource&&<details><summary>Erkannten Belegtext prüfen</summary><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{ocrSource}</pre></details>}
+      <label>Steuersatz laut Beleg (%)<input name="taxRate" inputMode="decimal" maxLength={5}/></label>
       <label>Leistungsdatum, falls belegt<input name="serviceOn" type="date"/></label>
       <label>Zahlungsangabe am Beleg<input name="paymentHint" maxLength={200}/></label>
       <label>Belegrichtung<select name="direction" required defaultValue=""><option value="">Bitte wählen</option><option value="income">Einnahme</option><option value="expense">Ausgabe</option></select></label>

@@ -147,20 +147,6 @@ export async function POST(request:Request) {
         return pending();
       }
     }
-    if (action==='extract_document' && multipart) {
-      const file=input.file;
-      if (!(file instanceof File) || !file.size || file.size>fileLimit ||
-          fileType(Buffer.from(await file.arrayBuffer()))?.[0]!==file.type) {
-        return json({error:'Nur gültige PDF-, JPG- und PNG-Dateien.'},400);
-      }
-      try {
-        const {extractDocument}=await import('../../../../lib/documentExtraction.server.ts');
-        const fields=await extractDocument(file);
-        return json({ok:true,state:fields===null?'unavailable':Object.keys(fields).length?'review':'empty',fields});
-      } catch {
-        return json({error:'Erkennung derzeit nicht verfügbar. Belegdaten manuell prüfen.'},503);
-      }
-    }
     if (action==='suggest_document_link'&&!multipart) {
       const reference=typeof input.reference==='string'?input.reference.trim():'';
       if (!reference || reference.length>200) return json({error:'Eindeutige Referenz eingeben.'},400);
@@ -188,11 +174,14 @@ export async function POST(request:Request) {
         }
         const serviceDate=typeof input.serviceOn==='string'&&input.serviceOn?input.serviceOn:null;
         if (serviceDate) metadata({title:'Leistung',issuedOn:serviceDate});
+        const taxRate=typeof input.taxRate==='string'?input.taxRate.trim():'';
+        if (taxRate&&!/^\d{1,2}(?:[.,]\d{1,2})?$/.test(taxRate)) return json({error:'Steuersatz prüfen.'},400);
         const context=typeof input.paymentHint==='string'?input.paymentHint.trim():'';
         if (context.length>200) return json({error:'Zahlungsangabe zu lang.'},400);
         fields.note=[
           'Belegdaten bestätigt · '+(input.direction==='income'?'Einnahme':'Ausgabe'),
           serviceDate?'Leistungsdatum: '+serviceDate:null,
+          taxRate?'Steuersatz laut Beleg: '+taxRate+' %':null,
           context?'Zahlungsangabe am Beleg: '+context:null,
           fields.note,
         ].filter(Boolean).join('\n');
