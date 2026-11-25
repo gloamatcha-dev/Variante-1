@@ -119,7 +119,7 @@ test('multi-page reference invoice reads net excluding tax and tax on a stated b
     return '<'+encoded+'> Tj T*';
   }).join(' ')+' ET');
   const pages=[
-    ['Invoice','Anthropic, PBC','Invoice number','MILBLCIX-0004','Date of issue','January 26, 2026',
+    ['Invoice','Anthropic, PBC','Invoice','number','MILBLCIX-','0004','Date of issue','January 26, 2026',
       'Date due','January 26, 2026','Bill to','Example Recipient, Inc.','Service EUR 180.00','Credit -38.76 EUR'],
     ['Subtotal €141.24','Total excluding tax €141.24','Tax (19% on €141.24) €26.84','Total €168.08','Amount due €168.08'],
   ];
@@ -278,4 +278,30 @@ test('real Tesseract reads scan PDF, JPG and PNG', {skip:!haveModels?'Pinned lan
       } finally {await task.destroy();}
     });
   } finally {await worker.terminate();}
+});
+
+test('German company invoice from an actual synthetic PDF fills amounts, dates and identifier',async()=>{
+  const rows=['Rechnung','Aussteller: Muster Office Supplies GmbH (Test)','Rechnungs-','nummer:',
+    'TEST-RE-2026-0048','Rechnungsdatum: 15.11.2026','Leistungsdatum: 14.11.2026',
+    'Netto EUR 80,00','Umsatzsteuer 19 % EUR 15,20','Brutto EUR 95,20','Zahlungsstatus: Offen'];
+  const contents='BT /F 12 Tf 35 425 Td 24 TL '+rows.map(line=>
+    '<'+Buffer.from(line,'latin1').toString('hex')+'> Tj T*').join(' ')+' ET';
+  const task=getDocument({data:pdf('<< /Font << /F 5 0 R >> >>',contents,
+    ['<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>']),useSystemFonts:true});
+  try {
+    const doc=await task.promise;
+    const fields=documentOcrFields(await documentPdfText(await doc.getPage(1)));
+    assert.deepEqual(fields,{issuer:'Muster Office Supplies GmbH (Test)',invoiceNumber:'TEST-RE-2026-0048',
+      issuedOn:'2026-11-15',serviceOn:'2026-11-14',currency:'EUR',netCents:8000,taxCents:1520,grossCents:9520,taxRate:'19'});
+  }finally{await task.destroy();}
+});
+
+test('stated zero fills the preview but missing tax and payment remain empty',()=>{
+  for(const [taxLine,expected] of [['Tax EUR 0.00','0,00'],['','']]){
+    const fields=documentOcrFields('Net total EUR 10.00\n'+taxLine+'\nTotal EUR 10.00\nPayment status: Paid');
+    const tax={tagName:'INPUT',value:''},payment={tagName:'INPUT',value:''};
+    fillDocumentOcrPreview({elements:{namedItem:key=>key==='taxCents'?tax:key==='paymentStatus'?payment:null}},fields);
+    assert.equal(tax.value,expected);
+    assert.equal(payment.value,'');
+  }
 });

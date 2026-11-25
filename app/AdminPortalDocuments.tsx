@@ -19,7 +19,7 @@ function MetadataFields({row}:{row?:PortalRow}) {
     <label>Rechnungsdatum<input name="issuedOn" type="date" defaultValue={string('issued_on')}/></label>
     <label>Aussteller<input name="issuer" maxLength={200} defaultValue={string('issuer')}/></label>
     <label>Rechnungsnummer<input name="invoiceNumber" maxLength={120} defaultValue={string('invoice_number')}/></label>
-    {Object.entries(documentAmountFields).map(([name,[label,key]])=><label key={name}>{label}<span style={{display:'flex',gap:'0.5rem',alignItems:'center'}}><input name={name} inputMode="decimal" maxLength={11} placeholder="0,00" defaultValue={formatDocumentAmountInput(row?.[key])}/><span>{unit}</span></span></label>)}
+    {Object.entries(documentAmountFields).map(([name,[label,key]])=><label key={name}>{label}<span style={{display:'flex',gap:'0.5rem',alignItems:'center'}}><input name={name} inputMode="decimal" maxLength={11} placeholder="Unbekannt" defaultValue={formatDocumentAmountInput(row?.[key])}/><span>{unit}</span></span></label>)}
     <label>Währung<input name="currency" pattern="[A-Z]{3}" maxLength={3} defaultValue={string('currency')} onInput={event=>setCurrency(event.currentTarget.value)}/></label>
     {currency&&/^[A-Z]{3}$/.test(currency)&&!isDocumentCentCurrency(currency)&&
       <p>Diese Währung kann im bestehenden Cent-Belegmodell nicht mit strukturierten Beträgen gespeichert werden. Originalbeträge bitte in der Belegnotiz dokumentieren.</p>}
@@ -88,6 +88,8 @@ export function AdminPortalDocuments(){
       setOcrContext(review.context.filter(fact=>!fact.unresolved).map(fact=>fact.label+': '+fact.value).join('\n'));
       const {applied,unresolved}=fillDocumentOcrPreview(form,review.fields,review.kind==='Kassenbon / Quittung');
       Object.assign(extractedFields.current,applied);
+      const confirmation=form.elements.namedItem('confirmed');
+      if(Object.keys(applied).length&&confirmation instanceof HTMLInputElement) confirmation.checked=false;
       const currencyInput=form.elements.namedItem('currency');
       if(applied.currency && currencyInput instanceof HTMLInputElement) {
         currencyInput.dispatchEvent(new Event('input',{bubbles:true}));
@@ -112,8 +114,12 @@ export function AdminPortalDocuments(){
       <button type="button" disabled={busy} onClick={()=>{extractedFields.current={};setOcrReview(null);setOcrContext('');setExtractionNotice('');setForm(v=>!v);}}>{form?'Abbrechen':'Dokument erfassen'}</button>
     </div>
     {notice&&<p role="status">{notice}</p>}
-    {form&&<form className="portal-form admin-data-card" aria-label="Rechnung oder Dokument hochladen" onSubmit={e=>void submit(e,'create_document')}>
+    {form&&<form className="portal-form admin-data-card" aria-label="Rechnung oder Dokument hochladen" onInput={event=>{
+      const confirmation=event.currentTarget.elements.namedItem('confirmed');
+      if(confirmation instanceof HTMLInputElement&&event.target!==confirmation) confirmation.checked=false;
+    }} onSubmit={e=>void submit(e,'create_document')}>
       <MetadataFields/>
+      <p>Leere Betragsfelder bedeuten unbekannt. 0,00 ist ein ausdrücklicher Nullbetrag. OCR-Vorschläge bleiben bis zur Admin-Bestätigung ungeprüft.</p>
       <label>Art<select name="kind">{['expense_receipt','gloa_invoice','stripe_receipt','b2b_document','other'].map(v=><option key={v} value={v}>{label(v)}</option>)}</select></label>
       <label>Originalbeleg (PDF, JPG oder PNG, bis 3 MB)<input name="file" type="file" accept="application/pdf,image/jpeg,image/png" disabled={busy} onChange={event=>{
         const fields=event.currentTarget.form?.elements;

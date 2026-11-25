@@ -131,7 +131,7 @@ test('private receipt to historical expenses and effective manual income with is
   const code=ts.transpileModule(load('../app/api/admin/documents/route.ts'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText;
   vm.runInNewContext(code,{module:m,exports:m.exports,Buffer,File,Response,URL,require:name=>{
     if(name.includes('adminActionRoute'))return {requireAdminIdentity:async()=>role==='owner'
-      ?{ok:true,session:{userId:actor}}:{ok:false,response:new Response(null,{status:403})}};
+      ?{ok:true,identity:{role},session:{userId:actor}}:{ok:false,response:new Response(null,{status:403})}};
     if(name.includes('supabaseAdmin'))return {getSupabaseAdmin:()=>db};
     if(name.includes('adminPortalModel'))return {uuid};
     if(name.includes('adminPortalRead'))return {};
@@ -149,10 +149,19 @@ test('private receipt to historical expenses and effective manual income with is
   role='viewer';assert.equal((await post(form())).status,403);assert.equal(storage.size,0);role='owner';
   assert.equal((await post(form(Buffer.from('invalid pdf')))).status,400);
   assert.equal((await post(form(Buffer.alloc(3*1024*1024+1)))).status,400);
-  const uploaded=await post(form());assert.equal(uploaded.status,200);
+  const confirmedExpense=()=>form(pdf,{action:'confirm_document',direction:'expense',confirmed:'yes',
+    netCents:'10336',taxCents:'1964'});
+  assert.equal((await post(form(pdf,{action:'confirm_document',direction:'expense'}))).status,400);
+  const uploaded=await post(confirmedExpense());assert.equal(uploaded.status,200);
   const {documentId}=await uploaded.json();
   assert.equal(read(`select to_jsonb(issued_on) from documents where id=${literal(documentId)}`),'2020-04-12');
-  assert.equal((await post(form())).status,409);assert.equal(storage.size,1);
+  assert.equal((await post(confirmedExpense())).status,409);assert.equal(storage.size,1);
+  const savedExpense=read(`select to_jsonb(d) from documents d where id=${literal(documentId)}`);
+  assert.equal(savedExpense.payment_status,null);
+  assert.deepEqual([savedExpense.gross_cents,savedExpense.net_cents,savedExpense.tax_cents],[12300,10336,1964]);
+  assert.equal(read("select to_jsonb(count(*)) from business_expenses"),1);
+  assert.equal(read("select to_jsonb(vat_cents) from business_expenses"),null);
+  assert.deepEqual(read("select jsonb_agg(gross_cents) from financial_events"),[1000]);
   const changedPdf=Buffer.concat([pdf,Buffer.from('\n')]);
   assert.equal((await post(form(changedPdf))).status,409);assert.equal(storage.size,1);
   const link={action:'link_document',documentId,entityType:'business_expense'};
@@ -164,7 +173,7 @@ test('private receipt to historical expenses and effective manual income with is
   const downloaded=await post({action:'download',id:documentId});
   assert.equal(downloaded.status,200);assert.match(downloaded.headers.get('content-disposition'),/^attachment/);
   assert.deepEqual(Buffer.from(await downloaded.arrayBuffer()),pdf);
-  assert.equal((await post({action:'update_document',id:documentId,title:'Updated',issuedOn:'2020-04-12',issuer:'Fixture supplier',invoiceNumber:'A-2020',grossCents:'12300',currency:'EUR'})).status,200);
+  assert.equal((await post({action:'update_document',id:documentId,title:'Updated',issuedOn:'2020-04-12',issuer:'Fixture supplier',invoiceNumber:'A-2020',grossCents:'12300',netCents:'10336',taxCents:'1964',currency:'EUR'})).status,200);
   assert.equal(read("select to_jsonb(count(*)) from admin_activity_log where action='document_metadata_updated'"),1);
   const otherPdf=Buffer.concat([Buffer.from('%PDF-1.4\n%independent\n'),pdf.subarray(9)]);
   const incomeDoc=await post(form(otherPdf,{kind:'gloa_invoice',issuer:'GLOA',invoiceNumber:'B-2020',grossCents:'2500',paymentStatus:'paid'}));

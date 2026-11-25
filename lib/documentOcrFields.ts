@@ -51,7 +51,7 @@ function storedAmount(value:string) {
 }
 
 const rx = {
-  invoiceNumber:/^(?:Rechnungs[- ]?(?:nummer|Nr\.?)|Beleg[- ]?(?:nummer|Nr\.?)|(?:Invoice|Receipt|Credit note)\s*(?:number|no\.?|#|ID))(?=[\s:#]|$)\s*:?\s*/i,
+  invoiceNumber:/^(?:Rechnungs[- ]?(?:nummer|Nr\.?)|Beleg[- ]?(?:nummer|Nr\.?)|(?:Invoice|Receipt|Credit note)\s*(?:number|no\.?|#|\u2116|ID))(?=[\s:\uFF1A#]|$)\s*[:\uFF1A]?\s*/i,
   issuedOn:/^(?:Rechnungsdatum|Belegdatum|Invoice date|Receipt date|Date of issue|Issue date|Date issued)(?=\s|:|$)\s*:?\s*/i,
   serviceOn:/^(?:Leistungsdatum|Lieferdatum|Service date|Delivery date)(?=\s|:|$)\s*:?\s*/i,
   dueOn:/^(?:Fälligkeitsdatum|Fällig am|Zahlbar bis|Payment due date|Due date|Date due)(?=\s|:|$)\s*:?\s*/i,
@@ -64,9 +64,9 @@ const rx = {
   simpleTotal:/^(?:Total|Summe)(?!\s+(?:due|paid|tax|VAT|discount|excl\.?|incl\.?)\b)(?=\s|:|$)\s*:?\s*(?=(?:[€$£¥]|[A-Z]{3}\s|\d|$))/i,
   net:/^(?:Netto(?:betrag|summe)?|Net total|(?:Total (?:excl\.?|excluding|before) (?:VAT|tax)))(?=\s|:|$)\s*:?\s*/i,
   subtotal:/^(?:Zwischensumme|Subtotal|Sub-total)(?=\s|:|$)\s*:?\s*/i,
-  tax:/^(?:Umsatzsteuer(?: gesamt)?|MwSt\.?(?: gesamt)?|VAT total|Total VAT|Total tax|Tax total|VAT|Sales tax)(?=\s|:|$)\s*:?\s*/i,
+  tax:/^(?:Umsatzsteuer(?: gesamt)?|MwSt\.?(?: gesamt)?|VAT total|Total VAT|Total tax|Tax total|VAT|Sales tax|Tax(?!\s+(?:invoice|identification|registration|number|ID)\b))(?=\s|:|$)\s*:?\s*/i,
   taxWithBase:/^(?:Tax|VAT|Sales tax|Umsatzsteuer|MwSt\.?)\s*\((\d{1,2}(?:[.,]\d{1,2})?)\s*%\s*(?:on|auf)\s+([^()]+)\)\s*:?\s*/i,
-  rate:/^(?:Umsatzsteuer|MwSt\.?|VAT|Sales tax)\s+(\d{1,2}(?:[.,]\d{1,2})?)\s*%(?=\s|:|$)\s*:?\s*/i,
+  rate:/^(?:Umsatzsteuer|MwSt\.?|VAT|Sales tax|Tax)\s+(\d{1,2}(?:[.,]\d{1,2})?)\s*%(?=\s|:|$)\s*:?\s*/i,
   open:/^(?:Offene[rn]? (?:Rest)?betrag|Restbetrag|Noch zu zahlen|Fälliger Betrag|Amount due|Balance due|Total (?:amount )?due|Outstanding balance)(?=\s|:|$)\s*:?\s*/i,
   paid:/^(?:Bereits bezahlt|Gezahlter Betrag|Teilzahlung|Amount paid|Total paid|Payments received|Amount received)(?=\s|:|$)\s*:?\s*/i,
   discount:/^(?:Rabatt(?:betrag)?|Nachlass|Discount(?: amount)?)(?=\s|:|$)\s*:?\s*/i,
@@ -83,6 +83,15 @@ function layoutLines(source:string):string[] {
         /^(?:number|no\.?|#|ID|nummer|Nr\.?)(?=\s|:|$)/i.test(rows[i+1]??'')) {
       const left=rows[i].replace(/-$/,'');
       lines.push(left+(/^(Rechnungs|Beleg)$/i.test(left)?'':' ')+rows[++i]);
+      continue;
+    }
+    // PDF rows can split a qualifier from its label or separate the tax basis.
+    const next=rows[i+1]??'';
+    if ((/^(?:Total (?:excl\.?|excluding|before|incl\.?)|Net)$/i.test(rows[i]) &&
+         /^(?:VAT|tax|total)(?=\s|:|$)/i.test(next)) ||
+        (/^(?:Tax|VAT|Sales tax|Umsatzsteuer|MwSt\.?)$/i.test(rows[i]) &&
+         /^\(\d{1,2}(?:[.,]\d{1,2})?\s*%\s*(?:on|auf)\s/i.test(next))) {
+      rows[i+1]=rows[i]+' '+next;
       continue;
     }
     const cells=rows[i].split(/\t+/).map(s=>s.trim()).filter(Boolean);
@@ -118,7 +127,12 @@ export function analyzeDocumentOcr(source:string) {
     const inline=line.slice(match[0].length).trim();
     const next=lines[index+1];
     const takeNext=!inline&&next&&!labels.some(pattern=>pattern.test(next));
-    return [{value:inline||(takeNext?next:''),source:takeNext?line+'\n'+next:line}];
+    const value=inline||(takeNext?next:'');
+    const following=lines[index+(takeNext?2:1)]??'';
+    const wraps=label===rx.invoiceNumber && /[\p{Pd}\u2212/]$/u.test(value) &&
+      /^\p{N}+[\p{L}\p{N}]*$/u.test(following);
+    return [{value:wraps?value+following:value,
+      source:[line,...(takeNext?[next]:[]),...(wraps?[following]:[])].join('\n')}];
   });
   const read=<T>(label:RegExp,parse:(value:string)=>T|undefined)=>{
     const facts=candidates(label).map(row=>({...row,parsed:parse(row.value)}));
