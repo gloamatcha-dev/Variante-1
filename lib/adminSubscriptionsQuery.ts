@@ -676,3 +676,21 @@ export type SummaryGroup = Exclude<SubscriptionGroup, "alle">;
 
 export const SUMMARY_GROUPS: readonly SummaryGroup[] =
   Object.freeze(["aktiv", "gekuendigt", "zahlungsproblem", "beendet"]);
+
+export type AdminSubscriptionPauseEvidence = {
+  windows: { subscription_id: string; pause_at: string }[];
+  fences: { subscription_id: string; action: string }[];
+};
+
+export function subscriptionPauseEvidence(evidence: AdminSubscriptionPauseEvidence | null | undefined, id: string) {
+  if (!evidence) return { state: "unknown" } as const;
+  const windows = evidence.windows.filter(window => window.subscription_id === id);
+  const fences = evidence.fences.filter(fence => fence.subscription_id === id);
+  if (windows.length > 1 || fences.length > 1) return { state: "conflict" } as const;
+  const action = fences[0]?.action;
+  if (action === "resume" || action === "pause") return { state: action };
+  if (fences.length || (windows.length && !Number.isFinite(Date.parse(windows[0].pause_at)))) {
+    return { state: "unknown" } as const;
+  }
+  return windows.length ? { state: "window", at: windows[0].pause_at } as const : null;
+}

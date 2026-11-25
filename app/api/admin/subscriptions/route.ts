@@ -242,8 +242,8 @@ export async function POST(request: Request): Promise<Response> {
   const itemLimit = Math.max(ids.length, 1) * ITEM_LINES_PER_SUBSCRIPTION_CAP;
   const attemptLimit = Math.max(ids.length, 1) * PAID_ATTEMPTS_PER_SUBSCRIPTION_CAP;
 
-  const [itemRead, attemptRead] = ids.length === 0
-    ? [null, null]
+  const [itemRead, attemptRead, pauseRead, fenceRead] = ids.length === 0
+    ? [null, null, null, null]
     : await Promise.all([
       supabase.from("subscription_items").select(SUBSCRIPTION_ITEM_COLUMNS)
         .in("subscription_id", ids).limit(itemLimit),
@@ -255,6 +255,10 @@ export async function POST(request: Request): Promise<Response> {
       supabase.from("checkout_attempts").select(SUBSCRIPTION_ATTEMPT_COLUMNS)
         .in("subscription_id", ids).eq("status", "paid")
         .order("paid_at", { ascending: false, nullsFirst: false }).limit(attemptLimit),
+      supabase.from("subscription_pause_windows").select("subscription_id,pause_at")
+        .in("subscription_id", ids).is("resumed_at", null).limit(1000),
+      supabase.from("subscription_pause_write_fences").select("subscription_id,action")
+        .in("subscription_id", ids).limit(ids.length),
     ]);
 
   let items: Record<string, { sku: string; productName: string; variantName: string; quantity: number }[]> = {};
@@ -300,12 +304,14 @@ export async function POST(request: Request): Promise<Response> {
     checkout_attempt_id: string | null; order_number: string | null; placed_at: string | null;
     fulfillment_status: string | null; shipped_at: string | null;
   }[] = [];
+  let ordersUnavailable = false;
   if (attemptIds.length > 0) {
     const orderRead = await supabase
       .from("orders").select(SUBSCRIPTION_ORDER_COLUMNS)
       .in("checkout_attempt_id", attemptIds)
       .limit(attemptIds.length);
     if (orderRead.error) {
+      ordersUnavailable = true;
       console.error("Admin subscriptions: order read failed -", orderRead.error.message);
     } else {
       orders = (orderRead.data ?? []) as unknown as typeof orders;
@@ -337,6 +343,12 @@ export async function POST(request: Request): Promise<Response> {
     itemsCapped,
     cycles,
     historyCapped,
+    ordersUnavailable,
+    pauseEvidence: ids.length && (pauseRead?.error || fenceRead?.error ||
+        !Array.isArray(pauseRead?.data) || !Array.isArray(fenceRead?.data) || pauseRead.data.length >= 1000) ? null : {
+      windows: pauseRead?.data ?? [],
+      fences: fenceRead?.data ?? [],
+    },
     page: query.page,
     pageSize: query.pageSize,
     total: count ?? 0,

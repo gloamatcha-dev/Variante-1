@@ -27,7 +27,7 @@ type StripeSubscription = {
   items: { has_more: boolean; data: {
     current_period_end: number;
     quantity?: number;
-    price: { id?: string; currency?: string; unit_amount?: number; recurring?: { interval: string; interval_count: number; usage_type: string } };
+    price: { id?: string; product?: string; currency?: string; unit_amount?: number; recurring?: { interval: string; interval_count: number; usage_type: string } };
   }[] };
 };
 
@@ -47,8 +47,10 @@ type StripeSchedule = {
   }[];
 };
 
+export type LiveCyclePrice = { totalCents: number; shippingCents: number };
+
 export type LocalPauseProof = { scheduleId: string; pauseAt: number };
-type Target = { localId: string; stripeId: string; operationId: string; stripeCustomerId?: string; pauseProof?: LocalPauseProof };
+type Target = { localId: string; stripeId: string; operationId: string; stripeCustomerId?: string; liveCyclePrice?: LiveCyclePrice; pauseProof?: LocalPauseProof };
 type Result = { state: "blocked" | "unconfirmed" | "scheduled" | "resume_requested"; reason?: string;
   scheduleId?: string; pauseAt?: number; holdFence?: true; resumeInvoiceId?: string };
 
@@ -104,7 +106,7 @@ function createStripePauseSchedule(secret: string, live: boolean, request: typeo
       liveEvents.every(event => endpoint.enabled_events.includes(event));
   }
 
-  async function verifyResumePreview(sub: StripeSubscription) {
+  async function verifyResumePreview(sub: StripeSubscription, totalCents: number) {
     const preview = await call<{
       livemode: boolean; currency: string; customer: string; total: number; subtotal: number; amount_due: number;
       starting_balance: number; ending_balance: number | null;
@@ -122,7 +124,7 @@ function createStripePauseSchedule(secret: string, live: boolean, request: typeo
     const anchor = lines?.[0]?.period?.start;
     return preview.livemode === true && preview.customer === sub.customer &&
       preview.parent?.subscription_details?.subscription === sub.id && preview.currency === "eur" &&
-      preview.subtotal === 2589 && preview.total === 2589 && preview.amount_due === 2589 &&
+      preview.subtotal === totalCents && preview.total === totalCents && preview.amount_due === totalCents &&
       preview.starting_balance === 0 && (preview.ending_balance == null || preview.ending_balance === 0) &&
       preview.lines?.has_more === false && lines?.length === sub.items.data.length && typeof anchor === "number" &&
       Number.isSafeInteger(anchor) && Math.abs(Math.floor(now() / 1000) - anchor) <= 30 &&
@@ -163,9 +165,15 @@ function createStripePauseSchedule(secret: string, live: boolean, request: typeo
         item.price.recurring.usage_type !== "licensed" || item.current_period_end !== items[0].current_period_end)) {
         return blocked("unsupported_billing_cycle");
       }
-      if (live && (sub.test_clock != null || items.length !== 2 ||
+      const contract = target.liveCyclePrice;
+      if (live && (sub.test_clock != null || items.length !== 2 || !contract ||
+          !Number.isSafeInteger(contract.totalCents) || !Number.isSafeInteger(contract.shippingCents) ||
+          contract.shippingCents <= 0 || contract.totalCents <= contract.shippingCents ||
           items.some(item => item.quantity !== 1 || item.price.currency !== "eur" || !item.price.id) ||
-          !items.some(item => item.price.unit_amount === 1999) || !items.some(item => item.price.unit_amount === 590))) {
+          !items.some(item => item.price.product === "prod_VJXyucGJG3m2Vf" &&
+            item.price.unit_amount === contract.totalCents - contract.shippingCents) ||
+          !items.some(item => item.price.product === "prod_VAFbv5UQXUbTt7" &&
+            item.price.unit_amount === contract.shippingCents))) {
         return blocked("unverified_live_plan");
       }
       const pauseAt = items[0].current_period_end;
@@ -242,7 +250,7 @@ function createStripePauseSchedule(secret: string, live: boolean, request: typeo
         body.set("pause_schedules[0][resume][settings][billing_cycle_anchor]", "resume_at");
         body.set("pause_schedules[0][resume][settings][payment_behavior]", "resume_on_payment_success");
       }
-      if (live && detached && !await verifyResumePreview(sub)) return blocked("unverified_resume_preview");
+      if (live && detached && !await verifyResumePreview(sub, contract!.totalCents)) return blocked("unverified_resume_preview");
       if (live && action === "pause" && pauseAt <= now() / 1000 + 60) return blocked("cycle_boundary_too_close");
       submitted.add(writeKey);
       requiresInspection.add(target.stripeId);

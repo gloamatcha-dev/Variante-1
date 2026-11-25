@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { getSupabaseAdmin } from "./supabaseAdmin";
-import { createStripePauseScheduleLive, createStripePauseScheduleSandbox, GLOA_LIVE_PAUSE_ENDPOINT, type LocalPauseProof } from "./stripePauseScheduleSandbox.server";
+import { createStripePauseScheduleLive, createStripePauseScheduleSandbox, GLOA_LIVE_PAUSE_ENDPOINT, type LiveCyclePrice, type LocalPauseProof } from "./stripePauseScheduleSandbox.server";
 
 type Action = "pause" | "resume";
 
@@ -53,17 +53,22 @@ export async function changeLiveSubscriptionPause(
 ) {
   const key = livePauseActionsKey(target.stripeId);
   if (!key) return { state: "blocked" as const, reason: "live_pause_disabled" };
-  const { data, error } = await admin.from("stripe_customers").select("stripe_customer_id")
-    .eq("user_id", callerId).maybeSingle();
-  if (error || !data?.stripe_customer_id) return { state: "blocked" as const, reason: "customer_mapping_unconfirmed" };
+  const [customer, subscription] = await Promise.all([
+    admin.from("stripe_customers").select("stripe_customer_id").eq("user_id", callerId).maybeSingle(),
+    admin.from("subscriptions").select("currency,total_gross_cents,shipping_gross_cents")
+      .eq("id", target.localId).eq("user_id", callerId).eq("stripe_subscription_id", target.stripeId).maybeSingle(),
+  ]);
+  if (customer.error || !customer.data?.stripe_customer_id) return { state: "blocked" as const, reason: "customer_mapping_unconfirmed" };
+  if (subscription.error || subscription.data?.currency !== "EUR") return { state: "blocked" as const, reason: "live_contract_unconfirmed" };
+  const liveCyclePrice = { totalCents: subscription.data.total_gross_cents, shippingCents: subscription.data.shipping_gross_cents };
   const adapter = createStripePauseScheduleLive(key);
   if (!await adapter.verifyContext()) return { state: "blocked" as const, reason: "unverified_live_context" };
-  return changeSubscriptionPause(admin, { ...target, stripeCustomerId: data.stripe_customer_id }, action, adapter);
+  return changeSubscriptionPause(admin, { ...target, stripeCustomerId: customer.data.stripe_customer_id, liveCyclePrice }, action, adapter);
 }
 
 async function changeSubscriptionPause(
   admin: NonNullable<ReturnType<typeof getSupabaseAdmin>>,
-  target: { localId: string; stripeId: string; stripeCustomerId?: string },
+  target: { localId: string; stripeId: string; stripeCustomerId?: string; liveCyclePrice?: LiveCyclePrice },
   action: Action,
   adapter: ReturnType<typeof createStripePauseScheduleSandbox>,
 ) {

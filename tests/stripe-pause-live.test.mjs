@@ -12,9 +12,10 @@ const scheduleId = "sub_sched_fixture";
 const now = 1800000000;
 const pauseAt = now - 86400;
 const target = { stripeId, localId, operationId: randomUUID(), stripeCustomerId: "cus_owner",
-  pauseProof: { scheduleId, pauseAt } };
-const items = [1999, 590].map(unit_amount => ({ quantity: 1, current_period_end: pauseAt,
+  liveCyclePrice: { totalCents: 2089, shippingCents: 590 }, pauseProof: { scheduleId, pauseAt } };
+const items = [1499, 590].map(unit_amount => ({ quantity: 1, current_period_end: pauseAt,
   price: { id: "price_" + unit_amount, currency: "eur", unit_amount,
+    product: unit_amount === 1499 ? "prod_VJXyucGJG3m2Vf" : "prod_VAFbv5UQXUbTt7",
     recurring: { interval: "week", interval_count: 4, usage_type: "licensed" } } }));
 const subscription = { id: stripeId, livemode: true, schedule: null, status: "paused", customer: "cus_owner",
   collection_method: "charge_automatically", billing_mode: { type: "flexible" }, metadata: { gloa_subscription_id: localId },
@@ -23,7 +24,7 @@ const subscription = { id: stripeId, livemode: true, schedule: null, status: "pa
   } } };
 const neededEvents = ["invoice.paid", "customer.subscription.paused", "customer.subscription.resumed"];
 
-function fixture({ account = GLOA_LIVE_PAUSE_ACCOUNT, events = neededEvents, sub = subscription, due = 2589, pending = false } = {}) {
+function fixture({ account = GLOA_LIVE_PAUSE_ACCOUNT, events = neededEvents, sub = subscription, due = 2089, pending = false } = {}) {
   const requests = [];
   const adapter = createStripePauseScheduleLive(key, async (url, options) => {
     const { pathname } = new URL(url);
@@ -42,7 +43,7 @@ function fixture({ account = GLOA_LIVE_PAUSE_ACCOUNT, events = neededEvents, sub
     }
     if (pathname === "/v1/invoices") return Response.json({ has_more: false, data: [] });
     if (pathname === "/v1/invoices/create_preview") return Response.json({
-      livemode: true, currency: "eur", customer: "cus_owner", subtotal: 2589, total: 2589, amount_due: due,
+      livemode: true, currency: "eur", customer: "cus_owner", subtotal: 2089, total: 2089, amount_due: due,
       starting_balance: 0, ending_balance: 0, parent: { subscription_details: { subscription: stripeId } },
       lines: { has_more: false, data: items.map(item => ({ amount: item.price.unit_amount, quantity: 1,
         parent: { subscription_item_details: { subscription: stripeId, proration: false } },
@@ -63,6 +64,9 @@ test("LIVE uses the shared adapter and requires the right account, mode, owner a
     { sub: { ...subscription, livemode: false } },
     { sub: { ...subscription, customer: "cus_other" } },
     { sub: { ...subscription, items: { has_more: false, data: items.map(item => ({
+      ...item, price: { ...item.price, product: "prod_unverified" },
+    })) } } },
+    { sub: { ...subscription, items: { has_more: false, data: items.map(item => ({
       ...item, price: { ...item.price, recurring: { interval: "year", interval_count: 1, usage_type: "licensed" } },
     })) } } },
   ]) {
@@ -73,7 +77,12 @@ test("LIVE uses the shared adapter and requires the right account, mode, owner a
 });
 
 test("LIVE requires a matching preview before mutating and a pending response keeps the payment fence", async () => {
-  const rejected = fixture({ due: 2689 });
+  const wrongContract = fixture();
+  assert.equal((await wrongContract.adapter.change({ ...target,
+    liveCyclePrice: { totalCents: 2589, shippingCents: 590 },
+  }, "resume")).reason, "unverified_live_plan");
+  assert.equal(wrongContract.requests.some(request => request.method === "POST"), false);
+  const rejected = fixture({ due: 2589 });
   assert.equal((await rejected.adapter.change(target, "resume")).reason, "unverified_resume_preview");
   assert.deepEqual(rejected.requests.filter(x => x.method === "POST").map(x => x.pathname),
     ["/v1/invoices/create_preview"]);

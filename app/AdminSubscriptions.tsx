@@ -10,6 +10,8 @@ import {
   SUBSCRIPTION_SORT_LABEL,
   SUMMARY_GROUPS,
   emptyCycleFacts,
+  subscriptionPauseEvidence,
+  type AdminSubscriptionPauseEvidence,
   formatCents,
   shortStripeId,
   subscriptionCustomer,
@@ -104,6 +106,8 @@ type SubscriptionsPayload = {
   itemsCapped: boolean;
   cycles: Record<string, SubscriptionCycleFacts>;
   historyCapped: boolean;
+  ordersUnavailable?: boolean;
+  pauseEvidence?: AdminSubscriptionPauseEvidence | null;
   page: number;
   pageSize: number;
   total: number;
@@ -384,6 +388,12 @@ export function AdminSubscriptions({ onSessionLost, initialSearch = "" }: { onSe
               const ended = hasEnded(r);
               const scheduled = isCancellationScheduled(r);
               const endAt = getEffectiveEndAt(r);
+              const pause = subscriptionPauseEvidence(data.pauseEvidence, r.id);
+              const pauseLabel = pause?.state === "window" ? "Pausenfenster ab " + fmtDateTime(pause.at)
+                : pause?.state === "resume" ? "Fortsetzung offen"
+                : pause?.state === "pause" ? "Pause offen"
+                : pause?.state === "conflict" ? "Pausenfenster widersprechen sich"
+                : pause?.state === "unknown" ? "Pausennachweis unbekannt" : null;
               return (
                 <tr key={r.id} className="ops-subs-row">
                   <td data-label="Kunde">
@@ -399,26 +409,27 @@ export function AdminSubscriptions({ onSessionLost, initialSearch = "" }: { onSe
                         vorgemerkt" outrank the stored status, exactly as
                         on the customer's own page. */}
                     <span className={ended ? "ops-subs-ended" : scheduled ? "ops-subs-scheduled" : ""}>
-                      {getSubscriptionStatusLabel(r)}
+                      {pauseLabel && "Gespeicherter Status: "}{getSubscriptionStatusLabel(r)}
                     </span>
+                    {pauseLabel && <span className="ops-subs-when">{pauseLabel}</span>}
                   </td>
                   <td data-label="Angelegt">{fmtDateTime(r.started_at || r.created_at)}</td>
-                  <td data-label="Zyklen" className="ops-subs-num">{cycle.paidCycles}</td>
-                  <td data-label="Letzte Zahlung">{fmtDateTime(cycle.lastPaymentAt)}</td>
+                  <td data-label="Zyklen" className="ops-subs-num">{data.historyCapped ? "Unbekannt" : cycle.paidCycles}</td>
+                  <td data-label="Letzte Zahlung">{data.historyCapped ? "Unbekannt" : fmtDateTime(cycle.lastPaymentAt)}</td>
                   <td data-label="Letzte Bestellung">
-                    <span>{fmtDate(cycle.lastOrderAt)}</span>
+                    <span>{data.ordersUnavailable ? "Unbekannt" : fmtDate(cycle.lastOrderAt)}</span>
                     {cycle.lastOrderNumber && <span className="ops-subs-when">{cycle.lastOrderNumber}</span>}
                   </td>
                   <td data-label="Letzter Versand">
-                    <span>{fmtDate(cycle.lastShipmentAt)}</span>
+                    <span>{data.ordersUnavailable ? "Unbekannt" : fmtDate(cycle.lastShipmentAt)}</span>
                     {/* When nothing has shipped, the reason is the last
                         order's own fulfilment state rather than a blank. */}
                     {!cycle.lastShipmentAt && cycle.lastOrderFulfillment && (
                       <span className="ops-subs-when">{cycle.lastOrderFulfillment}</span>
                     )}
                   </td>
-                  <td data-label="Nächste Abbuchung">{fmtDate(getNextBillingAt(r))}</td>
-                  <td data-label="Nächste Lieferung">{fmtDate(getNextDeliveryAt(r))}</td>
+                  <td data-label="Nächste Abbuchung">{pauseLabel && !ended ? "Nicht bestätigt" : fmtDate(getNextBillingAt(r))}</td>
+                  <td data-label="Nächste Lieferung">{pauseLabel && !ended ? "Nicht bestätigt" : fmtDate(getNextDeliveryAt(r))}</td>
                   <td data-label="Matcha">{formatCents(r.subtotal_gross_cents, r.currency)}</td>
                   <td data-label="Versand">{formatCents(r.shipping_gross_cents, r.currency)}</td>
                   <td data-label="Gesamt" className="ops-subs-total">{formatCents(r.total_gross_cents, r.currency)}</td>
