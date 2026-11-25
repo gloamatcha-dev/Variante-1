@@ -14,7 +14,7 @@ function load(file,imports = {}) {
   const code=readFileSync(new URL('../'+file,import.meta.url),'utf8');
   const exports={};
   const js=ts.transpileModule(code,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
-  vm.runInNewContext(js,{exports,require:name=>imports[name]??require(name),Response,Request,Buffer});
+  vm.runInNewContext(js,{exports,require:name=>imports[name]??require(name),Response,Request,Buffer,File,URL});
   return exports;
 }
 
@@ -66,6 +66,54 @@ test('accounting context is role checked and follows only explicit IDs',async()=
   assert.equal(result.events[0].kind,'refund');
   assert.equal(result.orders[0].payment_status,null);
   assert.deepEqual(used,[['document_id',doc],['id',['refund']],['id',['historical']]]);
+});
+
+test('reviewed intake requires confirmation and never creates a financial event',async()=>{
+  const calls=[];
+  const route=load('app/api/admin/documents/route.ts',{
+    '../../../../lib/adminActionRoute.ts':{requireAdminIdentity:async()=>({ok:true,identity:{role:'admin'},session:{userId:'actor'}})},
+    '../../../../lib/adminPortalRead.ts':{},
+    '../../../../lib/supabaseAdmin':{getSupabaseAdmin:()=>({rpc:async(_,args)=>{
+      calls.push(args);
+      return calls.length===1?{data:'saved'}:{error:{code:'23505'}};
+    }})},
+    '../../../../lib/adminPortalModel.ts':model,
+  });
+  const run=(confirmed)=>route.POST(new Request('http://localhost/api/admin/documents',{
+    method:'POST',headers:{origin:'http://localhost'},
+    body:JSON.stringify({action:'confirm_document',title:'Test',kind:'expense_receipt',
+      direction:'expense',serviceOn:'2026-11-25',externalReference:'synthetic-ref',confirmed}),
+  }));
+  assert.equal((await run('no')).status,400);
+  assert.equal(calls.length,0);
+  assert.equal((await run('yes')).status,200);
+  assert.equal((await run('yes')).status,409);
+  assert.ok(calls.every(call=>call.p_action==='create'));
+  assert.match(calls[0].p.note,/2026-11-25/);
+  assert.equal(calls[0].p.payment_status,null);
+});
+
+test('association proposes only a unique stored reference',async()=>{
+  let ambiguous=false;
+  const reads=[];
+  const route=load('app/api/admin/documents/route.ts',{
+    '../../../../lib/adminActionRoute.ts':{requireAdminIdentity:async()=>({ok:true,identity:{role:'admin'},session:{userId:'actor'}})},
+    '../../../../lib/adminPortalRead.ts':{},
+    '../../../../lib/supabaseAdmin':{getSupabaseAdmin:()=>({from:table=>{
+      const query={select:()=>query,eq:(key,value)=>{reads.push([table,key,value]);return query;},
+        limit:async()=>({data:table==='orders'?[{id:'stored-order'}]:ambiguous?[{id:'event',kind:'refund'}]:[]})};
+      return query;
+    }})},
+    '../../../../lib/adminPortalModel.ts':model,
+  });
+  const run=async()=> (await route.POST(new Request('http://localhost/api/admin/documents',{
+    method:'POST',headers:{origin:'http://localhost'},
+    body:JSON.stringify({action:'suggest_document_link',reference:'GLOA-TEST'}),
+  }))).json();
+  assert.deepEqual((await run()).suggestion,{id:'stored-order',kind:'order'});
+  ambiguous=true;
+  assert.deepEqual(await run(),{ok:true,state:'ambiguous',suggestion:null});
+  assert.deepEqual(reads.slice(0,2),[['orders','order_number','GLOA-TEST'],['financial_events','external_reference','GLOA-TEST']]);
 });
 
 test('original download keeps the owner boundary and rejects a checksum mismatch',async()=>{

@@ -147,9 +147,57 @@ export async function POST(request:Request) {
         return pending();
       }
     }
-    if(action==='create_document'){
+    if (action==='extract_document' && multipart) {
+      const file=input.file;
+      if (!(file instanceof File) || !file.size || file.size>fileLimit ||
+          fileType(Buffer.from(await file.arrayBuffer()))?.[0]!==file.type) {
+        return json({error:'Nur gültige PDF-, JPG- und PNG-Dateien.'},400);
+      }
+      try {
+        const {extractDocument}=await import('../../../../lib/documentExtraction.server.ts');
+        const fields=await extractDocument(file);
+        return json({ok:true,state:fields===null?'unavailable':Object.keys(fields).length?'review':'empty',fields});
+      } catch {
+        return json({error:'Erkennung derzeit nicht verfügbar. Belegdaten manuell prüfen.'},503);
+      }
+    }
+    if (action==='suggest_document_link'&&!multipart) {
+      const reference=typeof input.reference==='string'?input.reference.trim():'';
+      if (!reference || reference.length>200) return json({error:'Eindeutige Referenz eingeben.'},400);
+      const [orders,events,expenses]=await Promise.all([
+        admin.from('orders').select('id').eq('order_number',reference).limit(2),
+        admin.from('financial_events').select('id,kind').eq('external_reference',reference).limit(2),
+        uuid(reference)?admin.from('business_expenses').select('id').eq('id',reference).limit(2):{data:[],error:null},
+      ]);
+      if (orders.error||events.error||expenses.error) return json({error:'Zuordnung konnte nicht geprüft werden.'},503);
+      const matches=[
+        ...(orders.data??[]).map(r=>({id:r.id,kind:'order'})),
+        ...(events.data??[]).map(r=>({id:r.id,kind:'financial_event',reserved:r.kind==='manual_income'})),
+        ...(expenses.data??[]).map(r=>({id:r.id,kind:'business_expense'})),
+      ];
+      const [match]=matches;
+      return json({ok:true,state:matches.length>1?'ambiguous':match?'unique':'none',
+        suggestion:matches.length===1&&match&&!('reserved' in match&&match.reserved)?{id:match.id,kind:match.kind}:null});
+    }
+    if(action==='create_document'||action==='confirm_document'){
       if(!kinds.includes(String(input.kind)))return json({error:'Ungültige Belegart.'},400);
       const fields=metadata(input);
+      if (action==='confirm_document') {
+        if (input.confirmed!=='yes' || !['income','expense'].includes(String(input.direction))) {
+          return json({error:'Belegdaten und Richtung ausdrücklich bestätigen.'},400);
+        }
+        const serviceDate=typeof input.serviceOn==='string'&&input.serviceOn?input.serviceOn:null;
+        if (serviceDate) metadata({title:'Leistung',issuedOn:serviceDate});
+        const context=typeof input.paymentHint==='string'?input.paymentHint.trim():'';
+        if (context.length>200) return json({error:'Zahlungsangabe zu lang.'},400);
+        fields.note=[
+          'Belegdaten bestätigt · '+(input.direction==='income'?'Einnahme':'Ausgabe'),
+          serviceDate?'Leistungsdatum: '+serviceDate:null,
+          context?'Zahlungsangabe am Beleg: '+context:null,
+          fields.note,
+        ].filter(Boolean).join('\n');
+        if (fields.note.length>4000) return json({error:'Notiz einschließlich Belegangaben zu lang.'},400);
+      }
       const id=randomUUID();
       const file=input.file;
       let storage_path:string|null=null,file_sha256:string|null=null,mime_type:string|null=null,byte_size:number|null=null;

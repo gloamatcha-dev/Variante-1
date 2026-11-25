@@ -1,5 +1,5 @@
 "use client";
-import {useState,type FormEvent} from 'react';
+import {useRef,useState,type FormEvent} from 'react';
 import {AdminDocumentFacts, AdminDocumentAccountingContext} from './AdminDocumentFacts';
 import {AdminPortalDocumentAssociation} from './AdminPortalDocumentAssociation';
 import {date,label,text,type PortalRow} from '../lib/adminPortalModel.ts';
@@ -15,7 +15,7 @@ function MetadataFields({row}:{row?:PortalRow}) {
     <label>Aussteller<input name="issuer" maxLength={200} defaultValue={string('issuer')}/></label>
     <label>Rechnungsnummer<input name="invoiceNumber" maxLength={120} defaultValue={string('invoice_number')}/></label>
     {centsFields.map(([name,title,key])=><label key={name}>{title}<input name={name} type="number" min="0" step="1" defaultValue={string(key)}/></label>)}
-    <label>Währung<input name="currency" pattern="[A-Z]{3}" maxLength={3} defaultValue={row?string('currency'):'EUR'}/></label>
+    <label>Währung<input name="currency" pattern="[A-Z]{3}" maxLength={3} defaultValue={string('currency')}/></label>
     <label>Zahlungsstatus<select name="paymentStatus" defaultValue={string('payment_status')}>
       <option value="">Unbekannt</option><option value="paid">Bezahlt</option><option value="unpaid">Offen</option><option value="partial">Teilbezahlt</option>
     </select></label>
@@ -27,6 +27,8 @@ export function AdminPortalDocuments(){
   const {data,error,refresh}=usePortalRead('/api/admin/documents',{action:'list'});
   const [selectedId,setSelectedId]=useState<string|null>(null),[form,setForm]=useState(false);
   const [notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
+  const extractedFields=useRef<Record<string,string>>({});
+  const [extractionNotice,setExtractionNotice]=useState('');
   const [confirmCleanup,setConfirmCleanup]=useState(false);
   const docs=(data?.documents??[]) as PortalRow[];
   const links=(data?.links??[]) as PortalRow[];
@@ -52,7 +54,7 @@ export function AdminPortalDocuments(){
     const values=new FormData(event.currentTarget);
     await perform(async()=>{
       if(action==='create_document'){
-        values.set('action',action);
+        values.set('action','confirm_document');
         const response=await fetch(endpoint,{method:'POST',body:values});
         const result=await response.json();
         if(!response.ok||result.ok!==true)throw Error(result.error??'Speichern fehlgeschlagen.');
@@ -63,6 +65,35 @@ export function AdminPortalDocuments(){
         await portalRequest(endpoint,{...fields,action:operation,id:selectedId,documentId:selectedId,nonStripe:fields.nonStripe==='on'});
       }
       setNotice('Gespeichert.');refresh();
+    });
+  }
+  async function preview(form:HTMLFormElement) {
+    setExtractionNotice('');
+    await perform(async()=>{
+      const file=new FormData(form).get('file');
+      if (!(file instanceof File)||!file.size) throw Error('Zuerst einen Originalbeleg auswählen.');
+      const body=new FormData();
+      body.set('file',file);
+      body.set('action','extract_document');
+      const response=await fetch(endpoint,{method:'POST',body});
+      const data=await response.json();
+      if (!response.ok) throw Error(data.error??'Erkennung derzeit nicht verfügbar.');
+      if (data.state==='unavailable') {
+        setExtractionNotice('Automatische Erkennung ist nicht eingerichtet. Belegdaten anhand des Originals manuell erfassen.');
+        return;
+      }
+      const fields=data.fields as Record<string,string|number>;
+      const labels:Record<string,string>={issuer:'Aussteller',invoiceNumber:'Rechnungsnummer',issuedOn:'Rechnungsdatum',
+        serviceOn:'Leistungsdatum',currency:'Währung',grossCents:'Brutto',netCents:'Netto',taxCents:'Umsatzsteuer',paymentHint:'Zahlungsangabe'};
+      for(const name of [...Object.keys(labels),'reference']) {
+        const control=form.elements.namedItem(name==='reference'?'externalReference':name);
+        if (control instanceof HTMLInputElement&&!control.value&&fields[name]!=null) {
+          control.value=String(fields[name]);
+          extractedFields.current[control.name]=control.value;
+        }
+      }
+      const missing=Object.entries(labels).filter(([name])=>fields[name]==null).map(([,title])=>title);
+      setExtractionNotice('Erkannte Angaben sind Vorschläge. '+(missing.length?'Nicht sicher erkannt: '+missing.join(', ')+'. ':'')+'Alle Werte am Original prüfen.');
     });
   }
   async function download(){
@@ -79,13 +110,30 @@ export function AdminPortalDocuments(){
   return <>
     <div className="portal-section-head"><h2>Private Geschäftsdokumente</h2>
       <button type="button" onClick={refresh}>Aktualisieren</button>
-      <button type="button" onClick={()=>setForm(v=>!v)}>{form?'Abbrechen':'Dokument erfassen'}</button>
+      <button type="button" onClick={()=>{extractedFields.current={};setExtractionNotice('');setForm(v=>!v);}}>{form?'Abbrechen':'Dokument erfassen'}</button>
     </div>
     {notice&&<p role="status">{notice}</p>}
     {form&&<form className="portal-form admin-data-card" aria-label="Rechnung oder Dokument hochladen" onSubmit={e=>void submit(e,'create_document')}>
       <MetadataFields/>
       <label>Art<select name="kind">{['expense_receipt','gloa_invoice','stripe_receipt','b2b_document','other'].map(v=><option key={v} value={v}>{label(v)}</option>)}</select></label>
-      <label>Originalbeleg (PDF, JPG oder PNG, bis 3 MB)<input name="file" type="file" accept="application/pdf,image/jpeg,image/png"/></label>
+      <label>Originalbeleg (PDF, JPG oder PNG, bis 3 MB)<input name="file" type="file" accept="application/pdf,image/jpeg,image/png" disabled={busy} onChange={event=>{
+        const fields=event.currentTarget.form?.elements;
+        for(const [name,value] of Object.entries(extractedFields.current)) {
+          const control=fields?.namedItem(name);
+          if(control instanceof HTMLInputElement&&control.value===value) control.value='';
+        }
+        extractedFields.current={};
+        setExtractionNotice('');
+        const confirmed=fields?.namedItem('confirmed');
+        if(confirmed instanceof HTMLInputElement)confirmed.checked=false;
+      }}/></label>
+      <button type="button" disabled={busy} onClick={e=>{if(e.currentTarget.form)void preview(e.currentTarget.form);}}>Belegdaten auslesen</button>
+      {extractionNotice&&<p role="status">{extractionNotice}</p>}
+      <label>Leistungsdatum, falls belegt<input name="serviceOn" type="date"/></label>
+      <label>Zahlungsangabe am Beleg<input name="paymentHint" maxLength={200}/></label>
+      <label>Belegrichtung<select name="direction" required defaultValue=""><option value="">Bitte wählen</option><option value="income">Einnahme</option><option value="expense">Ausgabe</option></select></label>
+      <label><input type="checkbox" name="confirmed" value="yes" required/> Angaben am Original geprüft und bestätigt</label>
+      <p>Speichern bestätigt nur die Belegdaten. Eine Zahlung, Buchung oder Vorsteuer wird dadurch nicht bestätigt.</p>
       <label>Externe Belegreferenz<input name="externalReference" maxLength={200}/></label>
       <button disabled={busy}>Dokument speichern</button>
     </form>}
@@ -135,7 +183,7 @@ export function AdminPortalDocuments(){
         {selectedLinks.some(link=>['financial_event','business_expense','order'].includes(String(link.subject_type)))&&
           <AdminDocumentAccountingContext key={selectedId} id={String(selectedId)}/>}
         <BusinessTable rows={selectedLinks} columns={[{key:'subject_type',title:'Bereich',render:r=>label(r.subject_type)},{key:'subject_id',title:'Datensatz-ID'}]}/>
-        <form className="portal-form" onSubmit={e=>void submit(e,'link_document')}><AdminPortalDocumentAssociation key={selectedId} busy={busy}/></form>
+        <form className="portal-form" onSubmit={e=>void submit(e,'link_document')}><AdminPortalDocumentAssociation key={selectedId} busy={busy} reference={String(selected.external_reference??'')}/></form>
         {typeof selected.file_sha256==='string'&&selected.payment_status==='paid'&&
           (selected.kind==='gloa_invoice'||selected.kind==='other')&&!selected.external_reference&&<>
           <details><summary>Manuelle Einnahme außerhalb Stripe</summary>
