@@ -1,5 +1,6 @@
 "use client";
 import {useState,type FormEvent} from 'react';
+import {AdminDocumentFacts, AdminDocumentAccountingContext} from './AdminDocumentFacts';
 import {AdminPortalDocumentAssociation} from './AdminPortalDocumentAssociation';
 import {date,label,text,type PortalRow} from '../lib/adminPortalModel.ts';
 import {BusinessTable,ReadState,RecordDetails,portalRequest,usePortalRead} from './AdminPortalShared';
@@ -32,6 +33,7 @@ export function AdminPortalDocuments(){
   const selected=docs.find(row=>row.id===selectedId)??null;
   const selectedLinks=links.filter(row=>row.document_id===selectedId);
   const ledgerLinks=selectedLinks.filter(row=>row.subject_type==='financial_event');
+  const registeredInvoice=typeof selected?.storage_path==='string'&&selected.storage_path.startsWith('invoice-register/');
   const cleanupPending=Boolean(selected?.cleanup_operation_id);
   const canCleanup=data?.canCleanup===true&&selected?.kind==='other'&&selectedLinks.length===0&&
     typeof selected.file_sha256==='string'&&
@@ -96,6 +98,7 @@ export function AdminPortalDocuments(){
     </ReadState>
     <RecordDetails row={selected} title={text(selected?.title)} onClose={()=>setSelectedId(null)}>
       {selected&&<>
+        <AdminDocumentFacts row={selected}/>
         {cleanupPending&&<p>Löschung offen. Zuordnung und Bearbeitung sind gesperrt.</p>}
         {canCleanup&&<button type="button" disabled={busy} onClick={()=>setConfirmCleanup(true)}>
           {cleanupPending?'Löschung fortsetzen':'Endgültig löschen'}
@@ -120,7 +123,7 @@ export function AdminPortalDocuments(){
           </form>
         </dialog>}
         {!cleanupPending&&<>
-        {typeof selected.file_sha256==='string'
+        {registeredInvoice&&data?.canReadRegisteredInvoices!==true ? <p>Dieses Original ist nur für Owner abrufbar.</p> : typeof selected.file_sha256==='string'
           ? <button type="button" disabled={busy} onClick={()=>void download()}>Originalbeleg herunterladen</button>
           : <p>Referenzbeleg ohne gespeicherte Originaldatei.</p>}
         <details><summary>Belegdaten korrigieren</summary>
@@ -129,6 +132,8 @@ export function AdminPortalDocuments(){
           </form>
         </details>
         <h3>Geschäftsbezüge</h3>
+        {selectedLinks.some(link=>['financial_event','business_expense','order'].includes(String(link.subject_type)))&&
+          <AdminDocumentAccountingContext key={selectedId} id={String(selectedId)}/>}
         <BusinessTable rows={selectedLinks} columns={[{key:'subject_type',title:'Bereich',render:r=>label(r.subject_type)},{key:'subject_id',title:'Datensatz-ID'}]}/>
         <form className="portal-form" onSubmit={e=>void submit(e,'link_document')}><AdminPortalDocumentAssociation key={selectedId} busy={busy}/></form>
         {typeof selected.file_sha256==='string'&&selected.payment_status==='paid'&&

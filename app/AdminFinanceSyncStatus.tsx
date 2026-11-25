@@ -9,12 +9,13 @@ export function AdminFinanceSyncStatus({status,loadDetails,statusError}:{status?
  const [details,setDetails]=useState<PortalRow|null>(null),[error,setError]=useState(''),[loading,setLoading]=useState(false);
  async function inspect(){if(!loadDetails)return;setLoading(true);setError('');try{setDetails(await loadDetails());}catch{setError('Syncdetails konnten nicht geladen werden. Bitte erneut versuchen.');}finally{setLoading(false);}}
  const state=String(status?.state??'unknown');
- const labels:Record<string,string>={running:'Abgleich läuft',retry:'Wiederholung ausstehend',attention:'Prüfung oder Freigabe erforderlich',complete:'Letzter Abgleich abgeschlossen',disabled:'Nicht aktiviert – Freigabe erforderlich',unknown:'Abgleich unbekannt'};
+ const labels:Record<string,string>={running:'Abgleich läuft',retry:'Wiederholung ausstehend',attention:'Prüfung oder Freigabe erforderlich',complete:'Letzter Stripe-Abgleich abgeschlossen',disabled:'Nicht aktiviert – Freigabe erforderlich',unknown:'Abgleich unbekannt'};
  const date=typeof status?.last_success_at==='string'&&Number.isFinite(Date.parse(status.last_success_at))?new Intl.DateTimeFormat('de-DE',{dateStyle:'short',timeStyle:'short',timeZone:'Europe/Berlin'}).format(new Date(status.last_success_at)):'noch nicht bestätigt';
  return <section aria-label="Stripe-Synchronisierung"><h3>Stripe-Synchronisierung</h3>
   {statusError&&<p role="alert">{statusError} Letzter bekannter Stand; keine aktuelle Bestätigung.</p>}
   <p>Letzter abgeschlossener Scan: {berlinSyncTime(status?.last_scan_at)} · Letzter Fehler: {berlinSyncTime(status?.last_failure_at)} {typeof status?.last_failure_code==='string'?status.last_failure_code:''}</p>
   <p>{labels[state]??'Abgleich unbekannt'} · Letzter erfolgreicher Abgleich: {date}</p>
+  <p className="portal-note">Dieser Status beschreibt den Stripe-Abgleich. Ob Gebühren, Kosten und Steuern im gewählten Zeitraum vollständig belegt sind, zeigt die Finanzübersicht separat.</p>
   <p>{!statusError&&status?.verified===true
    ? <>Stripe-Zahlungen, Refunds und Gebühren im Prüfbereich abgeglichen: {berlinSyncTime(status.verified_from)} bis {berlinSyncTime(status.verified_to)}.</>
    : <>Aktuelle Stripe-Abdeckung nicht bestätigt.{!statusError&&typeof status?.verified_from==='string'&&typeof status?.verified_to==='string'&&<> Letzter geprüfter Bereich: {berlinSyncTime(status.verified_from)} bis {berlinSyncTime(status.verified_to)}.</>}</>}</p>

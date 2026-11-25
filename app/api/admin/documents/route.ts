@@ -73,7 +73,24 @@ export async function POST(request:Request) {
   try{
     if(action==='list'&&!multipart){
       const [documents,links]=await Promise.all([readPortalPages(admin,'documents'),readPortalPages(admin,'document_links',q=>q,'document_id')]);
-      return json({ok:true,documents,links,canCleanup:gate.identity.role==='owner'});
+      return json({ok:true,documents,links,canCleanup:gate.identity.role==='owner',canReadRegisteredInvoices:gate.identity.role==='owner'});
+    }
+    if (action==='accounting_context'&&!multipart) {
+      if (!uuid(input.id)) return json({error:'Ungültiger Beleg.'},400);
+      const linked = await readPortalPages(admin,'document_links',q=>q.eq('document_id',input.id),'document_id','subject_type,subject_id');
+      const ids = (subject: string) => [...new Set(linked
+        .filter(row=>row.subject_type===subject).map(row=>String(row.subject_id)))];
+      const eventIds=ids('financial_event'), expenseIds=ids('business_expense'), orderIds=ids('order');
+      // Read only explicit links. Amounts and statuses retain their original source.
+      const [events,expenses,orders] = await Promise.all([
+        eventIds.length ? readPortalPages(admin,'financial_events',q=>q.in('id',eventIds),'id','id,kind,direction,occurred_on,gross_cents,net_cents,tax_cents,currency,external_reference') : [],
+        expenseIds.length ? readPortalPages(admin,'business_expenses',q=>q.in('id',expenseIds),'id','id,occurred_on,gross_cents,vat_cents,payment_status') : [],
+        orderIds.length ? readPortalPages(admin,'orders',q=>q.in('id',orderIds),'id','id,order_number,payment_status,historical_payment_unverified') : [],
+      ]);
+      return json({ok:true,
+        events,expenses,
+        orders:orders.map(({id,order_number,payment_status,historical_payment_unverified})=>({id,order_number,payment_status:historical_payment_unverified===false?payment_status:null})),
+      });
     }
     if(action==='download'&&!multipart){
       if(!uuid(input.id))return json({error:'Ungültiger Beleg.'},400);
