@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import vm from "node:vm";
+import { pathToFileURL } from "node:url";
 import Stripe from "stripe";
 import ts from "typescript";
 
@@ -27,9 +28,10 @@ function load(relativePath, deps, env = {}, errors = () => {}) {
   return module.exports;
 }
 
-function receiver({ stripe, secret, subscriptionId, retrieve }) {
+export function receiver({ stripe, secret, subscriptionId, getSubscriptionId = () => subscriptionId, retrieve }) {
   const errors = [];
   const events = new Set();
+  const verifiedTypes = new Set();
   const periods = [];
   const payments = [];
   const admin = {
@@ -43,7 +45,7 @@ function receiver({ stripe, secret, subscriptionId, retrieve }) {
       };
     },
     async rpc(name, args) {
-      assert.equal(args.p_stripe_subscription_id, subscriptionId);
+      assert.equal(args.p_stripe_subscription_id, getSubscriptionId());
       if (name === "sync_subscription_from_stripe") periods.push(args);
       else if (name === "sync_subscription_payment_status") payments.push(args);
       else throw new Error("Unexpected RPC");
@@ -81,23 +83,24 @@ function receiver({ stripe, secret, subscriptionId, retrieve }) {
       try { event = stripe.webhooks.constructEvent(raw, signature, secret); }
       catch { return response.writeHead(400).end(); }
       if (event.livemode !== false || event.data.object.livemode !== false ||
-          event.data.object.id !== subscriptionId || (event.account && event.account !== accountId)) {
+          !getSubscriptionId() || event.data.object.id !== getSubscriptionId() || (event.account && event.account !== accountId)) {
         return response.writeHead(403).end();
       }
       if (!lifecycle.has(event.type)) return response.writeHead(422).end();
       const result = await route.POST(new Request("http://127.0.0.1" + path, {
         method: "POST", headers: { "stripe-signature": signature }, body: raw,
       }));
+      if (result.ok && events.has(event.id)) verifiedTypes.add(event.type);
       response.writeHead(result.status).end();
     } catch {
       response.writeHead(500).end();
     }
   });
-  return { server, events, periods, payments, errors };
+  return { server, events, periods, payments, errors, verifiedTypes };
 }
 
 
-function pauseActions({ key, localId, subscriptionId, transport, checkEndpoint, retrieve }) {
+export function pauseActions({ key, localId, subscriptionId, transport, checkEndpoint, retrieve }) {
   const ownerToken = randomUUID();
   const ownerId = randomUUID();
   const subscription = { id: localId, user_id: ownerId, stripe_subscription_id: subscriptionId, status: "active" };
@@ -180,7 +183,7 @@ function pauseActions({ key, localId, subscriptionId, transport, checkEndpoint, 
   };
 }
 
-async function start(server, port = 0) {
+export async function start(server, port = 0) {
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, "127.0.0.1", resolve);
@@ -188,6 +191,7 @@ async function start(server, port = 0) {
   return "http://127.0.0.1:" + server.address().port + path;
 }
 
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
 if (process.argv[2] === "--listen") {
   if (process.env.VERCEL_ENV === "production") throw new Error("Production is not allowed");
   const { GLOA_TEST_STRIPE_KEY: key, GLOA_TEST_WEBHOOK_SECRET: secret,
@@ -293,6 +297,8 @@ if (process.argv[2] === "--listen") {
   } finally {
     await new Promise(resolve => server.close(resolve));
   }
+}
+
 }
 
 async function checkPauseActions() {
