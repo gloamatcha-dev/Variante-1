@@ -44,7 +44,7 @@ function date(value: string): string | undefined {
 
 const currencyTokens = /\b(EUR|USD|GBP|CHF|CAD|AUD|JPY|CNY|SEK|DKK|NOK|PLN|KRW|CLP|VND|KWD|BHD|OMR|JOD|TND|HUF|CZK|RON|INR|NZD|SGD|HKD|MXN|BRL|ZAR)\b|[€£$¥]/g;
 const issuerLabel = /^(?:Aussteller|Lieferant|Supplier|Issuer|Vendor|Billed by|Sold by|From)(?=\s|:|$)\s*:?\s*/i;
-const legalHeading = /^(?=.{4,200}$)[\p{L}\p{N}][\p{L}\p{M}\p{N}.,’'&() -]+\s+(?:P\.?B\.?C\.?|L\.?L\.?C\.?|Inc\.?|Ltd\.?|Limited|GmbH|UG(?: \(haftungsbeschränkt\))?|AG|KG|Corp\.?|Corporation|B\.?V\.?)$/iu;
+const legalHeading = /^(?=.{4,200}$)[\p{L}\p{N}][\p{L}\p{M}\p{N}.,’'&() -]+\s+(?:P\.?B\.?C\.?|L\.?L\.?C\.?|Inc\.?|Ltd\.?|Limited|GmbH|UG(?: \(haftungsbeschränkt\))?|AG|KG|Corp\.?|Corporation|B\.?V\.?)(?:\s+\([\p{L}\p{M}\p{N} -]{1,40}\))?$/iu;
 
 function storedAmount(value:string) {
   return amount(value.replace(currencyTokens,'').trim());
@@ -52,7 +52,7 @@ function storedAmount(value:string) {
 
 const rx = {
   invoiceNumber:/^(?:Rechnungs[- ]?(?:nummer|Nr\.?)|Beleg[- ]?(?:nummer|Nr\.?)|(?:Invoice|Receipt|Credit note)\s*(?:number|no\.?|#|\u2116|ID))(?=[\s:\uFF1A#]|$)\s*[:\uFF1A]?\s*/i,
-  issuedOn:/^(?:Rechnungsdatum|Belegdatum|Invoice date|Receipt date|Date of issue|Issue date|Date issued)(?=\s|:|$)\s*:?\s*/i,
+  issuedOn:/^(?:Rechnungs[- ]?datum|Ausstellungsdatum|Datum der Rechnung|Belegdatum|Invoice date|Receipt date|Date of issue|Issue date|Date issued)(?=\s|:|$)\s*:?\s*/i,
   serviceOn:/^(?:Leistungsdatum|Lieferdatum|Service date|Delivery date)(?=\s|:|$)\s*:?\s*/i,
   dueOn:/^(?:Fälligkeitsdatum|Fällig am|Zahlbar bis|Payment due date|Due date|Date due)(?=\s|:|$)\s*:?\s*/i,
   recipient:/^(?:Bill(?:ed)? to|Invoice to|Rechnungsempfänger|Customer)(?=\s|:|$)\s*:?\s*/i,
@@ -62,11 +62,11 @@ const rx = {
   statedPayment:/^(?:Zahlungsstatus|Payment status)(?=\s|:|$)\s*:?\s*/i,
   gross:/^(?:Gesamtbetrag|Brutto(?:betrag)?|Rechnungsbetrag|Endbetrag|Grand total|Invoice total|Gross total|Total amount(?!\s+(?:due|paid)\b)|Total incl\.? (?:VAT|tax))(?=\s|:|$)\s*:?\s*/i,
   simpleTotal:/^(?:Total|Summe)(?!\s+(?:due|paid|tax|VAT|discount|excl\.?|incl\.?)\b)(?=\s|:|$)\s*:?\s*(?=(?:[€$£¥]|[A-Z]{3}\s|\d|$))/i,
-  net:/^(?:Netto(?:betrag|summe)?|Net total|(?:Total (?:excl\.?|excluding|before) (?:VAT|tax)))(?=\s|:|$)\s*:?\s*/i,
+  net:/^(?:Netto(?:[ -]?(?:betrag|summe))?|Summe netto|Net (?:total|amount)|(?:Total (?:excl\.?|excluding|before) (?:VAT|tax)))(?=\s|:|$)\s*:?\s*/i,
   subtotal:/^(?:Zwischensumme|Subtotal|Sub-total)(?=\s|:|$)\s*:?\s*/i,
-  tax:/^(?:Umsatzsteuer(?: gesamt)?|MwSt\.?(?: gesamt)?|VAT total|Total VAT|Total tax|Tax total|VAT|Sales tax|Tax(?!\s+(?:invoice|identification|registration|number|ID)\b))(?=\s|:|$)\s*:?\s*/i,
+  tax:/^(?:Umsatzsteuer(?:betrag| gesamt)?|MwSt\.?(?:[ -]?Betrag| gesamt)?|Steuerbetrag|(?:VAT|Tax) amount|VAT total|Total VAT|Total tax|Tax total|VAT|Sales tax|Tax(?!\s+(?:invoice|identification|registration|number|ID)\b))(?=\s|:|$)\s*:?\s*/i,
   taxWithBase:/^(?:Tax|VAT|Sales tax|Umsatzsteuer|MwSt\.?)\s*\((\d{1,2}(?:[.,]\d{1,2})?)\s*%\s*(?:on|auf)\s+([^()]+)\)\s*:?\s*/i,
-  rate:/^(?:Umsatzsteuer|MwSt\.?|VAT|Sales tax|Tax)\s+(\d{1,2}(?:[.,]\d{1,2})?)\s*%(?=\s|:|$)\s*:?\s*/i,
+  rate:/^(?:Umsatzsteuer|MwSt\.?|VAT|Sales tax|Tax)\s*:?\s*(?:\((\d{1,2}(?:[.,]\d{1,2})?)\s*%\)|(\d{1,2}(?:[.,]\d{1,2})?)\s*%)(?=\s|:|$)\s*:?\s*/i,
   open:/^(?:Offene[rn]? (?:Rest)?betrag|Restbetrag|Noch zu zahlen|Fälliger Betrag|Amount due|Balance due|Total (?:amount )?due|Outstanding balance)(?=\s|:|$)\s*:?\s*/i,
   paid:/^(?:Bereits bezahlt|Gezahlter Betrag|Teilzahlung|Amount paid|Total paid|Payments received|Amount received)(?=\s|:|$)\s*:?\s*/i,
   discount:/^(?:Rabatt(?:betrag)?|Nachlass|Discount(?: amount)?)(?=\s|:|$)\s*:?\s*/i,
@@ -95,6 +95,8 @@ function layoutLines(source:string):string[] {
       continue;
     }
     const cells=rows[i].split(/\t+/).map(s=>s.trim()).filter(Boolean);
+    // A standalone legal name to the left of a labeled column is its own cell.
+    if(cells.length>1&&legalHeading.test(cells[0])&&isLabel(cells[1])) lines.push(cells.shift()!);
     const following=rows[i+1]?.split(/\t+/).map(s=>s.trim()).filter(Boolean);
     // Only zip adjacent rows if all top cells are labels and the lower row
     // has precisely one value in each corresponding column.
@@ -201,13 +203,14 @@ export function analyzeDocumentOcr(source:string) {
   const net=candidates(rx.net).length?read(rx.net,signed):subtotal;
   if(net!==subtotal)money('Zwischensumme laut Beleg',subtotal.value,subtotal.source);
   const rateRows=[...candidates(rx.taxWithBase),...candidates(rx.rate)].flatMap(row=>{
-    const match=rx.taxWithBase.exec(row.source)??rx.rate.exec(row.source);
+    const withBase=rx.taxWithBase.exec(row.source);
+    const match=withBase??rx.rate.exec(row.source);
     if(!match)return [];
-    const rate=match[1].replace(',','.');
+    const rate=(match[1]??match[2]).replace(',','.');
     const value=storedAmount(row.value);
-    const base=match[2]===undefined?undefined:storedAmount(match[2]);
+    const base=withBase?storedAmount(withBase[2]):undefined;
     const calculated=base===undefined?undefined:Math.round(base*Math.round(Number(rate)*100)/10000);
-    const invalid=match[2]!==undefined&&(calculated===undefined||value===undefined||Math.abs(value-calculated)>1);
+    const invalid=Boolean(withBase)&&(calculated===undefined||value===undefined||Math.abs(value-calculated)>1);
     return [{rate,value:invalid?undefined:value,source:row.source,invalid}];
   });
   const rates=[...new Set(rateRows.map(row=>row.rate))];

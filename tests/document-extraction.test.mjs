@@ -305,3 +305,40 @@ test('stated zero fills the preview but missing tax and payment remain empty',()
     assert.equal(payment.value,'');
   }
 });
+
+test('PDF column headings keep the supplier separate and map the stated gross, net and tax',async()=>{
+  const layouts=[
+    {
+      header:[[410,35,'Muster Office Supplies GmbH (Test)'],[410,275,'Ausstellungsdatum'],[410,410,'Leistungsdatum'],
+        [390,275,'15.11.2026'],[390,410,'14.11.2026']],
+      totals:[[230,35,'Netto Betrag'],[230,410,'80,00 EUR'],[210,35,'MwSt. (19 %)'],[210,410,'15,20 EUR']],
+      issuer:'Muster Office Supplies GmbH (Test)',
+    },
+    {
+      header:[[410,35,'Rechnungsempf'+String.fromCharCode(228)+'nger'],[410,290,'Lieferant'],
+        [390,35,'Empfang Ltd.'],[390,290,'Rhein Media AG'],
+        [365,35,'Datum der Rechnung'],[365,290,'15.11.2026'],[340,35,'Leistungsdatum'],[340,290,'14.11.2026']],
+      totals:[[230,35,'Summe netto'],[230,410,'80,00 EUR'],[210,35,'Steuerbetrag'],[210,410,'15,20 EUR'],
+        [190,35,'Umsatzsteuer: 19 %']],
+      issuer:'Rhein Media AG',
+    },
+  ];
+  for(const {header,totals,issuer} of layouts){
+    const positioned=[...header,...totals,[310,35,'Rechnungsnummer'],[310,290,'TEST-RE-2026-0048'],
+      [160,35,'Gesamtbetrag'],[160,410,'95,20 EUR'],[140,35,'Restbetrag'],[140,410,'25,20 EUR']];
+    const contents=positioned.reverse().map(([y,x,value])=>
+      'BT /F 11 Tf '+x+' '+y+' Td <'+Buffer.from(value,'latin1').toString('hex')+'> Tj ET').join(' ');
+    const task=getDocument({data:pdf('<< /Font << /F 5 0 R >> >>',contents,
+      ['<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>']),useSystemFonts:true});
+    try{
+      const file=await task.promise;
+      const {fields}=analyzeDocumentOcr(await documentPdfText(await file.getPage(1)));
+      assert.deepEqual(fields,{issuer,issuedOn:'2026-11-15',serviceOn:'2026-11-14',invoiceNumber:'TEST-RE-2026-0048',
+        currency:'EUR',taxRate:'19',netCents:8000,taxCents:1520,grossCents:9520});
+      const inputs=Object.fromEntries([...Object.keys(fields),'paymentStatus'].map(key=>[key,{tagName:'INPUT',value:''}]));
+      fillDocumentOcrPreview({elements:{namedItem:key=>inputs[key]??null}},fields);
+      assert.deepEqual(['issuer','issuedOn','netCents','taxCents','grossCents','paymentStatus'].map(key=>inputs[key].value),
+        [issuer,'2026-11-15','80,00','15,20','95,20','']);
+    }finally{await task.destroy();}
+  }
+});
