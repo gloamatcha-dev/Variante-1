@@ -54,11 +54,26 @@ test('a B2B-only customer can start from an exact agreement ID', async () => {
 
 test('finance reference lookup exposes one exact target and blocks ambiguous results', async () => {
   for (const ambiguous of [false,true]) {
-    const mock=route('app/api/admin/finance/route.ts','admin',table=>table==='orders'?[{id:'order'}]:ambiguous&&table==='b2b_payment_schedule'?[{supply_agreement_id:'b2b'}]:[]);
+    const mock=route('app/api/admin/finance/route.ts','admin',table=>
+      table==='checkout_attempts'?[{id:'paid-attempt'}]:table==='orders'?[{id:'guest-order',user_id:null}]:
+      ambiguous&&table==='b2b_payment_schedule'?[{supply_agreement_id:'b2b'}]:[]);
     const result=await (await mock.run({action:'stripe_reference',reference:'in_Test'})).json();
     assert.equal(result.state,ambiguous?'ambiguous':'linked');
-    assert.deepEqual(result.target,ambiguous?null:{kind:'order',id:'order'});
-    assert.ok(mock.queries.every(([,field,value])=>field==='stripe_invoice_id'&&value==='in_Test'));
+    assert.deepEqual(result.target,ambiguous?null:{kind:'order',id:'guest-order'});
+    assert.deepEqual(mock.queries,[
+      ['checkout_attempts','stripe_invoice_id','in_Test'],['checkout_attempts','status','paid'],
+      ['b2b_payment_schedule','stripe_invoice_id','in_Test'],['orders','checkout_attempt_id','paid-attempt'],
+    ]);
+  }
+});
+
+test('an unpaid, missing or conflicting invoice attempt never resolves to an order', async () => {
+  for (const attempts of [[],[{id:'first'},{id:'second'}]]) {
+    const mock=route('app/api/admin/finance/route.ts','admin',table=>table==='checkout_attempts'?attempts:[]);
+    const result=await (await mock.run({action:'stripe_reference',reference:'in_Test'})).json();
+    assert.equal(result.state,attempts.length?'ambiguous':'unresolved');
+    assert.equal(result.target,null);
+    assert.equal(mock.queries.some(([table])=>table==='orders'),false);
   }
 });
 

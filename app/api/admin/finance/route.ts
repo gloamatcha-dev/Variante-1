@@ -52,17 +52,33 @@ export async function POST(request: Request): Promise<Response> {
     if (action === 'stripe_reference') {
       const ref = typeof raw.reference === 'string' ? raw.reference : '';
       if (!/^(pi|in)_[A-Za-z0-9]{1,100}$/.test(ref)) return json({error:'Ungültige Stripe-Referenz.'},400);
-      const field = ref.startsWith('pi_') ? 'stripe_payment_intent_id' : 'stripe_invoice_id';
-      const [orders, b2b, annual] = await Promise.all([
-        admin.from('orders').select('id').eq(field, ref).limit(2),
+      const paymentIntent = ref.startsWith('pi_');
+      const field = paymentIntent ? 'stripe_payment_intent_id' : 'stripe_invoice_id';
+      const [orderEvidence, b2b, annual] = await Promise.all([
+        paymentIntent
+          ? admin.from('orders').select('id').eq('stripe_payment_intent_id', ref).limit(2)
+          : admin.from('checkout_attempts').select('id').eq('stripe_invoice_id', ref).eq('status', 'paid').limit(2),
         admin.from('b2b_payment_schedule').select('supply_agreement_id').eq(field, ref).limit(2),
-        field === 'stripe_payment_intent_id'
+        paymentIntent
           ? admin.from('annual_plans').select('id').eq(field, ref).limit(2)
           : Promise.resolve({ data: [], error: null }),
       ]);
-      if (orders.error || b2b.error || annual.error) throw new Error('Stripe reference lookup unavailable');
+      if (orderEvidence.error || b2b.error || annual.error) throw new Error('Stripe reference lookup unavailable');
+      let orderRows = orderEvidence.data ?? [];
+      if (!paymentIntent) {
+        if (orderRows.length > 1) {
+          return Response.json({ok:true,state:'ambiguous',target:null},{headers:{'Cache-Control':'no-store'}});
+        }
+        const [attempt] = orderRows;
+        orderRows = [];
+        if (attempt) {
+          const linked = await admin.from('orders').select('id').eq('checkout_attempt_id', attempt.id).limit(2);
+          if (linked.error) throw new Error('Order reference lookup unavailable');
+          orderRows = linked.data ?? [];
+        }
+      }
       const matches = [
-        ...(orders.data ?? []).map(row => ({kind:'order',id:row.id})),
+        ...orderRows.map(row => ({kind:'order',id:row.id})),
         ...(b2b.data ?? []).map(row => ({kind:'b2b',id:row.supply_agreement_id})),
         ...(annual.data ?? []).map(row => ({kind:'annual',id:row.id})),
       ];
