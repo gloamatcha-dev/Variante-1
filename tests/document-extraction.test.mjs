@@ -6,6 +6,7 @@ import { createCanvas } from '@napi-rs/canvas';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { createWorker } from 'tesseract.js';
 import { documentOcrFields } from '../lib/documentOcrFields.ts';
+import { documentAmountsToCents } from '../lib/documentAmountInput.ts';
 import { fillDocumentOcrPreview } from '../lib/documentOcrPreview.ts';
 import { documentPdfText } from '../lib/documentPdfText.ts';
 
@@ -52,7 +53,7 @@ test('real text PDF preserves text lines and extracts verified invoice fields',a
   } finally { await task.destroy(); }
 });
 
-test('English layout from real PDF text fills the existing preview in cents',async()=>{
+test('English layout from real PDF text fills the decimal preview and submits cents',async()=>{
   const invoiceLines=['Invoice','Anthropic, PBC','Invoice number','ANT/2026#0042',
     'Date of issue','January 26, 2026','Date due','February 23, 2026',
     'Bill to','Example Recipient, Inc.','Total','€168.08','Total due: €50.00'];
@@ -71,13 +72,19 @@ test('English layout from real PDF text fills the existing preview in cents',asy
     const form={elements:{namedItem:key=>inputs[key]??null}};
     const {applied,unresolved}=fillDocumentOcrPreview(form,fields);
     assert.deepEqual(applied,{issuer:'Anthropic, PBC',invoiceNumber:'ANT/2026#0042',
-      issuedOn:'2026-01-26',currency:'EUR',grossCents:'16808'});
+      issuedOn:'2026-01-26',currency:'EUR',grossCents:'168,08'});
     assert.equal(inputs.issuedOn.value,'2026-01-26');
     for(const name of ['serviceOn','netCents','taxCents','paymentStatus'])assert.equal(inputs[name].value,'');
     assert.ok(unresolved.some(reason=>reason.includes('rechnerisch stimmige Aufteilung')));
-    inputs.grossCents.value='17000';
+    const submission=new FormData();
+    submission.set('grossCents',inputs.grossCents.value);
+    submission.set('netCents',inputs.netCents.value);
+    documentAmountsToCents(submission);
+    assert.equal(submission.get('grossCents'),'16808');
+    assert.equal(submission.get('netCents'),'');
+    inputs.grossCents.value='170,00';
     fillDocumentOcrPreview(form,fields);
-    assert.equal(inputs.grossCents.value,'17000');
+    assert.equal(inputs.grossCents.value,'170,00');
   } finally { await task.destroy(); }
 });
 
@@ -88,6 +95,20 @@ test('Unicode invoice numbers remain verbatim and amount due alone does not beco
   assert.deepEqual(documentOcrFields('Invoice number: A\nInvoice number: B\nBill to\nRecipient, Inc.'),
     {});
   assert.equal(documentOcrFields('Rechnungsdatum: 26. Januar 2026').issuedOn,'2026-01-26');
+});
+
+test('decimal inputs preserve zero, accept comma or point, and reject ambiguous separators',()=>{
+  const values=new FormData();
+  values.set('grossCents','168.08');
+  values.set('netCents','168,08');
+  values.set('taxCents','0,00');
+  documentAmountsToCents(values);
+  assert.deepEqual(Object.fromEntries(values),{grossCents:'16808',netCents:'16808',taxCents:'0'});
+  for(const rejected of ['1.234','1.234,56','21474836,48','-1,00']){
+    const invalid=new FormData();
+    invalid.set('grossCents',rejected);
+    assert.throws(()=>documentAmountsToCents(invalid));
+  }
 });
 
 test('German date and grouped currency validate; ambiguous totals and multiple VAT rates stay unresolved',()=>{

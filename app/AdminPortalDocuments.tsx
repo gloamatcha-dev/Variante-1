@@ -1,5 +1,6 @@
 "use client";
 import {useRef,useState,type FormEvent} from 'react';
+import {documentAmountFields,documentAmountsToCents,formatDocumentAmountInput} from '../lib/documentAmountInput';
 import {fillDocumentOcrPreview} from '../lib/documentOcrPreview';
 import {AdminDocumentFacts, AdminDocumentAccountingContext} from './AdminDocumentFacts';
 import {AdminPortalDocumentAssociation} from './AdminPortalDocumentAssociation';
@@ -10,13 +11,15 @@ const centsFields=[['grossCents','Brutto (Cent)','gross_cents'],['netCents','Net
 
 function MetadataFields({row}:{row?:PortalRow}) {
   const string=(name:string)=>row?.[name]==null?'':String(row[name]);
+  const [currency,setCurrency]=useState(string('currency'));
+  const unit=currency==='EUR'?'€':/^[A-Z]{3}$/.test(currency)?currency:'in Belegwährung';
   return <>
     <label>Titel<input name="title" required maxLength={200} defaultValue={string('title')}/></label>
     <label>Rechnungsdatum<input name="issuedOn" type="date" defaultValue={string('issued_on')}/></label>
     <label>Aussteller<input name="issuer" maxLength={200} defaultValue={string('issuer')}/></label>
     <label>Rechnungsnummer<input name="invoiceNumber" maxLength={120} defaultValue={string('invoice_number')}/></label>
-    {centsFields.map(([name,title,key])=><label key={name}>{title}<input name={name} type="number" min="0" step="1" defaultValue={string(key)}/></label>)}
-    <label>Währung<input name="currency" pattern="[A-Z]{3}" maxLength={3} defaultValue={string('currency')}/></label>
+    {Object.entries(documentAmountFields).map(([name,[label,key]])=><label key={name}>{label}<span style={{display:'flex',gap:'0.5rem',alignItems:'center'}}><input name={name} inputMode="decimal" maxLength={11} placeholder="0,00" defaultValue={formatDocumentAmountInput(row?.[key])}/><span>{unit}</span></span></label>)}
+    <label>Währung<input name="currency" pattern="[A-Z]{3}" maxLength={3} defaultValue={string('currency')} onInput={event=>setCurrency(event.currentTarget.value)}/></label>
     <label>Zahlungsstatus<select name="paymentStatus" defaultValue={string('payment_status')}>
       <option value="">Unbekannt</option><option value="paid">Bezahlt</option><option value="unpaid">Offen</option><option value="partial">Teilbezahlt</option>
     </select></label>
@@ -55,6 +58,7 @@ export function AdminPortalDocuments(){
     event.preventDefault();
     const values=new FormData(event.currentTarget);
     await perform(async()=>{
+      if(action==='create_document'||action==='update_document') documentAmountsToCents(values);
       if(action==='create_document'){
         values.set('action','confirm_document');
         const response=await fetch(endpoint,{method:'POST',body:values});
@@ -79,6 +83,10 @@ export function AdminPortalDocuments(){
       setOcrSource(source);
       const {applied,unresolved}=fillDocumentOcrPreview(form,fields);
       Object.assign(extractedFields.current,applied);
+      const currencyInput=form.elements.namedItem('currency');
+      if(applied.currency && currencyInput instanceof HTMLInputElement) {
+        currencyInput.dispatchEvent(new Event('input',{bubbles:true}));
+      }
       setExtractionNotice('Alle Werte am Original prüfen. '+(unresolved.length?'Offen: '+unresolved.join('; ')+'.':'Erkannte Angaben wurden als Vorschläge eingesetzt.'));
     });
   }
@@ -106,7 +114,10 @@ export function AdminPortalDocuments(){
         const fields=event.currentTarget.form?.elements;
         for(const [name,value] of Object.entries(extractedFields.current)) {
           const control=fields?.namedItem(name);
-          if(control instanceof HTMLInputElement&&control.value===value) control.value='';
+          if(control instanceof HTMLInputElement&&control.value===value) {
+            control.value='';
+            if(name==='currency') control.dispatchEvent(new Event('input',{bubbles:true}));
+          }
         }
         extractedFields.current={};
         setOcrSource('');

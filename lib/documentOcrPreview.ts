@@ -1,12 +1,14 @@
-﻿const fieldsForReview = {
+﻿import { documentAmountFields, formatDocumentAmountInput } from './documentAmountInput.ts';
+
+const fieldsForReview = {
   issuer: ['Aussteller','kein eindeutiger Aussteller im Rechnungskopf'],
   invoiceNumber: ['Rechnungsnummer','keine eindeutige Nummer mit lesbarem Format'],
   issuedOn: ['Rechnungsdatum','kein eindeutiges Ausstellungsdatum; Fälligkeitsdaten werden getrennt behandelt'],
   serviceOn: ['Leistungsdatum','kein eindeutig bezeichnetes Leistungsdatum'],
   currency: ['Währung','fehlt oder ist mehrdeutig'],
-  grossCents: ['Brutto (Cent)','kein eindeutiger Rechnungsgesamtbetrag mit Währung oder stimmiger Aufteilung'],
-  netCents: ['Netto (Cent)','keine vollständige, rechnerisch stimmige Aufteilung'],
-  taxCents: ['Umsatzsteuer (Cent)','keine vollständige, rechnerisch stimmige Aufteilung'],
+  grossCents: ['Brutto','kein eindeutiger Rechnungsgesamtbetrag mit Währung oder stimmiger Aufteilung'],
+  netCents: ['Netto','keine vollständige, rechnerisch stimmige Aufteilung'],
+  taxCents: ['Umsatzsteuer','keine vollständige, rechnerisch stimmige Aufteilung'],
   taxRate: ['Steuersatz','kein eindeutiger einzelner Satz'],
   paymentHint: ['Zahlungsangabe','keine eindeutigen Zahlungsbedingungen erkannt'],
 };
@@ -26,7 +28,7 @@ export function fillDocumentOcrPreview(
       unresolved.push(label+' – '+reason);
       continue;
     }
-    input.value=String(value);
+    input.value=Object.hasOwn(documentAmountFields,name) ? formatDocumentAmountInput(value) : String(value);
     if(input.value) applied[name]=input.value;
     else unresolved.push(label+' – Wert passt nicht zum Eingabeformat');
   }
