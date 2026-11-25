@@ -168,6 +168,49 @@ select pg_temp.expect_refusal(
   $$update public.gloa_b2b_invoice_evidence set payment_reference='changed'$$,'P0001','xrechnung_evidence_immutable');
 update public.operations_config set int_value=0 where key='invoice_release_writes_enabled';
 
+
+-- Stub the existing final claim to exercise the resume fence transaction.
+create function public.activate_subscription_from_invoice(uuid,text,text,timestamptz,timestamptz,timestamptz)
+returns uuid language sql as $$
+  insert into public.checkout_attempts(id,subscription_id,stripe_invoice_id)
+  values(gen_random_uuid(),$1,$3) returning id
+$$;
+update public.operations_config set int_value=1 where key='sandbox_pause_release_writes_enabled';
+insert into public.subscription_pause_windows(subscription_id,schedule_id,pause_at)
+values ('30000000-0000-4000-8000-000000000002','sub_sched_resume_fixture','2030-01-01');
+insert into public.subscription_pause_write_fences(subscription_id,operation_id,action)
+values ('30000000-0000-4000-8000-000000000002','30000000-0000-4000-8000-000000000022','resume');
+create function pg_temp.resume_claim(invoice text, paid_start timestamptz, resumed_at timestamptz) returns uuid
+language sql as $$
+  select public.activate_sandbox_subscription_cycle(
+    '30000000-0000-4000-8000-000000000002','sub_resume_fixture',invoice,
+    '2030-01-02','2030-01-30','2030-01-02',paid_start,'2030-01-30',null,resumed_at)
+$$;
+select pg_temp.expect_refusal(
+  $$select pg_temp.resume_claim('in_verified','2030-01-02','2030-01-02')$$,'P0001','subscription pause operation unresolved');
+update public.subscription_pause_write_fences set resume_invoice_id='in_verified',resume_schedule_id='sub_sched_resume_fixture'
+where operation_id='30000000-0000-4000-8000-000000000022';
+select pg_temp.expect_refusal(
+  $$select pg_temp.resume_claim('in_wrong','2030-01-02','2030-01-02')$$,'P0001','subscription pause operation unresolved');
+select pg_temp.expect_refusal(
+  $$select pg_temp.resume_claim('in_verified','2030-01-01','2030-01-02')$$,'P0001','subscription pause operation unresolved');
+select pg_temp.expect_refusal(
+  $$select pg_temp.resume_claim('in_verified','2030-01-02',null)$$,'P0001','subscription pause operation unresolved');
+do $$
+declare first_claim uuid;
+begin
+  first_claim := pg_temp.resume_claim('in_verified','2030-01-02','2030-01-02');
+  if first_claim is null or first_claim is distinct from pg_temp.resume_claim('in_verified','2030-01-02','2030-01-02')
+    or exists(select from public.subscription_pause_write_fences where operation_id='30000000-0000-4000-8000-000000000022')
+    or not exists(select from public.subscription_pause_windows where schedule_id='sub_sched_resume_fixture' and resumed_at='2030-01-02') then
+    raise exception 'resume-cycle claim is not atomic or idempotent';
+  end if;
+end $$;
+select pg_temp.expect_refusal(
+  $$select pg_temp.resume_claim('in_duplicate_cycle','2030-01-02','2030-01-02')$$,'23505',
+  'duplicate key value violates unique constraint "sandbox_subscription_paid_cycles_pkey"');
+update public.operations_config set int_value=0 where key='sandbox_pause_release_writes_enabled';
+
 update public.operations_config set int_value=1 where key='matcha_lot_release_writes_enabled';
 insert into public.inventory_movements(id,inventory_item_id,quantity_delta,movement_type,reason,supplier,batch_number,best_before_date)
 values ('30000000-0000-4000-8000-000000000006','30000000-0000-4000-8000-000000000001',10,'receipt','goods_receipt','synthetic','synthetic-lot',current_date+20);

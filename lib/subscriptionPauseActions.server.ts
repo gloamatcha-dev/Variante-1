@@ -49,6 +49,12 @@ export async function changeSandboxSubscriptionPause(
     });
     if (windowError) return { state: "unconfirmed" as const };
   }
+  if (result.resumeInvoiceId && result.scheduleId) {
+    const recorded = await admin.from("subscription_pause_write_fences")
+      .update({ resume_invoice_id: result.resumeInvoiceId, resume_schedule_id: result.scheduleId })
+      .eq("subscription_id", target.localId).eq("operation_id", operationId).select("operation_id").maybeSingle();
+    if (recorded.error || !recorded.data) return { state: "unconfirmed" as const };
+  }
   if (result.state !== "unconfirmed" && !result.holdFence) {
     const { error: releaseError } = await admin.from("subscription_pause_write_fences").delete()
       .eq("subscription_id", target.localId).eq("operation_id", operationId);

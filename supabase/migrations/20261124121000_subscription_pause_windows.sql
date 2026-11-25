@@ -45,6 +45,7 @@ language plpgsql security definer set search_path = ''
 as $$
 declare
   v_attempt uuid;
+  v_fence public.subscription_pause_write_fences;
 begin
   perform public.require_release_writes_v1('sandbox_pause_release_writes_enabled');
   perform 1 from public.subscriptions where id = p_subscription_id for update;
@@ -58,9 +59,23 @@ begin
     raise exception 'subscription invoice period unconfirmed';
   end if;
 
-  if exists (select 1 from public.subscription_pause_write_fences
-      where subscription_id = p_subscription_id) then
-    raise exception 'subscription pause operation unresolved';
+  select * into v_fence from public.subscription_pause_write_fences
+    where subscription_id = p_subscription_id for update;
+  if found then
+    if v_fence.action <> 'resume' or v_fence.resume_invoice_id is null
+      or v_fence.resume_invoice_id is distinct from p_stripe_invoice_id
+      or p_schedule_id is not null or p_resumed_at is null
+      or p_resumed_at is distinct from p_paid_start
+      or p_paid_start is distinct from p_current_period_start
+      or p_paid_end is distinct from p_current_period_end then
+      raise exception 'subscription pause operation unresolved';
+    end if;
+    update public.subscription_pause_windows set resumed_at = p_resumed_at
+      where subscription_id = p_subscription_id and schedule_id = v_fence.resume_schedule_id
+        and resumed_at is null and p_resumed_at > pause_at;
+    if not found then raise exception 'direct resume window unconfirmed'; end if;
+    delete from public.subscription_pause_write_fences where subscription_id = p_subscription_id
+      and operation_id = v_fence.operation_id;
   end if;
 
   if p_resumed_at is not null then

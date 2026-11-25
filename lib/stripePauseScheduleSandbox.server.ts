@@ -44,7 +44,7 @@ type StripeSchedule = {
 export type LocalPauseProof = { scheduleId: string; pauseAt: number };
 type Target = { localId: string; stripeId: string; operationId: string; pauseProof?: LocalPauseProof };
 type Result = { state: "blocked" | "unconfirmed" | "scheduled" | "resume_requested"; reason?: string;
-  scheduleId?: string; pauseAt?: number; holdFence?: true };
+  scheduleId?: string; pauseAt?: number; holdFence?: true; resumeInvoiceId?: string };
 
 function checkId(value: string, pattern: RegExp) {
   return typeof value === "string" && pattern.test(value);
@@ -190,12 +190,13 @@ export function createStripePauseScheduleSandbox(
           resumed.latest_invoice !== sub.latest_invoice;
         if (resumed.id !== sub.id || resumed.livemode !== false || resumed.schedule !== null ||
             resumed.metadata?.gloa_subscription_id !== target.localId || resumed.billing_mode?.type !== "flexible" ||
-            (resumed.status !== "active" && !(resumed.status === "paused" && pendingInvoice))) {
+            !pendingInvoice || (resumed.status !== "active" && resumed.status !== "paused")) {
           return { state: "unconfirmed" };
         }
         // The direct resume invoice has not yet been qualified by the fulfillment path.
         // Keep the durable fence for both an active response and an outstanding payment.
-        return { state: "resume_requested", scheduleId: target.pauseProof!.scheduleId, holdFence: true };
+        return { state: "resume_requested", scheduleId: target.pauseProof!.scheduleId, holdFence: true,
+          resumeInvoiceId: resumed.latest_invoice! };
       }
       const schedule = await call<StripeSchedule>(path, body, writeKey);
       const entry = schedule.pause_schedules?.[0];

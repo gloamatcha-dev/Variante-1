@@ -382,7 +382,10 @@ export function subscriptionInvoiceDeps(stripe: Stripe): SubscriptionInvoiceDeps
         anchor * 1000 <= Date.parse(paid.start) &&
         await createStripePauseScheduleSandbox(key).confirmedResume({ localId, stripeId: subscription.id }, scheduleId)
         ? new Date(anchor * 1000).toISOString() : null;
-      return { paidStart: paid.start, paidEnd: paid.end, scheduleId, resumedAt };
+      // SQL binds a detached resume to the exact invoice recorded by the adapter.
+      const detachedAnchor = subscription.schedule === null && subscription.status === "active" &&
+        anchorIsValid && anchor * 1000 === Date.parse(paid.start) ? paid.start : null;
+      return { paidStart: paid.start, paidEnd: paid.end, scheduleId, resumedAt: resumedAt ?? detachedAnchor };
     } : undefined,
     ...defaultSubscriptionInvoiceDeps,
     bindFirstInvoice: (subscriptionId, invoiceId) => bindFirstMatchaInvoice("subscription", subscriptionId, invoiceId),

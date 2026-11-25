@@ -27,3 +27,12 @@ Das Ziel ist ein Alias des GLOA-Production-Deployments. Stripe CLI aendert die Z
 ## Abnahmegrenze
 
 Das lokale synthetische Preflight-Ergebnis liegt vor. Die Sandbox-Anmeldung der Stripe CLI wurde vom Windows-Owner lesend bestaetigt. `node scripts/stripe-pause-loopback.mjs --check-actions` prueft den isolierten Aufruf mit synthetischem Stripe-Transport. Der echte Testlauf steht aus. Bei `unconfirmed` keine weiteren Schreibaktionen ausfuehren und den Empfaenger zur Wiederholung nicht neu starten. Zuerst den tatsaechlichen Stripe-Zustand lesend abgleichen.
+
+## Resume-only-Folgeabnahme
+
+Der erste Owner-Lauf bleibt verbraucht. Sein Runner und sein Sperrmarker werden weder zur Wiederaufnahme verwendet noch zurueckgesetzt.
+
+- Die Stripe-Ereignisse `evt_1UfTkFDASU5R3UGEF8zuuKkh` und `evt_1UfTkKDASU5R3UGE5kq567UH` belegen die GLOA-Terminplanung und die tatsaechliche Pause. Der erste Event verknuepft den Zeitplan mit der GLOA-Pause-Idempotenzkennung, dem synthetischen Abo und der Test Clock. Der zweite bestaetigt denselben Pausenzeitpunkt wie der freigegebene Zeitplan. Vor einer lokalen Wiederherstellung des Pausenbelegs diese Verknuepfungen erneut lesend pruefen.
+- Fuer ein spaeter gesondert freigegebenes Fenster braucht der Resume-only-Aufruf eine eigene atomare Einmalsperre vor der ersten Mutation sowie denselben verifizierten Wiederherstellungsweg fuer den Sandbox-Webhook.
+- Die Test Clock steht exakt auf der Pause. Einen spaeteren minimalen Zeitvorschub nur in diesem gesonderten Fenster und nur fuer diese Clock vornehmen. Vor der anschliessenden Wiederaufnahme Stripe-Zustand und Abrechnungsvorschau pruefen. Erlaubt ist ausschliesslich der neue volle Vier-Wochen-Zyklus ohne alte Positionen, Nachberechnung oder Proration. Bei anderer oder nicht belegter Vorschau stoppen.
+- Fuer die lokale Lieferfreigabe muessen die exakte vom Resume zurueckgegebene Rechnungs-ID, eine bezahlte und dem normalen Abo-Zyklus zuordenbare Rechnung und der neue Stripe-Zyklusbeginn zusammenpassen. Andere Rechnungsgruende bleiben gesperrt. Die signierte Sandbox-Zustellung und dieser konkrete Rechnungsnachweis stehen aus. Der Status-Loopback allein erteilt keine Lieferfreigabe.

@@ -161,12 +161,12 @@ const withPauseProof = { ...target, pauseProof: { scheduleId, pauseAt: boundary 
 
 test("a proven released schedule uses direct resume with an explicit billing policy and retains the delivery fence", async () => {
   for (const result of [
-    { ...pausedAfterRelease, status: "active" },
+    { ...pausedAfterRelease, status: "active", latest_invoice: "in_resume" },
     { ...pausedAfterRelease, latest_invoice: "in_resume" },
   ]) {
     const h = harness({ subscription: pausedAfterRelease, oldSchedule: releasedSchedule,
       wallTime: (boundary + 60) * 1000, result });
-    assert.deepEqual(await h.adapter.change(withPauseProof, "resume"), { state: "resume_requested", scheduleId, holdFence: true });
+    assert.deepEqual(await h.adapter.change(withPauseProof, "resume"), { state: "resume_requested", scheduleId, holdFence: true, resumeInvoiceId: "in_resume" });
     assert.deepEqual(h.writes[0], {
       pathname: "/v1/subscriptions/sub_synthetic/resume",
       params: { "billing_cycle_anchor[type]": "now", proration_behavior: "none", payment_behavior: "resume_on_payment_success" },
