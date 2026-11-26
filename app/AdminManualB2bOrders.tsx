@@ -4,10 +4,16 @@ import {useEffect, useRef, useState, type FormEvent} from "react";
 import {portalRequest} from "./AdminPortalShared";
 
 type Catalog = {id:string;sku:string;label:string;price_gross_cents:number};
-type Order = {id:string;order_number:string;status:string;total_gross_cents:number;
+type Order = {id:string;order_number:string;status:string;total_gross_cents:number;received_cents:number;
   customer_snapshot:{company:string};manual_b2b:{reference:string;payment:string}};
 type Data = {canWrite:boolean;orders:Order[];customers:{user_id:string;company_name:string}[];catalog:Catalog[]};
 const euro = new Intl.NumberFormat("de-DE",{style:"currency",currency:"EUR"});
+function decimalCents(value:string) {
+  if (!/^\d+(?:[.,]\d{1,2})?$/.test(value)) return NaN;
+  const [units,cents=""] = value.split(/[.,]/);
+  return Number(units)*100+Number(cents.padEnd(2,"0"));
+}
+
 const states:Record<string,string> = {pending:"Entwurf",confirmed:"Bestätigt",cancelled:"Storniert"};
 
 export function AdminManualB2bOrders() {
@@ -18,6 +24,8 @@ export function AdminManualB2bOrders() {
   const [notice,setNotice] = useState("");
   const operation = useRef<string|null>(null);
   const mutation = useRef(false);
+  const paymentOperation = useRef<string|null>(null);
+  const [paymentFor,setPaymentFor] = useState<string|null>(null);
   const load = async () => setData(await portalRequest("/api/admin/b2b/orders",{action:"list"}) as Data);
   useEffect(()=>{
     void portalRequest("/api/admin/b2b/orders",{action:"list"})
@@ -31,6 +39,7 @@ export function AdminManualB2bOrders() {
     try {
       await portalRequest("/api/admin/b2b/orders",{action,id,...fields});
       if(action==="create"){operation.current=null;setOpen(false);setPositions([0]);}
+      if(action==="record_payment"){paymentOperation.current=null;setPaymentFor(null);}
       await load();
       setNotice("Auftrag gespeichert.");
     } catch(error) { setNotice(error instanceof Error ? error.message : "Auftrag konnte nicht gespeichert werden."); }
@@ -40,12 +49,7 @@ export function AdminManualB2bOrders() {
     event.preventDefault();
     const values = new FormData(event.currentTarget);
     const get = (key:string)=>String(values.get(key)??"");
-    const amount = (key:string)=>{
-      const value=get(key).replace(",",".");
-      if (!/^\d+(?:\.\d{1,2})?$/.test(value)) return NaN;
-      const [units,cents=""] = value.split(".");
-      return Number(units)*100+Number(cents.padEnd(2,"0"));
-    };
+    const amount = (key:string)=>decimalCents(get(key));
     const address = (prefix:string)=>({street:get(prefix+"Street"),postalCode:get(prefix+"Zip"),
       city:get(prefix+"City"),country:"DE"});
     operation.current ??= crypto.randomUUID();
@@ -65,7 +69,7 @@ export function AdminManualB2bOrders() {
     </button>}
     {open&&data?.canWrite&&<form className="portal-form" onSubmit={submit}>
       <fieldset disabled={busy}>
-        <p>Manueller Auftrag für Deutschland in EUR. Ohne Bestandszusage. Zahlungen und Lieferungen werden hier noch nicht verarbeitet.</p>
+        <p>Manueller Auftrag für Deutschland in EUR. Ohne Bestandszusage. Der Entwurf erfasst keinen Zahlungseingang und veranlasst keine Lieferung.</p>
         <label>Geschäftskunde<select name="customer" required defaultValue="">
           <option value="">Konto auswählen</option>
           {data.customers.map(customer=><option key={customer.user_id} value={customer.user_id}>{customer.company_name}</option>)}
@@ -106,7 +110,29 @@ export function AdminManualB2bOrders() {
       <p>{order.order_number} · {order.customer_snapshot.company} · {order.manual_b2b.reference} · {states[order.status]}
         {order.status!=="cancelled"&&<> · Zahlung offen ({euro.format(order.total_gross_cents/100)})</>}</p>
       {data.canWrite&&order.status==="pending"&&<button type="button" disabled={busy} onClick={()=>void save("confirm",order.id)}>Bestellung bestätigen</button>}
-      {data.canWrite&&order.status!=="cancelled"&&<button type="button" disabled={busy}
+      {data.canWrite&&order.status==="confirmed"&&<button type="button" disabled={busy} onClick={()=>{
+        paymentOperation.current=null;
+        setPaymentFor(paymentFor===order.id?null:order.id);
+      }}>Best?tigten Zahlungseingang erfassen</button>}
+      {data.canWrite&&paymentFor===order.id&&order.status==="confirmed"&&<form className="portal-form" onSubmit={event=>{
+        event.preventDefault();
+        const values = new FormData(event.currentTarget);
+        paymentOperation.current ??= crypto.randomUUID();
+        void save("record_payment",order.id,{operation:paymentOperation.current,method:order.manual_b2b.payment,
+          document:values.get("document"),reference:values.get("reference"),receivedOn:values.get("receivedOn"),
+          confirmed:values.get("confirmed")==="yes",amount:decimalCents(String(values.get("amount")??""))});
+      }}>
+        <fieldset disabled={busy}>
+          <p>{order.manual_b2b.payment==="bank"?"Bank?berweisung":"Barzahlung"}. Originalnachweis zuerst unter Finanzen ? Dokumente erfassen.</p>
+          <label>Beleg-ID des Originalnachweises<input name="document" required maxLength={36}/></label>
+          <label>Eindeutige Buchungs- oder Kassenbelegreferenz<input name="reference" required minLength={3} maxLength={120}/></label>
+          <label>Datum des tats?chlichen Eingangs<input type="date" name="receivedOn" required/></label>
+          <label>Vereinnahmter Betrag (EUR)<input name="amount" inputMode="decimal" pattern="[0-9]+([.,][0-9]{1,2})?" required/></label>
+          <label><input type="checkbox" name="confirmed" value="yes" required/> Tats?chlichen Geldeingang am Original gepr?ft</label>
+          <button type="submit">Zahlungseingang buchen</button>
+        </fieldset>
+      </form>}
+      {data.canWrite&&order.status!=="cancelled"&&order.received_cents===0&&<button type="button" disabled={busy}
         onClick={()=>{if(window.confirm("Manuellen Auftrag stornieren?"))void save("cancel",order.id);}}>Auftrag stornieren</button>}
     </li>)}</ul>}
   </section>;

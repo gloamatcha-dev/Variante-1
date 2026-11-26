@@ -21,7 +21,7 @@ export function summarizeLedger(events: PortalRow[], expenses: PortalRow[], evid
   const fees=events.filter(r=>r.kind==='payment_fee');
   const coverage = { checkedPositive: 0, checkedZero: 0, notApplicable: 0, pending: 0, missing: 0, complete: false };
   for (const payment of income) {
-    if(payment.kind==='manual_income'){coverage.notApplicable++;continue;}
+    if(payment.kind==='manual_income'||payment.kind==='manual_b2b_payment'){coverage.notApplicable++;continue;}
     const matches = evidence.filter(r=>r.income_event_id===payment.id);
     const row = matches.length === 1 ? matches[0] : null;
     if (!row) coverage.missing++;

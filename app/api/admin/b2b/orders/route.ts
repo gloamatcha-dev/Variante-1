@@ -52,11 +52,30 @@ export async function POST(request: Request) {
         : { data: [], error: null },
     ]);
     if(orders.error || customers.error || catalog.error) return json({error:"Bestelldaten konnten nicht geladen werden."},503);
-    return json({canWrite, orders:orders.data, customers:customers.data, catalog:catalog.data});
+    const listed = orders.data ?? [];
+    const totals = listed.length ? await db.rpc("read_manual_b2b_payment_totals_v1",{ids:listed.map(order=>order.id)})
+      : {data:[],error:null};
+    if (totals.error || !Array.isArray(totals.data)) return json({error:"Zahlungsst?nde nicht verf?gbar."},503);
+    const received = new Map(totals.data.map(row=>[row.order_id, Number(row.received_cents)]));
+    if ([...received.values()].some(value=>!Number.isSafeInteger(value)||value<0))
+      return json({error:"Zahlungsst?nde nicht verf?gbar."},503);
+    return json({canWrite, orders:listed.map(order=>({...order,received_cents:received.get(order.id)??0})),
+      customers:customers.data, catalog:catalog.data});
   }
   if (!canWrite) return json({error:"Nur der Owner darf manuelle Aufträge bearbeiten."},403);
   if (!uuid(body.id)) return invalid();
 
+  if (body.action === "record_payment") {
+    const reference = text(body.reference,120), receivedOn = text(body.receivedOn,10);
+    if (body.confirmed!==true || !uuid(body.operation) || !uuid(body.document) || !reference || reference.length<3
+      || !receivedOn || !/^\d{4}-\d{2}-\d{2}$/.test(receivedOn)
+      || !int(body.amount,1,100000000) || (body.method!=="bank"&&body.method!=="cash")) return invalid();
+    const result = await db.rpc("record_manual_b2b_payment_v1",{actor:identity.session.userId,target:body.id,
+      operation:body.operation,document:body.document,method:body.method,reference,received_on:receivedOn,amount:body.amount});
+    if (result.error) return json({error:"Zahlung nicht erfasst. Freigabe, Originalnachweis, Datum und eindeutige Referenz pr?fen."},
+      result.error.code==="42501"?403:result.error.message==="release_writes_disabled"?503:409);
+    return json({id:result.data});
+  }
   let payload: Record<string, unknown> = {};
   if (body.action === "create") {
     const reference = text(body.reference,120), contact = text(body.contact,120), email = text(body.email,254);

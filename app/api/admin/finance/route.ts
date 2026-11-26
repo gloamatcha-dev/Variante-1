@@ -121,7 +121,7 @@ export async function POST(request: Request): Promise<Response> {
       const page = typeof raw.page === "number" && Number.isSafeInteger(raw.page) ? Math.max(1,raw.page) : 1;
       let query = admin.from("financial_events").select("*, orders(order_number,customer_snapshot)",{count:"exact"});
       query=raw.undated===true?query.is("occurred_on",null):query.gte("occurred_on",period.from).lt("occurred_on",period.to);
-      if(["order_payment","annual_prepayment","b2b_settlement","refund","payment_fee","manual_income"].includes(String(raw.kind)))query=query.eq("kind",raw.kind);
+      if(["order_payment","annual_prepayment","b2b_settlement","refund","payment_fee","manual_income","manual_b2b_payment"].includes(String(raw.kind)))query=query.eq("kind",raw.kind);
       if(["b2c","b2b","event","internal"].includes(String(raw.channel)))query=query.eq("channel",raw.channel);
       const {data,error,count}=await query.order("occurred_on",{ascending:false}).order("id").range((page-1)*PAGE_CAP,page*PAGE_CAP-1);
       if(error)throw new Error("Ledger read failed");
