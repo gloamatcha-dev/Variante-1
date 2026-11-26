@@ -3,6 +3,7 @@ import { readFinanceSummary } from "../../../../lib/adminPortalFinanceRead.ts";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { requireAdminIdentity } from "../../../../lib/adminActionRoute.ts";
 import { financeTreasuryRead, readAdminStripeTreasury } from '../../../../lib/adminStripeTreasury.ts';
+import { readManualB2bReceivables } from "../../../../lib/adminManualB2bReceivables.ts";
 import { uuid } from "../../../../lib/adminPortalModel.ts";
 
 type ErrorResponse = { error: string };
@@ -86,10 +87,11 @@ export async function POST(request: Request): Promise<Response> {
         target:matches.length===1?matches[0]:null},{headers:{'Cache-Control':'no-store'}});
     }
     if (action === 'stripe_treasury') {
-      const [config, b2b] = await Promise.all([
+      const [config, b2b, manualB2bReceivables] = await Promise.all([
         admin.from('finance_sync_config').select('account_id,known_payment_intent,known_amount_cents').eq('enabled', true).maybeSingle(),
         admin.from('b2b_payment_schedule').select('id', { count: 'exact', head: true })
           .in('status', ['payment_failed', 'action_required']),
+        readManualB2bReceivables(admin),
       ]);
       const key = process.env.STRIPE_RECONCILIATION_READ_KEY;
       const treasury = config.error || config.data?.account_id !== 'acct_1U6B3ODI76FH9qsq' || !key?.startsWith('rk_live_')
@@ -99,7 +101,7 @@ export async function POST(request: Request): Promise<Response> {
           paymentIntentId: config.data.known_payment_intent,
           amountCents: config.data.known_amount_cents,
         }, period);
-      return Response.json({ ok: true, treasury, b2bPaymentIssues: b2b.error ? null : b2b.count }, {
+      return Response.json({ ok: true, treasury, manualB2bReceivables, b2bPaymentIssues: b2b.error ? null : b2b.count }, {
         headers: { 'Cache-Control': 'no-store' },
       });
     }

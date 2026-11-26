@@ -1,5 +1,6 @@
-﻿"use client";
+"use client";
 import type { AdminStripeTreasury as Treasury } from '../lib/adminStripeTreasury.ts';
+import type { readManualB2bReceivables } from '../lib/adminManualB2bReceivables.ts';
 import type { PortalRow } from '../lib/adminPortalModel.ts';
 import { AdminStripeReference, stripeLiveDashboardUrl, type FinanceNavigate } from './AdminStripeReference';
 import { BusinessTable, ReadState, usePortalRead } from './AdminPortalShared';
@@ -22,6 +23,7 @@ export function AdminStripeTreasury({ period, navigate }: { period: PortalRow; n
   const treasury = data?.treasury as Treasury | undefined;
   const payouts = treasury?.payouts;
   const invoices = treasury?.invoices;
+  const manual = data?.manualB2bReceivables as Awaited<ReturnType<typeof readManualB2bReceivables>> | undefined;
   return <section className="admin-data-card admin-finance-section" aria-label="Stripe-Guthaben, Auszahlungen und offene Forderungen">
     <ReadState data={data} error={error} retry={refresh}>
       <h3>Guthaben</h3>
@@ -51,6 +53,13 @@ export function AdminStripeTreasury({ period, navigate }: { period: PortalRow; n
       }))} columns={[
         { key: 'id', title: 'Rechnungsreferenz', render: row => <AdminStripeReference reference={row.id} navigate={navigate} liveVerified/> }, { key: 'due', title: 'Fällig am' }, { key: 'amount', title: 'Offener Restbetrag' },
       ]}/> : <p>{invoices ? 'Keine offenen Stripe-Rechnungen mit Restbetrag.' : 'Offene Stripe-Rechnungen unbekannt.'}</p>}
+      <h3>Offene manuelle B2B-Aufträge</h3>
+      <p className="portal-note">Aktueller Auftragsrest in EUR nach bestätigten Bank- und Barzahlungen. Die Auftragsreste und die Stripe-Rechnungen werden getrennt ausgewiesen.</p>
+      {manual ? <dl className="portal-metrics">
+        <div><dt>Ohne Zahlungseingang</dt><dd>{manual.openCount}</dd></div>
+        <div><dt>Teilweise bezahlt</dt><dd>{manual.partialCount}</dd></div>
+        <div><dt>Offener Auftragsrest</dt><dd>{amount({ amount: manual.remainingCents, currency: 'eur' })}</dd></div>
+      </dl> : <p>Offene manuelle B2B-Aufträge unbekannt.</p>}
       <p className="portal-note">B2B-Zahlungsvorgänge mit Handlungsbedarf im Zahlungsplan: {typeof data?.b2bPaymentIssues === 'number' ? data.b2bPaymentIssues : 'unbekannt'}. Diese Vorgänge können dieselben Rechnungen betreffen und werden beim Forderungsbetrag nicht erneut gezählt.</p>
     </ReadState>
   </section>;

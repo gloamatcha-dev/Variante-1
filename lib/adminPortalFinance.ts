@@ -77,6 +77,9 @@ export function summarizeLedger(events: PortalRow[], expenses: PortalRow[], evid
     storedRefundNetCents:refunds.length?amount(refunds,'net_cents'):null,
     storedRefundTaxCents:refunds.length?amount(refunds,'tax_cents'):null,
     storedInputTaxCents:expenses.length?amount(expenses,'vat_cents'):null,
+    expensesWithUnknownTax: expenses.filter(expense => expense.vat_cents == null).length,
+    recordedOpenExpenseCents: expenses.some(expense => !['open', 'paid'].includes(String(expense.payment_status)))
+      ? null : amount(expenses.filter(expense => expense.payment_status === 'open'), 'gross_cents'),
     resultCents,contributionMarginCents,contributionComplete:contributionMarginCents!==null,resultComplete:resultCents!==null,
     manualPaymentFeeAmbiguity:manualPaymentFeeCount>0,manualPaymentFeeCount,costBlockers,openGeneralMonths:costs?.openMonths??[],
     sourceCoverage: costBasis?.sourceCoverage ?? null,
