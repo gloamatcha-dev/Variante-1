@@ -126,6 +126,22 @@ export async function POST(request:Request) {
         if(!classification||proof.length<15||proof.length>450)
           return json({error:'Herkunft und Aufbewahrungsfreiheit des Belegs belegen.'},409);
         review=classification+' | '+proof;
+        if(input.disposition==='synthetic'&&input.originalReviewed===true){
+          if(proof.length>400)return json({error:'Nachweis auf höchstens 400 Zeichen kürzen.'},400);
+          const original=await admin.from('documents').select('storage_path,file_sha256,kind').eq('id',input.id).maybeSingle();
+          if(original.error)return json({error:'Original konnte nicht geprüft werden.'},503);
+          if(original.data?.kind==='expense_receipt'){
+            const {storage_path:path,file_sha256:checksum}=original.data;
+            if(typeof path!=='string'||!new RegExp('^'+String(input.id)+'/original[.](pdf|jpg|png)$').test(path)||
+               typeof checksum!=='string'||!/^[a-f0-9]{64}$/.test(checksum))
+              return json({error:'Originaldatei ist nicht eindeutig zugeordnet.'},409);
+            const stored=await admin.storage.from(bucket).download(path);
+            if(stored.error||!stored.data||stored.data.size>fileLimit||
+               createHash('sha256').update(Buffer.from(await stored.data.arrayBuffer())).digest('hex')!==checksum)
+              return json({error:'Integrität des Originals konnte nicht bestätigt werden.'},409);
+            review='synthetic-original:'+checksum+' | '+proof;
+          }
+        }
       }
       let operation:string|null=null;
       const cleanup=(step:string)=>admin.rpc('admin_document_cleanup_v1',{

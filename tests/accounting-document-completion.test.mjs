@@ -15,6 +15,7 @@ const cluster=process.env.GLOA_ACCOUNTING_TEST_CLUSTER;
 const load=path=>readFileSync(new URL(path,import.meta.url),'utf8');
 const migration=load('../supabase/migrations/20261121222948_accounting_document_completion.sql');
 const cleanupMigration=load('../supabase/migrations/20261121230235_accounting_document_cleanup.sql');
+const syntheticCleanupMigration=load('../supabase/migrations/20261126003453_synthetic_expense_receipt_cleanup.sql');
 const url='http://local.invalid/api/admin/documents';
 const actor='10000000-0000-4000-8000-000000000001';
 const expense='10000000-0000-4000-8000-000000000002';
@@ -58,6 +59,8 @@ test('private receipt to historical expenses and effective manual income with is
     create table public.document_links(document_id uuid references public.documents(id),subject_type text
       check(subject_type in ('order','business_expense','annual_plan','b2b_agreement','customer','creator')),
       subject_id uuid,created_at timestamptz default now(),primary key(document_id,subject_type,subject_id));
+    create table public.gloa_invoice_register(document_id uuid unique references public.documents(id));
+    create table public.creator_payout_events(evidence_document_id uuid unique references public.documents(id));
     create table public.orders(id uuid primary key);
     create table public.annual_plans(id uuid primary key);
     create table public.b2b_supply_agreements(id uuid primary key);
@@ -84,7 +87,7 @@ test('private receipt to historical expenses and effective manual income with is
         'undatedEvents',0,'undatedFulfilments',0)
     $basis$;
   `;
-  assert.doesNotMatch(sql(fixture,migration,cleanupMigration).stderr,/ERROR/);
+  assert.doesNotMatch(sql(fixture,migration,cleanupMigration,syntheticCleanupMigration).stderr,/ERROR/);
   assert.deepEqual(read("select to_jsonb(b) from storage.buckets b where id='gloa-finance-documents'").public,false);
   assert.equal(read("select to_jsonb(count(*)) from pg_policy where polname='gloa_finance_documents_server_only' and not polpermissive"),1);
 
@@ -205,15 +208,20 @@ test('private receipt to historical expenses and effective manual income with is
 
   const finances=()=>read("select jsonb_build_array((select jsonb_agg(to_jsonb(e) order by id) from financial_events e),(select jsonb_agg(to_jsonb(e) order by id) from business_expenses e))");
   const before=finances();
-  const createTestDocument=async suffix=>{
+  const createTestDocument=async (suffix,extra={})=>{
     const response=await post(form(Buffer.concat([pdf,Buffer.from(suffix)]),{
-      kind:'other',title:'Synthetic storage fixture',issuedOn:'',issuer:'',invoiceNumber:'',grossCents:'',currency:'',
+      kind:'other',title:'Synthetic storage fixture',issuedOn:'',issuer:'',invoiceNumber:'',grossCents:'',currency:'',...extra,
     }));
     assert.equal(response.status,200);
     return (await response.json()).documentId;
   };
-  const cleanup=(id,review='Synthetic PDF, no accounting or retention obligation')=>({action:'cleanup_document',id,confirmed:true,disposition:'synthetic',review});
-  const id=await createTestDocument(' cleanup');
+  const cleanup=(id,review='Synthetic PDF, no accounting or retention obligation')=>({action:'cleanup_document',id,confirmed:true,disposition:'synthetic',originalReviewed:true,review});
+  const id=await createTestDocument(' cleanup',{kind:'expense_receipt',currency:'EUR'});
+  const invoiced=await createTestDocument(' invoice evidence',{kind:'expense_receipt',currency:'EUR'});
+  const payout=await createTestDocument(' payout evidence',{kind:'expense_receipt',currency:'EUR'});
+  sql(`insert into gloa_invoice_register values('${invoiced}'); insert into creator_payout_events values('${payout}');`);
+  assert.equal((await post({...cleanup(id),originalReviewed:false})).status,409);
+  assert.equal((await post({...cleanup(id),disposition:'draft'})).status,409);
   const linked=await createTestDocument(' linked');
   assert.equal((await post({...link,documentId:linked,entityId:expense})).status,200);
   role='viewer';assert.equal((await post(cleanup(id))).status,403);role='owner';
@@ -224,10 +232,12 @@ test('private receipt to historical expenses and effective manual income with is
   assert.equal((await post({...cleanup(id),resume:true})).status,409);
   assert.equal((await post(cleanup(id,''))).status,409);
   assert.ok(storage.has(id+'/original.pdf'));
-  for(const protectedId of [linked,documentId,incomeId])assert.equal((await post(cleanup(protectedId))).status,409);
+  for(const protectedId of [linked,documentId,incomeId,invoiced,payout])assert.equal((await post(cleanup(protectedId))).status,409);
   beforeRemove=async()=>{
     assert.equal((await post({...link,documentId:id,entityId:expense})).status,400);
     assert.equal((await post({action:'update_document',id,title:'Changed during deletion'})).status,400);
+    assert.match(sql(`insert into creator_payout_events values('${id}');`).stderr,/document_cleanup_pending/);
+    assert.match(sql(`insert into gloa_invoice_register values('${id}');`).stderr,/document_cleanup_pending/);
   };
   storageFailure=true;
   assert.equal((await post(cleanup(id))).status,503);

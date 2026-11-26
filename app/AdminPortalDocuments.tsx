@@ -42,6 +42,7 @@ export function AdminPortalDocuments(){
   const [cleanupError,setCleanupError]=useState('');
   const [removedIds,setRemovedIds]=useState<string[]>([]);
   const deleting=useRef(false);
+  const [reviewedOriginalId,setReviewedOriginalId]=useState<string|null>(null);
   const docs=((data?.documents??[]) as PortalRow[]).filter(row=>!removedIds.includes(String(row.id)));
   const links=(data?.links??[]) as PortalRow[];
   const selected=docs.find(row=>row.id===selectedId)??null;
@@ -53,9 +54,8 @@ export function AdminPortalDocuments(){
   const cleanupBlock=(row:PortalRow)=>{
     if(links.some(link=>link.document_id===row.id))return 'Der Beleg ist mit einem Geschäftsvorgang oder einer Buchung verknüpft.';
     const reasons:string[]=[];
-    if(row.kind==='expense_receipt')reasons.push('Als Ausgabenbeleg erfasst');
-    else if(row.kind!=='other')reasons.push('Geschützte Belegart');
-    if(row.currency!=null)reasons.push('Währung gespeichert');
+    if(row.kind!=='other'&&row.kind!=='expense_receipt')reasons.push('Geschützte Belegart');
+    if(row.kind!=='expense_receipt'&&row.currency!=null)reasons.push('Währung gespeichert');
     if(['external_reference','issued_on','issuer','invoice_number','gross_cents','net_cents','tax_cents','payment_status','note']
       .some(field=>row[field]!=null))reasons.push('Weitere Belegdaten gespeichert');
     if(reasons.length)return reasons.join('. ')+'. Die Herkunft als aufbewahrungsfreier Testbeleg oder Entwurf ist nicht nachgewiesen.';
@@ -64,8 +64,9 @@ export function AdminPortalDocuments(){
     return null;
   };
   const blockReason=cleanupDocument?cleanupBlock(cleanupDocument):null;
+  const requiresOriginalReview=cleanupDocument?.kind==='expense_receipt'&&!cleanupDocument.cleanup_operation_id;
   const deleteButton=(row:PortalRow)=>data?.canCleanup===true&&
-    <button type="button" disabled={busy} onClick={()=>{setCleanupError('');setCleanupId(String(row.id));}}>
+    <button type="button" disabled={busy} onClick={()=>{setCleanupError('');setReviewedOriginalId(null);setCleanupId(String(row.id));}}>
       <span aria-hidden="true">🗑︎</span> Löschen
     </button>;
   const endpoint='/api/admin/documents';
@@ -114,14 +115,15 @@ export function AdminPortalDocuments(){
       setExtractionNotice('Alle Werte am Original prüfen. '+(unresolved.length?'Offen: '+unresolved.join('; ')+'.':'Erkannte Angaben wurden als Vorschläge eingesetzt.'));
     });
   }
-  async function download(){
+  async function download(id=selectedId,forReview=false){
     await perform(async()=>{
-      const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'download',id:selectedId})});
+      const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'download',id})});
       if(!response.ok)throw Error('Originaldatei nicht verfügbar.');
       const url=URL.createObjectURL(await response.blob());
       const link=document.createElement('a');link.href=url;
       link.download=response.headers.get('content-disposition')?.match(/filename="([^"]+)"/)?.[1]??'beleg';
       link.click();
+      if(forReview)setReviewedOriginalId(id);
       setTimeout(()=>URL.revokeObjectURL(url),1000);
     });
   }
@@ -204,13 +206,14 @@ export function AdminPortalDocuments(){
         <button type="button" onClick={()=>setCleanupId(null)}>Schließen</button>
       </>:<form className="portal-form" onSubmit={async event=>{
         event.preventDefault();
-        if(deleting.current)return;
+        if(deleting.current||(requiresOriginalReview&&reviewedOriginalId!==cleanupDocument.id))return;
         const values=new FormData(event.currentTarget);
         const id=String(cleanupDocument.id);
         deleting.current=true;setBusy(true);setCleanupError('');
         try{
           await portalRequest(endpoint,{action:'cleanup_document',id,confirmed:true,
-            resume:Boolean(cleanupDocument.cleanup_operation_id),disposition:values.get('disposition'),review:values.get('review')});
+            resume:Boolean(cleanupDocument.cleanup_operation_id),disposition:requiresOriginalReview?'synthetic':values.get('disposition'),
+            originalReviewed:requiresOriginalReview&&values.get('originalReviewed')==='yes',review:values.get('review')});
           setRemovedIds(ids=>[...ids,id]);
           setSelectedId(current=>current===id?null:current);
           setCleanupId(null);setNotice('Datei und Beleg wurden gelöscht.');
@@ -221,15 +224,19 @@ export function AdminPortalDocuments(){
         <p>{cleanupDocument.cleanup_operation_id?'Die begonnene Löschung wird fortgesetzt.':'Datei und Beleg werden unwiderruflich entfernt. Die Löschung setzt einen nachweislich aufbewahrungsfreien Beleg voraus.'}</p>
         {cleanupError&&<p role="alert">{cleanupError}</p>}
         {!cleanupDocument.cleanup_operation_id&&<>
-          <label>Nachgewiesene Herkunft<select name="disposition" required defaultValue="">
+          {requiresOriginalReview?<>
+            <button type="button" disabled={busy} onClick={()=>void download(String(cleanupDocument.id),true)}>Original zur Prüfung herunterladen</button>
+            <label><input name="originalReviewed" type="checkbox" value="yes" required disabled={reviewedOriginalId!==cleanupDocument.id}/>
+              Ich habe das Original geprüft. Es ist rein synthetisch und muss nicht aufbewahrt werden.</label>
+          </>:<label>Nachgewiesene Herkunft<select name="disposition" required defaultValue="">
             <option value="">Bitte wählen</option><option value="synthetic">Synthetischer Testbeleg</option>
             <option value="draft">Verwerfbarer Entwurf</option>
-          </select></label>
-          <label>Nachweis zur Herkunft und Aufbewahrungsfreiheit<textarea name="review" required minLength={15} maxLength={450}/></label>
+          </select></label>}
+          <label>Nachweis zur Herkunft und Aufbewahrungsfreiheit<textarea name="review" required minLength={15} maxLength={requiresOriginalReview?400:450}/></label>
         </>}
         <div className="portal-document-delete-actions">
           <button type="button" autoFocus disabled={busy} onClick={()=>setCleanupId(null)}>Abbrechen</button>
-          <button type="submit" disabled={busy}>{busy?'Löschung läuft…':'Endgültig löschen'}</button>
+          <button type="submit" disabled={busy||(requiresOriginalReview&&reviewedOriginalId!==cleanupDocument.id)}>{busy?'Löschung läuft…':'Endgültig löschen'}</button>
         </div>
       </form>}
     </dialog>}

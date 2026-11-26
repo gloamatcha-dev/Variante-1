@@ -77,13 +77,13 @@ test('viewer has no delete action and a linked document has no confirmation form
   assert.equal(find(dialog,byType('form')),undefined);
 });
 
-test('an expense receipt with stored currency explains both reasons and cannot be submitted',()=>{
+test('an expense receipt requires original review and a reason even with currency present',()=>{
   const app=portal(true,[],{kind:'expense_receipt',currency:'EUR'});
   find(app.render(),byType(BusinessTable)).props.rowActions(app.row).props.onClick();
   const dialog=find(app.render(),byType('dialog'));
   assert.equal(dialog.props.className,'portal-document-delete-dialog');
-  const explanation=find(dialog,byType('p')).props.children;
-  assert.match(explanation,/Als Ausgabenbeleg erfasst/);
-  assert.match(explanation,/Währung gespeichert/);
-  assert.equal(find(dialog,byType('form')),undefined);
+  assert.ok(find(dialog,node=>typeof node.props?.children==='string'&&node.props.children.startsWith('Original zur')));
+  assert.equal(find(dialog,node=>node.props?.name==='originalReviewed').props.disabled,true);
+  assert.equal(find(dialog,node=>node.props?.name==='review').props.required,true);
+  assert.equal(find(dialog,node=>node.props?.type==='submit').props.disabled,true);
 });
