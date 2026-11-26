@@ -1,6 +1,7 @@
 ﻿import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import test from "node:test";
+import Stripe from "stripe";
 import { load } from "../scripts/stripe-pause-loopback.mjs";
 import { createStripePauseScheduleLive, GLOA_LIVE_PAUSE_ACCOUNT, GLOA_LIVE_PAUSE_ENDPOINT } from
   "../lib/stripePauseScheduleSandbox.server.ts";
@@ -23,6 +24,40 @@ const subscription = { id: stripeId, livemode: true, schedule: null, status: "pa
     type: "subscription", transitioned_at: pauseAt, subscription: { type: "pause_requested" },
   } } };
 const neededEvents = ["invoice.paid", "customer.subscription.paused", "customer.subscription.resumed"];
+
+test("signed LIVE webhook opt-in does not affect receipts outside the selected pause subscriptions", async () => {
+  const stripe = new Stripe("sk_test_fixture");
+  const signing = "whsec_webhook_fixture";
+  let keyCalls = 0, dedupeCalls = 0;
+  const route = load("../app/api/stripe/webhook/route.ts", {
+    stripe: { getStripeClient: () => stripe },
+    "stripePauseScheduleSandbox.server": { GLOA_LIVE_PAUSE_ACCOUNT },
+    "subscriptionPauseActions.server": {
+      livePauseKey: () => { keyCalls++; return null; },
+      livePauseTargetAllowed: id => id === stripeId,
+    },
+    subscriptionInvoiceRules: load("../lib/subscriptionInvoiceRules.ts", {}),
+    stripeWebhookEvents: { hasStripeWebhookEventBeenProcessed: async () => { dedupeCalls++; return true; } },
+  }, { STRIPE_WEBHOOK_SECRET: signing, VERCEL_ENV: "production", GLOA_LIVE_PAUSE_SIGNING_ENDPOINT: GLOA_LIVE_PAUSE_ENDPOINT });
+  async function send(type, object, account, secret = signing) {
+    const body = JSON.stringify({ id: "evt_fixture", livemode: true, type, account, data: { object } });
+    return route.POST(new Request("https://gloamatcha.com/api/stripe/webhook", {
+      method: "POST", body, headers: { "stripe-signature": stripe.webhooks.generateTestHeaderString({ payload: body, secret }) },
+    }));
+  }
+  for (const type of ["customer.subscription.paused", "customer.subscription.resumed"]) {
+    assert.equal((await send(type, { id: "sub_other", livemode: true }, undefined)).status, 200);
+  }
+  assert.equal(keyCalls, 0);
+  assert.equal(dedupeCalls, 0);
+  assert.equal((await send("customer.subscription.paused", { id: stripeId, livemode: true }, undefined, "whsec_wrong")).status, 400);
+  assert.equal((await send("customer.subscription.resumed", { id: stripeId, livemode: true }, undefined)).status, 503);
+  assert.equal(keyCalls, 1);
+  const invoice = id => ({ parent: { subscription_details: { subscription: id } } });
+  assert.equal((await send("invoice.paid", invoice(stripeId), "acct_other")).status, 403);
+  assert.equal((await send("invoice.paid", invoice("sub_other"), "acct_other")).status, 200);
+  assert.equal(dedupeCalls, 1);
+});
 
 function fixture({ account = GLOA_LIVE_PAUSE_ACCOUNT, events = neededEvents, sub = subscription, due = 2089, pending = false } = {}) {
   const requests = [];

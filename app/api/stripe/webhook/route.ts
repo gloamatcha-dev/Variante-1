@@ -133,16 +133,18 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const pauseLifecycle = event.type === "customer.subscription.paused" || event.type === "customer.subscription.resumed";
+  const paidInvoiceSubscription = event.livemode && event.type === "invoice.paid" && process.env.GLOA_LIVE_PAUSE_SIGNING_ENDPOINT
+    ? resolveInvoiceSubscriptionId(event.data.object as Stripe.Invoice) : null;
   if (event.livemode && event.account && event.account !== GLOA_LIVE_PAUSE_ACCOUNT &&
-      (pauseLifecycle || (event.type === "invoice.paid" && process.env.GLOA_LIVE_PAUSE_SIGNING_ENDPOINT))) {
+      (pauseLifecycle || (paidInvoiceSubscription && livePauseTargetAllowed(paidInvoiceSubscription)))) {
     return Response.json({ error: "Stripe-Konto passt nicht." }, { status: 403 });
   }
   if (event.livemode && pauseLifecycle) {
-    const key = livePauseKey();
-    if (!key) return Response.json({ error: "LIVE-Pausenstatus nicht freigegeben." }, { status: 503 });
     const subscription = event.data.object as Stripe.Subscription;
     if (subscription.livemode !== true) return Response.json({ error: "Stripe-Modus passt nicht." }, { status: 403 });
     if (!livePauseTargetAllowed(subscription.id)) return Response.json({ received: true });
+    const key = livePauseKey();
+    if (!key) return Response.json({ error: "LIVE-Pausenstatus nicht freigegeben." }, { status: 503 });
     try {
       if (!await createStripePauseScheduleLive(key).verifyContext()) throw new Error("LIVE context");
     } catch {
