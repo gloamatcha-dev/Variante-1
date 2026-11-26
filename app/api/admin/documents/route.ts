@@ -113,8 +113,20 @@ export async function POST(request:Request) {
     const actor=write.session.userId;
     if(action==='cleanup_document'&&!multipart){
       if(!uuid(input.id)||input.confirmed!==true)return json({error:'Löschung ausdrücklich bestätigen.'},400);
-      const review=typeof input.review==='string'?input.review.trim():null;
-      if(review&&review.length>500)return json({error:'Begründung zu lang.'},400);
+      if(write.identity.role!=='owner')return json({error:'Nur der Owner darf Dokumente löschen.'},403);
+      const proof=typeof input.review==='string'?input.review.trim():'';
+      const classification=input.disposition==='synthetic'?'Synthetischer Testbeleg':
+        input.disposition==='draft'?'Verwerfbarer Entwurf':null;
+      let review:string|null=null;
+      if(input.resume===true){
+        const state=await admin.from('documents').select('cleanup_operation_id').eq('id',input.id).maybeSingle();
+        if(state.error)return json({error:'Löschstatus konnte nicht geprüft werden.'},503);
+        if(!uuid(state.data?.cleanup_operation_id))return json({error:'Keine offene Löschung gefunden.'},409);
+      }else{
+        if(!classification||proof.length<15||proof.length>450)
+          return json({error:'Herkunft und Aufbewahrungsfreiheit des Belegs belegen.'},409);
+        review=classification+' | '+proof;
+      }
       let operation:string|null=null;
       const cleanup=(step:string)=>admin.rpc('admin_document_cleanup_v1',{
         actor,target:input.id,step,review,operation,

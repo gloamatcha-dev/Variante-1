@@ -212,13 +212,18 @@ test('private receipt to historical expenses and effective manual income with is
     assert.equal(response.status,200);
     return (await response.json()).documentId;
   };
-  const cleanup=(id,review='Synthetic PDF, no accounting or retention obligation')=>({action:'cleanup_document',id,confirmed:true,review});
+  const cleanup=(id,review='Synthetic PDF, no accounting or retention obligation')=>({action:'cleanup_document',id,confirmed:true,disposition:'synthetic',review});
   const id=await createTestDocument(' cleanup');
   const linked=await createTestDocument(' linked');
   assert.equal((await post({...link,documentId:linked,entityId:expense})).status,200);
   role='viewer';assert.equal((await post(cleanup(id))).status,403);role='owner';
   assert.equal(query(`select public.admin_document_cleanup_v1('${missing}','${id}','start','not authorized to remove',null)`).error.code,'42501');
+  assert.equal((await post({...cleanup(id),confirmed:false})).status,400);
+  assert.equal((await post(cleanup('not-a-document-id'))).status,400);
+  assert.equal((await post({...cleanup(id),disposition:null})).status,409);
+  assert.equal((await post({...cleanup(id),resume:true})).status,409);
   assert.equal((await post(cleanup(id,''))).status,409);
+  assert.ok(storage.has(id+'/original.pdf'));
   for(const protectedId of [linked,documentId,incomeId])assert.equal((await post(cleanup(protectedId))).status,409);
   beforeRemove=async()=>{
     assert.equal((await post({...link,documentId:id,entityId:expense})).status,400);
@@ -228,11 +233,15 @@ test('private receipt to historical expenses and effective manual income with is
   assert.equal((await post(cleanup(id))).status,503);
   assert.ok(storage.has(id+'/original.pdf'));
   storageFailure=false;finishFailure=true;
-  assert.equal((await post(cleanup(id,''))).status,503);
+  assert.equal((await post({...cleanup(id,''),resume:true})).status,503);
   assert.ok(!storage.has(id+'/original.pdf'));
   assert.ok(read(`select to_jsonb(cleanup_operation_id) from documents where id='${id}'`));
   finishFailure=false;
-  assert.equal((await post(cleanup(id,''))).status,200);
+  const resumes=await Promise.all([post({...cleanup(id,''),resume:true}),post({...cleanup(id,''),resume:true})]);
+  assert.equal(resumes.filter(result=>result.status===200).length,1);
+  assert.ok(resumes.every(result=>[200,409,503].includes(result.status)));
+  assert.equal((await post({...cleanup(id),resume:true})).status,409);
+  assert.ok(!storage.has(id+'/original.pdf'));
   assert.equal(read(`select to_jsonb(d) from documents d where id='${id}'`),null);
   assert.equal(read("select to_jsonb(count(*)) from admin_activity_log where action='document_cleanup_completed'"),1);
   assert.equal(read("select to_jsonb(count(*)) from admin_activity_log where action='document_cleanup_failed'"),2);

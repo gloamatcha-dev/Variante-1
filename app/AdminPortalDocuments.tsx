@@ -38,19 +38,31 @@ export function AdminPortalDocuments(){
   const [ocrReview,setOcrReview]=useState<(ReturnType<typeof analyzeDocumentOcr>&{source:string})|null>(null);
   const [ocrContext,setOcrContext]=useState('');
   const [extractionNotice,setExtractionNotice]=useState('');
-  const [confirmCleanup,setConfirmCleanup]=useState(false);
-  const docs=(data?.documents??[]) as PortalRow[];
+  const [cleanupId,setCleanupId]=useState<string|null>(null);
+  const [cleanupError,setCleanupError]=useState('');
+  const [removedIds,setRemovedIds]=useState<string[]>([]);
+  const deleting=useRef(false);
+  const docs=((data?.documents??[]) as PortalRow[]).filter(row=>!removedIds.includes(String(row.id)));
   const links=(data?.links??[]) as PortalRow[];
   const selected=docs.find(row=>row.id===selectedId)??null;
   const selectedLinks=links.filter(row=>row.document_id===selectedId);
   const ledgerLinks=selectedLinks.filter(row=>row.subject_type==='financial_event');
   const registeredInvoice=typeof selected?.storage_path==='string'&&selected.storage_path.startsWith('invoice-register/');
   const cleanupPending=Boolean(selected?.cleanup_operation_id);
-  const canCleanup=data?.canCleanup===true&&selected?.kind==='other'&&selectedLinks.length===0&&
-    typeof selected.file_sha256==='string'&&
-    ['pdf','jpg','png'].some(ext=>selected.storage_path===`${selected.id}/original.${ext}`)&&
-    ['external_reference','issued_on','issuer','invoice_number','gross_cents','net_cents','tax_cents','currency','payment_status','note']
-      .every(field=>selected[field]==null);
+  const cleanupDocument=docs.find(row=>row.id===cleanupId);
+  const cleanupBlock=(row:PortalRow)=>{
+    if(links.some(link=>link.document_id===row.id))return 'Der Beleg ist mit einem Geschäftsvorgang oder einer Buchung verknüpft.';
+    if(row.kind!=='other'||!['external_reference','issued_on','issuer','invoice_number','gross_cents','net_cents','tax_cents','currency','payment_status','note']
+      .every(field=>row[field]==null))return 'Belegart oder gespeicherte Geschäftsdaten sperren die endgültige Löschung.';
+    if(typeof row.file_sha256!=='string'||!['pdf','jpg','png'].some(ext=>row.storage_path===`${row.id}/original.${ext}`))
+      return 'Das private Original ist nicht eindeutig zugeordnet.';
+    return null;
+  };
+  const blockReason=cleanupDocument?cleanupBlock(cleanupDocument):null;
+  const deleteButton=(row:PortalRow)=>data?.canCleanup===true&&
+    <button type="button" disabled={busy} onClick={()=>{setCleanupError('');setCleanupId(String(row.id));}}>
+      <span aria-hidden="true">🗑︎</span> Löschen
+    </button>;
   const endpoint='/api/admin/documents';
 
   async function perform(action:()=>Promise<void>){
@@ -173,38 +185,52 @@ export function AdminPortalDocuments(){
       <button disabled={busy}>Dokument speichern</button>
     </form>}
     <ReadState data={data} error={error} retry={refresh}>
-      <BusinessTable rows={docs} onOpen={row=>{setConfirmCleanup(false);setSelectedId(String(row.id));}} columns={[
+      <BusinessTable rows={docs} onOpen={row=>setSelectedId(String(row.id))} rowActions={deleteButton} columns={[
         {key:'title',title:'Dokument'},{key:'kind',title:'Art',render:r=>label(r.kind)},
         {key:'issued_on',title:'Rechnungsdatum',render:r=>date(r.issued_on)},{key:'issuer',title:'Aussteller'},
         {key:'invoice_number',title:'Rechnungsnummer'},
       ]}/>
     </ReadState>
+    {cleanupDocument&&data?.canCleanup===true&&<dialog ref={dialog=>{if(dialog&&!dialog.open)dialog.showModal();}}
+      aria-labelledby="document-cleanup-title" onCancel={event=>{event.preventDefault();event.stopPropagation();if(!deleting.current)setCleanupId(null);}}>
+      <h2 id="document-cleanup-title">{text(cleanupDocument.title)}</h2>
+      {blockReason?<><p>{blockReason}</p>
+        <button type="button" onClick={()=>{setSelectedId(String(cleanupDocument.id));setCleanupId(null);}}>Belegdetails öffnen</button>
+        <button type="button" onClick={()=>setCleanupId(null)}>Schließen</button>
+      </>:<form className="portal-form" onSubmit={async event=>{
+        event.preventDefault();
+        if(deleting.current)return;
+        const values=new FormData(event.currentTarget);
+        const id=String(cleanupDocument.id);
+        deleting.current=true;setBusy(true);setCleanupError('');
+        try{
+          await portalRequest(endpoint,{action:'cleanup_document',id,confirmed:true,
+            resume:Boolean(cleanupDocument.cleanup_operation_id),disposition:values.get('disposition'),review:values.get('review')});
+          setRemovedIds(ids=>[...ids,id]);
+          setSelectedId(current=>current===id?null:current);
+          setCleanupId(null);setNotice('Datei und Beleg wurden gelöscht.');
+        }catch(error){
+          setCleanupError(error instanceof Error?error.message:'Löschung konnte nicht bestätigt werden.');
+        }finally{deleting.current=false;setBusy(false);refresh();}
+      }}>
+        <p>{cleanupDocument.cleanup_operation_id?'Die begonnene Löschung wird fortgesetzt.':'Datei und Beleg werden unwiderruflich entfernt. Die Löschung setzt einen nachweislich aufbewahrungsfreien Beleg voraus.'}</p>
+        {cleanupError&&<p role="alert">{cleanupError}</p>}
+        {!cleanupDocument.cleanup_operation_id&&<>
+          <label>Nachgewiesene Herkunft<select name="disposition" required defaultValue="">
+            <option value="">Bitte wählen</option><option value="synthetic">Synthetischer Testbeleg</option>
+            <option value="draft">Verwerfbarer Entwurf</option>
+          </select></label>
+          <label>Nachweis zur Herkunft und Aufbewahrungsfreiheit<textarea name="review" required minLength={15} maxLength={450}/></label>
+        </>}
+        <button type="button" autoFocus disabled={busy} onClick={()=>setCleanupId(null)}>Abbrechen</button>
+        <button disabled={busy}>Endgültig löschen</button>
+      </form>}
+    </dialog>}
     <RecordDetails row={selected} title={text(selected?.title)} onClose={()=>setSelectedId(null)}>
       {selected&&<>
         <AdminDocumentFacts row={selected}/>
         {cleanupPending&&<p>Löschung offen. Zuordnung und Bearbeitung sind gesperrt.</p>}
-        {canCleanup&&<button type="button" disabled={busy} onClick={()=>setConfirmCleanup(true)}>
-          {cleanupPending?'Löschung fortsetzen':'Endgültig löschen'}
-        </button>}
-        {canCleanup&&confirmCleanup&&<dialog open aria-label="Dokument endgültig entfernen">
-          <form onSubmit={event=>{
-            event.preventDefault();
-            const fields=new FormData(event.currentTarget);
-            void perform(async()=>{
-              try{
-                await portalRequest(endpoint,{action:'cleanup_document',id:selectedId,confirmed:true,review:fields.get('review')});
-                setSelectedId(null);setNotice('Datei und Metadaten entfernt.');
-              }finally{setConfirmCleanup(false);refresh();}
-            });
-          }}>
-            <p>Datei und Metadaten werden endgültig entfernt.</p>
-            {!cleanupPending&&<label>Nachweis, dass keine Aufbewahrungspflicht besteht
-              <textarea name="review" required minLength={15} maxLength={500}/>
-            </label>}
-            <button disabled={busy}>Endgültig löschen</button>
-            <button type="button" disabled={busy} onClick={()=>setConfirmCleanup(false)}>Abbrechen</button>
-          </form>
-        </dialog>}
+        {deleteButton(selected)}
         {!cleanupPending&&<>
         {registeredInvoice&&data?.canReadRegisteredInvoices!==true ? <p>Dieses Original ist nur für Owner abrufbar.</p> : typeof selected.file_sha256==='string'
           ? <button type="button" disabled={busy} onClick={()=>void download()}>Originalbeleg herunterladen</button>
