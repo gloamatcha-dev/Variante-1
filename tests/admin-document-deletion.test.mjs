@@ -12,11 +12,11 @@ const BusinessTable=()=>null;
 const RecordDetails=()=>null;
 const noop=()=>null;
 
-function portal(canCleanup=true,links=[]){
+function portal(canCleanup=true,links=[],documentOverrides={}){
   const state=[];
   let cursor=0,refreshes=0;
   const requests=[];
-  const row={id:'fixture',title:'Synthetischer Beleg',kind:'other',file_sha256:'checksum',storage_path:'fixture/original.pdf'};
+  const row={id:'fixture',title:'Synthetischer Beleg',kind:'other',file_sha256:'checksum',storage_path:'fixture/original.pdf',...documentOverrides};
   const react={
     useState(initial){
       const index=cursor++;
@@ -74,5 +74,16 @@ test('viewer has no delete action and a linked document has no confirmation form
   find(owner.render(),byType(BusinessTable)).props.rowActions(owner.row).props.onClick();
   const dialog=find(owner.render(),byType('dialog'));
   assert.match(find(dialog,byType('p')).props.children,/Buchung verkn/);
+  assert.equal(find(dialog,byType('form')),undefined);
+});
+
+test('an expense receipt with stored currency explains both reasons and cannot be submitted',()=>{
+  const app=portal(true,[],{kind:'expense_receipt',currency:'EUR'});
+  find(app.render(),byType(BusinessTable)).props.rowActions(app.row).props.onClick();
+  const dialog=find(app.render(),byType('dialog'));
+  assert.equal(dialog.props.className,'portal-document-delete-dialog');
+  const explanation=find(dialog,byType('p')).props.children;
+  assert.match(explanation,/Als Ausgabenbeleg erfasst/);
+  assert.match(explanation,/Währung gespeichert/);
   assert.equal(find(dialog,byType('form')),undefined);
 });

@@ -52,8 +52,13 @@ export function AdminPortalDocuments(){
   const cleanupDocument=docs.find(row=>row.id===cleanupId);
   const cleanupBlock=(row:PortalRow)=>{
     if(links.some(link=>link.document_id===row.id))return 'Der Beleg ist mit einem Geschäftsvorgang oder einer Buchung verknüpft.';
-    if(row.kind!=='other'||!['external_reference','issued_on','issuer','invoice_number','gross_cents','net_cents','tax_cents','currency','payment_status','note']
-      .every(field=>row[field]==null))return 'Belegart oder gespeicherte Geschäftsdaten sperren die endgültige Löschung.';
+    const reasons:string[]=[];
+    if(row.kind==='expense_receipt')reasons.push('Als Ausgabenbeleg erfasst');
+    else if(row.kind!=='other')reasons.push('Geschützte Belegart');
+    if(row.currency!=null)reasons.push('Währung gespeichert');
+    if(['external_reference','issued_on','issuer','invoice_number','gross_cents','net_cents','tax_cents','payment_status','note']
+      .some(field=>row[field]!=null))reasons.push('Weitere Belegdaten gespeichert');
+    if(reasons.length)return reasons.join('. ')+'. Die Herkunft als aufbewahrungsfreier Testbeleg oder Entwurf ist nicht nachgewiesen.';
     if(typeof row.file_sha256!=='string'||!['pdf','jpg','png'].some(ext=>row.storage_path===`${row.id}/original.${ext}`))
       return 'Das private Original ist nicht eindeutig zugeordnet.';
     return null;
@@ -191,7 +196,7 @@ export function AdminPortalDocuments(){
         {key:'invoice_number',title:'Rechnungsnummer'},
       ]}/>
     </ReadState>
-    {cleanupDocument&&data?.canCleanup===true&&<dialog ref={dialog=>{if(dialog&&!dialog.open)dialog.showModal();}}
+    {cleanupDocument&&data?.canCleanup===true&&<dialog className="portal-document-delete-dialog" ref={dialog=>{if(dialog&&!dialog.open)dialog.showModal();}}
       aria-labelledby="document-cleanup-title" onCancel={event=>{event.preventDefault();event.stopPropagation();if(!deleting.current)setCleanupId(null);}}>
       <h2 id="document-cleanup-title">{text(cleanupDocument.title)}</h2>
       {blockReason?<><p>{blockReason}</p>
@@ -222,8 +227,10 @@ export function AdminPortalDocuments(){
           </select></label>
           <label>Nachweis zur Herkunft und Aufbewahrungsfreiheit<textarea name="review" required minLength={15} maxLength={450}/></label>
         </>}
-        <button type="button" autoFocus disabled={busy} onClick={()=>setCleanupId(null)}>Abbrechen</button>
-        <button disabled={busy}>Endgültig löschen</button>
+        <div className="portal-document-delete-actions">
+          <button type="button" autoFocus disabled={busy} onClick={()=>setCleanupId(null)}>Abbrechen</button>
+          <button type="submit" disabled={busy}>{busy?'Löschung läuft…':'Endgültig löschen'}</button>
+        </div>
       </form>}
     </dialog>}
     <RecordDetails row={selected} title={text(selected?.title)} onClose={()=>setSelectedId(null)}>

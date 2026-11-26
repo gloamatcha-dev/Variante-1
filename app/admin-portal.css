@@ -196,3 +196,36 @@
  .ops.portal .portal-sidebar .portal-chip{color:#fff;background:rgb(255 255 255 / .12);border-color:rgb(255 255 255 / .35)}
  .ops.portal .portal-sidebar button:focus-visible{outline:2px solid #fff;outline-offset:3px;box-shadow:0 0 0 1px #1746D1}
 }
+
+.portal-document-delete-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  box-sizing: border-box;
+  width: min(32rem, calc(100% - 2rem));
+  max-height: calc(100dvh - 2rem);
+  overflow: auto;
+  padding: 1.5rem;
+  border: 1px solid #d3dbd0;
+  border-radius: 1rem;
+  background: #fff;
+  color: #213024;
+  box-shadow: 0 1rem 3rem rgb(12 21 15 / 24%);
+}
+
+.portal-document-delete-dialog::backdrop {
+  background: rgb(12 21 15 / 48%);
+}
+
+.portal-document-delete-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: .75rem;
+}
+
+.portal-document-delete-actions button[type="submit"] {
+  background: #8a2828;
+  border-color: #8a2828;
+  color: #fff;
+}
