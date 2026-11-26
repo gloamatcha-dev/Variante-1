@@ -38,6 +38,16 @@ export async function POST(request: Request) {
     }
     return json({ version: result.data }, 201);
   }
+  if (body?.action === 'notify') {
+    if (gate.context.identity.role !== 'owner') return json({ error: 'Nur der Owner darf Angebote versenden.' }, 403);
+    const input = body as Record<string, unknown>;
+    const id = parseB2bOfferId(input.id);
+    if (!id || typeof input.version !== 'number' || !Number.isInteger(input.version) ||
+        input.version < 1 || input.version > 2147483647) {
+      return json({ error: 'Ungültige Angebotsversion.' }, 400);
+    }
+    return json({ notification: await notifyB2bOffer(admin, id, input.version) });
+  }
   if (body?.action === 'publish') {
     const input = body as Record<string, unknown>;
     const id = parseB2bOfferId(input.id);
@@ -80,11 +90,12 @@ export async function POST(request: Request) {
     return json({ error: 'Veröffentlichung nicht bestätigt.' }, 503);
   }
   if (body?.action === 'list') {
-    const { data, error } = await admin.from('b2b_offer_drafts').select(`${columns},versions:b2b_offer_versions(version,state,pack_count,net_unit_cents,expires_at)`)
+    const { data, error } = await admin.from('b2b_offer_drafts').select(`${columns},versions:b2b_offer_versions(version,state,pack_count,net_unit_cents,expires_at,notification:b2b_offer_notifications(status))`)
       .order('created_at', { ascending: false }).order('id').limit(30);
     if (error) return json({ error: 'Entwürfe konnten nicht geladen werden.' }, 503);
     const acceptedIds = (data ?? []).filter(row => row.versions.some(v => v.state === 'accepted')).map(row => row.id);
-    if (!acceptedIds.length) return json({ drafts: data });
+    const canNotify = gate.context.identity.role === 'owner';
+    if (!acceptedIds.length) return json({ drafts: data, canNotify });
     const [linkResult, handoffResult] = await Promise.all([
       admin.from('b2b_offer_checkout_links').select('draft_id,version,request_id').in('draft_id', acceptedIds),
       admin.from('b2b_offer_contract_handoffs').select('draft_id,version,contract_terms').in('draft_id', acceptedIds),
@@ -94,7 +105,7 @@ export async function POST(request: Request) {
     const attemptResult = links.length ? await admin.from('checkout_attempts')
       .select('request_id,status').in('request_id', links.map(link => link.request_id)) : null;
     if (attemptResult?.error) return json({ error: 'Checkout-Status konnte nicht geladen werden.' }, 503);
-    return json({ drafts: (data ?? []).map(row => ({ ...row, versions: row.versions.map(version => {
+    return json({ canNotify, drafts: (data ?? []).map(row => ({ ...row, versions: row.versions.map(version => {
       if (version.state !== 'accepted') return version;
       const terms = handoffResult.data?.find(entry => entry.draft_id === row.id && entry.version === version.version)?.contract_terms;
       if (!terms) return { ...version, checkout_status: 'terms_missing' };

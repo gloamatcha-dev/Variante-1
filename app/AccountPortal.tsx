@@ -4571,13 +4571,14 @@ function BusinessOffers() {
     published: "Offen", accepted: "Annahme erfasst", declined: "Abgelehnt", expired: "Abgelaufen",
   };
   const euros = new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR" });
-  return <section className="b2b-section">
+  return <section className="b2b-section" id="b2b-offers">
     <h2>Deine Angebote</h2>
     <p>Deine Annahme geht zur Vertragsprüfung an GLOA. Im Kundenkonto wird dabei keine Zahlung ausgelöst.</p>
     <button type="button" className="portal-action" disabled={busy} onClick={() => void run()}>Angebote laden</button>
     {message && <p role="status">{message}</p>}
     {offers.map(offer => <article key={offer.draft_id + ":" + offer.version} className="portal-note">
       <h3>Matcha 500 g, Version {offer.version}</h3>
+      <p>Angebotsreferenz: {offer.draft_id}</p>
       <p>{offer.pack_count} Beutel zu je {euros.format(offer.net_unit_cents / 100)} netto. Lieferland {offer.destination_country}.</p>
       <p>{states[offer.state] ?? offer.state}. Gültig bis {new Date(offer.expires_at).toLocaleString("de-DE")}.</p>
       {offer.contract_terms ? <>

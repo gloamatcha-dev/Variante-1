@@ -69,9 +69,11 @@ test('protected draft endpoint accepts the same concurrent retry and refuses cha
   assert.equal((await call({ ...input, netUnitCents: 900 })).status, 409);
 });
 
-test('publication delegates the reviewed version and refuses missing evidence and unapproved tax', async () => {
+test('publication and pending notification preserve origin and owner authorization', async () => {
   const calls = [];
   let error;
+  let role = 'owner';
+  const notifications = [];
   const source = readFileSync(new URL('../app/api/admin/b2b/offers/route.ts', import.meta.url), 'utf8');
   const module = { exports: {} };
   vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS,
@@ -79,10 +81,12 @@ test('publication delegates the reviewed version and refuses missing evidence an
     module, exports: module.exports, Response, URL,
     require(name) {
       if (name.endsWith('adminActionRoute.ts')) return { openAdminAction: async request =>
-        ({ ok: true, context: { identity: { userId: 'owner-fixture' }, body: await request.json() } }) };
+        ({ ok: true, context: { identity: { userId: 'owner-fixture', role }, body: await request.json() } }) };
       if (name.endsWith('b2bOfferDraft.ts')) return { parseB2bOfferId };
       if (name.endsWith('b2bOfferContract')) return { buildB2bOfferContract };
-      if (name.endsWith('b2bOfferNotification.server')) return { notifyB2bOffer: async () => 'pending' };
+      if (name.endsWith('b2bOfferNotification.server')) return { notifyB2bOffer: async (_admin, id, version) => {
+        notifications.push([id, version]); return 'pending';
+      } };
       if (name.endsWith('supabaseAdmin')) return { getSupabaseAdmin: () => ({
         from: () => ({ select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: async () => ({
           data: { pack_count: 3, net_unit_cents: 5250, destination_country: 'DE' },
@@ -116,6 +120,19 @@ test('publication delegates the reviewed version and refuses missing evidence an
   assert.equal((await publish('proof')).status, 409);
   error = { code: '42501' };
   assert.equal((await publish('proof')).status, 403);
+  assert.deepEqual(notifications, [[input.id, 2]]);
+  const retry = (version, origin = 'https://local.invalid') => module.exports.POST(new Request(
+    'https://local.invalid/api/admin/b2b/offers', { method: 'POST', headers: { origin },
+      body: JSON.stringify({ action: 'notify', id: input.id, version }) },
+  ));
+  role = 'admin';
+  assert.equal((await retry(2)).status, 403);
+  role = 'owner';
+  assert.equal((await retry(2, 'https://foreign.invalid')).status, 403);
+  assert.equal((await retry(0)).status, 400);
+  assert.deepEqual(notifications, [[input.id, 2]]);
+  assert.equal((await retry(2)).status, 200);
+  assert.deepEqual(notifications, [[input.id, 2], [input.id, 2]]);
 });
 
 test('offer contract uses the existing monthly and annual quote and rejects unsupported terms', () => {
@@ -139,13 +156,17 @@ test('offer notification uses a confirmed account and one provider send for para
   const source = readFileSync(new URL('../lib/b2bOfferNotification.server.ts', import.meta.url), 'utf8');
   const module = { exports: {} };
   const delivered = [];
+  let providerResult = { data: { id: 'mock-accepted' } };
+  let offerState = 'published';
+  let expiresAt = '2099-12-08T12:00:00Z';
+  let recorded = true;
   const env = {};
   vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS,
     target: ts.ScriptTarget.ES2022 } }).outputText, {
     module, exports: module.exports, URL, process: { env },
     require(name) {
       if (name === './resend') return { getResendClient: () => ({ emails: {
-        send: async (...args) => { delivered.push(args); return {}; },
+        send: async (...args) => { delivered.push(args); return providerResult; },
       } }) };
       if (name === './siteUrl') return { getSiteOrigin: () => 'https://local.invalid' };
       if (name === './emailSenders') return { GLOA_FROM_HELLO: 'sender@example.invalid', GLOA_REPLY_TO_SUPPORT: 'reply@example.invalid' };
@@ -156,10 +177,13 @@ test('offer notification uses a confirmed account and one provider send for para
   let confirmed = false;
   const admin = {
     rpc: async () => { if (claimed) return { data: null }; claimed = true; return { data: input.customerId }; },
-    auth: { admin: { getUserById: async () => ({ data: { user: { email: 'buyer@example.invalid', email_confirmed_at: confirmed ? 'confirmed' : null } } }) } },
+    auth: { admin: { getUserById: async () => ({ data: { user: { id: input.customerId, email: 'buyer@example.invalid', email_confirmed_at: confirmed ? 'confirmed' : null } } }) } },
     from: table => table === 'b2b_offer_drafts'
       ? { select() { return this; }, eq() { return this; }, async maybeSingle() { return { data: { customer_id: input.customerId } }; } }
-      : { update: () => ({ eq() { return this; }, then(resolve) { resolve({}); } }) },
+      : table === 'b2b_offer_versions'
+        ? { select() { return this; }, eq() { return this; }, async maybeSingle() { return { data: { state: offerState, expires_at: expiresAt } }; } }
+        : { update: () => ({ eq() { return this; }, select() { return this; },
+          async maybeSingle() { return { data: recorded ? { status: 'sent' } : null }; } }) },
   };
   const send = () => module.exports.notifyB2bOffer(admin, input.id, 2);
   assert.equal(await send(), 'pending');
@@ -173,5 +197,28 @@ test('offer notification uses a confirmed account and one provider send for para
   assert.equal(delivered.length, 1);
   assert.equal(delivered[0][0].to, 'buyer@example.invalid');
   assert.equal(delivered[0][1].idempotencyKey, 'gloa-b2b-offer/' + input.id + '/2');
-  assert.match(delivered[0][0].text, /https:\/\/local\.invalid\/account\/business/);
+  assert.match(delivered[0][0].text, /https:\/\/local\.invalid\/account\/business#b2b-offers/);
+  assert.ok(delivered[0][0].text.includes(input.id));
+  assert.ok(delivered[0][0].text.includes('Version: 2'));
+  assert.ok(delivered[0][0].text.includes('2099'));
+
+  for (const refused of [{ error: { message: 'mock failure' } }, {}]) {
+    claimed = false;
+    providerResult = refused;
+    assert.equal(await send(), 'unconfirmed');
+    assert.equal(await send(), 'already_claimed');
+  }
+  assert.equal(delivered.length, 3);
+  claimed = false;
+  providerResult = { data: { id: 'mock-accepted' } };
+  recorded = false;
+  assert.equal(await send(), 'unconfirmed');
+  claimed = false;
+  offerState = 'superseded';
+  assert.equal(await send(), 'unavailable');
+  claimed = false;
+  offerState = 'published';
+  expiresAt = '2000-01-01T00:00:00Z';
+  assert.equal(await send(), 'unavailable');
+  assert.equal(delivered.length, 4);
 });

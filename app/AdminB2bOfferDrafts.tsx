@@ -4,7 +4,7 @@ import { useRef, useState, type FormEvent } from "react";
 import { portalRequest } from "./AdminPortalShared";
 
 const endpoint = "/api/admin/b2b/offers";
-type Version = { version: number; state: string; pack_count: number; net_unit_cents: number; expires_at: string | null; checkout_status?: string };
+type Version = { version: number; state: string; pack_count: number; net_unit_cents: number; expires_at: string | null; checkout_status?: string; notification?: { status: string } | null };
 type Draft = {
   id: string;
   versions?: Version[];
@@ -16,6 +16,7 @@ type Draft = {
 
 export function AdminB2bOfferDrafts() {
   const [drafts, setDrafts] = useState<Draft[]>([]);
+  const [canNotify, setCanNotify] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [busy, setBusy] = useState(false);
   const running = useRef(false);
@@ -68,6 +69,7 @@ export function AdminB2bOfferDrafts() {
       const result = await portalRequest(endpoint, { action: "list" });
       const rows = result.drafts as Draft[];
       setDrafts(rows);
+      setCanNotify(result.canNotify === true);
       if (rows.length === 0) setFeedback("Keine Angebotsentwürfe vorhanden.");
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : "Entwürfe nicht verfügbar.");
@@ -94,10 +96,29 @@ export function AdminB2bOfferDrafts() {
       const update = await portalRequest(endpoint, { id: draft.id, ...payload });
       const result = await portalRequest(endpoint, { action: "list" });
       setDrafts(result.drafts as Draft[]);
+      setCanNotify(result.canNotify === true);
       setFeedback(evidence ? update.notification === "sent" ? "Angebot veröffentlicht und Benachrichtigung gesendet."
         : "Angebot veröffentlicht. Benachrichtigung nicht als zugestellt bestätigt." : "Neue Version gespeichert.");
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : "Aktion nicht bestätigt.");
+    } finally {
+      running.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function retryPendingOffer(draft: Draft, version: Version) {
+    if (running.current) return;
+    running.current = true;
+    setBusy(true);
+    try {
+      const result = await portalRequest(endpoint, { action: "notify", id: draft.id, version: version.version });
+      setFeedback(result.notification === "sent" ? "E-Mail vom Versanddienst angenommen."
+        : "Kein neuer Versand bestätigt. Bitte den Versandstatus der Version prüfen.");
+      const list = await portalRequest(endpoint, { action: "list" });
+      setDrafts(list.drafts as Draft[]);
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "Versand nicht bestätigt.");
     } finally {
       running.current = false;
       setBusy(false);
@@ -126,6 +147,13 @@ export function AdminB2bOfferDrafts() {
         <p>{draft.inquiry_reference} · {draft.destination_country} · {latest?.state ?? "Entwurf"}
           {latest && " · Version " + latest.version}</p>
         {latest?.expires_at && <p>Gültig bis {new Date(latest.expires_at).toLocaleString("de-DE")}</p>}
+        {latest?.notification && <p>Versand für Version {latest.version}: {
+          latest.notification.status === "sent" ? "Vom Versanddienst angenommen"
+            : latest.notification.status === "sending" ? "Versand beansprucht, Ergebnis nicht bestätigt"
+              : "Ausstehend"}</p>}
+        {canNotify && latest?.state === "published" && latest.notification?.status === "pending" &&
+          Date.parse(latest.expires_at ?? "") > Date.now() &&
+          <button type="button" disabled={busy} onClick={() => void retryPendingOffer(draft, latest)}>Angebots-E-Mail versenden</button>}
         {latest?.state === "accepted" ? <p>{latest.checkout_status === "terms_missing" ? "Checkout gesperrt. Der angenommenen Version fehlen gespeicherte Vertragskonditionen."
           : latest.checkout_status === "paid" ? "Zahlung zum Checkout erfasst."
           : latest.checkout_status === "stripe_session_created" ? "Checkout angelegt. Zahlung noch nicht bestätigt."
