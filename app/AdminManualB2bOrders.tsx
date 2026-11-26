@@ -7,6 +7,8 @@ type Catalog = {id:string;sku:string;label:string;price_gross_cents:number};
 type Order = {id:string;order_number:string;status:string;total_gross_cents:number;received_cents:number;
   customer_snapshot:{company:string};manual_b2b:{reference:string;payment:string}};
 type Data = {canWrite:boolean;orders:Order[];customers:{user_id:string;company_name:string}[];catalog:Catalog[]};
+type DeliveryData = {items:{id:string;sku:string;product_name:string;quantity:number}[];
+  deliveries:{id:string;order_item_id:string;occurred_on:string;units:number;reference:string}[]};
 const euro = new Intl.NumberFormat("de-DE",{style:"currency",currency:"EUR"});
 function decimalCents(value:string) {
   if (!/^\d+(?:[.,]\d{1,2})?$/.test(value)) return NaN;
@@ -26,6 +28,10 @@ export function AdminManualB2bOrders() {
   const mutation = useRef(false);
   const paymentOperation = useRef<string|null>(null);
   const [paymentFor,setPaymentFor] = useState<string|null>(null);
+  const [invoiceFor,setInvoiceFor] = useState<string|null>(null);
+  const [deliveryFor,setDeliveryFor] = useState<string|null>(null);
+  const [deliveryData,setDeliveryData] = useState<DeliveryData|null>(null);
+  const deliveryOperation=useRef<string|null>(null);
   const load = async () => setData(await portalRequest("/api/admin/b2b/orders",{action:"list"}) as Data);
   useEffect(()=>{
     void portalRequest("/api/admin/b2b/orders",{action:"list"})
@@ -40,9 +46,52 @@ export function AdminManualB2bOrders() {
       await portalRequest("/api/admin/b2b/orders",{action,id,...fields});
       if(action==="create"){operation.current=null;setOpen(false);setPositions([0]);}
       if(action==="record_payment"){paymentOperation.current=null;setPaymentFor(null);}
+      if(action==="record_delivery"){deliveryOperation.current=null;await loadDeliveries(id);}
       await load();
       setNotice("Auftrag gespeichert.");
     } catch(error) { setNotice(error instanceof Error ? error.message : "Auftrag konnte nicht gespeichert werden."); }
+    finally {mutation.current=false;setBusy(false);}
+  }
+  async function loadDeliveries(id:string) {
+    const result=await portalRequest("/api/admin/b2b/orders",{action:"deliveries",id});
+    setDeliveryData(result as DeliveryData);
+  }
+  async function toggleDeliveries(id:string) {
+    if(deliveryFor===id){setDeliveryFor(null);return;}
+    setDeliveryFor(id);setDeliveryData(null);deliveryOperation.current=null;setBusy(true);
+    try {await loadDeliveries(id);}
+    catch(error){setNotice(error instanceof Error?error.message:"Lieferungen nicht verf?gbar.");}
+    finally{setBusy(false);}
+  }
+  async function downloadDelivery(id:string,deliveryId:string) {
+    try {
+      const response=await fetch("/api/admin/b2b/orders",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action:"delivery_pdf",id,deliveryId})});
+      if(!response.ok) throw new Error("Lieferschein nicht verf?gbar.");
+      const url=URL.createObjectURL(await response.blob());
+      const link=document.createElement("a");link.href=url;link.download="Lieferschein.pdf";link.click();
+      setTimeout(()=>URL.revokeObjectURL(url),1000);
+    }catch(error){setNotice(error instanceof Error?error.message:"Lieferschein nicht verf?gbar.");}
+  }
+  async function invoiceDocument(event:FormEvent<HTMLFormElement>,id:string) {
+    event.preventDefault();
+    if(mutation.current)return;
+    const fields=new FormData(event.currentTarget);
+    mutation.current=true;setBusy(true);setNotice("");
+    try {
+      const mode=fields.get("mode");
+      const response=await fetch("/api/admin/b2b/orders",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action:"invoice",id,mode,supplyOn:fields.get("supplyOn"),confirmed:fields.get("confirmed")==="yes"})});
+      if(!response.ok) throw new Error((await response.json()).error);
+      const pdf=mode==="issue"||mode==="correction"
+        ? await fetch("/api/admin/documents",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({action:"download",id:(await response.json()).id})})
+        : response;
+      if(!pdf.ok) throw new Error("PDF nicht verf?gbar. Erneut mit demselben Leistungsdatum abrufen.");
+      const url=URL.createObjectURL(await pdf.blob());
+      const link=document.createElement("a");link.href=url;link.download=String(mode)+".pdf";link.click();
+      setTimeout(()=>URL.revokeObjectURL(url),1000);
+    } catch(error) {setNotice(error instanceof Error?error.message:"Dokument nicht verf?gbar.");}
     finally {mutation.current=false;setBusy(false);}
   }
   function submit(event:FormEvent<HTMLFormElement>) {
@@ -74,6 +123,8 @@ export function AdminManualB2bOrders() {
           <option value="">Konto auswählen</option>
           {data.customers.map(customer=><option key={customer.user_id} value={customer.user_id}>{customer.company_name}</option>)}
         </select></label>
+        <p><a href="/account?type=business" target="_blank" rel="noopener noreferrer">Geschäftskonto über den bestehenden Registrierungsweg anlegen</a></p>
+        <button type="button" onClick={()=>void load().catch(()=>setNotice("Kundenliste konnte nicht aktualisiert werden."))}>Kundenliste aktualisieren</button>
         <label>Ansprechpartner<input name="contact" maxLength={120} required /></label>
         <label>E-Mail<input name="email" type="email" maxLength={254} required /></label>
         <label>Bestelldatum<input name="orderedOn" type="date" required /></label>
@@ -110,6 +161,18 @@ export function AdminManualB2bOrders() {
       <p>{order.order_number} · {order.customer_snapshot.company} · {order.manual_b2b.reference} · {states[order.status]}
         {order.status!=="cancelled"&&<> · Zahlung offen ({euro.format(order.total_gross_cents/100)})</>}</p>
       {data.canWrite&&order.status==="pending"&&<button type="button" disabled={busy} onClick={()=>void save("confirm",order.id)}>Bestellung bestätigen</button>}
+      {data.canWrite&&order.status==="confirmed"&&<button type="button" disabled={busy}
+        onClick={()=>setInvoiceFor(invoiceFor===order.id?null:order.id)}>Auftragsbest?tigung und Rechnung</button>}
+      {data.canWrite&&invoiceFor===order.id&&order.status==="confirmed"&&<form className="portal-form" onSubmit={event=>void invoiceDocument(event,order.id)}>
+        <fieldset disabled={busy}>
+          <label>Dokument<select name="mode"><option value="order_confirmation">Auftragsbest?tigung</option>
+            <option value="draft">Rechnungsentwurf</option><option value="issue">Rechnung ausstellen oder abrufen</option>
+            {order.received_cents===0&&<option value="correction">Unbezahlte Rechnung vollst?ndig korrigieren</option>}</select></label>
+          <label>Leistungsdatum<input type="date" name="supplyOn" required/></label>
+          <label><input type="checkbox" name="confirmed" value="yes"/> Rechnungsdaten und tats?chliches Leistungsdatum zur Ausstellung best?tigt</label>
+          <button type="submit">PDF abrufen</button>
+        </fieldset>
+      </form>}
       {data.canWrite&&order.status==="confirmed"&&<button type="button" disabled={busy} onClick={()=>{
         paymentOperation.current=null;
         setPaymentFor(paymentFor===order.id?null:order.id);
@@ -132,6 +195,39 @@ export function AdminManualB2bOrders() {
           <button type="submit">Zahlungseingang buchen</button>
         </fieldset>
       </form>}
+      {data.canWrite&&order.status==="confirmed"&&<button type="button" disabled={busy}
+        onClick={()=>void toggleDeliveries(order.id)}>Lieferungen und Lieferscheine</button>}
+      {data.canWrite&&deliveryFor===order.id&&deliveryData&&<>
+        <ul>{deliveryData.items.map(item=><li key={item.id}>{item.product_name} ? {
+          deliveryData.deliveries.filter(row=>row.order_item_id===item.id).reduce((sum,row)=>sum+row.units,0)
+        } / {item.quantity} ?bergeben oder versandt</li>)}</ul>
+        {deliveryData.deliveries.map(row=><button key={row.id} type="button" disabled={busy}
+          onClick={()=>void downloadDelivery(order.id,row.id)}>Lieferschein {row.reference}</button>)}
+        {order.received_cents<order.total_gross_cents
+          ? <p>Lieferung gesperrt, bis die Zahlung vollst?ndig best?tigt ist.</p>
+          : <form className="portal-form" onSubmit={event=>{
+            event.preventDefault();
+            const values=new FormData(event.currentTarget);
+            deliveryOperation.current??=crypto.randomUUID();
+            void save("record_delivery",order.id,{operation:deliveryOperation.current,lineId:values.get("lineId"),lot:values.get("lot"),
+              proof:values.get("proof"),deliveredOn:values.get("deliveredOn"),recipient:values.get("recipient"),reference:values.get("reference"),
+              amount:Number(values.get("amount")),confirmed:values.get("confirmed")==="yes"});
+          }}>
+            <fieldset disabled={busy}>
+              <label>Auftragsposition<select name="lineId" required defaultValue=""><option value="">Ausw?hlen</option>
+                {deliveryData.items.map(item=><option key={item.id} value={item.id}>{item.sku} ? {item.product_name}</option>)}
+              </select></label>
+              <label>Chargen-Beleg-ID<input name="lot" maxLength={36} required/></label>
+              <label>Beleg-ID f?r ?bergabe oder Versand<input name="proof" maxLength={36} required/></label>
+              <label>Tats?chliches ?bergabe- oder Versanddatum<input name="deliveredOn" type="date" required/></label>
+              <label>Empf?nger, Abholperson oder Transportdienstleister<input name="recipient" maxLength={80} required/></label>
+              <label>?bergabe- oder Sendungsreferenz<input name="reference" maxLength={80} required/></label>
+              <label>Menge aus dieser Charge<input name="amount" type="number" min={1} max={10000} required/></label>
+              <label><input name="confirmed" type="checkbox" value="yes" required/> Tats?chliche ?bergabe oder Versand best?tigt</label>
+              <button type="submit">?bergabe und Chargenbewegung buchen</button>
+            </fieldset>
+          </form>}
+      </>}
       {data.canWrite&&order.status!=="cancelled"&&order.received_cents===0&&<button type="button" disabled={busy}
         onClick={()=>{if(window.confirm("Manuellen Auftrag stornieren?"))void save("cancel",order.id);}}>Auftrag stornieren</button>}
     </li>)}</ul>}

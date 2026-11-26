@@ -65,6 +65,62 @@ export async function POST(request: Request) {
   if (!canWrite) return json({error:"Nur der Owner darf manuelle Aufträge bearbeiten."},403);
   if (!uuid(body.id)) return invalid();
 
+  if (body.action === "deliveries" || body.action === "delivery_pdf") {
+    const order = await db.from("orders").select("id,order_number,customer_snapshot,shipping_address_snapshot,manual_b2b")
+      .eq("id",body.id).maybeSingle();
+    if (order.error||!order.data?.manual_b2b) return json({error:"Manueller Auftrag nicht verf?gbar."},404);
+    const [items, deliveries] = await Promise.all([
+      db.from("order_items").select("id,sku,product_name,variant_name,quantity").eq("order_id",body.id),
+      db.from("manual_b2b_deliveries").select("id,order_item_id,receipt_id,method,occurred_on,units,recipient,reference")
+        .eq("order_id",body.id).order("created_at").limit(1001),
+    ]);
+    if (items.error||deliveries.error||!items.data||!deliveries.data||deliveries.data.length>1000)
+      return json({error:"Lieferdaten nicht vollst?ndig verf?gbar."},503);
+    if (body.action==="deliveries") return json({items:items.data,deliveries:deliveries.data});
+    if(!uuid(body.deliveryId)) return invalid();
+    const delivery=deliveries.data.find(row=>row.id===body.deliveryId);
+    const line=items.data.find(row=>row.id===delivery?.order_item_id);
+    if(!delivery||!line)return json({error:"Liefernachweis nicht gefunden."},404);
+    const {renderBusinessDocumentPdf}=await import("../../../../../lib/invoicePdf");
+    const shipping=order.data.shipping_address_snapshot;
+    try {
+      const pdf=renderBusinessDocumentPdf(["Lieferschein", "Auftrag: "+order.data.order_number,
+        "Lieferbeleg: "+delivery.id,"",String(order.data.customer_snapshot.company),
+        String(shipping.street),shipping.postalCode+" "+shipping.city,
+        "Lieferdatum: "+delivery.occurred_on,
+        "Art: "+({personal:"Pers?nliche Lieferung",pickup:"Abholung",carrier:"Versand"}[delivery.method as "personal"|"pickup"|"carrier"]),
+        "Empf?nger oder Dienstleister: "+delivery.recipient,"Referenz: "+delivery.reference,
+        line.sku+" | Menge: "+delivery.units, "Chargenbeleg: "+delivery.receipt_id]);
+      return new Response(new Uint8Array(pdf),{headers:{"Content-Type":"application/pdf","Cache-Control":"no-store","Content-Disposition":"attachment"}});
+    }catch {return json({error:"Lieferdaten k?nnen nicht als PDF dargestellt werden."},409);}
+  }
+  if (body.action === "record_delivery") {
+    const deliveredOn=text(body.deliveredOn,10), recipient=text(body.recipient,80), reference=text(body.reference,80);
+    if (body.confirmed!==true||!uuid(body.operation)||!uuid(body.lineId)||!uuid(body.lot)||!uuid(body.proof)
+      ||!deliveredOn||!/^\d{4}-\d{2}-\d{2}$/.test(deliveredOn)||!recipient||!reference||!int(body.amount,1,10000))return invalid();
+    const result=await db.rpc("record_manual_b2b_delivery_v1",{actor:identity.session.userId,target:body.id,
+      operation:body.operation,line_id:body.lineId,lot:body.lot,proof:body.proof,amount:body.amount,
+      delivered_on:deliveredOn,recipient,reference});
+    if(result.error)return json({error:"Lieferung nicht erfasst. Zahlung, Bestand, Charge und Originalnachweis pr?fen."},
+      result.error.code==="42501"?403:result.error.message==="release_writes_disabled"?503:409);
+    return json({id:result.data});
+  }
+  if (body.action === "invoice") {
+    const supplyOn = text(body.supplyOn,10), mode = body.mode;
+    if (!supplyOn || !/^\d{4}-\d{2}-\d{2}$/.test(supplyOn) ||
+      (mode!=="draft"&&mode!=="order_confirmation"&&mode!=="issue"&&mode!=="correction") ||
+      ((mode==="issue"||mode==="correction")&&body.confirmed!==true)) return invalid();
+    try {
+      const {manualB2bInvoice}=await import("../../../../../lib/gloaInvoice.server");
+      const result=await manualB2bInvoice(db,identity.session.userId,String(body.id),supplyOn,mode);
+      if (result.pdf) return new Response(new Uint8Array(result.pdf),{headers:{
+        "Content-Type":"application/pdf","Cache-Control":"no-store","Content-Disposition":"attachment",
+      }});
+      return json({id:result.id});
+    } catch {
+      return json({error:"Dokument nicht verf?gbar. Best?tigung, Leistungsdatum, Aussteller und Rechnungsfreigabe pr?fen."},409);
+    }
+  }
   if (body.action === "record_payment") {
     const reference = text(body.reference,120), receivedOn = text(body.receivedOn,10);
     if (body.confirmed!==true || !uuid(body.operation) || !uuid(body.document) || !reference || reference.length<3

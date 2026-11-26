@@ -20,6 +20,7 @@ export type InvoicePdfInput = {
   supplyOn: string;
   dateLabel?: "Zahlungseingang" | "Erstattungsdatum";
   originalNumber?: string;
+  documentKind?: "draft" | "order_confirmation";
   lines: InvoiceLine[];
   totals: Amounts;
 };
@@ -84,7 +85,8 @@ export function renderInvoicePdf(input: InvoicePdfInput): Buffer {
     throw new Error('invoice_totals_invalid');
   }
   const lines = [
-    (input.originalNumber === undefined ? 'Rechnung ' : 'Rechnungskorrektur ') + printable(input.number, 45),
+    (input.documentKind === 'draft' ? 'Rechnungsentwurf - ' : input.documentKind === 'order_confirmation'
+      ? 'Auftragsbestaetigung - ' : input.originalNumber === undefined ? 'Rechnung ' : 'Rechnungskorrektur ') + printable(input.number, 45),
     ...(input.originalNumber === undefined ? [] : ['Bezug: ' + printable(input.originalNumber, 45)]),
     ...address(issuer), 'Steuerkennung: ' + printable(issuer.taxIdentifier, 45), '',
     ...address(input.customer), '',
@@ -92,6 +94,16 @@ export function renderInvoicePdf(input: InvoicePdfInput): Buffer {
     ...lineText, '',
     'Netto: ' + euro(totals.netCents) + ' | USt: ' + euro(totals.taxCents) + ' | Gesamt: ' + euro(totals.grossCents),
   ];
+  return renderPdfLines(lines);
+}
+
+export function renderBusinessDocumentPdf(lines:readonly string[]):Buffer {
+  if(lines.length>54) throw new Error('document_too_long');
+  for(const line of lines) if(line) printable(line,100);
+  return renderPdfLines(lines);
+}
+
+function renderPdfLines(lines:readonly string[]):Buffer {
   const stream = 'BT\n/F1 10 Tf\n13 TL\n44 805 Td\n' +
     lines.map(line => '(' + line.replace(/[\\()]/g, '\\$&') + ') Tj\nT*\n').join('') + 'ET\n';
   const objects = [

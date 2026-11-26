@@ -97,8 +97,8 @@ async function sendInvoice(admin: Admin, row: Register, userId: string | null) {
     .eq("id", row.id).eq("delivery_status", "sending");
 }
 
-export async function completeGloaInvoice(admin: Admin, row: Register, userId: string | null) {
-  if (!invoiceConfig()) throw new Error("invoice_issuance_disabled");
+export async function completeGloaInvoice(admin: Admin, row: Register, userId: string | null, manualActor?:string) {
+  if (!manualActor && !invoiceConfig()) throw new Error("invoice_issuance_disabled");
   if (!row.document_id) {
     const bytes = renderInvoicePdf({ ...row.snapshot, number: row.number });
     const bucket = admin.storage.from(invoiceBucket);
@@ -110,13 +110,66 @@ export async function completeGloaInvoice(admin: Admin, row: Register, userId: s
       const result = await bucket.download(path);
       return result.data ? Buffer.from(await result.data.arrayBuffer()) : null;
     }, async () => {
-      const result = await admin.rpc("finish_gloa_invoice_v1", {
-        p_id: row.id, p_sha: createHash("sha256").update(bytes).digest("hex"), p_bytes: bytes.length,
-      });
+      const sha = createHash("sha256").update(bytes).digest("hex");
+      const result = manualActor
+        ? await admin.rpc("finish_manual_b2b_invoice_v1",{actor:manualActor,invoice_id:row.id,sha,bytes:bytes.length})
+        : await admin.rpc("finish_gloa_invoice_v1",{p_id:row.id,p_sha:sha,p_bytes:bytes.length});
       if (result.error) throw new Error("invoice_document_registration_failed");
     });
   }
-  await sendInvoice(admin, row, userId);
+  if (!manualActor) await sendInvoice(admin, row, userId);
+}
+
+export async function manualB2bInvoice(admin:Admin, actor:string, orderId:string, supplyOn:string,
+  mode:"draft"|"order_confirmation"|"issue"|"correction") {
+  const issuerVersion=Number(process.env.GLOA_INVOICE_ISSUER_VERSION);
+  if (mode==="issue"&&(!Number.isSafeInteger(issuerVersion)||issuerVersion<1)) throw new Error("invoice_issuer_unconfirmed");
+  const order=await admin.from("orders").select("*").eq("id",orderId).maybeSingle();
+  if (order.error||!order.data?.manual_b2b||order.data.status!=="confirmed"||order.data.cancelled_at||
+      order.data.tax_treatment!=="de_domestic") throw new Error("manual_b2b_invoice_order_invalid");
+  if (mode==="issue"||mode==="correction") {
+    const prior=await admin.from("gloa_invoice_register").select("*").eq("order_id",orderId).is("original_id",null).maybeSingle();
+    if (prior.error) throw new Error("invoice_register_unavailable");
+    if (prior.data) {
+      if (!prior.data.manual_order_evidence||prior.data.snapshot.supplyOn!==supplyOn) throw new Error("manual_b2b_invoice_conflict");
+      if (mode==="correction" || !prior.data.document_id) {
+        const snapshot=mode==="correction"
+          ? {...prior.data.snapshot,issuedOn:berlinCivilDate(new Date()),originalNumber:prior.data.number}
+          : prior.data.snapshot;
+        const claim=await admin.rpc("claim_manual_b2b_invoice_v1",{actor,target:orderId,
+          issuer_version:prior.data.issuer_version,invoice_snapshot:snapshot,correction:mode==="correction"}).single();
+        if (claim.error||!claim.data) throw new Error(claim.error?.message??"invoice_claim_failed");
+        const invoice=claim.data as Register;
+        await completeGloaInvoice(admin,invoice,null,actor);
+        return {id:invoice.id};
+      }
+      return {id:prior.data.id};
+    }
+  }
+  if(mode==="correction") throw new Error("invoice_original_missing");
+  const issuedOn=berlinCivilDate(new Date())??"";
+  if (supplyOn<order.data.manual_b2b.request.orderedOn || (mode==="issue"&&supplyOn>issuedOn))
+    throw new Error("manual_b2b_invoice_supply_date_unconfirmed");
+  const version=await admin.from("invoice_issuer_versions").select("*").lte("effective_from",new Date().toISOString())
+    .order("effective_from",{ascending:false}).limit(1).maybeSingle();
+  const issuer=version.data;
+  if (version.error||!issuer?.approved_by||issuer.country_code!=="DE"||(mode==="issue"&&issuer.version!==issuerVersion))
+    throw new Error("invoice_issuer_unconfirmed");
+  const row=order.data;
+  const snapshot:InvoiceSnapshot={
+    issuer:{version:issuer.version,legalName:issuer.legal_name,address:issuer.street_address,postalCode:issuer.postal_code,
+      city:issuer.city,country:issuer.country_code,taxIdentifier:issuer.vat_id||issuer.tax_number},
+    customer:invoiceParty({...row.billing_address_snapshot,line1:row.billing_address_snapshot.street,company:row.customer_snapshot.company}),
+    issuedOn,supplyOn,lines:await invoiceLines(admin,row,"",false),
+    totals:{netCents:row.total_net_cents,taxCents:row.tax_total_cents,grossCents:row.total_gross_cents},
+  };
+  const pdf=renderInvoicePdf({...snapshot,number:row.order_number,documentKind:mode==="issue"?undefined:mode});
+  if (mode!=="issue") return {pdf};
+  const result=await admin.rpc("claim_manual_b2b_invoice_v1",{actor,target:orderId,issuer_version:issuer.version,invoice_snapshot:snapshot}).single();
+  if (result.error||!result.data) throw new Error(result.error?.message??"invoice_claim_failed");
+  const invoice=result.data as Register;
+  await completeGloaInvoice(admin,invoice,null,actor);
+  return {id:invoice.id};
 }
 
 async function issueEvent(
