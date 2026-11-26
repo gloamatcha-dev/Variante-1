@@ -9,6 +9,11 @@ type Order = {id:string;order_number:string;status:string;total_gross_cents:numb
 type Data = {canWrite:boolean;orders:Order[];customers:{user_id:string;company_name:string}[];catalog:Catalog[]};
 type DeliveryData = {items:{id:string;sku:string;product_name:string;quantity:number}[];
   deliveries:{id:string;order_item_id:string;occurred_on:string;units:number;reference:string}[]};
+type Customer = Data["customers"][number];
+type OfferReference = {offer_id:string;offer_version:number;checkout_claimed:boolean;agreement_id:string|null;
+  contract_status:string|null;started_at:string|null;ended_at:string|null;linked:boolean;
+  terms:{planType?:string;deliveryIntervalMonths?:number;deliveryCount?:number;packNetCents?:number;
+    charges?:{grossCents:number}[]}};
 const euro = new Intl.NumberFormat("de-DE",{style:"currency",currency:"EUR"});
 function decimalCents(value:string) {
   if (!/^\d+(?:[.,]\d{1,2})?$/.test(value)) return NaN;
@@ -29,6 +34,11 @@ export function AdminManualB2bOrders() {
   const paymentOperation = useRef<string|null>(null);
   const [paymentFor,setPaymentFor] = useState<string|null>(null);
   const [invoiceFor,setInvoiceFor] = useState<string|null>(null);
+  const [customerEmail,setCustomerEmail] = useState("");
+  const [selectedCustomer,setSelectedCustomer] = useState("");
+  const [foundCustomer,setFoundCustomer] = useState<Customer|null>(null);
+  const [offerFor,setOfferFor] = useState<string|null>(null);
+  const [offers,setOffers] = useState<OfferReference[]>([]);
   const [deliveryFor,setDeliveryFor] = useState<string|null>(null);
   const [deliveryData,setDeliveryData] = useState<DeliveryData|null>(null);
   const deliveryOperation=useRef<string|null>(null);
@@ -44,13 +54,34 @@ export function AdminManualB2bOrders() {
     setNotice("");
     try {
       await portalRequest("/api/admin/b2b/orders",{action,id,...fields});
-      if(action==="create"){operation.current=null;setOpen(false);setPositions([0]);}
+      if(action==="create"){operation.current=null;setOpen(false);setPositions([0]);setSelectedCustomer("");}
       if(action==="record_payment"){paymentOperation.current=null;setPaymentFor(null);}
       if(action==="record_delivery"){deliveryOperation.current=null;await loadDeliveries(id);}
       await load();
       setNotice("Auftrag gespeichert.");
     } catch(error) { setNotice(error instanceof Error ? error.message : "Auftrag konnte nicht gespeichert werden."); }
     finally {mutation.current=false;setBusy(false);}
+  }
+  async function findCustomer() {
+    setBusy(true);setNotice("");
+    try {
+      const result=await portalRequest("/api/admin/b2b/orders",{action:"find_customer",email:customerEmail});
+      const customer=result.customer as Customer;
+      setFoundCustomer(customer);setSelectedCustomer(customer.user_id);
+    }catch(error){setNotice(error instanceof Error?error.message:"Geschäftskonto nicht verfügbar.");}
+    finally{setBusy(false);}
+  }
+  async function loadOffers(id:string,reference?:OfferReference) {
+    if(mutation.current)return;
+    mutation.current=true;setBusy(true);setNotice("");
+    if(!reference){setOffers([]);setOfferFor(id);}
+    try {
+      const result=await portalRequest("/api/admin/b2b/orders",reference
+        ? {action:"link_offer_reference",id,offerId:reference.offer_id,version:reference.offer_version,confirmed:true}
+        : {action:"offer_context",id});
+      setOffers(result.references as OfferReference[]);
+    }catch(error){setNotice(error instanceof Error?error.message:"Vertragsreferenzen nicht verfügbar.");}
+    finally{mutation.current=false;setBusy(false);}
   }
   async function loadDeliveries(id:string) {
     const result=await portalRequest("/api/admin/b2b/orders",{action:"deliveries",id});
@@ -119,12 +150,17 @@ export function AdminManualB2bOrders() {
     {open&&data?.canWrite&&<form className="portal-form" onSubmit={submit}>
       <fieldset disabled={busy}>
         <p>Manueller Auftrag für Deutschland in EUR. Ohne Bestandszusage. Der Entwurf erfasst keinen Zahlungseingang und veranlasst keine Lieferung.</p>
-        <label>Geschäftskunde<select name="customer" required defaultValue="">
+        <label>Geschäftskunde<select name="customer" required value={selectedCustomer} onChange={event=>setSelectedCustomer(event.target.value)}>
           <option value="">Konto auswählen</option>
           {data.customers.map(customer=><option key={customer.user_id} value={customer.user_id}>{customer.company_name}</option>)}
+          {foundCustomer&&!data.customers.some(customer=>customer.user_id===foundCustomer.user_id)&&
+            <option value={foundCustomer.user_id}>{foundCustomer.company_name}</option>}
         </select></label>
-        <p><a href="/account?type=business" target="_blank" rel="noopener noreferrer">Geschäftskonto über den bestehenden Registrierungsweg anlegen</a></p>
-        <button type="button" onClick={()=>void load().catch(()=>setNotice("Kundenliste konnte nicht aktualisiert werden."))}>Kundenliste aktualisieren</button>
+        <p>Die vertretungsberechtigte Person registriert das Geschäftskonto selbst und bestätigt ihre E-Mail-Adresse.</p>
+        <p><a href="/account?type=business" target="_blank" rel="noopener noreferrer">Bestehende Geschäftsregistrierung öffnen</a></p>
+        <label>Registrierte E-Mail-Adresse für die Kontosuche<input type="email" maxLength={254} value={customerEmail}
+          onChange={event=>setCustomerEmail(event.target.value)}/></label>
+        <button type="button" disabled={!customerEmail.trim()} onClick={()=>void findCustomer()}>Bestätigtes Konto übernehmen</button>
         <label>Ansprechpartner<input name="contact" maxLength={120} required /></label>
         <label>E-Mail<input name="email" type="email" maxLength={254} required /></label>
         <label>Bestelldatum<input name="orderedOn" type="date" required /></label>
@@ -160,6 +196,26 @@ export function AdminManualB2bOrders() {
     {!!data?.orders.length&&<ul>{data.orders.map(order=><li key={order.id}>
       <p>{order.order_number} · {order.customer_snapshot.company} · {order.manual_b2b.reference} · {states[order.status]}
         {order.status!=="cancelled"&&<> · Zahlung offen ({euro.format(order.total_gross_cents/100)})</>}</p>
+      {data.canWrite&&<button type="button" disabled={busy} onClick={()=>offerFor===order.id?setOfferFor(null):void loadOffers(order.id)}>
+        Angebote und Vertragsbezug
+      </button>}
+      {data.canWrite&&offerFor===order.id&&<section aria-label="Vertragsreferenzen">
+        <p>Nur Referenz für diesen eigenständigen Auftrag. Automatische Vertragsübernahme wird nicht unterstützt.</p>
+        {!offers.length&&!busy&&<p>Keine angenommenen Angebote dieses Kunden gefunden.</p>}
+        {offers.map(offer=><div key={offer.offer_id+":"+offer.offer_version}>
+          <p>Angebot {offer.offer_id} · Version {offer.offer_version} · {offer.terms.planType==="annual"?"Jahresvertrag":"Monatsvertrag"}</p>
+          <p>Lieferintervall: {offer.terms.deliveryIntervalMonths??"unbekannt"} Monat(e) · Lieferanzahl: {offer.terms.deliveryCount??"offen"}
+            {typeof offer.terms.packNetCents==="number"&&<> · Packpreis netto {euro.format(offer.terms.packNetCents/100)}</>}</p>
+          {offer.terms.charges?.length?<p>Vertragliche Zahlbeträge: {offer.terms.charges.map(charge=>euro.format(charge.grossCents/100)).join(" / ")}</p>:null}
+          {offer.agreement_id?<p>Bestehender Vertrag {offer.agreement_id} · {offer.contract_status}
+            {offer.started_at&&<> · Beginn {offer.started_at.slice(0,10)}</>}{offer.ended_at&&<> · Ende {offer.ended_at.slice(0,10)}</>}</p>
+            :<p>{offer.checkout_claimed?"Checkout bereits zugeordnet":"Kein Checkout zugeordnet"}</p>}
+          {offer.linked?<p>Als Referenz gespeichert.</p>:order.status!=="cancelled"&&!offers.some(other=>other.linked)&&
+            <button type="button" disabled={busy} onClick={()=>{
+              if(window.confirm("Nur als Referenz zu einem eigenständigen Auftrag speichern? Der Vertrag bleibt unverändert."))void loadOffers(order.id,offer);
+            }}>Nur als Referenz speichern</button>}
+        </div>)}
+      </section>}
       {data.canWrite&&order.status==="pending"&&<button type="button" disabled={busy} onClick={()=>void save("confirm",order.id)}>Bestellung bestätigen</button>}
       {data.canWrite&&order.status==="confirmed"&&<button type="button" disabled={busy}
         onClick={()=>setInvoiceFor(invoiceFor===order.id?null:order.id)}>Auftragsbest?tigung und Rechnung</button>}

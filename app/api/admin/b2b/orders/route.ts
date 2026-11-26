@@ -46,7 +46,7 @@ export async function POST(request: Request) {
     const [orders, customers, catalog] = await Promise.all([
       db.from("orders").select("id,order_number,status,total_gross_cents,manual_b2b,customer_snapshot").not("manual_b2b","is",null)
         .order("created_at",{ascending:false}).limit(100),
-      canWrite ? db.from("business_profiles").select("user_id,company_name").order("company_name").limit(500) : { data: [], error: null },
+      canWrite ? db.rpc("manual_b2b_verified_customers_v1",{actor:identity.session.userId}) : { data: [], error: null },
       canWrite ? db.from("product_variants").select("id,sku,label,price_gross_cents,products!inner(name)")
         .eq("is_active",true).eq("products.is_active",true).not("tax_category","is",null).not("price_gross_cents","is",null).limit(250)
         : { data: [], error: null },
@@ -63,7 +63,23 @@ export async function POST(request: Request) {
       customers:customers.data, catalog:catalog.data});
   }
   if (!canWrite) return json({error:"Nur der Owner darf manuelle Aufträge bearbeiten."},403);
+  if (body.action === "find_customer") {
+    const email=text(body.email,254);
+    if(!email||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return invalid();
+    const result=await db.rpc("manual_b2b_verified_customers_v1",{actor:identity.session.userId,exact_email:email});
+    if(result.error) return json({error:"Geschäftskonto konnte nicht geprüft werden."},503);
+    if(result.data?.length!==1) return json({error:"Kein eindeutig bestätigtes Geschäftskonto gefunden. Registrierung, E-Mail-Bestätigung und Unternehmensvertretung prüfen."},409);
+    return json({customer:result.data[0]});
+  }
   if (!uuid(body.id)) return invalid();
+  if(body.action==="offer_context"||body.action==="link_offer_reference") {
+    const linking=body.action==="link_offer_reference";
+    if(linking&&(!uuid(body.offerId)||!int(body.version,1,2147483647)||body.confirmed!==true)) return invalid();
+    const result=await db.rpc("manual_b2b_offer_context_v1",{actor:identity.session.userId,target:body.id,
+      ...(linking?{draft:body.offerId,revision:body.version}:{})});
+    if(result.error) return json({error:"Angebotsreferenz nicht verfügbar. Kundenbezug, Freigabe oder bestehende Zuordnung prüfen."},409);
+    return json({references:result.data??[]});
+  }
 
   if (body.action === "deliveries" || body.action === "delivery_pdf") {
     const order = await db.from("orders").select("id,order_number,customer_snapshot,shipping_address_snapshot,manual_b2b")
