@@ -177,6 +177,16 @@ function createStripePauseSchedule(secret: string, live: boolean, request: typeo
         return blocked("unverified_live_plan");
       }
       const pauseAt = items[0].current_period_end;
+      if (live && action === "pause") {
+        if (!checkId(sub.latest_invoice ?? "", /^in_[a-zA-Z0-9_]+$/)) return blocked("unverified_paid_invoice");
+        const latest = await call<{ id: string; livemode: boolean; status: string; customer: string; currency: string; total: number }>(
+          "invoices/" + sub.latest_invoice,
+        );
+        if (latest.id !== sub.latest_invoice || latest.livemode !== true || latest.status !== "paid" ||
+            latest.customer !== sub.customer || latest.currency !== "eur" || latest.total !== contract!.totalCents) {
+          return blocked("unverified_paid_invoice");
+        }
+      }
       let existing: StripeSchedule | undefined;
       const detached = action === "resume" && sub.schedule === null;
       if (detached) {

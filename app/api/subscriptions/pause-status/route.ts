@@ -1,4 +1,4 @@
-import { changeLiveSubscriptionPause, changeSandboxSubscriptionPause, livePauseActionsKey, sandboxPauseKey } from "../../../../lib/subscriptionPauseActions.server";
+import { changeLiveSubscriptionPause, changeSandboxSubscriptionPause, livePauseActionsKey, loadLivePauseTarget, sandboxPauseKey } from "../../../../lib/subscriptionPauseActions.server";
 import { verifyBearerUser } from "../../../../lib/verifyUser";
 import { getStripeClient } from "../../../../lib/stripe";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
@@ -51,7 +51,7 @@ export async function POST(request: Request) {
     if (error) return response({ error: "Abrechnungsstatus nicht bestätigt." }, 503);
     if (!data) return response({ error: "Abo nicht gefunden." }, 404);
     const sandboxKey = sandboxPauseKey();
-    const liveKey = data.stripe_subscription_id ? livePauseActionsKey(data.stripe_subscription_id) : null;
+    const liveKey = data.stripe_subscription_id ? livePauseActionsKey() : null;
     if (action) {
       if ((!sandboxKey && !liveKey) || !data.stripe_subscription_id ||
           (action === "pause" ? data.status !== "active" : !["active", "paused"].includes(data.status))) {
@@ -67,7 +67,12 @@ export async function POST(request: Request) {
       return response({ error: "Abrechnungsstatus nicht bestätigt." }, 409);
     }
     const subscription = await stripe.subscriptions.retrieve(data.stripe_subscription_id, { expand: ["latest_invoice"] });
-    return response({ ...readSubscriptionPauseStatus(subscription, { localId: data.id, stripeId: data.stripe_subscription_id }), sandboxActions: Boolean(sandboxKey && subscription.livemode === false || liveKey && subscription.livemode === true) });
+    const target = { localId: data.id, stripeId: data.stripe_subscription_id };
+    const status = readSubscriptionPauseStatus(subscription, target);
+    const liveTarget = liveKey && subscription.livemode === true && status.state !== "unconfirmed"
+      ? await loadLivePauseTarget(admin, target, caller.userId, status.state === "paused" ? "resume" : "pause") : null;
+    return response({ ...status, sandboxActions: Boolean(sandboxKey && subscription.livemode === false ||
+      liveTarget && subscription.customer === liveTarget.stripeCustomerId) });
   } catch {
     return response({ error: "Abrechnungsstatus nicht bestätigt. Bitte später erneut prüfen." }, 503);
   }

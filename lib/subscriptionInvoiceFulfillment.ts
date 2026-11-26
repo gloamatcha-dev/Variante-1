@@ -1,4 +1,4 @@
-import { livePauseKey, livePauseTargetAllowed, sandboxPauseKey } from "./subscriptionPauseActions.server";
+import { hasLivePauseHistory, livePauseKey, sandboxPauseKey } from "./subscriptionPauseActions.server";
 import { createStripePauseScheduleLive, createStripePauseScheduleSandbox } from "./stripePauseScheduleSandbox.server";
 import { bindFirstMatchaInvoice } from "./matchaFirstCheckout";
 import type Stripe from "stripe";
@@ -142,7 +142,7 @@ export type InvoiceFulfillmentResult =
 type SandboxCycle = { paidStart: string; paidEnd: string; scheduleId: string | null; resumedAt: string | null };
 
 export type SubscriptionInvoiceDeps = {
-  pauseCycleApplies?: (subscriptionId: string) => boolean;
+  pauseCycleApplies?: (subscriptionId: string, localId: string) => boolean | Promise<boolean>;
   prepareSandboxCycle?: (subscription: Stripe.Subscription, localId: string, paid: { start: string; end: string }) => Promise<SandboxCycle | undefined>;
   bindFirstInvoice?: (subscriptionId: string, invoiceId: string) => Promise<void>;
   /** Re-read from Stripe, never the webhook payload's embedded copy. */
@@ -372,10 +372,9 @@ export const defaultSubscriptionInvoiceDeps: SubscriptionInvoiceDeps = {
 export function subscriptionInvoiceDeps(stripe: Stripe, livemode = false): SubscriptionInvoiceDeps {
   const key = livemode ? livePauseKey() : sandboxPauseKey();
   return {
-    pauseCycleApplies: livemode ? livePauseTargetAllowed : undefined,
-    prepareSandboxCycle: key ? async (subscription, localId, paid) => {
-      if (subscription.livemode !== livemode) throw new Error("Stripe subscription mode mismatch");
-      if (livemode && !livePauseTargetAllowed(subscription.id)) return undefined;
+    pauseCycleApplies: livemode ? hasLivePauseHistory : undefined,
+    prepareSandboxCycle: livemode || key ? async (subscription, localId, paid) => {
+      if (!key || subscription.livemode !== livemode) throw new Error("Pause signing or subscription mode unconfirmed");
       const adapter = livemode ? createStripePauseScheduleLive(key) : createStripePauseScheduleSandbox(key);
       if (livemode && !await adapter.verifyContext()) throw new Error("LIVE pause context unconfirmed");
       const scheduleId = idOf(subscription.schedule);
@@ -485,7 +484,7 @@ export async function fulfillPaidSubscriptionInvoice(
   // on stripe_invoice_id, so a redelivery returns the same attempt.
   const period = resolveSubscriptionPeriod(stripeSubscription);
   const paidPeriod = resolvePaidInvoiceSubscriptionPeriod(invoice, stripeSubscriptionId);
-  const prepareCycle = !deps.pauseCycleApplies || deps.pauseCycleApplies(stripeSubscriptionId) ? deps.prepareSandboxCycle : undefined;
+  const prepareCycle = !deps.pauseCycleApplies || await deps.pauseCycleApplies(stripeSubscriptionId, subscription.id) ? deps.prepareSandboxCycle : undefined;
   const sandboxCycle = prepareCycle && paidPeriod.ok
     ? await prepareCycle(stripeSubscription, subscription.id, paidPeriod)
     : undefined;

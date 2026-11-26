@@ -1,5 +1,5 @@
 import { inspectVerifiedB2bInvoice, issueVerifiedAnnualInvoices, issueVerifiedOrderInvoices } from "../../../../lib/gloaInvoice.server";
-import { livePauseKey, livePauseTargetAllowed, sandboxPauseKey } from "../../../../lib/subscriptionPauseActions.server";
+import { hasLivePauseHistory, livePauseKey, sandboxPauseKey } from "../../../../lib/subscriptionPauseActions.server";
 import { createStripePauseScheduleLive, GLOA_LIVE_PAUSE_ACCOUNT } from "../../../../lib/stripePauseScheduleSandbox.server";
 import { releaseTerminalFirstMatchaCheckout } from "../../../../lib/matchaFirstCheckout";
 import type Stripe from "stripe";
@@ -135,14 +135,22 @@ export async function POST(request: Request): Promise<Response> {
   const pauseLifecycle = event.type === "customer.subscription.paused" || event.type === "customer.subscription.resumed";
   const paidInvoiceSubscription = event.livemode && event.type === "invoice.paid" && process.env.GLOA_LIVE_PAUSE_SIGNING_ENDPOINT
     ? resolveInvoiceSubscriptionId(event.data.object as Stripe.Invoice) : null;
-  if (event.livemode && event.account && event.account !== GLOA_LIVE_PAUSE_ACCOUNT &&
-      (pauseLifecycle || (paidInvoiceSubscription && livePauseTargetAllowed(paidInvoiceSubscription)))) {
-    return Response.json({ error: "Stripe-Konto passt nicht." }, { status: 403 });
+  const foreignAccount = event.account && event.account !== GLOA_LIVE_PAUSE_ACCOUNT;
+  if (event.livemode) {
+    try {
+      if (foreignAccount && (pauseLifecycle || (paidInvoiceSubscription && await hasLivePauseHistory(paidInvoiceSubscription)))) {
+        return Response.json({ error: "Stripe-Konto passt nicht." }, { status: 403 });
+      }
+      if (pauseLifecycle) {
+        const subscription = event.data.object as Stripe.Subscription;
+        if (subscription.livemode !== true) return Response.json({ error: "Stripe-Modus passt nicht." }, { status: 403 });
+        if (!await hasLivePauseHistory(subscription.id)) return Response.json({ received: true });
+      }
+    } catch {
+      return Response.json({ error: "LIVE-Pausenstatus nicht belegt." }, { status: 503 });
+    }
   }
   if (event.livemode && pauseLifecycle) {
-    const subscription = event.data.object as Stripe.Subscription;
-    if (subscription.livemode !== true) return Response.json({ error: "Stripe-Modus passt nicht." }, { status: 403 });
-    if (!livePauseTargetAllowed(subscription.id)) return Response.json({ received: true });
     const key = livePauseKey();
     if (!key) return Response.json({ error: "LIVE-Pausenstatus nicht freigegeben." }, { status: 503 });
     try {

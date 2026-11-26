@@ -1,4 +1,4 @@
-﻿import assert from "node:assert/strict";
+import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import test from "node:test";
 import Stripe from "stripe";
@@ -34,7 +34,7 @@ test("signed LIVE webhook opt-in does not affect receipts outside the selected p
     "stripePauseScheduleSandbox.server": { GLOA_LIVE_PAUSE_ACCOUNT },
     "subscriptionPauseActions.server": {
       livePauseKey: () => { keyCalls++; return null; },
-      livePauseTargetAllowed: id => id === stripeId,
+      hasLivePauseHistory: id => id === stripeId,
     },
     subscriptionInvoiceRules: load("../lib/subscriptionInvoiceRules.ts", {}),
     stripeWebhookEvents: { hasStripeWebhookEventBeenProcessed: async () => { dedupeCalls++; return true; } },
@@ -59,7 +59,7 @@ test("signed LIVE webhook opt-in does not affect receipts outside the selected p
   assert.equal(dedupeCalls, 1);
 });
 
-function fixture({ account = GLOA_LIVE_PAUSE_ACCOUNT, events = neededEvents, sub = subscription, due = 2089, pending = false } = {}) {
+function fixture({ account = GLOA_LIVE_PAUSE_ACCOUNT, events = neededEvents, sub = subscription, due = 2089, pending = false, latest = null } = {}) {
   const requests = [];
   const adapter = createStripePauseScheduleLive(key, async (url, options) => {
     const { pathname } = new URL(url);
@@ -76,6 +76,7 @@ function fixture({ account = GLOA_LIVE_PAUSE_ACCOUNT, events = neededEvents, sub
         pause_schedules: [{ key: "pause_schedule_fixture", pause: { pause_at: pauseAt, status: { type: "succeeded" } } }],
       });
     }
+    if (pathname === "/v1/invoices/in_initial") return Response.json(latest);
     if (pathname === "/v1/invoices") return Response.json({ has_more: false, data: [] });
     if (pathname === "/v1/invoices/create_preview") return Response.json({
       livemode: true, currency: "eur", customer: "cus_owner", subtotal: 2089, total: 2089, amount_due: due,
@@ -135,23 +136,22 @@ test("LIVE requires a matching preview before mutating and a pending response ke
   ]);
 });
 
-test("LIVE customer actions default closed and require an endpoint pin, matching digest and allowlist", () => {
+test("LIVE customer actions default closed and require an endpoint pin, matching digest", () => {
   const signing = "whsec_fixture";
   const env = { VERCEL_ENV: "production", STRIPE_SECRET_KEY: key, STRIPE_WEBHOOK_SECRET: signing,
     GLOA_LIVE_PAUSE_SIGNING_ENDPOINT: GLOA_LIVE_PAUSE_ENDPOINT,
-    GLOA_LIVE_PAUSE_SIGNING_SHA256: createHash("sha256").update(signing).digest("hex"),
-    GLOA_LIVE_PAUSE_SUBSCRIPTIONS: stripeId };
+    GLOA_LIVE_PAUSE_SIGNING_SHA256: createHash("sha256").update(signing).digest("hex") };
   const actions = load("../lib/subscriptionPauseActions.server.ts", {
     "node:crypto": { createHash, randomUUID },
     "stripePauseScheduleSandbox.server": { GLOA_LIVE_PAUSE_ENDPOINT },
   }, env);
-  assert.equal(actions.livePauseActionsKey(stripeId), null);
+  assert.equal(actions.livePauseActionsKey(), null);
   env.GLOA_LIVE_PAUSE_ACTIONS = "true";
-  assert.equal(actions.livePauseActionsKey(stripeId), key);
-  assert.equal(actions.livePauseActionsKey("sub_foreign"), null);
+  assert.equal(actions.livePauseActionsKey(), key);
+
   assert.equal(actions.sandboxPauseKey(), null);
   env.STRIPE_WEBHOOK_SECRET = "whsec_different";
-  assert.equal(actions.livePauseActionsKey(stripeId), null);
+  assert.equal(actions.livePauseActionsKey(), null);
 });
 
 test("customer route does not dispatch LIVE actions for a foreign subscription owner", async () => {
@@ -165,7 +165,7 @@ test("customer route does not dispatch LIVE actions for a foreign subscription o
         { id: localId, stripe_subscription_id: stripeId, status: "active" } : null }; },
     }) }) },
     "subscriptionPauseActions.server": {
-      sandboxPauseKey: () => null, livePauseActionsKey: id => id === stripeId ? key : null,
+      sandboxPauseKey: () => null, livePauseActionsKey: () => key,
       changeLiveSubscriptionPause: async (_admin, target, action, userId) => {
         handedOff.push({ ...target, action, userId });
         return { state: "resume_requested" };
@@ -188,7 +188,7 @@ test("LIVE paid invoice dependency keeps the detached cycle guarded and leaves u
   let configure = true;
   const app = load("../lib/subscriptionInvoiceFulfillment.ts", {
     "subscriptionPauseActions.server": {
-      livePauseKey: () => configure ? key : null, livePauseTargetAllowed: value => value === stripeId, sandboxPauseKey: () => null,
+      livePauseKey: () => configure ? key : null, hasLivePauseHistory: value => value === stripeId, sandboxPauseKey: () => null,
     },
     "stripePauseScheduleSandbox.server": { createStripePauseScheduleLive: () => ({ verifyContext: async () => context }) },
     subscriptionInvoiceRules: { idOf: id => id },
@@ -199,9 +199,67 @@ test("LIVE paid invoice dependency keeps the detached cycle guarded and leaves u
   const paid = { start: new Date(now * 1000).toISOString(), end: new Date((now + 28 * 86400) * 1000).toISOString() };
   assert.equal((await deps.prepareSandboxCycle(active, localId, paid)).resumedAt, paid.start);
   assert.equal((await deps.prepareSandboxCycle({ ...active, status: "paused" }, localId, paid)).resumedAt, null);
-  await assert.rejects(deps.prepareSandboxCycle({ ...active, livemode: false }, localId, paid), /mode mismatch/);
+  await assert.rejects(deps.prepareSandboxCycle({ ...active, livemode: false }, localId, paid), /mode unconfirmed/);
   context = false;
   await assert.rejects(deps.prepareSandboxCycle(active, localId, paid), /context unconfirmed/);
   configure = false;
-  assert.equal(app.subscriptionInvoiceDeps({}, true).prepareSandboxCycle, undefined);
+  await assert.rejects(app.subscriptionInvoiceDeps({}, true).prepareSandboxCycle(active, localId, paid), /signing/);
+});
+
+test("LIVE target binds customer, subscription and payment evidence without an ID allowlist", async () => {
+  const actions = load("../lib/subscriptionPauseActions.server.ts", {});
+  const queries = [];
+  let row = { status: "active", cancelled_at: null, last_paid_period_end: "2027-01-01T00:00:00Z",
+    currency: "EUR", total_gross_cents: 2089, shipping_gross_cents: 590 };
+  const target = { localId, stripeId };
+  const admin = { from: table => ({
+    select() { return this; },
+    eq(column, value) { queries.push([table, column, value]); return this; },
+    async maybeSingle() { return { data: table === "subscriptions" ? row : { stripe_customer_id: "cus_owner" } }; },
+  }) };
+  const getTarget = (action = "pause") => actions.loadLivePauseTarget(admin, target, "owner", action);
+  assert.deepEqual(JSON.parse(JSON.stringify(await getTarget())), { stripeCustomerId: "cus_owner", liveCyclePrice: { totalCents: 2089, shippingCents: 590 } });
+  assert.deepEqual(queries.filter(([table]) => table === "subscriptions"), [
+    ["subscriptions", "id", localId], ["subscriptions", "user_id", "owner"],
+    ["subscriptions", "stripe_subscription_id", stripeId],
+  ]);
+  const paid = row;
+  for (const patch of [{ cancelled_at: "2027-01-01" }, { status: "past_due" }, { currency: "USD" }, { last_paid_period_end: null }]) {
+    row = { ...paid, ...patch };
+    assert.equal(await getTarget(), null);
+  }
+  row = { ...paid, status: "paused" };
+  assert.equal(await getTarget(), null);
+  assert.ok(await getTarget("resume"));
+  row = null;
+  assert.equal(await getTarget(), null);
+});
+
+test("invoice routing uses persisted windows or unresolved fences and fails closed on read errors", async () => {
+  let evidence = {};
+  const admin = { from: table => ({
+    select() { return this; },
+    eq() { return this; },
+    async limit() { return evidence[table] ?? { data: [] }; },
+  }) };
+  const actions = load("../lib/subscriptionPauseActions.server.ts", { supabaseAdmin: { getSupabaseAdmin: () => admin } });
+  assert.equal(await actions.hasLivePauseHistory(stripeId, localId), false);
+  evidence = { subscription_pause_windows: { data: [{ schedule_id: scheduleId }] } };
+  assert.equal(await actions.hasLivePauseHistory(stripeId, localId), true);
+  evidence = { subscription_pause_write_fences: { data: [{ operation_id: localId }] } };
+  assert.equal(await actions.hasLivePauseHistory(stripeId, localId), true);
+  evidence = { subscription_pause_windows: { error: new Error() } };
+  await assert.rejects(actions.hasLivePauseHistory(stripeId, localId), /history unavailable/);
+});
+
+test("a LIVE pause cannot be scheduled with an unpaid or foreign latest invoice", async () => {
+  const sub = { ...subscription, status: "active", latest_invoice: "in_initial" };
+  const evidence = { id: "in_initial", livemode: true, status: "paid", customer: "cus_owner",
+    currency: "eur", total: 2089 };
+  for (const override of [{ status: "open" }, { customer: "cus_foreign" }, { total: 1 }, { livemode: false }]) {
+    const { adapter, requests } = fixture({ sub, latest: { ...evidence, ...override } });
+    const result = await adapter.change({ ...target, operationId: randomUUID() }, "pause");
+    assert.equal(result.reason, "unverified_paid_invoice");
+    assert.ok(requests.every(request => request.method !== "POST"));
+  }
 });

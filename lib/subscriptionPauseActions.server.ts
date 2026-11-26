@@ -18,9 +18,27 @@ export function sandboxPauseKey() {
   }
 }
 
-export function livePauseTargetAllowed(stripeId: string, env = process.env): boolean {
-  const ids = env.GLOA_LIVE_PAUSE_SUBSCRIPTIONS?.split(",") ?? [];
-  return ids.length > 0 && ids.every(id => /^sub_[a-zA-Z0-9_]+$/.test(id)) && ids.includes(stripeId);
+type Admin = NonNullable<ReturnType<typeof getSupabaseAdmin>>;
+
+// Only subscriptions with a GLOA pause operation use the guarded invoice path.
+// Keep using it after resume so late invoices cannot reopen a paused cycle.
+export async function hasLivePauseHistory(stripeId: string, localId?: string): Promise<boolean> {
+  if (!/^sub_[a-zA-Z0-9_]+$/.test(stripeId)) return false;
+  const admin = getSupabaseAdmin();
+  if (!admin) throw new Error("Pause history unavailable");
+  if (!localId) {
+    const { data, error } = await admin.from("subscriptions").select("id")
+      .eq("stripe_subscription_id", stripeId).maybeSingle();
+    if (error) throw new Error("Pause subscription mapping unavailable");
+    if (!data) return false;
+    localId = data.id;
+  }
+  const [windows, fences] = await Promise.all([
+    admin.from("subscription_pause_windows").select("schedule_id").eq("subscription_id", localId).limit(1),
+    admin.from("subscription_pause_write_fences").select("operation_id").eq("subscription_id", localId).limit(1),
+  ]);
+  if (windows.error || fences.error || !windows.data || !fences.data) throw new Error("Pause history unavailable");
+  return windows.data.length > 0 || fences.data.length > 0;
 }
 
 // The pin is recorded by the Owner after verifying the signing secret in Stripe.
@@ -32,8 +50,28 @@ export function livePauseKey(env = process.env): string | null {
   return key;
 }
 
-export function livePauseActionsKey(stripeId: string): string | null {
-  return process.env.GLOA_LIVE_PAUSE_ACTIONS === "true" && livePauseTargetAllowed(stripeId) ? livePauseKey() : null;
+export function livePauseActionsKey(): string | null {
+  return process.env.GLOA_LIVE_PAUSE_ACTIONS === "true" ? livePauseKey() : null;
+}
+
+export async function loadLivePauseTarget(
+  admin: Admin,
+  target: { localId: string; stripeId: string },
+  callerId: string,
+  action: Action,
+) {
+  const [customer, subscription] = await Promise.all([
+    admin.from("stripe_customers").select("stripe_customer_id").eq("user_id", callerId).maybeSingle(),
+    admin.from("subscriptions").select("status,cancelled_at,last_paid_period_end,currency,total_gross_cents,shipping_gross_cents")
+      .eq("id", target.localId).eq("user_id", callerId).eq("stripe_subscription_id", target.stripeId).maybeSingle(),
+  ]);
+  const row = subscription.data;
+  const stripeCustomerId = customer.data?.stripe_customer_id;
+  if (customer.error || subscription.error || !stripeCustomerId || !/^cus_[a-zA-Z0-9_]+$/.test(stripeCustomerId) ||
+      !row || row.currency !== "EUR" || row.cancelled_at !== null ||
+      (action === "pause" ? row.status !== "active" : !["active", "paused"].includes(row.status)) ||
+      !row.last_paid_period_end || !Number.isFinite(Date.parse(row.last_paid_period_end))) return null;
+  return { stripeCustomerId, liveCyclePrice: { totalCents: row.total_gross_cents, shippingCents: row.shipping_gross_cents } };
 }
 
 export async function changeSandboxSubscriptionPause(
@@ -51,19 +89,11 @@ export async function changeLiveSubscriptionPause(
   action: Action,
   callerId: string,
 ) {
-  const key = livePauseActionsKey(target.stripeId);
+  const key = livePauseActionsKey();
   if (!key) return { state: "blocked" as const, reason: "live_pause_disabled" };
-  const [customer, subscription] = await Promise.all([
-    admin.from("stripe_customers").select("stripe_customer_id").eq("user_id", callerId).maybeSingle(),
-    admin.from("subscriptions").select("currency,total_gross_cents,shipping_gross_cents")
-      .eq("id", target.localId).eq("user_id", callerId).eq("stripe_subscription_id", target.stripeId).maybeSingle(),
-  ]);
-  if (customer.error || !customer.data?.stripe_customer_id) return { state: "blocked" as const, reason: "customer_mapping_unconfirmed" };
-  if (subscription.error || subscription.data?.currency !== "EUR") return { state: "blocked" as const, reason: "live_contract_unconfirmed" };
-  const liveCyclePrice = { totalCents: subscription.data.total_gross_cents, shippingCents: subscription.data.shipping_gross_cents };
-  const adapter = createStripePauseScheduleLive(key);
-  if (!await adapter.verifyContext()) return { state: "blocked" as const, reason: "unverified_live_context" };
-  return changeSubscriptionPause(admin, { ...target, stripeCustomerId: customer.data.stripe_customer_id, liveCyclePrice }, action, adapter);
+  const verified = await loadLivePauseTarget(admin, target, callerId, action);
+  if (!verified) return { state: "blocked" as const, reason: "live_contract_unconfirmed" };
+  return changeSubscriptionPause(admin, { ...target, ...verified }, action, createStripePauseScheduleLive(key));
 }
 
 async function changeSubscriptionPause(

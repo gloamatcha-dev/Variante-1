@@ -1,4 +1,4 @@
-﻿import assert from "node:assert/strict";
+import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
@@ -17,7 +17,7 @@ test("production rejects correctly signed sandbox events before persistence and 
     stripe: { getStripeClient: () => ({
       webhooks: stripe.webhooks, subscriptions: { retrieve: async id => ({ id, livemode: true }) },
     }) },
-    "subscriptionPauseActions.server": { livePauseKey: () => pauseKey, livePauseTargetAllowed: id => id === "sub_fixture" },
+    "subscriptionPauseActions.server": { livePauseKey: () => pauseKey, hasLivePauseHistory: id => id === "sub_fixture" },
     "stripePauseScheduleSandbox.server": {
       GLOA_LIVE_PAUSE_ACCOUNT: "acct_1U6B3ODI76FH9qsq",
       createStripePauseScheduleLive: () => ({ verifyContext: async () => context }),
