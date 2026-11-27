@@ -485,3 +485,17 @@ test('German PDF tax columns and net-tax summary footer reach editable cents',()
   assert.deepEqual([review.fields.netCents,review.fields.taxCents,review.fields.grossCents],[1000,190,1190]);
   assert.equal(analyzeDocumentOcr(summary.replace('11,90','10,50')).fields.grossCents,undefined);
 });
+
+test('receipt tax table tolerates OCR edge noise and confirms the printed total',()=>{
+  const text=['Kassenbon','Kartenzahlung 42,92','NR Steuer X Brutto Netto Steuer IE',
+    'IN A 19,00% 0,25 0,21 0,04 RRS N','ee B7,00X 42,67 39,88 2,79 SN','EUR 42,92'].join('\n');
+  const review=analyzeDocumentOcr(text);
+  assert.deepEqual([review.fields.netCents,review.fields.taxCents,review.fields.grossCents],[4009,283,4292]);
+  assert.deepEqual(review.rates.map(Number),[19,7]);
+  assert.equal(review.fields.taxRate,undefined);
+  for(const [label,value] of [['Netto (19.00 %)','0,21'],['Steuer (19.00 %)','0,04'],
+    ['Netto (7.00 %)','39,88'],['Steuer (7.00 %)','2,79']]){
+    assert.ok(review.context.some(fact=>fact.label===label&&fact.value.startsWith(value)));
+  }
+  assert.equal(analyzeDocumentOcr(text.replace('EUR 42,92','EUR 42,90')).fields.grossCents,undefined);
+});

@@ -274,9 +274,13 @@ export function analyzeDocumentOcr(source:string) {
   const baseNet = rates.length===1 && baseRows.length ? unique(baseRows.map(row=>row.base)) : undefined;
   const netValue = net.value ?? (!candidates(rx.net).length
     ? table.groups.length ? grouped('net') : baseNet??breakdown.value?.net : undefined);
+  const receiptSum = canSuggestAmounts && table.groups.length > 0 && !table.invalid && table.receiptTable
+    ? lines.find(line=>/^(?:EUR\s+|€\s*)\d+[.,]\d{2}$/.test(line) && storedAmount(line)===grouped('gross'))
+    : undefined;
   const gross = candidates(rx.gross).length ? explicitGross
-    : candidates(rx.simpleTotal).length || kind==='Kassenbon / Quittung' ? genericGross
-    : breakdown.value && payable.value === breakdown.value.net + breakdown.value.tax ? payable : genericGross;
+    : candidates(rx.simpleTotal).length || (kind==='Kassenbon / Quittung' && candidates(rx.payableTotal).length) ? genericGross
+    : breakdown.value && payable.value === breakdown.value.net + breakdown.value.tax ? payable
+    : receiptSum ? {value:grouped('gross'),source:receiptSum} : genericGross;
   const tableSource = table.groups.map(row=>row.source).join('\n');
   const taxTableConflict = table.invalid || (table.groups.length > 0 && (
     (gross.value !== undefined && Math.abs(gross.value - grouped('gross')) > 1) ||
@@ -335,11 +339,14 @@ function readTaxTable(source: string) {
   const tableLines = new Set<string>();
   let header: string[] | undefined;
   let invalid = false;
+  let receiptTable = false;
+  let hasReceiptTable = false;
   for (const line of source.split(/\r?\n/)) {
     const split = columns(line);
     const cells = split.length === 1 && /^\s*(?:Steuersatz|Satz|MwSt\.?\s*%|USt\.?\s*%)(?:\s|$)/i.test(line)
       ? line.trim().replace(/(MwSt\.?|USt\.?)\s+%/i,'$1%').split(/\s+/) : split;
-        const names = cells.map(value => {
+        const receiptHeader = /\bSteuer\s*[%X]\s+Brutto\s+Netto\s+Steuer\b/i.test(line);
+    const names = cells.map(value => {
       const cell = value.replace(/\s*(?:\(EUR\)|\[EUR\]|\(€\)|\[€\]|\bEUR|€)\s*$/i,'').trim();
       if (/^(?:Steuersatz|Satz|(?:MwSt\.?|USt\.?|Umsatzsteuer)[ -]?Satz|MwSt\.?\s*%|USt\.?\s*%|VAT rate|Tax rate)$/i.test(cell)) return 'rate';
       if (/^(?:Netto(?:betrag)?|Net(?: amount)?)$/i.test(cell)) return 'net';
@@ -347,15 +354,22 @@ function readTaxTable(source: string) {
       if (/^(?:MwSt\.?|USt\.?|Mehrwertsteuer|Umsatzsteuer|Steuer)(?:[ -]?betrag)?$|^(?:VAT|Tax)(?: amount)?$/i.test(cell)) return 'tax';
       return '';
     });
-    if (names.length === 4 && names.every(Boolean) && new Set(names).size === 4) {
+    if (receiptHeader || (names.length === 4 && names.every(Boolean) && new Set(names).size === 4)) {
       tableLines.add(line);
-      header = names;
+      receiptTable = receiptHeader;
+      hasReceiptTable ||= receiptHeader;
+      header = receiptHeader ? ['rate','gross','net','tax'] : names;
       continue;
     }
     if (!header || !line.trim()) continue;
     // OCR can flatten padded columns to single spaces; only restore them
     // while inside a recognized table and for an explicit percentage row.
-    const values = cells.length === 4 ? cells
+    // OCR can surround a printed row with characters from the receipt edges.
+    // Only relax the row shape under the explicit receipt tax column header.
+    const receiptRow = receiptTable
+      ? /(?<![\d.,])(\d{1,2}(?:[.,]\d{1,2})?)\s*[%X]\s+(\d+[.,]\d{2})\s+(\d+[.,]\d{2})\s+(\d+[.,]\d{2})(?![\d.,])/i.exec(line)
+      : null;
+    const values = receiptRow ? [receiptRow[1]+'%',...receiptRow.slice(2)] : cells.length === 4 ? cells
       : line.trim().replace(/\s*%/g,'%').replace(/\s+(EUR|€)(?=\s|$)/g,'$1').split(/\s+/);
     const rateValue = values[header.indexOf('rate')];
     const rate = /^(\d{1,2}(?:[.,]\d{1,2})?)\s*%$/.exec(rateValue??'')?.[1]?.replace(',','.');
@@ -376,7 +390,7 @@ function readTaxTable(source: string) {
     }
     groups.push({rate,net,tax,gross,source:line});
   }
-  return {groups,invalid,tableLines};
+  return {groups,invalid,tableLines,receiptTable:hasReceiptTable};
 }
 
 function normalizeTrailingTaxRate(line:string) {
