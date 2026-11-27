@@ -365,17 +365,19 @@ export function isIsoDate(value: unknown): value is string {
  * paid at 00:30 Berlin time on 1 October is October revenue; comparing
  * the raw instant against a UTC boundary would file it under September.
  *
- * en-CA is used only because it formats as YYYY-MM-DD.
+ * Assemble the ISO date from parts, independent of locale punctuation.
  */
 export function berlinDateOf(instant: string): string | null {
   const d = new Date(instant);
   if (Number.isNaN(d.getTime())) return null;
-  return new Intl.DateTimeFormat("en-CA", {
+  const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Europe/Berlin",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(d);
+  }).formatToParts(d);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(value => value.type === type)?.value;
+  return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
 /** Inclusive on both ends, compared as strings because ISO dates sort. */

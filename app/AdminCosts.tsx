@@ -11,6 +11,8 @@ import {
   EXPENSE_PAYMENT_STATUSES,
   EXPENSE_PAYMENT_STATUS_LABEL,
   expenseNetCents,
+  berlinDateOf,
+  validateFinancePeriod,
   monthPeriod,
   previousMonthPeriod,
   type ExpenseCategory,
@@ -102,15 +104,13 @@ type ExpenseRow = {
   cancelled?: boolean;
 };
 
-type PeriodChoice = "this_month" | "last_month" | "custom";
+type PeriodChoice = "this_month" | "last_month" | "year" | "custom";
 type ChannelFilter = ExpenseChannel | "all";
 type StatusFilter = ExpensePaymentStatus | "all";
 
 /** Today as an ISO date in Berlin - the only clock this screen reads. */
 function todayInBerlin(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Berlin", year: "numeric", month: "2-digit", day: "2-digit",
-  }).format(new Date());
+  return berlinDateOf(new Date().toISOString())!;
 }
 
 function fmtDate(iso: string): string {
@@ -123,7 +123,7 @@ function fmtDate(iso: string): string {
 /** The one place an unknown VAT becomes words rather than a number. */
 const VAT_UNKNOWN = "Vorsteuer unbekannt";
 
-export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter="", onExpensesChanged }: { onSessionLost: () => void; expensesOnly?:boolean;initialFilter?:string;onExpensesChanged?:()=>void }) {
+export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter="", onExpensesChanged, onPeriodChanged }: { onSessionLost: () => void; expensesOnly?:boolean;initialFilter?:string;onExpensesChanged?:()=>void;onPeriodChanged?:(period:FinancePeriod)=>void }) {
   const [choice, setChoice] = useState<PeriodChoice>("this_month");
   const [custom, setCustom] = useState<FinancePeriod>(() => monthPeriod(todayInBerlin()));
   const [summary, setSummary] = useState<FinanceSummary | null>(null);
@@ -170,18 +170,16 @@ export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter=""
   */
   const submitOpRef = useRef<string>("");
 
-  const period: FinancePeriod = choice === "this_month"
-    ? monthPeriod(todayInBerlin())
-    : choice === "last_month"
-      ? previousMonthPeriod(todayInBerlin())
-      : custom;
-  /*
-    TWO PRIMITIVES, NOT THE OBJECT. `period` is derived on every render,
-    so an effect depending on it would re-fetch forever. These two strings
-    are what actually changes.
-  */
-  const periodFrom = period.from;
-  const periodTo = period.to;
+  const today = todayInBerlin();
+  const year = today.slice(0,4);
+  const selected = choice === "custom" ? custom
+    : choice === "last_month" ? previousMonthPeriod(today)
+    : choice === "year" ? {from: year+"-01-01", to: year+"-12-31"}
+    : monthPeriod(today);
+  const validation = validateFinancePeriod(selected.from, selected.to);
+  const periodError = validation.ok ? "" : validation.reason;
+  const periodFrom = validation.ok ? selected.from : summary?.period.from ?? "";
+  const periodTo = validation.ok ? selected.to : summary?.period.to ?? "";
 
   const load = useCallback(async (
     from: string,
@@ -226,10 +224,12 @@ export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter=""
       an immediately-invoked async function is what makes that visible to
       the effect.
     */
+    if (periodError) return;
+    onPeriodChanged?.({from:periodFrom,to:periodTo});
     let cancelled = false;
     (async () => { await load(periodFrom, periodTo, () => cancelled); })();
     return () => { cancelled = true; };
-  }, [load, periodFrom, periodTo]);
+  }, [load, onPeriodChanged, periodError, periodFrom, periodTo]);
 
   const resetForm = () => {
     // A new blank form is a new intent, so it gets its own operation id.
@@ -382,11 +382,6 @@ export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter=""
     }
   };
 
-  if (loading && !summary) return <p className="ops-loading">Laden…</p>;
-  if (loadError) return <p className="ops-error">{loadError}</p>;
-  if (!summary) return <p className="ops-empty">Keine Daten für diesen Zeitraum.</p>;
-
-  const s = summary;
   /*
     THE FILTERS NARROW THE LEDGER, NOT THE TOTALS.
 
@@ -399,15 +394,14 @@ export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter=""
     (channelFilter === "all" || e.channel === channelFilter)
     && (statusFilter === "all" || e.paymentStatus === statusFilter));
 
-  return (
-    <section className="ops-panel ops-costs">
-      {/* ── ZEITRAUM ── */}
+  const periodPicker = (
       <div className="ops-filter-row">
         <label>
           Zeitraum
           <select value={choice} onChange={e => setChoice(e.target.value as PeriodChoice)}>
             <option value="this_month">Aktueller Monat</option>
             <option value="last_month">Vorheriger Monat</option>
+            <option value="year">Dieses Jahr</option>
             <option value="custom">Eigener Zeitraum</option>
           </select>
         </label>
@@ -419,8 +413,21 @@ export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter=""
               onChange={e => setCustom(c => ({ ...c, to: e.target.value }))} /></label>
           </>
         )}
-        <span className="ops-refresh-at">{fmtDate(s.period.from)} – {fmtDate(s.period.to)}</span>
+        {summary && <span className="ops-refresh-at">Angezeigt: {fmtDate(summary.period.from)} – {fmtDate(summary.period.to)}</span>}
+        {periodError && <p className="ops-error" role="alert">{periodError}</p>}
       </div>
+  );
+
+  const loadNotice = loadError ? <p className="ops-error" role="alert">{loadError}</p> : null;
+  if (!summary) return <section className="ops-panel ops-costs">
+    {periodPicker}{loadNotice}
+    {!periodError && !loadError && (loading ? <p className="ops-loading">Laden…</p> : <p className="ops-empty">Keine Daten für diesen Zeitraum.</p>)}
+  </section>;
+
+  const s = summary;
+  return (
+    <section className="ops-panel ops-costs">
+      {periodPicker}{loadNotice}
 
       {/*
         ── THE DISCLOSURE, ABOVE THE FIGURES AND NOT BELOW THEM ──
@@ -609,7 +616,7 @@ export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter=""
           {formOpen ? "Abbrechen" : "Kosten erfassen"}
         </button>
         <button type="button" className="ops-refresh"
-          onClick={() => void load(periodFrom, periodTo)}>
+          disabled={Boolean(periodError)} onClick={() => void load(periodFrom, periodTo)}>
           Neu laden
         </button>
       </div>
