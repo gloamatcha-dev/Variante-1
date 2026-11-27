@@ -499,3 +499,14 @@ test('receipt tax table tolerates OCR edge noise and confirms the printed total'
   }
   assert.equal(analyzeDocumentOcr(text.replace('EUR 42,92','EUR 42,90')).fields.grossCents,undefined);
 });
+
+test('invoice net includes separately stated freight only with an agreeing tax and total',()=>{
+  const text=['Rechnung','Rechnungsnummer: TEST-42','MwSt.','19%\tArtikelbetrag',
+    'Zwischensumme (exkl. MwSt.)\t20,16 €','Lieferkosten (exkl. MwSt.)\t9,20 €',
+    '19% Gesamtbetrag MwSt.\t5,58 €','Gesamt\t34,94 €'].join('\n');
+  const result=analyzeDocumentOcr(text);
+  assert.deepEqual([result.fields.netCents,result.fields.taxCents,result.fields.grossCents,result.fields.taxRate],[2936,558,3494,'19']);
+  assert.match(result.evidence.netCents,/Berechnet/);
+  assert.ok(result.context.some(fact=>fact.label==='Versand netto'&&fact.value.startsWith('9,20')));
+  assert.equal(analyzeDocumentOcr(text.replace('34,94','34,95')).fields.netCents,undefined);
+});

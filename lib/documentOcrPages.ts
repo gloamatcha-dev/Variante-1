@@ -6,7 +6,7 @@ export function reviewDocumentPages(pages: string[]) {
   const blocked = (documents: {from:number; to:number; review:ReturnType<typeof analyzeDocumentOcr>}[]) => ({
     ...analyzeDocumentOcr(''), source, pageCount: pages.length, batch: documents.length > 1 ? 'multiple' as const : 'unclear' as const, documents,
     issues: [documents.length > 1
-      ? 'Mehrere Rechnungen erkannt. Seitenbereich als Teil-PDF speichern und jeden Einzelbeleg separat hochladen.'
+      ? 'Mehrere Rechnungen erkannt. Wähle einen Einzelbeleg und bestätige ihn separat im Formular.'
       : 'Beleggrenzen sind nicht eindeutig. Prüfe die Seiten am Original, speichere einen Seitenbereich als Teil-PDF und lade ihn separat hoch.'],
   });
 

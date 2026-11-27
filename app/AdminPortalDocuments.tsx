@@ -37,7 +37,10 @@ export function AdminPortalDocuments(){
   const extractedFields=useRef<Record<string,string>>({});
   const [ocrReview,setOcrReview]=useState<ReturnType<typeof reviewDocumentPages>|null>(null);
   const [selectedPdf,setSelectedPdf]=useState<File|null>(null);
+  const [selectedPart,setSelectedPart]=useState<{file:File;from:number;to:number}|null>(null);
+  const [savedParts,setSavedParts]=useState<number[]>([]);
   const [splitFrom,setSplitFrom]=useState('1'),[splitTo,setSplitTo]=useState('1');
+  const visibleReview=selectedPart ? ocrReview?.documents.find(part=>part.from===selectedPart.from)?.review : ocrReview;
   const [ocrContext,setOcrContext]=useState('');
   const [extractionNotice,setExtractionNotice]=useState('');
   const [cleanupId,setCleanupId]=useState<string|null>(null);
@@ -80,10 +83,14 @@ export function AdminPortalDocuments(){
   }
   async function submit(event:FormEvent<HTMLFormElement>,action:string){
     event.preventDefault();
-    const values=new FormData(event.currentTarget);
+    const currentForm=event.currentTarget;
+    const values=new FormData(currentForm);
     await perform(async()=>{
       if(action==='create_document' && ocrReview && ocrReview.batch!=='single') {
-        throw Error('Bitte die PDF vor dem Speichern in einzelne Belege aufteilen.');
+        if(ocrReview.batch!=='multiple'||!selectedPart||savedParts.includes(selectedPart.from)) {
+          throw Error('Bitte zuerst einen eindeutig erkannten Einzelbeleg auswählen.');
+        }
+        values.set('file',selectedPart.file);
       }
       if(action==='create_document'||action==='update_document') documentAmountsToCents(values);
       if(action==='create_document'){
@@ -91,13 +98,50 @@ export function AdminPortalDocuments(){
         const response=await fetch(endpoint,{method:'POST',body:values});
         const result=await response.json();
         if(!response.ok||result.ok!==true)throw Error(result.error??'Speichern fehlgeschlagen.');
-        setForm(false);setSelectedId(String(result.documentId));
+        setSelectedId(String(result.documentId));
+        if(selectedPart){
+          setSavedParts(previous=>[...previous,selectedPart.from]);
+          setSelectedPart(null);
+          setOcrContext('');
+          setExtractionNotice('');
+          resetPartForm(currentForm);
+        }else setForm(false);
       }else{
         const fields=Object.fromEntries(values);
         const operation=action==='income'&&fields.previousId?'correct_income':action;
         await portalRequest(endpoint,{...fields,action:operation,id:selectedId,documentId:selectedId,nonStripe:fields.nonStripe==='on'});
       }
       setNotice('Gespeichert.');refresh();
+    });
+  }
+  function resetPartForm(form:HTMLFormElement){
+    form.reset();
+    extractedFields.current={};
+    const currency=form.elements.namedItem('currency');
+    if(currency instanceof HTMLInputElement) currency.dispatchEvent(new Event('input',{bubbles:true}));
+  }
+  function applyReview(form:HTMLFormElement,review:ReturnType<typeof reviewDocumentPages>['documents'][number]['review']){
+    setOcrContext(review.context.filter(fact=>!fact.unresolved).map(fact=>fact.label+': '+fact.value).join('\n'));
+    const {applied,unresolved}=fillDocumentOcrPreview(form,review.fields,review.kind==='Kassenbon / Quittung');
+    const missing=review.rates.length>1?unresolved.filter(item=>!item.startsWith('Steuersatz ')):unresolved;
+    Object.assign(extractedFields.current,applied);
+    const confirmation=form.elements.namedItem('confirmed');
+    if(confirmation instanceof HTMLInputElement) confirmation.checked=false;
+    const currency=form.elements.namedItem('currency');
+    if(applied.currency && currency instanceof HTMLInputElement) currency.dispatchEvent(new Event('input',{bubbles:true}));
+    setExtractionNotice('Alle Werte am Original prüfen. '+(missing.length?'Offen: '+missing.join('; ')+'.':'Erkannte Angaben wurden als Vorschläge eingesetzt.'));
+  }
+  async function selectPdfPart(form:HTMLFormElement,file:File,part:ReturnType<typeof reviewDocumentPages>['documents'][number]){
+    if(ocrReview?.batch!=='multiple'||!ocrReview.documents.includes(part)||savedParts.includes(part.from)||!part.review.fields.invoiceNumber) return;
+    await perform(async()=>{
+      const {splitDocumentPdf}=await import('../lib/documentOcr.browser');
+      const blob=await splitDocumentPdf(file,part.from,part.to);
+      const extracted=new File([blob],'beleg-seiten-'+part.from+'-'+part.to+'.pdf',{type:'application/pdf'});
+      resetPartForm(form);
+      applyReview(form,part.review);
+      const title=form.elements.namedItem('title');
+      if(title instanceof HTMLInputElement) title.value='Rechnung '+part.review.fields.invoiceNumber;
+      setSelectedPart({file:extracted,from:part.from,to:part.to});
     });
   }
   async function preview(form:HTMLFormElement) {
@@ -112,17 +156,7 @@ export function AdminPortalDocuments(){
         setOcrContext('');
         return;
       }
-      setOcrContext(review.context.filter(fact=>!fact.unresolved).map(fact=>fact.label+': '+fact.value).join('\n'));
-      const {applied,unresolved}=fillDocumentOcrPreview(form,review.fields,review.kind==='Kassenbon / Quittung');
-      const missing=review.rates.length>1?unresolved.filter(item=>!item.startsWith('Steuersatz ')):unresolved;
-      Object.assign(extractedFields.current,applied);
-      const confirmation=form.elements.namedItem('confirmed');
-      if(Object.keys(applied).length&&confirmation instanceof HTMLInputElement) confirmation.checked=false;
-      const currencyInput=form.elements.namedItem('currency');
-      if(applied.currency && currencyInput instanceof HTMLInputElement) {
-        currencyInput.dispatchEvent(new Event('input',{bubbles:true}));
-      }
-      setExtractionNotice('Alle Werte am Original prüfen. '+(missing.length?'Offen: '+missing.join('; ')+'.':'Erkannte Angaben wurden als Vorschläge eingesetzt.'));
+      applyReview(form,review);
     });
   }
   async function downloadPdfRange(file:File, from:number, to:number) {
@@ -153,7 +187,7 @@ export function AdminPortalDocuments(){
   return <>
     <div className="portal-section-head"><h2>Private Geschäftsdokumente</h2>
       <button type="button" onClick={refresh}>Aktualisieren</button>
-      <button type="button" disabled={busy} onClick={()=>{extractedFields.current={};setSelectedPdf(null);setOcrReview(null);setOcrContext('');setExtractionNotice('');setForm(v=>!v);}}>{form?'Abbrechen':'Dokument erfassen'}</button>
+      <button type="button" disabled={busy} onClick={()=>{extractedFields.current={};setSelectedPdf(null);setSelectedPart(null);setSavedParts([]);setOcrReview(null);setOcrContext('');setExtractionNotice('');setForm(v=>!v);}}>{form?'Abbrechen':'Dokument erfassen'}</button>
     </div>
     {notice&&<p role="status">{notice}</p>}
     {form&&<form className="portal-form admin-data-card" aria-label="Rechnung oder Dokument hochladen" onInput={event=>{
@@ -166,6 +200,7 @@ export function AdminPortalDocuments(){
       <label>Originalbeleg (PDF, JPG oder PNG, bis 3 MB)<input name="file" type="file" accept="application/pdf,image/jpeg,image/png" disabled={busy} onChange={event=>{
         const file=event.currentTarget.files?.[0];
         setSelectedPdf(file?.type==='application/pdf'?file:null);
+        setSelectedPart(null);setSavedParts([]);
         setSplitFrom('1');setSplitTo('1');
         const fields=event.currentTarget.form?.elements;
         for(const [name,value] of Object.entries(extractedFields.current)) {
@@ -182,7 +217,7 @@ export function AdminPortalDocuments(){
         if(confirmed instanceof HTMLInputElement)confirmed.checked=false;
         if(event.currentTarget.files?.length&&event.currentTarget.form) void preview(event.currentTarget.form);
       }}/></label>
-      <button type="button" disabled={busy} onClick={e=>{if(e.currentTarget.form)void preview(e.currentTarget.form);}}>Belegdaten auslesen</button>
+      <button type="button" disabled={busy||ocrReview?.batch==='multiple'} onClick={e=>{if(e.currentTarget.form)void preview(e.currentTarget.form);}}>Belegdaten auslesen</button>
       {extractionNotice&&<p role="status">{extractionNotice}</p>}
       {selectedPdf&&<details open={ocrReview?.batch==='multiple'||ocrReview?.batch==='unclear'}>
         <summary>PDF nach Seiten aufteilen</summary>
@@ -191,28 +226,29 @@ export function AdminPortalDocuments(){
         <label>Letzte Seite<input type="number" min={1} max={ocrReview?.pageCount} value={splitTo} onChange={event=>setSplitTo(event.currentTarget.value)}/></label>
         <button type="button" disabled={busy} onClick={()=>void downloadPdfRange(selectedPdf,Number(splitFrom),Number(splitTo))}>Teil-PDF herunterladen</button>
       </details>}
+      {selectedPart&&<p role="status">Ausgewählter Einzelbeleg: Seiten {selectedPart.from}–{selectedPart.to}.</p>}
       {ocrReview&&<>
         {ocrReview.batch==='single'&&<p>Erkannte Belegart: {ocrReview.kind}.</p>}
-        {ocrReview.rates.length>1&&<p>Mehrere Steuersätze: {ocrReview.rates.map(rate=>rate.replace('.',',')+' %').join(', ')}.</p>}
-        {ocrReview.documents.map(({from,to,review})=><details key={from}>
-          <summary>Beleg auf {from===to?'Seite '+from:'Seiten '+from+'–'+to}</summary>
-          <dl>{Object.entries(review.fields).map(([key,value])=><div key={key}>
+        {visibleReview && visibleReview.rates.length>1&&<p>Mehrere Steuersätze: {visibleReview.rates.map(rate=>rate.replace('.',',')+' %').join(', ')}.</p>}
+        {ocrReview.documents.map(part=><details key={part.from}>
+          <summary>Beleg auf {part.from===part.to?'Seite '+part.from:'Seiten '+part.from+'–'+part.to}</summary>
+          <dl>{Object.entries(part.review.fields).map(([key,value])=><div key={key}>
             <dt>{fieldsForReview[key as keyof typeof fieldsForReview]?.[0]??key}</dt>
-            <dd>{Object.hasOwn(documentAmountFields,key)?formatDocumentAmountInput(value)+' '+(review.fields.currency??''):value}</dd>
+            <dd>{Object.hasOwn(documentAmountFields,key)?formatDocumentAmountInput(value)+' '+(part.review.fields.currency??''):value}</dd>
           </div>)}</dl>
-          {review.issues.map(issue=><p key={issue}>{issue}</p>)}
-          {selectedPdf&&<button type="button" disabled={busy}
-            onClick={()=>void downloadPdfRange(selectedPdf,from,to)}>Diesen Beleg als Teil-PDF herunterladen</button>}
+          {part.review.issues.map(issue=><p key={issue}>{issue}</p>)}
+          {savedParts.includes(part.from) ? <p>Gespeichert.</p> : selectedPdf && part.review.fields.invoiceNumber && <button type="button" disabled={busy}
+            onClick={event=>{if(event.currentTarget.form)void selectPdfPart(event.currentTarget.form,selectedPdf,part);}}>Diesen Beleg ins Formular übernehmen</button>}
         </details>)}
-        {ocrReview.issues.length>0&&<ul>{ocrReview.issues.map(issue=><li key={issue}>{issue}</li>)}</ul>}
-        {Object.keys(ocrReview.evidence).length>0&&<details><summary>Quellen der Feldvorschläge</summary>
-          <dl>{Object.entries(ocrReview.evidence).map(([key,source])=><div key={key}>
+        {visibleReview&&visibleReview.issues.length>0&&<ul>{visibleReview.issues.map(issue=><li key={issue}>{issue}</li>)}</ul>}
+        {visibleReview&&Object.keys(visibleReview.evidence).length>0&&<details><summary>Quellen der Feldvorschläge</summary>
+          <dl>{Object.entries(visibleReview.evidence).map(([key,source])=><div key={key}>
             <dt>{fieldsForReview[key as keyof typeof fieldsForReview]?.[0]??key}</dt>
             <dd style={{whiteSpace:'pre-wrap'}}>{source}</dd>
           </div>)}</dl>
         </details>}
-        {ocrReview.context.length>0&&<details><summary>Weitere Belegangaben prüfen</summary>
-          <dl>{ocrReview.context.map(fact=><div key={fact.label+fact.source}><dt>{fact.label}{fact.unresolved?' – ungeklärt':''}</dt><dd>{fact.value}<br/>{fact.source}</dd></div>)}</dl>
+        {visibleReview&&visibleReview.context.length>0&&<details><summary>Weitere Belegangaben prüfen</summary>
+          <dl>{visibleReview.context.map(fact=><div key={fact.label+fact.source}><dt>{fact.label}{fact.unresolved?' – ungeklärt':''}</dt><dd>{fact.value}<br/>{fact.source}</dd></div>)}</dl>
           <label>Zusatzangaben für die Belegnotiz, ohne Zahlungsbestätigung
             <textarea value={ocrContext} maxLength={1500} onChange={event=>setOcrContext(event.target.value)}/>
           </label>
@@ -224,7 +260,7 @@ export function AdminPortalDocuments(){
             note.value=next;setOcrContext('');
           }}>In Belegnotiz übernehmen</button>
         </details>}
-        {ocrReview.source&&<details><summary>Erkannten Belegtext prüfen</summary><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{ocrReview.source}</pre></details>}
+        {ocrReview.source&&!selectedPart&&<details><summary>Erkannten Belegtext prüfen</summary><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{ocrReview.source}</pre></details>}
       </>}
       <label>Steuersatz laut Beleg (%)<input name="taxRate" inputMode="decimal" maxLength={5}/></label>
       <label>Leistungsdatum, falls belegt<input name="serviceOn" type="date"/></label>
@@ -233,7 +269,7 @@ export function AdminPortalDocuments(){
       <label><input type="checkbox" name="confirmed" value="yes" required/> Angaben am Original geprüft und bestätigt</label>
       <p>Speichern bestätigt nur die Belegdaten. Eine Zahlung, Buchung oder Vorsteuer wird dadurch nicht bestätigt.</p>
       <label>Externe Belegreferenz<input name="externalReference" maxLength={200}/></label>
-      <button disabled={busy||Boolean(ocrReview&&ocrReview.batch!=='single')}>Dokument speichern</button>
+      <button disabled={busy||Boolean(ocrReview&&ocrReview.batch!=='single'&&!selectedPart)}>Dokument speichern</button>
     </form>}
     <ReadState data={data} error={error} retry={refresh}>
       <BusinessTable rows={docs} onOpen={row=>setSelectedId(String(row.id))} rowActions={deleteButton} columns={[

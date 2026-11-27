@@ -43,7 +43,7 @@ function date(value: string): string | undefined {
 }
 
 const currencyTokens = /\b(EUR|USD|GBP|CHF|CAD|AUD|JPY|CNY|SEK|DKK|NOK|PLN|KRW|CLP|VND|KWD|BHD|OMR|JOD|TND|HUF|CZK|RON|INR|NZD|SGD|HKD|MXN|BRL|ZAR)\b|[€£$¥]/g;
-const issuerLabel = /^(?:Rechnungssteller|Aussteller|Lieferant|Supplier|Issuer|Vendor|Billed by|Sold by|From)(?=\s|:|$)\s*:?\s*/i;
+const issuerLabel = /^(?:Rechnungssteller|Aussteller|Lieferant|Supplier|Issuer|Vendor|Billed by|Sold by|Verkauft von|From)(?=\s|:|$)\s*:?\s*/i;
 const legalHeading = /^(?=.{4,200}$)[\p{L}\p{N}][\p{L}\p{M}\p{N}.,’'&() -]+\s+(?:P\.?B\.?C\.?|L\.?L\.?C\.?|Inc\.?|Ltd\.?|Limited|GmbH|UG(?: \(haftungsbeschränkt\))?|AG|KG|Corp\.?|Corporation|B\.?V\.?)(?:\s+\([\p{L}\p{M}\p{N} -]{1,40}\))?$/iu;
 
 function storedAmount(value:string) {
@@ -64,11 +64,13 @@ const rx = {
   gross:/^(?:Gesamtbetrag(?: brutto)?(?!\s+netto\b)|Summe brutto|Brutto(?:[ -]?(?:betrag|summe))?|Rechnungsbetrag|Endbetrag|Grand total|Invoice total|Gross total|Total amount(?!\s+(?:due|paid)\b)|Total incl\.? (?:VAT|tax))(?=\s|:|$)\s*:?\s*/i,
   simpleTotal:/^(?:Total|Summe)(?!\s+(?:due|paid|tax|VAT|discount|excl\.?|incl\.?)\b)(?=\s|:|$)\s*:?\s*(?=(?:[€$£¥]|[A-Z]{3}\s|\d|$))/i,
   net:/^(?:Netto(?:[ -]?(?:betrag|summe|gesamt))?|(?:Gesamtbetrag|Gesamt|Summe) netto|(?:Warenwert|Rechnungsbetrag) netto|Net (?:total|amount)|(?:Total (?:excl\.?|excluding|before) (?:VAT|tax)))(?=\s|:|$)\s*:?\s*/i,
+  goodsNet:/^(?:Zwischensumme|Warenwert)\s*\((?:exkl\.?|ohne)\s+(?:MwSt\.?|USt\.?|Umsatzsteuer)\)\s*:?\s*/i,
+  shippingNet:/^(?:Lieferkosten|Versandkosten)\s*\((?:exkl\.?|ohne)\s+(?:MwSt\.?|USt\.?|Umsatzsteuer)\)\s*:?\s*/i,
   subtotal:/^(?:Zwischensumme|Subtotal|Sub-total)(?=\s|:|$)\s*:?\s*/i,
   tax:/^(?:Umsatzsteuer(?:betrag| gesamt)?(?!\s+(?:erklärt|abgeführt)\b)|MwSt\.?(?:[ -]?Betrag| gesamt)?|Steuerbetrag|USt\.?(?:[ -]?Betrag| gesamt)?|Mehrwertsteuer(?:betrag| gesamt)?|(?:VAT|Tax) amount|VAT total|Total VAT|Total tax|Tax total|VAT|Sales tax|Tax(?!\s+(?:invoice|identification|registration|number|ID)\b))(?=\s|:|$)\s*:?\s*/i,
   taxWithBase:/^(?:Tax|VAT|Sales tax|Umsatzsteuer|MwSt\.?)\s*\((\d{1,2}(?:[.,]\d{1,2})?)\s*%\s*(?:on|auf)\s+([^()]+)\)\s*:?\s*/i,
   rate:/^(?:Umsatzsteuer|Mehrwertsteuer|MwSt\.?|USt\.?|VAT|Sales tax|Tax)\s*:?\s*(?:\((\d{1,2}(?:[.,]\d{1,2})?)\s*%\)|(\d{1,2}(?:[.,]\d{1,2})?)\s*%)(?=\s|:|$)\s*:?\s*/i,
-  rateFirst:/^(?:zzgl\.?\s+|zuzüglich\s+)?(\d{1,2}(?:[.,]\d{1,2})?)\s*%\s+(?:MwSt\.?|USt\.?|Umsatzsteuer|Mehrwertsteuer|VAT)(?=\s|:|$)\s*:?\s*/i,
+  rateFirst:/^(?:zzgl\.?\s+|zuzüglich\s+)?(\d{1,2}(?:[.,]\d{1,2})?)\s*%\s+(?:Gesamtbetrag\s+)?(?:MwSt\.?|USt\.?|Umsatzsteuer|Mehrwertsteuer|VAT)(?=\s|:|$)\s*:?\s*/i,
   payableTotal:/^(?:Zahlbetrag|Zu zahlen|Gesamt)(?=\s|:|$)\s*:?\s*/i,
   open:/^(?:Offene[rn]? (?:Rest)?betrag|Restbetrag|Noch zu zahlen|Fälliger Betrag|Amount due|Balance due|Total (?:amount )?due|Outstanding balance)(?=\s|:|$)\s*:?\s*/i,
   paid:/^(?:Bereits bezahlt|Gezahlter Betrag|Teilzahlung|Amount paid|Total paid|Payments received|Amount received)(?=\s|:|$)\s*:?\s*/i,
@@ -90,6 +92,11 @@ function layoutLines(source:string):string[] {
     }
     // PDF rows can split a qualifier from its label or separate the tax basis.
     const next=rows[i+1]??'';
+    if(/^Rechnungsdatum$/i.test(rows[i]) && /^\/Lieferdatum(?:\s|:)/i.test(next)){
+      lines.push(rows[i]+' '+next.replace(/^\/Lieferdatum\s*:?\s*/i,''));
+      i++;
+      continue;
+    }
     if ((/^(?:Total (?:excl\.?|excluding|before|incl\.?)|Net)$/i.test(rows[i]) &&
          /^(?:VAT|tax|total)(?=\s|:|$)/i.test(next)) ||
         (/^(?:Tax|VAT|Sales tax|Umsatzsteuer|MwSt\.?)$/i.test(rows[i]) &&
@@ -144,6 +151,7 @@ export function analyzeDocumentOcr(source:string) {
     if(!match)return [];
     const inline=line.slice(match[0].length).trim();
     const next=lines[index+1];
+    if(label===issuerLabel && !inline && /^Verkauft von$/i.test(line)) return [];
     const takeNext=!inline&&next&&!labels.some(pattern=>pattern.test(next));
     const value=inline||(takeNext?next:'');
     const following=lines[index+(takeNext?2:1)]??'';
@@ -249,7 +257,8 @@ export function analyzeDocumentOcr(source:string) {
   });
   const rates=[...new Set([...rateRows, ...table.groups].map(row=>row.rate))];
   for(const row of rateRows)money('Steuer laut Beleg ('+row.rate.replace('.',',')+' %)',row.value,row.source);
-  const taxCandidates=candidates(rx.tax).filter(row=>!rx.rate.test(row.source)&&!rx.taxWithBase.test(row.source));
+  const taxCandidates=candidates(rx.tax).filter(row=>!rx.rate.test(row.source)&&!rx.taxWithBase.test(row.source) &&
+    !(/^(?:MwSt\.?|USt\.?)$/i.test(row.source.split('\n')[0]) && signed(row.value)===undefined && rateRows.some(rate=>rate.value!==undefined)));
   const parsedTax=taxCandidates.map(row=>signed(row.value));
   const ratesTax=rates.map(rate=>{
     const values=rateRows.filter(row=>row.rate===rate).map(row=>row.value);
@@ -272,7 +281,13 @@ export function analyzeDocumentOcr(source:string) {
   const payable=read(rx.payableTotal,signed);
   const baseRows = rateRows.filter(row=>row.base!==undefined&&!row.invalid);
   const baseNet = rates.length===1 && baseRows.length ? unique(baseRows.map(row=>row.base)) : undefined;
-  const netValue = net.value ?? (!candidates(rx.net).length
+  const goods = read(rx.goodsNet,signed), shipping = read(rx.shippingNet,signed);
+  const combinedNet = goods.value !== undefined && shipping.value !== undefined && goods.value >= 0 && shipping.value >= 0
+    ? goods.value + shipping.value : undefined;
+  const grossFromComponents = combinedNet !== undefined && tax !== undefined && rates.length===1 &&
+    Math.abs(Math.round(combinedNet*Number(rates[0])/100)-tax)<=1 && payable.value === combinedNet + tax &&
+    payable.source !== undefined && /^Gesamt(?=\s|:|$)/i.test(payable.source);
+  const netValue = grossFromComponents && !candidates(rx.net).length ? combinedNet : net.value ?? (!candidates(rx.net).length
     ? table.groups.length ? grouped('net') : baseNet??breakdown.value?.net : undefined);
   const receiptSum = canSuggestAmounts && table.groups.length > 0 && !table.invalid && table.receiptTable
     ? lines.find(line=>/^(?:EUR\s+|€\s*)\d+[.,]\d{2}$/.test(line) && storedAmount(line)===grouped('gross'))
@@ -280,7 +295,7 @@ export function analyzeDocumentOcr(source:string) {
   const gross = candidates(rx.gross).length ? explicitGross
     : candidates(rx.simpleTotal).length || (kind==='Kassenbon / Quittung' && candidates(rx.payableTotal).length) ? genericGross
     : breakdown.value && payable.value === breakdown.value.net + breakdown.value.tax ? payable
-    : receiptSum ? {value:grouped('gross'),source:receiptSum} : genericGross;
+    : receiptSum ? {value:grouped('gross'),source:receiptSum} : grossFromComponents ? payable : genericGross;
   const tableSource = table.groups.map(row=>row.source).join('\n');
   const taxTableConflict = table.invalid || (table.groups.length > 0 && (
     (gross.value !== undefined && Math.abs(gross.value - grouped('gross')) > 1) ||
@@ -303,7 +318,11 @@ export function analyzeDocumentOcr(source:string) {
   if(canSuggestAmounts&&gross.value!==undefined&&gross.value>=0&&!grossConflict&&!mismatch&&!taxConflict){
     keep('grossCents',gross);
     if(netValue!==undefined&&netValue>=0&&tax!==undefined&&tax>=0&&difference===0&&!taxBaseConflict&&!taxTableConflict) {
-      set('netCents',netValue,net.source??(tableSource?'Summe aus ausgewiesenen Steuergruppen:\n'+tableSource:baseRows[0]?.source??breakdown.value?.source));
+      if(grossFromComponents && !candidates(rx.net).length) {
+        set('netCents',netValue,'Berechnet aus ausgewiesener Waren-Zwischensumme und Nettoversand:\n'+goods.source+'\n'+shipping.source);
+        money('Warenwert netto',goods.value,goods.source);
+        money('Versand netto',shipping.value,shipping.source);
+      } else set('netCents',netValue,net.source??(tableSource?'Summe aus ausgewiesenen Steuergruppen:\n'+tableSource:baseRows[0]?.source??breakdown.value?.source));
       const summedTax = !taxCandidates.length && (table.groups.length>1 || ratesTax.filter(v=>v!==undefined).length>1);
       set('taxCents',tax,summedTax?'Summe aus ausgewiesenen Steuergruppen:\n'+taxOrigin:taxOrigin);
     }
