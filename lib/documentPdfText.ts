@@ -1,4 +1,4 @@
-﻿import type { PDFPageProxy } from 'pdfjs-dist';
+import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 
 export async function documentPdfText(page: PDFPageProxy): Promise<string> {
   const data=await page.getTextContent();
@@ -27,4 +27,14 @@ export async function documentPdfText(page: PDFPageProxy): Promise<string> {
       return (gap>24?'\t':gap>1||/\s$/.test(before.text)||/^\s/.test(part.text)?' ':'')+part.text.trim();
     }).join('');
   }).join('\n').trim();
+}
+
+export async function extractDocumentPdfRange(document: PDFDocumentProxy, from: number, to: number) {
+  if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) ||
+      from < 1 || to < from || to > document.numPages || to-from >= 6 ||
+      (from === 1 && to === document.numPages)) {
+    throw Error('Einen echten Teilbereich mit bis zu sechs vorhandenen PDF-Seiten auswählen.');
+  }
+  const included = Array.from({length:to-from+1}, (_,index)=>from-1+index);
+  return document.extractPages([{document:null,includePages:included}]);
 }

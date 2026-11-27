@@ -36,6 +36,8 @@ export function AdminPortalDocuments(){
   const [notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
   const extractedFields=useRef<Record<string,string>>({});
   const [ocrReview,setOcrReview]=useState<ReturnType<typeof reviewDocumentPages>|null>(null);
+  const [selectedPdf,setSelectedPdf]=useState<File|null>(null);
+  const [splitFrom,setSplitFrom]=useState('1'),[splitTo,setSplitTo]=useState('1');
   const [ocrContext,setOcrContext]=useState('');
   const [extractionNotice,setExtractionNotice]=useState('');
   const [cleanupId,setCleanupId]=useState<string|null>(null);
@@ -123,6 +125,19 @@ export function AdminPortalDocuments(){
       setExtractionNotice('Alle Werte am Original prüfen. '+(missing.length?'Offen: '+missing.join('; ')+'.':'Erkannte Angaben wurden als Vorschläge eingesetzt.'));
     });
   }
+  async function downloadPdfRange(file:File, from:number, to:number) {
+    await perform(async()=>{
+      const {splitDocumentPdf}=await import('../lib/documentOcr.browser');
+      const part=await splitDocumentPdf(file,from,to);
+      const url=URL.createObjectURL(part);
+      const link=document.createElement('a');
+      link.href=url;
+      link.download=file.name.replace(/\.pdf$/i,'')+'-Seiten-'+from+'-'+to+'.pdf';
+      link.click();
+      setTimeout(()=>URL.revokeObjectURL(url),1000);
+      setNotice('Teil-PDF erstellt. Lade sie als Einzelbeleg hoch und bestätige die Angaben separat.');
+    });
+  }
   async function download(id=selectedId,forReview=false){
     await perform(async()=>{
       const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'download',id})});
@@ -138,7 +153,7 @@ export function AdminPortalDocuments(){
   return <>
     <div className="portal-section-head"><h2>Private Geschäftsdokumente</h2>
       <button type="button" onClick={refresh}>Aktualisieren</button>
-      <button type="button" disabled={busy} onClick={()=>{extractedFields.current={};setOcrReview(null);setOcrContext('');setExtractionNotice('');setForm(v=>!v);}}>{form?'Abbrechen':'Dokument erfassen'}</button>
+      <button type="button" disabled={busy} onClick={()=>{extractedFields.current={};setSelectedPdf(null);setOcrReview(null);setOcrContext('');setExtractionNotice('');setForm(v=>!v);}}>{form?'Abbrechen':'Dokument erfassen'}</button>
     </div>
     {notice&&<p role="status">{notice}</p>}
     {form&&<form className="portal-form admin-data-card" aria-label="Rechnung oder Dokument hochladen" onInput={event=>{
@@ -149,6 +164,9 @@ export function AdminPortalDocuments(){
       <p>Leere Betragsfelder bedeuten unbekannt. 0,00 ist ein ausdrücklicher Nullbetrag. OCR-Vorschläge bleiben bis zur Admin-Bestätigung ungeprüft.</p>
       <label>Art<select name="kind">{['expense_receipt','gloa_invoice','stripe_receipt','b2b_document','other'].map(v=><option key={v} value={v}>{label(v)}</option>)}</select></label>
       <label>Originalbeleg (PDF, JPG oder PNG, bis 3 MB)<input name="file" type="file" accept="application/pdf,image/jpeg,image/png" disabled={busy} onChange={event=>{
+        const file=event.currentTarget.files?.[0];
+        setSelectedPdf(file?.type==='application/pdf'?file:null);
+        setSplitFrom('1');setSplitTo('1');
         const fields=event.currentTarget.form?.elements;
         for(const [name,value] of Object.entries(extractedFields.current)) {
           const control=fields?.namedItem(name);
@@ -166,6 +184,13 @@ export function AdminPortalDocuments(){
       }}/></label>
       <button type="button" disabled={busy} onClick={e=>{if(e.currentTarget.form)void preview(e.currentTarget.form);}}>Belegdaten auslesen</button>
       {extractionNotice&&<p role="status">{extractionNotice}</p>}
+      {selectedPdf&&<details open={ocrReview?.batch==='multiple'||ocrReview?.batch==='unclear'}>
+        <summary>PDF nach Seiten aufteilen</summary>
+        <p>Wähle die Seiten eines einzelnen Belegs. Die Teil-PDF ist eine lokal erstellte Kopie. Bewahre die Quelldatei auf und lade jeden Beleg separat hoch. Teilen nach Seiten kann zwei Rechnungen auf derselben Seite nicht trennen.</p>
+        <label>Erste Seite<input type="number" min={1} max={ocrReview?.pageCount} value={splitFrom} onChange={event=>setSplitFrom(event.currentTarget.value)}/></label>
+        <label>Letzte Seite<input type="number" min={1} max={ocrReview?.pageCount} value={splitTo} onChange={event=>setSplitTo(event.currentTarget.value)}/></label>
+        <button type="button" disabled={busy} onClick={()=>void downloadPdfRange(selectedPdf,Number(splitFrom),Number(splitTo))}>Teil-PDF herunterladen</button>
+      </details>}
       {ocrReview&&<>
         {ocrReview.batch==='single'&&<p>Erkannte Belegart: {ocrReview.kind}.</p>}
         {ocrReview.rates.length>1&&<p>Mehrere Steuersätze: {ocrReview.rates.map(rate=>rate.replace('.',',')+' %').join(', ')}.</p>}
@@ -176,6 +201,8 @@ export function AdminPortalDocuments(){
             <dd>{Object.hasOwn(documentAmountFields,key)?formatDocumentAmountInput(value)+' '+(review.fields.currency??''):value}</dd>
           </div>)}</dl>
           {review.issues.map(issue=><p key={issue}>{issue}</p>)}
+          {selectedPdf&&<button type="button" disabled={busy}
+            onClick={()=>void downloadPdfRange(selectedPdf,from,to)}>Diesen Beleg als Teil-PDF herunterladen</button>}
         </details>)}
         {ocrReview.issues.length>0&&<ul>{ocrReview.issues.map(issue=><li key={issue}>{issue}</li>)}</ul>}
         {Object.keys(ocrReview.evidence).length>0&&<details><summary>Quellen der Feldvorschläge</summary>
@@ -185,7 +212,7 @@ export function AdminPortalDocuments(){
           </div>)}</dl>
         </details>}
         {ocrReview.context.length>0&&<details><summary>Weitere Belegangaben prüfen</summary>
-          <dl>{ocrReview.context.map(fact=><div key={fact.label+fact.source}><dt>{fact.label}{fact.unresolved?' – ungeklärt':''}</dt><dd>{fact.source}</dd></div>)}</dl>
+          <dl>{ocrReview.context.map(fact=><div key={fact.label+fact.source}><dt>{fact.label}{fact.unresolved?' – ungeklärt':''}</dt><dd>{fact.value}<br/>{fact.source}</dd></div>)}</dl>
           <label>Zusatzangaben für die Belegnotiz, ohne Zahlungsbestätigung
             <textarea value={ocrContext} maxLength={1500} onChange={event=>setOcrContext(event.target.value)}/>
           </label>

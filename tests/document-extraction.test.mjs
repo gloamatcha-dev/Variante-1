@@ -8,7 +8,7 @@ import { createWorker } from 'tesseract.js';
 import { analyzeDocumentOcr, documentOcrFields } from '../lib/documentOcrFields.ts';
 import { documentAmountsToCents } from '../lib/documentAmountInput.ts';
 import { fillDocumentOcrPreview } from '../lib/documentOcrPreview.ts';
-import { documentPdfText } from '../lib/documentPdfText.ts';
+import { documentPdfText, extractDocumentPdfRange } from '../lib/documentPdfText.ts';
 import { reviewDocumentPages } from '../lib/documentOcrPages.ts';
 
 const lines=['Invoice number: GLOA-1024','Issuer: GLOA Test GmbH',
@@ -418,7 +418,22 @@ test('real PDF page boundaries preserve continuations and block collection forms
     const task = getDocument({data:pdfObjects(parts),useSystemFonts:true});
     try {
       const doc = await task.promise;
-      return reviewDocumentPages(await Promise.all([1,2].map(async n=>documentPdfText(await doc.getPage(n)))));
+      const review = reviewDocumentPages(await Promise.all([1,2].map(async n=>documentPdfText(await doc.getPage(n)))));
+      if(review.batch==='multiple'){
+        await assert.rejects(extractDocumentPdfRange(doc,1,2),/Teilbereich/);
+        await assert.rejects(extractDocumentPdfRange(doc,2,3),/Teilbereich/);
+        const extracted = await extractDocumentPdfRange(doc,2,2);
+        const part = getDocument({data:new Uint8Array(extracted),useSystemFonts:true});
+        try {
+          const single=await part.promise;
+          assert.equal(single.numPages,1);
+          const text=await documentPdfText(await single.getPage(1));
+          assert.match(text,/B-02/);
+          assert.doesNotMatch(text,/A-01/);
+          assert.equal(reviewDocumentPages([text]).fields.grossCents,500);
+        } finally { await part.destroy(); }
+      }
+      return review;
     } finally { await task.destroy(); }
   }
   const same = await readPages([['Invoice number: A-01','Issuer: Alpha GmbH','Page 1 of 2'],
@@ -434,4 +449,26 @@ test('real PDF page boundaries preserve continuations and block collection forms
   assert.equal(reviewDocumentPages(['Invoice number: A-01','Grand total: 5.00 EUR']).batch,'unclear');
   assert.equal(reviewDocumentPages(['Invoice number: A-01\nInvoice number: B-02']).batch,'unclear');
   assert.match(reviewDocumentPages(['??']).issues.join(' '),/Keine verlässlichen/);
+});
+
+test('varied tax layout keeps USt totals, rate-first amounts and tax bases grounded',()=>{
+  const review = analyzeDocumentOcr('Rechnung\nGesamt netto 42,63 EUR\nzzgl. 19 % MwSt. 8,10 EUR\nRechnungsbetrag 50,73 EUR');
+  assert.deepEqual(review.fields,{currency:'EUR',taxRate:'19',grossCents:5073,netCents:4263,taxCents:810});
+  const base = analyzeDocumentOcr('Invoice\nTax (19% on EUR 42.63) EUR 8.10\nGrand total EUR 50.73');
+  assert.equal(base.fields.netCents,4263);
+  assert.match(base.evidence.netCents,/Tax .*42.63/);
+  const standalone = analyzeDocumentOcr('Gesamt netto 42,63 EUR\nUSt. 8,10 EUR\nGesamtbetrag 50,73 EUR');
+  assert.equal(standalone.fields.taxCents,810);
+  assert.equal(standalone.fields.taxRate,undefined);
+  const computed = analyzeDocumentOcr('Gesamt netto 42,63 EUR\nGesamtbetrag 50,73 EUR');
+  assert.equal(computed.fields.taxCents,undefined);
+  assert.ok(computed.context.some(fact=>fact.label==='Steuer rechnerisch (nur Prüfhinweis)'&&fact.value.includes('8,10')));
+});
+
+test('labelled tax table accepts separated currency headers and receipt-only final amount',()=>{
+  const result=analyzeDocumentOcr('QUITTUNG\nZahlbetrag: 50,73 EUR\nNettobetrag (EUR)\tMwSt.-Satz\tUSt.-Betrag EUR\tBruttobetrag EUR\n42,63\t19 %\t8,10\t50,73');
+  assert.equal(result.fields.taxCents,810);
+  assert.equal(result.fields.taxRate,'19');
+  assert.equal(result.fields.grossCents,5073);
+  assert.equal(analyzeDocumentOcr('Rechnung\nZahlbetrag: 50,73 EUR').fields.grossCents,undefined);
 });

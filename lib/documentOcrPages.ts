@@ -2,12 +2,12 @@ import { analyzeDocumentOcr } from './documentOcrFields.ts';
 
 export function reviewDocumentPages(pages: string[]) {
   const source = pages.join('\n\n');
-  const single = () => ({...analyzeDocumentOcr(source), source, batch: 'single' as const, documents: []});
+  const single = () => ({...analyzeDocumentOcr(source), source, pageCount: pages.length, batch: 'single' as const, documents: []});
   const blocked = (documents: {from:number; to:number; review:ReturnType<typeof analyzeDocumentOcr>}[]) => ({
-    ...analyzeDocumentOcr(''), source, batch: documents.length > 1 ? 'multiple' as const : 'unclear' as const, documents,
+    ...analyzeDocumentOcr(''), source, pageCount: pages.length, batch: documents.length > 1 ? 'multiple' as const : 'unclear' as const, documents,
     issues: [documents.length > 1
-      ? 'Mehrere Rechnungen erkannt. PDF nach den angegebenen Seiten aufteilen und die Einzelbelege separat hochladen.'
-      : 'Beleggrenzen sind nicht eindeutig. Prüfe die Seiten am Original und lade jeden belegten Vorgang separat hoch.'],
+      ? 'Mehrere Rechnungen erkannt. Seitenbereich als Teil-PDF speichern und jeden Einzelbeleg separat hochladen.'
+      : 'Beleggrenzen sind nicht eindeutig. Prüfe die Seiten am Original, speichere einen Seitenbereich als Teil-PDF und lade ihn separat hoch.'],
   });
 
   const groups: {from:number; to:number; id?:string; issuer?:string; texts:string[]}[] = [];

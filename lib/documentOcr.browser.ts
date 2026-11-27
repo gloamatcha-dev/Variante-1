@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { reviewDocumentPages } from './documentOcrPages.ts';
-import { documentPdfText } from './documentPdfText.ts';
+import { documentPdfText, extractDocumentPdfRange } from './documentPdfText.ts';
 
 const MAX_BYTES = 3*1024*1024;
 const MAX_PAGES = 6;
@@ -34,6 +34,27 @@ function bounded<T>(promise: Promise<T>, duration: number): Promise<T> {
   })]).finally(()=>clearTimeout(timer));
 }
 
+async function loadPdf(bytes:Uint8Array) {
+  if(new TextDecoder().decode(bytes.subarray(0,5))!=='%PDF-') throw Error('Ungültige PDF-Datei.');
+  const [pdf,{default:workerUrl}]=await Promise.all([
+    import('pdfjs-dist'),import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
+  ]);
+  pdf.GlobalWorkerOptions.workerSrc=workerUrl;
+  return pdf.getDocument({data:bytes,enableXfa:false,useSystemFonts:true,
+    stopAtErrors:true,maxImageSize:MAX_IMAGE_PIXELS});
+}
+
+export async function splitDocumentPdf(file:File, from:number, to:number) {
+  if(file.type!=='application/pdf'||!file.size||file.size>MAX_BYTES) throw Error('PDF bis 3 MB auswählen.');
+  const task=await loadPdf(new Uint8Array(await file.arrayBuffer()));
+  try {
+    const document=await bounded(task.promise,15000);
+    const bytes=await bounded(extractDocumentPdfRange(document,from,to),15000);
+    if(!bytes.byteLength||bytes.byteLength>MAX_BYTES) throw Error('Teil-PDF ist leer oder größer als 3 MB.');
+    return new Blob([new Uint8Array(bytes)],{type:'application/pdf'});
+  } finally { await task.destroy(); }
+}
+
 export async function readDocumentInBrowser(file:File) {
   if(running) throw Error('Eine Belegerkennung läuft bereits.');
   if(!file.size || file.size>MAX_BYTES || !['image/jpeg','image/png','application/pdf'].includes(file.type)) {
@@ -65,13 +86,7 @@ export async function readDocumentInBrowser(file:File) {
     const bytes=new Uint8Array(await file.arrayBuffer());
     const pages: string[] = [];
     if(file.type==='application/pdf'){
-      if(new TextDecoder().decode(bytes.subarray(0,5))!=='%PDF-') throw Error('Ungültige PDF-Datei.');
-      const [pdf,{default:workerUrl}]=await Promise.all([
-        import('pdfjs-dist'),import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
-      ]);
-      pdf.GlobalWorkerOptions.workerSrc=workerUrl;
-      task=pdf.getDocument({data:bytes,enableXfa:false,useSystemFonts:true,
-        stopAtErrors:true,maxImageSize:MAX_IMAGE_PIXELS});
+      task=await loadPdf(bytes);
       const document=await bounded(task.promise,remaining());
       if(document.numPages>MAX_PAGES) throw Error('Maximal sechs PDF-Seiten pro Beleg.');
       for(let i=1;i<=document.numPages;i++){
