@@ -1,7 +1,7 @@
 "use client";
 import {useRef,useState,type FormEvent} from 'react';
 import {documentAmountFields,documentAmountsToCents,formatDocumentAmountInput,isDocumentCentCurrency} from '../lib/documentAmountInput';
-import type {analyzeDocumentOcr} from '../lib/documentOcrFields';
+import type {reviewDocumentPages} from '../lib/documentOcrPages';
 import {fieldsForReview,fillDocumentOcrPreview} from '../lib/documentOcrPreview';
 import {AdminDocumentFacts, AdminDocumentAccountingContext} from './AdminDocumentFacts';
 import {AdminPortalDocumentAssociation} from './AdminPortalDocumentAssociation';
@@ -35,7 +35,7 @@ export function AdminPortalDocuments(){
   const [selectedId,setSelectedId]=useState<string|null>(null),[form,setForm]=useState(false);
   const [notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
   const extractedFields=useRef<Record<string,string>>({});
-  const [ocrReview,setOcrReview]=useState<(ReturnType<typeof analyzeDocumentOcr>&{source:string})|null>(null);
+  const [ocrReview,setOcrReview]=useState<ReturnType<typeof reviewDocumentPages>|null>(null);
   const [ocrContext,setOcrContext]=useState('');
   const [extractionNotice,setExtractionNotice]=useState('');
   const [cleanupId,setCleanupId]=useState<string|null>(null);
@@ -80,6 +80,9 @@ export function AdminPortalDocuments(){
     event.preventDefault();
     const values=new FormData(event.currentTarget);
     await perform(async()=>{
+      if(action==='create_document' && ocrReview && ocrReview.batch!=='single') {
+        throw Error('Bitte die PDF vor dem Speichern in einzelne Belege aufteilen.');
+      }
       if(action==='create_document'||action==='update_document') documentAmountsToCents(values);
       if(action==='create_document'){
         values.set('action','confirm_document');
@@ -103,8 +106,13 @@ export function AdminPortalDocuments(){
       const {readDocumentInBrowser}=await import('../lib/documentOcr.browser');
       const review=await readDocumentInBrowser(file);
       setOcrReview(review);
+      if(review.batch!=='single') {
+        setOcrContext('');
+        return;
+      }
       setOcrContext(review.context.filter(fact=>!fact.unresolved).map(fact=>fact.label+': '+fact.value).join('\n'));
       const {applied,unresolved}=fillDocumentOcrPreview(form,review.fields,review.kind==='Kassenbon / Quittung');
+      const missing=review.rates.length>1?unresolved.filter(item=>!item.startsWith('Steuersatz ')):unresolved;
       Object.assign(extractedFields.current,applied);
       const confirmation=form.elements.namedItem('confirmed');
       if(Object.keys(applied).length&&confirmation instanceof HTMLInputElement) confirmation.checked=false;
@@ -112,7 +120,7 @@ export function AdminPortalDocuments(){
       if(applied.currency && currencyInput instanceof HTMLInputElement) {
         currencyInput.dispatchEvent(new Event('input',{bubbles:true}));
       }
-      setExtractionNotice('Alle Werte am Original prüfen. '+(unresolved.length?'Offen: '+unresolved.join('; ')+'.':'Erkannte Angaben wurden als Vorschläge eingesetzt.'));
+      setExtractionNotice('Alle Werte am Original prüfen. '+(missing.length?'Offen: '+missing.join('; ')+'.':'Erkannte Angaben wurden als Vorschläge eingesetzt.'));
     });
   }
   async function download(id=selectedId,forReview=false){
@@ -159,7 +167,16 @@ export function AdminPortalDocuments(){
       <button type="button" disabled={busy} onClick={e=>{if(e.currentTarget.form)void preview(e.currentTarget.form);}}>Belegdaten auslesen</button>
       {extractionNotice&&<p role="status">{extractionNotice}</p>}
       {ocrReview&&<>
-        <p>Erkannte Belegart: {ocrReview.kind}.</p>
+        {ocrReview.batch==='single'&&<p>Erkannte Belegart: {ocrReview.kind}.</p>}
+        {ocrReview.rates.length>1&&<p>Mehrere Steuersätze: {ocrReview.rates.map(rate=>rate.replace('.',',')+' %').join(', ')}.</p>}
+        {ocrReview.documents.map(({from,to,review})=><details key={from}>
+          <summary>Beleg auf {from===to?'Seite '+from:'Seiten '+from+'–'+to}</summary>
+          <dl>{Object.entries(review.fields).map(([key,value])=><div key={key}>
+            <dt>{fieldsForReview[key as keyof typeof fieldsForReview]?.[0]??key}</dt>
+            <dd>{Object.hasOwn(documentAmountFields,key)?formatDocumentAmountInput(value)+' '+(review.fields.currency??''):value}</dd>
+          </div>)}</dl>
+          {review.issues.map(issue=><p key={issue}>{issue}</p>)}
+        </details>)}
         {ocrReview.issues.length>0&&<ul>{ocrReview.issues.map(issue=><li key={issue}>{issue}</li>)}</ul>}
         {Object.keys(ocrReview.evidence).length>0&&<details><summary>Quellen der Feldvorschläge</summary>
           <dl>{Object.entries(ocrReview.evidence).map(([key,source])=><div key={key}>
@@ -189,7 +206,7 @@ export function AdminPortalDocuments(){
       <label><input type="checkbox" name="confirmed" value="yes" required/> Angaben am Original geprüft und bestätigt</label>
       <p>Speichern bestätigt nur die Belegdaten. Eine Zahlung, Buchung oder Vorsteuer wird dadurch nicht bestätigt.</p>
       <label>Externe Belegreferenz<input name="externalReference" maxLength={200}/></label>
-      <button disabled={busy}>Dokument speichern</button>
+      <button disabled={busy||Boolean(ocrReview&&ocrReview.batch!=='single')}>Dokument speichern</button>
     </form>}
     <ReadState data={data} error={error} retry={refresh}>
       <BusinessTable rows={docs} onOpen={row=>setSelectedId(String(row.id))} rowActions={deleteButton} columns={[

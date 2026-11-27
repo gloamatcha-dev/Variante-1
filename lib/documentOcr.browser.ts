@@ -1,5 +1,5 @@
-﻿/// <reference types="vite/client" />
-import { analyzeDocumentOcr } from './documentOcrFields.ts';
+/// <reference types="vite/client" />
+import { reviewDocumentPages } from './documentOcrPages.ts';
 import { documentPdfText } from './documentPdfText.ts';
 
 const MAX_BYTES = 3*1024*1024;
@@ -63,7 +63,7 @@ export async function readDocumentInBrowser(file:File) {
   }
   try {
     const bytes=new Uint8Array(await file.arrayBuffer());
-    let source='';
+    const pages: string[] = [];
     if(file.type==='application/pdf'){
       if(new TextDecoder().decode(bytes.subarray(0,5))!=='%PDF-') throw Error('Ungültige PDF-Datei.');
       const [pdf,{default:workerUrl}]=await Promise.all([
@@ -79,7 +79,7 @@ export async function readDocumentInBrowser(file:File) {
         try {
           const embedded=await bounded(documentPdfText(page),remaining());
           if(embedded.replace(/[^\p{L}\p{N}]/gu,'').length>=32) {
-            source+=embedded+'\n';
+            pages.push(embedded);
             continue;
           }
           const original=page.getViewport({scale:1});
@@ -90,7 +90,7 @@ export async function readDocumentInBrowser(file:File) {
           const render=page.render({canvas,viewport,background:'#ffffff'});
           try {
             await bounded(render.promise,remaining());
-            source+=await recognize(canvas)+'\n';
+            pages.push(await recognize(canvas));
           } finally { render.cancel(); canvas.width=canvas.height=0; }
         } finally { page.cleanup(); }
       }
@@ -109,11 +109,11 @@ export async function readDocumentInBrowser(file:File) {
         if(!ctx) throw Error('Bildverarbeitung nicht verfügbar.');
         ctx.fillStyle='white'; ctx.fillRect(0,0,canvas.width,canvas.height);
         ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);
-        source=await recognize(canvas);
+        pages.push(await recognize(canvas));
       } finally { bitmap.close(); canvas.width=canvas.height=0; }
     }
-    source=source.slice(0,40000).trim();
-    return {...analyzeDocumentOcr(source),source};
+    if (pages.reduce((sum, page) => sum + page.length, 0) > 40000) throw Error('Belegtext zu lang. PDF bitte aufteilen.');
+    return reviewDocumentPages(pages);
   } finally {
     try {
       await Promise.allSettled([worker?.terminate(),task?.destroy()]);

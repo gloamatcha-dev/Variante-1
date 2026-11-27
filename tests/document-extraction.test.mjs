@@ -1,4 +1,4 @@
-﻿import assert from 'node:assert/strict';
+import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -9,6 +9,7 @@ import { analyzeDocumentOcr, documentOcrFields } from '../lib/documentOcrFields.
 import { documentAmountsToCents } from '../lib/documentAmountInput.ts';
 import { fillDocumentOcrPreview } from '../lib/documentOcrPreview.ts';
 import { documentPdfText } from '../lib/documentPdfText.ts';
+import { reviewDocumentPages } from '../lib/documentOcrPages.ts';
 
 const lines=['Invoice number: GLOA-1024','Issuer: GLOA Test GmbH',
   'Invoice date: 2026-11-25','Service date: 2026-11-24','Subtotal: EUR 1,000.00',
@@ -363,4 +364,74 @@ test('original German invoice fills all eight editable fields', {skip:!originalP
     documentAmountsToCents(form);
     assert.deepEqual(['netCents','taxCents','grossCents'].map(key=>form.get(key)),['8000','1520','9520']);
   }finally{await task.destroy();}
+});
+
+test('19 percent layout keeps recipient and reference separate and validates the stated amounts', () => {
+  const review = reviewDocumentPages([[
+    'Rechnung', 'Rechnungsadresse: Empfaenger GmbH', 'Aussteller: Druckerei GmbH',
+    'Rechnungsnummer: 3203661337', 'Rechnungsdatum: 07.09.2026',
+    'Gesamtbetrag netto: 42,63 EUR', 'USt 19,00 %: 8,10 EUR', 'Bruttobetrag: 50,73 EUR',
+    'Verwendungszweck: GLOA',
+  ].join('\n')]);
+  assert.equal(review.fields.issuer,'Druckerei GmbH');
+  assert.equal(review.fields.issuedOn,'2026-09-07');
+  assert.equal(review.fields.invoiceNumber,'3203661337');
+  assert.equal(review.fields.grossCents,5073);
+  assert.equal(review.fields.netCents,4263);
+  assert.equal(review.fields.taxCents,810);
+  assert.equal(Number(review.fields.taxRate),19);
+  assert.ok(review.context.some(fact=>fact.label==='Empfänger'&&fact.value==='Empfaenger GmbH'));
+  assert.equal(analyzeDocumentOcr('Empfaenger GmbH\nRechnungsadresse: Empfaenger GmbH').fields.issuer,undefined);
+});
+
+test('receipt tax groups 7 and 19 are summed without assigning one tax rate', () => {
+  const review = analyzeDocumentOcr([
+    'MARKTHAUS','Kassenbon','07.09.2026 14:25','Bonnummer: B-123','Gesamtbetrag: 42,92 EUR',
+    'Steuersatz\tBruttobetrag\tNettobetrag\tSteuerbetrag',
+    '19 %\t0,25\t0,21\t0,04','7 %\t42,67\t39,88\t2,79',
+  ].join('\n'));
+  assert.equal(review.kind,'Kassenbon / Quittung');
+  assert.equal(review.fields.invoiceNumber,'B-123');
+  assert.equal(review.fields.issuer,'MARKTHAUS');
+  assert.equal(review.fields.issuedOn,'2026-09-07');
+  assert.deepEqual(review.rates,['19','7']);
+  assert.equal(review.fields.taxRate,undefined);
+  assert.equal(review.fields.netCents,4009);
+  assert.equal(review.fields.taxCents,283);
+  assert.equal(review.fields.grossCents,4292);
+  assert.ok(review.context.some(fact=>fact.label==='Steuer (7 %)'));
+  const zero = analyzeDocumentOcr('Gesamtbetrag: 42,92 EUR\nSteuersatz Bruttobetrag Nettobetrag Steuerbetrag\n0 % 42,92 42,92 0,00');
+  assert.equal(zero.fields.taxRate,'0');
+  assert.equal(zero.fields.taxCents,0);
+  const contradictory = analyzeDocumentOcr('Gesamtbetrag: 42,92 EUR\nSteuersatz\tBrutto\tNetto\tSteuer\n7 %\t42,67\t39,88\t8,79');
+  assert.equal(contradictory.fields.taxCents,undefined);
+  assert.match(contradictory.issues.join(' '),/widersprechen/);
+});
+
+test('real PDF page boundaries preserve continuations and block collection forms', async () => {
+  async function readPages(pages) {
+    const streamRows = pages.map(rows => stream('',Buffer.from('BT /F 14 Tf 35 410 Td 24 TL ' +
+      rows.map(row=>'('+row+') Tj T*').join(' ')+' ET')));
+    const parts = ['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [4 0 R 6 0 R] /Count 2 >>',
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
+    streamRows.forEach((contents,i)=>parts.push('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 460] /Resources << /Font << /F 3 0 R >> >> /Contents '+(5+2*i)+' 0 R >>',contents));
+    const task = getDocument({data:pdfObjects(parts),useSystemFonts:true});
+    try {
+      const doc = await task.promise;
+      return reviewDocumentPages(await Promise.all([1,2].map(async n=>documentPdfText(await doc.getPage(n)))));
+    } finally { await task.destroy(); }
+  }
+  const same = await readPages([['Invoice number: A-01','Issuer: Alpha GmbH','Page 1 of 2'],
+    ['Page 2 of 2','Net total: 10.00 EUR','VAT 19 %: 1.90 EUR','Grand total: 11.90 EUR']]);
+  assert.equal(same.batch,'single');
+  assert.equal(same.fields.grossCents,1190);
+  const separate = await readPages([['Invoice number: A-01','Issuer: Alpha GmbH','Grand total: 11.90 EUR'],
+    ['Invoice number: B-02','Issuer: Beta GmbH','Grand total: 5.00 EUR']]);
+  assert.equal(separate.batch,'multiple');
+  assert.deepEqual(separate.fields,{});
+  assert.deepEqual(separate.documents.map(doc=>[doc.from,doc.to,doc.review.fields.invoiceNumber,doc.review.fields.grossCents]),
+    [[1,1,'A-01',1190],[2,2,'B-02',500]]);
+  assert.equal(reviewDocumentPages(['Invoice number: A-01','Grand total: 5.00 EUR']).batch,'unclear');
+  assert.equal(reviewDocumentPages(['Invoice number: A-01\nInvoice number: B-02']).batch,'unclear');
+  assert.match(reviewDocumentPages(['??']).issues.join(' '),/Keine verlässlichen/);
 });
