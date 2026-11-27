@@ -47,8 +47,8 @@ export function Info({children}:{children:string}){return <button type="button" 
 export function Tabs({items,value,onChange}:{items:readonly string[];value:string;onChange:(value:string)=>void}){
   return <nav className="portal-tabs" aria-label="Unterbereiche">{items.map(item=><button type="button" key={item} aria-current={value===item?'page':undefined} className={value===item?'is-active':''} onClick={()=>onChange(item)}>{item}</button>)}</nav>;
 }
-export function Period({value,onChange}:{value:PortalRow;onChange:(value:PortalRow)=>void}){
-  return <div className="portal-period"><label>Zeitraum<select value={String(value.period)} onChange={e=>onChange({...value,period:e.target.value})}><option value="month">Aktueller Monat</option><option value="last_month">Letzter Monat</option><option value="year">Dieses Jahr</option><option value="custom">Eigener Zeitraum</option></select></label>{value.period==='custom' && <><label>Von<input type="date" value={String(value.from??'')} onChange={e=>onChange({...value,from:e.target.value})}/></label><label>Bis<input type="date" value={String(value.to??'')} onChange={e=>onChange({...value,to:e.target.value})}/></label></>}</div>;
+export function Period({value,onChange,allowAll=false}:{value:PortalRow;onChange:(value:PortalRow)=>void;allowAll?:boolean}){
+  return <div className="portal-period"><label>Zeitraum<select value={String(value.period)} onChange={e=>onChange({...value,period:e.target.value})}><option value="month">Aktueller Monat</option><option value="last_month">Letzter Monat</option><option value="year">Dieses Jahr</option><option value="custom">Eigener Zeitraum</option>{allowAll&&<option value="all">Alle Zeitr?ume</option>}</select></label>{value.period==='custom' && <><label>Von<input type="date" value={String(value.from??'')} onChange={e=>onChange({...value,from:e.target.value})}/></label><label>Bis<input type="date" value={String(value.to??'')} onChange={e=>onChange({...value,to:e.target.value})}/></label></>}</div>;
 }
 export function MoneySummary({summary:storedSummary}:{summary:PortalRow|null}){
   const sync=useGlobalStripeSync();

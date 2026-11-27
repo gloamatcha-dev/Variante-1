@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { FINANCE_TABS, financeDateBasis, financeReference, financeDirection, financeAmount, csvCell, date, label, money, text, type PortalRow } from '../lib/adminPortalModel.ts';
 import { AdminStripeReference, type FinanceNavigate } from './AdminStripeReference';
 import { AdminStripeTreasury } from './AdminStripeTreasury';
+import { FinanceOverview } from './FinanceOverview';
 import { AdminCosts } from './AdminCosts';
 import { AdminCostCoverage } from './AdminCostCoverage';
 import { expenseNet } from '../lib/directCostCoverage.ts';
@@ -13,11 +14,12 @@ import { BusinessContext, BusinessTable, Chip, Info, MoneySummary, Period, ReadS
 
 export function AdminPortalFinance({tab,onTab,onSessionLost,onCreator,navigate,initialFilter=""}:{tab:string;onTab:(tab:string)=>void;onSessionLost:()=>void;onCreator?:()=>void;navigate?:FinanceNavigate;initialFilter?:string}){
   const [period,setPeriod]=useState<PortalRow>({period:'month'});
+  const [overviewPeriod,setOverviewPeriod]=useState<PortalRow>({period:'month'});
   const [costVersion,setCostVersion]=useState(0);
   const sync=useGlobalStripeSync();
   return <><section className="admin-data-card admin-finance-section" aria-label="Stripe-Abgleich"><AdminFinanceSyncStatus status={sync?.status??undefined} statusError={sync?.error} loadDetails={()=>portalRequest('/api/admin/finance',{action:'sync_details'})}/></section><div className="admin-data-card admin-finance-tabs"><Tabs items={FINANCE_TABS} value={tab} onChange={onTab}/></div>{tab==='AUSGABEN'?<><AdminCosts onSessionLost={onSessionLost} expensesOnly initialFilter={initialFilter} onExpensesChanged={()=>setCostVersion(v=>v+1)}/><section className="admin-data-card admin-finance-section" aria-label="Kostenabdeckung">
     <Period value={period} onChange={setPeriod}/><AdminCostCoverage key={costVersion} period={period}/>
-  </section></>:tab==='DOKUMENTE'?<AdminPortalDocuments/>:<><Period value={period} onChange={setPeriod}/>{(tab==='BUCHUNGEN'||tab==='EINNAHMEN')?<Ledger key={JSON.stringify(period)} period={period} navigate={navigate}/>:<FinanceSummary period={period} reports={tab==='AUSWERTUNGEN'} onCreator={onCreator} navigate={navigate}/>}</>}</>;
+  </section></>:tab==='DOKUMENTE'?<AdminPortalDocuments/>:tab==='ÜBERSICHT'?<><Period value={overviewPeriod} onChange={setOverviewPeriod} allowAll/><FinanceOverview key={JSON.stringify(overviewPeriod)} period={overviewPeriod} navigate={navigate}/></>:<><Period value={period} onChange={setPeriod}/>{(tab==='BUCHUNGEN'||tab==='EINNAHMEN')?<Ledger key={JSON.stringify(period)} period={period} navigate={navigate}/>:<FinanceSummary period={period} reports={tab==='AUSWERTUNGEN'} onCreator={onCreator} navigate={navigate}/>}</>}</>;
 }
 export function FinanceSummary({period,reports=false,onCreator,navigate}:{period:PortalRow;reports?:boolean;onCreator?:()=>void;navigate?:FinanceNavigate}){
   const {data,error,refresh}=usePortalRead('/api/admin/finance',{action:'summary',...period});

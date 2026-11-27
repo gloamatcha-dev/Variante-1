@@ -54,20 +54,22 @@ async function known<T>(read: () => Promise<T>): Promise<T | null> {
   try { return await read(); } catch { return null; }
 }
 
-export async function readAdminStripeTreasury(read: StripeRead, identity: Identity, period: Period) {
+export async function readAdminStripeTreasury(read: StripeRead, identity: Identity, period: Period | null) {
   const verified = await known(async () => {
     await verifyStripeReconciliationIdentity(read, identity);
     return true;
   });
   if (!verified) return { payouts: null, available: null, invoices: null };
   // Berlin civil dates may straddle UTC dates. Filter the bounded provider result again below.
-  const from = Date.parse(period.from) / 1000;
-  const to = Date.parse(period.to) / 1000;
+  const payoutFilter: Record<string, string> = period ? {
+    'created[gte]': String(Date.parse(period.from) / 1000 - 86400),
+    'created[lt]': String(Date.parse(period.to) / 1000),
+  } : {};
   const [payouts, available, invoices] = await Promise.all([
-    known(() => loadList(read, 'payouts', { 'created[gte]': String(from - 86400), 'created[lt]': String(to) }, (row, id) => {
+    known(() => loadList(read, 'payouts', payoutFilter, (row, id) => {
       const created = timestamp(row.created);
       const day = berlinDate.format(created * 1000);
-      if (day < period.from || day >= period.to) return null;
+      if (period && (day < period.from || day >= period.to)) return null;
       const status = row.status;
       if (typeof status !== 'string' || !['paid', 'pending', 'in_transit', 'canceled', 'failed'].includes(status)) {
         throw Error('Invalid Stripe payout status');

@@ -1,4 +1,5 @@
 import { portalPeriod } from "../../../../lib/adminPortalFinance.ts";
+import { readExpenseEvidence, readFinanceHistoryRange } from "../../../../lib/adminFinanceOverview.ts";
 import { readFinanceSummary } from "../../../../lib/adminPortalFinanceRead.ts";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { requireAdminIdentity } from "../../../../lib/adminActionRoute.ts";
@@ -50,6 +51,10 @@ export async function POST(request: Request): Promise<Response> {
   let period: ReturnType<typeof portalPeriod>;
   try { period = portalPeriod(raw); } catch { return json({error:"Bitte einen gültigen Zeitraum wählen."},400); }
   try {
+    const overview = raw.overview === true;
+    if (overview && raw.period === 'all' && action === 'summary') {
+      period = await readFinanceHistoryRange(admin, period);
+    }
     if (action === 'stripe_reference') {
       const ref = typeof raw.reference === 'string' ? raw.reference : '';
       if (!/^(pi|in)_[A-Za-z0-9]{1,100}$/.test(ref)) return json({error:'Ungültige Stripe-Referenz.'},400);
@@ -100,7 +105,7 @@ export async function POST(request: Request): Promise<Response> {
           accountId: config.data.account_id,
           paymentIntentId: config.data.known_payment_intent,
           amountCents: config.data.known_amount_cents,
-        }, period);
+        }, overview && raw.period === 'all' ? null : period);
       return Response.json({ ok: true, treasury, manualB2bReceivables, b2bPaymentIssues: b2b.error ? null : b2b.count }, {
         headers: { 'Cache-Control': 'no-store' },
       });
@@ -116,8 +121,11 @@ export async function POST(request: Request): Promise<Response> {
       if(action==='missing_costs'){
         return json({ok:true,orders:missing.filter((s:Record<string,unknown>)=>s.kind==='order').map((s:Record<string,unknown>)=>({order_id:s.id,orders:{order_number:s.reference}})),fulfilments:missing,period},200);
       }
+      const expenseEvidence = action === 'summary' && overview
+        ? await readExpenseEvidence(admin, period, expenses, raw.period === 'all').catch(() => null)
+        : undefined;
       const obligations=await admin.from("creator_commissions").select("id",{count:"exact",head:true}).eq("kind","earned").in("payout_state",["pending","eligible","held"]);
-      return json({ok:true,period,summary,creatorObligations:obligations.error?null:obligations.count,undatedEvents:basis.undatedEvents,...(action==="export"?{events,expenses}:{})},200);
+      return json({ok:true,period,summary,expenseEvidence,creatorObligations:obligations.error?null:obligations.count,undatedEvents:basis.undatedEvents,...(action==="export"?{events,expenses}:{})},200);
     }
     if(action === "list" || action === undefined) {
       const page = typeof raw.page === "number" && Number.isSafeInteger(raw.page) ? Math.max(1,raw.page) : 1;
