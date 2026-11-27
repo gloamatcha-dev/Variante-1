@@ -3,7 +3,7 @@ import { reviewDocumentPages } from './documentOcrPages.ts';
 import { documentPdfText, extractDocumentPdfRange } from './documentPdfText.ts';
 
 const MAX_BYTES = 3*1024*1024;
-const MAX_PAGES = 6;
+const MAX_PAGES = 12;
 const MAX_EDGE = 2200;
 const MAX_IMAGE_PIXELS = 20000000;
 let running = false;
@@ -88,7 +88,7 @@ export async function readDocumentInBrowser(file:File) {
     if(file.type==='application/pdf'){
       task=await loadPdf(bytes);
       const document=await bounded(task.promise,remaining());
-      if(document.numPages>MAX_PAGES) throw Error('Maximal sechs PDF-Seiten pro Beleg.');
+      if(document.numPages>MAX_PAGES) throw Error('Maximal zwölf PDF-Seiten pro Datei für die automatische Prüfung. Größere Dateien nach Seiten aufteilen.');
       for(let i=1;i<=document.numPages;i++){
         const page=await bounded(document.getPage(i),remaining());
         try {

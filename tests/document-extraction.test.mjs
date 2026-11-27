@@ -472,3 +472,16 @@ test('labelled tax table accepts separated currency headers and receipt-only fin
   assert.equal(result.fields.grossCents,5073);
   assert.equal(analyzeDocumentOcr('Rechnung\nZahlbetrag: 50,73 EUR').fields.grossCents,undefined);
 });
+
+test('German PDF tax columns and net-tax summary footer reach editable cents',()=>{
+  const printedColumns=['Gesamt netto:\t42,63\t19,0%','Mwst.:\t8,10\t19,0%','Gesamtbetrag:\t50,73','EUR'].join('\n');
+  const columns=analyzeDocumentOcr(printedColumns);
+  assert.deepEqual([columns.fields.netCents,columns.fields.taxCents,columns.fields.grossCents,Number(columns.fields.taxRate)],
+    [4263,810,5073,19]);
+  const summary=['Rechnung','Zahlbetrag\t11,90 EUR','USt. %\tZwischensumme\tUSt.','(ohne USt.)',
+    '19%\t10,00 EUR\t1,90 EUR','USt. Gesamt\t10,00 EUR\t1,90 EUR',
+    'Umsatzsteuer erklärt durch den Verkäufer'].join('\n');
+  const review=analyzeDocumentOcr(summary);
+  assert.deepEqual([review.fields.netCents,review.fields.taxCents,review.fields.grossCents],[1000,190,1190]);
+  assert.equal(analyzeDocumentOcr(summary.replace('11,90','10,50')).fields.grossCents,undefined);
+});
