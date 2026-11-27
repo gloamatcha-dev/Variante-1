@@ -35,10 +35,10 @@ async function review(pdf){
   const pages=await Promise.all(Array.from({length:pdf.numPages},(_,i)=>pdf.getPage(i+1).then(documentPdfText)));
   return reviewDocumentPages(pages);
 }
-async function exerciseCards(bytes){
+async function exerciseCards(bytes, expected){
   const source=new File([bytes],'collection.pdf',{type:'application/pdf'});
   const batch=await readPdf(new Uint8Array(await source.arrayBuffer()),review);
-  assert.equal(batch.batch,'multiple');
+  assert.equal(batch.batch,expected ? 'single' : 'multiple');
   const saved=[],uploads=new Map(),http=[];
   let failure=null;
   const {POST}=load('app/api/admin/documents/route.ts',{
@@ -64,7 +64,8 @@ async function exerciseCards(bytes){
     checked=false;
     dispatchEvent(){}
   }
-  const controls=Object.fromEntries(['title','kind','file','direction','confirmed',...Object.keys(preview.fieldsForReview)].map(name=>[name,new Input()]));
+  const controls=Object.fromEntries(['title','kind','file','direction','confirmed','note',...Object.keys(preview.fieldsForReview)].map(name=>[name,new Input()]));
+  controls.note.tagName='TEXTAREA';
   const form={elements:{namedItem:key=>controls[key]},reset(){
     for(const input of Object.values(controls)){input.value='';input.checked=false;}
     controls.kind.value='expense_receipt';
@@ -96,7 +97,7 @@ async function exerciseCards(bytes){
           new Blob([new Uint8Array(await extractDocumentPdfRange(pdf,from,to))],{type:'application/pdf'}));
       },
     },
-  },{HTMLInputElement:Input,FormData:formData,crypto:webcrypto,fetch:async(_url,options)=>{
+  },{HTMLInputElement:Input,HTMLTextAreaElement:Input,FormData:formData,crypto:webcrypto,fetch:async(_url,options)=>{
     const response=await POST(new Request('https://local.invalid/api/admin/documents',{
       method:'POST',headers:{origin:'https://local.invalid'},body:options.body,
     }));
@@ -116,6 +117,41 @@ async function exerciseCards(bytes){
   controls.file.value=source;
   const fileInput=find(render(),node=>node.type==='input'&&node.props.name==='file');
   fileInput.props.onChange({currentTarget:{files:[source],form}});
+  if (expected) {
+    button(render(),'Belegdaten auslesen').props.onClick({currentTarget:{form}});
+    await until(()=>controls.invoiceNumber.value);
+    assert.equal(batch.pageCount,expected.pages);
+    assert.equal(controls.invoiceNumber.value,expected.number);
+    assert.equal(controls.issuedOn.value,expected.date);
+    for (const [key,value] of Object.entries(expected.amounts)) {
+      assert.equal(controls[key].value,value === null ? '' : amounts.formatDocumentAmountInput(value));
+    }
+    assert.equal(controls.paymentHint.value,expected.payment);
+    assert.equal(controls.taxRate.value,expected.rate ?? '');
+    const context=batch.context.map(fact=>fact.label+': '+fact.value.replace(/\s/g,' '));
+    for (const expectedFact of expected.context) assert.ok(context.some(fact=>fact.includes(expectedFact)));
+    const applyNote=find(render(),node=>node.type==='button'&&String(node.props.children).includes('Belegnotiz'));
+    assert.ok(applyNote);
+    applyNote.props.onClick({currentTarget:{form}});
+    controls.title.value='OCR acceptance';
+    controls.direction.value='expense';
+    controls.confirmed.checked=true;
+    submit();
+    await until(()=>http.length===1);
+    assert.deepEqual(http,[200]);
+    assert.equal(saved.length,1);
+    assert.equal(uploads.size,1);
+    assert.equal(saved[0].invoice_number,expected.number);
+    assert.equal(saved[0].issued_on,expected.date);
+    assert.equal(saved[0].gross_cents,expected.amounts.grossCents);
+    assert.equal(saved[0].net_cents,expected.amounts.netCents);
+    assert.equal(saved[0].tax_cents,expected.amounts.taxCents);
+    assert.equal(saved[0].payment_status,null);
+    assert.match(saved[0].note,/Zahlungsangabe am Beleg/);
+    for (const fact of expected.context) assert.ok(saved[0].note.replace(/\s/g,' ').includes(fact));
+    assert.equal(Buffer.compare(uploads.get(saved[0].storage_path),bytes),0);
+    return;
+  }
   const selectLabel='Rechnung prüfen';
   const progress=(count)=>find(render(),node=>node.type==='p'&&Array.isArray(node.props.children)&&node.props.children.join('')===count+' von '+batch.documents.length+' Rechnungen gespeichert');
   const cardStatus=state=>find(render(),node=>node.type==='span'&&node.props.className?.endsWith('--'+state));
@@ -228,4 +264,35 @@ test('stored identity only counts with unambiguous evidence',()=>{
   assert.deepEqual(status.documentCardStatus(fields,'b',[a,b],undefined,undefined,false),{state:'check'});
   assert.deepEqual(status.documentCardStatus({invoiceNumber:'B-005'},'b',[b],undefined,undefined,false),{state:'existing',id:'two'});
   assert.deepEqual(status.documentCardStatus(fields,'a',[{...a,cleanup_operation_id:'busy'}],undefined,undefined,false),{state:'check'});
+});
+
+const originalDirectory=process.env.GLOA_OCR_RECEIPT_ORIGINALS;
+const euro='\u20ac';
+const receipts=[
+  ['Invoice RE-202610-144700.pdf',{
+    pages:1,number:'RE-202610-144700',date:'2026-10-02',
+    amounts:{netCents:2458,taxCents:467,grossCents:2925},
+    rate:'19.00',payment:'PayPal-Express vom 30.09.2026',context:['0,00 '+euro],
+  }],
+  ['Quittung 2.pdf',{
+    pages:2,number:'PO-076-06861228995190094',date:'2026-09-30',
+    amounts:{netCents:null,taxCents:null,grossCents:1729},
+    payment:'Bezahlt am 30. Sept. 2026',context:['2,76 '+euro],
+  }],
+  ['Quittung.pdf',{
+    pages:3,number:'PO-076-06861365310070094',date:'2026-09-30',
+    amounts:{netCents:null,taxCents:null,grossCents:5988},
+    payment:'Bezahlt am 30. Sept. 2026',context:['9,55 '+euro,'12,50 '+euro,'47,38 '+euro],
+  }],
+];
+for(const [file,expected] of receipts) {
+  test('original receipt: '+file,{skip:!originalDirectory},()=>exerciseCards(readFileSync(originalDirectory+'/'+file),expected));
+}
+
+test('order item continuations cannot swallow another invoice or order',()=>{
+  const overview='Bestell\u00fcbersicht\nBestellnummer: ORDER-112\nBestelldatum: 30.09.2026\nGesamtsumme: 42,00 \u20ac';
+  const items='Artikeldetails (2)\nVerkauft von Handel\nFremder Artikel 20,00 \u20ac';
+  assert.equal(reviewDocumentPages([overview,items]).batch,'single');
+  assert.equal(reviewDocumentPages([overview,items+'\nRechnung\nRechnungsnummer: RE-11']).batch,'unclear');
+  assert.equal(reviewDocumentPages([overview,items+'\n'+overview]).batch,'unclear');
 });

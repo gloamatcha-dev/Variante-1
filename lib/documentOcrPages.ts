@@ -1,4 +1,4 @@
-import { analyzeDocumentOcr } from './documentOcrFields.ts';
+import { analyzeDocumentOcr, orderOverview } from './documentOcrFields.ts';
 
 export function reviewDocumentPages(pages: string[]) {
   const source = pages.join('\n\n');
@@ -9,6 +9,19 @@ export function reviewDocumentPages(pages: string[]) {
       ? 'Mehrere Rechnungen erkannt. Wähle einen Einzelbeleg und bestätige ihn separat im Formular.'
       : 'Beleggrenzen sind nicht eindeutig. Prüfe die Seiten am Original, speichere einen Seitenbereich als Teil-PDF und lade ihn separat hoch.'],
   });
+
+  // An order overview and its item pages are one receipt. Merchant headings
+  // on item pages are not invoice boundaries or sources of order totals.
+  if (orderOverview.test(pages[0] ?? '')) {
+    const overview = analyzeDocumentOcr(pages[0]);
+    const itemPages = pages.slice(1).every(page =>
+      /^(?:Artikeldetails\b|Verkauft von\b)/im.test(page) &&
+      !/^(?:Rechnung|Invoice|Tax invoice|Kassenbon|Quittung|Receipt)\s*[:.]?\s*$/im.test(page) &&
+      !/^\s*(?:Rechnungs[- ]?(?:nummer|Nr\.?)|Invoice\s*(?:number|no\.?|#)|Bestell(?:nummer|datum|zeit))\b/im.test(page) &&
+      !orderOverview.test(page));
+    return overview.identities.length === 1 && overview.fields.invoiceNumber && itemPages
+      ? {...overview, source, pageCount: pages.length, batch: 'single' as const, documents: []} : blocked([]);
+  }
 
   const groups: {from:number; to:number; id?:string; issuer?:string; texts:string[]}[] = [];
   for (const [index, page] of pages.entries()) {

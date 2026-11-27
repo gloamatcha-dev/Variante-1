@@ -50,7 +50,18 @@ function storedAmount(value:string) {
   return amount(value.replace(currencyTokens,'').trim());
 }
 
+export const orderOverview = /^\s*Bestell\u00fcbersicht\s*$/im;
+const orderNumber = /^Bestell(?:nummer|[- ]Nr\.?)\s*[:\uFF1A]?\s*/i;
+
 const rx = {
+  orderNumber,
+  orderDate:/^Bestell(?:zeit|datum)(?=\s|:|$)\s*:?\s*/i,
+  datedPayment:/^Zahlung\s+\(([^()]+)\)\s+vom\s+(\d{1,2}\.\d{1,2}\.\d{4})(?=\s|$)\s*/i,
+  paidDate:/^Bezahlt am(?=\s|:|$)\s*:?\s*/i,
+  datedInvoice:/^Datum\s*:\s*/i,
+  includedTax:/^Enth\u00e4lt Umsatzsteuer in H\u00f6he von\s+/i,
+  orderItems:/^Artikel gesamt\s*:\s*/i,
+  importCharges:/^Einfuhrabgaben\s*:\s*/i,
   invoiceNumber:/^(?:Rechnungs[- ]?(?:nummer|Nr\.?)|(?:Beleg|Bon)[- ]?(?:nummer|Nr\.?)|(?:Invoice|Receipt|Credit note)\s*(?:number|no\.?|#|\u2116|ID))(?=[\s:\uFF1A#]|$)\s*[:\uFF1A]?\s*/i,
   issuedOn:/^(?:Rechnungs[- ]?datum|Ausstellungsdatum|Datum der Rechnung|Belegdatum|Invoice date|Receipt date|Date of issue|Issue date|Date issued)(?=\s|:|$)\s*:?\s*/i,
   serviceOn:/^(?:Leistungsdatum|Lieferdatum|Service date|Delivery date)(?=\s|:|$)\s*:?\s*/i,
@@ -61,18 +72,18 @@ const rx = {
   paymentReference:/^(?:Zahlungsreferenz|Verwendungszweck|Payment reference)(?=\s|:|$)\s*:?\s*/i,
   iban:/^IBAN(?=\s|:|$)\s*:?\s*/i,
   statedPayment:/^(?:Zahlungsstatus|Payment status)(?=\s|:|$)\s*:?\s*/i,
-  gross:/^(?:Gesamtbetrag(?: brutto)?(?!\s+netto\b)|Summe brutto|Brutto(?:[ -]?(?:betrag|summe))?|Rechnungsbetrag|Endbetrag|Grand total|Invoice total|Gross total|Total amount(?!\s+(?:due|paid)\b)|Total incl\.? (?:VAT|tax))(?=\s|:|$)\s*:?\s*/i,
+  gross:/^(?:Gesamtsumme(?: brutto)?(?!\s+netto\b)|Gesamtbetrag(?: brutto)?(?!\s+netto\b)|Summe brutto|Brutto(?:[ -]?(?:betrag|summe))?|Rechnungsbetrag|Endbetrag|Grand total|Invoice total|Gross total|Total amount(?!\s+(?:due|paid)\b)|Total incl\.? (?:VAT|tax))(?=\s|:|$)\s*:?\s*/i,
   simpleTotal:/^(?:Total|Summe)(?!\s+(?:due|paid|tax|VAT|discount|excl\.?|incl\.?)\b)(?=\s|:|$)\s*:?\s*(?=(?:[€$£¥]|[A-Z]{3}\s|\d|$))/i,
-  net:/^(?:Netto(?:[ -]?(?:betrag|summe|gesamt))?|(?:Gesamtbetrag|Gesamt|Summe) netto|(?:Warenwert|Rechnungsbetrag) netto|Net (?:total|amount)|(?:Total (?:excl\.?|excluding|before) (?:VAT|tax)))(?=\s|:|$)\s*:?\s*/i,
+  net:/^(?:Netto(?:[ -]?(?:betrag|summe|gesamt))?|(?:Gesamtbetrag|Gesamtsumme|Gesamt|Summe) netto|(?:Warenwert|Rechnungsbetrag) netto|Net (?:total|amount)|(?:Total (?:excl\.?|excluding|before) (?:VAT|tax)))(?=\s|:|$)\s*(?:\(\d{1,2}(?:[.,]\d{1,2})?\s*%\)\s*)?:?\s*/i,
   goodsNet:/^(?:Zwischensumme|Warenwert)\s*\((?:exkl\.?|ohne)\s+(?:MwSt\.?|USt\.?|Umsatzsteuer)\)\s*:?\s*/i,
   shippingNet:/^(?:Lieferkosten|Versandkosten)\s*\((?:exkl\.?|ohne)\s+(?:MwSt\.?|USt\.?|Umsatzsteuer)\)\s*:?\s*/i,
   subtotal:/^(?:Zwischensumme|Subtotal|Sub-total)(?=\s|:|$)\s*:?\s*/i,
   tax:/^(?:Umsatzsteuer(?:betrag| gesamt)?(?!\s+(?:erklärt|abgeführt)\b)|MwSt\.?(?:[ -]?Betrag| gesamt)?|Steuerbetrag|USt\.?(?:[ -]?Betrag| gesamt)?|Mehrwertsteuer(?:betrag| gesamt)?|(?:VAT|Tax) amount|VAT total|Total VAT|Total tax|Tax total|VAT|Sales tax|Tax(?!\s+(?:invoice|identification|registration|number|ID)\b))(?=\s|:|$)\s*:?\s*/i,
   taxWithBase:/^(?:Tax|VAT|Sales tax|Umsatzsteuer|MwSt\.?)\s*\((\d{1,2}(?:[.,]\d{1,2})?)\s*%\s*(?:on|auf)\s+([^()]+)\)\s*:?\s*/i,
-  rate:/^(?:Umsatzsteuer|Mehrwertsteuer|MwSt\.?|USt\.?|VAT|Sales tax|Tax)\s*:?\s*(?:\((\d{1,2}(?:[.,]\d{1,2})?)\s*%\)|(\d{1,2}(?:[.,]\d{1,2})?)\s*%)(?=\s|:|$)\s*:?\s*/i,
+  rate:/^(?:(?:zzgl\.?|zuz\u00fcglich)\s+)?(?:Umsatzsteuer|Mehrwertsteuer|MwSt\.?|USt\.?|VAT|Sales tax|Tax)\s*:?\s*(?:\((\d{1,2}(?:[.,]\d{1,2})?)\s*%\)|(\d{1,2}(?:[.,]\d{1,2})?)\s*%)(?=\s|:|$)\s*:?\s*/i,
   rateFirst:/^(?:zzgl\.?\s+|zuzüglich\s+)?(\d{1,2}(?:[.,]\d{1,2})?)\s*%\s+(?:Gesamtbetrag\s+)?(?:MwSt\.?|USt\.?|Umsatzsteuer|Mehrwertsteuer|VAT)(?=\s|:|$)\s*:?\s*/i,
   payableTotal:/^(?:Zahlbetrag|Zu zahlen|Gesamt)(?=\s|:|$)\s*:?\s*/i,
-  open:/^(?:Offene[rn]? (?:Rest)?betrag|Restbetrag|Noch zu zahlen|Fälliger Betrag|Amount due|Balance due|Total (?:amount )?due|Outstanding balance)(?=\s|:|$)\s*:?\s*/i,
+  open:/^(?:Offene[rn]? (?:Rest)?[Bb]etrag|Restbetrag|Noch zu zahlen|Fälliger Betrag|Amount due|Balance due|Total (?:amount )?due|Outstanding balance)(?=\s|:|$)\s*:?\s*/i,
   paid:/^(?:Bereits bezahlt|Gezahlter Betrag|Teilzahlung|Amount paid|Total paid|Payments received|Amount received)(?=\s|:|$)\s*:?\s*/i,
   discount:/^(?:Rabatt(?:betrag)?|Nachlass|Discount(?: amount)?)(?=\s|:|$)\s*:?\s*/i,
 };
@@ -180,7 +191,9 @@ export function analyzeDocumentOcr(source:string) {
     if(/^(?:Rechnung|Invoice|Tax invoice|Commercial invoice)\s*[:.]?$/i.test(line))return ['Rechnung'];
     return [];
   }))??'Unklar';
-  const number=read(rx.invoiceNumber,value=>
+  const isOrder = orderOverview.test(source);
+  const numberLabel = isOrder ? rx.orderNumber : rx.invoiceNumber;
+  const number=read(numberLabel,value=>
     /^(?=.{1,120}$)[\p{L}\p{M}\p{N}#№][\p{L}\p{M}\p{N}\p{Pd}./_#№·+\u2212]*$/u.test(value)&&/\p{N}/u.test(value)?value:undefined);
   keep('invoiceNumber',number);
   const recipients = candidates(rx.recipient).map(row => row.value);
@@ -196,6 +209,10 @@ export function analyzeDocumentOcr(source:string) {
   else if (headings.length || candidates(issuerLabel).length) issues.push('Aussteller und Empfänger sind nicht eindeutig getrennt.');
   const invoiceDate = read(rx.issuedOn,date);
   keep('issuedOn',invoiceDate);
+  if (!candidates(rx.issuedOn).length) {
+    if (isOrder) keep('issuedOn',read(rx.orderDate,date));
+    else if (number.value && lines.some(line=>/^Rechnung$/i.test(line))) keep('issuedOn',read(rx.datedInvoice,date));
+  }
   if(kind==='Kassenbon / Quittung' && !candidates(rx.issuedOn).length) {
     const dates=lines.flatMap(line=>{
       const match=/^(\d{1,2}\.\d{1,2}\.\d{4})(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$/.exec(line);
@@ -206,7 +223,14 @@ export function analyzeDocumentOcr(source:string) {
     set('issuedOn',value,dates.find(entry=>entry.value===value)?.line);
   }
   keep('serviceOn',read(rx.serviceOn,date));
-  keep('paymentHint',read(rx.paymentHint,text(200)));
+  const payment = read(rx.datedPayment, storedAmount);
+  const datedPayment = payment.source && rx.datedPayment.exec(payment.source);
+  const paidDate = read(rx.paidDate, date);
+  if (datedPayment && payment.value !== undefined && date(datedPayment[2])) {
+    set('paymentHint',datedPayment[1]+' vom '+datedPayment[2],payment.source);
+  } else if (isOrder && paidDate.value) {
+    set('paymentHint',paidDate.source,paidDate.source);
+  } else keep('paymentHint',read(rx.paymentHint,text(200)));
   hint('Empfänger',read(rx.recipient,text(200)));
   hint('Fällig am',read(rx.dueOn,date));
   hint('Zahlungsreferenz',read(rx.paymentReference,text(120)));
@@ -229,7 +253,7 @@ export function analyzeDocumentOcr(source:string) {
     const parsed=amount(parentheses?trimmed.slice(1,-1):negative?trimmed.slice(1):trimmed);
     return parsed===undefined?undefined:negative?-parsed:parsed;
   };
-  const open=read(rx.open,storedAmount),paid=read(rx.paid,storedAmount),discount=read(rx.discount,signed);
+  const open=read(rx.open,storedAmount),paid=candidates(rx.paid).length ? read(rx.paid,storedAmount) : payment,discount=read(rx.discount,signed);
   money('Rabatt laut Beleg',discount.value,discount.source);
   const negativeItems=[...new Set(lines.filter(line=>/^\p{L}/u.test(line)&&!labels.some(pattern=>pattern.test(line))))].slice(0,100);
   for(const line of negativeItems) {
@@ -257,7 +281,9 @@ export function analyzeDocumentOcr(source:string) {
   });
   const rates=[...new Set([...rateRows, ...table.groups].map(row=>row.rate))];
   for(const row of rateRows)money('Steuer laut Beleg ('+row.rate.replace('.',',')+' %)',row.value,row.source);
-  const taxCandidates=candidates(rx.tax).filter(row=>!rx.rate.test(row.source)&&!rx.taxWithBase.test(row.source) &&
+  const included = isOrder ? candidates(rx.includedTax) : [];
+  const taxCandidates=[...included,...candidates(rx.tax)].filter(row=>
+    !/^(?:E\.-Preis|Einzelpreis)\s+(?:G\.-Preis|Gesamtpreis)$/i.test(row.value) && !rx.rate.test(row.source)&&!rx.taxWithBase.test(row.source) &&
     !(/^(?:MwSt\.?|USt\.?)$/i.test(row.source.split('\n')[0]) && signed(row.value)===undefined && rateRows.some(rate=>rate.value!==undefined)));
   const parsedTax=taxCandidates.map(row=>signed(row.value));
   const ratesTax=rates.map(rate=>{
@@ -327,6 +353,17 @@ export function analyzeDocumentOcr(source:string) {
       set('taxCents',tax,summedTax?'Summe aus ausgewiesenen Steuergruppen:\n'+taxOrigin:taxOrigin);
     }
   }
+  if (isOrder && canSuggestAmounts && gross.value !== undefined && fields.grossCents !== undefined) {
+    const items = read(rx.orderItems, storedAmount), charges = read(rx.importCharges, storedAmount);
+    money('Artikel gesamt laut Beleg',items.value,items.source);
+    money('Einfuhrabgaben laut Beleg',charges.value,charges.source);
+    const componentMismatch = items.value !== undefined && items.value + (charges.value ?? 0) !== gross.value;
+    if (componentMismatch) issues.push('Artikelbetrag und Einfuhrabgaben ergeben nicht die ausgewiesene Gesamtsumme.');
+    if (included.length > 0 && tax !== undefined && tax >= 0 && tax <= gross.value &&
+      !componentMismatch && !taxConflict && !taxTableConflict && !taxBaseConflict) {
+      money('Enthaltene Umsatzsteuer laut Beleg (Netto nicht ausgewiesen)',tax,taxOrigin);
+    }
+  }
   if(canSuggestAmounts && gross.value!==undefined && netValue!==undefined && tax===undefined &&
       gross.value>=netValue && !grossConflict && !taxTableConflict && !taxBaseConflict && !taxConflict &&
       !taxCandidates.length && !rateRows.some(row=>row.value!==undefined)) {
@@ -344,7 +381,7 @@ export function analyzeDocumentOcr(source:string) {
   if (!Object.keys(fields).some(key => ['issuer','invoiceNumber','grossCents','issuedOn'].includes(key))) {
     issues.push('Keine verlässlichen Belegdaten erkannt. Lesbarkeit prüfen oder Werte am Original erfassen.');
   }
-  const identities = [...new Set(candidates(rx.invoiceNumber).map(row => row.value).filter(value => /\p{N}/u.test(value)))];
+  const identities = [...new Set(candidates(numberLabel).map(row => row.value).filter(value => /\p{N}/u.test(value)))];
   return {fields,evidence,context,kind,issues,identities,rates};
 }
 
