@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AdminExpenseReceiptAssignment } from './AdminExpenseReceiptAssignment';
 import {ExpenseOrderSearch,MissingExpenseOrders} from "./AdminPortalExpenseOrder";
 import { formatCents } from "../lib/adminOrdersQuery";
 import {
@@ -136,6 +137,7 @@ export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter=""
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialFilter==='open'?'open':'all');
 
   // ── the form ──
+  const [receiptPickerOpen,setReceiptPickerOpen]=useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<ExpenseRow | null>(null);
   const [fDate, setFDate] = useState(todayInBerlin());
@@ -620,6 +622,14 @@ export function AdminCosts({ onSessionLost, expensesOnly=false, initialFilter=""
           Neu laden
         </button>
       </div>
+
+      {formOpen && !editing && <details onToggle={event=>setReceiptPickerOpen(event.currentTarget.open)}>
+        <summary>Vorhandene Rechnung zuordnen</summary>
+        {receiptPickerOpen && <AdminExpenseReceiptAssignment onAssigned={()=>{
+          onExpensesChanged?.();
+          void load(periodFrom, periodTo);
+        }}/>}
+      </details>}
 
       {!formOpen&&formError&&<p className="ops-error" role="alert">{formError}</p>}
       {formOpen && (

@@ -75,6 +75,22 @@ export async function POST(request:Request) {
       const [documents,links]=await Promise.all([readPortalPages(admin,'documents'),readPortalPages(admin,'document_links',q=>q,'document_id')]);
       return json({ok:true,documents,links,canCleanup:gate.identity.role==='owner',canReadRegisteredInvoices:gate.identity.role==='owner'});
     }
+    if(action==='expense_receipt_targets'&&!multipart){
+      if(!uuid(input.id))return json({error:'Bitte einen Beleg wählen.'},400);
+      const receipt=await admin.from('documents').select('gross_cents,currency')
+        .eq('id',input.id).eq('kind','expense_receipt').is('cleanup_operation_id',null).maybeSingle();
+      if(receipt.error)return json({error:'Beleg konnte nicht gelesen werden.'},503);
+      if(receipt.data?.currency!=='EUR'||!(receipt.data.gross_cents>0))return json({ok:true,expenses:[]});
+      const expenses=await readPortalPages(admin,'business_expenses',query=>query
+        .eq('gross_cents',receipt.data!.gross_cents).neq('category','payment_fee'),
+        'id','id,occurred_on,description,category,vat_cents,payment_status');
+      const cancelled=expenses.length ? await admin.rpc('admin_manual_cancellation_status_v1',{
+        subject:'business_expense',ids:expenses.map(row=>row.id),
+      }) : {data:[],error:null};
+      if(cancelled.error||!Array.isArray(cancelled.data))return json({error:'Ausgabenstatus ist nicht verfügbar.'},503);
+      const cancelledIds=new Set(cancelled.data);
+      return json({ok:true,expenses:expenses.filter(row=>!cancelledIds.has(row.id))});
+    }
     if (action==='accounting_context'&&!multipart) {
       if (!uuid(input.id)) return json({error:'Ungültiger Beleg.'},400);
       const linked = await readPortalPages(admin,'document_links',q=>q.eq('document_id',input.id),'document_id','subject_type,subject_id');
@@ -111,6 +127,34 @@ export async function POST(request:Request) {
     if(!write.ok)return write.response;
     if(request.headers.get('origin')!==new URL(request.url).origin)return json({error:'Ungültiger Anfrageursprung.'},403);
     const actor=write.session.userId;
+    if(action==='assign_expense_receipt'&&!multipart){
+      const linking=uuid(input.expenseId);
+      const expected=input.expected as Record<string,unknown>|null;
+      if(!uuid(input.id)||input.confirmed!==true||!expected||!Number.isSafeInteger(expected.gross)||
+        (expected.tax!==null&&!Number.isSafeInteger(expected.tax))||
+        (expected.date!==null&&(typeof expected.date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(expected.date)))||
+        (input.expenseId!=null&&!linking)||(input.orderId!=null&&!uuid(input.orderId))||
+        (!linking&&(typeof input.category!=='string'||input.category.length>32)))
+        return json({error:'Bitte Beleg und Zuordnung ausdrücklich bestätigen.'},400);
+      const result=await admin.rpc('admin_assign_expense_receipt_v1',{
+        p_actor:actor,p_document:input.id,p_expense:input.expenseId??null,
+        p_category:linking?null:input.category,p_order:linking?null:input.orderId??null,
+        p_expected:{gross:expected.gross,tax:expected.tax,date:expected.date},
+      });
+      if(result.error){
+        if(result.error.code==='42501')return json({error:'Für diese Aktion fehlt die Berechtigung.'},403);
+        if(result.error.message.includes('expense_receipt_matching_expense'))
+          return json({error:'Für Datum und Betrag gibt es bereits eine Ausgabe ohne Beleg. Bitte prüfe und wähle die vorhandene Position.'},409);
+        if(result.error.code==='23505')
+          return json({error:'Für den Beleg besteht bereits eine Buchungszuordnung.'},409);
+        if(result.error.message.includes('expense_receipt_changed'))
+          return json({error:'Belegdaten wurden zwischenzeitlich geändert. Bitte neu laden und erneut prüfen.'},409);
+        if(result.error.code==='22023')
+          return json({error:'Beleg oder Ausgabe ist nicht zuordenbar. Bitte Betrag, Steuer, Datum und Kostenkategorie prüfen.'},400);
+        return json({error:'Zuordnung konnte nicht gespeichert werden.'},503);
+      }
+      return uuid(result.data)?json({ok:true,id:result.data}):json({error:'Zuordnung konnte nicht bestätigt werden.'},503);
+    }
     if(action==='cleanup_document'&&!multipart){
       if(!uuid(input.id)||input.confirmed!==true)return json({error:'Löschung ausdrücklich bestätigen.'},400);
       if(write.identity.role!=='owner')return json({error:'Nur der Owner darf Dokumente löschen.'},403);

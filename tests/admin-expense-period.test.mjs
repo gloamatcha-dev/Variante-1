@@ -47,7 +47,7 @@ test('expense filter survives invalid dates and server errors and recovers acros
     },
   };
   const exports = {};
-  const imports = { react, '../lib/financeSummary': finance, '../lib/adminOrdersQuery': { formatCents: String }, './AdminPortalExpenseOrder': {} };
+  const imports = { react, './AdminExpenseReceiptAssignment': {}, '../lib/financeSummary': finance, '../lib/adminOrdersQuery': { formatCents: String }, './AdminPortalExpenseOrder': {} };
   vm.runInNewContext(compiled, { exports, require: name => imports[name] ?? require(name), fetch: async (_, options) => {
     const { from, to } = JSON.parse(options.body);
     requests.push({ from, to });
