@@ -10,20 +10,28 @@ import { portalRequest, ReadState, usePortalRead } from './AdminPortalShared';
 const endpoint = '/api/admin/documents';
 
 export function AdminExpenseReceiptAssignment({onAssigned}: {onAssigned: () => void}) {
-  const {data,error,refresh}=usePortalRead(endpoint,{action:'list'});
+  const {data,error,refresh}=usePortalRead(endpoint,{action:'list'},{freshOnRefresh:true});
   const [id,setId]=useState('');
   const [notice,setNotice]=useState('');
   const receipts=((data?.documents ?? []) as PortalRow[]).filter(row=>row.kind==='expense_receipt');
   const selected=receipts.find(row=>row.id===id);
-  const links=((data?.links ?? []) as PortalRow[]).filter(link=>link.document_id===id);
-  const linked=links.filter(link=>link.subject_type==='business_expense'||link.subject_type==='financial_event');
+  const accountLinks=((data?.links ?? []) as PortalRow[])
+    .filter(link=>link.subject_type==='business_expense'||link.subject_type==='financial_event');
+  const assigned=new Set(accountLinks.map(link=>link.document_id));
+  const linked=accountLinks.filter(link=>link.document_id===id);
+  const receiptRevision=selected && JSON.stringify([
+    selected.id,selected.title,selected.issued_on,selected.invoice_number,selected.issuer,
+    selected.net_cents,selected.tax_cents,selected.gross_cents,selected.currency,selected.payment_status,
+  ]);
 
-  return <ReadState data={data} error={error} retry={refresh}>
+  return <>
+    <button type="button" disabled={!data&&!error} onClick={refresh}>Belegdaten aktualisieren</button>
+    <ReadState data={data} error={error} retry={refresh}>
     <label>Gespeicherter Ausgabenbeleg
       <select value={id} onChange={event=>{setId(event.target.value);setNotice('');}}>
         <option value="">Bitte wählen</option>
-        {receipts.map(row=><option key={String(row.id)} value={String(row.id)}>
-          {text(row.title)} · {date(row.issued_on)} · {text(row.invoice_number,'ohne Nummer')} · {documentAmount(row.gross_cents,row.currency)}
+        {receipts.map(row=><option key={String(row.id)} value={String(row.id)} disabled={assigned.has(row.id)}>
+          {text(row.title)} · {date(row.issued_on)} · {text(row.invoice_number,'ohne Nummer')} · {documentAmount(row.gross_cents,row.currency)}{assigned.has(row.id)?' ? Bereits zugeordnet':''}
         </option>)}
       </select>
     </label>
@@ -41,13 +49,14 @@ export function AdminExpenseReceiptAssignment({onAssigned}: {onAssigned: () => v
       {linked.length ? <p>Bereits zugeordnet: {linked.map(link=>text(link.subject_id)).join(', ')}.</p>
         : selected.currency!=='EUR'||typeof selected.gross_cents!=='number'||selected.gross_cents<=0
           ? <p>Für die Zuordnung ist ein bestätigter positiver Bruttobetrag in EUR erforderlich.</p>
-          : <ReceiptAssignmentForm key={id} receipt={selected} onAssigned={()=>{
+          : <ReceiptAssignmentForm key={receiptRevision} receipt={selected} onAssigned={()=>{
               setId('');setNotice('Beleg und Ausgabe wurden verbunden. Den Zahlungsstatus kannst du in der Ausgabe separat prüfen.');
               refresh();onAssigned();
             }}/>}
     </>}
     {!receipts.length && <p>Keine gespeicherten Ausgabenbelege vorhanden.</p>}
-  </ReadState>;
+    </ReadState>
+  </>;
 }
 
 function ReceiptAssignmentForm({receipt,onAssigned}: {receipt: PortalRow;onAssigned:()=>void}) {

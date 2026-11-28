@@ -242,3 +242,5 @@
 @media(max-width:700px){.portal .portal-invoice-grid{grid-template-columns:1fr}.portal .portal-invoice-card .portal-facts{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .portal .portal-invoice-fields{display:contents}
 .portal .portal-invoice-fields[hidden]{display:none}
+
+.portal .portal-chip.portal-expense-assignment{background:#e5f5e9;color:#165b2d;border-color:#c6e5ce}

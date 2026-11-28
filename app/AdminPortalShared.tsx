@@ -18,13 +18,13 @@ export async function portalRequest(endpoint:string,body:PortalRow,signal?:Abort
   );
   return result;
 }
-export function usePortalRead(endpoint:string,body:PortalRow){
+export function usePortalRead(endpoint:string,body:PortalRow,{freshOnRefresh=false}: {freshOnRefresh?:boolean}={}){
   const sync=useGlobalStripeSync();
   const syncVersion=JSON.stringify([sync?.status?.state,sync?.status?.last_success_at,sync?.status?.last_attempt_at,sync?.status?.unresolved]);
   const bodyJson=JSON.stringify(body);
-  const key=JSON.stringify([endpoint,bodyJson]);
   const [state,setState]=useState<{key:string;data:PortalRow|null;error:string}>({key:'',data:null,error:''});
   const [revision,setRevision]=useState(0);
+  const key=JSON.stringify([endpoint,bodyJson,freshOnRefresh?revision:0]);
   const refresh=useCallback(()=>setRevision(r=>r+1),[]);
   useEffect(()=>{
     const controller=new AbortController();

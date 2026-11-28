@@ -55,6 +55,7 @@ export function AdminPortalDocuments(){
   const docs=((data?.documents??[]) as PortalRow[]).filter(row=>!removedIds.includes(String(row.id)));
   const links=(data?.links??[]) as PortalRow[];
   const selected=docs.find(row=>row.id===selectedId)??null;
+  const expenseDocumentIds=new Set(links.filter(link=>link.subject_type==='business_expense').map(link=>link.document_id));
   const selectedLinks=links.filter(row=>row.document_id===selectedId);
   const ledgerLinks=selectedLinks.filter(row=>row.subject_type==='financial_event');
   const registeredInvoice=typeof selected?.storage_path==='string'&&selected.storage_path.startsWith('invoice-register/');
@@ -332,6 +333,9 @@ export function AdminPortalDocuments(){
         {key:'net_cents',title:'Netto',render:r=>documentAmount(r.net_cents,r.currency)},
         {key:'tax_cents',title:'Umsatzsteuer',render:r=>documentAmount(r.tax_cents,r.currency)},
         {key:'gross_cents',title:'Brutto',render:r=>documentAmount(r.gross_cents,r.currency)},
+        {key:'expense_assignment',title:'Ausgabenbuchung',render:r=>expenseDocumentIds.has(r.id)
+          ? <span className="portal-chip portal-expense-assignment">Bereits zugeordnet</span>
+          : r.kind==='expense_receipt' ? 'Keine Ausgabenverknüpfung' : '—'},
       ]}/>
     </ReadState>
     {cleanupDocument&&data?.canCleanup===true&&<dialog className="portal-document-delete-dialog" ref={dialog=>{if(dialog&&!dialog.open)dialog.showModal();}}
