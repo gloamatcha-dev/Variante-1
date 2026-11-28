@@ -35,6 +35,7 @@ export function AdminPortalDocuments(){
   const {data,error,refresh}=usePortalRead('/api/admin/documents',{action:'list'});
   const [selectedId,setSelectedId]=useState<string|null>(null),[form,setForm]=useState(false);
   const [notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
+  const [metadataError,setMetadataError]=useState('');
   const extractedFields=useRef<Record<string,string>>({});
   const [ocrReview,setOcrReview]=useState<ReturnType<typeof reviewDocumentPages>|null>(null);
   const [selectedPdf,setSelectedPdf]=useState<File|null>(null);
@@ -87,14 +88,15 @@ export function AdminPortalDocuments(){
   const savedCount=new Set(cards.flatMap(({status})=>'id' in status?[status.id]:[])).size;
   const endpoint='/api/admin/documents';
 
-  async function perform(action:()=>Promise<void>){
+  async function perform(action:()=>Promise<void>,reportError:(message:string)=>void=setNotice){
     setBusy(true);setNotice('');
-    try{await action();}catch(e){setNotice(e instanceof Error?e.message:'Aktion fehlgeschlagen.');}
+    try{await action();}catch(e){reportError(e instanceof Error?e.message:'Aktion fehlgeschlagen.');}
     finally{setBusy(false);}
   }
   async function submit(event:FormEvent<HTMLFormElement>,action:string){
     event.preventDefault();
     const currentForm=event.currentTarget;
+    if(action==='update_document')setMetadataError('');
     const values=new FormData(currentForm);
     if(submittingPart.current)return;
     if(selectedPart)submittingPart.current=true;
@@ -134,10 +136,12 @@ export function AdminPortalDocuments(){
       }else{
         const fields=Object.fromEntries(values);
         const operation=action==='income'&&fields.previousId?'correct_income':action;
-        await portalRequest(endpoint,{...fields,action:operation,id:selectedId,documentId:selectedId,nonStripe:fields.nonStripe==='on'});
+        const result=await portalRequest(endpoint,{...fields,action:operation,id:selectedId,documentId:selectedId,nonStripe:fields.nonStripe==='on'});
+        if(action==='update_document'&&(result.ok!==true||result.id!==selectedId))
+          throw Error('Speicherung wurde nicht bestätigt.');
       }
       setNotice('Gespeichert.');refresh();
-    });}finally{submittingPart.current=false;}
+    },action==='update_document'?setMetadataError:setNotice);}finally{submittingPart.current=false;}
   }
   function resetPartForm(form:HTMLFormElement){
     form.reset();
@@ -326,7 +330,7 @@ export function AdminPortalDocuments(){
       </div>
     </form>}
     <ReadState data={data} error={error} retry={refresh}>
-      <BusinessTable rows={docs} onOpen={row=>setSelectedId(String(row.id))} rowActions={deleteButton} columns={[
+      <BusinessTable rows={docs} onOpen={row=>{setMetadataError('');setSelectedId(String(row.id));}} rowActions={deleteButton} columns={[
         {key:'title',title:'Dokument'},{key:'kind',title:'Art',render:r=>label(r.kind)},
         {key:'issued_on',title:'Rechnungsdatum',render:r=>date(r.issued_on)},{key:'issuer',title:'Aussteller'},
                 {key:'invoice_number',title:'Rechnungsnummer'},
@@ -391,7 +395,10 @@ export function AdminPortalDocuments(){
           : <p>Referenzbeleg ohne gespeicherte Originaldatei.</p>}
         <details><summary>Belegdaten korrigieren</summary>
           <form className="portal-form" key={JSON.stringify(selected)} onSubmit={e=>void submit(e,'update_document')}>
-            <MetadataFields row={selected}/><button disabled={busy}>Metadaten speichern</button>
+            <MetadataFields row={selected}/>
+            {expenseDocumentIds.has(selected.id)&&<p>Dieser Beleg ist mit einer Ausgabe verknüpft. Wenn du Datum, Währung oder Beträge korrigierst, prüfe die Ausgabenbuchung separat. Hier werden nur die Belegdaten gespeichert.</p>}
+            {metadataError&&<p role="alert">{metadataError}</p>}
+            <button disabled={busy}>Metadaten speichern</button>
           </form>
         </details>
         <h3>Geschäftsbezüge</h3>

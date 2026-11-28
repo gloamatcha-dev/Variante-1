@@ -19,7 +19,7 @@ function metadata(data:Record<string,unknown>) {
   const cents=(name:string)=>{
     const value=field(name,10);
     if(value===null)return null;
-    if(!/^\d+$/.test(value)||Number(value)>2147483647)throw Error('amount');
+    if(!/^\d+$/.test(value)||Number(value)>2147483647)throw Error('amount_format');
     return Number(value);
   };
   const title=field('title',200),issued_on=field('issuedOn',10),currency=field('currency',3),payment_status=field('paymentStatus',16);
@@ -27,8 +27,9 @@ function metadata(data:Record<string,unknown>) {
     new Date(issued_on).toISOString().slice(0,10)!==issued_on))||(currency&&!/^[A-Z]{3}$/.test(currency))||
     (payment_status&&!['paid','unpaid','partial'].includes(payment_status)))throw Error('metadata');
   const gross_cents=cents('grossCents'),net_cents=cents('netCents'),tax_cents=cents('taxCents');
-  if((gross_cents!==null&&!currency)||((net_cents!==null||tax_cents!==null)&&
-     (gross_cents===null||net_cents===null||tax_cents===null||gross_cents!==net_cents+tax_cents)))throw Error('amount');
+  if(gross_cents!==null&&!currency)throw Error('amount_currency');
+  if((net_cents!==null||tax_cents!==null)&&
+     (gross_cents===null||net_cents===null||tax_cents===null||gross_cents!==net_cents+tax_cents))throw Error('amount_breakdown');
   return {title,issued_on,issuer:field('issuer',200),invoice_number:field('invoiceNumber',120),
     gross_cents,net_cents,tax_cents,currency,payment_status,note:field('note',4000)};
 }
@@ -286,7 +287,19 @@ export async function POST(request:Request) {
     }
     if(!uuid(input.id??input.documentId)||multipart)return json({error:'Ungültiger Beleg.'},400);
     let operation:string,p:Record<string,unknown>;
-    if(action==='update_document'){operation='update';p={id:input.id,...metadata(input)};}
+    if(action==='update_document'){
+      if(!uuid(input.id))return json({error:'Ungültiger Beleg.'},400);
+      try {p={id:input.id,...metadata(input)};}
+      catch(error){
+        const reason=error instanceof Error?error.message:'';
+        const message=reason==='amount_currency' ? 'Bitte eine Währung f?r den Betrag angeben.'
+          : reason==='amount_breakdown' ? 'Netto und Umsatzsteuer müssen zusammen den Bruttobetrag ergeben. Wenn die Aufteilung unbekannt ist, beide Felder leer lassen.'
+          : reason==='amount_format' ? 'Bitte einen gültigen Betrag mit höchstens zwei Nachkommastellen eingeben.'
+          : 'Bitte Titel, Rechnungsdatum und die übrigen Pflichtangaben prüfen.';
+        return json({error:message},400);
+      }
+      operation='update';
+    }
     else if(action==='link_document'&&uuid(input.entityId)){operation='link';p={id:input.documentId,entity_type:input.entityType,entity_id:input.entityId};}
     else if(action==='income'||action==='correct_income'){
       operation=action;
@@ -296,6 +309,22 @@ export async function POST(request:Request) {
         occurred_on:fields.issued_on,gross_cents:fields.gross_cents,net_cents:fields.net_cents,tax_cents:fields.tax_cents};
     }else return json({error:'Unbekannte Aktion.'},400);
     const result=await admin.rpc('admin_accounting_document_v1',{p_actor:actor,p_action:operation,p});
+    if(action==='update_document'){
+      if(result.error){
+        const {message,code}=result.error;
+        if(message.includes('invoice_document_immutable'))
+          return json({error:'Registrierte Rechnungen sind geschützt. Bitte den Rechnungskorrekturprozess verwenden.'},409);
+        if(message.includes('accounting_invoice_identity_already_booked'))
+          return json({error:'Aussteller und Rechnungsnummer einer bereits verbuchten Einnahme sind geschützt.'},409);
+        if(message.includes('document_cleanup_pending'))return json({error:'Der Beleg wird gerade zur Löschung bearbeitet.'},409);
+        if(code==='42501')return json({error:'Für diese Belegänderung fehlt die Berechtigung.'},403);
+        if(code==='P0002')return json({error:'Der Beleg wurde nicht gefunden. Bitte die Dokumentenliste aktualisieren.'},404);
+        if(code==='23514'&&message.includes('admin_activity_log'))
+          return json({error:'Die Änderung wurde zurückgenommen, weil der Audit-Eintrag nicht gespeichert werden konnte.'},503);
+      }else if(result.data!==input.id){
+        return json({error:'Die Datenbank hat die Speicherung f?r diesen Beleg nicht bestätigt.'},503);
+      }
+    }
     if(result.error)return json({error:result.error.code==='23505'?'Beleg oder Buchung bereits erfasst.':'Aktion nicht möglich. Beleg und Zuordnung prüfen.'},result.error.code==='23505'?409:400);
     return json({ok:true,id:result.data});
   }catch{return json({error:'Aktion nicht möglich. Eingaben und Beleg prüfen.'},400);}
